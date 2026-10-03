@@ -3,6 +3,7 @@
 
 use std::ffi::OsString;
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 
 use anyhow::{anyhow, bail, Context, Result};
 use crew_core::config::{SandboxConfig, SandboxMode};
@@ -11,6 +12,7 @@ use crew_core::{paths, Agent};
 use super::Daemon;
 use crate::agents::LaunchSpec;
 use crate::git;
+use crate::git::launch::{Launcher, SandboxLauncher};
 use crate::persistence::NewEvent;
 use crate::sandbox::profile::{self, Built, Extra, Host, Request, Role, Session};
 use crate::sandbox::spec::{launcher_env, Spec};
@@ -118,6 +120,24 @@ impl Run {
     }
 }
 
+impl Run {
+    /// The agent's own git: no terminal, and of its variables only its
+    /// identity (`<A>/identity.json`).
+    pub fn git(agent_id: &str, agent_dir: &Path) -> Self {
+        let identity = agent_dir.join("identity.json");
+        Self {
+            agent_id: agent_id.to_string(),
+            program: "git".to_string(),
+            env: vec![(
+                paths::IDENTITY_ENV.to_string(),
+                identity.to_string_lossy().into_owned(),
+            )],
+            sidecar_dir: None,
+            terminal: None,
+        }
+    }
+}
+
 /// `argv` as a command. In a sandbox it runs behind `crew sandbox-run` with
 /// exactly the launcher's environment (`env` is passed in by name);
 /// otherwise `env` is added to the daemon's.
@@ -220,23 +240,56 @@ fn find_program(program: &str, path: Option<&OsString>) -> Option<PathBuf> {
 }
 
 impl Daemon {
-    /// The sandbox something an agent runs goes in: none unless the team
-    /// requires sandboxes, and then it does not start without one. The host
-    /// is probed every time.
-    pub(crate) async fn agent_sandbox(&self, agent: &Agent, run: Run) -> Result<Option<Spec>> {
-        let (config, worktrees) = {
-            let model = self.model();
-            let Some(team) = &model.session.team else {
-                return Ok(None);
-            };
+    /// The team's sandbox settings, and whether it works in worktrees, if
+    /// it requires sandboxes.
+    fn sandboxing(&self) -> Option<(SandboxConfig, bool)> {
+        let model = self.model();
+        let team = model.session.team.as_ref()?;
+        (team.workspace.sandbox.mode == SandboxMode::Required).then(|| {
             (
                 team.workspace.sandbox.clone(),
                 model.session.isolation == "worktree",
             )
-        };
-        if config.mode == SandboxMode::Off {
+        })
+    }
+
+    /// What an agent's own git (commit, status, diff, cherry-pick, merge)
+    /// runs through when the team requires sandboxes: the agent's sandbox,
+    /// with its identity and nothing else of its launch, so a hook on its
+    /// branch runs as the agent and no one else (design-b3.md §3.4, D1).
+    pub(crate) async fn agent_git_launcher(
+        &self,
+        agent: &Agent,
+    ) -> Result<Option<Arc<dyn Launcher>>> {
+        if self.sandboxing().is_none() {
             return Ok(None);
         }
+        if agent.orchestrator {
+            bail!(
+                "the orchestrator's checkout is read-only in a sandboxed team, so it has no git \
+of its own; a member commits in its worktree"
+            );
+        }
+        let run = Run::git(&agent.id, &self.agent_dir(&agent.id));
+        let env = run.env.clone();
+        let Some(spec) = self.agent_sandbox(agent, run).await? else {
+            return Ok(None);
+        };
+        let admin =
+            git::worktree_admin_dir(&self.workspace.join(".git"), Path::new(&agent.workdir))
+                .ok_or_else(|| anyhow!("{} is not a worktree crew made", agent.workdir))?;
+        Ok(Some(Arc::new(
+            SandboxLauncher::new(spec, env).with_admin_dir(admin),
+        )))
+    }
+
+    /// The sandbox something an agent runs goes in: none unless the team
+    /// requires sandboxes, and then it does not start without one. The host
+    /// is probed every time.
+    pub(crate) async fn agent_sandbox(&self, agent: &Agent, run: Run) -> Result<Option<Spec>> {
+        let Some((config, worktrees)) = self.sandboxing() else {
+            return Ok(None);
+        };
         if let Some(backend) = run.terminal.filter(|b| *b != "pty") {
             bail!(
                 "the {backend} backend cannot start sandboxed agents; use backend: pty, or set \
@@ -482,5 +535,31 @@ mod tests {
                 Some(std::ffi::OsStr::new("/codex-home"))
             )]
         );
+    }
+
+    #[test]
+    fn an_agents_git_runs_in_its_profile_with_its_identity_only() {
+        let f = fixture();
+        let agent_dir = f.ws.join(".crew/agents/a");
+        let run = Run::git("a", &agent_dir);
+        assert_eq!(
+            run.env,
+            [(
+                "CREW_IDENTITY".to_string(),
+                agent_dir
+                    .join("identity.json")
+                    .to_string_lossy()
+                    .into_owned()
+            )]
+        );
+
+        let spec = f.profile_for(false, true, &run).unwrap();
+        assert!(spec.new_session, "git has no terminal");
+        assert_eq!(spec.cwd, f.worktree);
+        assert_eq!(spec.pass_env, ["CREW_IDENTITY"]);
+        let binds = binds(&spec);
+        assert!(binds.contains(&(f.worktree.clone(), true)));
+        assert!(binds.contains(&(f.ws.join(".git/worktrees/a"), true)));
+        assert!(binds.contains(&(f.ws.join(".git/worktrees/a/config.worktree"), false)));
     }
 }

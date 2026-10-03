@@ -43,6 +43,28 @@ impl Daemon {
             .map_err(|e| git_error(format!("{e:#}")))
     }
 
+    /// Run a blocking sequence of git operations on `agent`'s behalf, one
+    /// at a time per daemon, inside the agent's sandbox when the team
+    /// requires one.
+    async fn agent_git<T: Send + 'static>(
+        &self,
+        agent: &str,
+        f: impl FnOnce() -> anyhow::Result<T> + Send + 'static,
+    ) -> Result<T, RpcError> {
+        let record = self
+            .agent(agent)
+            .ok_or_else(|| RpcError::not_found(format!("no agent '{agent}'")))?;
+        let launcher = self
+            .agent_git_launcher(&record)
+            .await
+            .map_err(|e| git_error(format!("{e:#}")))?;
+        self.git(move || match launcher {
+            Some(launcher) => git::launch::with_launcher(launcher, f),
+            None => f(),
+        })
+        .await
+    }
+
     /// In a shared checkout every agent works in one tree, so a commit,
     /// merge or cherry-pick cannot be attributed to one agent and moves
     /// everyone's HEAD.
@@ -57,7 +79,14 @@ agent_send)"
         Ok(())
     }
 
+    /// An agent sharing the checkout needs it to be a repository. A worktree
+    /// crew made is one by construction, and is not probed: whatever git
+    /// reads there is the agent's to write, so git runs there only on the
+    /// agent's behalf (in its sandbox, when the team requires one).
     async fn ensure_repo(&self, dir: &std::path::Path) -> Result<(), RpcError> {
+        if self.model().session.isolation == "worktree" {
+            return Ok(());
+        }
         let probe = dir.to_path_buf();
         let is_root = tokio::task::spawn_blocking(move || git::is_root(&probe))
             .await
@@ -82,7 +111,7 @@ git in it (use a git repository as the workspace, or workspace.init: true)",
         self.ensure_repo(&dir).await?;
         let author = agent.to_string();
         let commit = self
-            .git(move || git::commit_all(&dir, &author, &message))
+            .agent_git(agent, move || git::commit_all(&dir, &author, &message))
             .await?;
         // Attach the commit to the task the agent is working on.
         let task = {
@@ -126,7 +155,7 @@ git in it (use a git repository as the workspace, or workspace.init: true)",
         let dir = self.git_dir(agent)?;
         self.ensure_repo(&dir).await?;
         let text = self
-            .git(move || git::diff(&dir, against.as_deref()))
+            .agent_git(agent, move || git::diff(&dir, against.as_deref()))
             .await?;
         Ok(GitOutcome {
             ok: true,
@@ -138,7 +167,7 @@ git in it (use a git repository as the workspace, or workspace.init: true)",
     pub(crate) async fn git_status(&self, agent: &str) -> Result<GitOutcome, RpcError> {
         let dir = self.git_dir(agent)?;
         self.ensure_repo(&dir).await?;
-        let text = self.git(move || git::status(&dir)).await?;
+        let text = self.agent_git(agent, move || git::status(&dir)).await?;
         Ok(GitOutcome {
             ok: true,
             text,
@@ -157,7 +186,7 @@ git in it (use a git repository as the workspace, or workspace.init: true)",
         let author = agent.to_string();
         let rev = commit.clone();
         let outcome = self
-            .git(move || git::cherry_pick(&dir, &author, &rev))
+            .agent_git(agent, move || git::cherry_pick(&dir, &author, &rev))
             .await?;
         self.report_git(agent, &outcome);
         if let Some(applied) = &outcome.commit {
@@ -219,7 +248,9 @@ git in it (use a git repository as the workspace, or workspace.init: true)",
         self.ensure_repo(&dir).await?;
         let author = agent.to_string();
         let rev = branch.clone();
-        let outcome = self.git(move || git::merge(&dir, &author, &rev)).await?;
+        let outcome = self
+            .agent_git(agent, move || git::merge(&dir, &author, &rev))
+            .await?;
         self.report_git(agent, &outcome);
         if let Some(applied) = &outcome.commit {
             self.emit(
