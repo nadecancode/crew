@@ -348,7 +348,10 @@ impl Daemon {
         let runtime = runtime_for(agent.runtime);
 
         let agent_dir = self.agent_dir(id);
-        self.agent_root(id)?;
+        let agent_root = self.agent_root(id)?;
+        // A sandboxed agent's CLI keeps its configuration, credentials and sessions
+        // in a private home under its writable tree, not in the operator's.
+        let private_home = self.sandboxed().then(|| agent_dir.join("rw/home"));
         let identity_path = agent_dir.join("identity.json");
         let identity = Identity {
             socket: self.socket.to_string_lossy().into_owned(),
@@ -451,7 +454,7 @@ impl Daemon {
             resume,
             endpoint: &endpoint,
             long_context,
-            private_home: None,
+            private_home: private_home.as_deref(),
         })?;
         if let Some(program) = pi_program {
             spec.program = program.to_string_lossy().into_owned();
@@ -479,6 +482,15 @@ impl Daemon {
             None => None,
         };
         self.stop_sidecar(id);
+        if private_home.is_some() {
+            // D2: written through the agent root descriptor, and only while none of
+            // the agent's sandboxes runs (the previous ones are stopped above).
+            crate::agents::home::prepare(
+                agent.runtime,
+                std::os::fd::AsFd::as_fd(&agent_root),
+                &crate::agents::home::Operator::detect(),
+            )?;
+        }
         if let Some(sidecar) = &spec.sidecar {
             self.start_sidecar(id, sidecar, sidecar_sandbox.as_ref())
                 .await?;

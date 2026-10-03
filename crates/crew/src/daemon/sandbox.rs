@@ -460,6 +460,12 @@ impl Daemon {
         Ok(launcher)
     }
 
+    /// Whether this team's agents run in sandboxes (and so keep their CLIs'
+    /// configuration in private homes).
+    pub(crate) fn sandboxed(&self) -> bool {
+        self.sandboxing().is_some()
+    }
+
     /// The team's sandbox settings, and whether it works in worktrees, if
     /// it requires sandboxes.
     fn sandboxing(&self) -> Option<(SandboxConfig, bool)> {
