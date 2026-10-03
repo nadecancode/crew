@@ -965,6 +965,57 @@ impl Running {
 mod tests {
     use super::*;
 
+    #[tokio::test]
+    async fn the_compaction_offset_is_measured_through_the_agents_files() {
+        let temp = tempfile::tempdir().unwrap();
+        let running = start(DaemonOptions {
+            workspace: temp.path().to_path_buf(),
+            crew_bin: std::env::current_exe().unwrap(),
+        })
+        .await
+        .unwrap();
+        let daemon = &running.daemon;
+        let mut team = crew_core::config::TeamConfig::from_yaml(
+            "project: compact-review\nobjective: compact review\n",
+        )
+        .unwrap();
+        team.workspace.sandbox.mode = crew_core::config::SandboxMode::Required;
+        daemon.model().session.team = Some(team);
+        drop(daemon.agent_root("a").unwrap());
+        let agent: crew_core::Agent = serde_json::from_value(serde_json::json!({
+            "id": "a", "name": "a", "role": "review", "status": "working", "runtime": "codex",
+            "workdir": temp.path().to_str().unwrap(), "backend": "pty", "last_activity_at": 0,
+            "compact_pending": true
+        }))
+        .unwrap();
+        daemon.model().agents.push(agent);
+        *daemon.procs.write().unwrap() = Some(Arc::new(crate::process::pty::PtyManager::new(
+            daemon.proc_tx.clone(),
+        )));
+        let rollout = daemon.agent_dir("a").join("rw/rollout.jsonl");
+        std::fs::write(&rollout, "12345").unwrap();
+        {
+            let mut model = daemon.model();
+            let rt = model.rt("a");
+            rt.ready = true;
+            rt.rollout = Some(rollout.clone());
+        }
+        daemon.try_compact("a").await;
+        assert_eq!(daemon.model().rt("a").compact_offset, 5, "regular rollout");
+        // The agent replaced its rollout by a link to a file outside its tree:
+        // the offset comes from nothing the link points at.
+        let outside = temp.path().join("outside-rollout");
+        std::fs::write(&outside, "outside metadata must not supply this offset").unwrap();
+        std::fs::remove_file(&rollout).unwrap();
+        std::os::unix::fs::symlink(&outside, &rollout).unwrap();
+        daemon.model().rt("a").compact_sent_at = 0;
+        daemon.try_compact("a").await;
+        assert_eq!(
+            daemon.model().rt("a").compact_offset,
+            0,
+            "followed a linked rollout"
+        );
+    }
     #[test]
     fn the_workspace_lock_is_held_until_everything_is_withdrawn() {
         let dir = tempfile::tempdir().unwrap();
