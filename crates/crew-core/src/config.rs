@@ -174,6 +174,65 @@ pub enum Isolation {
     Shared,
 }
 
+/// OS sandbox policy. Off remains the default until the release gate passes.
+#[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum SandboxMode {
+    #[default]
+    Off,
+    Required,
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq, Default)]
+#[serde(deny_unknown_fields)]
+pub struct SandboxConfig {
+    #[serde(default)]
+    pub mode: SandboxMode,
+    /// Explicit absolute mount sources; the sandbox builder checks real paths.
+    #[serde(default)]
+    pub read_only: Vec<PathBuf>,
+    #[serde(default)]
+    pub read_write: Vec<PathBuf>,
+    /// Allow only the verified, untrusted-user Nix daemon endpoint.
+    #[serde(default)]
+    pub nix_daemon: bool,
+}
+
+impl SandboxConfig {
+    /// Validate syntax only. Canonical paths, protected mounts and host
+    /// capabilities are checked by the sandbox builder before any launch.
+    pub fn validate(&self) -> Result<()> {
+        use std::os::unix::ffi::OsStrExt;
+        let mut seen = HashMap::new();
+        for (key, paths) in [
+            ("read_only", &self.read_only),
+            ("read_write", &self.read_write),
+        ] {
+            for path in paths {
+                if path.as_os_str().as_bytes().contains(&0) {
+                    bail!("workspace.sandbox.{key} contains a path with NUL");
+                }
+                if !path.is_absolute() {
+                    bail!("workspace.sandbox.{key} requires nonempty absolute paths");
+                }
+                if let Some(previous) = seen.insert(path, key) {
+                    if previous == key {
+                        bail!(
+                            "workspace.sandbox.{key} contains duplicate path {}",
+                            path.display()
+                        );
+                    }
+                    bail!(
+                        "workspace.sandbox path {} appears in both read_only and read_write",
+                        path.display()
+                    );
+                }
+            }
+        }
+        Ok(())
+    }
+}
+
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
 #[serde(deny_unknown_fields)]
 pub struct WorkspaceConfig {
@@ -189,6 +248,8 @@ pub struct WorkspaceConfig {
     /// Revision agent branches start from.
     #[serde(default = "default_base")]
     pub base: String,
+    #[serde(default)]
+    pub sandbox: SandboxConfig,
 }
 
 fn default_workspace_path() -> String {
@@ -206,6 +267,7 @@ impl Default for WorkspaceConfig {
             isolation: Isolation::default(),
             init: false,
             base: default_base(),
+            sandbox: SandboxConfig::default(),
         }
     }
 }
@@ -622,6 +684,12 @@ impl TeamConfig {
         {
             bail!("`project` may only contain letters, digits, '-', '_' and '.' (max 64 chars)");
         }
+        self.workspace.sandbox.validate()?;
+        // A-S1 replaces this staged-rollout gate with actual sandbox probes
+        // and launch enforcement before accepting Required teams.
+        if self.workspace.sandbox.mode == SandboxMode::Required {
+            bail!("workspace.sandbox.mode: required is not available yet; team was not started");
+        }
         if let Some(style) = &self.style {
             if !is_valid_id(style) {
                 bail!("`style` '{style}' is not a style name (expected [a-z][a-z0-9_-]{{0,31}})");
@@ -872,6 +940,106 @@ pub fn parse_key_value(s: &str) -> Result<(String, String)> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn sandbox_config_defaults_off_and_preserves_explicit_paths() {
+        let legacy_yaml = TeamConfig::from_yaml("project: test\n").unwrap();
+        let legacy_toml = TeamConfig::from_toml("project = \"test\"\n").unwrap();
+        for legacy in [legacy_yaml, legacy_toml] {
+            assert_eq!(legacy.workspace.sandbox, SandboxConfig::default());
+            assert_eq!(legacy.workspace.sandbox.mode, SandboxMode::Off);
+        }
+        let yaml = "project: test\nworkspace:\n  sandbox:\n    mode: off\n    read_only: ['/opt/tool kit', '/srv/../data']\n    read_write: ['/mnt/cache']\n    nix_daemon: true\n";
+        let team = TeamConfig::from_yaml(yaml).unwrap();
+        assert_eq!(
+            team.workspace.sandbox.read_only,
+            vec![
+                PathBuf::from("/opt/tool kit"),
+                PathBuf::from("/srv/../data")
+            ]
+        );
+        assert_eq!(
+            team.workspace.sandbox.read_write,
+            vec![PathBuf::from("/mnt/cache")]
+        );
+        assert!(team.workspace.sandbox.nix_daemon);
+        assert_eq!(
+            TeamConfig::from_yaml(&team.to_yaml().unwrap()).unwrap(),
+            team
+        );
+        let sandbox: SandboxConfig = serde_yaml::from_str("mode: required\n").unwrap();
+        assert_eq!(sandbox.mode, SandboxMode::Required);
+        assert!(sandbox.read_only.is_empty() && sandbox.read_write.is_empty());
+        assert!(!sandbox.nix_daemon);
+        for text in [
+            "mode: optional",
+            "nix_deamon: true",
+            "read_only: ['/opt']\nunknown: true",
+        ] {
+            assert!(
+                serde_yaml::from_str::<SandboxConfig>(text).is_err(),
+                "{text}"
+            );
+        }
+    }
+
+    #[test]
+    fn sandbox_config_rejects_invalid_duplicate_and_conflicting_paths() {
+        let mut team = TeamConfig::from_yaml("project: test\n").unwrap();
+        // Explicit mount roots are syntactic here; canonicalization and the
+        // protected-set checks belong to the sandbox builder at start time.
+        team.workspace.sandbox.read_only = vec!["/opt/tool".into()];
+        team.workspace.sandbox.read_write = vec!["/srv/cache".into()];
+        team.validate().unwrap();
+        for (paths, expected) in [
+            (vec![PathBuf::new()], "absolute"),
+            (vec![PathBuf::from("relative")], "absolute"),
+            (vec![PathBuf::from("~/tools")], "absolute"),
+            (vec![PathBuf::from("/opt/\0bad")], "NUL"),
+            (
+                vec![PathBuf::from("/opt"), PathBuf::from("/opt")],
+                "duplicate",
+            ),
+        ] {
+            for read_only in [true, false] {
+                let mut invalid = team.clone();
+                if read_only {
+                    invalid.workspace.sandbox.read_only = paths.clone();
+                } else {
+                    invalid.workspace.sandbox.read_write = paths.clone();
+                }
+                let error = invalid.validate().unwrap_err().to_string();
+                assert!(error.contains("workspace.sandbox"), "{error}");
+                assert!(error.contains(expected), "{error}");
+            }
+        }
+        let mut conflict = team;
+        conflict.workspace.sandbox.read_write = conflict.workspace.sandbox.read_only.clone();
+        let error = conflict.validate().unwrap_err().to_string();
+        assert!(
+            error.contains("read_only") && error.contains("read_write"),
+            "{error}"
+        );
+    }
+
+    #[test]
+    fn sandbox_required_is_unavailable_until_daemon_enforcement_is_wired() {
+        // Required is a supported config value, but must never quietly launch
+        // unsandboxed processes while this stage only supplies its plumbing.
+        let yaml = "project: test\nworkspace:\n  sandbox:\n    mode: required\n";
+        let raw: TeamConfig = serde_yaml::from_str(yaml).unwrap();
+        assert_eq!(raw.workspace.sandbox.mode, SandboxMode::Required);
+        let error = TeamConfig::from_yaml(yaml).unwrap_err().to_string();
+        assert!(error.contains("workspace.sandbox.mode"), "{error}");
+        assert!(error.contains("required is not available yet"), "{error}");
+        assert!(error.contains("team was not started"), "{error}");
+        let toml = "project = \"test\"\n[workspace.sandbox]\nmode = \"required\"\n";
+        assert!(TeamConfig::from_toml(toml)
+            .unwrap_err()
+            .to_string()
+            .contains("required is not available yet"));
+        TeamConfig::from_yaml(&yaml.replace("required", "off")).unwrap();
+    }
 
     #[test]
     fn integration_is_reserved_for_the_integration_branch() {
