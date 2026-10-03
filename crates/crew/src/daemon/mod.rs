@@ -890,6 +890,8 @@ pub async fn start(options: DaemonOptions) -> Result<Running> {
         socket: socket.to_string_lossy().into_owned(),
         pid: std::process::id(),
         started_at,
+        pid_start: paths::process_start(std::process::id()),
+        boot_id: paths::boot_id(),
     })?;
     published.registered = true;
 

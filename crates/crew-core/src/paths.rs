@@ -29,6 +29,13 @@ pub struct DaemonInfo {
     pub socket: String,
     pub pid: u32,
     pub started_at: i64,
+    /// The daemon process's start time (clock ticks after boot) and the boot
+    /// it runs in, so a pid since given to another process does not keep the
+    /// entry alive. Absent from a daemon that did not record them.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pid_start: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub boot_id: Option<String>,
 }
 
 /// Credentials of one agent, stored `0600` in its state directory. Everything
@@ -508,6 +515,29 @@ pub fn read_daemon_info(state_dir: &Path) -> Option<DaemonInfo> {
     serde_json::from_str(&text).ok()
 }
 
+/// The start time (clock ticks after boot, `/proc/<pid>/stat` field 22) of
+/// process `pid`, if it can be read. The command name before it may hold
+/// anything, so the fields are counted from the last `)`.
+pub fn process_start(pid: u32) -> Option<u64> {
+    stat_start(&fs::read_to_string(format!("/proc/{pid}/stat")).ok()?)
+}
+
+fn stat_start(stat: &str) -> Option<u64> {
+    stat[stat.rfind(')')? + 1..]
+        .split_whitespace()
+        .nth(19)?
+        .parse()
+        .ok()
+}
+
+/// This boot's identity, if it can be read.
+pub fn boot_id() -> Option<String> {
+    fs::read_to_string("/proc/sys/kernel/random/boot_id")
+        .ok()
+        .map(|b| b.trim().to_string())
+        .filter(|b| !b.is_empty())
+}
+
 pub fn pid_alive(pid: u32) -> bool {
     if pid == 0 {
         return false;
@@ -518,7 +548,22 @@ pub fn pid_alive(pid: u32) -> bool {
 }
 
 fn is_live(info: &DaemonInfo) -> bool {
-    pid_alive(info.pid) && Path::new(&info.socket).exists()
+    pid_alive(info.pid) && Path::new(&info.socket).exists() && still_its_process(info)
+}
+
+/// Whether the registered pid still names the daemon that registered: the
+/// same boot, and the same start time, where it recorded them. What cannot
+/// be read is not taken against it (judged as before).
+fn still_its_process(info: &DaemonInfo) -> bool {
+    let same_boot = match (&info.boot_id, boot_id()) {
+        (Some(theirs), Some(ours)) => *theirs == ours,
+        _ => true,
+    };
+    let same_start = match info.pid_start {
+        Some(start) => process_start(info.pid).is_none_or(|now| now == start),
+        None => true,
+    };
+    same_boot && same_start
 }
 
 /// Every daemon currently running for this user; stale entries are pruned.
@@ -570,6 +615,8 @@ pub fn discover(dir: Option<&Path>, project: Option<&str>) -> Result<DaemonInfo>
                 socket: socket.to_string_lossy().into_owned(),
                 pid: 0,
                 started_at: 0,
+                pid_start: None,
+                boot_id: None,
             });
         }
         if let Some(identity) = Identity::from_env() {
@@ -580,6 +627,8 @@ pub fn discover(dir: Option<&Path>, project: Option<&str>) -> Result<DaemonInfo>
                 socket: identity.socket,
                 pid: 0,
                 started_at: 0,
+                pid_start: None,
+                boot_id: None,
             });
         }
         if let Ok(cwd) = std::env::current_dir() {
@@ -624,6 +673,48 @@ pub fn discover(dir: Option<&Path>, project: Option<&str>) -> Result<DaemonInfo>
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_start_time_is_counted_from_after_the_command_name() {
+        let fields = |comm: &str| {
+            format!("42 ({comm}) S 1 42 42 0 -1 4194560 0 0 0 0 0 0 0 0 20 0 1 0 987654 0 0")
+        };
+        assert_eq!(stat_start(&fields("crew")), Some(987654));
+        assert_eq!(stat_start(&fields("a b) S 1 2 3 (c")), Some(987654));
+        assert_eq!(stat_start("42 (crew) S 1"), None);
+        assert_eq!(stat_start("no command name"), None);
+    }
+
+    // /proc-specific: elsewhere neither the start time nor the boot can be
+    // read, and an entry is judged as before.
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn a_registered_daemon_is_live_only_while_its_own_process_runs() {
+        let dir = tempfile::tempdir().unwrap();
+        let socket = dir.path().join("crew.sock");
+        std::fs::write(&socket, "").unwrap();
+        let me = std::process::id();
+        let info = |pid_start, boot_id| DaemonInfo {
+            project: None,
+            workspace: "w".into(),
+            state_dir: "s".into(),
+            socket: socket.to_string_lossy().into_owned(),
+            pid: me,
+            started_at: 0,
+            pid_start,
+            boot_id,
+        };
+        let (start, boot) = (process_start(me).unwrap(), boot_id());
+        assert!(is_live(&info(Some(start), boot.clone())));
+        // Its pid now names a later process: stale.
+        assert!(!is_live(&info(Some(start + 1), boot.clone())));
+        // Written in an earlier boot: stale.
+        assert!(!is_live(&info(Some(start), Some("an earlier boot".into()))));
+        // Written by a daemon that recorded neither: judged as before.
+        assert!(is_live(&info(None, None)));
+        // No process, no start time.
+        assert_eq!(process_start(u32::MAX), None);
+    }
 
     #[test]
     fn operator_token_paths_are_distinct_and_credentials_are_private_bounded_files() {
