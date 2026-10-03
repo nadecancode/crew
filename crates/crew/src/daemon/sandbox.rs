@@ -278,7 +278,53 @@ fn provision_worktree(
     Ok(worktree)
 }
 
+/// Integration on its own worktree, made outside any launcher; it is filled
+/// and every agent branch merged into it through `helper`'s launcher when
+/// there is one: a hook or filter from any agent's branch can run there.
+fn integrate(
+    repo: &Path,
+    worktrees_dir: &Path,
+    base: &str,
+    agents: &[String],
+    helper: Option<HelperFor>,
+) -> Result<(git::Worktree, Vec<git::IntegrationStep>)> {
+    let Some(helper) = helper else {
+        return git::integrate(repo, worktrees_dir, base, agents);
+    };
+    let (worktree, needs_population) =
+        git::add_worktree(repo, worktrees_dir, git::INTEGRATION_DIR, base)?;
+    let launcher = helper(&worktree.path)?;
+    let steps = git::launch::with_launcher(launcher, || -> Result<_> {
+        if needs_population {
+            git::populate_worktree(&worktree)?;
+        }
+        git::merge_agents(&worktree, agents)
+    })?;
+    Ok((worktree, steps))
+}
+
 impl Daemon {
+    /// Integration (whoever asks for it), in a helper sandbox when the team
+    /// requires sandboxes. Blocking.
+    pub(crate) fn integration(
+        &self,
+        config: &SandboxConfig,
+        base: &str,
+        agents: &[String],
+    ) -> Result<(git::Worktree, Vec<git::IntegrationStep>)> {
+        let helper = |worktree: &Path| -> Result<Arc<dyn Launcher>> {
+            Ok(Arc::new(self.helper_launcher(config, worktree)?))
+        };
+        let required = config.mode == SandboxMode::Required;
+        integrate(
+            &self.workspace,
+            &self.worktrees_dir(),
+            base,
+            agents,
+            required.then_some(&helper as HelperFor),
+        )
+    }
+
     /// A member's worktree, filled in a helper sandbox when the team
     /// requires sandboxes. Blocking.
     pub(crate) fn member_worktree(
@@ -720,5 +766,49 @@ mod tests {
         // Reused once filled: nothing runs in it again.
         provision_worktree(&ws, &worktrees, "a", "main", Some(&helper)).unwrap();
         assert_eq!(calls.get(), 1);
+    }
+
+    #[test]
+    fn integration_merges_through_the_helper_in_its_own_worktree() {
+        let dir = tempfile::tempdir().unwrap();
+        let ws = dir.path().canonicalize().unwrap().join("ws");
+        git::init_repo(&ws).unwrap();
+        let worktrees = ws.join(".crew/worktrees");
+        let a = git::ensure_worktree(&ws, &worktrees, "a", "main").unwrap();
+        std::fs::write(a.path.join("from-a.txt"), "a\n").unwrap();
+        git::commit_all(&a.path, "a", "work of a").unwrap();
+        let recorder = Arc::new(Recorder::default());
+        let calls = std::cell::Cell::new(0);
+        let integration = worktrees.join(git::INTEGRATION_DIR);
+        let helper = |worktree: &Path| -> Result<Arc<dyn Launcher>> {
+            calls.set(calls.get() + 1);
+            assert_eq!(worktree, integration);
+            Ok(recorder.clone())
+        };
+
+        let (made, steps) =
+            integrate(&ws, &worktrees, "main", &["a".to_string()], Some(&helper)).unwrap();
+        assert_eq!(made.path, integration);
+        assert_eq!(steps.len(), 1);
+        assert!(steps[0].outcome.ok, "{:?}", steps[0].outcome);
+        assert!(integration.join("from-a.txt").exists());
+        assert_eq!(calls.get(), 1);
+        let seen = recorder.0.lock().unwrap().clone();
+        assert!(
+            seen.iter().any(|argv| argv.contains(&"merge".to_string())),
+            "{seen:?}"
+        );
+        assert!(
+            seen.iter().any(|argv| argv.contains(&"reset".to_string())),
+            "{seen:?}"
+        );
+        let elsewhere: Vec<_> = seen
+            .iter()
+            .filter(|argv| argv.get(2).map(PathBuf::from) != Some(integration.clone()))
+            .collect();
+        assert!(
+            elsewhere.is_empty(),
+            "helper git outside its worktree: {elsewhere:?}"
+        );
     }
 }

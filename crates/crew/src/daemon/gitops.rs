@@ -267,7 +267,7 @@ git in it (use a git repository as the workspace, or workspace.init: true)",
 
     /// Merge every agent branch into the integration branch.
     pub(crate) async fn integrate(&self) -> Result<Value, RpcError> {
-        let (agents, base, worktrees) = {
+        let (agents, base, worktrees, sandbox) = {
             let model = self.model();
             let team = model
                 .session
@@ -293,6 +293,7 @@ git in it (use a git repository as the workspace, or workspace.init: true)",
                 agents,
                 team.workspace.base.clone(),
                 model.session.isolation == "worktree",
+                team.workspace.sandbox.clone(),
             )
         };
         if !worktrees {
@@ -300,10 +301,9 @@ git in it (use a git repository as the workspace, or workspace.init: true)",
                 "agents share the workspace, so there are no branches to integrate",
             ));
         }
-        let repo = self.workspace.clone();
-        let dir = self.worktrees_dir();
+        let daemon = self.clone();
         let (worktree, steps) = self
-            .git(move || git::integrate(&repo, &dir, &base, &agents))
+            .git(move || daemon.integration(&sandbox, &base, &agents))
             .await?;
         let mut merged = Vec::new();
         let mut conflicts = Vec::new();
