@@ -260,6 +260,13 @@ auth_token, auth_token_env, auth_token_file"
             if self.env.contains_key(name) {
                 bail!("'{name}' is in both env and env_files");
             }
+            // The homes are the daemon's to set (a sandbox moves them).
+            if matches!(
+                name.as_str(),
+                "CLAUDE_CONFIG_DIR" | "CODEX_HOME" | "PI_CODING_AGENT_DIR"
+            ) {
+                bail!("env_files: '{name}' is set by crew, not by a token file");
+            }
         }
         self.credential(dir)?;
         Ok(())
@@ -447,6 +454,8 @@ impl Plan {
             self.credential = credential.map(|(kind, source)| (kind, source, scope));
         }
         for (name, value) in &section.env {
+            // A more specific plain value takes the name back from a token file.
+            self.env_files.remove(name);
             self.env.insert(name.clone(), (value.clone(), scope));
         }
         for (name, path) in &section.env_files {
@@ -454,6 +463,8 @@ impl Plan {
             if path.trim().is_empty() {
                 self.env_files.remove(name);
             } else {
+                // And a more specific token file takes it from a plain value.
+                self.env.remove(name);
                 self.env_files
                     .insert(name.clone(), (expand_path(path.trim(), dir), scope));
             }
@@ -790,7 +801,7 @@ const MAX_TOKEN_FILE: u64 = 64 * 1024;
 /// A token the operator keeps in a file for one agent's environment (a
 /// `claude setup-token` token, an API key). The file is opened without
 /// following a link anywhere in its path, and must be a regular file of this
-/// user (or root) that nobody else can read or write. The error never carries
+/// user with mode 0600. The error never carries
 /// the contents.
 fn read_token_file(path: &Path) -> Result<Secret> {
     use std::io::Read;
@@ -823,10 +834,10 @@ fn read_token_file(path: &Path) -> Result<Secret> {
     }
     // SAFETY: geteuid has no preconditions.
     let me = unsafe { libc::geteuid() };
-    if meta.uid() != me && meta.uid() != 0 {
-        bail!("{} is owned by another user", path.display());
+    if meta.uid() != me {
+        bail!("{} is not owned by you", path.display());
     }
-    if meta.mode() & 0o077 != 0 {
+    if meta.mode() & 0o777 != 0o600 {
         bail!(
             "{} can be read or written by other users (chmod 600)",
             path.display()
@@ -1206,7 +1217,7 @@ mod tests {
     fn token_files_become_environment_secrets_for_their_own_agents_only() {
         let dir = tempfile::tempdir().unwrap();
         let claude = token_file(dir.path(), "claude", "oauth-token-claude\n", 0o600);
-        let codex = token_file(dir.path(), "codex", "sk-codex-token", 0o400);
+        let codex = token_file(dir.path(), "codex", "sk-codex-token", 0o600);
         let pi = token_file(dir.path(), "pi", "pi-key", 0o600);
         let l = layers(
             "",
@@ -1298,6 +1309,76 @@ mod tests {
         assert!(resolve(&token_file(dir.path(), "empty", "  \n", 0o600)).is_err());
         assert!(resolve(&token_file(dir.path(), "big", &"x".repeat(70_000), 0o600)).is_err());
         assert!(resolve(&dir.path().join("missing")).is_err());
+    }
+
+    #[test]
+    fn a_name_is_never_in_both_the_plain_and_the_secret_environment() {
+        let dir = tempfile::tempdir().unwrap();
+        let secret = token_file(dir.path(), "t", "tok-secret", 0o600);
+        // A runtime-wide plain value and a more specific agent token file, and
+        // the reverse: the more specific one wins and the other is gone.
+        let l = layers(
+            "",
+            &format!(
+                "[claude.env]\nCLAUDE_CODE_OAUTH_TOKEN = \"plain-value\"\nKEEP = \"1\"\n\
+[agents.c1.env_files]\nCLAUDE_CODE_OAUTH_TOKEN = \"{p}\"\n\
+[claude.env_files]\nOTHER = \"{p}\"\n[agents.c2.env]\nOTHER = \"plain-wins\"",
+                p = secret.display()
+            ),
+            "",
+        );
+        let c1 = l.resolve(RuntimeKind::Claude, "c1", None).unwrap();
+        assert!(
+            !c1.env.contains_key("CLAUDE_CODE_OAUTH_TOKEN"),
+            "{:?}",
+            c1.env
+        );
+        assert_eq!(
+            c1.secret_env
+                .iter()
+                .filter(|(n, _)| n == "CLAUDE_CODE_OAUTH_TOKEN")
+                .count(),
+            1
+        );
+        assert_eq!(c1.env.get("KEEP").map(String::as_str), Some("1"));
+        let c2 = l.resolve(RuntimeKind::Claude, "c2", None).unwrap();
+        assert_eq!(c2.env.get("OTHER").map(String::as_str), Some("plain-wins"));
+        assert!(!c2.secret_env.iter().any(|(n, _)| n == "OTHER"));
+        // Every runtime-chosen home is the daemon's to set.
+        for name in ["CLAUDE_CONFIG_DIR", "CODEX_HOME", "PI_CODING_AGENT_DIR"] {
+            let config: FileConfig =
+                toml::from_str(&format!("[claude.env_files]\n{name} = \"/x\"")).unwrap();
+            assert!(config.validate(Path::new("/cfg")).is_err(), "{name}");
+        }
+    }
+
+    #[test]
+    fn a_token_file_must_be_mode_0600_and_the_users_own() {
+        let dir = tempfile::tempdir().unwrap();
+        let resolve = |path: &Path| {
+            layers(
+                "",
+                &format!("[claude.env_files]\nT = \"{}\"", path.display()),
+                "",
+            )
+            .resolve(RuntimeKind::Claude, "claude-1", None)
+        };
+        assert!(resolve(&token_file(dir.path(), "ok", "tok", 0o600)).is_ok());
+        for (name, mode) in [("ro", 0o400), ("exec", 0o700), ("rwx", 0o500)] {
+            let err = format!(
+                "{:#}",
+                resolve(&token_file(dir.path(), name, "tok", mode)).unwrap_err()
+            );
+            assert!(err.contains("chmod 600"), "{name}: {err}");
+        }
+        // A file that cannot even be opened is refused too.
+        assert!(resolve(&token_file(dir.path(), "unreadable", "tok", 0o100)).is_err());
+        // Not root's either: a file owned by root is not the user's.
+        // SAFETY: geteuid has no preconditions.
+        if unsafe { libc::geteuid() } != 0 {
+            let err = format!("{:#}", resolve(Path::new("/etc/shadow")).unwrap_err());
+            assert!(!err.contains("tok"), "{err}");
+        }
     }
 
     #[test]

@@ -399,6 +399,7 @@ impl AgentRuntime for PiRuntime {
             ctx.endpoint
                 .secret_env
                 .iter()
+                .filter(|(name, _)| ctx.private_home.is_none() || name != AGENT_DIR_ENV)
                 .map(|(name, secret)| (name.clone(), secret.expose().to_string())),
         );
         // The private home is where the daemon seeded and reads; an endpoint's own
@@ -682,6 +683,42 @@ mod tests {
             effective(&launch(None)).as_deref(),
             Some("/previous/pi-home")
         );
+    }
+
+    #[test]
+    fn a_secret_cannot_redirect_pis_private_home_either() {
+        let dir = tempfile::tempdir().unwrap();
+        let agent = agent(dir.path());
+        let identity = dir.path().join("identity.json");
+        let home = dir.path().join("rw/home");
+        let endpoint = Endpoint {
+            secret_env: vec![(
+                AGENT_DIR_ENV.into(),
+                crate::endpoints::Secret::new("/elsewhere"),
+            )],
+            ..Endpoint::default()
+        };
+        let spec = PiRuntime
+            .launch(&LaunchContext {
+                agent: &agent,
+                settings: &AgentSettings::default(),
+                crew_bin: Path::new("/opt/crew"),
+                agent_dir: dir.path(),
+                identity_path: &identity,
+                briefing: "be helpful",
+                resume: false,
+                endpoint: &endpoint,
+                long_context: false,
+                private_home: Some(&home),
+            })
+            .unwrap();
+        let all: Vec<_> = spec
+            .env
+            .iter()
+            .filter(|(k, _)| k == AGENT_DIR_ENV)
+            .collect();
+        assert_eq!(all.len(), 1, "{all:?}");
+        assert_eq!(all[0].1, home.join("pi").to_str().unwrap());
     }
 
     #[test]
