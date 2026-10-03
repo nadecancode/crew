@@ -307,3 +307,7 @@ pub fn render_to_string(app: &App, width: u16, height: u16, now: i64) -> String 
         .expect("test backend is infallible");
     widgets::canvas::buffer_text(terminal.backend().buffer())
 }
+
+#[cfg(test)]
+#[path = "../../crew-core/src/test_support.rs"]
+mod test_support;

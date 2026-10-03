@@ -633,6 +633,11 @@ mod tests {
 
     #[test]
     fn subscriber_reports_operator_token_errors_and_stops_reconnecting() {
+        if crate::test_support::isolate_operator_test(
+            "net::tests::subscriber_reports_operator_token_errors_and_stops_reconnecting",
+        ) {
+            return;
+        }
         use std::os::unix::fs::PermissionsExt;
         for (case, expected) in [
             ("missing", "no operator token"),
@@ -675,6 +680,11 @@ mod tests {
 
     #[test]
     fn subscriber_stops_after_a_protocol_mismatch_on_reconnect() {
+        if crate::test_support::isolate_operator_test(
+            "net::tests::subscriber_stops_after_a_protocol_mismatch_on_reconnect",
+        ) {
+            return;
+        }
         let temp = tempfile::tempdir().unwrap();
         let path = temp.path().join("daemon.sock");
         let daemon = FakeDaemon::start(&path);
@@ -712,6 +722,11 @@ mod tests {
 
     #[test]
     fn slow_lifecycle_actions_do_not_hit_the_fast_read_timeout() {
+        if crate::test_support::isolate_operator_test(
+            "net::tests::slow_lifecycle_actions_do_not_hit_the_fast_read_timeout",
+        ) {
+            return;
+        }
         let temp = tempfile::tempdir().unwrap();
         let path = temp.path().join("daemon.sock");
         let daemon = FakeDaemon::start_with_delay(
@@ -733,6 +748,11 @@ mod tests {
 
     #[test]
     fn shutdown_push_is_forwarded_as_a_terminal_event() {
+        if crate::test_support::isolate_operator_test(
+            "net::tests::shutdown_push_is_forwarded_as_a_terminal_event",
+        ) {
+            return;
+        }
         let temp = tempfile::tempdir().unwrap();
         let path = temp.path().join("daemon.sock");
         let daemon = FakeDaemon::start(&path);
@@ -753,6 +773,11 @@ mod tests {
 
     #[test]
     fn slow_model_listing_does_not_block_screen_requests() {
+        if crate::test_support::isolate_operator_test(
+            "net::tests::slow_model_listing_does_not_block_screen_requests",
+        ) {
+            return;
+        }
         let temp = tempfile::tempdir().unwrap();
         let path = temp.path().join("daemon.sock");
         let daemon = FakeDaemon::start_with_delay(
@@ -805,6 +830,11 @@ mod tests {
 
     #[test]
     fn subscriber_delivers_snapshot_pushes_resync_and_reconnects() {
+        if crate::test_support::isolate_operator_test(
+            "net::tests::subscriber_delivers_snapshot_pushes_resync_and_reconnects",
+        ) {
+            return;
+        }
         let (_dir, path) = socket();
         let daemon = FakeDaemon::start(&path);
         probe(&path).unwrap();
@@ -904,6 +934,11 @@ mod tests {
 
     #[test]
     fn keys_that_piled_up_go_together_and_another_terminals_wait_their_turn() {
+        if crate::test_support::isolate_operator_test(
+            "net::tests::keys_that_piled_up_go_together_and_another_terminals_wait_their_turn",
+        ) {
+            return;
+        }
         let (tx, rx) = mpsc::channel();
         let keys = |id: &str, text: &str| Command::Keys {
             id: id.into(),
@@ -929,6 +964,11 @@ mod tests {
 
     #[test]
     fn requester_runs_commands_and_reports_errors() {
+        if crate::test_support::isolate_operator_test(
+            "net::tests::requester_runs_commands_and_reports_errors",
+        ) {
+            return;
+        }
         let (_dir, path) = socket();
         let daemon = FakeDaemon::start(&path);
         let (tx, rx) = mpsc::channel();

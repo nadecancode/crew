@@ -11,3 +11,6 @@ pub mod types;
 pub mod util;
 
 pub use types::*;
+
+#[cfg(test)]
+mod test_support;

@@ -1040,6 +1040,11 @@ fn a_reviewer_cannot_be_made_the_author_of_the_task_it_reviews() {
 
 #[test]
 fn an_agent_cannot_approve_a_review_of_its_own_work() {
+    if common::test_support::isolate_operator_test(
+        "an_agent_cannot_approve_a_review_of_its_own_work",
+    ) {
+        return;
+    }
     // A task whose author is also its reviewer can only exist in a state
     // written before the checks (an older daemon's database): put one there
     // and restart the daemon on it.
@@ -1818,6 +1823,11 @@ fn two_teams_loaded_at_once_do_not_merge() {
 
 #[test]
 fn two_agents_added_at_once_under_one_id_are_one_agent() {
+    if common::test_support::isolate_operator_test(
+        "two_agents_added_at_once_under_one_id_are_one_agent",
+    ) {
+        return;
+    }
     let s = Session::new();
     let mut team = s.team("dup", vec![agent("a", "", &[])], vec![]);
     team.defaults.command = scripted(&[]);
@@ -5054,6 +5064,7 @@ fn claude_code_is_asked_for_the_accounts_usage_so_a_models_own_week_stays_curren
 #[test]
 fn only_the_operator_moves_the_orchestrator_to_another_cli_and_its_new_session_is_handed_the_work()
 {
+    if common::test_support::isolate_operator_test("only_the_operator_moves_the_orchestrator_to_another_cli_and_its_new_session_is_handed_the_work") { return; }
     use std::os::unix::fs::PermissionsExt;
 
     let s = Session::new();

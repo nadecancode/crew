@@ -138,9 +138,12 @@ fn main() {
             fcntl.ioctl(slave, termios.TIOCSCTTY, 0)
             resource.setrlimit(resource.RLIMIT_CORE, (0, 0))
 
+        child_env = dict(os.environ, TERM="xterm-256color")
+        child_env.pop("CREW_IDENTITY", None)
+        child_env.pop("CREW_SOCKET", None)
         child = subprocess.Popen(
             [str(self.binary), *([str(daemon.path)] if daemon else [])], stdin=slave, stdout=slave, stderr=slave,
-            cwd=self.root, env={**os.environ, "TERM": "xterm-256color"}, preexec_fn=attach,
+            cwd=self.root, env=child_env, preexec_fn=attach,
         )
         output = bytearray()
 

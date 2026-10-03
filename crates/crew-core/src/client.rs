@@ -386,6 +386,11 @@ mod tests {
 
     #[test]
     fn missing_token_preserves_old_daemon_protocol_diagnostics() {
+        if crate::test_support::isolate_operator_test(
+            "client::tests::missing_token_preserves_old_daemon_protocol_diagnostics",
+        ) {
+            return;
+        }
         for response in [
             ServerFrame::err(
                 0,
@@ -416,6 +421,7 @@ mod tests {
             assert_eq!(
                 hello
                     .expect("a tokenless Hello must negotiate the version")
+                    .1
                     .token,
                 None
             );
@@ -425,7 +431,7 @@ mod tests {
     fn hello_peer(
         socket: &Path,
         mut response: ServerFrame,
-    ) -> std::thread::JoinHandle<Option<Hello>> {
+    ) -> std::thread::JoinHandle<Option<(String, Hello)>> {
         use std::os::unix::net::UnixListener;
         let listener = UnixListener::bind(socket).unwrap();
         listener.set_nonblocking(true).unwrap();
@@ -448,7 +454,7 @@ mod tests {
                         };
                         response.id = Some(request.id);
                         send_frame(&mut stream, response);
-                        return Some(hello);
+                        return Some((line, hello));
                     }
                     Err(error) if error.kind() == io::ErrorKind::WouldBlock => {
                         std::thread::sleep(Duration::from_millis(1))
@@ -478,6 +484,11 @@ mod tests {
                 "{message}"
             );
             assert!(!message.contains("identity-secret-do-not-print"));
+            return;
+        }
+        if crate::test_support::isolate_operator_test(
+            "client::tests::operator_client_refuses_under_crew_identity",
+        ) {
             return;
         }
         use std::os::unix::net::UnixListener;
@@ -563,6 +574,11 @@ mod tests {
 
     #[test]
     fn missing_token_file_is_a_clear_error() {
+        if crate::test_support::isolate_operator_test(
+            "client::tests::missing_token_file_is_a_clear_error",
+        ) {
+            return;
+        }
         for response in [
             ServerFrame::err(0, RpcError::unauthorized("operator token required")),
             ServerFrame::ok(
@@ -576,7 +592,7 @@ mod tests {
             let error = Client::operator(&socket, "test")
                 .err()
                 .expect("missing operator token must fail");
-            let hello = peer
+            let (_, hello) = peer
                 .join()
                 .unwrap()
                 .expect("missing credentials must negotiate the protocol");
@@ -589,7 +605,11 @@ mod tests {
 
     #[test]
     fn operator_hello_carries_the_token_file() {
-        use std::os::unix::net::UnixListener;
+        if crate::test_support::isolate_operator_test(
+            "client::tests::operator_hello_carries_the_token_file",
+        ) {
+            return;
+        }
         let token = "synthetic-operator-secret";
         let temp = tempfile::tempdir().unwrap();
         let socket = temp.path().join("daemon.sock");
@@ -598,28 +618,18 @@ mod tests {
             token.as_bytes(),
         )
         .unwrap();
-        let listener = UnixListener::bind(&socket).unwrap();
-        let peer = std::thread::spawn(move || {
-            let (mut stream, _) = listener.accept().unwrap();
-            let mut line = String::new();
-            BufReader::new(stream.try_clone().unwrap())
-                .read_line(&mut line)
-                .unwrap();
-            let request: Request = serde_json::from_str(&line).unwrap();
-            let Call::Hello(hello) = request.call else {
-                panic!("expected Hello")
-            };
-            send_frame(
-                &mut stream,
-                ServerFrame::ok(
-                    request.id,
-                    json!({"role":"operator", "version":"test", "protocol":PROTOCOL_VERSION, "pid":1}),
-                ),
-            );
-            (line, hello)
-        });
+        let peer = hello_peer(
+            &socket,
+            ServerFrame::ok(
+                0,
+                json!({"role":"operator", "version":"test", "protocol":PROTOCOL_VERSION, "pid":1}),
+            ),
+        );
         let result = Client::operator(&socket, "token-test");
-        let (line, hello) = peer.join().unwrap();
+        let (line, hello) = peer
+            .join()
+            .unwrap()
+            .expect("expected Hello before peer deadline");
         assert!(result.is_ok());
         assert_eq!(hello.token.as_deref(), Some(token));
         let expected = serde_json::to_string(&Request {
@@ -651,6 +661,7 @@ mod tests {
 
     #[test]
     fn token_errors_keep_the_cause_and_invalid_socket_paths_stay_connect_errors() {
+        if crate::test_support::isolate_operator_test("client::tests::token_errors_keep_the_cause_and_invalid_socket_paths_stay_connect_errors") { return; }
         for socket in [Path::new(""), Path::new("/"), Path::new("..")] {
             assert!(matches!(
                 Client::operator(socket, "test"),
@@ -869,7 +880,11 @@ mod tests {
 
     #[test]
     fn hello_rejects_older_and_newer_daemons_for_both_roles() {
-        use std::os::unix::net::UnixListener;
+        if crate::test_support::isolate_operator_test(
+            "client::tests::hello_rejects_older_and_newer_daemons_for_both_roles",
+        ) {
+            return;
+        }
         for protocol in [PROTOCOL_VERSION - 1, PROTOCOL_VERSION, PROTOCOL_VERSION + 1] {
             for agent in [false, true] {
                 let temp = tempfile::tempdir().unwrap();
@@ -879,28 +894,15 @@ mod tests {
                     b"test",
                 )
                 .unwrap();
-                let listener = UnixListener::bind(&socket).unwrap();
-                let peer = std::thread::spawn(move || {
-                    let (mut server, _) = listener.accept().unwrap();
-                    let mut line = String::new();
-                    BufReader::new(server.try_clone().unwrap())
-                        .read_line(&mut line)
-                        .unwrap();
-                    let request: Request = serde_json::from_str(&line).unwrap();
-                    let Call::Hello(hello) = request.call else {
-                        panic!("expected Hello")
-                    };
-                    send_frame(
-                        &mut server,
-                        ServerFrame::ok(
-                            request.id,
-                            json!({
-                                "role": hello.role, "agent_id": hello.agent_id, "version": "test",
-                                "protocol": protocol, "pid": 1
-                            }),
-                        ),
-                    );
-                });
+                let role = if agent { Role::Agent } else { Role::Operator };
+                let agent_id = agent.then_some("worker");
+                let peer = hello_peer(
+                    &socket,
+                    ServerFrame::ok(
+                        0,
+                        json!({"role":role, "agent_id":agent_id, "version":"test", "protocol":protocol, "pid":1}),
+                    ),
+                );
                 let result = if agent {
                     Client::agent(
                         &Identity {
@@ -913,7 +915,12 @@ mod tests {
                 } else {
                     Client::operator(&socket, "test")
                 };
-                peer.join().unwrap();
+                let (_, hello) = peer
+                    .join()
+                    .unwrap()
+                    .expect("expected Hello before peer deadline");
+                assert_eq!(hello.role, role);
+                assert_eq!(hello.agent_id.as_deref(), agent_id);
                 if protocol == PROTOCOL_VERSION {
                     assert!(result.is_ok());
                 } else {

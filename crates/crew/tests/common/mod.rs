@@ -9,6 +9,9 @@
 
 #![allow(dead_code)]
 
+#[path = "../../../crew-core/src/test_support.rs"]
+pub mod test_support;
+
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output, Stdio};
 use std::time::{Duration, Instant};
