@@ -209,7 +209,13 @@ impl AgentRuntime for CodexRuntime {
                 program: "codex".into(),
                 args,
                 cwd: cwd.clone().into(),
-                env: env.clone(),
+                // Codex's tool shells run under the sidecar: it carries the agent's
+                // identity like the TUI does.
+                env: env
+                    .iter()
+                    .cloned()
+                    .chain(std::iter::once((IDENTITY_ENV.to_string(), identity.clone())))
+                    .collect(),
                 socket,
             })
         })
@@ -679,6 +685,40 @@ mod tests {
             .unwrap();
         let socket = spec.sidecar.expect("an app-server sidecar").socket;
         assert!(socket.as_os_str().len() < 104, "{}", socket.display());
+    }
+
+    #[test]
+    fn sidecar_env_has_crew_identity() {
+        let agent = agent();
+        let spec = CodexRuntime
+            .launch(&LaunchContext {
+                agent: &agent,
+                settings: &AgentSettings {
+                    socket_delivery: true,
+                    ..AgentSettings::default()
+                },
+                crew_bin: Path::new("/bin/crew"),
+                agent_dir: Path::new("/state/agents/codex-1"),
+                identity_path: Path::new("/state/agents/codex-1/identity.json"),
+                briefing: "standing instructions",
+                resume: false,
+                endpoint: &Endpoint::default(),
+                long_context: false,
+            })
+            .unwrap();
+        let sidecar = spec.sidecar.expect("an app-server sidecar");
+        let identity = |env: &[(String, String)]| {
+            env.iter()
+                .find(|(k, _)| k == IDENTITY_ENV)
+                .map(|(_, v)| v.clone())
+        };
+        // Codex tool shells run under the sidecar, so it needs the identity
+        // the TUI has.
+        assert_eq!(
+            identity(&sidecar.env).as_deref(),
+            Some("/state/agents/codex-1/identity.json")
+        );
+        assert_eq!(identity(&spec.env), identity(&sidecar.env));
     }
 
     #[test]
