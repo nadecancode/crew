@@ -20,18 +20,46 @@ const MAX_RESULT_CHARS: usize = 4000;
 const STALL_GRACE_MS: i64 = 12_000;
 const MAX_ARTIFACTS: usize = 32;
 
-/// A task its agent cannot be told about would never start: refuse one
-/// whose task message would exceed the bus limit.
+/// A task its agent cannot be told about would never start, and one whose
+/// reviewer cannot be asked would never be done: refuse one whose task
+/// message, or whose review request, would exceed the bus limit.
 pub(super) fn check_task_message_size(task: &Task, limit: usize) -> Result<(), RpcError> {
-    let size = prompt::task_dispatch(task).len();
-    if size > limit {
-        return Err(RpcError::invalid(format!(
-            "task '{}' is too long: its task message would be {size} bytes, and \
+    let request = task.reviewer.as_ref().map(|_| {
+        review_request(task, false)
+            .len()
+            .max(review_request(task, true).len())
+    });
+    let messages = [
+        ("task message", Some(prompt::task_dispatch(task).len())),
+        ("review request", request),
+    ];
+    for (what, size) in messages {
+        if let Some(size) = size.filter(|size| *size > limit) {
+            return Err(RpcError::invalid(format!(
+                "task '{}' is too long: its {what} would be {size} bytes, and \
 limits.max_message_bytes is {limit}",
-            task.id
-        )));
+                task.id
+            )));
+        }
     }
     Ok(())
+}
+
+/// The body of the review request for `task`: what to review against, and
+/// the work, are on the card. In a shared workspace (`shared`) nothing is
+/// committed: the work is already where the reviewer sees it.
+fn review_request(task: &Task, shared: bool) -> String {
+    let id = &task.id;
+    let work = if shared {
+        "result. The work is in the shared workspace"
+    } else {
+        "result and commits. git_cherry_pick or git_merge brings the work into your worktree"
+    };
+    format!(
+        "Review my work on task {id} (\"{}\"): task_get(\"{id}\") reads its card, with my \
+{work}; then review_submit(task_id=\"{id}\", approve=true|false, comments=…).",
+        task.title
+    )
 }
 
 impl Daemon {
@@ -910,19 +938,7 @@ with review_submit(task_id=\"{}\", approve=true|false).",
     /// Ask `reviewer`, straight from the author, to review `task`: what to
     /// review against, and the work, are on the card.
     pub(crate) async fn send_review_request(&self, task: &Task, author: &str, reviewer: &str) {
-        let id = &task.id;
-        // In a shared workspace nothing is committed: the work is already
-        // where the reviewer sees it.
-        let work = if self.model().session.isolation == "shared" {
-            "result. The work is in the shared workspace"
-        } else {
-            "result and commits. git_cherry_pick or git_merge brings the work into your worktree"
-        };
-        let body = format!(
-            "Review my work on task {id} (\"{}\"): task_get(\"{id}\") reads its card, with my \
-{work}; then review_submit(task_id=\"{id}\", approve=true|false, comments=…).",
-            task.title
-        );
+        let body = review_request(task, self.model().session.isolation == "shared");
         let commit = task
             .artifacts
             .iter()

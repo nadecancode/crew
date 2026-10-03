@@ -998,6 +998,87 @@ fn a_task_whose_reviewer_is_unavailable_stays_in_review_and_the_orchestrator_is_
 }
 
 #[test]
+fn a_reviewed_task_whose_review_request_would_not_fit_is_refused_at_creation() {
+    let s = Session::new();
+    // The review request names the task by its title, like the task message,
+    // and says more around it: a title the task message has room for can be
+    // too long for the request.
+    let long = "x".repeat(100);
+    let mut team = s.team(
+        "long-review",
+        vec![agent("author", "", &[]), agent("critic", "", &[])],
+        vec![task("write", "author", &[])],
+    );
+    team.limits.max_message_bytes = 300;
+    team.tasks[0].title = Some(long.clone());
+    team.tasks[0].reviewer = Some("critic".into());
+    // In a team file: refused before anything is set up.
+    std::fs::write(s.root().join("team.yaml"), team.to_yaml().unwrap()).unwrap();
+    let run = s.crew(&["run", "team.yaml", "--no-attach"]);
+    assert!(!run.status.success(), "{}", stdout(&run));
+    assert!(
+        stderr(&run).contains("its review request would be")
+            && stderr(&run).contains("limits.max_message_bytes"),
+        "{}",
+        stderr(&run)
+    );
+    assert!(s.snapshot().tasks.is_empty());
+
+    // Without a review there is no request, and the same title fits.
+    team.tasks[0].reviewer = None;
+    s.run(&team);
+    let ws = s.workspace.to_string_lossy().into_owned();
+    // Added to a running team with a reviewer: refused too.
+    let added = s.crew(&[
+        "task",
+        "add",
+        "--id",
+        "reviewed",
+        "--title",
+        &long,
+        "--description",
+        "do it",
+        "--agent",
+        "author",
+        "--reviewer",
+        "critic",
+        "-C",
+        &ws,
+    ]);
+    assert!(!added.status.success(), "{}", stdout(&added));
+    assert!(
+        stderr(&added).contains("its review request would be"),
+        "{}",
+        stderr(&added)
+    );
+    // Nor can an edit make a reviewed task's title that long.
+    s.ok(&[
+        "task",
+        "add",
+        "--id",
+        "reviewed",
+        "--title",
+        "a short title",
+        "--description",
+        "do it",
+        "--agent",
+        "author",
+        "--reviewer",
+        "critic",
+        "-C",
+        &ws,
+    ]);
+    let edited = s.crew(&["task", "edit", "reviewed", "--title", &long, "-C", &ws]);
+    assert!(!edited.status.success(), "{}", stdout(&edited));
+    assert!(
+        stderr(&edited).contains("its review request would be"),
+        "{}",
+        stderr(&edited)
+    );
+    assert_eq!(find_task(&s.snapshot(), "reviewed").title, "a short title");
+}
+
+#[test]
 fn a_task_cannot_be_reviewed_by_its_own_agent() {
     let s = Session::new();
     let mut team = s.team(
