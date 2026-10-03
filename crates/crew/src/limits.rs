@@ -692,6 +692,9 @@ pub fn codex_screen(screen: &str, now_ms: i64) -> Option<LimitInfo> {
     last_limit_on_screen(
         screen,
         |line| {
+            // Codex prints its errors behind its error marker; replies, the echoed
+            // prompt and wrapped text quoting the phrase do not start with it.
+            let line = line.strip_prefix('■')?;
             if line.contains("out of credits") || line.contains("hit your spend cap") {
                 Some(LimitKind::Credits)
             } else if line.contains("you've hit your usage limit")
@@ -714,11 +717,16 @@ pub fn claude_screen(screen: &str, now_ms: i64) -> Option<LimitInfo> {
     last_limit_on_screen(
         screen,
         |line| {
-            if line.contains("credit balance is too low") {
+            // The message is the start of the line, after Claude's own marker;
+            // text quoting the phrase mid-sentence, or echoed after the prompt
+            // marker, is not the error.
+            let line = line.trim_start_matches(['●', '⏺', ' ']);
+            if line.starts_with("credit balance is too low") {
                 Some(LimitKind::Credits)
-            } else if (line.contains("you've hit your") && line.contains("limit"))
-                || line.contains("usage limit reached")
-                || (line.contains("api error")
+            } else if (line.starts_with("you've hit your") && line.contains("limit"))
+                || line.starts_with("usage limit reached")
+                || line.starts_with("claude usage limit reached")
+                || (line.starts_with("api error")
                     && (line.contains("(429)") || line.contains("rate limit")))
             {
                 Some(LimitKind::Usage)
@@ -1262,6 +1270,32 @@ mod tests {
         );
         assert_eq!(claude_screen(&went_on, now), None);
         assert_eq!(claude_screen(&format!("● All done.\n{box_}"), now), None);
+    }
+
+    #[test]
+    fn quoted_limit_text_is_not_a_limit() {
+        let now = noon();
+        let box_ = "────────────────────────── claude-1 ─\n❯\u{a0}\n────────────────────────────────────\n";
+        // The task text on screen, an echoed prompt and an assistant reply all
+        // mention the phrase; none of them is the runtime's error.
+        for quoted in [
+            "  When it prints 'usage limit reached' the agent is parked.\n",
+            "❯ why does 'usage limit reached' park the agent?\n",
+            "● The check looks for \"usage limit reached\" in the screen text.\n",
+        ] {
+            assert_eq!(
+                claude_screen(&format!("{quoted}\n{box_}"), now),
+                None,
+                "{quoted}"
+            );
+        }
+        for quoted in [
+            "• The check looks for \"usage limit reached\" in the screen text.\n› \n",
+            "› explain the usage limit reached branch\n› \n",
+            "  When it says usage limit reached, park the agent.\n› \n",
+        ] {
+            assert_eq!(codex_screen(quoted, now), None, "{quoted}");
+        }
     }
 
     #[test]
