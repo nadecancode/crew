@@ -732,7 +732,6 @@ impl TeamConfig {
     }
 }
 
-/// Validate a single agent declaration (also used by `crew agent add`).
 /// Most models `model_fallbacks` names a fallback for, and most fallbacks
 /// of one model.
 pub const MAX_FALLBACK_MODELS: usize = 32;
@@ -777,6 +776,7 @@ fn validate_model_fallbacks(fallbacks: &BTreeMap<String, Vec<String>>) -> Result
     Ok(())
 }
 
+/// Validate a single agent declaration (also used by `crew agent add`).
 pub fn validate_agent_spec(agent: &AgentSpec) -> Result<()> {
     if !is_valid_id(&agent.id) {
         bail!(

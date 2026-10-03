@@ -1,11 +1,13 @@
 //! Daemon connections and the threads that feed the event loop.
 //!
-//! Three threads, one channel:
+//! Dedicated workers feed one UI channel:
 //! - the subscriber holds a subscribed connection and forwards pushes as they
 //!   happen (reconnecting once a second if the daemon goes away);
-//! - the requester owns a second connection and runs user-initiated calls so
-//!   the render loop never blocks on the socket;
+//! - fast requests, slow lifecycle/model calls and terminal keys use separate
+//!   workers, so none blocks the render loop or queues keys behind a request;
 //! - the input thread forwards terminal events.
+//!
+//! Commands on different workers may finish out of order; pushes refresh the UI.
 
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -132,11 +134,8 @@ pub fn spawn_subscriber(socket: PathBuf, tx: Sender<UiEvent>, stop: Arc<AtomicBo
         .spawn(run);
 }
 
-/// Run commands against the daemon on a worker thread; replies come back on
-/// the UI channel.
-/// The dashboard's line to the daemon: a thread for requests, and one for
-/// keys typed into a terminal, which must never queue behind a request in
-/// flight (a screen read takes the backend a while).
+/// The dashboard's fast requests, slow actions and terminal keys each have
+/// their own worker; replies come back on the UI channel.
 #[derive(Clone)]
 pub struct Requests {
     main: Sender<Command>,

@@ -1,4 +1,7 @@
-"""Run with `just test-terminal`: isolated signal/shutdown pseudo-terminal checks."""
+"""Run with `just test-terminal`: isolated signal/shutdown pseudo-terminal checks.
+
+Run `just test` or `just build` once first to populate the offline Cargo cache.
+"""
 
 import errno
 import fcntl

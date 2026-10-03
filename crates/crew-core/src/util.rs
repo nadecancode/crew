@@ -117,7 +117,7 @@ pub fn truncate_chars(s: &str, max: usize) -> String {
     out
 }
 
-/// Text safe to write to a terminal cell: drop controls and expand tabs.
+/// Text safe to write to a terminal cell: drop controls and turn tabs into a space.
 pub fn printable(text: &str) -> Cow<'_, str> {
     if !text.chars().any(char::is_control) {
         return Cow::Borrowed(text);

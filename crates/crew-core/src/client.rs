@@ -150,7 +150,7 @@ impl Client {
         Ok(id)
     }
 
-    /// Read the next frame, blocking until one arrives.
+    /// Read buffered pushes first, then block until the next socket frame arrives.
     pub fn next_frame(&mut self) -> ClientResult<ServerFrame> {
         if self.closed {
             return Err(ClientError::Closed);

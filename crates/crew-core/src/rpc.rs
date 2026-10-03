@@ -609,6 +609,7 @@ pub enum Push {
     /// The daemon is shutting down.
     Shutdown,
     /// An additive push the peer understands but this client does not.
+    /// Produced only while deserializing; never sent by the daemon.
     #[serde(other)]
     Unknown,
 }
@@ -707,6 +708,8 @@ mod compatibility_tests {
             Role::Operator => "operator",
             Role::Agent => "agent",
         };
+        // Adding a variant also requires an instance in `pushes` and its kind
+        // in the pinned version list below, together with a protocol bump.
         let push_tag = |push: &Push| match push {
             Push::Event(_) => "event",
             Push::Message(_) => "message",
