@@ -998,12 +998,34 @@ api_key_file = "~/.secrets/openai"   # a file only you can read
 ```
 
 Claude Code fetches an `api_key` from the daemon (`apiKeyHelper`); Codex gets it
-in its environment as `CREW_CODEX_API_KEY`. A subscription login has no field of
-its own here: use an API key. Whether Claude Code accepts a long-lived token
-from `claude setup-token` through `auth_token_env` (which sets
-`ANTHROPIC_AUTH_TOKEN`) has not been verified; it is a different variable from
-`CLAUDE_CODE_OAUTH_TOKEN`, so do not assume they are interchangeable. See
-`crew config` for what each agent will use.
+in its environment as `CREW_CODEX_API_KEY`.
+
+**Subscription logins and token files.** When sandboxed, use `setup-token` or
+API-key files; subscription login files are not bound. For a subscription, run
+`claude setup-token` once, keep the token in a file only you can read
+(`chmod 600`, owned by you), and name the variable the CLI reads:
+
+<!-- sandbox-token-files-example -->
+```toml
+[agents.claude-1.env_files]          # or [claude.env_files] for every Claude member
+CLAUDE_CODE_OAUTH_TOKEN = "~/.secrets/claude-oauth"
+
+[codex.env_files]
+OPENAI_API_KEY = "~/.secrets/openai"
+```
+
+`CLAUDE_CODE_OAUTH_TOKEN` is the variable the installed Claude Code (2.1.288)
+reads. For Codex and pi, name the variable that CLI reads for a key (for pi a
+provider key such as `ANTHROPIC_API_KEY`); crew does not check that the CLI
+acts on it. The file is read at every launch without following links and must
+be a regular file of yours with no group or other permissions; its contents go
+into that agent's environment only, never into a settings file, the event log,
+the roster or `crew config` (which shows the variable and the file). Binding
+the CLIs' own login files read-write, so a refreshing subscription login works
+in a sandbox, is deferred until the real-CLI run; auth_token_env
+(`ANTHROPIC_AUTH_TOKEN`) is a different variable from
+`CLAUDE_CODE_OAUTH_TOKEN` and is not a substitute. See `crew config` for what
+each agent will use.
 
 ## Workspace isolation
 

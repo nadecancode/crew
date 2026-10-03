@@ -1340,6 +1340,31 @@ mod tests {
     }
 
     #[test]
+    fn the_readmes_token_file_example_resolves_to_environment_secrets() {
+        let readme = include_str!("../../../README.md");
+        let marker = "<!-- sandbox-token-files-example -->\n```toml\n";
+        let start = readme.find(marker).expect("the example") + marker.len();
+        let example = &readme[start..start + readme[start..].find("```").unwrap()];
+        let dir = tempfile::tempdir().unwrap();
+        let claude = token_file(dir.path(), "claude-oauth", "oauth-readme", 0o600);
+        let openai = token_file(dir.path(), "openai", "sk-readme", 0o600);
+        let example = example
+            .replace("~/.secrets/claude-oauth", &claude.to_string_lossy())
+            .replace("~/.secrets/openai", &openai.to_string_lossy());
+        let l = layers("", &example, "");
+        let c = l.resolve(RuntimeKind::Claude, "claude-1", None).unwrap();
+        assert_eq!(c.secret_env[0].0, "CLAUDE_CODE_OAUTH_TOKEN");
+        assert_eq!(c.secret_env[0].1.expose(), "oauth-readme");
+        assert!(l
+            .resolve(RuntimeKind::Claude, "claude-2", None)
+            .unwrap()
+            .secret_env
+            .is_empty());
+        let x = l.resolve(RuntimeKind::Codex, "codex-1", None).unwrap();
+        assert_eq!(x.secret_env[0].0, "OPENAI_API_KEY");
+    }
+
+    #[test]
     fn the_report_shows_sources_and_never_a_whole_key() {
         let l = layers(
             "[claude]\nbase_url = \"https://global.example\"",

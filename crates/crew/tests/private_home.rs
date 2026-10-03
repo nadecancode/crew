@@ -113,6 +113,22 @@ fn sandboxed_clis_keep_their_files_in_private_homes_seeded_without_the_operators
     )
     .unwrap();
 
+    // A token file for the Claude agent only: it must reach that sandbox and no other.
+    let token = s.root().join("claude-token");
+    std::fs::write(&token, "tok-sandboxed-claude\n").unwrap();
+    std::fs::set_permissions(&token, std::fs::Permissions::from_mode(0o600)).unwrap();
+    let global = s.root().join("etc/config.toml");
+    std::fs::create_dir_all(global.parent().unwrap()).unwrap();
+    std::fs::write(
+        &global,
+        format!(
+            "[agents.c.env_files]\nCLAUDE_CODE_OAUTH_TOKEN = \"{}\"\n",
+            token.display()
+        ),
+    )
+    .unwrap();
+    std::fs::set_permissions(&global, std::fs::Permissions::from_mode(0o600)).unwrap();
+
     let mut team = s.team(
         "private-homes",
         vec![
@@ -170,6 +186,10 @@ fn sandboxed_clis_keep_their_files_in_private_homes_seeded_without_the_operators
         home("c").join("claude").to_str().unwrap()
     );
     assert_eq!(seen["env"]["HOME"], home("c").to_str().unwrap());
+    assert_eq!(
+        seen["env"]["CLAUDE_CODE_OAUTH_TOKEN"],
+        "tok-sandboxed-claude"
+    );
     let settings = json(&home("c").join("claude/settings.json"));
     assert_eq!(settings["model"], "opus");
     assert!(settings.get("hooks").is_none(), "{settings}");
@@ -203,6 +223,20 @@ fn sandboxed_clis_keep_their_files_in_private_homes_seeded_without_the_operators
         home("p").join("pi").to_str().unwrap()
     );
     assert!(agents.join("p/rw/pi-sessions").is_dir());
+    // The token went to the Claude agent's sandbox only.
+    for other in [
+        home("x").join("codex/fake-codex.json"),
+        pi,
+        home("h").join("claude/fake-claude.json"),
+    ] {
+        assert!(
+            !std::fs::read_to_string(&other)
+                .unwrap()
+                .contains("tok-sandboxed-claude"),
+            "{} holds the claude token",
+            other.display()
+        );
+    }
 
     // A hostile agent cannot make the daemon open a file outside its writable
     // tree by naming it: the daemon falls back to the real transcript.

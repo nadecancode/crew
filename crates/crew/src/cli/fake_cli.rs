@@ -98,6 +98,10 @@ fn stay_up(mut reply: impl FnMut(&str)) {
 fn claude(args: &[String]) -> Result<()> {
     let dir = home_dir("CLAUDE_CONFIG_DIR", ".claude")?;
     record(&dir, "fake-claude.json", args)?;
+    // And one per agent (--name), for agents that share a configuration directory.
+    if let Some(name) = flag(args, "--name") {
+        record(&dir, &format!("fake-claude-{name}.json"), args)?;
+    }
     let session = flag(args, "--session-id")
         .or_else(|| flag(args, "--resume"))
         .unwrap_or("fake-session");
