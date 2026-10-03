@@ -4,7 +4,7 @@
 
 use anyhow::{anyhow, Result};
 use crew_core::config::{validate_agent_spec, AgentSpec, TeamConfig, MAX_AGENTS};
-use crew_core::paths::{ensure_private_dir, write_private_file, Identity};
+use crew_core::paths::{write_private_file, Identity};
 use crew_core::rpc::{Push, RpcError};
 use crew_core::util::{new_token, now_ms};
 use crew_core::{Agent, AgentStatus, RuntimeKind, TaskStatus, OPERATOR_ID, ORCHESTRATOR_ID};
@@ -348,7 +348,7 @@ impl Daemon {
         let runtime = runtime_for(agent.runtime);
 
         let agent_dir = self.agent_dir(id);
-        ensure_private_dir(&agent_dir)?;
+        self.agent_root(id)?;
         let identity_path = agent_dir.join("identity.json");
         let identity = Identity {
             socket: self.socket.to_string_lossy().into_owned(),

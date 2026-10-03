@@ -6,6 +6,7 @@
 //! dashboard and CLI are plain clients; closing them never affects agents.
 
 use std::collections::{HashMap, HashSet};
+use std::os::fd::{AsFd, AsRawFd, BorrowedFd, OwnedFd};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, MutexGuard, RwLock};
 
@@ -287,6 +288,10 @@ pub struct Inner {
     /// logs, events, pushes or agent environments).
     #[allow(dead_code)] // checked when operator hellos require it (C-T2)
     pub(crate) operator_token: String,
+    /// `<workspace>/.crew`, held open from the start (design-b3.md §3.4, D2).
+    /// Agent directories are reached from it one component at a time, never
+    /// through a path an agent could have replaced with a link.
+    pub(crate) state_root: OwnedFd,
 }
 
 /// A running sidecar and the socket it serves.
@@ -569,6 +574,19 @@ impl Daemon {
         self.state_dir.join("agents").join(agent_id)
     }
 
+    /// Make an agent's directories beneath the held state directory: `<A>`,
+    /// which only the daemon writes, and `<A>/rw/home`, which the agent
+    /// writes (design-b3.md §3.2). A link anywhere on the way is refused, so
+    /// an agent that replaced `rw` cannot make the daemon write elsewhere.
+    /// Returns `<A>`.
+    pub(crate) fn agent_root(&self, agent_id: &str) -> Result<OwnedFd> {
+        let agents = private_subdir(self.state_root.as_fd(), "agents")?;
+        let root = private_subdir(agents.as_fd(), agent_id)?;
+        let rw = private_subdir(root.as_fd(), "rw")?;
+        private_subdir(rw.as_fd(), "home")?;
+        Ok(root)
+    }
+
     pub(crate) fn worktrees_dir(&self) -> PathBuf {
         self.state_dir.join("worktrees")
     }
@@ -614,7 +632,6 @@ fn load_model(store: &dyn Store) -> Result<Model> {
 /// the daemon exits, however it exits.
 fn lock_instance(state_dir: &Path) -> Result<Option<std::fs::File>> {
     use std::os::unix::fs::OpenOptionsExt;
-    use std::os::unix::io::AsRawFd;
     let path = state_dir.join("daemon.lock");
     let file = std::fs::OpenOptions::new()
         .create(true)
@@ -632,6 +649,32 @@ fn lock_instance(state_dir: &Path) -> Result<Option<std::fs::File>> {
         return Ok(None);
     }
     Err(err).with_context(|| format!("locking {}", path.display()))
+}
+
+/// The state directory, opened once (not through a link) for `Inner::state_root`.
+fn open_state_root(state_dir: &Path) -> Result<OwnedFd> {
+    use std::os::unix::fs::OpenOptionsExt;
+    let dir = std::fs::OpenOptions::new()
+        .read(true)
+        .custom_flags(libc::O_PATH | libc::O_DIRECTORY | libc::O_NOFOLLOW)
+        .open(state_dir)
+        .with_context(|| format!("opening {}", state_dir.display()))?;
+    Ok(dir.into())
+}
+
+/// `name` in `dir`, made `0700` if it is missing, and opened only if it is a
+/// directory and not a link.
+fn private_subdir(dir: BorrowedFd<'_>, name: &str) -> Result<OwnedFd> {
+    let c_name = std::ffi::CString::new(name)?;
+    // SAFETY: `dir` is a live descriptor and `c_name` is NUL-terminated.
+    if unsafe { libc::mkdirat(dir.as_raw_fd(), c_name.as_ptr(), 0o700) } != 0 {
+        let err = std::io::Error::last_os_error();
+        if err.kind() != std::io::ErrorKind::AlreadyExists {
+            return Err(err).with_context(|| format!("creating {name}"));
+        }
+    }
+    paths::open_dir_beneath(dir, Path::new(name))
+        .with_context(|| format!("{name} is not a directory of the daemon's"))
 }
 
 /// A daemon that has bound its socket and is ready to serve.
@@ -702,6 +745,7 @@ pub async fn start(options: DaemonOptions) -> Result<Running> {
     paths::ensure_private_dir(&state_dir)?;
     paths::ensure_private_dir(&state_dir.join("agents"))?;
     paths::ensure_private_dir(&paths::runtime_dir())?;
+    let state_root = open_state_root(&state_dir)?;
 
     let socket = paths::socket_path(&state_dir);
     // Only the lock holder may check the registration, replace the socket
@@ -791,6 +835,7 @@ pub async fn start(options: DaemonOptions) -> Result<Running> {
         started_at,
         _instance_lock: lock,
         operator_token: token,
+        state_root,
     }));
 
     // Before writing: a registration only half written is withdrawn too.

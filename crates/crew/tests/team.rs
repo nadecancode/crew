@@ -1215,6 +1215,51 @@ fn agents_can_be_paused_killed_and_restarted() {
 }
 
 #[test]
+fn an_agents_writable_tree_is_made_beneath_the_state_directory_and_never_through_a_link() {
+    use std::os::unix::fs::PermissionsExt;
+    let s = Session::new();
+    let team = s.team(
+        "layout",
+        vec![agent("a", "", &["--on-task=wait-message operator"])],
+        vec![task("t", "a", &[])],
+    );
+    s.run(&team);
+    s.wait("the agent to start", |snap| {
+        find_agent(snap, "a").pid.is_some()
+    });
+    let agent_dir = s.workspace.join(".crew/agents/a");
+    for dir in [agent_dir.join("rw"), agent_dir.join("rw/home")] {
+        let meta =
+            std::fs::symlink_metadata(&dir).unwrap_or_else(|e| panic!("{}: {e}", dir.display()));
+        assert!(meta.is_dir(), "{} is not a directory", dir.display());
+        assert_eq!(
+            meta.permissions().mode() & 0o777,
+            0o700,
+            "{}",
+            dir.display()
+        );
+    }
+
+    // The agent can write rw/, so it can put a link there. Its next start
+    // fails instead of making anything where the link points.
+    s.agent_cmd(&["kill", "a"]);
+    s.wait("the agent to stop", |snap| {
+        find_agent(snap, "a").status == AgentStatus::Stopped
+    });
+    let elsewhere = s.root().join("elsewhere");
+    std::fs::create_dir(&elsewhere).unwrap();
+    std::fs::remove_dir_all(agent_dir.join("rw")).unwrap();
+    std::os::unix::fs::symlink(&elsewhere, agent_dir.join("rw")).unwrap();
+    s.agent_cmd(&["restart", "a"]);
+    let failed = s.wait("the restart to fail", |snap| {
+        find_agent(snap, "a").status == AgentStatus::Failed
+    });
+    let error = find_agent(&failed, "a").error.clone().unwrap_or_default();
+    assert!(error.contains("rw is not a directory"), "{error}");
+    assert_eq!(std::fs::read_dir(&elsewhere).unwrap().count(), 0, "{error}");
+}
+
+#[test]
 fn a_crashed_agent_is_restarted_and_a_repeat_offender_fails_its_task() {
     let s = Session::new();
     let team = s.team(
