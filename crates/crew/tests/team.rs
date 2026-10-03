@@ -1264,6 +1264,59 @@ fn an_agent_can_launch_a_subagent_that_reports_back_and_is_retired() {
 }
 
 #[test]
+fn new_work_does_not_go_to_a_retired_subagent() {
+    let s = Session::new();
+    let team = s.team(
+        "retired",
+        vec![agent(
+            "lead",
+            "",
+            &[
+                "--on-task=spawn a quick job",
+                "--on-task=wait-message operator",
+                "--on-task=done lead finished",
+                "--on-subtask=done quick job done",
+            ],
+        )],
+        vec![task("build", "lead", &[])],
+    );
+    s.run(&team);
+    s.wait("the subagent to be retired", |snap| {
+        snap.agents
+            .iter()
+            .any(|a| a.id == "lead-s1" && a.status == AgentStatus::Done && a.pid.is_none())
+            && find_task(snap, "build").status == TaskStatus::Working
+    });
+    s.wait_for("the retirement to be logged", || {
+        s.has_event("agent.retired")
+    });
+
+    // The only other worker is busy: new unassigned work must wait for it,
+    // not go to the subagent whose process is gone.
+    let ws = s.workspace.to_string_lossy().into_owned();
+    s.ok(&[
+        "task",
+        "add",
+        "--id",
+        "extra",
+        "--description",
+        "more work",
+        "-C",
+        &ws,
+    ]);
+    std::thread::sleep(std::time::Duration::from_millis(1000));
+    let extra = find_task(&s.snapshot(), "extra").clone();
+    assert_eq!(extra.status, TaskStatus::Ready, "{extra:?}");
+    assert_eq!(extra.assigned_agent, None);
+
+    // Once the lead is free, it takes the work.
+    s.send("lead", "continue");
+    s.wait("the extra task to go to the lead", |snap| {
+        find_task(snap, "extra").assigned_agent.as_deref() == Some("lead")
+    });
+}
+
+#[test]
 fn the_orchestrator_designs_the_team_and_the_roster_is_saved_and_reused() {
     let s = Session::new();
     // No agents are declared: the (scripted) orchestrator decides who is needed.

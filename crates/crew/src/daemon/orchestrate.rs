@@ -39,6 +39,7 @@ impl Daemon {
     /// or agent state changes.
     pub(crate) async fn apply_plan(&self) {
         let _planning = self.plan_lock.lock().await;
+        let procs = self.procs().ok();
         let (tasks, agents) = {
             let model = self.model();
             if model.session.team.is_none() {
@@ -50,7 +51,13 @@ impl Daemon {
                 .map(|a| AgentView {
                     id: a.id.clone(),
                     orchestrator: a.orchestrator,
-                    runnable: !a.paused && !a.status.is_terminal(),
+                    // Its process must be running or starting: a retired
+                    // subagent, or a member not restarted after a daemon
+                    // restart, would never receive a task.
+                    runnable: !a.paused
+                        && !a.status.is_terminal()
+                        && (a.status == AgentStatus::Spawning
+                            || procs.as_ref().is_some_and(|p| p.is_alive(&a.id))),
                     // An agent parked at a usage limit is not stuck: it
                     // goes on when the limit lifts.
                     active: !a.orchestrator
