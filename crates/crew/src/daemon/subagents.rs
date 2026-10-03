@@ -12,7 +12,7 @@ use crew_core::{Agent, AgentStatus, MessageType, RuntimeKind, Task};
 use serde_json::json;
 
 use super::handlers::internal;
-use super::Daemon;
+use super::{Daemon, IdReservation};
 use crate::message_bus::NewMessage;
 use crate::persistence::NewEvent;
 
@@ -38,7 +38,7 @@ impl Daemon {
             )));
         }
         let (team, parent, worktrees, backend, id, command) = {
-            let model_guard = self.model();
+            let mut model_guard = self.model();
             let team = model_guard
                 .session
                 .team
@@ -74,7 +74,7 @@ to finish",
                             "invalid id '{id}' (lowercase letters, digits, - and _; at most 32 chars)"
                         )));
                     }
-                    if model_guard.agent(&id).is_some() {
+                    if model_guard.id_taken(&id) {
                         return Err(RpcError::conflict(format!("agent '{id}' already exists")));
                     }
                     id
@@ -83,7 +83,7 @@ to finish",
                     let stem: String = parent_id.chars().take(26).collect();
                     (1..)
                         .map(|n| format!("{stem}-s{n}"))
-                        .find(|candidate| model_guard.agent(candidate).is_none())
+                        .find(|candidate| !model_guard.id_taken(candidate))
                         .expect("an unused subagent id exists")
                 }
             };
@@ -92,6 +92,8 @@ to finish",
                 .get(parent_id)
                 .map(|l| l.settings.command.clone())
                 .unwrap_or_default();
+            // Taken before anything is awaited (see add_agent).
+            model_guard.reserved.insert(id.clone());
             (
                 team,
                 parent,
@@ -101,6 +103,7 @@ to finish",
                 command,
             )
         };
+        let _reserved = IdReservation::new(self, &id);
 
         let runtime = runtime.unwrap_or(parent.runtime);
         let spec = AgentSpec {

@@ -1283,6 +1283,60 @@ fn two_teams_loaded_at_once_do_not_merge() {
 }
 
 #[test]
+fn two_agents_added_at_once_under_one_id_are_one_agent() {
+    let s = Session::new();
+    let mut team = s.team("dup", vec![agent("a", "", &[])], vec![]);
+    team.defaults.command = scripted(&[]);
+    // Shared: in worktrees, git itself refuses the second worktree.
+    team.workspace.isolation = crew_core::config::Isolation::Shared;
+    team.workspace.init = false;
+    std::fs::create_dir_all(&s.workspace).unwrap();
+    s.run(&team);
+    // Two operator connections, ready before either asks, so the two adds
+    // reach the daemon together.
+    let info: Value = serde_json::from_str(
+        &std::fs::read_to_string(s.workspace.join(".crew/daemon.json")).unwrap(),
+    )
+    .unwrap();
+    let socket = std::path::PathBuf::from(info["socket"].as_str().unwrap());
+    let ready = std::sync::Arc::new(std::sync::Barrier::new(2));
+    let adds: Vec<_> = (0..2)
+        .map(|_| {
+            let (socket, ready) = (socket.clone(), ready.clone());
+            std::thread::spawn(move || {
+                let (mut client, _) = crew_core::client::Client::operator(&socket, "test").unwrap();
+                ready.wait();
+                client
+                    .call::<crew_core::Agent>(crew_core::rpc::Call::AgentAdd {
+                        spec: AgentSpec {
+                            id: "dup".into(),
+                            ..AgentSpec::default()
+                        },
+                    })
+                    .map_err(|e| e.to_string())
+            })
+        })
+        .collect();
+    let results: Vec<_> = adds.into_iter().map(|add| add.join().unwrap()).collect();
+
+    let refused: Vec<&String> = results.iter().filter_map(|r| r.as_ref().err()).collect();
+    assert_eq!(refused.len(), 1, "exactly one add succeeds: {results:?}");
+    assert!(
+        refused[0].contains("agent 'dup' already exists"),
+        "{}",
+        refused[0]
+    );
+    let snapshot = s.snapshot();
+    assert_eq!(snapshot.agents.iter().filter(|a| a.id == "dup").count(), 1);
+    let added = s
+        .events()
+        .into_iter()
+        .filter(|e| e.event_type == "agent.added")
+        .count();
+    assert_eq!(added, 1);
+}
+
+#[test]
 fn a_daemon_started_while_another_is_still_starting_is_refused() {
     // A daemon binds its socket before it registers in daemon.json, so two
     // starts close together can both miss each other's registration. Put a

@@ -5,7 +5,7 @@
 //! through the `MessageBus`, and pushes every change to subscribers. The
 //! dashboard and CLI are plain clients; closing them never affects agents.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, MutexGuard, RwLock};
 
@@ -176,6 +176,8 @@ pub(crate) struct Model {
     /// The stall currently observed: its fingerprint, when it was first
     /// seen, and whether it has been reported.
     pub stall: Option<(String, i64, bool)>,
+    /// Ids of agents being created: taken, though not on the team yet.
+    pub reserved: HashSet<String>,
 }
 
 impl Model {
@@ -193,6 +195,35 @@ impl Model {
 
     pub fn orchestrator(&self) -> Option<&Agent> {
         self.agents.iter().find(|a| a.orchestrator)
+    }
+
+    /// An agent has the id, or one is being created under it.
+    pub fn id_taken(&self, id: &str) -> bool {
+        self.agent(id).is_some() || self.reserved.contains(id)
+    }
+}
+
+/// An id in `Model::reserved`, given back when this is dropped: once the
+/// agent is on the team, or its creation failed. Create and drop it with
+/// the model unlocked.
+pub(crate) struct IdReservation {
+    daemon: Daemon,
+    id: String,
+}
+
+impl IdReservation {
+    /// For an id the caller has just put in `Model::reserved`.
+    pub(crate) fn new(daemon: &Daemon, id: &str) -> Self {
+        Self {
+            daemon: daemon.clone(),
+            id: id.to_string(),
+        }
+    }
+}
+
+impl Drop for IdReservation {
+    fn drop(&mut self) {
+        self.daemon.model().reserved.remove(&self.id);
     }
 }
 

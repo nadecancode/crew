@@ -11,7 +11,7 @@ use crew_core::{Agent, AgentStatus, RuntimeKind, TaskStatus, ORCHESTRATOR_ID};
 use serde_json::Value;
 
 use super::handlers::internal;
-use super::{AgentLocal, AgentRuntimeState, Daemon};
+use super::{AgentLocal, AgentRuntimeState, Daemon, IdReservation};
 use crate::agents::prompt::{self, TeamView};
 use crate::agents::{runtime_for, AgentSettings, LaunchContext, Signal};
 use crate::git;
@@ -171,29 +171,34 @@ impl Daemon {
     ) -> Result<Agent, RpcError> {
         validate_agent_spec(&spec).map_err(|e| RpcError::invalid(e.to_string()))?;
         let (team, worktrees, backend) = {
-            let model = self.model();
+            let mut model = self.model();
             let team = model
                 .session
                 .team
                 .clone()
                 .ok_or_else(|| RpcError::unavailable("no team is loaded"))?;
-            if model.agent(&spec.id).is_some() {
+            if model.id_taken(&spec.id) {
                 return Err(RpcError::conflict(format!(
                     "agent '{}' already exists",
                     spec.id
                 )));
             }
-            if model.agents.iter().filter(|a| !a.orchestrator).count() >= MAX_AGENTS {
+            let members = model.agents.iter().filter(|a| !a.orchestrator).count();
+            if members + model.reserved.len() >= MAX_AGENTS {
                 return Err(RpcError::invalid(format!(
                     "a team has at most {MAX_AGENTS} agents"
                 )));
             }
+            // Taken before anything is awaited, so a second add of the same
+            // id is refused rather than racing this one.
+            model.reserved.insert(spec.id.clone());
             (
                 team,
                 model.session.isolation == "worktree",
                 model.session.backend.clone(),
             )
         };
+        let _reserved = IdReservation::new(self, &spec.id);
         // A model whose usage window is used up cannot be started until it
         // resets: the work style's fallback takes its place, or the caller
         // hears what to take instead.
