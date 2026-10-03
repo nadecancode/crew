@@ -183,6 +183,26 @@ pub(crate) fn input_line(
     }
 }
 
+fn render_confirm(
+    buf: &mut Buffer,
+    area: Rect,
+    title: &str,
+    question: &str,
+    keys: &str,
+    theme: &Theme,
+) {
+    let rect = centered(area, (width(question) as u16 + 4).clamp(48, 110), 5);
+    if rect.width < 12 || rect.height < 5 {
+        return;
+    }
+    frame(buf, rect, title, theme);
+    let x = i32::from(rect.x) + 2;
+    let y = i32::from(rect.y) + 1;
+    let inner = usize::from(rect.width) - 4;
+    put_str(buf, rect, x, y, &fit(question, inner), theme.fg(theme.text));
+    put_str(buf, rect, x, y + 2, &fit(keys, inner), theme.fg(theme.dim));
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -218,24 +238,4 @@ mod tests {
             "{fastest:?}"
         );
     }
-}
-
-fn render_confirm(
-    buf: &mut Buffer,
-    area: Rect,
-    title: &str,
-    question: &str,
-    keys: &str,
-    theme: &Theme,
-) {
-    let rect = centered(area, (width(question) as u16 + 4).clamp(48, 110), 5);
-    if rect.width < 12 || rect.height < 5 {
-        return;
-    }
-    frame(buf, rect, title, theme);
-    let x = i32::from(rect.x) + 2;
-    let y = i32::from(rect.y) + 1;
-    let inner = usize::from(rect.width) - 4;
-    put_str(buf, rect, x, y, &fit(question, inner), theme.fg(theme.text));
-    put_str(buf, rect, x, y + 2, &fit(keys, inner), theme.fg(theme.dim));
 }
