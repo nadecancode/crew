@@ -458,6 +458,52 @@ fn a_task_starts_only_after_all_its_dependencies_are_done() {
 }
 
 #[test]
+fn a_task_blocked_before_it_started_cannot_be_completed() {
+    let s = Session::new();
+    let team = s.team(
+        "gate",
+        vec![
+            agent("a", "", &["--on-task=fail the API is down"]),
+            agent("b", "", &[]),
+            agent(
+                "c",
+                "",
+                &[
+                    "--on-task=status blocked on a flaky test",
+                    "--on-task=done anyway",
+                ],
+            ),
+        ],
+        vec![
+            task("dep", "a", &[]),
+            task("child", "b", &["dep"]),
+            task("own", "c", &[]),
+        ],
+    );
+    s.run(&team);
+    s.wait("the dependent to be blocked", |snap| {
+        find_task(snap, "child").status == TaskStatus::Blocked
+    });
+    // Its dependency failed: it never started, so it cannot be done.
+    let complete = json!({ "task_id": "child", "result": "done without dep" }).to_string();
+    let out = s.ctl("b", &["tool", "task_complete", &complete]);
+    assert!(!out.status.success(), "{}", stdout(&out));
+    assert!(
+        stderr(&out).contains("has not been started"),
+        "{}",
+        stderr(&out)
+    );
+    assert_eq!(
+        find_task(&s.snapshot(), "child").status,
+        TaskStatus::Blocked
+    );
+    // A task its agent blocked while working on it can still be finished.
+    s.wait("the self-blocked task to be done", |snap| {
+        find_task(snap, "own").status == TaskStatus::Done
+    });
+}
+
+#[test]
 fn a_failed_dependency_blocks_its_dependents_and_is_reported_as_a_stall() {
     let s = Session::new();
     let team = s.team(

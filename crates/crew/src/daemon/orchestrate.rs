@@ -711,6 +711,15 @@ call session_complete with the final report."
                     task.id
                 )))
             }
+            // Blocked before it started: a dependency failed, so it was
+            // never handed out.
+            TaskStatus::Blocked if task.started_at.is_none() => {
+                return Err(RpcError::conflict(format!(
+                    "task {} has not been started yet (it is blocked: {})",
+                    task.id,
+                    task.note.as_deref().unwrap_or("a dependency failed")
+                )))
+            }
             TaskStatus::Working | TaskStatus::Waiting | TaskStatus::Blocked => {}
         }
         let author = task
