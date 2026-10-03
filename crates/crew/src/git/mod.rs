@@ -393,7 +393,20 @@ pub fn commit_all(dir: &Path, agent: &str, message: &str) -> Result<CommitInfo> 
     with_identity(&mut cmd, agent);
     // `-m <message>` passes the message as a single argument. The project's
     // own commit hooks still run; a failing hook is reported back to the agent.
-    let output = output(cmd.args(["commit", "-q", "-m", message]))?;
+    let before = out(dir, &["rev-parse", "HEAD"]).ok();
+    let output = match output(cmd.args(["commit", "-q", "-m", message])) {
+        Ok(output) => output,
+        Err(e) if e.kind() == std::io::ErrorKind::TimedOut => {
+            clear_stale_index_lock(dir);
+            if out(dir, &["rev-parse", "HEAD"]).ok() != before {
+                bail!("git commit timed out ({e}) after the commit was made; check the history");
+            }
+            bail!(
+                "git commit timed out ({e}); nothing was committed, the changes are still staged"
+            );
+        }
+        Err(e) => return Err(e.into()),
+    };
     if !output.status.success() {
         bail!(
             "git commit failed: {}",
@@ -461,6 +474,47 @@ fn dirty(dir: &Path) -> Result<bool> {
     Ok(!out(dir, &["status", "--porcelain"])?.is_empty())
 }
 
+/// Everything git started is dead once it timed out, so an index lock left
+/// behind is stale.
+fn clear_stale_index_lock(dir: &Path) {
+    if let Ok(lock) = out(dir, &["rev-parse", "--git-path", "index.lock"]) {
+        let _ = std::fs::remove_file(dir.join(lock));
+    }
+}
+
+/// `output`, but a timeout is recovered from: the killed operation may have
+/// left a stale index lock, a half-applied merge or staged files. The worktree
+/// was clean before (callers checked), so restoring HEAD's state loses nothing.
+/// If HEAD moved before the kill the operation did complete; that is reported,
+/// not undone.
+fn output_recovering(
+    dir: &Path,
+    cmd: &mut Command,
+    operation: &str,
+    abort: &[&str],
+) -> Result<Output> {
+    let before = out(dir, &["rev-parse", "HEAD"])?;
+    let err = match output(cmd) {
+        Ok(output) => return Ok(output),
+        Err(e) if e.kind() == std::io::ErrorKind::TimedOut => e,
+        Err(e) => return Err(e.into()),
+    };
+    clear_stale_index_lock(dir);
+    let _ = run(dir, abort);
+    let after = out(dir, &["rev-parse", "HEAD"]).unwrap_or_default();
+    if after != before {
+        bail!(
+            "git {operation} timed out ({err}) after HEAD moved from {before} to {after}; the \
+result was kept, check the history before retrying"
+        );
+    }
+    let _ = run(dir, &["reset", "-q", "--hard", "HEAD"]);
+    if dirty(dir).unwrap_or(true) {
+        bail!("git {operation} timed out ({err}) and the worktree could not be restored; check git status");
+    }
+    bail!("git {operation} timed out ({err}); the worktree was restored, retry later")
+}
+
 /// Shared tail of cherry-pick and merge: on failure collect the conflicted
 /// files, abort the operation so the worktree is left exactly as it was, and
 /// report.
@@ -505,7 +559,12 @@ pub fn cherry_pick(dir: &Path, agent: &str, commit: &str) -> Result<GitOutcome> 
     .map_err(|_| anyhow!("unknown commit '{commit}'"))?;
     let mut cmd = git(dir);
     with_identity(&mut cmd, agent);
-    let output = output(cmd.args(["cherry-pick", "-x", commit]))?;
+    let output = output_recovering(
+        dir,
+        cmd.args(["cherry-pick", "-x", commit]),
+        "cherry-pick",
+        &["cherry-pick", "--abort"],
+    )?;
     finish(dir, "cherry-pick", &["cherry-pick", "--abort"], output)
 }
 
@@ -524,7 +583,12 @@ pub fn merge(dir: &Path, agent: &str, rev: &str) -> Result<GitOutcome> {
     let mut cmd = git(dir);
     with_identity(&mut cmd, agent);
     let message = format!("Merge {rev}");
-    let output = output(cmd.args(["merge", "--no-ff", "--no-edit", "-m", &message, rev]))?;
+    let output = output_recovering(
+        dir,
+        cmd.args(["merge", "--no-ff", "--no-edit", "-m", &message, rev]),
+        "merge",
+        &["merge", "--abort"],
+    )?;
     finish(dir, "merge", &["merge", "--abort"], output)
 }
 
@@ -675,6 +739,13 @@ mod tests {
         assert!(has_commits(&clean));
     }
 
+    fn has_commit_with_subject(dir: &Path, subject: &str) -> bool {
+        out(dir, &["log", "--format=%s"])
+            .unwrap()
+            .lines()
+            .any(|l| l == subject)
+    }
+
     #[test]
     fn a_hung_git_hook_times_out_and_is_killed() {
         use std::os::unix::fs::PermissionsExt;
@@ -694,10 +765,66 @@ mod tests {
         let started = std::time::Instant::now();
         let err = commit_all(&r.root, "a", "work").unwrap_err();
         assert!(err.to_string().contains("did not finish"), "{err:#}");
+        assert!(err.to_string().contains("nothing was committed"), "{err:#}");
+        assert!(!has_commit_with_subject(&r.root, "work"));
         assert!(started.elapsed() < std::time::Duration::from_secs(30));
         // The hook's children died with it.
         std::thread::sleep(std::time::Duration::from_secs(4));
         assert!(!marker.exists(), "the hook's child outlived the timeout");
+    }
+
+    /// `main` clean, `topic` one commit ahead; `hook` hangs for 60s.
+    fn repo_with_topic_and_hanging_hook(hook: &str) -> Repo {
+        use std::os::unix::fs::PermissionsExt;
+        let r = repo();
+        out(&r.root, &["checkout", "-q", "-b", "topic"]).unwrap();
+        write(&r.root, "topic.txt", "t\n");
+        commit_all(&r.root, "t", "topic work").unwrap();
+        out(&r.root, &["checkout", "-q", "main"]).unwrap();
+        let path = r.root.join(".git/hooks").join(hook);
+        std::fs::write(&path, "#!/bin/sh\nexec sleep 60\n").unwrap();
+        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o755)).unwrap();
+        r
+    }
+
+    fn assert_restored_and_retryable(r: &Repo, head: &str, hook: &str) {
+        assert_eq!(out(&r.root, &["rev-parse", "HEAD"]).unwrap(), head);
+        assert_eq!(out(&r.root, &["status", "--porcelain"]).unwrap(), "");
+        assert!(!r.root.join("topic.txt").exists());
+        // With the hook gone the same operation goes through.
+        std::fs::remove_file(r.root.join(".git/hooks").join(hook)).unwrap();
+    }
+
+    #[test]
+    fn a_merge_that_times_out_leaves_the_worktree_as_it_was() {
+        let r = repo_with_topic_and_hanging_hook("pre-merge-commit");
+        let head = out(&r.root, &["rev-parse", "HEAD"]).unwrap();
+        let err = merge(&r.root, "a", "topic").unwrap_err();
+        assert!(err.to_string().contains("worktree was restored"), "{err:#}");
+        assert_restored_and_retryable(&r, &head, "pre-merge-commit");
+        assert!(merge(&r.root, "a", "topic").unwrap().ok);
+        assert!(r.root.join("topic.txt").exists());
+    }
+
+    #[test]
+    fn a_cherry_pick_that_times_out_leaves_the_worktree_as_it_was() {
+        let r = repo_with_topic_and_hanging_hook("prepare-commit-msg");
+        let head = out(&r.root, &["rev-parse", "HEAD"]).unwrap();
+        let err = cherry_pick(&r.root, "a", "topic").unwrap_err();
+        assert!(err.to_string().contains("worktree was restored"), "{err:#}");
+        assert_restored_and_retryable(&r, &head, "prepare-commit-msg");
+        assert!(cherry_pick(&r.root, "a", "topic").unwrap().ok);
+    }
+
+    #[test]
+    fn a_timeout_after_head_moved_is_reported_not_undone() {
+        let r = repo_with_topic_and_hanging_hook("post-merge");
+        let before = out(&r.root, &["rev-parse", "HEAD"]).unwrap();
+        let err = merge(&r.root, "a", "topic").unwrap_err();
+        let after = out(&r.root, &["rev-parse", "HEAD"]).unwrap();
+        assert_ne!(before, after, "the merge itself had completed");
+        assert!(err.to_string().contains("HEAD moved"), "{err:#}");
+        assert!(r.root.join("topic.txt").exists(), "the commit was kept");
     }
 
     #[test]
