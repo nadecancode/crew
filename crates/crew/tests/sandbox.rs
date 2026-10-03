@@ -939,3 +939,203 @@ fn what_a_sandbox_leaves_out_is_reported_once_per_agent_start() {
     assert_eq!(about_it.len(), 1, "{about_it:#?}");
     s.stop();
 }
+
+#[test]
+fn agent_spawn_does_not_run_branch_hooks_or_filters_unsandboxed() {
+    if require_sandbox().is_none() {
+        return;
+    }
+    let s = Session::new();
+    let marks = tempfile::tempdir_in(s.root()).unwrap();
+    let hook_mark = marks.path().join("post-checkout");
+    let filter_mark = marks.path().join("smudge");
+    std::fs::create_dir_all(s.workspace.join(".githooks")).unwrap();
+    std::fs::write(
+        s.workspace.join(".githooks/post-checkout"),
+        format!("#!/bin/sh\ntouch '{}'\n", hook_mark.display()),
+    )
+    .unwrap();
+    executable(&s, ".githooks/post-checkout");
+    workspace_repo(
+        &s,
+        &[
+            (".gitattributes", "*.txt filter=mark\n"),
+            ("data.txt", "data\n"),
+        ],
+    );
+    repo_config(&s, "core.hooksPath", ".githooks");
+    let smudge = format!("sh -c \"touch '{}'; cat\"", filter_mark.display());
+    repo_config(&s, "filter.mark.smudge", &smudge);
+    // Positive control: run on the host, both write their marks.
+    let ran = Command::new("sh")
+        .args([
+            "-c",
+            &format!(
+                "{} </dev/null >/dev/null; '{}'",
+                smudge,
+                s.workspace.join(".githooks/post-checkout").display()
+            ),
+        ])
+        .status()
+        .unwrap()
+        .success();
+    assert!(ran && hook_mark.exists() && filter_mark.exists());
+    std::fs::remove_file(&hook_mark).unwrap();
+    std::fs::remove_file(&filter_mark).unwrap();
+
+    s.run(&sandboxed(
+        &s,
+        vec![agent("a", "", &["--on-start=sleep 600000"])],
+        vec![],
+    ));
+    s.wait("a to start", |snap| find_agent(snap, "a").pid.is_some());
+    let worktree = s.workspace.join(".crew/worktrees/a");
+    assert_eq!(
+        std::fs::read_to_string(worktree.join("data.txt")).unwrap(),
+        "data\n"
+    );
+    assert!(!hook_mark.exists(), "post-checkout ran on the host");
+    assert!(!filter_mark.exists(), "the smudge filter ran on the host");
+    s.stop();
+}
+
+#[test]
+fn integrate_hooks_have_no_authority() {
+    if require_sandbox().is_none() {
+        return;
+    }
+    let Some(socat) = require_tool("socat") else {
+        return;
+    };
+    let s = Session::new();
+    let marks = tempfile::tempdir_in(s.root()).unwrap();
+    let host_mark = marks.path().join("from-the-hook");
+    let tcp = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    let port = tcp.local_addr().unwrap().port();
+    std::thread::spawn(move || {
+        for mut stream in tcp.incoming().flatten() {
+            let _ = std::io::Write::write_all(&mut stream, b"pong\n");
+        }
+    });
+    let ws = s.workspace.clone();
+    std::fs::create_dir_all(&ws).unwrap();
+    let ws_c = ws.canonicalize().unwrap();
+    let identity = ws_c.join(".crew/agents/a/identity.json");
+    // The hook writes what it reached into the integration worktree.
+    let checks = [
+        reach("host-file", &format!("touch '{}'", host_mark.display())),
+        reach("identity-file", &format!("cat '{}'", identity.display())),
+        reach("identity-env", "test -n \"$CREW_IDENTITY\""),
+        // An agent call as `a`, its identity named outright (operator
+        // commands are refused under CREW_IDENTITY anyway, since G1).
+        reach(
+            "daemon",
+            &format!("CREW_IDENTITY='{}' '{CREW}' ctl inbox", identity.display()),
+        ),
+        reach(
+            "network",
+            &format!(
+                "'{}' -t2 -T2 - TCP:127.0.0.1:{port} </dev/null | grep -q pong",
+                socat.display()
+            ),
+        ),
+    ]
+    .concat();
+    std::fs::create_dir_all(ws.join(".githooks")).unwrap();
+    std::fs::write(
+        ws.join(".githooks/post-merge"),
+        format!("#!/bin/sh\n{{\n{checks}\n}} > hook-report 2>&1\n"),
+    )
+    .unwrap();
+    executable(&s, ".githooks/post-merge");
+    workspace_repo(&s, &[]);
+    repo_config(&s, "core.hooksPath", ".githooks");
+    let team = sandboxed(
+        &s,
+        vec![agent(
+            "a",
+            "",
+            &[
+                "--on-task=write a.txt work",
+                "--on-task=commit work",
+                "--on-task=done ok",
+            ],
+        )],
+        vec![task("t", "a", &[])],
+    );
+    s.run(&team);
+    s.wait("the task", |snap| {
+        find_task(snap, "t").status == TaskStatus::Done
+    });
+    // Positive controls: every target is reachable from outside.
+    let control = Command::new("sh")
+        .args([
+            "-c",
+            &checks.replace(
+                &host_mark.display().to_string(),
+                &marks.path().join("control").display().to_string(),
+            ),
+        ])
+        .env("CREW_IDENTITY", &identity)
+        .output()
+        .unwrap();
+    let control = String::from_utf8_lossy(&control.stdout).into_owned();
+    assert_eq!(
+        reached(&control),
+        [
+            "host-file",
+            "identity-file",
+            "identity-env",
+            "daemon",
+            "network"
+        ],
+        "{control}"
+    );
+
+    let out = s.crew(&["integrate", "-C", &ws.display().to_string()]);
+    assert!(out.status.success(), "{}", common::stderr(&out));
+    let report_file = ws.join(".crew/worktrees/_integration/hook-report");
+    let report = std::fs::read_to_string(&report_file).expect("the post-merge hook ran");
+    assert_eq!(reached(&report), Vec::<&str>::new(), "{report}");
+    assert!(!host_mark.exists());
+    s.stop();
+}
+
+#[test]
+fn git_status_ignores_agent_fsmonitor() {
+    if require_sandbox().is_none() {
+        return;
+    }
+    let s = Session::new();
+    workspace_repo(&s, &[]);
+    let marks = tempfile::tempdir_in(s.root()).unwrap();
+    let mark = marks.path().join("fsmonitor-ran");
+    let ws = s.workspace.canonicalize().unwrap();
+    let admin = ws.join(".git/worktrees/a");
+    let script = format!(
+        "{}{}",
+        reach(
+            "config-worktree",
+            &format!("echo '[core]' > '{}/config.worktree'", admin.display())
+        ),
+        reach(
+            "git-config",
+            &format!(
+                "git config --worktree core.fsmonitor \"touch '{}'\"",
+                mark.display()
+            )
+        ),
+    );
+    s.run(&sandboxed(&s, vec![probing(&s, "a", &script)], vec![]));
+    let report = report(&s, "a");
+    assert_eq!(reached(&report), Vec::<&str>::new(), "{report}");
+    assert_eq!(
+        std::fs::read_to_string(admin.join("config.worktree")).unwrap(),
+        ""
+    );
+    for (tool, args) in [("git_status", "{}"), ("git_commit", r#"{"message":"m"}"#)] {
+        let _ = s.ctl("a", &["tool", tool, args]);
+    }
+    assert!(!mark.exists(), "fsmonitor ran on the host");
+    s.stop();
+}
