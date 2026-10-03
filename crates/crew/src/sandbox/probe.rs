@@ -52,7 +52,7 @@ fn unavailable(cause: impl Into<String>, fix: impl Into<String>) -> Unavailable 
 }
 
 const FIX_LANDLOCK: &str = "run a newer kernel (Linux 7.1 or newer, with landlock in the \
-kernel's lsm= list), or set `sandbox: off` to run agents unsandboxed";
+kernel's lsm= list), or set `workspace.sandbox.mode: off` to run agents unsandboxed";
 const FIX_BWRAP: &str =
     "install bubblewrap 0.10 or newer (starting crew from its nix-shell provides it)";
 const FIX_USERNS: &str = "enable unprivileged user namespaces (sysctl \
@@ -307,12 +307,18 @@ mod tests {
             );
             assert!(error.cause.contains("need ABI 9"), "{error}");
             assert!(error.fix.contains("newer kernel"), "{error}");
-            assert!(error.fix.contains("`sandbox: off`"), "{error}");
+            assert!(
+                error.fix.contains("`workspace.sandbox.mode: off`"),
+                "{error}"
+            );
         }
         let error =
             check_landlock(Err(std::io::Error::from_raw_os_error(libc::EOPNOTSUPP))).unwrap_err();
         assert!(error.cause.contains("no Landlock"), "{error}");
-        assert!(error.fix.contains("`sandbox: off`"), "{error}");
+        assert!(
+            error.fix.contains("`workspace.sandbox.mode: off`"),
+            "{error}"
+        );
         assert_eq!(check_landlock(Ok(9)).unwrap(), 9);
         assert_eq!(check_landlock(Ok(10)).unwrap(), 10);
     }

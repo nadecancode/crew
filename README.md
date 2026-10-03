@@ -99,8 +99,8 @@ the command.
 - **bubblewrap** 0.10+ (`bwrap` on `PATH`), unprivileged user namespaces and
   Linux 7.1+ with Landlock enabled (in the kernel's `lsm=` list; Landlock
   ABI 9), for agent sandboxes (not yet on by default). On an older kernel
-  `sandbox: required` refuses to start; `sandbox: off` runs agents
-  unsandboxed. Each sandboxed agent runs in its own mount, PID and IPC
+  `workspace.sandbox.mode: required` refuses to start; `mode: off` runs
+  agents unsandboxed. Each sandboxed agent runs in its own mount, PID and IPC
   namespace behind `crew sandbox-exec`, which drops inherited descriptors,
   refuses terminal-injection ioctls and, with Landlock, confines signals and
   refuses every socket made outside the sandbox but crew's own. The sandbox
