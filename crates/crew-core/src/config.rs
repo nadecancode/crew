@@ -23,7 +23,10 @@ pub const MAX_INSTRUCTIONS_BYTES: usize = 16 * 1024;
 /// Reserve signed millisecond deadline headroom for the base timestamp.
 const MAX_TIMER_SECS: u64 = i64::MAX as u64 / 2000;
 
-fn validate_timer(key: &str, seconds: u64) -> Result<()> {
+/// A number of seconds for a timer named `key`: at least 1, and small
+/// enough to count in milliseconds. Team files and the daemon's own calls
+/// (a task created at run time) are held to the same rule.
+pub fn validate_timer(key: &str, seconds: u64) -> Result<()> {
     if seconds == 0 || seconds > MAX_TIMER_SECS {
         bail!("{key} must be between 1 and {MAX_TIMER_SECS}");
     }

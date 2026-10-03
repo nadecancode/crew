@@ -2,7 +2,7 @@
 
 use std::collections::HashMap;
 
-use crew_core::config::{find_cycle, TaskSpec};
+use crew_core::config::{find_cycle, validate_timer, TaskSpec};
 use crew_core::util::{is_valid_id, one_line, truncate_chars};
 use crew_core::{Task, TaskStatus};
 
@@ -49,6 +49,11 @@ pub fn validate_new(existing: &[Task], spec: &TaskSpec) -> Result<(), String> {
         return Err(format!("task '{}' already exists", spec.id));
     }
     check_reviewer(spec)?;
+    // As in a team file (M7).
+    if let Some(timeout) = spec.timeout_secs {
+        validate_timer(&format!("task '{}'.timeout_secs", spec.id), timeout)
+            .map_err(|e| e.to_string())?;
+    }
     for dep in &spec.depends_on {
         if dep == &spec.id {
             return Err(format!("task '{}' cannot depend on itself", spec.id));
@@ -123,6 +128,19 @@ pub fn done_counts(tasks: &[Task]) -> (usize, usize) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_new_task_needs_a_timeout_a_team_file_would_accept() {
+        let with = |timeout| TaskSpec {
+            timeout_secs: Some(timeout),
+            ..spec("t", &[])
+        };
+        for bad in [0, u64::MAX] {
+            let error = validate_new(&[], &with(bad)).expect_err("accepted a bad timeout");
+            assert!(error.contains("timeout_secs"), "{error}");
+        }
+        assert!(validate_new(&[], &with(3600)).is_ok());
+    }
 
     fn spec(id: &str, deps: &[&str]) -> TaskSpec {
         TaskSpec {
