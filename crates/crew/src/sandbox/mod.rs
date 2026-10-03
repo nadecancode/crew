@@ -10,6 +10,7 @@
 
 pub mod landlock;
 pub mod pin;
+pub mod profile;
 pub mod scan;
 pub mod seccomp;
 pub mod shim;

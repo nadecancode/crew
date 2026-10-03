@@ -26,6 +26,12 @@ pub struct Findings {
 /// Walk `root` without following symlinks (crossing mount points, as a
 /// recursive bind does).
 pub fn scan(root: &Path) -> io::Result<Findings> {
+    scan_excluding(root, &[])
+}
+
+/// Like [`scan`], skipping the subtrees in `excluded` (paths another mount
+/// will cover).
+pub fn scan_excluding(root: &Path, excluded: &[&Path]) -> io::Result<Findings> {
     let mut findings = Findings::default();
     let meta = std::fs::symlink_metadata(root)?;
     if meta.file_type().is_socket() {
@@ -53,12 +59,12 @@ pub fn scan(root: &Path) -> io::Result<Findings> {
             let kind = entry.file_type()?;
             if kind.is_socket() {
                 findings.sockets.push(entry.path());
-            } else if kind.is_dir() {
+            } else if kind.is_dir() && !excluded.contains(&entry.path().as_path()) {
                 pending.push(entry.path());
             }
         }
     }
-    for point in mount_points_under(root, &[]) {
+    for point in mount_points_under(root, excluded) {
         let socket = std::fs::symlink_metadata(&point).is_ok_and(|m| m.file_type().is_socket());
         if socket && !findings.sockets.contains(&point) {
             findings.sockets.push(point);
