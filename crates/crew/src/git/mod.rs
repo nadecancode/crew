@@ -268,7 +268,8 @@ pub fn init_repo(dir: &Path) -> Result<()> {
             dir.display()
         );
     }
-    unstage_state_dir(dir)?;
+    // The main repository: the hardened invocation, not an agent's.
+    out_h(dir, &["reset", "-q", "--", ".crew"])?;
     let mut cmd = git_h(dir);
     with_identity(&mut cmd, "crew");
     let output = output(cmd.args(["commit", "-q", "--allow-empty", "-m", "Initial commit"]))?;
@@ -1253,6 +1254,35 @@ mod tests {
         // The administrative directory must hold the empty per-worktree config
         // the sandbox binds read-only.
         assert!(admin.join("config.worktree").is_file());
+    }
+
+    #[test]
+    fn init_repo_runs_no_configured_command_when_it_unstages_the_state_directory() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path().join("repo");
+        std::fs::create_dir_all(root.join(".crew")).unwrap();
+        out(&root, &["init", "-q", "-b", "main"]).unwrap();
+        write(&root.join(".crew"), "crew.db", "db");
+        out(&root, &["add", "-f", ".crew/crew.db"]).unwrap();
+        let marker = dir.path().join("monitor-ran");
+        let monitor = dir.path().join("monitor.sh");
+        std::fs::write(&monitor, format!("#!/bin/sh\ntouch {}\n", marker.display())).unwrap();
+        std::fs::set_permissions(&monitor, std::fs::Permissions::from_mode(0o755)).unwrap();
+        out(
+            &root,
+            &["config", "core.fsmonitor", &monitor.to_string_lossy()],
+        )
+        .unwrap();
+        // Positive control: the plain invocation runs it.
+        out(&root, &["status", "--porcelain"]).unwrap();
+        assert!(marker.exists(), "the control did not run the monitor");
+        std::fs::remove_file(&marker).unwrap();
+        init_repo(&root).unwrap();
+        assert!(
+            !marker.exists(),
+            "a configured command ran during init_repo"
+        );
     }
 
     #[test]
