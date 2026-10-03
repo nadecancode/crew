@@ -32,6 +32,14 @@ impl Who {
             Who::Agent(id) => id,
         }
     }
+
+    /// Who this is, for messages: "the operator" or "agent '<id>'".
+    pub fn label(&self) -> String {
+        match self {
+            Who::Operator => "the operator".to_string(),
+            Who::Agent(id) => format!("agent '{id}'"),
+        }
+    }
 }
 
 pub(crate) struct Conn {

@@ -100,6 +100,16 @@ impl Daemon {
             return Ok(json!({ "pong": true }));
         }
         if let Call::Hello(hello) = call {
+            // A connection is who it first said it was: an agent's code must
+            // not turn its own connection into the operator's (B3a). A failed
+            // first hello sets nothing, so it can be retried.
+            if let Some(who) = &conn.who {
+                return Err(RpcError::forbidden(format!(
+                    "this connection is already authenticated as {}; open a new connection to \
+change identity",
+                    who.label()
+                )));
+            }
             // Exactly this version: an older client misreads newer frames as
             // surely as a newer one. The code lets clients say "restart".
             if hello.protocol != PROTOCOL_VERSION {
