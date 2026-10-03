@@ -27,6 +27,8 @@ use crate::app::{Command, Reply};
 const SNAPSHOT_MESSAGES: usize = 300;
 const SNAPSHOT_EVENTS: usize = 400;
 const REQUEST_TIMEOUT: Duration = Duration::from_secs(3);
+/// Lifecycle actions may wait for process exit, probes and a new session.
+const ACTION_TIMEOUT: Duration = Duration::from_secs(30);
 /// Stopping a team waits for each agent to exit.
 const STOP_TIMEOUT: Duration = Duration::from_secs(90);
 /// Listing the models waits for pi to list its own.
@@ -37,6 +39,18 @@ const RECONNECT_DELAY: Duration = Duration::from_secs(1);
 const OUTPUT_LINES: usize = 300;
 /// Entries of the session transcript the inspector asks for.
 const TRANSCRIPT_ENTRIES: usize = 400;
+
+fn request_timeout(call: &Call) -> Duration {
+    match call {
+        Call::AgentKill { .. }
+        | Call::AgentRestart { .. }
+        | Call::AgentResume { .. }
+        | Call::AgentSetModel { .. } => ACTION_TIMEOUT,
+        Call::Resume { .. } | Call::Shutdown { .. } => STOP_TIMEOUT,
+        Call::ModelsList => MODELS_TIMEOUT,
+        _ => REQUEST_TIMEOUT,
+    }
+}
 
 pub enum UiEvent {
     Input(term::Event),
@@ -123,6 +137,7 @@ pub fn spawn_subscriber(socket: PathBuf, tx: Sender<UiEvent>, stop: Arc<AtomicBo
 #[derive(Clone)]
 pub struct Requests {
     main: Sender<Command>,
+    slow: Sender<Command>,
     keys: Sender<Command>,
 }
 
@@ -130,14 +145,27 @@ impl Requests {
     pub fn send(&self, command: Command) -> Result<(), mpsc::SendError<Command>> {
         match command {
             Command::Keys { .. } => self.keys.send(command),
+            Command::Kill(_)
+            | Command::Restart(_)
+            | Command::Resume(_)
+            | Command::ResumeLimited { .. }
+            | Command::SetModel { .. }
+            | Command::StopTeam
+            | Command::FetchModels => self.slow.send(command),
             other => self.main.send(other),
         }
     }
 }
 
 pub fn spawn_requester(socket: PathBuf, tx: Sender<UiEvent>) -> Requests {
+    let main = spawn_commands(socket.clone(), tx.clone(), "crew-tui-req");
+    let slow = spawn_commands(socket.clone(), tx.clone(), "crew-tui-slow");
+    let keys = spawn_typist(socket, tx);
+    Requests { main, slow, keys }
+}
+
+fn spawn_commands(socket: PathBuf, tx: Sender<UiEvent>, name: &str) -> Sender<Command> {
     let (cmd_tx, cmd_rx): (Sender<Command>, Receiver<Command>) = mpsc::channel();
-    let keys = spawn_typist(socket.clone(), tx.clone());
     let run = move || {
         let mut requester = Requester {
             socket,
@@ -152,10 +180,8 @@ pub fn spawn_requester(socket: PathBuf, tx: Sender<UiEvent>) -> Requests {
             }
         }
     };
-    let _ = thread::Builder::new()
-        .name("crew-tui-req".into())
-        .spawn(run);
-    Requests { main: cmd_tx, keys }
+    let _ = thread::Builder::new().name(name.into()).spawn(run);
+    cmd_tx
 }
 
 /// Keys typed into an agent's terminal go over a connection of their own:
@@ -219,13 +245,14 @@ impl Requester {
     fn call<T: serde::de::DeserializeOwned>(&mut self, call: Call) -> Result<T, String> {
         if self.client.is_none() {
             let (client, _) = Client::operator(&self.socket, "tui").map_err(|e| e.to_string())?;
-            client
-                .set_timeout(Some(REQUEST_TIMEOUT))
-                .map_err(|e| e.to_string())?;
             self.client = Some(client);
         }
         let client = self.client.as_mut().expect("client was just connected");
-        match client.call::<T>(call) {
+        let timeout = request_timeout(&call);
+        match client
+            .set_timeout(Some(timeout))
+            .and_then(|()| client.call::<T>(call))
+        {
             Ok(value) => Ok(value),
             Err(ClientError::Rpc(error)) => Err(error.message),
             Err(other) => {
@@ -459,6 +486,14 @@ mod tests {
         }
 
         fn start_with_protocol(path: &Path, protocol: u32) -> Self {
+            Self::start_with_delay(path, protocol, None)
+        }
+
+        fn start_with_delay(
+            path: &Path,
+            protocol: u32,
+            delay: Option<(&'static str, Duration)>,
+        ) -> Self {
             let _ = std::fs::remove_file(path);
             let listener = UnixListener::bind(path).unwrap();
             listener.set_nonblocking(true).unwrap();
@@ -485,7 +520,9 @@ mod tests {
                                 .unwrap()
                                 .push(stream.try_clone().unwrap());
                             let (subscribers, calls) = (subscribers.clone(), calls.clone());
-                            thread::spawn(move || serve(stream, subscribers, calls, protocol));
+                            thread::spawn(move || {
+                                serve(stream, subscribers, calls, protocol, delay)
+                            });
                         }
                         Err(_) => thread::sleep(Duration::from_millis(5)),
                     }
@@ -522,12 +559,18 @@ mod tests {
         subscribers: Arc<Mutex<Vec<UnixStream>>>,
         calls: Arc<Mutex<Vec<Call>>>,
         protocol: u32,
+        delay: Option<(&'static str, Duration)>,
     ) {
         let mut writer = stream.try_clone().unwrap();
         for line in BufReader::new(stream).lines() {
             let Ok(line) = line else { return };
             let request: Request = serde_json::from_str(&line).unwrap();
             calls.lock().unwrap().push(request.call.clone());
+            if let Some((method, duration)) = delay {
+                if request.call.method() == method {
+                    thread::sleep(duration);
+                }
+            }
             let frame = match &request.call {
                 Call::Hello(_) => ServerFrame::ok(
                     request.id,
@@ -556,6 +599,7 @@ mod tests {
                     request.id,
                     json!({ "text": format!("screen of {id}"), "alive": true }),
                 ),
+                Call::ModelsList => ServerFrame::ok(request.id, json!({"models": []})),
                 Call::AgentKill { id } => ServerFrame::err(
                     request.id,
                     RpcError::not_found(format!("no agent named {id}")),
@@ -605,6 +649,57 @@ mod tests {
         );
         stop.store(true, Ordering::Relaxed);
         daemon.stop();
+    }
+
+    #[test]
+    fn slow_lifecycle_actions_do_not_hit_the_fast_read_timeout() {
+        let temp = tempfile::tempdir().unwrap();
+        let path = temp.path().join("daemon.sock");
+        let daemon = FakeDaemon::start_with_delay(
+            &path,
+            PROTOCOL_VERSION,
+            Some(("agent_restart", Duration::from_millis(3200))),
+        );
+        let mut requester = Requester {
+            socket: path,
+            client: None,
+        };
+        let reply = requester.run(Command::Restart("worker".into())).unwrap();
+        daemon.stop();
+        assert!(
+            matches!(reply, Reply::Action { result: Ok(()), .. }),
+            "completed restart must not be reported as timed out"
+        );
+    }
+
+    #[test]
+    fn slow_model_listing_does_not_block_screen_requests() {
+        let temp = tempfile::tempdir().unwrap();
+        let path = temp.path().join("daemon.sock");
+        let daemon = FakeDaemon::start_with_delay(
+            &path,
+            PROTOCOL_VERSION,
+            Some(("models_list", Duration::from_secs(1))),
+        );
+        let (tx, rx) = mpsc::channel();
+        let requests = spawn_requester(path, tx);
+        requests.send(Command::FetchModels).unwrap();
+        let deadline = Instant::now() + Duration::from_secs(2);
+        while !daemon.calls().contains(&Call::ModelsList) {
+            assert!(Instant::now() < deadline);
+            thread::sleep(Duration::from_millis(5));
+        }
+        requests
+            .send(Command::FetchOutput {
+                id: "worker".into(),
+            })
+            .unwrap();
+        let event = rx.recv_timeout(Duration::from_millis(500));
+        daemon.stop();
+        assert!(
+            matches!(event, Ok(UiEvent::Reply(reply)) if matches!(*reply, Reply::Output { result: Ok(_), .. })),
+            "screen requests must finish while models are still loading"
+        );
     }
 
     /// Wait for the first event matching `want`, skipping others.
@@ -829,9 +924,9 @@ mod tests {
             ("claude-5", "need a migration")
         );
         assert_eq!(sent.kind, MessageType::Message);
-        // Everything went over one operator connection; quitting sends nothing.
+        // Fast and lifecycle calls each reuse one connection; quitting sends nothing.
         let hellos = calls.iter().filter(|c| matches!(c, Call::Hello(_))).count();
-        assert_eq!(hellos, 1);
+        assert_eq!(hellos, 2);
         assert!(!calls.iter().any(|c| matches!(c, Call::Shutdown { .. })));
 
         // An answer names its question.
