@@ -137,10 +137,10 @@ fn event_loop(
                 let size = terminal.size().unwrap_or_default();
                 let area = Rect::new(0, 0, size.width, size.height);
                 let page = page_rows(app, if area.height == 0 { 24 } else { area.height });
-                handle(app, event, requests, page, area);
+                handle(app, event, requests, page, area)?;
                 // Drain whatever else is queued so a burst costs one redraw.
                 while let Ok(event) = rx.try_recv() {
-                    handle(app, event, requests, page, area);
+                    handle(app, event, requests, page, area)?;
                 }
             }
             Err(RecvTimeoutError::Timeout) => {}
@@ -159,7 +159,13 @@ fn page_rows(app: &App, height: u16) -> usize {
     }
 }
 
-fn handle(app: &mut App, event: UiEvent, requests: &net::Requests, page: usize, area: Rect) {
+fn handle(
+    app: &mut App,
+    event: UiEvent,
+    requests: &net::Requests,
+    page: usize,
+    area: Rect,
+) -> Result<()> {
     let now = now_ms();
     let run = |app: &mut App, commands: Vec<Command>| {
         for command in commands {
@@ -195,7 +201,9 @@ fn handle(app: &mut App, event: UiEvent, requests: &net::Requests, page: usize, 
         UiEvent::Push(push) => app.apply_push(*push, now),
         UiEvent::Disconnected => app.disconnected(),
         UiEvent::Reply(reply) => app.apply_reply(*reply, now),
+        UiEvent::Fatal(error) => return Err(error.into()),
     }
+    Ok(())
 }
 
 fn enter_terminal() -> io::Result<Terminal<CrosstermBackend<Stdout>>> {

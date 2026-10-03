@@ -819,7 +819,8 @@ impl App {
             Push::Event(event) => self.add_event(event),
             Push::Session(session) => self.session = *session,
             // Handled by the connection layer (refetch / reconnect / attach only).
-            Push::Resync
+            Push::Unknown
+            | Push::Resync
             | Push::Shutdown
             | Push::Pty { .. }
             | Push::PtyClosed

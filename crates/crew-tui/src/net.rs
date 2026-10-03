@@ -44,6 +44,7 @@ pub enum UiEvent {
     Push(Box<Push>),
     Disconnected,
     Reply(Box<Reply>),
+    Fatal(ClientError),
 }
 
 fn fetch_snapshot(socket: &Path) -> ClientResult<Snapshot> {
@@ -96,6 +97,12 @@ pub fn spawn_subscriber(socket: PathBuf, tx: Sender<UiEvent>, stop: Arc<AtomicBo
             if session.is_ok() || stop.load(Ordering::Relaxed) {
                 // The UI went away.
                 return;
+            }
+            if let Err(error) = session {
+                if error.is_protocol_mismatch() {
+                    let _ = tx.send(UiEvent::Fatal(error));
+                    return;
+                }
             }
             if tx.send(UiEvent::Disconnected).is_err() {
                 return;
@@ -448,6 +455,10 @@ mod tests {
 
     impl FakeDaemon {
         fn start(path: &Path) -> Self {
+            Self::start_with_protocol(path, PROTOCOL_VERSION)
+        }
+
+        fn start_with_protocol(path: &Path, protocol: u32) -> Self {
             let _ = std::fs::remove_file(path);
             let listener = UnixListener::bind(path).unwrap();
             listener.set_nonblocking(true).unwrap();
@@ -474,7 +485,7 @@ mod tests {
                                 .unwrap()
                                 .push(stream.try_clone().unwrap());
                             let (subscribers, calls) = (subscribers.clone(), calls.clone());
-                            thread::spawn(move || serve(stream, subscribers, calls));
+                            thread::spawn(move || serve(stream, subscribers, calls, protocol));
                         }
                         Err(_) => thread::sleep(Duration::from_millis(5)),
                     }
@@ -510,6 +521,7 @@ mod tests {
         stream: UnixStream,
         subscribers: Arc<Mutex<Vec<UnixStream>>>,
         calls: Arc<Mutex<Vec<Call>>>,
+        protocol: u32,
     ) {
         let mut writer = stream.try_clone().unwrap();
         for line in BufReader::new(stream).lines() {
@@ -524,7 +536,7 @@ mod tests {
                         agent_id: None,
                         project: Some("checkout-rewrite".into()),
                         version: "test".into(),
-                        protocol: PROTOCOL_VERSION,
+                        protocol,
                         pid: 1,
                     })
                     .unwrap(),
@@ -556,6 +568,43 @@ mod tests {
                 return;
             }
         }
+    }
+
+    #[test]
+    fn subscriber_stops_after_a_protocol_mismatch_on_reconnect() {
+        let temp = tempfile::tempdir().unwrap();
+        let path = temp.path().join("daemon.sock");
+        let daemon = FakeDaemon::start(&path);
+        let (tx, rx) = mpsc::channel();
+        let stop = Arc::new(AtomicBool::new(false));
+        spawn_subscriber(path.clone(), tx, stop.clone());
+        expect(&rx, "initial snapshot", |event| match event {
+            UiEvent::Snapshot(_) => Some(()),
+            _ => None,
+        });
+        daemon.stop();
+        expect(&rx, "disconnect", |event| match event {
+            UiEvent::Disconnected => Some(()),
+            _ => None,
+        });
+        let daemon = FakeDaemon::start_with_protocol(&path, 99);
+        let event = rx.recv_timeout(Duration::from_secs(3)).unwrap();
+        assert!(
+            matches!(event, UiEvent::Fatal(error) if error.is_protocol_mismatch() && error.to_string().contains("restart")),
+            "mismatched daemon must report a terminal version error"
+        );
+        thread::sleep(RECONNECT_DELAY + Duration::from_millis(100));
+        assert_eq!(
+            daemon
+                .calls()
+                .iter()
+                .filter(|call| matches!(call, Call::Hello(_)))
+                .count(),
+            1,
+            "must not reconnect forever after a version error"
+        );
+        stop.store(true, Ordering::Relaxed);
+        daemon.stop();
     }
 
     /// Wait for the first event matching `want`, skipping others.

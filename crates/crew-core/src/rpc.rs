@@ -16,7 +16,10 @@ use crate::types::{
     Agent, AgentStatus, Artifact, Event, InboxEntry, Message, MessageType, RuntimeKind, Task,
 };
 
-pub const PROTOCOL_VERSION: u32 = 1;
+/// Bump for new/renamed enum values, removed/renamed fields or changed meanings.
+/// New optional fields with `serde(default)` do not require a bump.
+/// Peers require an exact match; restart running teams after upgrading.
+pub const PROTOCOL_VERSION: u32 = 2;
 
 #[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
@@ -519,8 +522,33 @@ pub struct ServerFrame {
     pub result: Option<Value>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub error: Option<RpcError>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "deserialize_push"
+    )]
     pub push: Option<Push>,
+}
+
+fn deserialize_push<'de, D: serde::Deserializer<'de>>(
+    deserializer: D,
+) -> Result<Option<Push>, D::Error> {
+    let Some(value) = Option::<Value>::deserialize(deserializer)? else {
+        return Ok(None);
+    };
+    // Classify just the tag first. serde(other) alone rejects non-null data
+    // for its unit fallback. Known kinds must still validate their full data.
+    if let Some(kind) = value.get("kind").and_then(Value::as_str) {
+        if matches!(
+            serde_json::from_value::<Push>(serde_json::json!({"kind": kind})),
+            Ok(Push::Unknown)
+        ) {
+            return Ok(Some(Push::Unknown));
+        }
+    }
+    serde_json::from_value(value)
+        .map(Some)
+        .map_err(serde::de::Error::custom)
 }
 
 impl ServerFrame {
@@ -580,6 +608,9 @@ pub enum Push {
     PtyClosed,
     /// The daemon is shutting down.
     Shutdown,
+    /// An additive push the peer understands but this client does not.
+    #[serde(other)]
+    Unknown,
 }
 
 /// How much of one of an account's usage windows is spent, as the runtime
@@ -657,6 +688,106 @@ pub struct HelloInfo {
     pub version: String,
     pub protocol: u32,
     pub pid: u32,
+}
+
+#[cfg(test)]
+mod compatibility_tests {
+    use super::*;
+    use crate::types::{EventLevel, TaskStatus, TranscriptKind};
+    use serde_json::json;
+
+    fn enum_values<T: Serialize>(values: &[T]) -> Value {
+        serde_json::to_value(values).unwrap()
+    }
+
+    #[test]
+    fn wire_enum_manifest_requires_a_protocol_bump() {
+        // These matches intentionally require updates when variants are added.
+        let role_tag = |role: Role| match role {
+            Role::Operator => "operator",
+            Role::Agent => "agent",
+        };
+        let push_tag = |push: &Push| match push {
+            Push::Event(_) => "event",
+            Push::Message(_) => "message",
+            Push::Agent(_) => "agent",
+            Push::AgentRemoved { .. } => "agent_removed",
+            Push::Task(_) => "task",
+            Push::Session(_) => "session",
+            Push::Resync => "resync",
+            Push::Deliver { .. } => "deliver",
+            Push::Compact { .. } => "compact",
+            Push::Pty { .. } => "pty",
+            Push::PtyClosed => "pty_closed",
+            Push::Shutdown => "shutdown",
+            Push::Unknown => "unknown",
+        };
+        let pushes = vec![
+            Push::Event(serde_json::from_value(json!({"seq":0,"timestamp":0,"source":"","event_type":"","message":"","level":"info"})).unwrap()),
+            Push::Message(serde_json::from_value(json!({"id":"m","from":"a","to":"b","type":"message","body":"","timestamp":0})).unwrap()),
+            Push::Agent(Box::new(serde_json::from_value(json!({"id":"a","name":"a","role":"","status":"idle","runtime":"shell","workdir":"","backend":"pty","last_activity_at":0})).unwrap())),
+            Push::AgentRemoved { id: "a".into() },
+            Push::Task(Box::new(serde_json::from_value(json!({"id":"t","title":"","description":"","status":"queued","created_at":0})).unwrap())),
+            Push::Session(Box::default()), Push::Resync,
+            Push::Deliver { ids: vec![], text: String::new() },
+            Push::Compact { instructions: None }, Push::Pty { data: String::new() },
+            Push::PtyClosed, Push::Shutdown, Push::Unknown,
+        ];
+        let push_kinds: Vec<_> = pushes
+            .iter()
+            .map(|push| {
+                let tag = serde_json::to_value(push).unwrap()["kind"].clone();
+                assert_eq!(
+                    tag,
+                    push_tag(push),
+                    "update the manifest and bump PROTOCOL_VERSION"
+                );
+                tag
+            })
+            .collect();
+        let roles = [Role::Operator, Role::Agent];
+        for role in roles {
+            assert_eq!(serde_json::to_value(role).unwrap(), role_tag(role));
+        }
+        let actual = json!({
+            "agent_status": enum_values(AgentStatus::ALL), "task_status": enum_values(TaskStatus::ALL),
+            "message_type": enum_values(MessageType::ALL), "runtime_kind": enum_values(RuntimeKind::ALL),
+            "event_level": enum_values(EventLevel::ALL), "transcript_kind": enum_values(TranscriptKind::ALL),
+            "role": enum_values(&roles), "push": push_kinds,
+        });
+        let version_2 = json!({
+            "agent_status": ["spawning","idle","working","waiting","blocked","done","failed","stopped"],
+            "task_status": ["queued","ready","working","waiting","blocked","review","done","failed"],
+            "message_type": ["task","message","question","answer","status","review_request","review_result","artifact","error"],
+            "runtime_kind": ["claude","codex","pi","shell"], "event_level": ["debug","info","warn","error"],
+            "transcript_kind": ["prompt","reply","tool","note"], "role": ["operator","agent"],
+            "push": ["event","message","agent","agent_removed","task","session","resync","deliver","compact","pty","pty_closed","shutdown","unknown"],
+        });
+        assert_eq!(
+            (PROTOCOL_VERSION, actual),
+            (2, version_2),
+            "bump PROTOCOL_VERSION and update this list"
+        );
+    }
+
+    #[test]
+    fn future_push_payloads_do_not_break_frames() {
+        for data in [json!({"x": 1}), json!([1, 2]), json!("future"), json!(null)] {
+            let frame: ServerFrame =
+                serde_json::from_value(json!({"push": {"kind": "future", "data": data}})).unwrap();
+            assert_eq!(
+                serde_json::to_value(frame.push.unwrap()).unwrap(),
+                json!({"kind": "unknown"})
+            );
+        }
+        for push in [
+            json!({"kind": "deliver", "data": {"ids": 1}}),
+            json!({"kind": "agent_removed", "data": {}}),
+            json!({"data": 1}),
+        ] {
+            assert!(serde_json::from_value::<ServerFrame>(json!({"push": push})).is_err());
+        }
+    }
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]

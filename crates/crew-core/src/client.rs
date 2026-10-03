@@ -32,6 +32,36 @@ pub enum ClientError {
     Closed,
     #[error("protocol error: {0}")]
     Protocol(String),
+    #[error("the crew daemon speaks protocol {daemon}, this crew speaks {client}: restart the team after upgrading, or use the binary that started it")]
+    Version { daemon: u32, client: u32 },
+    #[error("incompatible crew protocol: {0}; restart the team after upgrading, or use the binary that started it")]
+    IncompatibleProtocol(String),
+}
+
+impl ClientError {
+    pub fn is_protocol_mismatch(&self) -> bool {
+        matches!(self, Self::Version { .. } | Self::IncompatibleProtocol(_))
+    }
+}
+
+fn check_hello(result: ClientResult<HelloInfo>) -> ClientResult<HelloInfo> {
+    let info = match result {
+        Err(ClientError::Rpc(error))
+            if error.code == "protocol"
+            // Legacy v1 daemons used the generic invalid code for this error.
+            || (error.code == "invalid" && error.message.starts_with("client speaks protocol ")) =>
+        {
+            return Err(ClientError::IncompatibleProtocol(error.message));
+        }
+        result => result?,
+    };
+    if info.protocol != PROTOCOL_VERSION {
+        return Err(ClientError::Version {
+            daemon: info.protocol,
+            client: PROTOCOL_VERSION,
+        });
+    }
+    Ok(info)
 }
 
 pub type ClientResult<T> = Result<T, ClientError>;
@@ -62,26 +92,26 @@ impl Client {
     /// Connect and authenticate as the human operator.
     pub fn operator(socket: &Path, client: &str) -> ClientResult<(Self, HelloInfo)> {
         let mut c = Self::connect(socket)?;
-        let info = c.call(Call::Hello(Hello {
+        let info = check_hello(c.call(Call::Hello(Hello {
             role: Role::Operator,
             agent_id: None,
             token: None,
             client: client.to_string(),
             protocol: PROTOCOL_VERSION,
-        }))?;
+        })))?;
         Ok((c, info))
     }
 
     /// Connect and authenticate as an agent.
     pub fn agent(identity: &Identity, client: &str) -> ClientResult<(Self, HelloInfo)> {
         let mut c = Self::connect(Path::new(&identity.socket))?;
-        let info = c.call(Call::Hello(Hello {
+        let info = check_hello(c.call(Call::Hello(Hello {
             role: Role::Agent,
             agent_id: Some(identity.agent_id.clone()),
             token: Some(identity.token.clone()),
             client: client.to_string(),
             protocol: PROTOCOL_VERSION,
-        }))?;
+        })))?;
         Ok((c, info))
     }
 
@@ -169,13 +199,18 @@ impl PushStream {
     /// Block until the next push. Returns `Err(Closed)` when the daemon goes away.
     #[allow(clippy::should_implement_trait)]
     pub fn next(&mut self) -> ClientResult<Push> {
-        if let Some(push) = self.buffered.pop_front() {
-            return Ok(push);
-        }
         loop {
+            if let Some(push) = self.buffered.pop_front() {
+                if push != Push::Unknown {
+                    return Ok(push);
+                }
+                continue;
+            }
             let frame = read_frame(&mut self.reader)?;
             if let Some(push) = frame.push {
-                return Ok(push);
+                if push != Push::Unknown {
+                    return Ok(push);
+                }
             }
         }
     }
@@ -335,5 +370,87 @@ mod tests {
         assert_eq!(stream.next().unwrap(), deliver("live"));
         server.shutdown(std::net::Shutdown::Both).unwrap();
         assert!(matches!(stream.next(), Err(ClientError::Closed)));
+    }
+
+    #[test]
+    fn future_push_data_is_skipped_without_losing_known_pushes() {
+        let (client, mut server) = paired_client();
+        server
+            .write_all(b"{\"push\":{\"kind\":\"future\",\"data\":{\"x\":1}}}\n")
+            .unwrap();
+        send_frame(&mut server, ServerFrame::ok(1, json!(null)));
+        server
+            .write_all(b"{\"push\":{\"kind\":\"future\",\"data\":[1,2]}}\n")
+            .unwrap();
+        send_frame(&mut server, ServerFrame::push(Push::Resync));
+        let mut stream = client.subscribe().unwrap();
+        assert_eq!(stream.next().unwrap(), Push::Resync);
+    }
+
+    #[test]
+    fn hello_rejects_older_and_newer_daemons_for_both_roles() {
+        use std::os::unix::net::UnixListener;
+        for protocol in [PROTOCOL_VERSION - 1, PROTOCOL_VERSION, PROTOCOL_VERSION + 1] {
+            for agent in [false, true] {
+                let temp = tempfile::tempdir().unwrap();
+                let socket = temp.path().join("hello.sock");
+                let listener = UnixListener::bind(&socket).unwrap();
+                let peer = std::thread::spawn(move || {
+                    let (mut server, _) = listener.accept().unwrap();
+                    let mut line = String::new();
+                    BufReader::new(server.try_clone().unwrap())
+                        .read_line(&mut line)
+                        .unwrap();
+                    let request: Request = serde_json::from_str(&line).unwrap();
+                    let Call::Hello(hello) = request.call else {
+                        panic!("expected Hello")
+                    };
+                    send_frame(
+                        &mut server,
+                        ServerFrame::ok(
+                            request.id,
+                            json!({
+                                "role": hello.role, "agent_id": hello.agent_id, "version": "test",
+                                "protocol": protocol, "pid": 1
+                            }),
+                        ),
+                    );
+                });
+                let result = if agent {
+                    Client::agent(
+                        &Identity {
+                            socket: socket.to_string_lossy().into_owned(),
+                            agent_id: "worker".into(),
+                            token: "test".into(),
+                        },
+                        "test",
+                    )
+                } else {
+                    Client::operator(&socket, "test")
+                };
+                peer.join().unwrap();
+                if protocol == PROTOCOL_VERSION {
+                    assert!(result.is_ok());
+                } else {
+                    let error = result.err().expect("mismatched daemon version must fail");
+                    assert!(error.to_string().contains("restart"), "{error}");
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn hello_protocol_refusals_have_a_restart_hint() {
+        for error in [
+            RpcError::new("protocol", "client speaks protocol 2, daemon speaks 3"),
+            RpcError::invalid("client speaks protocol 2, daemon speaks 1"),
+        ] {
+            let error = check_hello(Err(ClientError::Rpc(error))).unwrap_err();
+            assert!(error.is_protocol_mismatch());
+            assert!(error.to_string().contains("restart"));
+        }
+        let error =
+            check_hello(Err(ClientError::Rpc(RpcError::invalid("other error")))).unwrap_err();
+        assert!(!error.is_protocol_mismatch());
     }
 }
