@@ -24,7 +24,6 @@ use super::pin::{identify, Identity, Kind};
 use super::probe::UntrustedNixDaemon;
 use super::scan::{scan_excluding, Findings};
 use super::spec::{check_name, Mount, Spec};
-use super::store::{default_cache_path, scan_store, StoreCache};
 use super::validate::{host_members, Protected};
 
 /// System trees bound read-only when present. Not `/nix` as a whole: that
@@ -62,9 +61,6 @@ pub struct Host {
     pub resolv_conf: PathBuf,
     /// The Nix store, whose socket scan the Landlock socket rule replaces.
     pub nix_store: PathBuf,
-    /// Where finalized store objects found free of sockets are remembered
-    /// (needed only below Landlock ABI 9).
-    pub store_cache: Option<PathBuf>,
     pub landlock_abi: u32,
     /// The host part of the protected set.
     pub protected: Protected,
@@ -87,7 +83,6 @@ impl Host {
             system: SYSTEM_TREES.iter().map(PathBuf::from).collect(),
             resolv_conf: "/etc/resolv.conf".into(),
             nix_store: "/nix/store".into(),
-            store_cache: default_cache_path(&env),
             landlock_abi,
             protected: host_members(&home, &env),
             home,
@@ -415,11 +410,11 @@ impl<'a> Builder<'a> {
                 canonical.display()
             ));
         }
-        if !needs_socket_scan(&canonical, &self.host.nix_store, self.host.landlock_abi) {
+        if canonical.starts_with(&self.host.nix_store) {
+            // Not walked: the Landlock socket rule every launch demands
+            // refuses every socket made outside the sandbox, and walking a
+            // live store takes minutes.
             self.bind(&canonical, false)
-        } else if canonical == self.host.nix_store {
-            self.bind(&canonical, false)?;
-            self.scan_store(&canonical)
         } else {
             self.bind_scanned(&canonical, false, &[])
         }
@@ -680,23 +675,6 @@ impl<'a> Builder<'a> {
         Ok(())
     }
 
-    /// The store below Landlock ABI 9: walked, skipping remembered objects.
-    fn scan_store(&mut self, store: &Path) -> Result<(), String> {
-        let path = self.host.store_cache.as_deref();
-        let mut cache = path.map(StoreCache::load).unwrap_or_default();
-        let walk = scan_store(store, &mut cache, 0)
-            .map_err(|e| format!("scanning {} for sockets: {e}", store.display()))?;
-        if let Some(path) = path {
-            if let Err(e) = cache.save(path) {
-                self.warnings
-                    .push(format!("the store scan could not be remembered: {e:#}"));
-            }
-        }
-        self.findings.sockets.extend(walk.findings.sockets);
-        self.findings.unlisted.extend(walk.findings.unlisted);
-        Ok(())
-    }
-
     fn covered(&self, path: &Path) -> bool {
         self.covered.iter().any(|c| path.starts_with(c))
     }
@@ -710,15 +688,6 @@ impl<'a> Builder<'a> {
         let entries: Vec<&str> = self.path.iter().filter_map(|p| p.to_str()).collect();
         entries.join(":")
     }
-}
-
-/// Whether a system tree must be walked for sockets. The Nix store is the
-/// exception, and only when the launch enforces Landlock's socket rule
-/// (the spec then demands ABI 9, so an older kernel fails closed): that
-/// rule refuses every socket made outside the sandbox, and walking a live
-/// store takes minutes.
-pub fn needs_socket_scan(tree: &Path, nix_store: &Path, landlock_abi: u32) -> bool {
-    !(tree.starts_with(nix_store) && landlock_abi >= landlock::MIN_ABI)
 }
 
 /// The directory a CLI is installed in: the npm package for a Node CLI,
@@ -914,7 +883,6 @@ mod tests {
             system: Vec::new(),
             resolv_conf: root.join("no-resolv.conf"),
             nix_store: "/nix/store".into(),
-            store_cache: None,
             landlock_abi: 9,
             protected,
         };
@@ -1278,15 +1246,6 @@ mod tests {
     }
 
     #[test]
-    fn the_store_is_left_unscanned_only_when_landlock_refuses_outside_sockets() {
-        let store = Path::new("/nix/store");
-        assert!(!needs_socket_scan(store, store, 9));
-        assert!(!needs_socket_scan(&store.join("abc-bash"), store, 10));
-        assert!(needs_socket_scan(store, store, 8));
-        assert!(needs_socket_scan(Path::new("/etc"), store, 9));
-    }
-
-    #[test]
     fn every_spec_demands_landlock_abi_9_and_an_older_host_gets_none() {
         let mut f = fixture();
         assert_eq!(
@@ -1459,17 +1418,16 @@ mod tests {
     }
 
     #[test]
-    fn the_store_cache_is_never_visible_or_mountable() {
-        let mut f = fixture();
-        let cache = f.root.join("cache/crew/nix-store-scan");
-        std::fs::write(&cache, "crew nix-store-scan v1\n").unwrap();
-        f.host.store_cache = Some(cache.clone());
+    fn other_sessions_cargo_caches_are_never_visible_or_mountable() {
+        let f = fixture();
+        let other = f.root.join("cache/crew/4567/cargo");
+        mkdirs(&[&other]);
         let spec = f.worker(&Extra::default()).unwrap().spec;
         assert!(
             visible(&spec, &f.cargo),
-            "the shared cargo cache is mounted"
+            "the team's cargo cache is mounted"
         );
-        assert!(!visible(&spec, &cache));
+        assert!(!visible(&spec, &other));
         for ancestor in [f.root.join("cache"), f.root.join("cache/crew")] {
             let extra = Extra {
                 read_write: vec![ancestor.clone()],

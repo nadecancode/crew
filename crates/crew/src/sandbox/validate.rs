@@ -158,7 +158,7 @@ pub fn host_members(home: &Path, env: &dyn Fn(&str) -> Option<OsString>) -> Prot
     }
     let state = var("XDG_STATE_HOME").unwrap_or_else(|| home.join(".local/state"));
     protected.add(&state.join("crew"));
-    // Every session's cargo cache and the store-scan cache.
+    // Every session's cargo cache.
     let cache = var("XDG_CACHE_HOME").unwrap_or_else(|| home.join(".cache"));
     protected.add(&cache.join("crew"));
     let cargo = var("CARGO_HOME").unwrap_or_else(|| home.join(".cargo"));
@@ -318,7 +318,7 @@ mod tests {
             "/nonexistent-home/u/.codex/auth.json",
             "/nonexistent-home/u/.ssh/id_ed25519",
             "/nonexistent-home/u/.local/state/crew/sessions",
-            "/nonexistent-cache/crew/nix-store-scan",
+            "/nonexistent-cache/crew/0123/cargo",
             "/nonexistent-cargo/registry",
         ] {
             assert!(protected.check(Path::new(path)).is_err(), "{path}");
