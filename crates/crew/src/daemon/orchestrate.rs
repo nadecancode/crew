@@ -402,14 +402,14 @@ until the database takes writes again, tasks wait where they are.",
             )));
         }
         let task = self
-            .update_task(id, |t| {
+            .try_update_task(id, |t| {
                 if let Some(title) = &title {
                     t.title = title.clone();
                 }
                 if let Some(description) = &description {
                     t.description = description.clone();
                 }
-            })
+            })?
             .ok_or_else(|| RpcError::not_found(format!("no task '{id}'")))?;
         let changed: Vec<&str> = [
             (task.title != before.title).then_some("title"),

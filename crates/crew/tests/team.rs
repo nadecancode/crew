@@ -1581,6 +1581,58 @@ fn a_task_transition_the_database_refuses_is_an_error_and_not_applied() {
 }
 
 #[test]
+fn a_card_edit_the_database_refuses_is_an_error_and_not_applied() {
+    let s = Session::new();
+    let team = s.team(
+        "durable-card",
+        vec![agent("author", "", &["--on-task=wait-message operator"])],
+        vec![task("write", "author", &[])],
+    );
+    s.run(&team);
+    s.wait_for("the author to be on write", || {
+        s.agent_cmd(&["output", "author"])
+            .contains("Task write is yours")
+    });
+    let db = rusqlite::Connection::open(s.workspace.join(".crew/crew.db")).unwrap();
+    db.execute_batch(
+        "CREATE TRIGGER refuse_task_writes BEFORE UPDATE ON tasks \
+         BEGIN SELECT RAISE(ABORT, 'the disk is full'); END;",
+    )
+    .unwrap();
+    let ws = s.workspace.to_string_lossy().into_owned();
+    let edit = [
+        "task",
+        "edit",
+        "write",
+        "--title",
+        "write it twice",
+        "-C",
+        &ws,
+    ];
+    let refused = s.crew(&edit);
+    assert!(!refused.status.success(), "{}", stdout(&refused));
+    // The refusal itself, not "no task 'write'".
+    assert!(
+        stderr(&refused).contains("the disk is full"),
+        "{}",
+        stderr(&refused)
+    );
+    // Nothing is shown, or said to the author, that was not stored.
+    assert_eq!(find_task(&s.snapshot(), "write").title, "task write");
+    assert!(!s.has_event("task.edited"));
+    assert!(!s
+        .messages()
+        .iter()
+        .any(|m| m.to == "author" && m.body.contains("revised")));
+
+    db.execute_batch("DROP TRIGGER refuse_task_writes;")
+        .unwrap();
+    s.ok(&edit);
+    assert_eq!(find_task(&s.snapshot(), "write").title, "write it twice");
+    assert!(s.has_event("task.edited"));
+}
+
+#[test]
 fn a_refused_task_fail_leaves_what_the_agent_said_about_itself() {
     let s = Session::new();
     let team = s.team(
