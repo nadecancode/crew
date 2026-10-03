@@ -280,15 +280,21 @@ or `git push` yourself, so the team has a record.\n"
         let _ = write!(
             out,
             "\n## Workspace\n\
-All agents share one working directory. Only touch the files your task is about, and \
-tell a teammate (agent_send) before changing anything they own.\n"
+All agents share one working directory, so crew cannot attribute a commit to one agent: do not commit. \
+git_commit, git_merge and git_cherry_pick are refused here. Only touch the files your task is \
+about, and tell a teammate (agent_send) before changing anything they own.\n"
         );
     }
+    let done = if view.worktrees {
+        "git_commit your work, then call task_complete with a short summary of the result"
+    } else {
+        "call task_complete with a short summary of the result that lists the changed files \
+(nothing is committed in a shared checkout)"
+    };
     let _ = write!(
         out,
         "\n## Finishing\n\
-When your task is done: git_commit your work, then call task_complete with a short \
-summary of the result. crew tells the orchestrator when your task finishes, fails or stalls, \
+When your task is done: {done}. crew tells the orchestrator when your task finishes, fails or stalls, \
 so do not send it progress or status reports: task_update records progress where it can \
 see it. If you must wait for a teammate, call agent_status(\"waiting\", \
 \"<who and what>\") and stop; you will be prompted when their message arrives.\n"
@@ -941,6 +947,12 @@ mod tests {
             &agents[1],
         );
         assert!(shared.contains("share one working directory"));
+        // Nobody can commit in a shared checkout: the briefing says so and
+        // finishing means task_complete with the changed files.
+        assert!(shared.contains("do not commit"), "{shared}");
+        assert!(!shared.contains("git_commit your work"), "{shared}");
+        assert!(shared.contains("changed files"), "{shared}");
+        assert!(text.contains("git_commit your work"));
     }
 
     #[test]
