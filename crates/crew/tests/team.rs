@@ -1237,6 +1237,52 @@ fn a_second_daemon_for_the_same_workspace_is_refused_and_a_team_cannot_be_loaded
 }
 
 #[test]
+fn two_teams_loaded_at_once_do_not_merge() {
+    let s = Session::new();
+    std::fs::create_dir_all(&s.workspace).unwrap();
+    let ws = s.workspace.to_string_lossy().into_owned();
+    s.ok(&["start", "-C", &ws]);
+    let runs: Vec<_> = (0..2)
+        .map(|n| {
+            let mut team = s.team(
+                &format!("load-{n}"),
+                vec![agent(&format!("worker-{n}"), "", &[])],
+                vec![],
+            );
+            // No repository to create: the two loads meet in the daemon,
+            // not in `git init`.
+            team.workspace.init = false;
+            let file = s.root().join(format!("team-{n}.yaml"));
+            std::fs::write(&file, team.to_yaml().unwrap()).unwrap();
+            s.command()
+                .args(["run", &file.to_string_lossy(), "--no-attach"])
+                .stdout(Stdio::piped())
+                .stderr(Stdio::piped())
+                .spawn()
+                .unwrap()
+        })
+        .collect();
+    let outputs: Vec<_> = runs
+        .into_iter()
+        .map(|run| run.wait_with_output().unwrap())
+        .collect();
+
+    let won: Vec<usize> = (0..2).filter(|n| outputs[*n].status.success()).collect();
+    assert_eq!(won.len(), 1, "exactly one load succeeds: {outputs:?}");
+    let (winner, loser) = (won[0], 1 - won[0]);
+    assert!(
+        stderr(&outputs[loser]).contains("already running"),
+        "{}",
+        stderr(&outputs[loser])
+    );
+    let snapshot = s.snapshot();
+    let project = format!("load-{winner}");
+    assert_eq!(snapshot.session.project.as_deref(), Some(project.as_str()));
+    let members: Vec<&str> = snapshot.agents.iter().map(|a| a.id.as_str()).collect();
+    assert_eq!(members, [format!("worker-{winner}")]);
+}
+
+#[test]
 fn a_daemon_started_while_another_is_still_starting_is_refused() {
     // A daemon binds its socket before it registers in daemon.json, so two
     // starts close together can both miss each other's registration. Put a

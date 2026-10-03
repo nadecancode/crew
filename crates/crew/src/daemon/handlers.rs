@@ -772,6 +772,8 @@ impl Daemon {
 
     pub(crate) async fn shutdown(&self, stop_agents: bool) {
         if stop_agents {
+            // Not halfway through a load: its agents would be missed.
+            let _lifecycle = self.team_lock.lock().await;
             self.stopping_team
                 .store(true, std::sync::atomic::Ordering::SeqCst);
             let ids: Vec<String> = self.model().agents.iter().map(|a| a.id.clone()).collect();

@@ -64,7 +64,9 @@ impl Daemon {
             check_task_message_size(&task, config.limits.max_message_bytes)?;
         }
 
-        // One team per workspace at a time.
+        // One team per workspace at a time. The lock is held until the new
+        // team is in place, so a second load sees it.
+        let _lifecycle = self.team_lock.lock().await;
         {
             let model = self.model();
             if let Some(team) = &model.session.team {

@@ -230,6 +230,10 @@ pub struct Inner {
     /// Planning and applying the plan is one critical section, so two
     /// planners can never act on the same snapshot.
     pub(crate) plan_lock: tokio::sync::Mutex<()>,
+    /// Loading a team and stopping it are one at a time: a load checks that
+    /// no team is running and then replaces the session, with nothing in
+    /// between.
+    pub(crate) team_lock: tokio::sync::Mutex<()>,
     pub(crate) next_conn: std::sync::atomic::AtomicU64,
     /// The team is being stopped: an agent whose start is still under way
     /// must not come up behind the stop.
@@ -672,6 +676,7 @@ pub async fn start(options: DaemonOptions) -> Result<Running> {
         sidecars: Mutex::new(HashMap::new()),
         git_lock: tokio::sync::Mutex::new(()),
         plan_lock: tokio::sync::Mutex::new(()),
+        team_lock: tokio::sync::Mutex::new(()),
         next_conn: std::sync::atomic::AtomicU64::new(1),
         stopping_team: std::sync::atomic::AtomicBool::new(false),
         usage_cache_checked_at: std::sync::atomic::AtomicI64::new(0),
