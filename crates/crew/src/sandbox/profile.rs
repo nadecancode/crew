@@ -258,15 +258,23 @@ impl<'a> Builder<'a> {
         }
         self.toolchain()?;
         self.path_entries();
+        let mut read_write = Vec::new();
         for (paths, writable) in [
             (&request.extra.read_only, false),
             (&request.extra.read_write, true),
         ] {
             for path in paths {
-                self.protected
+                let canonical = self
+                    .protected
                     .validate(path)
-                    .and_then(|canonical| self.bind_scanned(&canonical, writable, &[]))
+                    .and_then(|canonical| {
+                        self.bind_scanned(&canonical, writable, &[])
+                            .map(|()| canonical)
+                    })
                     .map_err(|e| format!("workspace.sandbox entry refused: {e}"))?;
+                if writable {
+                    read_write.push(canonical);
+                }
             }
         }
         self.resolv_conf(&host.resolv_conf);
@@ -291,6 +299,7 @@ impl<'a> Builder<'a> {
                 host.home.clone()
             }
         };
+        self.no_writable_overlap(&read_write)?;
         for socket in std::mem::take(&mut self.findings.sockets) {
             self.mounts.push(Mount::Mask { path: socket });
         }
@@ -355,6 +364,34 @@ impl<'a> Builder<'a> {
             spec,
             warnings: self.warnings,
         })
+    }
+
+    /// Design-b3 §3.3 rule 6: an explicit `read_write` entry may not equal,
+    /// lie inside or contain any read-only mount (system trees, toolchain
+    /// leaves, PATH entries, the read-only git data, `<A>`). Otherwise a
+    /// writable bind over part of the operator's toolchain or config would
+    /// let the agent change what unsandboxed tools later run or load.
+    fn no_writable_overlap(&self, read_write: &[PathBuf]) -> Result<(), String> {
+        for rw in read_write {
+            for mount in &self.mounts {
+                let Mount::Bind {
+                    path,
+                    writable: false,
+                    ..
+                } = mount
+                else {
+                    continue;
+                };
+                if path.starts_with(rw) || rw.starts_with(path) {
+                    return Err(format!(
+                        "workspace.sandbox entry refused: read_write {} overlaps the read-only {}",
+                        rw.display(),
+                        path.display()
+                    ));
+                }
+            }
+        }
+        Ok(())
     }
 
     /// A system tree: root-owned and not writable by the operator at its
@@ -1185,6 +1222,50 @@ mod tests {
         let spec = f.worker(&extra).unwrap().spec;
         assert!(binds(&spec).contains(&(f.home.join("data"), false)));
         assert!(binds(&spec).contains(&(f.home.join("scratch"), true)));
+    }
+
+    #[test]
+    fn a_read_write_entry_may_not_overlap_a_read_only_mount() {
+        let f = fixture();
+        touch(&[
+            &f.home.join(".rustup/operator-tool"),
+            &f.home.join(".cargo/bin/rustc"),
+        ]);
+        symlink(f.home.join(".rustup"), f.home.join("rustup-alias")).unwrap();
+        symlink(f.home.join(".gitconfig"), f.home.join("gitconfig-alias")).unwrap();
+        for bad in [
+            // inside a toolchain leaf, a PATH entry, the CLI's install root
+            f.home.join(".rustup/operator-tool"),
+            f.home.join(".rustup/toolchains"),
+            f.home.join(".cargo/bin/rustc"),
+            f.home.join(".local/share/claude/versions/2.1.0"),
+            // equal to a leaf, also through an alias
+            f.home.join(".gitconfig"),
+            f.home.join("gitconfig-alias"),
+            f.home.join("rustup-alias/operator-tool"),
+            // containing one
+            f.home.join(".local/share/claude"),
+        ] {
+            let extra = Extra {
+                read_write: vec![bad.clone()],
+                ..Extra::default()
+            };
+            let error = f.worker(&extra).unwrap_err();
+            assert!(
+                error.contains("workspace.sandbox entry refused"),
+                "{bad:?}: {error}"
+            );
+        }
+        // Read-only entries inside a read-only mount stay allowed.
+        let extra = Extra {
+            read_only: vec![f.home.join(".rustup/operator-tool")],
+            read_write: vec![f.home.join("scratch")],
+        };
+        let spec = f.worker(&extra).unwrap().spec;
+        assert!(binds(&spec).contains(&(f.home.join("scratch"), true)));
+        assert!(!binds(&spec)
+            .iter()
+            .any(|(p, w)| *w && p.starts_with(f.home.join(".rustup"))));
     }
 
     #[test]

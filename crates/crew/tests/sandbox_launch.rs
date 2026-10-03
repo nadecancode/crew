@@ -670,3 +670,70 @@ fn the_probe_finds_this_host_able_to_run_sandboxes() {
     assert_eq!(available.landlock_abi, abi);
     assert!(available.bwrap_version >= crew::sandbox::probe::MIN_BWRAP);
 }
+
+#[test]
+fn a_writable_entry_cannot_reach_a_read_only_toolchain_but_data_stays_writable() {
+    let Some((bwrap, abi)) = bwrap() else { return };
+    let l = layout();
+    // Outside the protected set (not under /tmp): next to the crew binary.
+    let dir = tempfile::tempdir_in(Path::new(CREW).parent().unwrap()).unwrap();
+    let root = dir.path().canonicalize().unwrap();
+    let toolchain = root.join("rustup");
+    let data = root.join("data");
+    std::fs::create_dir_all(toolchain.join("bin")).unwrap();
+    std::fs::create_dir_all(&data).unwrap();
+    std::fs::write(toolchain.join("bin/operator-tool"), "trusted").unwrap();
+    std::os::unix::fs::symlink(&toolchain, root.join("alias")).unwrap();
+    let mut host = host(&bwrap, abi);
+    host.rustup_home = toolchain.clone();
+    let agent = l.agent();
+    let worktree = l.ws.join(".crew/worktrees/a");
+    let admin = l.git.join("worktrees/a");
+    let build_with = |extra: &Extra| {
+        let request = Request {
+            session: l.session(),
+            role: Role::Worker {
+                agent_dir: &agent,
+                worktree: &worktree,
+                admin: &admin,
+                sidecar_dir: None,
+            },
+            extra,
+            cli: None,
+            pass_env: &[],
+            terminal: false,
+            nix_daemon: None,
+        };
+        build(&host, &request)
+    };
+    for bad in [
+        toolchain.join("bin/operator-tool"),
+        root.join("alias/bin/operator-tool"),
+        root.clone(),
+    ] {
+        let extra = Extra {
+            read_write: vec![bad.clone()],
+            ..Extra::default()
+        };
+        assert!(build_with(&extra).is_err(), "{bad:?} was accepted");
+    }
+    let extra = Extra {
+        read_write: vec![data.clone()],
+        ..Extra::default()
+    };
+    let spec = build_with(&extra).unwrap().spec;
+    let script = format!(
+        "( echo evil > '{tool}' ) 2>/dev/null && echo TOOL-WRITTEN; \
+         cat '{tool}'; echo; echo ok > '{data}/out' && echo data-written",
+        tool = toolchain.join("bin/operator-tool").display(),
+        data = data.display(),
+    );
+    let out = sandboxed(&spec, &[], &script).output().unwrap();
+    assert!(out.status.success(), "{}", text(&out));
+    assert_eq!(lines(&out), ["trusted", "data-written"], "{}", text(&out));
+    assert_eq!(
+        std::fs::read_to_string(toolchain.join("bin/operator-tool")).unwrap(),
+        "trusted"
+    );
+    assert_eq!(std::fs::read_to_string(data.join("out")).unwrap(), "ok\n");
+}
