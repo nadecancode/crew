@@ -509,3 +509,49 @@ fn a_command_that_starts_a_daemon_is_refused_inside_an_agent_before_it_starts_on
         );
     }
 }
+
+#[test]
+fn a_start_that_loses_the_race_waits_for_the_winner_and_connects() {
+    use std::os::fd::AsRawFd;
+    let s = Session::new();
+    let state = s.workspace.join(".crew");
+    std::fs::create_dir_all(&state).unwrap();
+    std::fs::set_permissions(&state, std::os::unix::fs::PermissionsExt::from_mode(0o700)).unwrap();
+    // The winner of the race holds the workspace lock while it starts up.
+    let lock = std::fs::OpenOptions::new()
+        .create(true)
+        .truncate(false)
+        .write(true)
+        .open(state.join("daemon.lock"))
+        .unwrap();
+    // SAFETY: flock on a descriptor this test owns.
+    assert_eq!(
+        unsafe { libc::flock(lock.as_raw_fd(), libc::LOCK_EX | libc::LOCK_NB) },
+        0
+    );
+    let ws = s.workspace.to_string_lossy().into_owned();
+    let loser = s
+        .command()
+        .args(["start", "-C", &ws])
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped())
+        .spawn()
+        .unwrap();
+    // The daemon the loser spawned finds the lock taken and exits; the
+    // winner is not up yet.
+    std::thread::sleep(std::time::Duration::from_millis(1500));
+    drop(lock);
+    let mut winner = s
+        .command()
+        .args(["daemon", "--workspace", &ws])
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .spawn()
+        .unwrap();
+    let out = loser.wait_with_output().unwrap();
+    let (said, err) = (stdout(&out), stderr(&out));
+    winner.kill().unwrap();
+    let _ = winner.wait();
+    assert!(out.status.success(), "the loser failed: {err}");
+    assert!(said.contains("daemon running (pid"), "{said}");
+}

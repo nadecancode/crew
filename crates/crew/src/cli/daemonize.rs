@@ -57,6 +57,22 @@ fn daemon_reachable(info: &DaemonInfo) -> bool {
     paths::pid_alive(info.pid) && UnixStream::connect(&info.socket).is_ok()
 }
 
+/// Whether a daemon holds the workspace's single-instance lock: the lock it
+/// takes before anything else, and the kernel drops when it exits.
+fn another_daemon_holds_the_lock(state_dir: &Path) -> bool {
+    use std::os::fd::AsRawFd;
+    let Ok(file) = OpenOptions::new()
+        .write(true)
+        .open(state_dir.join("daemon.lock"))
+    else {
+        return false;
+    };
+    // SAFETY: flock on a descriptor this function owns; the lock is released
+    // when `file` is dropped.
+    let taken = unsafe { libc::flock(file.as_raw_fd(), libc::LOCK_EX | libc::LOCK_NB) } == 0;
+    !taken
+}
+
 /// The daemon for `workspace`, starting one if none is running.
 pub fn ensure_daemon(workspace: &Path) -> Result<DaemonInfo> {
     // Before anything is created: an agent must not leave a daemon (or its
@@ -101,11 +117,24 @@ pub fn ensure_daemon(workspace: &Path) -> Result<DaemonInfo> {
     let mut child = cmd.spawn().context("starting the crew daemon")?;
 
     let deadline = Instant::now() + Duration::from_secs(15);
+    // Set once the daemon this call started has exited because another one
+    // holds the workspace: that one is on its way up (this call lost a race
+    // to start it) and is waited for.
+    let mut lost_the_race = false;
     loop {
         if let Some(info) = paths::read_daemon_info(&state_dir).filter(daemon_reachable) {
             return Ok(info);
         }
-        if let Some(status) = child.try_wait()? {
+        let exited = if lost_the_race {
+            None
+        } else {
+            child.try_wait()?
+        };
+        if let Some(status) = exited {
+            if another_daemon_holds_the_lock(&state_dir) {
+                lost_the_race = true;
+                continue;
+            }
             let tail = std::fs::read_to_string(&log_path)
                 .map(|s| {
                     let lines: Vec<&str> = s.lines().collect();
