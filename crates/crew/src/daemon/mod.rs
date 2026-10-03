@@ -280,6 +280,11 @@ pub struct Inner {
     pub(crate) started_at: i64,
     /// Held for the daemon's lifetime: the workspace's single-instance lock.
     _instance_lock: std::fs::File,
+    /// The operator's credential for this run (design-b3.md §2.1): here and in
+    /// the 0600 token file next to the socket, nowhere else (not the database,
+    /// logs, events, pushes or agent environments).
+    #[allow(dead_code)] // checked when operator hellos require it (C-T2)
+    pub(crate) operator_token: String,
 }
 
 /// A running sidecar and the socket it serves.
@@ -632,6 +637,38 @@ pub struct Running {
     pub daemon: Daemon,
     listener: UnixListener,
     proc_rx: mpsc::UnboundedReceiver<ProcEvent>,
+    published: Published,
+}
+
+/// What a start put next to its socket path: its operator token and, once
+/// bound, the socket. Taken back when the start fails (on drop) or at
+/// shutdown, while the workspace lock is still held; a token file that no
+/// longer holds this run's token is left alone.
+struct Published {
+    socket: PathBuf,
+    token: String,
+    bound: bool,
+}
+
+impl Published {
+    fn withdraw(&mut self) {
+        if std::mem::take(&mut self.bound) {
+            let _ = std::fs::remove_file(&self.socket);
+        }
+        let ours = paths::read_operator_token(&self.socket)
+            .ok()
+            .flatten()
+            .is_some_and(|token| crew_core::util::ct_eq(&token, &self.token));
+        if ours {
+            let _ = std::fs::remove_file(paths::operator_token_path(&self.socket));
+        }
+    }
+}
+
+impl Drop for Published {
+    fn drop(&mut self) {
+        self.withdraw();
+    }
 }
 
 /// Bind the socket, open the database and recover persisted state.
@@ -669,10 +706,21 @@ pub async fn start(options: DaemonOptions) -> Result<Running> {
             );
         }
     }
+    // A new operator token for every start that wins the lock, written before
+    // the socket is bound: a client never finds a socket without its token.
+    let token = crew_core::util::new_token();
+    paths::write_private_file(&paths::operator_token_path(&socket), token.as_bytes())
+        .context("writing the operator token")?;
+    let mut published = Published {
+        socket: socket.clone(),
+        token: token.clone(),
+        bound: false,
+    };
     // Stale socket from a daemon that did not shut down cleanly.
     let _ = std::fs::remove_file(&socket);
     let listener =
         UnixListener::bind(&socket).with_context(|| format!("binding {}", socket.display()))?;
+    published.bound = true;
     {
         use std::os::unix::fs::PermissionsExt;
         std::fs::set_permissions(&socket, std::fs::Permissions::from_mode(0o600))?;
@@ -717,6 +765,7 @@ pub async fn start(options: DaemonOptions) -> Result<Running> {
         usage_refreshing: std::sync::atomic::AtomicBool::new(false),
         started_at,
         _instance_lock: instance_lock,
+        operator_token: token,
     }));
 
     paths::write_daemon_info(&DaemonInfo {
@@ -737,6 +786,7 @@ pub async fn start(options: DaemonOptions) -> Result<Running> {
         daemon,
         listener,
         proc_rx,
+        published,
     })
 }
 
@@ -751,6 +801,7 @@ impl Running {
             daemon,
             listener,
             mut proc_rx,
+            mut published,
         } = self;
         let mut stop = daemon.shutdown.subscribe();
 
@@ -813,7 +864,7 @@ impl Running {
         events_task.abort();
         plan_task.abort();
         housekeeping_task.abort();
-        let _ = std::fs::remove_file(&daemon.socket);
+        published.withdraw();
         paths::remove_daemon_info(&daemon.state_dir);
         Ok(())
     }
