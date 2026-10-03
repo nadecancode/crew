@@ -4,7 +4,7 @@ use std::path::Path;
 use std::sync::Arc;
 
 use anyhow::{anyhow, bail, Result};
-use crew_core::config::{AgentSpec, BackendChoice, Isolation, TeamConfig};
+use crew_core::config::{AgentSpec, BackendChoice, Isolation, SandboxMode, TeamConfig};
 use crew_core::paths::{self, DaemonInfo};
 use crew_core::rpc::RpcError;
 use crew_core::util::now_ms;
@@ -201,6 +201,19 @@ share it without isolation"
         ));
         if let Some(note) = note {
             self.emit(NewEvent::new("daemon", "session.isolation", note).warn());
+        }
+        if config.workspace.sandbox.mode == SandboxMode::Off {
+            // An explicit opt-out, visible (design-b3.md §3.6).
+            self.emit(
+                NewEvent::new(
+                    "daemon",
+                    "session.sandbox",
+                    "agents run without a sandbox (workspace.sandbox.mode: off): they can read \
+and write what you can and use your credentials; set workspace.sandbox.mode: required to confine \
+them",
+                )
+                .warn(),
+            );
         }
 
         // Agent records (worktrees, tokens) are created before any process

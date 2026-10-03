@@ -1260,6 +1260,24 @@ fn an_agents_writable_tree_is_made_beneath_the_state_directory_and_never_through
 }
 
 #[test]
+fn a_team_that_runs_unsandboxed_is_told_so() {
+    let s = Session::new();
+    s.run(&s.team("open", vec![agent("a", "", &[])], vec![]));
+    let events = s.events();
+    let warning = events
+        .iter()
+        .find(|e| e.event_type == "session.sandbox")
+        .expect("no session.sandbox event");
+    assert_eq!(warning.level, crew_core::EventLevel::Warn);
+    assert!(
+        warning.message.contains("workspace.sandbox.mode: off")
+            && warning.message.contains("workspace.sandbox.mode: required"),
+        "{}",
+        warning.message
+    );
+}
+
+#[test]
 fn a_crashed_agent_is_restarted_and_a_repeat_offender_fails_its_task() {
     let s = Session::new();
     let team = s.team(
