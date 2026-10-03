@@ -109,7 +109,7 @@ impl Client {
                 path: crate::paths::operator_token_path(socket)
                     .display()
                     .to_string(),
-                message: error.to_string(),
+                message: format!("{error:#}"),
             }
         })?;
         let mut c = Self::connect(socket)?;
@@ -406,6 +406,30 @@ mod tests {
             protocol: PROTOCOL_VERSION,
         };
         assert!(!format!("{hello:?}").contains("synthetic-secret-do-not-print"));
+    }
+
+    #[test]
+    fn token_errors_keep_the_cause_and_invalid_socket_paths_stay_connect_errors() {
+        for socket in [Path::new(""), Path::new("/"), Path::new("..")] {
+            assert!(matches!(
+                Client::operator(socket, "test"),
+                Err(ClientError::Connect { .. })
+            ));
+        }
+        let temp = tempfile::tempdir().unwrap();
+        let socket = temp.path().join("daemon.sock");
+        let token = crate::paths::operator_token_path(&socket);
+        std::fs::create_dir(&token).unwrap();
+        let error = Client::operator(&socket, "test").err().unwrap();
+        assert!(error.to_string().contains("not a regular file"), "{error}");
+        std::fs::remove_dir(&token).unwrap();
+        crate::paths::write_private_file(&token, b"must-not-appear-in-message").unwrap();
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(&token, std::fs::Permissions::from_mode(0o000)).unwrap();
+        let error = Client::operator(&socket, "test").err().unwrap();
+        assert!(error.to_string().contains("Permission denied"), "{error}");
+        assert!(!error.to_string().contains("must-not-appear-in-message"));
+        std::fs::set_permissions(&token, std::fs::Permissions::from_mode(0o600)).unwrap();
     }
 
     #[test]

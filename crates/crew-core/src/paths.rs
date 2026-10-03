@@ -387,6 +387,9 @@ pub fn operator_token_path(socket: &Path) -> PathBuf {
 /// during the plumbing rollout; every other error fails closed. Never log it.
 pub fn read_operator_token(socket: &Path) -> Result<Option<String>> {
     use std::io::Read;
+    if socket.file_name().is_none() {
+        return Ok(None);
+    }
     let path = operator_token_path(socket);
     let parent = path
         .parent()
@@ -411,17 +414,22 @@ pub fn read_operator_token(socket: &Path) -> Result<Option<String>> {
     let name = path
         .file_name()
         .ok_or_else(|| anyhow!("operator token path has no file name"))?;
-    let file = match open_beneath(&directory, Path::new(name)) {
-        Ok(file) => file,
-        Err(error)
-            if error
-                .downcast_ref::<std::io::Error>()
-                .is_some_and(|error| error.kind() == std::io::ErrorKind::NotFound) =>
-        {
-            return Ok(None)
-        }
+    // One component below the pinned parent needs no openat2. This keeps
+    // missing credentials optional even when a container blocks openat2.
+    let flags =
+        libc::O_RDONLY | libc::O_NONBLOCK | libc::O_NOCTTY | libc::O_CLOEXEC | libc::O_NOFOLLOW;
+    let fd = match walk_beneath(directory.as_fd(), Path::new(name), flags) {
+        Ok(fd) => fd,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
         Err(error) => return Err(error).context("opening operator token file"),
     };
+    let file = regular_file(fd, Path::new(name))?;
+    let parent_metadata = directory.metadata()?;
+    if parent_metadata.uid() != uid() || parent_metadata.permissions().mode() & 0o022 != 0 {
+        bail!(
+            "operator token directory must be owned by the current user and not writable by others"
+        );
+    }
     let metadata = file.metadata()?;
     if metadata.uid() != uid() || metadata.permissions().mode() & 0o777 != 0o600 {
         bail!("operator token file must be owned by the current user with mode 0600");
@@ -649,6 +657,82 @@ mod tests {
         assert!(
             read_operator_token(&socket).is_err(),
             "a dangling link must not look like an absent credential"
+        );
+        fs::remove_file(&token).unwrap();
+        write_private_file(&token, b"private but unsafe parent").unwrap();
+        fs::set_permissions(temp.path(), fs::Permissions::from_mode(0o777)).unwrap();
+        let result = read_operator_token(&socket);
+        fs::set_permissions(temp.path(), fs::Permissions::from_mode(0o700)).unwrap();
+        assert!(result.is_err());
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn token_reader_stays_optional_when_openat2_is_denied() {
+        let temp = tempfile::tempdir().unwrap();
+        let socket = temp.path().join("daemon.sock");
+        assert_eq!(read_operator_token(&socket).unwrap(), None);
+        let mut instructions = [
+            libc::sock_filter {
+                code: (libc::BPF_LD | libc::BPF_W | libc::BPF_ABS) as u16,
+                jt: 0,
+                jf: 0,
+                k: 0,
+            },
+            libc::sock_filter {
+                code: (libc::BPF_JMP | libc::BPF_JEQ | libc::BPF_K) as u16,
+                jt: 0,
+                jf: 1,
+                k: libc::SYS_openat2 as u32,
+            },
+            libc::sock_filter {
+                code: (libc::BPF_RET | libc::BPF_K) as u16,
+                jt: 0,
+                jf: 0,
+                k: libc::SECCOMP_RET_ERRNO | libc::EPERM as u32,
+            },
+            libc::sock_filter {
+                code: (libc::BPF_RET | libc::BPF_K) as u16,
+                jt: 0,
+                jf: 0,
+                k: libc::SECCOMP_RET_ALLOW,
+            },
+        ];
+        let filter = libc::sock_fprog {
+            len: instructions.len() as u16,
+            filter: instructions.as_mut_ptr(),
+        };
+        // SAFETY: this filter affects only this test thread, denying one syscall.
+        assert_eq!(
+            unsafe { libc::prctl(libc::PR_SET_NO_NEW_PRIVS, 1, 0, 0, 0) },
+            0
+        );
+        assert_eq!(
+            unsafe {
+                libc::prctl(
+                    libc::PR_SET_SECCOMP,
+                    libc::SECCOMP_MODE_FILTER,
+                    &filter,
+                    0,
+                    0,
+                )
+            },
+            0
+        );
+        let root = fs::File::open(temp.path()).unwrap();
+        let denied = open_beneath(&root, Path::new("missing")).unwrap_err();
+        assert_eq!(
+            denied
+                .downcast_ref::<std::io::Error>()
+                .unwrap()
+                .raw_os_error(),
+            Some(libc::EPERM)
+        );
+        assert_eq!(read_operator_token(&socket).unwrap(), None);
+        write_private_file(&operator_token_path(&socket), b"synthetic").unwrap();
+        assert_eq!(
+            read_operator_token(&socket).unwrap().as_deref(),
+            Some("synthetic")
         );
     }
 
