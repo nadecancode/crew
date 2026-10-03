@@ -464,14 +464,18 @@ impl Launcher for LedgerLauncher {
             return;
         };
         record.update(|r| r.pid = Some(pid));
-        // Its init, before a timeout can kill it. One that ends first says
-        // so through its done marker.
+        // Its init, before a timeout can kill it: git::output holds the
+        // child, unreaped, until this returns, so the number is its own. One
+        // that ends first says so through its done marker.
+        let Some(wrapper) = retire::Proc::of(pid) else {
+            return;
+        };
         let deadline = std::time::Instant::now() + retire::DISCOVER_WITHIN;
         let init = loop {
-            if let Some(init) = retire::sandbox_init(pid) {
+            if let Some(init) = retire::sandbox_init(wrapper) {
                 break Some(init);
             }
-            let ended = !retire::Proc::of(pid).is_some_and(|p| p.running());
+            let ended = !wrapper.alive();
             if ended || record.done().exists() || std::time::Instant::now() >= deadline {
                 break None;
             }

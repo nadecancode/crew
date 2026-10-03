@@ -528,8 +528,13 @@ async fn run_queue(
     use tokio::io::AsyncReadExt;
     if let (Some(record), Some(pid)) = (&record, child.id()) {
         record.update(|r| r.pid = Some(pid));
-        let running = || super::retire::Proc::of(pid).is_some_and(|p| p.running());
-        match super::retire::discover(pid, running, super::retire::DISCOVER_WITHIN).await {
+        // This task holds the child, not yet waited for, so the number is
+        // its own.
+        let found = match super::retire::Proc::of(pid) {
+            Some(wrapper) => super::retire::discover(wrapper, super::retire::DISCOVER_WITHIN).await,
+            None => Err(anyhow::anyhow!("its process could not be identified")),
+        };
+        match found {
             Ok(init) => record.update(|r| r.init = init),
             Err(e) => {
                 let _ = child.kill().await;

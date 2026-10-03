@@ -620,16 +620,13 @@ impl Daemon {
             record.update(|r| r.pid = spawned.pid);
             // Its init is needed to know that it is gone if it is killed,
             // before anything kills it (a team stop included).
-            let found = match spawned.pid {
-                Some(pid) => {
-                    super::retire::discover(
-                        pid,
-                        || procs.is_alive(id),
-                        super::retire::DISCOVER_WITHIN,
-                    )
-                    .await
+            // Named by the backend before anything could reap it.
+            let found = match (spawned.pid, spawned.start) {
+                (Some(pid), Some(start)) => {
+                    let wrapper = super::retire::Proc { pid, start };
+                    super::retire::discover(wrapper, super::retire::DISCOVER_WITHIN).await
                 }
-                None => Err(anyhow!("it has no pid")),
+                _ => Err(anyhow!("its process could not be identified")),
             };
             match found {
                 Ok(init) => record.update(|r| r.init = init),
@@ -756,9 +753,15 @@ impl Daemon {
             .with_context(|| format!("starting `{} {}`", sidecar.program, sidecar.args[0]))?;
         if let (Some(record), Some(pid)) = (&record, child.id()) {
             record.update(|r| r.pid = Some(pid));
-            // Its init, before anything can kill it.
-            let running = || super::retire::Proc::of(pid).is_some_and(|p| p.running());
-            match super::retire::discover(pid, running, super::retire::DISCOVER_WITHIN).await {
+            // Its init, before anything can kill it. The child is not
+            // waited for until after this, so the number is its own.
+            let found = match super::retire::Proc::of(pid) {
+                Some(wrapper) => {
+                    super::retire::discover(wrapper, super::retire::DISCOVER_WITHIN).await
+                }
+                None => Err(anyhow!("its process could not be identified")),
+            };
+            match found {
                 Ok(init) => record.update(|r| r.init = init),
                 Err(e) => {
                     reap_sidecar(child);

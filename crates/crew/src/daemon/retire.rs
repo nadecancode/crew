@@ -54,23 +54,53 @@ impl Proc {
             Err(e) => !matches!(e.raw_os_error(), Some(libc::ENOENT | libc::ESRCH)),
         }
     }
+
+    /// Whether it is, for certain, this process and alive: `/proc` shows
+    /// its pid with this start time, not a zombie. Anything `/proc` does not
+    /// say for certain counts as no (the opposite of `running`).
+    pub fn alive(&self) -> bool {
+        self.is(crate::process::stat(self.pid))
+    }
+
+    fn is(&self, stat: Option<crate::process::Stat>) -> bool {
+        stat.is_some_and(|s| s.start == self.start && !matches!(s.state, 'Z' | 'X'))
+    }
 }
 
-/// The init of the PID namespace a sandbox runs its programs in, `pid`
-/// being the process the daemon started (`crew sandbox-run`): bubblewrap's
-/// child, or the shim's own once bubblewrap has gone, pid 1 of a namespace
-/// of its own. None while it is not there.
-pub(crate) fn sandbox_init(pid: u32) -> Option<Proc> {
-    let ns = namespace_of(pid)?;
-    children(pid)
-        .into_iter()
-        .flat_map(|child| std::iter::once(child).chain(children(child)))
-        .find_map(|candidate| {
-            let init = Proc::of(candidate)?;
-            let nested = namespace_of(candidate).is_some_and(|n| n != ns);
-            // pid 1 where it is, and still the process just read.
-            (nested && first_in_its_namespace(candidate) && init.running()).then_some(init)
-        })
+/// The init of the PID namespace a sandbox runs its programs in, `wrapper`
+/// being the process the daemon started (`crew sandbox-run`), named while
+/// nothing could have reaped it: pid 1 of a namespace of its own, the child
+/// of bubblewrap (the wrapper's only child) or, once bubblewrap has gone,
+/// of the wrapper. None while it is not there, and once the wrapper has
+/// ended or cannot be told apart from a later process with its number.
+///
+/// Every number is read again after use: the wrapper, still alive with its
+/// start time, was never reaped, so its pid and its children's were its
+/// own throughout; a parent still among its children is bubblewrap, alive
+/// since before the candidate was read; and the candidate, alive with the
+/// start time first read, is the process whose namespace was read.
+pub(crate) fn sandbox_init(wrapper: Proc) -> Option<Proc> {
+    if !wrapper.alive() {
+        return None;
+    }
+    let ns = namespace_of(wrapper.pid)?;
+    let kids = children(wrapper.pid);
+    let candidates: Vec<u32> = kids
+        .iter()
+        .copied()
+        .chain(kids.iter().flat_map(|&kid| children(kid)))
+        .collect();
+    candidates.into_iter().find_map(|candidate| {
+        let stat = crate::process::stat(candidate)?;
+        let init = Proc {
+            pid: candidate,
+            start: stat.start,
+        };
+        let nested = namespace_of(candidate).is_some_and(|n| n != ns);
+        let ours = wrapper.alive()
+            && (stat.ppid == wrapper.pid || children(wrapper.pid).contains(&stat.ppid));
+        (nested && first_in_its_namespace(candidate) && ours && init.alive()).then_some(init)
+    })
 }
 
 fn children(pid: u32) -> Vec<u32> {
@@ -392,19 +422,17 @@ sandbox of this team is left, delete it",
 /// How long a sandbox may take to show the init of its PID namespace.
 pub(crate) const DISCOVER_WITHIN: Duration = Duration::from_secs(5);
 
-/// Find the init of the sandbox the daemon has just started as `pid`, while
-/// `running` says it runs. `Ok(None)`: it ended first.
-pub(crate) async fn discover(
-    pid: u32,
-    running: impl Fn() -> bool,
-    within: Duration,
-) -> Result<Option<Proc>> {
+/// Find the init of the sandbox the daemon has just started as `wrapper`
+/// (sandbox_init). `Ok(None)`: the wrapper ended first, or cannot be told
+/// apart from a later process; its entry then stays unknown unless its
+/// done marker proves it gone.
+pub(crate) async fn discover(wrapper: Proc, within: Duration) -> Result<Option<Proc>> {
     let deadline = tokio::time::Instant::now() + within;
     loop {
-        if let Some(init) = sandbox_init(pid) {
+        if let Some(init) = sandbox_init(wrapper) {
             return Ok(Some(init));
         }
-        if !running() {
+        if !wrapper.alive() {
             return Ok(None);
         }
         if tokio::time::Instant::now() >= deadline {
@@ -718,7 +746,7 @@ mod tests {
     fn init_of(pid: u32) -> (Proc, u64) {
         let mut init = None;
         eventually("the sandbox's init", || {
-            init = sandbox_init(pid);
+            init = Proc::of(pid).and_then(sandbox_init);
             init.is_some()
         });
         let init = init.unwrap();
@@ -796,6 +824,39 @@ mod tests {
         }
     }
 
+    #[tokio::test]
+    async fn a_launch_finds_only_its_own_sandboxs_init_and_none_once_it_has_ended() {
+        let Some(bwrap) = bwrap() else { return };
+        let mut sandbox = sandbox_running(&bwrap, true, "exec sleep 304")
+            .spawn()
+            .unwrap();
+        let wrapper = Proc::of(sandbox.id()).unwrap();
+        let within = Duration::from_millis(300);
+        // Its own launch finds it.
+        let found = discover(wrapper, within).await.unwrap();
+        let (init, _) = init_of(sandbox.id());
+        assert_eq!(found, Some(init));
+        // A launch that has ended, whose number now names this process (its
+        // start time differs), finds nothing, though a nested namespace's
+        // init runs under that number.
+        let ended = Proc {
+            start: wrapper.start - 1,
+            ..wrapper
+        };
+        let adopted = discover(ended, within).await.unwrap();
+        sandbox.kill().unwrap();
+        sandbox.wait().unwrap();
+        assert_eq!(
+            adopted, None,
+            "an ended launch adopted another sandbox's init"
+        );
+        // Nor once its own process is gone.
+        assert_eq!(discover(wrapper, within).await.unwrap(), None);
+        // What /proc does not say for certain is no proof of life.
+        assert!(!wrapper.is(None));
+        assert!(!wrapper.alive());
+    }
+
     /// A stand-in sidecar: `sh` starting a sandbox that runs `sleep
     /// <marker>`; the sandbox dies with `sh` or (`outlives`) does not. Put in
     /// the daemon's sidecars for `id`, with its init.
@@ -814,7 +875,7 @@ mod tests {
         // sh's child is bubblewrap, whose child is the init.
         let mut init = None;
         eventually("the stand-in sidecar's sandbox", || {
-            init = sandbox_init(child.id().unwrap());
+            init = Proc::of(child.id().unwrap()).and_then(sandbox_init);
             init.is_some()
         });
         entry.update(|r| {
