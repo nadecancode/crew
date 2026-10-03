@@ -268,6 +268,7 @@ impl AgentRuntime for ClaudeRuntime {
             prompt: None,
             prompt_as_arg: true,
             sidecar: None,
+            sandbox: None,
         })
     }
 

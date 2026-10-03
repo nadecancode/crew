@@ -126,6 +126,10 @@ pub struct LaunchSpec {
     pub prompt_as_arg: bool,
     /// A helper process the session depends on (Codex's app-server).
     pub sidecar: Option<Sidecar>,
+    /// Run the program inside this sandbox (`crew sandbox-run` in front of it).
+    /// Only the PTY backend honours it; the daemon refuses herdr for a
+    /// sandboxed agent.
+    pub sandbox: Option<crate::sandbox::spec::Spec>,
 }
 
 /// A background process that must be running before the agent starts. It has

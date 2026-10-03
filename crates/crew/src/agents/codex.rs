@@ -274,6 +274,7 @@ impl AgentRuntime for CodexRuntime {
             // After `resume` a trailing argument would be read as a session id.
             prompt_as_arg: !ctx.resume,
             sidecar,
+            sandbox: None,
         })
     }
 

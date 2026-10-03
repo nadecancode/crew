@@ -44,6 +44,7 @@ impl AgentRuntime for ShellRuntime {
             prompt: None,
             prompt_as_arg: false,
             sidecar: None,
+            sandbox: None,
         })
     }
 

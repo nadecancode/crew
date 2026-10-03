@@ -1094,6 +1094,7 @@ mod tests {
             prompt: None,
             prompt_as_arg: true,
             sidecar: None,
+            sandbox: None,
         }
     }
 

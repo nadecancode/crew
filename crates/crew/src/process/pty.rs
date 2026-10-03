@@ -198,6 +198,57 @@ fn screen_text(parser: &vt100::Parser, lines: usize) -> String {
     rows[start..].join("\n")
 }
 
+/// The command that starts `spec` on a PTY, and whether the first prompt went
+/// in as its last argument.
+fn command_for(spec: &LaunchSpec) -> Result<(CommandBuilder, bool)> {
+    // Structured argv: the program and each argument are separate strings
+    // handed to exec, never a shell command line. In a sandbox the program
+    // runs behind `crew sandbox-run`, which pins its mounts and execs
+    // bubblewrap (a PTY child has every descriptor above 2 closed, so
+    // nothing could be handed down any other way).
+    let mut argv: Vec<std::ffi::OsString> = Vec::new();
+    if let Some(sandbox) = &spec.sandbox {
+        argv.extend(crate::sandbox::run::prefix(sandbox).map_err(|e| anyhow!(e))?);
+    }
+    argv.push(spec.program.clone().into());
+    argv.extend(spec.args.iter().map(Into::into));
+    let mut prompt_delivered = false;
+    if spec.prompt_as_arg {
+        if let Some(prompt) = &spec.prompt {
+            argv.push(prompt.into());
+            prompt_delivered = true;
+        }
+    }
+    let mut cmd = CommandBuilder::from_argv(argv);
+    cmd.cwd(&spec.cwd);
+    let mut launch_env: Vec<(String, String)> = vec![
+        ("TERM".into(), "xterm-256color".into()),
+        ("COLORTERM".into(), "truecolor".into()),
+    ];
+    launch_env.extend(spec.env.iter().cloned());
+    match &spec.sandbox {
+        Some(sandbox) => {
+            // Exactly the launcher environment: the allow-listed names of the
+            // daemon's own plus the variables the spec passes by name.
+            cmd.env_clear();
+            for (name, value) in
+                crate::sandbox::spec::launcher_env(sandbox, std::env::vars_os(), &launch_env)
+            {
+                cmd.env(name, value);
+            }
+        }
+        None => {
+            for key in SCRUBBED_ENV {
+                cmd.env_remove(key);
+            }
+            for (key, value) in &launch_env {
+                cmd.env(key, value);
+            }
+        }
+    }
+    Ok((cmd, prompt_delivered))
+}
+
 #[async_trait]
 impl ProcessManager for PtyManager {
     fn name(&self) -> &'static str {
@@ -219,26 +270,7 @@ impl ProcessManager for PtyManager {
             })
             .map_err(|e| anyhow!("opening a pty: {e}"))?;
 
-        // Structured argv: the program and each argument are separate strings
-        // handed to exec, never a shell command line.
-        let mut cmd = CommandBuilder::new(&spec.program);
-        cmd.args(&spec.args);
-        let mut prompt_delivered = false;
-        if spec.prompt_as_arg {
-            if let Some(prompt) = &spec.prompt {
-                cmd.arg(prompt);
-                prompt_delivered = true;
-            }
-        }
-        cmd.cwd(&spec.cwd);
-        for key in SCRUBBED_ENV {
-            cmd.env_remove(key);
-        }
-        cmd.env("TERM", "xterm-256color");
-        cmd.env("COLORTERM", "truecolor");
-        for (key, value) in &spec.env {
-            cmd.env(key, value);
-        }
+        let (cmd, prompt_delivered) = command_for(spec)?;
 
         let mut child = pair
             .slave
@@ -534,6 +566,7 @@ mod tests {
             prompt: None,
             prompt_as_arg: false,
             sidecar: None,
+            sandbox: None,
         }
     }
 
@@ -561,6 +594,70 @@ mod tests {
             "'{needle}' never appeared on screen: {:?}",
             mgr.screen(id, 50).await
         );
+    }
+
+    #[test]
+    fn a_sandboxed_launch_runs_behind_sandbox_run_with_exactly_the_launchers_environment() {
+        use crate::sandbox::spec::Spec;
+        let sandbox = Spec {
+            bwrap: "/usr/bin/bwrap".into(),
+            crew_bin: "/opt/crew/bin/crew".into(),
+            mounts: vec![],
+            env: vec![("HOME".into(), "/home/agent".into())],
+            pass_env: vec!["ANTHROPIC_API_KEY".into(), "CREW_IDENTITY".into()],
+            cwd: "/work".into(),
+            network: true,
+            new_session: false,
+            min_landlock_abi: crate::sandbox::landlock::MIN_ABI,
+            allow_unix: vec![],
+        };
+        let mut launch = spec("a", "claude", &["--flag", "value"]);
+        launch.prompt = Some("do the task".into());
+        launch.prompt_as_arg = true;
+        launch.cwd = "/work".into();
+        launch.env = vec![
+            ("ANTHROPIC_API_KEY".into(), "sk-secret".into()),
+            ("CREW_IDENTITY".into(), "/id.json".into()),
+            ("NOT_PASSED".into(), "dropped".into()),
+        ];
+        launch.sandbox = Some(sandbox.clone());
+        let (cmd, delivered) = command_for(&launch).unwrap();
+        assert!(delivered);
+        let argv: Vec<String> = cmd
+            .get_argv()
+            .iter()
+            .map(|a| a.to_string_lossy().into_owned())
+            .collect();
+        assert_eq!(argv[0], "/opt/crew/bin/crew");
+        assert_eq!(argv[1], "sandbox-run");
+        assert_eq!(argv[3], "--");
+        assert_eq!(&argv[4..], ["claude", "--flag", "value", "do the task"]);
+        // The spec on the command line holds no secret.
+        assert!(!argv[2].contains("sk-secret"), "{}", argv[2]);
+        // The environment is exactly the launcher's: nothing the daemon has
+        // beyond the allow-list, and no variable the spec does not pass.
+        let env: std::collections::BTreeMap<String, String> = cmd
+            .iter_full_env_as_str()
+            .map(|(k, v)| (k.to_string(), v.to_string()))
+            .collect();
+        assert_eq!(
+            env.get("ANTHROPIC_API_KEY").map(String::as_str),
+            Some("sk-secret")
+        );
+        assert_eq!(
+            env.get("CREW_IDENTITY").map(String::as_str),
+            Some("/id.json")
+        );
+        assert!(!env.contains_key("NOT_PASSED"), "{env:?}");
+        assert!(
+            !env.contains_key("PATH") && !env.contains_key("HOME"),
+            "{env:?}"
+        );
+        assert_eq!(env.get("TERM").map(String::as_str), Some("xterm-256color"));
+        // Without a sandbox nothing changes.
+        launch.sandbox = None;
+        let (plain, _) = command_for(&launch).unwrap();
+        assert_eq!(plain.get_argv()[0].to_string_lossy(), "claude");
     }
 
     #[tokio::test]
