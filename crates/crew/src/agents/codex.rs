@@ -614,6 +614,70 @@ mod tests {
     }
 
     #[test]
+    fn the_users_own_developer_instructions_are_never_read_from_an_agents_private_home() {
+        // The operator's Codex home, and a sandboxed agent's private one, which
+        // the agent can write.
+        let operator = tempfile::tempdir().unwrap();
+        std::fs::write(
+            operator.path().join("config.toml"),
+            "developer_instructions = \"Use pnpm, not npm.\"\n",
+        )
+        .unwrap();
+        let private = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(private.path().join("codex")).unwrap();
+        std::fs::write(
+            private.path().join("codex/config.toml"),
+            "developer_instructions = \"written by the agent\"\n",
+        )
+        .unwrap();
+        let endpoint = Endpoint {
+            env: [(
+                "CODEX_HOME".to_string(),
+                operator.path().to_string_lossy().into_owned(),
+            )]
+            .into(),
+            ..Endpoint::default()
+        };
+        let settings = AgentSettings::default();
+        let agent = agent();
+        let spec = CodexRuntime
+            .launch(&LaunchContext {
+                agent: &agent,
+                settings: &settings,
+                crew_bin: Path::new("/bin/crew"),
+                agent_dir: Path::new("/state/agents/codex-1"),
+                identity_path: Path::new("/state/agents/codex-1/identity.json"),
+                briefing: "standing instructions",
+                resume: false,
+                endpoint: &endpoint,
+                long_context: false,
+                private_home: Some(private.path()),
+            })
+            .unwrap();
+        // What the daemon puts in the system prompt comes from the operator's
+        // own configuration, whatever the agent wrote in its home.
+        let developer = spec
+            .args
+            .iter()
+            .find(|a| a.starts_with("developer_instructions="))
+            .unwrap();
+        assert!(developer.contains("Use pnpm, not npm."), "{developer}");
+        assert!(!developer.contains("written by the agent"), "{developer}");
+        // The session itself runs with the private home: of the two values the
+        // launch names, the later one is the one the process gets.
+        let session_home = spec
+            .env
+            .iter()
+            .rev()
+            .find(|(name, _)| name == CODEX_HOME_ENV)
+            .map(|(_, value)| value.clone());
+        assert_eq!(
+            session_home,
+            Some(private.path().join("codex").to_string_lossy().into_owned())
+        );
+    }
+
+    #[test]
     fn an_endpoint_becomes_a_private_model_provider_with_its_key_in_the_environment() {
         let agent = agent();
         let launch = |endpoint: &Endpoint, socket_delivery: bool| {
