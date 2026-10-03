@@ -16,10 +16,14 @@ use super::{AgentLocal, AgentRuntimeState, Daemon, IdReservation};
 use crate::agents::prompt::{self, TeamView};
 use crate::agents::{runtime_for, AgentSettings, LaunchContext, Signal};
 use crate::persistence::NewEvent;
-use crate::process::{Hint, ProcEvent};
+use crate::process::{Hint, ProcEvent, ProcessManager};
 use crate::tasks::active_task;
 
 use super::delivery::DELIVERY_GAP;
+
+/// How long an agent's old sandboxes may take to go before its next launch
+/// fails (its home is never seeded while they run).
+const RETIRE_WITHIN: std::time::Duration = std::time::Duration::from_secs(10);
 
 const RESUME_NOTICE: &str = "[crew] Your session was restarted. Continue your current task where \
 you left off, and call agent_inbox to check for messages you may have missed.";
@@ -481,15 +485,17 @@ impl Daemon {
             }
             None => None,
         };
-        self.stop_sidecar(id);
         if private_home.is_some() {
-            // D2: written through the agent root descriptor, and only while none of
-            // the agent's sandboxes runs (the previous ones are stopped above).
+            // D2: written through the agent root descriptor, and only once none of
+            // the agent's previous sandboxes (session and sidecar) has a process left.
+            self.retire_sandboxes(id, procs.as_ref()).await?;
             crate::agents::home::prepare(
                 agent.runtime,
                 std::os::fd::AsFd::as_fd(&agent_root),
                 &crate::agents::home::Operator::detect(),
             )?;
+        } else {
+            self.stop_sidecar(id);
         }
         if let Some(sidecar) = &spec.sidecar {
             self.start_sidecar(id, sidecar, sidecar_sandbox.as_ref())
@@ -577,6 +583,9 @@ impl Daemon {
                 a.activity = "stopped".into();
             });
             return Ok(());
+        }
+        if let (Some(_), Some(pid)) = (&spec.sandbox, spawned.pid) {
+            self.note_sandbox(id, pid);
         }
         self.update_agent(id, |a| {
             a.pid = spawned.pid;
@@ -675,6 +684,9 @@ impl Daemon {
                     .insert(
                         id.to_string(),
                         super::SidecarProc {
+                            namespace: sandbox
+                                .and(child.id())
+                                .and_then(super::sandbox::sandbox_namespace),
                             child,
                             socket: sidecar.socket.clone(),
                             env: sidecar.env.clone(),
@@ -699,6 +711,59 @@ impl Daemon {
             sidecar.args[0],
             log_path.display()
         )
+    }
+
+    /// Stop what is left of an agent's previous sandboxes and wait until
+    /// none has a process left: its session must have exited (`kill` waits
+    /// for that), its sidecar is killed and reaped, and both sandboxes'
+    /// PID namespaces must be empty. Before this the agent's writable tree
+    /// is not written (design-b3.md §3.4, D2).
+    async fn retire_sandboxes(&self, id: &str, procs: &dyn ProcessManager) -> Result<()> {
+        if procs.is_alive(id) {
+            anyhow::bail!(
+                "{id}'s previous session is still running; its home is written only once it has \
+stopped"
+            );
+        }
+        let mut namespaces: Vec<u64> = self
+            .model()
+            .rt
+            .get(id)
+            .and_then(|r| r.sandbox_ns)
+            .into_iter()
+            .collect();
+        let removed = self
+            .sidecars
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .remove(id);
+        if let Some(mut sidecar) = removed {
+            namespaces.extend(sidecar.namespace);
+            let _ = sidecar.child.start_kill();
+            let reaped = tokio::time::timeout(RETIRE_WITHIN, sidecar.child.wait()).await;
+            if !matches!(reaped, Ok(Ok(_))) {
+                anyhow::bail!("{id}'s previous sidecar did not exit; its home is not written");
+            }
+        }
+        super::sandbox::wait_until_gone(&namespaces, RETIRE_WITHIN)
+            .await
+            .map_err(|e| anyhow!("{id}: {e}; its home is not written"))
+    }
+
+    /// Remember the PID namespace of the sandbox an agent's session runs in,
+    /// once bubblewrap has made it, for [`Self::retire_sandboxes`].
+    fn note_sandbox(&self, id: &str, pid: u32) {
+        let daemon = self.clone();
+        let id = id.to_string();
+        tokio::spawn(async move {
+            for _ in 0..100 {
+                if let Some(ns) = super::sandbox::sandbox_namespace(pid) {
+                    daemon.model().rt(&id).sandbox_ns = Some(ns);
+                    return;
+                }
+                tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+            }
+        });
     }
 
     pub(crate) fn stop_sidecar(&self, id: &str) {

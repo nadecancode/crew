@@ -146,6 +146,8 @@ pub(crate) struct AgentRuntimeState {
     pub quota_checked_at: i64,
     /// The Codex session file, once found.
     pub rollout: Option<std::path::PathBuf>,
+    /// The PID namespace of the session's sandbox, once seen.
+    pub sandbox_ns: Option<u64>,
     /// The runtime itself reported how full the context window is (so the
     /// transcript need not be read for it).
     pub context_reported: bool,
@@ -298,6 +300,8 @@ pub struct Inner {
 pub(crate) struct SidecarProc {
     pub child: tokio::process::Child,
     pub socket: PathBuf,
+    /// The PID namespace of its sandbox, when it runs in one.
+    pub namespace: Option<u64>,
     /// What the sidecar was started with: the agent's variables, which a
     /// sandboxed queue command gets too.
     pub env: Vec<(String, String)>,

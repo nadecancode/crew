@@ -238,6 +238,57 @@ fn find_program(program: &str, path: Option<&OsString>) -> Option<PathBuf> {
         .find(|candidate| candidate.is_file())
 }
 
+/// The PID namespace a sandbox runs its program in, `pid` being the process
+/// the daemon started (`crew sandbox-run`, which becomes bubblewrap): that of
+/// bubblewrap's child, the namespace's init. None while it is not there.
+pub(crate) fn sandbox_namespace(pid: u32) -> Option<u64> {
+    let children = std::fs::read_to_string(format!("/proc/{pid}/task/{pid}/children")).ok()?;
+    let child: u32 = children.split_whitespace().next()?.parse().ok()?;
+    namespace_of(child).filter(|ns| Some(*ns) != namespace_of(pid))
+}
+
+/// The PID namespace process `pid` is in.
+fn namespace_of(pid: u32) -> Option<u64> {
+    let link = std::fs::read_link(format!("/proc/{pid}/ns/pid")).ok()?;
+    link.to_str()?
+        .strip_prefix("pid:[")?
+        .strip_suffix(']')?
+        .parse()
+        .ok()
+}
+
+/// Whether any process is left in PID namespace `ns`.
+fn namespace_alive(ns: u64) -> bool {
+    let Ok(entries) = std::fs::read_dir("/proc") else {
+        return false;
+    };
+    entries
+        .flatten()
+        .filter_map(|e| e.file_name().to_str()?.parse::<u32>().ok())
+        .any(|pid| namespace_of(pid) == Some(ns))
+}
+
+/// Wait until no process is left in any of `namespaces`. A sandbox's
+/// processes die with it, but after the process the daemon started has been
+/// reaped: the kernel tears its namespace down on its own time.
+pub(crate) async fn wait_until_gone(namespaces: &[u64], within: std::time::Duration) -> Result<()> {
+    let deadline = tokio::time::Instant::now() + within;
+    loop {
+        let alive: Vec<u64> = namespaces
+            .iter()
+            .copied()
+            .filter(|ns| namespace_alive(*ns))
+            .collect();
+        if alive.is_empty() {
+            return Ok(());
+        }
+        if tokio::time::Instant::now() >= deadline {
+            bail!("processes are still running in the old sandbox (pid namespace {alive:?})");
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+    }
+}
+
 /// What every refusal offers besides its own fix.
 const OFF: &str = "or set workspace.sandbox.mode: off to run the agents unsandboxed";
 
@@ -1018,5 +1069,46 @@ unsandboxed"
         let without = session(None);
         assert!(!binds(&without).iter().any(|(p, _)| p == &socket));
         assert!(!without.allow_unix.contains(&nix_dir));
+    }
+
+    #[tokio::test]
+    async fn a_sandboxs_namespace_is_found_and_waited_out_with_its_setsid_descendant() {
+        use crate::sandbox::test_support::host_has;
+        let bwrap = std::env::split_paths(&std::env::var_os("PATH").unwrap_or_default())
+            .map(|d| d.join("bwrap"))
+            .find(|p| p.is_file());
+        if !host_has(bwrap.is_some(), "bubblewrap") {
+            return;
+        }
+        let mut sandbox = std::process::Command::new(bwrap.unwrap())
+            .args(["--unshare-user", "--unshare-pid", "--die-with-parent"])
+            .args(["--ro-bind", "/", "/", "--proc", "/proc"])
+            .args(["sh", "-c", "setsid sleep 300 & exec sleep 300"])
+            .spawn()
+            .unwrap();
+        let pid = sandbox.id();
+        let mut ns = None;
+        for _ in 0..200 {
+            ns = sandbox_namespace(pid);
+            if ns.is_some() {
+                break;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(10));
+        }
+        let ns = ns.expect("the sandbox's namespace");
+        assert_ne!(Some(ns), namespace_of(std::process::id()));
+        assert!(namespace_alive(ns));
+        let short = std::time::Duration::from_millis(100);
+        assert!(
+            wait_until_gone(&[ns], short).await.is_err(),
+            "still running"
+        );
+
+        sandbox.kill().unwrap();
+        sandbox.wait().unwrap();
+        wait_until_gone(&[ns], std::time::Duration::from_secs(5))
+            .await
+            .unwrap();
+        assert!(!namespace_alive(ns));
     }
 }
