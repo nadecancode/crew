@@ -394,7 +394,15 @@ impl AgentRuntime for PiRuntime {
                 home.join("pi").to_string_lossy().into_owned(),
             ));
         }
-        env.extend(ctx.endpoint.env.iter().map(|(k, v)| (k.clone(), v.clone())));
+        // The private home is where the daemon seeded and reads; an endpoint's own
+        // setting of the same variable must not send pi elsewhere.
+        env.extend(
+            ctx.endpoint
+                .env
+                .iter()
+                .filter(|(k, _)| ctx.private_home.is_none() || k.as_str() != AGENT_DIR_ENV)
+                .map(|(k, v)| (k.clone(), v.clone())),
+        );
 
         Ok(LaunchSpec {
             agent_id: ctx.agent.id.clone(),
@@ -579,6 +587,57 @@ mod tests {
             .unwrap();
         assert!(!plain.env.iter().any(|(k, _)| k == AGENT_DIR_ENV));
         assert!(dir.path().join("pi-sessions").is_dir());
+    }
+
+    #[test]
+    fn the_private_home_wins_over_an_endpoint_override_of_pis_directory() {
+        let dir = tempfile::tempdir().unwrap();
+        let agent = agent(dir.path());
+        let identity = dir.path().join("identity.json");
+        let home = dir.path().join("rw/home");
+        let endpoint = Endpoint {
+            env: [(AGENT_DIR_ENV.to_string(), "/previous/pi-home".to_string())].into(),
+            ..Endpoint::default()
+        };
+        let launch = |private_home: Option<&Path>| {
+            PiRuntime
+                .launch(&LaunchContext {
+                    agent: &agent,
+                    settings: &AgentSettings::default(),
+                    crew_bin: Path::new("/opt/crew"),
+                    agent_dir: dir.path(),
+                    identity_path: &identity,
+                    briefing: "be helpful",
+                    resume: false,
+                    endpoint: &endpoint,
+                    long_context: false,
+                    private_home,
+                })
+                .unwrap()
+        };
+        // The effective value is the last one a process would see.
+        let effective = |spec: &LaunchSpec| {
+            spec.env
+                .iter()
+                .rev()
+                .find(|(k, _)| k == AGENT_DIR_ENV)
+                .map(|(_, v)| v.clone())
+        };
+        let sandboxed = launch(Some(&home));
+        assert_eq!(effective(&sandboxed).as_deref(), home.join("pi").to_str());
+        assert_eq!(
+            sandboxed
+                .env
+                .iter()
+                .filter(|(k, _)| k == AGENT_DIR_ENV)
+                .count(),
+            1
+        );
+        // Not sandboxed, the operator's own setting is still honoured.
+        assert_eq!(
+            effective(&launch(None)).as_deref(),
+            Some("/previous/pi-home")
+        );
     }
 
     #[test]
