@@ -12,7 +12,7 @@ use crew_core::paths::IDENTITY_ENV;
 use crew_core::RuntimeKind;
 use serde_json::{json, Value};
 
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use super::{AgentRuntime, Dialog, LaunchContext, LaunchSpec, Sidecar, Signal};
 use crate::endpoints::CODEX_KEY_ENV;
@@ -53,6 +53,15 @@ fn own_developer_instructions(home: &Path) -> Option<String> {
     let config: toml::Table = text.parse().ok()?;
     let own = config.get("developer_instructions")?.as_str()?.trim();
     (!own.is_empty()).then(|| own.to_string())
+}
+
+/// The directory an agent's app-server socket lives in: its own, under
+/// `runtime`, named by a hash of the agent's directory.
+fn sidecar_dir(runtime: &Path, agent_dir: &Path) -> PathBuf {
+    runtime.join(format!(
+        "codex-{:016x}",
+        crew_core::util::fnv1a64(agent_dir.to_string_lossy().as_bytes())
+    ))
 }
 
 /// A TOML value literal. JSON strings and arrays of strings are valid TOML.
@@ -207,10 +216,7 @@ impl AgentRuntime for CodexRuntime {
             // would overflow it.
             // A directory of its own per agent: a sandbox binds exactly this
             // directory (the agent can reach its own socket and no other).
-            let dir = crew_core::paths::runtime_dir().join(format!(
-                "codex-{:016x}",
-                crew_core::util::fnv1a64(ctx.agent_dir.to_string_lossy().as_bytes())
-            ));
+            let dir = sidecar_dir(&crew_core::paths::runtime_dir(), ctx.agent_dir);
             let socket = dir.join(format!("{}.sock", crew_core::util::now_ms()));
             if socket.as_os_str().len() >= 104 {
                 bail!(
@@ -754,49 +760,16 @@ mod tests {
     fn the_sidecar_socket_has_a_private_directory_of_its_own() {
         use std::os::unix::fs::PermissionsExt;
         let run = tempfile::tempdir().unwrap();
-        // The test binary shares its environment: serialise on the variable.
-        static ENV: std::sync::Mutex<()> = std::sync::Mutex::new(());
-        let _guard = ENV.lock().unwrap_or_else(|e| e.into_inner());
-        let previous = std::env::var_os("XDG_RUNTIME_DIR");
-        std::env::set_var("XDG_RUNTIME_DIR", run.path());
-        let launch = |dir: &str| {
-            let agent = agent();
-            CodexRuntime
-                .launch(&LaunchContext {
-                    agent: &agent,
-                    settings: &AgentSettings {
-                        socket_delivery: true,
-                        ..AgentSettings::default()
-                    },
-                    crew_bin: Path::new("/bin/crew"),
-                    agent_dir: Path::new(dir),
-                    identity_path: &Path::new(dir).join("identity.json"),
-                    briefing: "standing instructions",
-                    resume: false,
-                    endpoint: &Endpoint::default(),
-                    long_context: false,
-                    private_home: None,
-                })
-                .unwrap()
-                .sidecar
-                .unwrap()
-                .socket
-        };
-        let a = launch("/state/agents/a");
-        let b = launch("/state/agents/b");
-        match previous {
-            Some(v) => std::env::set_var("XDG_RUNTIME_DIR", v),
-            None => std::env::remove_var("XDG_RUNTIME_DIR"),
-        }
-        let (dir_a, dir_b) = (a.parent().unwrap(), b.parent().unwrap());
+        // The runtime directory is passed in: the test process shares its
+        // environment with every other test, so it is not set here.
+        let runtime = run.path().join("crew");
+        let dir_a = sidecar_dir(&runtime, Path::new("/state/agents/a"));
+        let dir_b = sidecar_dir(&runtime, Path::new("/state/agents/b"));
         assert_ne!(dir_a, dir_b, "agents share a socket directory");
-        assert_ne!(
-            dir_a,
-            run.path().join("crew"),
-            "the socket is in the runtime dir itself"
-        );
-        assert!(dir_a.starts_with(run.path().join("crew")));
-        let mode = std::fs::metadata(dir_a).unwrap().permissions().mode() & 0o777;
+        assert_ne!(dir_a, runtime, "the socket is in the runtime dir itself");
+        assert!(dir_a.starts_with(&runtime));
+        crew_core::paths::ensure_private_dir(&dir_a).unwrap();
+        let mode = std::fs::metadata(&dir_a).unwrap().permissions().mode() & 0o777;
         assert_eq!(mode, 0o700);
     }
 
