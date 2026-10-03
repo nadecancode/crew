@@ -49,6 +49,9 @@ struct PtyProc {
     writer: Arc<Mutex<Box<dyn Write + Send>>>,
     parser: Arc<Mutex<vt100::Parser>>,
     alive: Arc<AtomicBool>,
+    /// The process group is known to be empty. Once set, its id may be
+    /// recycled, so it is never signalled or probed again.
+    group_retired: AtomicBool,
     output: broadcast::Sender<Vec<u8>>,
 }
 
@@ -262,6 +265,7 @@ impl ProcessManager for PtyManager {
                 0,
             ))),
             alive: Arc::new(AtomicBool::new(true)),
+            group_retired: AtomicBool::new(false),
             output,
         });
 
@@ -317,6 +321,9 @@ impl ProcessManager for PtyManager {
                     // only briefly.
                     let _ = drained_rx.recv_timeout(EXIT_DRAIN);
                     proc.alive.store(false, Ordering::SeqCst);
+                    if pid.is_some_and(|pid| !group_exists(pid)) {
+                        proc.group_retired.store(true, Ordering::SeqCst);
+                    }
                     let (code, detail) = match status {
                         Ok(status) => match status.signal() {
                             Some(signal) => (None, format!("killed by signal {signal}")),
@@ -407,7 +414,11 @@ impl ProcessManager for PtyManager {
         let Some(pid) = proc.pid else { return Ok(()) };
         // The group is tracked by its own id, not by the leader: children can
         // outlive a leader that exits on TERM, and must still be killed.
+        if proc.group_retired.load(Ordering::SeqCst) {
+            return Ok(());
+        }
         if !group_exists(pid) {
+            proc.group_retired.store(true, Ordering::SeqCst);
             return Ok(());
         }
         // A stopped process cannot handle SIGTERM until it is continued.
@@ -415,6 +426,7 @@ impl ProcessManager for PtyManager {
         signal_group(pid, libc::SIGTERM)?;
         for _ in 0..20 {
             if !group_exists(pid) {
+                proc.group_retired.store(true, Ordering::SeqCst);
                 return Ok(());
             }
             tokio::time::sleep(Duration::from_millis(100)).await;
@@ -422,6 +434,7 @@ impl ProcessManager for PtyManager {
         signal_group(pid, libc::SIGKILL)?;
         for _ in 0..20 {
             if !group_exists(pid) {
+                proc.group_retired.store(true, Ordering::SeqCst);
                 break;
             }
             tokio::time::sleep(Duration::from_millis(50)).await;
@@ -682,6 +695,24 @@ mod tests {
             unsafe { libc::kill(child, libc::SIGKILL) };
         }
         assert!(gone, "child {child} survived kill()");
+    }
+
+    #[tokio::test]
+    async fn a_group_that_is_gone_is_retired_so_a_recycled_pid_is_never_signalled() {
+        let (tx, mut rx) = mpsc::unbounded_channel();
+        let mgr = PtyManager::new(tx);
+        mgr.spawn(&spec("a", "sh", &["-c", "exit 0"]))
+            .await
+            .unwrap();
+        wait_for_exit(&mut rx).await;
+        assert!(mgr.get("a").unwrap().group_retired.load(Ordering::SeqCst));
+        // And a group killed through kill() is retired too.
+        mgr.spawn(&spec("b", "sh", &["-c", "sleep 300"]))
+            .await
+            .unwrap();
+        mgr.kill("b").await.unwrap();
+        wait_for_exit(&mut rx).await;
+        assert!(mgr.get("b").unwrap().group_retired.load(Ordering::SeqCst));
     }
 
     #[tokio::test]
