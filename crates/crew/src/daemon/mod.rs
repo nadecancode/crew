@@ -34,6 +34,7 @@ mod limits;
 mod orchestrate;
 mod policy;
 mod questions;
+mod retire;
 mod roster;
 mod sandbox;
 mod server;
@@ -261,9 +262,9 @@ pub struct Inner {
     /// Helper processes agents depend on (Codex app-servers), by agent id.
     pub(crate) sidecars: Mutex<HashMap<String, SidecarProc>>,
     /// Every sandbox started for an agent that is not known to be gone yet
-    /// (design-b3.md §3.4, D2): the agent's home is not written until its
-    /// list is empty. Entries leave only once their sandbox is gone.
-    pub(crate) retiring: Mutex<HashMap<String, Vec<sandbox::Record>>>,
+    /// (design-b3.md §3.4, D2): nothing of the agent's next launch is
+    /// written until its entries are gone.
+    pub(crate) ledger: retire::Ledger,
     /// One launch of an agent at a time.
     pub(crate) launches: Mutex<HashMap<String, Arc<tokio::sync::Mutex<()>>>>,
     /// Git operations run one at a time.
@@ -304,8 +305,6 @@ pub struct Inner {
 pub(crate) struct SidecarProc {
     pub child: tokio::process::Child,
     pub socket: PathBuf,
-    /// Its entry in the agent's retirement ledger, when it runs in a sandbox.
-    pub record: Option<sandbox::Record>,
     /// What the sidecar was started with: the agent's variables, which a
     /// sandboxed queue command gets too.
     pub env: Vec<(String, String)>,
@@ -835,6 +834,9 @@ pub async fn start(options: DaemonOptions) -> Result<Running> {
     let started_at = now_ms();
     let project = model.session.team.as_ref().map(|t| t.project.clone());
 
+    // What an earlier daemon started stays binding (design-b3.md §3.4, D2).
+    let ledger = retire::Ledger::open(&state_dir.join("sandboxes"))
+        .context("opening the sandbox retirement ledger")?;
     let daemon = Daemon(Arc::new(Inner {
         workspace: workspace.clone(),
         state_dir: state_dir.clone(),
@@ -851,7 +853,7 @@ pub async fn start(options: DaemonOptions) -> Result<Running> {
         delivery: Mutex::new(HashMap::new()),
         listeners: Mutex::new(HashMap::new()),
         sidecars: Mutex::new(HashMap::new()),
-        retiring: Mutex::new(HashMap::new()),
+        ledger,
         launches: Mutex::new(HashMap::new()),
         git_lock: tokio::sync::Mutex::new(()),
         plan_lock: tokio::sync::Mutex::new(()),

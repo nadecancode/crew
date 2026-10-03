@@ -21,21 +21,14 @@ use crate::tasks::active_task;
 
 use super::delivery::DELIVERY_GAP;
 
-/// Kill a sidecar and reap it in the background; its ledger entry learns
-/// how it ended.
-fn reap_sidecar(mut child: tokio::process::Child, record: Option<super::sandbox::Record>) {
+/// Kill a sidecar and reap it in the background. Its sandbox, if it has
+/// one, stays in the ledger until it reports that it is gone.
+fn reap_sidecar(mut child: tokio::process::Child) {
     let _ = child.start_kill();
     tokio::spawn(async move {
-        let status = child.wait().await;
-        if let Some(record) = record {
-            record.lock().unwrap_or_else(|e| e.into_inner()).ended =
-                Some(status.is_ok_and(|s| s.code().is_some()));
-        }
+        let _ = child.wait().await;
     });
 }
-
-/// How long a sandbox may take to show its PID namespace.
-const DISCOVER_WITHIN: std::time::Duration = std::time::Duration::from_secs(5);
 
 /// How long an agent's old sandboxes may take to go before its next launch
 /// fails (its home is never seeded while they run).
@@ -599,7 +592,41 @@ impl Daemon {
             a.subagents = 0;
         });
 
+        // In the ledger, on disk, before it starts: its sandbox reports there
+        // when it is gone. A spawn that fails leaves the entry: it is not
+        // known whether a process was made.
+        let record = match spec.sandbox.as_mut() {
+            Some(sandbox) => {
+                let record = self.ledger.start(id, "session")?;
+                sandbox.done = Some(record.done().to_path_buf());
+                Some(record)
+            }
+            None => None,
+        };
         let spawned = procs.spawn(&spec).await?;
+        if let Some(record) = &record {
+            record.update(|r| r.pid = spawned.pid);
+            // Its init is needed to know that it is gone if it is killed,
+            // before anything kills it (a team stop included).
+            let found = match spawned.pid {
+                Some(pid) => {
+                    super::retire::discover(
+                        pid,
+                        || procs.is_alive(id),
+                        super::retire::DISCOVER_WITHIN,
+                    )
+                    .await
+                }
+                None => Err(anyhow!("it has no pid")),
+            };
+            match found {
+                Ok(init) => record.update(|r| r.init = init),
+                Err(e) => {
+                    let _ = procs.kill(id).await;
+                    anyhow::bail!("{id}'s session was stopped: {e}");
+                }
+            }
+        }
         if stopping() {
             // Stopped while the process was coming up: it goes too.
             let _ = procs.kill(id).await;
@@ -609,22 +636,6 @@ impl Daemon {
                 a.activity = "stopped".into();
             });
             return Ok(());
-        }
-        if let (Some(_), Some(pid)) = (&spec.sandbox, spawned.pid) {
-            // In the ledger before anything can go wrong; its namespace is
-            // needed to know, later, that it is gone.
-            let record = super::sandbox::record("session", Some(pid));
-            self.with_retiring(id, |l| l.push(record.clone()));
-            let found = super::sandbox::discover(pid, || procs.is_alive(id), DISCOVER_WITHIN).await;
-            match found {
-                Ok(namespace) => {
-                    record.lock().unwrap_or_else(|e| e.into_inner()).namespace = namespace;
-                }
-                Err(e) => {
-                    let _ = procs.kill(id).await;
-                    anyhow::bail!("{id}'s session was stopped: {e}");
-                }
-            }
         }
         self.update_agent(id, |a| {
             a.pid = spawned.pid;
@@ -705,44 +716,49 @@ impl Daemon {
         let argv: Vec<String> = std::iter::once(sidecar.program.clone())
             .chain(sidecar.args.iter().cloned())
             .collect();
-        let mut cmd = super::sandbox::command(sandbox, &argv, &sidecar.env)?;
+        // In the ledger, on disk, before it starts: its sandbox reports there
+        // when it is gone.
+        let record = sandbox
+            .map(|_| self.ledger.start(id, "sidecar"))
+            .transpose()?;
+        let marked = sandbox.zip(record.as_ref()).map(|(sandbox, record)| {
+            let mut sandbox = sandbox.clone();
+            sandbox.done = Some(record.done().to_path_buf());
+            sandbox
+        });
+        let mut cmd = super::sandbox::command(marked.as_ref(), &argv, &sidecar.env)?;
         cmd.current_dir(&sidecar.cwd)
             .stdin(std::process::Stdio::null())
             .stdout(log.try_clone()?)
             .stderr(log)
             // The sidecar must not outlive the daemon that owns it.
             .kill_on_drop(true);
-        let mut child = cmd
-            .spawn()
+        let spawned = cmd.spawn();
+        if let (Err(_), Some(record)) = (&spawned, &record) {
+            self.ledger.never_started(record);
+        }
+        let mut child = spawned
             .with_context(|| format!("starting `{} {}`", sidecar.program, sidecar.args[0]))?;
-        // In the ledger from the start, whatever happens next.
-        let record = sandbox.map(|_| super::sandbox::record("sidecar", child.id()));
-        if let Some(record) = &record {
-            self.with_retiring(id, |l| l.push(record.clone()));
+        if let (Some(record), Some(pid)) = (&record, child.id()) {
+            record.update(|r| r.pid = Some(pid));
+            // Its init, before anything can kill it.
+            let running = || super::retire::Proc::of(pid).is_some_and(|p| p.running());
+            match super::retire::discover(pid, running, super::retire::DISCOVER_WITHIN).await {
+                Ok(init) => record.update(|r| r.init = init),
+                Err(e) => {
+                    reap_sidecar(child);
+                    anyhow::bail!("`{} {}`: {e}", sidecar.program, sidecar.args[0]);
+                }
+            }
         }
         for _ in 0..150 {
             if sidecar.socket.exists() {
-                // Its socket is up, so its sandbox is: its namespace must be
-                // there to be seen, or it is not run at all.
-                if let Some(record) = &record {
-                    let namespace = child.id().and_then(super::sandbox::sandbox_namespace);
-                    if namespace.is_none() {
-                        reap_sidecar(child, Some(record.clone()));
-                        anyhow::bail!(
-                            "`{} {}`: its sandbox's PID namespace was not found",
-                            sidecar.program,
-                            sidecar.args[0]
-                        );
-                    }
-                    record.lock().unwrap_or_else(|e| e.into_inner()).namespace = namespace;
-                }
                 self.sidecars
                     .lock()
                     .unwrap_or_else(|e| e.into_inner())
                     .insert(
                         id.to_string(),
                         super::SidecarProc {
-                            record,
                             child,
                             socket: sidecar.socket.clone(),
                             env: sidecar.env.clone(),
@@ -751,10 +767,6 @@ impl Daemon {
                 return Ok(());
             }
             if let Some(status) = child.try_wait()? {
-                if let Some(record) = &record {
-                    record.lock().unwrap_or_else(|e| e.into_inner()).ended =
-                        Some(status.code().is_some());
-                }
                 anyhow::bail!(
                     "`{} {}` exited during start-up ({status}); see {}",
                     sidecar.program,
@@ -764,7 +776,7 @@ impl Daemon {
             }
             tokio::time::sleep(std::time::Duration::from_millis(100)).await;
         }
-        reap_sidecar(child, record);
+        reap_sidecar(child);
         anyhow::bail!(
             "`{} {}` did not open its socket within 15s; see {}",
             sidecar.program,
@@ -773,13 +785,11 @@ impl Daemon {
         )
     }
 
-    /// Wait until none of an agent's previous sandboxes (sessions and
-    /// sidecars, however they were stopped) is left, by its ledger: the
-    /// session must have exited, the sidecar is stopped too, and each must
-    /// be known to be gone. Before this the agent's writable tree is not
-    /// written (design-b3.md §3.4, D2). Entries leave the ledger only once
-    /// they are gone, so a launch that gives up here leaves the next one the
-    /// same wait.
+    /// Wait until none of an agent's previous sandboxes is left, by its
+    /// ledger (daemon::retire): the session must have exited, the sidecar
+    /// is stopped too, and each sandbox, whoever started it, must be known
+    /// to be gone. Before this nothing of the agent's next launch is
+    /// written (design-b3.md §3.4, D2).
     pub(super) async fn retire_sandboxes(
         &self,
         id: &str,
@@ -793,22 +803,10 @@ stopped"
             );
         }
         self.stop_sidecar(id);
-        let records = self.with_retiring(id, |l| l.clone());
-        let waited = super::sandbox::wait_retired(&records, within).await;
-        self.with_retiring(id, |l| {
-            l.retain(|r| !r.lock().unwrap_or_else(|e| e.into_inner()).gone())
-        });
-        waited.map_err(|e| anyhow!("{id}'s home is not written: {e}"))
-    }
-
-    /// `f` on the retirement ledger of agent `id`.
-    fn with_retiring<T>(
-        &self,
-        id: &str,
-        f: impl FnOnce(&mut Vec<super::sandbox::Record>) -> T,
-    ) -> T {
-        let mut all = self.retiring.lock().unwrap_or_else(|e| e.into_inner());
-        f(all.entry(id.to_string()).or_default())
+        self.ledger
+            .retire(id, within)
+            .await
+            .map_err(|e| anyhow!("{id}'s home is not written: {e}"))
     }
 
     /// One launch of agent `id` at a time.
@@ -821,18 +819,6 @@ stopped"
             .clone()
     }
 
-    /// A process of agent `id` ended (whichever incarnation `instance` was):
-    /// its ledger entry learns how.
-    pub(super) fn record_exit(&self, id: &str, instance: &str, code: Option<i32>) {
-        let retiring = self.retiring.lock().unwrap_or_else(|e| e.into_inner());
-        for record in retiring.get(id).into_iter().flatten() {
-            let mut r = record.lock().unwrap_or_else(|e| e.into_inner());
-            if r.what == "session" && r.pid.is_some_and(|p| p.to_string() == instance) {
-                r.ended = Some(code.is_some());
-            }
-        }
-    }
-
     pub(crate) fn stop_sidecar(&self, id: &str) {
         let removed = self
             .sidecars
@@ -840,7 +826,7 @@ stopped"
             .unwrap_or_else(|e| e.into_inner())
             .remove(id);
         if let Some(sidecar) = removed {
-            reap_sidecar(sidecar.child, sidecar.record);
+            reap_sidecar(sidecar.child);
         }
     }
 
@@ -1538,9 +1524,6 @@ defaults.auto_trust: true in the team file.",
                 code,
                 detail,
             } => {
-                // Recorded for every incarnation, even one already replaced:
-                // its sandbox's end is what the next launch waits for.
-                self.record_exit(&agent_id, &instance, code);
                 // Ignore the exit of a process that has since been replaced
                 // (or that an explicit stop already accounted for).
                 let current = self.agent(&agent_id).and_then(|a| {
