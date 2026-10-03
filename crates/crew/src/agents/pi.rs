@@ -32,6 +32,8 @@ const EXTENSION_FILE: &str = "crew-pi.ts";
 /// Where the agent's sessions are kept: a directory per agent, so `--continue`
 /// resumes this agent's session and nobody else's.
 const SESSIONS_DIR: &str = "pi-sessions";
+/// Where pi keeps its settings, models and credentials.
+pub const AGENT_DIR_ENV: &str = "PI_CODING_AGENT_DIR";
 
 pub struct PiRuntime;
 
@@ -333,8 +335,17 @@ impl AgentRuntime for PiRuntime {
         let briefing_path = ctx.agent_dir.join("briefing.md");
         write_private_file(&briefing_path, ctx.briefing.as_bytes())?;
         let extension = write_extension(ctx.agent_dir, ctx.crew_bin, ctx.identity_path)?;
-        let sessions = ctx.agent_dir.join(SESSIONS_DIR);
-        crew_core::paths::ensure_private_dir(&sessions)?;
+        // In a sandbox pi's own directory and its sessions live in the agent's
+        // writable tree (`<A>/rw`); the daemon makes that directory through the
+        // agent root descriptor, never by walking the path here.
+        let sessions = match ctx.private_home.and_then(Path::parent) {
+            Some(rw) => rw.join(SESSIONS_DIR),
+            None => {
+                let sessions = ctx.agent_dir.join(SESSIONS_DIR);
+                crew_core::paths::ensure_private_dir(&sessions)?;
+                sessions
+            }
+        };
 
         let mut args: Vec<String> = vec![
             "--extension".into(),
@@ -377,6 +388,12 @@ impl AgentRuntime for PiRuntime {
             IDENTITY_ENV.to_string(),
             ctx.identity_path.to_string_lossy().into_owned(),
         )];
+        if let Some(home) = ctx.private_home {
+            env.push((
+                AGENT_DIR_ENV.to_string(),
+                home.join("pi").to_string_lossy().into_owned(),
+            ));
+        }
         env.extend(ctx.endpoint.env.iter().map(|(k, v)| (k.clone(), v.clone())));
 
         Ok(LaunchSpec {
@@ -510,6 +527,58 @@ mod tests {
             usage: None,
             error: None,
         }
+    }
+
+    #[test]
+    fn a_sandboxed_launch_keeps_pis_directory_and_sessions_under_the_agents_writable_tree() {
+        let dir = tempfile::tempdir().unwrap();
+        let agent = agent(dir.path());
+        let identity = dir.path().join("identity.json");
+        let home = dir.path().join("rw/home");
+        let spec = PiRuntime
+            .launch(&LaunchContext {
+                agent: &agent,
+                settings: &AgentSettings::default(),
+                crew_bin: Path::new("/opt/crew"),
+                agent_dir: dir.path(),
+                identity_path: &identity,
+                briefing: "be helpful",
+                resume: false,
+                endpoint: &Endpoint::default(),
+                long_context: false,
+                private_home: Some(&home),
+            })
+            .unwrap();
+        let var = |name: &str| {
+            spec.env
+                .iter()
+                .find(|(k, _)| k == name)
+                .map(|(_, v)| v.as_str())
+        };
+        assert_eq!(var(AGENT_DIR_ENV), home.join("pi").to_str());
+        let sessions = dir.path().join("rw/pi-sessions");
+        let at = spec.args.iter().position(|a| a == "--session-dir").unwrap();
+        assert_eq!(Path::new(&spec.args[at + 1]), sessions);
+        // `<A>/rw` belongs to the agent: the daemon makes nothing in it with a
+        // path walk (the directory is made through the agent root descriptor).
+        assert!(!sessions.exists());
+        // Not sandboxed: the sessions stay in the agent directory, as before.
+        let plain = PiRuntime
+            .launch(&LaunchContext {
+                agent: &agent,
+                settings: &AgentSettings::default(),
+                crew_bin: Path::new("/opt/crew"),
+                agent_dir: dir.path(),
+                identity_path: &identity,
+                briefing: "be helpful",
+                resume: false,
+                endpoint: &Endpoint::default(),
+                long_context: false,
+                private_home: None,
+            })
+            .unwrap();
+        assert!(!plain.env.iter().any(|(k, _)| k == AGENT_DIR_ENV));
+        assert!(dir.path().join("pi-sessions").is_dir());
     }
 
     #[test]
