@@ -1228,6 +1228,9 @@ mod tests {
         let (launcher, _warnings) =
             launch::helper_launcher(&host, session, &Extra::default(), &wt_path, &admin)
                 .unwrap_or_else(|e| panic!("building the helper profile: {e}"));
+        // Timeout recovery after a helper merge needs the trusted lock location.
+        use launch::Launcher;
+        assert_eq!(launcher.admin_dir().as_deref(), Some(admin.as_path()));
         let spec = launcher.spec();
         assert!(!spec.network && spec.new_session && spec.pass_env.is_empty());
         let bound = |p: &Path| {

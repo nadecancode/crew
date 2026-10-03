@@ -172,5 +172,6 @@ pub fn helper_launcher(
             nix_daemon: None,
         },
     )?;
-    Ok((SandboxLauncher::new(built.spec, Vec::new()), built.warnings))
+    let launcher = SandboxLauncher::new(built.spec, Vec::new()).with_admin_dir(admin.to_path_buf());
+    Ok((launcher, built.warnings))
 }
