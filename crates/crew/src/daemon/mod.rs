@@ -1016,6 +1016,35 @@ mod tests {
             "followed a linked rollout"
         );
     }
+
+    #[tokio::test]
+    async fn the_daemons_agent_files_accessor_does_not_create_a_missing_home() {
+        let temp = tempfile::tempdir().unwrap();
+        let running = start(DaemonOptions {
+            workspace: temp.path().to_path_buf(),
+            crew_bin: std::env::current_exe().unwrap(),
+        })
+        .await
+        .unwrap();
+        let daemon = &running.daemon;
+        let mut team = crew_core::config::TeamConfig::from_yaml(
+            "project: reader-review\nobjective: reader review\n",
+        )
+        .unwrap();
+        team.workspace.sandbox.mode = crew_core::config::SandboxMode::Required;
+        daemon.model().session.team = Some(team);
+        drop(daemon.agent_root("a").unwrap());
+        let home = daemon.agent_dir("a").join("rw/home");
+        std::fs::remove_dir(&home).unwrap();
+        let files = daemon.agent_files("a").unwrap();
+        assert!(
+            !home.exists(),
+            "a transcript reader created a missing private home"
+        );
+        let file = daemon.agent_dir("a").join("rw/session.jsonl");
+        std::fs::write(&file, "data").unwrap();
+        assert!(files.open_reported(&file).is_some());
+    }
     #[test]
     fn the_workspace_lock_is_held_until_everything_is_withdrawn() {
         let dir = tempfile::tempdir().unwrap();
