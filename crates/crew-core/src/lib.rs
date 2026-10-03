@@ -6,6 +6,7 @@ pub mod client;
 pub mod config;
 pub mod paths;
 pub mod rpc;
+pub mod signals;
 pub mod types;
 pub mod util;
 

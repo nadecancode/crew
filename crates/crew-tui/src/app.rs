@@ -367,6 +367,7 @@ pub struct App {
     pub stopping: bool,
     /// The team was stopped from this dashboard.
     pub stopped: bool,
+    pub(crate) daemon_stopped: bool,
     /// The models agents can be put on, as the daemon last listed them.
     pub models: Vec<ModelChoice>,
     /// A listing was asked for and has not come back.
@@ -443,6 +444,7 @@ impl App {
             ring: false,
             stopping: false,
             stopped: false,
+            daemon_stopped: false,
             models: Vec::new(),
             models_pending: false,
             models_error: None,
@@ -821,10 +823,15 @@ impl App {
             Push::Message(msg) => self.add_message(msg, now),
             Push::Event(event) => self.add_event(event),
             Push::Session(session) => self.session = *session,
+            Push::Shutdown => {
+                self.daemon_stopped = true;
+                self.stopped |= self.stopping;
+                self.should_quit = true;
+                self.stopping = false;
+            }
             // Handled by the connection layer (refetch / reconnect / attach only).
             Push::Unknown
             | Push::Resync
-            | Push::Shutdown
             | Push::Pty { .. }
             | Push::PtyClosed
             | Push::Compact { .. }
@@ -1255,6 +1262,17 @@ pub fn task_layers(tasks: &[Task]) -> Vec<Vec<usize>> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn daemon_shutdown_push_finishes_the_dashboard() {
+        let mut app = App::new();
+        app.apply_push(Push::Shutdown, 1);
+        assert!(app.daemon_stopped && app.should_quit && !app.stopped);
+        let mut app = App::new();
+        app.stopping = true;
+        app.apply_push(Push::Shutdown, 1);
+        assert!(app.daemon_stopped && app.should_quit && app.stopped);
+    }
     use crate::fixture;
     use crew_core::types::MessageType;
 

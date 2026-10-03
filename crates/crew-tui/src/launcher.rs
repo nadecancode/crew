@@ -330,11 +330,19 @@ fn sanitize(text: &str) -> String {
 
 /// Show the launcher until the user launches or cancels (`None`).
 pub fn run_launcher(mut launcher: Launcher) -> Result<Option<Launch>> {
+    let signals = crew_core::signals::TerminationSignals::install()
+        .context("watching termination signals")?;
     let mut terminal = crate::enter_terminal().context("preparing the terminal")?;
     let theme = Theme::detect();
     let mut outcome = || -> Result<Option<Launch>> {
         loop {
+            if signals.is_pending() {
+                return Ok(None);
+            }
             terminal.draw(|frame| render(frame, &launcher, &theme))?;
+            if !term::poll(std::time::Duration::from_millis(100))? {
+                continue;
+            }
             match term::read()? {
                 TermEvent::Key(key) if key.kind != KeyEventKind::Release => {
                     match launcher.handle_key(key) {

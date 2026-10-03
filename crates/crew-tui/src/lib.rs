@@ -27,6 +27,7 @@ use std::sync::mpsc::{self, Receiver, RecvTimeoutError};
 use std::sync::{Arc, Once};
 
 use anyhow::{Context, Result};
+use crew_core::signals::TerminationSignals;
 use crew_core::util::now_ms;
 use ratatui::backend::{CrosstermBackend, TestBackend};
 use ratatui::crossterm::event::{
@@ -51,7 +52,7 @@ use theme::Theme;
 /// How the dashboard was left.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Exit {
-    /// The dashboard was closed; agents and the daemon keep running.
+    /// The dashboard was closed.
     Detached,
     /// The team was stopped from the dashboard: agents and daemon are gone.
     Stopped,
@@ -73,8 +74,15 @@ pub fn run(
 
     let (tx, rx) = mpsc::channel::<UiEvent>();
     let stop = Arc::new(AtomicBool::new(false));
+    let signals = TerminationSignals::install().context("watching termination signals")?;
     let mut terminal = enter_terminal().context("preparing the terminal")?;
-    net::spawn_input(tx.clone(), stop.clone());
+    let input = match net::spawn_input(tx.clone(), stop.clone()) {
+        Ok(input) => input,
+        Err(error) => {
+            leave_terminal();
+            return Err(error).context("starting terminal input");
+        }
+    };
     net::spawn_subscriber(socket.to_path_buf(), tx.clone(), stop.clone());
     let requests = net::spawn_requester(socket.to_path_buf(), tx);
 
@@ -95,10 +103,15 @@ pub fn run(
         app.mouse = false;
         set_mouse(false);
     }
-    let result = event_loop(&mut terminal, &mut app, &theme, &rx, &requests);
+    let result = event_loop(&mut terminal, &mut app, &theme, &rx, &requests, &signals);
 
     stop.store(true, Ordering::Relaxed);
+    let _ = input.join();
     leave_terminal();
+    if result.is_ok() && app.daemon_stopped && !app.stopped {
+        use std::io::Write as _;
+        let _ = writeln!(io::stderr(), "the crew daemon stopped");
+    }
     result.map(|()| {
         if app.stopped {
             Exit::Stopped
@@ -114,8 +127,12 @@ fn event_loop(
     theme: &Theme,
     rx: &Receiver<UiEvent>,
     requests: &net::Requests,
+    signals: &TerminationSignals,
 ) -> Result<()> {
     loop {
+        if signals.is_pending() {
+            return Ok(());
+        }
         let now = now_ms();
         app.tick(now);
         for command in app.due_commands(now) {
@@ -138,9 +155,15 @@ fn event_loop(
                 let area = Rect::new(0, 0, size.width, size.height);
                 let page = page_rows(app, if area.height == 0 { 24 } else { area.height });
                 handle(app, event, requests, page, area)?;
+                if app.should_quit || signals.is_pending() {
+                    return Ok(());
+                }
                 // Drain whatever else is queued so a burst costs one redraw.
                 while let Ok(event) = rx.try_recv() {
                     handle(app, event, requests, page, area)?;
+                    if app.should_quit || signals.is_pending() {
+                        return Ok(());
+                    }
                 }
             }
             Err(RecvTimeoutError::Timeout) => {}

@@ -99,7 +99,10 @@ pub fn spawn_subscriber(socket: PathBuf, tx: Sender<UiEvent>, stop: Arc<AtomicBo
                                 return Ok(());
                             }
                         }
-                        Push::Shutdown => return Err(ClientError::Closed),
+                        Push::Shutdown => {
+                            let _ = tx.send(UiEvent::Push(Box::new(Push::Shutdown)));
+                            return Ok(());
+                        }
                         push => {
                             if tx.send(UiEvent::Push(Box::new(push))).is_err() {
                                 return Ok(());
@@ -433,10 +436,14 @@ impl Requester {
 
 /// Forward terminal events. The poll timeout only bounds how long the thread
 /// takes to notice `stop`; it does not drive any redraw.
-pub fn spawn_input(tx: Sender<UiEvent>, stop: Arc<AtomicBool>) {
+pub fn spawn_input(
+    tx: Sender<UiEvent>,
+    stop: Arc<AtomicBool>,
+) -> std::io::Result<thread::JoinHandle<()>> {
     let run = move || {
         while !stop.load(Ordering::Relaxed) {
             match term::poll(Duration::from_millis(200)) {
+                Ok(true) if stop.load(Ordering::Relaxed) => return,
                 Ok(true) => match term::read() {
                     Ok(event) => {
                         if tx.send(UiEvent::Input(event)).is_err() {
@@ -450,9 +457,9 @@ pub fn spawn_input(tx: Sender<UiEvent>, stop: Arc<AtomicBool>) {
             }
         }
     };
-    let _ = thread::Builder::new()
+    thread::Builder::new()
         .name("crew-tui-input".into())
-        .spawn(run);
+        .spawn(run)
 }
 
 #[cfg(test)]
@@ -673,6 +680,26 @@ mod tests {
     }
 
     #[test]
+    fn shutdown_push_is_forwarded_as_a_terminal_event() {
+        let temp = tempfile::tempdir().unwrap();
+        let path = temp.path().join("daemon.sock");
+        let daemon = FakeDaemon::start(&path);
+        let (tx, rx) = mpsc::channel();
+        let stop = Arc::new(AtomicBool::new(false));
+        spawn_subscriber(path, tx, stop.clone());
+        expect(&rx, "snapshot", |event| match event {
+            UiEvent::Snapshot(_) => Some(()),
+            _ => None,
+        });
+        daemon.push(Push::Shutdown);
+        let event = rx.recv_timeout(Duration::from_secs(2));
+        stop.store(true, Ordering::Relaxed);
+        daemon.stop();
+        assert!(matches!(event, Ok(UiEvent::Push(push)) if *push == Push::Shutdown));
+        assert!(rx.try_recv().is_err());
+    }
+
+    #[test]
     fn slow_model_listing_does_not_block_screen_requests() {
         let temp = tempfile::tempdir().unwrap();
         let path = temp.path().join("daemon.sock");
@@ -781,10 +808,10 @@ mod tests {
             _ => None,
         });
 
-        // A graceful shutdown notice is treated like a disconnect.
+        // A graceful shutdown ends the subscription and reaches the UI.
         daemon.push(Push::Shutdown);
-        expect(&rx, "the disconnect after shutdown", |e| match e {
-            UiEvent::Disconnected => Some(()),
+        expect(&rx, "the shutdown notice", |e| match e {
+            UiEvent::Push(push) if *push == Push::Shutdown => Some(()),
             _ => None,
         });
         stop.store(true, Ordering::Relaxed);
