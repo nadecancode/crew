@@ -268,6 +268,7 @@ impl Layout {
             cli: None,
             pass_env: &["CREW_IDENTITY".into(), "ANTHROPIC_API_KEY".into()],
             terminal,
+            nix_daemon: None,
         };
         build(host, &request).unwrap().spec
     }
@@ -402,6 +403,7 @@ fn a_helper_gets_no_identity_credentials_socket_or_network() {
         cli: None,
         pass_env: &[],
         terminal: false,
+        nix_daemon: None,
     };
     let spec = build(&host, &request).unwrap().spec;
     let script = format!(
@@ -614,6 +616,7 @@ fn a_socket_in_a_bound_tree_is_masked() {
         cli: None,
         pass_env: &[],
         terminal: false,
+        nix_daemon: None,
     };
     let spec = build(&host, &request).unwrap().spec;
     let script = format!(
@@ -656,4 +659,14 @@ fn resolv_conf_into_run_shows_only_the_target_file() {
         "{}",
         text(&out)
     );
+}
+
+#[test]
+fn the_probe_finds_this_host_able_to_run_sandboxes() {
+    let Some((bwrap, abi)) = bwrap() else { return };
+    let crew = Path::new(CREW).canonicalize().unwrap();
+    let available = crew::sandbox::probe::probe(&crew, std::env::var_os("PATH").as_ref()).unwrap();
+    assert_eq!(available.bwrap, bwrap);
+    assert_eq!(available.landlock_abi, abi);
+    assert!(available.bwrap_version >= crew::sandbox::probe::MIN_BWRAP);
 }

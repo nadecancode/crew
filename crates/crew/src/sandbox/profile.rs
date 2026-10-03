@@ -21,6 +21,7 @@ use std::path::{Component, Path, PathBuf};
 
 use super::landlock;
 use super::pin::{identify, Identity, Kind};
+use super::probe::UntrustedNixDaemon;
 use super::scan::{scan_excluding, Findings};
 use super::spec::{check_name, Mount, Spec};
 use super::validate::{host_members, Protected};
@@ -140,6 +141,9 @@ pub struct Request<'a> {
     pub pass_env: &'a [String],
     /// The process runs on a PTY (otherwise it gets a new session).
     pub terminal: bool,
+    /// The Nix daemon socket, for agents, when `workspace.sandbox.nix_daemon`
+    /// is set and the daemon was found not to trust the operator.
+    pub nix_daemon: Option<&'a UntrustedNixDaemon>,
 }
 
 #[derive(Debug)]
@@ -332,7 +336,11 @@ impl<'a> Builder<'a> {
             new_session: !agent || !request.terminal,
             min_landlock_abi,
             allow_unix: if agent {
-                vec![session.runtime_dir.to_path_buf()]
+                let nix = request.nix_daemon.and_then(|n| n.socket().parent());
+                std::iter::once(session.runtime_dir)
+                    .chain(nix)
+                    .map(Path::to_path_buf)
+                    .collect()
             } else {
                 Vec::new()
             },
@@ -566,6 +574,18 @@ impl<'a> Builder<'a> {
                 ));
             }
             self.generated(dir, true)?;
+        }
+        if let Some(nix) = self.request.nix_daemon {
+            let socket = nix.socket();
+            let id = identify(socket).map_err(|e| format!("{}: {e}", socket.display()))?;
+            if id.kind != Kind::Socket {
+                return Err(format!("{} is not a socket", socket.display()));
+            }
+            self.mounts.push(Mount::Bind {
+                path: socket.to_path_buf(),
+                id,
+                writable: true,
+            });
         }
         Ok(rw.join("home"))
     }
@@ -887,6 +907,7 @@ mod tests {
                 cli: (!matches!(role, Role::Helper { .. })).then_some(cli.as_path()),
                 pass_env,
                 terminal: true,
+                nix_daemon: None,
             };
             build(&self.host, &request)
         }
@@ -1283,6 +1304,45 @@ mod tests {
             .warnings
             .iter()
             .any(|w| w.contains("toolchain path left out")));
+    }
+
+    #[test]
+    fn an_untrusted_nix_daemon_socket_is_bound_exactly_for_agents_only() {
+        let f = fixture();
+        let nix_dir = f.root.join("nix/var/nix/daemon-socket");
+        mkdirs(&[&nix_dir]);
+        let _nix = UnixListener::bind(nix_dir.join("socket")).unwrap();
+        let verified = UntrustedNixDaemon::verified_for_test(&nix_dir.join("socket"));
+        let p = f.paths("a");
+        let request = Request {
+            session: f.session(),
+            role: Role::Worker {
+                agent_dir: &p.agent,
+                worktree: &p.worktree,
+                admin: &p.admin,
+                sidecar_dir: None,
+            },
+            extra: &Extra::default(),
+            cli: None,
+            pass_env: &[],
+            terminal: true,
+            nix_daemon: Some(&verified),
+        };
+        let spec = build(&f.host, &request).unwrap().spec;
+        assert!(binds(&spec).contains(&(nix_dir.join("socket"), true)));
+        assert!(!binds(&spec).iter().any(|(p, _)| p == &nix_dir));
+        assert_eq!(spec.allow_unix, vec![f.run.clone(), nix_dir.clone()]);
+        let helper = f.paths("_integration");
+        let request = Request {
+            role: Role::Helper {
+                worktree: &helper.worktree,
+                admin: &helper.admin,
+            },
+            ..request
+        };
+        let spec = build(&f.host, &request).unwrap().spec;
+        assert!(!visible(&spec, &nix_dir.join("socket")));
+        assert!(spec.allow_unix.is_empty());
     }
 
     #[test]

@@ -10,6 +10,7 @@
 
 pub mod landlock;
 pub mod pin;
+pub mod probe;
 pub mod profile;
 pub mod run;
 pub mod scan;
@@ -26,7 +27,8 @@ pub const EXIT_SETUP_FAILED: i32 = 125;
 pub(crate) mod test_support {
     /// Run `body` in a forked child and return its exit status. Confinement
     /// is per process and irreversible, so it is tried in a child. The child
-    /// only makes syscalls (glibc keeps malloc usable after fork).
+    /// only makes syscalls (glibc keeps malloc usable after fork) and must
+    /// not touch the environment: another thread may hold Rust's env lock.
     pub fn in_child(body: impl FnOnce() -> i32) -> i32 {
         // SAFETY: the child runs `body` and `_exit`s without unwinding.
         let pid = unsafe { libc::fork() };
