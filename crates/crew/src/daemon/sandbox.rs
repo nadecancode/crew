@@ -1071,33 +1071,80 @@ unsandboxed"
         assert!(!without.allow_unix.contains(&nix_dir));
     }
 
-    #[tokio::test]
-    async fn a_sandboxs_namespace_is_found_and_waited_out_with_its_setsid_descendant() {
-        use crate::sandbox::test_support::host_has;
-        let bwrap = std::env::split_paths(&std::env::var_os("PATH").unwrap_or_default())
+    /// bubblewrap from PATH, if the host has it (a failure under
+    /// CREW_TEST_SANDBOX=require otherwise).
+    fn bwrap() -> Option<PathBuf> {
+        let found = std::env::split_paths(&std::env::var_os("PATH").unwrap_or_default())
             .map(|d| d.join("bwrap"))
             .find(|p| p.is_file());
-        if !host_has(bwrap.is_some(), "bubblewrap") {
-            return;
+        crate::sandbox::test_support::host_has(found.is_some(), "bubblewrap")
+            .then(|| found.unwrap())
+    }
+
+    /// A sandbox like an agent's (user and PID namespaces, /proc and /dev),
+    /// running `script`.
+    fn sandbox_running(bwrap: &Path, die_with_parent: bool, script: &str) -> std::process::Command {
+        let mut cmd = std::process::Command::new(bwrap);
+        cmd.args(["--unshare-user", "--unshare-pid"]);
+        if die_with_parent {
+            cmd.arg("--die-with-parent");
         }
-        let mut sandbox = std::process::Command::new(bwrap.unwrap())
-            .args(["--unshare-user", "--unshare-pid", "--die-with-parent"])
-            .args(["--ro-bind", "/", "/", "--proc", "/proc"])
-            .args(["sh", "-c", "setsid sleep 300 & exec sleep 300"])
-            .spawn()
-            .unwrap();
-        let pid = sandbox.id();
-        let mut ns = None;
+        cmd.args(["--ro-bind", "/", "/", "--proc", "/proc", "--dev", "/dev"])
+            .args(["sh", "-c", script]);
+        cmd
+    }
+
+    /// The command lines of the processes in PID namespace `ns`.
+    fn in_namespace(ns: u64) -> Vec<String> {
+        std::fs::read_dir("/proc")
+            .unwrap()
+            .flatten()
+            .filter_map(|e| e.file_name().to_str()?.parse::<u32>().ok())
+            .filter(|pid| namespace_of(*pid) == Some(ns))
+            .filter_map(|pid| std::fs::read(format!("/proc/{pid}/cmdline")).ok())
+            .map(|c| {
+                String::from_utf8_lossy(&c)
+                    .replace('\0', " ")
+                    .trim()
+                    .to_string()
+            })
+            .collect()
+    }
+
+    /// Wait (up to 2 s) for `found` to hold.
+    fn eventually(what: &str, mut found: impl FnMut() -> bool) {
         for _ in 0..200 {
-            ns = sandbox_namespace(pid);
-            if ns.is_some() {
-                break;
+            if found() {
+                return;
             }
             std::thread::sleep(std::time::Duration::from_millis(10));
         }
-        let ns = ns.expect("the sandbox's namespace");
+        panic!("{what} never happened");
+    }
+
+    #[tokio::test]
+    async fn a_sandboxs_namespace_is_found_and_waited_out_with_its_setsid_descendant() {
+        let Some(bwrap) = bwrap() else { return };
+        let mut sandbox = sandbox_running(
+            &bwrap,
+            true,
+            "setsid sleep 301 </dev/null >/dev/null 2>&1 & exec sleep 300",
+        )
+        .spawn()
+        .unwrap();
+        let pid = sandbox.id();
+        let mut ns = None;
+        eventually("the sandbox's namespace", || {
+            ns = sandbox_namespace(pid);
+            ns.is_some()
+        });
+        let ns = ns.unwrap();
         assert_ne!(Some(ns), namespace_of(std::process::id()));
-        assert!(namespace_alive(ns));
+        // Both are running in it, the descendant in a session of its own.
+        eventually("the setsid descendant", || {
+            in_namespace(ns).iter().any(|c| c == "sleep 301")
+        });
+        assert!(in_namespace(ns).iter().any(|c| c == "sleep 300"));
         let short = std::time::Duration::from_millis(100);
         assert!(
             wait_until_gone(&[ns], short).await.is_err(),
@@ -1109,6 +1156,6 @@ unsandboxed"
         wait_until_gone(&[ns], std::time::Duration::from_secs(5))
             .await
             .unwrap();
-        assert!(!namespace_alive(ns));
+        assert_eq!(in_namespace(ns), Vec::<String>::new());
     }
 }
