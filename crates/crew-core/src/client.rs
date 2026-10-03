@@ -39,6 +39,14 @@ pub enum ClientError {
 }
 
 impl ClientError {
+    /// The stream is unavailable or unsafe to continue. This does not make
+    /// replaying a mutation safe: a request may have run before a read failed.
+    pub fn is_disconnect(&self) -> bool {
+        matches!(
+            self,
+            Self::Connect { .. } | Self::Io(_) | Self::Timeout | Self::Closed | Self::Protocol(_)
+        )
+    }
     pub fn is_protocol_mismatch(&self) -> bool {
         matches!(self, Self::Version { .. } | Self::IncompatibleProtocol(_))
     }
@@ -72,6 +80,7 @@ pub struct Client {
     next_id: u64,
     /// Pushes that arrived while waiting for a response.
     pushes: VecDeque<Push>,
+    closed: bool,
 }
 
 impl Client {
@@ -86,6 +95,7 @@ impl Client {
             writer,
             next_id: 1,
             pushes: VecDeque::new(),
+            closed: false,
         })
     }
 
@@ -117,6 +127,9 @@ impl Client {
 
     /// Bound how long a call may wait for the daemon (`None` waits forever).
     pub fn set_timeout(&self, timeout: Option<Duration>) -> ClientResult<()> {
+        if self.closed {
+            return Err(ClientError::Closed);
+        }
         self.reader.get_ref().set_read_timeout(timeout)?;
         self.writer.set_write_timeout(timeout)?;
         Ok(())
@@ -124,18 +137,44 @@ impl Client {
 
     /// Write a request without waiting for its response.
     pub fn send(&mut self, call: Call) -> ClientResult<u64> {
+        if self.closed {
+            return Err(ClientError::Closed);
+        }
         let id = self.next_id;
         self.next_id += 1;
-        write_request(&mut self.writer, id, call)?;
+        if let Err(error) = write_request(&mut self.writer, id, call) {
+            self.poison();
+            return Err(error);
+        }
         Ok(id)
     }
 
     /// Read the next frame, blocking until one arrives.
     pub fn next_frame(&mut self) -> ClientResult<ServerFrame> {
+        if self.closed {
+            return Err(ClientError::Closed);
+        }
         if let Some(push) = self.pushes.pop_front() {
             return Ok(ServerFrame::push(push));
         }
-        read_frame(&mut self.reader)
+        self.read_socket()
+    }
+
+    fn poison(&mut self) {
+        self.closed = true;
+        self.pushes.clear();
+        let _ = self.writer.shutdown(std::net::Shutdown::Both);
+    }
+
+    fn read_socket(&mut self) -> ClientResult<ServerFrame> {
+        if self.closed {
+            return Err(ClientError::Closed);
+        }
+        let result = read_frame(&mut self.reader);
+        if result.is_err() {
+            self.poison();
+        }
+        result
     }
 
     pub fn call_value(&mut self, call: Call) -> ClientResult<Value> {
@@ -143,7 +182,7 @@ impl Client {
         loop {
             // Only read the socket here: queued pushes belong to the caller,
             // and draining/requeueing them would never reach this reply.
-            let frame = read_frame(&mut self.reader)?;
+            let frame = self.read_socket()?;
             if let Some(push) = frame.push {
                 self.pushes.push_back(push);
                 continue;
@@ -161,8 +200,10 @@ impl Client {
     pub fn call<T: DeserializeOwned>(&mut self, call: Call) -> ClientResult<T> {
         let method = call.method();
         let value = self.call_value(call)?;
-        serde_json::from_value(value)
-            .map_err(|e| ClientError::Protocol(format!("unexpected `{method}` response: {e}")))
+        serde_json::from_value(value).map_err(|e| {
+            self.poison();
+            ClientError::Protocol(format!("unexpected `{method}` response: {e}"))
+        })
     }
 
     /// Subscribe and turn the connection into a stream of pushes.
@@ -292,6 +333,59 @@ mod tests {
     use super::*;
     use serde_json::json;
 
+    #[test]
+    fn framing_errors_and_timeouts_close_the_client_before_reuse() {
+        for response in ["{\"id\":1,\"result\":", "not-json\n"] {
+            let (mut client, mut server) = paired_client();
+            server.write_all(response.as_bytes()).unwrap();
+            let error = client.call_value(Call::Ping).unwrap_err();
+            assert!(matches!(
+                error,
+                ClientError::Timeout | ClientError::Protocol(_)
+            ));
+            let mut requests = BufReader::new(server);
+            let mut request = String::new();
+            requests.read_line(&mut request).unwrap();
+            assert!(matches!(
+                serde_json::from_str::<Request>(&request).unwrap().call,
+                Call::Ping
+            ));
+            assert!(
+                matches!(client.send(Call::Ping), Err(ClientError::Closed)),
+                "reuse must fail before another request is sent"
+            );
+            assert!(matches!(
+                client.call_value(Call::Ping),
+                Err(ClientError::Closed)
+            ));
+            assert!(matches!(client.next_frame(), Err(ClientError::Closed)));
+            request.clear();
+            assert_eq!(
+                requests.read_line(&mut request).unwrap(),
+                0,
+                "the peer must see closure, not another request"
+            );
+        }
+    }
+
+    #[test]
+    fn rpc_errors_leave_the_client_usable() {
+        let (mut client, mut server) = paired_client();
+        send_frame(
+            &mut server,
+            ServerFrame::err(1, RpcError::invalid("bad request")),
+        );
+        send_frame(&mut server, ServerFrame::ok(2, json!({"pong": true})));
+        assert!(matches!(
+            client.call_value(Call::Ping),
+            Err(ClientError::Rpc(_))
+        ));
+        assert_eq!(
+            client.call_value(Call::Ping).unwrap(),
+            json!({"pong": true})
+        );
+    }
+
     fn paired_client() -> (Client, UnixStream) {
         let (stream, server) = UnixStream::pair().unwrap();
         let client = Client {
@@ -299,6 +393,7 @@ mod tests {
             reader: BufReader::new(stream),
             next_id: 1,
             pushes: VecDeque::new(),
+            closed: false,
         };
         client
             .set_timeout(Some(Duration::from_millis(100)))
@@ -321,6 +416,9 @@ mod tests {
     #[test]
     fn listen_returns_pushes_buffered_before_its_reply() {
         let (mut client, mut server) = paired_client();
+        server
+            .set_read_timeout(Some(Duration::from_millis(200)))
+            .unwrap();
         send_frame(&mut server, ServerFrame::push(deliver("first")));
         send_frame(&mut server, ServerFrame::push(deliver("second")));
         send_frame(&mut server, ServerFrame::ok(1, json!({"listening": true})));
