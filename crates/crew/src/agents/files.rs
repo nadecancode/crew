@@ -10,6 +10,8 @@
 //! `<A>/identity.json` or `/etc/passwd` named there is not read.
 
 use std::fs::File;
+#[cfg(test)]
+use std::os::fd::AsFd;
 use std::os::fd::AsRawFd;
 use std::path::{Path, PathBuf};
 
@@ -35,6 +37,28 @@ const CLAUDE_PROJECTS: &str = "rw/home/claude/projects";
 const CODEX_SESSIONS: &str = "rw/home/codex/sessions";
 
 impl AgentFiles {
+    /// The files of an agent whose directories exist: opened beneath the state
+    /// directory (`state_root`) without making anything. A reader never creates
+    /// what an agent that is running may be writing.
+    pub fn open_existing(
+        state_root: std::os::fd::BorrowedFd<'_>,
+        agent_dir: PathBuf,
+        agent_id: &str,
+    ) -> anyhow::Result<Self> {
+        let rel = Path::new("agents").join(agent_id);
+        let root = paths::open_dir_beneath(state_root, &rel)?;
+        Ok(Self::private(agent_dir, root))
+    }
+
+    /// The size of the file the CLI reported at `path`, opened through these
+    /// files (0 when there is none, or it is refused). A compaction is looked
+    /// for after this offset.
+    pub fn reported_len(&self, path: Option<&Path>) -> u64 {
+        path.and_then(|p| self.open_reported(p))
+            .and_then(|opened| opened.file.metadata().ok())
+            .map_or(0, |meta| meta.len())
+    }
+
     pub fn private(agent_dir: PathBuf, root: std::os::fd::OwnedFd) -> Self {
         Self::Private {
             agent_dir,
@@ -239,6 +263,42 @@ mod tests {
                 outside.display()
             );
         }
+    }
+
+    #[test]
+    fn the_size_of_a_rollout_is_measured_on_the_file_opened_through_the_agents_files() {
+        let f = fixture();
+        let real = f.agent.join("rw/home/codex/sessions/rollout.jsonl");
+        write(&real, "0123456789");
+        assert_eq!(f.files.reported_len(Some(&real)), 10);
+        // A link to a bigger file elsewhere: the offset is 0, never that size.
+        let outside = f.dir.path().join("big");
+        write(&outside, &"x".repeat(500));
+        let linked = f.agent.join("rw/home/codex/sessions/linked.jsonl");
+        symlink(&outside, &linked).unwrap();
+        assert_eq!(f.files.reported_len(Some(&linked)), 0);
+        assert_eq!(
+            f.files.reported_len(Some(&f.agent.join("identity.json"))),
+            0
+        );
+        assert_eq!(f.files.reported_len(None), 0);
+    }
+
+    #[test]
+    fn opening_an_agents_files_creates_nothing() {
+        let dir = tempfile::tempdir().unwrap();
+        let base = dir.path().canonicalize().unwrap();
+        let state = base.join("ws/.crew");
+        std::fs::create_dir_all(state.join("agents")).unwrap();
+        let root = std::fs::File::open(&state).unwrap();
+        // No directory for the agent yet: a read is an error, not a mkdir.
+        assert!(AgentFiles::open_existing(root.as_fd(), state.join("agents/a"), "a").is_err());
+        assert!(!state.join("agents/a").exists());
+        // With the layout in place, files are reachable and nothing is added.
+        std::fs::create_dir_all(state.join("agents/a/rw")).unwrap();
+        let files = AgentFiles::open_existing(root.as_fd(), state.join("agents/a"), "a").unwrap();
+        assert!(files.claude_transcript("s").is_none());
+        assert!(!state.join("agents/a/rw/home").exists());
     }
 
     #[test]

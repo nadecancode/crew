@@ -292,13 +292,9 @@ compacts a teammate's",
             rt.compact_sent_at = now;
             // Codex records the compaction in its session file, after here. The
             // file is opened the way the daemon opens an agent's files.
-            rt.compact_offset = rt
-                .rollout
+            rt.compact_offset = files
                 .as_ref()
-                .zip(files.as_ref())
-                .and_then(|(path, files)| files.open_reported(path))
-                .and_then(|opened| opened.file.metadata().ok())
-                .map_or(0, |meta| meta.len());
+                .map_or(0, |files| files.reported_len(rt.rollout.as_deref()));
         }
         if let Err(e) = procs.submit_prompt(id, &command).await {
             tracing::warn!("asking {id} to compact failed: {e}");

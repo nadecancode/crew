@@ -597,10 +597,13 @@ impl Daemon {
         if !self.sandboxed() {
             return Ok(crate::agents::files::AgentFiles::Operator);
         }
-        Ok(crate::agents::files::AgentFiles::private(
+        // Only existing directories are opened: reading never makes `rw/home`
+        // under an agent that is running (`agent_root` is for the launch).
+        crate::agents::files::AgentFiles::open_existing(
+            self.state_root.as_fd(),
             self.agent_dir(agent_id),
-            self.agent_root(agent_id)?,
-        ))
+            agent_id,
+        )
     }
 
     pub(crate) fn worktrees_dir(&self) -> PathBuf {
