@@ -547,6 +547,15 @@ impl Daemon {
             state_dir: self.state_dir.to_string_lossy().into_owned(),
             backend: s.backend.clone(),
             isolation: s.isolation.clone(),
+            sandbox: s
+                .team
+                .as_ref()
+                .map(|team| match team.workspace.sandbox.mode {
+                    crew_core::config::SandboxMode::Off => "off",
+                    crew_core::config::SandboxMode::Required => "required",
+                })
+                .unwrap_or_default()
+                .to_string(),
             daemon_started_at: self.started_at,
             team_started_at: s.team_started_at,
             completed_at: s.completed_at,
@@ -1057,6 +1066,76 @@ mod tests {
         std::fs::write(&file, "data").unwrap();
         assert!(files.open_reported(&file).is_some());
     }
+    #[test]
+    fn session_info_reports_the_loaded_team_sandbox_mode() {
+        const PROBE: &str = "CREW_SESSION_SANDBOX_PROBE";
+        let Some(root) = std::env::var_os(PROBE) else {
+            let root = tempfile::Builder::new()
+                .prefix("crew-sb")
+                .tempdir_in("/tmp")
+                .unwrap();
+            let mut child = std::process::Command::new(std::env::current_exe().unwrap());
+            child
+                .args([
+                    "--exact",
+                    "daemon::tests::session_info_reports_the_loaded_team_sandbox_mode",
+                    "--nocapture",
+                ])
+                .env(PROBE, root.path())
+                .env_remove("CREW_IDENTITY")
+                .env_remove("CREW_SOCKET");
+            for (key, name) in [
+                ("HOME", "home"),
+                ("XDG_RUNTIME_DIR", "run"),
+                ("XDG_STATE_HOME", "state"),
+                ("XDG_CONFIG_HOME", "config"),
+            ] {
+                let dir = root.path().join(name);
+                std::fs::create_dir(&dir).unwrap();
+                child.env(key, dir);
+            }
+            let output = child
+                .env("CREW_GLOBAL_CONFIG", root.path().join("config.toml"))
+                .output()
+                .unwrap();
+            assert!(
+                output.status.success(),
+                "{}{}",
+                String::from_utf8_lossy(&output.stdout),
+                String::from_utf8_lossy(&output.stderr)
+            );
+            return;
+        };
+        let workspace = PathBuf::from(root).join("ws");
+        std::fs::create_dir(&workspace).unwrap();
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap();
+        let running = runtime
+            .block_on(start(DaemonOptions {
+                workspace,
+                crew_bin: std::env::current_exe().unwrap(),
+            }))
+            .unwrap();
+        let reported =
+            || serde_json::to_value(running.daemon.session_info()).unwrap()["sandbox"].clone();
+        assert_eq!(reported(), "", "no loaded team must not claim a sandbox");
+        let mut team = TeamConfig::from_yaml("project: state-test\n").unwrap();
+        for (mode, expected) in [
+            (crew_core::config::SandboxMode::Off, "off"),
+            (crew_core::config::SandboxMode::Required, "required"),
+        ] {
+            // Exercise the getter without launching a Required team before
+            // the staged enforcement gate has been replaced.
+            team.workspace.sandbox.mode = mode;
+            running.daemon.model().session.team = Some(team.clone());
+            assert_eq!(reported(), expected);
+        }
+        running.daemon.model().session.team = None;
+        assert_eq!(reported(), "");
+    }
+
     #[test]
     fn the_workspace_lock_is_held_until_everything_is_withdrawn() {
         let dir = tempfile::tempdir().unwrap();

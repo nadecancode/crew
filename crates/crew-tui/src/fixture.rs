@@ -391,6 +391,7 @@ pub fn snapshot(now: i64) -> Snapshot {
             state_dir: "/work/demo/.crew".to_string(),
             backend: "herdr".to_string(),
             isolation: "worktree".to_string(),
+            sandbox: "off".to_string(),
             daemon_started_at: now - 760_000,
             team_started_at: Some(now - 754_000),
             completed_at: None,

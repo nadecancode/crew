@@ -660,6 +660,9 @@ pub struct SessionInfo {
     /// `worktree` or `shared`.
     #[serde(default)]
     pub isolation: String,
+    /// `off`, `required`, or empty before a team is loaded or from older peers.
+    #[serde(default)]
+    pub sandbox: String,
     pub daemon_started_at: i64,
     #[serde(default)]
     pub team_started_at: Option<i64>,
@@ -705,6 +708,27 @@ pub struct HelloInfo {
 
 #[cfg(test)]
 mod compatibility_tests {
+
+    #[test]
+    fn legacy_snapshots_default_sandbox_to_unknown_and_preserve_reported_modes() {
+        let legacy = json!({
+            "session":{"workspace":"/ws", "state_dir":"/ws/.crew", "daemon_started_at":0,
+                "daemon_pid":1, "version":"old"},
+            "agents":[], "tasks":[], "messages":[], "events":[], "server_time":0,
+        });
+        let snapshot: Snapshot = serde_json::from_value(legacy.clone()).unwrap();
+        assert_eq!(snapshot.session.sandbox, "");
+        for mode in ["off", "required", "future"] {
+            let mut wire = legacy.clone();
+            wire["session"]["sandbox"] = json!(mode);
+            let snapshot: Snapshot = serde_json::from_value(wire).unwrap();
+            assert_eq!(snapshot.session.sandbox, mode);
+            assert_eq!(
+                serde_json::to_value(snapshot).unwrap()["session"]["sandbox"],
+                mode
+            );
+        }
+    }
     use super::*;
     use crate::types::{EventLevel, TaskStatus, TranscriptKind};
     use serde_json::json;
