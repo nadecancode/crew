@@ -125,10 +125,13 @@ fn candidates(
 /// own (GSD's `gsd-pi` does) with a command line of their own, which would
 /// take crew's arguments for prompts and subcommands; they say who they are
 /// in their help. A program that does not answer in time is given the
-/// benefit of the doubt: its launch then fails or succeeds on its own.
+/// benefit of the doubt: its launch then fails or succeeds on its own. One
+/// that cannot be run at all is not available, and the error says why.
 pub fn check_binary(path: &Path) -> Result<(), String> {
-    let Some(help) = output_within(path, &["--help"], std::time::Duration::from_secs(10)) else {
-        return Ok(());
+    let help = match output_within(path, &["--help"], std::time::Duration::from_secs(10)) {
+        Ok(Some(help)) => help,
+        Ok(None) => return Ok(()),
+        Err(why) => return Err(format!("{} could not be run: {why}", path.display())),
     };
     let first = help
         .lines()
@@ -144,9 +147,14 @@ pub fn check_binary(path: &Path) -> Result<(), String> {
     Ok(())
 }
 
-/// What `program args` prints, if it finishes within `limit`. Its output is
+/// What `program args` prints: `Ok(None)` if it does not finish within
+/// `limit`, `Err` (with the cause) if it cannot be run at all. Its output is
 /// read as it comes, so a long listing cannot stall it on a full pipe.
-fn output_within(program: &Path, args: &[&str], limit: std::time::Duration) -> Option<String> {
+fn output_within(
+    program: &Path,
+    args: &[&str],
+    limit: std::time::Duration,
+) -> Result<Option<String>, String> {
     use std::io::Read;
     use std::os::unix::process::CommandExt;
     use std::process::{Command, Stdio};
@@ -159,8 +167,10 @@ fn output_within(program: &Path, args: &[&str], limit: std::time::Duration) -> O
         .stdout(Stdio::piped())
         .stderr(Stdio::null())
         .spawn()
-        .ok()?;
-    let mut stdout = child.stdout.take()?;
+        .map_err(|e| e.to_string())?;
+    let Some(mut stdout) = child.stdout.take() else {
+        return Err("its output could not be read".into());
+    };
     let (tx, rx) = std::sync::mpsc::channel();
     std::thread::spawn(move || {
         let mut text = String::new();
@@ -183,7 +193,7 @@ fn output_within(program: &Path, args: &[&str], limit: std::time::Duration) -> O
             }
             _ => {
                 kill_group(&mut child);
-                return None;
+                return Ok(None);
             }
         }
     }
@@ -193,7 +203,7 @@ fn output_within(program: &Path, args: &[&str], limit: std::time::Duration) -> O
         // Something still holds the pipe; it is not wanted any more.
         kill_group(&mut child);
     }
-    text
+    Ok(text)
 }
 
 /// The models pi can reach with the providers it has credentials for, as
@@ -211,6 +221,7 @@ pub fn list_models() -> Result<Vec<String>, String> {
     }
     let listed = program().and_then(|program| {
         let listing = output_within(&program, &["--list-models"], Duration::from_secs(15))
+            .map_err(|why| format!("{} could not be run: {why}", program.display()))?
             .ok_or("pi did not list its models in time")?;
         Ok(parse_model_list(&listing))
     });
@@ -839,8 +850,21 @@ mod tests {
             refused.contains("is GSD's `pi`, not pi") && refused.contains("https://pi.dev"),
             "{refused}"
         );
-        // A program that cannot be asked is left to its launch.
-        assert_eq!(check_binary(&dir.path().join("missing")), Ok(()));
+        // A program that cannot be run is not pi that is fine: it is
+        // unavailable, and the reason says why.
+        let missing = dir.path().join("missing");
+        let why = check_binary(&missing).unwrap_err();
+        assert!(
+            why.contains(&missing.display().to_string()) && why.contains("could not be run"),
+            "{why}"
+        );
+        let broken = dir.path().join("broken");
+        crate::agents::write_executable(&broken, "#!/nonexistent/interpreter\n");
+        let why = check_binary(&broken).unwrap_err();
+        assert!(
+            why.contains("could not be run") && why.contains("No such file"),
+            "{why}"
+        );
     }
 
     #[test]
