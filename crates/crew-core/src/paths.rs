@@ -1,6 +1,7 @@
 //! Where crew keeps things: the per-workspace state directory, the daemon
 //! socket, the registry of running daemons and per-agent identity files.
 
+use std::ffi::OsStr;
 use std::fs;
 use std::os::fd::{AsRawFd, FromRawFd};
 use std::os::unix::ffi::OsStrExt;
@@ -146,16 +147,32 @@ pub fn write_private_file(path: &Path, contents: &[u8]) -> Result<()> {
 
 /// Directory for sockets: `$XDG_RUNTIME_DIR/crew`, else `/tmp/crew-<uid>`.
 pub fn runtime_dir() -> PathBuf {
-    match std::env::var_os("XDG_RUNTIME_DIR") {
+    runtime_dir_from(std::env::var_os("XDG_RUNTIME_DIR").as_deref(), uid())
+}
+
+fn runtime_dir_from(xdg: Option<&OsStr>, user: u32) -> PathBuf {
+    let preferred = match xdg {
         Some(dir) if !dir.is_empty() => PathBuf::from(dir).join("crew"),
-        _ => PathBuf::from(format!("/tmp/crew-{}", uid())),
+        _ => PathBuf::from(format!("/tmp/crew-{user}")),
+    };
+    // SAFETY: sockaddr_un consists only of integer fields and a byte array.
+    let address: libc::sockaddr_un = unsafe { std::mem::zeroed() };
+    let probe = socket_path_in(Path::new(""), &preferred);
+    if probe.as_os_str().as_bytes().len() < address.sun_path.len() {
+        preferred
+    } else {
+        PathBuf::from(format!("/tmp/crew-{user}"))
     }
 }
 
 /// Socket path for a state directory. Sockets live in the runtime dir under a
 /// hash of the state directory because `sun_path` is limited to ~108 bytes.
 pub fn socket_path(state_dir: &Path) -> PathBuf {
-    runtime_dir().join(format!("{:016x}.sock", session_hash(state_dir)))
+    socket_path_in(state_dir, &runtime_dir())
+}
+
+fn socket_path_in(state_dir: &Path, runtime: &Path) -> PathBuf {
+    runtime.join(format!("{:016x}.sock", session_hash(state_dir)))
 }
 
 fn session_hash(state_dir: &Path) -> u64 {
@@ -317,6 +334,23 @@ pub fn discover(dir: Option<&Path>, project: Option<&str>) -> Result<DaemonInfo>
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn long_runtime_dirs_use_a_bindable_socket_fallback() {
+        for prefix in [
+            format!("/tmp/{}", "a".repeat(100)),
+            format!("/tmp/{}", "界".repeat(50)),
+        ] {
+            let runtime = runtime_dir_from(Some(OsStr::new(&prefix)), uid());
+            let socket = socket_path_in(Path::new("/workspace/.crew"), &runtime);
+            assert!(
+                socket.as_os_str().as_bytes().len() <= 103,
+                "{}",
+                socket.display()
+            );
+            assert_eq!(runtime, runtime_dir_from(None, uid()));
+        }
+    }
 
     #[test]
     fn socket_paths_are_short_and_stable() {
