@@ -261,16 +261,102 @@ impl Found {
     }
 }
 
-/// What runs for `name`, which the daemon's PATH found at `found` and
-/// whose file the profile bound: `found` itself, an absolute path that
-/// keeps the name a program may look at, where `spec` shows it; else the
-/// file it resolves to. A program given as a path runs as given (None).
+/// What runs for `name`, which the daemon's PATH found at `found`: the
+/// file it resolves to, which the profile bound; or `found` itself, which
+/// keeps the name a program may look at (bash run as `sh`), where it leads
+/// to that file inside the sandbox too. A program given as a path runs as
+/// given (None).
 fn program_to_run(name: &str, found: Option<&Path>, spec: &Spec) -> Option<PathBuf> {
     let found = found.filter(|_| !name.contains('/'))?;
-    if spec.visible(found) {
+    let file = found.canonicalize().ok()?;
+    if resolve_inside(spec, found).as_ref() == Some(&file) {
         Some(found.to_path_buf())
     } else {
-        found.canonicalize().ok()
+        Some(file)
+    }
+}
+
+/// What a path names inside the sandbox `spec` describes, every link
+/// followed, if it names a host object bound there: where bubblewrap lays
+/// out the mounts in order (a later one over an earlier one), makes the
+/// directories mount points need, recreates links (Mount::Symlink), and
+/// shows bound trees as the host has them, their links included.
+fn resolve_inside(spec: &Spec, path: &Path) -> Option<PathBuf> {
+    use std::path::Component;
+    let mut rest = path.to_path_buf();
+    let mut at = PathBuf::from("/");
+    let mut bound = false;
+    let mut links = 0;
+    loop {
+        let mut components = rest.components();
+        let Some(component) = components.next() else {
+            break;
+        };
+        let after = components.as_path().to_path_buf();
+        match component {
+            Component::RootDir => (at, bound) = (PathBuf::from("/"), false),
+            Component::CurDir => {}
+            Component::ParentDir => {
+                at.pop();
+                bound = false;
+            }
+            Component::Normal(name) => {
+                let next = at.join(name);
+                match shown(spec, &next)? {
+                    Shown::Bound => (at, bound) = (next, true),
+                    Shown::Made => (at, bound) = (next, false),
+                    Shown::Link(target) => {
+                        links += 1;
+                        if links > 40 {
+                            return None;
+                        }
+                        // Relative to the link's directory, `at`.
+                        rest = target.join(after);
+                        continue;
+                    }
+                }
+            }
+            Component::Prefix(_) => return None,
+        }
+        rest = after;
+    }
+    bound.then_some(at)
+}
+
+/// What the sandbox shows at a path whose parent it shows as a directory.
+enum Shown {
+    /// A host object of a bound tree (not a link).
+    Bound,
+    /// A link, the host's in a bound tree or one the profile recreates.
+    Link(PathBuf),
+    /// A directory bubblewrap made: a tmpfs, an empty directory, or one a
+    /// later mount point needs.
+    Made,
+}
+
+fn shown(spec: &Spec, path: &Path) -> Option<Shown> {
+    use crate::sandbox::spec::Mount;
+    let covering = spec.mounts.iter().rposition(|m| path.starts_with(m.path()));
+    // A mount point beneath, laid out after whatever covers the path.
+    let needed = spec.mounts[covering.map_or(0, |i| i + 1)..]
+        .iter()
+        .any(|m| m.path().starts_with(path) && m.path() != path);
+    let Some(i) = covering else {
+        return needed.then_some(Shown::Made);
+    };
+    match &spec.mounts[i] {
+        Mount::Symlink { path: at, target } if at == path => Some(Shown::Link(target.clone())),
+        Mount::Symlink { .. } | Mount::Mask { .. } => None,
+        Mount::Bind { .. } => match std::fs::symlink_metadata(path) {
+            Ok(meta) if meta.file_type().is_symlink() => {
+                Some(Shown::Link(std::fs::read_link(path).ok()?))
+            }
+            Ok(_) => Some(Shown::Bound),
+            Err(_) => needed.then_some(Shown::Made),
+        },
+        Mount::Tmpfs { path: at } | Mount::Dir { path: at } => {
+            (at == path || needed).then_some(Shown::Made)
+        }
     }
 }
 
@@ -1299,6 +1385,227 @@ unsandboxed"
         // ... but what runs is the binary found, not a second lookup.
         let spec = fx.profile("a", false, true).unwrap();
         assert_eq!(found.program("crew", &spec), Some(crew.clone()));
+    }
+
+    /// A bind of `path` as the profile makes it.
+    fn bind(path: &Path) -> Mount {
+        Mount::Bind {
+            path: path.to_path_buf(),
+            id: crate::sandbox::pin::identify(path).unwrap(),
+            writable: false,
+        }
+    }
+
+    /// A spec holding exactly `mounts`.
+    fn spec_with(fx: &Fixture, mounts: Vec<Mount>) -> Spec {
+        let mut spec = fx.profile("a", false, true).unwrap();
+        spec.mounts = mounts;
+        spec
+    }
+
+    #[test]
+    fn a_name_found_on_path_runs_by_it_only_where_it_leads_to_the_bound_file_inside() {
+        use std::os::unix::fs::symlink;
+        let fx = fixture();
+        let root = &fx.root;
+        let (visible, hidden, target) = (
+            root.join("visible"),
+            root.join("hidden"),
+            root.join("target"),
+        );
+        for dir in [&visible, &hidden, &target] {
+            std::fs::create_dir(dir).unwrap();
+        }
+        let file = target.join("tool-body");
+        std::fs::write(&file, "#!/bin/sh\n").unwrap();
+
+        // Through a link whose middle hop the sandbox does not show: the
+        // name would not resolve inside, so the bound file runs.
+        symlink(&file, hidden.join("hop")).unwrap();
+        let through_hidden = visible.join("cli");
+        symlink(hidden.join("hop"), &through_hidden).unwrap();
+        let spec = spec_with(&fx, vec![bind(&visible), bind(&target)]);
+        assert_eq!(resolve_inside(&spec, &through_hidden), None);
+        assert_eq!(
+            program_to_run("cli", Some(&through_hidden), &spec),
+            Some(file.clone())
+        );
+
+        // Through a host link the profile recreates (a Symlink mount, as
+        // for /run/current-system): the name resolves inside and runs by it.
+        let system = root.join("system");
+        symlink(&target, &system).unwrap();
+        let recreated = spec_with(
+            &fx,
+            vec![
+                Mount::Symlink {
+                    path: system.clone(),
+                    target: target.clone(),
+                },
+                bind(&target),
+            ],
+        );
+        let alias = system.join("tool-body");
+        assert_eq!(resolve_inside(&recreated, &alias), Some(file.clone()));
+        assert_eq!(
+            program_to_run("tool-body", Some(&alias), &recreated),
+            Some(alias)
+        );
+
+        // Directly visible, and through a relative link in a visible
+        // directory: by the name.
+        symlink("../target/tool-body", visible.join("rel")).unwrap();
+        assert_eq!(
+            resolve_inside(&spec, &visible.join("rel")),
+            Some(file.clone())
+        );
+        assert_eq!(
+            program_to_run("rel", Some(&visible.join("rel")), &spec),
+            Some(visible.join("rel"))
+        );
+
+        // Masked, or under a tmpfs laid over its bind: not the bound file.
+        let masked = spec_with(&fx, vec![bind(&target), Mount::Mask { path: file.clone() }]);
+        assert_eq!(resolve_inside(&masked, &file), None);
+        let covered = spec_with(
+            &fx,
+            vec![
+                bind(&target),
+                Mount::Tmpfs {
+                    path: target.clone(),
+                },
+            ],
+        );
+        assert_eq!(resolve_inside(&covered, &file), None);
+        // A link loop resolves to nothing.
+        symlink(visible.join("loop"), visible.join("loop")).unwrap();
+        assert_eq!(resolve_inside(&spec, &visible.join("loop")), None);
+    }
+
+    /// The host as the daemon would see it, for launches through real
+    /// bubblewrap and the crew binary (skipped, or failing under
+    /// CREW_TEST_SANDBOX=require, where they are missing).
+    fn real_host() -> Option<Host> {
+        let target = std::env::var_os("CARGO_TARGET_DIR")
+            .map(PathBuf::from)
+            .unwrap_or_else(|| PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../target"));
+        let crew = target.join("debug/crew").canonicalize().ok();
+        let crew = crate::sandbox::test_support::host_has(crew.is_some(), "a built crew binary")
+            .then(|| crew.unwrap())?;
+        let available = crate::sandbox::probe::probe(&crew, std::env::var_os("PATH").as_ref());
+        let available =
+            crate::sandbox::test_support::host_has(available.is_ok(), "a usable sandbox")
+                .then(|| available.unwrap())?;
+        Some(Host::detect(
+            &crew,
+            &available.bwrap,
+            available.landlock_abi,
+        ))
+    }
+
+    /// The profile of a no-terminal launch of `name`, found at `found`.
+    fn cli_profile(fx: &Fixture, host: &Host, name: &str, found: &Path) -> Spec {
+        let layout = Layout::new(&fx.ws, &fx.socket, &fx.root.join("cache")).unwrap();
+        let agent = fx.ws.join(".crew/agents/a");
+        let at = Placement {
+            agent_dir: &agent,
+            workdir: &fx.worktree,
+            orchestrator: false,
+            worktrees: true,
+        };
+        let config = SandboxConfig {
+            mode: SandboxMode::Required,
+            ..SandboxConfig::default()
+        };
+        let run = Run {
+            agent_id: "a".into(),
+            program: name.into(),
+            env: Vec::new(),
+            sidecar_dir: None,
+            terminal: None,
+        };
+        agent_profile(host, &layout, &at, &config, &run, Some(found), None)
+            .unwrap()
+            .spec
+    }
+
+    fn run_in(spec: &Spec, program: &Path, args: &[&str]) -> std::process::Output {
+        let prefix = crate::sandbox::run::prefix(spec).unwrap();
+        std::process::Command::new(&prefix[0])
+            .args(&prefix[1..])
+            .arg(program)
+            .args(args)
+            .env_clear()
+            .envs(launcher_env(spec, std::env::vars_os(), &[]))
+            .stdin(std::process::Stdio::null())
+            .output()
+            .unwrap()
+    }
+
+    // rev-runtime's probes (m-e5bc8f41851b), through real bubblewrap.
+    #[test]
+    fn a_name_whose_link_crosses_what_the_sandbox_hides_runs_by_its_bound_file() {
+        use std::os::unix::fs::{symlink, PermissionsExt};
+        let Some(mut host) = real_host() else { return };
+        let fx = fixture();
+        let install = tempfile::tempdir_in(host.crew_bin.parent().unwrap()).unwrap();
+        let base = install.path().canonicalize().unwrap();
+        let (visible, hidden, target) = (
+            base.join("visible"),
+            base.join("hidden"),
+            base.join("target"),
+        );
+        for dir in [&visible, &hidden, &target] {
+            std::fs::create_dir(dir).unwrap();
+        }
+        let file = target.join("tool-body");
+        let shell = std::fs::canonicalize("/bin/sh").unwrap();
+        std::fs::write(&file, format!("#!{}\nprintf selected\n", shell.display())).unwrap();
+        std::fs::set_permissions(&file, std::fs::Permissions::from_mode(0o755)).unwrap();
+        symlink(&file, hidden.join("hop")).unwrap();
+        let found = visible.join("review-cli");
+        symlink(hidden.join("hop"), &found).unwrap();
+        host.path = std::env::join_paths([&visible]).unwrap();
+        let spec = cli_profile(&fx, &host, "review-cli", &found);
+        let control = run_in(&spec, &file, &[]);
+        assert!(control.status.success(), "control: {control:?}");
+        let chosen = program_to_run("review-cli", Some(&found), &spec).unwrap();
+        let out = run_in(&spec, &chosen, &[]);
+        assert!(
+            out.status.success(),
+            "{chosen:?} does not run inside: {out:?}"
+        );
+        assert_eq!(String::from_utf8_lossy(&out.stdout), "selected");
+    }
+
+    #[test]
+    fn a_name_through_a_recreated_system_link_keeps_its_name_inside() {
+        let found = PathBuf::from("/run/current-system/sw/bin/sh");
+        if !found.is_file() {
+            eprintln!("skipped: this host has no {}", found.display());
+            return;
+        }
+        let Some(mut host) = real_host() else { return };
+        let fx = fixture();
+        host.path = OsString::from("/run/current-system/sw/bin");
+        let spec = cli_profile(&fx, &host, "sh", &found);
+        let args = [
+            "-c",
+            "case \"$0\" in */sh|sh) printf sh;; *) printf changed;; esac",
+        ];
+        let control = run_in(&spec, &found, &args);
+        assert_eq!(
+            String::from_utf8_lossy(&control.stdout),
+            "sh",
+            "control: {control:?}"
+        );
+        let chosen = program_to_run("sh", Some(&found), &spec).unwrap();
+        let out = run_in(&spec, &chosen, &args);
+        assert_eq!(
+            String::from_utf8_lossy(&out.stdout),
+            "sh",
+            "the name was changed to {chosen:?}: {out:?}"
+        );
     }
 
     #[tokio::test]
