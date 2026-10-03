@@ -16,24 +16,28 @@
 //! too. It dies with the process that started it (`PR_SET_PDEATHSIG`),
 //! and bubblewrap's `--die-with-parent` then takes the sandbox down.
 //!
-//! How it ends:
+//! The endings it handles:
 //! - a setup failure exits with [`EXIT_SETUP_FAILED`] before bubblewrap is
 //!   started (there is no fallback to binding by path), after creating the
 //!   done marker as `not started` if the spec names one that passes its
 //!   own checks (`Spec::check_done`);
-//! - once bubblewrap is started, every exit with a code comes after the
-//!   last child was reaped: bubblewrap's code, 128 plus its signal, or
+//! - once bubblewrap is started, it exits with a code only after the last
+//!   child was reaped: bubblewrap's code, 128 plus its signal, or
 //!   [`EXIT_SETUP_FAILED`] when the done marker could not be created;
-//! - any other failure after bubblewrap is started aborts (SIGABRT), so it
-//!   never reports a code while part of the sandbox may still run.
+//! - a failure it detects after bubblewrap is started aborts (SIGABRT)
+//!   instead of exiting with a code.
 //!
-//! The proof that a launch's sandbox is gone is its done marker: the file
-//! the spec names, created only after the last child was reaped, holding
-//! `exited <code>` or `signal <n>`, or `not started` when no child was
-//! ever started. A marker that is absent or holds anything else means
-//! "not known gone". The exit status alone is not
-//! that proof: a plain 125 does not say whether bubblewrap ran, and an exit
-//! status is tied to a pid, not to a launch.
+//! Other endings carry no such meaning: a command line clap rejects before
+//! any of this runs, being killed, or an unexpected panic, which Rust
+//! reports as exit 101 and which can come after bubblewrap was started
+//! (std's spawn panics if its exec status channel fails).
+//!
+//! So the only proof that a launch's sandbox is gone is its done marker:
+//! the file the spec names, created only after the last child was reaped,
+//! holding `exited <code>` or `signal <n>`, or `not started` when no child
+//! was ever started. A marker that is absent or holds anything else means
+//! "not known gone". No exit status is that proof: it cannot tell the
+//! endings above apart, and it is tied to a pid, not to a launch.
 
 use std::ffi::{CString, OsString};
 use std::io;
