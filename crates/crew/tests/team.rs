@@ -1000,9 +1000,8 @@ fn a_task_whose_reviewer_is_unavailable_stays_in_review_and_the_orchestrator_is_
 #[test]
 fn a_reviewed_task_whose_review_request_would_not_fit_is_refused_at_creation() {
     let s = Session::new();
-    // The review request names the task by its title, like the task message,
-    // and says more around it: a title the task message has room for can be
-    // too long for the request.
+    // The review request says more than the task message does. With a small
+    // limit, a task whose task message fits can have a request that does not.
     let long = "x".repeat(100);
     let mut team = s.team(
         "long-review",
@@ -1076,6 +1075,44 @@ fn a_reviewed_task_whose_review_request_would_not_fit_is_refused_at_creation() {
         stderr(&edited)
     );
     assert_eq!(find_task(&s.snapshot(), "reviewed").title, "a short title");
+}
+
+#[test]
+fn the_review_request_quotes_a_long_title_in_part_and_points_to_the_card() {
+    let s = Session::new();
+    // A title the task message has room for.
+    let long = "x".repeat(400);
+    let mut team = s.team(
+        "long-title-review",
+        vec![
+            agent("author", "", &["--on-task=done finished"]),
+            agent("critic", "", &["--on-review=review approve fine"]),
+        ],
+        vec![task("write", "author", &[])],
+    );
+    team.limits.max_message_bytes = 512;
+    team.tasks[0].title = Some(long.clone());
+    team.tasks[0].reviewer = Some("critic".into());
+    s.run(&team);
+    // The reviewer is asked, and its verdict finishes the task.
+    let done = s.wait("the review to be given", |snap| {
+        find_task(snap, "write").status == TaskStatus::Done
+    });
+    let request = s
+        .messages()
+        .into_iter()
+        .find(|m| m.kind == MessageType::ReviewRequest)
+        .expect("the review request");
+    assert_eq!(request.to, "critic");
+    assert!(request.body.len() <= 512, "{}", request.body.len());
+    // The request is a pointer: the card has the title in full.
+    assert!(
+        request.body.contains("task_get(\"write\")"),
+        "{}",
+        request.body
+    );
+    assert!(!request.body.contains(&long), "{}", request.body);
+    assert_eq!(find_task(&done, "write").title, long);
 }
 
 #[test]

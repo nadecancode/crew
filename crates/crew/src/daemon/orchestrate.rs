@@ -19,6 +19,9 @@ const MAX_RESULT_CHARS: usize = 4000;
 /// How long nothing must be able to progress before it is called a stall.
 const STALL_GRACE_MS: i64 = 12_000;
 const MAX_ARTIFACTS: usize = 32;
+/// How much of a task's title a message about its review quotes: such a
+/// message points to the card, so its length must not depend on the card.
+const QUOTED_TITLE_CHARS: usize = 80;
 
 /// A task its agent cannot be told about would never start, and one whose
 /// reviewer cannot be asked would never be done: refuse one whose task
@@ -45,9 +48,10 @@ limits.max_message_bytes is {limit}",
     Ok(())
 }
 
-/// The body of the review request for `task`: what to review against, and
-/// the work, are on the card. In a shared workspace (`shared`) nothing is
-/// committed: the work is already where the reviewer sees it.
+/// The body of the review request for `task`: a pointer to its card, where
+/// what to review against, and the work, are. A long title is quoted in
+/// part. In a shared workspace (`shared`) nothing is committed: the work is
+/// already where the reviewer sees it.
 fn review_request(task: &Task, shared: bool) -> String {
     let id = &task.id;
     let work = if shared {
@@ -58,7 +62,7 @@ fn review_request(task: &Task, shared: bool) -> String {
     format!(
         "Review my work on task {id} (\"{}\"): task_get(\"{id}\") reads its card, with my \
 {work}; then review_submit(task_id=\"{id}\", approve=true|false, comments=…).",
-        task.title
+        truncate_chars(&task.title, QUOTED_TITLE_CHARS)
     )
 }
 
@@ -970,7 +974,7 @@ yourself"
             "Task {} (\"{}\") by {author} is waiting for review, but {why}. {next} \
 with review_submit(task_id=\"{}\", approve=true|false).",
             task.id,
-            truncate_chars(&task.title, 80),
+            truncate_chars(&task.title, QUOTED_TITLE_CHARS),
             task.id
         ))
         .await;
