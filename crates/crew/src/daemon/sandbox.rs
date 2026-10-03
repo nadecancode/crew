@@ -139,6 +139,16 @@ impl Run {
     }
 }
 
+/// The sandbox something an agent runs goes in, and what to run there.
+pub(crate) struct Sandboxed {
+    pub spec: Spec,
+    /// The program the daemon's PATH found, whose file the profile bound,
+    /// by absolute path (program_to_run), so no lookup in the sandbox's own
+    /// PATH can pick another one. None: the program runs as given (the
+    /// crew binary, or a path).
+    pub program: Option<PathBuf>,
+}
+
 /// `argv` as a command. In a sandbox it runs behind `crew sandbox-run` with
 /// exactly the launcher's environment (`env` is passed in by name);
 /// otherwise `env` is added to the daemon's.
@@ -226,6 +236,19 @@ fn cache_home() -> PathBuf {
     var("XDG_CACHE_HOME")
         .map(PathBuf::from)
         .unwrap_or_else(|| PathBuf::from(var("HOME").unwrap_or_else(|| "/".into())).join(".cache"))
+}
+
+/// What runs for `name`, which the daemon's PATH found at `found` and
+/// whose file the profile bound: `found` itself, an absolute path that
+/// keeps the name a program may look at, where `spec` shows it; else the
+/// file it resolves to. A program given as a path runs as given (None).
+fn program_to_run(name: &str, found: Option<&Path>, spec: &Spec) -> Option<PathBuf> {
+    let found = found.filter(|_| !name.contains('/'))?;
+    if spec.visible(found) {
+        Some(found.to_path_buf())
+    } else {
+        found.canonicalize().ok()
+    }
 }
 
 /// Where `program` is, as the daemon's `PATH` finds it.
@@ -373,10 +396,28 @@ struct LedgerLauncher {
     daemon: Daemon,
     agent: String,
     spec: Spec,
+    /// The git the profile bound (Sandboxed::program).
+    program: Option<PathBuf>,
     env: Vec<(String, String)>,
     admin: PathBuf,
     /// The entry of the command launched last, until it is started.
     pending: std::sync::Mutex<Option<retire::Record>>,
+}
+
+/// `cmd` with `program` in place of its own.
+fn with_program(cmd: &std::process::Command, program: &Path) -> std::process::Command {
+    let mut with = std::process::Command::new(program);
+    with.args(cmd.get_args());
+    for (name, value) in cmd.get_envs() {
+        match value {
+            Some(value) => with.env(name, value),
+            None => with.env_remove(name),
+        };
+    }
+    if let Some(dir) = cmd.get_current_dir() {
+        with.current_dir(dir);
+    }
+    with
 }
 
 impl Launcher for LedgerLauncher {
@@ -388,7 +429,11 @@ impl Launcher for LedgerLauncher {
             .map_err(|e| std::io::Error::other(format!("{e:#}")))?;
         let mut spec = self.spec.clone();
         spec.done = Some(record.done().to_path_buf());
-        let launched = SandboxLauncher::new(spec, self.env.clone()).launch(cmd);
+        let cmd = match &self.program {
+            Some(program) => with_program(cmd, program),
+            None => with_program(cmd, Path::new(cmd.get_program())),
+        };
+        let launched = SandboxLauncher::new(spec, self.env.clone()).launch(&cmd);
         match launched {
             Ok(_) => *self.pending.lock().unwrap_or_else(|e| e.into_inner()) = Some(record),
             Err(_) => self.daemon.ledger.never_started(&record),
@@ -564,7 +609,7 @@ of its own; a member commits in its worktree"
         }
         let run = Run::git(&agent.id, &self.agent_dir(&agent.id));
         let env = run.env.clone();
-        let Some(spec) = self.agent_sandbox(agent, run).await? else {
+        let Some(sandboxed) = self.agent_sandbox(agent, run).await? else {
             return Ok(None);
         };
         let admin =
@@ -573,7 +618,8 @@ of its own; a member commits in its worktree"
         Ok(Some(Arc::new(LedgerLauncher {
             daemon: self.clone(),
             agent: agent.id.clone(),
-            spec,
+            spec: sandboxed.spec,
+            program: sandboxed.program,
             env,
             admin,
             pending: std::sync::Mutex::new(None),
@@ -583,7 +629,7 @@ of its own; a member commits in its worktree"
     /// The sandbox something an agent runs goes in: none unless the team
     /// requires sandboxes, and then it does not start without one. The host
     /// is probed every time.
-    pub(crate) async fn agent_sandbox(&self, agent: &Agent, run: Run) -> Result<Option<Spec>> {
+    pub(crate) async fn agent_sandbox(&self, agent: &Agent, run: Run) -> Result<Option<Sandboxed>> {
         let Some((config, worktrees)) = self.sandboxing() else {
             return Ok(None);
         };
@@ -604,7 +650,7 @@ workspace.sandbox.mode: off"
         // Reported once per start of the session; the agent's git, sidecar
         // and queue commands leave out the same things and say nothing more.
         let report = run.terminal.is_some();
-        let built = tokio::task::spawn_blocking(move || -> Result<Built> {
+        let (built, program) = tokio::task::spawn_blocking(move || -> Result<_> {
             let (host, layout) = host_and_layout(&crew_bin, &workspace, &socket)?;
             let path = std::env::var_os("PATH");
             // The crew binary is bound anyway; any other program is a CLI,
@@ -623,7 +669,7 @@ workspace.sandbox.mode: off"
                 .then(|| untrusted_nix_daemon(path.as_ref()))
                 .transpose()
                 .map_err(|e| anyhow!("the Nix daemon cannot be given to {}: {e}", run.agent_id))?;
-            agent_profile(
+            let built = agent_profile(
                 &host,
                 &layout,
                 &at,
@@ -631,7 +677,9 @@ workspace.sandbox.mode: off"
                 &run,
                 cli.as_deref(),
                 nix.as_ref(),
-            )
+            )?;
+            let program = program_to_run(&run.program, cli.as_deref(), &built.spec);
+            Ok((built, program))
         })
         .await??;
         for warning in built.warnings.iter().filter(|_| report) {
@@ -645,7 +693,10 @@ workspace.sandbox.mode: off"
                 .warn(),
             );
         }
-        Ok(Some(built.spec))
+        Ok(Some(Sandboxed {
+            spec: built.spec,
+            program,
+        }))
     }
 }
 
@@ -1108,6 +1159,7 @@ unsandboxed"
             daemon: daemon.clone(),
             agent: "a".into(),
             spec: fx.profile_for(false, true, &run).unwrap(),
+            program: None,
             env,
             admin: PathBuf::from("/admin"),
             pending: std::sync::Mutex::new(None),
@@ -1147,5 +1199,91 @@ unsandboxed"
         assert!(refused.contains("its git sandbox"), "{refused}");
         std::fs::write(entry.done(), "exited 0\n").unwrap();
         daemon.ledger.retire("a", short).await.unwrap();
+    }
+
+    #[test]
+    fn the_cli_that_runs_is_the_one_the_daemons_path_found_by_its_absolute_path() {
+        use std::os::unix::fs::PermissionsExt;
+        let fx = fixture();
+        let root = &fx.root;
+        let program = |path: &Path| {
+            std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+            std::fs::write(path, "#!/bin/sh\n").unwrap();
+            std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o755)).unwrap();
+        };
+        // The first of two flat installations on the daemon's PATH.
+        let (first, second) = (root.join("first/codex"), root.join("second/codex"));
+        program(&first);
+        program(&second);
+        let path = std::env::join_paths([root.join("first"), root.join("second")]).unwrap();
+        let found = find_program("codex", Some(&path)).unwrap();
+        assert_eq!(found, first);
+        let bound = |spec: &mut Spec, path: &Path| {
+            spec.mounts.push(Mount::Bind {
+                path: path.to_path_buf(),
+                id: crate::sandbox::pin::identify(path).unwrap(),
+                writable: false,
+            })
+        };
+        // Where the sandbox shows that path (its directory bound, or the
+        // file alone when the directory was left out), it runs by it.
+        let mut spec = fx.profile("a", false, true).unwrap();
+        bound(&mut spec, &first);
+        assert_eq!(
+            program_to_run("codex", Some(&found), &spec),
+            Some(first.clone())
+        );
+        // Installed behind a link in a directory the sandbox does not show:
+        // the file it resolves to.
+        let target = root.join("lib/node_modules/@openai/codex/bin/codex.js");
+        program(&target);
+        std::fs::create_dir_all(root.join("links")).unwrap();
+        std::os::unix::fs::symlink(&target, root.join("links/codex")).unwrap();
+        let mut spec = fx.profile("a", false, true).unwrap();
+        bound(&mut spec, &root.join("lib/node_modules/@openai/codex"));
+        let linked = root.join("links/codex");
+        assert_eq!(program_to_run("codex", Some(&linked), &spec), Some(target));
+        // ... and by the link where its directory is shown, so a program
+        // that looks at its name (busybox's sh) still sees it.
+        bound(&mut spec, &root.join("links"));
+        assert_eq!(program_to_run("codex", Some(&linked), &spec), Some(linked));
+        // A program given as a path, or not found, runs as given.
+        assert_eq!(program_to_run("./codex", Some(&first), &spec), None);
+        assert_eq!(program_to_run("codex", None, &spec), None);
+    }
+
+    #[tokio::test]
+    async fn an_agents_git_runs_the_git_its_profile_bound() {
+        let fx = fixture();
+        let running = super::super::start(super::super::DaemonOptions {
+            workspace: fx.ws.clone(),
+            crew_bin: std::env::current_exe().unwrap(),
+        })
+        .await
+        .unwrap();
+        let run = Run::git("a", &fx.ws.join(".crew/agents/a"));
+        let launcher = LedgerLauncher {
+            daemon: running.daemon.clone(),
+            agent: "a".into(),
+            spec: fx.profile_for(false, true, &run).unwrap(),
+            program: Some(PathBuf::from("/bound/bin/git")),
+            env: run.env.clone(),
+            admin: PathBuf::from("/admin"),
+            pending: std::sync::Mutex::new(None),
+        };
+        let mut git = std::process::Command::new("git");
+        git.args(["-C", "/w", "status"]).env("GIT_AUTHOR_NAME", "a");
+        let launched = launcher.launch(&git).unwrap();
+        launcher.started(None);
+        let args: Vec<String> = launched
+            .get_args()
+            .map(|a| a.to_string_lossy().into_owned())
+            .collect();
+        let after = args.iter().position(|a| a == "--").unwrap() + 1;
+        assert_eq!(args[after..], ["/bound/bin/git", "-C", "/w", "status"]);
+        let spec: Spec = serde_json::from_str(&args[1]).unwrap();
+        assert!(spec
+            .env
+            .contains(&("GIT_AUTHOR_NAME".to_string(), "a".to_string())));
     }
 }

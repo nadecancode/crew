@@ -434,7 +434,7 @@ impl Daemon {
         session: &str,
         text: &str,
     ) -> Result<(), String> {
-        let argv = runtime_for(kind)
+        let mut argv = runtime_for(kind)
             .queue_command(socket, session, text)
             .ok_or("this runtime has no queue command")?;
         let agent = self.agent(id).ok_or("the agent is gone")?;
@@ -452,7 +452,14 @@ impl Daemon {
         let sandbox = self
             .agent_sandbox(&agent, Run::helper(id, &argv[0], &env, socket))
             .await
-            .map_err(|e| format!("{e:#}"))?;
+            .map_err(|e| format!("{e:#}"))?
+            .map(|sandboxed| {
+                // The CLI file its profile bound, by its absolute path.
+                if let Some(program) = sandboxed.program {
+                    argv[0] = program.to_string_lossy().into_owned();
+                }
+                sandboxed.spec
+            });
         // In the ledger, on disk, before it starts: its sandbox reports there
         // when it is gone.
         let record = sandbox

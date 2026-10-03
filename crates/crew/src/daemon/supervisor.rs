@@ -495,13 +495,25 @@ impl Daemon {
 
         // Before anything starts: an agent that must be sandboxed and cannot
         // be starts nothing.
-        spec.sandbox = self
+        // Each runs the CLI file its profile bound, by its absolute path.
+        if let Some(sandboxed) = self
             .agent_sandbox(&agent, Run::session(&spec, procs.name()))
-            .await?;
-        let sidecar_sandbox = match &spec.sidecar {
+            .await?
+        {
+            if let Some(program) = sandboxed.program {
+                spec.program = program.to_string_lossy().into_owned();
+            }
+            spec.sandbox = Some(sandboxed.spec);
+        }
+        let sidecar_sandbox = match spec.sidecar.as_mut() {
             Some(sidecar) => {
                 let run = Run::helper(id, &sidecar.program, &sidecar.env, &sidecar.socket);
-                self.agent_sandbox(&agent, run).await?
+                self.agent_sandbox(&agent, run).await?.map(|sandboxed| {
+                    if let Some(program) = sandboxed.program {
+                        sidecar.program = program.to_string_lossy().into_owned();
+                    }
+                    sandboxed.spec
+                })
             }
             None => None,
         };
