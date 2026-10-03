@@ -1859,9 +1859,12 @@ waiting on a teammate."
             // The process did not outlive the previous daemon.
             let needed = {
                 let model = self.model();
+                // Its own work, or a review it still owes.
                 let open = model.tasks.iter().any(|t| {
-                    t.assigned_agent.as_deref() == Some(agent.id.as_str())
-                        && !t.status.is_terminal()
+                    (t.assigned_agent.as_deref() == Some(agent.id.as_str())
+                        && !t.status.is_terminal())
+                        || (t.status == TaskStatus::Review
+                            && t.reviewer.as_deref() == Some(agent.id.as_str()))
                 });
                 open || (agent.orchestrator && model.session.summary.is_none())
             } || super::delivery::wakes(

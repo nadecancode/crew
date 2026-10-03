@@ -618,6 +618,53 @@ fn a_task_whose_reviewer_stopped_is_reported_as_a_stall() {
     assert_eq!(find_task(&s.snapshot(), "write").status, TaskStatus::Review);
 }
 
+#[test]
+fn a_reviewer_with_an_open_review_is_restarted_after_a_daemon_restart() {
+    let s = Session::new();
+    let team = {
+        let mut team = s.team(
+            "review-recovery",
+            vec![
+                agent("author", "", &["--on-task=done first draft"]),
+                // Reads the review request; the verdict is still to come.
+                agent("critic", "", &[]),
+            ],
+            vec![task("write", "author", &[])],
+        );
+        team.tasks[0].reviewer = Some("critic".into());
+        team
+    };
+    s.run(&team);
+    let before = s.wait("the task to await review", |snap| {
+        find_task(snap, "write").status == TaskStatus::Review
+    });
+    s.wait_for("the reviewer to read the request", || {
+        s.agent_cmd(&["output", "critic"])
+            .contains("review_request from author")
+    });
+
+    let old_pid = before.session.daemon_pid;
+    let killed = std::process::Command::new("kill")
+        .args(["-9", &old_pid.to_string()])
+        .status()
+        .unwrap();
+    assert!(killed.success());
+    s.wait_for("the daemon to die", || {
+        !crew_core::paths::pid_alive(old_pid)
+    });
+    s.ok(&["start", "-C", &s.workspace.to_string_lossy()]);
+    s.wait_for("the recovery", || s.has_event("daemon.recovered"));
+
+    // The review is still owed, so its reviewer comes back for it.
+    let after = s.snapshot();
+    let critic = find_agent(&after, "critic");
+    assert_ne!(critic.status, AgentStatus::Stopped, "{critic:?}");
+    assert_eq!(find_task(&after, "write").status, TaskStatus::Review);
+    s.wait("the reviewer to be running again", |snap| {
+        find_agent(snap, "critic").pid.is_some()
+    });
+}
+
 // ---------------------------------------------------------------------------
 // Agent lifecycle and failures
 // ---------------------------------------------------------------------------
