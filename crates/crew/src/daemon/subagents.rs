@@ -5,7 +5,7 @@
 //! branch, gets one task, reports the result straight to its parent when it
 //! finishes, and is retired once it is done.
 
-use crew_core::config::{validate_agent_spec, AgentSpec, TaskSpec};
+use crew_core::config::{validate_agent_spec, AgentSpec};
 use crew_core::rpc::RpcError;
 use crew_core::util::{is_valid_id, one_line, truncate_chars};
 use crew_core::{Agent, AgentStatus, MessageType, RuntimeKind, Task};
@@ -80,9 +80,13 @@ to finish",
                     id
                 }
                 None => {
-                    let stem: String = parent_id.chars().take(26).collect();
                     (1..)
-                        .map(|n| format!("{stem}-s{n}"))
+                        .map(|n| {
+                            // Room for the suffix, and for "-task" in its task id.
+                            let suffix = format!("-s{n}");
+                            let stem: String = parent_id.chars().take(27 - suffix.len()).collect();
+                            format!("{stem}{suffix}")
+                        })
                         .find(|candidate| !model_guard.id_taken(candidate))
                         .expect("an unused subagent id exists")
                 }
@@ -127,6 +131,7 @@ to finish",
         if runtime == RuntimeKind::Shell && spec.command.is_empty() {
             return Err(RpcError::invalid("a shell subagent needs a command"));
         }
+        let own_task = self.own_task(&id, task)?;
 
         let daemon = self.clone();
         let parent_for_task = parent.clone();
@@ -151,18 +156,13 @@ to finish",
                 "agent.subagent",
                 format!(
                     "{parent_id} launched subagent {id}: {}",
-                    truncate_chars(&one_line(&task), 120)
+                    truncate_chars(&one_line(&own_task.description), 120)
                 ),
             )
             .agent(&id)
             .data(json!({ "parent": parent_id })),
         );
-        self.create_task(TaskSpec {
-            id: format!("{id}-task"),
-            description: task,
-            agent: Some(id.clone()),
-            ..TaskSpec::default()
-        })?;
+        self.create_task(own_task)?;
         // Dispatch first so the subagent's first prompt is its task.
         self.apply_plan().await;
         self.spawn_in_background(&id, false, None);

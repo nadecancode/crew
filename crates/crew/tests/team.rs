@@ -1574,6 +1574,57 @@ fn an_agent_can_launch_a_subagent_that_reports_back_and_is_retired() {
 }
 
 #[test]
+fn an_agent_whose_task_cannot_be_created_is_not_created_either() {
+    let s = Session::new();
+    // 26 characters: the longest id a generated subagent id must fit after.
+    let lead = "lead-with-a-very-long-name";
+    let mut team = s.team("orphans", vec![agent(lead, "", &[])], vec![]);
+    team.defaults.command = scripted(&[]);
+    s.run(&team);
+    s.wait("the lead to come up", |snap| {
+        find_agent(snap, lead).status != AgentStatus::Spawning
+    });
+    let ws = s.workspace.to_string_lossy().into_owned();
+    let ids = |snap: &crew_core::rpc::Snapshot| -> Vec<String> {
+        snap.agents.iter().map(|a| a.id.clone()).collect()
+    };
+
+    // A valid agent id whose task id ("<id>-task") would be too long.
+    let long = "a".repeat(28);
+    let spawn = json!({ "task": "a quick job", "id": long }).to_string();
+    let out = s.ctl(lead, &["tool", "agent_spawn", &spawn]);
+    assert!(!out.status.success(), "{}", stdout(&out));
+    assert_eq!(ids(&s.snapshot()), [lead]);
+    assert!(stderr(&out).contains("at most 27"), "{}", stderr(&out));
+
+    // The same through agent_add with a task.
+    let added = s.crew(&[
+        "agent", "add", "--name", &long, "--task", "a job", "-C", &ws,
+    ]);
+    assert!(!added.status.success(), "{}", stdout(&added));
+    assert_eq!(ids(&s.snapshot()), [lead]);
+    assert!(stderr(&added).contains("at most 27"), "{}", stderr(&added));
+
+    // A generated id leaves room for the task id.
+    let spawn = json!({ "task": "a quick job" }).to_string();
+    let out = s.ctl(lead, &["tool", "agent_spawn", &spawn]);
+    assert!(out.status.success(), "{}", stderr(&out));
+    let snapshot = s.snapshot();
+    let sub = snapshot
+        .agents
+        .iter()
+        .find(|a| a.parent.as_deref() == Some(lead))
+        .expect("the subagent");
+    assert!(
+        snapshot
+            .tasks
+            .iter()
+            .any(|t| t.assigned_agent.as_deref() == Some(sub.id.as_str())),
+        "{snapshot:?}"
+    );
+}
+
+#[test]
 fn new_work_does_not_go_to_a_retired_subagent() {
     let s = Session::new();
     let team = s.team(

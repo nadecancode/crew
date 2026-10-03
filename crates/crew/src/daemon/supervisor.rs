@@ -246,6 +246,13 @@ impl Daemon {
                 )));
             }
         }
+        // Its task is checked first: an agent whose task cannot be created is
+        // not created either.
+        let own_task = spec
+            .task
+            .clone()
+            .map(|description| self.own_task(&spec.id, description))
+            .transpose()?;
         let daemon = self.clone();
         let spec_for_task = spec.clone();
         let agent = tokio::task::spawn_blocking(move || {
@@ -276,13 +283,7 @@ impl Daemon {
             )
             .agent(&agent.id),
         );
-        if let Some(description) = spec.task {
-            let task = crew_core::config::TaskSpec {
-                id: format!("{}-task", spec.id),
-                description,
-                agent: Some(spec.id.clone()),
-                ..Default::default()
-            };
+        if let Some(task) = own_task {
             if let Err(e) = self.create_task(task) {
                 tracing::warn!("creating the task for {}: {}", spec.id, e.message);
             }

@@ -3,7 +3,7 @@
 
 use crew_core::config::TaskSpec;
 use crew_core::rpc::{RpcError, SendResult, TaskCard};
-use crew_core::util::{now_ms, one_line, truncate_chars};
+use crew_core::util::{is_valid_id, now_ms, one_line, truncate_chars};
 use crew_core::{AgentStatus, Artifact, Message, MessageType, Task, TaskStatus, MAX_MESSAGE_BYTES};
 use serde_json::json;
 
@@ -35,6 +35,29 @@ limits.max_message_bytes is {limit}",
 }
 
 impl Daemon {
+    /// The task an agent is created with (`agent_add` with a task, or a
+    /// subagent's), checked before the agent exists: a task that cannot be
+    /// created must not leave an agent behind.
+    pub(crate) fn own_task(&self, agent: &str, description: String) -> Result<TaskSpec, RpcError> {
+        let spec = TaskSpec {
+            id: format!("{agent}-task"),
+            description,
+            agent: Some(agent.to_string()),
+            ..TaskSpec::default()
+        };
+        // Ids are at most 32 characters, and "-task" takes five.
+        if !is_valid_id(&spec.id) {
+            return Err(RpcError::invalid(format!(
+                "agent id '{agent}' is too long for an agent with a task: at most 27 characters \
+(its task is '{}')",
+                spec.id
+            )));
+        }
+        tasks::validate_new(&self.model().tasks, &spec).map_err(RpcError::invalid)?;
+        check_task_message_size(&tasks::task_from_spec(&spec, 0), self.bus.max_bytes())?;
+        Ok(spec)
+    }
+
     /// Run the scheduler and carry out what it decides. Called whenever task
     /// or agent state changes.
     pub(crate) async fn apply_plan(&self) {
