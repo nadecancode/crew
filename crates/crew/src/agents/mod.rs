@@ -19,6 +19,7 @@ use serde_json::Value;
 
 pub mod claude;
 pub mod codex;
+pub mod home;
 pub mod pi;
 pub mod prompt;
 pub mod shell;
