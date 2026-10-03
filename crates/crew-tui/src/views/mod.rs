@@ -33,13 +33,31 @@ pub fn render_buffer(buf: &mut Buffer, area: Rect, app: &App, theme: &Theme, now
     if area.is_empty() {
         return;
     }
+    if let Some(text) = sandbox_warning(app) {
+        let style = theme.bold(theme.warn).bg(theme.bar_bg);
+        fill_row(buf, area, area.y, style);
+        let label = if area.width < 10 {
+            "!".into()
+        } else {
+            fit(text, usize::from(area.width))
+        };
+        put_str(
+            buf,
+            area,
+            i32::from(area.x),
+            i32::from(area.y),
+            &label,
+            style,
+        );
+    }
+    let content = content_area(app, area);
     // A question waiting for the operator is announced above whatever view
     // is open, so it is not missed from the inspector or the logs.
-    let band_h = question::band_height(app, area);
+    let band_h = question::band_height(app, content);
     if band_h > 0 {
         let band = Rect {
             height: band_h,
-            ..area
+            ..content
         };
         question::render_band(buf, band, app, theme, now);
     }
@@ -51,23 +69,45 @@ pub fn render_buffer(buf: &mut Buffer, area: Rect, app: &App, theme: &Theme, now
         View::Logs => logs::render(buf, view, app, theme),
     }
     if app.help {
-        help::render(buf, area, theme);
+        help::render(buf, content, theme);
     }
     match &app.modal {
-        Some(Modal::Question(answer)) => question::render(buf, area, app, answer, theme, now),
-        Some(Modal::Message(view)) => message::render(buf, area, app, view, theme),
-        Some(Modal::Model(picker)) => models::render(buf, area, app, picker, theme),
-        Some(modal) => compose::render(buf, area, modal, theme),
+        Some(Modal::Question(answer)) => question::render(buf, content, app, answer, theme, now),
+        Some(Modal::Message(view)) => message::render(buf, content, app, view, theme),
+        Some(Modal::Model(picker)) => models::render(buf, content, app, picker, theme),
+        Some(modal) => compose::render(buf, content, modal, theme),
         None => {}
     }
     if !app.connected {
-        banner(buf, area, app, theme);
+        banner(buf, content, app, theme);
+    }
+}
+
+/// The daemon supplies the mode; missing or unfamiliar state cannot confirm
+/// confinement. Show fixed text, never the raw wire value.
+fn sandbox_warning(app: &App) -> Option<&'static str> {
+    match app.session.sandbox.as_str() {
+        "required" => None,
+        "off" => Some("NO SANDBOX · agents can access the host"),
+        _ => Some("SANDBOX UNCONFIRMED · host access may be unrestricted"),
+    }
+}
+
+/// Space below the persistent warning, shared by modal rendering and input
+/// limits. app.screen retains the full terminal size, including before draw.
+pub(crate) fn content_area(app: &App, area: Rect) -> Rect {
+    let header = u16::from(area.height > 0 && sandbox_warning(app).is_some());
+    Rect {
+        y: area.y + header,
+        height: area.height - header,
+        ..area
     }
 }
 
 /// The area a view gets inside the screen: everything below the band that
 /// announces questions for the operator.
 fn view_area(app: &App, area: Rect) -> Rect {
+    let area = content_area(app, area);
     let band_h = question::band_height(app, area);
     Rect {
         y: area.y + band_h,
@@ -79,6 +119,9 @@ fn view_area(app: &App, area: Rect) -> Rect {
 /// What a click at column `x`, row `y` of the screen lands on.
 pub fn hit(app: &App, area: Rect, x: u16, y: u16) -> Option<dashboard::Hit> {
     if area.is_empty() {
+        return None;
+    }
+    if y < content_area(app, area).y {
         return None;
     }
     let view = view_area(app, area);

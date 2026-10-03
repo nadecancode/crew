@@ -91,11 +91,23 @@ pub enum Hit {
 /// below the usage strip.
 fn regions(app: &App, area: Rect) -> (Rect, Rect, Rect) {
     let strip_h = super::usage::height(app, area);
-    split(Rect {
+    let warning = app.session.sandbox != "required";
+    let (mut topo, mut bus, mut footer) = split(Rect {
         y: area.y + strip_h,
-        height: area.height - strip_h,
+        height: (area.height - strip_h).saturating_add(u16::from(warning)),
         ..area
-    })
+    });
+    // Spend the warning's row on history before shrinking the agent boxes.
+    if warning {
+        if bus.height > 0 {
+            bus.height -= 1;
+        } else {
+            topo.height = topo.height.saturating_sub(1);
+        }
+        bus.y = topo.bottom();
+        footer.y = bus.bottom();
+    }
+    (topo, bus, footer)
 }
 
 /// The ring of boxes in `area`, and whether its boxes have a row for what

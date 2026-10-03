@@ -77,6 +77,175 @@ fn app() -> App {
     app
 }
 
+/// Geometry queries use the dashboard's area below the persistent warning.
+fn dashboard_area(app: &App, width: u16, height: u16) -> ratatui::layout::Rect {
+    let header = u16::from(height > 0 && app.session.sandbox != "required");
+    ratatui::layout::Rect::new(0, header, width, height - header)
+}
+
+#[test]
+fn sandbox_warning_is_persistent_and_only_the_snapshot_can_confirm_it() {
+    use crew_tui::app::{MessageView, ModelPicker, QuestionBox};
+    for width in [42, 120] {
+        let mut a = app();
+        a.session.sandbox = "required".into();
+        let screen = render_to_string(&a, width, 24, NOW);
+        assert!(!screen.contains("NO SANDBOX") && !screen.contains("SANDBOX UNCONFIRMED"));
+        let question = fixture::question(NOW);
+        let question_id = question.id.clone();
+        a.questions.push(question);
+        for (mode, label) in [
+            ("off", "NO SANDBOX"),
+            ("", "SANDBOX UNCONFIRMED"),
+            ("future", "SANDBOX UNCONFIRMED"),
+            ("\u{1b}]52;c;bad\u{7}", "SANDBOX UNCONFIRMED"),
+        ] {
+            a.session.sandbox = mode.into();
+            for view in [View::Dashboard, View::Detail, View::Tasks, View::Logs] {
+                a.view = view;
+                let overlays = [
+                    None,
+                    Some(Modal::Compose(Compose::default())),
+                    Some(Modal::Type(Compose::default())),
+                    Some(Modal::ConfirmKill("claude-1".into())),
+                    Some(Modal::ConfirmRestartPaused(1)),
+                    Some(Modal::ConfirmStop),
+                    Some(Modal::Message(MessageView {
+                        id: a.messages[0].id.clone(),
+                        ..Default::default()
+                    })),
+                    Some(Modal::Question(QuestionBox {
+                        id: question_id.clone(),
+                        ..Default::default()
+                    })),
+                    Some(Modal::Model(ModelPicker {
+                        agent: "claude-1".into(),
+                        runtime: crew_core::RuntimeKind::Claude,
+                        row: 0,
+                        moved: false,
+                        notice: None,
+                    })),
+                ];
+                for overlay in overlays {
+                    a.modal = overlay;
+                    for help in [false, true] {
+                        a.help = help;
+                        let screen = render_to_string(&a, width, 24, NOW);
+                        assert!(
+                            screen.lines().next().unwrap().contains(label),
+                            "{mode:?}/{view:?}: {screen}"
+                        );
+                        assert!(!screen.contains('\u{1b}'));
+                    }
+                }
+            }
+        }
+    }
+    for width in 0..=42 {
+        for height in 0..=3 {
+            let a = app();
+            let screen = render_to_string(&a, width, height, NOW);
+            if width > 0 && height > 0 {
+                assert!(
+                    !screen.lines().next().unwrap().trim().is_empty(),
+                    "{width}x{height}"
+                );
+            }
+        }
+    }
+}
+
+#[test]
+fn sandbox_header_keeps_mouse_hits_on_the_rows_that_are_drawn() {
+    use ratatui::crossterm::event::{MouseButton, MouseEvent, MouseEventKind};
+    let mut a = app();
+    let target = a
+        .agents
+        .iter_mut()
+        .find(|agent| agent.id == "claude-1")
+        .unwrap();
+    target.id = "tap".into();
+    target.name = "tap".into();
+    let area = ratatui::layout::Rect::new(0, 0, 42, 24);
+    let screen = render_to_string(&a, 42, 24, NOW);
+    assert!(
+        views::hit(&a, area, 1, 0).is_none(),
+        "the warning is not a question or agent"
+    );
+    let name = a
+        .agents
+        .iter()
+        .find(|agent| agent.id == "tap")
+        .unwrap()
+        .name
+        .clone();
+    let (row, line) = screen
+        .lines()
+        .enumerate()
+        .find(|(_, line)| line.contains(&name))
+        .unwrap();
+    let at = line.find(&name).unwrap();
+    let column = crew_tui::widgets::text::width(&line[..at]) as u16;
+    assert!(
+        matches!(views::hit(&a, area, column, row as u16), Some(views::dashboard::Hit::Agent(id)) if id=="tap")
+    );
+    crew_tui::input::handle_mouse(
+        &mut a,
+        MouseEvent {
+            kind: MouseEventKind::Down(MouseButton::Left),
+            column,
+            row: row as u16,
+            modifiers: KeyModifiers::NONE,
+        },
+        area,
+        NOW,
+        10,
+    );
+    assert_eq!(a.view, View::Detail);
+    assert_eq!(a.detail.agent, "tap");
+}
+
+#[test]
+fn sandbox_header_and_modal_scroll_limits_share_the_reduced_area() {
+    use crew_tui::app::MessageView;
+    let mut offsets = Vec::new();
+    for mode in ["required", "off"] {
+        let mut a = app();
+        a.session.sandbox = mode.into();
+        let body = (0..80)
+            .map(|n| format!("Body line {n}"))
+            .collect::<Vec<_>>()
+            .join("\n");
+        a.messages.push_back(fixture::message(
+            999,
+            "claude-1",
+            "claude-2",
+            MessageType::Message,
+            &body,
+            NOW,
+        ));
+        a.modal = Some(Modal::Message(MessageView {
+            id: "m-0999".into(),
+            scroll: 0,
+        }));
+        render_to_string(&a, 80, 24, NOW);
+        press(&mut a, KeyCode::End);
+        let bottom = render_to_string(&a, 80, 24, NOW);
+        assert!(bottom.contains("Body line 79"));
+        let Some(Modal::Message(view)) = &a.modal else {
+            unreachable!()
+        };
+        offsets.push(view.scroll);
+        press(&mut a, KeyCode::Up);
+        assert_ne!(render_to_string(&a, 80, 24, NOW), bottom);
+    }
+    assert_eq!(
+        offsets[1],
+        offsets[0] + 1,
+        "the warning uses one visible row"
+    );
+}
+
 #[test]
 fn inspector_text_never_renders_terminal_controls() {
     let poison = "\u{1b}]52;c;Y29tbWFuZA==\u{7}\u{9b}2J\tvisible";
@@ -888,7 +1057,7 @@ fn a_question_for_the_operator_is_announced_and_shown_in_full() {
     let question = fixture::question(NOW);
     app.questions.push(question.clone());
     let screen = render_to_string(&app, 120, 40, NOW);
-    let band = screen.lines().next().unwrap();
+    let band = screen.lines().nth(1).unwrap();
     assert!(
         band.contains("? question from orchestrator (for claude-2) · 3m05s ago: The legacy export"),
         "{band}"
@@ -906,7 +1075,7 @@ fn a_question_for_the_operator_is_announced_and_shown_in_full() {
     assert!(
         screen
             .lines()
-            .next()
+            .nth(1)
             .unwrap()
             .contains("? 2 questions for you · the first from orchestrator"),
         "{screen}"
@@ -918,7 +1087,7 @@ fn a_question_for_the_operator_is_announced_and_shown_in_full() {
         assert!(
             screen
                 .lines()
-                .next()
+                .nth(1)
                 .unwrap()
                 .contains("? 2 questions for you"),
             "{view:?}:\n{screen}"
@@ -1133,7 +1302,7 @@ fn each_box_names_its_model_and_effort_on_its_bottom_border() {
     // The bottom border of an agent's box, as drawn: on a 120-column screen
     // the boxes are 30 wide, on a 72-column one 22.
     let border_at = |app: &App, id: &str, w: u16| -> String {
-        let area = ratatui::layout::Rect::new(0, 0, w, 40);
+        let area = dashboard_area(app, w, 40);
         let screen = render_to_string(app, w, 40, NOW);
         let rects = crew_tui::views::dashboard::agent_rects(app, area);
         let (_, rect) = rects.iter().find(|(agent, _)| agent == id).unwrap();
@@ -1310,11 +1479,11 @@ fn the_boxes_show_how_full_each_context_window_is() {
     use crew_core::types::ContextUsage;
     use crew_tui::views::dashboard::agent_rects;
     use crew_tui::widgets::agent_box::window_size;
-    let area = ratatui::layout::Rect::new(0, 0, 120, 40);
 
     // Nobody reports a context: the boxes have the task and what the agent
     // is doing, nothing more.
     let mut app = app();
+    let area = dashboard_area(&app, 120, 40);
     assert!(agent_rects(&app, area)
         .iter()
         .filter(|(id, _)| id != "orchestrator")
@@ -1367,16 +1536,26 @@ fn the_boxes_show_how_full_each_context_window_is() {
     // row says what the agent runs on, and a click there is for choosing it.
     let (_, rect) = rects.iter().find(|(id, _)| id == "claude-2").unwrap();
     assert_eq!(
-        crew_tui::views::hit(&app, area, rect.x + 3, rect.bottom() - 2),
+        crew_tui::views::hit(
+            &app,
+            ratatui::layout::Rect::new(0, 0, 120, 40),
+            rect.x + 3,
+            rect.bottom() - 2
+        ),
         Some(crew_tui::views::dashboard::Hit::Agent("claude-2".into()))
     );
     assert_eq!(
-        crew_tui::views::hit(&app, area, rect.x + 3, rect.bottom() - 1),
+        crew_tui::views::hit(
+            &app,
+            ratatui::layout::Rect::new(0, 0, 120, 40),
+            rect.x + 3,
+            rect.bottom() - 1
+        ),
         Some(crew_tui::views::dashboard::Hit::Model("claude-2".into()))
     );
 
     // Where the taller boxes do not fit, the shorter ones are drawn.
-    let short = ratatui::layout::Rect::new(0, 0, 120, 24);
+    let short = dashboard_area(&app, 120, 24);
     let tall_fits = agent_rects(&app, short).iter().any(|(_, r)| r.height == 5);
     let screen = render_to_string(&app, 120, 24, NOW);
     assert_eq!(screen.contains("│ 1M "), tall_fits, "{screen}");
@@ -1878,7 +2057,7 @@ fn a_session_off_its_model_is_marked_on_its_box_and_explained_in_the_inspector()
     use crew_core::types::ModelFallback;
     let theme = Theme::truecolor();
     let mut app = app();
-    let area = ratatui::layout::Rect::new(0, 0, 120, 40);
+    let area = dashboard_area(&app, 120, 40);
     let agent = app.agents.iter_mut().find(|a| a.id == "claude-1").unwrap();
     agent.fallback = Some(ModelFallback {
         from: "Opus 5.5".into(),
@@ -1925,8 +2104,8 @@ fn a_session_off_its_model_is_marked_on_its_box_and_explained_in_the_inspector()
 #[test]
 fn each_box_says_which_task_its_member_is_on_and_what_it_is_doing_now() {
     use crew_tui::widgets::agent_box::{doing, Decor, Tone};
-    let area = ratatui::layout::Rect::new(0, 0, 120, 40);
     let mut app = app();
+    let area = dashboard_area(&app, 120, 40);
     // The rows of a box, inside its borders.
     let rows_of = |app: &App, id: &str| -> Vec<String> {
         let screen = render_to_string(app, 120, 40, NOW);

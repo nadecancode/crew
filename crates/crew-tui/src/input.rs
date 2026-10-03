@@ -79,7 +79,9 @@ pub fn handle_mouse(
             let up = mouse.kind == MouseEventKind::ScrollUp;
             app.mark_dirty();
             let message_lines = match &app.modal {
-                Some(Modal::Message(view)) => message::scroll_limit(app, view, area),
+                Some(Modal::Message(view)) => {
+                    message::scroll_limit(app, view, views::content_area(app, area))
+                }
                 _ => 0,
             };
             match &mut app.modal {
@@ -605,7 +607,8 @@ fn modal_key(app: &mut App, key: KeyEvent, now: i64) -> Vec<Command> {
         Modal::Question(answer) => question_key(app, answer, key, now),
         Modal::Model(picker) => picker_key(app, picker, key, now),
         Modal::Message(mut view) => {
-            let lines = message::scroll_limit(app, &view, app.screen.get());
+            let lines =
+                message::scroll_limit(app, &view, views::content_area(app, app.screen.get()));
             view.scroll = view.scroll.min(lines);
             match key.code {
                 KeyCode::Up => scroll_message(&mut view, true, 1, lines),
@@ -801,7 +804,11 @@ fn question_key(app: &mut App, mut answer: QuestionBox, key: KeyEvent, now: i64)
         .iter()
         .map(|q| {
             let options = q.options();
-            let limit = views::question::scroll_limit(&q.body, options.len(), app.screen.get());
+            let limit = views::question::scroll_limit(
+                &q.body,
+                options.len(),
+                views::content_area(app, app.screen.get()),
+            );
             (q.id.clone(), options, limit)
         })
         .collect();
@@ -1719,7 +1726,7 @@ mod tests {
 
     #[test]
     fn a_click_on_an_agent_opens_its_inspector() {
-        let boxes = views::dashboard::agent_rects(&app(), SCREEN);
+        let boxes = views::dashboard::agent_rects(&app(), views::content_area(&app(), SCREEN));
         // Six workers and the orchestrator, each with a box of its own.
         assert_eq!(boxes.len(), 7, "{boxes:?}");
         for (id, rect) in &boxes {
@@ -1786,7 +1793,7 @@ mod tests {
 
         // On a screen too small for boxes the agents are rows of a list.
         let small = Rect::new(0, 0, 50, 12);
-        let rows = views::dashboard::agent_rects(&app(), small);
+        let rows = views::dashboard::agent_rects(&app(), views::content_area(&app(), small));
         assert_eq!(rows.len(), 7);
         assert!(rows.iter().all(|(_, r)| r.height == 1));
         let (id, row) = &rows[3];
@@ -1898,7 +1905,8 @@ mod tests {
             .unwrap()
             .body
             .push_str(&"\nQuestion line".repeat(60));
-        left_click(&mut a, 40, 0);
+        let question_row = views::content_area(&a, SCREEN).y;
+        left_click(&mut a, 40, question_row);
         assert_eq!(answer_box(&a).id, first);
         mouse(&mut a, MouseEventKind::ScrollDown, 40, 10);
         assert_eq!(answer_box(&a).scroll, 5);
@@ -1935,7 +1943,7 @@ mod tests {
         assert_eq!(submit(&mut a, "/mouse"), vec![Command::SetMouse(false)]);
         assert!(a.status.as_ref().unwrap().text.contains("mouse off"));
         a.mouse = false;
-        let boxes = views::dashboard::agent_rects(&a, SCREEN);
+        let boxes = views::dashboard::agent_rects(&a, views::content_area(&a, SCREEN));
         assert!(
             left_click(&mut a, boxes[0].1.x + 2, boxes[0].1.y + 1).is_empty(),
             "off means off"
