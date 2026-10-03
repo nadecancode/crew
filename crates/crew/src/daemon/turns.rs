@@ -535,11 +535,15 @@ guidelines or usage policies, call decline(reason), and crew hands it to another
                 a.activity = format!("{model} refused the turn ({kind})");
             }
         });
-        self.mirror_status_to_task(
+        // The agent is blocked whatever its task shows: a refused save is
+        // logged, and those waiting on it are still told.
+        if let Err(e) = self.mirror_status_to_task(
             id,
             AgentStatus::Blocked,
             Some(format!("{model} refused it: {why}")),
-        );
+        ) {
+            tracing::error!("{}", e.message);
+        }
         let orchestrator = self.model().orchestrator().map(|a| a.id.clone());
         let senders: Vec<(String, String)> = input
             .iter()

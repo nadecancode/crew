@@ -102,26 +102,40 @@ impl Daemon {
             .collect();
         let actions = scheduler::plan(&tasks, &agents);
         let mut stalled = false;
+        // Each action builds on the ones before it, so a write the database
+        // refuses ends this round: the next one (an event, or the 5 s tick)
+        // plans again from what is stored.
+        let refused = |e: RpcError| {
+            tracing::error!("{}; the plan is applied again later", e.message);
+        };
         for action in actions {
             match action {
                 Action::MakeReady { task } => {
-                    self.update_task(&task, |t| {
+                    if let Err(e) = self.try_update_task(&task, |t| {
                         t.status = TaskStatus::Ready;
                         t.note = None;
-                    });
+                    }) {
+                        return refused(e);
+                    }
                     self.emit(
                         NewEvent::new("scheduler", "task.ready", format!("task {task} is ready"))
                             .task(&task),
                     );
                 }
                 Action::Requeue { task } => {
-                    self.update_task(&task, |t| {
+                    if let Err(e) = self.try_update_task(&task, |t| {
                         t.status = TaskStatus::Queued;
                         t.note = None;
-                    });
+                    }) {
+                        return refused(e);
+                    }
                 }
                 Action::Assign { task, agent } => {
-                    self.update_task(&task, |t| t.assigned_agent = Some(agent.clone()));
+                    if let Err(e) =
+                        self.try_update_task(&task, |t| t.assigned_agent = Some(agent.clone()))
+                    {
+                        return refused(e);
+                    }
                     self.emit(
                         NewEvent::new(
                             "scheduler",
@@ -134,10 +148,12 @@ impl Daemon {
                 }
                 Action::Dispatch { task, agent } => self.dispatch_task(&task, &agent).await,
                 Action::Block { task, reason } => {
-                    self.update_task(&task, |t| {
+                    if let Err(e) = self.try_update_task(&task, |t| {
                         t.status = TaskStatus::Blocked;
                         t.note = Some(reason.clone());
-                    });
+                    }) {
+                        return refused(e);
+                    }
                     self.emit(
                         NewEvent::new(
                             "scheduler",
@@ -222,11 +238,12 @@ call session_complete with the final report."
     /// Hand a ready task to its agent with a `task` message.
     async fn dispatch_task(&self, task_id: &str, agent_id: &str) {
         let now = now_ms();
-        // Check-and-set: only a task that is still ready is handed out, so a
-        // task can never be dispatched twice.
+        // Check-and-set: only a task that is still ready, and is this agent's,
+        // is handed out, so a task is never dispatched twice, nor without its
+        // owner (an assignment the database refused).
         let mut claimed = false;
         let Some(task) = self.update_task(task_id, |t| {
-            if t.status == TaskStatus::Ready {
+            if t.status == TaskStatus::Ready && t.assigned_agent.as_deref() == Some(agent_id) {
                 t.status = TaskStatus::Working;
                 t.started_at = Some(now);
                 t.progress = Some(0);
@@ -599,6 +616,16 @@ call session_complete with the final report."
                 None => active_task(&model.tasks, agent).map(|t| t.id.clone()),
             }
         };
+        // The task first: a refused save is the caller's error, and the
+        // agent then shows no progress the task does not have.
+        if let Some(task) = &task {
+            self.try_update_task(task, |t| {
+                t.progress = Some(percent);
+                if message.is_some() {
+                    t.note = message.clone();
+                }
+            })?;
+        }
         let now = now_ms();
         self.update_agent(agent, |a| {
             a.progress = Some(percent);
@@ -607,14 +634,6 @@ call session_complete with the final report."
             }
             a.last_activity_at = now;
         });
-        if let Some(task) = &task {
-            self.update_task(task, |t| {
-                t.progress = Some(percent);
-                if message.is_some() {
-                    t.note = message.clone();
-                }
-            });
-        }
         let mut event = NewEvent::new(
             "agent",
             "task.progress",
@@ -637,13 +656,13 @@ call session_complete with the final report."
         agent: &str,
         status: AgentStatus,
         note: Option<String>,
-    ) {
+    ) -> Result<(), RpcError> {
         let task = {
             let model = self.model();
             active_task(&model.tasks, agent).map(|t| t.id.clone())
         };
-        let Some(task) = task else { return };
-        self.update_task(&task, |t| match status {
+        let Some(task) = task else { return Ok(()) };
+        self.try_update_task(&task, |t| match status {
             AgentStatus::Waiting => {
                 t.status = TaskStatus::Waiting;
                 t.note = note.clone();
@@ -658,7 +677,8 @@ call session_complete with the final report."
                     t.note = note.clone();
                 }
             }
-        });
+        })?;
+        Ok(())
     }
 
     // ---- completion -----------------------------------------------------
@@ -910,15 +930,24 @@ with review_submit(task_id=\"{}\", approve=true|false).",
         self.report_to_parent(task, author).await;
     }
 
-    /// Mark a task failed (crash, timeout) and release its agent.
+    /// Mark a task failed (crash, timeout) and release its agent. A refused
+    /// save is logged; nothing changed then.
     pub(crate) async fn fail_task(&self, id: &str, reason: String) {
+        if let Err(e) = self.try_fail_task(id, reason).await {
+            tracing::error!("{}", e.message);
+        }
+    }
+
+    /// `fail_task`, returning a refused save to the caller.
+    async fn try_fail_task(&self, id: &str, reason: String) -> Result<(), RpcError> {
         let now = now_ms();
-        let Some(task) = self.update_task(id, |t| {
+        let Some(task) = self.try_update_task(id, |t| {
             t.status = TaskStatus::Failed;
             t.completed_at = Some(now);
             t.note = Some(reason.clone());
-        }) else {
-            return;
+        })?
+        else {
+            return Ok(());
         };
         let mut event = NewEvent::new(
             "scheduler",
@@ -948,6 +977,7 @@ with review_submit(task_id=\"{}\", approve=true|false).",
         ))
         .await;
         self.replan();
+        Ok(())
     }
 
     pub(crate) async fn fail_task_by(
@@ -967,8 +997,8 @@ with review_submit(task_id=\"{}\", approve=true|false).",
         if let Some(agent) = &task.assigned_agent {
             self.model().rt(agent).self_status = None;
         }
-        self.fail_task(&task.id, format!("{} gave up: {reason}", who.sender()))
-            .await;
+        self.try_fail_task(&task.id, format!("{} gave up: {reason}", who.sender()))
+            .await?;
         self.model()
             .task(&task.id)
             .cloned()

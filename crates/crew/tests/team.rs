@@ -1284,6 +1284,37 @@ fn a_task_transition_the_database_refuses_is_an_error_and_not_applied() {
         find_task(&s.snapshot(), "write").status,
         TaskStatus::Working
     );
+    // Giving up and reporting progress are refused the same way.
+    let fail = json!({ "reason": "cannot go on" }).to_string();
+    let refused = s.ctl("author", &["tool", "task_fail", &fail]);
+    assert!(!refused.status.success(), "{}", stdout(&refused));
+    assert!(
+        stderr(&refused).contains("the disk is full"),
+        "{}",
+        stderr(&refused)
+    );
+    let progress = json!({ "percent": 50, "message": "half way" }).to_string();
+    let refused = s.ctl("author", &["tool", "task_update", &progress]);
+    assert!(!refused.status.success(), "{}", stdout(&refused));
+    assert!(
+        stderr(&refused).contains("the disk is full"),
+        "{}",
+        stderr(&refused)
+    );
+    let blocked = json!({ "status": "blocked", "note": "stuck" }).to_string();
+    let refused = s.ctl("author", &["tool", "agent_status", &blocked]);
+    assert!(!refused.status.success(), "{}", stdout(&refused));
+    assert!(
+        stderr(&refused).contains("the disk is full"),
+        "{}",
+        stderr(&refused)
+    );
+    let snapshot = s.snapshot();
+    let write = find_task(&snapshot, "write");
+    assert_eq!(write.status, TaskStatus::Working);
+    assert_ne!(write.progress, Some(50));
+    assert_ne!(find_agent(&snapshot, "author").status, AgentStatus::Blocked);
+    assert_eq!(stored_status(), "working");
 
     db.execute_batch("DROP TRIGGER refuse_task_writes;")
         .unwrap();
@@ -1291,6 +1322,51 @@ fn a_task_transition_the_database_refuses_is_an_error_and_not_applied() {
     assert!(done.status.success(), "{}", stderr(&done));
     assert_eq!(stored_status(), "done");
     assert_eq!(find_task(&s.snapshot(), "write").status, TaskStatus::Done);
+}
+
+#[test]
+fn a_task_whose_assignment_the_database_refuses_is_not_dispatched() {
+    let s = Session::new();
+    let team = s.team("unowned", vec![agent("worker", "", &[])], vec![]);
+    s.run(&team);
+    s.wait("the worker to come up", |snap| {
+        find_agent(snap, "worker").status != AgentStatus::Spawning
+    });
+    // Only the write that gives a task its agent is refused.
+    let db = rusqlite::Connection::open(s.workspace.join(".crew/crew.db")).unwrap();
+    db.execute_batch(
+        "CREATE TRIGGER refuse_assignment BEFORE UPDATE ON tasks \
+         WHEN json_extract(OLD.data, '$.assigned_agent') IS NULL \
+          AND json_extract(NEW.data, '$.assigned_agent') IS NOT NULL \
+         BEGIN SELECT RAISE(ABORT, 'the disk is full'); END;",
+    )
+    .unwrap();
+    let ws = s.workspace.to_string_lossy().into_owned();
+    s.ok(&[
+        "task",
+        "add",
+        "--id",
+        "loose",
+        "--description",
+        "nobody's yet",
+        "-C",
+        &ws,
+    ]);
+    s.wait_for("the task to be ready", || s.has_event("task.ready"));
+    // The rest of that plan runs right after; give it a moment.
+    std::thread::sleep(std::time::Duration::from_millis(500));
+    let snapshot = s.snapshot();
+    let loose = find_task(&snapshot, "loose");
+    assert_eq!(loose.status, TaskStatus::Ready, "{loose:?}");
+    assert_eq!(loose.assigned_agent, None);
+    assert_eq!(find_agent(&snapshot, "worker").task, None);
+
+    // Once the database takes writes again, the task goes out normally.
+    db.execute_batch("DROP TRIGGER refuse_assignment;").unwrap();
+    s.wait("the task to be handed out", |snap| {
+        let loose = find_task(snap, "loose");
+        loose.status == TaskStatus::Working && loose.assigned_agent.as_deref() == Some("worker")
+    });
 }
 
 #[test]

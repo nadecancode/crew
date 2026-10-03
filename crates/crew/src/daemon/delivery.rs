@@ -396,7 +396,9 @@ impl Daemon {
                 a.last_activity_at = now;
             });
             // A task that was waiting on this message is being worked on again.
-            self.mirror_status_to_task(id, AgentStatus::Working, None);
+            if let Err(e) = self.mirror_status_to_task(id, AgentStatus::Working, None) {
+                tracing::error!("{}", e.message);
+            }
         }
         self.emit(
             NewEvent::new(

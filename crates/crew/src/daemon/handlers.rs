@@ -684,6 +684,9 @@ impl Daemon {
             ));
         }
         let note = note.map(|n| crew_core::util::truncate_chars(n.trim(), 300));
+        // The task first: a refused save is the caller's error, and nothing
+        // else has changed then.
+        self.mirror_status_to_task(agent, status, note.clone())?;
         {
             let mut model = self.model();
             let rt = model.rt(agent);
@@ -700,7 +703,6 @@ impl Daemon {
             }
             a.last_activity_at = crew_core::util::now_ms();
         });
-        self.mirror_status_to_task(agent, status, note.clone());
         self.emit(
             NewEvent::new(
                 "agent",
