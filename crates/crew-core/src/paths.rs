@@ -67,21 +67,30 @@ pub fn uid() -> u32 {
 
 /// Create a directory (and parents) readable by the current user only.
 pub fn ensure_private_dir(path: &Path) -> Result<()> {
-    // Walk through directory descriptors so checks and chmod never follow
-    // symlinks, including an attacker-controlled /tmp fallback ancestor.
-    let mut directory = fs::File::open(if path.is_absolute() { "/" } else { "." })?;
-    for component in path.components() {
-        if matches!(component, Component::RootDir | Component::CurDir) {
-            continue;
-        }
+    if path.as_os_str().is_empty() {
+        bail!("private directory path is empty");
+    }
+    // Trusted ancestors may be symlinks. A component under a writable
+    // parent (notably /tmp), and always the leaf, must be ours and not a link.
+    #[cfg(target_os = "linux")]
+    let search_flags = libc::O_PATH;
+    // Other Unix platforms need read permission on intermediate directories.
+    #[cfg(not(target_os = "linux"))]
+    let search_flags = libc::O_RDONLY;
+    let mut walked = PathBuf::from(if path.is_absolute() { "/" } else { "." });
+    let mut directory = fs::OpenOptions::new()
+        .read(true)
+        .custom_flags(search_flags | libc::O_DIRECTORY)
+        .open(&walked)?;
+    let components: Vec<_> = path
+        .components()
+        .filter(|component| !matches!(component, Component::RootDir | Component::CurDir))
+        .collect();
+    for (index, component) in components.iter().enumerate() {
         let metadata = directory.metadata()?;
-        if metadata.uid() != uid() && metadata.uid() != 0 {
-            bail!("{} has a directory owned by another user", path.display());
-        }
-        if metadata.permissions().mode() & 0o022 != 0 && metadata.permissions().mode() & 0o1000 == 0
-        {
-            bail!("{} has a directory writable by other users", path.display());
-        }
+        let leaf = index + 1 == components.len();
+        let strict = leaf || metadata.permissions().mode() & 0o022 != 0;
+        walked.push(component.as_os_str());
         let name = std::ffi::CString::new(component.as_os_str().as_bytes())?;
         let open = || {
             // SAFETY: directory is an open descriptor and name is NUL-terminated.
@@ -89,7 +98,10 @@ pub fn ensure_private_dir(path: &Path) -> Result<()> {
                 libc::openat(
                     directory.as_raw_fd(),
                     name.as_ptr(),
-                    libc::O_RDONLY | libc::O_DIRECTORY | libc::O_NOFOLLOW | libc::O_CLOEXEC,
+                    (if leaf { libc::O_RDONLY } else { search_flags })
+                        | libc::O_DIRECTORY
+                        | libc::O_CLOEXEC
+                        | if strict { libc::O_NOFOLLOW } else { 0 },
                 )
             }
         };
@@ -100,21 +112,27 @@ pub fn ensure_private_dir(path: &Path) -> Result<()> {
             if created < 0 {
                 let error = std::io::Error::last_os_error();
                 if error.kind() != std::io::ErrorKind::AlreadyExists {
-                    return Err(error).with_context(|| format!("creating {}", path.display()));
+                    return Err(error).with_context(|| format!("creating {}", walked.display()));
                 }
             }
             fd = open();
         }
         if fd < 0 {
-            return Err(std::io::Error::last_os_error()).with_context(|| {
-                format!(
-                    "opening private directory {} without symlinks",
-                    path.display()
-                )
-            });
+            let error = std::io::Error::last_os_error();
+            if strict && matches!(error.raw_os_error(), Some(libc::ELOOP | libc::ENOTDIR)) {
+                bail!(
+                    "{} is a symlink or not a directory; refusing to use it",
+                    walked.display()
+                );
+            }
+            return Err(error)
+                .with_context(|| format!("opening private directory {}", walked.display()));
         }
         // SAFETY: openat returned a new owned descriptor.
         directory = unsafe { fs::File::from_raw_fd(fd) };
+        if strict && directory.metadata()?.uid() != uid() {
+            bail!("{} is owned by another user", walked.display());
+        }
     }
     if directory.metadata()?.uid() != uid() {
         bail!("{} is owned by another user", path.display());
@@ -400,12 +418,42 @@ mod tests {
     #[test]
     fn private_directories_reject_symlink_ancestors() {
         let temp = tempfile::tempdir().unwrap();
+        fs::set_permissions(temp.path(), fs::Permissions::from_mode(0o1777)).unwrap();
         let target = temp.path().join("target");
         fs::create_dir(&target).unwrap();
         let link = temp.path().join("crew-uid");
         std::os::unix::fs::symlink(&target, &link).unwrap();
         assert!(ensure_private_dir(&link.join("crew/sessions")).is_err());
         assert!(!target.join("crew").exists());
+    }
+
+    #[test]
+    fn private_directories_preserve_trusted_ancestor_layouts() {
+        let temp = tempfile::tempdir().unwrap();
+        let workspace = temp.path().join("workspace");
+        fs::create_dir(&workspace).unwrap();
+        fs::set_permissions(&workspace, fs::Permissions::from_mode(0o775)).unwrap();
+        ensure_private_dir(&workspace.join(".crew")).unwrap();
+        assert_eq!(
+            fs::metadata(workspace.join(".crew"))
+                .unwrap()
+                .permissions()
+                .mode()
+                & 0o777,
+            0o700
+        );
+        assert_eq!(
+            fs::metadata(&workspace).unwrap().permissions().mode() & 0o777,
+            0o775
+        );
+        let link = temp.path().join("home-manager-link");
+        std::os::unix::fs::symlink(&workspace, &link).unwrap();
+        ensure_private_dir(&link.join("state/crew/sessions")).unwrap();
+        assert!(workspace.join("state/crew/sessions").is_dir());
+        fs::set_permissions(&workspace, fs::Permissions::from_mode(0o311)).unwrap();
+        let result = ensure_private_dir(&workspace.join("search-only"));
+        fs::set_permissions(&workspace, fs::Permissions::from_mode(0o775)).unwrap();
+        result.unwrap();
     }
 
     #[test]
