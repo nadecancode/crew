@@ -28,8 +28,16 @@ const BRIDGE_SUFFIX: &str = "\nThis is how Claude Code surfaces a prompt a plugi
 
 /// The newest `limit` entries of the session file at `path`.
 pub fn read(path: &Path, runtime: RuntimeKind, limit: usize) -> TranscriptResult {
-    let whole = std::fs::metadata(path).map(|m| m.len()).unwrap_or(0);
-    let Some(tail) = crate::limits::read_tail(path, TAIL_BYTES) else {
+    match std::fs::File::open(path) {
+        Ok(mut file) => read_file(&mut file, runtime, limit),
+        Err(_) => TranscriptResult::default(),
+    }
+}
+
+/// `read` for a session file already open.
+pub fn read_file(file: &mut std::fs::File, runtime: RuntimeKind, limit: usize) -> TranscriptResult {
+    let whole = file.metadata().map(|m| m.len()).unwrap_or(0);
+    let Some(tail) = crate::limits::read_tail_of(file, TAIL_BYTES) else {
         return TranscriptResult::default();
     };
     let mut entries = match runtime {

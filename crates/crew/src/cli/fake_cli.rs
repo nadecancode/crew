@@ -111,9 +111,12 @@ fn claude(args: &[String]) -> Result<()> {
         &transcript,
         &format!("{}\n", line("user", "user", "hello from the fake")),
     )?;
+    // `--fake-report-transcript <path>`: tell the daemon a different path, as a
+    // hostile agent could, for tests of what the daemon is willing to open.
+    let reported = flag(args, "--fake-report-transcript").map_or(transcript.clone(), PathBuf::from);
     hook(
         "session-start",
-        json!({ "session_id": session, "transcript_path": transcript, "model": "fake" }),
+        json!({ "session_id": session, "transcript_path": reported, "model": "fake" }),
     );
     println!("fake claude ready");
     let _ = std::io::stdout().flush();

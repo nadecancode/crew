@@ -155,12 +155,17 @@ impl Daemon {
             (agent.session_id.clone(), model.rt(id).transcript.clone())
         };
         let Some(session) = session else { return };
+        let Ok(files) = self.agent_files(id) else {
+            return;
+        };
         let read = tokio::task::spawn_blocking(move || {
-            let path = known
-                .map(std::path::PathBuf::from)
-                .filter(|p| p.is_file())
-                .or_else(|| crate::limits::claude_transcript_path(&session))?;
-            let tail = crate::limits::read_tail(&path, super::context::TRANSCRIPT_TAIL_BYTES)?;
+            let mut opened = known
+                .and_then(|p| files.open_reported(std::path::Path::new(&p)))
+                .or_else(|| files.claude_transcript(&session))?;
+            let tail = crate::limits::read_tail_of(
+                &mut opened.file,
+                super::context::TRANSCRIPT_TAIL_BYTES,
+            )?;
             crate::limits::claude_model_switch(&tail)
         })
         .await;

@@ -439,22 +439,27 @@ carry on where you left off; if nothing was in progress, there is nothing to do 
         };
         let runtime = agent.runtime;
         let started = agent.started_at.unwrap_or_else(now_ms);
+        let files = self
+            .agent_files(id)
+            .map_err(|e| RpcError::internal(format!("{e:#}")))?;
         let read = tokio::task::spawn_blocking(move || {
-            let path = match runtime {
+            let reported = |p: String| files.open_reported(std::path::Path::new(&p));
+            let mut opened = match runtime {
                 RuntimeKind::Claude => transcript
-                    .map(std::path::PathBuf::from)
-                    .filter(|p| p.is_file())
-                    .or_else(|| crate::limits::claude_transcript_path(&session)),
+                    .and_then(reported)
+                    .or_else(|| files.claude_transcript(&session)),
                 RuntimeKind::Codex => rollout
-                    .filter(|p| p.is_file())
-                    .or_else(|| crate::limits::codex_rollout_path(&session, started)),
+                    .and_then(|p| files.open_reported(&p))
+                    .or_else(|| files.codex_rollout(&session, started)),
                 // The crew extension says where pi keeps the session.
-                RuntimeKind::Pi => transcript
-                    .map(std::path::PathBuf::from)
-                    .filter(|p| p.is_file()),
+                RuntimeKind::Pi => transcript.and_then(reported),
                 RuntimeKind::Shell => None,
             }?;
-            Some(crate::transcript::read(&path, runtime, limit))
+            Some(crate::transcript::read_file(
+                &mut opened.file,
+                runtime,
+                limit,
+            ))
         })
         .await
         .map_err(|e| RpcError::internal(e.to_string()))?;
@@ -490,13 +495,15 @@ carry on where you left off; if nothing was in progress, there is nothing to do 
             }
         }
         for (id, session, known) in due {
+            let Ok(files) = self.agent_files(&id) else {
+                continue;
+            };
             let read = tokio::task::spawn_blocking(move || {
-                let path = known
-                    .map(std::path::PathBuf::from)
-                    .filter(|p| p.is_file())
-                    .or_else(|| crate::limits::claude_transcript_path(&session))?;
-                let tail = crate::limits::read_tail(&path, TRANSCRIPT_TAIL_BYTES)?;
-                Some((path, crate::limits::claude_session_facts(&tail)?))
+                let mut opened = known
+                    .and_then(|p| files.open_reported(std::path::Path::new(&p)))
+                    .or_else(|| files.claude_transcript(&session))?;
+                let tail = crate::limits::read_tail_of(&mut opened.file, TRANSCRIPT_TAIL_BYTES)?;
+                Some((opened.path, crate::limits::claude_session_facts(&tail)?))
             })
             .await;
             let Ok(Some((path, facts))) = read else {

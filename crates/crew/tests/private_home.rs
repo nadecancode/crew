@@ -104,6 +104,15 @@ fn sandboxed_clis_keep_their_files_in_private_homes_seeded_without_the_operators
         r#"{"OPENAI_API_KEY":"operator-key"}"#,
     );
 
+    // What only the daemon's side of the agent directory holds.
+    let planted = s.workspace.join(".crew/agents/h/planted.jsonl");
+    std::fs::create_dir_all(planted.parent().unwrap()).unwrap();
+    std::fs::write(
+        &planted,
+        r#"{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"SECRET-FROM-THE-DAEMONS-AREA"}]}}"#,
+    )
+    .unwrap();
+
     let mut team = s.team(
         "private-homes",
         vec![
@@ -113,6 +122,18 @@ fn sandboxed_clis_keep_their_files_in_private_homes_seeded_without_the_operators
                 ..runtime_agent("x", RuntimeKind::Codex)
             },
             runtime_agent("p", RuntimeKind::Pi),
+            // A hostile one: it tells the daemon its transcript is a file in the daemon's
+            // own part of the agent directory.
+            AgentSpec {
+                extra_args: vec![
+                    "--fake-report-transcript".into(),
+                    s.workspace
+                        .join(".crew/agents/h/planted.jsonl")
+                        .to_string_lossy()
+                        .into_owned(),
+                ],
+                ..runtime_agent("h", RuntimeKind::Claude)
+            },
         ],
         vec![],
     );
@@ -153,6 +174,11 @@ fn sandboxed_clis_keep_their_files_in_private_homes_seeded_without_the_operators
     assert_eq!(settings["model"], "opus");
     assert!(settings.get("hooks").is_none(), "{settings}");
     assert!(home("c").join("claude/projects/-fake").is_dir());
+    // The daemon reads the transcript from there, through the agent's root.
+    s.wait_for("the transcript through the daemon", || {
+        s.agent_cmd(&["transcript", "c"])
+            .contains("hello from the fake")
+    });
     assert!(!home("c").join("claude/.credentials.json").exists());
 
     // Codex: the app-server and the TUI share the private home.
@@ -177,6 +203,19 @@ fn sandboxed_clis_keep_their_files_in_private_homes_seeded_without_the_operators
         home("p").join("pi").to_str().unwrap()
     );
     assert!(agents.join("p/rw/pi-sessions").is_dir());
+
+    // A hostile agent cannot make the daemon open a file outside its writable
+    // tree by naming it: the daemon falls back to the real transcript.
+    wait_for_file(&s, &home("h").join("claude/fake-claude.json"));
+    s.wait_for("the hostile agent's transcript", || {
+        s.agent_cmd(&["transcript", "h"])
+            .contains("hello from the fake")
+    });
+    assert!(
+        !s.agent_cmd(&["transcript", "h"])
+            .contains("SECRET-FROM-THE-DAEMONS-AREA"),
+        "the daemon opened a path the agent named"
+    );
 
     // The operator's homes were not used: no fake CLI wrote there.
     for operator in [&operator_claude, &operator_codex] {

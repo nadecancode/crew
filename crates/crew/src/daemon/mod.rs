@@ -590,6 +590,19 @@ impl Daemon {
         Ok(root)
     }
 
+    /// How to reach the files an agent's CLI keeps (transcripts, rollouts): the
+    /// operator's own directories, or for a sandboxed agent its private tree,
+    /// opened through its root descriptor.
+    pub(crate) fn agent_files(&self, agent_id: &str) -> Result<crate::agents::files::AgentFiles> {
+        if !self.sandboxed() {
+            return Ok(crate::agents::files::AgentFiles::Operator);
+        }
+        Ok(crate::agents::files::AgentFiles::private(
+            self.agent_dir(agent_id),
+            self.agent_root(agent_id)?,
+        ))
+    }
+
     pub(crate) fn worktrees_dir(&self) -> PathBuf {
         self.state_dir.join("worktrees")
     }

@@ -254,8 +254,14 @@ pub fn codex_running(rollout: &str) -> Option<(Option<String>, Option<String>)> 
 /// `codex_running` over the whole session file: the turn that is running
 /// may have begun further back than any tail worth reading.
 pub fn codex_running_in(path: &std::path::Path) -> Option<(Option<String>, Option<String>)> {
-    use std::io::{BufRead, BufReader};
-    let mut reader = BufReader::new(std::fs::File::open(path).ok()?);
+    codex_running_of(std::fs::File::open(path).ok()?)
+}
+
+/// `codex_running_in` for a file already open.
+pub fn codex_running_of(mut file: std::fs::File) -> Option<(Option<String>, Option<String>)> {
+    use std::io::{BufRead, BufReader, Seek, SeekFrom};
+    file.seek(SeekFrom::Start(0)).ok()?;
+    let mut reader = BufReader::new(file);
     let mut line = Vec::new();
     let mut newest = None;
     loop {
@@ -540,8 +546,12 @@ fn codex_rollout_in(
 
 /// The last part of a file, from a line start, without reading all of it.
 pub fn read_tail(path: &std::path::Path, max_bytes: u64) -> Option<String> {
+    read_tail_of(&mut std::fs::File::open(path).ok()?, max_bytes)
+}
+
+/// `read_tail` of a file already open.
+pub fn read_tail_of(file: &mut std::fs::File, max_bytes: u64) -> Option<String> {
     use std::io::{Read, Seek, SeekFrom};
-    let mut file = std::fs::File::open(path).ok()?;
     let len = file.metadata().ok()?.len();
     let start = len.saturating_sub(max_bytes);
     file.seek(SeekFrom::Start(start)).ok()?;
@@ -561,10 +571,12 @@ pub fn read_tail(path: &std::path::Path, max_bytes: u64) -> Option<String> {
 /// Codex writes a `compacted` entry (which carries the whole replacement
 /// history, so it can be far longer than any tail worth reading).
 pub fn codex_compacted_since(path: &std::path::Path, offset: u64) -> bool {
+    std::fs::File::open(path).is_ok_and(|file| codex_compacted_since_in(file, offset))
+}
+
+/// `codex_compacted_since` for a file already open.
+pub fn codex_compacted_since_in(mut file: std::fs::File, offset: u64) -> bool {
     use std::io::{BufRead, BufReader, Seek, SeekFrom};
-    let Ok(mut file) = std::fs::File::open(path) else {
-        return false;
-    };
     if file.seek(SeekFrom::Start(offset)).is_err() {
         return false;
     }

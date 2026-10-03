@@ -415,14 +415,29 @@ other model family (task_assign).",
             }
         }
         for (id, thread, started, known, awaited, whole) in rollouts {
+            let Ok(files) = self.agent_files(&id) else {
+                continue;
+            };
             let read = tokio::task::spawn_blocking(move || {
-                let path = known.or_else(|| limits::codex_rollout_path(&thread, started))?;
-                let tail = limits::read_tail(&path, ROLLOUT_TAIL_BYTES)?;
-                let compacted =
-                    awaited.is_some_and(|offset| limits::codex_compacted_since(&path, offset));
-                let running = limits::codex_running(&tail)
-                    .or_else(|| whole.then(|| limits::codex_running_in(&path)).flatten());
+                // Opened once, through the agent's files: a sandboxed agent's are under
+                // its own tree and are untrusted.
+                let mut opened = known
+                    .and_then(|p| files.open_reported(&p))
+                    .or_else(|| files.codex_rollout(&thread, started))?;
+                let tail = limits::read_tail_of(&mut opened.file, ROLLOUT_TAIL_BYTES)?;
+                let compacted = awaited.is_some_and(|offset| {
+                    opened
+                        .file
+                        .try_clone()
+                        .is_ok_and(|f| limits::codex_compacted_since_in(f, offset))
+                });
+                let running = limits::codex_running(&tail).or_else(|| {
+                    whole
+                        .then(|| limits::codex_running_of(opened.file.try_clone().ok()?))
+                        .flatten()
+                });
                 let turn = limits::codex_last_turn(&tail);
+                let path = opened.path;
                 Some((
                     path,
                     limits::codex_quota(&tail),
