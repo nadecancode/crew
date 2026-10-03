@@ -77,7 +77,7 @@ pub fn scan_excluding(root: &Path, excluded: &[&Path]) -> io::Result<Findings> {
 
 /// Mount points strictly inside `root` and outside `excluded`, from
 /// `/proc/self/mountinfo`.
-fn mount_points_under(root: &Path, excluded: &[&Path]) -> Vec<PathBuf> {
+pub(crate) fn mount_points_under(root: &Path, excluded: &[&Path]) -> Vec<PathBuf> {
     let Ok(info) = std::fs::read_to_string("/proc/self/mountinfo") else {
         return Vec::new();
     };

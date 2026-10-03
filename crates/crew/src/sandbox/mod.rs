@@ -17,6 +17,7 @@ pub mod scan;
 pub mod seccomp;
 pub mod shim;
 pub mod spec;
+pub mod store;
 pub mod validate;
 
 /// Exit status of the crew sandbox stages when the sandbox could not be set

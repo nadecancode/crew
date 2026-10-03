@@ -24,6 +24,7 @@ use super::pin::{identify, Identity, Kind};
 use super::probe::UntrustedNixDaemon;
 use super::scan::{scan_excluding, Findings};
 use super::spec::{check_name, Mount, Spec};
+use super::store::{default_cache_path, scan_store, StoreCache};
 use super::validate::{host_members, Protected};
 
 /// System trees bound read-only when present. Not `/nix` as a whole: that
@@ -61,6 +62,9 @@ pub struct Host {
     pub resolv_conf: PathBuf,
     /// The Nix store, whose socket scan the Landlock socket rule replaces.
     pub nix_store: PathBuf,
+    /// Where finalized store objects found free of sockets are remembered
+    /// (needed only below Landlock ABI 9).
+    pub store_cache: Option<PathBuf>,
     pub landlock_abi: u32,
     /// The host part of the protected set.
     pub protected: Protected,
@@ -83,6 +87,7 @@ impl Host {
             system: SYSTEM_TREES.iter().map(PathBuf::from).collect(),
             resolv_conf: "/etc/resolv.conf".into(),
             nix_store: "/nix/store".into(),
+            store_cache: default_cache_path(&env),
             landlock_abi,
             protected: host_members(&home, &env),
             home,
@@ -377,6 +382,9 @@ impl<'a> Builder<'a> {
         }
         if !needs_socket_scan(&canonical, &self.host.nix_store, self.host.landlock_abi) {
             self.bind(&canonical, false)
+        } else if canonical == self.host.nix_store {
+            self.bind(&canonical, false)?;
+            self.scan_store(&canonical)
         } else {
             self.bind_scanned(&canonical, false, &[])
         }
@@ -637,6 +645,23 @@ impl<'a> Builder<'a> {
         Ok(())
     }
 
+    /// The store below Landlock ABI 9: walked, skipping remembered objects.
+    fn scan_store(&mut self, store: &Path) -> Result<(), String> {
+        let path = self.host.store_cache.as_deref();
+        let mut cache = path.map(StoreCache::load).unwrap_or_default();
+        let walk = scan_store(store, &mut cache, 0)
+            .map_err(|e| format!("scanning {} for sockets: {e}", store.display()))?;
+        if let Some(path) = path {
+            if let Err(e) = cache.save(path) {
+                self.warnings
+                    .push(format!("the store scan could not be remembered: {e:#}"));
+            }
+        }
+        self.findings.sockets.extend(walk.findings.sockets);
+        self.findings.unlisted.extend(walk.findings.unlisted);
+        Ok(())
+    }
+
     fn covered(&self, path: &Path) -> bool {
         self.covered.iter().any(|c| path.starts_with(c))
     }
@@ -854,6 +879,7 @@ mod tests {
             system: Vec::new(),
             resolv_conf: root.join("no-resolv.conf"),
             nix_store: "/nix/store".into(),
+            store_cache: None,
             landlock_abi: 9,
             protected,
         };
@@ -1343,6 +1369,47 @@ mod tests {
         let spec = build(&f.host, &request).unwrap().spec;
         assert!(!visible(&spec, &nix_dir.join("socket")));
         assert!(spec.allow_unix.is_empty());
+    }
+
+    #[test]
+    fn below_abi_9_the_store_is_walked_through_the_cache() {
+        let mut f = fixture();
+        // Any root-owned tree stands in for the store.
+        f.host.system = vec!["/etc".into()];
+        f.host.nix_store = "/etc".into();
+        let cache = f.root.join("cache/crew/nix-store-scan");
+        f.host.store_cache = Some(cache.clone());
+        f.worker(&Extra::default()).unwrap();
+        assert!(
+            !cache.exists(),
+            "ABI 9 enforces the socket rule; nothing to walk"
+        );
+        f.host.landlock_abi = 8;
+        let spec = f.worker(&Extra::default()).unwrap().spec;
+        assert_eq!(spec.min_landlock_abi, 6);
+        let text = std::fs::read_to_string(&cache).unwrap();
+        assert!(text.starts_with("crew nix-store-scan v1\n"), "{text}");
+    }
+
+    #[test]
+    fn the_store_cache_is_never_visible_or_mountable() {
+        let mut f = fixture();
+        let cache = f.root.join("cache/crew/nix-store-scan");
+        std::fs::write(&cache, "crew nix-store-scan v1\n").unwrap();
+        f.host.store_cache = Some(cache.clone());
+        let spec = f.worker(&Extra::default()).unwrap().spec;
+        assert!(
+            visible(&spec, &f.cargo),
+            "the shared cargo cache is mounted"
+        );
+        assert!(!visible(&spec, &cache));
+        for ancestor in [f.root.join("cache"), f.root.join("cache/crew")] {
+            let extra = Extra {
+                read_write: vec![ancestor.clone()],
+                ..Extra::default()
+            };
+            assert!(f.worker(&extra).is_err(), "{ancestor:?} was accepted");
+        }
     }
 
     #[test]
