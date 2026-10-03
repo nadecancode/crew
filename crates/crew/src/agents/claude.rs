@@ -94,6 +94,9 @@ const LONG_CONTEXT_TAG: &str = "[1m]";
 /// Set, Claude Code never substitutes another model for the session's (when
 /// its usage window is used up, or it is overloaded); the turn fails instead.
 const NO_FALLBACK_ENV: &str = "CLAUDE_CODE_NO_MODEL_FALLBACK";
+/// Where Claude Code keeps its configuration, credentials, sessions and
+/// transcripts (and `.claude.json`, which moves with it).
+pub const CONFIG_DIR_ENV: &str = "CLAUDE_CONFIG_DIR";
 
 /// Claude Code's tool for putting a multiple-choice question to the person at
 /// the terminal.
@@ -256,6 +259,12 @@ impl AgentRuntime for ClaudeRuntime {
         )];
         if !ctx.settings.model_fallback {
             env.push((NO_FALLBACK_ENV.to_string(), "1".to_string()));
+        }
+        if let Some(home) = ctx.private_home {
+            env.push((
+                CONFIG_DIR_ENV.to_string(),
+                home.join("claude").to_string_lossy().into_owned(),
+            ));
         }
 
         Ok(LaunchSpec {
@@ -582,6 +591,39 @@ mod tests {
     }
 
     #[test]
+    fn a_sandboxed_launch_keeps_claudes_configuration_in_the_private_home() {
+        let dir = tempfile::tempdir().unwrap();
+        let agent = agent(dir.path());
+        let identity = dir.path().join("identity.json");
+        let home = dir.path().join("rw/home");
+        let launch = |private_home: Option<&Path>| {
+            ClaudeRuntime
+                .launch(&LaunchContext {
+                    agent: &agent,
+                    settings: &AgentSettings::default(),
+                    crew_bin: Path::new("/opt/crew"),
+                    agent_dir: dir.path(),
+                    identity_path: &identity,
+                    briefing: "be helpful",
+                    resume: false,
+                    endpoint: &Endpoint::default(),
+                    long_context: false,
+                    private_home,
+                })
+                .unwrap()
+        };
+        let sandboxed = launch(Some(&home));
+        let config_dir = sandboxed
+            .env
+            .iter()
+            .find(|(k, _)| k == CONFIG_DIR_ENV)
+            .map(|(_, v)| v.as_str());
+        assert_eq!(config_dir, home.join("claude").to_str());
+        // Not sandboxed, Claude Code keeps using the operator's own.
+        assert!(!launch(None).env.iter().any(|(k, _)| k == CONFIG_DIR_ENV));
+    }
+
+    #[test]
     fn launch_builds_structured_arguments_and_private_files() {
         let dir = tempfile::tempdir().unwrap();
         let agent = agent(dir.path());
@@ -601,6 +643,7 @@ mod tests {
             resume: false,
             endpoint: &Endpoint::default(),
             long_context: false,
+            private_home: None,
         };
         let spec = ClaudeRuntime.launch(&ctx).unwrap();
         assert_eq!(spec.program, "claude");
@@ -627,6 +670,7 @@ mod tests {
                 endpoint: &Endpoint::default(),
                 // The 1M-token window is a tag on the model's name.
                 long_context: true,
+                private_home: None,
             })
             .unwrap()
             .args
@@ -747,6 +791,7 @@ mod tests {
                 resume: false,
                 endpoint: &Endpoint::default(),
                 long_context: false,
+                private_home: None,
             })
             .unwrap();
         let at = with_mod
@@ -780,6 +825,7 @@ mod tests {
                     resume: false,
                     endpoint,
                     long_context: false,
+                    private_home: None,
                 })
                 .unwrap();
             let text = std::fs::read_to_string(dir.path().join("settings.json")).unwrap();

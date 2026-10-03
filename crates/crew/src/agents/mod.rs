@@ -108,6 +108,10 @@ pub struct LaunchContext<'a> {
     pub endpoint: &'a Endpoint,
     /// Start the model in its 1M-token context variant.
     pub long_context: bool,
+    /// The agent's private home (`<A>/rw/home`) when it runs in a sandbox: the
+    /// CLI keeps its configuration, credentials and sessions there instead of in
+    /// the operator's.
+    pub private_home: Option<&'a Path>,
 }
 
 /// A fully resolved process launch: a program and an argument array. Nothing

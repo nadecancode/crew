@@ -451,6 +451,7 @@ impl Daemon {
             resume,
             endpoint: &endpoint,
             long_context,
+            private_home: None,
         })?;
         if let Some(program) = pi_program {
             spec.program = program.to_string_lossy().into_owned();

@@ -531,6 +531,7 @@ mod tests {
             resume: false,
             endpoint: &Endpoint::default(),
             long_context: false,
+            private_home: None,
         };
         let spec = PiRuntime.launch(&ctx).unwrap();
         assert_eq!(spec.program, "pi");
