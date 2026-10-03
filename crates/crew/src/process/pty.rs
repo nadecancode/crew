@@ -610,6 +610,7 @@ mod tests {
             new_session: false,
             min_landlock_abi: crate::sandbox::landlock::MIN_ABI,
             allow_unix: vec![],
+            done: None,
         };
         let mut launch = spec("a", "claude", &["--flag", "value"]);
         launch.prompt = Some("do the task".into());

@@ -55,6 +55,11 @@ pub struct Spec {
     /// Directories inside the sandbox beneath which outside pathname
     /// sockets may be reached.
     pub allow_unix: Vec<PathBuf>,
+    /// A daemon-private file `crew sandbox-run` creates once every process
+    /// of the sandbox is gone, holding `exited <code>` or `signal <n>`.
+    /// No sandbox may see it. Set by the daemon after `profile::build`.
+    #[serde(default)]
+    pub done: Option<PathBuf>,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
@@ -142,7 +147,38 @@ impl Spec {
                 landlock::MIN_ABI
             ));
         }
+        if let Some(done) = &self.done {
+            plain("done", done)?;
+            if self.visible(done) {
+                return Err(format!(
+                    "the done marker {} would be visible inside the sandbox",
+                    done.display()
+                ));
+            }
+            if !done.parent().is_some_and(Path::is_dir) {
+                return Err(format!(
+                    "the done marker's directory {} does not exist",
+                    done.parent().unwrap_or(done).display()
+                ));
+            }
+        }
         Ok(())
+    }
+
+    /// Whether the host path `path` can be seen inside the sandbox: a bind
+    /// covers it and no later tmpfs or mask hides it again.
+    pub fn visible(&self, path: &Path) -> bool {
+        let mut seen = false;
+        for mount in &self.mounts {
+            match mount {
+                Mount::Bind { path: p, .. } if path.starts_with(p) => seen = true,
+                Mount::Tmpfs { path: p } | Mount::Mask { path: p } if path.starts_with(p) => {
+                    seen = false
+                }
+                _ => {}
+            }
+        }
+        seen
     }
 
     /// Whether `name` gets through the allow-list. A name `check_name`
@@ -283,6 +319,7 @@ mod tests {
             new_session: false,
             min_landlock_abi: 9,
             allow_unix: vec!["/run/user/1000/crew".into()],
+            done: None,
         }
     }
 
@@ -327,6 +364,48 @@ mod tests {
             break_it(&mut spec);
             assert!(spec.check().is_err(), "{label} was accepted");
         }
+    }
+
+    #[test]
+    fn the_done_marker_must_be_invisible_inside_with_an_existing_parent() {
+        let dir = tempfile::tempdir().unwrap();
+        let private = dir.path().canonicalize().unwrap();
+        let mut ok = spec();
+        ok.done = Some(private.join("done-1"));
+        ok.check().unwrap();
+        let rustup = PathBuf::from("/home/u/.rustup");
+        // An existing directory that a bind (here read-only) makes visible.
+        let shown = private.join("shown");
+        std::fs::create_dir(&shown).unwrap();
+        let with_bind = |done: PathBuf| {
+            let mut s = spec();
+            s.mounts.push(Mount::Bind {
+                path: shown.clone(),
+                id: id(),
+                writable: false,
+            });
+            s.done = Some(done);
+            s
+        };
+        let cases: [(&str, Spec); 5] = [
+            ("relative", with_bind("done".into())),
+            ("missing parent", with_bind(private.join("no/such/done"))),
+            ("under a bind", with_bind(shown.join("done"))),
+            ("the bind itself", with_bind(shown.clone())),
+            ("dotdot", with_bind(private.join("../done"))),
+        ];
+        for (label, bad) in cases {
+            assert!(bad.check().is_err(), "{label} was accepted");
+        }
+        with_bind(private.join("done-2")).check().unwrap();
+        // Hidden again by a later tmpfs or mask: invisible, so fine.
+        let mut masked = spec();
+        masked.mounts.push(Mount::Tmpfs {
+            path: rustup.join("private"),
+        });
+        masked.done = Some(rustup.join("private/done"));
+        assert!(!masked.visible(&rustup.join("private/done")));
+        assert!(masked.visible(&rustup.join("toolchains")));
     }
 
     #[test]

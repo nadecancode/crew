@@ -351,6 +351,7 @@ impl<'a> Builder<'a> {
             } else {
                 Vec::new()
             },
+            done: None,
         };
         spec.check()?;
         Ok(Built {

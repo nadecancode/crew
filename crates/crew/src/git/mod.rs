@@ -1122,6 +1122,7 @@ mod tests {
             new_session: true,
             min_landlock_abi: crate::sandbox::landlock::MIN_ABI,
             allow_unix: vec![],
+            done: None,
         };
         let mut git_cmd = git(Path::new("/work"));
         with_identity(&mut git_cmd, "agent-1");
@@ -1332,6 +1333,7 @@ mod tests {
             new_session: false,
             min_landlock_abi: crate::sandbox::landlock::MIN_ABI,
             allow_unix: vec![],
+            done: None,
         };
         let launch_env = vec![
             (

@@ -23,6 +23,8 @@
 use std::ffi::{CString, OsString};
 use std::io;
 use std::os::fd::{AsRawFd, FromRawFd, OwnedFd};
+use std::os::unix::ffi::OsStrExt;
+use std::path::{Path, PathBuf};
 use std::process::Command;
 
 use super::pin::{pin, Kind};
@@ -61,19 +63,25 @@ pub fn prefix(spec: &Spec) -> Result<Vec<OsString>, String> {
 }
 
 /// Set up bubblewrap, run it and wait until the whole sandbox is gone.
-/// Exits with bubblewrap's exit code, or 128 plus the signal that killed
-/// it. Never returns.
+/// Then, if the spec names a done marker, create it. Exits with
+/// bubblewrap's exit code, or 128 plus the signal that killed it. Never
+/// returns.
 pub fn run(args: RunArgs) -> ! {
-    let started = tie_to_parent().and_then(|()| prepare(&args.spec, &args.command));
-    let (bwrap, pinned) = match started {
-        Ok(started) => started,
+    let prepared = tie_to_parent().and_then(|()| prepare(&args.spec, &args.command));
+    let prepared = match prepared {
+        Ok(prepared) => prepared,
         Err(error) => {
             eprintln!("crew sandbox-run: {error}");
             std::process::exit(EXIT_SETUP_FAILED)
         }
     };
-    match supervise(bwrap, pinned) {
-        Ok(code) => std::process::exit(code),
+    let done = prepared.done.clone();
+    let ended = supervise(prepared.command, prepared.fds).and_then(|ended| match &done {
+        Some(path) => write_marker(path, &ended.marker).map(|()| ended),
+        None => Ok(ended),
+    });
+    match ended {
+        Ok(ended) => std::process::exit(ended.code),
         Err(error) => {
             eprintln!("crew sandbox-run: {error}");
             std::process::exit(EXIT_SETUP_FAILED)
@@ -109,10 +117,17 @@ fn tie_to_parent() -> Result<(), String> {
     Ok(())
 }
 
+/// How bubblewrap ended, once nothing of the sandbox is left.
+struct Ended {
+    /// bubblewrap's exit code, or 128 plus the signal that killed it.
+    code: i32,
+    /// The done marker's line: `exited <code>` or `signal <n>`.
+    marker: String,
+}
+
 /// Start bubblewrap, drop this process's copies of the pinned descriptors,
-/// and reap children until none is left. Returns bubblewrap's exit code,
-/// or 128 plus the signal that killed it.
-fn supervise(mut bwrap: Command, pinned: Vec<OwnedFd>) -> Result<i32, String> {
+/// and reap children until none is left.
+fn supervise(mut bwrap: Command, pinned: Vec<OwnedFd>) -> Result<Ended, String> {
     let child = bwrap.spawn().map_err(|e| format!("running bwrap: {e}"))?;
     let bwrap_pid = child.id() as libc::pid_t;
     drop(pinned);
@@ -146,15 +161,33 @@ fn supervise(mut bwrap: Command, pinned: Vec<OwnedFd>) -> Result<i32, String> {
         }
     }
     match bwrap_status {
-        Some(status) if libc::WIFEXITED(status) => Ok(libc::WEXITSTATUS(status)),
-        Some(status) if libc::WIFSIGNALED(status) => Ok(128 + libc::WTERMSIG(status)),
+        Some(status) if libc::WIFEXITED(status) => Ok(Ended {
+            code: libc::WEXITSTATUS(status),
+            marker: format!("exited {}\n", libc::WEXITSTATUS(status)),
+        }),
+        Some(status) if libc::WIFSIGNALED(status) => Ok(Ended {
+            code: 128 + libc::WTERMSIG(status),
+            marker: format!("signal {}\n", libc::WTERMSIG(status)),
+        }),
         _ => std::process::abort(),
     }
 }
 
-/// The bubblewrap command for a spec, with the descriptors it refers to,
-/// which must stay open until bubblewrap is started.
-pub fn prepare(json: &str, command: &[OsString]) -> Result<(Command, Vec<OwnedFd>), String> {
+/// What [`prepare`] makes of a spec.
+pub struct Prepared {
+    /// The bubblewrap command.
+    pub command: Command,
+    /// The descriptors it refers to, which must stay open until bubblewrap
+    /// is started.
+    pub fds: Vec<OwnedFd>,
+    /// Where to report that the sandbox is gone.
+    pub done: Option<PathBuf>,
+}
+
+/// Check a spec and build its bubblewrap command. A done marker that
+/// already exists (or a symlink in its place) stops the launch here,
+/// before anything runs.
+pub fn prepare(json: &str, command: &[OsString]) -> Result<Prepared, String> {
     if json.len() > MAX_SPEC_LEN {
         return Err(format!(
             "the sandbox description is longer than {MAX_SPEC_LEN} bytes"
@@ -166,6 +199,11 @@ pub fn prepare(json: &str, command: &[OsString]) -> Result<(Command, Vec<OwnedFd
     if command.is_empty() {
         return Err("no program to run".into());
     }
+    if let Some(done) = &spec.done {
+        if std::fs::symlink_metadata(done).is_ok() {
+            return Err(format!("the done marker {} already exists", done.display()));
+        }
+    }
     mark_inherited_cloexec().map_err(|e| format!("closing inherited descriptors: {e}"))?;
     let (args, fds) = bwrap_args(&spec, command)?;
     let mut bwrap = Command::new(&spec.bwrap);
@@ -173,7 +211,41 @@ pub fn prepare(json: &str, command: &[OsString]) -> Result<(Command, Vec<OwnedFd
         .args(args)
         .env_clear()
         .envs(spec.sandbox_env(std::env::vars_os()));
-    Ok((bwrap, fds))
+    Ok(Prepared {
+        command: bwrap,
+        fds,
+        done: spec.done,
+    })
+}
+
+/// Create the done marker: a new 0600 file, never through a symlink,
+/// holding `line`.
+fn write_marker(path: &Path, line: &str) -> Result<(), String> {
+    use std::io::Write;
+    let fail = |e: io::Error| format!("writing the done marker {}: {e}", path.display());
+    let c_path = CString::new(path.as_os_str().as_bytes())
+        .map_err(|_| format!("{} contains a NUL byte", path.display()))?;
+    // SAFETY: open_how is plain integers; all-zero is its default.
+    let mut how: libc::open_how = unsafe { std::mem::zeroed() };
+    how.flags = (libc::O_WRONLY | libc::O_CREAT | libc::O_EXCL | libc::O_CLOEXEC) as u64;
+    how.mode = 0o600;
+    how.resolve = libc::RESOLVE_NO_SYMLINKS | libc::RESOLVE_NO_MAGICLINKS;
+    // SAFETY: `c_path` and `how` are valid for the call; the result is checked.
+    let fd = unsafe {
+        libc::syscall(
+            libc::SYS_openat2,
+            libc::AT_FDCWD,
+            c_path.as_ptr(),
+            &how as *const libc::open_how,
+            std::mem::size_of::<libc::open_how>(),
+        )
+    };
+    if fd < 0 {
+        return Err(fail(io::Error::last_os_error()));
+    }
+    // SAFETY: openat2 returned a new descriptor that nothing else owns.
+    let mut file = std::fs::File::from(unsafe { OwnedFd::from_raw_fd(fd as i32) });
+    file.write_all(line.as_bytes()).map_err(fail)
 }
 
 /// bubblewrap's arguments. Each bind source is pinned here; the returned
@@ -300,6 +372,7 @@ mod tests {
             new_session: false,
             min_landlock_abi: 9,
             allow_unix: vec!["/run/crew".into()],
+            done: None,
         }
     }
 

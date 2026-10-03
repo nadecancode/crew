@@ -1010,3 +1010,132 @@ fn sandbox_run_dies_with_the_process_that_started_it() {
         "still running after its parent died: {left:?}"
     );
 }
+
+// The marker that binds "the sandbox is gone" to one launch.
+
+fn marker_dir() -> tempfile::TempDir {
+    tempfile::tempdir().unwrap()
+}
+
+#[test]
+fn the_done_marker_appears_only_once_the_sandbox_is_gone() {
+    let Some((bwrap, abi)) = bwrap() else { return };
+    let l = layout();
+    let private = marker_dir();
+    let done = private.path().canonicalize().unwrap().join("launch-1.done");
+    let mut spec = worker_spec_for_lifetime(&bwrap, abi, &l);
+    spec.done = Some(done.clone());
+    let script = "setsid sleep 30 </dev/null >/dev/null 2>&1 & sleep 0.5; exit 7";
+    let mut child = sandboxed(&spec, &[], script)
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .spawn()
+        .unwrap();
+    let seen = descendants_over(child.id(), Duration::from_millis(400));
+    assert!(!done.exists(), "the marker exists while the sandbox runs");
+    let status = child.wait().unwrap();
+    assert_eq!(status.code(), Some(7));
+    assert_eq!(std::fs::read_to_string(&done).unwrap(), "exited 7\n");
+    let mode = std::fs::metadata(&done).unwrap().permissions();
+    assert_eq!(
+        std::os::unix::fs::PermissionsExt::mode(&mode) & 0o777,
+        0o600
+    );
+    assert!(seen.iter().all(|p| !alive(*p)));
+}
+
+#[test]
+fn the_done_marker_names_the_signal_that_killed_bubblewrap() {
+    let Some((bwrap, abi)) = bwrap() else { return };
+    let l = layout();
+    let private = marker_dir();
+    let done = private.path().canonicalize().unwrap().join("launch-2.done");
+    let mut spec = worker_spec_for_lifetime(&bwrap, abi, &l);
+    spec.done = Some(done.clone());
+    let mut child = sandboxed(&spec, &[], "sleep 30")
+        .stdout(std::process::Stdio::null())
+        .spawn()
+        .unwrap();
+    let mut bwrap_pid = None;
+    for _ in 0..100 {
+        bwrap_pid = children(child.id()).into_iter().next();
+        if bwrap_pid.is_some() {
+            break;
+        }
+        std::thread::sleep(Duration::from_millis(10));
+    }
+    std::thread::sleep(Duration::from_millis(200));
+    // SAFETY: plain kill of a process this test started.
+    unsafe { libc::kill(bwrap_pid.unwrap() as i32, libc::SIGKILL) };
+    assert_eq!(child.wait().unwrap().code(), Some(128 + libc::SIGKILL));
+    assert_eq!(std::fs::read_to_string(&done).unwrap(), "signal 9\n");
+}
+
+#[test]
+fn no_done_marker_when_sandbox_run_is_killed() {
+    let Some((bwrap, abi)) = bwrap() else { return };
+    let l = layout();
+    let private = marker_dir();
+    let done = private.path().canonicalize().unwrap().join("launch-3.done");
+    let mut spec = worker_spec_for_lifetime(&bwrap, abi, &l);
+    spec.done = Some(done.clone());
+    let mut child = sandboxed(&spec, &[], "sleep 30")
+        .stdout(std::process::Stdio::null())
+        .spawn()
+        .unwrap();
+    let seen = descendants_over(child.id(), Duration::from_millis(400));
+    child.kill().unwrap();
+    child.wait().unwrap();
+    let until = std::time::Instant::now() + Duration::from_secs(5);
+    while seen.iter().any(|p| alive(*p)) && std::time::Instant::now() < until {
+        std::thread::sleep(Duration::from_millis(20));
+    }
+    assert!(!done.exists(), "a killed sandbox-run left a marker");
+}
+
+#[test]
+fn an_existing_done_marker_stops_the_launch_and_is_left_alone() {
+    let Some((bwrap, abi)) = bwrap() else { return };
+    let l = layout();
+    let private = marker_dir();
+    let dir = private.path().canonicalize().unwrap();
+    let done = dir.join("launch-4.done");
+    std::fs::write(&done, "earlier\n").unwrap();
+    // Somewhere the program can write and the test can see: its worktree.
+    let sentinel = l.ws.join(".crew/worktrees/a/ran");
+    let mut spec = worker_spec_for_lifetime(&bwrap, abi, &l);
+    spec.done = Some(done.clone());
+    let write_sentinel = format!("echo ran > '{}'", sentinel.display());
+    // Positive control: without a marker the program writes the sentinel.
+    let mut control = spec.clone();
+    control.done = None;
+    let out = sandboxed(&control, &[], &write_sentinel).output().unwrap();
+    assert!(out.status.success(), "{}", text(&out));
+    assert!(sentinel.exists());
+    std::fs::remove_file(&sentinel).unwrap();
+
+    let out = sandboxed(&spec, &[], &write_sentinel).output().unwrap();
+    assert_eq!(out.status.code(), Some(125), "{}", text(&out));
+    assert!(!sentinel.exists(), "the program ran");
+    assert_eq!(std::fs::read_to_string(&done).unwrap(), "earlier\n");
+
+    // A symlink planted at the marker's path is refused the same way.
+    std::fs::remove_file(&done).unwrap();
+    std::os::unix::fs::symlink(dir.join("elsewhere"), &done).unwrap();
+    let out = sandboxed(&spec, &[], "true").output().unwrap();
+    assert_eq!(out.status.code(), Some(125), "{}", text(&out));
+    assert!(!dir.join("elsewhere").exists());
+
+    // A marker that appears while the sandbox runs is never overwritten:
+    // sandbox-run exits 125 without a marker of its own.
+    std::fs::remove_file(&done).unwrap();
+    let child = sandboxed(&spec, &[], "sleep 0.5")
+        .stdout(std::process::Stdio::null())
+        .spawn()
+        .unwrap();
+    std::thread::sleep(Duration::from_millis(150));
+    std::fs::write(&done, "someone else\n").unwrap();
+    let out = child.wait_with_output().unwrap();
+    assert_eq!(out.status.code(), Some(125));
+    assert_eq!(std::fs::read_to_string(&done).unwrap(), "someone else\n");
+}
