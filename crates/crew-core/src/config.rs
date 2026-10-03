@@ -199,6 +199,10 @@ pub struct SandboxConfig {
 }
 
 impl SandboxConfig {
+    fn is_default(&self) -> bool {
+        self == &Self::default()
+    }
+
     /// Validate syntax only. Canonical paths, protected mounts and host
     /// capabilities are checked by the sandbox builder before any launch.
     pub fn validate(&self) -> Result<()> {
@@ -248,7 +252,7 @@ pub struct WorkspaceConfig {
     /// Revision agent branches start from.
     #[serde(default = "default_base")]
     pub base: String,
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "SandboxConfig::is_default")]
     pub sandbox: SandboxConfig,
 }
 
@@ -940,6 +944,48 @@ pub fn parse_key_value(s: &str) -> Result<(String, String)> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn default_sandbox_keeps_legacy_yaml_and_json_workspace_shapes() {
+        let mut configured = TeamConfig::from_yaml("project: test\n").unwrap();
+        configured
+            .workspace
+            .sandbox
+            .read_only
+            .push("/opt/tool".into());
+        let yaml = configured.to_yaml().unwrap();
+        let value: serde_yaml::Value = serde_yaml::from_str(&yaml).unwrap();
+        assert!(value["workspace"].get("sandbox").is_some());
+        assert_eq!(TeamConfig::from_yaml(&yaml).unwrap(), configured);
+        let json = serde_json::to_value(&configured).unwrap();
+        assert!(json["workspace"].get("sandbox").is_some());
+        assert_eq!(
+            serde_json::from_value::<TeamConfig>(json).unwrap(),
+            configured
+        );
+
+        for input in [
+            "project: test\n",
+            "project: test\nworkspace:\n  sandbox:\n    mode: off\n",
+        ] {
+            let legacy = TeamConfig::from_yaml(input).unwrap();
+            let yaml = legacy.to_yaml().unwrap();
+            let value: serde_yaml::Value = serde_yaml::from_str(&yaml).unwrap();
+            let expected: serde_yaml::Value =
+                serde_yaml::from_str("path: .\nisolation: auto\ninit: false\nbase: HEAD\n")
+                    .unwrap();
+            assert_eq!(value["workspace"], expected);
+            let json = serde_json::to_value(&legacy).unwrap();
+            assert_eq!(
+                json["workspace"],
+                serde_json::json!({
+                    "path": ".", "isolation": "auto", "init": false, "base": "HEAD"
+                })
+            );
+            assert_eq!(TeamConfig::from_yaml(&yaml).unwrap(), legacy);
+            assert_eq!(serde_json::from_value::<TeamConfig>(json).unwrap(), legacy);
+        }
+    }
 
     #[test]
     fn sandbox_config_defaults_off_and_preserves_explicit_paths() {
