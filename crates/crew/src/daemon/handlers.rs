@@ -100,11 +100,16 @@ impl Daemon {
             return Ok(json!({ "pong": true }));
         }
         if let Call::Hello(hello) = call {
-            if hello.protocol > PROTOCOL_VERSION {
-                return Err(RpcError::invalid(format!(
-                    "client speaks protocol {}, daemon speaks {PROTOCOL_VERSION}",
-                    hello.protocol
-                )));
+            // Exactly this version: an older client misreads newer frames as
+            // surely as a newer one. The code lets clients say "restart".
+            if hello.protocol != PROTOCOL_VERSION {
+                return Err(RpcError::new(
+                    "protocol",
+                    format!(
+                        "client speaks protocol {}, daemon speaks {PROTOCOL_VERSION}",
+                        hello.protocol
+                    ),
+                ));
             }
             let who = self.authenticate(hello.role, hello.agent_id, hello.token)?;
             let info = HelloInfo {

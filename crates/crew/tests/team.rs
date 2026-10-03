@@ -1321,6 +1321,42 @@ fn a_second_daemon_for_the_same_workspace_is_refused_and_a_team_cannot_be_loaded
 }
 
 #[test]
+fn a_client_on_another_protocol_version_is_refused() {
+    let s = Session::new();
+    std::fs::create_dir_all(&s.workspace).unwrap();
+    s.ok(&["start", "-C", &s.workspace.to_string_lossy()]);
+    let info: Value = serde_json::from_str(
+        &std::fs::read_to_string(s.workspace.join(".crew/daemon.json")).unwrap(),
+    )
+    .unwrap();
+    let hello = |protocol: u32| -> Value {
+        let stream =
+            std::os::unix::net::UnixStream::connect(info["socket"].as_str().unwrap()).unwrap();
+        let mut writer = stream.try_clone().unwrap();
+        let request = json!({
+            "id": 1,
+            "method": "hello",
+            "params": { "role": "operator", "client": "test", "protocol": protocol },
+        });
+        writeln!(writer, "{request}").unwrap();
+        let mut line = String::new();
+        BufReader::new(stream).read_line(&mut line).unwrap();
+        serde_json::from_str(&line).unwrap()
+    };
+    let current = crew_core::rpc::PROTOCOL_VERSION;
+    assert!(hello(current)["result"].is_object());
+    for other in [current - 1, current + 1] {
+        let reply = hello(other);
+        assert_eq!(reply["error"]["code"], "protocol", "{reply}");
+        let message = reply["error"]["message"].as_str().unwrap();
+        assert_eq!(
+            message,
+            format!("client speaks protocol {other}, daemon speaks {current}")
+        );
+    }
+}
+
+#[test]
 fn two_teams_loaded_at_once_do_not_merge() {
     let s = Session::new();
     std::fs::create_dir_all(&s.workspace).unwrap();
