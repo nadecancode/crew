@@ -745,6 +745,44 @@ fn a_reviewed_task_is_done_only_after_approval() {
 }
 
 #[test]
+fn in_a_shared_workspace_a_rejection_does_not_ask_for_a_commit() {
+    let s = Session::new();
+    std::fs::create_dir_all(&s.workspace).unwrap();
+    let mut team = s.team(
+        "shared-review",
+        vec![
+            agent("author", "", &["--on-task=done first draft"]),
+            agent("critic", "", &["--on-review=review reject please fix"]),
+        ],
+        vec![task("write", "author", &[])],
+    );
+    team.tasks[0].reviewer = Some("critic".into());
+    team.workspace.isolation = crew_core::config::Isolation::Shared;
+    team.workspace.init = false;
+    s.run(&team);
+    s.wait_for("the rejection", || {
+        s.messages()
+            .iter()
+            .any(|m| m.kind == MessageType::ReviewResult)
+    });
+    let verdict = s
+        .messages()
+        .into_iter()
+        .find(|m| m.kind == MessageType::ReviewResult)
+        .unwrap();
+    assert!(verdict.body.contains("task_complete"), "{}", verdict.body);
+    assert!(!verdict.body.contains("git_commit"), "{}", verdict.body);
+    // Nor does the request send the reviewer to git for the work.
+    let request = s
+        .messages()
+        .into_iter()
+        .find(|m| m.kind == MessageType::ReviewRequest)
+        .unwrap();
+    assert!(request.body.contains("review_submit"), "{}", request.body);
+    assert!(!request.body.contains("git_"), "{}", request.body);
+}
+
+#[test]
 fn a_rejected_task_waits_until_its_author_has_finished_the_next_one() {
     let s = Session::new();
     let team = {

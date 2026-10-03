@@ -803,10 +803,16 @@ call session_complete with the final report."
                 // The review request goes straight from author to reviewer;
                 // what to review against, and the work, are on the card.
                 let id = &updated.id;
+                // In a shared workspace nothing is committed: the work is
+                // already where the reviewer sees it.
+                let work = if self.model().session.isolation == "shared" {
+                    "result. The work is in the shared workspace"
+                } else {
+                    "result and commits. git_cherry_pick or git_merge brings the work into your worktree"
+                };
                 let body = format!(
                     "Review my work on task {id} (\"{}\"): task_get(\"{id}\") reads its card, with my \
-result and commits. git_cherry_pick or git_merge brings the work into your worktree; then \
-review_submit(task_id=\"{id}\", approve=true|false, comments=…).",
+{work}; then review_submit(task_id=\"{id}\", approve=true|false, comments=…).",
                     updated.title
                 );
                 let commit = updated
@@ -1084,17 +1090,24 @@ with review_submit(task_id=\"{}\", approve=true|false).",
                         format!("\n\n{comments}")
                     }
                 )
-            } else if queued {
-                format!(
-                    "Changes requested on task \"{}\" (id {task_id}):\n\n{comments}\n\n\
-Finish your current task first: this one is handed back to you after it. Then address them, \
-git_commit, and call task_complete again.",
-                    updated.title
-                )
             } else {
+                // In a shared workspace there is nothing to commit: the work is
+                // already where everyone sees it.
+                let commit = if self.model().session.isolation == "shared" {
+                    ""
+                } else {
+                    "git_commit, "
+                };
+                let next = if queued {
+                    format!(
+                        "Finish your current task first: this one is handed back to you after \
+it. Then address them, {commit}and call task_complete again."
+                    )
+                } else {
+                    format!("Address them, {commit}then call task_complete again.")
+                };
                 format!(
-                    "Changes requested on task \"{}\" (id {task_id}):\n\n{comments}\n\n\
-Address them, git_commit, then call task_complete again.",
+                    "Changes requested on task \"{}\" (id {task_id}):\n\n{comments}\n\n{next}",
                     updated.title
                 )
             };
