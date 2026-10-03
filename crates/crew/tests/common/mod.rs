@@ -14,8 +14,8 @@ use std::process::{Command, Output, Stdio};
 use std::time::{Duration, Instant};
 
 use crew_core::config::{
-    AgentDefaults, AgentSpec, BackendChoice, OrchestratorConfig, TaskSpec, TeamConfig,
-    WorkspaceConfig,
+    AgentDefaults, AgentSpec, BackendChoice, OrchestratorConfig, SandboxConfig, SandboxMode,
+    TaskSpec, TeamConfig, WorkspaceConfig,
 };
 use crew_core::rpc::Snapshot;
 use crew_core::{Agent, Event, Message, RuntimeKind, Task};
@@ -80,6 +80,12 @@ impl Session {
             workspace: WorkspaceConfig {
                 path: self.workspace.to_string_lossy().into_owned(),
                 init: true,
+                // The scripted agents run unsandboxed whatever the default becomes;
+                // tests/sandbox.rs is where sandboxes are tested.
+                sandbox: SandboxConfig {
+                    mode: SandboxMode::Off,
+                    ..SandboxConfig::default()
+                },
                 ..WorkspaceConfig::default()
             },
             backend: BackendChoice::Pty,
