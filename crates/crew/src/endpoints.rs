@@ -1085,6 +1085,33 @@ mod tests {
     }
 
     #[test]
+    fn the_readmes_sandbox_credentials_example_resolves_to_keys_for_both_runtimes() {
+        // The example in README.md, parsed and resolved as an agent launch would.
+        let readme = include_str!("../../../README.md");
+        let marker = "<!-- sandbox-credentials-example -->\n```toml\n";
+        let start = readme.find(marker).expect("the example") + marker.len();
+        let example = &readme[start..start + readme[start..].find("```").unwrap()];
+        std::env::set_var("TEAM_ANTHROPIC_KEY", "sk-ant-from-the-environment-0000");
+        let dir = tempfile::tempdir().unwrap();
+        let secret = dir.path().join("openai");
+        std::fs::write(&secret, "sk-openai-from-a-file-0000\n").unwrap();
+        std::fs::set_permissions(&secret, std::os::unix::fs::PermissionsExt::from_mode(0o600))
+            .unwrap();
+        let example = example.replace("~/.secrets/openai", &secret.to_string_lossy());
+        let l = layers("", &example, "");
+        let claude = l.resolve(RuntimeKind::Claude, "claude-1", None).unwrap();
+        assert_eq!(
+            claude.api_key.as_ref().map(|k| k.expose()),
+            Some("sk-ant-from-the-environment-0000")
+        );
+        let codex = l.resolve(RuntimeKind::Codex, "codex-1", None).unwrap();
+        assert_eq!(
+            codex.api_key.as_ref().map(|k| k.expose()),
+            Some("sk-openai-from-a-file-0000")
+        );
+    }
+
+    #[test]
     fn the_report_shows_sources_and_never_a_whole_key() {
         let l = layers(
             "[claude]\nbase_url = \"https://global.example\"",

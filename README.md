@@ -976,6 +976,35 @@ Two things to know:
   that is tracked by git, since a repository could otherwise redirect your
   keys to its own endpoint, and any config file that other users can write.
 
+### Credentials in a sandbox
+
+With `workspace.sandbox.mode: required` an agent's CLI runs in a private home
+(`.crew/agents/<id>/rw/home`), seeded with your model settings only. **Your CLI
+login files are not copied** (`~/.claude/.credentials.json`, `~/.codex/auth.json`,
+pi's `auth.json`): a CLI that refreshes a copied token could invalidate your own
+login. **Credentials in your shell's environment are not enough either**: the
+sandbox passes an agent only the variables crew names for it, so an exported
+`ANTHROPIC_API_KEY` or `OPENAI_API_KEY` never arrives. Give each runtime its
+credential in the endpoint config, which is how crew passes it:
+
+<!-- sandbox-credentials-example -->
+```toml
+# ~/.config/crew/config.toml  (or .crew/config.toml, untracked)
+[claude]
+api_key_env = "TEAM_ANTHROPIC_KEY"   # a variable in the shell you start the team from
+
+[codex]
+api_key_file = "~/.secrets/openai"   # a file only you can read
+```
+
+Claude Code fetches an `api_key` from the daemon (`apiKeyHelper`); Codex gets it
+in its environment as `CREW_CODEX_API_KEY`. A subscription login has no field of
+its own here: use an API key. Whether Claude Code accepts a long-lived token
+from `claude setup-token` through `auth_token_env` (which sets
+`ANTHROPIC_AUTH_TOKEN`) has not been verified; it is a different variable from
+`CLAUDE_CODE_OAUTH_TOKEN`, so do not assume they are interchangeable. See
+`crew config` for what each agent will use.
+
 ## Workspace isolation
 
 With `isolation: worktree` (the default when the workspace is the root of a
