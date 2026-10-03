@@ -400,7 +400,12 @@ struct LedgerLauncher {
     program: Option<PathBuf>,
     env: Vec<(String, String)>,
     admin: PathBuf,
-    /// The entry of the command launched last, until it is started.
+    /// The entry of the command launched last, until it is started. One
+    /// slot: a launcher serves one blocking job, whose git commands start
+    /// one at a time on its thread (git::launch::with_launcher). It must
+    /// not be shared across concurrent commands: one command's pid and
+    /// init could be recorded in another's entry, which would then count
+    /// as gone when the wrong sandbox ends.
     pending: std::sync::Mutex<Option<retire::Record>>,
 }
 
