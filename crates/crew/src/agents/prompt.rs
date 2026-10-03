@@ -1096,6 +1096,9 @@ mod tests {
         // What it builds on is on the card, not in the dispatch.
         task.dependencies = vec![dep.id.clone()];
         assert!(task_dispatch(&task).ends_with("task_get(\"ledger\") reads its card."));
+        // How to finish is in the briefing, which knows whether the checkout is
+        // shared (nothing is committed there): the dispatch never says to commit.
+        assert!(!task_dispatch(&task).contains("git_commit"));
     }
 
     #[test]
