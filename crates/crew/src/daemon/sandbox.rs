@@ -270,8 +270,14 @@ workspace.isolation: worktree, {OFF}"
             ));
         }
         if let Err(e) = &self.host {
+            // The probe's fix may already offer the opt-out (Landlock's does).
+            let off = if e.fix.contains("workspace.sandbox.mode: off") {
+                String::new()
+            } else {
+                format!(", {OFF}")
+            };
             return Some(format!(
-                "agents cannot be sandboxed on this host: {}; {}, {OFF}",
+                "agents cannot be sandboxed on this host: {}; {}{off}",
                 e.cause, e.fix
             ));
         }
@@ -972,6 +978,23 @@ trusts you); set workspace.sandbox.nix_daemon: false",
             assert!(why.contains(says), "{why}");
             assert!(why.contains("workspace.sandbox.mode: off"), "{why}");
         }
+
+        // A probe whose fix already offers the opt-out is not told it twice.
+        let offers_off = Readiness {
+            host: Err(probe::Unavailable {
+                cause: "the kernel offers Landlock ABI 6".into(),
+                fix: "run a newer kernel, or set `workspace.sandbox.mode: off` to run agents \
+unsandboxed"
+                    .into(),
+            }),
+            ..ready()
+        };
+        let why = offers_off.refusal().expect("refused");
+        assert_eq!(
+            why.matches("workspace.sandbox.mode: off").count(),
+            1,
+            "{why}"
+        );
     }
 
     #[test]
