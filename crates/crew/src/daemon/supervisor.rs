@@ -11,6 +11,7 @@ use crew_core::{Agent, AgentStatus, RuntimeKind, TaskStatus, OPERATOR_ID, ORCHES
 use serde_json::Value;
 
 use super::handlers::internal;
+use super::sandbox::Run;
 use super::{AgentLocal, AgentRuntimeState, Daemon, IdReservation};
 use crate::agents::prompt::{self, TeamView};
 use crate::agents::{runtime_for, AgentSettings, LaunchContext, Signal};
@@ -467,7 +468,9 @@ impl Daemon {
 
         // Before anything starts: an agent that must be sandboxed and cannot
         // be starts nothing.
-        spec.sandbox = self.terminal_sandbox(&agent, &spec, procs.name()).await?;
+        spec.sandbox = self
+            .agent_sandbox(&agent, Run::session(&spec, procs.name()))
+            .await?;
         self.stop_sidecar(id);
         if let Some(sidecar) = &spec.sidecar {
             self.start_sidecar(id, sidecar).await?;

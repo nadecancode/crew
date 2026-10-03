@@ -75,18 +75,49 @@ struct Placement<'a> {
     worktrees: bool,
 }
 
-/// The profile of an agent's terminal session: the orchestrator sees the
+/// What runs in an agent's sandbox: its terminal session, or a helper of
+/// the session (the sidecar, a queue command).
+pub(crate) struct Run {
+    pub agent_id: String,
+    pub program: String,
+    /// What it is started with; passed into the sandbox by name.
+    pub env: Vec<(String, String)>,
+    /// The sidecar's socket directory, mounted writable.
+    pub sidecar_dir: Option<PathBuf>,
+    /// The backend whose terminal it runs on. None: no terminal (a new
+    /// session, stdin /dev/null).
+    pub terminal: Option<&'static str>,
+}
+
+impl Run {
+    /// The agent's terminal session, started by `backend`.
+    pub fn session(launch: &LaunchSpec, backend: &'static str) -> Self {
+        Self {
+            agent_id: launch.agent_id.clone(),
+            program: launch.program.clone(),
+            env: launch.env.clone(),
+            sidecar_dir: launch
+                .sidecar
+                .as_ref()
+                .and_then(|s| s.socket.parent())
+                .map(Path::to_path_buf),
+            terminal: Some(backend),
+        }
+    }
+}
+
+/// The profile of something an agent runs: the orchestrator sees the
 /// checkout read-only, a worker gets its own worktree. Agents sharing the
 /// checkout cannot be confined to anything of their own.
-fn terminal_profile(
+fn agent_profile(
     host: &Host,
     layout: &Layout,
     at: &Placement,
     config: &SandboxConfig,
-    launch: &LaunchSpec,
+    run: &Run,
     cli: Option<&Path>,
 ) -> Result<Built> {
-    let sidecar_dir = launch.sidecar.as_ref().and_then(|s| s.socket.parent());
+    let sidecar_dir = run.sidecar_dir.as_deref();
     let admin;
     let role = if at.orchestrator {
         Role::Orchestrator {
@@ -112,7 +143,7 @@ or set workspace.sandbox.mode: off"
         read_only: config.read_only.clone(),
         read_write: config.read_write.clone(),
     };
-    let pass_env: Vec<String> = launch.env.iter().map(|(name, _)| name.clone()).collect();
+    let pass_env: Vec<String> = run.env.iter().map(|(name, _)| name.clone()).collect();
     profile::build(
         host,
         &Request {
@@ -121,11 +152,11 @@ or set workspace.sandbox.mode: off"
             extra: &extra,
             cli,
             pass_env: &pass_env,
-            terminal: true,
+            terminal: run.terminal.is_some(),
             nix_daemon: None,
         },
     )
-    .map_err(|e| anyhow!("{} cannot be sandboxed: {e}", launch.agent_id))
+    .map_err(|e| anyhow!("{} cannot be sandboxed: {e}", run.agent_id))
 }
 
 /// `$XDG_CACHE_HOME`, else `~/.cache`.
@@ -147,15 +178,10 @@ fn find_program(program: &str, path: Option<&OsString>) -> Option<PathBuf> {
 }
 
 impl Daemon {
-    /// The sandbox an agent's terminal session runs in: none unless the
-    /// team requires sandboxes, and then the agent does not start without
-    /// one. The host is probed at every launch.
-    pub(crate) async fn terminal_sandbox(
-        &self,
-        agent: &Agent,
-        launch: &LaunchSpec,
-        backend: &str,
-    ) -> Result<Option<Spec>> {
+    /// The sandbox something an agent runs goes in: none unless the team
+    /// requires sandboxes, and then it does not start without one. The host
+    /// is probed every time.
+    pub(crate) async fn agent_sandbox(&self, agent: &Agent, run: Run) -> Result<Option<Spec>> {
         let (config, worktrees) = {
             let model = self.model();
             let Some(team) = &model.session.team else {
@@ -169,7 +195,7 @@ impl Daemon {
         if config.mode == SandboxMode::Off {
             return Ok(None);
         }
-        if backend != "pty" {
+        if let Some(backend) = run.terminal.filter(|b| *b != "pty") {
             bail!(
                 "the {backend} backend cannot start sandboxed agents; use backend: pty, or set \
 workspace.sandbox.mode: off"
@@ -183,7 +209,6 @@ workspace.sandbox.mode: off"
         let agent_dir = self.agent_dir(&agent.id);
         let workdir = PathBuf::from(&agent.workdir);
         let orchestrator = agent.orchestrator;
-        let launch = launch.clone();
         let built = tokio::task::spawn_blocking(move || -> Result<Built> {
             let path = std::env::var_os("PATH");
             let available = probe::probe(&crew_bin, path.as_ref())
@@ -193,7 +218,7 @@ workspace.sandbox.mode: off"
             // The crew binary is bound anyway; any other program is a CLI,
             // and its install directory is bound.
             let crew_bin = crew_bin.canonicalize().ok();
-            let cli = find_program(&launch.program, path.as_ref())
+            let cli = find_program(&run.program, path.as_ref())
                 .filter(|p| p.canonicalize().ok() != crew_bin);
             let at = Placement {
                 agent_dir: &agent_dir,
@@ -201,7 +226,7 @@ workspace.sandbox.mode: off"
                 orchestrator,
                 worktrees,
             };
-            terminal_profile(&host, &layout, &at, &config, &launch, cli.as_deref())
+            agent_profile(&host, &layout, &at, &config, &run, cli.as_deref())
         })
         .await??;
         for warning in &built.warnings {
@@ -293,7 +318,15 @@ mod tests {
                 mode: SandboxMode::Required,
                 ..SandboxConfig::default()
             };
-            terminal_profile(&host, &layout, &at, &config, &launch, None).map(|built| built.spec)
+            agent_profile(
+                &host,
+                &layout,
+                &at,
+                &config,
+                &Run::session(&launch, "pty"),
+                None,
+            )
+            .map(|built| built.spec)
         }
     }
 
