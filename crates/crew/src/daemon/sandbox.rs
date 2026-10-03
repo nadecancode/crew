@@ -14,6 +14,7 @@ use crate::agents::LaunchSpec;
 use crate::git;
 use crate::git::launch::{Launcher, SandboxLauncher};
 use crate::persistence::NewEvent;
+use crate::sandbox::probe::UntrustedNixDaemon;
 use crate::sandbox::profile::{self, Built, Extra, Host, Request, Role, Session};
 use crate::sandbox::spec::{launcher_env, Spec};
 use crate::sandbox::{probe, run};
@@ -178,6 +179,7 @@ fn agent_profile(
     config: &SandboxConfig,
     run: &Run,
     cli: Option<&Path>,
+    nix_daemon: Option<&UntrustedNixDaemon>,
 ) -> Result<Built> {
     let sidecar_dir = run.sidecar_dir.as_deref();
     let admin;
@@ -212,7 +214,7 @@ or set workspace.sandbox.mode: off"
             cli,
             pass_env: &pass_env,
             terminal: run.terminal.is_some(),
-            nix_daemon: None,
+            nix_daemon,
         },
     )
     .map_err(|e| anyhow!("{} cannot be sandboxed: {e}", run.agent_id))
@@ -245,11 +247,13 @@ struct Readiness {
     worktrees: bool,
     /// The host probe.
     host: Result<(), probe::Unavailable>,
+    /// The Nix daemon's answer, when `workspace.sandbox.nix_daemon` is set.
+    nix: Option<Result<(), String>>,
 }
 
 impl Readiness {
     /// Why the team cannot start, with what would fix it (design-b3.md
-    /// §3.6; operator decisions 1, 2, 6 and 10).
+    /// §3.2 "Nix", §3.6; operator decisions 1, 2, 6, 8 and 10).
     fn refusal(&self) -> Option<String> {
         if self.backend != "pty" {
             return Some(format!(
@@ -271,8 +275,21 @@ workspace.isolation: worktree, {OFF}"
                 e.cause, e.fix
             ));
         }
+        if let Some(Err(e)) = &self.nix {
+            return Some(format!(
+                "workspace.sandbox.nix_daemon is set and the Nix daemon cannot be given to agents \
+({e}); set workspace.sandbox.nix_daemon: false, {OFF}"
+            ));
+        }
         None
     }
+}
+
+/// The Nix daemon's socket, once the daemon has said it does not trust the
+/// operator (a trusted user's settings make it run code as root). Blocking.
+fn untrusted_nix_daemon(path: Option<&OsString>) -> Result<UntrustedNixDaemon, String> {
+    let nix = find_program("nix", path).ok_or("`nix` is not on PATH")?;
+    probe::nix_daemon(&nix)
 }
 
 /// The host, probed now, and the daemon's layout. Blocking.
@@ -355,8 +372,12 @@ impl Daemon {
             return Ok(());
         }
         let crew_bin = self.crew_bin.clone();
-        let host = tokio::task::spawn_blocking(move || {
-            probe::probe(&crew_bin, std::env::var_os("PATH").as_ref()).map(drop)
+        let nix_daemon = config.nix_daemon;
+        let (host, nix) = tokio::task::spawn_blocking(move || {
+            let path = std::env::var_os("PATH");
+            let host = probe::probe(&crew_bin, path.as_ref()).map(drop);
+            let nix = nix_daemon.then(|| untrusted_nix_daemon(path.as_ref()).map(drop));
+            (host, nix)
         })
         .await
         .map_err(|e| e.to_string())?;
@@ -364,6 +385,7 @@ impl Daemon {
             backend,
             worktrees,
             host,
+            nix,
         };
         match readiness.refusal() {
             Some(why) => Err(format!("workspace.sandbox.mode is required, but {why}")),
@@ -517,7 +539,20 @@ workspace.sandbox.mode: off"
                 orchestrator,
                 worktrees,
             };
-            agent_profile(&host, &layout, &at, &config, &run, cli.as_deref())
+            let nix = config
+                .nix_daemon
+                .then(|| untrusted_nix_daemon(path.as_ref()))
+                .transpose()
+                .map_err(|e| anyhow!("the Nix daemon cannot be given to {}: {e}", run.agent_id))?;
+            agent_profile(
+                &host,
+                &layout,
+                &at,
+                &config,
+                &run,
+                cli.as_deref(),
+                nix.as_ref(),
+            )
         })
         .await??;
         for warning in &built.warnings {
@@ -597,6 +632,16 @@ mod tests {
         }
 
         fn profile_for(&self, orchestrator: bool, worktrees: bool, run: &Run) -> Result<Spec> {
+            self.profile_with(orchestrator, worktrees, run, None)
+        }
+
+        fn profile_with(
+            &self,
+            orchestrator: bool,
+            worktrees: bool,
+            run: &Run,
+            nix: Option<&UntrustedNixDaemon>,
+        ) -> Result<Spec> {
             let crew_bin = std::env::current_exe().unwrap();
             let host = Host::detect(&crew_bin, Path::new("/bwrap"), landlock::MIN_ABI);
             let layout = Layout::new(&self.ws, &self.socket, &self.root.join("cache"))?;
@@ -615,7 +660,7 @@ mod tests {
                 mode: SandboxMode::Required,
                 ..SandboxConfig::default()
             };
-            agent_profile(&host, &layout, &at, &config, run, None).map(|built| built.spec)
+            agent_profile(&host, &layout, &at, &config, run, None, nix).map(|built| built.spec)
         }
     }
 
@@ -885,6 +930,7 @@ mod tests {
             backend: "pty",
             worktrees: true,
             host: Ok(()),
+            nix: Some(Ok(())),
         };
         assert_eq!(ready().refusal(), None);
         let unavailable = probe::Unavailable {
@@ -913,10 +959,39 @@ mod tests {
                 },
                 "on this host: the kernel offers Landlock ABI 6; run a newer kernel",
             ),
+            (
+                Readiness {
+                    nix: Some(Err("the daemon trusts you".into())),
+                    ..ready()
+                },
+                "nix_daemon is set and the Nix daemon cannot be given to agents (the daemon \
+trusts you); set workspace.sandbox.nix_daemon: false",
+            ),
         ] {
             let why = readiness.refusal().expect("refused");
             assert!(why.contains(says), "{why}");
             assert!(why.contains("workspace.sandbox.mode: off"), "{why}");
         }
+    }
+
+    #[test]
+    fn an_agent_gets_the_nix_daemon_only_once_it_was_found_not_to_trust_the_operator() {
+        let f = fixture();
+        let nix_dir = f.root.join("nix-daemon");
+        std::fs::create_dir(&nix_dir).unwrap();
+        let socket = nix_dir.join("socket");
+        let _nix = std::os::unix::net::UnixListener::bind(&socket).unwrap();
+        let verified = UntrustedNixDaemon::verified_for_test(&socket);
+        let session = |nix| {
+            let launch = Run::git("a", &f.ws.join(".crew/agents/a"));
+            f.profile_with(false, true, &launch, nix).unwrap()
+        };
+
+        let with = session(Some(&verified));
+        assert!(binds(&with).contains(&(socket.clone(), true)));
+        assert!(with.allow_unix.contains(&nix_dir), "{:?}", with.allow_unix);
+        let without = session(None);
+        assert!(!binds(&without).iter().any(|(p, _)| p == &socket));
+        assert!(!without.allow_unix.contains(&nix_dir));
     }
 }
