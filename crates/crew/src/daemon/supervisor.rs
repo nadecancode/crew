@@ -328,11 +328,11 @@ impl Daemon {
         resume: bool,
         notice: Option<String>,
     ) -> Result<()> {
-        // One launch of an agent at a time: two restarts close together
-        // must not both find nothing running and seed its home while the
-        // other's sandboxes start.
-        let launch = self.launch_lock(id);
-        let _launch = launch.lock().await;
+        // One launch of an agent at a time, and none beside its git jobs:
+        // two restarts close together must not both find nothing running
+        // and seed its home while the other's sandboxes start, nor write it
+        // beside a git sandbox.
+        let launch = self.launch_lease(id).write_owned().await;
         let procs = self.procs().map_err(|e| anyhow!(e.message))?;
         // Before anything of the agent's writable tree is touched (even made):
         // nothing of its previous sandboxes may be left (D2).
@@ -671,6 +671,9 @@ impl Daemon {
             }
         }
 
+        // Its sandboxes are started and in the ledger; what follows may
+        // deliver to it, which does not wait for this launch.
+        drop(launch);
         if spawned.prompt_delivered {
             if !pending_ids.is_empty() {
                 let _ = self.bus.mark_delivered(id, &pending_ids);
@@ -809,8 +812,12 @@ stopped"
             .map_err(|e| anyhow!("{id}'s home is not written: {e}"))
     }
 
-    /// One launch of agent `id` at a time.
-    fn launch_lock(&self, id: &str) -> std::sync::Arc<tokio::sync::Mutex<()>> {
+    /// Agent `id`'s launch lease. A launch holds it alone, from before the
+    /// agent's previous sandboxes are retired until its own have started.
+    /// The agent's git jobs share it while their sandboxes run, the guard
+    /// owned by the job itself, so a request that is cancelled does not let
+    /// a launch in beside a job still running.
+    pub(crate) fn launch_lease(&self, id: &str) -> std::sync::Arc<tokio::sync::RwLock<()>> {
         self.launches
             .lock()
             .unwrap_or_else(|e| e.into_inner())

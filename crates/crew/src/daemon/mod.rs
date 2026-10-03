@@ -265,8 +265,8 @@ pub struct Inner {
     /// (design-b3.md §3.4, D2): nothing of the agent's next launch is
     /// written until its entries are gone.
     pub(crate) ledger: retire::Ledger,
-    /// One launch of an agent at a time.
-    pub(crate) launches: Mutex<HashMap<String, Arc<tokio::sync::Mutex<()>>>>,
+    /// Each agent's launch lease (Daemon::launch_lease).
+    pub(crate) launches: Mutex<HashMap<String, Arc<tokio::sync::RwLock<()>>>>,
     /// Git operations run one at a time.
     pub(crate) git_lock: tokio::sync::Mutex<()>,
     /// Planning and applying the plan is one critical section, so two

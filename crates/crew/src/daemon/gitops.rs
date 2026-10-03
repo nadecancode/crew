@@ -54,13 +54,19 @@ impl Daemon {
         let record = self
             .agent(agent)
             .ok_or_else(|| RpcError::not_found(format!("no agent '{agent}'")))?;
+        // Held by the job itself, not by this request: a launch of the agent
+        // waits until the job and its sandboxes are done, cancelled or not.
+        let lease = self.launch_lease(agent).read_owned().await;
         let launcher = self
             .agent_git_launcher(&record)
             .await
             .map_err(|e| git_error(format!("{e:#}")))?;
-        self.git(move || match launcher {
-            Some(launcher) => git::launch::with_launcher(launcher, f),
-            None => f(),
+        self.git(move || {
+            let _lease = lease;
+            match launcher {
+                Some(launcher) => git::launch::with_launcher(launcher, f),
+                None => f(),
+            }
         })
         .await
     }
@@ -331,5 +337,59 @@ git in it (use a git repository as the workspace, or workspace.init: true)",
             "merged": merged,
             "conflicts": conflicts,
         }))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn an_agents_git_job_keeps_its_launch_lease_after_the_request_is_gone() {
+        let temp = tempfile::tempdir().unwrap();
+        let running = super::super::start(super::super::DaemonOptions {
+            workspace: temp.path().to_path_buf(),
+            crew_bin: std::env::current_exe().unwrap(),
+        })
+        .await
+        .unwrap();
+        let daemon = running.daemon.clone();
+        let agent: crew_core::Agent = serde_json::from_value(serde_json::json!({
+            "id": "a", "name": "a", "role": "work", "status": "working", "runtime": "shell",
+            "workdir": temp.path().to_str().unwrap(), "backend": "pty", "last_activity_at": 0
+        }))
+        .unwrap();
+        daemon.model().agents.push(agent);
+        let held = |daemon: &Daemon| daemon.launch_lease("a").try_write().is_err();
+        let until = |daemon: Daemon, want: bool| async move {
+            for _ in 0..200 {
+                if held(&daemon) == want {
+                    return;
+                }
+                tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+            }
+            panic!("the lease was never {}", if want { "held" } else { "free" });
+        };
+
+        let (release, job) = std::sync::mpsc::channel::<()>();
+        let request = {
+            let daemon = daemon.clone();
+            tokio::spawn(async move {
+                daemon
+                    .agent_git("a", move || {
+                        let _ = job.recv();
+                        Ok(())
+                    })
+                    .await
+            })
+        };
+        until(daemon.clone(), true).await;
+        // The request goes (its client disconnected); the job runs on, and
+        // no launch of the agent gets in beside it.
+        request.abort();
+        let _ = request.await;
+        assert!(held(&daemon), "the lease went with the request");
+        release.send(()).unwrap();
+        until(daemon.clone(), false).await;
     }
 }

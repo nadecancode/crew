@@ -9,7 +9,7 @@ use anyhow::{anyhow, bail, Context, Result};
 use crew_core::config::{SandboxConfig, SandboxMode, TeamConfig};
 use crew_core::{paths, Agent};
 
-use super::Daemon;
+use super::{retire, Daemon};
 use crate::agents::LaunchSpec;
 use crate::git;
 use crate::git::launch::{Launcher, SandboxLauncher};
@@ -365,6 +365,72 @@ fn integrate(
     Ok((worktree, steps))
 }
 
+/// What an agent's git runs through when the team requires sandboxes: the
+/// agent's sandbox, each command in the agent's retirement ledger before it
+/// starts and its init found right after (design-b3.md §3.4, D2). It
+/// belongs to one blocking job, which starts its commands one at a time.
+struct LedgerLauncher {
+    daemon: Daemon,
+    agent: String,
+    spec: Spec,
+    env: Vec<(String, String)>,
+    admin: PathBuf,
+    /// The entry of the command launched last, until it is started.
+    pending: std::sync::Mutex<Option<retire::Record>>,
+}
+
+impl Launcher for LedgerLauncher {
+    fn launch(&self, cmd: &std::process::Command) -> std::io::Result<std::process::Command> {
+        let record = self
+            .daemon
+            .ledger
+            .start(&self.agent, "git")
+            .map_err(|e| std::io::Error::other(format!("{e:#}")))?;
+        let mut spec = self.spec.clone();
+        spec.done = Some(record.done().to_path_buf());
+        let launched = SandboxLauncher::new(spec, self.env.clone()).launch(cmd);
+        match launched {
+            Ok(_) => *self.pending.lock().unwrap_or_else(|e| e.into_inner()) = Some(record),
+            Err(_) => self.daemon.ledger.never_started(&record),
+        }
+        launched
+    }
+
+    fn admin_dir(&self) -> Option<PathBuf> {
+        Some(self.admin.clone())
+    }
+
+    fn started(&self, pid: Option<u32>) {
+        let Some(record) = self
+            .pending
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .take()
+        else {
+            return;
+        };
+        let Some(pid) = pid else {
+            self.daemon.ledger.never_started(&record);
+            return;
+        };
+        record.update(|r| r.pid = Some(pid));
+        // Its init, before a timeout can kill it. One that ends first says
+        // so through its done marker.
+        let deadline = std::time::Instant::now() + retire::DISCOVER_WITHIN;
+        let init = loop {
+            if let Some(init) = retire::sandbox_init(pid) {
+                break Some(init);
+            }
+            let ended = !retire::Proc::of(pid).is_some_and(|p| p.running());
+            if ended || record.done().exists() || std::time::Instant::now() >= deadline {
+                break None;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(1));
+        };
+        record.update(|r| r.init = init);
+    }
+}
+
 impl Daemon {
     /// Refuse a team that requires sandboxes and cannot have them, before
     /// anything of it starts. Probes the host.
@@ -504,9 +570,14 @@ of its own; a member commits in its worktree"
         let admin =
             git::worktree_admin_dir(&self.workspace.join(".git"), Path::new(&agent.workdir))
                 .ok_or_else(|| anyhow!("{} is not a worktree crew made", agent.workdir))?;
-        Ok(Some(Arc::new(
-            SandboxLauncher::new(spec, env).with_admin_dir(admin),
-        )))
+        Ok(Some(Arc::new(LedgerLauncher {
+            daemon: self.clone(),
+            agent: agent.id.clone(),
+            spec,
+            env,
+            admin,
+            pending: std::sync::Mutex::new(None),
+        })))
     }
 
     /// The sandbox something an agent runs goes in: none unless the team
@@ -1018,5 +1089,63 @@ unsandboxed"
         let without = session(None);
         assert!(!binds(&without).iter().any(|(p, _)| p == &socket));
         assert!(!without.allow_unix.contains(&nix_dir));
+    }
+
+    #[tokio::test]
+    async fn an_agents_git_command_is_in_its_ledger_before_it_starts_and_reports_there() {
+        let fx = fixture();
+        let running = super::super::start(super::super::DaemonOptions {
+            workspace: fx.ws.clone(),
+            crew_bin: std::env::current_exe().unwrap(),
+        })
+        .await
+        .unwrap();
+        let daemon = running.daemon.clone();
+        let agent_dir = fx.ws.join(".crew/agents/a");
+        let run = Run::git("a", &agent_dir);
+        let env = run.env.clone();
+        let launcher = LedgerLauncher {
+            daemon: daemon.clone(),
+            agent: "a".into(),
+            spec: fx.profile_for(false, true, &run).unwrap(),
+            env,
+            admin: PathBuf::from("/admin"),
+            pending: std::sync::Mutex::new(None),
+        };
+        let mut git = std::process::Command::new("git");
+        git.arg("status");
+        let short = std::time::Duration::from_millis(100);
+
+        // Before it is started its entry is on disk, and its sandbox is told
+        // where to report.
+        let launched = launcher.launch(&git).unwrap();
+        let entries = daemon.ledger.of("a");
+        assert_eq!(entries.len(), 1);
+        assert_eq!(entries[0].get().pid, None);
+        let args: Vec<String> = launched
+            .get_args()
+            .map(|a| a.to_string_lossy().into_owned())
+            .collect();
+        assert_eq!(args[0], "sandbox-run");
+        let spec: Spec = serde_json::from_str(&args[1]).unwrap();
+        assert_eq!(spec.done.as_deref(), Some(entries[0].done()));
+        // Not started: no process, no entry.
+        launcher.started(None);
+        assert!(daemon.ledger.of("a").is_empty());
+        assert!(daemon.ledger.retire("a", short).await.is_ok());
+
+        // Started: its pid is kept, and it holds the agent until its sandbox
+        // reports that it is gone.
+        launcher.launch(&git).unwrap();
+        let mut ended = std::process::Command::new("true").spawn().unwrap();
+        let pid = ended.id();
+        ended.wait().unwrap();
+        launcher.started(Some(pid));
+        let entry = daemon.ledger.of("a").pop().unwrap();
+        assert_eq!(entry.get().pid, Some(pid));
+        let refused = format!("{:#}", daemon.ledger.retire("a", short).await.unwrap_err());
+        assert!(refused.contains("its git sandbox"), "{refused}");
+        std::fs::write(entry.done(), "exited 0\n").unwrap();
+        daemon.ledger.retire("a", short).await.unwrap();
     }
 }
