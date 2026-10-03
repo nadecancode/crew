@@ -42,6 +42,10 @@ const SCRUBBED_ENV: &[&str] = &[
     "TMUX_PANE",
 ];
 
+/// How long, and how often, the waiter watches a group that outlived its leader.
+const GROUP_WATCH_INTERVAL: Duration = Duration::from_millis(200);
+const GROUP_WATCH_POLLS: u32 = 3000;
+
 struct PtyProc {
     kind: RuntimeKind,
     pid: Option<u32>,
@@ -340,6 +344,21 @@ impl ProcessManager for PtyManager {
                         code,
                         detail,
                     });
+                    // Members that outlived the leader: retire the group when
+                    // the last one is gone (kill() may do it first), so its id
+                    // is never probed once it can be recycled. Bounded; a group
+                    // still alive after that is left to kill().
+                    let Some(pid) = pid else { return };
+                    for _ in 0..GROUP_WATCH_POLLS {
+                        if proc.group_retired.load(Ordering::SeqCst) {
+                            return;
+                        }
+                        if !group_exists(pid) {
+                            proc.group_retired.store(true, Ordering::SeqCst);
+                            return;
+                        }
+                        std::thread::sleep(GROUP_WATCH_INTERVAL);
+                    }
                 })
                 .context("starting the pty waiter thread")?;
         }
@@ -713,6 +732,33 @@ mod tests {
         mgr.kill("b").await.unwrap();
         wait_for_exit(&mut rx).await;
         assert!(mgr.get("b").unwrap().group_retired.load(Ordering::SeqCst));
+    }
+
+    #[tokio::test]
+    async fn a_group_whose_children_outlive_the_leader_is_retired_when_they_exit() {
+        let (tx, mut rx) = mpsc::unbounded_channel();
+        let mgr = PtyManager::new(tx);
+        // The leader exits at once, leaving a child that ends by itself.
+        mgr.spawn(&spec(
+            "a",
+            "sh",
+            &["-c", "trap '' HUP; sleep 1 & sleep 0.1; exit 0"],
+        ))
+        .await
+        .unwrap();
+        wait_for_exit(&mut rx).await;
+        let proc = mgr.get("a").unwrap();
+        assert!(
+            !proc.group_retired.load(Ordering::SeqCst),
+            "child still runs"
+        );
+        for _ in 0..60 {
+            if proc.group_retired.load(Ordering::SeqCst) {
+                return;
+            }
+            tokio::time::sleep(Duration::from_millis(100)).await;
+        }
+        panic!("the group was never retired after its last member exited");
     }
 
     #[tokio::test]
