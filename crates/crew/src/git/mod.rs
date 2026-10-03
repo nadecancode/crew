@@ -24,7 +24,8 @@ use crew_core::util::is_valid_id;
 pub const BRANCH_PREFIX: &str = "agents/";
 /// Branch that collects everyone's work when the session is integrated.
 pub const INTEGRATION_BRANCH: &str = "agents/integration";
-const INTEGRATION_DIR: &str = "_integration";
+/// The integration worktree's directory under the worktrees directory.
+pub const INTEGRATION_DIR: &str = "_integration";
 const MAX_DIFF_BYTES: usize = 48 * 1024;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -753,10 +754,29 @@ pub fn integrate(
     agents: &[String],
 ) -> Result<(Worktree, Vec<IntegrationStep>)> {
     let worktree = ensure_worktree(repo, worktrees_dir, INTEGRATION_DIR, base)?;
+    let steps = merge_agents(&worktree, agents)?;
+    Ok((worktree, steps))
+}
+
+/// Merge every agent branch that is ahead into the integration worktree.
+/// Every git command runs in that worktree (the branches are found through
+/// its shared refs), so a helper sandbox that mounts only it can run them
+/// all.
+pub fn merge_agents(worktree: &Worktree, agents: &[String]) -> Result<Vec<IntegrationStep>> {
     let mut steps = Vec::new();
     for agent in agents {
         let branch = branch_for(agent);
-        if !branch_exists(repo, &branch) {
+        let exists = run(
+            &worktree.path,
+            &[
+                "show-ref",
+                "--verify",
+                "--quiet",
+                &format!("refs/heads/{branch}"),
+            ],
+        )
+        .is_ok_and(|o| o.status.success());
+        if !exists {
             continue;
         }
         let ahead = out(
@@ -773,7 +793,7 @@ pub fn integrate(
             outcome,
         });
     }
-    Ok((worktree, steps))
+    Ok(steps)
 }
 
 #[cfg(test)]
@@ -1609,5 +1629,60 @@ mod tests {
         let (_, again) = integrate(&r.root, &r.worktrees, "HEAD", &agents).unwrap();
         assert_eq!(again.len(), 1);
         assert_eq!(again[0].agent, "c");
+    }
+
+    /// Runs only git started in one directory (`-C <dir>`), as a helper
+    /// sandbox that mounts only that worktree would, and records it.
+    struct ConfinedTo(PathBuf, std::sync::Mutex<Vec<Vec<String>>>);
+
+    impl launch::Launcher for ConfinedTo {
+        fn launch(&self, cmd: &Command) -> std::io::Result<Command> {
+            let argv: Vec<String> = launch::argv(cmd)
+                .iter()
+                .map(|a| a.to_string_lossy().into_owned())
+                .collect();
+            let inside = argv.get(1).map(String::as_str) == Some("-C")
+                && argv.get(2).map(PathBuf::from) == Some(self.0.clone());
+            self.1.lock().unwrap().push(argv);
+            if !inside {
+                return Err(std::io::Error::other("outside the worktree"));
+            }
+            let mut same = Command::new(cmd.get_program());
+            same.args(cmd.get_args());
+            for (k, v) in cmd.get_envs() {
+                match v {
+                    Some(v) => same.env(k, v),
+                    None => same.env_remove(k),
+                };
+            }
+            Ok(same)
+        }
+    }
+
+    #[test]
+    fn merging_the_agents_runs_git_only_in_the_integration_worktree() {
+        let r = repo();
+        let a = ensure_worktree(&r.root, &r.worktrees, "a", "HEAD").unwrap();
+        write(&a.path, "from-a.txt", "a\n");
+        commit_all(&a.path, "a", "work of a").unwrap();
+        let (worktree, needs_population) =
+            add_worktree(&r.root, &r.worktrees, INTEGRATION_DIR, "HEAD").unwrap();
+        assert!(needs_population);
+        populate_worktree(&worktree).unwrap();
+
+        let confined = Arc::new(ConfinedTo(worktree.path.clone(), Default::default()));
+        let steps = launch::with_launcher(confined.clone(), || {
+            merge_agents(&worktree, &["a".to_string(), "ghost".to_string()])
+        })
+        .unwrap();
+        let seen = confined.1.lock().unwrap().clone();
+        assert_eq!(steps.len(), 1, "{seen:?}");
+        assert!(steps[0].outcome.ok, "{:?}", steps[0].outcome);
+        assert!(worktree.path.join("from-a.txt").exists());
+        let outside: Vec<_> = seen
+            .iter()
+            .filter(|argv| argv.get(2).map(PathBuf::from) != Some(worktree.path.clone()))
+            .collect();
+        assert!(outside.is_empty(), "git outside the worktree: {outside:?}");
     }
 }
