@@ -44,7 +44,7 @@ fn text(out: &Output) -> String {
 
 #[test]
 fn the_shim_runs_the_program_once_confined() {
-    if !host_has(landlock_scopes(), "Landlock ABI 6") {
+    if !host_has(landlock_scopes(), "Landlock ABI 9") {
         return;
     }
     let out = shim(&[], "echo confined").output().unwrap();
@@ -72,7 +72,7 @@ fn the_shim_fails_closed_before_the_program_runs() {
 
 #[test]
 fn the_shim_closes_inherited_descriptors() {
-    if !host_has(landlock_scopes(), "Landlock ABI 6") {
+    if !host_has(landlock_scopes(), "Landlock ABI 9") {
         return;
     }
     let sentinel = tempfile::NamedTempFile::new().unwrap();
@@ -109,7 +109,7 @@ fn the_shim_closes_inherited_descriptors() {
 
 #[test]
 fn the_shim_keeps_the_program_from_signalling_outside() {
-    if !host_has(landlock_scopes(), "Landlock ABI 6") {
+    if !host_has(landlock_scopes(), "Landlock ABI 9") {
         return;
     }
     let script = format!("kill -0 {} && echo reached", std::process::id());
@@ -150,7 +150,7 @@ fn bwrap() -> Option<(PathBuf, u32)> {
     });
     if !host_has(
         usable && abi >= crew::sandbox::landlock::MIN_ABI,
-        "bubblewrap with user namespaces and Landlock ABI 6",
+        "bubblewrap with user namespaces and Landlock ABI 9",
     ) {
         return None;
     }
@@ -334,7 +334,7 @@ fn a_worker_sees_its_own_tree_and_nothing_of_the_operators() {
         echo "dbus=${{DBUS_SESSION_BUS_ADDRESS:-none}}"
         # find trusts readdir's type, which hides sockets bind-mounted over a
         # file; mount points are listed from mountinfo. /nix/store is left out:
-        # walking it takes minutes, and Landlock (ABI 9) guards it.
+        # walking it takes minutes, and the Landlock socket rule guards it.
         {{ find / -path /proc -prune -o -path /nix/store -prune -o -type s -print
           while read -r _ _ _ _ point _; do [ -S "$point" ] && echo "$point"; done < /proc/self/mountinfo
         }} 2>/dev/null | sort -u | sed 's/^/socket /'
@@ -736,4 +736,93 @@ fn a_writable_entry_cannot_reach_a_read_only_toolchain_but_data_stays_writable()
         "trusted"
     );
     assert_eq!(std::fs::read_to_string(data.join("out")).unwrap(), "ok\n");
+}
+
+#[test]
+fn a_socket_made_in_a_mounted_tree_after_launch_is_refused() {
+    let Some((bwrap, abi)) = bwrap() else { return };
+    let l = layout();
+    // A read-only tree outside the protected set, empty at launch.
+    let dir = tempfile::tempdir_in(Path::new(CREW).parent().unwrap()).unwrap();
+    let tree = dir.path().canonicalize().unwrap();
+    let socket = tree.join("late.sock");
+    let identity = tree.join("identity.json");
+    std::fs::write(
+        &identity,
+        format!(
+            r#"{{"socket":"{}","agent_id":"a","token":"t"}}"#,
+            socket.display()
+        ),
+    )
+    .unwrap();
+    let host = host(&bwrap, abi);
+    let agent = l.agent();
+    let worktree = l.ws.join(".crew/worktrees/a");
+    let admin = l.git.join("worktrees/a");
+    let extra = Extra {
+        read_only: vec![tree.clone()],
+        ..Extra::default()
+    };
+    let request = Request {
+        session: l.session(),
+        role: Role::Worker {
+            agent_dir: &agent,
+            worktree: &worktree,
+            admin: &admin,
+            sidecar_dir: None,
+        },
+        extra: &extra,
+        cli: None,
+        pass_env: &[],
+        terminal: false,
+        nix_daemon: None,
+    };
+    let spec = build(&host, &request).unwrap().spec;
+    assert!(!spec.mounts.iter().any(
+        |m| matches!(m, crew::sandbox::spec::Mount::Mask { path } if path.starts_with(&tree))
+    ));
+    // The agent waits for the socket, then tries it with `crew ctl`, which
+    // connects to the socket its identity file names.
+    let script = format!(
+        "while [ ! -S '{sock}' ]; do sleep 0.05; done; echo started; \
+         CREW_IDENTITY='{id}' '{CREW}' ctl list 2>&1 | head -3; echo done",
+        sock = socket.display(),
+        id = identity.display(),
+    );
+    let child = sandboxed(&spec, &[], &script)
+        .stdout(std::process::Stdio::piped())
+        .spawn()
+        .unwrap();
+    std::thread::sleep(Duration::from_millis(500));
+    let listener = UnixListener::bind(&socket).unwrap();
+    listener.set_nonblocking(true).unwrap();
+    let out = child.wait_with_output().unwrap();
+    assert!(out.status.success(), "{}", text(&out));
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    assert!(stdout.starts_with("started\n"), "{}", text(&out));
+    assert!(stdout.contains("Permission denied"), "{}", text(&out));
+    assert!(
+        listener.accept().is_err(),
+        "the agent reached the host socket"
+    );
+    // Control: the same client outside the sandbox reaches it.
+    let control = Command::new(CREW)
+        .args(["ctl", "list"])
+        .env("CREW_IDENTITY", &identity)
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .spawn()
+        .unwrap();
+    let mut reached = false;
+    for _ in 0..100 {
+        if listener.accept().is_ok() {
+            reached = true;
+            break;
+        }
+        std::thread::sleep(Duration::from_millis(20));
+    }
+    drop(listener);
+    let _ = control.wait_with_output();
+    assert!(reached, "the control client did not reach the socket");
 }

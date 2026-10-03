@@ -51,26 +51,19 @@ fn unavailable(cause: impl Into<String>, fix: impl Into<String>) -> Unavailable 
     }
 }
 
-const FIX_LANDLOCK: &str =
-    "sandboxes need Linux 6.12 or newer with landlock in the kernel's lsm= list";
+const FIX_LANDLOCK: &str = "run a newer kernel (Linux 7.1 or newer, with landlock in the \
+kernel's lsm= list), or set `sandbox: off` to run agents unsandboxed";
 const FIX_BWRAP: &str =
     "install bubblewrap 0.10 or newer (starting crew from its nix-shell provides it)";
 const FIX_USERNS: &str = "enable unprivileged user namespaces (sysctl \
 kernel.unprivileged_userns_clone=1; on Ubuntu 24.04 also \
 kernel.apparmor_restrict_unprivileged_userns=0 or an AppArmor profile for bwrap)";
 
-/// Check this host: Landlock ABI >= 6, bubblewrap >= 0.10 on `path`, and
+/// Check this host: Landlock ABI >= 9, bubblewrap >= 0.10 on `path`, and
 /// one real run of `crew --version` through bubblewrap (with a
 /// descriptor bind, user and PID namespaces) and the shim.
 pub fn probe(crew_bin: &Path, path: Option<&OsString>) -> Result<Available, Unavailable> {
-    let landlock_abi = landlock::abi()
-        .map_err(|e| unavailable(format!("Landlock is not available ({e})"), FIX_LANDLOCK))?;
-    if landlock_abi < landlock::MIN_ABI {
-        return Err(unavailable(
-            format!("the kernel offers Landlock ABI {landlock_abi}, older than 6"),
-            FIX_LANDLOCK,
-        ));
-    }
+    let landlock_abi = check_landlock(landlock::abi())?;
     let bwrap = path
         .and_then(|p| {
             std::env::split_paths(p)
@@ -94,7 +87,7 @@ pub fn probe(crew_bin: &Path, path: Option<&OsString>) -> Result<Available, Unav
             FIX_BWRAP,
         ));
     }
-    run_through_sandbox(&bwrap, crew_bin, landlock_abi)?;
+    run_through_sandbox(&bwrap, crew_bin)?;
     Ok(Available {
         bwrap,
         bwrap_version,
@@ -102,15 +95,36 @@ pub fn probe(crew_bin: &Path, path: Option<&OsString>) -> Result<Available, Unav
     })
 }
 
+/// The kernel's Landlock ABI, if sandboxes can rely on it.
+fn check_landlock(abi: std::io::Result<u32>) -> Result<u32, Unavailable> {
+    let abi = abi.map_err(|e| {
+        unavailable(
+            format!("the kernel offers no Landlock ({e}), and sandboxes need ABI 9"),
+            FIX_LANDLOCK,
+        )
+    })?;
+    if abi < landlock::MIN_ABI {
+        return Err(unavailable(
+            format!(
+                "the kernel offers Landlock ABI {abi}, and sandboxes need ABI {} to refuse \
+every socket made outside them",
+                landlock::MIN_ABI
+            ),
+            FIX_LANDLOCK,
+        ));
+    }
+    Ok(abi)
+}
+
 /// `crew --version` inside bubblewrap and the shim, with `/` bound
 /// read-only from a pinned descriptor.
-fn run_through_sandbox(bwrap: &Path, crew_bin: &Path, abi: u32) -> Result<(), Unavailable> {
+fn run_through_sandbox(bwrap: &Path, crew_bin: &Path) -> Result<(), Unavailable> {
     let root = Path::new("/");
     let root_fd = identify(root)
         .map_err(|e| e.to_string())
         .and_then(|id| pin(root, id))
         .map_err(|e| unavailable(format!("opening / for the probe: {e}"), FIX_BWRAP))?;
-    let min_abi = abi.min(landlock::RESOLVE_UNIX_ABI).to_string();
+    let min_abi = landlock::MIN_ABI.to_string();
     let mut cmd = Command::new(bwrap);
     cmd.args([
         "--unshare-user",
@@ -281,6 +295,26 @@ mod tests {
         assert_eq!(parse_version("bubblewrap"), None);
         assert_eq!(parse_version("bubblewrap x.y"), None);
         assert!(parse_version("bubblewrap 0.9.0").unwrap() < MIN_BWRAP);
+    }
+
+    #[test]
+    fn a_kernel_below_landlock_abi_9_is_unavailable_with_the_measured_abi_and_the_fixes() {
+        for abi in [6, 8] {
+            let error = check_landlock(Ok(abi)).unwrap_err();
+            assert!(
+                error.cause.contains(&format!("Landlock ABI {abi},")),
+                "{error}"
+            );
+            assert!(error.cause.contains("need ABI 9"), "{error}");
+            assert!(error.fix.contains("newer kernel"), "{error}");
+            assert!(error.fix.contains("`sandbox: off`"), "{error}");
+        }
+        let error =
+            check_landlock(Err(std::io::Error::from_raw_os_error(libc::EOPNOTSUPP))).unwrap_err();
+        assert!(error.cause.contains("no Landlock"), "{error}");
+        assert!(error.fix.contains("`sandbox: off`"), "{error}");
+        assert_eq!(check_landlock(Ok(9)).unwrap(), 9);
+        assert_eq!(check_landlock(Ok(10)).unwrap(), 10);
     }
 
     #[test]

@@ -5,7 +5,7 @@
 //! 3. install the terminal-injection seccomp filter;
 //! 4. enter a Landlock domain that scopes abstract unix sockets and signals
 //!    (agents keep the host network, so the network namespace does not
-//!    separate abstract sockets) and, from ABI 9, pathname sockets;
+//!    separate abstract sockets) and pathname sockets;
 //! 5. exec the program.
 //!
 //! The process must be single-threaded: Landlock and seccomp apply to the
@@ -24,7 +24,7 @@ pub struct ExecArgs {
     #[arg(long, value_name = "N", default_value_t = landlock::MIN_ABI)]
     pub min_landlock_abi: u32,
     /// Directory beneath which pathname sockets made outside the sandbox
-    /// may be reached (enforced from Landlock ABI 9)
+    /// may be reached
     #[arg(long = "allow-unix", value_name = "DIR")]
     pub allow_unix: Vec<PathBuf>,
     /// The program and its arguments, after `--`

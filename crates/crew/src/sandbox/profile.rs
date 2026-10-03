@@ -177,6 +177,13 @@ struct Builder<'a> {
 
 impl<'a> Builder<'a> {
     fn new(host: &'a Host, request: &'a Request<'a>) -> Result<Self, String> {
+        if host.landlock_abi < landlock::MIN_ABI {
+            return Err(format!(
+                "the kernel offers Landlock ABI {}, and sandboxes need ABI {}",
+                host.landlock_abi,
+                landlock::MIN_ABI
+            ));
+        }
         let s = &request.session;
         let mut generated = vec![
             s.workspace,
@@ -229,10 +236,6 @@ impl<'a> Builder<'a> {
             path: Vec::new(),
             warnings: Vec::new(),
         })
-    }
-
-    fn enforces_resolve_unix(&self) -> bool {
-        self.host.landlock_abi >= landlock::RESOLVE_UNIX_ABI
     }
 
     fn build(mut self) -> Result<Built, String> {
@@ -334,11 +337,6 @@ impl<'a> Builder<'a> {
             Role::Worker { worktree, .. } | Role::Helper { worktree, .. } => worktree,
             Role::Orchestrator { .. } => session.workspace,
         };
-        let min_landlock_abi = if self.enforces_resolve_unix() {
-            landlock::RESOLVE_UNIX_ABI
-        } else {
-            landlock::MIN_ABI
-        };
         let spec = Spec {
             bwrap: host.bwrap.clone(),
             crew_bin: canonical_file(&host.crew_bin)?,
@@ -348,7 +346,7 @@ impl<'a> Builder<'a> {
             cwd: cwd.to_path_buf(),
             network: agent,
             new_session: !agent || !request.terminal,
-            min_landlock_abi,
+            min_landlock_abi: landlock::MIN_ABI,
             allow_unix: if agent {
                 let nix = request.nix_daemon.and_then(|n| n.socket().parent());
                 std::iter::once(session.runtime_dir)
@@ -720,7 +718,7 @@ impl<'a> Builder<'a> {
 /// rule refuses every socket made outside the sandbox, and walking a live
 /// store takes minutes.
 pub fn needs_socket_scan(tree: &Path, nix_store: &Path, landlock_abi: u32) -> bool {
-    !(tree.starts_with(nix_store) && landlock_abi >= landlock::RESOLVE_UNIX_ABI)
+    !(tree.starts_with(nix_store) && landlock_abi >= landlock::MIN_ABI)
 }
 
 /// The directory a CLI is installed in: the npm package for a Node CLI,
@@ -1286,12 +1284,20 @@ mod tests {
         assert!(!needs_socket_scan(&store.join("abc-bash"), store, 10));
         assert!(needs_socket_scan(store, store, 8));
         assert!(needs_socket_scan(Path::new("/etc"), store, 9));
+    }
+
+    #[test]
+    fn every_spec_demands_landlock_abi_9_and_an_older_host_gets_none() {
         let mut f = fixture();
-        f.host.landlock_abi = 7;
         assert_eq!(
             f.worker(&Extra::default()).unwrap().spec.min_landlock_abi,
-            6
+            9
         );
+        for abi in [6, 8] {
+            f.host.landlock_abi = abi;
+            let error = f.worker(&Extra::default()).unwrap_err();
+            assert!(error.contains(&format!("Landlock ABI {abi},")), "{error}");
+        }
     }
 
     #[test]
@@ -1450,26 +1456,6 @@ mod tests {
         let spec = build(&f.host, &request).unwrap().spec;
         assert!(!visible(&spec, &nix_dir.join("socket")));
         assert!(spec.allow_unix.is_empty());
-    }
-
-    #[test]
-    fn below_abi_9_the_store_is_walked_through_the_cache() {
-        let mut f = fixture();
-        // Any root-owned tree stands in for the store.
-        f.host.system = vec!["/etc".into()];
-        f.host.nix_store = "/etc".into();
-        let cache = f.root.join("cache/crew/nix-store-scan");
-        f.host.store_cache = Some(cache.clone());
-        f.worker(&Extra::default()).unwrap();
-        assert!(
-            !cache.exists(),
-            "ABI 9 enforces the socket rule; nothing to walk"
-        );
-        f.host.landlock_abi = 8;
-        let spec = f.worker(&Extra::default()).unwrap().spec;
-        assert_eq!(spec.min_landlock_abi, 6);
-        let text = std::fs::read_to_string(&cache).unwrap();
-        assert!(text.starts_with("crew nix-store-scan v1\n"), "{text}");
     }
 
     #[test]

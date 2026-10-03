@@ -53,7 +53,7 @@ pub struct Spec {
     pub new_session: bool,
     pub min_landlock_abi: u32,
     /// Directories inside the sandbox beneath which outside pathname
-    /// sockets may be reached (Landlock ABI 9 and newer).
+    /// sockets may be reached.
     pub allow_unix: Vec<PathBuf>,
 }
 
@@ -281,7 +281,7 @@ mod tests {
             cwd: "/ws/.crew/worktrees/a".into(),
             network: true,
             new_session: false,
-            min_landlock_abi: 6,
+            min_landlock_abi: 9,
             allow_unix: vec!["/run/user/1000/crew".into()],
         }
     }
@@ -319,7 +319,7 @@ mod tests {
             ("bad name", |s| s.pass_env.push("A-B".into())),
             ("loader variable", |s| s.pass_env.push("LD_PRELOAD".into())),
             ("twice", |s| s.pass_env.push("HOME".into())),
-            ("abi", |s| s.min_landlock_abi = 5),
+            ("abi", |s| s.min_landlock_abi = 8),
             ("allow_unix", |s| s.allow_unix.push("run/crew".into())),
         ];
         for (label, break_it) in cases {

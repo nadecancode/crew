@@ -15,10 +15,12 @@ pub const SCOPE_SIGNAL: u64 = 1 << 1;
 /// Connecting to a pathname unix socket created outside the domain.
 pub const ACCESS_FS_RESOLVE_UNIX: u64 = 1 << 16;
 
-/// ABI 6 (Linux 6.12) added the two scopes the sandbox relies on.
-pub const MIN_ABI: u32 = 6;
-/// ABI 9 (Linux 7.1) added `ACCESS_FS_RESOLVE_UNIX`.
-pub const RESOLVE_UNIX_ABI: u32 = 9;
+/// The oldest ABI a sandbox runs on. ABI 9 (Linux 7.1) added
+/// `ACCESS_FS_RESOLVE_UNIX`, which with the two scopes from ABI 6 denies
+/// every socket made outside the sandbox for its whole life. A scan of the
+/// mounted trees at launch cannot: a socket created there later would be
+/// reachable. So below ABI 9 nothing is sandboxed (design-b3 decision 10).
+pub const MIN_ABI: u32 = 9;
 
 const CREATE_RULESET_VERSION: u32 = 1 << 0;
 const RULE_PATH_BENEATH: libc::c_int = 1;
@@ -58,8 +60,8 @@ pub fn abi() -> io::Result<u32> {
 /// Put the calling thread, and everything it executes afterwards, in a new
 /// Landlock domain:
 /// - abstract unix sockets and signals are scoped to the domain;
-/// - from ABI 9, pathname unix sockets created outside the domain can be
-///   reached only beneath the directories in `unix_dirs`.
+/// - pathname unix sockets created outside the domain can be reached only
+///   beneath the directories in `unix_dirs`.
 ///
 /// Refuses (and changes nothing) when the kernel's ABI is below `min_abi`.
 /// Returns the ABI that was used. `no_new_privs` must already be set.
@@ -67,18 +69,13 @@ pub fn restrict_self(min_abi: u32, unix_dirs: &[&Path]) -> Result<u32, String> {
     let abi = abi().map_err(|e| format!("Landlock is not available: {e}"))?;
     if abi < min_abi.max(MIN_ABI) {
         return Err(format!(
-            "Landlock ABI {abi} is older than the required {} (Linux 6.12 or newer, \
+            "Landlock ABI {abi} is older than the required {} (Linux 7.1 or newer, \
 with landlock in the lsm= list)",
             min_abi.max(MIN_ABI)
         ));
     }
-    let resolve_unix = abi >= RESOLVE_UNIX_ABI;
     let attr = RulesetAttr {
-        handled_access_fs: if resolve_unix {
-            ACCESS_FS_RESOLVE_UNIX
-        } else {
-            0
-        },
+        handled_access_fs: ACCESS_FS_RESOLVE_UNIX,
         handled_access_net: 0,
         scoped: SCOPE_ABSTRACT_UNIX_SOCKET | SCOPE_SIGNAL,
     };
@@ -99,10 +96,8 @@ with landlock in the lsm= list)",
     }
     // SAFETY: the syscall returned a new descriptor that nothing else owns.
     let ruleset = unsafe { OwnedFd::from_raw_fd(rc as i32) };
-    if resolve_unix {
-        for dir in unix_dirs {
-            allow_unix_beneath(&ruleset, dir)?;
-        }
+    for dir in unix_dirs {
+        allow_unix_beneath(&ruleset, dir)?;
     }
     // SAFETY: plain syscall on a descriptor we own.
     let rc = unsafe { libc::syscall(libc::SYS_landlock_restrict_self, ruleset.as_raw_fd(), 0u32) };
@@ -192,7 +187,7 @@ mod tests {
 
     #[test]
     fn the_domain_cannot_reach_outside_abstract_sockets_or_signal_outside() {
-        if !host_has(abi_at_least(MIN_ABI), "Landlock ABI 6") {
+        if !host_has(abi_at_least(MIN_ABI), "Landlock ABI 9") {
             return;
         }
         let name = format!("crew-landlock-test-{}", std::process::id());
@@ -218,8 +213,8 @@ mod tests {
     }
 
     #[test]
-    fn from_abi_9_outside_sockets_are_reached_only_beneath_allowed_directories() {
-        if !host_has(abi_at_least(RESOLVE_UNIX_ABI), "Landlock ABI 9") {
+    fn outside_sockets_are_reached_only_beneath_allowed_directories() {
+        if !host_has(abi_at_least(MIN_ABI), "Landlock ABI 9") {
             return;
         }
         let dir = tempfile::tempdir().unwrap();
