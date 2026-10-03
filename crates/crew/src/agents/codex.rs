@@ -186,17 +186,20 @@ impl AgentRuntime for CodexRuntime {
             // In the runtime directory under a hash, not in the agent's state
             // directory: `sun_path` holds about 100 bytes and a nested workspace
             // would overflow it.
-            let socket = crew_core::paths::runtime_dir().join(format!(
-                "codex-{:016x}-{}.sock",
-                crew_core::util::fnv1a64(ctx.agent_dir.to_string_lossy().as_bytes()),
-                crew_core::util::now_ms()
+            // A directory of its own per agent: a sandbox binds exactly this
+            // directory (the agent can reach its own socket and no other).
+            let dir = crew_core::paths::runtime_dir().join(format!(
+                "codex-{:016x}",
+                crew_core::util::fnv1a64(ctx.agent_dir.to_string_lossy().as_bytes())
             ));
+            let socket = dir.join(format!("{}.sock", crew_core::util::now_ms()));
             if socket.as_os_str().len() >= 104 {
                 bail!(
                     "the app-server socket path {} is too long for a Unix socket; set a shorter XDG_RUNTIME_DIR",
                     socket.display()
                 );
             }
+            crew_core::paths::ensure_private_dir(&dir)?;
             let mut args = vec![
                 "app-server".to_string(),
                 "--listen".to_string(),
@@ -719,6 +722,55 @@ mod tests {
             Some("/state/agents/codex-1/identity.json")
         );
         assert_eq!(identity(&spec.env), identity(&sidecar.env));
+    }
+
+    #[test]
+    fn the_sidecar_socket_has_a_private_directory_of_its_own() {
+        use std::os::unix::fs::PermissionsExt;
+        let run = tempfile::tempdir().unwrap();
+        // The test binary shares its environment: serialise on the variable.
+        static ENV: std::sync::Mutex<()> = std::sync::Mutex::new(());
+        let _guard = ENV.lock().unwrap_or_else(|e| e.into_inner());
+        let previous = std::env::var_os("XDG_RUNTIME_DIR");
+        std::env::set_var("XDG_RUNTIME_DIR", run.path());
+        let launch = |dir: &str| {
+            let agent = agent();
+            CodexRuntime
+                .launch(&LaunchContext {
+                    agent: &agent,
+                    settings: &AgentSettings {
+                        socket_delivery: true,
+                        ..AgentSettings::default()
+                    },
+                    crew_bin: Path::new("/bin/crew"),
+                    agent_dir: Path::new(dir),
+                    identity_path: &Path::new(dir).join("identity.json"),
+                    briefing: "standing instructions",
+                    resume: false,
+                    endpoint: &Endpoint::default(),
+                    long_context: false,
+                })
+                .unwrap()
+                .sidecar
+                .unwrap()
+                .socket
+        };
+        let a = launch("/state/agents/a");
+        let b = launch("/state/agents/b");
+        match previous {
+            Some(v) => std::env::set_var("XDG_RUNTIME_DIR", v),
+            None => std::env::remove_var("XDG_RUNTIME_DIR"),
+        }
+        let (dir_a, dir_b) = (a.parent().unwrap(), b.parent().unwrap());
+        assert_ne!(dir_a, dir_b, "agents share a socket directory");
+        assert_ne!(
+            dir_a,
+            run.path().join("crew"),
+            "the socket is in the runtime dir itself"
+        );
+        assert!(dir_a.starts_with(run.path().join("crew")));
+        let mode = std::fs::metadata(dir_a).unwrap().permissions().mode() & 0o777;
+        assert_eq!(mode, 0o700);
     }
 
     #[test]
