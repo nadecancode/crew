@@ -41,6 +41,7 @@ pub enum ClientError {
 impl ClientError {
     /// The stream is unavailable or unsafe to continue. This does not make
     /// replaying a mutation safe: a request may have run before a read failed.
+    /// A response decode mismatch means the reply, and thus the executed request, arrived.
     pub fn is_disconnect(&self) -> bool {
         matches!(
             self,
@@ -337,6 +338,9 @@ mod tests {
     fn framing_errors_and_timeouts_close_the_client_before_reuse() {
         for response in ["{\"id\":1,\"result\":", "not-json\n"] {
             let (mut client, mut server) = paired_client();
+            server
+                .set_read_timeout(Some(Duration::from_millis(200)))
+                .unwrap();
             server.write_all(response.as_bytes()).unwrap();
             let error = client.call_value(Call::Ping).unwrap_err();
             assert!(matches!(
@@ -386,6 +390,48 @@ mod tests {
         );
     }
 
+    #[test]
+    fn response_decode_errors_and_write_failures_poison_the_client() {
+        let (mut client, mut server) = paired_client();
+        send_frame(&mut server, ServerFrame::ok(1, json!({"wrong": "shape"})));
+        assert!(matches!(
+            client.call::<HelloInfo>(Call::Ping),
+            Err(ClientError::Protocol(_))
+        ));
+        assert!(matches!(client.send(Call::Ping), Err(ClientError::Closed)));
+        assert!(matches!(client.set_timeout(None), Err(ClientError::Closed)));
+        let (mut client, server) = paired_client();
+        server.shutdown(std::net::Shutdown::Both).unwrap();
+        assert!(matches!(client.send(Call::Ping), Err(ClientError::Io(_))));
+        assert!(matches!(client.send(Call::Ping), Err(ClientError::Closed)));
+    }
+
+    #[test]
+    fn disconnect_predicate_distinguishes_transport_from_rpc_and_version_errors() {
+        for error in [
+            ClientError::Closed,
+            ClientError::Timeout,
+            ClientError::Protocol("bad frame".into()),
+            ClientError::Io(io::Error::from(io::ErrorKind::BrokenPipe)),
+            ClientError::Connect {
+                path: "socket".into(),
+                source: io::Error::from(io::ErrorKind::NotFound),
+            },
+        ] {
+            assert!(error.is_disconnect(), "{error}");
+        }
+        for error in [
+            ClientError::Rpc(RpcError::invalid("bad request")),
+            ClientError::Version {
+                daemon: 0,
+                client: PROTOCOL_VERSION,
+            },
+            ClientError::IncompatibleProtocol("another build".into()),
+        ] {
+            assert!(!error.is_disconnect(), "{error}");
+        }
+    }
+
     fn paired_client() -> (Client, UnixStream) {
         let (stream, server) = UnixStream::pair().unwrap();
         let client = Client {
@@ -416,9 +462,6 @@ mod tests {
     #[test]
     fn listen_returns_pushes_buffered_before_its_reply() {
         let (mut client, mut server) = paired_client();
-        server
-            .set_read_timeout(Some(Duration::from_millis(200)))
-            .unwrap();
         send_frame(&mut server, ServerFrame::push(deliver("first")));
         send_frame(&mut server, ServerFrame::push(deliver("second")));
         send_frame(&mut server, ServerFrame::ok(1, json!({"listening": true})));
