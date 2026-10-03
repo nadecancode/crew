@@ -1258,6 +1258,7 @@ reads another agent's files.
 ```sh
 just test        # ./scripts/build-env cargo test --workspace   (no agent CLIs needed)
 just test-real   # optional end-to-end test with the real Claude Code CLI
+just test-terminal # isolated pseudo-terminal signal/shutdown checks (no agent CLIs)
 just lint
 just dry-run
 ```

@@ -27,6 +27,10 @@ test:
 test-real:
     ./scripts/build-env cargo test -p crew --test real_cli -- --ignored --nocapture
 
+# Check signal and shutdown cleanup on isolated pseudo-terminals.
+test-terminal:
+    if command -v python3 >/dev/null 2>&1; then ./scripts/build-env python3 crates/crew-tui/tests/terminal_signals.py; elif command -v nix >/dev/null 2>&1; then ./scripts/build-env nix shell nixpkgs#python3 --command python3 crates/crew-tui/tests/terminal_signals.py; else echo "test-terminal needs python3 or Nix" >&2; exit 127; fi
+
 # Lint.
 lint:
     ./scripts/build-env cargo clippy --workspace --all-targets

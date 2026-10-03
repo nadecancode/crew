@@ -1,4 +1,4 @@
-"""Signal/terminal smoke regression; run with Python 3 under the isolated build env."""
+"""Run with `just test-terminal`: isolated signal/shutdown pseudo-terminal checks."""
 
 import errno
 import fcntl
