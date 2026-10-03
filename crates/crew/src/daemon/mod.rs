@@ -176,6 +176,8 @@ pub(crate) struct Model {
     /// The stall currently observed: its fingerprint, when it was first
     /// seen, and whether it has been reported.
     pub stall: Option<(String, i64, bool)>,
+    /// A write the plan needed was refused, and this was said (its error).
+    pub plan_refused: Option<String>,
     /// Ids of agents being created: taken, though not on the team yet.
     pub reserved: HashSet<String>,
 }

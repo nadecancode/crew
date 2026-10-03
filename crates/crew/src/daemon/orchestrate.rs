@@ -105,9 +105,7 @@ impl Daemon {
         // Each action builds on the ones before it, so a write the database
         // refuses ends this round: the next one (an event, or the 5 s tick)
         // plans again from what is stored.
-        let refused = |e: RpcError| {
-            tracing::error!("{}; the plan is applied again later", e.message);
-        };
+        let mut refused = None;
         for action in actions {
             match action {
                 Action::MakeReady { task } => {
@@ -115,7 +113,8 @@ impl Daemon {
                         t.status = TaskStatus::Ready;
                         t.note = None;
                     }) {
-                        return refused(e);
+                        refused = Some(e);
+                        break;
                     }
                     self.emit(
                         NewEvent::new("scheduler", "task.ready", format!("task {task} is ready"))
@@ -127,14 +126,16 @@ impl Daemon {
                         t.status = TaskStatus::Queued;
                         t.note = None;
                     }) {
-                        return refused(e);
+                        refused = Some(e);
+                        break;
                     }
                 }
                 Action::Assign { task, agent } => {
                     if let Err(e) =
                         self.try_update_task(&task, |t| t.assigned_agent = Some(agent.clone()))
                     {
-                        return refused(e);
+                        refused = Some(e);
+                        break;
                     }
                     self.emit(
                         NewEvent::new(
@@ -152,7 +153,8 @@ impl Daemon {
                         t.status = TaskStatus::Blocked;
                         t.note = Some(reason.clone());
                     }) {
-                        return refused(e);
+                        refused = Some(e);
+                        break;
                     }
                     self.emit(
                         NewEvent::new(
@@ -230,9 +232,43 @@ call session_complete with the final report."
                 }
             }
         }
+        if let Some(e) = refused {
+            return self.plan_write_refused(e).await;
+        }
+        self.model().plan_refused = None;
         if !stalled {
             self.model().stall = None;
         }
+    }
+
+    /// A write the plan needed was refused. Said once (in the log and to the
+    /// orchestrator): every round meets the same refusal until the database
+    /// takes writes again.
+    async fn plan_write_refused(&self, e: RpcError) {
+        let first = {
+            let mut model = self.model();
+            let first = model.plan_refused.as_deref() != Some(e.message.as_str());
+            model.plan_refused = Some(e.message.clone());
+            first
+        };
+        if !first {
+            tracing::debug!("{}; the plan is applied again later", e.message);
+            return;
+        }
+        self.emit(
+            NewEvent::new(
+                "scheduler",
+                "scheduler.write_failed",
+                format!("the plan stopped: {}", e.message),
+            )
+            .error(),
+        );
+        self.notify_orchestrator(&format!(
+            "The scheduler could not store a change ({}). It tries again every few seconds; \
+until the database takes writes again, tasks wait where they are.",
+            e.message
+        ))
+        .await;
     }
 
     /// Hand a ready task to its agent with a `task` message.
@@ -1003,11 +1039,14 @@ with review_submit(task_id=\"{}\", approve=true|false).",
             )));
         }
         let reason = truncate_chars(reason.trim(), 500);
-        if let Some(agent) = &task.assigned_agent {
-            self.model().rt(agent).self_status = None;
-        }
         self.try_fail_task(&task.id, format!("{} gave up: {reason}", who.sender()))
             .await?;
+        // Only once it is stored: giving up ends what the agent said about
+        // itself (waiting, blocked), so it settles afresh.
+        if let Some(agent) = &task.assigned_agent {
+            self.model().rt(agent).self_status = None;
+            self.settle(agent);
+        }
         self.model()
             .task(&task.id)
             .cloned()

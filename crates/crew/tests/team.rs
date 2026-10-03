@@ -1456,12 +1456,78 @@ fn a_task_transition_the_database_refuses_is_an_error_and_not_applied() {
 }
 
 #[test]
+fn a_refused_task_fail_leaves_what_the_agent_said_about_itself() {
+    let s = Session::new();
+    let team = s.team(
+        "kept-status",
+        vec![agent("author", "", &["--on-task=wait-message operator"])],
+        vec![task("write", "author", &[])],
+    );
+    s.run(&team);
+    s.wait_for("the author to be on write", || {
+        s.agent_cmd(&["output", "author"])
+            .contains("Task write is yours")
+    });
+    let waiting = json!({ "status": "waiting", "note": "on the operator" }).to_string();
+    let out = s.ctl("author", &["tool", "agent_status", &waiting]);
+    assert!(out.status.success(), "{}", stderr(&out));
+    s.wait("the author to wait", |snap| {
+        find_agent(snap, "author").status == AgentStatus::Waiting
+    });
+    let turn_end = || {
+        let out = s
+            .command()
+            .env("CREW_IDENTITY", s.identity_path("author"))
+            .args(["hook", "turn-end", "{}"])
+            .output()
+            .unwrap();
+        assert!(out.status.success(), "{}", stderr(&out));
+    };
+
+    let db = rusqlite::Connection::open(s.workspace.join(".crew/crew.db")).unwrap();
+    db.execute_batch(
+        "CREATE TRIGGER refuse_task_writes BEFORE UPDATE ON tasks \
+         BEGIN SELECT RAISE(ABORT, 'the disk is full'); END;",
+    )
+    .unwrap();
+    let fail = json!({ "reason": "cannot go on" }).to_string();
+    let refused = s.ctl("author", &["tool", "task_fail", &fail]);
+    assert!(!refused.status.success(), "{}", stdout(&refused));
+    // The refused call changed nothing: at the end of the turn the agent
+    // is still waiting, as it said.
+    turn_end();
+    assert_eq!(
+        find_agent(&s.snapshot(), "author").status,
+        AgentStatus::Waiting
+    );
+
+    // Giving up for real ends it.
+    db.execute_batch("DROP TRIGGER refuse_task_writes;")
+        .unwrap();
+    let out = s.ctl("author", &["tool", "task_fail", &fail]);
+    assert!(out.status.success(), "{}", stderr(&out));
+    turn_end();
+    s.wait("the author to stop waiting", |snap| {
+        find_agent(snap, "author").status != AgentStatus::Waiting
+            && find_task(snap, "write").status == TaskStatus::Failed
+    });
+}
+
+#[test]
 fn a_task_whose_assignment_the_database_refuses_is_not_dispatched() {
     let s = Session::new();
-    let team = s.team("unowned", vec![agent("worker", "", &[])], vec![]);
+    let mut team = s.team("unowned", vec![agent("worker", "", &[])], vec![]);
+    team.orchestrator = OrchestratorConfig {
+        agent: true,
+        runtime: Some(RuntimeKind::Shell),
+        command: scripted(&[]),
+        ..OrchestratorConfig::default()
+    };
     s.run(&team);
-    s.wait("the worker to come up", |snap| {
-        find_agent(snap, "worker").status != AgentStatus::Spawning
+    s.wait("the team to come up", |snap| {
+        snap.agents
+            .iter()
+            .all(|a| a.status != AgentStatus::Spawning)
     });
     // Only the write that gives a task its agent is refused.
     let db = rusqlite::Connection::open(s.workspace.join(".crew/crew.db")).unwrap();
@@ -1491,6 +1557,24 @@ fn a_task_whose_assignment_the_database_refuses_is_not_dispatched() {
     assert_eq!(loose.status, TaskStatus::Ready, "{loose:?}");
     assert_eq!(loose.assigned_agent, None);
     assert_eq!(find_agent(&snapshot, "worker").task, None);
+    // The log says what happened, and only that; the orchestrator is told.
+    let about_loose = |kind: &str| {
+        s.events()
+            .into_iter()
+            .filter(|e| e.event_type == kind && e.message.contains("loose"))
+            .count()
+    };
+    assert_eq!(about_loose("task.assigned"), 0);
+    assert_eq!(about_loose("task.dispatched"), 0);
+    assert_eq!(about_loose("scheduler.write_failed"), 1);
+    s.wait_for("the orchestrator to be told", || {
+        s.messages().iter().any(|m| {
+            m.to == "orchestrator" && m.body.contains("could not store") && m.body.contains("loose")
+        })
+    });
+    // The next rounds (the 5 s tick) meet the same refusal: told once.
+    std::thread::sleep(std::time::Duration::from_millis(5500));
+    assert_eq!(about_loose("scheduler.write_failed"), 1);
 
     // Once the database takes writes again, the task goes out normally.
     db.execute_batch("DROP TRIGGER refuse_assignment;").unwrap();
