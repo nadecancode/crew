@@ -697,8 +697,8 @@ fn describe_plan(out: &mut String, plan: &Plan, runtime: RuntimeKind) {
     if let Some((wire, scope)) = &plan.wire_api {
         row(out, "wire_api", wire, *scope);
     }
-    for (name, (value, scope)) in &plan.env {
-        row(out, "env", &format!("{name}={value}"), *scope);
+    for (name, (_, scope)) in &plan.env {
+        row(out, "env", &format!("{name} (value not shown)"), *scope);
     }
 }
 
@@ -1070,6 +1070,18 @@ mod tests {
         // A missing file is simply not there.
         let missing = load_layer(Scope::User, ws.join("nope.toml"), ws);
         assert!(matches!(missing.state, LayerState::Missing));
+    }
+
+    #[test]
+    fn the_report_lists_env_names_without_their_values() {
+        let l = layers(
+            "",
+            "[claude.env]\nANTHROPIC_AUTH_HELPER = \"super-secret-value-123\"",
+            "",
+        );
+        let report = l.describe();
+        assert!(report.contains("ANTHROPIC_AUTH_HELPER"), "{report}");
+        assert!(!report.contains("super-secret-value-123"), "{report}");
     }
 
     #[test]
