@@ -12,6 +12,7 @@ pub mod landlock;
 pub mod pin;
 pub mod seccomp;
 pub mod shim;
+pub mod spec;
 pub mod validate;
 
 /// Exit status of the crew sandbox stages when the sandbox could not be set
