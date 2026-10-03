@@ -1247,3 +1247,112 @@ fn a_pin_failure_is_marked_not_started_and_the_program_never_runs() {
     assert!(!sentinel.exists());
     assert_eq!(std::fs::read_to_string(&done).unwrap(), "not started\n");
 }
+
+/// rev-core's forced failure (m-d579d6b1848c), kept as a regression: once
+/// bubblewrap is started, a failure must abort rather than exit with a
+/// code. `true` stands in for bubblewrap; a seccomp filter in sandbox-run
+/// lets close_range mark descriptors close-on-exec (flags 4) but refuses
+/// the plain close (flags 0) that comes after the spawn.
+#[cfg(any(target_arch = "x86_64", target_arch = "aarch64"))]
+#[test]
+fn a_failure_after_bubblewrap_started_aborts_without_a_marker() {
+    use std::os::unix::process::ExitStatusExt;
+    // Not canonicalized: `true` may be a multi-call binary that goes by
+    // the name it is run under.
+    let truth = std::env::split_paths(&std::env::var_os("PATH").unwrap())
+        .map(|dir| dir.join("true"))
+        .find(|p| p.is_file() && crew::sandbox::validate::is_plain_absolute(p))
+        .expect("a `true` program on PATH");
+    let dir = marker_dir();
+    let done = dir.path().canonicalize().unwrap().join("launch.done");
+    let spec = bare_spec(&truth, Some(done.clone()));
+    let argv = || {
+        let mut cmd = Command::new(CREW);
+        cmd.arg("sandbox-run")
+            .arg(serde_json::to_string(&spec).unwrap())
+            .args(["--", "true"])
+            .env_clear()
+            .stdin(std::process::Stdio::null());
+        cmd
+    };
+    // Positive control: the stand-in "sandbox" ends and is reported.
+    let out = argv().output().unwrap();
+    assert_eq!(out.status.code(), Some(0), "{}", text(&out));
+    assert_eq!(std::fs::read_to_string(&done).unwrap(), "exited 0\n");
+    std::fs::remove_file(&done).unwrap();
+
+    const SYS_CLOSE_RANGE: u32 = 436; // the same on x86_64 and aarch64
+    let filter = [
+        // load the syscall number
+        libc::sock_filter {
+            code: 0x20,
+            jt: 0,
+            jf: 0,
+            k: 0,
+        },
+        libc::sock_filter {
+            code: 0x15,
+            jt: 0,
+            jf: 3,
+            k: SYS_CLOSE_RANGE,
+        },
+        // load the low half of the third argument (flags)
+        libc::sock_filter {
+            code: 0x20,
+            jt: 0,
+            jf: 0,
+            k: 32,
+        },
+        libc::sock_filter {
+            code: 0x15,
+            jt: 0,
+            jf: 1,
+            k: 0,
+        },
+        libc::sock_filter {
+            code: 0x06,
+            jt: 0,
+            jf: 0,
+            k: libc::SECCOMP_RET_ERRNO | libc::EPERM as u32,
+        },
+        libc::sock_filter {
+            code: 0x06,
+            jt: 0,
+            jf: 0,
+            k: libc::SECCOMP_RET_ALLOW,
+        },
+    ];
+    let mut cmd = argv();
+    // SAFETY: setrlimit and prctl are async-signal-safe; `filter` outlives
+    // the call because the closure owns it.
+    unsafe {
+        cmd.pre_exec(move || {
+            let no_core = libc::rlimit {
+                rlim_cur: 0,
+                rlim_max: 0,
+            };
+            libc::setrlimit(libc::RLIMIT_CORE, &no_core);
+            let prog = libc::sock_fprog {
+                len: filter.len() as u16,
+                filter: filter.as_ptr() as *mut libc::sock_filter,
+            };
+            if libc::prctl(libc::PR_SET_NO_NEW_PRIVS, 1, 0, 0, 0) != 0
+                || libc::prctl(libc::PR_SET_SECCOMP, libc::SECCOMP_MODE_FILTER, &prog) != 0
+            {
+                return Err(std::io::Error::last_os_error());
+            }
+            Ok(())
+        });
+    }
+    let out = cmd.output().unwrap();
+    assert_eq!(out.status.signal(), Some(libc::SIGABRT), "{}", text(&out));
+    assert!(
+        String::from_utf8_lossy(&out.stderr).contains("closing inherited descriptors"),
+        "{}",
+        text(&out)
+    );
+    assert!(
+        !done.exists(),
+        "a marker was written although the end is unknown"
+    );
+}
