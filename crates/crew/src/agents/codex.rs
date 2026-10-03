@@ -17,6 +17,9 @@ use std::path::Path;
 use super::{AgentRuntime, Dialog, LaunchContext, LaunchSpec, Sidecar, Signal};
 use crate::endpoints::CODEX_KEY_ENV;
 
+/// Where Codex keeps its configuration, credentials and sessions.
+pub const CODEX_HOME_ENV: &str = "CODEX_HOME";
+
 /// Name of the model provider crew defines for an overridden endpoint.
 const PROVIDER: &str = "crew";
 const OPENAI_API: &str = "https://api.openai.com/v1";
@@ -141,6 +144,14 @@ impl AgentRuntime for CodexRuntime {
             .iter()
             .map(|(k, v)| (k.clone(), v.clone()))
             .collect();
+        // Shared by the TUI and the app-server (which owns the session and writes
+        // its rollout): in a sandbox both keep Codex's home in the private one.
+        if let Some(home) = ctx.private_home {
+            env.push((
+                CODEX_HOME_ENV.to_string(),
+                home.join("codex").to_string_lossy().into_owned(),
+            ));
+        }
         if endpoint.base_url.is_some() || endpoint.api_key.is_some() {
             let base_url = endpoint.base_url.as_deref().unwrap_or(OPENAI_API);
             let wire_api = endpoint.wire_api.as_deref().unwrap_or("responses");
@@ -779,6 +790,45 @@ mod tests {
         assert!(dir_a.starts_with(run.path().join("crew")));
         let mode = std::fs::metadata(dir_a).unwrap().permissions().mode() & 0o777;
         assert_eq!(mode, 0o700);
+    }
+
+    #[test]
+    fn a_sandboxed_launch_keeps_codexs_home_in_the_private_home_for_the_tui_and_the_sidecar() {
+        let agent = agent();
+        let home = Path::new("/state/agents/codex-1/rw/home");
+        let launch = |private_home: Option<&Path>| {
+            CodexRuntime
+                .launch(&LaunchContext {
+                    agent: &agent,
+                    settings: &AgentSettings {
+                        socket_delivery: true,
+                        ..AgentSettings::default()
+                    },
+                    crew_bin: Path::new("/bin/crew"),
+                    agent_dir: Path::new("/state/agents/codex-1"),
+                    identity_path: Path::new("/state/agents/codex-1/identity.json"),
+                    briefing: "standing instructions",
+                    resume: false,
+                    endpoint: &Endpoint::default(),
+                    long_context: false,
+                    private_home,
+                })
+                .unwrap()
+        };
+        let var = |env: &[(String, String)]| {
+            env.iter()
+                .find(|(k, _)| k == CODEX_HOME_ENV)
+                .map(|(_, v)| v.clone())
+        };
+        // The app-server owns the session and writes its rollout, so it needs the
+        // same home as the TUI that attaches to it.
+        let spec = launch(Some(home));
+        let want = Some("/state/agents/codex-1/rw/home/codex".to_string());
+        assert_eq!(var(&spec.env), want);
+        assert_eq!(var(&spec.sidecar.as_ref().unwrap().env), want);
+        let plain = launch(None);
+        assert_eq!(var(&plain.env), None);
+        assert_eq!(var(&plain.sidecar.unwrap().env), None);
     }
 
     #[test]
