@@ -954,6 +954,103 @@ fn a_task_cannot_be_reviewed_by_its_own_agent() {
 }
 
 #[test]
+fn a_reviewer_cannot_be_made_the_author_of_the_task_it_reviews() {
+    let s = Session::new();
+    let mut team = s.team(
+        "own-work",
+        vec![agent("author", "", &[]), agent("critic", "", &[])],
+        vec![
+            task("hold", "author", &[]),
+            task("write", "author", &["hold"]),
+        ],
+    );
+    team.tasks[1].reviewer = Some("critic".into());
+    s.run(&team);
+    let ws = s.workspace.to_string_lossy().into_owned();
+    // The reviewer cannot be given the work it reviews.
+    let assigned = s.crew(&["task", "assign", "write", "critic", "-C", &ws]);
+    assert!(!assigned.status.success(), "{}", stdout(&assigned));
+    assert!(
+        stderr(&assigned).contains("cannot be reviewed by its own agent"),
+        "{}",
+        stderr(&assigned)
+    );
+    assert_eq!(
+        find_task(&s.snapshot(), "write").assigned_agent.as_deref(),
+        Some("author")
+    );
+}
+
+#[test]
+fn an_agent_cannot_approve_a_review_of_its_own_work() {
+    // A task whose author is also its reviewer can only exist in a state
+    // written before the checks (an older daemon's database): put one there
+    // and restart the daemon on it.
+    let s = Session::new();
+    let team = s.team(
+        "self-approve",
+        vec![agent("critic", "", &[]), agent("other", "", &[])],
+        vec![task("write", "critic", &[])],
+    );
+    s.run(&team);
+    let critic_up = |snap: &crew_core::rpc::Snapshot| {
+        let critic = find_agent(snap, "critic");
+        critic.pid.is_some() && critic.status != AgentStatus::Spawning
+    };
+    s.wait("the critic to be on the task", |snap| {
+        critic_up(snap) && find_task(snap, "write").status == TaskStatus::Working
+    });
+    let old_pid = s.snapshot().session.daemon_pid;
+    let killed = std::process::Command::new("kill")
+        .args(["-9", &old_pid.to_string()])
+        .status()
+        .unwrap();
+    assert!(killed.success());
+    s.wait_for("the daemon to die", || {
+        !crew_core::paths::pid_alive(old_pid)
+    });
+    let db = rusqlite::Connection::open(s.workspace.join(".crew/crew.db")).unwrap();
+    db.execute(
+        "UPDATE tasks SET data = json_set(data, '$.status', 'review', '$.reviewer', 'critic') \
+         WHERE id = 'write'",
+        [],
+    )
+    .unwrap();
+    drop(db);
+    s.ok(&["start", "-C", &s.workspace.to_string_lossy()]);
+    s.wait_for("the recovery", || s.has_event("daemon.recovered"));
+    s.wait("the critic to be back", critic_up);
+
+    let approve = json!({ "task_id": "write", "approve": true }).to_string();
+    let out = s.ctl("critic", &["tool", "review_submit", &approve]);
+    assert!(!out.status.success(), "{}", stdout(&out));
+    assert!(
+        stderr(&out).contains("is your own work"),
+        "{}",
+        stderr(&out)
+    );
+    assert_eq!(find_task(&s.snapshot(), "write").status, TaskStatus::Review);
+    // The operator (like the orchestrator) can still decide.
+    let info: Value = serde_json::from_str(
+        &std::fs::read_to_string(s.workspace.join(".crew/daemon.json")).unwrap(),
+    )
+    .unwrap();
+    let (mut operator, _) = crew_core::client::Client::operator(
+        std::path::Path::new(info["socket"].as_str().unwrap()),
+        "test",
+    )
+    .unwrap();
+    let task: crew_core::Task = operator
+        .call(crew_core::rpc::Call::ReviewSubmit {
+            task_id: "write".into(),
+            approve: true,
+            comments: "waived".into(),
+        })
+        .unwrap();
+    assert_eq!(task.status, TaskStatus::Done);
+}
+
+#[test]
 fn a_task_whose_reviewer_stopped_is_reported_as_a_stall() {
     let s = Session::new();
     let team = {

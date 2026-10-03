@@ -487,6 +487,12 @@ call session_complete with the final report."
                     task.status
                 )));
             }
+            // Nobody reviews their own work (see tasks::check_reviewer).
+            if task.reviewer.as_deref() == Some(agent) {
+                return Err(RpcError::invalid(format!(
+                    "task '{id}' cannot be reviewed by its own agent '{agent}'; it is the reviewer"
+                )));
+            }
             if matches!(
                 task.status,
                 TaskStatus::Working | TaskStatus::Waiting | TaskStatus::Review
@@ -1057,6 +1063,13 @@ with review_submit(task_id=\"{}\", approve=true|false).",
                 return Err(RpcError::forbidden(format!(
                     "task {task_id} is to be reviewed by {}",
                     task.reviewer.as_deref().unwrap_or("someone else")
+                )));
+            }
+            // Only the orchestrator (or the operator) may waive a review of its
+            // own work.
+            if task.assigned_agent.as_deref() == Some(agent.as_str()) && !is_orchestrator {
+                return Err(RpcError::forbidden(format!(
+                    "task {task_id} is your own work; its review is not yours to give"
                 )));
             }
         }
