@@ -7,7 +7,7 @@ use ratatui::text::Line;
 use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
 
 pub fn width(s: &str) -> usize {
-    UnicodeWidthStr::width(s)
+    UnicodeWidthStr::width(printable(s).as_ref())
 }
 
 /// Preserve styling while making every span safe for Paragraph rendering.
@@ -23,6 +23,8 @@ pub(crate) fn printable_lines(lines: &mut [Line<'_>]) {
 
 /// Truncate to at most `max` columns, ending in `…` when cut.
 pub fn fit(s: &str, max: usize) -> String {
+    let safe = printable(s);
+    let s = safe.as_ref();
     if width(s) <= max {
         return s.to_string();
     }

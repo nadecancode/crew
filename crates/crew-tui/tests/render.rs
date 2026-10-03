@@ -70,6 +70,25 @@ fn inspector_text_never_renders_terminal_controls() {
     }
 }
 
+#[test]
+fn dashboard_handles_control_bearing_model_labels() {
+    let mut app = app();
+    let poison = "\u{1b}]52;c;Y29tbWFuZA==\u{7}\u{9b}2J\tvisible";
+    let agent = app.agents.iter_mut().find(|a| a.id == "claude-1").unwrap();
+    agent.model_name = Some(poison.into());
+    agent.effort = Some(poison.into());
+    let mut terminal = Terminal::new(TestBackend::new(180, 80)).unwrap();
+    terminal
+        .draw(|frame| views::render(frame, &app, &Theme::truecolor(), NOW))
+        .unwrap();
+    assert!(terminal
+        .backend()
+        .buffer()
+        .content
+        .iter()
+        .all(|cell| !cell.symbol().chars().any(char::is_control)));
+}
+
 /// How many member boxes are on screen: each leads with its runtime's glyph.
 /// (The hub writes its CLI's glyph too, before its model's proper name.)
 fn member_marks(screen: &str) -> usize {
