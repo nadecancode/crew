@@ -102,13 +102,18 @@ impl Client {
 
     /// Read the next frame, blocking until one arrives.
     pub fn next_frame(&mut self) -> ClientResult<ServerFrame> {
+        if let Some(push) = self.pushes.pop_front() {
+            return Ok(ServerFrame::push(push));
+        }
         read_frame(&mut self.reader)
     }
 
     pub fn call_value(&mut self, call: Call) -> ClientResult<Value> {
         let id = self.send(call)?;
         loop {
-            let frame = self.next_frame()?;
+            // Only read the socket here: queued pushes belong to the caller,
+            // and draining/requeueing them would never reach this reply.
+            let frame = read_frame(&mut self.reader)?;
             if let Some(push) = frame.push {
                 self.pushes.push_back(push);
                 continue;
@@ -145,6 +150,7 @@ impl Client {
         (
             FrameReader {
                 reader: self.reader,
+                buffered: self.pushes,
             },
             FrameWriter {
                 writer: self.writer,
@@ -177,11 +183,15 @@ impl PushStream {
 
 pub struct FrameReader {
     reader: BufReader<UnixStream>,
+    buffered: VecDeque<Push>,
 }
 
 impl FrameReader {
     #[allow(clippy::should_implement_trait)]
     pub fn next(&mut self) -> ClientResult<ServerFrame> {
+        if let Some(push) = self.buffered.pop_front() {
+            return Ok(ServerFrame::push(push));
+        }
         read_frame(&mut self.reader)
     }
 }
@@ -239,5 +249,91 @@ fn read_frame(reader: &mut BufReader<UnixStream>) -> ClientResult<ServerFrame> {
             continue;
         }
         return serde_json::from_str(&line).map_err(|e| ClientError::Protocol(e.to_string()));
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    fn paired_client() -> (Client, UnixStream) {
+        let (stream, server) = UnixStream::pair().unwrap();
+        let client = Client {
+            writer: stream.try_clone().unwrap(),
+            reader: BufReader::new(stream),
+            next_id: 1,
+            pushes: VecDeque::new(),
+        };
+        client
+            .set_timeout(Some(Duration::from_millis(100)))
+            .unwrap();
+        (client, server)
+    }
+
+    fn send_frame(server: &mut UnixStream, frame: ServerFrame) {
+        serde_json::to_writer(&mut *server, &frame).unwrap();
+        server.write_all(b"\n").unwrap();
+    }
+
+    fn deliver(text: &str) -> Push {
+        Push::Deliver {
+            ids: vec![text.into()],
+            text: text.into(),
+        }
+    }
+
+    #[test]
+    fn listen_returns_pushes_buffered_before_its_reply() {
+        let (mut client, mut server) = paired_client();
+        send_frame(&mut server, ServerFrame::push(deliver("first")));
+        send_frame(&mut server, ServerFrame::push(deliver("second")));
+        send_frame(&mut server, ServerFrame::ok(1, json!({"listening": true})));
+        send_frame(&mut server, ServerFrame::push(deliver("third")));
+        client.call_value(Call::Listen).unwrap();
+        for text in ["first", "second", "third"] {
+            assert_eq!(client.next_frame().unwrap().push, Some(deliver(text)));
+        }
+    }
+
+    #[test]
+    fn later_calls_do_not_rebuffer_earlier_pushes() {
+        let (mut client, mut server) = paired_client();
+        send_frame(&mut server, ServerFrame::push(deliver("first")));
+        send_frame(&mut server, ServerFrame::ok(1, json!(null)));
+        send_frame(&mut server, ServerFrame::push(deliver("second")));
+        send_frame(&mut server, ServerFrame::ok(2, json!({"pong": true})));
+        client.call_value(Call::Listen).unwrap();
+        assert_eq!(
+            client.call_value(Call::Ping).unwrap(),
+            json!({"pong": true})
+        );
+        for text in ["first", "second"] {
+            assert_eq!(client.next_frame().unwrap().push, Some(deliver(text)));
+        }
+    }
+
+    #[test]
+    fn split_preserves_buffered_pushes() {
+        let (mut client, mut server) = paired_client();
+        send_frame(&mut server, ServerFrame::push(deliver("buffered")));
+        send_frame(&mut server, ServerFrame::ok(1, json!(null)));
+        client.call_value(Call::Listen).unwrap();
+        let (mut reader, _writer) = client.split();
+        assert_eq!(reader.next().unwrap().push, Some(deliver("buffered")));
+    }
+
+    #[test]
+    fn subscribe_preserves_pushes_and_ignores_replies() {
+        let (client, mut server) = paired_client();
+        send_frame(&mut server, ServerFrame::push(deliver("buffered")));
+        send_frame(&mut server, ServerFrame::ok(1, json!(null)));
+        send_frame(&mut server, ServerFrame::ok(2, json!(null)));
+        send_frame(&mut server, ServerFrame::push(deliver("live")));
+        let mut stream = client.subscribe().unwrap();
+        assert_eq!(stream.next().unwrap(), deliver("buffered"));
+        assert_eq!(stream.next().unwrap(), deliver("live"));
+        server.shutdown(std::net::Shutdown::Both).unwrap();
+        assert!(matches!(stream.next(), Err(ClientError::Closed)));
     }
 }
