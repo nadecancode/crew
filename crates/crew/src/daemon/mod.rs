@@ -241,6 +241,8 @@ pub struct Inner {
     pub(crate) usage_refreshed_at: std::sync::atomic::AtomicI64,
     pub(crate) usage_refreshing: std::sync::atomic::AtomicBool,
     pub(crate) started_at: i64,
+    /// Held for the daemon's lifetime: the workspace's single-instance lock.
+    _instance_lock: std::fs::File,
 }
 
 /// A running sidecar and the socket it serves.
@@ -540,6 +542,31 @@ fn load_model(store: &dyn Store) -> Result<Model> {
     Ok(model)
 }
 
+/// Take the workspace's single-instance lock (`daemon.lock` in the state
+/// dir), or `None` if another daemon holds it. The kernel releases it when
+/// the daemon exits, however it exits.
+fn lock_instance(state_dir: &Path) -> Result<Option<std::fs::File>> {
+    use std::os::unix::fs::OpenOptionsExt;
+    use std::os::unix::io::AsRawFd;
+    let path = state_dir.join("daemon.lock");
+    let file = std::fs::OpenOptions::new()
+        .create(true)
+        .truncate(false)
+        .write(true)
+        .mode(0o600)
+        .open(&path)
+        .with_context(|| format!("opening {}", path.display()))?;
+    // SAFETY: flock on a descriptor this function owns.
+    if unsafe { libc::flock(file.as_raw_fd(), libc::LOCK_EX | libc::LOCK_NB) } == 0 {
+        return Ok(Some(file));
+    }
+    let err = std::io::Error::last_os_error();
+    if err.raw_os_error() == Some(libc::EWOULDBLOCK) {
+        return Ok(None);
+    }
+    Err(err).with_context(|| format!("locking {}", path.display()))
+}
+
 /// A daemon that has bound its socket and is ready to serve.
 pub struct Running {
     pub daemon: Daemon,
@@ -559,6 +586,17 @@ pub async fn start(options: DaemonOptions) -> Result<Running> {
     paths::ensure_private_dir(&paths::runtime_dir())?;
 
     let socket = paths::socket_path(&state_dir);
+    // Only the lock holder may check the registration, replace the socket
+    // and open the database, so two starts close together cannot both win.
+    let Some(instance_lock) = lock_instance(&state_dir)? else {
+        let pid = paths::read_daemon_info(&state_dir)
+            .map(|info| format!(" (pid {})", info.pid))
+            .unwrap_or_default();
+        bail!(
+            "a crew daemon{pid} is already running for {}",
+            workspace.display()
+        );
+    };
     if let Some(info) = paths::read_daemon_info(&state_dir) {
         if paths::pid_alive(info.pid)
             && info.pid != std::process::id()
@@ -617,6 +655,7 @@ pub async fn start(options: DaemonOptions) -> Result<Running> {
         usage_refreshed_at: std::sync::atomic::AtomicI64::new(0),
         usage_refreshing: std::sync::atomic::AtomicBool::new(false),
         started_at,
+        _instance_lock: instance_lock,
     }));
 
     paths::write_daemon_info(&DaemonInfo {

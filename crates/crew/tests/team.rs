@@ -839,6 +839,59 @@ fn a_second_daemon_for_the_same_workspace_is_refused_and_a_team_cannot_be_loaded
     assert!(status.contains("project    single"));
 }
 
+#[test]
+fn a_daemon_started_while_another_is_still_starting_is_refused() {
+    // A daemon binds its socket before it registers in daemon.json, so two
+    // starts close together can both miss each other's registration. Put a
+    // running daemon back in that window and start a second one.
+    let s = Session::new();
+    std::fs::create_dir_all(&s.workspace).unwrap();
+    let ws = s.workspace.to_string_lossy().into_owned();
+    s.ok(&["start", "-C", &ws]);
+    let info = s.workspace.join(".crew").join("daemon.json");
+    let registration = std::fs::read_to_string(&info).unwrap();
+    let first: Value = serde_json::from_str(&registration).unwrap();
+    let socket = first["socket"].as_str().unwrap().to_string();
+    std::fs::remove_file(&info).unwrap();
+
+    let mut second = s
+        .command()
+        .args(["daemon", "--workspace", &ws])
+        .stdout(Stdio::null())
+        .stderr(Stdio::piped())
+        .spawn()
+        .unwrap();
+    let deadline = std::time::Instant::now() + TIMEOUT;
+    let exited = loop {
+        if let Some(status) = second.try_wait().unwrap() {
+            break Some(status);
+        }
+        // The second daemon registering itself means it came up.
+        if info.exists() || std::time::Instant::now() > deadline {
+            break None;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(40));
+    };
+    let Some(status) = exited else {
+        let _ = second.kill();
+        let _ = second.wait();
+        // The first daemon lost its socket to the second: stop it by pid.
+        let _ = std::process::Command::new("kill")
+            .arg(first["pid"].to_string())
+            .status();
+        panic!("a second daemon came up for a workspace that already had one");
+    };
+    let mut err = String::new();
+    std::io::Read::read_to_string(&mut second.stderr.take().unwrap(), &mut err).unwrap();
+    assert!(!status.success());
+    assert!(err.contains("already running"), "{err}");
+    // The refused daemon left the first one's socket alone.
+    assert!(std::os::unix::net::UnixStream::connect(&socket).is_ok());
+
+    // Registered again, so the session's teardown stops it.
+    std::fs::write(&info, registration).unwrap();
+}
+
 // ---------------------------------------------------------------------------
 // Workspace isolation
 // ---------------------------------------------------------------------------
