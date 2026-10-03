@@ -662,21 +662,10 @@ impl ProcessManager for Herdr {
                 {
                     Ok(_) => break,
                     Err(e) if attempt < 12 && e.to_string().contains("agent_not_ready") => {
+                        if !pane.alive.load(Ordering::SeqCst) {
+                            bail!("agent '{agent_id}' stopped before the prompt was delivered");
+                        }
                         tokio::time::sleep(Duration::from_millis(500)).await;
-                    }
-                    Err(e) if e.to_string().contains("agent_not_ready") => {
-                        // herdr has not (re)recognised the agent, but the pane
-                        // is there: type the prompt into the pane itself.
-                        let line: String = text
-                            .chars()
-                            .map(|c| if c == '\n' || c.is_control() { ' ' } else { c })
-                            .collect();
-                        mgr.call(
-                            "pane.send_input",
-                            json!({ "pane_id": pane.pane_id, "text": line, "keys": ["enter"] }),
-                        )
-                        .await?;
-                        break;
                     }
                     Err(e) => return Err(e),
                 }
@@ -956,5 +945,75 @@ mod tests {
             format!("{err:#}").contains("connecting to herdr"),
             "{err:#}"
         );
+    }
+
+    /// A herdr that logs every method it is called with and answers
+    /// `agent.prompt` with `prompt_error` (an error code), or with success.
+    async fn fake_herdr(
+        socket: &Path,
+        prompt_error: Option<&'static str>,
+    ) -> Arc<Mutex<Vec<String>>> {
+        let listener = tokio::net::UnixListener::bind(socket).unwrap();
+        let log = Arc::new(Mutex::new(Vec::new()));
+        let seen = log.clone();
+        tokio::spawn(async move {
+            loop {
+                let Ok((stream, _)) = listener.accept().await else {
+                    return;
+                };
+                let (read, mut write) = stream.into_split();
+                let mut line = String::new();
+                if BufReader::new(read).read_line(&mut line).await.is_err() {
+                    continue;
+                }
+                let request: Value = serde_json::from_str(&line).unwrap_or(Value::Null);
+                let method = request["method"].as_str().unwrap_or("").to_string();
+                seen.lock().unwrap().push(method.clone());
+                let body = match (method.as_str(), prompt_error) {
+                    ("agent.prompt", Some(code)) => {
+                        json!({ "id": request["id"], "error": { "code": code, "message": "x" } })
+                    }
+                    _ => json!({ "id": request["id"], "result": {} }),
+                };
+                let mut out = serde_json::to_vec(&body).unwrap();
+                out.push(b'\n');
+                let _ = write.write_all(&out).await;
+            }
+        });
+        log
+    }
+
+    fn herdr_with_pane(socket: &Path, kind: RuntimeKind) -> Herdr {
+        let (tx, _rx) = mpsc::unbounded_channel();
+        let mgr = Arc::new(HerdrManager::new(
+            socket,
+            "crew:test",
+            HerdrLayout::Tabs,
+            None,
+            tx,
+        ));
+        mgr.state().panes.insert(
+            "a".into(),
+            Pane {
+                pane_id: "w1:p1".into(),
+                name: "a".into(),
+                kind,
+                alive: Arc::new(AtomicBool::new(true)),
+            },
+        );
+        Herdr(mgr)
+    }
+
+    #[tokio::test]
+    async fn an_agent_that_is_never_ready_does_not_get_text_typed_into_its_shell() {
+        let dir = tempfile::tempdir().unwrap();
+        let socket = dir.path().join("h.sock");
+        let log = fake_herdr(&socket, Some("agent_not_ready")).await;
+        let herdr = herdr_with_pane(&socket, RuntimeKind::Claude);
+        let result = herdr.submit_prompt("a", "x; touch /tmp/pwned").await;
+        assert!(result.is_err(), "delivery must fail, not fall back");
+        let calls = log.lock().unwrap().clone();
+        assert_eq!(calls.iter().filter(|m| *m == "agent.prompt").count(), 12);
+        assert!(!calls.iter().any(|m| m == "pane.send_input"), "{calls:?}");
     }
 }
