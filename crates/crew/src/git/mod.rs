@@ -48,6 +48,23 @@ fn git(dir: &Path) -> Command {
     cmd
 }
 
+/// `git(dir)` for operations on the main repository, run by crew itself: no
+/// hook, filesystem monitor or untracked cache the repository configures can
+/// run, and the system configuration is ignored.
+fn git_h(dir: &Path) -> Command {
+    let mut cmd = git(dir);
+    cmd.args([
+        "-c",
+        "core.hooksPath=/dev/null",
+        "-c",
+        "core.fsmonitor=false",
+        "-c",
+        "core.untrackedCache=false",
+    ]);
+    cmd.env("GIT_CONFIG_NOSYSTEM", "1");
+    cmd
+}
+
 /// How long one git command may run before it and its children are killed. A
 /// hung hook or helper would otherwise hold the daemon's global git lock.
 const GIT_TIMEOUT: Duration = if cfg!(test) {
@@ -146,6 +163,25 @@ fn out(dir: &Path, args: &[&str]) -> Result<String> {
     Ok(text(&output.stdout))
 }
 
+/// `run` with the hardened invocation.
+fn run_h(dir: &Path, args: &[&str]) -> Result<Output> {
+    output(git_h(dir).args(args))
+        .with_context(|| format!("running git {}", args.first().copied().unwrap_or("")))
+}
+
+/// `out` with the hardened invocation.
+fn out_h(dir: &Path, args: &[&str]) -> Result<String> {
+    let output = run_h(dir, args)?;
+    if !output.status.success() {
+        bail!(
+            "git {} failed: {}",
+            args.join(" "),
+            first_nonempty(&text(&output.stderr), &text(&output.stdout))
+        );
+    }
+    Ok(text(&output.stdout))
+}
+
 fn first_nonempty(a: &str, b: &str) -> String {
     if a.is_empty() { b } else { a }.to_string()
 }
@@ -160,14 +196,17 @@ fn with_identity(cmd: &mut Command, agent: &str) {
 }
 
 pub fn is_repo(dir: &Path) -> bool {
-    run(dir, &["rev-parse", "--is-inside-work-tree"])
+    run_h(dir, &["rev-parse", "--is-inside-work-tree"])
         .map(|o| o.status.success() && text(&o.stdout) == "true")
         .unwrap_or(false)
 }
 
 /// The top-level directory of the repository containing `dir`.
 pub fn toplevel(dir: &Path) -> Result<PathBuf> {
-    Ok(PathBuf::from(out(dir, &["rev-parse", "--show-toplevel"])?))
+    Ok(PathBuf::from(out_h(
+        dir,
+        &["rev-parse", "--show-toplevel"],
+    )?))
 }
 
 /// Whether `dir` is itself the root of a work tree (a repository's main
@@ -200,10 +239,10 @@ fn require_root(dir: &Path) -> Result<()> {
 pub fn init_repo(dir: &Path) -> Result<()> {
     std::fs::create_dir_all(dir).with_context(|| format!("creating {}", dir.display()))?;
     if !is_root(dir) {
-        out(dir, &["init", "-q", "-b", "main"])?;
+        out_h(dir, &["init", "-q", "-b", "main"])?;
     }
     require_root(dir)?;
-    if run(dir, &["rev-parse", "--verify", "-q", "HEAD"])?
+    if run_h(dir, &["rev-parse", "--verify", "-q", "HEAD"])?
         .status
         .success()
     {
@@ -212,7 +251,7 @@ pub fn init_repo(dir: &Path) -> Result<()> {
     // A first commit made here would take the operator's staged work under
     // crew's identity, and leave untracked source out of every worktree.
     // crew's own state and the team file do not count.
-    let pending = out(dir, &["status", "--porcelain"])?;
+    let pending = out_h(dir, &["status", "--porcelain"])?;
     // Staged work is never ours: only an untracked team file is let through.
     let ours = |line: &str| {
         let path = line.get(3..).unwrap_or_default();
@@ -227,7 +266,7 @@ pub fn init_repo(dir: &Path) -> Result<()> {
         );
     }
     unstage_state_dir(dir)?;
-    let mut cmd = git(dir);
+    let mut cmd = git_h(dir);
     with_identity(&mut cmd, "crew");
     let output = output(cmd.args(["commit", "-q", "--allow-empty", "-m", "Initial commit"]))?;
     if !output.status.success() {
@@ -240,7 +279,7 @@ pub fn init_repo(dir: &Path) -> Result<()> {
 }
 
 pub fn has_commits(dir: &Path) -> bool {
-    run(dir, &["rev-parse", "--verify", "-q", "HEAD"])
+    run_h(dir, &["rev-parse", "--verify", "-q", "HEAD"])
         .map(|o| o.status.success())
         .unwrap_or(false)
 }
@@ -255,7 +294,7 @@ fn unstage_state_dir(dir: &Path) -> Result<()> {
 /// Keep crew's state directory out of `git status` without touching the
 /// project's own `.gitignore`.
 pub fn exclude_state_dir(repo: &Path) -> Result<()> {
-    let git_dir = PathBuf::from(out(repo, &["rev-parse", "--git-common-dir"])?);
+    let git_dir = PathBuf::from(out_h(repo, &["rev-parse", "--git-common-dir"])?);
     let git_dir = if git_dir.is_absolute() {
         git_dir
     } else {
@@ -281,7 +320,7 @@ pub fn branch_for(agent: &str) -> String {
 }
 
 pub fn branch_exists(repo: &Path, branch: &str) -> bool {
-    run(
+    run_h(
         repo,
         &[
             "show-ref",
@@ -313,7 +352,7 @@ pub fn ensure_worktree(
     let path = worktrees_dir.join(agent);
     if path.join(".git").exists() {
         // Left over from an earlier run: reuse it if it is on the right branch.
-        let current = out(&path, &["rev-parse", "--abbrev-ref", "HEAD"]).unwrap_or_default();
+        let current = out_h(&path, &["rev-parse", "--abbrev-ref", "HEAD"]).unwrap_or_default();
         if current == branch {
             return Ok(Worktree { path, branch });
         }
@@ -324,13 +363,13 @@ pub fn ensure_worktree(
     }
     std::fs::create_dir_all(worktrees_dir)?;
     // Forget worktrees whose directories were deleted by hand.
-    let _ = run(repo, &["worktree", "prune"]);
+    let _ = run_h(repo, &["worktree", "prune"]);
     let path_str = path.to_string_lossy().into_owned();
     if branch_exists(repo, &branch) {
-        out(repo, &["worktree", "add", "-q", &path_str, &branch])?;
+        out_h(repo, &["worktree", "add", "-q", &path_str, &branch])?;
     } else {
         validate_rev(base)?;
-        out(
+        out_h(
             repo,
             &["worktree", "add", "-q", "-b", &branch, &path_str, base],
         )?;
@@ -825,6 +864,48 @@ mod tests {
         assert_ne!(before, after, "the merge itself had completed");
         assert!(err.to_string().contains("HEAD moved"), "{err:#}");
         assert!(r.root.join("topic.txt").exists(), "the commit was kept");
+    }
+
+    #[test]
+    fn main_repository_operations_run_no_hooks_and_no_configured_commands() {
+        use std::os::unix::fs::PermissionsExt;
+        let r = repo();
+        let marker = r.root.join("hook-ran");
+        let script = |name: &str| {
+            let path = r.root.join(".git/hooks").join(name);
+            std::fs::write(&path, format!("#!/bin/sh\ntouch {}\n", marker.display())).unwrap();
+            std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o755)).unwrap();
+        };
+        script("post-checkout");
+        script("reference-transaction");
+        // A configured command git would run on a status refresh.
+        let monitor = r.root.join("monitor.sh");
+        std::fs::write(&monitor, format!("#!/bin/sh\ntouch {}\n", marker.display())).unwrap();
+        std::fs::set_permissions(&monitor, std::fs::Permissions::from_mode(0o755)).unwrap();
+        out(
+            &r.root,
+            &["config", "core.fsmonitor", &monitor.to_string_lossy()],
+        )
+        .unwrap();
+        assert!(is_repo(&r.root) && is_root(&r.root) && has_commits(&r.root));
+        ensure_worktree(&r.root, &r.worktrees, "a", "HEAD").unwrap();
+        assert!(!marker.exists(), "a hook or configured command ran");
+        // The overrides are on the command line.
+        let cmd = git_h(&r.root);
+        let args: Vec<_> = cmd
+            .get_args()
+            .map(|a| a.to_string_lossy().into_owned())
+            .collect();
+        for want in [
+            "core.hooksPath=/dev/null",
+            "core.fsmonitor=false",
+            "core.untrackedCache=false",
+        ] {
+            assert!(args.iter().any(|a| a == want), "{want} in {args:?}");
+        }
+        assert!(cmd
+            .get_envs()
+            .any(|(k, v)| k == "GIT_CONFIG_NOSYSTEM" && v.is_some_and(|v| v == "1")));
     }
 
     #[test]
