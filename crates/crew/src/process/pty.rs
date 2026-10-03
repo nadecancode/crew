@@ -279,6 +279,9 @@ impl ProcessManager for PtyManager {
         // Close our copy of the slave so the reader sees EOF when the child exits.
         drop(pair.slave);
         let pid = child.process_id();
+        // Nothing reaps the child before the waiter thread below starts, so
+        // this names it, even if it has exited already.
+        let start = pid.and_then(super::stat).map(|s| s.start);
         let mut reader = pair
             .master
             .try_clone_reader()
@@ -400,6 +403,7 @@ impl ProcessManager for PtyManager {
             .insert(spec.agent_id.clone(), proc);
         Ok(Spawned {
             pid,
+            start,
             backend_ref: None,
             prompt_delivered,
             ready: false,
@@ -873,6 +877,31 @@ mod tests {
             tokio::time::sleep(Duration::from_millis(100)).await;
         }
         panic!("the group was never retired after its last member exited");
+    }
+
+    #[tokio::test]
+    async fn a_spawned_process_is_named_by_its_start_time_even_if_it_exits_at_once() {
+        let (tx, mut rx) = mpsc::unbounded_channel();
+        let mgr = PtyManager::new(tx);
+        let running = mgr
+            .spawn(&spec("a", "sh", &["-c", "sleep 300"]))
+            .await
+            .unwrap();
+        let pid = running.pid.unwrap();
+        let stat = std::fs::read_to_string(format!("/proc/{pid}/stat")).unwrap();
+        assert_eq!(
+            running.start,
+            crate::process::parse_stat(&stat).map(|s| s.start)
+        );
+        mgr.kill("a").await.unwrap();
+        wait_for_exit(&mut rx).await;
+        // Read before anything could reap it, so a process gone by the time
+        // spawn returns still has one.
+        let gone = mgr.spawn(&spec("b", "true", &[])).await.unwrap();
+        wait_for_exit(&mut rx).await;
+        assert!(gone
+            .start
+            .is_some_and(|start| start >= running.start.unwrap()));
     }
 
     #[tokio::test]

@@ -697,6 +697,7 @@ impl ProcessManager for Herdr {
         mgr.watch(spec.agent_id.clone(), pane);
         Ok(Spawned {
             pid,
+            start: None,
             backend_ref: Some(pane_id),
             prompt_delivered: false,
             // herdr considers the agent started, but a start-up dialog (folder

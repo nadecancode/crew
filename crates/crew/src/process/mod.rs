@@ -46,6 +46,10 @@ pub enum Hint {
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct Spawned {
     pub pid: Option<u32>,
+    /// The process's start time (clock ticks after boot), read before
+    /// anything could reap it, so `pid` and `start` name this process and no
+    /// later one with the same number. None where it is not known.
+    pub start: Option<u64>,
     /// Backend handle to persist (the herdr pane id).
     pub backend_ref: Option<String>,
     /// The first prompt was passed on the command line.
@@ -188,9 +192,50 @@ pub fn paste_bytes(text: &str, bracketed: bool) -> Vec<u8> {
     }
 }
 
+/// What a `/proc/<pid>/stat` line says about its process.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct Stat {
+    /// R, S, D, Z (a zombie), X (dead), ...
+    pub state: char,
+    pub ppid: u32,
+    /// Clock ticks after boot.
+    pub start: u64,
+}
+
+/// Fields 3 (state), 4 (parent) and 22 (start time) of a `/proc/<pid>/stat`
+/// line. The command name before them is in parentheses and may hold
+/// anything, so the fields are counted from the last `)`.
+pub(crate) fn parse_stat(stat: &str) -> Option<Stat> {
+    let fields: Vec<&str> = stat[stat.rfind(')')? + 1..].split_whitespace().collect();
+    Some(Stat {
+        state: fields.first()?.chars().next()?,
+        ppid: fields.get(1)?.parse().ok()?,
+        start: fields.get(19)?.parse().ok()?,
+    })
+}
+
+/// What `/proc` says about process `pid` now, if it has one.
+pub(crate) fn stat(pid: u32) -> Option<Stat> {
+    parse_stat(&std::fs::read_to_string(format!("/proc/{pid}/stat")).ok()?)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_stat_line_is_read_past_any_command_name() {
+        let tail = "S 7 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 987654 20 21";
+        let want = Some(Stat {
+            state: 'S',
+            ppid: 7,
+            start: 987654,
+        });
+        assert_eq!(parse_stat(&format!("42 (sleep) {tail}")), want);
+        // A command named `a) b (c`.
+        assert_eq!(parse_stat(&format!("42 (a) b (c) {tail}")), want);
+        assert_eq!(parse_stat("42 (sleep) S 1"), None);
+    }
 
     #[test]
     fn paste_wraps_and_sanitises() {

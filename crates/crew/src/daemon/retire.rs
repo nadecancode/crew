@@ -40,8 +40,7 @@ pub(crate) struct Proc {
 impl Proc {
     /// Process `pid` as it is now, if there is one.
     pub fn of(pid: u32) -> Option<Proc> {
-        let stat = std::fs::read_to_string(format!("/proc/{pid}/stat")).ok()?;
-        let (_, start) = parse_stat(&stat)?;
+        let start = crate::process::stat(pid)?.start;
         Some(Proc { pid, start })
     }
 
@@ -50,22 +49,11 @@ impl Proc {
     /// certain counts as running.
     pub fn running(&self) -> bool {
         match std::fs::read_to_string(format!("/proc/{}/stat", self.pid)) {
-            Ok(stat) => parse_stat(&stat)
-                .is_none_or(|(state, start)| start == self.start && !matches!(state, 'Z' | 'X')),
+            Ok(stat) => crate::process::parse_stat(&stat)
+                .is_none_or(|s| s.start == self.start && !matches!(s.state, 'Z' | 'X')),
             Err(e) => !matches!(e.raw_os_error(), Some(libc::ENOENT | libc::ESRCH)),
         }
     }
-}
-
-/// The state (field 3) and start time (field 22) in a `/proc/<pid>/stat`
-/// line. The command name before them is in parentheses and may hold
-/// anything, so the fields are counted from the last `)`.
-fn parse_stat(stat: &str) -> Option<(char, u64)> {
-    let fields: Vec<&str> = stat[stat.rfind(')')? + 1..].split_whitespace().collect();
-    Some((
-        fields.first()?.chars().next()?,
-        fields.get(19)?.parse().ok()?,
-    ))
 }
 
 /// The init of the PID namespace a sandbox runs its programs in, `pid`
@@ -431,20 +419,6 @@ mod tests {
     use super::*;
     use crate::daemon::Daemon;
     use std::os::unix::fs::MetadataExt;
-
-    #[test]
-    fn a_stat_line_is_read_past_any_command_name() {
-        let tail = "S 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 987654 20 21";
-        assert_eq!(
-            parse_stat(&format!("42 (sleep) {tail}")),
-            Some(('S', 987654))
-        );
-        assert_eq!(
-            parse_stat(&format!("42 (a) Z 1) (b) {tail}")),
-            Some(('S', 987654))
-        );
-        assert_eq!(parse_stat("42 (sleep) S 1"), None);
-    }
 
     #[test]
     fn a_process_is_running_until_it_is_a_zombie_or_its_pid_names_another() {
