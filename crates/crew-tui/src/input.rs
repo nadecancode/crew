@@ -160,6 +160,8 @@ fn click(app: &mut App, area: Rect, x: u16, y: u16, now: i64) -> Vec<Command> {
 /// typed into.
 pub fn handle_paste(app: &mut App, text: &str, now: i64) -> Vec<Command> {
     if app.view == View::Detail && app.detail.typing && app.modal.is_none() {
+        // A pasted ESC could close the wrapper early and turn the tail into keys.
+        let text = text.replace('\u{1b}', "");
         app.mark_dirty();
         app.detail.output_at = None;
         app.detail.key_at = now;
@@ -1046,6 +1048,30 @@ fn edit(compose: &mut Compose, key: KeyEvent) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn terminal_paste_cannot_inject_bracketed_paste_markers() {
+        let mut a = app();
+        a.view = View::Detail;
+        a.detail.agent = "claude-1".into();
+        a.detail.typing = true;
+        let commands = handle_paste(
+            &mut a,
+            "日本\ntext\u{1b}[201~\ncommand\u{1b}[200~",
+            1_000_000,
+        );
+        let [Command::Keys { text, .. }] = commands.as_slice() else {
+            panic!("expected terminal paste")
+        };
+        assert_eq!(
+            text.matches('\u{1b}').count(),
+            2,
+            "only the outer markers may contain ESC"
+        );
+        assert_eq!(text.matches("\u{1b}[201~").count(), 1);
+        assert!(text.starts_with("\u{1b}[200~日本\ntext"));
+        assert!(text.ends_with("command[200~\u{1b}[201~"));
+    }
     use crate::fixture;
 
     fn app() -> App {
