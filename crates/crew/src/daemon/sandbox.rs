@@ -240,39 +240,61 @@ fn cache_home() -> PathBuf {
 
 /// What the daemon's PATH finds for a program.
 struct Found {
-    path: Option<PathBuf>,
-    /// The same, if it is an agent CLI, whose install directory the
-    /// profile binds: anything but the crew binary, which is bound anyway.
+    /// Found by name on PATH, and the file it resolves to, resolved once,
+    /// here: what runs never depends on looking it up again.
+    by_name: Option<(PathBuf, PathBuf)>,
+    /// What PATH found (or the program, given as a path), if it is an
+    /// agent CLI, whose install directory the profile binds: anything but
+    /// the crew binary, which is bound anyway.
     cli: Option<PathBuf>,
 }
 
 impl Found {
-    fn new(program: &str, path: Option<&OsString>, crew_bin: &Path) -> Self {
+    /// A name found on PATH whose file cannot be resolved is an error, not
+    /// a program to look up again.
+    fn new(program: &str, path: Option<&OsString>, crew_bin: &Path) -> Result<Self> {
         let path = find_program(program, path);
+        let by_name = match path.as_ref().filter(|_| !program.contains('/')) {
+            Some(found) => {
+                let file = found.canonicalize().with_context(|| {
+                    format!(
+                        "`{program}` was found at {}, but not its file",
+                        found.display()
+                    )
+                })?;
+                Some((found.clone(), file))
+            }
+            None => None,
+        };
         let crew_bin = crew_bin.canonicalize().ok();
-        let cli = path.clone().filter(|p| p.canonicalize().ok() != crew_bin);
-        Self { path, cli }
+        let cli = path.filter(|p| p.canonicalize().ok() != crew_bin);
+        Ok(Self { by_name, cli })
     }
 
     /// What runs for `name` in the sandbox `spec` (program_to_run): the
     /// program found, CLI or crew binary alike.
     fn program(&self, name: &str, spec: &Spec) -> Option<PathBuf> {
-        program_to_run(name, self.path.as_deref(), spec)
+        program_to_run(
+            name,
+            self.by_name
+                .as_ref()
+                .map(|(f, file)| (f.as_path(), file.as_path())),
+            spec,
+        )
     }
 }
 
-/// What runs for `name`, which the daemon's PATH found at `found`: the
-/// file it resolves to, which the profile bound; or `found` itself, which
+/// What runs for `name`, which the daemon's PATH found at `found`, a name
+/// for `file`, which the profile bound: that file; or `found` itself, which
 /// keeps the name a program may look at (bash run as `sh`), where it leads
-/// to that file inside the sandbox too. A program given as a path runs as
-/// given (None).
-fn program_to_run(name: &str, found: Option<&Path>, spec: &Spec) -> Option<PathBuf> {
-    let found = found.filter(|_| !name.contains('/'))?;
-    let file = found.canonicalize().ok()?;
-    if resolve_inside(spec, found).as_ref() == Some(&file) {
+/// to that file inside the sandbox too. A program given as a path, or not
+/// found, runs as given (None).
+fn program_to_run(name: &str, found: Option<(&Path, &Path)>, spec: &Spec) -> Option<PathBuf> {
+    let (found, file) = found.filter(|_| !name.contains('/'))?;
+    if resolve_inside(spec, found).as_deref() == Some(file) {
         Some(found.to_path_buf())
     } else {
-        Some(file)
+        Some(file.to_path_buf())
     }
 }
 
@@ -771,7 +793,7 @@ workspace.sandbox.mode: off"
         let (built, program) = tokio::task::spawn_blocking(move || -> Result<_> {
             let (host, layout) = host_and_layout(&crew_bin, &workspace, &socket)?;
             let path = std::env::var_os("PATH");
-            let found = Found::new(&run.program, path.as_ref(), &crew_bin);
+            let found = Found::new(&run.program, path.as_ref(), &crew_bin)?;
             let at = Placement {
                 agent_dir: &agent_dir,
                 workdir: &workdir,
@@ -1344,7 +1366,11 @@ unsandboxed"
         let mut spec = fx.profile("a", false, true).unwrap();
         bound(&mut spec, &first);
         assert_eq!(
-            program_to_run("codex", Some(&found), &spec),
+            program_to_run(
+                "codex",
+                Some((&found, &found.canonicalize().unwrap())),
+                &spec
+            ),
             Some(first.clone())
         );
         // Installed behind a link in a directory the sandbox does not show:
@@ -1356,13 +1382,34 @@ unsandboxed"
         let mut spec = fx.profile("a", false, true).unwrap();
         bound(&mut spec, &root.join("lib/node_modules/@openai/codex"));
         let linked = root.join("links/codex");
-        assert_eq!(program_to_run("codex", Some(&linked), &spec), Some(target));
+        assert_eq!(
+            program_to_run(
+                "codex",
+                Some((&linked, &linked.canonicalize().unwrap())),
+                &spec
+            ),
+            Some(target)
+        );
         // ... and by the link where its directory is shown, so a program
         // that looks at its name (busybox's sh) still sees it.
         bound(&mut spec, &root.join("links"));
-        assert_eq!(program_to_run("codex", Some(&linked), &spec), Some(linked));
+        assert_eq!(
+            program_to_run(
+                "codex",
+                Some((&linked, &linked.canonicalize().unwrap())),
+                &spec
+            ),
+            Some(linked)
+        );
         // A program given as a path, or not found, runs as given.
-        assert_eq!(program_to_run("./codex", Some(&first), &spec), None);
+        assert_eq!(
+            program_to_run(
+                "./codex",
+                Some((&first, &first.canonicalize().unwrap())),
+                &spec
+            ),
+            None
+        );
         assert_eq!(program_to_run("codex", None, &spec), None);
     }
 
@@ -1379,12 +1426,32 @@ unsandboxed"
         std::fs::create_dir_all(root.join("links")).unwrap();
         std::os::unix::fs::symlink(&crew, root.join("links/crew")).unwrap();
         let path = std::env::join_paths([root.join("links")]).unwrap();
-        let found = Found::new("crew", Some(&path), &crew);
+        let found = Found::new("crew", Some(&path), &crew).unwrap();
         // Bound anyway, so no CLI install directory is added for it...
         assert_eq!(found.cli, None);
         // ... but what runs is the binary found, not a second lookup.
         let spec = fx.profile("a", false, true).unwrap();
         assert_eq!(found.program("crew", &spec), Some(crew.clone()));
+    }
+
+    #[test]
+    fn a_program_found_on_path_keeps_its_file_if_the_name_goes_before_the_launch() {
+        use std::os::unix::fs::{symlink, PermissionsExt};
+        let fx = fixture();
+        let root = &fx.root;
+        let file = root.join("install/codex.js");
+        std::fs::create_dir_all(file.parent().unwrap()).unwrap();
+        std::fs::write(&file, "#!/bin/sh\n").unwrap();
+        std::fs::set_permissions(&file, std::fs::Permissions::from_mode(0o755)).unwrap();
+        std::fs::create_dir_all(root.join("bin")).unwrap();
+        symlink(&file, root.join("bin/codex")).unwrap();
+        let path = std::env::join_paths([root.join("bin")]).unwrap();
+        let found = Found::new("codex", Some(&path), &root.join("crew")).unwrap();
+        // The link goes after the profile was built: what runs is still
+        // the file found, never the bare name for another lookup.
+        std::fs::remove_file(root.join("bin/codex")).unwrap();
+        let spec = fx.profile("a", false, true).unwrap();
+        assert_eq!(found.program("codex", &spec), Some(file));
     }
 
     /// A bind of `path` as the profile makes it.
@@ -1427,7 +1494,11 @@ unsandboxed"
         let spec = spec_with(&fx, vec![bind(&visible), bind(&target)]);
         assert_eq!(resolve_inside(&spec, &through_hidden), None);
         assert_eq!(
-            program_to_run("cli", Some(&through_hidden), &spec),
+            program_to_run(
+                "cli",
+                Some((&through_hidden, &through_hidden.canonicalize().unwrap())),
+                &spec
+            ),
             Some(file.clone())
         );
 
@@ -1448,7 +1519,11 @@ unsandboxed"
         let alias = system.join("tool-body");
         assert_eq!(resolve_inside(&recreated, &alias), Some(file.clone()));
         assert_eq!(
-            program_to_run("tool-body", Some(&alias), &recreated),
+            program_to_run(
+                "tool-body",
+                Some((&alias, &alias.canonicalize().unwrap())),
+                &recreated
+            ),
             Some(alias)
         );
 
@@ -1460,7 +1535,14 @@ unsandboxed"
             Some(file.clone())
         );
         assert_eq!(
-            program_to_run("rel", Some(&visible.join("rel")), &spec),
+            program_to_run(
+                "rel",
+                Some((
+                    &visible.join("rel"),
+                    &visible.join("rel").canonicalize().unwrap()
+                )),
+                &spec
+            ),
             Some(visible.join("rel"))
         );
 
@@ -1569,7 +1651,12 @@ unsandboxed"
         let spec = cli_profile(&fx, &host, "review-cli", &found);
         let control = run_in(&spec, &file, &[]);
         assert!(control.status.success(), "control: {control:?}");
-        let chosen = program_to_run("review-cli", Some(&found), &spec).unwrap();
+        let chosen = program_to_run(
+            "review-cli",
+            Some((&found, &found.canonicalize().unwrap())),
+            &spec,
+        )
+        .unwrap();
         let out = run_in(&spec, &chosen, &[]);
         assert!(
             out.status.success(),
@@ -1599,7 +1686,8 @@ unsandboxed"
             "sh",
             "control: {control:?}"
         );
-        let chosen = program_to_run("sh", Some(&found), &spec).unwrap();
+        let chosen =
+            program_to_run("sh", Some((&found, &found.canonicalize().unwrap())), &spec).unwrap();
         let out = run_in(&spec, &chosen, &args);
         assert_eq!(
             String::from_utf8_lossy(&out.stdout),
