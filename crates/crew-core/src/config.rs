@@ -689,11 +689,6 @@ impl TeamConfig {
             bail!("`project` may only contain letters, digits, '-', '_' and '.' (max 64 chars)");
         }
         self.workspace.sandbox.validate()?;
-        // A-S1 replaces this staged-rollout gate with actual sandbox probes
-        // and launch enforcement before accepting Required teams.
-        if self.workspace.sandbox.mode == SandboxMode::Required {
-            bail!("workspace.sandbox.mode: required is not available yet; team was not started");
-        }
         if let Some(style) = &self.style {
             if !is_valid_id(style) {
                 bail!("`style` '{style}' is not a style name (expected [a-z][a-z0-9_-]{{0,31}})");
@@ -1069,21 +1064,17 @@ mod tests {
     }
 
     #[test]
-    fn sandbox_required_is_unavailable_until_daemon_enforcement_is_wired() {
-        // Required is a supported config value, but must never quietly launch
-        // unsandboxed processes while this stage only supplies its plumbing.
+    fn sandbox_required_is_accepted_and_its_enforcement_is_the_daemons() {
+        // Supersedes sandbox_required_is_unavailable_until_daemon_enforcement_is_wired:
+        // the daemon now runs every launch of a team that requires sandboxes in
+        // one, and refuses such a team where it cannot (crew/tests/sandbox.rs,
+        // required_starts_on_a_capable_host_and_is_refused_with_the_probes_reason_otherwise).
         let yaml = "project: test\nworkspace:\n  sandbox:\n    mode: required\n";
-        let raw: TeamConfig = serde_yaml::from_str(yaml).unwrap();
-        assert_eq!(raw.workspace.sandbox.mode, SandboxMode::Required);
-        let error = TeamConfig::from_yaml(yaml).unwrap_err().to_string();
-        assert!(error.contains("workspace.sandbox.mode"), "{error}");
-        assert!(error.contains("required is not available yet"), "{error}");
-        assert!(error.contains("team was not started"), "{error}");
+        let team = TeamConfig::from_yaml(yaml).unwrap();
+        assert_eq!(team.workspace.sandbox.mode, SandboxMode::Required);
         let toml = "project = \"test\"\n[workspace.sandbox]\nmode = \"required\"\n";
-        assert!(TeamConfig::from_toml(toml)
-            .unwrap_err()
-            .to_string()
-            .contains("required is not available yet"));
+        let team = TeamConfig::from_toml(toml).unwrap();
+        assert_eq!(team.workspace.sandbox.mode, SandboxMode::Required);
         TeamConfig::from_yaml(&yaml.replace("required", "off")).unwrap();
     }
 

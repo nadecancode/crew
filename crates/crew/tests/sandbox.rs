@@ -144,3 +144,158 @@ fn the_harness_finds_a_usable_sandbox_and_its_controls_reach_the_host() {
     std::fs::create_dir(&run).unwrap();
     HostTargets::new(root.path(), &run).assert_reachable_from_the_host(&socat);
 }
+
+// ---------------------------------------------------------------------------
+// Teams that require sandboxes
+// ---------------------------------------------------------------------------
+
+mod common;
+use common::{find_task, task, Session};
+use crew_core::config::{AgentSpec, SandboxMode, TaskSpec, TeamConfig};
+use crew_core::TaskStatus;
+
+/// `s.team(..)`, requiring sandboxes.
+fn sandboxed(s: &Session, agents: Vec<AgentSpec>, tasks: Vec<TaskSpec>) -> TeamConfig {
+    let mut team = s.team("sandboxed", agents, tasks);
+    team.workspace.sandbox.mode = SandboxMode::Required;
+    team
+}
+
+/// Make the workspace a repository whose first commit holds `files`.
+fn workspace_repo(s: &Session, files: &[(&str, &str)]) {
+    std::fs::create_dir_all(&s.workspace).unwrap();
+    let git = |args: &[&str]| {
+        let ok = Command::new("git")
+            .arg("-C")
+            .arg(&s.workspace)
+            .args(["-c", "user.name=t", "-c", "user.email=t@t"])
+            .args(args)
+            .status()
+            .unwrap()
+            .success();
+        assert!(ok, "git {args:?}");
+    };
+    git(&["init", "-q", "-b", "main"]);
+    for (name, contents) in files {
+        let path = s.workspace.join(name);
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        std::fs::write(path, contents).unwrap();
+    }
+    git(&["add", "-A"]);
+    git(&["commit", "-q", "--allow-empty", "-m", "first"]);
+}
+
+/// `<A>/rw/home` of agent `id`, as the daemon makes it.
+fn home_of(s: &Session, id: &str) -> PathBuf {
+    std::fs::create_dir_all(&s.workspace).unwrap();
+    s.workspace
+        .canonicalize()
+        .unwrap()
+        .join(".crew/agents")
+        .join(id)
+        .join("rw/home")
+}
+
+/// An agent that runs `script` with `sh -c`, writes what it prints to
+/// `<A>/rw/home/report` and then `report.done` there (its home when
+/// sandboxed; the path works unsandboxed too), and stays up.
+fn probing(s: &Session, id: &str, script: &str) -> AgentSpec {
+    let home = home_of(s, id);
+    AgentSpec {
+        id: id.to_string(),
+        command: vec![
+            "sh".into(),
+            "-c".into(),
+            format!(
+                "{{\n{script}\n}} > '{0}/report' 2>&1; touch '{0}/report.done'; exec sleep 600",
+                home.display()
+            ),
+        ],
+        ..AgentSpec::default()
+    }
+}
+
+/// What agent `id`'s probe reported, once it is done.
+fn report(s: &Session, id: &str) -> String {
+    let home = home_of(s, id);
+    s.wait_for(&format!("{id}'s report"), || {
+        home.join("report.done").exists()
+    });
+    std::fs::read_to_string(home.join("report")).unwrap()
+}
+
+#[test]
+fn required_starts_on_a_capable_host_and_is_refused_with_the_probes_reason_otherwise() {
+    // Refused: on a host whose bubblewrap does not work (here a `bwrap`
+    // first on PATH that prints no version), with what the probe says.
+    let s = Session::new();
+    workspace_repo(&s, &[]);
+    let fake = s.root().join("fake-bwrap");
+    std::fs::create_dir(&fake).unwrap();
+    std::fs::write(fake.join("bwrap"), "#!/bin/sh\nexit 1\n").unwrap();
+    {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(fake.join("bwrap"), std::fs::Permissions::from_mode(0o755))
+            .unwrap();
+    }
+    let mut dirs = vec![fake];
+    dirs.extend(std::env::split_paths(&std::env::var_os("PATH").unwrap()));
+    let path = std::env::join_paths(dirs).unwrap();
+    let crew = Path::new(CREW).canonicalize().unwrap();
+    let why = crew::sandbox::probe::probe(&crew, Some(&path)).expect_err("the probe refuses");
+    let team = sandboxed(&s, vec![common::agent("a", "", &[])], vec![]);
+    std::fs::write(s.root().join("team.yaml"), team.to_yaml().unwrap()).unwrap();
+    let out = s
+        .command()
+        .env("PATH", &path)
+        .args(["run", "team.yaml", "--no-attach"])
+        .output()
+        .unwrap();
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(!out.status.success(), "{stderr}");
+    assert!(
+        stderr.contains(&why.cause) && stderr.contains(&why.fix),
+        "{stderr}"
+    );
+    assert!(stderr.contains("workspace.sandbox.mode: off"), "{stderr}");
+
+    // Starts: on this host, if it can run sandboxes, the team works and its
+    // agent is in a mount namespace of its own.
+    if require_sandbox().is_none() {
+        return;
+    }
+    let s = Session::new();
+    workspace_repo(&s, &[]);
+    let team = sandboxed(
+        &s,
+        vec![probing(&s, "a", "readlink /proc/self/ns/mnt")],
+        vec![task("t", "worker", &[])],
+    );
+    let mut team = team;
+    team.agents.push(common::agent(
+        "worker",
+        "",
+        &[
+            "--on-task=write work.txt done",
+            "--on-task=commit add work",
+            "--on-task=done finished",
+        ],
+    ));
+    s.run(&team);
+    let done = s.wait("the task", |snap| {
+        matches!(
+            find_task(snap, "t").status,
+            TaskStatus::Done | TaskStatus::Failed
+        )
+    });
+    assert_eq!(find_task(&done, "t").status, TaskStatus::Done);
+    let own = std::fs::read_link("/proc/self/ns/mnt").unwrap();
+    let inside = report(&s, "a");
+    assert!(inside.trim().starts_with("mnt:["), "{inside}");
+    assert_ne!(
+        inside.trim(),
+        own.to_string_lossy(),
+        "the agent shares our mounts"
+    );
+    s.stop();
+}
