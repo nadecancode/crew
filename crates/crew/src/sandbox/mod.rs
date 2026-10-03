@@ -9,6 +9,7 @@
 //! running unsandboxed.
 
 pub mod landlock;
+pub mod pin;
 pub mod seccomp;
 pub mod shim;
 
