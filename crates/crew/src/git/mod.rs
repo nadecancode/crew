@@ -766,7 +766,7 @@ pub fn merge_agents(worktree: &Worktree, agents: &[String]) -> Result<Vec<Integr
     let mut steps = Vec::new();
     for agent in agents {
         let branch = branch_for(agent);
-        let exists = run(
+        let found = run(
             &worktree.path,
             &[
                 "show-ref",
@@ -774,16 +774,23 @@ pub fn merge_agents(worktree: &Worktree, agents: &[String]) -> Result<Vec<Integr
                 "--quiet",
                 &format!("refs/heads/{branch}"),
             ],
-        )
-        .is_ok_and(|o| o.status.success());
-        if !exists {
-            continue;
+        )?;
+        // Exit 1 is "no such branch". Anything else that is not success
+        // (a sandbox that could not start exits 125) fails the integration
+        // rather than leaving the branch out.
+        match found.status.code() {
+            Some(0) => {}
+            Some(1) => continue,
+            _ => bail!(
+                "looking for {branch} failed ({}): {}",
+                found.status,
+                first_nonempty(&text(&found.stderr), &text(&found.stdout))
+            ),
         }
         let ahead = out(
             &worktree.path,
             &["rev-list", "--count", &format!("HEAD..{branch}")],
-        )
-        .unwrap_or_default();
+        )?;
         if ahead == "0" {
             continue;
         }
@@ -1684,5 +1691,90 @@ mod tests {
             .filter(|argv| argv.get(2).map(PathBuf::from) != Some(worktree.path.clone()))
             .collect();
         assert!(outside.is_empty(), "git outside the worktree: {outside:?}");
+    }
+
+    /// Fails every git command the way a sandbox that cannot start does:
+    /// the launcher refuses, or the command exits 125 (sandbox-exec).
+    enum Broken {
+        Refuses,
+        Exits125,
+    }
+
+    impl launch::Launcher for Broken {
+        fn launch(&self, _: &Command) -> std::io::Result<Command> {
+            match self {
+                Broken::Refuses => Err(std::io::Error::other("no sandbox")),
+                Broken::Exits125 => {
+                    let mut cmd = Command::new("sh");
+                    cmd.args(["-c", "exit 125"]);
+                    Ok(cmd)
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn merging_the_agents_fails_when_its_git_cannot_run_rather_than_finding_no_branches() {
+        let r = repo();
+        let a = ensure_worktree(&r.root, &r.worktrees, "a", "HEAD").unwrap();
+        write(&a.path, "from-a.txt", "a\n");
+        commit_all(&a.path, "a", "work of a").unwrap();
+        let (worktree, _) = add_worktree(&r.root, &r.worktrees, INTEGRATION_DIR, "HEAD").unwrap();
+        populate_worktree(&worktree).unwrap();
+        for broken in [Broken::Refuses, Broken::Exits125] {
+            let result = launch::with_launcher(Arc::new(broken), || {
+                merge_agents(&worktree, &["a".to_string()])
+            });
+            assert!(result.is_err(), "{result:?}");
+        }
+    }
+
+    /// Runs every git command but `rev-list`, which it refuses, and keeps
+    /// the arguments of what it was asked to run.
+    #[derive(Default)]
+    struct NoRevList(std::sync::Mutex<Vec<Vec<String>>>);
+
+    impl launch::Launcher for NoRevList {
+        fn launch(&self, cmd: &Command) -> std::io::Result<Command> {
+            let argv: Vec<String> = launch::argv(cmd)
+                .iter()
+                .map(|a| a.to_string_lossy().into_owned())
+                .collect();
+            let refused = argv.iter().any(|a| a == "rev-list");
+            self.0.lock().unwrap().push(argv);
+            if refused {
+                return Err(std::io::Error::other("no sandbox"));
+            }
+            let mut same = Command::new(cmd.get_program());
+            same.args(cmd.get_args());
+            for (k, v) in cmd.get_envs() {
+                match v {
+                    Some(v) => same.env(k, v),
+                    None => same.env_remove(k),
+                };
+            }
+            Ok(same)
+        }
+    }
+
+    #[test]
+    fn a_refused_ahead_count_stops_the_integration_before_any_merge() {
+        let r = repo();
+        let a = ensure_worktree(&r.root, &r.worktrees, "a", "HEAD").unwrap();
+        write(&a.path, "from-a.txt", "a\n");
+        commit_all(&a.path, "a", "work of a").unwrap();
+        let (worktree, _) = add_worktree(&r.root, &r.worktrees, INTEGRATION_DIR, "HEAD").unwrap();
+        populate_worktree(&worktree).unwrap();
+        let launcher = Arc::new(NoRevList::default());
+        let result = launch::with_launcher(launcher.clone(), || {
+            merge_agents(&worktree, &["a".to_string()])
+        });
+        let seen = launcher.0.lock().unwrap().clone();
+        assert!(result.is_err(), "{result:?}");
+        assert!(
+            !seen.iter().any(|argv| argv.iter().any(|a| a == "merge")),
+            "a merge was attempted: {seen:?}"
+        );
+        assert!(!worktree.path.join("from-a.txt").exists());
     }
 }
