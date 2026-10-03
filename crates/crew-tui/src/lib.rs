@@ -153,13 +153,14 @@ fn event_loop(
             Ok(event) => {
                 let size = terminal.size().unwrap_or_default();
                 let area = Rect::new(0, 0, size.width, size.height);
-                let page = page_rows(app, if area.height == 0 { 24 } else { area.height });
+                let page = page_rows(app, area);
                 handle(app, event, requests, page, area)?;
                 if app.should_quit || signals.is_pending() {
                     return Ok(());
                 }
                 // Drain whatever else is queued so a burst costs one redraw.
                 while let Ok(event) = rx.try_recv() {
+                    let page = page_rows(app, area);
                     handle(app, event, requests, page, area)?;
                     if app.should_quit || signals.is_pending() {
                         return Ok(());
@@ -175,7 +176,13 @@ fn event_loop(
     }
 }
 
-fn page_rows(app: &App, height: u16) -> usize {
+fn page_rows(app: &App, area: Rect) -> usize {
+    let area = if area.height == 0 {
+        Rect::new(0, 0, 80, 24)
+    } else {
+        area
+    };
+    let height = views::view_area(app, area).height;
     match app.view {
         View::Logs => views::logs::page_rows(height),
         _ => usize::from(height.saturating_sub(4)).max(1),
@@ -311,3 +318,94 @@ pub fn render_to_string(app: &App, width: u16, height: u16, now: i64) -> String 
 #[cfg(test)]
 #[path = "../../crew-core/src/test_support.rs"]
 mod test_support;
+
+#[cfg(test)]
+mod paging_tests {
+    use super::*;
+    use ratatui::crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+
+    fn event_numbers(screen: &str) -> Vec<usize> {
+        screen
+            .lines()
+            .filter_map(|line| {
+                let at = line.find("EVENT-")? + "EVENT-".len();
+                line[at..at + 4].parse().ok()
+            })
+            .collect()
+    }
+
+    #[test]
+    fn warning_and_questions_do_not_hide_oldest_logs_or_skip_a_page_line() {
+        for height in [12, 24] {
+            for mode in ["off", "required", ""] {
+                for questions in [false, true] {
+                    let mut app = App::new();
+                    app.apply_snapshot(fixture::snapshot(1_000), 1_000);
+                    app.view = View::Logs;
+                    app.session.sandbox = mode.into();
+                    app.events = (0..200)
+                        .map(|n| {
+                            fixture::event(
+                                n,
+                                crew_core::EventLevel::Info,
+                                "test",
+                                "test.event",
+                                None,
+                                &format!("EVENT-{n:04}"),
+                                1_000,
+                            )
+                        })
+                        .collect();
+                    if questions {
+                        app.questions.push(fixture::question(1_000));
+                    }
+                    let page = page_rows(&app, Rect::new(0, 0, 100, height));
+                    input::handle_key(
+                        &mut app,
+                        KeyEvent::new(KeyCode::Home, KeyModifiers::NONE),
+                        1_000,
+                        page,
+                    );
+                    let first = event_numbers(&render_to_string(&app, 100, height, 1_000));
+                    assert_eq!(
+                        first.first(),
+                        Some(&0),
+                        "{mode}/{height}/question={questions}"
+                    );
+                    let last = *first.last().unwrap();
+                    input::handle_key(
+                        &mut app,
+                        KeyEvent::new(KeyCode::PageDown, KeyModifiers::NONE),
+                        1_000,
+                        page,
+                    );
+                    let next = event_numbers(&render_to_string(&app, 100, height, 1_000));
+                    assert_eq!(next.first(), Some(&(last + 1)), "pages must be contiguous");
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn logs_detail_and_tasks_page_from_the_space_below_both_bands() {
+        for view in [View::Logs, View::Detail, View::Tasks] {
+            let mut app = App::new();
+            app.apply_snapshot(fixture::snapshot(1_000), 1_000);
+            app.view = view;
+            app.session.sandbox = "required".into();
+            let full = page_rows(&app, Rect::new(0, 0, 100, 24));
+            app.session.sandbox = "off".into();
+            assert_eq!(
+                page_rows(&app, Rect::new(0, 0, 100, 24)) + 1,
+                full,
+                "{view:?} warning row"
+            );
+            app.questions.push(fixture::question(1_000));
+            assert_eq!(
+                page_rows(&app, Rect::new(0, 0, 100, 24)) + 2,
+                full,
+                "{view:?} question band"
+            );
+        }
+    }
+}

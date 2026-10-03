@@ -91,7 +91,7 @@ pub enum Hit {
 /// below the usage strip.
 fn regions(app: &App, area: Rect) -> (Rect, Rect, Rect) {
     let strip_h = super::usage::height(app, area);
-    let warning = app.session.sandbox != "required";
+    let warning = super::sandbox_warning(app).is_some();
     let (mut topo, mut bus, mut footer) = split(Rect {
         y: area.y + strip_h,
         height: (area.height - strip_h).saturating_add(u16::from(warning)),

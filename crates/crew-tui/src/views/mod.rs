@@ -106,7 +106,7 @@ pub(crate) fn content_area(app: &App, area: Rect) -> Rect {
 
 /// The area a view gets inside the screen: everything below the band that
 /// announces questions for the operator.
-fn view_area(app: &App, area: Rect) -> Rect {
+pub(crate) fn view_area(app: &App, area: Rect) -> Rect {
     let area = content_area(app, area);
     let band_h = question::band_height(app, area);
     Rect {
