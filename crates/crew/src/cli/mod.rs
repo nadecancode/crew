@@ -8,6 +8,7 @@ use clap::{Args, CommandFactory, Parser, Subcommand};
 mod agent_side;
 mod attach;
 pub mod daemonize;
+mod fake_cli;
 mod ops;
 mod scripted;
 
@@ -227,6 +228,9 @@ answers: `crew answer 2`.")]
     },
     /// A scripted stand-in for a real agent (for dry runs and tests)
     ScriptedAgent(scripted::ScriptArgs),
+    /// A stand-in for an agent CLI (claude, codex, pi), for tests
+    #[command(hide = true)]
+    FakeCli(fake_cli::FakeArgs),
     /// Start a program in an agent sandbox (the daemon puts this in front of it)
     #[command(hide = true)]
     SandboxRun(crate::sandbox::run::RunArgs),
@@ -580,6 +584,7 @@ pub fn run(cli: Cli) -> Result<()> {
         Command::Style { command } => ops::style(&target, command.unwrap_or(StyleCommand::List)),
         Command::Models { command } => ops::models(command.unwrap_or(ModelsCommand::List)),
         Command::ScriptedAgent(args) => scripted::run(args),
+        Command::FakeCli(args) => fake_cli::run(args),
         Command::SandboxRun(args) => crate::sandbox::run::run(args),
         Command::SandboxExec(args) => crate::sandbox::shim::run(args),
         Command::Daemon { workspace } => daemonize::run_foreground(&workspace),
