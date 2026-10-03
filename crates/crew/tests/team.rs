@@ -6157,6 +6157,76 @@ fn a_failed_task_of_a_member_who_left_goes_back_to_the_pool_when_retried() {
 }
 
 #[test]
+fn a_retried_task_keeps_its_review_when_its_reviewer_has_left() {
+    let s = Session::new();
+    let mut team = s.team(
+        "review-left",
+        vec![
+            agent("gone", "", &["--on-task=fail cannot do it"]),
+            agent("critic", "", &[]),
+            agent("stays", "", &["--on-task=done done by {me}"]),
+        ],
+        vec![task("job", "gone", &[]), task("next", "stays", &["job"])],
+    );
+    team.tasks[0].reviewer = Some("critic".into());
+    team.orchestrator = OrchestratorConfig {
+        agent: true,
+        runtime: Some(RuntimeKind::Shell),
+        command: scripted(&[]),
+        ..OrchestratorConfig::default()
+    };
+    s.run(&team);
+    s.wait("the task to fail", |snap| {
+        find_task(snap, "job").status == TaskStatus::Failed
+    });
+    for id in ["gone", "critic"] {
+        s.agent_cmd(&["remove", id]);
+    }
+    s.wait("its author and its reviewer to leave", |snap| {
+        snap.agents
+            .iter()
+            .all(|a| a.id != "gone" && a.id != "critic")
+    });
+    s.ok(&["task", "retry", "job", "-C", &s.workspace.to_string_lossy()]);
+
+    // Its author's place goes to whoever is free. Its review is not dropped
+    // with its reviewer: the work waits for a verdict.
+    let finished = s.wait("the retried task to be finished by stays", |snap| {
+        matches!(
+            find_task(snap, "job").status,
+            TaskStatus::Review | TaskStatus::Done
+        )
+    });
+    let job = find_task(&finished, "job");
+    assert_eq!(job.assigned_agent.as_deref(), Some("stays"));
+    assert_eq!(job.status, TaskStatus::Review, "{job:?}");
+    assert_eq!(job.reviewer.as_deref(), Some("critic"));
+    s.wait_for("the orchestrator to be asked for the review", || {
+        s.messages().iter().any(|m| {
+            m.to == "orchestrator"
+                && m.body.contains("Task job")
+                && m.body.contains("critic is not on the team")
+        })
+    });
+    // Nothing that builds on it starts before that verdict.
+    let held = s.snapshot();
+    assert_eq!(find_task(&held, "job").status, TaskStatus::Review);
+    assert!(find_task(&held, "next").started_at.is_none());
+    assert!(!s.has_event("task.done"));
+
+    // The orchestrator's verdict is the explicit waiver.
+    let approve = json!({ "task_id": "job", "approve": true }).to_string();
+    let out = s.ctl("orchestrator", &["tool", "review_submit", &approve]);
+    assert!(out.status.success(), "{}", stderr(&out));
+    let done = s.wait_all_done();
+    assert_eq!(find_task(&done, "job").status, TaskStatus::Done);
+    assert_eq!(
+        find_task(&done, "next").result.as_deref(),
+        Some("done by stays")
+    );
+}
+
+#[test]
 fn a_turn_codexs_model_refuses_is_noticed_and_whoever_waits_on_it_is_told() {
     use std::io::Write as _;
     use std::os::unix::fs::PermissionsExt;

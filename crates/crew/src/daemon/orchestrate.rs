@@ -585,18 +585,14 @@ until the database takes writes again, tasks wait where they are.",
 
     pub(crate) fn retry_task(&self, id: &str) -> Result<Task, RpcError> {
         // A member who has left the team since cannot take it up again.
-        let (status, author_left, reviewer_left) = {
+        let (status, author_left) = {
             let model = self.model();
             let task = model
                 .task(id)
                 .ok_or_else(|| RpcError::not_found(format!("no task '{id}'")))?;
             let left =
                 |who: &Option<String>| who.as_deref().is_some_and(|w| model.agent(w).is_none());
-            (
-                task.status,
-                left(&task.assigned_agent),
-                left(&task.reviewer),
-            )
+            (task.status, left(&task.assigned_agent))
         };
         if !matches!(status, TaskStatus::Failed | TaskStatus::Blocked) {
             return Err(RpcError::conflict(format!(
@@ -614,9 +610,10 @@ until the database takes writes again, tasks wait where they are.",
                 if author_left {
                     t.assigned_agent = None;
                 }
-                if reviewer_left {
-                    t.reviewer = None;
-                }
+                // A reviewer who has left stays its reviewer: a configured
+                // review is not dropped with the member. The finished work
+                // then waits in Review, and the orchestrator is asked for
+                // the verdict (complete_task).
             })?
             .ok_or_else(|| RpcError::not_found(format!("no task '{id}'")))?;
         let unassigned = if author_left {
