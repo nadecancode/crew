@@ -260,6 +260,14 @@ impl AgentRuntime for ClaudeRuntime {
         if !ctx.settings.model_fallback {
             env.push((NO_FALLBACK_ENV.to_string(), "1".to_string()));
         }
+        // Tokens the operator keeps in files (`claude setup-token`): this agent's
+        // process environment only, never the settings file or a command line.
+        env.extend(
+            ctx.endpoint
+                .secret_env
+                .iter()
+                .map(|(name, secret)| (name.clone(), secret.expose().to_string())),
+        );
         if let Some(home) = ctx.private_home {
             env.push((
                 CONFIG_DIR_ENV.to_string(),
@@ -587,6 +595,43 @@ mod tests {
             outbox_total: 0,
             usage: None,
             error: None,
+        }
+    }
+
+    #[test]
+    fn a_token_from_a_file_goes_into_the_process_environment_and_nowhere_else() {
+        let dir = tempfile::tempdir().unwrap();
+        let agent = agent(dir.path());
+        let identity = dir.path().join("identity.json");
+        let endpoint = Endpoint {
+            secret_env: vec![(
+                "CLAUDE_CODE_OAUTH_TOKEN".into(),
+                crate::endpoints::Secret::new("oauth-token-value"),
+            )],
+            ..Endpoint::default()
+        };
+        let spec = ClaudeRuntime
+            .launch(&LaunchContext {
+                agent: &agent,
+                settings: &AgentSettings::default(),
+                crew_bin: Path::new("/opt/crew"),
+                agent_dir: dir.path(),
+                identity_path: &identity,
+                briefing: "be helpful",
+                resume: false,
+                endpoint: &endpoint,
+                long_context: false,
+                private_home: None,
+            })
+            .unwrap();
+        assert!(spec
+            .env
+            .contains(&("CLAUDE_CODE_OAUTH_TOKEN".into(), "oauth-token-value".into())));
+        // Not on a command line, not in the files the daemon writes for the session.
+        assert!(!spec.args.iter().any(|a| a.contains("oauth-token-value")));
+        for file in ["settings.json", "mcp.json", "briefing.md"] {
+            let text = std::fs::read_to_string(dir.path().join(file)).unwrap();
+            assert!(!text.contains("oauth-token-value"), "{file}");
         }
     }
 

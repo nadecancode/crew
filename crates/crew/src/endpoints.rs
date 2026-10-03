@@ -126,6 +126,8 @@ struct Section {
     wire_api: Option<String>,
     #[serde(default)]
     env: BTreeMap<String, String>,
+    #[serde(default)]
+    env_files: BTreeMap<String, String>,
 }
 
 #[derive(Deserialize, Clone, Default, PartialEq)]
@@ -244,6 +246,19 @@ auth_token, auth_token_env, auth_token_file"
             }
             if name.starts_with("CREW_") {
                 bail!("env: '{name}' is reserved for crew");
+            }
+        }
+        for name in self.env_files.keys() {
+            if !is_env_name(name) {
+                bail!("env_files: '{name}' is not an environment variable name");
+            }
+            if name.starts_with("CREW_") {
+                bail!("env_files: '{name}' is reserved for crew");
+            }
+            // Names that steer the loader or libc never reach an agent.
+            crate::sandbox::spec::check_name(name).map_err(|e| anyhow!("env_files: {e}"))?;
+            if self.env.contains_key(name) {
+                bail!("'{name}' is in both env and env_files");
             }
         }
         self.credential(dir)?;
@@ -411,6 +426,8 @@ struct Plan {
     model: Option<(String, Scope)>,
     wire_api: Option<(String, Scope)>,
     env: BTreeMap<String, (String, Scope)>,
+    /// Environment variable name to the token file that fills it.
+    env_files: BTreeMap<String, (PathBuf, Scope)>,
 }
 
 impl Plan {
@@ -432,6 +449,15 @@ impl Plan {
         for (name, value) in &section.env {
             self.env.insert(name.clone(), (value.clone(), scope));
         }
+        for (name, path) in &section.env_files {
+            // An empty path takes back what an earlier layer set.
+            if path.trim().is_empty() {
+                self.env_files.remove(name);
+            } else {
+                self.env_files
+                    .insert(name.clone(), (expand_path(path.trim(), dir), scope));
+            }
+        }
     }
 
     fn is_empty(&self) -> bool {
@@ -440,6 +466,7 @@ impl Plan {
             && self.model.is_none()
             && self.wire_api.is_none()
             && self.env.is_empty()
+            && self.env_files.is_empty()
     }
 }
 
@@ -454,6 +481,10 @@ pub struct Endpoint {
     /// Codex: `responses` (default) or `chat`.
     pub wire_api: Option<String>,
     pub env: BTreeMap<String, String>,
+    /// Environment secrets read from token files: name and value. Kept apart
+    /// from `env` because they go only into the process environment, never
+    /// into a settings file or the event log.
+    pub secret_env: Vec<(String, Secret)>,
     /// Where the settings come from, for the event log. No secrets.
     pub origin: Option<String>,
 }
@@ -599,6 +630,15 @@ config gives it an auth_token",
         if !plan.env.is_empty() {
             origin.push(format!("{} environment variable(s)", plan.env.len()));
         }
+        for (name, (path, scope)) in &plan.env_files {
+            let secret = read_token_file(path)
+                .with_context(|| format!("crew config ({}): env_files {name}", scope.as_str()))?;
+            endpoint.secret_env.push((name.clone(), secret));
+        }
+        if !plan.env_files.is_empty() {
+            let names: Vec<&str> = plan.env_files.keys().map(String::as_str).collect();
+            origin.push(format!("token file(s) for {}", names.join(", ")));
+        }
         endpoint.origin = Some(origin.join(", "));
         Ok(endpoint)
     }
@@ -697,6 +737,14 @@ fn describe_plan(out: &mut String, plan: &Plan, runtime: RuntimeKind) {
     if let Some((wire, scope)) = &plan.wire_api {
         row(out, "wire_api", wire, *scope);
     }
+    for (name, (path, scope)) in &plan.env_files {
+        row(
+            out,
+            "token",
+            &format!("{name} from {}", path.display()),
+            *scope,
+        );
+    }
     for (name, (_, scope)) in &plan.env {
         row(out, "env", &format!("{name} (value not shown)"), *scope);
     }
@@ -734,6 +782,68 @@ impl Source {
             },
         }
     }
+}
+
+/// The most a token file may hold.
+const MAX_TOKEN_FILE: u64 = 64 * 1024;
+
+/// A token the operator keeps in a file for one agent's environment (a
+/// `claude setup-token` token, an API key). The file is opened without
+/// following a link anywhere in its path, and must be a regular file of this
+/// user (or root) that nobody else can read or write. The error never carries
+/// the contents.
+fn read_token_file(path: &Path) -> Result<Secret> {
+    use std::io::Read;
+    use std::os::fd::FromRawFd;
+    let c_path = std::ffi::CString::new(std::os::unix::ffi::OsStrExt::as_bytes(path.as_os_str()))
+        .map_err(|_| anyhow!("the path contains a NUL byte"))?;
+    // SAFETY: open_how is plain integers; all-zero is its default.
+    let mut how: libc::open_how = unsafe { std::mem::zeroed() };
+    how.flags = (libc::O_RDONLY | libc::O_NONBLOCK | libc::O_NOCTTY | libc::O_CLOEXEC) as u64;
+    how.resolve = libc::RESOLVE_NO_SYMLINKS | libc::RESOLVE_NO_MAGICLINKS;
+    // SAFETY: `c_path` and `how` are valid for the call; the result is checked.
+    let fd = unsafe {
+        libc::syscall(
+            libc::SYS_openat2,
+            libc::AT_FDCWD,
+            c_path.as_ptr(),
+            &how as *const libc::open_how,
+            std::mem::size_of::<libc::open_how>(),
+        )
+    };
+    if fd < 0 {
+        let e = std::io::Error::last_os_error();
+        bail!("{}: {e} (no link may be followed)", path.display());
+    }
+    // SAFETY: openat2 returned a new descriptor that nothing else owns.
+    let file = unsafe { std::fs::File::from_raw_fd(fd as i32) };
+    let meta = file.metadata()?;
+    if !meta.is_file() {
+        bail!("{} is not a regular file", path.display());
+    }
+    // SAFETY: geteuid has no preconditions.
+    let me = unsafe { libc::geteuid() };
+    if meta.uid() != me && meta.uid() != 0 {
+        bail!("{} is owned by another user", path.display());
+    }
+    if meta.mode() & 0o077 != 0 {
+        bail!(
+            "{} can be read or written by other users (chmod 600)",
+            path.display()
+        );
+    }
+    if meta.len() > MAX_TOKEN_FILE {
+        bail!("{} is larger than {MAX_TOKEN_FILE} bytes", path.display());
+    }
+    let mut text = String::new();
+    file.take(MAX_TOKEN_FILE)
+        .read_to_string(&mut text)
+        .map_err(|_| anyhow!("{} is not text", path.display()))?;
+    let text = text.trim();
+    if text.is_empty() {
+        bail!("{} is empty", path.display());
+    }
+    Ok(Secret(text.to_string()))
 }
 
 fn resolve_secret(source: &Source) -> Result<Secret> {
@@ -1082,6 +1192,124 @@ mod tests {
         let report = l.describe();
         assert!(report.contains("ANTHROPIC_AUTH_HELPER"), "{report}");
         assert!(!report.contains("super-secret-value-123"), "{report}");
+    }
+
+    fn token_file(dir: &Path, name: &str, text: &str, mode: u32) -> PathBuf {
+        use std::os::unix::fs::PermissionsExt;
+        let path = dir.join(name);
+        std::fs::write(&path, text).unwrap();
+        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(mode)).unwrap();
+        path
+    }
+
+    #[test]
+    fn token_files_become_environment_secrets_for_their_own_agents_only() {
+        let dir = tempfile::tempdir().unwrap();
+        let claude = token_file(dir.path(), "claude", "oauth-token-claude\n", 0o600);
+        let codex = token_file(dir.path(), "codex", "sk-codex-token", 0o400);
+        let pi = token_file(dir.path(), "pi", "pi-key", 0o600);
+        let l = layers(
+            "",
+            &format!(
+                "[claude.env_files]\nCLAUDE_CODE_OAUTH_TOKEN = \"{}\"\n\
+[codex.env_files]\nOPENAI_API_KEY = \"{}\"\n\
+[agents.pi-1.env_files]\nANTHROPIC_API_KEY = \"{}\"",
+                claude.display(),
+                codex.display(),
+                pi.display()
+            ),
+            "",
+        );
+        let secrets = |e: Endpoint| -> Vec<(String, String)> {
+            e.secret_env
+                .iter()
+                .map(|(n, s)| (n.clone(), s.expose().to_string()))
+                .collect()
+        };
+        let c = l.resolve(RuntimeKind::Claude, "claude-1", None).unwrap();
+        // Never in the plain environment or the origin that reaches the event log.
+        assert!(c.env.is_empty());
+        assert!(!c
+            .origin
+            .as_deref()
+            .unwrap_or("")
+            .contains("oauth-token-claude"));
+        assert_eq!(
+            secrets(c),
+            [(
+                "CLAUDE_CODE_OAUTH_TOKEN".to_string(),
+                "oauth-token-claude".to_string()
+            )]
+        );
+        let x = l.resolve(RuntimeKind::Codex, "codex-1", None).unwrap();
+        assert_eq!(
+            secrets(x),
+            [("OPENAI_API_KEY".to_string(), "sk-codex-token".to_string())]
+        );
+        // pi has no section of its own: one agent's table, nobody else's.
+        let p = l.resolve(RuntimeKind::Pi, "pi-1", None).unwrap();
+        assert_eq!(
+            secrets(p),
+            [("ANTHROPIC_API_KEY".to_string(), "pi-key".to_string())]
+        );
+        assert!(l
+            .resolve(RuntimeKind::Pi, "pi-2", None)
+            .unwrap()
+            .secret_env
+            .is_empty());
+        // The report names the variable and the file, never a value.
+        assert!(l.describe().contains("CLAUDE_CODE_OAUTH_TOKEN from "));
+        assert!(!l.describe().contains("oauth-token-claude") && !l.describe().contains("pi-key"));
+    }
+
+    #[test]
+    fn a_token_file_is_read_only_when_it_is_private_plain_and_not_a_link() {
+        use std::os::unix::fs::symlink;
+        let dir = tempfile::tempdir().unwrap();
+        let resolve = |path: &Path| {
+            layers(
+                "",
+                &format!(
+                    "[claude.env_files]\nCLAUDE_CODE_OAUTH_TOKEN = \"{}\"",
+                    path.display()
+                ),
+                "",
+            )
+            .resolve(RuntimeKind::Claude, "claude-1", None)
+        };
+        let good = token_file(dir.path(), "good", "tok", 0o600);
+        assert!(resolve(&good).is_ok());
+        for (name, mode) in [("group", 0o640), ("world", 0o604), ("writable", 0o620)] {
+            let path = token_file(dir.path(), name, "tok-secret-value", mode);
+            let err = format!("{:#}", resolve(&path).unwrap_err());
+            assert!(err.contains("chmod 600"), "{name}: {err}");
+            assert!(!err.contains("tok-secret-value"), "{err}");
+        }
+        let link = dir.path().join("link");
+        symlink(&good, &link).unwrap();
+        assert!(resolve(&link).is_err(), "followed a link");
+        // A link in a parent directory is not followed either.
+        let real = dir.path().join("real");
+        std::fs::create_dir(&real).unwrap();
+        token_file(&real, "t", "tok", 0o600);
+        symlink(&real, dir.path().join("alias")).unwrap();
+        assert!(resolve(&dir.path().join("alias/t")).is_err());
+        assert!(resolve(dir.path()).is_err(), "a directory");
+        assert!(resolve(&token_file(dir.path(), "empty", "  \n", 0o600)).is_err());
+        assert!(resolve(&token_file(dir.path(), "big", &"x".repeat(70_000), 0o600)).is_err());
+        assert!(resolve(&dir.path().join("missing")).is_err());
+    }
+
+    #[test]
+    fn token_file_names_must_be_plain_variables_that_crew_does_not_own() {
+        for bad in ["CREW_IDENTITY", "1BAD", "A-B", "LD_PRELOAD"] {
+            let config: FileConfig =
+                toml::from_str(&format!("[claude.env_files]\n\"{bad}\" = \"/x\"")).unwrap();
+            assert!(config.validate(Path::new("/cfg")).is_err(), "{bad}");
+        }
+        let both: FileConfig =
+            toml::from_str("[claude.env]\nT = \"1\"\n[claude.env_files]\nT = \"/x\"").unwrap();
+        assert!(both.validate(Path::new("/cfg")).is_err());
     }
 
     #[test]

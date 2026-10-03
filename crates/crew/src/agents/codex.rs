@@ -144,6 +144,14 @@ impl AgentRuntime for CodexRuntime {
             .iter()
             .map(|(k, v)| (k.clone(), v.clone()))
             .collect();
+        // Tokens the operator keeps in files: the TUI and the app-server both call
+        // the model, so both get them.
+        env.extend(
+            endpoint
+                .secret_env
+                .iter()
+                .map(|(name, secret)| (name.clone(), secret.expose().to_string())),
+        );
         // Shared by the TUI and the app-server (which owns the session and writes
         // its rollout): in a sandbox both keep Codex's home in the private one.
         if let Some(home) = ctx.private_home {
@@ -790,6 +798,48 @@ mod tests {
         assert!(dir_a.starts_with(run.path().join("crew")));
         let mode = std::fs::metadata(dir_a).unwrap().permissions().mode() & 0o777;
         assert_eq!(mode, 0o700);
+    }
+
+    #[test]
+    fn a_token_from_a_file_goes_into_the_process_environment_and_nowhere_else() {
+        let dir = tempfile::tempdir().unwrap();
+        let agent = agent();
+        let identity = dir.path().join("identity.json");
+        let endpoint = Endpoint {
+            secret_env: vec![(
+                "OPENAI_API_KEY".into(),
+                crate::endpoints::Secret::new("sk-codex-value"),
+            )],
+            ..Endpoint::default()
+        };
+        let spec = CodexRuntime
+            .launch(&LaunchContext {
+                agent: &agent,
+                settings: &AgentSettings {
+                    socket_delivery: true,
+                    ..AgentSettings::default()
+                },
+                crew_bin: Path::new("/opt/crew"),
+                agent_dir: dir.path(),
+                identity_path: &identity,
+                briefing: "be helpful",
+                resume: false,
+                endpoint: &endpoint,
+                long_context: false,
+                private_home: None,
+            })
+            .unwrap();
+        assert!(spec
+            .env
+            .contains(&("OPENAI_API_KEY".into(), "sk-codex-value".into())));
+        // Not on a command line, not in the files the daemon writes for the session.
+        assert!(!spec.args.iter().any(|a| a.contains("sk-codex-value")));
+        // The app-server calls the model too: it gets the token, and no command line has it.
+        let sidecar = spec.sidecar.as_ref().expect("an app-server");
+        assert!(sidecar
+            .env
+            .contains(&("OPENAI_API_KEY".into(), "sk-codex-value".into())));
+        assert!(!sidecar.args.iter().any(|a| a.contains("sk-codex-value")));
     }
 
     #[test]
