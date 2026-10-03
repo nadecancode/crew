@@ -473,3 +473,39 @@ fn a_start_that_fails_to_register_leaves_nothing_behind() {
         .collect();
     assert!(left.is_empty(), "{left:?}");
 }
+
+#[test]
+fn a_command_that_starts_a_daemon_is_refused_inside_an_agent_before_it_starts_one() {
+    let s = Session::new();
+    std::fs::create_dir_all(&s.workspace).unwrap();
+    let team = s.team("refused", vec![agent("a", "w", &[])], vec![]);
+    let team_file = s.root().join("team.yaml");
+    std::fs::write(&team_file, team.to_yaml().unwrap()).unwrap();
+    let ws = s.workspace.to_string_lossy().into_owned();
+    let team_file = team_file.to_string_lossy().into_owned();
+    for args in [
+        vec!["-C", &ws, "start"],
+        vec!["-C", &ws, "run", &team_file, "--no-attach"],
+    ] {
+        let refused = s
+            .command()
+            .env("CREW_IDENTITY", s.root().join("no-such-identity.json"))
+            .args(&args)
+            .output()
+            .unwrap();
+        assert!(!refused.status.success(), "{args:?} succeeded");
+        assert!(
+            stderr(&refused).contains("CREW_IDENTITY is set"),
+            "{args:?}: {}",
+            stderr(&refused)
+        );
+        assert!(
+            !s.workspace.join(".crew").exists(),
+            "{args:?} left workspace state behind"
+        );
+        assert!(
+            !s.root().join("run/crew").exists(),
+            "{args:?} left a socket directory behind"
+        );
+    }
+}

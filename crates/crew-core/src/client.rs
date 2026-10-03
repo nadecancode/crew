@@ -99,6 +99,20 @@ pub struct Client {
     closed: bool,
 }
 
+/// Operator commands are not available to an agent: refuse when this process
+/// runs as one (`CREW_IDENTITY` is set). Commands that start a daemon call
+/// this before they start it.
+pub fn refuse_in_agent_context() -> ClientResult<()> {
+    if std::env::var_os(crate::paths::IDENTITY_ENV).is_none() {
+        return Ok(());
+    }
+    let agent_id = Identity::from_env()
+        .map(|identity| identity.agent_id)
+        .filter(|id| crate::util::is_valid_id(id))
+        .unwrap_or_else(|| "unknown".into());
+    Err(ClientError::AgentContext { agent_id })
+}
+
 impl Client {
     pub fn connect(socket: &Path) -> ClientResult<Self> {
         let stream = UnixStream::connect(socket).map_err(|source| ClientError::Connect {
@@ -117,13 +131,7 @@ impl Client {
 
     /// Connect and authenticate as the human operator.
     pub fn operator(socket: &Path, client: &str) -> ClientResult<(Self, HelloInfo)> {
-        if std::env::var_os(crate::paths::IDENTITY_ENV).is_some() {
-            let agent_id = Identity::from_env()
-                .map(|identity| identity.agent_id)
-                .filter(|id| crate::util::is_valid_id(id))
-                .unwrap_or_else(|| "unknown".into());
-            return Err(ClientError::AgentContext { agent_id });
-        }
+        refuse_in_agent_context()?;
         let token = crate::paths::read_operator_token(socket).map_err(|error| {
             ClientError::OperatorToken {
                 path: crate::paths::operator_token_path(socket)

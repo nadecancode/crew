@@ -59,6 +59,9 @@ fn daemon_reachable(info: &DaemonInfo) -> bool {
 
 /// The daemon for `workspace`, starting one if none is running.
 pub fn ensure_daemon(workspace: &Path) -> Result<DaemonInfo> {
+    // Before anything is created: an agent must not leave a daemon (or its
+    // files) behind just to be refused when it then connects as the operator.
+    crew_core::client::refuse_in_agent_context()?;
     let workspace = workspace
         .canonicalize()
         .with_context(|| format!("resolving {}", workspace.display()))?;

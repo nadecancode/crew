@@ -126,6 +126,8 @@ design the team again",
 /// Start the daemon for `workspace`, load the team into it, and open the
 /// dashboard.
 fn launch(config: TeamConfig, workspace: &Path, no_attach: bool) -> Result<()> {
+    // Before the workspace is created or the daemon started.
+    crew_core::client::refuse_in_agent_context()?;
     // A config file that cannot be used is reported here, before anything
     // starts, rather than as one failed agent after another.
     let layers = Layers::load(workspace);
