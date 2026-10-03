@@ -18,6 +18,58 @@ fn app() -> App {
     app
 }
 
+#[test]
+fn inspector_text_never_renders_terminal_controls() {
+    let poison = "\u{1b}]52;c;Y29tbWFuZA==\u{7}\u{9b}2J\tvisible";
+    let mut snapshot = fixture::snapshot(NOW);
+    let agent = snapshot
+        .agents
+        .iter_mut()
+        .find(|a| a.id == "claude-1")
+        .unwrap();
+    agent.name = poison.into();
+    agent.role = poison.into();
+    agent.task = Some(poison.into());
+    agent.model = Some(poison.into());
+    agent.running_model = Some(poison.into());
+    agent.model_name = Some(poison.into());
+    agent.effort = Some(poison.into());
+    agent.workdir = poison.into();
+    agent.session_id = Some(poison.into());
+    agent.backend_ref = Some(poison.into());
+    agent.branch = Some(poison.into());
+    let mut task = fixture::task("salty", "claude-1", TaskStatus::Done, &[], NOW);
+    task.title = poison.into();
+    task.result = Some(poison.into());
+    task.artifacts[0].kind = poison.into();
+    task.artifacts[0].value = poison.into();
+    task.artifacts[0].description = poison.into();
+    snapshot.tasks = vec![task];
+    for message in &mut snapshot.messages {
+        message.body = poison.into();
+    }
+    for event in &mut snapshot.events {
+        event.message = poison.into();
+    }
+    let mut app = App::new();
+    app.apply_snapshot(snapshot, NOW);
+    app.detail.agent = "claude-1".into();
+    for view in [View::Detail, View::Tasks, View::Logs] {
+        app.view = view;
+        let mut terminal = Terminal::new(TestBackend::new(180, 80)).unwrap();
+        terminal
+            .draw(|frame| views::render(frame, &app, &Theme::truecolor(), NOW))
+            .unwrap();
+        for cell in &terminal.backend().buffer().content {
+            assert!(
+                !cell.symbol().chars().any(char::is_control),
+                "{view:?} rendered a terminal control: {:?}",
+                cell.symbol()
+            );
+        }
+    }
+}
+
 /// How many member boxes are on screen: each leads with its runtime's glyph.
 /// (The hub writes its CLI's glyph too, before its model's proper name.)
 fn member_marks(screen: &str) -> usize {

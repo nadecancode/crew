@@ -1,5 +1,6 @@
 //! Small helpers shared across crates: time, identifiers, validation.
 
+use std::borrow::Cow;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use chrono::{Local, TimeZone};
@@ -114,6 +115,26 @@ pub fn truncate_chars(s: &str, max: usize) -> String {
     let mut out: String = s.chars().take(max.saturating_sub(1)).collect();
     out.push('…');
     out
+}
+
+/// Text safe to write to a terminal cell: drop controls and expand tabs.
+pub fn printable(text: &str) -> Cow<'_, str> {
+    if !text.chars().any(char::is_control) {
+        return Cow::Borrowed(text);
+    }
+    Cow::Owned(
+        text.chars()
+            .filter_map(|ch| {
+                if ch == '\t' {
+                    Some(' ')
+                } else if ch.is_control() {
+                    None
+                } else {
+                    Some(ch)
+                }
+            })
+            .collect(),
+    )
 }
 
 /// Collapse a body to a single display line.

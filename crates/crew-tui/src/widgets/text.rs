@@ -1,9 +1,24 @@
 //! Display-width aware string helpers.
 
+use std::borrow::Cow;
+
+use crew_core::util::printable;
+use ratatui::text::Line;
 use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
 
 pub fn width(s: &str) -> usize {
     UnicodeWidthStr::width(s)
+}
+
+/// Preserve styling while making every span safe for Paragraph rendering.
+pub(crate) fn printable_lines(lines: &mut [Line<'_>]) {
+    for line in lines {
+        for span in &mut line.spans {
+            if let Cow::Owned(text) = printable(&span.content) {
+                span.content = Cow::Owned(text);
+            }
+        }
+    }
 }
 
 /// Truncate to at most `max` columns, ending in `…` when cut.

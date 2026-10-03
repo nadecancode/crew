@@ -6,6 +6,7 @@
 //! was picked and the objective that was typed.
 
 use anyhow::{Context, Result};
+use crew_core::util::printable;
 use ratatui::buffer::Buffer;
 use ratatui::crossterm::event::{
     self as term, Event as TermEvent, KeyCode, KeyEvent, KeyEventKind, KeyModifiers, MouseButton,
@@ -21,7 +22,7 @@ use unicode_width::UnicodeWidthChar;
 use crate::slash::{self, slash_command};
 use crate::theme::Theme;
 use crate::widgets::canvas::put_str;
-use crate::widgets::text::{fit, pad_right, width};
+use crate::widgets::text::{fit, pad_right, printable_lines, width};
 
 /// Longest objective the input accepts, in characters.
 const MAX_OBJECTIVE_CHARS: usize = 4000;
@@ -365,7 +366,10 @@ fn panel(buf: &mut Buffer, rect: Rect, title: &str, focused: bool, theme: &Theme
     let block = Block::default()
         .borders(Borders::ALL)
         .border_style(theme.fg(if focused { theme.accent } else { theme.dim }))
-        .title(Span::styled(format!(" {title} "), theme.bold(theme.text)));
+        .title(Span::styled(
+            format!(" {} ", printable(title)),
+            theme.bold(theme.text),
+        ));
     let inner = block.inner(rect);
     block.render(rect, buf);
     inner
@@ -538,6 +542,7 @@ fn render_preview(buf: &mut Buffer, rect: Rect, launcher: &Launcher, theme: &The
             lines.push(Line::styled(line.to_string(), theme.fg(theme.muted)));
         }
     }
+    printable_lines(&mut lines);
     Paragraph::new(lines)
         .wrap(Wrap { trim: false })
         .scroll((launcher.scroll, 0))
@@ -619,6 +624,33 @@ pub fn render_to_string(launcher: &Launcher, width: u16, height: u16) -> String 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn style_preview_never_renders_terminal_controls() {
+        let poison = "\u{1b}]52;c;Y29tbWFuZA==\u{7}\u{9b}2J\tvisible";
+        let launcher = Launcher::new(
+            "/work",
+            vec![StyleChoice {
+                name: poison.into(),
+                description: poison.into(),
+                details: vec![(poison.into(), poison.into())],
+                instructions: poison.into(),
+                ..StyleChoice::default()
+            }],
+            0,
+            "",
+        );
+        let area = Rect::new(0, 0, 180, 40);
+        let mut buf = Buffer::empty(area);
+        render_into(&mut buf, area, &launcher, &Theme::truecolor());
+        for cell in &buf.content {
+            assert!(
+                !cell.symbol().chars().any(char::is_control),
+                "{:?}",
+                cell.symbol()
+            );
+        }
+    }
 
     fn key(code: KeyCode) -> KeyEvent {
         KeyEvent::new(code, KeyModifiers::NONE)

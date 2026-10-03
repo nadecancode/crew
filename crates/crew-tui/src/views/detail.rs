@@ -3,7 +3,7 @@
 //! session), and anything that went wrong.
 
 use crew_core::types::{Agent, Message, MessageType, RuntimeKind, Task};
-use crew_core::util::{fmt_clock, fmt_datetime, fmt_elapsed, one_line};
+use crew_core::util::{fmt_clock, fmt_datetime, fmt_elapsed, one_line, printable};
 use ratatui::buffer::Buffer;
 use ratatui::layout::{Constraint, Layout, Rect};
 use ratatui::style::Style;
@@ -16,7 +16,7 @@ use crate::transcript::Part;
 use crate::widgets::agent_box::status_tail;
 use crate::widgets::ansi;
 use crate::widgets::canvas::{fill_row, put_str};
-use crate::widgets::text::{fit, width};
+use crate::widgets::text::{fit, printable_lines, width};
 
 const HINTS: &str =
     "esc back · tab next agent · click terminal to type · f full · i type · m message · r refresh · d diff · p pause · R restart · k kill";
@@ -190,7 +190,7 @@ fn panel_in(
     buf: &mut Buffer,
     area: Rect,
     title: &str,
-    lines: Vec<Line<'static>>,
+    mut lines: Vec<Line<'static>>,
     border: Style,
     theme: &Theme,
 ) {
@@ -200,7 +200,11 @@ fn panel_in(
     let block = Block::default()
         .borders(Borders::ALL)
         .border_style(border)
-        .title(Span::styled(format!(" {title} "), theme.fg(theme.muted)));
+        .title(Span::styled(
+            format!(" {} ", printable(title)),
+            theme.fg(theme.muted),
+        ));
+    printable_lines(&mut lines);
     Paragraph::new(lines).block(block).render(area, buf);
 }
 
@@ -545,15 +549,6 @@ fn problem_lines(app: &App, agent: &Agent, theme: &Theme) -> Vec<Line<'static>> 
         .collect()
 }
 
-/// Terminal output is shown as captured; control characters would corrupt the
-/// dashboard, so they are dropped and tabs expanded.
-fn sanitize(line: &str) -> String {
-    line.chars()
-        .map(|c| if c == '\t' { ' ' } else { c })
-        .filter(|c| !c.is_control())
-        .collect()
-}
-
 /// The pane scrolled up: the agent's session transcript, `scroll` lines
 /// above its end. False when there is no transcript to show.
 fn render_transcript(buf: &mut Buffer, area: Rect, app: &App, theme: &Theme, now: i64) -> bool {
@@ -575,7 +570,7 @@ fn render_transcript(buf: &mut Buffer, area: Rect, app: &App, theme: &Theme, now
                 Part::Tool => theme.fg(theme.muted),
                 Part::Reply | Part::Blank => theme.fg(theme.text),
             };
-            Line::from(Span::styled(format!(" {}", sanitize(&line.text)), style))
+            Line::from(Span::styled(format!(" {}", printable(&line.text)), style))
         })
         .collect();
     let age = detail
@@ -677,7 +672,7 @@ fn render_output(buf: &mut Buffer, area: Rect, app: &App, theme: &Theme, now: i6
                 _ => theme.fg(theme.text),
             };
             lines.push(Line::from(Span::styled(
-                format!(" {}", sanitize(line)),
+                format!(" {}", printable(line)),
                 style,
             )));
         } else {
