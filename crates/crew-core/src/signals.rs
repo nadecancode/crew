@@ -104,6 +104,14 @@ mod tests {
     #[test]
     fn termination_waits_for_cleanup_and_preserves_the_signal_status() {
         if let Some(marker) = std::env::var_os("CREW_SIGNAL_TEST_MARKER") {
+            // The test must start from known dispositions, including under nohup
+            // or a backgrounded shell. The ignored-signal case is installed below.
+            for signal in [libc::SIGTERM, libc::SIGHUP, libc::SIGQUIT, libc::SIGINT] {
+                // SAFETY: changes only this test child's standard signal actions.
+                unsafe {
+                    libc::signal(signal, libc::SIG_DFL);
+                }
+            }
             let core_limit = libc::rlimit {
                 rlim_cur: 0,
                 rlim_max: 0,
