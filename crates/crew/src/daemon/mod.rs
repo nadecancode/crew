@@ -287,7 +287,6 @@ pub struct Inner {
     /// The operator's credential for this run (design-b3.md §2.1): here and in
     /// the 0600 token file next to the socket, nowhere else (not the database,
     /// logs, events, pushes or agent environments).
-    #[allow(dead_code)] // checked when operator hellos require it (C-T2)
     pub(crate) operator_token: String,
     /// `<workspace>/.crew`, held open from the start (design-b3.md §3.4, D2).
     /// Agent directories are reached from it one component at a time, never

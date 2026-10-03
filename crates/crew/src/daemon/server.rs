@@ -188,7 +188,13 @@ impl Daemon {
         token: Option<String>,
     ) -> Result<Who, RpcError> {
         match role {
-            Role::Operator => Ok(Who::Operator),
+            Role::Operator => match token {
+                None => Err(RpcError::unauthorized("operator token required")),
+                Some(token) if ct_eq(&self.operator_token, &token) => Ok(Who::Operator),
+                Some(_) => Err(RpcError::unauthorized(
+                    "operator token does not match this daemon (it may have restarted; reconnect)",
+                )),
+            },
             Role::Agent => {
                 let id = agent_id.ok_or_else(|| RpcError::unauthorized("agent_id is required"))?;
                 let token = token.ok_or_else(|| RpcError::unauthorized("token is required"))?;

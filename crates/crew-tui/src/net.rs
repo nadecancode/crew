@@ -118,7 +118,7 @@ pub fn spawn_subscriber(socket: PathBuf, tx: Sender<UiEvent>, stop: Arc<AtomicBo
                 return;
             }
             if let Err(error) = session {
-                if error.is_protocol_mismatch() {
+                if error.is_protocol_mismatch() || error.is_operator_auth_error() {
                     let _ = tx.send(UiEvent::Fatal(error));
                     return;
                 }
@@ -478,6 +478,8 @@ mod tests {
     use super::*;
     use crate::fixture;
 
+    const OPERATOR_TOKEN: &str = "synthetic-tui-operator-token";
+
     struct FakeDaemon {
         path: PathBuf,
         stop: Arc<AtomicBool>,
@@ -501,6 +503,11 @@ mod tests {
             delay: Option<(&'static str, Duration)>,
         ) -> Self {
             let _ = std::fs::remove_file(path);
+            crew_core::paths::write_private_file(
+                &crew_core::paths::operator_token_path(path),
+                OPERATOR_TOKEN.as_bytes(),
+            )
+            .unwrap();
             let listener = UnixListener::bind(path).unwrap();
             listener.set_nonblocking(true).unwrap();
             let daemon = Self {
@@ -578,6 +585,10 @@ mod tests {
                 }
             }
             let frame = match &request.call {
+                Call::Hello(hello) if hello.token.as_deref() != Some(OPERATOR_TOKEN) => ServerFrame::err(
+                    request.id,
+                    RpcError::unauthorized("operator token does not match this daemon (it may have restarted; reconnect)"),
+                ),
                 Call::Hello(_) => ServerFrame::ok(
                     request.id,
                     serde_json::to_value(HelloInfo {
@@ -617,6 +628,48 @@ mod tests {
             if writer.write_all(&out).is_err() {
                 return;
             }
+        }
+    }
+
+    #[test]
+    fn subscriber_reports_operator_token_errors_and_stops_reconnecting() {
+        use std::os::unix::fs::PermissionsExt;
+        for (case, expected) in [
+            ("missing", "no operator token"),
+            ("mode", "mode 0600"),
+            ("wrong", "does not match"),
+        ] {
+            let temp = tempfile::tempdir().unwrap();
+            let path = temp.path().join("daemon.sock");
+            let token = crew_core::paths::operator_token_path(&path);
+            let daemon = FakeDaemon::start(&path);
+            match case {
+                "missing" => std::fs::remove_file(&token).unwrap(),
+                "mode" => std::fs::set_permissions(&token, std::fs::Permissions::from_mode(0o644))
+                    .unwrap(),
+                "wrong" => {
+                    crew_core::paths::write_private_file(&token, b"wrong-credential-do-not-print")
+                        .unwrap()
+                }
+                _ => unreachable!(),
+            }
+            let (tx, rx) = mpsc::channel();
+            let stop = Arc::new(AtomicBool::new(false));
+            spawn_subscriber(path, tx, stop.clone());
+            let event = rx.recv_timeout(Duration::from_secs(3)).unwrap();
+            let UiEvent::Fatal(error) = event else {
+                panic!("operator credentials must give a visible terminal error");
+            };
+            assert!(error.to_string().contains(expected), "{error}");
+            assert!(!error.to_string().contains("wrong-credential-do-not-print"));
+            thread::sleep(RECONNECT_DELAY + Duration::from_millis(100));
+            assert!(
+                rx.try_recv().is_err(),
+                "credentials must not cause a reconnect loop"
+            );
+            assert_eq!(daemon.calls().len(), usize::from(case == "wrong"));
+            stop.store(true, Ordering::Relaxed);
+            daemon.stop();
         }
     }
 

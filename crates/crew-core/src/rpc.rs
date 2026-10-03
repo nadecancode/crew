@@ -19,7 +19,7 @@ use crate::types::{
 /// Bump for new/renamed enum values, removed/renamed fields or changed meanings.
 /// New optional fields with `serde(default)` do not require a bump.
 /// Peers require an exact match; restart running teams after upgrading.
-pub const PROTOCOL_VERSION: u32 = 2;
+pub const PROTOCOL_VERSION: u32 = 3;
 
 #[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
@@ -770,7 +770,7 @@ mod compatibility_tests {
             "event_level": enum_values(EventLevel::ALL), "transcript_kind": enum_values(TranscriptKind::ALL),
             "role": enum_values(&roles), "push": push_kinds,
         });
-        let version_2 = json!({
+        let version_3 = json!({
             "agent_status": ["spawning","idle","working","waiting","blocked","done","failed","stopped"],
             "task_status": ["queued","ready","working","waiting","blocked","review","done","failed"],
             "message_type": ["task","message","question","answer","status","review_request","review_result","artifact","error"],
@@ -780,7 +780,7 @@ mod compatibility_tests {
         });
         assert_eq!(
             (PROTOCOL_VERSION, actual),
-            (2, version_2),
+            (3, version_3),
             "bump PROTOCOL_VERSION and update this list"
         );
     }

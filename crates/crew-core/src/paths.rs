@@ -396,8 +396,8 @@ pub fn operator_token_path(socket: &Path) -> PathBuf {
     }
 }
 
-/// Read an existing private operator credential. Missing files remain optional
-/// during the plumbing rollout; every other error fails closed. Never log it.
+/// Read an existing private operator credential. A missing file returns None;
+/// callers decide whether it is required. Every other error fails closed.
 pub fn read_operator_token(socket: &Path) -> Result<Option<String>> {
     use std::io::Read;
     if socket.file_name().is_none() {

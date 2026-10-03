@@ -38,6 +38,8 @@ pub enum ClientError {
     IncompatibleProtocol(String),
     #[error("cannot read operator token at {path}: {message}")]
     OperatorToken { path: String, message: String },
+    #[error("no operator token at {path}: operator commands must run as the user who started the daemon, outside agent sandboxes")]
+    MissingOperatorToken { path: String },
 }
 
 impl ClientError {
@@ -52,6 +54,13 @@ impl ClientError {
     }
     pub fn is_protocol_mismatch(&self) -> bool {
         matches!(self, Self::Version { .. } | Self::IncompatibleProtocol(_))
+    }
+    /// An operator credential failure needs a visible error, not a reconnect loop.
+    pub fn is_operator_auth_error(&self) -> bool {
+        matches!(
+            self,
+            Self::OperatorToken { .. } | Self::MissingOperatorToken { .. }
+        ) || matches!(self, Self::Rpc(error) if error.code == "unauthorized")
     }
 }
 
@@ -112,11 +121,16 @@ impl Client {
                 message: format!("{error:#}"),
             }
         })?;
+        let token = token.ok_or_else(|| ClientError::MissingOperatorToken {
+            path: crate::paths::operator_token_path(socket)
+                .display()
+                .to_string(),
+        })?;
         let mut c = Self::connect(socket)?;
         let info = check_hello(c.call(Call::Hello(Hello {
             role: Role::Operator,
             agent_id: None,
-            token,
+            token: Some(token),
             client: client.to_string(),
             protocol: PROTOCOL_VERSION,
         })))?;
@@ -345,55 +359,103 @@ mod tests {
     use serde_json::json;
 
     #[test]
-    fn operator_hello_carries_the_token_file_and_missing_file_keeps_legacy_bytes() {
+    fn missing_token_file_is_a_clear_error() {
         use std::os::unix::net::UnixListener;
-        for token in [None, Some("synthetic-operator-secret")] {
-            let temp = tempfile::tempdir().unwrap();
-            let socket = temp.path().join("daemon.sock");
-            if let Some(token) = token {
-                crate::paths::write_private_file(&socket.with_extension("token"), token.as_bytes())
-                    .unwrap();
+        let temp = tempfile::tempdir().unwrap();
+        let socket = temp.path().join("daemon.sock");
+        let listener = UnixListener::bind(&socket).unwrap();
+        listener.set_nonblocking(true).unwrap();
+        let peer = std::thread::spawn(move || {
+            let deadline = std::time::Instant::now() + Duration::from_millis(200);
+            while std::time::Instant::now() < deadline {
+                match listener.accept() {
+                    Ok((mut stream, _)) => {
+                        stream.set_nonblocking(false).unwrap();
+                        stream
+                            .set_read_timeout(Some(Duration::from_secs(1)))
+                            .unwrap();
+                        let mut line = String::new();
+                        BufReader::new(stream.try_clone().unwrap())
+                            .read_line(&mut line)
+                            .unwrap();
+                        let request: Request = serde_json::from_str(&line).unwrap();
+                        send_frame(
+                            &mut stream,
+                            ServerFrame::ok(
+                                request.id,
+                                json!({"role":"operator", "version":"test", "protocol":PROTOCOL_VERSION, "pid":1}),
+                            ),
+                        );
+                        return true;
+                    }
+                    Err(error) if error.kind() == io::ErrorKind::WouldBlock => {
+                        std::thread::sleep(Duration::from_millis(1))
+                    }
+                    Err(error) => panic!("accept failed: {error}"),
+                }
             }
-            let listener = UnixListener::bind(&socket).unwrap();
-            let peer = std::thread::spawn(move || {
-                let (mut stream, _) = listener.accept().unwrap();
-                let mut line = String::new();
-                BufReader::new(stream.try_clone().unwrap())
-                    .read_line(&mut line)
-                    .unwrap();
-                let request: Request = serde_json::from_str(&line).unwrap();
-                let Call::Hello(hello) = request.call else {
-                    panic!("expected Hello")
-                };
-                send_frame(
-                    &mut stream,
-                    ServerFrame::ok(
-                        request.id,
-                        json!({"role":"operator", "version":"test", "protocol":PROTOCOL_VERSION, "pid":1}),
-                    ),
-                );
-                (line, hello)
-            });
-            let result = Client::operator(&socket, "token-test");
-            let (line, hello) = peer.join().unwrap();
-            assert!(result.is_ok());
-            assert_eq!(hello.token.as_deref(), token);
-            if token.is_none() {
-                let expected = serde_json::to_string(&Request {
-                    id: 1,
-                    call: Call::Hello(Hello {
-                        role: Role::Operator,
-                        agent_id: None,
-                        token: None,
-                        client: "token-test".into(),
-                        protocol: PROTOCOL_VERSION,
-                    }),
-                })
-                .unwrap()
-                    + "\n";
-                assert_eq!(line, expected);
-            }
-        }
+            false
+        });
+        let result = Client::operator(&socket, "test");
+        let connected = peer.join().unwrap();
+        let error = result.err().expect("missing operator token must fail");
+        assert_eq!(error.to_string(), format!(
+            "no operator token at {}: operator commands must run as the user who started the daemon, outside agent sandboxes",
+            crate::paths::operator_token_path(&socket).display()));
+        assert!(
+            !connected,
+            "missing token must be refused before connecting"
+        );
+    }
+
+    #[test]
+    fn operator_hello_carries_the_token_file() {
+        use std::os::unix::net::UnixListener;
+        let token = "synthetic-operator-secret";
+        let temp = tempfile::tempdir().unwrap();
+        let socket = temp.path().join("daemon.sock");
+        crate::paths::write_private_file(
+            &crate::paths::operator_token_path(&socket),
+            token.as_bytes(),
+        )
+        .unwrap();
+        let listener = UnixListener::bind(&socket).unwrap();
+        let peer = std::thread::spawn(move || {
+            let (mut stream, _) = listener.accept().unwrap();
+            let mut line = String::new();
+            BufReader::new(stream.try_clone().unwrap())
+                .read_line(&mut line)
+                .unwrap();
+            let request: Request = serde_json::from_str(&line).unwrap();
+            let Call::Hello(hello) = request.call else {
+                panic!("expected Hello")
+            };
+            send_frame(
+                &mut stream,
+                ServerFrame::ok(
+                    request.id,
+                    json!({"role":"operator", "version":"test", "protocol":PROTOCOL_VERSION, "pid":1}),
+                ),
+            );
+            (line, hello)
+        });
+        let result = Client::operator(&socket, "token-test");
+        let (line, hello) = peer.join().unwrap();
+        assert!(result.is_ok());
+        assert_eq!(hello.token.as_deref(), Some(token));
+        let expected = serde_json::to_string(&Request {
+            id: 1,
+            call: Call::Hello(Hello {
+                role: Role::Operator,
+                agent_id: None,
+                token: Some(token.into()),
+                client: "token-test".into(),
+                protocol: PROTOCOL_VERSION,
+            }),
+        })
+        .unwrap()
+            + "\n";
+        assert_eq!(line, expected);
     }
 
     #[test]
@@ -409,11 +471,11 @@ mod tests {
     }
 
     #[test]
-    fn token_errors_keep_the_cause_and_invalid_socket_paths_stay_connect_errors() {
+    fn token_errors_keep_the_cause_and_missing_credentials_prevent_connecting() {
         for socket in [Path::new(""), Path::new("/"), Path::new("..")] {
             assert!(matches!(
                 Client::operator(socket, "test"),
-                Err(ClientError::Connect { .. })
+                Err(ClientError::MissingOperatorToken { .. })
             ));
         }
         let temp = tempfile::tempdir().unwrap();
@@ -633,6 +695,11 @@ mod tests {
             for agent in [false, true] {
                 let temp = tempfile::tempdir().unwrap();
                 let socket = temp.path().join("hello.sock");
+                crate::paths::write_private_file(
+                    &crate::paths::operator_token_path(&socket),
+                    b"test",
+                )
+                .unwrap();
                 let listener = UnixListener::bind(&socket).unwrap();
                 let peer = std::thread::spawn(move || {
                     let (mut server, _) = listener.accept().unwrap();

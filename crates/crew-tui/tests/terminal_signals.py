@@ -26,6 +26,10 @@ import unittest
 class FakeDaemon:
     def __init__(self, path):
         self.path = path
+        self.token = "synthetic-terminal-operator-token"
+        credential = path.with_suffix(".token")
+        credential.write_text(self.token)
+        credential.chmod(0o600)
         self.listener = socket.socket(socket.AF_UNIX)
         self.listener.bind(str(path))
         self.listener.listen()
@@ -55,6 +59,9 @@ class FakeDaemon:
                 method = request["method"]
                 result = None
                 if method == "hello":
+                    if request["params"].get("token") != self.token:
+                        peer.sendall((json.dumps({"id": request["id"], "error": {"code": "unauthorized", "message": "operator token required"}}) + "\n").encode())
+                        continue
                     result = {"role": "operator", "version": "test", "protocol": request["params"]["protocol"], "pid": 1}
                 elif method == "subscribe":
                     with self.lock:

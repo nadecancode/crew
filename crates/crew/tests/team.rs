@@ -1687,6 +1687,9 @@ fn a_client_on_another_protocol_version_is_refused() {
         &std::fs::read_to_string(s.workspace.join(".crew/daemon.json")).unwrap(),
     )
     .unwrap();
+    let token = crew_core::paths::read_operator_token(Path::new(info["socket"].as_str().unwrap()))
+        .unwrap()
+        .unwrap();
     let hello = |protocol: u32| -> Value {
         let stream =
             std::os::unix::net::UnixStream::connect(info["socket"].as_str().unwrap()).unwrap();
@@ -1694,7 +1697,7 @@ fn a_client_on_another_protocol_version_is_refused() {
         let request = json!({
             "id": 1,
             "method": "hello",
-            "params": { "role": "operator", "client": "test", "protocol": protocol },
+            "params": { "role": "operator", "token": token, "client": "test", "protocol": protocol },
         });
         writeln!(writer, "{request}").unwrap();
         let mut line = String::new();

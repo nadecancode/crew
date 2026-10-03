@@ -25,6 +25,9 @@ impl Raw {
         )
         .unwrap();
         let stream = UnixStream::connect(info["socket"].as_str().unwrap()).unwrap();
+        stream
+            .set_read_timeout(Some(std::time::Duration::from_secs(3)))
+            .unwrap();
         Self {
             writer: stream.try_clone().unwrap(),
             reader: BufReader::new(stream),
@@ -40,7 +43,11 @@ impl Raw {
         writeln!(self.writer, "{request}").unwrap();
         loop {
             let mut line = String::new();
-            self.reader.read_line(&mut line).unwrap();
+            assert_ne!(
+                self.reader.read_line(&mut line).unwrap(),
+                0,
+                "closed before reply"
+            );
             let frame: Value = serde_json::from_str(&line).unwrap();
             if frame["id"] == id {
                 return frame;
@@ -48,11 +55,13 @@ impl Raw {
         }
     }
 
-    fn hello_operator(&mut self) -> Value {
-        self.call(
-            "hello",
-            json!({ "role": "operator", "client": "test", "protocol": PROTOCOL_VERSION }),
-        )
+    fn hello_operator(&mut self, token: Option<&str>) -> Value {
+        let mut params =
+            json!({ "role": "operator", "client": "test", "protocol": PROTOCOL_VERSION });
+        if let Some(token) = token {
+            params["token"] = json!(token);
+        }
+        self.call("hello", params)
     }
 
     fn hello_agent(&mut self, s: &Session, agent: &str) -> Value {
@@ -94,7 +103,8 @@ fn second_hello_is_refused_for_operator_and_agent_and_authority_is_unchanged() {
     // An agent cannot become the operator on its own connection...
     let mut as_agent = Raw::connect(&s);
     assert!(as_agent.hello_agent(&s, "a")["result"].is_object());
-    let again = as_agent.hello_operator();
+    let operator_token = live_token(&socket_of(&s));
+    let again = as_agent.hello_operator(Some(&operator_token));
     assert_eq!(error_code(&again), "forbidden", "{again}");
     let message = again["error"]["message"].as_str().unwrap();
     assert!(
@@ -110,7 +120,7 @@ fn second_hello_is_refused_for_operator_and_agent_and_authority_is_unchanged() {
     // The operator's connection cannot turn into an agent's either, and
     // keeps its operator authority.
     let mut as_operator = Raw::connect(&s);
-    assert!(as_operator.hello_operator()["result"].is_object());
+    assert!(as_operator.hello_operator(Some(&operator_token))["result"].is_object());
     let again = as_operator.hello_agent(&s, "a");
     assert_eq!(error_code(&again), "forbidden", "{again}");
     let message = again["error"]["message"].as_str().unwrap();
@@ -157,6 +167,125 @@ fn live_token(socket: &std::path::Path) -> String {
         .expect("the daemon wrote its operator token")
 }
 
+fn start_empty_daemon() -> Session {
+    let s = Session::new();
+    std::fs::create_dir_all(&s.workspace).unwrap();
+    s.ok(&["start", "-C", &s.workspace.to_string_lossy()]);
+    s
+}
+
+#[test]
+fn operator_with_token_succeeds() {
+    let s = start_empty_daemon();
+    let token = live_token(&socket_of(&s));
+    let mut raw = Raw::connect(&s);
+    let hello = raw.hello_operator(Some(&token));
+    assert_eq!(hello["result"]["role"], "operator", "{hello}");
+    assert!(raw.call("snapshot", json!({}))["result"].is_object());
+}
+
+#[test]
+fn operator_without_token_is_refused() {
+    let s = start_empty_daemon();
+    let token = live_token(&socket_of(&s));
+    let mut positive = Raw::connect(&s);
+    assert!(positive.hello_operator(Some(&token))["result"].is_object());
+    let mut raw = Raw::connect(&s);
+    let reply = raw.hello_operator(None);
+    assert_eq!(error_code(&reply), "unauthorized", "{reply}");
+    assert_eq!(reply["error"]["message"], "operator token required");
+    assert_eq!(error_code(&raw.call("snapshot", json!({}))), "unauthorized");
+    let mut null = Raw::connect(&s);
+    let reply = null.call(
+        "hello",
+        json!({"role":"operator", "token":null,
+        "client":"test", "protocol":PROTOCOL_VERSION}),
+    );
+    assert_eq!(error_code(&reply), "unauthorized", "{reply}");
+}
+
+#[test]
+fn wrong_token_is_refused() {
+    let s = start_empty_daemon();
+    let token = live_token(&socket_of(&s));
+    let mut positive = Raw::connect(&s);
+    assert!(positive.hello_operator(Some(&token))["result"].is_object());
+    let same_length = format!(
+        "{}{}",
+        if token.starts_with('a') { "b" } else { "a" },
+        &token[1..]
+    );
+    for wrong in ["", "guessed", &same_length, &format!("{token}x")] {
+        let mut raw = Raw::connect(&s);
+        let reply = raw.hello_operator(Some(wrong));
+        assert_eq!(error_code(&reply), "unauthorized", "{reply}");
+        assert_eq!(
+            reply["error"]["message"],
+            "operator token does not match this daemon (it may have restarted; reconnect)"
+        );
+        assert!(!reply.to_string().contains(&token));
+        assert_eq!(error_code(&raw.call("snapshot", json!({}))), "unauthorized");
+    }
+}
+
+#[test]
+fn failed_first_hello_then_valid_retry() {
+    let s = start_empty_daemon();
+    let token = live_token(&socket_of(&s));
+    let mut raw = Raw::connect(&s);
+    for supplied in [None, Some("wrong")] {
+        let reply = raw.hello_operator(supplied);
+        assert_eq!(error_code(&reply), "unauthorized", "{reply}");
+        assert_eq!(error_code(&raw.call("snapshot", json!({}))), "unauthorized");
+    }
+    assert!(raw.hello_operator(Some(&token))["result"].is_object());
+    assert!(raw.call("snapshot", json!({}))["result"].is_object());
+}
+
+#[test]
+fn agent_calls_succeed_on_the_same_socket() {
+    let s = Session::new();
+    s.run(&s.team("agents", vec![agent("a", "", &[])], vec![]));
+    s.wait("the agent to come up", |snap| {
+        find_agent(snap, "a").status != AgentStatus::Spawning
+    });
+    let token = live_token(&socket_of(&s));
+    let mut operator = Raw::connect(&s);
+    assert!(operator.hello_operator(Some(&token))["result"].is_object());
+    let mut raw = Raw::connect(&s);
+    assert!(raw.hello_agent(&s, "a")["result"].is_object());
+    assert!(raw.call("agents_list", json!(null))["result"].is_array());
+    assert_eq!(
+        error_code(&raw.call("agent_kill", json!({"id":"a"}))),
+        "forbidden"
+    );
+    let hello = raw.hello_operator(Some(&token));
+    assert_eq!(error_code(&hello), "forbidden", "{hello}");
+    assert!(raw.call("agents_list", json!(null))["result"].is_array());
+}
+
+#[test]
+fn protocol_2_client_gets_mismatch() {
+    let s = start_empty_daemon();
+    let token = live_token(&socket_of(&s));
+    let mut positive = Raw::connect(&s);
+    assert!(positive.hello_operator(Some(&token))["result"].is_object());
+    for supplied in [None, Some(token.as_str())] {
+        let mut raw = Raw::connect(&s);
+        let reply = raw.call(
+            "hello",
+            json!({"role":"operator", "token":supplied,
+            "client":"v2", "protocol":2}),
+        );
+        assert_eq!(error_code(&reply), "protocol", "{reply}");
+        assert_eq!(
+            reply["error"]["message"],
+            "client speaks protocol 2, daemon speaks 3"
+        );
+        assert!(raw.hello_operator(Some(&token))["result"].is_object());
+    }
+}
+
 fn kill_hard(pid: u32) {
     let killed = std::process::Command::new("kill")
         .args(["-9", &pid.to_string()])
@@ -180,6 +309,7 @@ fn token_file_0600_and_rotates_on_restart() {
     assert_eq!(meta.uid(), crew_core::paths::uid());
     let first = live_token(&socket);
     assert!(first.len() >= 32, "{} characters", first.len());
+    assert!(Raw::connect(&s).hello_operator(Some(&first))["result"].is_object());
 
     // A clean stop takes it away; the next start writes a new one.
     s.stop();
@@ -188,6 +318,9 @@ fn token_file_0600_and_rotates_on_restart() {
     s.ok(&["start", "-C", &ws]);
     let second = live_token(&socket);
     assert_ne!(second, first);
+    assert!(Raw::connect(&s).hello_operator(Some(&second))["result"].is_object());
+    let old = Raw::connect(&s).hello_operator(Some(&first));
+    assert_eq!(error_code(&old), "unauthorized", "{old}");
 
     // A daemon killed outright leaves its token; the next one replaces it.
     kill_hard(s.snapshot().session.daemon_pid);
@@ -195,6 +328,9 @@ fn token_file_0600_and_rotates_on_restart() {
     s.ok(&["start", "-C", &ws]);
     let third = live_token(&socket);
     assert_ne!(third, second);
+    assert!(Raw::connect(&s).hello_operator(Some(&third))["result"].is_object());
+    let old = Raw::connect(&s).hello_operator(Some(&second));
+    assert_eq!(error_code(&old), "unauthorized", "{old}");
 }
 
 #[test]
