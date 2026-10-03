@@ -667,7 +667,7 @@ mod tests {
                 rx.try_recv().is_err(),
                 "credentials must not cause a reconnect loop"
             );
-            assert_eq!(daemon.calls().len(), usize::from(case == "wrong"));
+            assert_eq!(daemon.calls().len(), usize::from(case != "mode"));
             stop.store(true, Ordering::Relaxed);
             daemon.stop();
         }
