@@ -21,6 +21,7 @@ use crew_core::util::now_ms;
 use crew_core::{Agent, AgentStatus, Message, MessageType, RuntimeKind, OPERATOR_ID};
 use tokio::sync::mpsc;
 
+use super::sandbox::{command, Run};
 use super::{Daemon, Listener};
 use crate::agents::runtime_for;
 use crate::persistence::NewEvent;
@@ -291,7 +292,7 @@ impl Daemon {
             Route::Queue(socket, thread) => {
                 let ids: Vec<String> = pending.iter().map(|m| m.id.clone()).collect();
                 let text = clip_for_argv(runtime_for(kind).nudge(&pending));
-                match self.queue(kind, &socket, &thread, &text).await {
+                match self.queue(id, kind, &socket, &thread, &text).await {
                     Ok(()) => self.delivered(id, &ids, "socket"),
                     Err(e) => {
                         self.model().rt(id).queue_failed = true;
@@ -423,9 +424,11 @@ impl Daemon {
     }
 
     /// Inject text through the runtime's own socket by running its queue
-    /// command (an argument array; no shell).
+    /// command (an argument array; no shell). In a team that requires
+    /// sandboxes it runs in the agent's sandbox, with the agent's variables.
     async fn queue(
         &self,
+        id: &str,
         kind: RuntimeKind,
         socket: &std::path::Path,
         session: &str,
@@ -434,11 +437,23 @@ impl Daemon {
         let argv = runtime_for(kind)
             .queue_command(socket, session, text)
             .ok_or("this runtime has no queue command")?;
-        let run = tokio::process::Command::new(&argv[0])
-            .args(&argv[1..])
-            .stdin(std::process::Stdio::null())
-            .kill_on_drop(true)
-            .output();
+        let agent = self.agent(id).ok_or("the agent is gone")?;
+        let env = self
+            .sidecars
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .get(id)
+            .map(|s| s.env.clone())
+            .unwrap_or_default();
+        let sandbox = self
+            .agent_sandbox(&agent, Run::helper(id, &argv[0], &env, socket))
+            .await
+            .map_err(|e| format!("{e:#}"))?;
+        // Unsandboxed it keeps running with the daemon's own environment.
+        let env = if sandbox.is_some() { env } else { Vec::new() };
+        let mut cmd = command(sandbox.as_ref(), &argv, &env).map_err(|e| format!("{e:#}"))?;
+        cmd.stdin(std::process::Stdio::null()).kill_on_drop(true);
+        let run = cmd.output();
         match tokio::time::timeout(std::time::Duration::from_secs(20), run).await {
             Ok(Ok(output)) if output.status.success() => Ok(()),
             Ok(Ok(output)) => Err(String::from_utf8_lossy(&output.stderr)
@@ -459,7 +474,7 @@ impl Daemon {
         if let (Some(socket), Some(agent)) = (self.sidecar_socket(id), self.agent(id)) {
             if let Some(thread) = &agent.session_id {
                 if self
-                    .queue(agent.runtime, &socket, thread, text)
+                    .queue(id, agent.runtime, &socket, thread, text)
                     .await
                     .is_ok()
                 {

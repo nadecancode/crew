@@ -471,9 +471,17 @@ impl Daemon {
         spec.sandbox = self
             .agent_sandbox(&agent, Run::session(&spec, procs.name()))
             .await?;
+        let sidecar_sandbox = match &spec.sidecar {
+            Some(sidecar) => {
+                let run = Run::helper(id, &sidecar.program, &sidecar.env, &sidecar.socket);
+                self.agent_sandbox(&agent, run).await?
+            }
+            None => None,
+        };
         self.stop_sidecar(id);
         if let Some(sidecar) = &spec.sidecar {
-            self.start_sidecar(id, sidecar).await?;
+            self.start_sidecar(id, sidecar, sidecar_sandbox.as_ref())
+                .await?;
         }
 
         // First prompt: whatever is already waiting for the agent, so it
@@ -621,7 +629,12 @@ impl Daemon {
 
     /// Start the helper process an agent's session depends on and wait until
     /// its socket is up.
-    async fn start_sidecar(&self, id: &str, sidecar: &crate::agents::Sidecar) -> Result<()> {
+    async fn start_sidecar(
+        &self,
+        id: &str,
+        sidecar: &crate::agents::Sidecar,
+        sandbox: Option<&crate::sandbox::spec::Spec>,
+    ) -> Result<()> {
         use anyhow::Context;
         let log_path = self.agent_dir(id).join("sidecar.log");
         let log = std::fs::OpenOptions::new()
@@ -629,10 +642,11 @@ impl Daemon {
             .append(true)
             .open(&log_path)
             .with_context(|| format!("opening {}", log_path.display()))?;
-        let mut cmd = tokio::process::Command::new(&sidecar.program);
-        cmd.args(&sidecar.args)
-            .envs(sidecar.env.iter().map(|(k, v)| (k, v)))
-            .current_dir(&sidecar.cwd)
+        let argv: Vec<String> = std::iter::once(sidecar.program.clone())
+            .chain(sidecar.args.iter().cloned())
+            .collect();
+        let mut cmd = super::sandbox::command(sandbox, &argv, &sidecar.env)?;
+        cmd.current_dir(&sidecar.cwd)
             .stdin(std::process::Stdio::null())
             .stdout(log.try_clone()?)
             .stderr(log)
@@ -651,6 +665,7 @@ impl Daemon {
                         super::SidecarProc {
                             child,
                             socket: sidecar.socket.clone(),
+                            env: sidecar.env.clone(),
                         },
                     );
                 return Ok(());

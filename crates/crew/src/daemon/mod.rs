@@ -299,6 +299,9 @@ pub struct Inner {
 pub(crate) struct SidecarProc {
     pub child: tokio::process::Child,
     pub socket: PathBuf,
+    /// What the sidecar was started with: the agent's variables, which a
+    /// sandboxed queue command gets too.
+    pub env: Vec<(String, String)>,
 }
 
 /// A connection an agent's runtime keeps open to receive messages.

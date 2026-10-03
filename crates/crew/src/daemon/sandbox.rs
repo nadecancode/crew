@@ -12,9 +12,9 @@ use super::Daemon;
 use crate::agents::LaunchSpec;
 use crate::git;
 use crate::persistence::NewEvent;
-use crate::sandbox::probe;
 use crate::sandbox::profile::{self, Built, Extra, Host, Request, Role, Session};
-use crate::sandbox::spec::Spec;
+use crate::sandbox::spec::{launcher_env, Spec};
+use crate::sandbox::{probe, run};
 
 /// The daemon's paths that every profile is built from.
 struct Layout {
@@ -104,6 +104,48 @@ impl Run {
             terminal: Some(backend),
         }
     }
+
+    /// A helper of the agent's session: no terminal, the sidecar's socket
+    /// directory mounted.
+    pub fn helper(agent_id: &str, argv0: &str, env: &[(String, String)], socket: &Path) -> Self {
+        Self {
+            agent_id: agent_id.to_string(),
+            program: argv0.to_string(),
+            env: env.to_vec(),
+            sidecar_dir: socket.parent().map(Path::to_path_buf),
+            terminal: None,
+        }
+    }
+}
+
+/// `argv` as a command. In a sandbox it runs behind `crew sandbox-run` with
+/// exactly the launcher's environment (`env` is passed in by name);
+/// otherwise `env` is added to the daemon's.
+pub(crate) fn command(
+    sandbox: Option<&Spec>,
+    argv: &[String],
+    env: &[(String, String)],
+) -> Result<tokio::process::Command> {
+    let mut full: Vec<OsString> = match sandbox {
+        Some(spec) => run::prefix(spec).map_err(|e| anyhow!(e))?,
+        None => Vec::new(),
+    };
+    full.extend(argv.iter().map(OsString::from));
+    let (program, args) = full
+        .split_first()
+        .ok_or_else(|| anyhow!("an empty command line"))?;
+    let mut cmd = tokio::process::Command::new(program);
+    cmd.args(args);
+    match sandbox {
+        Some(spec) => {
+            cmd.env_clear()
+                .envs(launcher_env(spec, std::env::vars_os(), env));
+        }
+        None => {
+            cmd.envs(env.iter().map(|(name, value)| (name, value)));
+        }
+    }
+    Ok(cmd)
 }
 
 /// The profile of something an agent runs: the orchestrator sees the
@@ -287,21 +329,9 @@ mod tests {
     }
 
     impl Fixture {
+        /// The profile of agent `id`'s terminal session (`sh`, with
+        /// `CREW_IDENTITY`).
         fn profile(&self, id: &str, orchestrator: bool, worktrees: bool) -> Result<Spec> {
-            let crew_bin = std::env::current_exe().unwrap();
-            let host = Host::detect(&crew_bin, Path::new("/bwrap"), landlock::MIN_ABI);
-            let layout = Layout::new(&self.ws, &self.socket, &self.root.join("cache"))?;
-            let agent_dir = self.ws.join(".crew/agents").join(id);
-            let at = Placement {
-                agent_dir: &agent_dir,
-                workdir: if orchestrator {
-                    &self.ws
-                } else {
-                    &self.worktree
-                },
-                orchestrator,
-                worktrees,
-            };
             let launch = LaunchSpec {
                 agent_id: id.into(),
                 kind: RuntimeKind::Shell,
@@ -314,19 +344,29 @@ mod tests {
                 sidecar: None,
                 sandbox: None,
             };
+            self.profile_for(orchestrator, worktrees, &Run::session(&launch, "pty"))
+        }
+
+        fn profile_for(&self, orchestrator: bool, worktrees: bool, run: &Run) -> Result<Spec> {
+            let crew_bin = std::env::current_exe().unwrap();
+            let host = Host::detect(&crew_bin, Path::new("/bwrap"), landlock::MIN_ABI);
+            let layout = Layout::new(&self.ws, &self.socket, &self.root.join("cache"))?;
+            let agent_dir = self.ws.join(".crew/agents").join(&run.agent_id);
+            let at = Placement {
+                agent_dir: &agent_dir,
+                workdir: if orchestrator {
+                    &self.ws
+                } else {
+                    &self.worktree
+                },
+                orchestrator,
+                worktrees,
+            };
             let config = SandboxConfig {
                 mode: SandboxMode::Required,
                 ..SandboxConfig::default()
             };
-            agent_profile(
-                &host,
-                &layout,
-                &at,
-                &config,
-                &Run::session(&launch, "pty"),
-                None,
-            )
-            .map(|built| built.spec)
+            agent_profile(&host, &layout, &at, &config, run, None).map(|built| built.spec)
         }
     }
 
@@ -390,5 +430,57 @@ mod tests {
 
         let shared = f.profile("a", false, false).unwrap_err().to_string();
         assert!(shared.contains("workspace.sandbox.mode: off"), "{shared}");
+    }
+
+    #[test]
+    fn a_sidecar_or_queue_command_gets_the_agents_profile_without_a_terminal() {
+        let f = fixture();
+        let sidecar_dir = f.root.join("run/codex-0123");
+        std::fs::create_dir(&sidecar_dir).unwrap();
+        let env = [("CODEX_HOME".to_string(), "/codex-home".to_string())];
+        let run = Run::helper("a", "codex", &env, &sidecar_dir.join("1.sock"));
+
+        let spec = f.profile_for(false, true, &run).unwrap();
+        assert!(spec.new_session, "a helper keeps the agent's terminal");
+        assert_eq!(spec.cwd, f.worktree);
+        assert_eq!(spec.pass_env, ["CODEX_HOME"]);
+        assert!(binds(&spec).contains(&(sidecar_dir.clone(), true)));
+        assert!(binds(&spec).contains(&(f.socket.clone(), true)));
+    }
+
+    #[test]
+    fn a_sandboxed_command_runs_behind_sandbox_run_with_only_the_launchers_environment() {
+        let f = fixture();
+        let spec = f.profile("a", false, true).unwrap();
+        let argv = ["codex".to_string(), "queue".to_string()];
+        let env = [("CODEX_HOME".to_string(), "/codex-home".to_string())];
+
+        let sandboxed = command(Some(&spec), &argv, &env).unwrap();
+        let cmd = sandboxed.as_std();
+        assert_eq!(cmd.get_program(), spec.crew_bin.as_os_str());
+        let args: Vec<&std::ffi::OsStr> = cmd.get_args().collect();
+        assert_eq!(args[0], "sandbox-run");
+        assert_eq!(args[2..], ["--", "codex", "queue"]);
+        // std shows a cleared environment as `env -i` (and only the
+        // variables set after it).
+        assert!(format!("{cmd:?}").starts_with("env -i "), "{cmd:?}");
+        let set: Vec<(OsString, OsString)> = cmd
+            .get_envs()
+            .filter_map(|(k, v)| Some((k.to_os_string(), v?.to_os_string())))
+            .collect();
+        assert_eq!(set, launcher_env(&spec, std::env::vars_os(), &env));
+
+        let plain = command(None, &argv, &env).unwrap();
+        let cmd = plain.as_std();
+        assert_eq!(cmd.get_program(), "codex");
+        assert_eq!(cmd.get_args().collect::<Vec<_>>(), ["queue"]);
+        assert!(!format!("{cmd:?}").starts_with("env -i "), "{cmd:?}");
+        assert_eq!(
+            cmd.get_envs().collect::<Vec<_>>(),
+            [(
+                std::ffi::OsStr::new("CODEX_HOME"),
+                Some(std::ffi::OsStr::new("/codex-home"))
+            )]
+        );
     }
 }
