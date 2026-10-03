@@ -30,14 +30,6 @@ fn validate_timer(key: &str, seconds: u64) -> Result<()> {
     Ok(())
 }
 
-fn model_name_valid(model: &str) -> bool {
-    !model.trim().is_empty()
-        && model.len() <= 120
-        && !model
-            .chars()
-            .any(|ch| ch.is_whitespace() || ch.is_control())
-}
-
 /// A work style: a preset for how a team is staffed and how it works
 /// (research, experiment, …), without the workspace and the objective, which
 /// are supplied when a team is launched from it.
@@ -739,10 +731,7 @@ impl TeamConfig {
             ("defaults.model", &self.defaults.model),
             ("orchestrator.model", &self.orchestrator.model),
         ] {
-            if model
-                .as_deref()
-                .is_some_and(|value| !model_name_valid(value))
-            {
+            if model.as_deref().is_some_and(|value| !model_name(value)) {
                 bail!("{key} is not a model name");
             }
         }
@@ -825,14 +814,14 @@ fn validate_model_fallbacks(fallbacks: &BTreeMap<String, Vec<String>>) -> Result
         bail!("`defaults.model_fallbacks` names more than {MAX_FALLBACK_MODELS} models");
     }
     for (model, instead) in fallbacks {
-        if !model_name_valid(model) {
+        if !model_name(model) {
             bail!("`defaults.model_fallbacks`: '{model}' is not a model name");
         }
         if instead.is_empty() || instead.len() > MAX_FALLBACKS {
             bail!("`defaults.model_fallbacks.{model}` lists 1 to {MAX_FALLBACKS} models to use instead");
         }
         for other in instead {
-            if !model_name_valid(other) {
+            if !model_name(other) {
                 bail!("`defaults.model_fallbacks.{model}`: '{other}' is not a model name");
             }
             if other.eq_ignore_ascii_case(model) {
@@ -871,7 +860,7 @@ pub fn validate_agent_spec(agent: &AgentSpec) -> Result<()> {
     if agent
         .model
         .as_deref()
-        .is_some_and(|model| !model_name_valid(model))
+        .is_some_and(|model| !model_name(model))
     {
         bail!("agent '{}'.model is not a model name", agent.id);
     }
