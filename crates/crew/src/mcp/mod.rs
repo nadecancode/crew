@@ -65,25 +65,34 @@ impl Bridge {
     }
 
     fn call_tool(&mut self, name: &str, args: &Value) -> Result<String, String> {
-        // One reconnect covers a daemon restart between two calls.
+        // One reconnect covers a daemon restart between two calls. A call
+        // whose connection failed may have run before the reply was lost,
+        // so only one that changes nothing is made again; for any other the
+        // agent is told, to check before it calls again.
+        let read_only = tools::definitions()
+            .iter()
+            .any(|t| t.name == name && t.read_only);
         for attempt in 0..2 {
             let client = self.client()?;
             match tools::call(client, name, args) {
                 Ok(output) => return Ok(output.text),
-                Err(e) if attempt == 0 && looks_disconnected(&e) => {
+                Err(tools::CallError::Daemon(e)) if e.is_disconnect() => {
                     self.client = None;
+                    if !read_only {
+                        return Err(format!(
+                            "{e}: the call was sent, so it may or may not have taken effect; \
+check before calling {name} again"
+                        ));
+                    }
+                    if attempt > 0 {
+                        return Err(e.to_string());
+                    }
                 }
-                Err(e) => return Err(e),
+                Err(e) => return Err(e.to_string()),
             }
         }
         Err("the crew daemon is not reachable".into())
     }
-}
-
-fn looks_disconnected(error: &str) -> bool {
-    error.contains("closed the connection")
-        || error.contains("connection to the crew daemon failed")
-        || error.contains("cannot reach the crew daemon")
 }
 
 fn tool_list(orchestrator: bool) -> Value {
@@ -274,6 +283,86 @@ mod tests {
             .unwrap()
             .iter()
             .any(|t| t["name"] == "task_create"));
+    }
+
+    /// A daemon that answers the hello, takes one request and drops the
+    /// connection without a reply (it may or may not have run it), on every
+    /// connection; with how many requests it took.
+    fn daemon_that_drops_requests() -> (
+        tempfile::TempDir,
+        Bridge,
+        std::sync::Arc<std::sync::atomic::AtomicUsize>,
+    ) {
+        use std::io::{BufRead, BufReader, Write};
+        let dir = tempfile::tempdir().unwrap();
+        let socket = dir.path().join("crew.sock");
+        let listener = std::os::unix::net::UnixListener::bind(&socket).unwrap();
+        let taken = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let counter = taken.clone();
+        std::thread::spawn(move || {
+            for stream in listener.incoming() {
+                let Ok(mut stream) = stream else { return };
+                let mut reader = BufReader::new(stream.try_clone().unwrap());
+                let mut line = String::new();
+                if reader.read_line(&mut line).unwrap_or(0) == 0 {
+                    continue;
+                }
+                let hello: Value = serde_json::from_str(&line).unwrap();
+                let info = crew_core::rpc::HelloInfo {
+                    role: crew_core::rpc::Role::Agent,
+                    agent_id: Some("claude-1".into()),
+                    project: None,
+                    version: "test".into(),
+                    protocol: crew_core::rpc::PROTOCOL_VERSION,
+                    pid: 1,
+                };
+                let reply = json!({ "id": hello["id"], "result": info });
+                writeln!(stream, "{reply}").unwrap();
+                line.clear();
+                if reader.read_line(&mut line).unwrap_or(0) > 0 {
+                    counter.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                }
+            }
+        });
+        let bridge = Bridge {
+            identity: Identity {
+                socket: socket.to_string_lossy().into_owned(),
+                agent_id: "claude-1".into(),
+                token: "t".into(),
+            },
+            client: None,
+            orchestrator: Some(false),
+        };
+        (dir, bridge, taken)
+    }
+
+    #[test]
+    fn a_call_that_changes_something_is_not_sent_again_after_the_connection_drops() {
+        let call = |b: &mut Bridge, name: &str, args: Value| {
+            handle(
+                b,
+                &json!({"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":name,"arguments":args}}),
+            )
+            .unwrap()
+        };
+        // A change: sent once, and the agent is told it may have happened.
+        let (_dir, mut b, taken) = daemon_that_drops_requests();
+        let r = call(&mut b, "agent_status", json!({"status": "working"}));
+        let text = r["result"]["content"][0]["text"]
+            .as_str()
+            .unwrap()
+            .to_string();
+        assert_eq!(r["result"]["isError"], true);
+        assert_eq!(
+            taken.load(std::sync::atomic::Ordering::SeqCst),
+            1,
+            "a call that changes something was sent again: {text}"
+        );
+        assert!(text.contains("may or may not have taken effect"), "{text}");
+        // A read: asked again on a new connection.
+        let (_dir, mut b, taken) = daemon_that_drops_requests();
+        call(&mut b, "tasks_list", json!({}));
+        assert_eq!(taken.load(std::sync::atomic::Ordering::SeqCst), 2);
     }
 
     #[test]

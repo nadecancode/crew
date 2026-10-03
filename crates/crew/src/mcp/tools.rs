@@ -454,13 +454,42 @@ fn message_type(args: &Value) -> Result<MessageType, String> {
     }
 }
 
+/// Why a tool call failed: the daemon refused it, or the connection to
+/// the daemon failed (the call may or may not have run).
+#[derive(Debug)]
+pub enum CallError {
+    Tool(String),
+    Daemon(ClientError),
+}
+
+impl std::fmt::Display for CallError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            CallError::Tool(message) => f.write_str(message),
+            CallError::Daemon(error) => write!(f, "{error}"),
+        }
+    }
+}
+
+impl From<String> for CallError {
+    fn from(message: String) -> Self {
+        CallError::Tool(message)
+    }
+}
+
+impl From<&str> for CallError {
+    fn from(message: &str) -> Self {
+        CallError::Tool(message.to_string())
+    }
+}
+
 fn rpc<T: serde::de::DeserializeOwned>(
     client: &mut Client,
     call: Call,
-) -> Result<(T, Value), String> {
+) -> Result<(T, Value), CallError> {
     let raw = client.call_value(call).map_err(|e| match e {
-        ClientError::Rpc(e) => e.message,
-        other => other.to_string(),
+        ClientError::Rpc(e) => CallError::Tool(e.message),
+        other => CallError::Daemon(other),
     })?;
     let typed =
         serde_json::from_value(raw.clone()).map_err(|e| format!("unexpected response: {e}"))?;
@@ -657,7 +686,7 @@ Coordinate with the author (agent_send) before trying again.",
 }
 
 /// Run one tool. `Err` is a message for the caller (shown as a tool error).
-pub fn call(client: &mut Client, name: &str, args: &Value) -> Result<ToolOutput, String> {
+pub fn call(client: &mut Client, name: &str, args: &Value) -> Result<ToolOutput, CallError> {
     let out = |text: String, raw: Value| Ok(ToolOutput { text, raw });
     match name {
         "agents_list" => {
@@ -680,7 +709,7 @@ pub fn call(client: &mut Client, name: &str, args: &Value) -> Result<ToolOutput,
                     }
                 }
                 if list.is_empty() {
-                    return Err("'to' names nobody".to_string());
+                    return Err("'to' names nobody".into());
                 }
                 list
             };
@@ -697,7 +726,7 @@ pub fn call(client: &mut Client, name: &str, args: &Value) -> Result<ToolOutput,
                     })
                     .collect();
                 if !unknown.is_empty() {
-                    return Err(format!("no agent {}; nothing was sent", unknown.join(", ")));
+                    return Err(format!("no agent {}; nothing was sent", unknown.join(", ")).into());
                 }
             }
             let mut lines = Vec::new();
@@ -1252,7 +1281,7 @@ from it, and report again once that is done."
             };
             out(text, raw)
         }
-        other => Err(format!("unknown tool '{other}'")),
+        other => Err(format!("unknown tool '{other}'").into()),
     }
 }
 
