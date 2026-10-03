@@ -336,13 +336,72 @@ pub fn branch_exists(repo: &Path, branch: &str) -> bool {
     .unwrap_or(false)
 }
 
-/// Create (or reuse) the worktree and branch for an agent.
+/// The common git directory of `repo` (the main checkout's `.git`).
+fn common_git_dir(repo: &Path) -> Result<PathBuf> {
+    let dir = PathBuf::from(out_h(repo, &["rev-parse", "--git-common-dir"])?);
+    Ok(if dir.is_absolute() {
+        dir
+    } else {
+        repo.join(dir)
+    })
+}
+
+/// The administrative directory git keeps for the linked worktree at `path`
+/// (`<common>/worktrees/<name>`), found by the `gitdir` file git wrote there
+/// rather than by trusting anything inside the worktree.
+fn worktree_admin_dir(common: &Path, path: &Path) -> Option<PathBuf> {
+    let want = path.join(".git");
+    std::fs::read_dir(common.join("worktrees"))
+        .ok()?
+        .flatten()
+        .map(|e| e.path())
+        .find(|admin| {
+            read_regular(&admin.join("gitdir")).is_some_and(|g| Path::new(g.trim()) == want)
+        })
+}
+
+/// A small regular file's text, not following a symlink in the last component.
+fn read_regular(path: &Path) -> Option<String> {
+    use std::io::Read;
+    use std::os::unix::fs::OpenOptionsExt;
+    let file = std::fs::OpenOptions::new()
+        .read(true)
+        .custom_flags(libc::O_NOFOLLOW | libc::O_NONBLOCK)
+        .open(path)
+        .ok()?;
+    if !file.metadata().ok()?.is_file() {
+        return None;
+    }
+    let mut text = String::new();
+    file.take(64 * 1024).read_to_string(&mut text).ok()?;
+    Some(text)
+}
+
+/// Create (or reuse) the worktree and branch for an agent, and fill it in.
 pub fn ensure_worktree(
     repo: &Path,
     worktrees_dir: &Path,
     agent: &str,
     base: &str,
 ) -> Result<Worktree> {
+    let (worktree, needs_population) = add_worktree(repo, worktrees_dir, agent, base)?;
+    if needs_population {
+        populate_worktree(&worktree)?;
+    }
+    Ok(worktree)
+}
+
+/// Create (or find) the worktree and branch for an agent, without checking
+/// anything out: `worktree add --no-checkout` runs no `post-checkout` hook and
+/// no smudge filter. Returns whether the files still have to be put in place
+/// ([`populate_worktree`]). Runs on the main repository, hardened, and runs no
+/// git inside the worktree itself, whose contents an agent can write.
+pub fn add_worktree(
+    repo: &Path,
+    worktrees_dir: &Path,
+    agent: &str,
+    base: &str,
+) -> Result<(Worktree, bool)> {
     if !is_valid_id(agent) && agent != INTEGRATION_DIR {
         bail!("invalid agent id '{agent}'");
     }
@@ -354,10 +413,20 @@ pub fn ensure_worktree(
     };
     let path = worktrees_dir.join(agent);
     if path.join(".git").exists() {
-        // Left over from an earlier run: reuse it if it is on the right branch.
-        let current = out_h(&path, &["rev-parse", "--abbrev-ref", "HEAD"]).unwrap_or_default();
+        // Left over from an earlier run: reuse it if it is on the right
+        // branch, read from the repository's own record of the worktree.
+        let common = common_git_dir(repo)?;
+        let admin = worktree_admin_dir(&common, &path)
+            .ok_or_else(|| anyhow!("{} is not a worktree of this repository", path.display()))?;
+        let head = read_regular(&admin.join("HEAD")).unwrap_or_default();
+        let current = head
+            .trim()
+            .strip_prefix("ref: refs/heads/")
+            .unwrap_or("(detached)");
         if current == branch {
-            return Ok(Worktree { path, branch });
+            // Without an index nothing was checked out yet.
+            let needs_population = !admin.join("index").exists();
+            return Ok((Worktree { path, branch }, needs_population));
         }
         bail!(
             "{} already exists but is on branch '{current}', expected '{branch}'",
@@ -369,15 +438,34 @@ pub fn ensure_worktree(
     let _ = run_h(repo, &["worktree", "prune"]);
     let path_str = path.to_string_lossy().into_owned();
     if branch_exists(repo, &branch) {
-        out_h(repo, &["worktree", "add", "-q", &path_str, &branch])?;
+        out_h(
+            repo,
+            &["worktree", "add", "-q", "--no-checkout", &path_str, &branch],
+        )?;
     } else {
         validate_rev(base)?;
         out_h(
             repo,
-            &["worktree", "add", "-q", "-b", &branch, &path_str, base],
+            &[
+                "worktree",
+                "add",
+                "-q",
+                "--no-checkout",
+                "-b",
+                &branch,
+                &path_str,
+                base,
+            ],
         )?;
     }
-    Ok(Worktree { path, branch })
+    Ok((Worktree { path, branch }, true))
+}
+
+/// Put the branch's files in a worktree made by [`add_worktree`]. This is
+/// where smudge filters and the branch's own configuration can run, so a
+/// caller that has a sandbox runs it inside one (see [`launch`]).
+pub fn populate_worktree(worktree: &Worktree) -> Result<()> {
+    out_h(&worktree.path, &["reset", "-q", "--hard", "HEAD"]).map(drop)
 }
 
 /// Revisions supplied by agents: a hex commit id, `HEAD`, or an agent branch.
@@ -1017,6 +1105,66 @@ mod tests {
             "{started:?}"
         );
         assert!(!env.contains("sk-not-allowed") || env.contains("SECRET_TOKEN"));
+    }
+
+    #[test]
+    fn reusing_a_worktree_runs_no_git_inside_it() {
+        let r = repo();
+        let wt = ensure_worktree(&r.root, &r.worktrees, "a", "HEAD").unwrap();
+        // Whatever the worktree holds is agent-writable: crew must read its
+        // branch from the repository's own administrative files, never by
+        // running git in it.
+        let recorder = Arc::new(Recorder(Default::default()));
+        let again = launch::with_launcher(recorder.clone(), || {
+            ensure_worktree(&r.root, &r.worktrees, "a", "HEAD").unwrap()
+        });
+        assert_eq!(again, wt);
+        let seen = recorder.0.lock().unwrap().clone();
+        let inside = wt.path.to_string_lossy().into_owned();
+        assert!(
+            !seen.iter().any(|argv| argv.contains(&inside)),
+            "git ran in the worktree: {seen:?}"
+        );
+        // A worktree on another branch is still refused.
+        out(&wt.path, &["checkout", "-q", "-b", "other"]).unwrap();
+        let err = ensure_worktree(&r.root, &r.worktrees, "a", "HEAD").unwrap_err();
+        assert!(err.to_string().contains("expected 'agents/a'"), "{err}");
+    }
+
+    #[test]
+    fn a_new_worktree_is_added_without_a_checkout_and_populated_separately() {
+        let r = repo();
+        write(&r.root, "tracked.txt", "content\n");
+        out(&r.root, &["add", "tracked.txt"]).unwrap();
+        out(
+            &r.root,
+            &[
+                "-c",
+                "user.name=t",
+                "-c",
+                "user.email=t@t",
+                "commit",
+                "-q",
+                "-m",
+                "tracked",
+            ],
+        )
+        .unwrap();
+        let (wt, needs_population) = add_worktree(&r.root, &r.worktrees, "a", "HEAD").unwrap();
+        assert!(needs_population);
+        assert!(
+            !wt.path.join("tracked.txt").exists(),
+            "added with a checkout"
+        );
+        // Not populated yet, so a second look still says so.
+        assert!(add_worktree(&r.root, &r.worktrees, "a", "HEAD").unwrap().1);
+        populate_worktree(&wt).unwrap();
+        assert_eq!(
+            std::fs::read_to_string(wt.path.join("tracked.txt")).unwrap(),
+            "content\n"
+        );
+        assert!(!add_worktree(&r.root, &r.worktrees, "a", "HEAD").unwrap().1);
+        assert!(status(&wt.path).unwrap().contains("working tree clean"));
     }
 
     #[test]
