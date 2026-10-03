@@ -232,12 +232,7 @@ fn required_starts_on_a_capable_host_and_is_refused_with_the_probes_reason_other
     workspace_repo(&s, &[]);
     let fake = s.root().join("fake-bwrap");
     std::fs::create_dir(&fake).unwrap();
-    std::fs::write(fake.join("bwrap"), "#!/bin/sh\nexit 1\n").unwrap();
-    {
-        use std::os::unix::fs::PermissionsExt;
-        std::fs::set_permissions(fake.join("bwrap"), std::fs::Permissions::from_mode(0o755))
-            .unwrap();
-    }
+    write_executable(&fake.join("bwrap"), "#!/bin/sh\nexit 1\n");
     let mut dirs = vec![fake];
     dirs.extend(std::env::split_paths(&std::env::var_os("PATH").unwrap()));
     let path = std::env::join_paths(dirs).unwrap();
@@ -355,13 +350,28 @@ fn repo_config(s: &Session, key: &str, value: &str) {
 }
 
 /// Mark `name` in the workspace executable (before its first commit).
-fn executable(s: &Session, name: &str) {
-    use std::os::unix::fs::PermissionsExt;
-    std::fs::set_permissions(
-        s.workspace.join(name),
-        std::fs::Permissions::from_mode(0o755),
-    )
-    .unwrap();
+/// Write the program `contents` to `path`, from a child process. A file
+/// this test process writes can be held open, for a moment, by a child
+/// another test is forking, and running it then fails with "Text file
+/// busy" (ETXTBSY).
+fn write_executable(path: &Path, contents: &str) {
+    let mut child = Command::new("sh")
+        .args(["-c", "cat > \"$1\" && chmod 755 \"$1\"", "sh"])
+        .arg(path)
+        .stdin(std::process::Stdio::piped())
+        .spawn()
+        .unwrap();
+    child
+        .stdin
+        .take()
+        .unwrap()
+        .write_all(contents.as_bytes())
+        .unwrap();
+    assert!(
+        child.wait().unwrap().success(),
+        "writing {}",
+        path.display()
+    );
 }
 
 /// Pids of processes whose arguments, after the program, start with `args`.
@@ -648,8 +658,7 @@ fn sandboxed_agent_can_do_its_work() {
         "#!/bin/sh\n{FIND_SOCKET}\ncat \"$token\" >/dev/null 2>&1 && echo REACHED > \"$HOME/hook-token\"\necho ran > \"$HOME/hook-ran\"\n"
     );
     std::fs::create_dir_all(s.workspace.join(".githooks")).unwrap();
-    std::fs::write(s.workspace.join(".githooks/pre-commit"), &hook).unwrap();
-    executable(&s, ".githooks/pre-commit");
+    write_executable(&s.workspace.join(".githooks/pre-commit"), &hook);
     workspace_repo(&s, &[]);
     repo_config(&s, "core.hooksPath", ".githooks");
     let team = sandboxed(
@@ -868,11 +877,7 @@ fn a_sandbox_that_cannot_start_never_runs_the_program() {
     // leaves a sentinel (its argument) when it runs.
     let bin = s.root().join("hostonly");
     let sentinel = s.root().join("ran-unsandboxed");
-    std::fs::write(&bin, "#!/bin/sh\ntouch \"$1\"\nexec sleep 600\n").unwrap();
-    {
-        use std::os::unix::fs::PermissionsExt;
-        std::fs::set_permissions(&bin, std::fs::Permissions::from_mode(0o755)).unwrap();
-    }
+    write_executable(&bin, "#!/bin/sh\ntouch \"$1\"\nexec sleep 600\n");
     // Positive control: it runs on the host.
     let control = s.root().join("control");
     let mut child = Command::new(&bin).arg(&control).spawn().unwrap();
@@ -950,12 +955,10 @@ fn agent_spawn_does_not_run_branch_hooks_or_filters_unsandboxed() {
     let hook_mark = marks.path().join("post-checkout");
     let filter_mark = marks.path().join("smudge");
     std::fs::create_dir_all(s.workspace.join(".githooks")).unwrap();
-    std::fs::write(
-        s.workspace.join(".githooks/post-checkout"),
-        format!("#!/bin/sh\ntouch '{}'\n", hook_mark.display()),
-    )
-    .unwrap();
-    executable(&s, ".githooks/post-checkout");
+    write_executable(
+        &s.workspace.join(".githooks/post-checkout"),
+        &format!("#!/bin/sh\ntouch '{}'\n", hook_mark.display()),
+    );
     workspace_repo(
         &s,
         &[
@@ -1042,12 +1045,10 @@ fn integrate_hooks_have_no_authority() {
     ]
     .concat();
     std::fs::create_dir_all(ws.join(".githooks")).unwrap();
-    std::fs::write(
-        ws.join(".githooks/post-merge"),
-        format!("#!/bin/sh\n{{\n{checks}\n}} > hook-report 2>&1\n"),
-    )
-    .unwrap();
-    executable(&s, ".githooks/post-merge");
+    write_executable(
+        &ws.join(".githooks/post-merge"),
+        &format!("#!/bin/sh\n{{\n{checks}\n}} > hook-report 2>&1\n"),
+    );
     workspace_repo(&s, &[]);
     repo_config(&s, "core.hooksPath", ".githooks");
     let team = sandboxed(
@@ -1145,7 +1146,6 @@ fn git_status_ignores_agent_fsmonitor() {
 /// (mounted in a sandbox; `/tmp` is not). The `codex` wrapper also notes,
 /// in its `$CODEX_HOME`, the mount namespace and arguments of a queue run.
 fn fake_clis() -> (tempfile::TempDir, PathBuf) {
-    use std::os::unix::fs::PermissionsExt;
     let dir = tempfile::tempdir_in(Path::new(CREW).parent().unwrap()).unwrap();
     let base = dir.path().canonicalize().unwrap();
     std::fs::create_dir_all(base.join("real")).unwrap();
@@ -1162,12 +1162,10 @@ echo tried >> \"$CODEX_HOME/tamper\"; }\n"
             ""
         };
         let path = base.join("real").join(name);
-        std::fs::write(
+        write_executable(
             &path,
-            format!("#!/bin/sh\n{note}exec '{CREW}' fake-cli {name} \"$@\"\n"),
-        )
-        .unwrap();
-        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o755)).unwrap();
+            &format!("#!/bin/sh\n{note}exec '{CREW}' fake-cli {name} \"$@\"\n"),
+        );
         std::os::unix::fs::symlink(&path, base.join("bin").join(name)).unwrap();
     }
     (dir, base.join("bin"))
@@ -1452,7 +1450,7 @@ fn daemon_writes_do_not_follow_planted_links() {
 
 #[test]
 fn host_toolchain_layout_starts() {
-    use std::os::unix::fs::{symlink, PermissionsExt};
+    use std::os::unix::fs::symlink;
     if require_sandbox().is_none() {
         return;
     }
@@ -1491,9 +1489,9 @@ fn host_toolchain_layout_starts() {
     // would, then runs the fake Claude Code.
     let versions = home.join(".local/share/claude/versions");
     std::fs::create_dir_all(&versions).unwrap();
-    std::fs::write(
-        versions.join("2.0.0"),
-        format!(
+    write_executable(
+        &versions.join("2.0.0"),
+        &format!(
             r#"#!/bin/sh
 {{ cargo --version && echo 'WORKS cargo'
   git --version && echo 'WORKS git'
@@ -1503,13 +1501,7 @@ exec '{}' fake-cli claude "$@"
 "#,
             crew.display()
         ),
-    )
-    .unwrap();
-    std::fs::set_permissions(
-        versions.join("2.0.0"),
-        std::fs::Permissions::from_mode(0o755),
-    )
-    .unwrap();
+    );
     std::fs::create_dir_all(home.join(".local/bin")).unwrap();
     symlink(versions.join("2.0.0"), home.join(".local/bin/claude")).unwrap();
     let dir_of = |program: &str| {
@@ -1578,7 +1570,6 @@ exec '{}' fake-cli claude "$@"
 /// which installation ran: `codex` in `$CODEX_HOME/ran`, `git` (when run for
 /// an agent) in `<A>/rw/git-ran`.
 fn two_installations() -> (tempfile::TempDir, String) {
-    use std::os::unix::fs::PermissionsExt;
     let dir = tempfile::tempdir_in(Path::new(CREW).parent().unwrap()).unwrap();
     let base = dir.path().canonicalize().unwrap();
     let path = std::env::var_os("PATH").unwrap();
@@ -1599,9 +1590,7 @@ fn two_installations() -> (tempfile::TempDir, String) {
             git.display()
         );
         for (name, script) in [("codex", codex), ("git", git)] {
-            std::fs::write(bin.join(name), script).unwrap();
-            std::fs::set_permissions(bin.join(name), std::fs::Permissions::from_mode(0o755))
-                .unwrap();
+            write_executable(&bin.join(name), &script);
         }
     }
     let mut dirs = vec![base.join("first"), base.join("second")];
@@ -1699,8 +1688,7 @@ fn a_restart_writes_the_agents_next_identity_only_after_its_git_job_ends() {
     // which mounts the agent's directory.
     let hook = "#!/bin/sh\necho > \"$HOME/hook-start\"\nsleep 3\necho > \"$HOME/hook-end\"\n";
     std::fs::create_dir_all(s.workspace.join(".githooks")).unwrap();
-    std::fs::write(s.workspace.join(".githooks/pre-commit"), hook).unwrap();
-    executable(&s, ".githooks/pre-commit");
+    write_executable(&s.workspace.join(".githooks/pre-commit"), hook);
     workspace_repo(&s, &[]);
     repo_config(&s, "core.hooksPath", ".githooks");
     let team = sandboxed(
