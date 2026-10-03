@@ -784,7 +784,10 @@ pub fn validate_agent_spec(agent: &AgentSpec) -> Result<()> {
             agent.id
         );
     }
-    if agent.id == ORCHESTRATOR_ID || agent.id == crate::types::OPERATOR_ID {
+    if agent.id == ORCHESTRATOR_ID
+        || agent.id == crate::types::OPERATOR_ID
+        || agent.id == "integration"
+    {
         bail!("agent id '{}' is reserved", agent.id);
     }
     if agent.role.len() > 200 {
@@ -869,6 +872,21 @@ pub fn parse_key_value(s: &str) -> Result<(String, String)> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn integration_is_reserved_for_the_integration_branch() {
+        let agent = AgentSpec {
+            id: "integration".into(),
+            ..AgentSpec::default()
+        };
+        assert!(validate_agent_spec(&agent).is_err());
+        assert!(TeamConfig::from_yaml("project: test\nagents:\n  - id: integration\n").is_err());
+        validate_agent_spec(&AgentSpec {
+            id: "integration-worker".into(),
+            ..AgentSpec::default()
+        })
+        .unwrap();
+    }
 
     #[test]
     fn config_rejects_zero_and_overflowing_timers_and_bad_percentages() {
