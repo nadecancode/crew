@@ -19,7 +19,7 @@ use crate::types::{
 /// Bump for new/renamed enum values, removed/renamed fields or changed meanings.
 /// New optional fields with `serde(default)` do not require a bump.
 /// Peers require an exact match; restart running teams after upgrading.
-pub const PROTOCOL_VERSION: u32 = 3;
+pub const PROTOCOL_VERSION: u32 = 4;
 
 #[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
@@ -119,6 +119,13 @@ pub enum Call {
         id: String,
     },
     AgentRestart {
+        id: String,
+    },
+    /// Restart an agent in a new session: its old one is not resumed (a
+    /// session whose every turn the provider refuses stays refused).
+    /// Operator only. A separate call, not a flag on AgentRestart, so an
+    /// older daemon refuses it rather than resuming.
+    AgentRestartFresh {
         id: String,
     },
     /// Put an agent on another model, with `note` as its first word
@@ -420,6 +427,7 @@ impl Call {
             Call::AgentKill { .. } => "agent_kill",
             Call::AgentRemove { .. } => "agent_remove",
             Call::AgentRestart { .. } => "agent_restart",
+            Call::AgentRestartFresh { .. } => "agent_restart_fresh",
             Call::AgentSetModel { .. } => "agent_set_model",
             Call::ModelsList => "models_list",
             Call::UsageStatus => "usage_status",
@@ -794,7 +802,7 @@ mod compatibility_tests {
             "event_level": enum_values(EventLevel::ALL), "transcript_kind": enum_values(TranscriptKind::ALL),
             "role": enum_values(&roles), "push": push_kinds,
         });
-        let version_3 = json!({
+        let version_4 = json!({
             "agent_status": ["spawning","idle","working","waiting","blocked","done","failed","stopped"],
             "task_status": ["queued","ready","working","waiting","blocked","review","done","failed"],
             "message_type": ["task","message","question","answer","status","review_request","review_result","artifact","error"],
@@ -804,9 +812,27 @@ mod compatibility_tests {
         });
         assert_eq!(
             (PROTOCOL_VERSION, actual),
-            (3, version_3),
+            (4, version_4),
             "bump PROTOCOL_VERSION and update this list"
         );
+    }
+
+    #[test]
+    fn a_fresh_restart_is_its_own_method_not_a_flag_on_restart() {
+        let fresh = Call::AgentRestartFresh { id: "a".into() };
+        let wire = serde_json::to_value(&fresh).unwrap();
+        assert_eq!(
+            wire,
+            json!({"method":"agent_restart_fresh","params":{"id":"a"}})
+        );
+        assert_eq!(fresh.method(), "agent_restart_fresh");
+        assert!(matches!(
+            serde_json::from_value(wire).unwrap(),
+            Call::AgentRestartFresh { id } if id == "a"
+        ));
+        let plain: Call =
+            serde_json::from_value(json!({"method":"agent_restart","params":{"id":"a"}})).unwrap();
+        assert!(matches!(plain, Call::AgentRestart { id } if id == "a"));
     }
 
     #[test]

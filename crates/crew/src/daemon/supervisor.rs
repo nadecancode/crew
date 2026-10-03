@@ -1866,12 +1866,38 @@ defaults.auto_trust: true in the team file.",
         self.restart_agent_with(id, None).await
     }
 
+    /// Restart an agent in a new session, never resuming the old one: its
+    /// session id and confirmation are dropped first, so nothing (this
+    /// start, a later restart) goes back to it.
+    pub(crate) async fn restart_agent_fresh(&self, id: &str) -> Result<(), RpcError> {
+        if self.model().agent(id).is_none() {
+            return Err(RpcError::not_found(format!("no agent '{id}'")));
+        }
+        {
+            let mut model = self.model();
+            let local = model.local.entry(id.to_string()).or_default();
+            local.session_confirmed = false;
+        }
+        self.save_local(id);
+        self.update_agent(id, |a| a.session_id = None);
+        self.restart(id, None, false).await
+    }
+
     /// Restart an agent, resuming its session; `notice` replaces the usual
     /// "you were restarted" line of its first prompt.
     pub(crate) async fn restart_agent_with(
         &self,
         id: &str,
         notice: Option<String>,
+    ) -> Result<(), RpcError> {
+        self.restart(id, notice, true).await
+    }
+
+    async fn restart(
+        &self,
+        id: &str,
+        notice: Option<String>,
+        resume: bool,
     ) -> Result<(), RpcError> {
         if self.model().agent(id).is_none() {
             return Err(RpcError::not_found(format!("no agent '{id}'")));
@@ -1917,7 +1943,7 @@ defaults.auto_trust: true in the team file.",
         let since = self.stops(id);
         let id = id.to_string();
         tokio::spawn(async move {
-            if let Err(e) = daemon.spawn_agent(&id, true, notice, since).await {
+            if let Err(e) = daemon.spawn_agent(&id, resume, notice, since).await {
                 daemon
                     .mark_failed(&id, format!("failed to start: {e:#}"))
                     .await;

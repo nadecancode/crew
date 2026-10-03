@@ -280,7 +280,7 @@ fn protocol_2_client_gets_mismatch() {
         assert_eq!(error_code(&reply), "protocol", "{reply}");
         assert_eq!(
             reply["error"]["message"],
-            "client speaks protocol 2, daemon speaks 3"
+            "client speaks protocol 2, daemon speaks 4"
         );
         assert!(raw.hello_operator(Some(&token))["result"].is_object());
     }

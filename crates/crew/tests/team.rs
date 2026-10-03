@@ -7587,3 +7587,95 @@ fn an_agent_killed_while_it_starts_stays_stopped() {
     );
     assert!(!sidecar_alive, "the killed agent's app-server runs on");
 }
+
+#[test]
+fn a_fresh_restart_starts_a_new_session_instead_of_resuming_the_old_one() {
+    let s = Session::new();
+    // A `codex` that notes, for every session it is started with, the
+    // session it resumes ("resume <id>") or "fresh", one line each.
+    let bin = s.root().join("bin");
+    std::fs::create_dir_all(&bin).unwrap();
+    let log = s.root().join("sessions");
+    write_program(
+        &bin.join("codex"),
+        &format!(
+            "#!/bin/sh\nif [ \"$1\" != app-server ]; then r=fresh; p=; for a in \"$@\"; do [ \"$p\" = resume ] && r=\"resume $a\"; p=$a; done; echo \"$r\" >> '{}'; fi\nexec '{CREW}' fake-cli codex \"$@\"\n",
+            log.display()
+        ),
+    );
+    let team = s.team(
+        "fresh",
+        vec![AgentSpec {
+            id: "x".into(),
+            role: "implementation".into(),
+            runtime: Some(RuntimeKind::Codex),
+            ..AgentSpec::default()
+        }],
+        vec![],
+    );
+    std::fs::write(s.root().join("team.yaml"), team.to_yaml().unwrap()).unwrap();
+    let mut path = vec![bin.clone()];
+    path.extend(std::env::split_paths(&std::env::var_os("PATH").unwrap()));
+    let out = s
+        .command()
+        .env("PATH", std::env::join_paths(path).unwrap())
+        .args(["run", "team.yaml", "--no-attach"])
+        .output()
+        .unwrap();
+    assert!(out.status.success(), "{}", stderr(&out));
+    let sessions = || std::fs::read_to_string(&log).unwrap_or_default();
+    let up = |n: usize| {
+        s.wait("x to be up", |snap| {
+            let x = find_agent(snap, "x");
+            x.pid.is_some() && x.status != AgentStatus::Spawning
+        });
+        s.wait_for("its session", || sessions().lines().count() >= n);
+    };
+    up(1);
+    // Its session (thread) becomes known, the way Codex's notify hook says.
+    let identity = s.workspace.join(".crew/agents/x/identity.json");
+    let notify = s
+        .command()
+        .args(["hook", "codex-notify", "--identity"])
+        .arg(&identity)
+        .arg(r#"{"type":"agent-turn-complete","thread-id":"old-thread"}"#)
+        .output()
+        .unwrap();
+    assert!(notify.status.success(), "{}", stderr(&notify));
+    s.wait("its session id", |snap| {
+        find_agent(snap, "x").session_id.as_deref() == Some("old-thread")
+    });
+    let socket = std::path::PathBuf::from(
+        serde_json::from_str::<Value>(&std::fs::read_to_string(&identity).unwrap()).unwrap()
+            ["socket"]
+            .as_str()
+            .unwrap(),
+    );
+    let (mut operator, _) = crew_core::client::Client::operator(&socket, "test").unwrap();
+    // Control: a plain restart resumes it.
+    operator
+        .call_value(crew_core::rpc::Call::AgentRestart { id: "x".into() })
+        .unwrap();
+    up(2);
+    // A fresh restart does not.
+    operator
+        .call_value(crew_core::rpc::Call::AgentRestartFresh { id: "x".into() })
+        .unwrap();
+    up(3);
+    let lines: Vec<String> = sessions().lines().map(String::from).collect();
+    let session_id = find_agent(&s.snapshot(), "x").session_id.clone();
+    s.stop();
+    assert_eq!(
+        lines[1], "resume old-thread",
+        "a plain restart did not resume: {lines:?}"
+    );
+    assert_eq!(
+        lines[2], "fresh",
+        "a fresh restart resumed a session: {lines:?}"
+    );
+    assert_ne!(
+        session_id.as_deref(),
+        Some("old-thread"),
+        "the old session id stayed"
+    );
+}

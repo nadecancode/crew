@@ -198,6 +198,11 @@ change identity",
                 self.restart_agent(&id).await?;
                 reply(self.agent(&id))
             }
+            Call::AgentRestartFresh { id } => {
+                operator_only(&who)?;
+                self.restart_agent_fresh(&id).await?;
+                reply(self.agent(&id))
+            }
             Call::AgentSetModel {
                 id,
                 model,
