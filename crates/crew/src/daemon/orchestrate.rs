@@ -20,6 +20,20 @@ const MAX_RESULT_CHARS: usize = 4000;
 const STALL_GRACE_MS: i64 = 12_000;
 const MAX_ARTIFACTS: usize = 32;
 
+/// A task its agent cannot be told about would never start: refuse one
+/// whose task message would exceed the bus limit.
+pub(super) fn check_task_message_size(task: &Task, limit: usize) -> Result<(), RpcError> {
+    let size = prompt::task_dispatch(task).len();
+    if size > limit {
+        return Err(RpcError::invalid(format!(
+            "task '{}' is too long: its task message would be {size} bytes, and \
+limits.max_message_bytes is {limit}",
+            task.id
+        )));
+    }
+    Ok(())
+}
+
 impl Daemon {
     /// Run the scheduler and carry out what it decides. Called whenever task
     /// or agent state changes.
@@ -227,6 +241,14 @@ call session_complete with the final report."
                 .task(task_id)
                 .error(),
             );
+            // The agent was never told, so the task cannot be left Working.
+            // Back to Ready would only fail the same way on the next plan;
+            // failing it hands the decision to the orchestrator.
+            self.fail_task(
+                task_id,
+                format!("could not be dispatched to {agent_id}: {}", e.message),
+            )
+            .await;
         }
     }
 
@@ -379,6 +401,7 @@ call session_complete with the final report."
                 }
             }
             let task = tasks::task_from_spec(&spec, now_ms());
+            check_task_message_size(&task, self.bus.max_bytes())?;
             model.tasks.push(task.clone());
             // New work reopens a session that had finished.
             model.session.completed_at = None;

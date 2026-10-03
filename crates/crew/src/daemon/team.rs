@@ -11,6 +11,7 @@ use crew_core::util::now_ms;
 use crew_core::ORCHESTRATOR_ID;
 
 use super::handlers::internal;
+use super::orchestrate::check_task_message_size;
 use super::{Daemon, Model, SessionState};
 use crate::git;
 use crate::persistence::NewEvent;
@@ -57,6 +58,10 @@ impl Daemon {
         config
             .validate()
             .map_err(|e| RpcError::invalid(e.to_string()))?;
+        for spec in config.all_tasks() {
+            let task = crate::tasks::task_from_spec(&spec, 0);
+            check_task_message_size(&task, config.limits.max_message_bytes)?;
+        }
 
         // One team per workspace at a time.
         {

@@ -497,6 +497,116 @@ fn a_failed_dependency_blocks_its_dependents_and_is_reported_as_a_stall() {
 }
 
 #[test]
+fn a_task_too_long_for_its_task_message_is_refused_at_creation() {
+    let s = Session::new();
+    // The task message names the card by id and title; what the card says is
+    // read with task_get and is not in it.
+    let huge = "x".repeat(3000);
+    let mut team = s.team(
+        "oversize",
+        vec![agent("a", "", &[])],
+        vec![task("huge", "a", &[])],
+    );
+    team.limits.max_message_bytes = 2048;
+    team.tasks[0].title = Some(huge.clone());
+    // In a team file: refused before anything is set up.
+    std::fs::write(s.root().join("team.yaml"), team.to_yaml().unwrap()).unwrap();
+    let run = s.crew(&["run", "team.yaml", "--no-attach"]);
+    assert!(!run.status.success(), "{}", stdout(&run));
+    assert!(
+        stderr(&run).contains("limits.max_message_bytes"),
+        "{}",
+        stderr(&run)
+    );
+    let nothing = s.snapshot();
+    assert!(nothing.agents.is_empty() && nothing.tasks.is_empty());
+
+    // Added to a running team: refused too.
+    team.tasks.clear();
+    s.run(&team);
+    let ws = s.workspace.to_string_lossy().into_owned();
+    let added = s.crew(&[
+        "task",
+        "add",
+        "--id",
+        "huge",
+        "--title",
+        &huge,
+        "--description",
+        "do huge",
+        "--agent",
+        "a",
+        "-C",
+        &ws,
+    ]);
+    assert!(!added.status.success(), "{}", stdout(&added));
+    assert!(
+        stderr(&added).contains("limits.max_message_bytes"),
+        "{}",
+        stderr(&added)
+    );
+    assert!(s.snapshot().tasks.is_empty());
+
+    // A long card is not a long message: its description stays on the board.
+    s.ok(&[
+        "task",
+        "add",
+        "--id",
+        "long",
+        "--title",
+        "a long card",
+        "--description",
+        &huge,
+        "--agent",
+        "a",
+        "-C",
+        &ws,
+    ]);
+    let told = s.wait("the long card to be handed out", |snap| {
+        find_task(snap, "long").status == TaskStatus::Working
+    });
+    assert_eq!(find_task(&told, "long").description, huge);
+}
+
+#[test]
+fn a_task_whose_task_message_is_refused_fails_instead_of_staying_working() {
+    let s = Session::new();
+    let team = s.team(
+        "undeliverable",
+        vec![
+            agent(
+                "a",
+                "",
+                &["--on-task=wait-message operator", "--on-task=done first"],
+            ),
+            agent("b", "", &["--on-task=done never told"]),
+        ],
+        vec![task("first", "a", &[]), task("second", "b", &["first"])],
+    );
+    s.run(&team);
+    s.wait_for("a to be on first", || {
+        s.agent_cmd(&["output", "a"])
+            .contains("Task first is yours")
+    });
+    // The database refuses the dependent's task message when its turn comes.
+    let db = rusqlite::Connection::open(s.workspace.join(".crew/crew.db")).unwrap();
+    db.execute_batch(
+        "CREATE TRIGGER refuse_task_message BEFORE INSERT ON messages \
+         WHEN NEW.kind = 'task' AND NEW.recipient = 'b' \
+         BEGIN SELECT RAISE(ABORT, 'the disk is full'); END;",
+    )
+    .unwrap();
+    s.send("a", "carry on");
+    let snapshot = s.wait("the dependent to fail", |snap| {
+        find_task(snap, "second").status == TaskStatus::Failed
+    });
+    let note = find_task(&snapshot, "second").note.clone().unwrap();
+    assert!(note.contains("could not be dispatched"), "{note}");
+    assert!(note.contains("the disk is full"), "{note}");
+    assert!(find_agent(&snapshot, "b").task.is_none());
+}
+
+#[test]
 fn progress_and_self_reported_status_reach_the_dashboard_state() {
     let s = Session::new();
     let team = s.team(

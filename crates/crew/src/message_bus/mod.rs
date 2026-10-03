@@ -110,6 +110,8 @@ pub trait MessageBus: Send + Sync {
     /// Live stream of accepted messages.
     fn subscribe(&self) -> broadcast::Receiver<BusEvent>;
     fn set_max_bytes(&self, limit: usize);
+    /// The largest message body `send` accepts.
+    fn max_bytes(&self) -> usize;
 }
 
 pub struct LocalBus {
@@ -240,6 +242,10 @@ impl MessageBus for LocalBus {
     fn set_max_bytes(&self, limit: usize) {
         self.max_bytes
             .store(limit.clamp(1, MAX_MESSAGE_BYTES), Ordering::Relaxed);
+    }
+
+    fn max_bytes(&self) -> usize {
+        self.max_bytes.load(Ordering::Relaxed)
     }
 }
 
