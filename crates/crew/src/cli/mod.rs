@@ -227,6 +227,9 @@ answers: `crew answer 2`.")]
     },
     /// A scripted stand-in for a real agent (for dry runs and tests)
     ScriptedAgent(scripted::ScriptArgs),
+    /// Inside an agent sandbox: confine this process, then run the program
+    #[command(hide = true)]
+    SandboxExec(crate::sandbox::shim::ExecArgs),
     /// Run the daemon in the foreground
     #[command(hide = true)]
     Daemon {
@@ -574,6 +577,7 @@ pub fn run(cli: Cli) -> Result<()> {
         Command::Style { command } => ops::style(&target, command.unwrap_or(StyleCommand::List)),
         Command::Models { command } => ops::models(command.unwrap_or(ModelsCommand::List)),
         Command::ScriptedAgent(args) => scripted::run(args),
+        Command::SandboxExec(args) => crate::sandbox::shim::run(args),
         Command::Daemon { workspace } => daemonize::run_foreground(&workspace),
     }
 }

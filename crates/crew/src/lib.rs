@@ -11,6 +11,7 @@
 //! - `process` — where agent processes run (daemon-owned PTYs, herdr panes)
 //! - `daemon` — the long-running process tying it all together
 //! - `mcp` — the MCP bridge that gives agents their tools
+//! - `sandbox` — bubblewrap sandboxes and the shim agents run behind
 //! - `cli` — the command-line front end
 
 pub mod agents;
@@ -24,6 +25,7 @@ pub mod message_bus;
 pub mod models;
 pub mod persistence;
 pub mod process;
+pub mod sandbox;
 pub mod scheduler;
 pub mod styles;
 pub mod tasks;
