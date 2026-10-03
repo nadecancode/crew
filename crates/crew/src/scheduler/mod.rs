@@ -147,12 +147,15 @@ pub fn plan(tasks: &[Task], agents: &[AgentView]) -> Vec<Action> {
         actions.push(Action::AllDone);
         return actions;
     }
+    // A review is progress only while its reviewer can do it.
+    let reviewable = |t: &Task| t.reviewer.as_deref().is_some_and(|r| runnable.contains(r));
     // A waiting task is not stuck while the teammate it waits on is busy
     // (for instance answering its question).
-    let progressing = tasks
-        .iter()
-        .any(|t| matches!(t.status, TaskStatus::Working | TaskStatus::Review))
-        || agents.iter().any(|a| a.runnable && a.active);
+    let progressing = tasks.iter().any(|t| match t.status {
+        TaskStatus::Working => true,
+        TaskStatus::Review => reviewable(t),
+        _ => false,
+    }) || agents.iter().any(|a| a.runnable && a.active);
     if !progressing {
         let mut stuck = Vec::new();
         let mut reasons = Vec::new();
@@ -180,6 +183,14 @@ pub fn plan(tasks: &[Task], agents: &[AgentView]) -> Vec<Action> {
                 }
                 TaskStatus::Queued => {
                     stuck.push(task.id.clone());
+                }
+                TaskStatus::Review if !reviewable(task) => {
+                    stuck.push(task.id.clone());
+                    let reviewer = task.reviewer.as_deref().unwrap_or("nobody");
+                    reasons.push(format!(
+                        "'{}' awaits review by {reviewer}, who is not running",
+                        task.id
+                    ));
                 }
                 TaskStatus::Working | TaskStatus::Review => {}
             }
@@ -380,6 +391,26 @@ mod tests {
         let mut views = agents(&["x", "y", "z"]);
         views[2].active = true;
         assert_eq!(plan(&[a, b], &views), vec![]);
+    }
+
+    #[test]
+    fn a_review_nobody_can_do_is_a_stall() {
+        let mut a = task("a", Some("x"), &[], TaskStatus::Review);
+        a.reviewer = Some("r".into());
+        let tasks = vec![a];
+        // A running reviewer is progress.
+        assert_eq!(plan(&tasks, &agents(&["x", "r"])), vec![]);
+        // A stopped one, or one no longer on the team, is not.
+        let mut views = agents(&["x", "r"]);
+        views[1].runnable = false;
+        for views in [views, agents(&["x"])] {
+            let actions = plan(&tasks, &views);
+            assert!(
+                matches!(&actions[..], [Action::Stall { tasks, reason }]
+                    if tasks == &["a"] && reason.contains("review by r")),
+                "{actions:?}"
+            );
+        }
     }
 
     #[test]

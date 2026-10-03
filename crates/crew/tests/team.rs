@@ -588,6 +588,36 @@ fn a_reviewed_task_is_done_only_after_approval() {
     assert!(review < approved && approved < finished);
 }
 
+#[test]
+fn a_task_whose_reviewer_stopped_is_reported_as_a_stall() {
+    let s = Session::new();
+    let team = {
+        let mut team = s.team(
+            "lost-reviewer",
+            vec![
+                agent("author", "", &["--on-task=done first draft"]),
+                // Takes the review request and never answers it.
+                agent("critic", "", &[]),
+            ],
+            vec![task("write", "author", &[])],
+        );
+        team.tasks[0].reviewer = Some("critic".into());
+        team
+    };
+    s.run(&team);
+    s.wait("the task to await review", |snap| {
+        find_task(snap, "write").status == TaskStatus::Review
+    });
+    s.agent_cmd(&["kill", "critic"]);
+    s.wait_for("the stall to be reported", || {
+        s.events().iter().any(|e| {
+            e.event_type == "scheduler.stall"
+                && e.message.contains("'write' awaits review by critic")
+        })
+    });
+    assert_eq!(find_task(&s.snapshot(), "write").status, TaskStatus::Review);
+}
+
 // ---------------------------------------------------------------------------
 // Agent lifecycle and failures
 // ---------------------------------------------------------------------------
