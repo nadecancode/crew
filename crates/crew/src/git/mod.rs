@@ -84,11 +84,13 @@ fn output(cmd: &mut Command) -> std::io::Result<Output> {
     use std::os::unix::process::CommandExt;
     use std::sync::mpsc;
     launch::apply(cmd)?;
-    let mut child = cmd
+    let spawned = cmd
         .process_group(0)
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
-        .spawn()?;
+        .spawn();
+    launch::started(spawned.as_ref().ok().map(|c| c.id()));
+    let mut child = spawned?;
     let drain = |pipe: Option<Box<dyn Read + Send>>| {
         let (tx, rx) = mpsc::channel();
         std::thread::spawn(move || {
@@ -1073,6 +1075,65 @@ mod tests {
             }
             Ok(same)
         }
+    }
+
+    #[test]
+    fn a_launcher_is_told_the_pid_of_each_command_it_launched_or_that_it_did_not_start() {
+        /// Launches each command unchanged, or (`broken`) as a program that
+        /// does not exist, and keeps what it is told.
+        struct Watcher {
+            broken: bool,
+            launched: std::sync::Mutex<usize>,
+            told: std::sync::Mutex<Vec<Option<u32>>>,
+        }
+        impl launch::Launcher for Watcher {
+            fn launch(&self, cmd: &Command) -> std::io::Result<Command> {
+                *self.launched.lock().unwrap() += 1;
+                let mut same = Command::new(if self.broken {
+                    std::ffi::OsStr::new("/nonexistent/git")
+                } else {
+                    cmd.get_program()
+                });
+                same.args(cmd.get_args());
+                for (k, v) in cmd.get_envs() {
+                    match v {
+                        Some(v) => same.env(k, v),
+                        None => same.env_remove(k),
+                    };
+                }
+                Ok(same)
+            }
+
+            fn started(&self, pid: Option<u32>) {
+                self.told.lock().unwrap().push(pid);
+            }
+        }
+        let watcher = |broken| {
+            Arc::new(Watcher {
+                broken,
+                launched: Default::default(),
+                told: Default::default(),
+            })
+        };
+        let r = repo();
+        write(&r.root, "work.txt", "x\n");
+        let working = watcher(false);
+        launch::with_launcher(working.clone(), || {
+            commit_all(&r.root, "a", "work").unwrap()
+        });
+        let told = working.told.lock().unwrap().clone();
+        assert_eq!(told.len(), *working.launched.lock().unwrap(), "{told:?}");
+        assert!(
+            told.len() >= 4 && told.iter().all(Option::is_some),
+            "{told:?}"
+        );
+        let mut pids: Vec<u32> = told.into_iter().flatten().collect();
+        pids.dedup();
+        assert!(pids.len() >= 4, "one process per command: {pids:?}");
+        // A command that cannot be started is reported as such, and fails.
+        let broken = watcher(true);
+        assert!(launch::with_launcher(broken.clone(), || status(&r.root)).is_err());
+        assert_eq!(*broken.told.lock().unwrap(), vec![None]);
     }
 
     #[test]

@@ -29,6 +29,13 @@ pub trait Launcher: Send + Sync {
     fn admin_dir(&self) -> Option<PathBuf> {
         None
     }
+
+    /// Told, right after the command `launch` returned was started, its
+    /// pid, or None when it could not be started. The daemon keeps each
+    /// sandbox an agent's git starts in its retirement ledger this way
+    /// (design-b3.md §3.4, D2), for as long as the job runs, whoever awaits
+    /// it.
+    fn started(&self, _pid: Option<u32>) {}
 }
 
 thread_local! {
@@ -56,6 +63,14 @@ pub(super) fn admin_dir() -> Option<PathBuf> {
 /// Whether a launcher is installed (git is running on an agent's behalf).
 pub(super) fn active() -> bool {
     CURRENT.with(|c| c.borrow().is_some())
+}
+
+/// Tell the installed launcher, if any, that the command it launched was
+/// started as `pid` (None: it was not).
+pub(super) fn started(pid: Option<u32>) {
+    if let Some(launcher) = CURRENT.with(|c| c.borrow().clone()) {
+        launcher.started(pid);
+    }
 }
 
 /// Replace `cmd` by what the installed launcher makes of it, if any.
