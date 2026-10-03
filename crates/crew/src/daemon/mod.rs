@@ -110,6 +110,10 @@ pub(crate) struct AgentRuntimeState {
     pub delivered_at: i64,
     /// What the runtime said when the turn just over ended in an error.
     pub turn_failure: Option<String>,
+    /// The provider's error the last turn ended in, until a turn ends well:
+    /// an agent that goes quiet with one is reported with it, not as
+    /// unresponsive.
+    pub provider_error: Option<String>,
     /// The refused turn last dealt with, so it is dealt with once.
     pub refusal_seen: Option<String>,
     /// The bus messages put into the session since its last turn ended.

@@ -519,7 +519,7 @@ guidelines or usage policies, call decline(reason), and crew hands it to another
                 format!("{id}: {model} refused the turn ({kind}): {message}"),
             )
             .agent(id)
-            .warn(),
+            .error(),
         );
         let passed = match self
             .refusal_fallback(agent, kind, &why, &model, input)
@@ -533,6 +533,7 @@ guidelines or usage policies, call decline(reason), and crew hands it to another
                 a.status = AgentStatus::Blocked;
                 a.block_kind = Some("refused".into());
                 a.activity = format!("{model} refused the turn ({kind})");
+                a.error = Some(format!("{model} refused the turn ({kind}): {message}"));
             }
         });
         // The agent is blocked whatever its task shows: a refused save is
@@ -890,6 +891,98 @@ mod tests {
                 "gpt-6-astra: the model that refused",
                 "glm-5.3: pi is not installed"
             ]
+        );
+    }
+}
+
+#[cfg(test)]
+mod provider_error_tests {
+    use super::*;
+
+    async fn daemon_with(id: &str) -> (tempfile::TempDir, super::super::Running) {
+        let temp = tempfile::tempdir().unwrap();
+        let running = super::super::start(super::super::DaemonOptions {
+            workspace: temp.path().to_path_buf(),
+            crew_bin: std::env::current_exe().unwrap(),
+        })
+        .await
+        .unwrap();
+        let agent: Agent = serde_json::from_value(serde_json::json!({
+            "id": id, "name": id, "role": "work", "status": "idle", "runtime": "codex",
+            "workdir": temp.path().to_str().unwrap(), "backend": "pty", "last_activity_at": 0
+        }))
+        .unwrap();
+        running.daemon.model().agents.push(agent);
+        (temp, running)
+    }
+
+    #[tokio::test]
+    async fn turns_that_end_in_a_provider_error_are_reported_as_that_error_not_as_unresponsive() {
+        let (_temp, running) = daemon_with("x").await;
+        let daemon = running.daemon.clone();
+        // Its last turn ended in the provider's error; a turn that ends well
+        // since would clear it.
+        daemon
+            .on_signal(
+                "x",
+                Signal::TurnFailed("Rate limit reached (rate_limit)".into()),
+            )
+            .await;
+        daemon
+            .stalled(
+                "x",
+                "went quiet with task 't' open and ignored 3 reminders".into(),
+            )
+            .await;
+        let x = daemon.agent("x").unwrap();
+        assert_eq!(x.status, AgentStatus::Blocked);
+        assert_eq!(x.block_kind.as_deref(), Some("provider_error"));
+        let error = x.error.unwrap_or_default();
+        assert!(error.contains("Rate limit reached (rate_limit)"), "{error}");
+        let events = daemon.store.recent_events(Some("x"), 100).unwrap();
+        assert!(
+            events.iter().any(|e| e.event_type == "agent.error"
+                && e.level == crew_core::types::EventLevel::Error
+                && e.message.contains("Rate limit reached")),
+            "{events:?}"
+        );
+        assert!(!events.iter().any(|e| e.event_type == "agent.unresponsive"));
+
+        // A turn that ended well: quiet since is "unresponsive", as before.
+        let (_temp, running) = daemon_with("y").await;
+        let daemon = running.daemon.clone();
+        daemon
+            .on_signal(
+                "y",
+                Signal::TurnFailed("Rate limit reached (rate_limit)".into()),
+            )
+            .await;
+        daemon.on_signal("y", Signal::TurnEnded).await;
+        daemon.stalled("y", "no activity for 900s".into()).await;
+        let y = daemon.agent("y").unwrap();
+        assert_eq!(y.block_kind.as_deref(), Some("unresponsive"));
+    }
+
+    #[tokio::test]
+    async fn a_refused_turn_reaches_the_operator_as_an_error_with_the_providers_words() {
+        let (_temp, running) = daemon_with("x").await;
+        let daemon = running.daemon.clone();
+        let agent = daemon.agent("x").unwrap();
+        let said = "This request was flagged for possible cybersecurity risk.";
+        daemon.turn_refused(&agent, "cyber_policy", said, &[]).await;
+        let x = daemon.agent("x").unwrap();
+        assert_eq!(x.block_kind.as_deref(), Some("refused"));
+        assert!(
+            x.error.as_deref().is_some_and(|e| e.contains(said)),
+            "{:?}",
+            x.error
+        );
+        let events = daemon.store.recent_events(Some("x"), 100).unwrap();
+        assert!(
+            events.iter().any(|e| e.event_type == "agent.refused"
+                && e.level == crew_core::types::EventLevel::Error
+                && e.message.contains(said)),
+            "{events:?}"
         );
     }
 }

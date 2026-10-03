@@ -890,6 +890,59 @@ stopped"
         }
     }
 
+    /// Agent `id` went quiet (`why`). If its last turn ended in the
+    /// provider's error, that error is the reason: reported as one, with
+    /// the provider's words, never as "unresponsive" (a reminder only gets
+    /// the same error). Otherwise it is unresponsive.
+    pub(crate) async fn stalled(&self, id: &str, why: String) {
+        let provider_error = self.model().rt(id).provider_error.clone();
+        let Some(said) = provider_error else {
+            self.update_agent(id, |a| {
+                a.status = AgentStatus::Blocked;
+                a.block_kind = Some("unresponsive".into());
+                a.activity = why.clone();
+            });
+            self.emit(
+                NewEvent::new(
+                    "scheduler",
+                    "agent.unresponsive",
+                    format!("{id} is unresponsive: {why}"),
+                )
+                .agent(id)
+                .warn(),
+            );
+            self.notify_orchestrator(&format!("Agent {id} is unresponsive: {why}."))
+                .await;
+            return;
+        };
+        let runtime = self
+            .agent(id)
+            .map(|a| crate::models::runtime_label(a.runtime).to_string())
+            .unwrap_or_default();
+        let error = format!("{runtime} said: {said}");
+        self.update_agent(id, |a| {
+            a.status = AgentStatus::Blocked;
+            a.block_kind = Some("provider_error".into());
+            a.activity = format!("its turns end in an error: {said}");
+            a.error = Some(error.clone());
+        });
+        self.emit(
+            NewEvent::new(
+                "scheduler",
+                "agent.error",
+                format!("{id}: its turns end in an error. {error}"),
+            )
+            .agent(id)
+            .error(),
+        );
+        self.notify_orchestrator(&format!(
+            "{id}'s turns end in an error from its provider ({error}), so reminders do not help. \
+If it persists, hand its work to a member on another model, or ask the operator (operator_ask) to \
+restart {id} fresh or move it to another CLI."
+        ))
+        .await;
+    }
+
     /// Shepherd a session through start-up: answer or report dialogs that
     /// appear in front of it, and — for runtimes without a "ready" hook, or
     /// when the hook never fires — treat it as ready once its output settles.
@@ -1036,7 +1089,12 @@ stopped"
             Signal::Compacted => self.context_compacted(id).await,
             Signal::CompactSkipped(why) => self.compact_skipped(id, &why),
             Signal::TurnFailed(what) => {
-                self.model().rt(id).turn_failure = Some(what.clone());
+                {
+                    let mut model = self.model();
+                    let rt = model.rt(id);
+                    rt.turn_failure = Some(what.clone());
+                    rt.provider_error = Some(what.clone());
+                }
                 self.emit(
                     NewEvent::new(
                         "daemon",
@@ -1066,7 +1124,10 @@ stopped"
                     a.last_activity_at = now;
                 });
             }
-            Signal::TurnEnded => self.turn_ended(id, now),
+            Signal::TurnEnded => {
+                self.model().rt(id).provider_error = None;
+                self.turn_ended(id, now);
+            }
             // Parked at a usage limit: a notification changes nothing.
             Signal::Blocked(_) if self.agent(id).is_some_and(|a| a.limit.is_some()) => {}
             Signal::Blocked(reason) => {
@@ -2022,24 +2083,7 @@ waiting on a teammate."
                         }
                     }
                 }
-                Todo::Unresponsive { agent, why } => {
-                    self.update_agent(&agent, |a| {
-                        a.status = AgentStatus::Blocked;
-                        a.block_kind = Some("unresponsive".into());
-                        a.activity = why.clone();
-                    });
-                    self.emit(
-                        NewEvent::new(
-                            "scheduler",
-                            "agent.unresponsive",
-                            format!("{agent} is unresponsive: {why}"),
-                        )
-                        .agent(&agent)
-                        .warn(),
-                    );
-                    self.notify_orchestrator(&format!("Agent {agent} is unresponsive: {why}."))
-                        .await;
-                }
+                Todo::Unresponsive { agent, why } => self.stalled(&agent, why).await,
                 Todo::Timeout { task_id, secs } => {
                     self.fail_task(&task_id, format!("timed out after {secs}s"))
                         .await;
