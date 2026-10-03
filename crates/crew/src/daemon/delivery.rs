@@ -445,25 +445,39 @@ impl Daemon {
             .get(id)
             .map(|s| s.env.clone())
             .unwrap_or_default();
+        // Held by the task that owns the command, not by this request: a
+        // launch of the agent waits until the command and its sandbox are
+        // done, whoever stops waiting for it.
+        let lease = self.launch_lease(id).read_owned().await;
         let sandbox = self
             .agent_sandbox(&agent, Run::helper(id, &argv[0], &env, socket))
             .await
             .map_err(|e| format!("{e:#}"))?;
+        // In the ledger, on disk, before it starts: its sandbox reports there
+        // when it is gone.
+        let record = sandbox
+            .as_ref()
+            .map(|_| self.ledger.start(id, "queue"))
+            .transpose()
+            .map_err(|e| format!("{e:#}"))?;
+        let marked = sandbox.zip(record.as_ref()).map(|(mut sandbox, record)| {
+            sandbox.done = Some(record.done().to_path_buf());
+            sandbox
+        });
         // Unsandboxed it keeps running with the daemon's own environment.
-        let env = if sandbox.is_some() { env } else { Vec::new() };
-        let mut cmd = command(sandbox.as_ref(), &argv, &env).map_err(|e| format!("{e:#}"))?;
-        cmd.stdin(std::process::Stdio::null()).kill_on_drop(true);
-        let run = cmd.output();
-        match tokio::time::timeout(std::time::Duration::from_secs(20), run).await {
-            Ok(Ok(output)) if output.status.success() => Ok(()),
-            Ok(Ok(output)) => Err(String::from_utf8_lossy(&output.stderr)
-                .lines()
-                .next()
-                .unwrap_or("the queue command failed")
-                .to_string()),
-            Ok(Err(e)) => Err(e.to_string()),
-            Err(_) => Err("the queue command timed out".to_string()),
+        let env = if marked.is_some() { env } else { Vec::new() };
+        let mut cmd = command(marked.as_ref(), &argv, &env).map_err(|e| format!("{e:#}"))?;
+        cmd.stdin(std::process::Stdio::null())
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::piped());
+        let spawned = cmd.spawn();
+        if let (Err(_), Some(record)) = (&spawned, &record) {
+            self.ledger.never_started(record);
         }
+        let child = spawned.map_err(|e| e.to_string())?;
+        tokio::spawn(run_queue(child, record, lease))
+            .await
+            .map_err(|e| e.to_string())?
     }
 
     /// Put crew's own text (a reminder) into a session. Returns whether it
@@ -494,6 +508,53 @@ impl Daemon {
             Err(_) => false,
         }
     }
+}
+
+/// Run a queue command to its end, with its ledger entry and the agent's
+/// launch lease (held until then). Its sandbox's init is found before
+/// anything can kill it; past its time it is killed.
+async fn run_queue(
+    mut child: tokio::process::Child,
+    record: Option<super::retire::Record>,
+    _lease: tokio::sync::OwnedRwLockReadGuard<()>,
+) -> Result<(), String> {
+    use tokio::io::AsyncReadExt;
+    if let (Some(record), Some(pid)) = (&record, child.id()) {
+        record.update(|r| r.pid = Some(pid));
+        let running = || super::retire::Proc::of(pid).is_some_and(|p| p.running());
+        match super::retire::discover(pid, running, super::retire::DISCOVER_WITHIN).await {
+            Ok(init) => record.update(|r| r.init = init),
+            Err(e) => {
+                let _ = child.kill().await;
+                return Err(format!("the queue command was stopped: {e:#}"));
+            }
+        }
+    }
+    let mut stderr = child.stderr.take();
+    let read = tokio::spawn(async move {
+        let mut text = String::new();
+        if let Some(stderr) = stderr.as_mut() {
+            let _ = stderr.read_to_string(&mut text).await;
+        }
+        text
+    });
+    let status = match tokio::time::timeout(std::time::Duration::from_secs(20), child.wait()).await
+    {
+        Ok(status) => status.map_err(|e| e.to_string())?,
+        Err(_) => {
+            let _ = child.kill().await;
+            return Err("the queue command timed out".to_string());
+        }
+    };
+    if status.success() {
+        return Ok(());
+    }
+    let stderr = read.await.unwrap_or_default();
+    Err(stderr
+        .lines()
+        .next()
+        .unwrap_or("the queue command failed")
+        .to_string())
 }
 
 #[cfg(test)]
@@ -557,5 +618,35 @@ mod tests {
         let asked = [news.clone(), message("lead", MessageType::Question)];
         assert!(wakes(&member(AgentStatus::Idle), &asked, true));
         assert!(!wakes(&member(AgentStatus::Idle), &asked[..1], true));
+    }
+
+    #[tokio::test]
+    async fn a_queue_command_keeps_its_launch_lease_until_it_ends_whoever_waits() {
+        let lease = Arc::new(tokio::sync::RwLock::new(()));
+        let shared = lease.clone().read_owned().await;
+        let child = tokio::process::Command::new("sleep")
+            .arg("0.5")
+            .stderr(std::process::Stdio::piped())
+            .spawn()
+            .unwrap();
+        let pid = child.id().unwrap();
+        // Nobody waits for it (the delivery was cancelled).
+        drop(tokio::spawn(run_queue(child, None, shared)));
+        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+        assert!(
+            lease.try_write().is_err(),
+            "the lease went before the command"
+        );
+        assert!(
+            std::path::Path::new(&format!("/proc/{pid}")).exists(),
+            "the command was stopped"
+        );
+        for _ in 0..200 {
+            if lease.try_write().is_ok() {
+                return;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+        }
+        panic!("the lease was kept after the command ended");
     }
 }

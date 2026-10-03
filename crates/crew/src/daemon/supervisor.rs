@@ -328,10 +328,10 @@ impl Daemon {
         resume: bool,
         notice: Option<String>,
     ) -> Result<()> {
-        // One launch of an agent at a time, and none beside its git jobs:
-        // two restarts close together must not both find nothing running
-        // and seed its home while the other's sandboxes start, nor write it
-        // beside a git sandbox.
+        // One launch of an agent at a time, and none beside its git jobs or
+        // queue commands: two restarts close together must not both find
+        // nothing running and seed its home while the other's sandboxes
+        // start, nor write it beside a helper's sandbox.
         let launch = self.launch_lease(id).write_owned().await;
         let procs = self.procs().map_err(|e| anyhow!(e.message))?;
         // Before anything of the agent's writable tree is touched (even made):
@@ -671,8 +671,8 @@ impl Daemon {
             }
         }
 
-        // Its sandboxes are started and in the ledger; what follows may
-        // deliver to it, which does not wait for this launch.
+        // Its sandboxes are started and in the ledger: what follows may
+        // deliver to it, through a queue command that shares the lease.
         drop(launch);
         if spawned.prompt_delivered {
             if !pending_ids.is_empty() {
@@ -814,9 +814,9 @@ stopped"
 
     /// Agent `id`'s launch lease. A launch holds it alone, from before the
     /// agent's previous sandboxes are retired until its own have started.
-    /// The agent's git jobs share it while their sandboxes run, the guard
-    /// owned by the job itself, so a request that is cancelled does not let
-    /// a launch in beside a job still running.
+    /// The agent's git jobs and queue commands share it while their
+    /// sandboxes run, the guard owned by the job itself, so a request that
+    /// is cancelled does not let a launch in beside a job still running.
     pub(crate) fn launch_lease(&self, id: &str) -> std::sync::Arc<tokio::sync::RwLock<()>> {
         self.launches
             .lock()
