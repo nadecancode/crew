@@ -256,8 +256,8 @@ pub(crate) struct Ledger {
     boot: String,
     agents: Mutex<HashMap<String, Vec<Record>>>,
     /// Files found at start that could not be read: they may be any
-    /// agent's.
-    unreadable: Vec<PathBuf>,
+    /// agent's, until the operator deletes them.
+    unreadable: Mutex<Vec<PathBuf>>,
 }
 
 impl Ledger {
@@ -307,7 +307,7 @@ impl Ledger {
             dir: dir.to_path_buf(),
             boot,
             agents: Mutex::new(agents),
-            unreadable,
+            unreadable: Mutex::new(unreadable),
         })
     }
 
@@ -363,7 +363,12 @@ impl Ledger {
     /// entries. Entries leave only once gone, so a launch that gives up
     /// here leaves the next one the same wait.
     pub async fn retire(&self, agent: &str, within: Duration) -> Result<()> {
-        if let Some(file) = self.unreadable.first() {
+        let unreadable = {
+            let mut files = self.unreadable.lock().unwrap_or_else(|e| e.into_inner());
+            files.retain(|file| !deleted(file));
+            files.first().cloned()
+        };
+        if let Some(file) = unreadable {
             bail!(
                 "the retirement ledger entry {} cannot be read, so it may be any agent's; once no \
 sandbox of this team is left, delete it",
@@ -660,6 +665,28 @@ mod tests {
         }
         let next = Ledger::open(dir.path()).unwrap();
         assert!(next.of("a").is_empty() && next.of("b").is_empty());
+    }
+
+    #[tokio::test]
+    async fn an_unreadable_entry_the_operator_deleted_no_longer_holds_anyone() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = tempfile::tempdir().unwrap();
+        let short = Duration::from_millis(100);
+        let torn = dir.path().join("torn.json");
+        std::fs::write(&torn, "{\"agent\": ").unwrap();
+        let ledger = Ledger::open(dir.path()).unwrap();
+        assert!(ledger.retire("a", short).await.is_err());
+        // While it cannot be checked, it still holds.
+        let mode = |m| std::fs::Permissions::from_mode(m);
+        std::fs::set_permissions(dir.path(), mode(0o000)).unwrap();
+        let refused = ledger.retire("a", short).await;
+        std::fs::set_permissions(dir.path(), mode(0o700)).unwrap();
+        assert!(refused.is_err(), "an entry that could not be checked went");
+        // Deleted, as the refusal says: the next launch goes through, with
+        // no daemon restart.
+        std::fs::remove_file(&torn).unwrap();
+        ledger.retire("a", short).await.unwrap();
+        ledger.retire("b", short).await.unwrap();
     }
 
     /// bubblewrap from PATH, if the host has it (a failure under
