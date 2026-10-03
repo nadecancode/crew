@@ -238,6 +238,29 @@ fn cache_home() -> PathBuf {
         .unwrap_or_else(|| PathBuf::from(var("HOME").unwrap_or_else(|| "/".into())).join(".cache"))
 }
 
+/// What the daemon's PATH finds for a program.
+struct Found {
+    path: Option<PathBuf>,
+    /// The same, if it is an agent CLI, whose install directory the
+    /// profile binds: anything but the crew binary, which is bound anyway.
+    cli: Option<PathBuf>,
+}
+
+impl Found {
+    fn new(program: &str, path: Option<&OsString>, crew_bin: &Path) -> Self {
+        let path = find_program(program, path);
+        let crew_bin = crew_bin.canonicalize().ok();
+        let cli = path.clone().filter(|p| p.canonicalize().ok() != crew_bin);
+        Self { path, cli }
+    }
+
+    /// What runs for `name` in the sandbox `spec` (program_to_run): the
+    /// program found, CLI or crew binary alike.
+    fn program(&self, name: &str, spec: &Spec) -> Option<PathBuf> {
+        program_to_run(name, self.path.as_deref(), spec)
+    }
+}
+
 /// What runs for `name`, which the daemon's PATH found at `found` and
 /// whose file the profile bound: `found` itself, an absolute path that
 /// keeps the name a program may look at, where `spec` shows it; else the
@@ -662,11 +685,7 @@ workspace.sandbox.mode: off"
         let (built, program) = tokio::task::spawn_blocking(move || -> Result<_> {
             let (host, layout) = host_and_layout(&crew_bin, &workspace, &socket)?;
             let path = std::env::var_os("PATH");
-            // The crew binary is bound anyway; any other program is a CLI,
-            // and its install directory is bound.
-            let crew_bin = crew_bin.canonicalize().ok();
-            let cli = find_program(&run.program, path.as_ref())
-                .filter(|p| p.canonicalize().ok() != crew_bin);
+            let found = Found::new(&run.program, path.as_ref(), &crew_bin);
             let at = Placement {
                 agent_dir: &agent_dir,
                 workdir: &workdir,
@@ -684,10 +703,10 @@ workspace.sandbox.mode: off"
                 &at,
                 &config,
                 &run,
-                cli.as_deref(),
+                found.cli.as_deref(),
                 nix.as_ref(),
             )?;
-            let program = program_to_run(&run.program, cli.as_deref(), &built.spec);
+            let program = found.program(&run.program, &built.spec);
             Ok((built, program))
         })
         .await??;
@@ -1259,6 +1278,27 @@ unsandboxed"
         // A program given as a path, or not found, runs as given.
         assert_eq!(program_to_run("./codex", Some(&first), &spec), None);
         assert_eq!(program_to_run("codex", None, &spec), None);
+    }
+
+    #[test]
+    fn the_crew_binary_by_bare_name_runs_as_found_too_though_it_is_no_cli() {
+        use std::os::unix::fs::PermissionsExt;
+        let fx = fixture();
+        let root = &fx.root;
+        let crew = root.join("build/crew");
+        std::fs::create_dir_all(crew.parent().unwrap()).unwrap();
+        std::fs::write(&crew, "#!/bin/sh\n").unwrap();
+        std::fs::set_permissions(&crew, std::fs::Permissions::from_mode(0o755)).unwrap();
+        // On PATH through a link, as `~/.local/bin/crew` would be.
+        std::fs::create_dir_all(root.join("links")).unwrap();
+        std::os::unix::fs::symlink(&crew, root.join("links/crew")).unwrap();
+        let path = std::env::join_paths([root.join("links")]).unwrap();
+        let found = Found::new("crew", Some(&path), &crew);
+        // Bound anyway, so no CLI install directory is added for it...
+        assert_eq!(found.cli, None);
+        // ... but what runs is the binary found, not a second lookup.
+        let spec = fx.profile("a", false, true).unwrap();
+        assert_eq!(found.program("crew", &spec), Some(crew.clone()));
     }
 
     #[tokio::test]
