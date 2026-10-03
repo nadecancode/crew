@@ -117,6 +117,15 @@ fn sandboxed_clis_keep_their_files_in_private_homes_seeded_without_the_operators
     let token = s.root().join("claude-token");
     std::fs::write(&token, "tok-sandboxed-claude\n").unwrap();
     std::fs::set_permissions(&token, std::fs::Permissions::from_mode(0o600)).unwrap();
+    let codex_token = s.root().join("codex-token");
+    let pi_token = s.root().join("pi-token");
+    for (path, value) in [
+        (&codex_token, "tok-sandboxed-codex"),
+        (&pi_token, "tok-sandboxed-pi"),
+    ] {
+        std::fs::write(path, value).unwrap();
+        std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o600)).unwrap();
+    }
     let global = s.root().join("etc/config.toml");
     std::fs::create_dir_all(global.parent().unwrap()).unwrap();
     std::fs::write(
@@ -128,6 +137,14 @@ fn sandboxed_clis_keep_their_files_in_private_homes_seeded_without_the_operators
     )
     .unwrap();
     std::fs::set_permissions(&global, std::fs::Permissions::from_mode(0o600)).unwrap();
+    {
+        use std::io::Write;
+        let mut file = std::fs::OpenOptions::new()
+            .append(true)
+            .open(&global)
+            .unwrap();
+        writeln!(file, "[agents.x.env_files]\nOPENAI_API_KEY = \"{}\"\n[agents.p.env_files]\nANTHROPIC_API_KEY = \"{}\"", codex_token.display(), pi_token.display()).unwrap();
+    }
 
     let mut team = s.team(
         "private-homes",
@@ -260,5 +277,36 @@ fn sandboxed_clis_keep_their_files_in_private_homes_seeded_without_the_operators
         );
     }
     assert!(!operator_codex.join("sessions").exists());
+    let records = [
+        json(&home("c").join("claude/fake-claude.json")),
+        json(&home("x").join("codex/fake-codex.json")),
+        json(&home("p").join("pi/fake-pi.json")),
+        json(&home("h").join("claude/fake-claude.json")),
+    ];
+    let tokens = [
+        ("CLAUDE_CODE_OAUTH_TOKEN", "tok-sandboxed-claude"),
+        ("OPENAI_API_KEY", "tok-sandboxed-codex"),
+        ("ANTHROPIC_API_KEY", "tok-sandboxed-pi"),
+    ];
+    for (i, record) in records.iter().enumerate() {
+        for (j, (name, value)) in tokens.iter().enumerate() {
+            if i == j {
+                assert_eq!(
+                    record["env"][name].as_str(),
+                    Some(*value),
+                    "agent {i} did not receive its token"
+                );
+            } else {
+                assert!(
+                    !record["env"].to_string().contains(value),
+                    "agent {i} received agent {j}'s token"
+                );
+            }
+        }
+    }
+    assert_eq!(
+        server["env"]["OPENAI_API_KEY"].as_str(),
+        Some("tok-sandboxed-codex")
+    );
     s.stop();
 }
