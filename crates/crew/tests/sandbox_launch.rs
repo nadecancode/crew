@@ -515,22 +515,40 @@ fn no_secret_reaches_a_command_line_and_no_descriptor_leaks_in() {
         }
     }
     let child = cmd.stdout(std::process::Stdio::piped()).spawn().unwrap();
-    // sandbox-run execs bwrap in place: the child's pid is bwrap's.
-    let pid = child.id();
+    // sandbox-run starts bwrap as its child and waits for it.
+    let run_pid = child.id();
+    let fds_of = |pid: u32| -> Vec<OsString> {
+        std::fs::read_dir(format!("/proc/{pid}/fd"))
+            .map(|dir| dir.flatten().map(|e| e.file_name()).collect())
+            .unwrap_or_default()
+    };
     let mut seen_bwrap = false;
     for _ in 0..50 {
+        let Some(pid) = children(run_pid).into_iter().next() else {
+            std::thread::sleep(Duration::from_millis(20));
+            continue;
+        };
         let cmdline = std::fs::read(format!("/proc/{pid}/cmdline")).unwrap_or_default();
         if cmdline.starts_with(bwrap.as_os_str().as_encoded_bytes()) {
             seen_bwrap = true;
             assert!(!String::from_utf8_lossy(&cmdline).contains(secret));
-            let fds: Vec<OsString> = std::fs::read_dir(format!("/proc/{pid}/fd"))
-                .unwrap()
-                .flatten()
-                .map(|e| e.file_name())
-                .collect();
+            let fds = fds_of(pid);
             assert!(
                 !fds.contains(&OsString::from("50")),
                 "bwrap inherited fd 50: {fds:?}"
+            );
+            // sandbox-run itself: no secret in its command line, and only
+            // stdio left while it waits (pinned, mask and inherited
+            // descriptors all closed).
+            let own = std::fs::read(format!("/proc/{run_pid}/cmdline")).unwrap();
+            assert!(!String::from_utf8_lossy(&own).contains(secret));
+            std::thread::sleep(Duration::from_millis(200));
+            let mut own_fds = fds_of(run_pid);
+            own_fds.sort();
+            assert_eq!(
+                own_fds,
+                ["0", "1", "2"],
+                "sandbox-run holds more than stdio"
             );
             break;
         }
@@ -828,4 +846,167 @@ fn a_socket_made_in_a_mounted_tree_after_launch_is_refused() {
     drop(listener);
     let _ = control.wait_with_output();
     assert!(reached, "the control client did not reach the socket");
+}
+
+// ---------------------------------------------------------------------
+// When `crew sandbox-run` has exited with a code, the whole sandbox is gone.
+
+/// A process by pid and start time, so a recycled pid is not mistaken for it.
+#[derive(Clone, Copy, Debug, PartialEq)]
+struct Proc {
+    pid: u32,
+    start: u64,
+}
+
+fn start_time(pid: u32) -> Option<u64> {
+    let stat = std::fs::read_to_string(format!("/proc/{pid}/stat")).ok()?;
+    // Field 22, counted after the parenthesised command name.
+    let after = &stat[stat.rfind(')')? + 2..];
+    after.split(' ').nth(19)?.parse().ok()
+}
+
+fn alive(p: Proc) -> bool {
+    start_time(p.pid) == Some(p.start)
+}
+
+fn children(pid: u32) -> Vec<u32> {
+    std::fs::read_to_string(format!("/proc/{pid}/task/{pid}/children"))
+        .unwrap_or_default()
+        .split_whitespace()
+        .filter_map(|p| p.parse().ok())
+        .collect()
+}
+
+/// Every process below `root`, seen over `window`.
+fn descendants_over(root: u32, window: Duration) -> Vec<Proc> {
+    let mut seen: Vec<Proc> = Vec::new();
+    let until = std::time::Instant::now() + window;
+    while std::time::Instant::now() < until {
+        let mut pending = children(root);
+        while let Some(pid) = pending.pop() {
+            pending.extend(children(pid));
+            if let Some(start) = start_time(pid) {
+                let p = Proc { pid, start };
+                if !seen.contains(&p) {
+                    seen.push(p);
+                }
+            }
+        }
+        std::thread::sleep(Duration::from_millis(10));
+    }
+    seen
+}
+
+fn worker_spec_for_lifetime(bwrap: &Path, abi: u32, l: &Layout) -> Spec {
+    l.worker_spec(&host(bwrap, abi), false)
+}
+
+#[test]
+fn when_sandbox_run_returns_a_code_every_sandbox_process_is_gone() {
+    let Some((bwrap, abi)) = bwrap() else { return };
+    let l = layout();
+    let spec = worker_spec_for_lifetime(&bwrap, abi, &l);
+    // A descendant in its own session outlives the program.
+    let script = "setsid sleep 30 </dev/null >/dev/null 2>&1 & sleep 0.5; exit 7";
+    let mut child = sandboxed(&spec, &[], script)
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .spawn()
+        .unwrap();
+    let seen = descendants_over(child.id(), Duration::from_millis(400));
+    assert!(seen.len() >= 3, "saw too little of the sandbox: {seen:?}");
+    let status = child.wait().unwrap();
+    assert_eq!(status.code(), Some(7));
+    let left: Vec<Proc> = seen.into_iter().filter(|p| alive(*p)).collect();
+    assert!(
+        left.is_empty(),
+        "still running after sandbox-run exited: {left:?}"
+    );
+}
+
+#[test]
+fn a_killed_bubblewrap_is_reported_as_its_signal_once_the_sandbox_is_gone() {
+    let Some((bwrap, abi)) = bwrap() else { return };
+    let l = layout();
+    let spec = worker_spec_for_lifetime(&bwrap, abi, &l);
+    let mut child = sandboxed(&spec, &[], "sleep 30")
+        .stdout(std::process::Stdio::null())
+        .spawn()
+        .unwrap();
+    let seen = descendants_over(child.id(), Duration::from_millis(400));
+    // The bubblewrap sandbox-run started: its direct child.
+    let direct = children(child.id());
+    let bwrap_proc = seen
+        .iter()
+        .find(|p| direct.contains(&p.pid))
+        .copied()
+        .unwrap_or_else(|| panic!("no child of sandbox-run: {seen:?}"));
+    let comm = std::fs::read_to_string(format!("/proc/{}/comm", bwrap_proc.pid)).unwrap();
+    assert_eq!(comm.trim(), "bwrap");
+    // SAFETY: plain kill of a process this test started.
+    unsafe { libc::kill(bwrap_proc.pid as i32, libc::SIGKILL) };
+    let status = child.wait().unwrap();
+    assert_eq!(status.code(), Some(128 + libc::SIGKILL));
+    let left: Vec<Proc> = seen.into_iter().filter(|p| alive(*p)).collect();
+    assert!(left.is_empty(), "still running: {left:?}");
+}
+
+#[test]
+fn a_killed_sandbox_run_takes_the_sandbox_with_it() {
+    let Some((bwrap, abi)) = bwrap() else { return };
+    let l = layout();
+    let spec = worker_spec_for_lifetime(&bwrap, abi, &l);
+    let mut child = sandboxed(&spec, &[], "sleep 30")
+        .stdout(std::process::Stdio::null())
+        .spawn()
+        .unwrap();
+    let seen = descendants_over(child.id(), Duration::from_millis(400));
+    child.kill().unwrap();
+    child.wait().unwrap();
+    let until = std::time::Instant::now() + Duration::from_secs(5);
+    while seen.iter().any(|p| alive(*p)) && std::time::Instant::now() < until {
+        std::thread::sleep(Duration::from_millis(20));
+    }
+    let left: Vec<Proc> = seen.into_iter().filter(|p| alive(*p)).collect();
+    assert!(left.is_empty(), "still running: {left:?}");
+}
+
+#[test]
+fn sandbox_run_dies_with_the_process_that_started_it() {
+    let Some((bwrap, abi)) = bwrap() else { return };
+    let l = layout();
+    let spec = worker_spec_for_lifetime(&bwrap, abi, &l);
+    let argv = prefix(&spec).unwrap();
+    // A parent that starts sandbox-run, prints its pid and waits.
+    let mut parent = Command::new("/bin/sh");
+    parent
+        .args(["-c", r#""$@" & echo $!; wait"#, "sh"])
+        .args(&argv)
+        .args(["sh", "-c", "sleep 30"])
+        .env_clear()
+        .envs(launcher_env(&spec, std::env::vars_os(), &[]))
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::piped());
+    let mut parent = parent.spawn().unwrap();
+    let mut line = String::new();
+    BufReader::new(parent.stdout.take().unwrap())
+        .read_line(&mut line)
+        .unwrap();
+    let run_pid: u32 = line.trim().parse().unwrap();
+    let mut seen = descendants_over(run_pid, Duration::from_millis(400));
+    seen.push(Proc {
+        pid: run_pid,
+        start: start_time(run_pid).unwrap(),
+    });
+    parent.kill().unwrap();
+    parent.wait().unwrap();
+    let until = std::time::Instant::now() + Duration::from_secs(5);
+    while seen.iter().any(|p| alive(*p)) && std::time::Instant::now() < until {
+        std::thread::sleep(Duration::from_millis(20));
+    }
+    let left: Vec<Proc> = seen.into_iter().filter(|p| alive(*p)).collect();
+    assert!(
+        left.is_empty(),
+        "still running after its parent died: {left:?}"
+    );
 }

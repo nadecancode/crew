@@ -5,9 +5,17 @@
 //! the daemon runs this fresh, single-threaded process in front of the
 //! program instead. It checks the spec, marks every inherited descriptor
 //! close-on-exec, pins each bind source and checks it is the object the
-//! daemon validated, and execs bubblewrap with only those descriptors and
+//! daemon validated, and starts bubblewrap with only those descriptors and
 //! the allow-listed environment. Inside, bubblewrap runs
 //! `crew sandbox-exec`, which confines the process and runs the program.
+//!
+//! It then stays as bubblewrap's parent, a child subreaper, until every
+//! process of the sandbox is gone. bubblewrap reports the program's exit
+//! before its own PID 1 has finished, and that PID 1 waits for the rest of
+//! the namespace; as a subreaper, sandbox-run inherits it and waits for it
+//! too. So when sandbox-run exits with a code, nothing of the sandbox is
+//! left. It dies with the process that started it (`PR_SET_PDEATHSIG`),
+//! and bubblewrap's `--die-with-parent` then takes the sandbox down.
 //!
 //! Any failure exits with [`EXIT_SETUP_FAILED`] before bubblewrap runs;
 //! there is no fallback to binding by path.
@@ -15,7 +23,6 @@
 use std::ffi::{CString, OsString};
 use std::io;
 use std::os::fd::{AsRawFd, FromRawFd, OwnedFd};
-use std::os::unix::process::CommandExt;
 use std::process::Command;
 
 use super::pin::{pin, Kind};
@@ -53,18 +60,100 @@ pub fn prefix(spec: &Spec) -> Result<Vec<OsString>, String> {
     ])
 }
 
-/// Set up and exec bubblewrap. Never returns.
+/// Set up bubblewrap, run it and wait until the whole sandbox is gone.
+/// Exits with bubblewrap's exit code, or 128 plus the signal that killed
+/// it. Never returns.
 pub fn run(args: RunArgs) -> ! {
-    let error = match prepare(&args.spec, &args.command) {
-        Ok((mut command, _pinned)) => format!("running bwrap: {}", command.exec()),
-        Err(error) => error,
+    let started = tie_to_parent().and_then(|()| prepare(&args.spec, &args.command));
+    let (bwrap, pinned) = match started {
+        Ok(started) => started,
+        Err(error) => {
+            eprintln!("crew sandbox-run: {error}");
+            std::process::exit(EXIT_SETUP_FAILED)
+        }
     };
-    eprintln!("crew sandbox-run: {error}");
-    std::process::exit(EXIT_SETUP_FAILED)
+    match supervise(bwrap, pinned) {
+        Ok(code) => std::process::exit(code),
+        Err(error) => {
+            eprintln!("crew sandbox-run: {error}");
+            std::process::exit(EXIT_SETUP_FAILED)
+        }
+    }
+}
+
+/// Die with the process that started this one, as bubblewrap did when it
+/// was that process's child, and become a subreaper so that bubblewrap's
+/// PID 1 comes back here when bubblewrap exits first.
+fn tie_to_parent() -> Result<(), String> {
+    // SAFETY: getppid has no failure modes.
+    let parent = unsafe { libc::getppid() };
+    // SAFETY: plain prctl calls with constant arguments.
+    let rc = unsafe { libc::prctl(libc::PR_SET_PDEATHSIG, libc::SIGKILL, 0, 0, 0) };
+    if rc != 0 {
+        return Err(format!(
+            "tying this process to its parent: {}",
+            io::Error::last_os_error()
+        ));
+    }
+    // SAFETY: getppid has no failure modes.
+    if unsafe { libc::getppid() } != parent {
+        return Err("the process that started this one is already gone".into());
+    }
+    // SAFETY: plain prctl call with constant arguments.
+    if unsafe { libc::prctl(libc::PR_SET_CHILD_SUBREAPER, 1, 0, 0, 0) } != 0 {
+        return Err(format!(
+            "becoming a subreaper: {}",
+            io::Error::last_os_error()
+        ));
+    }
+    Ok(())
+}
+
+/// Start bubblewrap, drop this process's copies of the pinned descriptors,
+/// and reap children until none is left. Returns bubblewrap's exit code,
+/// or 128 plus the signal that killed it.
+fn supervise(mut bwrap: Command, pinned: Vec<OwnedFd>) -> Result<i32, String> {
+    let child = bwrap.spawn().map_err(|e| format!("running bwrap: {e}"))?;
+    let bwrap_pid = child.id() as libc::pid_t;
+    drop(pinned);
+    // Dropping the handle neither waits nor kills; children are reaped below.
+    drop(child);
+    // Hold nothing but stdio while waiting: whatever this process inherited
+    // was only marked close-on-exec, and it may wait for a long time.
+    // SAFETY: nothing in this process still owns a descriptor from 3 up.
+    if unsafe { libc::syscall(libc::SYS_close_range, 3u32, u32::MAX, 0u32) } != 0 {
+        return Err(format!(
+            "closing inherited descriptors: {}",
+            io::Error::last_os_error()
+        ));
+    }
+    let mut bwrap_status = None;
+    loop {
+        let mut status = 0;
+        // SAFETY: waits for any child; `status` is a valid out-pointer.
+        let pid = unsafe { libc::waitpid(-1, &mut status, 0) };
+        if pid > 0 {
+            if pid == bwrap_pid {
+                bwrap_status = Some(status);
+            }
+            continue;
+        }
+        match io::Error::last_os_error().raw_os_error() {
+            Some(libc::EINTR) => continue,
+            Some(libc::ECHILD) => break,
+            // Not knowing whether the sandbox is gone, never report a code.
+            _ => std::process::abort(),
+        }
+    }
+    match bwrap_status {
+        Some(status) if libc::WIFEXITED(status) => Ok(libc::WEXITSTATUS(status)),
+        Some(status) if libc::WIFSIGNALED(status) => Ok(128 + libc::WTERMSIG(status)),
+        _ => std::process::abort(),
+    }
 }
 
 /// The bubblewrap command for a spec, with the descriptors it refers to,
-/// which must stay open until it is executed.
+/// which must stay open until bubblewrap is started.
 pub fn prepare(json: &str, command: &[OsString]) -> Result<(Command, Vec<OwnedFd>), String> {
     if json.len() > MAX_SPEC_LEN {
         return Err(format!(
