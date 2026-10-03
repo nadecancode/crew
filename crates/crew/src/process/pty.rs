@@ -42,9 +42,8 @@ const SCRUBBED_ENV: &[&str] = &[
     "TMUX_PANE",
 ];
 
-/// How long, and how often, the waiter watches a group that outlived its leader.
+/// How often the waiter checks a group that outlived its leader.
 const GROUP_WATCH_INTERVAL: Duration = Duration::from_millis(200);
-const GROUP_WATCH_POLLS: u32 = 3000;
 
 struct PtyProc {
     kind: RuntimeKind,
@@ -344,12 +343,12 @@ impl ProcessManager for PtyManager {
                         code,
                         detail,
                     });
-                    // Members that outlived the leader: retire the group when
-                    // the last one is gone (kill() may do it first), so its id
-                    // is never probed once it can be recycled. Bounded; a group
-                    // still alive after that is left to kill().
+                    // Members that outlived the leader: keep observing the group
+                    // until it is empty (kill() may retire it first), so its id
+                    // is never probed once it can be recycled. There is no time
+                    // limit: elapsed time is no evidence the group is not ours.
                     let Some(pid) = pid else { return };
-                    for _ in 0..GROUP_WATCH_POLLS {
+                    loop {
                         if proc.group_retired.load(Ordering::SeqCst) {
                             return;
                         }
