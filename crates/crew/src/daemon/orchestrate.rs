@@ -409,14 +409,15 @@ call session_complete with the final report."
             }
             let task = tasks::task_from_spec(&spec, now_ms());
             check_task_message_size(&task, self.bus.max_bytes())?;
+            // Stored first: a task the database refused does not exist.
+            self.store
+                .save_task(&task)
+                .map_err(|e| RpcError::internal(e.to_string()))?;
             model.tasks.push(task.clone());
             // New work reopens a session that had finished.
             model.session.completed_at = None;
             task
         };
-        self.store
-            .save_task(&task)
-            .map_err(|e| RpcError::internal(e.to_string()))?;
         self.push(crew_core::rpc::Push::Task(Box::new(task.clone())));
         self.emit(
             NewEvent::new(
@@ -462,7 +463,7 @@ call session_complete with the final report."
         }
         let previous = self.model().task(id).and_then(|t| t.assigned_agent.clone());
         let task = self
-            .update_task(id, |t| {
+            .try_update_task(id, |t| {
                 if t.assigned_agent.as_deref() != Some(agent) {
                     t.assigned_agent = Some(agent.to_string());
                     if !matches!(t.status, TaskStatus::Queued | TaskStatus::Ready) {
@@ -472,7 +473,7 @@ call session_complete with the final report."
                         t.note = None;
                     }
                 }
-            })
+            })?
             .ok_or_else(|| RpcError::not_found(format!("no task '{id}'")))?;
         if let Some(previous) = previous.filter(|p| p != agent) {
             self.update_agent(&previous, |a| {
@@ -515,7 +516,7 @@ call session_complete with the final report."
             )));
         }
         let task = self
-            .update_task(id, |t| {
+            .try_update_task(id, |t| {
                 t.status = TaskStatus::Queued;
                 t.started_at = None;
                 t.completed_at = None;
@@ -528,7 +529,7 @@ call session_complete with the final report."
                 if reviewer_left {
                     t.reviewer = None;
                 }
-            })
+            })?
             .ok_or_else(|| RpcError::not_found(format!("no task '{id}'")))?;
         let unassigned = if author_left {
             "; its member has left the team, so it goes to whoever is free"
@@ -722,7 +723,7 @@ call session_complete with the final report."
             },
         };
         let updated = self
-            .update_task(&task.id, |t| {
+            .try_update_task(&task.id, |t| {
                 t.result = Some(if result.is_empty() {
                     "done".into()
                 } else {
@@ -749,7 +750,7 @@ call session_complete with the final report."
                         t.note = None;
                     }
                 }
-            })
+            })?
             .ok_or_else(|| RpcError::not_found("task vanished"))?;
 
         self.model().rt(&author).self_status = None;
@@ -998,7 +999,7 @@ with review_submit(task_id=\"{}\", approve=true|false).",
         // something else in between.
         let mut queued = false;
         let updated = if approve {
-            self.update_task(task_id, |t| {
+            self.try_update_task(task_id, |t| {
                 t.status = TaskStatus::Done;
                 t.completed_at = Some(now);
                 t.note = None;
@@ -1008,7 +1009,7 @@ with review_submit(task_id=\"{}\", approve=true|false).",
             queued = author
                 .as_deref()
                 .is_some_and(|a| active_task(&self.model().tasks, a).is_some());
-            self.update_task(task_id, |t| {
+            self.try_update_task(task_id, |t| {
                 t.status = if queued {
                     TaskStatus::Ready
                 } else {
@@ -1017,7 +1018,7 @@ with review_submit(task_id=\"{}\", approve=true|false).",
                 t.progress = None;
                 t.note = Some(format!("changes requested by {reviewer}"));
             })
-        }
+        }?
         .ok_or_else(|| RpcError::not_found("task vanished"))?;
 
         self.emit(

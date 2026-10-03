@@ -1157,6 +1157,59 @@ fn the_daemon_recovers_its_state_after_being_killed() {
 }
 
 #[test]
+fn a_task_transition_the_database_refuses_is_an_error_and_not_applied() {
+    let s = Session::new();
+    let team = s.team(
+        "durable",
+        vec![agent("author", "", &["--on-task=wait-message operator"])],
+        vec![task("write", "author", &[])],
+    );
+    s.run(&team);
+    s.wait_for("the author to be on write", || {
+        s.agent_cmd(&["output", "author"])
+            .contains("Task write is yours")
+    });
+    let stored_status = || -> String {
+        let db = rusqlite::Connection::open(s.workspace.join(".crew/crew.db")).unwrap();
+        let data: String = db
+            .query_row("SELECT data FROM tasks WHERE id = 'write'", [], |row| {
+                row.get(0)
+            })
+            .unwrap();
+        let task: Value = serde_json::from_str(&data).unwrap();
+        task["status"].as_str().unwrap().to_string()
+    };
+    let db = rusqlite::Connection::open(s.workspace.join(".crew/crew.db")).unwrap();
+    db.execute_batch(
+        "CREATE TRIGGER refuse_task_writes BEFORE UPDATE ON tasks \
+         BEGIN SELECT RAISE(ABORT, 'the disk is full'); END;",
+    )
+    .unwrap();
+
+    let complete = json!({ "result": "finished" }).to_string();
+    let refused = s.ctl("author", &["tool", "task_complete", &complete]);
+    assert!(!refused.status.success(), "{}", stdout(&refused));
+    assert!(
+        stderr(&refused).contains("the disk is full"),
+        "{}",
+        stderr(&refused)
+    );
+    // What the daemon shows is what it stored.
+    assert_eq!(stored_status(), "working");
+    assert_eq!(
+        find_task(&s.snapshot(), "write").status,
+        TaskStatus::Working
+    );
+
+    db.execute_batch("DROP TRIGGER refuse_task_writes;")
+        .unwrap();
+    let done = s.ctl("author", &["tool", "task_complete", &complete]);
+    assert!(done.status.success(), "{}", stderr(&done));
+    assert_eq!(stored_status(), "done");
+    assert_eq!(find_task(&s.snapshot(), "write").status, TaskStatus::Done);
+}
+
+#[test]
 fn a_second_daemon_for_the_same_workspace_is_refused_and_a_team_cannot_be_loaded_twice() {
     let s = Session::new();
     let team = s.team("single", vec![agent("a", "", &[])], vec![]);

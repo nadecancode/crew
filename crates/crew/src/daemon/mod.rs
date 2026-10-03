@@ -417,22 +417,45 @@ impl Daemon {
         });
     }
 
+    /// Apply a change to a task, or `None` if there is no such task or the
+    /// change could not be stored (logged; nothing changed then).
     pub(crate) fn update_task(&self, id: &str, f: impl FnOnce(&mut Task)) -> Option<Task> {
-        let (before, after) = {
+        match self.try_update_task(id, f) {
+            Ok(task) => task,
+            Err(e) => {
+                tracing::error!("{}", e.message);
+                None
+            }
+        }
+    }
+
+    /// Apply a change to a task: it is stored first, and only then made
+    /// visible, so nothing is reported that the database does not hold.
+    /// Saving under the model lock also keeps an older snapshot from
+    /// overwriting a newer one.
+    pub(crate) fn try_update_task(
+        &self,
+        id: &str,
+        f: impl FnOnce(&mut Task),
+    ) -> Result<Option<Task>, RpcError> {
+        let after = {
             let mut model = self.model();
-            let task = model.tasks.iter_mut().find(|t| t.id == id)?;
-            let before = task.clone();
-            f(task);
-            (before, task.clone())
+            let Some(task) = model.tasks.iter_mut().find(|t| t.id == id) else {
+                return Ok(None);
+            };
+            let mut after = task.clone();
+            f(&mut after);
+            if after == *task {
+                return Ok(Some(after));
+            }
+            self.store
+                .save_task(&after)
+                .map_err(|e| RpcError::internal(format!("persisting task {id} failed: {e:#}")))?;
+            *task = after.clone();
+            after
         };
-        if before == after {
-            return Some(after);
-        }
-        if let Err(e) = self.store.save_task(&after) {
-            tracing::error!("persisting task {id} failed: {e:#}");
-        }
         self.push(Push::Task(Box::new(after.clone())));
-        Some(after)
+        Ok(Some(after))
     }
 
     /// Recompute inbox/outbox counters for the given agents.
