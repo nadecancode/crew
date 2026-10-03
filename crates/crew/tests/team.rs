@@ -896,6 +896,20 @@ fn a_task_whose_reviewer_is_unavailable_stays_in_review_and_the_orchestrator_is_
     });
     assert!(s.has_event("task.review_blocked"));
     assert!(!s.has_event("task.done"));
+
+    // Restarted, the reviewer gets the request that waited for it, once.
+    s.agent_cmd(&["restart", "critic"]);
+    s.wait_for("the request to reach the reviewer", || {
+        s.events()
+            .iter()
+            .any(|e| e.event_type == "message.delivered" && e.agent_id.as_deref() == Some("critic"))
+    });
+    let requests = s
+        .messages()
+        .into_iter()
+        .filter(|m| m.kind == MessageType::ReviewRequest && m.to == "critic")
+        .count();
+    assert_eq!(requests, 1);
 }
 
 #[test]
@@ -977,8 +991,15 @@ fn a_reviewer_with_an_open_review_is_restarted_after_a_daemon_restart() {
             "review-recovery",
             vec![
                 agent("author", "", &["--on-task=done first draft"]),
-                // Reads the review request; the verdict is still to come.
-                agent("critic", "", &[]),
+                // Reads the review request, then waits for the go-ahead.
+                agent(
+                    "critic",
+                    "",
+                    &[
+                        "--on-review=wait-message operator",
+                        r#"--on-review=tool review_submit {"task_id":"write","approve":true,"comments":"ok"}"#,
+                    ],
+                ),
             ],
             vec![task("write", "author", &[])],
         );
@@ -1013,6 +1034,19 @@ fn a_reviewer_with_an_open_review_is_restarted_after_a_daemon_restart() {
     assert_eq!(find_task(&after, "write").status, TaskStatus::Review);
     s.wait("the reviewer to be running again", |snap| {
         find_agent(snap, "critic").pid.is_some()
+    });
+    // Its new session did not see the request, so it is sent again, and
+    // the review can be finished.
+    s.wait_for("the review request to be sent again", || {
+        s.messages()
+            .iter()
+            .filter(|m| m.kind == MessageType::ReviewRequest && m.to == "critic")
+            .count()
+            == 2
+    });
+    s.send("critic", "go ahead");
+    s.wait("the verdict after the restart", |snap| {
+        find_task(snap, "write").status == TaskStatus::Done
     });
 }
 

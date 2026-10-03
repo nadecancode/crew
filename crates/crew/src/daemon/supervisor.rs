@@ -7,7 +7,7 @@ use crew_core::config::{validate_agent_spec, AgentSpec, TeamConfig, MAX_AGENTS};
 use crew_core::paths::{ensure_private_dir, write_private_file, Identity};
 use crew_core::rpc::{Push, RpcError};
 use crew_core::util::{new_token, now_ms};
-use crew_core::{Agent, AgentStatus, RuntimeKind, TaskStatus, ORCHESTRATOR_ID};
+use crew_core::{Agent, AgentStatus, RuntimeKind, TaskStatus, OPERATOR_ID, ORCHESTRATOR_ID};
 use serde_json::Value;
 
 use super::handlers::internal;
@@ -1467,7 +1467,7 @@ defaults.auto_trust: true in the team file.",
                 .agent(id)
                 .warn(),
             );
-            self.requeue_if_sessionless(id);
+            self.requeue_if_sessionless(id).await;
             let daemon = self.clone();
             let id = id.to_string();
             tokio::spawn(async move {
@@ -1486,13 +1486,20 @@ defaults.auto_trust: true in the team file.",
     }
 
     /// A restarted agent that cannot resume its session has forgotten its
-    /// task, so the task goes back to the scheduler to be handed out again.
-    fn requeue_if_sessionless(&self, id: &str) {
-        let (confirmed, task) = {
+    /// task and the reviews it was asked for: the task goes back to the
+    /// scheduler to be handed out again, and each review is asked for again.
+    async fn requeue_if_sessionless(&self, id: &str) {
+        let (confirmed, task, reviews) = {
             let model = self.model();
             (
                 model.local.get(id).is_some_and(|l| l.session_confirmed),
                 active_task(&model.tasks, id).map(|t| t.id.clone()),
+                model
+                    .tasks
+                    .iter()
+                    .filter(|t| t.status == TaskStatus::Review && t.reviewer.as_deref() == Some(id))
+                    .cloned()
+                    .collect::<Vec<_>>(),
             )
         };
         if confirmed {
@@ -1504,6 +1511,22 @@ defaults.auto_trust: true in the team file.",
                 t.started_at = None;
                 t.note = Some("re-dispatched after the agent restarted".into());
             });
+        }
+        // A request still waiting to be delivered reaches the new session.
+        let waiting = self.bus.undelivered(id).unwrap_or_default();
+        for task in reviews {
+            if waiting.iter().any(|m| {
+                m.kind == crew_core::MessageType::ReviewRequest
+                    && m.metadata.get("task_id").and_then(Value::as_str) == Some(task.id.as_str())
+            }) {
+                continue;
+            }
+            // Queued now, delivered once the new session is up.
+            let author = task
+                .assigned_agent
+                .clone()
+                .unwrap_or_else(|| OPERATOR_ID.into());
+            self.send_review_request(&task, &author, id).await;
         }
     }
 
@@ -1610,7 +1633,7 @@ defaults.auto_trust: true in the team file.",
                 t.note = None;
             });
         }
-        self.requeue_if_sessionless(id);
+        self.requeue_if_sessionless(id).await;
         self.update_agent(id, |a| {
             a.status = AgentStatus::Spawning;
             a.error = None;
@@ -1880,7 +1903,7 @@ waiting on a teammate."
             );
             if needed {
                 restarted += 1;
-                self.requeue_if_sessionless(&agent.id);
+                self.requeue_if_sessionless(&agent.id).await;
                 self.update_agent(&agent.id, |a| {
                     a.status = AgentStatus::Spawning;
                     a.pid = None;

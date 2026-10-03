@@ -820,36 +820,9 @@ call session_complete with the final report."
                     .task(&updated.id)
                     .agent(&author),
                 );
-                // The review request goes straight from author to reviewer;
-                // what to review against, and the work, are on the card.
-                let id = &updated.id;
-                // In a shared workspace nothing is committed: the work is
-                // already where the reviewer sees it.
-                let work = if self.model().session.isolation == "shared" {
-                    "result. The work is in the shared workspace"
-                } else {
-                    "result and commits. git_cherry_pick or git_merge brings the work into your worktree"
-                };
-                let body = format!(
-                    "Review my work on task {id} (\"{}\"): task_get(\"{id}\") reads its card, with my \
-{work}; then review_submit(task_id=\"{id}\", approve=true|false, comments=…).",
-                    updated.title
-                );
-                let commit = updated
-                    .artifacts
-                    .iter()
-                    .rev()
-                    .find(|a| a.kind == "commit")
-                    .map(|a| a.value.clone());
                 // A stopped reviewer finds the request when it is restarted.
                 if ask_reviewer {
-                    let message =
-                        NewMessage::new(&author, reviewer, MessageType::ReviewRequest, body)
-                            .metadata(json!({ "task_id": updated.id, "commit": commit }))
-                            .correlation(Some(format!("review-{}", updated.id)));
-                    if let Err(e) = self.send_message(message).await {
-                        tracing::warn!("sending the review request failed: {}", e.message);
-                    }
+                    self.send_review_request(&updated, &author, reviewer).await;
                 }
                 if let Some(why) = &unavailable {
                     self.emit(
@@ -887,6 +860,36 @@ with review_submit(task_id=\"{}\", approve=true|false).",
         self.settle(&author);
         self.replan();
         Ok(updated)
+    }
+
+    /// Ask `reviewer`, straight from the author, to review `task`: what to
+    /// review against, and the work, are on the card.
+    pub(crate) async fn send_review_request(&self, task: &Task, author: &str, reviewer: &str) {
+        let id = &task.id;
+        // In a shared workspace nothing is committed: the work is already
+        // where the reviewer sees it.
+        let work = if self.model().session.isolation == "shared" {
+            "result. The work is in the shared workspace"
+        } else {
+            "result and commits. git_cherry_pick or git_merge brings the work into your worktree"
+        };
+        let body = format!(
+            "Review my work on task {id} (\"{}\"): task_get(\"{id}\") reads its card, with my \
+{work}; then review_submit(task_id=\"{id}\", approve=true|false, comments=…).",
+            task.title
+        );
+        let commit = task
+            .artifacts
+            .iter()
+            .rev()
+            .find(|a| a.kind == "commit")
+            .map(|a| a.value.clone());
+        let message = NewMessage::new(author, reviewer, MessageType::ReviewRequest, body)
+            .metadata(json!({ "task_id": task.id, "commit": commit }))
+            .correlation(Some(format!("review-{}", task.id)));
+        if let Err(e) = self.send_message(message).await {
+            tracing::warn!("sending the review request failed: {}", e.message);
+        }
     }
 
     /// Bookkeeping once a task is really done (immediately, or after approval).
