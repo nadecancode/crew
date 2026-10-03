@@ -116,7 +116,7 @@ share it without isolation"
                     ),
                 ),
             };
-                if result.0 {
+                if result.0 || git::is_root(&workspace) {
                     git::exclude_state_dir(&workspace)?;
                 }
                 Ok(result)

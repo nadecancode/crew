@@ -284,6 +284,7 @@ pub fn commit_all(dir: &Path, agent: &str, message: &str) -> Result<CommitInfo> 
         bail!("commit message is empty");
     }
     require_root(dir)?;
+    exclude_state_dir(dir)?;
     out(dir, &["add", "-A", "--", "."])?;
     let staged = run(dir, &["diff", "--cached", "--quiet"])?;
     if staged.status.success() {
@@ -572,6 +573,20 @@ mod tests {
         // The state directory does not show up as untracked in the main checkout.
         assert_eq!(out(&r.root, &["status", "--porcelain"]).unwrap(), "");
         assert!(ensure_worktree(&r.root, &r.worktrees, "../evil", "HEAD").is_err());
+    }
+
+    #[test]
+    fn commit_all_never_stages_the_state_directory() {
+        // Shared mode: the daemon never excluded `.crew/` here, so a commit
+        // swept up crew.db and every agent's identity token.
+        let r = repo();
+        std::fs::create_dir_all(r.root.join(".crew/agents/a")).unwrap();
+        write(&r.root, ".crew/crew.db", "db");
+        write(&r.root, ".crew/agents/a/identity.json", "{\"token\":\"t\"}");
+        write(&r.root, "work.txt", "x\n");
+        commit_all(&r.root, "a", "work").unwrap();
+        let files = out(&r.root, &["show", "--format=", "--name-only", "HEAD"]).unwrap();
+        assert_eq!(files, "work.txt");
     }
 
     #[test]
