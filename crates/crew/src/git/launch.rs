@@ -10,6 +10,7 @@
 
 use std::cell::RefCell;
 use std::io;
+use std::path::Path;
 use std::process::{Command, Stdio};
 use std::sync::Arc;
 
@@ -61,6 +62,10 @@ impl SandboxLauncher {
     pub fn new(spec: Spec) -> Self {
         Self { spec }
     }
+
+    pub fn spec(&self) -> &Spec {
+        &self.spec
+    }
 }
 
 impl Launcher for SandboxLauncher {
@@ -100,4 +105,34 @@ pub(super) fn argv(cmd: &Command) -> Vec<std::ffi::OsString> {
     std::iter::once(cmd.get_program().to_owned())
         .chain(cmd.get_args().map(|a| a.to_owned()))
         .collect()
+}
+
+/// A launcher for the helper work git does on behalf of no agent: filling a
+/// new worktree in and merging every agent's branch for integration. Its
+/// sandbox has the toolchain, the one worktree (writable) and the repository's
+/// administrative files for it, and nothing of the daemon: no socket, no
+/// state directory, no agent directory, no identity or model variable, and no
+/// network. A hook or filter from any agent's branch can run in it, and has
+/// no authority.
+pub fn helper_launcher(
+    host: &crate::sandbox::profile::Host,
+    session: crate::sandbox::profile::Session<'_>,
+    extra: &crate::sandbox::profile::Extra,
+    worktree: &Path,
+    admin: &Path,
+) -> Result<(SandboxLauncher, Vec<String>), String> {
+    use crate::sandbox::profile::{build, Request, Role};
+    let built = build(
+        host,
+        &Request {
+            session,
+            role: Role::Helper { worktree, admin },
+            extra,
+            cli: None,
+            pass_env: &[],
+            terminal: false,
+            nix_daemon: None,
+        },
+    )?;
+    Ok((SandboxLauncher::new(built.spec), built.warnings))
 }

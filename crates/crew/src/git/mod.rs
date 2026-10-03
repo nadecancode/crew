@@ -424,6 +424,7 @@ pub fn add_worktree(
             .strip_prefix("ref: refs/heads/")
             .unwrap_or("(detached)");
         if current == branch {
+            ensure_worktree_config(&admin)?;
             // Without an index nothing was checked out yet.
             let needs_population = !admin.join("index").exists();
             return Ok((Worktree { path, branch }, needs_population));
@@ -458,7 +459,31 @@ pub fn add_worktree(
             ],
         )?;
     }
+    let common = common_git_dir(repo)?;
+    let admin = worktree_admin_dir(&common, &path)
+        .ok_or_else(|| anyhow!("git did not record the worktree {}", path.display()))?;
+    ensure_worktree_config(&admin)?;
     Ok((Worktree { path, branch }, true))
+}
+
+/// Make sure the worktree has an (empty) `config.worktree` in its administrative
+/// directory. The sandbox binds that file read-only over the real one, so an
+/// agent cannot set per-worktree configuration (`core.fsmonitor`, hooks) that
+/// crew's own git would then run.
+fn ensure_worktree_config(admin: &Path) -> Result<()> {
+    use std::os::unix::fs::OpenOptionsExt;
+    match std::fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .custom_flags(libc::O_NOFOLLOW)
+        .open(admin.join("config.worktree"))
+    {
+        Ok(_) => Ok(()),
+        Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => Ok(()),
+        Err(e) => {
+            Err(e).with_context(|| format!("creating config.worktree in {}", admin.display()))
+        }
+    }
 }
 
 /// Put the branch's files in a worktree made by [`add_worktree`]. This is
@@ -1165,6 +1190,69 @@ mod tests {
         );
         assert!(!add_worktree(&r.root, &r.worktrees, "a", "HEAD").unwrap().1);
         assert!(status(&wt.path).unwrap().contains("working tree clean"));
+    }
+
+    #[test]
+    fn the_helper_launcher_has_the_worktree_and_nothing_of_the_daemon() {
+        use crate::sandbox::profile::{Extra, Host, Session};
+        use crate::sandbox::spec::Mount;
+        use std::os::unix::net::UnixListener;
+        let r = repo();
+        let (wt, _) = add_worktree(&r.root, &r.worktrees, "a", "HEAD").unwrap();
+        let root = r.root.canonicalize().unwrap();
+        let run = r._dir.path().canonicalize().unwrap().join("run");
+        std::fs::create_dir_all(&run).unwrap();
+        let socket = run.join("daemon.sock");
+        let _listener = UnixListener::bind(&socket).unwrap();
+        let cargo = r._dir.path().canonicalize().unwrap().join("cargo");
+        std::fs::create_dir_all(&cargo).unwrap();
+        let state = root.join(".crew");
+        std::fs::create_dir_all(state.join("agents/a")).unwrap();
+        std::fs::write(state.join("crew.db"), "db").unwrap();
+        let admin = worktree_admin_dir(&root.join(".git"), &wt.path.canonicalize().unwrap())
+            .or_else(|| worktree_admin_dir(&root.join(".git"), &wt.path))
+            .expect("the worktree's admin directory");
+        let crew_bin = std::env::current_exe().unwrap().canonicalize().unwrap();
+        let host = Host::detect(&crew_bin, Path::new("/usr/bin/bwrap"), 9);
+        let session = Session {
+            workspace: &root,
+            git_dir: &root.join(".git"),
+            runtime_dir: &run,
+            daemon_socket: &socket,
+            cargo_home: &cargo,
+        };
+        let wt_path = wt.path.canonicalize().unwrap();
+        let (launcher, _warnings) =
+            launch::helper_launcher(&host, session, &Extra::default(), &wt_path, &admin)
+                .unwrap_or_else(|e| panic!("building the helper profile: {e}"));
+        let spec = launcher.spec();
+        assert!(!spec.network && spec.new_session && spec.pass_env.is_empty());
+        let bound = |p: &Path| {
+            spec.mounts
+                .iter()
+                .any(|m| matches!(m, Mount::Bind { path, .. } if path.starts_with(p)))
+        };
+        assert!(
+            spec.mounts.iter().any(|m| matches!(
+                m, Mount::Bind { path, writable: true, .. } if *path == wt_path
+            )),
+            "the worktree is writable"
+        );
+        let agents = state.join("agents");
+        let db = state.join("crew.db");
+        assert!(
+            !bound(&run) && !bound(&agents) && !bound(&db) && !bound(&socket),
+            "{:?}",
+            spec.mounts
+        );
+        assert!(
+            !spec.mounts.iter().any(|m| m.path() == state),
+            "the state directory is not mounted as a whole"
+        );
+        assert!(!spec.env.iter().any(|(k, _)| k.starts_with("CREW_")));
+        // The administrative directory must hold the empty per-worktree config
+        // the sandbox binds read-only.
+        assert!(admin.join("config.worktree").is_file());
     }
 
     #[test]
