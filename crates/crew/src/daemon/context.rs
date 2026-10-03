@@ -285,15 +285,19 @@ compacts a teammate's",
             return;
         };
         let Ok(procs) = self.procs() else { return };
+        let files = self.agent_files(id).ok();
         {
             let mut model = self.model();
             let rt = model.rt(id);
             rt.compact_sent_at = now;
-            // Codex records the compaction in its session file, after here.
+            // Codex records the compaction in its session file, after here. The
+            // file is opened the way the daemon opens an agent's files.
             rt.compact_offset = rt
                 .rollout
                 .as_ref()
-                .and_then(|path| std::fs::metadata(path).ok())
+                .zip(files.as_ref())
+                .and_then(|(path, files)| files.open_reported(path))
+                .and_then(|opened| opened.file.metadata().ok())
                 .map_or(0, |meta| meta.len());
         }
         if let Err(e) = procs.submit_prompt(id, &command).await {
