@@ -819,12 +819,13 @@ mod tests {
 
     #[test]
     fn another_agents_pi_is_told_apart_from_pi() {
-        use std::os::unix::fs::PermissionsExt;
         let dir = tempfile::tempdir().unwrap();
         let script = |name: &str, help: &str| {
             let path = dir.path().join(name);
-            std::fs::write(&path, format!("#!/bin/sh\nprintf '%s\\n' '{help}'\n")).unwrap();
-            std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o755)).unwrap();
+            crate::agents::write_executable(
+                &path,
+                &format!("#!/bin/sh\nprintf '%s\\n' '{help}'\n"),
+            );
             path
         };
         let pi = script(
@@ -844,12 +845,10 @@ mod tests {
 
     #[test]
     fn a_probe_whose_child_holds_stdout_still_returns_within_the_limit() {
-        use std::os::unix::fs::PermissionsExt;
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("pi");
         // The program exits at once; its background child keeps stdout open.
-        std::fs::write(&path, "#!/bin/sh\necho hi\nsleep 30 &\nexit 0\n").unwrap();
-        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o755)).unwrap();
+        crate::agents::write_executable(&path, "#!/bin/sh\necho hi\nsleep 30 &\nexit 0\n");
         let started = std::time::Instant::now();
         let _ = output_within(&path, &["--help"], std::time::Duration::from_secs(1));
         assert!(
@@ -976,7 +975,6 @@ anthropic  claude-opus-4-6    200K     32K      yes       yes\n";
 #[cfg(test)]
 mod program_tests {
     use super::*;
-    use std::os::unix::fs::PermissionsExt;
 
     #[test]
     fn pi_is_found_past_another_agents_pi_on_path_and_in_user_install_dirs() {
@@ -985,8 +983,10 @@ mod program_tests {
             let dir = root.path().join(dir);
             std::fs::create_dir_all(&dir).unwrap();
             let path = dir.join("pi");
-            std::fs::write(&path, format!("#!/bin/sh\nprintf '%s\\n' '{help}'\n")).unwrap();
-            std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o755)).unwrap();
+            crate::agents::write_executable(
+                &path,
+                &format!("#!/bin/sh\nprintf '%s\\n' '{help}'\n"),
+            );
             path
         };
         let gsd = script("profile/bin", "GSD v2.70.1 — Get Shit Done");

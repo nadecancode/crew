@@ -1136,12 +1136,10 @@ mod tests {
 
     #[tokio::test]
     async fn herdr_accepts_the_pane_running_the_selected_pi_and_puts_its_dir_on_path() {
-        use std::os::unix::fs::PermissionsExt;
         let dir = tempfile::tempdir().unwrap();
         let socket = dir.path().join("h.sock");
         let selected = dir.path().join("pi");
-        std::fs::write(&selected, "#!/bin/sh\nsleep 30\n").unwrap();
-        std::fs::set_permissions(&selected, std::fs::Permissions::from_mode(0o755)).unwrap();
+        crate::agents::write_executable(&selected, "#!/bin/sh\nsleep 30\n");
         let mut child = std::process::Command::new(&selected).spawn().unwrap();
         let _log = fake_herdr_running(&socket, child.id()).await;
         let herdr = herdr_with_pane(&socket, RuntimeKind::Pi);

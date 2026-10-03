@@ -274,6 +274,20 @@ pub fn shell_quote(s: &str) -> String {
     format!("'{}'", s.replace('\'', r"'\''"))
 }
 
+/// Write an executable file for a test. A child process writes it: had the
+/// (threaded) test process held the write descriptor, a fork in another test
+/// thread could inherit it and make executing the file fail with ETXTBSY.
+#[cfg(test)]
+pub(crate) fn write_executable(path: &Path, text: &str) {
+    let status = std::process::Command::new("sh")
+        .args(["-c", r#"printf '%s' "$2" > "$1" && chmod 755 "$1""#, "sh"])
+        .arg(path)
+        .arg(text)
+        .status()
+        .unwrap();
+    assert!(status.success(), "writing {}", path.display());
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
