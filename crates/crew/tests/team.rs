@@ -684,7 +684,11 @@ fn progress_and_self_reported_status_reach_the_dashboard_state() {
     assert_eq!(t.progress, Some(51));
 
     s.send("a", "carry on");
-    let done = s.wait_all_done();
+    // The session completes when the task does; the agent rests (Done) at
+    // the end of the turn it completed the task in, a moment later.
+    let done = s.wait("the session to complete and the agent to rest", |snap| {
+        snap.session.completed_at.is_some() && find_agent(snap, "a").status == AgentStatus::Done
+    });
     let a = find_agent(&done, "a");
     assert_eq!(a.status, AgentStatus::Done);
     assert_eq!(a.progress, Some(100));
