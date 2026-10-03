@@ -1228,12 +1228,14 @@ fn codex_sidecar_and_queue_run_sandboxed() {
     wait_up(&s, "x");
     let codex_home = home_of(&s, "x").join("codex");
 
-    // The sidecar runs, and not in our mount namespace.
-    s.wait_for("the fake app-server", || {
-        !processes_with(&["fake-cli", "codex", "app-server"]).is_empty()
+    // This team's sidecar (the one serving the socket its own record
+    // names; other tests' run beside it) runs, and not in our mount
+    // namespace.
+    s.wait_for("this team's fake app-server", || {
+        !sidecar_of(&s, "x").is_empty()
     });
     let own = mount_ns(std::process::id());
-    for pid in processes_with(&["fake-cli", "codex", "app-server"]) {
+    for pid in sidecar_of(&s, "x") {
         assert_ne!(mount_ns(pid), own, "the sidecar shares our mounts");
     }
     assert!(codex_home.join("fake-codex-server.json").is_file());
@@ -1644,9 +1646,9 @@ fn each_sandboxed_launch_runs_the_cli_the_daemon_found_not_another() {
     wait_up(&s, "x");
     let ran = home_of(&s, "x").join("codex/ran");
 
-    // The session and its app-server, then a queue command.
-    s.wait_for("the fake app-server", || {
-        !processes_with(&["fake-cli", "codex", "app-server"]).is_empty()
+    // The session and its app-server (this team's), then a queue command.
+    s.wait_for("this team's fake app-server", || {
+        !sidecar_of(&s, "x").is_empty()
     });
     let identity = s.workspace.join(".crew/agents/x/identity.json");
     let out = s
