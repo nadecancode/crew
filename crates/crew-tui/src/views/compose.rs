@@ -135,7 +135,7 @@ fn render_type(buf: &mut Buffer, area: Rect, compose: &Compose, theme: &Theme) {
 /// Draw an editable line in the `cols` columns from `origin`, scrolled sideways so
 /// the cursor (a character index; `None` hides it) stays in view. Line breaks
 /// show as `⏎`.
-pub(super) fn input_line(
+pub(crate) fn input_line(
     buf: &mut Buffer,
     clip: Rect,
     origin: (i32, i32),
@@ -152,9 +152,15 @@ pub(super) fn input_line(
     let at = cursor.unwrap_or(0).min(chars.len());
     let cell = |c: &char| UnicodeWidthChar::width(*c).unwrap_or(0);
     let room = cols.saturating_sub(1);
-    let mut start = 0;
-    while chars[start..at].iter().map(cell).sum::<usize>() > room {
-        start += 1;
+    let mut start = at;
+    let mut used = 0;
+    while start > 0 {
+        let next = cell(&chars[start - 1]);
+        if used + next > room {
+            break;
+        }
+        used += next;
+        start -= 1;
     }
     let end = x + cols as i32;
     let cursor_style = theme.fg(theme.text).add_modifier(Modifier::REVERSED);
@@ -174,6 +180,43 @@ pub(super) fn input_line(
     }
     if cursor.is_some_and(|c| c >= chars.len()) && cx < end {
         put_str(buf, clip, cx, y, " ", cursor_style);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn long_compose_line_renders_within_a_frame_budget() {
+        let text = format!("{}日本tail", "x".repeat(7990));
+        let clip = Rect::new(0, 0, 120, 1);
+        let mut buf = Buffer::empty(clip);
+        let mut fastest = std::time::Duration::MAX;
+        for _ in 0..3 {
+            let start = std::time::Instant::now();
+            input_line(
+                &mut buf,
+                clip,
+                (0, 0),
+                80,
+                &text,
+                Some(text.chars().count()),
+                &Theme::truecolor(),
+            );
+            fastest = fastest.min(start.elapsed());
+        }
+        assert!(buf
+            .content
+            .iter()
+            .map(|c| c.symbol())
+            .collect::<String>()
+            .contains("tail"));
+        eprintln!("8000-character input frame: {fastest:?}");
+        assert!(
+            fastest < std::time::Duration::from_millis(20),
+            "{fastest:?}"
+        );
     }
 }
 

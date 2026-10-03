@@ -17,10 +17,10 @@ use ratatui::style::Modifier;
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, Paragraph, Widget, Wrap};
 use ratatui::Frame;
-use unicode_width::UnicodeWidthChar;
 
 use crate::slash::{self, slash_command};
 use crate::theme::Theme;
+use crate::views::compose::input_line;
 use crate::widgets::canvas::put_str;
 use crate::widgets::text::{fit, pad_right, printable_lines, width};
 
@@ -584,32 +584,15 @@ fn render_objective(buf: &mut Buffer, rect: Rect, launcher: &Launcher, theme: &T
         );
         return;
     }
-    // Scroll horizontally so the cursor stays visible.
-    let chars: Vec<char> = launcher.objective.chars().collect();
-    let cursor = launcher.cursor.min(chars.len());
-    let cell = |c: &char| UnicodeWidthChar::width(*c).unwrap_or(0);
-    let mut start = 0;
-    while chars[start..cursor].iter().map(cell).sum::<usize>() > room {
-        start += 1;
-    }
-    let mut cx = text_x;
-    let end = text_x + room as i32 + 1;
-    for (i, ch) in chars.iter().enumerate().skip(start) {
-        let w = cell(ch) as i32;
-        if cx + w > end {
-            break;
-        }
-        let style = if i == cursor {
-            cursor_style
-        } else {
-            theme.fg(theme.text)
-        };
-        put_str(buf, inner, cx, y, &ch.to_string(), style);
-        cx += w;
-    }
-    if cursor >= chars.len() && cx < end {
-        put_str(buf, inner, cx, y, " ", cursor_style);
-    }
+    input_line(
+        buf,
+        inner,
+        (text_x, y),
+        room + 1,
+        &launcher.objective,
+        Some(launcher.cursor),
+        theme,
+    );
 }
 
 /// Render one frame as plain text (tests, documentation).
@@ -624,6 +607,32 @@ pub fn render_to_string(launcher: &Launcher, width: u16, height: u16) -> String 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn long_objective_renders_within_a_frame_budget() {
+        let mut launcher = launcher();
+        launcher.objective = format!("{}tail", "x".repeat(3996));
+        launcher.cursor = 4000;
+        let area = Rect::new(0, 0, 120, 40);
+        let mut buf = Buffer::empty(area);
+        let mut fastest = std::time::Duration::MAX;
+        for _ in 0..3 {
+            let start = std::time::Instant::now();
+            render_into(&mut buf, area, &launcher, &Theme::truecolor());
+            fastest = fastest.min(start.elapsed());
+        }
+        assert!(buf
+            .content
+            .iter()
+            .map(|c| c.symbol())
+            .collect::<String>()
+            .contains("tail"));
+        eprintln!("4000-character launcher frame: {fastest:?}");
+        assert!(
+            fastest < std::time::Duration::from_millis(20),
+            "{fastest:?}"
+        );
+    }
 
     #[test]
     fn style_preview_never_renders_terminal_controls() {
