@@ -1688,3 +1688,58 @@ fn each_sandboxed_launch_runs_the_cli_the_daemon_found_not_another() {
 {other_git:?}"
     );
 }
+
+#[test]
+fn a_restart_writes_the_agents_next_identity_only_after_its_git_job_ends() {
+    if require_sandbox().is_none() {
+        return;
+    }
+    let s = Session::new();
+    // A pre-commit hook that runs for a while, in the agent's git sandbox,
+    // which mounts the agent's directory.
+    let hook = "#!/bin/sh\necho > \"$HOME/hook-start\"\nsleep 3\necho > \"$HOME/hook-end\"\n";
+    std::fs::create_dir_all(s.workspace.join(".githooks")).unwrap();
+    std::fs::write(s.workspace.join(".githooks/pre-commit"), hook).unwrap();
+    executable(&s, ".githooks/pre-commit");
+    workspace_repo(&s, &[]);
+    repo_config(&s, "core.hooksPath", ".githooks");
+    let team = sandboxed(
+        &s,
+        vec![agent(
+            "w",
+            "",
+            &[
+                "--on-task=write work.txt done",
+                "--on-task=commit add work",
+                "--on-task=done finished",
+            ],
+        )],
+        vec![task("t", "w", &[])],
+    );
+    s.run(&team);
+    let home = home_of(&s, "w");
+    let identity = s.workspace.join(".crew/agents/w/identity.json");
+    s.wait_for("the hook to start", || home.join("hook-start").exists());
+    let before = std::fs::metadata(&identity).unwrap().modified().unwrap();
+    // Restarted while its commit's hook runs: the next identity is written
+    // once the job (and its sandbox) is done, not beside it.
+    s.agent_cmd(&["restart", "w"]);
+    s.wait_for("the hook to end", || home.join("hook-end").exists());
+    s.wait_for("the next identity", || {
+        std::fs::metadata(&identity)
+            .and_then(|m| m.modified())
+            .is_ok_and(|m| m > before)
+    });
+    let written = std::fs::metadata(&identity).unwrap().modified().unwrap();
+    let ended = std::fs::metadata(home.join("hook-end"))
+        .unwrap()
+        .modified()
+        .unwrap();
+    s.stop();
+    assert!(
+        written >= ended,
+        "the next identity was written while the agent's git hook still ran ({:?} before \
+its end)",
+        ended.duration_since(written).unwrap_or_default()
+    );
+}
