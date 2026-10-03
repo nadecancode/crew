@@ -147,6 +147,9 @@ share it without isolation"
                 _ => "pty",
             },
         };
+        self.refuse_unsandboxable(&config.workspace.sandbox, backend, worktrees)
+            .await
+            .map_err(RpcError::invalid)?;
         let procs = self
             .build_backend(backend, &config, herdr_socket.as_deref(), None)
             .map_err(internal)?;

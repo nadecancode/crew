@@ -236,6 +236,45 @@ fn find_program(program: &str, path: Option<&OsString>) -> Option<PathBuf> {
         .find(|candidate| candidate.is_file())
 }
 
+/// What every refusal offers besides its own fix.
+const OFF: &str = "or set workspace.sandbox.mode: off to run the agents unsandboxed";
+
+/// What decides whether a team that requires sandboxes can start here.
+struct Readiness {
+    backend: &'static str,
+    worktrees: bool,
+    /// The host probe.
+    host: Result<(), probe::Unavailable>,
+}
+
+impl Readiness {
+    /// Why the team cannot start, with what would fix it (design-b3.md
+    /// §3.6; operator decisions 1, 2, 6 and 10).
+    fn refusal(&self) -> Option<String> {
+        if self.backend != "pty" {
+            return Some(format!(
+                "the {} backend starts its own programs, so crew cannot sandbox them; use \
+backend: pty, {OFF}",
+                self.backend
+            ));
+        }
+        if !self.worktrees {
+            return Some(format!(
+                "agents sharing the checkout cannot be sandboxed (they would write your files); \
+make the workspace a git repository with a commit (or set workspace.init: true) and use \
+workspace.isolation: worktree, {OFF}"
+            ));
+        }
+        if let Err(e) = &self.host {
+            return Some(format!(
+                "agents cannot be sandboxed on this host: {}; {}, {OFF}",
+                e.cause, e.fix
+            ));
+        }
+        None
+    }
+}
+
 /// The host, probed now, and the daemon's layout. Blocking.
 fn host_and_layout(crew_bin: &Path, workspace: &Path, socket: &Path) -> Result<(Host, Layout)> {
     let path = std::env::var_os("PATH");
@@ -304,6 +343,34 @@ fn integrate(
 }
 
 impl Daemon {
+    /// Refuse a team that requires sandboxes and cannot have them, before
+    /// anything of it starts. Probes the host.
+    pub(crate) async fn refuse_unsandboxable(
+        &self,
+        config: &SandboxConfig,
+        backend: &'static str,
+        worktrees: bool,
+    ) -> Result<(), String> {
+        if config.mode == SandboxMode::Off {
+            return Ok(());
+        }
+        let crew_bin = self.crew_bin.clone();
+        let host = tokio::task::spawn_blocking(move || {
+            probe::probe(&crew_bin, std::env::var_os("PATH").as_ref()).map(drop)
+        })
+        .await
+        .map_err(|e| e.to_string())?;
+        let readiness = Readiness {
+            backend,
+            worktrees,
+            host,
+        };
+        match readiness.refusal() {
+            Some(why) => Err(format!("workspace.sandbox.mode is required, but {why}")),
+            None => Ok(()),
+        }
+    }
+
     /// Integration (whoever asks for it), in a helper sandbox when the team
     /// requires sandboxes. Blocking.
     pub(crate) fn integration(
@@ -810,5 +877,46 @@ mod tests {
             elsewhere.is_empty(),
             "helper git outside its worktree: {elsewhere:?}"
         );
+    }
+
+    #[test]
+    fn a_team_that_cannot_be_sandboxed_is_refused_with_what_would_fix_it() {
+        let ready = || Readiness {
+            backend: "pty",
+            worktrees: true,
+            host: Ok(()),
+        };
+        assert_eq!(ready().refusal(), None);
+        let unavailable = probe::Unavailable {
+            cause: "the kernel offers Landlock ABI 6".into(),
+            fix: "run a newer kernel".into(),
+        };
+        for (readiness, says) in [
+            (
+                Readiness {
+                    backend: "herdr",
+                    ..ready()
+                },
+                "herdr backend starts its own programs",
+            ),
+            (
+                Readiness {
+                    worktrees: false,
+                    ..ready()
+                },
+                "agents sharing the checkout cannot be sandboxed",
+            ),
+            (
+                Readiness {
+                    host: Err(unavailable),
+                    ..ready()
+                },
+                "on this host: the kernel offers Landlock ABI 6; run a newer kernel",
+            ),
+        ] {
+            let why = readiness.refusal().expect("refused");
+            assert!(why.contains(says), "{why}");
+            assert!(why.contains("workspace.sandbox.mode: off"), "{why}");
+        }
     }
 }
