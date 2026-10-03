@@ -7488,3 +7488,102 @@ fn a_task_is_handed_over_by_its_id_and_read_off_its_card() {
         Some("ledger built")
     );
 }
+
+/// Write the program `contents` to `path` from a child process (a file this
+/// process writes may be held open by a child another test is forking, and
+/// running it then fails with "Text file busy").
+fn write_program(path: &Path, contents: &str) {
+    let mut child = std::process::Command::new("sh")
+        .args(["-c", "cat > \"$1\" && chmod 755 \"$1\"", "sh"])
+        .arg(path)
+        .stdin(Stdio::piped())
+        .spawn()
+        .unwrap();
+    child
+        .stdin
+        .take()
+        .unwrap()
+        .write_all(contents.as_bytes())
+        .unwrap();
+    assert!(child.wait().unwrap().success());
+}
+
+#[test]
+fn an_agent_killed_while_it_starts_stays_stopped() {
+    let s = Session::new();
+    // A `codex` whose app-server (started before the session) says it was
+    // asked for, notes its pid, and waits for the gate.
+    let bin = s.root().join("bin");
+    std::fs::create_dir_all(&bin).unwrap();
+    let (asked, gate, sidecar) = (
+        s.root().join("asked"),
+        s.root().join("gate"),
+        s.root().join("pid"),
+    );
+    write_program(
+        &bin.join("codex"),
+        &format!(
+            "#!/bin/sh\nif [ \"$1\" = app-server ]; then echo $$ > '{}'; : > '{}'; while [ ! -e '{}' ]; do sleep 0.05; done; fi\nexec '{CREW}' fake-cli codex \"$@\"\n",
+            sidecar.display(),
+            asked.display(),
+            gate.display()
+        ),
+    );
+    let team = s.team(
+        "kill-while-starting",
+        vec![AgentSpec {
+            id: "x".into(),
+            role: "implementation".into(),
+            runtime: Some(RuntimeKind::Codex),
+            ..AgentSpec::default()
+        }],
+        vec![],
+    );
+    std::fs::write(s.root().join("team.yaml"), team.to_yaml().unwrap()).unwrap();
+    let mut path = vec![bin.clone()];
+    path.extend(std::env::split_paths(&std::env::var_os("PATH").unwrap()));
+    let out = s
+        .command()
+        .env("PATH", std::env::join_paths(path).unwrap())
+        .args(["run", "team.yaml", "--no-attach"])
+        .output()
+        .unwrap();
+    assert!(out.status.success(), "{}", stderr(&out));
+    // Killed while its start waits for the app-server.
+    s.wait_for("the app-server to be asked for", || asked.exists());
+    s.agent_cmd(&["kill", "x"]);
+    s.wait("x to be stopped", |snap| {
+        find_agent(snap, "x").status == AgentStatus::Stopped
+    });
+    // The start may go on now: it must give up, and take the app-server
+    // down, not bring the agent up.
+    std::fs::write(&gate, "").unwrap();
+    let pid: i32 = std::fs::read_to_string(&sidecar)
+        .unwrap()
+        .trim()
+        .parse()
+        .unwrap();
+    let alive = |pid: i32| {
+        std::fs::read_to_string(format!("/proc/{pid}/stat")).is_ok_and(|stat| {
+            !stat
+                .rsplit(')')
+                .next()
+                .unwrap_or("")
+                .trim_start()
+                .starts_with('Z')
+        })
+    };
+    let snap = s.wait("the start to give up or come up", |snap| {
+        find_agent(snap, "x").pid.is_some() || !alive(pid)
+    });
+    let x = find_agent(&snap, "x");
+    let up = (x.status, x.pid);
+    let sidecar_alive = alive(pid);
+    s.stop();
+    assert_eq!(
+        up,
+        (AgentStatus::Stopped, None),
+        "the killed agent came up anyway"
+    );
+    assert!(!sidecar_alive, "the killed agent's app-server runs on");
+}

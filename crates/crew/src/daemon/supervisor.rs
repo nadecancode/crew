@@ -311,9 +311,10 @@ impl Daemon {
 
     pub(crate) fn spawn_in_background(&self, id: &str, resume: bool, notice: Option<String>) {
         let daemon = self.clone();
+        let since = self.stops(id);
         let id = id.to_string();
         tokio::spawn(async move {
-            if let Err(e) = daemon.spawn_agent(&id, resume, notice).await {
+            if let Err(e) = daemon.spawn_agent(&id, resume, notice, since).await {
                 daemon
                     .mark_failed(&id, format!("failed to start: {e:#}"))
                     .await;
@@ -321,13 +322,31 @@ impl Daemon {
         });
     }
 
-    /// Start (or restart) an agent's process.
+    /// How many stops of agent `id` have been asked for. A start takes this
+    /// when it is asked for and gives up once it has changed: a stop asked
+    /// for while the start waits (for its sandboxes, its sidecar, its
+    /// process) is not lost to it.
+    pub(crate) fn stops(&self, id: &str) -> u64 {
+        let stops = self.stops.lock().unwrap_or_else(|e| e.into_inner());
+        stops.get(id).copied().unwrap_or(0)
+    }
+
+    fn stop_requested(&self, id: &str) {
+        let mut stops = self.stops.lock().unwrap_or_else(|e| e.into_inner());
+        *stops.entry(id.to_string()).or_default() += 1;
+    }
+
+    /// Start (or restart) an agent's process; `since` is Daemon::stops when
+    /// the start was asked for. A stop asked for after that makes it give up
+    /// at its next step, taking down what it had started.
     pub(crate) async fn spawn_agent(
         &self,
         id: &str,
         resume: bool,
         notice: Option<String>,
+        since: u64,
     ) -> Result<()> {
+        let stopped = || self.stops(id) != since;
         // One launch of an agent at a time, and none beside its git jobs or
         // queue commands: two restarts close together must not both find
         // nothing running and seed its home while the other's sandboxes
@@ -339,6 +358,9 @@ impl Daemon {
         if self.sandboxed() {
             self.retire_sandboxes(id, procs.as_ref(), RETIRE_WITHIN)
                 .await?;
+        }
+        if stopped() {
+            return Ok(());
         }
         // A model known to be out starts on the work style's fallback.
         let fresh = !(resume
@@ -528,9 +550,17 @@ impl Daemon {
         } else {
             self.stop_sidecar(id);
         }
+        if stopped() {
+            return Ok(());
+        }
         if let Some(sidecar) = &spec.sidecar {
             self.start_sidecar(id, sidecar, sidecar_sandbox.as_ref())
                 .await?;
+            // Stopped while it waited for its sidecar: that goes too.
+            if stopped() {
+                self.stop_sidecar(id);
+                return Ok(());
+            }
         }
 
         // First prompt: whatever is already waiting for the agent, so it
@@ -581,8 +611,9 @@ impl Daemon {
             );
         }
         // The team was stopped while this start was being prepared.
-        let stopping = || self.stopping_team.load(std::sync::atomic::Ordering::SeqCst);
+        let stopping = || self.stopping_team.load(std::sync::atomic::Ordering::SeqCst) || stopped();
         if stopping() {
+            self.stop_sidecar(id);
             return Ok(());
         }
         self.update_agent(id, |a| {
@@ -639,6 +670,7 @@ impl Daemon {
         if stopping() {
             // Stopped while the process was coming up: it goes too.
             let _ = procs.kill(id).await;
+            self.stop_sidecar(id);
             self.update_agent(id, |a| {
                 a.status = AgentStatus::Stopped;
                 a.pid = None;
@@ -1645,10 +1677,11 @@ defaults.auto_trust: true in the team file.",
             );
             self.requeue_if_sessionless(id).await;
             let daemon = self.clone();
+            let since = self.stops(id);
             let id = id.to_string();
             tokio::spawn(async move {
                 tokio::time::sleep(std::time::Duration::from_millis(500)).await;
-                if let Err(e) = daemon.spawn_agent(&id, true, None).await {
+                if let Err(e) = daemon.spawn_agent(&id, true, None, since).await {
                     daemon
                         .mark_failed(&id, format!("restart failed: {e:#}"))
                         .await;
@@ -1733,6 +1766,8 @@ defaults.auto_trust: true in the team file.",
         if self.model().agent(id).is_none() {
             return Err(RpcError::not_found(format!("no agent '{id}'")));
         }
+        // A start in progress gives up at its next step.
+        self.stop_requested(id);
         let procs = self.procs()?;
         {
             let mut model = self.model();
@@ -1818,9 +1853,10 @@ defaults.auto_trust: true in the team file.",
         });
         self.emit(NewEvent::new("daemon", "agent.restart", format!("restarting {id}")).agent(id));
         let daemon = self.clone();
+        let since = self.stops(id);
         let id = id.to_string();
         tokio::spawn(async move {
-            if let Err(e) = daemon.spawn_agent(&id, true, notice).await {
+            if let Err(e) = daemon.spawn_agent(&id, true, notice, since).await {
                 daemon
                     .mark_failed(&id, format!("failed to start: {e:#}"))
                     .await;

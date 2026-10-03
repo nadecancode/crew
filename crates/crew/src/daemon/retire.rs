@@ -1233,7 +1233,7 @@ mod tests {
             .collect();
 
         let refused = daemon
-            .spawn_agent("a", false, None)
+            .spawn_agent("a", false, None, daemon.stops("a"))
             .await
             .map(|_| ())
             .unwrap_err();
