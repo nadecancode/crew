@@ -97,18 +97,19 @@ the command.
 - **herdr** (optional). Started inside a herdr pane, `backend: auto` puts
   every agent in its own pane of a `crew:<project>` workspace.
 - **bubblewrap** 0.10+ (`bwrap` on `PATH`), unprivileged user namespaces and
-  Linux 6.12+ with Landlock enabled (in the kernel's `lsm=` list), for agent
-  sandboxes (not yet on by default). Each sandboxed agent runs in its own
-  mount, PID and IPC namespace behind `crew sandbox-exec`, which drops
-  inherited descriptors, refuses terminal-injection ioctls and confines
-  abstract sockets and signals with Landlock; on Linux 7.1+ (Landlock ABI 9)
-  it also refuses every outside socket but crew's own. The sandbox sees the
-  system trees, the toolchain on `PATH` (read-only), the agent's worktree and
-  its own state, and never the operator's token, `crew.db`, other agents or
-  the rest of `$HOME`. The host network stays. `nix-shell` in this checkout
-  provides bubblewrap; on Ubuntu 24.04 unprivileged user namespaces also need
-  `kernel.apparmor_restrict_unprivileged_userns=0` (or an AppArmor profile
-  for bwrap).
+  Linux 7.1+ with Landlock enabled (in the kernel's `lsm=` list; Landlock
+  ABI 9), for agent sandboxes (not yet on by default). On an older kernel
+  `sandbox: required` refuses to start; `sandbox: off` runs agents
+  unsandboxed. Each sandboxed agent runs in its own mount, PID and IPC
+  namespace behind `crew sandbox-exec`, which drops inherited descriptors,
+  refuses terminal-injection ioctls and, with Landlock, confines signals and
+  refuses every socket made outside the sandbox but crew's own. The sandbox
+  sees the system trees, the toolchain on `PATH` (read-only), the agent's
+  worktree and its own state, and never the operator's token, `crew.db`,
+  other agents or the rest of `$HOME`. The host network stays. `nix-shell` in
+  this checkout provides bubblewrap; on Ubuntu 24.04 unprivileged user
+  namespaces also need `kernel.apparmor_restrict_unprivileged_userns=0` (or
+  an AppArmor profile for bwrap).
 
 **Permissions.** By default agents run without their runtime's permission
 checks: Claude Code with `--dangerously-skip-permissions`, Codex with
