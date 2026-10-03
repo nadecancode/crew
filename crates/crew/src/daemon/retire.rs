@@ -116,8 +116,7 @@ fn namespace_of(pid: u32) -> Option<u64> {
         .ok()
 }
 
-/// This boot's identity, or "" when it cannot be read (then no entry is
-/// taken for an earlier boot's).
+/// This boot's identity, or "" when it cannot be read.
 fn boot_id() -> String {
     std::fs::read_to_string("/proc/sys/kernel/random/boot_id")
         .map(|b| b.trim().to_string())
@@ -176,7 +175,7 @@ impl Record {
     pub fn gone(&self, boot: &str) -> bool {
         let r = self.get();
         deleted(&self.0.file)
-            || (!boot.is_empty() && r.boot != boot)
+            || earlier_boot(&r.boot, boot)
             || reported(&self.0.done)
             || r.init.is_some_and(|init| !init.running())
     }
@@ -220,6 +219,13 @@ fn reported(done: &Path) -> bool {
                     .or_else(|| line.strip_prefix("signal "))
                     .is_some_and(number)
         })
+}
+
+/// Whether an entry started in boot `entry` is from another boot than
+/// `now`: only when both are known (an entry saved, or a daemon started,
+/// without the boot id proves nothing).
+fn earlier_boot(entry: &str, now: &str) -> bool {
+    !entry.is_empty() && !now.is_empty() && entry != now
 }
 
 fn save(file: &Path, state: &Retiring) -> Result<()> {
@@ -269,7 +275,7 @@ impl Ledger {
                 unreadable.push(path);
                 continue;
             };
-            if !boot.is_empty() && state.boot != boot {
+            if earlier_boot(&state.boot, &boot) {
                 let _ = std::fs::remove_file(path.with_extension("done"));
                 let _ = std::fs::remove_file(&path);
                 continue;
@@ -587,6 +593,31 @@ mod tests {
             let refused = format!("{:#}", ledger.retire(agent, short).await.unwrap_err());
             assert!(refused.contains(&torn.display().to_string()), "{refused}");
         }
+    }
+
+    #[tokio::test]
+    async fn an_entry_saved_without_a_boot_id_is_never_taken_for_an_earlier_boots() {
+        let dir = tempfile::tempdir().unwrap();
+        let short = Duration::from_millis(100);
+        // Saved by a daemon that could not read the boot id.
+        let unknown = Retiring {
+            agent: "a".into(),
+            what: "session".into(),
+            boot: String::new(),
+            pid: Some(4242),
+            init: None,
+        };
+        let file = dir.path().join("unknown.json");
+        std::fs::write(&file, serde_json::to_vec(&unknown).unwrap()).unwrap();
+        // The next daemon can read it: the entry is kept and holds `a`.
+        let ledger = Ledger::open(dir.path()).unwrap();
+        assert!(file.exists(), "removed as an earlier boot's");
+        assert_eq!(ledger.of("a").len(), 1);
+        assert!(ledger.retire("a", short).await.is_err());
+        // The same for an entry this daemon made while it could not.
+        let record = ledger.start("b", "git").unwrap();
+        record.update(|r| r.boot = String::new());
+        assert!(ledger.retire("b", short).await.is_err());
     }
 
     /// bubblewrap from PATH, if the host has it (a failure under
