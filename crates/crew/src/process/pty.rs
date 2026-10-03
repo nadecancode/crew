@@ -83,6 +83,17 @@ impl PtyManager {
     }
 }
 
+/// Whether any process is still in the group led by `pid` (a zombie counts
+/// until it is reaped).
+fn group_exists(pid: u32) -> bool {
+    if pid <= 1 {
+        return false;
+    }
+    // SAFETY: signal 0 only probes for existence.
+    let rc = unsafe { libc::kill(-(pid as libc::pid_t), 0) };
+    rc == 0 || std::io::Error::last_os_error().raw_os_error() != Some(libc::ESRCH)
+}
+
 /// Signal the agent's whole process group (the child is a session leader, so
 /// its pid is also its process-group id).
 fn signal_group(pid: u32, signal: libc::c_int) -> Result<()> {
@@ -394,21 +405,23 @@ impl ProcessManager for PtyManager {
             return Ok(());
         };
         let Some(pid) = proc.pid else { return Ok(()) };
-        if !proc.alive.load(Ordering::SeqCst) {
+        // The group is tracked by its own id, not by the leader: children can
+        // outlive a leader that exits on TERM, and must still be killed.
+        if !group_exists(pid) {
             return Ok(());
         }
         // A stopped process cannot handle SIGTERM until it is continued.
         signal_group(pid, libc::SIGCONT)?;
         signal_group(pid, libc::SIGTERM)?;
         for _ in 0..20 {
-            if !proc.alive.load(Ordering::SeqCst) {
+            if !group_exists(pid) {
                 return Ok(());
             }
             tokio::time::sleep(Duration::from_millis(100)).await;
         }
         signal_group(pid, libc::SIGKILL)?;
         for _ in 0..20 {
-            if !proc.alive.load(Ordering::SeqCst) {
+            if !group_exists(pid) {
                 break;
             }
             tokio::time::sleep(Duration::from_millis(50)).await;
@@ -627,6 +640,48 @@ mod tests {
             .adopt(&crate::process::pty::tests::dummy_agent())
             .await
             .unwrap());
+    }
+
+    #[tokio::test]
+    async fn kill_takes_down_children_that_ignore_term_and_hup() {
+        let dir = tempfile::tempdir().unwrap();
+        let pidfile = dir.path().join("child.pid");
+        let script = format!(
+            "(trap '' TERM HUP; exec sleep 300) & echo $! > {}; wait",
+            pidfile.display()
+        );
+        let (tx, mut rx) = mpsc::unbounded_channel();
+        let mgr = PtyManager::new(tx);
+        mgr.spawn(&spec("a", "sh", &["-c", &script])).await.unwrap();
+        let mut child = None;
+        for _ in 0..100 {
+            if let Some(pid) = std::fs::read_to_string(&pidfile)
+                .ok()
+                .and_then(|s| s.trim().parse::<libc::pid_t>().ok())
+            {
+                child = Some(pid);
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(50)).await;
+        }
+        let child = child.expect("child pid was never written");
+        mgr.kill("a").await.unwrap();
+        wait_for_exit(&mut rx).await;
+        // The leader is gone; its TERM-proof child must be gone too.
+        let mut gone = false;
+        for _ in 0..40 {
+            // SAFETY: signal 0 only checks that the process exists.
+            if unsafe { libc::kill(child, 0) } != 0 {
+                gone = true;
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(50)).await;
+        }
+        if !gone {
+            // SAFETY: do not leak the sleeper when the assertion fails.
+            unsafe { libc::kill(child, libc::SIGKILL) };
+        }
+        assert!(gone, "child {child} survived kill()");
     }
 
     #[tokio::test]
