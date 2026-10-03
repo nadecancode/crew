@@ -32,13 +32,22 @@ pub struct Operator {
 
 impl Operator {
     /// Where the operator's CLIs keep their configuration, as the daemon's
-    /// environment says.
-    pub fn detect() -> Self {
+    /// environment says, except Codex's when the agent's endpoint sets its own
+    /// `CODEX_HOME`: that home is the operator's for this agent, and it is the
+    /// one both the standing instructions and the seeded model settings come
+    /// from. Never an agent's private home.
+    pub fn detect(endpoint: &crate::endpoints::Endpoint) -> Self {
         let var = |name: &str| std::env::var_os(name).filter(|v| !v.is_empty());
         let home = var("HOME").map_or_else(|| PathBuf::from("/"), PathBuf::from);
         Self {
             claude: var("CLAUDE_CONFIG_DIR").map_or_else(|| home.join(".claude"), PathBuf::from),
-            codex: var("CODEX_HOME").map_or_else(|| home.join(".codex"), PathBuf::from),
+            codex: endpoint
+                .env
+                .get("CODEX_HOME")
+                .filter(|v| !v.is_empty())
+                .map(PathBuf::from)
+                .or_else(|| var("CODEX_HOME").map(PathBuf::from))
+                .unwrap_or_else(|| home.join(".codex")),
             pi: var("PI_CODING_AGENT_DIR").map_or_else(|| home.join(".pi/agent"), PathBuf::from),
         }
     }
@@ -236,6 +245,18 @@ fn create(dir: BorrowedFd<'_>, c_name: &CString, name: &str, bytes: &[u8]) -> Re
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_operators_codex_home_is_the_endpoints_when_it_sets_one() {
+        let mut endpoint = crate::endpoints::Endpoint::default();
+        endpoint
+            .env
+            .insert("CODEX_HOME".into(), "/endpoint/codex".into());
+        assert_eq!(
+            Operator::detect(&endpoint).codex,
+            PathBuf::from("/endpoint/codex")
+        );
+    }
     use std::os::fd::AsFd;
     use std::os::unix::fs::symlink;
     use std::path::Path;

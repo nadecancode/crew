@@ -603,7 +603,7 @@ impl Daemon {
             crate::agents::home::prepare(
                 agent.runtime,
                 std::os::fd::AsFd::as_fd(&agent_root),
-                &crate::agents::home::Operator::detect(),
+                &crate::agents::home::Operator::detect(&endpoint),
             )?;
         } else {
             self.stop_sidecar(id);

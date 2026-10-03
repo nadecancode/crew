@@ -32,19 +32,6 @@ const LONG_CONTEXT_COMPACT_AT: u64 = 900_000;
 
 pub struct CodexRuntime;
 
-/// The Codex home the session runs with: the one the crew config sets for
-/// it, else this process's, else `~/.codex`.
-fn codex_home(endpoint: &crate::endpoints::Endpoint) -> Option<std::path::PathBuf> {
-    endpoint
-        .env
-        .get("CODEX_HOME")
-        .map(std::ffi::OsString::from)
-        .or_else(|| std::env::var_os("CODEX_HOME"))
-        .filter(|v| !v.is_empty())
-        .map(std::path::PathBuf::from)
-        .or_else(|| std::env::var_os("HOME").map(|h| std::path::PathBuf::from(h).join(".codex")))
-}
-
 /// The developer instructions the user's own Codex config sets: a
 /// `developer_instructions` override replaces them, so crew's are added to
 /// them instead.
@@ -116,10 +103,10 @@ impl AgentRuntime for CodexRuntime {
         // The standing instructions (who the agent is, its role, the team,
         // the tools) go into the system prompt, after whatever the user's own
         // config puts there, rather than into a prompt of their own.
-        let mut instructions: Vec<String> = codex_home(ctx.endpoint)
-            .and_then(|home| own_developer_instructions(&home))
-            .into_iter()
-            .collect();
+        let mut instructions: Vec<String> =
+            own_developer_instructions(&super::home::Operator::detect(ctx.endpoint).codex)
+                .into_iter()
+                .collect();
         if !ctx.briefing.trim().is_empty() {
             instructions.push(ctx.briefing.trim_end().to_string());
         }

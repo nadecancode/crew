@@ -310,3 +310,84 @@ fn sandboxed_clis_keep_their_files_in_private_homes_seeded_without_the_operators
     );
     s.stop();
 }
+
+#[test]
+fn a_codex_endpoint_home_gives_both_the_instructions_and_the_seeded_model_settings() {
+    if !sandboxes_available() {
+        return;
+    }
+    let s = Session::new();
+    let (_fakes, bin) = fake_clis();
+    // Only this command's PATH: the test binary is shared with other tests.
+    let path = std::env::var_os("PATH").unwrap_or_default();
+    let mut dirs = vec![bin];
+    dirs.extend(std::env::split_paths(&path));
+    let path = std::env::join_paths(dirs).unwrap();
+
+    // The daemon's own Codex home (Session::command points it at codex-home)
+    // and the one the crew config gives this agent.
+    let daemon_home = s.root().join("codex-home");
+    let endpoint_home = s.root().join("endpoint-codex");
+    for (home, effort, rules) in [
+        (&daemon_home, "low", "global-rules"),
+        (&endpoint_home, "high", "endpoint-rules"),
+    ] {
+        std::fs::create_dir_all(home).unwrap();
+        std::fs::write(
+            home.join("config.toml"),
+            format!(
+                "model_reasoning_effort = \"{effort}\"\ndeveloper_instructions = \"{rules}\"\n"
+            ),
+        )
+        .unwrap();
+    }
+    std::fs::create_dir_all(s.workspace.join(".crew")).unwrap();
+    std::fs::write(
+        s.workspace.join(".crew/config.toml"),
+        format!(
+            "[agents.x.env]\nCODEX_HOME = {}\n",
+            serde_json::to_string(&endpoint_home.to_string_lossy()).unwrap()
+        ),
+    )
+    .unwrap();
+
+    let mut team = s.team(
+        "endpoint-home",
+        vec![runtime_agent("x", RuntimeKind::Codex)],
+        vec![],
+    );
+    team.workspace.sandbox = SandboxConfig {
+        mode: SandboxMode::Required,
+        ..SandboxConfig::default()
+    };
+    std::fs::write(s.root().join("team.yaml"), team.to_yaml().unwrap()).unwrap();
+    let started = s
+        .command()
+        .env("PATH", &path)
+        .args(["run", "team.yaml", "--no-attach"])
+        .output()
+        .unwrap();
+    assert!(started.status.success(), "{}", stderr(&started));
+
+    let home = s.workspace.join(".crew/agents/x/rw/home/codex");
+    let server = home.join("fake-codex-server.json");
+    wait_for_file(&s, &server);
+    let server = json(&server);
+    let instructions = server["args"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter_map(Value::as_str)
+        .find(|a| a.starts_with("developer_instructions="))
+        .expect("the sidecar was given developer instructions");
+    assert!(instructions.contains("endpoint-rules"), "{instructions}");
+    assert!(!instructions.contains("global-rules"), "{instructions}");
+    // The model settings come from the same home the instructions did.
+    let seeded: toml::Table = std::fs::read_to_string(home.join("config.toml"))
+        .unwrap()
+        .parse()
+        .unwrap();
+    assert_eq!(seeded["model_reasoning_effort"].as_str(), Some("high"));
+    assert!(!seeded.contains_key("developer_instructions"));
+    s.stop();
+}
