@@ -13,12 +13,24 @@
 //! process of the sandbox is gone. bubblewrap reports the program's exit
 //! before its own PID 1 has finished, and that PID 1 waits for the rest of
 //! the namespace; as a subreaper, sandbox-run inherits it and waits for it
-//! too. So when sandbox-run exits with a code, nothing of the sandbox is
-//! left. It dies with the process that started it (`PR_SET_PDEATHSIG`),
+//! too. It dies with the process that started it (`PR_SET_PDEATHSIG`),
 //! and bubblewrap's `--die-with-parent` then takes the sandbox down.
 //!
-//! Any failure exits with [`EXIT_SETUP_FAILED`] before bubblewrap runs;
-//! there is no fallback to binding by path.
+//! How it ends:
+//! - a setup failure exits with [`EXIT_SETUP_FAILED`] before bubblewrap is
+//!   started (there is no fallback to binding by path);
+//! - once bubblewrap is started, every exit with a code comes after the
+//!   last child was reaped: bubblewrap's code, 128 plus its signal, or
+//!   [`EXIT_SETUP_FAILED`] when the done marker could not be created;
+//! - any other failure after bubblewrap is started aborts (SIGABRT), so it
+//!   never reports a code while part of the sandbox may still run.
+//!
+//! The proof that a launch's sandbox is gone is its done marker: the file
+//! the spec names, created only after the last child was reaped, holding
+//! `exited <code>` or `signal <n>`. A marker that is absent or holds
+//! anything else means "not known gone". The exit status alone is not
+//! that proof: a plain 125 does not say whether bubblewrap ran, and an exit
+//! status is tied to a pid, not to a launch.
 
 use std::ffi::{CString, OsString};
 use std::io;
@@ -64,8 +76,8 @@ pub fn prefix(spec: &Spec) -> Result<Vec<OsString>, String> {
 
 /// Set up bubblewrap, run it and wait until the whole sandbox is gone.
 /// Then, if the spec names a done marker, create it. Exits with
-/// bubblewrap's exit code, or 128 plus the signal that killed it. Never
-/// returns.
+/// bubblewrap's exit code, or 128 plus the signal that killed it (see the
+/// module documentation for the other endings). Never returns.
 pub fn run(args: RunArgs) -> ! {
     let prepared = tie_to_parent().and_then(|()| prepare(&args.spec, &args.command));
     let prepared = match prepared {
@@ -126,7 +138,9 @@ struct Ended {
 }
 
 /// Start bubblewrap, drop this process's copies of the pinned descriptors,
-/// and reap children until none is left.
+/// and reap children until none is left. Returns an error only if
+/// bubblewrap could not be started; after that it returns how bubblewrap
+/// ended once the last child was reaped, or aborts.
 fn supervise(mut bwrap: Command, pinned: Vec<OwnedFd>) -> Result<Ended, String> {
     let child = bwrap.spawn().map_err(|e| format!("running bwrap: {e}"))?;
     let bwrap_pid = child.id() as libc::pid_t;
@@ -135,12 +149,14 @@ fn supervise(mut bwrap: Command, pinned: Vec<OwnedFd>) -> Result<Ended, String> 
     drop(child);
     // Hold nothing but stdio while waiting: whatever this process inherited
     // was only marked close-on-exec, and it may wait for a long time.
+    // bubblewrap runs now, so a failure must not end in an exit code.
     // SAFETY: nothing in this process still owns a descriptor from 3 up.
     if unsafe { libc::syscall(libc::SYS_close_range, 3u32, u32::MAX, 0u32) } != 0 {
-        return Err(format!(
-            "closing inherited descriptors: {}",
+        eprintln!(
+            "crew sandbox-run: closing inherited descriptors: {}",
             io::Error::last_os_error()
-        ));
+        );
+        std::process::abort();
     }
     let mut bwrap_status = None;
     loop {
