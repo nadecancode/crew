@@ -1099,7 +1099,9 @@ mod tests {
         let mut git_cmd = git(Path::new("/work"));
         with_identity(&mut git_cmd, "agent-1");
         git_cmd.args(["status", "--porcelain"]);
-        let launched = launch::SandboxLauncher::new(spec).launch(&git_cmd).unwrap();
+        let launched = launch::SandboxLauncher::new(spec, Vec::new())
+            .launch(&git_cmd)
+            .unwrap();
         let argv: Vec<String> = launch::argv(&launched)
             .iter()
             .map(|a| a.to_string_lossy().into_owned())
@@ -1283,6 +1285,50 @@ mod tests {
             !marker.exists(),
             "a configured command ran during init_repo"
         );
+    }
+
+    #[test]
+    fn an_agents_launch_variables_reach_its_git_only_by_the_names_its_spec_passes() {
+        use crate::sandbox::spec::Spec;
+        use launch::Launcher;
+        let spec = Spec {
+            bwrap: "/usr/bin/bwrap".into(),
+            crew_bin: "/opt/crew/bin/crew".into(),
+            mounts: vec![],
+            env: vec![],
+            pass_env: vec!["CREW_IDENTITY".into()],
+            cwd: "/work".into(),
+            network: true,
+            new_session: false,
+            min_landlock_abi: crate::sandbox::landlock::MIN_ABI,
+            allow_unix: vec![],
+        };
+        let launch_env = vec![
+            (
+                "CREW_IDENTITY".to_string(),
+                "/state/agents/a/identity.json".to_string(),
+            ),
+            ("ANTHROPIC_API_KEY".to_string(), "sk-not-passed".to_string()),
+        ];
+        let mut cmd = git(Path::new("/work"));
+        cmd.arg("status");
+        let launched = launch::SandboxLauncher::new(spec.clone(), launch_env)
+            .launch(&cmd)
+            .unwrap();
+        let env: std::collections::BTreeMap<String, String> = launched
+            .get_envs()
+            .filter_map(|(k, v)| Some((k.to_str()?.to_string(), v?.to_str()?.to_string())))
+            .collect();
+        assert_eq!(
+            env.get("CREW_IDENTITY").map(String::as_str),
+            Some("/state/agents/a/identity.json")
+        );
+        assert!(!env.contains_key("ANTHROPIC_API_KEY"), "{env:?}");
+        // A helper launcher carries none.
+        let helper = launch::SandboxLauncher::new(spec, Vec::new())
+            .launch(&cmd)
+            .unwrap();
+        assert!(!helper.get_envs().any(|(k, _)| k == "CREW_IDENTITY"));
     }
 
     #[test]

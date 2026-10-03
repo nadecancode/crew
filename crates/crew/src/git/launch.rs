@@ -56,11 +56,15 @@ pub(super) fn apply(cmd: &mut Command) -> io::Result<()> {
 /// names `spec::launcher_env` allows. A spec for a helper has no `pass_env`.
 pub struct SandboxLauncher {
     spec: Spec,
+    /// The agent's own launch variables (its `LaunchSpec.env`: identity, endpoint
+    /// keys) for operations on that agent's behalf; only the names the spec
+    /// passes get through. Empty for helpers.
+    launch_env: Vec<(String, String)>,
 }
 
 impl SandboxLauncher {
-    pub fn new(spec: Spec) -> Self {
-        Self { spec }
+    pub fn new(spec: Spec, launch_env: Vec<(String, String)>) -> Self {
+        Self { spec, launch_env }
     }
 
     pub fn spec(&self) -> &Spec {
@@ -92,7 +96,7 @@ impl Launcher for SandboxLauncher {
             .envs(crate::sandbox::spec::launcher_env(
                 &spec,
                 std::env::vars_os(),
-                &[],
+                &self.launch_env,
             ))
             .stdin(Stdio::null());
         Ok(launched)
@@ -134,5 +138,5 @@ pub fn helper_launcher(
             nix_daemon: None,
         },
     )?;
-    Ok((SandboxLauncher::new(built.spec), built.warnings))
+    Ok((SandboxLauncher::new(built.spec, Vec::new()), built.warnings))
 }
