@@ -134,6 +134,20 @@ pub fn init_repo(dir: &Path) -> Result<()> {
     {
         return Ok(());
     }
+    // A first commit made here would take the operator's staged work under
+    // crew's identity, and leave untracked source out of every worktree.
+    // crew's own state and the team file do not count.
+    let pending = out(dir, &["status", "--porcelain"])?;
+    let ours = |path: &str| {
+        path.starts_with(".crew/") || ["crew.yaml", "crew.yml", "crew.toml"].contains(&path)
+    };
+    if pending.lines().any(|l| !l.get(3..).is_some_and(ours)) {
+        bail!(
+            "the repository at {} has files but no commit yet; make the first commit yourself \
+(git add -A && git commit) and run crew again",
+            dir.display()
+        );
+    }
     let mut cmd = git(dir);
     with_identity(&mut cmd, "crew");
     let output = cmd
@@ -533,9 +547,15 @@ mod tests {
         assert!(status(&nested).is_err());
 
         let outer_head = out(&outer.root, &["rev-parse", "HEAD"]).unwrap();
+        // An existing project with files must make its own first commit; the
+        // agent's file is written once the repository is initialised.
+        assert!(init_repo(&nested).is_err());
+        std::fs::remove_file(nested.join("agent.txt")).unwrap();
+        std::fs::remove_dir_all(nested.join(".git")).unwrap();
         init_repo(&nested).unwrap();
         assert!(is_root(&nested));
         assert!(has_commits(&nested));
+        write(&nested, "agent.txt", "x\n");
         let commit = commit_all(&nested, "claude-1", "agent work").unwrap();
         assert_eq!(commit.files_changed, 1);
         // The outer repository did not gain a commit and still has its
@@ -550,6 +570,26 @@ mod tests {
         // A linked worktree is a root too.
         let wt = ensure_worktree(&nested, &nested.join(".crew/worktrees"), "a", "HEAD").unwrap();
         assert!(is_root(&wt.path));
+    }
+
+    #[test]
+    fn init_refuses_a_repository_with_work_but_no_commit() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path().join("repo");
+        std::fs::create_dir_all(&root).unwrap();
+        out(&root, &["init", "-q", "-b", "main"]).unwrap();
+        write(&root, "staged.rs", "fn main() {}\n");
+        out(&root, &["add", "staged.rs"]).unwrap();
+        write(&root, "untracked.rs", "x\n");
+        let err = init_repo(&root).unwrap_err();
+        assert!(err.to_string().contains("no commit yet"), "{err}");
+        assert!(!has_commits(&root), "an initial commit was made anyway");
+        // Only crew's own state directory in the way is fine.
+        let clean = dir.path().join("clean");
+        std::fs::create_dir_all(clean.join(".crew")).unwrap();
+        write(&clean.join(".crew"), "crew.db", "x");
+        init_repo(&clean).unwrap();
+        assert!(has_commits(&clean));
     }
 
     #[test]
