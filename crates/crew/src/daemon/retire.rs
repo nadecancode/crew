@@ -377,6 +377,28 @@ impl Ledger {
         gone.iter().for_each(forget);
     }
 
+    /// End what is left of `agent`'s sandboxes: the init of each entry not
+    /// gone that was identified while it ran, in this boot. Called only by
+    /// a launch holding the agent's launch lease alone, its session not
+    /// alive and its sidecar stopped, so every such entry is of a launch
+    /// that has ended; a sandbox still running is one its parent did not
+    /// take along (killed before bubblewrap tied it to it). Nothing else
+    /// is signalled, and a signal proves nothing: `retire` still waits for
+    /// the init to finish or the marker to say so. Returns how many were
+    /// signalled.
+    pub fn end_orphans(&self, agent: &str) -> usize {
+        self.of(agent)
+            .iter()
+            .filter(|record| !record.gone(&self.boot))
+            .filter_map(|record| {
+                let r = record.get();
+                let this_boot = !r.boot.is_empty() && r.boot == self.boot;
+                r.init.filter(|_| this_boot)
+            })
+            .filter(|init| signal_init(*init))
+            .count()
+    }
+
     /// Wait until every sandbox of `agent` is gone, then drop their
     /// entries. Entries leave only once gone, so a launch that gives up
     /// here leaves the next one the same wait.
@@ -417,6 +439,42 @@ sandbox of this team is left, delete it",
         let mut agents = self.agents.lock().unwrap_or_else(|e| e.into_inner());
         f(agents.entry(agent.to_string()).or_default())
     }
+}
+
+/// SIGKILL to `init`, a namespace's init, only if it is that process for
+/// certain: a pidfd is opened on its pid, then `/proc` must show that pid
+/// alive with the init's start time and as pid 1 of its namespace. The
+/// pidfd names the process that had the pid when it was opened; the init,
+/// alive after that with its start time, had it then. So the signal,
+/// through the pidfd, reaches the init or (if it has just ended) no one,
+/// never a later process with its number. Anything uncertain sends
+/// nothing. Whether it was sent.
+fn signal_init(init: Proc) -> bool {
+    use std::os::fd::{AsRawFd, FromRawFd, OwnedFd};
+    // SAFETY: plain syscall; no memory is passed.
+    let fd = unsafe { libc::syscall(libc::SYS_pidfd_open, init.pid as libc::pid_t, 0) };
+    let Ok(fd) = i32::try_from(fd) else {
+        return false;
+    };
+    if fd < 0 {
+        return false;
+    }
+    // SAFETY: a descriptor pidfd_open just returned, owned here only.
+    let pidfd = unsafe { OwnedFd::from_raw_fd(fd) };
+    if !(init.alive() && first_in_its_namespace(init.pid)) {
+        return false;
+    }
+    // SAFETY: plain syscall on a live pidfd; a null siginfo is allowed.
+    let sent = unsafe {
+        libc::syscall(
+            libc::SYS_pidfd_send_signal,
+            pidfd.as_raw_fd(),
+            libc::SIGKILL,
+            std::ptr::null::<libc::siginfo_t>(),
+            0,
+        )
+    };
+    sent == 0
 }
 
 /// How long a sandbox may take to show the init of its PID namespace.
@@ -914,8 +972,20 @@ mod tests {
     /// the daemon's sidecars for `id`, with its init, once the sandbox is
     /// fully up.
     async fn sidecar_for(daemon: &Daemon, id: &str, bwrap: &Path, outlives: bool) -> Proc {
+        sidecar_running(daemon, id, bwrap, outlives, "").await
+    }
+
+    /// sidecar_for, its sandbox's program first running `before` (a shell
+    /// fragment).
+    async fn sidecar_running(
+        daemon: &Daemon,
+        id: &str,
+        bwrap: &Path,
+        outlives: bool,
+        before: &str,
+    ) -> Proc {
         let marker = 400_000 + std::process::id() % 1_000 + u32::from(outlives);
-        let inner = sandbox_running(bwrap, !outlives, &format!("exec sleep {marker}"));
+        let inner = sandbox_running(bwrap, !outlives, &format!("{before}exec sleep {marker}"));
         let argv: Vec<String> = std::iter::once(inner.get_program())
             .chain(inner.get_args())
             .map(|a| format!("'{}'", a.to_string_lossy()))
@@ -979,30 +1049,46 @@ mod tests {
         .unwrap();
         let daemon = running.daemon.clone();
         let procs = crate::process::pty::PtyManager::new(daemon.proc_tx.clone());
-        let short = Duration::from_millis(300);
 
         // Stopped when its session exited or was killed (on_exit, kill_agent),
-        // before the restart: its sandbox still has a process, so the home
-        // is not seeded.
-        let init = sidecar_for(&daemon, "a", &bwrap, true).await;
+        // before the restart, its sandbox not tied to it (as one is whose
+        // parent was killed before bubblewrap tied it): the restart ends it,
+        // and lets the home be seeded only once nothing of it is left.
+        let descendant = 500_000 + std::process::id() % 1_000;
+        let init = sidecar_running(
+            &daemon,
+            "a",
+            &bwrap,
+            true,
+            &format!("setsid sleep {descendant} </dev/null >/dev/null 2>&1 & "),
+        )
+        .await;
+        let ns = namespace_of(init.pid).unwrap();
+        eventually("its setsid descendant", || {
+            in_namespace(ns).contains(&format!("sleep {descendant}"))
+        });
+        // Its init runs, so the number is its namespace's.
+        let seen = procs_in(ns);
         daemon.stop_sidecar("a");
-        let refused = daemon.retire_sandboxes("a", &procs, short).await;
-        // A second try (another restart) is refused too: the entry stayed.
-        let again = daemon.retire_sandboxes("a", &procs, short).await;
-        let outlived = init.running();
-        // SAFETY: plain kill of the test's sandbox init.
-        unsafe { libc::kill(init.pid as libc::pid_t, libc::SIGKILL) };
-        assert!(outlived, "the stand-in sandbox did not outlive its parent");
-        assert!(
-            refused.is_err(),
-            "seeded while the stopped sidecar's sandbox ran"
-        );
-        assert!(again.is_err(), "a retry skipped the wait");
-        // Once it is gone, the next try goes through and the entry leaves.
-        daemon
+        let retired = daemon
             .retire_sandboxes("a", &procs, Duration::from_secs(5))
-            .await
-            .unwrap();
+            .await;
+        let left = still_running(&seen);
+        let outlived = init.running();
+        if outlived {
+            // SAFETY: plain kill of the test's sandbox init.
+            unsafe { libc::kill(init.pid as libc::pid_t, libc::SIGKILL) };
+        }
+        assert!(
+            retired.is_ok(),
+            "the orphaned sandbox of a stopped sidecar holds the restart: {retired:?}"
+        );
+        assert!(!outlived, "let through while its init ran");
+        assert_eq!(
+            left,
+            Vec::<Proc>::new(),
+            "let through while its sandbox ran"
+        );
         assert!(daemon.ledger.of("a").is_empty());
 
         // One that goes with it is waited for, and then the home may be seeded.
@@ -1013,6 +1099,80 @@ mod tests {
             .await
             .unwrap();
         assert!(!init.running());
+    }
+
+    #[tokio::test]
+    async fn only_an_orphan_identified_for_certain_in_this_boot_is_signalled() {
+        let Some(bwrap) = bwrap() else { return };
+        let temp = tempfile::tempdir().unwrap();
+        let running = super::super::start(super::super::DaemonOptions {
+            workspace: temp.path().to_path_buf(),
+            crew_bin: std::env::current_exe().unwrap(),
+        })
+        .await
+        .unwrap();
+        let daemon = running.daemon.clone();
+        let procs = crate::process::pty::PtyManager::new(daemon.proc_tx.clone());
+        let short = Duration::from_millis(300);
+
+        // An orphan whose entry has no boot id: not signalled, and it holds
+        // every try, the entry kept.
+        let orphan = sidecar_for(&daemon, "a", &bwrap, true).await;
+        daemon.stop_sidecar("a");
+        for record in daemon.ledger.of("a") {
+            record.update(|r| r.boot = String::new());
+        }
+        let first = daemon.retire_sandboxes("a", &procs, short).await;
+        let second = daemon.retire_sandboxes("a", &procs, short).await;
+        let alive = orphan.running();
+        // SAFETY: plain kill of the test's sandbox init.
+        unsafe { libc::kill(orphan.pid as libc::pid_t, libc::SIGKILL) };
+        assert!(alive, "an orphan of unknown boot was signalled");
+        assert!(
+            first.is_err() && second.is_err(),
+            "let through while it ran"
+        );
+        assert_eq!(daemon.ledger.of("a").len(), 1, "the entry went");
+
+        // A live process named by an entry: its own identity, but not the
+        // init of a namespace; and its pid with another start time (a
+        // recycled number). Neither is signalled.
+        let mut control = std::process::Command::new("sleep")
+            .arg("300")
+            .spawn()
+            .unwrap();
+        let me = Proc::of(control.id()).unwrap();
+        let named = daemon.ledger.start("b", "sidecar").unwrap();
+        named.update(|r| r.init = Some(me));
+        let refused = daemon.retire_sandboxes("b", &procs, short).await;
+        let recycled = daemon.ledger.start("c", "sidecar").unwrap();
+        recycled.update(|r| {
+            r.init = Some(Proc {
+                start: me.start - 1,
+                ..me
+            })
+        });
+        let gone = daemon.retire_sandboxes("c", &procs, short).await;
+        // An entry with no init: nothing to signal, and it holds.
+        daemon
+            .ledger
+            .start("d", "sidecar")
+            .unwrap()
+            .update(|r| r.pid = Some(me.pid));
+        let unknown = daemon.retire_sandboxes("d", &procs, short).await;
+        let untouched = me.alive();
+        control.kill().unwrap();
+        control.wait().unwrap();
+        assert!(
+            untouched,
+            "a process that is no namespace's init was signalled"
+        );
+        assert!(refused.is_err(), "let through while the named process ran");
+        assert!(
+            gone.is_ok(),
+            "an init whose pid was recycled is gone: {gone:?}"
+        );
+        assert!(unknown.is_err(), "an entry with no init was let through");
     }
 
     #[tokio::test]

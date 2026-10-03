@@ -821,6 +821,12 @@ stopped"
             );
         }
         self.stop_sidecar(id);
+        // Under the agent's launch lease, held alone: whatever of its
+        // sandboxes still runs is of a launch that has ended.
+        let ended = self.ledger.end_orphans(id);
+        if ended > 0 {
+            tracing::info!("{id}: ended {ended} sandbox(es) its stopped processes left running");
+        }
         self.ledger
             .retire(id, within)
             .await
