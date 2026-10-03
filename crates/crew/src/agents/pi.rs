@@ -146,21 +146,33 @@ pub fn check_binary(path: &Path) -> Result<(), String> {
 /// read as it comes, so a long listing cannot stall it on a full pipe.
 fn output_within(program: &Path, args: &[&str], limit: std::time::Duration) -> Option<String> {
     use std::io::Read;
+    use std::os::unix::process::CommandExt;
     use std::process::{Command, Stdio};
+    // The probe leads its own process group, so a timeout takes its children
+    // (which may hold the pipe open) down with it.
     let mut child = Command::new(program)
         .args(args)
+        .process_group(0)
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::null())
         .spawn()
         .ok()?;
     let mut stdout = child.stdout.take()?;
-    let reader = std::thread::spawn(move || {
+    let (tx, rx) = std::sync::mpsc::channel();
+    std::thread::spawn(move || {
         let mut text = String::new();
         let _ = stdout.read_to_string(&mut text);
-        text
+        let _ = tx.send(text);
     });
+    // One deadline covers the exit and the draining of stdout.
     let deadline = std::time::Instant::now() + limit;
+    let kill_group = |child: &mut std::process::Child| {
+        // SAFETY: plain syscall; a negative pid addresses the probe's group.
+        unsafe { libc::kill(-(child.id() as libc::pid_t), libc::SIGKILL) };
+        let _ = child.kill();
+        let _ = child.wait();
+    };
     loop {
         match child.try_wait() {
             Ok(Some(_)) => break,
@@ -168,13 +180,18 @@ fn output_within(program: &Path, args: &[&str], limit: std::time::Duration) -> O
                 std::thread::sleep(std::time::Duration::from_millis(50));
             }
             _ => {
-                let _ = child.kill();
-                let _ = child.wait();
+                kill_group(&mut child);
                 return None;
             }
         }
     }
-    reader.join().ok()
+    let left = deadline.saturating_duration_since(std::time::Instant::now());
+    let text = rx.recv_timeout(left).ok();
+    if text.is_none() {
+        // Something still holds the pipe; it is not wanted any more.
+        kill_group(&mut child);
+    }
+    text
 }
 
 /// The models pi can reach with the providers it has credentials for, as
@@ -612,6 +629,23 @@ mod tests {
         );
         // A program that cannot be asked is left to its launch.
         assert_eq!(check_binary(&dir.path().join("missing")), Ok(()));
+    }
+
+    #[test]
+    fn a_probe_whose_child_holds_stdout_still_returns_within_the_limit() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("pi");
+        // The program exits at once; its background child keeps stdout open.
+        std::fs::write(&path, "#!/bin/sh\necho hi\nsleep 30 &\nexit 0\n").unwrap();
+        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o755)).unwrap();
+        let started = std::time::Instant::now();
+        let _ = output_within(&path, &["--help"], std::time::Duration::from_secs(1));
+        assert!(
+            started.elapsed() < std::time::Duration::from_secs(5),
+            "took {:?}",
+            started.elapsed()
+        );
     }
 
     #[test]
