@@ -213,10 +213,13 @@ pub fn init_repo(dir: &Path) -> Result<()> {
     // crew's identity, and leave untracked source out of every worktree.
     // crew's own state and the team file do not count.
     let pending = out(dir, &["status", "--porcelain"])?;
-    let ours = |path: &str| {
-        path.starts_with(".crew/") || ["crew.yaml", "crew.yml", "crew.toml"].contains(&path)
+    // Staged work is never ours: only an untracked team file is let through.
+    let ours = |line: &str| {
+        let path = line.get(3..).unwrap_or_default();
+        path.starts_with(".crew/")
+            || (line.starts_with("??") && ["crew.yaml", "crew.yml", "crew.toml"].contains(&path))
     };
-    if pending.lines().any(|l| !l.get(3..).is_some_and(ours)) {
+    if !pending.lines().all(ours) {
         bail!(
             "the repository at {} has files but no commit yet; make the first commit yourself \
 (git add -A && git commit) and run crew again",
@@ -781,6 +784,28 @@ mod tests {
             out(&root, &["show", "--format=", "--name-only", "HEAD"]).unwrap(),
             ""
         );
+    }
+
+    #[test]
+    fn init_does_not_commit_a_staged_team_file() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path().join("repo");
+        std::fs::create_dir_all(&root).unwrap();
+        out(&root, &["init", "-q", "-b", "main"]).unwrap();
+        write(&root, "crew.yaml", "project: x\n");
+        // Untracked, it is crew's own business and is left alone.
+        init_repo(&root).unwrap();
+        assert_eq!(
+            out(&root, &["show", "--format=", "--name-only", "HEAD"]).unwrap(),
+            ""
+        );
+        let staged = dir.path().join("staged");
+        std::fs::create_dir_all(&staged).unwrap();
+        out(&staged, &["init", "-q", "-b", "main"]).unwrap();
+        write(&staged, "crew.yaml", "project: x\n");
+        out(&staged, &["add", "crew.yaml"]).unwrap();
+        assert!(init_repo(&staged).is_err());
+        assert!(!has_commits(&staged));
     }
 
     #[test]
