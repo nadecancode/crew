@@ -1571,3 +1571,120 @@ exec '{}' fake-cli claude "$@"
     assert_eq!(works, ["cargo", "git", "gitconfig"], "{report}");
     s.stop();
 }
+
+/// Two flat installations of `codex` and `git` (each program a file directly
+/// in its directory, the case where the profile leaves that directory out of
+/// the sandbox), beside the crew binary: `first/` and `second/`. Each notes
+/// which installation ran: `codex` in `$CODEX_HOME/ran`, `git` (when run for
+/// an agent) in `<A>/rw/git-ran`.
+fn two_installations() -> (tempfile::TempDir, String) {
+    use std::os::unix::fs::PermissionsExt;
+    let dir = tempfile::tempdir_in(Path::new(CREW).parent().unwrap()).unwrap();
+    let base = dir.path().canonicalize().unwrap();
+    let path = std::env::var_os("PATH").unwrap();
+    let git = std::env::split_paths(&path)
+        .map(|d| d.join("git"))
+        .find(|p| p.is_file())
+        .unwrap()
+        .canonicalize()
+        .unwrap();
+    for which in ["first", "second"] {
+        let bin = base.join(which);
+        std::fs::create_dir_all(&bin).unwrap();
+        let codex = format!(
+            "#!/bin/sh\necho \"{which} $1\" >> \"$CODEX_HOME/ran\"\nexec '{CREW}' fake-cli codex \"$@\"\n"
+        );
+        let git = format!(
+            "#!/bin/sh\n[ -n \"$CREW_IDENTITY\" ] && echo {which} >> \"$(dirname \"$CREW_IDENTITY\")/rw/git-ran\"\nexec '{}' \"$@\"\n",
+            git.display()
+        );
+        for (name, script) in [("codex", codex), ("git", git)] {
+            std::fs::write(bin.join(name), script).unwrap();
+            std::fs::set_permissions(bin.join(name), std::fs::Permissions::from_mode(0o755))
+                .unwrap();
+        }
+    }
+    let mut dirs = vec![base.join("first"), base.join("second")];
+    dirs.extend(std::env::split_paths(&path));
+    let path = std::env::join_paths(dirs).unwrap().into_string().unwrap();
+    (dir, path)
+}
+
+#[test]
+fn each_sandboxed_launch_runs_the_cli_the_daemon_found_not_another() {
+    if require_sandbox().is_none() {
+        return;
+    }
+    let s = Session::new();
+    workspace_repo(&s, &[]);
+    let (_installations, path) = two_installations();
+    let team = sandboxed(
+        &s,
+        vec![
+            codex_agent("x"),
+            agent(
+                "w",
+                "",
+                &[
+                    "--on-task=write work.txt done",
+                    "--on-task=commit add work",
+                    "--on-task=done finished",
+                ],
+            ),
+        ],
+        vec![task("t", "w", &[])],
+    );
+    run_with_env(&s, &team, &[("PATH", &path)]);
+    wait_up(&s, "x");
+    let ran = home_of(&s, "x").join("codex/ran");
+
+    // The session and its app-server, then a queue command.
+    s.wait_for("the fake app-server", || {
+        !processes_with(&["fake-cli", "codex", "app-server"]).is_empty()
+    });
+    let identity = s.workspace.join(".crew/agents/x/identity.json");
+    let out = s
+        .command()
+        .args(["hook", "codex-notify", "--identity"])
+        .arg(&identity)
+        .arg(r#"{"type":"agent-turn-complete","thread-id":"fake-thread"}"#)
+        .output()
+        .unwrap();
+    assert!(out.status.success(), "{}", common::stderr(&out));
+    s.wait("the session id", |snap| {
+        find_agent(snap, "x").session_id.as_deref() == Some("fake-thread")
+    });
+    s.send("x", "through the queue");
+    s.wait_for("the queue command", || {
+        std::fs::read_to_string(&ran).is_ok_and(|r| r.lines().any(|l| l.ends_with(" queue")))
+    });
+    // The worker's commit: its git, in its sandbox.
+    let done = s.wait("the task", |snap| {
+        matches!(
+            find_task(snap, "t").status,
+            TaskStatus::Done | TaskStatus::Failed
+        )
+    });
+    assert_eq!(find_task(&done, "t").status, TaskStatus::Done);
+    let git_ran = s.workspace.join(".crew/agents/w/rw/git-ran");
+    let codex = std::fs::read_to_string(&ran).unwrap();
+    let git = std::fs::read_to_string(&git_ran).unwrap_or_default();
+    s.stop();
+
+    assert!(
+        codex.lines().any(|l| l.ends_with(" app-server")),
+        "no app-server: {codex}"
+    );
+    assert!(
+        codex.lines().count() >= 3,
+        "session, app-server, queue: {codex}"
+    );
+    let other_codex: Vec<&str> = codex.lines().filter(|l| !l.starts_with("first ")).collect();
+    let other_git: Vec<&str> = git.lines().filter(|l| *l != "first").collect();
+    assert!(!git.is_empty(), "the worker's git left no note");
+    assert!(
+        other_codex.is_empty() && other_git.is_empty(),
+        "launches ran another program than the one found first: codex {other_codex:?}, git \
+{other_git:?}"
+    );
+}
