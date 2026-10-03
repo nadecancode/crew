@@ -3,7 +3,7 @@
 
 use std::ffi::OsStr;
 use std::fs;
-use std::os::fd::{AsRawFd, FromRawFd};
+use std::os::fd::{AsFd, AsRawFd, BorrowedFd, FromRawFd, OwnedFd};
 use std::os::unix::ffi::OsStrExt;
 use std::os::unix::fs::{MetadataExt, OpenOptionsExt, PermissionsExt};
 use std::path::{Component, Path, PathBuf};
@@ -208,6 +208,143 @@ pub fn write_private_file(path: &Path, contents: &[u8]) -> Result<()> {
     result
 }
 
+/// Read a regular file beneath a trusted pre-opened directory, with no links.
+/// Size limits belong to the reader. No absolute, dot or dotdot paths are allowed.
+pub fn open_beneath(root: impl AsFd, relative: &Path) -> Result<fs::File> {
+    let flags =
+        libc::O_RDONLY | libc::O_NONBLOCK | libc::O_NOCTTY | libc::O_CLOEXEC | libc::O_NOFOLLOW;
+    let fd = resolve_beneath(root.as_fd(), relative, flags)?;
+    regular_file(fd, relative)
+}
+
+/// Acquire a descendant directory from the same pinned root used for reads.
+pub fn open_dir_beneath(root: impl AsFd, relative: &Path) -> Result<OwnedFd> {
+    #[cfg(target_os = "linux")]
+    let access = libc::O_PATH;
+    #[cfg(not(target_os = "linux"))]
+    let access = libc::O_RDONLY;
+    resolve_beneath(
+        root.as_fd(),
+        relative,
+        access | libc::O_DIRECTORY | libc::O_CLOEXEC | libc::O_NOFOLLOW,
+    )
+}
+
+fn relative_name(relative: &Path) -> std::io::Result<std::ffi::CString> {
+    let bytes = relative.as_os_str().as_bytes();
+    if bytes.is_empty()
+        || relative.is_absolute()
+        || bytes
+            .split(|b| *b == b'/')
+            .any(|part| part.is_empty() || part == b"." || part == b"..")
+    {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidInput,
+            "expected a nonempty relative path without dot or dotdot components",
+        ));
+    }
+    std::ffi::CString::new(bytes)
+        .map_err(|_| std::io::Error::new(std::io::ErrorKind::InvalidInput, "path contains NUL"))
+}
+
+fn resolve_beneath(root: BorrowedFd<'_>, relative: &Path, flags: libc::c_int) -> Result<OwnedFd> {
+    let name = relative_name(relative)?;
+    #[cfg(target_os = "linux")]
+    let native = {
+        // SAFETY: open_how is made only of integer fields; all arguments live through the syscall.
+        let mut how: libc::open_how = unsafe { std::mem::zeroed() };
+        how.flags = flags as u64;
+        how.resolve =
+            libc::RESOLVE_BENEATH | libc::RESOLVE_NO_SYMLINKS | libc::RESOLVE_NO_MAGICLINKS;
+        let fd = unsafe {
+            libc::syscall(
+                libc::SYS_openat2,
+                root.as_raw_fd(),
+                name.as_ptr(),
+                &how,
+                std::mem::size_of::<libc::open_how>(),
+            )
+        };
+        if fd < 0 {
+            Err(std::io::Error::last_os_error())
+        } else {
+            // SAFETY: the successful syscall returned a new owned descriptor.
+            Ok(unsafe { OwnedFd::from_raw_fd(fd as libc::c_int) })
+        }
+    };
+    #[cfg(not(target_os = "linux"))]
+    let native = {
+        let _ = name;
+        Err(std::io::Error::from_raw_os_error(libc::ENOSYS))
+    };
+    finish_beneath_open(native, root, relative, flags)
+        .with_context(|| format!("opening {} beneath pinned root", relative.display()))
+}
+
+fn finish_beneath_open(
+    native: std::io::Result<OwnedFd>,
+    root: BorrowedFd<'_>,
+    relative: &Path,
+    flags: libc::c_int,
+) -> std::io::Result<OwnedFd> {
+    match native {
+        Err(error) if error.raw_os_error() == Some(libc::ENOSYS) => {
+            walk_beneath(root, relative, flags)
+        }
+        result => result,
+    }
+}
+
+/// Kernels without openat2 and other Unix platforms use descriptor-relative
+/// lookup with O_NOFOLLOW at every component, never an absolute path lookup.
+fn walk_beneath(
+    root: BorrowedFd<'_>,
+    relative: &Path,
+    flags: libc::c_int,
+) -> std::io::Result<OwnedFd> {
+    relative_name(relative)?;
+    let mut directory = root.try_clone_to_owned()?;
+    let components: Vec<_> = relative.components().collect();
+    for (index, component) in components.iter().enumerate() {
+        let name = std::ffi::CString::new(component.as_os_str().as_bytes()).map_err(|_| {
+            std::io::Error::new(std::io::ErrorKind::InvalidInput, "path contains NUL")
+        })?;
+        #[cfg(target_os = "linux")]
+        let access = libc::O_PATH;
+        #[cfg(not(target_os = "linux"))]
+        let access = libc::O_RDONLY;
+        let component_flags = if index + 1 == components.len() {
+            flags
+        } else {
+            access | libc::O_DIRECTORY | libc::O_NOFOLLOW | libc::O_CLOEXEC
+        };
+        // SAFETY: the pinned directory and NUL-terminated component name are valid.
+        let fd = unsafe { libc::openat(directory.as_raw_fd(), name.as_ptr(), component_flags) };
+        if fd < 0 {
+            return Err(std::io::Error::last_os_error());
+        }
+        // SAFETY: openat returned a new owned descriptor.
+        directory = unsafe { OwnedFd::from_raw_fd(fd) };
+    }
+    Ok(directory)
+}
+
+fn regular_file(fd: OwnedFd, relative: &Path) -> Result<fs::File> {
+    let file = fs::File::from(fd);
+    if !file.metadata()?.is_file() {
+        bail!("{} is not a regular file", relative.display());
+    }
+    // SAFETY: file owns the fd; clearing NONBLOCK only after fstat avoids FIFO hangs.
+    let flags = unsafe { libc::fcntl(file.as_raw_fd(), libc::F_GETFL) };
+    if flags < 0
+        || unsafe { libc::fcntl(file.as_raw_fd(), libc::F_SETFL, flags & !libc::O_NONBLOCK) } < 0
+    {
+        return Err(std::io::Error::last_os_error())
+            .context("clearing nonblocking flag on regular file");
+    }
+    Ok(file)
+}
+
 /// Directory for sockets: `$XDG_RUNTIME_DIR/crew`, else `/tmp/crew-<uid>`.
 pub fn runtime_dir() -> PathBuf {
     runtime_dir_from(std::env::var_os("XDG_RUNTIME_DIR").as_deref(), uid())
@@ -397,6 +534,119 @@ pub fn discover(dir: Option<&Path>, project: Option<&str>) -> Result<DaemonInfo>
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn open_beneath_refuses_symlinks_dotdot_and_special_files() {
+        use std::io::Read;
+        let temp = tempfile::tempdir().unwrap();
+        let root_path = temp.path().join("root");
+        fs::create_dir_all(root_path.join("reports")).unwrap();
+        fs::write(root_path.join("reports/session"), b"inside").unwrap();
+        let outside = temp.path().join("outside");
+        fs::write(&outside, b"sentinel").unwrap();
+        assert_eq!(fs::read(&outside).unwrap(), b"sentinel");
+        let root = fs::File::open(&root_path).unwrap();
+        let mut contents = String::new();
+        open_beneath(&root, Path::new("reports/session"))
+            .unwrap()
+            .read_to_string(&mut contents)
+            .unwrap();
+        assert_eq!(contents, "inside");
+        let subdir = open_dir_beneath(&root, Path::new("reports")).unwrap();
+        contents.clear();
+        open_beneath(&subdir, Path::new("session"))
+            .unwrap()
+            .read_to_string(&mut contents)
+            .unwrap();
+        assert_eq!(contents, "inside");
+        std::os::unix::fs::symlink(&outside, root_path.join("link")).unwrap();
+        std::os::unix::fs::symlink(temp.path(), root_path.join("linked-directory")).unwrap();
+        std::os::unix::fs::symlink("reports", root_path.join("internal-link")).unwrap();
+        for relative in [
+            "link",
+            "internal-link/session",
+            "linked-directory/outside",
+            "../outside",
+            "reports/../reports/session",
+            "reports/./session",
+            "./reports/session",
+            "",
+            "reports",
+        ] {
+            assert!(
+                open_beneath(&root, Path::new(relative)).is_err(),
+                "{relative}"
+            );
+        }
+        assert!(open_beneath(&root, &root_path.join("reports/session")).is_err());
+        assert!(open_dir_beneath(&root, Path::new("linked-directory")).is_err());
+        let fifo = root_path.join("fifo");
+        let fifo_name = std::ffi::CString::new(fifo.as_os_str().as_bytes()).unwrap();
+        // SAFETY: the name is valid and creates only this fixture's FIFO.
+        assert_eq!(unsafe { libc::mkfifo(fifo_name.as_ptr(), 0o600) }, 0);
+        let positive = fs::OpenOptions::new()
+            .read(true)
+            .custom_flags(libc::O_NONBLOCK)
+            .open(&fifo)
+            .unwrap();
+        assert!(!positive.metadata().unwrap().is_file());
+        let start = std::time::Instant::now();
+        assert!(open_beneath(&root, Path::new("fifo")).is_err());
+        assert!(start.elapsed() < std::time::Duration::from_millis(200));
+        let socket = root_path.join("socket");
+        let _listener = std::os::unix::net::UnixListener::bind(&socket).unwrap();
+        let _positive = std::os::unix::net::UnixStream::connect(&socket).unwrap();
+        assert!(open_beneath(&root, Path::new("socket")).is_err());
+        fs::rename(&root_path, temp.path().join("moved-root")).unwrap();
+        fs::create_dir_all(root_path.join("reports")).unwrap();
+        fs::write(root_path.join("reports/session"), b"replacement").unwrap();
+        contents.clear();
+        open_beneath(&root, Path::new("reports/session"))
+            .unwrap()
+            .read_to_string(&mut contents)
+            .unwrap();
+        assert_eq!(
+            contents, "inside",
+            "the pinned root must survive pathname replacement"
+        );
+    }
+
+    #[test]
+    fn open_beneath_enosys_walk_refuses_links_and_never_falls_back_for_other_errors() {
+        use std::io::Read;
+        let temp = tempfile::tempdir().unwrap();
+        fs::create_dir(temp.path().join("sub")).unwrap();
+        fs::write(temp.path().join("sub/file"), b"inside").unwrap();
+        assert_eq!(fs::read(temp.path().join("sub/file")).unwrap(), b"inside");
+        std::os::unix::fs::symlink("sub", temp.path().join("link")).unwrap();
+        let root = fs::File::open(temp.path()).unwrap();
+        let flags =
+            libc::O_RDONLY | libc::O_NONBLOCK | libc::O_NOCTTY | libc::O_CLOEXEC | libc::O_NOFOLLOW;
+        let fallback = |relative: &str| {
+            finish_beneath_open(
+                Err(std::io::Error::from_raw_os_error(libc::ENOSYS)),
+                root.as_fd(),
+                Path::new(relative),
+                flags,
+            )
+        };
+        let mut contents = String::new();
+        regular_file(fallback("sub/file").unwrap(), Path::new("sub/file"))
+            .unwrap()
+            .read_to_string(&mut contents)
+            .unwrap();
+        assert_eq!(contents, "inside");
+        for relative in ["link/file", "../file", "sub/./file", "/sub/file", ""] {
+            assert!(fallback(relative).is_err(), "{relative}");
+        }
+        let denied = finish_beneath_open(
+            Err(std::io::Error::from_raw_os_error(libc::EACCES)),
+            root.as_fd(),
+            Path::new("sub/file"),
+            flags,
+        );
+        assert_eq!(denied.unwrap_err().raw_os_error(), Some(libc::EACCES));
+    }
 
     #[test]
     fn write_private_file_does_not_follow_a_planted_tmp_symlink() {
