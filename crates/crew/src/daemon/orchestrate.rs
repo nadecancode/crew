@@ -894,20 +894,11 @@ until the database takes writes again, tasks wait where they are.",
                     .agent(&author),
                 );
                 // A stopped reviewer finds the request when it is restarted.
-                if ask_reviewer {
-                    self.send_review_request(&updated, &author, reviewer).await;
-                }
-                if let Some(why) = &unavailable {
-                    self.emit(
-                        NewEvent::new(
-                            "scheduler",
-                            "task.review_blocked",
-                            format!("task {} cannot be reviewed now: {why}", updated.id),
-                        )
-                        .task(&updated.id)
-                        .warn(),
-                    );
-                    let next = if ask_reviewer {
+                let asked =
+                    ask_reviewer && self.send_review_request(&updated, &author, reviewer).await;
+                // (A request that could not be sent has been said by now.)
+                if let Some(why) = unavailable.filter(|_| asked || !ask_reviewer) {
+                    let next = if asked {
                         format!(
                             "Restart {reviewer} (the review request waits for it), or review it \
 yourself"
@@ -915,12 +906,7 @@ yourself"
                     } else {
                         "Review it yourself".to_string()
                     };
-                    self.notify_orchestrator(&format!(
-                        "Task {} (\"{}\") by {author} is waiting for review, but {why}. {next} \
-with review_submit(task_id=\"{}\", approve=true|false).",
-                        updated.id, updated.title, updated.id
-                    ))
-                    .await;
+                    self.review_blocked(&updated, &author, &why, &next).await;
                 }
             }
             None => self.finish_task(&updated, &author).await,
@@ -935,22 +921,59 @@ with review_submit(task_id=\"{}\", approve=true|false).",
         Ok(updated)
     }
 
-    /// Ask `reviewer`, straight from the author, to review `task`: what to
-    /// review against, and the work, are on the card.
-    pub(crate) async fn send_review_request(&self, task: &Task, author: &str, reviewer: &str) {
-        let body = review_request(task, self.model().session.isolation == "shared");
+    /// Ask `reviewer`, straight from the author, to review `task`. Says
+    /// whether the request was sent. One that could not be is not passed
+    /// over: the task stays in Review and the orchestrator hears of it.
+    pub(crate) async fn send_review_request(
+        &self,
+        task: &Task,
+        author: &str,
+        reviewer: &str,
+    ) -> bool {
+        let shared = self.model().session.isolation == "shared";
         let commit = task
             .artifacts
             .iter()
             .rev()
             .find(|a| a.kind == "commit")
             .map(|a| a.value.clone());
+        let body = review_request(task, shared);
         let message = NewMessage::new(author, reviewer, MessageType::ReviewRequest, body)
             .metadata(json!({ "task_id": task.id, "commit": commit }))
             .correlation(Some(format!("review-{}", task.id)));
-        if let Err(e) = self.send_message(message).await {
-            tracing::warn!("sending the review request failed: {}", e.message);
-        }
+        let Err(e) = self.send_message(message).await else {
+            return true;
+        };
+        tracing::warn!("sending the review request failed: {}", e.message);
+        let why = format!(
+            "the review request to {reviewer} could not be sent ({})",
+            truncate_chars(&one_line(&e.message), 200)
+        );
+        self.review_blocked(task, author, &why, "Review it yourself")
+            .await;
+        false
+    }
+
+    /// A review that cannot go ahead: the task stays in Review, and the
+    /// orchestrator is asked to see to it (`next`: what it can do).
+    async fn review_blocked(&self, task: &Task, author: &str, why: &str, next: &str) {
+        self.emit(
+            NewEvent::new(
+                "scheduler",
+                "task.review_blocked",
+                format!("task {} cannot be reviewed now: {why}", task.id),
+            )
+            .task(&task.id)
+            .warn(),
+        );
+        self.notify_orchestrator(&format!(
+            "Task {} (\"{}\") by {author} is waiting for review, but {why}. {next} \
+with review_submit(task_id=\"{}\", approve=true|false).",
+            task.id,
+            truncate_chars(&task.title, 80),
+            task.id
+        ))
+        .await;
     }
 
     /// Bookkeeping once a task is really done (immediately, or after approval).
