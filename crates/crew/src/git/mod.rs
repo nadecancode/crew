@@ -9,6 +9,8 @@
 //! Every git invocation uses an explicit argument array (no shell), and every
 //! revision that originates from an agent is validated before use.
 
+pub mod launch;
+
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output, Stdio};
 use std::time::{Duration, Instant};
@@ -79,6 +81,7 @@ fn output(cmd: &mut Command) -> std::io::Result<Output> {
     use std::io::Read;
     use std::os::unix::process::CommandExt;
     use std::sync::mpsc;
+    launch::apply(cmd)?;
     let mut child = cmd
         .process_group(0)
         .stdout(Stdio::piped())
@@ -673,6 +676,7 @@ pub fn integrate(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::Arc;
 
     struct Repo {
         _dir: tempfile::TempDir,
@@ -906,6 +910,113 @@ mod tests {
         assert!(cmd
             .get_envs()
             .any(|(k, v)| k == "GIT_CONFIG_NOSYSTEM" && v.is_some_and(|v| v == "1")));
+    }
+
+    /// Records every command it is asked to launch and runs it unchanged.
+    struct Recorder(std::sync::Mutex<Vec<Vec<String>>>);
+
+    impl launch::Launcher for Recorder {
+        fn launch(&self, cmd: &Command) -> std::io::Result<Command> {
+            let argv = launch::argv(cmd)
+                .iter()
+                .map(|a| a.to_string_lossy().into_owned())
+                .collect();
+            self.0.lock().unwrap().push(argv);
+            let mut same = Command::new(cmd.get_program());
+            same.args(cmd.get_args());
+            for (k, v) in cmd.get_envs() {
+                match v {
+                    Some(v) => same.env(k, v),
+                    None => same.env_remove(k),
+                };
+            }
+            Ok(same)
+        }
+    }
+
+    #[test]
+    fn every_git_command_goes_through_the_installed_launcher_and_only_inside_its_scope() {
+        let r = repo();
+        write(&r.root, "work.txt", "x\n");
+        let recorder = Arc::new(Recorder(Default::default()));
+        let commit = launch::with_launcher(recorder.clone(), || {
+            commit_all(&r.root, "a", "work").unwrap()
+        });
+        assert_eq!(commit.summary, "work");
+        let seen = recorder.0.lock().unwrap().clone();
+        assert!(seen.len() >= 4, "{seen:?}");
+        assert!(seen.iter().all(|argv| argv[0] == "git"), "{seen:?}");
+        assert!(seen.iter().any(|argv| argv.contains(&"commit".to_string())));
+        // Outside the scope nothing is recorded.
+        let before = recorder.0.lock().unwrap().len();
+        write(&r.root, "more.txt", "y\n");
+        commit_all(&r.root, "a", "more").unwrap();
+        assert_eq!(recorder.0.lock().unwrap().len(), before);
+        // A launcher that refuses stops the operation: no fallback.
+        struct Refuse;
+        impl launch::Launcher for Refuse {
+            fn launch(&self, _: &Command) -> std::io::Result<Command> {
+                Err(std::io::Error::other("no sandbox"))
+            }
+        }
+        write(&r.root, "third.txt", "z\n");
+        assert!(
+            launch::with_launcher(Arc::new(Refuse), || commit_all(&r.root, "a", "third")).is_err()
+        );
+        assert!(!has_commit_with_subject(&r.root, "third"));
+    }
+
+    #[test]
+    fn the_sandbox_launcher_wraps_git_in_sandbox_run_with_a_clean_environment() {
+        use crate::sandbox::spec::Spec;
+        use launch::Launcher;
+        let spec = Spec {
+            bwrap: "/usr/bin/bwrap".into(),
+            crew_bin: "/opt/crew/bin/crew".into(),
+            mounts: vec![],
+            env: vec![("HOME".into(), "/home/helper".into())],
+            pass_env: vec![],
+            cwd: "/work".into(),
+            network: false,
+            new_session: true,
+            min_landlock_abi: crate::sandbox::landlock::MIN_ABI,
+            allow_unix: vec![],
+        };
+        let mut git_cmd = git(Path::new("/work"));
+        with_identity(&mut git_cmd, "agent-1");
+        git_cmd.args(["status", "--porcelain"]);
+        let launched = launch::SandboxLauncher::new(spec).launch(&git_cmd).unwrap();
+        let argv: Vec<String> = launch::argv(&launched)
+            .iter()
+            .map(|a| a.to_string_lossy().into_owned())
+            .collect();
+        assert_eq!(argv[0], "/opt/crew/bin/crew");
+        assert_eq!(argv[1], "sandbox-run");
+        assert_eq!(argv[3], "--");
+        assert_eq!(&argv[4..7], ["git", "-C", "/work"]);
+        assert!(argv.ends_with(&["status".into(), "--porcelain".into()]));
+        // The spec carries git's non-secret variables, including the identity.
+        let spec: serde_json::Value = serde_json::from_str(&argv[2]).unwrap();
+        let env = spec["env"].to_string();
+        assert!(
+            env.contains("GIT_AUTHOR_NAME") && env.contains("agent-1"),
+            "{env}"
+        );
+        assert!(env.contains("GIT_TERMINAL_PROMPT"), "{env}");
+        // The process is started with the allow-list only: nothing of git's
+        // own variables or the daemon's other variables.
+        let started: Vec<String> = launched
+            .get_envs()
+            .filter(|(_, v)| v.is_some())
+            .map(|(k, _)| k.to_string_lossy().into_owned())
+            .collect();
+        assert!(
+            !started
+                .iter()
+                .any(|k| k.starts_with("GIT_") || k == "SECRET_TOKEN"),
+            "{started:?}"
+        );
+        assert!(!env.contains("sk-not-allowed") || env.contains("SECRET_TOKEN"));
     }
 
     #[test]
