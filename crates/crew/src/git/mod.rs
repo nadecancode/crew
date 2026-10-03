@@ -223,6 +223,7 @@ pub fn init_repo(dir: &Path) -> Result<()> {
             dir.display()
         );
     }
+    unstage_state_dir(dir)?;
     let mut cmd = git(dir);
     with_identity(&mut cmd, "crew");
     let output = output(cmd.args(["commit", "-q", "--allow-empty", "-m", "Initial commit"]))?;
@@ -239,6 +240,13 @@ pub fn has_commits(dir: &Path) -> bool {
     run(dir, &["rev-parse", "--verify", "-q", "HEAD"])
         .map(|o| o.status.success())
         .unwrap_or(false)
+}
+
+/// Take anything under `.crew/` out of the index (what is already tracked
+/// stays tracked, unchanged): ignore rules do not apply to paths that are
+/// staged or tracked, and the state holds agent tokens.
+fn unstage_state_dir(dir: &Path) -> Result<()> {
+    out(dir, &["reset", "-q", "--", ".crew"]).map(drop)
 }
 
 /// Keep crew's state directory out of `git status` without touching the
@@ -373,6 +381,7 @@ pub fn commit_all(dir: &Path, agent: &str, message: &str) -> Result<CommitInfo> 
     require_root(dir)?;
     exclude_state_dir(dir)?;
     out(dir, &["add", "-A", "--", "."])?;
+    unstage_state_dir(dir)?;
     let staged = run(dir, &["diff", "--cached", "--quiet"])?;
     if staged.status.success() {
         bail!("nothing to commit: the working tree has no changes");
@@ -723,6 +732,55 @@ mod tests {
         commit_all(&r.root, "a", "work").unwrap();
         let files = out(&r.root, &["show", "--format=", "--name-only", "HEAD"]).unwrap();
         assert_eq!(files, "work.txt");
+    }
+
+    #[test]
+    fn commit_all_leaves_a_staged_or_tracked_state_directory_out() {
+        let r = repo();
+        std::fs::create_dir_all(r.root.join(".crew/agents/a")).unwrap();
+        // One state file already tracked, one forced into the index.
+        write(&r.root, ".crew/tracked.db", "v1");
+        out(&r.root, &["add", "-f", ".crew/tracked.db"]).unwrap();
+        out(
+            &r.root,
+            &[
+                "-c",
+                "user.name=t",
+                "-c",
+                "user.email=t@t",
+                "commit",
+                "-q",
+                "-m",
+                "tracked",
+            ],
+        )
+        .unwrap();
+        write(&r.root, ".crew/tracked.db", "v2");
+        write(&r.root, ".crew/agents/a/identity.json", "{\"token\":\"t\"}");
+        out(&r.root, &["add", "-f", ".crew/agents/a/identity.json"]).unwrap();
+        write(&r.root, "work.txt", "x\n");
+        commit_all(&r.root, "a", "work").unwrap();
+        let files = out(&r.root, &["show", "--format=", "--name-only", "HEAD"]).unwrap();
+        assert_eq!(files, "work.txt");
+        // The tracked file was not removed from the repository either.
+        assert!(out(&r.root, &["ls-files", ".crew/tracked.db"])
+            .unwrap()
+            .contains("tracked.db"));
+    }
+
+    #[test]
+    fn the_initial_commit_leaves_a_staged_state_directory_out() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path().join("repo");
+        std::fs::create_dir_all(root.join(".crew")).unwrap();
+        out(&root, &["init", "-q", "-b", "main"]).unwrap();
+        write(&root.join(".crew"), "crew.db", "db");
+        out(&root, &["add", "-f", ".crew/crew.db"]).unwrap();
+        init_repo(&root).unwrap();
+        assert_eq!(
+            out(&root, &["show", "--format=", "--name-only", "HEAD"]).unwrap(),
+            ""
+        );
     }
 
     #[test]
