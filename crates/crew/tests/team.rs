@@ -699,6 +699,68 @@ fn a_reviewed_task_is_done_only_after_approval() {
 }
 
 #[test]
+fn a_rejected_task_waits_until_its_author_has_finished_the_next_one() {
+    let s = Session::new();
+    let team = {
+        let mut team = s.team(
+            "rework",
+            vec![
+                agent(
+                    "author",
+                    "",
+                    &["--on-task=wait-message operator", "--on-task=done finished"],
+                ),
+                agent(
+                    "critic",
+                    "",
+                    &[
+                        "--on-review=wait-message operator",
+                        r#"--on-review=tool review_submit {"task_id":"first","approve":false,"comments":"please fix"}"#,
+                    ],
+                ),
+            ],
+            vec![task("first", "author", &[]), task("second", "author", &[])],
+        );
+        team.tasks[0].reviewer = Some("critic".into());
+        team
+    };
+    s.run(&team);
+    let reached = |agent: &str, text: &str| s.agent_cmd(&["output", agent]).contains(text);
+    s.wait_for("the author to be on first", || {
+        reached("author", "Task first is yours")
+    });
+    s.send("author", "continue");
+    s.wait_for("the author to be on second", || {
+        reached("author", "Task second is yours")
+    });
+    s.wait_for("the critic to read the request", || {
+        reached("critic", "review_request from author")
+    });
+    s.send("critic", "go");
+    s.wait_for("the rejection", || s.has_event("task.changes_requested"));
+
+    // The author is still on second: the rework waits its turn.
+    let snapshot = s.snapshot();
+    assert_eq!(find_task(&snapshot, "second").status, TaskStatus::Working);
+    let first = find_task(&snapshot, "first");
+    assert_eq!(first.status, TaskStatus::Ready, "{first:?}");
+    assert_eq!(first.assigned_agent.as_deref(), Some("author"));
+    assert_eq!(first.result.as_deref(), Some("finished"));
+
+    // task_complete without an id closes the task the author is on, and
+    // the rework is handed back afterwards.
+    s.send("author", "continue");
+    let after = s.wait("second done and first handed back", |snap| {
+        find_task(snap, "second").status == TaskStatus::Done
+            && find_task(snap, "first").status == TaskStatus::Working
+    });
+    assert_eq!(
+        find_agent(&after, "author").task.as_deref(),
+        Some("task first")
+    );
+}
+
+#[test]
 fn a_task_whose_reviewer_stopped_is_reported_as_a_stall() {
     let s = Session::new();
     let team = {

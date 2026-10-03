@@ -956,6 +956,11 @@ review_submit(task_id=\"{id}\", approve=true|false, comments=…).",
         let author = task.assigned_agent.clone();
         let comments = truncate_chars(comments.trim(), MAX_RESULT_CHARS);
         let now = now_ms();
+        // An author already on another task gets the rework back once that
+        // task is finished: an agent works on one task at a time. Checked
+        // under the plan lock, so the scheduler cannot hand the author
+        // something else in between.
+        let mut queued = false;
         let updated = if approve {
             self.update_task(task_id, |t| {
                 t.status = TaskStatus::Done;
@@ -963,8 +968,16 @@ review_submit(task_id=\"{id}\", approve=true|false, comments=…).",
                 t.note = None;
             })
         } else {
+            let _planning = self.plan_lock.lock().await;
+            queued = author
+                .as_deref()
+                .is_some_and(|a| active_task(&self.model().tasks, a).is_some());
             self.update_task(task_id, |t| {
-                t.status = TaskStatus::Working;
+                t.status = if queued {
+                    TaskStatus::Ready
+                } else {
+                    TaskStatus::Working
+                };
                 t.progress = None;
                 t.note = Some(format!("changes requested by {reviewer}"));
             })
@@ -1002,6 +1015,13 @@ review_submit(task_id=\"{id}\", approve=true|false, comments=…).",
                         format!("\n\n{comments}")
                     }
                 )
+            } else if queued {
+                format!(
+                    "Changes requested on task \"{}\" (id {task_id}):\n\n{comments}\n\n\
+Finish your current task first: this one is handed back to you after it. Then address them, \
+git_commit, and call task_complete again.",
+                    updated.title
+                )
             } else {
                 format!(
                     "Changes requested on task \"{}\" (id {task_id}):\n\n{comments}\n\n\
@@ -1020,7 +1040,7 @@ Address them, git_commit, then call task_complete again.",
             if approve {
                 self.finish_task(&updated, author).await;
                 self.settle(author);
-            } else {
+            } else if !queued {
                 self.update_agent(author, |a| {
                     a.task = Some(updated.title.clone());
                     a.progress = None;
