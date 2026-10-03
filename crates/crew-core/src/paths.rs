@@ -681,72 +681,90 @@ mod tests {
 
     #[cfg(target_os = "linux")]
     #[test]
-    fn token_reader_stays_optional_when_openat2_is_denied() {
+    fn token_reader_seccomp_filter_does_not_escape_its_probe_thread() {
         let temp = tempfile::tempdir().unwrap();
-        let socket = temp.path().join("daemon.sock");
-        assert_eq!(read_operator_token(&socket).unwrap(), None);
-        let mut instructions = [
-            libc::sock_filter {
-                code: (libc::BPF_LD | libc::BPF_W | libc::BPF_ABS) as u16,
-                jt: 0,
-                jf: 0,
-                k: 0,
-            },
-            libc::sock_filter {
-                code: (libc::BPF_JMP | libc::BPF_JEQ | libc::BPF_K) as u16,
-                jt: 0,
-                jf: 1,
-                k: libc::SYS_openat2 as u32,
-            },
-            libc::sock_filter {
-                code: (libc::BPF_RET | libc::BPF_K) as u16,
-                jt: 0,
-                jf: 0,
-                k: libc::SECCOMP_RET_ERRNO | libc::EPERM as u32,
-            },
-            libc::sock_filter {
-                code: (libc::BPF_RET | libc::BPF_K) as u16,
-                jt: 0,
-                jf: 0,
-                k: libc::SECCOMP_RET_ALLOW,
-            },
-        ];
-        let filter = libc::sock_fprog {
-            len: instructions.len() as u16,
-            filter: instructions.as_mut_ptr(),
-        };
-        // SAFETY: this filter affects only this test thread, denying one syscall.
-        assert_eq!(
-            unsafe { libc::prctl(libc::PR_SET_NO_NEW_PRIVS, 1, 0, 0, 0) },
-            0
-        );
-        assert_eq!(
-            unsafe {
-                libc::prctl(
-                    libc::PR_SET_SECCOMP,
-                    libc::SECCOMP_MODE_FILTER,
-                    &filter,
-                    0,
-                    0,
-                )
-            },
-            0
-        );
+        fs::write(temp.path().join("file"), b"readable").unwrap();
         let root = fs::File::open(temp.path()).unwrap();
-        let denied = open_beneath(&root, Path::new("missing")).unwrap_err();
-        assert_eq!(
-            denied
-                .downcast_ref::<std::io::Error>()
-                .unwrap()
-                .raw_os_error(),
-            Some(libc::EPERM)
-        );
-        assert_eq!(read_operator_token(&socket).unwrap(), None);
-        write_private_file(&operator_token_path(&socket), b"synthetic").unwrap();
-        assert_eq!(
-            read_operator_token(&socket).unwrap().as_deref(),
-            Some("synthetic")
-        );
+        assert!(open_beneath(&root, Path::new("file")).is_ok());
+        // Invoke the probe directly as libtest can do on a fallback thread.
+        // Its irreversible syscall filter must not contaminate this caller.
+        token_reader_stays_optional_when_openat2_is_denied();
+        let file = open_beneath(&root, Path::new("file")).unwrap();
+        assert!(file.metadata().unwrap().is_file());
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn token_reader_stays_optional_when_openat2_is_denied() {
+        std::thread::spawn(|| {
+            let temp = tempfile::tempdir().unwrap();
+            let socket = temp.path().join("daemon.sock");
+            assert_eq!(read_operator_token(&socket).unwrap(), None);
+            let mut instructions = [
+                libc::sock_filter {
+                    code: (libc::BPF_LD | libc::BPF_W | libc::BPF_ABS) as u16,
+                    jt: 0,
+                    jf: 0,
+                    k: 0,
+                },
+                libc::sock_filter {
+                    code: (libc::BPF_JMP | libc::BPF_JEQ | libc::BPF_K) as u16,
+                    jt: 0,
+                    jf: 1,
+                    k: libc::SYS_openat2 as u32,
+                },
+                libc::sock_filter {
+                    code: (libc::BPF_RET | libc::BPF_K) as u16,
+                    jt: 0,
+                    jf: 0,
+                    k: libc::SECCOMP_RET_ERRNO | libc::EPERM as u32,
+                },
+                libc::sock_filter {
+                    code: (libc::BPF_RET | libc::BPF_K) as u16,
+                    jt: 0,
+                    jf: 0,
+                    k: libc::SECCOMP_RET_ALLOW,
+                },
+            ];
+            let filter = libc::sock_fprog {
+                len: instructions.len() as u16,
+                filter: instructions.as_mut_ptr(),
+            };
+            // SAFETY: this filter affects only this test thread, denying one syscall.
+            assert_eq!(
+                unsafe { libc::prctl(libc::PR_SET_NO_NEW_PRIVS, 1, 0, 0, 0) },
+                0
+            );
+            assert_eq!(
+                unsafe {
+                    libc::prctl(
+                        libc::PR_SET_SECCOMP,
+                        libc::SECCOMP_MODE_FILTER,
+                        &filter,
+                        0,
+                        0,
+                    )
+                },
+                0
+            );
+            let root = fs::File::open(temp.path()).unwrap();
+            let denied = open_beneath(&root, Path::new("missing")).unwrap_err();
+            assert_eq!(
+                denied
+                    .downcast_ref::<std::io::Error>()
+                    .unwrap()
+                    .raw_os_error(),
+                Some(libc::EPERM)
+            );
+            assert_eq!(read_operator_token(&socket).unwrap(), None);
+            write_private_file(&operator_token_path(&socket), b"synthetic").unwrap();
+            assert_eq!(
+                read_operator_token(&socket).unwrap().as_deref(),
+                Some("synthetic")
+            );
+        })
+        .join()
+        .unwrap();
     }
 
     #[test]
