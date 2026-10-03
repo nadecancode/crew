@@ -29,6 +29,15 @@ pub fn text_cols(width: u16) -> usize {
     usize::from(width.saturating_sub(6).clamp(24, 110)).saturating_sub(4)
 }
 
+fn visible_rows(lines: usize, height: u16) -> usize {
+    lines.clamp(1, usize::from(height).saturating_sub(6).max(1))
+}
+
+pub(crate) fn scroll_limit(app: &App, view: &MessageView, area: Rect) -> usize {
+    let lines = line_count(app, view, text_cols(area.width));
+    lines.saturating_sub(visible_rows(lines, area.height))
+}
+
 pub fn render(buf: &mut Buffer, area: Rect, app: &App, view: &MessageView, theme: &Theme) {
     let box_w = area.width.saturating_sub(6).clamp(24, 110).min(area.width);
     if box_w < 24 || area.height < 6 {
@@ -51,9 +60,7 @@ pub fn render(buf: &mut Buffer, area: Rect, app: &App, view: &MessageView, theme
     };
     let lines = wrap(&message.body, cols);
     // Borders, a blank row and the key hints frame the text.
-    let visible = lines
-        .len()
-        .clamp(1, usize::from(area.height).saturating_sub(6).max(1));
+    let visible = visible_rows(lines.len(), area.height);
     let rect = centered(area, box_w, visible as u16 + 4);
     let title = format!(
         "{} → {} · {} · {}",

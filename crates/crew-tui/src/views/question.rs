@@ -24,6 +24,18 @@ use crate::widgets::text::{fit, width};
 /// Keys of the answer box, shown under it.
 const KEYS: &str = "↑↓ choose · enter send · tab next question · pgup/pgdn scroll · esc later";
 
+fn visible_rows(lines: usize, options: usize, height: u16) -> usize {
+    let fixed = 2 + 1 + (options + 1) + 1 + 1;
+    lines.min(usize::from(height).saturating_sub(fixed + 2).max(1))
+}
+
+pub(crate) fn scroll_limit(body: &str, options: usize, area: Rect) -> usize {
+    let cols =
+        usize::from(area.width.saturating_sub(6).clamp(24, 104).min(area.width)).saturating_sub(4);
+    let lines = wrap(body, cols).len();
+    lines.saturating_sub(visible_rows(lines, options, area.height))
+}
+
 /// Rows the band takes at the top of the dashboard.
 pub fn band_height(app: &App, area: Rect) -> u16 {
     u16::from(!app.open_questions().is_empty() && area.height >= 8 && area.width >= 30)
@@ -200,9 +212,7 @@ pub fn render(
     // the rest and scrolls when it is longer.
     let lines = wrap(&question.body, cols);
     let fixed = 2 + 1 + (own + 1) + 1 + 1;
-    let visible = lines
-        .len()
-        .min(usize::from(area.height).saturating_sub(fixed + 2).max(1));
+    let visible = visible_rows(lines.len(), own, area.height);
     let rect = centered(area, outer.width, (visible + fixed) as u16);
     let counter = if open.len() > 1 {
         format!("question {} of {}", index + 1, open.len())

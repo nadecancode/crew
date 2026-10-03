@@ -324,6 +324,8 @@ pub struct StatusLine {
 
 #[derive(Clone, Debug)]
 pub struct App {
+    /// Last drawn screen size, used to clamp keyboard scrolling to wrapped text.
+    pub(crate) screen: Cell<Rect>,
     pub session: SessionInfo,
     /// Workers in natural id order, then the orchestrator.
     pub agents: Vec<Agent>,
@@ -410,6 +412,7 @@ fn satellite_parent<'a>(agents: &'a [Agent], agent: &Agent) -> Option<&'a Agent>
 impl App {
     pub fn new() -> Self {
         Self {
+            screen: Cell::new(Rect::new(0, 0, 80, 24)),
             session: SessionInfo::default(),
             agents: Vec::new(),
             tasks: Vec::new(),

@@ -7,10 +7,69 @@ use crew_tui::app::{Compose, Modal, Reply, View};
 use crew_tui::theme::Theme;
 use crew_tui::{fixture, render_to_string, views, App};
 use ratatui::backend::TestBackend;
+use ratatui::crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use ratatui::style::Modifier;
 use ratatui::Terminal;
 
 const NOW: i64 = 1_790_000_000_000;
+
+fn press(app: &mut App, code: KeyCode) {
+    crew_tui::input::handle_key(app, KeyEvent::new(code, KeyModifiers::NONE), NOW, 10);
+}
+
+#[test]
+fn message_end_then_up_moves_from_the_rendered_last_page() {
+    let mut app = app();
+    let body = (1..=60)
+        .map(|i| format!("Line {i}: {}", "wide text ".repeat(12)))
+        .collect::<Vec<_>>()
+        .join("\n");
+    app.messages.push_back(fixture::message(
+        999,
+        "claude-1",
+        "claude-2",
+        MessageType::Message,
+        &body,
+        NOW,
+    ));
+    app.modal = Some(Modal::Message(crew_tui::app::MessageView {
+        id: "m-0999".into(),
+        scroll: 0,
+    }));
+    render_to_string(&app, 100, 30, NOW);
+    press(&mut app, KeyCode::End);
+    let bottom = render_to_string(&app, 100, 30, NOW);
+    press(&mut app, KeyCode::Up);
+    assert_ne!(render_to_string(&app, 100, 30, NOW), bottom);
+    // Resize while at the bottom: the next key must still move immediately.
+    press(&mut app, KeyCode::End);
+    let narrow_bottom = render_to_string(&app, 60, 30, NOW);
+    press(&mut app, KeyCode::Up);
+    assert_ne!(render_to_string(&app, 60, 30, NOW), narrow_bottom);
+}
+
+#[test]
+fn question_page_up_moves_after_paging_to_the_bottom() {
+    let mut app = app();
+    let mut question = fixture::question(NOW);
+    question.body = (1..=60)
+        .map(|i| format!("Question line {i}: {}", "wide text ".repeat(8)))
+        .collect::<Vec<_>>()
+        .join("\n");
+    let id = question.id.clone();
+    app.questions.push(question);
+    app.modal = Some(Modal::Question(crew_tui::app::QuestionBox {
+        id,
+        ..Default::default()
+    }));
+    render_to_string(&app, 100, 30, NOW);
+    for _ in 0..200 {
+        press(&mut app, KeyCode::PageDown);
+    }
+    let bottom = render_to_string(&app, 100, 30, NOW);
+    press(&mut app, KeyCode::PageUp);
+    assert_ne!(render_to_string(&app, 100, 30, NOW), bottom);
+}
 
 fn app() -> App {
     let mut app = App::new();

@@ -60,6 +60,7 @@ pub fn handle_mouse(
         // still does, nothing listens.
         return Vec::new();
     }
+    app.screen.set(area);
     let key = |code| KeyEvent::new(code, KeyModifiers::NONE);
     match mouse.kind {
         MouseEventKind::Down(MouseButton::Left) => click(app, area, mouse.column, mouse.row, now),
@@ -78,9 +79,7 @@ pub fn handle_mouse(
             let up = mouse.kind == MouseEventKind::ScrollUp;
             app.mark_dirty();
             let message_lines = match &app.modal {
-                Some(Modal::Message(view)) => {
-                    message::line_count(app, view, message::text_cols(area.width))
-                }
+                Some(Modal::Message(view)) => message::scroll_limit(app, view, area),
                 _ => 0,
             };
             match &mut app.modal {
@@ -604,12 +603,8 @@ fn modal_key(app: &mut App, key: KeyEvent, now: i64) -> Vec<Command> {
         Modal::Question(answer) => question_key(app, answer, key, now),
         Modal::Model(picker) => picker_key(app, picker, key, now),
         Modal::Message(mut view) => {
-            // Scrolling is clamped to the text when it is drawn.
-            let lines = app
-                .messages
-                .iter()
-                .find(|m| m.id == view.id)
-                .map_or(0, |m| m.body.chars().count());
+            let lines = message::scroll_limit(app, &view, app.screen.get());
+            view.scroll = view.scroll.min(lines);
             match key.code {
                 KeyCode::Up => scroll_message(&mut view, true, 1, lines),
                 KeyCode::Down => scroll_message(&mut view, false, 1, lines),
@@ -687,12 +682,12 @@ fn modal_key(app: &mut App, key: KeyEvent, now: i64) -> Vec<Command> {
     }
 }
 
-/// Move a message view by `rows`, within its `lines`.
+/// Move a message view by `rows`, within its last visible-page offset.
 fn scroll_message(view: &mut MessageView, up: bool, rows: usize, lines: usize) {
     view.scroll = if up {
         view.scroll.min(lines).saturating_sub(rows)
     } else {
-        (view.scroll + rows).min(lines.saturating_sub(1))
+        view.scroll.min(lines).saturating_add(rows).min(lines)
     };
 }
 
@@ -802,7 +797,11 @@ fn question_key(app: &mut App, mut answer: QuestionBox, key: KeyEvent, now: i64)
     let open: Vec<(String, Vec<String>, usize)> = app
         .open_questions()
         .iter()
-        .map(|q| (q.id.clone(), q.options(), q.body.chars().count()))
+        .map(|q| {
+            let options = q.options();
+            let limit = views::question::scroll_limit(&q.body, options.len(), app.screen.get());
+            (q.id.clone(), options, limit)
+        })
         .collect();
     let Some(index) = open.iter().position(|(id, _, _)| *id == answer.id) else {
         // Answered from somewhere else meanwhile: on to the next, if any.
@@ -812,6 +811,7 @@ fn question_key(app: &mut App, mut answer: QuestionBox, key: KeyEvent, now: i64)
         return Vec::new();
     };
     let (_, options, length) = &open[index];
+    answer.scroll = answer.scroll.min(*length);
     // The row after the suggested answers takes the operator's own words.
     let own = options.len();
     answer.choice = answer.choice.min(own);
@@ -828,7 +828,6 @@ fn question_key(app: &mut App, mut answer: QuestionBox, key: KeyEvent, now: i64)
         KeyCode::Up => answer.choice = answer.choice.saturating_sub(1),
         KeyCode::Down => answer.choice = (answer.choice + 1).min(own),
         KeyCode::PageUp => answer.scroll = answer.scroll.saturating_sub(5),
-        // Rendering clamps to the wrapped length; this only keeps it sane.
         KeyCode::PageDown => answer.scroll = (answer.scroll + 5).min(*length),
         // The box opened by itself a moment ago: this Enter was meant for
         // what was on screen before, not as an answer.
@@ -1628,6 +1627,13 @@ mod tests {
         press(&mut a, KeyCode::Up);
         press(&mut a, KeyCode::Up);
         assert_eq!(answer_box(&a).choice, 0);
+        // Enough wrapped rows to exercise scrolling rather than an invisible offset.
+        a.questions
+            .iter_mut()
+            .find(|q| q.id == first)
+            .unwrap()
+            .body
+            .push_str(&"\nQuestion line".repeat(60));
         press(&mut a, KeyCode::PageDown);
         assert_eq!(answer_box(&a).scroll, 5);
         press(&mut a, KeyCode::PageUp);
@@ -1802,6 +1808,12 @@ mod tests {
 
         // It scrolls with the keys and the wheel, and closes on esc, on any
         // other key and on a right click.
+        a.messages
+            .iter_mut()
+            .find(|m| m.id == newest.id)
+            .unwrap()
+            .body
+            .push_str(&"\nMessage line".repeat(60));
         press(&mut a, KeyCode::Down);
         assert!(matches!(&a.modal, Some(Modal::Message(view)) if view.scroll == 1));
         mouse(&mut a, MouseEventKind::ScrollUp, 10, 10);
@@ -1814,9 +1826,52 @@ mod tests {
     }
 
     #[test]
+    fn scrolling_short_bodies_keeps_zero_offset_and_long_bodies_work_before_draw() {
+        let mut a = app();
+        let id = a.messages.back().unwrap().id.clone();
+        a.messages.back_mut().unwrap().body = "short".into();
+        a.modal = Some(Modal::Message(MessageView {
+            id: id.clone(),
+            scroll: 0,
+        }));
+        for code in [KeyCode::Down, KeyCode::PageDown, KeyCode::End] {
+            press(&mut a, code);
+            assert!(matches!(&a.modal, Some(Modal::Message(view)) if view.scroll == 0));
+        }
+        mouse(&mut a, MouseEventKind::ScrollDown, 10, 10);
+        assert!(matches!(&a.modal, Some(Modal::Message(view)) if view.scroll == 0));
+        a.messages.back_mut().unwrap().body = "long line\n".repeat(60);
+        // No draw has happened: the fallback screen size still allows motion.
+        press(&mut a, KeyCode::End);
+        let before = match &a.modal {
+            Some(Modal::Message(view)) => view.scroll,
+            _ => unreachable!(),
+        };
+        assert!(before > 0);
+        press(&mut a, KeyCode::Up);
+        assert!(matches!(&a.modal, Some(Modal::Message(view)) if view.scroll == before - 1));
+
+        let (mut a, first, _) = with_questions();
+        a.questions.iter_mut().find(|q| q.id == first).unwrap().body = "short".into();
+        a.modal = Some(Modal::Question(question_box(first.clone())));
+        press(&mut a, KeyCode::PageDown);
+        mouse(&mut a, MouseEventKind::ScrollDown, 10, 10);
+        assert_eq!(answer_box(&a).scroll, 0);
+        a.questions.iter_mut().find(|q| q.id == first).unwrap().body = "long line\n".repeat(60);
+        press(&mut a, KeyCode::PageDown);
+        assert_eq!(answer_box(&a).scroll, 5);
+    }
+
+    #[test]
     fn the_wheel_scrolls_and_the_right_button_goes_back() {
         // The band that announces a question opens the answer box.
         let (mut a, first, _) = with_questions();
+        a.questions
+            .iter_mut()
+            .find(|q| q.id == first)
+            .unwrap()
+            .body
+            .push_str(&"\nQuestion line".repeat(60));
         left_click(&mut a, 40, 0);
         assert_eq!(answer_box(&a).id, first);
         mouse(&mut a, MouseEventKind::ScrollDown, 40, 10);

@@ -29,6 +29,7 @@ pub fn render(frame: &mut Frame, app: &App, theme: &Theme, now: i64) {
 }
 
 pub fn render_buffer(buf: &mut Buffer, area: Rect, app: &App, theme: &Theme, now: i64) {
+    app.screen.set(area);
     if area.is_empty() {
         return;
     }
