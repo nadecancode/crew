@@ -404,6 +404,7 @@ pub(crate) async fn discover(
 mod tests {
     use super::*;
     use crate::daemon::Daemon;
+    use std::os::unix::fs::MetadataExt;
 
     #[test]
     fn a_stat_line_is_read_past_any_command_name() {
@@ -803,5 +804,87 @@ mod tests {
             .await
             .unwrap();
         assert!(!init.running());
+    }
+
+    #[tokio::test]
+    async fn a_launch_that_cannot_retire_writes_nothing_of_the_agents_next_generation() {
+        let temp = tempfile::tempdir().unwrap();
+        let options = || super::super::DaemonOptions {
+            workspace: temp.path().to_path_buf(),
+            crew_bin: std::env::current_exe().unwrap(),
+        };
+        // A daemon started a sandbox for `a`, which has not reported that it
+        // is gone, and then stopped.
+        let running = super::super::start(options()).await.unwrap();
+        let agent_dir = running.daemon.agent_dir("a");
+        running
+            .daemon
+            .ledger
+            .start("a", "sidecar")
+            .unwrap()
+            .update(|r| r.pid = Some(4242));
+        drop(running);
+
+        // The next daemon, its team requiring sandboxes, is asked to start `a`.
+        // (Other tests' forked children may hold the workspace lock a moment.)
+        let mut next = super::super::start(options()).await;
+        for _ in 0..100 {
+            if next.is_ok() {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(100)).await;
+            next = super::super::start(options()).await;
+        }
+        let running = next.unwrap();
+        let daemon = running.daemon.clone();
+        let mut team = crew_core::config::TeamConfig::from_yaml(
+            "project: retire\nobjective: retire\nagents:\n  - id: a\n    role: work\n",
+        )
+        .unwrap();
+        team.workspace.sandbox.mode = crew_core::config::SandboxMode::Required;
+        daemon.model().session.team = Some(team);
+        let agent: crew_core::Agent = serde_json::from_value(serde_json::json!({
+            "id": "a", "name": "a", "role": "work", "status": "stopped", "runtime": "shell",
+            "workdir": temp.path().to_str().unwrap(), "backend": "pty", "last_activity_at": 0
+        }))
+        .unwrap();
+        daemon.model().agents.push(agent);
+        *daemon.procs.write().unwrap() = Some(Arc::new(crate::process::pty::PtyManager::new(
+            daemon.proc_tx.clone(),
+        )));
+        // What the previous generation left: its identity and briefing.
+        std::fs::create_dir_all(&agent_dir).unwrap();
+        for file in ["identity.json", "briefing.md"] {
+            std::fs::write(agent_dir.join(file), "previous generation").unwrap();
+        }
+        let before: Vec<_> = ["identity.json", "briefing.md"]
+            .iter()
+            .map(|f| std::fs::metadata(agent_dir.join(f)).unwrap())
+            .map(|m| (m.ino(), m.modified().unwrap()))
+            .collect();
+
+        let refused = daemon
+            .spawn_agent("a", false, None)
+            .await
+            .map(|_| ())
+            .unwrap_err();
+        assert!(
+            format!("{refused:#}").contains("home is not written"),
+            "{refused:#}"
+        );
+        let after: Vec<_> = ["identity.json", "briefing.md"]
+            .iter()
+            .map(|f| std::fs::metadata(agent_dir.join(f)).unwrap())
+            .map(|m| (m.ino(), m.modified().unwrap()))
+            .collect();
+        assert_eq!(before, after, "the identity or briefing was rewritten");
+        for file in ["identity.json", "briefing.md"] {
+            assert_eq!(
+                std::fs::read_to_string(agent_dir.join(file)).unwrap(),
+                "previous generation"
+            );
+        }
+        assert!(!agent_dir.join("rw").exists(), "its writable tree was made");
+        assert_eq!(std::fs::read_dir(&agent_dir).unwrap().count(), 2);
     }
 }
