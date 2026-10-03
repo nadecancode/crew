@@ -466,6 +466,24 @@ impl HerdrManager {
         Ok((first.or(group), group))
     }
 
+    /// Fail closed unless the pane's foreground process is `program`.
+    async fn verify_program(&self, pane_id: &str, program: &Path) -> Result<()> {
+        let mut seen = None;
+        for _ in 0..5 {
+            seen = self.pane_pids(pane_id).await.ok().and_then(|(pid, _)| pid);
+            if seen.is_some_and(|pid| process_runs(pid, program)) {
+                return Ok(());
+            }
+            tokio::time::sleep(Duration::from_millis(300)).await;
+        }
+        bail!(
+            "herdr started a pi other than the selected {} (foreground process {}); \
+use backend: pty or put the selected pi first on herdr's PATH",
+            program.display(),
+            seen.map_or("unknown".to_string(), |p| p.to_string())
+        )
+    }
+
     async fn signal_foreground(&self, agent_id: &str, signal: libc::c_int) -> Result<()> {
         let pane = self.pane(agent_id)?;
         let (_, group) = self.pane_pids(&pane.pane_id).await?;
@@ -535,31 +553,42 @@ fn herdr_kind(kind: RuntimeKind) -> Option<&'static str> {
     }
 }
 
-/// herdr starts the canonical executable of an agent kind (`pi`) from its own
-/// `PATH`; it cannot be told which program to run. When crew selected another
-/// pi (`CREW_PI`, or a validated one that is not the first on `PATH`), the
-/// herdr pane would run the wrong tool, so refuse instead.
-fn check_selected_program(spec: &LaunchSpec, path: Option<std::ffi::OsString>) -> Result<()> {
-    if spec.kind != RuntimeKind::Pi || spec.program == "pi" {
-        return Ok(());
+/// herdr's agent.start takes only a kind (`pi`) and runs that executable as the
+/// pane's shell finds it; it cannot be told a program. So the selected pi's
+/// directory goes first on the pane's PATH, and after the start the pane's
+/// foreground process is checked to be that program (`verify_program`).
+fn pinned_to_selected_pi(spec: &LaunchSpec) -> LaunchSpec {
+    let mut spec = spec.clone();
+    if is_pinned(&spec) {
+        if let Some(dir) = Path::new(&spec.program).parent() {
+            let rest = std::env::var("PATH").unwrap_or_else(|_| "/usr/bin:/bin".into());
+            spec.env
+                .push(("PATH".into(), format!("{}:{rest}", dir.display())));
+        }
     }
-    let first = path
-        .iter()
-        .flat_map(std::env::split_paths)
-        .map(|dir| dir.join("pi"))
-        .find(|candidate| candidate.is_file());
-    let same = |a: &Path, b: &Path| matches!((a.canonicalize(), b.canonicalize()), (Ok(a), Ok(b)) if a == b);
-    if first
-        .as_deref()
-        .is_some_and(|first| same(first, Path::new(&spec.program)))
-    {
-        return Ok(());
+    spec
+}
+
+/// A pi crew selected by path, which herdr has to be steered to.
+fn is_pinned(spec: &LaunchSpec) -> bool {
+    spec.kind == RuntimeKind::Pi && spec.program != "pi"
+}
+
+/// Whether process `pid` runs `program`: its executable is it, or the program
+/// is one of its arguments (a script run by its interpreter).
+fn process_runs(pid: u32, program: &Path) -> bool {
+    let Ok(want) = program.canonicalize() else {
+        return false;
+    };
+    let same = |p: &Path| p.canonicalize().is_ok_and(|p| p == want);
+    if same(&PathBuf::from(format!("/proc/{pid}/exe"))) {
+        return true;
     }
-    bail!(
-        "the herdr backend starts `pi` from its own PATH and cannot run the selected {}; \
-put it first on PATH or use backend: pty",
-        spec.program
-    )
+    std::fs::read(format!("/proc/{pid}/cmdline")).is_ok_and(|raw| {
+        raw.split(|b| *b == 0)
+            .filter(|a| !a.is_empty())
+            .any(|a| same(Path::new(&*String::from_utf8_lossy(a))))
+    })
 }
 
 /// The shared handle is needed to spawn watcher tasks, so the trait is
@@ -574,7 +603,8 @@ impl ProcessManager for Herdr {
 
     async fn spawn(&self, spec: &LaunchSpec) -> Result<Spawned> {
         let mgr = &self.0;
-        check_selected_program(spec, std::env::var_os("PATH"))?;
+        let pinned = pinned_to_selected_pi(spec);
+        let spec = &pinned;
         if let Ok(old) = mgr.pane(&spec.agent_id) {
             if old.alive.load(Ordering::SeqCst) {
                 // Restart: replace the old pane.
@@ -648,6 +678,12 @@ impl ProcessManager for Herdr {
             }
         }
 
+        if is_pinned(spec) {
+            if let Err(e) = mgr.verify_program(&pane_id, Path::new(&spec.program)).await {
+                let _ = mgr.call("pane.close", json!({ "pane_id": pane_id })).await;
+                return Err(e);
+            }
+        }
         let pid = mgr.pane_pids(&pane_id).await.ok().and_then(|(pid, _)| pid);
         let pane = Pane {
             pane_id: pane_id.clone(),
@@ -981,6 +1017,15 @@ mod tests {
         socket: &Path,
         prompt_error: Option<&'static str>,
     ) -> Arc<Mutex<Vec<String>>> {
+        fake_herdr_with(socket, prompt_error, vec![]).await
+    }
+
+    /// As `fake_herdr`, answering the listed methods with the given results.
+    async fn fake_herdr_with(
+        socket: &Path,
+        prompt_error: Option<&'static str>,
+        canned: Vec<(&'static str, Value)>,
+    ) -> Arc<Mutex<Vec<String>>> {
         let listener = tokio::net::UnixListener::bind(socket).unwrap();
         let log = Arc::new(Mutex::new(Vec::new()));
         let seen = log.clone();
@@ -1001,7 +1046,13 @@ mod tests {
                     ("agent.prompt", Some(code)) => {
                         json!({ "id": request["id"], "error": { "code": code, "message": "x" } })
                     }
-                    _ => json!({ "id": request["id"], "result": {} }),
+                    (method, _) => {
+                        let result = canned
+                            .iter()
+                            .find(|(m, _)| *m == method)
+                            .map_or(json!({}), |(_, r)| r.clone());
+                        json!({ "id": request["id"], "result": result })
+                    }
                 };
                 let mut out = serde_json::to_vec(&body).unwrap();
                 out.push(b'\n');
@@ -1046,29 +1097,64 @@ mod tests {
         }
     }
 
-    #[tokio::test]
-    async fn herdr_refuses_a_pi_it_would_not_start() {
-        let dir = tempfile::tempdir().unwrap();
-        let socket = dir.path().join("h.sock");
-        let log = fake_herdr(&socket, None).await;
-        let herdr = herdr_with_pane(&socket, RuntimeKind::Pi);
-        let err = herdr
-            .spawn(&pi_spec("/opt/elsewhere/pi"))
-            .await
-            .unwrap_err();
-        assert!(err.to_string().contains("cannot run the selected"), "{err}");
-        assert!(log.lock().unwrap().is_empty(), "herdr must not be called");
+    /// A fake herdr that starts a pane whose foreground process is `pid`.
+    async fn fake_herdr_running(socket: &Path, pid: u32) -> Arc<Mutex<Vec<String>>> {
+        fake_herdr_with(
+            socket,
+            None,
+            vec![
+                (
+                    "workspace.create",
+                    json!({ "workspace": { "workspace_id": "w1" }, "root_pane": { "pane_id": "w1:p1" } }),
+                ),
+                (
+                    "pane.process_info",
+                    json!({ "foreground_processes": [{ "pid": pid }], "foreground_process_group_id": pid }),
+                ),
+            ],
+        )
+        .await
     }
 
-    #[test]
-    fn the_first_pi_on_path_is_accepted() {
+    #[tokio::test]
+    async fn herdr_fails_closed_when_the_pane_runs_another_pi() {
         let dir = tempfile::tempdir().unwrap();
-        let pi = dir.path().join("pi");
-        std::fs::write(&pi, "#!/bin/sh\n").unwrap();
-        let path = std::env::join_paths([dir.path()]).ok();
-        assert!(check_selected_program(&pi_spec(&pi.to_string_lossy()), path.clone()).is_ok());
-        assert!(check_selected_program(&pi_spec("pi"), None).is_ok());
-        assert!(check_selected_program(&pi_spec("/elsewhere/pi"), path).is_err());
+        let socket = dir.path().join("h.sock");
+        // The pane's foreground process is this test binary, not the selected pi.
+        let log = fake_herdr_running(&socket, std::process::id()).await;
+        let herdr = herdr_with_pane(&socket, RuntimeKind::Pi);
+        let selected = dir.path().join("pi");
+        std::fs::write(&selected, "#!/bin/sh\n").unwrap();
+        let err = herdr
+            .spawn(&pi_spec(&selected.to_string_lossy()))
+            .await
+            .unwrap_err();
+        assert!(err.to_string().contains("a pi other than"), "{err}");
+        assert!(log.lock().unwrap().iter().any(|m| m == "pane.close"));
+    }
+
+    #[tokio::test]
+    async fn herdr_accepts_the_pane_running_the_selected_pi_and_puts_its_dir_on_path() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = tempfile::tempdir().unwrap();
+        let socket = dir.path().join("h.sock");
+        let selected = dir.path().join("pi");
+        std::fs::write(&selected, "#!/bin/sh\nsleep 30\n").unwrap();
+        std::fs::set_permissions(&selected, std::fs::Permissions::from_mode(0o755)).unwrap();
+        let mut child = std::process::Command::new(&selected).spawn().unwrap();
+        let _log = fake_herdr_running(&socket, child.id()).await;
+        let herdr = herdr_with_pane(&socket, RuntimeKind::Pi);
+        let spec = pi_spec(&selected.to_string_lossy());
+        let ok = herdr.spawn(&spec).await;
+        let _ = child.kill();
+        let _ = child.wait();
+        assert!(ok.is_ok(), "{:?}", ok.err());
+        // The pane is told to find the selected pi first.
+        let pinned = pinned_to_selected_pi(&spec);
+        let path = pinned.env.iter().find(|(k, _)| k == "PATH").unwrap();
+        assert!(path.1.starts_with(&dir.path().display().to_string()));
+        // A bare `pi` is left to the pane's own PATH.
+        assert!(pinned_to_selected_pi(&pi_spec("pi")).env.is_empty());
     }
 
     #[tokio::test]
