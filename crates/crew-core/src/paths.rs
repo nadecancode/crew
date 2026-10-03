@@ -218,6 +218,8 @@ pub fn open_beneath(root: impl AsFd, relative: &Path) -> Result<fs::File> {
 }
 
 /// Acquire a descendant directory from the same pinned root used for reads.
+/// On Linux this is an O_PATH anchor for lookup and metadata, not an fd for
+/// listing or fchmod. Use list_dir_beneath when a readable directory is needed.
 pub fn open_dir_beneath(root: impl AsFd, relative: &Path) -> Result<OwnedFd> {
     #[cfg(target_os = "linux")]
     let access = libc::O_PATH;
@@ -228,6 +230,17 @@ pub fn open_dir_beneath(root: impl AsFd, relative: &Path) -> Result<OwnedFd> {
         relative,
         access | libc::O_DIRECTORY | libc::O_CLOEXEC | libc::O_NOFOLLOW,
     )
+}
+
+/// Open a readable descendant directory without following any symlink.
+/// Use descriptor-relative lookup or enumeration; do not reconstruct its path.
+pub fn list_dir_beneath(root: impl AsFd, relative: &Path) -> Result<fs::File> {
+    let fd = resolve_beneath(
+        root.as_fd(),
+        relative,
+        libc::O_RDONLY | libc::O_DIRECTORY | libc::O_CLOEXEC | libc::O_NOFOLLOW,
+    )?;
+    Ok(fs::File::from(fd))
 }
 
 fn relative_name(relative: &Path) -> std::io::Result<std::ffi::CString> {
@@ -810,6 +823,81 @@ mod tests {
             contents, "inside",
             "the pinned root must survive pathname replacement"
         );
+    }
+
+    #[test]
+    fn list_dir_beneath_is_readable_pinned_and_refuses_links() {
+        use std::os::fd::IntoRawFd;
+        fn entries(file: &fs::File) -> Vec<String> {
+            let fd = file.try_clone().unwrap().into_raw_fd();
+            // SAFETY: fdopendir takes ownership of the duplicate descriptor.
+            let directory = unsafe { libc::fdopendir(fd) };
+            if directory.is_null() {
+                // SAFETY: fdopendir failed, so this descriptor is still ours.
+                unsafe { libc::close(fd) };
+                panic!(
+                    "cannot enumerate directory: {}",
+                    std::io::Error::last_os_error()
+                );
+            }
+            let mut names = Vec::new();
+            // SAFETY: directory stays live until closedir; each name is copied
+            // before the next readdir invalidates the returned entry.
+            unsafe {
+                loop {
+                    let entry = libc::readdir(directory);
+                    if entry.is_null() {
+                        break;
+                    }
+                    names.push(
+                        std::ffi::CStr::from_ptr((*entry).d_name.as_ptr())
+                            .to_str()
+                            .unwrap()
+                            .to_owned(),
+                    );
+                }
+                assert_eq!(libc::closedir(directory), 0);
+            }
+            names.sort();
+            names
+        }
+        let temp = tempfile::tempdir().unwrap();
+        fs::create_dir_all(temp.path().join("root/reports/nested")).unwrap();
+        fs::write(temp.path().join("root/reports/session"), b"inside").unwrap();
+        let root_path = temp.path().join("root");
+        let root = fs::File::open(&root_path).unwrap();
+        let expected = vec![
+            ".".to_owned(),
+            "..".to_owned(),
+            "nested".to_owned(),
+            "session".to_owned(),
+        ];
+        let positive = fs::File::open(root_path.join("reports")).unwrap();
+        assert_eq!(entries(&positive), expected);
+        let listing = list_dir_beneath(&root, Path::new("reports")).unwrap();
+        assert!(listing.metadata().unwrap().is_dir());
+        assert_eq!(entries(&listing), expected);
+        // Check the ENOSYS component-walk path returns a listable fd as well.
+        let fallback = finish_beneath_open(
+            Err(std::io::Error::from_raw_os_error(libc::ENOSYS)),
+            root.as_fd(),
+            Path::new("reports"),
+            libc::O_RDONLY | libc::O_DIRECTORY | libc::O_CLOEXEC | libc::O_NOFOLLOW,
+        )
+        .unwrap();
+        assert_eq!(entries(&fs::File::from(fallback)), expected);
+        std::os::unix::fs::symlink("reports", root_path.join("link")).unwrap();
+        for relative in ["link", "link/nested", "reports/session", ".", "..", ""] {
+            assert!(
+                list_dir_beneath(&root, Path::new(relative)).is_err(),
+                "{relative}"
+            );
+        }
+        fs::rename(&root_path, temp.path().join("moved-root")).unwrap();
+        fs::create_dir_all(root_path.join("reports")).unwrap();
+        fs::write(root_path.join("reports/replacement"), b"wrong root").unwrap();
+        let pinned = list_dir_beneath(&root, Path::new("reports")).unwrap();
+        assert_eq!(entries(&pinned), expected);
     }
 
     #[test]
