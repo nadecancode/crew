@@ -1139,3 +1139,111 @@ fn an_existing_done_marker_stops_the_launch_and_is_left_alone() {
     assert_eq!(out.status.code(), Some(125));
     assert_eq!(std::fs::read_to_string(&done).unwrap(), "someone else\n");
 }
+
+// "not started": a failure before bubblewrap was started is reported too.
+
+/// A spec that needs no host feature to be judged: no mounts, so nothing
+/// to pin, and a bwrap that may not exist.
+fn bare_spec(bwrap: &Path, done: Option<PathBuf>) -> Spec {
+    Spec {
+        bwrap: bwrap.to_path_buf(),
+        crew_bin: Path::new(CREW).canonicalize().unwrap(),
+        mounts: Vec::new(),
+        env: Vec::new(),
+        pass_env: Vec::new(),
+        cwd: "/".into(),
+        network: false,
+        new_session: true,
+        min_landlock_abi: crew::sandbox::landlock::MIN_ABI,
+        allow_unix: Vec::new(),
+        done,
+    }
+}
+
+/// Run `crew sandbox-run` with a spec as given (not checked here).
+fn run_raw(spec: &Spec) -> Output {
+    Command::new(CREW)
+        .arg("sandbox-run")
+        .arg(serde_json::to_string(spec).unwrap())
+        .args(["--", "true"])
+        .env_clear()
+        .stdin(std::process::Stdio::null())
+        .output()
+        .unwrap()
+}
+
+#[test]
+fn a_bubblewrap_that_cannot_be_started_is_marked_not_started() {
+    let dir = marker_dir();
+    let done = dir.path().canonicalize().unwrap().join("launch.done");
+    let out = run_raw(&bare_spec(
+        Path::new("/nonexistent/bwrap"),
+        Some(done.clone()),
+    ));
+    assert_eq!(out.status.code(), Some(125), "{}", text(&out));
+    assert_eq!(std::fs::read_to_string(&done).unwrap(), "not started\n");
+    let mode = std::fs::metadata(&done).unwrap().permissions();
+    assert_eq!(
+        std::os::unix::fs::PermissionsExt::mode(&mode) & 0o777,
+        0o600
+    );
+}
+
+#[test]
+fn a_refused_spec_is_marked_not_started_when_its_marker_path_is_sound() {
+    let dir = marker_dir();
+    let private = dir.path().canonicalize().unwrap();
+    let done = private.join("launch.done");
+    let mut spec = bare_spec(Path::new("/nonexistent/bwrap"), Some(done.clone()));
+    spec.cwd = "relative".into();
+    let out = run_raw(&spec);
+    assert_eq!(out.status.code(), Some(125), "{}", text(&out));
+    assert_eq!(std::fs::read_to_string(&done).unwrap(), "not started\n");
+}
+
+#[test]
+fn a_marker_path_that_fails_its_own_checks_is_never_written() {
+    let dir = marker_dir();
+    let private = dir.path().canonicalize().unwrap();
+    let shown = private.join("shown");
+    std::fs::create_dir(&shown).unwrap();
+    // Visible inside: a bind covers it.
+    let mut spec = bare_spec(Path::new("/nonexistent/bwrap"), Some(shown.join("done")));
+    spec.mounts.push(crew::sandbox::spec::Mount::Bind {
+        path: shown.clone(),
+        id: crew::sandbox::pin::identify(&shown).unwrap(),
+        writable: false,
+    });
+    let out = run_raw(&spec);
+    assert_eq!(out.status.code(), Some(125), "{}", text(&out));
+    assert!(
+        !shown.join("done").exists(),
+        "wrote a marker the sandbox could see"
+    );
+    // A path with `..`.
+    let dotted = private.join("shown/../dotted.done");
+    let out = run_raw(&bare_spec(Path::new("/nonexistent/bwrap"), Some(dotted)));
+    assert_eq!(out.status.code(), Some(125), "{}", text(&out));
+    assert!(!private.join("dotted.done").exists());
+}
+
+#[test]
+fn a_pin_failure_is_marked_not_started_and_the_program_never_runs() {
+    let Some((bwrap, abi)) = bwrap() else { return };
+    let l = layout();
+    let dir = marker_dir();
+    let done = dir.path().canonicalize().unwrap().join("launch.done");
+    let mut spec = worker_spec_for_lifetime(&bwrap, abi, &l);
+    spec.done = Some(done.clone());
+    // The agent's rw directory is replaced after the spec was built.
+    let rw = l.agent().join("rw");
+    std::fs::rename(&rw, l.root.join("moved-rw")).unwrap();
+    std::fs::create_dir(&rw).unwrap();
+    let sentinel = l.root.join("ran");
+    let out = sandboxed(&spec, &[], &format!("echo ran > '{}'", sentinel.display()))
+        .output()
+        .unwrap();
+    assert_eq!(out.status.code(), Some(125), "{}", text(&out));
+    assert!(!sentinel.exists());
+    assert_eq!(std::fs::read_to_string(&done).unwrap(), "not started\n");
+}

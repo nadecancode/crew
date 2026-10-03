@@ -56,7 +56,8 @@ pub struct Spec {
     /// sockets may be reached.
     pub allow_unix: Vec<PathBuf>,
     /// A daemon-private file `crew sandbox-run` creates once every process
-    /// of the sandbox is gone, holding `exited <code>` or `signal <n>`.
+    /// of the sandbox is gone, holding `exited <code>` or `signal <n>`, or
+    /// `not started` when it failed before starting bubblewrap.
     /// No sandbox may see it. Set by the daemon after `profile::build`.
     #[serde(default)]
     pub done: Option<PathBuf>,
@@ -147,20 +148,29 @@ impl Spec {
                 landlock::MIN_ABI
             ));
         }
-        if let Some(done) = &self.done {
-            plain("done", done)?;
-            if self.visible(done) {
-                return Err(format!(
-                    "the done marker {} would be visible inside the sandbox",
-                    done.display()
-                ));
-            }
-            if !done.parent().is_some_and(Path::is_dir) {
-                return Err(format!(
-                    "the done marker's directory {} does not exist",
-                    done.parent().unwrap_or(done).display()
-                ));
-            }
+        self.check_done()
+    }
+
+    /// The part of [`Spec::check`] about the done marker: plain and
+    /// absolute, in an existing directory, and not visible inside the
+    /// sandbox, so no agent can forge it. Only a marker that passes may
+    /// be written, even to say the sandbox was never started.
+    pub fn check_done(&self) -> Result<(), String> {
+        let Some(done) = &self.done else {
+            return Ok(());
+        };
+        plain("done", done)?;
+        if self.visible(done) {
+            return Err(format!(
+                "the done marker {} would be visible inside the sandbox",
+                done.display()
+            ));
+        }
+        if !done.parent().is_some_and(Path::is_dir) {
+            return Err(format!(
+                "the done marker's directory {} does not exist",
+                done.parent().unwrap_or(done).display()
+            ));
         }
         Ok(())
     }

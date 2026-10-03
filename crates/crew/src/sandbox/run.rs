@@ -18,7 +18,9 @@
 //!
 //! How it ends:
 //! - a setup failure exits with [`EXIT_SETUP_FAILED`] before bubblewrap is
-//!   started (there is no fallback to binding by path);
+//!   started (there is no fallback to binding by path), after creating the
+//!   done marker as `not started` if the spec names one that passes its
+//!   own checks (`Spec::check_done`);
 //! - once bubblewrap is started, every exit with a code comes after the
 //!   last child was reaped: bubblewrap's code, 128 plus its signal, or
 //!   [`EXIT_SETUP_FAILED`] when the done marker could not be created;
@@ -27,8 +29,9 @@
 //!
 //! The proof that a launch's sandbox is gone is its done marker: the file
 //! the spec names, created only after the last child was reaped, holding
-//! `exited <code>` or `signal <n>`. A marker that is absent or holds
-//! anything else means "not known gone". The exit status alone is not
+//! `exited <code>` or `signal <n>`, or `not started` when no child was
+//! ever started. A marker that is absent or holds anything else means
+//! "not known gone". The exit status alone is not
 //! that proof: a plain 125 does not say whether bubblewrap ran, and an exit
 //! status is tied to a pid, not to a launch.
 
@@ -79,26 +82,44 @@ pub fn prefix(spec: &Spec) -> Result<Vec<OsString>, String> {
 /// bubblewrap's exit code, or 128 plus the signal that killed it (see the
 /// module documentation for the other endings). Never returns.
 pub fn run(args: RunArgs) -> ! {
-    let prepared = tie_to_parent().and_then(|()| prepare(&args.spec, &args.command));
-    let prepared = match prepared {
-        Ok(prepared) => prepared,
-        Err(error) => {
-            eprintln!("crew sandbox-run: {error}");
-            std::process::exit(EXIT_SETUP_FAILED)
-        }
+    let spec = match parse(&args.spec) {
+        Ok(spec) => spec,
+        Err(error) => fail(&error),
     };
-    let done = prepared.done.clone();
-    let ended = supervise(prepared.command, prepared.fds).and_then(|ended| match &done {
-        Some(path) => write_marker(path, &ended.marker).map(|()| ended),
-        None => Ok(ended),
-    });
-    match ended {
-        Ok(ended) => std::process::exit(ended.code),
-        Err(error) => {
-            eprintln!("crew sandbox-run: {error}");
-            std::process::exit(EXIT_SETUP_FAILED)
+    // A failure before bubblewrap is started is reported too, as "not
+    // started", but only to a marker path that passes its own checks.
+    let done = spec.check_done().ok().and(spec.done.clone());
+    let not_started = |error: String| -> ! {
+        if let Some(path) = &done {
+            if let Err(e) = write_marker(path, NOT_STARTED) {
+                eprintln!("crew sandbox-run: {e}");
+            }
+        }
+        fail(&error)
+    };
+    let prepared = match tie_to_parent().and_then(|()| prepare_spec(spec, &args.command)) {
+        Ok(prepared) => prepared,
+        Err(error) => not_started(error),
+    };
+    let ended = match supervise(prepared.command, prepared.fds) {
+        Ok(ended) => ended,
+        // Only starting bubblewrap can fail here; nothing was started.
+        Err(error) => not_started(error),
+    };
+    if let Some(path) = &done {
+        if let Err(error) = write_marker(path, &ended.marker) {
+            fail(&error)
         }
     }
+    std::process::exit(ended.code)
+}
+
+/// The done marker's line when bubblewrap was never started.
+const NOT_STARTED: &str = "not started\n";
+
+fn fail(error: &str) -> ! {
+    eprintln!("crew sandbox-run: {error}");
+    std::process::exit(EXIT_SETUP_FAILED)
 }
 
 /// Die with the process that started this one, as bubblewrap did when it
@@ -204,13 +225,20 @@ pub struct Prepared {
 /// already exists (or a symlink in its place) stops the launch here,
 /// before anything runs.
 pub fn prepare(json: &str, command: &[OsString]) -> Result<Prepared, String> {
+    prepare_spec(parse(json)?, command)
+}
+
+/// The spec in `json`, not yet checked.
+fn parse(json: &str) -> Result<Spec, String> {
     if json.len() > MAX_SPEC_LEN {
         return Err(format!(
             "the sandbox description is longer than {MAX_SPEC_LEN} bytes"
         ));
     }
-    let spec: Spec =
-        serde_json::from_str(json).map_err(|e| format!("reading the sandbox description: {e}"))?;
+    serde_json::from_str(json).map_err(|e| format!("reading the sandbox description: {e}"))
+}
+
+fn prepare_spec(spec: Spec, command: &[OsString]) -> Result<Prepared, String> {
     spec.check()?;
     if command.is_empty() {
         return Err("no program to run".into());
