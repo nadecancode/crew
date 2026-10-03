@@ -20,6 +20,23 @@ pub const ROSTERS_DIR: &str = "rosters";
 pub const STYLES_DIR: &str = "styles";
 /// Longest `instructions` text a team or style may carry.
 pub const MAX_INSTRUCTIONS_BYTES: usize = 16 * 1024;
+/// Reserve signed millisecond deadline headroom for the base timestamp.
+const MAX_TIMER_SECS: u64 = i64::MAX as u64 / 2000;
+
+fn validate_timer(key: &str, seconds: u64) -> Result<()> {
+    if seconds == 0 || seconds > MAX_TIMER_SECS {
+        bail!("{key} must be between 1 and {MAX_TIMER_SECS}");
+    }
+    Ok(())
+}
+
+fn model_name_valid(model: &str) -> bool {
+    !model.trim().is_empty()
+        && model.len() <= 120
+        && !model
+            .chars()
+            .any(|ch| ch.is_whitespace() || ch.is_control())
+}
 
 /// A work style: a preset for how a team is staffed and how it works
 /// (research, experiment, …), without the workspace and the objective, which
@@ -651,9 +668,23 @@ impl TeamConfig {
         }
         validate_model_fallbacks(&self.defaults.model_fallbacks)?;
         validate_refusal_fallbacks(&self.defaults.refusal_fallbacks)?;
+        for (key, model) in [
+            ("defaults.model", &self.defaults.model),
+            ("orchestrator.model", &self.orchestrator.model),
+        ] {
+            if model
+                .as_deref()
+                .is_some_and(|value| !model_name_valid(value))
+            {
+                bail!("{key} is not a model name");
+            }
+        }
         let tasks = self.all_tasks();
         let mut task_ids = HashSet::new();
         for task in &tasks {
+            if let Some(timeout) = task.timeout_secs {
+                validate_timer(&format!("task '{}'.timeout_secs", task.id), timeout)?;
+            }
             if !is_valid_id(&task.id) {
                 bail!(
                     "invalid task id '{}' (expected [a-z][a-z0-9_-]{{0,31}})",
@@ -691,6 +722,12 @@ impl TeamConfig {
         if self.limits.max_message_bytes == 0 || self.limits.max_message_bytes > MAX_MESSAGE_BYTES {
             bail!("limits.max_message_bytes must be between 1 and {MAX_MESSAGE_BYTES}");
         }
+        validate_timer("limits.idle_nudge_secs", self.limits.idle_nudge_secs)?;
+        validate_timer("limits.unresponsive_secs", self.limits.unresponsive_secs)?;
+        validate_timer("limits.limit_retry_secs", self.limits.limit_retry_secs)?;
+        if self.limits.context_warn_percent > 100 {
+            bail!("limits.context_warn_percent must be between 0 and 100 (0 disables warnings)");
+        }
         Ok(())
     }
 }
@@ -722,14 +759,14 @@ fn validate_model_fallbacks(fallbacks: &BTreeMap<String, Vec<String>>) -> Result
         bail!("`defaults.model_fallbacks` names more than {MAX_FALLBACK_MODELS} models");
     }
     for (model, instead) in fallbacks {
-        if !model_name(model) {
+        if !model_name_valid(model) {
             bail!("`defaults.model_fallbacks`: '{model}' is not a model name");
         }
         if instead.is_empty() || instead.len() > MAX_FALLBACKS {
             bail!("`defaults.model_fallbacks.{model}` lists 1 to {MAX_FALLBACKS} models to use instead");
         }
         for other in instead {
-            if !model_name(other) {
+            if !model_name_valid(other) {
                 bail!("`defaults.model_fallbacks.{model}`: '{other}' is not a model name");
             }
             if other.eq_ignore_ascii_case(model) {
@@ -752,6 +789,21 @@ pub fn validate_agent_spec(agent: &AgentSpec) -> Result<()> {
     }
     if agent.role.len() > 200 {
         bail!("agent '{}': role is too long", agent.id);
+    }
+    if agent.name.as_deref().is_some_and(|name| {
+        name.trim().is_empty() || name.len() > 200 || name.chars().any(char::is_control)
+    }) {
+        bail!(
+            "agent '{}'.name must be nonempty printable text (max 200 bytes)",
+            agent.id
+        );
+    }
+    if agent
+        .model
+        .as_deref()
+        .is_some_and(|model| !model_name_valid(model))
+    {
+        bail!("agent '{}'.model is not a model name", agent.id);
     }
     Ok(())
 }
@@ -817,6 +869,63 @@ pub fn parse_key_value(s: &str) -> Result<(String, String)> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn config_rejects_zero_and_overflowing_timers_and_bad_percentages() {
+        for (key, value) in [
+            ("idle_nudge_secs", 0u64),
+            ("unresponsive_secs", 0),
+            ("limit_retry_secs", 0),
+            ("idle_nudge_secs", u64::MAX),
+            ("unresponsive_secs", u64::MAX),
+            ("limit_retry_secs", u64::MAX),
+            ("context_warn_percent", 101),
+        ] {
+            let text = format!("project: test\nlimits:\n  {key}: {value}\n");
+            let error =
+                TeamConfig::from_yaml(&text).expect_err("invalid timer/percentage must fail");
+            assert!(error.to_string().contains(key), "{error}");
+        }
+        for value in [0, u64::MAX] {
+            let text = format!("project: test\ntasks:\n  - id: task\n    description: work\n    timeout_secs: {value}\n");
+            let error = TeamConfig::from_yaml(&text).expect_err("invalid task timeout must fail");
+            assert!(error.to_string().contains("timeout_secs"), "{error}");
+        }
+        TeamConfig::from_yaml("project: test\nlimits:\n  idle_nudge_secs: 1\n  unresponsive_secs: 1\n  limit_retry_secs: 1\n  context_warn_percent: 0\n  max_subagents: 0\n  max_nudges: 0\n").unwrap();
+    }
+
+    #[test]
+    fn config_rejects_invalid_display_names_and_model_selectors() {
+        for key in ["name", "model"] {
+            for value in ["", "bad\u{1b}name", &"x".repeat(201)] {
+                let mut agent = AgentSpec {
+                    id: "worker".into(),
+                    ..AgentSpec::default()
+                };
+                if key == "name" {
+                    agent.name = Some(value.into());
+                } else {
+                    agent.model = Some(value.into());
+                }
+                let error = validate_agent_spec(&agent).expect_err("invalid name/model must fail");
+                assert!(error.to_string().contains(key), "{error}");
+            }
+        }
+        for model in ["sonnet[1m]", "provider/model", "gpt-6-astra"] {
+            validate_agent_spec(&AgentSpec {
+                id: "worker".into(),
+                name: Some("Database expert 日本語".into()),
+                model: Some(model.into()),
+                ..AgentSpec::default()
+            })
+            .unwrap();
+        }
+        for section in ["defaults", "orchestrator"] {
+            let error = TeamConfig::from_yaml(&format!("project: test\n{section}:\n  model: ''\n"))
+                .unwrap_err();
+            assert!(error.to_string().contains(&format!("{section}.model")));
+        }
+    }
 
     #[test]
     fn a_style_is_a_team_without_its_workspace_and_objective() {
