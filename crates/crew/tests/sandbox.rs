@@ -1139,3 +1139,435 @@ fn git_status_ignores_agent_fsmonitor() {
     assert!(!mark.exists(), "fsmonitor ran on the host");
     s.stop();
 }
+/// Wrappers for `claude`, `codex` and `pi` that run `crew fake-cli`,
+/// installed the way the real CLIs are: the program in `real/`, a symlink to
+/// it in `bin/` (the directory that goes on PATH), beside the crew binary
+/// (mounted in a sandbox; `/tmp` is not). The `codex` wrapper also notes,
+/// in its `$CODEX_HOME`, the mount namespace and arguments of a queue run.
+fn fake_clis() -> (tempfile::TempDir, PathBuf) {
+    use std::os::unix::fs::PermissionsExt;
+    let dir = tempfile::tempdir_in(Path::new(CREW).parent().unwrap()).unwrap();
+    let base = dir.path().canonicalize().unwrap();
+    std::fs::create_dir_all(base.join("real")).unwrap();
+    std::fs::create_dir_all(base.join("bin")).unwrap();
+    for name in ["claude", "codex", "pi"] {
+        let note = if name == "codex" {
+            "[ \"$1\" = queue ] && { readlink /proc/self/ns/mnt > \"$CODEX_HOME/queue-ns\"; \
+printf '%s\\n' \"$@\" > \"$CODEX_HOME/queue-args\"; }\n\
+[ \"$1\" = --remote ] && [ -n \"$CREW_IDENTITY\" ] && { a=$(dirname \"$CREW_IDENTITY\"); \
+ln -sf /nonexistent/sentinel \"$a/briefing.md\" 2>/dev/null && echo REACHED link >> \"$CODEX_HOME/tamper\"; \
+rm -f \"$a/briefing.md\" 2>/dev/null && echo REACHED unlink >> \"$CODEX_HOME/tamper\"; \
+echo tried >> \"$CODEX_HOME/tamper\"; }\n"
+        } else {
+            ""
+        };
+        let path = base.join("real").join(name);
+        std::fs::write(
+            &path,
+            format!("#!/bin/sh\n{note}exec '{CREW}' fake-cli {name} \"$@\"\n"),
+        )
+        .unwrap();
+        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o755)).unwrap();
+        std::os::unix::fs::symlink(&path, base.join("bin").join(name)).unwrap();
+    }
+    (dir, base.join("bin"))
+}
+
+/// PATH with `first` in front of this process's.
+fn path_with(first: &Path) -> String {
+    let mut dirs = vec![first.to_path_buf()];
+    dirs.extend(std::env::split_paths(&std::env::var_os("PATH").unwrap()));
+    std::env::join_paths(dirs).unwrap().into_string().unwrap()
+}
+
+/// A Codex agent (the fake one, with its app-server as sidecar).
+fn codex_agent(id: &str) -> AgentSpec {
+    AgentSpec {
+        id: id.to_string(),
+        role: "implementation".to_string(),
+        runtime: Some(crew_core::RuntimeKind::Codex),
+        ..AgentSpec::default()
+    }
+}
+
+/// The mount namespace of process `pid`.
+fn mount_ns(pid: u32) -> String {
+    std::fs::read_link(format!("/proc/{pid}/ns/mnt"))
+        .unwrap()
+        .to_string_lossy()
+        .into_owned()
+}
+
+/// Wait until agent `id` is up: started, and no longer starting.
+fn wait_up(s: &Session, id: &str) {
+    s.wait(&format!("{id} to be up"), |snap| {
+        let a = common::find_agent(snap, id);
+        a.pid.is_some() && a.status != crew_core::AgentStatus::Spawning
+    });
+}
+
+/// The `--listen` socket of the fake app-server agent `id` runs, from its
+/// own record, and the pids serving it.
+fn sidecar_of(s: &Session, id: &str) -> Vec<u32> {
+    let record = home_of(s, id).join("codex/fake-codex-server.json");
+    s.wait_for("the sidecar's record", || record.is_file());
+    let record: serde_json::Value =
+        serde_json::from_str(&std::fs::read_to_string(&record).unwrap()).unwrap();
+    let listen = record["args"][2].as_str().unwrap().to_string();
+    processes_with(&["fake-cli", "codex", "app-server", "--listen", &listen])
+}
+
+#[test]
+fn codex_sidecar_and_queue_run_sandboxed() {
+    if require_sandbox().is_none() {
+        return;
+    }
+    let s = Session::new();
+    workspace_repo(&s, &[]);
+    let (_fakes, bin) = fake_clis();
+    let team = sandboxed(&s, vec![codex_agent("x")], vec![]);
+    run_with_env(&s, &team, &[("PATH", &path_with(&bin))]);
+    wait_up(&s, "x");
+    let codex_home = home_of(&s, "x").join("codex");
+
+    // The sidecar runs, and not in our mount namespace.
+    s.wait_for("the fake app-server", || {
+        !processes_with(&["fake-cli", "codex", "app-server"]).is_empty()
+    });
+    let own = mount_ns(std::process::id());
+    for pid in processes_with(&["fake-cli", "codex", "app-server"]) {
+        assert_ne!(mount_ns(pid), own, "the sidecar shares our mounts");
+    }
+    assert!(codex_home.join("fake-codex-server.json").is_file());
+
+    // Its session id arrives the way Codex's notify hook brings it; then a
+    // message goes in through the queue command.
+    let identity = s.workspace.join(".crew/agents/x/identity.json");
+    let out = s
+        .command()
+        .args(["hook", "codex-notify", "--identity"])
+        .arg(&identity)
+        .arg(r#"{"type":"agent-turn-complete","thread-id":"fake-thread"}"#)
+        .output()
+        .unwrap();
+    assert!(out.status.success(), "{}", common::stderr(&out));
+    s.wait("the session id", |snap| {
+        common::find_agent(snap, "x").session_id.as_deref() == Some("fake-thread")
+    });
+    s.send("x", "through the queue");
+    s.wait_for("the queue command", || {
+        codex_home.join("queue-args").is_file()
+    });
+    let args = std::fs::read_to_string(codex_home.join("queue-args")).unwrap();
+    assert!(args.contains("through the queue"), "{args}");
+    let queue_ns = std::fs::read_to_string(codex_home.join("queue-ns")).unwrap();
+    assert_ne!(queue_ns.trim(), own, "the queue command shares our mounts");
+    s.wait("the message delivered", |snap| {
+        common::find_agent(snap, "x").delivery == "socket"
+    });
+    s.stop();
+}
+
+#[test]
+fn kill_tears_down_the_sidecar_tree() {
+    if require_sandbox().is_none() {
+        return;
+    }
+    let s = Session::new();
+    workspace_repo(&s, &[]);
+    let (_fakes, bin) = fake_clis();
+    let team = sandboxed(&s, vec![codex_agent("x")], vec![]);
+    run_with_env(&s, &team, &[("PATH", &path_with(&bin))]);
+    wait_up(&s, "x");
+    // This team's sidecar: the one listening where its own record says.
+    let record = home_of(&s, "x").join("codex/fake-codex-server.json");
+    s.wait_for("the sidecar's record", || record.is_file());
+    let record: serde_json::Value =
+        serde_json::from_str(&std::fs::read_to_string(&record).unwrap()).unwrap();
+    let listen = record["args"][2].as_str().unwrap().to_string();
+    let mine = processes_with(&["fake-cli", "codex", "app-server", "--listen", &listen]);
+    assert!(!mine.is_empty(), "this team's sidecar");
+    s.agent_cmd(&["kill", "x"]);
+    s.wait_for("the sidecar to be gone", || {
+        mine.iter()
+            .all(|pid| !Path::new(&format!("/proc/{pid}")).exists())
+    });
+    s.stop();
+}
+
+#[test]
+fn compaction_does_not_read_through_symlinks() {
+    if require_sandbox().is_none() {
+        return;
+    }
+    let s = Session::new();
+    workspace_repo(&s, &[]);
+    let (_fakes, bin) = fake_clis();
+    let team = sandboxed(&s, vec![codex_agent("x")], vec![]);
+    run_with_env(&s, &team, &[("PATH", &path_with(&bin))]);
+    wait_up(&s, "x");
+    let ws = s.workspace.canonicalize().unwrap();
+    let briefing = ws.join(".crew/agents/x/briefing.md");
+    let codex_home = home_of(&s, "x").join("codex");
+
+    // From inside, the agent tried to put a link in place of its briefing,
+    // and to remove it; both failed.
+    s.wait_for("the agent's attempt", || {
+        std::fs::read_to_string(codex_home.join("tamper")).is_ok_and(|t| t.contains("tried"))
+    });
+    let tamper = std::fs::read_to_string(codex_home.join("tamper")).unwrap();
+    assert_eq!(reached(&tamper), Vec::<&str>::new(), "{tamper}");
+    let real = std::fs::read_to_string(&briefing).unwrap();
+    assert!(std::fs::symlink_metadata(&briefing).unwrap().is_file());
+
+    // Its session id and a finished turn, as Codex's notify hook brings them.
+    let identity = ws.join(".crew/agents/x/identity.json");
+    let out = s
+        .command()
+        .args(["hook", "codex-notify", "--identity"])
+        .arg(&identity)
+        .arg(r#"{"type":"agent-turn-complete","thread-id":"fake-thread"}"#)
+        .output()
+        .unwrap();
+    assert!(out.status.success(), "{}", common::stderr(&out));
+    s.wait("the session id", |snap| {
+        common::find_agent(snap, "x").session_id.as_deref() == Some("fake-thread")
+    });
+    // A compaction is queued and asked for; then the agent's own session
+    // file says it happened (anything there is the agent's to write).
+    s.agent_cmd(&["compact", "x"]);
+    s.wait_for("/compact to be typed", || {
+        s.agent_cmd(&["output", "x"]).contains("/compact")
+    });
+    let rollout =
+        codex_home.join("sessions/2026/10/03/rollout-2026-10-03T12-00-00-fake-thread.jsonl");
+    let mut file = std::fs::OpenOptions::new()
+        .append(true)
+        .open(&rollout)
+        .unwrap();
+    writeln!(
+        file,
+        r#"{{"timestamp":"2026-10-03T12:00:05Z","type":"compacted","payload":{{"message":""}}}}"#
+    )
+    .unwrap();
+    drop(file);
+
+    // The daemon tells the agent where its work stands, through the queue.
+    // Its standing instructions are in the system prompt, which a compaction
+    // keeps: nothing is read back from the agent's directory for it.
+    s.wait_for("the compaction note", || {
+        std::fs::read_to_string(codex_home.join("queue-args"))
+            .is_ok_and(|a| a.contains("Your conversation was just compacted"))
+    });
+    let sent = std::fs::read_to_string(codex_home.join("queue-args")).unwrap();
+    assert!(
+        !sent.contains("Your standing instructions, again"),
+        "{sent}"
+    );
+    let first = real.lines().find(|l| !l.trim().is_empty()).unwrap();
+    assert!(!sent.contains(first), "{sent}");
+    assert_eq!(std::fs::read_to_string(&briefing).unwrap(), real);
+    assert!(std::fs::symlink_metadata(&briefing).unwrap().is_file());
+    s.stop();
+}
+
+#[test]
+fn daemon_writes_do_not_follow_planted_links() {
+    use std::os::unix::fs::symlink;
+    if require_sandbox().is_none() {
+        return;
+    }
+    let s = Session::new();
+    workspace_repo(&s, &[]);
+    let (_fakes, bin) = fake_clis();
+    // The operator's Codex settings, which seeding copies (filtered).
+    let operator = s.root().join("codex-home");
+    std::fs::create_dir_all(&operator).unwrap();
+    std::fs::write(operator.join("config.toml"), "model = \"gpt-5\"\n").unwrap();
+    let outside = tempfile::tempdir_in(s.root()).unwrap();
+    let sentinel = outside.path().join("sentinel");
+    std::fs::write(&sentinel, "outside\n").unwrap();
+
+    let team = sandboxed(&s, vec![codex_agent("x")], vec![]);
+    run_with_env(&s, &team, &[("PATH", &path_with(&bin))]);
+    wait_up(&s, "x");
+    let home = home_of(&s, "x");
+    let config = home.join("codex/config.toml");
+    assert!(std::fs::read_to_string(&config).unwrap().contains("gpt-5"));
+    let rollouts = home.join("codex/sessions");
+    s.wait_for("the session file", || rollouts.is_dir());
+    let old_sidecar = sidecar_of(&s, "x");
+    assert!(!old_sidecar.is_empty());
+
+    // What the agent can do to its own tree before its next start: a link
+    // where seeding writes.
+    std::fs::remove_file(&config).unwrap();
+    symlink(&sentinel, &config).unwrap();
+    s.agent_cmd(&["restart", "x"]);
+    wait_up(&s, "x");
+    // Its previous sidecar was gone first; the link was replaced, not
+    // followed; its session files are still there.
+    assert!(old_sidecar
+        .iter()
+        .all(|pid| !Path::new(&format!("/proc/{pid}")).exists()));
+    assert_eq!(std::fs::read_to_string(&sentinel).unwrap(), "outside\n");
+    let meta = std::fs::symlink_metadata(&config).unwrap();
+    assert!(meta.is_file(), "config.toml is still a link");
+    assert!(std::fs::read_to_string(&config).unwrap().contains("gpt-5"));
+    assert!(
+        rollouts.is_dir(),
+        "the session files did not survive the restart"
+    );
+
+    // And its whole home replaced by a link: the next start fails rather
+    // than write there.
+    s.agent_cmd(&["kill", "x"]);
+    s.wait("x to stop", |snap| {
+        common::find_agent(snap, "x").status == crew_core::AgentStatus::Stopped
+    });
+    std::fs::rename(&home, home.with_file_name("home.moved")).unwrap();
+    symlink(outside.path(), &home).unwrap();
+    s.agent_cmd(&["restart", "x"]);
+    let failed = s.wait("the restart to fail", |snap| {
+        common::find_agent(snap, "x").status == crew_core::AgentStatus::Failed
+    });
+    let error = common::find_agent(&failed, "x")
+        .error
+        .clone()
+        .unwrap_or_default();
+    assert!(error.contains("home"), "{error}");
+    let left: Vec<_> = std::fs::read_dir(outside.path())
+        .unwrap()
+        .flatten()
+        .map(|e| e.file_name())
+        .collect();
+    assert_eq!(
+        left,
+        [std::ffi::OsString::from("sentinel")],
+        "written through the link"
+    );
+    assert_eq!(std::fs::read_to_string(&sentinel).unwrap(), "outside\n");
+    s.stop();
+}
+
+#[test]
+fn host_toolchain_layout_starts() {
+    use std::os::unix::fs::{symlink, PermissionsExt};
+    if require_sandbox().is_none() {
+        return;
+    }
+    let s = Session::new();
+    workspace_repo(&s, &[]);
+    let ws = s.workspace.canonicalize().unwrap();
+    // crew built in the checkout's target/, as on the operator's host: one
+    // read-only file is bound from there.
+    let release = ws.join("target/release");
+    std::fs::create_dir_all(&release).unwrap();
+    let crew = release.join("crew");
+    std::fs::copy(CREW, &crew).unwrap();
+    // A home with the toolchain where rustup puts it, git's config, and a
+    // CLI installed the way Claude Code's native installer does (a versioned
+    // binary, a symlink to it on PATH). Beside the build, not under /tmp,
+    // which a sandbox never mounts.
+    let fixture = tempfile::tempdir_in(Path::new(CREW).parent().unwrap()).unwrap();
+    let home = fixture.path().canonicalize().unwrap();
+    // The toolchain the tests themselves were built with.
+    let (Some(rustup), Some(cargo_home)) = (
+        std::env::var_os("RUSTUP_HOME").map(PathBuf::from),
+        std::env::var_os("CARGO_HOME").map(PathBuf::from),
+    ) else {
+        host_lacks::<()>("RUSTUP_HOME and CARGO_HOME (a rustup toolchain)");
+        return;
+    };
+    if !cargo_home.join("bin/cargo").exists() || !rustup.join("settings.toml").exists() {
+        host_lacks::<()>("a rustup toolchain (CARGO_HOME/bin/cargo and RUSTUP_HOME)");
+        return;
+    }
+    // Where rustup puts them; here the tests' own, linked in.
+    symlink(&cargo_home, home.join(".cargo")).unwrap();
+    symlink(&rustup, home.join(".rustup")).unwrap();
+    std::fs::write(home.join(".gitconfig"), "[user]\n\tname = fixture\n").unwrap();
+    // The agent's CLI: it checks its tools, as a CLI's own tool calls
+    // would, then runs the fake Claude Code.
+    let versions = home.join(".local/share/claude/versions");
+    std::fs::create_dir_all(&versions).unwrap();
+    std::fs::write(
+        versions.join("2.0.0"),
+        format!(
+            r#"#!/bin/sh
+{{ cargo --version && echo 'WORKS cargo'
+  git --version && echo 'WORKS git'
+  git config user.name | grep -q fixture && echo 'WORKS gitconfig'
+}} > "$HOME/report" 2>&1
+exec '{}' fake-cli claude "$@"
+"#,
+            crew.display()
+        ),
+    )
+    .unwrap();
+    std::fs::set_permissions(
+        versions.join("2.0.0"),
+        std::fs::Permissions::from_mode(0o755),
+    )
+    .unwrap();
+    std::fs::create_dir_all(home.join(".local/bin")).unwrap();
+    symlink(versions.join("2.0.0"), home.join(".local/bin/claude")).unwrap();
+    let dir_of = |program: &str| {
+        std::env::split_paths(&std::env::var_os("PATH").unwrap())
+            .find(|d| d.join(program).is_file())
+            .unwrap()
+    };
+    let path = std::env::join_paths([
+        home.join(".local/bin"),
+        home.join(".cargo/bin"),
+        dir_of("git"),
+        dir_of("bwrap"),
+        PathBuf::from("/run/current-system/sw/bin"),
+        PathBuf::from("/usr/bin"),
+        PathBuf::from("/bin"),
+    ])
+    .unwrap();
+
+    let team = sandboxed(
+        &s,
+        vec![AgentSpec {
+            id: "a".into(),
+            role: "implementation".into(),
+            runtime: Some(crew_core::RuntimeKind::Claude),
+            ..AgentSpec::default()
+        }],
+        vec![],
+    );
+    std::fs::write(s.root().join("team.yaml"), team.to_yaml().unwrap()).unwrap();
+    // Started by the copy, so that the daemon's crew binary is the one in
+    // the checkout.
+    let base = s.command();
+    let mut cmd = Command::new(&crew);
+    cmd.current_dir(s.root());
+    for (name, value) in base.get_envs() {
+        match value {
+            Some(value) => cmd.env(name, value),
+            None => cmd.env_remove(name),
+        };
+    }
+    let out = cmd
+        .env("HOME", &home)
+        .env("CARGO_HOME", home.join(".cargo"))
+        .env("RUSTUP_HOME", home.join(".rustup"))
+        .env("PATH", &path)
+        .args(["run", "team.yaml", "--no-attach"])
+        .output()
+        .unwrap();
+    assert!(out.status.success(), "{}", common::stderr(&out));
+    let agent_home = home_of(&s, "a");
+    s.wait_for("the CLI to start", || {
+        agent_home.join("claude/fake-claude.json").is_file()
+    });
+    let report = std::fs::read_to_string(agent_home.join("report")).unwrap();
+    let works: Vec<&str> = report
+        .lines()
+        .filter_map(|l| l.strip_prefix("WORKS "))
+        .collect();
+    assert_eq!(works, ["cargo", "git", "gitconfig"], "{report}");
+    s.stop();
+}
