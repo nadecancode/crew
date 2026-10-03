@@ -199,7 +199,7 @@ fn border_label(
     };
     let mark_w = mark.map_or(0, |(glyph, _)| width(glyph) + 1);
     let taken = width(&label) + 2 + mark_w;
-    let x = i32::from(rect.x) + 1 + ((span - taken) / 2) as i32;
+    let x = i32::from(rect.x) + 1 + (span.saturating_sub(taken) / 2) as i32;
     let y = i32::from(rect.bottom()) - 1;
     put_str(buf, clip, x, y, " ", border);
     if let Some((glyph, glyph_style)) = mark {

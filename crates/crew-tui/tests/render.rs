@@ -89,6 +89,23 @@ fn dashboard_handles_control_bearing_model_labels() {
         .all(|cell| !cell.symbol().chars().any(char::is_control)));
 }
 
+#[test]
+fn dashboard_handles_unicode_presentation_labels() {
+    for label in ["☺\u{fe0f}".repeat(12), "👩\u{200d}👩\u{200d}👦".repeat(6)] {
+        let mut app = app();
+        app.agents
+            .iter_mut()
+            .find(|a| a.id == "claude-1")
+            .unwrap()
+            .model_name = Some(label);
+        for width in [42, 48, 60, 80, 120, 180, 220] {
+            for height in [24, 40] {
+                render_to_string(&app, width, height, NOW);
+            }
+        }
+    }
+}
+
 /// How many member boxes are on screen: each leads with its runtime's glyph.
 /// (The hub writes its CLI's glyph too, before its model's proper name.)
 fn member_marks(screen: &str) -> usize {

@@ -4,10 +4,13 @@ use std::borrow::Cow;
 
 use crew_core::util::printable;
 use ratatui::text::Line;
-use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
+use unicode_width::UnicodeWidthChar;
 
 pub fn width(s: &str) -> usize {
-    UnicodeWidthStr::width(printable(s).as_ref())
+    printable(s)
+        .chars()
+        .map(|ch| UnicodeWidthChar::width(ch).unwrap_or(0))
+        .sum()
 }
 
 /// Preserve styling while making every span safe for Paragraph rendering.
