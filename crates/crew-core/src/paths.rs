@@ -354,9 +354,10 @@ mod tests {
 
     #[test]
     fn socket_paths_are_short_and_stable() {
-        let a = socket_path(Path::new("/some/very/long/workspace/path/.crew"));
-        let b = socket_path(Path::new("/some/very/long/workspace/path/.crew"));
-        let c = socket_path(Path::new("/another/.crew"));
+        let runtime = Path::new("/tmp/crew-test");
+        let a = socket_path_in(Path::new("/some/very/long/workspace/path/.crew"), runtime);
+        let b = socket_path_in(Path::new("/some/very/long/workspace/path/.crew"), runtime);
+        let c = socket_path_in(Path::new("/another/.crew"), runtime);
         assert_eq!(a, b);
         assert_ne!(a, c);
         assert!(a.to_string_lossy().len() < 100, "{}", a.display());
