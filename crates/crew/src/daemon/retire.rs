@@ -857,9 +857,37 @@ mod tests {
         assert!(!wrapper.alive());
     }
 
+    /// Wait, up to 20 s, until `ready`; else fail with what `seen` says.
+    fn within_20s(what: &str, mut ready: impl FnMut() -> bool, seen: impl Fn() -> String) {
+        let deadline = std::time::Instant::now() + Duration::from_secs(20);
+        while !ready() {
+            if std::time::Instant::now() >= deadline {
+                panic!("{what} did not happen within 20 s: {}", seen());
+            }
+            std::thread::sleep(Duration::from_millis(10));
+        }
+    }
+
+    /// Whether the sandbox whose init is `init` is fully up: its `program`
+    /// runs, so bubblewrap has set its own PR_SET_PDEATHSIG (it does so
+    /// before it lets the init go on), and the init waits for its
+    /// children, which it does right after setting its PR_SET_PDEATHSIG
+    /// (bubblewrap.c, do_init). bubblewrap checks its parent neither time:
+    /// a sandbox whose parent is killed before then does not die with it.
+    fn fully_up(init: Proc, program: &str) -> bool {
+        let runs =
+            namespace_of(init.pid).is_some_and(|ns| in_namespace(ns).iter().any(|c| c == program));
+        runs && wchan(init.pid) == "do_wait"
+    }
+
+    fn wchan(pid: u32) -> String {
+        std::fs::read_to_string(format!("/proc/{pid}/wchan")).unwrap_or_default()
+    }
+
     /// A stand-in sidecar: `sh` starting a sandbox that runs `sleep
     /// <marker>`; the sandbox dies with `sh` or (`outlives`) does not. Put in
-    /// the daemon's sidecars for `id`, with its init.
+    /// the daemon's sidecars for `id`, with its init, once the sandbox is
+    /// fully up.
     async fn sidecar_for(daemon: &Daemon, id: &str, bwrap: &Path, outlives: bool) -> Proc {
         let marker = 400_000 + std::process::id() % 1_000 + u32::from(outlives);
         let inner = sandbox_running(bwrap, !outlives, &format!("exec sleep {marker}"));
@@ -873,11 +901,32 @@ mod tests {
             .spawn()
             .unwrap();
         // sh's child is bubblewrap, whose child is the init.
+        let wrapper = Proc::of(child.id().unwrap()).unwrap();
         let mut init = None;
-        eventually("the stand-in sidecar's sandbox", || {
-            init = Proc::of(child.id().unwrap()).and_then(sandbox_init);
-            init.is_some()
-        });
+        within_20s(
+            "the stand-in sidecar's sandbox",
+            || {
+                init = sandbox_init(wrapper);
+                init.is_some()
+            },
+            || format!("no init under sh {wrapper:?}"),
+        );
+        // Stopped before it is fully up, a sandbox told to die with its
+        // parent may outlive it.
+        let program = format!("sleep {marker}");
+        let up = init.unwrap();
+        within_20s(
+            "the stand-in sidecar's sandbox to be fully up",
+            || fully_up(up, &program),
+            || {
+                let ns = namespace_of(up.pid);
+                format!(
+                    "{:?} in its namespace, init {up:?} in {:?}",
+                    ns.map(in_namespace),
+                    wchan(up.pid)
+                )
+            },
+        );
         entry.update(|r| {
             r.pid = child.id();
             r.init = init;
