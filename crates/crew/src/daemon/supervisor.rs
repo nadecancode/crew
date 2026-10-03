@@ -15,7 +15,6 @@ use super::sandbox::Run;
 use super::{AgentLocal, AgentRuntimeState, Daemon, IdReservation};
 use crate::agents::prompt::{self, TeamView};
 use crate::agents::{runtime_for, AgentSettings, LaunchContext, Signal};
-use crate::git;
 use crate::persistence::NewEvent;
 use crate::process::{Hint, ProcEvent};
 use crate::tasks::active_task;
@@ -86,7 +85,7 @@ impl Daemon {
             .and_then(|p| p.branch.clone())
             .unwrap_or_else(|| team.workspace.base.clone());
         let (workdir, branch) = if worktrees && !orchestrator {
-            let wt = git::ensure_worktree(&self.workspace, &self.worktrees_dir(), &spec.id, &base)?;
+            let wt = self.member_worktree(team, &spec.id, &base)?;
             (wt.path, Some(wt.branch))
         } else {
             (self.workspace.clone(), None)

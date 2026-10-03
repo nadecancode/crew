@@ -6,7 +6,7 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use anyhow::{anyhow, bail, Context, Result};
-use crew_core::config::{SandboxConfig, SandboxMode};
+use crew_core::config::{SandboxConfig, SandboxMode, TeamConfig};
 use crew_core::{paths, Agent};
 
 use super::Daemon;
@@ -201,10 +201,7 @@ fn agent_profile(
 or set workspace.sandbox.mode: off"
         );
     };
-    let extra = Extra {
-        read_only: config.read_only.clone(),
-        read_write: config.read_write.clone(),
-    };
+    let extra = extra(config);
     let pass_env: Vec<String> = run.env.iter().map(|(name, _)| name.clone()).collect();
     profile::build(
         host,
@@ -239,7 +236,96 @@ fn find_program(program: &str, path: Option<&OsString>) -> Option<PathBuf> {
         .find(|candidate| candidate.is_file())
 }
 
+/// The host, probed now, and the daemon's layout. Blocking.
+fn host_and_layout(crew_bin: &Path, workspace: &Path, socket: &Path) -> Result<(Host, Layout)> {
+    let path = std::env::var_os("PATH");
+    let available = probe::probe(crew_bin, path.as_ref())
+        .map_err(|e| anyhow!("agents cannot be sandboxed on this host: {e}"))?;
+    let host = Host::detect(crew_bin, &available.bwrap, available.landlock_abi);
+    Ok((host, Layout::new(workspace, socket, &cache_home())?))
+}
+
+/// What the team's configuration adds to every sandbox.
+fn extra(config: &SandboxConfig) -> Extra {
+    Extra {
+        read_only: config.read_only.clone(),
+        read_write: config.read_write.clone(),
+    }
+}
+
+/// A launcher made for one worktree.
+type HelperFor<'a> = &'a dyn Fn(&Path) -> Result<Arc<dyn Launcher>>;
+
+/// Make (or reuse) a member's worktree. Its files are put in place through
+/// `helper`'s launcher when there is one: smudge filters and the branch's
+/// own configuration can run then (design-b3.md §3.2, helper profiles).
+/// Making it runs no git inside it.
+fn provision_worktree(
+    repo: &Path,
+    worktrees_dir: &Path,
+    id: &str,
+    base: &str,
+    helper: Option<HelperFor>,
+) -> Result<git::Worktree> {
+    let Some(helper) = helper else {
+        return git::ensure_worktree(repo, worktrees_dir, id, base);
+    };
+    let (worktree, needs_population) = git::add_worktree(repo, worktrees_dir, id, base)?;
+    if needs_population {
+        let launcher = helper(&worktree.path)?;
+        git::launch::with_launcher(launcher, || git::populate_worktree(&worktree))?;
+    }
+    Ok(worktree)
+}
+
 impl Daemon {
+    /// A member's worktree, filled in a helper sandbox when the team
+    /// requires sandboxes. Blocking.
+    pub(crate) fn member_worktree(
+        &self,
+        team: &TeamConfig,
+        id: &str,
+        base: &str,
+    ) -> Result<git::Worktree> {
+        let config = &team.workspace.sandbox;
+        let helper = |worktree: &Path| -> Result<Arc<dyn Launcher>> {
+            Ok(Arc::new(self.helper_launcher(config, worktree)?))
+        };
+        let required = config.mode == SandboxMode::Required;
+        provision_worktree(
+            &self.workspace,
+            &self.worktrees_dir(),
+            id,
+            base,
+            required.then_some(&helper as HelperFor),
+        )
+    }
+
+    /// A sandbox for git working on `worktree` for nobody in particular:
+    /// no identity, socket, agent directory or network. Blocking: probes
+    /// the host.
+    fn helper_launcher(&self, config: &SandboxConfig, worktree: &Path) -> Result<SandboxLauncher> {
+        let (host, layout) = host_and_layout(&self.crew_bin, &self.workspace, &self.socket)?;
+        let admin = git::worktree_admin_dir(&layout.git_dir, worktree)
+            .ok_or_else(|| anyhow!("{} is not a worktree crew made", worktree.display()))?;
+        let (launcher, warnings) =
+            git::launch::helper_launcher(&host, layout.session(), &extra(config), worktree, &admin)
+                .map_err(|e| {
+                    anyhow!("{} cannot be filled in a sandbox: {e}", worktree.display())
+                })?;
+        for warning in warnings {
+            self.emit(
+                NewEvent::new(
+                    "daemon",
+                    "sandbox.warning",
+                    format!("{}: {warning}", worktree.display()),
+                )
+                .warn(),
+            );
+        }
+        Ok(launcher)
+    }
+
     /// The team's sandbox settings, and whether it works in worktrees, if
     /// it requires sandboxes.
     fn sandboxing(&self) -> Option<(SandboxConfig, bool)> {
@@ -305,11 +391,8 @@ workspace.sandbox.mode: off"
         let workdir = PathBuf::from(&agent.workdir);
         let orchestrator = agent.orchestrator;
         let built = tokio::task::spawn_blocking(move || -> Result<Built> {
+            let (host, layout) = host_and_layout(&crew_bin, &workspace, &socket)?;
             let path = std::env::var_os("PATH");
-            let available = probe::probe(&crew_bin, path.as_ref())
-                .map_err(|e| anyhow!("agents cannot be sandboxed on this host: {e}"))?;
-            let host = Host::detect(&crew_bin, &available.bwrap, available.landlock_abi);
-            let layout = Layout::new(&workspace, &socket, &cache_home())?;
             // The crew binary is bound anyway; any other program is a CLI,
             // and its install directory is bound.
             let crew_bin = crew_bin.canonicalize().ok();
@@ -561,5 +644,81 @@ mod tests {
         assert!(binds.contains(&(f.worktree.clone(), true)));
         assert!(binds.contains(&(f.ws.join(".git/worktrees/a"), true)));
         assert!(binds.contains(&(f.ws.join(".git/worktrees/a/config.worktree"), false)));
+    }
+
+    /// Passes every git command through unchanged, and keeps its arguments.
+    #[derive(Default)]
+    struct Recorder(std::sync::Mutex<Vec<Vec<String>>>);
+
+    impl Launcher for Recorder {
+        fn launch(&self, cmd: &std::process::Command) -> std::io::Result<std::process::Command> {
+            let argv = std::iter::once(cmd.get_program())
+                .chain(cmd.get_args())
+                .map(|a| a.to_string_lossy().into_owned())
+                .collect();
+            self.0.lock().unwrap().push(argv);
+            let mut same = std::process::Command::new(cmd.get_program());
+            same.args(cmd.get_args());
+            for (name, value) in cmd.get_envs() {
+                match value {
+                    Some(value) => same.env(name, value),
+                    None => same.env_remove(name),
+                };
+            }
+            Ok(same)
+        }
+    }
+
+    #[test]
+    fn a_new_worktree_is_filled_through_the_helper_and_made_without_it() {
+        let dir = tempfile::tempdir().unwrap();
+        let ws = dir.path().canonicalize().unwrap().join("ws");
+        std::fs::create_dir(&ws).unwrap();
+        let git = |args: &[&str]| {
+            let ok = std::process::Command::new("git")
+                .arg("-C")
+                .arg(&ws)
+                .args(["-c", "user.name=t", "-c", "user.email=t@t"])
+                .args(args)
+                .status()
+                .unwrap()
+                .success();
+            assert!(ok, "git {args:?}");
+        };
+        git(&["init", "-q", "-b", "main"]);
+        std::fs::write(ws.join("tracked.txt"), "x\n").unwrap();
+        git(&["add", "tracked.txt"]);
+        git(&["commit", "-q", "-m", "first"]);
+        let worktrees = ws.join(".crew/worktrees");
+        let recorder = Arc::new(Recorder::default());
+        let calls = std::cell::Cell::new(0);
+        let helper = |worktree: &Path| -> Result<Arc<dyn Launcher>> {
+            calls.set(calls.get() + 1);
+            assert_eq!(worktree, worktrees.join("a"));
+            Ok(recorder.clone())
+        };
+
+        let made = provision_worktree(&ws, &worktrees, "a", "main", Some(&helper)).unwrap();
+        assert_eq!(made.path, worktrees.join("a"));
+        assert_eq!(
+            std::fs::read_to_string(made.path.join("tracked.txt")).unwrap(),
+            "x\n"
+        );
+        let seen = recorder.0.lock().unwrap().clone();
+        assert!(
+            seen.iter().any(|argv| argv.contains(&"reset".to_string())),
+            "{seen:?}"
+        );
+        assert!(
+            !seen
+                .iter()
+                .any(|argv| argv.contains(&"worktree".to_string())),
+            "{seen:?}"
+        );
+        assert_eq!(calls.get(), 1);
+
+        // Reused once filled: nothing runs in it again.
+        provision_worktree(&ws, &worktrees, "a", "main", Some(&helper)).unwrap();
+        assert_eq!(calls.get(), 1);
     }
 }
