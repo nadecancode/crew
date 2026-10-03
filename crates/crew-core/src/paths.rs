@@ -2,8 +2,10 @@
 //! socket, the registry of running daemons and per-agent identity files.
 
 use std::fs;
-use std::os::unix::fs::{DirBuilderExt, OpenOptionsExt, PermissionsExt};
-use std::path::{Path, PathBuf};
+use std::os::fd::{AsRawFd, FromRawFd};
+use std::os::unix::ffi::OsStrExt;
+use std::os::unix::fs::{MetadataExt, OpenOptionsExt, PermissionsExt};
+use std::path::{Component, Path, PathBuf};
 
 use anyhow::{anyhow, bail, Context, Result};
 use serde::{Deserialize, Serialize};
@@ -64,14 +66,60 @@ pub fn uid() -> u32 {
 
 /// Create a directory (and parents) readable by the current user only.
 pub fn ensure_private_dir(path: &Path) -> Result<()> {
-    if !path.is_dir() {
-        fs::DirBuilder::new()
-            .recursive(true)
-            .mode(0o700)
-            .create(path)
-            .with_context(|| format!("creating {}", path.display()))?;
+    // Walk through directory descriptors so checks and chmod never follow
+    // symlinks, including an attacker-controlled /tmp fallback ancestor.
+    let mut directory = fs::File::open(if path.is_absolute() { "/" } else { "." })?;
+    for component in path.components() {
+        if matches!(component, Component::RootDir | Component::CurDir) {
+            continue;
+        }
+        let metadata = directory.metadata()?;
+        if metadata.uid() != uid() && metadata.uid() != 0 {
+            bail!("{} has a directory owned by another user", path.display());
+        }
+        if metadata.permissions().mode() & 0o022 != 0 && metadata.permissions().mode() & 0o1000 == 0
+        {
+            bail!("{} has a directory writable by other users", path.display());
+        }
+        let name = std::ffi::CString::new(component.as_os_str().as_bytes())?;
+        let open = || {
+            // SAFETY: directory is an open descriptor and name is NUL-terminated.
+            unsafe {
+                libc::openat(
+                    directory.as_raw_fd(),
+                    name.as_ptr(),
+                    libc::O_RDONLY | libc::O_DIRECTORY | libc::O_NOFOLLOW | libc::O_CLOEXEC,
+                )
+            }
+        };
+        let mut fd = open();
+        if fd < 0 && std::io::Error::last_os_error().kind() == std::io::ErrorKind::NotFound {
+            // SAFETY: the parent descriptor and name are valid; mode is private.
+            let created = unsafe { libc::mkdirat(directory.as_raw_fd(), name.as_ptr(), 0o700) };
+            if created < 0 {
+                let error = std::io::Error::last_os_error();
+                if error.kind() != std::io::ErrorKind::AlreadyExists {
+                    return Err(error).with_context(|| format!("creating {}", path.display()));
+                }
+            }
+            fd = open();
+        }
+        if fd < 0 {
+            return Err(std::io::Error::last_os_error()).with_context(|| {
+                format!(
+                    "opening private directory {} without symlinks",
+                    path.display()
+                )
+            });
+        }
+        // SAFETY: openat returned a new owned descriptor.
+        directory = unsafe { fs::File::from_raw_fd(fd) };
     }
-    fs::set_permissions(path, fs::Permissions::from_mode(0o700))
+    if directory.metadata()?.uid() != uid() {
+        bail!("{} is owned by another user", path.display());
+    }
+    directory
+        .set_permissions(fs::Permissions::from_mode(0o700))
         .with_context(|| format!("restricting permissions of {}", path.display()))?;
     Ok(())
 }
@@ -297,6 +345,32 @@ mod tests {
         );
         write_private_file(&file, b"{\"a\":1}").unwrap();
         assert_eq!(fs::read_to_string(&file).unwrap(), "{\"a\":1}");
+    }
+
+    #[test]
+    fn private_directories_reject_symlinks_without_chmodding_the_target() {
+        let temp = tempfile::tempdir().unwrap();
+        let target = temp.path().join("target");
+        fs::create_dir(&target).unwrap();
+        fs::set_permissions(&target, fs::Permissions::from_mode(0o755)).unwrap();
+        let link = temp.path().join("crew-uid");
+        std::os::unix::fs::symlink(&target, &link).unwrap();
+        assert!(ensure_private_dir(&link).is_err());
+        assert_eq!(
+            fs::metadata(&target).unwrap().permissions().mode() & 0o777,
+            0o755
+        );
+    }
+
+    #[test]
+    fn private_directories_reject_symlink_ancestors() {
+        let temp = tempfile::tempdir().unwrap();
+        let target = temp.path().join("target");
+        fs::create_dir(&target).unwrap();
+        let link = temp.path().join("crew-uid");
+        std::os::unix::fs::symlink(&target, &link).unwrap();
+        assert!(ensure_private_dir(&link.join("crew/sessions")).is_err());
+        assert!(!target.join("crew").exists());
     }
 
     #[test]
