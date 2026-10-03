@@ -731,6 +731,24 @@ mod tests {
             .collect()
     }
 
+    /// The processes in PID namespace `ns`, by identity. Read only while the
+    /// namespace is known to be alive (its init runs): once it is gone, its
+    /// number may name a later namespace, another test's sandbox.
+    fn procs_in(ns: u64) -> Vec<Proc> {
+        std::fs::read_dir("/proc")
+            .unwrap()
+            .flatten()
+            .filter_map(|e| e.file_name().to_str()?.parse::<u32>().ok())
+            .filter(|pid| namespace_of(*pid) == Some(ns))
+            .filter_map(Proc::of)
+            .collect()
+    }
+
+    /// Those of `seen` still running.
+    fn still_running(seen: &[Proc]) -> Vec<Proc> {
+        seen.iter().copied().filter(Proc::running).collect()
+    }
+
     /// Wait (up to 2 s) for `found` to hold.
     fn eventually(what: &str, mut found: impl FnMut() -> bool) {
         for _ in 0..200 {
@@ -773,6 +791,7 @@ mod tests {
             in_namespace(ns).iter().any(|c| c == "sleep 301")
         });
         assert!(in_namespace(ns).iter().any(|c| c == "sleep 300"));
+        let seen = procs_in(ns);
         let entry = ledger.start("a", "session").unwrap();
         entry.update(|r| r.init = Some(init));
         let short = Duration::from_millis(100);
@@ -782,7 +801,7 @@ mod tests {
         sandbox.kill().unwrap();
         sandbox.wait().unwrap();
         ledger.retire("a", Duration::from_secs(5)).await.unwrap();
-        assert_eq!(in_namespace(ns), Vec::<String>::new());
+        assert_eq!(still_running(&seen), Vec::<Proc>::new());
     }
 
     #[tokio::test]
@@ -811,16 +830,21 @@ mod tests {
             }
             let status = sandbox.wait().unwrap();
             let refused = ledger.retire("a", short).await;
-            let left = in_namespace(ns);
+            // Its init runs (it is killed only below), so the number is its
+            // namespace's.
+            let left = procs_in(ns);
             // SAFETY: plain kill of the test's sandbox init.
             unsafe { libc::kill(init.pid as libc::pid_t, libc::SIGKILL) };
-            assert!(!left.is_empty(), "{script}: nothing outlived bubblewrap");
+            assert!(
+                left.iter().any(|p| *p != init),
+                "{script}: nothing outlived bubblewrap"
+            );
             assert!(
                 refused.is_err(),
                 "{script}: gone while its init ran ({status})"
             );
             ledger.retire("a", Duration::from_secs(5)).await.unwrap();
-            assert_eq!(in_namespace(ns), Vec::<String>::new());
+            assert_eq!(still_running(&left), Vec::<Proc>::new());
         }
     }
 
@@ -877,7 +901,8 @@ mod tests {
     fn fully_up(init: Proc, program: &str) -> bool {
         let runs =
             namespace_of(init.pid).is_some_and(|ns| in_namespace(ns).iter().any(|c| c == program));
-        runs && wchan(init.pid) == "do_wait"
+        // Still the init whose namespace was read.
+        runs && wchan(init.pid) == "do_wait" && init.alive()
     }
 
     fn wchan(pid: u32) -> String {
