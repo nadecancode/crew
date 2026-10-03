@@ -146,21 +146,66 @@ pub fn ensure_private_dir(path: &Path) -> Result<()> {
 /// Write a file readable by the current user only, replacing it atomically.
 pub fn write_private_file(path: &Path, contents: &[u8]) -> Result<()> {
     use std::io::Write;
-    let tmp = path.with_extension("tmp");
-    {
-        let mut f = fs::OpenOptions::new()
-            .write(true)
-            .create(true)
-            .truncate(true)
-            .mode(0o600)
-            .open(&tmp)
-            .with_context(|| format!("writing {}", tmp.display()))?;
-        f.write_all(contents)?;
-        f.sync_all().ok();
+    let parent = path
+        .parent()
+        .filter(|p| !p.as_os_str().is_empty())
+        .unwrap_or(Path::new("."));
+    #[cfg(target_os = "linux")]
+    let access = libc::O_PATH;
+    #[cfg(not(target_os = "linux"))]
+    let access = libc::O_RDONLY;
+    let directory = fs::OpenOptions::new()
+        .read(true)
+        .custom_flags(access | libc::O_DIRECTORY)
+        .open(parent)
+        .with_context(|| format!("opening {}", parent.display()))?;
+    let name = std::ffi::CString::new(
+        path.file_name()
+            .ok_or_else(|| anyhow!("{} has no file name", path.display()))?
+            .as_bytes(),
+    )?;
+    let temporary = std::ffi::CString::new(format!(".crew-{}.tmp", uuid::Uuid::new_v4().simple()))?;
+    // SAFETY: names are NUL-terminated and directory is a live descriptor.
+    let fd = unsafe {
+        libc::openat(
+            directory.as_raw_fd(),
+            temporary.as_ptr(),
+            libc::O_WRONLY | libc::O_CREAT | libc::O_EXCL | libc::O_NOFOLLOW | libc::O_CLOEXEC,
+            0o600,
+        )
+    };
+    if fd < 0 {
+        return Err(std::io::Error::last_os_error())
+            .with_context(|| format!("creating private temporary file for {}", path.display()));
     }
-    fs::set_permissions(&tmp, fs::Permissions::from_mode(0o600))?;
-    fs::rename(&tmp, path).with_context(|| format!("replacing {}", path.display()))?;
-    Ok(())
+    // SAFETY: openat returned an owned descriptor for a newly created regular file.
+    let mut file = unsafe { fs::File::from_raw_fd(fd) };
+    let result = (|| -> Result<()> {
+        file.set_permissions(fs::Permissions::from_mode(0o600))?;
+        file.write_all(contents)?;
+        file.sync_all()?;
+        // SAFETY: both names resolve relative to our pinned parent descriptor.
+        if unsafe {
+            libc::renameat(
+                directory.as_raw_fd(),
+                temporary.as_ptr(),
+                directory.as_raw_fd(),
+                name.as_ptr(),
+            )
+        } != 0
+        {
+            return Err(std::io::Error::last_os_error())
+                .with_context(|| format!("replacing {}", path.display()));
+        }
+        Ok(())
+    })();
+    if result.is_err() {
+        // SAFETY: remove only this call's random temporary entry in its pinned parent.
+        unsafe {
+            libc::unlinkat(directory.as_raw_fd(), temporary.as_ptr(), 0);
+        }
+    }
+    result
 }
 
 /// Directory for sockets: `$XDG_RUNTIME_DIR/crew`, else `/tmp/crew-<uid>`.
@@ -352,6 +397,54 @@ pub fn discover(dir: Option<&Path>, project: Option<&str>) -> Result<DaemonInfo>
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn write_private_file_does_not_follow_a_planted_tmp_symlink() {
+        let temp = tempfile::tempdir().unwrap();
+        let sentinel = temp.path().join("outside");
+        fs::write(&sentinel, b"sentinel").unwrap();
+        assert_eq!(fs::read(&sentinel).unwrap(), b"sentinel");
+        let file = temp.path().join("operator.token");
+        std::os::unix::fs::symlink(&sentinel, file.with_extension("tmp")).unwrap();
+        write_private_file(&file, b"synthetic token").unwrap();
+        assert_eq!(
+            fs::read(&sentinel).unwrap(),
+            b"sentinel",
+            "temporary names must never truncate a linked target"
+        );
+        assert_eq!(fs::read(&file).unwrap(), b"synthetic token");
+        assert_eq!(
+            fs::metadata(&file).unwrap().permissions().mode() & 0o777,
+            0o600
+        );
+        std::os::unix::fs::symlink(&sentinel, temp.path().join("destination")).unwrap();
+        write_private_file(&temp.path().join("destination"), b"replacement").unwrap();
+        assert_eq!(fs::read(&sentinel).unwrap(), b"sentinel");
+        assert_eq!(
+            fs::read(temp.path().join("destination")).unwrap(),
+            b"replacement"
+        );
+        assert_eq!(fs::read_dir(temp.path()).unwrap().count(), 4);
+        let directory = temp.path().join("directory");
+        fs::create_dir(&directory).unwrap();
+        assert!(write_private_file(&directory, b"must not replace a directory").is_err());
+        assert_eq!(
+            fs::read_dir(temp.path()).unwrap().count(),
+            5,
+            "failed rename must remove its temporary file"
+        );
+        #[cfg(target_os = "linux")]
+        {
+            fs::set_permissions(&directory, fs::Permissions::from_mode(0o311)).unwrap();
+            let result = write_private_file(&directory.join("private"), b"search-only parent");
+            fs::set_permissions(&directory, fs::Permissions::from_mode(0o700)).unwrap();
+            result.unwrap();
+            assert_eq!(
+                fs::read(directory.join("private")).unwrap(),
+                b"search-only parent"
+            );
+        }
+    }
 
     #[test]
     fn long_runtime_dirs_use_a_bindable_socket_fallback() {
