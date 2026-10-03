@@ -708,6 +708,9 @@ pub struct HelloInfo {
 
 #[cfg(test)]
 mod compatibility_tests {
+    use super::*;
+    use crate::types::{EventLevel, TaskStatus, TranscriptKind};
+    use serde_json::json;
 
     #[test]
     fn legacy_snapshots_default_sandbox_to_unknown_and_preserve_reported_modes() {
@@ -729,9 +732,6 @@ mod compatibility_tests {
             );
         }
     }
-    use super::*;
-    use crate::types::{EventLevel, TaskStatus, TranscriptKind};
-    use serde_json::json;
 
     fn enum_values<T: Serialize>(values: &[T]) -> Value {
         serde_json::to_value(values).unwrap()
