@@ -23,6 +23,18 @@ link: build
 test:
     ./scripts/build-env cargo test --workspace
 
+# Run the sandbox tests with real bubblewrap; a host that cannot run them fails
+# instead of skipping. On Nix, bwrap and socat come from nixpkgs if missing.
+test-sandbox:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    export CREW_TEST_SANDBOX=require
+    tests=(./scripts/build-env cargo test -p crew --test sandbox --test sandbox_launch)
+    if command -v nix >/dev/null && ! { command -v bwrap && command -v socat; } >/dev/null; then
+        exec nix shell nixpkgs#bubblewrap nixpkgs#socat --command "${tests[@]}"
+    fi
+    exec "${tests[@]}"
+
 # Run the optional end-to-end test against the real Claude Code CLI.
 test-real:
     ./scripts/build-env cargo test -p crew --test real_cli -- --ignored --nocapture
