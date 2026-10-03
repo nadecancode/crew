@@ -1287,6 +1287,11 @@ real bubblewrap. Without bwrap, user namespaces or Landlock those tests are
 skipped with the reason printed; `CREW_TEST_SANDBOX=require` makes them fail
 instead (use it from `nix-shell`, or wherever bwrap is installed).
 
+The same holds for the other tests that launch sandboxed agents
+(`crates/crew/tests/pty_sandbox.rs`, `git_helper_sandbox.rs`). Keep
+`CARGO_TARGET_DIR` out of `/tmp`: the sandbox masks `/tmp`, so a test binary or
+crew build under it cannot be reached from inside and the launch fails.
+
 ## Limitations
 
 - The Claude Code mod API and Codex's app-server are both early-access
