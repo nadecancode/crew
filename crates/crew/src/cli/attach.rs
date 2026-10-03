@@ -237,6 +237,17 @@ impl TerminalFilter {
     }
 
     fn step(&mut self, b: u8, out: &mut Vec<u8>) {
+        let was_ground = matches!(self.state, State::Ground);
+        self.step_inner(b, out);
+        // Whatever ended a sequence (a terminator, an abort, the length cap)
+        // dropped its bytes, so no character is open any more: what follows is
+        // judged as the terminal will see it, a fresh start.
+        if !was_ground && matches!(self.state, State::Ground) {
+            self.utf8_pending = 0;
+        }
+    }
+
+    fn step_inner(&mut self, b: u8, out: &mut Vec<u8>) {
         // `is_c1` is asked before the byte is tracked: a UTF-8 continuation
         // byte is text in every state.
         let c1 = self.is_c1(b);
@@ -251,9 +262,14 @@ impl TerminalFilter {
                     self.state = State::EscSeq(seq);
                 }
                 0x30..=0x7e => {
-                    out.push(0x1b);
-                    out.extend_from_slice(&seq);
-                    out.push(b);
+                    // Only the character-set designations drawing needs (ASCII
+                    // and line drawing); `ESC %`, `ESC -`, `ESC SP G` and the rest
+                    // change the encoding or the emulation under the filter.
+                    if matches!(&seq[..], b"(" | b")") && matches!(b, b'B' | b'0') {
+                        out.push(0x1b);
+                        out.extend_from_slice(&seq);
+                        out.push(b);
+                    }
                 }
                 _ => self.reprocess(b, out),
             },
@@ -385,13 +401,16 @@ impl TerminalFilter {
             }
             0x1b => self.state = State::Esc,
             0x20..=0x2f => self.state = State::EscSeq(vec![b]),
-            // DECID answers like a device-attributes query; ST on its own is
-            // nothing; RIS would wipe the operator's terminal.
-            b'Z' | b'\\' | b'c' => {}
-            0x30..=0x7e => {
+            // The two-byte escapes drawing uses: save/restore cursor, index,
+            // reverse index, next line, tab set, keypad modes. Every other
+            // one is dropped: DECID answers like a device-attributes query,
+            // RIS wipes the terminal, and the locking shifts and S8C1T change
+            // how bytes are read.
+            b'7' | b'8' | b'M' | b'D' | b'E' | b'H' | b'=' | b'>' => {
                 out.push(0x1b);
                 out.push(b);
             }
+            0x30..=0x7e => {}
             _ => self.reprocess(b, out),
         }
     }
@@ -426,6 +445,24 @@ fn finish_title(raw: &[u8], out: &mut Vec<u8>) {
     out.push(0x07);
 }
 
+/// The private modes a TUI switches: cursor keys, reverse video, autowrap,
+/// cursor blink and visibility, alternate screens, mouse reporting and
+/// encodings, bracketed paste, synchronized output. Not DECANM (`?2`, VT52
+/// mode) or anything else that changes how the terminal reads its input.
+const PRIVATE_MODES: [u32; 21] = [
+    1, 4, 5, 6, 7, 8, 12, 25, 47, 66, 1000, 1002, 1003, 1005, 1006, 1015, 1047, 1048, 1049, 2004,
+    2026,
+];
+
+/// Whether every `;`-separated parameter is one of `allowed`.
+fn modes_allowed(params: &[u8], allowed: &[u32]) -> bool {
+    let text = String::from_utf8_lossy(params);
+    !text.is_empty()
+        && text
+            .split(';')
+            .all(|p| p.parse::<u32>().is_ok_and(|n| allowed.contains(&n)))
+}
+
 /// Whether a complete CSI sequence is drawing (kept) rather than a query or a
 /// report request. `params` is everything between `ESC [` and `final_byte`.
 fn keep_csi(params: &[u8], final_byte: u8) -> bool {
@@ -438,7 +475,9 @@ fn keep_csi(params: &[u8], final_byte: u8) -> bool {
     if private {
         // The modes TUIs switch (`?1049h`, `?25l`, `?2004h`); not the
         // keyboard-protocol, key-modifier or other private reports.
-        return matches!(final_byte, b'h' | b'l') && intermediates.is_empty();
+        return matches!(final_byte, b'h' | b'l')
+            && intermediates.is_empty()
+            && modes_allowed(&params[1..], &PRIVATE_MODES);
     }
     match final_byte {
         // Cursor movement and position, erase, insert/delete, scroll,
@@ -465,9 +504,9 @@ fn keep_csi(params: &[u8], final_byte: u8) -> bool {
         | b'b'
         | b's'
         | b'u'
-        | b'h'
-        | b'l'
         | b'r' => intermediates.is_empty(),
+        // Insert mode and new-line mode; not keyboard lock or the others.
+        b'h' | b'l' => intermediates.is_empty() && modes_allowed(params, &[4, 20]),
         // DECSCUSR, the cursor style.
         b'q' => intermediates == b" ",
         _ => false,
@@ -489,23 +528,19 @@ mod tests {
     /// `input` gives `expected` whole and split at every byte boundary, and
     /// fed one byte at a time.
     fn assert_shows(input: &[u8], expected: &[u8]) {
-        let show = |b: &[u8]| String::from_utf8_lossy(b).into_owned();
-        assert_eq!(
-            show(&TerminalFilter::default().feed(input)),
-            show(expected),
-            "whole"
-        );
+        // Raw bytes: a lossy string comparison would hide a stray C1 byte.
+        assert_eq!(TerminalFilter::default().feed(input), expected, "whole");
         for at in 0..=input.len() {
             assert_eq!(
-                show(&split_at(input, at)),
-                show(expected),
-                "split at {at} of {}",
-                show(input)
+                split_at(input, at),
+                expected,
+                "split at {at} of {:?}",
+                String::from_utf8_lossy(input)
             );
         }
         let mut filter = TerminalFilter::default();
         let bytewise: Vec<u8> = input.iter().flat_map(|b| filter.feed(&[*b])).collect();
-        assert_eq!(show(&bytewise), show(expected), "byte by byte");
+        assert_eq!(bytewise, expected, "byte by byte");
     }
 
     #[test]
@@ -537,6 +572,129 @@ mod tests {
             input.extend_from_slice(b"cd");
             assert_shows(&input, b"abcd");
         }
+    }
+
+    #[test]
+    fn a_dropped_utf8_lead_byte_never_lets_the_next_c1_byte_through() {
+        // Past the string cap the parser gives up on the string; a lead byte
+        // it dropped must not leave it believing a character is open.
+        for tail in [
+            &b"\xc3\x9d52;c;U1lOVEhFVElD\x07"[..],
+            b"\xc3\x9b6n",
+            b"\xe2\x98\x9d52;c;x\x07",
+        ] {
+            let mut input = b"\x1bP".to_vec();
+            input.extend(std::iter::repeat_n(b'A', MAX_STRING));
+            input.extend_from_slice(tail);
+            let whole = TerminalFilter::default().feed(&input);
+            assert!(
+                !whole
+                    .iter()
+                    .any(|b| (0x80..=0x9f).contains(b) || *b == 0x1b),
+                "{whole:?}"
+            );
+            let mut filter = TerminalFilter::default();
+            let bytewise: Vec<u8> = input.iter().flat_map(|b| filter.feed(&[*b])).collect();
+            assert_eq!(bytewise, whole);
+        }
+    }
+
+    /// No byte of `out` is a C1 control (0x80..=0x9f outside a UTF-8 character)
+    /// or an escape: the terminal could not read any of it as a command.
+    fn assert_no_raw_controls(out: &[u8], what: &str) {
+        let mut pending = 0u8;
+        for (i, &b) in out.iter().enumerate() {
+            assert_ne!(b, 0x1b, "{what}: ESC at {i}");
+            if pending > 0 && (0x80..=0xbf).contains(&b) {
+                pending -= 1;
+                continue;
+            }
+            pending = match b {
+                0xc2..=0xdf => 1,
+                0xe0..=0xef => 2,
+                0xf0..=0xf4 => 3,
+                _ => 0,
+            };
+            assert!(!(0x80..=0x9f).contains(&b), "{what}: raw C1 {b:#x} at {i}");
+        }
+    }
+
+    #[test]
+    fn nothing_that_reaches_a_cap_leaves_the_parser_out_of_step_with_the_terminal() {
+        let prefixes: [(&str, &[u8], usize); 4] = [
+            ("dcs", b"\x1bP", MAX_STRING),
+            ("osc", b"\x1b]", MAX_STRING),
+            ("osc52", b"\x1b]52;c;", MAX_STRING - 6),
+            ("csi", b"\x1b[", MAX_CSI),
+        ];
+        // Lead bytes (whole, partial, invalid) followed by what would be a C1
+        // control if the terminal read it bare.
+        let tails: [&[u8]; 9] = [
+            b"\xc3\x9d52;c;U1lOVEhFVElD\x07",
+            b"\xc3\x9b6n",
+            b"\xe2\x98\x9d52;c;x\x07",
+            b"\xe2\x9d52;c;x\x07",
+            b"\xf0\x9f\x9d52;c;x\x07",
+            b"\xc3\xc3\x9d52;c;x\x07",
+            b"\xff\x9d52;c;x\x07",
+            b"\xc3\x1b]52;c;x\x07",
+            b"\x9d52;c;x\x07",
+        ];
+        for (name, prefix, cap) in prefixes {
+            for pad in cap.saturating_sub(2)..=cap + 3 {
+                for tail in tails {
+                    let mut input = prefix.to_vec();
+                    // Parameter bytes for a CSI (a letter would end it); text otherwise.
+                    let filler = if name == "csi" { b'0' } else { b'A' };
+                    input.extend(std::iter::repeat_n(filler, pad));
+                    input.extend_from_slice(tail);
+                    let what = format!("{name} pad {pad} tail {tail:?}");
+                    let whole = TerminalFilter::default().feed(&input);
+                    assert_no_raw_controls(&whole, &what);
+                    let mut filter = TerminalFilter::default();
+                    let bytewise: Vec<u8> = input.iter().flat_map(|b| filter.feed(&[*b])).collect();
+                    assert_eq!(bytewise, whole, "{what}: byte by byte");
+                    for at in [
+                        prefix.len() + pad - 1,
+                        prefix.len() + pad,
+                        prefix.len() + pad + 1,
+                    ] {
+                        assert_eq!(split_at(&input, at), whole, "{what}: split at {at}");
+                    }
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn encoding_and_emulation_changes_are_dropped() {
+        for hostile in [
+            &b"\x1b%@"[..],
+            b"\x1b%G",
+            b"\x1b-A",
+            b"\x1b.A",
+            b"\x1b/A",
+            b"\x1b G",
+            b"\x1b F",
+            b"\x1bn",
+            b"\x1bo",
+            b"\x1b#8",
+            b"\x1b[?2l",
+            b"\x1b[2h",
+            b"\x1b[61;1\"p",
+            b"\x1b[?1;2l",
+            b"\x1b[?38h",
+            b"\x1b[?1;38h",
+        ] {
+            let mut input = b"ab".to_vec();
+            input.extend_from_slice(hostile);
+            input.extend_from_slice(b"cd");
+            assert_shows(&input, b"abcd");
+        }
+        // With ESC % @ gone the terminal stays in UTF-8, so C3 9D is the letter Ý
+        // and the rest is plain text: no OSC can start.
+        let shown = TerminalFilter::default().feed(b"\x1b%@\xc3\x9d52;c;x\x07");
+        assert_eq!(shown, b"\xc3\x9d52;c;x\x07");
     }
 
     #[test]
