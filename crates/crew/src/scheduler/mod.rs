@@ -118,9 +118,12 @@ pub fn plan(tasks: &[Task], agents: &[AgentView]) -> Vec<Action> {
         let agent = match &task.assigned_agent {
             Some(agent) => agent.clone(),
             None => {
+                // Never the task's own reviewer: nobody reviews their own work.
+                let reviewer = task.reviewer.as_deref();
                 let candidate = agents
                     .iter()
                     .filter(|a| a.runnable && !a.orchestrator && !busy.contains(&a.id))
+                    .filter(|a| reviewer != Some(a.id.as_str()))
                     .min_by_key(|a| (load.get(&a.id).copied().unwrap_or(0), a.id.clone()));
                 let Some(candidate) = candidate else { continue };
                 actions.push(Action::Assign {
@@ -147,8 +150,13 @@ pub fn plan(tasks: &[Task], agents: &[AgentView]) -> Vec<Action> {
         actions.push(Action::AllDone);
         return actions;
     }
-    // A review is progress only while its reviewer can do it.
-    let reviewable = |t: &Task| t.reviewer.as_deref().is_some_and(|r| runnable.contains(r));
+    // A review is progress only while its reviewer can do it, and an author
+    // cannot review their own work.
+    let reviewable = |t: &Task| {
+        t.reviewer
+            .as_deref()
+            .is_some_and(|r| runnable.contains(r) && t.assigned_agent.as_deref() != Some(r))
+    };
     // A waiting task is not stuck while the teammate it waits on is busy
     // (for instance answering its question).
     let progressing = tasks.iter().any(|t| match t.status {
@@ -187,8 +195,13 @@ pub fn plan(tasks: &[Task], agents: &[AgentView]) -> Vec<Action> {
                 TaskStatus::Review if !reviewable(task) => {
                     stuck.push(task.id.clone());
                     let reviewer = task.reviewer.as_deref().unwrap_or("nobody");
+                    let why = if task.reviewer == task.assigned_agent {
+                        "is its author"
+                    } else {
+                        "is not running"
+                    };
                     reasons.push(format!(
-                        "'{}' awaits review by {reviewer}, who is not running",
+                        "'{}' awaits review by {reviewer}, who {why}",
                         task.id
                     ));
                 }
@@ -411,6 +424,32 @@ mod tests {
                 "{actions:?}"
             );
         }
+    }
+
+    #[test]
+    fn nobody_reviews_their_own_work() {
+        // Unassigned work does not go to its reviewer...
+        let mut a = task("a", None, &[], TaskStatus::Ready);
+        a.reviewer = Some("r".into());
+        assert_eq!(
+            plan(&[a], &agents(&["r", "x"])),
+            vec![
+                Action::Assign {
+                    task: "a".into(),
+                    agent: "x".into()
+                },
+                dispatch("a", "x")
+            ]
+        );
+        // ...and a review its own author owes is no progress.
+        let mut b = task("b", Some("r"), &[], TaskStatus::Review);
+        b.reviewer = Some("r".into());
+        let actions = plan(&[b], &agents(&["r"]));
+        assert!(
+            matches!(&actions[..], [Action::Stall { reason, .. }]
+                if reason.contains("review by r, who is its author")),
+            "{actions:?}"
+        );
     }
 
     #[test]

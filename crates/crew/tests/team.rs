@@ -761,6 +761,101 @@ fn a_rejected_task_waits_until_its_author_has_finished_the_next_one() {
 }
 
 #[test]
+fn a_task_whose_reviewer_is_unavailable_stays_in_review_and_the_orchestrator_is_told() {
+    let s = Session::new();
+    let mut team = s.team(
+        "no-reviewer",
+        vec![
+            agent(
+                "author",
+                "",
+                &["--on-task=wait-message operator", "--on-task=done draft"],
+            ),
+            agent("critic", "", &[]),
+        ],
+        vec![
+            task("write", "author", &[]),
+            task("publish", "author", &["write"]),
+        ],
+    );
+    team.tasks[0].reviewer = Some("critic".into());
+    team.orchestrator = OrchestratorConfig {
+        agent: true,
+        runtime: Some(RuntimeKind::Shell),
+        command: scripted(&[]),
+        ..OrchestratorConfig::default()
+    };
+    s.run(&team);
+    s.wait_for("the author to be on write", || {
+        s.agent_cmd(&["output", "author"])
+            .contains("Task write is yours")
+    });
+    s.agent_cmd(&["kill", "critic"]);
+    s.wait("the reviewer to stop", |snap| {
+        find_agent(snap, "critic").status == AgentStatus::Stopped
+    });
+    s.send("author", "continue");
+    let snapshot = s.wait("the author to finish", |snap| {
+        find_task(snap, "write").status != TaskStatus::Working
+    });
+
+    // Nobody approved it, so it is not done and its dependent stays put.
+    let write = find_task(&snapshot, "write");
+    assert_eq!(write.status, TaskStatus::Review, "{write:?}");
+    assert_eq!(find_task(&snapshot, "publish").status, TaskStatus::Queued);
+    s.wait_for("the orchestrator to be told", || {
+        s.messages().iter().any(|m| {
+            m.to == "orchestrator"
+                && m.body.contains("Task write")
+                && m.body.contains("critic is stopped")
+        })
+    });
+    assert!(s.has_event("task.review_blocked"));
+    assert!(!s.has_event("task.done"));
+}
+
+#[test]
+fn a_task_cannot_be_reviewed_by_its_own_agent() {
+    let s = Session::new();
+    let mut team = s.team(
+        "self-review",
+        vec![agent("a", "", &[])],
+        vec![task("mine", "a", &[])],
+    );
+    team.tasks[0].reviewer = Some("a".into());
+    std::fs::write(s.root().join("team.yaml"), team.to_yaml().unwrap()).unwrap();
+    let run = s.crew(&["run", "team.yaml", "--no-attach"]);
+    assert!(!run.status.success(), "{}", stdout(&run));
+    assert!(
+        stderr(&run).contains("cannot be reviewed by its own agent"),
+        "{}",
+        stderr(&run)
+    );
+
+    team.tasks.clear();
+    s.run(&team);
+    let ws = s.workspace.to_string_lossy().into_owned();
+    let added = s.crew(&[
+        "task",
+        "add",
+        "--id",
+        "mine",
+        "--agent",
+        "a",
+        "--reviewer",
+        "a",
+        "-C",
+        &ws,
+    ]);
+    assert!(!added.status.success(), "{}", stdout(&added));
+    assert!(
+        stderr(&added).contains("cannot be reviewed by its own agent"),
+        "{}",
+        stderr(&added)
+    );
+}
+
+#[test]
 fn a_task_whose_reviewer_stopped_is_reported_as_a_stall() {
     let s = Session::new();
     let team = {

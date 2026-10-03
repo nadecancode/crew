@@ -48,6 +48,7 @@ pub fn validate_new(existing: &[Task], spec: &TaskSpec) -> Result<(), String> {
     if existing.iter().any(|t| t.id == spec.id) {
         return Err(format!("task '{}' already exists", spec.id));
     }
+    check_reviewer(spec)?;
     for dep in &spec.depends_on {
         if dep == &spec.id {
             return Err(format!("task '{}' cannot depend on itself", spec.id));
@@ -78,6 +79,17 @@ pub fn validate_new(existing: &[Task], spec: &TaskSpec) -> Result<(), String> {
         return Err(format!("dependency cycle: {}", cycle.join(" -> ")));
     }
     Ok(())
+}
+
+/// A review is someone else's look at the work.
+pub fn check_reviewer(spec: &TaskSpec) -> Result<(), String> {
+    match (&spec.agent, &spec.reviewer) {
+        (Some(agent), Some(reviewer)) if agent == reviewer => Err(format!(
+            "task '{}' cannot be reviewed by its own agent '{agent}'",
+            spec.id
+        )),
+        _ => Ok(()),
+    }
 }
 
 /// A task occupies its agent while the agent is expected to act on it.

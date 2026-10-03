@@ -59,6 +59,7 @@ impl Daemon {
             .validate()
             .map_err(|e| RpcError::invalid(e.to_string()))?;
         for spec in config.all_tasks() {
+            crate::tasks::check_reviewer(&spec).map_err(RpcError::invalid)?;
             let task = crate::tasks::task_from_spec(&spec, 0);
             check_task_message_size(&task, config.limits.max_message_bytes)?;
         }

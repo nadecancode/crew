@@ -708,11 +708,18 @@ call session_complete with the final report."
             .filter(|a| !a.value.is_empty())
             .collect();
         let result = truncate_chars(result.trim(), MAX_RESULT_CHARS);
-        let reviewer = {
-            let model = self.model();
-            task.reviewer
-                .clone()
-                .filter(|r| *r != author && model.agent(r).is_some_and(|a| !a.status.is_terminal()))
+        // A configured review is never skipped. When its reviewer cannot do
+        // it, the task waits in Review and the orchestrator decides.
+        // `ask_reviewer`: the reviewer gets the review request.
+        let reviewer = task.reviewer.clone();
+        let (unavailable, ask_reviewer) = match &reviewer {
+            None => (None, false),
+            Some(r) => match self.model().agent(r) {
+                _ if *r == author => (Some(format!("{r} is its author")), false),
+                None => (Some(format!("{r} is not on the team")), false),
+                Some(a) if a.status.is_terminal() => (Some(format!("{r} is {}", a.status)), true),
+                Some(_) => (None, true),
+            },
         };
         let updated = self
             .update_task(&task.id, |t| {
@@ -775,11 +782,40 @@ review_submit(task_id=\"{id}\", approve=true|false, comments=…).",
                     .rev()
                     .find(|a| a.kind == "commit")
                     .map(|a| a.value.clone());
-                let message = NewMessage::new(&author, reviewer, MessageType::ReviewRequest, body)
-                    .metadata(json!({ "task_id": updated.id, "commit": commit }))
-                    .correlation(Some(format!("review-{}", updated.id)));
-                if let Err(e) = self.send_message(message).await {
-                    tracing::warn!("sending the review request failed: {}", e.message);
+                // A stopped reviewer finds the request when it is restarted.
+                if ask_reviewer {
+                    let message =
+                        NewMessage::new(&author, reviewer, MessageType::ReviewRequest, body)
+                            .metadata(json!({ "task_id": updated.id, "commit": commit }))
+                            .correlation(Some(format!("review-{}", updated.id)));
+                    if let Err(e) = self.send_message(message).await {
+                        tracing::warn!("sending the review request failed: {}", e.message);
+                    }
+                }
+                if let Some(why) = &unavailable {
+                    self.emit(
+                        NewEvent::new(
+                            "scheduler",
+                            "task.review_blocked",
+                            format!("task {} cannot be reviewed now: {why}", updated.id),
+                        )
+                        .task(&updated.id)
+                        .warn(),
+                    );
+                    let next = if ask_reviewer {
+                        format!(
+                            "Restart {reviewer} (the review request waits for it), or review it \
+yourself"
+                        )
+                    } else {
+                        "Review it yourself".to_string()
+                    };
+                    self.notify_orchestrator(&format!(
+                        "Task {} (\"{}\") by {author} is waiting for review, but {why}. {next} \
+with review_submit(task_id=\"{}\", approve=true|false).",
+                        updated.id, updated.title, updated.id
+                    ))
+                    .await;
                 }
             }
             None => self.finish_task(&updated, &author).await,
