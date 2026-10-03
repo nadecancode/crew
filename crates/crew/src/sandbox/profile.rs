@@ -1044,7 +1044,7 @@ mod tests {
         let f = fixture();
         let spec = f.worker(&Extra::default()).unwrap().spec;
         for hidden in [
-            f.run.join("0123.token"),
+            crew_core::paths::operator_token_path(&f.socket),
             f.run.clone(),
             f.ws.join(".crew/crew.db"),
             f.ws.join(".crew/agents/b/identity.json"),

@@ -204,7 +204,10 @@ fn layout() -> Layout {
         (ws.join(".crew/crew.db"), "db".to_string()),
         (ws.join(".crew/agents/b/identity.json"), "b".to_string()),
         (ws.join("secret.txt"), "secret".to_string()),
-        (run.join("0123.token"), "operator-token".to_string()),
+        (
+            crew_core::paths::operator_token_path(&socket),
+            "operator-token".to_string(),
+        ),
         (
             ws.join(".crew/agents/a/identity.json"),
             format!(
@@ -339,7 +342,7 @@ fn a_worker_sees_its_own_tree_and_nothing_of_the_operators() {
           while read -r _ _ _ _ point _; do [ -S "$point" ] && echo "$point"; done < /proc/self/mountinfo
         }} 2>/dev/null | sort -u | sed 's/^/socket /'
         "#,
-        token = l.run.join("0123.token").display(),
+        token = crew_core::paths::operator_token_path(&l.socket).display(),
         db = l.ws.join(".crew/crew.db").display(),
         other = l.ws.join(".crew/agents/b/identity.json").display(),
         secret = l.ws.join("secret.txt").display(),
