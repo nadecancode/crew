@@ -10,7 +10,7 @@
 
 use std::cell::RefCell;
 use std::io;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::sync::Arc;
 
@@ -20,6 +20,15 @@ use crate::sandbox::{run, spec::Spec};
 /// command to run.
 pub trait Launcher: Send + Sync {
     fn launch(&self, cmd: &Command) -> io::Result<Command>;
+
+    /// The administrative directory (`<common>/worktrees/<name>`) of the
+    /// worktree this launcher works in, as the daemon created it, if it is
+    /// known. After a timeout the daemon clears a stale `index.lock` there:
+    /// a path git printed inside a sandbox is the agent's to forge, so it
+    /// is never used for host file operations.
+    fn admin_dir(&self) -> Option<PathBuf> {
+        None
+    }
 }
 
 thread_local! {
@@ -37,6 +46,16 @@ pub fn with_launcher<T>(launcher: Arc<dyn Launcher>, f: impl FnOnce() -> T) -> T
     }
     let _restore = Restore(CURRENT.with(|c| c.borrow_mut().replace(launcher)));
     f()
+}
+
+/// The administrative directory of the installed launcher, if any.
+pub(super) fn admin_dir() -> Option<PathBuf> {
+    CURRENT.with(|c| c.borrow().as_ref().and_then(|l| l.admin_dir()))
+}
+
+/// Whether a launcher is installed (git is running on an agent's behalf).
+pub(super) fn active() -> bool {
+    CURRENT.with(|c| c.borrow().is_some())
 }
 
 /// Replace `cmd` by what the installed launcher makes of it, if any.
@@ -60,11 +79,22 @@ pub struct SandboxLauncher {
     /// keys) for operations on that agent's behalf; only the names the spec
     /// passes get through. Empty for helpers.
     launch_env: Vec<(String, String)>,
+    admin: Option<PathBuf>,
 }
 
 impl SandboxLauncher {
     pub fn new(spec: Spec, launch_env: Vec<(String, String)>) -> Self {
-        Self { spec, launch_env }
+        Self {
+            spec,
+            launch_env,
+            admin: None,
+        }
+    }
+
+    /// The worktree's administrative directory, for clearing a stale lock.
+    pub fn with_admin_dir(mut self, admin: PathBuf) -> Self {
+        self.admin = Some(admin);
+        self
     }
 
     pub fn spec(&self) -> &Spec {
@@ -73,6 +103,10 @@ impl SandboxLauncher {
 }
 
 impl Launcher for SandboxLauncher {
+    fn admin_dir(&self) -> Option<PathBuf> {
+        self.admin.clone()
+    }
+
     fn launch(&self, cmd: &Command) -> io::Result<Command> {
         let invalid = |e: String| io::Error::new(io::ErrorKind::InvalidInput, e);
         let mut spec = self.spec.clone();

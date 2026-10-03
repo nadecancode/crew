@@ -71,6 +71,26 @@ impl Root {
         }
     }
 
+    /// Remove the file `rel` (a symlink is removed itself, never followed).
+    pub fn remove(&self, rel: &str) {
+        let (Some(dir), Some(name)) = (Path::new(rel).parent(), Path::new(rel).file_name()) else {
+            return;
+        };
+        let dir = if dir.as_os_str().is_empty() {
+            Path::new(".")
+        } else {
+            dir
+        };
+        let Ok(fd) = self.at(&dir.to_string_lossy(), libc::O_PATH | libc::O_DIRECTORY, 0) else {
+            return;
+        };
+        let Ok(name) = CString::new(name.as_bytes()) else {
+            return;
+        };
+        // SAFETY: `fd` is open and `name` is a valid C string.
+        unsafe { libc::unlinkat(fd.as_raw_fd(), name.as_ptr(), 0) };
+    }
+
     /// The names of the entries of the directory at `rel`.
     pub fn list(&self, rel: &str) -> Vec<String> {
         let Ok(fd) = self.at(rel, libc::O_RDONLY | libc::O_DIRECTORY, 0) else {

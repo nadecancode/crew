@@ -514,8 +514,10 @@ pub fn commit_all(dir: &Path, agent: &str, message: &str) -> Result<CommitInfo> 
         bail!("commit message is empty");
     }
     require_root(dir)?;
-    exclude_state_dir(dir)?;
-    out(dir, &["add", "-A", "--", "."])?;
+    // `.crew` is left out by pathspec, not by writing an exclude file: the path
+    // of the git directory is whatever a (possibly sandboxed) git prints, and
+    // the daemon must not write where that says.
+    out(dir, &["add", "-A", "--", ".", ":(exclude).crew"])?;
     unstage_state_dir(dir)?;
     let staged = run(dir, &["diff", "--cached", "--quiet"])?;
     if staged.status.success() {
@@ -609,7 +611,18 @@ fn dirty(dir: &Path) -> Result<bool> {
 /// Everything git started is dead once it timed out, so an index lock left
 /// behind is stale.
 fn clear_stale_index_lock(dir: &Path) {
-    if let Ok(lock) = out(dir, &["rev-parse", "--git-path", "index.lock"]) {
+    if launch::active() {
+        // On an agent's behalf the git directory is the one the daemon made
+        // for it, opened by descriptor; a path git printed in a sandbox is the
+        // agent's to forge and is never used.
+        if let Some(admin) = launch::admin_dir() {
+            if let Ok(root) = beneath::Root::open(&admin) {
+                root.remove("index.lock");
+            }
+        }
+        return;
+    }
+    if let Ok(lock) = out_h(dir, &["rev-parse", "--git-path", "index.lock"]) {
         let _ = std::fs::remove_file(dir.join(lock));
     }
 }
@@ -1003,9 +1016,20 @@ mod tests {
     }
 
     /// Records every command it is asked to launch and runs it unchanged.
-    struct Recorder(std::sync::Mutex<Vec<Vec<String>>>);
+    struct Recorder(std::sync::Mutex<Vec<Vec<String>>>, Option<PathBuf>);
+
+    impl Recorder {
+        fn with_admin(mut self, admin: PathBuf) -> Self {
+            self.1 = Some(admin);
+            self
+        }
+    }
 
     impl launch::Launcher for Recorder {
+        fn admin_dir(&self) -> Option<PathBuf> {
+            self.1.clone()
+        }
+
         fn launch(&self, cmd: &Command) -> std::io::Result<Command> {
             let argv = launch::argv(cmd)
                 .iter()
@@ -1028,7 +1052,7 @@ mod tests {
     fn every_git_command_goes_through_the_installed_launcher_and_only_inside_its_scope() {
         let r = repo();
         write(&r.root, "work.txt", "x\n");
-        let recorder = Arc::new(Recorder(Default::default()));
+        let recorder = Arc::new(Recorder(Default::default(), None));
         let commit = launch::with_launcher(recorder.clone(), || {
             commit_all(&r.root, "a", "work").unwrap()
         });
@@ -1118,7 +1142,7 @@ mod tests {
         // Whatever the worktree holds is agent-writable: crew must read its
         // branch from the repository's own administrative files, never by
         // running git in it.
-        let recorder = Arc::new(Recorder(Default::default()));
+        let recorder = Arc::new(Recorder(Default::default(), None));
         let again = launch::with_launcher(recorder.clone(), || {
             ensure_worktree(&r.root, &r.worktrees, "a", "HEAD").unwrap()
         });
@@ -1338,6 +1362,44 @@ mod tests {
         std::fs::remove_file(&head).unwrap();
         symlink(&elsewhere, &head).unwrap();
         assert!(add_worktree(&r2.root, &r2.worktrees, "b", "HEAD").is_err());
+    }
+
+    #[test]
+    fn nothing_the_daemon_reads_from_a_launched_git_decides_where_it_writes() {
+        // Under a launcher (an agent's sandbox) git's output is the agent's to
+        // forge: paths it prints must not become host file operations.
+        let r = repo();
+        write(&r.root, "work.txt", "x\n");
+        let recorder = Arc::new(Recorder(Default::default(), None));
+        launch::with_launcher(recorder.clone(), || {
+            commit_all(&r.root, "a", "work").unwrap();
+        });
+        let seen = recorder.0.lock().unwrap().clone();
+        let asked_for_a_path = |argv: &Vec<String>| {
+            argv.iter()
+                .any(|a| a == "--git-common-dir" || a == "--git-path")
+        };
+        assert!(
+            !seen.iter().any(asked_for_a_path),
+            "a path git printed is used on the host: {seen:?}"
+        );
+        // A stale lock is removed from the administrative directory the daemon
+        // knows, through a descriptor, never from a printed path.
+        let admin = r._dir.path().join("admin");
+        std::fs::create_dir_all(&admin).unwrap();
+        std::fs::write(admin.join("index.lock"), "").unwrap();
+        let launcher = Arc::new(Recorder(Default::default(), None).with_admin(admin.clone()));
+        launch::with_launcher(launcher.clone(), || clear_stale_index_lock(&r.root));
+        assert!(!admin.join("index.lock").exists());
+        // A symlink in place of that directory is not followed.
+        let real = r._dir.path().join("real-admin");
+        std::fs::create_dir_all(&real).unwrap();
+        std::fs::write(real.join("index.lock"), "").unwrap();
+        let link = r._dir.path().join("link-admin");
+        std::os::unix::fs::symlink(&real, &link).unwrap();
+        let launcher = Arc::new(Recorder(Default::default(), None).with_admin(link));
+        launch::with_launcher(launcher, || clear_stale_index_lock(&r.root));
+        assert!(real.join("index.lock").exists(), "followed a symlink");
     }
 
     #[test]
