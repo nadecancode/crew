@@ -311,3 +311,29 @@ fn token_never_leaks() {
         );
     }
 }
+
+#[test]
+fn a_start_that_fails_to_register_leaves_nothing_behind() {
+    let s = Session::new();
+    std::fs::create_dir_all(&s.workspace).unwrap();
+    // The session registry cannot be created: the start fails after it has
+    // written its token, bound its socket and written daemon.json.
+    let sessions = s.root().join("state/crew/sessions");
+    std::fs::create_dir_all(sessions.parent().unwrap()).unwrap();
+    std::fs::write(&sessions, "not a directory").unwrap();
+
+    let ws = s.workspace.to_string_lossy().into_owned();
+    let failed = s.crew(&["daemon", "--workspace", &ws]);
+    assert!(!failed.status.success(), "{}", stderr(&failed));
+    assert!(
+        !s.workspace.join(".crew/daemon.json").exists(),
+        "a half-written registration was left: {}",
+        stderr(&failed)
+    );
+    let runtime = s.root().join("run/crew");
+    let left: Vec<String> = std::fs::read_dir(&runtime)
+        .unwrap()
+        .map(|e| e.unwrap().file_name().to_string_lossy().into_owned())
+        .collect();
+    assert!(left.is_empty(), "{left:?}");
+}

@@ -279,6 +279,8 @@ pub struct Inner {
     pub(crate) usage_refreshing: std::sync::atomic::AtomicBool,
     pub(crate) started_at: i64,
     /// Held for the daemon's lifetime: the workspace's single-instance lock.
+    /// Connection tasks and other `Daemon` handles can outlive `Running`, so
+    /// the lock lasts as long as any of them.
     _instance_lock: std::fs::File,
     /// The operator's credential for this run (design-b3.md §2.1): here and in
     /// the 0600 token file next to the socket, nowhere else (not the database,
@@ -640,18 +642,37 @@ pub struct Running {
     published: Published,
 }
 
-/// What a start put next to its socket path: its operator token and, once
-/// bound, the socket. Taken back when the start fails (on drop) or at
-/// shutdown, while the workspace lock is still held; a token file that no
-/// longer holds this run's token is left alone.
+/// What this start published under the workspace lock (B7): its operator
+/// token, its socket once bound, its registration once written. Withdrawn
+/// in the reverse order at shutdown, or on drop when the start fails. It
+/// holds its own descriptor of the lock (a clone sharing the same flock),
+/// released only after the withdrawal (a field drops after `Drop::drop`
+/// runs), so the daemon that wins the lock next never loses its files to
+/// this one. Only this run's token and registration are removed.
 struct Published {
+    state_dir: PathBuf,
     socket: PathBuf,
     token: String,
     bound: bool,
+    /// This run's registration was being written: its `started_at`.
+    registering: Option<i64>,
+    /// ...and `write_daemon_info` finished, so the registry entry is ours too.
+    registered: bool,
+    _lock: std::fs::File,
 }
 
 impl Published {
     fn withdraw(&mut self) {
+        if let Some(started_at) = self.registering.take() {
+            if std::mem::take(&mut self.registered) {
+                paths::remove_daemon_info(&self.state_dir);
+            } else if paths::read_daemon_info(&self.state_dir)
+                .is_some_and(|info| info.pid == std::process::id() && info.started_at == started_at)
+            {
+                // Half written: daemon.json is ours, the registry entry is not.
+                let _ = std::fs::remove_file(paths::daemon_info_path(&self.state_dir));
+            }
+        }
         if std::mem::take(&mut self.bound) {
             let _ = std::fs::remove_file(&self.socket);
         }
@@ -685,7 +706,7 @@ pub async fn start(options: DaemonOptions) -> Result<Running> {
     let socket = paths::socket_path(&state_dir);
     // Only the lock holder may check the registration, replace the socket
     // and open the database, so two starts close together cannot both win.
-    let Some(instance_lock) = lock_instance(&state_dir)? else {
+    let Some(lock) = lock_instance(&state_dir)? else {
         let pid = paths::read_daemon_info(&state_dir)
             .map(|info| format!(" (pid {})", info.pid))
             .unwrap_or_default();
@@ -709,13 +730,17 @@ pub async fn start(options: DaemonOptions) -> Result<Running> {
     // A new operator token for every start that wins the lock, written before
     // the socket is bound: a client never finds a socket without its token.
     let token = crew_core::util::new_token();
-    paths::write_private_file(&paths::operator_token_path(&socket), token.as_bytes())
-        .context("writing the operator token")?;
     let mut published = Published {
+        state_dir: state_dir.clone(),
         socket: socket.clone(),
         token: token.clone(),
         bound: false,
+        registering: None,
+        registered: false,
+        _lock: lock.try_clone().context("sharing the workspace lock")?,
     };
+    paths::write_private_file(&paths::operator_token_path(&socket), token.as_bytes())
+        .context("writing the operator token")?;
     // Stale socket from a daemon that did not shut down cleanly.
     let _ = std::fs::remove_file(&socket);
     let listener =
@@ -764,10 +789,12 @@ pub async fn start(options: DaemonOptions) -> Result<Running> {
         usage_refreshed_at: std::sync::atomic::AtomicI64::new(0),
         usage_refreshing: std::sync::atomic::AtomicBool::new(false),
         started_at,
-        _instance_lock: instance_lock,
+        _instance_lock: lock,
         operator_token: token,
     }));
 
+    // Before writing: a registration only half written is withdrawn too.
+    published.registering = Some(started_at);
     paths::write_daemon_info(&DaemonInfo {
         project,
         workspace: workspace.to_string_lossy().into_owned(),
@@ -776,6 +803,7 @@ pub async fn start(options: DaemonOptions) -> Result<Running> {
         pid: std::process::id(),
         started_at,
     })?;
+    published.registered = true;
 
     daemon.emit(NewEvent::new(
         "daemon",
@@ -865,7 +893,42 @@ impl Running {
         plan_task.abort();
         housekeeping_task.abort();
         published.withdraw();
-        paths::remove_daemon_info(&daemon.state_dir);
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn the_workspace_lock_is_held_until_everything_is_withdrawn() {
+        let dir = tempfile::tempdir().unwrap();
+        let state_dir = dir.path().join("state");
+        std::fs::create_dir(&state_dir).unwrap();
+        let socket = dir.path().join("s.sock");
+        let _listener = std::os::unix::net::UnixListener::bind(&socket).unwrap();
+        let token = crew_core::util::new_token();
+        paths::write_private_file(&paths::operator_token_path(&socket), token.as_bytes()).unwrap();
+        let mut published = Published {
+            state_dir: state_dir.clone(),
+            socket: socket.clone(),
+            token,
+            bound: true,
+            registering: None,
+            registered: false,
+            _lock: lock_instance(&state_dir).unwrap().unwrap(),
+        };
+        assert!(lock_instance(&state_dir).unwrap().is_none());
+
+        published.withdraw();
+        assert!(!socket.exists());
+        assert!(!paths::operator_token_path(&socket).exists());
+        // Still held: a daemon that starts now cannot have its socket or
+        // token removed by this one's cleanup.
+        assert!(lock_instance(&state_dir).unwrap().is_none());
+
+        drop(published);
+        assert!(lock_instance(&state_dir).unwrap().is_some());
     }
 }
