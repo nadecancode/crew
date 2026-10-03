@@ -146,8 +146,6 @@ pub(crate) struct AgentRuntimeState {
     pub quota_checked_at: i64,
     /// The Codex session file, once found.
     pub rollout: Option<std::path::PathBuf>,
-    /// The PID namespace of the session's sandbox, once seen.
-    pub sandbox_ns: Option<u64>,
     /// The runtime itself reported how full the context window is (so the
     /// transcript need not be read for it).
     pub context_reported: bool,
@@ -262,6 +260,12 @@ pub struct Inner {
     pub(crate) listeners: Mutex<HashMap<String, Listener>>,
     /// Helper processes agents depend on (Codex app-servers), by agent id.
     pub(crate) sidecars: Mutex<HashMap<String, SidecarProc>>,
+    /// Every sandbox started for an agent that is not known to be gone yet
+    /// (design-b3.md §3.4, D2): the agent's home is not written until its
+    /// list is empty. Entries leave only once their sandbox is gone.
+    pub(crate) retiring: Mutex<HashMap<String, Vec<sandbox::Record>>>,
+    /// One launch of an agent at a time.
+    pub(crate) launches: Mutex<HashMap<String, Arc<tokio::sync::Mutex<()>>>>,
     /// Git operations run one at a time.
     pub(crate) git_lock: tokio::sync::Mutex<()>,
     /// Planning and applying the plan is one critical section, so two
@@ -300,8 +304,8 @@ pub struct Inner {
 pub(crate) struct SidecarProc {
     pub child: tokio::process::Child,
     pub socket: PathBuf,
-    /// The PID namespace of its sandbox, when it runs in one.
-    pub namespace: Option<u64>,
+    /// Its entry in the agent's retirement ledger, when it runs in a sandbox.
+    pub record: Option<sandbox::Record>,
     /// What the sidecar was started with: the agent's variables, which a
     /// sandboxed queue command gets too.
     pub env: Vec<(String, String)>,
@@ -847,6 +851,8 @@ pub async fn start(options: DaemonOptions) -> Result<Running> {
         delivery: Mutex::new(HashMap::new()),
         listeners: Mutex::new(HashMap::new()),
         sidecars: Mutex::new(HashMap::new()),
+        retiring: Mutex::new(HashMap::new()),
+        launches: Mutex::new(HashMap::new()),
         git_lock: tokio::sync::Mutex::new(()),
         plan_lock: tokio::sync::Mutex::new(()),
         team_lock: tokio::sync::Mutex::new(()),

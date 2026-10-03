@@ -257,35 +257,174 @@ fn namespace_of(pid: u32) -> Option<u64> {
         .ok()
 }
 
-/// Whether any process is left in PID namespace `ns`.
-fn namespace_alive(ns: u64) -> bool {
-    let Ok(entries) = std::fs::read_dir("/proc") else {
-        return false;
-    };
-    entries
-        .flatten()
-        .filter_map(|e| e.file_name().to_str()?.parse::<u32>().ok())
-        .any(|pid| namespace_of(pid) == Some(ns))
+/// What the daemon knows about one sandbox it started for an agent, until
+/// the sandbox is known to be gone.
+#[derive(Debug, Default)]
+pub(crate) struct Retiring {
+    /// `session` or `sidecar`, for messages.
+    pub what: &'static str,
+    /// The process the daemon started (`crew sandbox-run`, then bubblewrap).
+    pub pid: Option<u32>,
+    /// The PID namespace its programs run in, once seen.
+    pub namespace: Option<u64>,
+    /// How that process ended: `Some(true)` on its own, with an exit code;
+    /// `Some(false)` killed by a signal; `None` while it runs.
+    pub ended: Option<bool>,
 }
 
-/// Wait until no process is left in any of `namespaces`. A sandbox's
-/// processes die with it, but after the process the daemon started has been
-/// reaped: the kernel tears its namespace down on its own time.
-pub(crate) async fn wait_until_gone(namespaces: &[u64], within: std::time::Duration) -> Result<()> {
+pub(crate) type Record = std::sync::Arc<std::sync::Mutex<Retiring>>;
+
+/// A new ledger entry for a sandbox the daemon has just started.
+pub(crate) fn record(what: &'static str, pid: Option<u32>) -> Record {
+    std::sync::Arc::new(std::sync::Mutex::new(Retiring {
+        what,
+        pid,
+        ..Retiring::default()
+    }))
+}
+
+impl Retiring {
+    /// The sandbox is gone. bubblewrap that exits on its own has reaped its
+    /// namespace's init, which the kernel lets finish only once every other
+    /// process in the namespace is gone; one that was killed proves nothing,
+    /// so then the namespace must have been seen, and be empty. One killed
+    /// before its namespace was seen is never known to be gone.
+    pub fn gone(&self) -> bool {
+        match self.ended {
+            None => false,
+            Some(true) => true,
+            Some(false) => self.namespace.is_some_and(|ns| !namespace_alive(ns)),
+        }
+    }
+}
+
+/// Wait until every sandbox in `records` is gone. The records stay where
+/// they are: the caller drops those that are gone, whatever this returns.
+pub(crate) async fn wait_retired(records: &[Record], within: std::time::Duration) -> Result<()> {
     let deadline = tokio::time::Instant::now() + within;
     loop {
-        let alive: Vec<u64> = namespaces
+        let left: Vec<String> = records
             .iter()
-            .copied()
-            .filter(|ns| namespace_alive(*ns))
+            .filter_map(|r| {
+                let r = r.lock().unwrap_or_else(|e| e.into_inner());
+                (!r.gone()).then(|| match (r.ended, r.namespace) {
+                    (None, _) => format!("its {} is still running", r.what),
+                    (Some(false), None) => format!(
+                        "its {} was killed before its sandbox could be seen, so its sandbox is \
+not known to be gone (restart the daemon to clear this)",
+                        r.what
+                    ),
+                    _ => format!("processes of its {} sandbox are still running", r.what),
+                })
+            })
             .collect();
-        if alive.is_empty() {
+        if left.is_empty() {
             return Ok(());
         }
         if tokio::time::Instant::now() >= deadline {
-            bail!("processes are still running in the old sandbox (pid namespace {alive:?})");
+            bail!("{}", left.join("; "));
         }
         tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+    }
+}
+
+/// What one `/proc` entry says about PID namespace `ns`.
+#[derive(Debug, PartialEq, Eq)]
+enum Entry {
+    In,
+    NotIn,
+    /// It may be in it: its namespace could not be read, and it runs as
+    /// this user in a namespace below the daemon's.
+    Unknown,
+}
+
+/// `link` is the entry's `ns/pid` link (or why it could not be read),
+/// `status` its `status` file, which the kernel shows for every process.
+/// A process whose link cannot be read is one of an agent's only if it
+/// runs as this user, nested in a PID namespace below the daemon's: a
+/// sandboxed program can make itself undumpable, but not change its uid or
+/// leave its namespace. Root's processes and this user's undumpable ones in
+/// the daemon's own namespace (an ssh-agent) are not.
+fn entry(
+    link: std::io::Result<PathBuf>,
+    status: Option<&str>,
+    ns: u64,
+    uid: u32,
+    depth: usize,
+) -> Entry {
+    let wanted = format!("pid:[{ns}]");
+    match link {
+        Ok(link) if link.as_os_str() == wanted.as_str() => Entry::In,
+        Ok(_) => Entry::NotIn,
+        Err(e) if matches!(e.raw_os_error(), Some(libc::ENOENT | libc::ESRCH)) => Entry::NotIn,
+        Err(_) => {
+            let Some(status) = status else {
+                // Gone between the two reads.
+                return Entry::NotIn;
+            };
+            let field = |name: &str| {
+                status
+                    .lines()
+                    .find_map(|l| l.strip_prefix(name))
+                    .map(str::trim)
+            };
+            let ours = field("Uid:")
+                .and_then(|u| u.split_whitespace().next())
+                .and_then(|u| u.parse::<u32>().ok())
+                == Some(uid);
+            let nested = field("NSpid:").is_some_and(|n| n.split_whitespace().count() > depth);
+            if ours && nested {
+                Entry::Unknown
+            } else {
+                Entry::NotIn
+            }
+        }
+    }
+}
+
+/// Whether any process is, or may be, left in PID namespace `ns`.
+fn namespace_alive(ns: u64) -> bool {
+    let Ok(entries) = std::fs::read_dir("/proc") else {
+        return true;
+    };
+    let depth = std::fs::read_to_string("/proc/self/status")
+        .ok()
+        .and_then(|s| {
+            s.lines()
+                .find_map(|l| l.strip_prefix("NSpid:"))
+                .map(|n| n.split_whitespace().count())
+        })
+        .unwrap_or(1);
+    let uid = paths::uid();
+    entries
+        .flatten()
+        .filter_map(|e| e.file_name().to_str()?.parse::<u32>().ok())
+        .any(|pid| {
+            let link = std::fs::read_link(format!("/proc/{pid}/ns/pid"));
+            let status = std::fs::read_to_string(format!("/proc/{pid}/status")).ok();
+            entry(link, status.as_deref(), ns, uid, depth) != Entry::NotIn
+        })
+}
+
+/// Find the PID namespace of the sandbox the daemon has just started as
+/// `pid`, while `running` says it runs. `Ok(None)`: it ended first.
+pub(crate) async fn discover(
+    pid: u32,
+    running: impl Fn() -> bool,
+    within: std::time::Duration,
+) -> Result<Option<u64>> {
+    let deadline = tokio::time::Instant::now() + within;
+    loop {
+        if let Some(ns) = sandbox_namespace(pid) {
+            return Ok(Some(ns));
+        }
+        if !running() {
+            return Ok(None);
+        }
+        if tokio::time::Instant::now() >= deadline {
+            bail!("its sandbox's PID namespace was not found");
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(10)).await;
     }
 }
 
@@ -1145,17 +1284,236 @@ unsandboxed"
             in_namespace(ns).iter().any(|c| c == "sleep 301")
         });
         assert!(in_namespace(ns).iter().any(|c| c == "sleep 300"));
+        // Killed, as the daemon kills a session: gone once its namespace is
+        // empty, not once bubblewrap is reaped.
+        let entry = record("session", Some(pid));
+        entry.lock().unwrap().namespace = Some(ns);
         let short = std::time::Duration::from_millis(100);
         assert!(
-            wait_until_gone(&[ns], short).await.is_err(),
+            wait_retired(std::slice::from_ref(&entry), short)
+                .await
+                .is_err(),
             "still running"
         );
-
         sandbox.kill().unwrap();
         sandbox.wait().unwrap();
-        wait_until_gone(&[ns], std::time::Duration::from_secs(5))
+        entry.lock().unwrap().ended = Some(false);
+        wait_retired(&[entry], std::time::Duration::from_secs(5))
             .await
             .unwrap();
         assert_eq!(in_namespace(ns), Vec::<String>::new());
+    }
+
+    /// Pids in PID namespace `ns`.
+    fn pids_in(ns: u64) -> Vec<u32> {
+        std::fs::read_dir("/proc")
+            .unwrap()
+            .flatten()
+            .filter_map(|e| e.file_name().to_str()?.parse::<u32>().ok())
+            .filter(|pid| namespace_of(*pid) == Some(ns))
+            .collect()
+    }
+
+    /// A stand-in sidecar: `sh` starting a sandbox that runs `sleep
+    /// <marker>`; the sandbox dies with `sh` or (`outlives`) does not. Put in
+    /// the daemon's sidecars for `id`, with its namespace.
+    async fn sidecar_for(daemon: &Daemon, id: &str, bwrap: &Path, outlives: bool) -> u64 {
+        let marker = 400_000 + std::process::id() % 1_000 + u32::from(outlives);
+        let inner = sandbox_running(bwrap, !outlives, &format!("exec sleep {marker}"));
+        let argv: Vec<String> = std::iter::once(inner.get_program())
+            .chain(inner.get_args())
+            .map(|a| format!("'{}'", a.to_string_lossy()))
+            .collect();
+        let child = tokio::process::Command::new("sh")
+            .args(["-c", &format!("{} & wait", argv.join(" "))])
+            .spawn()
+            .unwrap();
+        let wanted = format!("sleep {marker}");
+        let mut ns = None;
+        eventually("the stand-in sidecar's sandbox", || {
+            ns = std::fs::read_dir("/proc")
+                .unwrap()
+                .flatten()
+                .filter_map(|e| e.file_name().to_str()?.parse::<u32>().ok())
+                .find(|pid| {
+                    std::fs::read(format!("/proc/{pid}/cmdline")).is_ok_and(|c| {
+                        String::from_utf8_lossy(&c).replace('\0', " ").trim() == wanted
+                    })
+                })
+                .and_then(namespace_of)
+                .filter(|ns| Some(*ns) != namespace_of(std::process::id()));
+            ns.is_some()
+        });
+        let entry = record("sidecar", child.id());
+        entry.lock().unwrap().namespace = ns;
+        daemon
+            .retiring
+            .lock()
+            .unwrap()
+            .entry(id.to_string())
+            .or_default()
+            .push(entry.clone());
+        daemon.sidecars.lock().unwrap().insert(
+            id.to_string(),
+            super::super::SidecarProc {
+                child,
+                socket: PathBuf::new(),
+                env: Vec::new(),
+                record: Some(entry),
+            },
+        );
+        ns.unwrap()
+    }
+
+    #[tokio::test]
+    async fn a_sidecar_stopped_before_the_restart_is_still_waited_out() {
+        let Some(bwrap) = bwrap() else { return };
+        let temp = tempfile::tempdir().unwrap();
+        let running = super::super::start(super::super::DaemonOptions {
+            workspace: temp.path().to_path_buf(),
+            crew_bin: std::env::current_exe().unwrap(),
+        })
+        .await
+        .unwrap();
+        let daemon = running.daemon.clone();
+        let procs = crate::process::pty::PtyManager::new(daemon.proc_tx.clone());
+        let short = std::time::Duration::from_millis(300);
+
+        // Stopped when its session exited or was killed (on_exit, kill_agent),
+        // before the restart: its sandbox still has a process, so the home
+        // is not seeded.
+        let ns = sidecar_for(&daemon, "a", &bwrap, true).await;
+        daemon.stop_sidecar("a");
+        let refused = daemon.retire_sandboxes("a", &procs, short).await;
+        // A second try (another restart) is refused too: the entry stayed.
+        let again = daemon.retire_sandboxes("a", &procs, short).await;
+        let left = pids_in(ns);
+        for pid in &left {
+            // SAFETY: plain kill of a test process.
+            unsafe { libc::kill(*pid as libc::pid_t, libc::SIGKILL) };
+        }
+        assert!(
+            !left.is_empty(),
+            "the stand-in sandbox did not outlive its parent"
+        );
+        assert!(
+            refused.is_err(),
+            "seeded while the stopped sidecar's sandbox ran"
+        );
+        assert!(again.is_err(), "a retry skipped the wait");
+        // Once it is gone, the next try goes through and the entry leaves.
+        daemon
+            .retire_sandboxes("a", &procs, std::time::Duration::from_secs(5))
+            .await
+            .unwrap();
+        assert!(daemon.retiring.lock().unwrap()["a"].is_empty());
+
+        // One that goes with it is waited for, and then the home may be seeded.
+        let ns = sidecar_for(&daemon, "b", &bwrap, false).await;
+        daemon.stop_sidecar("b");
+        daemon
+            .retire_sandboxes("b", &procs, std::time::Duration::from_secs(5))
+            .await
+            .unwrap();
+        assert!(pids_in(ns).is_empty());
+    }
+
+    #[test]
+    fn a_sandbox_is_known_gone_by_its_own_exit_or_its_empty_namespace_and_otherwise_not() {
+        let entry = |ended, namespace| Retiring {
+            what: "session",
+            pid: Some(1),
+            namespace,
+            ended,
+        };
+        // A namespace no process is in.
+        let empty = Some(u64::MAX);
+        assert!(!entry(None, empty).gone(), "still running");
+        assert!(entry(Some(true), None).gone(), "exited on its own");
+        assert!(entry(Some(false), empty).gone(), "killed, namespace empty");
+        assert!(
+            !entry(Some(false), None).gone(),
+            "killed before its namespace was seen"
+        );
+        let ours = namespace_of(std::process::id());
+        assert!(
+            !entry(Some(false), ours).gone(),
+            "killed, namespace still in use"
+        );
+    }
+
+    #[test]
+    fn an_unreadable_proc_entry_counts_only_if_it_could_be_an_agents() {
+        let denied = || Err(std::io::Error::from_raw_os_error(libc::EACCES));
+        let gone = || Err(std::io::Error::from_raw_os_error(libc::ENOENT));
+        let status = |uid: u32, nspid: &str| {
+            format!("Name:\tx\nUid:\t{uid}\t{uid}\t{uid}\t{uid}\nNSpid:\t{nspid}\n")
+        };
+        let (ns, me) = (7, 1000);
+        assert_eq!(entry(Ok("pid:[7]".into()), None, ns, me, 1), Entry::In);
+        assert_eq!(entry(Ok("pid:[8]".into()), None, ns, me, 1), Entry::NotIn);
+        assert_eq!(entry(gone(), None, ns, me, 1), Entry::NotIn);
+        // root's processes, and this user's undumpable ones beside the
+        // daemon (an ssh-agent), are no agent's.
+        assert_eq!(
+            entry(denied(), Some(&status(0, "4242 3")), ns, me, 1),
+            Entry::NotIn
+        );
+        assert_eq!(
+            entry(denied(), Some(&status(me, "4242")), ns, me, 1),
+            Entry::NotIn
+        );
+        // This user's, nested below: it may be in the sandbox.
+        assert_eq!(
+            entry(denied(), Some(&status(me, "4242 3")), ns, me, 1),
+            Entry::Unknown
+        );
+        // Gone between the reads.
+        assert_eq!(entry(denied(), None, ns, me, 1), Entry::NotIn);
+    }
+
+    #[tokio::test]
+    async fn a_session_killed_before_its_namespace_was_seen_keeps_its_home_shut() {
+        let temp = tempfile::tempdir().unwrap();
+        let running = super::super::start(super::super::DaemonOptions {
+            workspace: temp.path().to_path_buf(),
+            crew_bin: std::env::current_exe().unwrap(),
+        })
+        .await
+        .unwrap();
+        let daemon = running.daemon.clone();
+        let procs = crate::process::pty::PtyManager::new(daemon.proc_tx.clone());
+        let short = std::time::Duration::from_millis(100);
+        let add = |pid| {
+            let entry = record("session", Some(pid));
+            daemon
+                .retiring
+                .lock()
+                .unwrap()
+                .entry("a".into())
+                .or_default()
+                .push(entry);
+        };
+        // Exited with a code, as its exit event says: gone.
+        add(4242);
+        daemon.record_exit("a", "4242", Some(0));
+        daemon.retire_sandboxes("a", &procs, short).await.unwrap();
+        // Killed by a signal before its namespace was seen: never known to be
+        // gone, so no launch seeds the home, retry or not.
+        add(4343);
+        daemon.record_exit("a", "4343", None);
+        for _ in 0..2 {
+            let refused = daemon
+                .retire_sandboxes("a", &procs, short)
+                .await
+                .unwrap_err();
+            assert!(
+                format!("{refused:#}").contains("not known to be gone"),
+                "{refused:#}"
+            );
+        }
+        // An exit of another incarnation does not count for it.
+        daemon.record_exit("a", "4444", Some(0));
+        assert!(daemon.retire_sandboxes("a", &procs, short).await.is_err());
     }
 }
