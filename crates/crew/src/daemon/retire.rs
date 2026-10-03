@@ -147,6 +147,9 @@ struct Entry {
     file: PathBuf,
     done: PathBuf,
     state: Mutex<Retiring>,
+    /// Its files were removed, the sandbox being gone: it is never written
+    /// again. Set and read under `state`'s lock.
+    forgotten: std::sync::atomic::AtomicBool,
 }
 
 impl Record {
@@ -163,12 +166,15 @@ impl Record {
             .clone()
     }
 
-    /// Change the entry, on disk too. A change that cannot be written
-    /// leaves the earlier file, which proves less.
+    /// Change the entry, on disk too, unless it went (its sandbox known to
+    /// be gone, its files removed). A change that cannot be written leaves
+    /// the earlier file, which proves less.
     pub fn update(&self, f: impl FnOnce(&mut Retiring)) {
         let mut state = self.0.state.lock().unwrap_or_else(|e| e.into_inner());
         f(&mut state);
-        let _ = save(&self.0.file, &state);
+        if !self.0.forgotten.load(std::sync::atomic::Ordering::SeqCst) {
+            let _ = save(&self.0.file, &state);
+        }
     }
 
     /// The sandbox is known to be gone (see the module's documentation).
@@ -232,7 +238,14 @@ fn save(file: &Path, state: &Retiring) -> Result<()> {
     paths::write_private_file(file, &serde_json::to_vec_pretty(state)?)
 }
 
+/// Remove `record`'s files, for good: under its lock, so no update writes
+/// the entry again afterwards.
 fn forget(record: &Record) {
+    let _state = record.0.state.lock().unwrap_or_else(|e| e.into_inner());
+    record
+        .0
+        .forgotten
+        .store(true, std::sync::atomic::Ordering::SeqCst);
     let _ = std::fs::remove_file(&record.0.file);
     let _ = std::fs::remove_file(&record.0.done);
 }
@@ -287,6 +300,7 @@ impl Ledger {
                     done: path.with_extension("done"),
                     file: path,
                     state: Mutex::new(state),
+                    forgotten: Default::default(),
                 })));
         }
         Ok(Ledger {
@@ -317,6 +331,7 @@ impl Ledger {
             done: file.with_extension("done"),
             file,
             state: Mutex::new(state),
+            forgotten: Default::default(),
         }));
         self.with(agent, |l| l.push(record.clone()));
         Ok(record)
@@ -618,6 +633,33 @@ mod tests {
         let record = ledger.start("b", "git").unwrap();
         record.update(|r| r.boot = String::new());
         assert!(ledger.retire("b", short).await.is_err());
+    }
+
+    #[tokio::test]
+    async fn an_entry_that_went_is_not_written_again_by_whoever_still_holds_it() {
+        let dir = tempfile::tempdir().unwrap();
+        let short = Duration::from_millis(100);
+        let ledger = Ledger::open(dir.path()).unwrap();
+        // Its sandbox reported (it did not start) before the launch that
+        // holds the entry recorded the pid; another launch of the agent
+        // dropped the entries that are gone in between.
+        let reported = ledger.start("a", "queue").unwrap();
+        std::fs::write(reported.done(), "not started\n").unwrap();
+        ledger.forget_gone("a");
+        reported.update(|r| r.pid = Some(4242));
+        // The operator deleted one, and a holder updates it afterwards.
+        let deleted = ledger.start("b", "session").unwrap();
+        std::fs::remove_file(file_of(&deleted)).unwrap();
+        ledger.retire("b", short).await.unwrap();
+        deleted.update(|r| r.pid = Some(4343));
+        for (record, what) in [(&reported, "reported"), (&deleted, "deleted")] {
+            assert!(
+                !file_of(record).exists(),
+                "the {what} entry was written again"
+            );
+        }
+        let next = Ledger::open(dir.path()).unwrap();
+        assert!(next.of("a").is_empty() && next.of("b").is_empty());
     }
 
     /// bubblewrap from PATH, if the host has it (a failure under
