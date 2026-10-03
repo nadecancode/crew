@@ -257,12 +257,20 @@ fn run_with_deadline(cmd: &mut Command) -> std::io::Result<Output> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::os::unix::fs::PermissionsExt;
 
+    /// Write an executable script. A child process writes it: had this
+    /// (threaded) test process held the write descriptor, a fork in another
+    /// test thread could inherit it and make executing the script fail with
+    /// ETXTBSY.
     fn script(dir: &Path, name: &str, body: &str) -> PathBuf {
         let path = dir.join(name);
-        std::fs::write(&path, format!("#!/bin/sh\n{body}\n")).unwrap();
-        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o755)).unwrap();
+        let status = Command::new("sh")
+            .args(["-c", r#"printf '%s\n' "$2" > "$1" && chmod 755 "$1""#, "sh"])
+            .arg(&path)
+            .arg(format!("#!/bin/sh\n{body}"))
+            .status()
+            .unwrap();
+        assert!(status.success(), "writing {}", path.display());
         path
     }
 
