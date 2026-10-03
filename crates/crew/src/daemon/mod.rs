@@ -35,6 +35,7 @@ mod orchestrate;
 mod policy;
 mod questions;
 mod roster;
+mod sandbox;
 mod server;
 mod subagents;
 mod supervisor;

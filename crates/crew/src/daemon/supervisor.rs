@@ -465,6 +465,9 @@ impl Daemon {
             self.update_agent(id, |a| a.model = Some(model.clone()));
         }
 
+        // Before anything starts: an agent that must be sandboxed and cannot
+        // be starts nothing.
+        spec.sandbox = self.terminal_sandbox(&agent, &spec, procs.name()).await?;
         self.stop_sidecar(id);
         if let Some(sidecar) = &spec.sidecar {
             self.start_sidecar(id, sidecar).await?;
