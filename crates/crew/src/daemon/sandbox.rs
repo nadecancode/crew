@@ -454,16 +454,9 @@ impl Daemon {
                 .map_err(|e| {
                     anyhow!("{} cannot be filled in a sandbox: {e}", worktree.display())
                 })?;
-        for warning in warnings {
-            self.emit(
-                NewEvent::new(
-                    "daemon",
-                    "sandbox.warning",
-                    format!("{}: {warning}", worktree.display()),
-                )
-                .warn(),
-            );
-        }
+        // What it leaves out (PATH entries, toolchain leaves) is the same for
+        // every profile, and is reported when an agent's session starts.
+        drop(warnings);
         Ok(launcher)
     }
 
@@ -531,6 +524,9 @@ workspace.sandbox.mode: off"
         let agent_dir = self.agent_dir(&agent.id);
         let workdir = PathBuf::from(&agent.workdir);
         let orchestrator = agent.orchestrator;
+        // Reported once per start of the session; the agent's git, sidecar
+        // and queue commands leave out the same things and say nothing more.
+        let report = run.terminal.is_some();
         let built = tokio::task::spawn_blocking(move || -> Result<Built> {
             let (host, layout) = host_and_layout(&crew_bin, &workspace, &socket)?;
             let path = std::env::var_os("PATH");
@@ -561,7 +557,7 @@ workspace.sandbox.mode: off"
             )
         })
         .await??;
-        for warning in &built.warnings {
+        for warning in built.warnings.iter().filter(|_| report) {
             self.emit(
                 NewEvent::new(
                     "daemon",
