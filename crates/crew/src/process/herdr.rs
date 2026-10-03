@@ -535,6 +535,33 @@ fn herdr_kind(kind: RuntimeKind) -> Option<&'static str> {
     }
 }
 
+/// herdr starts the canonical executable of an agent kind (`pi`) from its own
+/// `PATH`; it cannot be told which program to run. When crew selected another
+/// pi (`CREW_PI`, or a validated one that is not the first on `PATH`), the
+/// herdr pane would run the wrong tool, so refuse instead.
+fn check_selected_program(spec: &LaunchSpec, path: Option<std::ffi::OsString>) -> Result<()> {
+    if spec.kind != RuntimeKind::Pi || spec.program == "pi" {
+        return Ok(());
+    }
+    let first = path
+        .iter()
+        .flat_map(std::env::split_paths)
+        .map(|dir| dir.join("pi"))
+        .find(|candidate| candidate.is_file());
+    let same = |a: &Path, b: &Path| matches!((a.canonicalize(), b.canonicalize()), (Ok(a), Ok(b)) if a == b);
+    if first
+        .as_deref()
+        .is_some_and(|first| same(first, Path::new(&spec.program)))
+    {
+        return Ok(());
+    }
+    bail!(
+        "the herdr backend starts `pi` from its own PATH and cannot run the selected {}; \
+put it first on PATH or use backend: pty",
+        spec.program
+    )
+}
+
 /// The shared handle is needed to spawn watcher tasks, so the trait is
 /// implemented on `Arc<HerdrManager>`.
 pub struct Herdr(pub Arc<HerdrManager>);
@@ -547,6 +574,7 @@ impl ProcessManager for Herdr {
 
     async fn spawn(&self, spec: &LaunchSpec) -> Result<Spawned> {
         let mgr = &self.0;
+        check_selected_program(spec, std::env::var_os("PATH"))?;
         if let Ok(old) = mgr.pane(&spec.agent_id) {
             if old.alive.load(Ordering::SeqCst) {
                 // Restart: replace the old pane.
@@ -1002,6 +1030,45 @@ mod tests {
             },
         );
         Herdr(mgr)
+    }
+
+    fn pi_spec(program: &str) -> LaunchSpec {
+        LaunchSpec {
+            agent_id: "a".into(),
+            kind: RuntimeKind::Pi,
+            program: program.into(),
+            args: vec![],
+            env: vec![],
+            cwd: "/".into(),
+            prompt: None,
+            prompt_as_arg: true,
+            sidecar: None,
+        }
+    }
+
+    #[tokio::test]
+    async fn herdr_refuses_a_pi_it_would_not_start() {
+        let dir = tempfile::tempdir().unwrap();
+        let socket = dir.path().join("h.sock");
+        let log = fake_herdr(&socket, None).await;
+        let herdr = herdr_with_pane(&socket, RuntimeKind::Pi);
+        let err = herdr
+            .spawn(&pi_spec("/opt/elsewhere/pi"))
+            .await
+            .unwrap_err();
+        assert!(err.to_string().contains("cannot run the selected"), "{err}");
+        assert!(log.lock().unwrap().is_empty(), "herdr must not be called");
+    }
+
+    #[test]
+    fn the_first_pi_on_path_is_accepted() {
+        let dir = tempfile::tempdir().unwrap();
+        let pi = dir.path().join("pi");
+        std::fs::write(&pi, "#!/bin/sh\n").unwrap();
+        let path = std::env::join_paths([dir.path()]).ok();
+        assert!(check_selected_program(&pi_spec(&pi.to_string_lossy()), path.clone()).is_ok());
+        assert!(check_selected_program(&pi_spec("pi"), None).is_ok());
+        assert!(check_selected_program(&pi_spec("/elsewhere/pi"), path).is_err());
     }
 
     #[tokio::test]
