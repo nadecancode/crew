@@ -668,6 +668,34 @@ fn a_task_too_long_for_its_task_message_is_refused_at_creation() {
 }
 
 #[test]
+fn a_card_edit_that_makes_its_task_message_too_long_is_refused() {
+    let s = Session::new();
+    let mut team = s.team(
+        "long-title",
+        vec![agent("a", "", &["--on-task=wait-message operator"])],
+        vec![task("first", "a", &[]), task("second", "a", &["first"])],
+    );
+    team.limits.max_message_bytes = 120;
+    s.run(&team);
+    let ws = s.workspace.to_string_lossy().into_owned();
+    // The title is in the task message; with this one it would not fit, and
+    // the task could never be handed out.
+    let long = "t".repeat(150);
+    let refused = s.crew(&["task", "edit", "second", "--title", &long, "-C", &ws]);
+    assert!(!refused.status.success(), "{}", stdout(&refused));
+    assert!(
+        stderr(&refused).contains("limits.max_message_bytes"),
+        "{}",
+        stderr(&refused)
+    );
+    assert_eq!(find_task(&s.snapshot(), "second").title, "task second");
+    assert!(!s.has_event("task.edited"));
+    // One that fits is taken.
+    s.ok(&["task", "edit", "second", "--title", "part two", "-C", &ws]);
+    assert_eq!(find_task(&s.snapshot(), "second").title, "part two");
+}
+
+#[test]
 fn a_task_whose_task_message_is_refused_fails_instead_of_staying_working() {
     let s = Session::new();
     let team = s.team(

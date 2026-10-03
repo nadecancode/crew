@@ -401,15 +401,21 @@ until the database takes writes again, tasks wait where they are.",
                 "task {id} is done; add a task for further work"
             )));
         }
+        let revise = |t: &mut Task| {
+            if let Some(title) = &title {
+                t.title = title.clone();
+            }
+            if let Some(description) = &description {
+                t.description = description.clone();
+            }
+        };
+        // As at creation: a card whose task message would not fit could
+        // never be handed out.
+        let mut revised = before.clone();
+        revise(&mut revised);
+        check_task_message_size(&revised, self.bus.max_bytes())?;
         let task = self
-            .try_update_task(id, |t| {
-                if let Some(title) = &title {
-                    t.title = title.clone();
-                }
-                if let Some(description) = &description {
-                    t.description = description.clone();
-                }
-            })?
+            .try_update_task(id, revise)?
             .ok_or_else(|| RpcError::not_found(format!("no task '{id}'")))?;
         let changed: Vec<&str> = [
             (task.title != before.title).then_some("title"),
