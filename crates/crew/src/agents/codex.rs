@@ -7,7 +7,7 @@
 //! session's developer instructions: part of its system prompt, so they are
 //! cached with it and Codex puts them back after a compaction.
 
-use anyhow::Result;
+use anyhow::{bail, Result};
 use crew_core::paths::IDENTITY_ENV;
 use crew_core::RuntimeKind;
 use serde_json::{json, Value};
@@ -182,10 +182,21 @@ impl AgentRuntime for CodexRuntime {
 
         // Socket delivery: run a private app-server and attach the TUI to it,
         // so messages can be queued into the session over its Unix socket.
-        let sidecar = ctx.settings.socket_delivery.then(|| {
-            let socket = ctx
-                .agent_dir
-                .join(format!("codex-{}.sock", crew_core::util::now_ms()));
+        let sidecar = ctx.settings.socket_delivery.then(|| -> Result<Sidecar> {
+            // In the runtime directory under a hash, not in the agent's state
+            // directory: `sun_path` holds about 100 bytes and a nested workspace
+            // would overflow it.
+            let socket = crew_core::paths::runtime_dir().join(format!(
+                "codex-{:016x}-{}.sock",
+                crew_core::util::fnv1a64(ctx.agent_dir.to_string_lossy().as_bytes()),
+                crew_core::util::now_ms()
+            ));
+            if socket.as_os_str().len() >= 104 {
+                bail!(
+                    "the app-server socket path {} is too long for a Unix socket; set a shorter XDG_RUNTIME_DIR",
+                    socket.display()
+                );
+            }
             let mut args = vec![
                 "app-server".to_string(),
                 "--listen".to_string(),
@@ -194,14 +205,15 @@ impl AgentRuntime for CodexRuntime {
             args.extend(overrides.iter().cloned());
             args.extend(server_permissions.iter().cloned());
             args.extend(ctx.settings.extra_args.iter().cloned());
-            Sidecar {
+            Ok(Sidecar {
                 program: "codex".into(),
                 args,
                 cwd: cwd.clone().into(),
                 env: env.clone(),
                 socket,
-            }
-        });
+            })
+        })
+        .transpose()?;
 
         let mut args: Vec<String> = Vec::new();
         if let Some(sidecar) = &sidecar {
@@ -642,6 +654,31 @@ mod tests {
         assert!(spec
             .args
             .contains(&r#"model_providers.crew.wire_api="responses""#.to_string()));
+    }
+
+    #[test]
+    fn the_sidecar_socket_path_fits_sun_path_for_a_deep_workspace() {
+        let agent = agent();
+        let deep = format!("/state/{}/agents/codex-1", "nested/".repeat(18));
+        assert!(deep.len() > 120);
+        let spec = CodexRuntime
+            .launch(&LaunchContext {
+                agent: &agent,
+                settings: &AgentSettings {
+                    socket_delivery: true,
+                    ..AgentSettings::default()
+                },
+                crew_bin: Path::new("/bin/crew"),
+                agent_dir: Path::new(&deep),
+                identity_path: &Path::new(&deep).join("identity.json"),
+                briefing: "standing instructions",
+                resume: false,
+                endpoint: &Endpoint::default(),
+                long_context: false,
+            })
+            .unwrap();
+        let socket = spec.sidecar.expect("an app-server sidecar").socket;
+        assert!(socket.as_os_str().len() < 104, "{}", socket.display());
     }
 
     #[test]
