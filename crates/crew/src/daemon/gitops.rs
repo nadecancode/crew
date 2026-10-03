@@ -43,6 +43,20 @@ impl Daemon {
             .map_err(|e| git_error(format!("{e:#}")))
     }
 
+    /// In a shared checkout every agent works in one tree, so a commit,
+    /// merge or cherry-pick cannot be attributed to one agent and moves
+    /// everyone's HEAD.
+    fn require_own_worktree(&self, tool: &str) -> Result<(), RpcError> {
+        if self.model().session.isolation == "shared" {
+            return Err(git_error(format!(
+                "{tool} is not available: the checkout is shared, so a commit cannot be attributed \
+to one agent. Report your changed files to the orchestrator instead (task_complete summary or \
+agent_send)"
+            )));
+        }
+        Ok(())
+    }
+
     async fn ensure_repo(&self, dir: &std::path::Path) -> Result<(), RpcError> {
         let probe = dir.to_path_buf();
         let is_root = tokio::task::spawn_blocking(move || git::is_root(&probe))
@@ -63,6 +77,7 @@ git in it (use a git repository as the workspace, or workspace.init: true)",
         agent: &str,
         message: String,
     ) -> Result<CommitInfo, RpcError> {
+        self.require_own_worktree("git_commit")?;
         let dir = self.git_dir(agent)?;
         self.ensure_repo(&dir).await?;
         let author = agent.to_string();
@@ -136,6 +151,7 @@ git in it (use a git repository as the workspace, or workspace.init: true)",
         agent: &str,
         commit: String,
     ) -> Result<GitOutcome, RpcError> {
+        self.require_own_worktree("git_cherry_pick")?;
         let dir = self.git_dir(agent)?;
         self.ensure_repo(&dir).await?;
         let author = agent.to_string();
@@ -163,6 +179,7 @@ git in it (use a git repository as the workspace, or workspace.init: true)",
         agent: &str,
         from_agent: String,
     ) -> Result<GitOutcome, RpcError> {
+        self.require_own_worktree("git_merge")?;
         if !is_valid_id(&from_agent) {
             return Err(RpcError::not_found(format!("no agent '{from_agent}'")));
         }
