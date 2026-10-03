@@ -40,6 +40,8 @@ pub enum ClientError {
     OperatorToken { path: String, message: String },
     #[error("no operator token at {path}: operator commands must run as the user who started the daemon, outside agent sandboxes")]
     MissingOperatorToken { path: String },
+    #[error("this process runs as agent '{agent_id}' (CREW_IDENTITY is set): operator commands are not available to agents; use your crew tools or crew ctl")]
+    AgentContext { agent_id: String },
 }
 
 impl ClientError {
@@ -59,7 +61,9 @@ impl ClientError {
     pub fn is_operator_auth_error(&self) -> bool {
         matches!(
             self,
-            Self::OperatorToken { .. } | Self::MissingOperatorToken { .. }
+            Self::OperatorToken { .. }
+                | Self::MissingOperatorToken { .. }
+                | Self::AgentContext { .. }
         ) || matches!(self, Self::Rpc(error) if error.code == "unauthorized")
     }
 }
@@ -113,6 +117,13 @@ impl Client {
 
     /// Connect and authenticate as the human operator.
     pub fn operator(socket: &Path, client: &str) -> ClientResult<(Self, HelloInfo)> {
+        if std::env::var_os(crate::paths::IDENTITY_ENV).is_some() {
+            let agent_id = Identity::from_env()
+                .map(|identity| identity.agent_id)
+                .filter(|id| crate::util::is_valid_id(id))
+                .unwrap_or_else(|| "unknown".into());
+            return Err(ClientError::AgentContext { agent_id });
+        }
         let token = crate::paths::read_operator_token(socket).map_err(|error| {
             ClientError::OperatorToken {
                 path: crate::paths::operator_token_path(socket)
@@ -357,6 +368,107 @@ fn read_frame(reader: &mut BufReader<UnixStream>) -> ClientResult<ServerFrame> {
 mod tests {
     use super::*;
     use serde_json::json;
+
+    #[test]
+    fn operator_client_refuses_under_crew_identity() {
+        const PROBE: &str = "CREW_OPERATOR_GUARD_PROBE";
+        if let Some(socket) = std::env::var_os(PROBE) {
+            let error = Client::operator(Path::new(&socket), "test")
+                .err()
+                .expect("operator client must refuse an agent environment");
+            let message = error.to_string();
+            assert!(message.contains("CREW_IDENTITY is set"), "{message}");
+            assert!(
+                message.contains("operator commands are not available to agents"),
+                "{message}"
+            );
+            assert!(
+                message.contains("use your crew tools or crew ctl"),
+                "{message}"
+            );
+            assert!(!message.contains("identity-secret-do-not-print"));
+            return;
+        }
+        use std::os::unix::net::UnixListener;
+        let temp = tempfile::tempdir().unwrap();
+        let socket = temp.path().join("daemon.sock");
+        crate::paths::write_private_file(
+            &crate::paths::operator_token_path(&socket),
+            b"operator-secret",
+        )
+        .unwrap();
+        let identity = temp.path().join("identity.json");
+        crate::paths::write_private_file(
+            &identity,
+            &serde_json::to_vec(&Identity {
+                socket: socket.to_string_lossy().into_owned(),
+                agent_id: "worker".into(),
+                token: "identity-secret-do-not-print".into(),
+            })
+            .unwrap(),
+        )
+        .unwrap();
+        for identity in [
+            identity.into_os_string(),
+            temp.path().join("missing.json").into_os_string(),
+            std::ffi::OsString::new(),
+        ] {
+            let listener = UnixListener::bind(&socket).unwrap();
+            listener.set_nonblocking(true).unwrap();
+            let peer = std::thread::spawn(move || {
+                let deadline = std::time::Instant::now() + Duration::from_millis(500);
+                while std::time::Instant::now() < deadline {
+                    match listener.accept() {
+                        Ok((mut stream, _)) => {
+                            stream.set_nonblocking(false).unwrap();
+                            stream
+                                .set_read_timeout(Some(Duration::from_secs(1)))
+                                .unwrap();
+                            let mut line = String::new();
+                            BufReader::new(stream.try_clone().unwrap())
+                                .read_line(&mut line)
+                                .unwrap();
+                            let request: Request = serde_json::from_str(&line).unwrap();
+                            send_frame(
+                                &mut stream,
+                                ServerFrame::ok(
+                                    request.id,
+                                    json!({"role":"operator", "version":"test", "protocol":PROTOCOL_VERSION, "pid":1}),
+                                ),
+                            );
+                            return true;
+                        }
+                        Err(error) if error.kind() == io::ErrorKind::WouldBlock => {
+                            std::thread::sleep(Duration::from_millis(1))
+                        }
+                        Err(error) => panic!("accept failed: {error}"),
+                    }
+                }
+                false
+            });
+            let child = std::process::Command::new(std::env::current_exe().unwrap())
+                .args([
+                    "--exact",
+                    "client::tests::operator_client_refuses_under_crew_identity",
+                    "--nocapture",
+                ])
+                .env(PROBE, &socket)
+                .env(crate::paths::IDENTITY_ENV, identity)
+                .output()
+                .unwrap();
+            assert!(
+                !peer.join().unwrap(),
+                "operator connected from an agent environment"
+            );
+            assert!(
+                child.status.success(),
+                "{}{}",
+                String::from_utf8_lossy(&child.stdout),
+                String::from_utf8_lossy(&child.stderr)
+            );
+            std::fs::remove_file(&socket).unwrap();
+        }
+    }
 
     #[test]
     fn missing_token_file_is_a_clear_error() {

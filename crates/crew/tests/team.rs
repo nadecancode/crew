@@ -18,6 +18,59 @@ use serde_json::{json, Value};
 // ---------------------------------------------------------------------------
 
 #[test]
+fn operator_subcommands_refuse_inside_an_agent() {
+    let s = Session::new();
+    s.run(&s.team(
+        "guard",
+        vec![agent("a", "", &[]), agent("b", "", &[])],
+        vec![],
+    ));
+    s.wait("the agents to come up", |snap| {
+        snap.agents
+            .iter()
+            .all(|a| a.status != AgentStatus::Spawning)
+    });
+    let ws = s.workspace.to_string_lossy().into_owned();
+    // Operator calls and authenticated agent calls work in their own contexts.
+    assert_eq!(s.snapshot().agents.len(), 2);
+    let allowed = s.ctl("a", &["tool", "agents_list", "{}"]);
+    assert!(allowed.status.success(), "{}", stderr(&allowed));
+    for args in [
+        vec!["status", "--json"],
+        vec!["agent", "pause", "b"],
+        vec!["agent", "resume", "b"],
+        vec!["resume"],
+        vec!["send", "b", "cannot operate"],
+        vec!["agent", "kill", "b"],
+        vec!["stop"],
+    ] {
+        let output = s
+            .command()
+            .env("CREW_IDENTITY", s.identity_path("a"))
+            .args(&args)
+            .args(["-C", &ws])
+            .output()
+            .unwrap();
+        assert!(!output.status.success(), "{args:?} unexpectedly worked");
+        let error = stderr(&output);
+        assert!(
+            error.contains("this process runs as agent 'a'"),
+            "{args:?}: {error}"
+        );
+        assert!(
+            error.contains("operator commands are not available to agents"),
+            "{args:?}: {error}"
+        );
+        assert!(error.contains("crew ctl"), "{args:?}: {error}");
+    }
+    let snapshot = s.snapshot();
+    assert!(snapshot.agents.iter().all(|agent| !agent.paused));
+    assert!(find_agent(&snapshot, "b").pid.is_some());
+    assert!(!s.messages().iter().any(|m| m.body == "cannot operate"));
+    assert!(s.ctl("a", &["tool", "agents_list", "{}"]).status.success());
+}
+
+#[test]
 fn direct_messages_go_peer_to_peer_and_the_recipient_reacts() {
     let s = Session::new();
     let team = s.team(
