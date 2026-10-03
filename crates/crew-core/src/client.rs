@@ -36,6 +36,8 @@ pub enum ClientError {
     Version { daemon: u32, client: u32 },
     #[error("incompatible crew protocol: {0}; restart the team after upgrading, or use the binary that started it")]
     IncompatibleProtocol(String),
+    #[error("cannot read operator token at {path}: {message}")]
+    OperatorToken { path: String, message: String },
 }
 
 impl ClientError {
@@ -102,11 +104,19 @@ impl Client {
 
     /// Connect and authenticate as the human operator.
     pub fn operator(socket: &Path, client: &str) -> ClientResult<(Self, HelloInfo)> {
+        let token = crate::paths::read_operator_token(socket).map_err(|error| {
+            ClientError::OperatorToken {
+                path: crate::paths::operator_token_path(socket)
+                    .display()
+                    .to_string(),
+                message: error.to_string(),
+            }
+        })?;
         let mut c = Self::connect(socket)?;
         let info = check_hello(c.call(Call::Hello(Hello {
             role: Role::Operator,
             agent_id: None,
-            token: None,
+            token,
             client: client.to_string(),
             protocol: PROTOCOL_VERSION,
         })))?;
@@ -333,6 +343,70 @@ fn read_frame(reader: &mut BufReader<UnixStream>) -> ClientResult<ServerFrame> {
 mod tests {
     use super::*;
     use serde_json::json;
+
+    #[test]
+    fn operator_hello_carries_the_token_file_and_missing_file_keeps_legacy_bytes() {
+        use std::os::unix::net::UnixListener;
+        for token in [None, Some("synthetic-operator-secret")] {
+            let temp = tempfile::tempdir().unwrap();
+            let socket = temp.path().join("daemon.sock");
+            if let Some(token) = token {
+                crate::paths::write_private_file(&socket.with_extension("token"), token.as_bytes())
+                    .unwrap();
+            }
+            let listener = UnixListener::bind(&socket).unwrap();
+            let peer = std::thread::spawn(move || {
+                let (mut stream, _) = listener.accept().unwrap();
+                let mut line = String::new();
+                BufReader::new(stream.try_clone().unwrap())
+                    .read_line(&mut line)
+                    .unwrap();
+                let request: Request = serde_json::from_str(&line).unwrap();
+                let Call::Hello(hello) = request.call else {
+                    panic!("expected Hello")
+                };
+                send_frame(
+                    &mut stream,
+                    ServerFrame::ok(
+                        request.id,
+                        json!({"role":"operator", "version":"test", "protocol":PROTOCOL_VERSION, "pid":1}),
+                    ),
+                );
+                (line, hello)
+            });
+            let result = Client::operator(&socket, "token-test");
+            let (line, hello) = peer.join().unwrap();
+            assert!(result.is_ok());
+            assert_eq!(hello.token.as_deref(), token);
+            if token.is_none() {
+                let expected = serde_json::to_string(&Request {
+                    id: 1,
+                    call: Call::Hello(Hello {
+                        role: Role::Operator,
+                        agent_id: None,
+                        token: None,
+                        client: "token-test".into(),
+                        protocol: PROTOCOL_VERSION,
+                    }),
+                })
+                .unwrap()
+                    + "\n";
+                assert_eq!(line, expected);
+            }
+        }
+    }
+
+    #[test]
+    fn hello_debug_does_not_reveal_operator_tokens() {
+        let hello = Hello {
+            role: Role::Operator,
+            agent_id: None,
+            token: Some("synthetic-secret-do-not-print".into()),
+            client: "test".into(),
+            protocol: PROTOCOL_VERSION,
+        };
+        assert!(!format!("{hello:?}").contains("synthetic-secret-do-not-print"));
+    }
 
     #[test]
     fn framing_errors_and_timeouts_close_the_client_before_reuse() {

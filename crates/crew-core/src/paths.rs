@@ -371,6 +371,75 @@ pub fn socket_path(state_dir: &Path) -> PathBuf {
     socket_path_in(state_dir, &runtime_dir())
 }
 
+/// The credential beside a daemon socket. Avoid a collision for socket names
+/// that already end in .token (including explicit CREW_SOCKET overrides).
+pub fn operator_token_path(socket: &Path) -> PathBuf {
+    if socket.extension() == Some(OsStr::new("token")) {
+        let mut name = socket.as_os_str().to_os_string();
+        name.push(".token");
+        PathBuf::from(name)
+    } else {
+        socket.with_extension("token")
+    }
+}
+
+/// Read an existing private operator credential. Missing files remain optional
+/// during the plumbing rollout; every other error fails closed. Never log it.
+pub fn read_operator_token(socket: &Path) -> Result<Option<String>> {
+    use std::io::Read;
+    let path = operator_token_path(socket);
+    let parent = path
+        .parent()
+        .filter(|p| !p.as_os_str().is_empty())
+        .unwrap_or(Path::new("."));
+    #[cfg(target_os = "linux")]
+    let access = libc::O_PATH;
+    #[cfg(not(target_os = "linux"))]
+    let access = libc::O_RDONLY;
+    let directory = match fs::OpenOptions::new()
+        .read(true)
+        .custom_flags(access | libc::O_DIRECTORY)
+        .open(parent)
+    {
+        Ok(directory) => directory,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+        Err(error) => {
+            return Err(error)
+                .with_context(|| format!("opening operator token directory {}", parent.display()))
+        }
+    };
+    let name = path
+        .file_name()
+        .ok_or_else(|| anyhow!("operator token path has no file name"))?;
+    let file = match open_beneath(&directory, Path::new(name)) {
+        Ok(file) => file,
+        Err(error)
+            if error
+                .downcast_ref::<std::io::Error>()
+                .is_some_and(|error| error.kind() == std::io::ErrorKind::NotFound) =>
+        {
+            return Ok(None)
+        }
+        Err(error) => return Err(error).context("opening operator token file"),
+    };
+    let metadata = file.metadata()?;
+    if metadata.uid() != uid() || metadata.permissions().mode() & 0o777 != 0o600 {
+        bail!("operator token file must be owned by the current user with mode 0600");
+    }
+    if metadata.len() == 0 || metadata.len() > 1024 {
+        bail!("operator token file must contain 1 to 1024 bytes");
+    }
+    let mut token = String::new();
+    file.take(1025)
+        .read_to_string(&mut token)
+        .context("reading operator token file")?;
+    let token = token.trim();
+    if token.is_empty() || token.len() > 1024 {
+        bail!("operator token file must contain 1 to 1024 bytes");
+    }
+    Ok(Some(token.to_owned()))
+}
+
 fn socket_path_in(state_dir: &Path, runtime: &Path) -> PathBuf {
     runtime.join(format!("{:016x}.sock", session_hash(state_dir)))
 }
@@ -534,6 +603,54 @@ pub fn discover(dir: Option<&Path>, project: Option<&str>) -> Result<DaemonInfo>
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn operator_token_paths_are_distinct_and_credentials_are_private_bounded_files() {
+        assert_eq!(
+            operator_token_path(Path::new("/run/crew/hash.sock")),
+            Path::new("/run/crew/hash.token")
+        );
+        assert_eq!(
+            operator_token_path(Path::new("/run/crew/socket")),
+            Path::new("/run/crew/socket.token")
+        );
+        assert_eq!(
+            operator_token_path(Path::new("/run/crew/socket.token")),
+            Path::new("/run/crew/socket.token.token")
+        );
+        let temp = tempfile::tempdir().unwrap();
+        let socket = temp.path().join("daemon.sock");
+        let token = operator_token_path(&socket);
+        assert_eq!(read_operator_token(&socket).unwrap(), None);
+        write_private_file(&token, b"synthetic private credential\n").unwrap();
+        assert_eq!(
+            read_operator_token(&socket).unwrap().as_deref(),
+            Some("synthetic private credential")
+        );
+        for bytes in [b"".as_slice(), b" \n ", &[0xff], &vec![b'x'; 1025]] {
+            write_private_file(&token, bytes).unwrap();
+            assert!(read_operator_token(&socket).is_err());
+        }
+        write_private_file(&token, b"must-not-appear-in-error").unwrap();
+        fs::set_permissions(&token, fs::Permissions::from_mode(0o644)).unwrap();
+        let error = read_operator_token(&socket).unwrap_err();
+        assert!(!error.to_string().contains("must-not-appear-in-error"));
+        fs::remove_file(&token).unwrap();
+        fs::create_dir(&token).unwrap();
+        assert!(read_operator_token(&socket).is_err());
+        fs::remove_dir(&token).unwrap();
+        let outside = temp.path().join("outside");
+        write_private_file(&outside, b"outside sentinel").unwrap();
+        assert_eq!(fs::read(&outside).unwrap(), b"outside sentinel");
+        std::os::unix::fs::symlink(&outside, &token).unwrap();
+        assert!(read_operator_token(&socket).is_err());
+        fs::remove_file(&token).unwrap();
+        std::os::unix::fs::symlink(temp.path().join("missing"), &token).unwrap();
+        assert!(
+            read_operator_token(&socket).is_err(),
+            "a dangling link must not look like an absent credential"
+        );
+    }
 
     #[test]
     fn open_beneath_refuses_symlinks_dotdot_and_special_files() {

@@ -30,7 +30,7 @@ pub enum Role {
     Agent,
 }
 
-#[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
+#[derive(Serialize, Deserialize, Clone, PartialEq)]
 pub struct Hello {
     pub role: Role,
     #[serde(default)]
@@ -42,6 +42,18 @@ pub struct Hello {
     pub client: String,
     #[serde(default)]
     pub protocol: u32,
+}
+
+impl std::fmt::Debug for Hello {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Hello")
+            .field("role", &self.role)
+            .field("agent_id", &self.agent_id)
+            .field("token", &self.token.as_ref().map(|_| "<redacted>"))
+            .field("client", &self.client)
+            .field("protocol", &self.protocol)
+            .finish()
+    }
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Default)]
