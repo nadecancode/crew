@@ -86,7 +86,7 @@ pub fn claude_quota(payload: &Value) -> Vec<QuotaReading> {
             };
             Some(QuotaReading {
                 window,
-                percent_used: w.get("percentUsed")?.as_f64()? as f32,
+                percent_used: finite_percent(w.get("percentUsed")?)?,
                 resets_at: w
                     .get("resetsAt")
                     .and_then(Value::as_str)
@@ -135,7 +135,7 @@ pub fn claude_cached_quota(text: &str) -> Option<(i64, Vec<QuotaReading>)> {
             };
             Some(QuotaReading {
                 window,
-                percent_used: limit.get("percent")?.as_f64()? as f32,
+                percent_used: finite_percent(limit.get("percent")?)?,
                 resets_at: limit
                     .get("resets_at")
                     .and_then(Value::as_str)
@@ -157,6 +157,12 @@ pub fn window_label(window: &str) -> String {
             None => other.to_string(),
         },
     }
+}
+
+/// A percentage a reading can carry: a number that is still finite as an f32
+/// (`1e300` is not, and an infinite quota breaks the snapshots it travels in).
+fn finite_percent(value: &Value) -> Option<f32> {
+    Some(value.as_f64()? as f32).filter(|p| p.is_finite())
 }
 
 /// Session first, then the weekly windows, then the rest.
@@ -194,7 +200,7 @@ pub fn codex_quota(rollout: &str) -> Vec<QuotaReading> {
             let w = limits.get(name)?;
             Some(QuotaReading {
                 window: window_name(w.get("window_minutes")?.as_i64()?),
-                percent_used: w.get("used_percent")?.as_f64()? as f32,
+                percent_used: finite_percent(w.get("used_percent")?)?,
                 resets_at: w
                     .get("resets_at")
                     .and_then(Value::as_i64)
@@ -1296,6 +1302,26 @@ mod tests {
         ] {
             assert_eq!(codex_screen(quoted, now), None, "{quoted}");
         }
+    }
+
+    #[test]
+    fn a_quota_that_does_not_fit_an_f32_is_dropped() {
+        // 1e300 becomes `inf` as an f32, which breaks every snapshot that carries it.
+        let huge = claude_quota(&json!({ "rate_limits": [
+            { "kind": "five_hour", "percentUsed": 1e300 },
+            { "kind": "seven_day", "percentUsed": 21 },
+        ]}));
+        assert_eq!(huge.len(), 1);
+        assert!(huge.iter().all(|r| r.percent_used.is_finite()));
+        let cache = json!({ "cachedUsageUtilization": { "fetchedAtMs": 1, "limits": [
+            { "kind": "session", "percent": 1e300 },
+        ] } });
+        assert!(claude_cached_quota(&cache.to_string())
+            .unwrap()
+            .1
+            .is_empty());
+        let rollout = r#"{"payload":{"rate_limits":{"primary":{"window_minutes":300,"used_percent":1e300}}}}"#;
+        assert!(codex_quota(rollout).is_empty());
     }
 
     #[test]
