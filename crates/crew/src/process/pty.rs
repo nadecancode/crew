@@ -642,6 +642,23 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn the_exit_event_comes_after_the_last_output_is_on_the_screen() {
+        for i in 0..150 {
+            let (tx, mut rx) = mpsc::unbounded_channel();
+            let mgr = PtyManager::new(tx);
+            mgr.spawn(&spec("a", "printf", &["%s", &format!("last-words-{i}")]))
+                .await
+                .unwrap();
+            wait_for_exit(&mut rx).await;
+            let screen = mgr.screen("a", 10).await.unwrap();
+            assert!(
+                screen.contains(&format!("last-words-{i}")),
+                "run {i}: {screen:?}"
+            );
+        }
+    }
+
+    #[tokio::test]
     async fn prompts_reach_stdin_and_kill_stops_the_process() {
         let (tx, mut rx) = mpsc::unbounded_channel();
         let mgr = PtyManager::new(tx);
