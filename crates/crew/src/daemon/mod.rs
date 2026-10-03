@@ -929,6 +929,16 @@ mod tests {
         assert!(lock_instance(&state_dir).unwrap().is_none());
 
         drop(published);
-        assert!(lock_instance(&state_dir).unwrap().is_some());
+        // A test running alongside may have just forked a child (see
+        // sandbox::test_support::in_child) that holds a copy of the lock's
+        // descriptor; the lock goes when that child exits.
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+        while lock_instance(&state_dir).unwrap().is_none() {
+            assert!(
+                std::time::Instant::now() < deadline,
+                "the lock outlived the withdrawal"
+            );
+            std::thread::sleep(std::time::Duration::from_millis(10));
+        }
     }
 }
