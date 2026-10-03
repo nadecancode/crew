@@ -1478,6 +1478,18 @@ pub fn integrate(target: &Target) -> Result<()> {
     Ok(())
 }
 
+/// The call that restarts agent `id`: resuming its session, or (`fresh`) in a
+/// new one. Fresh is a call of its own, so a daemon that predates it refuses
+/// rather than resuming.
+pub(super) fn restart_call(id: &str, fresh: bool) -> Call {
+    let id = id.to_string();
+    if fresh {
+        Call::AgentRestartFresh { id }
+    } else {
+        Call::AgentRestart { id }
+    }
+}
+
 pub fn agent(target: &Target, cmd: AgentCommand) -> Result<()> {
     let (mut client, info) = target.connect("cli")?;
     match cmd {
@@ -1520,9 +1532,12 @@ pub fn agent(target: &Target, cmd: AgentCommand) -> Result<()> {
             client.call_value(Call::AgentRemove { id: id.clone() })?;
             println!("{id} left the team");
         }
-        AgentCommand::Restart { id } => {
-            client.call_value(Call::AgentRestart { id: id.clone() })?;
-            println!("restarting {id}");
+        AgentCommand::Restart { id, fresh } => {
+            client.call_value(restart_call(&id, fresh))?;
+            println!(
+                "restarting {id}{}",
+                if fresh { " in a new session" } else { "" }
+            );
         }
         AgentCommand::Model {
             id,

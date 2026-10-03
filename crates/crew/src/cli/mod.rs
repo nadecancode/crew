@@ -322,8 +322,14 @@ pub enum AgentCommand {
     Kill { id: String },
     /// Take an agent off the team (its open tasks return to the pool)
     Remove { id: String },
-    /// Restart an agent, resuming its session
-    Restart { id: String },
+    /// Restart an agent, resuming its session (with --fresh: in a new session)
+    Restart {
+        id: String,
+        /// Start a new session instead of resuming the old one (for a session
+        /// the provider keeps refusing)
+        #[arg(long)]
+        fresh: bool,
+    },
     /// Put an agent on another model or CLI: on its own CLI the session is
     /// restarted on the model; on another, a fresh session there is handed
     /// the work
@@ -629,6 +635,29 @@ fn edit_distance(a: &str, b: &str) -> usize {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn restart_fresh_asks_for_a_new_session_and_plain_restart_still_resumes() {
+        use crew_core::rpc::Call;
+        let parse = |args: &[&str]| {
+            let mut argv = vec!["crew", "agent", "restart"];
+            argv.extend_from_slice(args);
+            match Cli::parse_from(argv).command {
+                Some(Command::Agent(AgentCommand::Restart { id, fresh })) => (id, fresh),
+                _ => panic!("not an agent restart"),
+            }
+        };
+        let (id, fresh) = parse(&["worker-1", "--fresh"]);
+        assert!(matches!(
+            ops::restart_call(&id, fresh),
+            Call::AgentRestartFresh { id } if id == "worker-1"
+        ));
+        let (id, fresh) = parse(&["worker-1"]);
+        assert!(matches!(
+            ops::restart_call(&id, fresh),
+            Call::AgentRestart { id } if id == "worker-1"
+        ));
+    }
 
     #[test]
     fn a_mistyped_command_is_not_taken_for_an_objective() {
