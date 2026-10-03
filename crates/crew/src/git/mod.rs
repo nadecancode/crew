@@ -9,6 +9,7 @@
 //! Every git invocation uses an explicit argument array (no shell), and every
 //! revision that originates from an agent is validated before use.
 
+mod beneath;
 pub mod launch;
 
 use std::path::{Path, PathBuf};
@@ -349,33 +350,22 @@ fn common_git_dir(repo: &Path) -> Result<PathBuf> {
 
 /// The administrative directory git keeps for the linked worktree at `path`
 /// (`<common>/worktrees/<name>`), found by the `gitdir` file git wrote there
-/// rather than by trusting anything inside the worktree.
-fn worktree_admin_dir(common: &Path, path: &Path) -> Option<PathBuf> {
+/// rather than by trusting anything inside the worktree. Everything is read
+/// through the descriptor of the common directory, never by a path walk.
+fn find_admin(common: &beneath::Root, path: &Path) -> Option<String> {
     let want = path.join(".git");
-    std::fs::read_dir(common.join("worktrees"))
-        .ok()?
-        .flatten()
-        .map(|e| e.path())
-        .find(|admin| {
-            read_regular(&admin.join("gitdir")).is_some_and(|g| Path::new(g.trim()) == want)
-        })
+    common.list("worktrees").into_iter().find(|name| {
+        common
+            .read_text(&format!("worktrees/{name}/gitdir"))
+            .is_some_and(|g| Path::new(g.trim()) == want)
+    })
 }
 
-/// A small regular file's text, not following a symlink in the last component.
-fn read_regular(path: &Path) -> Option<String> {
-    use std::io::Read;
-    use std::os::unix::fs::OpenOptionsExt;
-    let file = std::fs::OpenOptions::new()
-        .read(true)
-        .custom_flags(libc::O_NOFOLLOW | libc::O_NONBLOCK)
-        .open(path)
-        .ok()?;
-    if !file.metadata().ok()?.is_file() {
-        return None;
-    }
-    let mut text = String::new();
-    file.take(64 * 1024).read_to_string(&mut text).ok()?;
-    Some(text)
+/// The path of the worktree's administrative directory (for building a
+/// sandbox, which pins it again without following symlinks).
+pub fn worktree_admin_dir(common: &Path, path: &Path) -> Option<PathBuf> {
+    let root = beneath::Root::open(common).ok()?;
+    find_admin(&root, path).map(|name| common.join("worktrees").join(name))
 }
 
 /// Create (or reuse) the worktree and branch for an agent, and fill it in.
@@ -416,18 +406,21 @@ pub fn add_worktree(
     if path.join(".git").exists() {
         // Left over from an earlier run: reuse it if it is on the right
         // branch, read from the repository's own record of the worktree.
-        let common = common_git_dir(repo)?;
-        let admin = worktree_admin_dir(&common, &path)
+        let common = beneath::Root::open(&common_git_dir(repo)?)?;
+        let name = find_admin(&common, &path)
             .ok_or_else(|| anyhow!("{} is not a worktree of this repository", path.display()))?;
-        let head = read_regular(&admin.join("HEAD")).unwrap_or_default();
+        let admin = format!("worktrees/{name}");
+        let head = common
+            .read_text(&format!("{admin}/HEAD"))
+            .unwrap_or_default();
         let current = head
             .trim()
             .strip_prefix("ref: refs/heads/")
             .unwrap_or("(detached)");
         if current == branch {
-            ensure_worktree_config(&admin)?;
+            common.create_empty(&format!("{admin}/config.worktree"))?;
             // Without an index nothing was checked out yet.
-            let needs_population = !admin.join("index").exists();
+            let needs_population = !common.exists(&format!("{admin}/index"));
             return Ok((Worktree { path, branch }, needs_population));
         }
         bail!(
@@ -460,31 +453,14 @@ pub fn add_worktree(
             ],
         )?;
     }
-    let common = common_git_dir(repo)?;
-    let admin = worktree_admin_dir(&common, &path)
+    let common = beneath::Root::open(&common_git_dir(repo)?)?;
+    let name = find_admin(&common, &path)
         .ok_or_else(|| anyhow!("git did not record the worktree {}", path.display()))?;
-    ensure_worktree_config(&admin)?;
+    // An empty config.worktree: the sandbox binds it read-only over the real one,
+    // so an agent cannot set per-worktree configuration (core.fsmonitor, hooks)
+    // that crew's own git would then run.
+    common.create_empty(&format!("worktrees/{name}/config.worktree"))?;
     Ok((Worktree { path, branch }, true))
-}
-
-/// Make sure the worktree has an (empty) `config.worktree` in its administrative
-/// directory. The sandbox binds that file read-only over the real one, so an
-/// agent cannot set per-worktree configuration (`core.fsmonitor`, hooks) that
-/// crew's own git would then run.
-fn ensure_worktree_config(admin: &Path) -> Result<()> {
-    use std::os::unix::fs::OpenOptionsExt;
-    match std::fs::OpenOptions::new()
-        .write(true)
-        .create_new(true)
-        .custom_flags(libc::O_NOFOLLOW)
-        .open(admin.join("config.worktree"))
-    {
-        Ok(_) => Ok(()),
-        Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => Ok(()),
-        Err(e) => {
-            Err(e).with_context(|| format!("creating config.worktree in {}", admin.display()))
-        }
-    }
 }
 
 /// Put the branch's files in a worktree made by [`add_worktree`]. This is
@@ -1329,6 +1305,39 @@ mod tests {
             .launch(&cmd)
             .unwrap();
         assert!(!helper.get_envs().any(|(k, _)| k == "CREW_IDENTITY"));
+    }
+
+    #[test]
+    fn a_symlinked_admin_directory_is_never_followed_or_written_through() {
+        use std::os::unix::fs::symlink;
+        let r = repo();
+        ensure_worktree(&r.root, &r.worktrees, "a", "HEAD").unwrap();
+        let admin = r.root.join(".git/worktrees/a");
+        let outside = r._dir.path().join("outside-admin");
+        std::fs::rename(&admin, &outside).unwrap();
+        std::fs::remove_file(outside.join("config.worktree")).unwrap();
+        symlink(&outside, &admin).unwrap();
+        // Whatever the verdict, nothing is created through the link, and the
+        // worktree is not accepted by way of it.
+        let result = add_worktree(&r.root, &r.worktrees, "a", "HEAD");
+        assert!(
+            !outside.join("config.worktree").exists(),
+            "config.worktree was created through a symlinked admin directory"
+        );
+        assert!(
+            result.is_err(),
+            "the worktree was accepted through a symlink"
+        );
+        // A symlinked HEAD inside a real admin directory is not read either.
+        let r2 = repo();
+        ensure_worktree(&r2.root, &r2.worktrees, "b", "HEAD").unwrap();
+        let head = r2.root.join(".git/worktrees/b/HEAD");
+        let elsewhere = r2._dir.path().join("fake-head");
+        std::fs::write(&elsewhere, "ref: refs/heads/agents/b\n").unwrap();
+        std::fs::write(&head, "ref: refs/heads/other\n").unwrap();
+        std::fs::remove_file(&head).unwrap();
+        symlink(&elsewhere, &head).unwrap();
+        assert!(add_worktree(&r2.root, &r2.worktrees, "b", "HEAD").is_err());
     }
 
     #[test]
