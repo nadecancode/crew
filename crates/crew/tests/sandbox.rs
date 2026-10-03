@@ -1568,7 +1568,9 @@ exec '{}' fake-cli claude "$@"
 /// in its directory, the case where the profile leaves that directory out of
 /// the sandbox), beside the crew binary: `first/` and `second/`. Each notes
 /// which installation ran: `codex` in `$CODEX_HOME/ran`, `git` (when run for
-/// an agent) in `<A>/rw/git-ran`.
+/// an agent) in `<A>/rw/git-ran`. Ahead of both on PATH, the crew binary's
+/// own directory (left out too: the binary is bound by itself); in
+/// `second/`, a `crew` that notes it ran in `<A>/rw/crew-fallback`.
 fn two_installations() -> (tempfile::TempDir, String) {
     let dir = tempfile::tempdir_in(Path::new(CREW).parent().unwrap()).unwrap();
     let base = dir.path().canonicalize().unwrap();
@@ -1593,7 +1595,18 @@ fn two_installations() -> (tempfile::TempDir, String) {
             write_executable(&bin.join(name), &script);
         }
     }
-    let mut dirs = vec![base.join("first"), base.join("second")];
+    write_executable(
+        &base.join("second/crew"),
+        &format!(
+            "#!/bin/sh\nprintf fallback > \"$(dirname \"$CREW_IDENTITY\")/rw/crew-fallback\"\nexec '{CREW}' \"$@\"\n"
+        ),
+    );
+    let crew_dir = Path::new(CREW).canonicalize().unwrap();
+    let mut dirs = vec![
+        crew_dir.parent().unwrap().to_path_buf(),
+        base.join("first"),
+        base.join("second"),
+    ];
     dirs.extend(std::env::split_paths(&path));
     let path = std::env::join_paths(dirs).unwrap().into_string().unwrap();
     (dir, path)
@@ -1607,7 +1620,7 @@ fn each_sandboxed_launch_runs_the_cli_the_daemon_found_not_another() {
     let s = Session::new();
     workspace_repo(&s, &[]);
     let (_installations, path) = two_installations();
-    let team = sandboxed(
+    let mut team = sandboxed(
         &s,
         vec![
             codex_agent("x"),
@@ -1623,6 +1636,10 @@ fn each_sandboxed_launch_runs_the_cli_the_daemon_found_not_another() {
         ],
         vec![task("t", "w", &[])],
     );
+    // The worker's program is the crew binary, named bare (rev-runtime's
+    // case: it runs the binary found, not the later `crew`).
+    let worker = team.agents.iter_mut().find(|a| a.id == "w").unwrap();
+    worker.command[0] = "crew".into();
     run_with_env(&s, &team, &[("PATH", &path)]);
     wait_up(&s, "x");
     let ran = home_of(&s, "x").join("codex/ran");
@@ -1658,6 +1675,7 @@ fn each_sandboxed_launch_runs_the_cli_the_daemon_found_not_another() {
     let git_ran = s.workspace.join(".crew/agents/w/rw/git-ran");
     let codex = std::fs::read_to_string(&ran).unwrap();
     let git = std::fs::read_to_string(&git_ran).unwrap_or_default();
+    let crew_fallback = s.workspace.join(".crew/agents/w/rw/crew-fallback").exists();
     s.stop();
 
     assert!(
@@ -1672,9 +1690,9 @@ fn each_sandboxed_launch_runs_the_cli_the_daemon_found_not_another() {
     let other_git: Vec<&str> = git.lines().filter(|l| *l != "first").collect();
     assert!(!git.is_empty(), "the worker's git left no note");
     assert!(
-        other_codex.is_empty() && other_git.is_empty(),
+        other_codex.is_empty() && other_git.is_empty() && !crew_fallback,
         "launches ran another program than the one found first: codex {other_codex:?}, git \
-{other_git:?}"
+{other_git:?}, the later crew {crew_fallback}"
     );
 }
 
