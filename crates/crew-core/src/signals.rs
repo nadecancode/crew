@@ -38,6 +38,13 @@ impl TerminationSignals {
             action.sa_sigaction = record_signal as *const () as usize;
             // SAFETY: both pointers refer to initialized sigaction storage.
             let mut previous: libc::sigaction = unsafe { std::mem::zeroed() };
+            // SAFETY: a null action reads the current disposition without changing it.
+            if unsafe { libc::sigaction(signal, std::ptr::null(), &mut previous) } != 0 {
+                return Err(io::Error::last_os_error());
+            }
+            if previous.sa_sigaction == libc::SIG_IGN {
+                continue;
+            }
             // SAFETY: sa_mask is valid and signal is one of the supported signals.
             let rc = unsafe {
                 libc::sigemptyset(&mut action.sa_mask);
@@ -106,6 +113,27 @@ mod tests {
                 unsafe { libc::setrlimit(libc::RLIMIT_CORE, &core_limit) },
                 0
             );
+            if std::env::var_os("CREW_SIGNAL_TEST_IGNORE").is_some() {
+                // SAFETY: valid signal and the standard ignored disposition.
+                unsafe {
+                    libc::signal(libc::SIGHUP, libc::SIG_IGN);
+                }
+                let signals = TerminationSignals::install().unwrap();
+                // SAFETY: valid output storage; observe the live kernel disposition.
+                let mut current: libc::sigaction = unsafe { std::mem::zeroed() };
+                assert_eq!(
+                    unsafe { libc::sigaction(libc::SIGHUP, std::ptr::null(), &mut current) },
+                    0
+                );
+                assert_eq!(current.sa_sigaction, libc::SIG_IGN);
+                println!("SIGNALS_READY");
+                std::io::stdout().flush().unwrap();
+                std::thread::sleep(Duration::from_millis(200));
+                assert!(!signals.is_pending(), "an ignored signal must stay ignored");
+                drop(signals);
+                std::fs::write(marker, "ignore preserved").unwrap();
+                return;
+            }
             let signals = TerminationSignals::install().unwrap();
             assert!(TerminationSignals::install().is_err());
             println!("SIGNALS_READY");
@@ -120,6 +148,35 @@ mod tests {
             panic!("the original default handler must terminate the child");
         }
         let temp = tempfile::tempdir().unwrap();
+        let marker = temp.path().join("ignored");
+        let mut child = Command::new(std::env::current_exe().unwrap())
+            .current_dir(temp.path())
+            .args([
+                "--exact",
+                "signals::tests::termination_waits_for_cleanup_and_preserves_the_signal_status",
+                "--nocapture",
+            ])
+            .env("CREW_SIGNAL_TEST_MARKER", &marker)
+            .env("CREW_SIGNAL_TEST_IGNORE", "1")
+            .stdout(Stdio::piped())
+            .spawn()
+            .unwrap();
+        let mut output = std::io::BufReader::new(child.stdout.take().unwrap());
+        let mut line = String::new();
+        loop {
+            line.clear();
+            assert!(output.read_line(&mut line).unwrap() > 0);
+            if line.contains("SIGNALS_READY") {
+                break;
+            }
+        }
+        // SAFETY: this is the test child that announced readiness.
+        assert_eq!(
+            unsafe { libc::kill(child.id() as libc::pid_t, libc::SIGHUP) },
+            0
+        );
+        assert!(child.wait().unwrap().success());
+        assert_eq!(std::fs::read_to_string(marker).unwrap(), "ignore preserved");
         // Consecutive normal lifetimes restore handlers and release the watcher.
         for _ in 0..2 {
             // SAFETY: both buffers are valid; a null action only reads disposition.
