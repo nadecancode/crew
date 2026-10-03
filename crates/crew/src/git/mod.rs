@@ -11,6 +11,7 @@
 
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output, Stdio};
+use std::time::{Duration, Instant};
 
 use anyhow::{anyhow, bail, Context, Result};
 use crew_core::rpc::{CommitInfo, ConflictReport, GitOutcome};
@@ -47,10 +48,84 @@ fn git(dir: &Path) -> Command {
     cmd
 }
 
+/// How long one git command may run before it and its children are killed. A
+/// hung hook or helper would otherwise hold the daemon's global git lock.
+const GIT_TIMEOUT: Duration = if cfg!(test) {
+    Duration::from_secs(5)
+} else {
+    Duration::from_secs(300)
+};
+
+/// `cmd.output()` with a deadline: the command leads its own process group,
+/// and the group is killed when the deadline passes.
+fn output(cmd: &mut Command) -> std::io::Result<Output> {
+    use std::io::Read;
+    use std::os::unix::process::CommandExt;
+    use std::sync::mpsc;
+    let mut child = cmd
+        .process_group(0)
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()?;
+    let drain = |pipe: Option<Box<dyn Read + Send>>| {
+        let (tx, rx) = mpsc::channel();
+        std::thread::spawn(move || {
+            let mut bytes = Vec::new();
+            if let Some(mut pipe) = pipe {
+                let _ = pipe.read_to_end(&mut bytes);
+            }
+            let _ = tx.send(bytes);
+        });
+        rx
+    };
+    let stdout = drain(child.stdout.take().map(|p| Box::new(p) as _));
+    let stderr = drain(child.stderr.take().map(|p| Box::new(p) as _));
+    let deadline = Instant::now() + GIT_TIMEOUT;
+    let timed_out = || {
+        std::io::Error::new(
+            std::io::ErrorKind::TimedOut,
+            format!(
+                "git did not finish within {}s and was killed",
+                GIT_TIMEOUT.as_secs()
+            ),
+        )
+    };
+    let kill_group = |child: &mut std::process::Child| {
+        // SAFETY: plain syscall; a negative pid addresses the command's group.
+        unsafe { libc::kill(-(child.id() as libc::pid_t), libc::SIGKILL) };
+        let _ = child.kill();
+        let _ = child.wait();
+    };
+    let status = loop {
+        match child.try_wait()? {
+            Some(status) => break status,
+            None if Instant::now() < deadline => {
+                std::thread::sleep(Duration::from_millis(10));
+            }
+            None => {
+                kill_group(&mut child);
+                return Err(timed_out());
+            }
+        }
+    };
+    let read = |rx: mpsc::Receiver<Vec<u8>>| {
+        rx.recv_timeout(deadline.saturating_duration_since(Instant::now()))
+    };
+    match (read(stdout), read(stderr)) {
+        (Ok(stdout), Ok(stderr)) => Ok(Output {
+            status,
+            stdout,
+            stderr,
+        }),
+        _ => {
+            kill_group(&mut child);
+            Err(timed_out())
+        }
+    }
+}
+
 fn run(dir: &Path, args: &[&str]) -> Result<Output> {
-    git(dir)
-        .args(args)
-        .output()
+    output(git(dir).args(args))
         .with_context(|| format!("running git {}", args.first().copied().unwrap_or("")))
 }
 
@@ -150,9 +225,7 @@ pub fn init_repo(dir: &Path) -> Result<()> {
     }
     let mut cmd = git(dir);
     with_identity(&mut cmd, "crew");
-    let output = cmd
-        .args(["commit", "-q", "--allow-empty", "-m", "Initial commit"])
-        .output()?;
+    let output = output(cmd.args(["commit", "-q", "--allow-empty", "-m", "Initial commit"]))?;
     if !output.status.success() {
         bail!(
             "creating the initial commit failed: {}",
@@ -308,7 +381,7 @@ pub fn commit_all(dir: &Path, agent: &str, message: &str) -> Result<CommitInfo> 
     with_identity(&mut cmd, agent);
     // `-m <message>` passes the message as a single argument. The project's
     // own commit hooks still run; a failing hook is reported back to the agent.
-    let output = cmd.args(["commit", "-q", "-m", message]).output()?;
+    let output = output(cmd.args(["commit", "-q", "-m", message]))?;
     if !output.status.success() {
         bail!(
             "git commit failed: {}",
@@ -420,7 +493,7 @@ pub fn cherry_pick(dir: &Path, agent: &str, commit: &str) -> Result<GitOutcome> 
     .map_err(|_| anyhow!("unknown commit '{commit}'"))?;
     let mut cmd = git(dir);
     with_identity(&mut cmd, agent);
-    let output = cmd.args(["cherry-pick", "-x", commit]).output()?;
+    let output = output(cmd.args(["cherry-pick", "-x", commit]))?;
     finish(dir, "cherry-pick", &["cherry-pick", "--abort"], output)
 }
 
@@ -439,9 +512,7 @@ pub fn merge(dir: &Path, agent: &str, rev: &str) -> Result<GitOutcome> {
     let mut cmd = git(dir);
     with_identity(&mut cmd, agent);
     let message = format!("Merge {rev}");
-    let output = cmd
-        .args(["merge", "--no-ff", "--no-edit", "-m", &message, rev])
-        .output()?;
+    let output = output(cmd.args(["merge", "--no-ff", "--no-edit", "-m", &message, rev]))?;
     finish(dir, "merge", &["merge", "--abort"], output)
 }
 
@@ -590,6 +661,31 @@ mod tests {
         write(&clean.join(".crew"), "crew.db", "x");
         init_repo(&clean).unwrap();
         assert!(has_commits(&clean));
+    }
+
+    #[test]
+    fn a_hung_git_hook_times_out_and_is_killed() {
+        use std::os::unix::fs::PermissionsExt;
+        let r = repo();
+        let hook = r.root.join(".git/hooks/pre-commit");
+        let marker = r.root.join("hook-child-alive");
+        std::fs::write(
+            &hook,
+            format!(
+                "#!/bin/sh\n(sleep 7; touch {}) &\nsleep 60\n",
+                marker.display()
+            ),
+        )
+        .unwrap();
+        std::fs::set_permissions(&hook, std::fs::Permissions::from_mode(0o755)).unwrap();
+        write(&r.root, "work.txt", "x\n");
+        let started = std::time::Instant::now();
+        let err = commit_all(&r.root, "a", "work").unwrap_err();
+        assert!(err.to_string().contains("did not finish"), "{err:#}");
+        assert!(started.elapsed() < std::time::Duration::from_secs(30));
+        // The hook's children died with it.
+        std::thread::sleep(std::time::Duration::from_secs(4));
+        assert!(!marker.exists(), "the hook's child outlived the timeout");
     }
 
     #[test]
