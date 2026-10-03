@@ -1338,12 +1338,16 @@ real bubblewrap, and `crates/crew/tests/sandbox.rs` checks what a sandboxed
 agent cannot reach (its probes use `socat`). Without bwrap, user namespaces or
 Landlock those tests are skipped with the reason printed;
 `CREW_TEST_SANDBOX=require` makes them fail instead. `just test-sandbox` runs
-both that way, from `nix-shell` or wherever bwrap and socat are installed.
+the whole suite that way, from `nix-shell` or wherever bwrap and socat are
+installed.
 
 The same holds for the other tests that launch sandboxed agents
-(`crates/crew/tests/pty_sandbox.rs`, `git_helper_sandbox.rs`). Keep
-`CARGO_TARGET_DIR` out of `/tmp`: the sandbox masks `/tmp`, so a test binary or
-crew build under it cannot be reached from inside and the launch fails.
+(`crates/crew/tests/pty_sandbox.rs`, `git_helper_sandbox.rs`,
+`private_home.rs`). Keep `CARGO_TARGET_DIR` out of `/tmp` and `/run`: the
+sandbox masks them, so a test binary or crew build under them cannot be
+reached from inside and the launch fails ("the crew binary cannot be
+bound: ... lies inside the protected /tmp"); `just test-sandbox` refuses
+to start there.
 
 ## Limitations
 

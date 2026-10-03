@@ -23,13 +23,18 @@ link: build
 test:
     ./scripts/build-env cargo test --workspace
 
-# Run the sandbox tests with real bubblewrap; a host that cannot run them fails
-# instead of skipping. On Nix, bwrap and socat come from nixpkgs if missing.
+# Run the whole test suite with real bubblewrap: the sandbox tests fail on a
+# host that cannot run them instead of skipping. On Nix, bwrap and socat come
+# from nixpkgs if missing. The build must not be under /tmp or /run, which
+# sandboxes mask: crew and the test binaries are run from inside.
 test-sandbox:
     #!/usr/bin/env bash
     set -euo pipefail
     export CREW_TEST_SANDBOX=require
-    tests=(./scripts/build-env cargo test -p crew --test sandbox --test sandbox_launch)
+    case "${CARGO_TARGET_DIR:-$PWD/target}" in
+        /tmp/*|/run/*) echo "CARGO_TARGET_DIR must not be under /tmp or /run: sandboxes mask them" >&2; exit 1 ;;
+    esac
+    tests=(./scripts/build-env cargo test --workspace)
     if command -v nix >/dev/null && ! { command -v bwrap && command -v socat; } >/dev/null; then
         exec nix shell nixpkgs#bubblewrap nixpkgs#socat --command "${tests[@]}"
     fi
