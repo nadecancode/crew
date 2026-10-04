@@ -76,8 +76,10 @@ pub(crate) async fn serve(server: Arc<Server>, stream: TcpStream, admitted: Admi
         return;
     };
     let (sink, source) = socket.split();
-    // One frame is buffered, not a queue: a browser that does not read
-    // holds the connection's task, which stops reading the daemon.
+    // One unit is buffered, not a queue: a frame, or a batch of at most
+    // `BATCH` daemon lines the read already held (at most what its buffer
+    // holds). A browser that does not read holds the connection's task,
+    // which stops reading the daemon.
     let (out, rx) = mpsc::channel::<Out>(1);
     let mut writer = AbortOnDrop(spawn_held(Some(admitted.lease.clone()), write(sink, rx)));
     let mut conn = Conn {
@@ -554,8 +556,13 @@ impl Conn {
                         }
                     }
                     if ended {
+                        // What came before the line that ended it is
+                        // delivered; nothing after it is.
                         drop((lines, writer, guard));
                         hub.reconcile(&id);
+                        if !texts.is_empty() && self.out.send(Out::Texts(texts)).await.is_err() {
+                            return None;
+                        }
                         return Some((CLOSE_WORKSPACE_ENDED, "the workspace's connection ended"));
                     }
                     if self.out.send(Out::Texts(texts)).await.is_err() {
