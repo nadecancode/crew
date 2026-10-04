@@ -46,6 +46,9 @@ pub(crate) struct Summaries {
     /// One refresh at a time, from its capture to its publication: a
     /// capture is never published after a later one.
     refresh: Mutex<()>,
+    /// Test count: how many times it was computed.
+    #[cfg(test)]
+    pub(crate) computed: std::sync::atomic::AtomicU64,
     /// Wakes the task; shared with it, which holds the daemon only weakly.
     wake: Arc<Notify>,
     /// The task that recomputes it, started by the first watcher.
@@ -68,6 +71,8 @@ impl Default for Summaries {
             questions_dirty: AtomicBool::new(true),
             questions: Mutex::new(0),
             refresh: Mutex::new(()),
+            #[cfg(test)]
+            computed: std::sync::atomic::AtomicU64::new(0),
             wake: Arc::new(Notify::new()),
             task: OnceLock::new(),
             #[cfg(test)]
@@ -125,6 +130,8 @@ impl Daemon {
         if !summaries.dirty.swap(false, Ordering::SeqCst) && !force {
             return;
         }
+        #[cfg(test)]
+        summaries.computed.fetch_add(1, Ordering::SeqCst);
         if summaries.questions_dirty.swap(false, Ordering::SeqCst) || force {
             match self.open_questions() {
                 Ok(open) => {
