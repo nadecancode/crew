@@ -46,7 +46,9 @@ function rowState(e: WorkspaceEntry): string {
   return `${s.agents} agent${s.agents === 1 ? "" : "s"} · ${s.working} working`;
 }
 
-/** The status bar's button and the others' badges. */
+/** The status bar's button and the others' badges. While the list is open
+ * nothing but its own keys acts: focus is inside it (the list, then the copy
+ * buttons) and single keys go to the list. */
 export function SwitcherButton() {
   const app = useApp();
   const { page } = app;
@@ -141,9 +143,6 @@ function SwitcherList(props: { close(refocus: boolean): void }) {
     } else if (e.key.length === 1 && e.key !== " ") {
       setFilter((f) => f + e.key);
       setActive(0);
-    } else if (e.key === "Tab") {
-      props.close(false);
-      handled = false;
     } else handled = false;
     if (handled) {
       e.preventDefault();
@@ -158,7 +157,21 @@ function SwitcherList(props: { close(refocus: boolean): void }) {
   };
 
   return (
-    <div class="switcher-pop" data-region="switcher">
+    <div
+      class="switcher-pop"
+      data-region="switcher"
+      // Tab moves on to the copy buttons; the list closes once focus leaves it.
+      onFocusOut={(e) => {
+        const to = e.relatedTarget as Node | null;
+        if (!to || !e.currentTarget.contains(to)) props.close(false);
+      }}
+      onKeyDown={(e) => {
+        if (e.key !== "Escape" || e.defaultPrevented) return;
+        e.preventDefault();
+        e.stopPropagation();
+        props.close(true);
+      }}
+    >
       <Show when={filter()}><div class="switcher-filter muted">filter: <b>{filter()}</b></div></Show>
       <div ref={list} class="switcher-list" role="listbox" tabindex="0" aria-label="workspaces" aria-activedescendant={activeId()} onKeyDown={onKey}>
         <For each={joined()} fallback={<div class="switcher-none muted">{filter() ? "no workspace matches" : "No workspace is shown here. Run `crew web` in a workspace."}</div>}>

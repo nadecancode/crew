@@ -120,6 +120,28 @@ test("the switcher by mouse; typing filters; others are named with the command t
   await expect(list(page)).toHaveCount(0);
 });
 
+test("by keyboard alone the copy buttons are reached: tab moves into them, the list stays open, esc closes and gives the focus back, tab out closes", async ({ page, openPage }) => {
+  await openPage();
+  await page.keyboard.press("w");
+  await expect(list(page)).toBeFocused();
+  await page.keyboard.press("Tab");
+  const copy = page.locator("[data-other]").getByRole("button", { name: "copy" });
+  await expect(copy).toBeFocused();
+  await expect(list(page)).toBeVisible();
+  // Single keys are the list's, not the page's: t changes no view.
+  await page.keyboard.press("t");
+  await expect(page.locator(".agent-graph")).toBeVisible();
+  await page.keyboard.press("Escape");
+  await expect(list(page)).toHaveCount(0);
+  await expect(button(page)).toBeFocused();
+  await page.keyboard.press("w");
+  await page.keyboard.press("Tab");
+  await expect(copy).toBeFocused();
+  await page.keyboard.press("Tab");
+  await expect(list(page)).toHaveCount(0);
+  await expect(page.locator("[data-other]")).toHaveCount(0);
+});
+
 test("a switch disposes the workspace left: nothing of it remains while the next one's snapshot is held back", async ({ page, mock, openPage }) => {
   await openPage();
   await page.locator('[data-agent="claude-2"] .node-head').click();

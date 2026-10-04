@@ -125,11 +125,14 @@ export const KEYS: KeyDef[] = [
 const textual = (el: Element | null) =>
   !!el && (el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement || el instanceof HTMLSelectElement || (el as HTMLElement).isContentEditable);
 
-/** Whether single-key shortcuts may act: not in a text field, a dialog or the terminal. */
+/** Whether single-key shortcuts may act: not in a text field, a dialog, the
+ * terminal or the workspace switcher. */
 export function keyboardFree(app: App, target: Element | null = document.activeElement): boolean {
   if (app.ui.dialog()) return false;
   if (textual(target)) return false;
   if (target?.closest?.("[data-terminal]")) return false;
+  // The workspace switcher's list takes its own keys.
+  if (target?.closest?.('[data-region="switcher"]')) return false;
   return true;
 }
 
