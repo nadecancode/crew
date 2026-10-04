@@ -708,6 +708,43 @@ fn sandboxed_agent_can_do_its_work() {
 }
 
 #[test]
+fn an_agent_moves_files_between_directories_of_its_worktree_and_not_out_of_it() {
+    if require_sandbox().is_none() {
+        return;
+    }
+    let s = Session::new();
+    workspace_repo(&s, &[("tracked.txt", "tracked\n")]);
+    // In its worktree (its working directory): a link and a rename into
+    // a subdirectory, `git mv` (git only: under jj, git refuses to run in
+    // a workspace), and a rename into its home, another mount, which
+    // `mv` turns into a copy.
+    let script = r#"mkdir -p d e
+echo f > f && ln f d/g && echo 'MOVED link'
+echo r > r && i=$(stat -c %i r) && mv r e/r && [ "$(stat -c %i e/r)" = "$i" ] && echo 'MOVED rename'
+if git mv tracked.txt d/tracked.txt; then echo 'GIT-MV ok'; else echo 'GIT-MV failed'; fi
+echo o > out && i=$(stat -c %i out) && mv out "$HOME/out" && [ "$(stat -c %i "$HOME/out")" = "$i" ] && echo 'REACHED rename-out'
+true"#;
+    s.run(&sandboxed(&s, vec![probing(&s, "a", script)], vec![]));
+    let report = report(&s, "a");
+    let vcs = s.snapshot().session.vcs;
+    s.stop();
+    let moved: Vec<&str> = report
+        .lines()
+        .filter_map(|l| l.strip_prefix("MOVED "))
+        .collect();
+    assert_eq!(moved, ["link", "rename"], "{report}");
+    let git_mv = if vcs == "git" {
+        "GIT-MV ok"
+    } else {
+        "GIT-MV failed"
+    };
+    assert!(report.lines().any(|l| l == git_mv), "{vcs}: {report}");
+    assert_eq!(reached(&report), Vec::<&str>::new(), "{report}");
+    let worktree = s.workspace.join(".crew/worktrees/a");
+    assert!(worktree.join("d/g").exists() && worktree.join("e/r").exists());
+}
+
+#[test]
 fn orchestrator_reads_but_cannot_write_the_checkout() {
     if require_sandbox().is_none() {
         return;

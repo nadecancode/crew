@@ -2136,6 +2136,325 @@ unsandboxed"
         );
     }
 
+    /// A jj project with workspaces for `a` and `b`, and the profiles of
+    /// their version control as agent_git_launcher builds them, on this
+    /// host; and the helper's for the integration workspace.
+    struct JjSandbox {
+        _dir: tempfile::TempDir,
+        _listener: std::os::unix::net::UnixListener,
+        ws: PathBuf,
+        jj: crate::vcs::jj::Jj,
+        host: Host,
+        layout: Layout,
+        a: (Workspace, Spec),
+        b: (Workspace, Spec),
+    }
+
+    fn jj_sandbox() -> Option<JjSandbox> {
+        let host = real_host()?;
+        let (dir, ws, jj) = jj_project()?;
+        let root = dir.path().canonicalize().unwrap();
+        std::fs::create_dir(root.join("run")).unwrap();
+        let socket = root.join("run/0123.sock");
+        let listener = std::os::unix::net::UnixListener::bind(&socket).unwrap();
+        let layout = Layout::new(&ws, jj.store(), &socket, &root.join("cache")).unwrap();
+        let config = SandboxConfig {
+            mode: SandboxMode::Required,
+            ..SandboxConfig::default()
+        };
+        let member = |id: &str| {
+            let workspace =
+                provision_worktree(&jj, &ws.join(".crew/worktrees"), id, "HEAD", None).unwrap();
+            let agent_dir = ws.join(".crew/agents").join(id);
+            std::fs::create_dir_all(agent_dir.join("rw/home")).unwrap();
+            let at = Placement {
+                agent_dir: &agent_dir,
+                workdir: &workspace.path,
+                orchestrator: false,
+                worktrees: true,
+            };
+            let run = Run::vcs(id, &agent_dir, &vcs_program(&jj));
+            let spec = agent_profile(&host, &layout, &at, &config, &run, Some(jj.program()), None)
+                .unwrap()
+                .spec;
+            (workspace, spec)
+        };
+        let (a, b) = (member("a"), member("b"));
+        Some(JjSandbox {
+            _dir: dir,
+            _listener: listener,
+            ws,
+            jj,
+            host,
+            layout,
+            a,
+            b,
+        })
+    }
+
+    impl JjSandbox {
+        /// `f` with every jj command in `spec`'s sandbox.
+        fn inside<T>(&self, spec: &Spec, f: impl FnOnce() -> T) -> T {
+            let launcher = Arc::new(SandboxLauncher::new(spec.clone(), Vec::new()));
+            git::launch::with_launcher(launcher, f)
+        }
+
+        /// `agent` commits `file` holding `text`, in its sandbox.
+        fn commit(&self, agent: &(Workspace, Spec), file: &str, text: &str) -> CommitInfo {
+            let (workspace, spec) = agent;
+            std::fs::write(workspace.path.join(file), text).unwrap();
+            let id = workspace.path.file_name().unwrap().to_str().unwrap();
+            self.inside(spec, || self.jj.commit_all(&workspace.path, id, file))
+                .unwrap_or_else(|e| panic!("{id} commits {file}: {e:#}"))
+        }
+
+        /// Where plain git sees `agents/<id>`.
+        fn branch(&self, id: &str) -> String {
+            let out = std::process::Command::new("git")
+                .arg("-C")
+                .arg(&self.ws)
+                .args(["rev-parse", &format!("refs/heads/agents/{id}")])
+                .output()
+                .unwrap();
+            String::from_utf8_lossy(&out.stdout).trim().to_string()
+        }
+    }
+
+    use crew_core::rpc::CommitInfo;
+
+    #[test]
+    fn an_agents_jj_does_all_its_work_in_its_sandbox_and_the_helper_integrates() {
+        let Some(sb) = jj_sandbox() else { return };
+        let (a, b) = (&sb.a.0.path, &sb.b.0.path);
+        let jj = &sb.jj;
+        // Commit, status and diff.
+        let first = sb.commit(&sb.a, "a.txt", "from a\n");
+        assert_eq!(sb.branch("a"), first.sha);
+        std::fs::write(a.join("pending.txt"), "pending\n").unwrap();
+        let status = sb.inside(&sb.a.1, || jj.status(a)).unwrap();
+        assert!(status.contains("pending.txt"), "{status}");
+        let diff = sb.inside(&sb.a.1, || jj.diff(a, None)).unwrap();
+        assert!(diff.contains("+pending"), "{diff}");
+        std::fs::remove_file(a.join("pending.txt")).unwrap();
+        // A conflicting cherry-pick and merge are rolled back.
+        sb.commit(&sb.a, "shared.txt", "a's\n");
+        let theirs = sb.commit(&sb.b, "shared.txt", "b's\n");
+        let before = sb.branch("a");
+        let picked = sb
+            .inside(&sb.a.1, || jj.cherry_pick(a, "a", &theirs.sha))
+            .unwrap();
+        assert!(picked.outcome.conflict.is_some(), "{:?}", picked.outcome);
+        let merged = sb.inside(&sb.a.1, || jj.merge(a, "a", "agents/b")).unwrap();
+        assert_eq!(merged.conflict.unwrap().files, ["shared.txt"]);
+        assert_eq!(sb.branch("a"), before);
+        assert_eq!(
+            std::fs::read_to_string(a.join("shared.txt")).unwrap(),
+            "a's\n"
+        );
+        // A clean cherry-pick and a clean merge land and are published.
+        let other = sb.commit(&sb.b, "b.txt", "from b\n");
+        let picked = sb
+            .inside(&sb.b.1, || jj.cherry_pick(b, "b", &first.sha))
+            .unwrap();
+        assert!(picked.outcome.ok, "{:?}", picked.outcome);
+        assert_eq!(sb.branch("b"), picked.outcome.commit.unwrap().sha);
+        assert!(b.join("a.txt").exists());
+        let merged = sb.inside(&sb.a.1, || jj.merge(a, "a", "agents/b")).unwrap();
+        assert!(!merged.ok, "shared.txt still conflicts: {merged:?}");
+        let _ = other;
+        // The integration, in the helper's sandbox.
+        let integration = sb.ws.join(".crew/worktrees").join(git::INTEGRATION_DIR);
+        let helper = |worktree: &Path| -> Result<Arc<dyn Launcher>> {
+            let (launcher, _) = git::launch::helper_launcher(
+                &sb.host,
+                sb.layout.session(),
+                &Extra::default(),
+                worktree,
+                None,
+                Some(jj.program()),
+            )
+            .map_err(|e| anyhow!(e))?;
+            Ok(Arc::new(launcher))
+        };
+        let (made, steps) = integrate(
+            jj,
+            &sb.ws.join(".crew/worktrees"),
+            "HEAD",
+            &["a".to_string(), "b".to_string()],
+            Some(&helper),
+            &mut |_| {},
+        )
+        .unwrap_or_else(|e| panic!("integration: {e:#}"));
+        assert_eq!(made.path, integration);
+        assert_eq!(steps.len(), 2, "{steps:?}");
+        assert!(steps[0].outcome.ok, "{:?}", steps[0].outcome);
+        assert!(
+            steps[1].outcome.conflict.is_some(),
+            "{:?}",
+            steps[1].outcome
+        );
+        assert!(integration.join("a.txt").exists());
+        assert!(!sb.branch("integration").is_empty());
+    }
+
+    /// A shell snippet that tries each `(what, from, to)`: a rename (`mv`,
+    /// which copies when the kernel refuses, so the file must keep its
+    /// inode) or a hard link (`ln`, which has nothing to fall back on).
+    /// Prints `<what> renamed`, `<what> linked` or `<what> refused`.
+    fn moves(renames: &[(&str, &Path, &Path)], links: &[(&str, &Path, &Path)]) -> String {
+        let mut script = String::new();
+        for (what, from, to) in renames {
+            script.push_str(&format!(
+                "i=$(stat -c %i '{0}'); if mv '{0}' '{1}' 2>/dev/null && [ \"$(stat -c %i \
+'{1}')\" = \"$i\" ]; then echo '{what} renamed'; else echo '{what} refused'; fi\n",
+                from.display(),
+                to.display()
+            ));
+        }
+        for (what, from, to) in links {
+            script.push_str(&format!(
+                "if ln '{}' '{}' 2>/dev/null; then echo '{what} linked'; else echo '{what} \
+refused'; fi\n",
+                from.display(),
+                to.display()
+            ));
+        }
+        script
+    }
+
+    fn sh() -> PathBuf {
+        std::fs::canonicalize("/bin/sh").unwrap()
+    }
+
+    /// What `script` printed in the sandbox `spec` describes, line by line.
+    fn said(spec: &Spec, script: &str) -> Vec<String> {
+        let out = run_in(spec, &sh(), &["-c", script]);
+        assert!(out.status.success(), "{out:?}");
+        String::from_utf8_lossy(&out.stdout)
+            .lines()
+            .map(str::to_string)
+            .collect()
+    }
+
+    #[test]
+    fn files_move_between_directories_on_one_writable_mount_and_nowhere_else() {
+        let Some(host) = real_host() else { return };
+        let fx = fixture();
+        let sidecar = fx.root.join("run/codex-0123");
+        std::fs::create_dir(&sidecar).unwrap();
+        let layout =
+            Layout::new(&fx.ws, fx.store.clone(), &fx.socket, &fx.root.join("cache")).unwrap();
+        let agent_dir = fx.ws.join(".crew/agents/a");
+        let at = Placement {
+            agent_dir: &agent_dir,
+            workdir: &fx.worktree,
+            orchestrator: false,
+            worktrees: true,
+        };
+        let config = SandboxConfig {
+            mode: SandboxMode::Required,
+            ..SandboxConfig::default()
+        };
+        let run = Run::helper("a", "sh", &[], &sidecar.join("1.sock"));
+        let spec = agent_profile(&host, &layout, &at, &config, &run, None, None)
+            .unwrap()
+            .spec;
+        let (w, git) = (&fx.worktree, fx.ws.join(".git"));
+        for dir in ["a", "b"] {
+            std::fs::create_dir(w.join(dir)).unwrap();
+        }
+        for name in ["moved", "linked", "out", "out-link", "to-sidecar"] {
+            std::fs::write(w.join("a").join(name), name).unwrap();
+        }
+        // A socket made in the worktree.
+        let _socket = std::os::unix::net::UnixListener::bind(w.join("a/sock")).unwrap();
+        std::fs::create_dir_all(git.join("info")).unwrap();
+        let script = moves(
+            &[
+                ("in the worktree", &w.join("a/moved"), &w.join("b/moved")),
+                ("into objects", &w.join("a/out"), &git.join("objects/out")),
+                (
+                    "inside the read-only .git",
+                    &git.join("description"),
+                    &git.join("info/description"),
+                ),
+                (
+                    "to the sidecar",
+                    &w.join("a/to-sidecar"),
+                    &sidecar.join("f"),
+                ),
+            ],
+            &[
+                ("in the worktree", &w.join("a/linked"), &w.join("b/linked")),
+                (
+                    "into objects",
+                    &w.join("a/out-link"),
+                    &git.join("objects/out"),
+                ),
+                (
+                    "socket to the sidecar",
+                    &w.join("a/sock"),
+                    &sidecar.join("sock"),
+                ),
+            ],
+        );
+        assert_eq!(
+            said(&spec, &script),
+            [
+                "in the worktree renamed",
+                "into objects refused",
+                "inside the read-only .git refused",
+                "to the sidecar refused",
+                "in the worktree linked",
+                "into objects refused",
+                "socket to the sidecar refused",
+            ]
+        );
+        assert!(git.join("description").exists());
+        assert!(!sidecar.join("sock").exists());
+        assert!(w.join("a/sock").exists());
+    }
+
+    #[test]
+    fn under_jj_files_move_inside_the_workspace_and_the_object_store_only() {
+        let Some(sb) = jj_sandbox() else { return };
+        let (w, spec) = (&sb.a.0.path, &sb.a.1);
+        let objects = sb.ws.join(".git/objects");
+        for dir in ["a", "b"] {
+            std::fs::create_dir(w.join(dir)).unwrap();
+        }
+        for name in ["moved", "linked", "out"] {
+            std::fs::write(w.join("a").join(name), name).unwrap();
+        }
+        let script = format!(
+            "echo x > '{0}/probe' && mkdir -p '{0}/zz'\n{1}",
+            objects.display(),
+            moves(
+                &[
+                    ("in the workspace", &w.join("a/moved"), &w.join("b/moved")),
+                    ("objects", &objects.join("probe"), &objects.join("zz/probe")),
+                    ("into objects", &w.join("a/out"), &objects.join("out")),
+                    (
+                        "into .jj",
+                        &w.join("b/moved"),
+                        &w.join(".jj/working_copy/moved"),
+                    ),
+                ],
+                &[("in the workspace", &w.join("a/linked"), &w.join("b/linked"))],
+            )
+        );
+        assert_eq!(
+            said(spec, &script),
+            [
+                "in the workspace renamed",
+                "objects renamed",
+                "into objects refused",
+                "into .jj refused",
+                "in the workspace linked",
+            ]
+        );
+    }
+
     #[tokio::test]
     async fn an_agents_git_runs_the_git_its_profile_bound() {
         let fx = fixture();
