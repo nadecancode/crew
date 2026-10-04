@@ -7648,6 +7648,11 @@ fn an_agent_killed_while_it_starts_stays_stopped_when_the_start_then_fails() {
 
 #[test]
 fn a_fresh_restart_starts_a_new_session_instead_of_resuming_the_old_one() {
+    if common::test_support::isolate_operator_test(
+        "a_fresh_restart_starts_a_new_session_instead_of_resuming_the_old_one",
+    ) {
+        return;
+    }
     let s = Session::new();
     // A `codex` that notes, for every session it is started with, the
     // session it resumes ("resume <id>") or "fresh", one line each.
@@ -7740,6 +7745,11 @@ fn a_fresh_restart_starts_a_new_session_instead_of_resuming_the_old_one() {
 
 #[test]
 fn a_restart_takes_over_from_a_restart_still_starting() {
+    if common::test_support::isolate_operator_test(
+        "a_restart_takes_over_from_a_restart_still_starting",
+    ) {
+        return;
+    }
     let s = Session::new();
     // A `codex` that notes how each session starts ("resume <id>" or
     // "fresh"), and whose second app-server (the first restart's) says it
@@ -7837,6 +7847,11 @@ fn a_restart_takes_over_from_a_restart_still_starting() {
 
 #[test]
 fn a_fresh_restart_is_not_handed_back_the_old_session_by_its_last_hook() {
+    if common::test_support::isolate_operator_test(
+        "a_fresh_restart_is_not_handed_back_the_old_session_by_its_last_hook",
+    ) {
+        return;
+    }
     let s = Session::new();
     let identity = s.workspace.join(".crew/agents/x/identity.json");
     // A `claude` that notes, for every session it is started with, how
@@ -7922,6 +7937,11 @@ fn a_fresh_restart_is_not_handed_back_the_old_session_by_its_last_hook() {
 
 #[test]
 fn a_fresh_restart_hands_its_task_to_the_new_session_whatever_the_old_one_said_last() {
+    if common::test_support::isolate_operator_test(
+        "a_fresh_restart_hands_its_task_to_the_new_session_whatever_the_old_one_said_last",
+    ) {
+        return;
+    }
     let s = Session::new();
     let identity = s.workspace.join(".crew/agents/x/identity.json");
     // A `claude` that notes, for every session it is started with, how
