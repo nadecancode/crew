@@ -18,12 +18,14 @@ use crate::sandbox::probe::UntrustedNixDaemon;
 use crate::sandbox::profile::{self, Built, Extra, Host, Request, Role, Session};
 use crate::sandbox::spec::{launcher_env, Spec};
 use crate::sandbox::{probe, run};
-use crate::vcs::{IntegrationStep, Vcs, Workspace};
+use crate::vcs::{IntegrationStep, Kind, Store, Vcs, Workspace};
 
 /// The daemon's paths that every profile is built from.
 struct Layout {
     workspace: PathBuf,
-    git_dir: PathBuf,
+    /// Where the repository keeps its data (`Vcs::store`): what a worktree's
+    /// git or jj needs mounted.
+    store: Store,
     runtime_dir: PathBuf,
     socket: PathBuf,
     /// `<C>/cargo`: the team's `CARGO_HOME`, never the operator's.
@@ -33,15 +35,8 @@ struct Layout {
 impl Layout {
     /// `<C>` is `<cache_home>/crew/<hash>`, named after the socket, and its
     /// `cargo` directory is made if it is missing.
-    fn new(workspace: &Path, socket: &Path, cache_home: &Path) -> Result<Self> {
-        let git_dir = workspace.join(".git");
-        if !std::fs::symlink_metadata(&git_dir).is_ok_and(|m| m.is_dir()) {
-            bail!(
-                "{} is not a directory: sandboxed agents need the workspace to be the main \
-checkout of its repository",
-                git_dir.display()
-            );
-        }
+    fn new(workspace: &Path, store: Store, socket: &Path, cache_home: &Path) -> Result<Self> {
+        check_store(workspace, &store)?;
         let (Some(runtime_dir), Some(hash)) = (socket.parent(), socket.file_stem()) else {
             bail!("the daemon socket {} has no directory", socket.display());
         };
@@ -49,7 +44,7 @@ checkout of its repository",
         paths::ensure_private_dir(&cargo_home)?;
         Ok(Self {
             workspace: workspace.to_path_buf(),
-            git_dir,
+            store,
             runtime_dir: runtime_dir.to_path_buf(),
             socket: socket.to_path_buf(),
             cargo_home: cargo_home
@@ -61,11 +56,62 @@ checkout of its repository",
     fn session(&self) -> Session<'_> {
         Session {
             workspace: &self.workspace,
-            git_dir: &self.git_dir,
+            store: &self.store,
             runtime_dir: &self.runtime_dir,
             daemon_socket: &self.socket,
             cargo_home: &self.cargo_home,
         }
+    }
+}
+
+/// Refuse a store a sandbox cannot be given: each of its directories (the
+/// common git directory; under jj also jj's repository) must be a directory
+/// inside the workspace. A project that is a linked git worktree keeps its
+/// objects and refs in the main checkout's `.git`, which is not mounted
+/// into a sandbox (notes/jj-design.md §layout).
+fn check_store(workspace: &Path, store: &Store) -> Result<()> {
+    let dirs = match store {
+        Store::Git { git_dir } => vec![git_dir],
+        Store::Jj { git_dir, repo_dir } => vec![git_dir, repo_dir],
+    };
+    for dir in dirs {
+        let inside = dir.starts_with(workspace) && dir != workspace;
+        if !inside || !std::fs::symlink_metadata(dir).is_ok_and(|m| m.is_dir()) {
+            bail!(
+                "{} is not a directory inside the workspace: sandboxed agents need the workspace \
+to be the main checkout of its repository",
+                dir.display()
+            );
+        }
+    }
+    Ok(())
+}
+
+/// The administrative directory of a git worktree crew made, found through
+/// the repository's own record of it (git::worktree_admin_dir). A jj
+/// workspace has none; it must hold the `.jj` it was registered with, which
+/// says which repository it belongs to.
+fn admin_of(store: &Store, worktree: &Path) -> Result<Option<PathBuf>> {
+    match store {
+        Store::Git { git_dir } => git::worktree_admin_dir(git_dir, worktree)
+            .map(Some)
+            .ok_or_else(|| anyhow!("{} is not a worktree crew made", worktree.display())),
+        Store::Jj { .. } => {
+            if !std::fs::symlink_metadata(worktree.join(".jj")).is_ok_and(|m| m.is_dir()) {
+                bail!("{} is not a jj workspace crew made", worktree.display());
+            }
+            Ok(None)
+        }
+    }
+}
+
+/// What an agent's version control runs, the way its profile is to bind it:
+/// git by name, as the daemon's PATH finds it; jj by the canonical path the
+/// daemon selected (notes/jj-design.md §ops), never looked up again.
+fn vcs_program(vcs: &dyn Vcs) -> String {
+    match vcs.kind() {
+        Kind::Git => "git".to_string(),
+        Kind::Jj => vcs.program().to_string_lossy().into_owned(),
     }
 }
 
@@ -123,13 +169,14 @@ impl Run {
 }
 
 impl Run {
-    /// The agent's own git: no terminal, and of its variables only its
-    /// identity (`<A>/identity.json`).
-    pub fn git(agent_id: &str, agent_dir: &Path) -> Self {
+    /// The agent's own version control, `program` (git or jj, see
+    /// vcs_program): no terminal, and of its variables only its identity
+    /// (`<A>/identity.json`).
+    pub fn vcs(agent_id: &str, agent_dir: &Path, program: &str) -> Self {
         let identity = agent_dir.join("identity.json");
         Self {
             agent_id: agent_id.to_string(),
-            program: "git".to_string(),
+            program: program.to_string(),
             env: vec![(
                 paths::IDENTITY_ENV.to_string(),
                 identity.to_string_lossy().into_owned(),
@@ -200,12 +247,11 @@ fn agent_profile(
             sidecar_dir,
         }
     } else if at.worktrees {
-        admin = git::worktree_admin_dir(&layout.git_dir, at.workdir)
-            .ok_or_else(|| anyhow!("{} is not a worktree crew made", at.workdir.display()))?;
+        admin = admin_of(&layout.store, at.workdir)?;
         Role::Worker {
             agent_dir: at.agent_dir,
             worktree: at.workdir,
-            admin: &admin,
+            admin: admin.as_deref(),
             sidecar_dir,
         }
     } else {
@@ -454,12 +500,17 @@ fn untrusted_nix_daemon(path: Option<&OsString>) -> Result<UntrustedNixDaemon, S
 }
 
 /// The host, probed now, and the daemon's layout. Blocking.
-fn host_and_layout(crew_bin: &Path, workspace: &Path, socket: &Path) -> Result<(Host, Layout)> {
+fn host_and_layout(
+    crew_bin: &Path,
+    workspace: &Path,
+    store: Store,
+    socket: &Path,
+) -> Result<(Host, Layout)> {
     let path = std::env::var_os("PATH");
     let available = probe::probe(crew_bin, path.as_ref())
         .map_err(|e| anyhow!("agents cannot be sandboxed on this host: {e}"))?;
     let host = Host::detect(crew_bin, &available.bwrap, available.landlock_abi);
-    Ok((host, Layout::new(workspace, socket, &cache_home())?))
+    Ok((host, Layout::new(workspace, store, socket, &cache_home())?))
 }
 
 /// What the team's configuration adds to every sandbox.
@@ -523,21 +574,27 @@ fn integrate(
     Ok((worktree, steps))
 }
 
-/// What an agent's git runs through when the team requires sandboxes: the
-/// agent's sandbox, each command in the agent's retirement ledger before it
-/// starts and its init found right after (design-b3.md §3.4, D2). It
-/// belongs to one blocking job, which starts its commands one at a time.
+/// What an agent's git or jj runs through when the team requires
+/// sandboxes: the agent's sandbox, each command in the agent's retirement
+/// ledger before it starts and its init found right after (design-b3.md
+/// §3.4, D2). It belongs to one blocking job, which starts its commands one
+/// at a time.
 struct LedgerLauncher {
     daemon: Daemon,
     agent: String,
+    /// The ledger's name for these sandboxes: `git` or `jj`.
+    what: &'static str,
     spec: Spec,
-    /// The git the profile bound (Sandboxed::program).
+    /// The program the profile bound, which every command runs: git as the
+    /// daemon's PATH found it (Sandboxed::program), or the jj the daemon
+    /// selected.
     program: Option<PathBuf>,
     env: Vec<(String, String)>,
-    admin: PathBuf,
+    /// The git worktree's administrative directory; None under jj.
+    admin: Option<PathBuf>,
     /// The entry of the command launched last, until it is started. One
-    /// slot: a launcher serves one blocking job, whose git commands start
-    /// one at a time on its thread (git::launch::with_launcher). It must
+    /// slot: a launcher serves one blocking job, whose commands start one
+    /// at a time on its thread (git::launch::with_launcher). It must
     /// not be shared across concurrent commands: one command's pid and
     /// init could be recorded in another's entry, which would then count
     /// as gone when the wrong sandbox ends.
@@ -565,7 +622,7 @@ impl Launcher for LedgerLauncher {
         let record = self
             .daemon
             .ledger
-            .start(&self.agent, "git")
+            .start(&self.agent, self.what)
             .map_err(|e| std::io::Error::other(format!("{e:#}")))?;
         let mut spec = self.spec.clone();
         spec.done = Some(record.done().to_path_buf());
@@ -582,7 +639,7 @@ impl Launcher for LedgerLauncher {
     }
 
     fn admin_dir(&self) -> Option<PathBuf> {
-        Some(self.admin.clone())
+        self.admin.clone()
     }
 
     fn started(&self, pid: Option<u32>) {
@@ -699,18 +756,26 @@ impl Daemon {
         )
     }
 
-    /// A sandbox for git working on `worktree` for nobody in particular:
-    /// no identity, socket, agent directory or network. Blocking: probes
-    /// the host.
+    /// A sandbox for git or jj working on `worktree` for nobody in
+    /// particular: no identity, socket, agent directory or network.
+    /// Blocking: probes the host.
     fn helper_launcher(&self, config: &SandboxConfig, worktree: &Path) -> Result<SandboxLauncher> {
-        let (host, layout) = host_and_layout(&self.crew_bin, &self.workspace, &self.socket)?;
-        let admin = git::worktree_admin_dir(&layout.git_dir, worktree)
-            .ok_or_else(|| anyhow!("{} is not a worktree crew made", worktree.display()))?;
-        let (launcher, warnings) =
-            git::launch::helper_launcher(&host, layout.session(), &extra(config), worktree, &admin)
-                .map_err(|e| {
-                    anyhow!("{} cannot be filled in a sandbox: {e}", worktree.display())
-                })?;
+        let vcs = self.vcs();
+        let (host, layout) =
+            host_and_layout(&self.crew_bin, &self.workspace, vcs.store(), &self.socket)?;
+        let admin = admin_of(&layout.store, worktree)?;
+        // jj runs by the path the daemon selected, which the profile binds;
+        // git is found on the sandbox's PATH.
+        let program = (vcs.kind() == Kind::Jj).then(|| vcs.program());
+        let (launcher, warnings) = git::launch::helper_launcher(
+            &host,
+            layout.session(),
+            &extra(config),
+            worktree,
+            admin.as_deref(),
+            program,
+        )
+        .map_err(|e| anyhow!("{} cannot be filled in a sandbox: {e}", worktree.display()))?;
         // What it leaves out (PATH entries, toolchain leaves) is the same for
         // every profile, and is reported when an agent's session starts.
         drop(warnings);
@@ -736,10 +801,11 @@ impl Daemon {
         })
     }
 
-    /// What an agent's own git (commit, status, diff, cherry-pick, merge)
-    /// runs through when the team requires sandboxes: the agent's sandbox,
-    /// with its identity and nothing else of its launch, so a hook on its
-    /// branch runs as the agent and no one else (design-b3.md §3.4, D1).
+    /// What an agent's own git or jj (commit, status, diff, cherry-pick,
+    /// merge) runs through when the team requires sandboxes: the agent's
+    /// sandbox, with its identity and nothing else of its launch, so a hook
+    /// on its branch runs as the agent and no one else (design-b3.md §3.4,
+    /// D1).
     pub(crate) async fn agent_git_launcher(
         &self,
         agent: &Agent,
@@ -753,19 +819,26 @@ impl Daemon {
 of its own; a member commits in its worktree"
             );
         }
-        let run = Run::git(&agent.id, &self.agent_dir(&agent.id));
+        let vcs = self.vcs();
+        let program = vcs_program(vcs.as_ref());
+        let run = Run::vcs(&agent.id, &self.agent_dir(&agent.id), &program);
         let env = run.env.clone();
         let Some(sandboxed) = self.agent_sandbox(agent, run).await? else {
             return Ok(None);
         };
-        let admin =
-            git::worktree_admin_dir(&self.workspace.join(".git"), Path::new(&agent.workdir))
-                .ok_or_else(|| anyhow!("{} is not a worktree crew made", agent.workdir))?;
+        // The store was resolved for the profile just built.
+        let admin = admin_of(&vcs.store(), Path::new(&agent.workdir))?;
+        // A program given by its path (jj) is not looked up: it runs as
+        // given, and that is the file the profile bound.
+        let program = sandboxed
+            .program
+            .or_else(|| Some(PathBuf::from(&program)).filter(|p| p.is_absolute()));
         Ok(Some(Arc::new(LedgerLauncher {
             daemon: self.clone(),
             agent: agent.id.clone(),
+            what: vcs.kind().as_str(),
             spec: sandboxed.spec,
-            program: sandboxed.program,
+            program,
             env,
             admin,
             pending: std::sync::Mutex::new(None),
@@ -785,10 +858,11 @@ of its own; a member commits in its worktree"
 workspace.sandbox.mode: off"
             );
         }
-        let (workspace, socket, crew_bin) = (
+        let (workspace, socket, crew_bin, vcs) = (
             self.workspace.clone(),
             self.socket.clone(),
             self.crew_bin.clone(),
+            self.vcs(),
         );
         let agent_dir = self.agent_dir(&agent.id);
         let workdir = PathBuf::from(&agent.workdir);
@@ -797,7 +871,7 @@ workspace.sandbox.mode: off"
         // and queue commands leave out the same things and say nothing more.
         let report = run.terminal.is_some();
         let (built, program) = tokio::task::spawn_blocking(move || -> Result<_> {
-            let (host, layout) = host_and_layout(&crew_bin, &workspace, &socket)?;
+            let (host, layout) = host_and_layout(&crew_bin, &workspace, vcs.store(), &socket)?;
             let path = std::env::var_os("PATH");
             let found = Found::new(&run.program, path.as_ref(), &crew_bin)?;
             let at = Placement {
@@ -859,15 +933,56 @@ mod tests {
         ws: PathBuf,
         worktree: PathBuf,
         socket: PathBuf,
+        store: Store,
     }
 
     fn fixture() -> Fixture {
+        fixture_with(false)
+    }
+
+    /// `fixture()` as the jj backend lays it out: jj's repository in the
+    /// handle `.crew/jj`, backed by `.git`, and `a`'s worktree a jj
+    /// workspace naming it, with the guard file in place of `.git`.
+    fn jj_fixture() -> Fixture {
+        fixture_with(true)
+    }
+
+    fn fixture_with(jj: bool) -> Fixture {
         let dir = tempfile::tempdir().unwrap();
         let root = dir.path().canonicalize().unwrap();
         let ws = root.join("ws");
         git::init_repo(&ws).unwrap();
-        let (worktree, _) =
-            git::add_worktree(&ws, &ws.join(".crew/worktrees"), "a", "main").unwrap();
+        let git_dir = ws.join(".git");
+        let (worktree, store) = if jj {
+            let repo = ws.join(".crew/jj/.jj/repo");
+            for sub in [
+                "op_store",
+                "op_heads",
+                "index",
+                "store/extra",
+                "workspace_store",
+            ] {
+                std::fs::create_dir_all(repo.join(sub)).unwrap();
+            }
+            std::fs::write(repo.join("store/git_target"), git_dir.to_str().unwrap()).unwrap();
+            let worktree = ws.join(".crew/worktrees/a");
+            std::fs::create_dir_all(worktree.join(".jj/working_copy")).unwrap();
+            std::fs::write(worktree.join(".jj/repo"), "../../../jj/.jj/repo").unwrap();
+            std::fs::write(
+                worktree.join(".git"),
+                "gitdir: /nonexistent/crew-jj-workspace\n",
+            )
+            .unwrap();
+            let store = Store::Jj {
+                git_dir,
+                repo_dir: repo,
+            };
+            (worktree, store)
+        } else {
+            let (worktree, _) =
+                git::add_worktree(&ws, &ws.join(".crew/worktrees"), "a", "main").unwrap();
+            (worktree.path, Store::Git { git_dir })
+        };
         for id in ["a", "orchestrator"] {
             std::fs::create_dir_all(ws.join(".crew/agents").join(id).join("rw/home")).unwrap();
         }
@@ -878,9 +993,10 @@ mod tests {
             _dir: dir,
             _listener: listener,
             ws,
-            worktree: worktree.path,
+            worktree,
             socket,
             root,
+            store,
         }
     }
 
@@ -916,7 +1032,12 @@ mod tests {
         ) -> Result<Spec> {
             let crew_bin = std::env::current_exe().unwrap();
             let host = Host::detect(&crew_bin, Path::new("/bwrap"), landlock::MIN_ABI);
-            let layout = Layout::new(&self.ws, &self.socket, &self.root.join("cache"))?;
+            let layout = Layout::new(
+                &self.ws,
+                self.store.clone(),
+                &self.socket,
+                &self.root.join("cache"),
+            )?;
             let agent_dir = self.ws.join(".crew/agents").join(&run.agent_id);
             let at = Placement {
                 agent_dir: &agent_dir,
@@ -1054,7 +1175,7 @@ mod tests {
     fn an_agents_git_runs_in_its_profile_with_its_identity_only() {
         let f = fixture();
         let agent_dir = f.ws.join(".crew/agents/a");
-        let run = Run::git("a", &agent_dir);
+        let run = Run::vcs("a", &agent_dir, "git");
         assert_eq!(
             run.env,
             [(
@@ -1076,7 +1197,8 @@ mod tests {
         assert!(binds.contains(&(f.ws.join(".git/worktrees/a/config.worktree"), false)));
     }
 
-    /// Passes every git command through unchanged, and keeps its arguments.
+    /// Passes every git or jj command through unchanged, and keeps its
+    /// arguments.
     #[derive(Default)]
     struct Recorder(std::sync::Mutex<Vec<Vec<String>>>);
 
@@ -1094,6 +1216,9 @@ mod tests {
                     Some(value) => same.env(name, value),
                     None => same.env_remove(name),
                 };
+            }
+            if let Some(dir) = cmd.get_current_dir() {
+                same.current_dir(dir);
             }
             Ok(same)
         }
@@ -1218,6 +1343,292 @@ mod tests {
     }
 
     #[test]
+    fn a_jj_workers_profile_has_its_workspace_and_the_store_but_no_git_admin_directory() {
+        let f = jj_fixture();
+        let repo = f.ws.join(".crew/jj/.jj/repo");
+        let git_dir = f.ws.join(".git");
+        let spec = f.profile("a", false, true).unwrap();
+        assert_eq!(spec.cwd, f.worktree);
+        let binds = binds(&spec);
+        for expected in [
+            (repo.clone(), false),
+            (repo.join("op_store"), true),
+            (repo.join("op_heads"), true),
+            (repo.join("index"), true),
+            (repo.join("store/extra"), true),
+            (git_dir.clone(), false),
+            (git_dir.join("objects"), true),
+            (git_dir.join("refs"), true),
+            (f.worktree.clone(), true),
+            (f.worktree.join(".jj"), false),
+            (f.worktree.join(".jj/working_copy"), true),
+        ] {
+            assert!(
+                binds.contains(&expected),
+                "{expected:?} missing: {binds:#?}"
+            );
+        }
+        assert!(
+            !binds
+                .iter()
+                .any(|(p, _)| p.starts_with(git_dir.join("worktrees"))),
+            "{binds:#?}"
+        );
+        assert!(!binds.iter().any(|(p, _)| p == &f.ws.join(".crew/jj")));
+        // A worktree that is no jj workspace is refused before anything is
+        // bound.
+        std::fs::remove_dir_all(f.worktree.join(".jj")).unwrap();
+        let refused = f.profile("a", false, true).unwrap_err().to_string();
+        assert!(
+            refused.contains("is not a jj workspace crew made"),
+            "{refused}"
+        );
+    }
+
+    #[test]
+    fn a_store_a_sandbox_cannot_mount_is_refused() {
+        let f = fixture();
+        let elsewhere = f.root.join("main/.git");
+        std::fs::create_dir_all(&elsewhere).unwrap();
+        let cache = f.root.join("cache");
+        let refused = |store: Store| {
+            Layout::new(&f.ws, store, &f.socket, &cache)
+                .err()
+                .map(|e| e.to_string())
+        };
+        // A linked git worktree: its objects and refs are in the main
+        // checkout's `.git`.
+        let why = refused(Store::Git {
+            git_dir: elsewhere.clone(),
+        })
+        .expect("refused");
+        assert!(why.contains("the main checkout of its repository"), "{why}");
+        assert!(why.contains(&elsewhere.display().to_string()), "{why}");
+        // jj's repository outside the workspace, or not a directory.
+        assert!(refused(Store::Jj {
+            git_dir: f.ws.join(".git"),
+            repo_dir: f.root.join("main"),
+        })
+        .is_some());
+        let file = f.ws.join(".crew/repo-file");
+        std::fs::write(&file, "").unwrap();
+        assert!(refused(Store::Jj {
+            git_dir: f.ws.join(".git"),
+            repo_dir: file,
+        })
+        .is_some());
+        // A link to a directory inside is not one.
+        let link = f.ws.join(".crew/git-link");
+        std::os::unix::fs::symlink(f.ws.join(".git"), &link).unwrap();
+        assert!(refused(Store::Git { git_dir: link }).is_some());
+        assert!(refused(Store::Git {
+            git_dir: f.ws.clone()
+        })
+        .is_some());
+        assert!(refused(f.store.clone()).is_none());
+    }
+
+    #[test]
+    fn an_agents_jj_runs_by_the_path_the_daemon_selected() {
+        let f = jj_fixture();
+        let jj = f.root.join("bin/jj");
+        std::fs::create_dir_all(jj.parent().unwrap()).unwrap();
+        std::fs::write(&jj, "#!/bin/sh\n").unwrap();
+        let program = jj.to_string_lossy().into_owned();
+        let run = Run::vcs("a", &f.ws.join(".crew/agents/a"), &program);
+        assert_eq!(run.program, program);
+        // Given by its path: bound as the program run (its install root),
+        // never looked up by name.
+        let found = Found::new(&run.program, Some(&OsString::from("/nowhere")), &f.root).unwrap();
+        assert_eq!(found.cli.as_deref(), Some(jj.as_path()));
+        let spec = f.profile_for(false, true, &run).unwrap();
+        assert_eq!(found.program(&run.program, &spec), None);
+        assert_eq!(spec.pass_env, ["CREW_IDENTITY"]);
+    }
+
+    #[tokio::test]
+    async fn an_agents_jj_command_runs_the_bound_jj_in_its_sandbox_and_ledger() {
+        let fx = jj_fixture();
+        let running = super::super::start(super::super::DaemonOptions {
+            workspace: fx.ws.clone(),
+            crew_bin: std::env::current_exe().unwrap(),
+        })
+        .await
+        .unwrap();
+        let daemon = running.daemon.clone();
+        let run = Run::vcs("a", &fx.ws.join(".crew/agents/a"), "/bound/bin/jj");
+        let launcher = LedgerLauncher {
+            daemon: daemon.clone(),
+            agent: "a".into(),
+            what: "jj",
+            spec: fx.profile_for(false, true, &run).unwrap(),
+            program: Some(PathBuf::from("/bound/bin/jj")),
+            env: run.env.clone(),
+            admin: None,
+            pending: std::sync::Mutex::new(None),
+        };
+        assert_eq!(launcher.admin_dir(), None);
+        let mut jj = std::process::Command::new("/bound/bin/jj");
+        jj.args(["-R", "/w", "status"])
+            .env("JJ_USER", "a")
+            .env("JJ_CONFIG", "/dev/null")
+            .current_dir("/w");
+        let launched = launcher.launch(&jj).unwrap();
+        let entries = daemon.ledger.of("a");
+        assert_eq!(entries.len(), 1);
+        assert_eq!(entries[0].get().what, "jj");
+        launcher.started(None);
+        let args: Vec<String> = launched
+            .get_args()
+            .map(|a| a.to_string_lossy().into_owned())
+            .collect();
+        let after = args.iter().position(|a| a == "--").unwrap() + 1;
+        assert_eq!(args[after..], ["/bound/bin/jj", "-R", "/w", "status"]);
+        // jj's variables travel in the spec; it starts in the workspace.
+        let spec: Spec = serde_json::from_str(&args[1]).unwrap();
+        for var in [("JJ_USER", "a"), ("JJ_CONFIG", "/dev/null")] {
+            assert!(
+                spec.env.contains(&(var.0.to_string(), var.1.to_string())),
+                "{:?}",
+                spec.env
+            );
+        }
+        assert_eq!(spec.cwd, fx.worktree);
+    }
+
+    /// The jj under test and a project with one commit on `main`, its jj
+    /// backend prepared; None (and a note) without jj, unless
+    /// `CREW_TEST_VCS=jj` asks for it.
+    fn jj_project() -> Option<(tempfile::TempDir, PathBuf, crate::vcs::jj::Jj)> {
+        let (program, version) = match crate::vcs::find_jj() {
+            Ok(found) => found,
+            Err(why) => {
+                if std::env::var("CREW_TEST_VCS").as_deref() == Ok("jj") {
+                    panic!("CREW_TEST_VCS=jj, but jj cannot be used: {why:?}");
+                }
+                eprintln!("skipped: jj cannot be used ({why:?})");
+                return None;
+            }
+        };
+        let dir = tempfile::tempdir().unwrap();
+        let ws = dir.path().canonicalize().unwrap().join("ws");
+        git::init_repo(&ws).unwrap();
+        std::fs::write(ws.join("tracked.txt"), "x\n").unwrap();
+        git::commit_all(&ws, "setup", "tracked").unwrap();
+        let jj = crate::vcs::jj::Jj::new(&program, &version, &ws, &ws.join(".crew"));
+        assert!(jj.prepare(&ws).unwrap());
+        Some((dir, ws, jj))
+    }
+
+    /// The directory each command of `seen` names with `-R`.
+    fn repository_args(seen: &[Vec<String>]) -> Vec<PathBuf> {
+        seen.iter()
+            .filter_map(|argv| {
+                let at = argv.iter().position(|a| a == "-R")?;
+                argv.get(at + 1).map(PathBuf::from)
+            })
+            .collect()
+    }
+
+    #[test]
+    fn a_new_jj_workspace_is_filled_through_the_helper_and_made_without_it() {
+        let Some((_dir, ws, jj)) = jj_project() else {
+            return;
+        };
+        let worktrees = ws.join(".crew/worktrees");
+        let recorder = Arc::new(Recorder::default());
+        let calls = std::cell::Cell::new(0);
+        let helper = |worktree: &Path| -> Result<Arc<dyn Launcher>> {
+            calls.set(calls.get() + 1);
+            assert_eq!(worktree, worktrees.join("a"));
+            Ok(recorder.clone())
+        };
+        let made = provision_worktree(&jj, &worktrees, "a", "HEAD", Some(&helper)).unwrap();
+        assert_eq!(made.path, worktrees.join("a"));
+        assert_eq!(
+            std::fs::read_to_string(made.path.join("tracked.txt")).unwrap(),
+            "x\n"
+        );
+        assert_eq!(calls.get(), 1);
+        let seen = recorder.0.lock().unwrap().clone();
+        assert!(!seen.is_empty());
+        assert!(
+            seen.iter()
+                .all(|argv| argv[0] == jj.program().to_string_lossy()),
+            "{seen:?}"
+        );
+        assert!(
+            seen.iter().any(|argv| argv.contains(&"sparse".to_string())),
+            "{seen:?}"
+        );
+        assert!(
+            !seen
+                .iter()
+                .any(|argv| argv.contains(&"workspace".to_string())),
+            "the workspace was made through the helper: {seen:?}"
+        );
+        assert!(
+            repository_args(&seen).iter().all(|r| *r == made.path),
+            "{seen:?}"
+        );
+        // Its admin data is its own `.jj`, and no git admin directory.
+        assert_eq!(
+            admin_of(&jj.store(), &made.path).unwrap(),
+            None,
+            "a jj workspace has no git admin directory"
+        );
+    }
+
+    #[test]
+    fn jj_integration_merges_through_the_helper_in_its_own_workspace() {
+        let Some((_dir, ws, jj)) = jj_project() else {
+            return;
+        };
+        let worktrees = ws.join(".crew/worktrees");
+        let a = provision_worktree(&jj, &worktrees, "a", "HEAD", None).unwrap();
+        std::fs::write(a.path.join("from-a.txt"), "a\n").unwrap();
+        jj.commit_all(&a.path, "a", "work of a").unwrap();
+        let recorder = Arc::new(Recorder::default());
+        let calls = std::cell::Cell::new(0);
+        let integration = worktrees.join(git::INTEGRATION_DIR);
+        let helper = |worktree: &Path| -> Result<Arc<dyn Launcher>> {
+            calls.set(calls.get() + 1);
+            assert_eq!(worktree, integration);
+            Ok(recorder.clone())
+        };
+        let mut stepped = Vec::new();
+        let (made, steps) = integrate(
+            &jj,
+            &worktrees,
+            "HEAD",
+            &["a".to_string()],
+            Some(&helper),
+            &mut |step| stepped.push(step.agent.clone()),
+        )
+        .unwrap();
+        assert_eq!(made.path, integration);
+        assert_eq!(steps.len(), 1);
+        assert!(steps[0].outcome.ok, "{:?}", steps[0].outcome);
+        assert_eq!(stepped, ["a"]);
+        assert!(integration.join("from-a.txt").exists());
+        assert_eq!(calls.get(), 1);
+        let seen = recorder.0.lock().unwrap().clone();
+        assert!(
+            seen.iter().any(|argv| argv.contains(&"new".to_string())),
+            "{seen:?}"
+        );
+        let elsewhere: Vec<_> = repository_args(&seen)
+            .into_iter()
+            .filter(|r| *r != integration)
+            .collect();
+        assert!(
+            elsewhere.is_empty(),
+            "helper jj outside its workspace: {elsewhere:?}"
+        );
+        assert_eq!(repository_args(&seen).len(), seen.len(), "{seen:?}");
+    }
+
+    #[test]
     fn a_team_that_cannot_be_sandboxed_is_refused_with_what_would_fix_it() {
         let ready = || Readiness {
             backend: "pty",
@@ -1293,7 +1704,7 @@ unsandboxed"
         let _nix = std::os::unix::net::UnixListener::bind(&socket).unwrap();
         let verified = UntrustedNixDaemon::verified_for_test(&socket);
         let session = |nix| {
-            let launch = Run::git("a", &f.ws.join(".crew/agents/a"));
+            let launch = Run::vcs("a", &f.ws.join(".crew/agents/a"), "git");
             f.profile_with(false, true, &launch, nix).unwrap()
         };
 
@@ -1316,7 +1727,7 @@ unsandboxed"
         .unwrap();
         let daemon = running.daemon.clone();
         let agent_dir = fx.ws.join(".crew/agents/a");
-        let run = Run::git("a", &agent_dir);
+        let run = Run::vcs("a", &agent_dir, "git");
         let env = run.env.clone();
         let launcher = LedgerLauncher {
             daemon: daemon.clone(),
@@ -1324,7 +1735,8 @@ unsandboxed"
             spec: fx.profile_for(false, true, &run).unwrap(),
             program: None,
             env,
-            admin: PathBuf::from("/admin"),
+            what: "git",
+            admin: Some(PathBuf::from("/admin")),
             pending: std::sync::Mutex::new(None),
         };
         let mut git = std::process::Command::new("git");
@@ -1614,7 +2026,8 @@ unsandboxed"
 
     /// The profile of a no-terminal launch of `name`, found at `found`.
     fn cli_profile(fx: &Fixture, host: &Host, name: &str, found: &Path) -> Spec {
-        let layout = Layout::new(&fx.ws, &fx.socket, &fx.root.join("cache")).unwrap();
+        let layout =
+            Layout::new(&fx.ws, fx.store.clone(), &fx.socket, &fx.root.join("cache")).unwrap();
         let agent = fx.ws.join(".crew/agents/a");
         let at = Placement {
             agent_dir: &agent,
@@ -1732,14 +2145,15 @@ unsandboxed"
         })
         .await
         .unwrap();
-        let run = Run::git("a", &fx.ws.join(".crew/agents/a"));
+        let run = Run::vcs("a", &fx.ws.join(".crew/agents/a"), "git");
         let launcher = LedgerLauncher {
             daemon: running.daemon.clone(),
             agent: "a".into(),
             spec: fx.profile_for(false, true, &run).unwrap(),
             program: Some(PathBuf::from("/bound/bin/git")),
             env: run.env.clone(),
-            admin: PathBuf::from("/admin"),
+            what: "git",
+            admin: Some(PathBuf::from("/admin")),
             pending: std::sync::Mutex::new(None),
         };
         let mut git = std::process::Command::new("git");
