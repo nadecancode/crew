@@ -188,17 +188,57 @@ pub(crate) async fn say_hello(
 
 /// One line from a daemon, at most `limit` bytes before its `\n`: `None` at
 /// its end (or past the limit, which no daemon sends).
+///
+/// Safe to cancel: what a call read before it was cancelled stays in `buf`
+/// and the next call goes on from there, the limit counting all of it. The
+/// caller clears `buf` once it consumed the line.
 pub(crate) async fn read_line(lines: &mut Lines, buf: &mut Vec<u8>, limit: usize) -> Option<()> {
-    buf.clear();
-    let mut limited = (&mut *lines).take(limit as u64 + 1);
+    if buf.len() > limit {
+        return None;
+    }
+    let room = (limit + 1 - buf.len()) as u64;
+    let mut limited = (&mut *lines).take(room);
     match limited.read_until(b'\n', buf).await {
         Ok(0) | Err(_) => None,
-        Ok(_) if buf.len() > limit && buf.last() != Some(&b'\n') => None,
+        // Past the limit, or the end in the middle of a line.
+        Ok(_) if buf.last() != Some(&b'\n') => None,
         Ok(_) => {
-            if buf.last() == Some(&b'\n') {
-                buf.pop();
-            }
+            buf.pop();
             Some(())
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn a_line_read_across_a_cancelled_read_is_whole() {
+        let (mut daemon, ours) = tokio::io::duplex(64);
+        let mut lines: Lines = BufReader::new(Box::pin(ours));
+        let mut buf = Vec::new();
+        daemon.write_all(br#"{"id":7,"#).await.unwrap();
+        // Another branch wins while half the line is in.
+        let cancelled = tokio::time::timeout(
+            Duration::from_millis(20),
+            read_line(&mut lines, &mut buf, 1024),
+        )
+        .await;
+        assert!(cancelled.is_err());
+        daemon.write_all(b"\"result\":{\"pong\":true}}\n").await.unwrap();
+        assert!(read_line(&mut lines, &mut buf, 1024).await.is_some());
+        assert_eq!(buf, br#"{"id":7,"result":{"pong":true}}"#);
+        buf.clear();
+        // The limit counts what came before the cancellation too.
+        daemon.write_all(&[b'x'; 20]).await.unwrap();
+        let _ = tokio::time::timeout(
+            Duration::from_millis(20),
+            read_line(&mut lines, &mut buf, 30),
+        )
+        .await;
+        daemon.write_all(&[b'x'; 20]).await.unwrap();
+        daemon.write_all(b"\n").await.unwrap();
+        assert!(read_line(&mut lines, &mut buf, 30).await.is_none());
     }
 }
