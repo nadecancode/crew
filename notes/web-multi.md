@@ -833,10 +833,46 @@ path is a read and a write, and no meaning of the protocol is written down
 a second time. A daemon line is at most `MAX_FRAME_BYTES`, the WebSocket
 limit is the same constant.
 
-A slow browser: the server stops reading that connection's daemon socket
-while a WebSocket write is pending; the daemon then sees a slow reader on
-its socket and does what it does for any (`resync`, §transport "Reconnect
-and resync"). The server buffers one frame per connection, not a queue.
+**Batches** (added during implementation; qa m-de37530b2645, reviewer
+m-82e473bec934). A line the server has read is written to the browser
+together with every further complete line its read buffer already holds, at
+most 256 lines in all: each still one text message, in order, the batch
+flushed once. A batch never waits for more. A line that arrives alone goes
+out alone and at once, so P16 is untouched; under load one write carries
+what one read brought, instead of a hand-over between tasks and a flush for
+every line (measured by qa: 2000 pipelined `send`s on one connection took
+7.8 s with a write a line, where the daemon's own server took 3.2 s).
+
+**A slow browser, and what the server holds for it.** Per workspace
+connection, of what a daemon sent and the browser has not taken, the server
+holds at most:
+
+- **three batches**: the one being written to the WebSocket, one queued
+  behind it (the queue has one place), and the one the connection's task has
+  put together and cannot queue yet;
+- where a batch is one line of at most `MAX_FRAME_BYTES` + 1024 bytes and,
+  after it, only complete lines that were already in the read buffer
+  (64 KiB, at most 255 of them);
+- and the read buffer itself.
+
+That is about 3.3 MiB for a connection whose daemon sends lines as long as
+a line may be, and about 256 KiB when lines are short. These are constants,
+not a queue that grows with what the daemon sends. Once the third batch
+cannot be queued, the connection's task waits and the daemon's socket is not
+read; the daemon then sees a slow reader and does what it does for any
+(`resync`, §transport "Reconnect and resync"). (Revisions 1 to 3 said "one
+frame per connection" and "not read while a write is pending". With a queue
+of one place between the task and its writer that was three frames, read
+until the third could not be queued; the sentence is now what the code does,
+with batches in the place of frames.)
+
+What this does not change: the task that waits to queue a batch is not
+looking at its revocation, exactly as the one that waited to queue a frame
+was not. It is one of those §multi-join "Leaving" cancels after a second
+(step 4). The writer task holds the browser's side and text, never the
+daemon's side. What had been read before a revocation may still be written
+to the browser ahead of its close frame, at most the two batches that were
+with the writer; nothing is read after it.
 
 A daemon that stops in order sends its `shutdown` push first, as to every
 subscriber; the connection then ends with 4001 like any whose daemon's side
@@ -1220,11 +1256,42 @@ workspace connection, as the page now starts. Added:
 | P17 | a switch: from `enter` in the switcher to the first frame of the other workspace with its snapshot applied, 10 agents, 300 messages, 1000 events | ≤ 150 ms at p95 | the wire part (connect, `hello`, `subscribe`, `snapshot`): 12–15 ms at p95 |
 | P18 | a question asked in a workspace not on screen: from the daemon's `message` push to the badge | ≤ 500 ms at p95 | not spiked: 250 ms (daemon) + 100 ms (server) of coalescing at most |
 | P19 | an idle page with five joined workspaces: index frames received and calls made in 60 s, pings aside | none | by construction (summaries hold no times) |
-| P20 | the server with five joined workspaces and three pages, idle: resident memory; wake-ups | ≤ 40 MB; none under 5 s but pings | not spiked |
+| P20 | the server with five joined workspaces and three pages, idle: resident memory; wake-ups | ≤ 40 MB; none but the 5 s housekeeping tick, the pings, and the runtime's timer wheel stepping those two down (below) | qa, 60 s, five workspaces, six idle connections: 28 wake-ups, every one of them a tick, a ping or a step of the wheel (13 of those) |
 
 How the server meets P16: a frame is read and written, not parsed
 (§multi-transport); `TCP_NODELAY` on every accepted socket, as today; one
 task per direction per connection.
+
+**P20 and the runtime's timer wheel** (amended during QA, m-dc99bc6bcd1c;
+the budget read "none under 5 s but pings"). The budget is there so that the
+server does not poll: a poll would hide a lost `web_rescan` or reconcile,
+and cost something on a machine where nothing happens. It was written as if
+a timer cost one wake-up, when it fires. It does not, in tokio: its timers
+sit in a wheel of levels (slots of 1 ms, 64 ms, 4096 ms, …;
+`runtime/time/wheel`, `level_for`), a timer whose deadline lies in a later
+4096 ms slot than the present is filed by that slot, and the runtime wakes
+at the slot's start to file it one level down, and once more at the start of
+its 64 ms slot. The 5 s tick and the 20 s pings are both such timers, and
+the tick keeps every 4096 ms slot occupied. So an idle server wakes, besides
+for the tick and the pings themselves:
+
+- at most once per 4096 ms, on one lattice whose phase is the runtime's
+  start (qa measured exactly this: 1014, 5100, 9210, 13301 … ms);
+- at most once in the 64 ms before a tick or a ping fires.
+
+These are the cost of the two timers the design has, not a third thing the
+server does: nothing of crew's runs in them. Making crew's timers shorter
+than a slot would add wake-ups, and the pings are 20 s by §security. So P20
+allows them, counted apart and reported, and nothing else: a wake-up that is
+neither a tick, a ping, nor on that lattice (or within 64 ms before a tick
+or a ping) fails the gate, as polling at any period from 50 ms to 11 s does
+in qa's control runs.
+
+What the measurement cannot tell apart is a poll of exactly 4096 ms in phase
+with the runtime. Such a poll would add no wake-up, which is what P20
+counts; it would still be a timer of ours, and that is what the frozen-clock
+test of §multi-tests is for (`…an_idle_server_arms_no_timer`: with healthy
+watches the hub has no timer pending at all), whatever the period.
 
 ---
 
@@ -1311,6 +1378,18 @@ the test's own and real daemons beside it:
   for byte); a message with `\n` or `\r` closes with 1008 and the daemon
   receives nothing; the barrier test of §tests passes through the server
   unchanged; `not_found`, `unavailable`, `protocol`.
+- **Batches**: N lines the stand-in daemon sends in one write arrive as N
+  text messages, in order, byte for byte, for N of 1, 2, 256, 257 and 1000,
+  and with a line of `MAX_FRAME_BYTES` first, last and in the middle; a line
+  sent alone is delivered with no timer armed (frozen clock); a line that is
+  not UTF-8 in the middle of a batch ends the connection and nothing after
+  it is delivered. A browser that does not read: the stand-in daemon can
+  write no more than the bound above plus what the two sockets' kernel
+  buffers take, and then its writes stop being accepted; the server's memory
+  for that connection stays under the bound however much the daemon offers.
+  Revoked while the task waits to queue a batch: the forced end of
+  "Leaving", and what the browser is sent afterwards is at most two batches
+  and the close.
 - **A daemon stops and returns**: its connections close with 4001; the
   index gets `stopped` with the last summary; other workspaces' connections
   are untouched; after the daemon starts again the index says `running`

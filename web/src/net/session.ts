@@ -1,8 +1,10 @@
 // The page's credential: the one module that touches `localStorage`
 // (notes/web-design.md §security).
 //
-// - A pairing code arrives in the URL fragment (`#pair=<code>`) and is taken
-//   out of the address before anything else runs.
+// - A pairing code arrives in the URL fragment (`#pair=<code>&w=<id>`) and is
+//   taken out of the address before anything else runs; what is left is the
+//   address of the workspace `w` names (`#/w/<id>/`), the one the page
+//   opens first (notes/web-multi.md §multi-ui "Addresses").
 // - The session (token and verifier) is kept under the one key
 //   `crew.web.session`. It is read once, when the document starts; from then
 //   on only the copy in this module's memory is trusted. There is no
@@ -13,6 +15,8 @@
 // - Nothing here is logged, put in a URL, or kept in a store a component can
 //   render.
 
+import { WORKSPACE_ID } from "../route";
+
 export const STORAGE_KEY = "crew.web.session";
 
 export type Credential = { readonly token: string; readonly verifier: string };
@@ -21,14 +25,16 @@ type Store = Pick<Storage, "getItem" | "setItem" | "removeItem">;
 type Place = { hash: string; pathname: string; search: string };
 type History = { replaceState(data: unknown, unused: string, url?: string): void };
 
-/** Take a pairing code out of the address: `#pair=<code>` is removed before
- * any connection is made, and before the router reads the fragment. */
+/** Take a pairing code out of the address: `#pair=<code>&w=<id>` is replaced
+ * by `#/w/<id>/` (or nothing) before any connection is made, and before the
+ * router reads the fragment. */
 export function takePairCode(place: Place, history: History): string | null {
   // Read before the address changes: with the real `location` the hash is gone after.
   const hash = place.hash;
   if (!hash.startsWith("#pair=")) return null;
-  history.replaceState(null, "", place.pathname + place.search);
-  const code = hash.slice("#pair=".length);
+  const [code, ...rest] = hash.slice("#pair=".length).split("&");
+  const w = new URLSearchParams(rest.join("&")).get("w");
+  history.replaceState(null, "", place.pathname + place.search + (w && WORKSPACE_ID.test(w) ? `#/w/${w}/` : ""));
   return /^[A-Za-z0-9_-]{1,256}$/.test(code) ? code : null;
 }
 

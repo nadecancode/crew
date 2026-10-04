@@ -146,8 +146,8 @@ test("P10, P11, P12, P15 against a real daemon: frames under real pushes, rows i
   daemon.start(teamYaml(daemon.ws, daemon.vcs, 4));
   const info = daemon.web();
   const label = new URL(info.url).host;
-  const protocol = Number(JSON.parse(daemon.c(["status", "--json"])).session.protocol ?? 5);
-  const op = (await signedIn(info.port, label, `http://${label}`, new URL(info.pair_url).hash.replace("#pair=", ""), protocol)) as unknown as Operator;
+  const protocol = 6;
+  const op = (await signedIn(info.port, label, `http://${label}`, new URLSearchParams(new URL(info.pair_url).hash.slice(1)).get("pair")!, protocol, info.workspace!)) as unknown as Operator;
   const targets = ["idle", "echo", "w1", "w2", "w3", "w4"];
   const lastSeq = () => Math.max(0, ...daemon.events().map((e) => e.seq));
 
@@ -213,7 +213,7 @@ test("P10, P11, P12, P15 against a real daemon: frames under real pushes, rows i
     // The load was real: every call answered without error, the daemon took at least the steady rate
     // (the steady rate; and for the burst more than that: the daemon, not the page, bounds what it takes), the page applied what the daemon emitted.
     expect(l.errors, `${name}: calls refused`).toBe(0);
-    expect(l.accepted, `${name}: calls answered`).toBe(l.offered);
+    expect(l.accepted, `${name}: calls answered (op socket closed: ${(op as unknown as { closed: boolean }).closed})`).toBe(l.offered);
     // The daemon bounds what it accepts (reported, floor far below); the design's rates are pushes at the page.
     expect(l.accepted_in_window * 1000 / ms, `${name}: accepted per second`).toBeGreaterThanOrEqual(50);
     expect((applied * 1000) / ms, `${name}: pushes applied per second`).toBeGreaterThanOrEqual(rate);

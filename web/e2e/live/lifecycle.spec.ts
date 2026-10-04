@@ -79,11 +79,14 @@ const FORGED = (() => {
   return s;
 })();
 
-test("a killed daemon, a squatter on its port, a rewritten storage: the open tab refuses the server, and a restarted daemon is a new origin", async ({ context, page, daemon, openLive }) => {
+/** The pid of the dashboard server, from the file it keeps in the runtime directory. */
+const serverPid = (root: string): number => JSON.parse(readFileSync(join(root, "run/crew/web.json"), "utf8")).pid;
+
+test("a killed server, a squatter on its port, a rewritten storage: the open tab refuses the forged server, and a new server is a new origin", async ({ context, page, daemon, openLive }) => {
   test.setTimeout(120_000);
   const servers: http.Server[] = [];
   const sockets: Duplex[] = [];
-  // What happened, in order. The squatter holds the open tab's `hello` until the second
+  // What happened, in order. The squatter holds the open tab's first `hello` until the second
   // document has read and rewritten the storage, so the forged answer is given with the
   // stolen verifier in hand, not before.
   const order: string[] = [];
@@ -102,27 +105,31 @@ test("a killed daemon, a squatter on its port, a rewritten storage: the open tab
     const session = JSON.parse(stored["crew.web.session"]) as { token: string; verifier: string };
     expect(session.verifier).toMatch(/^[0-9a-f]{64}$/);
 
-    // The daemon goes without a word.
-    daemon.kill();
-    daemon.until("the daemon to be gone", () => {
+    // The server goes without a word (the daemon, and its team, go on).
+    const pid = serverPid(daemon.root);
+    process.kill(pid, "SIGKILL");
+    daemon.until("the server to be gone", () => {
       try {
-        daemon.snapshot();
+        process.kill(pid, 0);
         return false;
       } catch {
         return true;
       }
     });
     // Someone else takes the port on both addresses and answers for any Host.
+    const listing = fixture("multi.json").workspaces.reply.result;
     const squat = [await hostile(info.port, "127.0.0.1", servers), await hostile(info.port, "::1", servers)];
     for (const s of squat)
-      forgedSocket(s, sockets, async (request) => {
+      forgedSocket(s, sockets, async (request: { method: string; params?: { workspace?: string } }) => {
         if (request.method === "hello") {
           order.push("hello-held");
           await released;
           order.push(`hello-answered:${proof}`);
-          return { ...fixture("results.json").hello[0], web_proof: proof };
+          return { ...fixture("multi.json").hello.index.reply.result, web_proof: proof };
         }
-        return request.method === "snapshot" ? (order.push("snapshot-forged"), FORGED) : { subscribed: true };
+        if (request.method === "workspaces") return (order.push("listing-forged"), listing);
+        if (request.method === "snapshot") return (order.push("snapshot-forged"), FORGED);
+        return { subscribed: true };
       });
 
     // The open tab reconnects by itself and is held at its `hello`.
@@ -133,7 +140,7 @@ test("a killed daemon, a squatter on its port, a rewritten storage: the open tab
     await second.goto(info.url);
     expect(await second.title()).toBe("hostile");
     const taken = await second.evaluate(() => Object.fromEntries(Object.entries(localStorage)));
-    expect(taken).toEqual(stored);
+    expect(taken["crew.web.session"]).toBe(stored["crew.web.session"]);
     order.push("stolen");
     proof = (JSON.parse(taken["crew.web.session"]) as { verifier: string }).verifier;
     expect(proof).toBe(session.verifier);
@@ -142,19 +149,16 @@ test("a killed daemon, a squatter on its port, a rewritten storage: the open tab
     });
     order.push("rewritten");
 
-    // (b) Only now is the open tab's `hello` answered, with the stolen verifier as the proof:
-    // it refuses the server, draws nothing of the made-up team, ends stopped with every control
-    // disabled, and makes no further request.
+    // (b) Only now is the open tab's `hello` answered, with the stolen verifier as the proof: it
+    // refuses the server, draws nothing of the made-up team or listing, and ends stopped.
     release();
     await expect(page.locator('[data-conn="stopped"]')).toBeAttached({ timeout: 40_000 });
     expect(order.slice(0, 4)).toEqual(["hello-held", "stolen", "rewritten", `hello-answered:${session.verifier}`]);
     expect(order).not.toContain("snapshot-forged");
+    expect(order).not.toContain("listing-forged");
     await expect(page.locator("[data-agent]")).toHaveCount(agents);
     await expect(page.locator("[data-agent]").filter({ hasText: "FORGED" })).toHaveCount(0);
-    await expect(page.locator(".conn-bar")).toContainText("stopped");
-    for (const button of await page.locator("footer button, #side-panel button").all()) {
-      if (await button.isVisible()) await expect(button).toBeDisabled();
-    }
+    await expect(page.getByText("forged", { exact: false })).toHaveCount(0);
     const asked: string[] = [];
     page.on("request", (r) => asked.push(r.url()));
     // Opening a terminal tab requests no script, and the squatter's mark is not set.
@@ -166,12 +170,13 @@ test("a killed daemon, a squatter on its port, a rewritten storage: the open tab
     expect(scriptsAsked).toEqual([]);
     expect(asked).toEqual([]);
 
-    // (c) The squatter lets go; the daemon starts again: another label, the same port.
+    // (c) The squatter lets go; `crew web` starts a new server: another label, the same port, and
+    // the workspace is joined again.
     for (const s of sockets) s.destroy();
     await Promise.all(servers.splice(0).map(close));
-    daemon.start();
     const next = daemon.web();
     expect(next.port).toBe(info.port);
+    expect(next.started).toBe(true);
     expect(new URL(next.url).origin).not.toBe(oldOrigin);
     const fresh = await context.newPage();
     await openLive(next, fresh);

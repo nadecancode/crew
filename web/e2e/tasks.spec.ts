@@ -51,7 +51,7 @@ test("t shows the DAG in layers, left to right; t again goes back to the graph",
   const guard = noRequestsAfterStart(page, mock);
   await openPage();
   await page.keyboard.press("t");
-  await expect(page).toHaveURL(/#\/tasks$/);
+  await expect(page).toHaveURL(/#\/w\/[0-9a-f]{16}\/tasks$/);
   for (const id of IDS) await expect(task(page, id)).toBeVisible();
   await expect(task(page, "billing")).toHaveAccessibleName("billing, working");
   await expect(page.locator(".task-dag path.edge")).toHaveCount(5);
@@ -106,7 +106,7 @@ test("a click opens the task's card in the side panel and asks task_get", async 
   await expect(panel).toContainText("implement ledger");
   await expect(panel.locator(".deps")).toContainText("db");
   await expect(task(page, "ledger")).toHaveClass(/\bselected\b/);
-  await expect(page).toHaveURL(/#\/tasks\?task=ledger$/);
+  await expect(page).toHaveURL(/#\/w\/[0-9a-f]{16}\/tasks\?task=ledger$/);
 
   // The card's dependency link moves the card.
   await panel.locator(".deps").getByRole("button", { name: "db" }).click();
@@ -154,7 +154,7 @@ test("the keyboard walks the DAG: j k and arrows along a layer, h l and arrows a
   await page.keyboard.press("ArrowLeft");
   await expect.poll(() => focused(page)).toBe(layers[0][0]);
   // The view keys did not fire on the way (`l` is also the log view's key).
-  await expect(page).toHaveURL(/#\/tasks$/);
+  await expect(page).toHaveURL(/#\/w\/[0-9a-f]{16}\/tasks$/);
   expect(mock.calls.filter((c) => c.method === "agent_kill")).toEqual([]);
   await expect(page.getByRole("dialog")).toHaveCount(0);
 

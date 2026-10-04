@@ -1,6 +1,7 @@
 // Every fixture file is read by the decoders; the protocol number and every
 // enum list are the Rust side's (notes/web-design.md §tests).
 import { describe, expect, test } from "vitest";
+import { CLOSE_DAEMON_ENDED, CLOSE_TAKEN_OUT } from "../src/net/conn";
 import * as P from "../src/protocol";
 import { fixture, fixtureLines } from "./fixtures";
 
@@ -28,6 +29,8 @@ const RESULT_DECODERS: Record<string, (v: unknown) => unknown> = {
   agent_kill: P.decodeAgentOrNull,
   agent_compact: P.decodeAgentOrNull,
   agent_set_model: P.decodeAgentOrNull,
+  workspaces: P.decodeWorkspaces,
+  summary: P.decodeSummary,
 };
 
 describe("fixtures", () => {
@@ -50,6 +53,39 @@ describe("fixtures", () => {
       }
     }
     for (const kind of ["event", "message", "agent", "agent_removed", "task", "session", "resync", "pty", "pty_closed", "shutdown"]) expect(kinds).toContain(kind);
+  });
+
+  test("multi.json: the index and a workspace connection as the page meets them", () => {
+    const m = fixture("multi.json");
+    // Both hello replies carry the proof; the page's hello names its workspace or none.
+    for (const kind of ["index", "workspace"] as const) {
+      const frame = P.decodeFrame(JSON.stringify(m.hello[kind].reply));
+      expect(frame.kind).toBe("result");
+      if (frame.kind === "result") expect(P.decodeHello(frame.result).web_proof).toBeTruthy();
+      expect(m.hello[kind].request.params.protocol).toBe(P.PROTOCOL);
+    }
+    expect(m.hello.index.request.params.workspace).toBeUndefined();
+    expect(m.hello.workspace.request.params.workspace).toMatch(/^[0-9a-f]{16}$/);
+    // The refusals a workspace's hello may meet: codes are the contract.
+    expect(Object.keys(m.hello.workspace_refused).sort()).toEqual(["not_found", "protocol", "unauthorized", "unavailable"]);
+    for (const [code, f] of Object.entries(m.hello.workspace_refused)) {
+      const frame = P.decodeFrame(JSON.stringify(f));
+      expect(frame.kind === "error" && frame.error.code).toBe(code);
+    }
+    // The listing, reply and push, with every state and others.
+    const reply = P.decodeFrame(JSON.stringify(m.workspaces.reply));
+    const push = P.decodeFrame(JSON.stringify(m.workspaces.push));
+    expect(reply.kind).toBe("result");
+    expect(push.kind === "push" && push.push.kind).toBe("workspaces");
+    const listing = push.kind === "push" && push.push.kind === "workspaces" ? push.push.data : null;
+    expect(new Set(listing!.joined.map((e) => e.state))).toEqual(new Set(P.WORKSPACE_STATE));
+    expect(listing!.others.length).toBeGreaterThan(0);
+    if (reply.kind === "result") expect(P.decodeWorkspaces(reply.result).rev).toBeTypeOf("number");
+    // The server's own push to its watch is not the page's: ignored.
+    expect(P.decodeFrame(JSON.stringify(m.summary.push)).kind).toBe("ignored");
+    // The close codes the page tells apart.
+    expect(m.close.workspace_ended.code).toBe(CLOSE_DAEMON_ENDED);
+    expect(m.close.workspace_removed.code).toBe(CLOSE_TAKEN_OUT);
   });
 
   test("every vcs.* event of pushes.jsonl carries a payload the page reads", () => {
@@ -99,6 +135,7 @@ test("the protocol number and every enum list are the daemon's", () => {
   expect([...P.PUSH_KIND]).toEqual(enums.push);
   expect([...P.VCS_ACTION]).toEqual(enums.vcs_action);
   expect([...P.VCS_OUTCOME]).toEqual(enums.vcs_outcome);
+  expect([...P.WORKSPACE_STATE]).toEqual(enums.workspace_state);
 });
 
 test("malformed frames are refused, not applied", () => {

@@ -5,14 +5,15 @@
 // to its origin except WebSocket upgrades.
 import { render } from "solid-js/web";
 import "./theme.css";
-import { AppContext, createApp } from "./app";
+import { createPage } from "./app";
 import { browserEnv } from "./net/conn";
 import { Session, takePairCode } from "./net/session";
-import { Shell } from "./views/Shell";
+import { Root } from "./views/Shell";
 
 const terminal = import("./term/Terminal");
 
-// The pairing code leaves the address before anything else runs.
+// The pairing code leaves the address before anything else runs; what is left
+// names the workspace to open first.
 const code = takePairCode(location, history);
 
 function storage(): Storage | null {
@@ -25,21 +26,14 @@ function storage(): Storage | null {
 
 // The session is read from storage once, here, at the document's start.
 const session = new Session(storage(), code);
-const app = createApp(browserEnv(), session, terminal);
+const page = createPage(browserEnv(), session, terminal);
 
-render(
-  () => (
-    <AppContext.Provider value={app}>
-      <Shell />
-    </AppContext.Provider>
-  ),
-  document.getElementById("app")!,
-);
+render(() => <Root page={page} />, document.getElementById("app")!);
 
-app.link.start();
+page.start();
 // A connection that dropped while the tab slept is tried again at once.
-document.addEventListener("visibilitychange", () => document.visibilityState === "visible" && app.link.poke());
-window.addEventListener("online", () => app.link.poke());
+document.addEventListener("visibilitychange", () => document.visibilityState === "visible" && page.poke());
+window.addEventListener("online", () => page.poke());
 
 // For e2e/perf.spec.ts: timings only, no state and no credential.
-Object.defineProperty(window, "crewPerf", { value: { measure: app.measure, log: app.perf }, enumerable: false });
+Object.defineProperty(window, "crewPerf", { value: { measure: page.measure, log: page.perf }, enumerable: false });

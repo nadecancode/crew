@@ -9,7 +9,7 @@ import type { Page } from "@playwright/test";
 import { expect, noRequestsAfterStart, test } from "./fixtures.ts";
 import type { Mock } from "./fixtures.ts";
 
-const TITLE = "crew · checkout-rewrite";
+const TITLE = "checkout-rewrite · crew";
 const node = (page: Page, id: string) => page.locator(`[data-agent="${id}"]`);
 const banner = (page: Page) => page.locator(".question-banner");
 const dialog = (page: Page) => page.getByRole("dialog", { name: "question" });

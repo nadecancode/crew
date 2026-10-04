@@ -12,9 +12,9 @@ import type { Store } from "../store/store";
  * the expiries, so links and labels still light up and go. */
 export function createFrames(
   store: Store,
-  { reduced = false, raf = (cb: FrameRequestCallback) => requestAnimationFrame(cb), timers = window as { setTimeout(fn: () => void, ms: number): number; clearTimeout(id: number): void } } = {},
+  { reduced = false, raf = (cb: FrameRequestCallback) => requestAnimationFrame(cb), cancelRaf = (id: number) => cancelAnimationFrame(id), timers = window as { setTimeout(fn: () => void, ms: number): number; clearTimeout(id: number): void } } = {},
 ) {
-  return createRoot(() => {
+  return createRoot((disposeRoot) => {
     const [t, setT] = createSignal(clock());
     let frame = 0;
     let timer: number | null = null;
@@ -52,9 +52,21 @@ export function createFrames(
     }));
 
     // A hidden tab gets no frames; on return what expired meanwhile goes.
-    if (typeof document !== "undefined") document.addEventListener("visibilitychange", () => document.visibilityState === "visible" && step());
+    const onVisible = () => document.visibilityState === "visible" && step();
+    if (typeof document !== "undefined") document.addEventListener("visibilitychange", onVisible);
 
-    return { now: t };
+    return {
+      now: t,
+      /** The workspace was left: no frame, no timer, no listener remains. */
+      dispose(): void {
+        disposeRoot();
+        if (frame) cancelRaf(frame);
+        frame = 0;
+        if (timer !== null) timers.clearTimeout(timer);
+        timer = null;
+        if (typeof document !== "undefined") document.removeEventListener("visibilitychange", onVisible);
+      },
+    };
   });
 }
 

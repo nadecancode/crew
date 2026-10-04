@@ -8,7 +8,7 @@ import type { App } from "../src/app";
 import { AppContext } from "../src/app";
 import { KEYS, handleKey } from "../src/keys";
 import { operations } from "../src/operate";
-import { createPrefs } from "../src/prefs";
+import { createDashboardPrefs, createLayoutPrefs, joinPrefs } from "../src/prefs";
 import { decodeSnapshot } from "../src/protocol";
 import { createState } from "../src/store/store";
 import { createUi } from "../src/ui";
@@ -21,11 +21,14 @@ function fakeApp(calls: Calls) {
   return createRoot(() => {
     const loc = { hash: "#/" };
     const hist = { pushState: (_: unknown, __: string, url?: string) => (loc.hash = url!), replaceState: (_: unknown, __: string, url?: string) => (loc.hash = url!) };
-    const ui = createUi(loc, hist);
+    const ui = createUi({ loc, hist });
     const store = createState();
     const snap = decodeSnapshot(fixture("snapshot.json"));
     store.applySnapshot(snap, snap.server_time);
-    const prefs = createPrefs(async () => ({ prefs: {} }), { setTimeout: () => 0, clearTimeout: () => {} });
+    const noTimers = { setTimeout: () => 0, clearTimeout: () => {} };
+    const prefs = joinPrefs(createLayoutPrefs(async () => ({ prefs: {} }), noTimers), createDashboardPrefs(async () => ({ prefs: {} }), noTimers));
+    let switcher = false;
+    const page = { setSwitcher: (on: boolean) => (switcher = on), switcher: () => switcher };
     const record = (name: string) => (...args: unknown[]) => {
       calls.push(`${name}${args.length ? `(${args.map((a) => (typeof a === "object" ? (a as { id?: string }).id : a)).join(",")})` : ""}`);
       return Promise.resolve(undefined);
@@ -38,6 +41,7 @@ function fakeApp(calls: Calls) {
       prefs,
       actions,
       link: { live: () => true, conn: () => "live" },
+      page,
       views: { graph: viewport, tasks: viewport },
       isPending: () => false,
     } as unknown as App;
@@ -75,6 +79,10 @@ describe("each key does its action on the selected agent", () => {
     press(app, ops, "?");
     expect(ui.dialog()).toEqual({ kind: "help" });
     ui.closeDialog();
+    // w opens the workspace switcher.
+    press(app, ops, "w");
+    expect(app.page.switcher()).toBe(true);
+    app.page.setSwitcher(false);
     // Nothing selected yet: the TUI's word for it.
     press(app, ops, "p");
     expect(ui.status()?.text).toBe("no agent selected");

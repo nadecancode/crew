@@ -28,7 +28,8 @@ test("a second tab of the same address is live without pairing", async ({ contex
   await second.goto(mock.url);
   await expect(second.locator('[data-conn="live"]')).toBeAttached();
   expect(mock.calls.filter((c) => c.method === "web_pair").length).toBe(1);
-  expect(mock.calls.filter((c) => c.method === "hello").length).toBe(2);
+  // One index connection per tab, each with its own hello.
+  expect(mock.calls.filter((c) => c.method === "hello" && c.params?.workspace === undefined).length).toBe(2);
 });
 
 test("a spent code with a stored session: the stored session is used", async ({ context, mock, openPage }) => {

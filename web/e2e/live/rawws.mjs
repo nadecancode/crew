@@ -20,6 +20,8 @@ export function rawWs(port, host, origin, { timeoutMs = 8000 } = {}) {
     const waiting = new Map();
     const client = {
       upgraded: true,
+      closed: false,
+      pings: [],
       replies: 0,
       errors: 0,
       send(method, params = {}) {
@@ -44,6 +46,7 @@ export function rawWs(port, host, origin, { timeoutMs = 8000 } = {}) {
       },
     };
     const refuse = () => resolve({ upgraded: false });
+    sock.on("close", () => (client.closed = true));
     sock.setTimeout(timeoutMs * 4, () => (upgraded ? undefined : (sock.destroy(), refuse())));
     sock.on("error", () => (upgraded ? undefined : refuse()));
     sock.on("close", () => (upgraded ? undefined : refuse()));
@@ -74,6 +77,15 @@ export function rawWs(port, host, origin, { timeoutMs = 8000 } = {}) {
         const opcode = buf[0] & 0x0f;
         const body = buf.subarray(off, off + len);
         buf = buf.subarray(off + len);
+        if (opcode === 9) {
+          // A ping: answer it (a server closes a client that does not) and note when it came.
+          client.pings.push(Date.now());
+          const mask = randomBytes(4);
+          const data = Buffer.from(body);
+          for (let i = 0; i < data.length; i++) data[i] ^= mask[i % 4];
+          sock.write(Buffer.concat([Buffer.from([0x8a, 0x80 | data.length]), mask, data]));
+          continue;
+        }
         if (opcode !== 1) continue;
         let frame;
         try {
@@ -92,13 +104,19 @@ export function rawWs(port, host, origin, { timeoutMs = 8000 } = {}) {
   });
 }
 
-/** `web_pair` with the code of a pairing address, then `hello`: a signed-in client. */
-export async function signedIn(port, host, origin, code, protocol) {
-  const ws = await rawWs(port, host, origin);
-  if (!ws.upgraded) throw new Error("upgrade refused");
-  const paired = await ws.call("web_pair", { code });
+/** `web_pair` with the code of a pairing address on the index connection, then a workspace connection
+ * (`hello` with `workspace`): a signed-in client of that workspace's daemon. */
+export async function signedIn(port, host, origin, code, protocol, workspace) {
+  const index = await rawWs(port, host, origin);
+  if (!index.upgraded) throw new Error("upgrade refused");
+  const paired = await index.call("web_pair", { code });
   if (!paired.result) throw new Error(`web_pair: ${JSON.stringify(paired)}`);
-  const hello = await ws.call("hello", { role: "operator", token: paired.result.token, client: "web", protocol });
+  const token = paired.result.token;
+  const hello = await index.call("hello", { role: "operator", token, client: "web", protocol });
   if (!hello.result) throw new Error(`hello: ${JSON.stringify(hello)}`);
+  const ws = await rawWs(port, host, origin);
+  const wh = await ws.call("hello", { role: "operator", token, client: "web", protocol, workspace });
+  if (!wh.result) throw new Error(`workspace hello: ${JSON.stringify(wh)}`);
+  ws.index = index;
   return ws;
 }

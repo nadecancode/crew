@@ -39,7 +39,7 @@ test("a question from an agent: the dialog opens by itself and the answer reache
   await expect(dialog).toBeVisible({ timeout: 15_000 });
   await expect(dialog).toContainText("Ship the schema?");
   await expect(node(page, "peer").locator(".badge.ask")).toBeVisible();
-  await expect(page).toHaveTitle(/^\(1\) /);
+  await expect(page).toHaveTitle(/^\(1\) web-live · crew$/);
   await dialog.getByRole("textbox", { name: "your own answer" }).fill("yes, ship it");
   await dialog.getByRole("textbox", { name: "your own answer" }).press("Enter");
   await expect(dialog).toHaveCount(0);
@@ -47,7 +47,7 @@ test("a question from an agent: the dialog opens by itself and the answer reache
   daemon.until("question.answered", () => daemon.events().some((e) => e.event_type === "question.answered"));
   // The answer is on the bus, to the asker.
   expect(daemon.c(["messages", "--json", "-n", "100"])).toContain("yes, ship it");
-  await expect(page).toHaveTitle(/^crew · /);
+  await expect(page).toHaveTitle("web-live · crew");
 });
 
 test("pause and resume, then kill after the confirmation", async ({ page, daemon, openLive }) => {

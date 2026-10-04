@@ -65,7 +65,7 @@ test("hovering a mark shows the event; clicking it opens the event in the log", 
   await mark.hover();
   await expect(page.locator(".hover-card")).toContainText("3f4e5d6c0d1e2f3a4b5c6d7e8f9a0b1c2d3e4f5a");
   await mark.click();
-  await expect(page).toHaveURL(/#\/logs\?event=\d+/);
+  await expect(page).toHaveURL(/#\/w\/[0-9a-f]{16}\/logs\?event=\d+/);
   await expect(page.locator("#side-panel")).toContainText("vcs.commit");
 });
 

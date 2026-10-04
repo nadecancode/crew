@@ -5,7 +5,7 @@
 //   CREW_BIN       the crew binary (default ../target/debug/crew)
 //   CREW_TEST_VCS  jj | git | unset (auto), as for the Rust suites
 
-import { execFileSync, spawnSync } from "node:child_process";
+import { execFile, execFileSync, spawnSync } from "node:child_process";
 import { mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -17,12 +17,12 @@ export { expect };
 const here = dirname(fileURLToPath(import.meta.url));
 export const CREW_BIN = resolve(process.env.CREW_BIN ?? join(here, "../../../target/debug/crew"));
 
-export type WebInfo = { url: string; port: number; pair_url: string; expires_in_secs: number; started: boolean };
+export type WebInfo = { url: string; port: number; pair_url: string; expires_in_secs: number; started: boolean; workspace?: string; workspace_url?: string; joined?: string[] };
 export type CrewEvent = { seq: number; source: string; event_type: string; level: string; agent_id: string | null; message: string; data: unknown };
 export type VcsData = { action: string; outcome: string; op: string; backend: string; agent: string; peer?: string | null; commit?: string | null; files?: string[] };
 
 /** The scripted team the live specs share. Agents act when the test sends them a message. */
-export function teamYaml(ws: string, vcs: string, extra = 0): string {
+export function teamYaml(ws: string, vcs: string, extra = 0, opts: { project?: string; asker?: boolean; askerLoop?: boolean } = {}): string {
   const agent = (id: string, role: string, steps: string[]) =>
     [
       `  - id: ${id}`,
@@ -30,10 +30,10 @@ export function teamYaml(ws: string, vcs: string, extra = 0): string {
       `    command:`,
       `      - "{crew}"`,
       `      - scripted-agent`,
-      ...steps.map((s) => `      - ${JSON.stringify(`--on-message=${s}`)}`),
+      ...steps.map((s) => `      - ${JSON.stringify(s.startsWith("start:") ? `--on-start=${s.slice(6)}` : `--on-message=${s}`)}`),
     ].join("\n");
   return [
-    `project: web-live`,
+    `project: ${opts.project ?? "web-live"}`,
     `objective: live browser tests`,
     `workspace:`,
     `  path: ${JSON.stringify(ws)}`,
@@ -54,6 +54,8 @@ export function teamYaml(ws: string, vcs: string, extra = 0): string {
     agent("rival", "rival", ["write schema.sql CREATE TABLE other (x TEXT);", "commit Rival schema", "merge dev"]),
     agent("echo", "echo", ["reply ack from echo", "tool git_status {}"]),
     agent("idle", "idle", []),
+    ...(opts.asker ? [agent("asker", "asker", ["start:wait-message operator", "start:send operator question Which way?"])] : []),
+    ...(opts.askerLoop ? [agent("asker", "asker", ["send operator question Which way?"])] : []),
     // prober runs node as the agent (in its sandbox when there is one) and probes the dashboard socket.
     [
       `  - id: prober`,
@@ -70,11 +72,17 @@ export class Daemon {
   readonly root: string;
   readonly ws: string;
   readonly env: NodeJS.ProcessEnv;
-  constructor(readonly vcs: string = process.env.CREW_TEST_VCS || "auto") {
+  /** `shared`: another daemon of the same user: the same runtime and state directories (so the same
+   * dashboard server) and a workspace of its own. */
+  constructor(readonly vcs: string = process.env.CREW_TEST_VCS || "auto", readonly shared?: Daemon, readonly name = "ws", readonly project = "web-live") {
     // A short path: Unix socket paths are limited to ~108 bytes.
-    this.root = mkdtempSync("/tmp/crew-wl");
-    this.ws = join(this.root, "ws");
+    this.root = shared ? shared.root : mkdtempSync("/tmp/crew-wl");
+    this.ws = join(this.root, name);
     mkdirSync(this.ws, { recursive: true });
+    if (shared) {
+      this.env = shared.env;
+      return;
+    }
     this.env = {
       ...process.env,
       XDG_RUNTIME_DIR: join(this.root, "run"),
@@ -103,10 +111,10 @@ export class Daemon {
   }
 
   /** Write the team and `crew run` it; wait for the agents to be up. */
-  start(yaml: string = teamYaml(this.ws, this.vcs)): void {
-    const file = join(this.root, "team.yaml");
+  start(yaml: string = teamYaml(this.ws, this.vcs, 0, { project: this.project })): void {
+    const file = join(this.root, `team-${this.name}.yaml`);
     writeFileSync(file, yaml);
-    this.ok(["run", "team.yaml", "--no-attach"]);
+    this.ok(["run", `team-${this.name}.yaml`, "--no-attach"]);
     this.until("the agents to come up", () => this.snapshot().agents.every((a: { status: string }) => a.status !== "spawning"));
   }
 
@@ -153,7 +161,19 @@ export class Daemon {
     if (!pid) throw new Error("no daemon pid in the session");
     process.kill(pid, "SIGKILL");
   }
+  /** `crew <args> -C <ws>` without blocking the test's event loop; its output and when it ended. */
+  crewAsync(args: string[]): Promise<{ ok: boolean; stdout: string; stderr: string; ended: number }> {
+    return new Promise((resolve) => {
+      execFile(CREW_BIN, [...args, "-C", this.ws], { cwd: this.root, env: this.env, encoding: "utf8" }, (err, stdout, stderr) => resolve({ ok: !err, stdout, stderr, ended: Date.now() }));
+    });
+  }
+  /** The process id of the daemon. */
+  pid(): number {
+    return Number(this.snapshot().session.daemon_pid);
+  }
   cleanup(): void {
+    if (this.shared) return void this.stop();
+    this.crew(["web", "--stop", "-C", this.ws]);
     this.stop();
     rmSync(this.root, { recursive: true, force: true });
   }
@@ -161,6 +181,8 @@ export class Daemon {
 
 type Fixtures = {
   daemon: Daemon;
+  /** More daemons of the same user, each with a workspace and a project name of its own: `sibling("beta")`. */
+  sibling: (name: string) => Daemon;
   /** Open `info.pair_url` in `target` (default `page`) and wait until live. */
   openLive: (info: WebInfo, target?: Page) => Promise<Page>;
 };
@@ -174,10 +196,20 @@ export const test = base.extend<Fixtures>({
       d.cleanup();
     }
   },
+  sibling: async ({ daemon }, use) => {
+    const made: Daemon[] = [];
+    await use((name) => {
+      const d = new Daemon(daemon.vcs, daemon, name, name);
+      made.push(d);
+      return d;
+    });
+    for (const d of made.reverse()) d.cleanup();
+  },
   openLive: async ({ page }, use) => {
     await use(async (info, target = page) => {
       await target.goto(info.pair_url);
       await target.locator('[data-conn="live"]').waitFor({ state: "attached", timeout: 15_000 });
+      await target.locator('[data-workspace-state="live"]').first().waitFor({ state: "attached", timeout: 15_000 });
       return target;
     });
   },
@@ -200,6 +232,9 @@ if (ws.upgraded) {
   out.snapshot = await ws.call("snapshot", {});
   out.pair = await ws.call("web_pair", { code: "x" });
   ws.close();
+  const w = await rawWs(p.port, p.host, p.origin);
+  out.ws_hello = w.upgraded ? await w.call("hello", { role: "agent", agent_id: p.agent, token: identity.token, protocol: p.protocol, workspace: p.workspace }) : { upgraded: false };
+  if (w.upgraded) { out.ws_snapshot = await w.call("snapshot", {}); w.close(); }
 }
 writeFileSync("probe.out", JSON.stringify(out));
 setInterval(() => {}, 1 << 30);

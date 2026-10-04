@@ -67,10 +67,10 @@ test("an agent's own token, presented from the agent's own process, is unauthori
   daemon.start();
   const info = daemon.web();
   const label = new URL(info.url).host;
-  const protocol = Number(JSON.parse(daemon.c(["status", "--json"])).session.protocol ?? 5);
+  const protocol = 6;
   // The prober agent (node, started with the team) reads probe.json from its working directory.
   const dir = join(daemon.ws, ".crew/worktrees/prober");
-  const probe = { port: info.port, host: label, origin: `http://${label}`, agent: "prober", protocol };
+  const probe = { port: info.port, host: label, origin: `http://${label}`, agent: "prober", protocol, workspace: info.workspace };
   writeFileSync(join(dir, "probe.json"), JSON.stringify(probe));
   let out = "";
   daemon.until("the prober's report", () => ((out = readFileSync(join(dir, "probe.out"), "utf8")), out.length > 0), 30_000);
@@ -80,6 +80,10 @@ test("an agent's own token, presented from the agent's own process, is unauthori
   expect(report.upgraded).toBe(true);
   expect(report.hello?.error?.code).toBe("unauthorized");
   expect(report.snapshot?.error?.code).toBe("unauthorized");
+  // And on a workspace connection: refused, whatever the workspace.
+  const wr = report as unknown as { ws_hello?: { error?: { code?: string } }; ws_snapshot?: { error?: { code?: string } } };
+  expect(wr.ws_hello?.error?.code).toBe("unauthorized");
+  expect(wr.ws_snapshot?.error?.code).not.toBe(undefined);
   // Nor can it pair: the code is not its to guess.
   expect(report.pair?.error?.code).toBeTruthy();
 });
