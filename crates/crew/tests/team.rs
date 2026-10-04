@@ -2636,6 +2636,107 @@ fn a_team_start_says_which_version_control_runs_and_why() {
     assert!(!s.workspace.join(".jj").exists());
 }
 
+/// What the daemon emits for reads and a failed write is what the dashboard
+/// animates: real events, through the real RPC, into `crew_tui::App`.
+#[test]
+fn reads_and_a_failed_commit_leave_vcs_events_the_dashboard_animates() {
+    use crew_core::rpc::Push;
+    use crew_core::vcs::{VcsAction, VcsEvent, VcsOutcome};
+    use crew_core::EventLevel;
+    use crew_tui::anim::{MarkKind, Tone};
+
+    let s = Session::new();
+    s.run(&s.team("vcs-reads", vec![agent("a", "", &[])], vec![]));
+    s.wait("the agent to come up", |snap| {
+        snap.agents
+            .iter()
+            .all(|a| a.status != AgentStatus::Spawning)
+    });
+    let before = s.events().len();
+    let mut app = crew_tui::App::new();
+    app.apply_snapshot(s.snapshot(), 0);
+
+    for tool in [
+        vec!["tool", "git_status", "{}"],
+        vec!["tool", "git_diff", "{}"],
+    ] {
+        let out = s.ctl("a", &tool);
+        assert!(out.status.success(), "{tool:?}: {}", stderr(&out));
+    }
+    // Nothing to commit: the tool answers, and the event says it failed.
+    let out = s.ctl("a", &["tool", "git_commit", r#"{"message":"nothing"}"#]);
+    assert!(!out.status.success());
+    assert!(
+        stderr(&out).contains("nothing to commit"),
+        "{}",
+        stderr(&out)
+    );
+
+    let events: Vec<_> = s.events().into_iter().skip(before).collect();
+    let vcs: Vec<(VcsEvent, crew_core::Event)> = events
+        .iter()
+        .filter_map(|e| VcsEvent::from_event(e).map(|v| (v, e.clone())))
+        .collect();
+    let terminal: Vec<_> = vcs
+        .iter()
+        .filter(|(v, _)| v.outcome.is_terminal())
+        .map(|(v, e)| (v.action, v.outcome, e.level, v.agent.clone()))
+        .collect();
+    assert_eq!(
+        terminal,
+        [
+            (
+                VcsAction::Status,
+                VcsOutcome::Ok,
+                EventLevel::Debug,
+                "a".to_string()
+            ),
+            (
+                VcsAction::Diff,
+                VcsOutcome::Ok,
+                EventLevel::Debug,
+                "a".to_string()
+            ),
+            (
+                VcsAction::Commit,
+                VcsOutcome::Error,
+                EventLevel::Warn,
+                "a".to_string()
+            ),
+        ],
+        "{vcs:#?}"
+    );
+    // Every start is closed by an end with its op.
+    for (v, _) in vcs.iter().filter(|(v, _)| v.outcome == VcsOutcome::Started) {
+        assert_eq!(
+            vcs.iter()
+                .filter(|(e, _)| e.op == v.op && e.outcome.is_terminal())
+                .count(),
+            1,
+            "{v:?}"
+        );
+    }
+
+    // The dashboard animates what the daemon sent, in order.
+    let now = 1_000;
+    let mut seen = Vec::new();
+    for (v, event) in &vcs {
+        app.apply_push(Push::Event(event.clone()), now);
+        if v.outcome.is_terminal() {
+            let mark = app.anims.mark_for("a", now).expect("a mark on the box");
+            seen.push((v.action, mark.kind.clone(), mark.tone));
+        }
+    }
+    assert_eq!(
+        seen,
+        [
+            (VcsAction::Status, MarkKind::Glance, Tone::Ok),
+            (VcsAction::Diff, MarkKind::Glance, Tone::Ok),
+            (VcsAction::Commit, MarkKind::Done, Tone::Error),
+        ]
+    );
+    assert!(!app.anims.running(), "every operation ended");
+}
 // ---------------------------------------------------------------------------
 // Dynamic teams
 // ---------------------------------------------------------------------------
