@@ -556,8 +556,13 @@ impl Conn {
                         }
                     }
                     if ended {
+                        // What came before the line that ended it is
+                        // delivered; nothing after it is.
                         drop((lines, writer, guard));
                         hub.reconcile(&id);
+                        if !texts.is_empty() && self.out.send(Out::Texts(texts)).await.is_err() {
+                            return None;
+                        }
                         return Some((CLOSE_WORKSPACE_ENDED, "the workspace's connection ended"));
                     }
                     if self.out.send(Out::Texts(texts)).await.is_err() {
