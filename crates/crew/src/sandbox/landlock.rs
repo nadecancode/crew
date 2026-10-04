@@ -12,6 +12,10 @@ use std::path::Path;
 pub const SCOPE_ABSTRACT_UNIX_SOCKET: u64 = 1 << 0;
 /// Processes outside the domain cannot be signalled.
 pub const SCOPE_SIGNAL: u64 = 1 << 1;
+/// Linking or renaming a file into another directory. Every Landlock
+/// domain denies it (with EXDEV) unless a rule allows it beneath both
+/// directories, whether the ruleset handles it or not.
+pub const ACCESS_FS_REFER: u64 = 1 << 13;
 /// Connecting to a pathname unix socket created outside the domain.
 pub const ACCESS_FS_RESOLVE_UNIX: u64 = 1 << 16;
 
@@ -61,7 +65,14 @@ pub fn abi() -> io::Result<u32> {
 /// Landlock domain:
 /// - abstract unix sockets and signals are scoped to the domain;
 /// - pathname unix sockets created outside the domain can be reached only
-///   beneath the directories in `unix_dirs`.
+///   beneath the directories in `unix_dirs`;
+/// - a file can be linked or renamed into another directory anywhere,
+///   which a domain otherwise refuses everywhere (`git mv a d/a`, and jj's
+///   git, which writes each object in the top directory of the object store
+///   and moves it into a subdirectory). The mounts decide where anything is
+///   written: a move needs both directories writable and on one mount. The
+///   kernel still refuses a move that would give a file the socket right of
+///   a `unix_dirs` directory it did not have.
 ///
 /// Refuses (and changes nothing) when the kernel's ABI is below `min_abi`.
 /// Returns the ABI that was used. `no_new_privs` must already be set.
@@ -75,7 +86,7 @@ with landlock in the lsm= list)",
         ));
     }
     let attr = RulesetAttr {
-        handled_access_fs: ACCESS_FS_RESOLVE_UNIX,
+        handled_access_fs: ACCESS_FS_RESOLVE_UNIX | ACCESS_FS_REFER,
         handled_access_net: 0,
         scoped: SCOPE_ABSTRACT_UNIX_SOCKET | SCOPE_SIGNAL,
     };
@@ -97,8 +108,9 @@ with landlock in the lsm= list)",
     // SAFETY: the syscall returned a new descriptor that nothing else owns.
     let ruleset = unsafe { OwnedFd::from_raw_fd(rc as i32) };
     for dir in unix_dirs {
-        allow_unix_beneath(&ruleset, dir)?;
+        allow_beneath(&ruleset, dir, ACCESS_FS_RESOLVE_UNIX, "sockets")?;
     }
+    allow_beneath(&ruleset, Path::new("/"), ACCESS_FS_REFER, "moving files")?;
     // SAFETY: plain syscall on a descriptor we own.
     let rc = unsafe { libc::syscall(libc::SYS_landlock_restrict_self, ruleset.as_raw_fd(), 0u32) };
     if rc < 0 {
@@ -110,7 +122,8 @@ with landlock in the lsm= list)",
     Ok(abi)
 }
 
-fn allow_unix_beneath(ruleset: &OwnedFd, dir: &Path) -> Result<(), String> {
+/// Allow `access` beneath `dir` (`what`, for the error).
+fn allow_beneath(ruleset: &OwnedFd, dir: &Path, access: u64, what: &str) -> Result<(), String> {
     let c_dir = CString::new(dir.as_os_str().as_bytes())
         .map_err(|_| format!("{} contains a NUL byte", dir.display()))?;
     // SAFETY: `c_dir` is a valid C string; the result is checked.
@@ -122,7 +135,7 @@ fn allow_unix_beneath(ruleset: &OwnedFd, dir: &Path) -> Result<(), String> {
     };
     if fd < 0 {
         return Err(format!(
-            "opening {} for the Landlock socket rule: {}",
+            "opening {} for the Landlock rule: {}",
             dir.display(),
             io::Error::last_os_error()
         ));
@@ -130,7 +143,7 @@ fn allow_unix_beneath(ruleset: &OwnedFd, dir: &Path) -> Result<(), String> {
     // SAFETY: `open` returned a new descriptor that nothing else owns.
     let dir_fd = unsafe { OwnedFd::from_raw_fd(fd) };
     let rule = PathBeneathAttr {
-        allowed_access: ACCESS_FS_RESOLVE_UNIX,
+        allowed_access: access,
         parent_fd: dir_fd.as_raw_fd(),
     };
     // SAFETY: `rule` is a valid path-beneath attribute; both descriptors are open.
@@ -145,7 +158,7 @@ fn allow_unix_beneath(ruleset: &OwnedFd, dir: &Path) -> Result<(), String> {
     };
     if rc < 0 {
         return Err(format!(
-            "allowing sockets beneath {}: {}",
+            "allowing {what} beneath {}: {}",
             dir.display(),
             io::Error::last_os_error()
         ));
@@ -234,6 +247,47 @@ mod tests {
             }
             if errno_of(UnixStream::connect(other.join("s"))) != libc::EACCES {
                 return 2;
+            }
+            0
+        });
+        assert_eq!(code, 0, "check {code} failed inside the domain");
+    }
+
+    #[test]
+    fn files_move_between_directories_but_never_into_the_socket_right() {
+        if !host_has(abi_at_least(MIN_ABI), "Landlock ABI 9") {
+            return;
+        }
+        let dir = tempfile::tempdir().unwrap();
+        let (a, b, sockets) = (
+            dir.path().join("a"),
+            dir.path().join("b"),
+            dir.path().join("sockets"),
+        );
+        for d in [&a, &b, &sockets] {
+            std::fs::create_dir_all(d).unwrap();
+        }
+        for name in ["moved", "linked", "kept"] {
+            std::fs::write(a.join(name), name).unwrap();
+        }
+        let exdev =
+            |r: std::io::Result<()>| r.err().and_then(|e| e.raw_os_error()) == Some(libc::EXDEV);
+        let code = in_child(|| {
+            if !set_no_new_privs() || restrict_self(MIN_ABI, &[sockets.as_path()]).is_err() {
+                return 90;
+            }
+            if std::fs::rename(a.join("moved"), b.join("moved")).is_err() {
+                return 1;
+            }
+            if std::fs::hard_link(a.join("linked"), b.join("linked")).is_err() {
+                return 2;
+            }
+            // It would gain the right to reach the sockets beneath.
+            if !exdev(std::fs::rename(a.join("kept"), sockets.join("kept"))) {
+                return 3;
+            }
+            if !exdev(std::fs::hard_link(a.join("kept"), sockets.join("kept"))) {
+                return 4;
             }
             0
         });

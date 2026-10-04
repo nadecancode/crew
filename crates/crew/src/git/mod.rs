@@ -1386,17 +1386,26 @@ mod tests {
             .expect("the worktree's admin directory");
         let crew_bin = std::env::current_exe().unwrap().canonicalize().unwrap();
         let host = Host::detect(&crew_bin, Path::new("/usr/bin/bwrap"), 9);
+        let store = crate::vcs::Store::Git {
+            git_dir: root.join(".git"),
+        };
         let session = Session {
             workspace: &root,
-            git_dir: &root.join(".git"),
+            store: &store,
             runtime_dir: &run,
             daemon_socket: &socket,
             cargo_home: &cargo,
         };
         let wt_path = wt.path.canonicalize().unwrap();
-        let (launcher, _warnings) =
-            launch::helper_launcher(&host, session, &Extra::default(), &wt_path, &admin)
-                .unwrap_or_else(|e| panic!("building the helper profile: {e}"));
+        let (launcher, _warnings) = launch::helper_launcher(
+            &host,
+            session,
+            &Extra::default(),
+            &wt_path,
+            Some(&admin),
+            None,
+        )
+        .unwrap_or_else(|e| panic!("building the helper profile: {e}"));
         // Timeout recovery after a helper merge needs the trusted lock location.
         use launch::Launcher;
         assert_eq!(launcher.admin_dir().as_deref(), Some(admin.as_path()));

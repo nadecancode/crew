@@ -134,6 +134,7 @@ use std::time::Duration;
 use crew::sandbox::profile::{build, Extra, Host, Request, Role, Session};
 use crew::sandbox::run::prefix;
 use crew::sandbox::spec::{launcher_env, Spec};
+use crew::vcs::Store;
 
 /// bubblewrap on PATH, new enough, with working user namespaces, and a
 /// Landlock that scopes: what every test below needs.
@@ -165,6 +166,7 @@ struct Layout {
     root: PathBuf,
     ws: PathBuf,
     git: PathBuf,
+    store: Store,
     run: PathBuf,
     socket: PathBuf,
     cargo: PathBuf,
@@ -232,6 +234,9 @@ fn layout() -> Layout {
         _dir: dir,
         root,
         ws,
+        store: Store::Git {
+            git_dir: git.clone(),
+        },
         git,
         run,
         socket,
@@ -244,7 +249,7 @@ impl Layout {
     fn session(&self) -> Session<'_> {
         Session {
             workspace: &self.ws,
-            git_dir: &self.git,
+            store: &self.store,
             runtime_dir: &self.run,
             daemon_socket: &self.socket,
             cargo_home: &self.cargo,
@@ -265,7 +270,7 @@ impl Layout {
             role: Role::Worker {
                 agent_dir: &agent,
                 worktree: &worktree,
-                admin: &admin,
+                admin: Some(&admin),
                 sidecar_dir: Some(&sidecar),
             },
             extra: &Extra::default(),
@@ -401,7 +406,7 @@ fn a_helper_gets_no_identity_credentials_socket_or_network() {
         session: l.session(),
         role: Role::Helper {
             worktree: &worktree,
-            admin: &admin,
+            admin: Some(&admin),
         },
         extra: &Extra::default(),
         cli: None,
@@ -638,7 +643,7 @@ fn a_socket_in_a_bound_tree_is_masked() {
         role: Role::Worker {
             agent_dir: &agent,
             worktree: &worktree,
-            admin: &admin,
+            admin: Some(&admin),
             sidecar_dir: None,
         },
         extra: &extra_mounts,
@@ -724,7 +729,7 @@ fn a_writable_entry_cannot_reach_a_read_only_toolchain_but_data_stays_writable()
             role: Role::Worker {
                 agent_dir: &agent,
                 worktree: &worktree,
-                admin: &admin,
+                admin: Some(&admin),
                 sidecar_dir: None,
             },
             extra,
@@ -797,7 +802,7 @@ fn a_socket_made_in_a_mounted_tree_after_launch_is_refused() {
         role: Role::Worker {
             agent_dir: &agent,
             worktree: &worktree,
-            admin: &admin,
+            admin: Some(&admin),
             sidecar_dir: None,
         },
         extra: &extra,
