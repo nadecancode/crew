@@ -435,5 +435,17 @@ mod tests {
             assert!(!text.contains("Content-Security-Policy"), "{text}");
         }
         assert!(!index.to_ascii_lowercase().contains("access-control-"));
+        // A hashed file of the bundle never changes: cached for good, and
+        // without the page's policy.
+        let hashed = Answer::File(super::super::assets::Asset {
+            path: "assets/app-B7xk2f9a.js",
+            content_type: "text/javascript; charset=utf-8",
+            bytes: b"export {};",
+        });
+        let file = String::from_utf8(response(&hashed, HOST)).unwrap();
+        assert!(file.contains("Cache-Control: public, max-age=31536000, immutable\r\n"));
+        assert!(file.contains("Content-Type: text/javascript; charset=utf-8\r\n"));
+        assert!(!file.contains("Content-Security-Policy"), "{file}");
+        assert!(!file.to_ascii_lowercase().contains("access-control-"));
     }
 }
