@@ -2,7 +2,7 @@
 // written, `reply_to` and the replies as links. A message the page does not
 // hold is asked for with `message_get`.
 
-import { For, Show, createResource } from "solid-js";
+import { For, Show, createResource, createSignal } from "solid-js";
 import { useApp } from "../app";
 import { clockTime } from "../format";
 import { askedBy, decodeMessage, options, type Message } from "../protocol";
@@ -19,15 +19,28 @@ export function MessagePanel(props: { id: string }) {
     return store.state.questions.find((q) => q.id === id);
   };
   // Asked only while the page is live; asked again when it is live again.
+  const [askedFor, setAskedFor] = createSignal<string | null>(null);
   const [fetched] = createResource(
     () => (local(props.id) || !link.live() ? null : props.id),
-    (id) => link.call("message_get", { id }, decodeMessage),
+    (id) => (setAskedFor(id), link.call("message_get", { id }, decodeMessage)),
   );
-  // A resource that failed throws when read: its error is shown instead.
-  const message = () => local(props.id) ?? (fetched.error ? undefined : fetched());
+  // A resource keeps its last value, or error, when its source goes (the page
+  // stopped): only what was asked for this message is shown. One that failed
+  // throws when read: its error is shown instead.
+  const failed = () => (askedFor() === props.id ? fetched.error : undefined);
+  const message = () => {
+    const m = local(props.id);
+    if (m) return m;
+    if (fetched.error) return undefined;
+    const f = fetched();
+    return f?.id === props.id ? f : undefined;
+  };
   const why = () => {
-    if (!link.live() && !fetched.error) return "not connected: it is fetched when the dashboard is live";
-    const e = fetched.error;
+    const e = failed();
+    if (!link.live() && !e) {
+      const final = link.conn() === "stopped" || link.conn() === "signed-out";
+      return final ? "not fetched: this page is stopped" : "not connected: it is fetched when the dashboard is live";
+    }
     if (!e) return "loading…";
     const text = e instanceof Error ? e.message : String(e);
     return (e as { code?: string }).code === "not_found" ? `not found: ${text}` : `not fetched: ${text}`;

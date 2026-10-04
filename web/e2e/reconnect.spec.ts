@@ -132,3 +132,30 @@ test("a message opened while the connection is unproven is fetched once it is pr
   expect(errors).toEqual([]);
   expect(csp).toEqual([]);
 });
+
+test("after the page stopped, another message never shows the one fetched before", async ({ page, mock, openPage, csp }) => {
+  const errors: string[] = [];
+  page.on("pageerror", (e) => errors.push(e.message));
+  const first = { id: "m-old-0001", from: "claude-4", to: "orchestrator", type: "message", body: "The first old message", timestamp: mock.now() - 3_600_000, correlation_id: null, reply_to: null, metadata: null };
+  mock.on("message_get", (p: { id: string }) => {
+    if (p.id === first.id) return first;
+    throw { code: "not_found", message: `no message '${p.id}'` };
+  });
+  await openPage();
+  const panel = page.locator("#side-panel");
+  await page.evaluate(() => { location.hash = "/?message=m-gone-0003"; });
+  await expect(panel).toContainText("not found: no message 'm-gone-0003'");
+  await page.evaluate(() => { location.hash = "/?message=m-old-0001"; });
+  await expect(panel).toContainText("The first old message");
+  await mock.shutdown();
+  await expect(page.locator('[data-conn="stopped"]')).toBeAttached();
+  await page.evaluate(() => { location.hash = "/?message=m-old-0002"; });
+  await expect(panel.locator(".panel-title")).toHaveText("message m-old-0002");
+  await expect(panel).toContainText("not fetched: this page is stopped");
+  await expect(panel).not.toContainText("The first old message");
+  // An error asked for another message is not this one's either.
+  await page.evaluate(() => { location.hash = "/?message=m-old-0001"; });
+  await expect(panel).not.toContainText("not found");
+  expect(errors).toEqual([]);
+  expect(csp).toEqual([]);
+});
