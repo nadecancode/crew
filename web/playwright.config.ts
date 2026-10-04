@@ -20,7 +20,7 @@ export default defineConfig({
   },
   projects: [
     { name: "mock", testDir: "e2e", testIgnore: ["live/**", "perf.spec.ts"] },
-    { name: "perf", testDir: "e2e", testMatch: "perf.spec.ts", dependencies: ["mock"] },
+    { name: "perf", testDir: "e2e", testMatch: "perf.spec.ts", testIgnore: "live/**", dependencies: ["mock"] },
     { name: "live", testDir: "e2e/live" },
   ],
 });
