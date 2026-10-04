@@ -83,6 +83,7 @@ fn default_message_type() -> MessageType {
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
 #[serde(tag = "method", content = "params", rename_all = "snake_case")]
 pub enum Call {
+    #[serde(deserialize_with = "empty_params")]
     Ping,
     Hello(Hello),
     /// Full current state; `messages`/`events` bound the history included.
@@ -93,6 +94,7 @@ pub enum Call {
         events: Option<usize>,
     },
     /// Start receiving pushes on this connection.
+    #[serde(deserialize_with = "empty_params")]
     Subscribe,
     /// Launch a team in this daemon's workspace.
     LoadTeam {
@@ -106,6 +108,7 @@ pub enum Call {
         stop_agents: bool,
     },
 
+    #[serde(deserialize_with = "empty_params")]
     AgentsList,
     AgentAdd {
         spec: AgentSpec,
@@ -144,9 +147,11 @@ pub enum Call {
     },
     /// The models an agent can be put on from this machine, for the
     /// dashboard's picker (operator).
+    #[serde(deserialize_with = "empty_params")]
     ModelsList,
     /// The accounts' usage windows, which models are out until they reset
     /// and what to take instead, as text (orchestrator or operator).
+    #[serde(deserialize_with = "empty_params")]
     UsageStatus,
     AgentPause {
         id: String,
@@ -248,12 +253,14 @@ pub enum Call {
     /// Agent only: turn this connection into the agent's delivery channel.
     /// The daemon pushes `Deliver` frames here instead of typing into the
     /// agent's terminal.
+    #[serde(deserialize_with = "empty_params")]
     Listen,
     /// Agent only: the given messages were injected into the session.
     Delivered {
         ids: Vec<String>,
     },
     /// Agent only: the API key the crew config assigns to this agent.
+    #[serde(deserialize_with = "empty_params")]
     Credential,
     History {
         #[serde(default)]
@@ -286,6 +293,7 @@ pub enum Call {
         task_id: Option<String>,
     },
 
+    #[serde(deserialize_with = "empty_params")]
     TasksList,
     /// One task's card: the task and the tasks it builds on. Without an
     /// id, the calling agent's task in progress.
@@ -377,6 +385,7 @@ pub enum Call {
         agent: Option<String>,
     },
     /// Merge every agent branch into the integration branch.
+    #[serde(deserialize_with = "empty_params")]
     Integrate,
 
     /// Lifecycle signal from a runtime hook (`crew hook <event>`).
@@ -410,6 +419,18 @@ pub enum Call {
 
 fn default_true() -> bool {
     true
+}
+
+/// No-argument methods accept the usual empty JSON-RPC object as well as
+/// omitted/null params. Keep unit variants and their serialized wire shape.
+fn empty_params<'de, D: serde::Deserializer<'de>>(deserializer: D) -> Result<(), D::Error> {
+    match Value::deserialize(deserializer)? {
+        Value::Null => Ok(()),
+        Value::Object(params) if params.is_empty() => Ok(()),
+        _ => Err(serde::de::Error::custom(
+            "this RPC method takes no parameters (expected null or an empty object)",
+        )),
+    }
 }
 
 impl Call {
@@ -723,6 +744,70 @@ mod compatibility_tests {
     use super::*;
     use crate::types::{EventLevel, TaskStatus, TranscriptKind};
     use serde_json::json;
+
+    #[test]
+    fn unit_rpc_methods_accept_empty_params_without_changing_their_wire_shape() {
+        for call in [
+            Call::Ping,
+            Call::Subscribe,
+            Call::AgentsList,
+            Call::ModelsList,
+            Call::UsageStatus,
+            Call::Listen,
+            Call::Credential,
+            Call::TasksList,
+            Call::Integrate,
+        ] {
+            let canonical = serde_json::to_value(&call).unwrap();
+            assert!(canonical.get("params").is_none());
+            for params in [Value::Null, json!({})] {
+                let wire = json!({"id":7, "method":call.method(), "params":params});
+                let request: Request = serde_json::from_value(wire.clone())
+                    .unwrap_or_else(|error| panic!("{}: {error}", call.method()));
+                assert_eq!(request.id, 7);
+                assert_eq!(request.call, call);
+                assert_eq!(serde_json::to_value(&request.call).unwrap(), canonical);
+                let direct: Call = serde_json::from_value(wire).unwrap();
+                assert_eq!(direct, call);
+            }
+            assert_eq!(serde_json::from_value::<Call>(canonical).unwrap(), call);
+            for params in [
+                json!({"unexpected":true}),
+                json!([]),
+                json!([null]),
+                json!(false),
+                json!(0),
+                json!(""),
+            ] {
+                assert!(
+                    serde_json::from_value::<Request>(
+                        json!({"id":7, "method":call.method(), "params":params})
+                    )
+                    .is_err(),
+                    "{} accepted nonempty params",
+                    call.method()
+                );
+            }
+        }
+        for method in ["hello", "agent_restart", "agent_restart_fresh", "load_team"] {
+            assert!(
+                serde_json::from_value::<Request>(json!({"id":7,"method":method,"params":{}}))
+                    .is_err(),
+                "{method} lost required arguments"
+            );
+        }
+        assert!(
+            serde_json::from_value::<Request>(json!({"id":7,"method":"unknown","params":{}}))
+                .is_err()
+        );
+        // The content may arrive before the tag in a JSON object.
+        assert_eq!(
+            serde_json::from_str::<Request>(r#"{"params":{},"id":7,"method":"ping"}"#)
+                .unwrap()
+                .call,
+            Call::Ping
+        );
+    }
 
     #[test]
     fn legacy_snapshots_default_sandbox_to_unknown_and_preserve_reported_modes() {
