@@ -1,0 +1,16 @@
+# What Landlock does to rename and link across directories, with and without
+# REFER (review/design-b3.md §3.1 revision 8, notes/jj-design.md §sandbox).
+#
+#   ../../scripts/build-env cargo run --release -- /tmp/refer-check none
+#   ../../scripts/build-env cargo run --release -- /tmp/refer-check unix-only
+#   ../../scripts/build-env cargo run --release -- /tmp/refer-check refer-root
+[package]
+name = "landlock-refer-check"
+version = "0.0.0"
+edition = "2021"
+publish = false
+
+[dependencies]
+libc = "0.2"
+
+[workspace]

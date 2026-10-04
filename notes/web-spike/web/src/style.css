@@ -1,0 +1,25 @@
+:root { --text:#ccd0d8; --muted:#7c828e; --dim:#4e525e; --faint:#343740; --accent:#e88c64; --orch:#6ebef0; --ok:#7ec87e; --err:#f06060; --warn:#e6be60; --bg:#16171d; --panel:#1e2028; }
+* { box-sizing: border-box; }
+html, body { margin:0; height:100%; background:var(--bg); color:var(--text); font:13px/1.4 ui-monospace, SFMono-Regular, Menlo, monospace; }
+#app { display:grid; grid-template-rows:auto 1fr 240px; height:100%; }
+header { padding:6px 12px; border-bottom:1px solid var(--faint); display:flex; gap:16px; }
+.graph { width:100%; height:100%; touch-action:none; user-select:none; }
+.spoke { stroke:var(--faint); }
+.link { stroke:var(--accent); stroke-width:1.5; }
+.pulse { fill:var(--accent); }
+.node rect { fill:var(--panel); stroke:var(--dim); }
+.node.hub rect { stroke:var(--orch); }
+.node.hover rect, .node:focus rect { stroke:var(--text); }
+.node.working .status { fill:var(--ok); }
+.node.blocked .status, .node.failed .status { fill:var(--err); }
+.node text { fill:var(--text); font-size:12px; }
+.node .activity { fill:var(--muted); font-size:11px; }
+.node { cursor:pointer; outline:none; }
+.log { overflow:auto; border-top:1px solid var(--faint); contain:strict; }
+.log-pad { position:relative; }
+.row { height:20px; white-space:nowrap; overflow:hidden; display:flex; gap:10px; padding:0 12px; }
+.row .seq { color:var(--dim); width:5ch; text-align:right; }
+.row .type { color:var(--muted); width:22ch; }
+.row .agent { color:var(--accent); width:10ch; }
+.row.warn .msg { color:var(--warn); } .row.error .msg { color:var(--err); }
+.term { height:240px; border-top:1px solid var(--faint); }
