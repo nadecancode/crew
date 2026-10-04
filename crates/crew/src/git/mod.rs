@@ -349,6 +349,14 @@ pub fn branch_exists(repo: &Path, branch: &str) -> bool {
     .unwrap_or(false)
 }
 
+/// The commit the branch points at, if it exists.
+pub fn branch_commit(repo: &Path, branch: &str) -> Option<String> {
+    let rev = format!("refs/heads/{branch}^{{commit}}");
+    out_h(repo, &["rev-parse", "--verify", "-q", &rev])
+        .ok()
+        .filter(|sha| !sha.is_empty())
+}
+
 /// The common git directory of `repo` (the main checkout's `.git`).
 pub(crate) fn common_git_dir(repo: &Path) -> Result<PathBuf> {
     let dir = PathBuf::from(out_h(repo, &["rev-parse", "--git-common-dir"])?);
@@ -491,6 +499,23 @@ pub fn populate_worktree(worktree: &Worktree) -> Result<()> {
     out_h(&worktree.path, &["reset", "-q", "--hard", "HEAD"]).map(drop)
 }
 
+/// An operation that timed out after its result had landed: the result was
+/// kept (and, under jj, published), and this says so.
+#[derive(Debug)]
+pub struct Kept {
+    /// The full id of the commit that was kept.
+    pub commit: String,
+    pub message: String,
+}
+
+impl std::fmt::Display for Kept {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&self.message)
+    }
+}
+
+impl std::error::Error for Kept {}
+
 /// Revisions supplied by agents: a hex commit id, `HEAD`, or an agent branch.
 /// Anything else (in particular anything starting with `-`) is rejected so a
 /// revision can never be parsed as a git option.
@@ -554,8 +579,15 @@ pub fn commit_all(dir: &Path, agent: &str, message: &str) -> Result<CommitInfo> 
         Ok(output) => output,
         Err(e) if e.kind() == std::io::ErrorKind::TimedOut => {
             clear_stale_index_lock(dir);
-            if out(dir, &["rev-parse", "HEAD"]).ok() != before {
-                bail!("git commit timed out ({e}) after the commit was made; check the history");
+            let after = out(dir, &["rev-parse", "HEAD"]).ok();
+            if after != before {
+                return Err(Kept {
+                    commit: after.unwrap_or_default(),
+                    message: format!(
+                        "git commit timed out ({e}) after the commit was made; check the history"
+                    ),
+                }
+                .into());
             }
             bail!(
                 "git commit timed out ({e}); nothing was committed, the changes are still staged"
@@ -670,10 +702,15 @@ fn output_recovering(
     let _ = run(dir, abort);
     let after = out(dir, &["rev-parse", "HEAD"]).unwrap_or_default();
     if after != before {
-        bail!(
+        let message = format!(
             "git {operation} timed out ({err}) after HEAD moved from {before} to {after}; the \
 result was kept, check the history before retrying"
         );
+        return Err(Kept {
+            commit: after,
+            message,
+        }
+        .into());
     }
     let _ = run(dir, &["reset", "-q", "--hard", "HEAD"]);
     if dirty(dir).unwrap_or(true) {

@@ -22,7 +22,7 @@ use crate::git;
 
 pub mod jj;
 
-pub use crate::git::{IntegrationStep, Picked, Worktree as Workspace};
+pub use crate::git::{IntegrationStep, Kept, Picked, Worktree as Workspace};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Kind {
@@ -59,7 +59,12 @@ pub trait Vcs: Send + Sync {
     /// Make the store ready (idempotent) and say whether there is a commit
     /// to start from. Err: `ws` is not the root of a repository.
     fn prepare(&self, ws: &Path) -> Result<bool>;
-    fn branch_exists(&self, branch: &str) -> bool;
+    fn branch_exists(&self, branch: &str) -> bool {
+        self.branch_commit(branch).is_some()
+    }
+    /// The commit the branch points at, if it exists. Runs on the
+    /// repository, never inside a workspace.
+    fn branch_commit(&self, branch: &str) -> Option<String>;
 
     /// Register (or find) the agent's workspace under `dir`. Runs nothing
     /// inside it. The bool: its files still have to be put in place.
@@ -134,6 +139,10 @@ impl Vcs for Git {
 
     fn branch_exists(&self, branch: &str) -> bool {
         git::branch_exists(&self.repo, branch)
+    }
+
+    fn branch_commit(&self, branch: &str) -> Option<String> {
+        git::branch_commit(&self.repo, branch)
     }
 
     fn add_workspace(&self, dir: &Path, agent: &str, base: &str) -> Result<(Workspace, bool)> {

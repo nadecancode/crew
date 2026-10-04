@@ -715,16 +715,21 @@ points at the result; it was left as it is, check jj status"
             return failed();
         }
         let short = found.short();
-        match op {
-            Operation::Commit => anyhow!(
+        let message = match op {
+            Operation::Commit => format!(
                 "jj commit timed out ({cause}) after the commit was made: {short} is on \
 {bookmark}; check the history"
             ),
-            _ => anyhow!(
+            _ => format!(
                 "jj {name} timed out ({cause}) after it completed: {short} is on {bookmark}; the \
 result was kept, check the history before retrying"
             ),
+        };
+        git::Kept {
+            commit: found.commit.clone(),
+            message,
         }
+        .into()
     }
 
     /// A `.lock` git export left behind when it was killed. Removed through
@@ -1061,11 +1066,11 @@ impl Vcs for Jj {
         Ok(self.head()?.is_some())
     }
 
-    fn branch_exists(&self, branch: &str) -> bool {
-        is_plain_name(branch)
-            && self
-                .bookmark(&self.handle, CREW, branch)
-                .is_ok_and(|found| found.is_some())
+    fn branch_commit(&self, branch: &str) -> Option<String> {
+        if !is_plain_name(branch) {
+            return None;
+        }
+        self.bookmark(&self.handle, CREW, branch).ok().flatten()
     }
 
     fn add_workspace(&self, dir: &Path, agent: &str, base: &str) -> Result<(Workspace, bool)> {

@@ -7,9 +7,12 @@ use crew_core::util::{new_token, now_ms};
 use crew_core::{Agent, AgentStatus, RuntimeKind};
 
 use super::{agent_settings, chosen_session_id};
+use crate::daemon::gitops::VcsOp;
 use crate::daemon::handlers::internal;
 use crate::daemon::{AgentLocal, Daemon, IdReservation};
 use crate::persistence::NewEvent;
+use crate::vcs::Workspace;
+use crew_core::vcs::{VcsAction, VcsOutcome};
 
 impl Daemon {
     /// Create the persistent record of an agent (worktree, token, settings).
@@ -54,7 +57,7 @@ impl Daemon {
             .and_then(|p| p.branch.clone())
             .unwrap_or_else(|| team.workspace.base.clone());
         let (workdir, branch) = if worktrees && !orchestrator {
-            let wt = self.member_worktree(team, &spec.id, &base)?;
+            let wt = self.member_workspace(team, &spec.id, &base, parent)?;
             (wt.path, Some(wt.branch))
         } else {
             (self.workspace.clone(), None)
@@ -126,6 +129,46 @@ impl Daemon {
         self.save_local(&agent.id);
         self.push(Push::Agent(Box::new(agent.clone())));
         Ok(agent)
+    }
+
+    /// A member's workspace, with its `vcs.workspace` events: a start when
+    /// its directory does not exist yet, and an end when it was made (or
+    /// a start went out). A workspace that is reused says nothing.
+    fn member_workspace(
+        &self,
+        team: &TeamConfig,
+        id: &str,
+        base: &str,
+        parent: Option<&Agent>,
+    ) -> Result<Workspace> {
+        let mut op = VcsOp::new(self, VcsAction::Workspace, id)
+            .peer(parent.map(|p| p.id.as_str()))
+            .branch(&crate::git::branch_for(id));
+        if !self.worktrees_dir().join(id).exists() {
+            op.start();
+        }
+        match self.member_worktree(team, id, base) {
+            Ok(workspace) if workspace.created || op.started() => {
+                let head = self.vcs().branch_commit(&workspace.branch);
+                op.finish(VcsOutcome::Ok, |e| {
+                    e.commit = head;
+                    e.branch = Some(workspace.branch.clone());
+                });
+                Ok(workspace)
+            }
+            Ok(workspace) => {
+                op.disarm();
+                Ok(workspace)
+            }
+            Err(e) if op.started() => {
+                op.fail(&e);
+                Err(e)
+            }
+            Err(e) => {
+                op.disarm();
+                Err(e)
+            }
+        }
     }
 
     /// Add a member. A `temporary` one is not saved with the roster and

@@ -18,7 +18,7 @@ use std::time::{Duration, Instant};
 
 use crew_core::config::{
     AgentDefaults, AgentSpec, BackendChoice, OrchestratorConfig, SandboxConfig, SandboxMode,
-    TaskSpec, TeamConfig, WorkspaceConfig,
+    TaskSpec, TeamConfig, VcsChoice, WorkspaceConfig,
 };
 use crew_core::rpc::Snapshot;
 use crew_core::{Agent, Event, Message, RuntimeKind, Task};
@@ -50,6 +50,17 @@ pub fn task(id: &str, agent: &str, depends_on: &[&str]) -> TaskSpec {
         agent: Some(agent.to_string()),
         depends_on: depends_on.iter().map(|s| s.to_string()).collect(),
         ..TaskSpec::default()
+    }
+}
+
+/// The version control every test team is built with: `CREW_TEST_VCS`
+/// (`jj` or `git`), else `auto` (jj when it is on PATH, git otherwise).
+pub fn test_vcs() -> VcsChoice {
+    match std::env::var("CREW_TEST_VCS").as_deref() {
+        Ok("jj") => VcsChoice::Jj,
+        Ok("git") => VcsChoice::Git,
+        Ok("") | Err(_) => VcsChoice::Auto,
+        Ok(other) => panic!("CREW_TEST_VCS is jj or git, not {other}"),
     }
 }
 
@@ -89,6 +100,7 @@ impl Session {
                     mode: SandboxMode::Off,
                     ..SandboxConfig::default()
                 },
+                vcs: test_vcs(),
                 ..WorkspaceConfig::default()
             },
             backend: BackendChoice::Pty,
