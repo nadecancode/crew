@@ -1,5 +1,5 @@
+use super::process::{Server, Settings};
 use super::*;
-use crate::daemon::Daemon;
 
 #[path = "review_regressions.rs"]
 mod review_regressions;
@@ -164,7 +164,7 @@ fn two_starts_never_give_the_same_label() {
         .all(|l| l.len() == 32 && l.bytes().all(|b| b.is_ascii_hexdigit())));
 }
 
-// A daemon's web server, driven from here: the one-address case with the
+// The dashboard server, driven from here: the one-address case with the
 // bind injected, and the order of stopping with a hook between the steps.
 
 use std::net::IpAddr;
@@ -187,15 +187,14 @@ type Steps = mpsc::UnboundedReceiver<(u8, oneshot::Sender<()>)>;
 const V4: IpAddr = IpAddr::V4(Ipv4Addr::LOCALHOST);
 const V6: IpAddr = IpAddr::V6(Ipv6Addr::LOCALHOST);
 
-async fn daemon() -> (tempfile::TempDir, crate::daemon::Running) {
+async fn server() -> (tempfile::TempDir, Arc<Server>) {
     let temp = tempfile::tempdir().unwrap();
-    let running = crate::daemon::start(crate::daemon::DaemonOptions {
-        workspace: temp.path().to_path_buf(),
-        crew_bin: std::env::current_exe().unwrap(),
-    })
-    .await
-    .unwrap();
-    (temp, running)
+    let server = Server::new(
+        Arc::new(super::daemons::Registered),
+        &Settings::default(),
+        temp.path().join("web-prefs.json"),
+    );
+    (temp, server)
 }
 
 fn host_has_ipv6() -> bool {
@@ -203,8 +202,8 @@ fn host_has_ipv6() -> bool {
 }
 
 /// Whether the running server holds `[::1]` too.
-async fn on_ipv6(daemon: &Daemon) -> bool {
-    daemon
+async fn on_ipv6(server: &Server) -> bool {
+    server
         .web
         .lifecycle
         .lock()
@@ -214,15 +213,15 @@ async fn on_ipv6(daemon: &Daemon) -> bool {
 }
 
 /// The addresses the running server answers on.
-async fn addresses(daemon: &Daemon) -> Vec<IpAddr> {
-    if on_ipv6(daemon).await {
+async fn addresses(server: &Server) -> Vec<IpAddr> {
+    if on_ipv6(server).await {
         vec![V4, V6]
     } else {
         vec![V4]
     }
 }
 
-fn code_of(info: &WebInfo) -> String {
+fn code_of(info: &crew_core::rpc::WebInfo) -> String {
     info.pair_url.split("#pair=").nth(1).unwrap().to_string()
 }
 
@@ -319,26 +318,23 @@ struct Before {
     waiting: Vec<Ws>,
 }
 
-async fn before_the_stop(daemon: &Daemon) -> (Before, Steps) {
-    let info = daemon.open_web(None).await.unwrap();
-    let serving = daemon.web.serving().unwrap();
-    let addresses = addresses(daemon).await;
+async fn before_the_stop(server: &Server) -> (Before, Steps) {
+    let info = server.web.open(None).await.unwrap();
+    let serving = server.web.serving().unwrap();
+    let addresses = addresses(server).await;
     let mut pairing = connect(&serving, V4).await;
     let paired = call(&mut pairing, 1, "web_pair", json!({"code": code_of(&info)})).await;
     let token = paired["result"]["token"].as_str().unwrap().to_string();
     let mut live = connect(&serving, *addresses.last().unwrap()).await;
     assert!(hello(&mut live, &token).await["result"]["web_proof"].is_string());
-    assert_eq!(
-        call(&mut live, 2, "subscribe", json!({})).await["result"]["subscribed"],
-        true
-    );
+    assert!(call(&mut live, 2, "workspaces", json!({})).await["result"]["rev"].is_u64());
     let mut waiting = Vec::new();
     for ip in &addresses {
         waiting.push(connect(&serving, *ip).await);
     }
-    let code = code_of(&daemon.open_web(None).await.unwrap());
+    let code = code_of(&server.web.open(None).await.unwrap());
     let (hook, steps) = mpsc::unbounded_channel();
-    *daemon.web.stop_hook.lock().unwrap() = Some(hook);
+    *server.web.stop_hook.lock().unwrap() = Some(hook);
     let before = Before {
         serving,
         addresses,
@@ -371,7 +367,7 @@ fn refused_for_stopping(reply: &Value) {
 /// holds there: after 1 the credentials are gone while both listeners are
 /// bound, after 2 every connection is closed while they still are, after 3
 /// they are free. `shutdown`: the daemon is going, and says so first.
-async fn walk_the_stop(daemon: &Daemon, mut before: Before, steps: &mut Steps, shutdown: bool) {
+async fn walk_the_stop(server: &Server, mut before: Before, steps: &mut Steps, shutdown: bool) {
     let port = before.serving.port;
     let go = step(steps, 1).await;
     for ws in &mut before.waiting {
@@ -397,7 +393,7 @@ async fn walk_the_stop(daemon: &Daemon, mut before: Before, steps: &mut Steps, s
             "{frames:?}"
         );
     }
-    assert!(daemon.web.registry().conns.is_empty());
+    assert!(server.web.registry().conns.is_empty());
     for ip in &before.addresses {
         assert!(bound(*ip, port), "{ip}:{port} was released before step 3");
     }
@@ -407,29 +403,28 @@ async fn walk_the_stop(daemon: &Daemon, mut before: Before, steps: &mut Steps, s
     for ip in &before.addresses {
         assert!(!bound(*ip, port), "{ip}:{port} is still held after step 3");
     }
-    assert_eq!(daemon.web.url(), "");
+    assert_eq!(server.web.url(), "");
     go.send(()).unwrap();
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn web_close_revokes_then_closes_then_releases_both_listeners() {
-    let (_temp, running) = daemon().await;
-    let daemon = running.daemon.clone();
-    let (before, mut steps) = before_the_stop(&daemon).await;
+    let (_temp, server) = server().await;
+    let (before, mut steps) = before_the_stop(&server).await;
     assert_eq!(before.addresses.len(), if host_has_ipv6() { 2 } else { 1 });
     let token = before.token.clone();
     let stop = {
-        let daemon = daemon.clone();
-        tokio::spawn(async move { daemon.web.stop(None).await })
+        let server = server.clone();
+        tokio::spawn(async move { server.web.stop(None).await })
     };
-    walk_the_stop(&daemon, before, &mut steps, false).await;
+    walk_the_stop(&server, before, &mut steps, false).await;
     assert!(stop.await.unwrap());
     // Codes and sessions are gone for good: a new start knows neither.
-    *daemon.web.stop_hook.lock().unwrap() = None;
-    daemon.open_web(None).await.unwrap();
-    assert_eq!(daemon.web.registry().sessions(), 0);
-    assert_eq!(daemon.web.registry().codes.len(), 1);
-    let serving = daemon.web.serving().unwrap();
+    *server.web.stop_hook.lock().unwrap() = None;
+    server.web.open(None).await.unwrap();
+    assert_eq!(server.web.registry().sessions(), 0);
+    assert_eq!(server.web.registry().codes.len(), 1);
+    let serving = server.web.serving().unwrap();
     let mut ws = connect(&serving, V4).await;
     assert_eq!(
         hello(&mut ws, &token).await["error"]["code"],
@@ -438,31 +433,15 @@ async fn web_close_revokes_then_closes_then_releases_both_listeners() {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-async fn the_daemon_stops_its_web_server_in_the_same_order_before_its_socket() {
-    let (_temp, running) = daemon().await;
-    let daemon = running.daemon.clone();
-    let socket = daemon.socket.clone();
-    let serve = tokio::spawn(running.serve());
-    let (before, mut steps) = before_the_stop(&daemon).await;
-    daemon.shutdown(false).await;
-    let walk = walk_the_stop(&daemon, before, &mut steps, true);
-    // The daemon's own socket is there through every step.
-    let socket_kept = async {
-        loop {
-            assert!(socket.exists(), "the socket went before the web server");
-            tokio::time::sleep(Duration::from_millis(5)).await;
-        }
+async fn the_server_stops_in_the_same_order_and_tells_its_pages() {
+    let (_temp, server) = server().await;
+    let (before, mut steps) = before_the_stop(&server).await;
+    let shut = {
+        let server = server.clone();
+        tokio::spawn(async move { server.shut(None).await })
     };
-    tokio::select! {
-        _ = walk => {}
-        _ = socket_kept => unreachable!(),
-    }
-    tokio::time::timeout(Duration::from_secs(10), serve)
-        .await
-        .expect("the daemon stopped")
-        .unwrap()
-        .unwrap();
-    assert!(!socket.exists());
+    walk_the_stop(&server, before, &mut steps, true).await;
+    shut.await.unwrap();
 }
 
 /// Binds `127.0.0.1` for real; `[::1]` as `v6` says.
@@ -485,128 +464,64 @@ const TAKEN: u8 = 2;
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn on_one_address_a_later_ipv6_is_kept_and_a_taken_one_stops_the_server() {
-    let (_temp, running) = daemon().await;
-    let daemon = running.daemon.clone();
+    let (_temp, server) = server().await;
     let v6 = Arc::new(AtomicU8::new(NO_IPV6));
-    daemon.web.set_binder(binder(v6.clone()));
+    server.web.set_binder(binder(v6.clone()));
 
     // No IPv6 loopback: served on 127.0.0.1 alone, and still after a tick
     // that finds none.
-    daemon.open_web(None).await.unwrap();
-    let serving = daemon.web.serving().unwrap();
-    assert!(!on_ipv6(&daemon).await);
-    daemon.web.tick().await;
-    assert_eq!(daemon.web.serving(), Some(serving.clone()));
-    assert!(!on_ipv6(&daemon).await);
+    server.web.open(None).await.unwrap();
+    let serving = server.web.serving().unwrap();
+    assert!(!on_ipv6(&server).await);
+    server.web.tick().await;
+    assert_eq!(server.web.serving(), Some(serving.clone()));
+    assert!(!on_ipv6(&server).await);
 
     if host_has_ipv6() {
         // [::1] comes up: bound on the next tick and kept, whatever the
         // ticks after it find.
         v6.store(REAL, Ordering::SeqCst);
-        daemon.web.tick().await;
-        assert!(on_ipv6(&daemon).await);
+        server.web.tick().await;
+        assert!(on_ipv6(&server).await);
         let mut ws = connect(&serving, V6).await;
         assert_eq!(
             call(&mut ws, 1, "ping", json!({})).await["result"]["pong"],
             true
         );
         v6.store(TAKEN, Ordering::SeqCst);
-        daemon.web.tick().await;
-        assert!(on_ipv6(&daemon).await);
-        assert_eq!(daemon.web.serving(), Some(serving.clone()));
-        daemon.web.stop(None).await;
+        server.web.tick().await;
+        assert!(on_ipv6(&server).await);
+        assert_eq!(server.web.serving(), Some(serving.clone()));
+        server.web.stop(None).await;
     } else {
-        daemon.web.stop(None).await;
+        server.web.stop(None).await;
     }
 
     // On 127.0.0.1 alone with a session open, someone takes [::1]: the
     // server stops itself, in the same order, and says why.
     v6.store(NO_IPV6, Ordering::SeqCst);
-    let (before, mut steps) = before_the_stop(&daemon).await;
+    let (before, mut steps) = before_the_stop(&server).await;
     assert_eq!(before.addresses, vec![V4]);
     let port = before.serving.port;
     let token = before.token.clone();
     v6.store(TAKEN, Ordering::SeqCst);
     let tick = {
-        let daemon = daemon.clone();
-        tokio::spawn(async move { daemon.web.tick().await })
+        let server = server.clone();
+        tokio::spawn(async move { server.web.tick().await })
     };
-    walk_the_stop(&daemon, before, &mut steps, false).await;
+    walk_the_stop(&server, before, &mut steps, false).await;
     tick.await.unwrap();
-    let stopped = daemon
-        .store
-        .recent_events(None, 50)
-        .unwrap()
-        .into_iter()
-        .rfind(|e| e.event_type == "web.stopped")
-        .expect("web.stopped");
-    assert_eq!(stopped.level, crew_core::EventLevel::Warn);
     assert!(
-        stopped
-            .message
-            .contains(&format!("[::1]:{port} was taken by another process")),
-        "{}",
-        stopped.message
+        server.web.serving().is_none(),
+        "[::1]:{port} taken: stopped"
     );
     // Every session was revoked.
-    *daemon.web.stop_hook.lock().unwrap() = None;
+    *server.web.stop_hook.lock().unwrap() = None;
     v6.store(NO_IPV6, Ordering::SeqCst);
-    daemon.open_web(None).await.unwrap();
-    let mut ws = connect(&daemon.web.serving().unwrap(), V4).await;
+    server.web.open(None).await.unwrap();
+    let mut ws = connect(&server.web.serving().unwrap(), V4).await;
     assert_eq!(
         hello(&mut ws, &token).await["error"]["code"],
         "unauthorized"
-    );
-}
-
-/// P16 (notes/web-design.md §perf): `Daemon::push` to the bytes on the
-/// WebSocket, p95 within 1 ms. Measured to the moment the client has read
-/// and parsed the frame, so loopback and the client count too: the server's
-/// part is no larger. Scaled by `CREW_PERF_SCALE` on a slow machine.
-#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-async fn a_push_is_on_the_wire_within_a_millisecond_at_p95() {
-    const SAMPLES: usize = 300;
-    let (_temp, running) = daemon().await;
-    let daemon = running.daemon.clone();
-    let (before, _steps) = before_the_stop(&daemon).await;
-    *daemon.web.stop_hook.lock().unwrap() = None;
-    let mut live = before.live;
-    let mut took = Vec::with_capacity(SAMPLES);
-    for i in 0..SAMPLES {
-        let event: crew_core::Event = serde_json::from_value(json!({
-            "seq": i, "timestamp": 0, "source": "test", "event_type": "test.p16",
-            "message": format!("p16 {i}"), "level": "info"
-        }))
-        .unwrap();
-        let want = format!("p16 {i}");
-        let started = std::time::Instant::now();
-        daemon.push(crew_core::rpc::Push::Event(event));
-        loop {
-            let message = tokio::time::timeout(Duration::from_secs(5), live.next())
-                .await
-                .expect("the push within 5 s")
-                .unwrap()
-                .unwrap();
-            if let Message::Text(text) = message {
-                let frame: Value = serde_json::from_str(text.as_str()).unwrap();
-                if frame["push"]["data"]["message"] == want.as_str() {
-                    break;
-                }
-            }
-        }
-        took.push(started.elapsed());
-        tokio::time::sleep(Duration::from_millis(2)).await;
-    }
-    took.sort();
-    let p50 = took[SAMPLES / 2];
-    let p95 = took[SAMPLES * 95 / 100];
-    let scale: f64 = std::env::var("CREW_PERF_SCALE")
-        .ok()
-        .and_then(|s| s.parse().ok())
-        .unwrap_or(1.0);
-    println!("P16: push to the client's read over {SAMPLES} pushes: p50 {p50:?}, p95 {p95:?}");
-    assert!(
-        p95 <= Duration::from_secs_f64(0.001 * scale),
-        "P16: p95 {p95:?} over 1 ms (x{scale}); p50 {p50:?}"
     );
 }

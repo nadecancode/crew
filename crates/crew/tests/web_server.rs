@@ -12,7 +12,7 @@ use std::process::Child;
 use std::time::{Duration, Instant};
 
 use common::*;
-use crew_core::rpc::{Workspaces, WebInfo, PROTOCOL_VERSION};
+use crew_core::rpc::{WebInfo, Workspaces, PROTOCOL_VERSION};
 use crew_core::types::WorkspaceState;
 use futures_util::{SinkExt, StreamExt};
 use serde_json::{json, Value};
@@ -104,14 +104,18 @@ struct Control {
 impl Control {
     fn connect(socket: &Path, hello: bool) -> Self {
         let stream = UnixStream::connect(socket).unwrap();
-        stream.set_read_timeout(Some(Duration::from_secs(15))).unwrap();
+        stream
+            .set_read_timeout(Some(Duration::from_secs(15)))
+            .unwrap();
         let mut control = Self {
             writer: stream.try_clone().unwrap(),
             reader: BufReader::new(stream),
             next: 1,
         };
         if hello {
-            let token = crew_core::paths::read_operator_token(socket).unwrap().unwrap();
+            let token = crew_core::paths::read_operator_token(socket)
+                .unwrap()
+                .unwrap();
             let reply = control.call(
                 "hello",
                 json!({"role": "operator", "token": token, "client": "test", "protocol": PROTOCOL_VERSION}),
@@ -124,7 +128,12 @@ impl Control {
     fn call(&mut self, method: &str, params: Value) -> Value {
         let id = self.next;
         self.next += 1;
-        writeln!(self.writer, "{}", json!({"id": id, "method": method, "params": params})).unwrap();
+        writeln!(
+            self.writer,
+            "{}",
+            json!({"id": id, "method": method, "params": params})
+        )
+        .unwrap();
         let mut line = String::new();
         assert_ne!(self.reader.read_line(&mut line).unwrap(), 0, "closed");
         serde_json::from_str(&line).unwrap()
@@ -141,7 +150,10 @@ impl Control {
 }
 
 fn host_of(info: &WebInfo) -> String {
-    info.url.trim_start_matches("http://").trim_end_matches('/').to_string()
+    info.url
+        .trim_start_matches("http://")
+        .trim_end_matches('/')
+        .to_string()
 }
 
 fn code_of(info: &WebInfo) -> String {
@@ -154,10 +166,19 @@ async fn ws(info: &WebInfo) -> Ws {
     let mut request = format!("ws://{host}/ws").into_client_request().unwrap();
     let headers = request.headers_mut();
     headers.insert("Host", HeaderValue::from_str(&host).unwrap());
-    headers.insert("Origin", HeaderValue::from_str(&format!("http://{host}")).unwrap());
-    headers.insert("Sec-WebSocket-Key", HeaderValue::from_str(&generate_key()).unwrap());
+    headers.insert(
+        "Origin",
+        HeaderValue::from_str(&format!("http://{host}")).unwrap(),
+    );
+    headers.insert(
+        "Sec-WebSocket-Key",
+        HeaderValue::from_str(&generate_key()).unwrap(),
+    );
     let stream = TcpStream::connect(("127.0.0.1", info.port)).await.unwrap();
-    tokio_tungstenite::client_async(request, stream).await.unwrap().0
+    tokio_tungstenite::client_async(request, stream)
+        .await
+        .unwrap()
+        .0
 }
 
 /// A frame by id, pushes kept aside.
@@ -201,7 +222,8 @@ async fn closed(ws: &mut Ws) -> Option<u16> {
 }
 
 async fn hello(ws: &mut Ws, token: &str, workspace: Option<&str>) -> Value {
-    let mut params = json!({"role": "operator", "token": token, "client": "web", "protocol": PROTOCOL_VERSION});
+    let mut params =
+        json!({"role": "operator", "token": token, "client": "web", "protocol": PROTOCOL_VERSION});
     if let Some(w) = workspace {
         params["workspace"] = json!(w);
     }
@@ -212,7 +234,10 @@ async fn hello(ws: &mut Ws, token: &str, workspace: Option<&str>) -> Value {
 async fn pair(info: &WebInfo) -> String {
     let mut socket = ws(info).await;
     let reply = call(&mut socket, 1, "web_pair", json!({"code": code_of(info)})).await;
-    reply["result"]["token"].as_str().expect("a token").to_string()
+    reply["result"]["token"]
+        .as_str()
+        .expect("a token")
+        .to_string()
 }
 
 /// The next `workspaces` push on an index connection.
@@ -226,7 +251,10 @@ async fn pushed(index: &mut Ws) -> Workspaces {
 }
 
 fn rt() -> tokio::runtime::Runtime {
-    tokio::runtime::Builder::new_current_thread().enable_all().build().unwrap()
+    tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .unwrap()
 }
 
 #[test]
@@ -242,9 +270,17 @@ fn a_workspace_is_shown_through_the_server_and_survives_its_daemon() {
     assert!(info.pair_url.ends_with(&format!("&w={id}")));
     let listing = control.listing();
     assert_eq!(listing.joined.len(), 1);
-    assert_eq!(listing.joined[0].state, WorkspaceState::Running, "{listing:?}");
+    assert_eq!(
+        listing.joined[0].state,
+        WorkspaceState::Running,
+        "{listing:?}"
+    );
     let pid = listing.joined[0].daemon.unwrap().pid;
-    assert_eq!(s.snapshot().session.web, info.url, "the daemon shows the server's address");
+    assert_eq!(
+        s.snapshot().session.web,
+        info.url,
+        "the daemon shows the server's address"
+    );
     rt().block_on(async {
         let token = pair(&info).await;
         let mut index = ws(&info).await;
@@ -261,7 +297,13 @@ fn a_workspace_is_shown_through_the_server_and_survives_its_daemon() {
         let snapshot = call(&mut state_conn, 2, "snapshot", json!({})).await;
         assert_eq!(snapshot["result"]["session"]["web"], json!(info.url));
         // W7, held by the daemon.
-        let refused = call(&mut state_conn, 3, "web_attach", json!({"url": "http://x/"})).await;
+        let refused = call(
+            &mut state_conn,
+            3,
+            "web_attach",
+            json!({"url": "http://x/"}),
+        )
+        .await;
         assert_eq!(refused["error"]["code"], "forbidden", "{refused}");
         // The daemon stops: its connection ends with 4001, the index says
         // stopped, and the page's session stands.

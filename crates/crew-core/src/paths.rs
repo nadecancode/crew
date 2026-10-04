@@ -512,11 +512,11 @@ pub fn session_id(state_dir: &Path) -> String {
     format!("{:016x}", session_hash(state_dir))
 }
 
-/// The first loopback port the web dashboard of this workspace tries:
-/// `23000 + (h mod 1000)`, with `h` the hash that names the socket. The same
-/// workspace gets the same number, below the kernel's ephemeral range.
-pub fn web_port(state_dir: &Path) -> u16 {
-    23000 + (session_hash(state_dir) % 1000) as u16
+/// The first loopback port the dashboard server tries: `23000 + (h mod
+/// 1000)`, with `h` the hash of `dir`, its runtime directory: a port per
+/// user (and per test), below the kernel's ephemeral range.
+pub fn web_port(dir: &Path) -> u16 {
+    23000 + (session_hash(dir) % 1000) as u16
 }
 
 /// What the running dashboard server publishes of itself in `web.json`, for

@@ -281,6 +281,10 @@ impl Session {
 impl Drop for Session {
     fn drop(&mut self) {
         self.stop();
+        // A dashboard server the test started stops with it.
+        if self.root().join("run/crew/web.sock").exists() {
+            let _ = self.crew(&["web", "--stop"]);
+        }
     }
 }
 

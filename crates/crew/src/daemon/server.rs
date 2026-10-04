@@ -13,22 +13,12 @@ use crew_core::rpc::{Call, Push, Request, Role, RpcError, ServerFrame, Workspace
 use crew_core::util::ct_eq;
 use crew_core::MAX_FRAME_BYTES;
 use serde_json::Value;
-use std::sync::Arc;
 use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader};
 use tokio::net::{UnixListener, UnixStream};
 use tokio::sync::{broadcast, mpsc};
 use tokio::task::JoinHandle;
 
 use super::Daemon;
-
-/// What carries a connection's frames.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(crate) enum Transport {
-    /// The daemon's Unix socket: one JSON object per line.
-    Socket,
-    /// The web dashboard's WebSocket: one JSON object per text message.
-    Web,
-}
 
 /// Who a connection has authenticated as.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -57,16 +47,12 @@ impl Who {
 
 pub(crate) struct Conn {
     pub id: u64,
-    pub transport: Transport,
     pub who: Option<Who>,
     /// Its `hello` said `web`: the dashboard server opened it for a browser,
     /// which may not do what W7 keeps from a web session.
     pub web: bool,
     /// This connection is the dashboard server's watch (`web_attach`).
     pub web_attached: bool,
-    /// On the web transport: the connection's lease, held by every task of
-    /// it (see [`crate::web::Lease`]).
-    pub lease: Option<Arc<crate::web::Lease>>,
     pub tx: mpsc::Sender<ServerFrame>,
     /// A subscription to start once the pending response has been queued:
     /// from now (`subscribe`), or from a receiver taken before a snapshot was
@@ -84,9 +70,6 @@ pub(crate) struct Conn {
     pub summary_task: Option<JoinHandle<()>>,
     /// Agent whose terminal this connection is attached to.
     pub attached: Option<String>,
-    /// The connection is to be closed once the pending response is sent (a
-    /// web `hello` beyond the limit of connections).
-    pub close_after_reply: bool,
     /// Test hook: how long to wait between capturing a snapshot and queueing
     /// its reply, the window the barrier closes.
     #[cfg(test)]
@@ -102,17 +85,15 @@ pub(crate) struct Session {
 impl Session {
     /// A new connection, and the frames for it (responses and pushes) in the
     /// order they must be written.
-    pub fn new(daemon: &Daemon, transport: Transport) -> (Self, mpsc::Receiver<ServerFrame>) {
+    pub fn new(daemon: &Daemon) -> (Self, mpsc::Receiver<ServerFrame>) {
         let (tx, rx) = mpsc::channel::<ServerFrame>(1024);
         let conn = Conn {
             id: daemon
                 .next_conn
                 .fetch_add(1, std::sync::atomic::Ordering::Relaxed),
-            transport,
             who: None,
             web: false,
             web_attached: false,
-            lease: None,
             tx,
             subscribe_after_reply: None,
             subscribed: false,
@@ -121,7 +102,6 @@ impl Session {
             summary_after_reply: None,
             summary_task: None,
             attached: None,
-            close_after_reply: false,
             #[cfg(test)]
             after_capture: None,
         };
@@ -130,16 +110,6 @@ impl Session {
             conn,
         };
         (session, rx)
-    }
-
-    /// A connection of the web dashboard, held by `lease`.
-    pub fn web(
-        daemon: &Daemon,
-        lease: Arc<crate::web::Lease>,
-    ) -> (Self, mpsc::Receiver<ServerFrame>) {
-        let (mut session, frames) = Self::new(daemon, Transport::Web);
-        session.conn.lease = Some(lease);
-        (session, frames)
     }
 
     /// Handle one request as received (one line, one text message): parse,
@@ -208,13 +178,9 @@ impl Session {
         self.conn.tx.send(frame).await.is_ok()
     }
 
+    #[cfg(test)]
     pub fn authenticated(&self) -> bool {
         self.conn.who.is_some()
-    }
-
-    /// The last reply asked for the connection to be closed.
-    pub fn close_requested(&self) -> bool {
-        self.conn.close_after_reply
     }
 
     #[cfg(test)]
@@ -243,14 +209,13 @@ impl Drop for Session {
 }
 
 impl Conn {
-    /// Spawn a task of this connection (a forwarder): on the web it holds
-    /// the connection's lease until it is gone.
+    /// Spawn a task of this connection (a forwarder).
     pub fn spawn<F>(&self, task: F) -> JoinHandle<F::Output>
     where
         F: std::future::Future + Send + 'static,
         F::Output: Send + 'static,
     {
-        crate::web::spawn_held(self.lease.clone(), task)
+        tokio::spawn(task)
     }
 }
 
@@ -285,7 +250,7 @@ async fn handle(daemon: Daemon, stream: UnixStream) {
         }
     }
     let (read, mut write) = stream.into_split();
-    let (mut session, mut rx) = Session::new(&daemon, Transport::Socket);
+    let (mut session, mut rx) = Session::new(&daemon);
     let writer = tokio::spawn(async move {
         while let Some(frame) = rx.recv().await {
             let Ok(mut line) = serde_json::to_vec(&frame) else {
@@ -427,7 +392,7 @@ mod tests {
     }
 
     async fn operator(daemon: &Daemon) -> (Session, mpsc::Receiver<ServerFrame>) {
-        let (mut session, mut rx) = Session::new(daemon, Transport::Socket);
+        let (mut session, mut rx) = Session::new(daemon);
         let hello = serde_json::json!({"role": "operator", "token": daemon.operator_token,
             "client": "test", "protocol": crew_core::rpc::PROTOCOL_VERSION});
         assert!(session.request(&request(1, "hello", hello)).await);
@@ -674,7 +639,7 @@ mod tests {
     async fn the_socket_behaviours_hold_through_the_session() {
         let (_temp, running) = daemon().await;
         let daemon = running.daemon.clone();
-        let (mut session, mut rx) = Session::new(&daemon, Transport::Socket);
+        let (mut session, mut rx) = Session::new(&daemon);
         // Before hello: unauthorized.
         assert!(
             session

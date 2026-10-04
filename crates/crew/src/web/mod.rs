@@ -32,7 +32,7 @@ use std::io;
 use std::net::{Ipv4Addr, Ipv6Addr, SocketAddr};
 use std::sync::{Arc, Mutex, MutexGuard, OnceLock};
 
-use crew_core::rpc::{RpcError, WebInfo, WebPaired};
+use crew_core::rpc::{RpcError, WebPaired};
 use crew_core::util::{ct_eq, new_token, now_ms};
 use sha2::{Digest, Sha256};
 use tokio::sync::{watch, Notify};
@@ -495,6 +495,7 @@ impl Web {
     }
 
     /// The dashboard's address while it is served, else empty.
+    #[cfg(test)]
     pub(crate) fn url(&self) -> String {
         self.registry()
             .serving
@@ -576,10 +577,14 @@ impl Web {
     }
 
     /// Serve, if not served yet, and make a pairing code.
-    pub(crate) async fn open(self: &Arc<Self>, port: Option<u16>) -> Result<WebInfo, RpcError> {
+    #[cfg(test)]
+    pub(crate) async fn open(
+        self: &Arc<Self>,
+        port: Option<u16>,
+    ) -> Result<crew_core::rpc::WebInfo, RpcError> {
         let (serving, started) = self.listen(port).await?;
         let code = self.code();
-        Ok(WebInfo {
+        Ok(crew_core::rpc::WebInfo {
             url: serving.url(),
             port: serving.port,
             pair_url: format!("{}#pair={code}", serving.url()),

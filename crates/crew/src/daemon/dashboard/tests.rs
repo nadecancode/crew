@@ -1,5 +1,5 @@
 use super::*;
-use crate::daemon::server::{Session, Transport};
+use crate::daemon::server::Session;
 use crate::message_bus::NewMessage;
 use crew_core::rpc::PROTOCOL_VERSION;
 use crew_core::{Agent, MessageType, Task};
@@ -43,7 +43,7 @@ struct Peer {
 
 impl Peer {
     async fn hello(daemon: &Daemon, params: Value) -> (Self, ServerFrame) {
-        let (session, frames) = Session::new(daemon, Transport::Socket);
+        let (session, frames) = Session::new(daemon);
         let mut peer = Self {
             session,
             frames,

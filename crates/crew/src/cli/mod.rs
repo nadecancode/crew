@@ -196,7 +196,21 @@ answers: `crew answer 2`.")]
         /// Print the address as JSON (and open nothing)
         #[arg(long)]
         json: bool,
-        /// Stop serving: every browser session ends
+        /// Show every running session in the dashboard
+        #[arg(long, conflicts_with_all = ["remove", "list", "restart", "stop"])]
+        all: bool,
+        /// Take this workspace out of the dashboard
+        #[arg(long, conflicts_with_all = ["port", "no_open", "list", "restart", "stop"])]
+        remove: bool,
+        /// What the dashboard shows, and what runs beside it
+        #[arg(long, conflicts_with_all = ["port", "no_open", "restart", "stop"])]
+        list: bool,
+        /// Replace the dashboard server with this build's, keeping its
+        /// workspaces (open tabs stop; no team does)
+        #[arg(long, conflicts_with_all = ["stop"])]
+        restart: bool,
+        /// Stop the dashboard server: every browser session ends, for every
+        /// workspace
         #[arg(long, conflicts_with_all = ["port", "no_open", "json"])]
         stop: bool,
     },
@@ -597,12 +611,25 @@ pub fn run(cli: Cli) -> Result<()> {
             port,
             no_open,
             json,
+            all,
+            remove,
+            list,
+            restart,
             stop,
         } => {
             if stop {
-                ops::web_stop(&target)
+                ops::web_stop()
+            } else if remove {
+                ops::web_remove(&target)
+            } else if list {
+                ops::web_list(json)
             } else {
-                ops::web(&target, port, no_open, json)
+                let how = if all {
+                    ops::WebJoin::All
+                } else {
+                    ops::WebJoin::This
+                };
+                ops::web(&target, how, port, no_open, json, restart)
             }
         }
         Command::Ctl(cmd) => agent_side::ctl(cmd),
