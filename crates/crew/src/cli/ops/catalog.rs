@@ -5,7 +5,8 @@ use anyhow::{anyhow, Result};
 use crew_core::util::one_line;
 
 use super::super::{ConfigCommand, ModelsCommand, StyleCommand};
-use super::{members_line, Target};
+use super::plain::members_line;
+use super::Target;
 use crate::endpoints::{Layers, Scope};
 use crate::models::{self, Availability, Catalog};
 use crate::styles::{self, Styles};
