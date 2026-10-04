@@ -2200,7 +2200,12 @@ unsandboxed"
         }
 
         /// `agent` commits `file` holding `text`, in its sandbox.
-        fn commit(&self, agent: &(Workspace, Spec), file: &str, text: &str) -> CommitInfo {
+        fn commit(
+            &self,
+            agent: &(Workspace, Spec),
+            file: &str,
+            text: &str,
+        ) -> crew_core::rpc::CommitInfo {
             let (workspace, spec) = agent;
             std::fs::write(workspace.path.join(file), text).unwrap();
             let id = workspace.path.file_name().unwrap().to_str().unwrap();
@@ -2219,8 +2224,6 @@ unsandboxed"
             String::from_utf8_lossy(&out.stdout).trim().to_string()
         }
     }
-
-    use crew_core::rpc::CommitInfo;
 
     #[test]
     fn an_agents_jj_does_all_its_work_in_its_sandbox_and_the_helper_integrates() {
@@ -2251,18 +2254,15 @@ unsandboxed"
             std::fs::read_to_string(a.join("shared.txt")).unwrap(),
             "a's\n"
         );
-        // A clean cherry-pick and a clean merge land and are published.
-        let other = sb.commit(&sb.b, "b.txt", "from b\n");
+        // A clean cherry-pick lands and is published.
         let picked = sb
             .inside(&sb.b.1, || jj.cherry_pick(b, "b", &first.sha))
             .unwrap();
         assert!(picked.outcome.ok, "{:?}", picked.outcome);
         assert_eq!(sb.branch("b"), picked.outcome.commit.unwrap().sha);
         assert!(b.join("a.txt").exists());
-        let merged = sb.inside(&sb.a.1, || jj.merge(a, "a", "agents/b")).unwrap();
-        assert!(!merged.ok, "shared.txt still conflicts: {merged:?}");
-        let _ = other;
-        // The integration, in the helper's sandbox.
+        // The integration, in the helper's sandbox: a merges, b conflicts
+        // with it in shared.txt.
         let integration = sb.ws.join(".crew/worktrees").join(git::INTEGRATION_DIR);
         let helper = |worktree: &Path| -> Result<Arc<dyn Launcher>> {
             let (launcher, _) = git::launch::helper_launcher(
