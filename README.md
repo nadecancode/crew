@@ -53,6 +53,8 @@ each row in the bus log is a persisted message.
   └──────┘ └──────┘
 ```
 
+- The browser dashboard (`crew web`) is one more client: the daemon serves it
+  on the loopback addresses and speaks the same protocol over a WebSocket.
 - The **daemon** is a detached process per workspace. It persists every
   change, so it can be killed and restarted without losing the session.
 - **Agents** are ordinary interactive `claude` / `codex` sessions on real
@@ -100,6 +102,8 @@ the command.
   so at every team start (see [Workspace isolation](#workspace-isolation)).
   git is needed either way: an empty directory is made a repository with
   `git init`, and the repository jj works on is git's.
+- **bun** and node, only to rebuild the web dashboard's frontend (`web/`); the
+  built bundle is committed, so installing crew needs neither.
 - **herdr** (optional). Started inside a herdr pane, `backend: auto` puts
   every agent in its own pane of a `crew:<project>` workspace.
 - **bubblewrap** 0.10+ (`bwrap` on `PATH`), unprivileged user namespaces and
@@ -673,6 +677,83 @@ needed`.
 Claude Code's built-in ask-the-user dialog (`AskUserQuestion`) is switched off
 for crew's agents (a `deny` rule in the session's private settings): it would
 hold the agent at a prompt only `crew agent attach` could reach.
+
+## Web dashboard
+
+The same session in a browser: the agent graph with its message and VCS
+animations, the bus, the task graph, the event log, usage, the inspector (a
+live terminal included) and every operator action of the TUI except starting
+a team. It is served by the daemon itself, on the loopback addresses only
+(no other machine, no TLS, no accounts), and works in Chromium-based browsers
+and Firefox. Safari cannot resolve its address.
+
+```sh
+crew web                    # start serving if needed, print the address, open the browser
+crew web --no-open          # print it only
+crew web --json             # the address as JSON (scripts)
+crew web --port 23417       # exactly this port (default: derived from the workspace)
+crew web --stop             # stop serving: every browser session ends
+```
+
+`crew web` prints two addresses:
+
+```
+web        http://c7f3a09b52e14d6f8a1b3c5d7e9f0a2b.localhost:23417/
+open       http://c7f3a09b52e14d6f8a1b3c5d7e9f0a2b.localhost:23417/#pair=3f9a…e1   (works once, for 2 minutes)
+```
+
+**Open the `open` address in your own browser and paste it nowhere else.** Its
+`#pair=` code signs one browser in, once; the page removes the code from the
+address at once and keeps its session in that browser's `localStorage` (no
+cookie, no service worker). Another tab of the same address needs no code. To
+sign in another browser, run `crew web` again: it prints the same address with
+a new code. `crew status` shows the `web` line while the dashboard is served.
+
+What keeps it yours:
+
+- The address has a random name made when the server starts and never used
+  again, so a page left over from an earlier run (or served by anything that
+  later took the port) shares nothing with this one. The server answers only
+  to that name: `http://127.0.0.1:<port>/` and `http://localhost:<port>/`
+  show nothing (421).
+- A page of another origin cannot open the socket. An agent's own token is not
+  a web session, and the web session cannot start or stop the server, or load
+  a team.
+- The server proves itself to the page with a secret that is not in the
+  browser's storage; a tab whose daemon was killed refuses whoever takes the
+  port next and stops.
+- Text and terminal output from agents are shown as text, under a strict
+  Content-Security-Policy; after it has loaded the page makes no HTTP request
+  at all.
+- **After the daemon (or `crew web --stop`) restarts, a tab from before stays
+  stopped by design**: run `crew web` for the new address.
+
+Preferences (node positions, the log filters) are kept by the daemon, per
+workspace. The wire is the daemon's own protocol (version 5) over a
+WebSocket; `crates/crew/tests/fixtures/web/` has its reference frames.
+
+### Building the frontend
+
+The built bundle is committed in `crates/crew/web-dist/` and embedded in the
+binary, so `cargo install --path crates/crew` needs no node. Only changing the
+frontend (`web/`, Solid and Vite) needs [bun](https://bun.sh) (and node):
+
+```sh
+just web-build        # bun run build in web/, writes crates/crew/web-dist
+just web-test         # vitest
+just web-e2e          # Playwright: the mock and perf projects, then the live one
+just web-check        # the committed bundle is what the sources build (byte for byte)
+just web-install-check # cargo install with node and bun failing; GET / serves the bundle
+```
+
+Commit the rebuilt `web-dist/` with every change to `web/`: `cargo test` fails
+(`web_bundle`) when the bundle is older than the sources. The browser tests use
+`PLAYWRIGHT_EXECUTABLE_PATH` for a Chromium-based browser when Playwright's own
+does not start (NixOS). `scripts/web-e2e [jj|git]` runs the live project alone:
+a real daemon with scripted agents that commit, cherry-pick, merge and ask a
+question, checked through the page (pairing, live updates, the VCS animations,
+operator actions, the terminal, what stays outside, a killed and restarted
+daemon, the performance budgets).
 
 ## Dashboard controls
 
@@ -1377,8 +1458,9 @@ Cargo workspace:
 | Crate | Contents |
 | --- | --- |
 | `crew-core` | domain types, the wire protocol (`rpc.rs`), blocking client, team config, paths |
-| `crew` | `daemon/` (state, server, supervisor, delivery, orchestration, roster, subagents, git ops), `message_bus/`, `persistence/`, `scheduler/`, `tasks/`, `agents/` (Claude, Codex, pi, shell), `process/` (pty, herdr), `vcs/` (jj backend and selection) and `git/` (git backend, shared helpers), `mcp/`, `cli/` |
+| `crew` | `daemon/` (state, server, supervisor, delivery, orchestration, roster, subagents, git ops), `message_bus/`, `persistence/`, `scheduler/`, `tasks/`, `agents/` (Claude, Codex, pi, shell), `process/` (pty, herdr), `vcs/` (jj backend and selection) and `git/` (git backend, shared helpers), `web/` (the browser dashboard's server: HTTP, WebSocket, pairing; `build.rs` embeds `web-dist/`), `mcp/`, `cli/` |
 | `crew-tui` | the ratatui dashboard |
+| `web/` (not a crate) | the browser dashboard's frontend (Solid, Vite, bun); its built bundle is `crates/crew/web-dist/` |
 
 The seams, each a trait with one or two implementations:
 

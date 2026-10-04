@@ -91,3 +91,36 @@ dry-run:
 # The six-agent demo with real Claude Code agents.
 demo:
     ./scripts/build-env cargo run -p crew -- run examples/demo.yaml
+
+# Build the web dashboard bundle into crates/crew/web-dist (commit it with the sources).
+web-build:
+    cd web && ([ -d node_modules ] || bun install --frozen-lockfile) && bun run build
+
+# Frontend unit tests (vitest; no daemon).
+web-test:
+    cd web && ([ -d node_modules ] || bun install --frozen-lockfile) && bun run test
+
+# Browser tests: the mock project and the perf budgets, then the live project against a
+# real daemon on jj (or git: `just web-e2e git`).
+web-e2e vcs="jj":
+    cd web && ([ -d node_modules ] || bun install --frozen-lockfile) && bun run e2e
+    ./scripts/web-e2e {{vcs}}
+
+# The committed bundle is the one these sources build: rebuild in a temporary
+# directory and compare byte for byte with crates/crew/web-dist.
+web-check:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    tmp=$(mktemp -d)
+    trap 'rm -rf "$tmp"' EXIT
+    [ -d web/node_modules ] || (cd web && bun install --frozen-lockfile)
+    mkdir -p "$tmp/web" "$tmp/crates/crew"
+    tar -C web --exclude=node_modules --exclude=test-results --exclude=playwright-report -cf - . | tar -C "$tmp/web" -xf -
+    ln -s "$PWD/web/node_modules" "$tmp/web/node_modules"
+    (cd "$tmp/web" && bun run build >/dev/null)
+    diff -r "$tmp/crates/crew/web-dist" crates/crew/web-dist
+    echo "web-dist matches the sources"
+
+# Install crew without node or bun and check that it serves the committed bundle.
+web-install-check:
+    ./scripts/web-install-check

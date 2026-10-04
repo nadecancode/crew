@@ -1,0 +1,46 @@
+#!/usr/bin/env bash
+# `cargo install` of crew needs no node: build it with node and bun made to
+# fail, start a daemon with the installed binary, and check that `/` serves the
+# bundle committed in crates/crew/web-dist (notes/web-design.md §build,
+# "Install without node").
+set -euo pipefail
+
+cd "$(dirname "$0")/.."
+tmp=$(mktemp -d /tmp/crew-wi.XXXXXX)
+trap 'CREW_BIN_DIR="$tmp/root/bin"; [ -x "$tmp/root/bin/crew" ] && "$tmp/root/bin/crew" stop -C "$tmp/ws" >/dev/null 2>&1 || true; rm -rf "$tmp"' EXIT
+
+# node and bun first on PATH, and failing: a build that runs either is caught.
+mkdir "$tmp/shims"
+for tool in node bun npm npx bunx; do
+    printf '#!/bin/sh\necho "%s was run by the build" >> "%s/invoked"\nexit 127\n' "$tool" "$tmp" > "$tmp/shims/$tool"
+    chmod +x "$tmp/shims/$tool"
+done
+
+PATH="$tmp/shims:$PATH" CARGO_TARGET_DIR="${CARGO_TARGET_DIR:-$PWD/target}" \
+    ./scripts/build-env cargo install --path crates/crew --locked --root "$tmp/root"
+if [ -e "$tmp/invoked" ]; then
+    echo "the build ran node or bun:" >&2
+    cat "$tmp/invoked" >&2
+    exit 1
+fi
+
+crew="$tmp/root/bin/crew"
+unset CREW_IDENTITY CREW_SOCKET HERDR_ENV HERDR_SOCKET_PATH HERDR_PANE_ID
+export XDG_RUNTIME_DIR="$tmp/run" XDG_STATE_HOME="$tmp/state" XDG_CONFIG_HOME="$tmp/config" CREW_GLOBAL_CONFIG="$tmp/etc/config.toml"
+mkdir -p "$tmp/ws" "$tmp/run"
+chmod 700 "$tmp/run"
+"$crew" start -C "$tmp/ws" >/dev/null
+info=$("$crew" web --json -C "$tmp/ws")
+url=$(printf '%s' "$info" | sed -n 's/.*"url": *"\([^"]*\)".*/\1/p')
+host=${url#http://}; host=${host%/}
+port=${host##*:}
+body=$(curl -fsS -H "Host: $host" "http://127.0.0.1:$port/")
+if [ "$body" != "$(cat crates/crew/web-dist/index.html)" ]; then
+    echo "GET / is not the committed web-dist/index.html:" >&2
+    printf '%s\n' "$body" | head -5 >&2
+    exit 1
+fi
+script=$(sed -n 's/.*src="\(\/assets\/[^"]*\.js\)".*/\1/p' crates/crew/web-dist/index.html | head -1)
+grep -q "\"${script#/}\"" crates/crew/web-dist/manifest.json || { echo "$script is not in manifest.json" >&2; exit 1; }
+curl -fsS -H "Host: $host" "http://127.0.0.1:$port$script" -o /dev/null
+echo "ok: installed without node, / serves the committed bundle ($script)"
