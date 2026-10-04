@@ -557,3 +557,55 @@ async fn on_one_address_a_later_ipv6_is_kept_and_a_taken_one_stops_the_server() 
         "unauthorized"
     );
 }
+
+/// P16 (notes/web-design.md §perf): `Daemon::push` to the bytes on the
+/// WebSocket, p95 within 1 ms. Measured to the moment the client has read
+/// and parsed the frame, so loopback and the client count too: the server's
+/// part is no larger. Scaled by `CREW_PERF_SCALE` on a slow machine.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_push_is_on_the_wire_within_a_millisecond_at_p95() {
+    const SAMPLES: usize = 300;
+    let (_temp, running) = daemon().await;
+    let daemon = running.daemon.clone();
+    let (before, _steps) = before_the_stop(&daemon).await;
+    *daemon.web.stop_hook.lock().unwrap() = None;
+    let mut live = before.live;
+    let mut took = Vec::with_capacity(SAMPLES);
+    for i in 0..SAMPLES {
+        let event: crew_core::Event = serde_json::from_value(json!({
+            "seq": i, "timestamp": 0, "source": "test", "event_type": "test.p16",
+            "message": format!("p16 {i}"), "level": "info"
+        }))
+        .unwrap();
+        let want = format!("p16 {i}");
+        let started = std::time::Instant::now();
+        daemon.push(crew_core::rpc::Push::Event(event));
+        loop {
+            let message = tokio::time::timeout(Duration::from_secs(5), live.next())
+                .await
+                .expect("the push within 5 s")
+                .unwrap()
+                .unwrap();
+            if let Message::Text(text) = message {
+                let frame: Value = serde_json::from_str(text.as_str()).unwrap();
+                if frame["push"]["data"]["message"] == want.as_str() {
+                    break;
+                }
+            }
+        }
+        took.push(started.elapsed());
+        tokio::time::sleep(Duration::from_millis(2)).await;
+    }
+    took.sort();
+    let p50 = took[SAMPLES / 2];
+    let p95 = took[SAMPLES * 95 / 100];
+    let scale: f64 = std::env::var("CREW_PERF_SCALE")
+        .ok()
+        .and_then(|s| s.parse().ok())
+        .unwrap_or(1.0);
+    println!("P16: push to the client's read over {SAMPLES} pushes: p50 {p50:?}, p95 {p95:?}");
+    assert!(
+        p95 <= Duration::from_secs_f64(0.001 * scale),
+        "P16: p95 {p95:?} over 1 ms (x{scale}); p50 {p50:?}"
+    );
+}
