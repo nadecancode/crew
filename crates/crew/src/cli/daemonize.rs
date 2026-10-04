@@ -16,7 +16,7 @@ use crate::daemon::{self, DaemonOptions};
 /// Environment variables that mark the *invoking* session (a Claude Code or
 /// multiplexer session crew was started from). Agents must not inherit them,
 /// or they would believe they are that session.
-const SESSION_MARKERS: &[&str] = &[
+pub(crate) const SESSION_MARKERS: &[&str] = &[
     "CLAUDECODE",
     "CLAUDE_CODE_ENTRYPOINT",
     "CLAUDE_CODE_SESSION_ID",

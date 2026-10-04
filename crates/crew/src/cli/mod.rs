@@ -196,7 +196,21 @@ answers: `crew answer 2`.")]
         /// Print the address as JSON (and open nothing)
         #[arg(long)]
         json: bool,
-        /// Stop serving: every browser session ends
+        /// Show every running session in the dashboard
+        #[arg(long, conflicts_with_all = ["remove", "list", "restart", "stop"])]
+        all: bool,
+        /// Take this workspace out of the dashboard
+        #[arg(long, conflicts_with_all = ["port", "no_open", "list", "restart", "stop"])]
+        remove: bool,
+        /// What the dashboard shows, and what runs beside it
+        #[arg(long, conflicts_with_all = ["port", "no_open", "restart", "stop"])]
+        list: bool,
+        /// Replace the dashboard server with this build's, keeping its
+        /// workspaces (open tabs stop; no team does)
+        #[arg(long, conflicts_with_all = ["stop"])]
+        restart: bool,
+        /// Stop the dashboard server: every browser session ends, for every
+        /// workspace
         #[arg(long, conflicts_with_all = ["port", "no_open", "json"])]
         stop: bool,
     },
@@ -258,6 +272,13 @@ answers: `crew answer 2`.")]
     Daemon {
         #[arg(long)]
         workspace: PathBuf,
+    },
+    /// Run the dashboard server in the foreground (`crew web` starts it)
+    #[command(hide = true)]
+    WebServer {
+        /// Serve on exactly this port (1-65535)
+        #[arg(long, value_parser = clap::value_parser!(u16).range(1..))]
+        port: Option<u16>,
     },
 }
 
@@ -590,12 +611,25 @@ pub fn run(cli: Cli) -> Result<()> {
             port,
             no_open,
             json,
+            all,
+            remove,
+            list,
+            restart,
             stop,
         } => {
             if stop {
-                ops::web_stop(&target)
+                ops::web_stop()
+            } else if remove {
+                ops::web_remove(&target)
+            } else if list {
+                ops::web_list(json)
             } else {
-                ops::web(&target, port, no_open, json)
+                let how = if all {
+                    ops::WebJoin::All
+                } else {
+                    ops::WebJoin::This
+                };
+                ops::web(&target, how, port, no_open, json, restart)
             }
         }
         Command::Ctl(cmd) => agent_side::ctl(cmd),
@@ -622,6 +656,7 @@ pub fn run(cli: Cli) -> Result<()> {
         Command::SandboxRun(args) => crate::sandbox::run::run(args),
         Command::SandboxExec(args) => crate::sandbox::shim::run(args),
         Command::Daemon { workspace } => daemonize::run_foreground(&workspace),
+        Command::WebServer { port } => crate::web::process::run(port),
     }
 }
 

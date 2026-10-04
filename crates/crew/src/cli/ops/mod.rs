@@ -21,7 +21,7 @@ pub use comms::{answer, integrate, logs, messages, questions, send};
 pub use plain::{quick, refuse_command};
 pub use session::{attach, frame, resume, sessions, start, status, stop};
 pub use team::run_team;
-pub use web::{web, web_stop};
+pub use web::{web, web_list, web_remove, web_stop, WebJoin};
 
 /// Which session a command addresses.
 pub struct Target {
