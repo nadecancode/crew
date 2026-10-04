@@ -1166,55 +1166,23 @@ with review_submit(task_id=\"{}\", approve=true|false).",
         // task is finished: an agent works on one task at a time. Checked
         // under the plan lock, so the scheduler cannot hand the author
         // something else in between.
-        let mut queued = false;
-        let updated = if approve {
-            self.try_update_task(task_id, |t| {
-                t.status = TaskStatus::Done;
-                t.completed_at = Some(now);
-                t.note = None;
-            })
+        let planning = if approve {
+            None
         } else {
-            let _planning = self.plan_lock.lock().await;
-            queued = author
+            Some(self.plan_lock.lock().await)
+        };
+        let queued = !approve
+            && author
                 .as_deref()
                 .is_some_and(|a| active_task(&self.model().tasks, a).is_some());
-            self.try_update_task(task_id, |t| {
-                t.status = if queued {
-                    TaskStatus::Ready
-                } else {
-                    TaskStatus::Working
-                };
-                t.progress = None;
-                t.note = Some(format!("changes requested by {reviewer}"));
-            })
-        }?
-        .ok_or_else(|| RpcError::not_found("task vanished"))?;
-
-        self.emit(
-            NewEvent::new(
-                "scheduler",
-                if approve {
-                    "task.approved"
-                } else {
-                    "task.changes_requested"
-                },
-                format!(
-                    "{reviewer} {} task {task_id}",
-                    if approve {
-                        "approved"
-                    } else {
-                        "requested changes on"
-                    }
-                ),
-            )
-            .task(task_id)
-            .agent(&reviewer),
-        );
-        if let Some(author) = &author {
+        // The author is told the verdict before it is applied: a verdict that
+        // cannot be told is not applied (the task stays in Review), and the
+        // reviewer and the orchestrator hear of it.
+        if let Some(author) = author.as_deref().filter(|a| *a != reviewer) {
             let body = if approve {
                 format!(
                     "Approved: task \"{}\" (id {task_id}).{}",
-                    updated.title,
+                    task.title,
                     if comments.is_empty() {
                         String::new()
                     } else {
@@ -1239,17 +1207,60 @@ it. Then address them, {commit}and call task_complete again."
                 };
                 format!(
                     "Changes requested on task \"{}\" (id {task_id}):\n\n{comments}\n\n{next}",
-                    updated.title
+                    task.title
                 )
             };
-            if author != &reviewer {
-                let message = NewMessage::new(&reviewer, author, MessageType::ReviewResult, body)
-                    .metadata(json!({ "task_id": task_id, "approved": approve }))
-                    .correlation(Some(format!("review-{task_id}")));
-                if let Err(e) = self.send_message(message).await {
-                    tracing::warn!("sending the review result failed: {}", e.message);
-                }
+            let message = NewMessage::new(&reviewer, author, MessageType::ReviewResult, body)
+                .metadata(json!({ "task_id": task_id, "approved": approve }))
+                .correlation(Some(format!("review-{task_id}")));
+            if let Err(e) = self.send_message(message).await {
+                drop(planning);
+                return Err(self
+                    .review_result_unsent(&task, &reviewer, author, approve, &comments, &e)
+                    .await);
             }
+        }
+        let updated = if approve {
+            self.try_update_task(task_id, |t| {
+                t.status = TaskStatus::Done;
+                t.completed_at = Some(now);
+                t.note = None;
+            })
+        } else {
+            self.try_update_task(task_id, |t| {
+                t.status = if queued {
+                    TaskStatus::Ready
+                } else {
+                    TaskStatus::Working
+                };
+                t.progress = None;
+                t.note = Some(format!("changes requested by {reviewer}"));
+            })
+        };
+        drop(planning);
+        let updated = updated?.ok_or_else(|| RpcError::not_found("task vanished"))?;
+
+        self.emit(
+            NewEvent::new(
+                "scheduler",
+                if approve {
+                    "task.approved"
+                } else {
+                    "task.changes_requested"
+                },
+                format!(
+                    "{reviewer} {} task {task_id}",
+                    if approve {
+                        "approved"
+                    } else {
+                        "requested changes on"
+                    }
+                ),
+            )
+            .task(task_id)
+            .agent(&reviewer),
+        );
+        if let Some(author) = &author {
             if approve {
                 self.finish_task(&updated, author).await;
                 self.settle(author);
@@ -1262,5 +1273,66 @@ it. Then address them, {commit}and call task_complete again."
         }
         self.replan();
         Ok(updated)
+    }
+
+    /// A verdict on `task` that could not be told to its author: it is not
+    /// applied, the event says why, and the orchestrator is given the
+    /// verdict. Returns the error for the one who gave it, to give it again.
+    async fn review_result_unsent(
+        &self,
+        task: &Task,
+        reviewer: &str,
+        author: &str,
+        approve: bool,
+        comments: &str,
+        e: &RpcError,
+    ) -> RpcError {
+        tracing::warn!("sending the review result failed: {}", e.message);
+        let why = format!(
+            "the review result could not be sent to {author} ({})",
+            truncate_chars(&one_line(&e.message), 200)
+        );
+        let verdict = if approve {
+            "approved"
+        } else {
+            "changes requested"
+        };
+        self.emit(
+            NewEvent::new(
+                "scheduler",
+                "task.review_result_unsent",
+                format!(
+                    "task {}: {reviewer}'s verdict ({verdict}) is not applied: {why}",
+                    task.id
+                ),
+            )
+            .task(&task.id)
+            .agent(reviewer)
+            .warn(),
+        );
+        let said = if comments.is_empty() {
+            String::new()
+        } else {
+            format!(
+                " Its comments: \"{}\"",
+                truncate_chars(&one_line(comments), 500)
+            )
+        };
+        self.notify_orchestrator(&format!(
+            "Task {} (\"{}\") by {author} stays in Review: {reviewer}'s verdict ({verdict}) was not \
+applied, because {why}.{said} Ask {reviewer} to give it again, or tell {author} yourself and give \
+it with review_submit(task_id=\"{}\", approve=true|false).",
+            task.id,
+            truncate_chars(&task.title, 80),
+            task.id
+        ))
+        .await;
+        RpcError::new(
+            &e.code,
+            format!(
+                "{why}; task {} stays in Review: submit the review again",
+                task.id
+            ),
+        )
     }
 }

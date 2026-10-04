@@ -1191,6 +1191,86 @@ fn a_review_request_that_cannot_be_sent_keeps_the_task_in_review_and_the_orchest
 }
 
 #[test]
+fn a_review_result_that_cannot_be_sent_is_not_applied_and_the_orchestrator_is_told() {
+    let s = Session::new();
+    let mut team = s.team(
+        "lost-verdict",
+        vec![
+            agent("author", "", &["--on-task=done draft"]),
+            agent("critic", "", &[]),
+        ],
+        vec![
+            task("write", "author", &[]),
+            task("publish", "author", &["write"]),
+        ],
+    );
+    team.tasks[0].reviewer = Some("critic".into());
+    team.orchestrator = OrchestratorConfig {
+        agent: true,
+        runtime: Some(RuntimeKind::Shell),
+        command: scripted(&[]),
+        ..OrchestratorConfig::default()
+    };
+    s.run(&team);
+    s.wait("write to be in review", |snap| {
+        find_task(snap, "write").status == TaskStatus::Review
+    });
+    // The database refuses review results.
+    let db = rusqlite::Connection::open(s.workspace.join(".crew/crew.db")).unwrap();
+    db.execute_batch(
+        "CREATE TRIGGER refuse_review_result BEFORE INSERT ON messages \
+         WHEN NEW.kind = 'review_result' \
+         BEGIN SELECT RAISE(ABORT, 'the disk is full'); END;",
+    )
+    .unwrap();
+    let verdict = |approve: bool, comments: &str| {
+        let args = json!({ "task_id": "write", "approve": approve, "comments": comments });
+        s.ctl("critic", &["tool", "review_submit", &args.to_string()])
+    };
+
+    // Neither verdict can be told to the author: neither is applied, the
+    // critic hears it, and so does the orchestrator, with the verdict.
+    for (approve, comments) in [(false, "fix the intro"), (true, "fine after all")] {
+        let out = verdict(approve, comments);
+        let said = format!("{}{}", stdout(&out), stderr(&out));
+        assert!(
+            said.contains("could not be sent to author") && said.contains("stays in Review"),
+            "approve={approve}: {said}"
+        );
+        let held = s.snapshot();
+        assert_eq!(find_task(&held, "write").status, TaskStatus::Review);
+        assert!(find_task(&held, "publish").started_at.is_none());
+        s.wait_for("the orchestrator to be told", || {
+            s.messages().iter().any(|m| {
+                m.to == "orchestrator"
+                    && m.body.contains("Task write")
+                    && m.body.contains("could not be sent to author")
+                    && m.body.contains(comments)
+            })
+        });
+    }
+    assert!(s.has_event("task.review_result_unsent"));
+    assert!(!s.has_event("task.done"));
+    assert!(!s
+        .messages()
+        .iter()
+        .any(|m| m.kind == MessageType::ReviewResult));
+
+    // Sent again once it can be, the verdict is told and applied.
+    db.execute_batch("DROP TRIGGER refuse_review_result;")
+        .unwrap();
+    let out = verdict(true, "fine after all");
+    assert!(out.status.success(), "{}", stderr(&out));
+    s.wait("the review to be given", |snap| {
+        find_task(snap, "write").status == TaskStatus::Done
+    });
+    assert!(s
+        .messages()
+        .iter()
+        .any(|m| m.kind == MessageType::ReviewResult && m.to == "author"));
+}
+
+#[test]
 fn a_task_cannot_be_reviewed_by_its_own_agent() {
     let s = Session::new();
     let mut team = s.team(
