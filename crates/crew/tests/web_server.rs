@@ -782,3 +782,82 @@ fn one_failed_dial_beside_a_healthy_watch_is_unavailable_and_changes_no_listing(
         assert!(reply["result"]["web_proof"].is_string(), "{reply}");
     });
 }
+
+/// A stand-in daemon of protocol 5 in `dir`: a live registry entry (this
+/// test's process), the socket the server derives, a token file, and an
+/// answer of `protocol` to every `hello`.
+fn protocol_5_daemon(s: &Session, dir: &Path) -> PathBuf {
+    use std::os::unix::fs::PermissionsExt;
+    std::fs::create_dir_all(dir.join(".crew")).unwrap();
+    let state = dir.canonicalize().unwrap().join(".crew");
+    let id = crew_core::paths::session_id(&state);
+    let socket = runtime(s).join(format!("{id}.sock"));
+    std::fs::create_dir_all(runtime(s)).unwrap();
+    let token = socket.with_extension("token");
+    std::fs::write(&token, "old-token").unwrap();
+    std::fs::set_permissions(&token, std::fs::Permissions::from_mode(0o600)).unwrap();
+    let listener = std::os::unix::net::UnixListener::bind(&socket).unwrap();
+    std::thread::spawn(move || {
+        for stream in listener.incoming().flatten() {
+            let mut writer = stream.try_clone().unwrap();
+            let mut line = String::new();
+            if BufReader::new(stream).read_line(&mut line).unwrap_or(0) > 0 {
+                let id = serde_json::from_str::<Value>(&line)
+                    .map(|v| v["id"].clone())
+                    .unwrap_or_default();
+                let _ = writeln!(
+                    writer,
+                    "{}",
+                    json!({"id": id, "error": {"code": "protocol",
+                    "message": "client speaks protocol 6, daemon speaks 5"}})
+                );
+            }
+        }
+    });
+    let registry = s.root().join("state/crew/sessions");
+    std::fs::create_dir_all(&registry).unwrap();
+    let pid = std::process::id();
+    let info = crew_core::paths::DaemonInfo {
+        project: Some("old".into()),
+        workspace: state.parent().unwrap().to_string_lossy().into_owned(),
+        state_dir: state.to_string_lossy().into_owned(),
+        socket: socket.to_string_lossy().into_owned(),
+        pid,
+        started_at: 1,
+        pid_start: crew_core::paths::process_start(pid),
+        boot_id: crew_core::paths::boot_id(),
+    };
+    std::fs::write(
+        registry.join(format!("{id}.json")),
+        serde_json::to_vec(&info).unwrap(),
+    )
+    .unwrap();
+    std::fs::write(
+        state.join("daemon.json"),
+        serde_json::to_vec(&info).unwrap(),
+    )
+    .unwrap();
+    state
+}
+
+#[test]
+fn a_daemon_of_protocol_5_is_refused_by_crew_web_and_listed_incompatible_under_all() {
+    let s = Session::new();
+    let old = s.root().join("old");
+    let state = protocol_5_daemon(&s, &old);
+    // `crew web` for it: the usual sentence, and no server started.
+    let out = s.crew(&["web", "--json", "-C", &old.to_string_lossy()]);
+    assert!(!out.status.success());
+    assert!(stderr(&out).contains("protocol"), "{}", stderr(&out));
+    assert!(!runtime(&s).join("web.json").exists());
+    // `crew web --all`: joined, and shown as incompatible.
+    s.ok(&["web", "--all", "--json"]);
+    let listing: Workspaces = serde_json::from_str(&s.ok(&["web", "--list", "--json"])).unwrap();
+    let entry = listing
+        .joined
+        .iter()
+        .find(|w| w.id == crew_core::paths::session_id(&state))
+        .unwrap_or_else(|| panic!("{listing:?}"));
+    assert_eq!(entry.state, WorkspaceState::Incompatible, "{entry:?}");
+    s.ok(&["web", "--stop"]);
+}
