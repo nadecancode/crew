@@ -54,8 +54,13 @@ type Source = SplitStream<WebSocketStream<TcpStream>>;
 /// What the connection's task tells its writer.
 enum Out {
     Text(String),
+    /// Every complete line a daemon had sent, in order: one write.
+    Texts(Vec<String>),
     Close(u16, &'static str),
 }
+
+/// At most this many daemon lines go to the writer as one batch.
+const BATCH: usize = 256;
 
 /// How a connection ends: the close frame it gets, if any.
 type Goodbye = Option<(u16, &'static str)>;
@@ -106,6 +111,17 @@ async fn write(mut sink: Sink, mut rx: mpsc::Receiver<Out>) -> Option<Sink> {
             out = rx.recv() => match out {
                 Some(Out::Text(text)) => {
                     if sink.send(Message::text(text)).await.is_err() {
+                        return None;
+                    }
+                }
+                Some(Out::Texts(texts)) => {
+                    // Fed one by one, flushed once.
+                    for text in texts {
+                        if sink.feed(Message::text(text)).await.is_err() {
+                            return None;
+                        }
+                    }
+                    if sink.flush().await.is_err() {
                         return None;
                     }
                 }
@@ -514,12 +530,35 @@ impl Conn {
                     return Some((CLOSE_WORKSPACE_ENDED, "the workspace's connection ended"));
                 }
                 Step::Daemon(Some(())) => {
-                    let Ok(text) = String::from_utf8(std::mem::take(&mut buf)) else {
+                    // With it, every line already read in full: one batch,
+                    // one write, instead of a hand-over and a flush a frame.
+                    let mut texts = Vec::new();
+                    let mut ended = false;
+                    loop {
+                        match String::from_utf8(std::mem::take(&mut buf)) {
+                            Ok(text) => texts.push(text),
+                            Err(_) => {
+                                ended = true;
+                                break;
+                            }
+                        }
+                        if texts.len() >= BATCH || !lines.buffer().contains(&b'\n') {
+                            break;
+                        }
+                        if daemons::read_line(&mut lines, &mut buf, LONGEST_LINE)
+                            .await
+                            .is_none()
+                        {
+                            ended = true;
+                            break;
+                        }
+                    }
+                    if ended {
                         drop((lines, writer, guard));
                         hub.reconcile(&id);
                         return Some((CLOSE_WORKSPACE_ENDED, "the workspace's connection ended"));
-                    };
-                    if self.out.send(Out::Text(text)).await.is_err() {
+                    }
+                    if self.out.send(Out::Texts(texts)).await.is_err() {
                         drop((lines, writer, guard));
                         return None;
                     }

@@ -523,3 +523,49 @@ async fn a_daemon_tells_a_running_dashboard_server_once_and_again_while_that_fai
     assert_eq!(started.elapsed(), Duration::from_secs(1 + 2 + 4 + 8 + 16));
     assert_eq!(calls.load(Ordering::SeqCst), 6);
 }
+
+/// qa (m-de37530b2645): with the dashboard server's watch on a daemon, a
+/// burst of operator messages took the daemon from 3.2 s to 7.8 s: the
+/// summary was computed, and the open questions counted in the database,
+/// for every change. Under a burst it is now computed a few times a
+/// second, and the watcher still ends at the model's state.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_burst_of_changes_computes_the_summary_a_few_times_not_once_each() {
+    let (_temp, running) = daemon().await;
+    let daemon = running.daemon.clone();
+    daemon.model().agents.push(agent("a", "idle"));
+    let mut watch = Peer::operator(&daemon, false).await;
+    watch.call("summary", json!({"watch": true})).await;
+    let before = daemon.summaries.computed.load(Ordering::SeqCst);
+    let started = tokio::time::Instant::now();
+    for i in 0..2000 {
+        let status = if i % 2 == 0 { "working" } else { "idle" };
+        daemon.update_agent("a", |a| a.status = status.parse().unwrap());
+        if i % 10 == 0 {
+            daemon
+                .bus
+                .send(
+                    NewMessage::new(OPERATOR_ID, "a", MessageType::Message, "go on"),
+                    vec!["a".into()],
+                )
+                .unwrap();
+        }
+        if i % 100 == 0 {
+            tokio::task::yield_now().await;
+        }
+    }
+    daemon.update_agent("a", |a| a.status = crew_core::AgentStatus::Blocked);
+    let took = started.elapsed();
+    // The last change reaches the watcher.
+    let mut last = None;
+    while let Some(summary) = watch.next_summary(Duration::from_millis(800)).await {
+        last = Some(summary);
+    }
+    assert_eq!(last.expect("pushes").attention, 1);
+    let computed = daemon.summaries.computed.load(Ordering::SeqCst) - before;
+    let allowed = took.as_millis() as u64 / SUMMARY_EVERY.as_millis() as u64 + 4;
+    assert!(
+        computed <= allowed,
+        "computed {computed} times for 2200 changes in {took:?} (at most {allowed})"
+    );
+}
