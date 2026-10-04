@@ -39,7 +39,7 @@ export function MessagePanel(props: { id: string }) {
     const e = failed();
     if (!link.live() && !e) {
       const final = link.conn() === "stopped" || link.conn() === "signed-out";
-      return final ? "not fetched: this page is stopped" : "not connected: it is fetched when the dashboard is live";
+      return final ? "not connected: this page is stopped and fetches nothing" : "not connected: it is fetched when the dashboard is live";
     }
     if (!e) return "loading…";
     const text = e instanceof Error ? e.message : String(e);

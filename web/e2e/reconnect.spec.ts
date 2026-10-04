@@ -151,7 +151,7 @@ test("after the page stopped, another message never shows the one fetched before
   await expect(page.locator('[data-conn="stopped"]')).toBeAttached();
   await page.evaluate(() => { location.hash = "/?message=m-old-0002"; });
   await expect(panel.locator(".panel-title")).toHaveText("message m-old-0002");
-  await expect(panel).toContainText("not fetched: this page is stopped");
+  await expect(panel).toContainText("not connected: this page is stopped and fetches nothing");
   await expect(panel).not.toContainText("The first old message");
   // An error asked for another message is not this one's either.
   await page.evaluate(() => { location.hash = "/?message=m-old-0001"; });
