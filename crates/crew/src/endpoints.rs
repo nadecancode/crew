@@ -137,6 +137,10 @@ struct FileConfig {
     codex: Option<Section>,
     #[serde(default)]
     agents: BTreeMap<String, Section>,
+    /// The dashboard server's (`crate::web::process::Settings`), read there.
+    #[serde(default)]
+    #[allow(dead_code)]
+    web: Option<toml::Value>,
 }
 
 /// How a credential is sent.

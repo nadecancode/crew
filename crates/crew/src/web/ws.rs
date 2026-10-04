@@ -32,7 +32,7 @@ pub(crate) const PING_EVERY: Duration = Duration::from_secs(20);
 /// A connection that sent nothing for this long is closed.
 pub(crate) const SILENT_FOR: Duration = Duration::from_secs(40);
 /// How long a closed connection waits for the browser to close too.
-const LINGER: Duration = Duration::from_secs(1);
+pub(crate) const LINGER: Duration = Duration::from_secs(1);
 
 /// What the reader tells the writer.
 enum Ctl {
@@ -55,49 +55,57 @@ fn goodbye(order: Option<Ctl>, stopping: bool) -> Option<CloseFrame> {
     }
 }
 
-pub(crate) async fn serve(daemon: Daemon, mut stream: TcpStream, admitted: Admitted) {
+pub(crate) async fn serve(daemon: Daemon, stream: TcpStream, admitted: Admitted) {
     let Some(serving) = daemon.web.serving() else {
         return;
     };
-    let host = serving.host();
     let mut close = admitted.close.clone();
+    let Some(socket) = upgrade(stream, &serving.host(), &mut close).await else {
+        return;
+    };
+    run(daemon, socket, &admitted).await;
+}
+
+/// The HTTP request of an accepted connection: a file, a refusal, or the
+/// upgrade to a WebSocket (`host`: the only name answered). `None` when it
+/// was not an upgrade, or the server closed it meanwhile.
+pub(crate) async fn upgrade(
+    mut stream: TcpStream,
+    host: &str,
+    close: &mut tokio::sync::watch::Receiver<bool>,
+) -> Option<WebSocketStream<TcpStream>> {
     let head = tokio::select! {
         head = http::read_head(&mut stream) => head,
-        _ = close.changed() => return,
+        _ = close.changed() => return None,
     };
     let (head, rest) = match head {
         Ok(head) => head,
-        Err(http::HeadError::Closed) => return,
+        Err(http::HeadError::Closed) => return None,
         Err(http::HeadError::Bad) => {
-            http::respond(&mut stream, &Answer::Status(400), &host).await;
-            return;
+            http::respond(&mut stream, &Answer::Status(400), host).await;
+            return None;
         }
     };
-    let key = match http::route(&head, &host) {
+    let key = match http::route(&head, host) {
         Answer::Upgrade(key) => key,
         answer => {
-            http::respond(&mut stream, &answer, &host).await;
-            return;
+            http::respond(&mut stream, &answer, host).await;
+            return None;
         }
     };
-    if stream
+    stream
         .write_all(&http::switching_protocols(&key))
         .await
-        .is_err()
-    {
-        return;
-    }
+        .ok()?;
     let config = WebSocketConfig::default()
         .max_message_size(Some(crew_core::MAX_FRAME_BYTES))
         .max_frame_size(Some(crew_core::MAX_FRAME_BYTES));
-    let socket =
-        WebSocketStream::from_partially_read(stream, rest, Role::Server, Some(config)).await;
-    run(daemon, socket, &admitted).await;
+    Some(WebSocketStream::from_partially_read(stream, rest, Role::Server, Some(config)).await)
 }
 
 /// Aborts its task when dropped: the writer does not outlive the
 /// connection's task, however that ends.
-struct AbortOnDrop<T>(JoinHandle<T>);
+pub(crate) struct AbortOnDrop<T>(pub(crate) JoinHandle<T>);
 
 impl<T> Drop for AbortOnDrop<T> {
     fn drop(&mut self) {

@@ -259,6 +259,13 @@ answers: `crew answer 2`.")]
         #[arg(long)]
         workspace: PathBuf,
     },
+    /// Run the dashboard server in the foreground (`crew web` starts it)
+    #[command(hide = true)]
+    WebServer {
+        /// Serve on exactly this port (1-65535)
+        #[arg(long, value_parser = clap::value_parser!(u16).range(1..))]
+        port: Option<u16>,
+    },
 }
 
 #[derive(Args, Clone, Default)]
@@ -622,6 +629,7 @@ pub fn run(cli: Cli) -> Result<()> {
         Command::SandboxRun(args) => crate::sandbox::run::run(args),
         Command::SandboxExec(args) => crate::sandbox::shim::run(args),
         Command::Daemon { workspace } => daemonize::run_foreground(&workspace),
+        Command::WebServer { port } => crate::web::process::run(port),
     }
 }
 

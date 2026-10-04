@@ -19,7 +19,12 @@
 //! still good.
 
 pub(crate) mod assets;
+pub(crate) mod control;
+pub(crate) mod daemons;
 pub(crate) mod http;
+pub(crate) mod hub;
+pub(crate) mod page;
+pub mod process;
 pub(crate) mod ws;
 
 use std::collections::{HashMap, VecDeque};
@@ -42,8 +47,9 @@ pub(crate) const MAX_SESSIONS: usize = 16;
 /// Connections not authenticated yet (a head being read, a WebSocket before
 /// `hello`); more are closed at accept.
 pub(crate) const MAX_UNAUTHENTICATED: usize = 32;
-/// Authenticated WebSockets.
-pub(crate) const MAX_AUTHENTICATED: usize = 32;
+/// Authenticated WebSockets (a page has an index connection, a workspace
+/// connection and a terminal's).
+pub(crate) const MAX_AUTHENTICATED: usize = 64;
 /// Ports tried from the workspace's own.
 const PORTS_TRIED: u16 = 16;
 /// The largest `web_prefs` object.
@@ -571,6 +577,31 @@ impl Web {
 
     /// Serve, if not served yet, and make a pairing code.
     pub(crate) async fn open(self: &Arc<Self>, port: Option<u16>) -> Result<WebInfo, RpcError> {
+        let (serving, started) = self.listen(port).await?;
+        let code = self.code();
+        Ok(WebInfo {
+            url: serving.url(),
+            port: serving.port,
+            pair_url: format!("{}#pair={code}", serving.url()),
+            expires_in_secs: (CODE_TTL_MS / 1000) as u32,
+            started,
+            workspace: None,
+            workspace_url: None,
+            joined: Vec::new(),
+        })
+    }
+
+    /// A new pairing code.
+    pub(crate) fn code(&self) -> String {
+        let now = self.now();
+        self.registry().code(now)
+    }
+
+    /// Serve, if not served yet: where, and whether this call started it.
+    pub(crate) async fn listen(
+        self: &Arc<Self>,
+        port: Option<u16>,
+    ) -> Result<(Serving, bool), RpcError> {
         // Port 0 would give each address another port the system picks, and
         // a name with neither in it.
         if port == Some(0) {
@@ -593,21 +624,28 @@ use another",
             *lifecycle = Some(server);
         }
         let serving = lifecycle.as_ref().expect("served").serving.clone();
-        let code = self.registry().code(self.now());
         drop(lifecycle);
         if started {
             self.news(News::Started(serving.url()));
         }
-        Ok(WebInfo {
-            url: serving.url(),
-            port: serving.port,
-            pair_url: format!("{}#pair={code}", serving.url()),
-            expires_in_secs: (CODE_TTL_MS / 1000) as u32,
-            started,
-            workspace: None,
-            workspace_url: None,
-            joined: Vec::new(),
-        })
+        Ok((serving, started))
+    }
+
+    /// End the connections `ids` now: each one's task is aborted and
+    /// awaited, so whatever it owned has been dropped when this returns.
+    pub(crate) async fn cancel(&self, ids: &[u64]) {
+        let tasks: Vec<JoinHandle<()>> = {
+            let mut registry = self.registry();
+            ids.iter()
+                .filter_map(|id| registry.conns.get_mut(id).and_then(|c| c.task.take()))
+                .collect()
+        };
+        for task in &tasks {
+            task.abort();
+        }
+        for task in tasks {
+            let _ = task.await;
+        }
     }
 
     /// Bind both loopback addresses on one port, then make the name.
