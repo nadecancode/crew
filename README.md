@@ -1343,16 +1343,23 @@ turn:
   it never stops to ask). When it cannot, the turn ends in its notice
   ("…'s safeguards flagged this message"), which crew reads from the transcript
   and the `StopFailure` hook.
-- **The member says so:** with the `decline(reason)` tool, which members are
-  told about, or in words alone. crew does not judge the wording. Text in a
-  crew session reaches nobody, so it looks at what the turn did instead. A
-  turn that was given a task, a question, a review request or a message, and
-  ended without a single tool call, produced nothing anyone can see. crew asks
-  once more (`agent.unanswered`): do it, answer with `agent_send`, say what
-  holds you up, say there is nothing to do, or `decline`. A turn that answers
-  that without a tool call either is taken as refused. A member that just
-  answered in words gets pointed at `agent_send` along the way. This applies
-  to members only; the orchestrator turning a teammate down is part of its job.
+- **The member says so** with the `decline(reason)` tool, which members are
+  told about. This is the only form on pi: its providers turn a refusal into
+  the same "unknown error" as any other failure.
+
+Nothing else is a refusal. crew does not judge the wording, and a turn that
+ends with nothing to show is not one either. Text in a crew session reaches
+nobody, so crew looks at what the turn did: a turn that was given a task, a
+question, a review request or a message, and ended without a single tool
+call, produced nothing anyone can see. crew asks once more
+(`agent.unanswered`): do it, answer with `agent_send`, say what holds you up,
+say there is nothing to do, or `decline`. A turn that answers that without a
+tool call either (in words, or with nothing at all, as after a message that
+needed no answer) had nothing to do (`agent.idle_turn`): the member stays as
+it was, its task where it was, and it gets the next message as usual. A
+member that just answered in words gets pointed at `agent_send` along the
+way. This applies to members only; the orchestrator turning a teammate down is
+part of its job.
 
 A style can name models to take such work over:
 
