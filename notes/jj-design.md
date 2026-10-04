@@ -16,9 +16,22 @@ control action runs.
    project root, git `HEAD` and index untouched. Agent work is visible to plain
    git as `agents/<id>` branches.
 
+**Revision 2.** Folds in the operator's decisions relayed by the orchestrator
+(m-2a5f16b7c08b) and the reviewer's change requests (m-51055bd076c4):
+- read actions (`git_status`, `git_diff`) emit events and animate, lightly
+  (D11, §events, §anim);
+- operations that can take seconds emit a start event and show as in progress
+  until their terminal event (D13, §events, §anim);
+- the sticky backend is accepted; crew says at team start which backend runs
+  and why, and how to move to jj (D2);
+- a timeout is recovered from by what the repository says, and a result that
+  landed clean is kept and published, never rolled back (D7, §conflicts);
+- a project that is a linked git worktree keeps its admin directory (`HEAD`)
+  and its common directory (objects, refs) apart (§layout, §ops, §sandbox).
+
 **Verification.** Every jj invocation below was run against jj 0.44.0
 (`nix shell nixpkgs#jujutsu`) in scratch repositories. `notes/jj-argv-check.sh`
-replays all of them in a throwaway project and asserts what this design relies
+replays all of them in throwaway projects and asserts what this design relies
 on; it prints `PASS` on jj 0.44.0. Findings that came out of those runs are
 marked **(observed)**.
 
@@ -112,34 +125,63 @@ leaves behind) is the one git has today.
 
   A "git worktree left" is a directory under `.crew/worktrees/` with a `.git`
   file and no `.jj` directory.
-- What the user is told. A notice is a `warn` event `session.vcs`, emitted next
-  to `session.isolation`; a refusal fails `load_team` with the same text.
-  - jj absent: `jj is not on PATH: using git for version control. Install jj
-    0.44 or newer to switch; workspace.vcs: git silences this.`
-  - jj too old: `jj 0.41.0 is older than 0.44: using git for version control.`
-  - sticky git: `.crew/worktrees holds git worktrees from earlier sessions:
-    staying on git. Remove them (git worktree remove) to switch to jj.`
-  - sticky jj without jj: `this workspace is managed with jj (.crew/jj) and jj
-    is not on PATH; install jj 0.44 or newer, or remove .crew/jj and
-    .crew/worktrees to start over with git.`
-  - `vcs: git` on a jj workspace: `this workspace is managed with jj
+- **What the user is told, at every team start.** The operator accepted the
+  sticky backend on this condition: crew says which backend is in use, why, and
+  how to move to jj.
+  - `load_team` always emits `session.vcs` when the team has a workspace per
+    agent: `info` when jj was chosen, `warn` for a fallback to git. A refusal
+    fails `load_team` with its text.
+  - `SessionInfo` gains `vcs: String` (`jj`, `git`, or empty when agents share
+    the checkout) and `vcs_note: String` (the fallback's text, else empty).
+  - `crew run` and plain `crew` print `… isolation worktree, vcs git` in their
+    "started" line and `note: <vcs_note>` under it, and hand the note to the
+    dashboard as its opening notice (the `notice` argument of `crew_tui::run`,
+    which `stale_daemon_note` uses today). `crew status` prints both.
+    `session.started` names the backend too.
+- The texts:
+  - jj chosen: `version control: jj 0.44.0 (state in .crew/jj; agent branches
+    are exported to git as agents/<id>)`.
+    (native layout: `…(the project's own jj repository; …)`).
+  - jj absent: `version control: git, because jj is not on PATH. Install jj 0.44
+    or newer and start the team again to use jj; workspace.vcs: git silences
+    this.`
+  - jj too old: `version control: git, because jj 0.41.0 is older than 0.44.`
+  - sticky git: `version control: git, because .crew/worktrees holds git
+    worktrees from earlier sessions (<ids>). To move to jj: stop the team,
+    commit what is uncommitted there, run git worktree remove
+    .crew/worktrees/<id> for each and start again (README, "Moving a workspace
+    to jj"). The agents/<id> branches are kept.`
+  - sticky jj without jj (refusal): `this workspace is managed with jj
+    (.crew/jj) and jj is not on PATH; install jj 0.44 or newer, or remove
+    .crew/jj and .crew/worktrees to start over with git.`
+  - `vcs: git` on a jj workspace (refusal): `this workspace is managed with jj
     (.crew/jj); workspace.vcs: git would fork its history.`
-  - `vcs: jj` without jj: `workspace.vcs is jj, but jj is not on PATH` (or
-    `…but jj 0.41.0 is older than 0.44`).
-  - `vcs: jj` with git worktrees left: `workspace.vcs is jj, but
+  - `vcs: jj` without jj (refusal): `workspace.vcs is jj, but jj is not on PATH`
+    (or `…but jj 0.41.0 is older than 0.44`).
+  - `vcs: jj` with git worktrees left (refusal): `workspace.vcs is jj, but
     .crew/worktrees holds git worktrees from earlier sessions (<ids>); remove
     them (git worktree remove) or set workspace.vcs: git.`
-- `session.started` names the backend (`… isolation worktree, vcs jj`).
-  `SessionInfo` gains `vcs: String` (`jj`, `git`, or empty when agents share
-  the checkout).
-- With `isolation: shared` nothing is selected. A notice is sent only when the
-  team ends up with one workspace per agent.
-- Consequence: a workspace that already holds git worktrees stays on git until
-  the user removes them (crew never removes an agent's directory). New
-  workspaces get jj. Migrating in place is not part of this design (D12).
+- With `isolation: shared` nothing is selected and nothing is said.
+- **Moving a workspace from git to jj** (by hand; crew never removes an agent's
+  directory). The steps go into the README (qa) **(observed: the agent's jj
+  workspace starts from its git branch and the next commit continues it)**:
+  1. `crew stop`.
+  2. For each `.crew/worktrees/<id>`: `git -C .crew/worktrees/<id> status`.
+     Commit what should be kept; uncommitted files are not carried over.
+  3. `git worktree remove .crew/worktrees/<id>` for each (`--force` discards
+     uncommitted files), then `git worktree prune`. The branches `agents/<id>`
+     stay.
+  4. With jj 0.44 or newer on PATH, start the team again. crew creates
+     `.crew/jj`, imports the branches, and gives each agent a jj workspace at
+     its branch.
+- **Back to git** **(observed)**: `crew stop`, commit through crew or
+  `jj commit` what should be kept, remove `.crew/jj` and the directories under
+  `.crew/worktrees`, set `workspace.vcs: git` (or take jj off PATH) and start
+  again. The branches are in git already, and the git backend adds its
+  worktrees on them.
 
 **D3. Layout (operator answer 2).** In a plain-git project the jj repository
-lives in `.crew/jj`, created with `jj git init --git-repo <ws>`, so its commits
+lives in `.crew/jj`, created with `jj git init --git-repo <git>`, so its commits
 are objects of the project's `.git`. A project that already has `.jj` in its
 root is used as it is. Details in §layout.
 
@@ -169,7 +211,9 @@ the additions are defaulted fields, and event payloads are free-form JSON.
 
 **D7. Conflicts are rolled back by undoing exactly what the operation did**
 (§conflicts), never with `jj op restore`, which would also undo what other
-workspaces did in the meantime.
+workspaces did in the meantime. Only a commit that no bookmark points at is
+ever abandoned. A result that landed without a conflict is never rolled back:
+after a timeout it is kept, published and reported.
 
 **D8. A stale working copy is an error, not something crew repairs silently.**
 `snapshot.auto-update-stale` is pinned to `false`; `jj workspace update-stale`
@@ -186,19 +230,28 @@ the `git_status`/`git_diff` tools or `jj status`, `jj diff`, `jj log`.
 only the subdirectories jj appends to are writable; jj runs inside
 agent-writable directories only in a sandbox, as git does today (§sandbox).
 
-**D11. Events.** One `vcs.<action>` event per state-changing action, from both
+**D11. Events.** Every VCS action emits a `vcs.<action>` event, from both
 backends, replacing `git.commit`, `git.cherry_pick`, `git.merge`,
-`git.integrate` and `git.conflict`. `git_status` and `git_diff` change nothing
-and emit nothing (§events).
+`git.integrate` and `git.conflict`. That includes the read actions
+`git_status` and `git_diff` (the objective says every action); their events
+are `debug` level and their animation is lighter than a write's (§events,
+§anim).
 
 **D12. Not done here.**
-- No migration of git worktrees to jj workspaces (D2 keeps such a workspace on
-  git until the user removes them).
+- No automatic migration of git worktrees to jj workspaces: D2 keeps such a
+  workspace on git and tells the user how to move it.
 - No garbage collection. jj keeps a ref `refs/jj/keep/<commit>` in the project's
   `.git` for every commit it creates, working-copy snapshots included; they show
   up in `git log --all` and `git for-each-ref`. `jj -R .crew/jj util gc` prunes
   them; running it for the user is left for later.
 - No jj-native tools (`jj_*`) for agents.
+
+**D13. Long operations have a start and an end.** Workspace creation,
+cherry-pick, merge and integration emit a `started` event when they begin and
+exactly one terminal event when they end, tied together by an operation id.
+The dashboard shows them as in progress in between. A terminal event renders
+fully on its own, so one that arrives without its start loses nothing. Commit,
+status and diff emit only their terminal event (§events, §anim).
 
 ---
 
@@ -209,7 +262,7 @@ and emit nothing (§events).
 
 ```
 <ws>/                           the user's checkout: never written
-├── .git/                       the project's repository = jj's backing store
+├── .git/                       <git>: the project's repository = jj's backing store
 │   ├── objects/                + objects of agent commits and snapshots
 │   ├── refs/heads/agents/<id>  exported bookmarks (plain git branches)
 │   ├── refs/jj/keep/<commit>   jj's keep-alive refs
@@ -219,7 +272,7 @@ and emit nothing (§events).
     ├── jj/                     the handle: what `-R` points at for repository-level commands
     │   └── .jj/
     │       ├── repo/           the jj repository (operation log, index, change ids)
-    │       │   └── store/git_target   -> <ws>/.git
+    │       │   └── store/git_target   -> <git>
     │       └── working_copy/   of a forgotten, empty workspace; no files are checked out
     └── worktrees/
         ├── <id>/               jj workspace "<id>"; the agent's working directory
@@ -262,12 +315,48 @@ workspaces appear in the user's `jj log` and `jj workspace list`.
   colocated, `<ws>/.jj/repo/store/git` otherwise. `jj git export` writes the
   `agents/<id>` branches there.
 
+### `<admin>` and `<git>`: a project that is a linked git worktree
+
+A git checkout has two directories that are the same one in a main checkout
+and differ in a linked worktree (`git worktree add`):
+
+| | holds | main checkout | linked worktree |
+|---|---|---|---|
+| `<admin>` | this checkout's `HEAD` and index | `<ws>/.git` | what the file `<ws>/.git` names: `gitdir: <main>/.git/worktrees/<name>` |
+| `<git>` | objects, refs, `packed-refs`, `config` | `<ws>/.git` | `<admin>/` + the content of `<admin>/commondir`, canonical: `<main>/.git` |
+
+crew resolves both once, in `prepare`, before any agent runs, and keeps them
+apart:
+- the jj repository is backed by `<git>` (`jj git init --git-repo <git>`), so
+  jj's `git_target`, `jj git root`, the exported branches and the sandbox
+  mounts all name the directory that has the objects and refs;
+- the base `HEAD` is read from `<admin>/HEAD`, so agents start from the linked
+  checkout's branch, not from the main checkout's.
+
+**(observed)** With `--git-repo <ws>` on a linked worktree, jj records the
+`.git` file and `jj git root` answers `<main>/.git/worktrees/<name>`, which has
+no objects or refs: that form is not used. With `--git-repo <git>`: `jj git
+root` is `<main>/.git`, a workspace based on the linked `HEAD` holds the linked
+branch's files, its commits appear as `agents/<id>` in the shared repository,
+and `HEAD`, index and files of both the linked and the main checkout are
+unchanged.
+
+Sandboxed teams keep today's rule, stated for the store: `<git>` must lie
+inside `<ws>` (`<ws>/.git`, or under `<ws>/.jj` in the native layout). A
+linked worktree is refused with today's text (`sandboxed agents need the
+workspace to be the main checkout of its repository`): a store outside the
+workspace is not mounted into a sandbox.
+
+In the native layout `<git>` is what `jj git root` prints; if that directory
+has a `commondir` file the same rule gives the common directory (a jj
+repository colocated in a linked git worktree; not exercised here).
+
 ### Which layout
 
-`<ws>/.jj` is a directory → native. Otherwise `<ws>/.git` exists (directory, or
-the `gitdir:` file of a git worktree) → hidden. Otherwise the workspace is not
-a repository root (`isolation: auto` shares it; `worktree` is refused, as
-today).
+`<ws>/.jj` is a directory → native. Otherwise `<ws>/.git` exists (a directory,
+or the `gitdir:` file of a linked git worktree) → hidden. Otherwise the
+workspace is not a repository root (`isolation: auto` shares it; `worktree`
+is refused, as today).
 
 ### Colocating instead (the answer 2 that was not chosen)
 
@@ -371,12 +460,17 @@ on it does nothing, so crew resolves first)**.
 
 ```
 INFO  = commit_id ++ "\n" ++ change_id ++ "\n" ++ description.first_line() ++ "\n" ++ self.diff().files().len() ++ "\n"
-STATE = conflict ++ "\n" ++ empty ++ "\n" ++ conflicted_files.map(|f| f.path()).join("\n") ++ "\n"
+STATE = commit_id ++ "\n" ++ conflict ++ "\n" ++ empty ++ "\n" ++ local_bookmarks.map(|b| b.name()).join(" ") ++ "\n" ++ conflicted_files.map(|f| f.path()).join("\n") ++ "\n"
+PRE   = empty ++ "\n" ++ parents.map(|p| p.commit_id()).join(",") ++ "\n"
 ```
 
 `INFO` fills `CommitInfo { sha, change_id, summary, files_changed }`; `short`
 is the first 8 characters of `sha` and `branch` is `agents/<id>`.
-`STATE` paths are relative to the workspace root.
+`STATE` describes a commit an operation just made: its id, whether it holds a
+conflict, whether it is empty, the bookmarks on it, then one conflicted path
+per line, relative to the workspace root.
+`PRE` is the first command of every state-changing operation: it snapshots
+the working copy and says whether it is clean and what its parent is.
 
 ### Operations
 
@@ -396,7 +490,7 @@ and says whether there is a commit to start from.
 
 Hidden layout, no `R/.jj` yet [crew]:
 ```
-G git init --git-repo <ws> R            (no -R; .crew must exist)
+G git init --git-repo <git> R           (no -R; .crew must exist; <git> as in §layout)
 G -R R sparse set --clear
 G -R R workspace forget default
 ```
@@ -417,9 +511,10 @@ G -R R --ignore-working-copy git root          → the backing git directory
 ```
 
 **Base** (`workspace.base`, default `HEAD`) → a commit id.
-- `HEAD`, hidden layout: read `HEAD` of the git directory with
-  `beneath::Root::read_text` (for a `.git` file, follow its `gitdir:` line
-  first). `ref: refs/heads/<b>` → the bookmark `<b>`; a hex id → that commit.
+- `HEAD`, hidden layout: read `<admin>/HEAD` (§layout: the checkout's own
+  `HEAD`, which for a linked worktree is not the main checkout's) with
+  `beneath::Root::read_text`. `ref: refs/heads/<b>` → the bookmark `<b>`; a
+  hex id → that commit.
   ```
   G -R R --ignore-working-copy log --no-graph -r 'present(bookmarks(exact:"<b>"))' -T 'commit_id ++ "\n"'
   ```
@@ -465,7 +560,7 @@ G -R R --ignore-working-copy git export                                         
 **Commit** (`commit_all(W, id, message)`) [`<id>`].
 
 ```
-1  G -R W log --no-graph -r @ -T 'empty ++ "\n" ++ parents.map(|p| p.commit_id()).join(",") ++ "\n"'
+1  G -R W log --no-graph -r @ -T '<PRE>'
 2  G -R W commit --message=<message>
 3  G -R W bookmark set agents/<id> -r @-
 4  G -R W git export
@@ -476,6 +571,8 @@ G -R R --ignore-working-copy git export                                         
   has no changes`. It also records the parent for the timeout check.
 - 2 describes the working-copy change and starts a new empty one, in one
   operation. `--message=` keeps a subject that starts with `-` an argument.
+- 3 and 4 are the publish phase: the bookmark follows the new commit and git
+  sees it.
 - 3 refuses to move the bookmark backwards or sideways **(observed)**, which
   happens only when the agent rearranged its history by hand; the error says
   so and names the commit that was made.
@@ -503,7 +600,7 @@ revision:     G -R W diff --stat --from <revset> --to @  G -R W diff --git --fro
 **Cherry-pick** (`cherry_pick(W, id, rev)`) [`<id>`].
 
 ```
-1  G -R W log --no-graph -r @ -T 'empty ++ "\n" ++ parents.map(|p| p.commit_id()).join(",") ++ "\n"'
+1  G -R W log --no-graph -r @ -T '<PRE>'
 2  G -R W --ignore-working-copy log --no-graph -r <revset> -T 'commit_id ++ " " ++ author.email() ++ "\n"'
 3  G -R W --config <DUP> duplicate 'commit_id(<source>)' --insert-before @
 4  G -R W --ignore-working-copy log --no-graph -r @- -T '<STATE>'
@@ -524,12 +621,15 @@ templates.duplicate_description='description ++ "\n(cherry picked from commit " 
   the copy is always `@-`. The template adds git's `-x` trailer.
 - 4: `conflict` → roll back with 5a and return a `ConflictReport` (§conflicts).
   `empty` (the change is already there) → 5a and `cherry-pick of <source> is
-  empty: its changes are already in agents/<id>`.
+  empty: its changes are already in agents/<id>`. 5a runs only when `STATE`
+  lists no bookmark on the copy (D7).
+- 5b is the publish phase. From here on the result stays, whatever happens
+  (§conflicts, timeouts).
 
 **Merge** (`merge(W, id, branch)`) [`<id>`; `crew` in the integration workspace].
 
 ```
-1  G -R W log --no-graph -r @ -T 'empty ++ "\n" ++ parents.map(|p| p.commit_id()).join(",") ++ "\n"'
+1  G -R W log --no-graph -r @ -T '<PRE>'
 2  G -R W --ignore-working-copy log --no-graph -r 'present(bookmarks(exact:"<branch>"))' -T 'commit_id ++ "\n"'
 3  G -R W --ignore-working-copy log --no-graph -r '"<branch>" ~ ::@-' -T '"x\n"'
 4  G -R W new --no-edit --message=Merge <branch> --insert-after @- --insert-after '"<branch>"' --insert-before @
@@ -547,14 +647,18 @@ templates.duplicate_description='description ++ "\n(cherry picked from commit " 
 - 4 creates the merge commit with parents (`@-`, `<branch>`) and moves the
   working copy on top of it; the merge is `@-`. As with `git merge --no-ff`
   there is always a merge commit.
-- 5: `conflict` → 6a, `ConflictReport`.
+- 5: `conflict` → 6a, `ConflictReport`. 6a runs only when `STATE` lists no
+  bookmark on the merge commit (D7).
+- 6b is the publish phase, as 5b of cherry-pick.
 
 **Integrate** (`integrate`, `merge_agents`). The integration workspace is made
 as above at the base. Then for each agent, in the integration workspace, steps
 2–6 of merge with identity `crew` and message `Merge agents/<id>`: a missing
 bookmark or one that is not ahead is skipped, a conflict is reported and
 skipped, anything else moves `agents/integration`. One `git export` at the end.
-The result is today's `(Workspace, Vec<IntegrationStep>)`.
+The result is today's `(Workspace, Vec<IntegrationStep>)`; each step is also
+handed to an observer as soon as it is done, so its event is emitted while
+the integration is still running (§events, §split).
 
 **Branch exists** (`git_merge` from a member that left):
 
@@ -598,6 +702,19 @@ that one operation did:
   commit without a bookmark is left over: no branch points to it and plain git
   does not see it. It is logged and left.
 
+Two rules keep a rollback from ever taking published work with it:
+- **A rollback happens before the publish phase, or not at all.** The bookmark
+  moves only after `STATE` said the result is clean, so a commit that is being
+  rolled back never had the bookmark on it.
+- **A commit with a bookmark on it is never abandoned.** `jj abandon` deletes
+  the bookmarks on what it abandons, and the exported git branch goes at the
+  next export **(observed, as the reviewer reported: after a published merge
+  was abandoned, `agents/<id>` was gone)**. `STATE` lists the bookmarks on the
+  commit; if there is one (the agent moved it by hand in between), the rollback
+  is not run and the operation fails with `<operation> conflicts, and
+  agents/<id> already points at the result; it was left as it is, check jj
+  status`.
+
 The precondition stays: the working copy must have no uncommitted changes
 (`empty` of `@` after the snapshot), so there is nothing of the agent's to lose
 while the working copy moves.
@@ -616,31 +733,85 @@ Rejected alternatives:
 
 ### Timeouts
 
-jj commits an operation to the repository atomically and updates the working
-copy afterwards. A jj that is killed has therefore either done nothing or
-completed the operation **(observed: `SIGKILL` at five points during a commit
-of 4000 files gave either "not committed, the changes are still in the working
-copy" or "committed"; the next command worked and no lock was left)**. jj's own
-locks (`working_copy.lock`, `op_heads/heads/lock`, `store/extra/lock`) are
-`flock`s and die with the process; a leftover file does not block
-**(observed)**.
+Every command goes through the funnel and can time out: the snapshot, the
+mutation, the inspection, the rollback, `bookmark set`, `git export`. What is
+known about a jj that was killed:
+- jj commits an operation to the repository atomically and updates the working
+  copy afterwards, so the command has either done nothing or completed its
+  operation **(observed: `SIGKILL` at five points during a commit of 4000
+  files gave either "not committed, the changes are still in the working copy"
+  or "committed"; the next command worked and no lock was left)**.
+- jj's own locks (`working_copy.lock`, `op_heads/heads/lock`,
+  `store/extra/lock`) are `flock`s and die with the process; a leftover file
+  does not block **(observed)**.
+- `git export` can leave git's `refs/heads/agents/<id>.lock`. jj then skips
+  that ref with a warning and exit 0 **(observed)**.
 
-After `TimedOut` from the funnel on a state-changing command:
-1. `G -R W workspace update-stale`: finishes a working-copy update that was cut
-   short; a no-op otherwise **(observed)**.
-2. Compare `@-` with the parent recorded in step 1 of the operation.
-   - commit: changed → `jj commit timed out (…) after the commit was made; check
-     the history`; unchanged → `… nothing was committed, the changes are still
-     in the working copy`.
-   - cherry-pick, merge: changed → run the rollback above. Then, as today:
-     `… timed out (…); the worktree was restored, retry later`, or
-     `… the worktree could not be restored; check jj status`.
-3. A timeout in `git export` can leave git's
-   `refs/heads/agents/<id>.lock`. It is removed with
-   `beneath::Root::open(<git dir>)` and `remove("refs/heads/agents/<id>.lock")`:
-   a path the daemon builds, as with `index.lock` today. Until then jj skips
-   that ref with a warning and exit 0 **(observed)**, which step 5 of commit
-   reports as `pending`.
+Which command timed out does not say what state the repository is in, so
+recovery does not depend on it. An operation has three phases,
+
+```
+mutate          commit | duplicate | new          (the result is @-)
+inspect         STATE of @-
+  roll back     abandon | rebase + abandon        only for a conflicted (or, for a pick, empty) result
+  publish       bookmark set, git export          only for a clean result
+```
+
+and after `TimedOut` from any command of an operation, one procedure runs. It
+reads the state and finishes the phase the operation was in. `P` is the parent
+that `PRE` recorded before the mutation.
+
+```
+T1  G -R W workspace update-stale
+T2  G -R W log --no-graph -r @- -T '<STATE>'
+T3  remove <git>/refs/heads/agents/<id>.lock        beneath::Root::open(<git>).remove(…); a path the daemon builds
+then, by what T2 says of @-:
+  it is P                       → nothing landed, or the rollback was complete
+        G -R W git export
+  not P, conflicted (or an empty pick), no bookmark on it
+                                → roll back as above, then
+        G -R W git export
+  not P, clean                  → the result is kept: publish it
+        G -R W bookmark set agents/<id> -r @-
+        G -R W git export
+  not P, conflicted, a bookmark on it
+                                → left as it is (second rule above)
+```
+
+- T1 finishes a working-copy update that was cut short, and is a no-op
+  otherwise **(observed)**.
+- `bookmark set` to where the bookmark already is, and `git export` with
+  nothing to export, succeed and change nothing **(observed)**, so the
+  procedure can run at any point, and again.
+- The export at the end of every branch leaves the git branch equal to the
+  bookmark, whichever phase was cut.
+- In the integration workspace the bookmark is `agents/integration`.
+
+What the caller is told (an error in every case, as today):
+
+| state found | operation | text |
+|---|---|---|
+| nothing landed | commit | `jj commit timed out (…); nothing was committed, the changes are still in the working copy` |
+| nothing landed, or rolled back | cherry-pick, merge | `jj <operation> timed out (…); the worktree was restored, retry later` |
+| kept | commit | `jj commit timed out (…) after the commit was made: <short> is on agents/<id>; check the history` |
+| kept | cherry-pick, merge | `jj <operation> timed out (…) after it completed: <short> is on agents/<id>; the result was kept, check the history before retrying` |
+| a recovery command failed or timed out | any | `jj <operation> timed out (…) and the worktree could not be restored; check jj status` |
+
+This is git's contract (`output_recovering`): a result that landed is reported
+and not undone; anything else is restored. The cases, each run on jj 0.44 by
+cutting the operation short and running the procedure
+(`notes/jj-argv-check.sh`, "timeouts") **(observed)**:
+
+| cut | found | after recovery |
+|---|---|---|
+| before the mutation landed | `@-` is `P` | unchanged |
+| after a clean merge, before `bookmark set` | clean result | kept; bookmark and git branch on the merge |
+| after `bookmark set`, before `git export` (the reviewer's case) | clean result, bookmark on it | kept; the git branch follows; nothing is abandoned |
+| after `git export` | the same | kept; unchanged |
+| after a conflicted merge | conflicted result, no bookmark | rolled back; bookmark and git branch still on `P` |
+| in the rollback of a merge, between `rebase` and `abandon` | `@-` is `P` | unchanged; the merge commit is left without a bookmark |
+| after a conflicted pick | conflicted result | rolled back; bookmark still on `P` |
+| after a clean pick | clean result | kept and published |
 
 ### Stale working copies
 
@@ -649,7 +820,8 @@ elsewhere. crew's own operations never cause it: each rewrites only the acting
 workspace's own working-copy change and commits it has just created. It
 happens when
 - an agent runs history-changing jj by hand on commits other workspaces sit on
-  (`jj squash --into`, `jj rebase`, `jj describe -r`, `jj abandon`), or
+  (`jj squash --into`, `jj rebase`, `jj describe -r`, `jj abandon`): every
+  workspace that descends from the rewritten commit turns stale **(observed)**;
 - a jj was killed between committing an operation and updating the files
   (handled above).
 
@@ -664,6 +836,7 @@ runs `jj workspace update-stale` and looks at `jj status`.
 ### Concurrency
 
 - Operations crew runs are one at a time per daemon (`git_lock`), as today.
+  Workspace creation is outside that lock, as today.
 - jj an agent runs itself is not behind that lock, and need not be: jj takes no
   repository lock, and operations made at the same time are reconciled by the
   next command **(observed: two commits started together in two workspaces
@@ -683,8 +856,10 @@ runs `jj workspace update-stale` and looks at `jj status`.
 ### What jj reads and writes
 
 Measured with `strace` on jj 0.44.0, hidden layout. `<git>` is the backing git
-directory, `<repo>` the jj repository (`R/.jj/repo`, or `<ws>/.jj/repo` in the
-native layout).
+directory as §layout defines it (the common directory: objects and refs),
+`<repo>` the jj repository (`R/.jj/repo`, or `<ws>/.jj/repo` in the native
+layout). `<admin>` (the checkout's own `HEAD`) is read only by the daemon,
+for the base, and is not part of any sandbox.
 
 | operation | writes |
 |---|---|
@@ -794,7 +969,7 @@ masks `.git` (native layout).
 | today | with jj |
 |---|---|
 | find the admin directory by its `gitdir` file | none: `add_workspace` created `W` and knows it; registration lives in the operation store |
-| read the worktree's `HEAD` | `Root::open(<git>).read_text("HEAD")` for the base (hidden layout) |
+| read the worktree's `HEAD` | `Root::open(<admin>).read_text("HEAD")` for the base (hidden layout); `<admin>/commondir` the same way, for `<git>` |
 | `create_empty(config.worktree)` | the guard file: a new `Root::write_new(rel, bytes)` (`O_CREAT \| O_EXCL \| O_NOFOLLOW`) on `Root::open(W)` |
 | `remove(index.lock)` after a timeout | `Root::open(<git>).remove("refs/heads/agents/<id>.lock")` |
 
@@ -802,12 +977,15 @@ masks `.git` (native layout).
 
 ### Changes for the sandbox code
 
-- `vcs::Store` (§split) describes the store. `profile::Session.git_dir` becomes
+- `vcs::Store` (§split) describes the store: `git_dir` is `<git>`, never
+  `<admin>`. `profile::Session.git_dir` becomes
   `store: &Store`; `Role::{Worker, Helper}.admin` becomes `Option<&Path>`
   (`Some` only for git). `profile.rs::git(admin)` becomes a function that adds
   the table above for `Store::Jj` and what it adds today for `Store::Git`.
 - `daemon/sandbox.rs`: `Layout` takes its paths from `Vcs::store`; the
-  "`.git` must be a directory" check applies to `<git>` and `<repo>`.
+  "`.git` must be a directory" check becomes: `<git>` and `<repo>` are
+  directories inside `<ws>` (§layout: a linked git worktree is refused for a
+  sandboxed team, as today).
   `Run::git` becomes `Run::vcs(agent, agent_dir, program)`.
   `provision_worktree` and `integrate` call the trait
   (`add_workspace`/`populate`/`merge_agents`). The helper request passes the
@@ -820,9 +998,9 @@ masks `.git` (native layout).
 <a id="events"></a>
 ## §events
 
-One event per state-changing VCS action, emitted by the daemon through
-`Daemon::emit` (so it is stored and pushed as `Push::Event`), whichever backend
-ran. `Event.data` is a `crew_core::vcs::VcsEvent`:
+Every VCS action emits events through `Daemon::emit` (so they are stored and
+pushed as `Push::Event`), whichever backend ran. `Event.data` is a
+`crew_core::vcs::VcsEvent`:
 
 ```rust
 // crates/crew-core/src/vcs.rs
@@ -830,16 +1008,30 @@ pub const VCS_SOURCE: &str = "vcs";
 
 #[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
-pub enum VcsAction { Workspace, Commit, CherryPick, Merge, Integrate }
+pub enum VcsAction { Workspace, Commit, CherryPick, Merge, Integrate, Status, Diff }
+
+impl VcsAction {
+    /// Status and diff: they change nothing.
+    pub fn is_read(self) -> bool;
+}
 
 #[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
-pub enum VcsOutcome { Ok, Conflict, Error }
+pub enum VcsOutcome { Started, Ok, Conflict, Error }
+
+impl VcsOutcome {
+    /// Everything but `Started`: the operation is over.
+    pub fn is_terminal(self) -> bool;
+}
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
 pub struct VcsEvent {
     pub action: VcsAction,
     pub outcome: VcsOutcome,
+    /// The operation this event belongs to: on every event, one id per
+    /// operation. A `started` event and the terminal event of the same
+    /// operation carry the same id.
+    pub op: String,
     /// "jj" or "git".
     pub backend: String,
     /// Who acted: an agent id, or "integration".
@@ -855,7 +1047,9 @@ pub struct VcsEvent {
     /// jj's change id of `commit`. None under git.
     #[serde(default)]
     pub change: Option<String>,
-    /// What was brought in: the picked commit's id, or the merged branch.
+    /// What was brought in or looked at: the picked commit's id (on a
+    /// `started` event: the revision as the agent gave it), the merged branch,
+    /// the revision a diff is against.
     #[serde(default)]
     pub source: Option<String>,
     /// The branch that was created or moved.
@@ -872,39 +1066,125 @@ pub struct VcsEvent {
 impl VcsEvent {
     /// "vcs.commit", "vcs.cherry_pick", …
     pub fn event_type(&self) -> String;
-    /// The payload of a VCS event; None for any other event or a payload
-    /// this build does not know.
+    /// The payload of a VCS event; None for any other event, or for a payload
+    /// this build does not know (an action or outcome added later).
     pub fn from_event(event: &Event) -> Option<Self>;
 }
 ```
 
 Envelope: `source: "vcs"`, `event_type: "vcs.<action>"`, `agent_id`: the acting
 agent when it is a team member (none for integration), `task_id`: the agent's
-active task for a commit (as today), `level`: `info` for `ok`, `warn` for
-`conflict` and `error`.
+active task for a commit (as today).
 
-| event_type | when | `agent` | `peer` | outcomes |
-|---|---|---|---|---|
-| `vcs.workspace` | a member's workspace was created (not when reused); `supervisor/creation.rs`, and the integration workspace | the member, or `integration` | the parent, for a subagent | `ok` |
-| `vcs.commit` | `git_commit` | the agent | – | `ok`, `error` |
-| `vcs.cherry_pick` | `git_cherry_pick` | the agent | the source commit's author when its address is `<agent>@crew.local` | `ok`, `conflict`, `error` |
-| `vcs.merge` | `git_merge` | the agent | `from_agent` | `ok`, `conflict`, `error` |
-| `vcs.integrate` | one per branch merged or conflicted, in order | `integration` | the agent merged | `ok`, `conflict` |
-| `vcs.integrate` | once, last: the tally | `integration` | – | `ok`, or `conflict` when any branch conflicted |
+| outcome | level |
+|---|---|
+| `started` | `debug` |
+| `ok` | `info`; `debug` for status and diff |
+| `conflict`, `error` | `warn` |
 
-- `error` is emitted when the backend was run and failed (nothing to commit,
-  uncommitted changes, unknown commit, a timeout, a stale workspace). A request
-  refused before any VCS ran (shared checkout, unknown agent, invalid
-  revision) emits nothing.
-- The event is emitted after the operation has finished, before the RPC reply.
-- `git_status`, `git_diff`: no event.
-- For the tally, `summary` is `2 merged, 1 conflict`, `branch` is
-  `agents/integration`, `commit` its head.
+### Which events
 
-Example (`vcs.cherry_pick`, conflict):
+| event_type | action | `started` | terminal outcomes | `agent` | `peer` |
+|---|---|---|---|---|---|
+| `vcs.workspace` | a member's workspace is created (not when reused) | yes | `ok`, `error` | the member | the parent, for a subagent |
+| `vcs.commit` | `git_commit` | no | `ok`, `error` | the agent | – |
+| `vcs.cherry_pick` | `git_cherry_pick` | yes | `ok`, `conflict`, `error` | the agent | the source commit's author when its address is `<agent>@crew.local`; unknown at the start |
+| `vcs.merge` | `git_merge` | yes | `ok`, `conflict`, `error` | the agent | `from_agent` |
+| `vcs.integrate` | the integration run | yes | `ok`; `conflict` when any branch conflicted; `error` | `integration` | – |
+| `vcs.integrate` | one branch of the run, as it finishes, in order | no | `ok`, `conflict` | `integration` | the agent merged |
+| `vcs.status` | `git_status` | no | `ok`, `error` | the agent | – |
+| `vcs.diff` | `git_diff` | no | `ok`, `error` | the agent | – |
+
+The operator's decision named workspace creation, integration and merge as the
+operations that can run for seconds. Cherry-pick is in the same class (the same
+number of commands as a merge, each of which starts a sandbox in a sandboxed
+team) and gets a start as well. A consumer treats `started` the same way for
+any action, so giving commit a start later needs no change to the contract.
+
+### Rules
+
+1. **One operation, one `op`.** `v<n>`, from a counter of the daemon: unique
+   while the daemon lives. Every event carries one.
+2. **`started` is emitted when the operation begins to run**, on the thread
+   that runs it: after it has waited for its turn (`git_lock`), not when it was
+   asked for.
+3. **Every `started` is followed by exactly one terminal event** with the same
+   `op`, `action` and `agent`, for as long as the daemon lives. The operation
+   holds a guard on its own thread whose `Drop` emits the terminal event if
+   nothing else did (`error`, summary `interrupted`): an early return, a panic,
+   and a request whose client went away all end in a terminal event. Events are
+   emitted from the job, not from the request: today's `git.*` events are
+   emitted after the request's `await` and are lost when the client disconnects
+   while the job runs on.
+4. **A terminal event stands on its own.** It carries every field its action
+   has, whether or not a `started` came before, so a consumer that missed the
+   start (or an operation that has none) renders the same.
+5. **Workspace.** `started` is emitted before the workspace is made when its
+   directory does not exist yet; a terminal event is emitted when the workspace
+   was created (`Workspace.created`) or a `started` went out. A workspace that
+   is reused emits nothing. The integration workspace has no event of its
+   own: making it is part of the integration run.
+6. **Integration.** `started`; then one event per branch that was merged or
+   conflicted, each with its own `op`, emitted as that branch finishes (the
+   backend calls an observer per step, §split); then the run's terminal event
+   with the start's `op` and the tally: `summary` `2 merged, 1 conflict`,
+   `branch` `agents/integration`, `commit` its head. Branches that are missing
+   or not ahead emit nothing.
+7. **`error`** is emitted when the backend ran and failed (nothing to commit,
+   uncommitted changes, unknown commit, a timeout, a stale workspace). A
+   request refused before any VCS ran (shared checkout, unknown agent, invalid
+   revision, no sandbox) emits nothing, not even a start. A timeout that kept
+   its result (§conflicts) is an `error` whose `commit` names the result.
+8. **Reads** emit one event after the command ran. They are not rate-limited:
+   an agent that polls `git_status` produces one `debug` event per call.
+9. A consumer ignores what it does not know: `from_event` returns `None` for an
+   unknown action or outcome, and the event is still an ordinary log line.
+
+### In the daemon
+
+One helper in `daemon/gitops.rs` carries the rules, so no caller emits by hand:
+
+```rust
+/// One VCS operation: its events, emitted on the thread that runs it.
+pub(crate) struct VcsOp { /* daemon, the event so far (action, backend, agent, op), task, state */ }
+
+impl VcsOp {
+    pub fn new(daemon: &Daemon, action: VcsAction, agent: &str) -> Self;   // takes the next `op`
+    pub fn peer(self, peer: Option<&str>) -> Self;
+    pub fn source(self, source: &str) -> Self;
+    pub fn branch(self, branch: &str) -> Self;
+    /// Emit `started` (rule 2).
+    pub fn start(&mut self);
+    /// Emit the terminal event; `fill` adds what the operation found out.
+    pub fn finish(self, outcome: VcsOutcome, fill: impl FnOnce(&mut VcsEvent));
+}
+impl Drop for VcsOp { /* rule 3 */ }
+```
+
+- Agent operations build the `VcsOp` in the request and move it into the
+  closure given to `agent_git`; `start` and `finish` run inside the closure.
+- Workspace: `supervisor/creation.rs`, around `member_worktree` (already on a
+  blocking thread).
+- Integration: inside the closure given to `Daemon::git`; the per-branch
+  events are emitted by the observer passed to `Daemon::integration`.
+- `Daemon::emit` is called from blocking threads today (`create_agent`).
+
+### Examples
+
+`vcs.merge`, started, then its terminal event:
 
 ```json
-{ "action": "cherry_pick", "outcome": "conflict", "backend": "jj",
+{ "action": "merge", "outcome": "started", "op": "v17", "backend": "jj",
+  "agent": "ledger", "peer": "db", "source": "agents/db", "branch": "agents/ledger" }
+{ "action": "merge", "outcome": "ok", "op": "v17", "backend": "jj",
+  "agent": "ledger", "peer": "db", "source": "agents/db", "branch": "agents/ledger",
+  "commit": "5e6f7a8b…", "change": "kzvsvsvn…", "summary": "Merge agents/db" }
+```
+
+`vcs.cherry_pick`, conflict:
+
+```json
+{ "action": "cherry_pick", "outcome": "conflict", "op": "v18", "backend": "jj",
   "agent": "ledger", "peer": "rival",
   "source": "d082aaff1b40f2501fb419c7756171bd4c485d57",
   "branch": "agents/ledger", "files": ["schema.sql"] }
@@ -913,15 +1193,21 @@ Example (`vcs.cherry_pick`, conflict):
 Messages (the log view shows them):
 
 ```
+creating the workspace of ledger…                                              started
 workspace for ledger on agents/ledger at 1a2b3c4d
 db committed 1a2b3c4d on agents/db: Add schema
+ledger: cherry-pick of 1a2b3c4d…                                               started
 ledger cherry-picked 1a2b3c4d from db as 5e6f7a8b
+ledger: merging agents/db…                                                     started
 ledger merged agents/db (5e6f7a8b)
 ledger: cherry-pick of d082aaff conflicts with rival in schema.sql; nothing was changed
+integrating into agents/integration…                                           started
 integration merged agents/db (9c0d1e2f)
 integration: merge of agents/rival conflicts in schema.sql; skipped
 integration on agents/integration: 2 merged, 1 conflict
 db: commit failed: nothing to commit: the working tree has no changes
+db: status
+db: diff against agents/ledger
 ```
 
 Replaced: `git.commit`, `git.cherry_pick`, `git.merge`, `git.integrate`,
@@ -942,33 +1228,58 @@ means for.)
 <a id="anim"></a>
 ## §anim
 
-The TUI animates from `vcs.*` events only (`VcsEvent::from_event`), and only
-when they arrive live.
+The TUI animates from `vcs.*` events only (`VcsEvent::from_event`). Every VCS
+action shows: a write with a link and a mark, a long one as in progress until
+it ends, a read with a glance.
 
-### What is shown
+### The pieces
 
-Two primitives, both in `Anims`:
+All in `Anims`:
 - a **link**: today's `Link`, with a new kind `LinkKind::Vcs(Tone)`. A pulse
   travels from `from` to `to` in `PULSE_MS` (900 ms) and the link stays lit
-  until `LINK_MS` (3 s), as for messages.
-- a **mark** on one agent's box (new): a bright segment runs once around the
-  box's border in `MARK_SWEEP_MS` (700 ms), and a short label sits on the
-  bottom border until `MARK_MS` (2400 ms).
+  until `LINK_MS` (3 s), as for messages. New: a link can be **held** by a
+  running operation. A held link is lit, dim, with no pulse and no expiry;
+  when the operation ends the pulse travels and the 3 s start.
+- a **mark** on one box, of three kinds:
+  - **done** (a write ended): a bright segment runs once around the box's
+    border in `MARK_SWEEP_MS` (700 ms), and a label sits on the bottom border
+    until `MARK_MS` (2400 ms). Bold, in the tone's colour.
+  - **running** (a long operation began): the spinner and a label on the
+    bottom border, until the operation's terminal event. No sweep.
+  - **glance** (a read): a short segment runs once along the bottom border
+    only, in `GLANCE_SWEEP_MS` (300 ms), and a label sits there until
+    `GLANCE_MS` (900 ms). Not bold, in `theme.muted`: no tone colour, no link,
+    about a third of a write's time.
 
 `Tone` is `Ok` (`theme.ok`), `Conflict` (`theme.err`) or `Error`
 (`theme.warn`). No new theme colours.
 
+### What each event shows
+
+`started` events (D13):
+
+| event | running mark | held link |
+|---|---|---|
+| `workspace` | on the parent's box when there is a `peer`, else on the hub: `<spinner> workspace <agent>` (the member has no box yet) | – |
+| `cherry_pick` | agent: `<spinner> cherry-pick` | – (the peer is not known yet) |
+| `merge` | agent: `<spinner> merge <peer>` | peer → agent |
+| `integrate` | hub: `<spinner> integrating` | – |
+
+Terminal events. Each row is complete without a `started` before it:
+
 | event | link | mark |
 |---|---|---|
-| `workspace` ok | parent → member, `Ok`, when there is a `peer` | member: `Ok`, label `+ agents/<id>`, starts when the pulse arrives |
-| `commit` ok | – | agent: `Ok`, label `◆ <short>` |
-| `cherry_pick` ok | peer → agent, `Ok` | agent: `Ok`, label `◆ <short>`, on arrival |
-| `merge` ok | peer → agent, `Ok` | agent: `Ok`, label `◆ <short>`, on arrival |
-| `cherry_pick`/`merge` conflict | peer → agent, `Conflict` | agent: `Conflict`, label `✗ <n> file(s)`, on arrival |
+| `workspace` ok | parent → member, `Ok`, when there is a `peer` | member: done, `Ok`, label `+ agents/<id>`, starts when the pulse arrives |
+| `commit` ok | – | agent: done, `Ok`, label `◆ <short>` |
+| `cherry_pick` ok | peer → agent, `Ok` | agent: done, `Ok`, label `◆ <short>`, on arrival |
+| `merge` ok | peer → agent, `Ok` | agent: done, `Ok`, label `◆ <short>`, on arrival |
+| `cherry_pick`/`merge` conflict | peer → agent, `Conflict` | agent: done, `Conflict`, label `✗ <n> file(s)`, on arrival |
 | `integrate` ok, with peer | peer → hub, `Ok` | – |
 | `integrate` conflict, with peer | peer → hub, `Conflict` | – |
-| `integrate` tally | – | hub: `Ok` or `Conflict`, label = `summary` |
-| any `error` | – | agent: `Error`, label `! <action>` |
+| `integrate` without peer (the tally) | – | hub: done, `Ok` or `Conflict`, label = `summary` |
+| `status`, `diff` ok | – | agent: glance, label `· status` / `· diff` |
+| `status`, `diff` error | – | agent: glance, label `! status` / `! diff` in `theme.warn` |
+| any other `error` | – | agent: done, `Error`, label `! <action>`. `workspace`: on the box where it shows as running (parent or hub), label `! workspace <agent>`; `integrate`: the hub |
 
 - `<short>` is the first 8 characters of `commit`.
 - Endpoints: `integration` has no box and maps to the hub, as the operator does
@@ -978,49 +1289,97 @@ Two primitives, both in `Anims`:
   started for the same event. A mark that has not started is not drawn.
 - The pulse of a VCS link is drawn as `◆` with a `◇` behind it (messages keep
   `●`/`•`), in the tone's colour, along `layout::route` with the same obstacle
-  rule as `P2p`. Hub links run along the spoke like `Orchestrator`.
+  rule as `P2p`. Hub links run along the spoke like `Orchestrator`. A held link
+  is drawn in `theme.muted`.
 - A VCS link replaces a live link between the same pair (today's
   `Anims::start` rule). `p2p_live` counts only `P2p`, so the "private channel"
   banner is not triggered.
 - Label placement: on the bottom border, left; it yields to nothing while live
   (the `+N` badge returns after it). Cut with `fit` to the box width.
-- Compact layout (`render_compact`): no links; a live mark's label replaces the
-  agent's activity text, in the tone's colour.
-- An agent that is no longer on the dashboard: its link and mark are skipped by
-  the renderer (`rect_of` returns none), as for messages.
+- Compact layout (`render_compact`): no links; a live mark's label (spinner
+  included) replaces the agent's activity text.
+- An agent that has no box (not on the dashboard yet, or gone): its link and
+  mark are skipped by the renderer (`rect_of` returns none), as for messages.
+  When the box appears while the mark is live, the mark shows.
+
+### Start and end
+
+- A terminal event ends the running mark and releases the held link that carry
+  its `op`, then starts what its row says. The held link becomes that row's
+  link (same pair), so the pulse runs along the line that was already lit.
+- A terminal event whose `op` matches nothing running is rendered by its row
+  alone (rule 4 of §events).
+- Running state without an end is bounded three ways: the agent's box goes; a
+  snapshot is applied (below); and a running mark older than `RUNNING_MAX_MS`
+  (10 min) is dropped with its held link.
+
+Which mark a box shows:
+- a done or glance mark while it is live, else the newest running mark of that
+  box;
+- a done mark replaces any done or glance mark of the agent;
+- a glance replaces only a glance. It is dropped when a done mark of the agent
+  is live or pending, so a read never hides the result of a write.
 
 ### `Anims`
 
 ```rust
 pub const MARK_SWEEP_MS: i64 = 700;
 pub const MARK_MS: i64 = 2400;
-const MAX_MARKS: usize = 32;
+pub const GLANCE_SWEEP_MS: i64 = 300;
+pub const GLANCE_MS: i64 = 900;
+pub const RUNNING_MAX_MS: i64 = 600_000;
+const MAX_MARKS: usize = 48;
 
 pub enum Tone { Ok, Conflict, Error }
 pub enum LinkKind { P2p, Orchestrator, Broadcast, Vcs(Tone) }
-pub struct Mark { pub agent: String, pub tone: Tone, pub label: String, pub started: i64 }
+
+pub struct Link {
+    pub from: String, pub to: String, pub kind: LinkKind, pub started: i64,
+    /// The running operation (`VcsEvent.op`) that keeps this link lit.
+    pub held: Option<String>,
+}
+
+pub enum MarkKind { Running { op: String }, Done, Glance }
+
+pub struct Mark {
+    /// The box it is drawn on.
+    pub agent: String,
+    pub kind: MarkKind,
+    pub tone: Tone,
+    pub label: String,
+    pub started: i64,
+}
 
 impl Mark {
-    /// Position of the sweep around the border (0..1) while it runs.
+    /// Position of the sweep (done: around the border; glance: along the
+    /// bottom) while it runs, 0..1.
     pub fn sweep(&self, now: i64) -> Option<f64>;
-    pub fn is_live(&self, now: i64) -> bool;      // started <= now < started + MARK_MS
+    pub fn is_live(&self, now: i64) -> bool;
 }
 
 impl Anims {
     pub marks: Vec<Mark>,
-    /// Start what the table above says for this event.
+    /// Start, or end, what the tables above say for this event.
     pub fn on_vcs(&mut self, event: &VcsEvent, now: i64);
-    /// Something is moving: a pulse or a sweep. Replaces `pulse_live` in `tick`/`next_wake`.
+    /// From a snapshot's events, oldest first: operations that started and
+    /// have not ended. Restores their running marks and held links, and
+    /// starts nothing else. `age` is how long ago each event happened.
+    pub fn resume<'a>(&mut self, events: impl Iterator<Item = (&'a VcsEvent, i64 /* age, ms */)>, now: i64);
+    /// Something is moving: a pulse, a sweep or a glance. Replaces
+    /// `pulse_live` in `tick` and `next_wake`.
     pub fn animating(&self, now: i64) -> bool;
-    /// Also covers marks: the next start of a pending one, the next end of a live one.
+    /// An operation is running: the spinner turns.
+    pub fn running(&self) -> bool;
+    /// Also covers marks: the next start of a pending one, the next end of a
+    /// live one, the cap of a running one. Held links have no expiry.
     pub fn next_expiry(&self, now: i64) -> Option<i64>;
-    /// Also drops marks past `started + MARK_MS`.
+    /// Also drops marks that ended, and running ones past the cap.
     pub fn gc(&mut self, now: i64) -> bool;
 }
 ```
 
-A newer mark for the same agent replaces the older one. `MAX_MARKS` bounds the
-list as `MAX_LINKS` does.
+`Link::pulse` is `None` and `Link::is_live` is `true` while `held` is set.
+`MAX_MARKS` bounds the list as `MAX_LINKS` does.
 
 ### Frame rate and idle
 
@@ -1028,29 +1387,51 @@ The rules of `App::tick` and `App::next_wake` stay; "a pulse is in flight"
 becomes "something is moving":
 - `tick`: dirty when `anims.gc(now) || anims.animating(now)`.
 - `next_wake`: 33 ms while `anims.animating(now)`; otherwise the minimum of the
-  next second, the spinner step and `anims.next_expiry(now)`, never under 5 ms.
-- A lit link or a label that only waits to expire costs no frames: one wake at
-  its expiry. A pending mark costs one wake at its start.
+  next second, the spinner step (when `has_spinner()`, which now also holds
+  while `anims.running()`), and `anims.next_expiry(now)`, never under 5 ms.
+- What costs frames: a pulse (900 ms), a done sweep (700 ms), a glance
+  (300 ms). A running mark redraws at the spinner's rate (150 ms), like a
+  working agent. A lit or held link and a label that only waits to expire cost
+  one wake at their expiry; a pending mark one wake at its start.
 - An idle dashboard still wakes once a second
   (`idle_app_wakes_about_once_a_second` keeps passing).
 
 ### When an animation starts
 
-In `App::apply_push`, `Push::Event` branch, for a `fresh` event (the existing
-`seq` test) whose payload parses, and whose `timestamp` is at most 10 s behind
-`server_now(now)`. Events that arrive in a snapshot (`apply_snapshot`, also
-after `Resync`) are history and start nothing.
+- Live: in `App::apply_push`, `Push::Event` branch, for a `fresh` event (the
+  existing `seq` test) whose payload parses and whose `timestamp` is at most
+  10 s behind `server_now(now)`: `anims.on_vcs`.
+- From a snapshot (`apply_snapshot`: attach, reconnect, `Resync`): VCS marks
+  and VCS links are cleared, then `anims.resume` restores what is still
+  running. Events in a snapshot are history: no pulse, no done mark, no glance.
+  An operation whose start fell out of the snapshot's window is not shown as
+  running; its terminal event still renders.
 
 ### Tests (tui)
 
-- `anim.rs`: each row of the table; a mark is pending until the pulse lands;
-  `animating` is false between the end of the sweep and expiry; `gc` and
-  `next_expiry` cover marks; the bounds.
-- `app.rs`: a live `vcs.commit` push makes the app wake at frame rate and
-  return to once a second after `MARK_MS`; the same event in a snapshot, or 11 s
-  old, starts nothing; an event with an unknown `action` is logged and ignored.
+- `anim.rs`:
+  - each row of both tables;
+  - a mark is pending until the pulse lands;
+  - `started` then terminal with the same `op`: the running mark goes, the held
+    link pulses; a terminal event alone gives the same link and mark;
+  - a `started` whose end never comes is dropped at `RUNNING_MAX_MS`;
+  - a glance does not replace a live or pending done mark, a done mark replaces
+    a glance;
+  - `animating` is false between the end of a sweep and expiry, and for a
+    running mark; `running` is true for it; `gc` and `next_expiry` cover marks;
+    the bounds.
+- `app.rs`:
+  - a live `vcs.commit` push makes the app wake at frame rate and return to
+    once a second after `MARK_MS`;
+  - a live `vcs.merge` `started` makes it wake at the spinner's rate, not at
+    frame rate, until the terminal event;
+  - a snapshot holding `started` without its end restores the running mark; one
+    holding both, or only finished events, shows nothing;
+  - an event 11 s old starts nothing; an event with an unknown `action` or
+    `outcome` is logged and ignored.
 - `fixture.rs`: the `git.conflict` sample becomes `vcs.*` samples with
-  payloads, so the fixture dashboard shows the animation.
+  payloads (a write, a conflict, a running merge, a read), so the fixture
+  dashboard shows each piece.
 
 ---
 
@@ -1061,8 +1442,10 @@ after `Resync`) are history and start nothing.
 
 - `shell.nix`: add `jujutsu` to `packages`.
 - `CREW_JJ=<path>` overrides the PATH lookup (D2). Tests use it to put a
-  wrapper script in front of jj (to make it hang, for the timeout tests: jj has
-  no hooks to hang in).
+  wrapper script in front of jj that hangs when its arguments contain a
+  chosen subcommand (`duplicate`, `new`, `bookmark`, `git export`, `abandon`)
+  and runs the real jj otherwise: jj has no hooks to hang in, and this cuts an
+  operation at a chosen phase.
 - `CREW_TEST_VCS`, read by `crates/crew/tests/common/mod.rs` when it builds a
   team, and by the unit tests of `vcs/jj.rs`:
   - unset: `workspace.vcs` is left at `auto`. A host without jj runs everything
@@ -1089,8 +1472,11 @@ after `Resync`) are history and start nothing.
 - New selection tests (`vcs/mod.rs`): each row of the D2 table, with a fake
   `CREW_JJ` (absent, a script printing `jj 0.41.0`, a script printing
   `jj 0.44.0`), and the notice texts.
-- One e2e in `tests/team.rs`: `auto` with `CREW_JJ` pointing at nothing loads on
-  git and emits `session.vcs`.
+- e2e in `tests/team.rs`: `auto` with `CREW_JJ` pointing at nothing loads on
+  git, emits `session.vcs` at `warn` and returns `SessionInfo.vcs == "git"`
+  with the note; a workspace holding a git worktree from an earlier session
+  stays on git and its note names the worktree and the way to move; with jj
+  present and nothing in the way, `session.vcs` is `info` and names jj.
 
 ### Existing tests that change
 
@@ -1098,11 +1484,17 @@ after `Resync`) are history and start nothing.
 - `agents_work_in_their_own_worktrees_and_exchange_commits`: runs under both
   backends. `has_event("git.conflict")` becomes a `vcs.integrate` event with
   outcome `conflict`, peer `rival`, files `["schema.sql"]`. Add: `vcs.commit`
-  for `db`, `vcs.cherry_pick` with agent `ledger` and peer `db`,
-  `vcs.workspace` for each member; under jj also "plain git sees it"
+  for `db`; `vcs.cherry_pick` with agent `ledger` and peer `db`; for each
+  member a `vcs.workspace` pair; for the integration a `started`, the
+  per-branch events in order, then the tally with the start's `op`; every
+  `started` in the log has exactly one terminal event with its `op` after
+  it; under jj also "plain git sees it"
   (`git rev-parse refs/heads/agents/db` equals the artifact) and "the checkout
   is untouched" (`git status --porcelain` empty, `HEAD` unchanged, no `.jj` in
   the workspace).
+- New: `git_status` and `git_diff` each leave a `debug` `vcs.status` /
+  `vcs.diff` event; a `git_commit` with nothing to commit leaves `vcs.commit`
+  with outcome `error`; a refused call (shared checkout) leaves none.
 - The briefing and resume texts (`read git status and git diff…`, around the
   `/w/.crew/worktrees/design` fixtures) follow the wording of the backend.
 - Everything else is backend-neutral and runs under both.
@@ -1129,6 +1521,11 @@ profiles by hand from `git_dir` and `admin`: they move to the new `Session` and
 about a smudge filter). One profile test per role is added for `Store::Jj`
 (the mount table of §sandbox, in order).
 
+`daemon/gitops.rs`: `an_agents_git_job_keeps_its_launch_lease_after_the_request_is_gone`
+gains the event side: a merge whose request is aborted while the job runs
+still ends in a terminal `vcs.merge` event with the start's `op` (§events
+rule 3); a job that panics ends in `error`.
+
 Unit tests: `daemon/sandbox.rs` (fixtures gain a jj variant),
 `sandbox/profile.rs` (the mount list for `Store::Jj`), `crew-core`
 (`VcsEvent` round trip; the wire manifest test is untouched: no enum or push
@@ -1154,9 +1551,22 @@ The list of `git/mod.rs`, for jj:
   commit.
 - integration merges what merges, reports conflicts, skips what is not ahead;
   a second run does nothing.
-- a jj that hangs (wrapper through `CREW_JJ`) times out, is killed with its
-  children, and the workspace is as it was; a hang after the operation landed is
-  reported as such.
+- timeouts, one test per row of the table in §conflicts, with the wrapper
+  hanging on that phase's subcommand: jj is killed with its children; cut in
+  the mutation → nothing landed; cut in `bookmark set` and cut in `git
+  export` after a clean merge and after a clean pick → the result is kept,
+  the bookmark and `refs/heads/agents/<id>` point at it, the error says so;
+  cut after a conflicted merge and pick → rolled back, bookmark and ref
+  still on the old parent; cut between `rebase` and `abandon` → restored; a
+  commit cut in `git export` → the commit is reported as made.
+- a conflicted result that already carries the bookmark is not abandoned.
+- a project that is a linked git worktree whose `HEAD` is on another branch
+  than the main checkout's: the store is the common directory, agents start
+  from the linked `HEAD`, commits appear as branches of the shared
+  repository, and `HEAD`, index and files of both checkouts are unchanged; a
+  sandboxed team is refused there.
+- moving from git: after `git worktree remove`, an agent with a branch from
+  the git backend gets a jj workspace at that branch.
 - a stale workspace is an error that names `jj workspace update-stale`.
 - every command goes through the installed launcher (the test that exists for
   git, with the jj argv).
@@ -1183,7 +1593,9 @@ pub struct IntegrationStep { pub agent: String, pub outcome: GitOutcome }
 pub struct Picked { pub outcome: GitOutcome, pub source: String, pub author_email: String }
 
 /// Where the store is, for the sandbox profile. Paths the daemon made or
-/// read before any agent ran.
+/// read before any agent ran. `git_dir` is `<git>` of §layout: the directory
+/// with the objects and refs (a linked worktree's common directory), never
+/// the checkout's admin directory.
 pub enum Store {
     Git { git_dir: PathBuf },
     Jj { git_dir: PathBuf, repo_dir: PathBuf },
@@ -1196,7 +1608,8 @@ pub trait Vcs: Send + Sync {
     fn store(&self) -> Store;
 
     /// Make the store ready (idempotent) and say whether there is a commit
-    /// to start from. Err: `ws` is not the root of a repository.
+    /// to start from. Err: `ws` is not the root of a repository. Resolves
+    /// `<admin>` and `<git>` (§layout).
     fn prepare(&self, ws: &Path) -> Result<bool>;
     fn branch_exists(&self, branch: &str) -> bool;
 
@@ -1213,12 +1626,15 @@ pub trait Vcs: Send + Sync {
     fn cherry_pick(&self, dir: &Path, agent: &str, rev: &str) -> Result<Picked>;
     fn merge(&self, dir: &Path, agent: &str, branch: &str) -> Result<GitOutcome>;
 
-    /// Inside the integration workspace; under the helper launcher.
-    fn merge_agents(&self, workspace: &Workspace, agents: &[String]) -> Result<Vec<IntegrationStep>>;
+    /// Inside the integration workspace; under the helper launcher. `on_step`
+    /// is called with each step as soon as it is done (§events rule 6).
+    fn merge_agents(&self, workspace: &Workspace, agents: &[String],
+                    on_step: &mut dyn FnMut(&IntegrationStep)) -> Result<Vec<IntegrationStep>>;
 }
 
-/// D2. The notice, if any, is for a `session.vcs` event.
-pub fn select(choice: VcsChoice, ws: &Path, state_dir: &Path) -> Result<(Arc<dyn Vcs>, Option<String>)>;
+/// D2. What was chosen, and what to tell the user about it.
+pub struct Selection { pub vcs: Arc<dyn Vcs>, pub note: String, pub fallback: bool }
+pub fn select(choice: VcsChoice, ws: &Path, state_dir: &Path) -> Result<Selection>;
 ```
 
 The daemon keeps the selected backend for the session (`Daemon::vcs()`), set in
@@ -1231,7 +1647,7 @@ Everyone else cherry-picks it before starting. No behaviour changes.
 - `crew_core::config`: `VcsChoice { Auto, Jj, Git }`, `WorkspaceConfig.vcs`
   (`#[serde(default)]`, skipped when default).
 - `crew_core::rpc`: `CommitInfo.change_id: Option<String>`, `SessionInfo.vcs:
-  String` (both defaulted).
+  String`, `SessionInfo.vcs_note: String` (all defaulted).
 - `crates/crew/src/vcs/mod.rs`: the types and trait above, `vcs::Git`
   delegating to `crate::git`, `select` returning git for now, `Daemon::vcs()`.
   `Workspace` and `IntegrationStep` are the `git` types re-exported, so
@@ -1249,14 +1665,19 @@ Owns:
 - `crates/crew/src/git/mod.rs`, `git/beneath.rs` (`output` made `pub(crate)`
   with the program's name in its timeout text; `beneath` made `pub(crate)`;
   `Root::write_new`; `cherry_pick` returning the source for `Picked`).
-- `crates/crew/src/daemon/gitops.rs` (calls the trait; emits `vcs.*`;
+- `crates/crew/src/daemon/gitops.rs` (calls the trait; `VcsOp` and every
+  `vcs.*` event, emitted from the job;
   `report_git` moves here and goes away), `daemon/handlers.rs` (only the removal
   of `report_git`), `daemon/team.rs` (selection, `prepare`, the `session.vcs`
   notice, `session.started` text), `daemon/supervisor/creation.rs` (the
-  `vcs.workspace` event), `daemon/mod.rs` (`vcs` in the session state and in
-  `SessionInfo`).
+  `vcs.workspace` events), `daemon/mod.rs` (`vcs` and its note in the session
+  state and in `SessionInfo`; the `op` counter).
 - `crates/crew/src/cli/ops/plain.rs` (`is_blank` also allows `.jj`;
   `workspace_is_isolated` treats a root with `.jj` as isolated).
+- `crates/crew/src/cli/ops/{team, session}.rs` (the backend and the note in
+  the "started" line and in `crew status`; the note handed to the dashboard
+  as its opening notice; `landing_hint` unchanged: `agents/integration` is a
+  git branch under both backends).
 - `crates/crew-core/src/{vcs.rs, config.rs, rpc.rs, lib.rs}`.
 - The unit tests in those files.
 
@@ -1272,14 +1693,18 @@ Owns:
 ### Member **tui**: §anim
 
 Owns `crates/crew-tui/**`. Consumes `crew_core::vcs` and nothing else of this
-work; may show `SessionInfo.vcs` where isolation and sandbox are shown.
+work; may show `SessionInfo.vcs` where isolation and sandbox are shown. The
+fallback note reaches the dashboard through `crew_tui::run`'s existing
+`notice` argument and needs nothing new in the TUI.
 
 ### Member **qa**: e2e tests, agent-facing wording, docs, integration
 
 Owns:
 - `crates/crew/tests/{team, shared_git}.rs`, `crates/crew/tests/common/mod.rs`
   (`CREW_TEST_VCS`).
-- `shell.nix`, `justfile`, `README.md`, `examples/`.
+- `shell.nix`, `justfile`, `README.md` (jj as the default, `workspace.vcs`,
+  the fallback and its notes, "Moving a workspace to jj" and back with the
+  steps of D2, the `vcs.*` events), `examples/`.
 - Agent-facing wording: `crates/crew/src/agents/prompt.rs` (`TeamView.vcs`; the
   workspace paragraph and the resume text say, under jj: the directory is a jj
   workspace published as branch `agents/<id>`; inspect with the `git_status`
@@ -1298,9 +1723,9 @@ Owns:
 | between | what | fixed by |
 |---|---|---|
 | vcs → all | `crew_core::vcs::VcsEvent`, `VcsChoice`, `CommitInfo.change_id`, `SessionInfo.vcs`, the `Vcs` trait and `Store` | step 0 |
-| vcs ↔ sandbox | `Daemon::member_worktree(team, id, base) -> Result<Workspace>`, `Daemon::integration(config, base, agents) -> Result<(Workspace, Vec<IntegrationStep>)>`, `Daemon::agent_git_launcher(agent)`: names and meaning stay; sandbox changes their bodies, vcs calls them | this section |
+| vcs ↔ sandbox | `Daemon::member_worktree(team, id, base) -> Result<Workspace>`, `Daemon::integration(config, base, agents, on_step) -> Result<(Workspace, Vec<IntegrationStep>)>` (`on_step` passed through to `merge_agents`), `Daemon::agent_git_launcher(agent)`: names and meaning stay; sandbox changes their bodies, vcs calls them | this section |
 | vcs → sandbox | `Vcs::store()`, `Vcs::program()`; `git::output` and the `Launcher` hooks (`apply`, `started`, `active`) keep their signatures | step 0 |
-| vcs → tui | events exactly as §events; tui reads nothing else | step 0 |
+| vcs → tui | events exactly as §events, and `SessionInfo.vcs`; tui reads nothing else | step 0 |
 | vcs → qa | event names and payloads for assertions; `Daemon::vcs().kind()` for `TeamView.vcs` | step 0 |
 | sandbox → vcs | none: `vcs/jj.rs` never names a mount | – |
 
@@ -1326,3 +1751,5 @@ Owns:
   here: the real-CLI test (`just test-real`) should be run once under jj for
   each runtime, and Codex's trust dialog watched for.
 - `refs/jj/keep/*` grow with every snapshot (D12).
+- Read events are not rate-limited (§events rule 8). If an agent that polls
+  `git_status` floods the log, coalescing belongs in `VcsOp`, not in the TUI.
