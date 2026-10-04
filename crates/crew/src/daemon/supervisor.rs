@@ -395,6 +395,12 @@ impl Daemon {
         if stopped() {
             return Ok(());
         }
+        // This launch's mark, in the environment of every process it starts:
+        // from here a hook of an earlier launch, arriving late, is told apart
+        // (on_hook).
+        let launch_id = uuid::Uuid::new_v4().to_string();
+        self.model().local.entry(id.to_string()).or_default().launch = Some(launch_id.clone());
+        self.save_local(id);
         let procs = self.procs().map_err(|e| anyhow!(e.message))?;
         // Before anything of the agent's writable tree is touched (even made):
         // nothing of its previous sandboxes may be left (D2).
@@ -562,6 +568,12 @@ impl Daemon {
         })?;
         if let Some(program) = pi_program {
             spec.program = program.to_string_lossy().into_owned();
+        }
+        // Before the sandboxes are made: they pass on what the launch's
+        // environment names.
+        spec.env.push(("CREW_LAUNCH".into(), launch_id.clone()));
+        if let Some(sidecar) = spec.sidecar.as_mut() {
+            sidecar.env.push(("CREW_LAUNCH".into(), launch_id.clone()));
         }
         if let Some(origin) = &endpoint.origin {
             self.emit(
@@ -1053,8 +1065,24 @@ restart {id} fresh or move it to another CLI."
 
     // ---- signals --------------------------------------------------------
 
-    pub(crate) async fn on_hook(&self, id: &str, event: &str, payload: &Value) {
+    /// A runtime hook of agent `id`, run by a process of `launch` (when it
+    /// says). One of an earlier launch is dropped: a replaced session's
+    /// late report must not change the current one.
+    pub(crate) async fn on_hook(
+        &self,
+        id: &str,
+        launch: Option<&str>,
+        event: &str,
+        payload: &Value,
+    ) {
         let Some(agent) = self.agent(id) else { return };
+        if let Some(launch) = launch {
+            let current = self.model().local.get(id).and_then(|l| l.launch.clone());
+            if current.is_some_and(|current| current != launch) {
+                tracing::info!("{id}: dropped the {event} hook of a replaced launch");
+                return;
+            }
+        }
         for signal in runtime_for(agent.runtime).on_hook(event, payload) {
             self.on_signal(id, signal).await;
         }

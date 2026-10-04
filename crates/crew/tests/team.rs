@@ -7926,6 +7926,119 @@ fn a_restart_takes_over_from_a_restart_still_starting() {
 }
 
 #[test]
+fn a_hook_from_a_replaced_launch_does_not_change_the_new_session() {
+    if common::test_support::isolate_operator_test(
+        "a_hook_from_a_replaced_launch_does_not_change_the_new_session",
+    ) {
+        return;
+    }
+    let s = Session::new();
+    let identity = s.workspace.join(".crew/agents/x/identity.json");
+    // A `claude` that notes the launch it was started for.
+    let bin = s.root().join("bin");
+    std::fs::create_dir_all(&bin).unwrap();
+    let launches = s.root().join("launches");
+    write_program(
+        &bin.join("claude"),
+        &format!(
+            "#!/bin/sh\necho \"${{CREW_LAUNCH:-}}\" >> '{}'\nexec '{CREW}' fake-cli claude \"$@\"\n",
+            launches.display()
+        ),
+    );
+    let team = s.team(
+        "late-hook",
+        vec![AgentSpec {
+            id: "x".into(),
+            role: "implementation".into(),
+            runtime: Some(RuntimeKind::Claude),
+            ..AgentSpec::default()
+        }],
+        vec![],
+    );
+    std::fs::write(s.root().join("team.yaml"), team.to_yaml().unwrap()).unwrap();
+    let mut path = vec![bin.clone()];
+    path.extend(std::env::split_paths(&std::env::var_os("PATH").unwrap()));
+    let out = s
+        .command()
+        .env("PATH", std::env::join_paths(path).unwrap())
+        .args(["run", "team.yaml", "--no-attach"])
+        .output()
+        .unwrap();
+    assert!(out.status.success(), "{}", stderr(&out));
+    let started = || {
+        std::fs::read_to_string(&launches)
+            .unwrap_or_default()
+            .lines()
+            .map(String::from)
+            .collect::<Vec<_>>()
+    };
+    s.wait("x to be up", |snap| {
+        let x = find_agent(snap, "x");
+        x.pid.is_some() && x.status != AgentStatus::Spawning
+    });
+    let old_session = find_agent(&s.snapshot(), "x").session_id.clone().unwrap();
+    let socket = std::path::PathBuf::from(
+        serde_json::from_str::<Value>(&std::fs::read_to_string(&identity).unwrap()).unwrap()
+            ["socket"]
+            .as_str()
+            .unwrap(),
+    );
+    let (mut operator, _) = crew_core::client::Client::operator(&socket, "test").unwrap();
+    // Replaced by a launch in a new session.
+    operator
+        .call_value(crew_core::rpc::Call::AgentRestartFresh { id: "x".into() })
+        .unwrap();
+    let snap = s.wait("the new session to be up", |snap| {
+        let x = find_agent(snap, "x");
+        x.pid.is_some()
+            && x.status != AgentStatus::Spawning
+            && x.session_id.as_deref().is_some_and(|id| id != old_session)
+    });
+    let new_session = find_agent(&snap, "x").session_id.clone().unwrap();
+    s.wait_for("the second launch", || started().len() >= 2);
+    let (old_launch, new_launch) = (started()[0].clone(), started()[1].clone());
+    let hook = |launch: Option<&str>, event: &str, payload: Value| {
+        let mut command = s.command();
+        command
+            .args(["hook", event, "--identity"])
+            .arg(&identity)
+            .arg(payload.to_string());
+        match launch {
+            Some(launch) => command.env("CREW_LAUNCH", launch),
+            None => command.env_remove("CREW_LAUNCH"),
+        };
+        let out = command.output().unwrap();
+        assert!(out.status.success(), "{event}: {}", stderr(&out));
+    };
+    let bash = |command: &str| json!({ "tool_name": "Bash", "tool_input": { "command": command } });
+
+    // The replaced launch's last turn ends late: its hooks report the old
+    // session and what it was doing. The new session is not changed.
+    hook(
+        Some(&old_launch),
+        "stop",
+        json!({ "session_id": old_session }),
+    );
+    hook(Some(&old_launch), "pre-tool-use", bash("old launch"));
+    let x = find_agent(&s.snapshot(), "x").clone();
+    // The current launch's hooks are taken, and so is one run outside any
+    // launch (no CREW_LAUNCH), as before.
+    hook(Some(&new_launch), "pre-tool-use", bash("current launch"));
+    let current = find_agent(&s.snapshot(), "x").activity.clone();
+    hook(None, "pre-tool-use", bash("no launch"));
+    let unmarked = find_agent(&s.snapshot(), "x").activity.clone();
+    s.stop();
+    assert_eq!(
+        x.session_id.as_deref(),
+        Some(new_session.as_str()),
+        "a hook of the replaced launch changed the new session"
+    );
+    assert!(!x.activity.contains("old launch"), "{}", x.activity);
+    assert!(current.contains("current launch"), "{current}");
+    assert!(unmarked.contains("no launch"), "{unmarked}");
+}
+
+#[test]
 fn a_fresh_restart_is_not_handed_back_the_old_session_by_its_last_hook() {
     if common::test_support::isolate_operator_test(
         "a_fresh_restart_is_not_handed_back_the_old_session_by_its_last_hook",

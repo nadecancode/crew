@@ -393,6 +393,14 @@ pub enum Call {
         event: String,
         #[serde(default)]
         payload: Value,
+        /// `CREW_LAUNCH` of the process that ran the hook: the daemon drops
+        /// a hook of a launch that is not the agent's current one. Only
+        /// hooks that carry it are told apart (one without it, from an
+        /// older crew or run outside a launch, is taken as before); it
+        /// correlates a hook with its launch and authenticates nothing.
+        /// Refusing hooks without it would need a protocol bump.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        launch: Option<String>,
     },
     Events {
         #[serde(default)]
@@ -968,6 +976,34 @@ mod compatibility_tests {
         let plain: Call =
             serde_json::from_value(json!({"method":"agent_restart","params":{"id":"a"}})).unwrap();
         assert!(matches!(plain, Call::AgentRestart { id } if id == "a"));
+    }
+
+    #[test]
+    fn a_hook_says_its_launch_only_when_it_has_one() {
+        // As an older crew sends it: no launch.
+        let old: Call =
+            serde_json::from_value(json!({"method":"hook","params":{"event":"stop"}})).unwrap();
+        assert_eq!(
+            old,
+            Call::Hook {
+                event: "stop".into(),
+                payload: Value::Null,
+                launch: None,
+            }
+        );
+        // Without a launch the frame is the old one.
+        assert_eq!(
+            serde_json::to_value(&old).unwrap(),
+            json!({"method":"hook","params":{"event":"stop","payload":null}})
+        );
+        let marked = Call::Hook {
+            event: "stop".into(),
+            payload: json!({"session_id":"s"}),
+            launch: Some("l-1".into()),
+        };
+        let wire = serde_json::to_value(&marked).unwrap();
+        assert_eq!(wire["params"]["launch"], "l-1");
+        assert_eq!(serde_json::from_value::<Call>(wire).unwrap(), marked);
     }
 
     #[test]

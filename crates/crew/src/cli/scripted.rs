@@ -150,6 +150,7 @@ impl Agent {
         let _ = self.client.call_value(Call::Hook {
             event: event.to_string(),
             payload: Value::Null,
+            launch: std::env::var("CREW_LAUNCH").ok().filter(|l| !l.is_empty()),
         });
     }
 

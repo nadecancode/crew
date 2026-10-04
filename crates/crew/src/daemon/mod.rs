@@ -72,6 +72,11 @@ pub(crate) struct AgentLocal {
     pub spec: crew_core::config::AgentSpec,
     /// The runtime reported its session id, so the session can be resumed.
     pub session_confirmed: bool,
+    /// The agent's current launch (`CREW_LAUNCH` of the processes it
+    /// started): kept across daemon restarts, so processes adopted then are
+    /// still its own.
+    #[serde(default)]
+    pub launch: Option<String>,
     pub tasks_completed: u32,
     /// The account refused the model's 1M-token context variant; it is
     /// not asked for again.

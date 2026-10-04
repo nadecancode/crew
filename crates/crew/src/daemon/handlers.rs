@@ -491,9 +491,14 @@ change identity",
                 reply(self.integrate().await?)
             }
 
-            Call::Hook { event, payload } => {
+            Call::Hook {
+                event,
+                payload,
+                launch,
+            } => {
                 let agent = agent_only(&who)?.to_string();
-                self.on_hook(&agent, &event, &payload).await;
+                self.on_hook(&agent, launch.as_deref(), &event, &payload)
+                    .await;
                 Ok(json!({ "ok": true }))
             }
             Call::Events { agent, limit } => {

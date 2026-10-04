@@ -124,6 +124,9 @@ pub fn hook(event: &str, identity_path: Option<&Path>, payload: Option<String>) 
     let _ = client.call_value(Call::Hook {
         event: event.to_string(),
         payload,
+        // The launch whose process ran the hook, from its environment: a
+        // late hook of a replaced launch is then told apart.
+        launch: std::env::var("CREW_LAUNCH").ok().filter(|l| !l.is_empty()),
     });
 }
 

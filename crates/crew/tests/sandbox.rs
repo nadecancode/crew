@@ -1239,6 +1239,21 @@ fn codex_sidecar_and_queue_run_sandboxed() {
         assert_ne!(mount_ns(pid), own, "the sidecar shares our mounts");
     }
     assert!(codex_home.join("fake-codex-server.json").is_file());
+    // The session and the sidecar are of one launch, which their sandboxes
+    // pass on: what their hooks (notify runs in the sidecar) carry.
+    let launch_of = |record: &str| {
+        let path = codex_home.join(record);
+        s.wait_for(record, || path.is_file());
+        let record: serde_json::Value =
+            serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
+        record["env"]["CREW_LAUNCH"]
+            .as_str()
+            .unwrap_or_default()
+            .to_string()
+    };
+    let launch = launch_of("fake-codex-server.json");
+    assert!(!launch.is_empty(), "the sidecar has no CREW_LAUNCH");
+    assert_eq!(launch_of("fake-codex.json"), launch);
 
     // Its session id arrives the way Codex's notify hook brings it; then a
     // message goes in through the queue command.
