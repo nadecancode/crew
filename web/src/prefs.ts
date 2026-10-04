@@ -151,14 +151,15 @@ export function createLayoutPrefs(call: Caller, timers: Timers = window) {
 /** The operator's: shortcuts, the side panel's width, the workspace last on screen.
  *
  * A field is *established* once the server's file holds a valid value for
- * it, the operator set it, or a workspace's old value was adopted for it;
- * only established fields are written, so that a default the page shows is
- * never stored as if the operator had chosen it, and a field is adopted at
- * most once and never over the operator's choice. */
+ * it, the operator set it, or a workspace's old value was adopted for it.
+ * `keys` and `panel` are written only once established, so that a default
+ * the page shows is never stored as if the operator had chosen it; a field
+ * is adopted at most once and never over the operator's choice. `last` is
+ * the page's own and always written (null: none yet). */
 export function createDashboardPrefs(call: Caller, timers: Timers = window) {
   type Field = keyof DashboardPrefs;
   const established = new Set<Field>();
-  const kept = createKept(call, validateDashboard, timers, (p) => Object.fromEntries((Object.keys(p) as Field[]).filter((k) => established.has(k)).map((k) => [k, p[k]])));
+  const kept = createKept(call, validateDashboard, timers, (p) => Object.fromEntries((Object.keys(p) as Field[]).filter((k) => k === "last" || established.has(k)).map((k) => [k, p[k]])));
   const set = <K extends Field>(key: K, value: DashboardPrefs[K]) => {
     established.add(key);
     kept.update((x) => ({ ...x, [key]: value }));

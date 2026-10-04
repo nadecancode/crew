@@ -101,7 +101,7 @@ test("the switcher by mouse; typing filters; others are named with the command t
   await expect(list(page)).toBeVisible();
   const other = page.locator("[data-other]");
   await expect(other).toContainText("docs");
-  await expect(other).toContainText("crew web -C ~/work/docs");
+  await expect(other).toContainText("crew web -C /home/op/work/docs");
   await expect(other).not.toHaveAttribute("role", "option");
   await page.keyboard.type("sear");
   await expect(list(page).getByRole("option")).toHaveCount(1);

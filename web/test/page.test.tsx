@@ -198,7 +198,7 @@ describe("the switcher's rows", () => {
     expect(rows[3].textContent).toContain("its daemon did not answer within 2 s");
     expect(rows.map((r) => r.querySelector(".ws-key")!.textContent)).toEqual(["1", "2", "3", "4"]);
     const other = view.container.querySelector<HTMLElement>("[data-other]")!;
-    expect(other.textContent).toContain("crew web -C ~/work/docs");
+    expect(other.textContent).toContain("crew web -C /home/op/work/docs");
     expect(other.getAttribute("role")).toBeNull();
     // Typing filters by project and path.
     const list = view.container.querySelector<HTMLElement>("[role=listbox]")!;

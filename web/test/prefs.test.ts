@@ -71,7 +71,7 @@ test("a workspace's keys and panel from before are read once, as defaults, when 
   expect(dash.prefs.panel).toBe(700);
   await vi.advanceTimersByTimeAsync(WRITE_DELAY_MS);
   // Only what was chosen or adopted is stored: no default the page shows.
-  expect(writes).toEqual([{ keys: false, panel: 700 }]);
+  expect(writes).toEqual([{ keys: false, panel: 700, last: null }]);
   // A second workspace's old values come after: the first one's stay.
   const two = createLayoutPrefs(async () => ({ prefs: { layout: {}, keys: true, panel: 300 } }), timers);
   await two.load();
@@ -103,7 +103,7 @@ test("a workspace's old values never replace what the operator chose in this doc
   dash.adopt({ keys: true, panel: 900 });
   expect(dash.prefs).toMatchObject({ keys: false, panel: 520 });
   await vi.advanceTimersByTimeAsync(WRITE_DELAY_MS);
-  expect(writes).toEqual([{ keys: false, panel: 520 }]);
+  expect(writes).toEqual([{ keys: false, panel: 520, last: null }]);
 });
 
 test("the page's own write of the last workspace stores no default for keys or panel", async () => {

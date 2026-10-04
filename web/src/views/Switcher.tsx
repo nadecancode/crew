@@ -6,7 +6,7 @@
 //   ● payments   ~/work/payments   6 agents · 3 working   tasks 4/6         1
 //   ○ billing    ~/work/billing    stopped                                   2
 //   ─ running, not in this dashboard ─
-//     docs       ~/work/docs       crew web -C ~/work/docs              [copy]
+//     docs       ~/work/docs       crew web -C /home/op/work/docs       [copy]
 //
 // A listbox: one tab stop, arrows move, enter switches, esc closes and gives
 // focus back to the button, typing filters by project and path, 1–9 switch
@@ -215,8 +215,7 @@ function SwitcherList(props: { close(refocus: boolean): void }) {
 }
 
 function OtherRow(props: { other: OtherSession }) {
-  // Shown short, copied exact.
-  const shown = () => `crew web -C ${homeDir(props.other.workspace)}`;
+  // Shown as it is copied: what is read is what runs.
   const command = () => addCommand(props.other.workspace);
   const [copied, setCopied] = createSignal(false);
   return (
@@ -224,7 +223,7 @@ function OtherRow(props: { other: OtherSession }) {
       <span class="ws-dot" />
       <span class="ws-name">{props.other.project ?? props.other.workspace.split("/").filter(Boolean).pop() ?? props.other.id}</span>
       <span class="ws-dir mono">{homeDir(props.other.workspace)}</span>
-      <code class="ws-cmd" title={command()}>{shown()}</code>
+      <code class="ws-cmd" title={command()}>{command()}</code>
       <button
         onClick={() => {
           void navigator.clipboard?.writeText(command()).then(() => setCopied(true), () => {});
