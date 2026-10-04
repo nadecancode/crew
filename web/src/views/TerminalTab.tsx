@@ -37,10 +37,22 @@ function PtyTerminal(props: { id: string }) {
   let handle: TerminalHandle | null = null;
   let disposed = false;
 
+  // No terminal is attached while the page cannot act: not before the state
+  // socket is live (and its server proven), never after the page stopped.
+  const stopped = () => link.conn() === "stopped" || link.conn() === "signed-out";
+  const detach = () => {
+    handle?.dispose();
+    handle = null;
+    host.replaceChildren();
+    setEnded(false);
+    setState("stopped");
+  };
   const attach = async () => {
+    if (!link.live()) return detach();
     const mod = await app.terminal.catch(() => null);
     if (disposed) return;
     if (!mod) return setState("unavailable");
+    if (!link.live()) return detach();
     handle?.dispose();
     host.replaceChildren();
     setEnded(false);
@@ -55,7 +67,7 @@ function PtyTerminal(props: { id: string }) {
     handle.setReadOnly(!link.live());
   };
   onMount(() => {
-    if (link.live()) void attach();
+    void attach();
     // Attached again once the state socket is live again.
     const off = link.onLive(() => {
       if (state() !== "live") void attach();
@@ -63,6 +75,8 @@ function PtyTerminal(props: { id: string }) {
     onCleanup(off);
   });
   createEffect(on(link.live, (live) => handle?.setReadOnly(!live)));
+  // Stopped for good: the terminal keeps what it shows and its socket goes.
+  createEffect(on(stopped, (s) => s && handle?.detach()));
   createEffect(on(() => props.id, () => void (state() !== "loading" && attach()), { defer: true }));
   onCleanup(() => {
     disposed = true;
@@ -75,8 +89,8 @@ function PtyTerminal(props: { id: string }) {
       <Show when={state() === "unavailable"}>
         <p class="pad warn">The terminal's code was not loaded when this page started; this page cannot load it now. Open a new tab from <code>crew web</code>.</p>
       </Show>
-      <Show when={state() === "stopped" && !ended()}>
-        <div class="term-note warn">disconnected · it attaches again when the dashboard is live</div>
+      <Show when={(state() === "stopped" || stopped()) && !ended()}>
+        <div class="term-note warn">{stopped() ? "not attached · this page is stopped" : "disconnected · it attaches again when the dashboard is live"}</div>
       </Show>
       <Show when={state() === "loading" || state() === "connecting"}>
         <div class="term-note muted">attaching…</div>

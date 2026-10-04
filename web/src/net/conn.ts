@@ -109,6 +109,9 @@ export class Conn {
   private attempt = 0;
   private failingSince: number | null = null;
   private retryTimer: number | null = null;
+  /** The give-up time while not live: it bounds a socket that never opens
+   * and a handshake that never ends, not only the waits between attempts. */
+  private deadline: number | null = null;
   private stoppedFor: StopReason | null = null;
   private isLive = false;
   private generation = 0;
@@ -125,6 +128,7 @@ export class Conn {
 
   start(): void {
     this.o.state("connecting");
+    this.failingSince = this.o.env.now();
     this.open();
   }
 
@@ -190,6 +194,7 @@ export class Conn {
     if (this.stoppedFor) return;
     this.stoppedFor = reason;
     this.isLive = false;
+    this.clearDeadline();
     if (this.retryTimer !== null) this.o.env.clearTimeout(this.retryTimer);
     this.retryTimer = null;
     this.drop();
@@ -200,9 +205,15 @@ export class Conn {
   close(): void {
     this.stoppedFor = this.stoppedFor ?? "gone";
     this.isLive = false;
+    this.clearDeadline();
     if (this.retryTimer !== null) this.o.env.clearTimeout(this.retryTimer);
     this.retryTimer = null;
     this.drop();
+  }
+
+  private clearDeadline(): void {
+    if (this.deadline !== null) this.o.env.clearTimeout(this.deadline);
+    this.deadline = null;
   }
 
   private drop(): void {
@@ -231,6 +242,13 @@ export class Conn {
   private open(): void {
     if (this.stoppedFor) return;
     this.isLive = false;
+    if (this.deadline === null && this.failingSince !== null) {
+      const left = Math.max(0, this.failingSince + GIVE_UP_MS - this.o.env.now());
+      this.deadline = this.o.env.setTimeout(() => {
+        this.deadline = null;
+        if (this.failingSince !== null) this.stop("gone");
+      }, left);
+    }
     this.retryTimer = null;
     const generation = ++this.generation;
     const ws = new this.o.env.WebSocket(this.o.env.url);
@@ -312,6 +330,7 @@ export class Conn {
       if (!current()) return;
       this.attempt = 0;
       this.failingSince = null;
+      this.clearDeadline();
       this.o.state("live");
     } catch {
       // A call failed or timed out: start over on a new connection.

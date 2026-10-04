@@ -35,6 +35,8 @@ export type TerminalHandle = {
   focus(): void;
   /** Keys go nowhere while the page cannot act. */
   setReadOnly(on: boolean): void;
+  /** Close the socket for good; what the terminal shows stays. */
+  detach(): void;
   dispose(): void;
 };
 
@@ -150,6 +152,9 @@ export function mountTerminal(host: HTMLElement, o: TerminalOptions): TerminalHa
     setReadOnly(on) {
       readOnly = on;
       term.options.disableStdin = on;
+    },
+    detach() {
+      conn.close();
     },
     dispose() {
       disposed = true;

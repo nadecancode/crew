@@ -199,10 +199,16 @@ export function createApp(env: Env, session: Session, terminal: Promise<Terminal
       const label = restart ? "restarted the paused agents on the current login" : "told the paused agents to continue";
       return quietly(act(`resume:${restart}`, label, "resume", { agents: [], restart }));
     },
-    /** A prompt typed for an agent: submitted as one (paste, then Enter). */
-    prompt(id: string, text: string) {
+    /** A prompt typed for an agent: submitted as one (paste, then Enter).
+     * True once the daemon took it. */
+    async prompt(id: string, text: string): Promise<boolean> {
       const submit = text.length > 0;
-      return quietly(act(`agent_input:${id}`, `typed into ${id}`, "agent_input", { id, text: submit ? text : "\r", submit }));
+      const label = `typed into ${id}`;
+      if (!link.live()) {
+        ui.setStatus(`${label}: not connected`, true);
+        return false;
+      }
+      return act(`agent_input:${id}`, label, "agent_input", { id, text: submit ? text : "\r", submit }).then(() => true, () => false);
     },
     async stopTeam() {
       if (!link.live()) return ui.setStatus("stopping the team: not connected", true);

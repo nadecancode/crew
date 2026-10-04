@@ -147,8 +147,8 @@ export function operations(app: App) {
      * text again when nothing was sent (a failure, a refused command). */
     async submit(to: string, text: string, prompt: boolean): Promise<{ keep: boolean; hint?: string }> {
       if (prompt) {
-        await actions.prompt(to, text);
-        return { keep: false };
+        // A prompt that did not go keeps its text, and the box stays a prompt box.
+        return { keep: !(await actions.prompt(to, text)) };
       }
       const sc = slashCommand(text);
       if (sc) {
