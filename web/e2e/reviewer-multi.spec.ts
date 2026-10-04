@@ -33,3 +33,13 @@ test("Enter on the focused copy button performs its native activation", async ({
   await page.keyboard.press("Enter");
   await expect.poll(() => page.evaluate(() => (window as any).__copiedCommand)).toMatch(/^crew web -C /);
 });
+
+test("clicking the open workspace switcher button closes its popup", async ({ page, openPage }) => {
+  await openPage();
+  const button = page.locator("[data-switcher-button]");
+  await button.click();
+  await expect(page.getByRole("listbox", { name: "workspaces" })).toBeVisible();
+  await button.click();
+  await expect(page.getByRole("listbox", { name: "workspaces" })).toHaveCount(0);
+  await expect(button).toHaveAttribute("aria-expanded", "false");
+});
