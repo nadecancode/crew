@@ -4,12 +4,25 @@ export type Handlers = { snapshot(s: any): void; push(p: { kind: string; data?: 
 
 export const PROTOCOL = Number((window as any).__PROTOCOL ?? 4);
 
+export type Session = { token: string; verifier: string | null; mode: string | null };
+
+const hex = (b: ArrayBuffer) => [...new Uint8Array(b)].map((x) => x.toString(16).padStart(2, "0")).join("");
+/** Is `proof` what this session's server must show? */
+async function proven(proof: unknown, s: Session): Promise<boolean> {
+  if (typeof proof !== "string") return false;
+  // Revision 2 kept the proof itself; whoever reads the storage can replay it.
+  if (s.mode === "stored") return proof === s.verifier;
+  // The design: the storage holds only the hash of what the server reveals.
+  return hex(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(proof))) === s.verifier;
+}
+
 export class Conn {
   private ws!: WebSocket;
   private next = 1;
   private waiting = new Map<number, { ok(v: any): void; err(e: any): void }>();
   private delay = 250;
-  constructor(private token: string, private h: Handlers) { this.open(); }
+  private stopped = false;
+  constructor(private session: Session, private h: Handlers) { this.open(); }
 
   call<T = any>(method: string, params?: unknown): Promise<T> {
     const id = this.next++;
@@ -24,7 +37,14 @@ export class Conn {
     const ws = (this.ws = new WebSocket(`ws://${location.host}/ws`));
     ws.onopen = async () => {
       try {
-        await this.call("hello", { role: "operator", token: this.token, client: "web", protocol: PROTOCOL });
+        const info = await this.call("hello", { role: "operator", token: this.session.token, client: "web", protocol: PROTOCOL });
+        if (this.session.verifier && !(await proven(info?.web_proof, this.session))) {
+          // Whoever answers is not this page's server: nothing it says is used, and nothing is retried.
+          this.stopped = true;
+          this.h.state("stopped: the server did not prove itself");
+          ws.close();
+          return;
+        }
         // Subscribe first, then the snapshot: nothing falls between the two.
         await this.call("subscribe");
         this.h.snapshot(await this.call("snapshot", { messages: 300, events: 2000 }));
@@ -50,6 +70,7 @@ export class Conn {
     ws.onclose = () => {
       for (const w of this.waiting.values()) w.err({ code: "closed", message: "connection closed" });
       this.waiting.clear();
+      if (this.stopped) return;
       this.h.state("disconnected");
       setTimeout(() => this.open(), this.delay);
       this.delay = Math.min(this.delay * 2, 5000);

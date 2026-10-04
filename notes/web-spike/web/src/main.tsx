@@ -1,18 +1,29 @@
 import { render } from "solid-js/web";
 import { createSignal, batch } from "solid-js";
 import "./style.css";
-import { Conn } from "./net";
+import { Conn, type Session } from "./net";
 import { applyPush, applySnapshot, state, events } from "./store";
 import { Graph } from "./Graph";
 import { LogList } from "./LogList";
 import { lazy, Show, Suspense } from "solid-js";
 const Term = lazy(() => import("./Term"));
 
-// The design's storage: per origin, shared by the origin's tabs.
-const KEY = "crew.web.session";
-const fromUrl = new URLSearchParams(location.hash.slice(1)).get("k");
-if (fromUrl) { localStorage.setItem(KEY, fromUrl); history.replaceState(null, "", location.pathname); }
-const token = localStorage.getItem(KEY) ?? "";
+// The design's storage: per origin, shared by the origin's tabs. The spike takes
+// the session from the fragment (the design pairs): `k` the token, `v` what the
+// server's proof is checked against, `m` how (`hash`: the design; `stored`:
+// revision 2, where the proof itself was kept).
+const KEY = "crew.web.session", VERIFIER = "crew.web.verifier", MODE = "crew.web.mode";
+const fragment = new URLSearchParams(location.hash.slice(1));
+// `lazy=1`: fetch the terminal's code only when a terminal opens (not the design; shows why).
+const lazyTerminal = fragment.get("lazy") === "1";
+if (fragment.get("k")) {
+  localStorage.setItem(KEY, fragment.get("k")!);
+  if (fragment.get("v")) { localStorage.setItem(VERIFIER, fragment.get("v")!); localStorage.setItem(MODE, fragment.get("m") ?? "hash"); }
+  history.replaceState(null, "", location.pathname);
+}
+// Read once, when the document starts; from here on only this copy is trusted.
+const session: Session = { token: localStorage.getItem(KEY) ?? "", verifier: localStorage.getItem(VERIFIER), mode: localStorage.getItem(MODE) };
+const token = session.token;
 
 const [conn, setConn] = createSignal("idle");
 const [open, setOpen] = createSignal<string | null>(null);
@@ -29,7 +40,11 @@ function onPush(p: { kind: string; data?: any }, t0: number) {
   if (p.kind === "event" && p.data?.timestamp) perf.lag.push(Date.now() - p.data.timestamp);
   requestAnimationFrame(() => requestAnimationFrame(() => perf.toFrame.push(performance.now() - t0)));
 }
-const c = new Conn(token, { snapshot: applySnapshot, push: onPush, state: setConn });
+// The design: every script the page will ever run is requested when the
+// document starts, from the server that served it. Later uses resolve from the
+// module map; the origin is never asked for code again.
+if (!lazyTerminal) for (const code of [import("./Term"), import("@xterm/xterm"), import("@xterm/addon-fit")]) code.catch(() => {});
+const c = new Conn(session, { snapshot: applySnapshot, push: onPush, state: setConn });
 (window as any).__conn = c;
 
 // Synthetic load through the same reducers: `rate` pushes a second for `ms`.

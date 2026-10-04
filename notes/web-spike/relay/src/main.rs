@@ -20,6 +20,8 @@ struct Shared {
     /// The only host name answered: `<label>.localhost:<port>`.
     host: String,
     web_token: String,
+    /// What the `hello` reply carries as `web_proof` (design: §security, "The server proves itself").
+    proof: Option<String>,
     operator_token: String,
     /// `style-src 'self'` instead of allowing style elements (what xterm.js needs).
     strict_styles: bool,
@@ -37,6 +39,7 @@ async fn main() {
     let strict_styles = flag("strict");
     // The design binds both loopback addresses; `v4only` leaves `::1` to whoever takes it.
     let v4_only = flag("v4only");
+    let proof = args[6..].iter().find_map(|a| a.strip_prefix("proof=").map(str::to_string));
     let operator_token = crew_core::paths::read_operator_token(&socket)
         .unwrap()
         .expect("operator token");
@@ -46,7 +49,7 @@ async fn main() {
     let v6 = if v4_only { None } else { Some(TcpListener::bind(("::1", port)).await.expect("binding [::1]")) };
     let host = format!("{label}.localhost:{port}");
     eprintln!("listening on http://{host}/#k={web_token}");
-    let shared = Arc::new(Shared { socket, dist, host, web_token, operator_token, strict_styles });
+    let shared = Arc::new(Shared { socket, dist, host, web_token, proof, operator_token, strict_styles });
     let accept = |listener: TcpListener, shared: Arc<Shared>| async move {
         loop {
             let (stream, _) = listener.accept().await.unwrap();
@@ -176,10 +179,22 @@ async fn relay(shared: Arc<Shared>, ws: WebSocketStream<TcpStream>) -> Result<()
     let (unix_rx, mut unix_tx) = unix.into_split();
     let mut lines = BufReader::new(unix_rx).lines();
     let mut authed = false;
+    // The id of a `hello` whose reply is still to come: the proof goes into it.
+    let mut hello_id: Option<u64> = None;
     loop {
         tokio::select! {
             line = lines.next_line() => {
-                let Some(line) = line? else { break };
+                let Some(mut line) = line? else { break };
+                if let (Some(id), Some(proof)) = (hello_id, &shared.proof) {
+                    let mut v: serde_json::Value = serde_json::from_str(&line)?;
+                    if v["id"].as_u64() == Some(id) {
+                        hello_id = None;
+                        if let Some(result) = v.get_mut("result").and_then(|r| r.as_object_mut()) {
+                            result.insert("web_proof".into(), proof.clone().into());
+                            line = v.to_string();
+                        }
+                    }
+                }
                 ws_tx.send(Message::text(line)).await?;
             }
             msg = ws_rx.next() => {
@@ -197,6 +212,7 @@ async fn relay(shared: Arc<Shared>, ws: WebSocketStream<TcpStream>) -> Result<()
                                 }
                                 v["params"]["token"] = serde_json::Value::String(shared.operator_token.clone());
                                 authed = true;
+                                hello_id = v["id"].as_u64();
                                 out = v.to_string();
                             } else if v["method"] != "ping" {
                                 let id = v["id"].as_u64().unwrap_or(0);
