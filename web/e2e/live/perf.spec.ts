@@ -114,43 +114,70 @@ function frames(page: Page, ms: number) {
   }, ms);
 }
 
-type Operator = { send(method: string, params?: object): number; call(method: string, params?: object): Promise<{ result?: unknown }>; replies: number; close(): void };
+type Operator = { send(method: string, params?: object): number; call(method: string, params?: object): Promise<{ result?: unknown }>; replies: number; errors: number; close(): void };
+/** What a load run did: the calls it offered, the replies that came back in the window, and in
+ * all after a drain; and how many of those were errors. */
+type Load = { offered: number; accepted_in_window: number; accepted: number; errors: number };
 
-/** Operator `send` calls at `rate` per second for `ms` through a signed-in web socket: each is a message
- * push (a pulse on the graph) and the events it leaves. Returns how many were sent. */
-async function load(op: Operator, rate: number, ms: number, to: string[]): Promise<number> {
-  let sent = 0;
+/** Operator `send` calls at `rate` per second for `ms` through a signed-in web socket: each one is a
+ * message push (a pulse on the graph) and the events it leaves. The daemon may take fewer than are
+ * offered: `accepted_in_window` is what it answered in the window, `accepted` after waiting for the rest. */
+async function load(op: Operator, rate: number, ms: number, to: string[]): Promise<Load> {
+  const replies0 = op.replies, errors0 = op.errors;
+  let offered = 0;
   const start = Date.now();
   await new Promise<void>((done) => {
     const timer = setInterval(() => {
-      const due = Math.floor(((Date.now() - start) * rate) / 1000) - sent;
-      for (let i = 0; i < due; i++, sent++) op.send("send", { to: to[sent % to.length], type: "message", body: `load ${sent}`, id: `w-load-${Date.now().toString(16)}-${sent}` });
+      const due = Math.floor(((Date.now() - start) * rate) / 1000) - offered;
+      for (let i = 0; i < due; i++, offered++) op.send("send", { to: to[offered % to.length], type: "message", body: `load ${offered}`, id: `w-load-${start.toString(16)}-${offered}` });
       if (Date.now() - start >= ms) (clearInterval(timer), done());
     }, 2);
   });
-  return sent;
+  const inWindow = op.replies - replies0 - (op.errors - errors0);
+  const drain = Date.now() + 60_000;
+  while (op.replies - replies0 < offered && Date.now() < drain) await new Promise((r) => setTimeout(r, 20));
+  return { offered, accepted_in_window: inWindow, accepted: op.replies - replies0 - (op.errors - errors0), errors: op.errors - errors0 };
 }
 
+
+
 test("P10, P11, P12, P15 against a real daemon: frames under real pushes, rows in the DOM, the heap", async ({ browser, daemon, openLive }) => {
-  test.setTimeout(240_000);
+  test.setTimeout(300_000);
   daemon.start(teamYaml(daemon.ws, daemon.vcs, 4));
   const info = daemon.web();
   const label = new URL(info.url).host;
   const protocol = Number(JSON.parse(daemon.c(["status", "--json"])).session.protocol ?? 5);
   const op = (await signedIn(info.port, label, `http://${label}`, new URL(info.pair_url).hash.replace("#pair=", ""), protocol)) as unknown as Operator;
   const targets = ["idle", "echo", "w1", "w2", "w3", "w4"];
-  // The log to 5000 events, at whatever rate the daemon takes.
   const lastSeq = () => Math.max(0, ...daemon.events().map((e) => e.seq));
+
+  // The log to 5000 events at the daemon, at whatever rate it takes; the run fails when it does not get there.
   const t0 = Date.now();
   let preloaded = 0;
-  while (lastSeq() < 5000 && Date.now() - t0 < 120_000) preloaded += await load(op, 1000, 1000, targets);
+  while (lastSeq() < 5000 && Date.now() - t0 < 120_000) {
+    const l = await load(op, 1000, 1000, targets);
+    expect(l.errors, "the preload's calls").toBe(0);
+    preloaded += l.accepted;
+  }
+  expect(lastSeq(), "the daemon's log after the preload").toBeGreaterThanOrEqual(5000);
   report.live_preload = { messages: preloaded, last_event_seq: lastSeq(), seconds: +((Date.now() - t0) / 1000).toFixed(1) };
 
   const context = await browser.newContext({ viewport: { width: 1440, height: 900 } });
   const page = await context.newPage();
   await openLive(daemon.web(), page);
   await expect(page.locator(".node.member")).toHaveCount(10);
+  // The snapshot holds 1000 events: the page's ring is filled to 5000 by pushes before anything is timed.
+  const ring = async () => {
+    if (!(await page.locator(".logs").isVisible())) await page.keyboard.press("l");
+    await expect(page.locator(".logs")).toBeVisible();
+    return Number(/of (\d+)/.exec((await page.locator(".logs .muted").first().textContent()) ?? "")?.[1] ?? 0);
+  };
+  const warm = Date.now();
+  while ((await ring()) < 5000 && Date.now() - warm < 120_000) expect((await load(op, 1000, 1000, targets)).errors).toBe(0);
+  expect(await ring(), "the page's event ring before P10").toBeGreaterThanOrEqual(5000);
+
   await page.evaluate(() => (window as unknown as { crewPerf: { measure(on: boolean): void } }).crewPerf.measure(true));
+  const log = () => page.evaluate(() => { const l = (window as unknown as { crewPerf: { log: PerfLog } }).crewPerf.log; return { applied: l.apply.length, events: l.lag.length }; });
   const out: Record<string, unknown> = {};
   for (const [name, rate, ms, limit, view] of [
     ["p10_steady_200_per_s_graph", 200, 5000, 18, "graph"],
@@ -159,13 +186,36 @@ test("P10, P11, P12, P15 against a real daemon: frames under real pushes, rows i
     ["p11_burst_2000_per_s_log", 2000, 3000, 20, "logs"],
   ] as const) {
     if (view === "logs" && !(await page.locator(".logs").isVisible())) await page.keyboard.press("l");
+    if (view === "graph" && !(await page.locator(".agent-graph").isVisible())) await page.evaluate(() => (location.hash = "#/"));
     await expect(page.locator(view === "logs" ? ".logs" : ".agent-graph")).toBeVisible();
     const seq0 = lastSeq();
+    const before = await log();
     const f = frames(page, ms);
-    const sent = await load(op, rate, ms, targets);
+    const l = await load(op, rate, ms, targets);
     const { intervals, long } = await f;
+    await page.waitForTimeout(500);
+    const after = await log();
+    const emitted = lastSeq() - seq0;
+    const applied = after.applied - before.applied;
+    const appliedEvents = after.events - before.events;
     const fs = stats(intervals);
-    out[name] = { sent_per_s: Math.round((sent * 1000) / ms), events_emitted: lastSeq() - seq0, frame_ms: fs, long_tasks: long.length };
+    out[name] = {
+      offered_per_s: Math.round((l.offered * 1000) / ms),
+      accepted_per_s: Math.round((l.accepted_in_window * 1000) / ms),
+      errors: l.errors,
+      events_emitted_per_s: Math.round((emitted * 1000) / ms),
+      pushes_applied_per_s: Math.round((applied * 1000) / ms),
+      event_pushes_applied_per_s: Math.round((appliedEvents * 1000) / ms),
+      frame_ms: fs,
+      long_tasks: long.length,
+    };
+    // The load was real: every call answered without error, the daemon took at least the steady rate
+    // (the steady rate; and for the burst more than that: the daemon, not the page, bounds what it takes), the page applied what the daemon emitted.
+    expect(l.errors, `${name}: calls refused`).toBe(0);
+    expect(l.accepted, `${name}: calls answered`).toBe(l.offered);
+    expect(l.accepted_in_window * 1000 / ms, `${name}: accepted per second`).toBeGreaterThanOrEqual(rate <= 200 ? 0.9 * rate : 240);
+    expect(appliedEvents, `${name}: event pushes the page applied of ${emitted} emitted`).toBeGreaterThanOrEqual(Math.floor(0.95 * emitted));
+    expect(applied, `${name}: pushes applied`).toBeGreaterThanOrEqual(l.accepted);
     expect(fs.p95!, name).toBeLessThanOrEqual(limit * SCALE);
     expect(long.length, name).toBe(0);
   }
