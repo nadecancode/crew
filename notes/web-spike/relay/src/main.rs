@@ -17,7 +17,8 @@ const MAX_HEAD: usize = 8 * 1024;
 struct Shared {
     socket: PathBuf,
     dist: PathBuf,
-    port: u16,
+    /// The only host name answered: `<label>.localhost:<port>`.
+    host: String,
     web_token: String,
     operator_token: String,
     /// `style-src 'self'` instead of allowing style elements (what xterm.js needs).
@@ -31,24 +32,37 @@ async fn main() {
     let dist = PathBuf::from(&args[2]);
     let port: u16 = args[3].parse().unwrap();
     let web_token = args[4].clone();
-    let strict_styles = args.get(5).is_some_and(|s| s == "strict");
+    let label = args[5].clone();
+    let flag = |name: &str| args[6..].iter().any(|a| a == name);
+    let strict_styles = flag("strict");
+    // The design binds both loopback addresses; `v4only` leaves `::1` to whoever takes it.
+    let v4_only = flag("v4only");
     let operator_token = crew_core::paths::read_operator_token(&socket)
         .unwrap()
         .expect("operator token");
-    let listener = TcpListener::bind(("127.0.0.1", port)).await.unwrap();
-    let port = listener.local_addr().unwrap().port();
-    eprintln!("listening on http://127.0.0.1:{port}/#k={web_token}");
-    let shared = Arc::new(Shared { socket, dist, port, web_token, operator_token, strict_styles });
-    loop {
-        let (stream, _) = listener.accept().await.unwrap();
-        stream.set_nodelay(true).ok();
-        let shared = shared.clone();
-        tokio::spawn(async move {
-            if let Err(e) = serve(shared, stream).await {
-                eprintln!("conn: {e}");
-            }
-        });
+    let v4 = TcpListener::bind(("127.0.0.1", port)).await.unwrap();
+    let port = v4.local_addr().unwrap().port();
+    // `<label>.localhost` resolves to both loopback addresses: own both.
+    let v6 = if v4_only { None } else { Some(TcpListener::bind(("::1", port)).await.expect("binding [::1]")) };
+    let host = format!("{label}.localhost:{port}");
+    eprintln!("listening on http://{host}/#k={web_token}");
+    let shared = Arc::new(Shared { socket, dist, host, web_token, operator_token, strict_styles });
+    let accept = |listener: TcpListener, shared: Arc<Shared>| async move {
+        loop {
+            let (stream, _) = listener.accept().await.unwrap();
+            stream.set_nodelay(true).ok();
+            let shared = shared.clone();
+            tokio::spawn(async move {
+                if let Err(e) = serve(shared, stream).await {
+                    eprintln!("conn: {e}");
+                }
+            });
+        }
+    };
+    if let Some(v6) = v6 {
+        tokio::spawn(accept(v6, shared.clone()));
     }
+    accept(v4, shared).await;
 }
 
 async fn read_head(stream: &mut TcpStream) -> std::io::Result<Vec<u8>> {
@@ -94,8 +108,8 @@ async fn serve(shared: Arc<Shared>, mut stream: TcpStream) -> Result<(), Box<dyn
             .and_then(|h| std::str::from_utf8(h.value).ok())
             .map(str::to_string)
     };
-    let hosts = [format!("127.0.0.1:{}", shared.port), format!("localhost:{}", shared.port)];
-    let host_ok = get("host").is_some_and(|h| hosts.contains(&h));
+    // Exactly this server's name: not `127.0.0.1`, not `localhost`, not an older label.
+    let host_ok = get("host").is_some_and(|h| h == shared.host);
     if !host_ok {
         return Ok(respond(&mut stream, "421 Misdirected Request", "text/plain", "", b"wrong host\n").await?);
     }
@@ -104,7 +118,7 @@ async fn serve(shared: Arc<Shared>, mut stream: TcpStream) -> Result<(), Box<dyn
     }
     let path = req.path.unwrap_or("/").split('?').next().unwrap_or("/").to_string();
     if path == "/ws" {
-        let origin_ok = get("origin").is_some_and(|o| hosts.iter().any(|h| o == format!("http://{h}")));
+        let origin_ok = get("origin").is_some_and(|o| o == format!("http://{}", shared.host));
         let upgrade = get("upgrade").is_some_and(|u| u.eq_ignore_ascii_case("websocket"));
         let key = get("sec-websocket-key");
         let version_ok = get("sec-websocket-version").as_deref() == Some("13");

@@ -60,25 +60,38 @@ for _ in $(seq 60); do
     grep -q '^tasks *6/6 done' <<<"$status" && break
     sleep 0.5
 done
-"$relay" "$sock" "$here/web/dist" "$port" spiketoken & pids+=($!)
-"$relay" "$sock" "$here/web/dist" "$((port + 1))" spiketoken strict & pids+=($!)
+label=spike
+"$relay" "$sock" "$here/web/dist" "$port" spiketoken "$label" & pids+=($!)
+"$relay" "$sock" "$here/web/dist" "$((port + 1))" spiketoken "$label" strict & pids+=($!)
 sleep 0.5
 
 echo "== HTTP checks"
+name=$label.localhost:$port
+at=http://127.0.0.1:$port
+# curl goes to the address; the server judges the Host it is asked for.
 get() { curl -s -o /dev/null -w '%{http_code}' --max-time 5 "$@"; }
-up=(-H Upgrade:websocket -H Connection:Upgrade -H Sec-WebSocket-Version:13 -H Sec-WebSocket-Key:dGhlIHNhbXBsZSBub25jZQ==)
+host() { printf 'Host: %s' "$1"; }
+up=(-H Upgrade:websocket -H Connection:Upgrade -H Sec-WebSocket-Version:13 -H Sec-WebSocket-Key:dGhlIHNhbXBsZSBub25jZQ== -H "$(host "$name")")
 check() { [ "$2" = "$3" ] && echo "ok   $1: $2" || { echo "FAIL $1: got $2, want $3" >&2; exit 1; }; }
-check "index"                         "$(get "http://127.0.0.1:$port/")" 200
-check "foreign Host (DNS rebinding)"  "$(get -H "Host: evil.example:$port" "http://127.0.0.1:$port/")" 421
-check "POST"                          "$(get -X POST "http://127.0.0.1:$port/")" 405
-check "upgrade without Origin"        "$(get "${up[@]}" "http://127.0.0.1:$port/ws")" 403
-check "upgrade from another site"     "$(get "${up[@]}" -H "Origin: http://evil.example" "http://127.0.0.1:$port/ws")" 403
-check "upgrade from another local port" "$(get "${up[@]}" -H "Origin: http://127.0.0.1:5173" "http://127.0.0.1:$port/ws")" 403
+check "index, by the server's name"     "$(get -H "$(host "$name")" "$at/")" 200
+check "the same on ::1"                 "$(get -H "$(host "$name")" "http://[::1]:$port/")" 200
+check "Host 127.0.0.1"                  "$(get -H "$(host "127.0.0.1:$port")" "$at/")" 421
+check "Host localhost"                  "$(get -H "$(host "localhost:$port")" "$at/")" 421
+check "Host with another label"         "$(get -H "$(host "other.localhost:$port")" "$at/")" 421
+check "foreign Host (DNS rebinding)"    "$(get -H "$(host "evil.example:$port")" "$at/")" 421
+check "POST"                            "$(get -H "$(host "$name")" -X POST "$at/")" 405
+check "upgrade without Origin"          "$(get "${up[@]}" "$at/ws")" 403
+check "upgrade from another site"       "$(get "${up[@]}" -H "Origin: http://evil.example" "$at/ws")" 403
+check "upgrade from another local port" "$(get "${up[@]}" -H "Origin: http://127.0.0.1:5173" "$at/ws")" 403
+check "upgrade from the bare address"   "$(get "${up[@]}" -H "Origin: http://127.0.0.1:$port" "$at/ws")" 403
 # A listener made by tokio has no SO_REUSEPORT: nobody else can share its port.
 rebind=$(PORT=$port bun -e 'try { Bun.listen({ hostname: "127.0.0.1", port: Number(process.env.PORT), reusePort: true, socket: { data() {} } }); console.log("bound"); process.exit(0) } catch (e) { console.log(e.code) }')
 check "second bind of the port with SO_REUSEPORT" "$rebind" EADDRINUSE
 
+echo "== snapshot against pushes on one connection (the daemon as it is today)"
+bun "$here/snapshot-race.mjs" "$sock" 400
+
 echo "== browser checks (Playwright)"
-PORT=$port CREW=$crew WS=$ws bunx playwright test
+PORT=$port LABEL=$label CREW=$crew WS=$ws RELAY=$relay SOCK=$sock DIST=$here/web/dist bunx playwright test
 
 echo PASS

@@ -16,6 +16,22 @@ actions, with the TUI's views, keys and commands, and the VCS animations of
 **Implementation waits for the jj work** (operator ordering): it starts on the
 commit `jj-final-review` ends with.
 
+**Revision 2.** After the review of revision 1 (m-f40b1a7f31f0; the direction
+was agreed in m-a97923a7e48c):
+- **P1, origin.** The page's origin outlived the server: whoever held the port
+  while crew was stopped could leave a page behind that read the next
+  server's token. Each server start now has an origin of its own,
+  `http://<label>.localhost:<port>/`, on both loopback addresses, never
+  reused; tabs do not survive a restart; the server proves itself to the
+  page (W5, §security "One origin per server start").
+- **P2, snapshot order.** A snapshot on a subscribed connection is a barrier
+  in the push stream, given by the server; the page discards pushes while one
+  is in flight (W13, §transport "A snapshot is a barrier").
+- **P2, keys.** `tab` is the browser's again; the graph is one tab stop with
+  arrow keys inside (§ui "Focus and keys").
+Both findings were reproduced before they were fixed in the design; the
+replays are in the spike.
+
 **Verification.** The transport, the security checks, the build and the
 performance figures below were tried in a spike against a real daemon (this
 branch, protocol 4) running the scripted team of `examples/dry-run.yaml`:
@@ -24,18 +40,21 @@ branch, protocol 4) running the scripted team of `examples/dry-run.yaml`:
 - a SolidJS prototype (store, radial SVG graph with pan, zoom, drag and
   pulses, a virtual log, an xterm.js terminal over `attach`);
 - vitest unit tests and Playwright browser tests, including the measurements
-  §perf quotes.
+  §perf quotes and the origin attack of revision 2;
+- `snapshot-race.mjs`, which shows the snapshot race on the daemon as it is.
 
 `notes/web-spike/run.sh` replays all of it and prints `PASS` (crew built from
 this branch, bun 1.3.9, node 24.19.0, Chromium 145 headless): `relay/` is the
 Rust relay, `web/` the prototype with its tests. Findings from those runs are
 marked **(observed)**.
 
-The spike is evidence, not the implementation. It differs from the design in
-two ways, both on purpose: it is a separate process relaying to the socket
-(the design puts the server in the daemon, §transport), and it accepts a fixed
-token from the URL fragment (pairing codes and session tokens, §security, are
-designed here and covered by the tests of §tests, not spiked).
+The spike is evidence, not the implementation. It differs from the design on
+purpose: it is a separate process relaying to the socket (the design puts the
+server in the daemon, §transport); it accepts a fixed token from the URL
+fragment and takes its host label as an argument (pairing codes, session
+tokens, the server proof and the label made at start, §security, are designed
+here and covered by the tests of §tests, not spiked); and the daemon it talks
+to has no snapshot barrier yet.
 
 Sections: [§scope](#scope) · [§transport](#transport) · [§security](#security) ·
 [§build](#build) · [§ui](#ui) · [§graphs](#graphs) · [§perf](#perf) ·
@@ -65,25 +84,29 @@ Sections: [§scope](#scope) · [§transport](#transport) · [§security](#securi
 | W1 | The server runs **inside the daemon**, and only after `crew web` asked for it. Not a separate bridge process. | §transport |
 | W2 | **WebSocket**, carrying `crew_core::rpc` frames as they are: one WebSocket is one daemon connection. Not SSE. | §transport |
 | W3 | **No polling**: every fetch is caused by a push or by something the operator did. The terminal is a stream (`attach`), not a screen read on a timer. | §transport |
-| W4 | `PROTOCOL_VERSION` 4 → 5: three calls (`web_open`, `web_close`, `web_pair`) and `SessionInfo.web`. | §transport |
-| W5 | Loopback only (`127.0.0.1`), a port that is stable per workspace. No TLS, no remote access. | §security |
-| W6 | A **one-time pairing code** in the URL fragment is traded for a **session token**; the token travels in `hello`, never in a cookie, a URL or a header. | §security |
+| W4 | `PROTOCOL_VERSION` 4 → 5: four calls (`web_open`, `web_close`, `web_pair`, `web_prefs`), `SessionInfo.web`, `HelloInfo.web_proof`, and the barrier. | §transport |
+| W5 | Loopback only, both addresses. **Every server start has an origin of its own**, `http://<label>.localhost:<port>/` with a random label that is never reused; the server answers to no other name. Tabs do not survive a restart. No TLS, no remote access. | §security |
+| W6 | A **one-time pairing code** in the URL fragment is traded for a **session token** and a **server proof**; the token travels in `hello`, never in a cookie, a URL or a header; the proof comes back in the reply. | §security |
 | W7 | A web session is an operator session without `web_open`, `web_close` and `load_team`. | §security |
 | W8 | Sources in `web/`; the built bundle is **committed** in `crates/crew/web-dist/` and embedded by `crates/crew/build.rs`. `cargo install` needs no node. A test fails when the bundle is older than the sources. | §build |
 | W9 | SolidJS 1.9, Vite 7, TypeScript, bun. No router, no component kit, no state library. xterm.js is the one large dependency, loaded only when a terminal opens. | §build |
 | W10 | Graphs and charts are **hand-written SVG**: no graph, layout or chart library. | §graphs |
 | W11 | The animation state machine is a port of `crew_tui::anim::Anims`; parity with the TUI is tested with cases generated from the Rust code. | §graphs |
 | W12 | The Rust side publishes **wire fixtures** generated from the real types; the frontend's decoders, its mock server and its tests read them. Nothing is generated into the frontend's tree. | §tests |
+| W13 | On a subscribed connection a **snapshot is a barrier**: no push before its reply is newer than it, every push after its marker follows it. The server guarantees it; the page relies on it. | §transport |
 
 ### Not built (v1)
 
 - Launching a team from the browser (the launcher, `crew run`): the dashboard
   is for a session that runs. `load_team` is refused on web connections (W7).
-- Access from another machine, TLS, accounts. The listener binds `127.0.0.1`
-  and there is no flag to change that.
+- Access from another machine, TLS, accounts. The listener binds the loopback
+  addresses and there is no flag to change that.
 - One page for several sessions. Each daemon serves its own workspace on its
   own port, as each `crew attach` shows one.
 - A phone layout. The page works down to 900 px; below that it scrolls.
+- Safari: it does not resolve the dashboard's address (§security).
+- Tabs that live through a restart of the server: a restart has a new
+  address by design (§security).
 - History the daemon does not keep: usage over time is charted from what the
   page saw since it was opened (§graphs).
 - Changes to the TUI. It may show `SessionInfo.web` later; nothing here needs
@@ -216,8 +239,9 @@ impl Session {
     pub fn new(daemon: &Daemon, transport: Transport) -> (Self, mpsc::Receiver<ServerFrame>);
     /// Handle one request as received (one line, one text message): parse,
     /// dispatch, queue the response, start the subscription after the reply.
-    /// Malformed JSON is answered with `invalid`, as today. `false`: the
-    /// writer is gone, stop reading.
+    /// A `snapshot` on a subscribed connection is a barrier in the push
+    /// stream (see "A snapshot is a barrier"). Malformed JSON is answered
+    /// with `invalid`, as today. `false`: the writer is gone, stop reading.
     pub async fn request(&mut self, text: &str) -> bool;
     pub fn authenticated(&self) -> bool;
     /// The connection ended: stop its stream task, release its listener slot.
@@ -243,7 +267,7 @@ impl Session {
 
 ```
 → {"id":1,"method":"hello","params":{"role":"operator","token":"<session>","client":"web","protocol":5}}
-← {"id":1,"result":{"role":"operator","agent_id":null,"project":"demo","version":"0.1.0","protocol":5,"pid":4242}}
+← {"id":1,"result":{"role":"operator","agent_id":null,"project":"demo","version":"0.1.0","protocol":5,"pid":4242,"web_proof":"<proof>"}}
 → {"id":2,"method":"subscribe"}
 ← {"id":2,"result":{"subscribed":true}}
 → {"id":3,"method":"snapshot","params":{"messages":300,"events":1000}}
@@ -252,13 +276,10 @@ impl Session {
 …
 ```
 
-Subscribing comes **before** the snapshot, as in `crew-tui/src/net.rs`:
-anything that happened earlier is in the snapshot, anything later arrives as a
-push, and the reducers are idempotent for the overlap:
-- `event`: dropped when `seq != 0 && seq <= last.seq`;
-- `message`: dropped when its `id` is among the newest 64;
-- `agent`, `task`, `session`: replace by id;
-- `agent_removed`: removing what is absent is nothing.
+The page checks `web_proof` before it does anything else with the connection
+(§security). Subscribing comes **before** the snapshot, as in
+`crew-tui/src/net.rs`. What makes the pair gap-free on one connection is the
+next section.
 
 Pushes the page handles: `event`, `message`, `agent`, `agent_removed`, `task`,
 `session`, `resync`, `shutdown`; on a terminal socket `pty` and `pty_closed`.
@@ -298,12 +319,98 @@ connection's subscription, which is why the terminal has a socket of its own.
 | `message_get` | `{id}` | `Message` | a message not in memory |
 | `task_get` | `{id}` | `TaskCard` | task panel |
 | `git_diff` | `{agent}` | `GitOutcome` | diff tab |
+| `web_prefs` | `{set?}` | `{prefs}` | after `hello`; when a preference changes |
 | `attach`, `attach_input`, `attach_resize` | – | – | terminal socket |
 
 Timeouts are the TUI's (`net.rs`): 3 s; 30 s for kill, restart, resume of one
 agent and `agent_set_model`; 90 s for `resume` and `shutdown`; 20 s for
 `models_list`. A call that times out is reported as failed and its late answer
 is ignored; the connection stays.
+
+### A snapshot is a barrier
+
+**The problem (reviewer, m-97031d916788; reproduced).** The TUI subscribes on
+one connection and fetches the snapshot on another, and applies the snapshot
+before the pushes it buffered meanwhile. On one connection the snapshot's
+reply and the pushes share a queue, and two tasks fill it: the request
+handler (which captures the state and then queues the reply) and the
+subscription's forwarder. A change made after the capture can have its push
+queued **before** the reply. A page that applies the push and then replaces
+its state with the snapshot has lost that change, and nothing brings it back
+until the same agent or task changes again. Replacing by id is not a fence.
+**(observed)** `notes/web-spike/snapshot-race.mjs`, against the daemon as it
+is: one subscribed connection asking for snapshots while 400 messages are
+sent to one agent; 45 of 56 snapshot replies were older than a push that had
+arrived before them.
+
+**The guarantee (server).** On a subscribed connection, `Session` handles
+`snapshot` as a barrier in that connection's push stream:
+
+1. it takes a **new** receiver on the daemon's push channel: the marker `M`.
+   A receiver gets what is sent after it was made;
+2. it stops the connection's forwarder **and waits until that task has
+   ended** (so nothing of the old stream can be queued later);
+3. it captures the snapshot;
+4. it queues the reply;
+5. it starts a forwarder on the receiver of step 1.
+
+So on the wire:
+
+```
+… pushes sent before M …   ← {"id":3,"result":{Snapshot}}   … every push sent after M …
+```
+
+- **Before the reply: only pushes older than the snapshot.** Each was queued
+  by the old forwarder, which had ended before the capture; a push is sent
+  after its change is made, so the change is in the snapshot. Overwriting
+  them loses nothing. Pushes the old forwarder had not queued when it was
+  stopped are dropped from this position; those sent before `M` are in the
+  snapshot (events and messages in its lists), those sent after `M` come
+  again after the reply.
+- **After the reply: every push sent after `M`, in order, none missing.** A
+  change made after the capture is among them. A change made between `M` and
+  the capture is in the snapshot *and* comes again as a push.
+- A lagging forwarder still sends `resync`; the snapshot the page then asks
+  for is a barrier like any other.
+- A connection that is not subscribed (the TUI's snapshot connection, `crew
+  status`) is answered as today.
+
+```rust
+// crates/crew/src/daemon/server.rs
+pub(crate) struct Conn {
+    // …
+    /// A subscription to start once the pending response has been queued:
+    /// from now (`subscribe`), or from a receiver taken before a snapshot was
+    /// captured. Replaces `subscribe_after_reply`.
+    pub subscribe_after_reply: Option<broadcast::Receiver<Push>>,
+}
+```
+
+**The rule (page).**
+1. From the moment it sends `snapshot` until the reply arrives, the page
+   **discards** pushes (they are older than the snapshot that is coming).
+   This includes the time between `subscribe` and the first snapshot, and it
+   includes `resync`: a lag reported before the reply is covered by that
+   snapshot. So there is never more than one snapshot in flight on a
+   connection; a `resync` after the reply starts the next one.
+2. The reply replaces agents, tasks, session, questions and both rings.
+3. From then on every push is applied in the order received:
+   - `agent`, `task`, `session`: replace by id; `agent_removed`: remove;
+   - `event`: dropped when `seq != 0 && seq <= last.seq` (the snapshot's last
+     event is the watermark);
+   - `message`: dropped when its `id` is among the newest 64.
+
+**Why this converges without versions on agents and tasks.** After the reply
+the page replays the daemon's own stream from a point not later than the
+capture. The last push for an entity always carries its latest state, so the
+page ends equal to the daemon. A push for a change that is already in the
+snapshot may show an earlier state of that entity for as long as it takes
+the next push to arrive (two changes of one agent between `M` and the
+capture: a window of well under a millisecond, and the two pushes are
+adjacent in the stream). The TUI has the same property today. A revision
+counter on every agent and task, stamped under the model lock, would remove
+even that; it would touch every mutation in the daemon and two wire types,
+and is not needed for correctness.
 
 ### No polling (W3)
 
@@ -336,11 +443,13 @@ The TUI reads the terminal every 2 s (200 ms while typing). The web does not:
 | what happens | what the page does |
 |---|---|
 | the state socket closes or errors | status "reconnecting"; every call in flight fails with `closed`; retry after 250 ms, doubling to 5 s, ±20 % jitter; retry at once when the tab becomes visible or the browser reports `online` |
-| a connection opens | `hello`, `subscribe`, `snapshot`; the snapshot **replaces** agents, tasks, session, questions and both rings; VCS marks and links are rebuilt with `Anims.resume` (jj-design §anim: history starts no pulse) |
-| `resync` push | `snapshot` again on the same connection, applied the same way |
-| `shutdown` push | status "the team was stopped"; no retry (the daemon is gone and its tokens with it); the page comes back when another tab stores a new token (below) |
-| `hello` answers `unauthorized` | the stored token is dropped; screen "signed out: run `crew web`"; the page listens for a token another tab stores (below) |
-| `hello` answers `protocol` | "crew was upgraded": the page reloads itself once (the new daemon serves the new bundle); if the versions still differ it says so and stops |
+| a connection opens | `hello`; check `web_proof`; `subscribe`; `snapshot`, applied as the barrier rules say; VCS marks and links are rebuilt with `Anims.resume` (jj-design §anim: history starts no pulse) |
+| `resync` push | `snapshot` again on the same connection (one in flight at most) |
+| `shutdown` push | the session is removed from storage; status "the dashboard was stopped: run `crew web`"; no retry, ever |
+| `hello` is answered without the right `web_proof` | the same: whoever answers is not this page's server (§security) |
+| `hello` answers `unauthorized` | the same, with "signed out: run `crew web`" (the session was dropped to make room for a seventeenth) |
+| `hello` answers `protocol` | cannot happen with the embedded bundle (page and daemon are one binary); shown as an error, no retry, **no reload** |
+| reconnecting fails for 30 s | the page gives up as for `shutdown`. A server that is alive answers within a retry or two; one that is gone never comes back under this address (a new start has a new name, and answers the old name with `421`), so there is nothing to wait for |
 | a terminal socket closes | that terminal shows "disconnected" and re-attaches when the state socket is live again (the attachment starts with a repaint of the screen) |
 
 **Calls are not replayed.** A request may have run before the connection
@@ -350,12 +459,14 @@ id is a no-op in the daemon, so a message whose reply was lost is sent again
 once after the reconnect. Every other failed action is reported and left to
 the operator.
 
-**After a daemon restart** the port is the same (§security) but every token is
-new. `crew web` opens a tab that pairs and stores the new token; tabs still
-open from before receive the browser's `storage` event for that key and
-reconnect with it. So one `crew web` brings every old tab back.
+**A restart ends every tab.** Reconnecting is for a connection that dropped
+while the server lives (the laptop slept, the tab was frozen). A server that
+was restarted (the daemon, or `crew web --stop` and `crew web`) has a new
+address and new tokens (§security): `crew web` opens it, and the tabs of the
+old address stay stopped. The page never navigates or reloads itself to
+follow a server.
 
-### `crew web` and the three calls (W4)
+### `crew web` and the new calls (W4)
 
 ```
 crew web [--port N] [--no-open] [--json]     start if needed, print the address, open the browser
@@ -364,8 +475,9 @@ crew web --stop                               stop serving; every browser sessio
 
 ```
 $ crew web
-web        http://127.0.0.1:23417/
-open       http://127.0.0.1:23417/#pair=3f9a…e1   (works once, for 2 minutes)
+web        http://c7f3a09b52e14d6f8a1b3c5d7e9f0a2b.localhost:23417/
+open       http://c7f3a09b52e14d6f8a1b3c5d7e9f0a2b.localhost:23417/#pair=3f9a…e1   (works once, for 2 minutes)
+note       opens in Chromium-based browsers and Firefox; Safari cannot resolve this address
 ```
 
 - Run again while the dashboard is served, it prints the same address with a
@@ -381,7 +493,7 @@ open       http://127.0.0.1:23417/#pair=3f9a…e1   (works once, for 2 minutes)
   open is not an error, the address is printed either way.
 - Like every operator command it goes through `Client::operator`, so it is
   refused inside an agent (`CREW_IDENTITY`) and needs the operator token.
-- `crew status` prints `web        http://127.0.0.1:23417/` while it serves.
+- `crew status` prints the `web` line while it serves.
 
 ```rust
 // crates/crew-core/src/rpc.rs
@@ -397,11 +509,14 @@ pub enum Call {
     WebClose,
     /// A browser, before `hello`: trade a pairing code for a session token.
     WebPair { code: String },
+    /// Operator, either transport: the dashboard's preferences for this
+    /// workspace. With `set` they are replaced first. Answers `{"prefs": {…}}`.
+    WebPrefs { #[serde(default)] set: Option<Value> },
 }
 
 /// What `web_open` answers. `Debug` leaves `pair_url` out.
 pub struct WebInfo {
-    /// `http://127.0.0.1:<port>/`
+    /// `http://<label>.localhost:<port>/`: this server's origin (§security).
     pub url: String,
     pub port: u16,
     /// `url` with `#pair=<code>`: opens a browser session once.
@@ -411,8 +526,21 @@ pub struct WebInfo {
     pub started: bool,
 }
 
-/// What `web_pair` answers. `Debug` leaves the token out.
-pub struct WebPaired { pub token: String }
+/// What `web_pair` answers. `Debug` leaves both out.
+pub struct WebPaired {
+    /// What the page presents in `hello`.
+    pub token: String,
+    /// What the server presents in every `hello` reply of this session.
+    pub proof: String,
+}
+
+pub struct HelloInfo {
+    // …
+    /// On the web transport: the proof of the session whose token was
+    /// presented. Absent on the socket. `Debug` leaves it out.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub web_proof: Option<String>,
+}
 
 pub struct SessionInfo {
     // …
@@ -424,21 +552,30 @@ pub struct SessionInfo {
 ```
 
 `web_close` answers `{"stopped": true}` (`false` when nothing was served).
-`Call::method()` gains the three names.
+`Call::method()` gains the four names.
+
+**Preferences live in the daemon, not in the browser.** The page's origin is
+new at every start (§security), so nothing kept in the browser outlasts a
+restart. What should (where the operator dragged the agents, whether
+single-key shortcuts are off) is one JSON object per workspace, kept by the
+daemon in `crew.db` (`meta` key `web_prefs`): at most 16 KiB, an object, else
+`invalid`. The page reads it after `hello`, validates every field it uses
+(unknown keys and wrong types are dropped), and writes the whole object back
+500 ms after the last change. Two tabs: the last write wins.
 
 **Why the version moves.** The rule in `rpc.rs` is to bump for new enum values
 and changed meanings. Without a bump a new `crew web` against a daemon started
 before the upgrade would fail with `malformed request: unknown variant`; with
 it the operator gets the existing message, "restart the team after upgrading".
-The page uses the same number: a tab left open across an upgrade is told
-`protocol` by the new daemon and reloads. The manifest test in `rpc.rs` moves
+The barrier is a changed meaning of `snapshot` on a subscribed connection as
+well. The manifest test in `rpc.rs` moves
 to `(5, version_5)` with unchanged lists (no new push kind, role or status).
 
 **Events** (through `Daemon::emit`, so they are in the log like any other):
 
 | event_type | level | message |
 |---|---|---|
-| `web.started` | info | `web dashboard on http://127.0.0.1:23417/` |
+| `web.started` | info | `web dashboard on http://c7f3….localhost:23417/` |
 | `web.stopped` | info | `web dashboard stopped` |
 | `web.paired` | info | `a browser was paired (3 sessions)` |
 | `web.auth_failed` | warn | `7 refused web logins in the last minute`: at most one event a minute |
@@ -457,15 +594,20 @@ design-b3.md drew for the socket: *no process running for an agent may
 authenticate as the operator*.
 
 1. **Code running for an agent on this host.** Sandboxed agents keep the host
-   network (design-b3.md §3.2), so they can connect to any loopback port. They
-   cannot read the daemon's memory, the runtime directory, the operator's home
-   (a tmpfs in the sandbox) or the host's `/proc` (own PID namespace).
+   network (design-b3.md §3.2), so they can connect to any loopback port, and
+   bind any loopback port that is free. They cannot read the daemon's memory,
+   the runtime directory, the operator's home (a tmpfs in the sandbox) or the
+   host's `/proc` (own PID namespace).
 2. **Other local users.** Loopback TCP has no file permissions: unlike the
-   socket, any user of the machine can connect.
+   socket, any user of the machine can connect, and bind.
 3. **A page of another origin in the operator's browser**: any web site, and
    in particular a page an agent serves on another local port, which the
    operator is likely to open (a dev server the agent just started).
-4. **Text and terminal output produced by agents**, rendered in the page.
+4. **Whoever holds the dashboard's port at another time.** A loopback port
+   belongs to nobody: before the server starts and after it stops, 1 or 2 can
+   bind it and serve pages to a browser that still has a tab, a bookmark, a
+   cache entry or a service worker for that address.
+5. **Text and terminal output produced by agents**, rendered in the page.
 
 Out of scope, as in design-b3.md: processes of the operator outside a sandbox
 (they can read the operator token file), teams run with `sandbox: off`, the
@@ -473,16 +615,24 @@ browser and its extensions, and denial of service by a local process.
 
 ### The listener (W5)
 
-- Bound to `127.0.0.1` only. There is no option for another address.
+- Bound to the loopback addresses only, **both of them, on the same port**:
+  `127.0.0.1` and `[::1]`. There is no option for another address. The
+  dashboard's host name (below) resolves to both, and a browser tries `::1`
+  first: **(observed)** with the relay on `127.0.0.1` alone and another
+  program on `[::1]` at the same port, Chromium loaded the other program's
+  page for the dashboard's address. A port is used only if both addresses
+  could be bound. A host without IPv6 loopback (`EADDRNOTAVAIL`, or
+  `EAFNOSUPPORT`) is served on `127.0.0.1` alone: nobody else can bind there
+  what does not exist. `EADDRINUSE` on either address means the port is
+  taken.
 - Port: `23000 + (h mod 1000)`, where `h` is the hash of the state directory
   that already names the socket (`paths::session_hash`, FNV-1a), exposed as
-  `crew_core::paths::web_port(state_dir)`. If that port is taken
-  the next 15 are tried; if all are taken `web_open` fails with `unavailable`
-  and names `--port`. `--port N` means exactly `N` or an error.
-  - Stable per workspace, so an address survives a daemon restart: tabs
-    reconnect (§transport) and a bookmark keeps working.
-  - Below the kernel's ephemeral range (32768–60999), so an outgoing
-    connection of another program does not take it by chance.
+  `crew_core::paths::web_port(state_dir)`. If that port is taken the next 15
+  are tried; if all are taken `web_open` fails with `unavailable` and names
+  `--port`. `--port N` means exactly `N` or an error. The port is a
+  convenience (the same workspace, the same number, below the kernel's
+  ephemeral range 32768–60999); nothing in the security of the page rests on
+  it, and the address as a whole is new at every start (next section).
 - **Never `SO_REUSEPORT`.** With that option on the listener, another process
   of the same user (an agent) can bind the same port and the kernel hands it a
   share of the connections: the operator's browser would send its token to the
@@ -490,38 +640,131 @@ browser and its extensions, and denial of service by a local process.
   bound the port and received 11 of 12 connections; against one without it
   (what `tokio::net::TcpListener::bind` makes), binding the port again is
   refused with `EADDRINUSE`, with the option, without it, and on `0.0.0.0`.
-  The listener is made with `TcpListener::bind` and nothing else; a test
+  The listeners are made with `TcpListener::bind` and nothing else; a test
   binds the port again with the option set and must be refused.
 - Plain HTTP. TLS on loopback would need a certificate the browser does not
   trust and would protect nothing: loopback traffic cannot be read without
-  privileges that already give everything.
+  privileges that already give everything. It would not give the origin an
+  owner either: an origin is scheme, host and port whatever the certificate.
+
+### One origin per server start
+
+**The problem (reviewer, m-f0921e2e2bcf; reproduced).** A browser keeps state
+per origin: `localStorage`, the HTTP cache, service workers, and open
+documents that go on running. With an address like `http://127.0.0.1:<port>/`
+the origin outlives the server, and the port can be bound by someone else
+while crew is stopped. A page that someone served there (to a tab left open
+and reloaded, to a bookmark) keeps running in the dashboard's origin after
+the port is released; when the next daemon starts on the same port and a new
+tab signs in, the old page reads the new token out of the shared storage, or
+is handed it by the `storage` event. A service worker installed in between
+would take over every later load. "The old token is dead" does not help: it
+is the *new* token that leaks. **(observed)** `notes/web-spike/web/e2e/origin.spec.ts`
+replays it: with the same origin for two server lifetimes, the page left open
+by the squatter receives the second server's token.
+
+A stable port, a random port and a port never used twice all fail the same
+way, because an attacker can prepare origins in advance: one visit to an
+agent's page can load frames from thousands of loopback ports the agent
+serves at that moment, each leaving a service worker or a cached page behind
+for whoever binds that port later.
+
+**The rule.** The server's origin is made at its start, cannot be known or
+prepared before, and is never used again:
+
+```
+http://<label>.localhost:<port>/          e.g. http://c7f3a09b52e14d6f8a1b3c5d7e9f0a2b.localhost:23417/
+```
+
+- `<label>`: 128 random bits as 32 hex digits, generated **after** both
+  listeners are bound, new at every start of the server (`web_open` after
+  `web_close`, or a new daemon), kept in memory only. A label is never
+  written down and never used twice.
+- Names under `.localhost` resolve to the loopback addresses inside the
+  browser, without a DNS query (Chromium-based browsers and Firefox;
+  RFC 6761 §6.3). **(observed)** Chromium loads the dashboard from
+  `http://<label>.localhost:<port>/` and gives it that origin.
+- The server answers **only** to its own name: `Host` must be exactly
+  `<label>.localhost:<port>`. `127.0.0.1:<port>`, `localhost:<port>` and a
+  name with another label get `421`. So no document of this server is ever
+  delivered into an origin that outlives it.
+- What this gives: while the server runs, its origin is served by it alone
+  (it holds the port on both addresses, unshared). Before it started the
+  origin did not exist, so nothing could be left in it. After it stops the
+  origin is dead: no server of crew will ever answer for that name again, so
+  nothing new is ever stored there. Whoever takes the port afterwards can
+  serve the dead name (an old tab's requests tell it the label) and read
+  what the origin holds: a token of a server that no longer exists.
+  **(observed)** with a new label for the second server, the page left open
+  by the squatter sees no `storage` event and reads only the first server's
+  token.
+- The label is not a secret and need not be: it appears in `SessionInfo.web`,
+  in `crew status` and in the `web.started` event. Knowing it while the
+  server runs gives nothing (the port cannot be shared; requests still need
+  a token); the protection is that it is new and not reused.
+- **Rules for the page**, which keep the origin's state bounded by the
+  server's life:
+  - it registers no service worker, and uses no browser storage but
+    `localStorage` under the one key `crew.web.session` (the token and the
+    server proof); preferences are kept by the daemon (`web_prefs`);
+  - it does not listen for `storage` events and never takes a credential
+    from anywhere but its own pairing;
+  - it never reloads or navigates by itself on anything a server says;
+  - on `shutdown`, on a failed server proof (below) and on `unauthorized` it
+    removes `crew.web.session` and stops; it does not retry.
+- **Tabs do not survive a restart.** After the daemon (or the web server) was
+  restarted, `crew web` prints a new address and opens it; a tab from before
+  shows "the dashboard was stopped: run `crew web`" and stays that way. This
+  is the price of the rule, and the operator's one command.
+- **Safari** does not resolve names under `.localhost` (WebKit bug 160504,
+  open since 2016): the page does not load there. Chromium-based browsers
+  and Firefox do. There is no fallback to an address by number: that address
+  would be an origin that outlives the server. `crew web` says which browsers
+  work when it prints the address.
+
+### The server proves itself to the page
+
+After the server stopped, a tab that is still open runs crew's own code and
+tries to reconnect; whoever took the port would receive that connection and
+could answer it with a snapshot of its own making: a dashboard the operator
+trusts, showing an agent's text, taking the operator's replies.
+
+So pairing gives the page two values: the **token** it presents, and a
+**proof** the server must present. `web_pair` answers both; every `hello` on
+the web transport is answered with the proof that belongs to the token
+(`HelloInfo.web_proof`); the page compares it with what it stored and, when
+it is missing or different, closes the connection, removes its session and
+shows "stopped". The proof is never sent by the page, so only the server that
+made the session can know it. The token an old tab sends to a squatter is the
+token of a server that is gone.
 
 ### Pairing code, session token (W6)
 
 ```
-crew web ──web_open──▶ daemon: makes code C (120 s, once)      prints http://127.0.0.1:P/#pair=C
+crew web ──web_open──▶ daemon: makes code C (120 s, once)   prints http://<label>.localhost:P/#pair=C
 browser  ──GET /──────▶ bundle (no credential needed, no state in it)
 page:      takes C out of the URL (history.replaceState) before anything else
 page     ──WebSocket /ws──▶ Host and Origin checked
-page     ──web_pair{C}────▶ C is spent; daemon makes session token T
-page:      stores T (localStorage "crew.web.session")
-page     ──hello{token: T}─▶ operator session
+page     ──web_pair{C}────▶ C is spent; daemon makes session token T and proof V
+page:      stores T and V (localStorage "crew.web.session")
+page     ──hello{token: T}─▶ operator session; the reply carries V; the page checks it
 ```
 
 - **Code.** `crew_core::util::new_token()` (244 random bits). Kept in the
   daemon's memory with its expiry. At most 8 outstanding (a ninth drops the
   oldest). Spent by the first `web_pair` that presents it; a wrong, spent or
   expired code answers `unauthorized` and changes nothing.
-- **Session token.** `new_token()`, memory only: not in `crew.db`, the state
-  directory, events, pushes, logs or `SessionInfo`. Valid until `web_close` or
-  the daemon exits. Compared with `ct_eq`.
+- **Session token and proof.** Two values from `new_token()`, memory only:
+  not in `crew.db`, the state directory, events, pushes, logs or
+  `SessionInfo`. Valid until `web_close` or the daemon exits. Compared with
+  `ct_eq`.
 - **Sessions.** At most 16. Pairing a seventeenth drops the session with no
   open connection whose last `hello` is oldest; when all sixteen have open
   connections `web_pair` fails with `unavailable`.
 - **The page** always pairs when the URL carries a code, even if it already
   holds a token (so a code that was opened is always spent), and adopts the
-  new token. Without a code it uses the stored token; without either it shows
-  "signed out: run `crew web`".
+  new session. Without a code it uses the stored one; without either it
+  shows "signed out: run `crew web`".
 - **On the web transport** `hello` accepts only `role: operator` with a live
   session token. The operator token is not accepted there, and a web session
   token is not accepted on the socket: each credential works on one transport,
@@ -534,17 +777,16 @@ once, for two minutes, makes what is left in scrollback, a process list or a
 chat harmless. Why the fragment: it is never sent to a server and never in a
 `Referer`.
 
-**No cookie.** Cookies are scoped by host, not by port. A cookie set by
-`127.0.0.1:23417` is sent to `127.0.0.1:5173` as well: to any local server,
-including one an agent runs and the operator visits. `localStorage` is scoped
-by origin, port included. For the same reason the credential is never ambient:
-the page presents it explicitly, in `hello`, on a connection it opened.
+**No cookie.** Cookies are scoped by host, not by port: a cookie would be
+sent to whatever answers for the same name on another port. The credential is
+never ambient: the page presents it explicitly, in `hello`, on a connection it
+opened to its own origin.
 
 **Why `localStorage`, not `sessionStorage`.** Every tab of the origin shares
-the session, a new tab needs no new pairing, and tabs recover after a daemon
-restart through the `storage` event. The token is worthless once the server
-that made it stopped. What it costs: the token is on disk in the browser
-profile, which the sandbox does not mount.
+the session, so a second tab on the same address needs no new pairing. The
+origin lives exactly as long as the server, so does the token, and nothing
+else ever runs in that origin while the token is good. What it costs: the
+token is on disk in the browser profile, which the sandbox does not mount.
 
 ### What each request must pass
 
@@ -552,9 +794,9 @@ Before any routing:
 - the head arrives within 5 s, is at most 8 KiB with at most 48 headers,
   parses as HTTP/1.1 and announces no body (no `Content-Length` other than 0,
   no `Transfer-Encoding`). If not: `400`, and the connection is closed;
-- `Host` is exactly `127.0.0.1:<port>` or `localhost:<port>`. Otherwise `421`.
-  This is the defence against DNS rebinding: a foreign name that resolves to
-  loopback still sends its own `Host`;
+- `Host` is exactly `<label>.localhost:<port>`. Otherwise `421`. This is the
+  origin rule above, and it is also the defence against DNS rebinding: a
+  foreign name that resolves to loopback sends its own `Host`;
 - the method is `GET`. Otherwise `405` with `Allow: GET` (so no preflight is
   ever answered and no cross-origin request with side effects exists).
 
@@ -571,19 +813,22 @@ connection (`Connection: close`): a page load is four requests, and the
 server needs no keep-alive state.
 
 The upgrade additionally needs:
-- `Origin` exactly `http://127.0.0.1:<port>` or `http://localhost:<port>`.
-  Missing or different: `403`. WebSockets are not covered by the same-origin
-  policy; this is what stops another site's page (or an agent's page on
-  another port) from opening the socket in the operator's browser. A program
-  that is not a browser can send any `Origin`: against those the token is the
-  defence, and the Origin check is not counted on;
+- `Origin` exactly `http://<label>.localhost:<port>`. Missing or different:
+  `403`. WebSockets are not covered by the same-origin policy; this is what
+  stops another site's page (or an agent's page on another port, or a page
+  in a dead origin of an earlier server) from opening the socket in the
+  operator's browser. A program that is not a browser can send any `Origin`:
+  against those the token is the defence, and the Origin check is not counted
+  on;
 - `Sec-WebSocket-Version: 13` and a key; otherwise `400`.
 
-**(observed)** with the relay: foreign `Host` → 421; `POST` → 405; upgrade
-without `Origin`, from `http://evil.example` and from `http://127.0.0.1:5173`
-→ 403; a `data:` page in the browser could not open the socket; before `hello`
-a `snapshot` is answered `unauthorized: say hello first`, a wrong token
-`unauthorized`, a wrong protocol number `protocol`.
+**(observed)** with the relay, started with a label: its own name → 200 on
+`127.0.0.1` and on `[::1]`; `Host: 127.0.0.1:<port>`, `localhost:<port>`,
+another label and a foreign name → 421; `POST` → 405; upgrade without
+`Origin`, from `http://evil.example`, from `http://127.0.0.1:5173` and from
+`http://127.0.0.1:<port>` → 403; a `data:` page in the browser could not open
+the socket; before `hello` a `snapshot` is answered `unauthorized: say hello
+first`, a wrong token `unauthorized`, a wrong protocol number `protocol`.
 
 Headers on every response:
 
@@ -599,26 +844,28 @@ and on `index.html`:
 Cache-Control: no-store
 X-Frame-Options: DENY
 Cross-Origin-Opener-Policy: same-origin
-Content-Security-Policy: default-src 'none'; script-src 'self'; style-src-elem 'self' 'unsafe-inline'; style-src-attr 'none'; img-src 'self' data:; font-src 'self'; connect-src 'self' ws://127.0.0.1:<port> ws://localhost:<port>; base-uri 'none'; form-action 'none'; frame-ancestors 'none'
+Content-Security-Policy: default-src 'none'; script-src 'self'; style-src-elem 'self' 'unsafe-inline'; style-src-attr 'none'; img-src 'self' data:; font-src 'self'; connect-src 'self' ws://<label>.localhost:<port>; base-uri 'none'; form-action 'none'; frame-ancestors 'none'
 ```
 
 Other files: `Cache-Control: public, max-age=31536000, immutable` (their
-names carry a content hash). No `Access-Control-*` header is ever sent.
+names carry a content hash, and the origin they are cached for dies with the
+server). No `Access-Control-*` header is ever sent.
 
 - `script-src 'self'`: no inline script, no `eval`. Markup that got into the
   page could not run code.
 - `frame-ancestors 'none'`: an agent's page cannot frame the dashboard and
-  steer clicks.
+  steer clicks. `Cross-Origin-Opener-Policy`: a page that opened the
+  dashboard keeps no handle on its window.
 - **`style-src-elem 'unsafe-inline'` is there for xterm.js (observed).**
   xterm.js 6.0 creates `<style>` elements; under `style-src 'self'` the
-  browser blocks them (the spike's last browser test shows the violations,
-  and that the app without the terminal is clean under the strict policy).
-  What the relaxation allows is a `<style>` element, which needs an HTML
-  injection first; it cannot run script, and with `img-src`/`font-src 'self'`
-  it cannot send anything elsewhere. `style-src-attr 'none'` stays: no
-  `style="…"` attribute works. Solid's object form (`style={{…}}`) sets
-  properties through the CSSOM and is not affected **(observed)**; a string
-  `style` in JSX would be blocked, so the frontend does not use one.
+  browser blocks them (a browser test of the spike shows the violations, and
+  that the app without the terminal is clean under the strict policy). What
+  the relaxation allows is a `<style>` element, which needs an HTML injection
+  first; it cannot run script, and with `img-src`/`font-src 'self'` it cannot
+  send anything elsewhere. `style-src-attr 'none'` stays: no `style="…"`
+  attribute works. Solid's object form (`style={{…}}`) sets properties
+  through the CSSOM and is not affected **(observed)**; a string `style` in
+  JSX would be blocked, so the frontend does not use one.
 
 ### Limits
 
@@ -664,7 +911,7 @@ operator through the operator's own browser. Rules for the frontend:
    hyperlinks open only as rule 2 says. The daemon keeps stripping terminal
    queries from the attached stream (`strip_queries`), so the browser's
    terminal never answers one into the agent's input.
-5. The token is read from and written to `localStorage` in one module, is
+5. The session is read from and written to `localStorage` in one module, is
    never logged, never put in a URL, and is not in any store a component can
    render.
 
@@ -674,18 +921,16 @@ operator through the operator's own browser. Rules for the frontend:
   from connecting while it does. It gains nothing, sockets already
   authenticated are counted apart, and the TUI and CLI do not use this
   listener.
-- A page that looks like crew, served by an agent on another port, can ask
-  the operator to paste the output of `crew web` into it. The pairing code is
-  for the address `crew web` prints; the README says to open that and paste
-  it nowhere.
-- While the dashboard is not served, another process can take the
-  workspace's usual port. `crew web` then serves on the next free one and
-  prints that address; a bookmark of the old one shows the other process's
-  page. That page finds no live token: a token is stored per origin, and one
-  stored for a port is dead by the time anyone else can bind that port (the
-  server that made it stopped).
+- **Asking for the address.** A page the operator trusts for the wrong
+  reason (an agent's page on another port made to look like crew; a tab from
+  an earlier server, reloaded while someone else holds the port) can ask the
+  operator to paste the output of `crew web` into it. A pairing code is
+  whoever presents it first. `crew web` opens the browser itself; the
+  dashboard never asks for an address or a code, and the README and the
+  "stopped" screen say: run `crew web`, paste its output nowhere.
 - A script injection in the page would have the session. The rules above and
   the policy are the defence; there is no second credential behind them.
+- Safari users need another browser (above).
 
 ---
 
@@ -813,7 +1058,7 @@ Written by `web/scripts/stamp.ts` as the last step of `bun run build`:
 
 | script | does |
 |---|---|
-| `bun run dev` | Vite dev server with hot reload; `/ws` is proxied to `dev/mock.ts`, or to a real daemon when `CREW_WEB=http://127.0.0.1:<port>` is set (the proxy sends that address as `Host` and `Origin`; open the dev server with the `#pair=` fragment `crew web --no-open` printed) |
+| `bun run dev` | Vite dev server with hot reload; `/ws` is proxied to `dev/mock.ts`, or to a real daemon when `CREW_WEB` is set to the address `crew web --no-open` printed (the proxy sends that name as `Host` and `Origin`; open the dev server with the `#pair=` fragment). For development with a scratch team only: the dev server's own origin (`localhost:5173`) has none of the protections of §security |
 | `bun run build` | `tsc --noEmit`, `vite build`, `scripts/stamp.ts` |
 | `bun run test` | vitest |
 | `bun run e2e` | Playwright against the mock and the built bundle |
@@ -882,8 +1127,9 @@ side on a browser window, so the graph never has to leave the screen:
   area instead of sharing it.
 - Routes are in the fragment, parsed by hand: `#/`, `#/tasks`, `#/logs`,
   `#/usage`, and a selection as `?agent=<id>`, `?task=<id>`, `?message=<id>`
-  after the route (`#/tasks?task=db`). Back and forward work; an address can
-  be bookmarked; the server only ever serves `/`. `#pair=<code>` is not a
+  after the route (`#/tasks?task=db`). Back and forward work; an address
+  can be opened in another tab for as long as the server runs; the server
+  only ever serves `/`. `#pair=<code>` is not a
   route: it is consumed before the router starts (§security).
 - Dialogs (compose, question, model, confirm, help) are modal, trap focus,
   close with `esc`, and return focus to where it was.
@@ -951,15 +1197,42 @@ own). Tabs per CLI (`1` `2` `3`, ←→), rows per model with tier, price,
 summary and why one is unavailable; the current one marked. The same warning
 as the TUI when the choice moves the agent to another CLI (a fresh session).
 
-### Keys
+### Focus and keys
 
-The same keys as the TUI, active when no text field, dialog or terminal has
-focus. The table is one data structure in `web/src/keys.ts`; the handler and
-the help overlay both read it.
+**`tab` belongs to the browser.** `tab` and `shift-tab` move focus through
+the page in document order and are never taken over outside a dialog (a
+dialog keeps focus inside itself, as modal dialogs do). The order is: status
+bar actions, usage strip actions, question banner, the main area, the side
+panel (its tabs, its action buttons, its content), the message box. Every
+action of §ui's table is a button that `tab` reaches and `enter` or `space`
+presses, so the page can be operated without any single-key shortcut.
+
+**The graph is one tab stop** (a roving tabindex): exactly one node is in the
+tab order, the selected agent, or the first when none is selected. Inside the
+graph:
+
+| key | does |
+|---|---|
+| `→` `↓` / `←` `↑` | next / previous agent, in the TUI's order, wrapping; selects it (the TUI's `tab` / `shift-tab`) |
+| `home` / `end` | first / last agent |
+| `enter` | opens the inspector and moves focus to the side panel |
+| `tab` | leaves the graph for the next region |
+
+`esc` in the side panel closes it and gives focus back to the node it was
+opened from. The task DAG is one tab stop in the same way (arrows along and
+across layers). Lists (bus, log, transcript) are one tab stop each, with the
+arrow keys moving the selected row.
+
+**Single-key shortcuts** are the TUI's keys. They act on the selected agent
+whichever region has focus, and are inactive while a text field, a dialog or
+the terminal has focus. `/keys off` turns them off (kept in the
+preferences, `web_prefs`) for those who type by voice or switch; the command line
+(`ctrl-k`) and the buttons remain. The table is one data structure in
+`web/src/keys.ts`; the handler and the help overlay both read it.
 
 | key | action | TUI |
 |---|---|---|
-| `tab` / `shift-tab` | next / previous agent (focus moves node to node, so this is also the browser's own focus order); arrows too | same |
+| arrows, in the graph | next / previous agent | `tab` / `shift-tab`, arrows |
 | `enter` | open the selected agent's inspector | same |
 | `o` | select the orchestrator | same |
 | `m` / `M` | message the selected agent / broadcast | same |
@@ -999,7 +1272,7 @@ box, and the same rule: a line starting with `/` is never sent as a message.
 |---|---|
 | `/stop`, `/kill [agent]`, `/restart [agent]`, `/restart-fresh [agent]`, `/pause [agent]`, `/unpause [agent]`, `/compact [agent]`, `/model [agent]`, `/resume`, `/answer`, `/tasks`, `/logs`, `/help` | as the TUI (`input/commands.rs::run_slash`): the agent named, else the one the box was addressed to, else the selected one |
 | `/exit`, `/mouse` | answer "not needed in the browser" in the hint line |
-| `/usage`, `/graph [reset]` | new: the usage view; the graph (`reset` forgets dragged positions) |
+| `/usage`, `/graph [reset]`, `/keys on`, `/keys off` | new: the usage view; the graph (`reset` forgets dragged positions); single-key shortcuts |
 
 The fixtures list the TUI's commands (§tests); a unit test fails when the web
 neither implements nor explicitly declines one.
@@ -1116,9 +1389,9 @@ hub that still receives operator and integration traffic, as in the TUI.
 Positions are computed from the list of agents and the viewport size by a
 pure function (`layout/radial.ts`).
 
-**Drag.** A node can be dragged anywhere; the position is kept per project in
-`localStorage` (`crew.layout.<project>`: `{id: {x, y}}`) and wins over the
-computed one. "Reset layout" (`/graph reset`, or the button) forgets them.
+**Drag.** A node can be dragged anywhere; the position is kept in the
+dashboard's preferences (`web_prefs`, `layout: {id: {x, y}}`) and wins over
+the computed one. "Reset layout" (`/graph reset`, or the button) forgets them.
 An agent that joins takes its computed place; one that leaves frees it.
 
 **A node** shows what the TUI's box shows (`widgets/agent_box.rs`): runtime
@@ -1259,7 +1532,7 @@ server does not compress.
 
 Measured in headless Chromium on the development host, production bundle,
 the `team(10)` fixture or the scripted dry-run team. "Spike" is what
-`notes/web-spike/run.sh` printed over three runs for the prototype (which has the store, the
+`notes/web-spike/run.sh` printed over four runs for the prototype (which has the store, the
 graph, the virtual log and the terminal, and not yet the dialogs, the DAG or
 the charts).
 
@@ -1270,7 +1543,7 @@ the charts).
 | P3 | terminal chunk (xterm.js), loaded when a terminal first opens | ≤ 350 KB | 331 KB |
 | P4 | the whole of `web-dist/` | ≤ 600 KB | 369 KB |
 | P5 | first contentful paint, cold cache | ≤ 150 ms | 28–40 ms |
-| P6 | live (snapshot of 10 agents, 300 messages, 1000 events applied and drawn), cold cache | ≤ 300 ms | 44–54 ms median, 70 ms worst (6 agents, about 100 events) |
+| P6 | live (snapshot of 10 agents, 300 messages, 1000 events applied and drawn), cold cache | ≤ 300 ms | 44–55 ms median, 82 ms worst (6 agents; 300 messages and about 1000 events in the last run) |
 | P7 | daemon emits → the page's handler runs, p95 | ≤ 10 ms | 1 ms median, 2–4 ms p95 (real pushes, through the relay) |
 | P8 | handling one push (reduce and update the DOM), p95 | ≤ 1 ms | 0.2–0.3 ms |
 | P9 | a push is on screen: handler → the frame after it is presented, p95 | ≤ 2 frames + 2 ms (35 ms at 60 Hz) | 31–32 ms |
@@ -1385,7 +1658,7 @@ same for every check.
 
 ### Rust: the bridge (owner: vcs)
 
-Unit tests beside the code (`crates/crew/src/web/`):
+Unit tests beside the code (`crates/crew/src/web/`, `daemon/server.rs`):
 - the request head: routing by path, `Host` and method; the upgrade's
   `Origin`, version and key; bodies and oversized or malformed heads refused;
 - the asset table: every embedded path answers with its type; unknown paths
@@ -1393,35 +1666,61 @@ Unit tests beside the code (`crates/crew/src/web/`):
 - codes and sessions with an injected clock: a code works once; it expires
   after 120 s; the ninth outstanding code drops the oldest; the seventeenth
   session drops the idle one with the oldest `hello`, and is refused when all
-  have connections; `web_close` clears both;
+  have connections; `web_close` clears both; two starts never give the same
+  label;
 - `Session`: the socket's existing behaviours hold through the refactor
   (malformed request answered with the salvaged id, `attach_input` not
   answered, the subscription starts after the reply);
 - lag: a subscriber that does not read while more pushes are emitted than the
-  channel holds receives `resync`.
+  channel holds receives `resync`;
+- **the barrier, adversarially** (`snapshot_is_a_barrier`). A task changes one
+  agent's `activity` to `n=1`, `n=2`, … as fast as it can (through
+  `Daemon::update_agent`, so every change pushes) while a subscribed
+  `Session` asks for snapshots in a loop. A test hook
+  (`#[cfg(test)] Conn::after_capture`) sleeps between the capture and the
+  queueing of the reply, which is the window the bug lived in. The frames of
+  the connection are read in order and checked:
+  1. no `agent` push between two snapshot replies carries an `n` greater than
+     the `n` of the reply that follows it (nothing newer is overwritten);
+  2. between two replies the pushes are in increasing `n` (pushes sent after
+     the marker may come once before the reply and again after it, never out
+     of order within either part), and the last push of the run carries the
+     final `n`;
+  3. a model that applies the frames by the page's rule (discard while a
+     snapshot is in flight, replace on the reply, apply after) holds the
+     final `n` at the end, in every one of 200 runs;
+  4. the same with the forwarder forced to lag (`resync` in the stream).
+  Without the barrier check 1 fails within the first run (the spike's probe:
+  45 of 56 replies).
 
 Integration tests (`crates/crew/tests/web.rs`), a real daemon with scripted
 agents through the existing harness, a WebSocket client
-(`tokio-tungstenite` with `connect` as a dev-dependency) and plain TCP:
+(`tokio-tungstenite` with `connect` as a dev-dependency) and plain TCP. The
+client connects to `127.0.0.1:<port>` and sends the `Host` and `Origin` of
+the address `crew web --json` printed:
 
 | test | asserts |
 |---|---|
-| `off_until_asked` | nothing listens on the workspace's port before `web_open`; after it `SessionInfo.web` is the address and `web.started` is logged; after `web_close` open sockets are closed, the port is free, `SessionInfo.web` is empty |
+| `off_until_asked` | nothing listens on the workspace's port before `web_open`; after it `SessionInfo.web` is the address and `web.started` is logged; after `web_close` open sockets are closed, the port is free on both addresses, `SessionInfo.web` is empty |
+| `owns_both_loopback_addresses` | while serving, the page is answered on `127.0.0.1` and on `[::1]`; binding `[::1]:<port>` from the test fails with `EADDRINUSE`; a port whose `[::1]` side is taken by the test beforehand is skipped for the next one (skipped on a host without IPv6 loopback) |
 | `port_is_not_shared` | while serving, binding the same port from the test with `SO_REUSEPORT` set fails with `EADDRINUSE` |
+| `answers_only_to_its_name` | `Host: 127.0.0.1:<port>`, `localhost:<port>`, another label and a foreign name → 421; upgrade without `Origin`, with a foreign one, with another loopback port, with `http://127.0.0.1:<port>` → 403 |
+| `a_new_start_is_a_new_origin` | `web_close` then `web_open`, and stop then start of the daemon: the label differs each time, the port may be the same; a request with the old name → 421; the old token → `unauthorized`; the old pairing code → `unauthorized` |
 | `serves_the_bundle` | `GET /` is `index.html` with the policy and headers of §security; a hashed file is `immutable`; `/nope` is 404; `POST`, `OPTIONS`, `HEAD` are 405; no response has an `Access-Control-` header |
-| `refuses_foreign_host_and_origin` | `Host: evil.example:<port>` → 421; upgrade without `Origin`, with a foreign one, with another loopback port → 403 |
 | `nothing_before_hello` | `snapshot` before `hello` → `unauthorized`; a wrong token → `unauthorized`; the operator token of the socket → `unauthorized`; `role: agent` with that agent's real token → `unauthorized`; no `hello` within 5 s → closed |
-| `pairing_works_once` | `crew web --json` gives a `pair_url`; `web_pair` answers a token; `hello` with it gives an operator session; the same code again → `unauthorized` |
+| `pairing_works_once` | `crew web --json` gives a `pair_url`; `web_pair` answers a token and a proof; `hello` with the token gives an operator session whose reply carries that proof; the same code again → `unauthorized` |
+| `proof_is_per_session` | two pairings have different proofs; `hello` on the socket has no `web_proof`; a failed `hello` carries none |
 | `web_token_stays_on_the_web` | a `hello` on the socket with a web session token → `unauthorized` |
 | `web_sessions_cannot` | `load_team`, `web_open`, `web_close` on a web session → `forbidden` |
+| `prefs_are_kept` | `web_prefs` set on a web session reads back on the socket and after a daemon restart; more than 16 KiB, or a value that is not an object → `invalid`; an agent → `forbidden` |
 | `pushes_reach_the_browser` | after `subscribe`: a `crew send` arrives as `message` and `event` pushes; the `subscribe` reply precedes every push; prints the time from `emit` to receipt (P16) and fails above 10 ms median |
+| `snapshot_under_load` | the integration form of the barrier test: scripted agents report progress in a tight loop while the client asks for snapshots; checks 1 and 3 of the unit test on the frames received |
 | `same_answers_as_the_socket` | `snapshot`, `tasks_list`, `history`, `events` give the same result on both transports |
 | `reconnect_sees_what_it_missed` | close the socket, act, connect again with the same token: the snapshot has it |
 | `terminal_over_the_web` | a second connection, `attach`: a `pty` push with the screen; `attach_input` is echoed back in `pty` pushes; closing detaches |
 | `limits` | a message over 1 MiB closes with 1009; one over 4 KiB before `hello` closes; the 33rd unauthenticated connection is closed at accept |
 | `stop_tells_the_browser` | `crew stop`: a `shutdown` push, then the socket closes and the port is free |
-| `restart_keeps_the_port_not_the_tokens` | stop, start, `crew web`: the same port; the old token → `unauthorized` |
-| `no_secret_is_written` | after pairing and a session: neither code nor token appears in `crew logs --json`, the daemon's log file, `crew.db` or `daemon.json` |
+| `no_secret_is_written` | after pairing and a session: neither code, token nor proof appears in `crew logs --json`, the daemon's log file, `crew.db` or `daemon.json` |
 | `web_needs_the_operator` | `crew web` with `CREW_IDENTITY` set is refused with the existing agent-context error |
 
 `crates/crew/tests/web_bundle.rs` (no node needed): when
@@ -1432,8 +1731,9 @@ fingerprint recomputed over `web/` (§build). Without a manifest it checks
 that the built-in page is what `/` serves.
 
 `rpc.rs`: the manifest test at version 5; `web_open`, `web_close`,
-`web_pair` round-trip; `WebInfo` and `WebPaired` do not print their secrets
-with `{:?}`; a `SessionInfo` without `web` still reads.
+`web_pair` round-trip; `WebInfo`, `WebPaired` and `HelloInfo` do not print
+their secrets with `{:?}`; a `SessionInfo` without `web` and a `HelloInfo`
+without `web_proof` still read.
 
 ### Frontend unit tests (vitest; owner: web)
 
@@ -1444,12 +1744,14 @@ with `{:?}`; a `SessionInfo` without `web` still reads.
 | file | asserts |
 |---|---|
 | `protocol.test.ts` | every fixture file is read by the decoders; `PROTOCOL` and every enum list equal `enums.json`; the unknown push kind is ignored |
-| `store.test.ts` | snapshot then overlapping pushes: an event with a known `seq` and a message with a known `id` are dropped; agent order equals the fixture's (the TUI's sort); a removed agent leaves and its inspector closes; a question joins on its message and leaves on the operator's answer; the rings cap |
+| `store.test.ts` | snapshot then pushes: an event with a known `seq` and a message with a known `id` are dropped; agent order equals the fixture's (the TUI's sort); a removed agent leaves and its inspector closes; a question joins on its message and leaves on the operator's answer; the rings cap |
+| `order.test.ts` | the page's half of the barrier. Pushes received while a snapshot is in flight are discarded, `resync` among them, and no second snapshot is asked for; pushes after the reply are applied in order. Property test: for random histories of one agent and random positions of marker, capture and reply that obey the server's guarantee, the page ends in the daemon's final state; for a stream that breaks the guarantee (a newer push before the reply) the test's own naive reducer ends stale, which shows the property test can fail |
 | `anims.test.ts` | every case of `anim.json` |
-| `conn.test.ts` | with a fake WebSocket: `hello`, `subscribe`, `snapshot` in that order; the backoff schedule; `resync`; `unauthorized` drops the token; `protocol` reloads once; a lost `send` is sent once more with the same id and nothing else is replayed; timeouts per call |
-| `session.test.ts` | the `#pair=` fragment is removed before any connection; a code is always traded, even with a stored token; a token stored by another tab is adopted |
+| `conn.test.ts` | with a fake WebSocket: `hello`, proof check, `subscribe`, `snapshot` in that order; nothing is rendered and no call is made before the proof matched; a missing or wrong proof, `shutdown`, `unauthorized` and 30 s of failed reconnects each remove the session and end in the stopped state without another attempt; `protocol` does not reload; the backoff schedule; a lost `send` is sent once more with the same id and nothing else is replayed; timeouts per call |
+| `session.test.ts` | the `#pair=` fragment is removed before any connection; a code is always traded, even with a stored session; token and proof are stored under `crew.web.session` and nowhere else; no `storage` listener and no service worker registration exist in `src/` |
+| `prefs.test.ts` | preferences are read after `hello`; fields of the wrong type and unknown keys are dropped; a change is written once, 500 ms later; a dragged node keeps its place after a new snapshot |
 | `layout.test.ts` | radial: order and no overlap for 1 to 12 agents with subagents; layers: every dependency points left, the fixture's task graph gives the expected layers; `zoomAt` keeps the point under the pointer; `fit` |
-| `keys.test.ts` | every key of §ui does its action; none fires while a text field, a dialog or the terminal has focus; the help overlay lists exactly the table |
+| `keys.test.ts` | every key of §ui does its action; none fires while a text field, a dialog or the terminal has focus, nor after `/keys off`; `tab` is never handled outside a dialog; in the graph exactly one node has `tabindex="0"` and the arrows move it; the help overlay lists exactly the table |
 | `commands.test.ts` | every command of `commands.json` is implemented or declined by name; completion and hints as `slash.rs` |
 | `virtual.test.tsx` | 5000 rows put fewer than 80 in the DOM; it follows the tail at the bottom and stays put when scrolled up |
 | `text.test.ts` | only `http:` and `https:` become links (`javascript:`, `data:`, `file:` do not); SGR becomes spans, other escape sequences vanish |
@@ -1465,23 +1767,24 @@ page while working; it is not the suite.
 **(observed)** On this host Playwright's downloaded Chromium does not start
 (exit 127, NixOS); with `launchOptions.executablePath` taken from
 `PLAYWRIGHT_EXECUTABLE_PATH` (set here, a Chromium-based browser from the Nix
-store) the spike's eight tests pass. `playwright.config.ts` does that, and
+store) the spike's twelve tests pass. `playwright.config.ts` does that, and
 defines two projects:
 
 - **`mock`** (owner: web; `web/e2e/*.spec.ts`): the built bundle served by
-  `dev/mock.ts`, which sends the headers of §security, replays the fixtures
-  and records calls. No daemon.
+  `dev/mock.ts` under a name of the form `<label>.localhost`, with the
+  headers of §security; it replays the fixtures and records calls. No daemon.
 
   | spec | asserts |
   |---|---|
-  | `graph.spec.ts` | ten agents drawn; wheel zooms about the pointer; dragging the background pans; dragging a node moves it and a reload keeps it; hover shows the card; click selects; `tab` walks the agents in order; `enter` opens the inspector |
+  | `graph.spec.ts` | ten agents drawn; wheel zooms about the pointer; dragging the background pans; dragging a node moves it, and a reload keeps it (the mock stores `web_prefs`); hover shows the card; click selects; the arrows walk the agents in order; `enter` opens the inspector |
+  | `keyboard.spec.ts` | with the keyboard alone: `tab` from the status bar reaches the graph (one stop), the side panel's tabs and action buttons, the message box, and `shift-tab` goes back the same way; focus is never stuck in the graph; every action of §ui's table can be reached and pressed; `esc` in the side panel returns focus to the node; a dialog keeps focus inside and gives it back; after `/keys off` a `k` does nothing and the kill button still works |
   | `anim.spec.ts` | a `vcs.merge` `started` push shows the running label and the held link; its terminal event the pulse, then the done label, which is gone after `MARK_MS`; a read shows the glance; a message push shows the pulse; with reduced motion nothing moves and the labels still show |
   | `actions.spec.ts` | each row of §ui's action table sends its call with its parameters; the four confirmations ask first and `esc` sends nothing; an error answer is shown as text |
   | `question.spec.ts` | a question push shows banner, badge and title count and opens the dialog; a number picks a suggested answer; `esc` puts it off, `a` reopens |
   | `lists.spec.ts` | bus and log follow the tail, stay when scrolled up, filter; "load older" asks `events` |
   | `tasks.spec.ts` | the DAG's layers; hover dims what is unrelated; click opens the card |
-  | `auth.spec.ts` | the fragment is gone from the address after load; no cookie exists; without a token the signed-out screen; `unauthorized` returns to it; a token arriving by `storage` brings the page back |
-  | `reconnect.spec.ts` | the mock drops the socket: "reconnecting", then live with the new snapshot; `resync`; `shutdown` ends without retry |
+  | `auth.spec.ts` | the fragment is gone from the address after load; no cookie exists; no service worker is registered; without a session the signed-out screen; a second tab of the same address is live without pairing |
+  | `reconnect.spec.ts` | the mock drops the socket: "reconnecting", then live with the new snapshot; `resync`; a push the mock sends between the page's `snapshot` and its reply is not shown, one after it is; `shutdown` ends without retry and empties the storage; a mock that answers `hello` with a wrong proof is refused and nothing it sends is drawn |
   | `policy.spec.ts` | no Content-Security-Policy violation is logged in any of the above (a fixture collects them, as the spike does); an agent named `<img src=x onerror=…>` and a message with markup are shown as text |
   | `perf.spec.ts` | the report and limits of §perf |
 
@@ -1496,13 +1799,14 @@ defines two projects:
   | `vcs.spec.ts` | on the script's commit, cherry-pick, merge and conflict the marks and links of jj-design §anim appear on the right nodes; under jj and under git |
   | `operate.spec.ts` | message an agent (it reacts), answer the question, pause and resume, kill; the daemon's events confirm each |
   | `terminal.spec.ts` | the terminal shows the agent's screen; typed keys are echoed; P14 |
-  | `outside.spec.ts` | a page from another origin cannot open the socket; from inside an agent's sandbox (`CREW_TEST_SANDBOX=require`) the port answers but a `hello` with the agent's own token is `unauthorized` |
-  | `restart.spec.ts` | `crew stop`, start again, `crew web`: the new tab is live on the same address, and the tab left open from before comes back by itself |
+  | `outside.spec.ts` | a page from another origin cannot open the socket; the bare addresses `http://127.0.0.1:<port>/` and `http://localhost:<port>/` show nothing of the dashboard (421); from inside an agent's sandbox (`CREW_TEST_SANDBOX=require`) the port answers but a `hello` with the agent's own token is `unauthorized` |
+  | `lifecycle.spec.ts` | **the attack of revision 2, as a regression.** A tab is live. `crew stop`. The test binds the old port on both addresses and serves, for any `Host`, a page that records `storage` events and reads `localStorage`, and a WebSocket that answers `hello` with a made-up snapshot. (a) The tab, not reloaded, tries to reconnect: it refuses the server (no proof), draws nothing of the made-up snapshot, and ends "stopped" with its storage empty. (b) A second tab of the old address is reloaded: it now shows the test's page. The test releases the port; the daemon starts again; `crew web --json` gives an address with another label, on the same port; a new tab pairs there and goes live. Then: the page of (b) has seen no `storage` event, reads no session, and a `hello` with anything it can read is `unauthorized`; the two origins differ |
   | `perf.spec.ts` | the report against the real daemon (P5–P11, P14) |
 
   Chromium is the gate. Firefox, when Playwright has one on the host, runs
-  the same projects; what the page uses is in every current browser
-  (`style-src-elem` and `style-src-attr`: Firefox 108, Safari 15.4).
+  the same projects; what the page uses is in every current browser except
+  that Safari does not resolve the address (`style-src-elem` and
+  `style-src-attr`: Firefox 108).
 
 ### Install without node (owner: qa)
 
@@ -1524,13 +1828,13 @@ Three members. No file is edited by two of them.
 | file | change |
 |---|---|
 | `Cargo.toml`, `Cargo.lock`, `crates/crew/Cargo.toml` | `tokio-tungstenite`, `futures-util`, `httparse`; the client feature as a dev-dependency |
-| `crates/crew-core/src/rpc.rs` | `WebOpen`, `WebClose`, `WebPair`, `WebInfo`, `WebPaired`, `SessionInfo.web`, `PROTOCOL_VERSION = 5`, tests |
+| `crates/crew-core/src/rpc.rs` | `WebOpen`, `WebClose`, `WebPair`, `WebInfo`, `WebPaired`, `SessionInfo.web`, `HelloInfo.web_proof`, `PROTOCOL_VERSION = 5`, tests |
 | `crates/crew-core/src/paths.rs` | `web_port(state_dir)` |
 | `crates/crew/build.rs` (new) | embeds `web-dist/` |
-| `crates/crew/src/web/` (new): `mod.rs` (start, stop, codes, sessions, limits), `http.rs` (head, routing, headers), `ws.rs` (upgrade, message loop, ping), `assets.rs` (the table) | the server |
+| `crates/crew/src/web/` (new): `mod.rs` (start on both loopback addresses, the label, stop, codes, sessions and proofs, limits), `http.rs` (head, routing, headers), `ws.rs` (upgrade, message loop, ping), `assets.rs` (the table) | the server |
 | `crates/crew/src/lib.rs` | `mod web` |
-| `crates/crew/src/daemon/server.rs` | `Transport`, `Session`; `authenticate` by transport |
-| `crates/crew/src/daemon/handlers.rs` | the three calls; what a web session may not call |
+| `crates/crew/src/daemon/server.rs` | `Transport`, `Session`, the snapshot barrier; `authenticate` by transport |
+| `crates/crew/src/daemon/handlers.rs` | the four calls; what a web session may not call |
 | `crates/crew/src/daemon/mod.rs` | the web state in `Inner`; `session_info().web`; the listener stops in `serve`'s shutdown path |
 | `crates/crew/src/cli/mod.rs`, `cli/ops/mod.rs`, `cli/ops/web.rs` (new), `cli/ops/session.rs` | `crew web`; the `web` line of `crew status` |
 | `crates/crew/tests/web.rs`, `web_wire.rs`, `web_bundle.rs`, `tests/fixtures/web/` (new) | §tests |
@@ -1563,26 +1867,29 @@ Pinned by this document; a change goes through `architect`.
 |---|---|---|
 | frames: `Request`, `ServerFrame`, every type in them, protocol 5 | `crew_core::rpc`, `types`, `vcs`; the fixtures are the examples | vcs |
 | one text message per frame, both ways; `/ws`; state and terminal sockets | §transport | vcs |
-| `web_pair`, then `hello {role: operator, token, client: "web", protocol: 5}`; the error codes `unauthorized`, `protocol`, `forbidden`, `unavailable` | §transport, §security | vcs |
+| `web_pair` (token and proof), then `hello {role: operator, token, client: "web", protocol: 5}` answered with `web_proof`; the error codes `unauthorized`, `protocol`, `forbidden`, `unavailable` | §transport, §security | vcs |
+| on a subscribed connection a `snapshot` reply is a barrier: nothing before it is newer than it, everything sent after its marker follows it, in order | §transport | vcs |
+| the page discards pushes while a snapshot is in flight, keeps one in flight at most, and applies what follows in order | §transport | web |
 | which calls a web session has, with parameters and results | §transport's table, `results.json` | vcs |
-| the address: `http://127.0.0.1:<port>/`, `#pair=<code>`, `WebInfo` from `crew web --json` | §transport, §security | vcs |
+| the address: `http://<label>.localhost:<port>/`, new at every start, answered on both loopback addresses and under no other name; `#pair=<code>`; `WebInfo` from `crew web --json` | §transport, §security | vcs |
 | files served at their path under `/`, `index.html` at `/`, the headers and the policy | §security, §build | vcs |
 | limits (sizes, counts, times, ping) | §security | vcs |
 | the fixtures and their regeneration | §tests | vcs |
 | `crates/crew/web-dist/`: any files, `index.html` at its root, `manifest.json` as specified, names with content hashes | §build | web |
-| the page obeys the policy (no inline script, no string styles), stores the token only under `crew.web.session`, and makes no call outside the table | §security, §transport | web |
+| the page obeys the policy (no inline script, no string styles); keeps the session only under `crew.web.session`; registers no service worker and no `storage` listener; never reloads or navigates on a server's word; refuses a server without the proof; makes no call outside the table | §security, §transport | web |
 | selectors the live tests use: a node is `[data-agent="<id>"]` with role `button` and name `<id>, <status>`; a task `[data-task="<id>"]`; connection state `[data-conn]` on the status bar, one of `live`, `reconnecting`, `signed-out`, `stopped`; a mark's label `[data-mark="<agent>"]`; a lit link `[data-link="<from>:<to>"]` | here | web, for qa |
 
 ### Order
 
 1. **vcs, step 0** (first, one commit, announced to web and qa): the
    `crew-core` changes (calls, types, version 5, `web_port`) with the daemon
-   answering the three calls as "not implemented yet" (`unavailable`), and
+   answering the new calls as "not implemented yet" (`unavailable`), and
    the fixtures with their generator. From here web has the wire types and
    every example it needs.
 2. In parallel:
-   - vcs: `Session` refactor (socket behaviour unchanged, tests green), then
-     the server, pairing, `crew web`, the bridge tests.
+   - vcs: `Session` refactor with the snapshot barrier and its adversarial
+     test (socket behaviour otherwise unchanged, tests green), then the
+     server, pairing, `crew web`, the bridge tests.
    - web: `protocol.ts`, store and connection against the fixtures and the
      mock; then graph, animation port, views, keys, terminal; unit and `mock`
      browser tests; budgets.
@@ -1608,7 +1915,19 @@ Pinned by this document; a change goes through `architect`.
   one agent: the last resize wins.
 - **Protocol 5 on running teams.** As with every bump: teams started before
   the upgrade must be restarted; the CLI already says so.
-- **Port collisions.** Sixteen ports are tried; a machine with that many
-  crew sessions hashing together needs `--port`. The error must say so.
+- **Port collisions.** Sixteen ports are tried, each on both addresses; a
+  machine with that many crew sessions hashing together needs `--port`. The
+  error must say so.
+- **Names under `.localhost`.** The design rests on the browser resolving
+  them to loopback by itself. Chromium-based browsers and Firefox do; Safari
+  does not, and a browser behind an unusual proxy setting may not. `crew web`
+  says so next to the address, and the README names the browsers. The answer
+  to a browser that cannot is another browser, never an address by number.
+- **The origin rule is easy to undo by accident.** Accepting `127.0.0.1` as
+  `Host` "for convenience", persisting the label, adding a `storage`
+  listener or a service worker, or reloading on a server's word each reopens
+  the hole of revision 2. `answers_only_to_its_name`,
+  `a_new_start_is_a_new_origin`, `session.test.ts` and `lifecycle.spec.ts`
+  are the guards; none of them may be weakened to make something else pass.
 - **Frontend dependencies creeping in.** `budget.test.ts` pins the three
   runtime packages and the sizes.

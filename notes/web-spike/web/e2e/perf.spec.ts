@@ -3,7 +3,7 @@ import { execFileSync } from "node:child_process";
 import { expect, test } from "@playwright/test";
 
 const PORT = Number(process.env.PORT ?? 47615);
-const url = `http://127.0.0.1:${PORT}/#k=spiketoken`;
+const url = `http://${process.env.LABEL ?? "spike"}.localhost:${PORT}/#k=spiketoken`;
 const report: Record<string, unknown> = {};
 test.afterAll(() => console.log("\nREPORT " + JSON.stringify(report, null, 1)));
 

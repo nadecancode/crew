@@ -8,8 +8,11 @@ import { LogList } from "./LogList";
 import { lazy, Show, Suspense } from "solid-js";
 const Term = lazy(() => import("./Term"));
 
-const token = new URLSearchParams(location.hash.slice(1)).get("k") ?? sessionStorage.getItem("crew.k") ?? "";
-if (token) { sessionStorage.setItem("crew.k", token); history.replaceState(null, "", location.pathname); }
+// The design's storage: per origin, shared by the origin's tabs.
+const KEY = "crew.web.session";
+const fromUrl = new URLSearchParams(location.hash.slice(1)).get("k");
+if (fromUrl) { localStorage.setItem(KEY, fromUrl); history.replaceState(null, "", location.pathname); }
+const token = localStorage.getItem(KEY) ?? "";
 
 const [conn, setConn] = createSignal("idle");
 const [open, setOpen] = createSignal<string | null>(null);

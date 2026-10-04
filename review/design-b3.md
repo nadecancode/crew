@@ -2,10 +2,11 @@
 
 Author: `lead`. Design only: no code was changed and nothing was committed.
 
-**Status: revision 7.**
+**Status: revision 8.**
 - rev-core approved revision 5 for implementation. That revision addressed its change requests on revision 3 (points 1–10) and revision 4 (the gate cycle, toolchain leaves, helper profiles, D2 root acquisition and the Nix probe).
 - Revision 6 adds two things after rev-core's review of the sandbox core: §3.3 rule 6 (no writable entry over a read-only mount), and the requirement of Landlock ABI ≥ 9 for `required` mode. rev-core confirmed both (m-661c2a241175). The ABI floor must be the same in the probe, the launch spec and the shim, with no fallback to scanning alone.
 - Revision 7 widens §3.4 rule D2 at the request of rev-core and rev-runtime (m-40ad3046fd7e): the daemon writes into an agent's tree only while no sandbox of that agent is alive, which includes its git operations and queue commands. The same exclusion now comes before publishing a new start's identity and configuration files (m-6db21ceb1714).
+- Revision 8 (architect, during the jj work; orchestrator m-044d0b27aa92) amends §3.1 step 4: Landlock also handles `LANDLOCK_ACCESS_FS_REFER` and allows it beneath `/`. Without that, every rename or link across directories fails with `EXDEV` inside a sandbox, in the agent's own trees too; the sandbox member found it when jj could not store an object (m-a111740fb9fb).
 - B3 stays open until gate G2 for teams that set `required`, and until G3 by default. Operator decisions 1–10 are settled (§6).
 
 **Inputs.**
@@ -146,9 +147,15 @@ The shim runs single-threaded, and **fails closed**: any failed step exits 125 w
 1. `close_range(3, ~0, 0)`. No inherited descriptors survive except stdio and the PTY.
 2. `prctl(PR_SET_NO_NEW_PRIVS, 1)`.
 3. A seccomp filter that denies `ioctl(TIOCSTI)` and `ioctl(TIOCLINUX)` (as Flatpak does).
-4. Landlock `restrict_self` with two parts:
+4. Landlock `restrict_self` with three parts:
    - `LANDLOCK_SCOPE_ABSTRACT_UNIX_SOCKET | LANDLOCK_SCOPE_SIGNAL` (ABI ≥ 6). Abstract sockets are scoped by network namespace, and agents keep the host network, so this is the only thing that closes them.
    - `LANDLOCK_ACCESS_FS_RESOLVE_UNIX` (ABI ≥ 9), denied everywhere except the exact socket exceptions of §3.3 rule 5.
+   - `LANDLOCK_ACCESS_FS_REFER` (ABI ≥ 2), handled and **allowed beneath `/`** (revision 8).
+     - Why it is needed. REFER (rename or link into another directory) is the one right Landlock denies in every domain, whether the ruleset handles it or not. With the ruleset of revisions 6–7 a sandboxed process could not `rename` or `link` across directories anywhere: `git mv a d/a` failed with `EXDEV`, tools without a copy fallback failed, and jj could not write a commit (its git library renames `objects/.tmp…` into `objects/xx/`).
+     - Why the root. Landlock is used here for sockets and signals only; what an agent may write is decided by the mounts of §3.2. A rule on `/` gives rename and link back the meaning they have without Landlock, and nothing more: both directories must still be writable (a read-only bind answers `EROFS`), and on one mount (the kernel refuses a move between two binds with `EXDEV`, so nothing moves between the worktree, `<A>/rw`, the object store and the sidecar directory).
+     - What Landlock still refuses. A file may not be moved or linked to where it would gain a handled right: a socket made in the worktree cannot be moved or linked into a directory that carries the `RESOLVE_UNIX` exception.
+     - Observed on Linux 7.1.8 (ABI 9) with `notes/landlock-refer-check/`: sockets-only ruleset: rename and link across directories `EXDEV`; with REFER beneath `/`: both succeed, a move into the socket directory is still `EXDEV`.
+     - The rule is added by the shim itself, for every role and both VCS backends; it is not in the launch spec. Failing to add it exits 125.
 5. `execve` of the program.
 
 No thread is created before `restrict_self` succeeds. Raw `syscall`s go through `libc`, with no new crate.
