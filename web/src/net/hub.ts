@@ -109,8 +109,6 @@ export function createHub(env: Env, session: Session, hooks: { note?(text: strin
     refresh(): Promise<void> {
       return index.call("workspaces", undefined, decodeWorkspaces).then(apply, () => false).then(() => {});
     },
-    /** For tests and the perf spec: apply a listing as if it had arrived. */
-    apply,
     call: <T>(method: string, params?: unknown, decode?: (v: unknown) => T) => index.call<T>(method, params, decode),
     onLive: listen(liveListeners),
     onListing: listen(listingListeners),

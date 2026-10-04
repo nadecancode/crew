@@ -7,5 +7,6 @@ import type { WorkspaceLink as Link } from "../net/workspace";
 export function waiting(link: Link, reading: string): string {
   if (link.live()) return reading;
   const c = link.conn();
-  return c === "stopped" || c === "signed-out" ? "not connected: this page is stopped and fetches nothing" : "not connected: it is fetched when the dashboard is live";
+  if (c === "stopped" || c === "signed-out") return "not connected: this page is stopped and fetches nothing";
+  return c === "live" ? "not connected: it is fetched when the workspace is live" : "not connected: it is fetched when the dashboard is live";
 }
