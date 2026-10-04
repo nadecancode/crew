@@ -1132,6 +1132,7 @@ badges: unread inbox, `?` (waits for the operator), paused, usage limit,
 | on | hover | click | other |
 |---|---|---|---|
 | node | card: status and since when, task, model and effort, context %, tokens, last activity, branch | select (the inspector opens in the side panel); double click or `enter`: inspector on its terminal tab | context menu: message, pause/resume, restart, model, compact, kill |
+| the task title on a node | the task: status, progress note, what it waits for | that task's card in the side panel (`#/?task=<id>`: the graph stays) | – |
 | the model label | – | model dialog (the TUI's "click a model") | – |
 | message link | the last three messages between the two, newest first | the bus filtered to that pair | – |
 | pulse in flight | the message's first line | that message's panel | – |
