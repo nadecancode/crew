@@ -89,6 +89,40 @@ test("the bus follows the tail, and scrolled up it stays where the reader is", a
   expect(csp).toEqual([]);
 });
 
+for (const which of ["bus", "log"] as const) {
+  test(`a full ${which} drops its oldest rows without moving the rows being read, and keeps the selected row`, async ({ page, mock, csp, openPage }) => {
+    await openPage();
+    const cap = which === "bus" ? 1000 : 5000;
+    const attr = which === "bus" ? "data-message" : "data-seq";
+    const push = (i: number) =>
+      mock.push(which === "bus"
+        ? message(mock, `review-${i}`, "claude-3", "claude-5", `review ${i}`)
+        : { kind: "event", data: event(100_000 + i, mock.now(), { message: `review ${i}` }) });
+    if (which === "log") await page.keyboard.press("l");
+    const list = which === "bus" ? busList(page) : logList(page);
+    for (let i = 0; i < cap + 50; i++) push(i);
+    const last = which === "bus" ? "review-" + (cap + 49) : String(100_000 + cap + 49);
+    await expect(list.locator(`[${attr}="${last}"]`)).toBeInViewport();
+    expect(await rows(list)).toBe(cap);
+    // Scrolled up to row 400 of the full list.
+    await scrollTo(list, 400 * ROW);
+    const first = await firstVisible(list, attr);
+    const want = which === "bus" ? "review-450" : String(100_450);
+    expect(first).toBe(want);
+    // Select a row with the keyboard (a click on a bus row opens the message).
+    await list.focus();
+    await page.keyboard.press("ArrowUp");
+    const selected = list.locator(".vrow.selected").locator(`[${attr}]`);
+    const picked = await selected.getAttribute(attr);
+    expect(picked).not.toBeNull();
+    for (let i = cap + 50; i < cap + 60; i++) push(i);
+    await page.waitForTimeout(300);
+    expect(await firstVisible(list, attr)).toBe(want);
+    await expect(selected).toHaveAttribute(attr, picked!);
+    expect(csp).toEqual([]);
+  });
+}
+
 test("the bus filters to the pair of a link clicked in the graph; hovering a row lights the link", async ({ page, mock, csp, openPage }) => {
   // No pulses, so that the click lands on the link and not on a pulse in flight.
   await page.emulateMedia({ reducedMotion: "reduce" });

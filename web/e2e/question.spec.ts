@@ -217,3 +217,22 @@ test("after a number answered one of two questions, the dialog keeps the focus a
   await expect(d).toHaveCount(0);
   expect(csp).toEqual([]);
 });
+
+test("while the connection has not proved itself again, a number answers nothing: the dialog stays and no answer goes out", async ({ page, mock, csp, openPage }) => {
+  await openPage();
+  mock.push(mock.pushes("m-9001")[0]);
+  const d = dialog(page);
+  await expect(d).toBeVisible();
+  // The next server takes the socket but never answers hello: it is not proven.
+  const { NO_REPLY } = await import("../dev/mock.ts");
+  mock.on("hello", () => NO_REPLY);
+  mock.dropSockets();
+  await expect(page.locator('[data-conn="reconnecting"], [data-conn="connecting"]')).toBeAttached();
+  await expect.poll(() => mock.calls.filter((c) => c.method === "hello").length).toBeGreaterThan(1);
+  await d.getByRole("button", { name: "later" }).focus();
+  await page.keyboard.press("1");
+  await frame(page);
+  await expect(d).toBeVisible();
+  expect(mock.calls.filter((c) => c.method === "answer")).toEqual([]);
+  expect(csp).toEqual([]);
+});

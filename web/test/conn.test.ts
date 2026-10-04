@@ -204,6 +204,51 @@ test("a call that times out fails; its late answer is ignored; the connection st
   expect(conn.live).toBe(true);
 });
 
+test("a snapshot after resync that fails starts over on a new connection, which takes its own snapshot", async () => {
+  vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "Date"] });
+  const tick = async (ms = 1) => (await flush(), await vi.advanceTimersByTimeAsync(ms));
+  const h = harness();
+  h.link.start();
+  const serveAll = async (s: FakeSocket) => {
+    s.open();
+    await tick();
+    s.reply(s.last("hello").id, { role: "operator", protocol: 5, version: "x", pid: 1, web_proof: SECRET });
+    await tick();
+    s.reply(s.last("subscribe").id, { subscribed: true });
+    await tick();
+    s.reply(s.last("snapshot").id, fixture("snapshot.json"));
+    await tick();
+  };
+  const first = sock();
+  await serveAll(first);
+  expect(h.link.conn()).toBe("live");
+
+  // Timed out.
+  first.push("resync");
+  await tick();
+  expect(first.methods().filter((m) => m === "snapshot").length).toBe(2);
+  await tick(3001);
+  expect(h.link.conn()).toBe("reconnecting");
+  first.reply(first.last("snapshot").id, fixture("snapshot.json"));
+  await tick(400);
+  const second = sock();
+  expect(second).not.toBe(first);
+  await serveAll(second);
+  expect(h.link.conn()).toBe("live");
+  expect(h.applied.snapshots.length).toBe(2);
+
+  // Answered with what does not decode.
+  second.push("resync");
+  await tick();
+  second.reply(second.last("snapshot").id, { agents: "not a list" });
+  await tick(400);
+  const third = sock();
+  expect(third).not.toBe(second);
+  await serveAll(third);
+  expect(h.link.conn()).toBe("live");
+  expect(h.applied.snapshots.length).toBe(3);
+});
+
 test("nothing pushed before the proof matched reaches the page", async () => {
   const pushes: string[] = [];
   const session = new Session(stored(), null);
@@ -218,6 +263,42 @@ test("nothing pushed before the proof matched reaches the page", async () => {
   s.push("resync");
   expect(pushes).toEqual(["resync"]);
   expect(GIVE_UP_MS).toBe(30_000);
+});
+
+test("nothing the page asks goes out before the proof matched: not on the first connection, not after a reconnect", async () => {
+  const { createApp } = await import("../src/app");
+  const app = createApp(fakeEnv(), new Session(stored(), null), new Promise(() => {}));
+  app.link.start();
+  const serveAll = async (s: FakeSocket) => {
+    s.open();
+    await settle();
+    s.reply(s.last("hello").id, { role: "operator", protocol: 5, version: "x", pid: 1, web_proof: SECRET });
+    await settle();
+    s.reply(s.last("subscribe").id, { subscribed: true });
+    await settle();
+    s.reply(s.last("snapshot").id, fixture("snapshot.json"));
+    await settle();
+  };
+  // Before the first proof: the socket is open, hello has no answer yet.
+  const first = sock();
+  first.open();
+  await settle();
+  await expect(app.link.call("inbox", { agent: "claude-1" })).rejects.toMatchObject({ code: "closed" });
+  expect(await app.actions.answer("m-9001", "Convert in the adapter")).toBe(false);
+  expect(first.methods()).toEqual(["hello"]);
+  first.drop();
+  await new Promise((r) => setTimeout(r, 400));
+  await serveAll(sock());
+  expect(app.link.conn()).toBe("live");
+  // Lost again; the next server has not proved itself.
+  sock().drop();
+  await new Promise((r) => setTimeout(r, 400));
+  const third = sock();
+  third.open();
+  await settle();
+  expect(await app.actions.answer("m-9001", "Convert in the adapter")).toBe(false);
+  await expect(app.link.call("answer", { id: "m-9001", body: "x" })).rejects.toMatchObject({ code: "closed" });
+  expect(third.methods()).toEqual(["hello"]);
 });
 
 test("a send whose reply was lost goes once more with the same id after the reconnect; nothing else is replayed", async () => {

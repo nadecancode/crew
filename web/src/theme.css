@@ -260,7 +260,7 @@ pre.body { background: var(--bg-term); border: 1px solid var(--line); border-rad
 .edge.lit { stroke: var(--orch); stroke-width: 2; } .edge.dim { opacity: 0.2; }
 
 /* Lists */
-.vlist { overflow: auto; flex: 1; min-height: 0; position: relative; contain: strict; outline: none; }
+.vlist { overflow: auto; flex: 1; min-height: 0; position: relative; contain: strict; outline: none; overflow-anchor: none; }
 .vlist:focus-visible { box-shadow: inset 0 0 0 2px var(--orch); }
 .vlist-pad { position: relative; }
 .vlist-rows { position: absolute; left: 0; right: 0; top: 0; will-change: transform; }

@@ -26,8 +26,8 @@ const inPair = (m: Message, [a, b]: [string, string]) => {
 export function Bus() {
   const app = useApp();
   const { store, ui, link } = app;
-  const [cursor, setCursor] = createSignal<number | null>(null);
-  const [older, setOlder] = createSignal(0);
+  // The selected row by identity: it stays selected as rows come and go.
+  const [selectedId, setSelectedId] = createSignal<string | null>(null);
   const [loading, setLoading] = createSignal(false);
   const filtered = createMemo(() => {
     store.messagesVersion();
@@ -43,15 +43,20 @@ export function Bus() {
     const f = filtered();
     return f ? f[i] : store.messages.at(i);
   };
+  const cursor = createMemo(() => {
+    const id = selectedId();
+    if (id === null) return null;
+    store.messagesVersion();
+    const i = (filtered() ?? store.messages.toArray()).findIndex((m) => m.id === id);
+    return i < 0 ? null : i;
+  });
 
   const loadOlder = async () => {
     setLoading(true);
     try {
       const have = store.messages.length;
       const list = await link.call("history", { limit: Math.min(have + 300, store.messages.capacity) }, decodeMessages);
-      const before = store.messages.length;
       store.prependMessages(list);
-      setOlder((n) => n + (store.messages.length - before));
     } catch (e) {
       ui.setStatus(`older messages: ${e instanceof Error ? e.message : e}`, true);
     } finally {
@@ -75,11 +80,11 @@ export function Bus() {
         count={count}
         slice={slice}
         rowHeight={BUS_ROW}
-        prepended={older}
+        key={(m: Message) => m.id}
         selected={cursor}
         onSelect={(i) => {
-          setCursor(i);
           const m = at(i);
+          setSelectedId(m?.id ?? null);
           if (m) ui.setHoverPair([m.from, m.to]);
         }}
         onOpen={(i) => {

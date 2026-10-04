@@ -17,7 +17,6 @@ const RANK: Record<EventLevel, number> = { debug: 0, info: 1, warn: 2, error: 3 
 export function Logs() {
   const app = useApp();
   const { store, ui, link } = app;
-  const [older, setOlder] = createSignal(0);
   const [loading, setLoading] = createSignal(false);
   const f = () => ui.logFilter();
   const filtering = () => !!(f().agent || f().vcs || f().text || f().level !== "debug");
@@ -57,9 +56,7 @@ export function Logs() {
     try {
       const limit = Math.min(MAX_EVENTS, store.events.length + 1000);
       const list = await link.call("events", { limit }, decodeEvents);
-      const before = store.events.length;
       store.prependEvents(list);
-      setOlder((n) => n + (store.events.length - before));
     } catch (e) {
       ui.setStatus(`older events: ${e instanceof Error ? e.message : e}`, true);
     } finally {
@@ -96,7 +93,7 @@ export function Logs() {
         count={count}
         slice={slice}
         rowHeight={LOG_ROW}
-        prepended={older}
+        key={(e: Event) => e.seq}
         selected={cursor}
         onSelect={(i) => {
           const e = at(i);

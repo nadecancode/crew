@@ -23,6 +23,22 @@ test("resync asks for a snapshot again on the same connection", async ({ page, m
   expect(mock.calls.filter((c) => c.method === "hello").length).toBe(1);
 });
 
+test("a resync snapshot that times out starts over on a new connection, which brings the page up to date", async ({ page, mock, openPage, csp }) => {
+  await openPage();
+  // Changed without a push: the push was lost to the lag that resync reports.
+  (mock.state.agents[0] as { activity: string }).activity = "Changed during the lag";
+  const release = mock.holdSnapshot();
+  const n = mock.calls.length;
+  mock.push({ kind: "resync" });
+  await mock.waitForCall("snapshot", (c) => c.seq >= n);
+  await page.waitForTimeout(3300);
+  release();
+  await expect.poll(() => mock.calls.filter((c) => c.method === "hello").length, { timeout: 10_000 }).toBe(2);
+  await expect(page.locator('[data-conn="live"]')).toBeAttached({ timeout: 10_000 });
+  await expect(activity(page, "claude-1")).toHaveText("▸ Changed during the lag");
+  expect(csp).toEqual([]);
+});
+
 test("a push between the page's snapshot and its reply is not shown; one after it is", async ({ page, mock, openPage }) => {
   await openPage();
   const release = mock.holdSnapshot();

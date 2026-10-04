@@ -1,7 +1,9 @@
 // A virtual list (notes/web-design.md §perf 4): fixed row height, rows for
 // the visible range plus 10 above and below, the rest one spacer's height.
-// Scrolled to the bottom it follows the tail; scrolled up, appends do not move
-// what is being read. One tab stop; the arrow keys, `j`/`k`, PageUp/PageDown
+// Scrolled to the bottom it follows the tail; scrolled up, what is being read
+// stays put: appends do not move it, and with `key` neither do rows taken
+// from the front (a full ring drops its oldest) or put there (older rows
+// loaded), until the row read itself is dropped. One tab stop; the arrow keys, `j`/`k`, PageUp/PageDown
 // and Home/End move the selected row.
 
 import { For, createEffect, createMemo, createSignal, on, onCleanup, onMount, untrack, type JSX } from "solid-js";
@@ -21,8 +23,11 @@ export function VirtualList<T>(props: {
   selected?: () => number | null;
   onSelect?(index: number): void;
   onOpen?(index: number): void;
-  /** Rows at the top were added (older entries loaded): keep the reader's place. */
+  /** Rows at the top were added (older entries loaded): keep the reader's place.
+   * Not needed with `key`, which keeps it whatever moved. */
   prepended?: () => number;
+  /** A row's identity: the reader's place is kept by it. */
+  key?: (item: T) => string | number;
   empty?: JSX.Element;
 }) {
   let el!: HTMLDivElement;
@@ -61,13 +66,49 @@ export function VirtualList<T>(props: {
   // Older rows put in front: the same rows stay under the reader.
   createEffect(on(() => props.prepended?.() ?? 0, (n, prev) => {
     const added = n - (prev ?? 0);
-    if (added > 0 && !stick()) queueMicrotask(() => {
+    if (added > 0 && !stick() && !props.key) queueMicrotask(() => {
       el.scrollTop += added * H;
       setTop(el.scrollTop);
     });
   }, { defer: true }));
 
+  // The row at the top of the view, by identity.
+  let anchor: { i: number; key: string | number } | null = null;
+  const keyAt = (i: number) => {
+    const item = props.slice(i, i + 1)[0];
+    return item === undefined ? undefined : props.key!(item);
+  };
+  const setAnchor = () => {
+    if (!props.key) return;
+    const i = Math.floor(el.scrollTop / H);
+    const key = untrack(() => keyAt(i));
+    anchor = key === undefined ? null : { i, key };
+  };
+  // The rows changed: where the anchor went, the view goes (nearest first, as
+  // a few rows dropped or added is the common case).
+  createEffect(on(() => (props.count(), props.slice(0, 0)), () => {
+    if (!props.key || stick() || !anchor) return;
+    const a = anchor;
+    untrack(() => {
+      const n = props.count();
+      if (keyAt(a.i) === a.key) return;
+      for (let d = 1; d < n; d++) {
+        for (const j of [a.i - d, a.i + d]) {
+          if (j < 0 || j >= n || keyAt(j) !== a.key) continue;
+          el.scrollTop += (j - a.i) * H;
+          anchor = { i: j, key: a.key };
+          setTop(el.scrollTop);
+          return;
+        }
+        if (a.i - d < 0 && a.i + d >= n) break;
+      }
+      // Dropped: the row now in its place is read instead.
+      setAnchor();
+    });
+  }, { defer: true }));
+
   const onScroll = () => {
+    setAnchor();
     setTop(el.scrollTop);
     setStick(el.scrollTop + el.clientHeight >= el.scrollHeight - H / 2);
   };

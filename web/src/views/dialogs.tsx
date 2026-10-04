@@ -77,7 +77,7 @@ function QuestionDialog(props: { id: string }) {
   createEffect(on(() => props.id, () => setOwn(""), { defer: true }));
   const send = async (body: string) => {
     const question = q();
-    if (!question || !body.trim() || sending()) return;
+    if (!question || !body.trim() || sending() || !link.live()) return;
     setSending(true);
     const ok = await app.actions.answer(question.id, body);
     setSending(false);

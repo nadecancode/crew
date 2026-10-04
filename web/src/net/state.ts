@@ -9,10 +9,14 @@
 //    next one.
 // 2. The reply replaces agents, tasks, session, questions and both rings.
 // 3. From then on every push is applied in the order received.
+//
+// A snapshot after `resync` that fails (times out, does not decode) leaves
+// the page behind the daemon with the pushes in between discarded: the page
+// starts over on a new connection, which takes a snapshot of its own.
 
 import { createSignal } from "solid-js";
 import { decodeSnapshot, type Push, type Snapshot } from "../protocol";
-import { Conn, type ConnState, type Env, type StopReason } from "./conn";
+import { CallError, Conn, type ConnState, type Env, type StopReason } from "./conn";
 import type { Session } from "./session";
 
 export const SNAPSHOT_PARAMS = { messages: 300, events: 1000 };
@@ -68,7 +72,11 @@ export function createLink(env: Env, session: Session, sink: Sink, hooks: { note
     push(push, t0) {
       if (inFlight) return;
       if (push.kind === "resync") {
-        void snapshot(state).catch(() => {});
+        void snapshot(state).catch((e) => {
+          // Lost with the connection: reconnecting already takes a new snapshot.
+          if (e instanceof CallError && e.code === "closed") return;
+          state.restart();
+        });
         return;
       }
       if (push.kind === "shutdown") {

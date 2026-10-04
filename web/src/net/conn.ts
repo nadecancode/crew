@@ -128,6 +128,14 @@ export class Conn {
     this.open();
   }
 
+  /** Start over on a new connection, as when a call of the handshake fails:
+   * what the page shows can no longer be brought up to date on this one. */
+  restart(): void {
+    if (this.stoppedFor || !this.ws) return;
+    this.drop();
+    this.lost();
+  }
+
   /** Connect again now (the tab became visible, the browser went online). */
   poke(): void {
     if (this.stoppedFor || this.ws || this.retryTimer === null) return;
@@ -136,8 +144,17 @@ export class Conn {
     this.open();
   }
 
-  /** A call; its answer, or a `CallError` (`timeout`, `closed`, or the daemon's code). */
+  /** A call; its answer, or a `CallError` (`timeout`, `closed`, or the daemon's code).
+   * Only on a connection whose server proved itself: until then nothing the
+   * page asks or says may reach whoever answers (§security). */
   call<T = unknown>(method: string, params?: unknown, decode?: (v: unknown) => T): Promise<T> {
+    if (!this.isLive) return Promise.reject(new CallError("closed", "not connected"));
+    return this.request(method, params, decode);
+  }
+
+  /** A request on the open socket, proven or not: the handshake's own
+   * `web_pair` and `hello` only. */
+  private request<T>(method: string, params?: unknown, decode?: (v: unknown) => T): Promise<T> {
     const ws = this.ws;
     if (this.stoppedFor || !ws || ws.readyState !== 1) return Promise.reject(new CallError("closed", "not connected"));
     const id = this.next++;
@@ -213,6 +230,7 @@ export class Conn {
 
   private open(): void {
     if (this.stoppedFor) return;
+    this.isLive = false;
     this.retryTimer = null;
     const generation = ++this.generation;
     const ws = new this.o.env.WebSocket(this.o.env.url);
@@ -266,7 +284,7 @@ export class Conn {
       const code = this.o.session.takeCode();
       if (code !== null) {
         try {
-          this.o.session.adopt(await this.call("web_pair", { code }, decodePaired));
+          this.o.session.adopt(await this.request("web_pair", { code }, decodePaired));
         } catch (e) {
           if (!current()) return;
           if (!(e instanceof CallError) || (e.code !== "unauthorized" && e.code !== "unavailable")) throw e;
@@ -278,7 +296,7 @@ export class Conn {
       if (!credential) return this.stop("no-session");
       let hello;
       try {
-        hello = await this.call("hello", { role: "operator", token: credential.token, client: "web", protocol: PROTOCOL }, decodeHello);
+        hello = await this.request("hello", { role: "operator", token: credential.token, client: "web", protocol: PROTOCOL }, decodeHello);
       } catch (e) {
         if (!current()) return;
         if (e instanceof CallError && e.code === "unauthorized") return this.stop("unauthorized");

@@ -157,6 +157,10 @@ export function createApp(env: Env, session: Session, terminal: Promise<Terminal
   }
 
   async function answer(id: string, body: string): Promise<boolean> {
+    if (!link.live()) {
+      ui.setStatus("the answer was not sent: not connected", true);
+      return false;
+    }
     // The question is hidden from the call on: once answered it stays hidden
     // until the operator's answer message (or a snapshot without it) removes it.
     store.setAnswering(id, true);
