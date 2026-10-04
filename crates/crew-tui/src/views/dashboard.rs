@@ -91,19 +91,17 @@ pub enum Hit {
 /// below the usage strip.
 fn regions(app: &App, area: Rect) -> (Rect, Rect, Rect) {
     let strip_h = super::usage::height(app, area);
-    let warning = super::sandbox_warning(app).is_some();
+    let warnings = super::warning_rows(app);
     let (mut topo, mut bus, mut footer) = split(Rect {
         y: area.y + strip_h,
-        height: (area.height - strip_h).saturating_add(u16::from(warning)),
+        height: (area.height - strip_h).saturating_add(warnings),
         ..area
     });
-    // Spend the warning's row on history before shrinking the agent boxes.
-    if warning {
-        if bus.height > 0 {
-            bus.height -= 1;
-        } else {
-            topo.height = topo.height.saturating_sub(1);
-        }
+    // Spend warning rows on history before shrinking the agent boxes.
+    if warnings > 0 {
+        let from_bus = bus.height.min(warnings);
+        bus.height -= from_bus;
+        topo.height = topo.height.saturating_sub(warnings - from_bus);
         bus.y = topo.bottom();
         footer.y = bus.bottom();
     }

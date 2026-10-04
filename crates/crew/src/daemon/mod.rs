@@ -249,6 +249,8 @@ pub struct Inner {
     pub(crate) workspace: PathBuf,
     pub(crate) state_dir: PathBuf,
     pub(crate) socket: PathBuf,
+    /// Computed once from the socket this daemon binds.
+    socket_warning: String,
     pub(crate) crew_bin: PathBuf,
     pub(crate) store: Arc<dyn Store>,
     pub(crate) bus: Arc<dyn MessageBus>,
@@ -562,6 +564,7 @@ impl Daemon {
                 })
                 .unwrap_or_default()
                 .to_string(),
+            socket_warning: self.socket_warning.clone(),
             daemon_started_at: self.started_at,
             team_started_at: s.team_started_at,
             completed_at: s.completed_at,
@@ -789,6 +792,7 @@ pub async fn start(options: DaemonOptions) -> Result<Running> {
     let state_root = open_state_root(&state_dir)?;
 
     let socket = paths::socket_path(&state_dir);
+    let socket_warning = paths::socket_warning(&socket);
     // Only the lock holder may check the registration, replace the socket
     // and open the database, so two starts close together cannot both win.
     let Some(lock) = lock_instance(&state_dir)? else {
@@ -856,6 +860,7 @@ pub async fn start(options: DaemonOptions) -> Result<Running> {
         workspace: workspace.clone(),
         state_dir: state_dir.clone(),
         socket: socket.clone(),
+        socket_warning,
         crew_bin: options.crew_bin,
         store,
         bus,
@@ -904,6 +909,10 @@ pub async fn start(options: DaemonOptions) -> Result<Running> {
         "daemon.started",
         format!("daemon started (pid {})", std::process::id()),
     ));
+    if !daemon.socket_warning.is_empty() {
+        daemon
+            .emit(NewEvent::new("daemon", "daemon.socket_fallback", &daemon.socket_warning).warn());
+    }
     Ok(Running {
         daemon,
         listener,
@@ -1075,6 +1084,97 @@ mod tests {
         std::fs::write(&file, "data").unwrap();
         assert!(files.open_reported(&file).is_some());
     }
+
+    #[test]
+    fn socket_fallback_is_reported_from_the_bound_socket_and_emitted_once() {
+        const PROBE: &str = "CREW_SOCKET_FALLBACK_PROBE";
+        let Some(root) = std::env::var_os(PROBE) else {
+            for case in ["xdg", "missing", "long"] {
+                let root = tempfile::Builder::new()
+                    .prefix("crew-sock")
+                    .tempdir_in("/tmp")
+                    .unwrap();
+                let mut child = std::process::Command::new(std::env::current_exe().unwrap());
+                child.args(["--exact", "daemon::tests::socket_fallback_is_reported_from_the_bound_socket_and_emitted_once", "--nocapture"])
+                    .env(PROBE, root.path()).env("CREW_SOCKET_FALLBACK_CASE", case)
+                    .env_remove("CREW_IDENTITY").env_remove("CREW_SOCKET");
+                for (key, name) in [
+                    ("HOME", "home"),
+                    ("XDG_STATE_HOME", "state"),
+                    ("XDG_CONFIG_HOME", "config"),
+                    ("XDG_RUNTIME_DIR", "run"),
+                ] {
+                    let dir = root.path().join(name);
+                    std::fs::create_dir(&dir).unwrap();
+                    child.env(key, dir);
+                }
+                if case == "missing" {
+                    child.env_remove("XDG_RUNTIME_DIR");
+                }
+                if case == "long" {
+                    child.env("XDG_RUNTIME_DIR", root.path().join("x".repeat(108)));
+                }
+                let output = child
+                    .env("CREW_GLOBAL_CONFIG", root.path().join("global.toml"))
+                    .output()
+                    .unwrap();
+                assert!(
+                    output.status.success(),
+                    "case {case}: {}{}",
+                    String::from_utf8_lossy(&output.stdout),
+                    String::from_utf8_lossy(&output.stderr)
+                );
+                assert!(String::from_utf8_lossy(&output.stdout).contains("1 passed; 0 failed"));
+            }
+            return;
+        };
+        let root = PathBuf::from(root);
+        let workspace = root.join("ws");
+        std::fs::create_dir(&workspace).unwrap();
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap();
+        let running = runtime
+            .block_on(start(DaemonOptions {
+                workspace,
+                crew_bin: std::env::current_exe().unwrap(),
+            }))
+            .unwrap();
+        let info = serde_json::to_value(running.daemon.session_info()).unwrap();
+        let warning = info["socket_warning"]
+            .as_str()
+            .expect("daemon must report its socket warning");
+        let fallback = std::env::var("CREW_SOCKET_FALLBACK_CASE").unwrap() != "xdg";
+        assert_eq!(!warning.is_empty(), fallback);
+        assert_eq!(
+            running.socket().parent().unwrap(),
+            if fallback {
+                PathBuf::from(format!("/tmp/crew-{}", paths::uid()))
+            } else {
+                root.join("run/crew")
+            }
+        );
+        let events = running.daemon.store.recent_events(None, 100).unwrap();
+        let warnings: Vec<_> = events
+            .iter()
+            .filter(|e| e.event_type == "daemon.socket_fallback")
+            .collect();
+        assert_eq!(warnings.len(), usize::from(fallback));
+        if fallback {
+            assert_eq!(warnings[0].message, warning);
+            assert_eq!(warnings[0].source, "daemon");
+            assert_eq!(warnings[0].level, EventLevel::Warn);
+        }
+        // Published::drop withdraws this run under the lock, including the
+        // fallback files in the shared runtime directory. Leave it intact.
+        let socket = running.socket().to_path_buf();
+        let token = paths::operator_token_path(&socket);
+        drop(running);
+        assert!(!socket.exists(), "socket survived the unserved run");
+        assert!(!token.exists(), "operator token survived the unserved run");
+    }
+
     #[test]
     fn session_info_reports_the_loaded_team_sandbox_mode() {
         const PROBE: &str = "CREW_SESSION_SANDBOX_PROBE";

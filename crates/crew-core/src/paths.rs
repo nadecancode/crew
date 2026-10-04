@@ -391,6 +391,16 @@ pub fn socket_path(state_dir: &Path) -> PathBuf {
     socket_path_in(state_dir, &runtime_dir())
 }
 
+/// Diagnose the private /tmp fallback from the socket actually bound by the
+/// daemon. No environment lookup: the warning cannot change after startup.
+pub fn socket_warning(socket: &Path) -> String {
+    if socket.parent() == Some(Path::new(&format!("/tmp/crew-{}", uid()))) {
+        "daemon socket is in /tmp; XDG_RUNTIME_DIR is unset or too long".into()
+    } else {
+        String::new()
+    }
+}
+
 /// The credential beside a daemon socket. Avoid a collision for socket names
 /// that already end in .token (including explicit CREW_SOCKET overrides).
 pub fn operator_token_path(socket: &Path) -> PathBuf {
@@ -1108,6 +1118,25 @@ mod tests {
                 socket.display()
             );
             assert_eq!(runtime, runtime_dir_from(None, uid()));
+        }
+    }
+
+    #[test]
+    fn socket_warning_follows_the_selected_runtime_without_reading_the_environment() {
+        for (xdg, warns) in [
+            (None, true),
+            (Some("/run/user/test".to_string()), false),
+            (Some(format!("/run/{}", "x".repeat(108))), true),
+            (Some("/tmp/short".to_string()), false),
+        ] {
+            let runtime = runtime_dir_from(xdg.as_deref().map(OsStr::new), uid());
+            let socket = socket_path_in(Path::new("/workspace/.crew"), &runtime);
+            assert_eq!(
+                !socket_warning(&socket).is_empty(),
+                warns,
+                "{}",
+                socket.display()
+            );
         }
     }
 

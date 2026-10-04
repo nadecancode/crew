@@ -392,6 +392,7 @@ pub fn snapshot(now: i64) -> Snapshot {
             backend: "herdr".to_string(),
             isolation: "worktree".to_string(),
             sandbox: "off".to_string(),
+            socket_warning: String::new(),
             daemon_started_at: now - 760_000,
             team_started_at: Some(now - 754_000),
             completed_at: None,

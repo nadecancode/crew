@@ -128,6 +128,91 @@ fn dashboard_area(app: &App, width: u16, height: u16) -> ratatui::layout::Rect {
 }
 
 #[test]
+fn socket_fallback_warning_stays_above_views_and_modals_and_preserves_hits() {
+    use ratatui::layout::Rect;
+    let mut wire = serde_json::to_value(fixture::snapshot(NOW)).unwrap();
+    wire["session"]["socket_warning"] =
+        serde_json::json!("daemon socket is in /tmp\u{1b}]52;c;bad\u{7}");
+    wire["events"] = serde_json::json!([]);
+    let mut a = App::new();
+    a.apply_snapshot(serde_json::from_value(wire).unwrap(), NOW);
+    for mode in ["required", "off"] {
+        a.session.sandbox = mode.into();
+        for view in [View::Dashboard, View::Detail, View::Tasks, View::Logs] {
+            a.view = view;
+            for help in [false, true] {
+                a.help = help;
+                for modal in [
+                    None,
+                    Some(Modal::Compose(crew_tui::app::Compose {
+                        to: "claude-1".into(),
+                        text: "hello".into(),
+                        cursor: 5,
+                        notice: None,
+                    })),
+                ] {
+                    a.modal = modal;
+                    let screen = render_to_string(&a, 42, 24, NOW);
+                    let warning_row = usize::from(mode != "required");
+                    assert!(
+                        screen
+                            .lines()
+                            .nth(warning_row)
+                            .unwrap()
+                            .contains("SOCKET IN /tmp"),
+                        "{screen}"
+                    );
+                    assert!(
+                        !screen.contains("52;c;bad"),
+                        "raw warning text must not be drawn"
+                    );
+                }
+            }
+        }
+        a.help = false;
+        a.modal = None;
+        for view in [View::Dashboard, View::Detail, View::Tasks, View::Logs] {
+            a.view = view;
+            for width in [0, 1, 9, 10, 42] {
+                for height in [0, 1, 2, 3, 24] {
+                    let text = render_to_string(&a, width, height, NOW);
+                    assert!(!text.chars().any(|c| c.is_control() && c != '\n'));
+                    if width > 0 && height > 0 {
+                        assert!(
+                            text.starts_with(if width < 10 {
+                                "!"
+                            } else if mode == "required" {
+                                "SOCKET"
+                            } else {
+                                "NO"
+                            }),
+                            "{text}"
+                        );
+                    }
+                }
+            }
+        }
+        a.view = View::Dashboard;
+        a.modal = None;
+        a.help = false;
+        let rows = 1 + u16::from(mode != "required");
+        let screen = Rect::new(0, 0, 120, 40);
+        render_to_string(&a, 120, 40, NOW);
+        for row in 0..rows {
+            assert_eq!(views::hit(&a, screen, 10, row), None);
+        }
+        let rects = views::dashboard::agent_rects(&a, Rect::new(0, rows, 120, 40 - rows));
+        assert!(!rects.is_empty());
+        for (id, rect) in rects {
+            assert_eq!(
+                views::hit(&a, screen, rect.x + 1, rect.y + 1),
+                Some(views::dashboard::Hit::Agent(id))
+            );
+        }
+    }
+}
+
+#[test]
 fn sandbox_warning_is_persistent_and_only_the_snapshot_can_confirm_it() {
     use crew_tui::app::{MessageView, ModelPicker, QuestionBox};
     for width in [42, 120] {

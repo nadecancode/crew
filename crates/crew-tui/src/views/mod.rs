@@ -33,22 +33,19 @@ pub fn render_buffer(buf: &mut Buffer, area: Rect, app: &App, theme: &Theme, now
     if area.is_empty() {
         return;
     }
-    if let Some(text) = sandbox_warning(app) {
+    for (row, text) in warnings(app).into_iter().flatten().enumerate() {
+        if row >= usize::from(area.height) {
+            break;
+        }
+        let y = area.y + row as u16;
         let style = theme.bold(theme.warn).bg(theme.bar_bg);
-        fill_row(buf, area, area.y, style);
+        fill_row(buf, area, y, style);
         let label = if area.width < 10 {
             "!".into()
         } else {
             fit(text, usize::from(area.width))
         };
-        put_str(
-            buf,
-            area,
-            i32::from(area.x),
-            i32::from(area.y),
-            &label,
-            style,
-        );
+        put_str(buf, area, i32::from(area.x), i32::from(y), &label, style);
     }
     let content = content_area(app, area);
     // A question waiting for the operator is announced above whatever view
@@ -93,10 +90,22 @@ fn sandbox_warning(app: &App) -> Option<&'static str> {
     }
 }
 
+fn warnings(app: &App) -> [Option<&'static str>; 2] {
+    [
+        sandbox_warning(app),
+        (!app.session.socket_warning.is_empty())
+            .then_some("SOCKET IN /tmp · using a private temporary directory"),
+    ]
+}
+
+pub(crate) fn warning_rows(app: &App) -> u16 {
+    warnings(app).into_iter().flatten().count() as u16
+}
+
 /// Space below the persistent warning, shared by modal rendering and input
 /// limits. app.screen retains the full terminal size, including before draw.
 pub(crate) fn content_area(app: &App, area: Rect) -> Rect {
-    let header = u16::from(area.height > 0 && sandbox_warning(app).is_some());
+    let header = warning_rows(app).min(area.height);
     Rect {
         y: area.y + header,
         height: area.height - header,

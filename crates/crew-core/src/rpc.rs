@@ -671,6 +671,10 @@ pub struct SessionInfo {
     /// `off`, `required`, or empty before a team is loaded or from older peers.
     #[serde(default)]
     pub sandbox: String,
+    /// The daemon's startup warning when its bound socket uses the private
+    /// /tmp fallback; empty for the preferred runtime directory or older peers.
+    #[serde(default)]
+    pub socket_warning: String,
     pub daemon_started_at: i64,
     #[serde(default)]
     pub team_started_at: Option<i64>,
@@ -739,6 +743,20 @@ mod compatibility_tests {
                 mode
             );
         }
+    }
+
+    #[test]
+    fn legacy_snapshots_without_a_socket_warning_remain_readable() {
+        let legacy = json!({
+            "session":{"workspace":"/ws", "state_dir":"/ws/.crew", "daemon_started_at":0,
+                "daemon_pid":1, "version":"old"},
+            "agents":[], "tasks":[], "messages":[], "events":[], "server_time":0,
+        });
+        let snapshot: Snapshot = serde_json::from_value(legacy).unwrap();
+        assert_eq!(
+            serde_json::to_value(snapshot).unwrap()["session"]["socket_warning"],
+            ""
+        );
     }
 
     #[test]

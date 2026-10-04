@@ -338,11 +338,15 @@ mod paging_tests {
     fn warning_and_questions_do_not_hide_oldest_logs_or_skip_a_page_line() {
         for height in [12, 24] {
             for mode in ["off", "required", ""] {
-                for questions in [false, true] {
+                for (questions, socket_warning) in
+                    [(false, false), (true, false), (false, true), (true, true)]
+                {
                     let mut app = App::new();
                     app.apply_snapshot(fixture::snapshot(1_000), 1_000);
                     app.view = View::Logs;
                     app.session.sandbox = mode.into();
+                    app.session.socket_warning =
+                        if socket_warning { "fallback" } else { "" }.into();
                     app.events = (0..200)
                         .map(|n| {
                             fixture::event(
@@ -405,6 +409,12 @@ mod paging_tests {
                 page_rows(&app, Rect::new(0, 0, 100, 24)) + 2,
                 full,
                 "{view:?} question band"
+            );
+            app.session.socket_warning = "fallback".into();
+            assert_eq!(
+                page_rows(&app, Rect::new(0, 0, 100, 24)) + 3,
+                full,
+                "{view:?} socket warning below sandbox and question rows"
             );
         }
     }
