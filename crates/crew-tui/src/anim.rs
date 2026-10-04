@@ -279,10 +279,15 @@ impl Anims {
         }
         // The operation is over: its running mark and held link go. The
         // terminal row starts its own link, along the line already lit.
-        self.marks
-            .retain(|m| !matches!(&m.kind, MarkKind::Running { op } if *op == event.op));
-        self.links.retain(|l| l.held.as_deref() != Some(&event.op));
+        self.end_op(&event.op);
         self.vcs_ended(event, now);
+    }
+
+    /// The operation is over: its running mark and held link go.
+    pub fn end_op(&mut self, op: &str) {
+        self.marks
+            .retain(|m| !matches!(&m.kind, MarkKind::Running { op: running } if running == op));
+        self.links.retain(|l| l.held.as_deref() != Some(op));
     }
 
     fn vcs_started(&mut self, event: &VcsEvent, now: i64) {
@@ -488,6 +493,13 @@ impl Anims {
         mine()
             .rfind(|m| !m.is_running() && m.is_live(now))
             .or_else(|| mine().rfind(|m| m.is_running()))
+    }
+
+    /// An agent left the team: nothing of it is drawn, so nothing of it runs.
+    pub fn remove_agent(&mut self, id: &str) {
+        self.marks.retain(|m| m.agent != id);
+        self.links
+            .retain(|l| !(matches!(l.kind, LinkKind::Vcs(_)) && (l.from == id || l.to == id)));
     }
 
     /// An operation is running: the spinner turns.

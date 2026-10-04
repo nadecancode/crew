@@ -911,6 +911,7 @@ impl App {
             return;
         };
         self.agents.remove(index);
+        self.anims.remove_agent(id);
         // Subagents of a removed parent rejoin the ring until they go too.
         self.sort_agents();
         self.fix_selection(Some(index));
@@ -979,13 +980,16 @@ impl App {
     /// A VCS event that just arrived starts its animation, unless it is
     /// already old (a reconnect replays what the daemon kept).
     fn start_vcs(&mut self, event: &Event, now: i64) {
-        let server_now = self.server_now(now);
-        if server_now - event.timestamp > VCS_FRESH_MS {
+        let Some(vcs) = VcsEvent::from_event(event) else {
+            return;
+        };
+        if self.server_now(now) - event.timestamp > VCS_FRESH_MS {
+            // Too late to play, not too late to end what is still shown as
+            // running.
+            self.anims.end_op(&vcs.op);
             return;
         }
-        if let Some(vcs) = VcsEvent::from_event(event) {
-            self.anims.on_vcs(&vcs, now);
-        }
+        self.anims.on_vcs(&vcs, now);
     }
 
     /// After a snapshot: what still runs shows as running, nothing else.
@@ -2224,5 +2228,49 @@ mod tests {
             commit_event("claude-1", VcsOutcome::Ok, "v5"),
         );
         assert!(app.anims.marks.is_empty());
+    }
+
+    #[test]
+    fn a_removed_agent_takes_its_running_operation_with_it() {
+        let mut app = calm();
+        vcs_push(&mut app, 900, T, T, merge_event(VcsOutcome::Started, "v1"));
+        assert!(app.anims.running());
+        app.apply_push(
+            Push::AgentRemoved {
+                id: "claude-3".into(),
+            },
+            T + 10,
+        );
+        assert!(!app.anims.running());
+        assert!(app.anims.links.is_empty() && app.anims.marks.is_empty());
+        let wake = app.next_wake(T + 20_050);
+        assert_eq!(wake, Duration::from_millis(950));
+        // The peer going away drops the held link too.
+        let mut app = calm();
+        vcs_push(&mut app, 900, T, T, merge_event(VcsOutcome::Started, "v1"));
+        app.apply_push(
+            Push::AgentRemoved {
+                id: "claude-5".into(),
+            },
+            T + 10,
+        );
+        assert!(app.anims.links.is_empty());
+    }
+
+    #[test]
+    fn a_late_terminal_event_still_ends_the_running_mark() {
+        let mut app = calm();
+        vcs_push(&mut app, 900, T, T, merge_event(VcsOutcome::Started, "v77"));
+        assert!(app.anims.running());
+        // Delivered 11 s after it happened: no animation, but no spinner either.
+        vcs_push(
+            &mut app,
+            901,
+            T + 1000,
+            T + 12_000,
+            merge_event(VcsOutcome::Ok, "v77"),
+        );
+        assert!(!app.anims.running());
+        assert!(app.anims.links.is_empty() && app.anims.marks.is_empty());
     }
 }

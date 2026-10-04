@@ -598,6 +598,19 @@ fn render_compact(
         put_str(buf, area, status_x + 2, y, &tail, theme.fg(theme.muted));
         let work_x = status_x + 3 + width(&tail) as i32;
         let room = (i32::from(area.right()) - work_x).max(0) as usize;
+        if is_hub && room > 4 {
+            // What the team's version control is doing, on the hub's row.
+            if let Some(mark) = app.anims.mark_for(ORCHESTRATOR_ID, now) {
+                put_str(
+                    buf,
+                    area,
+                    work_x,
+                    y,
+                    &fit(&mark_text(mark, now), room),
+                    mark_style(mark, theme),
+                );
+            }
+        }
         if !is_hub && room > 2 {
             let decor = Decor {
                 work: app.work_of(&agent.id, now),

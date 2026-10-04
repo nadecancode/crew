@@ -2737,4 +2737,49 @@ mod vcs {
         let screen = render_to_string(&app, 120, 30, NOW);
         assert!(screen.contains("vcs.commit"), "{screen}");
     }
+
+    #[test]
+    fn the_compact_layout_shows_the_hub_marks_too() {
+        let mut app = app();
+        push(
+            &mut app,
+            900,
+            event(
+                VcsAction::Integrate,
+                VcsOutcome::Started,
+                "v8",
+                "integration",
+            ),
+        );
+        let screen = render_to_string(&app, 100, 6, NOW + 100);
+        assert!(screen.contains("integrating"), "{screen}");
+        push(
+            &mut app,
+            901,
+            VcsEvent {
+                summary: Some("2 merged, 1 conflict".into()),
+                ..event(
+                    VcsAction::Integrate,
+                    VcsOutcome::Conflict,
+                    "v8",
+                    "integration",
+                )
+            },
+        );
+        let screen = render_to_string(&app, 100, 6, NOW + 200);
+        assert!(!screen.contains("integrating"), "{screen}");
+        assert!(screen.contains("2 merged, 1 conflict"), "{screen}");
+        let mut ws = self::app();
+        push(
+            &mut ws,
+            900,
+            event(VcsAction::Workspace, VcsOutcome::Started, "v9", "claude-7"),
+        );
+        let screen = render_to_string(&ws, 100, 6, NOW + 100);
+        assert!(screen.contains("workspace claude-7"), "{screen}");
+        // Selected hub: still on the first row.
+        ws.selected = Some("orchestrator".into());
+        let screen = render_to_string(&ws, 100, 6, NOW + 100);
+        assert!(screen.contains("workspace claude-7"), "{screen}");
+    }
 }
