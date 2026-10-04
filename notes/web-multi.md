@@ -1256,11 +1256,42 @@ workspace connection, as the page now starts. Added:
 | P17 | a switch: from `enter` in the switcher to the first frame of the other workspace with its snapshot applied, 10 agents, 300 messages, 1000 events | ≤ 150 ms at p95 | the wire part (connect, `hello`, `subscribe`, `snapshot`): 12–15 ms at p95 |
 | P18 | a question asked in a workspace not on screen: from the daemon's `message` push to the badge | ≤ 500 ms at p95 | not spiked: 250 ms (daemon) + 100 ms (server) of coalescing at most |
 | P19 | an idle page with five joined workspaces: index frames received and calls made in 60 s, pings aside | none | by construction (summaries hold no times) |
-| P20 | the server with five joined workspaces and three pages, idle: resident memory; wake-ups | ≤ 40 MB; none under 5 s but pings | not spiked |
+| P20 | the server with five joined workspaces and three pages, idle: resident memory; wake-ups | ≤ 40 MB; none but the 5 s housekeeping tick, the pings, and the runtime's timer wheel stepping those two down (below) | qa, 60 s, five workspaces, six idle connections: 28 wake-ups, every one of them a tick, a ping or a step of the wheel (13 of those) |
 
 How the server meets P16: a frame is read and written, not parsed
 (§multi-transport); `TCP_NODELAY` on every accepted socket, as today; one
 task per direction per connection.
+
+**P20 and the runtime's timer wheel** (amended during QA, m-dc99bc6bcd1c;
+the budget read "none under 5 s but pings"). The budget is there so that the
+server does not poll: a poll would hide a lost `web_rescan` or reconcile,
+and cost something on a machine where nothing happens. It was written as if
+a timer cost one wake-up, when it fires. It does not, in tokio: its timers
+sit in a wheel of levels (slots of 1 ms, 64 ms, 4096 ms, …;
+`runtime/time/wheel`, `level_for`), a timer whose deadline lies in a later
+4096 ms slot than the present is filed by that slot, and the runtime wakes
+at the slot's start to file it one level down, and once more at the start of
+its 64 ms slot. The 5 s tick and the 20 s pings are both such timers, and
+the tick keeps every 4096 ms slot occupied. So an idle server wakes, besides
+for the tick and the pings themselves:
+
+- at most once per 4096 ms, on one lattice whose phase is the runtime's
+  start (qa measured exactly this: 1014, 5100, 9210, 13301 … ms);
+- at most once in the 64 ms before a tick or a ping fires.
+
+These are the cost of the two timers the design has, not a third thing the
+server does: nothing of crew's runs in them. Making crew's timers shorter
+than a slot would add wake-ups, and the pings are 20 s by §security. So P20
+allows them, counted apart and reported, and nothing else: a wake-up that is
+neither a tick, a ping, nor on that lattice (or within 64 ms before a tick
+or a ping) fails the gate, as polling at any period from 50 ms to 11 s does
+in qa's control runs.
+
+What the measurement cannot tell apart is a poll of exactly 4096 ms in phase
+with the runtime. Such a poll would add no wake-up, which is what P20
+counts; it would still be a timer of ours, and that is what the frozen-clock
+test of §multi-tests is for (`…an_idle_server_arms_no_timer`: with healthy
+watches the hub has no timer pending at all), whatever the period.
 
 ---
 
