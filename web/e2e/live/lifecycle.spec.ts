@@ -37,7 +37,7 @@ function hostile(port: number, address: string, servers: http.Server[]): Promise
 const close = (server: http.Server) => new Promise((done) => (server.closeAllConnections(), server.close(done)));
 
 /** A WebSocket endpoint in a few lines: text frames only. */
-function forgedSocket(server: http.Server, sockets: Duplex[], answer: (request: { method: string }) => unknown) {
+function forgedSocket(server: http.Server, sockets: Duplex[], answer: (request: { method: string }) => unknown | Promise<unknown>) {
   server.on("upgrade", (req, socket: Duplex) => {
     sockets.push(socket);
     const accept = createHash("sha1").update(req.headers["sec-websocket-key"] + "258EAFA5-E914-47DA-95CA-C5AB0DC85B11").digest("base64");
@@ -60,9 +60,11 @@ function forgedSocket(server: http.Server, sockets: Duplex[], answer: (request: 
         if (opcode !== 1) continue;
         for (let i = 0; i < body.length; i++) body[i] ^= mask[i % 4];
         const request = JSON.parse(body.toString());
-        const out = Buffer.from(JSON.stringify({ id: request.id, result: answer(request) }));
+        void Promise.resolve(answer(request)).then((result) => {
+          const out = Buffer.from(JSON.stringify({ id: request.id, result }));
         const head = out.length < 65536 ? (out.length < 126 ? Buffer.from([0x81, out.length]) : Buffer.from([0x81, 126, out.length >> 8, out.length & 0xff])) : (() => { const h = Buffer.alloc(10); h[0] = 0x81; h[1] = 127; h.writeBigUInt64BE(BigInt(out.length), 2); return h; })();
-        socket.write(Buffer.concat([head, out]));
+          socket.write(Buffer.concat([head, out]));
+        });
       }
     });
     socket.on("error", () => {});
@@ -81,6 +83,13 @@ test("a killed daemon, a squatter on its port, a rewritten storage: the open tab
   test.setTimeout(120_000);
   const servers: http.Server[] = [];
   const sockets: Duplex[] = [];
+  // What happened, in order. The squatter holds the open tab's `hello` until the second
+  // document has read and rewritten the storage, so the forged answer is given with the
+  // stolen verifier in hand, not before.
+  const order: string[] = [];
+  let release!: () => void;
+  const released = new Promise<void>((r) => (release = r));
+  let proof = "";
   try {
     daemon.start();
     const info = daemon.web();
@@ -88,9 +97,10 @@ test("a killed daemon, a squatter on its port, a rewritten storage: the open tab
     // A tab is live; its terminal was never opened.
     await openLive(info);
     const agents = await page.locator("[data-agent]").count();
-    expect(agents).toBe(5);
+    expect(agents).toBe(6);
     const stored = await page.evaluate(() => Object.fromEntries(Object.entries(localStorage)));
-    expect(Object.keys(stored).length).toBeGreaterThan(0);
+    const session = JSON.parse(stored["crew.web.session"]) as { token: string; verifier: string };
+    expect(session.verifier).toMatch(/^[0-9a-f]{64}$/);
 
     // The daemon goes without a word.
     daemon.kill();
@@ -103,37 +113,42 @@ test("a killed daemon, a squatter on its port, a rewritten storage: the open tab
       }
     });
     // Someone else takes the port on both addresses and answers for any Host.
-    let proof = "";
     const squat = [await hostile(info.port, "127.0.0.1", servers), await hostile(info.port, "::1", servers)];
     for (const s of squat)
-      forgedSocket(s, sockets, (request) =>
-        request.method === "hello" ? { ...fixture("results.json").hello[0], web_proof: proof }
-        : request.method === "snapshot" ? FORGED
-        : { subscribed: true });
+      forgedSocket(s, sockets, async (request) => {
+        if (request.method === "hello") {
+          order.push("hello-held");
+          await released;
+          order.push(`hello-answered:${proof}`);
+          return { ...fixture("results.json").hello[0], web_proof: proof };
+        }
+        return request.method === "snapshot" ? (order.push("snapshot-forged"), FORGED) : { subscribed: true };
+      });
 
-    // (a) A second tab of the old address, opened first: it is the squatter's page, and reads
-    // what the origin holds, hands it to the squatter as its proof, and overwrites the storage.
+    // The open tab reconnects by itself and is held at its `hello`.
+    await expect.poll(() => order.includes("hello-held"), { timeout: 40_000, message: "the open tab's hello at the squatter" }).toBe(true);
+    // (a) A second tab of the old address: it is the squatter's page. It reads what the origin
+    // holds, hands the verifier to the squatter as its proof, and overwrites the storage.
     const second = await context.newPage();
     await second.goto(info.url);
     expect(await second.title()).toBe("hostile");
     const taken = await second.evaluate(() => Object.fromEntries(Object.entries(localStorage)));
     expect(taken).toEqual(stored);
-    proof = Object.values(taken).join("");
-    for (const value of Object.values(taken)) {
-      try {
-        const parsed = JSON.parse(value);
-        if (parsed && typeof parsed === "object") for (const v of Object.values(parsed)) if (typeof v === "string") proof = v;
-      } catch {
-        proof = value;
-      }
-    }
+    order.push("stolen");
+    proof = (JSON.parse(taken["crew.web.session"]) as { verifier: string }).verifier;
+    expect(proof).toBe(session.verifier);
     await second.evaluate(() => {
       for (const k of Object.keys(localStorage)) localStorage.setItem(k, "attacker");
     });
+    order.push("rewritten");
 
-    // (b) Only now may the first tab reconnect: it refuses the server, draws nothing of the
-    // made-up team, ends stopped with every control disabled, and makes no further request.
+    // (b) Only now is the open tab's `hello` answered, with the stolen verifier as the proof:
+    // it refuses the server, draws nothing of the made-up team, ends stopped with every control
+    // disabled, and makes no further request.
+    release();
     await expect(page.locator('[data-conn="stopped"]')).toBeAttached({ timeout: 40_000 });
+    expect(order.slice(0, 4)).toEqual(["hello-held", "stolen", "rewritten", `hello-answered:${session.verifier}`]);
+    expect(order).not.toContain("snapshot-forged");
     await expect(page.locator("[data-agent]")).toHaveCount(agents);
     await expect(page.locator("[data-agent]").filter({ hasText: "FORGED" })).toHaveCount(0);
     await expect(page.locator(".conn-bar")).toContainText("stopped");
@@ -160,10 +175,9 @@ test("a killed daemon, a squatter on its port, a rewritten storage: the open tab
     expect(new URL(next.url).origin).not.toBe(oldOrigin);
     const fresh = await context.newPage();
     await openLive(next, fresh);
-    await expect(fresh.locator("[data-agent]")).toHaveCount(5);
-    // The page of (a) has seen no storage event since, reads no session of the new server, and
-    // a hello with anything it holds is unauthorized; the two origins differ.
-    // (The stopped tab removed its own session: a `null`, never a value.)
+    await expect(fresh.locator("[data-agent]")).toHaveCount(6);
+    // The page of (a) has seen no storage event with a value since (the stopped tab removed its
+    // own session: a `null`), reads no session of the new server, and the two origins differ.
     const seen = await second.evaluate(() => (window as unknown as { __seen: [string, string | null][] }).__seen);
     expect(seen.filter(([, value]) => value !== null)).toEqual([]);
     const newSession = await fresh.evaluate(() => localStorage.getItem("crew.web.session"));
@@ -175,6 +189,7 @@ test("a killed daemon, a squatter on its port, a rewritten storage: the open tab
     // The stopped tab stays stopped.
     await expect(page.locator('[data-conn="stopped"]')).toBeAttached();
   } finally {
+    release();
     for (const s of sockets) s.destroy();
     await Promise.all(servers.map(close));
   }

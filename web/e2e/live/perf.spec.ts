@@ -3,6 +3,7 @@
 // when a limit is exceeded. Timing limits scale with CREW_PERF_SCALE, counts never do.
 import type { Page } from "@playwright/test";
 import { expect, test, teamYaml } from "./harness.ts";
+import { signedIn } from "./rawws.mjs";
 
 const SCALE = Number(process.env.CREW_PERF_SCALE ?? 1);
 const report: Record<string, unknown> = {};
@@ -21,7 +22,7 @@ test.use({ viewport: { width: 1440, height: 900 } });
 
 test("P5–P9, P14 against a real daemon with ten agents", async ({ browser, daemon, openLive }) => {
   test.setTimeout(180_000);
-  daemon.start(teamYaml(daemon.ws, daemon.vcs, 5));
+  daemon.start(teamYaml(daemon.ws, daemon.vcs, 4));
   // History for the snapshot: real messages and the events they leave.
   for (let i = 0; i < 100; i++) daemon.send(i % 2 ? "echo" : "idle", `history ${i}`);
   const info = () => daemon.web();
@@ -88,4 +89,96 @@ test("P5–P9, P14 against a real daemon with ten agents", async ({ browser, dae
   expect(sp.p8_apply_ms.p95!).toBeLessThanOrEqual(1 * SCALE);
   expect(sp.p9_handler_to_presented_frame_ms.p95!).toBeLessThanOrEqual(35 * SCALE);
   expect((report.p14_key_to_echo_ms as Stats).p95!).toBeLessThanOrEqual(20 * SCALE);
+});
+
+/** Frame intervals and long tasks in the page for `ms`. */
+function frames(page: Page, ms: number) {
+  return page.evaluate(async (ms) => {
+    const out: number[] = [];
+    const long: number[] = [];
+    const po = new PerformanceObserver((l) => l.getEntries().forEach((e) => long.push(e.duration)));
+    po.observe({ entryTypes: ["longtask"] });
+    await new Promise<void>((done) => {
+      const start = performance.now();
+      let prev = start;
+      const tick = (t: number) => {
+        out.push(t - prev);
+        prev = t;
+        if (t - start < ms) requestAnimationFrame(tick);
+        else done();
+      };
+      requestAnimationFrame(tick);
+    });
+    po.disconnect();
+    return { intervals: out.slice(1), long };
+  }, ms);
+}
+
+type Operator = { send(method: string, params?: object): number; call(method: string, params?: object): Promise<{ result?: unknown }>; replies: number; close(): void };
+
+/** Operator `send` calls at `rate` per second for `ms` through a signed-in web socket: each is a message
+ * push (a pulse on the graph) and the events it leaves. Returns how many were sent. */
+async function load(op: Operator, rate: number, ms: number, to: string[]): Promise<number> {
+  let sent = 0;
+  const start = Date.now();
+  await new Promise<void>((done) => {
+    const timer = setInterval(() => {
+      const due = Math.floor(((Date.now() - start) * rate) / 1000) - sent;
+      for (let i = 0; i < due; i++, sent++) op.send("send", { to: to[sent % to.length], type: "message", body: `load ${sent}`, id: `w-load-${Date.now().toString(16)}-${sent}` });
+      if (Date.now() - start >= ms) (clearInterval(timer), done());
+    }, 2);
+  });
+  return sent;
+}
+
+test("P10, P11, P12, P15 against a real daemon: frames under real pushes, rows in the DOM, the heap", async ({ browser, daemon, openLive }) => {
+  test.setTimeout(240_000);
+  daemon.start(teamYaml(daemon.ws, daemon.vcs, 4));
+  const info = daemon.web();
+  const label = new URL(info.url).host;
+  const protocol = Number(JSON.parse(daemon.c(["status", "--json"])).session.protocol ?? 5);
+  const op = (await signedIn(info.port, label, `http://${label}`, new URL(info.pair_url).hash.replace("#pair=", ""), protocol)) as unknown as Operator;
+  const targets = ["idle", "echo", "w1", "w2", "w3", "w4"];
+  // The log to 5000 events, at whatever rate the daemon takes.
+  const lastSeq = () => Math.max(0, ...daemon.events().map((e) => e.seq));
+  const t0 = Date.now();
+  let preloaded = 0;
+  while (lastSeq() < 5000 && Date.now() - t0 < 120_000) preloaded += await load(op, 1000, 1000, targets);
+  report.live_preload = { messages: preloaded, last_event_seq: lastSeq(), seconds: +((Date.now() - t0) / 1000).toFixed(1) };
+
+  const context = await browser.newContext({ viewport: { width: 1440, height: 900 } });
+  const page = await context.newPage();
+  await openLive(daemon.web(), page);
+  await expect(page.locator(".node.member")).toHaveCount(10);
+  await page.evaluate(() => (window as unknown as { crewPerf: { measure(on: boolean): void } }).crewPerf.measure(true));
+  const out: Record<string, unknown> = {};
+  for (const [name, rate, ms, limit, view] of [
+    ["p10_steady_200_per_s_graph", 200, 5000, 18, "graph"],
+    ["p11_burst_2000_per_s_graph", 2000, 3000, 20, "graph"],
+    ["p10_steady_200_per_s_log", 200, 3000, 18, "logs"],
+    ["p11_burst_2000_per_s_log", 2000, 3000, 20, "logs"],
+  ] as const) {
+    if (view === "logs" && !(await page.locator(".logs").isVisible())) await page.keyboard.press("l");
+    await expect(page.locator(view === "logs" ? ".logs" : ".agent-graph")).toBeVisible();
+    const seq0 = lastSeq();
+    const f = frames(page, ms);
+    const sent = await load(op, rate, ms, targets);
+    const { intervals, long } = await f;
+    const fs = stats(intervals);
+    out[name] = { sent_per_s: Math.round((sent * 1000) / ms), events_emitted: lastSeq() - seq0, frame_ms: fs, long_tasks: long.length };
+    expect(fs.p95!, name).toBeLessThanOrEqual(limit * SCALE);
+    expect(long.length, name).toBe(0);
+  }
+  const rows = await page.locator(".log-row").count();
+  const visible = await page.locator(".log-list").evaluate((el) => Math.ceil(el.clientHeight / 22));
+  out.p12_log_rows_in_dom = { rows, visible };
+  expect(rows).toBeLessThanOrEqual(visible + 20 + 1);
+  out.p15_heap_mb = await page.evaluate(() => {
+    const m = (performance as unknown as { memory?: { usedJSHeapSize: number } }).memory;
+    return m ? +(m.usedJSHeapSize / 1048576).toFixed(1) : null;
+  });
+  if (out.p15_heap_mb !== null) expect(out.p15_heap_mb as number).toBeLessThanOrEqual(60);
+  report.real_load = out;
+  op.close();
+  await context.close();
 });

@@ -1,12 +1,13 @@
 // What stays out (notes/web-design.md §tests "outside.spec.ts"): another
-// origin, the bare loopback addresses, and an agent's own token.
-import { randomBytes } from "node:crypto";
-import { readFileSync } from "node:fs";
+// origin, the bare loopback addresses, and an agent's own token, presented
+// from inside an agent's own process (in its sandbox under
+// CREW_TEST_SANDBOX=require).
+import { readFileSync, writeFileSync } from "node:fs";
 import { createServer, request } from "node:http";
 import type { AddressInfo } from "node:net";
-import { connect } from "node:net";
 import { join } from "node:path";
 import { expect, test } from "./harness.ts";
+import { rawWs } from "./rawws.mjs";
 
 const get = (port: number, host: string) =>
   new Promise<{ status: number; body: string }>((resolve, reject) => {
@@ -19,41 +20,7 @@ const get = (port: number, host: string) =>
     r.end();
   });
 
-/** One WebSocket request, written by hand so the test sets Host and Origin; the first reply to `frame`. */
-function rawWs(port: number, host: string, origin: string, frame: object): Promise<{ upgraded: boolean; reply?: Record<string, unknown> }> {
-  return new Promise((resolve) => {
-    const sock = connect(port, "127.0.0.1");
-    const key = randomBytes(16).toString("base64");
-    let buf = Buffer.alloc(0);
-    let upgraded = false;
-    const done = (v: { upgraded: boolean; reply?: Record<string, unknown> }) => (sock.destroy(), resolve(v));
-    sock.setTimeout(8000, () => done({ upgraded }));
-    sock.on("error", () => done({ upgraded }));
-    sock.on("connect", () => sock.write(`GET /ws HTTP/1.1\r\nHost: ${host}\r\nOrigin: ${origin}\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Key: ${key}\r\nSec-WebSocket-Version: 13\r\n\r\n`));
-    sock.on("data", (d) => {
-      buf = Buffer.concat([buf, d]);
-      if (!upgraded) {
-        const end = buf.indexOf("\r\n\r\n");
-        if (end < 0) return;
-        if (!buf.subarray(0, 12).toString().includes("101")) return done({ upgraded: false });
-        upgraded = true;
-        buf = buf.subarray(end + 4);
-        const payload = Buffer.from(JSON.stringify(frame));
-        const mask = randomBytes(4);
-        const head = payload.length < 126 ? Buffer.from([0x81, 0x80 | payload.length]) : Buffer.from([0x81, 0x80 | 126, payload.length >> 8, payload.length & 255]);
-        sock.write(Buffer.concat([head, mask, Buffer.from(payload.map((b, i) => b ^ mask[i % 4]))]));
-      }
-      // An unmasked server text frame.
-      if (upgraded && buf.length >= 2 && (buf[0] & 0x0f) === 1) {
-        let len = buf[1] & 0x7f, off = 2;
-        if (len === 126) (len = buf.readUInt16BE(2)), (off = 4);
-        if (buf.length >= off + len) return done({ upgraded, reply: JSON.parse(buf.subarray(off, off + len).toString()) });
-      }
-    });
-  });
-}
-
-test("another origin cannot open the socket; the bare addresses show nothing; an agent's token is unauthorized", async ({ page, daemon, openLive }) => {
+test("another origin cannot open the socket; the bare addresses show nothing", async ({ page, daemon, openLive }) => {
   daemon.start();
   const info = daemon.web();
   const label = new URL(info.url).host;
@@ -78,7 +45,7 @@ test("another origin cannot open the socket; the bare addresses show nothing; an
   );
   expect(opened).toBe(false);
   // The same with the origin written by hand: refused at the upgrade.
-  expect((await rawWs(info.port, label, `http://127.0.0.1:${otherPort}`, { id: 1, method: "ping" })).upgraded).toBe(false);
+  expect((await rawWs(info.port, label, `http://127.0.0.1:${otherPort}`)).upgraded).toBe(false);
   await stranger.close();
   other.close();
 
@@ -93,11 +60,26 @@ test("another origin cannot open the socket; the bare addresses show nothing; an
   await bare.goto(`http://127.0.0.1:${info.port}/`).catch(() => {});
   await expect(bare.locator("[data-agent]")).toHaveCount(0);
   await bare.close();
+});
 
-  // An agent's own token is not a web session: hello is unauthorized, and nothing else works.
-  const identity = JSON.parse(readFileSync(join(daemon.ws, ".crew/agents/echo/identity.json"), "utf8")) as { token: string };
-  const proto = JSON.parse(daemon.c(["status", "--json"])).session.protocol ?? 5;
-  const r = await rawWs(info.port, label, `http://${label}`, { id: 1, method: "hello", params: { role: "agent", agent_id: "echo", token: identity.token, protocol: proto } });
-  expect(r.upgraded).toBe(true);
-  expect((r.reply as { error?: { code?: string } }).error?.code).toBe("unauthorized");
+test("an agent's own token, presented from the agent's own process, is unauthorized", async ({ daemon }) => {
+  test.setTimeout(90_000);
+  daemon.start();
+  const info = daemon.web();
+  const label = new URL(info.url).host;
+  const protocol = Number(JSON.parse(daemon.c(["status", "--json"])).session.protocol ?? 5);
+  // The prober agent (node, started with the team) reads probe.json from its working directory.
+  const dir = join(daemon.ws, ".crew/worktrees/prober");
+  const probe = { port: info.port, host: label, origin: `http://${label}`, agent: "prober", protocol };
+  writeFileSync(join(dir, "probe.json"), JSON.stringify(probe));
+  let out = "";
+  daemon.until("the prober's report", () => ((out = readFileSync(join(dir, "probe.out"), "utf8")), out.length > 0), 30_000);
+  const report = JSON.parse(out) as { upgraded: boolean; hello?: { error?: { code?: string } }; snapshot?: { error?: { code?: string } }; pair?: { error?: { code?: string } } };
+  // It reaches the port (the loopback network is shared) and the upgrade passes for the right
+  // name; the token it holds is no web session.
+  expect(report.upgraded).toBe(true);
+  expect(report.hello?.error?.code).toBe("unauthorized");
+  expect(report.snapshot?.error?.code).toBe("unauthorized");
+  // Nor can it pair: the code is not its to guess.
+  expect(report.pair?.error?.code).toBeTruthy();
 });

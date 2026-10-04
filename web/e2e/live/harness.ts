@@ -6,7 +6,7 @@
 //   CREW_TEST_VCS  jj | git | unset (auto), as for the Rust suites
 
 import { execFileSync, spawnSync } from "node:child_process";
-import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { test as base, expect } from "@playwright/test";
@@ -54,6 +54,13 @@ export function teamYaml(ws: string, vcs: string, extra = 0): string {
     agent("rival", "rival", ["write schema.sql CREATE TABLE other (x TEXT);", "commit Rival schema", "merge dev"]),
     agent("echo", "echo", ["reply ack from echo", "tool git_status {}"]),
     agent("idle", "idle", []),
+    // prober runs node as the agent (in its sandbox when there is one) and probes the dashboard socket.
+    [
+      `  - id: prober`,
+      `    role: probe`,
+      `    command:`,
+      ...[process.execPath, "--input-type=module", "-e", PROBER_SRC].map((a) => `      - ${JSON.stringify(a)}`),
+    ].join("\n"),
     ...Array.from({ length: extra }, (_, i) => agent(`w${i + 1}`, "worker", ["reply ok"])),
     "",
   ].join("\n");
@@ -175,3 +182,26 @@ export const test = base.extend<Fixtures>({
     });
   },
 });
+
+/** The program of the `prober` agent: waits for `probe.json` in its working directory, then
+ * opens the dashboard's socket as the page would and says `hello` with the agent's own token
+ * (a sandboxed agent shares the host's loopback network). It writes `probe.out`. */
+const PROBER_MAIN = `
+import { existsSync, readFileSync, writeFileSync } from "node:fs";
+while (!existsSync("probe.json")) await new Promise((r) => setTimeout(r, 100));
+await new Promise((r) => setTimeout(r, 100));
+const p = JSON.parse(readFileSync("probe.json", "utf8"));
+const identity = JSON.parse(readFileSync(process.env.CREW_IDENTITY, "utf8"));
+const out = {};
+const ws = await rawWs(p.port, p.host, p.origin);
+out.upgraded = ws.upgraded;
+if (ws.upgraded) {
+  out.hello = await ws.call("hello", { role: "agent", agent_id: p.agent, token: identity.token, protocol: p.protocol });
+  out.snapshot = await ws.call("snapshot", {});
+  out.pair = await ws.call("web_pair", { code: "x" });
+  ws.close();
+}
+writeFileSync("probe.out", JSON.stringify(out));
+setInterval(() => {}, 1 << 30);
+`;
+export const PROBER_SRC = readFileSync(join(here, "rawws.mjs"), "utf8").replace(/^export /gm, "") + PROBER_MAIN;
