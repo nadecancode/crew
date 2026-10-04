@@ -417,6 +417,9 @@ async fn race(gap: Option<Duration>, rounds: usize) -> usize {
     let daemon = running.daemon.clone();
     daemon.model().agents.push(agent("a", "idle"));
     *daemon.summaries.capture_first.lock().unwrap() = gap;
+    // The race is about registration and capture, not about how often
+    // the summary is computed under load: no folding window here.
+    *daemon.summaries.fold_for.lock().unwrap() = Some(Duration::ZERO);
     let mut lost = 0;
     for round in 0..rounds {
         let mut peer = Peer::operator(&daemon, false).await;
