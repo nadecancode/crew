@@ -9,6 +9,7 @@ use std::sync::Arc;
 use crew::git::{self, launch};
 use crew::sandbox::probe;
 use crew::sandbox::profile::{Extra, Host, Session};
+use crew::vcs::Store;
 
 const CREW: &str = env!("CARGO_BIN_EXE_crew");
 
@@ -73,15 +74,18 @@ fn a_filter_from_the_repository_runs_confined_when_a_worktree_is_populated() {
     let wt = worktree.path.canonicalize().unwrap();
     let admin = git_dir.join("worktrees/a");
     let host = Host::detect(Path::new(CREW), &available.bwrap, available.landlock_abi);
+    let store = Store::Git {
+        git_dir: git_dir.clone(),
+    };
     let session = Session {
         workspace: &ws,
-        git_dir: &git_dir,
+        store: &store,
         runtime_dir: &run,
         daemon_socket: &socket,
         cargo_home: &cargo,
     };
     let (launcher, _warnings) =
-        launch::helper_launcher(&host, session, &Extra::default(), &wt, &admin)
+        launch::helper_launcher(&host, session, &Extra::default(), &wt, Some(&admin), None)
             .unwrap_or_else(|e| panic!("helper profile: {e}"));
     launch::with_launcher(Arc::new(launcher), || {
         git::populate_worktree(&worktree).unwrap_or_else(|e| panic!("populate: {e:#}"));

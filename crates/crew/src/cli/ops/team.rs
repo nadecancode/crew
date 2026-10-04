@@ -123,26 +123,45 @@ pub(super) fn launch(config: TeamConfig, workspace: &Path, no_attach: bool) -> R
         herdr_socket: herdr,
     })?;
     println!(
-        "team '{}' started: {} agent(s), backend {}, isolation {}",
+        "team '{}' started: {} agent(s), backend {}, isolation {}{}",
         config.project,
         config.agents.len() + usize::from(config.orchestrator.agent),
         session.backend,
-        session.isolation
+        session.isolation,
+        vcs_suffix(&session)
     );
+    let note = (!session.vcs_note.is_empty()).then(|| session.vcs_note.clone());
+    if let Some(note) = &note {
+        println!("note: {note}");
+    }
     println!("workspace  {}", session.workspace);
     println!(
         "daemon     pid {} (keeps running when you close the dashboard)",
         session.daemon_pid
     );
-    open_dashboard(&info, no_attach)
+    open_dashboard(&info, no_attach, note)
 }
 
-pub(super) fn open_dashboard(info: &DaemonInfo, no_attach: bool) -> Result<()> {
+/// `, vcs jj` when the agents have workspaces of their own.
+pub(super) fn vcs_suffix(session: &SessionInfo) -> String {
+    if session.vcs.is_empty() {
+        String::new()
+    } else {
+        format!(", vcs {}", session.vcs)
+    }
+}
+
+/// Open the dashboard on the team; `note` is what it says first.
+pub(super) fn open_dashboard(
+    info: &DaemonInfo,
+    no_attach: bool,
+    note: Option<String>,
+) -> Result<()> {
     if no_attach || !std::io::stdout().is_terminal() {
         println!("dashboard  crew attach -C {}", info.workspace);
         return Ok(());
     }
-    if dashboard(info)? == crew_tui::Exit::Stopped {
+    if dashboard(info, note)? == crew_tui::Exit::Stopped {
         return Ok(());
     }
     // Back at the shell: if the work is finished, say where it is.
@@ -162,16 +181,23 @@ pub(super) fn open_dashboard(info: &DaemonInfo, no_attach: bool) -> Result<()> {
     Ok(())
 }
 
-/// Show the dashboard until the user leaves it. When they stopped the team
-/// from it, wait for the daemon to go and say what is left.
-pub(super) fn dashboard(info: &DaemonInfo) -> Result<crew_tui::Exit> {
+/// Show the dashboard until the user leaves it, opening with `note` (the
+/// team's version control fallback, when it was just started). When they
+/// stopped the team from it, wait for the daemon to go and say what is
+/// left.
+pub(super) fn dashboard(info: &DaemonInfo, note: Option<String>) -> Result<crew_tui::Exit> {
     // A team started by an older crew sends its agents without their
     // models' proper names; the catalog supplies them.
     let stale = stale_daemon_note(info);
+    let notice = match (&note, &stale) {
+        (Some(note), Some(stale)) => Some(format!("{note} — {stale}")),
+        (Some(note), None) => Some(note.clone()),
+        (None, stale) => stale.clone(),
+    };
     let exit = crew_tui::run(
         Path::new(&info.socket),
         Catalog::load().display_names(),
-        stale.clone(),
+        notice,
     )?;
     if let (Some(note), crew_tui::Exit::Detached) = (&stale, exit) {
         // Said again where it can be read at leisure, and copied.

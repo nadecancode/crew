@@ -3,13 +3,15 @@
 //! A sandbox starts empty: a private `/tmp` (with `/tmp/run` as
 //! `XDG_RUNTIME_DIR`), `$HOME` as an empty tmpfs, then only what is listed
 //! here. Three profiles:
-//! - a **worker** gets its worktree and the git data it needs to commit,
-//!   its agent directory (read-only, with `rw/` writable), the team's
-//!   cargo cache, the daemon socket and its sidecar directory;
-//! - the **orchestrator** gets the checkout read-only with `.crew` and
-//!   `.git` masked, and the same agent mounts, but no worktree;
-//! - a **helper** (git on behalf of no agent) gets one worktree and the git
-//!   data: no identity, socket, agent directory, credentials or network.
+//! - a **worker** gets its worktree and the store data it needs to commit
+//!   (git's, or jj's: notes/jj-design.md §sandbox), its agent directory
+//!   (read-only, with `rw/` writable), the team's cargo cache, the daemon
+//!   socket and its sidecar directory;
+//! - the **orchestrator** gets the checkout read-only with `.crew`, `.git`
+//!   and `.jj` masked, and the same agent mounts, but no worktree;
+//! - a **helper** (git or jj on behalf of no agent) gets one worktree and
+//!   the store data: no identity, socket, agent directory, credentials or
+//!   network.
 //!
 //! Every profile gets the system trees, the toolchain leaves and the PATH
 //! entries that pass validation, all read-only.
@@ -25,6 +27,7 @@ use super::probe::UntrustedNixDaemon;
 use super::scan::{scan_excluding, Findings};
 use super::spec::{check_name, Mount, Spec};
 use super::validate::{host_members, Protected};
+use crate::vcs::Store;
 
 /// System trees bound read-only when present. Not `/nix` as a whole: that
 /// would expose the Nix daemon socket.
@@ -44,6 +47,10 @@ pub const SYSTEM_TREES: &[&str] = &[
 
 /// Inside the sandbox, `XDG_RUNTIME_DIR`.
 const RUNTIME_DIR: &str = "/tmp/run";
+
+/// The directories of a jj repository that jj writes as it works in a
+/// workspace; everything else in it stays read-only.
+const JJ_APPENDED: [&str; 4] = ["op_store", "op_heads", "index", "store/extra"];
 
 /// Facts about the host every profile uses.
 #[derive(Clone, Debug)]
@@ -94,8 +101,9 @@ impl Host {
 #[derive(Clone, Copy, Debug)]
 pub struct Session<'a> {
     pub workspace: &'a Path,
-    /// The repository's common git directory (usually `<ws>/.git`).
-    pub git_dir: &'a Path,
+    /// The repository's store: its common git directory (usually
+    /// `<ws>/.git`) and, under jj, jj's repository.
+    pub store: &'a Store,
     /// The daemon's runtime directory `<R>`.
     pub runtime_dir: &'a Path,
     pub daemon_socket: &'a Path,
@@ -108,8 +116,9 @@ pub enum Role<'a> {
     Worker {
         agent_dir: &'a Path,
         worktree: &'a Path,
-        /// `<git_dir>/worktrees/<id>`.
-        admin: &'a Path,
+        /// `<git_dir>/worktrees/<id>`: git only. A jj workspace keeps what
+        /// says which repository it is in its own `.jj`.
+        admin: Option<&'a Path>,
         sidecar_dir: Option<&'a Path>,
     },
     Orchestrator {
@@ -118,7 +127,8 @@ pub enum Role<'a> {
     },
     Helper {
         worktree: &'a Path,
-        admin: &'a Path,
+        /// As for a worker: git only.
+        admin: Option<&'a Path>,
     },
 }
 
@@ -134,7 +144,8 @@ pub struct Request<'a> {
     pub session: Session<'a>,
     pub role: Role<'a>,
     pub extra: &'a Extra,
-    /// The agent CLI's program; its install root is bound.
+    /// The agent CLI's program, or the jj an agent's version control and
+    /// the helper run; its install root is bound.
     pub cli: Option<&'a Path>,
     /// Names of the runtime's launch variables (their values reach
     /// `crew sandbox-run` separately). Helpers get none.
@@ -180,22 +191,28 @@ impl<'a> Builder<'a> {
             ));
         }
         let s = &request.session;
+        let (git_dir, repo_dir) = match s.store {
+            Store::Git { git_dir } => (git_dir.as_path(), None),
+            Store::Jj { git_dir, repo_dir } => (git_dir.as_path(), Some(repo_dir.as_path())),
+        };
         let mut generated = vec![
             s.workspace,
-            s.git_dir,
+            git_dir,
             s.runtime_dir,
             s.daemon_socket,
             s.cargo_home,
         ];
-        match request.role {
+        generated.extend(repo_dir);
+        let admin = match request.role {
             Role::Worker {
                 agent_dir,
                 worktree,
                 admin,
                 sidecar_dir,
             } => {
-                generated.extend([agent_dir, worktree, admin]);
+                generated.extend([agent_dir, worktree]);
                 generated.extend(sidecar_dir);
+                Some(admin)
             }
             Role::Orchestrator {
                 agent_dir,
@@ -203,21 +220,36 @@ impl<'a> Builder<'a> {
             } => {
                 generated.push(agent_dir);
                 generated.extend(sidecar_dir);
+                None
             }
             Role::Helper { worktree, admin } => {
-                generated.extend([worktree, admin]);
+                generated.push(worktree);
                 if !request.pass_env.is_empty() {
                     return Err("a helper sandbox gets no launch variables".into());
                 }
+                Some(admin)
             }
+        };
+        match (s.store, admin) {
+            (Store::Git { .. }, Some(None)) => {
+                return Err("a git worktree needs its admin directory".into())
+            }
+            (Store::Jj { .. }, Some(Some(_))) => {
+                return Err("a jj workspace has no git admin directory".into())
+            }
+            (_, Some(Some(admin))) => generated.push(admin),
+            _ => {}
         }
         for path in generated {
             canonical(path)?;
         }
         let mut protected = host.protected.clone();
         protected.add(s.workspace);
-        protected.add(s.git_dir);
-        if let Some(repo) = s.git_dir.parent() {
+        protected.add(git_dir);
+        if let Some(repo) = git_dir.parent() {
+            protected.add(repo);
+        }
+        if let Some(repo) = repo_dir {
             protected.add(repo);
         }
         protected.add(s.runtime_dir);
@@ -283,8 +315,7 @@ impl<'a> Builder<'a> {
                 admin,
                 sidecar_dir,
             } => {
-                self.git(admin)?;
-                self.generated(worktree, true)?;
+                self.store(worktree, admin)?;
                 self.agent(agent_dir, sidecar_dir)?
             }
             Role::Orchestrator {
@@ -292,8 +323,7 @@ impl<'a> Builder<'a> {
                 sidecar_dir,
             } => self.agent(agent_dir, sidecar_dir)?,
             Role::Helper { worktree, admin } => {
-                self.git(admin)?;
-                self.generated(worktree, true)?;
+                self.store(worktree, admin)?;
                 host.home.clone()
             }
         };
@@ -466,15 +496,16 @@ impl<'a> Builder<'a> {
         }
     }
 
-    /// The orchestrator's view of the checkout: read-only, with `.crew` and
-    /// `.git` masked.
+    /// The orchestrator's view of the checkout: read-only, with `.crew`,
+    /// `.git` and `.jj` (a project's own jj repository) masked.
     fn checkout_read_only(&mut self) -> Result<(), String> {
         let ws = self.request.session.workspace;
         let crew = ws.join(crew_core::paths::STATE_DIR_NAME);
         let dot_git = ws.join(".git");
+        let dot_jj = ws.join(".jj");
         self.generated(ws, false)?;
-        self.scan(ws, &[&crew, &dot_git])?;
-        for masked in [crew, dot_git] {
+        self.scan(ws, &[&crew, &dot_git, &dot_jj])?;
+        for masked in [crew, dot_git, dot_jj] {
             match std::fs::symlink_metadata(&masked) {
                 Ok(meta) if meta.is_dir() => self.mounts.push(Mount::Tmpfs { path: masked }),
                 Ok(_) => self.mounts.push(Mount::Mask { path: masked }),
@@ -545,19 +576,23 @@ impl<'a> Builder<'a> {
         }
     }
 
-    /// The git data a worktree needs: the common git directory read-only,
-    /// with objects and refs writable (to commit), the worktree's own admin
-    /// directory writable, and the three files that say which repository
-    /// and which per-worktree config it uses read-only over it.
-    fn git(&mut self, admin: &Path) -> Result<(), String> {
-        let git_dir = self.request.session.git_dir;
-        if admin.parent() != Some(&git_dir.join("worktrees")) {
-            return Err(format!(
-                "{} is not a worktree admin directory of {}",
-                admin.display(),
-                git_dir.display()
-            ));
+    /// The worktree, writable, and the store data it needs: git's, or jj's.
+    /// Builder::new checked that a git worktree has its admin directory and
+    /// a jj workspace none.
+    fn store(&mut self, worktree: &Path, admin: Option<&Path>) -> Result<(), String> {
+        match (self.request.session.store, admin) {
+            (Store::Git { git_dir }, Some(admin)) => {
+                self.git(git_dir, admin)?;
+                self.generated(worktree, true)
+            }
+            (Store::Jj { git_dir, repo_dir }, None) => self.jj(git_dir, repo_dir, worktree),
+            _ => Err("the worktree does not match the repository's store".into()),
         }
+    }
+
+    /// The common git directory read-only, with objects and refs writable
+    /// (to commit).
+    fn git_data(&mut self, git_dir: &Path) -> Result<(), String> {
         self.generated(git_dir, false)?;
         self.scan(git_dir, &[])?;
         for sub in ["objects", "refs", "logs", "packed-refs"] {
@@ -566,6 +601,21 @@ impl<'a> Builder<'a> {
                 self.generated(&path, true)?;
             }
         }
+        Ok(())
+    }
+
+    /// The git data a worktree needs: the common git data, the worktree's
+    /// own admin directory writable, and the three files that say which
+    /// repository and which per-worktree config it uses read-only over it.
+    fn git(&mut self, git_dir: &Path, admin: &Path) -> Result<(), String> {
+        if admin.parent() != Some(&git_dir.join("worktrees")) {
+            return Err(format!(
+                "{} is not a worktree admin directory of {}",
+                admin.display(),
+                git_dir.display()
+            ));
+        }
+        self.git_data(git_dir)?;
         self.generated(admin, true)?;
         for file in ["commondir", "gitdir", "config.worktree"] {
             let path = admin.join(file);
@@ -580,6 +630,30 @@ impl<'a> Builder<'a> {
             });
         }
         Ok(())
+    }
+
+    /// What jj needs to work in the workspace `worktree`
+    /// (notes/jj-design.md §sandbox): the common git data as for git; jj's
+    /// repository read-only, with the directories jj appends to (operations,
+    /// views, index, change ids) writable; and the workspace writable, with
+    /// its `.jj` read-only over it and the working-copy state in that
+    /// writable. Read-only: what names the repository (`store/git_target`,
+    /// the workspace's `.jj/repo`) and where configuration would be planted
+    /// (`config.toml`, `workspace-config.toml`), which jj would apply when it
+    /// next runs outside a sandbox. jj's repository goes first: in a
+    /// project's own jj repository that is not colocated, the git data lies
+    /// inside it.
+    fn jj(&mut self, git_dir: &Path, repo_dir: &Path, worktree: &Path) -> Result<(), String> {
+        self.generated(repo_dir, false)?;
+        self.scan(repo_dir, &[])?;
+        for sub in JJ_APPENDED {
+            self.generated(&repo_dir.join(sub), true)?;
+        }
+        self.git_data(git_dir)?;
+        self.generated(worktree, true)?;
+        let dot_jj = worktree.join(".jj");
+        self.generated(&dot_jj, false)?;
+        self.generated(&dot_jj.join("working_copy"), true)
     }
 
     /// The agent directory and the agent's shared mounts. Returns `$HOME`.
@@ -785,6 +859,7 @@ mod tests {
         home: PathBuf,
         ws: PathBuf,
         git: PathBuf,
+        store: Store,
         run: PathBuf,
         socket: PathBuf,
         cargo: PathBuf,
@@ -893,12 +968,37 @@ mod tests {
             root,
             home,
             ws,
+            store: Store::Git {
+                git_dir: git.clone(),
+            },
             git,
             run,
             socket,
             cargo,
             host,
         }
+    }
+
+    /// `fixture()` as the jj backend lays it out: the repository in the
+    /// handle `.crew/jj`, backed by `.git`, and each worktree a jj
+    /// workspace naming it.
+    fn jj_fixture() -> Fixture {
+        let mut f = fixture();
+        let repo = f.ws.join(".crew/jj/.jj/repo");
+        for sub in JJ_APPENDED.iter().chain(&["workspace_store"]) {
+            mkdirs(&[&repo.join(sub)]);
+        }
+        touch(&[&repo.join("store/git_target"), &repo.join("store/type")]);
+        for id in ["a", "b", "_integration"] {
+            let dot_jj = f.ws.join(".crew/worktrees").join(id).join(".jj");
+            mkdirs(&[&dot_jj.join("working_copy")]);
+            touch(&[&dot_jj.join("repo")]);
+        }
+        f.store = Store::Jj {
+            git_dir: f.git.clone(),
+            repo_dir: repo,
+        };
+        f
     }
 
     struct Paths {
@@ -921,7 +1021,7 @@ mod tests {
         fn session(&self) -> Session<'_> {
             Session {
                 workspace: &self.ws,
-                git_dir: &self.git,
+                store: &self.store,
                 runtime_dir: &self.run,
                 daemon_socket: &self.socket,
                 cargo_home: &self.cargo,
@@ -942,13 +1042,16 @@ mod tests {
             build(&self.host, &request)
         }
 
+        /// Agent `a`'s profile; its worktree has an admin directory only
+        /// under git.
         fn worker(&self, extra: &Extra) -> Result<Built, String> {
             let p = self.paths("a");
+            let admin = matches!(self.store, Store::Git { .. }).then_some(p.admin.as_path());
             self.build(
                 Role::Worker {
                     agent_dir: &p.agent,
                     worktree: &p.worktree,
-                    admin: &p.admin,
+                    admin,
                     sidecar_dir: Some(&p.sidecar),
                 },
                 extra,
@@ -1092,7 +1195,7 @@ mod tests {
         let p = f.paths("_integration");
         let role = Role::Helper {
             worktree: &p.worktree,
-            admin: &p.admin,
+            admin: Some(&p.admin),
         };
         let spec = f.build(role, &Extra::default(), &[]).unwrap().spec;
         for path in binds(&spec).iter().map(|(p, _)| p) {
@@ -1332,7 +1435,7 @@ mod tests {
         let role = Role::Worker {
             agent_dir: &p.agent,
             worktree: &aliased,
-            admin: &p.admin,
+            admin: Some(&p.admin),
             sidecar_dir: None,
         };
         let error = f.build(role, &Extra::default(), &[]).unwrap_err();
@@ -1341,7 +1444,7 @@ mod tests {
         let role = Role::Worker {
             agent_dir: &p.agent,
             worktree: &p.worktree,
-            admin: &wrong_admin,
+            admin: Some(&wrong_admin),
             sidecar_dir: None,
         };
         assert!(f.build(role, &Extra::default(), &[]).is_err());
@@ -1349,7 +1452,7 @@ mod tests {
         let role = Role::Worker {
             agent_dir: &p.agent,
             worktree: &p.worktree,
-            admin: &p.admin,
+            admin: Some(&p.admin),
             sidecar_dir: Some(&outside),
         };
         assert!(f.build(role, &Extra::default(), &[]).is_err());
@@ -1392,7 +1495,7 @@ mod tests {
             role: Role::Worker {
                 agent_dir: &p.agent,
                 worktree: &p.worktree,
-                admin: &p.admin,
+                admin: Some(&p.admin),
                 sidecar_dir: None,
             },
             extra: &Extra::default(),
@@ -1409,7 +1512,7 @@ mod tests {
         let request = Request {
             role: Role::Helper {
                 worktree: &helper.worktree,
-                admin: &helper.admin,
+                admin: Some(&helper.admin),
             },
             ..request
         };
@@ -1436,6 +1539,184 @@ mod tests {
             };
             assert!(f.worker(&extra).is_err(), "{ancestor:?} was accepted");
         }
+    }
+
+    /// The binds under `root`, in mount order.
+    fn binds_under(spec: &Spec, root: &Path) -> Vec<(PathBuf, bool)> {
+        binds(spec)
+            .into_iter()
+            .filter(|(path, _)| path.starts_with(root))
+            .collect()
+    }
+
+    /// The mount table of notes/jj-design.md §sandbox, in order: jj's
+    /// repository read-only with what jj appends to writable, the git data
+    /// as for git, the workspace writable with its `.jj` read-only and the
+    /// working-copy state writable.
+    fn jj_store_table(f: &Fixture, worktree: &Path) -> Vec<(PathBuf, bool)> {
+        let repo = f.ws.join(".crew/jj/.jj/repo");
+        vec![
+            (repo.clone(), false),
+            (repo.join("op_store"), true),
+            (repo.join("op_heads"), true),
+            (repo.join("index"), true),
+            (repo.join("store/extra"), true),
+            (f.git.clone(), false),
+            (f.git.join("objects"), true),
+            (f.git.join("refs"), true),
+            (f.git.join("logs"), true),
+            (f.git.join("packed-refs"), true),
+            (worktree.to_path_buf(), true),
+            (worktree.join(".jj"), false),
+            (worktree.join(".jj/working_copy"), true),
+        ]
+    }
+
+    #[test]
+    fn a_jj_worker_gets_the_store_and_its_workspace_and_no_git_admin_directory() {
+        let f = jj_fixture();
+        let built = f.worker(&Extra::default()).unwrap();
+        let p = f.paths("a");
+        let mut expected = vec![(f.ws.join("target/release/crew"), false)];
+        expected.extend(jj_store_table(&f, &p.worktree));
+        expected.extend([(p.agent.clone(), false), (p.agent.join("rw"), true)]);
+        assert_eq!(binds_under(&built.spec, &f.ws), expected);
+        assert!(!binds(&built.spec)
+            .iter()
+            .any(|(path, _)| path.starts_with(f.git.join("worktrees"))));
+        assert!(!visible(&built.spec, &f.ws.join(".crew/worktrees/b")));
+        assert!(!visible(
+            &built.spec,
+            &f.ws.join(".crew/jj/.jj/working_copy")
+        ));
+        assert_eq!(built.spec.cwd, p.worktree);
+        assert!(built.warnings.is_empty(), "{:?}", built.warnings);
+    }
+
+    #[test]
+    fn a_jj_helper_gets_the_same_store_table_and_nothing_of_an_agent() {
+        let f = jj_fixture();
+        let p = f.paths("_integration");
+        let role = Role::Helper {
+            worktree: &p.worktree,
+            admin: None,
+        };
+        let jj = f.home.join(".cargo/bin/jj");
+        touch(&[&jj]);
+        let request = Request {
+            session: f.session(),
+            role,
+            extra: &Extra::default(),
+            cli: Some(&jj),
+            pass_env: &[],
+            terminal: false,
+            nix_daemon: None,
+        };
+        let spec = build(&f.host, &request).unwrap().spec;
+        let mut expected = vec![(f.ws.join("target/release/crew"), false)];
+        expected.extend(jj_store_table(&f, &p.worktree));
+        assert_eq!(binds_under(&spec, &f.ws), expected);
+        assert!(visible(&spec, &jj), "the jj it runs");
+        assert!(!spec.network && spec.new_session && spec.pass_env.is_empty());
+        assert!(!visible(&spec, &f.ws.join(".crew/agents")));
+    }
+
+    #[test]
+    fn the_admin_directory_goes_with_git_and_never_with_jj() {
+        let git = fixture();
+        let p = git.paths("a");
+        let role = Role::Helper {
+            worktree: &p.worktree,
+            admin: None,
+        };
+        let error = git.build(role, &Extra::default(), &[]).unwrap_err();
+        assert!(error.contains("needs its admin directory"), "{error}");
+        let jj = jj_fixture();
+        let p = jj.paths("a");
+        let role = Role::Helper {
+            worktree: &p.worktree,
+            admin: Some(&p.admin),
+        };
+        let error = jj.build(role, &Extra::default(), &[]).unwrap_err();
+        assert!(error.contains("no git admin directory"), "{error}");
+    }
+
+    #[test]
+    fn a_planted_link_in_a_jj_workspace_is_refused() {
+        // `.jj` or its working-copy state replaced by a link: the profile
+        // would bind what it points at.
+        for planted in [".jj", ".jj/working_copy"] {
+            let f = jj_fixture();
+            let p = f.paths("a");
+            let at = p.worktree.join(planted);
+            std::fs::remove_dir_all(&at).unwrap();
+            symlink(f.home.join("data"), &at).unwrap();
+            let error = f.worker(&Extra::default()).unwrap_err();
+            assert!(error.contains("not canonical"), "{planted}: {error}");
+        }
+        // A workspace without its `.jj` is no jj workspace.
+        let f = jj_fixture();
+        std::fs::remove_dir_all(f.paths("a").worktree.join(".jj")).unwrap();
+        assert!(f.worker(&Extra::default()).is_err());
+    }
+
+    #[test]
+    fn the_projects_own_jj_repository_is_bound_with_its_git_data_inside() {
+        // The native layout, not colocated: the git data lies inside jj's
+        // repository, whose read-only bind must come first.
+        let mut f = fixture();
+        let repo = f.ws.join(".jj/repo");
+        let git = repo.join("store/git");
+        for sub in JJ_APPENDED {
+            mkdirs(&[&repo.join(sub)]);
+        }
+        mkdirs(&[&git.join("objects"), &git.join("refs")]);
+        let worktree = f.paths("a").worktree;
+        mkdirs(&[&worktree.join(".jj/working_copy")]);
+        f.store = Store::Jj {
+            git_dir: git.clone(),
+            repo_dir: repo.clone(),
+        };
+        let spec = f.worker(&Extra::default()).unwrap().spec;
+        let store: Vec<_> = binds_under(&spec, &f.ws.join(".jj"));
+        assert_eq!(
+            store,
+            [
+                (repo.clone(), false),
+                (repo.join("op_store"), true),
+                (repo.join("op_heads"), true),
+                (repo.join("index"), true),
+                (repo.join("store/extra"), true),
+                (git.clone(), false),
+                (git.join("objects"), true),
+                (git.join("refs"), true),
+            ]
+        );
+        assert!(binds(&spec).contains(&(worktree.join(".jj/working_copy"), true)));
+    }
+
+    #[test]
+    fn the_orchestrator_does_not_see_a_projects_own_jj_repository() {
+        let mut f = jj_fixture();
+        mkdirs(&[&f.ws.join(".jj/repo")]);
+        touch(&[&f.ws.join(".jj/repo/config.toml")]);
+        f.store = Store::Jj {
+            git_dir: f.git.clone(),
+            repo_dir: f.ws.join(".jj/repo"),
+        };
+        let p = f.paths("orchestrator");
+        mkdirs(&[&p.agent.join("rw")]);
+        let role = Role::Orchestrator {
+            agent_dir: &p.agent,
+            sidecar_dir: None,
+        };
+        let spec = f.build(role, &Extra::default(), &[]).unwrap().spec;
+        assert!(visible(&spec, &f.ws.join("src")));
+        assert!(spec.mounts.contains(&Mount::Tmpfs {
+            path: f.ws.join(".jj")
+        }));
+        assert!(!visible(&spec, &f.ws.join(".jj/repo/config.toml")));
+        assert!(!visible(&spec, &f.ws.join(".crew/jj")));
     }
 
     #[test]

@@ -6,7 +6,7 @@
 //! - `persistence` — storage traits and their SQLite implementation
 //! - `message_bus` — the agent-to-agent bus
 //! - `tasks`, `scheduler` — the task graph and the pure planning function
-//! - `git` — worktree isolation and commit exchange
+//! - `git`, `vcs` — workspace isolation and commit exchange (jj or git)
 //! - `agents` — runtime adapters (Claude Code, Codex, shell)
 //! - `process` — where agent processes run (daemon-owned PTYs, herdr panes)
 //! - `daemon` — the long-running process tying it all together
@@ -30,3 +30,4 @@ pub mod scheduler;
 pub mod styles;
 pub mod tasks;
 pub mod transcript;
+pub mod vcs;
