@@ -154,6 +154,8 @@ impl Client {
             token,
             client: client.to_string(),
             protocol: PROTOCOL_VERSION,
+            web: false,
+            workspace: None,
         })));
         let missing = || ClientError::MissingOperatorToken {
             path: crate::paths::operator_token_path(socket)
@@ -183,6 +185,8 @@ impl Client {
             token: Some(identity.token.clone()),
             client: client.to_string(),
             protocol: PROTOCOL_VERSION,
+            web: false,
+            workspace: None,
         })))?;
         Ok((c, info))
     }
@@ -651,6 +655,8 @@ mod tests {
                 token: Some(token.into()),
                 client: "token-test".into(),
                 protocol: PROTOCOL_VERSION,
+                web: false,
+                workspace: None,
             }),
         })
         .unwrap()
@@ -666,6 +672,8 @@ mod tests {
             token: Some("synthetic-secret-do-not-print".into()),
             client: "test".into(),
             protocol: PROTOCOL_VERSION,
+            web: false,
+            workspace: None,
         };
         assert!(!format!("{hello:?}").contains("synthetic-secret-do-not-print"));
     }

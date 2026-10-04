@@ -467,6 +467,31 @@ string_enum! {
     }
 }
 
+string_enum! {
+    /// What the dashboard server knows of a joined workspace's daemon
+    /// (notes/web-multi.md §multi-join); only the registry decides it.
+    /// `running`: its daemon runs and the server has its watch. `stopped`: no
+    /// daemon runs for it. `incompatible`: its daemon speaks another protocol
+    /// version. `unreachable`: the registry publishes its daemon and the
+    /// server has no watch on it (it refused the server, or does not answer).
+    WorkspaceState {
+        Running => "running",
+        Stopped => "stopped",
+        Incompatible => "incompatible",
+        Unreachable => "unreachable",
+    }
+}
+
+string_enum! {
+    /// What the dashboard server tells a joined workspace's log about: a
+    /// browser was paired, or web logins were refused (counted over the
+    /// last minute).
+    WebEventKind {
+        Paired => "paired",
+        AuthFailed => "auth_failed",
+    }
+}
+
 /// One entry of an agent's session transcript, as its runtime recorded it.
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
 pub struct TranscriptEntry {

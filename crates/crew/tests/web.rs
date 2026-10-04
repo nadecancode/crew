@@ -30,9 +30,17 @@ fn start_empty_daemon() -> Session {
     s
 }
 
+thread_local! {
+    /// The workspace the last `crew web` of this test joined: a `hello`
+    /// names it, so its connection reaches that daemon through the server.
+    static WORKSPACE: std::cell::RefCell<Option<String>> = const { std::cell::RefCell::new(None) };
+}
+
 fn web_open(s: &Session) -> WebInfo {
     let out = s.ok(&["web", "--json", "-C", &s.workspace.to_string_lossy()]);
-    serde_json::from_str(&out).expect("crew web --json")
+    let info: WebInfo = serde_json::from_str(&out).expect("crew web --json");
+    WORKSPACE.with(|w| *w.borrow_mut() = info.workspace.clone());
+    info
 }
 
 /// `<label>.localhost:<port>` of an address.
@@ -44,7 +52,8 @@ fn host_of(info: &WebInfo) -> String {
 }
 
 fn code_of(info: &WebInfo) -> String {
-    info.pair_url.split("#pair=").nth(1).unwrap().to_string()
+    let fragment = info.pair_url.split("#pair=").nth(1).unwrap();
+    fragment.split('&').next().unwrap().to_string()
 }
 
 /// One plain HTTP request; the whole response.
@@ -116,13 +125,12 @@ async fn call(ws: &mut Ws, id: u64, method: &str, params: Value) -> Value {
 }
 
 async fn hello(ws: &mut Ws, token: &str) -> Value {
-    call(
-        ws,
-        1,
-        "hello",
-        json!({"role": "operator", "token": token, "client": "web", "protocol": PROTOCOL_VERSION}),
-    )
-    .await
+    let mut params =
+        json!({"role": "operator", "token": token, "client": "web", "protocol": PROTOCOL_VERSION});
+    if let Some(id) = WORKSPACE.with(|w| w.borrow().clone()) {
+        params["workspace"] = json!(id);
+    }
+    call(ws, 1, "hello", params).await
 }
 
 fn sha256_hex(text: &str) -> String {
@@ -153,7 +161,7 @@ fn rt() -> tokio::runtime::Runtime {
 #[test]
 fn off_until_asked_then_served_and_stopped() {
     let s = start_empty_daemon();
-    let port = crew_core::paths::web_port(&s.workspace.canonicalize().unwrap().join(".crew"));
+    let port = crew_core::paths::web_port(&s.root().join("run").join("crew"));
     assert!(
         StdTcp::connect(("127.0.0.1", port)).is_err(),
         "something listens before crew web"
@@ -162,7 +170,7 @@ fn off_until_asked_then_served_and_stopped() {
     assert!(info.started);
     assert!(info.url.starts_with("http://") && info.url.contains(".localhost:"));
     assert_eq!(s.snapshot().session.web, info.url);
-    assert!(s.has_event("web.started"));
+    assert!(s.has_event("web.joined"));
     // Run again: the same address, a new code.
     let again = web_open(&s);
     assert!(!again.started);
@@ -188,7 +196,7 @@ fn off_until_asked_then_served_and_stopped() {
     assert!(StdTcp::connect(("127.0.0.1", info.port)).is_err());
     assert!(std::net::TcpListener::bind(("127.0.0.1", info.port)).is_ok());
     assert_eq!(s.snapshot().session.web, "");
-    assert!(s.has_event("web.stopped"));
+    assert!(s.has_event("web.left"));
 }
 
 #[test]
@@ -298,7 +306,8 @@ fn nothing_before_hello_and_each_credential_on_its_own_transport() {
         assert!(hello(&mut socket, &token).await["result"].is_object());
         for method in ["web_open", "web_close"] {
             let reply = call(&mut socket, 3, method, json!({})).await;
-            assert_eq!(reply["error"]["code"], "forbidden", "{method}");
+            // The daemon no longer has them: the dashboard server's.
+            assert_eq!(reply["error"]["code"], "invalid", "{method}");
         }
         // The socket's credentials are nothing here: a wrong token, the
         // operator token, an agent's own token.
@@ -510,7 +519,7 @@ fn owns_both_loopback_addresses() {
         return;
     }
     let s = start_empty_daemon();
-    let first = crew_core::paths::web_port(&s.workspace.canonicalize().unwrap().join(".crew"));
+    let first = crew_core::paths::web_port(&s.root().join("run").join("crew"));
     // Someone holds [::1] of the workspace's port: that port is skipped.
     let squatter = std::net::TcpListener::bind(("::1", first));
     let info = web_open(&s);
@@ -633,13 +642,18 @@ fn a_new_start_is_a_new_origin() {
     };
     refused(&first, &second, &token, &spare);
 
-    // The daemon stopped and started: the same.
+    // The daemon stopped and started: the origin, and the session, stand
+    // (the server is not the daemon's); a new server is a new origin again.
     let (token, spare) = rt().block_on(async {
         let (token, _) = pair(&second).await;
         (token, code_of(&web_open(&s)))
     });
     s.stop();
     s.ok(&["start", "-C", &ws_dir]);
+    let same = web_open(&s);
+    assert!(!same.started);
+    assert_eq!(host_of(&same), host_of(&second));
+    s.ok(&["web", "--stop"]);
     let third = web_open(&s);
     assert!(third.started);
     assert_ne!(host_of(&third), host_of(&first));
@@ -927,9 +941,14 @@ fn stop_tells_the_browser() {
             frames.iter().any(|f| f["push"]["kind"] == "shutdown"),
             "{frames:?}"
         );
-        assert_eq!(code, Some(1001), "{frames:?}");
+        // The daemon's side of this connection ended: 4001, which says
+        // nothing of the server, still serving.
+        assert_eq!(code, Some(4001), "{frames:?}");
         assert!(stopping.join().unwrap().status.success());
     });
+    assert!(std::net::TcpListener::bind(("127.0.0.1", info.port)).is_err());
+    // `crew web --stop`: the port is free.
+    s.ok(&["web", "--stop"]);
     assert!(std::net::TcpListener::bind(("127.0.0.1", info.port)).is_ok());
     if has_ipv6() {
         assert!(std::net::TcpListener::bind(("::1", info.port)).is_ok());
@@ -1235,4 +1254,39 @@ fn port_zero_is_refused() {
     let reply = Raw::operator(&s).call("web_open", json!({"port": 0}));
     assert_eq!(reply["error"]["code"], "invalid", "{reply}");
     assert_eq!(s.snapshot().session.web, "");
+}
+
+/// P16 (notes/web-multi.md §multi-perf): a push is on the wire within 1 ms
+/// at p95, measured at the browser's end of the server. A `ping` on a
+/// workspace connection goes browser, server, daemon and back: its round
+/// trip bounds one push's way (daemon, server, browser) from above.
+#[test]
+fn a_frame_crosses_the_server_within_a_millisecond_at_p95() {
+    const SAMPLES: usize = 300;
+    let s = start_empty_daemon();
+    let info = web_open(&s);
+    let mut took = rt().block_on(async {
+        let (token, _) = pair(&info).await;
+        let mut socket = ws(&info).await;
+        assert!(hello(&mut socket, &token).await["result"].is_object());
+        let mut took = Vec::with_capacity(SAMPLES);
+        for i in 0..SAMPLES as u64 {
+            let started = std::time::Instant::now();
+            let reply = call(&mut socket, 100 + i, "ping", json!({})).await;
+            took.push(started.elapsed());
+            assert_eq!(reply["result"]["pong"], true);
+        }
+        took
+    });
+    took.sort();
+    let (p50, p95) = (took[SAMPLES / 2], took[SAMPLES * 95 / 100]);
+    let scale: f64 = std::env::var("CREW_PERF_SCALE")
+        .ok()
+        .and_then(|s| s.parse().ok())
+        .unwrap_or(1.0);
+    println!("P16 through the server: round trip p50 {p50:?}, p95 {p95:?}");
+    assert!(
+        p95 <= Duration::from_secs_f64(0.001 * scale),
+        "P16: round trip p95 {p95:?} over 1 ms (x{scale}); p50 {p50:?}"
+    );
 }

@@ -1,6 +1,7 @@
 //! Turns that end without the work being done because the model refused
 //! it. The same work offered again is refused again, so such a turn is dealt
-//! with instead of reminded about. A refusal shows in three ways:
+//! with instead of reminded about. A refusal is what the runtime or the model
+//! reports as one, in one of three ways:
 //! - Codex's content filters end the turn in an error (`cyber_policy`:
 //!   flagged for possible cybersecurity risk). Codex calls its `notify` hook
 //!   only for a turn that completed, so the end of such a turn is read from
@@ -9,11 +10,17 @@
 //!   first moves the session to another model by itself; when that is not
 //!   possible, the turn ends in its notice ("…'s safeguards flagged this
 //!   message"), in the transcript and the `StopFailure` hook.
-//! - The model says so itself: with the `decline` tool, or by answering in
-//!   words alone. Text in a crew session reaches nobody, so a turn that was
-//!   asked something and ends without a tool call is asked once more (how
-//!   to answer, wait, or decline); one that answers that without a tool call
-//!   too is taken as refused. No wording is read into.
+//! - The model says so itself, with the `decline` tool (every runtime).
+//!   pi has no other way: its providers turn a refusal (`stop_reason:
+//!   "refusal"`, `finish_reason: "content_filter"`) into the same "unknown
+//!   error" as any other failure.
+//!
+//! A turn that ends with nothing to show is not one of them. Text in a crew
+//! session reaches nobody, so a turn that was asked something and ends
+//! without a tool call is asked once more (how to answer, wait, or decline);
+//! one that ends without a tool call again, said something or not, is taken
+//! as having nothing to do: the agent stays as it is, ready for more. No
+//! wording is read into.
 //!
 //! A work style can name models to take such work over
 //! (`defaults.refusal_fallbacks`): the agent moves to the first that can be
@@ -163,7 +170,7 @@ impl Daemon {
     ///   without a single tool call, so nothing came of it — text in the
     ///   session reaches nobody: crew asks once more, saying how to answer,
     ///   wait or decline; a turn that answers that without a tool call
-    ///   either is taken as refused.
+    ///   either had nothing to do (not a refusal).
     pub(crate) async fn check_turn(&self, id: &str, asked: Vec<String>, openers: Vec<String>) {
         let (failure, declined) = {
             let mut model = self.model();
@@ -227,14 +234,23 @@ impl Daemon {
         if turn.tools > 0 || forwarded || agent.orchestrator {
             return;
         }
-        if let Some((_, given)) = follow_up.as_ref().filter(|(sent, _)| asked.contains(sent)) {
-            let said = truncate_chars(crew_core::util::one_line(&turn.reply).trim(), 400);
-            let said = if said.is_empty() {
-                "(nothing)".to_string()
-            } else {
-                said
-            };
-            self.turn_refused(&agent, "declined", &said, given).await;
+        // Asked again, and again nothing came of it: what it was given needs
+        // nothing from it, as far as it can tell (an FYI, an answer it has no
+        // use for). That is not a refusal: only the runtime or `decline` says
+        // that. The agent is left as it is, to be given more, and its task
+        // stays where it was.
+        if follow_up
+            .as_ref()
+            .is_some_and(|(sent, _)| asked.contains(sent))
+        {
+            self.emit(
+                NewEvent::new(
+                    "daemon",
+                    "agent.idle_turn",
+                    format!("{id}'s turn ended without a tool call again: taken as nothing to do"),
+                )
+                .agent(id),
+            );
             return;
         }
         // Not yet asked again (or that is still on its way): keep it.
@@ -984,5 +1000,305 @@ mod provider_error_tests {
                 && e.message.contains(said)),
             "{events:?}"
         );
+    }
+}
+
+/// What a turn that ends with nothing to show is taken as, on each runtime
+/// whose session crew reads, against the refusals each runtime reports.
+#[cfg(test)]
+mod empty_turn_tests {
+    use super::*;
+    use crew_core::TaskStatus;
+    use serde_json::{json, Value};
+    use std::io::Write as _;
+
+    const RUNTIMES: [RuntimeKind; 3] = [RuntimeKind::Claude, RuntimeKind::Codex, RuntimeKind::Pi];
+
+    /// A daemon with member `x` on `runtime`, working on task `t`, whose
+    /// session file crew reads.
+    async fn member_on(
+        runtime: RuntimeKind,
+    ) -> (tempfile::TempDir, super::super::Running, std::path::PathBuf) {
+        let temp = tempfile::tempdir().unwrap();
+        let running = super::super::start(super::super::DaemonOptions {
+            workspace: temp.path().to_path_buf(),
+            crew_bin: std::env::current_exe().unwrap(),
+        })
+        .await
+        .unwrap();
+        let daemon = running.daemon.clone();
+        let agent: Agent = serde_json::from_value(json!({
+            "id": "x", "name": "x", "role": "work", "status": "working",
+            "runtime": runtime.to_string(), "session_id": "s-1", "task": "t",
+            "workdir": temp.path().to_str().unwrap(), "backend": "pty", "last_activity_at": 0
+        }))
+        .unwrap();
+        let task: crew_core::Task = serde_json::from_value(json!({
+            "id": "t", "title": "t", "description": "", "status": "working",
+            "assigned_agent": "x", "created_at": 0
+        }))
+        .unwrap();
+        // Who asks: a member, so a refusal tells it.
+        let lead: Agent = serde_json::from_value(json!({
+            "id": "lead", "name": "lead", "role": "lead", "status": "idle", "runtime": "shell",
+            "workdir": temp.path().to_str().unwrap(), "backend": "pty", "last_activity_at": 0
+        }))
+        .unwrap();
+        {
+            let mut model = daemon.model();
+            model.agents.push(agent);
+            model.agents.push(lead);
+            model.tasks.push(task);
+        }
+        let session = temp.path().join("session.jsonl");
+        std::fs::write(&session, "").unwrap();
+        {
+            let mut model = daemon.model();
+            let rt = model.rt("x");
+            match runtime {
+                RuntimeKind::Codex => rt.rollout = Some(session.clone()),
+                _ => rt.transcript = Some(session.to_string_lossy().into_owned()),
+            }
+        }
+        (temp, running, session)
+    }
+
+    /// A turn as `runtime` records it: given `prompt`, it wrote `reply`
+    /// (nothing, when empty) and called no tool.
+    fn record(runtime: RuntimeKind, session: &std::path::Path, prompt: &str, reply: &str) {
+        let content: Vec<Value> = if reply.is_empty() {
+            Vec::new()
+        } else {
+            match runtime {
+                RuntimeKind::Codex => vec![json!({"type": "output_text", "text": reply})],
+                _ => vec![json!({"type": "text", "text": reply})],
+            }
+        };
+        let lines = match runtime {
+            RuntimeKind::Claude => [
+                json!({"type": "user", "message": {"role": "user", "content": prompt}}),
+                json!({"type": "assistant", "message": {"role": "assistant", "content": content}}),
+            ],
+            RuntimeKind::Codex => [
+                json!({"type": "response_item", "payload": {"type": "message", "role": "user",
+                    "content": [{"type": "input_text", "text": prompt}]}}),
+                json!({"type": "response_item", "payload": {"type": "message", "role": "assistant",
+                    "content": content}}),
+            ],
+            RuntimeKind::Pi => [
+                json!({"type": "message", "message": {"role": "user", "content": prompt}}),
+                json!({"type": "message", "message": {"role": "assistant", "content": content}}),
+            ],
+            RuntimeKind::Shell => unreachable!(),
+        };
+        let mut file = std::fs::OpenOptions::new()
+            .append(true)
+            .open(session)
+            .unwrap();
+        for line in lines {
+            writeln!(file, "{line}").unwrap();
+        }
+    }
+
+    fn ask(daemon: &Daemon, kind: MessageType, body: &str) -> String {
+        daemon
+            .bus
+            .send(NewMessage::new("lead", "x", kind, body), vec!["x".into()])
+            .unwrap()
+            .message
+            .id
+    }
+
+    /// How a message from `lead` is put into a session.
+    fn given(id: &str) -> String {
+        format!("[crew] Message from lead (type question, id {id}):\n\nWhat it asks.")
+    }
+
+    fn events(daemon: &Daemon, kind: &str) -> usize {
+        daemon
+            .store
+            .recent_events(Some("x"), 200)
+            .unwrap()
+            .iter()
+            .filter(|e| e.event_type == kind)
+            .count()
+    }
+
+    /// What `lead` was told by crew.
+    fn told_lead(daemon: &Daemon) -> Vec<String> {
+        daemon
+            .bus
+            .history(Some("lead"), 100)
+            .unwrap()
+            .into_iter()
+            .filter(|m| m.to == "lead" && m.from != "x")
+            .map(|m| m.body)
+            .collect()
+    }
+
+    fn still_at_work(daemon: &Daemon, runtime: RuntimeKind) {
+        let x = daemon.agent("x").unwrap();
+        assert_eq!(x.status, AgentStatus::Working, "{runtime}: {x:?}");
+        assert_eq!(x.block_kind, None, "{runtime}");
+        assert_eq!(x.error, None, "{runtime}");
+        assert_eq!(x.task.as_deref(), Some("t"), "{runtime}");
+        let task = daemon.model().task("t").cloned().unwrap();
+        assert_eq!(task.status, TaskStatus::Working, "{runtime}");
+        assert_eq!(events(daemon, "agent.refused"), 0, "{runtime}");
+        assert!(
+            told_lead(daemon).is_empty(),
+            "{runtime}: {:?}",
+            told_lead(daemon)
+        );
+    }
+
+    fn refused(daemon: &Daemon, runtime: RuntimeKind, kind: &str) {
+        let x = daemon.agent("x").unwrap();
+        assert_eq!(x.status, AgentStatus::Blocked, "{runtime}: {x:?}");
+        assert_eq!(x.block_kind.as_deref(), Some("refused"), "{runtime}");
+        assert!(
+            x.activity.contains(&format!("refused the turn ({kind})")),
+            "{runtime}: {}",
+            x.activity
+        );
+        assert_eq!(events(daemon, "agent.refused"), 1, "{runtime}");
+        assert!(
+            told_lead(daemon)
+                .iter()
+                .any(|m| m.contains("x cannot act on your message")),
+            "{runtime}: {:?}",
+            told_lead(daemon)
+        );
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn a_turn_that_ends_with_nothing_twice_is_idle_not_refused_on_every_runtime() {
+        for runtime in RUNTIMES {
+            let (_temp, running, session) = member_on(runtime).await;
+            let daemon = running.daemon.clone();
+            let asked = ask(&daemon, MessageType::Message, "FYI: the parser landed.");
+            record(runtime, &session, "[crew] Message from lead: FYI", "");
+            daemon.check_turn("x", vec![asked], vec![]).await;
+            // Asked once more how to answer, wait or decline.
+            let again = daemon
+                .model()
+                .rt("x")
+                .follow_up
+                .clone()
+                .map(|(sent, _)| sent)
+                .unwrap_or_else(|| panic!("{runtime}: not asked again"));
+            assert_eq!(events(&daemon, "agent.unanswered"), 1, "{runtime}");
+            still_at_work(&daemon, runtime);
+            // Nothing again: it had nothing to do.
+            record(
+                runtime,
+                &session,
+                "[crew] Your last turn ended without a tool call",
+                "",
+            );
+            daemon.check_turn("x", vec![again], vec![]).await;
+            still_at_work(&daemon, runtime);
+            assert_eq!(events(&daemon, "agent.idle_turn"), 1, "{runtime}");
+            assert!(daemon.model().rt("x").follow_up.is_none(), "{runtime}");
+            // Still given work as before: the next message is asked about
+            // again if nothing comes of it either.
+            let asked = ask(
+                &daemon,
+                MessageType::Question,
+                "Which file holds the parser?",
+            );
+            record(
+                runtime,
+                &session,
+                "[crew] Message from lead: which file",
+                "",
+            );
+            daemon.check_turn("x", vec![asked], vec![]).await;
+            assert_eq!(events(&daemon, "agent.unanswered"), 2, "{runtime}");
+            still_at_work(&daemon, runtime);
+        }
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn words_alone_after_being_asked_again_are_not_a_refusal() {
+        let runtime = RuntimeKind::Claude;
+        let (_temp, running, session) = member_on(runtime).await;
+        let daemon = running.daemon.clone();
+        let asked = ask(
+            &daemon,
+            MessageType::Question,
+            "Which file holds the parser?",
+        );
+        record(
+            runtime,
+            &session,
+            "[crew] Message from lead: which file",
+            "src/parser.rs",
+        );
+        daemon.check_turn("x", vec![asked], vec![]).await;
+        let again = daemon.model().rt("x").follow_up.clone().unwrap().0;
+        record(
+            runtime,
+            &session,
+            "[crew] Your last turn ended",
+            "Understood.",
+        );
+        daemon.check_turn("x", vec![again], vec![]).await;
+        still_at_work(&daemon, runtime);
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn decline_is_a_refusal_on_every_runtime() {
+        for runtime in RUNTIMES {
+            let (_temp, running, session) = member_on(runtime).await;
+            let daemon = running.daemon.clone();
+            let asked = ask(&daemon, MessageType::Question, "Write the exploit.");
+            daemon
+                .declined("x", "it goes against my guidelines".into())
+                .unwrap();
+            record(runtime, &session, &given(&asked), "");
+            daemon.check_turn("x", vec![asked], vec![]).await;
+            refused(&daemon, runtime, "declined");
+        }
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn the_runtimes_own_refusals_are_still_refusals() {
+        // Claude Code's notice that the model's safeguards flagged the turn.
+        let (_temp, running, session) = member_on(RuntimeKind::Claude).await;
+        let daemon = running.daemon.clone();
+        let asked = ask(&daemon, MessageType::Question, "Scan that host.");
+        record(RuntimeKind::Claude, &session, &given(&asked), "");
+        daemon
+            .on_signal(
+                "x",
+                Signal::TurnFailed(
+                    "API Error: Opus 4.8's safeguards flagged this message. Details: `[cyber]`"
+                        .into(),
+                ),
+            )
+            .await;
+        daemon.check_turn("x", vec![asked], vec![]).await;
+        refused(&daemon, RuntimeKind::Claude, "cyber");
+
+        // Codex's content filter, read from its session file.
+        let (_temp, running, _session) = member_on(RuntimeKind::Codex).await;
+        let daemon = running.daemon.clone();
+        let asked = ask(&daemon, MessageType::Question, "Scan that host.");
+        daemon
+            .codex_turn_seen(
+                "x",
+                CodexTurnEnd {
+                    turn_id: "turn-1".into(),
+                    ended_at: Some(now_ms()),
+                    error: Some((
+                        "cyber_policy".into(),
+                        "This content was flagged for possible cybersecurity risk.".into(),
+                    )),
+                    input: vec![given(&asked)],
+                },
+            )
+            .await;
+        refused(&daemon, RuntimeKind::Codex, "cyber_policy");
     }
 }

@@ -506,11 +506,70 @@ fn session_hash(state_dir: &Path) -> u64 {
     fnv1a64(state_dir.to_string_lossy().as_bytes())
 }
 
-/// The first loopback port the web dashboard of this workspace tries:
-/// `23000 + (h mod 1000)`, with `h` the hash that names the socket. The same
-/// workspace gets the same number, below the kernel's ephemeral range.
-pub fn web_port(state_dir: &Path) -> u16 {
-    23000 + (session_hash(state_dir) % 1000) as u16
+/// The id of a workspace on the dashboard's wire: the 16 hex digits that
+/// name its daemon's socket and registry entry. Never used as a path.
+pub fn session_id(state_dir: &Path) -> String {
+    format!("{:016x}", session_hash(state_dir))
+}
+
+/// The first loopback port the dashboard server tries: `23000 + (h mod
+/// 1000)`, with `h` the hash of `dir`, its runtime directory: a port per
+/// user (and per test), below the kernel's ephemeral range.
+pub fn web_port(dir: &Path) -> u16 {
+    23000 + (session_hash(dir) % 1000) as u16
+}
+
+/// What the running dashboard server publishes of itself in `web.json`, for
+/// `crew web` and for telling a stale file from a live server.
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
+pub struct WebServerInfo {
+    pub pid: u32,
+    #[serde(default)]
+    pub pid_start: Option<u64>,
+    #[serde(default)]
+    pub boot_id: Option<String>,
+    pub port: u16,
+    pub url: String,
+    pub protocol: u32,
+    pub version: String,
+    /// The crate version and the embedded bundle's manifest hash.
+    pub build: String,
+}
+
+impl WebServerInfo {
+    /// The process it names still runs (the same start, the same boot).
+    pub fn is_live(&self) -> bool {
+        let same_boot = match (&self.boot_id, boot_id()) {
+            (Some(theirs), Some(ours)) => *theirs == ours,
+            _ => true,
+        };
+        let same_start = match self.pid_start {
+            Some(start) => process_start(self.pid).is_none_or(|now| now == start),
+            None => true,
+        };
+        pid_alive(self.pid) && same_boot && same_start
+    }
+}
+
+pub fn read_web_info() -> Option<WebServerInfo> {
+    serde_json::from_str(&fs::read_to_string(web_info_path()).ok()?).ok()
+}
+
+/// The dashboard server's files, in the runtime directory beside the
+/// daemons' sockets (notes/web-multi.md §multi-server): its control socket.
+/// Its token is `operator_token_path` of it (`web.token`).
+pub fn web_socket() -> PathBuf {
+    runtime_dir().join("web.sock")
+}
+
+/// The dashboard server's single-instance lock.
+pub fn web_lock() -> PathBuf {
+    runtime_dir().join("web.lock")
+}
+
+/// What the running dashboard server publishes of itself (`WebServerInfo`).
+pub fn web_info_path() -> PathBuf {
+    runtime_dir().join("web.json")
 }
 
 /// Registry of running daemons, so `crew attach` works from any directory.

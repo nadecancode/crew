@@ -26,7 +26,7 @@
     "artifact",
     "error"
   ],
-  "protocol": 5,
+  "protocol": 6,
   "push": [
     "event",
     "message",
@@ -39,7 +39,9 @@
     "compact",
     "pty",
     "pty_closed",
-    "shutdown"
+    "shutdown",
+    "summary",
+    "workspaces"
   ],
   "role": [
     "operator",
@@ -81,5 +83,15 @@
     "ok",
     "conflict",
     "error"
+  ],
+  "web_event_kind": [
+    "paired",
+    "auth_failed"
+  ],
+  "workspace_state": [
+    "running",
+    "stopped",
+    "incompatible",
+    "unreachable"
   ]
 }

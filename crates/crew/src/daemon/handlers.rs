@@ -9,7 +9,7 @@ use crew_core::{AgentStatus, MessageType, BROADCAST, OPERATOR_ID};
 use serde::Serialize;
 use serde_json::{json, Value};
 
-use super::server::{Conn, Transport, Who};
+use super::server::{Conn, Who};
 use super::{Daemon, VERSION};
 use crate::message_bus::{BusError, NewMessage, SendOutcome};
 use crate::persistence::NewEvent;
@@ -51,7 +51,7 @@ fn operator_only(who: &Who) -> Result<(), RpcError> {
 /// with whoever holds the operator token file, and the browser does not
 /// launch teams.
 fn not_on_the_web(conn: &Conn, method: &str) -> Result<(), RpcError> {
-    if conn.transport == Transport::Web {
+    if conn.web {
         return Err(RpcError::forbidden(format!(
             "{method} is not available to the web dashboard"
         )));
@@ -108,17 +108,15 @@ impl Daemon {
     }
 
     pub(crate) async fn dispatch(&self, conn: &mut Conn, call: Call) -> Reply {
+        let call_name = call.method();
         if let Call::Ping = call {
             return Ok(json!({ "pong": true }));
         }
-        // A browser trades its pairing code before it can say hello.
-        if let Call::WebPair { code } = call {
-            if conn.transport != Transport::Web {
-                return Err(RpcError::forbidden(
-                    "web_pair is for the web dashboard's connections",
-                ));
-            }
-            return reply(self.web.pair(self, &code)?);
+        // The dashboard server's, since it serves the dashboard.
+        if let Call::WebPair { .. } = call {
+            return Err(RpcError::invalid(
+                "web_pair is served by the dashboard server: open the address `crew web` prints",
+            ));
         }
         if let Call::Hello(hello) = call {
             // A connection is who it first said it was: an agent's code must
@@ -134,9 +132,6 @@ change identity",
             // Exactly this version: an older client misreads newer frames as
             // surely as a newer one. The code lets clients say "restart".
             if hello.protocol != PROTOCOL_VERSION {
-                if conn.transport == Transport::Web {
-                    self.web.refused(self);
-                }
                 return Err(RpcError::new(
                     "protocol",
                     format!(
@@ -145,37 +140,10 @@ change identity",
                     ),
                 ));
             }
-            let mut web_proof = None;
-            let who = match conn.transport {
-                Transport::Socket => self.authenticate(hello.role, hello.agent_id, hello.token)?,
-                // Only a live web session's token, and only as the operator:
-                // the operator token and agents' tokens work on the socket
-                // alone.
-                Transport::Web => {
-                    if hello.role != Role::Operator {
-                        self.web.refused(self);
-                        return Err(RpcError::unauthorized(
-                            "the web dashboard signs in as the operator only",
-                        ));
-                    }
-                    let lease =
-                        conn.lease.as_ref().map(|l| l.id).ok_or_else(|| {
-                            RpcError::internal("a web connection without a lease")
-                        })?;
-                    match self.web.hello(self, lease, hello.token.as_deref()) {
-                        Ok((_, secret)) => {
-                            web_proof = Some(secret);
-                            Who::Operator
-                        }
-                        Err(e) => {
-                            if e.code == "unavailable" {
-                                conn.close_after_reply = true;
-                            }
-                            return Err(e);
-                        }
-                    }
-                }
-            };
+            let who = self.authenticate(hello.role, hello.agent_id, hello.token)?;
+            // The dashboard server's mark on a browser's connection: it only
+            // takes away (W7).
+            conn.web = hello.web;
             let info = HelloInfo {
                 role: hello.role,
                 agent_id: match &who {
@@ -186,7 +154,7 @@ change identity",
                 version: VERSION.to_string(),
                 protocol: PROTOCOL_VERSION,
                 pid: std::process::id(),
-                web_proof,
+                web_proof: None,
             };
             debug_assert!(matches!(
                 (&who, hello.role),
@@ -611,20 +579,38 @@ change identity",
                 Ok(Value::Null)
             }
 
-            Call::WebOpen { port } => {
-                operator_only(&who)?;
-                not_on_the_web(conn, "web_open")?;
-                reply(self.web.open(self, port).await?)
-            }
-            Call::WebClose => {
-                operator_only(&who)?;
-                not_on_the_web(conn, "web_close")?;
-                Ok(json!({ "stopped": self.web.stop(self, None).await }))
-            }
+            // The dashboard is the dashboard server's (notes/web-multi.md
+            // §multi-migration).
+            Call::WebOpen { .. } => Err(RpcError::invalid(
+                "web_open is served by the dashboard server: run `crew web`",
+            )),
+            Call::WebClose { .. } => Err(RpcError::invalid(
+                "web_close is served by the dashboard server: run `crew web --stop`",
+            )),
             Call::WebPair { .. } => unreachable!("handled above"),
             Call::WebPrefs { set } => {
                 operator_only(&who)?;
                 self.web_prefs(set)
+            }
+            Call::Workspaces | Call::WebRescan => Err(RpcError::invalid(format!(
+                "{} is the dashboard server's: run `crew web`",
+                call_name
+            ))),
+            Call::Summary { watch } => {
+                operator_only(&who)?;
+                reply(self.summary(conn, watch).await)
+            }
+            Call::WebAttach { url } => {
+                operator_only(&who)?;
+                not_on_the_web(conn, "web_attach")?;
+                self.web_attach(conn, url)?;
+                Ok(json!({ "attached": true }))
+            }
+            Call::WebEvent { kind, count } => {
+                operator_only(&who)?;
+                not_on_the_web(conn, "web_event")?;
+                self.web_event(conn, kind, count)?;
+                Ok(json!({ "ok": true }))
             }
         }
     }

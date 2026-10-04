@@ -10,14 +10,15 @@
 use std::path::PathBuf;
 
 use crew_core::rpc::{
-    CommitInfo, ConflictReport, GitOutcome, HelloInfo, InboxResult, ModelsResult, OutputResult,
-    Push, Role, RpcError, SendResult, ServerFrame, TaskCard, TranscriptResult, WebInfo, WebPaired,
-    PROTOCOL_VERSION,
+    Call, CommitInfo, ConflictReport, DaemonRef, GitOutcome, Hello, HelloInfo, InboxResult,
+    ModelsResult, OtherSession, OutputResult, Push, Request, Role, RpcError, SendResult,
+    ServerFrame, TaskCard, TranscriptResult, WebInfo, WebPaired, WorkspaceEntry, WorkspaceSummary,
+    Workspaces, CLOSE_WORKSPACE_ENDED, CLOSE_WORKSPACE_REMOVED, PROTOCOL_VERSION,
 };
 use crew_core::types::{
     AgentStatus, Event, EventLevel, InboxEntry, Message, MessageType, RuntimeKind, TaskStatus,
-    TranscriptEntry, TranscriptKind, AGENT_ERROR_EVENT, AGENT_REFUSED_EVENT, BROADCAST,
-    OPERATOR_ID, ORCHESTRATOR_ID,
+    TranscriptEntry, TranscriptKind, WebEventKind, WorkspaceState, AGENT_ERROR_EVENT,
+    AGENT_REFUSED_EVENT, BROADCAST, OPERATOR_ID, ORCHESTRATOR_ID,
 };
 use crew_core::vcs::{VcsAction, VcsEvent, VcsOutcome, INTEGRATION_AGENT};
 use crew_tui::anim::{Anims, LinkKind, MarkKind, Tone};
@@ -530,13 +531,7 @@ fn results() -> Value {
         token: "t0kent0kent0kent0kent0kent0kent0kent0kent0k".into(),
         verifier: "9d5b3f0b4e8c4a6f2d1e0c9b8a7f6e5d4c3b2a1f0e9d8c7b6a5f4e3d2c1b0a9f".into(),
     };
-    let info = WebInfo {
-        url: "http://c7f3a09b52e14d6f8a1b3c5d7e9f0a2b.localhost:23417/".into(),
-        port: 23417,
-        pair_url: "http://c7f3a09b52e14d6f8a1b3c5d7e9f0a2b.localhost:23417/#pair=3f9ac0dec0dec0dec0dec0dec0dec0dec0dec0dee1".into(),
-        expires_in_secs: 120,
-        started: true,
-    };
+    let info = web_info();
     let output = OutputResult {
         text: "\u{1b}[1mcrew\u{1b}[0m $ cargo test\ntest result: ok. 12 passed".into(),
         alive: true,
@@ -580,8 +575,210 @@ fn results() -> Value {
         "git_merge": [value(&merged), value(&conflicted)],
         "web_prefs": [{"prefs": {}}, {"prefs": {"positions": {"claude-1": [120.5, -40.0]}, "keys": true}}],
         "web_open": [value(&info)],
-        "web_close": [{"stopped": true}, {"stopped": false}],
+        "web_close": [{"stopped": true}, {"stopped": false}, {"removed": true}],
+        "workspaces": [value(listing())],
+        "summary": [value(summary(12))],
     })
+}
+
+// ---- several workspaces (notes/web-multi.md §multi-tests) -------------------------
+
+const ORIGIN: &str = "http://c7f3a09b52e14d6f8a1b3c5d7e9f0a2b.localhost:23417/";
+const PAYMENTS: &str = "946d4617aa702870";
+const SEARCH: &str = "0b54c1d2e3f4a596";
+
+fn web_info() -> WebInfo {
+    WebInfo {
+        url: ORIGIN.into(),
+        port: 23417,
+        pair_url: format!("{ORIGIN}#pair=3f9ac0dec0dec0dec0dec0dec0dec0dec0dec0dee1&w={PAYMENTS}"),
+        expires_in_secs: 120,
+        started: true,
+        workspace: Some(PAYMENTS.into()),
+        workspace_url: Some(format!("{ORIGIN}#/w/{PAYMENTS}/")),
+        joined: vec![PAYMENTS.into()],
+    }
+}
+
+fn summary(rev: u64) -> WorkspaceSummary {
+    WorkspaceSummary {
+        rev,
+        project: Some("payments".into()),
+        agents: 6,
+        working: 3,
+        attention: 1,
+        questions: 2,
+        tasks: 6,
+        tasks_done: 4,
+    }
+}
+
+/// A listing with an entry in every state, and a session not joined.
+fn listing() -> Workspaces {
+    let entry = |id: &str, generation: u64, project: &str, state: WorkspaceState| WorkspaceEntry {
+        id: id.into(),
+        generation,
+        daemon: (state == WorkspaceState::Running).then_some(DaemonRef {
+            pid: 4242,
+            started_at: NOW - 3_600_000,
+        }),
+        project: Some(project.into()),
+        workspace: format!("/home/op/work/{project}"),
+        state,
+        detail: match state {
+            WorkspaceState::Incompatible => {
+                "started by another version of crew (protocol 5): restart the team".into()
+            }
+            WorkspaceState::Unreachable => "its daemon did not answer within 2 s".into(),
+            _ => String::new(),
+        },
+        summary: match state {
+            WorkspaceState::Running | WorkspaceState::Stopped => Some(summary(12)),
+            _ => None,
+        },
+        joined_at: NOW - 60_000 + generation as i64,
+    };
+    Workspaces {
+        rev: 41,
+        joined: vec![
+            entry(PAYMENTS, 1, "payments", WorkspaceState::Running),
+            entry("4c2e8a1b9d0f3e57", 2, "billing", WorkspaceState::Stopped),
+            entry("7a1d2c3b4e5f6071", 3, "infra", WorkspaceState::Incompatible),
+            entry("e0f1a2b3c4d5e6f7", 5, "search", WorkspaceState::Unreachable),
+        ],
+        others: vec![OtherSession {
+            id: SEARCH.into(),
+            project: Some("docs".into()),
+            workspace: "/home/op/work/docs".into(),
+        }],
+    }
+}
+
+fn request(id: u64, call: Call) -> Value {
+    value(Request { id, call })
+}
+
+fn hello(workspace: Option<&str>) -> Call {
+    Call::Hello(Hello {
+        role: Role::Operator,
+        agent_id: None,
+        token: Some("t0kent0kent0kent0kent0kent0kent0kent0kent0k".into()),
+        client: "web".into(),
+        protocol: PROTOCOL_VERSION,
+        web: false,
+        workspace: workspace.map(str::to_string),
+    })
+}
+
+/// Everything a page and the dashboard server say to each other that
+/// protocol 5 did not have, with the control socket's `web_open` and the
+/// daemon's refusals of the calls it no longer serves.
+fn multi() -> Value {
+    let proof = "pr00f5ecretpr00f5ecretpr00f5ecretpr00f5ecret";
+    let index_reply = HelloInfo {
+        role: Role::Operator,
+        agent_id: None,
+        project: None,
+        version: "0.1.0".into(),
+        protocol: PROTOCOL_VERSION,
+        pid: 31337,
+        web_proof: Some(proof.into()),
+    };
+    let workspace_reply = HelloInfo {
+        project: Some("payments".into()),
+        pid: 4242,
+        ..index_reply.clone()
+    };
+    let err = |id: u64, error: RpcError| value(ServerFrame::err(id, error));
+    json!({
+        "hello": {
+            "index": {
+                "request": request(1, hello(None)),
+                "reply": value(ServerFrame::ok(1, value(&index_reply))),
+            },
+            "workspace": {
+                "request": request(1, hello(Some(PAYMENTS))),
+                "reply": value(ServerFrame::ok(1, value(&workspace_reply))),
+                // What the server sends the daemon in its place.
+                "to_daemon": request(0, Call::Hello(Hello {
+                    token: Some("daem0nt0kendaem0nt0kendaem0nt0kendaem0nt0k".into()),
+                    web: true,
+                    workspace: None,
+                    ..match hello(None) { Call::Hello(h) => h, _ => unreachable!() }
+                })),
+            },
+            "workspace_refused": {
+                "not_found": err(1, RpcError::not_found(format!(
+                    "workspace {SEARCH} is not in this dashboard: run `crew web` in it"
+                ))),
+                "unavailable": err(1, RpcError::unavailable(
+                    "billing is not running: start it (`crew run` in /home/op/work/billing)"
+                )),
+                "protocol": err(1, RpcError::new(
+                    "protocol",
+                    "infra was started by another version of crew (protocol 5): restart the team",
+                )),
+                "unauthorized": err(1, RpcError::unauthorized(
+                    "this browser is signed out: run `crew web` and open the address it prints",
+                )),
+            },
+        },
+        "workspaces": {
+            "request": request(2, Call::Workspaces),
+            "reply": value(ServerFrame::ok(2, value(listing()))),
+            "push": value(ServerFrame::push(Push::Workspaces(Workspaces {
+                rev: 42,
+                ..listing()
+            }))),
+        },
+        "summary": {
+            "request": request(3, Call::Summary { watch: true }),
+            "reply": value(ServerFrame::ok(3, value(summary(12)))),
+            "push": value(ServerFrame::push(Push::Summary(summary(13)))),
+        },
+        "web_attach": {
+            "request": request(4, Call::WebAttach { url: ORIGIN.into() }),
+            "reply": value(ServerFrame::ok(4, json!({"attached": true}))),
+        },
+        "web_event": {
+            "request": request(5, Call::WebEvent { kind: WebEventKind::Paired, count: 3 }),
+            "reply": value(ServerFrame::ok(5, json!({"ok": true}))),
+        },
+        "web_open": {
+            "request": request(6, Call::WebOpen {
+                port: None,
+                workspace: Some("/home/op/work/payments/.crew".into()),
+                all: false,
+                restore: None,
+            }),
+            "reply": value(ServerFrame::ok(6, value(web_info()))),
+        },
+        "web_close": {
+            "request": request(7, Call::WebClose { workspace: Some(SEARCH.into()) }),
+            "reply": value(ServerFrame::ok(7, json!({"removed": true}))),
+        },
+        "daemon_refusals": {
+            "web_open": err(8, RpcError::invalid(
+                "web_open is served by the dashboard server: run `crew web`"
+            )),
+            "web_close": err(9, RpcError::invalid(
+                "web_close is served by the dashboard server: run `crew web --stop`"
+            )),
+            "web_pair": err(10, RpcError::invalid(
+                "web_pair is served by the dashboard server: open the address `crew web` prints"
+            )),
+        },
+        "close": {
+            "workspace_ended": {"code": CLOSE_WORKSPACE_ENDED, "reason": "the workspace's connection ended"},
+            "workspace_removed": {"code": CLOSE_WORKSPACE_REMOVED, "reason": "taken out of this dashboard"},
+            "line_break": {"code": 1008, "reason": "one request per message: no line breaks"},
+        },
+    })
+}
+
+#[test]
+fn multi_json() {
+    check("multi.json", pretty(&multi()));
 }
 
 #[test]
@@ -593,7 +790,7 @@ fn results_json() {
 fn errors_json() {
     let examples = [
         RpcError::unauthorized("say hello first"),
-        RpcError::new("protocol", "client speaks protocol 4, daemon speaks 5"),
+        RpcError::new("protocol", "client speaks protocol 5, daemon speaks 6"),
         RpcError::forbidden("web sessions cannot call web_open"),
         RpcError::not_found("no agent 'claude-9'"),
         RpcError::invalid("malformed request: missing field `id`"),
@@ -626,6 +823,8 @@ fn enums_json() {
         "pty",
         "pty_closed",
         "shutdown",
+        "summary",
+        "workspaces",
     ];
     // Each kind in the list is one the daemon serializes.
     for kind in push_kinds {
@@ -637,6 +836,8 @@ fn enums_json() {
                     text: String::new(),
                 })),
                 value(ServerFrame::push(Push::Compact { instructions: None })),
+                value(ServerFrame::push(Push::Summary(summary(1)))),
+                value(ServerFrame::push(Push::Workspaces(listing()))),
             ])
             .find(|f| f["push"]["kind"] == kind);
         assert!(frame.is_some(), "no push of kind {kind}");
@@ -653,6 +854,8 @@ fn enums_json() {
         "push": push_kinds,
         "vcs_action": value(VcsAction::ALL),
         "vcs_outcome": value([VcsOutcome::Started, VcsOutcome::Ok, VcsOutcome::Conflict, VcsOutcome::Error]),
+        "workspace_state": value(WorkspaceState::ALL),
+        "web_event_kind": value(WebEventKind::ALL),
     });
     check("enums.json", pretty(&enums));
 }
@@ -1178,6 +1381,7 @@ fn every_fixture_file_is_generated() {
         "commands.json",
         "enums.json",
         "errors.json",
+        "multi.json",
         "pushes.jsonl",
         "results.json",
         "snapshot.json",

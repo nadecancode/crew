@@ -7252,7 +7252,7 @@ fn a_turn_codex_refuses_goes_to_the_work_styles_pi_model_and_the_member_comes_ba
 }
 
 #[test]
-fn a_turn_that_ends_without_a_tool_call_is_asked_again_and_one_that_declines_is_dealt_with() {
+fn a_turn_that_ends_without_a_tool_call_is_asked_again_and_only_one_that_declines_is_refused() {
     use std::io::Write as _;
     use std::os::unix::fs::PermissionsExt;
 
@@ -7433,7 +7433,8 @@ fn a_turn_that_ends_without_a_tool_call_is_asked_again_and_one_that_declines_is_
     });
     s.wait_for("the orchestrator to hear of it", || told("orchestrator").contains("decliner's model (Sonnet 5.5) refused its turn: it declined to do it. It answered: \"it goes against my guidelines\""));
 
-    // Asked again, words answers in words alone once more: taken as declined.
+    // Asked again, words answers in words alone once more: it had nothing
+    // to do. Not a refusal: it stays as it was, and nobody is told it refused.
     let typed = s.workspace.join(".crew/agents/words/typed");
     s.wait_for("the question again to be typed", || {
         std::fs::read_to_string(&typed)
@@ -7456,13 +7457,24 @@ fn a_turn_that_ends_without_a_tool_call_is_asked_again_and_one_that_declines_is_
         ],
     );
     hook("words", "stop", "{}");
-    let snap = s.wait("words to be set aside", |snap| {
-        find_agent(snap, "words").block_kind.as_deref() == Some("refused")
+    s.wait_for("words' turn to be taken as nothing to do", || {
+        s.has_event("agent.idle_turn")
     });
-    assert_eq!(find_agent(&snap, "words").status, AgentStatus::Blocked);
-    s.wait_for("lead to hear of words", || {
-        told("lead").contains("words cannot act on your message")
-    });
+    let words = find_agent(&s.snapshot(), "words").clone();
+    assert!(
+        words.status != AgentStatus::Blocked && words.block_kind.is_none(),
+        "{words:?}"
+    );
+    assert!(
+        !told("lead").contains("words cannot act"),
+        "{}",
+        told("lead")
+    );
+    assert!(
+        !told("orchestrator").contains("words'"),
+        "{}",
+        told("orchestrator")
+    );
     // The one that answered with a tool was left alone.
     let tools = find_agent(&s.snapshot(), "tools").clone();
     assert!(

@@ -19,22 +19,24 @@
 //! still good.
 
 pub(crate) mod assets;
+pub(crate) mod control;
+pub(crate) mod daemons;
 pub(crate) mod http;
-mod ws;
+pub(crate) mod hub;
+pub(crate) mod page;
+pub mod process;
+pub(crate) mod ws;
 
 use std::collections::{HashMap, VecDeque};
 use std::io;
 use std::net::{Ipv4Addr, Ipv6Addr, SocketAddr};
-use std::sync::{Arc, Mutex, MutexGuard};
+use std::sync::{Arc, Mutex, MutexGuard, OnceLock};
 
-use crew_core::rpc::{RpcError, WebInfo, WebPaired};
+use crew_core::rpc::{RpcError, WebPaired};
 use crew_core::util::{ct_eq, new_token, now_ms};
 use sha2::{Digest, Sha256};
 use tokio::sync::{watch, Notify};
 use tokio::task::JoinHandle;
-
-use crate::daemon::Daemon;
-use crate::persistence::NewEvent;
 
 /// How long a pairing code works.
 pub(crate) const CODE_TTL_MS: i64 = 120_000;
@@ -45,8 +47,9 @@ pub(crate) const MAX_SESSIONS: usize = 16;
 /// Connections not authenticated yet (a head being read, a WebSocket before
 /// `hello`); more are closed at accept.
 pub(crate) const MAX_UNAUTHENTICATED: usize = 32;
-/// Authenticated WebSockets.
-pub(crate) const MAX_AUTHENTICATED: usize = 32;
+/// Authenticated WebSockets (a page has an index connection, a workspace
+/// connection and a terminal's).
+pub(crate) const MAX_AUTHENTICATED: usize = 64;
 /// Ports tried from the workspace's own.
 const PORTS_TRIED: u16 = 16;
 /// The largest `web_prefs` object.
@@ -336,6 +339,30 @@ fn in_use(e: &io::Error) -> bool {
 pub(crate) type StopHook =
     tokio::sync::mpsc::UnboundedSender<(u8, tokio::sync::oneshot::Sender<()>)>;
 
+/// What a web server tells whoever runs it, for its log.
+pub(crate) enum News {
+    /// Serving at this address.
+    Started(String),
+    /// Stopped; by itself, for this reason.
+    Stopped(Option<String>),
+    /// A browser was paired; this many sessions now.
+    Paired(usize),
+    /// This many refused logins (at most one report a minute).
+    AuthFailed(u32),
+}
+
+/// Whoever runs a web server: where its ports start, where its news goes,
+/// and what serves a connection it accepted.
+pub(crate) trait Host: Send + Sync {
+    fn first_port(&self) -> u16;
+    fn news(&self, news: News);
+    fn serve(
+        &self,
+        stream: tokio::net::TcpStream,
+        admitted: Admitted,
+    ) -> std::pin::Pin<Box<dyn std::future::Future<Output = ()> + Send>>;
+}
+
 /// The running listeners.
 struct Server {
     serving: Serving,
@@ -344,9 +371,11 @@ struct Server {
     v6: Option<JoinHandle<()>>,
 }
 
-/// The web server's state in the daemon.
+/// A web server: its listeners, its codes and sessions, its connections.
 pub(crate) struct Web {
     registry: Mutex<Registry>,
+    /// Who runs it; set once, before it serves.
+    host: OnceLock<Arc<dyn Host>>,
     /// Starting and stopping, one at a time.
     lifecycle: tokio::sync::Mutex<Option<Server>>,
     /// A connection ended.
@@ -364,6 +393,7 @@ impl Default for Web {
     fn default() -> Self {
         Self {
             registry: Mutex::new(Registry::default()),
+            host: OnceLock::new(),
             lifecycle: tokio::sync::Mutex::new(None),
             gone: Notify::new(),
             bind: Mutex::new(Arc::new(bind_listener)),
@@ -381,15 +411,14 @@ impl Default for Web {
 /// holds is dropped before its lease (see [`spawn_held`]), so by then no
 /// frame of it can be written any more.
 pub(crate) struct Lease {
-    daemon: Daemon,
+    web: Arc<Web>,
     pub(crate) id: u64,
 }
 
 impl Drop for Lease {
     fn drop(&mut self) {
-        let web = &self.daemon.web;
-        web.registry().release(self.id);
-        web.gone.notify_waiters();
+        self.web.registry().release(self.id);
+        self.web.gone.notify_waiters();
     }
 }
 
@@ -432,6 +461,17 @@ pub(crate) struct Admitted {
 }
 
 impl Web {
+    /// Who runs this server. Set once; a later call changes nothing.
+    pub(crate) fn set_host(&self, host: Arc<dyn Host>) {
+        let _ = self.host.set(host);
+    }
+
+    fn news(&self, news: News) {
+        if let Some(host) = self.host.get() {
+            host.news(news);
+        }
+    }
+
     /// Bind with `bind` from now on.
     #[cfg(test)]
     pub(crate) fn set_binder(&self, bind: Binder) {
@@ -455,6 +495,7 @@ impl Web {
     }
 
     /// The dashboard's address while it is served, else empty.
+    #[cfg(test)]
     pub(crate) fn url(&self) -> String {
         self.registry()
             .serving
@@ -469,11 +510,11 @@ impl Web {
 
     /// Accept a connection, unless the server is closing or too many are
     /// not authenticated yet.
-    fn admit(&self, daemon: &Daemon) -> Option<Admitted> {
+    fn admit(self: &Arc<Self>) -> Option<Admitted> {
         let (id, close) = self.registry().admit()?;
         Some(Admitted {
             lease: Arc::new(Lease {
-                daemon: daemon.clone(),
+                web: self.clone(),
                 id,
             }),
             close,
@@ -487,7 +528,7 @@ impl Web {
     }
 
     /// `web_pair` on a web connection.
-    pub(crate) fn pair(&self, daemon: &Daemon, code: &str) -> Result<WebPaired, RpcError> {
+    pub(crate) fn pair(&self, code: &str) -> Result<WebPaired, RpcError> {
         let now = self.now();
         let (result, report, sessions) = {
             let mut registry = self.registry();
@@ -499,29 +540,17 @@ impl Web {
             (result, report, registry.sessions())
         };
         if let Some(n) = report {
-            report_failures(daemon, n);
+            self.news(News::AuthFailed(n));
         }
         if result.is_ok() {
-            daemon.emit(NewEvent::new(
-                "web",
-                "web.paired",
-                format!(
-                    "a browser was paired ({sessions} session{})",
-                    if sessions == 1 { "" } else { "s" }
-                ),
-            ));
+            self.news(News::Paired(sessions));
         }
         result
     }
 
     /// `hello` with `token` on web connection `conn`: the session and its
     /// secret.
-    pub(crate) fn hello(
-        &self,
-        daemon: &Daemon,
-        conn: u64,
-        token: Option<&str>,
-    ) -> Result<(u64, String), RpcError> {
+    pub(crate) fn hello(&self, conn: u64, token: Option<&str>) -> Result<(u64, String), RpcError> {
         let now = self.now();
         let (result, report) = {
             let mut registry = self.registry();
@@ -533,26 +562,51 @@ impl Web {
             (result, report)
         };
         if let Some(n) = report {
-            report_failures(daemon, n);
+            self.news(News::AuthFailed(n));
         }
         result
     }
 
     /// A `hello` refused before the token was looked at (role, protocol).
-    pub(crate) fn refused(&self, daemon: &Daemon) {
+    pub(crate) fn refused(&self) {
         let now = self.now();
         let report = self.registry().failed(now);
         if let Some(n) = report {
-            report_failures(daemon, n);
+            self.news(News::AuthFailed(n));
         }
     }
 
     /// Serve, if not served yet, and make a pairing code.
+    #[cfg(test)]
     pub(crate) async fn open(
-        &self,
-        daemon: &Daemon,
+        self: &Arc<Self>,
         port: Option<u16>,
-    ) -> Result<WebInfo, RpcError> {
+    ) -> Result<crew_core::rpc::WebInfo, RpcError> {
+        let (serving, started) = self.listen(port).await?;
+        let code = self.code();
+        Ok(crew_core::rpc::WebInfo {
+            url: serving.url(),
+            port: serving.port,
+            pair_url: format!("{}#pair={code}", serving.url()),
+            expires_in_secs: (CODE_TTL_MS / 1000) as u32,
+            started,
+            workspace: None,
+            workspace_url: None,
+            joined: Vec::new(),
+        })
+    }
+
+    /// A new pairing code.
+    pub(crate) fn code(&self) -> String {
+        let now = self.now();
+        self.registry().code(now)
+    }
+
+    /// Serve, if not served yet: where, and whether this call started it.
+    pub(crate) async fn listen(
+        self: &Arc<Self>,
+        port: Option<u16>,
+    ) -> Result<(Serving, bool), RpcError> {
         // Port 0 would give each address another port the system picks, and
         // a name with neither in it.
         if port == Some(0) {
@@ -571,32 +625,42 @@ use another",
                 )));
             }
         } else {
-            let server = self.start(daemon, port)?;
+            let server = self.start(port)?;
             *lifecycle = Some(server);
         }
         let serving = lifecycle.as_ref().expect("served").serving.clone();
-        let code = self.registry().code(self.now());
         drop(lifecycle);
         if started {
-            daemon.emit(NewEvent::new(
-                "web",
-                "web.started",
-                format!("web dashboard on {}", serving.url()),
-            ));
-            daemon.save_session();
+            self.news(News::Started(serving.url()));
         }
-        Ok(WebInfo {
-            url: serving.url(),
-            port: serving.port,
-            pair_url: format!("{}#pair={code}", serving.url()),
-            expires_in_secs: (CODE_TTL_MS / 1000) as u32,
-            started,
-        })
+        Ok((serving, started))
+    }
+
+    /// End the connections `ids` now: each one's task is aborted and
+    /// awaited, so whatever it owned has been dropped when this returns.
+    pub(crate) async fn cancel(&self, ids: &[u64]) {
+        let tasks: Vec<JoinHandle<()>> = {
+            let mut registry = self.registry();
+            ids.iter()
+                .filter_map(|id| registry.conns.get_mut(id).and_then(|c| c.task.take()))
+                .collect()
+        };
+        for task in &tasks {
+            task.abort();
+        }
+        for task in tasks {
+            let _ = task.await;
+        }
     }
 
     /// Bind both loopback addresses on one port, then make the name.
-    fn start(&self, daemon: &Daemon, port: Option<u16>) -> Result<Server, RpcError> {
-        let first = port.unwrap_or_else(|| crew_core::paths::web_port(&daemon.state_dir));
+    fn start(self: &Arc<Self>, port: Option<u16>) -> Result<Server, RpcError> {
+        let first = port.unwrap_or_else(|| {
+            self.host
+                .get()
+                .map(|host| host.first_port())
+                .unwrap_or(23000)
+        });
         let tries = if port.is_some() { 1 } else { PORTS_TRIED };
         let mut bound = None;
         for p in (0..tries).filter_map(|i| first.checked_add(i)) {
@@ -649,9 +713,9 @@ use another",
             registry.stopping = false;
             registry.closing = false;
         }
-        let v4 = spawn_accept(daemon, v4).map_err(|e| RpcError::internal(e.to_string()))?;
+        let v4 = spawn_accept(self, v4).map_err(|e| RpcError::internal(e.to_string()))?;
         let v6 = v6
-            .map(|v6| spawn_accept(daemon, v6))
+            .map(|v6| spawn_accept(self, v6))
             .transpose()
             .map_err(|e| RpcError::internal(e.to_string()))?;
         Ok(Server { serving, v4, v6 })
@@ -660,7 +724,7 @@ use another",
     /// Stop serving: every code, token and secret goes, then every
     /// connection, then the listeners. `why`: the server stopped itself.
     /// False when nothing was served.
-    pub(crate) async fn stop(&self, daemon: &Daemon, why: Option<String>) -> bool {
+    pub(crate) async fn stop(&self, why: Option<String>) -> bool {
         let mut lifecycle = self.lifecycle.lock().await;
         let Some(server) = lifecycle.take() else {
             return false;
@@ -721,17 +785,7 @@ use another",
         }
         drop(lifecycle);
         self.step(3).await;
-        let event = match why {
-            Some(why) => NewEvent::new(
-                "web",
-                "web.stopped",
-                format!("web dashboard stopped: {why}"),
-            )
-            .warn(),
-            None => NewEvent::new("web", "web.stopped", "web dashboard stopped"),
-        };
-        daemon.emit(event);
-        daemon.save_session();
+        self.news(News::Stopped(why));
         true
     }
 
@@ -769,7 +823,7 @@ use another",
 
     /// The housekeeping tick: a server on `127.0.0.1` alone tries `[::1]`
     /// again; if someone else holds it, the server stops itself.
-    pub(crate) async fn tick(&self, daemon: &Daemon) {
+    pub(crate) async fn tick(self: &Arc<Self>) {
         let taken = {
             let mut lifecycle = self.lifecycle.lock().await;
             let Some(server) = lifecycle.as_mut() else {
@@ -781,7 +835,7 @@ use another",
             let port = server.serving.port;
             match self.bind(SocketAddr::from((Ipv6Addr::LOCALHOST, port))) {
                 Ok(v6) => {
-                    match spawn_accept(daemon, v6) {
+                    match spawn_accept(self, v6) {
                         Ok(task) => server.v6 = Some(task),
                         Err(e) => tracing::warn!("serving [::1]:{port}: {e}"),
                     }
@@ -792,33 +846,16 @@ use another",
             }
         };
         if let Some(port) = taken {
-            self.stop(
-                daemon,
-                Some(format!("[::1]:{port} was taken by another process")),
-            )
-            .await;
+            self.stop(Some(format!("[::1]:{port} was taken by another process")))
+                .await;
         }
     }
 }
 
-fn report_failures(daemon: &Daemon, n: u32) {
-    daemon.emit(
-        NewEvent::new(
-            "web",
-            "web.auth_failed",
-            format!(
-                "{n} refused web login{} in the last minute",
-                if n == 1 { "" } else { "s" }
-            ),
-        )
-        .warn(),
-    );
-}
-
 /// Accept connections on `listener` until aborted.
-fn spawn_accept(daemon: &Daemon, listener: std::net::TcpListener) -> io::Result<JoinHandle<()>> {
+fn spawn_accept(web: &Arc<Web>, listener: std::net::TcpListener) -> io::Result<JoinHandle<()>> {
     let listener = tokio::net::TcpListener::from_std(listener)?;
-    let daemon = daemon.clone();
+    let web = web.clone();
     Ok(tokio::spawn(async move {
         loop {
             let stream = match listener.accept().await {
@@ -830,12 +867,15 @@ fn spawn_accept(daemon: &Daemon, listener: std::net::TcpListener) -> io::Result<
                 }
             };
             let _ = stream.set_nodelay(true);
-            let Some(admitted) = daemon.web.admit(&daemon) else {
+            let Some(host) = web.host.get().cloned() else {
+                continue;
+            };
+            let Some(admitted) = web.admit() else {
                 continue;
             };
             let id = admitted.lease.id;
-            let task = tokio::spawn(ws::serve(daemon.clone(), stream, admitted));
-            daemon.web.track(id, task);
+            let task = tokio::spawn(host.serve(stream, admitted));
+            web.track(id, task);
         }
     }))
 }
