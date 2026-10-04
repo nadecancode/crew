@@ -826,6 +826,37 @@ async fn a_removal_lets_go_of_the_watch_before_it_answers() {
 }
 
 #[tokio::test(start_paused = true)]
+async fn reviewer_removal_drains_a_watch_still_waiting_for_hello() {
+    let fake = Fake::new();
+    let a = fake.start("a", 100);
+    a.answer(Answer::After(Duration::from_millis(500)));
+    let hub = hub(&fake, false);
+    let joining = tokio::spawn({
+        let hub = hub.clone();
+        async move { hub.join(Join::One(dir("a"))).await }
+    });
+    settle().await;
+    let watch = fake.conns(100, false)[0];
+    assert!(fake.let_go(watch).is_none());
+    remove(&hub, &id("a")).await.unwrap();
+    let answered = Instant::now();
+    let closed_at_answer = fake.let_go(watch).is_some_and(|at| at <= answered);
+    tokio::time::advance(Duration::from_millis(600)).await;
+    settle().await;
+    let _ = joining.await.unwrap();
+    let after_answer: Vec<_> = fake
+        .lines(100)
+        .into_iter()
+        .filter(|(conn, _, at)| *conn == watch && *at > answered)
+        .map(|(_, line, _)| line["method"].clone())
+        .collect();
+    assert!(
+        closed_at_answer && after_answer.is_empty(),
+        "removal answered before the watch dial ended; later requests: {after_answer:?}"
+    );
+}
+
+#[tokio::test(start_paused = true)]
 async fn a_pending_open_is_revoked_at_once_and_the_removal_waits_for_it() {
     let fake = Fake::new();
     fake.start("a", 100);

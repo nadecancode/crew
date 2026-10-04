@@ -561,7 +561,9 @@ impl Hub {
                             w.task.abort();
                         }
                         match self.daemons.check(&info) {
-                            Ok(()) => Some((info, m.generation, m.gauge.hold(), m.revoked.subscribe())),
+                            Ok(()) => {
+                                Some((info, m.generation, m.gauge.hold(), m.revoked.subscribe()))
+                            }
                             Err(why) => {
                                 m.stop_retry();
                                 changed |= m.set(WorkspaceState::Unreachable, why);

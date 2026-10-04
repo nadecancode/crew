@@ -226,7 +226,10 @@ mod tests {
         )
         .await;
         assert!(cancelled.is_err());
-        daemon.write_all(b"\"result\":{\"pong\":true}}\n").await.unwrap();
+        daemon
+            .write_all(b"\"result\":{\"pong\":true}}\n")
+            .await
+            .unwrap();
         assert!(read_line(&mut lines, &mut buf, 1024).await.is_some());
         assert_eq!(buf, br#"{"id":7,"result":{"pong":true}}"#);
         buf.clear();
@@ -240,5 +243,32 @@ mod tests {
         daemon.write_all(&[b'x'; 20]).await.unwrap();
         daemon.write_all(b"\n").await.unwrap();
         assert!(read_line(&mut lines, &mut buf, 30).await.is_none());
+    }
+}
+#[cfg(test)]
+mod reviewer_tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn reviewer_a_daemon_frame_survives_an_interrupted_read() {
+        let (reader, mut writer) = tokio::io::duplex(128);
+        let mut lines: Lines = BufReader::new(Box::pin(reader));
+        let mut buf = Vec::new();
+        writer.write_all(b"{\"id\":7,").await.unwrap();
+        // page::Conn::committed and hub::watching cancel this future when
+        // another branch of their select! is ready, then call it again.
+        assert!(tokio::time::timeout(
+            Duration::from_millis(10),
+            read_line(&mut lines, &mut buf, 1024)
+        )
+        .await
+        .is_err());
+        assert_eq!(buf, b"{\"id\":7,");
+        writer
+            .write_all(b"\"result\":{\"pong\":true}}\n")
+            .await
+            .unwrap();
+        read_line(&mut lines, &mut buf, 1024).await.unwrap();
+        assert_eq!(buf, b"{\"id\":7,\"result\":{\"pong\":true}}");
     }
 }
