@@ -79,7 +79,20 @@ ul, ol { margin: 0; padding-left: 18px; }
   white-space: nowrap; min-height: 34px;
 }
 .status-bar .brand { font-weight: 600; }
-.status-bar .project { font-weight: 600; }
+.switcher { position: relative; display: flex; align-items: center; gap: 6px; }
+.switcher .project { font-weight: 600; border-color: transparent; background: none; padding: 1px 6px; }
+.badge { font: 11px var(--mono); padding: 0 5px; border: 1px solid; border-radius: 8px; }
+.badge.q { color: var(--orch); } .badge.att { color: var(--err); }
+.switcher-pop { position: absolute; top: calc(100% + 6px); left: 0; z-index: 40; min-width: 560px; max-width: calc(100vw - 24px); background: var(--panel); border: 1px solid var(--line); border-radius: 6px; padding: 4px; box-shadow: 0 6px 24px #0008; }
+.switcher-list:focus-visible { outline: none; }
+.switcher-row { display: grid; grid-template-columns: 14px minmax(70px, auto) minmax(90px, 1fr) auto auto auto 16px; gap: 10px; align-items: center; padding: 3px 8px; border-radius: 4px; cursor: pointer; white-space: nowrap; }
+.switcher-row.other { cursor: default; grid-template-columns: 14px minmax(70px, auto) minmax(90px, 1fr) auto auto; }
+.switcher-row.active { background: var(--node-hi); outline: 1px solid var(--dim); }
+.switcher-row[aria-current] .ws-name { color: var(--orch); }
+.switcher-row.dimmed { color: var(--muted); }
+.ws-running { color: var(--ok); } .ws-incompatible { color: var(--warn); }
+.ws-dir, .switcher-sep, .switcher-filter, .switcher-none { color: var(--muted); font-size: 12px; }
+.switcher-sep, .switcher-filter, .switcher-none { padding: 3px 8px; }
 .status-bar .objective { color: var(--muted); overflow: hidden; text-overflow: ellipsis; min-width: 40px; flex-shrink: 1; }
 .status-bar .views { display: flex; gap: 2px; }
 .status-bar .conn { font-family: var(--mono); font-size: 12px; }
@@ -150,6 +163,8 @@ pre.body { background: var(--bg-term); border: 1px solid var(--line); border-rad
 .toasts { position: fixed; right: 14px; bottom: 70px; display: flex; flex-direction: column; gap: 6px; z-index: 30; max-width: 460px; }
 .toast { display: flex; gap: 10px; align-items: flex-start; background: #2c1818; border: 1px solid #6a3434; border-radius: 6px; padding: 6px 10px; }
 .toast button { border: none; background: none; padding: 0 4px; }
+.toast:not(.err) { background: var(--panel); border-color: var(--line); }
+.toast .act { border: 1px solid var(--orch); color: var(--orch); padding: 0 8px; }
 
 /* Entry screen */
 .entry { display: grid; place-items: center; height: 100%; }

@@ -1,6 +1,7 @@
 // The agent graph (notes/web-design.md §graphs, §tests "graph.spec.ts").
 import type { Page } from "@playwright/test";
 import { expect, test } from "./fixtures.ts";
+import { WORKSPACE_IDS } from "../dev/mock.ts";
 
 test.use({ mockOptions: { fixture: "team10" }, viewport: { width: 1500, height: 900 } });
 
@@ -86,7 +87,7 @@ test("hover shows the card; a click selects and opens the inspector", async ({ p
   await page.locator('[data-agent="claude-2"] .node-head').click();
   await expect(page.locator('[data-inspector="claude-2"]')).toBeVisible();
   await expect(page.locator('[data-agent="claude-2"]')).toHaveClass(/selected/);
-  expect(new URL(page.url()).hash).toBe("#/?agent=claude-2");
+  expect(new URL(page.url()).hash).toBe(`#/w/${WORKSPACE_IDS[0]}/?agent=claude-2`);
 });
 
 test("without an orchestrator agent the empty hub is not a tab stop: tab enters the graph once, on a member", async ({ page, mock, openPage }) => {
@@ -141,7 +142,7 @@ test("the task title on a node opens its card; the graph stays", async ({ page, 
   await openPage();
   await page.locator('[data-agent="claude-1"] [data-task-link]').click();
   await expect(page.locator("#side-panel")).toContainText("task billing");
-  expect(new URL(page.url()).hash).toBe("#/?task=billing");
+  expect(new URL(page.url()).hash).toBe(`#/w/${WORKSPACE_IDS[0]}/?task=billing`);
   await expect(page.locator(".agent-graph")).toBeVisible();
 });
 

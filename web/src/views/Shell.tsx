@@ -1,14 +1,17 @@
 // The page (notes/web-design.md §ui "Layout"):
 //
-//   status bar · usage strip · question banner
+//   status bar (with the workspace switcher) · usage strip · question banner
 //   main area (graph, tasks, logs, usage) | side panel
 //   message box · footer
 //
 // A page that is reconnecting or stopped is read-only: what it last knew,
 // dimmed, every control disabled, and a bar that says which and what to do.
+// So is a workspace that is not live while the page is (notes/web-multi.md
+// §multi-ui "Not running, incompatible"): what it last showed, dimmed, under
+// a bar that says why.
 
-import { For, Match, Show, Switch, createEffect, createMemo, createSignal, onCleanup, onMount, type JSX } from "solid-js";
-import { useApp } from "../app";
+import { For, Match, Show, Switch, createEffect, createMemo, createSignal, on, onCleanup, onMount, type JSX } from "solid-js";
+import { AppContext, useApp, workspaceName, type Page } from "../app";
 import { useSecond } from "../clock";
 import { clockTime, fmtElapsed, runtimeGlyph } from "../format";
 import { AgentGraph } from "../graph/AgentGraph";
@@ -24,6 +27,21 @@ import { SidePanel } from "./SidePanel";
 import { UsageView } from "./UsageView";
 import { levelTone, pausedText, until, usageRows, windowLabel, STALE_MS } from "./usage";
 import { OpsContext, useOps } from "./ops";
+import { SwitcherButton, homeDir } from "./Switcher";
+
+/** The workspace on screen, made anew at each switch: nothing of the one
+ * left is drawn under the name of the next. */
+export function Root(props: { page: Page }) {
+  return (
+    <Show when={props.page.app()} keyed>
+      {(app) => (
+        <AppContext.Provider value={app}>
+          <Shell />
+        </AppContext.Provider>
+      )}
+    </Show>
+  );
+}
 
 export function Shell() {
   const app = useApp();
@@ -32,7 +50,7 @@ export function Shell() {
 
   onMount(() => {
     const onKey = (e: KeyboardEvent) => handleKey(app, ops, e);
-    const onHash = () => ui.fromLocation();
+    const onHash = () => app.page.fromLocation();
     document.addEventListener("keydown", onKey);
     window.addEventListener("hashchange", onHash);
     onCleanup(() => {
@@ -41,12 +59,18 @@ export function Shell() {
     });
   });
 
-  // The page title carries the count of open questions: `(1) crew · demo`.
+  // The page title: `<project> · crew`, with the questions waiting in any
+  // joined workspace in front: `(3) payments · crew`.
   createEffect(() => {
-    const n = app.store.openQuestions().length;
-    const project = app.store.state.session?.project;
-    document.title = `${n > 0 ? `(${n}) ` : ""}crew${project ? ` · ${project}` : ""}`;
+    const here = app.store.state.loaded ? app.store.openQuestions().length : app.page.hub.entry(app.link.id)?.summary?.questions ?? 0;
+    const n = here + app.page.others().reduce((k, e) => k + (e.summary?.questions ?? 0), 0);
+    const entry = app.page.hub.entry(app.link.id);
+    const project = app.store.state.session?.project ?? (entry ? workspaceName(entry) : null);
+    document.title = `${n > 0 ? `(${n}) ` : ""}${project ? `${project} · ` : ""}crew`;
   });
+
+  // A dialog does not outlive the workspace it was opened for.
+  createEffect(on(link.shown, (s) => s === "removed" && ui.closeDialog()));
 
   // A question opens its dialog by itself once nothing else holds the
   // keyboard (a dialog, a focused text field, the terminal), as
@@ -77,16 +101,18 @@ export function Shell() {
 
   return (
     <OpsContext.Provider value={ops}>
-      <div class="page" classList={{ readonly: readOnly(), loaded: app.store.state.loaded }} data-conn-state={state()}>
-        <Show when={app.store.state.loaded || link.live()} fallback={<Entry />}>
+      <div class="page" classList={{ readonly: readOnly(), loaded: app.store.state.loaded }} data-conn-state={state()} data-workspace-state={link.shown()}>
+        <Show when={app.store.state.loaded || link.conn() === "live"} fallback={<Entry />}>
           <StatusBar />
           <Warnings />
           <ConnBar />
+          <WorkspaceBar />
           <UsageStrip />
           <QuestionBanner />
           <div class="page-body" classList={{ full: ui.panelFull() }}>
             <main id="main" class="main" data-region="main" aria-label="main area">
               <Switch>
+                <Match when={!app.store.state.loaded}><Empty><WorkspaceText /></Empty></Match>
                 <Match when={ui.view() === "graph"}><AgentGraph /></Match>
                 <Match when={ui.view() === "tasks"}><TaskDag /></Match>
                 <Match when={ui.view() === "logs"}><Logs /></Match>
@@ -137,12 +163,49 @@ function StopText() {
   const at = () => (link.stoppedAt() ? clockTime(link.stoppedAt()!) : "");
   return (
     <Switch>
-      <Match when={link.stopReason() === "shutdown"}><p>The team was stopped at {at()}. Run <code>crew web</code> for the new address. This tab cannot come back; reloading it asks whoever holds the port now.</p></Match>
+      <Match when={link.stopReason() === "shutdown"}><p>The dashboard's server was stopped at {at()}. Run <code>crew web</code> for the new address. This tab cannot come back; reloading it asks whoever holds the port now.</p></Match>
       <Match when={link.stopReason() === "proof"}><p>The dashboard was stopped at {at()}: whoever answers at this address could not prove it is this dashboard's server. Run <code>crew web</code> for the new address. This tab cannot come back; reloading it asks whoever holds the port now.</p></Match>
-      <Match when={link.stopReason() === "protocol"}><p>This dashboard and the daemon speak different protocol versions ({link.stopDetail()}). Restart the team after upgrading crew, then run <code>crew web</code>.</p></Match>
+      <Match when={link.stopReason() === "protocol"}><p>This page and the dashboard's server speak different protocol versions ({link.stopDetail()}). Run <code>crew web</code> after upgrading crew.</p></Match>
       <Match when={link.stopReason() === "unauthorized" || link.stopReason() === "no-session"}><p>Signed out: run <code>crew web</code>.</p></Match>
       <Match when={true}><p>The dashboard was stopped at {at()}. Run <code>crew web</code> for the new address. This tab cannot come back; reloading it asks whoever holds the port now.</p></Match>
     </Switch>
+  );
+}
+
+/** What the workspace on screen is, when it is not live and the page is. */
+function WorkspaceText() {
+  const { link, page, store } = useApp();
+  const entry = () => page.hub.entry(link.id);
+  const name = () => (entry() ? workspaceName(entry()!) : store.state.session?.project ?? link.id ?? "");
+  const dir = () => homeDir(entry()?.workspace ?? "");
+  return (
+    <Switch>
+      <Match when={link.shown() === "not-running"}>
+        <p><b>{name()}</b> is not running. Start it (<code>crew run</code> in {dir()}) and it comes back here.</p>
+        <Show when={entry()?.state === "unreachable" && link.detail()}><p class="muted">{link.detail()}</p></Show>
+      </Match>
+      <Match when={link.shown() === "incompatible"}>
+        <p><b>{name()}</b> was started by another version of crew. Restart the team to see it here.</p>
+        <Show when={link.detail()}><p class="muted">{link.detail()}</p></Show>
+      </Match>
+      <Match when={link.shown() === "removed" && link.seen()}><p><b>{name()}</b> was taken out of this dashboard. Pick another workspace (<kbd>w</kbd>), or run <code>crew web</code> in it to bring it back.</p></Match>
+      <Match when={link.shown() === "removed"}><p>That workspace is not in this dashboard: run <code>crew web</code> in it. The others are in the switcher (<kbd>w</kbd>).</p></Match>
+      <Match when={link.shown() === "none"}><p>No workspace is shown here. Run <code>crew web</code> in a workspace.</p></Match>
+      <Match when={link.shown() === "reconnecting"}><p>reconnecting to <b>{name()}</b>… what you see is what it last showed; nothing can be sent until it answers.</p></Match>
+      <Match when={true}><p>connecting to <b>{name()}</b>…</p></Match>
+    </Switch>
+  );
+}
+
+/** The workspace on screen is not live, the page is: why, over what it last showed. */
+function WorkspaceBar() {
+  const { link, store } = useApp();
+  return (
+    <Show when={store.state.loaded && link.conn() === "live" && link.shown() !== "live" && link.shown() !== "connecting"}>
+      <div class="conn-bar ws-bar" classList={{ stopped: link.shown() !== "reconnecting" }} role="status" data-workspace-bar={link.shown()}>
+        <WorkspaceText />
+      </div>
+    </Show>
   );
 }
 
@@ -180,7 +243,7 @@ function StatusBar() {
   return (
     <header class="status-bar" data-region="status">
       <span class="brand"><span class="orch">◆</span> crew</span>
-      <span class="project" title={s()?.workspace}>{s()?.project ?? "no team loaded"}</span>
+      <SwitcherButton />
       <Show when={s()?.objective}><span class="objective" title={s()!.objective}>{s()!.objective}</span></Show>
       <span class="spacer" />
       <Show when={elapsed()}><span class="muted" title="how long the team has been running">{elapsed()}</span></Show>
@@ -311,8 +374,11 @@ function Toasts() {
     <div class="toasts" aria-live="assertive">
       <For each={ui.notices()}>
         {(n) => (
-          <div class="toast err" role="alert">
+          <div class="toast" classList={{ err: !n.action }} role="alert">
             <span>{n.text}</span>
+            <Show when={n.action}>
+              <button class="act" onClick={() => (ui.dismissNotice(n.id), n.action!.run())}>{n.action!.label}</button>
+            </Show>
             <button aria-label="dismiss" onClick={() => ui.dismissNotice(n.id)}>×</button>
           </div>
         )}

@@ -71,6 +71,7 @@ export const test = base.extend<Fixtures>({
     await use(async (target = page) => {
       await target.goto(mock.pairUrl());
       await target.locator('[data-conn="live"]').waitFor({ state: "attached" });
+      await target.locator('[data-workspace-state="live"]').waitFor({ state: "attached" });
       return target;
     });
   },

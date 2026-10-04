@@ -1,6 +1,8 @@
 // Routes live in the fragment and are parsed by hand (notes/web-design.md
-// §ui): `#/`, `#/tasks`, `#/logs`, `#/usage`, and one selection after the
-// route: `?agent=<id>`, `?task=<id>`, `?message=<id>`, `?event=<seq>`.
+// §ui, notes/web-multi.md §multi-ui "Addresses"): `#/w/<id>/`,
+// `#/w/<id>/tasks`, `#/w/<id>/logs`, `#/w/<id>/usage`, and one selection after
+// the route: `?agent=<id>`, `?task=<id>`, `?message=<id>`, `?event=<seq>`. A
+// route without `/w/<id>` is rewritten to the chosen workspace's.
 // `#pair=<code>` is not a route: it is taken out before the router starts.
 
 export type View = "graph" | "tasks" | "logs" | "usage";
@@ -12,13 +14,25 @@ export type Selection =
   | { kind: "event"; seq: number }
   | null;
 
-export type Route = { view: View; sel: Selection };
+/** `workspace`: the id in the address, or null when it names none. */
+export type Route = { workspace: string | null; view: View; sel: Selection };
+
+/** A workspace's id: the 16 hex digits that name its daemon's socket. */
+export const WORKSPACE_ID = /^[0-9a-f]{16}$/;
 
 const PATHS: Record<View, string> = { graph: "/", tasks: "/tasks", logs: "/logs", usage: "/usage" };
 
 export function parseRoute(hash: string): Route {
   const raw = hash.startsWith("#") ? hash.slice(1) : hash;
-  const [path, query = ""] = raw.split("?", 2);
+  let [path, query = ""] = raw.split("?", 2);
+  let workspace: string | null = null;
+  const w = /^\/w\/([^/]*)(\/.*)?$/.exec(path);
+  if (w) {
+    // Kept as written, so that the page can say it is not joined; it is only
+    // ever sent once a listing names it.
+    workspace = w[1].slice(0, 64) || null;
+    path = w[2] ?? "/";
+  }
   const view = (Object.keys(PATHS) as View[]).find((v) => PATHS[v] === (path || "/")) ?? "graph";
   const q = new URLSearchParams(query);
   let sel: Selection = null;
@@ -27,11 +41,11 @@ export function parseRoute(hash: string): Route {
   else if (task) sel = { kind: "task", id: task };
   else if (message) sel = { kind: "message", id: message };
   else if (event && /^\d+$/.test(event)) sel = { kind: "event", seq: Number(event) };
-  return { view, sel };
+  return { workspace, view, sel };
 }
 
 export function formatRoute(route: Route): string {
-  const path = PATHS[route.view];
+  const path = route.workspace === null ? PATHS[route.view] : `/w/${encodeURIComponent(route.workspace)}${PATHS[route.view]}`;
   const s = route.sel;
   if (!s) return `#${path}`;
   const q = s.kind === "event" ? `event=${s.seq}` : `${s.kind}=${encodeURIComponent(s.id)}`;

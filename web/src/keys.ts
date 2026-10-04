@@ -115,6 +115,10 @@ export const KEYS: KeyDef[] = [
     },
   },
   { keys: "v", action: "the usage view", tui: "new", scope: "page", match: ["v"], run: (_a, ops) => ops.toggleView("usage") },
+  {
+    keys: "w", action: "switch workspace: arrows, enter; typing filters; 1–9 directly", tui: "new", scope: "page", match: ["w"],
+    run: (app) => app.page.setSwitcher(true),
+  },
   { keys: "q", action: "nothing: closing the tab leaves the team running", tui: "quits the TUI", scope: "page" },
 ];
 
@@ -159,7 +163,7 @@ export function handleKey(app: App, ops: Operations, e: KeyboardEvent): void {
   const readOnly = !app.link.live();
   const def = KEYS.find((k) => k.match?.includes(e.key));
   if (!def?.run) return;
-  if (readOnly && !["t", "l", "v", "?", "+", "=", "-", "0", "o", "Enter", "j", "k", "f", "d"].includes(e.key)) return;
+  if (readOnly && !["t", "l", "v", "w", "?", "+", "=", "-", "0", "o", "Enter", "j", "k", "f", "d"].includes(e.key)) return;
   e.preventDefault();
   def.run(app, ops, e.key);
 }

@@ -87,7 +87,7 @@ test("no policy violation and no request across every view, inspector tab and di
   await page.locator('#main [data-seq="4"]').dblclick();
   await expect(page.locator("#side-panel .event-panel")).toContainText("cherry_pick");
   await page.keyboard.press("v");
-  await expect(page).toHaveURL(/#\/usage/);
+  await expect(page).toHaveURL(/#\/w\/[0-9a-f]{16}\/usage/);
   mock.push(agentPush(mock, "claude-4", { limit: { kind: "usage", message: "limit", since: mock.now(), resets_at: mock.now() + 3_600_000, retry_at: null, attempts: 0 } }));
   await expect(page.locator(".usage-strip")).toBeVisible();
   await page.keyboard.press("v");

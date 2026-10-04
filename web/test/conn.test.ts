@@ -1,50 +1,19 @@
-// The connection (notes/web-design.md §tests "conn.test.ts"): hello, the
-// server's proof, subscribe, snapshot in that order; nothing is used before
-// the proof matched; every way of stopping removes the session and makes no
+// The connections (notes/web-design.md §tests "conn.test.ts", notes/web-multi.md
+// §multi-tests "Frontend"): on the index, hello and the server's proof, then
+// the listing; on a workspace connection, hello with its id, the proof,
+// subscribe, snapshot in that order; nothing is used before the proof
+// matched; every way of stopping the page removes the session and makes no
 // further attempt; reconnecting backs off; only `send` is replayed.
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import { CallError, Conn, backoff, timeoutFor, GIVE_UP_MS } from "../src/net/conn";
 import { Session, STORAGE_KEY } from "../src/net/session";
-import { createLink } from "../src/net/state";
-import { decodeSnapshot, type Snapshot } from "../src/protocol";
-import { FakeSocket, MemoryStorage, fakeEnv, flush, settle, sha256 } from "./fakes";
+import { createPage } from "../src/app";
+import { FakeSocket, fakeEnv, flush, settle, sha256 } from "./fakes";
 import { fixture } from "./fixtures";
+import { A, SECRET, entry, indexSocket, listing, newest, page, serveIndex, serveWorkspace, stored } from "./multi";
 
-const SECRET = "s3cret-of-the-server";
-const TOKEN = "t0ken";
-
-function stored(secret = SECRET) {
-  const st = new MemoryStorage();
-  st.setItem(STORAGE_KEY, JSON.stringify({ token: TOKEN, verifier: sha256(secret) }));
-  return st;
-}
-
-function harness(opts: { storage?: MemoryStorage; code?: string | null } = {}) {
-  const storage = opts.storage ?? stored();
-  const session = new Session(storage, opts.code ?? null);
-  const applied: { snapshots: Snapshot[]; pushes: string[] } = { snapshots: [], pushes: [] };
-  let shutdown = 0;
-  const link = createLink(fakeEnv(), session, {
-    snapshot: (s) => applied.snapshots.push(s),
-    push: (p) => (applied.pushes.push(p.kind === "agent" ? `agent:${p.data.activity}` : p.kind), true),
-    shutdown: () => shutdown++,
-    now: () => Date.now(),
-  });
-  return { link, session, storage, applied, shutdowns: () => shutdown };
-}
-
-const sock = () => FakeSocket.all[FakeSocket.all.length - 1];
-const snapshot = () => decodeSnapshot(fixture("snapshot.json"));
-
-/** Serve the handshake: hello with `proof`, subscribe, snapshot. */
-async function serve(s: FakeSocket, proof: string | null = SECRET) {
-  s.open();
-  await settle();
-  const hello = s.last("hello");
-  expect(hello.params).toMatchObject({ role: "operator", token: TOKEN, client: "web", protocol: 5 });
-  s.reply(hello.id, { role: "operator", protocol: 5, version: "x", pid: 1, ...(proof === null ? {} : { web_proof: proof }) });
-  await settle();
-}
+const sock = newest;
+const helloReply = (proof: string | null = SECRET) => ({ role: "operator", protocol: 6, version: "x", pid: 1, ...(proof === null ? {} : { web_proof: proof }) });
 
 beforeEach(() => {
   FakeSocket.all = [];
@@ -54,11 +23,25 @@ afterEach(() => {
 });
 
 describe("handshake", () => {
-  test("hello, proof, subscribe, snapshot, in that order", async () => {
-    const h = harness();
-    h.link.start();
+  test("index: hello, proof, then the listing and the operator's preferences; workspace: hello with its id, proof, subscribe, snapshot", async () => {
+    const p = page(A);
+    const index = indexSocket();
+    index.open();
+    await settle();
+    expect(index.methods()).toEqual(["hello"]);
+    index.reply(index.last("hello").id, helloReply());
+    await settle();
+    expect(index.methods()).toEqual(["hello", "workspaces", "web_prefs"]);
+    index.reply(index.last("workspaces").id, listing(1, [entry(A)]));
+    index.reply(index.last("web_prefs").id, { prefs: {} });
+    await settle();
+    expect(p.hub.conn()).toBe("live");
     const s = sock();
-    await serve(s);
+    s.open();
+    await settle();
+    expect(s.last("hello").params).toEqual({ role: "operator", token: "t0ken", client: "web", protocol: 6, workspace: A });
+    s.reply(s.last("hello").id, helloReply());
+    await settle();
     expect(s.methods()).toEqual(["hello", "subscribe"]);
     s.reply(s.last("subscribe").id, { subscribed: true });
     await settle();
@@ -66,8 +49,9 @@ describe("handshake", () => {
     expect(s.last("snapshot").params).toEqual({ messages: 300, events: 1000 });
     s.reply(s.last("snapshot").id, fixture("snapshot.json"));
     await settle();
-    expect(h.applied.snapshots.length).toBe(1);
-    expect(h.link.conn()).toBe("live");
+    expect(p.applied.snapshots.length).toBe(1);
+    expect(p.link.shown()).toBe("live");
+    expect(p.link.live()).toBe(true);
   });
 
   for (const [name, proof] of [
@@ -75,93 +59,79 @@ describe("handshake", () => {
     ["a wrong proof", "not-the-secret"],
     ["the verifier itself sent back as the proof", sha256(SECRET)],
   ] as const) {
-    test(`${name} stops the page for good: nothing used, session removed, no other attempt`, async () => {
+    test(`${name} on the index stops the page for good: nothing used, session removed, no other attempt`, async () => {
       vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "Date"] });
-      const h = harness();
-      h.link.start();
+      const p = page(A);
       const s = sock();
       s.open();
       (await flush(), await vi.advanceTimersByTimeAsync(1));
-      const hello = s.last("hello");
-      s.reply(hello.id, { role: "operator", protocol: 5, version: "x", pid: 1, ...(proof === null ? {} : { web_proof: proof }) });
+      s.reply(s.last("hello").id, helloReply(proof));
       (await flush(), await vi.advanceTimersByTimeAsync(1));
       // Whatever it sends next is not used.
-      s.push("agent", snapshot().agents[0]);
+      s.push("workspaces", listing(1, [entry(A)]));
       await vi.advanceTimersByTimeAsync(60_000);
-      expect(h.link.conn()).toBe("stopped");
-      expect(h.link.stopReason()).toBe("proof");
+      expect(p.hub.conn()).toBe("stopped");
+      expect(p.hub.stopReason()).toBe("proof");
       expect(s.methods()).toEqual(["hello"]);
-      expect(h.applied.pushes).toEqual([]);
-      expect(h.applied.snapshots).toEqual([]);
-      expect(h.storage.map.has(STORAGE_KEY)).toBe(false);
+      expect(p.hub.listing()).toBeNull();
+      expect(p.storage.map.has(STORAGE_KEY)).toBe(false);
       expect(FakeSocket.all.length).toBe(1);
     });
   }
 
   test("unauthorized signs out and removes the session; no retry", async () => {
     vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "Date"] });
-    const h = harness();
-    h.link.start();
+    const p = page(A);
     const s = sock();
     s.open();
     (await flush(), await vi.advanceTimersByTimeAsync(1));
     s.fail(s.last("hello").id, "unauthorized", "no such session");
     await vi.advanceTimersByTimeAsync(60_000);
-    expect(h.link.conn()).toBe("signed-out");
-    expect(h.storage.map.has(STORAGE_KEY)).toBe(false);
+    expect(p.hub.conn()).toBe("signed-out");
+    expect(p.storage.map.has(STORAGE_KEY)).toBe(false);
     expect(FakeSocket.all.length).toBe(1);
   });
 
-  test("protocol is an error without retry and without reload", async () => {
+  test("protocol on the index is an error without retry and without reload", async () => {
     vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "Date"] });
-    const h = harness();
-    h.link.start();
+    const p = page(A);
     const s = sock();
     s.open();
     (await flush(), await vi.advanceTimersByTimeAsync(1));
-    s.fail(s.last("hello").id, "protocol", "client speaks protocol 5, daemon speaks 6");
+    s.fail(s.last("hello").id, "protocol", "client speaks protocol 6, server speaks 7");
     await vi.advanceTimersByTimeAsync(60_000);
-    expect(h.link.conn()).toBe("stopped");
-    expect(h.link.stopReason()).toBe("protocol");
+    expect(p.hub.conn()).toBe("stopped");
+    expect(p.hub.stopReason()).toBe("protocol");
     expect(FakeSocket.all.length).toBe(1);
   });
 
-  test("shutdown stops the page and empties the storage", async () => {
+  test("the server's shutdown stops the page and empties the storage", async () => {
     vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "Date"] });
-    const h = harness();
-    h.link.start();
-    const s = sock();
-    s.open();
-    (await flush(), await vi.advanceTimersByTimeAsync(1));
-    s.reply(s.last("hello").id, { role: "operator", protocol: 5, version: "x", pid: 1, web_proof: SECRET });
-    (await flush(), await vi.advanceTimersByTimeAsync(1));
-    s.reply(s.last("subscribe").id, { subscribed: true });
-    (await flush(), await vi.advanceTimersByTimeAsync(1));
-    s.reply(s.last("snapshot").id, fixture("snapshot.json"));
-    (await flush(), await vi.advanceTimersByTimeAsync(1));
-    s.push("shutdown");
-    s.drop();
+    const tick = async () => (await flush(), await vi.advanceTimersByTimeAsync(1));
+    const p = page(A);
+    await serveIndex(indexSocket(), listing(1, [entry(A)]), tick);
+    await serveWorkspace(sock(), tick);
+    indexSocket().push("shutdown");
+    indexSocket().drop();
     await vi.advanceTimersByTimeAsync(60_000);
-    expect(h.shutdowns()).toBe(1);
-    expect(h.link.conn()).toBe("stopped");
-    expect(h.link.stopReason()).toBe("shutdown");
-    expect(h.storage.map.has(STORAGE_KEY)).toBe(false);
-    expect(FakeSocket.all.length).toBe(1);
+    expect(p.hub.conn()).toBe("stopped");
+    expect(p.hub.stopReason()).toBe("shutdown");
+    expect(p.storage.map.has(STORAGE_KEY)).toBe(false);
+    expect(FakeSocket.all.length).toBe(2);
   });
 
-  test("30 s of failed reconnects stop the page", async () => {
+  test("30 s of failed reconnects of the index stop the page", async () => {
     vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "Date"] });
-    const h = harness();
-    h.link.start();
+    const p = page(A);
     sock().drop();
     for (let t = 0; t < 40_000; t += 100) {
       await vi.advanceTimersByTimeAsync(100);
       const s = sock();
       if (s.readyState === 0) s.drop();
     }
-    expect(h.link.conn()).toBe("stopped");
-    expect(h.link.stopReason()).toBe("gone");
-    expect(h.storage.map.has(STORAGE_KEY)).toBe(false);
+    expect(p.hub.conn()).toBe("stopped");
+    expect(p.hub.stopReason()).toBe("gone");
+    expect(p.storage.map.has(STORAGE_KEY)).toBe(false);
     const n = FakeSocket.all.length;
     await vi.advanceTimersByTimeAsync(60_000);
     expect(FakeSocket.all.length).toBe(n);
@@ -192,7 +162,7 @@ test("a call that times out fails; its late answer is ignored; the connection st
   const s = sock();
   s.open();
   (await flush(), await vi.advanceTimersByTimeAsync(1));
-  s.reply(s.last("hello").id, { role: "operator", protocol: 5, version: "x", pid: 1, web_proof: SECRET });
+  s.reply(s.last("hello").id, helloReply());
   (await flush(), await vi.advanceTimersByTimeAsync(1));
   const p = conn.call("task_get", { id: "x" });
   const caught = p.catch((e) => e);
@@ -204,49 +174,26 @@ test("a call that times out fails; its late answer is ignored; the connection st
   expect(conn.live).toBe(true);
 });
 
-test("a snapshot after resync that fails starts over on a new connection, which takes its own snapshot", async () => {
-  vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "Date"] });
-  const tick = async (ms = 1) => (await flush(), await vi.advanceTimersByTimeAsync(ms));
-  const h = harness();
-  h.link.start();
-  const serveAll = async (s: FakeSocket) => {
-    s.open();
-    await tick();
-    s.reply(s.last("hello").id, { role: "operator", protocol: 5, version: "x", pid: 1, web_proof: SECRET });
-    await tick();
-    s.reply(s.last("subscribe").id, { subscribed: true });
-    await tick();
-    s.reply(s.last("snapshot").id, fixture("snapshot.json"));
-    await tick();
-  };
-  const first = sock();
-  await serveAll(first);
-  expect(h.link.conn()).toBe("live");
+test("a workspace connection's refusal is its ending, not the page's stop; the close code is kept", async () => {
+  const states: string[] = [];
+  const conn = new Conn({ env: fakeEnv(), session: new Session(stored(), null), reconnect: false, workspace: A, ready: () => {}, push: () => {}, state: (s, r) => states.push(`${s}:${r ?? ""}`) });
+  conn.start();
+  const s = sock();
+  s.open();
+  await settle();
+  s.fail(s.last("hello").id, "protocol", "infra was started by another version of crew");
+  await settle();
+  expect(conn.ending).toEqual({ kind: "refused", code: "protocol", message: "infra was started by another version of crew" });
+  expect(states).toEqual(["connecting:", "stopped:gone"]);
 
-  // Timed out.
-  first.push("resync");
-  await tick();
-  expect(first.methods().filter((m) => m === "snapshot").length).toBe(2);
-  await tick(3001);
-  expect(h.link.conn()).toBe("reconnecting");
-  first.reply(first.last("snapshot").id, fixture("snapshot.json"));
-  await tick(400);
-  const second = sock();
-  expect(second).not.toBe(first);
-  await serveAll(second);
-  expect(h.link.conn()).toBe("live");
-  expect(h.applied.snapshots.length).toBe(2);
-
-  // Answered with what does not decode.
-  second.push("resync");
-  await tick();
-  second.reply(second.last("snapshot").id, { agents: "not a list" });
-  await tick(400);
-  const third = sock();
-  expect(third).not.toBe(second);
-  await serveAll(third);
-  expect(h.link.conn()).toBe("live");
-  expect(h.applied.snapshots.length).toBe(3);
+  const closed = new Conn({ env: fakeEnv(), session: new Session(stored(), null), reconnect: false, workspace: A, ready: () => {}, push: () => {}, state: () => {} });
+  closed.start();
+  sock().open();
+  await settle();
+  sock().reply(sock().last("hello").id, helloReply());
+  await settle();
+  sock().drop(4002);
+  expect(closed.ending).toEqual({ kind: "closed", code: 4002 });
 });
 
 test("nothing pushed before the proof matched reaches the page", async () => {
@@ -258,27 +205,26 @@ test("nothing pushed before the proof matched reaches the page", async () => {
   s.open();
   await settle();
   s.push("resync");
-  s.reply(s.last("hello").id, { role: "operator", protocol: 5, version: "x", pid: 1, web_proof: SECRET });
+  s.reply(s.last("hello").id, helloReply());
   await settle();
   s.push("resync");
   expect(pushes).toEqual(["resync"]);
   expect(GIVE_UP_MS).toBe(30_000);
 });
 
+/** A page as main.tsx makes it, on workspace A. */
+function realPage() {
+  const loc = { hash: `#/w/${A}/` };
+  const hist = { pushState: (_: unknown, __: string, url?: string) => (loc.hash = url!), replaceState: (_: unknown, __: string, url?: string) => (loc.hash = url!) };
+  const p = createPage(fakeEnv(), new Session(stored(), null), new Promise(() => {}), { loc, hist });
+  p.start();
+  return p;
+}
+
 test("nothing the page asks goes out before the proof matched: not on the first connection, not after a reconnect", async () => {
-  const { createApp } = await import("../src/app");
-  const app = createApp(fakeEnv(), new Session(stored(), null), new Promise(() => {}));
-  app.link.start();
-  const serveAll = async (s: FakeSocket) => {
-    s.open();
-    await settle();
-    s.reply(s.last("hello").id, { role: "operator", protocol: 5, version: "x", pid: 1, web_proof: SECRET });
-    await settle();
-    s.reply(s.last("subscribe").id, { subscribed: true });
-    await settle();
-    s.reply(s.last("snapshot").id, fixture("snapshot.json"));
-    await settle();
-  };
+  const p = realPage();
+  await serveIndex(indexSocket(), listing(1, [entry(A)]), settle);
+  const app = p.app();
   // Before the first proof: the socket is open, hello has no answer yet.
   const first = sock();
   first.open();
@@ -288,10 +234,10 @@ test("nothing the page asks goes out before the proof matched: not on the first 
   expect(first.methods()).toEqual(["hello"]);
   first.drop();
   await new Promise((r) => setTimeout(r, 400));
-  await serveAll(sock());
-  expect(app.link.conn()).toBe("live");
+  await serveWorkspace(sock(), settle);
+  expect(app.link.live()).toBe(true);
   // Lost again; the next server has not proved itself.
-  sock().drop();
+  sock().drop(4001);
   await new Promise((r) => setTimeout(r, 400));
   const third = sock();
   third.open();
@@ -302,33 +248,22 @@ test("nothing the page asks goes out before the proof matched: not on the first 
 });
 
 test("a send whose reply was lost goes once more with the same id after the reconnect; nothing else is replayed", async () => {
-  const { createApp } = await import("../src/app");
-  const st = stored();
-  const app = createApp(fakeEnv(), new Session(st, null), new Promise(() => {}));
-  app.link.start();
-  const serveAll = async (s: FakeSocket) => {
-    s.open();
-    await settle();
-    s.reply(s.last("hello").id, { role: "operator", protocol: 5, version: "x", pid: 1, web_proof: SECRET });
-    await settle();
-    s.reply(s.last("subscribe").id, { subscribed: true });
-    await settle();
-    s.reply(s.last("snapshot").id, fixture("snapshot.json"));
-    await settle();
-  };
-  await serveAll(sock());
-  expect(app.link.conn()).toBe("live");
+  const p = realPage();
+  await serveIndex(indexSocket(), listing(1, [entry(A)]), settle);
+  const app = p.app();
+  await serveWorkspace(sock(), settle);
+  expect(app.link.live()).toBe(true);
   const sent = app.actions.send("claude-1", "hello there");
   const paused = app.actions.pause("claude-2");
   await settle();
   const first = sock();
   const id = first.last("send").params.id;
   expect(id).toMatch(/^w-[0-9a-f]{16}$/);
-  first.drop();
+  first.drop(4001);
   await new Promise((r) => setTimeout(r, 400));
   const second = sock();
   expect(second).not.toBe(first);
-  await serveAll(second);
+  await serveWorkspace(second, settle);
   await settle();
   expect(second.last("send").params).toEqual({ to: "claude-1", type: "message", body: "hello there", id });
   expect(second.methods().filter((m) => m === "agent_pause")).toEqual([]);

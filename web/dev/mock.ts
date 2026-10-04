@@ -1,9 +1,14 @@
-// A mock crew daemon for the dashboard (notes/web-design.md §tests, the
-// `mock` project). It serves the built bundle under a name of its own,
-// `<label>.localhost:<port>`, with the headers of §security, and speaks the
-// daemon's side of the WebSocket (protocol 5): pairing, `hello` with the
-// server's proof, `subscribe`, `snapshot` and the calls of §transport,
-// answered from a live state seeded with the wire fixtures. `bun run mock`
+// A mock dashboard server for the dashboard (notes/web-design.md §tests,
+// notes/web-multi.md §multi-tests, the `mock` project). It serves the built
+// bundle under a name of its own, `<label>.localhost:<port>`, with the
+// headers of §security, and speaks the server's side of the WebSocket
+// (protocol 6): pairing, `hello` with the server's proof; on the index
+// connection the listing of its workspaces (`workspaces`, with a `rev`) and
+// the operator's preferences; on a workspace connection that workspace's
+// daemon: `subscribe`, `snapshot` and the calls of §transport, answered from
+// a live state seeded with the wire fixtures. One workspace by default, as
+// many as the test asks for; the controller stops, starts, removes and joins
+// them as the server would see it happen. `bun run mock`
 // serves it for `bun run dev` (dev/serve.ts); the Playwright specs start one
 // per test (e2e/fixtures.ts) and drive it through the controller.
 //
@@ -44,6 +49,24 @@ const QUOTE_CHARS = 400;
 const WS_GUID = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11";
 
 export type FixtureName = "snapshot" | "subagents" | "team10";
+export type WorkspaceStatus = "running" | "stopped" | "incompatible" | "unreachable";
+/** The ids the first workspaces get: `crew_core`'s 16 hex digits. */
+export const WORKSPACE_IDS = ["946d4617aa702870", "0b54c1d2e3f4a596", "4c2e8a1b9d0f3e57", "7a1d2c3b4e5f6071"];
+/** Close codes of a workspace connection (notes/web-multi.md §multi-transport). */
+export const CLOSE_ENDED = 4001;
+export const CLOSE_REMOVED = 4002;
+export type WorkspaceOptions = {
+  id?: string;
+  fixture?: FixtureName;
+  /** In place of the fixture's `session.project`. */
+  project?: string;
+  /** In place of the fixture's `session.workspace`. */
+  workspace?: string;
+  status?: WorkspaceStatus;
+  detail?: string;
+  /** False: running beside the server, not joined (`others` does not list it by itself). */
+  joined?: boolean;
+};
 export const FIXTURE_NAMES: readonly FixtureName[] = ["snapshot", "subagents", "team10"];
 
 /** What `hello` shows as `web_proof`: the session's secret (`ok`), something
@@ -62,6 +85,11 @@ export type MockOptions = {
   strictHost?: boolean;
   /** A WebSocket that has not said hello by then is closed; 0 never. */
   helloTimeoutMs?: number;
+  /** The workspaces the server shows, joined in this order; one by default
+   * (with `fixture`). */
+  workspaces?: WorkspaceOptions[];
+  /** Running sessions that are not joined, as the listing names them. */
+  others?: { id: string; project?: string | null; workspace: string }[];
 };
 
 type Obj = Record<string, any>;
@@ -105,6 +133,8 @@ export const NO_REPLY: unique symbol = Symbol("no reply");
 export interface MockConn {
   readonly id: number;
   readonly authenticated: boolean;
+  /** After `hello`: null for the index, else the workspace's id. */
+  readonly workspace: string | null | undefined;
   /** Receives the pushes of `mock.push` (after `subscribe` was answered). */
   readonly subscribed: boolean;
   /** The agent whose terminal this connection carries (after `attach`). */
@@ -122,7 +152,26 @@ export interface MockConn {
   drop(): void;
 }
 
-/** The controller. */
+/** One workspace behind the server: its daemon's state and controls. */
+export interface MockWorkspace {
+  readonly id: string;
+  readonly fixture: FixtureName;
+  readonly state: MockState;
+  /** What its daemon's `web_prefs` keeps (the layout). */
+  prefs: Record<string, unknown>;
+  readonly status: WorkspaceStatus;
+  readonly generation: number;
+  readonly connections: readonly MockConn[];
+  push(frameOrPush: Push | PushFrame): number;
+  ptyWrite(agent: string, data: string | Uint8Array): number;
+  snapshot(params?: { messages?: number; events?: number }): Obj;
+  holdSnapshot(): () => void;
+  /** The next `hello` for this workspace is answered `code` after `ms`. */
+  holdHello(code: string, ms: number, message?: string): void;
+}
+
+/** The controller. The daemon's methods (`state`, `push`, `snapshot`, …)
+ * act on the first workspace. */
 export interface Mock {
   readonly label: string;
   readonly port: number;
@@ -146,14 +195,39 @@ export interface Mock {
   /** The WebSockets open now. */
   readonly connections: readonly MockConn[];
   proofMode: ProofMode;
-  /** What `web_prefs` keeps. */
+  /** What the server's `web_prefs` keeps (keys, panel, last). */
   prefs: Record<string, unknown>;
+  /** Running sessions that are not joined. */
+  others: { id: string; project?: string | null; workspace: string }[];
+  /** Every workspace, joined or not, in the order of the options. */
+  readonly workspaces: readonly MockWorkspace[];
+  /** The listing's revision now. */
+  readonly rev: number;
+  /** A workspace by id or by index (0: the first). */
+  workspace(which?: string | number): MockWorkspace;
+  /** What `workspaces` would answer now. */
+  listing(): Obj;
+  /** Its daemon stops: its `shutdown` push, its connections closed with
+   * 4001, the listing says `stopped`. */
+  stopDaemon(id?: string): void;
+  /** Its daemon starts again (a new pid): the listing says `running`. */
+  startDaemon(id?: string): void;
+  setStatus(id: string, status: WorkspaceStatus, detail?: string): void;
+  /** `crew web --remove`: the listing without it, its connections closed
+   * with 4002 (after `holdCloseMs`), nothing of theirs forwarded meanwhile. */
+  remove(id: string, o?: { holdCloseMs?: number }): void;
+  /** `crew web` for it: joined again, with a new generation. */
+  join(id: string): void;
+  /** Removed and joined again in one listing; the old connections' 4002
+   * held back `holdCloseMs`. */
+  removeAndRejoin(id: string, o?: { holdCloseMs?: number }): void;
+  setOthers(others: { id: string; project?: string | null; workspace: string }[]): void;
   /** The mock's server time: the fixture's `server_time`, running since the start. */
   now(): number;
   /** A new pairing code: spent by the first `web_pair`, valid for `ttlMs`. */
   code(ttlMs?: number): string;
-  /** `<origin>/#pair=<code>`, with a new code unless one is given. */
-  pairUrl(code?: string): string;
+  /** `<origin>/#pair=<code>` (`&w=<id>` with a workspace), with a new code unless one is given. */
+  pairUrl(code?: string, workspace?: string): string;
   /** Answer `method` with `handler` from now on; null restores the mock's own. */
   on(method: string, handler: Handler | null): void;
   /** The first call of `method` (already made or still to come) that `predicate` accepts. */
@@ -177,16 +251,17 @@ export interface Mock {
   holdSnapshot(): () => void;
   /** Destroy every WebSocket without a close frame. */
   dropSockets(): void;
-  /** As the daemon stopping: a `shutdown` push, then every WebSocket is
-   * closed; `web_pair` and `hello` answer `unavailable` from then on. The
-   * listeners stay, so a test can see that nothing comes back. */
+  /** As the server stopping: a `shutdown` push on every index connection,
+   * then every WebSocket is closed; `web_pair` and `hello` answer
+   * `unavailable` from then on. The listeners stay, so a test can see that
+   * nothing comes back. */
   shutdown(): Promise<void>;
   /** Close the listeners and every connection. */
   stop(): Promise<void>;
 }
 
 export async function startMock(options: MockOptions = {}): Promise<Mock> {
-  const mock = new MockDaemon(options);
+  const mock = new MockServer(options);
   await mock.listen(options.port ?? 0);
   return mock;
 }
@@ -328,6 +403,10 @@ class Connection implements MockConn {
   readonly origin: string | null;
   readonly address: string;
   authenticated = false;
+  /** After `hello`: null for the index, else the workspace's id. */
+  workspace: string | null | undefined = undefined;
+  /** Its workspace's generation was revoked: nothing is forwarded any more. */
+  revoked = false;
   subscribed = false;
   attached: string | null = null;
   /** Run once the answer to the current request was written: how
@@ -507,27 +586,199 @@ class Connection implements MockConn {
   }
 }
 
-// ---- the daemon -------------------------------------------------------------
+// ---- the server and its workspaces -------------------------------------------
 
 type WebSession = { token: string; secret: string; verifier: string };
 type Waiter = { ok(call: MockCall): boolean; resolve(call: MockCall): void; reject(e: Error): void; timer: ReturnType<typeof setTimeout> };
 type Hold = { promise: Promise<void>; release(): void };
+type HeldHello = { code: string; message: string; ms: number };
 
 /** Calls a connection may make before `hello` succeeded (§security, "Limits"). */
 const BEFORE_HELLO = new Set(["ping", "web_pair", "hello"]);
+/** Calls of the index connection (notes/web-multi.md §multi-transport). */
+const INDEX_CALLS = new Set(["ping", "workspaces", "web_prefs"]);
 
-class MockDaemon implements Mock {
+const counts = (state: MockState): Obj => ({
+  project: state.session.project ?? null,
+  agents: state.agents.length,
+  working: state.agents.filter((a) => a.status === "working").length,
+  attention: state.agents.filter((a) => a.status === "blocked" || a.status === "failed").length,
+  questions: state.questions.length,
+  tasks: state.tasks.length,
+  tasks_done: state.tasks.filter((t) => t.status === "done").length,
+});
+
+class Workspace implements MockWorkspace {
+  readonly id: string;
+  readonly fixture: FixtureName;
+  readonly state: MockState;
+  prefs: Record<string, unknown> = {};
+  status: WorkspaceStatus;
+  detail = "";
+  generation = 0;
+  joined = false;
+  joinedAt = 0;
+  daemon: { pid: number; started_at: number } | null = null;
+  summary: Obj | null = null;
+  summaryRev = 0;
+  holds: Hold[] = [];
+  heldHello: HeldHello | null = null;
+  readonly #server: MockServer;
+
+  constructor(server: MockServer, o: WorkspaceOptions, id: string) {
+    this.#server = server;
+    this.id = id;
+    this.fixture = o.fixture ?? "snapshot";
+    if (!FIXTURE_NAMES.includes(this.fixture)) throw new Error(`unknown fixture ${this.fixture}: one of ${FIXTURE_NAMES.join(", ")}`);
+    const snap = readJson(`${this.fixture}.json`);
+    if (o.project !== undefined) snap.session.project = o.project;
+    if (o.workspace !== undefined) {
+      snap.session.workspace = o.workspace;
+      snap.session.state_dir = `${o.workspace}/.crew`;
+    }
+    this.state = {
+      session: snap.session,
+      agents: snap.agents,
+      tasks: snap.tasks,
+      messages: snap.messages,
+      events: snap.events,
+      questions: snap.questions ?? [],
+    };
+    this.status = o.status ?? "running";
+    if (this.status === "running") this.daemon = { pid: snap.session.daemon_pid ?? 4242, started_at: snap.session.daemon_started_at || Date.now() };
+    this.detail = o.detail ?? (this.status === "incompatible" ? "started by another version of crew (protocol 5): restart the team" : "");
+    this.refreshSummary();
+  }
+
+  get connections(): readonly MockConn[] {
+    return this.#server.connections.filter((c) => c.workspace === this.id);
+  }
+
+  /** Recompute what the switcher shows; true when it changed. */
+  refreshSummary(): boolean {
+    if (this.status !== "running") return false;
+    const next = counts(this.state);
+    if (this.summary && Object.keys(next).every((k) => this.summary![k] === next[k])) return false;
+    this.summary = { rev: ++this.summaryRev, ...next };
+    return true;
+  }
+
+  entry(): Obj {
+    const s = this.state.session;
+    return {
+      id: this.id,
+      generation: this.generation,
+      daemon: this.status === "running" ? this.daemon : null,
+      project: this.summary?.project ?? s.project ?? null,
+      workspace: s.workspace ?? "",
+      state: this.status,
+      detail: this.status === "incompatible" || this.status === "unreachable" ? this.detail : "",
+      summary: this.summary,
+      joined_at: this.joinedAt,
+    };
+  }
+
+  push(frameOrPush: Push | PushFrame): number {
+    const frame = clone(asFrame(frameOrPush));
+    this.#apply(frame.push);
+    const terminal = frame.push.kind === "pty" || frame.push.kind === "pty_closed";
+    let sent = 0;
+    for (const conn of this.connections) {
+      if (!conn.open || !(terminal ? conn.attached !== null : conn.subscribed)) continue;
+      conn.send(frame);
+      sent++;
+    }
+    if (this.refreshSummary()) this.#server.listingChanged();
+    return sent;
+  }
+
+  ptyWrite(agent: string, data: string | Uint8Array): number {
+    const frame = { push: { kind: "pty", data: { data: Buffer.from(data).toString("base64") } } };
+    let sent = 0;
+    for (const conn of this.connections) {
+      if (conn.open && conn.attached === agent) {
+        conn.send(frame);
+        sent++;
+      }
+    }
+    return sent;
+  }
+
+  /** What a push changes in the daemon's state, so that a later snapshot has it. */
+  #apply(push: Push): void {
+    const s = this.state;
+    const d = isObj(push.data) ? push.data : {};
+    switch (push.kind) {
+      case "agent":
+        upsert(s.agents, clone(d));
+        return;
+      case "agent_removed":
+        s.agents = s.agents.filter((a) => a.id !== d.id);
+        return;
+      case "task":
+        upsert(s.tasks, clone(d));
+        return;
+      case "session":
+        s.session = clone(d);
+        return;
+      case "message":
+        if (!s.messages.some((m) => m.id === d.id)) s.messages.push(clone(d));
+        if (d.to === OPERATOR && d.type === "question" && !s.questions.some((q) => q.id === d.id)) s.questions.push(clone(d));
+        if (d.from === OPERATOR && d.reply_to) s.questions = s.questions.filter((q) => q.id !== d.reply_to);
+        return;
+      case "event":
+        if (d.seq === 0 || !s.events.some((e) => e.seq === d.seq)) s.events.push(clone(d));
+        return;
+    }
+  }
+
+  snapshot(params: { messages?: number; events?: number } = {}): Obj {
+    const s = this.state;
+    return clone({
+      session: s.session,
+      agents: s.agents,
+      tasks: s.tasks,
+      messages: newest(s.messages, limitOf(params.messages, 200, 2000)),
+      events: newest(s.events, limitOf(params.events, 300, 5000)),
+      questions: s.questions,
+      server_time: this.#server.now(),
+    });
+  }
+
+  holdSnapshot(): () => void {
+    let release: () => void = () => {};
+    const hold: Hold = {
+      promise: new Promise<void>((r) => {
+        release = r;
+      }),
+      release: () => {
+        this.holds = this.holds.filter((h) => h !== hold);
+        release();
+      },
+    };
+    this.holds.push(hold);
+    return hold.release;
+  }
+
+  holdHello(code: string, ms: number, message = code): void {
+    this.heldHello = { code, message, ms };
+  }
+}
+
+class MockServer implements Mock {
   label = "";
   port = 0;
   addresses: string[] = [];
   readonly dist: string;
-  readonly fixture: FixtureName;
   readonly strictHost: boolean;
-  readonly state: MockState;
   readonly calls: MockCall[] = [];
   readonly requests: HttpRecord[] = [];
   proofMode: ProofMode = "ok";
+  /** The server's preferences: the operator's (keys, panel, last). */
   prefs: Record<string, unknown> = {};
+  others: { id: string; project?: string | null; workspace: string }[] = [];
+  readonly workspaces: Workspace[] = [];
+  rev = 1;
 
   #helloTimeoutMs: number;
   #servers: Server[] = [];
@@ -537,7 +788,7 @@ class MockDaemon implements Mock {
   #sessions = new Map<string, WebSession>();
   #handlers = new Map<string, Handler>();
   #waiters: Waiter[] = [];
-  #holds: Hold[] = [];
+  #generations = 0;
   #serverTime: number;
   #startedAt = Date.now();
   #stopping = false;
@@ -545,22 +796,29 @@ class MockDaemon implements Mock {
 
   constructor(options: MockOptions) {
     this.dist = resolve(options.dist ?? DEFAULT_DIST);
-    this.fixture = options.fixture ?? "snapshot";
-    if (!FIXTURE_NAMES.includes(this.fixture)) throw new Error(`unknown fixture ${this.fixture}: one of ${FIXTURE_NAMES.join(", ")}`);
     this.strictHost = options.strictHost ?? true;
     this.#helloTimeoutMs = options.helloTimeoutMs ?? 5000;
-    const snap = readJson(`${this.fixture}.json`);
-    this.#serverTime = snap.server_time;
-    this.state = {
-      session: snap.session,
-      agents: snap.agents,
-      tasks: snap.tasks,
-      messages: snap.messages,
-      events: snap.events,
-      questions: snap.questions ?? [],
-    };
+    const list = options.workspaces ?? [{ fixture: options.fixture }];
+    if (list.length === 0) throw new Error("a mock serves at least one workspace");
+    list.forEach((o, i) => {
+      const ws = new Workspace(this, { fixture: options.fixture, ...o }, o.id ?? WORKSPACE_IDS[i] ?? hex(8));
+      this.workspaces.push(ws);
+      if (o.joined !== false) this.#join(ws);
+    });
+    this.others = clone(options.others ?? []);
+    this.#serverTime = readJson(`${this.workspaces[0].fixture}.json`).server_time;
   }
 
+  /** The first workspace: what the controller's daemon methods act on. */
+  get primary(): Workspace {
+    return this.workspaces[0];
+  }
+  get fixture(): FixtureName {
+    return this.primary.fixture;
+  }
+  get state(): MockState {
+    return this.primary.state;
+  }
   get host(): string {
     return `${this.label}.localhost:${this.port}`;
   }
@@ -578,9 +836,98 @@ class MockDaemon implements Mock {
     return this.#serverTime + (Date.now() - this.#startedAt);
   }
 
+  workspace(which: string | number = 0): Workspace {
+    const ws = typeof which === "number" ? this.workspaces[which] : this.workspaces.find((w) => w.id === which);
+    if (!ws) throw new Error(`no workspace ${which}`);
+    return ws;
+  }
+
+  listing(): Obj {
+    return clone({ rev: this.rev, joined: this.workspaces.filter((w) => w.joined).sort((a, b) => a.joinedAt - b.joinedAt).map((w) => w.entry()), others: this.others });
+  }
+
+  /** Something in the listing changed: a new revision, pushed to every index connection. */
+  listingChanged(): void {
+    this.rev++;
+    const frame = { push: { kind: "workspaces", data: this.listing() } };
+    for (const conn of this.#conns) if (conn.open && conn.workspace === null) conn.send(frame);
+  }
+
+  #join(ws: Workspace): void {
+    ws.joined = true;
+    ws.generation = ++this.#generations;
+    ws.joinedAt = Date.now() + this.#generations;
+  }
+
+  join(id: string): void {
+    const ws = this.workspace(id);
+    if (ws.joined) return;
+    this.#join(ws);
+    this.listingChanged();
+  }
+
+  remove(id: string, o: { holdCloseMs?: number } = {}): void {
+    const ws = this.workspace(id);
+    ws.joined = false;
+    const conns = ws.connections;
+    this.listingChanged();
+    this.#closeLater(conns, CLOSE_REMOVED, "taken out of this dashboard", o.holdCloseMs ?? 0);
+  }
+
+  removeAndRejoin(id: string, o: { holdCloseMs?: number } = {}): void {
+    const ws = this.workspace(id);
+    const conns = ws.connections;
+    this.#join(ws);
+    this.listingChanged();
+    this.#closeLater(conns, CLOSE_REMOVED, "taken out of this dashboard", o.holdCloseMs ?? 0);
+  }
+
+  #closeLater(conns: readonly MockConn[], code: number, reason: string, ms: number): void {
+    // The connections are this generation's no longer: nothing more reaches them.
+    for (const c of conns) (c as Connection).revoked = true;
+    const close = () => conns.forEach((c) => c.close(code, reason));
+    if (ms > 0) setTimeout(close, ms).unref();
+    else close();
+  }
+
+  stopDaemon(id: string = this.primary.id): void {
+    const ws = this.workspace(id);
+    const conns = ws.connections;
+    for (const c of conns) if (c.subscribed) c.push({ kind: "shutdown" });
+    ws.status = "stopped";
+    ws.daemon = null;
+    for (const c of conns) c.close(CLOSE_ENDED, "the workspace's connection ended");
+    this.listingChanged();
+  }
+
+  startDaemon(id: string = this.primary.id): void {
+    const ws = this.workspace(id);
+    ws.status = "running";
+    ws.detail = "";
+    ws.daemon = { pid: (ws.daemon?.pid ?? ws.state.session.daemon_pid ?? 4242) + 1, started_at: Date.now() };
+    ws.refreshSummary();
+    this.listingChanged();
+  }
+
+  setStatus(id: string, status: WorkspaceStatus, detail = ""): void {
+    if (status === "running") return this.startDaemon(id);
+    const ws = this.workspace(id);
+    const conns = ws.connections;
+    ws.status = status;
+    ws.detail = detail;
+    ws.daemon = null;
+    for (const c of conns) c.close(CLOSE_ENDED, "the workspace's connection ended");
+    this.listingChanged();
+  }
+
+  setOthers(others: { id: string; project?: string | null; workspace: string }[]): void {
+    this.others = clone(others);
+    this.listingChanged();
+  }
+
   // -- listening --
 
-  /** Both loopback addresses on one port, as the daemon (§security, "The
+  /** Both loopback addresses on one port, as the server (§security, "The
    * listener"): a port is taken when either address is. The label is made
    * only once both are bound. */
   async listen(wanted: number): Promise<void> {
@@ -605,7 +952,7 @@ class MockDaemon implements Mock {
       }
       this.port = port;
       this.label = hex(16);
-      this.state.session.web = this.url;
+      for (const ws of this.workspaces) ws.state.session.web = this.url;
       return;
     }
   }
@@ -720,6 +1067,10 @@ class MockDaemon implements Mock {
   // -- requests --
 
   async #request(conn: Connection, text: string): Promise<void> {
+    // One request per message: a line break would be two requests to a daemon.
+    if (/[\r\n]/.test(text)) return conn.close(1008, "one request per message: no line breaks");
+    // A connection of a generation that was revoked forwards nothing.
+    if (conn.revoked) return;
     let req: unknown;
     try {
       req = JSON.parse(text);
@@ -747,6 +1098,7 @@ class MockDaemon implements Mock {
       conn.afterReply = null;
       frame = { id, error: toFailure(e) };
     }
+    if (conn.revoked) return;
     conn.send(frame);
     // Set by the handler while it was awaited.
     const after = conn.afterReply as (() => void) | null;
@@ -759,7 +1111,11 @@ class MockDaemon implements Mock {
     const handler = this.#handlers.get(method);
     if (handler) {
       const result = await handler(params, conn);
-      if (method === "hello") conn.signedIn();
+      if (method === "hello") {
+        conn.signedIn();
+        const w = isObj(params) && typeof params.workspace === "string" ? params.workspace : null;
+        conn.workspace = w;
+      }
       return result;
     }
     const p: Obj = isObj(params) ? params : {};
@@ -770,6 +1126,14 @@ class MockDaemon implements Mock {
         return this.#pair(p);
       case "hello":
         return this.#hello(conn, p);
+    }
+    if (conn.workspace === null) {
+      if (!INDEX_CALLS.has(method)) fail("invalid", `${method} is a call of a workspace connection`);
+      if (method === "workspaces") return this.listing();
+      return this.#prefs(this, p);
+    }
+    const ws = this.workspace(conn.workspace!);
+    switch (method) {
       case "subscribe":
         conn.afterReply = () => {
           conn.subscribed = true;
@@ -777,63 +1141,58 @@ class MockDaemon implements Mock {
         };
         return { subscribed: true };
       case "snapshot": {
-        const snap = this.snapshot(p);
-        const hold = this.#holds.shift();
+        const snap = ws.snapshot(p);
+        const hold = ws.holds.shift();
         if (hold) await hold.promise;
         return snap;
       }
       case "send":
-        return this.#send(p);
+        return this.#send(ws, p);
       case "answer":
-        return this.#answer(p);
+        return this.#answer(ws, p);
       case "agent_pause":
       case "agent_resume": {
-        const agent = this.#agent(p.id);
+        const agent = this.#agent(ws, p.id);
         agent.paused = method === "agent_pause";
-        this.push({ kind: "agent", data: agent });
+        ws.push({ kind: "agent", data: agent });
         return clone(agent);
       }
       case "agent_set_model": {
-        const agent = this.#agent(p.id);
+        const agent = this.#agent(ws, p.id);
         if (typeof p.model === "string" && p.model) agent.model = p.model;
         if (RUNTIMES.includes(p.runtime)) agent.runtime = p.runtime;
-        this.push({ kind: "agent", data: agent });
+        ws.push({ kind: "agent", data: agent });
         return clone(agent);
       }
       case "agent_restart":
       case "agent_restart_fresh":
       case "agent_kill":
       case "agent_compact":
-        return clone(this.#agent(p.id));
+        return clone(this.#agent(ws, p.id));
       case "agents_list":
-        return clone(this.state.agents);
+        return clone(ws.state.agents);
       case "tasks_list":
-        return clone(this.state.tasks);
+        return clone(ws.state.tasks);
       case "task_get": {
-        const task = this.state.tasks.find((t) => t.id === p.id) ?? fail("not_found", `no task '${p.id}'`);
-        const dependencies = (task.dependencies as string[]).map((d) => this.state.tasks.find((t) => t.id === d)).filter(Boolean);
+        const task = ws.state.tasks.find((t) => t.id === p.id) ?? fail("not_found", `no task '${p.id}'`);
+        const dependencies = (task.dependencies as string[]).map((d) => ws.state.tasks.find((t) => t.id === d)).filter(Boolean);
         return clone({ task, dependencies });
       }
       case "message_get":
-        return clone(this.state.messages.find((m) => m.id === p.id) ?? fail("not_found", `no message '${p.id}'`));
+        return clone(ws.state.messages.find((m) => m.id === p.id) ?? fail("not_found", `no message '${p.id}'`));
       case "events": {
-        const list = this.state.events.filter((e) => p.agent == null || e.agent_id === p.agent);
+        const list = ws.state.events.filter((e) => p.agent == null || e.agent_id === p.agent);
         return clone(newest(list, limitOf(p.limit, 100)));
       }
       case "history": {
-        const list = this.state.messages.filter((m) => p.agent == null || m.from === p.agent || m.to === p.agent || m.to === "*");
+        const list = ws.state.messages.filter((m) => p.agent == null || m.from === p.agent || m.to === p.agent || m.to === "*");
         return clone(newest(list, limitOf(p.limit, 100)));
       }
       case "web_prefs":
-        if (p.set != null) {
-          if (!isObj(p.set)) fail("invalid", "web preferences are a JSON object");
-          if (Buffer.byteLength(JSON.stringify(p.set)) > MAX_PREFS) fail("invalid", "web preferences exceed 16 KiB");
-          this.prefs = clone(p.set);
-        }
-        return { prefs: clone(this.prefs) };
+        return this.#prefs(ws, p);
       case "attach": {
         const agent = typeof p.agent === "string" ? p.agent : fail("invalid", "malformed request: missing field `agent`");
-        this.#agent(agent);
+        this.#agent(ws, agent);
         // The attachment replaces the subscription; its output starts after the reply.
         conn.subscribed = false;
         conn.afterReply = () => {
@@ -855,20 +1214,33 @@ class MockDaemon implements Mock {
         if (!conn.attached) fail("invalid", "not attached");
         return NO_REPLY;
       case "web_open":
+        fail("invalid", "web_open is served by the dashboard server: run `crew web`");
       case "web_close":
+        fail("invalid", "web_close is served by the dashboard server: run `crew web --stop`");
       case "load_team":
+      case "web_attach":
+      case "web_event":
         fail("forbidden", `web sessions cannot call ${method}`);
     }
     // The rest answer the fixture's example, for an agent that exists.
-    if (method.startsWith("agent_") && typeof p.id === "string") this.#agent(p.id);
-    if ((method === "inbox" || method === "git_diff") && typeof p.agent === "string") this.#agent(p.agent);
+    if (method.startsWith("agent_") && typeof p.id === "string") this.#agent(ws, p.id);
+    if ((method === "inbox" || method === "git_diff") && typeof p.agent === "string") this.#agent(ws, p.agent);
     const examples = results()[method];
     if (Array.isArray(examples) && examples.length) return clone(examples[0]);
     fail("invalid", `malformed request: unknown variant \`${method}\``);
   }
 
-  #agent(id: unknown): Obj {
-    return this.state.agents.find((a) => a.id === id) ?? fail("not_found", `no agent '${String(id)}'`);
+  #prefs(owner: { prefs: Record<string, unknown> }, p: Obj): unknown {
+    if (p.set != null) {
+      if (!isObj(p.set)) fail("invalid", "web preferences are a JSON object");
+      if (Buffer.byteLength(JSON.stringify(p.set)) > MAX_PREFS) fail("invalid", "web preferences exceed 16 KiB");
+      owner.prefs = clone(p.set);
+    }
+    return { prefs: clone(owner.prefs) };
+  }
+
+  #agent(ws: Workspace, id: unknown): Obj {
+    return ws.state.agents.find((a) => a.id === id) ?? fail("not_found", `no agent '${String(id)}'`);
   }
 
   #pair(p: Obj): unknown {
@@ -883,32 +1255,49 @@ class MockDaemon implements Mock {
     return { token: session.token, verifier: session.verifier };
   }
 
-  #hello(conn: Connection, p: Obj): unknown {
+  async #hello(conn: Connection, p: Obj): Promise<unknown> {
     if (conn.authenticated) fail("forbidden", "this connection is already authenticated as operator; open a new connection to change identity");
     if (this.#stopping) fail("unavailable", "the web dashboard is stopping");
-    if (p.protocol !== PROTOCOL) fail("protocol", `client speaks protocol ${typeof p.protocol === "number" ? p.protocol : 0}, daemon speaks ${PROTOCOL}`);
+    if (p.protocol !== PROTOCOL) fail("protocol", `client speaks protocol ${typeof p.protocol === "number" ? p.protocol : 0}, server speaks ${PROTOCOL}`);
     if (p.role !== OPERATOR) fail("unauthorized", "the web dashboard signs in the operator only");
     const session = (typeof p.token === "string" && this.#sessions.get(p.token)) || fail("unauthorized", "this browser session is not known: run `crew web`");
+    const proof = (info: Obj) => {
+      if (this.proofMode === "ok") info.web_proof = session.secret;
+      else if (this.proofMode === "wrong") info.web_proof = hex(32);
+      else if (this.proofMode === "verifier") info.web_proof = session.verifier;
+      return info;
+    };
+    if (p.workspace === undefined || p.workspace === null) {
+      conn.signedIn();
+      conn.workspace = null;
+      return proof({ role: OPERATOR, agent_id: null, project: null, version: this.primary.state.session.version ?? "0.1.0", protocol: PROTOCOL, pid: process.pid });
+    }
+    const ws = this.workspaces.find((w) => w.id === p.workspace && w.joined) ?? fail("not_found", `workspace ${String(p.workspace)} is not in this dashboard: run \`crew web\` in it`);
+    const held = ws.heldHello;
+    if (held) {
+      ws.heldHello = null;
+      await new Promise((r) => setTimeout(r, held.ms));
+      fail(held.code, held.message);
+    }
+    if (ws.status === "incompatible") fail("protocol", `${ws.state.session.project ?? ws.id} ${ws.detail || "was started by another version of crew"}`);
+    if (ws.status !== "running") fail("unavailable", `${ws.state.session.project ?? ws.id} is not running: start it (\`crew run\` in ${ws.state.session.workspace})`);
     conn.signedIn();
-    const s = this.state.session;
-    const info: Obj = { role: OPERATOR, agent_id: null, project: s.project ?? null, version: s.version ?? "0.1.0", protocol: PROTOCOL, pid: s.daemon_pid ?? process.pid };
-    if (this.proofMode === "ok") info.web_proof = session.secret;
-    else if (this.proofMode === "wrong") info.web_proof = hex(32);
-    else if (this.proofMode === "verifier") info.web_proof = session.verifier;
-    return info;
+    conn.workspace = ws.id;
+    const s = ws.state.session;
+    return proof({ role: OPERATOR, agent_id: null, project: s.project ?? null, version: s.version ?? "0.1.0", protocol: PROTOCOL, pid: ws.daemon?.pid ?? s.daemon_pid ?? process.pid });
   }
 
-  #send(p: Obj): unknown {
+  #send(ws: Workspace, p: Obj): unknown {
     const to = typeof p.to === "string" ? p.to : fail("invalid", "malformed request: missing field `to`");
     const body = typeof p.body === "string" ? p.body : fail("invalid", "malformed request: missing field `body`");
     const type = p.type ?? "message";
     if (!MESSAGE_TYPES.includes(type)) fail("invalid", `malformed request: unknown variant \`${type}\``);
     if (Buffer.byteLength(body) > MAX_BODY) fail("too_large", `message body exceeds ${MAX_BODY} bytes`);
     if (!body.trim()) fail("invalid", "a message needs a body");
-    if (to !== "*" && !this.state.agents.some((a) => a.id === to)) fail("not_found", `no agent '${to}'`);
+    if (to !== "*" && !ws.state.agents.some((a) => a.id === to)) fail("not_found", `no agent '${to}'`);
     const id = typeof p.id === "string" && p.id ? p.id : `m-${hex(6)}`;
-    const recipients = to === "*" ? this.state.agents.map((a) => a.id as string) : [to];
-    const known = this.state.messages.find((m) => m.id === id);
+    const recipients = to === "*" ? ws.state.agents.map((a) => a.id as string) : [to];
+    const known = ws.state.messages.find((m) => m.id === id);
     if (known) {
       // Sending an id again is a no-op (retries are safe); another message under it is not.
       if (known.from !== OPERATOR || known.to !== to || known.body !== body) fail("conflict", `message id ${id} is already used for another message`);
@@ -925,17 +1314,17 @@ class MockDaemon implements Mock {
       reply_to: p.reply_to ?? null,
       metadata: p.metadata ?? null,
     };
-    this.push({ kind: "message", data: message });
+    ws.push({ kind: "message", data: message });
     return { message: clone(message), duplicate: false, recipients };
   }
 
-  #answer(p: Obj): unknown {
+  #answer(ws: Workspace, p: Obj): unknown {
     const id = String(p.id ?? "");
     const body = typeof p.body === "string" ? p.body.trim() : "";
     if (!body) fail("invalid", "an answer needs some text");
-    const question = this.state.questions.find((q) => q.id === id);
+    const question = ws.state.questions.find((q) => q.id === id);
     if (!question) {
-      const asked = this.state.messages.some((m) => m.id === id && m.to === OPERATOR && m.type === "question");
+      const asked = ws.state.messages.some((m) => m.id === id && m.to === OPERATOR && m.type === "question");
       return fail(asked ? "invalid" : "not_found", asked ? `question ${id} was already answered` : `no open question '${id}'`);
     }
     const line = String(question.body).split(/\s+/).join(" ").trim();
@@ -952,7 +1341,7 @@ class MockDaemon implements Mock {
       metadata: null,
     };
     // The push carries `reply_to`, which takes the question off the state.
-    this.push({ kind: "message", data: message });
+    ws.push({ kind: "message", data: message });
     return { message: clone(message), duplicate: false, recipients: [question.from] };
   }
 
@@ -966,8 +1355,8 @@ class MockDaemon implements Mock {
     return code;
   }
 
-  pairUrl(code: string = this.code()): string {
-    return `${this.origin}/#pair=${code}`;
+  pairUrl(code: string = this.code(), workspace?: string): string {
+    return `${this.origin}/#pair=${code}${workspace ? `&w=${workspace}` : ""}`;
   }
 
   on(method: string, handler: Handler | null): void {
@@ -1008,56 +1397,11 @@ class MockDaemon implements Mock {
   }
 
   push(frameOrPush: Push | PushFrame): number {
-    const frame = clone(asFrame(frameOrPush));
-    this.#apply(frame.push);
-    const terminal = frame.push.kind === "pty" || frame.push.kind === "pty_closed";
-    let sent = 0;
-    for (const conn of this.#conns) {
-      if (!conn.open || !(terminal ? conn.attached !== null : conn.subscribed)) continue;
-      conn.send(frame);
-      sent++;
-    }
-    return sent;
+    return this.primary.push(frameOrPush);
   }
 
   ptyWrite(agent: string, data: string | Uint8Array): number {
-    const frame = { push: { kind: "pty", data: { data: Buffer.from(data).toString("base64") } } };
-    let sent = 0;
-    for (const conn of this.#conns) {
-      if (conn.open && conn.attached === agent) {
-        conn.send(frame);
-        sent++;
-      }
-    }
-    return sent;
-  }
-
-  /** What a push changes in the daemon's state, so that a later snapshot has it. */
-  #apply(push: Push): void {
-    const s = this.state;
-    const d = isObj(push.data) ? push.data : {};
-    switch (push.kind) {
-      case "agent":
-        upsert(s.agents, clone(d));
-        return;
-      case "agent_removed":
-        s.agents = s.agents.filter((a) => a.id !== d.id);
-        return;
-      case "task":
-        upsert(s.tasks, clone(d));
-        return;
-      case "session":
-        s.session = clone(d);
-        return;
-      case "message":
-        if (!s.messages.some((m) => m.id === d.id)) s.messages.push(clone(d));
-        if (d.to === OPERATOR && d.type === "question" && !s.questions.some((q) => q.id === d.id)) s.questions.push(clone(d));
-        if (d.from === OPERATOR && d.reply_to) s.questions = s.questions.filter((q) => q.id !== d.reply_to);
-        return;
-      case "event":
-        if (d.seq === 0 || !s.events.some((e) => e.seq === d.seq)) s.events.push(clone(d));
-        return;
-    }
+    return this.primary.ptyWrite(agent, data);
   }
 
   retime<T>(obj: T): T {
@@ -1080,31 +1424,11 @@ class MockDaemon implements Mock {
   }
 
   snapshot(params: { messages?: number; events?: number } = {}): Obj {
-    const s = this.state;
-    return clone({
-      session: s.session,
-      agents: s.agents,
-      tasks: s.tasks,
-      messages: newest(s.messages, limitOf(params.messages, 200, 2000)),
-      events: newest(s.events, limitOf(params.events, 300, 5000)),
-      questions: s.questions,
-      server_time: this.now(),
-    });
+    return this.primary.snapshot(params);
   }
 
   holdSnapshot(): () => void {
-    let release: () => void = () => {};
-    const hold: Hold = {
-      promise: new Promise<void>((r) => {
-        release = r;
-      }),
-      release: () => {
-        this.#holds = this.#holds.filter((h) => h !== hold);
-        release();
-      },
-    };
-    this.#holds.push(hold);
-    return hold.release;
+    return this.primary.holdSnapshot();
   }
 
   dropSockets(): void {
@@ -1113,9 +1437,9 @@ class MockDaemon implements Mock {
 
   async shutdown(): Promise<void> {
     this.#stopping = true;
-    this.push({ kind: "shutdown" });
+    for (const conn of this.#conns) if (conn.open && conn.workspace === null) conn.push({ kind: "shutdown" });
     const conns = [...this.#conns];
-    for (const conn of conns) conn.close(1001, "the daemon stopped");
+    for (const conn of conns) conn.close(1001, "the dashboard's server stopped");
     await Promise.all(conns.map((c) => c.ended()));
   }
 
@@ -1123,7 +1447,7 @@ class MockDaemon implements Mock {
     if (this.#stopped) return;
     this.#stopped = true;
     this.#stopping = true;
-    for (const hold of [...this.#holds]) hold.release();
+    for (const ws of this.workspaces) for (const hold of [...ws.holds]) hold.release();
     for (const w of this.#waiters.splice(0)) {
       clearTimeout(w.timer);
       w.reject(new Error("the mock stopped"));

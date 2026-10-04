@@ -3,7 +3,7 @@ import { readdirSync, readFileSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { beforeEach, expect, test } from "vitest";
 import { Session, STORAGE_KEY, proves, takePairCode } from "../src/net/session";
-import { createLink } from "../src/net/state";
+import { createHub } from "../src/net/hub";
 import { FakeSocket, MemoryStorage, fakeEnv, settle, sha256 } from "./fakes";
 
 beforeEach(() => {
@@ -35,11 +35,22 @@ test("the #pair= fragment is removed from the address before anything else", () 
   expect(calls.length).toBe(2);
 });
 
+test("#pair=<code>&w=<id> leaves the address of that workspace, and only of a well-formed id", () => {
+  const calls: string[] = [];
+  const hist = { replaceState: (_d: unknown, _u: string, url?: string) => calls.push(url!) };
+  expect(takePairCode({ hash: "#pair=3f9a0e1&w=946d4617aa702870", pathname: "/", search: "" }, hist)).toBe("3f9a0e1");
+  expect(calls).toEqual(["/#/w/946d4617aa702870/"]);
+  expect(takePairCode({ hash: "#pair=3f9a0e1&w=../../etc", pathname: "/", search: "" }, hist)).toBe("3f9a0e1");
+  expect(calls[1]).toBe("/");
+  expect(takePairCode({ hash: "#pair=<x>&w=946d4617aa702870", pathname: "/", search: "" }, hist)).toBeNull();
+  expect(calls[2]).toBe("/#/w/946d4617aa702870/");
+});
+
 test("a code is always traded, even with a stored session, and the new session is adopted", async () => {
   const st = new MemoryStorage();
   st.setItem(STORAGE_KEY, JSON.stringify({ token: "old", verifier: sha256("old-secret") }));
   const session = new Session(st, "the-code");
-  const link = createLink(fakeEnv(), session, { snapshot() {}, push: () => true, shutdown() {}, now: Date.now });
+  const link = createHub(fakeEnv(), session);
   link.start();
   const s = FakeSocket.all[0];
   s.open();
@@ -52,7 +63,7 @@ test("a code is always traded, even with a stored session, and the new session i
   // Token and verifier under the one key, and nowhere else; the proof nowhere.
   expect([...st.map.keys()]).toEqual([STORAGE_KEY]);
   expect(JSON.parse(st.map.get(STORAGE_KEY)!)).toEqual({ token: "new", verifier: sha256("new-secret") });
-  s.reply(s.last("hello").id, { role: "operator", protocol: 5, version: "x", pid: 1, web_proof: "new-secret" });
+  s.reply(s.last("hello").id, { role: "operator", protocol: 6, version: "x", pid: 1, web_proof: "new-secret" });
   await settle();
   expect(JSON.stringify([...st.map.values()])).not.toContain("new-secret");
 });
@@ -60,7 +71,7 @@ test("a code is always traded, even with a stored session, and the new session i
 test("a spent code with a stored session uses the stored one; without one the page is signed out", async () => {
   const st = new MemoryStorage();
   st.setItem(STORAGE_KEY, JSON.stringify({ token: "kept", verifier: sha256("x") }));
-  const link = createLink(fakeEnv(), new Session(st, "spent"), { snapshot() {}, push: () => true, shutdown() {}, now: Date.now });
+  const link = createHub(fakeEnv(), new Session(st, "spent"));
   link.start();
   let s = FakeSocket.all[0];
   s.open();
@@ -71,7 +82,7 @@ test("a spent code with a stored session uses the stored one; without one the pa
 
   FakeSocket.all = [];
   const empty = new MemoryStorage();
-  const link2 = createLink(fakeEnv(), new Session(empty, "spent"), { snapshot() {}, push: () => true, shutdown() {}, now: Date.now });
+  const link2 = createHub(fakeEnv(), new Session(empty, "spent"));
   link2.start();
   s = FakeSocket.all[0];
   s.open();
@@ -83,7 +94,7 @@ test("a spent code with a stored session uses the stored one; without one the pa
 });
 
 test("without a code or a session the page is signed out and asks nothing", async () => {
-  const link = createLink(fakeEnv(), new Session(new MemoryStorage(), null), { snapshot() {}, push: () => true, shutdown() {}, now: Date.now });
+  const link = createHub(fakeEnv(), new Session(new MemoryStorage(), null));
   link.start();
   FakeSocket.all[0].open();
   await settle();
@@ -98,14 +109,14 @@ test("the key is read once: later changes to the storage change nothing the page
   expect(st.reads).toBe(1);
   // Another document of the origin rewrites the storage.
   st.setItem(STORAGE_KEY, JSON.stringify({ token: "attacker", verifier: sha256("attacker") }));
-  const link = createLink(fakeEnv(), session, { snapshot() {}, push: () => true, shutdown() {}, now: Date.now });
+  const link = createHub(fakeEnv(), session);
   link.start();
   let s = FakeSocket.all[0];
   s.open();
   await settle();
   expect(s.last("hello").params.token).toBe("first");
   // A reconnect still checks against the first verifier: the attacker's proof is refused.
-  s.reply(s.last("hello").id, { role: "operator", protocol: 5, version: "x", pid: 1, web_proof: "attacker" });
+  s.reply(s.last("hello").id, { role: "operator", protocol: 6, version: "x", pid: 1, web_proof: "attacker" });
   await settle();
   expect(link.conn()).toBe("stopped");
   expect(st.reads).toBe(1);

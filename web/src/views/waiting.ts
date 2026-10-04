@@ -1,6 +1,6 @@
 // What a pane that fetches from the daemon says while it waits.
 
-import type { Link } from "../net/state";
+import type { WorkspaceLink as Link } from "../net/workspace";
 
 /** What a pane that fetches says while the page cannot ask: `reading` while
  * it is live and waiting for the answer. */

@@ -1,8 +1,12 @@
-// One WebSocket is one daemon connection (notes/web-design.md §transport):
-// `crew_core::rpc` frames, one JSON object per text message. This module owns
+// One WebSocket is one connection (notes/web-design.md §transport,
+// notes/web-multi.md §multi-transport): `crew_core::rpc` frames, one JSON
+// object per text message. A `hello` without a workspace is the index
+// connection, answered by the dashboard server itself; with one, a
+// workspace's daemon connection passed through the server. This module owns
 // the handshake (pairing, `hello`, the server's proof), calls with their
 // timeouts, and reconnecting. It knows nothing of what the connection is for:
-// the state socket (net/state.ts) and terminal sockets (term/) build on it.
+// the index (net/hub.ts), a workspace's state socket (net/workspace.ts) and
+// terminal sockets (term/) build on it.
 
 import { DecodeError, PROTOCOL, decodeFrame, decodeHello, decodePaired, type Push, type RpcError } from "../protocol";
 import { proves, type Credential, type Session } from "./session";
@@ -11,7 +15,7 @@ import { proves, type Credential, type Session } from "./session";
 export type ConnState = "connecting" | "live" | "reconnecting" | "signed-out" | "stopped";
 
 export type StopReason =
-  /** The daemon said it shuts down. */
+  /** The dashboard's server said it shuts down. */
   | "shutdown"
   /** Whoever answered could not prove it is this page's server. */
   | "proof"
@@ -21,8 +25,24 @@ export type StopReason =
   | "unauthorized"
   /** No session and no pairing code, or the code was spent. */
   | "no-session"
-  /** The daemon speaks another protocol version. */
+  /** The server speaks another protocol version. */
   | "protocol";
+
+/** How a connection that does not reconnect ended, for its owner to judge
+ * (a workspace's attempt, notes/web-multi.md §multi-ui "What an outcome
+ * does"). Nothing here says what became of the workspace. */
+export type Ending =
+  /** The socket closed: 4001 (the daemon's side ended), 4002 (taken out of
+   * the dashboard), or any other code. */
+  | { kind: "closed"; code: number }
+  /** `hello` was answered with an error: `not_found`, `unavailable`, `protocol`. */
+  | { kind: "refused"; code: string; message: string }
+  /** A call of the handshake failed or timed out, or the socket never opened. */
+  | { kind: "failed" };
+
+/** Close codes of the dashboard server on a workspace connection. */
+export const CLOSE_DAEMON_ENDED = 4001;
+export const CLOSE_TAKEN_OUT = 4002;
 
 export class CallError extends Error {
   constructor(readonly code: string, message: string) {
@@ -88,9 +108,14 @@ type Waiter = { ok(v: unknown): void; err(e: CallError): void; timer: number };
 export type ConnOptions = {
   env: Env;
   session: Session;
-  /** Reconnect when the connection drops (the state socket); a terminal
-   * socket does not, it is made again when the state socket is live. */
+  /** Reconnect when the connection drops (the index); a workspace's state
+   * socket and a terminal socket do not: their owners decide when to try
+   * again. */
   reconnect: boolean;
+  /** The workspace this connection is for, sent in `hello`; absent for the
+   * index. A workspace's `hello` refused with anything but `unauthorized`
+   * ends the connection (`ending`) instead of stopping the page. */
+  workspace?: string;
   /** The server proved itself: start using the connection (subscribe and
    * snapshot, or attach). A throw closes the connection, which then
    * reconnects as any other failure. */
@@ -115,6 +140,8 @@ export class Conn {
   private stoppedFor: StopReason | null = null;
   private isLive = false;
   private generation = 0;
+  /** Why it ended, once it did without being stopped or closed by its owner. */
+  ending: Ending | null = null;
 
   constructor(private readonly o: ConnOptions) {}
 
@@ -246,7 +273,9 @@ export class Conn {
       const left = Math.max(0, this.failingSince + GIVE_UP_MS - this.o.env.now());
       this.deadline = this.o.env.setTimeout(() => {
         this.deadline = null;
-        if (this.failingSince !== null) this.stop("gone");
+        if (this.failingSince === null) return;
+        this.ending ??= { kind: "failed" };
+        this.stop("gone");
       }, left);
     }
     this.retryTimer = null;
@@ -259,8 +288,10 @@ export class Conn {
     ws.onmessage = (ev: MessageEvent) => {
       if (generation === this.generation) this.frame(ev.data);
     };
-    ws.onclose = () => {
-      if (generation === this.generation) this.lost();
+    ws.onclose = (ev: CloseEvent) => {
+      if (generation !== this.generation) return;
+      this.ending ??= { kind: "closed", code: typeof ev?.code === "number" ? ev.code : 1006 };
+      this.lost();
     };
     ws.onerror = () => {};
   }
@@ -313,11 +344,19 @@ export class Conn {
       const credential: Credential | null = this.o.session.current();
       if (!credential) return this.stop("no-session");
       let hello;
+      const params: Record<string, unknown> = { role: "operator", token: credential.token, client: "web", protocol: PROTOCOL };
+      if (this.o.workspace !== undefined) params.workspace = this.o.workspace;
       try {
-        hello = await this.request("hello", { role: "operator", token: credential.token, client: "web", protocol: PROTOCOL }, decodeHello);
+        hello = await this.request("hello", params, decodeHello);
       } catch (e) {
         if (!current()) return;
         if (e instanceof CallError && e.code === "unauthorized") return this.stop("unauthorized");
+        // A workspace's refusal is about this attempt: its owner judges it.
+        if (e instanceof CallError && this.o.workspace !== undefined && !["timeout", "closed", "invalid"].includes(e.code)) {
+          this.ending = { kind: "refused", code: e.code, message: e.message };
+          this.drop();
+          return this.lost();
+        }
         if (e instanceof CallError && e.code === "protocol") return this.stop("protocol", e.message);
         throw e;
       }
@@ -335,6 +374,7 @@ export class Conn {
     } catch {
       // A call failed or timed out: start over on a new connection.
       if (current()) {
+        this.ending ??= { kind: "failed" };
         this.drop();
         this.lost();
       }
@@ -348,6 +388,7 @@ export class Conn {
     this.failAll("closed", "connection closed");
     if (this.stoppedFor) return;
     if (!this.o.reconnect) {
+      this.clearDeadline();
       this.stoppedFor = "gone";
       this.o.state("stopped", "gone");
       return;

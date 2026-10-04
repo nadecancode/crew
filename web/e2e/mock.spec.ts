@@ -11,7 +11,7 @@ import type { Socket } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { expect, test } from "@playwright/test";
-import { NO_REPLY, contentSecurityPolicy, startMock } from "../dev/mock.ts";
+import { NO_REPLY, WORKSPACE_IDS, contentSecurityPolicy, startMock } from "../dev/mock.ts";
 import type { Mock, MockOptions } from "../dev/mock.ts";
 
 // A bundle of known files, so that the answers can be checked exactly.
@@ -213,14 +213,15 @@ class Ws {
 }
 
 const sha256 = (s: string) => createHash("sha256").update(s).digest("hex");
-const hello = (token: string, extra: object = {}) => ({ role: "operator", token, client: "test", protocol: 5, ...extra });
+/** A workspace connection's hello (the first workspace's), unless `extra` says otherwise; `{ workspace: undefined }` is the index's. */
+const hello = (token: string, extra: object = {}) => ({ role: "operator", token, client: "test", protocol: 6, workspace: WORKSPACE_IDS[0], ...extra });
 const quiet = (ms: number) => new Promise((done) => setTimeout(done, ms));
 
-/** A connection that paired and said hello. */
-async function signedIn(mock: Mock): Promise<{ ws: Ws; token: string; verifier: string; info: any }> {
+/** A connection that paired and said hello: to the first workspace, unless `extra` says otherwise. */
+async function signedIn(mock: Mock, extra: object = {}): Promise<{ ws: Ws; token: string; verifier: string; info: any }> {
   const ws = await Ws.open(mock);
   const paired = await ws.call("web_pair", { code: mock.code() });
-  const answered = await ws.call("hello", hello(paired.result.token));
+  const answered = await ws.call("hello", hello(paired.result.token, extra));
   expect(answered.error).toBeUndefined();
   return { ws, token: paired.result.token, verifier: paired.result.verifier, info: answered.result };
 }
@@ -431,7 +432,7 @@ test("a pairing code works once, and the proof hashes to the verifier", async ()
   expect((await ws.call("web_pair", { code: expired })).error.code).toBe("unauthorized");
 
   const info = (await ws.call("hello", hello(token))).result;
-  expect(info).toMatchObject({ role: "operator", agent_id: null, project: "checkout-rewrite", protocol: 5 });
+  expect(info).toMatchObject({ role: "operator", agent_id: null, project: "checkout-rewrite", protocol: 6 });
   expect(typeof info.pid).toBe("number");
   expect(sha256(info.web_proof)).toBe(verifier);
   expect(info.web_proof).not.toBe(verifier);
@@ -452,7 +453,7 @@ test("hello refuses a wrong token, role or protocol, without a proof", async () 
   const ws = await Ws.open(mock);
   const refused = [
     [hello("nope"), "unauthorized"],
-    [{ role: "operator", client: "test", protocol: 5 }, "unauthorized"],
+    [{ role: "operator", client: "test", protocol: 6 }, "unauthorized"],
     [hello(token, { role: "agent", agent_id: "claude-1" }), "unauthorized"],
     [hello(token, { protocol: 4 }), "protocol"],
   ] as const;
@@ -461,7 +462,7 @@ test("hello refuses a wrong token, role or protocol, without a proof", async () 
     expect(reply.error.code).toBe(code);
     expect(reply.result).toBeUndefined();
   }
-  expect((await ws.call("hello", hello(token, { protocol: 4 }))).error.message).toBe("client speaks protocol 4, daemon speaks 5");
+  expect((await ws.call("hello", hello(token, { protocol: 4 }))).error.message).toBe("client speaks protocol 4, server speaks 6");
   // A failed hello leaves the connection as it was.
   expect((await ws.call("snapshot", {})).error.code).toBe("unauthorized");
   expect((await ws.call("hello", hello(token))).result.role).toBe("operator");
@@ -619,7 +620,9 @@ test("the other calls answer from the state or results.json, unless overridden",
   expect((await ws.call("events", { agent: "claude-5", limit: 10 })).result.every((e: any) => e.agent_id === "claude-5")).toBe(true);
   expect((await ws.call("history", { limit: 3 })).result).toEqual(mock.state.messages.slice(-3));
   expect((await ws.call("message_get", { id: "m-0001" })).result.id).toBe("m-0001");
-  for (const method of ["web_open", "web_close", "load_team"]) expect((await ws.call(method, {})).error.code, method).toBe("forbidden");
+  // The daemon no longer serves the dashboard's own calls; a web session cannot load a team.
+  for (const method of ["web_open", "web_close"]) expect((await ws.call(method, {})).error.code, method).toBe("invalid");
+  expect((await ws.call("load_team", {})).error.code).toBe("forbidden");
   expect((await ws.call("no_such_call", {})).error).toEqual({ code: "invalid", message: "malformed request: unknown variant `no_such_call`" });
 
   mock.on("models_list", () => {
@@ -637,15 +640,19 @@ test("the other calls answer from the state or results.json, unless overridden",
   expect((await ws.call("models_list")).result).toEqual(results.models_list[0]);
 });
 
-test("web_prefs keeps an object of at most 16 KiB", async () => {
+test("web_prefs keeps an object of at most 16 KiB: the workspace's on its connection, the server's on the index", async () => {
   const mock = await start();
   const { ws } = await signedIn(mock);
   expect((await ws.call("web_prefs", {})).result).toEqual({ prefs: {} });
-  expect((await ws.call("web_prefs", { set: { keys: false, layout: { "claude-1": [1, 2] } } })).result.prefs.keys).toBe(false);
-  expect((await (await signedIn(mock)).ws.call("web_prefs")).result).toEqual({ prefs: { keys: false, layout: { "claude-1": [1, 2] } } });
-  expect(mock.prefs).toEqual({ keys: false, layout: { "claude-1": [1, 2] } });
+  expect((await ws.call("web_prefs", { set: { layout: { "claude-1": [1, 2] } } })).result.prefs.layout).toEqual({ "claude-1": [1, 2] });
+  expect((await (await signedIn(mock)).ws.call("web_prefs")).result).toEqual({ prefs: { layout: { "claude-1": [1, 2] } } });
+  expect(mock.workspace().prefs).toEqual({ layout: { "claude-1": [1, 2] } });
   expect((await ws.call("web_prefs", { set: [1] })).error.code).toBe("invalid");
   expect((await ws.call("web_prefs", { set: { big: "x".repeat(17_000) } })).error.code).toBe("invalid");
+  const index = await signedIn(mock, { workspace: undefined });
+  expect((await index.ws.call("web_prefs", { set: { keys: false, last: WORKSPACE_IDS[0] } })).result.prefs.keys).toBe(false);
+  expect(mock.prefs).toEqual({ keys: false, last: WORKSPACE_IDS[0] });
+  expect(mock.workspace().prefs).toEqual({ layout: { "claude-1": [1, 2] } });
 });
 
 test("attach turns a connection into a terminal", async () => {
@@ -684,20 +691,131 @@ test("dropSockets ends every WebSocket without a close frame", async () => {
   expect((await (await Ws.open(mock)).call("hello", hello(one.token))).result.role).toBe("operator");
 });
 
-test("shutdown pushes shutdown, closes, and refuses from then on", async () => {
+test("shutdown (the server's) pushes shutdown on the index, closes every connection, and refuses from then on", async () => {
   const mock = await start();
+  const index = await signedIn(mock, { workspace: undefined });
   const { ws, token } = await signedIn(mock);
   await ws.call("subscribe");
   const terminal = await signedIn(mock);
   await terminal.ws.call("attach", { agent: "claude-1", rows: 24, cols: 80 });
   const code = mock.code();
   await mock.shutdown();
-  expect(ws.frames.at(-1)).toEqual({ push: { kind: "shutdown" } });
+  expect(index.ws.frames.at(-1)).toEqual({ push: { kind: "shutdown" } });
+  expect(ws.frames.some((f) => f.push?.kind === "shutdown")).toBe(false);
+  expect(await index.ws.closed).toBe(1001);
   expect(await ws.closed).toBe(1001);
   expect(await terminal.ws.closed).toBe(1001);
   const late = await Ws.open(mock);
   expect((await late.call("hello", hello(token))).error.code).toBe("unavailable");
   expect((await late.call("web_pair", { code })).error.code).toBe("unavailable");
+});
+
+// ---- the index and the workspaces ------------------------------------------------
+
+const TWO = { workspaces: [{ fixture: "snapshot" as const }, { fixture: "team10" as const, project: "search", workspace: "/home/op/work/search" }], others: [{ id: "4c2e8a1b9d0f3e57", project: "docs", workspace: "/home/op/work/docs" }] };
+
+test("the index: the server's hello, the listing with its revision, and nothing of a daemon", async () => {
+  const mock = await start(TWO);
+  const { ws, info } = await signedIn(mock, { workspace: undefined });
+  expect(info).toMatchObject({ role: "operator", project: null, protocol: 6 });
+  expect(typeof info.web_proof).toBe("string");
+  const listing = (await ws.call("workspaces")).result;
+  expect(listing.rev).toBe(mock.rev);
+  expect(listing.joined.map((e: any) => [e.id, e.project, e.state, e.generation])).toEqual([
+    [WORKSPACE_IDS[0], "checkout-rewrite", "running", 1],
+    [WORKSPACE_IDS[1], "search", "running", 2],
+  ]);
+  expect(listing.joined[1].summary).toMatchObject({ agents: 11, project: "search" });
+  expect(listing.others).toEqual(TWO.others);
+  for (const method of ["subscribe", "snapshot", "send"]) expect((await ws.call(method, {})).error.code, method).toBe("invalid");
+  expect((await ws.call("ping")).result).toEqual({ pong: true });
+});
+
+test("a workspace's hello: refused not_found, unavailable, protocol as the listing says; each its own daemon", async () => {
+  const mock = await start(TWO);
+  const { token } = await signedIn(mock);
+  const say = async (workspace: string) => (await (await Ws.open(mock)).call("hello", hello(token, { workspace })));
+  expect((await say("ffffffffffffffff")).error.code).toBe("not_found");
+  expect((await say(WORKSPACE_IDS[1])).result.project).toBe("search");
+  mock.stopDaemon(WORKSPACE_IDS[1]);
+  expect((await say(WORKSPACE_IDS[1])).error.code).toBe("unavailable");
+  mock.setStatus(WORKSPACE_IDS[1], "incompatible", "started by another version of crew (protocol 5): restart the team");
+  expect((await say(WORKSPACE_IDS[1])).error.code).toBe("protocol");
+  mock.remove(WORKSPACE_IDS[0]);
+  expect((await say(WORKSPACE_IDS[0])).error.code).toBe("not_found");
+  // Pushes reach their own workspace's subscribers only.
+  const b = await Ws.open(mock);
+  mock.startDaemon(WORKSPACE_IDS[1]);
+  await b.call("hello", hello(token, { workspace: WORKSPACE_IDS[1] }));
+  await b.call("subscribe");
+  expect(mock.workspace(1).push({ kind: "agent_removed", data: { id: "claude-1" } })).toBe(1);
+  expect(mock.push({ kind: "agent_removed", data: { id: "claude-1" } })).toBe(0);
+});
+
+test("a daemon that stops: its shutdown push, 4001, the listing says stopped; it starts again with another pid", async () => {
+  const mock = await start(TWO);
+  const index = await signedIn(mock, { workspace: undefined });
+  const { ws } = await signedIn(mock);
+  await ws.call("subscribe");
+  const rev = mock.rev;
+  mock.stopDaemon(WORKSPACE_IDS[0]);
+  expect(await ws.next((f) => f.push?.kind === "shutdown")).toEqual({ push: { kind: "shutdown" } });
+  expect(await ws.closed).toBe(4001);
+  const pushed = (await index.ws.next((f) => f.push?.kind === "workspaces")).push.data;
+  expect(pushed.rev).toBe(rev + 1);
+  expect(pushed.joined[0]).toMatchObject({ state: "stopped", daemon: null });
+  expect(pushed.joined[0].summary.agents).toBe(7);
+  mock.startDaemon(WORKSPACE_IDS[0]);
+  const again = (await index.ws.next((f) => f.push?.kind === "workspaces")).push.data;
+  expect(again.joined[0].state).toBe("running");
+  expect(again.joined[0].daemon.pid).not.toBe(pushed.joined[0].daemon?.pid);
+});
+
+test("removed and joined again in one listing; the old connection's 4002 held back, nothing of it forwarded meanwhile", async () => {
+  const mock = await start(TWO);
+  const index = await signedIn(mock, { workspace: undefined });
+  const { ws } = await signedIn(mock);
+  const t0 = Date.now();
+  mock.removeAndRejoin(WORKSPACE_IDS[0], { holdCloseMs: 300 });
+  const pushed = (await index.ws.next((f) => f.push?.kind === "workspaces")).push.data;
+  expect(pushed.joined.find((e: any) => e.id === WORKSPACE_IDS[0]).generation).toBe(3);
+  const asked = ws.request("ping");
+  expect(await ws.closed).toBe(4002);
+  expect(Date.now() - t0).toBeGreaterThanOrEqual(280);
+  expect(ws.frames.some((f) => f.id === asked)).toBe(false);
+  mock.remove(WORKSPACE_IDS[1]);
+  expect((await index.ws.next((f) => f.push?.kind === "workspaces")).push.data.joined.map((e: any) => e.id)).toEqual([WORKSPACE_IDS[0]]);
+  mock.join(WORKSPACE_IDS[1]);
+  expect((await index.ws.next((f) => f.push?.kind === "workspaces")).push.data.joined.at(-1)).toMatchObject({ id: WORKSPACE_IDS[1], generation: 4 });
+});
+
+test("holdHello answers the next hello late, with the code given; a message with a line break closes with 1008", async () => {
+  const mock = await start(TWO);
+  const { token } = await signedIn(mock);
+  mock.workspace(0).holdHello("protocol", 200);
+  const t0 = Date.now();
+  const late = await (await Ws.open(mock)).call("hello", hello(token));
+  expect(late.error.code).toBe("protocol");
+  expect(Date.now() - t0).toBeGreaterThanOrEqual(190);
+  expect((await (await Ws.open(mock)).call("hello", hello(token))).result.role).toBe("operator");
+  const ws = await Ws.open(mock);
+  ws.sendText('{"id":1,"method":"ping"}\n{"id":2,"method":"ping"}');
+  expect(await ws.closed).toBe(1008);
+  expect(ws.frames).toEqual([]);
+});
+
+test("the summary follows the daemon's state: a question raises it and pushes the listing", async () => {
+  const mock = await start(TWO);
+  const index = await signedIn(mock, { workspace: undefined });
+  const before = mock.listing().joined[1].summary;
+  mock.workspace(1).push({ kind: "message", data: { id: "q-77", from: "orchestrator", to: "operator", type: "question", body: "Ship it?", timestamp: mock.now() } });
+  const pushed = (await index.ws.next((f) => f.push?.kind === "workspaces")).push.data;
+  expect(pushed.joined[1].summary.questions).toBe(before.questions + 1);
+  expect(pushed.joined[1].summary.rev).toBe(before.rev + 1);
+  // A push that changes no count changes no summary and pushes no listing.
+  const rev = mock.rev;
+  mock.workspace(1).push({ kind: "event", data: { seq: 0, timestamp: mock.now(), source: "x", event_type: "x", message: "", level: "info" } });
+  expect(mock.rev).toBe(rev);
 });
 
 test("waitForCall sees calls made and to come, and gives up", async () => {

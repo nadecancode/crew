@@ -4,14 +4,14 @@
 //
 // xterm.js with the `fit` addon only: no clipboard addon, so OSC 52 cannot
 // write the operator's clipboard; title changes are ignored; hyperlinks open
-// only when they are http(s). Each terminal is a WebSocket of its own:
-// `hello`, then `attach`; output arrives as `pty` pushes, keys go out as
+// only when they are http(s). Each terminal is a WebSocket of its own, a
+// connection to the workspace on screen: `hello` with its id, then `attach`; output arrives as `pty` pushes, keys go out as
 // `attach_input`, size changes as `attach_resize`.
 
 import { FitAddon } from "@xterm/addon-fit";
 import { Terminal } from "@xterm/xterm";
 import "@xterm/xterm/css/xterm.css";
-import { Conn, type ConnState, type Env } from "../net/conn";
+import { Conn, type ConnState, type Env, type StopReason } from "../net/conn";
 import type { Session } from "../net/session";
 import { safeHref } from "../text";
 
@@ -21,12 +21,15 @@ export const MIN_ROWS = 24;
 
 export type TerminalOptions = {
   agent: string;
+  /** The workspace on screen. */
+  workspace: string;
   env: Env;
   session: Session;
   /** The socket's state: `live` once attached; `stopped` when it closed. */
   state(s: ConnState, reason?: string): void;
-  /** The server failed its proof on this socket: the whole page stops. */
-  proofFailed(): void;
+  /** The server failed its proof on this socket, or the session is gone:
+   * the whole page stops (notes/web-multi.md §multi-ui "Two levels"). */
+  stopPage(reason: StopReason): void;
   /** The process ended. */
   ended(): void;
 };
@@ -110,6 +113,7 @@ export function mountTerminal(host: HTMLElement, o: TerminalOptions): TerminalHa
     env: o.env,
     session: o.session,
     reconnect: false,
+    workspace: o.workspace,
     async ready(c) {
       await c.call("attach", { agent: o.agent, rows: term.rows, cols: term.cols });
     },
@@ -125,7 +129,7 @@ export function mountTerminal(host: HTMLElement, o: TerminalOptions): TerminalHa
       }
     },
     state(s, reason) {
-      if (reason === "proof") o.proofFailed();
+      if (reason === "proof" || reason === "unauthorized") o.stopPage(reason);
       o.state(s, reason);
     },
   });

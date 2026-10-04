@@ -21,7 +21,7 @@ test("resync asks for a snapshot again on the same connection", async ({ page, m
   const before = mock.calls.filter((c) => c.method === "snapshot").length;
   mock.push({ kind: "resync" });
   await expect.poll(() => mock.calls.filter((c) => c.method === "snapshot").length).toBe(before + 1);
-  expect(mock.calls.filter((c) => c.method === "hello").length).toBe(1);
+  expect(mock.calls.filter((c) => c.method === "hello" && c.params?.workspace).length).toBe(1);
 });
 
 test("a resync snapshot that times out starts over on a new connection, which brings the page up to date", async ({ page, mock, openPage, csp }) => {
@@ -34,7 +34,7 @@ test("a resync snapshot that times out starts over on a new connection, which br
   await mock.waitForCall("snapshot", (c) => c.seq >= n);
   await page.waitForTimeout(3300);
   release();
-  await expect.poll(() => mock.calls.filter((c) => c.method === "hello").length, { timeout: 10_000 }).toBe(2);
+  await expect.poll(() => mock.calls.filter((c) => c.method === "hello" && c.params?.workspace).length, { timeout: 10_000 }).toBe(2);
   await expect(page.locator('[data-conn="live"]')).toBeAttached({ timeout: 10_000 });
   await expect(activity(page, "claude-1")).toHaveText("▸ Changed during the lag");
   expect(csp).toEqual([]);
@@ -58,11 +58,11 @@ test("a push between the page's snapshot and its reply is not shown; one after i
   await expect(activity(page, "claude-2")).toHaveText("▸ After");
 });
 
-test("shutdown ends the page: no retry, the storage emptied, what it showed kept, every control disabled", async ({ page, mock, openPage }) => {
+test("the server's shutdown ends the page: no retry, the storage emptied, what it showed kept, every control disabled", async ({ page, mock, openPage }) => {
   await openPage();
   await mock.shutdown();
   await expect(page.locator('[data-conn="stopped"]')).toBeAttached();
-  await expect(page.locator(".conn-bar")).toContainText("The team was stopped at");
+  await expect(page.locator(".conn-bar")).toContainText("The dashboard's server was stopped at");
   expect(await page.evaluate(() => localStorage.getItem("crew.web.session"))).toBeNull();
   await expect(page.locator(".node.member")).toHaveCount(6);
   await expect(page.getByRole("button", { name: "stop team" })).toBeDisabled();

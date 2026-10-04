@@ -41,9 +41,10 @@ export class FakeSocket {
   push(kind: string, data?: unknown) {
     this.frame({ push: data === undefined ? { kind } : { kind, data } });
   }
-  drop() {
+  /** Closed by the server's side: with `code` as a close frame says it, else 1006. */
+  drop(code = 1006) {
     this.readyState = 3;
-    this.onclose?.({});
+    this.onclose?.({ code });
   }
   /** The last request of `method` the page sent. */
   last(method: string) {
@@ -51,6 +52,10 @@ export class FakeSocket {
   }
   methods() {
     return this.sent.map((r) => r.method);
+  }
+  /** The `workspace` its `hello` named; undefined for the index. */
+  get workspace(): string | undefined {
+    return this.sent.find((r) => r.method === "hello")?.params?.workspace;
   }
 }
 
