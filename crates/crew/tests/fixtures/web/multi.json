@@ -1,0 +1,410 @@
+{
+  "close": {
+    "line_break": {
+      "code": 1008,
+      "reason": "one request per message: no line breaks"
+    },
+    "workspace_ended": {
+      "code": 4001,
+      "reason": "the workspace's connection ended"
+    },
+    "workspace_removed": {
+      "code": 4002,
+      "reason": "taken out of this dashboard"
+    }
+  },
+  "daemon_refusals": {
+    "web_close": {
+      "error": {
+        "code": "invalid",
+        "message": "web_close is served by the dashboard server: run `crew web --stop`"
+      },
+      "id": 9
+    },
+    "web_open": {
+      "error": {
+        "code": "invalid",
+        "message": "web_open is served by the dashboard server: run `crew web`"
+      },
+      "id": 8
+    },
+    "web_pair": {
+      "error": {
+        "code": "invalid",
+        "message": "web_pair is served by the dashboard server: open the address `crew web` prints"
+      },
+      "id": 10
+    }
+  },
+  "hello": {
+    "index": {
+      "reply": {
+        "id": 1,
+        "result": {
+          "agent_id": null,
+          "pid": 31337,
+          "project": null,
+          "protocol": 6,
+          "role": "operator",
+          "version": "0.1.0",
+          "web_proof": "pr00f5ecretpr00f5ecretpr00f5ecretpr00f5ecret"
+        }
+      },
+      "request": {
+        "id": 1,
+        "method": "hello",
+        "params": {
+          "agent_id": null,
+          "client": "web",
+          "protocol": 6,
+          "role": "operator",
+          "token": "t0kent0kent0kent0kent0kent0kent0kent0kent0k"
+        }
+      }
+    },
+    "workspace": {
+      "reply": {
+        "id": 1,
+        "result": {
+          "agent_id": null,
+          "pid": 4242,
+          "project": "payments",
+          "protocol": 6,
+          "role": "operator",
+          "version": "0.1.0",
+          "web_proof": "pr00f5ecretpr00f5ecretpr00f5ecretpr00f5ecret"
+        }
+      },
+      "request": {
+        "id": 1,
+        "method": "hello",
+        "params": {
+          "agent_id": null,
+          "client": "web",
+          "protocol": 6,
+          "role": "operator",
+          "token": "t0kent0kent0kent0kent0kent0kent0kent0kent0k",
+          "workspace": "946d4617aa702870"
+        }
+      },
+      "to_daemon": {
+        "id": 0,
+        "method": "hello",
+        "params": {
+          "agent_id": null,
+          "client": "web",
+          "protocol": 6,
+          "role": "operator",
+          "token": "daem0nt0kendaem0nt0kendaem0nt0kendaem0nt0k",
+          "web": true
+        }
+      }
+    },
+    "workspace_refused": {
+      "not_found": {
+        "error": {
+          "code": "not_found",
+          "message": "workspace 0b54c1d2e3f4a596 is not in this dashboard: run `crew web` in it"
+        },
+        "id": 1
+      },
+      "protocol": {
+        "error": {
+          "code": "protocol",
+          "message": "infra was started by another version of crew (protocol 5): restart the team"
+        },
+        "id": 1
+      },
+      "unauthorized": {
+        "error": {
+          "code": "unauthorized",
+          "message": "this browser is signed out: run `crew web` and open the address it prints"
+        },
+        "id": 1
+      },
+      "unavailable": {
+        "error": {
+          "code": "unavailable",
+          "message": "billing is not running: start it (`crew run` in /home/op/work/billing)"
+        },
+        "id": 1
+      }
+    }
+  },
+  "summary": {
+    "push": {
+      "push": {
+        "data": {
+          "agents": 6,
+          "attention": 1,
+          "project": "payments",
+          "questions": 2,
+          "rev": 13,
+          "tasks": 6,
+          "tasks_done": 4,
+          "working": 3
+        },
+        "kind": "summary"
+      }
+    },
+    "reply": {
+      "id": 3,
+      "result": {
+        "agents": 6,
+        "attention": 1,
+        "project": "payments",
+        "questions": 2,
+        "rev": 12,
+        "tasks": 6,
+        "tasks_done": 4,
+        "working": 3
+      }
+    },
+    "request": {
+      "id": 3,
+      "method": "summary",
+      "params": {
+        "watch": true
+      }
+    }
+  },
+  "web_attach": {
+    "reply": {
+      "id": 4,
+      "result": {
+        "attached": true
+      }
+    },
+    "request": {
+      "id": 4,
+      "method": "web_attach",
+      "params": {
+        "url": "http://c7f3a09b52e14d6f8a1b3c5d7e9f0a2b.localhost:23417/"
+      }
+    }
+  },
+  "web_close": {
+    "reply": {
+      "id": 7,
+      "result": {
+        "removed": true
+      }
+    },
+    "request": {
+      "id": 7,
+      "method": "web_close",
+      "params": {
+        "workspace": "0b54c1d2e3f4a596"
+      }
+    }
+  },
+  "web_event": {
+    "reply": {
+      "id": 5,
+      "result": {
+        "ok": true
+      }
+    },
+    "request": {
+      "id": 5,
+      "method": "web_event",
+      "params": {
+        "count": 3,
+        "kind": "paired"
+      }
+    }
+  },
+  "web_open": {
+    "reply": {
+      "id": 6,
+      "result": {
+        "expires_in_secs": 120,
+        "joined": [
+          "946d4617aa702870"
+        ],
+        "pair_url": "http://c7f3a09b52e14d6f8a1b3c5d7e9f0a2b.localhost:23417/#pair=3f9ac0dec0dec0dec0dec0dec0dec0dec0dec0dee1&w=946d4617aa702870",
+        "port": 23417,
+        "started": true,
+        "url": "http://c7f3a09b52e14d6f8a1b3c5d7e9f0a2b.localhost:23417/",
+        "workspace": "946d4617aa702870",
+        "workspace_url": "http://c7f3a09b52e14d6f8a1b3c5d7e9f0a2b.localhost:23417/#/w/946d4617aa702870/"
+      }
+    },
+    "request": {
+      "id": 6,
+      "method": "web_open",
+      "params": {
+        "port": null,
+        "workspace": "/home/op/work/payments/.crew"
+      }
+    }
+  },
+  "workspaces": {
+    "push": {
+      "push": {
+        "data": {
+          "joined": [
+            {
+              "daemon": {
+                "pid": 4242,
+                "started_at": 1759996400000
+              },
+              "detail": "",
+              "generation": 1,
+              "id": "946d4617aa702870",
+              "joined_at": 1759999940001,
+              "project": "payments",
+              "state": "running",
+              "summary": {
+                "agents": 6,
+                "attention": 1,
+                "project": "payments",
+                "questions": 2,
+                "rev": 12,
+                "tasks": 6,
+                "tasks_done": 4,
+                "working": 3
+              },
+              "workspace": "/home/op/work/payments"
+            },
+            {
+              "daemon": null,
+              "detail": "",
+              "generation": 2,
+              "id": "4c2e8a1b9d0f3e57",
+              "joined_at": 1759999940002,
+              "project": "billing",
+              "state": "stopped",
+              "summary": {
+                "agents": 6,
+                "attention": 1,
+                "project": "payments",
+                "questions": 2,
+                "rev": 12,
+                "tasks": 6,
+                "tasks_done": 4,
+                "working": 3
+              },
+              "workspace": "/home/op/work/billing"
+            },
+            {
+              "daemon": null,
+              "detail": "started by another version of crew (protocol 5): restart the team",
+              "generation": 3,
+              "id": "7a1d2c3b4e5f6071",
+              "joined_at": 1759999940003,
+              "project": "infra",
+              "state": "incompatible",
+              "summary": null,
+              "workspace": "/home/op/work/infra"
+            },
+            {
+              "daemon": null,
+              "detail": "its daemon did not answer within 2 s",
+              "generation": 5,
+              "id": "e0f1a2b3c4d5e6f7",
+              "joined_at": 1759999940005,
+              "project": "search",
+              "state": "unreachable",
+              "summary": null,
+              "workspace": "/home/op/work/search"
+            }
+          ],
+          "others": [
+            {
+              "id": "0b54c1d2e3f4a596",
+              "project": "docs",
+              "workspace": "/home/op/work/docs"
+            }
+          ],
+          "rev": 42
+        },
+        "kind": "workspaces"
+      }
+    },
+    "reply": {
+      "id": 2,
+      "result": {
+        "joined": [
+          {
+            "daemon": {
+              "pid": 4242,
+              "started_at": 1759996400000
+            },
+            "detail": "",
+            "generation": 1,
+            "id": "946d4617aa702870",
+            "joined_at": 1759999940001,
+            "project": "payments",
+            "state": "running",
+            "summary": {
+              "agents": 6,
+              "attention": 1,
+              "project": "payments",
+              "questions": 2,
+              "rev": 12,
+              "tasks": 6,
+              "tasks_done": 4,
+              "working": 3
+            },
+            "workspace": "/home/op/work/payments"
+          },
+          {
+            "daemon": null,
+            "detail": "",
+            "generation": 2,
+            "id": "4c2e8a1b9d0f3e57",
+            "joined_at": 1759999940002,
+            "project": "billing",
+            "state": "stopped",
+            "summary": {
+              "agents": 6,
+              "attention": 1,
+              "project": "payments",
+              "questions": 2,
+              "rev": 12,
+              "tasks": 6,
+              "tasks_done": 4,
+              "working": 3
+            },
+            "workspace": "/home/op/work/billing"
+          },
+          {
+            "daemon": null,
+            "detail": "started by another version of crew (protocol 5): restart the team",
+            "generation": 3,
+            "id": "7a1d2c3b4e5f6071",
+            "joined_at": 1759999940003,
+            "project": "infra",
+            "state": "incompatible",
+            "summary": null,
+            "workspace": "/home/op/work/infra"
+          },
+          {
+            "daemon": null,
+            "detail": "its daemon did not answer within 2 s",
+            "generation": 5,
+            "id": "e0f1a2b3c4d5e6f7",
+            "joined_at": 1759999940005,
+            "project": "search",
+            "state": "unreachable",
+            "summary": null,
+            "workspace": "/home/op/work/search"
+          }
+        ],
+        "others": [
+          {
+            "id": "0b54c1d2e3f4a596",
+            "project": "docs",
+            "workspace": "/home/op/work/docs"
+          }
+        ],
+        "rev": 41
+      }
+    },
+    "request": {
+      "id": 2,
+      "method": "workspaces"
+    }
+  }
+}

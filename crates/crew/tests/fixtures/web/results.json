@@ -528,7 +528,7 @@
       "agent_id": null,
       "pid": 4242,
       "project": "checkout-rewrite",
-      "protocol": 5,
+      "protocol": 6,
       "role": "operator",
       "version": "0.1.0",
       "web_proof": "pr00f5ecretpr00f5ecretpr00f5ecretpr00f5ecret"
@@ -1441,6 +1441,18 @@
       "subscribed": true
     }
   ],
+  "summary": [
+    {
+      "agents": 6,
+      "attention": 1,
+      "project": "payments",
+      "questions": 2,
+      "rev": 12,
+      "tasks": 6,
+      "tasks_done": 4,
+      "working": 3
+    }
+  ],
   "task_get": [
     {
       "dependencies": [
@@ -1658,15 +1670,23 @@
     },
     {
       "stopped": false
+    },
+    {
+      "removed": true
     }
   ],
   "web_open": [
     {
       "expires_in_secs": 120,
-      "pair_url": "http://c7f3a09b52e14d6f8a1b3c5d7e9f0a2b.localhost:23417/#pair=3f9ac0dec0dec0dec0dec0dec0dec0dec0dec0dee1",
+      "joined": [
+        "946d4617aa702870"
+      ],
+      "pair_url": "http://c7f3a09b52e14d6f8a1b3c5d7e9f0a2b.localhost:23417/#pair=3f9ac0dec0dec0dec0dec0dec0dec0dec0dec0dee1&w=946d4617aa702870",
       "port": 23417,
       "started": true,
-      "url": "http://c7f3a09b52e14d6f8a1b3c5d7e9f0a2b.localhost:23417/"
+      "url": "http://c7f3a09b52e14d6f8a1b3c5d7e9f0a2b.localhost:23417/",
+      "workspace": "946d4617aa702870",
+      "workspace_url": "http://c7f3a09b52e14d6f8a1b3c5d7e9f0a2b.localhost:23417/#/w/946d4617aa702870/"
     }
   ],
   "web_pair": [
@@ -1689,6 +1709,85 @@
           ]
         }
       }
+    }
+  ],
+  "workspaces": [
+    {
+      "joined": [
+        {
+          "daemon": {
+            "pid": 4242,
+            "started_at": 1759996400000
+          },
+          "detail": "",
+          "generation": 1,
+          "id": "946d4617aa702870",
+          "joined_at": 1759999940001,
+          "project": "payments",
+          "state": "running",
+          "summary": {
+            "agents": 6,
+            "attention": 1,
+            "project": "payments",
+            "questions": 2,
+            "rev": 12,
+            "tasks": 6,
+            "tasks_done": 4,
+            "working": 3
+          },
+          "workspace": "/home/op/work/payments"
+        },
+        {
+          "daemon": null,
+          "detail": "",
+          "generation": 2,
+          "id": "4c2e8a1b9d0f3e57",
+          "joined_at": 1759999940002,
+          "project": "billing",
+          "state": "stopped",
+          "summary": {
+            "agents": 6,
+            "attention": 1,
+            "project": "payments",
+            "questions": 2,
+            "rev": 12,
+            "tasks": 6,
+            "tasks_done": 4,
+            "working": 3
+          },
+          "workspace": "/home/op/work/billing"
+        },
+        {
+          "daemon": null,
+          "detail": "started by another version of crew (protocol 5): restart the team",
+          "generation": 3,
+          "id": "7a1d2c3b4e5f6071",
+          "joined_at": 1759999940003,
+          "project": "infra",
+          "state": "incompatible",
+          "summary": null,
+          "workspace": "/home/op/work/infra"
+        },
+        {
+          "daemon": null,
+          "detail": "its daemon did not answer within 2 s",
+          "generation": 5,
+          "id": "e0f1a2b3c4d5e6f7",
+          "joined_at": 1759999940005,
+          "project": "search",
+          "state": "unreachable",
+          "summary": null,
+          "workspace": "/home/op/work/search"
+        }
+      ],
+      "others": [
+        {
+          "id": "0b54c1d2e3f4a596",
+          "project": "docs",
+          "workspace": "/home/op/work/docs"
+        }
+      ],
+      "rev": 41
     }
   ]
 }

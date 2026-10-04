@@ -108,6 +108,7 @@ impl Daemon {
     }
 
     pub(crate) async fn dispatch(&self, conn: &mut Conn, call: Call) -> Reply {
+        let call_name = call.method();
         if let Call::Ping = call {
             return Ok(json!({ "pong": true }));
         }
@@ -611,12 +612,15 @@ change identity",
                 Ok(Value::Null)
             }
 
-            Call::WebOpen { port } => {
+            // Until the dashboard server takes over (notes/web-multi.md
+            // §multi-split step 3), the daemon still serves its own: a
+            // workspace or `all` means nothing to it.
+            Call::WebOpen { port, .. } => {
                 operator_only(&who)?;
                 not_on_the_web(conn, "web_open")?;
                 reply(self.web.open(self, port).await?)
             }
-            Call::WebClose => {
+            Call::WebClose { .. } => {
                 operator_only(&who)?;
                 not_on_the_web(conn, "web_close")?;
                 Ok(json!({ "stopped": self.web.stop(self, None).await }))
@@ -626,6 +630,13 @@ change identity",
                 operator_only(&who)?;
                 self.web_prefs(set)
             }
+            Call::Workspaces | Call::WebRescan => Err(RpcError::invalid(format!(
+                "{} is the dashboard server's: run `crew web`",
+                call_name
+            ))),
+            Call::Summary { .. } | Call::WebAttach { .. } | Call::WebEvent { .. } => Err(
+                RpcError::invalid(format!("{call_name} is not served by this daemon yet")),
+            ),
         }
     }
 

@@ -15,7 +15,12 @@ pub fn web(target: &Target, port: Option<u16>, no_open: bool, json: bool) -> Res
     // Before anything else: an agent never gets a pairing code.
     crew_core::client::refuse_in_agent_context()?;
     let (mut client, _) = target.connect("cli")?;
-    let info: WebInfo = client.call(Call::WebOpen { port })?;
+    let info: WebInfo = client.call(Call::WebOpen {
+        port,
+        workspace: None,
+        all: false,
+        restore: None,
+    })?;
     if json {
         println!("{}", serde_json::to_string_pretty(&info)?);
         return Ok(());
@@ -39,7 +44,7 @@ address. Open it yourself, and paste it nowhere else"
 /// `crew web --stop`: stop serving; every browser session ends.
 pub fn web_stop(target: &Target) -> Result<()> {
     let (mut client, _) = target.connect("cli")?;
-    let reply: Value = client.call(Call::WebClose)?;
+    let reply: Value = client.call(Call::WebClose { workspace: None })?;
     if reply["stopped"].as_bool() == Some(true) {
         println!("stopped the web dashboard: every browser session has ended");
     } else {
