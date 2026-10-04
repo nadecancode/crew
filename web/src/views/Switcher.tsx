@@ -56,6 +56,10 @@ export function SwitcherButton() {
   const questions = () => otherCounts(page).questions;
   const attention = () => otherCounts(page).attention;
   let button!: HTMLButtonElement;
+  /** Whether the list was open when the pointer went down on the button: the
+   * list closes on the way (focus leaves it), and the click must not open it
+   * again. */
+  let openAtPress: boolean | null = null;
   return (
     <span class="switcher">
       <button
@@ -65,7 +69,12 @@ export function SwitcherButton() {
         aria-haspopup="listbox"
         aria-expanded={page.switcher()}
         title={`${app.store.state.session?.workspace ?? page.hub.entry(app.link.id)?.workspace ?? ""} · switch workspace (w)`}
-        onClick={() => page.setSwitcher(!page.switcher())}
+        onMouseDown={() => (openAtPress = page.switcher())}
+        onClick={() => {
+          const open = openAtPress ?? page.switcher();
+          openAtPress = null;
+          page.setSwitcher(!open);
+        }}
       >
         {name()} ▾
       </button>

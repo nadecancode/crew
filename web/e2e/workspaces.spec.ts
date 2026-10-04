@@ -113,6 +113,11 @@ test("the switcher by mouse; typing filters; others are named with the command t
   await list(page).getByRole("option", { name: /search/ }).click();
   await live(page);
   await expect(button(page)).toHaveText("search ▾");
+  // A second click on the button closes it.
+  await button(page).click();
+  await expect(list(page)).toBeVisible();
+  await button(page).click();
+  await expect(list(page)).toHaveCount(0);
   // A click elsewhere closes it.
   await button(page).click();
   await expect(list(page)).toBeVisible();
