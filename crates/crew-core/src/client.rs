@@ -106,7 +106,10 @@ pub fn refuse_in_agent_context() -> ClientResult<()> {
     if std::env::var_os(crate::paths::IDENTITY_ENV).is_none() {
         return Ok(());
     }
+    // Presence decides authority; loading only improves the safe agent label.
     let agent_id = Identity::from_env()
+        .ok()
+        .flatten()
         .map(|identity| identity.agent_id)
         .filter(|id| crate::util::is_valid_id(id))
         .unwrap_or_else(|| "unknown".into());

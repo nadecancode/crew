@@ -17,7 +17,7 @@ use crate::mcp::tools;
 fn identity(path: Option<&Path>) -> Result<Identity> {
     match path {
         Some(path) => Identity::load(path),
-        None => Identity::from_env().context(
+        None => Identity::from_env()?.context(
             "this command runs inside a crew agent: CREW_IDENTITY is not set (or pass --identity)",
         ),
     }

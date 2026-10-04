@@ -175,7 +175,7 @@ fn handle(bridge: &mut Bridge, message: &Value) -> Option<Value> {
 pub fn serve(identity_path: Option<&Path>) -> Result<()> {
     let identity = match identity_path {
         Some(path) => Identity::load(path)?,
-        None => Identity::from_env().context(
+        None => Identity::from_env()?.context(
             "no agent identity: pass --identity <file> or set CREW_IDENTITY (crew sets this for its agents)",
         )?,
     };

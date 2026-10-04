@@ -53,13 +53,33 @@ impl Identity {
         let text = fs::read_to_string(path)
             .with_context(|| format!("reading identity file {}", path.display()))?;
         serde_json::from_str(&text)
+            .map_err(|error| {
+                // Serde's data errors can quote the offending value. Never
+                // include identity contents (notably the token) in a diagnostic.
+                let reason = match error.classify() {
+                    serde_json::error::Category::Data => {
+                        "identity JSON has invalid or missing fields"
+                    }
+                    serde_json::error::Category::Syntax => "identity file contains invalid JSON",
+                    serde_json::error::Category::Eof => "identity JSON is incomplete",
+                    serde_json::error::Category::Io => "cannot decode identity JSON",
+                };
+                anyhow!(
+                    "{reason} at line {} column {}",
+                    error.line(),
+                    error.column()
+                )
+            })
             .with_context(|| format!("parsing identity file {}", path.display()))
     }
 
-    /// The identity named by `CREW_IDENTITY`, if this process runs inside an agent.
-    pub fn from_env() -> Option<Self> {
-        let path = std::env::var_os(IDENTITY_ENV)?;
-        Self::load(Path::new(&path)).ok()
+    /// The identity named by `CREW_IDENTITY`, if this process runs inside an
+    /// agent. Only an unset variable means no identity; a load failure is an error.
+    pub fn from_env() -> Result<Option<Self>> {
+        std::env::var_os(IDENTITY_ENV)
+            .map(|path| Self::load(Path::new(&path)))
+            .transpose()
+            .with_context(|| format!("loading agent identity named by {IDENTITY_ENV}"))
     }
 }
 
@@ -629,7 +649,7 @@ pub fn discover(dir: Option<&Path>, project: Option<&str>) -> Result<DaemonInfo>
                 boot_id: None,
             });
         }
-        if let Some(identity) = Identity::from_env() {
+        if let Some(identity) = Identity::from_env()? {
             return Ok(DaemonInfo {
                 project: None,
                 workspace: String::new(),
@@ -683,6 +703,93 @@ pub fn discover(dir: Option<&Path>, project: Option<&str>) -> Result<DaemonInfo>
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn identity_environment_errors_are_visible_and_do_not_leak_file_content() {
+        const PROBE: &str = "CREW_IDENTITY_DIAGNOSTIC_PROBE";
+        if let Ok(case) = std::env::var(PROBE) {
+            let result = Identity::from_env();
+            match case.as_str() {
+                "unset" => assert!(result.unwrap().is_none()),
+                "valid" => {
+                    let identity = result.unwrap().unwrap();
+                    assert_eq!(identity.agent_id, "a");
+                    assert_eq!(identity.socket, "/test.sock");
+                    assert_eq!(discover(None, None).unwrap().socket, identity.socket);
+                }
+                _ => {
+                    let error = result.expect_err("identity load failure disappeared");
+                    let result = format!("{error:#}");
+                    let path = std::env::var_os(IDENTITY_ENV).unwrap();
+                    assert!(
+                        result.contains(Path::new(&path).to_str().unwrap()),
+                        "error must name the identity path: {result}"
+                    );
+                    assert!(result.contains(IDENTITY_ENV));
+                    assert!(
+                        !result.contains("SYNTHETIC-PRIVATE-CONTENT"),
+                        "identity contents leaked"
+                    );
+                    let discovery = discover(None, None).unwrap_err();
+                    let message = format!("{discovery:#}");
+                    assert!(
+                        message.contains(&case),
+                        "discovery hid the identity failure: {message}"
+                    );
+                    assert!(!message.contains("SYNTHETIC-PRIVATE-CONTENT"));
+                }
+            }
+            return;
+        }
+        let root = tempfile::tempdir().unwrap();
+        for name in ["home", "run", "state", "config", "directory"] {
+            fs::create_dir(root.path().join(name)).unwrap();
+        }
+        fs::write(root.path().join("parse"), "{SYNTHETIC-PRIVATE-CONTENT").unwrap();
+        fs::write(root.path().join("data"), "\"SYNTHETIC-PRIVATE-CONTENT\"").unwrap();
+        fs::write(root.path().join("utf8"), [0xff]).unwrap();
+        fs::write(
+            root.path().join("valid"),
+            r#"{"socket":"/test.sock","agent_id":"a","token":"synthetic-valid-token"}"#,
+        )
+        .unwrap();
+        for case in [
+            "missing",
+            "parse",
+            "data",
+            "utf8",
+            "directory",
+            "valid",
+            "unset",
+        ] {
+            let mut child = std::process::Command::new(std::env::current_exe().unwrap());
+            child.args(["--exact", "paths::tests::identity_environment_errors_are_visible_and_do_not_leak_file_content", "--nocapture"])
+                .env(PROBE, case).current_dir(root.path()).env_remove(SOCKET_ENV)
+                .env(IDENTITY_ENV, root.path().join(case));
+            if case == "unset" {
+                child.env_remove(IDENTITY_ENV);
+            }
+            for (key, name) in [
+                ("HOME", "home"),
+                ("XDG_RUNTIME_DIR", "run"),
+                ("XDG_STATE_HOME", "state"),
+                ("XDG_CONFIG_HOME", "config"),
+            ] {
+                child.env(key, root.path().join(name));
+            }
+            let output = child
+                .env("CREW_GLOBAL_CONFIG", root.path().join("global.toml"))
+                .output()
+                .unwrap();
+            assert!(
+                output.status.success(),
+                "case {case}: {}{}",
+                String::from_utf8_lossy(&output.stdout),
+                String::from_utf8_lossy(&output.stderr)
+            );
+            assert!(String::from_utf8_lossy(&output.stdout).contains("1 passed; 0 failed"));
+        }
+    }
 
     #[test]
     fn the_start_time_is_counted_from_after_the_command_name() {

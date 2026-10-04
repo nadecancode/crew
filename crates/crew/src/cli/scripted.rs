@@ -416,7 +416,7 @@ impl Agent {
 }
 
 pub fn run(args: ScriptArgs) -> Result<()> {
-    let identity = Identity::from_env()
+    let identity = Identity::from_env()?
         .context("crew scripted-agent runs as a crew agent: CREW_IDENTITY is not set")?;
     let (mut client, _) = Client::agent(&identity, "scripted-agent")?;
     client.set_timeout(Some(Duration::from_secs(120)))?;
