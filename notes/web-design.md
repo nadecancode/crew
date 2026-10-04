@@ -57,6 +57,13 @@ usage view or hover cards; the whole app of §ui and §graphs measures 191 KB.
 P1 is now 220 KB. No feature is cut for it, and P4 (the whole bundle, 600 KB)
 is unchanged (§perf "Budgets").
 
+**Revised by `notes/web-multi.md`** (operator, m-50a884c7d9b1: one server
+for several workspaces). It replaces W1: the server becomes a process of its
+own, shared by every workspace the operator joined, and the page gains a
+workspace switcher. What this document says about the listener, the origin,
+pairing, the proof, the frames, the views and the budgets stands, with "the
+server" read as that process.
+
 **Verification.** The transport, the security checks, the build and the
 performance figures below were tried in a spike against a real daemon (this
 branch, protocol 4) running the scripted team of `examples/dry-run.yaml`:
