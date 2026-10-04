@@ -1300,6 +1300,42 @@ mod tests {
     }
 
     #[test]
+    fn replayed_provider_events_do_not_raise_a_new_error_notice() {
+        for kind in ["agent.error", "agent.refused"] {
+            for (seq, raises_notice) in [(49, false), (50, false), (51, true), (0, true)] {
+                let mut app = loaded();
+                app.events.clear();
+                app.add_event(fixture::event(
+                    50,
+                    crew_core::EventLevel::Info,
+                    "daemon",
+                    "agent.started",
+                    Some("claude-1"),
+                    "started",
+                    1_000_000,
+                ));
+                app.status = None;
+                app.apply_push(
+                    Push::Event(fixture::event(
+                        seq,
+                        crew_core::EventLevel::Error,
+                        "daemon",
+                        kind,
+                        Some("claude-1"),
+                        "provider denied this turn",
+                        1_000_001,
+                    )),
+                    1_000_001,
+                );
+                assert_eq!(app.status.is_some(), raises_notice, "{kind} seq={seq}");
+                if let Some(status) = app.status {
+                    assert!(status.is_error && status.text.contains("provider denied"));
+                }
+            }
+        }
+    }
+
+    #[test]
     fn provider_error_events_are_visible_errors_without_an_unresponsive_diagnosis() {
         let mut app = loaded();
         for kind in ["agent.error", "agent.refused"] {

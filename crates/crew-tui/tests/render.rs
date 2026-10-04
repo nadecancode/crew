@@ -95,7 +95,7 @@ fn provider_errors_override_stale_activity_and_stay_visible_without_event_histor
             !status_tail(agent).contains('%'),
             "stale progress must not hide the error"
         );
-        assert!(work_line(agent, &decor).0.starts_with("DENIED"));
+        assert_eq!(work_line(agent, &decor).0, agent.task.as_deref().unwrap());
         snap.events.clear();
         let mut a = App::new();
         a.apply_snapshot(snap, NOW);

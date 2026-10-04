@@ -436,9 +436,6 @@ pub fn doing(agent: &Agent, decor: &Decor<'_>) -> (String, String, Tone) {
 /// What the first row of a box says: the task the agent is on, or the one it
 /// finished last, else its role; and whether that is current.
 pub fn work_line<'a>(agent: &'a Agent, decor: &Decor<'a>) -> (&'a str, bool) {
-    if let Some(error) = provider_error(agent) {
-        return (error, false);
-    }
     match (decor.work, agent.task.as_deref()) {
         (Some(work), _) => (work.title, !work.done),
         (None, Some(task)) => (task, true),
