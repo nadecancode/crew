@@ -293,6 +293,21 @@ impl Conn {
         }
     }
 
+    /// Queue a batch of daemon lines for the writer: `Some(true)`, or
+    /// `Some(false)` when the workspace was revoked meanwhile, `None` when
+    /// the writer is gone. Room is waited for without looking at the
+    /// revocation (a browser that does not read is for a removal to
+    /// cancel), but a batch is not queued after one: the browser is then
+    /// sent at most the two batches already with the writer.
+    async fn queue(&self, texts: Vec<String>, revoked: &watch::Receiver<bool>) -> Option<bool> {
+        let room = self.out.reserve().await.ok()?;
+        if *revoked.borrow() {
+            return Some(false);
+        }
+        room.send(Out::Texts(texts));
+        Some(true)
+    }
+
     /// Before `hello` the deadline holds through a reply that waits for
     /// room behind a browser that does not read.
     async fn reply_before(&self, by: tokio::time::Instant, frame: &ServerFrame) -> bool {
@@ -560,12 +575,17 @@ impl Conn {
                         // delivered; nothing after it is.
                         drop((lines, writer, guard));
                         hub.reconcile(&id);
-                        if !texts.is_empty() && self.out.send(Out::Texts(texts)).await.is_err() {
-                            return None;
+                        if !texts.is_empty() {
+                            match self.queue(texts, &revoked).await {
+                                None => return None,
+                                Some(false) => return Some((CLOSE_WORKSPACE_REMOVED, REMOVED)),
+                                Some(true) => {}
+                            }
                         }
                         return Some((CLOSE_WORKSPACE_ENDED, "the workspace's connection ended"));
                     }
-                    if self.out.send(Out::Texts(texts)).await.is_err() {
+                    // Not queued once revoked: the next turn lets go.
+                    if self.queue(texts, &revoked).await.is_none() {
                         drop((lines, writer, guard));
                         return None;
                     }
