@@ -89,6 +89,25 @@ test("hover shows the card; a click selects and opens the inspector", async ({ p
   expect(new URL(page.url()).hash).toBe("#/?agent=claude-2");
 });
 
+test("without an orchestrator agent the empty hub is not a tab stop: tab enters the graph once, on a member", async ({ page, mock, openPage }) => {
+  const agents = mock.state.agents as { id: string }[];
+  agents.splice(agents.findIndex((a) => a.id === "orchestrator"), 1);
+  await openPage();
+  await expect(page.locator(".node.hub.empty")).toHaveCount(1);
+  await page.getByRole("button", { name: "keys and commands" }).focus();
+  const stops: string[] = [];
+  for (let i = 0; i < 6; i++) {
+    await page.keyboard.press("Tab");
+    stops.push(await page.evaluate(() => {
+      const el = document.activeElement;
+      if (!el?.closest(".viewport")) return "outside";
+      return el.getAttribute("data-agent") ? `node:${el.getAttribute("data-agent")}:${el.getAttribute("tabindex")}` : `graph:${el.getAttribute("class")}`;
+    }));
+  }
+  const inGraph = stops.filter((s) => s !== "outside");
+  expect(inGraph).toEqual(["node:claude-1:0"]);
+});
+
 test("the graph is one tab stop; arrows walk the agents in the TUI's order; enter opens the inspector", async ({ page, openPage }) => {
   await openPage();
   await expect(page.locator('[data-agent][tabindex="0"]')).toHaveCount(1);
