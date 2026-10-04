@@ -395,12 +395,7 @@ impl Daemon {
         if stopped() {
             return Ok(());
         }
-        // This launch's mark, in the environment of every process it starts:
-        // from here a hook of an earlier launch, arriving late, is told apart
-        // (on_hook).
-        let launch_id = uuid::Uuid::new_v4().to_string();
-        self.model().local.entry(id.to_string()).or_default().launch = Some(launch_id.clone());
-        self.save_local(id);
+        let launch_id = self.begin_launch(id).await;
         let procs = self.procs().map_err(|e| anyhow!(e.message))?;
         // Before anything of the agent's writable tree is touched (even made):
         // nothing of its previous sandboxes may be left (D2).
@@ -1064,6 +1059,16 @@ restart {id} fresh or move it to another CLI."
     }
 
     // ---- signals --------------------------------------------------------
+
+    /// Agent `id`'s next launch begins: its mark, put in the environment of
+    /// every process the launch starts, from which a hook of an earlier
+    /// launch, arriving late, is told apart (on_hook).
+    pub(crate) async fn begin_launch(&self, id: &str) -> String {
+        let launch = uuid::Uuid::new_v4().to_string();
+        self.model().local.entry(id.to_string()).or_default().launch = Some(launch.clone());
+        self.save_local(id);
+        launch
+    }
 
     /// A runtime hook of agent `id`, run by a process of `launch` (when it
     /// says). One of an earlier launch is dropped: a replaced session's
