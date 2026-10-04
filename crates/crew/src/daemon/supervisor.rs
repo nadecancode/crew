@@ -37,6 +37,24 @@ const RETIRE_WITHIN: std::time::Duration = std::time::Duration::from_secs(10);
 const RESUME_NOTICE: &str = "[crew] Your session was restarted. Continue your current task where \
 you left off, and call agent_inbox to check for messages you may have missed.";
 
+/// What a start does with the agent's session.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum Start {
+    /// Starts it in the session it has, not resuming one (a new agent).
+    New,
+    /// Resumes its session, once that is confirmed.
+    Resume,
+    /// Leaves its session for a new one, never resuming it.
+    Fresh,
+}
+
+/// The session id a new session of `runtime` starts with: Claude Code and
+/// pi let us choose it, which makes resuming exact.
+fn chosen_session_id(runtime: RuntimeKind) -> Option<String> {
+    matches!(runtime, RuntimeKind::Claude | RuntimeKind::Pi)
+        .then(|| uuid::Uuid::new_v4().to_string())
+}
+
 /// How an agent declared by `spec` is run: the team's defaults with the
 /// declaration's own settings over them.
 pub(crate) fn agent_settings(
@@ -123,10 +141,7 @@ impl Daemon {
             backend: backend.to_string(),
             backend_ref: None,
             pid: None,
-            // Claude Code and pi let us choose the session id, which makes
-            // resuming exact.
-            session_id: matches!(runtime, RuntimeKind::Claude | RuntimeKind::Pi)
-                .then(|| uuid::Uuid::new_v4().to_string()),
+            session_id: chosen_session_id(runtime),
             orchestrator,
             parent: parent.map(|p| p.id.clone()),
             subagents: 0,
@@ -314,7 +329,8 @@ impl Daemon {
         let since = self.stops(id);
         let id = id.to_string();
         tokio::spawn(async move {
-            if let Err(e) = daemon.spawn_agent(&id, resume, notice, since).await {
+            let start = if resume { Start::Resume } else { Start::New };
+            if let Err(e) = daemon.spawn_agent(&id, start, notice, since).await {
                 daemon
                     .mark_failed(&id, format!("failed to start: {e:#}"))
                     .await;
@@ -344,11 +360,11 @@ impl Daemon {
     pub(crate) async fn spawn_agent(
         &self,
         id: &str,
-        resume: bool,
+        start: Start,
         notice: Option<String>,
         since: u64,
     ) -> Result<()> {
-        match self.start_agent(id, resume, notice, since).await {
+        match self.start_agent(id, start, notice, since).await {
             Err(e) if self.stops(id) != since => {
                 tracing::info!("{id}: a start given up for a stop ended in: {e:#}");
                 Ok(())
@@ -360,11 +376,12 @@ impl Daemon {
     async fn start_agent(
         &self,
         id: &str,
-        resume: bool,
+        start: Start,
         notice: Option<String>,
         since: u64,
     ) -> Result<()> {
         let stopped = || self.stops(id) != since;
+        let resume = start == Start::Resume;
         // One launch of an agent at a time, and none beside its git jobs or
         // queue commands: two restarts close together must not both find
         // nothing running and seed its home while the other's sandboxes
@@ -1765,7 +1782,7 @@ defaults.auto_trust: true in the team file.",
             let id = id.to_string();
             tokio::spawn(async move {
                 tokio::time::sleep(std::time::Duration::from_millis(500)).await;
-                if let Err(e) = daemon.spawn_agent(&id, true, None, since).await {
+                if let Err(e) = daemon.spawn_agent(&id, Start::Resume, None, since).await {
                     daemon
                         .mark_failed(&id, format!("restart failed: {e:#}"))
                         .await;
@@ -1903,7 +1920,7 @@ defaults.auto_trust: true in the team file.",
         }
         self.save_local(id);
         self.update_agent(id, |a| a.session_id = None);
-        self.restart(id, None, false).await
+        self.restart(id, None, Start::Fresh).await
     }
 
     /// Restart an agent, resuming its session; `notice` replaces the usual
@@ -1913,14 +1930,14 @@ defaults.auto_trust: true in the team file.",
         id: &str,
         notice: Option<String>,
     ) -> Result<(), RpcError> {
-        self.restart(id, notice, true).await
+        self.restart(id, notice, Start::Resume).await
     }
 
     async fn restart(
         &self,
         id: &str,
         notice: Option<String>,
-        resume: bool,
+        start: Start,
     ) -> Result<(), RpcError> {
         if self.model().agent(id).is_none() {
             return Err(RpcError::not_found(format!("no agent '{id}'")));
@@ -1966,7 +1983,7 @@ defaults.auto_trust: true in the team file.",
         let since = self.stops(id);
         let id = id.to_string();
         tokio::spawn(async move {
-            if let Err(e) = daemon.spawn_agent(&id, resume, notice, since).await {
+            if let Err(e) = daemon.spawn_agent(&id, start, notice, since).await {
                 daemon
                     .mark_failed(&id, format!("failed to start: {e:#}"))
                     .await;

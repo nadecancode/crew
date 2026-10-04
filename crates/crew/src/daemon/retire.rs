@@ -1233,7 +1233,12 @@ mod tests {
             .collect();
 
         let refused = daemon
-            .spawn_agent("a", false, None, daemon.stops("a"))
+            .spawn_agent(
+                "a",
+                super::super::supervisor::Start::New,
+                None,
+                daemon.stops("a"),
+            )
             .await
             .map(|_| ())
             .unwrap_err();
@@ -1307,7 +1312,9 @@ mod tests {
             .unwrap()
             .update(|r| r.pid = Some(pid));
 
-        let started = daemon.spawn_agent("a", false, None, overtaken).await;
+        let started = daemon
+            .spawn_agent("a", super::super::supervisor::Start::New, None, overtaken)
+            .await;
         let sidecar_runs = daemon
             .sidecars
             .lock()
