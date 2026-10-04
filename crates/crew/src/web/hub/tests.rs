@@ -96,6 +96,8 @@ struct Stand {
     pushes: broadcast::Sender<String>,
     /// Bytes written by a `flood`.
     flooded: AtomicU64,
+    /// Bytes for the browsers' connections, each written in one write.
+    raw: broadcast::Sender<Arc<Vec<u8>>>,
 }
 
 impl Stand {
@@ -126,13 +128,21 @@ impl Stand {
         let _ = self.pushes.send(line);
     }
 
+    /// `bytes` on every browser's connection, in one write.
+    fn write_raw(&self, bytes: Vec<u8>) {
+        let _ = self.raw.send(Arc::new(bytes));
+    }
+
     /// One connection, as a daemon serves it: every line is recorded;
     /// `hello`, `web_attach`, `summary` and `ping` are answered, `flood`
-    /// writes until the server stops reading, the rest is only recorded.
+    /// and `flood_lines` write until the server stops reading, the rest is
+    /// only recorded. A browser's connection also gets what `write_raw` is
+    /// given.
     async fn serve(self: Arc<Self>, stream: DuplexStream, conn: u64, web: bool, log: Log) {
         let pid = self.info.pid;
         let mut kill = self.kill.subscribe();
         let mut pushes = self.pushes.subscribe();
+        let mut raws = self.raw.subscribe();
         let (read, mut write) = tokio::io::split(stream);
         let mut lines = BufReader::new(read).lines();
         let mut watching = false;
@@ -145,6 +155,14 @@ impl Stand {
                 push = pushes.recv(), if watching => {
                     if let Ok(line) = push {
                         if write_line(&mut write, &line).await.is_err() {
+                            return;
+                        }
+                    }
+                    continue;
+                }
+                raw = raws.recv(), if web => {
+                    if let Ok(raw) = raw {
+                        if write.write_all(&raw).await.is_err() {
                             return;
                         }
                     }
@@ -220,6 +238,31 @@ impl Stand {
                     }
                     return;
                 }
+                Some("flood_lines") => {
+                    // Numbered lines of `len` bytes, as many to a write
+                    // as 64 KiB holds (one at least), every byte the pipe
+                    // takes counted as it is taken.
+                    let len = request["params"]["len"].as_u64().unwrap_or(100) as usize;
+                    let mut seq = 0;
+                    loop {
+                        let mut lines = Vec::new();
+                        while lines.is_empty() || lines.len() + len < 64 * 1024 {
+                            lines.extend_from_slice(flood_line(seq, len).as_bytes());
+                            lines.push(b'\n');
+                            seq += 1;
+                        }
+                        let mut at = 0;
+                        while at < lines.len() {
+                            match write.write(&lines[at..]).await {
+                                Ok(0) | Err(_) => return,
+                                Ok(n) => {
+                                    at += n;
+                                    self.flooded.fetch_add(n as u64, Ordering::SeqCst);
+                                }
+                            }
+                        }
+                    }
+                }
                 _ => continue,
             };
             if write_line(&mut write, &reply.to_string()).await.is_err() {
@@ -244,6 +287,20 @@ impl Stand {
 async fn write_line<W: AsyncWrite + Unpin>(write: &mut W, line: &str) -> std::io::Result<()> {
     write.write_all(line.as_bytes()).await?;
     write.write_all(b"\n").await
+}
+
+/// Line `seq` of a `flood_lines`: its number, then letters up to `len`
+/// bytes.
+fn flood_line(seq: u64, len: usize) -> String {
+    let mut line = format!("{seq:010}:");
+    line.extend(
+        (b'a'..=b'z')
+            .cycle()
+            .map(char::from)
+            .take(len.saturating_sub(11)),
+    );
+    line.truncate(len);
+    line
 }
 
 /// The server's side of a connection to a stand-in: when both halves are
@@ -329,6 +386,7 @@ impl Fake {
             kill: broadcast::channel(16).0,
             pushes: broadcast::channel(4096).0,
             flooded: AtomicU64::new(0),
+            raw: broadcast::channel(16).0,
         });
         self.stands.lock().unwrap().insert(pid, stand.clone());
         let mut published = self.published.lock().unwrap();
@@ -1860,3 +1918,7 @@ async fn a_page_that_applies_only_greater_revisions_ends_at_the_servers_listing(
     assert_eq!(applied, hub.listing());
     assert_eq!(member(&applied, "a").unwrap().summary.unwrap().agents, 1000);
 }
+
+// Batches (§multi-transport "Batches", "A slow browser, and what the server
+// holds for it").
+mod batches;
