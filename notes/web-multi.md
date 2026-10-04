@@ -1,0 +1,1018 @@
+# Design: one web dashboard for several workspaces
+
+Author: `architect` (task `multi-design`). Design only: no source file was
+changed. This file and `notes/multi-spike/` are tracked by force
+(`git add -f`), like the rest of `notes/`.
+
+**Request (operator, m-50a884c7d9b1).** "For web server multiple crew
+instances should share the same server (but with different workspace that
+user can switch between)."
+
+**What this document is.** A revision of `notes/web-design.md` (the design the
+dashboard on main, 2c2441e7, implements). Everything there holds unless this
+document says otherwise; the decisions it replaces are named where they are
+replaced. Section names here carry the prefix `multi-` so that both documents
+can be cited side by side.
+
+**Decided with the operator** (asked in m-5119bb45803c, answered in
+m-4ca285b69b15): a workspace is shown in the dashboard only after `crew web`
+was run for it; `crew web --all` adds every running session at once; the
+configuration can make that the rule. The server is a process of its own.
+
+**Verification.** What was uncertain was tried against two real daemons
+(built from main, protocol 5) with a prototype of the shared server:
+`notes/multi-spike/run.sh` replays it and prints `PASS` (node 24.19.0).
+`hub/` is the prototype (Rust, 280 lines: one port, an index connection, one
+daemon connection per WebSocket), `measure.mjs` the measurements. Findings
+from those runs are marked **(observed)**. The spike is evidence, not the
+implementation: it takes its label, pairing code and secret as arguments,
+joins every running session, and learns about daemons by reading the registry
+ten times a second, none of which the design does.
+
+Sections: [§multi-scope](#multi-scope) · [§multi-server](#multi-server) ·
+[§multi-join](#multi-join) · [§multi-security](#multi-security) ·
+[§multi-transport](#multi-transport) · [§multi-ui](#multi-ui) ·
+[§multi-migration](#multi-migration) · [§multi-perf](#multi-perf) ·
+[§multi-tests](#multi-tests) · [§multi-split](#multi-split)
+
+---
+
+<a id="multi-scope"></a>
+## §multi-scope
+
+### What changes for the operator
+
+```
+$ cd ~/work/payments && crew web
+web        http://c7f3a09b52e14d6f8a1b3c5d7e9f0a2b.localhost:23417/#/w/946d4617aa702870/
+open       http://c7f3a09b52e14d6f8a1b3c5d7e9f0a2b.localhost:23417/#pair=3f9a…e1&w=946d4617aa702870   (works once, for 2 minutes)
+
+$ cd ~/work/search && crew web
+web        http://c7f3a09b52e14d6f8a1b3c5d7e9f0a2b.localhost:23417/#/w/0b54c1d2e3f4a596/
+open       …
+```
+
+The second command starts nothing: it adds `search` to the server that is
+already running and prints the same address, pointing at the other workspace.
+A tab that was open on `payments` shows `search` in its workspace switcher at
+that moment; no reload, no new pairing. Stopping and starting the `payments`
+team no longer ends the tab: the workspace is shown as stopped and comes back
+when its daemon does.
+
+### Decisions
+
+| # | decision | replaces | where |
+|---|---|---|---|
+| M1 | The dashboard is served by **one process per user, of its own** (`crew web-server`, started by the first `crew web`, detached like the daemon). It belongs to no daemon and outlives each of them. No daemon listens on TCP any more. | W1 (the server inside the daemon) | §multi-server |
+| M2 | A workspace is in the dashboard only after the operator **joined** it: `crew web` in it, `crew web --all`, or `[web] join = "all"` in the configuration. It stays joined for the server's life, across restarts of its team; `crew web --remove` takes it out. | "only after `crew web` asked for it", kept per workspace | §multi-join |
+| M3 | A browser is **paired once, with the server**; its session reaches every joined workspace. The server reaches a daemon as the operator, with that daemon's token file, read when it connects, and marks the connection as a web session so that the daemon keeps enforcing W7. | W6 moves to the server unchanged; W7 gains what a web session cannot do to the server | §multi-security |
+| M4 | **One WebSocket per workspace**, exactly today's: one WebSocket is one daemon connection, frames unchanged, now passed through the server. Beside it **one index connection** per page, to the server itself, for the list of workspaces and their badges. Nothing is multiplexed. | W2 kept; adds the index | §multi-transport |
+| M5 | What a badge needs comes from the daemon as a **summary** (a call and a coalesced push). The server passes summaries on; it holds no copy of any workspace's state and interprets no push. | new | §multi-transport |
+| M6 | The page has **two levels of state**: the page (its server: live, reconnecting, stopped, with today's rules) and the workspace on screen (live, not running, incompatible). A daemon that stops no longer stops the page. | "on `shutdown` the page stops" now holds for the server's `shutdown` only | §multi-ui |
+| M7 | Addresses name the workspace: `#/w/<id>/…`, with `<id>` the 16 hex digits that already name the daemon's socket and its registry entry. | routes of §ui | §multi-ui |
+| M8 | `PROTOCOL_VERSION` 5 → 6. | W4 | §multi-migration |
+
+W3 (no polling), W5 (loopback, an origin per server start), W8–W13 are
+unchanged; "the server" in W5 now means the shared one.
+
+### Not built
+
+- Workspaces of other users or other machines; a server shared between users.
+- Acting on several workspaces at once (a message to agents of two teams, a
+  combined log). The switcher shows counts for the others, nothing more.
+- Adding or removing a workspace from the page: that stays with the command
+  line (§multi-security "What a web session may not do").
+- Starting a team from the page (as before, W7).
+- A second state connection kept warm for the workspace just left: a switch
+  takes a new snapshot, which costs about 12 ms on the wire (§multi-perf).
+
+---
+
+<a id="multi-server"></a>
+## §multi-server
+
+### Why a process of its own (M1)
+
+W1 put the server in the daemon and gave three reasons against a separate
+process. The request changes the first one and leaves the others where they
+were:
+
+- **Lifetime.** W1: "a browser tab should stay live for as long as the team
+  runs". With several teams there is no single daemon whose life is the
+  right one. Hosted by the first daemon, the server would die with that
+  team and take every other workspace's tabs with it (the origin is new at
+  every server start, W5, so they could not come back); handing the listeners
+  and the sessions from one daemon to another does not survive a crash and
+  would be the most delicate code in the program. A process that belongs to
+  no team has exactly the life that is wanted, and it gives back something
+  the single-workspace design had to give up: **a tab survives a team's
+  restart**.
+- **Authority.** Unchanged: whatever serves the browser can act as the
+  operator. The server reads the operator token of each joined daemon, as
+  the CLI does. It is the operator's process, started by the operator's
+  command, in no agent's environment.
+- **One hop more.** Pushes now cross a Unix socket and the server before the
+  WebSocket. Measured (**observed**, four runs, 300 to 600 pushes each): from
+  a `send` on the daemon's socket to the `message` push at a subscriber,
+  431–557 µs at the median through the daemon's own server and 438–572 µs
+  through the prototype; the difference per run was −62, −23, +15 and
+  +25 µs, which is the noise of the measurement. §perf is unaffected.
+
+What the separate process costs is what W1 said it would: its own
+registration, single-instance lock and cleanup. They are specified below and
+mirror the daemon's. It also removes something: the daemon no longer parses
+HTTP or WebSocket input from the network at all, so a fault in that code is
+no longer in the process that owns the agents and the database.
+
+### The process
+
+`crew web-server [--port N]` is a hidden subcommand of the same binary (the
+bundle is embedded in it, W8), run in the foreground by tests and detached by
+`crew web`, with the daemon's way of detaching and the same environment
+scrubbing (`cli/daemonize.rs`, `SESSION_MARKERS`). It refuses to start in an
+agent's environment (`refuse_in_agent_context`).
+
+Its files are in the runtime directory (`paths::runtime_dir()`, where the
+daemons' sockets are; mode 0700, and hidden from sandboxed agents, which see
+only their own daemon's socket and their own sidecar directory there):
+
+| file | what |
+|---|---|
+| `web.lock` | the single-instance lock (`flock`), held for the process's life |
+| `web.sock` | the control socket, mode 0600 |
+| `web.token` | the token of the control socket, mode 0600, written before the socket is bound: `paths::operator_token_path("web.sock")`, read with `read_operator_token` and its checks |
+| `web.json` | `{pid, pid_start, boot_id, port, url, protocol, version, build}`, for `crew web` and for telling a stale file from a live server |
+
+Its log is `web.log` in the registry's parent (`$XDG_STATE_HOME/crew/`),
+written as `daemon.log` is. No code, token, secret or verifier is ever
+written to it (as before).
+
+**The port** is per user, not per workspace: `23000 + fnv1a64(runtime_dir)
+% 1000`, sixteen tries upwards, or exactly `--port`. Two users of a machine,
+and a test with a runtime directory of its own, get servers of their own.
+`paths::web_port` takes the runtime directory instead of the state directory.
+
+**The listeners, the origin, pairing, sessions, the proof, the limits, the
+stop order**: `crates/crew/src/web/` as it is on main, moved out of the
+daemon into this process. Nothing in §security "The listener" to "Limits"
+changes, except the two numbers in §multi-security "Limits".
+
+### The control socket
+
+It speaks `crew_core::rpc` frames, one JSON object per line, like a daemon's
+socket, so `Client::operator(web.sock)` works on it as it is: `hello` with
+the role `operator` and the token of `web.token`. It serves:
+
+| call | does |
+|---|---|
+| `ping`, `hello` | as on a daemon |
+| `web_open {workspace?, all?, port?}` | joins (§multi-join), makes a pairing code, answers `WebInfo` |
+| `web_close {workspace?}` | with `workspace`: removes it from the dashboard; without: stops the server |
+| `workspaces` | the listing of §multi-transport (for `crew web --list` and tests) |
+| `web_rescan` | reads the registry again (a daemon says it started) |
+
+Everything else answers `invalid`. No browser reaches this socket and no
+call on it is available on a WebSocket.
+
+### Its life
+
+**Start.** `crew web` (after `refuse_in_agent_context`, and after it found
+the daemon it was run for, as today): connect to `web.sock`; if nobody
+answers, take the stale files away when `web.lock` is free, spawn `crew
+web-server`, wait up to 5 s for `ping`. Then `web_open`. Two `crew web` at
+the same moment: the lock decides, the loser connects to the winner. A
+server whose first `web_open` leaves its table empty stops at once instead
+of lingering.
+
+**While it runs** it holds, for each joined workspace whose daemon runs, one
+connection to that daemon (the *watch*, §multi-transport). Nothing is read
+on a timer (W3 applies to the server too), and no timer recurs faster than
+the 5 s housekeeping tick except the WebSocket pings; the two coalescing
+delays of §multi-transport are armed only while something waits to be sent: it learns that a daemon stopped from the end
+of its watch, and that a daemon started from that daemon (below).
+
+**A daemon stops** (orderly, killed, crashed): the watch ends. The workspace
+stays joined, in the state `stopped`, with its last summary; its WebSockets
+are closed with 4001 (§multi-transport). Nothing else happens: no port was
+freed, the origin still has its owner, other workspaces do not notice.
+
+**A daemon starts**: once its socket listens and its registry entry is
+written it calls `web_rescan` on `web.sock` if that exists (as the operator,
+with `web.token`; best effort, 1 s, in the background; a daemon is not an
+agent's environment). The server reads the registry (`paths::list_sessions`,
+which already drops entries whose process is gone) and dials every joined
+workspace it has no watch for; with `join = "all"` it joins what is new. A
+workspace that was shown as stopped is live again within the daemon's start
+plus one dial (**observed**: the same id, a new pid, a new operator token;
+the browser session that was there before reaches it).
+
+**It stops** when
+- `crew web --stop` asks it to (`web_close` without a workspace);
+- no joined workspace has been `running` for the *linger* time, 600 s
+  unless `[web] linger_secs` says otherwise (0: at once). The time is there
+  so that `crew stop` followed by `crew run` keeps the tab, and so that
+  nothing is left listening on a machine where every team was stopped;
+- it gets `SIGTERM` or `SIGINT`;
+- it loses a listener it cannot get back, as today (`web.tick`);
+- the path of its control socket no longer names its socket (the runtime
+  directory was removed under it): checked on the 5 s housekeeping tick, so
+  that a test's server does not outlive the test's directory.
+
+Stopping is today's order (revoke codes and sessions, close connections,
+release the listeners), then the watches are closed and `web.sock`,
+`web.token` and `web.json` removed. Index connections get the `shutdown`
+push first; a page that receives it stops for good, as a page does today.
+
+**It is killed.** Every tab stops (no proof from whoever answers next, or
+nobody for 30 s): §security "A document whose server is gone", unchanged. The
+daemons and their teams are not affected; each notices its watch end and
+clears its `web` line. The next `crew web` finds the lock free, starts a new
+server with a new origin, and joins the workspace it was run in; the others
+are joined again by running `crew web` in them, or all at once with `--all`.
+
+**Versions.** The server and a daemon must speak the same protocol, as every
+client must. A daemon that answers the server's `hello` with `protocol` is
+listed in the state `incompatible` ("started by another version of crew:
+restart the team"). `crew web` compares itself with the server it finds:
+- another protocol, the server's the older: `crew web` stops it (`SIGTERM`
+  to the pid of `web.json`, wait for the lock), starts its own, joins the
+  workspace it was run in, and says "the dashboard server of an older crew
+  was replaced: open tabs have stopped; run `crew web` in the other
+  workspaces, or `crew web --all`" (it cannot ask the old server what it
+  had joined: they do not speak the same protocol);
+- another protocol, the server's the newer: refused, "a newer crew serves
+  the dashboard: use it, or stop it with its `crew web --stop`";
+- the same protocol, another build (`web.json`'s `build`: crate version and
+  the bundle's manifest hash): served as it is, with a `note` line naming
+  `crew web --restart`, which asks the old server for its listing, stops
+  it, starts this build's and joins the same workspaces again.
+
+---
+
+<a id="multi-join"></a>
+## §multi-join
+
+### A workspace's name on the wire
+
+The id of a workspace is the 16 hex digits of `session_hash(state_dir)`: the
+stem of its daemon's socket and of its registry file. It is the same for
+every daemon ever started in that workspace, it is not a secret, and it is
+never used as a path: the server looks it up in its table of joined
+workspaces and nowhere else.
+
+### Joining (M2)
+
+`web_open {workspace: <state dir>}` on the control socket joins one
+workspace; `web_open {all: true}` joins every running session; a server
+started with `[web] join = "all"` (user or global `config.toml`; the project
+scope is not read for `[web]`: a workspace does not opt itself in) joins
+every running session at each rescan. Joining a workspace means, in order:
+
+1. Its registry entry is read (`registry_file(state_dir)`), and must be
+   live (`is_live`: the pid, its start time, this boot).
+2. Its socket must lie directly in the server's own runtime directory and
+   be a socket owned by this user. An entry pointing anywhere else is
+   refused (`invalid`), whoever wrote it.
+3. The server dials it and says `hello` as the operator with the token of
+   that daemon's token file, read at that moment with `read_operator_token`
+   (owner, mode, size checks as for the CLI). Then `web_attach` and
+   `summary {watch: true}` (§multi-transport): this connection is the watch.
+4. The workspace is in the table: `{id, state_dir, project, state, summary,
+   joined_at}`. At most 32 (`conflict` beyond).
+
+A daemon that fails step 3 is joined all the same, so that the page can say
+why it shows nothing of it: as `incompatible` when it answered `protocol`,
+as `unreachable` when its token file could not be read or it answered
+`unauthorized`. It is dialled again at the next rescan. One that fails
+steps 1 or 2 is not joined, and `web_open` answers the reason.
+
+A workspace leaves the table only by `web_close {workspace}` (`crew web
+--remove`) or when the server stops. The table is in memory only: consent
+is given to a server, not for ever.
+
+### What the listing holds
+
+```rust
+// crates/crew-core/src/rpc.rs
+/// What the `workspaces` call answers and the `workspaces` push carries: all of it, each time.
+pub struct Workspaces {
+    /// Joined, in the order they were joined.
+    pub joined: Vec<WorkspaceEntry>,
+    /// Running sessions of this user that are not joined: names only.
+    pub others: Vec<OtherSession>,
+}
+pub struct WorkspaceEntry {
+    pub id: String,
+    pub project: Option<String>,
+    /// The workspace directory.
+    pub workspace: String,
+    pub state: WorkspaceState,
+    /// Why, for `incompatible` and `unreachable`; else empty.
+    pub detail: String,
+    /// The last summary its daemon gave; kept while it is stopped.
+    pub summary: Option<WorkspaceSummary>,
+    pub joined_at: i64,
+}
+#[serde(rename_all = "snake_case")]
+pub enum WorkspaceState {
+    /// Its daemon runs and the server has its watch.
+    Running,
+    /// No daemon runs for it.
+    Stopped,
+    /// Its daemon speaks another protocol version.
+    Incompatible,
+    /// Its daemon runs but refused the server (the token file is missing or unreadable).
+    Unreachable,
+}
+pub struct OtherSession { pub id: String, pub project: Option<String>, pub workspace: String }
+```
+
+`others` exists so that the page can say what the operator would otherwise
+have to guess: "search is running; `crew web -C ~/work/search` adds it". It
+is read from the registry at each rescan and when a page asks for the
+listing (at most once a second), not on a timer. It names sessions; it gives
+no way to reach them.
+
+### Stale entries, and sessions the operator did not start
+
+- **A registry entry whose daemon is gone**: `list_sessions` removes it; the
+  server never dials it (step 1).
+- **A joined workspace whose directory was deleted**: stays `stopped` until
+  it is removed or the server stops.
+- **Sessions of other users**: not in this user's registry (a private
+  directory under this user's state home), and their sockets are not in this
+  user's runtime directory (step 2).
+- **Sessions this user's programs started** (a test harness, a script, an
+  unsandboxed agent that cleared its environment): in the registry like any
+  other. With the default they are named in `others` and reachable by
+  nobody; they are joined only if the operator runs `crew web` for them or
+  chose `--all` or `join = "all"`. That is the reason for the default, and
+  the README says so next to the setting.
+- **A registry entry written by hand** to make the server dial something:
+  writing there takes this user's file access, which is outside what crew
+  defends against (design-b3.md §1); and step 2 still keeps the operator
+  token from being sent to a socket outside the runtime directory.
+
+---
+
+<a id="multi-security"></a>
+## §multi-security
+
+### What is kept, and where it is enforced now
+
+| property of §security | now |
+|---|---|
+| Loopback only, both addresses, no `SO_REUSEPORT`, one port | the server, same code |
+| An origin per server start, a label never reused, exact `Host`, exact `Origin` on `/ws`, `GET` only, files by table lookup, the CSP | the server, same code; `connect-src` is unchanged (one host) |
+| A one-time pairing code in the fragment, a session token and a verifier, the proof in every `hello` reply, the session read once at the document's start, no code after the start | unchanged; codes are made on the control socket, sessions are the server's |
+| Before `hello` nothing but `ping`, `web_pair`, `hello`; 5 s; 4 KiB | the server |
+| A web session is the operator minus `web_open`, `web_close`, `load_team` (W7) | `load_team`: the daemon, on connections whose `hello` said `web` (below). `web_open`, `web_close`: not calls of any WebSocket any more |
+| An agent's token is not a web session; a web session's token is nothing on a Unix socket | the server knows no agent tokens at all; the daemons know no web sessions at all |
+| Stop order: credentials, then connections, then listeners | the server |
+| No secret in logs, events or the database | the server's log and the daemons' events |
+
+What an attacker who is not the operator can reach is what it was: the
+port. A sandboxed agent has the host's loopback network and so the port; it
+does not have `web.sock`, `web.token` or any token file (of the runtime
+directory the sandbox profile mounts its daemon's socket and the agent's own
+sidecar directory, nothing else; `a_worker_never_sees_the_token…` gains the
+`web.*` names).
+
+### The server to a daemon (M3)
+
+The server holds no credential of its own for any daemon. It reads a
+daemon's operator token from that daemon's token file each time it dials
+(a restarted daemon has a new one: **observed**), uses it for one `hello`,
+and does not keep it.
+
+For a browser's workspace connection it sends
+
+```json
+{"id":0,"method":"hello","params":{"role":"operator","token":"…","client":"web","protocol":6,"web":true}}
+```
+
+`Hello.web` is new. A daemon that accepted an operator `hello` with `web:
+true` treats the connection as today's `Transport::Web`: `load_team`,
+`web_attach` and `web_event` answer `forbidden` (`not_on_the_web`). The
+restriction is enforced where it always was, in the daemon, per connection;
+the server only has to say truthfully which connections are a browser's,
+and a unit test holds it to that (§multi-tests). `Transport::Web` and
+`Session::web` go; `Conn` gets `web: bool`.
+
+The watch is the server's own connection (`web: false`).
+
+### A browser to the server
+
+Pairing, the session and the proof are W6. What is new is their reach:
+
+- **One pairing reaches every joined workspace**, those joined later
+  included. A second pairing per workspace would add nothing: the page is
+  one origin, so its documents share their storage and their script realm,
+  and whatever holds the session for one workspace holds the others. The
+  boundary that means something is which workspaces the *server* will dial,
+  and that is the join table, which only the command line changes.
+- `crew web` in any workspace makes a pairing code (the operator ran it).
+  The code is the server's, not the workspace's; `&w=<id>` in the address
+  only says which workspace the page opens first.
+- Every WebSocket starts with `hello` and gets the proof in the reply, the
+  index and each workspace connection alike, and the page uses nothing a
+  connection carries before it checked it. A failed proof on any of them
+  stops the page.
+
+### What a web session may not do
+
+It cannot join or remove a workspace, start or stop the server, or make a
+pairing code: those are calls of the control socket, which is not reachable
+from a browser and needs a token the page never sees. It cannot name a
+workspace that is not joined: `hello` with an id that is not in the table
+answers `not_found`, and the id is never turned into a path. It cannot load
+a team (the daemon refuses). Everything else an operator can do in a joined
+workspace, it can.
+
+### One request per message
+
+On a daemon's socket a request is one line. The server passes a browser's
+text message to the daemon as one line without parsing it (§multi-transport
+"What the server does to a frame"), so a message with a line break in it
+would be two requests to the daemon (**observed**: two replies for one
+message). Since the daemon enforces W7 per connection, a second request
+gains nothing by itself; it would still make every later check that looks
+at a message meaningless. A text message containing a line feed or a
+carriage return closes the connection with 1008. `JSON.stringify` never
+produces one.
+
+### Limits
+
+As §security "Limits", with: 64 authenticated connections instead of 32 (a
+page has an index connection, a workspace connection and a terminal's), 32
+joined workspaces, 2 s for the server to reach a daemon when a browser says
+`hello` (inside the 5 s the browser has), and one pending `web_rescan` at a
+time.
+
+### What remains, beyond §security "What remains"
+
+- **A session's reach is every joined workspace.** A stolen session (which
+  takes this user's browser profile or this user's files) reaches all of
+  them, where it reached one. That is the cost of one dashboard, and the
+  reason joining is explicit by default and `crew web --remove` exists.
+- **Text from one workspace is rendered in a document that can act on the
+  others.** The page still renders agents' text as text under the same CSP;
+  a flaw there would now cross workspaces. No new mechanism is added for
+  it: separate origins per workspace would end "one server one can switch
+  in" (a switch would be a navigation and a pairing, and no page could show
+  the others' badges).
+- **The server can act as the operator of every running session of this
+  user**, joined or not, in the sense that it runs as this user and could
+  read any token file. So can every program this user runs. What the design
+  guarantees is that it *does* not: it dials joined workspaces only.
+
+---
+
+<a id="multi-transport"></a>
+## §multi-transport
+
+### Two kinds of connection
+
+Every WebSocket is `GET /ws` on the one origin, and begins as today
+(`web_pair` once per browser, then `hello`). `Hello` gains `workspace`:
+
+```rust
+pub struct Hello {
+    // …
+    /// Set by the dashboard server on a connection it opens for a browser.
+    #[serde(default)] pub web: bool,
+    /// From a browser to the dashboard server: the workspace this connection
+    /// is for. Absent: the index connection.
+    #[serde(default)] pub workspace: Option<String>,
+}
+```
+
+**The index connection** (`hello` without `workspace`) is answered by the
+server itself: `HelloInfo {role: operator, project: None, version,
+protocol, pid: <the server's>, web_proof}`. A page has one for its whole
+life; it is the page's link to its server (§multi-ui "Two levels"). On it:
+
+| call | answers |
+|---|---|
+| `ping` | `{"pong": true}` |
+| `workspaces` | `Workspaces` (§multi-join) |
+| `web_prefs {set?}` | the dashboard's own preferences (below) |
+
+and two pushes: `workspaces` (the whole listing, whenever the table, a state
+or a summary changed; at most one per 100 ms per connection, the first at
+once) and `shutdown`. There is no `subscribe` and no snapshot: every
+`workspaces` push replaces what the page had, so there is nothing to order
+it against. Any other call answers `invalid`.
+
+**A workspace connection** (`hello` with `workspace`) is today's connection
+to a daemon, through the server:
+
+1. The server checks the protocol version and the session token itself, in
+   the daemon's order (`protocol`, `unauthorized`), then the id
+   (`not_found`), then the workspace's state (`unavailable` for `stopped`
+   and `unreachable`, with the reason; `protocol` for `incompatible`).
+2. It dials the daemon, says `hello` to it (§multi-security), and answers
+   the browser with the daemon's `HelloInfo`, the session's `web_proof` put
+   into it.
+3. From then on it passes frames through, both ways, until either side
+   closes.
+
+The state connection and each terminal's connection are workspace
+connections, as today. `subscribe`, `snapshot`, the barrier (W13), `attach`,
+`resync`, every call and every push are the daemon's, unchanged, because the
+daemon cannot tell this connection from any other operator's on its socket
+except by `web`. One WebSocket is still one daemon connection (W2). A daemon
+ignores `workspace` in a `hello`; no browser's `hello` reaches one.
+
+Why not one WebSocket carrying several workspaces: frames would need an
+envelope (W2 has none), a terminal's output would wait behind another
+workspace's snapshot on the same stream, and the barrier would have to be
+defined per channel inside a stream. Three connections per page cost three
+handshakes at the start, in parallel.
+
+### What the server does to a frame
+
+After the two `hello`s, nothing: a line from the daemon is one text message
+to the browser, a text message from the browser is one line to the daemon.
+The server does not parse either (it checks that a browser's message has no
+line break, §multi-security, and that a daemon's line is UTF-8). So the hot
+path is a read and a write, and no meaning of the protocol is written down
+a second time. A daemon line is at most `MAX_FRAME_BYTES`, the WebSocket
+limit is the same constant.
+
+A slow browser: the server stops reading that connection's daemon socket
+while a WebSocket write is pending; the daemon then sees a slow reader on
+its socket and does what it does for any (`resync`, §transport "Reconnect
+and resync"). The server buffers one frame per connection, not a queue.
+
+**When the daemon's side ends**, the server closes the WebSocket with
+**4001**, "the workspace stopped". A daemon that stops in order sends its
+`shutdown` push first, as to every subscriber. **When the server cannot
+reach the daemon** at `hello`: `unavailable`.
+
+### Summaries (M5)
+
+The switcher shows, for every joined workspace, whether someone is waiting
+for the operator. The page has a state connection to one workspace only, so
+that has to come from elsewhere, and it should not come from the server
+keeping a model of every workspace: that would be the page's store written
+again in Rust, fed by every push of every team.
+
+```rust
+pub enum Call {
+    // …
+    /// Operator: what a workspace switcher shows of this session. With
+    /// `watch`, the connection then gets a `summary` push whenever the
+    /// summary changed: the first change at once, then at most one per
+    /// 250 ms.
+    Summary { #[serde(default)] watch: bool },
+    /// Operator on the socket, not web: this connection is the dashboard
+    /// server's watch. `SessionInfo.web` is `url` until it ends.
+    WebAttach { url: String },
+    /// On the watch: something about the dashboard the session's log should hold.
+    WebEvent { kind: WebEventKind, #[serde(default)] count: u32 },
+}
+#[serde(rename_all = "snake_case")]
+pub enum WebEventKind { Paired, AuthFailed }
+pub struct WorkspaceSummary {
+    /// The team's name once one is loaded; the listing shows it in place of
+    /// the registry's.
+    pub project: Option<String>,
+    pub agents: u32,
+    /// Agents whose status is `working`.
+    pub working: u32,
+    /// Agents that cannot go on by themselves: status `blocked` (whatever
+    /// the kind) or `failed`.
+    pub attention: u32,
+    /// Questions put to the operator that nobody answered yet.
+    pub questions: u32,
+    pub tasks: u32,
+    pub tasks_done: u32,
+}
+pub enum Push { /* … */ Summary(WorkspaceSummary), Workspaces(Workspaces) }
+```
+
+The daemon computes the summary from its model when an agent, a task or an
+open question changed and at least one connection watches. It holds no
+times and no progress: it changes when an agent changes status, a task is
+added or done, or a question opens or closes. An idle workspace sends none;
+a busy one a few a minute.
+
+The server's **watch** on each joined, running workspace is one operator
+connection: `hello`, `web_attach {url}`, `summary {watch: true}`. It never
+subscribes. Each `summary` push replaces the entry's summary and causes a
+`workspaces` push to the index connections. The end of the watch is how the
+server learns that the daemon is gone.
+
+`web_attach` gives the daemon what it lost with its own server: the `web`
+line of `crew status` (`SessionInfo.web`, with a `session` push when it
+changes) and two events in the session's log, `web.joined` ("shown in the
+web dashboard at http://c7f3….localhost:23417/") when it is called and
+`web.left` when that connection ends. `web_event` adds `web.paired` ("a
+browser was paired with the dashboard (3 sessions)") and `web.auth_failed`
+("7 refused web logins in the last minute", at most one a minute) to the
+log of every joined workspace, since a new browser session is something
+each of them should have on record. The texts are the daemon's; the server
+sends a kind and a count.
+
+### Preferences
+
+`web_prefs` on a workspace connection is the daemon's, as today, and holds
+what belongs to the workspace: `layout` (where agents were dragged).
+`web_prefs` on the index connection is the server's and holds what belongs
+to the operator: `keys`, `panel`, and `last` (the id of the workspace last
+on screen). The server keeps it in `web-prefs.json` beside its log (mode
+0600, an object of at most 16 KiB, else `invalid`), so it outlasts the
+server. The page validates every field of both, as today. A workspace's
+stored `keys` and `panel` from before are read once as defaults when the
+server's file has none.
+
+---
+
+<a id="multi-ui"></a>
+## §multi-ui
+
+### Two levels (M6)
+
+| | the page | the workspace on screen |
+|---|---|---|
+| connection | the index connection | its state connection (and terminals) |
+| states | `connecting`, `live`, `reconnecting`, `signed-out`, `stopped`, as today (`[data-conn]`) | `connecting`, `live`, `reconnecting`, `not-running`, `incompatible`, `none` (`[data-workspace-state]`) |
+| stops for good on | the server's `shutdown`, a failed proof on any connection, `unauthorized`, 30 s without the server | never: a workspace that is not running is waited for |
+| removes the stored session | when it stops, as today | never |
+
+`net/conn.ts` stays the connection; `net/state.ts` splits into `net/hub.ts`
+(the index: the listing, the dashboard's preferences, the page's state) and
+`net/workspace.ts` (today's link, for one workspace id). Rules:
+
+- A workspace connection is opened only while the page is `live` and the
+  listing says the workspace is `running`. Its `hello` carries the id.
+- A `shutdown` push on it, a close with 4001, or `unavailable` to its
+  `hello`: the workspace is `not-running`. The store keeps what it showed,
+  read-only and dimmed, under a banner (below). There is no retry timer:
+  the page waits for a `workspaces` push in which the workspace is
+  `running` again, then connects and takes a new snapshot.
+- Any other loss of the workspace connection while the index is live (a
+  timeout, a failed snapshot after `resync`): reconnect with today's
+  backoff, giving up into `not-running` after 30 s; the next `workspaces`
+  push that says `running` starts it again.
+- When the index connection is lost the page is `reconnecting` and
+  read-only as today, whatever the workspace connection does; when the page
+  stops, every connection is closed and nothing is requested again.
+- A failed proof on a workspace or terminal connection stops the page
+  (`link.stop("proof")` as the terminal does today). `unauthorized` on one
+  does too: the session is the server's, whichever connection learns that
+  it is gone.
+- `protocol` in answer to a workspace's `hello` makes that workspace
+  `incompatible`; it does not stop the page. (On the index connection it
+  still does: the page's own server does not speak its protocol.)
+- `not_found`: the workspace is not in the dashboard (any more); the page
+  says so and takes the next listing as the truth.
+
+### Which workspace
+
+In this order: the id in the address (`#/w/<id>/…`), the `w` of the pairing
+fragment, `last` of the dashboard's preferences, the first joined workspace
+that is running, the first joined. An id that is not joined: the page says
+so ("that workspace is not in this dashboard: run `crew web` in it") and
+offers the switcher; it does not fall through silently to another one.
+Nothing joined (every workspace was removed): "No workspace is shown here.
+Run `crew web` in a workspace."
+
+### Addresses (M7)
+
+`#/w/<id>/`, `#/w/<id>/tasks`, `#/w/<id>/logs`, `#/w/<id>/usage`, each with
+today's one selection (`?agent=`, `?task=`, `?message=`, `?event=`). A route
+without `/w/<id>` is rewritten in place (`replaceState`) to the chosen
+workspace's. Switching pushes a history entry, so the browser's back button
+returns to the workspace left. `#pair=<code>&w=<id>` is taken out of the
+address before anything else, as `#pair=` is today, and leaves `#/w/<id>/`.
+`route.ts` gains `workspace: string | null` in `Route`.
+
+### The switcher
+
+The project name at the left of the status bar becomes a button, `<project>
+▾`, with the others' badges beside it when there are any: `? 2` (questions
+waiting in other workspaces, summed) and `! 1` (agents needing attention in
+other workspaces). It opens a list:
+
+```
+  ● payments      ~/work/payments     6 agents · 3 working    tasks 4/6            1
+  ● search        ~/work/search       4 agents · 1 working    tasks 1/9   ? 2      2
+  ○ billing       ~/work/billing      stopped                                      3
+  ⚠ infra         ~/work/infra        started by another version of crew: restart the team
+  ─ running, not in this dashboard ─
+    docs          ~/work/docs         crew web -C ~/work/docs                    [copy]
+```
+
+- A listbox: one tab stop, arrows move, `enter` switches, `esc` closes and
+  returns focus to the button, typing filters by project and path, `1`–`9`
+  switch directly while it is open. `w` opens it from anywhere single-key
+  shortcuts work (the key is free in §ui's table; the help overlay lists
+  it). The current workspace is marked `aria-current`.
+- A row shows the state dot, project, directory (home as `~`), the
+  summary's counts, and its badges. `stopped` rows are dimmed and can be
+  chosen (the page then shows why nothing is live). `others` rows are text
+  with a button that copies the command; they cannot be chosen.
+- The document title is `<project> · crew`, with `(n)` in front when `n`
+  questions wait in any joined workspace.
+- When a question appears in another workspace (its `questions` went up),
+  one notice: "search: 2 questions are waiting", with a "switch" action.
+  The summary holds counts only, so no text of one workspace is shown
+  inside another.
+
+### A switch
+
+1. The state connection and the terminals of the workspace left are closed;
+   its store, animations and inspector are disposed. Its route (view and
+   selection) is remembered for this document, so coming back shows the
+   same view.
+2. The address changes; `last` is written (500 ms debounce, as preferences
+   are).
+3. If the new workspace is `running`: connect, `hello`, `subscribe`,
+   `snapshot`, `web_prefs`; the page shows the frame of the workspace (status
+   bar with the new name, "connecting…") at once and the content when the
+   snapshot is applied. **Observed** on the wire: 10.7–12.8 ms at the median,
+   12–15 ms at p95, for a 250–294 KiB snapshot.
+4. Nothing of the old workspace remains on screen once the new name is
+   shown: no agent, message or terminal of one is ever drawn under the name
+   of the other. The store is a new one, not the old one emptied.
+
+Operator actions, dialogs and the message box act on the workspace on
+screen and are disabled while it is not `live`. A dialog that is open when
+the workspace changes (by a `workspaces` push removing it, or by the back
+button) is closed, not carried over.
+
+### Not running, incompatible
+
+- `not-running`, with a last state: that state, dimmed and read-only, under
+  "payments is not running. Start it (`crew run` in ~/work/payments) and it
+  comes back here." Without one (the page was opened on it): the same
+  sentence on an empty main area.
+- `incompatible`: "payments was started by another version of crew (0.1.0,
+  protocol 5). Restart the team to see it here."
+- A workspace removed with `crew web --remove` while on screen: "payments
+  was taken out of this dashboard", and the switcher.
+
+---
+
+<a id="multi-migration"></a>
+## §multi-migration
+
+### The command
+
+```
+crew web [-C DIR] [--port N] [--no-open] [--json]   join this workspace, print the address, open the browser
+crew web --all                                       join every running session
+crew web --remove [-C DIR]                           take this workspace out of the dashboard
+crew web --list                                      what the dashboard shows (and what runs beside it)
+crew web --restart                                   stop the server and start this build's (open tabs stop)
+crew web --stop                                      stop the server: every browser session ends, for every workspace
+```
+
+- What a script written against today's `crew web --json` reads keeps its
+  meaning: `url` is the origin, `port`, `pair_url`, `expires_in_secs`,
+  `started` (this call started the server). New in `WebInfo`: `workspace`
+  (the id), `workspace_url` (`url` + `#/w/<id>/`), `joined` (the ids this
+  call joined). `pair_url` ends in `&w=<id>`.
+- `--stop` now ends the dashboard of every workspace, which is what "stop
+  serving" means when there is one server; it says how many workspaces it
+  was showing. `--remove` is the narrow one.
+- `--port` with a server already on another port: `conflict`, as today.
+- `--all` needs no workspace of its own; without any running session it
+  says so and starts nothing.
+- `crew status` prints the `web` line while the workspace is joined (from
+  `SessionInfo.web`, set by `web_attach`).
+
+### Protocol 6 (M8)
+
+| change | why the version moves |
+|---|---|
+| `Hello.web`, `Hello.workspace` | a daemon that ignored `web` would give a browser `load_team` |
+| `summary`, `web_attach`, `web_event`, `workspaces`, `web_rescan`; `web_close` takes `workspace`, `web_open` takes `workspace` and `all` | new calls, changed parameters |
+| pushes `summary`, `workspaces` | new push kinds |
+| a daemon answers `web_open`, `web_close`, `web_pair` with `invalid` ("served by the dashboard server: run `crew web`") | changed meaning |
+| `WebInfo` gains three fields; `SessionInfo.web` is set by the watch | changed meaning |
+
+The manifest test in `rpc.rs` moves to `(6, version_6)` with the two push
+kinds added. A team started before the upgrade answers `protocol` to the new
+CLI as always ("restart the team after upgrading"); to the new server it is
+`incompatible`.
+
+### What moves, what goes
+
+- `crates/crew/src/web/` (listener, HTTP, WebSocket, registry of codes and
+  sessions, assets) becomes the server process's; `Web::open` and
+  `Web::stop` lose their `&Daemon`. `ws.rs` drives a pipe to a Unix socket
+  instead of a `Session`.
+- The daemon loses `Daemon.web`, `Session::web`, `Transport::Web`, the
+  `web.tick` housekeeping and `web.stop` on shutdown; it gains `Conn.web`,
+  the summary, `web_attach`, `web_event` and the rescan call at start.
+- `web_prefs` stays in the daemon for `layout`.
+- There is one way to serve the dashboard, not two: no flag keeps a daemon
+  serving by itself.
+
+### For someone who has the dashboard open while upgrading
+
+Tabs of the old server stop when it is stopped (the first `crew web` of the
+new build replaces it, §multi-server "Versions"), as tabs always have at a
+restart. The new address is printed by that command.
+
+---
+
+<a id="multi-perf"></a>
+## §multi-perf
+
+The budgets of §perf stand. P5 and P6 are measured with the index and one
+workspace connection, as the page now starts. Added:
+
+| # | what | budget | spike (**observed**) |
+|---|---|---|---|
+| P16 | a push is on the wire, now measured at the browser's end of the server | ≤ 1 ms at p95 (unchanged) | the hop costs −62 to +25 µs at the median: noise |
+| P17 | a switch: from `enter` in the switcher to the first frame of the other workspace with its snapshot applied, 10 agents, 300 messages, 1000 events | ≤ 150 ms at p95 | the wire part (connect, `hello`, `subscribe`, `snapshot`): 12–15 ms at p95 |
+| P18 | a question asked in a workspace not on screen: from the daemon's `message` push to the badge | ≤ 500 ms at p95 | not spiked: 250 ms (daemon) + 100 ms (server) of coalescing at most |
+| P19 | an idle page with five joined workspaces: index frames received and calls made in 60 s, pings aside | none | by construction (summaries hold no times) |
+| P20 | the server with five joined workspaces and three pages, idle: resident memory; wake-ups | ≤ 40 MB; none under 5 s but pings | not spiked |
+
+How the server meets P16: a frame is read and written, not parsed
+(§multi-transport); `TCP_NODELAY` on every accepted socket, as today; one
+task per direction per connection.
+
+---
+
+<a id="multi-tests"></a>
+## §multi-tests
+
+### Wire fixtures (owner: vcs; W12)
+
+Added under `crates/crew/tests/fixtures/web/`: `hello` with `workspace` and
+its four refusals; the index `hello` reply; `workspaces` reply and push with
+every `WorkspaceState` and a non-empty `others`; `summary` reply and push;
+`web_open` reply with the new fields; the daemon's `invalid` for the three
+calls it no longer serves. The frontend's decoders and its mock read them.
+
+### Rust (owner: vcs)
+
+The server process, started in the foreground with a runtime directory of
+the test's own and real daemons beside it:
+
+- **Single instance and files**: a second server exits; stale `web.sock`,
+  `web.token`, `web.json` of a dead one are replaced; modes 0600; the
+  server refuses to start in an agent's environment.
+- **Control socket**: no token, an agent's token, a daemon's operator token:
+  `unauthorized`; the calls of a WebSocket (`snapshot`, `send`) are
+  `invalid` there, and `web_open`, `web_close`, `workspaces`, `web_rescan`
+  are refused on a WebSocket, before and after `hello`.
+- **Join**: one workspace; `all`; a registry entry whose socket is outside
+  the runtime directory (refused, and no connection is made to it: a
+  listener there sees none); a dead entry; the 33rd workspace; `join =
+  "all"` picks up a daemon started later; the project scope's `[web]` is
+  ignored.
+- **The daemon's side**: `hello` with `web: true` and the operator token:
+  `load_team`, `web_attach`, `web_event` are `forbidden`, everything of W7's
+  rest works; `web: true` with an agent's token is an agent's `hello` as
+  before (the flag grants nothing); `web_attach` sets `SessionInfo.web`,
+  pushes `session`, emits `web.joined`, and the end of that connection
+  clears it and emits `web.left`; `summary` counts agents, attention,
+  questions and tasks from a scripted team, a watch gets a push for each
+  change and at most one per 250 ms, an idle team gets none in 2 s.
+- **A workspace connection**: the server's `hello` to the daemon has `web:
+  true` (asserted on a stand-in daemon that records it) and the token that
+  is in the file at that moment; the reply to the browser is the daemon's
+  with the proof; frames pass unchanged both ways (the fixture frames, byte
+  for byte); a message with `\n` or `\r` closes with 1008 and the daemon
+  receives nothing; the barrier test of §tests passes through the server
+  unchanged; `not_found`, `unavailable`, `protocol`.
+- **A daemon stops and returns**: its connections close with 4001; the
+  index gets `stopped` with the last summary; other workspaces' connections
+  are untouched; after the daemon starts again the index says `running`
+  without any timer in the server having fired (the test freezes time), and
+  the same session reaches it with the new token.
+- **The server's life**: linger (with `linger_secs = 0`: exits when the last
+  joined daemon stops; with 600 and frozen time: at 600 s; a daemon back at
+  599 s cancels it); `web_close` without a workspace runs the stop order
+  (the existing stop-order tests, moved); the control socket's path removed:
+  exits within two ticks; `SIGTERM`.
+- **Versions**: a daemon speaking another protocol is `incompatible`; the
+  CLI replaces an older server, refuses a newer one, and notes another
+  build.
+- **Everything of §tests "Rust: the bridge"** that is about the listener,
+  HTTP, pairing, sessions, the proof and the limits runs against the server
+  process instead of a daemon.
+- **Sandbox**: a sandboxed agent cannot see `web.sock`, `web.token`,
+  `web.json` (profile test), and its prober (the live spec's) is still
+  `unauthorized` on the port.
+- **P16** through the server.
+
+### Frontend (owner: web)
+
+- vitest: `hub.ts` and `workspace.ts` state machines (every row of
+  §multi-ui "Two levels", including: `shutdown` on a workspace connection
+  does not stop the page or remove the session; `shutdown` on the index
+  does; a failed proof on a workspace connection stops the page; no
+  workspace connection is opened before the index is live or for a
+  workspace that is not `running`; no retry timer while `not-running`);
+  route parsing and rewriting with `/w/<id>`; the pairing fragment with
+  `&w=`; the choice of workspace; the switcher's rows from fixtures; title
+  and badges from summaries; preferences split in two.
+- Playwright, `mock` (the mock server gains an index and two workspaces):
+  the switcher by keyboard and by mouse; a switch disposes the old store
+  (no element of the old workspace remains, checked while the new snapshot
+  is delayed); the back button; a deep link to each workspace; a question
+  in the other workspace raises the badge and the notice; a workspace stops
+  and returns; a workspace is removed while on screen; an id that is not
+  joined; `others`; a dialog open during a switch is closed.
+- Playwright, `perf`: P17, P19.
+
+### Live (owner: qa)
+
+Two real daemons, the real server, Chromium:
+
+- `crew web` in A, then in B: the same origin, the tab opened for A shows B
+  in its switcher without a reload; switching shows B's agents; an operator
+  action in B is confirmed by B's events and absent from A's.
+- A question asked by an agent of B while A is on screen: the badge, then
+  the banner after the switch.
+- `crew stop` for A: the tab stays live, A is `not-running`; `crew run`
+  again: A is live again in the same tab, with the same session.
+- `SIGKILL` for A's daemon: the same.
+- The lifecycle spec, with the server in the daemon's place: `SIGKILL` the
+  server, a squatter on both loopback addresses, a hostile second document:
+  the open tab refuses the forged proof and stops; a new `crew web` gives a
+  new label.
+- `crew web --remove` for B while it is on screen; `crew web --stop`.
+- A third session that was never joined: named in `others`, and `hello`
+  with its id is `not_found`.
+- The outside spec unchanged (another origin, the numeric addresses, an
+  agent's token), plus the sandboxed prober.
+- P18 measured; P5–P11, P14 measured again through the server.
+
+`scripts/web-e2e` and the harness give each test its own runtime directory,
+as now; the harness's teardown runs `crew web --stop`, and the server's
+exit when its directory is removed catches what a failed test leaves.
+
+---
+
+<a id="multi-split"></a>
+## §multi-split
+
+### Member **vcs** (task `multi-server`)
+
+In this order, each step a commit that builds and passes its tests:
+
+0. **The contract**: `rpc.rs` at protocol 6 (the types above, the manifest
+   test), the wire fixtures. Nothing uses them yet. The frontend starts from
+   this commit.
+1. **The daemon's side**: `Conn.web` from `Hello.web`; `summary` and its
+   push; `web_attach`, `web_event`; the rescan call at start. The in-daemon
+   server still runs.
+2. **The server process**: `crew web-server`, its files, the control socket,
+   the join table, the watches, the index connection, workspace connections
+   as pipes. `crates/crew/src/web/` moves under it.
+3. **The switch**: `crew web` talks to the server (`--all`, `--remove`,
+   `--list`, `--restart`, `--stop`); the daemon's server, `Transport::Web`
+   and `Session::web` are deleted; `web_open`, `web_close`, `web_pair` are
+   `invalid` on a daemon. The Rust tests of §tests move.
+
+### Member **web** (task `multi-ui`)
+
+From step 0: `net/hub.ts`, `net/workspace.ts`, the route, the switcher, the
+workspace states and banners, preferences split, the mock server with an
+index and two workspaces, the tests. Rebuilt bundle with every commit (W8).
+
+### Member **qa** (task `multi-qa`)
+
+Integration; the live specs of §multi-tests; `README` "Web dashboard" (one
+server, joining, `--all`, the setting and why the default is what it is,
+`--remove`, `--stop`, tabs and restarts); `justfile` unchanged in its
+recipes.
+
+### The contract between vcs and web
+
+`crates/crew/tests/fixtures/web/` at step 0, and these sentences:
+
+- A page opens `ws://<host>/ws` for everything. `hello` without `workspace`
+  is the index; with it, a workspace.
+- Every `hello` reply carries `web_proof`.
+- On the index: `workspaces`, `web_prefs`, `ping`; pushes `workspaces`,
+  `shutdown`.
+- On a workspace connection: protocol 5's calls and pushes with protocol 6's
+  number; closed with 4001 when the daemon is gone; `hello` errors
+  `not_found`, `unavailable`, `protocol`, `unauthorized`.
+- A text message has no line break.
+
+### Risks to watch
+
+- **Two servers for a while** (steps 1–2): the daemon's own must keep
+  passing its tests until step 3 deletes it; no step leaves the tree with a
+  dashboard that does not open.
+- **The page's two levels**: the easy mistake is to keep one "connection
+  state" and let a workspace's `shutdown` stop the page, or let a page-level
+  stop leave a workspace connection open. The vitest table is the gate.
+- **Timers in the server**: the design has none for discovery. A "just in
+  case" registry poll would hide a missing `web_rescan` and break P20; the
+  frozen-time test is the gate.
+- **The watch is not a subscriber**: if it subscribed, the server would
+  receive every push of every team and P20 would depend on the teams.
+- **Tests that leave servers behind**: every harness stops its server; the
+  directory check is the net, not the plan.
