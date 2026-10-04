@@ -1173,38 +1173,56 @@ with review_submit(task_id=\"{}\", approve=true|false).",
             && author
                 .as_deref()
                 .is_some_and(|a| active_task(&self.model().tasks, a).is_some());
-        let mut updated = task.clone();
-        if approve {
-            updated.status = TaskStatus::Done;
-            updated.completed_at = Some(now);
-            updated.note = None;
-        } else {
-            updated.status = if queued {
-                TaskStatus::Ready
+        // The verdict, made to the task as it is when it is stored (a card
+        // edit or a progress report meanwhile is kept), if it is still
+        // awaiting review.
+        let verdict = |t: &mut Task| -> Result<(), RpcError> {
+            if t.status != TaskStatus::Review {
+                return Err(RpcError::conflict(format!(
+                    "task {task_id} is {}, not awaiting review",
+                    t.status
+                )));
+            }
+            if approve {
+                t.status = TaskStatus::Done;
+                t.completed_at = Some(now);
+                t.note = None;
             } else {
-                TaskStatus::Working
-            };
-            updated.progress = None;
-            updated.note = Some(format!("changes requested by {reviewer}"));
-        }
+                t.status = if queued {
+                    TaskStatus::Ready
+                } else {
+                    TaskStatus::Working
+                };
+                t.progress = None;
+                t.note = Some(format!("changes requested by {reviewer}"));
+            }
+            Ok(())
+        };
         // The verdict is told to the author in the same write that applies
         // it: both are stored, or neither is. One that cannot be (the bus or
         // the database refuses) is not applied: the task stays in Review,
         // and the reviewer and the orchestrator hear of it.
-        match author.as_deref().filter(|a| *a != reviewer) {
+        let updated = match author.as_deref().filter(|a| *a != reviewer) {
             Some(author) => {
                 let message =
                     self.review_result(&task, &reviewer, author, approve, &comments, queued);
+                let mut refused = None;
                 let stored = self.recipients_of(&message).and_then(|(recipients, p2p)| {
-                    let outcome = self.bus.send_with_task(message, recipients, &updated)?;
-                    Ok((outcome, p2p))
+                    let apply =
+                        |t: &mut Task| verdict(t).inspect_err(|e| refused = Some(e.clone()));
+                    let told = self.try_update_task_telling(task_id, apply, message, recipients)?;
+                    Ok(told.map(|(updated, outcome)| (updated, outcome, p2p)))
                 });
+                if let Some(e) = refused {
+                    return Err(e);
+                }
                 match stored {
-                    Ok((outcome, p2p)) => {
-                        self.task_saved(&updated);
+                    Ok(Some((updated, outcome, p2p))) => {
                         drop(planning);
                         self.message_sent(&outcome, p2p).await;
+                        updated
                     }
+                    Ok(None) => return Err(RpcError::not_found("task vanished")),
                     Err(e) => {
                         drop(planning);
                         return Err(self
@@ -1214,11 +1232,19 @@ with review_submit(task_id=\"{}\", approve=true|false).",
                 }
             }
             None => {
-                let saved = self.try_update_task(task_id, |t| *t = updated.clone());
+                let mut refused = None;
+                let saved = self.try_update_task(task_id, |t| {
+                    if let Err(e) = verdict(t) {
+                        refused = Some(e);
+                    }
+                });
                 drop(planning);
-                saved?.ok_or_else(|| RpcError::not_found("task vanished"))?;
+                if let Some(e) = refused {
+                    return Err(e);
+                }
+                saved?.ok_or_else(|| RpcError::not_found("task vanished"))?
             }
-        }
+        };
 
         self.emit(
             NewEvent::new(
@@ -1362,5 +1388,150 @@ it with review_submit(task_id=\"{}\", approve=true|false).",
                 task.id
             ),
         )
+    }
+}
+
+#[cfg(test)]
+mod review_tests {
+    use super::*;
+    use crate::message_bus::{BusError, BusEvent, MessageBus, SendOutcome};
+    use crate::persistence::MessageCounts;
+    use crew_core::InboxEntry;
+    use std::sync::{mpsc, Arc, Mutex};
+
+    type Bus<T> = std::result::Result<T, BusError>;
+
+    /// A bus whose send_with_task waits until it is released (rev-core's
+    /// fixture, m-4db439acbc56): a verdict can be held between reading its
+    /// task and storing it.
+    struct GatedBus {
+        bus: Arc<dyn MessageBus>,
+        entered: mpsc::Sender<()>,
+        release: Mutex<mpsc::Receiver<()>>,
+    }
+
+    impl MessageBus for GatedBus {
+        fn send(&self, m: NewMessage, r: Vec<String>) -> Bus<SendOutcome> {
+            self.bus.send(m, r)
+        }
+        fn send_with_task(&self, m: NewMessage, r: Vec<String>, t: &Task) -> Bus<SendOutcome> {
+            self.entered.send(()).unwrap();
+            let release = self.release.lock().unwrap();
+            release
+                .recv_timeout(std::time::Duration::from_secs(10))
+                .unwrap();
+            self.bus.send_with_task(m, r, t)
+        }
+        fn receive(&self, a: &str, u: bool, l: usize) -> Bus<Vec<InboxEntry>> {
+            self.bus.receive(a, u, l)
+        }
+        fn undelivered(&self, a: &str) -> Bus<Vec<Message>> {
+            self.bus.undelivered(a)
+        }
+        fn mark_delivered(&self, a: &str, i: &[String]) -> Bus<()> {
+            self.bus.mark_delivered(a, i)
+        }
+        fn acknowledge(&self, a: &str, i: Option<&[String]>) -> Bus<usize> {
+            self.bus.acknowledge(a, i)
+        }
+        fn history(&self, a: Option<&str>, l: usize) -> Bus<Vec<Message>> {
+            self.bus.history(a, l)
+        }
+        fn get(&self, i: &str) -> Bus<Option<(Message, Vec<String>)>> {
+            self.bus.get(i)
+        }
+        fn counts(&self, a: &str) -> Bus<MessageCounts> {
+            self.bus.counts(a)
+        }
+        fn subscribe(&self) -> tokio::sync::broadcast::Receiver<BusEvent> {
+            self.bus.subscribe()
+        }
+        fn set_max_bytes(&self, l: usize) {
+            self.bus.set_max_bytes(l)
+        }
+        fn max_bytes(&self) -> usize {
+            self.bus.max_bytes()
+        }
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn a_card_edit_made_while_a_verdict_is_stored_is_kept() {
+        let temp = tempfile::tempdir().unwrap();
+        let mut running = super::super::start(super::super::DaemonOptions {
+            workspace: temp.path().to_path_buf(),
+            crew_bin: std::env::current_exe().unwrap(),
+        })
+        .await
+        .unwrap();
+        let (entered_tx, entered) = mpsc::channel();
+        let (release, release_rx) = mpsc::channel();
+        let original = running.daemon.bus.clone();
+        Arc::get_mut(&mut running.daemon.0).unwrap().bus = Arc::new(GatedBus {
+            bus: original,
+            entered: entered_tx,
+            release: Mutex::new(release_rx),
+        });
+        let daemon = running.daemon.clone();
+        for id in ["author", "critic"] {
+            let agent = serde_json::from_value(json!({
+                "id": id, "name": id, "role": "work", "status": "idle", "runtime": "shell",
+                "workdir": temp.path().to_str().unwrap(), "backend": "pty", "last_activity_at": 0
+            }))
+            .unwrap();
+            daemon.model().agents.push(agent);
+        }
+        let task: Task = serde_json::from_value(json!({
+            "id": "t", "title": "original", "status": "review", "created_at": 0,
+            "assigned_agent": "author", "reviewer": "critic"
+        }))
+        .unwrap();
+        daemon.store.save_task(&task).unwrap();
+        daemon.model().tasks.push(task);
+
+        // The critic's verdict is being stored; meanwhile the operator edits
+        // the card.
+        let review = tokio::spawn({
+            let daemon = daemon.clone();
+            async move {
+                daemon
+                    .submit_review(&Who::Agent("critic".into()), "t", false, "revise".into())
+                    .await
+            }
+        });
+        entered
+            .recv_timeout(std::time::Duration::from_secs(5))
+            .unwrap();
+        let title = "edited while the verdict was stored";
+        let edit = tokio::spawn({
+            let daemon = daemon.clone();
+            async move {
+                daemon
+                    .edit_task(&Who::Operator, "t", Some(title.into()), None)
+                    .await
+            }
+        });
+        // (On this thread: the workers may all be held, one by the verdict,
+        // one by the edit waiting for it.)
+        std::thread::sleep(std::time::Duration::from_millis(200));
+        release.send(()).unwrap();
+        review.await.unwrap().unwrap();
+        edit.await.unwrap().unwrap();
+
+        // Both hold: the verdict and the edit.
+        let in_memory = daemon.model().task("t").unwrap().clone();
+        let stored = daemon
+            .store
+            .load_tasks()
+            .unwrap()
+            .into_iter()
+            .find(|t| t.id == "t")
+            .unwrap();
+        for (copy, task) in [("in memory", &in_memory), ("stored", &stored)] {
+            assert_eq!(
+                (task.title.as_str(), task.status),
+                (title, TaskStatus::Working),
+                "{copy}: the verdict's earlier copy of the task overwrote the edit"
+            );
+        }
     }
 }

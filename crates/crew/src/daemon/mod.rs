@@ -21,7 +21,7 @@ use tokio::net::UnixListener;
 use tokio::sync::{broadcast, mpsc, watch, Notify};
 
 use crate::agents::AgentSettings;
-use crate::message_bus::{LocalBus, MessageBus};
+use crate::message_bus::{LocalBus, MessageBus, NewMessage, SendOutcome};
 use crate::persistence::{NewEvent, SqliteStore, Store};
 use crate::process::{PaneMeta, ProcEvent, ProcessManager};
 
@@ -532,13 +532,32 @@ impl Daemon {
         Ok(Some(after))
     }
 
-    /// `task` as it was just stored (with a message, by the bus): the model
-    /// and the clients get it.
-    pub(crate) fn task_saved(&self, task: &Task) {
-        if let Some(t) = self.model().tasks.iter_mut().find(|t| t.id == task.id) {
-            *t = task.clone();
-        }
-        self.push(Push::Task(Box::new(task.clone())));
+    /// try_update_task, with `message` (for `recipients`) stored in the
+    /// same write as the change: both are, or neither is, and nothing is
+    /// published unless they are. As try_update_task's, the change is made
+    /// to the task as it is now, all under the model lock, so a change of
+    /// it made meanwhile by any writer is kept. `f` refusing (Err) changes
+    /// nothing.
+    pub(crate) fn try_update_task_telling(
+        &self,
+        id: &str,
+        f: impl FnOnce(&mut Task) -> Result<(), RpcError>,
+        message: NewMessage,
+        recipients: Vec<String>,
+    ) -> Result<Option<(Task, SendOutcome)>, RpcError> {
+        let (after, outcome) = {
+            let mut model = self.model();
+            let Some(task) = model.tasks.iter_mut().find(|t| t.id == id) else {
+                return Ok(None);
+            };
+            let mut after = task.clone();
+            f(&mut after)?;
+            let outcome = self.bus.send_with_task(message, recipients, &after)?;
+            *task = after.clone();
+            (after, outcome)
+        };
+        self.push(Push::Task(Box::new(after.clone())));
+        Ok(Some((after, outcome)))
     }
 
     /// Recompute inbox/outbox counters for the given agents.
@@ -1020,6 +1039,71 @@ impl Running {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crew_core::{MessageType, TaskStatus};
+
+    #[tokio::test]
+    async fn a_task_change_told_in_the_same_write_is_made_to_the_task_as_it_is_now() {
+        let temp = tempfile::tempdir().unwrap();
+        let running = start(DaemonOptions {
+            workspace: temp.path().to_path_buf(),
+            crew_bin: std::env::current_exe().unwrap(),
+        })
+        .await
+        .unwrap();
+        let daemon = running.daemon.clone();
+        let task: Task = serde_json::from_value(serde_json::json!({
+            "id": "t", "title": "as read", "description": "", "status": "review",
+            "assigned_agent": "author", "created_at": 0
+        }))
+        .unwrap();
+        daemon.model().tasks.push(task);
+        let verdict = || {
+            NewMessage::new(
+                "critic",
+                "author",
+                MessageType::ReviewResult,
+                "Approved: task t.",
+            )
+        };
+        let recipients = || vec!["author".to_string()];
+        let messages = |daemon: &Daemon| daemon.bus.history(None, 10).unwrap().len();
+
+        // The change is made to the task as it is when it is stored.
+        daemon.model().tasks[0].title = "edited meanwhile".into();
+        let (told, _) = daemon
+            .try_update_task_telling(
+                "t",
+                |t| {
+                    t.status = TaskStatus::Done;
+                    Ok(())
+                },
+                verdict(),
+                recipients(),
+            )
+            .unwrap()
+            .unwrap();
+        assert_eq!(
+            (told.status, told.title.as_str()),
+            (TaskStatus::Done, "edited meanwhile")
+        );
+        assert_eq!(
+            daemon.store.load_tasks().unwrap()[0].title,
+            "edited meanwhile"
+        );
+        assert_eq!(messages(&daemon), 1);
+
+        // A change refused (here: no longer awaiting review) stores nothing
+        // and tells nothing.
+        let refused = daemon.try_update_task_telling(
+            "t",
+            |_| Err(RpcError::conflict("not awaiting review")),
+            verdict(),
+            recipients(),
+        );
+        assert_eq!(refused.unwrap_err().code, "conflict");
+        assert_eq!(daemon.model().tasks[0].status, TaskStatus::Done);
+        assert_eq!(messages(&daemon), 1);
+    }
 
     #[tokio::test]
     async fn the_compaction_offset_is_measured_through_the_agents_files() {
