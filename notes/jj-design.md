@@ -29,6 +29,12 @@ control action runs.
 - a project that is a linked git worktree keeps its admin directory (`HEAD`)
   and its common directory (objects, refs) apart (§layout, §ops, §sandbox).
 
+**Revision 3.** The steps for going back from jj to git (D2) publish the work
+before anything is removed: the reviewer found (m-1aead106ab54) that a bare
+`jj commit` leaves `agents/<id>` and the git branch on the previous commit.
+`notes/jj-argv-check.sh` replays the steps on a workspace with uncommitted
+work.
+
 **Verification.** Every jj invocation below was run against jj 0.44.0
 (`nix shell nixpkgs#jujutsu`) in scratch repositories. `notes/jj-argv-check.sh`
 replays all of them in throwaway projects and asserts what this design relies
@@ -152,10 +158,12 @@ leaves behind) is the one git has today.
     .crew/worktrees/<id> for each and start again (README, "Moving a workspace
     to jj"). The agents/<id> branches are kept.`
   - sticky jj without jj (refusal): `this workspace is managed with jj
-    (.crew/jj) and jj is not on PATH; install jj 0.44 or newer, or remove
-    .crew/jj and .crew/worktrees to start over with git.`
+    (.crew/jj) and jj is not on PATH; install jj 0.44 or newer. Going back to
+    git needs jj once more, to publish the agents' work (README, "Back to
+    git"); removing .crew/jj before that loses what is not on a git branch.`
   - `vcs: git` on a jj workspace (refusal): `this workspace is managed with jj
-    (.crew/jj); workspace.vcs: git would fork its history.`
+    (.crew/jj); workspace.vcs: git would fork its history. To go back to git,
+    publish every agent's work first (README, "Back to git").`
   - `vcs: jj` without jj (refusal): `workspace.vcs is jj, but jj is not on PATH`
     (or `…but jj 0.41.0 is older than 0.44`).
   - `vcs: jj` with git worktrees left (refusal): `workspace.vcs is jj, but
@@ -174,11 +182,36 @@ leaves behind) is the one git has today.
   4. With jj 0.44 or newer on PATH, start the team again. crew creates
      `.crew/jj`, imports the branches, and gives each agent a jj workspace at
      its branch.
-- **Back to git** **(observed)**: `crew stop`, commit through crew or
-  `jj commit` what should be kept, remove `.crew/jj` and the directories under
-  `.crew/worktrees`, set `workspace.vcs: git` (or take jj off PATH) and start
-  again. The branches are in git already, and the git backend adds its
-  worktrees on them.
+- **Back to git** (by hand) **(observed, with a workspace that still had
+  uncommitted work)**. Under jj a commit alone publishes nothing: `jj commit`
+  moves neither the bookmark `agents/<id>` nor the git branch **(observed: both
+  stay on the previous commit)**, and the git backend starts from the git
+  branch. So nothing is removed until git has every agent's last commit:
+  1. If the team is still running, let each agent finish with `git_commit`:
+     crew moves and exports the branch. Then `crew stop`.
+  2. For each `.crew/worktrees/<id>`, save what is still uncommitted and publish
+     it. `W` is `.crew/worktrees/<id>`:
+     ```
+     jj -R W --config 'snapshot.max-new-file-size="1TiB"' status
+     jj -R W --config 'snapshot.max-new-file-size="1TiB"' commit -m "<message>"     only when status lists changes
+     jj -R W bookmark set agents/<id> -r @-
+     jj -R W git export
+     ```
+     Without the `--config`, plain jj leaves new files over 1 MiB out of the
+     commit, with a warning **(observed)**.
+  3. Verify, for each: the workspace is clean and git's branch is the saved
+     commit. These two print the same id:
+     ```
+     jj -R W log --no-graph -r @- -T 'commit_id ++ "\n"'
+     git rev-parse agents/<id>
+     ```
+     and `jj -R W status` says `The working copy has no changes`. Do not go on
+     while they differ.
+  4. Only then remove `.crew/jj` and the directories under `.crew/worktrees`.
+  5. Set `workspace.vcs: git` (with jj on PATH, `auto` would choose jj again)
+     and start the team. The git backend adds its worktrees on the branches.
+  6. Optional: jj's keep refs stay in the repository; this removes them:
+     `git for-each-ref --format='delete %(refname)' refs/jj/ | git update-ref --stdin`.
 
 **D3. Layout (operator answer 2).** In a plain-git project the jj repository
 lives in `.crew/jj`, created with `jj git init --git-repo <git>`, so its commits
@@ -1567,6 +1600,10 @@ The list of `git/mod.rs`, for jj:
   sandboxed team is refused there.
 - moving from git: after `git worktree remove`, an agent with a branch from
   the git backend gets a jj workspace at that branch.
+- going back to git (`notes/jj-argv-check.sh`, "jj -> git"): after the steps
+  of D2 on a workspace with uncommitted work, the git branch holds it and a
+  git worktree on the branch has the files; and the hazard itself: after a
+  bare `jj commit` the bookmark and the git branch have not moved.
 - a stale workspace is an error that names `jj workspace update-stale`.
 - every command goes through the installed launcher (the test that exists for
   git, with the jj argv).

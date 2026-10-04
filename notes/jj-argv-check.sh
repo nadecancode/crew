@@ -177,11 +177,15 @@ commit a "again" >/dev/null && fail "empty commit was made" || true
 
 # --- status and diff
 echo more >> "$WT/a/b.txt"
-j a -R "$WT/a" --ignore-working-copy log --no-graph -r @- -T 'bookmarks ++ "\n" ++ commit_id.short(8) ++ " " ++ description.first_line() ++ "\n"' | grep -q '^agents/a$' || fail "status header"
+out=$(j a -R "$WT/a" --ignore-working-copy log --no-graph -r @- -T 'bookmarks ++ "\n" ++ commit_id.short(8) ++ " " ++ description.first_line() ++ "\n"')
+echo "$out" | grep -q '^agents/a$' || fail "status header"
 ( cd "$WT/a" && eq "$(j a -R "$WT/a" diff --summary)" "M b.txt" "diff --summary" )
-j a -R "$WT/a" diff --git | grep -q '^+more$' || fail "diff --git"
-j a -R "$WT/a" diff --stat --from '"main"' --to @ | grep -q '3 files changed' || fail "diff --stat"
-j a -R "$WT/a" diff --git --from "commit_id($BASE)" --to @ | grep -q '^diff --git a/n.txt b/n.txt$' || fail "diff --from"
+out=$(j a -R "$WT/a" diff --git)
+echo "$out" | grep -q '^+more$' || fail "diff --git"
+out=$(j a -R "$WT/a" diff --stat --from '"main"' --to @)
+echo "$out" | grep -q '3 files changed' || fail "diff --stat"
+out=$(j a -R "$WT/a" diff --git --from "commit_id($BASE)" --to @)
+echo "$out" | grep -q '^diff --git a/n.txt b/n.txt$' || fail "diff --from"
 commit a "a: more" >/dev/null
 
 # other agents: a clean commit and a conflicting one
@@ -191,7 +195,8 @@ printf 'hello\nD\n' > "$WT/d/a.txt"; D1=$(commit d $'d: conflicting\n\nbody' | l
 # --- cherry-pick
 eq "$(cherry_pick a "commit_id(${B1:0:10})")" "b@crew.local" "pick source author"
 [ -f "$WT/a/bnew.txt" ] || fail "pick did not land"
-j a -R "$WT/a" --ignore-working-copy log --no-graph -r @- -T description | grep -q "^(cherry picked from commit $B1)$" || fail "trailer"
+out=$(j a -R "$WT/a" --ignore-working-copy log --no-graph -r @- -T description)
+echo "$out" | grep -q "^(cherry picked from commit $B1)$" || fail "trailer"
 eq "$(git log -1 --format='%an|%cn' agents/a)" "b|a" "pick keeps author"
 before=$(head_of a)
 out=$(cherry_pick a "commit_id($D1)") && fail "conflict not reported" || true
@@ -368,6 +373,40 @@ ensure_workspace a "commit_id($(bookmark main))"
 [ -f "$WT/a/wa.txt" ] || fail "migrated workspace does not start from its branch"
 echo more > "$WT/a/more.txt"; commit a "a: continued under jj" >/dev/null
 eq "$(git rev-parse agents/a~1)" "$G1" "jj continues the git branch"
+
+# ================================================= moving a workspace jj -> git
+# §decisions D2 "Back to git": the team is stopped and a jj workspace still has
+# uncommitted work. By hand, with plain jj (no pins but the ones the steps give).
+hand() { JJ_USER=u JJ_EMAIL=u@example.com "$JJ" --no-pager --color never --quiet "$@"; }
+BIG='snapshot.max-new-file-size="1TiB"'
+J1=$(git rev-parse agents/a)
+echo dirty > "$WT/a/dirty.txt"; head -c 1500000 /dev/zero > "$WT/a/big.bin"
+out=$(hand -R "$WT/a" --config "$BIG" status)
+echo "$out" | grep -q 'dirty.txt' || fail "status does not list the uncommitted file"
+hand -R "$WT/a" --config "$BIG" commit -m "a: saved by hand"
+SAVED=$(hand -R "$WT/a" log --no-graph -r @- -T 'commit_id ++ "\n"')
+[ "$SAVED" != "$J1" ] || fail "nothing was saved"
+# the hazard the steps exist for: `jj commit` alone moves neither the bookmark nor the git branch
+eq "$(bookmark agents/a)" "$J1" "bare jj commit leaves the bookmark behind"
+eq "$(git rev-parse agents/a)" "$J1" "bare jj commit leaves the git branch behind"
+# the steps: move the bookmark, export, verify
+hand -R "$WT/a" bookmark set agents/a -r @-
+hand -R "$WT/a" git export
+eq "$(git rev-parse agents/a)" "$(hand -R "$WT/a" log --no-graph -r @- -T 'commit_id ++ "\n"')" "verify: the exported branch is the saved commit"
+out=$(hand -R "$WT/a" --config "$BIG" status)
+echo "$out" | grep -q 'The working copy has no changes' || fail "verify: the workspace is clean"
+# only now: remove jj's state; the git backend adds its worktree on the branch
+rm -rf "$R" "$WT/a"
+git worktree add -q .crew/worktrees/a agents/a
+eq "$(git -C .crew/worktrees/a rev-parse HEAD)" "$SAVED" "git worktree is at the saved commit"
+[ -f .crew/worktrees/a/dirty.txt ] && [ -f .crew/worktrees/a/more.txt ] && [ -f .crew/worktrees/a/wa.txt ] || fail "saved work missing from the git worktree"
+eq "$(wc -c < .crew/worktrees/a/big.bin)" 1500000 "the large file was saved"
+eq "$(git -C .crew/worktrees/a status --porcelain)" "" "git worktree is clean"
+# jj's keep refs stay behind in git; this removes them
+git for-each-ref --format='delete %(refname)' refs/jj/ | git update-ref --stdin
+eq "$(git for-each-ref refs/jj/ | wc -l)" 0 "keep refs removed"
+git fsck --connectivity-only >/dev/null 2>&1 || fail "repository damaged"
+eq "$(git rev-parse agents/a)" "$SAVED" "branch after cleanup"
 
 # ================================================================ native layout
 NS=$T/native; mkdir -p "$NS"; cd "$NS"
