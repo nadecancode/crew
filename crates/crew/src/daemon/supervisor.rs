@@ -1814,13 +1814,25 @@ defaults.auto_trust: true in the team file.",
     }
 
     /// A restarted agent that cannot resume its session has forgotten its
-    /// task and the reviews it was asked for: the task goes back to the
-    /// scheduler to be handed out again, and each review is asked for again.
+    /// task and the reviews it was asked for (requeue_forgotten_work).
     async fn requeue_if_sessionless(&self, id: &str) {
-        let (confirmed, task, reviews) = {
+        let confirmed = self
+            .model()
+            .local
+            .get(id)
+            .is_some_and(|l| l.session_confirmed);
+        if !confirmed {
+            self.requeue_forgotten_work(id).await;
+        }
+    }
+
+    /// Agent `id` starts in a session that knows nothing of its work: its
+    /// task goes back to the scheduler to be handed out again, and each
+    /// review it was asked for is asked for again.
+    async fn requeue_forgotten_work(&self, id: &str) {
+        let (task, reviews) = {
             let model = self.model();
             (
-                model.local.get(id).is_some_and(|l| l.session_confirmed),
                 active_task(&model.tasks, id).map(|t| t.id.clone()),
                 model
                     .tasks
@@ -1830,9 +1842,6 @@ defaults.auto_trust: true in the team file.",
                     .collect::<Vec<_>>(),
             )
         };
-        if confirmed {
-            return;
-        }
         if let Some(task) = task {
             self.update_task(&task, |t| {
                 t.status = TaskStatus::Ready;
