@@ -13,6 +13,7 @@ use crate::layout::{self, Topology};
 use crate::theme::{agent_icon, Theme};
 use crate::widgets::agent_box::{draw_agent, draw_orchestrator, status_tail, Decor, HubState};
 use crate::widgets::canvas::{fill_row, put_str};
+use crate::widgets::mark::{draw_mark, style as mark_style, text as mark_text, tone_color};
 use crate::widgets::text::{fit, pad_left, pad_right, width};
 
 /// Split the screen into (topology, message bus, footer).
@@ -273,20 +274,24 @@ fn render_topology(buf: &mut Buffer, area: Rect, app: &App, theme: &Theme, now: 
         if from == to {
             continue;
         }
-        let path = link_path(link, from, to, &boxes, area);
+        let path = link_path(link, from, to, &boxes, topo.center, area);
         let color = link_color(link, theme);
+        let trail = if link.held.is_some() {
+            theme.fg(color)
+        } else {
+            theme.bold(color)
+        };
         for (x, y) in &path {
-            put_str(
-                buf,
-                area,
-                i32::from(*x),
-                i32::from(*y),
-                "·",
-                theme.bold(color),
-            );
+            put_str(buf, area, i32::from(*x), i32::from(*y), "·", trail);
         }
         if let Some(t) = link.pulse(now) {
-            pulses.push(Pulse { path, t, color });
+            let vcs = matches!(link.kind, LinkKind::Vcs(_));
+            pulses.push(Pulse {
+                path,
+                t,
+                color,
+                vcs,
+            });
         }
     }
 
@@ -352,11 +357,33 @@ fn render_topology(buf: &mut Buffer, area: Rect, app: &App, theme: &Theme, now: 
         draw_empty_hint(buf, area, topo.center, app, theme);
     }
 
+    // Marks of version control actions, over the borders just drawn.
+    let mut marked: Vec<&str> = Vec::new();
+    for mark in &app.anims.marks {
+        if marked.contains(&mark.agent.as_str()) {
+            continue;
+        }
+        marked.push(&mark.agent);
+        let (Some(rect), Some(shown)) =
+            (rect_of(&mark.agent), app.anims.mark_for(&mark.agent, now))
+        else {
+            continue;
+        };
+        draw_mark(buf, area, rect, shown, theme, now);
+    }
+
     let boxed = |x: u16, y: u16| {
         let p = ratatui::layout::Position::new(x, y);
         boxes.iter().any(|r| r.contains(p))
     };
-    for Pulse { path, t, color } in pulses {
+    for Pulse {
+        path,
+        t,
+        color,
+        vcs,
+    } in pulses
+    {
+        let (head_glyph, tail_glyph) = if vcs { ("◆", "◇") } else { ("●", "•") };
         if path.is_empty() {
             continue;
         }
@@ -364,7 +391,14 @@ fn render_topology(buf: &mut Buffer, area: Rect, app: &App, theme: &Theme, now: 
         if head > 0 {
             let (x, y) = path[head - 1];
             if !boxed(x, y) {
-                put_str(buf, area, i32::from(x), i32::from(y), "•", theme.fg(color));
+                put_str(
+                    buf,
+                    area,
+                    i32::from(x),
+                    i32::from(y),
+                    tail_glyph,
+                    theme.fg(color),
+                );
             }
         }
         let (x, y) = path[head];
@@ -374,7 +408,7 @@ fn render_topology(buf: &mut Buffer, area: Rect, app: &App, theme: &Theme, now: 
                 area,
                 i32::from(x),
                 i32::from(y),
-                "●",
+                head_glyph,
                 theme.bold(color),
             );
         }
@@ -406,6 +440,8 @@ struct Pulse {
     path: Vec<(u16, u16)>,
     t: f64,
     color: Color,
+    /// A version control pulse: drawn as diamonds.
+    vcs: bool,
 }
 
 /// The dim scaffolding: spokes from the hub, a ring through the agents, and a
@@ -444,13 +480,21 @@ fn draw_structure(
     }
 }
 
-fn link_path(link: &Link, from: Rect, to: Rect, boxes: &[Rect], area: Rect) -> Vec<(u16, u16)> {
+fn link_path(
+    link: &Link,
+    from: Rect,
+    to: Rect,
+    boxes: &[Rect],
+    hub: Rect,
+    area: Rect,
+) -> Vec<(u16, u16)> {
     match link.kind {
         // Hub traffic runs straight along its spoke.
         LinkKind::Orchestrator => layout::route(from, to, &[], area),
+        LinkKind::Vcs(_) if from == hub || to == hub => layout::route(from, to, &[], area),
         // Worker-to-worker links avoid every other box, the hub above all. A
         // subagent and its parent are neighbours, so theirs is the tether.
-        LinkKind::P2p | LinkKind::Broadcast => {
+        LinkKind::P2p | LinkKind::Broadcast | LinkKind::Vcs(_) => {
             let obstacles: Vec<Rect> = boxes
                 .iter()
                 .copied()
@@ -465,6 +509,8 @@ fn link_color(link: &Link, theme: &Theme) -> Color {
     match link.kind {
         LinkKind::P2p | LinkKind::Broadcast => theme.accent,
         LinkKind::Orchestrator => theme.orch,
+        LinkKind::Vcs(_) if link.held.is_some() => theme.muted,
+        LinkKind::Vcs(tone) => tone_color(tone, theme),
     }
 }
 
@@ -575,7 +621,18 @@ fn render_compact(
             let (what, _, tone) = crate::widgets::agent_box::doing(agent, &decor);
             let after = work_x + width(&work) as i32 + 3;
             let left = (i32::from(area.right()) - after).max(0) as usize;
-            if tone == crate::widgets::agent_box::Tone::Live && left > 6 {
+            if let Some(mark) = app.anims.mark_for(&agent.id, now).filter(|_| left > 6) {
+                // A version control action stands in for the activity.
+                put_str(buf, area, after - 2, y, "·", theme.fg(theme.dim));
+                put_str(
+                    buf,
+                    area,
+                    after,
+                    y,
+                    &fit(&mark_text(mark, now), left),
+                    mark_style(mark, theme),
+                );
+            } else if tone == crate::widgets::agent_box::Tone::Live && left > 6 {
                 put_str(buf, area, after - 2, y, "·", theme.fg(theme.dim));
                 put_str(
                     buf,
