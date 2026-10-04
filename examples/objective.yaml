@@ -1,0 +1,33 @@
+# No agents and no tasks: the orchestrator designs the team itself.
+#
+#     crew run examples/objective.yaml
+#
+# The orchestrator reads the objective, adds the members it needs with
+# agent_add (each one a real Claude Code or Codex session), decomposes the
+# work with task_create, and supervises. The roster it settles on is saved to
+# <workspace>/.crew/roster.yaml and reused the next time you run this file;
+# `crew run examples/objective.yaml --replan` lets it start over, and it can
+# keep reshaping the team (agent_add / agent_remove) while the work runs.
+project: objective
+
+objective: >
+  Write a small command-line todo app in Python: a `todo.py` with add, list
+  and done commands storing tasks in a JSON file, unit tests for it, and a
+  README explaining usage. Keep it under 150 lines of code.
+
+workspace:
+  path: ./objective-workspace
+  init: true
+
+defaults:
+  runtime: claude
+  model: sonnet
+  auto_trust: true
+
+orchestrator:
+  agent: true
+  model: sonnet
+
+limits:
+  # Members may launch helpers of their own; cap how many run at once.
+  max_subagents: 3

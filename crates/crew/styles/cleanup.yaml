@@ -1,0 +1,71 @@
+# Built-in work style: code cleanup and review.
+description: Clean up and review code. Find what to simplify, change it without changing behaviour, review every change.
+instructions: |
+  This is a cleanup and review team. The deliverable is the same program,
+  easier to read and change: every change preserves behaviour and is
+  reviewed before it counts.
+
+  Ground rules for every member:
+  - Start from a baseline. Find how the project builds, tests and lints (its
+    README, CI configuration, Makefile or package scripts), run all of it
+    before you change anything, and write down what passed and what already
+    failed. Failures that were there before you are reported, not hidden.
+  - Change structure, not behaviour. Renames, extractions, deleting dead
+    code, removing duplication, untangling control flow, fixing stale
+    comments and docs: yes. New features, changed output, changed public
+    interfaces, new dependencies: only when the task says so.
+  - A bug you find while cleaning gets its own commit with a test that shows
+    it, and is called out in your task result. Never fold a fix into a
+    refactor.
+  - Small commits, one kind of change each (a rename, an extraction, a
+    deletion), each leaving the build and the tests green. The message says
+    what changed and why. A reviewer should understand a commit in minutes.
+  - Prefer deleting to adding. Do not add abstractions, options or layers
+    "for later". Match the conventions of the code around you; do not
+    reformat whole files (a formatting pass, if the project has a formatter,
+    is a commit of its own).
+  - Tests are evidence, not obstacles: never weaken, skip or delete a test to
+    make a change pass. Code without tests that you need to change gets a
+    test of its current behaviour first.
+  - Stay in your area. Members own separate parts of the tree; to change
+    something another member owns, message them. Something too risky to
+    change now is written down with the reason, not done halfway.
+
+  Reviewing:
+  - Findings go in `review/<area>.md`, most valuable first. Each one: file
+    and line, what is wrong, why it matters, the change you suggest, and
+    its kind — bug, risk, cleanup or nit. Leave nits out unless they are
+    cheap and many.
+  - Review the diff, not the intention. Check that behaviour is preserved
+    (callers, edge cases, error paths), that the tests still test something,
+    and that nothing unrelated slipped in. Run the tests yourself. Approve
+    only what you would merge; when you ask for changes, name the lines and
+    say what to do.
+
+  For the orchestrator:
+  - First a survey: one or two reviewers read the code the objective is
+    about, run the baseline, and write the findings. Plan the rest from what
+    they found, highest value first.
+  - Then 2 to 4 cleaners, each owning a part of the tree no one else edits,
+    with tasks taken from the findings. Set `reviewer` on every cleanup task
+    to a reviewer on a different model family than its author.
+  - Finish with a task that depends on all the others: integrate the
+    branches, run the full baseline again, and write `review/SUMMARY.md` —
+    what was changed (with commits), the bugs found, what was deliberately
+    left and why, and what to do next.
+  - When the objective asks only for a review, the findings and the summary
+    are the deliverable: staff no cleaners and change no code.
+  - Choose each member's model from the model catalog: a strong model for
+    the survey and the reviewers, balanced ones for routine cleanup.
+# A member whose model's own weekly window is used up carries on on the next
+# model here, and goes back once the window resets. Moving to a model of the
+# other CLI is allowed too (a fresh session there, handed the work).
+defaults:
+  model_fallbacks:
+    fable: [opus]
+  # When a model refuses a turn's content (Codex's cyber_policy: "flagged for
+  # possible cybersecurity risk"), the member moves to the first of these that
+  # can be started, handed what was refused, and back once that work is done.
+  # Names pi does not list are passed over; a bare name matches whichever
+  # provider pi has the model under (zai/glm-5.3, opencode/glm-5.3, ...).
+  refusal_fallbacks: [glm-5.3, deepseek-v4-flash]

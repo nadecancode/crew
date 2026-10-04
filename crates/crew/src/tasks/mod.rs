@@ -1,0 +1,152 @@
+//! Task graph helpers: construction, validation and queries.
+
+use std::collections::HashMap;
+
+use crew_core::config::{find_cycle, TaskSpec};
+use crew_core::util::{is_valid_id, one_line, truncate_chars};
+use crew_core::{Task, TaskStatus};
+
+/// Build a queued task from its declaration.
+pub fn task_from_spec(spec: &TaskSpec, now: i64) -> Task {
+    let title = match &spec.title {
+        Some(t) if !t.trim().is_empty() => t.trim().to_string(),
+        _ => {
+            let first = spec.description.lines().find(|l| !l.trim().is_empty());
+            match first {
+                Some(line) => truncate_chars(&one_line(line), 60),
+                None => spec.id.clone(),
+            }
+        }
+    };
+    Task {
+        id: spec.id.clone(),
+        title,
+        description: spec.description.trim().to_string(),
+        assigned_agent: spec.agent.clone(),
+        status: TaskStatus::Queued,
+        dependencies: spec.depends_on.clone(),
+        created_at: now,
+        started_at: None,
+        completed_at: None,
+        artifacts: Vec::new(),
+        reviewer: spec.reviewer.clone(),
+        result: None,
+        progress: None,
+        note: None,
+        timeout_secs: spec.timeout_secs,
+    }
+}
+
+/// Check that a task can be added to an existing graph.
+pub fn validate_new(existing: &[Task], spec: &TaskSpec) -> Result<(), String> {
+    if !is_valid_id(&spec.id) {
+        return Err(format!(
+            "invalid task id '{}' (expected [a-z][a-z0-9_-]{{0,31}})",
+            spec.id
+        ));
+    }
+    if existing.iter().any(|t| t.id == spec.id) {
+        return Err(format!("task '{}' already exists", spec.id));
+    }
+    for dep in &spec.depends_on {
+        if dep == &spec.id {
+            return Err(format!("task '{}' cannot depend on itself", spec.id));
+        }
+        if !existing.iter().any(|t| &t.id == dep) {
+            return Err(format!("task '{}' depends on unknown task '{dep}'", spec.id));
+        }
+    }
+    // A new node whose dependencies all exist cannot close a cycle, but check
+    // anyway so the invariant holds even if the graph was edited by hand.
+    let mut graph: HashMap<&str, Vec<&str>> = existing
+        .iter()
+        .map(|t| (t.id.as_str(), t.dependencies.iter().map(String::as_str).collect()))
+        .collect();
+    graph.insert(
+        spec.id.as_str(),
+        spec.depends_on.iter().map(String::as_str).collect(),
+    );
+    if let Some(cycle) = find_cycle(&graph) {
+        return Err(format!("dependency cycle: {}", cycle.join(" -> ")));
+    }
+    Ok(())
+}
+
+/// A task occupies its agent while the agent is expected to act on it.
+pub fn occupies_agent(task: &Task) -> bool {
+    match task.status {
+        TaskStatus::Working | TaskStatus::Waiting => true,
+        // Blocked after it was started: the agent itself is stuck on it.
+        TaskStatus::Blocked => task.started_at.is_some(),
+        _ => false,
+    }
+}
+
+/// The task an agent is currently on, if any.
+pub fn active_task<'a>(tasks: &'a [Task], agent: &str) -> Option<&'a Task> {
+    tasks
+        .iter()
+        .find(|t| t.assigned_agent.as_deref() == Some(agent) && occupies_agent(t))
+}
+
+/// `(done, total)` across all tasks.
+pub fn done_counts(tasks: &[Task]) -> (usize, usize) {
+    (
+        tasks.iter().filter(|t| t.status == TaskStatus::Done).count(),
+        tasks.len(),
+    )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn spec(id: &str, deps: &[&str]) -> TaskSpec {
+        TaskSpec {
+            id: id.into(),
+            description: format!("do {id}\nsecond line"),
+            depends_on: deps.iter().map(|s| s.to_string()).collect(),
+            ..TaskSpec::default()
+        }
+    }
+
+    #[test]
+    fn builds_tasks_with_derived_titles() {
+        let t = task_from_spec(&spec("a", &[]), 7);
+        assert_eq!(t.title, "do a");
+        assert_eq!(t.status, TaskStatus::Queued);
+        assert_eq!(t.created_at, 7);
+        let mut s = spec("b", &[]);
+        s.title = Some("  Explicit ".into());
+        assert_eq!(task_from_spec(&s, 0).title, "Explicit");
+        s.title = None;
+        s.description = String::new();
+        assert_eq!(task_from_spec(&s, 0).title, "b");
+    }
+
+    #[test]
+    fn validates_additions() {
+        let existing = vec![task_from_spec(&spec("a", &[]), 0)];
+        assert!(validate_new(&existing, &spec("b", &["a"])).is_ok());
+        assert!(validate_new(&existing, &spec("a", &[])).is_err());
+        assert!(validate_new(&existing, &spec("b", &["zzz"])).is_err());
+        assert!(validate_new(&existing, &spec("b", &["b"])).is_err());
+        assert!(validate_new(&existing, &spec("Bad Id", &[])).is_err());
+    }
+
+    #[test]
+    fn occupancy() {
+        let mut t = task_from_spec(&spec("a", &[]), 0);
+        t.assigned_agent = Some("x".into());
+        assert!(active_task(std::slice::from_ref(&t), "x").is_none());
+        t.status = TaskStatus::Working;
+        assert!(active_task(std::slice::from_ref(&t), "x").is_some());
+        assert!(active_task(std::slice::from_ref(&t), "y").is_none());
+        t.status = TaskStatus::Blocked;
+        assert!(!occupies_agent(&t), "blocked before start does not occupy");
+        t.started_at = Some(1);
+        assert!(occupies_agent(&t));
+        t.status = TaskStatus::Review;
+        assert!(!occupies_agent(&t), "author is free while under review");
+    }
+}

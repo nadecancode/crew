@@ -1,0 +1,11 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# Rust needs a C toolchain to link (and to build bundled SQLite). On Nix hosts
+# without one on PATH, enter a compiler shell automatically.
+if command -v nix >/dev/null 2>&1 &&
+    { ! command -v cc >/dev/null 2>&1 || ! command -v pkg-config >/dev/null 2>&1; }; then
+    exec nix shell nixpkgs#gcc nixpkgs#pkg-config --command "$@"
+fi
+
+exec "$@"

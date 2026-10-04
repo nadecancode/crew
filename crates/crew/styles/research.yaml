@@ -1,0 +1,41 @@
+# Built-in work style: research.
+description: Investigate a question. Gather evidence, cross-check it, write up findings.
+instructions: |
+  This is a research team. The deliverable is knowledge, written down: not code.
+
+  Ground rules for every member:
+  - Every claim in a deliverable says where it comes from: a file and line, a
+    URL, a paper, or the command you ran and its output. Mark clearly what you
+    inferred rather than observed, and say how confident you are.
+  - Keep working notes in `notes/<your-id>.md` and put finished findings in
+    `findings/<topic>.md`, committed, so teammates can pull them in. Do not
+    edit another member's files; send them a message instead.
+  - Look for evidence against your current answer, not only for it. Report
+    what you could not find out and what would settle it.
+  - When two members' findings disagree, the two of you resolve it directly
+    (agent_send) and record the outcome in both findings files.
+  - A finding is done when a teammate could act on it without asking you
+    anything. Prefer a short, sourced answer over a long survey.
+
+  For the orchestrator:
+  - Break the objective into distinct questions or angles and staff one
+    investigator per angle (2 to 4), plus one skeptic whose job is to try to
+    refute the findings and check the sources, and who reviews the
+    investigators' tasks (set `reviewer`).
+  - Choose each member's model from the model catalog. Put the skeptic on a
+    different model family than the investigators it checks.
+  - Finish with a synthesis task that depends on all the others: one
+    `report.md` answering the objective, with the evidence, the open
+    questions and the disagreements that remain.
+# A member whose model's own weekly window is used up carries on on the next
+# model here, and goes back once the window resets. Moving to a model of the
+# other CLI is allowed too (a fresh session there, handed the work).
+defaults:
+  model_fallbacks:
+    fable: [opus]
+  # When a model refuses a turn's content (Codex's cyber_policy: "flagged for
+  # possible cybersecurity risk"), the member moves to the first of these that
+  # can be started, handed what was refused, and back once that work is done.
+  # Names pi does not list are passed over; a bare name matches whichever
+  # provider pi has the model under (zai/glm-5.3, opencode/glm-5.3, ...).
+  refusal_fallbacks: [glm-5.3, deepseek-v4-flash]

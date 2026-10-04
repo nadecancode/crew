@@ -1,0 +1,113 @@
+# The six-agent demo: real Claude Code agents, a real orchestrator, and a
+# direct claude-3 → claude-5 exchange that never touches the orchestrator.
+#
+#     crew run examples/demo.yaml
+#
+# Watch for:
+#   - the orchestrator handing out tasks (blue ⇉ rows in the message bus),
+#   - claude-3 asking claude-5 for a schema change directly (orange → row and
+#     the "p2p channel OPEN" banner),
+#   - claude-5 reacting inside its own session, committing, and sending the
+#     commit id back; claude-3 cherry-picking it,
+#   - claude-4 starting only once its dependencies (ledger, queue) are done.
+#
+# The tasks are deliberately tiny so the run takes a couple of minutes on a
+# small model. Close the dashboard with `q` at any time; the daemon and the
+# agents keep running. `crew attach` brings it back, `crew stop` ends it.
+project: demo
+
+objective: >
+  Sketch the pieces of a small payments service — billing, job queue,
+  transaction ledger, notifications, database schema and search — as short
+  design notes plus the SQL schema, each piece owned by one agent.
+
+workspace:
+  # A scratch repository created next to where you run the command.
+  path: ./demo-workspace
+  init: true
+
+# auto: herdr panes when started inside herdr, daemon-owned PTYs otherwise.
+backend: auto
+
+defaults:
+  runtime: claude
+  model: haiku
+  # The workspace is created by this file, so trust it without a dialog.
+  auto_trust: true
+
+orchestrator:
+  agent: true
+  model: haiku
+
+agents:
+  - id: claude-1
+    role: billing
+  - id: claude-2
+    role: queue
+  - id: claude-3
+    role: ledger
+  - id: claude-4
+    role: notify
+  - id: claude-5
+    role: db
+  - id: claude-6
+    role: search
+
+tasks:
+  - id: billing
+    title: Design billing
+    agent: claude-1
+    description: >
+      Create billing.md with five bullet points describing how invoices are
+      computed for the payments service. Report progress once with
+      task_update (around 50%) before you write the file. Then git_commit and
+      task_complete.
+
+  - id: queue
+    title: Design the job queue
+    agent: claude-2
+    description: >
+      Create queue.md with five bullet points describing the background job
+      queue (enqueue, retry, dead-letter). Then git_commit and task_complete.
+
+  - id: db
+    title: Design the database schema
+    agent: claude-5
+    description: >
+      Create schema.sql with a `transactions` table (id, account_id,
+      amount_cents, created_at) and git_commit it. You own the schema, and
+      claude-3 (ledger) will ask you for a change: call
+      agent_status("waiting", "for claude-3's schema request") and stop until
+      its message arrives. When it does, make the change it asks for,
+      git_commit, and send claude-3 the commit id with agent_send (type
+      "artifact"). Only then call task_complete.
+
+  - id: ledger
+    title: Design the transaction ledger
+    agent: claude-3
+    description: >
+      The ledger must record when a transaction was committed, so the
+      `transactions` table needs a `committed_at` column. claude-5 owns the
+      schema: ask claude-5 directly with agent_send (type "question") to add
+      it and send you the commit. Call agent_status("waiting", "on claude-5")
+      and stop until the commit id arrives, then git_cherry_pick it. After
+      that create ledger.md with five bullet points on how
+      Transaction::commit() records committed_at, git_commit and
+      task_complete.
+
+  - id: search
+    title: Design search
+    agent: claude-6
+    description: >
+      Create search.md with five bullet points describing how transactions
+      are indexed for search. Then git_commit and task_complete.
+
+  - id: notify
+    title: Design notifications
+    agent: claude-4
+    depends_on: [ledger, queue]
+    description: >
+      Create notify.md with five bullet points describing the notifications
+      sent when a transaction commits, building on the ledger and queue
+      designs summarised in your task message. Then git_commit and
+      task_complete.

@@ -1,0 +1,42 @@
+# Claude Code and Codex on the same team, talking to each other directly.
+#
+#     crew run examples/mixed.yaml
+#
+# Messages reach both runtimes over Unix sockets: Claude Code through the
+# crew mod loaded into its session, Codex through its own app-server
+# (`codex queue`). Neither needs anything typed into its terminal.
+project: mixed
+
+objective: >
+  Agree on and write down a tiny HTTP API for a todo service.
+
+workspace:
+  path: ./mixed-workspace
+  init: true
+
+defaults:
+  auto_trust: true
+
+orchestrator:
+  agent: false
+
+agents:
+  - id: claude-1
+    role: API design
+    runtime: claude
+    model: haiku
+  - id: codex-1
+    role: API review
+    runtime: codex
+    # Any Codex option can be passed through, e.g. a lower reasoning effort.
+    extra_args: ["-c", "model_reasoning_effort=\"low\""]
+
+tasks:
+  - id: api
+    title: Design the todo API
+    agent: claude-1
+    description: >
+      Draft api.md with the endpoints of a todo service (list, create,
+      complete, delete). Then ask codex-1 directly (agent_send, type
+      "question") for one concrete improvement, apply its answer, git_commit
+      and task_complete.

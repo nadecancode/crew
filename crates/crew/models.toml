@@ -1,0 +1,257 @@
+# crew's model catalog: what each model is good for, so a team can put the
+# right model on each job across Claude Code and Codex.
+#
+# This file is compiled into crew. To change it, do not edit it here: put
+# the entries you want to add or replace in
+#   ~/.config/crew/models.toml      (yours)
+#   /etc/crew/models.toml           (everyone on the machine)
+# An entry there replaces the entry of the same name; `disabled = true`
+# removes one. `crew models` shows the result.
+#
+# Where the content comes from. `summary` is the vendor's own description.
+# `good_for` / `avoid_for` and the picks are crew's reading of the sources
+# listed with each entry, checked on the date below; they are a starting
+# point, not a measurement of your workload. Figures are as the sources
+# reported them on that date.
+
+as_of = "2026-10-02"
+
+# ---------------------------------------------------------------------------
+# Claude Code. The names are the aliases `claude --model` accepts.
+# ---------------------------------------------------------------------------
+
+[models.fable]
+runtime = "claude"
+name = "Claude Fable 5.1"
+id = "claude-fable-5-1"
+long_context = true
+tier = "frontier"
+price = "$10 / $50 per MTok"
+speed = "slower"
+summary = "For demanding reasoning and long-horizon agentic work. Anthropic's most capable generally available model."
+good_for = [
+  "orchestrating a team: staffing, planning, deciding when work is done",
+  "architecture and plans where a wrong call is expensive",
+  "multi-step research carried through to a finished write-up",
+  "long sessions that have to stay coherent for hours",
+  "reviewing work written by an OpenAI model",
+]
+avoid_for = [
+  "routine or bulk work: it costs five times Sonnet",
+  "work that fits Opus: Anthropic says to move up only when Opus at higher effort falls short",
+]
+notes = "Works through a task in many more steps than GPT-6 Astra for a similar score: Artificial Analysis reports about 78k output tokens per Intelligence Index task against Astra's 27k, and about 60 turns per GDPval-AA task against 24. That suits exploration; it is slow and costly for a quick verdict."
+sources = [
+  "https://platform.claude.com/docs/en/models/overview",
+  "https://platform.claude.com/docs/en/about-claude/models/choosing-a-model",
+  "https://platform.claude.com/docs/en/about-claude/models/optimizing-for-cost-and-intelligence",
+  "https://artificialanalysis.ai/articles/benchmarking-gpt-6-astra",
+]
+
+[models.opus]
+runtime = "claude"
+name = "Claude Opus 5.5"
+id = "claude-opus-5-5"
+long_context = true
+tier = "strong"
+price = "$4 / $20 per MTok"
+speed = "moderate"
+summary = "For long-running agentic coding and knowledge work. Anthropic's recommended starting point for most workloads."
+good_for = [
+  "implementation that spans many files or runs for hours",
+  "large refactors and complex systems engineering",
+  "orchestrating when Fable is more than the job needs",
+  "computer use and vision-heavy work",
+]
+avoid_for = [
+  "small, well-scoped edits: Sonnet does them at half the price",
+]
+sources = [
+  "https://platform.claude.com/docs/en/models/overview",
+  "https://platform.claude.com/docs/en/about-claude/models/choosing-a-model",
+]
+
+[models.sonnet]
+runtime = "claude"
+name = "Claude Sonnet 5.5"
+id = "claude-sonnet-5-5"
+long_context = true
+tier = "balanced"
+price = "$2 / $10 per MTok"
+speed = "fast"
+summary = "The best combination of speed and intelligence, for everyday coding, agent and enterprise workloads."
+good_for = [
+  "everyday implementation with a clear brief",
+  "tests, documentation and mechanical changes",
+  "data analysis and content",
+  "workers under a frontier orchestrator: Anthropic's measured delegation pattern",
+]
+avoid_for = [
+  "decisions the whole team builds on: use a frontier model",
+]
+sources = [
+  "https://platform.claude.com/docs/en/models/overview",
+  "https://platform.claude.com/docs/en/about-claude/models/choosing-a-model",
+  "https://platform.claude.com/docs/en/about-claude/models/optimizing-for-cost-and-intelligence",
+]
+
+[models.haiku]
+runtime = "claude"
+name = "Claude Haiku 4.5"
+id = "claude-haiku-4-5"
+aliases = ["claude-haiku-4-5-20251001"]
+tier = "fast"
+price = "$1 / $5 per MTok"
+speed = "fastest"
+summary = "The fastest model with near-frontier intelligence; lowest latency and price."
+good_for = [
+  "subagents and helpers with one narrow task",
+  "lookups, summaries and other high-volume, straightforward work",
+  "trying a team out cheaply",
+]
+avoid_for = [
+  "anything needing a large context: 200K tokens, against 1M for the others",
+  "recent APIs: its reliable knowledge ends in February 2025",
+]
+notes = "Anthropic lists its retirement as not sooner than October 15, 2026: expect to move these jobs to Sonnet."
+sources = [
+  "https://platform.claude.com/docs/en/models/overview",
+  "https://platform.claude.com/docs/en/about-claude/models/choosing-a-model",
+]
+
+# ---------------------------------------------------------------------------
+# Codex. The names are the model slugs `codex --model` accepts. The GPT-6
+# models have a 1M-token context window that Codex uses only when asked
+# (`model_context_window`); crew asks for it.
+# ---------------------------------------------------------------------------
+
+[models.gpt-6-astra]
+runtime = "codex"
+name = "GPT-6 Astra"
+id = "gpt-6-astra"
+long_context = true
+tier = "frontier"
+price = "$10 / $50 per MTok"
+summary = "OpenAI's most capable model for complex work across code, apps and research, combining advanced reasoning, computer use and stronger judgment."
+good_for = [
+  "reviewing a plan or design before work starts",
+  "reviewing code written by a Claude model: an independent second opinion",
+  "hard debugging and root-cause analysis in a terminal",
+  "a verdict on a well-defined hard question: it gets there in few turns",
+  "computer use and frontend QA",
+]
+avoid_for = [
+  "routine or bulk work: it costs five times GPT-6.1 Sol",
+  "open-ended knowledge work that rewards long exploration",
+]
+notes = "Artificial Analysis, at max effort: ties Fable 5.1 on its Intelligence Index (53) at about 40% of the cost per task and on its Coding Agent Index (62) at about 40% less, leads on Terminal-Bench v4.0 (59% against 52%), and its hallucination rate fell from 92% to 51%. It also takes fewer turns per task and lost about 45 Elo on GDPval-AA v2 against GPT-5.6 Sol, so it is the weaker choice where thorough exploration matters more than a fast, sound judgment."
+sources = [
+  "https://developers.openai.com/api/docs/models",
+  "https://learn.chatgpt.com/docs/models",
+  "https://artificialanalysis.ai/articles/benchmarking-gpt-6-astra",
+]
+
+[models."gpt-6.1-sol"]
+runtime = "codex"
+name = "GPT-6.1 Sol"
+id = "gpt-6.1-sol"
+long_context = true
+tier = "balanced"
+price = "$2 / $10 per MTok"
+summary = "Near-Astra performance for complex work at a lower cost; Codex's current workhorse for coding and everyday work."
+good_for = [
+  "everyday implementation on the Codex side",
+  "repeated, long-running work across code and documents",
+  "a second implementer from a different model family than the Claude members",
+  "reviewing routine changes written by a Claude model",
+]
+avoid_for = [
+  "the few decisions that need the strongest judgment: use Astra or Fable",
+]
+sources = [
+  "https://developers.openai.com/api/docs/models",
+  "https://learn.chatgpt.com/docs/models",
+]
+
+[models.gpt-6-luna]
+runtime = "codex"
+name = "GPT-6 Luna"
+id = "gpt-6-luna"
+long_context = true
+tier = "fast"
+price = "$0.10 / $0.50 per MTok"
+speed = "fast"
+summary = "OpenAI's most efficient model for focused, high-volume tasks, including summarization, extraction and focused coding."
+good_for = [
+  "extraction, classification, transformation and structured summaries",
+  "bulk passes over many files with known success criteria",
+  "subagents and helpers with one narrow task",
+]
+avoid_for = [
+  "open-ended design or debugging",
+  "work without clear success criteria",
+]
+sources = [
+  "https://developers.openai.com/api/docs/models",
+  "https://learn.chatgpt.com/docs/models",
+]
+
+# ---------------------------------------------------------------------------
+# Picks: for a kind of work, the models to prefer, best first. The first one
+# that is available on the machine is the one to use.
+# ---------------------------------------------------------------------------
+
+[[picks]]
+work = "orchestration"
+models = ["fable", "opus"]
+why = "A frontier lead over cheaper workers is the delegation pattern Anthropic measured."
+
+[[picks]]
+work = "planning and architecture"
+models = ["fable", "gpt-6-astra", "opus"]
+why = "The decisions everything else builds on get a frontier model."
+
+[[picks]]
+work = "plan and design review"
+models = ["gpt-6-astra", "fable"]
+why = "Review wants sound judgment in few turns, from a different model family than the plan's author."
+
+[[picks]]
+work = "implementation, large or long-running"
+models = ["opus", "gpt-6.1-sol"]
+why = "Built for multi-hour agentic coding; Sol when the work should sit on the Codex side."
+
+[[picks]]
+work = "implementation, well-scoped"
+models = ["sonnet", "gpt-6.1-sol"]
+why = "Balanced models at a fifth of frontier prices."
+
+[[picks]]
+work = "code review"
+models = ["gpt-6-astra", "fable", "gpt-6.1-sol", "opus"]
+why = "Choose the first one from the other family than the author's: OpenAI reviews Claude's code and the reverse."
+
+[[picks]]
+work = "hard debugging"
+models = ["gpt-6-astra", "fable"]
+why = "Astra leads the terminal benchmark; Fable when the hunt is long and exploratory."
+
+[[picks]]
+work = "research and synthesis"
+models = ["fable", "opus", "gpt-6-astra"]
+why = "Multi-step research through to a written result is what Fable is positioned for; an Astra skeptic checks it."
+
+[[picks]]
+work = "tests, docs, mechanical changes"
+models = ["sonnet", "gpt-6.1-sol"]
+why = "Clear briefs do not need a frontier model."
+
+[[picks]]
+work = "bulk extraction and summaries"
+models = ["gpt-6-luna", "haiku"]
+why = "High-volume work with known success criteria goes to the cheapest model that does it."
+
+[[picks]]
+work = "subagents and helpers"
+models = ["haiku", "gpt-6-luna", "sonnet"]
+why = "One narrow task each; speed and price matter most."

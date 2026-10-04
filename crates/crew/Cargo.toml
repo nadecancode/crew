@@ -1,0 +1,41 @@
+[package]
+name = "crew"
+description = "Local-first multi-agent orchestration for Claude Code and Codex"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[lib]
+name = "crew"
+path = "src/lib.rs"
+
+[[bin]]
+name = "crew"
+path = "src/main.rs"
+
+[dependencies]
+crew-core = { path = "../crew-core" }
+crew-tui = { path = "../crew-tui" }
+anyhow.workspace = true
+thiserror.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+chrono.workspace = true
+toml.workspace = true
+libc.workspace = true
+tokio.workspace = true
+rusqlite.workspace = true
+clap.workspace = true
+portable-pty.workspace = true
+vt100.workspace = true
+async-trait.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true
+base64.workspace = true
+uuid.workspace = true
+ratatui.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true
+

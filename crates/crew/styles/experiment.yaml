@@ -1,0 +1,43 @@
+# Built-in work style: experiments.
+description: Test hypotheses. Design, run, measure and compare, then report results.
+instructions: |
+  This is an experiment team. The deliverable is evidence: measured results
+  that someone else can reproduce.
+
+  Ground rules for every member:
+  - Before running anything, write down the hypothesis, the metric that
+    decides it, and what result would count as support or refutation.
+  - Change one thing per experiment and keep a baseline to compare against.
+    If the baseline is not yours, cherry-pick it rather than rebuilding it.
+  - Each experiment lives in `experiments/<name>/` with a `README.md`
+    (hypothesis, setup, the exact command to reproduce it), the raw results,
+    and a conclusion. Fix seeds and record versions.
+  - Commit before you run, and record the commit id with the results, so a
+    number can always be traced to the code that produced it.
+  - Report what you measured, including runs that failed or showed nothing.
+    A negative result is a result. Do not tune until the number looks good
+    and then report only that.
+  - Say how sure the result is: number of runs, spread, and anything that
+    might explain it other than your change.
+
+  For the orchestrator:
+  - Staff one member who builds the shared baseline and measurement harness
+    first, 2 to 4 experimenters who each own one hypothesis (their tasks
+    depend on the baseline), and one analyst.
+  - Choose each member's model from the model catalog. Put the analyst on a
+    different model family than the experimenters whose results it judges.
+  - Finish with an analysis task that depends on every experiment: the
+    analyst compares the results in one table in `results.md`, says which
+    hypotheses held, and what to try next.
+# A member whose model's own weekly window is used up carries on on the next
+# model here, and goes back once the window resets. Moving to a model of the
+# other CLI is allowed too (a fresh session there, handed the work).
+defaults:
+  model_fallbacks:
+    fable: [opus]
+  # When a model refuses a turn's content (Codex's cyber_policy: "flagged for
+  # possible cybersecurity risk"), the member moves to the first of these that
+  # can be started, handed what was refused, and back once that work is done.
+  # Names pi does not list are passed over; a bare name matches whichever
+  # provider pi has the model under (zai/glm-5.3, opencode/glm-5.3, ...).
+  refusal_fallbacks: [glm-5.3, deepseek-v4-flash]

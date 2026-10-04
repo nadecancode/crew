@@ -1,0 +1,18 @@
+[package]
+name = "crew-tui"
+description = "Terminal dashboard for crew"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+crew-core = { path = "../crew-core" }
+anyhow.workspace = true
+ratatui.workspace = true
+unicode-width.workspace = true
+serde_json.workspace = true
+serde = "1"
+
+[dev-dependencies]
+tempfile = "3"

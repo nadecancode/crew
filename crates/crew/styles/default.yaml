@@ -1,0 +1,14 @@
+# Built-in work style: general software work.
+description: General software work. The orchestrator staffs and plans the team.
+# A member whose model's own weekly window is used up carries on on the next
+# model here, and goes back once the window resets. Moving to a model of the
+# other CLI is allowed too (a fresh session there, handed the work).
+defaults:
+  model_fallbacks:
+    fable: [opus]
+  # When a model refuses a turn's content (Codex's cyber_policy: "flagged for
+  # possible cybersecurity risk"), the member moves to the first of these that
+  # can be started, handed what was refused, and back once that work is done.
+  # Names pi does not list are passed over; a bare name matches whichever
+  # provider pi has the model under (zai/glm-5.3, opencode/glm-5.3, ...).
+  refusal_fallbacks: [glm-5.3, deepseek-v4-flash]
