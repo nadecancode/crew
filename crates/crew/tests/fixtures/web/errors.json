@@ -1,0 +1,72 @@
+[
+  {
+    "error": {
+      "code": "unauthorized",
+      "message": "say hello first"
+    },
+    "id": 1
+  },
+  {
+    "error": {
+      "code": "protocol",
+      "message": "client speaks protocol 4, daemon speaks 5"
+    },
+    "id": 2
+  },
+  {
+    "error": {
+      "code": "forbidden",
+      "message": "web sessions cannot call web_open"
+    },
+    "id": 3
+  },
+  {
+    "error": {
+      "code": "not_found",
+      "message": "no agent 'claude-9'"
+    },
+    "id": 4
+  },
+  {
+    "error": {
+      "code": "invalid",
+      "message": "malformed request: missing field `id`"
+    },
+    "id": 5
+  },
+  {
+    "error": {
+      "code": "conflict",
+      "message": "message id m-0104 is already used for another message"
+    },
+    "id": 6
+  },
+  {
+    "error": {
+      "code": "too_large",
+      "message": "message body exceeds 65536 bytes"
+    },
+    "id": 7
+  },
+  {
+    "error": {
+      "code": "unavailable",
+      "message": "the web dashboard is stopping"
+    },
+    "id": 8
+  },
+  {
+    "error": {
+      "code": "internal",
+      "message": "persisting task billing failed"
+    },
+    "id": 9
+  },
+  {
+    "error": {
+      "code": "git",
+      "message": "nothing to commit: the working tree has no changes"
+    },
+    "id": 10
+  }
+]

@@ -1,0 +1,85 @@
+{
+  "agent_status": [
+    "spawning",
+    "idle",
+    "working",
+    "waiting",
+    "blocked",
+    "done",
+    "failed",
+    "stopped"
+  ],
+  "event_level": [
+    "debug",
+    "info",
+    "warn",
+    "error"
+  ],
+  "message_type": [
+    "task",
+    "message",
+    "question",
+    "answer",
+    "status",
+    "review_request",
+    "review_result",
+    "artifact",
+    "error"
+  ],
+  "protocol": 5,
+  "push": [
+    "event",
+    "message",
+    "agent",
+    "agent_removed",
+    "task",
+    "session",
+    "resync",
+    "deliver",
+    "compact",
+    "pty",
+    "pty_closed",
+    "shutdown"
+  ],
+  "role": [
+    "operator",
+    "agent"
+  ],
+  "runtime_kind": [
+    "claude",
+    "codex",
+    "pi",
+    "shell"
+  ],
+  "task_status": [
+    "queued",
+    "ready",
+    "working",
+    "waiting",
+    "blocked",
+    "review",
+    "done",
+    "failed"
+  ],
+  "transcript_kind": [
+    "prompt",
+    "reply",
+    "tool",
+    "note"
+  ],
+  "vcs_action": [
+    "workspace",
+    "commit",
+    "cherry_pick",
+    "merge",
+    "integrate",
+    "status",
+    "diff"
+  ],
+  "vcs_outcome": [
+    "started",
+    "ok",
+    "conflict",
+    "error"
+  ]
+}

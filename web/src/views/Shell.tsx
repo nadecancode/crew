@@ -1,0 +1,326 @@
+// The page (notes/web-design.md §ui "Layout"):
+//
+//   status bar · usage strip · question banner
+//   main area (graph, tasks, logs, usage) | side panel
+//   message box · footer
+//
+// A page that is reconnecting or stopped is read-only: what it last knew,
+// dimmed, every control disabled, and a bar that says which and what to do.
+
+import { For, Match, Show, Switch, createEffect, createMemo, createSignal, onCleanup, onMount, type JSX } from "solid-js";
+import { useApp } from "../app";
+import { useSecond } from "../clock";
+import { clockTime, fmtElapsed, runtimeGlyph } from "../format";
+import { AgentGraph } from "../graph/AgentGraph";
+import { TaskDag } from "../graph/TaskDag";
+import { handleKey, keyboardFree } from "../keys";
+import { operations } from "../operate";
+import { asker } from "../protocol";
+import { ContextMenu } from "./ContextMenu";
+import { Dialogs } from "./dialogs";
+import { Logs } from "./Logs";
+import { MessageBox } from "./MessageBox";
+import { SidePanel } from "./SidePanel";
+import { UsageView } from "./UsageView";
+import { levelTone, pausedText, until, usageRows, windowLabel, STALE_MS } from "./usage";
+import { OpsContext, useOps } from "./ops";
+
+export function Shell() {
+  const app = useApp();
+  const ops = operations(app);
+  const { ui, link } = app;
+
+  onMount(() => {
+    const onKey = (e: KeyboardEvent) => handleKey(app, ops, e);
+    const onHash = () => ui.fromLocation();
+    document.addEventListener("keydown", onKey);
+    window.addEventListener("hashchange", onHash);
+    onCleanup(() => {
+      document.removeEventListener("keydown", onKey);
+      window.removeEventListener("hashchange", onHash);
+    });
+  });
+
+  // The page title carries the count of open questions: `(1) crew · demo`.
+  createEffect(() => {
+    const n = app.store.openQuestions().length;
+    const project = app.store.state.session?.project;
+    document.title = `${n > 0 ? `(${n}) ` : ""}crew${project ? ` · ${project}` : ""}`;
+  });
+
+  // A question opens its dialog by itself once nothing else holds the
+  // keyboard (a dialog, a focused text field, the terminal), as
+  // `App::pop_question` decides.
+  const [focusTick, setFocusTick] = createSignal(0);
+  onMount(() => {
+    const bump = () => setFocusTick((n) => n + 1);
+    document.addEventListener("focusin", bump);
+    document.addEventListener("focusout", bump);
+    onCleanup(() => {
+      document.removeEventListener("focusin", bump);
+      document.removeEventListener("focusout", bump);
+    });
+  });
+  createEffect(() => {
+    focusTick();
+    if (!app.store.state.loaded || !link.live() || ui.dialog()) return;
+    const q = app.store.openQuestions().find((q) => !ui.shownQuestions.has(q.id));
+    if (!q) return;
+    // The focus moves in a microtask after a click; check once it settled.
+    queueMicrotask(() => {
+      if (!ui.dialog() && keyboardFree(app) && !ui.shownQuestions.has(q.id)) ui.openDialog({ kind: "question", id: q.id });
+    });
+  });
+
+  const state = () => (link.conn() === "connecting" ? "reconnecting" : link.conn());
+  const readOnly = () => !link.live();
+
+  return (
+    <OpsContext.Provider value={ops}>
+      <div class="page" classList={{ readonly: readOnly(), loaded: app.store.state.loaded }} data-conn-state={state()}>
+        <Show when={app.store.state.loaded || link.live()} fallback={<Entry />}>
+          <StatusBar />
+          <Warnings />
+          <ConnBar />
+          <UsageStrip />
+          <QuestionBanner />
+          <div class="page-body" classList={{ full: ui.panelFull() }}>
+            <main id="main" class="main" data-region="main" aria-label="main area">
+              <Switch>
+                <Match when={ui.view() === "graph"}><AgentGraph /></Match>
+                <Match when={ui.view() === "tasks"}><TaskDag /></Match>
+                <Match when={ui.view() === "logs"}><Logs /></Match>
+                <Match when={ui.view() === "usage"}><UsageView /></Match>
+              </Switch>
+            </main>
+            <SidePanel />
+          </div>
+          <MessageBox />
+          <Footer />
+        </Show>
+        <Toasts />
+        <ContextMenu />
+        <Dialogs />
+      </div>
+    </OpsContext.Provider>
+  );
+}
+
+/** Before anything was loaded: connecting, or signed out, or stopped. */
+function Entry() {
+  const app = useApp();
+  const { link } = app;
+  return (
+    <div class="entry">
+      <div class="entry-box">
+        <h1><span class="orch">◆</span> crew</h1>
+        <div data-conn={link.conn() === "connecting" ? "reconnecting" : link.conn()} class="conn-text">
+          <Switch fallback={<p>connecting…</p>}>
+            <Match when={link.conn() === "signed-out"}>
+              <p>Signed out: run <code>crew web</code> in the workspace and open the address it prints.</p>
+              <Show when={link.stopDetail()}><p class="muted">{link.stopDetail()}</p></Show>
+              <p class="muted">Paste that address nowhere else: it signs in whoever opens it first.</p>
+            </Match>
+            <Match when={link.conn() === "stopped"}>
+              <StopText />
+            </Match>
+            <Match when={link.conn() === "reconnecting"}><p>connecting… the dashboard's server does not answer yet.</p></Match>
+          </Switch>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function StopText() {
+  const { link } = useApp();
+  const at = () => (link.stoppedAt() ? clockTime(link.stoppedAt()!) : "");
+  return (
+    <Switch>
+      <Match when={link.stopReason() === "shutdown"}><p>The team was stopped at {at()}. Run <code>crew web</code> for the new address. This tab cannot come back; reloading it asks whoever holds the port now.</p></Match>
+      <Match when={link.stopReason() === "proof"}><p>The dashboard was stopped at {at()}: whoever answers at this address could not prove it is this dashboard's server. Run <code>crew web</code> for the new address. This tab cannot come back; reloading it asks whoever holds the port now.</p></Match>
+      <Match when={link.stopReason() === "protocol"}><p>This dashboard and the daemon speak different protocol versions ({link.stopDetail()}). Restart the team after upgrading crew, then run <code>crew web</code>.</p></Match>
+      <Match when={link.stopReason() === "unauthorized" || link.stopReason() === "no-session"}><p>Signed out: run <code>crew web</code>.</p></Match>
+      <Match when={true}><p>The dashboard was stopped at {at()}. Run <code>crew web</code> for the new address. This tab cannot come back; reloading it asks whoever holds the port now.</p></Match>
+    </Switch>
+  );
+}
+
+/** Reconnecting or stopped: what the page shows is what it last knew. */
+function ConnBar() {
+  const { link } = useApp();
+  return (
+    <Show when={!link.live()}>
+      <div class="conn-bar" classList={{ stopped: link.conn() === "stopped" || link.conn() === "signed-out" }} role="status">
+        <Show when={link.conn() === "stopped" || link.conn() === "signed-out"} fallback={<p>reconnecting… what you see is what the dashboard last knew; nothing can be sent until the server answers.</p>}>
+          <StopText />
+        </Show>
+      </div>
+    </Show>
+  );
+}
+
+function StatusBar() {
+  const app = useApp();
+  const ops = useOps();
+  const { store, ui, link } = app;
+  const second = useSecond();
+  const s = () => store.state.session;
+  const elapsed = () => {
+    second();
+    const start = s()?.team_started_at;
+    if (!start) return null;
+    const end = s()?.completed_at ?? store.serverNow(Date.now());
+    return fmtElapsed(end - start);
+  };
+  const done = () => store.state.tasks.filter((t) => t.status === "done").length;
+  const conn = () => (link.conn() === "connecting" ? "reconnecting" : link.conn());
+  const connText = () => ({ live: "live", reconnecting: "reconnecting", "signed-out": "signed out", stopped: "stopped" } as Record<string, string>)[conn()] ?? conn();
+  const views = [["graph", "graph", ""], ["tasks", "tasks", "t"], ["logs", "logs", "l"], ["usage", "usage", "v"]] as const;
+  return (
+    <header class="status-bar" data-region="status">
+      <span class="brand"><span class="orch">◆</span> crew</span>
+      <span class="project" title={s()?.workspace}>{s()?.project ?? "no team loaded"}</span>
+      <Show when={s()?.objective}><span class="objective" title={s()!.objective}>{s()!.objective}</span></Show>
+      <span class="spacer" />
+      <Show when={elapsed()}><span class="muted" title="how long the team has been running">{elapsed()}</span></Show>
+      <span title="tasks done / all">tasks <b>{done()}/{store.state.tasks.length}</b></span>
+      <Show when={s()?.vcs}><span class="vcs" title={s()!.vcs_note || `agents work with ${s()!.vcs}`} classList={{ warn: !!s()!.vcs_note }}>{s()!.vcs}</span></Show>
+      <Show when={s()?.sandbox}><span classList={{ warn: s()!.sandbox !== "required" }}>{s()!.sandbox === "required" ? "sandbox" : "no sandbox"}</span></Show>
+      <nav class="views" aria-label="views">
+        <For each={views}>
+          {([v, label, key]) => (
+            <button classList={{ on: ui.view() === v }} aria-pressed={ui.view() === v} onClick={() => ui.setView(v)} title={key ? `${label} (${key})` : label}>{label}</button>
+          )}
+        </For>
+      </nav>
+      <button onClick={() => ui.openDialog({ kind: "help" })} title="keys and commands (?)" aria-label="keys and commands">?</button>
+      <button class="danger" disabled={!link.live() || app.isPending("shutdown")} onClick={() => ops.stop()} title="stop the team (S)">stop team</button>
+      <span class="conn" data-conn={conn()} role="status" aria-live="polite"><span class="dot">●</span> {connText()}</span>
+    </header>
+  );
+}
+
+/** The TUI's banners: no sandbox, a socket in /tmp. Fixed text, never the raw wire value. */
+function Warnings() {
+  const { store } = useApp();
+  const sandbox = () => {
+    const m = store.state.session?.sandbox;
+    if (!store.state.session || m === "required") return null;
+    return m === "off" ? "NO SANDBOX · agents can access the host" : "SANDBOX UNCONFIRMED · host access may be unrestricted";
+  };
+  return (
+    <>
+      <Show when={sandbox()}><div class="warning" role="note">{sandbox()}</div></Show>
+      <Show when={store.state.session?.socket_warning}><div class="warning" role="note">SOCKET IN /tmp · using a private temporary directory</div></Show>
+      <Show when={store.state.session?.vcs_note}><div class="warning note" role="note">{store.state.session!.vcs_note}</div></Show>
+    </>
+  );
+}
+
+function UsageStrip() {
+  const app = useApp();
+  const ops = useOps();
+  const { store, link } = app;
+  const second = useSecond();
+  const now = () => (second(), store.serverNow(Date.now()));
+  const rows = createMemo(() => usageRows(store.state.session?.quotas ?? [], store.state.agents));
+  return (
+    <Show when={rows().length > 0}>
+      <section class="usage-strip" data-region="usage" aria-label="usage">
+        <For each={rows()}>
+          {(row) => (
+            <>
+              <Show when={row.paused.length > 0}>
+                <div class="paused-row warn">
+                  <span>{pausedText(row.paused, now())}</span>
+                  <button disabled={!link.live()} onClick={() => ops.resumePaused()} title="u">continue now</button>
+                  <button disabled={!link.live()} onClick={() => ops.restartPaused()} title="U">restart on the current login</button>
+                </div>
+              </Show>
+              <div class="quota-row">
+                <span class={`rt rt-${row.runtime}`}>{runtimeGlyph(row.runtime)} {row.runtime}</span>
+                <For each={row.quotas}>
+                  {(q) => (
+                    <span class="quota" classList={{ stale: now() - q.updated_at > STALE_MS }} title={`${windowLabel(q.window)}: ${q.percent_used.toFixed(1)}% used${q.resets_at ? `, resets in ${until(q.resets_at - now())}` : ""}`}>
+                      <span class="muted">{windowLabel(q.window)}</span>
+                      <span class="bar gauge"><span class={`fill ${levelTone(q.percent_used)}`} style={{ width: `${Math.min(100, Math.max(q.percent_used > 0 ? 1 : 0, q.percent_used))}%` }} /></span>
+                      <b class="pct">{Math.round(Math.max(0, q.percent_used))}%</b>
+                      <Show when={q.resets_at && q.resets_at > now()}><span class="dim">↻ {until(q.resets_at! - now())}</span></Show>
+                    </span>
+                  )}
+                </For>
+              </div>
+            </>
+          )}
+        </For>
+      </section>
+    </Show>
+  );
+}
+
+function QuestionBanner() {
+  const app = useApp();
+  const { store, ui } = app;
+  const qs = () => store.openQuestions();
+  return (
+    <Show when={qs().length > 0}>
+      <section class="question-banner" data-region="questions" role="alert">
+        <span class="q-mark">?</span>
+        <span class="q-text"><b>{asker(qs()[0])}</b> asks: {qs()[0].body.split("\n", 1)[0]}</span>
+        <Show when={qs().length > 1}><span class="muted">and {qs().length - 1} more</span></Show>
+        <button class="primary" disabled={!app.link.live()} onClick={() => ui.openDialog({ kind: "question", id: qs()[0].id })} title="a">answer</button>
+      </section>
+    </Show>
+  );
+}
+
+const HINTS: Record<string, string> = {
+  main: "arrows walk the agents · enter inspector · m message · / command · t tasks · l logs · v usage · + - 0 zoom · ? keys",
+  panel: "esc closes · tab moves through the panel · f fills the main area · d diff · i prompt · r refresh",
+  compose: "enter sends · shift-enter new line · tab completes a command · esc leaves the box",
+  terminal: "keys go to the agent · ctrl-] gives the keyboard back",
+  status: "tab moves on to the graph · ? keys and commands",
+  usage: "u continue now · U restart on the current login",
+  questions: "a answers · 1–6 pick a suggested answer in the dialog",
+};
+
+function Footer() {
+  const app = useApp();
+  const [region, setRegion] = createSignal("main");
+  onMount(() => {
+    const f = (e: FocusEvent) => {
+      const el = e.target as Element | null;
+      setRegion(el?.closest?.("[data-terminal]") ? "terminal" : el?.closest?.("[data-region]")?.getAttribute("data-region") ?? "main");
+    };
+    document.addEventListener("focusin", f);
+    onCleanup(() => document.removeEventListener("focusin", f));
+  });
+  return (
+    <footer class="footer" data-region="footer">
+      <Show when={app.ui.status()} fallback={<span class="hints">{app.prefs.prefs.keys || region() === "compose" ? HINTS[region()] ?? HINTS.main : "single-key shortcuts are off (/keys on) · ctrl-k command line · tab moves between regions"}</span>}>
+        <span class="status-line" classList={{ err: app.ui.status()!.error }} role="status">{app.ui.status()!.text}</span>
+      </Show>
+    </footer>
+  );
+}
+
+function Toasts() {
+  const { ui } = useApp();
+  return (
+    <div class="toasts" aria-live="assertive">
+      <For each={ui.notices()}>
+        {(n) => (
+          <div class="toast err" role="alert">
+            <span>{n.text}</span>
+            <button aria-label="dismiss" onClick={() => ui.dismissNotice(n.id)}>×</button>
+          </div>
+        )}
+      </For>
+    </div>
+  );
+}
+
+export function Empty(props: { children: JSX.Element }) {
+  return <div class="empty">{props.children}</div>;
+}

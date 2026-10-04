@@ -18,6 +18,7 @@ use crate::persistence::NewEvent;
 use crate::process::herdr::{self, Herdr, HerdrManager};
 use crate::process::pty::PtyManager;
 use crate::process::ProcessManager;
+use crate::vcs;
 
 impl Daemon {
     /// Construct the process backend for a session.
@@ -87,43 +88,24 @@ impl Daemon {
             }
         }
 
-        // Workspace isolation.
-        let workspace = self.workspace.clone();
-        let wanted = config.workspace.isolation;
-        let init = config.workspace.init;
-        let (worktrees, note) =
-            tokio::task::spawn_blocking(move || -> Result<(bool, Option<String>)> {
-                // The workspace must be the root of its own repository; sitting
-                // inside some other repository does not count.
-                if init && !(git::is_root(&workspace) && git::has_commits(&workspace)) {
-                    git::init_repo(&workspace)?;
-                }
-                let usable = git::is_root(&workspace) && git::has_commits(&workspace);
-                let result = match wanted {
-                Isolation::Shared => (false, None),
-                Isolation::Worktree if usable => (true, None),
-                Isolation::Worktree => bail!(
-                    "isolation: worktree needs the workspace to be the root of a git repository \
-with at least one commit (set workspace.init: true to create one)"
-                ),
-                Isolation::Auto if usable => (true, None),
-                Isolation::Auto => (
-                    false,
-                    Some(
-                        "the workspace is not the root of a git repository with commits, so agents \
-share it without isolation"
-                            .to_string(),
-                    ),
-                ),
-            };
-                if result.0 || git::is_root(&workspace) {
-                    git::exclude_state_dir(&workspace)?;
-                }
-                Ok(result)
-            })
-            .await
-            .map_err(internal)?
-            .map_err(|e| RpcError::invalid(format!("{e:#}")))?;
+        // Workspace isolation, and the version control that provides it.
+        let isolated = {
+            let (workspace, state_dir) = (self.workspace.clone(), self.state_dir.clone());
+            let workspace_config = config.workspace.clone();
+            tokio::task::spawn_blocking(move || isolate(&workspace, &state_dir, &workspace_config))
+                .await
+                .map_err(internal)?
+                .map_err(|e| RpcError::invalid(format!("{e:#}")))?
+        };
+        let Isolated {
+            selection,
+            shared_note: note,
+        } = isolated;
+        let worktrees = selection.is_some();
+        let vcs_kind = selection
+            .as_ref()
+            .map(|s| s.vcs.kind().as_str())
+            .unwrap_or_default();
 
         // Process backend.
         let herdr_socket = herdr_socket.filter(|s| !s.is_empty());
@@ -173,10 +155,20 @@ share it without isolation"
                     completed_at: None,
                     summary: None,
                     founded_at: None,
+                    vcs: vcs_kind.to_string(),
+                    vcs_note: selection
+                        .as_ref()
+                        .filter(|s| s.fallback)
+                        .map(|s| s.note.clone())
+                        .unwrap_or_default(),
                 },
                 ..Model::default()
             };
         }
+        self.set_vcs(match &selection {
+            Some(selection) => selection.vcs.clone(),
+            None => Arc::new(vcs::Git::new(&self.workspace)),
+        });
         *self.procs.write().unwrap_or_else(|e| e.into_inner()) = Some(procs);
         self.bus.set_max_bytes(config.limits.max_message_bytes);
         self.save_session();
@@ -195,14 +187,27 @@ share it without isolation"
             "daemon",
             "session.started",
             format!(
-                "team '{}' starting: {} agent(s), backend {backend}, isolation {}",
+                "team '{}' starting: {} agent(s), backend {backend}, isolation {}{}",
                 config.project,
                 config.agents.len(),
-                if worktrees { "worktree" } else { "shared" }
+                if worktrees { "worktree" } else { "shared" },
+                if worktrees {
+                    format!(", vcs {vcs_kind}")
+                } else {
+                    String::new()
+                }
             ),
         ));
         if let Some(note) = note {
             self.emit(NewEvent::new("daemon", "session.isolation", note).warn());
+        }
+        if let Some(selection) = &selection {
+            let event = NewEvent::new("daemon", "session.vcs", &selection.note);
+            self.emit(if selection.fallback {
+                event.warn()
+            } else {
+                event
+            });
         }
         if config.workspace.sandbox.mode == SandboxMode::Off {
             // An explicit opt-out, visible (design-b3.md §3.6).
@@ -270,4 +275,61 @@ them",
         }
         Ok(())
     }
+}
+
+/// How the agents of a team are kept apart.
+struct Isolated {
+    /// The version control backend that gives each agent a workspace of its
+    /// own; None when they share the checkout.
+    selection: Option<vcs::Selection>,
+    /// Why they share it although isolation was not turned off.
+    shared_note: Option<String>,
+}
+
+/// Decide the team's isolation and make its store ready: create the
+/// repository when asked to (`workspace.init`), choose jj or git
+/// (`workspace.vcs`) and prepare it. Blocking.
+fn isolate(
+    workspace: &Path,
+    state_dir: &Path,
+    config: &crew_core::config::WorkspaceConfig,
+) -> Result<Isolated> {
+    // The workspace must be the root of its own repository; sitting inside
+    // some other repository does not count. A jj repository of its own is
+    // used as it is.
+    let jj_root = vcs::is_jj_root(workspace);
+    if config.init && !jj_root && !(git::is_root(workspace) && git::has_commits(workspace)) {
+        git::init_repo(workspace)?;
+    }
+    let shared = |note: Option<&str>| Isolated {
+        selection: None,
+        shared_note: note.map(str::to_string),
+    };
+    if config.isolation == Isolation::Shared {
+        if git::is_root(workspace) {
+            git::exclude_state_dir(workspace)?;
+        }
+        return Ok(shared(None));
+    }
+    let not_usable = || match config.isolation {
+        Isolation::Worktree => Err(anyhow!(
+            "isolation: worktree needs the workspace to be the root of a git repository with at \
+least one commit (set workspace.init: true to create one)"
+        )),
+        _ => Ok(shared(Some(
+            "the workspace is not the root of a git repository with commits, so agents share it \
+without isolation",
+        ))),
+    };
+    if !jj_root && !git::is_root(workspace) {
+        return not_usable();
+    }
+    let selection = vcs::select(config.vcs, workspace, state_dir)?;
+    if !selection.vcs.prepare(workspace)? {
+        return not_usable();
+    }
+    Ok(Isolated {
+        selection: Some(selection),
+        shared_note: None,
+    })
 }

@@ -810,7 +810,7 @@ fn detail_view_shows_the_agent_and_its_terminal() {
         "← db",
         "⬡ commit a91ec21",
         "→ claude-5",
-        "git.conflict",
+        "vcs.cherry_pick",
     ] {
         assert!(screen.contains(needle), "missing {needle:?}\n{screen}");
     }
@@ -840,7 +840,7 @@ fn logs_view_follows_and_filters() {
     app.logs.filter_agent = Some("claude-3".into());
     let screen = render_to_string(&app, 120, 30, NOW);
     assert!(screen.contains("event log · claude-3"), "{screen}");
-    assert!(screen.contains("git.conflict"), "{screen}");
+    assert!(screen.contains("vcs.cherry_pick"), "{screen}");
     assert!(!screen.contains("agent.crashed"), "{screen}");
 }
 
@@ -2408,4 +2408,378 @@ fn the_hub_says_its_cli_and_the_picker_chooses_the_orchestrators_model_and_cli()
             && screen.contains("esc cancel"),
         "{screen}"
     );
+}
+
+// ---- version control animations ------------------------------------------------
+
+mod vcs {
+    use super::*;
+    use crew_core::vcs::{VcsAction, VcsEvent, VcsOutcome};
+    use crew_tui::anim::{GLANCE_MS, MARK_MS, MARK_SWEEP_MS, PULSE_MS};
+    use ratatui::buffer::Buffer;
+    use ratatui::style::Color;
+
+    fn push(app: &mut App, seq: i64, event: VcsEvent) {
+        app.apply_push(Push::Event(fixture::vcs_event(seq, NOW, "vcs", event)), NOW);
+    }
+
+    fn event(action: VcsAction, outcome: VcsOutcome, op: &str, agent: &str) -> VcsEvent {
+        fixture::vcs(action, outcome, op, agent)
+    }
+
+    fn commit(agent: &str) -> VcsEvent {
+        VcsEvent {
+            commit: Some("1a2b3c4d5e6f7a8b".into()),
+            ..event(VcsAction::Commit, VcsOutcome::Ok, "v1", agent)
+        }
+    }
+
+    fn conflict() -> VcsEvent {
+        VcsEvent {
+            peer: Some("claude-5".into()),
+            files: vec!["src/ledger.rs".into(), "db/schema.sql".into()],
+            ..event(VcsAction::Merge, VcsOutcome::Conflict, "v2", "claude-3")
+        }
+    }
+
+    fn frame(app: &App, width: u16, height: u16, now: i64) -> Buffer {
+        let theme = Theme::truecolor();
+        let mut terminal = Terminal::new(TestBackend::new(width, height)).unwrap();
+        terminal
+            .draw(|frame| views::render(frame, app, &theme, now))
+            .unwrap();
+        terminal.backend().buffer().clone()
+    }
+
+    /// The cell where `needle` starts, if it is on screen.
+    fn find(buf: &Buffer, needle: &str) -> Option<(u16, u16)> {
+        let first = needle.chars().next()?.to_string();
+        for y in 0..buf.area.height {
+            let row: String = (0..buf.area.width)
+                .map(|x| buf[(x, y)].symbol().to_string())
+                .collect();
+            if let Some(at) = row.find(needle) {
+                let x = row[..at].chars().count() as u16;
+                assert_eq!(buf[(x, y)].symbol(), first);
+                return Some((x, y));
+            }
+        }
+        None
+    }
+
+    fn fg(buf: &Buffer, at: (u16, u16)) -> Color {
+        buf[at].fg
+    }
+
+    fn bold(buf: &Buffer, at: (u16, u16)) -> bool {
+        buf[at].modifier.contains(Modifier::BOLD)
+    }
+
+    #[test]
+    fn a_commit_labels_the_box_and_sweeps_its_border() {
+        let mut app = app();
+        push(&mut app, 900, commit("claude-3"));
+        let theme = Theme::truecolor();
+        let before = frame(&app, 120, 40, NOW - 1);
+        let during = frame(&app, 120, 40, NOW + 300);
+        let at = find(&during, "◆ 1a2b3c4d").expect("label on the bottom border");
+        assert_eq!(fg(&during, at), theme.ok);
+        assert!(bold(&during, at));
+        assert!(find(&before, "◆ 1a2b3c4d").is_none());
+        // The bottom border is the label's: the model name gives way.
+        let row: String = (0..120)
+            .map(|x| during[(x, at.1)].symbol().to_string())
+            .collect();
+        assert!(row.contains("└ ◆ 1a2b3c4d ─"), "{row}");
+        // A bright segment on the border: some ok-coloured, bold border cells
+        // beside the label.
+        let lit = |buf: &Buffer| {
+            (0..40u16)
+                .flat_map(|y| (0..120u16).map(move |x| (x, y)))
+                .filter(|&p| {
+                    matches!(buf[p].symbol(), "─" | "│" | "┌" | "┐" | "└" | "┘")
+                        && fg(buf, p) == theme.ok
+                        && bold(buf, p)
+                })
+                .count()
+        };
+        assert!(lit(&during) >= 4, "{}", lit(&during));
+        // The sweep over, only the label stays lit.
+        let after = frame(&app, 120, 40, NOW + MARK_SWEEP_MS + 100);
+        assert!(find(&after, "◆ 1a2b3c4d").is_some());
+        assert_eq!(lit(&after), 0);
+        // Gone after its time: the border shows the model again.
+        let gone = frame(&app, 120, 40, NOW + MARK_MS + 10);
+        assert!(find(&gone, "◆ 1a2b3c4d").is_none());
+        assert_eq!(lit(&gone), 0);
+    }
+
+    #[test]
+    fn a_conflict_looks_different_from_a_merge() {
+        let theme = Theme::truecolor();
+        let mut ok = app();
+        push(
+            &mut ok,
+            900,
+            VcsEvent {
+                commit: Some("5e6f7a8b9c0d".into()),
+                ..VcsEvent {
+                    peer: Some("claude-5".into()),
+                    ..event(VcsAction::Merge, VcsOutcome::Ok, "v2", "claude-3")
+                }
+            },
+        );
+        let mut bad = app();
+        push(&mut bad, 900, conflict());
+        // The pulse travels first: diamonds on the way, no label yet.
+        let mid = frame(&bad, 120, 40, NOW + PULSE_MS / 2);
+        assert!(find(&mid, "◆").is_some() || find(&mid, "◇").is_some());
+        assert!(find(&mid, "✗ 2 files").is_none());
+        let on_arrival = NOW + PULSE_MS + 50;
+        let good = frame(&ok, 120, 40, on_arrival);
+        let wrong = frame(&bad, 120, 40, on_arrival);
+        let g = find(&good, "◆ 5e6f7a8b").expect("merge label");
+        let w = find(&wrong, "✗ 2 files").expect("conflict label");
+        assert_eq!(fg(&good, g), theme.ok);
+        assert_eq!(fg(&wrong, w), theme.err);
+        assert_ne!(theme.ok, theme.err);
+        // The message bus is not the private channel.
+        let screen = render_to_string(&bad, 120, 40, NOW + 100);
+        assert!(!screen.contains("p2p channel OPEN"), "{screen}");
+    }
+
+    #[test]
+    fn a_read_glances_quietly_and_briefly() {
+        let theme = Theme::truecolor();
+        let mut app = app();
+        push(
+            &mut app,
+            900,
+            event(VcsAction::Status, VcsOutcome::Ok, "v1", "claude-2"),
+        );
+        let buf = frame(&app, 120, 40, NOW + 100);
+        let at = find(&buf, "· status").expect("glance label");
+        assert_eq!(fg(&buf, at), theme.muted);
+        assert!(!bold(&buf, at));
+        let later = frame(&app, 120, 40, NOW + GLANCE_MS + 10);
+        assert!(find(&later, "· status").is_none());
+        // A failed read is the one with a colour.
+        let mut failed = self::app();
+        push(
+            &mut failed,
+            900,
+            event(VcsAction::Diff, VcsOutcome::Error, "v1", "claude-2"),
+        );
+        let buf = frame(&failed, 120, 40, NOW + 100);
+        let at = find(&buf, "! diff").expect("failed glance");
+        assert_eq!(fg(&buf, at), theme.warn);
+    }
+
+    #[test]
+    fn a_running_merge_spins_and_lights_its_link_until_it_ends() {
+        let theme = Theme::truecolor();
+        let mut app = app();
+        push(
+            &mut app,
+            900,
+            VcsEvent {
+                peer: Some("claude-5".into()),
+                ..event(VcsAction::Merge, VcsOutcome::Started, "v3", "claude-3")
+            },
+        );
+        let buf = frame(&app, 120, 40, NOW + 5000);
+        let at = find(&buf, "merge claude-5").expect("running label");
+        // The spinner leads it, in a cell of its own.
+        let lead = buf[(at.0 - 2, at.1)].symbol().to_string();
+        assert!(["◐", "◓", "◑", "◒"].contains(&lead.as_str()), "{lead:?}");
+        // The link is lit but no pulse travels.
+        let screen = render_to_string(&app, 120, 40, NOW + 5000);
+        assert!(!screen.contains('◇'), "{screen}");
+        let held_dots = (0..40u16)
+            .flat_map(|y| (0..120u16).map(move |x| (x, y)))
+            .filter(|&p| buf[p].symbol() == "·" && fg(&buf, p) == theme.muted && !bold(&buf, p))
+            .count();
+        let quiet = frame(&self::app(), 120, 40, NOW + 5000);
+        let quiet_dots = (0..40u16)
+            .flat_map(|y| (0..120u16).map(move |x| (x, y)))
+            .filter(|&p| {
+                quiet[p].symbol() == "·" && fg(&quiet, p) == theme.muted && !bold(&quiet, p)
+            })
+            .count();
+        assert!(held_dots > quiet_dots, "{held_dots} vs {quiet_dots}");
+        // The end: the label goes, the same line pulses.
+        push(
+            &mut app,
+            901,
+            VcsEvent {
+                peer: Some("claude-5".into()),
+                commit: Some("5e6f7a8b9c0d".into()),
+                ..event(VcsAction::Merge, VcsOutcome::Ok, "v3", "claude-3")
+            },
+        );
+        let done = render_to_string(&app, 120, 40, NOW + PULSE_MS + 100);
+        assert!(!done.contains("merge claude-5"), "{done}");
+        assert!(done.contains("◆ 5e6f7a8b"), "{done}");
+    }
+
+    #[test]
+    fn the_hub_shows_an_integration_running_and_its_tally() {
+        let theme = Theme::truecolor();
+        let mut app = app();
+        push(
+            &mut app,
+            900,
+            event(
+                VcsAction::Integrate,
+                VcsOutcome::Started,
+                "v4",
+                "integration",
+            ),
+        );
+        let buf = frame(&app, 120, 40, NOW + 1000);
+        assert!(find(&buf, "integrating").is_some());
+        push(
+            &mut app,
+            901,
+            VcsEvent {
+                summary: Some("2 merged, 1 conflict".into()),
+                branch: Some("agents/integration".into()),
+                ..event(
+                    VcsAction::Integrate,
+                    VcsOutcome::Conflict,
+                    "v4",
+                    "integration",
+                )
+            },
+        );
+        let buf = frame(&app, 120, 40, NOW + 1100);
+        assert!(find(&buf, "integrating").is_none());
+        let at = find(&buf, "2 merged, 1 conflict").expect("tally on the hub");
+        assert_eq!(fg(&buf, at), theme.err);
+    }
+
+    #[test]
+    fn a_workspace_for_a_subagent_runs_from_its_parent() {
+        let mut app = App::new();
+        app.apply_snapshot(fixture::with_subagents(NOW), NOW);
+        push(
+            &mut app,
+            900,
+            VcsEvent {
+                peer: Some("claude-3".into()),
+                ..event(
+                    VcsAction::Workspace,
+                    VcsOutcome::Started,
+                    "v5",
+                    "claude-3-s1",
+                )
+            },
+        );
+        let buf = frame(&app, 120, 40, NOW + 500);
+        assert!(find(&buf, "workspace claude-3-s1").is_some());
+        push(
+            &mut app,
+            901,
+            VcsEvent {
+                peer: Some("claude-3".into()),
+                branch: Some("agents/claude-3-s1".into()),
+                commit: Some("1a2b3c4d5e6f".into()),
+                ..event(VcsAction::Workspace, VcsOutcome::Ok, "v5", "claude-3-s1")
+            },
+        );
+        let screen = render_to_string(&app, 120, 40, NOW + PULSE_MS + 100);
+        assert!(!screen.contains("workspace claude-3-s1"), "{screen}");
+        // The mark is on the member's own box, which is narrow: cut to fit.
+        assert!(screen.contains("+ agents"), "{screen}");
+    }
+
+    #[test]
+    fn marks_for_agents_without_a_box_draw_nothing_and_do_not_panic() {
+        let mut app = app();
+        push(&mut app, 900, commit("ghost"));
+        push(
+            &mut app,
+            901,
+            VcsEvent {
+                peer: Some("ghost".into()),
+                ..event(VcsAction::Merge, VcsOutcome::Started, "v6", "also-gone")
+            },
+        );
+        for (w, h) in [(120, 40), (70, 24), (40, 10), (8, 4)] {
+            render_to_string(&app, w, h, NOW + 100);
+        }
+    }
+
+    #[test]
+    fn the_compact_layout_replaces_the_activity_with_the_label() {
+        let mut app = app();
+        push(&mut app, 900, commit("claude-3"));
+        let screen = render_to_string(&app, 100, 6, NOW + 100);
+        assert!(screen.contains("◆ 1a2b3c4d"), "{screen}");
+        let mut running = self::app();
+        push(
+            &mut running,
+            900,
+            VcsEvent {
+                peer: Some("claude-5".into()),
+                ..event(VcsAction::Merge, VcsOutcome::Started, "v7", "claude-3")
+            },
+        );
+        let screen = render_to_string(&running, 100, 6, NOW + 100);
+        assert!(screen.contains("merge claude-5"), "{screen}");
+    }
+
+    #[test]
+    fn the_log_view_shows_the_vcs_messages() {
+        let mut app = app();
+        push(&mut app, 900, commit("claude-3"));
+        app.view = View::Logs;
+        let screen = render_to_string(&app, 120, 30, NOW);
+        assert!(screen.contains("vcs.commit"), "{screen}");
+    }
+
+    #[test]
+    fn the_compact_layout_shows_the_hub_marks_too() {
+        let mut app = app();
+        push(
+            &mut app,
+            900,
+            event(
+                VcsAction::Integrate,
+                VcsOutcome::Started,
+                "v8",
+                "integration",
+            ),
+        );
+        let screen = render_to_string(&app, 100, 6, NOW + 100);
+        assert!(screen.contains("integrating"), "{screen}");
+        push(
+            &mut app,
+            901,
+            VcsEvent {
+                summary: Some("2 merged, 1 conflict".into()),
+                ..event(
+                    VcsAction::Integrate,
+                    VcsOutcome::Conflict,
+                    "v8",
+                    "integration",
+                )
+            },
+        );
+        let screen = render_to_string(&app, 100, 6, NOW + 200);
+        assert!(!screen.contains("integrating"), "{screen}");
+        assert!(screen.contains("2 merged, 1 conflict"), "{screen}");
+        let mut ws = self::app();
+        push(
+            &mut ws,
+            900,
+            event(VcsAction::Workspace, VcsOutcome::Started, "v9", "claude-7"),
+        );
+        let screen = render_to_string(&ws, 100, 6, NOW + 100);
+        assert!(screen.contains("workspace claude-7"), "{screen}");
+        // Selected hub: still on the first row.
+        ws.selected = Some("orchestrator".into());
+        let screen = render_to_string(&ws, 100, 6, NOW + 100);
+        assert!(screen.contains("workspace claude-7"), "{screen}");
+    }
 }

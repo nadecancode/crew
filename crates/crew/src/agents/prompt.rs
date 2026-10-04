@@ -23,6 +23,8 @@ pub struct TeamView<'a> {
     pub agents: &'a [Agent],
     /// Agents work in separate git worktrees.
     pub worktrees: bool,
+    /// The version control backend the worktrees are made with.
+    pub vcs: crate::vcs::Kind,
     /// How members write to one another.
     pub voice: Voice,
 }
@@ -264,7 +266,21 @@ They come from your teammates or the crew scheduler, not from a human. Act on th
     );
     out.push_str(&writing_to_agents(view.voice));
     out.push_str(&worker_questions(view, me));
-    if view.worktrees {
+    if view.worktrees && view.vcs == crate::vcs::Kind::Jj {
+        let branch = me.branch.as_deref().unwrap_or("your own branch");
+        let _ = write!(
+            out,
+            "\n## Workspace\n\
+Your working directory is your own jj workspace, published as branch `{branch}`. Only change \
+files inside it. Teammates work in their own workspaces and cannot see your uncommitted files, \
+and you cannot see theirs. To share work: git_commit, then send the commit id to whoever \
+needs it (agent_send with type \"artifact\"); they apply it with git_cherry_pick. \
+Inspect your work with the git_status and git_diff tools, or `jj status`, `jj diff` and \
+`jj log`. Plain `git` does not work in this directory. Do not run history-changing jj commands \
+(rebase, squash, abandon, edit, and the like), and never on a teammate's commits: use the crew \
+git tools so the team has a record.\n"
+        );
+    } else if view.worktrees {
         let branch = me.branch.as_deref().unwrap_or("your own branch");
         let _ = write!(
             out,
@@ -500,6 +516,8 @@ pub struct Handoff<'a> {
     pub agents: &'a [Agent],
     /// The old session's last replies, oldest first.
     pub last_words: &'a [String],
+    /// The version control backend of the workspace.
+    pub vcs: crate::vcs::Kind,
 }
 
 /// The first prompt of a session that takes over from one on another CLI:
@@ -580,8 +598,13 @@ is a fresh session: you do not have the previous session's conversation.",
             .unwrap_or_default();
         let mut work = format!(
             "Your working directory ({}{branch}) holds the work so far, uncommitted changes \
-included: read git status and git diff before you go on, and do not redo what is done.",
-            me.workdir
+included: read {inspect} before you go on, and do not redo what is done.",
+            me.workdir,
+            inspect = if h.vcs == crate::vcs::Kind::Jj {
+                "jj status and jj diff (or the git_status and git_diff tools)"
+            } else {
+                "git status and git diff"
+            }
         );
         let mine = h.tasks.iter().find(|t| {
             t.assigned_agent.as_deref() == Some(me.id.as_str()) && !t.status.is_terminal()
@@ -805,6 +828,40 @@ mod tests {
     }
 
     #[test]
+    fn a_jj_workspace_is_described_as_one_and_git_is_not_promised() {
+        let agents = vec![
+            agent("orchestrator", "", true),
+            agent("claude-3", "ledger", false),
+        ];
+        let briefing = |vcs| {
+            worker_briefing(
+                &TeamView {
+                    project: "demo",
+                    objective: "Build it",
+                    style: None,
+                    instructions: "",
+                    models: "",
+                    agents: &agents,
+                    worktrees: true,
+                    vcs,
+                    voice: Voice::default(),
+                },
+                &agents[1],
+            )
+        };
+        let jj = briefing(crate::vcs::Kind::Jj);
+        assert!(
+            jj.contains("your own jj workspace, published as branch"),
+            "{jj}"
+        );
+        assert!(jj.contains("Plain `git` does not work"), "{jj}");
+        assert!(jj.contains("history-changing jj commands"), "{jj}");
+        let git = briefing(crate::vcs::Kind::Git);
+        assert!(git.contains("your own git worktree"), "{git}");
+        assert!(!git.contains("jj"), "{git}");
+    }
+
+    #[test]
     fn members_write_to_each_other_in_the_teams_voice_and_to_people_plainly() {
         let agents = vec![
             agent("orchestrator", "", true),
@@ -818,6 +875,7 @@ mod tests {
             models: "",
             agents: &agents,
             worktrees: true,
+            vcs: crate::vcs::Kind::Git,
             voice,
         };
         let member = worker_briefing(&view(Voice::default()), &agents[1]);
@@ -870,6 +928,7 @@ mod tests {
             models: "",
             agents: &agents,
             worktrees: true,
+            vcs: crate::vcs::Kind::Git,
             voice: Voice::default(),
         };
         let text = worker_briefing(&view, &agents[1]);
@@ -941,6 +1000,7 @@ mod tests {
         let shared = worker_briefing(
             &TeamView {
                 worktrees: false,
+                vcs: crate::vcs::Kind::Git,
                 voice: Voice::default(),
                 ..view
             },
@@ -966,6 +1026,7 @@ mod tests {
             models: "\n## Models\n- fable (Claude Code): strong.\n",
             agents: &agents,
             worktrees: true,
+            vcs: crate::vcs::Kind::Git,
             voice: Voice::default(),
         });
         assert!(text.contains("must not act as a relay"));
@@ -1162,6 +1223,7 @@ mod tests {
             tasks: &tasks,
             agents: &agents,
             last_words: &last,
+            vcs: crate::vcs::Kind::Git,
         });
         assert_eq!(
             text,
@@ -1184,6 +1246,7 @@ the plan."
             tasks: &tasks,
             agents: &agents,
             last_words: &[],
+            vcs: crate::vcs::Kind::Git,
         });
         assert_eq!(
             text,

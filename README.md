@@ -39,7 +39,8 @@ each row in the bus log is a persisted message.
             ┌─────▼─────────────────▼──────┐
             │          crew daemon         │──── SQLite (.crew/crew.db):
             │  scheduler · message bus     │     agents, tasks, messages, events
-            │  supervisor · git worktrees  │
+            │  supervisor · jj / git work- │
+            │  spaces                      │
             └──┬───────────────┬───────────┘
    process     │               │      agent API
    backend     │               │      (per-agent token)
@@ -48,10 +49,12 @@ each row in the bus log is a persisted message.
    └──┬───────┬───┘      │ hooks · socket delivery          │
       │       │          └─────▲────────────────────────────┘
   ┌───▼──┐ ┌──▼───┐            │
-  │claude│ │codex │ … real interactive sessions, one worktree + branch each
+  │claude│ │codex │ … real interactive sessions, one workspace + branch each
   └──────┘ └──────┘
 ```
 
+- The browser dashboard (`crew web`) is one more client: the daemon serves it
+  on the loopback addresses and speaks the same protocol over a WebSocket.
 - The **daemon** is a detached process per workspace. It persists every
   change, so it can be killed and restarted without losing the session.
 - **Agents** are ordinary interactive `claude` / `codex` sessions on real
@@ -93,7 +96,14 @@ the command.
   `CREW_PI=/path/to/pi` (in the environment `crew run` / `crew start` is run
   from) names the program outright. The [model picker](#changing-model-and-cli)
   says what it found, or what is missing.
-- **git**, for worktree isolation.
+- **jj** 0.44+ (`jj` on `PATH`, or `CREW_JJ=/path/to/jj`), the default for
+  isolating agents: each agent gets a jj workspace, published as the git branch
+  `agents/<id>`. Without jj, or older, crew runs on **git** worktrees and says
+  so at every team start (see [Workspace isolation](#workspace-isolation)).
+  git is needed either way: an empty directory is made a repository with
+  `git init`, and the repository jj works on is git's.
+- **bun** and node, only to rebuild the web dashboard's frontend (`web/`); the
+  built bundle is committed, so installing crew needs neither.
 - **herdr** (optional). Started inside a herdr pane, `backend: auto` puts
   every agent in its own pane of a `crew:<project>` workspace.
 - **bubblewrap** 0.10+ (`bwrap` on `PATH`), unprivileged user namespaces and
@@ -143,13 +153,14 @@ the directory:
 | anything else                     | opens the launcher: choose a [work style](#work-styles), type the objective |
 
 An empty directory is made a git repository so each agent gets its own
-worktree. A directory that already has files is left as it is: if it is a
-repository with a commit the agents get worktrees, otherwise they share it
+workspace. A directory that already has files is left as it is: if it is a
+repository with a commit the agents get workspaces (jj, or git worktrees
+without jj), otherwise they share it
 (crew never commits your files for you). `--runtime codex` and
 `--model <name>` choose what the team runs on, `--no-attach` skips the
 dashboard. Plain `crew` refuses to use your home directory as a workspace.
 
-Each agent commits to its own branch (`agents/<id>`) in its own worktree, so
+Each agent commits to its own branch (`agents/<id>`) in its own workspace, so
 when the team is done the directory itself has not changed yet. Land the
 result with:
 
@@ -252,7 +263,7 @@ instructions: |            # part of every member's briefing, the orchestrator's
 # Optional — everything a team file can say about the team:
 # agents: [...]            # a fixed roster; left out, the orchestrator staffs it
 # defaults: { runtime: codex, model: gpt-5.1 }
-# isolation: shared        # auto | worktree | shared
+# isolation: shared        # auto | worktree | shared (vcs: auto | jj | git is under workspace)
 defaults:
   model_fallbacks:         # while a model's window is used up, go on on these
     fable: [opus]          # (see "Fallback models" under Usage limits)
@@ -526,7 +537,7 @@ The orchestrator keeps each runtime's own guidance, since you read it.
 | `agent_status(status, note)` | working / waiting / blocked / idle |
 | `task_update(percent, message)` | report progress |
 | `task_complete(result)` / `task_fail(reason)` | finish the current task |
-| `git_commit` / `git_diff` / `git_status` / `git_cherry_pick` / `git_merge` | work with your worktree |
+| `git_commit` / `git_diff` / `git_status` / `git_cherry_pick` / `git_merge` | work with your workspace; same tools under jj and git, a jj change id is shown beside the commit id and accepted as a revision |
 | `review_request` / `review_submit` | reviews between agents |
 | `agent_spawn(task, role?)` | launch a subagent |
 | `agent_compact(keep?)` | compact your own context when the turn ends; the orchestrator may name a member (`id`) — see [Context windows](#context-windows) |
@@ -667,6 +678,83 @@ Claude Code's built-in ask-the-user dialog (`AskUserQuestion`) is switched off
 for crew's agents (a `deny` rule in the session's private settings): it would
 hold the agent at a prompt only `crew agent attach` could reach.
 
+## Web dashboard
+
+The same session in a browser: the agent graph with its message and VCS
+animations, the bus, the task graph, the event log, usage, the inspector (a
+live terminal included) and every operator action of the TUI except starting
+a team. It is served by the daemon itself, on the loopback addresses only
+(no other machine, no TLS, no accounts), and works in Chromium-based browsers
+and Firefox. Safari cannot resolve its address.
+
+```sh
+crew web                    # start serving if needed, print the address, open the browser
+crew web --no-open          # print it only
+crew web --json             # the address as JSON (scripts)
+crew web --port 23417       # exactly this port (default: derived from the workspace)
+crew web --stop             # stop serving: every browser session ends
+```
+
+`crew web` prints two addresses:
+
+```
+web        http://c7f3a09b52e14d6f8a1b3c5d7e9f0a2b.localhost:23417/
+open       http://c7f3a09b52e14d6f8a1b3c5d7e9f0a2b.localhost:23417/#pair=3f9a…e1   (works once, for 2 minutes)
+```
+
+**Open the `open` address in your own browser and paste it nowhere else.** Its
+`#pair=` code signs one browser in, once; the page removes the code from the
+address at once and keeps its session in that browser's `localStorage` (no
+cookie, no service worker). Another tab of the same address needs no code. To
+sign in another browser, run `crew web` again: it prints the same address with
+a new code. `crew status` shows the `web` line while the dashboard is served.
+
+What keeps it yours:
+
+- The address has a random name made when the server starts and never used
+  again, so a page left over from an earlier run (or served by anything that
+  later took the port) shares nothing with this one. The server answers only
+  to that name: `http://127.0.0.1:<port>/` and `http://localhost:<port>/`
+  show nothing (421).
+- A page of another origin cannot open the socket. An agent's own token is not
+  a web session, and the web session cannot start or stop the server, or load
+  a team.
+- The server proves itself to the page with a secret that is not in the
+  browser's storage; a tab whose daemon was killed refuses whoever takes the
+  port next and stops.
+- Text and terminal output from agents are shown as text, under a strict
+  Content-Security-Policy; after it has loaded the page makes no HTTP request
+  at all.
+- **After the daemon (or `crew web --stop`) restarts, a tab from before stays
+  stopped by design**: run `crew web` for the new address.
+
+Preferences (node positions, the log filters) are kept by the daemon, per
+workspace. The wire is the daemon's own protocol (version 5) over a
+WebSocket; `crates/crew/tests/fixtures/web/` has its reference frames.
+
+### Building the frontend
+
+The built bundle is committed in `crates/crew/web-dist/` and embedded in the
+binary, so `cargo install --path crates/crew` needs no node. Only changing the
+frontend (`web/`, Solid and Vite) needs [bun](https://bun.sh) (and node):
+
+```sh
+just web-build        # bun run build in web/, writes crates/crew/web-dist
+just web-test         # vitest
+just web-e2e          # Playwright: the mock and perf projects, then the live one
+just web-check        # the committed bundle is what the sources build (byte for byte)
+just web-install-check # cargo install with node and bun failing; GET / serves the bundle
+```
+
+Commit the rebuilt `web-dist/` with every change to `web/`: `cargo test` fails
+(`web_bundle`) when the bundle is older than the sources. The browser tests use
+`PLAYWRIGHT_EXECUTABLE_PATH` for a Chromium-based browser when Playwright's own
+does not start (NixOS). `scripts/web-e2e [jj|git]` runs the live project alone:
+a real daemon with scripted agents that commit, cherry-pick, merge and ask a
+question, checked through the page (pairing, live updates, the VCS animations,
+operator actions, the terminal, what stays outside, a killed and restarted
+daemon, the performance budgets).
+
 ## Dashboard controls
 
 | Key | Action |
@@ -804,7 +892,7 @@ Enter puts the agent on the highlighted model:
   with what it runs on and is doing, and its predecessor's last three replies
   (read from the old session's transcript); for a member, its working
   directory and branch (uncommitted work included: it is told to read `git
-  status` and `git diff` first), its task (dispatched to it again) and its
+  status` and `git diff` first, or `jj status` and `jj diff` under jj), its task (dispatched to it again) and its
   predecessor's last replies. Runtime-specific settings of the agent
   (permission mode, allowed tools, extra arguments) are dropped; the team's
   defaults apply. The new session id is crew's again on Claude Code and pi.
@@ -837,6 +925,7 @@ workspace:
   path: .                     # relative to where `crew run` is invoked
   isolation: auto             # auto | worktree | shared
   init: false                 # create the dir and `git init` it if needed
+  vcs: auto                   # auto | jj | git (see Workspace isolation)
   base: HEAD                  # revision agent branches start from
 backend: auto                 # auto | pty | herdr
 herdr:
@@ -1029,14 +1118,87 @@ each agent will use.
 
 ## Workspace isolation
 
+`workspace.vcs` chooses the tool: `auto` (the default), `jj` or `git`. `auto`
+uses [jj](https://github.com/jj-vcs/jj) 0.44 or newer when it is found and
+falls back to git otherwise. crew tells you which is in use at every team
+start: the `session.vcs` event (`info` for jj, `warn` for a fallback), the
+`crew run` / `crew status` output and the dashboard's opening notice.
+Workspaces are provisioned once and stay on their backend: neither tool can
+adopt the other's directory.
+
 With `isolation: worktree` (the default when the workspace is the root of a
 git repository) each agent works in `.crew/worktrees/<id>` on branch
 `agents/<id>`. Agents cannot see each other's uncommitted files. Work moves
 explicitly: `git_commit` → send the commit id → `git_cherry_pick` /
-`git_merge`. A conflicting cherry-pick or merge is aborted, the worktree is
+`git_merge`. A conflicting cherry-pick or merge is undone, the workspace is
 left as it was, and the conflicting files are reported. `crew integrate`
 merges every agent branch into `agents/integration` and lists what conflicted.
-crew only ever runs git in a directory that is the root of its own work tree.
+The tools and the commit ids are the same under both backends.
+
+Under jj:
+
+- In a plain git project the jj repository is `.crew/jj`, sharing the
+  project's `.git`, so every commit is an object of your repository and
+  `agents/<id>` is an ordinary git branch plain `git` sees. A project that
+  already has a `.jj` is used as it is. Your checkout is not touched.
+- Each agent directory is a jj workspace with a guard `.git` file, so plain
+  `git` run there fails instead of reaching your repository. Agents use the
+  `git_*` tools, or `jj status`, `jj diff`, `jj log`.
+- jj records its own working-copy snapshots as `refs/jj/keep/*` in your
+  `.git`. They show up in `git for-each-ref`; `jj -R .crew/jj util gc` prunes
+  them. crew does not run it.
+- Sandboxed teams work with jj; the store's top directories are read-only to
+  agents.
+
+### Moving a workspace to jj
+
+A workspace that has git worktrees under `.crew/worktrees` stays on git. To
+move it (crew never removes an agent's directory):
+
+1. `crew stop`.
+2. For each `.crew/worktrees/<id>`: `git -C .crew/worktrees/<id> status`.
+   Commit what should be kept; uncommitted files are not carried over.
+3. `git worktree remove .crew/worktrees/<id>` for each (`--force` discards
+   uncommitted files), then `git worktree prune`. The `agents/<id>` branches
+   stay.
+4. With jj 0.44+ on `PATH`, start the team again. crew creates `.crew/jj`,
+   imports the branches and starts each agent's jj workspace at its branch.
+
+### Back to git
+
+Only for the hidden layout (`.crew/jj`); with a project's own `.jj` the
+workspaces are registered in your jj repository and stay. Under jj a commit
+alone publishes nothing, so nothing is removed until git holds every agent's
+last commit:
+
+1. Let each running agent finish with `git_commit`, then `crew stop`.
+2. For every directory `W` under `.crew/worktrees` (`<branch>` is `agents/<id>`,
+   and `agents/integration` for `_integration`):
+   ```sh
+   jj -R W --config 'snapshot.max-new-file-size="1TiB"' status
+   jj -R W --config 'snapshot.max-new-file-size="1TiB"' commit -m "<message>"   # only if status lists changes
+   jj -R W bookmark set <branch> -r @-
+   jj -R W git export
+   ```
+3. Check that these print the same id, and that `jj -R W status` says the
+   working copy has no changes; do not go on while they differ:
+   ```sh
+   jj -R W log --no-graph -r @- -T 'commit_id ++ "\n"'
+   git rev-parse <branch>
+   ```
+4. Only then remove `.crew/jj` and the directories under `.crew/worktrees`.
+5. Set `workspace.vcs: git` (`auto` would choose jj again) and start the team.
+
+### Version control events
+
+Every action leaves a `vcs.<action>` event with the same fields under both
+backends: `workspace`, `commit`, `cherry_pick`, `merge`, `integrate`, and
+`debug`-level `status` and `diff`. The data holds `action`, `outcome`
+(`started`, `ok`, `conflict`, `error`), `op` (shared by an operation's
+`started` and its end), `backend`, `agent`, `peer`, `commit`, `change`,
+`source`, `branch` and `files`. They replace the earlier `git.*` events. The
+dashboard animates each one on the agent's box and on the link to the agent whose
+work moved; reads are lighter than writes and a conflict is marked as one.
 
 ## Usage limits
 
@@ -1286,7 +1448,7 @@ reaches the agent in the note that follows.
 | the model refuses the turn (Codex's `cyber_policy`, shown as "This content can't be shown"; Claude's safeguards notice; a `decline` call; or a turn asked twice that still calls no tool, see Refusal fallbacks) | with a refusal fallback in the work style (see Usage limits), the member moves to that model, handed what was refused, and back once that work is done. Without one that can be started, the same work would be refused again, so the agent is `blocked` (`refused`) and nothing re-prompts it; its task is blocked so it can be reassigned. The orchestrator is told why and to hand the work to a member on another model family, or to ask you to move the agent to another CLI (`s` on its box). Whoever sent the refused messages is told not to wait for an answer. `agent.refused` in the event log |
 | duplicate message | same id is delivered once |
 | task deadlock / stall | `scheduler.stall` event, orchestrator notified |
-| git conflict | operation aborted, `git.conflict` event with the files |
+| version control conflict | operation undone, `vcs.<action>` event with outcome `conflict` and the files |
 | task timeout | task fails (`timeout_secs`) |
 
 ## Architecture internals
@@ -1296,8 +1458,9 @@ Cargo workspace:
 | Crate | Contents |
 | --- | --- |
 | `crew-core` | domain types, the wire protocol (`rpc.rs`), blocking client, team config, paths |
-| `crew` | `daemon/` (state, server, supervisor, delivery, orchestration, roster, subagents, git ops), `message_bus/`, `persistence/`, `scheduler/`, `tasks/`, `agents/` (Claude, Codex, pi, shell), `process/` (pty, herdr), `git/`, `mcp/`, `cli/` |
+| `crew` | `daemon/` (state, server, supervisor, delivery, orchestration, roster, subagents, git ops), `message_bus/`, `persistence/`, `scheduler/`, `tasks/`, `agents/` (Claude, Codex, pi, shell), `process/` (pty, herdr), `vcs/` (jj backend and selection) and `git/` (git backend, shared helpers), `web/` (the browser dashboard's server: HTTP, WebSocket, pairing; `build.rs` embeds `web-dist/`), `mcp/`, `cli/` |
 | `crew-tui` | the ratatui dashboard |
+| `web/` (not a crate) | the browser dashboard's frontend (Solid, Vite, bun); its built bundle is `crates/crew/web-dist/` |
 
 The seams, each a trait with one or two implementations:
 
@@ -1322,6 +1485,9 @@ reads another agent's files.
 
 ```sh
 just test        # ./scripts/build-env cargo test --workspace   (no agent CLIs needed)
+just test-git    # the same, every team on git
+just test-jj     # the same, every team on jj (fails without jj; nix supplies it)
+just test-all    # test-git, test-jj, test-sandbox, test-sandbox-git
 just test-real   # optional end-to-end test with the real Claude Code CLI
 just test-terminal # isolated pseudo-terminal signal/shutdown checks (no agent CLIs)
 just lint
@@ -1338,8 +1504,11 @@ real bubblewrap, and `crates/crew/tests/sandbox.rs` checks what a sandboxed
 agent cannot reach (its probes use `socat`). Without bwrap, user namespaces or
 Landlock those tests are skipped with the reason printed;
 `CREW_TEST_SANDBOX=require` makes them fail instead. `just test-sandbox` runs
-the whole suite that way, from `nix-shell` or wherever bwrap and socat are
-installed.
+the whole suite that way (jj by default, `just test-sandbox git` or
+`just test-sandbox-git` for git), from `nix-shell` or wherever bwrap, socat
+and jj are installed. `CREW_TEST_VCS=jj|git` picks the backend of every team
+the integration tests start; unset, the tests use `auto` and the jj unit
+tests skip with a message when jj is missing.
 
 The same holds for the other tests that launch sandboxed agents
 (`crates/crew/tests/pty_sandbox.rs`, `git_helper_sandbox.rs`,

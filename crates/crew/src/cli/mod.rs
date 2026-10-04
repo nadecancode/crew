@@ -184,6 +184,22 @@ answers: `crew answer 2`.")]
     },
     /// Merge every agent branch into the integration branch
     Integrate,
+    /// Serve the dashboard in the browser and open it (a one-time pairing
+    /// address; Chromium-based browsers and Firefox)
+    Web {
+        /// Serve on exactly this port (1-65535)
+        #[arg(long, value_parser = clap::value_parser!(u16).range(1..))]
+        port: Option<u16>,
+        /// Print the address without opening the browser
+        #[arg(long)]
+        no_open: bool,
+        /// Print the address as JSON (and open nothing)
+        #[arg(long)]
+        json: bool,
+        /// Stop serving: every browser session ends
+        #[arg(long, conflicts_with_all = ["port", "no_open", "json"])]
+        stop: bool,
+    },
     /// Agent-side commands (identity comes from CREW_IDENTITY)
     #[command(subcommand)]
     Ctl(CtlCommand),
@@ -570,6 +586,18 @@ pub fn run(cli: Cli) -> Result<()> {
         },
         Command::Messages { agent, lines, json } => ops::messages(&target, agent, lines, json),
         Command::Integrate => ops::integrate(&target),
+        Command::Web {
+            port,
+            no_open,
+            json,
+            stop,
+        } => {
+            if stop {
+                ops::web_stop(&target)
+            } else {
+                ops::web(&target, port, no_open, json)
+            }
+        }
         Command::Ctl(cmd) => agent_side::ctl(cmd),
         Command::Mcp(identity) => crate::mcp::serve(identity.identity.as_deref()),
         Command::Hook {

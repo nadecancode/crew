@@ -1,0 +1,36 @@
+{
+  "version": 1,
+  "source": "fnv1a64:8375c76290d56491",
+  "files": [
+    {
+      "path": "assets/Terminal-Dr3tuvGR.js",
+      "bytes": 2363,
+      "hash": "fnv1a64:ea479c1cd3c82db3"
+    },
+    {
+      "path": "assets/index-d32H5HSl.js",
+      "bytes": 175079,
+      "hash": "fnv1a64:116d25a60ef86f1f"
+    },
+    {
+      "path": "assets/solid-BRdVP_zY.js",
+      "bytes": 18695,
+      "hash": "fnv1a64:1e5ae7bede64cc21"
+    },
+    {
+      "path": "assets/style-B_wInkfM.css",
+      "bytes": 27005,
+      "hash": "fnv1a64:c8f73dc38cb737bc"
+    },
+    {
+      "path": "assets/xterm-lz32akA6.js",
+      "bytes": 330491,
+      "hash": "fnv1a64:65d76e4715d23d2b"
+    },
+    {
+      "path": "index.html",
+      "bytes": 686,
+      "hash": "fnv1a64:21b0c48bd407020e"
+    }
+  ]
+}

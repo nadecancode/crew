@@ -12,6 +12,7 @@ mod comms;
 mod plain;
 mod session;
 mod team;
+mod web;
 #[cfg(test)]
 pub(super) use agents::restart_call;
 pub use agents::{agent, task};
@@ -20,6 +21,7 @@ pub use comms::{answer, integrate, logs, messages, questions, send};
 pub use plain::{quick, refuse_command};
 pub use session::{attach, frame, resume, sessions, start, status, stop};
 pub use team::run_team;
+pub use web::{web, web_stop};
 
 /// Which session a command addresses.
 pub struct Target {

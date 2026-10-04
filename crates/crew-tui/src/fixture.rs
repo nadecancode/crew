@@ -6,6 +6,7 @@ use crew_core::types::{
     Agent, AgentStatus, Artifact, Event, EventLevel, Message, MessageType, RuntimeKind, Task,
     TaskStatus, Usage, ORCHESTRATOR_ID,
 };
+use crew_core::vcs::{VcsAction, VcsEvent, VcsOutcome, VCS_SOURCE};
 use serde_json::Value;
 
 pub fn agent(id: &str, role: &str, status: AgentStatus, progress: Option<u8>, now: i64) -> Agent {
@@ -350,14 +351,17 @@ pub fn snapshot(now: i64) -> Snapshot {
             "claude-3 → claude-5 (question)",
             t0 + 6,
         ),
-        event(
+        vcs_event(
             4,
-            EventLevel::Warn,
-            "git",
-            "git.conflict",
-            Some("claude-3"),
-            "cherry-pick a91ec21 conflicted in src/ledger.rs; aborted",
             t0 + 500,
+            "claude-3: cherry-pick of a91ec21 conflicts with claude-5 in src/ledger.rs; nothing was changed",
+            VcsEvent {
+                peer: Some("claude-5".into()),
+                source: Some("a91ec21f0e4d3b2c1a09f8e7d6c5b4a392817060".into()),
+                branch: Some("agents/claude-3".into()),
+                files: vec!["src/ledger.rs".into()],
+                ..vcs(VcsAction::CherryPick, VcsOutcome::Conflict, "v4", "claude-3")
+            },
         ),
         event(
             5,
@@ -392,6 +396,9 @@ pub fn snapshot(now: i64) -> Snapshot {
             backend: "herdr".to_string(),
             isolation: "worktree".to_string(),
             sandbox: "off".to_string(),
+            vcs: "jj".to_string(),
+            vcs_note: String::new(),
+            web: String::new(),
             socket_warning: String::new(),
             daemon_started_at: now - 760_000,
             team_started_at: Some(now - 754_000),
@@ -477,4 +484,199 @@ pub fn team(n: usize, now: i64) -> Snapshot {
         .collect();
     snap.agents.push(orchestrator);
     snap
+}
+
+// ---- version control ---------------------------------------------------------
+
+/// A VCS event as the daemon builds it: just what every event has.
+pub fn vcs(action: VcsAction, outcome: VcsOutcome, op: &str, agent: &str) -> VcsEvent {
+    VcsEvent {
+        action,
+        outcome,
+        op: op.to_string(),
+        backend: "jj".to_string(),
+        agent: agent.to_string(),
+        peer: None,
+        commit: None,
+        change: None,
+        source: None,
+        branch: None,
+        files: Vec::new(),
+        summary: None,
+    }
+}
+
+/// The envelope the daemon puts around a VCS event: `vcs.<action>`, the log
+/// level of its outcome, the payload in `data`.
+pub fn vcs_event(seq: i64, ts: i64, message: &str, vcs: VcsEvent) -> Event {
+    let level = match vcs.outcome {
+        VcsOutcome::Started => EventLevel::Debug,
+        VcsOutcome::Ok if vcs.action.is_read() => EventLevel::Debug,
+        VcsOutcome::Ok => EventLevel::Info,
+        VcsOutcome::Conflict | VcsOutcome::Error => EventLevel::Warn,
+    };
+    Event {
+        seq,
+        timestamp: ts,
+        source: VCS_SOURCE.to_string(),
+        event_type: vcs.event_type(),
+        agent_id: (vcs.agent != "integration").then(|| vcs.agent.clone()),
+        task_id: None,
+        message: message.to_string(),
+        level,
+        data: serde_json::to_value(&vcs).unwrap_or(Value::Null),
+    }
+}
+
+/// Every VCS animation in turn, as a script: `(milliseconds after the start,
+/// message, event)`. Agents are those of [`snapshot`]. Played one event at a
+/// time it shows each piece: a workspace being made, a commit, a status and a
+/// diff, a cherry-pick, a merge that runs for a while, a conflict, and an
+/// integration with its branches.
+pub fn vcs_script() -> Vec<(i64, String, VcsEvent)> {
+    let full = |c: &str| format!("{c}0d1e2f3a4b5c6d7e8f9a0b1c2d3e4f5a6b7c");
+    let mut script: Vec<(i64, String, VcsEvent)> = Vec::new();
+    let mut add = |at: i64, text: &str, event: VcsEvent| script.push((at, text.to_string(), event));
+    let v = |action, outcome, op: &str, agent: &str| vcs(action, outcome, op, agent);
+
+    add(
+        0,
+        "creating the workspace of claude-3-s1…",
+        VcsEvent {
+            peer: Some("claude-3".into()),
+            ..v(
+                VcsAction::Workspace,
+                VcsOutcome::Started,
+                "v1",
+                "claude-3-s1",
+            )
+        },
+    );
+    add(
+        1500,
+        "workspace for claude-3-s1 on agents/claude-3-s1 at 1a2b3c4d",
+        VcsEvent {
+            peer: Some("claude-3".into()),
+            commit: Some(full("1a2b3c4d")),
+            branch: Some("agents/claude-3-s1".into()),
+            ..v(VcsAction::Workspace, VcsOutcome::Ok, "v1", "claude-3-s1")
+        },
+    );
+    add(
+        4500,
+        "claude-1 committed 3f4e5d6c on agents/claude-1: Add billing totals",
+        VcsEvent {
+            commit: Some(full("3f4e5d6c")),
+            change: Some("kzvsvsvnkzvsvsvn".into()),
+            branch: Some("agents/claude-1".into()),
+            summary: Some("Add billing totals".into()),
+            ..v(VcsAction::Commit, VcsOutcome::Ok, "v2", "claude-1")
+        },
+    );
+    add(
+        7000,
+        "claude-2: status",
+        v(VcsAction::Status, VcsOutcome::Ok, "v3", "claude-2"),
+    );
+    add(
+        7600,
+        "claude-2: diff against agents/claude-4",
+        VcsEvent {
+            source: Some("agents/claude-4".into()),
+            ..v(VcsAction::Diff, VcsOutcome::Ok, "v4", "claude-2")
+        },
+    );
+    add(
+        9000,
+        "claude-4: cherry-pick of 5a6b7c8d…",
+        VcsEvent {
+            source: Some("5a6b7c8d".into()),
+            ..v(VcsAction::CherryPick, VcsOutcome::Started, "v5", "claude-4")
+        },
+    );
+    add(
+        10_000,
+        "claude-4 cherry-picked 5a6b7c8d from claude-5 as 7e8f9a0b",
+        VcsEvent {
+            peer: Some("claude-5".into()),
+            commit: Some(full("7e8f9a0b")),
+            source: Some(full("5a6b7c8d")),
+            ..v(VcsAction::CherryPick, VcsOutcome::Ok, "v5", "claude-4")
+        },
+    );
+    add(
+        13_000,
+        "claude-3: merging agents/claude-5…",
+        VcsEvent {
+            peer: Some("claude-5".into()),
+            source: Some("agents/claude-5".into()),
+            ..v(VcsAction::Merge, VcsOutcome::Started, "v6", "claude-3")
+        },
+    );
+    add(
+        17_000,
+        "claude-3: merge of agents/claude-5 conflicts in src/ledger.rs, db/schema.sql; nothing was changed",
+        VcsEvent {
+            peer: Some("claude-5".into()),
+            source: Some("agents/claude-5".into()),
+            files: vec!["src/ledger.rs".into(), "db/schema.sql".into()],
+            ..v(VcsAction::Merge, VcsOutcome::Conflict, "v6", "claude-3")
+        },
+    );
+    add(
+        20_000,
+        "claude-6: status failed: the workspace is stale",
+        VcsEvent {
+            summary: Some("the workspace is stale".into()),
+            ..v(VcsAction::Status, VcsOutcome::Error, "v7", "claude-6")
+        },
+    );
+    add(
+        22_000,
+        "integrating into agents/integration…",
+        v(
+            VcsAction::Integrate,
+            VcsOutcome::Started,
+            "v8",
+            "integration",
+        ),
+    );
+    add(
+        23_500,
+        "integration merged agents/claude-5 (9c0d1e2f)",
+        VcsEvent {
+            peer: Some("claude-5".into()),
+            commit: Some(full("9c0d1e2f")),
+            ..v(VcsAction::Integrate, VcsOutcome::Ok, "v9", "integration")
+        },
+    );
+    add(
+        25_000,
+        "integration: merge of agents/claude-2 conflicts in src/queue.rs; skipped",
+        VcsEvent {
+            peer: Some("claude-2".into()),
+            files: vec!["src/queue.rs".into()],
+            ..v(
+                VcsAction::Integrate,
+                VcsOutcome::Conflict,
+                "v10",
+                "integration",
+            )
+        },
+    );
+    add(
+        26_500,
+        "integration on agents/integration: 1 merged, 1 conflict",
+        VcsEvent {
+            branch: Some("agents/integration".into()),
+            summary: Some("1 merged, 1 conflict".into()),
+            ..v(
+                VcsAction::Integrate,
+                VcsOutcome::Conflict,
+                "v8",
+                "integration",
+            )
+        },
+    );
+    script
 }

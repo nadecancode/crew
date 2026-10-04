@@ -470,6 +470,8 @@ left off; if you were in the middle of a step, check its state before repeating 
             agent.model_name.as_deref().or(agent.model.as_deref()),
         );
         let to = describe(runtime, name.as_deref().or(model.as_deref()));
+        // Before the model guard: `vcs()` may lock the model itself.
+        let vcs = self.vcs().kind();
         let brief = {
             let m = self.model();
             crate::agents::prompt::handoff(&crate::agents::prompt::Handoff {
@@ -481,6 +483,7 @@ left off; if you were in the middle of a step, check its state before repeating 
                 tasks: &m.tasks,
                 agents: &m.agents,
                 last_words: &last_words,
+                vcs,
             })
         };
         self.update_agent(id, |a| {
@@ -556,5 +559,45 @@ left off; if you were in the middle of a step, check its state before repeating 
             .agent(id),
         );
         self.restart_agent_with(id, None).await
+    }
+}
+
+#[cfg(test)]
+mod vcs_lock_tests {
+    use crew_core::RuntimeKind;
+
+    /// `Daemon::vcs()` locks the model while it restores the backend after a
+    /// restart: the handoff must not read it with the model already held.
+    #[tokio::test]
+    async fn a_handoff_with_the_backend_not_yet_restored_does_not_lock_the_model_twice() {
+        let temp = tempfile::tempdir().unwrap();
+        let running = crate::daemon::start(crate::daemon::DaemonOptions {
+            workspace: temp.path().to_path_buf(),
+            crew_bin: std::env::current_exe().unwrap(),
+        })
+        .await
+        .unwrap();
+        let daemon = running.daemon.clone();
+        let agent: crew_core::Agent = serde_json::from_value(serde_json::json!({
+            "id": "a", "name": "a", "role": "work", "status": "working", "runtime": "claude",
+            "workdir": temp.path().to_str().unwrap(), "backend": "pty", "last_activity_at": 0
+        }))
+        .unwrap();
+        daemon.model().agents.push(agent.clone());
+        assert!(daemon.vcs.read().unwrap().is_none(), "nothing restored yet");
+        let moved = tokio::time::timeout(
+            std::time::Duration::from_secs(20),
+            daemon.move_to_runtime(
+                "operator",
+                &agent,
+                RuntimeKind::Shell,
+                None,
+                None,
+                None,
+                false,
+            ),
+        )
+        .await;
+        assert!(moved.is_ok(), "the handoff deadlocked on the model lock");
     }
 }

@@ -19,7 +19,7 @@ use crate::types::{
 /// Bump for new/renamed enum values, removed/renamed fields or changed meanings.
 /// New optional fields with `serde(default)` do not require a bump.
 /// Peers require an exact match; restart running teams after upgrading.
-pub const PROTOCOL_VERSION: u32 = 4;
+pub const PROTOCOL_VERSION: u32 = 5;
 
 #[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
@@ -423,6 +423,27 @@ pub enum Call {
         rows: u16,
         cols: u16,
     },
+
+    /// Operator, on the daemon socket: serve the web dashboard if it is not
+    /// served yet, and make a one-time pairing code for one browser.
+    WebOpen {
+        #[serde(default)]
+        port: Option<u16>,
+    },
+    /// Operator, on the daemon socket: stop serving; every web session ends.
+    #[serde(deserialize_with = "empty_params")]
+    WebClose,
+    /// A browser, before `hello`: trade a pairing code for a session token.
+    WebPair {
+        code: String,
+    },
+    /// Operator, either transport: the dashboard's preferences for this
+    /// workspace. With `set` they are replaced first. Answers
+    /// `{"prefs": {…}}`.
+    WebPrefs {
+        #[serde(default)]
+        set: Option<Value>,
+    },
 }
 
 fn default_true() -> bool {
@@ -503,6 +524,10 @@ impl Call {
             Call::Attach { .. } => "attach",
             Call::AttachInput { .. } => "attach_input",
             Call::AttachResize { .. } => "attach_resize",
+            Call::WebOpen { .. } => "web_open",
+            Call::WebClose => "web_close",
+            Call::WebPair { .. } => "web_pair",
+            Call::WebPrefs { .. } => "web_prefs",
         }
     }
 }
@@ -700,6 +725,19 @@ pub struct SessionInfo {
     /// `off`, `required`, or empty before a team is loaded or from older peers.
     #[serde(default)]
     pub sandbox: String,
+    /// The version control tool agents work with: `jj`, `git`, or empty when
+    /// they share the checkout, before a team is loaded, or from older peers.
+    #[serde(default)]
+    pub vcs: String,
+    /// Why `vcs` is git although jj is the default (the fallback's notice);
+    /// empty otherwise.
+    #[serde(default)]
+    pub vcs_note: String,
+    /// The web dashboard's address while it is served
+    /// (`http://<label>.localhost:<port>/`), else empty. Never a code or a
+    /// token.
+    #[serde(default)]
+    pub web: String,
     /// The daemon's startup warning when its bound socket uses the private
     /// /tmp fallback; empty for the preferred runtime directory or older peers.
     #[serde(default)]
@@ -735,7 +773,7 @@ pub struct Snapshot {
     pub server_time: i64,
 }
 
-#[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
+#[derive(Serialize, Deserialize, Clone, PartialEq)]
 pub struct HelloInfo {
     pub role: Role,
     #[serde(default)]
@@ -745,6 +783,69 @@ pub struct HelloInfo {
     pub version: String,
     pub protocol: u32,
     pub pid: u32,
+    /// On the web transport: the secret of the session whose token was
+    /// presented; its SHA-256 is that session's verifier. Absent on the
+    /// socket, and on any `hello` that failed. `Debug` leaves it out.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub web_proof: Option<String>,
+}
+
+impl std::fmt::Debug for HelloInfo {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("HelloInfo")
+            .field("role", &self.role)
+            .field("agent_id", &self.agent_id)
+            .field("project", &self.project)
+            .field("version", &self.version)
+            .field("protocol", &self.protocol)
+            .field("pid", &self.pid)
+            .field("web_proof", &self.web_proof.as_ref().map(|_| "<redacted>"))
+            .finish()
+    }
+}
+
+/// What `web_open` answers. `Debug` leaves `pair_url` out.
+#[derive(Serialize, Deserialize, Clone, PartialEq, Eq)]
+pub struct WebInfo {
+    /// `http://<label>.localhost:<port>/`: this server's origin.
+    pub url: String,
+    pub port: u16,
+    /// `url` with `#pair=<code>`: opens a browser session once.
+    pub pair_url: String,
+    pub expires_in_secs: u32,
+    /// This call started the server (it was not running).
+    pub started: bool,
+}
+
+impl std::fmt::Debug for WebInfo {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("WebInfo")
+            .field("url", &self.url)
+            .field("port", &self.port)
+            .field("pair_url", &"<redacted>")
+            .field("expires_in_secs", &self.expires_in_secs)
+            .field("started", &self.started)
+            .finish()
+    }
+}
+
+/// What `web_pair` answers. `Debug` leaves the token out.
+#[derive(Serialize, Deserialize, Clone, PartialEq, Eq)]
+pub struct WebPaired {
+    /// What the page presents in `hello`.
+    pub token: String,
+    /// SHA-256, in hex, of the secret the server shows in every `hello`
+    /// reply of this session. Not a secret itself.
+    pub verifier: String,
+}
+
+impl std::fmt::Debug for WebPaired {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("WebPaired")
+            .field("token", &"<redacted>")
+            .field("verifier", &self.verifier)
+            .finish()
+    }
 }
 
 #[cfg(test)]
@@ -765,6 +866,7 @@ mod compatibility_tests {
             Call::Credential,
             Call::TasksList,
             Call::Integrate,
+            Call::WebClose,
         ] {
             let canonical = serde_json::to_value(&call).unwrap();
             assert!(canonical.get("params").is_none());
@@ -945,7 +1047,7 @@ mod compatibility_tests {
             "event_level": enum_values(EventLevel::ALL), "transcript_kind": enum_values(TranscriptKind::ALL),
             "role": enum_values(&roles), "push": push_kinds,
         });
-        let version_4 = json!({
+        let version_5 = json!({
             "agent_status": ["spawning","idle","working","waiting","blocked","done","failed","stopped"],
             "task_status": ["queued","ready","working","waiting","blocked","review","done","failed"],
             "message_type": ["task","message","question","answer","status","review_request","review_result","artifact","error"],
@@ -955,9 +1057,96 @@ mod compatibility_tests {
         });
         assert_eq!(
             (PROTOCOL_VERSION, actual),
-            (4, version_4),
+            (5, version_5),
             "bump PROTOCOL_VERSION and update this list"
         );
+    }
+
+    #[test]
+    fn the_web_calls_round_trip_and_their_secrets_stay_out_of_debug() {
+        for (call, wire) in [
+            (
+                Call::WebOpen { port: Some(23417) },
+                json!({"method":"web_open","params":{"port":23417}}),
+            ),
+            (
+                Call::WebOpen { port: None },
+                json!({"method":"web_open","params":{"port":null}}),
+            ),
+            (Call::WebClose, json!({"method":"web_close"})),
+            (
+                Call::WebPair {
+                    code: "c0de".into(),
+                },
+                json!({"method":"web_pair","params":{"code":"c0de"}}),
+            ),
+            (
+                Call::WebPrefs {
+                    set: Some(json!({"keys": false})),
+                },
+                json!({"method":"web_prefs","params":{"set":{"keys":false}}}),
+            ),
+        ] {
+            assert_eq!(serde_json::to_value(&call).unwrap(), wire);
+            assert_eq!(serde_json::from_value::<Call>(wire.clone()).unwrap(), call);
+            assert_eq!(wire["method"], call.method());
+        }
+        // Optional parameters may be left out.
+        let open: Call = serde_json::from_value(json!({"method":"web_open","params":{}})).unwrap();
+        assert_eq!(open, Call::WebOpen { port: None });
+        let prefs: Call =
+            serde_json::from_value(json!({"method":"web_prefs","params":{}})).unwrap();
+        assert_eq!(prefs, Call::WebPrefs { set: None });
+
+        let info = WebInfo {
+            url: "http://c7f3.localhost:23417/".into(),
+            port: 23417,
+            pair_url: "http://c7f3.localhost:23417/#pair=SECRETCODE".into(),
+            expires_in_secs: 120,
+            started: true,
+        };
+        let paired = WebPaired {
+            token: "SECRETTOKEN".into(),
+            verifier: "abc123".into(),
+        };
+        let hello = HelloInfo {
+            role: Role::Operator,
+            agent_id: None,
+            project: None,
+            version: "0".into(),
+            protocol: PROTOCOL_VERSION,
+            pid: 1,
+            web_proof: Some("SECRETPROOF".into()),
+        };
+        for printed in [
+            format!("{info:?}"),
+            format!("{paired:?}"),
+            format!("{hello:?}"),
+        ] {
+            assert!(!printed.contains("SECRET"), "{printed}");
+        }
+        assert!(format!("{paired:?}").contains("abc123"));
+        assert_eq!(
+            serde_json::to_value(&hello).unwrap()["web_proof"],
+            "SECRETPROOF"
+        );
+        // Without a proof the field is not on the wire, and a reply without
+        // it still reads.
+        let plain = HelloInfo {
+            web_proof: None,
+            ..hello
+        };
+        let wire = serde_json::to_value(&plain).unwrap();
+        assert!(wire.get("web_proof").is_none());
+        assert_eq!(serde_json::from_value::<HelloInfo>(wire).unwrap(), plain);
+    }
+
+    #[test]
+    fn a_session_without_a_web_address_still_reads() {
+        let legacy = json!({"workspace":"/ws", "state_dir":"/ws/.crew", "daemon_started_at":0,
+            "daemon_pid":1, "version":"old"});
+        let session: SessionInfo = serde_json::from_value(legacy).unwrap();
+        assert_eq!(session.web, "");
     }
 
     #[test]
@@ -1055,6 +1244,9 @@ pub struct CommitInfo {
     pub branch: String,
     pub summary: String,
     pub files_changed: usize,
+    /// jj's change id of the commit; None under git.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub change_id: Option<String>,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq, Default)]

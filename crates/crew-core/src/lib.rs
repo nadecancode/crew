@@ -9,6 +9,7 @@ pub mod rpc;
 pub mod signals;
 pub mod types;
 pub mod util;
+pub mod vcs;
 
 pub use types::*;
 
