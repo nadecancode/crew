@@ -16,7 +16,10 @@
 //! another CLI starts a fresh session there, handed the work. The roster
 //! keeps the agent's own model: a fallback is for the time being. What is
 //! out comes from the accounts' usage windows crew already follows (the
-//! sessions' reports and Claude Code's usage cache).
+//! sessions' reports and Claude Code's usage cache). From another CLI the
+//! agent goes back between tasks, so once its own model can be used again
+//! it is handed no new task until it is back: a queue of work would
+//! otherwise keep it away for good.
 
 use crew_core::rpc::Quota;
 use crew_core::types::{model_display_name, ModelFallback};
@@ -50,6 +53,10 @@ const RETRY_HOME_MS: i64 = 60 * 60 * 1000;
 const RESET_MARGIN_MS: i64 = 2 * 60 * 1000;
 /// A reading at 100% with no reset time counts this long.
 const UNDATED_MS: i64 = 6 * 60 * 60 * 1000;
+/// An agent due back from another CLI and free of tasks waits for its turn
+/// to end, or for its session to be quiet this long: one whose turns crew
+/// does not see end (its hooks failing, say) goes back all the same.
+const HOME_TURN_GRACE_MS: i64 = 60 * 1000;
 /// Who a move is said to be by.
 const BY: &str = "the work style";
 
@@ -613,33 +620,76 @@ take the first model after it:",
                 }
                 continue;
             }
-            let reset = home.resets_at.is_some_and(|at| now >= at + RESET_MARGIN_MS);
-            let read_since = quotas
-                .iter()
-                .any(|q| q.runtime == home.runtime && q.updated_at > home.moved_at);
-            let waited = home.resets_at.is_none() && now >= home.moved_at + RETRY_HOME_MS;
-            if !(reset || read_since || waited)
-                || self
-                    .model_out(home.runtime, home.model.as_deref())
-                    .is_some()
-            {
-                continue;
-            }
             let Some(agent) = self.agent(&id) else {
                 continue;
             };
-            if agent.status.is_terminal()
-                || agent.paused
-                || !between_turns.contains(&id) && agent.limit.is_none()
-            {
+            let due = self.home_due(&home, &quotas, now);
+            let other_cli = home.runtime != agent.runtime;
+            let on_task = crate::tasks::active_task(&self.model().tasks, &id).is_some();
+            // Due back from another CLI and free of tasks (the scheduler
+            // hands it none now): since when, and since when quiet.
+            let quiet_since = {
+                let mut m = self.model();
+                let rt = m.rt(&id);
+                rt.home_free_since =
+                    (due && other_cli && !on_task).then(|| rt.home_free_since.unwrap_or(now));
+                rt.home_free_since
+                    .map(|since| since.max(rt.last_output_at).max(agent.last_activity_at))
+            };
+            if !due || agent.status.is_terminal() || agent.paused || other_cli && on_task {
                 continue;
             }
-            let on_task = crate::tasks::active_task(&self.model().tasks, &id).is_some();
-            if home.runtime != agent.runtime && on_task {
+            let resting = between_turns.contains(&id) || agent.limit.is_some();
+            // It goes once its turn is over; if crew does not see that turn
+            // end, once the session has been quiet a while all the same.
+            let waited_out = agent.status != crew_core::AgentStatus::Spawning
+                && quiet_since.is_some_and(|since| now - since >= HOME_TURN_GRACE_MS);
+            if !resting && !waited_out {
                 continue;
             }
             self.go_home(&agent, home).await;
         }
+    }
+
+    /// Whether the model an agent on a fallback goes back to can be used
+    /// again: its window has reset, or a reading of its CLI's windows came
+    /// since the move, or (with no reset time known) a while has passed;
+    /// and the readings do not say it is out.
+    fn home_due(&self, home: &HomeModel, quotas: &[Quota], now: i64) -> bool {
+        let reset = home.resets_at.is_some_and(|at| now >= at + RESET_MARGIN_MS);
+        let read_since = quotas
+            .iter()
+            .any(|q| q.runtime == home.runtime && q.updated_at > home.moved_at);
+        let waited = home.resets_at.is_none() && now >= home.moved_at + RETRY_HOME_MS;
+        (reset || read_since || waited)
+            && self
+                .model_out(home.runtime, home.model.as_deref())
+                .is_none()
+    }
+
+    /// The members free of tasks on a work style's fallback of another CLI
+    /// whose own model can be used again. They go back between tasks, so
+    /// the scheduler hands them no new task until they are back.
+    pub(crate) fn homeward(&self) -> Vec<String> {
+        let now = now_ms();
+        let (quotas, away) = {
+            let m = self.model();
+            let away: Vec<(String, HomeModel)> = m
+                .agents
+                .iter()
+                .filter(|a| !a.orchestrator && crate::tasks::active_task(&m.tasks, &a.id).is_none())
+                .filter_map(|a| {
+                    let home = m.local.get(&a.id)?.home.clone()?;
+                    (home.refused.is_none() && home.runtime != a.runtime)
+                        .then(|| (a.id.clone(), home))
+                })
+                .collect();
+            (m.quotas.clone(), away)
+        };
+        away.into_iter()
+            .filter(|(_, home)| self.home_due(home, &quotas, now))
+            .map(|(id, _)| id)
+            .collect()
     }
 
     async fn go_home(&self, agent: &crew_core::Agent, home: HomeModel) {
@@ -665,6 +715,7 @@ take the first model after it:",
             if let Some(local) = m.local.get_mut(id) {
                 local.home = None;
             }
+            m.rt(id).home_free_since = None;
         }
         self.save_local(id);
         if home.runtime != agent.runtime {
@@ -815,5 +866,87 @@ mod tests {
         let undated = vec![quota(claude, "week/Fable", 100.0, None)];
         assert!(out_of(&undated, claude, Some("Fable 5.1"), 2_000).is_some());
         assert!(out_of(&undated, claude, Some("Fable 5.1"), 1_000 + UNDATED_MS).is_none());
+    }
+}
+
+#[cfg(test)]
+mod homeward_tests {
+    use super::*;
+
+    const MINUTE: i64 = 60 * 1000;
+
+    /// A daemon with `x` on Codex for now, its own CLI (a shell, so going
+    /// back needs nothing installed) usable again since its window reset,
+    /// and in a turn crew has not seen end.
+    async fn away_on_codex() -> (tempfile::TempDir, super::super::Running) {
+        let temp = tempfile::tempdir().unwrap();
+        let running = super::super::start(super::super::DaemonOptions {
+            workspace: temp.path().to_path_buf(),
+            crew_bin: std::env::current_exe().unwrap(),
+        })
+        .await
+        .unwrap();
+        let agent: crew_core::Agent = serde_json::from_value(serde_json::json!({
+            "id": "x", "name": "x", "role": "work", "status": "working", "runtime": "codex",
+            "workdir": temp.path().to_str().unwrap(), "backend": "pty", "last_activity_at": 0
+        }))
+        .unwrap();
+        let now = now_ms();
+        let daemon = &running.daemon;
+        let mut m = daemon.model();
+        m.agents.push(agent);
+        m.local.entry("x".into()).or_default().home = Some(HomeModel {
+            runtime: RuntimeKind::Shell,
+            model: None,
+            window: "week".into(),
+            resets_at: Some(now - 5 * MINUTE),
+            moved_at: now - 30 * MINUTE,
+            refused: None,
+        });
+        m.rt("x").turn_active = true;
+        drop(m);
+        (temp, running)
+    }
+
+    fn restored(daemon: &Daemon) -> bool {
+        daemon
+            .store
+            .recent_events(Some("x"), 100)
+            .unwrap()
+            .iter()
+            .any(|e| e.event_type == "agent.model_restored")
+    }
+
+    #[tokio::test]
+    async fn an_agent_due_back_from_another_cli_takes_no_new_task_and_goes_once_free() {
+        let (_temp, running) = away_on_codex().await;
+        let daemon = running.daemon.clone();
+        // Due back: the scheduler holds new tasks for it.
+        assert_eq!(daemon.homeward(), vec!["x".to_string()]);
+
+        // Free of tasks, its turn not seen to end: it waits for that turn.
+        daemon.fallback_housekeeping().await;
+        assert!(!restored(&daemon));
+        let since = daemon.model().rt("x").home_free_since;
+        assert!(since.is_some(), "free since the first look");
+
+        // A session still putting out output is taken to be in its turn.
+        let long_ago = now_ms() - HOME_TURN_GRACE_MS - 1;
+        {
+            let mut m = daemon.model();
+            let rt = m.rt("x");
+            rt.home_free_since = Some(long_ago);
+            rt.last_output_at = now_ms();
+        }
+        daemon.fallback_housekeeping().await;
+        assert!(!restored(&daemon));
+
+        // A turn crew never sees end (its hooks failing, say) does not keep
+        // it away for good: quiet that long, it goes.
+        daemon.model().rt("x").last_output_at = long_ago;
+        daemon.fallback_housekeeping().await;
+        assert!(restored(&daemon), "back once quiet");
+        assert!(daemon.model().local["x"].home.is_none());
+        assert!(daemon.homeward().is_empty());
     }
 }

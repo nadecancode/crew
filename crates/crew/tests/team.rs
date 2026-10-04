@@ -6289,6 +6289,156 @@ fn a_work_style_puts_members_on_its_fallback_while_their_models_window_is_used_u
 }
 
 #[test]
+fn a_member_the_work_style_moves_to_another_cli_keeps_getting_its_tasks_and_comes_back() {
+    use std::os::unix::fs::PermissionsExt;
+
+    let s = Session::new();
+    let root = s.root().to_path_buf();
+    std::fs::create_dir_all(root.join("bin")).unwrap();
+    std::fs::create_dir_all(root.join("claude-home")).unwrap();
+    for (name, script) in [("claude", FAKE_CLAUDE_WITH_LIMITS), ("codex", FAKE_RUNTIME)] {
+        std::fs::write(root.join("bin").join(name), script).unwrap();
+        std::fs::set_permissions(
+            root.join("bin").join(name),
+            std::fs::Permissions::from_mode(0o755),
+        )
+        .unwrap();
+    }
+    let limits = json!([
+        { "kind": "weekly_all", "percent": 60, "resets_at": "2030-01-03T00:00:00+00:00" },
+    ]);
+    std::fs::write(root.join("claude-home/limits.json"), limits.to_string()).unwrap();
+    let path = format!(
+        "{}:{}",
+        root.join("bin").display(),
+        std::env::var("PATH").unwrap_or_default()
+    );
+    let identity = |id: &str| s.identity_path(id).to_string_lossy().into_owned();
+    let hook = |id: &str, event: &str, payload: &str| {
+        let out = s.crew(&["hook", event, "--identity", &identity(id), payload]);
+        assert!(out.status.success(), "{event}: {}", stderr(&out));
+    };
+    let read = |id: &str| {
+        std::fs::read_to_string(s.workspace.join(".crew/agents").join(id).join("fake-args"))
+            .unwrap_or_default()
+    };
+
+    let mut team = s.team(
+        "crossfallback",
+        vec![],
+        vec![task("t1", "qa", &[]), task("t2", "qa", &["t1"])],
+    );
+    team.defaults.delivery = crew_core::config::DeliveryChoice::Terminal;
+    team.defaults
+        .model_fallbacks
+        .insert("sonnet".to_string(), vec!["gpt-6-astra".to_string()]);
+    team.orchestrator = OrchestratorConfig {
+        agent: true,
+        runtime: Some(RuntimeKind::Shell),
+        command: scripted(&[]),
+        ..OrchestratorConfig::default()
+    };
+    for (id, model) in [("lead", "haiku"), ("qa", "sonnet")] {
+        team.agents.push(AgentSpec {
+            id: id.to_string(),
+            runtime: Some(RuntimeKind::Claude),
+            model: Some(model.to_string()),
+            ..AgentSpec::default()
+        });
+    }
+    std::fs::write(root.join("team.yaml"), team.to_yaml().unwrap()).unwrap();
+    let out = s
+        .command()
+        .env("PATH", &path)
+        .args(["run", "team.yaml", "--no-attach"])
+        .output()
+        .unwrap();
+    assert!(out.status.success(), "{}", stderr(&out));
+    s.wait("qa to take t1 on Claude Code", |snap| {
+        find_agent(snap, "qa").status != AgentStatus::Spawning
+            && find_task(snap, "t1").status == TaskStatus::Working
+    });
+    let session = find_agent(&s.snapshot(), "qa").session_id.clone().unwrap();
+    hook(
+        "qa",
+        "session-start",
+        &json!({ "session_id": session, "transcript_path": "/nonexistent" }).to_string(),
+    );
+
+    // The account's week runs out, resetting in a little while; between
+    // turns the work style puts qa on Codex.
+    let resets = chrono::Utc::now() + chrono::Duration::seconds(25);
+    hook(
+        "qa",
+        "usage",
+        &json!({ "rate_limits": [{ "kind": "seven_day", "percentUsed": 100, "resetsAt": resets.to_rfc3339() }] })
+            .to_string(),
+    );
+    hook("qa", "stop", "{}");
+    let snap = s.wait("qa to move to Codex", |snap| {
+        let qa = find_agent(snap, "qa");
+        qa.runtime == RuntimeKind::Codex
+            && qa.status != AgentStatus::Spawning
+            && qa.fallback.as_ref().is_some_and(|f| f.policy)
+    });
+    // Still on t1, which its new session is handed.
+    let t1 = find_task(&snap, "t1");
+    assert_eq!(
+        (t1.status, t1.assigned_agent.as_deref()),
+        (TaskStatus::Working, Some("qa"))
+    );
+    s.wait_for("the Codex session to be handed t1", || {
+        let args = read("qa");
+        args.contains("gpt-6-astra") && args.contains("Task t1 is yours")
+    });
+    assert!(s
+        .events()
+        .iter()
+        .any(|e| e.event_type == "agent.runtime_set"
+            && e.message
+                .contains("to Codex on GPT 6 Astra (the work style)")));
+
+    // Codex's turn ends. The window resets and a reading says so. qa
+    // finishes t1, and goes back to Claude Code before it is handed t2: were
+    // t2 handed to it on Codex, it would stay there as long as work came.
+    hook(
+        "qa",
+        "codex-notify",
+        r#"{"type":"agent-turn-complete","thread-id":"thread-qa"}"#,
+    );
+    let wait = (resets - chrono::Utc::now()).num_milliseconds().max(0) as u64 + 500;
+    std::thread::sleep(std::time::Duration::from_millis(wait));
+    hook(
+        "lead",
+        "usage",
+        r#"{"rate_limits":[{"kind":"seven_day","percentUsed":10}]}"#,
+    );
+    let done = json!({ "task_id": "t1", "result": "done" }).to_string();
+    let out = s.ctl("qa", &["tool", "task_complete", &done]);
+    assert!(out.status.success(), "{}", stderr(&out));
+    let snap = s.wait("qa to go back to Claude Code with t2", |snap| {
+        let t2 = find_task(snap, "t2");
+        find_agent(snap, "qa").runtime == RuntimeKind::Claude
+            && t2.status == TaskStatus::Working
+            && t2.assigned_agent.as_deref() == Some("qa")
+    });
+    let qa = find_agent(&snap, "qa");
+    assert_eq!(qa.model.as_deref(), Some("sonnet"));
+    assert!(qa.fallback.is_none());
+    s.wait_for("the Claude Code session to be handed t2", || {
+        let args = read("qa");
+        args.contains("--model\nsonnet[1m]\n") && args.contains("Task t2 is yours")
+    });
+    let events = s.events();
+    let at = |what: &dyn Fn(&crew_core::Event) -> bool| events.iter().position(what);
+    let back = at(&|e| e.event_type == "agent.model_restored").expect("qa went back");
+    let handed =
+        at(&|e| e.event_type == "task.dispatched" && e.message == "task t2 dispatched to qa")
+            .expect("t2 handed to qa");
+    assert!(back < handed, "t2 was handed to qa on Codex");
+}
+
+#[test]
 fn the_orchestrator_staffs_the_team_around_the_models_whose_window_is_used_up() {
     use std::os::unix::fs::PermissionsExt;
 

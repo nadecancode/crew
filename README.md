@@ -1366,7 +1366,10 @@ log has `agent.model_policy`, and the orchestrator is told, with nothing to
 decide. The roster keeps the member's own model. Once a reading since the move
 (or the reset time) says the model can be used again, the member goes back:
 between turns on the same CLI (its session resumed), between tasks from the
-other CLI. Choosing a model yourself (`s`, `crew agent model`) or by the
+other CLI. From then on it is handed no new task until it is back, and once
+it has finished the one it is on it goes when its turn ends (or, if crew
+does not see that turn end, once its session has been quiet for a minute).
+Choosing a model yourself (`s`, `crew agent model`) or by the
 orchestrator (`agent_set_model`) replaces the fallback, and nothing goes back
 by itself. It applies to the orchestrator as well: the rule is yours, written in
 the style. The built-in styles say `fable: [opus]`, which the launcher shows
