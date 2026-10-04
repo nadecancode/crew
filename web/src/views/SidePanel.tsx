@@ -41,11 +41,19 @@ export function SidePanel() {
   };
   onCleanup(() => (start = null));
   const sel = () => ui.sel();
+  // What is shown, by identity: another agent, task, message or event is a
+  // panel of its own, so nothing one fetched (or is still fetching) ever
+  // shows under another's name.
+  const shown = () => {
+    const s = sel();
+    return s ? `${s.kind}:${"id" in s ? s.id : s.seq}` : null;
+  };
   return (
     <aside id="side-panel" class="side-panel" data-region="panel" aria-label="side panel" style={{ "--panel-w": `${width()}px` }} classList={{ open: !!sel() }}>
       <div class="resizer" role="separator" aria-orientation="vertical" aria-label="resize the side panel" tabindex="-1"
         onPointerDown={down} onPointerMove={move} onPointerUp={up} onPointerCancel={up} onKeyDown={keyResize} />
-      <Switch fallback={<Bus />}>
+      <Show when={shown()} keyed fallback={<Bus />}>{(_key: string) => (
+      <Switch>
         <Match when={sel()?.kind === "agent" && app.store.agent((sel() as { id: string }).id)}>
           {(agent) => <Inspector agent={agent()} />}
         </Match>
@@ -62,6 +70,7 @@ export function SidePanel() {
           <EventPanel seq={(sel() as { seq: number }).seq} />
         </Match>
       </Switch>
+      )}</Show>
     </aside>
   );
 }

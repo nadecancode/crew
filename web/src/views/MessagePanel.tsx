@@ -9,6 +9,7 @@ import { askedBy, decodeMessage, options, type Message } from "../protocol";
 import { Linked } from "../text";
 import { kindOf } from "./Bus";
 import { PanelHead } from "./SidePanel";
+import { waiting } from "./waiting";
 
 export function MessagePanel(props: { id: string }) {
   const app = useApp();
@@ -37,11 +38,7 @@ export function MessagePanel(props: { id: string }) {
   };
   const why = () => {
     const e = failed();
-    if (!link.live() && !e) {
-      const final = link.conn() === "stopped" || link.conn() === "signed-out";
-      return final ? "not connected: this page is stopped and fetches nothing" : "not connected: it is fetched when the dashboard is live";
-    }
-    if (!e) return "loading…";
+    if (!e) return waiting(link, "loading…");
     const text = e instanceof Error ? e.message : String(e);
     return (e as { code?: string }).code === "not_found" ? `not found: ${text}` : `not fetched: ${text}`;
   };
