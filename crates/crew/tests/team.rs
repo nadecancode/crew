@@ -5908,12 +5908,17 @@ fn only_the_operator_moves_the_orchestrator_to_another_cli_and_its_new_session_i
     for said in [
         "[crew] You take over the work of design. It ran on Claude Code on Fable 5.1 until now; operator moved it to Codex on its default model.",
         "Your working directory (",
-        "read git status and git diff before you go on",
         "Your task is design-task (\"design the thing\"); it is handed to you again, and task_get(\"design-task\") reads its card.",
         "> Half of the spec is in spec.md.",
     ] {
         assert!(args.contains(said), "missing {said:?} in\n{args}");
     }
+    // The inspection commands follow the backend the team runs on.
+    assert!(
+        args.contains("read git status and git diff before you go on")
+            || args.contains("read jj status and jj diff (or the git_status and git_diff tools) before you go on"),
+        "missing the inspection hint in\n{args}"
+    );
     // And back to Claude Code on a model named for it.
     let out = crew(&["agent", "model", "orchestrator", "sonnet", "-C", &ws]);
     assert!(out.status.success(), "{}", stderr(&out));

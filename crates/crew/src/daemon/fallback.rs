@@ -481,6 +481,7 @@ left off; if you were in the middle of a step, check its state before repeating 
                 tasks: &m.tasks,
                 agents: &m.agents,
                 last_words: &last_words,
+                vcs: self.vcs().kind(),
             })
         };
         self.update_agent(id, |a| {

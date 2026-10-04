@@ -192,6 +192,7 @@ impl Daemon {
             models: &models,
             agents: &agents,
             worktrees,
+            vcs: self.vcs().kind(),
             voice: team.defaults.voice,
         };
         let briefing = if agent.orchestrator {
@@ -273,6 +274,12 @@ impl Daemon {
         // Before the sandboxes are made: they pass on what the launch's
         // environment names.
         spec.env.push(("CREW_LAUNCH".into(), launch_id.clone()));
+        if worktrees && self.vcs().kind() == crate::vcs::Kind::Jj {
+            // jj run by the agent itself records its name, as the crew tools do.
+            spec.env.push(("JJ_USER".into(), id.to_string()));
+            spec.env
+                .push(("JJ_EMAIL".into(), format!("{id}@crew.local")));
+        }
         if let Some(sidecar) = spec.sidecar.as_mut() {
             sidecar.env.push(("CREW_LAUNCH".into(), launch_id.clone()));
         }
