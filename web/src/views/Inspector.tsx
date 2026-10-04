@@ -18,6 +18,7 @@ import { Linked } from "../text";
 import type { InspectorTab } from "../ui";
 import { useOps } from "./ops";
 import { PanelHead } from "./SidePanel";
+import { waiting } from "./waiting";
 import { TerminalTab } from "./TerminalTab";
 import { VirtualList } from "./VirtualList";
 
@@ -117,10 +118,10 @@ function Overview(props: { agent: Agent }) {
       .then((r) => setInbox(new Map(r.messages.map((m) => [m.id, m]))), () => {});
   };
   // The inspector opening; an `agent` push whose inbox counts changed.
-  createEffect(on(() => [a().id, a().inbox_total, a().inbox_unread, ui.refreshTick()], readInbox));
-  createEffect(on(() => a().id, (id) => {
-    setFetchedEvents(null);
-    if (link.live()) link.call("events", { agent: id, limit: 200 }, decodeEvents).then(setFetchedEvents, () => {});
+  createEffect(on(() => [a().id, a().inbox_total, a().inbox_unread, ui.refreshTick(), link.live()], readInbox));
+  // Once per panel (one panel per agent), when it is live.
+  createEffect(on(link.live, (live) => {
+    if (live && fetchedEvents() === null) link.call("events", { agent: a().id, limit: 200 }, decodeEvents).then(setFetchedEvents, () => {});
   }));
 
   const facts = (): [string, string, string?][] => {
@@ -257,12 +258,12 @@ function Transcript(props: { agent: Agent }) {
       .finally(() => (inFlight = false));
   };
   // The tab opening, the refresh key, a turn that ended (the status changed).
-  createEffect(on(() => [a().id, a().status, ui.refreshTick()], read));
+  createEffect(on(() => [a().id, a().status, ui.refreshTick(), link.live()], read));
   const entries = () => result()?.entries ?? [];
   const chosen = (): TranscriptEntry | undefined => (cursor() !== null ? entries()[cursor()!] : undefined);
   return (
     <div class="transcript">
-      <Show when={result()} fallback={<p class="pad muted">{error() ?? "reading the session…"}</p>}>
+      <Show when={result()} fallback={<p class="pad muted">{error() ?? waiting(link, "reading the session…")}</p>}>
         <Show when={result()!.available} fallback={<p class="pad muted">this runtime keeps no session file crew can read, or it was not found</p>}>
           <Show when={result()!.truncated}><p class="pad dim">older entries are not shown</p></Show>
           <VirtualList label="transcript" class="transcript-list" count={() => entries().length} slice={(f, t) => entries().slice(f, t)} rowHeight={TRANSCRIPT_ROW}
@@ -303,11 +304,11 @@ function Diff(props: { agent: Agent }) {
     for (const e of store.events.newest(200)) if (e.event_type === "vcs.commit" && e.agent_id === a().id) return e.seq;
     return 0;
   });
-  createEffect(on(() => [a().id, lastCommit(), ui.refreshTick()], read));
+  createEffect(on(() => [a().id, lastCommit(), ui.refreshTick(), link.live()], read));
   const lines = () => (diff()?.text ?? "").split("\n");
   return (
     <Scroll key={`${a().id}:diff`} class="diff">
-      <Show when={diff()} fallback={<p class="pad muted">{error() ?? "reading the diff…"}</p>}>
+      <Show when={diff()} fallback={<p class="pad muted">{error() ?? waiting(link, "reading the diff…")}</p>}>
         <Show when={diff()!.text.trim()} fallback={<p class="pad muted">no uncommitted changes</p>}>
           <pre class="diff-text">
             <For each={lines()}>

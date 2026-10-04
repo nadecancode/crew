@@ -19,6 +19,7 @@ import { decodeOutput, type Agent } from "../protocol";
 import type { TerminalHandle } from "../term/Terminal";
 import { Sgr } from "../text";
 import { useOps } from "./ops";
+import { waiting } from "./waiting";
 
 export function TerminalTab(props: { agent: Agent }) {
   return (
@@ -144,7 +145,7 @@ function HerdrScreen(props: { agent: Agent }) {
   };
   onCleanup(() => again !== null && window.clearTimeout(again));
   // The tab opening, the refresh key, activity of the agent.
-  createEffect(on(() => [props.agent.id, props.agent.last_activity_at, ui.refreshTick()], read));
+  createEffect(on(() => [props.agent.id, props.agent.last_activity_at, ui.refreshTick(), link.live()], read));
 
   // Keys typed here go to the agent; what piles up while a call is out goes in the next.
   let pending = "";
@@ -191,7 +192,7 @@ function HerdrScreen(props: { agent: Agent }) {
         <button disabled={!link.live()} onClick={() => ops.focusPane(props.agent.id)}>jump to pane</button>
         <button disabled={!link.live()} onClick={() => ui.refresh()} title="read the screen again (r)">refresh</button>
       </div>
-      <Show when={screen() !== null} fallback={<p class="pad muted">{error() ?? "reading the screen…"}</p>}>
+      <Show when={screen() !== null} fallback={<p class="pad muted">{error() ?? waiting(link, "reading the screen…")}</p>}>
         <pre class="screen" tabindex="0" aria-label={`the terminal of ${props.agent.id}`} onKeyDown={onKey} onPaste={onPaste}><Sgr text={screen()!} /></pre>
       </Show>
     </div>
