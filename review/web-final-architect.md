@@ -2,7 +2,9 @@
 
 Second reviewer of the dual final review (the first is `review/web-final-recheck.md`
 and the reports it builds on). Reviewed tree: `agents/qa` at `f76be24`
-(qa `7a4dcc8`, web `c7c99d4`), identical outside `review/` to this branch.
+(qa `7a4dcc8`, web `c7c99d4`); the fixes that followed were re-checked at the
+final integration, `agents/qa` at `2c2441e7` (qa `862f344d`, web `e8551391`),
+which is identical outside `review/` to this branch.
 
 This pass is independent of the first reviewer's: it re-derives the security
 properties of `notes/web-design.md` §security from the running program and a
@@ -12,15 +14,22 @@ check below was made by the architect alone unless it says otherwise.
 
 ## Verdict
 
-Changes requested while A1 is open with QA. No finding against the product blocks.
-This section is rewritten when the fixes are integrated and re-checked.
+**Approved at `2c2441e7`.** No finding of this pass is open that blocks: A1 and
+A2 were fixed and re-checked, A3 and A4 are accepted as they are.
+
+The first reviewer's verdict, from `review/web-final-recheck.md` (at
+`e2fbaa62`): every production finding closed, no production bug open, the
+aggregate approval withheld for two test gates with QA. Both gates are fixed
+(`c7c99d4`, then `862f344d` after A1) and were re-checked here, as its model
+was blocked before it could do so itself; its own confirmation of those two
+fixes is the one thing this record cannot supply.
 
 ## Findings
 
 | # | severity | owner | what | state |
 |---|---|---|---|---|
-| A1 | blocking (test gate) | qa | The live P10/P11 gate of `7a4dcc8` asserts a floor on the rate at which the daemon answers `send` calls (`web/e2e/live/perf.spec.ts`, "accepted per second": 0.9 × rate for the steady windows, 240/s for the bursts). On this host it failed five runs of five (jj; sandboxes required three times, off twice): 149–184/s against 240 in the burst log window, 158–179/s against 180 in the steady log window. The rate depends on the machine and on the backlog the scripted agents still work off from the earlier burst. The product was within every budget in the same runs: the page applied 2009–20110 pushes per second (the design's P10 is 200, P11 is 2000), frame p95 16.7–16.8 ms, no long task, heap 13.7 MB. Wanted: gate the load the design names, the pushes the page applies per second, and report the acceptance rate without a floor. | open |
-| A2 | P3 | web | With no orchestrator agent (`orchestrator: agent: false`) the graph has two tab stops in Chromium: the empty hub (`<g class="node hub empty">`, no role, no `tabindex`) takes focus before the roving node, because an SVG element with a focus listener is tabbable there. §ui says the graph is one tab stop. `web/src/graph/AgentNode.tsx`: `tabindex` should be `-1`, not absent. | fixed by `e8551391`, re-check pending |
+| A1 | blocking (test gate) | qa | The live P10/P11 gate of `7a4dcc8` asserts a floor on the rate at which the daemon answers `send` calls (`web/e2e/live/perf.spec.ts`, "accepted per second": 0.9 × rate for the steady windows, 240/s for the bursts). On this host it failed five runs of five (jj; sandboxes required three times, off twice): 149–184/s against 240 in the burst log window, 158–179/s against 180 in the steady log window. The rate depends on the machine and on the backlog the scripted agents still work off from the earlier burst. The product was within every budget in the same runs: the page applied 2009–20110 pushes per second (the design's P10 is 200, P11 is 2000), frame p95 16.7–16.8 ms, no long task, heap 13.7 MB. Wanted: gate the load the design names, the pushes the page applies per second, and report the acceptance rate without a floor. | fixed by `862f344d`; re-checked: four runs of four green (see below) |
+| A2 | P3 | web | With no orchestrator agent (`orchestrator: agent: false`) the graph has two tab stops in Chromium: the empty hub (`<g class="node hub empty">`, no role, no `tabindex`) takes focus before the roving node, because an SVG element with a focus listener is tabbable there. §ui says the graph is one tab stop. `web/src/graph/AgentNode.tsx`: `tabindex` should be `-1`, not absent. | fixed by `e8551391`; re-checked in the browser |
 | A3 | P3, noted | vcs | Before `hello` a WebSocket message is refused above 4 KiB only once it has been read: the WebSocket layer accepts up to 1 MiB from the start, so 32 unauthenticated connections can make the daemon buffer 32 MiB for at most 5 s each. Bounded; no change asked. | open, accepted |
 | A4 | P3, noted | vcs | `Web::start` records the server as serving before the accept tasks are spawned; if converting a listener failed in between, the record would stay without a listener. Not reachable in practice; no change asked. | open, accepted |
 | A5 | note | web | After `crew web --stop` an open tab says "reconnecting" (read-only) until the 30 s give-up and only then "stopped"; the close reason the server sends ("the dashboard was stopped") is not used. This is what §transport specifies for a lost connection and it is safe (the token is already revoked; whoever answers must show the proof). After a daemon shutdown the tab stops at once. | as designed |
@@ -40,7 +49,26 @@ so they were re-checked here.
   `7a4dcc8` asserts the preload (the daemon's log reaches 5000 events), the
   page's ring (5000 before anything is timed), that no call was refused, that
   every call was answered, and that the page applied what the daemon emitted.
-  Those assertions hold. Its acceptance-rate floor is finding A1.
+  Those assertions hold. Its acceptance-rate floor was finding A1; `862f344d`
+  gates the pushes the page applies per second instead (at least 200 in the
+  steady windows, 2000 in the bursts) and keeps the acceptance rate as a
+  reported number with a floor of 50.
+
+### Re-check of the fixes at `2c2441e7`
+
+- A1: the live P10/P11 test, four runs in a row on jj (three without
+  sandboxes, one with them required), all green. Pushes applied by the page
+  per second: 1739–2031 in the steady windows, 17205–20090 in the bursts;
+  frame p95 16.7–16.8 ms in all sixteen windows; no call refused. The
+  acceptance rate in the log windows was 164–190/s with the host lightly
+  loaded too (load 2–4 on 32 cores), so the old floor measured the daemon's backlog, not the load on the
+  page. QA reports one red run in six of its own (a frame p95 of 33.3 ms in
+  the first steady window under host load): the timing limits remain
+  sensitive to what else the machine does, which `CREW_PERF_SCALE` is for.
+- A2: `vitest` 99 passed; `e2e/graph.spec.ts` 10 passed, the new test among
+  them; in Chromium against a real dry-run team the empty hub has
+  `tabindex="-1"` and `tab` goes from "stop team" to the one graph node and
+  on to the bus.
 
 ## What was checked
 
@@ -83,11 +111,12 @@ tab. All consistent with §transport and §security:
 - `/ws`: no `Origin`, `null`, another site, `https:`, a trailing slash, the
   numeric and `localhost` origins, a sub-name and a suffix all answer 403;
   two `Origin` headers 400; the exact origin 101.
-- Before `hello`, fourteen calls with valid parameters (`snapshot`,
-  `subscribe`, `send`, `agent_kill`, `agent_pause`, `agent_restart`,
-  `agent_remove`, `agent_input`, `agent_output`, `load_team`, `shutdown`,
-  `agents_list`, `listen`, `agent_set_model` and others) answer `unauthorized`
-  and change nothing; only `ping` is answered.
+- Before `hello`, twenty-two calls with valid parameters (`snapshot`,
+  `subscribe`, `send`, `attach`, `events`, `agent_kill`, `agent_pause`,
+  `agent_restart`, `agent_remove`, `agent_input`, `agent_output`,
+  `agent_set_model`, `load_team`, `shutdown`, `agents_list`, `listen`,
+  `web_open`, `web_close`, `web_prefs` and others) answer `unauthorized` and
+  change nothing; only `ping` is answered.
 - `hello` on the web with the operator's token file, an agent's token (as
   agent and as operator), no token, an empty one and a random one:
   `unauthorized`, no `web_proof` in the reply, and the connection stays
