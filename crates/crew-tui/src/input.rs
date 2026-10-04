@@ -598,6 +598,10 @@ fn modal_key(app: &mut App, key: KeyEvent, now: i64) -> Vec<Command> {
             KeyCode::Char('y') | KeyCode::Char('Y') => vec![Command::Kill(id)],
             _ => Vec::new(),
         },
+        Modal::ConfirmRestartFresh(id) => match key.code {
+            KeyCode::Char('y') | KeyCode::Char('Y') => vec![Command::RestartFresh(id)],
+            _ => Vec::new(),
+        },
         Modal::ConfirmRestartPaused(_) => match key.code {
             KeyCode::Char('y') | KeyCode::Char('Y') => {
                 vec![Command::ResumeLimited { restart: true }]
@@ -907,6 +911,11 @@ fn run_slash(
         "stop" => app.modal = Some(Modal::ConfirmStop),
         "kill" => app.modal = Some(Modal::ConfirmKill(slash_agent(app, command, rest, to)?)),
         "restart" => return Ok(vec![Command::Restart(slash_agent(app, command, rest, to)?)]),
+        "restart-fresh" => {
+            app.modal = Some(Modal::ConfirmRestartFresh(slash_agent(
+                app, command, rest, to,
+            )?));
+        }
         "pause" => return Ok(vec![Command::Pause(slash_agent(app, command, rest, to)?)]),
         "unpause" => return Ok(vec![Command::Resume(slash_agent(app, command, rest, to)?)]),
         "compact" => return Ok(vec![Command::Compact(slash_agent(app, command, rest, to)?)]),
@@ -1467,6 +1476,34 @@ mod tests {
             assert_eq!(press(&mut a, KeyCode::Char('y')), vec![Command::StopTeam]);
             assert!(a.stopping && a.modal.is_none());
         }
+    }
+
+    #[test]
+    fn fresh_restart_requires_a_no_resume_confirmation_and_targets_one_agent() {
+        let mut a = app();
+        assert!(submit(&mut a, "/restart-fresh claude-2").is_empty());
+        assert_eq!(
+            format!("{:?}", a.modal),
+            "Some(ConfirmRestartFresh(\"claude-2\"))"
+        );
+        for width in [42, 120] {
+            let screen = crate::render_to_string(&a, width, 24, 1_000_000);
+            assert!(screen.contains("no resume"), "{screen}");
+            assert!(screen.contains("old conversation"), "{screen}");
+        }
+        assert!(press(&mut a, KeyCode::Esc).is_empty());
+        assert!(a.modal.is_none());
+        assert!(submit(&mut a, "/restart-fresh").is_empty());
+        assert_eq!(
+            format!("{:?}", press(&mut a, KeyCode::Char('y'))),
+            "[RestartFresh(\"claude-1\")]"
+        );
+        assert!(a.modal.is_none());
+        // Ordinary restart still resumes immediately.
+        assert_eq!(
+            submit(&mut a, "/restart claude-2"),
+            vec![Command::Restart("claude-2".into())]
+        );
     }
 
     #[test]

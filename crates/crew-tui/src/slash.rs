@@ -67,6 +67,12 @@ pub const DASHBOARD: &[SlashCommand] = &[
         "[agent]",
         "restart an agent, resuming its session",
     ),
+    command(
+        "restart-fresh",
+        &[],
+        "[agent]",
+        "restart without resuming the old conversation (asks first)",
+    ),
     command("pause", &[], "[agent]", "suspend an agent"),
     command("unpause", &[], "[agent]", "let a suspended agent continue"),
     command(
@@ -256,7 +262,7 @@ mod tests {
         assert!(all.starts_with("/exit · /stop · /kill [agent]"), "{all}");
         assert_eq!(
             hint(DASHBOARD, "/re").as_deref(),
-            Some("/restart [agent] · /resume")
+            Some("/restart [agent] · /restart-fresh [agent] · /resume")
         );
         assert_eq!(
             hint(DASHBOARD, "/sto").as_deref(),

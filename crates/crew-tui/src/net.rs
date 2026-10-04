@@ -46,6 +46,7 @@ fn request_timeout(call: &Call) -> Duration {
     match call {
         Call::AgentKill { .. }
         | Call::AgentRestart { .. }
+        | Call::AgentRestartFresh { .. }
         | Call::AgentResume { .. }
         | Call::AgentSetModel { .. } => ACTION_TIMEOUT,
         Call::Resume { .. } | Call::Shutdown { .. } => STOP_TIMEOUT,
@@ -149,6 +150,7 @@ impl Requests {
             Command::Keys { .. } => self.keys.send(command),
             Command::Kill(_)
             | Command::Restart(_)
+            | Command::RestartFresh(_)
             | Command::Resume(_)
             | Command::ResumeLimited { .. }
             | Command::SetModel { .. }
@@ -346,6 +348,10 @@ impl Requester {
             },
             Command::Kill(id) => self.action(format!("kill {id}"), Call::AgentKill { id }),
             Command::Restart(id) => self.action(format!("restart {id}"), Call::AgentRestart { id }),
+            Command::RestartFresh(id) => self.action(
+                format!("restart {id} fresh (no resume)"),
+                Call::AgentRestartFresh { id },
+            ),
             Command::Pause(id) => self.action(format!("pause {id}"), Call::AgentPause { id }),
             Command::Resume(id) => self.action(format!("resume {id}"), Call::AgentResume { id }),
             Command::ResumeLimited { restart } => self.action(
@@ -718,6 +724,60 @@ mod tests {
         );
         stop.store(true, Ordering::Relaxed);
         daemon.stop();
+    }
+
+    #[test]
+    fn fresh_restart_uses_its_own_rpc_without_blocking_screen_reads() {
+        if crate::test_support::isolate_operator_test(
+            "net::tests::fresh_restart_uses_its_own_rpc_without_blocking_screen_reads",
+        ) {
+            return;
+        }
+        let temp = tempfile::tempdir().unwrap();
+        let path = temp.path().join("daemon.sock");
+        let daemon = FakeDaemon::start_with_delay(
+            &path,
+            PROTOCOL_VERSION,
+            Some(("agent_restart_fresh", Duration::from_millis(3200))),
+        );
+        let (tx, rx) = mpsc::channel();
+        let requests = spawn_requester(path, tx);
+        requests
+            .send(Command::RestartFresh("worker".into()))
+            .unwrap();
+        requests
+            .send(Command::FetchOutput {
+                id: "worker".into(),
+            })
+            .unwrap();
+        let first = rx
+            .recv_timeout(Duration::from_secs(2))
+            .expect("screen read waits behind fresh restart");
+        assert!(
+            matches!(first, UiEvent::Reply(reply) if matches!(*reply, Reply::Output { result: Ok(_), .. }))
+        );
+        let next = rx.recv_timeout(Duration::from_secs(4)).unwrap();
+        assert!(
+            matches!(next, UiEvent::Reply(reply) if matches!(*reply, Reply::Action { result: Ok(()), .. }))
+        );
+        let calls = daemon.calls();
+        assert!(calls
+            .iter()
+            .any(|call| matches!(call, Call::AgentRestartFresh { id } if id == "worker")));
+        assert!(!calls
+            .iter()
+            .any(|call| matches!(call, Call::AgentRestart { .. })));
+        daemon.stop();
+    }
+
+    #[test]
+    fn fresh_restart_has_a_lifecycle_timeout() {
+        assert_eq!(
+            request_timeout(&Call::AgentRestartFresh {
+                id: "worker".into()
+            }),
+            ACTION_TIMEOUT
+        );
     }
 
     #[test]

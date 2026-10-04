@@ -27,6 +27,14 @@ pub fn render(buf: &mut Buffer, area: Rect, modal: &Modal, theme: &Theme) {
             "y kill · any other key cancels",
             theme,
         ),
+        Modal::ConfirmRestartFresh(id) => render_confirm(
+            buf,
+            area,
+            &format!("restart {id} fresh · no resume"),
+            "The old conversation is not resumed.",
+            "y restart fresh · any other key cancels",
+            theme,
+        ),
         Modal::ConfirmRestartPaused(count) => render_confirm(
             buf,
             area,

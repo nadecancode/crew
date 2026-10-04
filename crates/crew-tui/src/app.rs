@@ -78,6 +78,7 @@ pub enum Command {
     },
     Kill(String),
     Restart(String),
+    RestartFresh(String),
     Pause(String),
     Resume(String),
     /// Continue every agent paused at a usage limit; `restart` restarts
@@ -180,6 +181,8 @@ pub enum Modal {
     /// A line typed into an agent's terminal (`to` is the agent).
     Type(Compose),
     ConfirmKill(String),
+    /// Start one agent without resuming its old conversation.
+    ConfirmRestartFresh(String),
     /// Restart the agents paused at a usage limit (how many).
     ConfirmRestartPaused(usize),
     /// Stop the whole team.
