@@ -9,7 +9,7 @@
 //! Every git invocation uses an explicit argument array (no shell), and every
 //! revision that originates from an agent is validated before use.
 
-mod beneath;
+pub(crate) mod beneath;
 pub mod launch;
 
 use std::path::{Path, PathBuf};
@@ -32,6 +32,8 @@ const MAX_DIFF_BYTES: usize = 48 * 1024;
 pub struct Worktree {
     pub path: PathBuf,
     pub branch: String,
+    /// This call made it (it was not there from an earlier run).
+    pub created: bool,
 }
 
 fn git(dir: &Path) -> Command {
@@ -78,11 +80,17 @@ const GIT_TIMEOUT: Duration = if cfg!(test) {
 };
 
 /// `cmd.output()` with a deadline: the command leads its own process group,
-/// and the group is killed when the deadline passes.
-fn output(cmd: &mut Command) -> std::io::Result<Output> {
+/// and the group is killed when the deadline passes. Every git and jj command
+/// crew runs goes through here, and through the installed [`launch::Launcher`].
+pub(crate) fn output(cmd: &mut Command) -> std::io::Result<Output> {
     use std::io::Read;
     use std::os::unix::process::CommandExt;
     use std::sync::mpsc;
+    // Named before a launcher replaces the program with its sandbox runner.
+    let program = Path::new(cmd.get_program())
+        .file_name()
+        .map(|n| n.to_string_lossy().into_owned())
+        .unwrap_or_else(|| "git".to_string());
     launch::apply(cmd)?;
     let spawned = cmd
         .process_group(0)
@@ -109,7 +117,7 @@ fn output(cmd: &mut Command) -> std::io::Result<Output> {
         std::io::Error::new(
             std::io::ErrorKind::TimedOut,
             format!(
-                "git did not finish within {}s and was killed",
+                "{program} did not finish within {}s and was killed",
                 GIT_TIMEOUT.as_secs()
             ),
         )
@@ -341,8 +349,16 @@ pub fn branch_exists(repo: &Path, branch: &str) -> bool {
     .unwrap_or(false)
 }
 
+/// The commit the branch points at, if it exists.
+pub fn branch_commit(repo: &Path, branch: &str) -> Option<String> {
+    let rev = format!("refs/heads/{branch}^{{commit}}");
+    out_h(repo, &["rev-parse", "--verify", "-q", &rev])
+        .ok()
+        .filter(|sha| !sha.is_empty())
+}
+
 /// The common git directory of `repo` (the main checkout's `.git`).
-fn common_git_dir(repo: &Path) -> Result<PathBuf> {
+pub(crate) fn common_git_dir(repo: &Path) -> Result<PathBuf> {
     let dir = PathBuf::from(out_h(repo, &["rev-parse", "--git-common-dir"])?);
     Ok(if dir.is_absolute() {
         dir
@@ -424,7 +440,12 @@ pub fn add_worktree(
             common.create_empty(&format!("{admin}/config.worktree"))?;
             // Without an index nothing was checked out yet.
             let needs_population = !common.exists(&format!("{admin}/index"));
-            return Ok((Worktree { path, branch }, needs_population));
+            let worktree = Worktree {
+                path,
+                branch,
+                created: false,
+            };
+            return Ok((worktree, needs_population));
         }
         bail!(
             "{} already exists but is on branch '{current}', expected '{branch}'",
@@ -463,7 +484,12 @@ pub fn add_worktree(
     // so an agent cannot set per-worktree configuration (core.fsmonitor, hooks)
     // that crew's own git would then run.
     common.create_empty(&format!("worktrees/{name}/config.worktree"))?;
-    Ok((Worktree { path, branch }, true))
+    let worktree = Worktree {
+        path,
+        branch,
+        created: true,
+    };
+    Ok((worktree, true))
 }
 
 /// Put the branch's files in a worktree made by [`add_worktree`]. This is
@@ -472,6 +498,23 @@ pub fn add_worktree(
 pub fn populate_worktree(worktree: &Worktree) -> Result<()> {
     out_h(&worktree.path, &["reset", "-q", "--hard", "HEAD"]).map(drop)
 }
+
+/// An operation that timed out after its result had landed: the result was
+/// kept (and, under jj, published), and this says so.
+#[derive(Debug)]
+pub struct Kept {
+    /// The full id of the commit that was kept.
+    pub commit: String,
+    pub message: String,
+}
+
+impl std::fmt::Display for Kept {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&self.message)
+    }
+}
+
+impl std::error::Error for Kept {}
 
 /// Revisions supplied by agents: a hex commit id, `HEAD`, or an agent branch.
 /// Anything else (in particular anything starting with `-`) is rejected so a
@@ -507,6 +550,7 @@ fn commit_info(dir: &Path, rev: &str) -> Result<CommitInfo> {
         branch,
         summary,
         files_changed: files.lines().filter(|l| !l.trim().is_empty()).count(),
+        change_id: None,
     })
 }
 
@@ -535,8 +579,15 @@ pub fn commit_all(dir: &Path, agent: &str, message: &str) -> Result<CommitInfo> 
         Ok(output) => output,
         Err(e) if e.kind() == std::io::ErrorKind::TimedOut => {
             clear_stale_index_lock(dir);
-            if out(dir, &["rev-parse", "HEAD"]).ok() != before {
-                bail!("git commit timed out ({e}) after the commit was made; check the history");
+            let after = out(dir, &["rev-parse", "HEAD"]).ok();
+            if after != before {
+                return Err(Kept {
+                    commit: after.unwrap_or_default(),
+                    message: format!(
+                        "git commit timed out ({e}) after the commit was made; check the history"
+                    ),
+                }
+                .into());
             }
             bail!(
                 "git commit timed out ({e}); nothing was committed, the changes are still staged"
@@ -651,10 +702,15 @@ fn output_recovering(
     let _ = run(dir, abort);
     let after = out(dir, &["rev-parse", "HEAD"]).unwrap_or_default();
     if after != before {
-        bail!(
+        let message = format!(
             "git {operation} timed out ({err}) after HEAD moved from {before} to {after}; the \
 result was kept, check the history before retrying"
         );
+        return Err(Kept {
+            commit: after,
+            message,
+        }
+        .into());
     }
     let _ = run(dir, &["reset", "-q", "--hard", "HEAD"]);
     if dirty(dir).unwrap_or(true) {
@@ -693,27 +749,43 @@ fn finish(dir: &Path, operation: &str, abort: &[&str], output: Output) -> Result
     })
 }
 
+/// What a cherry-pick did, and whose commit it took.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Picked {
+    pub outcome: GitOutcome,
+    /// The full id of the commit that was picked.
+    pub source: String,
+    /// Its author's address (`<agent>@crew.local` for an agent's commit).
+    pub author_email: String,
+}
+
 /// Apply another agent's commit onto this worktree's branch.
-pub fn cherry_pick(dir: &Path, agent: &str, commit: &str) -> Result<GitOutcome> {
+pub fn cherry_pick(dir: &Path, agent: &str, commit: &str) -> Result<Picked> {
     validate_rev(commit)?;
     require_root(dir)?;
     if dirty(dir)? {
         bail!("the worktree has uncommitted changes; commit them before cherry-picking");
     }
-    out(
+    let source = out(
         dir,
         &["rev-parse", "--verify", &format!("{commit}^{{commit}}")],
     )
     .map_err(|_| anyhow!("unknown commit '{commit}'"))?;
+    let author_email = out(dir, &["log", "-1", "--format=%ae", &source]).unwrap_or_default();
     let mut cmd = git(dir);
     with_identity(&mut cmd, agent);
     let output = output_recovering(
         dir,
-        cmd.args(["cherry-pick", "-x", commit]),
+        cmd.args(["cherry-pick", "-x", &source]),
         "cherry-pick",
         &["cherry-pick", "--abort"],
     )?;
-    finish(dir, "cherry-pick", &["cherry-pick", "--abort"], output)
+    let outcome = finish(dir, "cherry-pick", &["cherry-pick", "--abort"], output)?;
+    Ok(Picked {
+        outcome,
+        source,
+        author_email,
+    })
 }
 
 /// Merge a branch (or commit) into this worktree's branch.
@@ -754,17 +826,22 @@ pub fn integrate(
     worktrees_dir: &Path,
     base: &str,
     agents: &[String],
+    on_step: &mut dyn FnMut(&IntegrationStep),
 ) -> Result<(Worktree, Vec<IntegrationStep>)> {
     let worktree = ensure_worktree(repo, worktrees_dir, INTEGRATION_DIR, base)?;
-    let steps = merge_agents(&worktree, agents)?;
+    let steps = merge_agents(&worktree, agents, on_step)?;
     Ok((worktree, steps))
 }
 
 /// Merge every agent branch that is ahead into the integration worktree.
 /// Every git command runs in that worktree (the branches are found through
 /// its shared refs), so a helper sandbox that mounts only it can run them
-/// all.
-pub fn merge_agents(worktree: &Worktree, agents: &[String]) -> Result<Vec<IntegrationStep>> {
+/// all. `on_step` is told each step as soon as it is done.
+pub fn merge_agents(
+    worktree: &Worktree,
+    agents: &[String],
+    on_step: &mut dyn FnMut(&IntegrationStep),
+) -> Result<Vec<IntegrationStep>> {
     let mut steps = Vec::new();
     for agent in agents {
         let branch = branch_for(agent);
@@ -797,10 +874,12 @@ pub fn merge_agents(worktree: &Worktree, agents: &[String]) -> Result<Vec<Integr
             continue;
         }
         let outcome = merge(&worktree.path, "crew", &branch)?;
-        steps.push(IntegrationStep {
+        let step = IntegrationStep {
             agent: agent.clone(),
             outcome,
-        });
+        };
+        on_step(&step);
+        steps.push(step);
     }
     Ok(steps)
 }
@@ -988,7 +1067,7 @@ mod tests {
         let err = cherry_pick(&r.root, "a", "topic").unwrap_err();
         assert!(err.to_string().contains("worktree was restored"), "{err:#}");
         assert_restored_and_retryable(&r, &head, "prepare-commit-msg");
-        assert!(cherry_pick(&r.root, "a", "topic").unwrap().ok);
+        assert!(cherry_pick(&r.root, "a", "topic").unwrap().outcome.ok);
     }
 
     #[test]
@@ -1235,7 +1314,8 @@ mod tests {
         let again = launch::with_launcher(recorder.clone(), || {
             ensure_worktree(&r.root, &r.worktrees, "a", "HEAD").unwrap()
         });
-        assert_eq!(again, wt);
+        assert_eq!((&again.path, &again.branch), (&wt.path, &wt.branch));
+        assert!(wt.created && !again.created);
         let seen = recorder.0.lock().unwrap().clone();
         let inside = wt.path.to_string_lossy().into_owned();
         assert!(
@@ -1506,10 +1586,9 @@ mod tests {
         assert_ne!(a.path, b.path);
         assert!(a.path.join(".git").exists());
         // Reuse is idempotent.
-        assert_eq!(
-            ensure_worktree(&r.root, &r.worktrees, "claude-1", "HEAD").unwrap(),
-            a
-        );
+        let again = ensure_worktree(&r.root, &r.worktrees, "claude-1", "HEAD").unwrap();
+        assert_eq!((&again.path, &again.branch), (&a.path, &a.branch));
+        assert!(!again.created);
         // Files written by one agent are invisible to the other.
         write(&a.path, "only-a.txt", "a");
         assert!(!b.path.join("only-a.txt").exists());
@@ -1621,6 +1700,9 @@ mod tests {
         );
 
         let picked = cherry_pick(&b.path, "claude-3", &commit.short).unwrap();
+        assert_eq!(picked.source, commit.sha);
+        assert_eq!(picked.author_email, "claude-2@crew.local");
+        let picked = picked.outcome;
         assert!(picked.ok);
         assert!(b.path.join("api.rs").exists());
         assert!(status(&b.path).unwrap().contains("working tree clean"));
@@ -1636,7 +1718,7 @@ mod tests {
         write(&b.path, "shared.txt", "from b\n");
         commit_all(&b.path, "b", "b's version").unwrap();
 
-        let outcome = cherry_pick(&b.path, "b", &ca.sha).unwrap();
+        let outcome = cherry_pick(&b.path, "b", &ca.sha).unwrap().outcome;
         assert!(!outcome.ok);
         let conflict = outcome.conflict.unwrap();
         assert_eq!(conflict.operation, "cherry-pick");
@@ -1681,7 +1763,7 @@ mod tests {
             .iter()
             .map(|s| s.to_string())
             .collect();
-        let (wt, steps) = integrate(&r.root, &r.worktrees, "HEAD", &agents).unwrap();
+        let (wt, steps) = integrate(&r.root, &r.worktrees, "HEAD", &agents, &mut |_| {}).unwrap();
         assert_eq!(wt.branch, INTEGRATION_BRANCH);
         assert_eq!(steps.len(), 3);
         assert!(steps[0].outcome.ok && steps[1].outcome.ok);
@@ -1696,7 +1778,7 @@ mod tests {
             "b\n"
         );
         // Running it again only retries what is still missing.
-        let (_, again) = integrate(&r.root, &r.worktrees, "HEAD", &agents).unwrap();
+        let (_, again) = integrate(&r.root, &r.worktrees, "HEAD", &agents, &mut |_| {}).unwrap();
         assert_eq!(again.len(), 1);
         assert_eq!(again[0].agent, "c");
     }
@@ -1742,7 +1824,11 @@ mod tests {
 
         let confined = Arc::new(ConfinedTo(worktree.path.clone(), Default::default()));
         let steps = launch::with_launcher(confined.clone(), || {
-            merge_agents(&worktree, &["a".to_string(), "ghost".to_string()])
+            merge_agents(
+                &worktree,
+                &["a".to_string(), "ghost".to_string()],
+                &mut |_| {},
+            )
         })
         .unwrap();
         let seen = confined.1.lock().unwrap().clone();
@@ -1786,7 +1872,7 @@ mod tests {
         populate_worktree(&worktree).unwrap();
         for broken in [Broken::Refuses, Broken::Exits125] {
             let result = launch::with_launcher(Arc::new(broken), || {
-                merge_agents(&worktree, &["a".to_string()])
+                merge_agents(&worktree, &["a".to_string()], &mut |_| {})
             });
             assert!(result.is_err(), "{result:?}");
         }
@@ -1830,7 +1916,7 @@ mod tests {
         populate_worktree(&worktree).unwrap();
         let launcher = Arc::new(NoRevList::default());
         let result = launch::with_launcher(launcher.clone(), || {
-            merge_agents(&worktree, &["a".to_string()])
+            merge_agents(&worktree, &["a".to_string()], &mut |_| {})
         });
         let seen = launcher.0.lock().unwrap().clone();
         assert!(result.is_err(), "{result:?}");

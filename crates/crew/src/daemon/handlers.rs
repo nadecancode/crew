@@ -2,8 +2,8 @@
 
 use base64::Engine;
 use crew_core::rpc::{
-    Call, GitOutcome, HelloInfo, InboxResult, OutputResult, Push, Role, RpcError, SendParams,
-    SendResult, ServerFrame, PROTOCOL_VERSION,
+    Call, HelloInfo, InboxResult, OutputResult, Push, Role, RpcError, SendParams, SendResult,
+    ServerFrame, PROTOCOL_VERSION,
 };
 use crew_core::{AgentStatus, MessageType, BROADCAST, OPERATOR_ID};
 use serde::Serialize;
@@ -833,25 +833,5 @@ change identity",
             }
         }
         let _ = self.shutdown.send(true);
-    }
-
-    /// Git outcome → reply value, logging conflicts as events.
-    pub(crate) fn report_git(&self, agent: &str, outcome: &GitOutcome) {
-        if let Some(conflict) = &outcome.conflict {
-            self.emit(
-                NewEvent::new(
-                    "git",
-                    "git.conflict",
-                    format!(
-                        "{agent}: {} conflict in {}",
-                        conflict.operation,
-                        conflict.files.join(", ")
-                    ),
-                )
-                .agent(agent)
-                .warn()
-                .data(json!({ "files": conflict.files, "operation": conflict.operation })),
-            );
-        }
     }
 }

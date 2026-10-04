@@ -11,7 +11,7 @@ use crew_core::{Agent, RuntimeKind, TaskStatus};
 use serde_json::Value;
 
 use super::super::daemonize;
-use super::team::{dashboard, landing_hint, stale_daemon_note, wait_for_exit};
+use super::team::{dashboard, landing_hint, stale_daemon_note, vcs_suffix, wait_for_exit};
 use super::Target;
 use crate::limits::fmt_when;
 use crate::mcp::tools::{render_agents, render_tasks};
@@ -32,7 +32,7 @@ pub fn attach(target: &Target) -> Result<()> {
     if !std::io::stdout().is_terminal() {
         bail!("the dashboard needs a terminal; use `crew status` for plain output");
     }
-    dashboard(&info).map(|_| ())
+    dashboard(&info, None).map(|_| ())
 }
 
 pub fn sessions() -> Result<()> {
@@ -66,10 +66,15 @@ pub fn status(target: &Target, json: bool) -> Result<()> {
     let s = &snapshot.session;
     match &s.project {
         Some(project) => println!(
-            "project    {project}  (backend {}, isolation {})",
-            s.backend, s.isolation
+            "project    {project}  (backend {}, isolation {}{})",
+            s.backend,
+            s.isolation,
+            vcs_suffix(s)
         ),
         None => println!("project    <no team loaded>"),
+    }
+    if !s.vcs_note.is_empty() {
+        println!("note       {}", s.vcs_note);
     }
     if let Some(style) = &s.style {
         println!("style      {style}");

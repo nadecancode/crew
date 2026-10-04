@@ -238,8 +238,8 @@ teammate, or that needs an answer first: say those with agent_send or agent_stat
         ),
         tool(
             "git_commit",
-            "Commit all changes in your worktree on your branch. Returns the commit id, which you \
-can send to teammates.",
+            "Commit all changes in your workspace on your branch (agents/<your id>, which plain git \
+sees too). Returns the commit id, which you can send to teammates.",
             object(json!({ "message": { "type": "string" } }), &["message"]),
             false,
         ),
@@ -247,7 +247,7 @@ can send to teammates.",
             "git_diff",
             "Show your uncommitted changes, or the difference against a revision.",
             object(
-                json!({ "against": { "type": "string", "description": "Commit id or branch (optional)" } }),
+                json!({ "against": { "type": "string", "description": "Commit id, jj change id or branch (optional)" } }),
                 &[],
             ),
             true,
@@ -262,7 +262,10 @@ can send to teammates.",
             "git_cherry_pick",
             "Apply a teammate's commit onto your branch. On conflict nothing is changed and the \
 conflicting files are reported.",
-            object(json!({ "commit": { "type": "string" } }), &["commit"]),
+            object(
+                json!({ "commit": { "type": "string", "description": "Its commit id (or jj change id)" } }),
+                &["commit"],
+            ),
             false,
         ),
         tool(
@@ -658,10 +661,14 @@ fn render_message(m: &Message) -> String {
 }
 
 fn render_commit(commit: &CommitInfo) -> String {
-    format!(
+    let mut text = format!(
         "Committed {} on {} ({} file(s)): {}\nFull id: {}",
         commit.short, commit.branch, commit.files_changed, commit.summary, commit.sha
-    )
+    );
+    if let Some(change) = &commit.change_id {
+        text.push_str(&format!("\nChange id: {change}"));
+    }
+    text
 }
 
 fn render_outcome(outcome: &GitOutcome, done: &str) -> String {

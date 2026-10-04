@@ -107,7 +107,7 @@ objective to; use `crew task add`, or `crew stop` first"
                 info.project.as_deref().unwrap_or("?")
             );
         }
-        return open_dashboard(&info, opts.no_attach);
+        return open_dashboard(&info, opts.no_attach, None);
     }
 
     // What the last session here was about, offered again when no new
@@ -426,12 +426,12 @@ fn style_team(style: &Style, workspace: &Path) -> TeamConfig {
     team
 }
 
-/// Nothing in the directory but, at most, crew's and git's own state.
+/// Nothing in the directory but, at most, crew's, git's and jj's own state.
 fn is_blank(dir: &Path) -> bool {
     match std::fs::read_dir(dir) {
         Ok(entries) => entries
             .flatten()
-            .all(|e| matches!(e.file_name().to_str(), Some(".crew" | ".git"))),
+            .all(|e| matches!(e.file_name().to_str(), Some(".crew" | ".git" | ".jj"))),
         Err(_) => false,
     }
 }
@@ -440,6 +440,7 @@ fn is_blank(dir: &Path) -> bool {
 fn workspace_is_isolated(workspace: &Path, config: &TeamConfig) -> bool {
     config.workspace.isolation == Isolation::Shared
         || config.workspace.init
+        || crate::vcs::is_jj_root(workspace)
         || (crate::git::is_root(workspace) && crate::git::has_commits(workspace))
 }
 
