@@ -1255,3 +1255,38 @@ fn port_zero_is_refused() {
     assert_eq!(reply["error"]["code"], "invalid", "{reply}");
     assert_eq!(s.snapshot().session.web, "");
 }
+
+/// P16 (notes/web-multi.md §multi-perf): a push is on the wire within 1 ms
+/// at p95, measured at the browser's end of the server. A `ping` on a
+/// workspace connection goes browser, server, daemon and back: its round
+/// trip bounds one push's way (daemon, server, browser) from above.
+#[test]
+fn a_frame_crosses_the_server_within_a_millisecond_at_p95() {
+    const SAMPLES: usize = 300;
+    let s = start_empty_daemon();
+    let info = web_open(&s);
+    let mut took = rt().block_on(async {
+        let (token, _) = pair(&info).await;
+        let mut socket = ws(&info).await;
+        assert!(hello(&mut socket, &token).await["result"].is_object());
+        let mut took = Vec::with_capacity(SAMPLES);
+        for i in 0..SAMPLES as u64 {
+            let started = std::time::Instant::now();
+            let reply = call(&mut socket, 100 + i, "ping", json!({})).await;
+            took.push(started.elapsed());
+            assert_eq!(reply["result"]["pong"], true);
+        }
+        took
+    });
+    took.sort();
+    let (p50, p95) = (took[SAMPLES / 2], took[SAMPLES * 95 / 100]);
+    let scale: f64 = std::env::var("CREW_PERF_SCALE")
+        .ok()
+        .and_then(|s| s.parse().ok())
+        .unwrap_or(1.0);
+    println!("P16 through the server: round trip p50 {p50:?}, p95 {p95:?}");
+    assert!(
+        p95 <= Duration::from_secs_f64(0.001 * scale),
+        "P16: round trip p95 {p95:?} over 1 ms (x{scale}); p50 {p50:?}"
+    );
+}

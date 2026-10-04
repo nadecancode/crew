@@ -1160,6 +1160,11 @@ mod tests {
             f.home.join(".cargo/registry"),
             f.home.join("notes.txt"),
             f.run.join("0123/b"),
+            // The dashboard server's files (notes/web-multi.md §multi-security).
+            f.run.join("web.sock"),
+            f.run.join("web.token"),
+            f.run.join("web.json"),
+            f.run.join("web.lock"),
         ] {
             assert!(!visible(&spec, &hidden), "{} is visible", hidden.display());
         }
