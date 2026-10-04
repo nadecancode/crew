@@ -303,7 +303,7 @@ pub(crate) struct Web {
     lifecycle: tokio::sync::Mutex<Option<Server>>,
     /// A connection ended.
     gone: Notify,
-    bind: Binder,
+    bind: Mutex<Binder>,
     /// Test hook: told each step of stopping, which waits for the reply.
     #[cfg(test)]
     pub(crate) stop_hook: Mutex<Option<StopHook>>,
@@ -314,7 +314,16 @@ pub(crate) struct Web {
 
 impl Default for Web {
     fn default() -> Self {
-        Self::with_binder(Arc::new(bind_listener))
+        Self {
+            registry: Mutex::new(Registry::default()),
+            lifecycle: tokio::sync::Mutex::new(None),
+            gone: Notify::new(),
+            bind: Mutex::new(Arc::new(bind_listener)),
+            #[cfg(test)]
+            stop_hook: Mutex::new(None),
+            #[cfg(test)]
+            skew: std::sync::atomic::AtomicI64::new(0),
+        }
     }
 }
 
@@ -360,17 +369,15 @@ impl Drop for Admitted {
 }
 
 impl Web {
-    pub(crate) fn with_binder(bind: Binder) -> Self {
-        Self {
-            registry: Mutex::new(Registry::default()),
-            lifecycle: tokio::sync::Mutex::new(None),
-            gone: Notify::new(),
-            bind,
-            #[cfg(test)]
-            stop_hook: Mutex::new(None),
-            #[cfg(test)]
-            skew: std::sync::atomic::AtomicI64::new(0),
-        }
+    /// Bind with `bind` from now on.
+    #[cfg(test)]
+    pub(crate) fn set_binder(&self, bind: Binder) {
+        *self.bind.lock().unwrap_or_else(|e| e.into_inner()) = bind;
+    }
+
+    fn bind(&self, addr: SocketAddr) -> io::Result<std::net::TcpListener> {
+        let bind = self.bind.lock().unwrap_or_else(|e| e.into_inner()).clone();
+        bind(addr)
     }
 
     fn registry(&self) -> MutexGuard<'_, Registry> {
@@ -531,7 +538,7 @@ use another",
         let tries = if port.is_some() { 1 } else { PORTS_TRIED };
         let mut bound = None;
         for p in (0..tries).filter_map(|i| first.checked_add(i)) {
-            let v4 = match (self.bind)(SocketAddr::from((Ipv4Addr::LOCALHOST, p))) {
+            let v4 = match self.bind(SocketAddr::from((Ipv4Addr::LOCALHOST, p))) {
                 Ok(listener) => listener,
                 Err(e) if in_use(&e) => continue,
                 Err(e) => {
@@ -540,7 +547,7 @@ use another",
                     )))
                 }
             };
-            match (self.bind)(SocketAddr::from((Ipv6Addr::LOCALHOST, p))) {
+            match self.bind(SocketAddr::from((Ipv6Addr::LOCALHOST, p))) {
                 Ok(v6) => {
                     bound = Some((p, v4, Some(v6)));
                     break;
@@ -698,7 +705,7 @@ use another",
                 return;
             }
             let port = server.serving.port;
-            match (self.bind)(SocketAddr::from((Ipv6Addr::LOCALHOST, port))) {
+            match self.bind(SocketAddr::from((Ipv6Addr::LOCALHOST, port))) {
                 Ok(v6) => {
                     match spawn_accept(daemon, v6) {
                         Ok(task) => server.v6 = Some(task),

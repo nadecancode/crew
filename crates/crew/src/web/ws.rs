@@ -9,6 +9,7 @@
 use std::time::Duration;
 
 use futures_util::{SinkExt, StreamExt};
+use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpStream;
 use tokio::sync::mpsc;
 use tokio_tungstenite::tungstenite::protocol::frame::coding::CloseCode;
@@ -29,10 +30,28 @@ pub(crate) const MAX_UNAUTHENTICATED_MESSAGE: usize = 4 * 1024;
 pub(crate) const PING_EVERY: Duration = Duration::from_secs(20);
 /// A connection that sent nothing for this long is closed.
 pub(crate) const SILENT_FOR: Duration = Duration::from_secs(40);
+/// How long a closed connection waits for the browser to close too.
+const LINGER: Duration = Duration::from_secs(1);
 
 /// What the reader tells the writer.
 enum Ctl {
     Close(CloseCode, &'static str),
+}
+
+/// The close frame a connection ends with: the reader's reason, else the
+/// server's when it is stopping, else none.
+fn goodbye(order: Option<Ctl>, stopping: bool) -> Option<CloseFrame> {
+    match order {
+        Some(Ctl::Close(code, reason)) => Some(CloseFrame {
+            code,
+            reason: reason.into(),
+        }),
+        None if stopping => Some(CloseFrame {
+            code: CloseCode::Away,
+            reason: "the dashboard was stopped".into(),
+        }),
+        None => None,
+    }
 }
 
 pub(super) async fn serve(daemon: Daemon, mut stream: TcpStream, mut admitted: Admitted) {
@@ -60,7 +79,6 @@ pub(super) async fn serve(daemon: Daemon, mut stream: TcpStream, mut admitted: A
             return;
         }
     };
-    use tokio::io::AsyncWriteExt;
     if stream
         .write_all(&http::switching_protocols(&key))
         .await
@@ -88,40 +106,43 @@ async fn run(daemon: Daemon, socket: WebSocketStream<TcpStream>, admitted: &mut 
         tokio::spawn(async move {
             let mut ping =
                 tokio::time::interval_at(tokio::time::Instant::now() + PING_EVERY, PING_EVERY);
-            let goodbye: Option<CloseFrame> = loop {
+            let last: Option<CloseFrame> = loop {
                 tokio::select! {
                     biased;
                     frame = frames.recv() => {
-                        let Some(frame) = frame else { break None };
+                        // The session ended: the reader said why before it
+                        // ended it, or the server is stopping.
+                        let Some(frame) = frame else {
+                            break goodbye(ctl_rx.try_recv().ok(), *close.borrow());
+                        };
                         let Ok(text) = serde_json::to_string(&frame) else { continue };
                         if sink.send(Message::text(text)).await.is_err() {
-                            return;
+                            return None;
                         }
                     }
-                    order = ctl_rx.recv() => {
-                        break order.map(|Ctl::Close(code, reason)| CloseFrame { code, reason: reason.into() });
-                    }
+                    order = ctl_rx.recv() => break goodbye(order, *close.borrow()),
                     _ = close.changed() => {
                         // What is queued (a `shutdown` push) goes first.
                         while let Ok(frame) = frames.try_recv() {
                             let Ok(text) = serde_json::to_string(&frame) else { continue };
                             if sink.send(Message::text(text)).await.is_err() {
-                                return;
+                                return None;
                             }
                         }
-                        break Some(CloseFrame { code: CloseCode::Away, reason: "the dashboard was stopped".into() });
+                        break goodbye(None, true);
                     }
                     _ = ping.tick() => {
                         if sink.send(Message::Ping(Vec::new().into())).await.is_err() {
-                            return;
+                            return None;
                         }
                     }
                 }
             };
-            if let Some(frame) = goodbye {
+            if let Some(frame) = last {
                 let _ = sink.send(Message::Close(Some(frame))).await;
             }
             let _ = sink.close().await;
+            Some(sink)
         })
     };
 
@@ -180,5 +201,26 @@ async fn run(daemon: Daemon, socket: WebSocketStream<TcpStream>, admitted: &mut 
     }
     session.close();
     drop(ctl);
-    let _ = tokio::time::timeout(Duration::from_secs(2), writer).await;
+    let sink = tokio::time::timeout(Duration::from_secs(2), writer)
+        .await
+        .ok()
+        .and_then(Result::ok)
+        .flatten();
+    // A lingering close: the end of the stream is sent, and what the browser
+    // still sends (the rest of a message too large, its own close) is read
+    // and dropped until it closes too. Closing with that unread would reset
+    // the connection and lose the close frame on the way.
+    let Some(sink) = sink else { return };
+    let Ok(mut socket) = source.reunite(sink) else {
+        return;
+    };
+    let stream = socket.get_mut();
+    if stream.shutdown().await.is_err() {
+        return;
+    }
+    let mut buf = vec![0u8; 16 * 1024];
+    let _ = tokio::time::timeout(LINGER, async {
+        while matches!(stream.read(&mut buf).await, Ok(n) if n > 0) {}
+    })
+    .await;
 }
