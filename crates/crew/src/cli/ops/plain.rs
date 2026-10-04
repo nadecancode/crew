@@ -13,7 +13,8 @@ use crew_core::util::{one_line, slash_command, truncate_chars};
 use crew_core::RuntimeKind;
 
 use super::super::QuickArgs;
-use super::{launch, open_dashboard, reuse_roster, saved_roster, set_backend, Target};
+use super::team::{launch, open_dashboard, reuse_roster, saved_roster, set_backend};
+use super::Target;
 use crate::styles::{self, Styles};
 use crew_tui::{Launcher, StyleChoice};
 

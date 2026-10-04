@@ -11,7 +11,8 @@ use crew_core::{Agent, RuntimeKind, TaskStatus};
 use serde_json::Value;
 
 use super::super::daemonize;
-use super::{dashboard, landing_hint, stale_daemon_note, wait_for_exit, Target};
+use super::team::{dashboard, landing_hint, stale_daemon_note, wait_for_exit};
+use super::Target;
 use crate::limits::fmt_when;
 use crate::mcp::tools::{render_agents, render_tasks};
 use crate::models::Catalog;
