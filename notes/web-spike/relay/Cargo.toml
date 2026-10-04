@@ -1,0 +1,23 @@
+# Spike for notes/web-design.md: one loopback port serving a bundle and a
+# WebSocket that relays crew's socket protocol. Not part of the workspace.
+[package]
+name = "relay"
+version = "0.0.0"
+edition = "2021"
+publish = false
+
+[dependencies]
+crew-core = { path = "../../../crates/crew-core" }
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "net", "io-util", "sync", "time", "fs"] }
+tokio-tungstenite = { version = "=0.28.0", default-features = false, features = ["handshake"] }
+futures-util = { version = "0.3", default-features = false, features = ["sink"] }
+httparse = "1"
+serde_json = "1"
+
+[workspace]
+
+[profile.release]
+opt-level = 3
+lto = "thin"
+codegen-units = 4
+strip = true
