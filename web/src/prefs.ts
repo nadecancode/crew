@@ -75,8 +75,9 @@ export function validate(raw: unknown): Prefs {
 type Caller = (method: string, params?: unknown) => Promise<unknown>;
 type Timers = { setTimeout(fn: () => void, ms: number): number; clearTimeout(id: number): void };
 
-/** One place's preferences: read once, written whole after the last change. */
-function createKept<T extends object>(call: Caller, check: (raw: unknown) => T, timers: Timers) {
+/** One place's preferences: read once, written whole (as `serialize` gives
+ * it) after the last change. */
+function createKept<T extends object>(call: Caller, check: (raw: unknown) => T, timers: Timers, serialize: (p: T) => unknown = (p) => p) {
   const [prefs, setPrefs] = createStore<T>(check(null));
   let timer: number | null = null;
   let loaded = false;
@@ -89,7 +90,7 @@ function createKept<T extends object>(call: Caller, check: (raw: unknown) => T, 
     loaded = true;
   }
 
-  const write = () => void call("web_prefs", { set: structuredClone(unwrap(prefs)) }).catch(() => {});
+  const write = () => void call("web_prefs", { set: structuredClone(serialize(unwrap(prefs) as T)) }).catch(() => {});
 
   function schedule(): void {
     if (timer !== null) timers.clearTimeout(timer);
@@ -147,29 +148,50 @@ export function createLayoutPrefs(call: Caller, timers: Timers = window) {
   };
 }
 
-/** The operator's: shortcuts, the side panel's width, the workspace last on screen. */
+/** The operator's: shortcuts, the side panel's width, the workspace last on screen.
+ *
+ * A field is *established* once the server's file holds a valid value for
+ * it, the operator set it, or a workspace's old value was adopted for it;
+ * only established fields are written, so that a default the page shows is
+ * never stored as if the operator had chosen it, and a field is adopted at
+ * most once and never over the operator's choice. */
 export function createDashboardPrefs(call: Caller, timers: Timers = window) {
-  const kept = createKept(call, validateDashboard, timers);
+  type Field = keyof DashboardPrefs;
+  const established = new Set<Field>();
+  const kept = createKept(call, validateDashboard, timers, (p) => Object.fromEntries((Object.keys(p) as Field[]).filter((k) => established.has(k)).map((k) => [k, p[k]])));
+  const set = <K extends Field>(key: K, value: DashboardPrefs[K]) => {
+    established.add(key);
+    kept.update((x) => ({ ...x, [key]: value }));
+  };
   return {
     prefs: kept.prefs,
-    load: kept.load,
+    async load(): Promise<void> {
+      await kept.load();
+      const raw = kept.raw;
+      const read = validateDashboard(raw);
+      if (typeof raw?.keys === "boolean") established.add("keys");
+      if (read.panel !== null) established.add("panel");
+      if (read.last !== null) established.add("last");
+    },
     get loaded() {
       return kept.loaded;
     },
-    /** A workspace's `keys` and `panel` from before: taken for what the
-     * server's file does not hold yet, once. */
+    /** A workspace's `keys` and `panel` from before: taken for a field that
+     * is not established yet, once. */
     adopt(old: { keys?: boolean; panel?: number | null }): void {
       // Unread, the server's file is unknown: nothing is written over it.
       if (!kept.loaded) return;
-      const keys = old.keys !== undefined && !kept.had("keys");
-      const panel = old.panel !== undefined && old.panel !== null && !kept.had("panel");
+      const keys = old.keys !== undefined && !established.has("keys");
+      const panel = old.panel !== undefined && old.panel !== null && !established.has("panel");
+      if (keys) established.add("keys");
+      if (panel) established.add("panel");
       if (!keys && !panel) return;
       kept.update((x) => ({ ...x, ...(keys ? { keys: old.keys } : {}), ...(panel ? { panel: old.panel } : {}) }));
     },
-    setKeys: (on: boolean) => kept.update((x) => ({ ...x, keys: on })),
-    setPanel: (px: number | null) => kept.update((x) => ({ ...x, panel: px })),
+    setKeys: (on: boolean) => set("keys", on),
+    setPanel: (px: number | null) => set("panel", px),
     /** Written by the page itself, so only over what was read. */
-    setLast: (id: string) => kept.loaded && kept.prefs.last !== id && kept.update((x) => ({ ...x, last: id })),
+    setLast: (id: string) => kept.loaded && kept.prefs.last !== id && set("last", id),
   };
 }
 

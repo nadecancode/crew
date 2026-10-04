@@ -70,7 +70,13 @@ test("a workspace's keys and panel from before are read once, as defaults, when 
   expect(dash.prefs.keys).toBe(false);
   expect(dash.prefs.panel).toBe(700);
   await vi.advanceTimersByTimeAsync(WRITE_DELAY_MS);
-  expect(writes).toEqual([{ keys: false, panel: 700, last: null }]);
+  // Only what was chosen or adopted is stored: no default the page shows.
+  expect(writes).toEqual([{ keys: false, panel: 700 }]);
+  // A second workspace's old values come after: the first one's stay.
+  const two = createLayoutPrefs(async () => ({ prefs: { layout: {}, keys: true, panel: 300 } }), timers);
+  await two.load();
+  dash.adopt(two.legacy());
+  expect(dash.prefs).toMatchObject({ keys: false, panel: 700 });
 
   // The server has them: another workspace's old values change nothing.
   const dash2 = createDashboardPrefs(async () => ({ prefs: { keys: true, panel: 300 } }), timers);
@@ -81,6 +87,40 @@ test("a workspace's keys and panel from before are read once, as defaults, when 
   const none = createLayoutPrefs(async () => ({ prefs: { layout: {} } }), timers);
   await none.load();
   expect(none.legacy()).toEqual({ keys: undefined, panel: undefined });
+});
+
+test("a workspace's old values never replace what the operator chose in this document", async () => {
+  vi.useFakeTimers();
+  const writes: unknown[] = [];
+  const dash = createDashboardPrefs(async (_m, params) => {
+    const set = (params as { set?: unknown }).set;
+    if (set) writes.push(set);
+    return { prefs: {} };
+  }, timers);
+  await dash.load();
+  dash.setKeys(false);
+  dash.setPanel(520);
+  dash.adopt({ keys: true, panel: 900 });
+  expect(dash.prefs).toMatchObject({ keys: false, panel: 520 });
+  await vi.advanceTimersByTimeAsync(WRITE_DELAY_MS);
+  expect(writes).toEqual([{ keys: false, panel: 520 }]);
+});
+
+test("the page's own write of the last workspace stores no default for keys or panel", async () => {
+  vi.useFakeTimers();
+  const writes: unknown[] = [];
+  const dash = createDashboardPrefs(async (_m, params) => {
+    const set = (params as { set?: unknown }).set;
+    if (set) writes.push(set);
+    return { prefs: { keys: "junk" } };
+  }, timers);
+  await dash.load();
+  dash.setLast("946d4617aa702870");
+  await vi.advanceTimersByTimeAsync(WRITE_DELAY_MS);
+  expect(writes).toEqual([{ last: "946d4617aa702870" }]);
+  // Nothing established for keys: a workspace's old value is still taken.
+  dash.adopt({ keys: false });
+  expect(dash.prefs.keys).toBe(false);
 });
 
 test("a reset forgets dragged positions; the views read both places as one", async () => {
