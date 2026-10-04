@@ -10,6 +10,7 @@ import { decodeTaskCard, type TaskCard } from "../protocol";
 import { Linked } from "../text";
 import { AgentLink } from "./MessagePanel";
 import { PanelHead } from "./SidePanel";
+import { waiting } from "./waiting";
 
 export function TaskPanel(props: { id: string }) {
   const app = useApp();
@@ -31,7 +32,7 @@ export function TaskPanel(props: { id: string }) {
     }
   };
   // On open, and on every `task` push for it (its fields change).
-  createEffect(on(() => [props.id, JSON.stringify(local() ?? null)], () => void fetch()));
+  createEffect(on(() => [props.id, JSON.stringify(local() ?? null), link.live()], () => void fetch()));
   createEffect(on(app.ui.refreshTick, () => void fetch(), { defer: true }));
   const task = () => local() ?? card()?.task;
   const copy = (value: string) => navigator.clipboard?.writeText(value).then(() => ui.setStatus(`copied ${value}`), () => ui.setStatus("could not copy", true));
@@ -40,7 +41,7 @@ export function TaskPanel(props: { id: string }) {
       <PanelHead title={`task ${props.id}`}>
         <button onClick={() => ui.setView("tasks")} title="the task graph (t)">graph</button>
       </PanelHead>
-      <Show when={task()} fallback={<p class="pad muted">{error() ?? "loading…"}</p>}>
+      <Show when={task()} fallback={<p class="pad muted">{error() ?? waiting(link, "loading…")}</p>}>
         {(t) => (
           <div class="pad scroll" tabindex="0" data-focus-first>
             <h3 class="task-title">{t().title}</h3>
