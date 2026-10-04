@@ -574,6 +574,7 @@ the team again to use jj; workspace.vcs: git silences this."
             let path = bin.join("jj");
             std::fs::write(&path, format!("#!/bin/sh\necho '{says}'\n")).unwrap();
             std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o755)).unwrap();
+            jj::tests::runnable(&path);
             path
         };
         let new = fake("new", "jj 0.44.0");

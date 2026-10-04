@@ -131,6 +131,8 @@ enum Operation {
     Commit,
     CherryPick,
     Merge,
+    /// The integration run: its merges, then one export.
+    Integrate,
 }
 
 impl Operation {
@@ -139,6 +141,7 @@ impl Operation {
             Operation::Commit => "commit",
             Operation::CherryPick => "cherry-pick",
             Operation::Merge => "merge",
+            Operation::Integrate => "integration",
         }
     }
 }
@@ -612,15 +615,48 @@ impl Jj {
     }
 
     /// The publish phase: the bookmark follows the new commit, and git sees
-    /// it. A ref git could not write is a warning of jj's (exit 0); the next
-    /// export retries it.
+    /// it.
     fn publish(&self, dir: &Path, who: &str, bookmark: &str) -> Result<()> {
         self.out(dir, who, &["bookmark", "set", bookmark, "-r", "@-"])?;
-        self.export(dir, who)
+        self.export(dir, who, bookmark)
     }
 
-    fn export(&self, dir: &Path, who: &str) -> Result<()> {
-        self.out(dir, who, &["git", "export"]).map(drop)
+    /// `git export`, then whether git has `bookmark` where jj has it. A ref
+    /// git could not write is only a warning of jj's (exit 0): it is said
+    /// besides the operation's result, and the next export retries it.
+    fn export(&self, dir: &Path, who: &str, bookmark: &str) -> Result<()> {
+        // The handle has no working copy.
+        let args: &[&str] = if dir == self.handle {
+            &["--ignore-working-copy", "git", "export"]
+        } else {
+            &["git", "export"]
+        };
+        let mut cmd = self.cmd(dir, who);
+        let output = Self::run(&mut cmd, args)?;
+        let stderr = text(&output.stderr);
+        if !output.status.success() {
+            bail!("jj git export failed: {stderr}");
+        }
+        let pending = self.ids(
+            dir,
+            who,
+            &format!(
+                "present(bookmarks(exact:\"{bookmark}\")) ~ remote_bookmarks(exact:\"{bookmark}\", \
+exact:\"git\")"
+            ),
+        )?;
+        if !pending.is_empty() {
+            let why = stderr
+                .lines()
+                .find(|l| l.contains(&format!("{bookmark}@git")))
+                .map(|l| format!(" ({})", l.trim()))
+                .unwrap_or_default();
+            super::warn(format!(
+                "{bookmark} is not exported to git: git still has its previous commit{why}; the \
+next export retries it"
+            ));
+        }
+        Ok(())
     }
 
     /// Undo what a conflicted (or empty) cherry-pick or merge did; the
@@ -646,7 +682,7 @@ impl Jj {
                 }
                 Ok(())
             }
-            Operation::Commit => Ok(()),
+            Operation::Commit | Operation::Integrate => Ok(()),
         }
     }
 
@@ -680,7 +716,7 @@ status"
         };
         self.remove_ref_lock(bookmark);
         if found.commit == parent {
-            if self.export(dir, who).is_err() {
+            if self.export(dir, who, bookmark).is_err() {
                 return failed();
             }
             return match op {
@@ -693,7 +729,7 @@ in the working copy"
                 }
             };
         }
-        let undo = op != Operation::Commit
+        let undo = matches!(op, Operation::CherryPick | Operation::Merge)
             && (found.conflict || (op == Operation::CherryPick && found.empty));
         if undo {
             if !found.bookmarks.is_empty() {
@@ -703,7 +739,7 @@ points at the result; it was left as it is, check jj status"
                 );
             }
             if self.roll_back(dir, who, op, &found, parent).is_err()
-                || self.export(dir, who).is_err()
+                || self.export(dir, who, bookmark).is_err()
             {
                 return failed();
             }
@@ -1135,7 +1171,7 @@ README)",
         beneath::Root::open(&path)
             .and_then(|root| root.write_new(".git", GUARD))
             .with_context(|| format!("writing the git guard in {}", path.display()))?;
-        self.repo(&["git", "export"])?;
+        self.export(&self.handle, CREW, &branch)?;
         let workspace = Workspace {
             path,
             branch,
@@ -1183,30 +1219,8 @@ was rearranged by hand, check jj log",
                     made.short
                 );
             }
-            self.export(dir, agent)?;
-            let template = format!(
-                "{INFO} ++ if(self.contained_in(\"remote_bookmarks(exact:\\\"{bookmark}\\\", \
-exact:\\\"git\\\")\"), \"exported\", \"pending\") ++ \"\\n\""
-            );
-            let out = self.out(
-                dir,
-                agent,
-                &[
-                    "--ignore-working-copy",
-                    "log",
-                    "--no-graph",
-                    "-r",
-                    "@-",
-                    "-T",
-                    &template,
-                ],
-            )?;
-            if out.lines().nth(4).map(str::trim) == Some("pending") {
-                super::warn(format!(
-                    "{bookmark} is not exported to git yet; the next export retries it"
-                ));
-            }
-            commit_info(&out, &bookmark)
+            self.export(dir, agent, &bookmark)?;
+            self.info(dir, agent, &bookmark)
         })
     }
 
@@ -1366,27 +1380,51 @@ exact:\\\"git\\\")\"), \"exported\", \"pending\") ++ \"\\n\""
         on_step: &mut dyn FnMut(&IntegrationStep),
     ) -> Result<Vec<IntegrationStep>> {
         let dir = &workspace.path;
+        // Where agents/integration was before this run, for the recovery of
+        // its publication.
+        let start = self.state(dir, CREW)?.commit;
         let mut steps = Vec::new();
-        for agent in agents {
-            let branch = git::branch_for(agent);
-            let Some(outcome) = self.merge_into(dir, CREW, INTEGRATION_BRANCH, &branch, false)?
-            else {
-                continue;
-            };
-            if outcome.ok && outcome.text == "Already up to date." {
-                continue;
+        let mut run = || -> Result<()> {
+            for agent in agents {
+                let branch = git::branch_for(agent);
+                let Some(outcome) =
+                    self.merge_into(dir, CREW, INTEGRATION_BRANCH, &branch, false)?
+                else {
+                    continue;
+                };
+                if outcome.ok && outcome.text == "Already up to date." {
+                    continue;
+                }
+                let step = IntegrationStep {
+                    agent: agent.clone(),
+                    outcome,
+                };
+                on_step(&step);
+                steps.push(step);
             }
-            let step = IntegrationStep {
-                agent: agent.clone(),
-                outcome,
-            };
-            on_step(&step);
-            steps.push(step);
+            Ok(())
+        };
+        if let Err(e) = run() {
+            // What merged before the failure is on the bookmark: git sees it
+            // too (a timeout's recovery has exported already).
+            if !timed_out(&e) {
+                let _ = self.export(dir, CREW, INTEGRATION_BRANCH);
+            }
+            return Err(e);
         }
-        self.export(dir, CREW)?;
+        // The publication: one export for the whole run, recovered from like
+        // any other phase when it times out.
+        self.guarded(
+            dir,
+            CREW,
+            INTEGRATION_BRANCH,
+            Operation::Integrate,
+            &start,
+            || self.export(dir, CREW, INTEGRATION_BRANCH),
+        )?;
         Ok(steps)
     }
 }
 
 #[cfg(test)]
-mod tests;
+pub(crate) mod tests;

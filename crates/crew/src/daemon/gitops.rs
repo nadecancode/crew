@@ -282,16 +282,21 @@ impl Daemon {
         Ok(dir)
     }
 
-    /// Run a blocking git operation, one at a time per daemon.
+    /// Run a blocking git operation, one at a time per daemon. The job
+    /// holds the lock, not this request: one whose client went away runs
+    /// on, and the next operation waits until it is done.
     async fn git<T: Send + 'static>(
         &self,
         f: impl FnOnce() -> anyhow::Result<T> + Send + 'static,
     ) -> Result<T, RpcError> {
-        let _guard = self.git_lock.lock().await;
-        tokio::task::spawn_blocking(f)
-            .await
-            .map_err(git_error)?
-            .map_err(|e| git_error(format!("{e:#}")))
+        let guard = self.git_lock.clone().lock_owned().await;
+        tokio::task::spawn_blocking(move || {
+            let _guard = guard;
+            f()
+        })
+        .await
+        .map_err(git_error)?
+        .map_err(|e| git_error(format!("{e:#}")))
     }
 
     /// Run a blocking sequence of git operations on `agent`'s behalf, one
@@ -759,7 +764,28 @@ mod tests {
         request.abort();
         let _ = request.await;
         assert!(held(&daemon), "the lease went with the request");
+        // Nor does another operation: the job, not the request, holds the
+        // daemon's VCS lock.
+        let ran = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let next = {
+            let (daemon, ran) = (daemon.clone(), ran.clone());
+            tokio::spawn(async move {
+                daemon
+                    .agent_git("a", move || {
+                        ran.store(true, Ordering::SeqCst);
+                        Ok(())
+                    })
+                    .await
+            })
+        };
+        tokio::time::sleep(std::time::Duration::from_millis(200)).await;
+        assert!(
+            !ran.load(Ordering::SeqCst),
+            "a second operation ran beside the cancelled request's job"
+        );
         release.send(()).unwrap();
+        next.await.unwrap().unwrap();
+        assert!(ran.load(Ordering::SeqCst));
         until_held(daemon.clone(), false).await;
         // ...and the operation still ends in its terminal event, with the
         // start's op.
