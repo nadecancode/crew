@@ -294,7 +294,7 @@ pub struct Inner {
     /// Numbers VCS operations for their events (`v<n>`).
     pub(crate) vcs_ops: std::sync::atomic::AtomicU64,
     /// Git operations run one at a time.
-    pub(crate) git_lock: tokio::sync::Mutex<()>,
+    pub(crate) git_lock: Arc<tokio::sync::Mutex<()>>,
     /// Planning and applying the plan is one critical section, so two
     /// planners can never act on the same snapshot.
     pub(crate) plan_lock: tokio::sync::Mutex<()>,
@@ -947,7 +947,7 @@ pub async fn start(options: DaemonOptions) -> Result<Running> {
         stops: Mutex::new(HashMap::new()),
         vcs: RwLock::new(None),
         vcs_ops: std::sync::atomic::AtomicU64::new(1),
-        git_lock: tokio::sync::Mutex::new(()),
+        git_lock: Arc::new(tokio::sync::Mutex::new(())),
         plan_lock: tokio::sync::Mutex::new(()),
         team_lock: tokio::sync::Mutex::new(()),
         next_conn: std::sync::atomic::AtomicU64::new(1),

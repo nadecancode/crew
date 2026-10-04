@@ -851,6 +851,7 @@ exec "{real}" "$@"
         )
         .unwrap();
         std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o755)).unwrap();
+        runnable(&script);
         Self {
             _dir: temp,
             script,
@@ -1045,4 +1046,102 @@ fn a_conflicted_result_that_already_carries_the_bookmark_is_not_abandoned() {
     assert!(err.to_string().contains("left as it is"), "{err:#}");
     assert_eq!(p.head(&a), made);
     assert_eq!(p.bookmark("a").as_deref(), Some(made.as_str()));
+}
+
+#[test]
+fn an_integration_cut_in_its_export_is_kept_and_published() {
+    let Some((p, hang)) = hanging_project() else {
+        return;
+    };
+    let (_, _, _, _, _) = rivals(&p);
+    let (integration, _) =
+        p.jj.add_workspace(&p.worktrees, INTEGRATION_DIR, "HEAD")
+            .unwrap();
+    p.jj.populate(&integration).unwrap();
+    let before = p.git(&["rev-parse", "refs/heads/agents/integration"]);
+    // An export killed earlier left git's lock behind: a plain export would
+    // skip the ref with a warning and exit 0.
+    let lock = p.ws.join(".git/refs/heads/agents/integration.lock");
+    std::fs::write(&lock, "").unwrap();
+    hang.arm("before", "export");
+    let agents: Vec<String> = ["a", "b"].iter().map(|s| s.to_string()).collect();
+    let err =
+        p.jj.merge_agents(&integration, &agents, &mut |_| {})
+            .unwrap_err();
+    let text = format!("{err:#}");
+    assert!(text.contains("the result was kept"), "{text}");
+    let head = p.head(&integration);
+    assert_ne!(head, before);
+    assert!(text.contains(&head[..8]), "{text}");
+    let kept = err.downcast_ref::<git::Kept>().expect("the kept commit");
+    assert_eq!(kept.commit, head);
+    assert!(!lock.exists(), "the stale lock is still there");
+    assert_eq!(p.git(&["rev-parse", "refs/heads/agents/integration"]), head);
+    assert!(integration.path.join("bnew.txt").exists());
+}
+
+#[test]
+fn an_export_git_refuses_is_said_by_every_publisher() {
+    let Some(p) = project() else { return };
+    let (t1, t2, _) = ahead(&p);
+    crate::vcs::take_warnings();
+    let lock = |id: &str| p.ws.join(format!(".git/refs/heads/agents/{id}.lock"));
+    let said = |bookmark: &str| {
+        let warnings = crate::vcs::take_warnings();
+        assert!(
+            warnings
+                .iter()
+                .any(|w| w.starts_with(&format!("{bookmark} is not exported to git"))),
+            "{bookmark}: {warnings:?}"
+        );
+    };
+    // Merge.
+    let before = p.branch("t1");
+    std::fs::write(lock("t1"), "").unwrap();
+    let merged = p.jj.merge(&t1.path, "t1", "agents/t2").unwrap();
+    assert!(merged.ok);
+    assert_eq!(p.branch("t1"), before, "git took the ref after all");
+    said("agents/t1");
+    // Cherry-pick, and commit.
+    write(&t2.path, "more.txt", "more\n");
+    let c = p.jj.commit_all(&t2.path, "t2", "more").unwrap();
+    assert!(crate::vcs::take_warnings().is_empty());
+    assert!(p.jj.cherry_pick(&t1.path, "t1", &c.sha).unwrap().outcome.ok);
+    said("agents/t1");
+    write(&t1.path, "own.txt", "own\n");
+    p.jj.commit_all(&t1.path, "t1", "own").unwrap();
+    said("agents/t1");
+    // Integration.
+    let (integration, _) =
+        p.jj.add_workspace(&p.worktrees, INTEGRATION_DIR, "HEAD")
+            .unwrap();
+    p.jj.populate(&integration).unwrap();
+    crate::vcs::take_warnings();
+    std::fs::write(lock("integration"), "").unwrap();
+    let steps =
+        p.jj.merge_agents(&integration, &["t2".to_string()], &mut |_| {})
+            .unwrap();
+    assert_eq!(steps.len(), 1);
+    said("agents/integration");
+    // With the locks gone the next export catches up, and says nothing.
+    std::fs::remove_file(lock("t1")).unwrap();
+    write(&t1.path, "last.txt", "last\n");
+    let last = p.jj.commit_all(&t1.path, "t1", "last").unwrap();
+    assert_eq!(p.branch("t1"), last.sha);
+    assert!(crate::vcs::take_warnings().is_empty());
+}
+
+/// Wait until the script at `path`, just written, can be run: a process
+/// another test thread forked while the file was open for writing keeps it
+/// busy (ETXTBSY) until that process runs its own program.
+pub(crate) fn runnable(path: &Path) {
+    for _ in 0..500 {
+        match Command::new(path).arg("--version").output() {
+            Err(e) if e.raw_os_error() == Some(libc::ETXTBSY) => {
+                std::thread::sleep(std::time::Duration::from_millis(10))
+            }
+            _ => return,
+        }
+    }
+    panic!("{} stayed busy", path.display());
 }
