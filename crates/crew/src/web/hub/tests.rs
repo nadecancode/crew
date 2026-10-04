@@ -187,6 +187,30 @@ impl Stand {
                     json!({"id": id, "result": summary})
                 }
                 Some("ping") => json!({"id": id, "result": {"pong": true}}),
+                Some("reviewer_burst") => {
+                    let mut bytes = Vec::new();
+                    for i in 0..513 {
+                        bytes.extend_from_slice(reviewer_burst_frame(i).as_bytes());
+                        bytes.push(b'\n');
+                    }
+                    // The last frame is completed only after another browser
+                    // request, exercising a cancelled read after the batches.
+                    bytes.extend_from_slice(b"{\"id\":99,");
+                    if write.write_all(&bytes).await.is_err() {
+                        return;
+                    }
+                    continue;
+                }
+                Some("reviewer_finish_burst") => {
+                    if write
+                        .write_all(b"\"result\":{\"pong\":true}}\n")
+                        .await
+                        .is_err()
+                    {
+                        return;
+                    }
+                    continue;
+                }
                 Some("flood") => {
                     let line = json!({"push": {"kind": "noise", "data": "x".repeat(32 * 1024)}})
                         .to_string();
@@ -1425,6 +1449,48 @@ fn web_conns(fake: &Fake, pid: u32) -> Vec<u64> {
 /// `pid` received a `hello` on its browser connection `conn`.
 fn said_hello(fake: &Fake, pid: u32, conn: u64) -> bool {
     fake.methods(pid, conn).iter().any(|m| m == "hello")
+}
+
+fn reviewer_burst_frame(sequence: usize) -> String {
+    // Whitespace and multibyte UTF-8 must survive the unparsed pipe too.
+    format!(
+        "  {}  ",
+        json!({"push": {"kind": "noise", "data": {"sequence": sequence, "text": "déjà 文"}}})
+    )
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn reviewer_workspace_batches_preserve_frames_and_a_partial_tail() {
+    let fake = Fake::new();
+    fake.start("a", 100);
+    let served = Served::new(&fake).await;
+    served.open("a").await;
+    let token = served.pair().await;
+    let mut ws = served.workspace(&token, "a").await;
+    ws.send(Message::text(
+        json!({"id": 2, "method": "reviewer_burst"}).to_string(),
+    ))
+    .await
+    .unwrap();
+    tokio::time::timeout(Duration::from_secs(5), async {
+        for sequence in 0..513 {
+            loop {
+                let frame = ws.next().await.unwrap().unwrap();
+                if let Message::Text(text) = frame {
+                    assert_eq!(text.as_str(), reviewer_burst_frame(sequence));
+                    break;
+                }
+                assert!(matches!(frame, Message::Ping(_) | Message::Pong(_)));
+            }
+        }
+    })
+    .await
+    .expect("every frame, in order, across more than two batches");
+    tokio::time::sleep(Duration::from_millis(20)).await;
+    let tail = call(&mut ws, 99, "reviewer_finish_burst", json!({})).await;
+    assert_eq!(tail, json!({"id": 99, "result": {"pong": true}}));
+    let pong = call(&mut ws, 100, "ping", json!({})).await;
+    assert_eq!(pong["result"]["pong"], true);
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
