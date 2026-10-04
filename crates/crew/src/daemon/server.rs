@@ -1,9 +1,12 @@
-//! The daemon's Unix-socket server: connection handling and authentication.
+//! The daemon's servers: the Unix socket, and the protocol both transports
+//! speak.
 //!
-//! Access control has three layers: the socket lives in a `0700` directory
-//! and is `0600`; the peer's uid is checked on accept; and a connection that
-//! claims to be an agent must present that agent's token. The daemon stamps
-//! the sender on everything, so an agent cannot speak as another agent.
+//! Access control on the socket has three layers: the socket lives in a
+//! `0700` directory and is `0600`; the peer's uid is checked on accept; and a
+//! connection that claims to be an agent must present that agent's token.
+//! The daemon stamps the sender on everything, so an agent cannot speak as
+//! another agent. The web dashboard's WebSocket (`crate::web`) carries the
+//! same frames through the same [`Session`], with its own checks in front.
 
 use crew_core::paths::uid;
 use crew_core::rpc::{Call, Push, Request, Role, RpcError, ServerFrame};
@@ -16,6 +19,15 @@ use tokio::sync::{broadcast, mpsc};
 use tokio::task::JoinHandle;
 
 use super::Daemon;
+
+/// What carries a connection's frames.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum Transport {
+    /// The daemon's Unix socket: one JSON object per line.
+    Socket,
+    /// The web dashboard's WebSocket: one JSON object per text message.
+    Web,
+}
 
 /// Who a connection has authenticated as.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -44,16 +56,159 @@ impl Who {
 
 pub(crate) struct Conn {
     pub id: u64,
+    pub transport: Transport,
     pub who: Option<Who>,
+    /// On the web transport: the session whose token this connection
+    /// presented.
+    pub web_session: Option<u64>,
     pub tx: mpsc::Sender<ServerFrame>,
-    /// Start streaming pushes once the pending response has been written.
-    pub subscribe_after_reply: bool,
+    /// A subscription to start once the pending response has been queued:
+    /// from now (`subscribe`), or from a receiver taken before a snapshot was
+    /// captured (the barrier).
+    pub subscribe_after_reply: Option<broadcast::Receiver<Push>>,
+    /// The forwarder in `stream_task` streams the daemon's pushes.
+    pub subscribed: bool,
     /// This connection is an agent's delivery channel.
     pub listening: Option<String>,
     /// Forwarder for pushes or terminal output on this connection.
     pub stream_task: Option<JoinHandle<()>>,
     /// Agent whose terminal this connection is attached to.
     pub attached: Option<String>,
+    /// The connection is to be closed once the pending response is sent (a
+    /// web `hello` beyond the limit of connections).
+    pub close_after_reply: bool,
+    /// Test hook: how long to wait between capturing a snapshot and queueing
+    /// its reply, the window the barrier closes.
+    #[cfg(test)]
+    pub after_capture: Option<std::time::Duration>,
+}
+
+/// One connection's protocol state, whatever carries its frames.
+pub(crate) struct Session {
+    daemon: Daemon,
+    conn: Conn,
+}
+
+impl Session {
+    /// A new connection, and the frames for it (responses and pushes) in the
+    /// order they must be written.
+    pub fn new(daemon: &Daemon, transport: Transport) -> (Self, mpsc::Receiver<ServerFrame>) {
+        let (tx, rx) = mpsc::channel::<ServerFrame>(1024);
+        let conn = Conn {
+            id: daemon
+                .next_conn
+                .fetch_add(1, std::sync::atomic::Ordering::Relaxed),
+            transport,
+            who: None,
+            web_session: None,
+            tx,
+            subscribe_after_reply: None,
+            subscribed: false,
+            listening: None,
+            stream_task: None,
+            attached: None,
+            close_after_reply: false,
+            #[cfg(test)]
+            after_capture: None,
+        };
+        let session = Self {
+            daemon: daemon.clone(),
+            conn,
+        };
+        (session, rx)
+    }
+
+    /// Handle one request as received (one line, one text message): parse,
+    /// dispatch, queue the response, start the subscription after the reply.
+    /// A `snapshot` on a subscribed connection is a barrier in the push
+    /// stream. Malformed JSON is answered with `invalid`. `false`: the writer
+    /// is gone, stop reading.
+    pub async fn request(&mut self, text: &str) -> bool {
+        let text = text.trim();
+        if text.is_empty() {
+            return true;
+        }
+        let frame = match serde_json::from_str::<Request>(text) {
+            Ok(request) => {
+                let id = request.id;
+                // Input for an attached terminal is not acknowledged.
+                let silent = matches!(
+                    request.call,
+                    Call::AttachInput { .. } | Call::AttachResize { .. }
+                );
+                #[cfg(test)]
+                let snapshot = matches!(request.call, Call::Snapshot { .. });
+                let result = self.daemon.dispatch(&mut self.conn, request.call).await;
+                #[cfg(test)]
+                if let (true, Some(wait)) = (snapshot, self.conn.after_capture) {
+                    tokio::time::sleep(wait).await;
+                }
+                match result {
+                    Ok(_) if silent => {
+                        self.after_reply();
+                        return true;
+                    }
+                    Ok(result) => ServerFrame::ok(id, result),
+                    Err(error) => ServerFrame::err(id, error),
+                }
+            }
+            Err(e) => {
+                // Malformed request: answer with the id if one can be salvaged.
+                let id = serde_json::from_str::<Value>(text)
+                    .ok()
+                    .and_then(|v| v.get("id").and_then(Value::as_u64))
+                    .unwrap_or(0);
+                ServerFrame::err(id, RpcError::invalid(format!("malformed request: {e}")))
+            }
+        };
+        if self.conn.tx.send(frame).await.is_err() {
+            return false;
+        }
+        self.after_reply();
+        true
+    }
+
+    /// Start the subscription a request asked for, now that its reply is
+    /// queued: the reply precedes every push of it.
+    fn after_reply(&mut self) {
+        if let Some(rx) = self.conn.subscribe_after_reply.take() {
+            self.daemon.start_subscription(&mut self.conn, rx);
+        }
+    }
+
+    /// Queue a frame that answers no request (an oversized message).
+    pub async fn send(&self, frame: ServerFrame) -> bool {
+        self.conn.tx.send(frame).await.is_ok()
+    }
+
+    pub fn authenticated(&self) -> bool {
+        self.conn.who.is_some()
+    }
+
+    /// The last reply asked for the connection to be closed.
+    pub fn close_requested(&self) -> bool {
+        self.conn.close_after_reply
+    }
+
+    /// The web session this connection presented, once authenticated.
+    pub fn web_session(&self) -> Option<u64> {
+        self.conn.web_session
+    }
+
+    #[cfg(test)]
+    pub fn delay_after_capture(&mut self, wait: std::time::Duration) {
+        self.conn.after_capture = Some(wait);
+    }
+
+    /// The connection ended: stop its stream task, release its listener slot.
+    pub fn close(mut self) {
+        if let Some(task) = self.conn.stream_task.take() {
+            task.abort();
+        }
+        if let Some(agent) = self.conn.listening.take() {
+            self.daemon.listener_gone(&agent, self.conn.id);
+        }
+    }
 }
 
 pub(crate) async fn accept_loop(daemon: Daemon, listener: UnixListener) {
@@ -87,7 +242,7 @@ async fn handle(daemon: Daemon, stream: UnixStream) {
         }
     }
     let (read, mut write) = stream.into_split();
-    let (tx, mut rx) = mpsc::channel::<ServerFrame>(1024);
+    let (mut session, mut rx) = Session::new(&daemon, Transport::Socket);
     let writer = tokio::spawn(async move {
         while let Some(frame) = rx.recv().await {
             let Ok(mut line) = serde_json::to_vec(&frame) else {
@@ -101,17 +256,6 @@ async fn handle(daemon: Daemon, stream: UnixStream) {
         let _ = write.shutdown().await;
     });
 
-    let mut conn = Conn {
-        id: daemon
-            .next_conn
-            .fetch_add(1, std::sync::atomic::Ordering::Relaxed),
-        who: None,
-        tx,
-        subscribe_after_reply: false,
-        listening: None,
-        stream_task: None,
-        attached: None,
-    };
     let mut reader = BufReader::new(read);
     let mut buf: Vec<u8> = Vec::new();
     loop {
@@ -124,8 +268,7 @@ async fn handle(daemon: Daemon, stream: UnixStream) {
             Ok(_) => {}
         }
         if buf.len() > MAX_FRAME_BYTES {
-            let _ = conn
-                .tx
+            let _ = session
                 .send(ServerFrame::err(
                     0,
                     RpcError::too_large(format!("request exceeds {MAX_FRAME_BYTES} bytes")),
@@ -134,48 +277,11 @@ async fn handle(daemon: Daemon, stream: UnixStream) {
             break;
         }
         let line = String::from_utf8_lossy(&buf);
-        let line = line.trim();
-        if line.is_empty() {
-            continue;
-        }
-        let frame = match serde_json::from_str::<Request>(line) {
-            Ok(request) => {
-                let id = request.id;
-                // Input for an attached terminal is not acknowledged.
-                let silent = matches!(
-                    request.call,
-                    Call::AttachInput { .. } | Call::AttachResize { .. }
-                );
-                match daemon.dispatch(&mut conn, request.call).await {
-                    Ok(_) if silent => continue,
-                    Ok(result) => ServerFrame::ok(id, result),
-                    Err(error) => ServerFrame::err(id, error),
-                }
-            }
-            Err(e) => {
-                // Malformed request: answer with the id if one can be salvaged.
-                let id = serde_json::from_str::<Value>(line)
-                    .ok()
-                    .and_then(|v| v.get("id").and_then(Value::as_u64))
-                    .unwrap_or(0);
-                ServerFrame::err(id, RpcError::invalid(format!("malformed request: {e}")))
-            }
-        };
-        if conn.tx.send(frame).await.is_err() {
+        if !session.request(&line).await {
             break;
         }
-        if std::mem::take(&mut conn.subscribe_after_reply) {
-            // Subscribing only now guarantees the response precedes any push.
-            daemon.start_subscription(&mut conn);
-        }
     }
-    if let Some(task) = conn.stream_task.take() {
-        task.abort();
-    }
-    if let Some(agent) = conn.listening.take() {
-        daemon.listener_gone(&agent, conn.id);
-    }
-    drop(conn);
+    session.close();
     let _ = writer.await;
 }
 
@@ -214,12 +320,23 @@ impl Daemon {
         }
     }
 
-    /// Start streaming pushes to a connection.
-    pub(crate) fn start_subscription(&self, conn: &mut Conn) {
+    /// Stop the connection's forwarder and wait until its task has ended,
+    /// so nothing of the old stream can be queued after this returns.
+    pub(crate) async fn stop_stream(&self, conn: &mut Conn) {
+        conn.subscribed = false;
+        if let Some(task) = conn.stream_task.take() {
+            task.abort();
+            let _ = task.await;
+        }
+    }
+
+    /// Stream the pushes `rx` receives to a connection, in place of whatever
+    /// it streamed before.
+    pub(crate) fn start_subscription(&self, conn: &mut Conn, mut rx: broadcast::Receiver<Push>) {
         if let Some(task) = conn.stream_task.take() {
             task.abort();
         }
-        let mut rx = self.push.subscribe();
+        conn.subscribed = true;
         let tx = conn.tx.clone();
         conn.stream_task = Some(tokio::spawn(async move {
             loop {
@@ -234,5 +351,314 @@ impl Daemon {
                 }
             }
         }));
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crew_core::rpc::Snapshot;
+    use std::sync::atomic::{AtomicBool, Ordering};
+    use std::sync::Arc;
+    use std::time::Duration;
+
+    async fn daemon() -> (tempfile::TempDir, super::super::Running) {
+        let temp = tempfile::tempdir().unwrap();
+        let running = super::super::start(super::super::DaemonOptions {
+            workspace: temp.path().to_path_buf(),
+            crew_bin: std::env::current_exe().unwrap(),
+        })
+        .await
+        .unwrap();
+        let agent: crew_core::Agent = serde_json::from_value(serde_json::json!({
+            "id": "a", "name": "a", "role": "work", "status": "working", "runtime": "shell",
+            "workdir": temp.path().to_str().unwrap(), "backend": "pty", "last_activity_at": 0
+        }))
+        .unwrap();
+        running.daemon.model().agents.push(agent);
+        (temp, running)
+    }
+
+    fn request(id: u64, method: &str, params: Value) -> String {
+        serde_json::json!({"id": id, "method": method, "params": params}).to_string()
+    }
+
+    async fn operator(daemon: &Daemon) -> (Session, mpsc::Receiver<ServerFrame>) {
+        let (mut session, mut rx) = Session::new(daemon, Transport::Socket);
+        let hello = serde_json::json!({"role": "operator", "token": daemon.operator_token,
+            "client": "test", "protocol": crew_core::rpc::PROTOCOL_VERSION});
+        assert!(session.request(&request(1, "hello", hello)).await);
+        let reply = rx.recv().await.unwrap();
+        assert!(reply.result.is_some(), "{reply:?}");
+        (session, rx)
+    }
+
+    /// `n` of an agent's activity `n=<n>`.
+    fn n_of(activity: &str) -> u64 {
+        activity
+            .strip_prefix("n=")
+            .and_then(|n| n.parse().ok())
+            .unwrap_or(0)
+    }
+
+    /// What a frame says about agent `a`: a push of it, or a snapshot reply.
+    #[derive(Debug, Clone, Copy, PartialEq)]
+    enum Seen {
+        Push(u64),
+        Reply(u64),
+        Resync,
+        Other,
+    }
+
+    fn seen(frame: &ServerFrame) -> Seen {
+        if let Some(push) = &frame.push {
+            return match push {
+                Push::Agent(agent) if agent.id == "a" => Seen::Push(n_of(&agent.activity)),
+                Push::Resync => Seen::Resync,
+                _ => Seen::Other,
+            };
+        }
+        match frame
+            .result
+            .as_ref()
+            .and_then(|r| serde_json::from_value::<Snapshot>(r.clone()).ok())
+        {
+            Some(snap) => Seen::Reply(
+                snap.agents
+                    .iter()
+                    .find(|a| a.id == "a")
+                    .map(|a| n_of(&a.activity))
+                    .unwrap_or(0),
+            ),
+            None => Seen::Other,
+        }
+    }
+
+    /// Changes agent `a` to `n=1` … `n=last`. `persist`: through
+    /// `update_agent` (stored, then pushed); otherwise straight into the
+    /// model and the push channel, for runs too long to store.
+    fn churn(daemon: &Daemon, last: u64, persist: bool) -> tokio::task::JoinHandle<()> {
+        let daemon = daemon.clone();
+        tokio::spawn(async move {
+            for n in 1..=last {
+                if persist {
+                    daemon.update_agent("a", |a| a.activity = format!("n={n}"));
+                } else {
+                    let agent = {
+                        let mut model = daemon.model();
+                        let agent = model.agents.iter_mut().find(|a| a.id == "a").unwrap();
+                        agent.activity = format!("n={n}");
+                        agent.clone()
+                    };
+                    daemon.push(Push::Agent(Box::new(agent)));
+                }
+                if n % 8 == 0 {
+                    tokio::task::yield_now().await;
+                }
+            }
+        })
+    }
+
+    /// The page's rule: discard pushes while a snapshot is in flight (one at
+    /// most), replace on the reply, apply what follows; a `resync` after
+    /// the reply asks again. Runs until `done` and the stream is quiet;
+    /// returns the frames seen and the state the page ends in.
+    async fn page(
+        session: &mut Session,
+        rx: &mut mpsc::UnboundedReceiver<ServerFrame>,
+        done: Arc<AtomicBool>,
+    ) -> (Vec<Seen>, u64) {
+        let mut frames = Vec::new();
+        let mut state = 0;
+        let mut id = 10;
+        let mut in_flight = false;
+        let mut asked = 0;
+        loop {
+            if !in_flight && (asked < 20 || done.load(Ordering::SeqCst) && asked < 21) {
+                id += 1;
+                asked += 1;
+                in_flight = true;
+                let params = serde_json::json!({"messages": 0, "events": 0});
+                assert!(session.request(&request(id, "snapshot", params)).await);
+            }
+            let frame = match tokio::time::timeout(Duration::from_millis(25), rx.recv()).await {
+                Ok(Some(frame)) => frame,
+                Ok(None) => break,
+                Err(_) if done.load(Ordering::SeqCst) && !in_flight => break,
+                Err(_) => continue,
+            };
+            let what = seen(&frame);
+            frames.push(what);
+            match what {
+                Seen::Reply(n) => {
+                    in_flight = false;
+                    state = n;
+                }
+                Seen::Push(n) if !in_flight => state = n,
+                Seen::Resync if !in_flight => {
+                    // Ask again at once.
+                    asked = asked.min(19);
+                }
+                _ => {}
+            }
+        }
+        (frames, state)
+    }
+
+    /// The connection's frames as its writer takes them: always read, so a
+    /// request never waits for room in the queue.
+    /// `stall`: it reads nothing for that long first, as a browser that
+    /// stopped reading would.
+    fn pump(
+        mut rx: mpsc::Receiver<ServerFrame>,
+        stall: Option<Duration>,
+    ) -> mpsc::UnboundedReceiver<ServerFrame> {
+        let (tx, out) = mpsc::unbounded_channel();
+        tokio::spawn(async move {
+            if let Some(stall) = stall {
+                tokio::time::sleep(stall).await;
+            }
+            while let Some(frame) = rx.recv().await {
+                if tx.send(frame).is_err() {
+                    break;
+                }
+            }
+        });
+        out
+    }
+
+    /// Checks 1 and 2 of notes/web-design.md §tests on one run's frames.
+    fn check_order(frames: &[Seen], last: u64) {
+        let mut pushes: Vec<u64> = Vec::new();
+        for frame in frames {
+            match *frame {
+                Seen::Reply(n) => {
+                    // 1: nothing before a reply is newer than it.
+                    assert!(
+                        pushes.iter().all(|p| *p <= n),
+                        "a push newer than the snapshot came before it: {pushes:?} then reply {n}"
+                    );
+                    pushes.clear();
+                }
+                Seen::Push(n) => {
+                    // 2: in order between two replies.
+                    assert!(
+                        pushes.last().is_none_or(|p| *p < n),
+                        "pushes out of order: {pushes:?} then {n}"
+                    );
+                    pushes.push(n);
+                }
+                _ => {}
+            }
+        }
+        let final_n = frames
+            .iter()
+            .rev()
+            .find_map(|f| match f {
+                Seen::Push(n) | Seen::Reply(n) => Some(*n),
+                _ => None,
+            })
+            .unwrap();
+        assert_eq!(final_n, last, "the run did not end with the final state");
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+    async fn snapshot_is_a_barrier() {
+        let (_temp, running) = daemon().await;
+        let daemon = running.daemon.clone();
+        for run in 0..200 {
+            let (mut session, mut rx) = operator(&daemon).await;
+            session.delay_after_capture(Duration::from_millis(1));
+            assert!(session.request(&request(2, "subscribe", Value::Null)).await);
+            assert!(rx.recv().await.unwrap().result.is_some());
+            let mut rx = pump(rx, None);
+            let start = n_of(&daemon.agent("a").unwrap().activity);
+            let last = start + 60;
+            let done = Arc::new(AtomicBool::new(false));
+            let churner = {
+                let (daemon, done) = (daemon.clone(), done.clone());
+                tokio::spawn(async move {
+                    for n in start + 1..=last {
+                        daemon.update_agent("a", |a| a.activity = format!("n={n}"));
+                        if n % 4 == 0 {
+                            tokio::task::yield_now().await;
+                        }
+                    }
+                    done.store(true, Ordering::SeqCst);
+                })
+            };
+            let (frames, state) = page(&mut session, &mut rx, done).await;
+            churner.await.unwrap();
+            check_order(&frames, last);
+            // 3: the page's rule ends in the daemon's final state.
+            assert_eq!(state, last, "run {run}: the page ended stale: {frames:?}");
+            session.close();
+        }
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+    async fn a_lagging_subscriber_resyncs_and_converges() {
+        let (_temp, running) = daemon().await;
+        let daemon = running.daemon.clone();
+        let (mut session, mut rx) = operator(&daemon).await;
+        session.delay_after_capture(Duration::from_millis(1));
+        assert!(session.request(&request(2, "subscribe", Value::Null)).await);
+        assert!(rx.recv().await.unwrap().result.is_some());
+        let mut rx = pump(rx, Some(Duration::from_millis(400)));
+        // More than the push channel and the connection's queue hold, while
+        // the page does not read.
+        let last = 8000;
+        let done = Arc::new(AtomicBool::new(false));
+        let churner = {
+            let (daemon, done) = (daemon.clone(), done.clone());
+            tokio::spawn(async move {
+                churn(&daemon, last, false).await.unwrap();
+                done.store(true, Ordering::SeqCst);
+            })
+        };
+        let (frames, state) = page(&mut session, &mut rx, done).await;
+        churner.await.unwrap();
+        assert!(
+            frames.contains(&Seen::Resync),
+            "the subscriber never lagged"
+        );
+        check_order(&frames, last);
+        assert_eq!(state, last);
+        session.close();
+    }
+
+    #[tokio::test]
+    async fn the_socket_behaviours_hold_through_the_session() {
+        let (_temp, running) = daemon().await;
+        let daemon = running.daemon.clone();
+        let (mut session, mut rx) = Session::new(&daemon, Transport::Socket);
+        // Before hello: unauthorized.
+        assert!(
+            session
+                .request(&request(3, "snapshot", serde_json::json!({})))
+                .await
+        );
+        let reply = rx.recv().await.unwrap();
+        assert_eq!(reply.id, Some(3));
+        assert_eq!(reply.error.unwrap().code, "unauthorized");
+        // Malformed: answered with the id that could be salvaged.
+        assert!(session.request(r#"{"id": 9, "method": "no_such"}"#).await);
+        let reply = rx.recv().await.unwrap();
+        assert_eq!(reply.id, Some(9));
+        assert_eq!(reply.error.unwrap().code, "invalid");
+        assert!(session.request("not json").await);
+        assert_eq!(rx.recv().await.unwrap().id, Some(0));
+        drop(session);
+        // Subscribing: the reply precedes every push.
+        let (mut session, mut rx) = operator(&daemon).await;
+        assert!(session.authenticated());
+        daemon.update_agent("a", |a| a.activity = "before".into());
+        assert!(session.request(&request(2, "subscribe", Value::Null)).await);
+        daemon.update_agent("a", |a| a.activity = "after".into());
+        let first = rx.recv().await.unwrap();
+        assert_eq!(first.id, Some(2));
+        let next = rx.recv().await.unwrap();
+        assert!(matches!(next.push, Some(Push::Agent(_))), "{next:?}");
+        session.close();
     }
 }

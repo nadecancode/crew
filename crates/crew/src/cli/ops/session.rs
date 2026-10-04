@@ -80,6 +80,12 @@ pub fn status(target: &Target, json: bool) -> Result<()> {
         println!("style      {style}");
     }
     println!("workspace  {}", s.workspace);
+    if !s.web.is_empty() {
+        println!(
+            "web        {}   (`crew web` gives a browser the way in)",
+            s.web
+        );
+    }
     println!(
         "daemon     pid {}, up {}",
         s.daemon_pid,
