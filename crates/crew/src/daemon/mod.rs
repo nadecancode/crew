@@ -612,6 +612,7 @@ impl Daemon {
                 .to_string(),
             vcs: s.vcs.clone(),
             vcs_note: s.vcs_note.clone(),
+            web: String::new(),
             socket_warning: self.socket_warning.clone(),
             daemon_started_at: self.started_at,
             team_started_at: s.team_started_at,

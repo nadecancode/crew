@@ -1,0 +1,1694 @@
+{
+  "agent_compact": [
+    {
+      "activity": "Edit src/lib.rs",
+      "backend": "herdr",
+      "backend_ref": "w2:p4",
+      "block_kind": null,
+      "branch": "agents/claude-1",
+      "compact_pending": false,
+      "compactions": 0,
+      "context": null,
+      "delivery": "socket",
+      "effort": "high",
+      "error": null,
+      "exit_code": null,
+      "fallback": null,
+      "id": "claude-1",
+      "inbox_total": 3,
+      "inbox_unread": 0,
+      "last_activity_at": 1759999998000,
+      "limit": null,
+      "model": "sonnet",
+      "model_name": "Sonnet 5.5",
+      "name": "claude-1",
+      "orchestrator": false,
+      "outbox_total": 2,
+      "parent": null,
+      "paused": false,
+      "pid": 4242,
+      "progress": 51,
+      "restarts": 0,
+      "role": "billing",
+      "running_model": "claude-sonnet-5-5",
+      "runtime": "claude",
+      "session_id": "0d73aa0a-bdaf-4916-8421-d1917fc3bf2a",
+      "started_at": 1759999246000,
+      "status": "working",
+      "subagents": 0,
+      "task": "implement billing",
+      "temporary": false,
+      "usage": {
+        "cache_creation_tokens": 31004,
+        "cache_read_tokens": 220448,
+        "input_tokens": 18230,
+        "output_tokens": 4112,
+        "turns": 9
+      },
+      "workdir": "/work/demo/.crew/worktrees/claude-1"
+    }
+  ],
+  "agent_focus": [
+    {
+      "ok": true
+    }
+  ],
+  "agent_input": [
+    {
+      "ok": true
+    }
+  ],
+  "agent_kill": [
+    {
+      "activity": "Edit src/lib.rs",
+      "backend": "herdr",
+      "backend_ref": "w2:p4",
+      "block_kind": null,
+      "branch": "agents/claude-1",
+      "compact_pending": false,
+      "compactions": 0,
+      "context": null,
+      "delivery": "socket",
+      "effort": "high",
+      "error": null,
+      "exit_code": null,
+      "fallback": null,
+      "id": "claude-1",
+      "inbox_total": 3,
+      "inbox_unread": 0,
+      "last_activity_at": 1759999998000,
+      "limit": null,
+      "model": "sonnet",
+      "model_name": "Sonnet 5.5",
+      "name": "claude-1",
+      "orchestrator": false,
+      "outbox_total": 2,
+      "parent": null,
+      "paused": false,
+      "pid": 4242,
+      "progress": 51,
+      "restarts": 0,
+      "role": "billing",
+      "running_model": "claude-sonnet-5-5",
+      "runtime": "claude",
+      "session_id": "0d73aa0a-bdaf-4916-8421-d1917fc3bf2a",
+      "started_at": 1759999246000,
+      "status": "stopped",
+      "subagents": 0,
+      "task": "implement billing",
+      "temporary": false,
+      "usage": {
+        "cache_creation_tokens": 31004,
+        "cache_read_tokens": 220448,
+        "input_tokens": 18230,
+        "output_tokens": 4112,
+        "turns": 9
+      },
+      "workdir": "/work/demo/.crew/worktrees/claude-1"
+    },
+    null
+  ],
+  "agent_output": [
+    {
+      "alive": true,
+      "text": "\u001b[1mcrew\u001b[0m $ cargo test\ntest result: ok. 12 passed"
+    }
+  ],
+  "agent_pause": [
+    {
+      "activity": "Edit src/lib.rs",
+      "backend": "herdr",
+      "backend_ref": "w2:p4",
+      "block_kind": null,
+      "branch": "agents/claude-1",
+      "compact_pending": false,
+      "compactions": 0,
+      "context": null,
+      "delivery": "socket",
+      "effort": "high",
+      "error": null,
+      "exit_code": null,
+      "fallback": null,
+      "id": "claude-1",
+      "inbox_total": 3,
+      "inbox_unread": 0,
+      "last_activity_at": 1759999998000,
+      "limit": null,
+      "model": "sonnet",
+      "model_name": "Sonnet 5.5",
+      "name": "claude-1",
+      "orchestrator": false,
+      "outbox_total": 2,
+      "parent": null,
+      "paused": true,
+      "pid": 4242,
+      "progress": 51,
+      "restarts": 0,
+      "role": "billing",
+      "running_model": "claude-sonnet-5-5",
+      "runtime": "claude",
+      "session_id": "0d73aa0a-bdaf-4916-8421-d1917fc3bf2a",
+      "started_at": 1759999246000,
+      "status": "working",
+      "subagents": 0,
+      "task": "implement billing",
+      "temporary": false,
+      "usage": {
+        "cache_creation_tokens": 31004,
+        "cache_read_tokens": 220448,
+        "input_tokens": 18230,
+        "output_tokens": 4112,
+        "turns": 9
+      },
+      "workdir": "/work/demo/.crew/worktrees/claude-1"
+    }
+  ],
+  "agent_restart": [
+    {
+      "activity": "Edit src/lib.rs",
+      "backend": "herdr",
+      "backend_ref": "w2:p4",
+      "block_kind": null,
+      "branch": "agents/claude-1",
+      "compact_pending": false,
+      "compactions": 0,
+      "context": null,
+      "delivery": "socket",
+      "effort": "high",
+      "error": null,
+      "exit_code": null,
+      "fallback": null,
+      "id": "claude-1",
+      "inbox_total": 3,
+      "inbox_unread": 0,
+      "last_activity_at": 1759999998000,
+      "limit": null,
+      "model": "sonnet",
+      "model_name": "Sonnet 5.5",
+      "name": "claude-1",
+      "orchestrator": false,
+      "outbox_total": 2,
+      "parent": null,
+      "paused": false,
+      "pid": 4242,
+      "progress": 51,
+      "restarts": 0,
+      "role": "billing",
+      "running_model": "claude-sonnet-5-5",
+      "runtime": "claude",
+      "session_id": "0d73aa0a-bdaf-4916-8421-d1917fc3bf2a",
+      "started_at": 1759999246000,
+      "status": "working",
+      "subagents": 0,
+      "task": "implement billing",
+      "temporary": false,
+      "usage": {
+        "cache_creation_tokens": 31004,
+        "cache_read_tokens": 220448,
+        "input_tokens": 18230,
+        "output_tokens": 4112,
+        "turns": 9
+      },
+      "workdir": "/work/demo/.crew/worktrees/claude-1"
+    }
+  ],
+  "agent_restart_fresh": [
+    {
+      "activity": "Edit src/lib.rs",
+      "backend": "herdr",
+      "backend_ref": "w2:p4",
+      "block_kind": null,
+      "branch": "agents/claude-1",
+      "compact_pending": false,
+      "compactions": 0,
+      "context": null,
+      "delivery": "socket",
+      "effort": "high",
+      "error": null,
+      "exit_code": null,
+      "fallback": null,
+      "id": "claude-1",
+      "inbox_total": 3,
+      "inbox_unread": 0,
+      "last_activity_at": 1759999998000,
+      "limit": null,
+      "model": "sonnet",
+      "model_name": "Sonnet 5.5",
+      "name": "claude-1",
+      "orchestrator": false,
+      "outbox_total": 2,
+      "parent": null,
+      "paused": false,
+      "pid": 4242,
+      "progress": 51,
+      "restarts": 0,
+      "role": "billing",
+      "running_model": "claude-sonnet-5-5",
+      "runtime": "claude",
+      "session_id": "0d73aa0a-bdaf-4916-8421-d1917fc3bf2a",
+      "started_at": 1759999246000,
+      "status": "working",
+      "subagents": 0,
+      "task": "implement billing",
+      "temporary": false,
+      "usage": {
+        "cache_creation_tokens": 31004,
+        "cache_read_tokens": 220448,
+        "input_tokens": 18230,
+        "output_tokens": 4112,
+        "turns": 9
+      },
+      "workdir": "/work/demo/.crew/worktrees/claude-1"
+    }
+  ],
+  "agent_resume": [
+    {
+      "activity": "Edit src/lib.rs",
+      "backend": "herdr",
+      "backend_ref": "w2:p4",
+      "block_kind": null,
+      "branch": "agents/claude-1",
+      "compact_pending": false,
+      "compactions": 0,
+      "context": null,
+      "delivery": "socket",
+      "effort": "high",
+      "error": null,
+      "exit_code": null,
+      "fallback": null,
+      "id": "claude-1",
+      "inbox_total": 3,
+      "inbox_unread": 0,
+      "last_activity_at": 1759999998000,
+      "limit": null,
+      "model": "sonnet",
+      "model_name": "Sonnet 5.5",
+      "name": "claude-1",
+      "orchestrator": false,
+      "outbox_total": 2,
+      "parent": null,
+      "paused": false,
+      "pid": 4242,
+      "progress": 51,
+      "restarts": 0,
+      "role": "billing",
+      "running_model": "claude-sonnet-5-5",
+      "runtime": "claude",
+      "session_id": "0d73aa0a-bdaf-4916-8421-d1917fc3bf2a",
+      "started_at": 1759999246000,
+      "status": "working",
+      "subagents": 0,
+      "task": "implement billing",
+      "temporary": false,
+      "usage": {
+        "cache_creation_tokens": 31004,
+        "cache_read_tokens": 220448,
+        "input_tokens": 18230,
+        "output_tokens": 4112,
+        "turns": 9
+      },
+      "workdir": "/work/demo/.crew/worktrees/claude-1"
+    }
+  ],
+  "agent_set_model": [
+    {
+      "activity": "Edit src/lib.rs",
+      "backend": "herdr",
+      "backend_ref": "w2:p4",
+      "block_kind": null,
+      "branch": "agents/claude-1",
+      "compact_pending": false,
+      "compactions": 0,
+      "context": null,
+      "delivery": "socket",
+      "effort": "high",
+      "error": null,
+      "exit_code": null,
+      "fallback": null,
+      "id": "claude-1",
+      "inbox_total": 3,
+      "inbox_unread": 0,
+      "last_activity_at": 1759999998000,
+      "limit": null,
+      "model": "opus",
+      "model_name": "Opus 5.5",
+      "name": "claude-1",
+      "orchestrator": false,
+      "outbox_total": 2,
+      "parent": null,
+      "paused": false,
+      "pid": 4242,
+      "progress": 51,
+      "restarts": 0,
+      "role": "billing",
+      "running_model": "claude-sonnet-5-5",
+      "runtime": "claude",
+      "session_id": "0d73aa0a-bdaf-4916-8421-d1917fc3bf2a",
+      "started_at": 1759999246000,
+      "status": "working",
+      "subagents": 0,
+      "task": "implement billing",
+      "temporary": false,
+      "usage": {
+        "cache_creation_tokens": 31004,
+        "cache_read_tokens": 220448,
+        "input_tokens": 18230,
+        "output_tokens": 4112,
+        "turns": 9
+      },
+      "workdir": "/work/demo/.crew/worktrees/claude-1"
+    }
+  ],
+  "agent_transcript": [
+    {
+      "available": true,
+      "entries": [
+        {
+          "at": 1759999940000,
+          "kind": "prompt",
+          "text": "[crew] Task billing is yours."
+        },
+        {
+          "at": 1759999950000,
+          "kind": "tool",
+          "text": "Edit src/billing.rs"
+        },
+        {
+          "at": 1759999960000,
+          "kind": "reply",
+          "text": "Totals done, committed 3f4e5d6c."
+        },
+        {
+          "at": null,
+          "kind": "note",
+          "text": "compacted"
+        }
+      ],
+      "truncated": false
+    }
+  ],
+  "answer": [
+    {
+      "duplicate": false,
+      "message": {
+        "body": "Please add the rounding rule to the totals.",
+        "correlation_id": null,
+        "from": "operator",
+        "id": "m-0104",
+        "metadata": null,
+        "reply_to": null,
+        "timestamp": 1760000002000,
+        "to": "claude-1",
+        "type": "message"
+      },
+      "recipients": [
+        "claude-1"
+      ]
+    }
+  ],
+  "events": [
+    [
+      {
+        "agent_id": null,
+        "data": null,
+        "event_type": "team.loaded",
+        "level": "info",
+        "message": "team checkout-rewrite loaded (6 agents)",
+        "seq": 1,
+        "source": "daemon",
+        "task_id": null,
+        "timestamp": 1759999246000
+      },
+      {
+        "agent_id": "claude-5",
+        "data": null,
+        "event_type": "task.dispatched",
+        "level": "info",
+        "message": "db → claude-5",
+        "seq": 2,
+        "source": "scheduler",
+        "task_id": null,
+        "timestamp": 1759999300000
+      },
+      {
+        "agent_id": "claude-3",
+        "data": null,
+        "event_type": "message.sent",
+        "level": "info",
+        "message": "claude-3 → claude-5 (question)",
+        "seq": 3,
+        "source": "bus",
+        "task_id": null,
+        "timestamp": 1759999980006
+      },
+      {
+        "agent_id": "claude-3",
+        "data": {
+          "action": "cherry_pick",
+          "agent": "claude-3",
+          "backend": "jj",
+          "branch": "agents/claude-3",
+          "files": [
+            "src/ledger.rs"
+          ],
+          "op": "v4",
+          "outcome": "conflict",
+          "peer": "claude-5",
+          "source": "a91ec21f0e4d3b2c1a09f8e7d6c5b4a392817060"
+        },
+        "event_type": "vcs.cherry_pick",
+        "level": "warn",
+        "message": "claude-3: cherry-pick of a91ec21 conflicts with claude-5 in src/ledger.rs; nothing was changed",
+        "seq": 4,
+        "source": "vcs",
+        "task_id": null,
+        "timestamp": 1759999980500
+      },
+      {
+        "agent_id": "claude-1",
+        "data": null,
+        "event_type": "agent.crashed",
+        "level": "error",
+        "message": "process exited with code 1; restarting (1/1)",
+        "seq": 5,
+        "source": "daemon",
+        "task_id": null,
+        "timestamp": 1759999980900
+      },
+      {
+        "agent_id": "claude-1",
+        "data": null,
+        "event_type": "agent.status",
+        "level": "info",
+        "message": "claude-1 is working",
+        "seq": 6,
+        "source": "daemon",
+        "task_id": null,
+        "timestamp": 1759999981500
+      }
+    ]
+  ],
+  "git_diff": [
+    {
+      "commit": null,
+      "conflict": null,
+      "ok": true,
+      "text": "M src/billing.rs\n\ndiff --git a/src/billing.rs b/src/billing.rs\n--- a/src/billing.rs\n+++ b/src/billing.rs\n@@ -1 +1,2 @@\n pub fn total() {}\n+pub fn round() {}"
+    }
+  ],
+  "git_merge": [
+    {
+      "commit": {
+        "branch": "agents/claude-1",
+        "change_id": "kzvsvsvnkzvsvsvnkzvsvsvnkzvsvsvn",
+        "files_changed": 2,
+        "sha": "3f4e5d6c0d1e2f3a4b5c6d7e8f9a0b1c2d3e4f5a",
+        "short": "3f4e5d6c",
+        "summary": "Add billing totals"
+      },
+      "conflict": null,
+      "ok": true,
+      "text": "merged agents/claude-5 as 3f4e5d6c"
+    },
+    {
+      "commit": null,
+      "conflict": {
+        "detail": "merge of agents/claude-6 conflicts in 1 file(s)",
+        "files": [
+          "schema.sql"
+        ],
+        "operation": "merge"
+      },
+      "ok": false,
+      "text": "merge aborted because of conflicts; the worktree is unchanged"
+    }
+  ],
+  "hello": [
+    {
+      "agent_id": null,
+      "pid": 4242,
+      "project": "checkout-rewrite",
+      "protocol": 5,
+      "role": "operator",
+      "version": "0.1.0",
+      "web_proof": "pr00f5ecretpr00f5ecretpr00f5ecretpr00f5ecret"
+    }
+  ],
+  "history": [
+    [
+      {
+        "body": "your trait bound broke Transaction::commit(), can you relax it?",
+        "correlation_id": null,
+        "from": "claude-3",
+        "id": "m-0001",
+        "metadata": null,
+        "reply_to": null,
+        "timestamp": 1759999980006,
+        "to": "claude-5",
+        "type": "question"
+      },
+      {
+        "body": "pin tokio 1.41 across the workspace",
+        "correlation_id": null,
+        "from": "orchestrator",
+        "id": "m-0002",
+        "metadata": null,
+        "reply_to": null,
+        "timestamp": 1759999980177,
+        "to": "claude-4",
+        "type": "task"
+      },
+      {
+        "body": "pin tokio 1.38 across crates until the audit lands",
+        "correlation_id": null,
+        "from": "orchestrator",
+        "id": "m-0003",
+        "metadata": null,
+        "reply_to": null,
+        "timestamp": 1759999980209,
+        "to": "claude-3",
+        "type": "task"
+      },
+      {
+        "body": "review claude-2's PR #5",
+        "correlation_id": null,
+        "from": "orchestrator",
+        "id": "m-0004",
+        "metadata": null,
+        "reply_to": null,
+        "timestamp": 1759999980247,
+        "to": "claude-5",
+        "type": "review_request"
+      },
+      {
+        "body": "bump edition 2021 → 2024",
+        "correlation_id": null,
+        "from": "orchestrator",
+        "id": "m-0005",
+        "metadata": null,
+        "reply_to": null,
+        "timestamp": 1759999980301,
+        "to": "*",
+        "type": "status"
+      },
+      {
+        "body": "your macro shadows mine, renamed to ledger_entry!",
+        "correlation_id": null,
+        "from": "claude-3",
+        "id": "m-0006",
+        "metadata": null,
+        "reply_to": null,
+        "timestamp": 1759999980325,
+        "to": "claude-1",
+        "type": "message"
+      },
+      {
+        "body": "approved · direct channel works. Commit a91ec21",
+        "correlation_id": null,
+        "from": "claude-5",
+        "id": "m-0007",
+        "metadata": null,
+        "reply_to": null,
+        "timestamp": 1759999980412,
+        "to": "claude-3",
+        "type": "artifact"
+      }
+    ]
+  ],
+  "inbox": [
+    {
+      "messages": [
+        {
+          "acked_at": null,
+          "body": "Please add the rounding rule to the totals.",
+          "correlation_id": null,
+          "delivered_at": 1760000002100,
+          "from": "operator",
+          "id": "m-0104",
+          "metadata": null,
+          "reply_to": null,
+          "timestamp": 1760000002000,
+          "to": "claude-1",
+          "type": "message"
+        }
+      ]
+    }
+  ],
+  "message_get": [
+    {
+      "body": "Please add the rounding rule to the totals.",
+      "correlation_id": null,
+      "from": "operator",
+      "id": "m-0104",
+      "metadata": null,
+      "reply_to": null,
+      "timestamp": 1760000002000,
+      "to": "claude-1",
+      "type": "message"
+    }
+  ],
+  "models_list": [
+    {
+      "models": [
+        {
+          "model": "fable",
+          "name": "Fable 5.1",
+          "price": "$10 / $50 per MTok",
+          "runtime": "claude",
+          "summary": "Fable 5.1, as its vendor describes it.",
+          "tier": "frontier",
+          "unavailable": null
+        },
+        {
+          "model": "opus",
+          "name": "Opus 5.5",
+          "price": "$4 / $20 per MTok",
+          "runtime": "claude",
+          "summary": "Opus 5.5, as its vendor describes it.",
+          "tier": "strong",
+          "unavailable": null
+        },
+        {
+          "model": "sonnet",
+          "name": "Sonnet 5.5",
+          "price": "$2 / $10 per MTok",
+          "runtime": "claude",
+          "summary": "Sonnet 5.5, as its vendor describes it.",
+          "tier": "balanced",
+          "unavailable": null
+        },
+        {
+          "model": "gpt-6-astra",
+          "name": "GPT 6 Astra",
+          "price": "$5 / $40 per MTok",
+          "runtime": "codex",
+          "summary": "GPT 6 Astra, as its vendor describes it.",
+          "tier": "frontier",
+          "unavailable": null
+        },
+        {
+          "model": "gpt-6-luna",
+          "name": "GPT 6 Luna",
+          "price": "",
+          "runtime": "codex",
+          "summary": "GPT 6 Luna, as its vendor describes it.",
+          "tier": "fast",
+          "unavailable": "not in the model list of this Codex account"
+        },
+        {
+          "model": "",
+          "name": "pi's default",
+          "price": "",
+          "runtime": "pi",
+          "summary": "pi's default, as its vendor describes it.",
+          "tier": "",
+          "unavailable": null
+        },
+        {
+          "model": "anthropic/claude-opus-4-6",
+          "name": "anthropic/claude-opus-4-6",
+          "price": "",
+          "runtime": "pi",
+          "summary": "anthropic/claude-opus-4-6, as its vendor describes it.",
+          "tier": "",
+          "unavailable": null
+        }
+      ]
+    }
+  ],
+  "resume": [
+    {
+      "resumed": [
+        "claude-1",
+        "claude-2"
+      ]
+    }
+  ],
+  "send": [
+    {
+      "duplicate": false,
+      "message": {
+        "body": "Please add the rounding rule to the totals.",
+        "correlation_id": null,
+        "from": "operator",
+        "id": "m-0104",
+        "metadata": null,
+        "reply_to": null,
+        "timestamp": 1760000002000,
+        "to": "claude-1",
+        "type": "message"
+      },
+      "recipients": [
+        "claude-1"
+      ]
+    },
+    {
+      "duplicate": true,
+      "message": {
+        "body": "Please add the rounding rule to the totals.",
+        "correlation_id": null,
+        "from": "operator",
+        "id": "m-0104",
+        "metadata": null,
+        "reply_to": null,
+        "timestamp": 1760000002000,
+        "to": "claude-1",
+        "type": "message"
+      },
+      "recipients": [
+        "claude-1"
+      ]
+    }
+  ],
+  "shutdown": [
+    {
+      "stopping": true
+    }
+  ],
+  "snapshot": [
+    {
+      "agents": [
+        {
+          "activity": "Edit src/lib.rs",
+          "backend": "herdr",
+          "backend_ref": "w2:p4",
+          "block_kind": null,
+          "branch": "agents/claude-1",
+          "compact_pending": false,
+          "compactions": 0,
+          "context": null,
+          "delivery": "socket",
+          "effort": "high",
+          "error": null,
+          "exit_code": null,
+          "fallback": null,
+          "id": "claude-1",
+          "inbox_total": 3,
+          "inbox_unread": 0,
+          "last_activity_at": 1759999998000,
+          "limit": null,
+          "model": "sonnet",
+          "model_name": "Sonnet 5.5",
+          "name": "claude-1",
+          "orchestrator": false,
+          "outbox_total": 2,
+          "parent": null,
+          "paused": false,
+          "pid": 4242,
+          "progress": 51,
+          "restarts": 0,
+          "role": "billing",
+          "running_model": "claude-sonnet-5-5",
+          "runtime": "claude",
+          "session_id": "0d73aa0a-bdaf-4916-8421-d1917fc3bf2a",
+          "started_at": 1759999246000,
+          "status": "working",
+          "subagents": 0,
+          "task": "implement billing",
+          "temporary": false,
+          "usage": {
+            "cache_creation_tokens": 31004,
+            "cache_read_tokens": 220448,
+            "input_tokens": 18230,
+            "output_tokens": 4112,
+            "turns": 9
+          },
+          "workdir": "/work/demo/.crew/worktrees/claude-1"
+        },
+        {
+          "activity": "",
+          "backend": "herdr",
+          "backend_ref": "w2:p4",
+          "block_kind": null,
+          "branch": "agents/claude-2",
+          "compact_pending": false,
+          "compactions": 0,
+          "context": null,
+          "delivery": "socket",
+          "effort": "high",
+          "error": null,
+          "exit_code": null,
+          "fallback": null,
+          "id": "claude-2",
+          "inbox_total": 3,
+          "inbox_unread": 0,
+          "last_activity_at": 1759999998000,
+          "limit": null,
+          "model": "sonnet",
+          "model_name": "Sonnet 5.5",
+          "name": "claude-2",
+          "orchestrator": false,
+          "outbox_total": 2,
+          "parent": null,
+          "paused": false,
+          "pid": 4242,
+          "progress": 100,
+          "restarts": 0,
+          "role": "queue",
+          "running_model": "claude-sonnet-5-5",
+          "runtime": "codex",
+          "session_id": "0d73aa0a-bdaf-4916-8421-d1917fc3bf2a",
+          "started_at": 1759999246000,
+          "status": "done",
+          "subagents": 0,
+          "task": "implement queue",
+          "temporary": false,
+          "usage": {
+            "cache_creation_tokens": 31004,
+            "cache_read_tokens": 220448,
+            "input_tokens": 18230,
+            "output_tokens": 4112,
+            "turns": 9
+          },
+          "workdir": "/work/demo/.crew/worktrees/claude-2"
+        },
+        {
+          "activity": "",
+          "backend": "herdr",
+          "backend_ref": "w2:p4",
+          "block_kind": null,
+          "branch": "agents/claude-3",
+          "compact_pending": false,
+          "compactions": 0,
+          "context": null,
+          "delivery": "socket",
+          "effort": "high",
+          "error": null,
+          "exit_code": null,
+          "fallback": null,
+          "id": "claude-3",
+          "inbox_total": 3,
+          "inbox_unread": 0,
+          "last_activity_at": 1759999998000,
+          "limit": null,
+          "model": "sonnet",
+          "model_name": "Sonnet 5.5",
+          "name": "claude-3",
+          "orchestrator": false,
+          "outbox_total": 2,
+          "parent": null,
+          "paused": false,
+          "pid": 4242,
+          "progress": 100,
+          "restarts": 0,
+          "role": "ledger",
+          "running_model": "claude-sonnet-5-5",
+          "runtime": "claude",
+          "session_id": "0d73aa0a-bdaf-4916-8421-d1917fc3bf2a",
+          "started_at": 1759999246000,
+          "status": "done",
+          "subagents": 0,
+          "task": "implement ledger",
+          "temporary": false,
+          "usage": {
+            "cache_creation_tokens": 31004,
+            "cache_read_tokens": 220448,
+            "input_tokens": 18230,
+            "output_tokens": 4112,
+            "turns": 9
+          },
+          "workdir": "/work/demo/.crew/worktrees/claude-3"
+        },
+        {
+          "activity": "",
+          "backend": "herdr",
+          "backend_ref": "w2:p4",
+          "block_kind": null,
+          "branch": "agents/claude-4",
+          "compact_pending": false,
+          "compactions": 0,
+          "context": null,
+          "delivery": "socket",
+          "effort": "high",
+          "error": null,
+          "exit_code": null,
+          "fallback": null,
+          "id": "claude-4",
+          "inbox_total": 3,
+          "inbox_unread": 0,
+          "last_activity_at": 1759999998000,
+          "limit": null,
+          "model": "sonnet",
+          "model_name": "Sonnet 5.5",
+          "name": "claude-4",
+          "orchestrator": false,
+          "outbox_total": 2,
+          "parent": null,
+          "paused": false,
+          "pid": 4242,
+          "progress": 100,
+          "restarts": 0,
+          "role": "notify",
+          "running_model": "claude-sonnet-5-5",
+          "runtime": "claude",
+          "session_id": "0d73aa0a-bdaf-4916-8421-d1917fc3bf2a",
+          "started_at": 1759999246000,
+          "status": "done",
+          "subagents": 0,
+          "task": "implement notify",
+          "temporary": false,
+          "usage": {
+            "cache_creation_tokens": 31004,
+            "cache_read_tokens": 220448,
+            "input_tokens": 18230,
+            "output_tokens": 4112,
+            "turns": 9
+          },
+          "workdir": "/work/demo/.crew/worktrees/claude-4"
+        },
+        {
+          "activity": "",
+          "backend": "herdr",
+          "backend_ref": "w2:p4",
+          "block_kind": null,
+          "branch": "agents/claude-5",
+          "compact_pending": false,
+          "compactions": 0,
+          "context": null,
+          "delivery": "socket",
+          "effort": "high",
+          "error": null,
+          "exit_code": null,
+          "fallback": null,
+          "id": "claude-5",
+          "inbox_total": 3,
+          "inbox_unread": 0,
+          "last_activity_at": 1759999998000,
+          "limit": null,
+          "model": "sonnet",
+          "model_name": "Sonnet 5.5",
+          "name": "claude-5",
+          "orchestrator": false,
+          "outbox_total": 2,
+          "parent": null,
+          "paused": false,
+          "pid": 4242,
+          "progress": 100,
+          "restarts": 0,
+          "role": "db",
+          "running_model": "claude-sonnet-5-5",
+          "runtime": "claude",
+          "session_id": "0d73aa0a-bdaf-4916-8421-d1917fc3bf2a",
+          "started_at": 1759999246000,
+          "status": "done",
+          "subagents": 0,
+          "task": "implement db",
+          "temporary": false,
+          "usage": {
+            "cache_creation_tokens": 31004,
+            "cache_read_tokens": 220448,
+            "input_tokens": 18230,
+            "output_tokens": 4112,
+            "turns": 9
+          },
+          "workdir": "/work/demo/.crew/worktrees/claude-5"
+        },
+        {
+          "activity": "",
+          "backend": "herdr",
+          "backend_ref": "w2:p4",
+          "block_kind": null,
+          "branch": "agents/claude-6",
+          "compact_pending": false,
+          "compactions": 0,
+          "context": null,
+          "delivery": "socket",
+          "effort": "high",
+          "error": null,
+          "exit_code": null,
+          "fallback": null,
+          "id": "claude-6",
+          "inbox_total": 3,
+          "inbox_unread": 0,
+          "last_activity_at": 1759999998000,
+          "limit": null,
+          "model": "sonnet",
+          "model_name": "Sonnet 5.5",
+          "name": "claude-6",
+          "orchestrator": false,
+          "outbox_total": 2,
+          "parent": null,
+          "paused": false,
+          "pid": 4242,
+          "progress": 100,
+          "restarts": 0,
+          "role": "search",
+          "running_model": "claude-sonnet-5-5",
+          "runtime": "claude",
+          "session_id": "0d73aa0a-bdaf-4916-8421-d1917fc3bf2a",
+          "started_at": 1759999246000,
+          "status": "done",
+          "subagents": 0,
+          "task": "implement search",
+          "temporary": false,
+          "usage": {
+            "cache_creation_tokens": 31004,
+            "cache_read_tokens": 220448,
+            "input_tokens": 18230,
+            "output_tokens": 4112,
+            "turns": 9
+          },
+          "workdir": "/work/demo/.crew/worktrees/claude-6"
+        },
+        {
+          "activity": "",
+          "backend": "herdr",
+          "backend_ref": "w2:p4",
+          "block_kind": null,
+          "branch": null,
+          "compact_pending": false,
+          "compactions": 0,
+          "context": null,
+          "delivery": "socket",
+          "effort": "high",
+          "error": null,
+          "exit_code": null,
+          "fallback": null,
+          "id": "orchestrator",
+          "inbox_total": 3,
+          "inbox_unread": 0,
+          "last_activity_at": 1759999998000,
+          "limit": null,
+          "model": "sonnet",
+          "model_name": "Sonnet 5.5",
+          "name": "orchestrator",
+          "orchestrator": true,
+          "outbox_total": 2,
+          "parent": null,
+          "paused": false,
+          "pid": 4242,
+          "progress": null,
+          "restarts": 0,
+          "role": "orchestrator",
+          "running_model": "claude-sonnet-5-5",
+          "runtime": "claude",
+          "session_id": "0d73aa0a-bdaf-4916-8421-d1917fc3bf2a",
+          "started_at": 1759999246000,
+          "status": "waiting",
+          "subagents": 0,
+          "task": null,
+          "temporary": false,
+          "usage": {
+            "cache_creation_tokens": 31004,
+            "cache_read_tokens": 220448,
+            "input_tokens": 18230,
+            "output_tokens": 4112,
+            "turns": 9
+          },
+          "workdir": "/work/demo/.crew/worktrees/orchestrator"
+        }
+      ],
+      "events": [
+        {
+          "agent_id": null,
+          "data": null,
+          "event_type": "team.loaded",
+          "level": "info",
+          "message": "team checkout-rewrite loaded (6 agents)",
+          "seq": 1,
+          "source": "daemon",
+          "task_id": null,
+          "timestamp": 1759999246000
+        },
+        {
+          "agent_id": "claude-5",
+          "data": null,
+          "event_type": "task.dispatched",
+          "level": "info",
+          "message": "db → claude-5",
+          "seq": 2,
+          "source": "scheduler",
+          "task_id": null,
+          "timestamp": 1759999300000
+        },
+        {
+          "agent_id": "claude-3",
+          "data": null,
+          "event_type": "message.sent",
+          "level": "info",
+          "message": "claude-3 → claude-5 (question)",
+          "seq": 3,
+          "source": "bus",
+          "task_id": null,
+          "timestamp": 1759999980006
+        },
+        {
+          "agent_id": "claude-3",
+          "data": {
+            "action": "cherry_pick",
+            "agent": "claude-3",
+            "backend": "jj",
+            "branch": "agents/claude-3",
+            "files": [
+              "src/ledger.rs"
+            ],
+            "op": "v4",
+            "outcome": "conflict",
+            "peer": "claude-5",
+            "source": "a91ec21f0e4d3b2c1a09f8e7d6c5b4a392817060"
+          },
+          "event_type": "vcs.cherry_pick",
+          "level": "warn",
+          "message": "claude-3: cherry-pick of a91ec21 conflicts with claude-5 in src/ledger.rs; nothing was changed",
+          "seq": 4,
+          "source": "vcs",
+          "task_id": null,
+          "timestamp": 1759999980500
+        },
+        {
+          "agent_id": "claude-1",
+          "data": null,
+          "event_type": "agent.crashed",
+          "level": "error",
+          "message": "process exited with code 1; restarting (1/1)",
+          "seq": 5,
+          "source": "daemon",
+          "task_id": null,
+          "timestamp": 1759999980900
+        },
+        {
+          "agent_id": "claude-1",
+          "data": null,
+          "event_type": "agent.status",
+          "level": "info",
+          "message": "claude-1 is working",
+          "seq": 6,
+          "source": "daemon",
+          "task_id": null,
+          "timestamp": 1759999981500
+        }
+      ],
+      "messages": [
+        {
+          "body": "your trait bound broke Transaction::commit(), can you relax it?",
+          "correlation_id": null,
+          "from": "claude-3",
+          "id": "m-0001",
+          "metadata": null,
+          "reply_to": null,
+          "timestamp": 1759999980006,
+          "to": "claude-5",
+          "type": "question"
+        },
+        {
+          "body": "pin tokio 1.41 across the workspace",
+          "correlation_id": null,
+          "from": "orchestrator",
+          "id": "m-0002",
+          "metadata": null,
+          "reply_to": null,
+          "timestamp": 1759999980177,
+          "to": "claude-4",
+          "type": "task"
+        },
+        {
+          "body": "pin tokio 1.38 across crates until the audit lands",
+          "correlation_id": null,
+          "from": "orchestrator",
+          "id": "m-0003",
+          "metadata": null,
+          "reply_to": null,
+          "timestamp": 1759999980209,
+          "to": "claude-3",
+          "type": "task"
+        },
+        {
+          "body": "review claude-2's PR #5",
+          "correlation_id": null,
+          "from": "orchestrator",
+          "id": "m-0004",
+          "metadata": null,
+          "reply_to": null,
+          "timestamp": 1759999980247,
+          "to": "claude-5",
+          "type": "review_request"
+        },
+        {
+          "body": "bump edition 2021 → 2024",
+          "correlation_id": null,
+          "from": "orchestrator",
+          "id": "m-0005",
+          "metadata": null,
+          "reply_to": null,
+          "timestamp": 1759999980301,
+          "to": "*",
+          "type": "status"
+        },
+        {
+          "body": "your macro shadows mine, renamed to ledger_entry!",
+          "correlation_id": null,
+          "from": "claude-3",
+          "id": "m-0006",
+          "metadata": null,
+          "reply_to": null,
+          "timestamp": 1759999980325,
+          "to": "claude-1",
+          "type": "message"
+        },
+        {
+          "body": "approved · direct channel works. Commit a91ec21",
+          "correlation_id": null,
+          "from": "claude-5",
+          "id": "m-0007",
+          "metadata": null,
+          "reply_to": null,
+          "timestamp": 1759999980412,
+          "to": "claude-3",
+          "type": "artifact"
+        }
+      ],
+      "questions": [],
+      "server_time": 1760000000000,
+      "session": {
+        "backend": "herdr",
+        "completed_at": null,
+        "daemon_pid": 4000,
+        "daemon_started_at": 1759999240000,
+        "herdr_workspace": "w2",
+        "isolation": "worktree",
+        "objective": "Rewrite the checkout service while preserving API compatibility.",
+        "project": "checkout-rewrite",
+        "quotas": [],
+        "sandbox": "off",
+        "socket_warning": "",
+        "state_dir": "/work/demo/.crew",
+        "style": null,
+        "summary": null,
+        "team_started_at": 1759999246000,
+        "vcs": "jj",
+        "vcs_note": "",
+        "version": "0.1.0",
+        "web": "",
+        "workspace": "/work/demo"
+      },
+      "tasks": [
+        {
+          "artifacts": [
+            {
+              "agent": "claude-5",
+              "created_at": 1759999940000,
+              "description": "db implementation",
+              "kind": "commit",
+              "value": "a91ec21"
+            }
+          ],
+          "assigned_agent": "claude-5",
+          "completed_at": 1759999940000,
+          "created_at": 1759999240000,
+          "dependencies": [],
+          "description": "Build the db module and commit it.",
+          "id": "db",
+          "note": null,
+          "progress": 100,
+          "result": "db done",
+          "reviewer": null,
+          "started_at": 1759999300000,
+          "status": "done",
+          "timeout_secs": null,
+          "title": "implement db"
+        },
+        {
+          "artifacts": [
+            {
+              "agent": "claude-2",
+              "created_at": 1759999940000,
+              "description": "queue implementation",
+              "kind": "commit",
+              "value": "a91ec21"
+            }
+          ],
+          "assigned_agent": "claude-2",
+          "completed_at": 1759999940000,
+          "created_at": 1759999240000,
+          "dependencies": [],
+          "description": "Build the queue module and commit it.",
+          "id": "queue",
+          "note": null,
+          "progress": 100,
+          "result": "queue done",
+          "reviewer": null,
+          "started_at": 1759999300000,
+          "status": "done",
+          "timeout_secs": null,
+          "title": "implement queue"
+        },
+        {
+          "artifacts": [
+            {
+              "agent": "claude-3",
+              "created_at": 1759999940000,
+              "description": "ledger implementation",
+              "kind": "commit",
+              "value": "a91ec21"
+            }
+          ],
+          "assigned_agent": "claude-3",
+          "completed_at": 1759999940000,
+          "created_at": 1759999240000,
+          "dependencies": [
+            "db"
+          ],
+          "description": "Build the ledger module and commit it.",
+          "id": "ledger",
+          "note": null,
+          "progress": 100,
+          "result": "ledger done",
+          "reviewer": "claude-2",
+          "started_at": 1759999300000,
+          "status": "done",
+          "timeout_secs": null,
+          "title": "implement ledger"
+        },
+        {
+          "artifacts": [
+            {
+              "agent": "claude-6",
+              "created_at": 1759999940000,
+              "description": "search implementation",
+              "kind": "commit",
+              "value": "a91ec21"
+            }
+          ],
+          "assigned_agent": "claude-6",
+          "completed_at": 1759999940000,
+          "created_at": 1759999240000,
+          "dependencies": [
+            "db"
+          ],
+          "description": "Build the search module and commit it.",
+          "id": "search",
+          "note": null,
+          "progress": 100,
+          "result": "search done",
+          "reviewer": null,
+          "started_at": 1759999300000,
+          "status": "done",
+          "timeout_secs": null,
+          "title": "implement search"
+        },
+        {
+          "artifacts": [
+            {
+              "agent": "claude-4",
+              "created_at": 1759999940000,
+              "description": "notify implementation",
+              "kind": "commit",
+              "value": "a91ec21"
+            }
+          ],
+          "assigned_agent": "claude-4",
+          "completed_at": 1759999940000,
+          "created_at": 1759999240000,
+          "dependencies": [
+            "queue"
+          ],
+          "description": "Build the notify module and commit it.",
+          "id": "notify",
+          "note": null,
+          "progress": 100,
+          "result": "notify done",
+          "reviewer": null,
+          "started_at": 1759999300000,
+          "status": "done",
+          "timeout_secs": null,
+          "title": "implement notify"
+        },
+        {
+          "artifacts": [],
+          "assigned_agent": "claude-1",
+          "completed_at": null,
+          "created_at": 1759999240000,
+          "dependencies": [
+            "ledger",
+            "queue"
+          ],
+          "description": "Build the billing module and commit it.",
+          "id": "billing",
+          "note": null,
+          "progress": 51,
+          "result": null,
+          "reviewer": null,
+          "started_at": 1759999300000,
+          "status": "working",
+          "timeout_secs": null,
+          "title": "implement billing"
+        }
+      ]
+    }
+  ],
+  "subscribe": [
+    {
+      "subscribed": true
+    }
+  ],
+  "task_get": [
+    {
+      "dependencies": [
+        {
+          "artifacts": [
+            {
+              "agent": "claude-2",
+              "created_at": 1759999940000,
+              "description": "queue implementation",
+              "kind": "commit",
+              "value": "a91ec21"
+            }
+          ],
+          "assigned_agent": "claude-2",
+          "completed_at": 1759999940000,
+          "created_at": 1759999240000,
+          "dependencies": [],
+          "description": "Build the queue module and commit it.",
+          "id": "queue",
+          "note": null,
+          "progress": 100,
+          "result": "queue done",
+          "reviewer": null,
+          "started_at": 1759999300000,
+          "status": "done",
+          "timeout_secs": null,
+          "title": "implement queue"
+        }
+      ],
+      "task": {
+        "artifacts": [
+          {
+            "agent": "claude-5",
+            "created_at": 1759999940000,
+            "description": "db implementation",
+            "kind": "commit",
+            "value": "a91ec21"
+          }
+        ],
+        "assigned_agent": "claude-5",
+        "completed_at": 1759999940000,
+        "created_at": 1759999240000,
+        "dependencies": [],
+        "description": "Build the db module and commit it.",
+        "id": "db",
+        "note": null,
+        "progress": 100,
+        "result": "db done",
+        "reviewer": null,
+        "started_at": 1759999300000,
+        "status": "done",
+        "timeout_secs": null,
+        "title": "implement db"
+      }
+    }
+  ],
+  "tasks_list": [
+    [
+      {
+        "artifacts": [
+          {
+            "agent": "claude-5",
+            "created_at": 1759999940000,
+            "description": "db implementation",
+            "kind": "commit",
+            "value": "a91ec21"
+          }
+        ],
+        "assigned_agent": "claude-5",
+        "completed_at": 1759999940000,
+        "created_at": 1759999240000,
+        "dependencies": [],
+        "description": "Build the db module and commit it.",
+        "id": "db",
+        "note": null,
+        "progress": 100,
+        "result": "db done",
+        "reviewer": null,
+        "started_at": 1759999300000,
+        "status": "done",
+        "timeout_secs": null,
+        "title": "implement db"
+      },
+      {
+        "artifacts": [
+          {
+            "agent": "claude-2",
+            "created_at": 1759999940000,
+            "description": "queue implementation",
+            "kind": "commit",
+            "value": "a91ec21"
+          }
+        ],
+        "assigned_agent": "claude-2",
+        "completed_at": 1759999940000,
+        "created_at": 1759999240000,
+        "dependencies": [],
+        "description": "Build the queue module and commit it.",
+        "id": "queue",
+        "note": null,
+        "progress": 100,
+        "result": "queue done",
+        "reviewer": null,
+        "started_at": 1759999300000,
+        "status": "done",
+        "timeout_secs": null,
+        "title": "implement queue"
+      },
+      {
+        "artifacts": [
+          {
+            "agent": "claude-3",
+            "created_at": 1759999940000,
+            "description": "ledger implementation",
+            "kind": "commit",
+            "value": "a91ec21"
+          }
+        ],
+        "assigned_agent": "claude-3",
+        "completed_at": 1759999940000,
+        "created_at": 1759999240000,
+        "dependencies": [
+          "db"
+        ],
+        "description": "Build the ledger module and commit it.",
+        "id": "ledger",
+        "note": null,
+        "progress": 100,
+        "result": "ledger done",
+        "reviewer": "claude-2",
+        "started_at": 1759999300000,
+        "status": "done",
+        "timeout_secs": null,
+        "title": "implement ledger"
+      },
+      {
+        "artifacts": [
+          {
+            "agent": "claude-6",
+            "created_at": 1759999940000,
+            "description": "search implementation",
+            "kind": "commit",
+            "value": "a91ec21"
+          }
+        ],
+        "assigned_agent": "claude-6",
+        "completed_at": 1759999940000,
+        "created_at": 1759999240000,
+        "dependencies": [
+          "db"
+        ],
+        "description": "Build the search module and commit it.",
+        "id": "search",
+        "note": null,
+        "progress": 100,
+        "result": "search done",
+        "reviewer": null,
+        "started_at": 1759999300000,
+        "status": "done",
+        "timeout_secs": null,
+        "title": "implement search"
+      },
+      {
+        "artifacts": [
+          {
+            "agent": "claude-4",
+            "created_at": 1759999940000,
+            "description": "notify implementation",
+            "kind": "commit",
+            "value": "a91ec21"
+          }
+        ],
+        "assigned_agent": "claude-4",
+        "completed_at": 1759999940000,
+        "created_at": 1759999240000,
+        "dependencies": [
+          "queue"
+        ],
+        "description": "Build the notify module and commit it.",
+        "id": "notify",
+        "note": null,
+        "progress": 100,
+        "result": "notify done",
+        "reviewer": null,
+        "started_at": 1759999300000,
+        "status": "done",
+        "timeout_secs": null,
+        "title": "implement notify"
+      },
+      {
+        "artifacts": [],
+        "assigned_agent": "claude-1",
+        "completed_at": null,
+        "created_at": 1759999240000,
+        "dependencies": [
+          "ledger",
+          "queue"
+        ],
+        "description": "Build the billing module and commit it.",
+        "id": "billing",
+        "note": null,
+        "progress": 51,
+        "result": null,
+        "reviewer": null,
+        "started_at": 1759999300000,
+        "status": "working",
+        "timeout_secs": null,
+        "title": "implement billing"
+      }
+    ]
+  ],
+  "web_close": [
+    {
+      "stopped": true
+    },
+    {
+      "stopped": false
+    }
+  ],
+  "web_open": [
+    {
+      "expires_in_secs": 120,
+      "pair_url": "http://c7f3a09b52e14d6f8a1b3c5d7e9f0a2b.localhost:23417/#pair=3f9ac0dec0dec0dec0dec0dec0dec0dec0dec0dee1",
+      "port": 23417,
+      "started": true,
+      "url": "http://c7f3a09b52e14d6f8a1b3c5d7e9f0a2b.localhost:23417/"
+    }
+  ],
+  "web_pair": [
+    {
+      "token": "t0kent0kent0kent0kent0kent0kent0kent0kent0k",
+      "verifier": "9d5b3f0b4e8c4a6f2d1e0c9b8a7f6e5d4c3b2a1f0e9d8c7b6a5f4e3d2c1b0a9f"
+    }
+  ],
+  "web_prefs": [
+    {
+      "prefs": {}
+    },
+    {
+      "prefs": {
+        "keys": true,
+        "positions": {
+          "claude-1": [
+            120.5,
+            -40.0
+          ]
+        }
+      }
+    }
+  ]
+}
