@@ -151,7 +151,7 @@ fn the_harness_finds_a_usable_sandbox_and_its_controls_reach_the_host() {
 
 mod common;
 use common::{agent, find_agent, find_task, task, Session};
-use crew_core::config::{AgentSpec, SandboxMode, TaskSpec, TeamConfig};
+use crew_core::config::{AgentSpec, SandboxMode, TaskSpec, TeamConfig, VcsChoice};
 use crew_core::{AgentStatus, TaskStatus};
 
 /// `s.team(..)`, requiring sandboxes.
@@ -159,6 +159,68 @@ fn sandboxed(s: &Session, agents: Vec<AgentSpec>, tasks: Vec<TaskSpec>) -> TeamC
     let mut team = s.team("sandboxed", agents, tasks);
     team.workspace.sandbox.mode = SandboxMode::Required;
     team
+}
+
+/// `sandboxed(..)` on git, for a test of git's hooks or configuration,
+/// which jj does not have.
+fn sandboxed_git(s: &Session, agents: Vec<AgentSpec>, tasks: Vec<TaskSpec>) -> TeamConfig {
+    let mut team = sandboxed(s, agents, tasks);
+    team.workspace.vcs = VcsChoice::Git;
+    team
+}
+
+/// The jj the tests can use, by its canonical path: `CREW_JJ`, else the
+/// first `jj` on PATH.
+fn real_jj() -> Option<PathBuf> {
+    match std::env::var_os("CREW_JJ").filter(|v| !v.is_empty()) {
+        Some(jj) => PathBuf::from(jj).canonicalize().ok(),
+        None => std::env::split_paths(&std::env::var_os("PATH").unwrap_or_default())
+            .map(|dir| dir.join("jj"))
+            .find(|p| p.is_file())
+            .and_then(|p| p.canonicalize().ok()),
+    }
+}
+
+/// Test teams run on jj: `CREW_TEST_VCS` does not ask for git, and there
+/// is a jj, which `auto` chooses.
+fn on_jj() -> bool {
+    common::test_vcs() != VcsChoice::Git && real_jj().is_some()
+}
+
+/// Skip (or, under `CREW_TEST_SANDBOX=require` with `CREW_TEST_VCS=jj`,
+/// fail) a test of jj's store when the teams run on git.
+fn require_jj() -> bool {
+    if on_jj() {
+        return true;
+    }
+    if common::test_vcs() == VcsChoice::Jj {
+        panic!("CREW_TEST_VCS=jj, but jj is not on PATH");
+    }
+    eprintln!("skipped: the teams run on git");
+    false
+}
+
+/// jj's repository and agent `id`'s workspace in a hidden-layout project.
+fn jj_paths(s: &Session, id: &str) -> (PathBuf, PathBuf) {
+    let ws = s.workspace.canonicalize().unwrap();
+    (
+        ws.join(".crew/jj/.jj/repo"),
+        ws.join(".crew/worktrees").join(id),
+    )
+}
+
+/// A program beside the crew binary (not under /tmp, which a sandbox never
+/// mounts) that runs the real jj; before it, `before` (a shell snippet)
+/// runs with the arguments in `$@`. For `CREW_JJ`.
+fn jj_wrapper(before: &str) -> Option<(tempfile::TempDir, PathBuf)> {
+    let real = real_jj()?;
+    let dir = tempfile::tempdir_in(Path::new(CREW).parent().unwrap()).unwrap();
+    let wrapper = dir.path().canonicalize().unwrap().join("jj");
+    write_executable(
+        &wrapper,
+        &format!("#!/bin/sh\n{before}\nexec '{}' \"$@\"\n", real.display()),
+    );
+    Some((dir, wrapper))
 }
 
 /// Make the workspace a repository whose first commit holds `files`.
@@ -464,7 +526,12 @@ fn agent_cannot_reach_host_sockets() {
     let targets = HostTargets::new(s.root(), &run_dir);
     targets.assert_reachable_from_the_host(&socat);
     let ws = s.workspace.canonicalize().unwrap();
-    let late = ws.join(".git/late.sock");
+    // In a read-only tree of the store the backend under test mounts.
+    let late = if on_jj() {
+        ws.join(".crew/jj/.jj/repo/late.sock")
+    } else {
+        ws.join(".git/late.sock")
+    };
     let home = home_of(&s, "a");
     let script = format!(
         r#"{FIND_SOCKET}
@@ -691,9 +758,12 @@ fn sandboxed_agent_can_do_its_work() {
         t.artifacts
     );
     let home = home_of(&s, "a");
-    assert!(
+    // jj runs no hooks; git runs it, confined.
+    let vcs = done.session.vcs.clone();
+    assert_eq!(
         home.join("hook-ran").exists(),
-        "the pre-commit hook did not run"
+        vcs == "git",
+        "{vcs}: the pre-commit hook ran (or did not)"
     );
     let (_, _, token) = daemon_paths(&s);
     assert!(
@@ -705,6 +775,43 @@ fn sandboxed_agent_can_do_its_work() {
         "the hook read the operator token"
     );
     s.stop();
+}
+
+#[test]
+fn an_agent_moves_files_between_directories_of_its_worktree_and_not_out_of_it() {
+    if require_sandbox().is_none() {
+        return;
+    }
+    let s = Session::new();
+    workspace_repo(&s, &[("tracked.txt", "tracked\n")]);
+    // In its worktree (its working directory): a link and a rename into
+    // a subdirectory, `git mv` (git only: under jj, git refuses to run in
+    // a workspace), and a rename into its home, another mount, which
+    // `mv` turns into a copy.
+    let script = r#"mkdir -p d e
+echo f > f && ln f d/g && echo 'MOVED link'
+echo r > r && i=$(stat -c %i r) && mv r e/r && [ "$(stat -c %i e/r)" = "$i" ] && echo 'MOVED rename'
+if git mv tracked.txt d/tracked.txt; then echo 'GIT-MV ok'; else echo 'GIT-MV failed'; fi
+echo o > out && i=$(stat -c %i out) && mv out "$HOME/out" && [ "$(stat -c %i "$HOME/out")" = "$i" ] && echo 'REACHED rename-out'
+true"#;
+    s.run(&sandboxed(&s, vec![probing(&s, "a", script)], vec![]));
+    let report = report(&s, "a");
+    let vcs = s.snapshot().session.vcs;
+    s.stop();
+    let moved: Vec<&str> = report
+        .lines()
+        .filter_map(|l| l.strip_prefix("MOVED "))
+        .collect();
+    assert_eq!(moved, ["link", "rename"], "{report}");
+    let git_mv = if vcs == "git" {
+        "GIT-MV ok"
+    } else {
+        "GIT-MV failed"
+    };
+    assert!(report.lines().any(|l| l == git_mv), "{vcs}: {report}");
+    assert_eq!(reached(&report), Vec::<&str>::new(), "{report}");
+    let worktree = s.workspace.join(".crew/worktrees/a");
+    assert!(worktree.join("d/g").exists() && worktree.join("e/r").exists());
 }
 
 #[test]
@@ -724,6 +831,9 @@ fn orchestrator_reads_but_cannot_write_the_checkout() {
         reach("crew-db", &format!("cat '{w}/.crew/crew.db'")),
         reach("other-agent", &format!("ls '{w}/.crew/agents/b'")),
         reach("git-dir", &format!("cat '{w}/.git/HEAD'")),
+    ) + &reach(
+        "jj-repo",
+        &format!("cat '{w}/.crew/jj/.jj/repo/store/git_target'"),
     ) + &format!("echo \"agents: $(ls '{w}/.crew/agents' | tr '\\n' ' ')\"\n");
     let mut team = sandboxed(
         &s,
@@ -741,6 +851,10 @@ fn orchestrator_reads_but_cannot_write_the_checkout() {
     assert!(report.contains("agents: orchestrator \n"), "{report}");
     assert_eq!(reached(&report), Vec::<&str>::new(), "{report}");
     assert!(ws.join(".crew/agents/b").is_dir() && ws.join(".crew/crew.db").exists());
+    if on_jj() {
+        // Control: jj's repository is there, outside.
+        assert!(ws.join(".crew/jj/.jj/repo/store/git_target").is_file());
+    }
     assert!(!ws.join("new.txt").exists());
     assert_eq!(
         std::fs::read_to_string(ws.join("readme.txt")).unwrap(),
@@ -1051,7 +1165,7 @@ fn integrate_hooks_have_no_authority() {
     );
     workspace_repo(&s, &[]);
     repo_config(&s, "core.hooksPath", ".githooks");
-    let team = sandboxed(
+    let team = sandboxed_git(
         &s,
         vec![agent(
             "a",
@@ -1127,7 +1241,7 @@ fn git_status_ignores_agent_fsmonitor() {
             )
         ),
     );
-    s.run(&sandboxed(&s, vec![probing(&s, "a", &script)], vec![]));
+    s.run(&sandboxed_git(&s, vec![probing(&s, "a", &script)], vec![]));
     let report = report(&s, "a");
     assert_eq!(reached(&report), Vec::<&str>::new(), "{report}");
     assert_eq!(
@@ -1503,7 +1617,8 @@ fn host_toolchain_layout_starts() {
     symlink(&rustup, home.join(".rustup")).unwrap();
     std::fs::write(home.join(".gitconfig"), "[user]\n\tname = fixture\n").unwrap();
     // The agent's CLI: it checks its tools, as a CLI's own tool calls
-    // would, then runs the fake Claude Code.
+    // would, then runs the fake Claude Code. git's configuration is read
+    // from its home: plain git does not run in a jj workspace.
     let versions = home.join(".local/share/claude/versions");
     std::fs::create_dir_all(&versions).unwrap();
     write_executable(
@@ -1512,7 +1627,8 @@ fn host_toolchain_layout_starts() {
             r#"#!/bin/sh
 {{ cargo --version && echo 'WORKS cargo'
   git --version && echo 'WORKS git'
-  git config user.name | grep -q fixture && echo 'WORKS gitconfig'
+  (cd "$HOME" && git config --global user.name) | grep -q fixture && echo 'WORKS gitconfig'
+  jj --version && echo 'WORKS jj'
 }} > "$HOME/report" 2>&1
 exec '{}' fake-cli claude "$@"
 "#,
@@ -1526,15 +1642,22 @@ exec '{}' fake-cli claude "$@"
             .find(|d| d.join(program).is_file())
             .unwrap()
     };
-    let path = std::env::join_paths([
-        home.join(".local/bin"),
-        home.join(".cargo/bin"),
-        dir_of("git"),
-        dir_of("bwrap"),
-        PathBuf::from("/run/current-system/sw/bin"),
-        PathBuf::from("/usr/bin"),
-        PathBuf::from("/bin"),
-    ])
+    // jj too, when there is one: the team runs on it, and an agent can
+    // run it itself.
+    let jj_dir = real_jj().map(|jj| jj.parent().unwrap().to_path_buf());
+    let path = std::env::join_paths(
+        [
+            home.join(".local/bin"),
+            home.join(".cargo/bin"),
+            dir_of("git"),
+            dir_of("bwrap"),
+            PathBuf::from("/run/current-system/sw/bin"),
+            PathBuf::from("/usr/bin"),
+            PathBuf::from("/bin"),
+        ]
+        .into_iter()
+        .chain(jj_dir.clone()),
+    )
     .unwrap();
 
     let team = sandboxed(
@@ -1577,17 +1700,22 @@ exec '{}' fake-cli claude "$@"
         .lines()
         .filter_map(|l| l.strip_prefix("WORKS "))
         .collect();
-    assert_eq!(works, ["cargo", "git", "gitconfig"], "{report}");
+    let mut expected = vec!["cargo", "git", "gitconfig"];
+    if jj_dir.is_some_and(|d| d.join("jj").is_file()) {
+        expected.push("jj");
+    }
+    assert_eq!(works, expected, "{report}");
     s.stop();
 }
 
-/// Two flat installations of `codex` and `git` (each program a file directly
-/// in its directory, the case where the profile leaves that directory out of
-/// the sandbox), beside the crew binary: `first/` and `second/`. Each notes
-/// which installation ran: `codex` in `$CODEX_HOME/ran`, `git` (when run for
-/// an agent) in `<A>/rw/git-ran`. Ahead of both on PATH, the crew binary's
-/// own directory (left out too: the binary is bound by itself); in
-/// `second/`, a `crew` that notes it ran in `<A>/rw/crew-fallback`.
+/// Two flat installations of `codex`, `git` and, when there is a jj, `jj`
+/// (each program a file directly in its directory, the case where the
+/// profile leaves that directory out of the sandbox), beside the crew
+/// binary: `first/` and `second/`. Each notes which installation ran:
+/// `codex` in `$CODEX_HOME/ran`, `git` and `jj` (when run for an agent) in
+/// `<A>/rw/vcs-ran`. Ahead of both on PATH, the crew binary's own directory
+/// (left out too: the binary is bound by itself); in `second/`, a `crew`
+/// that notes it ran in `<A>/rw/crew-fallback`.
 fn two_installations() -> (tempfile::TempDir, String) {
     let dir = tempfile::tempdir_in(Path::new(CREW).parent().unwrap()).unwrap();
     let base = dir.path().canonicalize().unwrap();
@@ -1604,11 +1732,17 @@ fn two_installations() -> (tempfile::TempDir, String) {
         let codex = format!(
             "#!/bin/sh\necho \"{which} $1\" >> \"$CODEX_HOME/ran\"\nexec '{CREW}' fake-cli codex \"$@\"\n"
         );
-        let git = format!(
-            "#!/bin/sh\n[ -n \"$CREW_IDENTITY\" ] && echo {which} >> \"$(dirname \"$CREW_IDENTITY\")/rw/git-ran\"\nexec '{}' \"$@\"\n",
-            git.display()
-        );
-        for (name, script) in [("codex", codex), ("git", git)] {
+        let vcs = |real: &Path| {
+            format!(
+                "#!/bin/sh\n[ -n \"$CREW_IDENTITY\" ] && echo {which} >> \"$(dirname \"$CREW_IDENTITY\")/rw/vcs-ran\"\nexec '{}' \"$@\"\n",
+                real.display()
+            )
+        };
+        let mut programs = vec![("codex", codex), ("git", vcs(&git))];
+        if let Some(jj) = real_jj() {
+            programs.push(("jj", vcs(&jj)));
+        }
+        for (name, script) in programs {
             write_executable(&bin.join(name), &script);
         }
     }
@@ -1681,7 +1815,7 @@ fn each_sandboxed_launch_runs_the_cli_the_daemon_found_not_another() {
     s.wait_for("the queue command", || {
         std::fs::read_to_string(&ran).is_ok_and(|r| r.lines().any(|l| l.ends_with(" queue")))
     });
-    // The worker's commit: its git, in its sandbox.
+    // The worker's commit: its git or jj, in its sandbox.
     let done = s.wait("the task", |snap| {
         matches!(
             find_task(snap, "t").status,
@@ -1689,7 +1823,7 @@ fn each_sandboxed_launch_runs_the_cli_the_daemon_found_not_another() {
         )
     });
     assert_eq!(find_task(&done, "t").status, TaskStatus::Done);
-    let git_ran = s.workspace.join(".crew/agents/w/rw/git-ran");
+    let git_ran = s.workspace.join(".crew/agents/w/rw/vcs-ran");
     let codex = std::fs::read_to_string(&ran).unwrap();
     let git = std::fs::read_to_string(&git_ran).unwrap_or_default();
     let crew_fallback = s.workspace.join(".crew/agents/w/rw/crew-fallback").exists();
@@ -1705,7 +1839,7 @@ fn each_sandboxed_launch_runs_the_cli_the_daemon_found_not_another() {
     );
     let other_codex: Vec<&str> = codex.lines().filter(|l| !l.starts_with("first ")).collect();
     let other_git: Vec<&str> = git.lines().filter(|l| *l != "first").collect();
-    assert!(!git.is_empty(), "the worker's git left no note");
+    assert!(!git.is_empty(), "the worker's version control left no note");
     assert!(
         other_codex.is_empty() && other_git.is_empty() && !crew_fallback,
         "launches ran another program than the one found first: codex {other_codex:?}, git \
@@ -1719,11 +1853,17 @@ fn a_restart_writes_the_agents_next_identity_only_after_its_git_job_ends() {
         return;
     }
     let s = Session::new();
-    // A pre-commit hook that runs for a while, in the agent's git sandbox,
-    // which mounts the agent's directory.
-    let hook = "#!/bin/sh\necho > \"$HOME/hook-start\"\nsleep 3\necho > \"$HOME/hook-end\"\n";
+    // A commit that runs for a while, in the agent's git or jj sandbox,
+    // which mounts the agent's directory: git's pre-commit hook, or (jj
+    // runs no hooks) the jj crew runs, a wrapper that waits when it is
+    // asked to commit.
+    let slow = "echo > \"$HOME/hook-start\"\nsleep 3\necho > \"$HOME/hook-end\"\n";
     std::fs::create_dir_all(s.workspace.join(".githooks")).unwrap();
-    write_executable(&s.workspace.join(".githooks/pre-commit"), hook);
+    write_executable(
+        &s.workspace.join(".githooks/pre-commit"),
+        &format!("#!/bin/sh\n{slow}"),
+    );
+    let jj = jj_wrapper(&format!("case \" $* \" in *\" commit \"*)\n{slow};; esac"));
     workspace_repo(&s, &[]);
     repo_config(&s, "core.hooksPath", ".githooks");
     let team = sandboxed(
@@ -1739,7 +1879,10 @@ fn a_restart_writes_the_agents_next_identity_only_after_its_git_job_ends() {
         )],
         vec![task("t", "w", &[])],
     );
-    s.run(&team);
+    match &jj {
+        Some((_, wrapper)) => run_with_env(&s, &team, &[("CREW_JJ", wrapper.to_str().unwrap())]),
+        None => drop(s.run(&team)),
+    }
     let home = home_of(&s, "w");
     let identity = s.workspace.join(".crew/agents/w/identity.json");
     s.wait_for("the hook to start", || home.join("hook-start").exists());
@@ -1765,4 +1908,280 @@ fn a_restart_writes_the_agents_next_identity_only_after_its_git_job_ends() {
 its end)",
         ended.duration_since(written).unwrap_or_default()
     );
+}
+
+#[test]
+fn an_agent_cannot_repoint_or_configure_jjs_store() {
+    if require_sandbox().is_none() || !require_jj() {
+        return;
+    }
+    let s = Session::new();
+    workspace_repo(&s, &[]);
+    let (repo, w) = jj_paths(&s, "a");
+    // `: >>` opens a file for writing and writes nothing.
+    let script = [
+        reach(
+            "repo-config",
+            &format!("echo x > '{}'", repo.join("config.toml").display()),
+        ),
+        reach(
+            "workspace-config",
+            &format!(
+                "echo x > '{}'",
+                w.join(".jj/workspace-config.toml").display()
+            ),
+        ),
+        reach(
+            "git-target",
+            &format!(": >> '{}'", repo.join("store/git_target").display()),
+        ),
+        reach(
+            "workspace-repo",
+            &format!(": >> '{}'", w.join(".jj/repo").display()),
+        ),
+        reach(
+            "workspace-store",
+            &format!("touch '{}'", repo.join("workspace_store/x").display()),
+        ),
+        reach(
+            "move-dot-jj",
+            &format!("mv '{0}/.jj' '{0}/.jj-moved'", w.display()),
+        ),
+        "echo work > work.txt\n".to_string(),
+    ]
+    .concat();
+    s.run(&sandboxed(&s, vec![probing(&s, "a", &script)], vec![]));
+    let report = report(&s, "a");
+    // Positive controls: outside, every one of them can be written.
+    for file in [repo.join("store/git_target"), w.join(".jj/repo")] {
+        assert!(
+            std::fs::OpenOptions::new().append(true).open(&file).is_ok(),
+            "{} is not writable outside",
+            file.display()
+        );
+    }
+    for dir in [repo.clone(), w.join(".jj"), repo.join("workspace_store")] {
+        assert!(
+            tempfile::NamedTempFile::new_in(&dir).is_ok(),
+            "{} is not writable outside",
+            dir.display()
+        );
+    }
+    assert_eq!(reached(&report), Vec::<&str>::new(), "{report}");
+    assert!(!repo.join("config.toml").exists());
+    assert!(!w.join(".jj/workspace-config.toml").exists());
+    assert!(w.join(".jj").is_dir() && !w.join(".jj-moved").exists());
+    // And its jj still works: the commit lands on its branch.
+    let out = s.ctl("a", &["tool", "git_commit", r#"{"message":"work"}"#]);
+    let said = String::from_utf8_lossy(&out.stdout);
+    let sha = said
+        .lines()
+        .find_map(|l| l.strip_prefix("Full id: "))
+        .unwrap_or_else(|| panic!("{said}{}", common::stderr(&out)));
+    let branch = Command::new("git")
+        .arg("-C")
+        .arg(&s.workspace)
+        .args(["rev-parse", "refs/heads/agents/a"])
+        .output()
+        .unwrap();
+    assert_eq!(String::from_utf8_lossy(&branch.stdout).trim(), sha.trim());
+    s.stop();
+}
+
+#[test]
+fn sandboxed_agents_pick_each_others_commits_and_integrate() {
+    if require_sandbox().is_none() {
+        return;
+    }
+    let s = Session::new();
+    workspace_repo(&s, &[]);
+    let team = sandboxed(
+        &s,
+        vec![
+            agent(
+                "db",
+                "",
+                &[
+                    "--on-task=write schema.sql CREATE TABLE t (id INTEGER);",
+                    "--on-task=commit Add schema",
+                    "--on-task=done schema",
+                ],
+            ),
+            agent(
+                "rival",
+                "",
+                &[
+                    "--on-task=write schema.sql CREATE TABLE other (x TEXT);",
+                    "--on-task=commit Rival schema",
+                    "--on-task=done rival schema",
+                ],
+            ),
+            agent("ledger", "", &[]),
+        ],
+        vec![task("schema", "db", &[]), task("rival", "rival", &[])],
+    );
+    s.run(&team);
+    let done = s.wait("both tasks", |snap| {
+        ["schema", "rival"].iter().all(|t| {
+            matches!(
+                find_task(snap, t).status,
+                TaskStatus::Done | TaskStatus::Failed
+            )
+        })
+    });
+    for t in ["schema", "rival"] {
+        let task = find_task(&done, t);
+        assert_eq!(task.status, TaskStatus::Done, "{t}: {:?}", task.note);
+    }
+    let schema = find_task(&done, "schema").artifacts[0].value.clone();
+    let worktree = |id: &str| s.workspace.join(".crew/worktrees").join(id);
+    let pick = |who: &str| {
+        let out = s.ctl(
+            who,
+            &[
+                "tool",
+                "git_cherry_pick",
+                &format!(r#"{{"commit":"{schema}"}}"#),
+            ],
+        );
+        format!(
+            "{}{}",
+            String::from_utf8_lossy(&out.stdout),
+            common::stderr(&out)
+        )
+    };
+    // A clean pick, in ledger's sandbox.
+    let said = pick("ledger");
+    assert!(!said.contains("CONFLICT"), "{said}");
+    assert_eq!(
+        std::fs::read_to_string(worktree("ledger").join("schema.sql"))
+            .unwrap()
+            .trim(),
+        "CREATE TABLE t (id INTEGER);"
+    );
+    // A conflicting one, in rival's: rolled back.
+    let said = pick("rival");
+    assert!(said.contains("CONFLICT"), "{said}");
+    assert!(
+        std::fs::read_to_string(worktree("rival").join("schema.sql"))
+            .unwrap()
+            .contains("other")
+    );
+    // The integration, in the helper's sandbox.
+    let out = s.ok(&["integrate", "-C", &s.workspace.to_string_lossy()]);
+    let report: serde_json::Value = serde_json::from_str(&out).unwrap();
+    let merged: Vec<&str> = report["merged"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|v| v.as_str().unwrap())
+        .collect();
+    assert!(
+        merged.contains(&"db") && merged.contains(&"ledger"),
+        "{report}"
+    );
+    assert_eq!(report["conflicts"][0]["agent"], "rival", "{report}");
+    assert!(worktree("_integration").join("schema.sql").exists());
+    s.stop();
+}
+
+#[test]
+fn jjs_integration_runs_with_no_authority() {
+    if require_sandbox().is_none() || !require_jj() {
+        return;
+    }
+    let Some(socat) = require_tool("socat") else {
+        return;
+    };
+    let s = Session::new();
+    let marks = tempfile::tempdir_in(s.root()).unwrap();
+    let host_mark = marks.path().join("from-the-helper");
+    let tcp = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    let port = tcp.local_addr().unwrap().port();
+    std::thread::spawn(move || {
+        for mut stream in tcp.incoming().flatten() {
+            let _ = std::io::Write::write_all(&mut stream, b"pong\n");
+        }
+    });
+    std::fs::create_dir_all(&s.workspace).unwrap();
+    let ws = s.workspace.canonicalize().unwrap();
+    let identity = ws.join(".crew/agents/a/identity.json");
+    let checks = [
+        reach("host-file", &format!("touch '{}'", host_mark.display())),
+        reach("identity-file", &format!("cat '{}'", identity.display())),
+        reach("identity-env", "test -n \"$CREW_IDENTITY\""),
+        reach(
+            "daemon",
+            &format!("CREW_IDENTITY='{}' '{CREW}' ctl inbox", identity.display()),
+        ),
+        reach(
+            "network",
+            &format!(
+                "'{}' -t2 -T2 - TCP:127.0.0.1:{port} </dev/null | grep -q pong",
+                socat.display()
+            ),
+        ),
+    ]
+    .concat();
+    // jj runs no hooks, so the program the helper runs is what probes: the
+    // jj crew runs, a wrapper that checks what it reaches whenever it runs
+    // in the integration workspace, and writes a report there, which the
+    // project ignores.
+    let Some((_jj, wrapper)) = jj_wrapper(&format!(
+        "case \"$PWD\" in */_integration) {{\n{checks}\n}} > helper-report 2>&1;; esac"
+    )) else {
+        return;
+    };
+    workspace_repo(&s, &[(".gitignore", "helper-report\n")]);
+    let team = sandboxed(
+        &s,
+        vec![agent(
+            "a",
+            "",
+            &[
+                "--on-task=write a.txt work",
+                "--on-task=commit work",
+                "--on-task=done ok",
+            ],
+        )],
+        vec![task("t", "a", &[])],
+    );
+    run_with_env(&s, &team, &[("CREW_JJ", wrapper.to_str().unwrap())]);
+    s.wait("the task", |snap| {
+        find_task(snap, "t").status == TaskStatus::Done
+    });
+    assert_eq!(s.snapshot().session.vcs, "jj");
+    // Positive controls: every target is reachable from outside.
+    let control = Command::new("sh")
+        .args([
+            "-c",
+            &checks.replace(
+                &host_mark.display().to_string(),
+                &marks.path().join("control").display().to_string(),
+            ),
+        ])
+        .env("CREW_IDENTITY", &identity)
+        .output()
+        .unwrap();
+    let control = String::from_utf8_lossy(&control.stdout).into_owned();
+    assert_eq!(
+        reached(&control),
+        [
+            "host-file",
+            "identity-file",
+            "identity-env",
+            "daemon",
+            "network"
+        ],
+        "{control}"
+    );
+
+    let out = s.crew(&["integrate", "-C", &ws.display().to_string()]);
+    assert!(out.status.success(), "{}", common::stderr(&out));
+    let report_file = ws.join(".crew/worktrees/_integration/helper-report");
+    let report = std::fs::read_to_string(&report_file).expect("the wrapper ran in the helper");
+    assert_eq!(reached(&report), Vec::<&str>::new(), "{report}");
+    assert!(!host_mark.exists());
+    assert!(ws.join(".crew/worktrees/_integration/a.txt").exists());
+    s.stop();
 }

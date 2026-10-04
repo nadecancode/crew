@@ -3,4 +3,5 @@
 pub mod agent_box;
 pub mod ansi;
 pub mod canvas;
+pub mod mark;
 pub mod text;

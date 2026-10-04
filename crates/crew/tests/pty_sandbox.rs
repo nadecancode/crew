@@ -12,6 +12,7 @@ use crew::process::pty::PtyManager;
 use crew::process::{ProcEvent, ProcessManager};
 use crew::sandbox::probe;
 use crew::sandbox::profile::{self, Extra, Host, Request, Role, Session};
+use crew::vcs::Store;
 use crew_core::RuntimeKind;
 use tokio::sync::mpsc;
 
@@ -21,6 +22,7 @@ struct Layout {
     _dir: tempfile::TempDir,
     ws: PathBuf,
     git: PathBuf,
+    store: Store,
     run: PathBuf,
     socket: PathBuf,
     cargo: PathBuf,
@@ -58,6 +60,9 @@ fn layout() -> Layout {
     Layout {
         _dir: dir,
         ws,
+        store: Store::Git {
+            git_dir: git.clone(),
+        },
         git,
         run,
         socket,
@@ -91,7 +96,7 @@ fn launch(l: &Layout, available: &probe::Available, script: &str) -> LaunchSpec 
         &Request {
             session: Session {
                 workspace: &l.ws,
-                git_dir: &l.git,
+                store: &l.store,
                 runtime_dir: &l.run,
                 daemon_socket: &l.socket,
                 cargo_home: &l.cargo,
@@ -99,7 +104,7 @@ fn launch(l: &Layout, available: &probe::Available, script: &str) -> LaunchSpec 
             role: Role::Worker {
                 agent_dir: &agent,
                 worktree: &worktree,
-                admin: &admin,
+                admin: Some(&admin),
                 sidecar_dir: Some(&sidecar),
             },
             extra: &Extra::default(),

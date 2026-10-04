@@ -40,6 +40,12 @@ are for the hidden layout only; the optional removal of `refs/jj/` is gone
 (those refs can belong to the user's own jj repository; D12 leaves garbage
 collection for later); `_integration` publishes `agents/integration`.
 
+**Revision 5.** §sandbox, after the sandbox member's m-a111740fb9fb: inside a
+Landlock domain jj cannot store an object, because its git library renames
+across directories and Landlock denies that by default. The shim now allows
+it (design-b3.md §3.1, revision 8). The `strace` runs behind §sandbox were
+made without Landlock and could not show this.
+
 **Verification.** Every jj invocation below was run against jj 0.44.0
 (`nix shell nixpkgs#jujutsu`) in scratch repositories. `notes/jj-argv-check.sh`
 replays all of them in throwaway projects and asserts what this design relies
@@ -1011,6 +1017,42 @@ masks `.git` (native layout).
 - Plain git in the agent's shell can still reach `<git>` where it is mounted
   (`git --git-dir=…`), as today. The guard file (D9) is against habit, not
   against intent: it lies in `W` and the agent can delete it.
+
+### Landlock and renames (revision 5)
+
+Every sandbox enters a Landlock domain (design-b3.md §3.1). Landlock denies
+`rename` and `link` into another directory in every domain unless the
+ruleset handles `LANDLOCK_ACCESS_FS_REFER` and a rule allows it; the error
+is `EXDEV`.
+
+- jj writes a git object through gix as `<git>/objects/.tmp…` and renames it
+  to `<git>/objects/<xx>/<rest>`: across directories. In a sandbox every
+  snapshot and commit failed ("Could not turn temporary file into persisted
+  file … Invalid cross-device link"). **(observed)** by the sandbox member
+  with real bwrap and jj 0.44, and with `notes/landlock-refer-check/`:
+  the rename `objects/.tmp1` → `objects/19/abc` is `EXDEV` under the
+  sockets-only ruleset.
+- git is not affected in the object store (it creates `objects/xx/tmp_obj_…`
+  and links within that directory), but agents were: `git mv a d/a` and any
+  tool that renames across directories without a copy fallback failed in a
+  worktree, under either backend.
+- **Decision.** The shim handles REFER and allows it beneath `/`, for every
+  role and both backends (design-b3.md §3.1, revision 8, with the reasons).
+  Nothing in this section's mounts changes: what an agent can write is still
+  the table above, and the kernel still refuses a move from one bind to
+  another, so a file cannot leave the workspace for the store or the other
+  way round. Not a `Spec` field: there is nothing to configure.
+- jj's own files (operation store, index, `working_copy`, `store/extra`, ref
+  locks) are written by a temporary file in the same directory and need no
+  REFER; the sandbox member's `EXDEV` search over the jj end-to-end run is the
+  check.
+
+Tests (member sandbox, commit 834c915c): in a sandbox, jj commit, status,
+diff, a conflicting and a clean cherry-pick, a merge and the helper's
+integration pass; in a worktree `rename` and `link` across directories and
+`git mv` pass, under jj and git; a move from the workspace into the object
+store or `.jj`, inside a read-only mount, or of a socket into the sidecar
+directory is refused.
 
 ### `beneath.rs`
 

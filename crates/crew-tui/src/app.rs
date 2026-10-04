@@ -22,6 +22,7 @@ use ratatui::layout::Rect;
 use crate::anim::Anims;
 use crate::theme::{spinner_index, SPINNER_MS};
 use crate::transcript::{self, TLine};
+use crew_core::vcs::VcsEvent;
 
 pub const MAX_MESSAGES: usize = 500;
 pub const MAX_EVENTS: usize = 2000;
@@ -31,6 +32,8 @@ const OUTPUT_TIMEOUT_MS: i64 = 6000;
 /// A transcript read this recently is shown again as it is when the pane is
 /// scrolled up once more.
 const TRANSCRIPT_FRESH_MS: i64 = 5000;
+/// A pushed VCS event older than this starts no animation.
+const VCS_FRESH_MS: i64 = 10_000;
 /// How often the terminal is read while it is being typed into, and for
 /// how long after a key it is read back-to-back instead (the backend serves
 /// each read on its own clock; the gaps between reads are what crew can
@@ -379,6 +382,8 @@ pub struct App {
     pub models_error: Option<String>,
     dirty: bool,
     last_spin: usize,
+    /// Something was moving at the last tick: one more redraw shows it still.
+    was_moving: bool,
     last_second: i64,
 }
 
@@ -453,6 +458,7 @@ impl App {
             models_error: None,
             dirty: true,
             last_spin: 0,
+            was_moving: false,
             last_second: 0,
         }
     }
@@ -586,6 +592,7 @@ impl App {
         self.agents
             .iter()
             .any(|a| a.status == AgentStatus::Working && !a.paused)
+            || self.anims.running()
             || self.tasks.iter().any(|t| t.status == TaskStatus::Working)
     }
 
@@ -602,9 +609,11 @@ impl App {
     /// Advance time-driven state; marks the app dirty when a redraw is due.
     pub fn tick(&mut self, now: i64) {
         self.pop_question(now);
-        if self.anims.gc(now) || self.anims.pulse_live(now) {
+        let moving = self.anims.animating(now);
+        if self.anims.gc(now) || moving || self.was_moving {
             self.dirty = true;
         }
+        self.was_moving = moving;
         let spin = spinner_index(now);
         if spin != self.last_spin {
             self.last_spin = spin;
@@ -633,10 +642,10 @@ impl App {
     }
 
     /// How long the event loop may sleep before the next time-driven redraw:
-    /// frame rate while a pulse travels, spinner rate while agents work, and
+    /// frame rate while something moves (a pulse, a sweep), spinner rate while agents work, and
     /// once a second otherwise (for the clock).
     pub fn next_wake(&self, now: i64) -> Duration {
-        let ms = if self.anims.pulse_live(now) {
+        let ms = if self.anims.animating(now) {
             33
         } else {
             let mut ms = 1000 - now.rem_euclid(1000);
@@ -805,6 +814,7 @@ impl App {
         while self.events.len() > MAX_EVENTS {
             self.events.pop_front();
         }
+        self.resume_vcs(now);
         self.questions = snap.questions;
         let questions = &self.questions;
         self.answering
@@ -829,6 +839,9 @@ impl App {
                     .events
                     .back()
                     .is_none_or(|last| event.seq == 0 || event.seq > last.seq);
+                if fresh {
+                    self.start_vcs(&event, now);
+                }
                 if fresh
                     && matches!(
                         event.event_type.as_str(),
@@ -898,6 +911,7 @@ impl App {
             return;
         };
         self.agents.remove(index);
+        self.anims.remove_agent(id);
         // Subagents of a removed parent rejoin the ring until they go too.
         self.sort_agents();
         self.fix_selection(Some(index));
@@ -961,6 +975,33 @@ impl App {
         while self.messages.len() > MAX_MESSAGES {
             self.messages.pop_front();
         }
+    }
+
+    /// A VCS event that just arrived starts its animation, unless it is
+    /// already old (a reconnect replays what the daemon kept).
+    fn start_vcs(&mut self, event: &Event, now: i64) {
+        let Some(vcs) = VcsEvent::from_event(event) else {
+            return;
+        };
+        if self.server_now(now) - event.timestamp > VCS_FRESH_MS {
+            // Too late to play, not too late to end what is still shown as
+            // running.
+            self.anims.end_op(&vcs.op);
+            return;
+        }
+        self.anims.on_vcs(&vcs, now);
+    }
+
+    /// After a snapshot: what still runs shows as running, nothing else.
+    fn resume_vcs(&mut self, now: i64) {
+        let server_now = self.server_now(now);
+        let parsed: Vec<(VcsEvent, i64)> = self
+            .events
+            .iter()
+            .filter_map(|e| Some((VcsEvent::from_event(e)?, (server_now - e.timestamp).max(0))))
+            .collect();
+        self.anims
+            .resume(parsed.iter().map(|(e, age)| (e, *age)), now);
     }
 
     fn add_event(&mut self, event: Event) {
@@ -1980,5 +2021,256 @@ mod tests {
         let mut busy = loaded();
         busy.anims = Anims::default();
         assert!(busy.next_wake(10_250) <= Duration::from_millis(SPINNER_MS as u64));
+    }
+
+    // ---- version control animations ---------------------------------------
+
+    use crate::anim::{MarkKind, MARK_MS, MARK_SWEEP_MS, RUNNING_MAX_MS};
+    use crew_core::vcs::{VcsAction, VcsOutcome};
+
+    const T: i64 = 1_000_000;
+
+    /// A team with nothing working: no spinner, nothing moving.
+    fn calm() -> App {
+        let mut app = loaded();
+        for agent in &mut app.agents {
+            agent.status = AgentStatus::Done;
+        }
+        for task in &mut app.tasks {
+            task.status = TaskStatus::Done;
+        }
+        app.anims = Anims::default();
+        app
+    }
+
+    fn vcs_push(app: &mut App, seq: i64, ts: i64, now: i64, event: VcsEvent) {
+        app.apply_push(Push::Event(fixture::vcs_event(seq, ts, "vcs", event)), now);
+    }
+
+    fn commit_event(agent: &str, outcome: VcsOutcome, op: &str) -> VcsEvent {
+        VcsEvent {
+            commit: Some("1a2b3c4d5e6f".into()),
+            ..fixture::vcs(VcsAction::Commit, outcome, op, agent)
+        }
+    }
+
+    fn merge_event(outcome: VcsOutcome, op: &str) -> VcsEvent {
+        VcsEvent {
+            peer: Some("claude-5".into()),
+            ..fixture::vcs(VcsAction::Merge, outcome, op, "claude-3")
+        }
+    }
+
+    #[test]
+    fn a_live_commit_wakes_at_frame_rate_then_settles() {
+        let mut app = calm();
+        app.tick(T);
+        app.take_dirty();
+        assert!(app.next_wake(T) > Duration::from_millis(33));
+        vcs_push(
+            &mut app,
+            900,
+            T,
+            T,
+            commit_event("claude-3", VcsOutcome::Ok, "v1"),
+        );
+        assert!(app.take_dirty());
+        assert_eq!(app.next_wake(T + 10), Duration::from_millis(33));
+        app.tick(T + MARK_SWEEP_MS - 10);
+        assert!(app.take_dirty());
+        // The sweep is over: one more redraw clears its last frame ...
+        app.tick(T + MARK_SWEEP_MS + 5);
+        assert!(app.take_dirty());
+        // ... then nothing until the label expires.
+        app.tick(T + MARK_SWEEP_MS + 60);
+        assert!(!app.take_dirty());
+        let wake = app.next_wake(T + MARK_SWEEP_MS + 60);
+        assert!(wake > Duration::from_millis(33), "{wake:?}");
+        app.tick(T + MARK_MS);
+        assert!(app.take_dirty());
+        assert!(app.anims.marks.is_empty());
+        // Idle again: about once a second.
+        let wake = app.next_wake(T + MARK_MS + 250);
+        assert!(wake > Duration::from_millis(33) && wake <= Duration::from_millis(1000));
+    }
+
+    #[test]
+    fn a_running_merge_wakes_at_the_spinner_rate_until_it_ends() {
+        let mut app = calm();
+        app.take_dirty();
+        vcs_push(&mut app, 900, T, T, merge_event(VcsOutcome::Started, "v1"));
+        assert!(app.take_dirty());
+        assert!(app.anims.running());
+        // 50 ms in is a spinner step: the next one is a full step away, not a frame.
+        assert_eq!(
+            app.next_wake(T + 50),
+            Duration::from_millis(SPINNER_MS as u64)
+        );
+        // The spinner turns: the app redraws each step.
+        app.tick(T + 20);
+        app.take_dirty();
+        app.tick(T + SPINNER_MS + 20);
+        assert!(app.take_dirty());
+        // Long after, still running (until the cap), still not frame rate.
+        assert_eq!(
+            app.next_wake(T + 300_050),
+            Duration::from_millis(SPINNER_MS as u64)
+        );
+        vcs_push(
+            &mut app,
+            901,
+            T + 400,
+            T + 400,
+            merge_event(VcsOutcome::Ok, "v1"),
+        );
+        assert!(!app.anims.running());
+        assert_eq!(app.next_wake(T + 410), Duration::from_millis(33));
+        // A start that never ends is dropped at the cap.
+        vcs_push(
+            &mut app,
+            902,
+            T + 5000,
+            T + 5000,
+            merge_event(VcsOutcome::Started, "v2"),
+        );
+        app.tick(T + 5000 + RUNNING_MAX_MS);
+        assert!(!app.anims.running());
+    }
+
+    #[test]
+    fn a_snapshot_restores_what_still_runs_and_nothing_else() {
+        let snap = |events: Vec<VcsEvent>| {
+            let mut snap = fixture::snapshot(T);
+            for (i, e) in events.into_iter().enumerate() {
+                snap.events.push(fixture::vcs_event(
+                    900 + i as i64,
+                    T - 5000 + i as i64,
+                    "vcs",
+                    e,
+                ));
+            }
+            snap
+        };
+        let mut app = calm();
+        app.apply_snapshot(snap(vec![merge_event(VcsOutcome::Started, "v1")]), T);
+        assert!(app.anims.running());
+        assert!(matches!(app.anims.marks[0].kind, MarkKind::Running { .. }));
+        assert!(app.anims.links.iter().any(|l| l.held.is_some()));
+        assert!(!app.anims.animating(T));
+        // Started and ended, and plain history: nothing shows.
+        let mut app = calm();
+        app.apply_snapshot(
+            snap(vec![
+                merge_event(VcsOutcome::Started, "v1"),
+                merge_event(VcsOutcome::Ok, "v1"),
+                commit_event("claude-1", VcsOutcome::Ok, "v2"),
+                fixture::vcs(VcsAction::Status, VcsOutcome::Ok, "v3", "claude-2"),
+            ]),
+            T,
+        );
+        assert!(app.anims.marks.is_empty() && app.anims.links.is_empty());
+        // A reconnect clears what a snapshot no longer says is running.
+        let mut app = calm();
+        app.apply_snapshot(snap(vec![merge_event(VcsOutcome::Started, "v1")]), T);
+        app.apply_snapshot(snap(vec![]), T + 100);
+        assert!(app.anims.marks.is_empty() && app.anims.links.is_empty());
+    }
+
+    #[test]
+    fn old_and_unknown_vcs_events_start_nothing() {
+        let mut app = calm();
+        // 11 s old.
+        vcs_push(
+            &mut app,
+            900,
+            T - 11_000,
+            T,
+            commit_event("claude-1", VcsOutcome::Ok, "v1"),
+        );
+        assert!(app.anims.marks.is_empty());
+        // Just inside the window.
+        vcs_push(
+            &mut app,
+            901,
+            T - 9_000,
+            T,
+            commit_event("claude-1", VcsOutcome::Ok, "v2"),
+        );
+        assert_eq!(app.anims.marks.len(), 1);
+        // An action this build does not know: logged, nothing animates.
+        let mut app = calm();
+        let mut unknown = fixture::vcs_event(
+            900,
+            T,
+            "vcs",
+            commit_event("claude-1", VcsOutcome::Ok, "v3"),
+        );
+        unknown.event_type = "vcs.rebase".into();
+        unknown.data["action"] = serde_json::json!("rebase");
+        app.apply_push(Push::Event(unknown.clone()), T);
+        let mut unknown_outcome = fixture::vcs_event(
+            901,
+            T,
+            "vcs",
+            commit_event("claude-1", VcsOutcome::Ok, "v4"),
+        );
+        unknown_outcome.data["outcome"] = serde_json::json!("deferred");
+        app.apply_push(Push::Event(unknown_outcome), T);
+        assert!(app.anims.marks.is_empty());
+        assert!(app.events.iter().any(|e| e.event_type == "vcs.rebase"));
+        assert_eq!(app.events.iter().filter(|e| e.seq >= 900).count(), 2);
+        // A replayed event (stale seq) is not new either.
+        vcs_push(
+            &mut app,
+            901,
+            T,
+            T,
+            commit_event("claude-1", VcsOutcome::Ok, "v5"),
+        );
+        assert!(app.anims.marks.is_empty());
+    }
+
+    #[test]
+    fn a_removed_agent_takes_its_running_operation_with_it() {
+        let mut app = calm();
+        vcs_push(&mut app, 900, T, T, merge_event(VcsOutcome::Started, "v1"));
+        assert!(app.anims.running());
+        app.apply_push(
+            Push::AgentRemoved {
+                id: "claude-3".into(),
+            },
+            T + 10,
+        );
+        assert!(!app.anims.running());
+        assert!(app.anims.links.is_empty() && app.anims.marks.is_empty());
+        let wake = app.next_wake(T + 20_050);
+        assert_eq!(wake, Duration::from_millis(950));
+        // The peer going away drops the held link too.
+        let mut app = calm();
+        vcs_push(&mut app, 900, T, T, merge_event(VcsOutcome::Started, "v1"));
+        app.apply_push(
+            Push::AgentRemoved {
+                id: "claude-5".into(),
+            },
+            T + 10,
+        );
+        assert!(app.anims.links.is_empty());
+    }
+
+    #[test]
+    fn a_late_terminal_event_still_ends_the_running_mark() {
+        let mut app = calm();
+        vcs_push(&mut app, 900, T, T, merge_event(VcsOutcome::Started, "v77"));
+        assert!(app.anims.running());
+        // Delivered 11 s after it happened: no animation, but no spinner either.
+        vcs_push(
+            &mut app,
+            901,
+            T + 1000,
+            T + 12_000,
+            merge_event(VcsOutcome::Ok, "v77"),
+        );
+        assert!(!app.anims.running());
+        assert!(app.anims.links.is_empty() && app.anims.marks.is_empty());
     }
 }
