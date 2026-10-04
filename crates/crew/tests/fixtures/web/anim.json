@@ -1,0 +1,2942 @@
+{
+  "cases": [
+    {
+      "checks": [
+        {
+          "animating": true,
+          "at": 0,
+          "links": [
+            {
+              "from": "claude-1",
+              "held": false,
+              "kind": "p2p",
+              "live": true,
+              "pulse": 0.0,
+              "to": "claude-2",
+              "tone": null
+            }
+          ],
+          "marks": [],
+          "next_expiry": 3000,
+          "running": false,
+          "shown": {}
+        },
+        {
+          "animating": true,
+          "at": 450,
+          "links": [
+            {
+              "from": "claude-1",
+              "held": false,
+              "kind": "p2p",
+              "live": true,
+              "pulse": 0.5,
+              "to": "claude-2",
+              "tone": null
+            }
+          ],
+          "marks": [],
+          "next_expiry": 2550,
+          "running": false,
+          "shown": {}
+        },
+        {
+          "animating": true,
+          "at": 899,
+          "links": [
+            {
+              "from": "claude-1",
+              "held": false,
+              "kind": "p2p",
+              "live": true,
+              "pulse": 1.0,
+              "to": "claude-2",
+              "tone": null
+            }
+          ],
+          "marks": [],
+          "next_expiry": 2101,
+          "running": false,
+          "shown": {}
+        },
+        {
+          "animating": false,
+          "at": 900,
+          "links": [
+            {
+              "from": "claude-1",
+              "held": false,
+              "kind": "p2p",
+              "live": true,
+              "pulse": null,
+              "to": "claude-2",
+              "tone": null
+            }
+          ],
+          "marks": [],
+          "next_expiry": 2100,
+          "running": false,
+          "shown": {}
+        },
+        {
+          "animating": false,
+          "at": 2999,
+          "links": [
+            {
+              "from": "claude-1",
+              "held": false,
+              "kind": "p2p",
+              "live": true,
+              "pulse": null,
+              "to": "claude-2",
+              "tone": null
+            }
+          ],
+          "marks": [],
+          "next_expiry": 1,
+          "running": false,
+          "shown": {}
+        },
+        {
+          "animating": false,
+          "at": 3000,
+          "links": [],
+          "marks": [],
+          "next_expiry": null,
+          "running": false,
+          "shown": {}
+        }
+      ],
+      "name": "message: peer to peer, pulses and expires",
+      "steps": [
+        {
+          "at": 0,
+          "message": {
+            "body": "x",
+            "correlation_id": null,
+            "from": "claude-1",
+            "id": "m-0001",
+            "metadata": null,
+            "reply_to": null,
+            "timestamp": 0,
+            "to": "claude-2",
+            "type": "message"
+          }
+        }
+      ],
+      "workers": [
+        "claude-1",
+        "claude-2",
+        "claude-3"
+      ]
+    },
+    {
+      "checks": [
+        {
+          "animating": true,
+          "at": 300,
+          "links": [
+            {
+              "from": "orchestrator",
+              "held": false,
+              "kind": "orchestrator",
+              "live": true,
+              "pulse": 0.222,
+              "to": "claude-1",
+              "tone": null
+            },
+            {
+              "from": "claude-2",
+              "held": false,
+              "kind": "orchestrator",
+              "live": true,
+              "pulse": 0.099,
+              "to": "orchestrator",
+              "tone": null
+            },
+            {
+              "from": "orchestrator",
+              "held": false,
+              "kind": "orchestrator",
+              "live": true,
+              "pulse": 0.025,
+              "to": "claude-3",
+              "tone": null
+            },
+            {
+              "from": "claude-3",
+              "held": false,
+              "kind": "orchestrator",
+              "live": true,
+              "pulse": 0.0,
+              "to": "orchestrator",
+              "tone": null
+            }
+          ],
+          "marks": [],
+          "next_expiry": 2700,
+          "running": false,
+          "shown": {}
+        },
+        {
+          "animating": false,
+          "at": 1200,
+          "links": [
+            {
+              "from": "orchestrator",
+              "held": false,
+              "kind": "orchestrator",
+              "live": true,
+              "pulse": null,
+              "to": "claude-1",
+              "tone": null
+            },
+            {
+              "from": "claude-2",
+              "held": false,
+              "kind": "orchestrator",
+              "live": true,
+              "pulse": null,
+              "to": "orchestrator",
+              "tone": null
+            },
+            {
+              "from": "orchestrator",
+              "held": false,
+              "kind": "orchestrator",
+              "live": true,
+              "pulse": null,
+              "to": "claude-3",
+              "tone": null
+            },
+            {
+              "from": "claude-3",
+              "held": false,
+              "kind": "orchestrator",
+              "live": true,
+              "pulse": null,
+              "to": "orchestrator",
+              "tone": null
+            }
+          ],
+          "marks": [],
+          "next_expiry": 1800,
+          "running": false,
+          "shown": {}
+        }
+      ],
+      "name": "message: orchestrator and operator traffic uses the hub",
+      "steps": [
+        {
+          "at": 0,
+          "message": {
+            "body": "x",
+            "correlation_id": null,
+            "from": "orchestrator",
+            "id": "m-0001",
+            "metadata": null,
+            "reply_to": null,
+            "timestamp": 0,
+            "to": "claude-1",
+            "type": "message"
+          }
+        },
+        {
+          "at": 100,
+          "message": {
+            "body": "x",
+            "correlation_id": null,
+            "from": "claude-2",
+            "id": "m-0002",
+            "metadata": null,
+            "reply_to": null,
+            "timestamp": 0,
+            "to": "orchestrator",
+            "type": "message"
+          }
+        },
+        {
+          "at": 200,
+          "message": {
+            "body": "x",
+            "correlation_id": null,
+            "from": "operator",
+            "id": "m-0003",
+            "metadata": null,
+            "reply_to": null,
+            "timestamp": 0,
+            "to": "claude-3",
+            "type": "message"
+          }
+        },
+        {
+          "at": 300,
+          "message": {
+            "body": "x",
+            "correlation_id": null,
+            "from": "claude-3",
+            "id": "m-0004",
+            "metadata": null,
+            "reply_to": null,
+            "timestamp": 0,
+            "to": "operator",
+            "type": "question"
+          }
+        }
+      ],
+      "workers": [
+        "claude-1",
+        "claude-2",
+        "claude-3"
+      ]
+    },
+    {
+      "checks": [
+        {
+          "animating": true,
+          "at": 100,
+          "links": [
+            {
+              "from": "claude-1",
+              "held": false,
+              "kind": "broadcast",
+              "live": true,
+              "pulse": 0.025,
+              "to": "claude-2",
+              "tone": null
+            },
+            {
+              "from": "claude-1",
+              "held": false,
+              "kind": "broadcast",
+              "live": true,
+              "pulse": 0.025,
+              "to": "claude-3",
+              "tone": null
+            },
+            {
+              "from": "orchestrator",
+              "held": false,
+              "kind": "orchestrator",
+              "live": true,
+              "pulse": 0.0,
+              "to": "claude-1",
+              "tone": null
+            },
+            {
+              "from": "orchestrator",
+              "held": false,
+              "kind": "orchestrator",
+              "live": true,
+              "pulse": 0.0,
+              "to": "claude-2",
+              "tone": null
+            },
+            {
+              "from": "orchestrator",
+              "held": false,
+              "kind": "orchestrator",
+              "live": true,
+              "pulse": 0.0,
+              "to": "claude-3",
+              "tone": null
+            }
+          ],
+          "marks": [],
+          "next_expiry": 2900,
+          "running": false,
+          "shown": {}
+        },
+        {
+          "animating": true,
+          "at": 500,
+          "links": [
+            {
+              "from": "claude-1",
+              "held": false,
+              "kind": "broadcast",
+              "live": true,
+              "pulse": 0.605,
+              "to": "claude-2",
+              "tone": null
+            },
+            {
+              "from": "claude-1",
+              "held": false,
+              "kind": "broadcast",
+              "live": true,
+              "pulse": 0.605,
+              "to": "claude-3",
+              "tone": null
+            },
+            {
+              "from": "orchestrator",
+              "held": false,
+              "kind": "orchestrator",
+              "live": true,
+              "pulse": 0.395,
+              "to": "claude-1",
+              "tone": null
+            },
+            {
+              "from": "orchestrator",
+              "held": false,
+              "kind": "orchestrator",
+              "live": true,
+              "pulse": 0.395,
+              "to": "claude-2",
+              "tone": null
+            },
+            {
+              "from": "orchestrator",
+              "held": false,
+              "kind": "orchestrator",
+              "live": true,
+              "pulse": 0.395,
+              "to": "claude-3",
+              "tone": null
+            }
+          ],
+          "marks": [],
+          "next_expiry": 2500,
+          "running": false,
+          "shown": {}
+        }
+      ],
+      "name": "message: a broadcast fans out to every other worker",
+      "steps": [
+        {
+          "at": 0,
+          "message": {
+            "body": "x",
+            "correlation_id": null,
+            "from": "claude-1",
+            "id": "m-0001",
+            "metadata": null,
+            "reply_to": null,
+            "timestamp": 0,
+            "to": "*",
+            "type": "message"
+          }
+        },
+        {
+          "at": 100,
+          "message": {
+            "body": "x",
+            "correlation_id": null,
+            "from": "orchestrator",
+            "id": "m-0002",
+            "metadata": null,
+            "reply_to": null,
+            "timestamp": 0,
+            "to": "*",
+            "type": "message"
+          }
+        }
+      ],
+      "workers": [
+        "claude-1",
+        "claude-2",
+        "claude-3"
+      ]
+    },
+    {
+      "checks": [
+        {
+          "animating": false,
+          "at": 1999,
+          "links": [
+            {
+              "from": "claude-1",
+              "held": false,
+              "kind": "p2p",
+              "live": true,
+              "pulse": null,
+              "to": "claude-2",
+              "tone": null
+            }
+          ],
+          "marks": [],
+          "next_expiry": 1001,
+          "running": false,
+          "shown": {}
+        },
+        {
+          "animating": true,
+          "at": 2000,
+          "links": [
+            {
+              "from": "claude-1",
+              "held": false,
+              "kind": "p2p",
+              "live": true,
+              "pulse": 0.0,
+              "to": "claude-2",
+              "tone": null
+            }
+          ],
+          "marks": [],
+          "next_expiry": 3000,
+          "running": false,
+          "shown": {}
+        },
+        {
+          "animating": true,
+          "at": 2450,
+          "links": [
+            {
+              "from": "claude-1",
+              "held": false,
+              "kind": "p2p",
+              "live": true,
+              "pulse": 0.5,
+              "to": "claude-2",
+              "tone": null
+            }
+          ],
+          "marks": [],
+          "next_expiry": 2550,
+          "running": false,
+          "shown": {}
+        },
+        {
+          "animating": false,
+          "at": 4999,
+          "links": [
+            {
+              "from": "claude-1",
+              "held": false,
+              "kind": "p2p",
+              "live": true,
+              "pulse": null,
+              "to": "claude-2",
+              "tone": null
+            }
+          ],
+          "marks": [],
+          "next_expiry": 1,
+          "running": false,
+          "shown": {}
+        },
+        {
+          "animating": false,
+          "at": 5000,
+          "links": [],
+          "marks": [],
+          "next_expiry": null,
+          "running": false,
+          "shown": {}
+        }
+      ],
+      "name": "message: a repeat restarts the same link",
+      "steps": [
+        {
+          "at": 0,
+          "message": {
+            "body": "x",
+            "correlation_id": null,
+            "from": "claude-1",
+            "id": "m-0001",
+            "metadata": null,
+            "reply_to": null,
+            "timestamp": 0,
+            "to": "claude-2",
+            "type": "message"
+          }
+        },
+        {
+          "at": 2000,
+          "message": {
+            "body": "x",
+            "correlation_id": null,
+            "from": "claude-1",
+            "id": "m-0002",
+            "metadata": null,
+            "reply_to": null,
+            "timestamp": 0,
+            "to": "claude-2",
+            "type": "message"
+          }
+        }
+      ],
+      "workers": [
+        "claude-1",
+        "claude-2",
+        "claude-3"
+      ]
+    },
+    {
+      "checks": [
+        {
+          "animating": true,
+          "at": 0,
+          "links": [],
+          "marks": [
+            {
+              "agent": "db",
+              "kind": "done",
+              "label": "◆ 1a2b3c4d",
+              "live": true,
+              "started": 0,
+              "sweep": 0.0,
+              "tone": "ok"
+            }
+          ],
+          "next_expiry": 2400,
+          "running": false,
+          "shown": {
+            "db": "◆ 1a2b3c4d"
+          }
+        },
+        {
+          "animating": true,
+          "at": 350,
+          "links": [],
+          "marks": [
+            {
+              "agent": "db",
+              "kind": "done",
+              "label": "◆ 1a2b3c4d",
+              "live": true,
+              "started": 0,
+              "sweep": 0.5,
+              "tone": "ok"
+            }
+          ],
+          "next_expiry": 2050,
+          "running": false,
+          "shown": {
+            "db": "◆ 1a2b3c4d"
+          }
+        },
+        {
+          "animating": false,
+          "at": 700,
+          "links": [],
+          "marks": [
+            {
+              "agent": "db",
+              "kind": "done",
+              "label": "◆ 1a2b3c4d",
+              "live": true,
+              "started": 0,
+              "sweep": null,
+              "tone": "ok"
+            }
+          ],
+          "next_expiry": 1700,
+          "running": false,
+          "shown": {
+            "db": "◆ 1a2b3c4d"
+          }
+        },
+        {
+          "animating": false,
+          "at": 2399,
+          "links": [],
+          "marks": [
+            {
+              "agent": "db",
+              "kind": "done",
+              "label": "◆ 1a2b3c4d",
+              "live": true,
+              "started": 0,
+              "sweep": null,
+              "tone": "ok"
+            }
+          ],
+          "next_expiry": 1,
+          "running": false,
+          "shown": {
+            "db": "◆ 1a2b3c4d"
+          }
+        },
+        {
+          "animating": false,
+          "at": 2400,
+          "links": [],
+          "marks": [],
+          "next_expiry": null,
+          "running": false,
+          "shown": {}
+        }
+      ],
+      "name": "commit: marks its agent with the short id",
+      "steps": [
+        {
+          "at": 0,
+          "vcs": {
+            "action": "commit",
+            "agent": "db",
+            "backend": "jj",
+            "commit": "1a2b3c4d0d1e2f3a4b5c6d7e8f9a0b1c2d3e4f5a",
+            "op": "v1",
+            "outcome": "ok"
+          }
+        }
+      ],
+      "workers": [
+        "db",
+        "ledger"
+      ]
+    },
+    {
+      "checks": [
+        {
+          "animating": true,
+          "at": 0,
+          "links": [
+            {
+              "from": "db",
+              "held": false,
+              "kind": "vcs",
+              "live": true,
+              "pulse": 0.0,
+              "to": "ledger",
+              "tone": "ok"
+            }
+          ],
+          "marks": [
+            {
+              "agent": "ledger",
+              "kind": "done",
+              "label": "◆ 7e8f9a0b",
+              "live": false,
+              "started": 900,
+              "sweep": null,
+              "tone": "ok"
+            }
+          ],
+          "next_expiry": 900,
+          "running": false,
+          "shown": {}
+        },
+        {
+          "animating": true,
+          "at": 450,
+          "links": [
+            {
+              "from": "db",
+              "held": false,
+              "kind": "vcs",
+              "live": true,
+              "pulse": 0.5,
+              "to": "ledger",
+              "tone": "ok"
+            }
+          ],
+          "marks": [
+            {
+              "agent": "ledger",
+              "kind": "done",
+              "label": "◆ 7e8f9a0b",
+              "live": false,
+              "started": 900,
+              "sweep": null,
+              "tone": "ok"
+            }
+          ],
+          "next_expiry": 450,
+          "running": false,
+          "shown": {}
+        },
+        {
+          "animating": true,
+          "at": 900,
+          "links": [
+            {
+              "from": "db",
+              "held": false,
+              "kind": "vcs",
+              "live": true,
+              "pulse": null,
+              "to": "ledger",
+              "tone": "ok"
+            }
+          ],
+          "marks": [
+            {
+              "agent": "ledger",
+              "kind": "done",
+              "label": "◆ 7e8f9a0b",
+              "live": true,
+              "started": 900,
+              "sweep": 0.0,
+              "tone": "ok"
+            }
+          ],
+          "next_expiry": 2100,
+          "running": false,
+          "shown": {
+            "ledger": "◆ 7e8f9a0b"
+          }
+        },
+        {
+          "animating": true,
+          "at": 1250,
+          "links": [
+            {
+              "from": "db",
+              "held": false,
+              "kind": "vcs",
+              "live": true,
+              "pulse": null,
+              "to": "ledger",
+              "tone": "ok"
+            }
+          ],
+          "marks": [
+            {
+              "agent": "ledger",
+              "kind": "done",
+              "label": "◆ 7e8f9a0b",
+              "live": true,
+              "started": 900,
+              "sweep": 0.5,
+              "tone": "ok"
+            }
+          ],
+          "next_expiry": 1750,
+          "running": false,
+          "shown": {
+            "ledger": "◆ 7e8f9a0b"
+          }
+        },
+        {
+          "animating": false,
+          "at": 3299,
+          "links": [],
+          "marks": [
+            {
+              "agent": "ledger",
+              "kind": "done",
+              "label": "◆ 7e8f9a0b",
+              "live": true,
+              "started": 900,
+              "sweep": null,
+              "tone": "ok"
+            }
+          ],
+          "next_expiry": 1,
+          "running": false,
+          "shown": {
+            "ledger": "◆ 7e8f9a0b"
+          }
+        },
+        {
+          "animating": false,
+          "at": 3300,
+          "links": [],
+          "marks": [],
+          "next_expiry": null,
+          "running": false,
+          "shown": {}
+        }
+      ],
+      "name": "cherry-pick: pulses from the peer and marks on arrival",
+      "steps": [
+        {
+          "at": 0,
+          "vcs": {
+            "action": "cherry_pick",
+            "agent": "ledger",
+            "backend": "jj",
+            "commit": "7e8f9a0b0d1e2f3a4b5c6d7e8f9a0b1c2d3e4f5a",
+            "op": "v1",
+            "outcome": "ok",
+            "peer": "db"
+          }
+        }
+      ],
+      "workers": [
+        "db",
+        "ledger"
+      ]
+    },
+    {
+      "checks": [
+        {
+          "animating": false,
+          "at": 100,
+          "links": [
+            {
+              "from": "db",
+              "held": true,
+              "kind": "vcs",
+              "live": true,
+              "pulse": null,
+              "to": "ledger",
+              "tone": "ok"
+            }
+          ],
+          "marks": [
+            {
+              "agent": "ledger",
+              "kind": "running",
+              "label": "merge db",
+              "live": true,
+              "started": 0,
+              "sweep": null,
+              "tone": "ok"
+            }
+          ],
+          "next_expiry": 599900,
+          "running": true,
+          "shown": {
+            "ledger": "merge db"
+          }
+        },
+        {
+          "animating": false,
+          "at": 3999,
+          "links": [
+            {
+              "from": "db",
+              "held": true,
+              "kind": "vcs",
+              "live": true,
+              "pulse": null,
+              "to": "ledger",
+              "tone": "ok"
+            }
+          ],
+          "marks": [
+            {
+              "agent": "ledger",
+              "kind": "running",
+              "label": "merge db",
+              "live": true,
+              "started": 0,
+              "sweep": null,
+              "tone": "ok"
+            }
+          ],
+          "next_expiry": 596001,
+          "running": true,
+          "shown": {
+            "ledger": "merge db"
+          }
+        },
+        {
+          "animating": true,
+          "at": 4000,
+          "links": [
+            {
+              "from": "db",
+              "held": false,
+              "kind": "vcs",
+              "live": true,
+              "pulse": 0.0,
+              "to": "ledger",
+              "tone": "ok"
+            }
+          ],
+          "marks": [
+            {
+              "agent": "ledger",
+              "kind": "done",
+              "label": "◆ 5e6f7a8b",
+              "live": false,
+              "started": 4900,
+              "sweep": null,
+              "tone": "ok"
+            }
+          ],
+          "next_expiry": 900,
+          "running": false,
+          "shown": {}
+        },
+        {
+          "animating": true,
+          "at": 4450,
+          "links": [
+            {
+              "from": "db",
+              "held": false,
+              "kind": "vcs",
+              "live": true,
+              "pulse": 0.5,
+              "to": "ledger",
+              "tone": "ok"
+            }
+          ],
+          "marks": [
+            {
+              "agent": "ledger",
+              "kind": "done",
+              "label": "◆ 5e6f7a8b",
+              "live": false,
+              "started": 4900,
+              "sweep": null,
+              "tone": "ok"
+            }
+          ],
+          "next_expiry": 450,
+          "running": false,
+          "shown": {}
+        },
+        {
+          "animating": true,
+          "at": 4900,
+          "links": [
+            {
+              "from": "db",
+              "held": false,
+              "kind": "vcs",
+              "live": true,
+              "pulse": null,
+              "to": "ledger",
+              "tone": "ok"
+            }
+          ],
+          "marks": [
+            {
+              "agent": "ledger",
+              "kind": "done",
+              "label": "◆ 5e6f7a8b",
+              "live": true,
+              "started": 4900,
+              "sweep": 0.0,
+              "tone": "ok"
+            }
+          ],
+          "next_expiry": 2100,
+          "running": false,
+          "shown": {
+            "ledger": "◆ 5e6f7a8b"
+          }
+        },
+        {
+          "animating": false,
+          "at": 7299,
+          "links": [],
+          "marks": [
+            {
+              "agent": "ledger",
+              "kind": "done",
+              "label": "◆ 5e6f7a8b",
+              "live": true,
+              "started": 4900,
+              "sweep": null,
+              "tone": "ok"
+            }
+          ],
+          "next_expiry": 1,
+          "running": false,
+          "shown": {
+            "ledger": "◆ 5e6f7a8b"
+          }
+        },
+        {
+          "animating": false,
+          "at": 7300,
+          "links": [],
+          "marks": [],
+          "next_expiry": null,
+          "running": false,
+          "shown": {}
+        }
+      ],
+      "name": "merge: started, then ok",
+      "steps": [
+        {
+          "at": 0,
+          "vcs": {
+            "action": "merge",
+            "agent": "ledger",
+            "backend": "jj",
+            "op": "v1",
+            "outcome": "started",
+            "peer": "db"
+          }
+        },
+        {
+          "at": 4000,
+          "vcs": {
+            "action": "merge",
+            "agent": "ledger",
+            "backend": "jj",
+            "commit": "5e6f7a8b0d1e2f3a4b5c6d7e8f9a0b1c2d3e4f5a",
+            "op": "v1",
+            "outcome": "ok",
+            "peer": "db"
+          }
+        }
+      ],
+      "workers": [
+        "db",
+        "ledger"
+      ]
+    },
+    {
+      "checks": [
+        {
+          "animating": true,
+          "at": 0,
+          "links": [
+            {
+              "from": "db",
+              "held": false,
+              "kind": "vcs",
+              "live": true,
+              "pulse": 0.0,
+              "to": "ledger",
+              "tone": "ok"
+            }
+          ],
+          "marks": [
+            {
+              "agent": "ledger",
+              "kind": "done",
+              "label": "◆ 5e6f7a8b",
+              "live": false,
+              "started": 900,
+              "sweep": null,
+              "tone": "ok"
+            }
+          ],
+          "next_expiry": 900,
+          "running": false,
+          "shown": {}
+        },
+        {
+          "animating": true,
+          "at": 450,
+          "links": [
+            {
+              "from": "db",
+              "held": false,
+              "kind": "vcs",
+              "live": true,
+              "pulse": 0.5,
+              "to": "ledger",
+              "tone": "ok"
+            }
+          ],
+          "marks": [
+            {
+              "agent": "ledger",
+              "kind": "done",
+              "label": "◆ 5e6f7a8b",
+              "live": false,
+              "started": 900,
+              "sweep": null,
+              "tone": "ok"
+            }
+          ],
+          "next_expiry": 450,
+          "running": false,
+          "shown": {}
+        },
+        {
+          "animating": true,
+          "at": 900,
+          "links": [
+            {
+              "from": "db",
+              "held": false,
+              "kind": "vcs",
+              "live": true,
+              "pulse": null,
+              "to": "ledger",
+              "tone": "ok"
+            }
+          ],
+          "marks": [
+            {
+              "agent": "ledger",
+              "kind": "done",
+              "label": "◆ 5e6f7a8b",
+              "live": true,
+              "started": 900,
+              "sweep": 0.0,
+              "tone": "ok"
+            }
+          ],
+          "next_expiry": 2100,
+          "running": false,
+          "shown": {
+            "ledger": "◆ 5e6f7a8b"
+          }
+        },
+        {
+          "animating": false,
+          "at": 3299,
+          "links": [],
+          "marks": [
+            {
+              "agent": "ledger",
+              "kind": "done",
+              "label": "◆ 5e6f7a8b",
+              "live": true,
+              "started": 900,
+              "sweep": null,
+              "tone": "ok"
+            }
+          ],
+          "next_expiry": 1,
+          "running": false,
+          "shown": {
+            "ledger": "◆ 5e6f7a8b"
+          }
+        }
+      ],
+      "name": "merge: a terminal event alone renders like one after a start",
+      "steps": [
+        {
+          "at": 0,
+          "vcs": {
+            "action": "merge",
+            "agent": "ledger",
+            "backend": "jj",
+            "commit": "5e6f7a8b0d1e2f3a4b5c6d7e8f9a0b1c2d3e4f5a",
+            "op": "v1",
+            "outcome": "ok",
+            "peer": "db"
+          }
+        }
+      ],
+      "workers": [
+        "db",
+        "ledger"
+      ]
+    },
+    {
+      "checks": [
+        {
+          "animating": true,
+          "at": 450,
+          "links": [
+            {
+              "from": "db",
+              "held": false,
+              "kind": "vcs",
+              "live": true,
+              "pulse": 0.5,
+              "to": "ledger",
+              "tone": "conflict"
+            }
+          ],
+          "marks": [
+            {
+              "agent": "ledger",
+              "kind": "done",
+              "label": "✗ 1 file",
+              "live": false,
+              "started": 900,
+              "sweep": null,
+              "tone": "conflict"
+            }
+          ],
+          "next_expiry": 450,
+          "running": false,
+          "shown": {}
+        },
+        {
+          "animating": true,
+          "at": 900,
+          "links": [
+            {
+              "from": "db",
+              "held": false,
+              "kind": "vcs",
+              "live": true,
+              "pulse": null,
+              "to": "ledger",
+              "tone": "conflict"
+            }
+          ],
+          "marks": [
+            {
+              "agent": "ledger",
+              "kind": "done",
+              "label": "✗ 1 file",
+              "live": true,
+              "started": 900,
+              "sweep": 0.0,
+              "tone": "conflict"
+            }
+          ],
+          "next_expiry": 2100,
+          "running": false,
+          "shown": {
+            "ledger": "✗ 1 file"
+          }
+        },
+        {
+          "animating": true,
+          "at": 5900,
+          "links": [
+            {
+              "from": "ledger",
+              "held": false,
+              "kind": "vcs",
+              "live": true,
+              "pulse": null,
+              "to": "db",
+              "tone": "conflict"
+            }
+          ],
+          "marks": [
+            {
+              "agent": "db",
+              "kind": "done",
+              "label": "✗ 2 files",
+              "live": true,
+              "started": 5900,
+              "sweep": 0.0,
+              "tone": "conflict"
+            }
+          ],
+          "next_expiry": 2100,
+          "running": false,
+          "shown": {
+            "db": "✗ 2 files"
+          }
+        }
+      ],
+      "name": "conflict: a distinct tone with its file count",
+      "steps": [
+        {
+          "at": 0,
+          "vcs": {
+            "action": "merge",
+            "agent": "ledger",
+            "backend": "jj",
+            "files": [
+              "schema.sql"
+            ],
+            "op": "v1",
+            "outcome": "conflict",
+            "peer": "db"
+          }
+        },
+        {
+          "at": 5000,
+          "vcs": {
+            "action": "cherry_pick",
+            "agent": "db",
+            "backend": "jj",
+            "files": [
+              "a.rs",
+              "b.rs"
+            ],
+            "op": "v2",
+            "outcome": "conflict",
+            "peer": "ledger"
+          }
+        }
+      ],
+      "workers": [
+        "db",
+        "ledger"
+      ]
+    },
+    {
+      "checks": [
+        {
+          "animating": false,
+          "at": 100,
+          "links": [],
+          "marks": [
+            {
+              "agent": "db",
+              "kind": "running",
+              "label": "workspace db-s1",
+              "live": true,
+              "started": 0,
+              "sweep": null,
+              "tone": "ok"
+            }
+          ],
+          "next_expiry": 599900,
+          "running": true,
+          "shown": {
+            "db": "workspace db-s1"
+          }
+        },
+        {
+          "animating": true,
+          "at": 1500,
+          "links": [
+            {
+              "from": "db",
+              "held": false,
+              "kind": "vcs",
+              "live": true,
+              "pulse": 0.0,
+              "to": "db-s1",
+              "tone": "ok"
+            }
+          ],
+          "marks": [
+            {
+              "agent": "db-s1",
+              "kind": "done",
+              "label": "+ agents/db-s1",
+              "live": false,
+              "started": 2400,
+              "sweep": null,
+              "tone": "ok"
+            }
+          ],
+          "next_expiry": 900,
+          "running": false,
+          "shown": {}
+        },
+        {
+          "animating": true,
+          "at": 2400,
+          "links": [
+            {
+              "from": "db",
+              "held": false,
+              "kind": "vcs",
+              "live": true,
+              "pulse": null,
+              "to": "db-s1",
+              "tone": "ok"
+            }
+          ],
+          "marks": [
+            {
+              "agent": "db-s1",
+              "kind": "done",
+              "label": "+ agents/db-s1",
+              "live": true,
+              "started": 2400,
+              "sweep": 0.0,
+              "tone": "ok"
+            }
+          ],
+          "next_expiry": 2100,
+          "running": false,
+          "shown": {
+            "db-s1": "+ agents/db-s1"
+          }
+        },
+        {
+          "animating": true,
+          "at": 2500,
+          "links": [
+            {
+              "from": "db",
+              "held": false,
+              "kind": "vcs",
+              "live": true,
+              "pulse": null,
+              "to": "db-s1",
+              "tone": "ok"
+            }
+          ],
+          "marks": [
+            {
+              "agent": "db-s1",
+              "kind": "done",
+              "label": "+ agents/db-s1",
+              "live": true,
+              "started": 2400,
+              "sweep": 0.143,
+              "tone": "ok"
+            }
+          ],
+          "next_expiry": 2000,
+          "running": false,
+          "shown": {
+            "db-s1": "+ agents/db-s1"
+          }
+        }
+      ],
+      "name": "workspace: links parent to member and marks the member",
+      "steps": [
+        {
+          "at": 0,
+          "vcs": {
+            "action": "workspace",
+            "agent": "db-s1",
+            "backend": "jj",
+            "op": "v1",
+            "outcome": "started",
+            "peer": "db"
+          }
+        },
+        {
+          "at": 1500,
+          "vcs": {
+            "action": "workspace",
+            "agent": "db-s1",
+            "backend": "jj",
+            "branch": "agents/db-s1",
+            "commit": "1a2b3c4d0d1e2f3a4b5c6d7e8f9a0b1c2d3e4f5a",
+            "op": "v1",
+            "outcome": "ok",
+            "peer": "db"
+          }
+        }
+      ],
+      "workers": [
+        "db",
+        "db-s1"
+      ]
+    },
+    {
+      "checks": [
+        {
+          "animating": false,
+          "at": 100,
+          "links": [],
+          "marks": [
+            {
+              "agent": "orchestrator",
+              "kind": "running",
+              "label": "workspace ledger",
+              "live": true,
+              "started": 0,
+              "sweep": null,
+              "tone": "ok"
+            }
+          ],
+          "next_expiry": 599900,
+          "running": true,
+          "shown": {
+            "orchestrator": "workspace ledger"
+          }
+        },
+        {
+          "animating": true,
+          "at": 1000,
+          "links": [],
+          "marks": [
+            {
+              "agent": "orchestrator",
+              "kind": "done",
+              "label": "! workspace ledger",
+              "live": true,
+              "started": 1000,
+              "sweep": 0.0,
+              "tone": "error"
+            }
+          ],
+          "next_expiry": 2400,
+          "running": false,
+          "shown": {
+            "orchestrator": "! workspace ledger"
+          }
+        },
+        {
+          "animating": true,
+          "at": 1200,
+          "links": [],
+          "marks": [
+            {
+              "agent": "orchestrator",
+              "kind": "done",
+              "label": "! workspace ledger",
+              "live": true,
+              "started": 1000,
+              "sweep": 0.286,
+              "tone": "error"
+            }
+          ],
+          "next_expiry": 2200,
+          "running": false,
+          "shown": {
+            "orchestrator": "! workspace ledger"
+          }
+        }
+      ],
+      "name": "workspace: a member without a parent runs on the hub",
+      "steps": [
+        {
+          "at": 0,
+          "vcs": {
+            "action": "workspace",
+            "agent": "ledger",
+            "backend": "jj",
+            "op": "v1",
+            "outcome": "started"
+          }
+        },
+        {
+          "at": 1000,
+          "vcs": {
+            "action": "workspace",
+            "agent": "ledger",
+            "backend": "jj",
+            "op": "v1",
+            "outcome": "error",
+            "summary": "/w/.crew/worktrees/ledger already exists"
+          }
+        }
+      ],
+      "workers": [
+        "db",
+        "ledger"
+      ]
+    },
+    {
+      "checks": [
+        {
+          "animating": false,
+          "at": 500,
+          "links": [],
+          "marks": [
+            {
+              "agent": "orchestrator",
+              "kind": "running",
+              "label": "integrating",
+              "live": true,
+              "started": 0,
+              "sweep": null,
+              "tone": "ok"
+            }
+          ],
+          "next_expiry": 599500,
+          "running": true,
+          "shown": {
+            "orchestrator": "integrating"
+          }
+        },
+        {
+          "animating": true,
+          "at": 1450,
+          "links": [
+            {
+              "from": "db",
+              "held": false,
+              "kind": "vcs",
+              "live": true,
+              "pulse": 0.5,
+              "to": "orchestrator",
+              "tone": "ok"
+            }
+          ],
+          "marks": [
+            {
+              "agent": "orchestrator",
+              "kind": "running",
+              "label": "integrating",
+              "live": true,
+              "started": 0,
+              "sweep": null,
+              "tone": "ok"
+            }
+          ],
+          "next_expiry": 2550,
+          "running": true,
+          "shown": {
+            "orchestrator": "integrating"
+          }
+        },
+        {
+          "animating": true,
+          "at": 2450,
+          "links": [
+            {
+              "from": "db",
+              "held": false,
+              "kind": "vcs",
+              "live": true,
+              "pulse": null,
+              "to": "orchestrator",
+              "tone": "ok"
+            },
+            {
+              "from": "ledger",
+              "held": false,
+              "kind": "vcs",
+              "live": true,
+              "pulse": 0.5,
+              "to": "orchestrator",
+              "tone": "conflict"
+            }
+          ],
+          "marks": [
+            {
+              "agent": "orchestrator",
+              "kind": "running",
+              "label": "integrating",
+              "live": true,
+              "started": 0,
+              "sweep": null,
+              "tone": "ok"
+            }
+          ],
+          "next_expiry": 1550,
+          "running": true,
+          "shown": {
+            "orchestrator": "integrating"
+          }
+        },
+        {
+          "animating": true,
+          "at": 3000,
+          "links": [
+            {
+              "from": "db",
+              "held": false,
+              "kind": "vcs",
+              "live": true,
+              "pulse": null,
+              "to": "orchestrator",
+              "tone": "ok"
+            },
+            {
+              "from": "ledger",
+              "held": false,
+              "kind": "vcs",
+              "live": true,
+              "pulse": null,
+              "to": "orchestrator",
+              "tone": "conflict"
+            }
+          ],
+          "marks": [
+            {
+              "agent": "orchestrator",
+              "kind": "done",
+              "label": "1 merged, 1 conflict",
+              "live": true,
+              "started": 3000,
+              "sweep": 0.0,
+              "tone": "conflict"
+            }
+          ],
+          "next_expiry": 1000,
+          "running": false,
+          "shown": {
+            "orchestrator": "1 merged, 1 conflict"
+          }
+        },
+        {
+          "animating": true,
+          "at": 3350,
+          "links": [
+            {
+              "from": "db",
+              "held": false,
+              "kind": "vcs",
+              "live": true,
+              "pulse": null,
+              "to": "orchestrator",
+              "tone": "ok"
+            },
+            {
+              "from": "ledger",
+              "held": false,
+              "kind": "vcs",
+              "live": true,
+              "pulse": null,
+              "to": "orchestrator",
+              "tone": "conflict"
+            }
+          ],
+          "marks": [
+            {
+              "agent": "orchestrator",
+              "kind": "done",
+              "label": "1 merged, 1 conflict",
+              "live": true,
+              "started": 3000,
+              "sweep": 0.5,
+              "tone": "conflict"
+            }
+          ],
+          "next_expiry": 650,
+          "running": false,
+          "shown": {
+            "orchestrator": "1 merged, 1 conflict"
+          }
+        },
+        {
+          "animating": false,
+          "at": 5399,
+          "links": [],
+          "marks": [
+            {
+              "agent": "orchestrator",
+              "kind": "done",
+              "label": "1 merged, 1 conflict",
+              "live": true,
+              "started": 3000,
+              "sweep": null,
+              "tone": "conflict"
+            }
+          ],
+          "next_expiry": 1,
+          "running": false,
+          "shown": {
+            "orchestrator": "1 merged, 1 conflict"
+          }
+        },
+        {
+          "animating": false,
+          "at": 5400,
+          "links": [],
+          "marks": [],
+          "next_expiry": null,
+          "running": false,
+          "shown": {}
+        }
+      ],
+      "name": "integrate: branches run to the hub and the tally marks it",
+      "steps": [
+        {
+          "at": 0,
+          "vcs": {
+            "action": "integrate",
+            "agent": "integration",
+            "backend": "jj",
+            "op": "v1",
+            "outcome": "started"
+          }
+        },
+        {
+          "at": 1000,
+          "vcs": {
+            "action": "integrate",
+            "agent": "integration",
+            "backend": "jj",
+            "commit": "9c0d1e2f0d1e2f3a4b5c6d7e8f9a0b1c2d3e4f5a",
+            "op": "v2",
+            "outcome": "ok",
+            "peer": "db"
+          }
+        },
+        {
+          "at": 2000,
+          "vcs": {
+            "action": "integrate",
+            "agent": "integration",
+            "backend": "jj",
+            "files": [
+              "schema.sql"
+            ],
+            "op": "v3",
+            "outcome": "conflict",
+            "peer": "ledger"
+          }
+        },
+        {
+          "at": 3000,
+          "vcs": {
+            "action": "integrate",
+            "agent": "integration",
+            "backend": "jj",
+            "branch": "agents/integration",
+            "op": "v1",
+            "outcome": "conflict",
+            "summary": "1 merged, 1 conflict"
+          }
+        }
+      ],
+      "workers": [
+        "db",
+        "ledger"
+      ]
+    },
+    {
+      "checks": [
+        {
+          "animating": true,
+          "at": 150,
+          "links": [],
+          "marks": [
+            {
+              "agent": "db",
+              "kind": "glance",
+              "label": "· diff",
+              "live": true,
+              "started": 100,
+              "sweep": 0.167,
+              "tone": "ok"
+            }
+          ],
+          "next_expiry": 850,
+          "running": false,
+          "shown": {
+            "db": "· diff"
+          }
+        },
+        {
+          "animating": false,
+          "at": 999,
+          "links": [],
+          "marks": [
+            {
+              "agent": "db",
+              "kind": "glance",
+              "label": "· diff",
+              "live": true,
+              "started": 100,
+              "sweep": null,
+              "tone": "ok"
+            }
+          ],
+          "next_expiry": 1,
+          "running": false,
+          "shown": {
+            "db": "· diff"
+          }
+        },
+        {
+          "animating": false,
+          "at": 1000,
+          "links": [],
+          "marks": [],
+          "next_expiry": null,
+          "running": false,
+          "shown": {}
+        },
+        {
+          "animating": true,
+          "at": 2100,
+          "links": [],
+          "marks": [
+            {
+              "agent": "db",
+              "kind": "done",
+              "label": "◆ 1a2b3c4d",
+              "live": true,
+              "started": 2000,
+              "sweep": 0.143,
+              "tone": "ok"
+            }
+          ],
+          "next_expiry": 2300,
+          "running": false,
+          "shown": {
+            "db": "◆ 1a2b3c4d"
+          }
+        },
+        {
+          "animating": true,
+          "at": 2200,
+          "links": [],
+          "marks": [
+            {
+              "agent": "db",
+              "kind": "done",
+              "label": "◆ 1a2b3c4d",
+              "live": true,
+              "started": 2000,
+              "sweep": 0.286,
+              "tone": "ok"
+            }
+          ],
+          "next_expiry": 2200,
+          "running": false,
+          "shown": {
+            "db": "◆ 1a2b3c4d"
+          }
+        },
+        {
+          "animating": true,
+          "at": 5000,
+          "links": [],
+          "marks": [
+            {
+              "agent": "db",
+              "kind": "glance",
+              "label": "· diff",
+              "live": true,
+              "started": 5000,
+              "sweep": 0.0,
+              "tone": "ok"
+            }
+          ],
+          "next_expiry": 900,
+          "running": false,
+          "shown": {
+            "db": "· diff"
+          }
+        },
+        {
+          "animating": true,
+          "at": 5150,
+          "links": [],
+          "marks": [
+            {
+              "agent": "db",
+              "kind": "glance",
+              "label": "· diff",
+              "live": true,
+              "started": 5000,
+              "sweep": 0.5,
+              "tone": "ok"
+            }
+          ],
+          "next_expiry": 750,
+          "running": false,
+          "shown": {
+            "db": "· diff"
+          }
+        },
+        {
+          "animating": false,
+          "at": 5900,
+          "links": [],
+          "marks": [],
+          "next_expiry": null,
+          "running": false,
+          "shown": {}
+        }
+      ],
+      "name": "reads: glance and never hide a write",
+      "steps": [
+        {
+          "at": 0,
+          "vcs": {
+            "action": "status",
+            "agent": "db",
+            "backend": "jj",
+            "op": "v1",
+            "outcome": "ok"
+          }
+        },
+        {
+          "at": 100,
+          "vcs": {
+            "action": "diff",
+            "agent": "db",
+            "backend": "jj",
+            "op": "v2",
+            "outcome": "ok",
+            "source": "agents/ledger"
+          }
+        },
+        {
+          "at": 2000,
+          "vcs": {
+            "action": "commit",
+            "agent": "db",
+            "backend": "jj",
+            "commit": "1a2b3c4d0d1e2f3a4b5c6d7e8f9a0b1c2d3e4f5a",
+            "op": "v3",
+            "outcome": "ok"
+          }
+        },
+        {
+          "at": 2100,
+          "vcs": {
+            "action": "status",
+            "agent": "db",
+            "backend": "jj",
+            "op": "v4",
+            "outcome": "ok"
+          }
+        },
+        {
+          "at": 5000,
+          "vcs": {
+            "action": "diff",
+            "agent": "db",
+            "backend": "jj",
+            "op": "v5",
+            "outcome": "ok"
+          }
+        }
+      ],
+      "workers": [
+        "db",
+        "ledger"
+      ]
+    },
+    {
+      "checks": [
+        {
+          "animating": true,
+          "at": 100,
+          "links": [],
+          "marks": [
+            {
+              "agent": "db",
+              "kind": "glance",
+              "label": "! status",
+              "live": true,
+              "started": 0,
+              "sweep": 0.333,
+              "tone": "error"
+            },
+            {
+              "agent": "ledger",
+              "kind": "done",
+              "label": "! commit",
+              "live": true,
+              "started": 0,
+              "sweep": 0.143,
+              "tone": "error"
+            },
+            {
+              "agent": "orchestrator",
+              "kind": "done",
+              "label": "! integrate",
+              "live": true,
+              "started": 100,
+              "sweep": 0.0,
+              "tone": "error"
+            }
+          ],
+          "next_expiry": 800,
+          "running": false,
+          "shown": {
+            "db": "! status",
+            "ledger": "! commit",
+            "orchestrator": "! integrate"
+          }
+        },
+        {
+          "animating": true,
+          "at": 400,
+          "links": [],
+          "marks": [
+            {
+              "agent": "db",
+              "kind": "glance",
+              "label": "! status",
+              "live": true,
+              "started": 0,
+              "sweep": null,
+              "tone": "error"
+            },
+            {
+              "agent": "ledger",
+              "kind": "done",
+              "label": "! commit",
+              "live": true,
+              "started": 0,
+              "sweep": 0.571,
+              "tone": "error"
+            },
+            {
+              "agent": "orchestrator",
+              "kind": "done",
+              "label": "! integrate",
+              "live": true,
+              "started": 100,
+              "sweep": 0.429,
+              "tone": "error"
+            }
+          ],
+          "next_expiry": 500,
+          "running": false,
+          "shown": {
+            "db": "! status",
+            "ledger": "! commit",
+            "orchestrator": "! integrate"
+          }
+        },
+        {
+          "animating": false,
+          "at": 1000,
+          "links": [],
+          "marks": [
+            {
+              "agent": "ledger",
+              "kind": "done",
+              "label": "! commit",
+              "live": true,
+              "started": 0,
+              "sweep": null,
+              "tone": "error"
+            },
+            {
+              "agent": "orchestrator",
+              "kind": "done",
+              "label": "! integrate",
+              "live": true,
+              "started": 100,
+              "sweep": null,
+              "tone": "error"
+            }
+          ],
+          "next_expiry": 1400,
+          "running": false,
+          "shown": {
+            "ledger": "! commit",
+            "orchestrator": "! integrate"
+          }
+        }
+      ],
+      "name": "errors: reads glance in warn, other errors mark done",
+      "steps": [
+        {
+          "at": 0,
+          "vcs": {
+            "action": "status",
+            "agent": "db",
+            "backend": "jj",
+            "op": "v1",
+            "outcome": "error",
+            "summary": "stale"
+          }
+        },
+        {
+          "at": 0,
+          "vcs": {
+            "action": "commit",
+            "agent": "ledger",
+            "backend": "jj",
+            "op": "v2",
+            "outcome": "error",
+            "summary": "nothing to commit: the working tree has no changes"
+          }
+        },
+        {
+          "at": 100,
+          "vcs": {
+            "action": "integrate",
+            "agent": "integration",
+            "backend": "jj",
+            "op": "v3",
+            "outcome": "error",
+            "summary": "interrupted"
+          }
+        }
+      ],
+      "workers": [
+        "db",
+        "ledger"
+      ]
+    },
+    {
+      "checks": [
+        {
+          "animating": false,
+          "at": 0,
+          "links": [
+            {
+              "from": "db",
+              "held": true,
+              "kind": "vcs",
+              "live": true,
+              "pulse": null,
+              "to": "ledger",
+              "tone": "ok"
+            }
+          ],
+          "marks": [
+            {
+              "agent": "db",
+              "kind": "running",
+              "label": "cherry-pick",
+              "live": true,
+              "started": 0,
+              "sweep": null,
+              "tone": "ok"
+            },
+            {
+              "agent": "ledger",
+              "kind": "running",
+              "label": "merge db",
+              "live": true,
+              "started": 0,
+              "sweep": null,
+              "tone": "ok"
+            },
+            {
+              "agent": "orchestrator",
+              "kind": "running",
+              "label": "integrating",
+              "live": true,
+              "started": 0,
+              "sweep": null,
+              "tone": "ok"
+            },
+            {
+              "agent": "db",
+              "kind": "running",
+              "label": "workspace db-s1",
+              "live": true,
+              "started": 0,
+              "sweep": null,
+              "tone": "ok"
+            }
+          ],
+          "next_expiry": 600000,
+          "running": true,
+          "shown": {
+            "db": "workspace db-s1",
+            "ledger": "merge db",
+            "orchestrator": "integrating"
+          }
+        },
+        {
+          "animating": false,
+          "at": 60000,
+          "links": [
+            {
+              "from": "db",
+              "held": true,
+              "kind": "vcs",
+              "live": true,
+              "pulse": null,
+              "to": "ledger",
+              "tone": "ok"
+            }
+          ],
+          "marks": [
+            {
+              "agent": "db",
+              "kind": "running",
+              "label": "cherry-pick",
+              "live": true,
+              "started": 0,
+              "sweep": null,
+              "tone": "ok"
+            },
+            {
+              "agent": "ledger",
+              "kind": "running",
+              "label": "merge db",
+              "live": true,
+              "started": 0,
+              "sweep": null,
+              "tone": "ok"
+            },
+            {
+              "agent": "orchestrator",
+              "kind": "running",
+              "label": "integrating",
+              "live": true,
+              "started": 0,
+              "sweep": null,
+              "tone": "ok"
+            },
+            {
+              "agent": "db",
+              "kind": "running",
+              "label": "workspace db-s1",
+              "live": true,
+              "started": 0,
+              "sweep": null,
+              "tone": "ok"
+            }
+          ],
+          "next_expiry": 540000,
+          "running": true,
+          "shown": {
+            "db": "workspace db-s1",
+            "ledger": "merge db",
+            "orchestrator": "integrating"
+          }
+        }
+      ],
+      "name": "started: a mark for each action that has one",
+      "steps": [
+        {
+          "at": 0,
+          "vcs": {
+            "action": "cherry_pick",
+            "agent": "db",
+            "backend": "jj",
+            "op": "v1",
+            "outcome": "started",
+            "source": "5a6b7c8d"
+          }
+        },
+        {
+          "at": 0,
+          "vcs": {
+            "action": "merge",
+            "agent": "ledger",
+            "backend": "jj",
+            "op": "v2",
+            "outcome": "started",
+            "peer": "db"
+          }
+        },
+        {
+          "at": 0,
+          "vcs": {
+            "action": "integrate",
+            "agent": "integration",
+            "backend": "jj",
+            "op": "v3",
+            "outcome": "started"
+          }
+        },
+        {
+          "at": 0,
+          "vcs": {
+            "action": "workspace",
+            "agent": "db-s1",
+            "backend": "jj",
+            "op": "v4",
+            "outcome": "started",
+            "peer": "db"
+          }
+        }
+      ],
+      "workers": [
+        "db",
+        "ledger"
+      ]
+    },
+    {
+      "checks": [
+        {
+          "animating": true,
+          "at": 0,
+          "links": [
+            {
+              "from": "ledger",
+              "held": false,
+              "kind": "vcs",
+              "live": true,
+              "pulse": 0.0,
+              "to": "orchestrator",
+              "tone": "ok"
+            }
+          ],
+          "marks": [
+            {
+              "agent": "db",
+              "kind": "done",
+              "label": "◆ 1a2b3c4d",
+              "live": true,
+              "started": 0,
+              "sweep": 0.0,
+              "tone": "ok"
+            }
+          ],
+          "next_expiry": 2400,
+          "running": false,
+          "shown": {
+            "db": "◆ 1a2b3c4d"
+          }
+        },
+        {
+          "animating": true,
+          "at": 450,
+          "links": [
+            {
+              "from": "ledger",
+              "held": false,
+              "kind": "vcs",
+              "live": true,
+              "pulse": 0.5,
+              "to": "orchestrator",
+              "tone": "ok"
+            }
+          ],
+          "marks": [
+            {
+              "agent": "db",
+              "kind": "done",
+              "label": "◆ 1a2b3c4d",
+              "live": true,
+              "started": 0,
+              "sweep": 0.643,
+              "tone": "ok"
+            }
+          ],
+          "next_expiry": 1950,
+          "running": false,
+          "shown": {
+            "db": "◆ 1a2b3c4d"
+          }
+        }
+      ],
+      "name": "hub: integration and operator map to it, self links are skipped",
+      "steps": [
+        {
+          "at": 0,
+          "vcs": {
+            "action": "merge",
+            "agent": "db",
+            "backend": "jj",
+            "commit": "1a2b3c4d0d1e2f3a4b5c6d7e8f9a0b1c2d3e4f5a",
+            "op": "v1",
+            "outcome": "ok",
+            "peer": "db"
+          }
+        },
+        {
+          "at": 0,
+          "vcs": {
+            "action": "integrate",
+            "agent": "integration",
+            "backend": "jj",
+            "commit": "2b3c4d5e0d1e2f3a4b5c6d7e8f9a0b1c2d3e4f5a",
+            "op": "v2",
+            "outcome": "ok",
+            "peer": "ledger"
+          }
+        }
+      ],
+      "workers": [
+        "db",
+        "ledger"
+      ]
+    },
+    {
+      "checks": [
+        {
+          "animating": true,
+          "at": 400,
+          "links": [
+            {
+              "from": "db",
+              "held": false,
+              "kind": "p2p",
+              "live": true,
+              "pulse": 0.395,
+              "to": "ledger",
+              "tone": null
+            }
+          ],
+          "marks": [],
+          "next_expiry": 2600,
+          "running": false,
+          "shown": {}
+        },
+        {
+          "animating": true,
+          "at": 500,
+          "links": [
+            {
+              "from": "db",
+              "held": false,
+              "kind": "vcs",
+              "live": true,
+              "pulse": 0.0,
+              "to": "ledger",
+              "tone": "ok"
+            }
+          ],
+          "marks": [
+            {
+              "agent": "ledger",
+              "kind": "done",
+              "label": "◆ 7e8f9a0b",
+              "live": false,
+              "started": 1400,
+              "sweep": null,
+              "tone": "ok"
+            }
+          ],
+          "next_expiry": 900,
+          "running": false,
+          "shown": {}
+        },
+        {
+          "animating": true,
+          "at": 950,
+          "links": [
+            {
+              "from": "db",
+              "held": false,
+              "kind": "vcs",
+              "live": true,
+              "pulse": 0.5,
+              "to": "ledger",
+              "tone": "ok"
+            }
+          ],
+          "marks": [
+            {
+              "agent": "ledger",
+              "kind": "done",
+              "label": "◆ 7e8f9a0b",
+              "live": false,
+              "started": 1400,
+              "sweep": null,
+              "tone": "ok"
+            }
+          ],
+          "next_expiry": 450,
+          "running": false,
+          "shown": {}
+        }
+      ],
+      "name": "links: a vcs link replaces a live link between the same pair",
+      "steps": [
+        {
+          "at": 0,
+          "message": {
+            "body": "x",
+            "correlation_id": null,
+            "from": "db",
+            "id": "m-0001",
+            "metadata": null,
+            "reply_to": null,
+            "timestamp": 0,
+            "to": "ledger",
+            "type": "message"
+          }
+        },
+        {
+          "at": 500,
+          "vcs": {
+            "action": "cherry_pick",
+            "agent": "ledger",
+            "backend": "jj",
+            "commit": "7e8f9a0b0d1e2f3a4b5c6d7e8f9a0b1c2d3e4f5a",
+            "op": "v1",
+            "outcome": "ok",
+            "peer": "db"
+          }
+        }
+      ],
+      "workers": [
+        "db",
+        "ledger"
+      ]
+    },
+    {
+      "checks": [
+        {
+          "animating": false,
+          "at": 599999,
+          "links": [
+            {
+              "from": "db",
+              "held": true,
+              "kind": "vcs",
+              "live": true,
+              "pulse": null,
+              "to": "ledger",
+              "tone": "ok"
+            }
+          ],
+          "marks": [
+            {
+              "agent": "ledger",
+              "kind": "running",
+              "label": "merge db",
+              "live": true,
+              "started": 0,
+              "sweep": null,
+              "tone": "ok"
+            }
+          ],
+          "next_expiry": 1,
+          "running": true,
+          "shown": {
+            "ledger": "merge db"
+          }
+        },
+        {
+          "animating": false,
+          "at": 600000,
+          "links": [],
+          "marks": [],
+          "next_expiry": null,
+          "running": false,
+          "shown": {}
+        }
+      ],
+      "name": "running: without an end it is dropped at the cap",
+      "steps": [
+        {
+          "at": 0,
+          "vcs": {
+            "action": "merge",
+            "agent": "ledger",
+            "backend": "jj",
+            "op": "v1",
+            "outcome": "started",
+            "peer": "db"
+          }
+        }
+      ],
+      "workers": [
+        "db",
+        "ledger"
+      ]
+    },
+    {
+      "checks": [
+        {
+          "animating": false,
+          "at": 100,
+          "links": [
+            {
+              "from": "db",
+              "held": true,
+              "kind": "vcs",
+              "live": true,
+              "pulse": null,
+              "to": "ledger",
+              "tone": "ok"
+            }
+          ],
+          "marks": [
+            {
+              "agent": "ledger",
+              "kind": "running",
+              "label": "merge db",
+              "live": true,
+              "started": -4900,
+              "sweep": null,
+              "tone": "ok"
+            }
+          ],
+          "next_expiry": 595000,
+          "running": true,
+          "shown": {
+            "ledger": "merge db"
+          }
+        },
+        {
+          "animating": false,
+          "at": 594999,
+          "links": [
+            {
+              "from": "db",
+              "held": true,
+              "kind": "vcs",
+              "live": true,
+              "pulse": null,
+              "to": "ledger",
+              "tone": "ok"
+            }
+          ],
+          "marks": [
+            {
+              "agent": "ledger",
+              "kind": "running",
+              "label": "merge db",
+              "live": true,
+              "started": -4900,
+              "sweep": null,
+              "tone": "ok"
+            }
+          ],
+          "next_expiry": 101,
+          "running": true,
+          "shown": {
+            "ledger": "merge db"
+          }
+        },
+        {
+          "animating": false,
+          "at": 595100,
+          "links": [],
+          "marks": [],
+          "next_expiry": null,
+          "running": false,
+          "shown": {}
+        }
+      ],
+      "name": "resume: only what still runs is restored",
+      "steps": [
+        {
+          "at": 0,
+          "vcs": {
+            "action": "commit",
+            "agent": "db",
+            "backend": "jj",
+            "commit": "1a2b3c4d0d1e2f3a4b5c6d7e8f9a0b1c2d3e4f5a",
+            "op": "v0",
+            "outcome": "ok"
+          }
+        },
+        {
+          "at": 100,
+          "snapshot": [
+            {
+              "age": 5000,
+              "vcs": {
+                "action": "merge",
+                "agent": "ledger",
+                "backend": "jj",
+                "op": "v1",
+                "outcome": "started",
+                "peer": "db"
+              }
+            },
+            {
+              "age": 4000,
+              "vcs": {
+                "action": "integrate",
+                "agent": "integration",
+                "backend": "jj",
+                "op": "v2",
+                "outcome": "started"
+              }
+            },
+            {
+              "age": 3000,
+              "vcs": {
+                "action": "integrate",
+                "agent": "integration",
+                "backend": "jj",
+                "op": "v2",
+                "outcome": "ok",
+                "summary": "1 merged, 0 conflicts"
+              }
+            },
+            {
+              "age": 700000,
+              "vcs": {
+                "action": "cherry_pick",
+                "agent": "db",
+                "backend": "jj",
+                "op": "v3",
+                "outcome": "started",
+                "source": "abcdef1"
+              }
+            },
+            {
+              "age": 1000,
+              "vcs": {
+                "action": "status",
+                "agent": "db",
+                "backend": "jj",
+                "op": "v4",
+                "outcome": "ok"
+              }
+            }
+          ]
+        }
+      ],
+      "workers": [
+        "db",
+        "ledger"
+      ]
+    },
+    {
+      "checks": [
+        {
+          "animating": true,
+          "at": 50,
+          "links": [
+            {
+              "from": "db",
+              "held": true,
+              "kind": "vcs",
+              "live": true,
+              "pulse": null,
+              "to": "ledger",
+              "tone": "ok"
+            },
+            {
+              "from": "db",
+              "held": false,
+              "kind": "orchestrator",
+              "live": true,
+              "pulse": 0.006,
+              "to": "orchestrator",
+              "tone": null
+            }
+          ],
+          "marks": [
+            {
+              "agent": "ledger",
+              "kind": "running",
+              "label": "merge db",
+              "live": true,
+              "started": 0,
+              "sweep": null,
+              "tone": "ok"
+            },
+            {
+              "agent": "db",
+              "kind": "done",
+              "label": "◆ 1a2b3c4d",
+              "live": true,
+              "started": 0,
+              "sweep": 0.071,
+              "tone": "ok"
+            }
+          ],
+          "next_expiry": 2350,
+          "running": true,
+          "shown": {
+            "db": "◆ 1a2b3c4d",
+            "ledger": "merge db"
+          }
+        },
+        {
+          "animating": true,
+          "at": 100,
+          "links": [
+            {
+              "from": "db",
+              "held": false,
+              "kind": "orchestrator",
+              "live": true,
+              "pulse": 0.025,
+              "to": "orchestrator",
+              "tone": null
+            }
+          ],
+          "marks": [
+            {
+              "agent": "db",
+              "kind": "done",
+              "label": "◆ 1a2b3c4d",
+              "live": true,
+              "started": 0,
+              "sweep": 0.143,
+              "tone": "ok"
+            }
+          ],
+          "next_expiry": 2300,
+          "running": false,
+          "shown": {
+            "db": "◆ 1a2b3c4d"
+          }
+        }
+      ],
+      "name": "remove: an agent that leaves takes its marks and links",
+      "steps": [
+        {
+          "at": 0,
+          "vcs": {
+            "action": "merge",
+            "agent": "ledger",
+            "backend": "jj",
+            "op": "v1",
+            "outcome": "started",
+            "peer": "db"
+          }
+        },
+        {
+          "at": 0,
+          "vcs": {
+            "action": "commit",
+            "agent": "db",
+            "backend": "jj",
+            "commit": "1a2b3c4d0d1e2f3a4b5c6d7e8f9a0b1c2d3e4f5a",
+            "op": "v2",
+            "outcome": "ok"
+          }
+        },
+        {
+          "at": 0,
+          "message": {
+            "body": "x",
+            "correlation_id": null,
+            "from": "db",
+            "id": "m-0001",
+            "metadata": null,
+            "reply_to": null,
+            "timestamp": 0,
+            "to": "orchestrator",
+            "type": "message"
+          }
+        },
+        {
+          "at": 100,
+          "remove": "ledger"
+        }
+      ],
+      "workers": [
+        "db",
+        "ledger"
+      ]
+    }
+  ],
+  "constants": {
+    "GLANCE_MS": 900,
+    "GLANCE_SWEEP_MS": 300,
+    "LINK_MS": 3000,
+    "MARK_MS": 2400,
+    "MARK_SWEEP_MS": 700,
+    "PULSE_MS": 900,
+    "RUNNING_MAX_MS": 600000
+  }
+}

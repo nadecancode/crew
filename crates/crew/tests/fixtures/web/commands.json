@@ -1,0 +1,105 @@
+[
+  {
+    "about": "leave the dashboard — the team keeps running",
+    "aliases": [
+      "quit",
+      "q"
+    ],
+    "args": "",
+    "name": "exit"
+  },
+  {
+    "about": "stop the team: every agent and the daemon (asks first)",
+    "aliases": [
+      "terminate",
+      "shutdown"
+    ],
+    "args": "",
+    "name": "stop"
+  },
+  {
+    "about": "stop one agent's process (asks first)",
+    "aliases": [],
+    "args": "[agent]",
+    "name": "kill"
+  },
+  {
+    "about": "restart an agent, resuming its session",
+    "aliases": [],
+    "args": "[agent]",
+    "name": "restart"
+  },
+  {
+    "about": "restart without resuming the old conversation (asks first)",
+    "aliases": [],
+    "args": "[agent]",
+    "name": "restart-fresh"
+  },
+  {
+    "about": "suspend an agent",
+    "aliases": [],
+    "args": "[agent]",
+    "name": "pause"
+  },
+  {
+    "about": "let a suspended agent continue",
+    "aliases": [],
+    "args": "[agent]",
+    "name": "unpause"
+  },
+  {
+    "about": "compact an agent's context when its turn ends",
+    "aliases": [],
+    "args": "[agent]",
+    "name": "compact"
+  },
+  {
+    "about": "choose the model and CLI an agent runs on",
+    "aliases": [
+      "cli",
+      "harness"
+    ],
+    "args": "[agent]",
+    "name": "model"
+  },
+  {
+    "about": "continue the agents paused at a usage limit",
+    "aliases": [],
+    "args": "",
+    "name": "resume"
+  },
+  {
+    "about": "answer the questions the team has for you",
+    "aliases": [
+      "questions"
+    ],
+    "args": "",
+    "name": "answer"
+  },
+  {
+    "about": "show the task graph",
+    "aliases": [],
+    "args": "",
+    "name": "tasks"
+  },
+  {
+    "about": "show the event log",
+    "aliases": [],
+    "args": "",
+    "name": "logs"
+  },
+  {
+    "about": "turn mouse clicks on or off (off: drag selects text)",
+    "aliases": [],
+    "args": "",
+    "name": "mouse"
+  },
+  {
+    "about": "keys and commands",
+    "aliases": [
+      "?"
+    ],
+    "args": "",
+    "name": "help"
+  }
+]

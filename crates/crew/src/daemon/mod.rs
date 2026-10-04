@@ -37,7 +37,7 @@ mod questions;
 mod retire;
 mod roster;
 mod sandbox;
-mod server;
+pub(crate) mod server;
 mod subagents;
 mod supervisor;
 mod team;
@@ -291,6 +291,8 @@ pub struct Inner {
     pub(crate) stops: Mutex<HashMap<String, u64>>,
     /// The version control backend of the session (Daemon::vcs).
     pub(crate) vcs: RwLock<Option<Arc<dyn crate::vcs::Vcs>>>,
+    /// The web dashboard's server (`crew web`).
+    pub(crate) web: crate::web::Web,
     /// Numbers VCS operations for their events (`v<n>`).
     pub(crate) vcs_ops: std::sync::atomic::AtomicU64,
     /// Git operations run one at a time.
@@ -612,6 +614,7 @@ impl Daemon {
                 .to_string(),
             vcs: s.vcs.clone(),
             vcs_note: s.vcs_note.clone(),
+            web: self.web.url(),
             socket_warning: self.socket_warning.clone(),
             daemon_started_at: self.started_at,
             team_started_at: s.team_started_at,
@@ -946,6 +949,7 @@ pub async fn start(options: DaemonOptions) -> Result<Running> {
         hooks: Mutex::new(HashMap::new()),
         stops: Mutex::new(HashMap::new()),
         vcs: RwLock::new(None),
+        web: crate::web::Web::default(),
         vcs_ops: std::sync::atomic::AtomicU64::new(1),
         git_lock: Arc::new(tokio::sync::Mutex::new(())),
         plan_lock: tokio::sync::Mutex::new(()),
@@ -1035,6 +1039,7 @@ impl Running {
                 loop {
                     tick.tick().await;
                     daemon.housekeeping().await;
+                    daemon.web.tick(&daemon).await;
                     // Re-plan on the tick too: a stall is only reported once
                     // it has lasted a while.
                     daemon.replan();
@@ -1062,6 +1067,9 @@ impl Running {
         daemon.push(Push::Shutdown);
         // Give writers a moment to flush the final frames.
         tokio::time::sleep(std::time::Duration::from_millis(150)).await;
+        // The web server stops before the socket and the registration go:
+        // its sessions, then its connections, then its listeners.
+        daemon.web.stop(&daemon, None).await;
         accept_task.abort();
         events_task.abort();
         plan_task.abort();

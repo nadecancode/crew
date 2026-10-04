@@ -315,6 +315,7 @@ mod tests {
                     version: "test".into(),
                     protocol: crew_core::rpc::PROTOCOL_VERSION,
                     pid: 1,
+                    web_proof: None,
                 };
                 let reply = json!({ "id": hello["id"], "result": info });
                 writeln!(stream, "{reply}").unwrap();
