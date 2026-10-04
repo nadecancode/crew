@@ -1,5 +1,6 @@
 // Losing the connection, and stopping (notes/web-design.md §transport
 // "Reconnect and resync", §security "What a stopped page is", §tests "reconnect.spec.ts").
+import { NO_REPLY } from "../dev/mock.ts";
 import { expect, test } from "./fixtures.ts";
 
 const activity = (page: import("@playwright/test").Page, id: string) => page.locator(`[data-agent="${id}"] .doing .what`);
@@ -99,4 +100,35 @@ test("a page that was live and then meets a server without the proof stops and k
   await expect(page.locator('[data-conn="stopped"]')).toBeAttached({ timeout: 10_000 });
   await expect(page.locator(".node.member")).toHaveCount(6);
   expect(mock.calls.filter((c) => c.method === "subscribe").length).toBe(1);
+});
+
+test("a message opened while the connection is unproven is fetched once it is proven again; one that does not exist says so", async ({ page, mock, openPage, csp }) => {
+  const errors: string[] = [];
+  page.on("pageerror", (e) => errors.push(e.message));
+  await openPage();
+  // Only the daemon knows it: older than any snapshot holds.
+  const old = { id: "m-old-0001", from: "claude-4", to: "orchestrator", type: "message", body: "An old message, fetched on demand", timestamp: mock.now() - 3_600_000, correlation_id: null, reply_to: null, metadata: null };
+  mock.on("message_get", (p: { id: string }) => {
+    if (p.id === old.id) return old;
+    throw { code: "not_found", message: `no message '${p.id}'` };
+  });
+  const first = mock.calls.length;
+  mock.on("hello", () => NO_REPLY);
+  mock.dropSockets();
+  await mock.waitForCall("hello", (c) => c.seq >= first);
+  await page.evaluate(() => { location.hash = "/?message=m-old-0001"; });
+  const panel = page.locator("#side-panel");
+  await expect(panel).toContainText("not connected");
+  expect(mock.calls.filter((c) => c.method === "message_get")).toEqual([]);
+
+  // Proven again: the panel fetches what it shows.
+  mock.on("hello", null);
+  await expect(page.locator('[data-conn="live"]')).toBeAttached({ timeout: 15_000 });
+  await expect(panel).toContainText("An old message, fetched on demand");
+  expect(mock.calls.filter((c) => c.method === "message_get").map((c) => c.params)).toEqual([{ id: "m-old-0001" }]);
+
+  await page.evaluate(() => { location.hash = "/?message=m-gone-0002"; });
+  await expect(panel).toContainText("not found: no message 'm-gone-0002'");
+  expect(errors).toEqual([]);
+  expect(csp).toEqual([]);
 });

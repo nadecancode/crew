@@ -151,7 +151,7 @@ function ModelDialog(props: { agent: string }) {
   const tabs: RuntimeKind[] = RUNTIME_KIND.filter((r) => r !== "shell");
   const [runtime, setRuntime] = createSignal<RuntimeKind>(agent()?.runtime && agent()!.runtime !== "shell" ? agent()!.runtime : "claude");
   const [notice, setNotice] = createSignal<string | null>(null);
-  const rows = createMemo(() => (models()?.models ?? []).filter((m) => m.runtime === runtime()));
+  const rows = createMemo(() => ((models.error ? undefined : models())?.models ?? []).filter((m) => m.runtime === runtime()));
   const current = (m: ModelChoice) => {
     const a = agent();
     return !!a && a.runtime === m.runtime && (a.model ?? "").toLowerCase() === m.model.toLowerCase();

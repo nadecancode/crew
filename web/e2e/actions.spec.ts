@@ -421,3 +421,20 @@ test.describe("operator actions", () => {
     expect(csp).toEqual([]);
   });
 });
+
+test("the model dialog shows why the models could not be listed, and the page goes on", async ({ page, mock, csp, openPage }) => {
+  const errors: string[] = [];
+  page.on("pageerror", (e) => errors.push(e.message));
+  mock.on("models_list", () => { throw { code: "unavailable", message: "the model catalog is unavailable" }; });
+  await openPage();
+  await page.locator('[data-agent="claude-2"] .node-head').click();
+  await page.keyboard.press("s");
+  const d = page.getByRole("dialog");
+  await expect(d).toContainText("the models could not be listed: the model catalog is unavailable");
+  await page.keyboard.press("Escape");
+  await expect(d).toHaveCount(0);
+  await page.keyboard.press("t");
+  await expect(page.locator(".task-dag")).toBeVisible();
+  expect(errors).toEqual([]);
+  expect(csp).toEqual([]);
+});

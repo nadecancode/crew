@@ -18,11 +18,20 @@ export function MessagePanel(props: { id: string }) {
     for (const m of store.messages.newest()) if (m.id === id) return m;
     return store.state.questions.find((q) => q.id === id);
   };
+  // Asked only while the page is live; asked again when it is live again.
   const [fetched] = createResource(
-    () => (local(props.id) ? null : props.id),
+    () => (local(props.id) || !link.live() ? null : props.id),
     (id) => link.call("message_get", { id }, decodeMessage),
   );
-  const message = () => local(props.id) ?? fetched();
+  // A resource that failed throws when read: its error is shown instead.
+  const message = () => local(props.id) ?? (fetched.error ? undefined : fetched());
+  const why = () => {
+    if (!link.live() && !fetched.error) return "not connected: it is fetched when the dashboard is live";
+    const e = fetched.error;
+    if (!e) return "loading…";
+    const text = e instanceof Error ? e.message : String(e);
+    return (e as { code?: string }).code === "not_found" ? `not found: ${text}` : `not fetched: ${text}`;
+  };
   const replies = () => {
     store.messagesVersion();
     return store.messages.toArray().filter((m) => m.reply_to === props.id);
@@ -31,7 +40,7 @@ export function MessagePanel(props: { id: string }) {
   return (
     <div class="panel-body message-panel">
       <PanelHead title={`message ${props.id}`} />
-      <Show when={message()} fallback={<p class="pad muted">{fetched.error ? `not found: ${fetched.error.message ?? fetched.error}` : "loading…"}</p>}>
+      <Show when={message()} fallback={<p class="pad muted">{why()}</p>}>
         {(m) => (
           <div class="pad scroll" tabindex="0" data-focus-first>
             <dl class="facts">

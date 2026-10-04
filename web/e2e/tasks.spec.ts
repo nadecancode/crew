@@ -15,13 +15,26 @@ import type { Mock } from "./fixtures.ts";
 const task = (page: Page, id: string) => page.locator(`[data-task="${id}"]`);
 const IDS = ["db", "queue", "ledger", "search", "notify", "billing"];
 
+/** Every task's box, read in one go once the view has settled (the DAG is
+ * fitted to the window as it first draws: boxes read across that fit would
+ * mix two scales). */
 async function boxes(page: Page): Promise<Record<string, { x: number; y: number }>> {
-  const out: Record<string, { x: number; y: number }> = {};
-  for (const id of IDS) {
-    const b = (await task(page, id).locator("rect.box").boundingBox())!;
-    out[id] = { x: Math.round(b.x), y: Math.round(b.y) };
+  const read = () =>
+    page.evaluate((ids) => {
+      const out: Record<string, { x: number; y: number }> = {};
+      for (const id of ids) {
+        const b = document.querySelector(`[data-task="${id}"] rect.box`)!.getBoundingClientRect();
+        out[id] = { x: Math.round(b.x), y: Math.round(b.y) };
+      }
+      return out;
+    }, IDS);
+  let last = JSON.stringify(await read());
+  for (;;) {
+    await page.evaluate(() => new Promise((done) => requestAnimationFrame(() => requestAnimationFrame(done))));
+    const now = await read();
+    if (JSON.stringify(now) === last) return now;
+    last = JSON.stringify(now);
   }
-  return out;
 }
 
 const focused = (page: Page) => page.evaluate(() => document.activeElement?.getAttribute("data-task") ?? null);
