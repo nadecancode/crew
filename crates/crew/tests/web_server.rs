@@ -70,12 +70,21 @@ impl Server {
             child,
             runtime: runtime(s),
         };
+        // Its web.json, not one a server before it left.
         let deadline = Instant::now() + Duration::from_secs(10);
-        while !server.runtime.join("web.json").exists() {
+        while !server.published() {
             assert!(Instant::now() < deadline, "the server did not start");
             std::thread::sleep(Duration::from_millis(20));
         }
         server
+    }
+
+    /// web.json names this server.
+    fn published(&self) -> bool {
+        std::fs::read_to_string(self.runtime.join("web.json"))
+            .ok()
+            .and_then(|text| serde_json::from_str::<Value>(&text).ok())
+            .is_some_and(|info| info["pid"] == self.child.id())
     }
 
     fn control(&self) -> Control {
@@ -408,4 +417,368 @@ fn a_session_is_in_joined_or_in_others_never_both() {
     assert!(listing.joined.iter().all(|w| w.id != b_id));
     assert!(listing.others.iter().any(|o| o.id == b_id), "{listing:?}");
     s.ok(&["stop", "-C", &s.root().join("b").to_string_lossy()]);
+}
+
+/// The socket a daemon's state directory publishes.
+fn daemon_socket(state: &Path) -> PathBuf {
+    let text = std::fs::read_to_string(state.join("daemon.json")).unwrap();
+    let info: Value = serde_json::from_str(&text).unwrap();
+    PathBuf::from(info["socket"].as_str().unwrap())
+}
+
+fn mode(path: &Path) -> u32 {
+    use std::os::unix::fs::PermissionsExt;
+    std::fs::symlink_metadata(path)
+        .unwrap()
+        .permissions()
+        .mode()
+        & 0o777
+}
+
+/// The server's files, once it stopped.
+fn gone(s: &Session) {
+    for file in ["web.sock", "web.token", "web.json"] {
+        assert!(!runtime(s).join(file).exists(), "{file} is left");
+    }
+}
+
+#[test]
+fn one_server_per_user_its_files_private_and_a_dead_ones_replaced() {
+    use std::os::unix::fs::DirBuilderExt;
+    let s = Session::new();
+    // What a server that died left: a socket nobody listens on, its token,
+    // its web.json.
+    let run = runtime(&s);
+    std::fs::DirBuilder::new()
+        .recursive(true)
+        .mode(0o700)
+        .create(&run)
+        .unwrap();
+    drop(std::os::unix::net::UnixListener::bind(run.join("web.sock")).unwrap());
+    std::fs::write(run.join("web.token"), "stale-token").unwrap();
+    let stale = json!({
+        "pid": 999_999, "port": 1, "url": "http://stale.localhost:1/",
+        "protocol": PROTOCOL_VERSION, "version": "0", "build": "0"
+    });
+    std::fs::write(run.join("web.json"), stale.to_string()).unwrap();
+    let mut server = Server::start(&s);
+    // Replaced: the token is new, and it is the one the socket takes.
+    let token = std::fs::read_to_string(run.join("web.token")).unwrap();
+    assert_ne!(token, "stale-token");
+    let mut control = server.control();
+    assert_eq!(control.call("ping", json!({}))["result"]["pong"], true);
+    for file in ["web.sock", "web.token", "web.json", "web.lock"] {
+        assert_eq!(mode(&run.join(file)), 0o600, "{file}");
+    }
+    assert_eq!(mode(&run), 0o700);
+    // A second server: refused, and the first one stands.
+    let second = s.crew(&["web-server"]);
+    assert!(!second.status.success());
+    assert!(
+        stderr(&second).contains("already running"),
+        "{}",
+        stderr(&second)
+    );
+    assert!(!server.exited_within(Duration::from_millis(300)));
+    assert!(server.published());
+    assert_eq!(control.call("ping", json!({}))["result"]["pong"], true);
+    assert_eq!(
+        std::fs::read_to_string(run.join("web.token")).unwrap(),
+        token
+    );
+}
+
+#[test]
+fn the_server_refuses_to_start_in_an_agents_environment() {
+    let s = Session::new();
+    let identity = s.root().join("identity.json");
+    std::fs::write(
+        &identity,
+        json!({"socket": "/nowhere.sock", "agent_id": "a", "token": "t"}).to_string(),
+    )
+    .unwrap();
+    let out = s
+        .command()
+        .arg("web-server")
+        .env("CREW_IDENTITY", &identity)
+        .output()
+        .unwrap();
+    assert!(!out.status.success());
+    assert!(stderr(&out).contains("CREW_IDENTITY"), "{}", stderr(&out));
+    gone(&s);
+}
+
+#[test]
+fn the_control_socket_takes_its_own_token_and_only_its_own_calls() {
+    let s = Session::new();
+    let team = s.team("auth", vec![agent("a", "", &[])], vec![]);
+    s.run(&team);
+    s.wait_for("the agent's identity", || s.identity_path("a").exists());
+    let state = s.workspace.canonicalize().unwrap().join(".crew");
+    let server = Server::start(&s);
+    let socket = runtime(&s).join("web.sock");
+    // Before hello: nothing but ping.
+    let mut raw = Control::connect(&socket, false);
+    assert_eq!(raw.call("ping", json!({}))["result"]["pong"], true);
+    for (method, params) in [
+        ("workspaces", json!({})),
+        ("web_open", json!({"workspace": state})),
+        ("web_rescan", json!({})),
+        ("web_close", json!({})),
+    ] {
+        let reply = raw.call(method, params);
+        assert_eq!(reply["error"]["code"], "unauthorized", "{method}: {reply}");
+    }
+    // No token, an agent's, the daemon's own operator token.
+    let identity: Value =
+        serde_json::from_str(&std::fs::read_to_string(s.identity_path("a")).unwrap()).unwrap();
+    let daemon_token = crew_core::paths::read_operator_token(&daemon_socket(&state))
+        .unwrap()
+        .unwrap();
+    let hellos = [
+        json!({"role": "operator", "client": "test", "protocol": PROTOCOL_VERSION}),
+        json!({"role": "agent", "agent_id": "a", "token": identity["token"],
+               "client": "test", "protocol": PROTOCOL_VERSION}),
+        json!({"role": "operator", "token": identity["token"],
+               "client": "test", "protocol": PROTOCOL_VERSION}),
+        json!({"role": "operator", "token": daemon_token,
+               "client": "test", "protocol": PROTOCOL_VERSION}),
+    ];
+    for params in hellos {
+        let mut control = Control::connect(&socket, false);
+        let reply = control.call("hello", params.clone());
+        assert_eq!(reply["error"]["code"], "unauthorized", "{params}: {reply}");
+        let after = control.call("web_open", json!({"workspace": state}));
+        assert_eq!(after["error"]["code"], "unauthorized", "{after}");
+    }
+    // With its own token: a WebSocket's calls are not calls of this socket.
+    let mut control = server.control();
+    for (method, params) in [
+        ("snapshot", json!({})),
+        (
+            "send",
+            json!({"to": "a", "body": "from the control socket"}),
+        ),
+        ("subscribe", json!({})),
+        ("web_pair", json!({"code": "nothing"})),
+        ("web_prefs", json!({})),
+    ] {
+        let reply = control.call(method, params);
+        assert_eq!(reply["error"]["code"], "invalid", "{method}: {reply}");
+    }
+    assert!(control.listing().joined.is_empty(), "nothing was joined");
+    assert!(s
+        .messages()
+        .iter()
+        .all(|m| m.body != "from the control socket"));
+}
+
+#[test]
+fn control_calls_do_nothing_on_any_websocket() {
+    let s = Session::new();
+    let a = running(&s);
+    let b = another(&s, "b");
+    let (a_id, b_id) = (
+        crew_core::paths::session_id(&a),
+        crew_core::paths::session_id(&b),
+    );
+    let mut server = Server::start(&s);
+    let mut control = server.control();
+    let info = control.open(&a);
+    let calls = [
+        ("web_open", json!({"workspace": b})),
+        ("web_open", json!({"all": true})),
+        ("web_close", json!({"workspace": a_id})),
+        ("web_close", json!({})),
+        ("web_rescan", json!({})),
+    ];
+    let deadline = Instant::now() + Duration::from_secs(10);
+    while !control.listing().others.iter().any(|o| o.id == b_id) {
+        assert!(Instant::now() < deadline, "b among the others");
+        std::thread::sleep(Duration::from_millis(50));
+    }
+    rt().block_on(async {
+        let token = pair(&info).await;
+        // Before hello.
+        let mut fresh = ws(&info).await;
+        for (n, (method, params)) in calls.iter().enumerate() {
+            let reply = call(&mut fresh, 10 + n as u64, method, params.clone()).await;
+            assert_eq!(reply["error"]["code"], "unauthorized", "{method}: {reply}");
+        }
+        // On the index connection: the server's own `invalid`.
+        let mut index = ws(&info).await;
+        assert!(hello(&mut index, &token, None).await["result"]["web_proof"].is_string());
+        for (n, (method, params)) in calls.iter().enumerate() {
+            let reply = call(&mut index, 10 + n as u64, method, params.clone()).await;
+            assert_eq!(reply["error"]["code"], "invalid", "{method}: {reply}");
+        }
+        // On a workspace connection: the daemon's, which has none of them.
+        let mut conn = ws(&info).await;
+        assert!(hello(&mut conn, &token, Some(&a_id)).await["result"]["web_proof"].is_string());
+        for (n, (method, params)) in calls.iter().enumerate() {
+            let reply = call(&mut conn, 10 + n as u64, method, params.clone()).await;
+            assert_eq!(reply["error"]["code"], "invalid", "{method}: {reply}");
+        }
+        // The same listing, with the same revision, on the index and here.
+        let on_index = call(&mut index, 99, "workspaces", json!({})).await;
+        let on_index: Workspaces = serde_json::from_value(on_index["result"].clone()).unwrap();
+        assert_eq!(on_index, control.listing());
+    });
+    // Nothing was joined, taken out or stopped.
+    let listing = control.listing();
+    let joined: Vec<&str> = listing.joined.iter().map(|w| w.id.as_str()).collect();
+    assert_eq!(joined, [a_id.as_str()]);
+    assert_eq!(listing.joined[0].state, WorkspaceState::Running);
+    assert!(!server.exited_within(Duration::from_millis(100)));
+    s.ok(&["stop", "-C", &s.root().join("b").to_string_lossy()]);
+}
+
+#[test]
+fn with_linger_zero_the_server_exits_when_the_last_daemon_stops() {
+    let s = Session::new();
+    let config = s.root().join("config").join("crew");
+    std::fs::create_dir_all(&config).unwrap();
+    std::fs::write(config.join("config.toml"), "[web]\nlinger_secs = 0\n").unwrap();
+    let state = running(&s);
+    let mut server = Server::start(&s);
+    let mut control = server.control();
+    control.open(&state);
+    assert!(
+        !server.exited_within(Duration::from_millis(500)),
+        "a running workspace keeps it"
+    );
+    s.ok(&["stop", "-C", &s.workspace.to_string_lossy()]);
+    assert!(server.exited_within(Duration::from_secs(10)));
+    assert!(server.child.try_wait().unwrap().unwrap().success());
+    gone(&s);
+}
+
+#[test]
+fn the_server_exits_when_its_control_socket_is_removed() {
+    let s = Session::new();
+    let mut server = Server::start(&s);
+    std::fs::remove_file(runtime(&s).join("web.sock")).unwrap();
+    // Within two housekeeping ticks.
+    assert!(server.exited_within(Duration::from_secs(10)));
+    gone(&s);
+}
+
+#[test]
+fn sigterm_stops_the_server_in_order_and_no_daemon() {
+    let s = Session::new();
+    let state = running(&s);
+    let mut server = Server::start(&s);
+    let mut control = server.control();
+    let info = control.open(&state);
+    let daemon = control.listing().joined[0].daemon.unwrap().pid;
+    rt().block_on(async {
+        let token = pair(&info).await;
+        let mut index = ws(&info).await;
+        assert!(hello(&mut index, &token, None).await["result"]["web_proof"].is_string());
+        // SAFETY: a signal to the child this test started.
+        assert_eq!(
+            unsafe { libc::kill(server.child.id() as i32, libc::SIGTERM) },
+            0
+        );
+        // The index is told before it is closed.
+        let mut shutdown = false;
+        let code = tokio::time::timeout(Duration::from_secs(10), async {
+            loop {
+                match index.next().await {
+                    Some(Ok(Message::Text(text))) => {
+                        let frame: Value = serde_json::from_str(text.as_str()).unwrap();
+                        shutdown |= frame["push"]["kind"] == "shutdown";
+                    }
+                    Some(Ok(Message::Close(frame))) => return frame.map(|f| u16::from(f.code)),
+                    None | Some(Err(_)) => return None,
+                    Some(Ok(_)) => {}
+                }
+            }
+        })
+        .await
+        .expect("closed within 10 s");
+        assert!(shutdown, "a shutdown push before the close");
+        assert_eq!(code, Some(1001));
+    });
+    assert!(server.exited_within(Duration::from_secs(10)));
+    assert!(server.child.try_wait().unwrap().unwrap().success());
+    gone(&s);
+    // The daemon runs on, and lets go of the server's address.
+    s.wait("the daemon to clear its web line", |snapshot| {
+        snapshot.session.web.is_empty()
+    });
+    let published: Value =
+        serde_json::from_str(&std::fs::read_to_string(state.join("daemon.json")).unwrap()).unwrap();
+    assert_eq!(published["pid"], daemon, "the same daemon");
+}
+
+#[test]
+fn a_message_with_a_line_break_closes_the_connection_and_reaches_no_daemon() {
+    let s = Session::new();
+    let state = running(&s);
+    let server = Server::start(&s);
+    let mut control = server.control();
+    let info = control.open(&state);
+    let id = crew_core::paths::session_id(&state);
+    rt().block_on(async {
+        let token = pair(&info).await;
+        let set = |marker: u32| {
+            json!({"id": marker, "method": "web_prefs", "params": {"set": {"marker": marker}}})
+                .to_string()
+        };
+        for text in [
+            format!("{}\n{}", set(1), set(2)),
+            format!("{}\r{}", set(3), set(4)),
+            format!("{}\r\n", set(5)),
+            format!("{}\n", set(6)),
+        ] {
+            let mut conn = ws(&info).await;
+            assert!(hello(&mut conn, &token, Some(&id)).await["result"]["web_proof"].is_string());
+            conn.send(Message::text(text)).await.unwrap();
+            assert_eq!(closed(&mut conn).await, Some(1008));
+        }
+        // The daemon got none of them.
+        let mut check = ws(&info).await;
+        assert!(hello(&mut check, &token, Some(&id)).await["result"]["web_proof"].is_string());
+        let prefs = call(&mut check, 2, "web_prefs", json!({})).await;
+        assert_eq!(prefs["result"]["prefs"], json!({}), "{prefs}");
+    });
+}
+
+#[test]
+fn one_failed_dial_beside_a_healthy_watch_is_unavailable_and_changes_no_listing() {
+    let s = Session::new();
+    let state = running(&s);
+    let server = Server::start(&s);
+    let mut control = server.control();
+    let info = control.open(&state);
+    let id = crew_core::paths::session_id(&state);
+    let token_file = crew_core::paths::operator_token_path(&daemon_socket(&state));
+    rt().block_on(async {
+        let token = pair(&info).await;
+        let mut index = ws(&info).await;
+        assert!(hello(&mut index, &token, None).await["result"]["web_proof"].is_string());
+        // Whatever the join still pushes, then quiet.
+        while tokio::time::timeout(Duration::from_millis(300), pushed(&mut index))
+            .await
+            .is_ok()
+        {}
+        let rev = control.listing().rev;
+        // The server cannot read the daemon's token for one dial.
+        let aside = token_file.with_extension("aside");
+        std::fs::rename(&token_file, &aside).unwrap();
+        let mut conn = ws(&info).await;
+        let refused = hello(&mut conn, &token, Some(&id)).await;
+        std::fs::rename(&aside, &token_file).unwrap();
+        assert_eq!(refused["error"]["code"], "unavailable", "{refused}");
+        let push = tokio::time::timeout(Duration::from_millis(500), pushed(&mut index)).await;
+        assert!(push.is_err(), "nothing is pushed: {push:?}");
+        let listing = control.listing();
+        assert_eq!(listing.rev, rev);
+        assert_eq!(listing.joined[0].state, WorkspaceState::Running);
+        // The next one is let in.
+        let mut again = ws(&info).await;
+        let reply = hello(&mut again, &token, Some(&id)).await;
+        assert!(reply["result"]["web_proof"].is_string(), "{reply}");
+    });
 }

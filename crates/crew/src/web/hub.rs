@@ -808,31 +808,39 @@ impl Hub {
             }
         }
         let mut joined = Vec::new();
+        let mut full = None;
         {
             let mut t = self.table();
             if t.closed {
                 return Err(RpcError::unavailable("the dashboard server is stopping"));
             }
             for (id, state_dir, info) in &wanted {
-                // An explicit command takes it out of the removed set.
-                t.removed.remove(id);
                 if t.member(id).is_some() {
                     continue;
                 }
                 if t.members.len() >= MAX_JOINED {
-                    return Err(RpcError::conflict(format!(
+                    full = Some(RpcError::conflict(format!(
                         "{MAX_JOINED} workspaces are in this dashboard: `crew web --remove` one first"
                     )));
+                    break;
                 }
+                // An explicit command takes it out of the removed set.
+                t.removed.remove(id);
                 let project = info.as_ref().and_then(|i| i.project.clone());
                 self.add(&mut t, id, state_dir, project);
                 joined.push(id.clone());
             }
         }
+        // What was joined is reconciled even when the table filled up on the
+        // way: a membership is never left showing `stopped` for a daemon
+        // that runs.
         for (id, _, info) in wanted {
             self.reconcile_one(&id, info).await;
         }
-        Ok(joined)
+        match full {
+            Some(conflict) => Err(conflict),
+            None => Ok(joined),
+        }
     }
 }
 
