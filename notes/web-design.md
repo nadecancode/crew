@@ -46,6 +46,11 @@ points above are resolved):
   certificate would give the origin an owner; it is not chosen for its cost.
 The replayed gap and the two fixes are in the spike (`origin.spec.ts`).
 
+**Approved** by the reviewer through revision 3 (m-f95c7cb48e47, commit
+0b2a79e1). Added afterwards, at the reviewer's request (m-8f47734a8c0c), as a
+gate for the implementation: the order in which a server stops (§security
+"The listener", "Stopping").
+
 **Verification.** The transport, the security checks, the build and the
 performance figures below were tried in a spike against a real daemon (this
 branch, protocol 4) running the scripted team of `examples/dry-run.yaml`:
@@ -662,6 +667,21 @@ browser and its extensions, and denial of service by a local process.
   refused with `EADDRINUSE`, with the option, without it, and on `0.0.0.0`.
   The listeners are made with `TcpListener::bind` and nothing else; a test
   binds the port again with the option set and must be refused.
+- **Stopping, in this order.** The two listeners cannot be released in the
+  same instant. If one address were free while the other still answered,
+  someone could bind the free one, receive a tab's reconnect there (the tab
+  sends its token), and present that token to the listener that still
+  answers: a live session, and the secret that proves the server. So:
+  1. the server is marked stopping: `web_pair` and `hello` on the web
+     transport answer `unavailable` (with no `web_proof`), and every code,
+     token and secret is dropped;
+  2. every web connection is closed, state and terminal sockets alike;
+  3. only then are the listeners closed, both.
+  This is the path of `web_close`, of the daemon's shutdown (before the
+  socket and the registration are withdrawn) and of the self-stop of the
+  one-address case. A daemon that is killed releases both addresses with the
+  process, and its tokens with its memory. The same in reverse at the start:
+  no label, code or session exists before both binds succeeded.
 - Plain HTTP. A certificate the browser trusts would give the origin an
   owner: a squatter could not present it, and that would be the stronger
   answer to the problem of the next section. It needs a certificate authority
@@ -1019,6 +1039,10 @@ operator through the operator's own browser. Rules for the frontend:
   from connecting while it does. It gains nothing, sockets already
   authenticated are counted apart, and the TUI and CLI do not use this
   listener.
+- **A host whose IPv6 loopback appears while the dashboard is served on
+  `127.0.0.1` alone.** Until the next housekeeping tick (5 s) someone else
+  can hold `[::1]:<port>` and answer for the name. It takes an administrator
+  enabling IPv6 on the loopback interface at that moment; an agent cannot.
 - **A dead address, loaded again.** A tab of a server that is gone, reloaded
   by the operator or by the browser (a discarded tab), or a bookmark of it,
   shows whatever the port's holder serves: possibly an imitation of the
@@ -1787,6 +1811,11 @@ Unit tests beside the code (`crates/crew/src/web/`, `daemon/server.rs`):
 - the one-address case, with the bind injected: serving on `127.0.0.1` alone,
   a later successful bind of `[::1]` is kept; `EADDRINUSE` there stops the
   server and revokes every session;
+- stopping, with a hook between the steps: after step 1 a `hello` with a
+  token that was live a moment ago is `unavailable` and carries no
+  `web_proof`, on a connection already open and on a new one, on both
+  addresses; the listeners are still bound at that point and are closed
+  last; the same order on daemon shutdown and on the self-stop;
 - `Session`: the socket's existing behaviours hold through the refactor
   (malformed request answered with the salvaged id, `attach_input` not
   answered, the subscription starts after the reply);
@@ -2042,6 +2071,9 @@ Pinned by this document; a change goes through `architect`.
   does not, and a browser behind an unusual proxy setting may not. `crew web`
   says so next to the address, and the README names the browsers. The answer
   to a browser that cannot is another browser, never an address by number.
+- **Stopping in the wrong order.** Closing a listener before the sessions
+  are revoked leaves an address free while tokens are still good (§security
+  "Stopping"). The unit test with the hook between the steps is the guard.
 - **The origin rule is easy to undo by accident.** Accepting `127.0.0.1` as
   `Host` "for convenience", persisting the label, adding a `storage`
   listener or a service worker, reloading on a server's word, storing the
