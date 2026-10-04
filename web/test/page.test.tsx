@@ -208,4 +208,17 @@ describe("the switcher's rows", () => {
     fireEvent.keyDown(list, { key: "Escape" });
     expect(view.container.querySelector("[role=listbox]")).toBeNull();
   });
+
+  test("a session both joined and among the others is shown once, as joined", async () => {
+    const { page } = openPage(`#/w/${A}/`);
+    await serveIndex(indexSocket(), listing(1, [entry(A), entry(B)], [{ id: B, project: "search", workspace: "/home/op/work/search" }, { id: "4c2e8a1b9d0f3e57", project: "docs", workspace: "/home/op/work/docs" }]), settle);
+    const view = render(() => (
+      <AppContext.Provider value={page.app()}>
+        <SwitcherButton />
+      </AppContext.Provider>
+    ));
+    fireEvent.click(view.container.querySelector("[data-switcher-button]")!);
+    expect(view.container.querySelectorAll("[role=option]").length).toBe(2);
+    expect([...view.container.querySelectorAll<HTMLElement>("[data-other]")].map((r) => r.dataset.other)).toEqual(["4c2e8a1b9d0f3e57"]);
+  });
 });

@@ -106,9 +106,16 @@ function SwitcherList(props: { close(refocus: boolean): void }) {
   const joined = createMemo(() =>
     (page.hub.listing()?.joined ?? []).map((entry, i) => ({ kind: "joined" as const, entry, n: i + 1 })).filter((r) => matches(workspaceName(r.entry), r.entry.workspace)),
   );
-  const others = createMemo(() =>
-    (page.hub.listing()?.others ?? []).map((other) => ({ kind: "other" as const, other })).filter((r) => matches(r.other.project ?? "", r.other.workspace)),
-  );
+  // A session just joined may still be named among the others until the
+  // server reads the registry again: it is shown once, as joined.
+  const others = createMemo(() => {
+    const listing = page.hub.listing();
+    const joinedIds = new Set((listing?.joined ?? []).map((e) => e.id));
+    return (listing?.others ?? [])
+      .filter((other) => !joinedIds.has(other.id))
+      .map((other) => ({ kind: "other" as const, other }))
+      .filter((r) => matches(r.other.project ?? "", r.other.workspace));
+  });
   /** Only joined rows can be chosen; arrows move over them. */
   const choosable = () => joined();
   const current = () => app.link.id;
