@@ -1145,3 +1145,37 @@ pub(crate) fn runnable(path: &Path) {
     }
     panic!("{} stayed busy", path.display());
 }
+
+#[test]
+fn an_integration_cut_between_branches_publishes_what_merged_before() {
+    let Some((p, hang)) = hanging_project() else {
+        return;
+    };
+    let (_, _, _, _, _) = rivals(&p);
+    let (integration, _) =
+        p.jj.add_workspace(&p.worktrees, INTEGRATION_DIR, "HEAD")
+            .unwrap();
+    p.jj.populate(&integration).unwrap();
+    let before = p.git(&["rev-parse", "refs/heads/agents/integration"]);
+    let agents: Vec<String> = ["a", "b"].iter().map(|s| s.to_string()).collect();
+    // Once a is merged, the lookup of b's branch hangs: a raw timeout, not
+    // one an operation's recovery handled.
+    let err =
+        p.jj.merge_agents(&integration, &agents, &mut |step| {
+            if step.agent == "a" {
+                hang.arm("before", "present(bookmarks(exact:\"agents/b\"))");
+            }
+        })
+        .unwrap_err();
+    let text = format!("{err:#}");
+    assert!(text.contains("did not finish"), "{text}");
+    let head = p.head(&integration);
+    assert_ne!(head, before, "a was merged");
+    assert!(text.contains("was kept"), "{text}");
+    assert_eq!(err.downcast_ref::<git::Kept>().unwrap().commit, head);
+    assert_eq!(p.git(&["rev-parse", "refs/heads/agents/integration"]), head);
+    assert!(
+        !integration.path.join("bnew.txt").exists(),
+        "b was not merged"
+    );
+}

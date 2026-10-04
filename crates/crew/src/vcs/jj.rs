@@ -950,6 +950,38 @@ is, check jj status"
         s
     }
 
+    /// An integration run that failed with `e` part of the way: what merged
+    /// before is on `agents/integration`, so git gets it too, and the error
+    /// says it was kept. Any command can have timed out, recovered or not
+    /// (a lookup before a merge is not), so the working copy is brought up
+    /// to date first and the export runs whatever happened; it changes
+    /// nothing when there is nothing new.
+    fn publish_merged(&self, dir: &Path, start: &str, e: anyhow::Error) -> anyhow::Error {
+        if timed_out(&e) {
+            let _ = self.out(dir, CREW, &["workspace", "update-stale"]);
+            self.remove_ref_lock(INTEGRATION_BRANCH);
+        }
+        if self.export(dir, CREW, INTEGRATION_BRANCH).is_err() {
+            return e;
+        }
+        let head = match self.bookmark(dir, CREW, INTEGRATION_BRANCH) {
+            Ok(Some(head)) if head != start => head,
+            _ => return e,
+        };
+        if e.chain().any(|c| c.downcast_ref::<git::Kept>().is_some()) {
+            return e;
+        }
+        let message = format!(
+            "{e:#}; what merged before it was kept: {} is on {INTEGRATION_BRANCH}",
+            short(&head)
+        );
+        git::Kept {
+            commit: head,
+            message,
+        }
+        .into()
+    }
+
     /// The identity a workspace directory acts as.
     fn identity_of(workspace: &Workspace) -> String {
         match workspace.path.file_name().and_then(|n| n.to_str()) {
@@ -1405,12 +1437,7 @@ was rearranged by hand, check jj log",
             Ok(())
         };
         if let Err(e) = run() {
-            // What merged before the failure is on the bookmark: git sees it
-            // too (a timeout's recovery has exported already).
-            if !timed_out(&e) {
-                let _ = self.export(dir, CREW, INTEGRATION_BRANCH);
-            }
-            return Err(e);
+            return Err(self.publish_merged(dir, &start, e));
         }
         // The publication: one export for the whole run, recovered from like
         // any other phase when it times out.
