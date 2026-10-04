@@ -28,25 +28,52 @@ const KEYS: &[(&str, &str)] = &[
     ("S", "stop the team: agents and daemon (asks first)"),
     ("/", "type a command (listed below)"),
     ("click", "open an agent or a bus message; wheel scrolls"),
-    ("click a model", "a box's bottom label: choose its model and CLI"),
-    ("click terminal", "inspector: type straight into it · ctrl-] stops"),
+    (
+        "click a model",
+        "a box's bottom label: choose its model and CLI",
+    ),
+    (
+        "click terminal",
+        "inspector: type straight into it · ctrl-] stops",
+    ),
     ("f", "inspector: the terminal pane fills the view (toggle)"),
-    ("right-click", "back / close, like esc (shift-drag selects text)"),
+    (
+        "right-click",
+        "back / close, like esc (shift-drag selects text)",
+    ),
     ("esc", "back / close"),
     ("q", "quit the dashboard — agents keep running"),
 ];
 
 /// What the symbols mean and the keys of the other views, below the commands.
 const NOTES: &[(&str, &str)] = &[
-    ("✱  ❂  π  $", "an agent on Claude Code · Codex · pi · a shell"),
-    ("↳ box", "a subagent, tethered to the agent that launched it"),
+    (
+        "✱  ❂  π  $",
+        "an agent on Claude Code · Codex · pi · a shell",
+    ),
+    (
+        "↳ box",
+        "a subagent, tethered to the agent that launched it",
+    ),
     ("⑂N  +N", "in-session subagents · subagents without a box"),
-    ("temp", "a member added mid-run: it leaves once its work is done"),
-    ("inspector", "i type into the terminal · r refresh · d diff · ↑ transcript"),
-    ("? on a box", "it waits for your answer; the box opens itself"),
+    (
+        "temp",
+        "a member added mid-run: it leaves once its work is done",
+    ),
+    (
+        "inspector",
+        "i type into the terminal · r refresh · d diff · ↑ transcript",
+    ),
+    (
+        "? on a box",
+        "it waits for your answer; the box opens itself",
+    ),
     ("event log", "f filter to selected agent · Home/End"),
     ("compose", "a line starting with / is a command, never sent"),
-    ("shift+enter", "a new line in any box (alt+enter or ctrl+j if not)"),
+    (
+        "shift+enter",
+        "a new line in any box (alt+enter or ctrl+j if not)",
+    ),
 ];
 
 /// Columns of the overlay, and of its left (key) column.

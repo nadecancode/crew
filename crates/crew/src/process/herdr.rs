@@ -123,7 +123,9 @@ impl HerdrManager {
             params["format"] = json!("ansi");
         }
         let result = self.call_with_timeout("pane.read", params, timeout).await?;
-        Ok(str_at(&result, &["/read/text", "/text"]).unwrap_or_default().to_string())
+        Ok(str_at(&result, &["/read/text", "/text"])
+            .unwrap_or_default()
+            .to_string())
     }
 
     /// What the pane shows now, plain or with its colours. The same rows
@@ -140,7 +142,13 @@ impl HerdrManager {
         if rows > 2 {
             let within = (rows - 1).min(lines.max(1));
             let joined = self
-                .read_pane(&pane.pane_id, "recent_unwrapped", Some(within), ansi, UNWRAP_TIMEOUT)
+                .read_pane(
+                    &pane.pane_id,
+                    "recent_unwrapped",
+                    Some(within),
+                    ansi,
+                    UNWRAP_TIMEOUT,
+                )
                 .await;
             // herdr counts those lines up from the bottom row of the screen,
             // blank rows included: a screen with little on it comes back
@@ -152,7 +160,12 @@ impl HerdrManager {
         Ok(tidy(shown))
     }
 
-    async fn call_with_timeout(&self, method: &str, params: Value, timeout: Duration) -> Result<Value> {
+    async fn call_with_timeout(
+        &self,
+        method: &str,
+        params: Value,
+        timeout: Duration,
+    ) -> Result<Value> {
         let id = format!("crew:{}", self.seq.fetch_add(1, Ordering::Relaxed));
         let request = json!({ "id": id, "method": method, "params": params });
         let exchange = async {
@@ -195,7 +208,11 @@ impl HerdrManager {
         // Reuse the team's workspace if it still exists.
         let mut workspace = self.state().workspace_id.clone();
         if let Some(id) = &workspace {
-            if self.call("workspace.get", json!({ "workspace_id": id })).await.is_err() {
+            if self
+                .call("workspace.get", json!({ "workspace_id": id }))
+                .await
+                .is_err()
+            {
                 workspace = None;
                 let mut state = self.state();
                 state.workspace_id = None;
@@ -359,12 +376,17 @@ impl HerdrManager {
                 continue;
             };
             let data = value.get("data").cloned().unwrap_or(Value::Null);
-            if str_at(&data, &["/pane_id", "/pane/pane_id"]).as_deref() != Some(pane.pane_id.as_str()) {
+            if str_at(&data, &["/pane_id", "/pane/pane_id"]).as_deref()
+                != Some(pane.pane_id.as_str())
+            {
                 continue;
             }
             match event.replace('.', "_").as_str() {
                 "pane_agent_status_changed" => {
-                    let status = data.get("agent_status").and_then(Value::as_str).unwrap_or("");
+                    let status = data
+                        .get("agent_status")
+                        .and_then(Value::as_str)
+                        .unwrap_or("");
                     // The pane outlives the agent: when herdr no longer sees
                     // an agent in it, the agent's process has exited and the
                     // pane is back at its shell.
@@ -420,15 +442,15 @@ impl HerdrManager {
     /// The pane still exists but no agent occupies it any more.
     async fn agent_left(&self, pane_id: &str) -> bool {
         match self.call("pane.get", json!({ "pane_id": pane_id })).await {
-            Ok(result) => result
-                .pointer("/pane/agent")
-                .is_none_or(Value::is_null),
+            Ok(result) => result.pointer("/pane/agent").is_none_or(Value::is_null),
             Err(_) => false,
         }
     }
 
     async fn pane_pids(&self, pane_id: &str) -> Result<(Option<u32>, Option<u32>)> {
-        let result = self.call("pane.process_info", json!({ "pane_id": pane_id })).await?;
+        let result = self
+            .call("pane.process_info", json!({ "pane_id": pane_id }))
+            .await?;
         let info = result.get("process_info").unwrap_or(&result);
         let group = info
             .get("foreground_process_group_id")
@@ -447,7 +469,8 @@ impl HerdrManager {
     async fn signal_foreground(&self, agent_id: &str, signal: libc::c_int) -> Result<()> {
         let pane = self.pane(agent_id)?;
         let (_, group) = self.pane_pids(&pane.pane_id).await?;
-        let group = group.ok_or_else(|| anyhow!("herdr did not report a foreground process group"))?;
+        let group =
+            group.ok_or_else(|| anyhow!("herdr did not report a foreground process group"))?;
         if group <= 1 {
             bail!("refusing to signal process group {group}");
         }
@@ -480,7 +503,13 @@ fn agent_names(agent_id: &str, label: &str) -> Vec<String> {
         .unwrap_or(label)
         .to_ascii_lowercase()
         .chars()
-        .map(|c| if c.is_ascii_lowercase() || c.is_ascii_digit() || c == '_' { c } else { '-' })
+        .map(|c| {
+            if c.is_ascii_lowercase() || c.is_ascii_digit() || c == '_' {
+                c
+            } else {
+                '-'
+            }
+        })
         .collect();
     let team = team.trim_matches('-');
     let mut names = vec![agent_id.to_string()];
@@ -522,7 +551,9 @@ impl ProcessManager for Herdr {
             if old.alive.load(Ordering::SeqCst) {
                 // Restart: replace the old pane.
                 old.alive.store(false, Ordering::SeqCst);
-                let _ = mgr.call("pane.close", json!({ "pane_id": old.pane_id })).await;
+                let _ = mgr
+                    .call("pane.close", json!({ "pane_id": old.pane_id }))
+                    .await;
             }
         }
         let pane_id = mgr.create_pane(spec).await?;
@@ -552,13 +583,16 @@ impl ProcessManager for Herdr {
                         .await;
                     match result {
                         Ok(_) => break,
-                        Err(e) if e.to_string().contains("agent_name_taken") => match names.next() {
-                            Some(next) => name = next,
-                            None => {
-                                let _ = mgr.call("pane.close", json!({ "pane_id": pane_id })).await;
-                                return Err(e);
+                        Err(e) if e.to_string().contains("agent_name_taken") => {
+                            match names.next() {
+                                Some(next) => name = next,
+                                None => {
+                                    let _ =
+                                        mgr.call("pane.close", json!({ "pane_id": pane_id })).await;
+                                    return Err(e);
+                                }
                             }
-                        },
+                        }
                         Err(e) if attempt < 8 && is_pane_not_ready(&e.to_string()) => {
                             tokio::time::sleep(Duration::from_millis(400)).await;
                         }
@@ -593,7 +627,9 @@ impl ProcessManager for Herdr {
             kind: spec.kind,
             alive: Arc::new(AtomicBool::new(true)),
         };
-        mgr.state().panes.insert(spec.agent_id.clone(), pane.clone());
+        mgr.state()
+            .panes
+            .insert(spec.agent_id.clone(), pane.clone());
         mgr.watch(spec.agent_id.clone(), pane);
         Ok(Spawned {
             pid,
@@ -674,8 +710,11 @@ impl ProcessManager for Herdr {
         let mgr = &self.0;
         let pane = mgr.pane(agent_id)?;
         // herdr encodes named keys for the pane's terminal mode itself.
-        mgr.call("pane.send_keys", json!({ "pane_id": pane.pane_id, "keys": keys }))
-            .await?;
+        mgr.call(
+            "pane.send_keys",
+            json!({ "pane_id": pane.pane_id, "keys": keys }),
+        )
+        .await?;
         Ok(())
     }
 
@@ -685,7 +724,13 @@ impl ProcessManager for Herdr {
         // Past the screen herdr takes tens of milliseconds a line.
         let timeout = CALL_TIMEOUT + SCROLLBACK_LINE_TIME * lines as u32;
         let text = mgr
-            .read_pane(&pane.pane_id, "recent_unwrapped", Some(lines), false, timeout)
+            .read_pane(
+                &pane.pane_id,
+                "recent_unwrapped",
+                Some(lines),
+                false,
+                timeout,
+            )
             .await?;
         Ok(text.trim_end().to_string())
     }
@@ -719,7 +764,10 @@ impl ProcessManager for Herdr {
             return Ok(());
         };
         pane.alive.store(false, Ordering::SeqCst);
-        match mgr.call("pane.close", json!({ "pane_id": pane.pane_id })).await {
+        match mgr
+            .call("pane.close", json!({ "pane_id": pane.pane_id }))
+            .await
+        {
             Ok(_) => Ok(()),
             // Already gone is what we wanted.
             Err(e) if mgr.pane_gone(&pane.pane_id).await => {
@@ -809,7 +857,8 @@ impl ProcessManager for Herdr {
     async fn focus(&self, agent_id: &str) -> Result<()> {
         let mgr = &self.0;
         let pane = mgr.pane(agent_id)?;
-        mgr.call("pane.focus", json!({ "pane_id": pane.pane_id })).await?;
+        mgr.call("pane.focus", json!({ "pane_id": pane.pane_id }))
+            .await?;
         Ok(())
     }
 
@@ -857,10 +906,18 @@ mod tests {
             let mut chars = name.chars();
             chars.next().is_some_and(|c| c.is_ascii_lowercase())
                 && name.len() <= NAME_MAX
-                && chars.all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-' || c == '_')
+                && chars
+                    .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-' || c == '_')
         };
         let names = agent_names("orchestrator", "crew:hello-crew");
-        assert_eq!(names[..3], ["orchestrator", "orchestrator-hello-crew", "orchestrator-hello-crew-2"]);
+        assert_eq!(
+            names[..3],
+            [
+                "orchestrator",
+                "orchestrator-hello-crew",
+                "orchestrator-hello-crew-2"
+            ]
+        );
         assert!(names.iter().all(|n| valid(n)), "{names:?}");
         // Long ids, long or odd project names and custom labels still fit.
         let long = agent_names(&"a".repeat(32), "crew:My.Project With Spaces");
@@ -876,7 +933,10 @@ mod tests {
     #[test]
     fn json_helpers() {
         let v = json!({"root_pane": {"pane_id": "w1:p2"}, "text": "x"});
-        assert_eq!(str_at(&v, &["/pane/pane_id", "/root_pane/pane_id"]).as_deref(), Some("w1:p2"));
+        assert_eq!(
+            str_at(&v, &["/pane/pane_id", "/root_pane/pane_id"]).as_deref(),
+            Some("w1:p2")
+        );
         assert_eq!(str_at(&v, &["/missing"]), None);
         assert_eq!(herdr_kind(RuntimeKind::Codex), Some("codex"));
         assert_eq!(herdr_kind(RuntimeKind::Shell), None);
@@ -892,6 +952,9 @@ mod tests {
         let (tx, _rx) = mpsc::unbounded_channel();
         let mgr = HerdrManager::new(&socket, "crew:test", HerdrLayout::Tabs, None, tx);
         let err = mgr.call("ping", json!({})).await.unwrap_err();
-        assert!(format!("{err:#}").contains("connecting to herdr"), "{err:#}");
+        assert!(
+            format!("{err:#}").contains("connecting to herdr"),
+            "{err:#}"
+        );
     }
 }

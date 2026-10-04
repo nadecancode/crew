@@ -41,7 +41,9 @@ impl From<BusError> for RpcError {
 fn operator_only(who: &Who) -> Result<(), RpcError> {
     match who {
         Who::Operator => Ok(()),
-        Who::Agent(_) => Err(RpcError::forbidden("this operation is reserved for the operator")),
+        Who::Agent(_) => Err(RpcError::forbidden(
+            "this operation is reserved for the operator",
+        )),
     }
 }
 
@@ -72,11 +74,17 @@ impl Daemon {
 
     /// Resolve which agent a call acts on. Agents can only act as themselves;
     /// the operator must name the agent.
-    pub(crate) fn acting_agent(&self, who: &Who, named: Option<String>) -> Result<String, RpcError> {
+    pub(crate) fn acting_agent(
+        &self,
+        who: &Who,
+        named: Option<String>,
+    ) -> Result<String, RpcError> {
         match (who, named) {
             (Who::Agent(me), None) => Ok(me.clone()),
             (Who::Agent(me), Some(other)) if *me == other => Ok(other),
-            (Who::Agent(_), Some(_)) => Err(RpcError::forbidden("agents can only act as themselves")),
+            (Who::Agent(_), Some(_)) => {
+                Err(RpcError::forbidden("agents can only act as themselves"))
+            }
             (Who::Operator, Some(agent)) => {
                 if self.model().agent(&agent).is_none() {
                     return Err(RpcError::not_found(format!("no agent '{agent}'")));
@@ -127,14 +135,20 @@ impl Daemon {
 
             Call::Snapshot { messages, events } => {
                 operator_only(&who)?;
-                reply(self.snapshot(messages.unwrap_or(200).min(2000), events.unwrap_or(300).min(5000))?)
+                reply(self.snapshot(
+                    messages.unwrap_or(200).min(2000),
+                    events.unwrap_or(300).min(5000),
+                )?)
             }
             Call::Subscribe => {
                 operator_only(&who)?;
                 conn.subscribe_after_reply = true;
                 Ok(json!({ "subscribed": true }))
             }
-            Call::LoadTeam { config, herdr_socket } => {
+            Call::LoadTeam {
+                config,
+                herdr_socket,
+            } => {
                 operator_only(&who)?;
                 self.load_team(*config, herdr_socket).await?;
                 reply(self.session_info())
@@ -150,7 +164,8 @@ impl Daemon {
                 self.privileged(&who)?;
                 // The orchestrator's additions once the team is founded are
                 // temporary; the operator's are the operator's to remove.
-                let temporary = matches!(&who, Who::Agent(_)) && self.model().session.founded_at.is_some();
+                let temporary =
+                    matches!(&who, Who::Agent(_)) && self.model().session.founded_at.is_some();
                 reply(self.add_agent(spec, temporary).await?)
             }
             Call::AgentKill { id } => {
@@ -168,10 +183,16 @@ impl Daemon {
                 self.restart_agent(&id).await?;
                 reply(self.agent(&id))
             }
-            Call::AgentSetModel { id, model, runtime, note } => {
+            Call::AgentSetModel {
+                id,
+                model,
+                runtime,
+                note,
+            } => {
                 self.privileged(&who)?;
                 let by_operator = matches!(who, Who::Operator);
-                self.set_model(who.sender(), by_operator, &id, &model, runtime, note).await?;
+                self.set_model(who.sender(), by_operator, &id, &model, runtime, note)
+                    .await?;
                 reply(self.agent(&id))
             }
             Call::UsageStatus => {
@@ -234,7 +255,10 @@ impl Daemon {
             }
             Call::AgentTranscript { id, limit } => {
                 operator_only(&who)?;
-                reply(self.agent_transcript(&id, limit.unwrap_or(400).clamp(1, 2000)).await?)
+                reply(
+                    self.agent_transcript(&id, limit.unwrap_or(400).clamp(1, 2000))
+                        .await?,
+                )
             }
             Call::AgentInput { id, text, submit } => {
                 operator_only(&who)?;
@@ -243,7 +267,10 @@ impl Daemon {
                 if submit {
                     procs.submit_prompt(&id, &text).await.map_err(internal)?;
                 } else {
-                    procs.write_raw(&id, text.as_bytes()).await.map_err(internal)?;
+                    procs
+                        .write_raw(&id, text.as_bytes())
+                        .await
+                        .map_err(internal)?;
                 }
                 self.emit(
                     NewEvent::new("daemon", "agent.input", format!("operator typed into {id}"))
@@ -264,7 +291,10 @@ impl Daemon {
                 model,
             } => {
                 let parent = agent_only(&who)?.to_string();
-                reply(self.spawn_subagent(&parent, id, role, task, runtime, model).await?)
+                reply(
+                    self.spawn_subagent(&parent, id, role, task, runtime, model)
+                        .await?,
+                )
             }
 
             Call::Send(params) => reply(self.handle_send(&who, params).await?),
@@ -279,9 +309,9 @@ impl Daemon {
                 limit,
             } => {
                 let agent = self.acting_agent(&who, agent)?;
-                let messages = self
-                    .bus
-                    .receive(&agent, unread_only, limit.unwrap_or(50).clamp(1, 500))?;
+                let messages =
+                    self.bus
+                        .receive(&agent, unread_only, limit.unwrap_or(50).clamp(1, 500))?;
                 // Only the agent itself consumes its inbox; the operator just looks.
                 if ack && matches!(who, Who::Agent(_)) && !messages.is_empty() {
                     let ids: Vec<String> = messages.iter().map(|m| m.message.id.clone()).collect();
@@ -322,9 +352,9 @@ impl Daemon {
                 let endpoint = crate::endpoints::Layers::load(&self.workspace)
                     .resolve(runtime, &agent, parent.as_deref())
                     .map_err(|e| RpcError::invalid(format!("{e:#}")))?;
-                let key = endpoint
-                    .api_key
-                    .ok_or_else(|| RpcError::not_found("the crew config sets no api key for this agent"))?;
+                let key = endpoint.api_key.ok_or_else(|| {
+                    RpcError::not_found("the crew config sets no api key for this agent")
+                })?;
                 Ok(json!({ "value": key.expose() }))
             }
             Call::History { agent, limit } => {
@@ -364,7 +394,11 @@ impl Daemon {
                 self.privileged(&who)?;
                 reply(self.create_task(spec)?)
             }
-            Call::TaskEdit { id, title, description } => {
+            Call::TaskEdit {
+                id,
+                title,
+                description,
+            } => {
                 self.privileged(&who)?;
                 reply(self.edit_task(&who, &id, title, description).await?)
             }
@@ -377,7 +411,9 @@ impl Daemon {
                 result,
                 artifacts,
             } => reply(self.complete_task(&who, task_id, result, artifacts).await?),
-            Call::TaskFail { task_id, reason } => reply(self.fail_task_by(&who, task_id, reason).await?),
+            Call::TaskFail { task_id, reason } => {
+                reply(self.fail_task_by(&who, task_id, reason).await?)
+            }
             Call::TaskRetry { id } => {
                 self.privileged(&who)?;
                 reply(self.retry_task(&id)?)
@@ -388,12 +424,18 @@ impl Daemon {
                 artifact,
                 task_id,
                 note,
-            } => reply(self.request_review(&who, agent_id, artifact, task_id, note).await?),
+            } => reply(
+                self.request_review(&who, agent_id, artifact, task_id, note)
+                    .await?,
+            ),
             Call::ReviewSubmit {
                 task_id,
                 approve,
                 comments,
-            } => reply(self.submit_review(&who, &task_id, approve, comments).await?),
+            } => reply(
+                self.submit_review(&who, &task_id, approve, comments)
+                    .await?,
+            ),
             Call::SessionComplete { summary, decisions } => {
                 self.privileged(&who)?;
                 let decisions = self.check_decisions(&who, decisions)?;
@@ -460,7 +502,10 @@ impl Daemon {
                 let bytes = base64::engine::general_purpose::STANDARD
                     .decode(data)
                     .map_err(|e| RpcError::invalid(format!("bad base64: {e}")))?;
-                self.procs()?.write_raw(&agent, &bytes).await.map_err(internal)?;
+                self.procs()?
+                    .write_raw(&agent, &bytes)
+                    .await
+                    .map_err(internal)?;
                 Ok(Value::Null)
             }
             Call::AttachResize { rows, cols } => {
@@ -469,13 +514,20 @@ impl Daemon {
                     .attached
                     .clone()
                     .ok_or_else(|| RpcError::invalid("not attached"))?;
-                self.procs()?.resize(&agent, rows, cols).await.map_err(internal)?;
+                self.procs()?
+                    .resize(&agent, rows, cols)
+                    .await
+                    .map_err(internal)?;
                 Ok(Value::Null)
             }
         }
     }
 
-    pub(crate) async fn handle_send(&self, who: &Who, mut params: SendParams) -> Result<SendResult, RpcError> {
+    pub(crate) async fn handle_send(
+        &self,
+        who: &Who,
+        mut params: SendParams,
+    ) -> Result<SendResult, RpcError> {
         if params.to == OPERATOR_ID && params.kind == MessageType::Question {
             self.check_operator_question(who, &mut params)?;
         }
@@ -612,7 +664,12 @@ impl Daemon {
         Ok(sent)
     }
 
-    fn self_status(&self, agent: &str, status: AgentStatus, note: Option<String>) -> Result<(), RpcError> {
+    fn self_status(
+        &self,
+        agent: &str,
+        status: AgentStatus,
+        note: Option<String>,
+    ) -> Result<(), RpcError> {
         if !matches!(
             status,
             AgentStatus::Working | AgentStatus::Waiting | AgentStatus::Blocked | AgentStatus::Idle
@@ -654,7 +711,13 @@ impl Daemon {
         Ok(())
     }
 
-    async fn attach(&self, conn: &mut Conn, agent: &str, rows: u16, cols: u16) -> Result<(), RpcError> {
+    async fn attach(
+        &self,
+        conn: &mut Conn,
+        agent: &str,
+        rows: u16,
+        cols: u16,
+    ) -> Result<(), RpcError> {
         let procs = self.procs()?;
         // Fit the pty to the client before taking the snapshot.
         procs.resize(agent, rows, cols).await.map_err(internal)?;
@@ -678,8 +741,13 @@ impl Daemon {
             loop {
                 match output.recv().await {
                     Ok(chunk) => {
-                        let data = base64::engine::general_purpose::STANDARD.encode(strip_queries(&chunk));
-                        if tx.send(ServerFrame::push(Push::Pty { data })).await.is_err() {
+                        let data =
+                            base64::engine::general_purpose::STANDARD.encode(strip_queries(&chunk));
+                        if tx
+                            .send(ServerFrame::push(Push::Pty { data }))
+                            .await
+                            .is_err()
+                        {
                             return;
                         }
                     }
@@ -692,15 +760,20 @@ impl Daemon {
             }
         }));
         self.emit(
-            NewEvent::new("daemon", "agent.attached", format!("operator attached to {agent}"))
-                .agent(agent),
+            NewEvent::new(
+                "daemon",
+                "agent.attached",
+                format!("operator attached to {agent}"),
+            )
+            .agent(agent),
         );
         Ok(())
     }
 
     pub(crate) async fn shutdown(&self, stop_agents: bool) {
         if stop_agents {
-            self.stopping_team.store(true, std::sync::atomic::Ordering::SeqCst);
+            self.stopping_team
+                .store(true, std::sync::atomic::Ordering::SeqCst);
             let ids: Vec<String> = self.model().agents.iter().map(|a| a.id.clone()).collect();
             for id in &ids {
                 if let Err(e) = self.kill_agent(id).await {

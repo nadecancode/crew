@@ -45,7 +45,10 @@ fn str_field(payload: &Value, key: &str) -> Option<String> {
 
 /// A short label for a tool call, e.g. `$ cargo test` or `edit main.rs`.
 fn describe_tool(payload: &Value) -> String {
-    let tool = payload.get("tool_name").and_then(Value::as_str).unwrap_or("tool");
+    let tool = payload
+        .get("tool_name")
+        .and_then(Value::as_str)
+        .unwrap_or("tool");
     let input = payload.get("tool_input").unwrap_or(&Value::Null);
     let file = |key: &str| {
         input.get(key).and_then(Value::as_str).map(|p| {
@@ -64,7 +67,10 @@ fn describe_tool(payload: &Value) -> String {
         format!("{tool} {name}")
     } else if let Some(pattern) = input.get("pattern").and_then(Value::as_str) {
         format!("{tool} {pattern}")
-    } else if crate::mcp::tools::definitions().iter().any(|t| t.name == tool) {
+    } else if crate::mcp::tools::definitions()
+        .iter()
+        .any(|t| t.name == tool)
+    {
         format!("crew: {tool}")
     } else {
         tool.to_string()
@@ -85,20 +91,28 @@ pub const INSTALL_HINT: &str = "npm install -g @earendil-works/pi-coding-agent";
 
 fn executable(path: &Path) -> bool {
     use std::os::unix::fs::PermissionsExt;
-    std::fs::metadata(path).is_ok_and(|meta| meta.is_file() && meta.permissions().mode() & 0o111 != 0)
+    std::fs::metadata(path)
+        .is_ok_and(|meta| meta.is_file() && meta.permissions().mode() & 0o111 != 0)
 }
 
 /// Every `pi` on `path` (a `PATH` value), then in the user install
 /// directories under `home`, each once.
-fn candidates(path: Option<std::ffi::OsString>, home: Option<std::ffi::OsString>) -> Vec<std::path::PathBuf> {
-    let mut dirs: Vec<std::path::PathBuf> = path.map(|path| std::env::split_paths(&path).collect()).unwrap_or_default();
+fn candidates(
+    path: Option<std::ffi::OsString>,
+    home: Option<std::ffi::OsString>,
+) -> Vec<std::path::PathBuf> {
+    let mut dirs: Vec<std::path::PathBuf> = path
+        .map(|path| std::env::split_paths(&path).collect())
+        .unwrap_or_default();
     if let Some(home) = home.filter(|h| !h.is_empty()) {
         dirs.extend(USER_BIN_DIRS.iter().map(|dir| Path::new(&home).join(dir)));
     }
     let mut found: Vec<std::path::PathBuf> = Vec::new();
     let mut seen = std::collections::HashSet::new();
     for candidate in dirs.into_iter().map(|dir| dir.join("pi")) {
-        if executable(&candidate) && seen.insert(std::fs::canonicalize(&candidate).unwrap_or(candidate.clone())) {
+        if executable(&candidate)
+            && seen.insert(std::fs::canonicalize(&candidate).unwrap_or(candidate.clone()))
+        {
             found.push(candidate);
         }
     }
@@ -114,9 +128,16 @@ pub fn check_binary(path: &Path) -> Result<(), String> {
     let Some(help) = output_within(path, &["--help"], std::time::Duration::from_secs(10)) else {
         return Ok(());
     };
-    let first = help.lines().map(str::trim).find(|l| !l.is_empty()).unwrap_or_default();
+    let first = help
+        .lines()
+        .map(str::trim)
+        .find(|l| !l.is_empty())
+        .unwrap_or_default();
     if first.starts_with("GSD") || help.contains("Get Shit Done") {
-        return Err(format!("{} is GSD's `pi`, not pi (https://pi.dev)", path.display()));
+        return Err(format!(
+            "{} is GSD's `pi`, not pi (https://pi.dev)",
+            path.display()
+        ));
     }
     Ok(())
 }
@@ -183,7 +204,9 @@ fn parse_model_list(listing: &str) -> Vec<String> {
     let mut models = Vec::new();
     for line in listing.lines() {
         let mut cells = line.split_whitespace();
-        let (Some(provider), Some(model)) = (cells.next(), cells.next()) else { continue };
+        let (Some(provider), Some(model)) = (cells.next(), cells.next()) else {
+            continue;
+        };
         if provider.eq_ignore_ascii_case("provider") && model.eq_ignore_ascii_case("model") {
             continue;
         }
@@ -200,14 +223,18 @@ fn parse_model_list(listing: &str) -> Vec<String> {
 fn check_cached(path: &Path) -> Result<(), String> {
     use std::collections::HashMap;
     use std::sync::{Mutex, OnceLock};
-    static CHECKED: OnceLock<Mutex<HashMap<std::path::PathBuf, Result<(), String>>>> = OnceLock::new();
+    static CHECKED: OnceLock<Mutex<HashMap<std::path::PathBuf, Result<(), String>>>> =
+        OnceLock::new();
     let key = std::fs::canonicalize(path).unwrap_or(path.to_path_buf());
     let checked = CHECKED.get_or_init(Default::default);
     if let Some(known) = checked.lock().unwrap_or_else(|e| e.into_inner()).get(&key) {
         return known.clone();
     }
     let result = check_binary(path);
-    checked.lock().unwrap_or_else(|e| e.into_inner()).insert(key, result.clone());
+    checked
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .insert(key, result.clone());
     result
 }
 
@@ -216,7 +243,9 @@ fn check_cached(path: &Path) -> Result<(), String> {
 /// program of the same name — or why there is none.
 pub fn program() -> Result<std::path::PathBuf, String> {
     pick(
-        std::env::var_os(PI_ENV).filter(|v| !v.is_empty()).map(std::path::PathBuf::from),
+        std::env::var_os(PI_ENV)
+            .filter(|v| !v.is_empty())
+            .map(std::path::PathBuf::from),
         candidates(std::env::var_os("PATH"), std::env::var_os("HOME")),
         check_cached,
     )
@@ -232,7 +261,9 @@ fn pick(
         if !executable(&named) {
             return Err(format!("{PI_ENV}={} is not a program", named.display()));
         }
-        return check(&named).map(|()| named).map_err(|why| format!("{PI_ENV}: {why}"));
+        return check(&named)
+            .map(|()| named)
+            .map_err(|why| format!("{PI_ENV}: {why}"));
     }
     let mut refused = Vec::new();
     for candidate in candidates {
@@ -243,7 +274,9 @@ fn pick(
     }
     Err(match refused.first() {
         None => format!("pi is not installed: `{INSTALL_HINT}` (or bun add -g) installs it"),
-        Some(why) => format!("{why}. Install pi with `{INSTALL_HINT}` (or bun add -g), or set {PI_ENV} to its path"),
+        Some(why) => format!(
+            "{why}. Install pi with `{INSTALL_HINT}` (or bun add -g), or set {PI_ENV} to its path"
+        ),
     })
 }
 
@@ -253,13 +286,23 @@ pub fn check_installed() -> Result<(), String> {
 }
 
 /// Write the crew extension for an agent and return its path.
-fn write_extension(agent_dir: &Path, crew_bin: &Path, identity: &Path) -> Result<std::path::PathBuf> {
+fn write_extension(
+    agent_dir: &Path,
+    crew_bin: &Path,
+    identity: &Path,
+) -> Result<std::path::PathBuf> {
     let path = agent_dir.join(EXTENSION_FILE);
     // The two paths are embedded as JSON string literals, which are valid
     // TypeScript string literals.
     let source = EXTENSION
-        .replace("__CREW_BIN__", &json!(crew_bin.to_string_lossy()).to_string())
-        .replace("__IDENTITY__", &json!(identity.to_string_lossy()).to_string());
+        .replace(
+            "__CREW_BIN__",
+            &json!(crew_bin.to_string_lossy()).to_string(),
+        )
+        .replace(
+            "__IDENTITY__",
+            &json!(identity.to_string_lossy()).to_string(),
+        );
     write_private_file(&path, source.as_bytes())?;
     Ok(path)
 }
@@ -294,7 +337,14 @@ impl AgentRuntime for PiRuntime {
         }
         // Project-local pi files (`.pi/`) in the workspace: trusted or ignored,
         // never asked about.
-        args.push(if ctx.settings.auto_trust { "--approve" } else { "--no-approve" }.into());
+        args.push(
+            if ctx.settings.auto_trust {
+                "--approve"
+            } else {
+                "--no-approve"
+            }
+            .into(),
+        );
         // A model as pi names it, with its provider in front when the name
         // alone would be ambiguous: `anthropic/claude-opus-4-6` (pi and GSD
         // both take that form in one argument).
@@ -351,16 +401,22 @@ impl AgentRuntime for PiRuntime {
             "turn-end" => {
                 let mut signals = vec![Signal::TurnEnded];
                 if payload.get("error").is_some() {
-                    signals.push(match limits::pi_turn_error(payload, crew_core::util::now_ms()) {
-                        limits::TurnFailure::Limited(info) => Signal::Limited(info),
-                        limits::TurnFailure::Other(what) => Signal::TurnFailed(what),
-                    });
+                    signals.push(
+                        match limits::pi_turn_error(payload, crew_core::util::now_ms()) {
+                            limits::TurnFailure::Limited(info) => Signal::Limited(info),
+                            limits::TurnFailure::Other(what) => Signal::TurnFailed(what),
+                        },
+                    );
                 }
                 signals
             }
             "tool-start" => vec![Signal::Activity(describe_tool(payload))],
             "usage" => {
-                let figure = |key: &str| payload.pointer(&format!("/context/{key}")).and_then(Value::as_u64);
+                let figure = |key: &str| {
+                    payload
+                        .pointer(&format!("/context/{key}"))
+                        .and_then(Value::as_u64)
+                };
                 match (figure("tokens"), figure("window")) {
                     (Some(tokens), Some(window)) => vec![Signal::Context { tokens, window }],
                     _ => Vec::new(),
@@ -368,7 +424,8 @@ impl AgentRuntime for PiRuntime {
             }
             "compacted" => vec![Signal::Compacted],
             "compact-skipped" => {
-                let why = str_field(payload, "reason").unwrap_or_else(|| "no reason given".to_string());
+                let why =
+                    str_field(payload, "reason").unwrap_or_else(|| "no reason given".to_string());
                 vec![Signal::CompactSkipped(why)]
             }
             "exiting" => vec![Signal::Exiting],
@@ -486,11 +543,23 @@ mod tests {
         assert_eq!(std::fs::read_to_string(&briefing).unwrap(), "be helpful");
         // The extension has the paths it needs and nothing from pi itself.
         let source = std::fs::read_to_string(&extension).unwrap();
-        assert!(source.contains(r#"const CREW_BIN: string = "/opt/my tools/crew""#), "{source}");
-        assert!(source.contains(&format!("const IDENTITY: string = {}", json!(identity.to_str().unwrap()))));
+        assert!(
+            source.contains(r#"const CREW_BIN: string = "/opt/my tools/crew""#),
+            "{source}"
+        );
+        assert!(source.contains(&format!(
+            "const IDENTITY: string = {}",
+            json!(identity.to_str().unwrap())
+        )));
         assert!(!source.contains("__CREW_BIN__") && !source.contains("pi-coding-agent"));
         assert!(source.contains("registerMcpServer") && source.contains("sendUserMessage"));
-        assert_eq!(spec.env[0], ("CREW_IDENTITY".to_string(), identity.to_string_lossy().into_owned()));
+        assert_eq!(
+            spec.env[0],
+            (
+                "CREW_IDENTITY".to_string(),
+                identity.to_string_lossy().into_owned()
+            )
+        );
 
         // A restart opens the same session; without an id of crew's, pi's
         // newest for the agent; a team that trusts the workspace says so.
@@ -509,9 +578,15 @@ mod tests {
             })
             .unwrap();
         let joined = resumed.args.join(" ");
-        assert!(joined.contains("--session-dir") && joined.contains(" --continue --approve "), "{joined}");
+        assert!(
+            joined.contains("--session-dir") && joined.contains(" --continue --approve "),
+            "{joined}"
+        );
         assert!(!joined.contains("--session-id"), "{joined}");
-        assert!(joined.ends_with("--model claude-sonnet-4-6 --thinking high --"), "{joined}");
+        assert!(
+            joined.ends_with("--model claude-sonnet-4-6 --thinking high --"),
+            "{joined}"
+        );
     }
 
     #[test]
@@ -524,11 +599,17 @@ mod tests {
             std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o755)).unwrap();
             path
         };
-        let pi = script("pi", "pi - AI coding assistant with read, bash, edit, write tools");
+        let pi = script(
+            "pi",
+            "pi - AI coding assistant with read, bash, edit, write tools",
+        );
         assert_eq!(check_binary(&pi), Ok(()));
         let gsd = script("gsd", "GSD v2.70.1 — Get Shit Done");
         let refused = check_binary(&gsd).unwrap_err();
-        assert!(refused.contains("is GSD's `pi`, not pi") && refused.contains("https://pi.dev"), "{refused}");
+        assert!(
+            refused.contains("is GSD's `pi`, not pi") && refused.contains("https://pi.dev"),
+            "{refused}"
+        );
         // A program that cannot be asked is left to its launch.
         assert_eq!(check_binary(&dir.path().join("missing")), Ok(()));
     }
@@ -553,14 +634,20 @@ mod tests {
             ]
         );
         assert_eq!(
-            rt.on_hook("model", &json!({ "model": "anthropic/claude-sonnet-4-6", "effort": "high" })),
+            rt.on_hook(
+                "model",
+                &json!({ "model": "anthropic/claude-sonnet-4-6", "effort": "high" })
+            ),
             vec![Signal::Model {
                 model: Some("anthropic/claude-sonnet-4-6".into()),
                 effort: Some("high".into())
             }]
         );
         assert!(rt.on_hook("model", &json!({})).is_empty());
-        assert_eq!(rt.on_hook("turn-start", &json!({})), vec![Signal::TurnStarted]);
+        assert_eq!(
+            rt.on_hook("turn-start", &json!({})),
+            vec![Signal::TurnStarted]
+        );
         assert_eq!(rt.on_hook("turn-end", &json!({})), vec![Signal::TurnEnded]);
         // A turn that ended in the account's usage limit parks the agent; any
         // other error just ends the turn.
@@ -569,28 +656,55 @@ mod tests {
             &json!({ "error": "error", "error_details": "429 rate_limit_error: You've hit your usage limit · resets 3:19 PM" }),
         );
         assert_eq!(limited[0], Signal::TurnEnded);
-        assert!(matches!(&limited[1], Signal::Limited(info) if info.kind == limits::LimitKind::Usage && info.resets_at.is_some()), "{limited:?}");
-        let failed = rt.on_hook("turn-end", &json!({ "error": "error", "error_details": "500 overloaded" }));
-        assert!(matches!(&failed[1], Signal::TurnFailed(what) if what.contains("overloaded")), "{failed:?}");
+        assert!(
+            matches!(&limited[1], Signal::Limited(info) if info.kind == limits::LimitKind::Usage && info.resets_at.is_some()),
+            "{limited:?}"
+        );
+        let failed = rt.on_hook(
+            "turn-end",
+            &json!({ "error": "error", "error_details": "500 overloaded" }),
+        );
+        assert!(
+            matches!(&failed[1], Signal::TurnFailed(what) if what.contains("overloaded")),
+            "{failed:?}"
+        );
         assert_eq!(
-            rt.on_hook("tool-start", &json!({ "tool_name": "bash", "tool_input": { "command": "cargo test" } })),
+            rt.on_hook(
+                "tool-start",
+                &json!({ "tool_name": "bash", "tool_input": { "command": "cargo test" } })
+            ),
             vec![Signal::Activity("$ cargo test".into())]
         );
         assert_eq!(
-            rt.on_hook("tool-start", &json!({ "tool_name": "edit", "tool_input": { "path": "/w/src/main.rs" } })),
+            rt.on_hook(
+                "tool-start",
+                &json!({ "tool_name": "edit", "tool_input": { "path": "/w/src/main.rs" } })
+            ),
             vec![Signal::Activity("edit main.rs".into())]
         );
         assert_eq!(
-            rt.on_hook("tool-start", &json!({ "tool_name": "agent_send", "tool_input": { "to": "a" } })),
+            rt.on_hook(
+                "tool-start",
+                &json!({ "tool_name": "agent_send", "tool_input": { "to": "a" } })
+            ),
             vec![Signal::Activity("crew: agent_send".into())]
         );
         assert_eq!(
-            rt.on_hook("usage", &json!({ "context": { "tokens": 40000, "window": 200000 } })),
-            vec![Signal::Context { tokens: 40000, window: 200000 }]
+            rt.on_hook(
+                "usage",
+                &json!({ "context": { "tokens": 40000, "window": 200000 } })
+            ),
+            vec![Signal::Context {
+                tokens: 40000,
+                window: 200000
+            }]
         );
         assert_eq!(rt.on_hook("compacted", &json!({})), vec![Signal::Compacted]);
         assert_eq!(rt.on_hook("exiting", &json!({})), vec![Signal::Exiting]);
-        assert_eq!(rt.compact_command(Some("the plan")).as_deref(), Some("/compact"));
+        assert_eq!(
+            rt.compact_command(Some("the plan")).as_deref(),
+            Some("/compact")
+        );
     }
 }
 
@@ -605,7 +719,10 @@ anthropic  claude-opus-4-6    200K     32K      yes       yes\n\
 openai     gpt-6-astra        1M       128K     yes       yes\n\
 \n\
 anthropic  claude-opus-4-6    200K     32K      yes       yes\n";
-        assert_eq!(parse_model_list(listing), vec!["anthropic/claude-opus-4-6", "openai/gpt-6-astra"]);
+        assert_eq!(
+            parse_model_list(listing),
+            vec!["anthropic/claude-opus-4-6", "openai/gpt-6-astra"]
+        );
         assert!(parse_model_list("").is_empty());
         assert!(parse_model_list("provider  model  context\n").is_empty());
     }
@@ -628,8 +745,14 @@ mod program_tests {
             path
         };
         let gsd = script("profile/bin", "GSD v2.70.1 — Get Shit Done");
-        let real = script("home/.bun/bin", "pi - AI coding assistant with read, bash, edit, write tools");
-        let path = Some(std::env::join_paths([root.path().join("profile/bin"), root.path().join("empty")]).unwrap());
+        let real = script(
+            "home/.bun/bin",
+            "pi - AI coding assistant with read, bash, edit, write tools",
+        );
+        let path = Some(
+            std::env::join_paths([root.path().join("profile/bin"), root.path().join("empty")])
+                .unwrap(),
+        );
         let home = Some(root.path().join("home").into_os_string());
 
         // GSD's `pi` comes first on PATH; pi itself is in ~/.bun/bin.
@@ -638,11 +761,18 @@ mod program_tests {
         assert_eq!(pick(None, found, check_binary), Ok(real.clone()));
         // Only GSD's: the reason says what to do.
         let why = pick(None, candidates(path.clone(), None), check_binary).unwrap_err();
-        assert!(why.contains("is GSD's `pi`") && why.contains(INSTALL_HINT) && why.contains(PI_ENV), "{why}");
-        assert!(pick(None, Vec::new(), check_binary).unwrap_err().starts_with("pi is not installed"));
+        assert!(
+            why.contains("is GSD's `pi`") && why.contains(INSTALL_HINT) && why.contains(PI_ENV),
+            "{why}"
+        );
+        assert!(pick(None, Vec::new(), check_binary)
+            .unwrap_err()
+            .starts_with("pi is not installed"));
         // CREW_PI names it outright, and is held to being pi.
         assert_eq!(pick(Some(real.clone()), Vec::new(), check_binary), Ok(real));
-        assert!(pick(Some(gsd), Vec::new(), check_binary).unwrap_err().starts_with("CREW_PI: "));
+        assert!(pick(Some(gsd), Vec::new(), check_binary)
+            .unwrap_err()
+            .starts_with("CREW_PI: "));
         let missing = pick(Some(root.path().join("nope")), Vec::new(), check_binary).unwrap_err();
         assert!(missing.contains("is not a program"), "{missing}");
     }

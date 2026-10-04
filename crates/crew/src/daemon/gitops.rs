@@ -58,7 +58,11 @@ git in it (use a git repository as the workspace, or workspace.init: true)",
         }
     }
 
-    pub(crate) async fn git_commit(&self, agent: &str, message: String) -> Result<CommitInfo, RpcError> {
+    pub(crate) async fn git_commit(
+        &self,
+        agent: &str,
+        message: String,
+    ) -> Result<CommitInfo, RpcError> {
         let dir = self.git_dir(agent)?;
         self.ensure_repo(&dir).await?;
         let author = agent.to_string();
@@ -99,7 +103,11 @@ git in it (use a git repository as the workspace, or workspace.init: true)",
         Ok(commit)
     }
 
-    pub(crate) async fn git_diff(&self, agent: &str, against: Option<String>) -> Result<GitOutcome, RpcError> {
+    pub(crate) async fn git_diff(
+        &self,
+        agent: &str,
+        against: Option<String>,
+    ) -> Result<GitOutcome, RpcError> {
         let dir = self.git_dir(agent)?;
         self.ensure_repo(&dir).await?;
         let text = self
@@ -123,7 +131,11 @@ git in it (use a git repository as the workspace, or workspace.init: true)",
         })
     }
 
-    pub(crate) async fn git_cherry_pick(&self, agent: &str, commit: String) -> Result<GitOutcome, RpcError> {
+    pub(crate) async fn git_cherry_pick(
+        &self,
+        agent: &str,
+        commit: String,
+    ) -> Result<GitOutcome, RpcError> {
         let dir = self.git_dir(agent)?;
         self.ensure_repo(&dir).await?;
         let author = agent.to_string();
@@ -146,12 +158,18 @@ git in it (use a git repository as the workspace, or workspace.init: true)",
         Ok(outcome)
     }
 
-    pub(crate) async fn git_merge(&self, agent: &str, from_agent: String) -> Result<GitOutcome, RpcError> {
+    pub(crate) async fn git_merge(
+        &self,
+        agent: &str,
+        from_agent: String,
+    ) -> Result<GitOutcome, RpcError> {
         if !is_valid_id(&from_agent) {
             return Err(RpcError::not_found(format!("no agent '{from_agent}'")));
         }
         if from_agent == agent {
-            return Err(RpcError::invalid("cannot merge an agent's branch into itself"));
+            return Err(RpcError::invalid(
+                "cannot merge an agent's branch into itself",
+            ));
         }
         let (member, worktrees) = {
             let model = self.model();
@@ -161,14 +179,18 @@ git in it (use a git repository as the workspace, or workspace.init: true)",
             )
         };
         let branch = match member {
-            Some(branch) => branch
-                .ok_or_else(|| git_error(format!("{from_agent} has no branch (agents share the workspace)")))?,
+            Some(branch) => branch.ok_or_else(|| {
+                git_error(format!(
+                    "{from_agent} has no branch (agents share the workspace)"
+                ))
+            })?,
             // A member who has left the team leaves its branch behind.
             None => {
                 let (repo, branch) = (self.workspace.clone(), git::branch_for(&from_agent));
                 let exists = worktrees && {
                     let branch = branch.clone();
-                    self.git(move || Ok(git::branch_exists(&repo, &branch))).await?
+                    self.git(move || Ok(git::branch_exists(&repo, &branch)))
+                        .await?
                 };
                 if !exists {
                     return Err(RpcError::not_found(format!("no agent '{from_agent}'")));

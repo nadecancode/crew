@@ -636,7 +636,10 @@ impl TeamConfig {
                 && agent.command.is_empty()
                 && self.defaults.command.is_empty()
             {
-                bail!("agent '{}' uses the shell runtime and needs `command`", agent.id);
+                bail!(
+                    "agent '{}' uses the shell runtime and needs `command`",
+                    agent.id
+                );
             }
         }
         if self.orchestrator.agent
@@ -652,7 +655,10 @@ impl TeamConfig {
         let mut task_ids = HashSet::new();
         for task in &tasks {
             if !is_valid_id(&task.id) {
-                bail!("invalid task id '{}' (expected [a-z][a-z0-9_-]{{0,31}})", task.id);
+                bail!(
+                    "invalid task id '{}' (expected [a-z][a-z0-9_-]{{0,31}})",
+                    task.id
+                );
             }
             if !task_ids.insert(task.id.as_str()) {
                 bail!("duplicate task id '{}'", task.id);
@@ -672,7 +678,12 @@ impl TeamConfig {
         }
         let graph: HashMap<&str, Vec<&str>> = tasks
             .iter()
-            .map(|t| (t.id.as_str(), t.depends_on.iter().map(String::as_str).collect()))
+            .map(|t| {
+                (
+                    t.id.as_str(),
+                    t.depends_on.iter().map(String::as_str).collect(),
+                )
+            })
             .collect();
         if let Some(cycle) = find_cycle(&graph) {
             bail!("task dependencies form a cycle: {}", cycle.join(" -> "));
@@ -691,7 +702,9 @@ pub const MAX_FALLBACK_MODELS: usize = 32;
 pub const MAX_FALLBACKS: usize = 8;
 
 fn model_name(m: &str) -> bool {
-    !m.trim().is_empty() && m.len() <= 120 && !m.chars().any(|c| c.is_whitespace() || c.is_control())
+    !m.trim().is_empty()
+        && m.len() <= 120
+        && !m.chars().any(|c| c.is_whitespace() || c.is_control())
 }
 
 fn validate_refusal_fallbacks(fallbacks: &[String]) -> Result<()> {
@@ -944,7 +957,10 @@ task = "do the thing"
         .is_err());
         // A roster round-trips through YAML, so it can be saved and re-run.
         let demo = TeamConfig::from_yaml(DEMO).unwrap();
-        assert_eq!(TeamConfig::from_yaml(&demo.to_yaml().unwrap()).unwrap(), demo);
+        assert_eq!(
+            TeamConfig::from_yaml(&demo.to_yaml().unwrap()).unwrap(),
+            demo
+        );
     }
 
     #[test]
@@ -960,12 +976,24 @@ agents:
 
     #[test]
     fn a_style_names_what_its_members_fall_back_to() {
-        let style = Style::parse("s", "defaults:\n  model_fallbacks:\n    fable: [opus, gpt-6-astra]\n", false).unwrap();
-        assert_eq!(style.defaults.model_fallbacks["fable"], ["opus", "gpt-6-astra"]);
+        let style = Style::parse(
+            "s",
+            "defaults:\n  model_fallbacks:\n    fable: [opus, gpt-6-astra]\n",
+            false,
+        )
+        .unwrap();
+        assert_eq!(
+            style.defaults.model_fallbacks["fable"],
+            ["opus", "gpt-6-astra"]
+        );
         // It travels with the team file, and is left out when empty.
         let team = style.team("p", ".", "o");
         assert!(team.to_yaml().unwrap().contains("model_fallbacks"));
-        assert!(!Style::default().team("p", ".", "o").to_yaml().unwrap().contains("model_fallbacks"));
+        assert!(!Style::default()
+            .team("p", ".", "o")
+            .to_yaml()
+            .unwrap()
+            .contains("model_fallbacks"));
         for bad in [
             "defaults:\n  model_fallbacks:\n    fable: []\n",
             "defaults:\n  model_fallbacks:\n    fable: [fable]\n",
@@ -981,18 +1009,45 @@ agents:
         assert_eq!(AgentDefaults::default().voice, Voice::Ultracave);
         let style = Style::parse("s", "defaults:\n  voice: megacave\n", false).unwrap();
         assert_eq!(style.defaults.voice, Voice::Megacave);
-        assert!(style.team("p", ".", "o").to_yaml().unwrap().contains("voice: megacave"));
-        assert!(!Style::default().team("p", ".", "o").to_yaml().unwrap().contains("voice:"));
+        assert!(style
+            .team("p", ".", "o")
+            .to_yaml()
+            .unwrap()
+            .contains("voice: megacave"));
+        assert!(!Style::default()
+            .team("p", ".", "o")
+            .to_yaml()
+            .unwrap()
+            .contains("voice:"));
         assert!(Style::parse("s", "defaults:\n  voice: grunt\n", false).is_err());
     }
 
     #[test]
     fn a_style_names_what_takes_over_what_a_model_refuses() {
-        let style = Style::parse("s", "defaults:\n  refusal_fallbacks: [glm-5.3, deepseek/deepseek-flash, opus]\n", false).unwrap();
-        assert_eq!(style.defaults.refusal_fallbacks, ["glm-5.3", "deepseek/deepseek-flash", "opus"]);
-        assert!(style.team("p", ".", "o").to_yaml().unwrap().contains("refusal_fallbacks"));
-        assert!(!Style::default().team("p", ".", "o").to_yaml().unwrap().contains("refusal_fallbacks"));
-        for bad in ["defaults:\n  refusal_fallbacks: [\"two words\"]\n", "defaults:\n  refusal_fallbacks: glm-5.3\n"] {
+        let style = Style::parse(
+            "s",
+            "defaults:\n  refusal_fallbacks: [glm-5.3, deepseek/deepseek-flash, opus]\n",
+            false,
+        )
+        .unwrap();
+        assert_eq!(
+            style.defaults.refusal_fallbacks,
+            ["glm-5.3", "deepseek/deepseek-flash", "opus"]
+        );
+        assert!(style
+            .team("p", ".", "o")
+            .to_yaml()
+            .unwrap()
+            .contains("refusal_fallbacks"));
+        assert!(!Style::default()
+            .team("p", ".", "o")
+            .to_yaml()
+            .unwrap()
+            .contains("refusal_fallbacks"));
+        for bad in [
+            "defaults:\n  refusal_fallbacks: [\"two words\"]\n",
+            "defaults:\n  refusal_fallbacks: glm-5.3\n",
+        ] {
             assert!(Style::parse("s", bad, false).is_err(), "{bad}");
         }
     }

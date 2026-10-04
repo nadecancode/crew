@@ -5,7 +5,9 @@ use std::path::{Path, PathBuf};
 
 use anyhow::{anyhow, bail, Context, Result};
 use crew_core::client::Client;
-use crew_core::config::{AgentSpec, BackendChoice, Isolation, Style, TaskSpec, TeamConfig, ROSTER_FILE};
+use crew_core::config::{
+    AgentSpec, BackendChoice, Isolation, Style, TaskSpec, TeamConfig, ROSTER_FILE,
+};
 use crew_core::paths::{self, DaemonInfo};
 use crew_core::rpc::{
     Call, OutputResult, Push, SendParams, SendResult, SessionInfo, Snapshot, TranscriptResult,
@@ -19,12 +21,12 @@ use super::{
     attach as raw_attach, daemonize, AgentCommand, ConfigCommand, ModelsCommand, QuickArgs,
     StyleCommand, TaskCommand,
 };
-use crate::models::{self, Availability, Catalog};
 use crate::endpoints::{Layers, Scope};
 use crate::limits::fmt_when;
+use crate::mcp::tools::{render_agents, render_tasks};
+use crate::models::{self, Availability, Catalog};
 use crate::styles::{self, Styles};
 use crew_tui::{Launcher, StyleChoice};
-use crate::mcp::tools::{render_agents, render_tasks};
 
 /// Which session a command addresses.
 pub struct Target {
@@ -46,7 +48,9 @@ impl Target {
 
 /// The herdr socket of the terminal crew was started from, if any.
 fn herdr_socket(explicit_backend: BackendChoice) -> Option<String> {
-    let from_env = std::env::var("HERDR_SOCKET_PATH").ok().filter(|s| !s.is_empty());
+    let from_env = std::env::var("HERDR_SOCKET_PATH")
+        .ok()
+        .filter(|s| !s.is_empty());
     if std::env::var("HERDR_ENV").as_deref() == Ok("1") {
         return from_env;
     }
@@ -55,7 +59,9 @@ fn herdr_socket(explicit_backend: BackendChoice) -> Option<String> {
         return from_env.or_else(|| {
             let home = std::env::var_os("HOME")?;
             let default = PathBuf::from(home).join(".config/herdr/herdr.sock");
-            default.exists().then(|| default.to_string_lossy().into_owned())
+            default
+                .exists()
+                .then(|| default.to_string_lossy().into_owned())
         });
     }
     None
@@ -103,7 +109,9 @@ fn reuse_roster(config: &mut TeamConfig, workspace: &Path) {
     if !config.agents.is_empty() {
         return;
     }
-    let Some(roster) = saved_roster(workspace) else { return };
+    let Some(roster) = saved_roster(workspace) else {
+        return;
+    };
     if roster.project == config.project && !roster.agents.is_empty() {
         println!(
             "using the saved roster ({} member(s), {}); --replan lets the orchestrator \
@@ -151,7 +159,10 @@ fn launch(config: TeamConfig, workspace: &Path, no_attach: bool) -> Result<()> {
         session.isolation
     );
     println!("workspace  {}", session.workspace);
-    println!("daemon     pid {} (keeps running when you close the dashboard)", session.daemon_pid);
+    println!(
+        "daemon     pid {} (keeps running when you close the dashboard)",
+        session.daemon_pid
+    );
     open_dashboard(&info, no_attach)
 }
 
@@ -186,14 +197,21 @@ fn dashboard(info: &DaemonInfo) -> Result<crew_tui::Exit> {
     // A team started by an older crew sends its agents without their
     // models' proper names; the catalog supplies them.
     let stale = stale_daemon_note(info);
-    let exit = crew_tui::run(Path::new(&info.socket), Catalog::load().display_names(), stale.clone())?;
+    let exit = crew_tui::run(
+        Path::new(&info.socket),
+        Catalog::load().display_names(),
+        stale.clone(),
+    )?;
     if let (Some(note), crew_tui::Exit::Detached) = (&stale, exit) {
         // Said again where it can be read at leisure, and copied.
         println!("note: {note}");
     }
     if exit == crew_tui::Exit::Stopped {
         wait_for_exit(info.pid);
-        println!("stopped the team in {}: its agents and the crew daemon are gone", info.workspace);
+        println!(
+            "stopped the team in {}: its agents and the crew daemon are gone",
+            info.workspace
+        );
         println!("committed work stays on the agents' branches; `crew` starts a team here again");
     }
     Ok(exit)
@@ -203,8 +221,16 @@ fn dashboard(info: &DaemonInfo) -> Result<crew_tui::Exit> {
 /// and reopening the dashboard does not change it. When the `crew` being run
 /// is newer than the daemon, say so, and how to bring the daemon up to date.
 fn stale_daemon_note(info: &DaemonInfo) -> Option<String> {
-    let built = std::env::current_exe().ok()?.metadata().ok()?.modified().ok()?;
-    let built_ms = built.duration_since(std::time::UNIX_EPOCH).ok()?.as_millis() as i64;
+    let built = std::env::current_exe()
+        .ok()?
+        .metadata()
+        .ok()?
+        .modified()
+        .ok()?;
+    let built_ms = built
+        .duration_since(std::time::UNIX_EPOCH)
+        .ok()?
+        .as_millis() as i64;
     stale_since(info.started_at, built_ms)
 }
 
@@ -275,13 +301,18 @@ team and is meant for the operator (agents use their crew tools, or `crew ctl`)"
         Some(dir) => dir.clone(),
         None => std::env::current_dir()?,
     };
-    let team_file = TEAM_FILES.iter().map(|name| dir.join(name)).find(|f| f.is_file());
+    let team_file = TEAM_FILES
+        .iter()
+        .map(|name| dir.join(name))
+        .find(|f| f.is_file());
     let from_file = team_file.as_deref().map(TeamConfig::load).transpose()?;
     let mut workspace = match &from_file {
         Some(config) => config.workspace_dir(&dir),
         None => dir,
     };
-    let mut objective = objective.map(|o| o.trim().to_string()).filter(|o| !o.is_empty());
+    let mut objective = objective
+        .map(|o| o.trim().to_string())
+        .filter(|o| !o.is_empty());
 
     if from_file.is_some() && opts.style.is_some() {
         bail!("this directory has a team file, which defines the team; --style is for directories without one");
@@ -299,20 +330,31 @@ team and is meant for the operator (agents use their crew tools, or `crew ctl`)"
                 messages: Some(0),
                 events: Some(0),
             })?;
-            let orchestrator = snapshot.agents.iter().find(|a| a.orchestrator).ok_or_else(|| {
-                anyhow!(
-                    "a team is already running here and has no orchestrator to hand a new \
+            let orchestrator =
+                snapshot
+                    .agents
+                    .iter()
+                    .find(|a| a.orchestrator)
+                    .ok_or_else(|| {
+                        anyhow!(
+                            "a team is already running here and has no orchestrator to hand a new \
 objective to; use `crew task add`, or `crew stop` first"
-                )
-            })?;
+                        )
+                    })?;
             let _: SendResult = client.call(Call::Send(SendParams {
                 to: orchestrator.id.clone(),
                 body: objective.clone(),
                 ..SendParams::default()
             }))?;
-            println!("a team is already running here; sent the objective to {}", orchestrator.id);
+            println!(
+                "a team is already running here; sent the objective to {}",
+                orchestrator.id
+            );
         } else {
-            println!("team '{}' is running here", info.project.as_deref().unwrap_or("?"));
+            println!(
+                "team '{}' is running here",
+                info.project.as_deref().unwrap_or("?")
+            );
         }
         return open_dashboard(&info, opts.no_attach);
     }
@@ -325,7 +367,10 @@ objective to; use `crew task add`, or `crew stop` first"
             if !opts.replan {
                 reuse_roster(&mut config, &workspace);
             }
-            let name = team_file.as_deref().and_then(Path::file_name).unwrap_or_default();
+            let name = team_file
+                .as_deref()
+                .and_then(Path::file_name)
+                .unwrap_or_default();
             (config, format!("team file {}", name.to_string_lossy()))
         }
         None => {
@@ -342,7 +387,14 @@ objective to; use `crew task add`, or `crew stop` first"
                 eprintln!("warning: work style {problem}");
             }
             let last = saved_roster(&workspace);
-            let Some(picked) = pick_style(&workspace, &styles, last.as_ref(), &opts, objective.as_deref())? else {
+            let Some(picked) = pick_style(
+                &workspace,
+                &styles,
+                last.as_ref(),
+                &opts,
+                objective.as_deref(),
+            )?
+            else {
                 println!("cancelled; nothing was started");
                 return Ok(());
             };
@@ -367,13 +419,17 @@ objective to; use `crew task add`, or `crew stop` first"
                 // The team of the last session, launched from a team file
                 // rather than a style.
                 None => {
-                    let mut roster = last.ok_or_else(|| anyhow!("there is no earlier team here"))?;
+                    let mut roster =
+                        last.ok_or_else(|| anyhow!("there is no earlier team here"))?;
                     let members = if opts.replan { 0 } else { roster.agents.len() };
                     roster.agents.truncate(members);
                     roster.workspace.path = workspace.to_string_lossy().into_owned();
                     previous = Some(std::mem::take(&mut roster.objective))
                         .filter(|o| !o.trim().is_empty());
-                    (roster, format!("the team of the last session ({members} member(s))"))
+                    (
+                        roster,
+                        format!("the team of the last session ({members} member(s))"),
+                    )
                 }
             }
         }
@@ -407,7 +463,10 @@ will share it without a worktree each (commit it first to isolate them)",
     }
     println!("starting {origin} in {}", workspace.display());
     if !config.objective.trim().is_empty() {
-        println!("objective  {}", truncate_chars(&one_line(&config.objective), 200));
+        println!(
+            "objective  {}",
+            truncate_chars(&one_line(&config.objective), 200)
+        );
     }
     launch(config, &workspace, opts.no_attach)
 }
@@ -474,7 +533,12 @@ fn pick_style(
         choices.push(last_team_choice(team, opts.replan));
     }
     let offset = choices.len();
-    choices.extend(styles.entries.iter().map(|entry| style_choice(workspace, entry, opts.replan)));
+    choices.extend(
+        styles
+            .entries
+            .iter()
+            .map(|entry| style_choice(workspace, entry, opts.replan)),
+    );
     let selected = match (legacy, last_style) {
         (Some(_), _) => 0,
         (None, name) => {
@@ -529,11 +593,17 @@ fn style_choice(workspace: &Path, entry: &styles::Entry, replan: bool) -> StyleC
             .iter()
             .map(|(model, instead)| format!("{model} → {}", instead.join(" → ")))
             .collect();
-        details.push(("fallbacks".to_string(), format!("{} while its window is used up", rules.join(", "))));
+        details.push((
+            "fallbacks".to_string(),
+            format!("{} while its window is used up", rules.join(", ")),
+        ));
     }
     let refused = &entry.style.defaults.refusal_fallbacks;
     if !refused.is_empty() {
-        details.push(("refused".to_string(), format!("{} takes over what a model refuses", refused.join(" → "))));
+        details.push((
+            "refused".to_string(),
+            format!("{} takes over what a model refuses", refused.join(" → ")),
+        ));
     }
     let saved = styles::saved_team(workspace, &entry.style.name);
     if let Some(saved) = saved.as_ref().filter(|s| !replan && !s.agents.is_empty()) {
@@ -561,7 +631,10 @@ fn last_team_choice(team: &TeamConfig, replan: bool) -> StyleChoice {
     StyleChoice {
         name: "last team".to_string(),
         origin: "here".to_string(),
-        description: format!("Continue with the team of the last session ('{}').", team.project),
+        description: format!(
+            "Continue with the team of the last session ('{}').",
+            team.project
+        ),
         details: vec![("team".to_string(), staffing)],
         instructions: team.instructions.clone(),
         previous_objective: Some(team.objective.clone()).filter(|o| !o.trim().is_empty()),
@@ -574,7 +647,13 @@ fn project_name(workspace: &Path) -> String {
         .map(|n| n.to_string_lossy().into_owned())
         .unwrap_or_default()
         .chars()
-        .map(|c| if c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | '.') { c } else { '-' })
+        .map(|c| {
+            if c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | '.') {
+                c
+            } else {
+                '-'
+            }
+        })
         .take(64)
         .collect();
     if name.trim_matches('-').is_empty() {
@@ -656,7 +735,8 @@ crew \"build a todo CLI with tests\""
     // command is given as the objective after all.
     let typed = line.trim_end();
     if let Some((name, _)) = slash_command(typed) {
-        let leave = crew_tui::slash::find(crew_tui::slash::LAUNCHER, name).is_some_and(|c| c.name == "exit");
+        let leave = crew_tui::slash::find(crew_tui::slash::LAUNCHER, name)
+            .is_some_and(|c| c.name == "exit");
         if leave {
             bail!("cancelled; nothing was started");
         }
@@ -701,7 +781,12 @@ pub fn models(command: ModelsCommand) -> Result<()> {
     let available = Availability::detect();
     match command {
         ModelsCommand::List => {
-            let width = catalog.models.iter().map(|(m, _)| m.key.len()).max().unwrap_or(0);
+            let width = catalog
+                .models
+                .iter()
+                .map(|(m, _)| m.key.len())
+                .max()
+                .unwrap_or(0);
             for (m, origin) in &catalog.models {
                 let runtime = m.runtime.map(models::runtime_label).unwrap_or_default();
                 let state = match available.check(m) {
@@ -714,12 +799,21 @@ pub fn models(command: ModelsCommand) -> Result<()> {
                     runtime,
                     m.tier,
                     m.price,
-                    if *origin == "built-in" { String::new() } else { format!("  [{origin}]") },
+                    if *origin == "built-in" {
+                        String::new()
+                    } else {
+                        format!("  [{origin}]")
+                    },
                 );
                 println!("{:<width$}  {}", "", m.summary);
             }
             println!("\nwhich to pick, best first:");
-            let work = catalog.picks.iter().map(|p| p.work.len()).max().unwrap_or(0);
+            let work = catalog
+                .picks
+                .iter()
+                .map(|p| p.work.len())
+                .max()
+                .unwrap_or(0);
             for pick in &catalog.picks {
                 println!("  {:<work$}  {}", pick.work, pick.models.join(", "));
             }
@@ -728,7 +822,9 @@ pub fn models(command: ModelsCommand) -> Result<()> {
 Profiles checked {}.",
                 catalog.as_of
             );
-            println!("`crew models show <name>` has the detail and sources. Your own entries go in:");
+            println!(
+                "`crew models show <name>` has the detail and sources. Your own entries go in:"
+            );
             for scope in [Scope::User, Scope::Global] {
                 if let Some(path) = models::path(scope) {
                     println!("  {:<7} {}", scope.as_str(), path.display());
@@ -742,10 +838,16 @@ Profiles checked {}.",
         ModelsCommand::Show { name } => {
             let m = catalog.find(&name).ok_or_else(|| {
                 let names: Vec<&str> = catalog.models.iter().map(|(m, _)| m.key.as_str()).collect();
-                anyhow!("no model '{name}' in the catalog (there are: {})", names.join(", "))
+                anyhow!(
+                    "no model '{name}' in the catalog (there are: {})",
+                    names.join(", ")
+                )
             })?;
             println!("{}  ({})", m.key, m.name);
-            println!("runs on    {}", m.runtime.map(models::runtime_label).unwrap_or_default());
+            println!(
+                "runs on    {}",
+                m.runtime.map(models::runtime_label).unwrap_or_default()
+            );
             if !m.id.is_empty() {
                 println!("model id   {}", m.id);
             }
@@ -770,7 +872,11 @@ Profiles checked {}.",
             let picked: Vec<&str> = catalog
                 .picks
                 .iter()
-                .filter(|p| p.models.iter().any(|n| catalog.find(n).is_some_and(|f| f.key == m.key)))
+                .filter(|p| {
+                    p.models
+                        .iter()
+                        .any(|n| catalog.find(n).is_some_and(|f| f.key == m.key))
+                })
                 .map(|p| p.work.as_str())
                 .collect();
             if !picked.is_empty() {
@@ -806,7 +912,12 @@ pub fn style(target: &Target, command: StyleCommand) -> Result<()> {
     match command {
         StyleCommand::List => {
             let all = Styles::load(&workspace);
-            let name_width = all.entries.iter().map(|e| e.style.name.len()).max().unwrap_or(0);
+            let name_width = all
+                .entries
+                .iter()
+                .map(|e| e.style.name.len())
+                .max()
+                .unwrap_or(0);
             for entry in &all.entries {
                 println!(
                     "{:<name_width$}  {:<8}  {}",
@@ -836,7 +947,9 @@ pub fn style(target: &Target, command: StyleCommand) -> Result<()> {
             }
             println!("team       {}", entry.staffing());
             println!("runtime    {}", entry.runtime());
-            if let Some(saved) = styles::saved_team(&workspace, &name).filter(|s| !s.agents.is_empty()) {
+            if let Some(saved) =
+                styles::saved_team(&workspace, &name).filter(|s| !s.agents.is_empty())
+            {
                 println!("last time  {}", members_line(&saved.agents));
             }
             println!("\n{}", entry.source()?.trim_end());
@@ -845,7 +958,9 @@ pub fn style(target: &Target, command: StyleCommand) -> Result<()> {
         StyleCommand::New { name, scope, from } => {
             let path = styles::create(&workspace, &name, Scope::parse(&scope)?, from.as_deref())?;
             println!("wrote {}", path.display());
-            println!("edit it, then launch it with `crew --style {name}` or pick it in the chooser");
+            println!(
+                "edit it, then launch it with `crew --style {name}` or pick it in the chooser"
+            );
             Ok(())
         }
     }
@@ -979,12 +1094,17 @@ fn transcript_text(transcript: &TranscriptResult) -> String {
     let mut last = None;
     for entry in &transcript.entries {
         // Tool calls of one turn stay together.
-        if last.is_some() && !(last == Some(TranscriptKind::Tool) && entry.kind == TranscriptKind::Tool) {
+        if last.is_some()
+            && !(last == Some(TranscriptKind::Tool) && entry.kind == TranscriptKind::Tool)
+        {
             out.push('\n');
         }
         match entry.kind {
             TranscriptKind::Prompt => {
-                let at = entry.at.map(|at| format!(" · {}", &fmt_clock(at)[..8])).unwrap_or_default();
+                let at = entry
+                    .at
+                    .map(|at| format!(" · {}", &fmt_clock(at)[..8]))
+                    .unwrap_or_default();
                 out.push_str(&format!("── prompt{at}\n{}\n", entry.text));
             }
             TranscriptKind::Reply => out.push_str(&format!("{}\n", entry.text)),
@@ -1014,7 +1134,12 @@ fn usage_lines(snapshot: &Snapshot) -> Vec<String> {
         .max(8);
     for runtime in [RuntimeKind::Claude, RuntimeKind::Codex, RuntimeKind::Pi] {
         let mut name = runtime.to_string();
-        for q in snapshot.session.quotas.iter().filter(|q| q.runtime == runtime) {
+        for q in snapshot
+            .session
+            .quotas
+            .iter()
+            .filter(|q| q.runtime == runtime)
+        {
             const CELLS: usize = 24;
             let percent = q.percent_used.clamp(0.0, 100.0);
             let mut filled = ((percent / 100.0) * CELLS as f32).round() as usize;
@@ -1047,7 +1172,9 @@ fn usage_lines(snapshot: &Snapshot) -> Vec<String> {
     // Sessions moved to another model than their member was given.
     for a in snapshot.agents.iter().filter(|a| a.fallback.is_some()) {
         let fallback = a.fallback.as_ref().unwrap();
-        let running = a.model_label().unwrap_or_else(|| "another model".to_string());
+        let running = a
+            .model_label()
+            .unwrap_or_else(|| "another model".to_string());
         let why = if fallback.note.is_empty() {
             String::new()
         } else {
@@ -1065,10 +1192,17 @@ fn usage_lines(snapshot: &Snapshot) -> Vec<String> {
             )
         });
     }
-    let parked: Vec<&Agent> = snapshot.agents.iter().filter(|a| a.limit.is_some()).collect();
+    let parked: Vec<&Agent> = snapshot
+        .agents
+        .iter()
+        .filter(|a| a.limit.is_some())
+        .collect();
     if !parked.is_empty() {
         let ids: Vec<&str> = parked.iter().map(|a| a.id.as_str()).collect();
-        let next = parked.iter().filter_map(|a| a.limit.as_ref()?.retry_at).min();
+        let next = parked
+            .iter()
+            .filter_map(|a| a.limit.as_ref()?.retry_at)
+            .min();
         let when = match next {
             Some(at) => format!("next automatic resume {}", fmt_when(at, now)),
             None => "waiting for you".to_string(),
@@ -1125,12 +1259,19 @@ pub fn stop(target: &Target, keep_agents: bool) -> Result<()> {
     // Wait for the daemon to go away so a following `crew run` starts clean.
     wait_for_exit(info.pid);
     if paths::pid_alive(info.pid) {
-        bail!("the crew daemon (pid {}) was told to stop but is still running", info.pid);
+        bail!(
+            "the crew daemon (pid {}) was told to stop but is still running",
+            info.pid
+        );
     }
     println!(
         "stopped the crew daemon for {}{}",
         info.workspace,
-        if keep_agents { " (agents left running)" } else { "" }
+        if keep_agents {
+            " (agents left running)"
+        } else {
+            ""
+        }
     );
     Ok(())
 }
@@ -1153,7 +1294,13 @@ fn print_event(event: &Event, json: bool) {
     );
 }
 
-pub fn logs(target: &Target, agent: Option<String>, lines: usize, follow: bool, json: bool) -> Result<()> {
+pub fn logs(
+    target: &Target,
+    agent: Option<String>,
+    lines: usize,
+    follow: bool,
+    json: bool,
+) -> Result<()> {
     let (mut client, info) = target.connect("cli")?;
     let events: Vec<Event> = client.call(Call::Events {
         agent: agent.clone(),
@@ -1375,7 +1522,12 @@ pub fn agent(target: &Target, cmd: AgentCommand) -> Result<()> {
             client.call_value(Call::AgentRestart { id: id.clone() })?;
             println!("restarting {id}");
         }
-        AgentCommand::Model { id, model, runtime, note } => {
+        AgentCommand::Model {
+            id,
+            model,
+            runtime,
+            note,
+        } => {
             let runtime = match runtime {
                 Some(r) => Some(r.parse().map_err(|e: String| anyhow!(e))?),
                 None => None,
@@ -1420,7 +1572,12 @@ pub fn agent(target: &Target, cmd: AgentCommand) -> Result<()> {
             client.call_value(Call::AgentResume { id: id.clone() })?;
             println!("resumed {id}");
         }
-        AgentCommand::Output { id, lines, screen, ansi } => {
+        AgentCommand::Output {
+            id,
+            lines,
+            screen,
+            ansi,
+        } => {
             let output: OutputResult = client.call(Call::AgentOutput {
                 id,
                 lines: Some(lines),
@@ -1505,8 +1662,16 @@ pub fn task(target: &Target, cmd: TaskCommand) -> Result<()> {
                 print!("{}", crate::mcp::tools::render_card(&card));
             }
         }
-        TaskCommand::Edit { id, title, description } => {
-            let task: Task = client.call(Call::TaskEdit { id, title, description })?;
+        TaskCommand::Edit {
+            id,
+            title,
+            description,
+        } => {
+            let task: Task = client.call(Call::TaskEdit {
+                id,
+                title,
+                description,
+            })?;
             println!("task {} revised", task.id);
         }
         TaskCommand::Assign { id, agent } => {
@@ -1541,7 +1706,10 @@ mod tests {
     fn a_daemon_older_than_the_crew_being_run_is_pointed_out() {
         // Started before this build: it runs the older code until it is restarted.
         let note = stale_since(1_000, 2_000).expect("a note");
-        assert!(note.contains("crew stop --keep-agents && crew start"), "{note}");
+        assert!(
+            note.contains("crew stop --keep-agents && crew start"),
+            "{note}"
+        );
         // Started by this build (or a later one): nothing to say.
         assert_eq!(stale_since(2_000, 2_000), None);
         assert_eq!(stale_since(3_000, 2_000), None);
@@ -1589,8 +1757,17 @@ mod tests {
         let styles = Styles::load(ws);
         let entry = styles.require("research").unwrap();
         let fresh = style_choice(ws, entry, false);
-        assert_eq!((fresh.name.as_str(), fresh.origin.as_str()), ("research", "built-in"));
-        assert_eq!(fresh.details[0], ("team".to_string(), "staffed by the orchestrator".to_string()));
+        assert_eq!(
+            (fresh.name.as_str(), fresh.origin.as_str()),
+            ("research", "built-in")
+        );
+        assert_eq!(
+            fresh.details[0],
+            (
+                "team".to_string(),
+                "staffed by the orchestrator".to_string()
+            )
+        );
         assert!(fresh.previous_objective.is_none());
         assert!(fresh.instructions.contains("research team"));
 
@@ -1598,25 +1775,43 @@ mod tests {
         let mut saved = style_team(&entry.style, ws);
         saved.objective = "How does X work?".to_string();
         saved.agents = vec![
-            AgentSpec { id: "scout".into(), ..AgentSpec::default() },
-            AgentSpec { id: "skeptic".into(), ..AgentSpec::default() },
+            AgentSpec {
+                id: "scout".into(),
+                ..AgentSpec::default()
+            },
+            AgentSpec {
+                id: "skeptic".into(),
+                ..AgentSpec::default()
+            },
         ];
         let path = styles::roster_path(ws, "research");
         std::fs::create_dir_all(path.parent().unwrap()).unwrap();
         std::fs::write(&path, saved.to_yaml().unwrap()).unwrap();
         let again = style_choice(ws, entry, false);
-        assert!(again
-            .details
-            .contains(&("last time".to_string(), "2 member(s): scout, skeptic".to_string())));
-        assert_eq!(again.previous_objective.as_deref(), Some("How does X work?"));
+        assert!(again.details.contains(&(
+            "last time".to_string(),
+            "2 member(s): scout, skeptic".to_string()
+        )));
+        assert_eq!(
+            again.previous_objective.as_deref(),
+            Some("How does X work?")
+        );
         // --replan: the members are not offered, the objective still is.
         let replanned = style_choice(ws, entry, true);
-        assert!(!replanned.details.iter().any(|(label, _)| label == "last time"));
-        assert_eq!(replanned.previous_objective.as_deref(), Some("How does X work?"));
+        assert!(!replanned
+            .details
+            .iter()
+            .any(|(label, _)| label == "last time"));
+        assert_eq!(
+            replanned.previous_objective.as_deref(),
+            Some("How does X work?")
+        );
         // Another style in the same workspace has its own memory.
-        assert!(style_choice(ws, styles.require("experiment").unwrap(), false)
-            .previous_objective
-            .is_none());
+        assert!(
+            style_choice(ws, styles.require("experiment").unwrap(), false)
+                .previous_objective
+                .is_none()
+        );
 
         let legacy = last_team_choice(&saved, false);
         assert_eq!(legacy.name, "last team");
@@ -1631,7 +1826,10 @@ mod tests {
         assert!(landing_hint(&snapshot).is_none(), "still running");
         snapshot.session.completed_at = Some(1);
         let hint = landing_hint(&snapshot).unwrap();
-        assert!(hint.contains("crew integrate") && hint.contains("/work/app"), "{hint}");
+        assert!(
+            hint.contains("crew integrate") && hint.contains("/work/app"),
+            "{hint}"
+        );
         // Shared workspace: the files are already where the user looks.
         snapshot.session.isolation = "shared".to_string();
         assert!(landing_hint(&snapshot).is_none());
@@ -1640,7 +1838,9 @@ mod tests {
     #[test]
     fn the_home_directory_is_not_a_workspace() {
         assert!(refuse_broad_workspace(Path::new("/")).is_err());
-        if let Some(home) = std::env::var_os("HOME").and_then(|h| PathBuf::from(h).canonicalize().ok()) {
+        if let Some(home) =
+            std::env::var_os("HOME").and_then(|h| PathBuf::from(h).canonicalize().ok())
+        {
             assert!(refuse_broad_workspace(&home).is_err());
             assert!(refuse_broad_workspace(&home.join("project")).is_ok());
         }

@@ -2,10 +2,14 @@
 //! the key press calls for.
 
 use crew_core::types::BROADCAST;
-use ratatui::crossterm::event::{KeyCode, KeyEvent, KeyModifiers, MouseButton, MouseEvent, MouseEventKind};
+use ratatui::crossterm::event::{
+    KeyCode, KeyEvent, KeyModifiers, MouseButton, MouseEvent, MouseEventKind,
+};
 use ratatui::layout::Rect;
 
-use crate::app::{App, Command, Compose, MessageView, Modal, ModelPicker, QuestionBox, View, HARNESSES};
+use crate::app::{
+    App, Command, Compose, MessageView, Modal, ModelPicker, QuestionBox, View, HARNESSES,
+};
 use crate::slash::{self, slash_command, SlashCommand};
 use crate::views::dashboard::Hit;
 use crate::views::{self, logs, message};
@@ -44,7 +48,13 @@ const WHEEL_ROWS: usize = 3;
 
 /// Handle a mouse event on a screen of `area`: a click opens what it lands
 /// on, the wheel scrolls, the right button goes back.
-pub fn handle_mouse(app: &mut App, mouse: MouseEvent, area: Rect, now: i64, page: usize) -> Vec<Command> {
+pub fn handle_mouse(
+    app: &mut App,
+    mouse: MouseEvent,
+    area: Rect,
+    now: i64,
+    page: usize,
+) -> Vec<Command> {
     if !app.mouse {
         // Switched off: the terminal should not be reporting, and if it
         // still does, nothing listens.
@@ -56,7 +66,9 @@ pub fn handle_mouse(app: &mut App, mouse: MouseEvent, area: Rect, now: i64, page
         // Back, wherever Esc goes back: out of a box, out of a view. While
         // typing into a terminal Esc is the agent's, so this stops the
         // typing instead.
-        MouseEventKind::Down(MouseButton::Right) if app.view == View::Detail && app.detail.typing => {
+        MouseEventKind::Down(MouseButton::Right)
+            if app.view == View::Detail && app.detail.typing =>
+        {
             app.mark_dirty();
             app.detail.typing = false;
             Vec::new()
@@ -66,7 +78,9 @@ pub fn handle_mouse(app: &mut App, mouse: MouseEvent, area: Rect, now: i64, page
             let up = mouse.kind == MouseEventKind::ScrollUp;
             app.mark_dirty();
             let message_lines = match &app.modal {
-                Some(Modal::Message(view)) => message::line_count(app, view, message::text_cols(area.width)),
+                Some(Modal::Message(view)) => {
+                    message::line_count(app, view, message::text_cols(area.width))
+                }
                 _ => 0,
             };
             match &mut app.modal {
@@ -74,9 +88,16 @@ pub fn handle_mouse(app: &mut App, mouse: MouseEvent, area: Rect, now: i64, page
                     scroll_message(view, up, WHEEL_ROWS, message_lines);
                     Vec::new()
                 }
-                Some(Modal::Question(_)) => {
-                    handle_key(app, key(if up { KeyCode::PageUp } else { KeyCode::PageDown }), now, page)
-                }
+                Some(Modal::Question(_)) => handle_key(
+                    app,
+                    key(if up {
+                        KeyCode::PageUp
+                    } else {
+                        KeyCode::PageDown
+                    }),
+                    now,
+                    page,
+                ),
                 Some(_) => Vec::new(),
                 None if app.help || app.view == View::Dashboard => Vec::new(),
                 None => {
@@ -395,9 +416,14 @@ fn common_key(app: &mut App, key: KeyEvent, now: i64) -> Option<Vec<Command>> {
             let id = if app.view == View::Detail {
                 Some(app.detail.agent.clone())
             } else {
-                app.selected.clone().or_else(|| app.orchestrator().map(|a| a.id.clone()))
+                app.selected
+                    .clone()
+                    .or_else(|| app.orchestrator().map(|a| a.id.clone()))
             };
-            Some(id.map(|id| app.open_model_picker(&id, now)).unwrap_or_default())
+            Some(
+                id.map(|id| app.open_model_picker(&id, now))
+                    .unwrap_or_default(),
+            )
         }
         KeyCode::Char('u') => Some(resume_paused(app, now)),
         KeyCode::Char('U') => {
@@ -570,14 +596,20 @@ fn modal_key(app: &mut App, key: KeyEvent, now: i64) -> Vec<Command> {
             _ => Vec::new(),
         },
         Modal::ConfirmRestartPaused(_) => match key.code {
-            KeyCode::Char('y') | KeyCode::Char('Y') => vec![Command::ResumeLimited { restart: true }],
+            KeyCode::Char('y') | KeyCode::Char('Y') => {
+                vec![Command::ResumeLimited { restart: true }]
+            }
             _ => Vec::new(),
         },
         Modal::Question(answer) => question_key(app, answer, key, now),
         Modal::Model(picker) => picker_key(app, picker, key, now),
         Modal::Message(mut view) => {
             // Scrolling is clamped to the text when it is drawn.
-            let lines = app.messages.iter().find(|m| m.id == view.id).map_or(0, |m| m.body.chars().count());
+            let lines = app
+                .messages
+                .iter()
+                .find(|m| m.id == view.id)
+                .map_or(0, |m| m.body.chars().count());
             match key.code {
                 KeyCode::Up => scroll_message(&mut view, true, 1, lines),
                 KeyCode::Down => scroll_message(&mut view, false, 1, lines),
@@ -670,7 +702,10 @@ fn picker_key(app: &mut App, mut picker: ModelPicker, key: KeyEvent, now: i64) -
     let rows = app.model_rows(picker.runtime).len();
     let last = rows.saturating_sub(1);
     let step_cli = |picker: &mut ModelPicker, app: &App, delta: i32| {
-        let at = HARNESSES.iter().position(|r| *r == picker.runtime).unwrap_or(0) as i32;
+        let at = HARNESSES
+            .iter()
+            .position(|r| *r == picker.runtime)
+            .unwrap_or(0) as i32;
         picker.runtime = HARNESSES[(at + delta).rem_euclid(HARNESSES.len() as i32) as usize];
         picker.row = app.start_row(&picker.agent, picker.runtime);
         picker.moved = true;
@@ -708,10 +743,18 @@ fn picker_key(app: &mut App, mut picker: ModelPicker, key: KeyEvent, now: i64) -
 /// say why not and leave the picker open.
 fn choose_model(app: &mut App, mut picker: ModelPicker, now: i64) -> Vec<Command> {
     let Some(agent) = app.agent(&picker.agent).cloned() else {
-        app.set_status(format!("{} is no longer on the team", picker.agent), true, now);
+        app.set_status(
+            format!("{} is no longer on the team", picker.agent),
+            true,
+            now,
+        );
         return Vec::new();
     };
-    let Some(choice) = app.model_rows(picker.runtime).get(picker.row).map(|c| (*c).clone()) else {
+    let Some(choice) = app
+        .model_rows(picker.runtime)
+        .get(picker.row)
+        .map(|c| (*c).clone())
+    else {
         picker.notice = Some(if app.models_pending {
             "the models are still being listed".to_string()
         } else {
@@ -726,14 +769,24 @@ fn choose_model(app: &mut App, mut picker: ModelPicker, now: i64) -> Vec<Command
         return Vec::new();
     }
     if app.current_row(&agent.id, picker.runtime) == Some(picker.row) {
-        app.set_status(format!("{} already runs on {}", agent.id, choice.name), false, now);
+        app.set_status(
+            format!("{} already runs on {}", agent.id, choice.name),
+            false,
+            now,
+        );
         return Vec::new();
     }
     let cli = crate::theme::runtime_label(choice.runtime);
     let label = if choice.runtime == agent.runtime {
-        format!("restarting {} on {}, resuming its session", agent.id, choice.name)
+        format!(
+            "restarting {} on {}, resuming its session",
+            agent.id, choice.name
+        )
     } else {
-        format!("moving {} to {cli} on {}: a fresh session there, handed the work", agent.id, choice.name)
+        format!(
+            "moving {} to {cli} on {}: a fresh session there, handed the work",
+            agent.id, choice.name
+        )
     };
     app.set_status(format!("{label}…"), false, now);
     vec![Command::SetModel {
@@ -779,7 +832,8 @@ fn question_key(app: &mut App, mut answer: QuestionBox, key: KeyEvent, now: i64)
         KeyCode::PageDown => answer.scroll = (answer.scroll + 5).min(*length),
         // The box opened by itself a moment ago: this Enter was meant for
         // what was on screen before, not as an answer.
-        KeyCode::Enter if answer.popped_at > 0 && now - answer.popped_at < crate::app::POPUP_GRACE_MS => {}
+        KeyCode::Enter
+            if answer.popped_at > 0 && now - answer.popped_at < crate::app::POPUP_GRACE_MS => {}
         KeyCode::Enter if !newline_key(key) => {
             let typed = answer.choice == own;
             let body = if typed {
@@ -790,8 +844,9 @@ fn question_key(app: &mut App, mut answer: QuestionBox, key: KeyEvent, now: i64)
             if body.is_empty() {
                 answer.input.notice = Some("pick an answer with ↑↓, or type your own".to_string());
             } else if typed && slash_command(&answer.input.text).is_some() {
-                answer.input.notice =
-                    Some("that is a command, not an answer — esc closes this box first".to_string());
+                answer.input.notice = Some(
+                    "that is a command, not an answer — esc closes this box first".to_string(),
+                );
             } else {
                 app.answering.insert(answer.id.clone());
                 // Straight on to the next question, when there is one.
@@ -828,7 +883,13 @@ fn question_key(app: &mut App, mut answer: QuestionBox, key: KeyEvent, now: i64)
 
 /// Run a slash command typed into the message box, which was addressed to
 /// `to`. `Err` is why nothing was run; the box then stays open to say so.
-fn run_slash(app: &mut App, name: &str, rest: &str, to: &str, now: i64) -> Result<Vec<Command>, String> {
+fn run_slash(
+    app: &mut App,
+    name: &str,
+    rest: &str,
+    to: &str,
+    now: i64,
+) -> Result<Vec<Command>, String> {
     let command = slash::find(slash::DASHBOARD, name).ok_or_else(|| slash::unknown(name))?;
     if command.args.is_empty() && !rest.is_empty() {
         return Err(slash::no_argument(command));
@@ -884,7 +945,10 @@ fn slash_agent(app: &App, command: &SlashCommand, rest: &str, to: &str) -> Resul
         return Ok(rest.to_string());
     }
     let ids: Vec<&str> = app.agents.iter().map(|a| a.id.as_str()).collect();
-    Err(format!("no agent named {rest} (there are: {})", ids.join(", ")))
+    Err(format!(
+        "no agent named {rest} (there are: {})",
+        ids.join(", ")
+    ))
 }
 
 /// Cycle through every agent, then the broadcast address.
@@ -904,7 +968,9 @@ fn next_recipient(app: &App, current: &str, delta: i32) -> String {
 /// do the same.
 fn newline_key(key: KeyEvent) -> bool {
     match key.code {
-        KeyCode::Enter => key.modifiers.intersects(KeyModifiers::SHIFT | KeyModifiers::ALT),
+        KeyCode::Enter => key
+            .modifiers
+            .intersects(KeyModifiers::SHIFT | KeyModifiers::ALT),
         KeyCode::Char('j') => key.modifiers.contains(KeyModifiers::CONTROL),
         _ => false,
     }
@@ -1054,7 +1120,9 @@ mod tests {
         press(&mut a, KeyCode::Enter);
         assert_eq!(a.view, View::Detail);
         press(&mut a, KeyCode::Char('i'));
-        assert!(matches!(&a.modal, Some(Modal::Type(c)) if c.to == "claude-1" && c.text.is_empty()));
+        assert!(
+            matches!(&a.modal, Some(Modal::Type(c)) if c.to == "claude-1" && c.text.is_empty())
+        );
         // Shortcuts are text here; the line goes in as one prompt.
         type_text(&mut a, "run the tests, k?");
         a.detail.output_at = Some(5);
@@ -1128,7 +1196,10 @@ mod tests {
         type_text(&mut a, "y");
         assert!(matches!(&a.modal, Some(Modal::Question(q)) if q.input.text == "x\ny"));
         let sent = press(&mut a, KeyCode::Enter);
-        assert!(matches!(&sent[..], [Command::Answer { body, .. }] if body == "x\ny"), "{sent:?}");
+        assert!(
+            matches!(&sent[..], [Command::Answer { body, .. }] if body == "x\ny"),
+            "{sent:?}"
+        );
     }
 
     #[test]
@@ -1157,21 +1228,39 @@ mod tests {
             }
         };
         assert_eq!(keys(&mut a, KeyCode::Char('q'), KeyModifiers::NONE), "q");
-        assert_eq!(keys(&mut a, KeyCode::Char('c'), KeyModifiers::CONTROL), "\x03");
+        assert_eq!(
+            keys(&mut a, KeyCode::Char('c'), KeyModifiers::CONTROL),
+            "\x03"
+        );
         assert_eq!(keys(&mut a, KeyCode::Esc, KeyModifiers::NONE), "\x1b");
         assert_eq!(keys(&mut a, KeyCode::Enter, KeyModifiers::NONE), "\r");
         assert_eq!(keys(&mut a, KeyCode::Enter, KeyModifiers::SHIFT), "\x1b\r");
         assert_eq!(keys(&mut a, KeyCode::Up, KeyModifiers::NONE), "\x1b[A");
-        assert_eq!(keys(&mut a, KeyCode::Left, KeyModifiers::SHIFT), "\x1b[1;2D");
-        assert_eq!(keys(&mut a, KeyCode::BackTab, KeyModifiers::SHIFT), "\x1b[Z");
+        assert_eq!(
+            keys(&mut a, KeyCode::Left, KeyModifiers::SHIFT),
+            "\x1b[1;2D"
+        );
+        assert_eq!(
+            keys(&mut a, KeyCode::BackTab, KeyModifiers::SHIFT),
+            "\x1b[Z"
+        );
         assert_eq!(keys(&mut a, KeyCode::Backspace, KeyModifiers::NONE), "\x7f");
         assert_eq!(keys(&mut a, KeyCode::Delete, KeyModifiers::NONE), "\x1b[3~");
-        assert_eq!(keys(&mut a, KeyCode::PageDown, KeyModifiers::NONE), "\x1b[6~");
+        assert_eq!(
+            keys(&mut a, KeyCode::PageDown, KeyModifiers::NONE),
+            "\x1b[6~"
+        );
         assert_eq!(keys(&mut a, KeyCode::F(1), KeyModifiers::NONE), "\x1bOP");
         assert_eq!(keys(&mut a, KeyCode::F(5), KeyModifiers::NONE), "\x1b[15~");
         assert_eq!(keys(&mut a, KeyCode::Char('x'), KeyModifiers::ALT), "\x1bx");
         assert_eq!(keys(&mut a, KeyCode::Char('É'), KeyModifiers::SHIFT), "É");
-        assert!(handle_key(&mut a, KeyEvent::new(KeyCode::CapsLock, KeyModifiers::NONE), 1_000_000, 10).is_empty());
+        assert!(handle_key(
+            &mut a,
+            KeyEvent::new(KeyCode::CapsLock, KeyModifiers::NONE),
+            1_000_000,
+            10
+        )
+        .is_empty());
         assert!(a.view == View::Detail && a.modal.is_none() && a.detail.typing);
         // A paste arrives as one, bracketed.
         assert_eq!(
@@ -1187,7 +1276,9 @@ mod tests {
             a.detail.pending = false;
             a.detail.output_at = Some(at - 1);
             a.detail.requested_at = at - 1;
-            a.due_commands(at).iter().any(|c| matches!(c, Command::FetchOutput { .. }))
+            a.due_commands(at)
+                .iter()
+                .any(|c| matches!(c, Command::FetchOutput { .. }))
         };
         assert!(fetches(&mut a, 1_000_000 + 1));
         assert!(!fetches(&mut a, 1_000_000 + crate::app::KEY_BURST_MS + 10));
@@ -1195,7 +1286,10 @@ mod tests {
         a.detail.output_at = Some(1_000_000 + crate::app::KEY_BURST_MS);
         a.detail.requested_at = 1_000_000 + crate::app::KEY_BURST_MS;
         let later = 1_000_000 + crate::app::KEY_BURST_MS + crate::app::TYPING_REFRESH_MS;
-        assert!(a.due_commands(later).iter().any(|c| matches!(c, Command::FetchOutput { .. })));
+        assert!(a
+            .due_commands(later)
+            .iter()
+            .any(|c| matches!(c, Command::FetchOutput { .. })));
 
         // Ctrl+] is the way out; so is a right-click, or a click elsewhere.
         assert!(ctrl(&mut a, ']').is_empty());
@@ -1211,7 +1305,9 @@ mod tests {
         // Tab is the agent's too while typing; another agent's inspector
         // starts without it.
         left_click(&mut a, 60, 10);
-        assert!(matches!(press(&mut a, KeyCode::Tab).as_slice(), [Command::Keys { text, .. }] if text == "\t"));
+        assert!(
+            matches!(press(&mut a, KeyCode::Tab).as_slice(), [Command::Keys { text, .. }] if text == "\t")
+        );
         assert_eq!(a.detail.agent, "claude-1");
         a.open_detail("claude-2", 1_000_000);
         assert!(!a.detail.typing);
@@ -1285,14 +1381,21 @@ mod tests {
         let mut a = app();
         assert!(submit(&mut a, "/clear").is_empty());
         assert_eq!(compose(&a).text, "/clear");
-        assert!(compose(&a).notice.as_deref().unwrap().contains("no command /clear"));
+        assert!(compose(&a)
+            .notice
+            .as_deref()
+            .unwrap()
+            .contains("no command /clear"));
         // Editing clears the note; an argument where none belongs is refused.
         press(&mut a, KeyCode::Backspace);
         assert!(compose(&a).notice.is_none());
         ctrl(&mut a, 'u');
         type_text(&mut a, "/exit now");
         assert!(press(&mut a, KeyCode::Enter).is_empty());
-        assert_eq!(compose(&a).notice.as_deref(), Some("/exit takes no argument"));
+        assert_eq!(
+            compose(&a).notice.as_deref(),
+            Some("/exit takes no argument")
+        );
         assert!(press(&mut a, KeyCode::Esc).is_empty());
         assert!(a.modal.is_none());
 
@@ -1340,32 +1443,62 @@ mod tests {
         let mut a = app();
         assert!(submit(&mut a, "/kill").is_empty());
         assert_eq!(a.modal, Some(Modal::ConfirmKill("claude-1".into())));
-        assert_eq!(press(&mut a, KeyCode::Char('y')), vec![Command::Kill("claude-1".into())]);
+        assert_eq!(
+            press(&mut a, KeyCode::Char('y')),
+            vec![Command::Kill("claude-1".into())]
+        );
         assert!(submit(&mut a, "/kill claude-3").is_empty());
         assert_eq!(a.modal, Some(Modal::ConfirmKill("claude-3".into())));
         press(&mut a, KeyCode::Esc);
 
-        assert_eq!(submit(&mut a, "/restart claude-2"), vec![Command::Restart("claude-2".into())]);
-        assert_eq!(submit(&mut a, "/pause"), vec![Command::Pause("claude-1".into())]);
-        assert_eq!(submit(&mut a, "/compact"), vec![Command::Compact("claude-1".into())]);
-        assert_eq!(submit(&mut a, "/compact claude-3"), vec![Command::Compact("claude-3".into())]);
-        assert_eq!(submit(&mut a, "/unpause claude-2"), vec![Command::Resume("claude-2".into())]);
+        assert_eq!(
+            submit(&mut a, "/restart claude-2"),
+            vec![Command::Restart("claude-2".into())]
+        );
+        assert_eq!(
+            submit(&mut a, "/pause"),
+            vec![Command::Pause("claude-1".into())]
+        );
+        assert_eq!(
+            submit(&mut a, "/compact"),
+            vec![Command::Compact("claude-1".into())]
+        );
+        assert_eq!(
+            submit(&mut a, "/compact claude-3"),
+            vec![Command::Compact("claude-3".into())]
+        );
+        assert_eq!(
+            submit(&mut a, "/unpause claude-2"),
+            vec![Command::Resume("claude-2".into())]
+        );
 
         // An agent that does not exist is named in the note, with the real ones.
         assert!(submit(&mut a, "/kill ghost").is_empty());
         let notice = compose(&a).notice.clone().unwrap();
-        assert!(notice.contains("no agent named ghost") && notice.contains("claude-2"), "{notice}");
+        assert!(
+            notice.contains("no agent named ghost") && notice.contains("claude-2"),
+            "{notice}"
+        );
         press(&mut a, KeyCode::Esc);
 
         // A broadcast box has no agent of its own: the selection stands in.
         press(&mut a, KeyCode::Char('M'));
         type_text(&mut a, "/restart");
-        assert_eq!(press(&mut a, KeyCode::Enter), vec![Command::Restart("claude-1".into())]);
+        assert_eq!(
+            press(&mut a, KeyCode::Enter),
+            vec![Command::Restart("claude-1".into())]
+        );
 
-        assert!(submit(&mut a, "/resume").is_empty(), "nobody is at a usage limit");
+        assert!(
+            submit(&mut a, "/resume").is_empty(),
+            "nobody is at a usage limit"
+        );
         assert!(a.status.as_ref().unwrap().is_error);
         a.agents[0].limit = Some(crew_core::types::UsageLimit::default());
-        assert_eq!(submit(&mut a, "/resume"), vec![Command::ResumeLimited { restart: false }]);
+        assert_eq!(
+            submit(&mut a, "/resume"),
+            vec![Command::ResumeLimited { restart: false }]
+        );
 
         assert!(submit(&mut a, "/tasks").is_empty());
         assert_eq!(a.view, View::Tasks);
@@ -1405,12 +1538,20 @@ mod tests {
         let mut a = app();
         assert!(press(&mut a, KeyCode::Char('a')).is_empty());
         assert!(a.modal.is_none());
-        assert!(a.status.as_ref().unwrap().text.contains("no question is waiting"));
+        assert!(a
+            .status
+            .as_ref()
+            .unwrap()
+            .text
+            .contains("no question is waiting"));
 
         // The oldest question opens with its first suggested answer selected.
         let (mut a, first, second) = with_questions();
         press(&mut a, KeyCode::Char('a'));
-        assert_eq!((answer_box(&a).id.as_str(), answer_box(&a).choice), (first.as_str(), 0));
+        assert_eq!(
+            (answer_box(&a).id.as_str(), answer_box(&a).choice),
+            (first.as_str(), 0)
+        );
         press(&mut a, KeyCode::Down);
         assert_eq!(answer_box(&a).choice, 1);
         press(&mut a, KeyCode::Char('1'));
@@ -1429,11 +1570,27 @@ mod tests {
         assert_eq!(answer_box(&a).id, second);
 
         // No suggestions: the box takes the operator's own words.
-        assert!(press(&mut a, KeyCode::Enter).is_empty(), "an empty answer is not sent");
-        assert!(answer_box(&a).input.notice.as_deref().unwrap().contains("type your own"));
+        assert!(
+            press(&mut a, KeyCode::Enter).is_empty(),
+            "an empty answer is not sent"
+        );
+        assert!(answer_box(&a)
+            .input
+            .notice
+            .as_deref()
+            .unwrap()
+            .contains("type your own"));
         type_text(&mut a, "/exit");
-        assert!(press(&mut a, KeyCode::Enter).is_empty(), "a command is not an answer");
-        assert!(answer_box(&a).input.notice.as_deref().unwrap().contains("a command, not an answer"));
+        assert!(
+            press(&mut a, KeyCode::Enter).is_empty(),
+            "a command is not an answer"
+        );
+        assert!(answer_box(&a)
+            .input
+            .notice
+            .as_deref()
+            .unwrap()
+            .contains("a command, not an answer"));
         ctrl(&mut a, 'u');
         assert!(answer_box(&a).input.notice.is_none());
         type_text(&mut a, "yes, ship it q");
@@ -1456,9 +1613,16 @@ mod tests {
         // Typing on a suggested answer starts the operator's own, also for
         // letters that are dashboard keys elsewhere.
         type_text(&mut a, "q");
-        assert_eq!((answer_box(&a).choice, answer_box(&a).input.text.as_str()), (2, "q"));
+        assert_eq!(
+            (answer_box(&a).choice, answer_box(&a).input.text.as_str()),
+            (2, "q")
+        );
         type_text(&mut a, "2");
-        assert_eq!(answer_box(&a).input.text, "q2", "on the typing row a digit is text");
+        assert_eq!(
+            answer_box(&a).input.text,
+            "q2",
+            "on the typing row a digit is text"
+        );
         press(&mut a, KeyCode::Up);
         assert_eq!(answer_box(&a).choice, 1);
         press(&mut a, KeyCode::Up);
@@ -1471,7 +1635,13 @@ mod tests {
 
         // Tab walks the questions; each starts afresh.
         press(&mut a, KeyCode::Tab);
-        assert_eq!((answer_box(&a).id.as_str(), answer_box(&a).input.text.as_str()), (second.as_str(), ""));
+        assert_eq!(
+            (
+                answer_box(&a).id.as_str(),
+                answer_box(&a).input.text.as_str()
+            ),
+            (second.as_str(), "")
+        );
         press(&mut a, KeyCode::Tab);
         assert_eq!(answer_box(&a).id, first);
         press(&mut a, KeyCode::BackTab);
@@ -1523,9 +1693,15 @@ mod tests {
         for (id, rect) in &boxes {
             let mut a = app();
             let commands = left_click(&mut a, rect.x + rect.width / 2, rect.y + rect.height / 2);
-            assert_eq!((a.view, a.detail.agent.as_str()), (View::Detail, id.as_str()));
+            assert_eq!(
+                (a.view, a.detail.agent.as_str()),
+                (View::Detail, id.as_str())
+            );
             assert_eq!(a.selected.as_deref(), Some(id.as_str()));
-            assert!(commands.contains(&Command::FetchOutput { id: id.clone() }), "{id}");
+            assert!(
+                commands.contains(&Command::FetchOutput { id: id.clone() }),
+                "{id}"
+            );
             // The corners of the box count; the cell outside it does not.
             let mut a = app();
             left_click(&mut a, rect.x, rect.y);
@@ -1540,7 +1716,11 @@ mod tests {
             if a.agent(id).unwrap().runtime == crew_core::RuntimeKind::Shell {
                 assert_eq!(a.detail.agent, *id);
             } else {
-                assert!(matches!(&a.modal, Some(Modal::Model(p)) if p.agent == *id), "{id}: {:?}", a.modal);
+                assert!(
+                    matches!(&a.modal, Some(Modal::Model(p)) if p.agent == *id),
+                    "{id}: {:?}",
+                    a.modal
+                );
                 assert_eq!(commands, vec![Command::FetchModels]);
                 assert_eq!(a.view, View::Dashboard);
             }
@@ -1554,7 +1734,10 @@ mod tests {
                 .skip(usize::from(rect.x))
                 .take(usize::from(rect.width))
                 .collect();
-            assert!(top.contains(id.as_str()), "{id} is not drawn at {rect:?}: {top:?}");
+            assert!(
+                top.contains(id.as_str()),
+                "{id} is not drawn at {rect:?}: {top:?}"
+            );
         }
 
         // Empty space opens nothing, and neither does a click under a box.
@@ -1564,7 +1747,10 @@ mod tests {
         a.modal = Some(Modal::ConfirmStop);
         let (_, rect) = &boxes[0];
         assert!(left_click(&mut a, rect.x + 1, rect.y + 1).is_empty());
-        assert_eq!((a.view, a.modal.clone()), (View::Dashboard, Some(Modal::ConfirmStop)));
+        assert_eq!(
+            (a.view, a.modal.clone()),
+            (View::Dashboard, Some(Modal::ConfirmStop))
+        );
 
         // On a screen too small for boxes the agents are rows of a list.
         let small = Rect::new(0, 0, 50, 12);
@@ -1588,11 +1774,20 @@ mod tests {
         let mut a = app();
         let screen = crate::render_to_string(&a, SCREEN.width, SCREEN.height, 1_000_000);
         // The messages are listed under the heading, the newest last.
-        let heading = screen.lines().position(|l| l.contains("message bus")).unwrap() as u16;
+        let heading = screen
+            .lines()
+            .position(|l| l.contains("message bus"))
+            .unwrap() as u16;
         let newest = a.messages.back().unwrap().clone();
         let y = heading + a.messages.len() as u16;
         assert!(left_click(&mut a, 30, y).is_empty());
-        assert_eq!(a.modal, Some(Modal::Message(MessageView { id: newest.id.clone(), scroll: 0 })));
+        assert_eq!(
+            a.modal,
+            Some(Modal::Message(MessageView {
+                id: newest.id.clone(),
+                scroll: 0
+            }))
+        );
         // The one above it is the message before.
         let mut b = app();
         left_click(&mut b, 30, y - 1);
@@ -1646,7 +1841,11 @@ mod tests {
         left_click(&mut a, 5, 5);
         assert!(!a.help);
         let _ = a.take_dirty();
-        for kind in [MouseEventKind::Moved, MouseEventKind::Up(MouseButton::Left), MouseEventKind::Drag(MouseButton::Left)] {
+        for kind in [
+            MouseEventKind::Moved,
+            MouseEventKind::Up(MouseButton::Left),
+            MouseEventKind::Drag(MouseButton::Left),
+        ] {
             assert!(mouse(&mut a, kind, 60, 20).is_empty());
         }
         assert!(!a.take_dirty());
@@ -1656,7 +1855,10 @@ mod tests {
         assert!(a.status.as_ref().unwrap().text.contains("mouse off"));
         a.mouse = false;
         let boxes = views::dashboard::agent_rects(&a, SCREEN);
-        assert!(left_click(&mut a, boxes[0].1.x + 2, boxes[0].1.y + 1).is_empty(), "off means off");
+        assert!(
+            left_click(&mut a, boxes[0].1.x + 2, boxes[0].1.y + 1).is_empty(),
+            "off means off"
+        );
         assert_eq!(a.view, View::Dashboard);
         assert_eq!(submit(&mut a, "/mouse"), vec![Command::SetMouse(true)]);
     }
@@ -1667,7 +1869,10 @@ mod tests {
         press(&mut a, KeyCode::Char('/'));
         type_text(&mut a, "st");
         press(&mut a, KeyCode::Tab);
-        assert_eq!((compose(&a).text.as_str(), compose(&a).cursor), ("/stop", 5));
+        assert_eq!(
+            (compose(&a).text.as_str(), compose(&a).cursor),
+            ("/stop", 5)
+        );
         assert_eq!(compose(&a).to, "claude-1");
         ctrl(&mut a, 'u');
         type_text(&mut a, "/k");
@@ -1821,10 +2026,19 @@ mod tests {
         let mut a = app();
         a.selected = Some("claude-1".to_string());
         // O is the orchestrator's whatever is selected, and asks for the models.
-        assert_eq!(press(&mut a, KeyCode::Char('O')), vec![Command::FetchModels]);
-        assert_eq!((picker(&a).agent.as_str(), picker(&a).runtime), (ORCHESTRATOR_ID, RuntimeKind::Claude));
+        assert_eq!(
+            press(&mut a, KeyCode::Char('O')),
+            vec![Command::FetchModels]
+        );
+        assert_eq!(
+            (picker(&a).agent.as_str(), picker(&a).runtime),
+            (ORCHESTRATOR_ID, RuntimeKind::Claude)
+        );
         assert!(press(&mut a, KeyCode::Enter).is_empty());
-        assert_eq!(picker(&a).notice.as_deref(), Some("the models are still being listed"));
+        assert_eq!(
+            picker(&a).notice.as_deref(),
+            Some("the models are still being listed")
+        );
         // The listing comes in: the highlight is on what it runs on.
         listed(&mut a);
         assert!(!a.models_pending);
@@ -1834,7 +2048,12 @@ mod tests {
         let mut same = a.clone();
         assert!(press(&mut same, KeyCode::Enter).is_empty());
         assert!(same.modal.is_none());
-        assert!(same.status.as_ref().unwrap().text.contains("orchestrator already runs on Sonnet 5.5"));
+        assert!(same
+            .status
+            .as_ref()
+            .unwrap()
+            .text
+            .contains("orchestrator already runs on Sonnet 5.5"));
         // Another model of its CLI: the session is resumed on it.
         press(&mut a, KeyCode::Up);
         assert_eq!(
@@ -1847,7 +2066,12 @@ mod tests {
             }]
         );
         assert!(a.modal.is_none());
-        assert!(a.status.as_ref().unwrap().text.starts_with("restarting orchestrator on Opus 5.5"));
+        assert!(a
+            .status
+            .as_ref()
+            .unwrap()
+            .text
+            .starts_with("restarting orchestrator on Opus 5.5"));
         // A listing that comes in after the highlight was moved leaves it.
         press(&mut a, KeyCode::Char('O'));
         press(&mut a, KeyCode::Up);
@@ -1867,13 +2091,19 @@ mod tests {
         listed(&mut a);
         // Codex: nothing is current there; the first model that starts.
         press(&mut a, KeyCode::Right);
-        assert_eq!((picker(&a).runtime, picker(&a).row), (RuntimeKind::Codex, 0));
+        assert_eq!(
+            (picker(&a).runtime, picker(&a).row),
+            (RuntimeKind::Codex, 0)
+        );
         press(&mut a, KeyCode::Down);
         press(&mut a, KeyCode::Down);
         assert_eq!(picker(&a).row, 1, "the last row is the last");
         assert!(press(&mut a, KeyCode::Enter).is_empty());
         let notice = picker(&a).notice.unwrap();
-        assert!(notice.contains("GPT 6 Luna cannot be started here: not in the model list"), "{notice}");
+        assert!(
+            notice.contains("GPT 6 Luna cannot be started here: not in the model list"),
+            "{notice}"
+        );
         press(&mut a, KeyCode::Up);
         assert_eq!(
             press(&mut a, KeyCode::Enter),
@@ -1898,7 +2128,10 @@ mod tests {
         press(&mut a, KeyCode::Left);
         assert_eq!(picker(&a).runtime, RuntimeKind::Pi);
         press(&mut a, KeyCode::Tab);
-        assert_eq!((picker(&a).runtime, picker(&a).row), (RuntimeKind::Claude, 2));
+        assert_eq!(
+            (picker(&a).runtime, picker(&a).row),
+            (RuntimeKind::Claude, 2)
+        );
     }
 
     #[test]
@@ -1906,8 +2139,14 @@ mod tests {
         use crew_core::RuntimeKind;
         let mut a = app();
         a.selected = Some("claude-2".to_string());
-        assert_eq!(press(&mut a, KeyCode::Char('s')), vec![Command::FetchModels]);
-        assert_eq!((picker(&a).agent.as_str(), picker(&a).runtime), ("claude-2", RuntimeKind::Codex));
+        assert_eq!(
+            press(&mut a, KeyCode::Char('s')),
+            vec![Command::FetchModels]
+        );
+        assert_eq!(
+            (picker(&a).agent.as_str(), picker(&a).runtime),
+            ("claude-2", RuntimeKind::Codex)
+        );
         press(&mut a, KeyCode::Esc);
         a.open_detail("claude-3", 1_000_000);
         press(&mut a, KeyCode::Char('s'));
@@ -1921,11 +2160,20 @@ mod tests {
         assert_eq!(picker(&a).agent, "claude-4");
         press(&mut a, KeyCode::Esc);
         // A shell runs no model.
-        a.agents.iter_mut().find(|x| x.id == "claude-5").unwrap().runtime = RuntimeKind::Shell;
+        a.agents
+            .iter_mut()
+            .find(|x| x.id == "claude-5")
+            .unwrap()
+            .runtime = RuntimeKind::Shell;
         a.selected = Some("claude-5".to_string());
         assert!(press(&mut a, KeyCode::Char('s')).is_empty());
         assert!(a.modal.is_none());
-        assert!(a.status.as_ref().unwrap().text.contains("claude-5 is a shell agent"));
+        assert!(a
+            .status
+            .as_ref()
+            .unwrap()
+            .text
+            .contains("claude-5 is a shell agent"));
     }
 
     #[test]
@@ -1937,7 +2185,12 @@ mod tests {
         a.apply_push(Push::Message(question.clone()), t0);
         // The band and the status line say so; the next tick opens the box,
         // and the bell is due once.
-        assert!(a.status.as_ref().unwrap().text.contains("orchestrator, for claude-2 has a question for you"));
+        assert!(a
+            .status
+            .as_ref()
+            .unwrap()
+            .text
+            .contains("orchestrator, for claude-2 has a question for you"));
         a.tick(t0);
         assert_eq!(answer_box(&a).id, question.id);
         assert_eq!(answer_box(&a).popped_at, t0);
@@ -1945,11 +2198,18 @@ mod tests {
         assert!(!a.take_ring(), "one bell per question");
 
         // An Enter right after it opened was meant for something else.
-        let enter = |a: &mut App, at: i64| handle_key(a, KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE), at, 10);
+        let enter = |a: &mut App, at: i64| {
+            handle_key(a, KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE), at, 10)
+        };
         assert!(enter(&mut a, t0 + 300).is_empty());
         assert_eq!(answer_box(&a).id, question.id, "still open, nothing sent");
         // Put off with esc, it stays in the band and does not open again.
-        handle_key(&mut a, KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE), t0 + 400, 10);
+        handle_key(
+            &mut a,
+            KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE),
+            t0 + 400,
+            10,
+        );
         a.tick(t0 + 500);
         assert!(a.modal.is_none());
         assert_eq!(a.open_questions().len(), 1);
@@ -1962,7 +2222,12 @@ mod tests {
         a.apply_push(Push::Message(second.clone()), t0 + 600);
         a.tick(t0 + 600);
         assert!(matches!(a.modal, Some(Modal::Compose(_))));
-        handle_key(&mut a, KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE), t0 + 700, 10);
+        handle_key(
+            &mut a,
+            KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE),
+            t0 + 700,
+            10,
+        );
         a.tick(t0 + 800);
         assert_eq!(answer_box(&a).id, second.id);
         // Past the moment, Enter sends the selected answer.

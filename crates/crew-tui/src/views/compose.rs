@@ -82,12 +82,21 @@ fn render_compose(buf: &mut Buffer, area: Rect, compose: &Compose, theme: &Theme
     let inner = usize::from(rect.width) - 4;
 
     put_str(buf, rect, x, y, "› ", theme.bold(theme.accent));
-    input_line(buf, rect, (x + 2, y), inner.saturating_sub(2), &compose.text, Some(compose.cursor), theme);
+    input_line(
+        buf,
+        rect,
+        (x + 2, y),
+        inner.saturating_sub(2),
+        &compose.text,
+        Some(compose.cursor),
+        theme,
+    );
     let (hint, style) = match (&compose.notice, command_hint) {
         (Some(notice), _) => (notice.clone(), theme.fg(theme.warn)),
         (None, Some(hint)) => (hint, theme.fg(theme.muted)),
         (None, None) => (
-            "enter send · shift+enter new line · tab recipient · esc cancel · / commands".to_string(),
+            "enter send · shift+enter new line · tab recipient · esc cancel · / commands"
+                .to_string(),
             theme.fg(theme.dim),
         ),
     };
@@ -100,12 +109,25 @@ fn render_type(buf: &mut Buffer, area: Rect, compose: &Compose, theme: &Theme) {
     if rect.width < 12 || rect.height < 5 {
         return;
     }
-    frame(buf, rect, &format!("type into {}'s terminal", compose.to), theme);
+    frame(
+        buf,
+        rect,
+        &format!("type into {}'s terminal", compose.to),
+        theme,
+    );
     let x = i32::from(rect.x) + 2;
     let y = i32::from(rect.y) + 1;
     let inner = usize::from(rect.width) - 4;
     put_str(buf, rect, x, y, "❯ ", theme.bold(theme.accent));
-    input_line(buf, rect, (x + 2, y), inner.saturating_sub(2), &compose.text, Some(compose.cursor), theme);
+    input_line(
+        buf,
+        rect,
+        (x + 2, y),
+        inner.saturating_sub(2),
+        &compose.text,
+        Some(compose.cursor),
+        theme,
+    );
     let hint = "enter sends as a prompt · shift+enter new line · enter alone presses ⏎ · esc back";
     put_str(buf, rect, x, y + 2, &fit(hint, inner), theme.fg(theme.dim));
 }
@@ -123,7 +145,10 @@ pub(super) fn input_line(
     theme: &Theme,
 ) {
     let (x, y) = origin;
-    let chars: Vec<char> = text.chars().map(|c| if c == '\n' { '⏎' } else { c }).collect();
+    let chars: Vec<char> = text
+        .chars()
+        .map(|c| if c == '\n' { '⏎' } else { c })
+        .collect();
     let at = cursor.unwrap_or(0).min(chars.len());
     let cell = |c: &char| UnicodeWidthChar::width(*c).unwrap_or(0);
     let room = cols.saturating_sub(1);
@@ -139,7 +164,11 @@ pub(super) fn input_line(
         if cx + w > end {
             break;
         }
-        let style = if cursor == Some(i) { cursor_style } else { theme.fg(theme.text) };
+        let style = if cursor == Some(i) {
+            cursor_style
+        } else {
+            theme.fg(theme.text)
+        };
         put_str(buf, clip, cx, y, &ch.to_string(), style);
         cx += w;
     }
@@ -148,7 +177,14 @@ pub(super) fn input_line(
     }
 }
 
-fn render_confirm(buf: &mut Buffer, area: Rect, title: &str, question: &str, keys: &str, theme: &Theme) {
+fn render_confirm(
+    buf: &mut Buffer,
+    area: Rect,
+    title: &str,
+    question: &str,
+    keys: &str,
+    theme: &Theme,
+) {
     let rect = centered(area, (width(question) as u16 + 4).clamp(48, 110), 5);
     if rect.width < 12 || rect.height < 5 {
         return;
@@ -157,20 +193,6 @@ fn render_confirm(buf: &mut Buffer, area: Rect, title: &str, question: &str, key
     let x = i32::from(rect.x) + 2;
     let y = i32::from(rect.y) + 1;
     let inner = usize::from(rect.width) - 4;
-    put_str(
-        buf,
-        rect,
-        x,
-        y,
-        &fit(question, inner),
-        theme.fg(theme.text),
-    );
-    put_str(
-        buf,
-        rect,
-        x,
-        y + 2,
-        &fit(keys, inner),
-        theme.fg(theme.dim),
-    );
+    put_str(buf, rect, x, y, &fit(question, inner), theme.fg(theme.text));
+    put_str(buf, rect, x, y + 2, &fit(keys, inner), theme.fg(theme.dim));
 }

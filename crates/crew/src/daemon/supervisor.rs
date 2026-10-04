@@ -26,7 +26,11 @@ you left off, and call agent_inbox to check for messages you may have missed.";
 
 /// How an agent declared by `spec` is run: the team's defaults with the
 /// declaration's own settings over them.
-pub(crate) fn agent_settings(team: &TeamConfig, spec: &AgentSpec, orchestrator: bool) -> AgentSettings {
+pub(crate) fn agent_settings(
+    team: &TeamConfig,
+    spec: &AgentSpec,
+    orchestrator: bool,
+) -> AgentSettings {
     let mut settings = AgentSettings::resolve(&team.defaults, spec);
     if orchestrator && spec.permission_mode.is_none() {
         // Guarded mode: the orchestrator coordinates and never needs to
@@ -71,7 +75,8 @@ impl Daemon {
         let runtime = assigned.runtime;
         if let Some(note) = &assigned.note {
             self.emit(
-                NewEvent::new("daemon", "agent.model", format!("{}: {note}", spec.id)).agent(&spec.id),
+                NewEvent::new("daemon", "agent.model", format!("{}: {note}", spec.id))
+                    .agent(&spec.id),
             );
         }
         // A subagent starts from its parent's branch, so it sees the parent's
@@ -159,7 +164,11 @@ impl Daemon {
 
     /// Add a member. A `temporary` one is not saved with the roster and
     /// leaves once its work is done.
-    pub(crate) async fn add_agent(&self, spec: AgentSpec, temporary: bool) -> Result<Agent, RpcError> {
+    pub(crate) async fn add_agent(
+        &self,
+        spec: AgentSpec,
+        temporary: bool,
+    ) -> Result<Agent, RpcError> {
         validate_agent_spec(&spec).map_err(|e| RpcError::invalid(e.to_string()))?;
         let (team, worktrees, backend) = {
             let model = self.model();
@@ -169,10 +178,15 @@ impl Daemon {
                 .clone()
                 .ok_or_else(|| RpcError::unavailable("no team is loaded"))?;
             if model.agent(&spec.id).is_some() {
-                return Err(RpcError::conflict(format!("agent '{}' already exists", spec.id)));
+                return Err(RpcError::conflict(format!(
+                    "agent '{}' already exists",
+                    spec.id
+                )));
             }
             if model.agents.iter().filter(|a| !a.orchestrator).count() >= MAX_AGENTS {
-                return Err(RpcError::invalid(format!("a team has at most {MAX_AGENTS} agents")));
+                return Err(RpcError::invalid(format!(
+                    "a team has at most {MAX_AGENTS} agents"
+                )));
             }
             (
                 team,
@@ -195,15 +209,26 @@ impl Daemon {
         .await
         .map_err(internal)?;
         // A catalog model decides the CLI, so this is the runtime it gets.
-        if assigned.runtime == RuntimeKind::Shell && spec.command.is_empty() && team.defaults.command.is_empty() {
+        if assigned.runtime == RuntimeKind::Shell
+            && spec.command.is_empty()
+            && team.defaults.command.is_empty()
+        {
             return Err(RpcError::invalid("shell agents need a command"));
         }
-        if let Some((out, instead)) = self.out_now(assigned.runtime, assigned.model.as_deref()).await {
+        if let Some((out, instead)) = self
+            .out_now(assigned.runtime, assigned.model.as_deref())
+            .await
+        {
             let model = assigned.model.clone().unwrap_or_default();
             if !self.has_style_fallback(&model, assigned.runtime).await {
                 let resets = out
                     .resets_at
-                    .map(|at| format!(" (it resets {})", crew_core::util::fmt_when(at, crew_core::util::now_ms())))
+                    .map(|at| {
+                        format!(
+                            " (it resets {})",
+                            crew_core::util::fmt_when(at, crew_core::util::now_ms())
+                        )
+                    })
                     .unwrap_or_default();
                 let instead = if instead.is_empty() {
                     "no comparable model is free either".to_string()
@@ -219,7 +244,7 @@ impl Daemon {
         let daemon = self.clone();
         let spec_for_task = spec.clone();
         let agent = tokio::task::spawn_blocking(move || {
-daemon.create_agent(&spec_for_task, &team, false, worktrees, &backend, None)
+            daemon.create_agent(&spec_for_task, &team, false, worktrees, &backend, None)
         })
         .await
         .map_err(internal)?
@@ -237,7 +262,11 @@ daemon.create_agent(&spec_for_task, &team, false, worktrees, &backend, None)
                 format!(
                     "added agent {}{}",
                     agent.id,
-                    if temporary { " (temporary: it leaves once its work is done)" } else { "" }
+                    if temporary {
+                        " (temporary: it leaves once its work is done)"
+                    } else {
+                        ""
+                    }
                 ),
             )
             .agent(&agent.id),
@@ -266,16 +295,28 @@ daemon.create_agent(&spec_for_task, &team, false, worktrees, &backend, None)
         let id = id.to_string();
         tokio::spawn(async move {
             if let Err(e) = daemon.spawn_agent(&id, resume, notice).await {
-                daemon.mark_failed(&id, format!("failed to start: {e:#}")).await;
+                daemon
+                    .mark_failed(&id, format!("failed to start: {e:#}"))
+                    .await;
             }
         });
     }
 
     /// Start (or restart) an agent's process.
-    pub(crate) async fn spawn_agent(&self, id: &str, resume: bool, notice: Option<String>) -> Result<()> {
+    pub(crate) async fn spawn_agent(
+        &self,
+        id: &str,
+        resume: bool,
+        notice: Option<String>,
+    ) -> Result<()> {
         let procs = self.procs().map_err(|e| anyhow!(e.message))?;
         // A model known to be out starts on the work style's fallback.
-        let fresh = !(resume && self.model().local.get(id).is_some_and(|l| l.session_confirmed));
+        let fresh = !(resume
+            && self
+                .model()
+                .local
+                .get(id)
+                .is_some_and(|l| l.session_confirmed));
         self.fall_back_by_style(id, None, Some(fresh)).await;
         let (agent, local, team, agents, tasks, token, worktrees) = {
             let model = self.model();
@@ -314,7 +355,8 @@ daemon.create_agent(&spec_for_task, &team, false, worktrees, &backend, None)
         let models = if agent.orchestrator {
             let fallbacks = team.defaults.model_fallbacks.clone();
             tokio::task::spawn_blocking(move || {
-                let mut text = crate::models::Catalog::load().briefing(&crate::models::Availability::detect());
+                let mut text =
+                    crate::models::Catalog::load().briefing(&crate::models::Availability::detect());
                 text.push_str(&prompt::fallbacks_section(&fallbacks));
                 text
             })
@@ -348,7 +390,11 @@ daemon.create_agent(&spec_for_task, &team, false, worktrees, &backend, None)
         let (agent_id, parent) = (id.to_string(), agent.parent.clone());
         let agent_runtime = agent.runtime;
         let endpoint = tokio::task::spawn_blocking(move || {
-            crate::endpoints::Layers::load(&workspace).resolve(agent_runtime, &agent_id, parent.as_deref())
+            crate::endpoints::Layers::load(&workspace).resolve(
+                agent_runtime,
+                &agent_id,
+                parent.as_deref(),
+            )
         })
         .await??;
         // The 1M-token context window, for a model the catalog says has one
@@ -363,7 +409,9 @@ daemon.create_agent(&spec_for_task, &team, false, worktrees, &backend, None)
             {
                 let model = model.clone();
                 tokio::task::spawn_blocking(move || {
-                    crate::models::Catalog::load().find(&model).is_some_and(|m| m.long_context)
+                    crate::models::Catalog::load()
+                        .find(&model)
+                        .is_some_and(|m| m.long_context)
                 })
                 .await?
             }
@@ -403,7 +451,8 @@ daemon.create_agent(&spec_for_task, &team, false, worktrees, &backend, None)
         }
         if let Some(origin) = &endpoint.origin {
             self.emit(
-                NewEvent::new("daemon", "agent.endpoint", format!("{id} runs on {origin}")).agent(id),
+                NewEvent::new("daemon", "agent.endpoint", format!("{id} runs on {origin}"))
+                    .agent(id),
             );
         }
         if let Some(model) = &endpoint.model {
@@ -477,7 +526,12 @@ daemon.create_agent(&spec_for_task, &team, false, worktrees, &backend, None)
             a.started_at = Some(now);
             a.last_activity_at = now;
             a.backend = procs.name().to_string();
-            a.delivery = if spec.sidecar.is_some() { "socket" } else { "terminal" }.to_string();
+            a.delivery = if spec.sidecar.is_some() {
+                "socket"
+            } else {
+                "terminal"
+            }
+            .to_string();
             a.subagents = 0;
         });
 
@@ -506,7 +560,10 @@ daemon.create_agent(&spec_for_task, &team, false, worktrees, &backend, None)
                     "{id} started ({} on {}{})",
                     agent.runtime,
                     procs.name(),
-                    spawned.pid.map(|p| format!(", pid {p}")).unwrap_or_default()
+                    spawned
+                        .pid
+                        .map(|p| format!(", pid {p}"))
+                        .unwrap_or_default()
                 ),
             )
             .agent(id),
@@ -574,13 +631,16 @@ daemon.create_agent(&spec_for_task, &team, false, worktrees, &backend, None)
             .with_context(|| format!("starting `{} {}`", sidecar.program, sidecar.args[0]))?;
         for _ in 0..150 {
             if sidecar.socket.exists() {
-                self.sidecars.lock().unwrap_or_else(|e| e.into_inner()).insert(
-                    id.to_string(),
-                    super::SidecarProc {
-                        child,
-                        socket: sidecar.socket.clone(),
-                    },
-                );
+                self.sidecars
+                    .lock()
+                    .unwrap_or_else(|e| e.into_inner())
+                    .insert(
+                        id.to_string(),
+                        super::SidecarProc {
+                            child,
+                            socket: sidecar.socket.clone(),
+                        },
+                    );
                 return Ok(());
             }
             if let Some(status) = child.try_wait()? {
@@ -734,7 +794,10 @@ daemon.create_agent(&spec_for_task, &team, false, worktrees, &backend, None)
         let now = now_ms();
         // A session parked at a usage limit that shows signs of life went on
         // by itself (the runtime retried, or someone typed into it).
-        if matches!(signal, Signal::TurnStarted | Signal::Activity(_) | Signal::TurnEnded) {
+        if matches!(
+            signal,
+            Signal::TurnStarted | Signal::Activity(_) | Signal::TurnEnded
+        ) {
             self.limit_lifted(id, "the session went on");
         }
         if matches!(signal, Signal::TurnEnded) {
@@ -761,9 +824,13 @@ daemon.create_agent(&spec_for_task, &team, false, worktrees, &backend, None)
             Signal::TurnFailed(what) => {
                 self.model().rt(id).turn_failure = Some(what.clone());
                 self.emit(
-                    NewEvent::new("daemon", "agent.turn_failed", format!("{id}: the turn ended in an error: {what}"))
-                        .agent(id)
-                        .warn(),
+                    NewEvent::new(
+                        "daemon",
+                        "agent.turn_failed",
+                        format!("{id}: the turn ended in an error: {what}"),
+                    )
+                    .agent(id)
+                    .warn(),
                 );
                 self.turn_ended(id, now);
                 self.long_context_refused(id, &what);
@@ -789,7 +856,9 @@ daemon.create_agent(&spec_for_task, &team, false, worktrees, &backend, None)
             // Parked at a usage limit: a notification changes nothing.
             Signal::Blocked(_) if self.agent(id).is_some_and(|a| a.limit.is_some()) => {}
             Signal::Blocked(reason) => {
-                let changed = self.agent(id).is_some_and(|a| a.status != AgentStatus::Blocked);
+                let changed = self
+                    .agent(id)
+                    .is_some_and(|a| a.status != AgentStatus::Blocked);
                 self.update_agent(id, |a| {
                     if !a.status.is_terminal() {
                         a.status = AgentStatus::Blocked;
@@ -812,7 +881,10 @@ daemon.create_agent(&spec_for_task, &team, false, worktrees, &backend, None)
             Signal::Unblocked => {
                 let was_blocked = self.agent(id).is_some_and(|a| {
                     a.status == AgentStatus::Blocked
-                        && matches!(a.block_kind.as_deref(), Some("permission" | "dialog" | "unresponsive"))
+                        && matches!(
+                            a.block_kind.as_deref(),
+                            Some("permission" | "dialog" | "unresponsive")
+                        )
                 });
                 if was_blocked {
                     self.update_agent(id, |a| {
@@ -837,7 +909,10 @@ daemon.create_agent(&spec_for_task, &team, false, worktrees, &backend, None)
                     }
                 });
             }
-            Signal::Session { id: session_id, transcript } => {
+            Signal::Session {
+                id: session_id,
+                transcript,
+            } => {
                 {
                     let mut model = self.model();
                     if transcript.is_some() {
@@ -879,7 +954,10 @@ daemon.create_agent(&spec_for_task, &team, false, worktrees, &backend, None)
             rt.turn_ended_at = now;
             rt.idle_since = Some(now);
             // What this turn was given; what is delivered from here on is the next one's.
-            let given = (std::mem::take(&mut rt.turn_messages), std::mem::take(&mut rt.turn_openers));
+            let given = (
+                std::mem::take(&mut rt.turn_messages),
+                std::mem::take(&mut rt.turn_openers),
+            );
             (rt.transcript.clone(), given)
         };
         let status = self.resting_status(id);
@@ -1060,15 +1138,26 @@ daemon.create_agent(&spec_for_task, &team, false, worktrees, &backend, None)
     /// thought" notice), so it holds no keys and blocks nothing. Returns
     /// whether there was one.
     pub(crate) async fn dismiss_notice(&self, id: &str, screen: &str) -> bool {
-        let Some(agent) = self.agent(id) else { return false };
-        let Some(notice) = runtime_for(agent.runtime).detect_dialog(screen).filter(|d| d.kind == "notice") else {
+        let Some(agent) = self.agent(id) else {
             return false;
         };
-        let Ok(procs) = self.procs() else { return false };
+        let Some(notice) = runtime_for(agent.runtime)
+            .detect_dialog(screen)
+            .filter(|d| d.kind == "notice")
+        else {
+            return false;
+        };
+        let Ok(procs) = self.procs() else {
+            return false;
+        };
         if procs.send_keys(id, &notice.accept_keys).await.is_ok() {
             self.emit(
-                NewEvent::new("daemon", "agent.notice_dismissed", format!("{id}: dismissed — {}", notice.description))
-                    .agent(id),
+                NewEvent::new(
+                    "daemon",
+                    "agent.notice_dismissed",
+                    format!("{id}: dismissed — {}", notice.description),
+                )
+                .agent(id),
             );
         }
         true
@@ -1081,7 +1170,9 @@ daemon.create_agent(&spec_for_task, &team, false, worktrees, &backend, None)
         // same dialog would press its keys twice and pick the wrong option.
         let lock = self.delivery_lock(&format!("dialog:{id}"));
         let _guard = lock.lock().await;
-        let Some(agent) = self.agent(id) else { return true };
+        let Some(agent) = self.agent(id) else {
+            return true;
+        };
         let Ok(procs) = self.procs() else { return true };
         let runtime = runtime_for(agent.runtime);
         let auto_trust = self
@@ -1109,8 +1200,12 @@ daemon.create_agent(&spec_for_task, &team, false, worktrees, &backend, None)
                 keys if dialog.kind == "notice" && !keys.is_empty() && attempt < 3 => {
                     if attempt == 0 {
                         self.emit(
-                            NewEvent::new("daemon", "agent.notice_dismissed", format!("{id}: dismissed — {}", dialog.description))
-                                .agent(id),
+                            NewEvent::new(
+                                "daemon",
+                                "agent.notice_dismissed",
+                                format!("{id}: dismissed — {}", dialog.description),
+                            )
+                            .agent(id),
                         );
                     }
                     for key in keys {
@@ -1124,7 +1219,9 @@ daemon.create_agent(&spec_for_task, &team, false, worktrees, &backend, None)
                             NewEvent::new(
                                 "daemon",
                                 "agent.dialog_accepted",
-                                format!("{id}: accepted the workspace-trust dialog (auto_trust is on)"),
+                                format!(
+                                    "{id}: accepted the workspace-trust dialog (auto_trust is on)"
+                                ),
                             )
                             .agent(id),
                         );
@@ -1184,7 +1281,9 @@ defaults.auto_trust: true in the team file.",
                 let now = now_ms();
                 let (starting, push) = {
                     let mut model = self.model();
-                    let Some(agent) = model.agent(&agent_id).cloned() else { return };
+                    let Some(agent) = model.agent(&agent_id).cloned() else {
+                        return;
+                    };
                     let rt = model.rt(&agent_id);
                     rt.last_output_at = now;
                     let push = now - rt.last_activity_push > 5_000;
@@ -1226,7 +1325,9 @@ defaults.auto_trust: true in the team file.",
                 }
             }
             ProcEvent::Hint { agent_id, hint } => {
-                let Some(agent) = self.agent(&agent_id) else { return };
+                let Some(agent) = self.agent(&agent_id) else {
+                    return;
+                };
                 let (ready, turn_active) = {
                     let mut model = self.model();
                     let rt = model.rt(&agent_id);
@@ -1288,7 +1389,9 @@ defaults.auto_trust: true in the team file.",
     async fn on_exit(&self, id: &str, code: Option<i32>, detail: &str) {
         let (expected, agent, max_restarts, has_task) = {
             let mut model = self.model();
-            let Some(agent) = model.agent(id).cloned() else { return };
+            let Some(agent) = model.agent(id).cloned() else {
+                return;
+            };
             let has_task = active_task(&model.tasks, id).is_some();
             let max_restarts = model
                 .local
@@ -1299,7 +1402,12 @@ defaults.auto_trust: true in the team file.",
             rt.ready = false;
             rt.turn_active = false;
             rt.pending_prompt = None;
-            (std::mem::take(&mut rt.expected_exit), agent, max_restarts, has_task)
+            (
+                std::mem::take(&mut rt.expected_exit),
+                agent,
+                max_restarts,
+                has_task,
+            )
         };
         // The session is gone, so its helper is not needed either (a restart
         // starts a fresh one).
@@ -1359,7 +1467,9 @@ defaults.auto_trust: true in the team file.",
             tokio::spawn(async move {
                 tokio::time::sleep(std::time::Duration::from_millis(500)).await;
                 if let Err(e) = daemon.spawn_agent(&id, true, None).await {
-                    daemon.mark_failed(&id, format!("restart failed: {e:#}")).await;
+                    daemon
+                        .mark_failed(&id, format!("restart failed: {e:#}"))
+                        .await;
                 }
                 daemon.replan();
             });
@@ -1403,9 +1513,11 @@ defaults.auto_trust: true in the team file.",
             active_task(&model.tasks, id).map(|t| t.id.clone())
         };
         if let Some(task) = task {
-            self.fail_task(&task, format!("agent {id} failed: {error}")).await;
+            self.fail_task(&task, format!("agent {id} failed: {error}"))
+                .await;
         } else {
-            self.notify_orchestrator(&format!("Agent {id} failed: {error}")).await;
+            self.notify_orchestrator(&format!("Agent {id} failed: {error}"))
+                .await;
         }
         self.replan();
     }
@@ -1455,7 +1567,11 @@ defaults.auto_trust: true in the team file.",
 
     /// Restart an agent, resuming its session; `notice` replaces the usual
     /// "you were restarted" line of its first prompt.
-    pub(crate) async fn restart_agent_with(&self, id: &str, notice: Option<String>) -> Result<(), RpcError> {
+    pub(crate) async fn restart_agent_with(
+        &self,
+        id: &str,
+        notice: Option<String>,
+    ) -> Result<(), RpcError> {
         if self.model().agent(id).is_none() {
             return Err(RpcError::not_found(format!("no agent '{id}'")));
         }
@@ -1500,7 +1616,9 @@ defaults.auto_trust: true in the team file.",
         let id = id.to_string();
         tokio::spawn(async move {
             if let Err(e) = daemon.spawn_agent(&id, true, notice).await {
-                daemon.mark_failed(&id, format!("failed to start: {e:#}")).await;
+                daemon
+                    .mark_failed(&id, format!("failed to start: {e:#}"))
+                    .await;
             }
             daemon.replan();
         });
@@ -1524,7 +1642,11 @@ defaults.auto_trust: true in the team file.",
         self.emit(
             NewEvent::new(
                 "daemon",
-                if pause { "agent.paused" } else { "agent.resumed" },
+                if pause {
+                    "agent.paused"
+                } else {
+                    "agent.resumed"
+                },
                 format!("{id} {}", if pause { "paused" } else { "resumed" }),
             )
             .agent(id),
@@ -1549,9 +1671,19 @@ defaults.auto_trust: true in the team file.",
         self.temporary_housekeeping().await;
 
         enum Todo {
-            Remind { agent: String, task_id: String, title: String },
-            Unresponsive { agent: String, why: String },
-            Timeout { task_id: String, secs: u64 },
+            Remind {
+                agent: String,
+                task_id: String,
+                title: String,
+            },
+            Unresponsive {
+                agent: String,
+                why: String,
+            },
+            Timeout {
+                task_id: String,
+                secs: u64,
+            },
         }
         let mut todo = Vec::new();
         {
@@ -1625,7 +1757,11 @@ defaults.auto_trust: true in the team file.",
 
         for item in todo {
             match item {
-                Todo::Remind { agent, task_id, title } => {
+                Todo::Remind {
+                    agent,
+                    task_id,
+                    title,
+                } => {
                     let text = format!(
                         "[crew] Reminder: task \"{title}\" (id {task_id}) is still open. Continue \
 working on it; call task_complete when it is done, or agent_status(\"waiting\", …) if you are \
@@ -1664,7 +1800,8 @@ waiting on a teammate."
                         .await;
                 }
                 Todo::Timeout { task_id, secs } => {
-                    self.fail_task(&task_id, format!("timed out after {secs}s")).await;
+                    self.fail_task(&task_id, format!("timed out after {secs}s"))
+                        .await;
                 }
             }
         }
@@ -1677,12 +1814,21 @@ waiting on a teammate."
     pub(crate) async fn recover(&self) {
         let (session, agents, task_count) = {
             let model = self.model();
-            (model.session.clone(), model.agents.clone(), model.tasks.len())
+            (
+                model.session.clone(),
+                model.agents.clone(),
+                model.tasks.len(),
+            )
         };
         let Some(team) = session.team.clone() else {
             return;
         };
-        let procs = match self.build_backend(&session.backend, &team, session.herdr_socket.as_deref(), session.herdr_workspace.clone()) {
+        let procs = match self.build_backend(
+            &session.backend,
+            &team,
+            session.herdr_socket.as_deref(),
+            session.herdr_workspace.clone(),
+        ) {
             Ok(procs) => procs,
             Err(e) => {
                 self.emit(
@@ -1713,12 +1859,16 @@ waiting on a teammate."
             // The process did not outlive the previous daemon.
             let needed = {
                 let model = self.model();
-                let open = model
-                    .tasks
-                    .iter()
-                    .any(|t| t.assigned_agent.as_deref() == Some(agent.id.as_str()) && !t.status.is_terminal());
+                let open = model.tasks.iter().any(|t| {
+                    t.assigned_agent.as_deref() == Some(agent.id.as_str())
+                        && !t.status.is_terminal()
+                });
                 open || (agent.orchestrator && model.session.summary.is_none())
-            } || super::delivery::wakes(agent, &self.bus.undelivered(&agent.id).unwrap_or_default(), true);
+            } || super::delivery::wakes(
+                agent,
+                &self.bus.undelivered(&agent.id).unwrap_or_default(),
+                true,
+            );
             if needed {
                 restarted += 1;
                 self.requeue_if_sessionless(&agent.id);

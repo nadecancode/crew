@@ -141,7 +141,11 @@ fn sgr(params: &str, mut style: Style, base: Style) -> Style {
                     _ => None,
                 };
                 if let Some(color) = color {
-                    style = if code == 38 { style.fg(color) } else { style.bg(color) };
+                    style = if code == 38 {
+                        style.fg(color)
+                    } else {
+                        style.bg(color)
+                    };
                 }
             }
             39 => style.fg = base.fg,
@@ -174,17 +178,29 @@ mod tests {
         assert_eq!(got[0], ("plain ".into(), Style::default()));
         assert_eq!(
             got[1],
-            ("bold red".into(), Style::default().fg(Color::Red).add_modifier(Modifier::BOLD))
+            (
+                "bold red".into(),
+                Style::default().fg(Color::Red).add_modifier(Modifier::BOLD)
+            )
         );
         assert_eq!(got[2], (" ".into(), Style::default()));
-        assert_eq!(got[3], ("indexed".into(), Style::default().fg(Color::Indexed(208))));
-        assert_eq!(got[5], ("rgb".into(), Style::default().fg(Color::Rgb(10, 20, 30))));
+        assert_eq!(
+            got[3],
+            ("indexed".into(), Style::default().fg(Color::Indexed(208)))
+        );
+        assert_eq!(
+            got[5],
+            ("rgb".into(), Style::default().fg(Color::Rgb(10, 20, 30)))
+        );
         assert_eq!(got[6], (" end".into(), Style::default()));
         // Dim, background and bright colours; 22 lifts bold and dim.
         let got = parts("\x1b[2;44mdim on blue\x1b[22;49;97m white");
         assert_eq!(
             got[0],
-            ("dim on blue".into(), Style::default().bg(Color::Blue).add_modifier(Modifier::DIM))
+            (
+                "dim on blue".into(),
+                Style::default().bg(Color::Blue).add_modifier(Modifier::DIM)
+            )
         );
         assert_eq!(got[1], (" white".into(), Style::default().fg(Color::White)));
     }

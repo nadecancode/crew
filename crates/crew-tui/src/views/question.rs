@@ -56,8 +56,15 @@ pub fn render_band(buf: &mut Buffer, area: Rect, app: &App, theme: &Theme, now: 
 
     let key = "a answer";
     let lead = match open.len() {
-        1 => format!("? question from {} · {} ago: ", asker(first), age(app, first, now)),
-        n => format!("? {n} questions for you · the first from {}: ", asker(first)),
+        1 => format!(
+            "? question from {} · {} ago: ",
+            asker(first),
+            age(app, first, now)
+        ),
+        n => format!(
+            "? {n} questions for you · the first from {}: ",
+            asker(first)
+        ),
     };
     let lead = fit(&lead, cols);
     let style = theme.bold(theme.warn).bg(theme.bar_bg);
@@ -142,9 +149,20 @@ fn frame(buf: &mut Buffer, rect: Rect, title: &str, theme: &Theme) {
         .render(rect, buf);
 }
 
-pub fn render(buf: &mut Buffer, area: Rect, app: &App, answer: &QuestionBox, theme: &Theme, now: i64) {
+pub fn render(
+    buf: &mut Buffer,
+    area: Rect,
+    app: &App,
+    answer: &QuestionBox,
+    theme: &Theme,
+    now: i64,
+) {
     let open = app.open_questions();
-    let outer = centered(area, area.width.saturating_sub(6).clamp(24, 104), area.height);
+    let outer = centered(
+        area,
+        area.width.saturating_sub(6).clamp(24, 104),
+        area.height,
+    );
     if outer.width < 24 || area.height < 7 {
         return;
     }
@@ -155,8 +173,22 @@ pub fn render(buf: &mut Buffer, area: Rect, app: &App, answer: &QuestionBox, the
         frame(buf, rect, "question", theme);
         let x = i32::from(rect.x) + 2;
         let y = i32::from(rect.y) + 1;
-        put_str(buf, rect, x, y, &fit("This question has been answered.", cols), theme.fg(theme.text));
-        put_str(buf, rect, x, y + 2, &fit("any key closes", cols), theme.fg(theme.dim));
+        put_str(
+            buf,
+            rect,
+            x,
+            y,
+            &fit("This question has been answered.", cols),
+            theme.fg(theme.text),
+        );
+        put_str(
+            buf,
+            rect,
+            x,
+            y + 2,
+            &fit("any key closes", cols),
+            theme.fg(theme.dim),
+        );
         return;
     };
     let question = open[index];
@@ -177,7 +209,11 @@ pub fn render(buf: &mut Buffer, area: Rect, app: &App, answer: &QuestionBox, the
     } else {
         "question".to_string()
     };
-    let title = format!("{counter} · {} · {} ago", question.asker(), age(app, question, now));
+    let title = format!(
+        "{counter} · {} · {} ago",
+        question.asker(),
+        age(app, question, now)
+    );
     frame(buf, rect, &fit(&title, cols), theme);
 
     let x = i32::from(rect.x) + 2;
@@ -199,19 +235,41 @@ pub fn render(buf: &mut Buffer, area: Rect, app: &App, answer: &QuestionBox, the
     for (i, option) in options.iter().enumerate() {
         let selected = i == choice;
         let marker = if selected { "▸" } else { " " };
-        let style = if selected { theme.bold(theme.accent) } else { theme.fg(theme.text) };
-        put_str(buf, rect, x, y, &fit(&format!("{marker} {}. {option}", i + 1), cols), style);
+        let style = if selected {
+            theme.bold(theme.accent)
+        } else {
+            theme.fg(theme.text)
+        };
+        put_str(
+            buf,
+            rect,
+            x,
+            y,
+            &fit(&format!("{marker} {}. {option}", i + 1), cols),
+            style,
+        );
         y += 1;
     }
     // The operator's own words.
     let selected = choice == own;
     let lead = format!("{} {}. › ", if selected { "▸" } else { " " }, own + 1);
-    let style = if selected { theme.bold(theme.accent) } else { theme.fg(theme.muted) };
+    let style = if selected {
+        theme.bold(theme.accent)
+    } else {
+        theme.fg(theme.muted)
+    };
     put_str(buf, rect, x, y, &lead, style);
     let text_x = x + width(&lead) as i32;
     let room = cols.saturating_sub(width(&lead));
     if answer.input.text.is_empty() && !selected {
-        put_str(buf, rect, text_x, y, &fit("type your own answer", room), theme.fg(theme.dim));
+        put_str(
+            buf,
+            rect,
+            text_x,
+            y,
+            &fit("type your own answer", room),
+            theme.fg(theme.dim),
+        );
     } else {
         input_line(
             buf,
@@ -240,7 +298,10 @@ mod tests {
     fn text_wraps_at_spaces_and_keeps_line_breaks() {
         assert_eq!(wrap("one two three four", 9), ["one two", "three", "four"]);
         assert_eq!(wrap("one two three four", 100), ["one two three four"]);
-        assert_eq!(wrap("first\n\nsecond line", 20), ["first", "", "second line"]);
+        assert_eq!(
+            wrap("first\n\nsecond line", 20),
+            ["first", "", "second line"]
+        );
         // Words longer than a line are cut; wide characters count double.
         assert_eq!(wrap("abcdefghij", 4), ["abcd", "efgh", "ij"]);
         assert_eq!(wrap("ab cdefghij", 4), ["ab", "cdef", "ghij"]);
@@ -249,8 +310,14 @@ mod tests {
         assert!(wrap("", 10).is_empty());
         assert!(wrap("  \n ", 10).is_empty());
         for cols in 1..30 {
-            let lines = wrap("The legacy export writes amounts as integer cents; 日本語 too.", cols);
-            assert!(lines.iter().all(|l| width(l) <= cols.max(2)), "{cols}: {lines:?}");
+            let lines = wrap(
+                "The legacy export writes amounts as integer cents; 日本語 too.",
+                cols,
+            );
+            assert!(
+                lines.iter().all(|l| width(l) <= cols.max(2)),
+                "{cols}: {lines:?}"
+            );
         }
     }
 }

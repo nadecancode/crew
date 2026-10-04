@@ -234,14 +234,19 @@ unless you give it more work now."
             if !model.agents.iter().any(|a| a.temporary) {
                 return;
             }
-            let Some(orchestrator) = model.orchestrator().cloned() else { return };
+            let Some(orchestrator) = model.orchestrator().cloned() else {
+                return;
+            };
             let rt = model.rt(&orchestrator.id);
             // What it has read: messages put into a turn that has since
             // ended, and stayed ended (a message queued during a turn can
             // start the next one).
             let heard = if orchestrator.runtime == RuntimeKind::Shell {
                 rt.delivered_at
-            } else if rt.turn_active || rt.turn_ended_at < rt.delivered_at || now - rt.turn_ended_at < SETTLE_MS {
+            } else if rt.turn_active
+                || rt.turn_ended_at < rt.delivered_at
+                || now - rt.turn_ended_at < SETTLE_MS
+            {
                 return;
             } else {
                 rt.delivered_at
@@ -274,10 +279,15 @@ unless you give it more work now."
         }
         for id in leaving {
             // Given work, or a message, since.
-            if work_of(&self.model().tasks, &id).0 || !self.bus.undelivered(&id).unwrap_or_default().is_empty() {
+            if work_of(&self.model().tasks, &id).0
+                || !self.bus.undelivered(&id).unwrap_or_default().is_empty()
+            {
                 continue;
             }
-            if let Err(e) = self.remove_agent(&id, ": a temporary member, its work done").await {
+            if let Err(e) = self
+                .remove_agent(&id, ": a temporary member, its work done")
+                .await
+            {
                 tracing::warn!("taking {id} off the team: {}", e.message);
             }
         }

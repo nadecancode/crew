@@ -136,8 +136,13 @@ fn take_words(rest: &str, n: usize) -> (Vec<String>, String) {
 
 impl Agent {
     fn tool(&mut self, name: &str, args: Value) -> Result<tools::ToolOutput> {
-        let output = tools::call(&mut self.client, name, &args).map_err(|e| anyhow!("{name}: {e}"))?;
-        println!("[{}] {name}: {}", self.me, output.text.lines().next().unwrap_or(""));
+        let output =
+            tools::call(&mut self.client, name, &args).map_err(|e| anyhow!("{name}: {e}"))?;
+        println!(
+            "[{}] {name}: {}",
+            self.me,
+            output.text.lines().next().unwrap_or("")
+        );
         Ok(output)
     }
 
@@ -155,7 +160,8 @@ impl Agent {
             ack: true,
             limit: Some(100),
         })?;
-        self.backlog.extend(inbox.messages.into_iter().map(|e| e.message));
+        self.backlog
+            .extend(inbox.messages.into_iter().map(|e| e.message));
         Ok(())
     }
 
@@ -204,11 +210,16 @@ impl Agent {
                         .parse()
                         .context("progress <pct>")?;
                     let note = (!note.is_empty()).then_some(note);
-                    self.tool("task_update", json!({ "percent": percent, "message": note }))?;
+                    self.tool(
+                        "task_update",
+                        json!({ "percent": percent, "message": note }),
+                    )?;
                 }
                 "status" => {
                     let (words, note) = take_words(&rest, 1);
-                    let status = words.first().ok_or_else(|| anyhow!("status <status> [note]"))?;
+                    let status = words
+                        .first()
+                        .ok_or_else(|| anyhow!("status <status> [note]"))?;
                     let note = (!note.is_empty()).then_some(note);
                     self.tool("agent_status", json!({ "status": status, "note": note }))?;
                 }
@@ -217,7 +228,10 @@ impl Agent {
                     let [to, kind] = words.as_slice() else {
                         bail!("send <to> <type> <body>");
                     };
-                    self.tool("agent_send", json!({ "to": to, "type": kind, "body": body }))?;
+                    self.tool(
+                        "agent_send",
+                        json!({ "to": to, "type": kind, "body": body }),
+                    )?;
                 }
                 "broadcast" => {
                     self.tool("agent_broadcast", json!({ "body": rest }))?;
@@ -233,7 +247,9 @@ impl Agent {
                 }
                 "write" => {
                     let (words, content) = take_words(&rest, 1);
-                    let file = words.first().ok_or_else(|| anyhow!("write <file> <content>"))?;
+                    let file = words
+                        .first()
+                        .ok_or_else(|| anyhow!("write <file> <content>"))?;
                     let path = std::path::Path::new(file);
                     if path.is_absolute() || file.split('/').any(|part| part == "..") {
                         bail!("write: '{file}' must stay inside the working directory");
@@ -246,16 +262,26 @@ impl Agent {
                 }
                 "commit" => {
                     let output = self.tool("git_commit", json!({ "message": rest }))?;
-                    self.last_commit = output.raw.get("sha").and_then(Value::as_str).map(str::to_string);
+                    self.last_commit = output
+                        .raw
+                        .get("sha")
+                        .and_then(Value::as_str)
+                        .map(str::to_string);
                 }
                 "publish" => {
                     let (words, text) = take_words(&rest, 1);
-                    let to = words.first().ok_or_else(|| anyhow!("publish <to> [text]"))?;
+                    let to = words
+                        .first()
+                        .ok_or_else(|| anyhow!("publish <to> [text]"))?;
                     let commit = self
                         .last_commit
                         .clone()
                         .ok_or_else(|| anyhow!("publish: nothing has been committed yet"))?;
-                    let text = if text.is_empty() { "My work is committed.".to_string() } else { text };
+                    let text = if text.is_empty() {
+                        "My work is committed.".to_string()
+                    } else {
+                        text
+                    };
                     self.tool(
                         "agent_send",
                         json!({
@@ -314,7 +340,11 @@ impl Agent {
                     )?;
                 }
                 "done" => {
-                    let result = if rest.is_empty() { "done".to_string() } else { rest };
+                    let result = if rest.is_empty() {
+                        "done".to_string()
+                    } else {
+                        rest
+                    };
                     self.tool("task_complete", json!({ "result": result }))?;
                 }
                 "fail" => {
@@ -340,7 +370,9 @@ impl Agent {
                 }
                 "tool" => {
                     let (words, json_args) = take_words(&rest, 1);
-                    let name = words.first().ok_or_else(|| anyhow!("tool <name> <json-args>"))?;
+                    let name = words
+                        .first()
+                        .ok_or_else(|| anyhow!("tool <name> <json-args>"))?;
                     let args: Value = if json_args.is_empty() {
                         json!({})
                     } else {
@@ -367,7 +399,9 @@ impl Agent {
                 self.args.on_subtask.clone()
             }
             MessageType::Task => self.args.on_task.clone(),
-            MessageType::ReviewRequest if !self.args.on_review.is_empty() => self.args.on_review.clone(),
+            MessageType::ReviewRequest if !self.args.on_review.is_empty() => {
+                self.args.on_review.clone()
+            }
             _ => self.args.on_message.clone(),
         };
         if steps.is_empty() {
@@ -429,11 +463,17 @@ mod tests {
 
     #[test]
     fn step_parsing() {
-        assert_eq!(split_step("progress 50 half way"), ("progress".into(), "50 half way".into()));
+        assert_eq!(
+            split_step("progress 50 half way"),
+            ("progress".into(), "50 half way".into())
+        );
         assert_eq!(split_step("  done  "), ("done".into(), String::new()));
         assert_eq!(
             take_words("claude-5 question please add a column", 2),
-            (vec!["claude-5".into(), "question".into()], "please add a column".into())
+            (
+                vec!["claude-5".into(), "question".into()],
+                "please add a column".into()
+            )
         );
         assert_eq!(take_words("only", 2), (vec!["only".into()], String::new()));
         assert_eq!(take_words("", 1), (Vec::<String>::new(), String::new()));

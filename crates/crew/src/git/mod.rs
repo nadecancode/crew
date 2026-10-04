@@ -128,7 +128,10 @@ pub fn init_repo(dir: &Path) -> Result<()> {
         out(dir, &["init", "-q", "-b", "main"])?;
     }
     require_root(dir)?;
-    if run(dir, &["rev-parse", "--verify", "-q", "HEAD"])?.status.success() {
+    if run(dir, &["rev-parse", "--verify", "-q", "HEAD"])?
+        .status
+        .success()
+    {
         return Ok(());
     }
     let mut cmd = git(dir);
@@ -137,7 +140,10 @@ pub fn init_repo(dir: &Path) -> Result<()> {
         .args(["commit", "-q", "--allow-empty", "-m", "Initial commit"])
         .output()?;
     if !output.status.success() {
-        bail!("creating the initial commit failed: {}", text(&output.stderr));
+        bail!(
+            "creating the initial commit failed: {}",
+            text(&output.stderr)
+        );
     }
     Ok(())
 }
@@ -179,14 +185,24 @@ pub fn branch_for(agent: &str) -> String {
 pub fn branch_exists(repo: &Path, branch: &str) -> bool {
     run(
         repo,
-        &["show-ref", "--verify", "--quiet", &format!("refs/heads/{branch}")],
+        &[
+            "show-ref",
+            "--verify",
+            "--quiet",
+            &format!("refs/heads/{branch}"),
+        ],
     )
     .map(|o| o.status.success())
     .unwrap_or(false)
 }
 
 /// Create (or reuse) the worktree and branch for an agent.
-pub fn ensure_worktree(repo: &Path, worktrees_dir: &Path, agent: &str, base: &str) -> Result<Worktree> {
+pub fn ensure_worktree(
+    repo: &Path,
+    worktrees_dir: &Path,
+    agent: &str,
+    base: &str,
+) -> Result<Worktree> {
     if !is_valid_id(agent) && agent != INTEGRATION_DIR {
         bail!("invalid agent id '{agent}'");
     }
@@ -216,7 +232,10 @@ pub fn ensure_worktree(repo: &Path, worktrees_dir: &Path, agent: &str, base: &st
         out(repo, &["worktree", "add", "-q", &path_str, &branch])?;
     } else {
         validate_rev(base)?;
-        out(repo, &["worktree", "add", "-q", "-b", &branch, &path_str, base])?;
+        out(
+            repo,
+            &["worktree", "add", "-q", "-b", &branch, &path_str, base],
+        )?;
     }
     Ok(Worktree { path, branch })
 }
@@ -226,16 +245,14 @@ pub fn ensure_worktree(repo: &Path, worktrees_dir: &Path, agent: &str, base: &st
 /// revision can never be parsed as a git option.
 pub fn validate_rev(rev: &str) -> Result<()> {
     let is_sha = (7..=40).contains(&rev.len()) && rev.bytes().all(|b| b.is_ascii_hexdigit());
-    let is_agent_branch = rev
-        .strip_prefix(BRANCH_PREFIX)
-        .is_some_and(is_valid_id);
+    let is_agent_branch = rev.strip_prefix(BRANCH_PREFIX).is_some_and(is_valid_id);
     let is_plain_ref = !rev.is_empty()
         && rev.len() <= 100
         && !rev.starts_with('-')
         && !rev.contains("..")
-        && rev
-            .bytes()
-            .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'_' | b'-' | b'/' | b'.' | b'~' | b'^'));
+        && rev.bytes().all(|b| {
+            b.is_ascii_alphanumeric() || matches!(b, b'_' | b'-' | b'/' | b'.' | b'~' | b'^')
+        });
     if is_sha || is_agent_branch || is_plain_ref {
         Ok(())
     } else {
@@ -244,7 +261,10 @@ pub fn validate_rev(rev: &str) -> Result<()> {
 }
 
 fn commit_info(dir: &Path, rev: &str) -> Result<CommitInfo> {
-    let sha = out(dir, &["rev-parse", "--verify", &format!("{rev}^{{commit}}")])?;
+    let sha = out(
+        dir,
+        &["rev-parse", "--verify", &format!("{rev}^{{commit}}")],
+    )?;
     let summary = out(dir, &["log", "-1", "--format=%s", &sha])?;
     let branch = out(dir, &["rev-parse", "--abbrev-ref", "HEAD"]).unwrap_or_default();
     let files = out(dir, &["show", "--format=", "--name-only", &sha])?;
@@ -328,7 +348,12 @@ pub fn status(dir: &Path) -> Result<String> {
 
 fn conflicted_files(dir: &Path) -> Vec<String> {
     out(dir, &["diff", "--name-only", "--diff-filter=U"])
-        .map(|s| s.lines().map(str::to_string).filter(|l| !l.is_empty()).collect())
+        .map(|s| {
+            s.lines()
+                .map(str::to_string)
+                .filter(|l| !l.is_empty())
+                .collect()
+        })
         .unwrap_or_default()
 }
 
@@ -373,8 +398,11 @@ pub fn cherry_pick(dir: &Path, agent: &str, commit: &str) -> Result<GitOutcome> 
     if dirty(dir)? {
         bail!("the worktree has uncommitted changes; commit them before cherry-picking");
     }
-    out(dir, &["rev-parse", "--verify", &format!("{commit}^{{commit}}")])
-        .map_err(|_| anyhow!("unknown commit '{commit}'"))?;
+    out(
+        dir,
+        &["rev-parse", "--verify", &format!("{commit}^{{commit}}")],
+    )
+    .map_err(|_| anyhow!("unknown commit '{commit}'"))?;
     let mut cmd = git(dir);
     with_identity(&mut cmd, agent);
     let output = cmd.args(["cherry-pick", "-x", commit]).output()?;
@@ -388,8 +416,11 @@ pub fn merge(dir: &Path, agent: &str, rev: &str) -> Result<GitOutcome> {
     if dirty(dir)? {
         bail!("the worktree has uncommitted changes; commit them before merging");
     }
-    out(dir, &["rev-parse", "--verify", &format!("{rev}^{{commit}}")])
-        .map_err(|_| anyhow!("unknown revision '{rev}'"))?;
+    out(
+        dir,
+        &["rev-parse", "--verify", &format!("{rev}^{{commit}}")],
+    )
+    .map_err(|_| anyhow!("unknown revision '{rev}'"))?;
     let mut cmd = git(dir);
     with_identity(&mut cmd, agent);
     let message = format!("Merge {rev}");
@@ -479,7 +510,11 @@ mod tests {
         let outer = repo();
         let nested = outer.root.join("demo-workspace");
         std::fs::create_dir_all(&nested).unwrap();
-        write(&outer.root, "outer.txt", "belongs to the outer repository\n");
+        write(
+            &outer.root,
+            "outer.txt",
+            "belongs to the outer repository\n",
+        );
 
         // Inside a repository, but not the root of one.
         assert!(is_repo(&nested));
@@ -488,7 +523,10 @@ mod tests {
         // outer repository's files into an agent's commit.
         write(&nested, "agent.txt", "x\n");
         let err = commit_all(&nested, "claude-1", "oops").unwrap_err();
-        assert!(err.to_string().contains("not the root of a git work tree"), "{err}");
+        assert!(
+            err.to_string().contains("not the root of a git work tree"),
+            "{err}"
+        );
         assert!(ensure_worktree(&nested, &nested.join(".crew/worktrees"), "a", "HEAD").is_err());
         assert!(cherry_pick(&nested, "a", "abcdef1").is_err());
         assert!(status(&nested).is_err());
@@ -501,8 +539,13 @@ mod tests {
         assert_eq!(commit.files_changed, 1);
         // The outer repository did not gain a commit and still has its
         // untracked file.
-        assert_eq!(out(&outer.root, &["rev-parse", "HEAD"]).unwrap(), outer_head);
-        assert!(out(&outer.root, &["status", "--porcelain"]).unwrap().contains("outer.txt"));
+        assert_eq!(
+            out(&outer.root, &["rev-parse", "HEAD"]).unwrap(),
+            outer_head
+        );
+        assert!(out(&outer.root, &["status", "--porcelain"])
+            .unwrap()
+            .contains("outer.txt"));
         // A linked worktree is a root too.
         let wt = ensure_worktree(&nested, &nested.join(".crew/worktrees"), "a", "HEAD").unwrap();
         assert!(is_root(&wt.path));
@@ -605,7 +648,10 @@ mod tests {
         write(&c.path, "shared.txt", "c\n");
         commit_all(&c.path, "c", "c shared").unwrap();
 
-        let agents: Vec<String> = ["a", "b", "c", "idle"].iter().map(|s| s.to_string()).collect();
+        let agents: Vec<String> = ["a", "b", "c", "idle"]
+            .iter()
+            .map(|s| s.to_string())
+            .collect();
         let (wt, steps) = integrate(&r.root, &r.worktrees, "HEAD", &agents).unwrap();
         assert_eq!(wt.branch, INTEGRATION_BRANCH);
         assert_eq!(steps.len(), 3);

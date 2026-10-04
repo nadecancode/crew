@@ -57,7 +57,8 @@ const GATHER_MAX_MS: i64 = 5_000;
 /// when news may be what it waits for. A member mid-turn reads it in that
 /// turn, at no cost of its own.
 pub(crate) fn waits_for_company(to: &Agent, message: &Message, resting: bool) -> bool {
-    let news = message.kind == MessageType::Status && !CREW_SENDERS.contains(&message.from.as_str());
+    let news =
+        message.kind == MessageType::Status && !CREW_SENDERS.contains(&message.from.as_str());
     news && (to.orchestrator || (resting && to.status != AgentStatus::Waiting))
 }
 
@@ -177,7 +178,9 @@ impl Daemon {
         let sidecar = self.sidecar_socket(id);
         let (kind, route) = {
             let mut model = self.model();
-            let Some(agent) = model.agent(id).cloned() else { return };
+            let Some(agent) = model.agent(id).cloned() else {
+                return;
+            };
             let resting = !model.rt(id).turn_active;
             if !wakes(&agent, &pending, resting) {
                 // Only news: it rides along later.
@@ -195,7 +198,10 @@ impl Daemon {
             }
             // Claude Code's mod and pi's extension hold the socket open.
             let wants_socket = matches!(agent.runtime, RuntimeKind::Claude | RuntimeKind::Pi)
-                && model.local.get(id).is_some_and(|l| l.settings.socket_delivery);
+                && model
+                    .local
+                    .get(id)
+                    .is_some_and(|l| l.settings.socket_delivery);
             let rt = model.rt(id);
             let gone = agent.paused
                 // Parked at a usage limit: a prompt now would only fail again.
@@ -205,7 +211,11 @@ impl Daemon {
             let route = if gone {
                 Route::Hold(0)
             } else if let Some((conn, tx)) = listener {
-                if rt.in_flight.values().any(|sent| now - *sent > IN_FLIGHT_TIMEOUT_MS) {
+                if rt
+                    .in_flight
+                    .values()
+                    .any(|sent| now - *sent > IN_FLIGHT_TIMEOUT_MS)
+                {
                     rt.in_flight.clear();
                     Route::SocketStale(conn)
                 } else {
@@ -248,7 +258,9 @@ impl Daemon {
             if resting {
                 let given: Vec<String> = match &route {
                     Route::Socket(_, _, fresh) => fresh.iter().map(|m| m.id.clone()).collect(),
-                    Route::Terminal | Route::Queue(..) => pending.iter().map(|m| m.id.clone()).collect(),
+                    Route::Terminal | Route::Queue(..) => {
+                        pending.iter().map(|m| m.id.clone()).collect()
+                    }
                     _ => Vec::new(),
                 };
                 model.rt(id).turn_openers.extend(given);
@@ -444,7 +456,11 @@ impl Daemon {
         let _guard = lock.lock().await;
         if let (Some(socket), Some(agent)) = (self.sidecar_socket(id), self.agent(id)) {
             if let Some(thread) = &agent.session_id {
-                if self.queue(agent.runtime, &socket, thread, text).await.is_ok() {
+                if self
+                    .queue(agent.runtime, &socket, thread, text)
+                    .await
+                    .is_ok()
+                {
                     return true;
                 }
             }
@@ -491,21 +507,38 @@ mod tests {
 
     #[test]
     fn news_waits_for_company_unless_it_is_what_a_member_waits_for() {
-        let member = |status| Agent { status, ..agent("m") };
-        let orchestrator = Agent { orchestrator: true, ..agent("orchestrator") };
+        let member = |status| Agent {
+            status,
+            ..agent("m")
+        };
+        let orchestrator = Agent {
+            orchestrator: true,
+            ..agent("orchestrator")
+        };
         let news = message("lead", MessageType::Status);
         // The orchestrator: news always waits; crew's notices never do.
         assert!(waits_for_company(&orchestrator, &news, false));
-        assert!(!waits_for_company(&orchestrator, &message("scheduler", MessageType::Status), true));
+        assert!(!waits_for_company(
+            &orchestrator,
+            &message("scheduler", MessageType::Status),
+            true
+        ));
         // A member at rest: news waits, unless it said it is waiting.
         assert!(waits_for_company(&member(AgentStatus::Idle), &news, true));
-        assert!(!waits_for_company(&member(AgentStatus::Waiting), &news, true));
+        assert!(!waits_for_company(
+            &member(AgentStatus::Waiting),
+            &news,
+            true
+        ));
         // Mid-turn it is read in that turn.
-        assert!(!waits_for_company(&member(AgentStatus::Working), &news, false));
+        assert!(!waits_for_company(
+            &member(AgentStatus::Working),
+            &news,
+            false
+        ));
         // Anything else starts a turn.
         let asked = [news.clone(), message("lead", MessageType::Question)];
         assert!(wakes(&member(AgentStatus::Idle), &asked, true));
         assert!(!wakes(&member(AgentStatus::Idle), &asked[..1], true));
     }
-
 }

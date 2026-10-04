@@ -64,7 +64,12 @@ pub(crate) struct Out {
 /// The window among `quotas` that rules out `name` (a model's proper name,
 /// `Fable 5.1`) on `runtime` at `now`: a model's own weekly window
 /// (`week/Fable`), or one of the account's, used up and not reset yet.
-pub(crate) fn out_of(quotas: &[Quota], runtime: RuntimeKind, name: Option<&str>, now: i64) -> Option<Out> {
+pub(crate) fn out_of(
+    quotas: &[Quota],
+    runtime: RuntimeKind,
+    name: Option<&str>,
+    now: i64,
+) -> Option<Out> {
     let name = name.map(str::to_lowercase);
     quotas
         .iter()
@@ -74,7 +79,9 @@ pub(crate) fn out_of(quotas: &[Quota], runtime: RuntimeKind, name: Option<&str>,
             None => now - q.updated_at < UNDATED_MS,
         })
         .find(|q| match q.window.strip_prefix("week/") {
-            Some(family) => name.as_deref().is_some_and(|n| n.starts_with(&family.to_lowercase())),
+            Some(family) => name
+                .as_deref()
+                .is_some_and(|n| n.starts_with(&family.to_lowercase())),
             // A spend cap stops usage beyond the plan, not the plan's own.
             None => q.window != "spend",
         })
@@ -98,7 +105,11 @@ pub(crate) struct Candidate {
 /// through, best first, at most three: the same tier first (another
 /// family's, the model's own being the one that is out), then each tier
 /// down, the model's own family before the other; a stronger tier last.
-pub(crate) fn closest(candidates: &[Candidate], model: &Candidate, usable: impl Fn(&Candidate) -> bool) -> Vec<String> {
+pub(crate) fn closest(
+    candidates: &[Candidate],
+    model: &Candidate,
+    usable: impl Fn(&Candidate) -> bool,
+) -> Vec<String> {
     const TIERS: [&str; 4] = ["frontier", "strong", "balanced", "fast"];
     let rank = |tier: &str| TIERS.iter().position(|t| *t == tier).unwrap_or(TIERS.len());
     let home = rank(&model.tier);
@@ -108,13 +119,21 @@ pub(crate) fn closest(candidates: &[Candidate], model: &Candidate, usable: impl 
         .filter(|(_, c)| c.key != model.key && usable(c))
         .map(|(i, c)| {
             let tier = rank(&c.tier);
-            let distance = if tier >= home { tier - home } else { home - tier + TIERS.len() };
+            let distance = if tier >= home {
+                tier - home
+            } else {
+                home - tier + TIERS.len()
+            };
             let other_family = c.runtime != model.runtime && distance > 0;
             (distance, other_family, i, c)
         })
         .collect();
     scored.sort_by_key(|(distance, other, i, _)| (*distance, *other, *i));
-    scored.into_iter().take(3).map(|(.., c)| c.key.clone()).collect()
+    scored
+        .into_iter()
+        .take(3)
+        .map(|(.., c)| c.key.clone())
+        .collect()
 }
 
 /// A model to fall back to: its CLI, its name to start it with, its
@@ -144,19 +163,24 @@ impl Daemon {
         let agent = self.agent(id)?;
         agent.model.clone().or_else(|| {
             let first = self.model().rt(id).first_model.clone()?;
-            crate::models::Catalog::load().find(&first).map(|p| p.key.clone())
+            crate::models::Catalog::load()
+                .find(&first)
+                .map(|p| p.key.clone())
         })
     }
 
     /// Whether the work style names a fallback for the model `id` runs on.
     pub(crate) fn has_fallbacks(&self, id: &str) -> bool {
-        self.model_of(id).is_some_and(|model| !self.fallbacks_of(&model).is_empty())
+        self.model_of(id)
+            .is_some_and(|model| !self.fallbacks_of(&model).is_empty())
     }
 
     /// Whether the work style names a fallback for `model` that can be
     /// started now.
     pub(crate) async fn has_style_fallback(&self, model: &str, runtime: RuntimeKind) -> bool {
-        self.fallback_target(model, runtime, Some(model)).await.is_some()
+        self.fallback_target(model, runtime, Some(model))
+            .await
+            .is_some()
     }
 
     /// The work style's fallbacks for `model`, in order.
@@ -172,7 +196,11 @@ impl Daemon {
             return Vec::new();
         }
         let catalog = crate::models::Catalog::load();
-        let key = |m: &str| catalog.find(m).map_or_else(|| m.to_lowercase(), |p| p.key.to_lowercase());
+        let key = |m: &str| {
+            catalog
+                .find(m)
+                .map_or_else(|| m.to_lowercase(), |p| p.key.to_lowercase())
+        };
         let wanted = key(model);
         table
             .into_iter()
@@ -190,7 +218,12 @@ impl Daemon {
 
     /// The first of `home`'s fallbacks to go on now: one that can be
     /// started here, is not out itself, and is not `current`.
-    async fn fallback_target(&self, home: &str, home_runtime: RuntimeKind, current: Option<&str>) -> Option<Target> {
+    async fn fallback_target(
+        &self,
+        home: &str,
+        home_runtime: RuntimeKind,
+        current: Option<&str>,
+    ) -> Option<Target> {
         let chain = self.fallbacks_of(home);
         if chain.is_empty() {
             return None;
@@ -209,16 +242,24 @@ impl Daemon {
                         None => crate::models::Availability::runtime(runtime).is_ok(),
                     };
                     let model = profile.map_or(name.clone(), |p| p.key.clone());
-                    let id = profile.map(|p| p.id.as_str()).filter(|id| !id.is_empty()).unwrap_or(&model);
+                    let id = profile
+                        .map(|p| p.id.as_str())
+                        .filter(|id| !id.is_empty())
+                        .unwrap_or(&model);
                     let name = model_display_name(id);
-                    usable.then_some(Target { runtime, model, name })
+                    usable.then_some(Target {
+                        runtime,
+                        model,
+                        name,
+                    })
                 })
                 .collect::<Vec<_>>()
         })
         .await
         .ok()?;
         candidates.into_iter().find(|t| {
-            Some(t.model.to_lowercase()) != current && self.model_out(t.runtime, Some(&t.model)).is_none()
+            Some(t.model.to_lowercase()) != current
+                && self.model_out(t.runtime, Some(&t.model)).is_none()
         })
     }
 
@@ -239,18 +280,30 @@ impl Daemon {
     }
 
     async fn fall_back(&self, id: &str, running: Option<&str>, starting: Option<bool>) -> bool {
-        let Some(agent) = self.agent(id) else { return false };
+        let Some(agent) = self.agent(id) else {
+            return false;
+        };
         if agent.runtime == RuntimeKind::Shell {
             return false;
         }
-        let Some(current) = self.model_of(id) else { return false };
-        let Some(out) = self.model_out(agent.runtime, Some(&current)) else { return false };
+        let Some(current) = self.model_of(id) else {
+            return false;
+        };
+        let Some(out) = self.model_out(agent.runtime, Some(&current)) else {
+            return false;
+        };
         let home = self.model().local.get(id).and_then(|l| l.home.clone());
         let (home_runtime, home_model) = match &home {
-            Some(home) => (home.runtime, home.model.clone().unwrap_or_else(|| current.clone())),
+            Some(home) => (
+                home.runtime,
+                home.model.clone().unwrap_or_else(|| current.clone()),
+            ),
             None => (agent.runtime, current.clone()),
         };
-        let Some(target) = self.fallback_target(&home_model, home_runtime, Some(&current)).await else {
+        let Some(target) = self
+            .fallback_target(&home_model, home_runtime, Some(&current))
+            .await
+        else {
             return false;
         };
         let other_cli = target.runtime != agent.runtime;
@@ -346,7 +399,8 @@ impl Daemon {
                         spec.extra_args.clear();
                         spec.runtime = Some(target.runtime);
                         if let Some(team) = &team {
-                            local.settings = super::supervisor::agent_settings(team, &spec, agent.orchestrator);
+                            local.settings =
+                                super::supervisor::agent_settings(team, &spec, agent.orchestrator);
                         }
                         local.session_confirmed = false;
                     }
@@ -413,13 +467,21 @@ you left off; if you were in the middle of a step, check its state before repeat
 
     /// Why `model` (on `runtime`) cannot be started now and what to take
     /// instead, or `None` when it can.
-    pub(crate) async fn out_now(&self, runtime: RuntimeKind, model: Option<&str>) -> Option<(Out, Vec<String>)> {
+    pub(crate) async fn out_now(
+        &self,
+        runtime: RuntimeKind,
+        model: Option<&str>,
+    ) -> Option<(Out, Vec<String>)> {
         let out = self.model_out(runtime, model)?;
         let candidates = self.candidates().await;
         let quotas = self.model().quotas.clone();
         let now = now_ms();
         let free = |c: &Candidate| out_of(&quotas, c.runtime, Some(&c.name), now).is_none();
-        let key = model.map(|m| crate::models::Catalog::load().find(m).map_or(m.to_string(), |p| p.key.clone()));
+        let key = model.map(|m| {
+            crate::models::Catalog::load()
+                .find(m)
+                .map_or(m.to_string(), |p| p.key.clone())
+        });
         let substitutes = candidates
             .iter()
             .find(|c| Some(&c.key) == key.as_ref())
@@ -440,14 +502,22 @@ you left off; if you were in the middle of a step, check its state before repeat
         for runtime in [RuntimeKind::Claude, RuntimeKind::Codex, RuntimeKind::Pi] {
             let mut parts: Vec<String> = Vec::new();
             for q in quotas.iter().filter(|q| q.runtime == runtime) {
-                let mut part = format!("{} {:.0}%", crate::limits::window_label(&q.window), q.percent_used.max(0.0));
+                let mut part = format!(
+                    "{} {:.0}%",
+                    crate::limits::window_label(&q.window),
+                    q.percent_used.max(0.0)
+                );
                 if let Some(at) = q.resets_at.filter(|at| *at > now && q.percent_used >= 90.0) {
                     let _ = write!(part, " (resets {})", fmt_when(at, now));
                 }
                 parts.push(part);
             }
             if !parts.is_empty() {
-                windows.push(format!("{} {}", crate::models::runtime_label(runtime), parts.join(" · ")));
+                windows.push(format!(
+                    "{} {}",
+                    crate::models::runtime_label(runtime),
+                    parts.join(" · ")
+                ));
             }
         }
         let mut out = if windows.is_empty() {
@@ -472,13 +542,20 @@ take the first model after it:",
         );
         for (model, why) in used_up {
             let instead = closest(&candidates, model, free);
-            let resets = why.resets_at.map(|at| format!(", resets {}", fmt_when(at, now))).unwrap_or_default();
+            let resets = why
+                .resets_at
+                .map(|at| format!(", resets {}", fmt_when(at, now)))
+                .unwrap_or_default();
             let instead = if instead.is_empty() {
                 "nothing comparable is free".to_string()
             } else {
                 instead.join(", then ")
             };
-            let _ = write!(out, "\n- {} ({} used up{resets}): {instead}", model.key, why.window);
+            let _ = write!(
+                out,
+                "\n- {} ({} used up{resets}): {instead}",
+                model.key, why.window
+            );
         }
         out
     }
@@ -515,7 +592,13 @@ take the first model after it:",
             for id in &between_turns {
                 let home = away.iter().any(|(away, _)| away == id);
                 let runtime = self.agent(id).map(|a| a.runtime);
-                if !home && runtime.is_some_and(|r| quotas.iter().any(|q| q.runtime == r && q.percent_used >= 100.0)) {
+                if !home
+                    && runtime.is_some_and(|r| {
+                        quotas
+                            .iter()
+                            .any(|q| q.runtime == r && q.percent_used >= 100.0)
+                    })
+                {
                     self.fall_back_by_style(id, None, None).await;
                 }
             }
@@ -531,13 +614,24 @@ take the first model after it:",
                 continue;
             }
             let reset = home.resets_at.is_some_and(|at| now >= at + RESET_MARGIN_MS);
-            let read_since = quotas.iter().any(|q| q.runtime == home.runtime && q.updated_at > home.moved_at);
+            let read_since = quotas
+                .iter()
+                .any(|q| q.runtime == home.runtime && q.updated_at > home.moved_at);
             let waited = home.resets_at.is_none() && now >= home.moved_at + RETRY_HOME_MS;
-            if !(reset || read_since || waited) || self.model_out(home.runtime, home.model.as_deref()).is_some() {
+            if !(reset || read_since || waited)
+                || self
+                    .model_out(home.runtime, home.model.as_deref())
+                    .is_some()
+            {
                 continue;
             }
-            let Some(agent) = self.agent(&id) else { continue };
-            if agent.status.is_terminal() || agent.paused || !between_turns.contains(&id) && agent.limit.is_none() {
+            let Some(agent) = self.agent(&id) else {
+                continue;
+            };
+            if agent.status.is_terminal()
+                || agent.paused
+                || !between_turns.contains(&id) && agent.limit.is_none()
+            {
                 continue;
             }
             let on_task = crate::tasks::active_task(&self.model().tasks, &id).is_some();
@@ -551,13 +645,20 @@ take the first model after it:",
     async fn go_home(&self, agent: &crew_core::Agent, home: HomeModel) {
         let id = agent.id.as_str();
         let name = home.model.as_deref().map(Self::proper_name);
-        let shown = name.clone().unwrap_or_else(|| "its default model".to_string());
+        let shown = name
+            .clone()
+            .unwrap_or_else(|| "its default model".to_string());
         let reason = match &home.refused {
             Some(_) => "the work it refused is done".to_string(),
             None => format!("{} has reset", home.window),
         };
         self.emit(
-            NewEvent::new("daemon", "agent.model_restored", format!("{id} is back on {shown}: {reason}")).agent(id),
+            NewEvent::new(
+                "daemon",
+                "agent.model_restored",
+                format!("{id} is back on {shown}: {reason}"),
+            )
+            .agent(id),
         );
         {
             let mut m = self.model();
@@ -572,7 +673,15 @@ take the first model after it:",
                 None => format!("{reason}, so you are back on {shown}."),
             };
             let _ = self
-                .move_to_runtime(BY, agent, home.runtime, home.model.clone(), name, Some(note), false)
+                .move_to_runtime(
+                    BY,
+                    agent,
+                    home.runtime,
+                    home.model.clone(),
+                    name,
+                    Some(note),
+                    false,
+                )
                 .await;
         } else {
             self.update_agent(id, |a| {
@@ -591,7 +700,8 @@ state before repeating it."
             let _ = self.restart_agent_with(id, Some(notice)).await;
         }
         if !agent.orchestrator {
-            self.notify_orchestrator(&format!("[crew] Agent {id} is back on {shown}: {reason}.")).await;
+            self.notify_orchestrator(&format!("[crew] Agent {id} is back on {shown}: {reason}."))
+                .await;
         }
     }
 }
@@ -630,16 +740,31 @@ mod tests {
         ];
         let all = |_: &Candidate| true;
         // Fable out: Astra is as strong; Opus is the next tier of its own family.
-        assert_eq!(closest(&catalog, &catalog[0], all), ["gpt-6-astra", "opus", "sonnet"]);
+        assert_eq!(
+            closest(&catalog, &catalog[0], all),
+            ["gpt-6-astra", "opus", "sonnet"]
+        );
         // Codex out too: only Claude models are left.
-        assert_eq!(closest(&catalog, &catalog[0], |c| c.runtime == claude), ["opus", "sonnet", "haiku"]);
+        assert_eq!(
+            closest(&catalog, &catalog[0], |c| c.runtime == claude),
+            ["opus", "sonnet", "haiku"]
+        );
         // Astra out: Fable is as strong; Codex has no model of the next tier,
         // so Opus comes before Sol.
-        assert_eq!(closest(&catalog, &catalog[4], all), ["fable", "opus", "gpt-6.1-sol"]);
+        assert_eq!(
+            closest(&catalog, &catalog[4], all),
+            ["fable", "opus", "gpt-6.1-sol"]
+        );
         // Sonnet out: Sol is the same tier; nothing weaker beats something as strong.
-        assert_eq!(closest(&catalog, &catalog[2], all), ["gpt-6.1-sol", "haiku", "gpt-6-luna"]);
+        assert_eq!(
+            closest(&catalog, &catalog[2], all),
+            ["gpt-6.1-sol", "haiku", "gpt-6-luna"]
+        );
         // The fastest tier has nothing below: a stronger model, last.
-        assert_eq!(closest(&catalog, &catalog[3], |c| c.key != "gpt-6-luna"), ["sonnet", "gpt-6.1-sol", "opus"]);
+        assert_eq!(
+            closest(&catalog, &catalog[3], |c| c.key != "gpt-6-luna"),
+            ["sonnet", "gpt-6.1-sol", "opus"]
+        );
     }
 
     #[test]
@@ -655,17 +780,36 @@ mod tests {
         // Fable's own window rules Fable out, not Opus.
         assert_eq!(
             out_of(&quotas, claude, Some("Fable 5.1"), now),
-            Some(Out { window: "Fable week".into(), resets_at: Some(now + 5_000) })
+            Some(Out {
+                window: "Fable week".into(),
+                resets_at: Some(now + 5_000)
+            })
         );
         assert_eq!(out_of(&quotas, claude, Some("Opus 5.5"), now), None);
         // Codex's account window rules out every Codex model.
-        assert_eq!(out_of(&quotas, RuntimeKind::Codex, Some("GPT 6 Astra"), now).unwrap().window, "week");
+        assert_eq!(
+            out_of(&quotas, RuntimeKind::Codex, Some("GPT 6 Astra"), now)
+                .unwrap()
+                .window,
+            "week"
+        );
         // Once its reset time has passed, a reading at 100% no longer counts.
-        assert_eq!(out_of(&quotas, claude, Some("Fable 5.1"), now + 6_000), None);
+        assert_eq!(
+            out_of(&quotas, claude, Some("Fable 5.1"), now + 6_000),
+            None
+        );
         // An account window at its limit rules out every model of the CLI;
         // a spend cap does not.
-        let spent = vec![quota(claude, "spend", 100.0, None), quota(claude, "5h", 100.0, Some(now + 1))];
-        assert_eq!(out_of(&spent, claude, Some("Opus 5.5"), now).unwrap().window, "session");
+        let spent = vec![
+            quota(claude, "spend", 100.0, None),
+            quota(claude, "5h", 100.0, Some(now + 1)),
+        ];
+        assert_eq!(
+            out_of(&spent, claude, Some("Opus 5.5"), now)
+                .unwrap()
+                .window,
+            "session"
+        );
         assert_eq!(out_of(&spent[..1], claude, Some("Opus 5.5"), now), None);
         // A reading with no reset time counts for a while.
         let undated = vec![quota(claude, "week/Fable", 100.0, None)];

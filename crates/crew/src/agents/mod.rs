@@ -172,7 +172,10 @@ pub enum Signal {
         effort: Option<String>,
     },
     /// How full the session's context window is: tokens used, window size.
-    Context { tokens: u64, window: u64 },
+    Context {
+        tokens: u64,
+        window: u64,
+    },
     /// The session's context was compacted, by crew's request or by the
     /// runtime itself.
     Compacted,
@@ -252,8 +255,9 @@ pub fn runtime_for(kind: RuntimeKind) -> Arc<dyn AgentRuntime> {
 /// requires, and for typing a command into a herdr pane's shell.
 pub fn shell_quote(s: &str) -> String {
     if !s.is_empty()
-        && s.bytes()
-            .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'/' | b'.' | b'_' | b'-' | b'=' | b':' | b','))
+        && s.bytes().all(|b| {
+            b.is_ascii_alphanumeric() || matches!(b, b'/' | b'.' | b'_' | b'-' | b'=' | b':' | b',')
+        })
     {
         return s.to_string();
     }

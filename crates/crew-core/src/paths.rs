@@ -285,10 +285,16 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let sub = dir.path().join("a/b");
         ensure_private_dir(&sub).unwrap();
-        assert_eq!(fs::metadata(&sub).unwrap().permissions().mode() & 0o777, 0o700);
+        assert_eq!(
+            fs::metadata(&sub).unwrap().permissions().mode() & 0o777,
+            0o700
+        );
         let file = sub.join("identity.json");
         write_private_file(&file, b"{}").unwrap();
-        assert_eq!(fs::metadata(&file).unwrap().permissions().mode() & 0o777, 0o600);
+        assert_eq!(
+            fs::metadata(&file).unwrap().permissions().mode() & 0o777,
+            0o600
+        );
         write_private_file(&file, b"{\"a\":1}").unwrap();
         assert_eq!(fs::read_to_string(&file).unwrap(), "{\"a\":1}");
     }

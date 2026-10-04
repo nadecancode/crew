@@ -125,7 +125,9 @@ pub fn render(buf: &mut Buffer, area: Rect, app: &App, theme: &Theme, now: i64) 
             }
             Row::Task(task) => {
                 let who = assignee(task);
-                let who = who.as_deref().map(|id| (id, theme.name_color(&app.agents, id)));
+                let who = who
+                    .as_deref()
+                    .map(|id| (id, theme.name_color(&app.agents, id)));
                 task_row(buf, body, x, y, task, who, id_w, agent_w, theme, now)
             }
             Row::Note(task) => {

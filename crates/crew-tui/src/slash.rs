@@ -43,29 +43,64 @@ const fn command(
 
 /// Commands of the dashboard's message box.
 pub const DASHBOARD: &[SlashCommand] = &[
-    command("exit", &["quit", "q"], "", "leave the dashboard — the team keeps running"),
+    command(
+        "exit",
+        &["quit", "q"],
+        "",
+        "leave the dashboard — the team keeps running",
+    ),
     command(
         "stop",
         &["terminate", "shutdown"],
         "",
         "stop the team: every agent and the daemon (asks first)",
     ),
-    command("kill", &[], "[agent]", "stop one agent's process (asks first)"),
-    command("restart", &[], "[agent]", "restart an agent, resuming its session"),
+    command(
+        "kill",
+        &[],
+        "[agent]",
+        "stop one agent's process (asks first)",
+    ),
+    command(
+        "restart",
+        &[],
+        "[agent]",
+        "restart an agent, resuming its session",
+    ),
     command("pause", &[], "[agent]", "suspend an agent"),
     command("unpause", &[], "[agent]", "let a suspended agent continue"),
-    command("compact", &[], "[agent]", "compact an agent's context when its turn ends"),
+    command(
+        "compact",
+        &[],
+        "[agent]",
+        "compact an agent's context when its turn ends",
+    ),
     command(
         "model",
         &["cli", "harness"],
         "[agent]",
         "choose the model and CLI an agent runs on",
     ),
-    command("resume", &[], "", "continue the agents paused at a usage limit"),
-    command("answer", &["questions"], "", "answer the questions the team has for you"),
+    command(
+        "resume",
+        &[],
+        "",
+        "continue the agents paused at a usage limit",
+    ),
+    command(
+        "answer",
+        &["questions"],
+        "",
+        "answer the questions the team has for you",
+    ),
     command("tasks", &[], "", "show the task graph"),
     command("logs", &[], "", "show the event log"),
-    command("mouse", &[], "", "turn mouse clicks on or off (off: drag selects text)"),
+    command(
+        "mouse",
+        &[],
+        "",
+        "turn mouse clicks on or off (off: drag selects text)",
+    ),
     command("help", &["?"], "", "keys and commands"),
 ];
 
@@ -98,7 +133,10 @@ fn typing(text: &str) -> Option<&str> {
 /// Commands whose name starts with what was typed.
 fn candidates(commands: &'static [SlashCommand], word: &str) -> Vec<&'static SlashCommand> {
     let word = word.to_ascii_lowercase();
-    commands.iter().filter(|c| c.name.starts_with(&word)).collect()
+    commands
+        .iter()
+        .filter(|c| c.name.starts_with(&word))
+        .collect()
 }
 
 /// What Tab turns a partly typed command into: the first command it could
@@ -136,7 +174,11 @@ pub fn hint(commands: &'static [SlashCommand], text: &str) -> Option<String> {
     Some(match candidates(commands, word).as_slice() {
         [] => unknown(word),
         [only] => format!("{} · tab completes", describe(only)),
-        many => many.iter().map(|c| c.usage()).collect::<Vec<_>>().join(" · "),
+        many => many
+            .iter()
+            .map(|c| c.usage())
+            .collect::<Vec<_>>()
+            .join(" · "),
     })
 }
 
@@ -201,14 +243,21 @@ mod tests {
         assert_eq!(complete(DASHBOARD, "/resume").as_deref(), Some("/resume"));
         assert_eq!(complete(DASHBOARD, "/").as_deref(), Some("/exit"));
         assert_eq!(complete(DASHBOARD, "/zz"), None);
-        assert_eq!(complete(DASHBOARD, "/kill cl"), None, "arguments are not completed");
+        assert_eq!(
+            complete(DASHBOARD, "/kill cl"),
+            None,
+            "arguments are not completed"
+        );
         assert_eq!(complete(DASHBOARD, "hello"), None);
 
         assert_eq!(hint(DASHBOARD, "hello"), None);
         assert_eq!(hint(DASHBOARD, " /exit"), None);
         let all = hint(DASHBOARD, "/").unwrap();
         assert!(all.starts_with("/exit · /stop · /kill [agent]"), "{all}");
-        assert_eq!(hint(DASHBOARD, "/re").as_deref(), Some("/restart [agent] · /resume"));
+        assert_eq!(
+            hint(DASHBOARD, "/re").as_deref(),
+            Some("/restart [agent] · /resume")
+        );
         assert_eq!(
             hint(DASHBOARD, "/sto").as_deref(),
             Some("/stop  stop the team: every agent and the daemon (asks first) · tab completes")
@@ -221,8 +270,12 @@ mod tests {
             hint(DASHBOARD, "/kill claude-2").as_deref(),
             Some("/kill [agent]  stop one agent's process (asks first)")
         );
-        assert!(hint(DASHBOARD, "/clear").unwrap().starts_with("no command /clear"));
-        assert!(hint(DASHBOARD, "/clear now").unwrap().starts_with("no command /clear"));
+        assert!(hint(DASHBOARD, "/clear")
+            .unwrap()
+            .starts_with("no command /clear"));
+        assert!(hint(DASHBOARD, "/clear now")
+            .unwrap()
+            .starts_with("no command /clear"));
     }
 
     #[test]

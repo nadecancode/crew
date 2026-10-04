@@ -29,7 +29,8 @@ impl Daemon {
     ) -> Result<Arc<dyn ProcessManager>> {
         match backend {
             "herdr" => {
-                let socket = herdr_socket.ok_or_else(|| anyhow!("the herdr socket path is unknown"))?;
+                let socket =
+                    herdr_socket.ok_or_else(|| anyhow!("the herdr socket path is unknown"))?;
                 let label = team
                     .herdr
                     .workspace_label
@@ -53,7 +54,9 @@ impl Daemon {
         config: TeamConfig,
         herdr_socket: Option<String>,
     ) -> Result<(), RpcError> {
-        config.validate().map_err(|e| RpcError::invalid(e.to_string()))?;
+        config
+            .validate()
+            .map_err(|e| RpcError::invalid(e.to_string()))?;
 
         // One team per workspace at a time.
         {
@@ -80,14 +83,15 @@ impl Daemon {
         let workspace = self.workspace.clone();
         let wanted = config.workspace.isolation;
         let init = config.workspace.init;
-        let (worktrees, note) = tokio::task::spawn_blocking(move || -> Result<(bool, Option<String>)> {
-            // The workspace must be the root of its own repository; sitting
-            // inside some other repository does not count.
-            if init && !(git::is_root(&workspace) && git::has_commits(&workspace)) {
-                git::init_repo(&workspace)?;
-            }
-            let usable = git::is_root(&workspace) && git::has_commits(&workspace);
-            let result = match wanted {
+        let (worktrees, note) =
+            tokio::task::spawn_blocking(move || -> Result<(bool, Option<String>)> {
+                // The workspace must be the root of its own repository; sitting
+                // inside some other repository does not count.
+                if init && !(git::is_root(&workspace) && git::has_commits(&workspace)) {
+                    git::init_repo(&workspace)?;
+                }
+                let usable = git::is_root(&workspace) && git::has_commits(&workspace);
+                let result = match wanted {
                 Isolation::Shared => (false, None),
                 Isolation::Worktree if usable => (true, None),
                 Isolation::Worktree => bail!(
@@ -104,14 +108,14 @@ share it without isolation"
                     ),
                 ),
             };
-            if result.0 {
-                git::exclude_state_dir(&workspace)?;
-            }
-            Ok(result)
-        })
-        .await
-        .map_err(internal)?
-        .map_err(|e| RpcError::invalid(format!("{e:#}")))?;
+                if result.0 {
+                    git::exclude_state_dir(&workspace)?;
+                }
+                Ok(result)
+            })
+            .await
+            .map_err(internal)?
+            .map_err(|e| RpcError::invalid(format!("{e:#}")))?;
 
         // Process backend.
         let herdr_socket = herdr_socket.filter(|s| !s.is_empty());
@@ -124,7 +128,9 @@ share it without isolation"
                     )
                 })?;
                 if !herdr::reachable(Path::new(socket)).await {
-                    return Err(RpcError::unavailable(format!("herdr is not reachable at {socket}")));
+                    return Err(RpcError::unavailable(format!(
+                        "herdr is not reachable at {socket}"
+                    )));
                 }
                 "herdr"
             }
@@ -209,7 +215,14 @@ share it without isolation"
         let ids = tokio::task::spawn_blocking(move || -> Result<Vec<String>> {
             let mut ids = Vec::new();
             for (spec, orchestrator) in &specs {
-                let agent = daemon.create_agent(spec, &team, *orchestrator, worktrees, &backend_name, None)?;
+                let agent = daemon.create_agent(
+                    spec,
+                    &team,
+                    *orchestrator,
+                    worktrees,
+                    &backend_name,
+                    None,
+                )?;
                 ids.push(agent.id);
             }
             Ok(ids)

@@ -123,7 +123,12 @@ fn main() {
         "stop" => app.modal = Some(Modal::ConfirmStop),
         "context" => {
             // How full each context window is, shown in the boxes.
-            let fills = [(350_000, 1_000_000), (164_000, 200_000), (12_000, 258_400), (930_000, 1_000_000)];
+            let fills = [
+                (350_000, 1_000_000),
+                (164_000, 200_000),
+                (12_000, 258_400),
+                (930_000, 1_000_000),
+            ];
             for (agent, (tokens, window)) in app.agents.iter_mut().zip(fills.into_iter().cycle()) {
                 agent.context = Some(crew_core::types::ContextUsage::new(tokens, window, at));
             }
@@ -160,15 +165,17 @@ fn launcher_frame(width: u16, height: u16) -> String {
         "built-in",
         "Investigate a question. Gather evidence, cross-check it, write up findings.",
     );
-    research
-        .details
-        .push(("last time".into(), "3 member(s): scout, skeptic, writer".into()));
-    research.instructions = "This is a research team. The deliverable is knowledge, written down: not code.\n\n\
+    research.details.push((
+        "last time".into(),
+        "3 member(s): scout, skeptic, writer".into(),
+    ));
+    research.instructions =
+        "This is a research team. The deliverable is knowledge, written down: not code.\n\n\
 Ground rules for every member:\n\
 - Every claim in a deliverable says where it comes from: a file and line, a URL, a paper, \
 or the command you ran and its output.\n\
 - Look for evidence against your current answer, not only for it."
-        .into();
+            .into();
     let mut l = Launcher::new(
         "/work/payments",
         vec![

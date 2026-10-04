@@ -21,9 +21,9 @@
 //! that work is done. Without one, the agent is set aside as blocked and
 //! those waiting on it are told.
 
+use crew_core::rpc::RpcError;
 use crew_core::types::{model_display_name, ModelFallback};
 use crew_core::util::{now_ms, truncate_chars};
-use crew_core::rpc::RpcError;
 use crew_core::{Agent, AgentStatus, MessageType, RuntimeKind, OPERATOR_ID};
 
 use super::policy::HomeModel;
@@ -79,7 +79,11 @@ fn pick_stand(
                 Ok(()) => Stand {
                     runtime: profile.runtime.unwrap_or(RuntimeKind::Claude),
                     model: profile.key.clone(),
-                    name: model_display_name(if profile.id.is_empty() { &profile.key } else { &profile.id }),
+                    name: model_display_name(if profile.id.is_empty() {
+                        &profile.key
+                    } else {
+                        &profile.id
+                    }),
                 },
                 Err(why) => {
                     passed.push(format!("{wanted}: {why}"));
@@ -96,7 +100,10 @@ fn pick_stand(
                 };
                 let found = listed.iter().find(|m| {
                     m.eq_ignore_ascii_case(wanted)
-                        || (!wanted.contains('/') && m.rsplit('/').next().is_some_and(|name| name.eq_ignore_ascii_case(wanted)))
+                        || (!wanted.contains('/')
+                            && m.rsplit('/')
+                                .next()
+                                .is_some_and(|name| name.eq_ignore_ascii_case(wanted)))
                 });
                 let Some(model) = found else {
                     passed.push(format!("{wanted}: not among the models pi lists"));
@@ -164,13 +171,22 @@ impl Daemon {
             (rt.turn_failure.take(), rt.declined.take())
         };
         let Some(agent) = self.agent(id) else { return };
-        if agent.runtime == RuntimeKind::Shell || agent.status.is_terminal() || agent.limit.is_some() {
+        if agent.runtime == RuntimeKind::Shell
+            || agent.status.is_terminal()
+            || agent.limit.is_some()
+        {
             return;
         }
         // The runtime writes the turn's end just after it says so.
         tokio::time::sleep(std::time::Duration::from_millis(500)).await;
-        let transcript = self.agent_transcript(id, 80).await.ok().filter(|t| t.available);
-        let turn = transcript.as_ref().and_then(|t| crate::transcript::last_turn(&t.entries));
+        let transcript = self
+            .agent_transcript(id, 80)
+            .await
+            .ok()
+            .filter(|t| t.available);
+        let turn = transcript
+            .as_ref()
+            .and_then(|t| crate::transcript::last_turn(&t.entries));
         let input = turn.as_ref().map(|t| t.input.clone()).unwrap_or_default();
         let notice = failure
             .and_then(|text| crate::transcript::runtime_refusal(&text).map(|kind| (kind, text)))
@@ -179,7 +195,11 @@ impl Daemon {
                 crate::transcript::runtime_refusal(reply).map(|kind| (kind, reply.clone()))
             });
         if let Some((kind, message)) = notice {
-            let seen = format!("{:?} {}", turn.as_ref().and_then(|t| t.reply_at), truncate_chars(&message, 120));
+            let seen = format!(
+                "{:?} {}",
+                turn.as_ref().and_then(|t| t.reply_at),
+                truncate_chars(&message, 120)
+            );
             {
                 let mut model = self.model();
                 let rt = model.rt(id);
@@ -209,7 +229,11 @@ impl Daemon {
         }
         if let Some((_, given)) = follow_up.as_ref().filter(|(sent, _)| asked.contains(sent)) {
             let said = truncate_chars(crew_core::util::one_line(&turn.reply).trim(), 400);
-            let said = if said.is_empty() { "(nothing)".to_string() } else { said };
+            let said = if said.is_empty() {
+                "(nothing)".to_string()
+            } else {
+                said
+            };
             self.turn_refused(&agent, "declined", &said, given).await;
             return;
         }
@@ -222,7 +246,10 @@ impl Daemon {
         if wanted.is_empty() {
             return;
         }
-        let list: Vec<String> = wanted.iter().map(|m| format!("{} from {} ({})", m.kind, m.from, m.id)).collect();
+        let list: Vec<String> = wanted
+            .iter()
+            .map(|m| format!("{} from {} ({})", m.kind, m.from, m.id))
+            .collect();
         let text = format!(
             "[crew] Your last turn ended without a tool call, so nothing came of it: a reply reaches \
 only whoever asked a question or sent a message. You were given {}. Do it, or answer with agent_send; if something \
@@ -231,14 +258,20 @@ you, agent_status(\"idle\", \"nothing to do\"). If you will not do it because it
 guidelines or usage policies, call decline(reason), and crew hands it to another model.",
             list.join(", ")
         );
-        match self.send_notice(NewMessage::new("scheduler", id, MessageType::Status, text)).await {
+        match self
+            .send_notice(NewMessage::new("scheduler", id, MessageType::Status, text))
+            .await
+        {
             Ok(sent) => {
                 self.model().rt(id).follow_up = Some((sent, turn.input.clone()));
                 self.emit(
                     NewEvent::new(
                         "daemon",
                         "agent.unanswered",
-                        format!("{id}'s turn ended without a tool call after {}; asked again", list.join(", ")),
+                        format!(
+                            "{id}'s turn ended without a tool call after {}; asked again",
+                            list.join(", ")
+                        ),
                     )
                     .agent(id),
                 );
@@ -253,13 +286,24 @@ guidelines or usage policies, call decline(reason), and crew hands it to another
     /// turn), and each `@name:` part to that teammate, as a message. An
     /// answer asks for nothing, so a reply to one goes nowhere, and no two
     /// agents keep each other busy. Says whether anything went.
-    async fn forward_reply(&self, agent: &Agent, turn: &crate::transcript::LastTurn, openers: &[String]) -> bool {
+    async fn forward_reply(
+        &self,
+        agent: &Agent,
+        turn: &crate::transcript::LastTurn,
+        openers: &[String],
+    ) -> bool {
         let id = agent.id.as_str();
         let reply = turn.final_reply.trim();
         if reply.is_empty() {
             return false;
         }
-        let mut names: Vec<String> = self.model().agents.iter().filter(|a| a.id != id).map(|a| a.id.clone()).collect();
+        let mut names: Vec<String> = self
+            .model()
+            .agents
+            .iter()
+            .filter(|a| a.id != id)
+            .map(|a| a.id.clone())
+            .collect();
         names.push(OPERATOR_ID.to_string());
         let names: Vec<&str> = names.iter().map(String::as_str).collect();
         let (lead, parts) = crate::transcript::addressed(reply, &names);
@@ -267,23 +311,41 @@ guidelines or usage policies, call decline(reason), and crew hands it to another
         // The questions and messages that started the turn, newest last.
         let opened: Vec<&crew_core::Message> = history
             .iter()
-            .filter(|m| openers.contains(&m.id) && m.to == id && m.from != id && m.from != "scheduler")
+            .filter(|m| {
+                openers.contains(&m.id) && m.to == id && m.from != id && m.from != "scheduler"
+            })
             .filter(|m| matches!(m.kind, MessageType::Question | MessageType::Message))
             .collect();
         let first_asked = opened.iter().map(|m| m.timestamp).min().unwrap_or(i64::MAX);
         // It wrote to them itself during the turn: that is its answer.
         let wrote_to = |to: &str| {
             history.iter().any(|m| {
-                m.from == id && m.to == to && m.timestamp >= first_asked && m.metadata.get("via").is_none()
+                m.from == id
+                    && m.to == to
+                    && m.timestamp >= first_asked
+                    && m.metadata.get("via").is_none()
             })
         };
-        let asked_by = |to: &str| opened.iter().rev().find(|m| m.from == to).map(|m| m.id.clone());
+        let asked_by = |to: &str| {
+            opened
+                .iter()
+                .rev()
+                .find(|m| m.from == to)
+                .map(|m| m.id.clone())
+        };
         let mut sent = false;
         let mut answered: Vec<String> = Vec::new();
         for (to, text) in parts {
             let reply_to = asked_by(&to);
-            let (kind, via) = if reply_to.is_some() { (MessageType::Answer, "reply") } else { (MessageType::Message, "mention") };
-            if self.forward(id, &to, kind, &text, reply_to, via, &history).await {
+            let (kind, via) = if reply_to.is_some() {
+                (MessageType::Answer, "reply")
+            } else {
+                (MessageType::Message, "mention")
+            };
+            if self
+                .forward(id, &to, kind, &text, reply_to, via, &history)
+                .await
+            {
                 sent = true;
             }
             answered.push(to);
@@ -299,7 +361,18 @@ guidelines or usage policies, call decline(reason), and crew hands it to another
                 if answered.iter().any(|a| a == to) || wrote_to(to) {
                     continue;
                 }
-                if self.forward(id, to, MessageType::Answer, &lead, asked_by(to), "reply", &history).await {
+                if self
+                    .forward(
+                        id,
+                        to,
+                        MessageType::Answer,
+                        &lead,
+                        asked_by(to),
+                        "reply",
+                        &history,
+                    )
+                    .await
+                {
                     sent = true;
                 }
             }
@@ -324,14 +397,21 @@ guidelines or usage policies, call decline(reason), and crew hands it to another
         let now = crew_core::util::now_ms();
         let recent = history
             .iter()
-            .filter(|m| m.from == from && m.to == to && m.metadata.get("via").is_some() && now - m.timestamp < CARRIED_WINDOW_MS)
+            .filter(|m| {
+                m.from == from
+                    && m.to == to
+                    && m.metadata.get("via").is_some()
+                    && now - m.timestamp < CARRIED_WINDOW_MS
+            })
             .count();
         if recent >= CARRIED_PER_PAIR {
             self.emit(
                 NewEvent::new(
                     "bus",
                     "message.held",
-                    format!("{from} → {to}: not carried over, {recent} carried in the last 10 minutes"),
+                    format!(
+                        "{from} → {to}: not carried over, {recent} carried in the last 10 minutes"
+                    ),
                 )
                 .agent(from)
                 .warn(),
@@ -363,7 +443,10 @@ guidelines or usage policies, call decline(reason), and crew hands it to another
             .filter(|m| {
                 matches!(
                     m.kind,
-                    MessageType::Task | MessageType::Question | MessageType::ReviewRequest | MessageType::Message
+                    MessageType::Task
+                        | MessageType::Question
+                        | MessageType::ReviewRequest
+                        | MessageType::Message
                 )
             })
             .collect()
@@ -375,7 +458,9 @@ guidelines or usage policies, call decline(reason), and crew hands it to another
     pub(crate) async fn codex_turn_seen(&self, id: &str, end: CodexTurnEnd) {
         let (agent, unnoticed) = {
             let mut model = self.model();
-            let Some(agent) = model.agent(id).cloned() else { return };
+            let Some(agent) = model.agent(id).cloned() else {
+                return;
+            };
             let local = model.local.entry(id.to_string()).or_default();
             if local.codex_turn.as_deref() == Some(end.turn_id.as_str()) {
                 return;
@@ -391,7 +476,12 @@ guidelines or usage policies, call decline(reason), and crew hands it to another
         self.save_local(id);
         // A usage limit is read from the screen and waited out; parked, the
         // agent is that machinery's.
-        if agent.limit.is_some() || end.error.as_ref().is_some_and(|(kind, _)| kind == "usage_limit_exceeded") {
+        if agent.limit.is_some()
+            || end
+                .error
+                .as_ref()
+                .is_some_and(|(kind, _)| kind == "usage_limit_exceeded")
+        {
             return;
         }
         if unnoticed {
@@ -413,7 +503,9 @@ guidelines or usage policies, call decline(reason), and crew hands it to another
     /// given, so as not to wait for an answer.
     async fn turn_refused(&self, agent: &Agent, kind: &str, message: &str, input: &[String]) {
         let id = agent.id.as_str();
-        let model = agent.model_label().unwrap_or_else(|| agent.runtime.to_string());
+        let model = agent
+            .model_label()
+            .unwrap_or_else(|| agent.runtime.to_string());
         let why = refused_for(kind);
         let said = if kind == "declined" {
             "It answered".to_string()
@@ -429,7 +521,10 @@ guidelines or usage policies, call decline(reason), and crew hands it to another
             .agent(id)
             .warn(),
         );
-        let passed = match self.refusal_fallback(agent, kind, &why, &model, input).await {
+        let passed = match self
+            .refusal_fallback(agent, kind, &why, &model, input)
+            .await
+        {
             Ok(()) => return,
             Err(passed) => passed,
         };
@@ -440,7 +535,11 @@ guidelines or usage policies, call decline(reason), and crew hands it to another
                 a.activity = format!("{model} refused the turn ({kind})");
             }
         });
-        self.mirror_status_to_task(id, AgentStatus::Blocked, Some(format!("{model} refused it: {why}")));
+        self.mirror_status_to_task(
+            id,
+            AgentStatus::Blocked,
+            Some(format!("{model} refused it: {why}")),
+        );
         let orchestrator = self.model().orchestrator().map(|a| a.id.clone());
         let senders: Vec<(String, String)> = input
             .iter()
@@ -461,13 +560,19 @@ guidelines or usage policies, call decline(reason), and crew hands it to another
             let about = if senders.is_empty() {
                 String::new()
             } else {
-                let list: Vec<String> = senders.iter().map(|(from, msg)| format!("{msg} from {from}")).collect();
+                let list: Vec<String> = senders
+                    .iter()
+                    .map(|(from, msg)| format!("{msg} from {from}"))
+                    .collect();
                 format!(" It was given {} (they have been told).", list.join(", "))
             };
             let none = if passed.is_empty() {
                 String::new()
             } else {
-                format!(" None of the work style's refusal fallbacks could take it over ({}).", passed.join("; "))
+                format!(
+                    " None of the work style's refusal fallbacks could take it over ({}).",
+                    passed.join("; ")
+                )
             };
             self.notify_orchestrator(&format!(
                 "{id}'s model ({model}) refused its turn: {why}. {said}: \"{message}\".{about}{none} The same \
@@ -504,7 +609,14 @@ again. {told_whom}"
     /// Move `agent` to the first of the work style's refusal fallbacks that
     /// can be started, handed what was refused. `Err`: why none took it over
     /// (empty when the style names none).
-    async fn refusal_fallback(&self, agent: &Agent, kind: &str, why: &str, model: &str, input: &[String]) -> Result<(), Vec<String>> {
+    async fn refusal_fallback(
+        &self,
+        agent: &Agent,
+        kind: &str,
+        why: &str,
+        model: &str,
+        input: &[String],
+    ) -> Result<(), Vec<String>> {
         let id = agent.id.as_str();
         // The orchestrator's model is the operator's to change.
         if agent.orchestrator || agent.runtime == RuntimeKind::Shell {
@@ -512,7 +624,12 @@ again. {told_whom}"
         }
         let (chain, home, refusals) = {
             let mut m = self.model();
-            let chain = m.session.team.as_ref().map(|t| t.defaults.refusal_fallbacks.clone()).unwrap_or_default();
+            let chain = m
+                .session
+                .team
+                .as_ref()
+                .map(|t| t.defaults.refusal_fallbacks.clone())
+                .unwrap_or_default();
             let local = m.local.entry(id.to_string()).or_default();
             local.refusals += 1;
             (chain, local.home.clone(), local.refusals)
@@ -542,7 +659,9 @@ again. {told_whom}"
             Some(home) => (home.runtime, home.model.clone()),
             None => (agent.runtime, agent.model.clone()),
         };
-        let home_name = home_model.as_deref().map_or_else(|| model.to_string(), Self::proper_name);
+        let home_name = home_model
+            .as_deref()
+            .map_or_else(|| model.to_string(), Self::proper_name);
         let until = if refusals >= STAY_AFTER {
             format!("it stays there, as its own model has refused {refusals} turns")
         } else {
@@ -561,14 +680,25 @@ given, below, and answer whoever sent it as {id}.\n\n{given}"
             NewEvent::new(
                 "daemon",
                 "agent.model_policy",
-                format!("{id} moves from {model} to {}: {model} refused a turn ({kind}); {until}", stand.name),
+                format!(
+                    "{id} moves from {model} to {}: {model} refused a turn ({kind}); {until}",
+                    stand.name
+                ),
             )
             .agent(id),
         );
         if stand.runtime != agent.runtime {
-            self.move_to_runtime(BY, agent, stand.runtime, Some(stand.model.clone()), Some(stand.name.clone()), Some(note), false)
-                .await
-                .map_err(|e| vec![e.message])?;
+            self.move_to_runtime(
+                BY,
+                agent,
+                stand.runtime,
+                Some(stand.model.clone()),
+                Some(stand.name.clone()),
+                Some(note),
+                false,
+            )
+            .await
+            .map_err(|e| vec![e.message])?;
         } else {
             // Within its CLI the session resumes, the refused turn included.
             self.update_agent(id, |a| {
@@ -583,7 +713,9 @@ given, below, and answer whoever sent it as {id}.\n\n{given}"
 that turn's work now.",
                 stand.name
             );
-            self.restart_agent_with(id, Some(notice)).await.map_err(|e| vec![e.message])?;
+            self.restart_agent_with(id, Some(notice))
+                .await
+                .map_err(|e| vec![e.message])?;
         }
         {
             let mut m = self.model();
@@ -623,8 +755,14 @@ for that part, handed what was refused; {until}. Nothing needs deciding.",
     /// since, with no task under way and nothing on its way to it. One whose
     /// own model refused again and again stays.
     pub(crate) fn refused_work_done(&self, id: &str, home: &HomeModel, now: i64) -> bool {
-        let Some(agent) = self.agent(id) else { return false };
-        if agent.status.is_terminal() || agent.paused || agent.limit.is_some() || agent.status == AgentStatus::Spawning {
+        let Some(agent) = self.agent(id) else {
+            return false;
+        };
+        if agent.status.is_terminal()
+            || agent.paused
+            || agent.limit.is_some()
+            || agent.status == AgentStatus::Spawning
+        {
             return false;
         }
         let (rested, refusals, on_task) = {
@@ -632,14 +770,21 @@ for that part, handed what was refused; {until}. Nothing needs deciding.",
             let refusals = m.local.get(id).map_or(0, |l| l.refusals);
             let on_task = crate::tasks::active_task(&m.tasks, id).is_some();
             let rt = m.rt(id);
-            let rested = !rt.turn_active && rt.turn_ended_at > home.moved_at && now - rt.turn_ended_at >= RESTED_MS;
+            let rested = !rt.turn_active
+                && rt.turn_ended_at > home.moved_at
+                && now - rt.turn_ended_at >= RESTED_MS;
             (rested, refusals, on_task)
         };
         rested
             && !on_task
             && refusals < STAY_AFTER
-            && self.bus.undelivered(id).is_ok_and(|pending| pending.is_empty())
-            && self.model_out(home.runtime, home.model.as_deref()).is_none()
+            && self
+                .bus
+                .undelivered(id)
+                .is_ok_and(|pending| pending.is_empty())
+            && self
+                .model_out(home.runtime, home.model.as_deref())
+                .is_none()
     }
 }
 
@@ -650,31 +795,97 @@ mod tests {
     #[test]
     fn content_filters_refuse_and_other_errors_fail() {
         assert!(is_refusal("cyber_policy"));
-        for kind in ["server_overloaded", "usage_limit_exceeded", "unauthorized", "other", ""] {
+        for kind in [
+            "server_overloaded",
+            "usage_limit_exceeded",
+            "unauthorized",
+            "other",
+            "",
+        ] {
             assert!(!is_refusal(kind), "{kind}");
         }
-        assert_eq!(refused_for("cyber_policy"), "it was flagged for possible cybersecurity risk");
+        assert_eq!(
+            refused_for("cyber_policy"),
+            "it was flagged for possible cybersecurity risk"
+        );
     }
 
     #[test]
     fn a_refused_turn_goes_to_the_first_fallback_that_can_be_started() {
         let catalog = Catalog::built_in();
         let chain = |names: &[&str]| names.iter().map(|n| n.to_string()).collect::<Vec<_>>();
-        let pi: Result<Vec<String>, String> = Ok(chain(&["zai/glm-5.3", "openrouter/deepseek/deepseek-v4-flash"]));
+        let pi: Result<Vec<String>, String> = Ok(chain(&[
+            "zai/glm-5.3",
+            "openrouter/deepseek/deepseek-v4-flash",
+        ]));
         let anything = |_: &ModelProfile| Ok(());
         // A pi model by its name under whichever provider pi has it...
-        let stand = pick_stand(&chain(&["deepseek-v4-pro", "glm-5.3"]), "gpt-6-astra", &catalog, anything, &pi).unwrap();
-        assert_eq!(stand, Stand { runtime: RuntimeKind::Pi, model: "zai/glm-5.3".into(), name: "GLM 5.3".into() });
+        let stand = pick_stand(
+            &chain(&["deepseek-v4-pro", "glm-5.3"]),
+            "gpt-6-astra",
+            &catalog,
+            anything,
+            &pi,
+        )
+        .unwrap();
+        assert_eq!(
+            stand,
+            Stand {
+                runtime: RuntimeKind::Pi,
+                model: "zai/glm-5.3".into(),
+                name: "GLM 5.3".into()
+            }
+        );
         // ...or as pi names it; a provider-qualified name must match whole.
-        let stand = pick_stand(&chain(&["openrouter/deepseek/deepseek-v4-flash"]), "", &catalog, anything, &pi).unwrap();
-        assert_eq!((stand.model.as_str(), stand.name.as_str()), ("openrouter/deepseek/deepseek-v4-flash", "DeepSeek V4 Flash"));
-        assert!(pick_stand(&chain(&["deepseek/deepseek-v4-flash"]), "", &catalog, anything, &pi).is_err());
+        let stand = pick_stand(
+            &chain(&["openrouter/deepseek/deepseek-v4-flash"]),
+            "",
+            &catalog,
+            anything,
+            &pi,
+        )
+        .unwrap();
+        assert_eq!(
+            (stand.model.as_str(), stand.name.as_str()),
+            ("openrouter/deepseek/deepseek-v4-flash", "DeepSeek V4 Flash")
+        );
+        assert!(pick_stand(
+            &chain(&["deepseek/deepseek-v4-flash"]),
+            "",
+            &catalog,
+            anything,
+            &pi
+        )
+        .is_err());
         // A catalog model runs on its own CLI.
         let stand = pick_stand(&chain(&["opus"]), "gpt-6-astra", &catalog, anything, &pi).unwrap();
-        assert_eq!((stand.runtime, stand.model.as_str()), (RuntimeKind::Claude, "opus"));
+        assert_eq!(
+            (stand.runtime, stand.model.as_str()),
+            (RuntimeKind::Claude, "opus")
+        );
         // What cannot be started, or is the model that refused, is passed over, with why.
-        let no_claude = |p: &ModelProfile| if p.runtime == Some(RuntimeKind::Claude) { Err("`claude` is not on PATH".to_string()) } else { Ok(()) };
-        let passed = pick_stand(&chain(&["opus", "gpt-6-astra", "glm-5.3"]), "gpt-6-astra", &catalog, no_claude, &Err("pi is not installed".into())).unwrap_err();
-        assert_eq!(passed, ["opus: `claude` is not on PATH", "gpt-6-astra: the model that refused", "glm-5.3: pi is not installed"]);
+        let no_claude = |p: &ModelProfile| {
+            if p.runtime == Some(RuntimeKind::Claude) {
+                Err("`claude` is not on PATH".to_string())
+            } else {
+                Ok(())
+            }
+        };
+        let passed = pick_stand(
+            &chain(&["opus", "gpt-6-astra", "glm-5.3"]),
+            "gpt-6-astra",
+            &catalog,
+            no_claude,
+            &Err("pi is not installed".into()),
+        )
+        .unwrap_err();
+        assert_eq!(
+            passed,
+            [
+                "opus: `claude` is not on PATH",
+                "gpt-6-astra: the model that refused",
+                "glm-5.3: pi is not installed"
+            ]
+        );
     }
 }

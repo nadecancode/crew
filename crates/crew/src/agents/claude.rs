@@ -74,8 +74,14 @@ fn write_bridge_mod(
     // The values are embedded as JSON literals, which are valid TypeScript
     // literals.
     let source = BRIDGE_MOD
-        .replace("__CREW_BIN__", &json!(crew_bin.to_string_lossy()).to_string())
-        .replace("__IDENTITY__", &json!(identity.to_string_lossy()).to_string())
+        .replace(
+            "__CREW_BIN__",
+            &json!(crew_bin.to_string_lossy()).to_string(),
+        )
+        .replace(
+            "__IDENTITY__",
+            &json!(identity.to_string_lossy()).to_string(),
+        )
         .replace("__DELIVER__", &json!(deliver).to_string())
         .replace("__TONE__", &json!(tone).to_string());
     write_private_file(&root.join("hooks").join("register.ts"), source.as_bytes())?;
@@ -204,7 +210,8 @@ impl AgentRuntime for ClaudeRuntime {
         args.push(briefing_path.to_string_lossy().into_owned());
         // crew's mod: socket delivery, and for a member the system prompt's
         // guidance on writing for a person replaced by its own.
-        let tone = (!ctx.agent.orchestrator).then(|| super::prompt::member_tone(ctx.settings.voice));
+        let tone =
+            (!ctx.agent.orchestrator).then(|| super::prompt::member_tone(ctx.settings.voice));
         if ctx.settings.socket_delivery || tone.is_some() {
             let mod_dir = write_bridge_mod(
                 ctx.agent_dir,
@@ -267,15 +274,21 @@ impl AgentRuntime for ClaudeRuntime {
     fn on_hook(&self, event: &str, payload: &Value) -> Vec<Signal> {
         match event {
             "stop-failure" if payload.get("agent_id").is_none_or(|v| v.is_null()) => {
-                return vec![match limits::claude_stop_failure(payload, crew_core::util::now_ms()) {
-                    limits::TurnFailure::Limited(info) => Signal::Limited(info),
-                    limits::TurnFailure::Other(what) => Signal::TurnFailed(what),
-                }];
+                return vec![
+                    match limits::claude_stop_failure(payload, crew_core::util::now_ms()) {
+                        limits::TurnFailure::Limited(info) => Signal::Limited(info),
+                        limits::TurnFailure::Other(what) => Signal::TurnFailed(what),
+                    },
+                ];
             }
             // Sent by the crew mod when the engine measures the session.
             "usage" => {
                 let mut signals = Vec::new();
-                let figure = |key: &str| payload.pointer(&format!("/context/{key}")).and_then(Value::as_u64);
+                let figure = |key: &str| {
+                    payload
+                        .pointer(&format!("/context/{key}"))
+                        .and_then(Value::as_u64)
+                };
                 if let (Some(tokens), Some(window)) = (figure("tokens"), figure("window")) {
                     signals.push(Signal::Context { tokens, window });
                 }
@@ -302,7 +315,8 @@ impl AgentRuntime for ClaudeRuntime {
             // Sent by the crew mod about a compaction the daemon asked for.
             "compacted" => return vec![Signal::Compacted],
             "compact-skipped" => {
-                let why = str_field(payload, "reason").unwrap_or_else(|| "no reason given".to_string());
+                let why =
+                    str_field(payload, "reason").unwrap_or_else(|| "no reason given".to_string());
                 return vec![Signal::CompactSkipped(why)];
             }
             "subagent-start" => return vec![Signal::Subagents(1)],
@@ -317,10 +331,16 @@ impl AgentRuntime for ClaudeRuntime {
         // effort of the turn with every hook inside one.
         let running = Signal::Model {
             model: str_field(payload, "model").filter(|_| event == "session-start"),
-            effort: payload.pointer("/effort/level").and_then(Value::as_str).map(str::to_string),
+            effort: payload
+                .pointer("/effort/level")
+                .and_then(Value::as_str)
+                .map(str::to_string),
         };
         let mut signals = match &running {
-            Signal::Model { model: None, effort: None } => Vec::new(),
+            Signal::Model {
+                model: None,
+                effort: None,
+            } => Vec::new(),
             _ => vec![running],
         };
         signals.extend(match event {
@@ -381,7 +401,11 @@ impl AgentRuntime for ClaudeRuntime {
             return Some(Dialog {
                 kind: "trust",
                 description: "Claude Code is asking whether to trust this workspace".into(),
-                accept_keys: if on_yes { vec!["enter"] } else { vec!["down", "enter"] },
+                accept_keys: if on_yes {
+                    vec!["enter"]
+                } else {
+                    vec!["down", "enter"]
+                },
             });
         }
         if lower.contains("bypass permissions mode") && lower.contains("yes, i accept") {
@@ -608,7 +632,10 @@ mod tests {
             .join(" ");
         assert!(bypassed.contains("--dangerously-skip-permissions"));
         assert!(!bypassed.contains("--permission-mode"));
-        assert!(bypassed.contains("--model sonnet[1m] ") || bypassed.ends_with("--model sonnet[1m]"), "{bypassed}");
+        assert!(
+            bypassed.contains("--model sonnet[1m] ") || bypassed.ends_with("--model sonnet[1m]"),
+            "{bypassed}"
+        );
         assert!(joined.contains("--allowedTools mcp__crew,Bash(cargo test:*)"));
         // The options end before the prompt that follows them, which
         // `--allowedTools` would otherwise take for one more tool.
@@ -617,7 +644,13 @@ mod tests {
         assert_eq!(spec.env[0].0, "CREW_IDENTITY");
         // The team may forbid the engine substituting another model for the
         // session's; by default it may (and crew tells the orchestrator).
-        assert!(spec.env.iter().any(|(k, v)| k == NO_FALLBACK_ENV && v == "1"), "{:?}", spec.env);
+        assert!(
+            spec.env
+                .iter()
+                .any(|(k, v)| k == NO_FALLBACK_ENV && v == "1"),
+            "{:?}",
+            spec.env
+        );
         let allowed = ClaudeRuntime
             .launch(&LaunchContext {
                 settings: &AgentSettings {
@@ -627,18 +660,26 @@ mod tests {
                 ..ctx
             })
             .unwrap();
-        assert!(!allowed.env.iter().any(|(k, _)| k == NO_FALLBACK_ENV), "{:?}", allowed.env);
+        assert!(
+            !allowed.env.iter().any(|(k, _)| k == NO_FALLBACK_ENV),
+            "{:?}",
+            allowed.env
+        );
 
-        let settings: Value =
-            serde_json::from_str(&std::fs::read_to_string(dir.path().join("settings.json")).unwrap())
-                .unwrap();
+        let settings: Value = serde_json::from_str(
+            &std::fs::read_to_string(dir.path().join("settings.json")).unwrap(),
+        )
+        .unwrap();
         assert_eq!(settings["permissions"]["deny"], json!(["AskUserQuestion"]));
         assert_eq!(settings["switchModelsOnFlag"], json!(true));
         let cmd = settings["hooks"]["Stop"][0]["hooks"][0]["command"]
             .as_str()
             .unwrap();
         // The binary path contains a space and must be quoted for the hook shell.
-        assert!(cmd.starts_with("'/opt/my tools/crew' hook stop --identity "), "{cmd}");
+        assert!(
+            cmd.starts_with("'/opt/my tools/crew' hook stop --identity "),
+            "{cmd}"
+        );
         assert_eq!(settings["hooks"]["PreToolUse"][0]["matcher"], "*");
         let mcp: Value =
             serde_json::from_str(&std::fs::read_to_string(dir.path().join("mcp.json")).unwrap())
@@ -650,17 +691,43 @@ mod tests {
         );
 
         let resumed = ClaudeRuntime
-            .launch(&LaunchContext { resume: true, ..ctx })
+            .launch(&LaunchContext {
+                resume: true,
+                ..ctx
+            })
             .unwrap();
         assert_eq!(resumed.args[0], "--resume");
         // A member loads crew's mod for its tone even without socket delivery.
-        let at = resumed.args.iter().position(|a| a == "--plugin-dir").expect("the mod, for the tone");
-        let source = std::fs::read_to_string(Path::new(&resumed.args[at + 1]).join("hooks/register.ts")).unwrap();
-        assert!(source.contains("const DELIVER: boolean = false"), "{source}");
-        assert!(source.contains("const TONE: string | null = \"# Tone and style\\nYou are a member of a team"), "{source}");
+        let at = resumed
+            .args
+            .iter()
+            .position(|a| a == "--plugin-dir")
+            .expect("the mod, for the tone");
+        let source =
+            std::fs::read_to_string(Path::new(&resumed.args[at + 1]).join("hooks/register.ts"))
+                .unwrap();
+        assert!(
+            source.contains("const DELIVER: boolean = false"),
+            "{source}"
+        );
+        assert!(
+            source.contains(
+                "const TONE: string | null = \"# Tone and style\\nYou are a member of a team"
+            ),
+            "{source}"
+        );
         // The orchestrator's output is the operator's to read: no mod without delivery.
-        let orchestrator = Agent { orchestrator: true, ..agent.clone() };
-        let plain = ClaudeRuntime.launch(&LaunchContext { agent: &orchestrator, resume: true, ..ctx }).unwrap();
+        let orchestrator = Agent {
+            orchestrator: true,
+            ..agent.clone()
+        };
+        let plain = ClaudeRuntime
+            .launch(&LaunchContext {
+                agent: &orchestrator,
+                resume: true,
+                ..ctx
+            })
+            .unwrap();
         assert!(!plain.args.contains(&"--plugin-dir".to_string()));
 
         // With socket delivery the bridge mod is generated and loaded.
@@ -681,7 +748,11 @@ mod tests {
                 long_context: false,
             })
             .unwrap();
-        let at = with_mod.args.iter().position(|a| a == "--plugin-dir").unwrap();
+        let at = with_mod
+            .args
+            .iter()
+            .position(|a| a == "--plugin-dir")
+            .unwrap();
         let mod_dir = Path::new(&with_mod.args[at + 1]);
         let source = std::fs::read_to_string(mod_dir.join("hooks/register.ts")).unwrap();
         assert!(source.contains(r#"const CREW_BIN: string = "/opt/my tools/crew""#));
@@ -726,21 +797,35 @@ mod tests {
             model: Some("gateway-model".into()),
             ..Endpoint::default()
         };
-        endpoint.env.insert("ANTHROPIC_DEFAULT_HAIKU_MODEL".into(), "small".into());
+        endpoint
+            .env
+            .insert("ANTHROPIC_DEFAULT_HAIKU_MODEL".into(), "small".into());
         let (spec, settings, text) = launch(&endpoint);
-        assert_eq!(settings["env"]["ANTHROPIC_BASE_URL"], "https://gateway.example");
+        assert_eq!(
+            settings["env"]["ANTHROPIC_BASE_URL"],
+            "https://gateway.example"
+        );
         assert_eq!(settings["env"]["ANTHROPIC_DEFAULT_HAIKU_MODEL"], "small");
         // Credentials inherited from the operator's shell are blanked.
         assert_eq!(settings["env"]["ANTHROPIC_API_KEY"], "");
         assert_eq!(settings["env"]["ANTHROPIC_AUTH_TOKEN"], "");
         let helper = settings["apiKeyHelper"].as_str().unwrap();
-        assert!(helper.starts_with("'/opt/my tools/crew' credential --identity "), "{helper}");
+        assert!(
+            helper.starts_with("'/opt/my tools/crew' credential --identity "),
+            "{helper}"
+        );
         assert!(!text.contains("sk-ant-crew-secret-key"));
         assert!(!format!("{spec:?}").contains("sk-ant-crew-secret-key"));
         // The endpoint's model replaces the one the team asked for.
         let joined = spec.args.join(" ");
-        assert!(joined.contains("--model gateway-model") && !joined.contains("sonnet"), "{joined}");
-        assert!(settings["hooks"]["Stop"].is_array(), "hooks are still there");
+        assert!(
+            joined.contains("--model gateway-model") && !joined.contains("sonnet"),
+            "{joined}"
+        );
+        assert!(
+            settings["hooks"]["Stop"].is_array(),
+            "hooks are still there"
+        );
 
         // A bearer token has no helper mechanism: it goes into the settings.
         let endpoint = Endpoint {
@@ -760,42 +845,100 @@ mod tests {
         // Context fill and compactions, as the crew mod and the hooks report them.
         let rt = ClaudeRuntime;
         assert_eq!(
-            rt.on_hook("usage", &json!({ "rate_limits": [], "context": { "tokens": 150000, "window": 200000 } })),
-            vec![Signal::Context { tokens: 150000, window: 200000 }]
+            rt.on_hook(
+                "usage",
+                &json!({ "rate_limits": [], "context": { "tokens": 150000, "window": 200000 } })
+            ),
+            vec![Signal::Context {
+                tokens: 150000,
+                window: 200000
+            }]
         );
-        assert!(rt.on_hook("usage", &json!({ "rate_limits": [], "context": { "window": 200000 } })).is_empty());
-        assert_eq!(rt.on_hook("post-compact", &json!({ "compact_summary": "..." })), vec![Signal::Compacted]);
-        assert!(rt.on_hook("post-compact", &json!({ "agent_id": "sub-1" })).is_empty(), "a subagent's own compaction");
+        assert!(rt
+            .on_hook(
+                "usage",
+                &json!({ "rate_limits": [], "context": { "window": 200000 } })
+            )
+            .is_empty());
+        assert_eq!(
+            rt.on_hook("post-compact", &json!({ "compact_summary": "..." })),
+            vec![Signal::Compacted]
+        );
+        assert!(
+            rt.on_hook("post-compact", &json!({ "agent_id": "sub-1" }))
+                .is_empty(),
+            "a subagent's own compaction"
+        );
         assert_eq!(rt.on_hook("compacted", &json!({})), vec![Signal::Compacted]);
         assert_eq!(
             rt.on_hook("compact-skipped", &json!({ "reason": "a hook said no" })),
             vec![Signal::CompactSkipped("a hook said no".into())]
         );
         assert_eq!(rt.compact_command(None).as_deref(), Some("/compact"));
-        assert_eq!(rt.compact_command(Some("the plan")).as_deref(), Some("/compact the plan"));
-        assert!(HOOKS.iter().any(|(event, name)| *event == "PostCompact" && *name == "post-compact"));
+        assert_eq!(
+            rt.compact_command(Some("the plan")).as_deref(),
+            Some("/compact the plan")
+        );
+        assert!(HOOKS
+            .iter()
+            .any(|(event, name)| *event == "PostCompact" && *name == "post-compact"));
         // What the session runs on: the model at the start, the effort with
         // the hooks of a turn; a subagent's own say nothing about the agent.
-        let started = rt.on_hook("session-start", &json!({ "session_id": "s", "model": "claude-sonnet-5-5" }));
-        assert_eq!(started[0], Signal::Model { model: Some("claude-sonnet-5-5".into()), effort: None });
-        let tool = rt.on_hook("pre-tool-use", &json!({ "tool_name": "Bash", "model": "x", "effort": { "level": "high" } }));
-        assert_eq!(tool[0], Signal::Model { model: None, effort: Some("high".into()) });
+        let started = rt.on_hook(
+            "session-start",
+            &json!({ "session_id": "s", "model": "claude-sonnet-5-5" }),
+        );
+        assert_eq!(
+            started[0],
+            Signal::Model {
+                model: Some("claude-sonnet-5-5".into()),
+                effort: None
+            }
+        );
+        let tool = rt.on_hook(
+            "pre-tool-use",
+            &json!({ "tool_name": "Bash", "model": "x", "effort": { "level": "high" } }),
+        );
+        assert_eq!(
+            tool[0],
+            Signal::Model {
+                model: None,
+                effort: Some("high".into())
+            }
+        );
         assert!(matches!(tool[1], Signal::Activity(_)));
         assert_eq!(
             rt.on_hook("stop", &json!({ "effort": { "level": "max" } }))[0],
-            Signal::Model { model: None, effort: Some("max".into()) }
+            Signal::Model {
+                model: None,
+                effort: Some("max".into())
+            }
         );
-        assert!(rt.on_hook("pre-tool-use", &json!({ "agent_id": "sub", "effort": { "level": "low" } })).is_empty());
+        assert!(rt
+            .on_hook(
+                "pre-tool-use",
+                &json!({ "agent_id": "sub", "effort": { "level": "low" } })
+            )
+            .is_empty());
         // The crew mod reports the model and effort of each request of the
         // main loop that differ from the one before: the session's, or the
         // one the engine fell back to.
         assert_eq!(
-            rt.on_hook("step", &json!({ "model": "claude-opus-5-5[1m]", "effort": "xhigh" })),
-            vec![Signal::Model { model: Some("claude-opus-5-5[1m]".into()), effort: Some("xhigh".into()) }]
+            rt.on_hook(
+                "step",
+                &json!({ "model": "claude-opus-5-5[1m]", "effort": "xhigh" })
+            ),
+            vec![Signal::Model {
+                model: Some("claude-opus-5-5[1m]".into()),
+                effort: Some("xhigh".into())
+            }]
         );
         assert_eq!(
             rt.on_hook("step", &json!({ "model": "claude-opus-5-5", "effort": 70 })),
-            vec![Signal::Model { model: Some("claude-opus-5-5".into()), effort: Some("70".into()) }]
+            vec![Signal::Model {
+                model: Some("claude-opus-5-5".into()),
+                effort: Some("70".into())
+            }]
         );
         assert!(rt.on_hook("step", &json!({})).is_empty());
         let rt = ClaudeRuntime;
@@ -813,7 +956,10 @@ mod tests {
                 Signal::Ready
             ]
         );
-        assert_eq!(rt.on_hook("user-prompt-submit", &json!({})), vec![Signal::TurnStarted]);
+        assert_eq!(
+            rt.on_hook("user-prompt-submit", &json!({})),
+            vec![Signal::TurnStarted]
+        );
         assert_eq!(
             rt.on_hook(
                 "pre-tool-use",
@@ -833,12 +979,20 @@ mod tests {
                 "notification",
                 &json!({"message": "Claude needs your permission to use Bash"})
             ),
-            vec![Signal::Blocked("Claude needs your permission to use Bash".into())]
+            vec![Signal::Blocked(
+                "Claude needs your permission to use Bash".into()
+            )]
         );
         assert!(rt
-            .on_hook("notification", &json!({"message": "Claude is waiting for your input"}))
+            .on_hook(
+                "notification",
+                &json!({"message": "Claude is waiting for your input"})
+            )
             .is_empty());
-        assert!(matches!(rt.on_hook("stop", &json!({}))[..], [_, Signal::TurnEnded]));
+        assert!(matches!(
+            rt.on_hook("stop", &json!({}))[..],
+            [_, Signal::TurnEnded]
+        ));
         // Subagent events never drive the agent's state, only its subagent count.
         assert!(rt.on_hook("stop", &json!({"agent_id": "sub-1"})).is_empty());
         assert_eq!(

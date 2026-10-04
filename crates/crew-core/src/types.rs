@@ -348,7 +348,9 @@ pub fn short_model(id: &str) -> String {
     let id = id.rsplit_once('/').map_or(id, |(_, name)| name);
     let id = id.strip_prefix("claude-").unwrap_or(id);
     match id.rsplit_once('-') {
-        Some((name, date)) if date.len() == 8 && date.bytes().all(|b| b.is_ascii_digit()) => name.to_string(),
+        Some((name, date)) if date.len() == 8 && date.bytes().all(|b| b.is_ascii_digit()) => {
+            name.to_string()
+        }
         _ => id.to_string(),
     }
 }

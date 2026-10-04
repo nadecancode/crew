@@ -434,9 +434,15 @@ pub enum CtlCommand {
         all: bool,
     },
     /// Set your status: working, waiting, blocked or idle
-    Status { status: String, note: Option<String> },
+    Status {
+        status: String,
+        note: Option<String>,
+    },
     /// Report progress on your task
-    Progress { percent: u8, message: Option<String> },
+    Progress {
+        percent: u8,
+        message: Option<String>,
+    },
     /// Show the board
     Tasks,
     /// Show a task's card (default: your task in progress)
@@ -498,7 +504,11 @@ pub fn run(cli: Cli) -> Result<()> {
         if let Some(objective) = &cli.objective {
             ops::refuse_command(objective)?;
         }
-        if let Some(word) = cli.objective.as_deref().filter(|o| o.split_whitespace().count() < 2) {
+        if let Some(word) = cli
+            .objective
+            .as_deref()
+            .filter(|o| o.split_whitespace().count() < 2)
+        {
             // A lone word is far more likely a mistyped command than an
             // objective, and starting a team is not a cheap mistake.
             bail!("{}", unknown_command(word));
@@ -620,8 +630,13 @@ mod tests {
     #[test]
     fn a_slash_command_is_not_taken_for_an_objective() {
         for objective in ["/exit", "/stop now", "/compact the context please"] {
-            let error = run(Cli::parse_from(["crew", objective])).unwrap_err().to_string();
-            assert!(error.contains("looks like a command, not an objective"), "{objective}: {error}");
+            let error = run(Cli::parse_from(["crew", objective]))
+                .unwrap_err()
+                .to_string();
+            assert!(
+                error.contains("looks like a command, not an objective"),
+                "{objective}: {error}"
+            );
             assert!(error.contains("crew stop"), "{error}");
         }
         assert!(ops::refuse_command("/src/main.rs is slow, find out why").is_ok());
@@ -640,7 +655,13 @@ mod tests {
         assert!(matches!(cli.command, Some(Command::Status { .. })));
         assert!(cli.objective.is_none());
         let cli = Cli::parse_from(["crew", "run", "team.yaml", "--no-attach"]);
-        assert!(matches!(cli.command, Some(Command::Run { no_attach: true, .. })));
+        assert!(matches!(
+            cli.command,
+            Some(Command::Run {
+                no_attach: true,
+                ..
+            })
+        ));
         assert!(!cli.quick.no_attach);
         assert!(Cli::parse_from(["crew"]).command.is_none());
     }

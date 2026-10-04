@@ -23,7 +23,11 @@ fn app() -> App {
 fn member_marks(screen: &str) -> usize {
     screen
         .match_indices(['✱', '❂'])
-        .filter(|(at, mark)| !screen[at + mark.len()..].trim_start_matches(' ').starts_with(char::is_uppercase))
+        .filter(|(at, mark)| {
+            !screen[at + mark.len()..]
+                .trim_start_matches(' ')
+                .starts_with(char::is_uppercase)
+        })
         .count()
 }
 
@@ -95,7 +99,10 @@ fn a_message_in_classical_chinese_keeps_the_dashboard_in_shape() {
         let screen = render_to_string(&app, cols, rows, NOW);
         for line in screen.lines() {
             // One character per cell (a wide character's second cell prints as a space).
-            assert!(line.chars().count() <= cols as usize, "{cols}x{rows}: {line}");
+            assert!(
+                line.chars().count() <= cols as usize,
+                "{cols}x{rows}: {line}"
+            );
         }
     }
     let screen = render_to_string(&app, 120, 40, NOW);
@@ -399,11 +406,23 @@ fn overlays_render_on_top() {
     let screen = render_to_string(&app, 120, 40, NOW);
     assert!(screen.contains("crew · keys"), "{screen}");
     assert!(screen.contains("agents keep running"), "{screen}");
-    assert!(screen.contains("stop the team: agents and daemon (asks first)"), "{screen}");
-    assert!(screen.contains("commands") && screen.contains("/exit · /stop · /kill [agent]"), "{screen}");
-    assert!(screen.contains("/unpause [agent]") && screen.contains("/help"), "{screen}");
+    assert!(
+        screen.contains("stop the team: agents and daemon (asks first)"),
+        "{screen}"
+    );
+    assert!(
+        screen.contains("commands") && screen.contains("/exit · /stop · /kill [agent]"),
+        "{screen}"
+    );
+    assert!(
+        screen.contains("/unpause [agent]") && screen.contains("/help"),
+        "{screen}"
+    );
     assert!(screen.contains("/compact [agent]"), "{screen}");
-    assert!(screen.contains("open an agent or a bus message; wheel scrolls"), "{screen}");
+    assert!(
+        screen.contains("open an agent or a bus message; wheel scrolls"),
+        "{screen}"
+    );
     assert!(screen.contains("a subagent, tethered"), "{screen}");
 
     app.help = false;
@@ -424,8 +443,14 @@ fn overlays_render_on_top() {
     app.modal = Some(Modal::ConfirmStop);
     let screen = render_to_string(&app, 120, 40, NOW);
     assert!(screen.contains("stop the team"), "{screen}");
-    assert!(screen.contains("Stop every agent and the crew daemon?"), "{screen}");
-    assert!(screen.contains("y stop · any other key cancels"), "{screen}");
+    assert!(
+        screen.contains("Stop every agent and the crew daemon?"),
+        "{screen}"
+    );
+    assert!(
+        screen.contains("y stop · any other key cancels"),
+        "{screen}"
+    );
 }
 
 #[test]
@@ -442,7 +467,10 @@ fn the_message_box_turns_into_a_command_line_on_a_slash() {
     app.modal = Some(compose("", None));
     let screen = render_to_string(&app, 120, 40, NOW);
     assert!(screen.contains("message → claude-5"), "{screen}");
-    assert!(screen.contains("shift+enter new line") && screen.contains("/ commands"), "{screen}");
+    assert!(
+        screen.contains("shift+enter new line") && screen.contains("/ commands"),
+        "{screen}"
+    );
 
     // The commands are listed as soon as the slash is typed, then narrowed.
     app.modal = Some(compose("/", None));
@@ -453,10 +481,19 @@ fn the_message_box_turns_into_a_command_line_on_a_slash() {
     app.modal = Some(compose("/sto", None));
     let screen = render_to_string(&app, 120, 40, NOW);
     assert!(screen.contains("› /sto"), "{screen}");
-    assert!(screen.contains("/stop  stop the team: every agent and the daemon"), "{screen}");
-    app.modal = Some(compose("/clear", Some("no command /clear — /help lists them")));
+    assert!(
+        screen.contains("/stop  stop the team: every agent and the daemon"),
+        "{screen}"
+    );
+    app.modal = Some(compose(
+        "/clear",
+        Some("no command /clear — /help lists them"),
+    ));
     let screen = render_to_string(&app, 120, 40, NOW);
-    assert!(screen.contains("no command /clear — /help lists them"), "{screen}");
+    assert!(
+        screen.contains("no command /clear — /help lists them"),
+        "{screen}"
+    );
 
     // While a stop is under way the footer says so.
     app.modal = None;
@@ -480,7 +517,12 @@ fn disconnect_shows_a_banner_and_keeps_the_last_state() {
 #[test]
 fn run_refuses_to_start_without_a_daemon() {
     // Fails before the terminal is touched, so it is safe under the test harness.
-    let err = crew_tui::run(std::path::Path::new("/nonexistent/crew-daemon.sock"), Default::default(), None).unwrap_err();
+    let err = crew_tui::run(
+        std::path::Path::new("/nonexistent/crew-daemon.sock"),
+        Default::default(),
+        None,
+    )
+    .unwrap_err();
     assert!(
         format!("{err:#}").contains("cannot attach the dashboard"),
         "{err:#}"
@@ -508,8 +550,14 @@ fn subagents_orbit_their_parent() {
         let line = screen.lines().find(|l| l.contains(needle)).unwrap();
         line[..line.find(needle).unwrap()].chars().count() as i32
     };
-    assert!((row_of("↳ claude-3-s1") - row_of("✱ claude-3 ")).abs() <= 9, "{screen}");
-    assert!((col_of("↳ claude-3-s1") - col_of("✱ claude-3 ")).abs() <= 44, "{screen}");
+    assert!(
+        (row_of("↳ claude-3-s1") - row_of("✱ claude-3 ")).abs() <= 9,
+        "{screen}"
+    );
+    assert!(
+        (col_of("↳ claude-3-s1") - col_of("✱ claude-3 ")).abs() <= 44,
+        "{screen}"
+    );
     // The report from the subagent to its parent is ordinary P2P traffic.
     assert!(screen.contains("claude-3-s1 → claude-3"), "{screen}");
 }
@@ -520,7 +568,10 @@ fn subagent_and_parent_talk_over_their_tether() {
     p2p(&mut app, "claude-3-s1", "claude-3");
     let screen = render_to_string(&app, 140, 44, NOW + 400);
     assert!(screen.contains("p2p channel OPEN"), "{screen}");
-    assert!(screen.contains('●'), "the pulse travels the tether\n{screen}");
+    assert!(
+        screen.contains('●'),
+        "the pulse travels the tether\n{screen}"
+    );
 }
 
 #[test]
@@ -530,7 +581,10 @@ fn in_session_subagents_show_as_a_badge() {
     // The badge shares the title row; the status row is intact.
     let title = screen.lines().find(|l| l.contains("✱ claude-1")).unwrap();
     assert!(title.contains("⑂2"), "{title}");
-    assert!(screen.contains("billing") && screen.contains("51%"), "{screen}");
+    assert!(
+        screen.contains("billing") && screen.contains("51%"),
+        "{screen}"
+    );
 
     // At the narrowest boxes the status row still survives.
     let mut crowded = App::new();
@@ -545,7 +599,14 @@ fn in_session_subagents_show_as_a_badge() {
 #[test]
 fn small_terminals_badge_the_parent_instead_of_drawing_satellites() {
     let mut app = sub_app();
-    let second = fixture::subagent("claude-3-s2", "claude-3", "docs", AgentStatus::Working, None, NOW);
+    let second = fixture::subagent(
+        "claude-3-s2",
+        "claude-3",
+        "docs",
+        AgentStatus::Working,
+        None,
+        NOW,
+    );
     app.apply_push(Push::Agent(Box::new(second)), NOW);
     let screen = render_to_string(&app, 80, 24, NOW);
     assert!(!screen.contains("↳ claude-3-s1"), "{screen}");
@@ -554,7 +615,10 @@ fn small_terminals_badge_the_parent_instead_of_drawing_satellites() {
     assert_eq!(screen.matches('┌').count(), 7, "{screen}");
     // The compact list still names them.
     let list = render_to_string(&app, 30, 14, NOW);
-    assert!(list.contains("↳claude-3-s1") || list.contains("↳ claude-3-s1"), "{list}");
+    assert!(
+        list.contains("↳claude-3-s1") || list.contains("↳ claude-3-s1"),
+        "{list}"
+    );
 }
 
 #[test]
@@ -566,7 +630,10 @@ fn an_empty_roster_explains_itself() {
     app.apply_snapshot(snap, NOW);
     let screen = render_to_string(&app, 120, 40, NOW);
     assert!(screen.contains("◆ orchestrator"), "{screen}");
-    assert!(screen.contains("the orchestrator is assembling the team…"), "{screen}");
+    assert!(
+        screen.contains("the orchestrator is assembling the team…"),
+        "{screen}"
+    );
     assert_eq!(screen.matches('┌').count(), 1, "{screen}");
     assert_eq!(member_marks(&screen), 0, "{screen}");
 
@@ -581,7 +648,13 @@ fn an_empty_roster_explains_itself() {
     // Members arriving one at a time never garble the ring.
     for id in ["backend", "db"] {
         app.apply_push(
-            Push::Agent(Box::new(fixture::agent(id, id, AgentStatus::Spawning, None, NOW))),
+            Push::Agent(Box::new(fixture::agent(
+                id,
+                id,
+                AgentStatus::Spawning,
+                None,
+                NOW,
+            ))),
             NOW,
         );
         let screen = render_to_string(&app, 120, 40, NOW);
@@ -601,7 +674,10 @@ fn detail_and_task_views_name_parents_and_subagents() {
 
     app.open_detail("claude-3", NOW);
     let screen = render_to_string(&app, 140, 44, NOW);
-    assert!(screen.contains("subagents claude-3-s1 (working)"), "{screen}");
+    assert!(
+        screen.contains("subagents claude-3-s1 (working)"),
+        "{screen}"
+    );
 
     app.open_detail("claude-1", NOW);
     let screen = render_to_string(&app, 140, 44, NOW);
@@ -619,7 +695,16 @@ fn detail_and_task_views_name_parents_and_subagents() {
 
 #[test]
 fn tiny_terminals_never_panic_with_subagents() {
-    for (w, h) in [(1u16, 1u16), (5, 3), (20, 8), (40, 10), (60, 15), (79, 23), (100, 23), (101, 30)] {
+    for (w, h) in [
+        (1u16, 1u16),
+        (5, 3),
+        (20, 8),
+        (40, 10),
+        (60, 15),
+        (79, 23),
+        (100, 23),
+        (101, 30),
+    ] {
         for view in [View::Dashboard, View::Detail, View::Tasks, View::Logs] {
             let mut app = sub_app();
             for i in 2..=4 {
@@ -657,20 +742,40 @@ fn a_question_for_the_operator_is_announced_and_shown_in_full() {
     app.questions.push(question.clone());
     let screen = render_to_string(&app, 120, 40, NOW);
     let band = screen.lines().next().unwrap();
-    assert!(band.contains("? question from orchestrator (for claude-2) · 3m05s ago: The legacy export"), "{band}");
+    assert!(
+        band.contains("? question from orchestrator (for claude-2) · 3m05s ago: The legacy export"),
+        "{band}"
+    );
     assert!(band.trim_end().ends_with("a answer"), "{band}");
-    assert!(screen.contains("claude-1") && screen.contains("message bus"), "{screen}");
+    assert!(
+        screen.contains("claude-1") && screen.contains("message bus"),
+        "{screen}"
+    );
     let mut second = question.clone();
     second.id = "m-second".into();
     second.metadata = serde_json::Value::Null;
     app.questions.push(second);
     let screen = render_to_string(&app, 120, 40, NOW);
-    assert!(screen.lines().next().unwrap().contains("? 2 questions for you · the first from orchestrator"), "{screen}");
+    assert!(
+        screen
+            .lines()
+            .next()
+            .unwrap()
+            .contains("? 2 questions for you · the first from orchestrator"),
+        "{screen}"
+    );
     // It is there in every view, above the view's own header.
     for view in [View::Detail, View::Tasks, View::Logs] {
         app.view = view;
         let screen = render_to_string(&app, 120, 40, NOW);
-        assert!(screen.lines().next().unwrap().contains("? 2 questions for you"), "{view:?}:\n{screen}");
+        assert!(
+            screen
+                .lines()
+                .next()
+                .unwrap()
+                .contains("? 2 questions for you"),
+            "{view:?}:\n{screen}"
+        );
         assert_eq!(screen.lines().count(), 40, "{view:?}");
     }
     app.view = View::Dashboard;
@@ -682,7 +787,10 @@ fn a_question_for_the_operator_is_announced_and_shown_in_full() {
         ..QuestionBox::default()
     }));
     let screen = render_to_string(&app, 120, 40, NOW);
-    assert!(screen.contains("question 1 of 2 · orchestrator, for claude-2 · 3m05s ago"), "{screen}");
+    assert!(
+        screen.contains("question 1 of 2 · orchestrator, for claude-2 · 3m05s ago"),
+        "{screen}"
+    );
     for part in [
         "The legacy export writes amounts as integer cents",
         "breaks the two finance dashboards until they",
@@ -704,28 +812,46 @@ fn a_question_for_the_operator_is_announced_and_shown_in_full() {
     typed.input.notice = Some("pick an answer with ↑↓, or type your own".into());
     app.modal = Some(Modal::Question(typed));
     let screen = render_to_string(&app, 120, 40, NOW);
-    assert!(screen.contains("▸ 3. › convert, but log every mismatch"), "{screen}");
-    assert!(screen.contains("pick an answer with ↑↓, or type your own"), "{screen}");
+    assert!(
+        screen.contains("▸ 3. › convert, but log every mismatch"),
+        "{screen}"
+    );
+    assert!(
+        screen.contains("pick an answer with ↑↓, or type your own"),
+        "{screen}"
+    );
 
     // A long question on a short screen scrolls instead of being cut off.
     let mut long = question.clone();
     long.id = "m-long".into();
-    long.body = (1..=40).map(|i| format!("Line {i} of the question.")).collect::<Vec<_>>().join("\n");
+    long.body = (1..=40)
+        .map(|i| format!("Line {i} of the question."))
+        .collect::<Vec<_>>()
+        .join("\n");
     app.questions = vec![long.clone()];
     app.modal = Some(Modal::Question(QuestionBox {
         id: long.id.clone(),
         ..QuestionBox::default()
     }));
     let screen = render_to_string(&app, 100, 24, NOW);
-    assert!(screen.contains("Line 1 of the question.") && screen.contains("more line(s) · pgdn"), "{screen}");
-    assert!(screen.contains("▸ 1. Convert in the adapter") && screen.contains("esc later"), "{screen}");
+    assert!(
+        screen.contains("Line 1 of the question.") && screen.contains("more line(s) · pgdn"),
+        "{screen}"
+    );
+    assert!(
+        screen.contains("▸ 1. Convert in the adapter") && screen.contains("esc later"),
+        "{screen}"
+    );
     app.modal = Some(Modal::Question(QuestionBox {
         id: long.id,
         scroll: 500,
         ..QuestionBox::default()
     }));
     let screen = render_to_string(&app, 100, 24, NOW);
-    assert!(screen.contains("Line 40 of the question.") && !screen.contains("more line(s)"), "{screen}");
+    assert!(
+        screen.contains("Line 40 of the question.") && !screen.contains("more line(s)"),
+        "{screen}"
+    );
 
     // Answered meanwhile, tiny screens: nothing breaks.
     app.questions.clear();
@@ -735,9 +861,22 @@ fn a_question_for_the_operator_is_announced_and_shown_in_full() {
         id: question.id,
         ..QuestionBox::default()
     }));
-    for (w, h) in [(1, 1), (10, 3), (24, 7), (30, 8), (40, 10), (60, 14), (300, 80)] {
+    for (w, h) in [
+        (1, 1),
+        (10, 3),
+        (24, 7),
+        (30, 8),
+        (40, 10),
+        (60, 14),
+        (300, 80),
+    ] {
         let screen = render_to_string(&app, w, h, NOW);
-        assert!(screen.lines().all(|l| crew_tui::widgets::text::width(l) <= usize::from(w)), "{w}x{h}");
+        assert!(
+            screen
+                .lines()
+                .all(|l| crew_tui::widgets::text::width(l) <= usize::from(w)),
+            "{w}x{h}"
+        );
     }
 }
 
@@ -747,22 +886,34 @@ fn the_inspector_shows_how_full_the_context_window_is() {
     let mut app = app();
     app.open_detail("claude-3", NOW);
     let screen = render_to_string(&app, 140, 44, NOW);
-    assert!(!screen.contains("% full"), "nothing is shown before the runtime reports it:\n{screen}");
+    assert!(
+        !screen.contains("% full"),
+        "nothing is shown before the runtime reports it:\n{screen}"
+    );
 
     let agent = app.agents.iter_mut().find(|a| a.id == "claude-3").unwrap();
     agent.context = Some(ContextUsage::new(164_000, 200_000, NOW));
     agent.compact_pending = true;
     agent.compactions = 2;
     let screen = render_to_string(&app, 140, 44, NOW);
-    assert!(screen.contains("context   82% full · 164k of 200k"), "{screen}");
-    assert!(screen.contains("compact   queued · done 2× so far"), "{screen}");
+    assert!(
+        screen.contains("context   82% full · 164k of 200k"),
+        "{screen}"
+    );
+    assert!(
+        screen.contains("compact   queued · done 2× so far"),
+        "{screen}"
+    );
 
     // Right after a compaction there is no figure yet, only the count.
     let agent = app.agents.iter_mut().find(|a| a.id == "claude-3").unwrap();
     agent.context = None;
     agent.compact_pending = false;
     let screen = render_to_string(&app, 140, 44, NOW);
-    assert!(screen.contains("compact   done 2×") && !screen.contains("% full"), "{screen}");
+    assert!(
+        screen.contains("compact   done 2×") && !screen.contains("% full"),
+        "{screen}"
+    );
     assert_eq!(ContextUsage::new(5, 0, NOW).percent, 0);
     assert_eq!(ContextUsage::new(300_000, 200_000, NOW).percent, 100);
 }
@@ -773,25 +924,57 @@ fn a_bus_message_opens_in_full() {
     let mut app = app();
     let mut long = app.messages.back().unwrap().clone();
     long.id = "m-long".into();
-    long.body = (1..=60).map(|i| format!("Paragraph {i} of the report, which the bus log cuts short.")).collect::<Vec<_>>().join("\n");
+    long.body = (1..=60)
+        .map(|i| format!("Paragraph {i} of the report, which the bus log cuts short."))
+        .collect::<Vec<_>>()
+        .join("\n");
     app.messages.push_back(long.clone());
-    app.modal = Some(Modal::Message(MessageView { id: long.id.clone(), scroll: 0 }));
+    app.modal = Some(Modal::Message(MessageView {
+        id: long.id.clone(),
+        scroll: 0,
+    }));
     let screen = render_to_string(&app, 120, 30, NOW);
-    assert!(screen.contains(&format!("{} → {} · {}", long.from, long.to, long.kind)), "{screen}");
-    assert!(screen.contains("Paragraph 1 of the report") && !screen.contains("Paragraph 60 of"), "{screen}");
-    assert!(screen.contains("more line(s)") && screen.contains("esc or right-click close"), "{screen}");
+    assert!(
+        screen.contains(&format!("{} → {} · {}", long.from, long.to, long.kind)),
+        "{screen}"
+    );
+    assert!(
+        screen.contains("Paragraph 1 of the report") && !screen.contains("Paragraph 60 of"),
+        "{screen}"
+    );
+    assert!(
+        screen.contains("more line(s)") && screen.contains("esc or right-click close"),
+        "{screen}"
+    );
     // Scrolled past the end, it stops at the last line.
-    app.modal = Some(Modal::Message(MessageView { id: long.id, scroll: 999 }));
+    app.modal = Some(Modal::Message(MessageView {
+        id: long.id,
+        scroll: 999,
+    }));
     let screen = render_to_string(&app, 120, 30, NOW);
-    assert!(screen.contains("Paragraph 60 of the report") && !screen.contains("more line(s)"), "{screen}");
+    assert!(
+        screen.contains("Paragraph 60 of the report") && !screen.contains("more line(s)"),
+        "{screen}"
+    );
     // A message that left the log, and screens of every size.
-    app.modal = Some(Modal::Message(MessageView { id: "m-gone".into(), scroll: 0 }));
+    app.modal = Some(Modal::Message(MessageView {
+        id: "m-gone".into(),
+        scroll: 0,
+    }));
     assert!(render_to_string(&app, 120, 30, NOW).contains("no longer in the log"));
     for (w, h) in [(1, 1), (20, 4), (24, 6), (40, 8), (300, 80)] {
         for id in ["m-long", "m-gone"] {
-            app.modal = Some(Modal::Message(MessageView { id: id.into(), scroll: 3 }));
+            app.modal = Some(Modal::Message(MessageView {
+                id: id.into(),
+                scroll: 3,
+            }));
             let screen = render_to_string(&app, w, h, NOW);
-            assert!(screen.lines().all(|l| crew_tui::widgets::text::width(l) <= usize::from(w)), "{w}x{h}");
+            assert!(
+                screen
+                    .lines()
+                    .all(|l| crew_tui::widgets::text::width(l) <= usize::from(w)),
+                "{w}x{h}"
+            );
         }
     }
 }
@@ -823,55 +1006,124 @@ fn each_box_names_its_model_and_effort_on_its_bottom_border() {
     let mut app = app();
     let screen = render_to_string(&app, 120, 40, NOW);
     assert_eq!(screen.matches(" Sonnet 5.5 · high ").count(), 7, "{screen}");
-    assert_eq!(border_of(&app, "claude-1"), "└──── Sonnet 5.5 · high ─────┘");
+    assert_eq!(
+        border_of(&app, "claude-1"),
+        "└──── Sonnet 5.5 · high ─────┘"
+    );
     assert_eq!(narrow_border_of(&app, "claude-1"), "└ Sonnet 5.5 · high ─┘");
     // A border that carries a label is a plain line whatever the progress
     // (half done, done): no stray pieces of the bar beside the name.
-    assert_eq!(border_of(&app, "claude-2"), "└──── Sonnet 5.5 · high ─────┘");
-    assert!(!screen.lines().any(|l| l.contains("Sonnet 5.5") && l.contains('━')), "{screen}");
+    assert_eq!(
+        border_of(&app, "claude-2"),
+        "└──── Sonnet 5.5 · high ─────┘"
+    );
+    assert!(
+        !screen
+            .lines()
+            .any(|l| l.contains("Sonnet 5.5") && l.contains('━')),
+        "{screen}"
+    );
     // The inspector spells it out.
     app.open_detail("claude-3", NOW);
     assert!(render_to_string(&app, 140, 44, NOW).contains("runtime   claude · Sonnet 5.5 · high"));
     app.view = View::Dashboard;
 
     // It sits in the middle of the border, the line running on at both ends.
-    let set = |app: &mut App, id: &str, model: Option<&str>, name: Option<&str>, running: Option<&str>, effort: Option<&str>| {
+    let set = |app: &mut App,
+               id: &str,
+               model: Option<&str>,
+               name: Option<&str>,
+               running: Option<&str>,
+               effort: Option<&str>| {
         let agent = app.agents.iter_mut().find(|a| a.id == id).unwrap();
         agent.model = model.map(str::to_string);
         agent.model_name = name.map(str::to_string);
         agent.running_model = running.map(str::to_string);
         agent.effort = effort.map(str::to_string);
     };
-    set(&mut app, "claude-1", Some("opus"), Some("Opus 5.5"), None, None);
+    set(
+        &mut app,
+        "claude-1",
+        Some("opus"),
+        Some("Opus 5.5"),
+        None,
+        None,
+    );
     let border = border_of(&app, "claude-1");
     assert_eq!(border.chars().count(), 30);
     assert!(border.contains(" Opus 5.5 "), "{border}");
     let (left, right) = border.split_once(" Opus 5.5 ").unwrap();
-    assert!(left.chars().count().abs_diff(right.chars().count()) <= 1, "{border}");
+    assert!(
+        left.chars().count().abs_diff(right.chars().count()) <= 1,
+        "{border}"
+    );
     assert!(left.chars().count() >= 5, "{border}");
 
     // Without a name from the daemon it is worked out: from what the
     // session reports, else from the name in the team file.
-    set(&mut app, "claude-2", Some("opus"), None, Some("claude-opus-5-5"), Some("xhigh"));
+    set(
+        &mut app,
+        "claude-2",
+        Some("opus"),
+        None,
+        Some("claude-opus-5-5"),
+        Some("xhigh"),
+    );
     assert!(border_of(&app, "claude-2").contains(" Opus 5.5 · xhigh "));
     set(&mut app, "claude-2", Some("fable"), None, None, None);
     assert!(border_of(&app, "claude-2").contains(" Fable "));
     // A long name gives way a step at a time in a narrow box: a short
     // level, no spaces round the dot, the model alone.
-    set(&mut app, "claude-2", None, Some("Sonnet 5.5"), None, Some("medium"));
-    assert!(border_of(&app, "claude-2").contains(" Sonnet 5.5 · medium "), "{}", border_of(&app, "claude-2"));
-    assert!(narrow_border_of(&app, "claude-2").contains(" Sonnet 5.5 · med "), "{}", narrow_border_of(&app, "claude-2"));
-    set(&mut app, "claude-2", None, Some("GPT 6 Astra"), None, Some("xhigh"));
-    assert_eq!(narrow_border_of(&app, "claude-2").chars().filter(|c| !"└┘━─".contains(*c)).collect::<String>(), " GPT 6 Astra·xhigh ");
+    set(
+        &mut app,
+        "claude-2",
+        None,
+        Some("Sonnet 5.5"),
+        None,
+        Some("medium"),
+    );
+    assert!(
+        border_of(&app, "claude-2").contains(" Sonnet 5.5 · medium "),
+        "{}",
+        border_of(&app, "claude-2")
+    );
+    assert!(
+        narrow_border_of(&app, "claude-2").contains(" Sonnet 5.5 · med "),
+        "{}",
+        narrow_border_of(&app, "claude-2")
+    );
+    set(
+        &mut app,
+        "claude-2",
+        None,
+        Some("GPT 6 Astra"),
+        None,
+        Some("xhigh"),
+    );
+    assert_eq!(
+        narrow_border_of(&app, "claude-2")
+            .chars()
+            .filter(|c| !"└┘━─".contains(*c))
+            .collect::<String>(),
+        " GPT 6 Astra·xhigh "
+    );
     // An agent whose runtime has not said yet has a plain border.
     set(&mut app, "claude-3", None, None, None, None);
     // Its border is the progress bar, as before.
-    assert!(border_of(&app, "claude-3").chars().all(|c| "└┘━─".contains(c)));
+    assert!(border_of(&app, "claude-3")
+        .chars()
+        .all(|c| "└┘━─".contains(c)));
     assert!(border_of(&app, "claude-3").contains('━'));
 
     let agent = app.agents.iter().find(|a| a.id == "claude-2").unwrap();
-    assert_eq!(running_label(agent, 30).as_deref(), Some("GPT 6 Astra · xhigh"));
-    assert_eq!(running_label(agent, 17).as_deref(), Some("GPT 6 Astra·xhigh"));
+    assert_eq!(
+        running_label(agent, 30).as_deref(),
+        Some("GPT 6 Astra · xhigh")
+    );
+    assert_eq!(
+        running_label(agent, 17).as_deref(),
+        Some("GPT 6 Astra·xhigh")
+    );
     assert_eq!(running_label(agent, 12).as_deref(), Some("GPT 6 Astra"));
     assert_eq!(running_label(agent, 7).as_deref(), Some("GPT 6 …"));
     assert_eq!(running_label(agent, 3), None);
@@ -897,7 +1149,12 @@ fn each_box_names_its_model_and_effort_on_its_bottom_border() {
     // Nothing spills at any size.
     for (w, h) in [(40, 12), (60, 20), (80, 24), (100, 30), (200, 60)] {
         let screen = render_to_string(&app, w, h, NOW);
-        assert!(screen.lines().all(|l| crew_tui::widgets::text::width(l) <= usize::from(w)), "{w}x{h}");
+        assert!(
+            screen
+                .lines()
+                .all(|l| crew_tui::widgets::text::width(l) <= usize::from(w)),
+            "{w}x{h}"
+        );
     }
 }
 
@@ -911,12 +1168,16 @@ fn the_boxes_show_how_full_each_context_window_is() {
     // Nobody reports a context: the boxes have the task and what the agent
     // is doing, nothing more.
     let mut app = app();
-    assert!(agent_rects(&app, area).iter().filter(|(id, _)| id != "orchestrator").all(|(_, r)| r.height == 4));
+    assert!(agent_rects(&app, area)
+        .iter()
+        .filter(|(id, _)| id != "orchestrator")
+        .all(|(_, r)| r.height == 4));
     assert!(!render_to_string(&app, 120, 40, NOW).contains("context —"));
 
     // Once one does, every box gets a row for it: the window, a bar, the share.
     let set = |app: &mut App, id: &str, tokens: u64, window: u64| {
-        app.agents.iter_mut().find(|a| a.id == id).unwrap().context = Some(ContextUsage::new(tokens, window, NOW));
+        app.agents.iter_mut().find(|a| a.id == id).unwrap().context =
+            Some(ContextUsage::new(tokens, window, NOW));
     };
     set(&mut app, "claude-1", 350_000, 1_000_000);
     set(&mut app, "claude-2", 164_000, 200_000);
@@ -946,8 +1207,14 @@ fn the_boxes_show_how_full_each_context_window_is() {
     assert_eq!(row_of("claude-3"), "│ context —                  │");
     // The other rows are where they were: the task and what the agent is
     // doing above, the model below.
-    assert!(screen.contains("│ implement billing   ◓  51% │"), "{screen}");
-    assert!(screen.contains("│ ▸ Edit src/lib.rs   11m40s │"), "{screen}");
+    assert!(
+        screen.contains("│ implement billing   ◓  51% │"),
+        "{screen}"
+    );
+    assert!(
+        screen.contains("│ ▸ Edit src/lib.rs   11m40s │"),
+        "{screen}"
+    );
     assert_eq!(screen.matches(" Sonnet 5.5 · high ").count(), 7, "{screen}");
     // A click still lands on the taller boxes, bottom row included: that
     // row says what the agent runs on, and a click there is for choosing it.
@@ -968,7 +1235,12 @@ fn the_boxes_show_how_full_each_context_window_is() {
     assert_eq!(screen.contains("│ 1M "), tall_fits, "{screen}");
     for (w, h) in [(40, 12), (60, 18), (80, 24), (100, 30), (160, 50)] {
         let screen = render_to_string(&app, w, h, NOW);
-        assert!(screen.lines().all(|l| crew_tui::widgets::text::width(l) <= usize::from(w)), "{w}x{h}");
+        assert!(
+            screen
+                .lines()
+                .all(|l| crew_tui::widgets::text::width(l) <= usize::from(w)),
+            "{w}x{h}"
+        );
     }
 
     assert_eq!(window_size(1_000_000), "1M");
@@ -984,18 +1256,27 @@ fn each_runtime_has_its_own_glyph_and_colour() {
     // The colour of the cell `skip` columns into the first `what` on screen.
     let color_of = |app: &App, size: (u16, u16), what: &str, skip: u16| {
         let mut terminal = Terminal::new(TestBackend::new(size.0, size.1)).unwrap();
-        terminal.draw(|frame| views::render(frame, app, &theme, NOW)).unwrap();
+        terminal
+            .draw(|frame| views::render(frame, app, &theme, NOW))
+            .unwrap();
         let buf = terminal.backend().buffer();
         let cells: Vec<String> = what.chars().map(String::from).collect();
         let area = buf.area;
         for y in area.y..area.bottom() {
             for x in area.x..=area.right() - cells.len() as u16 {
-                if cells.iter().enumerate().all(|(i, c)| buf[(x + i as u16, y)].symbol() == c) {
+                if cells
+                    .iter()
+                    .enumerate()
+                    .all(|(i, c)| buf[(x + i as u16, y)].symbol() == c)
+                {
                     return buf[(x + skip, y)].fg;
                 }
             }
         }
-        panic!("{what} is not on screen\n{}", render_to_string(app, size.0, size.1, NOW));
+        panic!(
+            "{what} is not on screen\n{}",
+            render_to_string(app, size.0, size.1, NOW)
+        );
     };
 
     let mut app = app();
@@ -1054,7 +1335,10 @@ fn each_runtime_has_its_own_glyph_and_colour() {
     app.view = View::Dashboard;
     app.help = true;
     let screen = render_to_string(&app, 120, 44, NOW);
-    assert!(screen.contains("an agent on Claude Code · Codex · pi · a shell"), "{screen}");
+    assert!(
+        screen.contains("an agent on Claude Code · Codex · pi · a shell"),
+        "{screen}"
+    );
     // A pi member has its own mark and colour too.
     let pi = app.agents.iter_mut().find(|a| a.id == "claude-3").unwrap();
     pi.runtime = crew_core::types::RuntimeKind::Pi;
@@ -1084,7 +1368,10 @@ fn the_inspector_scrolled_up_shows_the_session_transcript() {
     );
     // At the bottom the pane is the live terminal, and says what is above.
     let screen = render_to_string(&app, 120, 40, NOW);
-    assert!(screen.contains("terminal · live · 0s ago · ↑ transcript"), "{screen}");
+    assert!(
+        screen.contains("terminal · live · 0s ago · ↑ transcript"),
+        "{screen}"
+    );
     assert!(screen.contains("› Ask Codex to do anything"), "{screen}");
 
     // Scrolled up before the transcript has arrived, it says it is reading.
@@ -1117,9 +1404,17 @@ fn the_inspector_scrolled_up_shows_the_session_transcript() {
         NOW,
     );
     let screen = render_to_string(&app, 120, 40, NOW);
-    assert!(screen.contains("transcript · read 0s ago · ↑1 of 11 · ↓ live terminal"), "{screen}");
+    assert!(
+        screen.contains("transcript · read 0s ago · ↑1 of 11 · ↓ live terminal"),
+        "{screen}"
+    );
     assert!(!screen.contains("› Ask Codex to do anything"), "{screen}");
-    let at = |what: &str| screen.lines().position(|l| l.contains(what)).unwrap_or_else(|| panic!("{what}\n{screen}"));
+    let at = |what: &str| {
+        screen
+            .lines()
+            .position(|l| l.contains(what))
+            .unwrap_or_else(|| panic!("{what}\n{screen}"))
+    };
     let rows = [
         at("── prompt · "),
         at("[crew] Message from orchestrator (type task, id m-1):"),
@@ -1138,15 +1433,25 @@ fn the_inspector_scrolled_up_shows_the_session_transcript() {
     app.detail.scroll = 400;
     let screen = render_to_string(&app, 120, 14, NOW);
     assert!(screen.contains("── prompt · "), "{screen}");
-    assert!(!screen.contains("The retry path loses messages"), "{screen}");
+    assert!(
+        !screen.contains("The retry path loses messages"),
+        "{screen}"
+    );
     // And at the bottom again it is the terminal.
     app.detail.scroll = 0;
     let screen = render_to_string(&app, 120, 40, NOW);
-    assert!(screen.contains("› Ask Codex to do anything") && !screen.contains("── prompt"), "{screen}");
+    assert!(
+        screen.contains("› Ask Codex to do anything") && !screen.contains("── prompt"),
+        "{screen}"
+    );
 
     // An agent without a session file keeps scrolling its terminal.
     let mut snap = fixture::snapshot(NOW);
-    snap.agents.iter_mut().find(|a| a.id == "claude-2").unwrap().runtime = crew_core::types::RuntimeKind::Shell;
+    snap.agents
+        .iter_mut()
+        .find(|a| a.id == "claude-2")
+        .unwrap()
+        .runtime = crew_core::types::RuntimeKind::Shell;
     let mut shell = App::new();
     shell.apply_snapshot(snap, NOW);
     shell.open_detail("claude-2", NOW);
@@ -1161,7 +1466,10 @@ fn the_inspector_scrolled_up_shows_the_session_transcript() {
         NOW,
     );
     let screen = render_to_string(&shell, 120, 40, NOW);
-    assert!(screen.contains("terminal · live · 0s ago ─") && !screen.contains("↑ transcript"), "{screen}");
+    assert!(
+        screen.contains("terminal · live · 0s ago ─") && !screen.contains("↑ transcript"),
+        "{screen}"
+    );
     shell.detail.scroll = 50;
     shell.apply_reply(
         Reply::Transcript {
@@ -1171,7 +1479,10 @@ fn the_inspector_scrolled_up_shows_the_session_transcript() {
         NOW,
     );
     let screen = render_to_string(&shell, 120, 40, NOW);
-    assert!(screen.contains("line 0") && !screen.contains("line 59"), "{screen}");
+    assert!(
+        screen.contains("line 0") && !screen.contains("line 59"),
+        "{screen}"
+    );
 }
 
 #[test]
@@ -1180,7 +1491,10 @@ fn a_team_that_waits_for_the_operator_shows_it_on_the_overview() {
     let mut app = app();
     app.selected = None;
     let screen = render_to_string(&app, 120, 40, NOW);
-    assert!(!screen.contains("answer needed") && !screen.contains("answers needed"), "{screen}");
+    assert!(
+        !screen.contains("answer needed") && !screen.contains("answers needed"),
+        "{screen}"
+    );
 
     // One question, passed on for claude-3: the hub says the team waits, and
     // so does the box of the member who wants to know.
@@ -1189,20 +1503,38 @@ fn a_team_that_waits_for_the_operator_shows_it_on_the_overview() {
     app.questions = vec![question.clone()];
     let screen = render_to_string(&app, 120, 40, NOW);
     assert!(screen.contains("│ ? your answer needed"), "{screen}");
-    let member = screen.lines().position(|l| l.contains("✱ claude-3")).unwrap();
-    assert!(screen.lines().nth(member + 1).unwrap().contains(" ? "), "{screen}");
-    let other = screen.lines().position(|l| l.contains("✱ claude-1")).unwrap();
-    assert!(!screen.lines().nth(other + 1).unwrap().contains(" ? "), "{screen}");
+    let member = screen
+        .lines()
+        .position(|l| l.contains("✱ claude-3"))
+        .unwrap();
+    assert!(
+        screen.lines().nth(member + 1).unwrap().contains(" ? "),
+        "{screen}"
+    );
+    let other = screen
+        .lines()
+        .position(|l| l.contains("✱ claude-1"))
+        .unwrap();
+    assert!(
+        !screen.lines().nth(other + 1).unwrap().contains(" ? "),
+        "{screen}"
+    );
 
     // In the colour of things that need attention, border included.
     let mut terminal = Terminal::new(TestBackend::new(120, 40)).unwrap();
-    terminal.draw(|frame| views::render(frame, &app, &theme, NOW)).unwrap();
+    terminal
+        .draw(|frame| views::render(frame, &app, &theme, NOW))
+        .unwrap();
     let buf = terminal.backend().buffer();
     let find = |what: &str| {
         let cells: Vec<String> = what.chars().map(String::from).collect();
         for y in 0..40u16 {
             for x in 0..=120 - cells.len() as u16 {
-                if cells.iter().enumerate().all(|(i, c)| buf[(x + i as u16, y)].symbol() == c) {
+                if cells
+                    .iter()
+                    .enumerate()
+                    .all(|(i, c)| buf[(x + i as u16, y)].symbol() == c)
+                {
                     return (x, y);
                 }
             }
@@ -1223,20 +1555,32 @@ fn a_team_that_waits_for_the_operator_shows_it_on_the_overview() {
     let screen = render_to_string(&app, 160, 40, NOW);
     assert!(screen.contains("│ ? 2 answers needed"), "{screen}");
     assert!(!screen.contains("✓ all tasks done   "), "{screen}");
-    assert!(screen.contains("✓ all tasks done · ? 2 answers are needed"), "{screen}");
+    assert!(
+        screen.contains("✓ all tasks done · ? 2 answers are needed"),
+        "{screen}"
+    );
     assert!(!screen.contains("Everything is built."), "{screen}");
     // Answered, the team is simply done.
     app.questions.clear();
     let screen = render_to_string(&app, 160, 40, NOW);
-    assert!(screen.contains("│ ✓ all tasks done") && screen.contains("· Everything is built."), "{screen}");
+    assert!(
+        screen.contains("│ ✓ all tasks done") && screen.contains("· Everything is built."),
+        "{screen}"
+    );
 
     // The small-terminal list marks the same agents.
     app.questions = vec![question];
     let screen = render_to_string(&app, 60, 16, NOW);
-    let hub = screen.lines().find(|l| l.contains("◆ orchestrator")).unwrap();
+    let hub = screen
+        .lines()
+        .find(|l| l.contains("◆ orchestrator"))
+        .unwrap();
     let asker = screen.lines().find(|l| l.contains("✱ claude-3")).unwrap();
     let quiet = screen.lines().find(|l| l.contains("✱ claude-1")).unwrap();
-    assert!(hub.contains(" ? ") && asker.contains(" ? ") && !quiet.contains(" ? "), "{screen}");
+    assert!(
+        hub.contains(" ? ") && asker.contains(" ? ") && !quiet.contains(" ? "),
+        "{screen}"
+    );
 }
 
 #[test]
@@ -1256,25 +1600,41 @@ fn the_live_terminal_keeps_its_colours_and_the_type_box_is_drawn() {
     );
     let screen = render_to_string(&app, 120, 40, NOW);
     assert!(screen.contains("red then bold green"), "{screen}");
-    assert!(screen.contains("❯ cursor") && !screen.contains("title"), "{screen}");
+    assert!(
+        screen.contains("❯ cursor") && !screen.contains("title"),
+        "{screen}"
+    );
 
     let mut terminal = Terminal::new(TestBackend::new(120, 40)).unwrap();
-    terminal.draw(|frame| views::render(frame, &app, &theme, NOW)).unwrap();
+    terminal
+        .draw(|frame| views::render(frame, &app, &theme, NOW))
+        .unwrap();
     let buf = terminal.backend().buffer();
     let find = |what: &str| {
         let cells: Vec<String> = what.chars().map(String::from).collect();
         for y in 0..40u16 {
             for x in 0..=120 - cells.len() as u16 {
-                if cells.iter().enumerate().all(|(i, c)| buf[(x + i as u16, y)].symbol() == c) {
+                if cells
+                    .iter()
+                    .enumerate()
+                    .all(|(i, c)| buf[(x + i as u16, y)].symbol() == c)
+                {
                     return (x, y);
                 }
             }
         }
-        panic!("{what} is not on screen\n{}", render_to_string(&app, 120, 40, NOW));
+        panic!(
+            "{what} is not on screen\n{}",
+            render_to_string(&app, 120, 40, NOW)
+        );
     };
     let (x, y) = find("red then bold green");
     assert_eq!(buf[(x, y)].fg, ratatui::style::Color::Red);
-    assert_eq!(buf[(x + 4, y)].fg, theme.text, "a reset goes back to the pane's colour");
+    assert_eq!(
+        buf[(x + 4, y)].fg,
+        theme.text,
+        "a reset goes back to the pane's colour"
+    );
     let green = &buf[(x + 9, y)];
     assert_eq!(green.fg, ratatui::style::Color::Rgb(10, 200, 10));
     assert!(green.modifier.contains(Modifier::BOLD));
@@ -1289,7 +1649,10 @@ fn the_live_terminal_keeps_its_colours_and_the_type_box_is_drawn() {
     let screen = render_to_string(&app, 120, 40, NOW);
     assert!(screen.contains("type into claude-1's terminal"), "{screen}");
     assert!(screen.contains("❯ hello there"), "{screen}");
-    assert!(screen.contains("enter alone presses ⏎ · esc back"), "{screen}");
+    assert!(
+        screen.contains("enter alone presses ⏎ · esc back"),
+        "{screen}"
+    );
 }
 
 #[test]
@@ -1308,20 +1671,34 @@ fn the_terminal_pane_takes_the_inspector_with_f_and_shows_when_it_is_typed_into(
         NOW,
     );
     let screen = render_to_string(&app, 120, 40, NOW);
-    assert!(screen.contains("messages") && screen.contains("errors") && screen.contains("tasks"), "{screen}");
+    assert!(
+        screen.contains("messages") && screen.contains("errors") && screen.contains("tasks"),
+        "{screen}"
+    );
     assert!(screen.contains("↑ transcript · click to type"), "{screen}");
     // Drawing records where the pane is, and a click there is into it.
     let pane = app.detail.terminal_rect.get();
     assert!(pane.width > 40 && pane.height > 10, "{pane:?}");
     assert_eq!(
-        views::hit(&app, ratatui::layout::Rect::new(0, 0, 120, 40), pane.x + 2, pane.y + 2),
+        views::hit(
+            &app,
+            ratatui::layout::Rect::new(0, 0, 120, 40),
+            pane.x + 2,
+            pane.y + 2
+        ),
         Some(views::dashboard::Hit::Terminal)
     );
-    assert_eq!(views::hit(&app, ratatui::layout::Rect::new(0, 0, 120, 40), 2, 5), None);
+    assert_eq!(
+        views::hit(&app, ratatui::layout::Rect::new(0, 0, 120, 40), 2, 5),
+        None
+    );
 
     app.detail.full = true;
     let screen = render_to_string(&app, 120, 40, NOW);
-    assert!(!screen.contains("messages") && !screen.contains("errors") && !screen.contains("tasks ─"), "{screen}");
+    assert!(
+        !screen.contains("messages") && !screen.contains("errors") && !screen.contains("tasks ─"),
+        "{screen}"
+    );
     assert!(screen.contains("terminal · live"), "{screen}");
     let wide = app.detail.terminal_rect.get();
     assert!(wide.width >= 118 && wide.height >= 36, "{wide:?}");
@@ -1329,12 +1706,24 @@ fn the_terminal_pane_takes_the_inspector_with_f_and_shows_when_it_is_typed_into(
     // Typed into, the pane says so, in the colour of things that are live.
     app.detail.typing = true;
     let screen = render_to_string(&app, 120, 40, NOW);
-    assert!(screen.contains("typing: keys go to the agent · ctrl-] stops"), "{screen}");
-    assert!(screen.contains("ctrl-] stop typing (right-click too)"), "{screen}");
+    assert!(
+        screen.contains("typing: keys go to the agent · ctrl-] stops"),
+        "{screen}"
+    );
+    assert!(
+        screen.contains("ctrl-] stop typing (right-click too)"),
+        "{screen}"
+    );
     let mut terminal = Terminal::new(TestBackend::new(120, 40)).unwrap();
-    terminal.draw(|frame| views::render(frame, &app, &theme, NOW)).unwrap();
+    terminal
+        .draw(|frame| views::render(frame, &app, &theme, NOW))
+        .unwrap();
     let buf = terminal.backend().buffer();
-    assert_eq!(buf[(wide.x, wide.y + 1)].fg, theme.accent, "the pane's border");
+    assert_eq!(
+        buf[(wide.x, wide.y + 1)].fg,
+        theme.accent,
+        "the pane's border"
+    );
 }
 
 #[test]
@@ -1353,7 +1742,11 @@ fn a_session_off_its_model_is_marked_on_its_box_and_explained_in_the_inspector()
     // The label on the border is marked and in the warning colour; the
     // other boxes are as before.
     let screen = render_to_string(&app, 120, 40, NOW);
-    assert_eq!(screen.matches(" ↓ Sonnet 5.5 · high ").count(), 1, "{screen}");
+    assert_eq!(
+        screen.matches(" ↓ Sonnet 5.5 · high ").count(),
+        1,
+        "{screen}"
+    );
     // Six boxes and the hub, the marked one included.
     assert_eq!(screen.matches(" Sonnet 5.5 · high ").count(), 7, "{screen}");
     let rects = crew_tui::views::dashboard::agent_rects(&app, area);
@@ -1362,7 +1755,9 @@ fn a_session_off_its_model_is_marked_on_its_box_and_explained_in_the_inspector()
     let at = row.find("↓ Sonnet").unwrap();
     let x = row[..at].chars().count() as u16;
     let mut terminal = Terminal::new(TestBackend::new(120, 40)).unwrap();
-    terminal.draw(|frame| views::render(frame, &app, &theme, NOW)).unwrap();
+    terminal
+        .draw(|frame| views::render(frame, &app, &theme, NOW))
+        .unwrap();
     let cell = &terminal.backend().buffer()[(x, rect.bottom() - 1)];
     assert_eq!(cell.fg, theme.warn, "{row}");
     assert!(cell.modifier.contains(Modifier::BOLD));
@@ -1370,7 +1765,10 @@ fn a_session_off_its_model_is_marked_on_its_box_and_explained_in_the_inspector()
     // The inspector says what it runs on instead of what, and why.
     app.open_detail("claude-1", NOW);
     let screen = render_to_string(&app, 160, 44, NOW);
-    assert!(screen.contains("runtime   claude · Sonnet 5.5 · high"), "{screen}");
+    assert!(
+        screen.contains("runtime   claude · Sonnet 5.5 · high"),
+        "{screen}"
+    );
     assert!(
         screen.contains("fallback  ↓ on Sonnet 5.5 instead of Opus 5.5 — Swi"),
         "{screen}"
@@ -1391,18 +1789,29 @@ fn each_box_says_which_task_its_member_is_on_and_what_it_is_doing_now() {
             .lines()
             .skip(usize::from(rect.y) + 1)
             .take(usize::from(rect.height) - 2)
-            .map(|l| l.chars().skip(usize::from(rect.x) + 2).take(usize::from(rect.width) - 4).collect::<String>())
+            .map(|l| {
+                l.chars()
+                    .skip(usize::from(rect.x) + 2)
+                    .take(usize::from(rect.width) - 4)
+                    .collect::<String>()
+            })
             .collect()
     };
     // The task it is on (not its role), and the tool it is running with how
     // long it has been on the task.
-    assert_eq!(rows_of(&app, "claude-1"), ["implement billing   ◓  51%", "▸ Edit src/lib.rs   11m40s"]);
+    assert_eq!(
+        rows_of(&app, "claude-1"),
+        ["implement billing   ◓  51%", "▸ Edit src/lib.rs   11m40s"]
+    );
     // Every report from the session shows at once.
     let agent = app.agents.iter_mut().find(|a| a.id == "claude-1").unwrap();
     agent.activity = "$ cargo test --workspace".into();
     assert_eq!(rows_of(&app, "claude-1")[1], "▸ $ cargo test --w… 11m40s");
     // A finished member says what it finished, and when.
-    assert_eq!(rows_of(&app, "claude-2"), ["implement queue     ✓ 100%", "✓ finished       1m00s ago"]);
+    assert_eq!(
+        rows_of(&app, "claude-2"),
+        ["implement queue     ✓ 100%", "✓ finished       1m00s ago"]
+    );
 
     // Other states say what they are.
     let set = |app: &mut App, id: &str, f: &dyn Fn(&mut crew_core::types::Agent)| {
@@ -1419,29 +1828,47 @@ fn each_box_says_which_task_its_member_is_on_and_what_it_is_doing_now() {
     });
     assert_eq!(rows_of(&app, "claude-4")[1], "failed to start: no such …");
     // A member without a task shows its role, and how long it has been idle.
-    app.tasks.retain(|t| t.assigned_agent.as_deref() != Some("claude-5"));
+    app.tasks
+        .retain(|t| t.assigned_agent.as_deref() != Some("claude-5"));
     set(&mut app, "claude-5", &|a| {
         a.status = AgentStatus::Idle;
         a.task = None;
         a.progress = None;
         a.last_activity_at = NOW - 300_000;
     });
-    assert_eq!(rows_of(&app, "claude-5"), ["db                  · idle", "idle                 5m00s"]);
+    assert_eq!(
+        rows_of(&app, "claude-5"),
+        ["db                  · idle", "idle                 5m00s"]
+    );
 
     // The tones: live while working, a warning when blocked, an error when
     // failed, quiet otherwise.
     let tone = |id: &str| {
         let agent = app.agents.iter().find(|a| a.id == id).unwrap();
-        let decor = Decor { work: app.work_of(id, NOW), ..Decor::default() };
+        let decor = Decor {
+            work: app.work_of(id, NOW),
+            ..Decor::default()
+        };
         doing(agent, &decor).2
     };
-    assert_eq!((tone("claude-1"), tone("claude-2"), tone("claude-3"), tone("claude-4")), (Tone::Live, Tone::Quiet, Tone::Warn, Tone::Bad));
+    assert_eq!(
+        (
+            tone("claude-1"),
+            tone("claude-2"),
+            tone("claude-3"),
+            tone("claude-4")
+        ),
+        (Tone::Live, Tone::Quiet, Tone::Warn, Tone::Bad)
+    );
 
     // Where only one row per member fits, the list carries both: the task,
     // then what a working member is doing.
     let compact = render_to_string(&app, 100, 6, NOW);
     let row = compact.lines().find(|l| l.contains("claude-1")).unwrap();
-    assert!(row.contains("implement billing · ▸ $ cargo test --workspace"), "{compact}");
+    assert!(
+        row.contains("implement billing · ▸ $ cargo test --workspace"),
+        "{compact}"
+    );
 }
 
 #[test]
@@ -1453,10 +1880,16 @@ fn the_hub_says_its_cli_and_the_picker_chooses_the_orchestrators_model_and_cli()
     let screen = render_to_string(&app, 120, 40, NOW);
     assert!(screen.contains("─ ✱ Sonnet 5.5 · high ─"), "{screen}");
 
-    assert_eq!(app.open_model_picker("orchestrator", NOW), vec![Command::FetchModels]);
+    assert_eq!(
+        app.open_model_picker("orchestrator", NOW),
+        vec![Command::FetchModels]
+    );
     let screen = render_to_string(&app, 120, 40, NOW);
     assert!(screen.contains("orchestrator · model and CLI"), "{screen}");
-    assert!(screen.contains("asking the daemon what can be started here…"), "{screen}");
+    assert!(
+        screen.contains("asking the daemon what can be started here…"),
+        "{screen}"
+    );
     app.apply_reply(Reply::Models(Ok(fixture::models())), NOW);
     let screen = render_to_string(&app, 120, 40, NOW);
     // A tab per CLI, the orchestrator's own marked; its models, with the
@@ -1464,14 +1897,37 @@ fn the_hub_says_its_cli_and_the_picker_chooses_the_orchestrators_model_and_cli()
     assert!(screen.contains(" 1 ✱ Claude Code ● "), "{screen}");
     assert!(screen.contains(" 2 ❂ Codex "), "{screen}");
     assert!(screen.contains(" 3 π pi "), "{screen}");
-    let row = |screen: &str, text: &str| screen.lines().find(|l| l.contains(text)).unwrap_or_default().to_string();
+    let row = |screen: &str, text: &str| {
+        screen
+            .lines()
+            .find(|l| l.contains(text))
+            .unwrap_or_default()
+            .to_string()
+    };
     let current = row(&screen, "Sonnet 5.5  ");
     assert!(current.contains("▸● Sonnet 5.5"), "{current}");
-    assert!(current.contains("balanced") && current.contains("$2 / $10 per MTok") && current.contains("now"), "{current}");
-    assert!(row(&screen, "Fable 5.1").contains("   Fable 5.1"), "{screen}");
-    assert!(screen.contains("Sonnet 5.5, as its vendor describes it."), "{screen}");
-    assert!(screen.contains("same CLI: the session is restarted on the model, resumed where it was"), "{screen}");
-    assert!(screen.contains("←→ CLI · ↑↓ model · enter switch · esc cancel"), "{screen}");
+    assert!(
+        current.contains("balanced")
+            && current.contains("$2 / $10 per MTok")
+            && current.contains("now"),
+        "{current}"
+    );
+    assert!(
+        row(&screen, "Fable 5.1").contains("   Fable 5.1"),
+        "{screen}"
+    );
+    assert!(
+        screen.contains("Sonnet 5.5, as its vendor describes it."),
+        "{screen}"
+    );
+    assert!(
+        screen.contains("same CLI: the session is restarted on the model, resumed where it was"),
+        "{screen}"
+    );
+    assert!(
+        screen.contains("←→ CLI · ↑↓ model · enter switch · esc cancel"),
+        "{screen}"
+    );
 
     // Another CLI says what moving there means; a model that cannot start
     // there says why.
@@ -1481,12 +1937,20 @@ fn the_hub_says_its_cli_and_the_picker_chooses_the_orchestrators_model_and_cli()
     }
     let screen = render_to_string(&app, 120, 40, NOW);
     assert!(row(&screen, "GPT 6 Luna").contains("not here"), "{screen}");
-    assert!(screen.contains("Cannot be started here: not in the model list of this Codex account"), "{screen}");
+    assert!(
+        screen.contains("Cannot be started here: not in the model list of this Codex account"),
+        "{screen}"
+    );
     assert!(
         screen.contains("another CLI: a fresh Codex session there, handed where the work stands"),
         "{screen}"
     );
     // It fits a small terminal.
     let screen = render_to_string(&app, 80, 24, NOW);
-    assert!(screen.contains("model and CLI") && screen.contains("GPT 6 Astra") && screen.contains("esc cancel"), "{screen}");
+    assert!(
+        screen.contains("model and CLI")
+            && screen.contains("GPT 6 Astra")
+            && screen.contains("esc cancel"),
+        "{screen}"
+    );
 }

@@ -531,7 +531,10 @@ mod tests {
         let topo = radial(Rect::new(0, 0, 200, 60), 0).unwrap();
         assert!(satellites(Rect::new(0, 0, 200, 60), &topo, &[]).is_empty());
         let topo = radial(Rect::new(0, 0, 120, 30), 3).unwrap();
-        assert_eq!(satellites(Rect::new(0, 0, 120, 30), &topo, &[1, 1, 1, 9]).len(), 4);
+        assert_eq!(
+            satellites(Rect::new(0, 0, 120, 30), &topo, &[1, 1, 1, 9]).len(),
+            4
+        );
     }
 
     #[test]

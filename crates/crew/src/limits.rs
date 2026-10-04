@@ -195,7 +195,10 @@ pub fn codex_quota(rollout: &str) -> Vec<QuotaReading> {
             Some(QuotaReading {
                 window: window_name(w.get("window_minutes")?.as_i64()?),
                 percent_used: w.get("used_percent")?.as_f64()? as f32,
-                resets_at: w.get("resets_at").and_then(Value::as_i64).map(|secs| secs * 1000),
+                resets_at: w
+                    .get("resets_at")
+                    .and_then(Value::as_i64)
+                    .map(|secs| secs * 1000),
             })
         })
         .collect()
@@ -291,13 +294,21 @@ pub fn codex_last_turn(rollout: &str) -> Option<CodexTurnEnd> {
         let marked = ["\"task_complete\"", "\"turn_aborted\"", "\"task_started\""]
             .iter()
             .any(|mark| line.contains(mark));
-        let given = end.is_some() && (line.contains("\"role\":\"user\"") || line.contains("\"user_message\""));
+        let given = end.is_some()
+            && (line.contains("\"role\":\"user\"") || line.contains("\"user_message\""));
         if !marked && !given {
             continue;
         }
-        let Ok(value) = serde_json::from_str::<Value>(line) else { continue };
-        let Some(payload) = value.get("payload") else { continue };
-        let kind = payload.get("type").and_then(Value::as_str).unwrap_or_default();
+        let Ok(value) = serde_json::from_str::<Value>(line) else {
+            continue;
+        };
+        let Some(payload) = value.get("payload") else {
+            continue;
+        };
+        let kind = payload
+            .get("type")
+            .and_then(Value::as_str)
+            .unwrap_or_default();
         match (value.get("type").and_then(Value::as_str), kind) {
             (Some("event_msg"), "task_complete" | "turn_aborted") => {
                 if end.is_some() {
@@ -320,7 +331,10 @@ pub fn codex_last_turn(rollout: &str) -> Option<CodexTurnEnd> {
                         .or_else(|| value.get("timestamp").and_then(Value::as_str))
                         .unwrap_or_default()
                         .to_string(),
-                    ended_at: payload.get("completed_at").and_then(Value::as_i64).map(|secs| secs * 1000),
+                    ended_at: payload
+                        .get("completed_at")
+                        .and_then(Value::as_i64)
+                        .map(|secs| secs * 1000),
                     error,
                     input: Vec::new(),
                 });
@@ -334,9 +348,19 @@ pub fn codex_last_turn(rollout: &str) -> Option<CodexTurnEnd> {
                     input.push(text.to_string());
                 }
             }
-            (Some("response_item"), "message") if payload.get("role").and_then(Value::as_str) == Some("user") => {
-                let texts = payload.get("content").and_then(Value::as_array).into_iter().flatten();
-                input.extend(texts.filter_map(|c| c.get("text").and_then(Value::as_str)).map(str::to_string));
+            (Some("response_item"), "message")
+                if payload.get("role").and_then(Value::as_str) == Some("user") =>
+            {
+                let texts = payload
+                    .get("content")
+                    .and_then(Value::as_array)
+                    .into_iter()
+                    .flatten();
+                input.extend(
+                    texts
+                        .filter_map(|c| c.get("text").and_then(Value::as_str))
+                        .map(str::to_string),
+                );
             }
             _ => {}
         }
@@ -387,10 +411,17 @@ pub fn claude_model_switch(transcript: &str) -> Option<ModelSwitch> {
                 "model_fallback" | "model_consent_fallback" => {}
                 // A refusal answered by another model only for that reply
                 // leaves the session's model as it was.
-                "model_refusal_fallback" if value.get("scope").and_then(Value::as_str) != Some("local") => {}
+                "model_refusal_fallback"
+                    if value.get("scope").and_then(Value::as_str) != Some("local") => {}
                 _ => return None,
             }
-            let text = |key: &str| value.get(key).and_then(Value::as_str).unwrap_or_default().to_string();
+            let text = |key: &str| {
+                value
+                    .get(key)
+                    .and_then(Value::as_str)
+                    .unwrap_or_default()
+                    .to_string()
+            };
             let (from, to) = (text("originalModel"), text("fallbackModel"));
             if from.is_empty() || to.is_empty() {
                 return None;
@@ -418,8 +449,14 @@ pub fn claude_session_facts(transcript: &str) -> Option<SessionFacts> {
             let message = value.get("message")?;
             let usage = message.get("usage")?;
             let count = |key: &str| usage.get(key).and_then(Value::as_u64).unwrap_or(0);
-            let tokens = count("input_tokens") + count("cache_read_input_tokens") + count("cache_creation_input_tokens");
-            let text = |v: Option<&Value>| v.and_then(Value::as_str).filter(|s| !s.is_empty()).map(str::to_string);
+            let tokens = count("input_tokens")
+                + count("cache_read_input_tokens")
+                + count("cache_creation_input_tokens");
+            let text = |v: Option<&Value>| {
+                v.and_then(Value::as_str)
+                    .filter(|s| !s.is_empty())
+                    .map(str::to_string)
+            };
             Some(SessionFacts {
                 // A reply crew or the CLI made up carries no real model.
                 model: text(message.get("model")).filter(|m| !m.starts_with('<')),
@@ -436,13 +473,19 @@ pub fn claude_transcript_path(session: &str) -> Option<std::path::PathBuf> {
     let home = std::env::var_os("CLAUDE_CONFIG_DIR")
         .filter(|v| !v.is_empty())
         .map(std::path::PathBuf::from)
-        .or_else(|| std::env::var_os("HOME").map(|h| std::path::PathBuf::from(h).join(".claude")))?;
+        .or_else(|| {
+            std::env::var_os("HOME").map(|h| std::path::PathBuf::from(h).join(".claude"))
+        })?;
     claude_transcript_in(&home, session)
 }
 
 fn claude_transcript_in(home: &std::path::Path, session: &str) -> Option<std::path::PathBuf> {
     // A session id is a plain name, never a path.
-    if session.is_empty() || !session.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'-' || b == b'_') {
+    if session.is_empty()
+        || !session
+            .bytes()
+            .all(|b| b.is_ascii_alphanumeric() || b == b'-' || b == b'_')
+    {
         return None;
     }
     let file = format!("{session}.jsonl");
@@ -463,17 +506,29 @@ pub fn codex_rollout_path(thread: &str, started_ms: i64) -> Option<std::path::Pa
     codex_rollout_in(&home, thread, started_ms)
 }
 
-fn codex_rollout_in(home: &std::path::Path, thread: &str, started_ms: i64) -> Option<std::path::PathBuf> {
+fn codex_rollout_in(
+    home: &std::path::Path,
+    thread: &str,
+    started_ms: i64,
+) -> Option<std::path::PathBuf> {
     let suffix = format!("-{thread}.jsonl");
     // The folder is named after the local day the session started.
     [0i64, -1, 1].iter().find_map(|day| {
-        let date = Local.timestamp_millis_opt(started_ms + day * 86_400_000).single()?;
-        let dir = home.join("sessions").join(date.format("%Y/%m/%d").to_string());
-        std::fs::read_dir(dir).ok()?.flatten().map(|e| e.path()).find(|p| {
-            p.file_name()
-                .and_then(|n| n.to_str())
-                .is_some_and(|n| n.starts_with("rollout-") && n.ends_with(&suffix))
-        })
+        let date = Local
+            .timestamp_millis_opt(started_ms + day * 86_400_000)
+            .single()?;
+        let dir = home
+            .join("sessions")
+            .join(date.format("%Y/%m/%d").to_string());
+        std::fs::read_dir(dir)
+            .ok()?
+            .flatten()
+            .map(|e| e.path())
+            .find(|p| {
+                p.file_name()
+                    .and_then(|n| n.to_str())
+                    .is_some_and(|n| n.starts_with("rollout-") && n.ends_with(&suffix))
+            })
     })
 }
 
@@ -488,7 +543,9 @@ pub fn read_tail(path: &std::path::Path, max_bytes: u64) -> Option<String> {
     file.read_to_end(&mut bytes).ok()?;
     let text = String::from_utf8_lossy(&bytes).into_owned();
     Some(if start > 0 {
-        text.split_once('\n').map(|(_, rest)| rest.to_string()).unwrap_or_default()
+        text.split_once('\n')
+            .map(|(_, rest)| rest.to_string())
+            .unwrap_or_default()
     } else {
         text
     })
@@ -537,14 +594,24 @@ fn normalise(text: &str) -> String {
 
 /// Classify the payload of Claude Code's `StopFailure` hook.
 pub fn claude_stop_failure(payload: &Value, now_ms: i64) -> TurnFailure {
-    let field = |name: &str| payload.get(name).and_then(Value::as_str).unwrap_or("").trim();
+    let field = |name: &str| {
+        payload
+            .get(name)
+            .and_then(Value::as_str)
+            .unwrap_or("")
+            .trim()
+    };
     let error = field("error");
     let said = [field("error_details"), field("last_assistant_message")]
         .into_iter()
         .filter(|s| !s.is_empty())
         .collect::<Vec<_>>()
         .join(" ");
-    let message = if said.is_empty() { error.replace('_', " ") } else { said.clone() };
+    let message = if said.is_empty() {
+        error.replace('_', " ")
+    } else {
+        said.clone()
+    };
     let message = truncate_chars(&one_line(&message), 300);
     let kind = match error {
         "rate_limit" => LimitKind::Usage,
@@ -555,7 +622,11 @@ pub fn claude_stop_failure(payload: &Value, now_ms: i64) -> TurnFailure {
         | "verification_required"
         | "cloud_credential_error" => LimitKind::Auth,
         other => {
-            let what = if other.is_empty() { "unknown error" } else { other };
+            let what = if other.is_empty() {
+                "unknown error"
+            } else {
+                other
+            };
             return TurnFailure::Other(format!("{}: {message}", what.replace('_', " ")));
         }
     };
@@ -577,7 +648,11 @@ fn last_limit_on_screen(
     is_prompt: impl Fn(&str) -> bool,
     now_ms: i64,
 ) -> Option<LimitInfo> {
-    let lines: Vec<&str> = screen.lines().map(str::trim_end).filter(|l| !l.trim().is_empty()).collect();
+    let lines: Vec<&str> = screen
+        .lines()
+        .map(str::trim_end)
+        .filter(|l| !l.trim().is_empty())
+        .collect();
     let (at, kind) = lines
         .iter()
         .enumerate()
@@ -592,7 +667,11 @@ fn last_limit_on_screen(
     }
     // A long message wraps; take it up to the input line.
     let mut message = lines[at].trim().to_string();
-    for line in after.iter().take_while(|l| !is_prompt(l.trim_start())).take(3) {
+    for line in after
+        .iter()
+        .take_while(|l| !is_prompt(l.trim_start()))
+        .take(3)
+    {
         if line.starts_with("  ") || line.starts_with('\t') {
             message.push(' ');
             message.push_str(line.trim());
@@ -615,7 +694,9 @@ pub fn codex_screen(screen: &str, now_ms: i64) -> Option<LimitInfo> {
         |line| {
             if line.contains("out of credits") || line.contains("hit your spend cap") {
                 Some(LimitKind::Credits)
-            } else if line.contains("you've hit your usage limit") || line.contains("usage limit reached") {
+            } else if line.contains("you've hit your usage limit")
+                || line.contains("usage limit reached")
+            {
                 Some(LimitKind::Usage)
             } else {
                 None
@@ -637,7 +718,8 @@ pub fn claude_screen(screen: &str, now_ms: i64) -> Option<LimitInfo> {
                 Some(LimitKind::Credits)
             } else if (line.contains("you've hit your") && line.contains("limit"))
                 || line.contains("usage limit reached")
-                || (line.contains("api error") && (line.contains("(429)") || line.contains("rate limit")))
+                || (line.contains("api error")
+                    && (line.contains("(429)") || line.contains("rate limit")))
             {
                 Some(LimitKind::Usage)
             } else {
@@ -658,11 +740,36 @@ pub fn claude_screen(screen: &str, now_ms: i64) -> Option<LimitInfo> {
 pub fn classify_error(text: &str) -> Option<LimitKind> {
     let lower = text.to_lowercase();
     let has = |needles: &[&str]| needles.iter().any(|n| lower.contains(n));
-    if has(&["credit balance", "insufficient credit", "out of credits", "billing", "payment required", "402"]) {
+    if has(&[
+        "credit balance",
+        "insufficient credit",
+        "out of credits",
+        "billing",
+        "payment required",
+        "402",
+    ]) {
         Some(LimitKind::Credits)
-    } else if has(&["usage limit", "rate limit", "rate_limit", "429", "too many requests", "quota exceeded", "hit your"]) {
+    } else if has(&[
+        "usage limit",
+        "rate limit",
+        "rate_limit",
+        "429",
+        "too many requests",
+        "quota exceeded",
+        "hit your",
+    ]) {
         Some(LimitKind::Usage)
-    } else if has(&["401", "unauthorized", "authentication", "not logged in", "no api key", "invalid api key", "token expired", "permission_error", "403"]) {
+    } else if has(&[
+        "401",
+        "unauthorized",
+        "authentication",
+        "not logged in",
+        "no api key",
+        "invalid api key",
+        "token expired",
+        "permission_error",
+        "403",
+    ]) {
         Some(LimitKind::Auth)
     } else {
         None
@@ -672,9 +779,19 @@ pub fn classify_error(text: &str) -> Option<LimitKind> {
 /// A pi turn that ended in an error, as the crew extension reports it:
 /// `error` and the provider's message in `error_details`.
 pub fn pi_turn_error(payload: &Value, now_ms: i64) -> TurnFailure {
-    let field = |name: &str| payload.get(name).and_then(Value::as_str).unwrap_or("").trim();
+    let field = |name: &str| {
+        payload
+            .get(name)
+            .and_then(Value::as_str)
+            .unwrap_or("")
+            .trim()
+    };
     let details = field("error_details");
-    let message = if details.is_empty() { field("error") } else { details };
+    let message = if details.is_empty() {
+        field("error")
+    } else {
+        details
+    };
     let message = truncate_chars(&one_line(message), 300);
     match classify_error(&message) {
         Some(kind) => TurnFailure::Limited(LimitInfo {
@@ -682,7 +799,11 @@ pub fn pi_turn_error(payload: &Value, now_ms: i64) -> TurnFailure {
             resets_at: parse_reset(&message, now_ms),
             message,
         }),
-        None => TurnFailure::Other(if message.is_empty() { "unknown error".to_string() } else { message }),
+        None => TurnFailure::Other(if message.is_empty() {
+            "unknown error".to_string()
+        } else {
+            message
+        }),
     }
 }
 
@@ -693,7 +814,8 @@ pub fn pi_screen(screen: &str, now_ms: i64) -> Option<LimitInfo> {
     last_limit_on_screen(
         screen,
         |line| {
-            let looks_like_error = line.contains("error") || line.contains("limit") || line.contains("429");
+            let looks_like_error =
+                line.contains("error") || line.contains("limit") || line.contains("429");
             looks_like_error.then(|| classify_error(line)).flatten()
         },
         // pi's input box is a bordered line; anything after an error that
@@ -723,11 +845,17 @@ struct Scanner<'a> {
 
 impl<'a> Scanner<'a> {
     fn skip(&mut self, chars: &[char]) {
-        self.rest = self.rest.trim_start_matches(|c: char| c.is_whitespace() || chars.contains(&c));
+        self.rest = self
+            .rest
+            .trim_start_matches(|c: char| c.is_whitespace() || chars.contains(&c));
     }
 
     fn number(&mut self) -> Option<u32> {
-        let digits = self.rest.len() - self.rest.trim_start_matches(|c: char| c.is_ascii_digit()).len();
+        let digits = self.rest.len()
+            - self
+                .rest
+                .trim_start_matches(|c: char| c.is_ascii_digit())
+                .len();
         if digits == 0 || digits > 10 {
             return None;
         }
@@ -737,7 +865,11 @@ impl<'a> Scanner<'a> {
     }
 
     fn word(&mut self) -> &'a str {
-        let len = self.rest.len() - self.rest.trim_start_matches(|c: char| c.is_ascii_alphabetic()).len();
+        let len = self.rest.len()
+            - self
+                .rest
+                .trim_start_matches(|c: char| c.is_ascii_alphabetic())
+                .len();
         let word = &self.rest[..len];
         self.rest = &self.rest[len..];
         word
@@ -790,7 +922,10 @@ fn parse_clock(text: &str, now_ms: i64) -> Option<i64> {
 
     let before = scan.rest;
     let word = scan.word();
-    if let Some(month) = MONTHS.iter().position(|m| word.len() >= 3 && word.starts_with(m)) {
+    if let Some(month) = MONTHS
+        .iter()
+        .position(|m| word.len() >= 3 && word.starts_with(m))
+    {
         scan.skip(&[]);
         let day = scan.number()?;
         for suffix in ["st", "nd", "rd", "th"] {
@@ -868,7 +1003,9 @@ pub fn parse_reset(text: &str, now_ms: i64) -> Option<i64> {
         "continuing automatically ",
     ];
     for anchor in ANCHORS {
-        let Some(at) = text.find(anchor) else { continue };
+        let Some(at) = text.find(anchor) else {
+            continue;
+        };
         let tail: String = text[at + anchor.len()..].chars().take(64).collect();
         let tail = tail.trim_start_matches(['"', ':', '=', ' ']);
         let parsed = if anchor == "resets_at" {
@@ -909,7 +1046,11 @@ mod tests {
     }
 
     fn local(y: i32, mo: u32, d: u32, h: u32, mi: u32) -> i64 {
-        Local.with_ymd_and_hms(y, mo, d, h, mi, 0).single().unwrap().timestamp_millis()
+        Local
+            .with_ymd_and_hms(y, mo, d, h, mi, 0)
+            .single()
+            .unwrap()
+            .timestamp_millis()
     }
 
     #[test]
@@ -919,17 +1060,35 @@ mod tests {
             // Codex.
             ("or try again at 3:19 PM.", local(2026, 10, 2, 15, 19)),
             ("Try again at 9:05 AM.", local(2026, 10, 3, 9, 5)),
-            ("or try again at Oct 5th, 2026 9:00 AM.", local(2026, 10, 5, 9, 0)),
-            ("try again in 3 hours 12 minutes", now + (3 * 3600 + 12 * 60) * 1000),
+            (
+                "or try again at Oct 5th, 2026 9:00 AM.",
+                local(2026, 10, 5, 9, 0),
+            ),
+            (
+                "try again in 3 hours 12 minutes",
+                now + (3 * 3600 + 12 * 60) * 1000,
+            ),
             // Claude Code.
-            ("You've hit your session limit · resets 3pm (America/Chicago)", local(2026, 10, 2, 15, 0)),
-            ("You've hit your weekly limit · resets Oct 6, 9am", local(2026, 10, 6, 9, 0)),
-            ("Usage limit reached · continuing automatically at 4:30pm", local(2026, 10, 2, 16, 30)),
+            (
+                "You've hit your session limit · resets 3pm (America/Chicago)",
+                local(2026, 10, 2, 15, 0),
+            ),
+            (
+                "You've hit your weekly limit · resets Oct 6, 9am",
+                local(2026, 10, 6, 9, 0),
+            ),
+            (
+                "Usage limit reached · continuing automatically at 4:30pm",
+                local(2026, 10, 2, 16, 30),
+            ),
             ("limit resets at 15:45", local(2026, 10, 2, 15, 45)),
             ("resets in 2h 5m", now + (2 * 3600 + 5 * 60) * 1000),
             ("resets tomorrow at 8am", local(2026, 10, 3, 8, 0)),
             // Machine-readable.
-            (r#"{"type":"usage_limit_reached","resets_at":1791000000}"#, 1_791_000_000_000),
+            (
+                r#"{"type":"usage_limit_reached","resets_at":1791000000}"#,
+                1_791_000_000_000,
+            ),
             ("Jan 2, 9am", 0),
         ];
         for (text, expected) in cases {
@@ -942,9 +1101,17 @@ mod tests {
         }
         // A date without a year that already passed long ago means next year.
         let december = local(2026, 12, 20, 12, 0);
-        assert_eq!(parse_reset("resets Jan 2, 9am", december), Some(local(2027, 1, 2, 9, 0)));
+        assert_eq!(
+            parse_reset("resets Jan 2, 9am", december),
+            Some(local(2027, 1, 2, 9, 0))
+        );
         // Nothing usable: no guess is made.
-        for text in ["Please try again later.", "resets soon", "try again at some point", "resets 99"] {
+        for text in [
+            "Please try again later.",
+            "resets soon",
+            "try again at some point",
+            "resets 99",
+        ] {
             assert_eq!(parse_reset(text, now), None, "{text}");
         }
         assert_eq!(fmt_when(local(2026, 10, 2, 15, 19), now), "3:19 PM");
@@ -971,7 +1138,11 @@ mod tests {
         let now = noon();
         let limit = codex_screen(CODEX_LIMITED, now).expect("a limit");
         assert_eq!(limit.kind, LimitKind::Usage);
-        assert!(limit.message.starts_with("You’ve hit your usage limit."), "{}", limit.message);
+        assert!(
+            limit.message.starts_with("You’ve hit your usage limit."),
+            "{}",
+            limit.message
+        );
         assert_eq!(limit.resets_at, Some(local(2026, 10, 2, 15, 19)));
 
         // A narrow terminal wraps the message; the time is still found.
@@ -979,7 +1150,10 @@ mod tests {
             "purchase more credits or try again at 3:19 PM.",
             "purchase more\n  credits or try again at 3:19 PM.",
         );
-        assert_eq!(codex_screen(&wrapped, now).unwrap().resets_at, Some(local(2026, 10, 2, 15, 19)));
+        assert_eq!(
+            codex_screen(&wrapped, now).unwrap().resets_at,
+            Some(local(2026, 10, 2, 15, 19))
+        );
 
         // Once the session goes on, the message is history: the resume
         // prompt was sent, or the model is answering again.
@@ -995,19 +1169,27 @@ mod tests {
         assert_eq!(codex_screen(&answering, now), None);
         // …and if it runs into the limit again, the new message counts.
         let again = format!("{resumed}\n■ You've hit your usage limit. Try again at 4:00 PM.\n\n› Ask Codex to do anything\n");
-        assert_eq!(codex_screen(&again, now).unwrap().resets_at, Some(local(2026, 10, 2, 16, 0)));
+        assert_eq!(
+            codex_screen(&again, now).unwrap().resets_at,
+            Some(local(2026, 10, 2, 16, 0))
+        );
 
         let credits = "■ Your workspace is out of credits. Add credits to continue.\n› Ask Codex to do anything\n";
         assert_eq!(codex_screen(credits, now).unwrap().kind, LimitKind::Credits);
         // Talking about limits is not hitting one.
-        assert_eq!(codex_screen("• The API has a usage limit of 100 requests.\n› \n", now), None);
+        assert_eq!(
+            codex_screen("• The API has a usage limit of 100 requests.\n› \n", now),
+            None
+        );
         assert_eq!(codex_screen("", now), None);
     }
 
     #[test]
     fn a_pi_turn_that_failed_is_classified_by_what_the_provider_said() {
         let now = local(2026, 10, 2, 12, 0);
-        let failed = |details: &str| pi_turn_error(&json!({ "error": "error", "error_details": details }), now);
+        let failed = |details: &str| {
+            pi_turn_error(&json!({ "error": "error", "error_details": details }), now)
+        };
         match failed("429 {\"type\":\"rate_limit_error\",\"message\":\"This request would exceed your usage limit · resets 3:19 PM\"}") {
             TurnFailure::Limited(info) => {
                 assert_eq!(info.kind, LimitKind::Usage);
@@ -1016,17 +1198,28 @@ mod tests {
             }
             other => panic!("{other:?}"),
         }
-        assert!(matches!(failed("Your credit balance is too low to access the Anthropic API"), TurnFailure::Limited(i) if i.kind == LimitKind::Credits));
-        assert!(matches!(failed("401 authentication_error: invalid x-api-key"), TurnFailure::Limited(i) if i.kind == LimitKind::Auth));
-        assert!(matches!(failed("500 Internal server error"), TurnFailure::Other(what) if what == "500 Internal server error"));
-        assert!(matches!(pi_turn_error(&json!({ "error": "error" }), now), TurnFailure::Other(what) if what == "error"));
+        assert!(
+            matches!(failed("Your credit balance is too low to access the Anthropic API"), TurnFailure::Limited(i) if i.kind == LimitKind::Credits)
+        );
+        assert!(
+            matches!(failed("401 authentication_error: invalid x-api-key"), TurnFailure::Limited(i) if i.kind == LimitKind::Auth)
+        );
+        assert!(
+            matches!(failed("500 Internal server error"), TurnFailure::Other(what) if what == "500 Internal server error")
+        );
+        assert!(
+            matches!(pi_turn_error(&json!({ "error": "error" }), now), TurnFailure::Other(what) if what == "error")
+        );
         assert_eq!(classify_error("Overloaded"), None);
 
         // On the screen, the provider's error line, unless the session went
         // on after it.
         let screen = "● Reading the file\n\nError: 429 rate_limit_error: You've hit your usage limit · resets 3:19 PM\n\n> \n";
         let info = pi_screen(screen, now).unwrap();
-        assert_eq!((info.kind, info.resets_at), (LimitKind::Usage, Some(local(2026, 10, 2, 15, 19))));
+        assert_eq!(
+            (info.kind, info.resets_at),
+            (LimitKind::Usage, Some(local(2026, 10, 2, 15, 19)))
+        );
         let went_on = format!("{screen}● Trying again\n> \n");
         assert!(pi_screen(&went_on, now).is_none());
         assert!(pi_screen("● all good\n> \n", now).is_none());
@@ -1042,15 +1235,31 @@ mod tests {
         );
         let limit = claude_screen(&rate, now).expect("a limit");
         assert_eq!((limit.kind, limit.resets_at), (LimitKind::Usage, None));
-        assert!(limit.message.starts_with("API Error: Request rejected (429)"), "{}", limit.message);
+        assert!(
+            limit
+                .message
+                .starts_with("API Error: Request rejected (429)"),
+            "{}",
+            limit.message
+        );
 
-        let plan = format!("  You've hit your session limit · resets 3pm (America/Chicago)\n\n{box_}");
-        assert_eq!(claude_screen(&plan, now).unwrap().resets_at, Some(local(2026, 10, 2, 15, 0)));
+        let plan =
+            format!("  You've hit your session limit · resets 3pm (America/Chicago)\n\n{box_}");
+        assert_eq!(
+            claude_screen(&plan, now).unwrap().resets_at,
+            Some(local(2026, 10, 2, 15, 0))
+        );
         let credits = format!("● Credit balance is too low\n{box_}");
-        assert_eq!(claude_screen(&credits, now).unwrap().kind, LimitKind::Credits);
+        assert_eq!(
+            claude_screen(&credits, now).unwrap().kind,
+            LimitKind::Credits
+        );
 
         // Followed by a new message or a new answer, it is history.
-        let went_on = format!("{}❯ continue please\n\n● Sure.\n\n{box_}", rate.replace(box_, ""));
+        let went_on = format!(
+            "{}❯ continue please\n\n● Sure.\n\n{box_}",
+            rate.replace(box_, "")
+        );
         assert_eq!(claude_screen(&went_on, now), None);
         assert_eq!(claude_screen(&format!("● All done.\n{box_}"), now), None);
     }
@@ -1064,9 +1273,15 @@ mod tests {
             { "percentUsed": 1 },
         ]}));
         assert_eq!(claude.len(), 3);
-        assert_eq!((claude[0].window.as_str(), claude[0].percent_used), ("5h", 62.5));
+        assert_eq!(
+            (claude[0].window.as_str(), claude[0].percent_used),
+            ("5h", 62.5)
+        );
         assert_eq!(claude[0].resets_at, Some(1_790_971_200_000));
-        assert_eq!((claude[1].window.as_str(), claude[1].resets_at), ("week", None));
+        assert_eq!(
+            (claude[1].window.as_str(), claude[1].resets_at),
+            ("week", None)
+        );
         assert_eq!(claude[2].window, "spend");
         assert!(claude_quota(&json!({})).is_empty());
 
@@ -1100,24 +1315,36 @@ mod tests {
         // without a cache, there is nothing.
         let flat = json!({ "cachedUsageUtilization": { "fetchedAtMs": 5, "limits": [{ "kind": "session", "percent": 1 }] } });
         assert_eq!(claude_cached_quota(&flat.to_string()).unwrap().1.len(), 1);
-        assert!(claude_cached_quota(&json!({ "cachedUsageUtilization": { "fetchedAtMs": 5 } }).to_string()).is_none());
+        assert!(claude_cached_quota(
+            &json!({ "cachedUsageUtilization": { "fetchedAtMs": 5 } }).to_string()
+        )
+        .is_none());
         assert!(claude_cached_quota("{}").is_none());
         assert!(claude_cached_quota("not json").is_none());
         assert_eq!(window_label("week/Fable"), "Fable week");
         assert_eq!(window_label("5h"), "session");
         assert_eq!(window_label("week"), "week");
-        assert!(window_rank("5h") < window_rank("week") && window_rank("week") < window_rank("week/Fable"));
+        assert!(
+            window_rank("5h") < window_rank("week")
+                && window_rank("week") < window_rank("week/Fable")
+        );
 
         // As Codex writes it (captured from a real session), newest last.
         let rollout = concat!(
-            r#"{"type":"event_msg","payload":{"type":"token_count","rate_limits":{"limit_id":"codex","primary":{"used_percent":12.0,"window_minutes":300,"resets_at":1791000000},"secondary":null}}}"#, "\n",
-            r#"{"type":"response_item","payload":{"type":"message"}}"#, "\n",
-            r#"{"type":"event_msg","payload":{"type":"token_count","rate_limits":{"limit_id":"codex","limit_name":null,"primary":{"used_percent":56.0,"window_minutes":10080,"resets_at":1791310669},"secondary":{"used_percent":3.5,"window_minutes":43200,"resets_at":1793000000},"credits":{"has_credits":false},"plan_type":"pro"}}}"#, "\n",
+            r#"{"type":"event_msg","payload":{"type":"token_count","rate_limits":{"limit_id":"codex","primary":{"used_percent":12.0,"window_minutes":300,"resets_at":1791000000},"secondary":null}}}"#,
+            "\n",
+            r#"{"type":"response_item","payload":{"type":"message"}}"#,
+            "\n",
+            r#"{"type":"event_msg","payload":{"type":"token_count","rate_limits":{"limit_id":"codex","limit_name":null,"primary":{"used_percent":56.0,"window_minutes":10080,"resets_at":1791310669},"secondary":{"used_percent":3.5,"window_minutes":43200,"resets_at":1793000000},"credits":{"has_credits":false},"plan_type":"pro"}}}"#,
+            "\n",
             "not json\n",
         );
         let codex = codex_quota(rollout);
         assert_eq!(codex.len(), 2);
-        assert_eq!((codex[0].window.as_str(), codex[0].percent_used), ("week", 56.0));
+        assert_eq!(
+            (codex[0].window.as_str(), codex[0].percent_used),
+            ("week", 56.0)
+        );
         assert_eq!(codex[0].resets_at, Some(1_791_310_669_000));
         assert_eq!(codex[1].window, "30d");
         // A session on another endpoint records the field with nothing in it.
@@ -1150,14 +1377,20 @@ mod tests {
             "\n",
             r#"{"type":"response_item","payload":{"text":"about turn_context entries","model":"nope"}}"#,
         );
-        assert_eq!(codex_running(turns), Some((Some("gpt-6-astra".into()), Some("xhigh".into()))));
+        assert_eq!(
+            codex_running(turns),
+            Some((Some("gpt-6-astra".into()), Some("xhigh".into())))
+        );
         assert_eq!(codex_running(log), None);
 
         // A turn that began long ago is found in the file itself.
         let dir = tempfile::tempdir().unwrap();
         let file = dir.path().join("rollout.jsonl");
         std::fs::write(&file, format!("{turns}\n{}\n", "x".repeat(400_000))).unwrap();
-        assert_eq!(codex_running_in(&file), Some((Some("gpt-6-astra".into()), Some("xhigh".into()))));
+        assert_eq!(
+            codex_running_in(&file),
+            Some((Some("gpt-6-astra".into()), Some("xhigh".into())))
+        );
         assert_eq!(codex_running_in(&dir.path().join("missing")), None);
 
         // A Claude Code transcript names the model, the effort and the fill
@@ -1207,19 +1440,31 @@ mod tests {
         );
         assert_eq!(facts.model.as_deref(), Some("claude-opus-5-5"));
         let overloaded = r#"{"type":"system","subtype":"model_fallback","content":"Switched to Sonnet 5.5 due to high demand for Opus 5.5","trigger":"overloaded","originalModel":"claude-opus-5-5","fallbackModel":"claude-sonnet-5-5"}"#;
-        assert_eq!(claude_model_switch(overloaded).map(|s| s.to), Some("claude-sonnet-5-5".into()));
+        assert_eq!(
+            claude_model_switch(overloaded).map(|s| s.to),
+            Some("claude-sonnet-5-5".into())
+        );
         let refusal = r#"{"type":"system","subtype":"model_refusal_fallback","direction":"retry","scope":"session","content":"Opus 5.5 declined. Switched to Sonnet 5.5.","originalModel":"claude-opus-5-5","fallbackModel":"claude-sonnet-5-5"}"#;
-        assert_eq!(claude_model_switch(refusal).map(|s| s.from), Some("claude-opus-5-5".into()));
+        assert_eq!(
+            claude_model_switch(refusal).map(|s| s.from),
+            Some("claude-opus-5-5".into())
+        );
         let one_reply = refusal.replace(r#""scope":"session""#, r#""scope":"local""#);
         assert_eq!(claude_model_switch(&one_reply), None);
         assert_eq!(claude_model_switch(transcript), None);
         // The newest word counts.
-        assert_eq!(claude_model_switch(&format!("{refusal}\n{overloaded}\n")).map(|s| s.note), Some("Switched to Sonnet 5.5 due to high demand for Opus 5.5".into()));
+        assert_eq!(
+            claude_model_switch(&format!("{refusal}\n{overloaded}\n")).map(|s| s.note),
+            Some("Switched to Sonnet 5.5 due to high demand for Opus 5.5".into())
+        );
         let home = tempfile::tempdir().unwrap();
         let project = home.path().join("projects/-work-demo");
         std::fs::create_dir_all(&project).unwrap();
         std::fs::write(project.join("abc-123.jsonl"), "").unwrap();
-        assert_eq!(claude_transcript_in(home.path(), "abc-123"), Some(project.join("abc-123.jsonl")));
+        assert_eq!(
+            claude_transcript_in(home.path(), "abc-123"),
+            Some(project.join("abc-123.jsonl"))
+        );
         assert_eq!(claude_transcript_in(home.path(), "nope"), None);
         assert_eq!(claude_transcript_in(home.path(), "../abc-123"), None);
 
@@ -1229,7 +1474,10 @@ mod tests {
         let path = dir.path().join("rollout.jsonl");
         let before = r#"{"timestamp":"t","type":"response_item","payload":{"text":"the \"type\":\"compacted\" entry"}}"#;
         std::fs::write(&path, format!("{before}\n")).unwrap();
-        assert!(!codex_compacted_since(&path, 0), "only text that mentions one");
+        assert!(
+            !codex_compacted_since(&path, 0),
+            "only text that mentions one"
+        );
         let offset = std::fs::metadata(&path).unwrap().len();
         let entry = format!(
             r#"{{"timestamp":"t","ordinal":350,"type":"compacted","payload":{{"message":"","replacement_history":"{}"}}}}"#,
@@ -1238,7 +1486,10 @@ mod tests {
         std::fs::write(&path, format!("{before}\n{entry}\n{before}\n")).unwrap();
         assert!(codex_compacted_since(&path, offset));
         assert!(codex_compacted_since(&path, 0));
-        assert!(!codex_compacted_since(&path, offset + entry.len() as u64 + 1), "an older compaction");
+        assert!(
+            !codex_compacted_since(&path, offset + entry.len() as u64 + 1),
+            "an older compaction"
+        );
         assert!(!codex_compacted_since(&dir.path().join("missing"), 0));
         assert_eq!(window_name(300), "5h");
         assert_eq!(window_name(720), "12h");
@@ -1255,12 +1506,22 @@ mod tests {
         let find = |thread: &str, at: i64| codex_rollout_in(tmp.path(), thread, at);
         assert_eq!(find("abc-123", started).as_deref(), Some(file.as_path()));
         // Looked up just after midnight, it is in yesterday's folder.
-        assert_eq!(find("abc-123", started + 3_600_000).as_deref(), Some(file.as_path()));
+        assert_eq!(
+            find("abc-123", started + 3_600_000).as_deref(),
+            Some(file.as_path())
+        );
         assert_eq!(find("other", started), None);
         let tail = read_tail(&file, 1500).unwrap();
-        assert!(!tail.contains("xxxx") && tail.starts_with("{\"type\""), "{}", &tail[..40]);
+        assert!(
+            !tail.contains("xxxx") && tail.starts_with("{\"type\""),
+            "{}",
+            &tail[..40]
+        );
         assert_eq!(codex_quota(&tail).len(), 2);
-        assert_eq!(read_tail(&file, 1 << 20).unwrap().len(), 5001 + rollout.len());
+        assert_eq!(
+            read_tail(&file, 1 << 20).unwrap().len(),
+            5001 + rollout.len()
+        );
     }
 
     #[test]
@@ -1275,18 +1536,47 @@ mod tests {
             "error": "rate_limit",
             "error_details": "You've hit your session limit · resets 3pm (America/Chicago)",
         }));
-        assert_eq!((info.kind, info.resets_at), (LimitKind::Usage, Some(local(2026, 10, 2, 15, 0))));
+        assert_eq!(
+            (info.kind, info.resets_at),
+            (LimitKind::Usage, Some(local(2026, 10, 2, 15, 0)))
+        );
         assert!(info.message.contains("session limit"));
         // No details: the error name is the message, and no time is invented.
         let info = limited(json!({ "error": "rate_limit" }));
-        assert_eq!((info.message.as_str(), info.resets_at), ("rate limit", None));
-        assert_eq!(limited(json!({ "error": "billing_error" })).kind, LimitKind::Credits);
-        for error in ["authentication_failed", "oauth_org_not_allowed", "account_on_hold", "cloud_credential_error"] {
-            assert_eq!(limited(json!({ "error": error })).kind, LimitKind::Auth, "{error}");
+        assert_eq!(
+            (info.message.as_str(), info.resets_at),
+            ("rate limit", None)
+        );
+        assert_eq!(
+            limited(json!({ "error": "billing_error" })).kind,
+            LimitKind::Credits
+        );
+        for error in [
+            "authentication_failed",
+            "oauth_org_not_allowed",
+            "account_on_hold",
+            "cloud_credential_error",
+        ] {
+            assert_eq!(
+                limited(json!({ "error": error })).kind,
+                LimitKind::Auth,
+                "{error}"
+            );
         }
-        for error in ["overloaded", "server_error", "max_output_tokens", "invalid_request", "unknown", ""] {
-            let failure = claude_stop_failure(&json!({ "error": error, "error_details": "boom" }), now);
-            assert!(matches!(&failure, TurnFailure::Other(text) if text.ends_with(": boom")), "{error}: {failure:?}");
+        for error in [
+            "overloaded",
+            "server_error",
+            "max_output_tokens",
+            "invalid_request",
+            "unknown",
+            "",
+        ] {
+            let failure =
+                claude_stop_failure(&json!({ "error": error, "error_details": "boom" }), now);
+            assert!(
+                matches!(&failure, TurnFailure::Other(text) if text.ends_with(": boom")),
+                "{error}: {failure:?}"
+            );
         }
         assert_eq!(LimitKind::label("usage"), "usage limit reached");
         assert_eq!(LimitKind::label(LimitKind::Auth.as_str()), "sign-in needed");
@@ -1294,26 +1584,58 @@ mod tests {
 
     #[test]
     fn a_codex_turn_that_ended_in_an_error_is_read_from_the_session_file_with_what_it_was_given() {
-        let started = |turn: &str| format!(r#"{{"type":"event_msg","payload":{{"type":"task_started","turn_id":"{turn}","started_at":1791007870}}}}"#);
+        let started = |turn: &str| {
+            format!(
+                r#"{{"type":"event_msg","payload":{{"type":"task_started","turn_id":"{turn}","started_at":1791007870}}}}"#
+            )
+        };
         let given = r#"{"type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"[crew] Message from lead (type review_request, id m-69):\n\nPlease review design-b3.md"}]}}"#;
         let tool = r#"{"type":"response_item","payload":{"type":"function_call","name":"exec_command","arguments":"{}"}}"#;
         let refused = r#"{"type":"event_msg","payload":{"type":"task_complete","turn_id":"t-2","last_agent_message":null,"error":{"message":"This content was flagged for possible cybersecurity risk.","codex_error_info":"cyber_policy"},"completed_at":1791007884}}"#;
         let fine = r#"{"type":"event_msg","payload":{"type":"task_complete","turn_id":"t-1","last_agent_message":"done","completed_at":1791007000}}"#;
-        let rollout = [started("t-1"), fine.to_string(), started("t-2"), given.to_string(), tool.to_string(), refused.to_string()].join("\n");
+        let rollout = [
+            started("t-1"),
+            fine.to_string(),
+            started("t-2"),
+            given.to_string(),
+            tool.to_string(),
+            refused.to_string(),
+        ]
+        .join("\n");
         let end = codex_last_turn(&rollout).unwrap();
         assert_eq!(end.turn_id, "t-2");
         assert_eq!(end.ended_at, Some(1_791_007_884_000));
-        assert_eq!(end.error, Some(("cyber_policy".into(), "This content was flagged for possible cybersecurity risk.".into())));
+        assert_eq!(
+            end.error,
+            Some((
+                "cyber_policy".into(),
+                "This content was flagged for possible cybersecurity risk.".into()
+            ))
+        );
         assert_eq!(end.input, ["[crew] Message from lead (type review_request, id m-69):\n\nPlease review design-b3.md"]);
         // A turn that completed has no error; one that runs has not ended.
         let end = codex_last_turn(&[started("t-1"), fine.to_string()].join("\n")).unwrap();
         assert_eq!((end.turn_id.as_str(), end.error), ("t-1", None));
-        assert_eq!(codex_last_turn(&format!("{rollout}\n{}\n{given}", started("t-3"))), None);
+        assert_eq!(
+            codex_last_turn(&format!("{rollout}\n{}\n{given}", started("t-3"))),
+            None
+        );
         // An interrupted turn has ended too; a kind with details is named by its key.
         let aborted = r#"{"timestamp":"2026-10-03T06:00:00.000Z","type":"event_msg","payload":{"type":"turn_aborted","reason":"interrupted"}}"#;
-        assert_eq!(codex_last_turn(&format!("{rollout}\n{aborted}")).unwrap().turn_id, "2026-10-03T06:00:00.000Z");
-        let failed = refused.replace(r#""cyber_policy""#, r#"{"response_stream_disconnected":{"http_status_code":502}}"#);
-        assert_eq!(codex_last_turn(&failed).unwrap().error.unwrap().0, "response_stream_disconnected");
+        assert_eq!(
+            codex_last_turn(&format!("{rollout}\n{aborted}"))
+                .unwrap()
+                .turn_id,
+            "2026-10-03T06:00:00.000Z"
+        );
+        let failed = refused.replace(
+            r#""cyber_policy""#,
+            r#"{"response_stream_disconnected":{"http_status_code":502}}"#,
+        );
+        assert_eq!(
+            codex_last_turn(&failed).unwrap().error.unwrap().0,
+            "response_stream_disconnected"
+        );
         assert_eq!(codex_last_turn(""), None);
     }
 }

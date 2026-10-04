@@ -131,7 +131,10 @@ pub trait ProcessManager: Send + Sync {
 
     /// Bring the agent's terminal to the user's attention.
     async fn focus(&self, _agent_id: &str) -> Result<()> {
-        anyhow::bail!("the {} backend has no panes to focus; use `crew agent attach`", self.name())
+        anyhow::bail!(
+            "the {} backend has no panes to focus; use `crew agent attach`",
+            self.name()
+        )
     }
 
     /// Stream the terminal for a raw attachment.

@@ -16,8 +16,8 @@ use std::time::Duration;
 
 use crew_core::client::{Client, ClientError, ClientResult};
 use crew_core::rpc::{
-    Call, GitOutcome, InboxResult, ModelChoice, ModelsResult, OutputResult, Push, SendParams, Snapshot,
-    TranscriptResult,
+    Call, GitOutcome, InboxResult, ModelChoice, ModelsResult, OutputResult, Push, SendParams,
+    Snapshot, TranscriptResult,
 };
 use crew_core::types::{Event, MessageType};
 use ratatui::crossterm::event as term;
@@ -193,7 +193,10 @@ fn spawn_typist(socket: PathBuf, tx: Sender<UiEvent>) -> Sender<Command> {
 fn gather_keys(id: &str, text: &mut String, keys_rx: &Receiver<Command>) -> Option<Command> {
     while let Ok(next) = keys_rx.try_recv() {
         match next {
-            Command::Keys { id: same, text: more } if same == id => text.push_str(&more),
+            Command::Keys {
+                id: same,
+                text: more,
+            } if same == id => text.push_str(&more),
             other => return Some(other),
         }
     }
@@ -351,7 +354,12 @@ impl Requester {
             ),
             Command::StopTeam => Reply::Stopped(self.stop_team()),
             Command::FetchModels => Reply::Models(self.models()),
-            Command::SetModel { id, model, runtime, label } => self.action(
+            Command::SetModel {
+                id,
+                model,
+                runtime,
+                label,
+            } => self.action(
                 label,
                 Call::AgentSetModel {
                     id,
@@ -678,7 +686,12 @@ mod tests {
             id: id.into(),
             text: text.into(),
         };
-        for command in [keys("a", "b"), keys("a", "c"), keys("b", "1"), keys("a", "d")] {
+        for command in [
+            keys("a", "b"),
+            keys("a", "c"),
+            keys("b", "1"),
+            keys("a", "d"),
+        ] {
             tx.send(command).unwrap();
         }
         let mut text = "a".to_string();
@@ -797,7 +810,9 @@ mod tests {
             Reply::Stopped(result) => result.unwrap(),
             _ => panic!("expected a stop reply"),
         }
-        assert!(daemon.calls().contains(&Call::Shutdown { stop_agents: true }));
+        assert!(daemon
+            .calls()
+            .contains(&Call::Shutdown { stop_agents: true }));
 
         // With the daemon gone a command fails cleanly instead of hanging.
         daemon.stop();

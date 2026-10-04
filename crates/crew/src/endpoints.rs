@@ -176,9 +176,9 @@ impl Section {
             (CredentialKind::AuthToken, 1, &self.auth_token_env),
             (CredentialKind::AuthToken, 2, &self.auth_token_file),
         ];
-        let mut set = fields.iter().filter_map(|(kind, how, value)| {
-            value.as_ref().map(|v| (*kind, *how, v.trim()))
-        });
+        let mut set = fields
+            .iter()
+            .filter_map(|(kind, how, value)| value.as_ref().map(|v| (*kind, *how, v.trim())));
         let Some((kind, how, value)) = set.next() else {
             return Ok(None);
         };
@@ -195,7 +195,10 @@ auth_token, auth_token_env, auth_token_file"
             0 => Source::Literal(Secret(value.to_string())),
             1 => {
                 if !is_env_name(value) {
-                    bail!("{}_env: '{value}' is not an environment variable name", kind.field());
+                    bail!(
+                        "{}_env: '{value}' is not an environment variable name",
+                        kind.field()
+                    );
                 }
                 Source::Env(value.to_string())
             }
@@ -211,7 +214,12 @@ auth_token, auth_token_env, auth_token_file"
     }
 
     fn validate(&self, dir: &Path) -> Result<()> {
-        if let Some(url) = self.base_url.as_deref().map(str::trim).filter(|u| !u.is_empty()) {
+        if let Some(url) = self
+            .base_url
+            .as_deref()
+            .map(str::trim)
+            .filter(|u| !u.is_empty())
+        {
             let rest = url
                 .strip_prefix("https://")
                 .or_else(|| url.strip_prefix("http://"))
@@ -220,7 +228,12 @@ auth_token, auth_token_env, auth_token_file"
                 bail!("base_url '{url}' is not a URL");
             }
         }
-        if let Some(wire) = self.wire_api.as_deref().map(str::trim).filter(|w| !w.is_empty()) {
+        if let Some(wire) = self
+            .wire_api
+            .as_deref()
+            .map(str::trim)
+            .filter(|w| !w.is_empty())
+        {
             if !matches!(wire, "responses" | "chat") {
                 bail!("wire_api must be \"responses\" or \"chat\"");
             }
@@ -240,7 +253,9 @@ auth_token, auth_token_env, auth_token_file"
 
 fn is_env_name(name: &str) -> bool {
     let mut chars = name.chars();
-    chars.next().is_some_and(|c| c.is_ascii_alphabetic() || c == '_')
+    chars
+        .next()
+        .is_some_and(|c| c.is_ascii_alphabetic() || c == '_')
         && chars.all(|c| c.is_ascii_alphanumeric() || c == '_')
 }
 
@@ -270,7 +285,10 @@ impl FileConfig {
         }
         if let Some(codex) = &self.codex {
             codex.validate(dir).context("[codex]")?;
-            if matches!(codex.credential(dir)?, Some(Some((CredentialKind::AuthToken, _)))) {
+            if matches!(
+                codex.credential(dir)?,
+                Some(Some((CredentialKind::AuthToken, _)))
+            ) {
                 bail!("[codex]: Codex sends its key as a bearer token already; use api_key");
             }
         }
@@ -278,7 +296,9 @@ impl FileConfig {
             if !is_valid_id(id) {
                 bail!("[agents.{id}]: not an agent id");
             }
-            section.validate(dir).with_context(|| format!("[agents.{id}]"))?;
+            section
+                .validate(dir)
+                .with_context(|| format!("[agents.{id}]"))?;
         }
         Ok(())
     }
@@ -357,7 +377,8 @@ fn load_layer(scope: Scope, path: PathBuf, workspace: &Path) -> Layer {
     match state {
         Ok(config) => {
             if config.has_literal_secret() && meta.mode() & 0o077 != 0 {
-                layer.warning = Some("holds a key and is readable by other users (chmod 600)".into());
+                layer.warning =
+                    Some("holds a key and is readable by other users (chmod 600)".into());
             }
             layer.state = LayerState::Loaded(Box::new(config));
         }
@@ -466,7 +487,11 @@ impl Layers {
     pub fn check(&self) -> Result<()> {
         for layer in &self.layers {
             if let LayerState::Rejected(reason) = &layer.state {
-                bail!("crew config ({}) {} {reason}", layer.scope.as_str(), layer.path.display());
+                bail!(
+                    "crew config ({}) {} {reason}",
+                    layer.scope.as_str(),
+                    layer.path.display()
+                );
             }
         }
         Ok(())
@@ -513,7 +538,12 @@ impl Layers {
     }
 
     /// The endpoint and key `agent_id` is launched with.
-    pub fn resolve(&self, runtime: RuntimeKind, agent_id: &str, parent: Option<&str>) -> Result<Endpoint> {
+    pub fn resolve(
+        &self,
+        runtime: RuntimeKind,
+        agent_id: &str,
+        parent: Option<&str>,
+    ) -> Result<Endpoint> {
         self.check()?;
         if runtime == RuntimeKind::Shell {
             return Ok(Endpoint::default());
@@ -526,7 +556,11 @@ impl Layers {
             base_url: plan.base_url.as_ref().map(|(url, _)| url.clone()),
             model: plan.model.as_ref().map(|(model, _)| model.clone()),
             wire_api: plan.wire_api.as_ref().map(|(wire, _)| wire.clone()),
-            env: plan.env.iter().map(|(k, (v, _))| (k.clone(), v.clone())).collect(),
+            env: plan
+                .env
+                .iter()
+                .map(|(k, (v, _))| (k.clone(), v.clone()))
+                .collect(),
             ..Endpoint::default()
         };
         let mut origin: Vec<String> = Vec::new();
@@ -553,7 +587,11 @@ config gives it an auth_token",
                     "auth token"
                 }
             };
-            origin.push(format!("{what} from {} ({} config)", source.describe(), scope.as_str()));
+            origin.push(format!(
+                "{what} from {} ({} config)",
+                source.describe(),
+                scope.as_str()
+            ));
         }
         if let Some((model, scope)) = &plan.model {
             origin.push(format!("model {model} ({} config)", scope.as_str()));
@@ -593,12 +631,18 @@ affected. Later files override earlier ones, field by field.\n"
         }
 
         let members: BTreeSet<&String> = self.loaded().flat_map(|(_, c)| c.agents.keys()).collect();
-        let sections = [("claude", RuntimeKind::Claude), ("codex", RuntimeKind::Codex)];
+        let sections = [
+            ("claude", RuntimeKind::Claude),
+            ("codex", RuntimeKind::Codex),
+        ];
         for (name, runtime) in sections {
             let plan = self.plan(runtime, "", None);
             let _ = writeln!(out, "\n[{name}]");
             if plan.is_empty() {
-                let _ = writeln!(out, "  nothing set: members use your own {name} login and endpoint");
+                let _ = writeln!(
+                    out,
+                    "  nothing set: members use your own {name} login and endpoint"
+                );
             } else {
                 describe_plan(&mut out, &plan, runtime);
             }
@@ -607,7 +651,11 @@ affected. Later files override earlier ones, field by field.\n"
             let mut plan = Plan::default();
             for (layer, config) in self.loaded() {
                 if let Some(section) = config.agents.get(id) {
-                    plan.apply(section, layer.scope, layer.path.parent().unwrap_or(Path::new("/")));
+                    plan.apply(
+                        section,
+                        layer.scope,
+                        layer.path.parent().unwrap_or(Path::new("/")),
+                    );
                 }
             }
             let _ = writeln!(out, "\n[agents.{id}]  (on top of its runtime's section)");
@@ -636,7 +684,10 @@ fn describe_plan(out: &mut String, plan: &Plan, runtime: RuntimeKind) {
             );
         }
         (None, RuntimeKind::Codex) if plan.base_url.is_some() => {
-            let _ = writeln!(out, "  api_key    not set: the endpoint is called without credentials");
+            let _ = writeln!(
+                out,
+                "  api_key    not set: the endpoint is called without credentials"
+            );
         }
         _ => {}
     }
@@ -667,7 +718,10 @@ impl Source {
             Source::Literal(secret) => mask(secret.expose()),
             Source::Env(name) => match std::env::var(name) {
                 Ok(value) if !value.trim().is_empty() => {
-                    format!("${name} = {} (read from the crew daemon's environment)", mask(value.trim()))
+                    format!(
+                        "${name} = {} (read from the crew daemon's environment)",
+                        mask(value.trim())
+                    )
                 }
                 _ => format!("${name} — not set in this shell"),
             },
@@ -691,8 +745,9 @@ fn resolve_secret(source: &Source) -> Result<Secret> {
 `crew stop` and start the team again)"
             )
         })?,
-        Source::File(path) => std::fs::read_to_string(path)
-            .with_context(|| format!("reading {}", path.display()))?,
+        Source::File(path) => {
+            std::fs::read_to_string(path).with_context(|| format!("reading {}", path.display()))?
+        }
     };
     let value = value.trim();
     if value.is_empty() {
@@ -797,17 +852,32 @@ mod tests {
         );
         let e = l.resolve(RuntimeKind::Claude, "claude-1", None).unwrap();
         assert_eq!(e.base_url.as_deref(), Some("https://user.example"));
-        assert_eq!(e.api_key.as_ref().unwrap().expose(), "sk-project-11111111111");
+        assert_eq!(
+            e.api_key.as_ref().unwrap().expose(),
+            "sk-project-11111111111"
+        );
         assert_eq!(e.model.as_deref(), Some("global-model"));
         assert_eq!(e.env["A"], "global");
         assert_eq!(e.env["B"], "user");
         let origin = e.origin.unwrap();
-        assert!(origin.contains("endpoint https://user.example (user config)"), "{origin}");
-        assert!(origin.contains("api key from the config file (project config)"), "{origin}");
+        assert!(
+            origin.contains("endpoint https://user.example (user config)"),
+            "{origin}"
+        );
+        assert!(
+            origin.contains("api key from the config file (project config)"),
+            "{origin}"
+        );
         assert!(!origin.contains("sk-"), "{origin}");
         // The other runtime and scripted agents are untouched.
-        assert!(l.resolve(RuntimeKind::Codex, "codex-1", None).unwrap().is_default());
-        assert!(l.resolve(RuntimeKind::Shell, "claude-1", None).unwrap().is_default());
+        assert!(l
+            .resolve(RuntimeKind::Codex, "codex-1", None)
+            .unwrap()
+            .is_default());
+        assert!(l
+            .resolve(RuntimeKind::Shell, "claude-1", None)
+            .unwrap()
+            .is_default());
     }
 
     #[test]
@@ -827,7 +897,10 @@ mod tests {
             "[claude]\nauth_token = \"bearer-user\"",
             "[claude]\napi_key = \"\"\nbase_url = \"\"",
         );
-        assert!(l.resolve(RuntimeKind::Claude, "a", None).unwrap().is_default());
+        assert!(l
+            .resolve(RuntimeKind::Claude, "a", None)
+            .unwrap()
+            .is_default());
     }
 
     #[test]
@@ -857,7 +930,9 @@ mod tests {
         let three = l.resolve(RuntimeKind::Claude, "claude-3", None).unwrap();
         assert_eq!(three.base_url.as_deref(), Some("http://localhost:4000"));
         assert!(three.api_key.is_none());
-        let helper = l.resolve(RuntimeKind::Claude, "claude-3-s1", Some("claude-3")).unwrap();
+        let helper = l
+            .resolve(RuntimeKind::Claude, "claude-3-s1", Some("claude-3"))
+            .unwrap();
         assert_eq!(helper.base_url, three.base_url);
         let codex = l.resolve(RuntimeKind::Codex, "codex-1", None).unwrap();
         assert_eq!(codex.wire_api.as_deref(), Some("chat"));
@@ -885,23 +960,38 @@ mod tests {
         assert_eq!(e.api_key.unwrap().expose(), "sk-from-file-3333333333");
         // A key that cannot be resolved stops the launch: it must not fall
         // back to the user's own login.
-        let error = format!("{:#}", l.resolve(RuntimeKind::Codex, "b", None).unwrap_err());
-        assert!(error.contains("$CREW_TEST_ENDPOINT_KEY_UNSET is not set"), "{error}");
+        let error = format!(
+            "{:#}",
+            l.resolve(RuntimeKind::Codex, "b", None).unwrap_err()
+        );
+        assert!(
+            error.contains("$CREW_TEST_ENDPOINT_KEY_UNSET is not set"),
+            "{error}"
+        );
     }
 
     #[test]
     fn malformed_sections_are_refused() {
         let bad = [
             ("[claude]\nbase_url = \"gateway.example\"", "http"),
-            ("[claude]\napi_key = \"a\"\nauth_token = \"b\"", "one credential"),
-            ("[claude]\napi_key = \"a\"\napi_key_env = \"B\"", "one credential"),
+            (
+                "[claude]\napi_key = \"a\"\nauth_token = \"b\"",
+                "one credential",
+            ),
+            (
+                "[claude]\napi_key = \"a\"\napi_key_env = \"B\"",
+                "one credential",
+            ),
             ("[claude]\nwire_api = \"responses\"", "Codex setting"),
             ("[codex]\nauth_token = \"x\"", "use api_key"),
             ("[codex]\nwire_api = \"grpc\"", "wire_api"),
             ("[claude.env]\n\"A B\" = \"x\"", "environment variable name"),
             ("[claude.env]\nCREW_IDENTITY = \"x\"", "reserved"),
             ("[agents.\"Not An Id\"]\nmodel = \"x\"", "not an agent id"),
-            ("[claude]\napi_key_env = \"not a name\"", "environment variable name"),
+            (
+                "[claude]\napi_key_env = \"not a name\"",
+                "environment variable name",
+            ),
         ];
         for (text, expected) in bad {
             let config: FileConfig = toml::from_str(text).unwrap();
@@ -919,13 +1009,24 @@ mod tests {
         let ws = tmp.path();
         let path = Scope::Project.path(ws).unwrap();
         std::fs::create_dir_all(path.parent().unwrap()).unwrap();
-        std::fs::write(&path, "[claude]\nbase_url = \"https://p.example\"\napi_key = \"sk-literal-4444444444444\"").unwrap();
+        std::fs::write(
+            &path,
+            "[claude]\nbase_url = \"https://p.example\"\napi_key = \"sk-literal-4444444444444\"",
+        )
+        .unwrap();
 
         std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o666)).unwrap();
         let layer = load_layer(Scope::Project, path.clone(), ws);
-        assert!(matches!(&layer.state, LayerState::Rejected(r) if r.contains("writable by other users")));
-        let all = Layers { layers: vec![layer] };
-        let error = all.resolve(RuntimeKind::Claude, "a", None).unwrap_err().to_string();
+        assert!(
+            matches!(&layer.state, LayerState::Rejected(r) if r.contains("writable by other users"))
+        );
+        let all = Layers {
+            layers: vec![layer],
+        };
+        let error = all
+            .resolve(RuntimeKind::Claude, "a", None)
+            .unwrap_err()
+            .to_string();
         assert!(error.contains("crew config (project)"), "{error}");
 
         // Readable by others: used, with a warning about the key in it.
@@ -934,14 +1035,23 @@ mod tests {
         assert!(matches!(layer.state, LayerState::Loaded(_)));
         assert!(layer.warning.as_deref().unwrap().contains("chmod 600"));
         std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600)).unwrap();
-        assert!(load_layer(Scope::Project, path.clone(), ws).warning.is_none());
+        assert!(load_layer(Scope::Project, path.clone(), ws)
+            .warning
+            .is_none());
 
         // Committed to the repository: not this user's decision.
         let git = |args: &[&str]| {
             assert!(std::process::Command::new("git")
                 .arg("-C")
                 .arg(ws)
-                .args(["-c", "user.name=t", "-c", "user.email=t@t", "-c", "commit.gpgsign=false"])
+                .args([
+                    "-c",
+                    "user.name=t",
+                    "-c",
+                    "user.email=t@t",
+                    "-c",
+                    "commit.gpgsign=false"
+                ])
                 .args(args)
                 .output()
                 .unwrap()
@@ -949,7 +1059,10 @@ mod tests {
                 .success());
         };
         git(&["init", "-q"]);
-        assert!(matches!(load_layer(Scope::Project, path.clone(), ws).state, LayerState::Loaded(_)));
+        assert!(matches!(
+            load_layer(Scope::Project, path.clone(), ws).state,
+            LayerState::Loaded(_)
+        ));
         git(&["add", "-f", ".crew/config.toml"]);
         let layer = load_layer(Scope::Project, path.clone(), ws);
         assert!(matches!(&layer.state, LayerState::Rejected(r) if r.contains("tracked by git")));
@@ -967,12 +1080,21 @@ mod tests {
             "[agents.claude-3]\nmodel = \"small\"\napi_key = \"short\"",
         );
         let report = l.describe();
-        assert!(report.contains("base_url   https://global.example  (global)"), "{report}");
+        assert!(
+            report.contains("base_url   https://global.example  (global)"),
+            "{report}"
+        );
         assert!(report.contains("api_key    sk-a…1234  (user)"), "{report}");
-        assert!(report.contains("the endpoint is called without credentials"), "{report}");
+        assert!(
+            report.contains("the endpoint is called without credentials"),
+            "{report}"
+        );
         assert!(report.contains("[agents.claude-3]"), "{report}");
         assert!(report.contains("model      small  (project)"), "{report}");
-        assert!(!report.contains("user-key") && !report.contains("short"), "{report}");
+        assert!(
+            !report.contains("user-key") && !report.contains("short"),
+            "{report}"
+        );
         assert_eq!(mask("0123456789abcdef"), "0123…cdef");
         assert_eq!(mask("0123456789"), "…");
         assert_eq!(format!("{:?}", Secret("sk-secret".into())), "Secret(…)");

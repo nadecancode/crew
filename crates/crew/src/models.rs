@@ -175,7 +175,9 @@ impl Catalog {
     #[cfg(test)]
     pub(crate) fn built_in() -> Self {
         let mut catalog = Catalog::default();
-        catalog.apply(BUILT_IN, "built-in").expect("the built-in model catalog is valid");
+        catalog
+            .apply(BUILT_IN, "built-in")
+            .expect("the built-in model catalog is valid");
         catalog
     }
 
@@ -187,7 +189,9 @@ impl Catalog {
             .expect("the built-in model catalog is valid");
         for scope in [Scope::Global, Scope::User] {
             let Some(path) = path(scope) else { continue };
-            let Ok(text) = std::fs::read_to_string(&path) else { continue };
+            let Ok(text) = std::fs::read_to_string(&path) else {
+                continue;
+            };
             if let Err(e) = catalog.apply(&text, scope.as_str()) {
                 catalog.problems.push(format!("{}: {e:#}", path.display()));
             }
@@ -256,9 +260,16 @@ impl Catalog {
     pub fn display_names(&self) -> std::collections::HashMap<String, String> {
         let mut names = std::collections::HashMap::new();
         for (model, _) in &self.models {
-            let id = if model.id.is_empty() { &model.key } else { &model.id };
+            let id = if model.id.is_empty() {
+                &model.key
+            } else {
+                &model.id
+            };
             let name = crew_core::types::model_display_name(id);
-            for known in std::iter::once(&model.key).chain(std::iter::once(&model.id)).chain(&model.aliases) {
+            for known in std::iter::once(&model.key)
+                .chain(std::iter::once(&model.id))
+                .chain(&model.aliases)
+            {
                 if !known.is_empty() {
                     names.insert(known.to_lowercase(), name.clone());
                 }
@@ -313,7 +324,10 @@ impl Catalog {
         });
         Assignment {
             runtime,
-            model: model.map(|m| self.find(m).map_or_else(|| m.to_string(), |p| p.key.clone())),
+            model: model.map(|m| {
+                self.find(m)
+                    .map_or_else(|| m.to_string(), |p| p.key.clone())
+            }),
             note: None,
         }
     }
@@ -337,8 +351,14 @@ Each member runs on one model. Choose it per member to fit the member's role and
 Codex), so you need not set `runtime`. Available here:\n",
         );
         for m in &models {
-            let mut facts = vec![runtime_label(m.runtime.unwrap_or(RuntimeKind::Claude)).to_string()];
-            facts.extend([&m.tier, &m.price, &m.speed].into_iter().filter(|f| !f.is_empty()).cloned());
+            let mut facts =
+                vec![runtime_label(m.runtime.unwrap_or(RuntimeKind::Claude)).to_string()];
+            facts.extend(
+                [&m.tier, &m.price, &m.speed]
+                    .into_iter()
+                    .filter(|f| !f.is_empty())
+                    .cloned(),
+            );
             let _ = write!(out, "- {} ({}): {}", m.key, facts.join(", "), m.summary);
             if !m.good_for.is_empty() {
                 let _ = write!(out, " Good for: {}.", m.good_for.join("; "));
@@ -400,11 +420,15 @@ routine and bulk work goes to cheaper models.\n\
         // What to take for a model whose window is used up, with an example
         // from what is on offer here.
         let twin = models.iter().find_map(|a| {
-            let b = models.iter().find(|b| !a.tier.is_empty() && b.tier == a.tier && b.runtime != a.runtime)?;
+            let b = models
+                .iter()
+                .find(|b| !a.tier.is_empty() && b.tier == a.tier && b.runtime != a.runtime)?;
             Some(format!(" (for {}, {})", a.key, b.key))
         });
         let closest = match twin {
-            Some(example) => format!("the same tier of the other family first{example}, then the next tier down"),
+            Some(example) => {
+                format!("the same tier of the other family first{example}, then the next tier down")
+            }
             None => "the same tier if there is one, else the next tier down".to_string(),
         };
         let _ = writeln!(
@@ -421,7 +445,11 @@ model that is out, take the closest one that is not: {closest}."
     /// default and the models it reaches (`pi_models`: its listing, or why
     /// pi cannot be used) — each marked with why it cannot be launched here
     /// when it cannot.
-    pub fn choices(&self, available: &Availability, pi_models: Result<Vec<String>, String>) -> Vec<ModelChoice> {
+    pub fn choices(
+        &self,
+        available: &Availability,
+        pi_models: Result<Vec<String>, String>,
+    ) -> Vec<ModelChoice> {
         let mut profiles: Vec<&ModelProfile> = self
             .models
             .iter()
@@ -432,7 +460,11 @@ model that is out, take the closest one that is not: {closest}."
         let choice = |m: &ModelProfile| ModelChoice {
             runtime: m.runtime.unwrap_or(RuntimeKind::Claude),
             model: m.key.clone(),
-            name: crew_core::types::model_display_name(if m.id.is_empty() { &m.key } else { &m.id }),
+            name: crew_core::types::model_display_name(if m.id.is_empty() {
+                &m.key
+            } else {
+                &m.id
+            }),
             tier: m.tier.clone(),
             price: m.price.clone(),
             summary: m.summary.clone(),
@@ -455,17 +487,25 @@ model that is out, take the closest one that is not: {closest}."
             name: "pi's default".to_string(),
             tier: String::new(),
             price: String::new(),
-            summary: "The model pi's own settings choose (`defaultModel` in ~/.pi/agent/settings.json).".to_string(),
+            summary:
+                "The model pi's own settings choose (`defaultModel` in ~/.pi/agent/settings.json)."
+                    .to_string(),
             unavailable: unavailable.clone(),
         });
-        for m in profiles.iter().filter(|m| m.runtime == Some(RuntimeKind::Pi)) {
+        for m in profiles
+            .iter()
+            .filter(|m| m.runtime == Some(RuntimeKind::Pi))
+        {
             out.push(ModelChoice {
                 unavailable: unavailable.clone().or_else(|| available.check(m).err()),
                 ..choice(m)
             });
         }
         for model in listed {
-            if out.iter().any(|c| c.runtime == RuntimeKind::Pi && c.model == model) {
+            if out
+                .iter()
+                .any(|c| c.runtime == RuntimeKind::Pi && c.model == model)
+            {
                 continue;
             }
             out.push(ModelChoice {
@@ -600,13 +640,33 @@ mod tests {
         // Claude before Codex, strongest first.
         assert_eq!(
             keys,
-            ["fable", "opus", "sonnet", "haiku", "gpt-6-astra", "gpt-6.1-sol", "gpt-6-luna"]
+            [
+                "fable",
+                "opus",
+                "sonnet",
+                "haiku",
+                "gpt-6-astra",
+                "gpt-6.1-sol",
+                "gpt-6-luna"
+            ]
         );
         for (m, origin) in &catalog.models {
             assert_eq!(*origin, "built-in");
-            assert!(!m.summary.is_empty() && !m.price.is_empty() && !m.tier.is_empty(), "{}", m.key);
-            assert!(!m.good_for.is_empty() && !m.avoid_for.is_empty(), "{}", m.key);
-            assert!(m.sources.iter().all(|s| s.starts_with("https://")) && !m.sources.is_empty(), "{}", m.key);
+            assert!(
+                !m.summary.is_empty() && !m.price.is_empty() && !m.tier.is_empty(),
+                "{}",
+                m.key
+            );
+            assert!(
+                !m.good_for.is_empty() && !m.avoid_for.is_empty(),
+                "{}",
+                m.key
+            );
+            assert!(
+                m.sources.iter().all(|s| s.starts_with("https://")) && !m.sources.is_empty(),
+                "{}",
+                m.key
+            );
             assert!(tier_rank(&m.tier) < 4, "{}: unknown tier {}", m.key, m.tier);
         }
         // Every pick names models that exist, and both families are on offer
@@ -614,16 +674,30 @@ mod tests {
         assert!(catalog.picks.len() >= 8);
         for pick in &catalog.picks {
             for name in &pick.models {
-                assert!(catalog.find(name).is_some(), "pick '{}' names unknown model {name}", pick.work);
+                assert!(
+                    catalog.find(name).is_some(),
+                    "pick '{}' names unknown model {name}",
+                    pick.work
+                );
             }
             assert!(!pick.why.is_empty(), "{}", pick.work);
         }
-        let review = catalog.picks.iter().find(|p| p.work == "plan and design review").unwrap();
+        let review = catalog
+            .picks
+            .iter()
+            .find(|p| p.work == "plan and design review")
+            .unwrap();
         assert_eq!(review.models[0], "gpt-6-astra");
         // Found by name, full id or alias, whatever the case.
         assert_eq!(catalog.find("claude-fable-5-1").unwrap().key, "fable");
-        assert_eq!(catalog.find("Claude-Haiku-4-5-20251001").unwrap().key, "haiku");
-        assert_eq!(catalog.find("GPT-6-Astra").unwrap().runtime, Some(RuntimeKind::Codex));
+        assert_eq!(
+            catalog.find("Claude-Haiku-4-5-20251001").unwrap().key,
+            "haiku"
+        );
+        assert_eq!(
+            catalog.find("GPT-6-Astra").unwrap().runtime,
+            Some(RuntimeKind::Codex)
+        );
         assert!(catalog.find("gpt-4").is_none());
         // The template for overrides is a valid, empty catalog file.
         let mut copy = built_in();
@@ -638,17 +712,26 @@ mod tests {
         let codex = RuntimeKind::Codex;
         // Naming a catalog model is enough…
         let a = catalog.assign(None, Some("gpt-6-astra"), claude, Some("sonnet"));
-        assert_eq!((a.runtime, a.model.as_deref(), a.note.is_none()), (codex, Some("gpt-6-astra"), true));
+        assert_eq!(
+            (a.runtime, a.model.as_deref(), a.note.is_none()),
+            (codex, Some("gpt-6-astra"), true)
+        );
         // …and wins over a runtime that cannot run it, saying so.
         let a = catalog.assign(Some(claude), Some("gpt-6.1-sol"), claude, None);
         assert_eq!(a.runtime, codex);
-        assert_eq!(a.note.as_deref(), Some("gpt-6.1-sol runs on Codex, not Claude Code"));
+        assert_eq!(
+            a.note.as_deref(),
+            Some("gpt-6.1-sol runs on Codex, not Claude Code")
+        );
         // A full id is turned into the name the CLI is started with.
         let a = catalog.assign(None, Some("claude-opus-5-5"), codex, None);
         assert_eq!((a.runtime, a.model.as_deref()), (claude, Some("opus")));
         // A model crew does not know is passed through on the stated runtime.
         let a = catalog.assign(Some(codex), Some("my-local-model"), claude, None);
-        assert_eq!((a.runtime, a.model.as_deref()), (codex, Some("my-local-model")));
+        assert_eq!(
+            (a.runtime, a.model.as_deref()),
+            (codex, Some("my-local-model"))
+        );
 
         // Without a model, the team default applies only where it can run:
         // a Codex member of a Claude team does not get `--model sonnet`.
@@ -691,13 +774,25 @@ mod tests {
             )
             .unwrap();
         assert!(catalog.find("gpt-6-luna").is_none());
-        let sonnet = catalog.models.iter().find(|(m, _)| m.key == "sonnet").unwrap();
+        let sonnet = catalog
+            .models
+            .iter()
+            .find(|(m, _)| m.key == "sonnet")
+            .unwrap();
         assert_eq!((sonnet.0.summary.as_str(), sonnet.1), ("Ours.", "user"));
         assert_eq!(catalog.find("local-qwen").unwrap().name, "local-qwen");
-        let review = catalog.picks.iter().find(|p| p.work == "plan and design review").unwrap();
+        let review = catalog
+            .picks
+            .iter()
+            .find(|p| p.work == "plan and design review")
+            .unwrap();
         assert_eq!(review.models, ["fable"]);
         assert!(catalog.picks.iter().any(|p| p.work == "drafts"));
-        assert_eq!(catalog.as_of, built_in().as_of, "only the built-in file dates the catalog");
+        assert_eq!(
+            catalog.as_of,
+            built_in().as_of,
+            "only the built-in file dates the catalog"
+        );
 
         // A file with a mistake changes nothing.
         let before = catalog.models.len();
@@ -719,10 +814,22 @@ mod tests {
         let catalog = built_in();
         let both = catalog.briefing(&Availability::all());
         assert!(both.starts_with("\n## Models\n"), "{both}");
-        assert!(both.contains("- fable (Claude Code, frontier, $10 / $50 per MTok, slower): "), "{both}");
-        assert!(both.contains("- gpt-6-astra (Codex, frontier, $10 / $50 per MTok): "), "{both}");
-        assert!(both.contains("Good for: reviewing a plan or design before work starts;"), "{both}");
-        assert!(both.contains("- plan and design review: gpt-6-astra, then fable ("), "{both}");
+        assert!(
+            both.contains("- fable (Claude Code, frontier, $10 / $50 per MTok, slower): "),
+            "{both}"
+        );
+        assert!(
+            both.contains("- gpt-6-astra (Codex, frontier, $10 / $50 per MTok): "),
+            "{both}"
+        );
+        assert!(
+            both.contains("Good for: reviewing a plan or design before work starts;"),
+            "{both}"
+        );
+        assert!(
+            both.contains("- plan and design review: gpt-6-astra, then fable ("),
+            "{both}"
+        );
         assert!(both.contains("checked by the other model family"), "{both}");
         assert!(both.contains("pass it as `model` to agent_add"), "{both}");
         // Compact enough to sit in a system prompt.
@@ -735,8 +842,14 @@ mod tests {
             ..Availability::default()
         });
         assert!(!claude_only.contains("gpt-6"), "{claude_only}");
-        assert!(claude_only.contains("- plan and design review: fable\n"), "{claude_only}");
-        assert!(!claude_only.contains("bulk extraction and summaries: gpt"), "{claude_only}");
+        assert!(
+            claude_only.contains("- plan and design review: fable\n"),
+            "{claude_only}"
+        );
+        assert!(
+            !claude_only.contains("bulk extraction and summaries: gpt"),
+            "{claude_only}"
+        );
         assert!(!claude_only.contains("other model family"), "{claude_only}");
 
         // A Codex account that does not list a model does not get it offered.
@@ -747,9 +860,15 @@ mod tests {
             codex_models: Some(["gpt-6.1-sol".to_string()].into_iter().collect()),
         };
         let text = catalog.briefing(&partial);
-        assert!(text.contains("- gpt-6.1-sol (") && !text.contains("- gpt-6-astra ("), "{text}");
+        assert!(
+            text.contains("- gpt-6.1-sol (") && !text.contains("- gpt-6-astra ("),
+            "{text}"
+        );
         let astra = catalog.find("gpt-6-astra").unwrap();
-        assert!(partial.check(astra).unwrap_err().contains("model list of this Codex account"));
+        assert!(partial
+            .check(astra)
+            .unwrap_err()
+            .contains("model list of this Codex account"));
         assert_eq!(catalog.briefing(&Availability::default()), "");
     }
 
@@ -759,27 +878,70 @@ mod tests {
         catalog
             .apply("[models.pi-opus]\nruntime = \"pi\"\nname = \"anthropic/claude-opus-4-6\"\ntier = \"strong\"\n", "user")
             .unwrap();
-        let listed = vec!["anthropic/claude-opus-4-6".to_string(), "pi-opus".to_string(), "openai/gpt-6-astra".to_string()];
-        let no_codex = Availability { claude: true, pi: true, ..Availability::default() };
+        let listed = vec![
+            "anthropic/claude-opus-4-6".to_string(),
+            "pi-opus".to_string(),
+            "openai/gpt-6-astra".to_string(),
+        ];
+        let no_codex = Availability {
+            claude: true,
+            pi: true,
+            ..Availability::default()
+        };
         let choices = catalog.choices(&no_codex, Ok(listed));
         let runtimes: Vec<RuntimeKind> = choices.iter().map(|c| c.runtime).collect();
-        let first_codex = runtimes.iter().position(|r| *r == RuntimeKind::Codex).unwrap();
+        let first_codex = runtimes
+            .iter()
+            .position(|r| *r == RuntimeKind::Codex)
+            .unwrap();
         let first_pi = runtimes.iter().position(|r| *r == RuntimeKind::Pi).unwrap();
-        assert!(runtimes[..first_codex].iter().all(|r| *r == RuntimeKind::Claude), "{runtimes:?}");
-        assert!(runtimes[first_pi..].iter().all(|r| *r == RuntimeKind::Pi), "{runtimes:?}");
+        assert!(
+            runtimes[..first_codex]
+                .iter()
+                .all(|r| *r == RuntimeKind::Claude),
+            "{runtimes:?}"
+        );
+        assert!(
+            runtimes[first_pi..].iter().all(|r| *r == RuntimeKind::Pi),
+            "{runtimes:?}"
+        );
         let fable = choices.iter().find(|c| c.model == "fable").unwrap();
-        assert_eq!((fable.name.as_str(), fable.tier.as_str(), fable.unavailable.as_deref()), ("Fable 5.1", "frontier", None));
+        assert_eq!(
+            (
+                fable.name.as_str(),
+                fable.tier.as_str(),
+                fable.unavailable.as_deref()
+            ),
+            ("Fable 5.1", "frontier", None)
+        );
         assert!(!fable.summary.is_empty() && !fable.price.is_empty());
         let astra = choices.iter().find(|c| c.model == "gpt-6-astra").unwrap();
         assert_eq!(astra.unavailable.as_deref(), Some("`codex` is not on PATH"));
         // pi: its own default first, the catalog's pi models, then the rest
         // of its listing, each once.
-        let pi: Vec<&str> = choices[first_pi..].iter().map(|c| c.model.as_str()).collect();
-        assert_eq!(pi, ["", "pi-opus", "anthropic/claude-opus-4-6", "openai/gpt-6-astra"]);
-        assert!(choices[first_pi..].iter().all(|c| c.unavailable.is_none()), "pi listed them: it runs");
+        let pi: Vec<&str> = choices[first_pi..]
+            .iter()
+            .map(|c| c.model.as_str())
+            .collect();
+        assert_eq!(
+            pi,
+            [
+                "",
+                "pi-opus",
+                "anthropic/claude-opus-4-6",
+                "openai/gpt-6-astra"
+            ]
+        );
+        assert!(
+            choices[first_pi..].iter().all(|c| c.unavailable.is_none()),
+            "pi listed them: it runs"
+        );
         // Without pi, the one pi row says why.
         let without = catalog.choices(&Availability::all(), Err("`pi` is not on PATH".to_string()));
-        let pi: Vec<_> = without.iter().filter(|c| c.runtime == RuntimeKind::Pi).collect();
+        let pi: Vec<_> = without
+            .iter()
+            .filter(|c| c.runtime == RuntimeKind::Pi)
+            .collect();
         assert_eq!(pi[0].model, "");
         assert_eq!(pi[0].unavailable.as_deref(), Some("`pi` is not on PATH"));
         assert!(pi.iter().all(|c| c.unavailable.is_some()));

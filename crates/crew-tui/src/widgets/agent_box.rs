@@ -117,9 +117,13 @@ fn bottom_border(
 /// that is not the model the member was given. `None` when the runtime has
 /// not said yet, or nothing fits.
 pub fn running_label(agent: &Agent, room: usize) -> Option<String> {
-    let model = agent
-        .model_label()
-        .map(|model| if agent.fallback.is_some() { format!("↓ {model}") } else { model });
+    let model = agent.model_label().map(|model| {
+        if agent.fallback.is_some() {
+            format!("↓ {model}")
+        } else {
+            model
+        }
+    });
     let effort = agent.effort.as_deref().filter(|e| !e.is_empty());
     let forms = match (model, effort) {
         (Some(model), Some(effort)) => {
@@ -188,7 +192,9 @@ fn border_label(
         let label = running_label(agent, span.saturating_sub(3 + width(glyph)))?;
         Some((label, Some((glyph, glyph_style))))
     });
-    let Some((label, mark)) = with_mark.or_else(|| Some((running_label(agent, span.saturating_sub(2))?, None))) else {
+    let Some((label, mark)) =
+        with_mark.or_else(|| Some((running_label(agent, span.saturating_sub(2))?, None)))
+    else {
         return;
     };
     let mark_w = mark.map_or(0, |(glyph, _)| width(glyph) + 1);
@@ -201,7 +207,14 @@ fn border_label(
         put_str(buf, clip, x + 1 + width(glyph) as i32, y, " ", border);
     }
     put_str(buf, clip, x + 1 + mark_w as i32, y, &label, style);
-    put_str(buf, clip, x + 1 + (mark_w + width(&label)) as i32, y, " ", border);
+    put_str(
+        buf,
+        clip,
+        x + 1 + (mark_w + width(&label)) as i32,
+        y,
+        " ",
+        border,
+    );
 }
 
 /// A context window's size, short: `1M`, `200k`, `258k`.
@@ -226,13 +239,28 @@ pub fn window_size(tokens: u64) -> String {
 /// ```text
 /// │ 1M ████░░░░░░  35% │
 /// ```
-fn context_row(buf: &mut Buffer, clip: Rect, rect: Rect, row: i32, agent: Option<&Agent>, border: Style, theme: &Theme) {
+fn context_row(
+    buf: &mut Buffer,
+    clip: Rect,
+    rect: Rect,
+    row: i32,
+    agent: Option<&Agent>,
+    border: Style,
+    theme: &Theme,
+) {
     side_borders(buf, clip, rect, row, border);
     let inner = usize::from(rect.width).saturating_sub(4);
     let x = i32::from(rect.x) + 2;
     let Some(context) = agent.and_then(|a| a.context.as_ref()) else {
         // The runtime has not said (or never does: a shell agent).
-        put_str(buf, clip, x, row, &fit("context —", inner), theme.fg(theme.dim));
+        put_str(
+            buf,
+            clip,
+            x,
+            row,
+            &fit("context —", inner),
+            theme.fg(theme.dim),
+        );
         return;
     };
     if context.window == 0 {
@@ -262,8 +290,22 @@ fn context_row(buf: &mut Buffer, clip: Rect, rect: Rect, row: i32, agent: Option
     put_str(buf, clip, bar_x, row, &"█".repeat(full), fill);
     put_str(buf, clip, bar_x + full as i32, row, partial, fill);
     let track_x = bar_x + (cells - track) as i32;
-    put_str(buf, clip, track_x, row, &" ".repeat(track), Style::default().bg(theme.gauge_track));
-    put_str(buf, clip, bar_x + cells as i32 + 1, row, &percent, theme.fg(theme.text));
+    put_str(
+        buf,
+        clip,
+        track_x,
+        row,
+        &" ".repeat(track),
+        Style::default().bg(theme.gauge_track),
+    );
+    put_str(
+        buf,
+        clip,
+        bar_x + cells as i32 + 1,
+        row,
+        &percent,
+        theme.fg(theme.text),
+    );
 }
 
 fn side_borders(buf: &mut Buffer, clip: Rect, rect: Rect, row: i32, border: Style) {
@@ -315,7 +357,11 @@ pub fn doing(agent: &Agent, decor: &Decor<'_>) -> (String, String, Tone) {
     match agent.status {
         AgentStatus::Spawning => ("starting…".into(), String::new(), Tone::Quiet),
         AgentStatus::Working => {
-            let what = if activity.is_empty() { "working".to_string() } else { activity };
+            let what = if activity.is_empty() {
+                "working".to_string()
+            } else {
+                activity
+            };
             (format!("▸ {what}"), elapsed(under_way), Tone::Live)
         }
         AgentStatus::Blocked => {
@@ -327,14 +373,23 @@ pub fn doing(agent: &Agent, decor: &Decor<'_>) -> (String, String, Tone) {
             (what, String::new(), Tone::Warn)
         }
         AgentStatus::Failed => {
-            let what = agent.error.as_deref().map(one_line).unwrap_or_else(|| "failed".into());
+            let what = agent
+                .error
+                .as_deref()
+                .map(one_line)
+                .unwrap_or_else(|| "failed".into());
             (what, String::new(), Tone::Bad)
         }
         AgentStatus::Waiting => ("waiting".into(), elapsed(decor.idle_for), Tone::Quiet),
         AgentStatus::Idle => ("idle".into(), elapsed(decor.idle_for), Tone::Quiet),
         AgentStatus::Done => {
             let ago = decor.work.filter(|w| w.done).and_then(|w| w.elapsed);
-            ("✓ finished".into(), ago.map(|ms| format!("{} ago", fmt_elapsed(ms))).unwrap_or_default(), Tone::Quiet)
+            (
+                "✓ finished".into(),
+                ago.map(|ms| format!("{} ago", fmt_elapsed(ms)))
+                    .unwrap_or_default(),
+                Tone::Quiet,
+            )
         }
         AgentStatus::Stopped => ("stopped".into(), String::new(), Tone::Quiet),
     }
@@ -432,13 +487,24 @@ pub fn draw_agent(
     if badge_on_top {
         put_str(buf, clip, badge_x - 1, i32::from(rect.y), " ", border);
         put_str(buf, clip, badge_x, i32::from(rect.y), &badge, badge_style);
-        put_str(buf, clip, badge_x + badge_w as i32, i32::from(rect.y), " ", border);
+        put_str(
+            buf,
+            clip,
+            badge_x + badge_w as i32,
+            i32::from(rect.y),
+            " ",
+            border,
+        );
     }
 
     let row = i32::from(rect.y) + 1;
     side_borders(buf, clip, rect, row, border);
     let inner = usize::from(rect.width) - 4;
-    let icon = if decor.asking { "?" } else { agent_icon(agent.status, agent.paused, now) };
+    let icon = if decor.asking {
+        "?"
+    } else {
+        agent_icon(agent.status, agent.paused, now)
+    };
     let mut tail = status_tail(agent);
     if 1 + 1 + width(&tail) + 2 > inner {
         tail.clear();
@@ -453,7 +519,11 @@ pub fn draw_agent(
         x,
         row,
         &pad_right(&fit(work, work_w), work_w),
-        if current { theme.fg(theme.text) } else { theme.fg(theme.muted) },
+        if current {
+            theme.fg(theme.text)
+        } else {
+            theme.fg(theme.muted)
+        },
     );
     let icon_x = x + (inner - right_w) as i32;
     let color = if agent.paused || decor.asking {
@@ -474,7 +544,11 @@ pub fn draw_agent(
         side_borders(buf, clip, rect, next, border);
         let (what, how_long, tone) = doing(agent, decor);
         let how_long_w = width(&how_long);
-        let what_w = if how_long_w == 0 { inner } else { inner.saturating_sub(how_long_w + 1) };
+        let what_w = if how_long_w == 0 {
+            inner
+        } else {
+            inner.saturating_sub(how_long_w + 1)
+        };
         let style = match tone {
             Tone::Live => theme.fg(theme.text),
             Tone::Quiet => theme.fg(theme.muted),
@@ -483,7 +557,14 @@ pub fn draw_agent(
         };
         put_str(buf, clip, x, next, &fit(&what, what_w), style);
         if how_long_w > 0 && how_long_w < inner {
-            put_str(buf, clip, x + (inner - how_long_w) as i32, next, &how_long, theme.fg(theme.muted));
+            put_str(
+                buf,
+                clip,
+                x + (inner - how_long_w) as i32,
+                next,
+                &how_long,
+                theme.fg(theme.muted),
+            );
         }
         next += 1;
     }
@@ -501,9 +582,22 @@ pub fn draw_agent(
     // (the figure is in the row above either way).
     let badge_below = badge_w > 0 && !badge_on_top && w >= badge_w + 6;
     let reserved = if badge_below { badge_w + 3 } else { 0 };
-    let progress = if labelled(rect, agent, reserved) { None } else { progress_of(agent) };
+    let progress = if labelled(rect, agent, reserved) {
+        None
+    } else {
+        progress_of(agent)
+    };
     bottom_border(buf, clip, rect, border, theme.fg(bar_color), progress);
-    border_label(buf, clip, rect, agent, reserved, border, running_style(agent, theme), None);
+    border_label(
+        buf,
+        clip,
+        rect,
+        agent,
+        reserved,
+        border,
+        running_style(agent, theme),
+        None,
+    );
     if badge_w > 0 && !badge_on_top && w >= badge_w + 6 {
         let y = i32::from(rect.bottom()) - 1;
         put_str(buf, clip, badge_x - 1, y, " ", border);
@@ -600,7 +694,11 @@ pub fn draw_orchestrator(
         }
     };
     put_str(buf, clip, x, row, icon, theme.bold(color));
-    let label_style = if hub.questions > 0 { theme.bold(theme.warn) } else { theme.fg(theme.muted) };
+    let label_style = if hub.questions > 0 {
+        theme.bold(theme.warn)
+    } else {
+        theme.fg(theme.muted)
+    };
     put_str(
         buf,
         clip,
@@ -619,11 +717,26 @@ pub fn draw_orchestrator(
     } else {
         Some((hub.done * 100 / hub.total) as u8)
     };
-    let percent = percent.filter(|_| !hub.orchestrator.is_some_and(|agent| labelled(rect, agent, 0)));
+    let percent = percent.filter(|_| {
+        !hub.orchestrator
+            .is_some_and(|agent| labelled(rect, agent, 0))
+    });
     bottom_border(buf, clip, rect, border, theme.fg(theme.orch), percent);
     if let Some(agent) = hub.orchestrator {
         // Which CLI the orchestrator is on, as the members' boxes say it.
-        let mark = (runtime_glyph(agent.runtime), theme.bold(theme.runtime_color(agent.runtime)));
-        border_label(buf, clip, rect, agent, 0, border, running_style(agent, theme), Some(mark));
+        let mark = (
+            runtime_glyph(agent.runtime),
+            theme.bold(theme.runtime_color(agent.runtime)),
+        );
+        border_label(
+            buf,
+            clip,
+            rect,
+            agent,
+            0,
+            border,
+            running_style(agent, theme),
+            Some(mark),
+        );
     }
 }

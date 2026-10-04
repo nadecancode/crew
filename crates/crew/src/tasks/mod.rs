@@ -53,14 +53,22 @@ pub fn validate_new(existing: &[Task], spec: &TaskSpec) -> Result<(), String> {
             return Err(format!("task '{}' cannot depend on itself", spec.id));
         }
         if !existing.iter().any(|t| &t.id == dep) {
-            return Err(format!("task '{}' depends on unknown task '{dep}'", spec.id));
+            return Err(format!(
+                "task '{}' depends on unknown task '{dep}'",
+                spec.id
+            ));
         }
     }
     // A new node whose dependencies all exist cannot close a cycle, but check
     // anyway so the invariant holds even if the graph was edited by hand.
     let mut graph: HashMap<&str, Vec<&str>> = existing
         .iter()
-        .map(|t| (t.id.as_str(), t.dependencies.iter().map(String::as_str).collect()))
+        .map(|t| {
+            (
+                t.id.as_str(),
+                t.dependencies.iter().map(String::as_str).collect(),
+            )
+        })
         .collect();
     graph.insert(
         spec.id.as_str(),
@@ -92,7 +100,10 @@ pub fn active_task<'a>(tasks: &'a [Task], agent: &str) -> Option<&'a Task> {
 /// `(done, total)` across all tasks.
 pub fn done_counts(tasks: &[Task]) -> (usize, usize) {
     (
-        tasks.iter().filter(|t| t.status == TaskStatus::Done).count(),
+        tasks
+            .iter()
+            .filter(|t| t.status == TaskStatus::Done)
+            .count(),
         tasks.len(),
     )
 }

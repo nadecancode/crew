@@ -555,20 +555,27 @@ pub enum Push {
     Event(Event),
     Message(Message),
     Agent(Box<Agent>),
-    AgentRemoved { id: String },
+    AgentRemoved {
+        id: String,
+    },
     Task(Box<Task>),
     Session(Box<SessionInfo>),
     /// The subscriber fell behind and missed pushes; fetch a new snapshot.
     Resync,
     /// Messages for a listening agent, already phrased for its session.
-    Deliver { ids: Vec<String>, text: String },
+    Deliver {
+        ids: Vec<String>,
+        text: String,
+    },
     /// For a listening agent: compact the session at the next turn boundary.
     Compact {
         #[serde(default)]
         instructions: Option<String>,
     },
     /// Raw terminal output for an attached connection (base64).
-    Pty { data: String },
+    Pty {
+        data: String,
+    },
     /// The attached agent's process ended.
     PtyClosed,
     /// The daemon is shutting down.

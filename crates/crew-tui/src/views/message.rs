@@ -51,7 +51,9 @@ pub fn render(buf: &mut Buffer, area: Rect, app: &App, view: &MessageView, theme
     };
     let lines = wrap(&message.body, cols);
     // Borders, a blank row and the key hints frame the text.
-    let visible = lines.len().clamp(1, usize::from(area.height).saturating_sub(6).max(1));
+    let visible = lines
+        .len()
+        .clamp(1, usize::from(area.height).saturating_sub(6).max(1));
     let rect = centered(area, box_w, visible as u16 + 4);
     let title = format!(
         "{} → {} · {} · {}",

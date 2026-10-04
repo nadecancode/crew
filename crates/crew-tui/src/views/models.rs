@@ -54,13 +54,20 @@ pub fn render(buf: &mut Buffer, area: Rect, app: &App, picker: &ModelPicker, the
             Some(why) => format!("Cannot be started here: {why}"),
             None => m.summary.clone(),
         })
-        .map(|text| wrap(&text, cols).into_iter().take(SUMMARY_LINES).collect::<Vec<_>>())
+        .map(|text| {
+            wrap(&text, cols)
+                .into_iter()
+                .take(SUMMARY_LINES)
+                .collect::<Vec<_>>()
+        })
         .unwrap_or_default();
 
     // Fixed rows: blank, tabs, blank, (list), blank, (summary and a blank
     // after it), consequence, keys; plus the borders.
     let fixed = 3 + 1 + usize::from(!summary.is_empty()) + 2 + 2;
-    let room = usize::from(area.height).saturating_sub(fixed + summary.len()).max(1);
+    let room = usize::from(area.height)
+        .saturating_sub(fixed + summary.len())
+        .max(1);
     let visible = rows.len().clamp(1, MAX_ROWS).min(room);
     let height = fixed + summary.len() + visible;
     let rect = centered(area, outer_w, height as u16);
@@ -82,9 +89,16 @@ pub fn render(buf: &mut Buffer, area: Rect, app: &App, picker: &ModelPicker, the
     let mut tx = x;
     for (i, runtime) in HARNESSES.iter().enumerate() {
         let mark = if Some(*runtime) == own { " ●" } else { "" };
-        let label = format!("{} {} {}{mark}", i + 1, runtime_glyph(*runtime), runtime_label(*runtime));
+        let label = format!(
+            "{} {} {}{mark}",
+            i + 1,
+            runtime_glyph(*runtime),
+            runtime_label(*runtime)
+        );
         let style = if *runtime == picker.runtime {
-            theme.bold(theme.runtime_color(*runtime)).add_modifier(ratatui::style::Modifier::REVERSED)
+            theme
+                .bold(theme.runtime_color(*runtime))
+                .add_modifier(ratatui::style::Modifier::REVERSED)
         } else {
             theme.fg(theme.muted)
         };
@@ -102,19 +116,34 @@ pub fn render(buf: &mut Buffer, area: Rect, app: &App, picker: &ModelPicker, the
         } else {
             format!("no {} models are known", runtime_label(picker.runtime))
         };
-        let style = if app.models_error.is_some() { theme.fg(theme.err) } else { theme.fg(theme.dim) };
+        let style = if app.models_error.is_some() {
+            theme.fg(theme.err)
+        } else {
+            theme.fg(theme.dim)
+        };
         put_str(buf, rect, x, y, &fit(&text, cols), style);
         y += 1;
     } else {
-        let first = picker.row.saturating_sub(visible - 1).min(rows.len() - visible);
-        let name_w = rows.iter().map(|m| width(&m.name)).max().unwrap_or(0).clamp(8, 30);
+        let first = picker
+            .row
+            .saturating_sub(visible - 1)
+            .min(rows.len() - visible);
+        let name_w = rows
+            .iter()
+            .map(|m| width(&m.name))
+            .max()
+            .unwrap_or(0)
+            .clamp(8, 30);
         let tier_w = rows.iter().map(|m| width(&m.tier)).max().unwrap_or(0);
         for (i, model) in rows.iter().enumerate().skip(first).take(visible) {
             let selected = i == picker.row;
             let now = current == Some(i);
             let cursor = if selected { "▸" } else { " " };
             let mark = if now { "●" } else { " " };
-            let mut line = format!("{cursor}{mark} {}", pad_right(&fit(&model.name, name_w), name_w));
+            let mut line = format!(
+                "{cursor}{mark} {}",
+                pad_right(&fit(&model.name, name_w), name_w)
+            );
             if tier_w > 0 {
                 line.push_str(&format!("  {}", pad_right(&model.tier, tier_w)));
             }
@@ -144,7 +173,14 @@ pub fn render(buf: &mut Buffer, area: Rect, app: &App, picker: &ModelPicker, the
         if rows.len() > visible {
             let note = format!("{}/{}", picker.row + 1, rows.len());
             let at = i32::from(rect.right()) - 3 - width(&note) as i32;
-            put_str(buf, rect, at, i32::from(rect.bottom()) - 1, &note, theme.fg(theme.dim));
+            put_str(
+                buf,
+                rect,
+                at,
+                i32::from(rect.bottom()) - 1,
+                &note,
+                theme.fg(theme.dim),
+            );
         }
     }
     y += 1;

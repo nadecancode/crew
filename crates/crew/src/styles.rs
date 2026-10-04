@@ -115,13 +115,23 @@ impl Styles {
             });
         }
         for scope in Scope::ALL {
-            let Some(dir) = dir(scope, workspace) else { continue };
-            let Ok(read) = std::fs::read_dir(&dir) else { continue };
+            let Some(dir) = dir(scope, workspace) else {
+                continue;
+            };
+            let Ok(read) = std::fs::read_dir(&dir) else {
+                continue;
+            };
             let mut files: Vec<PathBuf> = read.flatten().map(|e| e.path()).collect();
             files.sort();
             for path in files {
-                let Some(toml) = extension(&path) else { continue };
-                let name = path.file_stem().unwrap_or_default().to_string_lossy().into_owned();
+                let Some(toml) = extension(&path) else {
+                    continue;
+                };
+                let name = path
+                    .file_stem()
+                    .unwrap_or_default()
+                    .to_string_lossy()
+                    .into_owned();
                 let parsed = std::fs::read_to_string(&path)
                     .map_err(anyhow::Error::from)
                     .and_then(|text| Style::parse(&name, &text, toml));
@@ -140,7 +150,11 @@ impl Styles {
 
     /// Add a style, replacing one of the same name where it stands.
     fn put(&mut self, entry: Entry) {
-        match self.entries.iter_mut().find(|e| e.style.name == entry.style.name) {
+        match self
+            .entries
+            .iter_mut()
+            .find(|e| e.style.name == entry.style.name)
+        {
             Some(existing) => *existing = entry,
             None => self.entries.push(entry),
         }
@@ -171,7 +185,11 @@ impl Entry {
             return "staffed by the orchestrator".to_string();
         }
         let ids: Vec<&str> = style.agents.iter().map(|a| a.id.as_str()).collect();
-        let orchestrator = if style.orchestrator.agent { " + orchestrator" } else { "" };
+        let orchestrator = if style.orchestrator.agent {
+            " + orchestrator"
+        } else {
+            ""
+        };
         format!("{}{orchestrator}", ids.join(", "))
     }
 
@@ -186,7 +204,9 @@ impl Entry {
     /// The file's text (the embedded text for a built-in).
     pub fn source(&self) -> Result<String> {
         match &self.path {
-            Some(path) => std::fs::read_to_string(path).with_context(|| format!("reading {}", path.display())),
+            Some(path) => {
+                std::fs::read_to_string(path).with_context(|| format!("reading {}", path.display()))
+            }
             None => Ok(BUILT_IN
                 .iter()
                 .find(|(name, _)| *name == self.style.name)
@@ -198,7 +218,9 @@ impl Entry {
 
 /// Where the last team launched from `style` in this workspace is kept.
 pub fn roster_path(workspace: &Path, style: &str) -> PathBuf {
-    paths::state_dir(workspace).join(ROSTERS_DIR).join(format!("{style}.yaml"))
+    paths::state_dir(workspace)
+        .join(ROSTERS_DIR)
+        .join(format!("{style}.yaml"))
 }
 
 /// The team the orchestrator settled on the last time `style` ran here.
@@ -211,7 +233,8 @@ pub fn create(workspace: &Path, name: &str, scope: Scope, from: Option<&str>) ->
     if !is_valid_id(name) {
         bail!("'{name}' is not a style name (expected [a-z][a-z0-9_-]{{0,31}})");
     }
-    let dir = dir(scope, workspace).ok_or_else(|| anyhow!("no home directory to put the style in"))?;
+    let dir =
+        dir(scope, workspace).ok_or_else(|| anyhow!("no home directory to put the style in"))?;
     let path = dir.join(format!("{name}.yaml"));
     for existing in ["yaml", "yml", "toml"] {
         let other = dir.join(format!("{name}.{existing}"));
@@ -224,7 +247,10 @@ pub fn create(workspace: &Path, name: &str, scope: Scope, from: Option<&str>) ->
             let entry = Styles::load(workspace);
             let entry = entry.require(source)?;
             if entry.path.as_deref().and_then(extension) == Some(true) {
-                bail!("'{source}' is a TOML style; copy {} by hand", entry.path.as_ref().unwrap().display());
+                bail!(
+                    "'{source}' is a TOML style; copy {} by hand",
+                    entry.path.as_ref().unwrap().display()
+                );
             }
             entry.source()?
         }
@@ -246,27 +272,46 @@ mod tests {
         for (name, text) in BUILT_IN {
             let style = Style::parse(name, text, false).unwrap();
             assert!(!style.description.is_empty(), "{name}");
-            assert!(style.agents.is_empty() && style.orchestrator.agent, "{name}");
+            assert!(
+                style.agents.is_empty() && style.orchestrator.agent,
+                "{name}"
+            );
             styles.put(Entry {
                 style,
                 origin: Origin::BuiltIn,
                 path: None,
             });
         }
-        let names: Vec<&str> = styles.entries.iter().map(|e| e.style.name.as_str()).collect();
+        let names: Vec<&str> = styles
+            .entries
+            .iter()
+            .map(|e| e.style.name.as_str())
+            .collect();
         assert_eq!(names, ["default", "research", "experiment", "cleanup"]);
         let research = styles.get("research").unwrap();
         assert_eq!(research.staffing(), "staffed by the orchestrator");
         assert_eq!(research.runtime(), "claude");
         assert!(research.style.instructions.contains("research team"));
-        assert!(styles.get("experiment").unwrap().style.instructions.contains("hypothesis"));
+        assert!(styles
+            .get("experiment")
+            .unwrap()
+            .style
+            .instructions
+            .contains("hypothesis"));
         let cleanup = &styles.get("cleanup").unwrap().style;
-        assert!(cleanup.instructions.contains("Change structure, not behaviour"));
-        assert!(cleanup.instructions.contains("Set `reviewer` on every cleanup task"));
+        assert!(cleanup
+            .instructions
+            .contains("Change structure, not behaviour"));
+        assert!(cleanup
+            .instructions
+            .contains("Set `reviewer` on every cleanup task"));
         assert_eq!(cleanup.defaults.model_fallbacks["fable"], ["opus"]);
         assert!(research.source().unwrap().contains("description:"));
         let error = styles.require("reserch").unwrap_err().to_string();
-        assert!(error.contains("available: default, research, experiment, cleanup"), "{error}");
+        assert!(
+            error.contains("available: default, research, experiment, cleanup"),
+            "{error}"
+        );
         // The template `crew style new` writes is itself a valid style.
         Style::parse("mine", TEMPLATE, false).unwrap();
         assert_eq!(
@@ -298,18 +343,30 @@ mod tests {
         assert_eq!(research.style.description, "Our research");
         assert_eq!(research.staffing(), "scout, skeptic + orchestrator");
         assert_eq!(styles.position("research"), Some(1));
-        assert_eq!(styles.get("field-notes").unwrap().origin.as_str(), "project");
+        assert_eq!(
+            styles.get("field-notes").unwrap().origin.as_str(),
+            "project"
+        );
         assert!(styles.get("broken").is_none() && styles.get("README").is_none());
-        assert!(styles.problems.iter().any(|p| p.contains("broken.yaml")), "{:?}", styles.problems);
+        assert!(
+            styles.problems.iter().any(|p| p.contains("broken.yaml")),
+            "{:?}",
+            styles.problems
+        );
 
         // `crew style new`: from the template, or as a copy to edit.
         let path = create(ws, "mine", Scope::Project, None).unwrap();
         assert_eq!(path, folder.join("mine.yaml"));
-        assert!(create(ws, "mine", Scope::Project, None).is_err(), "never overwrites");
+        assert!(
+            create(ws, "mine", Scope::Project, None).is_err(),
+            "never overwrites"
+        );
         assert!(create(ws, "Bad Name", Scope::Project, None).is_err());
         assert!(create(ws, "copy", Scope::Project, Some("nope")).is_err());
         let copy = create(ws, "my-experiment", Scope::Project, Some("experiment")).unwrap();
-        assert!(std::fs::read_to_string(copy).unwrap().contains("hypothesis"));
+        assert!(std::fs::read_to_string(copy)
+            .unwrap()
+            .contains("hypothesis"));
         let styles = Styles::load(ws);
         assert!(styles.get("mine").is_some() && styles.get("my-experiment").is_some());
     }

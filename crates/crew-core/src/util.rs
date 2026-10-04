@@ -159,8 +159,14 @@ mod tests {
     #[test]
     fn slash_commands_are_told_from_text() {
         assert_eq!(slash_command("/exit"), Some(("exit", "")));
-        assert_eq!(slash_command("/kill  claude-2 \n"), Some(("kill", "claude-2")));
-        assert_eq!(slash_command("/Stop now please"), Some(("Stop", "now please")));
+        assert_eq!(
+            slash_command("/kill  claude-2 \n"),
+            Some(("kill", "claude-2"))
+        );
+        assert_eq!(
+            slash_command("/Stop now please"),
+            Some(("Stop", "now please"))
+        );
         assert_eq!(slash_command("/?"), Some(("?", "")));
         assert_eq!(slash_command("/exit\nand more"), Some(("exit", "and more")));
         // Paths, text after a space, and everything else are plain text.

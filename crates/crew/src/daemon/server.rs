@@ -94,7 +94,9 @@ async fn handle(daemon: Daemon, stream: UnixStream) {
     });
 
     let mut conn = Conn {
-        id: daemon.next_conn.fetch_add(1, std::sync::atomic::Ordering::Relaxed),
+        id: daemon
+            .next_conn
+            .fetch_add(1, std::sync::atomic::Ordering::Relaxed),
         who: None,
         tx,
         subscribe_after_reply: false,
@@ -132,7 +134,10 @@ async fn handle(daemon: Daemon, stream: UnixStream) {
             Ok(request) => {
                 let id = request.id;
                 // Input for an attached terminal is not acknowledged.
-                let silent = matches!(request.call, Call::AttachInput { .. } | Call::AttachResize { .. });
+                let silent = matches!(
+                    request.call,
+                    Call::AttachInput { .. } | Call::AttachResize { .. }
+                );
                 match daemon.dispatch(&mut conn, request.call).await {
                     Ok(_) if silent => continue,
                     Ok(result) => ServerFrame::ok(id, result),

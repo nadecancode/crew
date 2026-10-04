@@ -45,7 +45,11 @@ fn roster(view: &TeamView<'_>, me: &str) -> String {
     for agent in view.agents {
         let you = if agent.id == me { " (you)" } else { "" };
         if let Some(parent) = &agent.parent {
-            let _ = writeln!(out, "- {}{you} — subagent of {parent}: {}", agent.id, agent.role);
+            let _ = writeln!(
+                out,
+                "- {}{you} — subagent of {parent}: {}",
+                agent.id, agent.role
+            );
             continue;
         }
         let role = if agent.orchestrator {
@@ -294,11 +298,15 @@ see it. If you must wait for a teammate, call agent_status(\"waiting\", \
 
 /// How a worker gets a question answered: nobody reads its terminal.
 fn worker_questions(view: &TeamView<'_>, me: &Agent) -> String {
-    let orchestrator = view.agents.iter().find(|a| a.orchestrator).map(|a| a.id.as_str());
+    let orchestrator = view
+        .agents
+        .iter()
+        .find(|a| a.orchestrator)
+        .map(|a| a.id.as_str());
     let whom = match (&me.parent, orchestrator) {
-        (Some(parent), _) => format!(
-            "put it to {parent}: agent_send(to: \"{parent}\", type: \"question\")"
-        ),
+        (Some(parent), _) => {
+            format!("put it to {parent}: agent_send(to: \"{parent}\", type: \"question\")")
+        }
         (None, Some(id)) => format!(
             "put it to {id}: agent_send(to: \"{id}\", type: \"question\"). It answers what it can \
 and brings in the human operator for what only a human can decide; if its answer does not \
@@ -518,7 +526,13 @@ is a fresh session: you do not have the previous session's conversation.",
         }
         for task in h.tasks {
             let who = task.assigned_agent.as_deref().unwrap_or("unassigned");
-            let _ = write!(plan, "\n- {} → {who} [{}]: {}", task.id, task.status.as_str(), task.title);
+            let _ = write!(
+                plan,
+                "\n- {} → {who} [{}]: {}",
+                task.id,
+                task.status.as_str(),
+                task.title
+            );
         }
         parts.push(plan);
         let mut team = String::from("The team:");
@@ -536,13 +550,28 @@ is a fresh session: you do not have the previous session's conversation.",
             let doing = if member.activity.is_empty() {
                 String::new()
             } else {
-                format!(" — {}", crew_core::util::truncate_chars(&crew_core::util::one_line(&member.activity), 80))
+                format!(
+                    " — {}",
+                    crew_core::util::truncate_chars(
+                        &crew_core::util::one_line(&member.activity),
+                        80
+                    )
+                )
             };
-            let _ = write!(team, "\n- {} ({runs}): {}{doing}", member.id, member.status.as_str());
+            let _ = write!(
+                team,
+                "\n- {} ({runs}): {}{doing}",
+                member.id,
+                member.status.as_str()
+            );
         }
         parts.push(team);
     } else {
-        let branch = me.branch.as_deref().map(|b| format!(", branch {b}")).unwrap_or_default();
+        let branch = me
+            .branch
+            .as_deref()
+            .map(|b| format!(", branch {b}"))
+            .unwrap_or_default();
         let mut work = format!(
             "Your working directory ({}{branch}) holds the work so far, uncommitted changes \
 included: read git status and git diff before you go on, and do not redo what is done.",
@@ -572,8 +601,15 @@ included: read git status and git diff before you go on, and do not redo what is
                     .join("\n")
             })
             .collect();
-        let whose = if me.orchestrator { "your predecessor" } else { "the previous session" };
-        parts.push(format!("The last thing {whose} wrote:\n{}", quoted.join("\n>\n")));
+        let whose = if me.orchestrator {
+            "your predecessor"
+        } else {
+            "the previous session"
+        };
+        parts.push(format!(
+            "The last thing {whose} wrote:\n{}",
+            quoted.join("\n>\n")
+        ));
     }
     parts.push(
         if me.orchestrator {
@@ -609,9 +645,13 @@ pub fn last_words(entries: &[crew_core::types::TranscriptEntry]) -> Vec<String> 
 /// card on the board is theirs, by id. What the card says (the work, the
 /// results it builds on, its reviewer) is read with task_get, not sent.
 pub fn task_dispatch(task: &Task) -> String {
-    let more = (!task.description.is_empty() && task.description != task.title) || !task.dependencies.is_empty();
+    let more = (!task.description.is_empty() && task.description != task.title)
+        || !task.dependencies.is_empty();
     if more {
-        format!("Task {} is yours: \"{}\". task_get(\"{}\") reads its card.", task.id, task.title, task.id)
+        format!(
+            "Task {} is yours: \"{}\". task_get(\"{}\") reads its card.",
+            task.id, task.title, task.id
+        )
     } else {
         format!("Task {} is yours: \"{}\".", task.id, task.title)
     }
@@ -662,7 +702,11 @@ pub fn nudge_senders(prompt: &str) -> Vec<(String, String)> {
     let mut found: Vec<(String, String)> = Vec::new();
     let mut add = |from: &str, id: &str| {
         let id = id.trim_end_matches([':', ')']);
-        if crew_core::util::is_valid_id(from) && !id.is_empty() && !id.contains(char::is_whitespace) && !found.iter().any(|(_, seen)| seen == id) {
+        if crew_core::util::is_valid_id(from)
+            && !id.is_empty()
+            && !id.contains(char::is_whitespace)
+            && !found.iter().any(|(_, seen)| seen == id)
+        {
             found.push((from.to_string(), id.to_string()));
         }
     };
@@ -670,7 +714,10 @@ pub fn nudge_senders(prompt: &str) -> Vec<(String, String)> {
     for (at, mark) in prompt.match_indices("[crew] Message from ") {
         let rest = &prompt[at + mark.len()..];
         if let Some((from, rest)) = rest.split_once(" (type ") {
-            if let Some((id, _)) = rest.split_once(", id ").and_then(|(_, rest)| rest.split_once(')')) {
+            if let Some((id, _)) = rest
+                .split_once(", id ")
+                .and_then(|(_, rest)| rest.split_once(')'))
+            {
                 add(from, id);
             }
         }
@@ -753,7 +800,10 @@ mod tests {
 
     #[test]
     fn members_write_to_each_other_in_the_teams_voice_and_to_people_plainly() {
-        let agents = vec![agent("orchestrator", "", true), agent("claude-3", "ledger", false)];
+        let agents = vec![
+            agent("orchestrator", "", true),
+            agent("claude-3", "ledger", false),
+        ];
         let view = |voice| TeamView {
             project: "demo",
             objective: "Build it",
@@ -765,17 +815,38 @@ mod tests {
             voice,
         };
         let member = worker_briefing(&view(Voice::default()), &agents[1]);
-        assert!(member.contains("## Writing") && member.contains("Voice: ultracave. Fragments"), "{member}");
-        assert!(member.contains("Not in the voice: what lasts for people (code, comments, commit messages"), "{member}");
+        assert!(
+            member.contains("## Writing") && member.contains("Voice: ultracave. Fragments"),
+            "{member}"
+        );
+        assert!(
+            member.contains(
+                "Not in the voice: what lasts for people (code, comments, commit messages"
+            ),
+            "{member}"
+        );
         let classical = worker_briefing(&view(Voice::Megacave), &agents[1]);
-        assert!(classical.contains("Voice: megacave. Write in 文言") && !classical.contains("Voice: ultracave"), "{classical}");
+        assert!(
+            classical.contains("Voice: megacave. Write in 文言")
+                && !classical.contains("Voice: ultracave"),
+            "{classical}"
+        );
         let lead = orchestrator_briefing(&view(Voice::default()));
-        assert!(lead.contains("Members are models. Write to them in the team's voice"), "{lead}");
-        assert!(lead.contains("plain, self-contained English sentences"), "{lead}");
+        assert!(
+            lead.contains("Members are models. Write to them in the team's voice"),
+            "{lead}"
+        );
+        assert!(
+            lead.contains("plain, self-contained English sentences"),
+            "{lead}"
+        );
         assert!(lead.contains("Voice: ultracave."), "{lead}");
         // In the system prompt, in place of the runtime's guidance for a person.
         let tone = member_tone(Voice::Caveman);
-        assert!(tone.starts_with("# Tone and style\nYou are a member of a team") && tone.ends_with(voice_rules(Voice::Caveman)));
+        assert!(
+            tone.starts_with("# Tone and style\nYou are a member of a team")
+                && tone.ends_with(voice_rules(Voice::Caveman))
+        );
     }
 
     #[test]
@@ -803,9 +874,14 @@ mod tests {
             instructions: "Cite a source for every claim.\n",
             ..view
         };
-        for text in [worker_briefing(&styled, &agents[1]), orchestrator_briefing(&styled)] {
+        for text in [
+            worker_briefing(&styled, &agents[1]),
+            orchestrator_briefing(&styled),
+        ] {
             assert!(
-                text.contains("## How this team works (research)\nCite a source for every claim.\n"),
+                text.contains(
+                    "## How this team works (research)\nCite a source for every claim.\n"
+                ),
                 "{text}"
             );
         }
@@ -814,19 +890,36 @@ mod tests {
         assert!(text.contains("- claude-5 — db"));
         assert!(text.contains("the orchestrator is not a relay"));
         // Replies are carried over; a conversation starts with an @line.
-        assert!(text.contains("goes back to the teammate whose question or message started it") && text.contains("begin a line of that reply with `@<id>:`"), "{text}");
+        assert!(
+            text.contains("goes back to the teammate whose question or message started it")
+                && text.contains("begin a line of that reply with `@<id>:`"),
+            "{text}"
+        );
         // What is not the agent's to decide goes to the orchestrator, which
         // brings in the human; nobody reads the agent's own terminal.
-        assert!(text.contains("## Questions\nNobody watches your terminal"), "{text}");
-        assert!(text.contains("- agent_compact(keep?) — compact your own conversation"), "{text}");
-        assert!(text.contains("agent_send(to: \"orchestrator\", type: \"question\")"), "{text}");
+        assert!(
+            text.contains("## Questions\nNobody watches your terminal"),
+            "{text}"
+        );
+        assert!(
+            text.contains("- agent_compact(keep?) — compact your own conversation"),
+            "{text}"
+        );
+        assert!(
+            text.contains("agent_send(to: \"orchestrator\", type: \"question\")"),
+            "{text}"
+        );
         assert!(!text.contains("operator_ask"), "{text}");
         // A subagent asks the agent that launched it; a team without an
         // orchestrator asks the operator directly.
         let mut sub = agent("claude-3-1", "helper", false);
         sub.parent = Some("claude-3".into());
         let text_sub = worker_briefing(&view, &sub);
-        assert!(text_sub.contains("put it to claude-3: agent_send(to: \"claude-3\", type: \"question\")"), "{text_sub}");
+        assert!(
+            text_sub
+                .contains("put it to claude-3: agent_send(to: \"claude-3\", type: \"question\")"),
+            "{text_sub}"
+        );
         let flat = worker_briefing(
             &TeamView {
                 agents: &agents[1..],
@@ -834,7 +927,10 @@ mod tests {
             },
             &agents[1],
         );
-        assert!(flat.contains("agent_send(to: \"operator\", type: \"question\")"), "{flat}");
+        assert!(
+            flat.contains("agent_send(to: \"operator\", type: \"question\")"),
+            "{flat}"
+        );
         assert!(text.contains("agents/claude-3"));
         let shared = worker_briefing(
             &TeamView {
@@ -863,7 +959,10 @@ mod tests {
         assert!(text.contains("must not act as a relay"));
         // The model catalog sits between the roster and the working rules.
         let models = text.find("## Models").expect("the catalog section");
-        assert!(text.find("## Team").unwrap() < models && models < text.find("## How the team runs").unwrap());
+        assert!(
+            text.find("## Team").unwrap() < models
+                && models < text.find("## How the team runs").unwrap()
+        );
         assert!(text.contains("agent_add"));
         assert!(orchestrator_kickoff(&[], 0, "").contains("no members yet"));
         assert!(orchestrator_kickoff(&[], 3, "").contains("task graph is empty"));
@@ -875,12 +974,24 @@ mod tests {
         assert!(text.contains("session_complete"));
         assert!(text.contains("- orchestrator (you)"));
         // Members' questions it cannot settle go to the human, through crew.
-        assert!(text.contains("- operator_ask(question, options?, asked_by?)"), "{text}");
+        assert!(
+            text.contains("- operator_ask(question, options?, asked_by?)"),
+            "{text}"
+        );
         // It watches the context windows and compacts at a good moment.
         assert!(text.contains("- agent_compact(id?, keep?)"), "{text}");
-        assert!(text.contains("5. Mind the context windows.") && text.contains("6. Conclude."), "{text}");
-        assert!(text.contains("4. Answer. Members bring you the questions they cannot settle"), "{text}");
-        assert!(text.contains("never ask there or through a built-in ask-the-user dialog"), "{text}");
+        assert!(
+            text.contains("5. Mind the context windows.") && text.contains("6. Conclude."),
+            "{text}"
+        );
+        assert!(
+            text.contains("4. Answer. Members bring you the questions they cannot settle"),
+            "{text}"
+        );
+        assert!(
+            text.contains("never ask there or through a built-in ask-the-user dialog"),
+            "{text}"
+        );
     }
 
     #[test]
@@ -904,12 +1015,25 @@ mod tests {
 
     #[test]
     fn the_senders_of_a_nudge_are_read_back_from_its_text() {
-        let one = format_nudge(&[message("lead", MessageType::ReviewRequest, "Please review: a (b) from c · type d")]);
-        assert_eq!(nudge_senders(&one), [("lead".to_string(), "m-1".to_string())]);
+        let one = format_nudge(&[message(
+            "lead",
+            MessageType::ReviewRequest,
+            "Please review: a (b) from c · type d",
+        )]);
+        assert_eq!(
+            nudge_senders(&one),
+            [("lead".to_string(), "m-1".to_string())]
+        );
         let mut second = message("scheduler", MessageType::Status, "task done");
         second.id = "m-2".into();
-        let two = format_nudge(&[message("lead", MessageType::Message, "one (x) from me"), second]);
-        let expected = [("lead".to_string(), "m-1".to_string()), ("scheduler".to_string(), "m-2".to_string())];
+        let two = format_nudge(&[
+            message("lead", MessageType::Message, "one (x) from me"),
+            second,
+        ]);
+        let expected = [
+            ("lead".to_string(), "m-1".to_string()),
+            ("scheduler".to_string(), "m-2".to_string()),
+        ];
         assert_eq!(nudge_senders(&two), expected);
         // Typed into a terminal, the lines are joined; the senders are the same.
         assert_eq!(nudge_senders(&two.replace('\n', "  ")), expected);
@@ -947,10 +1071,16 @@ mod tests {
         task.description = "Write ledger.rs".into();
         task.reviewer = Some("claude-2".into());
         dep.title = "schema".into();
-        assert_eq!(task_dispatch(&task), "Task ledger is yours: \"implement ledger\". task_get(\"ledger\") reads its card.");
+        assert_eq!(
+            task_dispatch(&task),
+            "Task ledger is yours: \"implement ledger\". task_get(\"ledger\") reads its card."
+        );
         // A card that says no more than its title is all in the dispatch.
         task.description = task.title.clone();
-        assert_eq!(task_dispatch(&task), "Task ledger is yours: \"implement ledger\".");
+        assert_eq!(
+            task_dispatch(&task),
+            "Task ledger is yours: \"implement ledger\"."
+        );
         // What it builds on is on the card, not in the dispatch.
         task.dependencies = vec![dep.id.clone()];
         assert!(task_dispatch(&task).ends_with("task_get(\"ledger\") reads its card."));
@@ -976,7 +1106,10 @@ mod tests {
             note: None,
             timeout_secs: None,
         };
-        let tasks = vec![task("design", "design", TaskStatus::Working), task("review", "skeptic", TaskStatus::Queued)];
+        let tasks = vec![
+            task("design", "design", TaskStatus::Working),
+            task("review", "skeptic", TaskStatus::Queued),
+        ];
         let mut design = agent("design", "designer", false);
         design.status = AgentStatus::Working;
         design.activity = "Edit spec.md".into();
@@ -985,7 +1118,11 @@ mod tests {
         design.branch = Some("agents/design".into());
         let orchestrator = agent(ORCHESTRATOR_ID, "orchestrator", true);
         let agents = vec![orchestrator.clone(), design.clone()];
-        let entry = |kind, text: &str| TranscriptEntry { kind, at: None, text: text.into() };
+        let entry = |kind, text: &str| TranscriptEntry {
+            kind,
+            at: None,
+            text: text.into(),
+        };
         let transcript = vec![
             entry(TranscriptKind::Reply, "one"),
             entry(TranscriptKind::Prompt, "do it"),
@@ -995,7 +1132,11 @@ mod tests {
             entry(TranscriptKind::Reply, "four"),
         ];
         let last = last_words(&transcript);
-        assert_eq!(last, ["two\nlines", "three", "four"], "the last three replies, oldest first");
+        assert_eq!(
+            last,
+            ["two\nlines", "three", "four"],
+            "the last three replies, oldest first"
+        );
 
         let text = handoff(&Handoff {
             agent: &orchestrator,

@@ -67,7 +67,9 @@ task_complete."
         .find(|m| m.from == "beta" && m.to == "alpha")
         .expect("beta's answer to alpha");
     assert!(answer.body.contains("51"), "{}", answer.body);
-    assert!(messages.iter().all(|m| m.kind == MessageType::Task || m.is_p2p()));
+    assert!(messages
+        .iter()
+        .all(|m| m.kind == MessageType::Task || m.is_p2p()));
 
     let alpha = find_agent(&snapshot, "alpha");
     let answer_file = std::path::Path::new(&alpha.workdir).join("answer.txt");

@@ -8,8 +8,8 @@
 use anyhow::{Context, Result};
 use ratatui::buffer::Buffer;
 use ratatui::crossterm::event::{
-    self as term, Event as TermEvent, KeyCode, KeyEvent, KeyEventKind, KeyModifiers, MouseButton, MouseEvent,
-    MouseEventKind,
+    self as term, Event as TermEvent, KeyCode, KeyEvent, KeyEventKind, KeyModifiers, MouseButton,
+    MouseEvent, MouseEventKind,
 };
 use ratatui::layout::{Position, Rect};
 use ratatui::style::Modifier;
@@ -72,8 +72,16 @@ pub enum Step {
 }
 
 impl Launcher {
-    pub fn new(workspace: &str, choices: Vec<StyleChoice>, selected: usize, objective: &str) -> Self {
-        let objective: String = sanitize(objective).chars().take(MAX_OBJECTIVE_CHARS).collect();
+    pub fn new(
+        workspace: &str,
+        choices: Vec<StyleChoice>,
+        selected: usize,
+        objective: &str,
+    ) -> Self {
+        let objective: String = sanitize(objective)
+            .chars()
+            .take(MAX_OBJECTIVE_CHARS)
+            .collect();
         Self {
             workspace: workspace.to_string(),
             selected: selected.min(choices.len().saturating_sub(1)),
@@ -152,7 +160,11 @@ impl Launcher {
                     .choices
                     .iter()
                     .position(|c| named(c) == wanted)
-                    .or_else(|| self.choices.iter().position(|c| !wanted.is_empty() && named(c).starts_with(&wanted)));
+                    .or_else(|| {
+                        self.choices
+                            .iter()
+                            .position(|c| !wanted.is_empty() && named(c).starts_with(&wanted))
+                    });
                 match found {
                     Some(index) => {
                         self.selected = index;
@@ -161,8 +173,12 @@ impl Launcher {
                         self.notice = None;
                     }
                     None => {
-                        let names: Vec<&str> = self.choices.iter().map(|c| c.name.as_str()).collect();
-                        self.notice = Some(format!("no style named '{rest}' (there are: {})", names.join(", ")));
+                        let names: Vec<&str> =
+                            self.choices.iter().map(|c| c.name.as_str()).collect();
+                        self.notice = Some(format!(
+                            "no style named '{rest}' (there are: {})",
+                            names.join(", ")
+                        ));
                     }
                 }
             }
@@ -208,12 +224,19 @@ impl Launcher {
         let Some(list) = list_rect(area, self) else {
             return;
         };
-        let rows = Rect::new(list.x + 1, list.y + 1, list.width - 2, list.height.saturating_sub(2));
+        let rows = Rect::new(
+            list.x + 1,
+            list.y + 1,
+            list.width - 2,
+            list.height.saturating_sub(2),
+        );
         let over_list = rows.contains(Position::new(mouse.column, mouse.row));
         match mouse.kind {
             MouseEventKind::Down(MouseButton::Left) if over_list => {
                 // The list keeps the selection in view; rows count from there.
-                let first = self.selected.saturating_sub(usize::from(rows.height).saturating_sub(1));
+                let first = self
+                    .selected
+                    .saturating_sub(usize::from(rows.height).saturating_sub(1));
                 let index = first + usize::from(mouse.row - rows.y);
                 if index < self.choices.len() {
                     self.selected = index;
@@ -262,7 +285,9 @@ impl Launcher {
             KeyCode::End => self.cursor = len,
             KeyCode::Char('a') if ctrl => self.cursor = 0,
             KeyCode::Char('e') if ctrl => self.cursor = len,
-            KeyCode::Backspace if self.cursor > 0 => self.delete_range(self.cursor - 1, self.cursor),
+            KeyCode::Backspace if self.cursor > 0 => {
+                self.delete_range(self.cursor - 1, self.cursor)
+            }
             KeyCode::Delete if self.cursor < len => self.delete_range(self.cursor, self.cursor + 1),
             KeyCode::Char('u') if ctrl => self.delete_range(0, self.cursor),
             KeyCode::Char('k') if ctrl => self.delete_range(self.cursor, len),
@@ -277,7 +302,9 @@ impl Launcher {
                 }
                 self.delete_range(start, self.cursor);
             }
-            KeyCode::Char(ch) if !ctrl && !key.modifiers.contains(KeyModifiers::ALT) => self.insert(ch),
+            KeyCode::Char(ch) if !ctrl && !key.modifiers.contains(KeyModifiers::ALT) => {
+                self.insert(ch)
+            }
             _ => return Step::Continue,
         }
         self.notice = None;
@@ -289,7 +316,13 @@ impl Launcher {
 /// characters are dropped.
 fn sanitize(text: &str) -> String {
     text.chars()
-        .map(|c| if c == '\n' || c == '\r' || c == '\t' { ' ' } else { c })
+        .map(|c| {
+            if c == '\n' || c == '\r' || c == '\t' {
+                ' '
+            } else {
+                c
+            }
+        })
         .filter(|c| !c.is_control())
         .collect()
 }
@@ -302,11 +335,13 @@ pub fn run_launcher(mut launcher: Launcher) -> Result<Option<Launch>> {
         loop {
             terminal.draw(|frame| render(frame, &launcher, &theme))?;
             match term::read()? {
-                TermEvent::Key(key) if key.kind != KeyEventKind::Release => match launcher.handle_key(key) {
-                    Step::Continue => {}
-                    Step::Launch(launch) => return Ok(Some(launch)),
-                    Step::Cancel => return Ok(None),
-                },
+                TermEvent::Key(key) if key.kind != KeyEventKind::Release => {
+                    match launcher.handle_key(key) {
+                        Step::Continue => {}
+                        Step::Launch(launch) => return Ok(Some(launch)),
+                        Step::Cancel => return Ok(None),
+                    }
+                }
                 TermEvent::Paste(text) => launcher.paste(&text),
                 TermEvent::Mouse(mouse) => {
                     let size = terminal.size().unwrap_or_default();
@@ -359,7 +394,10 @@ fn render_into(buf: &mut Buffer, area: Rect, launcher: &Launcher, theme: &Theme)
             area,
             i32::from(area.x),
             i32::from(area.y),
-            &fit("terminal too small for the crew launcher", usize::from(area.width)),
+            &fit(
+                "terminal too small for the crew launcher",
+                usize::from(area.width),
+            ),
             theme.fg(theme.warn),
         );
         return;
@@ -369,7 +407,14 @@ fn render_into(buf: &mut Buffer, area: Rect, launcher: &Launcher, theme: &Theme)
 
     // Header.
     let title = "crew · new team";
-    put_str(buf, area, x + 1, i32::from(area.y), title, theme.bold(theme.orch));
+    put_str(
+        buf,
+        area,
+        x + 1,
+        i32::from(area.y),
+        title,
+        theme.bold(theme.orch),
+    );
     let room = full.saturating_sub(width(title) + 4);
     let workspace = fit(&launcher.workspace, room);
     put_str(
@@ -391,16 +436,27 @@ fn render_into(buf: &mut Buffer, area: Rect, launcher: &Launcher, theme: &Theme)
     render_preview(buf, preview, launcher, theme);
     render_objective(buf, objective, launcher, theme);
 
-    let (text, style) = match (&launcher.notice, slash::hint(slash::LAUNCHER, &launcher.objective)) {
+    let (text, style) = match (
+        &launcher.notice,
+        slash::hint(slash::LAUNCHER, &launcher.objective),
+    ) {
         (Some(notice), _) => (notice.clone(), theme.fg(theme.warn)),
         // A command is being typed: it will not be taken for the objective.
         (None, Some(hint)) => (hint, theme.fg(theme.muted)),
         (None, None) => (
-            "↑↓ style · type the objective · enter launch · pgup/pgdn scroll · esc cancel".to_string(),
+            "↑↓ style · type the objective · enter launch · pgup/pgdn scroll · esc cancel"
+                .to_string(),
             theme.fg(theme.dim),
         ),
     };
-    put_str(buf, area, x + 1, footer_y, &fit(&text, full.saturating_sub(2)), style);
+    put_str(
+        buf,
+        area,
+        x + 1,
+        footer_y,
+        &fit(&text, full.saturating_sub(2)),
+        style,
+    );
 }
 
 fn render_list(buf: &mut Buffer, rect: Rect, launcher: &Launcher, theme: &Theme) {
@@ -412,7 +468,14 @@ fn render_list(buf: &mut Buffer, rect: Rect, launcher: &Launcher, theme: &Theme)
     }
     // Keep the selection in view.
     let first = launcher.selected.saturating_sub(rows.saturating_sub(1));
-    for (row, (index, choice)) in launcher.choices.iter().enumerate().skip(first).take(rows).enumerate() {
+    for (row, (index, choice)) in launcher
+        .choices
+        .iter()
+        .enumerate()
+        .skip(first)
+        .take(rows)
+        .enumerate()
+    {
         let y = i32::from(inner.y) + row as i32;
         let selected = index == launcher.selected;
         let origin = fit(&choice.origin, cols.saturating_sub(6) / 2);
@@ -428,7 +491,14 @@ fn render_list(buf: &mut Buffer, rect: Rect, launcher: &Launcher, theme: &Theme)
         } else {
             theme.fg(theme.text)
         };
-        put_str(buf, inner, i32::from(inner.x), y, &pad_right(&line, cols), style);
+        put_str(
+            buf,
+            inner,
+            i32::from(inner.x),
+            y,
+            &pad_right(&line, cols),
+            style,
+        );
     }
 }
 
@@ -443,10 +513,18 @@ fn render_preview(buf: &mut Buffer, rect: Rect, launcher: &Launcher, theme: &The
     }
     let mut lines: Vec<Line> = Vec::new();
     if !choice.description.is_empty() {
-        lines.push(Line::styled(choice.description.clone(), theme.fg(theme.text)));
+        lines.push(Line::styled(
+            choice.description.clone(),
+            theme.fg(theme.text),
+        ));
         lines.push(Line::default());
     }
-    let label_width = choice.details.iter().map(|(l, _)| width(l)).max().unwrap_or(0);
+    let label_width = choice
+        .details
+        .iter()
+        .map(|(l, _)| width(l))
+        .max()
+        .unwrap_or(0);
     for (label, value) in &choice.details {
         lines.push(Line::from(vec![
             Span::styled(pad_right(label, label_width + 2), theme.fg(theme.muted)),
@@ -463,7 +541,10 @@ fn render_preview(buf: &mut Buffer, rect: Rect, launcher: &Launcher, theme: &The
     Paragraph::new(lines)
         .wrap(Wrap { trim: false })
         .scroll((launcher.scroll, 0))
-        .render(Rect::new(inner.x + 1, inner.y, inner.width - 1, inner.height), buf);
+        .render(
+            Rect::new(inner.x + 1, inner.y, inner.width - 1, inner.height),
+            buf,
+        );
 }
 
 fn render_objective(buf: &mut Buffer, rect: Rect, launcher: &Launcher, theme: &Theme) {
@@ -481,11 +562,21 @@ fn render_objective(buf: &mut Buffer, rect: Rect, launcher: &Launcher, theme: &T
 
     if launcher.objective.is_empty() {
         put_str(buf, inner, text_x, y, " ", cursor_style);
-        let hint = match launcher.current().and_then(|c| c.previous_objective.as_deref()) {
+        let hint = match launcher
+            .current()
+            .and_then(|c| c.previous_objective.as_deref())
+        {
             Some(previous) => format!("enter continues: {previous}"),
             None => "what should the team do?".to_string(),
         };
-        put_str(buf, inner, text_x + 2, y, &fit(&hint, room.saturating_sub(2)), theme.fg(theme.dim));
+        put_str(
+            buf,
+            inner,
+            text_x + 2,
+            y,
+            &fit(&hint, room.saturating_sub(2)),
+            theme.fg(theme.dim),
+        );
         return;
     }
     // Scroll horizontally so the cursor stays visible.
@@ -503,7 +594,11 @@ fn render_objective(buf: &mut Buffer, rect: Rect, launcher: &Launcher, theme: &T
         if cx + w > end {
             break;
         }
-        let style = if i == cursor { cursor_style } else { theme.fg(theme.text) };
+        let style = if i == cursor {
+            cursor_style
+        } else {
+            theme.fg(theme.text)
+        };
         put_str(buf, inner, cx, y, &ch.to_string(), style);
         cx += w;
     }
@@ -549,7 +644,10 @@ mod tests {
         };
         let mut research = choice("research", "built-in", "Investigate a question.");
         research.instructions = "Cite a source for every claim.\nLook for evidence against.".into();
-        research.details.push(("last time".into(), "3 members: scout, skeptic, writer".into()));
+        research.details.push((
+            "last time".into(),
+            "3 members: scout, skeptic, writer".into(),
+        ));
         research.previous_objective = Some("How does the scheduler pick tasks?".into());
         Launcher::new(
             "/work/payments",
@@ -570,7 +668,10 @@ mod tests {
         assert!(frame.contains("crew · new team"), "{frame}");
         assert!(frame.contains("/work/payments"), "{frame}");
         assert!(frame.contains("▸ default"), "{frame}");
-        assert!(frame.contains("research") && frame.contains("field-notes"), "{frame}");
+        assert!(
+            frame.contains("research") && frame.contains("field-notes"),
+            "{frame}"
+        );
         assert!(frame.contains("project"), "{frame}");
         assert!(frame.contains("General software work."), "{frame}");
         assert!(frame.contains("what should the team do?"), "{frame}");
@@ -580,10 +681,16 @@ mod tests {
         let frame = render_to_string(&l, 100, 20);
         assert!(frame.contains("▸ research"), "{frame}");
         assert!(frame.contains("Investigate a question."), "{frame}");
-        assert!(frame.contains("last time  3 members: scout, skeptic, writer"), "{frame}");
+        assert!(
+            frame.contains("last time  3 members: scout, skeptic, writer"),
+            "{frame}"
+        );
         assert!(frame.contains("How the team works"), "{frame}");
         assert!(frame.contains("Cite a source for every claim."), "{frame}");
-        assert!(frame.contains("enter continues: How does the scheduler pick tasks?"), "{frame}");
+        assert!(
+            frame.contains("enter continues: How does the scheduler pick tasks?"),
+            "{frame}"
+        );
 
         // Selection wraps around in both directions.
         l.handle_key(key(KeyCode::Down));
@@ -653,9 +760,15 @@ mod tests {
         let mut l = launcher();
         type_text(&mut l, "/e");
         let frame = render_to_string(&l, 100, 20);
-        assert!(frame.contains("/exit  leave without starting a team"), "{frame}");
+        assert!(
+            frame.contains("/exit  leave without starting a team"),
+            "{frame}"
+        );
         l.handle_key(key(KeyCode::Tab));
-        assert_eq!((l.objective.as_str(), l.cursor, l.selected), ("/exit", 5, 0));
+        assert_eq!(
+            (l.objective.as_str(), l.cursor, l.selected),
+            ("/exit", 5, 0)
+        );
 
         // /style picks a style by name or the start of one.
         let mut l = launcher();
@@ -664,7 +777,11 @@ mod tests {
         assert_eq!((l.selected, l.objective.as_str(), l.cursor), (2, "", 0));
         type_text(&mut l, "/style nope");
         assert_eq!(l.handle_key(key(KeyCode::Enter)), Step::Continue);
-        assert!(l.notice.as_deref().unwrap().contains("no style named 'nope' (there are: default, research, field-notes)"));
+        assert!(l
+            .notice
+            .as_deref()
+            .unwrap()
+            .contains("no style named 'nope' (there are: default, research, field-notes)"));
         l.handle_key(ctrl('u'));
         type_text(&mut l, "/help");
         assert_eq!(l.handle_key(key(KeyCode::Enter)), Step::Continue);
@@ -672,7 +789,10 @@ mod tests {
         assert!(render_to_string(&l, 140, 20).contains("/style <name>  pick a work style by name"));
 
         // A path, or a line given after a space, is an objective.
-        for text in ["/src/queue.rs drops messages; find out why", " /exit handling needs a test"] {
+        for text in [
+            "/src/queue.rs drops messages; find out why",
+            " /exit handling needs a test",
+        ] {
             let mut l = launcher();
             type_text(&mut l, text);
             assert_eq!(
@@ -704,7 +824,8 @@ mod tests {
         let mut l = launcher();
         // The styles are listed from the third row of the screen down.
         let frame = render_to_string(&l, 100, 20);
-        let row_of = |name: &str| frame.lines().position(|line| line.contains(name)).unwrap() as u16;
+        let row_of =
+            |name: &str| frame.lines().position(|line| line.contains(name)).unwrap() as u16;
         mouse(&mut l, click, 5, row_of("field-notes"));
         assert_eq!(l.selected, 2);
         mouse(&mut l, click, 5, row_of("▸ default"));
@@ -778,12 +899,18 @@ mod tests {
         let l = launcher();
         for (w, h) in [(0, 0), (1, 1), (20, 5), (43, 30), (44, 12), (200, 60)] {
             let frame = render_to_string(&l, w, h);
-            assert!(frame.lines().all(|line| width(line) <= usize::from(w)), "{w}x{h}");
+            assert!(
+                frame.lines().all(|line| width(line) <= usize::from(w)),
+                "{w}x{h}"
+            );
         }
         assert!(render_to_string(&l, 30, 8).contains("too small"));
         let empty = Launcher::new("/w", Vec::new(), 0, "");
         assert!(render_to_string(&empty, 80, 20).contains("no styles"));
-        assert_eq!(Launcher::new("/w", Vec::new(), 0, "x").handle_key(key(KeyCode::Enter)), Step::Cancel);
+        assert_eq!(
+            Launcher::new("/w", Vec::new(), 0, "x").handle_key(key(KeyCode::Enter)),
+            Step::Cancel
+        );
         // A long list keeps the selection on screen.
         let mut many = launcher();
         many.choices = (0..40)

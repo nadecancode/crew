@@ -157,7 +157,10 @@ fn screen_styled(parser: &vt100::Parser, lines: usize) -> String {
     let screen = parser.screen();
     let plain = screen.contents();
     let plain: Vec<&str> = plain.lines().collect();
-    let shown = plain.iter().rposition(|l| !l.trim().is_empty()).map_or(0, |at| at + 1);
+    let shown = plain
+        .iter()
+        .rposition(|l| !l.trim().is_empty())
+        .map_or(0, |at| at + 1);
     let (_, cols) = screen.size();
     let rows: Vec<String> = screen
         .rows_formatted(0, cols)
@@ -242,7 +245,11 @@ impl ProcessManager for PtyManager {
             pid,
             master: Mutex::new(pair.master),
             writer: Arc::new(Mutex::new(writer)),
-            parser: Arc::new(Mutex::new(vt100::Parser::new(DEFAULT_ROWS, DEFAULT_COLS, 0))),
+            parser: Arc::new(Mutex::new(vt100::Parser::new(
+                DEFAULT_ROWS,
+                DEFAULT_COLS,
+                0,
+            ))),
             alive: Arc::new(AtomicBool::new(true)),
             output,
         });
@@ -356,13 +363,19 @@ impl ProcessManager for PtyManager {
 
     async fn screen(&self, agent_id: &str, lines: usize) -> Result<String> {
         let proc = self.get(agent_id)?;
-        let parser = proc.parser.lock().map_err(|_| anyhow!("terminal state poisoned"))?;
+        let parser = proc
+            .parser
+            .lock()
+            .map_err(|_| anyhow!("terminal state poisoned"))?;
         Ok(screen_text(&parser, lines))
     }
 
     async fn styled(&self, agent_id: &str, lines: usize) -> Result<String> {
         let proc = self.get(agent_id)?;
-        let parser = proc.parser.lock().map_err(|_| anyhow!("terminal state poisoned"))?;
+        let parser = proc
+            .parser
+            .lock()
+            .map_err(|_| anyhow!("terminal state poisoned"))?;
         Ok(screen_styled(&parser, lines))
     }
 
@@ -416,7 +429,10 @@ impl ProcessManager for PtyManager {
 
     fn attach(&self, agent_id: &str) -> Result<Attachment> {
         let proc = self.live(agent_id)?;
-        let parser = proc.parser.lock().map_err(|_| anyhow!("terminal state poisoned"))?;
+        let parser = proc
+            .parser
+            .lock()
+            .map_err(|_| anyhow!("terminal state poisoned"))?;
         // Subscribe while holding the parser lock so no output is lost or
         // duplicated between the snapshot and the stream.
         let output = proc.output.subscribe();
@@ -497,7 +513,10 @@ mod tests {
             }
             tokio::time::sleep(Duration::from_millis(50)).await;
         }
-        panic!("'{needle}' never appeared on screen: {:?}", mgr.screen(id, 50).await);
+        panic!(
+            "'{needle}' never appeared on screen: {:?}",
+            mgr.screen(id, 50).await
+        );
     }
 
     #[tokio::test]
@@ -505,7 +524,11 @@ mod tests {
         let (tx, mut rx) = mpsc::unbounded_channel();
         let mgr = PtyManager::new(tx);
         let spawned = mgr
-            .spawn(&spec("a", "sh", &["-c", "echo hello-$CREW_TEST_VAR; exit 3"]))
+            .spawn(&spec(
+                "a",
+                "sh",
+                &["-c", "echo hello-$CREW_TEST_VAR; exit 3"],
+            ))
             .await
             .unwrap();
         assert!(spawned.pid.is_some());
@@ -521,24 +544,41 @@ mod tests {
         );
         assert!(!mgr.is_alive("a"));
         // The screen survives the process, with the environment applied.
-        assert!(mgr.screen("a", 10).await.unwrap().contains("hello-from-crew"));
+        assert!(mgr
+            .screen("a", 10)
+            .await
+            .unwrap()
+            .contains("hello-from-crew"));
     }
 
     #[tokio::test]
     async fn the_styled_screen_keeps_the_colours() {
         let (tx, mut rx) = mpsc::unbounded_channel();
         let mgr = PtyManager::new(tx);
-        mgr.spawn(&spec("c", "sh", &["-c", "printf 'plain \\033[1;32mgreen\\033[0m end\\n'; exit 0"]))
-            .await
-            .unwrap();
+        mgr.spawn(&spec(
+            "c",
+            "sh",
+            &[
+                "-c",
+                "printf 'plain \\033[1;32mgreen\\033[0m end\\n'; exit 0",
+            ],
+        ))
+        .await
+        .unwrap();
         wait_for_exit(&mut rx).await;
         let plain = mgr.screen("c", 10).await.unwrap();
-        assert!(plain.contains("plain green end") && !plain.contains('\x1b'), "{plain:?}");
+        assert!(
+            plain.contains("plain green end") && !plain.contains('\x1b'),
+            "{plain:?}"
+        );
         let styled = mgr.styled("c", 10).await.unwrap();
         // Bold and green, in whichever order the terminal state writes them.
         let before = &styled[..styled.find("green").unwrap()];
         let codes = &before[before.rfind("\x1b[").unwrap()..];
-        assert!(codes.contains("32") && codes.contains("1") && codes.ends_with("m"), "{styled:?}");
+        assert!(
+            codes.contains("32") && codes.contains("1") && codes.ends_with("m"),
+            "{styled:?}"
+        );
         assert!(styled.contains(" end"), "{styled:?}");
         // Only the rows with something on them, like the plain screen.
         assert_eq!(styled.lines().count(), plain.lines().count(), "{styled:?}");
@@ -577,10 +617,16 @@ mod tests {
         mgr.resume("a").await.unwrap();
         mgr.kill("a").await.unwrap();
         let exit = wait_for_exit(&mut rx).await;
-        assert!(matches!(exit, ProcEvent::Exited { code: None, .. }), "{exit:?}");
+        assert!(
+            matches!(exit, ProcEvent::Exited { code: None, .. }),
+            "{exit:?}"
+        );
         assert!(!mgr.is_alive("a"));
         assert!(mgr.submit_prompt("a", "late").await.is_err());
-        assert!(!mgr.adopt(&crate::process::pty::tests::dummy_agent()).await.unwrap());
+        assert!(!mgr
+            .adopt(&crate::process::pty::tests::dummy_agent())
+            .await
+            .unwrap());
     }
 
     #[tokio::test]
@@ -591,7 +637,10 @@ mod tests {
             .spawn(&spec("a", "/definitely/not/a/binary", &[]))
             .await
             .unwrap_err();
-        assert!(err.to_string().contains("/definitely/not/a/binary"), "{err}");
+        assert!(
+            err.to_string().contains("/definitely/not/a/binary"),
+            "{err}"
+        );
         assert!(mgr.screen("missing", 5).await.is_err());
     }
 

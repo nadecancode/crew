@@ -1,7 +1,9 @@
 //! Colours and glyphs. One palette in truecolor, one approximated in the
 //! 256-colour cube for terminals that do not advertise 24-bit colour.
 
-use crew_core::types::{Agent, AgentStatus, EventLevel, RuntimeKind, TaskStatus, OPERATOR_ID, ORCHESTRATOR_ID};
+use crew_core::types::{
+    Agent, AgentStatus, EventLevel, RuntimeKind, TaskStatus, OPERATOR_ID, ORCHESTRATOR_ID,
+};
 use ratatui::style::{Color, Modifier, Style};
 
 pub const SPINNER: [&str; 4] = ["◐", "◓", "◑", "◒"];
@@ -118,7 +120,11 @@ impl Theme {
     /// What stands in front of a team member's name: its runtime's glyph,
     /// or a subagent's tether, in the runtime's colour.
     pub fn member_mark(&self, runtime: RuntimeKind, subagent: bool) -> (&'static str, Color) {
-        let glyph = if subagent { "↳" } else { runtime_glyph(runtime) };
+        let glyph = if subagent {
+            "↳"
+        } else {
+            runtime_glyph(runtime)
+        };
         (glyph, self.runtime_color(runtime))
     }
 

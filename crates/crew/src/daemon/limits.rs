@@ -69,7 +69,13 @@ fn describe(limit: &UsageLimit, now: i64) -> String {
 
 /// By runtime, then session, week, the models' own weeks, the rest.
 fn sort_quotas(quotas: &mut [Quota]) {
-    quotas.sort_by_key(|q| (q.runtime.to_string(), limits::window_rank(&q.window), q.window.clone()));
+    quotas.sort_by_key(|q| {
+        (
+            q.runtime.to_string(),
+            limits::window_rank(&q.window),
+            q.window.clone(),
+        )
+    });
 }
 
 impl Daemon {
@@ -170,7 +176,10 @@ impl Daemon {
         }
 
         if attempts == 0 && !agent.orchestrator && !by_style {
-            let orchestrator_free = self.model().orchestrator().is_some_and(|o| o.limit.is_none());
+            let orchestrator_free = self
+                .model()
+                .orchestrator()
+                .is_some_and(|o| o.limit.is_none());
             if orchestrator_free {
                 let resumes = match limit.retry_at {
                     Some(at) => format!("crew resumes it at {}", fmt_when(at, now)),
@@ -225,7 +234,10 @@ other model family (task_assign).",
             NewEvent::new(
                 "daemon",
                 "agent.limit_lifted",
-                format!("{id} goes on after {} at a usage limit ({how})", fmt_elapsed(parked)),
+                format!(
+                    "{id} goes on after {} at a usage limit ({how})",
+                    fmt_elapsed(parked)
+                ),
             )
             .agent(id),
         );
@@ -251,7 +263,13 @@ other model family (task_assign).",
                 .agents
                 .iter()
                 .filter(|a| !a.status.is_terminal())
-                .filter(|a| if ids.is_empty() { a.limit.is_some() } else { ids.contains(&a.id) })
+                .filter(|a| {
+                    if ids.is_empty() {
+                        a.limit.is_some()
+                    } else {
+                        ids.contains(&a.id)
+                    }
+                })
                 .cloned()
                 .collect()
         };
@@ -280,7 +298,8 @@ other model family (task_assign).",
                 rt.limit_grace_until = now + SCREEN_GRACE_MS;
             }
             if restart || !procs.is_alive(id) {
-                self.restart_agent_with(id, Some(RESTART_NOTICE.to_string())).await?;
+                self.restart_agent_with(id, Some(RESTART_NOTICE.to_string()))
+                    .await?;
             } else {
                 self.model().rt(id).turn_active = true;
                 self.update_agent(id, |a| {
@@ -346,7 +365,8 @@ other model family (task_assign).",
                     if let Some(thread) = &agent.session_id {
                         rt.quota_checked_at = now;
                         // A compaction that was asked for and typed is looked for.
-                        let awaited = (agent.compact_pending && rt.compact_sent_at > 0).then_some(rt.compact_offset);
+                        let awaited = (agent.compact_pending && rt.compact_sent_at > 0)
+                            .then_some(rt.compact_offset);
                         // A turn that began long ago is not in the tail.
                         let whole = agent.effort.is_none();
                         rollouts.push((
@@ -398,10 +418,19 @@ other model family (task_assign).",
             let read = tokio::task::spawn_blocking(move || {
                 let path = known.or_else(|| limits::codex_rollout_path(&thread, started))?;
                 let tail = limits::read_tail(&path, ROLLOUT_TAIL_BYTES)?;
-                let compacted = awaited.is_some_and(|offset| limits::codex_compacted_since(&path, offset));
-                let running = limits::codex_running(&tail).or_else(|| whole.then(|| limits::codex_running_in(&path)).flatten());
+                let compacted =
+                    awaited.is_some_and(|offset| limits::codex_compacted_since(&path, offset));
+                let running = limits::codex_running(&tail)
+                    .or_else(|| whole.then(|| limits::codex_running_in(&path)).flatten());
                 let turn = limits::codex_last_turn(&tail);
-                Some((path, limits::codex_quota(&tail), limits::codex_context(&tail), compacted, running, turn))
+                Some((
+                    path,
+                    limits::codex_quota(&tail),
+                    limits::codex_context(&tail),
+                    compacted,
+                    running,
+                    turn,
+                ))
             })
             .await;
             if let Ok(Some((path, readings, context, compacted, running, turn))) = read {
@@ -432,7 +461,9 @@ other model family (task_assign).",
         let changed = {
             let mut model = self.model();
             let same = |q: &Quota, r: &QuotaReading| {
-                q.window == r.window && q.percent_used == r.percent_used && q.resets_at == r.resets_at
+                q.window == r.window
+                    && q.percent_used == r.percent_used
+                    && q.resets_at == r.resets_at
             };
             // A model's own window (`week/<model>`) is never reported this
             // way; it comes from Claude Code's usage cache and stays.
@@ -491,7 +522,10 @@ other model family (task_assign).",
                 .iter()
                 .filter(|a| a.runtime == RuntimeKind::Claude && !a.status.is_terminal())
                 .collect();
-            (!live.is_empty(), live.iter().any(|a| a.status == AgentStatus::Working))
+            (
+                !live.is_empty(),
+                live.iter().any(|a| a.status == AgentStatus::Working),
+            )
         };
         if !claude && !without_agents {
             return;
@@ -524,7 +558,9 @@ other model family (task_assign).",
         .stderr(std::process::Stdio::null())
         .kill_on_drop(true);
         let ran = match cmd.spawn() {
-            Ok(mut child) => tokio::time::timeout(USAGE_REFRESH_TIMEOUT, child.wait()).await.is_ok_and(|r| r.is_ok()),
+            Ok(mut child) => tokio::time::timeout(USAGE_REFRESH_TIMEOUT, child.wait())
+                .await
+                .is_ok_and(|r| r.is_ok()),
             Err(_) => false,
         };
         self.usage_refreshed_at.store(now_ms(), Ordering::Relaxed);
@@ -542,7 +578,9 @@ other model family (task_assign).",
             return;
         }
         self.usage_cache_checked_at.store(now, Ordering::Relaxed);
-        let Some(path) = limits::claude_usage_cache_path() else { return };
+        let Some(path) = limits::claude_usage_cache_path() else {
+            return;
+        };
         let read = tokio::task::spawn_blocking(move || {
             let text = std::fs::read_to_string(path).ok()?;
             limits::claude_cached_quota(&text)
@@ -562,9 +600,11 @@ other model family (task_assign).",
             let before = model.quotas.len();
             // A model's own window that the cache no longer lists is gone.
             let listed: Vec<&str> = readings.iter().map(|r| r.window.as_str()).collect();
-            model
-                .quotas
-                .retain(|q| !(q.runtime == runtime && q.window.contains('/') && !listed.contains(&q.window.as_str())));
+            model.quotas.retain(|q| {
+                !(q.runtime == runtime
+                    && q.window.contains('/')
+                    && !listed.contains(&q.window.as_str()))
+            });
             let mut changed = model.quotas.len() != before;
             for reading in readings {
                 let quota = Quota {
@@ -574,7 +614,11 @@ other model family (task_assign).",
                     resets_at: reading.resets_at,
                     updated_at: fetched_at,
                 };
-                match model.quotas.iter_mut().find(|q| q.runtime == runtime && q.window == quota.window) {
+                match model
+                    .quotas
+                    .iter_mut()
+                    .find(|q| q.runtime == runtime && q.window == quota.window)
+                {
                     Some(known) if known.updated_at >= fetched_at => {}
                     Some(known) => {
                         *known = quota;
@@ -613,14 +657,23 @@ mod tests {
             retry_at: None,
             attempts: 0,
         };
-        assert_eq!(describe(&limit, now), "usage limit reached · waiting for `crew resume`");
+        assert_eq!(
+            describe(&limit, now),
+            "usage limit reached · waiting for `crew resume`"
+        );
         limit.resets_at = Some(now + 3_600_000);
         limit.retry_at = Some(now + 3_660_000);
         let text = describe(&limit, now);
-        assert!(text.starts_with("usage limit reached · resets ") && text.contains(" · resumes "), "{text}");
+        assert!(
+            text.starts_with("usage limit reached · resets ") && text.contains(" · resumes "),
+            "{text}"
+        );
         limit.kind = "auth".into();
         limit.resets_at = None;
         limit.retry_at = None;
-        assert_eq!(describe(&limit, now), "sign-in needed · waiting for `crew resume`");
+        assert_eq!(
+            describe(&limit, now),
+            "sign-in needed · waiting for `crew resume`"
+        );
     }
 }

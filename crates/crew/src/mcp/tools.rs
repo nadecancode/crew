@@ -454,12 +454,16 @@ fn message_type(args: &Value) -> Result<MessageType, String> {
     }
 }
 
-fn rpc<T: serde::de::DeserializeOwned>(client: &mut Client, call: Call) -> Result<(T, Value), String> {
+fn rpc<T: serde::de::DeserializeOwned>(
+    client: &mut Client,
+    call: Call,
+) -> Result<(T, Value), String> {
     let raw = client.call_value(call).map_err(|e| match e {
         ClientError::Rpc(e) => e.message,
         other => other.to_string(),
     })?;
-    let typed = serde_json::from_value(raw.clone()).map_err(|e| format!("unexpected response: {e}"))?;
+    let typed =
+        serde_json::from_value(raw.clone()).map_err(|e| format!("unexpected response: {e}"))?;
     Ok((typed, raw))
 }
 
@@ -485,7 +489,9 @@ fn status_cell(agent: &Agent) -> String {
     }
     // The session was moved to another model than the member was given.
     if let Some(fallback) = &agent.fallback {
-        let running = agent.model_label().unwrap_or_else(|| "another model".to_string());
+        let running = agent
+            .model_label()
+            .unwrap_or_else(|| "another model".to_string());
         s.push_str(&format!(" · on {running} instead of {}", fallback.from));
     }
     s
@@ -494,7 +500,11 @@ fn status_cell(agent: &Agent) -> String {
 pub fn render_agents(agents: &[Agent]) -> String {
     let mut out = String::new();
     for a in agents {
-        let role = if a.role.is_empty() { "-" } else { a.role.as_str() };
+        let role = if a.role.is_empty() {
+            "-"
+        } else {
+            a.role.as_str()
+        };
         let temporary = if a.temporary { " (temporary)" } else { "" };
         out.push_str(&format!("{} [{}] {role}{temporary}", a.id, status_cell(a)));
         if let Some(task) = &a.task {
@@ -505,7 +515,10 @@ pub fn render_agents(agents: &[Agent]) -> String {
                 out.push_str(&format!(" — {}", truncate_chars(&one_line(error), 240)));
             }
             _ if !a.activity.is_empty() => {
-                out.push_str(&format!(" — {}", truncate_chars(&one_line(&a.activity), 80)));
+                out.push_str(&format!(
+                    " — {}",
+                    truncate_chars(&one_line(&a.activity), 80)
+                ));
             }
             _ => {}
         }
@@ -538,7 +551,10 @@ pub fn render_tasks(tasks: &[Task]) -> String {
         }
         out.push('\n');
         if let Some(result) = &t.result {
-            out.push_str(&format!("    result: {}\n", truncate_chars(&one_line(result), 200)));
+            out.push_str(&format!(
+                "    result: {}\n",
+                truncate_chars(&one_line(result), 200)
+            ));
         }
         for a in &t.artifacts {
             out.push_str(&format!("    {} {}", a.kind, a.value));
@@ -654,7 +670,11 @@ pub fn call(client: &mut Client, name: &str, args: &Value) -> Result<ToolOutput,
             } else {
                 // Several recipients: a copy each, so each answers on its own.
                 let mut list: Vec<String> = Vec::new();
-                for to in arg_str(args, "to")?.split(',').map(str::trim).filter(|t| !t.is_empty()) {
+                for to in arg_str(args, "to")?
+                    .split(',')
+                    .map(str::trim)
+                    .filter(|t| !t.is_empty())
+                {
                     if !list.iter().any(|seen| seen == to) {
                         list.push(to.to_string());
                     }
@@ -672,7 +692,9 @@ pub fn call(client: &mut Client, name: &str, args: &Value) -> Result<ToolOutput,
                 let unknown: Vec<&str> = recipients
                     .iter()
                     .map(String::as_str)
-                    .filter(|to| *to != crew_core::OPERATOR_ID && !agents.iter().any(|a| a.id == *to))
+                    .filter(|to| {
+                        *to != crew_core::OPERATOR_ID && !agents.iter().any(|a| a.id == *to)
+                    })
                     .collect();
                 if !unknown.is_empty() {
                     return Err(format!("no agent {}; nothing was sent", unknown.join(", ")));
@@ -695,13 +717,24 @@ pub fn call(client: &mut Client, name: &str, args: &Value) -> Result<ToolOutput,
                     }),
                 )?;
                 lines.push(if sent.duplicate {
-                    format!("Already sent (id {}); not delivered twice.", sent.message.id)
+                    format!(
+                        "Already sent (id {}); not delivered twice.",
+                        sent.message.id
+                    )
                 } else {
-                    format!("Delivered to {} (id {}).", sent.recipients.join(", "), sent.message.id)
+                    format!(
+                        "Delivered to {} (id {}).",
+                        sent.recipients.join(", "),
+                        sent.message.id
+                    )
                 });
                 raws.push(raw);
             }
-            let raw = if raws.len() == 1 { raws.remove(0) } else { Value::Array(raws) };
+            let raw = if raws.len() == 1 {
+                raws.remove(0)
+            } else {
+                Value::Array(raws)
+            };
             out(lines.join("\n"), raw)
         }
         "agent_inbox" => {
@@ -710,7 +743,10 @@ pub fn call(client: &mut Client, name: &str, args: &Value) -> Result<ToolOutput,
                 return out(render_message(&message), raw);
             }
             let all = args.get("all").and_then(Value::as_bool).unwrap_or(false);
-            let limit = args.get("limit").and_then(Value::as_u64).map(|n| n as usize);
+            let limit = args
+                .get("limit")
+                .and_then(Value::as_u64)
+                .map(|n| n as usize);
             let (inbox, raw): (InboxResult, _) = rpc(
                 client,
                 Call::Inbox {
@@ -751,7 +787,10 @@ pub fn call(client: &mut Client, name: &str, args: &Value) -> Result<ToolOutput,
                 agent.id
             );
             match keep {
-                Some(keep) => text.push_str(&format!(", keeping: {}", truncate_chars(&one_line(&keep), 200))),
+                Some(keep) => text.push_str(&format!(
+                    ", keeping: {}",
+                    truncate_chars(&one_line(&keep), 200)
+                )),
                 None => text.push('.'),
             }
             out(text, raw)
@@ -772,7 +811,12 @@ pub fn call(client: &mut Client, name: &str, args: &Value) -> Result<ToolOutput,
             out(render_tasks(&tasks), raw)
         }
         "task_get" => {
-            let (card, raw): (TaskCard, _) = rpc(client, Call::TaskGet { id: opt_str(args, "id") })?;
+            let (card, raw): (TaskCard, _) = rpc(
+                client,
+                Call::TaskGet {
+                    id: opt_str(args, "id"),
+                },
+            )?;
             out(render_card(&card), raw)
         }
         "task_update" => {
@@ -832,9 +876,15 @@ pub fn call(client: &mut Client, name: &str, args: &Value) -> Result<ToolOutput,
             out(text, raw)
         }
         "decline" => {
-            let (_, raw): (Value, _) = rpc(client, Call::Decline { reason: arg_str(args, "reason")? })?;
+            let (_, raw): (Value, _) = rpc(
+                client,
+                Call::Decline {
+                    reason: arg_str(args, "reason")?,
+                },
+            )?;
             out(
-                "Noted: when this turn ends, crew hands the work to another model. Stop here.".to_string(),
+                "Noted: when this turn ends, crew hands the work to another model. Stop here."
+                    .to_string(),
                 raw,
             )
         }
@@ -877,10 +927,7 @@ pub fn call(client: &mut Client, name: &str, args: &Value) -> Result<ToolOutput,
                 },
             )?;
             out(
-                format!(
-                    "Review recorded: task {} is now {}.",
-                    task.id, task.status
-                ),
+                format!("Review recorded: task {} is now {}.", task.id, task.status),
                 raw,
             )
         }
@@ -985,7 +1032,12 @@ reach it with agent_send(to=\"{}\").",
                 .fallback
                 .as_ref()
                 .filter(|f| f.policy)
-                .map(|f| format!(" It starts there, not on {}: {}; it moves to {} once that resets.", f.from, f.note, f.from))
+                .map(|f| {
+                    format!(
+                        " It starts there, not on {}: {}; it moves to {} once that resets.",
+                        f.from, f.note, f.from
+                    )
+                })
                 .unwrap_or_default();
             let temporary = if agent.temporary {
                 " It is temporary: not saved with the roster, it leaves the team once its tasks are \
@@ -999,7 +1051,11 @@ done and you have been told so."
                     agent.id,
                     agent.role,
                     agent.runtime,
-                    agent.model.as_deref().map(|m| format!(", {m}")).unwrap_or_default()
+                    agent
+                        .model
+                        .as_deref()
+                        .map(|m| format!(", {m}"))
+                        .unwrap_or_default()
                 ),
                 raw,
             )
@@ -1066,15 +1122,22 @@ done and you have been told so."
                 },
             )?;
             let told = match task.status {
-                crew_core::TaskStatus::Working | crew_core::TaskStatus::Waiting | crew_core::TaskStatus::Blocked => {
-                    task.assigned_agent.as_deref().map(|a| format!("; {a} was told to read it again"))
-                }
-                crew_core::TaskStatus::Review => {
-                    task.reviewer.as_deref().map(|r| format!("; {r}, reviewing it, was told to read it again"))
-                }
+                crew_core::TaskStatus::Working
+                | crew_core::TaskStatus::Waiting
+                | crew_core::TaskStatus::Blocked => task
+                    .assigned_agent
+                    .as_deref()
+                    .map(|a| format!("; {a} was told to read it again")),
+                crew_core::TaskStatus::Review => task
+                    .reviewer
+                    .as_deref()
+                    .map(|r| format!("; {r}, reviewing it, was told to read it again")),
                 _ => None,
             };
-            out(format!("Card {} revised{}.", task.id, told.unwrap_or_default()), raw)
+            out(
+                format!("Card {} revised{}.", task.id, told.unwrap_or_default()),
+                raw,
+            )
         }
         "task_assign" => {
             let (task, raw): (Task, _) = rpc(
@@ -1094,14 +1157,24 @@ done and you have been told so."
             )
         }
         "task_retry" => {
-            let (task, raw): (Task, _) = rpc(client, Call::TaskRetry { id: arg_str(args, "id")? })?;
+            let (task, raw): (Task, _) = rpc(
+                client,
+                Call::TaskRetry {
+                    id: arg_str(args, "id")?,
+                },
+            )?;
             out(format!("Task {} queued again.", task.id), raw)
         }
         "integrate" => {
             let (result, raw): (Value, _) = rpc(client, Call::Integrate)?;
             let merged = result["merged"]
                 .as_array()
-                .map(|a| a.iter().filter_map(Value::as_str).collect::<Vec<_>>().join(", "))
+                .map(|a| {
+                    a.iter()
+                        .filter_map(Value::as_str)
+                        .collect::<Vec<_>>()
+                        .join(", ")
+                })
                 .unwrap_or_default();
             let mut text = format!(
                 "Integration branch {}: merged [{}].",
@@ -1111,7 +1184,11 @@ done and you have been told so."
             if let Some(conflicts) = result["conflicts"].as_array().filter(|c| !c.is_empty()) {
                 text.push_str("\nConflicts (branches left unmerged):");
                 for c in conflicts {
-                    text.push_str(&format!("\n  {}: {}", c["agent"].as_str().unwrap_or("?"), c["files"]));
+                    text.push_str(&format!(
+                        "\n  {}: {}",
+                        c["agent"].as_str().unwrap_or("?"),
+                        c["files"]
+                    ));
                 }
             }
             out(text, raw)
@@ -1150,7 +1227,13 @@ moving.",
             let decisions: Vec<String> = args
                 .get("decisions")
                 .and_then(Value::as_array)
-                .map(|items| items.iter().filter_map(Value::as_str).map(str::to_string).collect())
+                .map(|items| {
+                    items
+                        .iter()
+                        .filter_map(Value::as_str)
+                        .map(str::to_string)
+                        .collect()
+                })
                 .unwrap_or_default();
             let (done, raw): (Value, _) = rpc(
                 client,
@@ -1195,12 +1278,23 @@ mod tests {
             }
             assert!(!def.description.is_empty());
         }
-        for expected in ["agents_list", "agent_send", "agent_inbox", "agent_status", "task_update", "task_complete"] {
+        for expected in [
+            "agents_list",
+            "agent_send",
+            "agent_inbox",
+            "agent_status",
+            "task_update",
+            "task_complete",
+        ] {
             assert!(names.contains(expected), "missing tool {expected}");
         }
-        assert!(defs.iter().any(|d| d.orchestrator_only && d.name == "task_create"));
+        assert!(defs
+            .iter()
+            .any(|d| d.orchestrator_only && d.name == "task_create"));
         // Members ask the orchestrator; only it brings in the operator.
-        assert!(defs.iter().any(|d| d.orchestrator_only && d.name == "operator_ask"));
+        assert!(defs
+            .iter()
+            .any(|d| d.orchestrator_only && d.name == "operator_ask"));
     }
 
     #[test]

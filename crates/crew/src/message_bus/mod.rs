@@ -91,8 +91,12 @@ pub trait MessageBus: Send + Sync {
     /// `recipients` is `[to]`; for a broadcast it is everyone but the sender.
     fn send(&self, message: NewMessage, recipients: Vec<String>) -> Result<SendOutcome, BusError>;
     /// Read an agent's inbox, oldest first.
-    fn receive(&self, agent: &str, unread_only: bool, limit: usize)
-        -> Result<Vec<InboxEntry>, BusError>;
+    fn receive(
+        &self,
+        agent: &str,
+        unread_only: bool,
+        limit: usize,
+    ) -> Result<Vec<InboxEntry>, BusError>;
     /// Messages that still have to be injected into the agent's session.
     fn undelivered(&self, agent: &str) -> Result<Vec<Message>, BusError>;
     fn mark_delivered(&self, agent: &str, ids: &[String]) -> Result<(), BusError>;
@@ -339,7 +343,10 @@ mod tests {
             Err(BusError::InvalidId(_))
         ));
         assert!(matches!(
-            bus.send(NewMessage::new("a", "b", MessageType::Message, "ok"), vec![]),
+            bus.send(
+                NewMessage::new("a", "b", MessageType::Message, "ok"),
+                vec![]
+            ),
             Err(BusError::NoRecipients)
         ));
     }
@@ -348,12 +355,19 @@ mod tests {
     fn acknowledge_clears_unread() {
         let bus = bus();
         let a = bus
-            .send(NewMessage::new("a", "b", MessageType::Message, "1"), vec!["b".into()])
+            .send(
+                NewMessage::new("a", "b", MessageType::Message, "1"),
+                vec!["b".into()],
+            )
             .unwrap();
-        bus.send(NewMessage::new("a", "b", MessageType::Message, "2"), vec!["b".into()])
-            .unwrap();
+        bus.send(
+            NewMessage::new("a", "b", MessageType::Message, "2"),
+            vec!["b".into()],
+        )
+        .unwrap();
         assert_eq!(bus.undelivered("b").unwrap().len(), 2);
-        bus.mark_delivered("b", std::slice::from_ref(&a.message.id)).unwrap();
+        bus.mark_delivered("b", std::slice::from_ref(&a.message.id))
+            .unwrap();
         assert_eq!(bus.undelivered("b").unwrap().len(), 1);
         assert_eq!(bus.acknowledge("b", Some(&[a.message.id])).unwrap(), 1);
         assert_eq!(bus.counts("b").unwrap().unread, 1);

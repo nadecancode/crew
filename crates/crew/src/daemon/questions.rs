@@ -33,9 +33,15 @@ impl Daemon {
     /// Vet a question on its way to the operator, and tidy what comes with
     /// it. A member of a team that has an orchestrator asks the orchestrator
     /// first: it answers what it can and passes on the rest.
-    pub(crate) fn check_operator_question(&self, who: &Who, params: &mut SendParams) -> Result<(), RpcError> {
+    pub(crate) fn check_operator_question(
+        &self,
+        who: &Who,
+        params: &mut SendParams,
+    ) -> Result<(), RpcError> {
         let Who::Agent(asker) = who else {
-            return Err(RpcError::invalid("the operator has nobody to put a question to but the agents"));
+            return Err(RpcError::invalid(
+                "the operator has nobody to put a question to but the agents",
+            ));
         };
         let model = self.model();
         let is_orchestrator = model.agent(asker).is_some_and(|a| a.orchestrator);
@@ -69,7 +75,10 @@ It answers what it can and brings in the operator for what only a human can deci
                 "at most {MAX_QUESTION_OPTIONS} options; the operator can always answer in their own words"
             )));
         }
-        if let Some(long) = options.iter().find(|o| o.chars().count() > MAX_OPTION_CHARS) {
+        if let Some(long) = options
+            .iter()
+            .find(|o| o.chars().count() > MAX_OPTION_CHARS)
+        {
             return Err(RpcError::invalid(format!(
                 "an option is a short answer (at most {MAX_OPTION_CHARS} characters); put the \
 explanation in the question: {}",
@@ -82,7 +91,9 @@ explanation in the question: {}",
         if let Some(member) = params.metadata.get("asked_by").and_then(Value::as_str) {
             if member != asker.as_str() {
                 if model.agent(member).is_none() {
-                    return Err(RpcError::not_found(format!("asked_by: no agent '{member}' on the team")));
+                    return Err(RpcError::not_found(format!(
+                        "asked_by: no agent '{member}' on the team"
+                    )));
                 }
                 metadata.insert("asked_by".into(), json!(member));
             }
@@ -93,7 +104,11 @@ explanation in the question: {}",
 
     /// Tidy the decisions a final report leaves for the operator, before
     /// anything of the report is recorded.
-    pub(crate) fn check_decisions(&self, who: &Who, decisions: Vec<String>) -> Result<Vec<String>, RpcError> {
+    pub(crate) fn check_decisions(
+        &self,
+        who: &Who,
+        decisions: Vec<String>,
+    ) -> Result<Vec<String>, RpcError> {
         let mut kept: Vec<String> = Vec::new();
         for decision in decisions {
             let decision = decision.trim().to_string();
@@ -105,7 +120,9 @@ explanation in the question: {}",
             return Ok(kept);
         }
         if !matches!(who, Who::Agent(_)) {
-            return Err(RpcError::invalid("decisions for the operator come from an agent"));
+            return Err(RpcError::invalid(
+                "decisions for the operator come from an agent",
+            ));
         }
         if kept.len() > MAX_DECISIONS {
             return Err(RpcError::invalid(format!(
@@ -119,7 +136,11 @@ explanation in the question: {}",
     /// its own: asked, it shows on the dashboard until it is answered,
     /// where a line in the report is only read by chance. Returns how many
     /// were asked; a report that is sent again does not ask twice.
-    pub(crate) async fn ask_decisions(&self, who: &Who, decisions: Vec<String>) -> Result<usize, RpcError> {
+    pub(crate) async fn ask_decisions(
+        &self,
+        who: &Who,
+        decisions: Vec<String>,
+    ) -> Result<usize, RpcError> {
         if decisions.is_empty() {
             return Ok(0);
         }
@@ -179,7 +200,11 @@ explanation in the question: {}",
 
     /// The operator's answer to an open question: delivered to the agent
     /// that asked, and to the member whose question it passed on.
-    pub(crate) async fn answer_question(&self, id: &str, body: &str) -> Result<SendResult, RpcError> {
+    pub(crate) async fn answer_question(
+        &self,
+        id: &str,
+        body: &str,
+    ) -> Result<SendResult, RpcError> {
         let body = body.trim();
         if body.is_empty() {
             return Err(RpcError::invalid("an answer needs some text"));
@@ -195,7 +220,11 @@ explanation in the question: {}",
         };
         let close = || {
             self.store
-                .acknowledge(OPERATOR_ID, Some(std::slice::from_ref(&question.id)), now_ms())
+                .acknowledge(
+                    OPERATOR_ID,
+                    Some(std::slice::from_ref(&question.id)),
+                    now_ms(),
+                )
                 .map_err(internal)
         };
         if self.model().agent(&question.from).is_none() {
@@ -223,7 +252,10 @@ explanation in the question: {}",
         close()?;
         // The member who wanted to know hears it first-hand rather than
         // waiting for the orchestrator to pass it on.
-        if let Some(member) = question.asked_by().filter(|m| self.model().agent(m).is_some()) {
+        if let Some(member) = question
+            .asked_by()
+            .filter(|m| self.model().agent(m).is_some())
+        {
             let copy = NewMessage::new(
                 OPERATOR_ID,
                 member,

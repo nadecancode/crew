@@ -122,19 +122,26 @@ fn handle(bridge: &mut Bridge, message: &Value) -> Option<Value> {
                 "capabilities": { "tools": { "listChanged": false } },
                 "serverInfo": { "name": "crew", "version": env!("CARGO_PKG_VERSION") },
                 "instructions": "Team coordination for crew agents: message teammates directly, \
-report progress, exchange commits and complete tasks.",
+            report progress, exchange commits and complete tasks.",
             }))
         }
         "ping" => Ok(json!({})),
         "tools/list" => Ok(tool_list(bridge.is_orchestrator())),
         "tools/call" => {
             let name = params.get("name").and_then(Value::as_str).unwrap_or("");
-            let args = params.get("arguments").cloned().unwrap_or_else(|| json!({}));
+            let args = params
+                .get("arguments")
+                .cloned()
+                .unwrap_or_else(|| json!({}));
             Ok(match bridge.call_tool(name, &args) {
-                Ok(text) => json!({ "content": [{ "type": "text", "text": text }], "isError": false }),
+                Ok(text) => {
+                    json!({ "content": [{ "type": "text", "text": text }], "isError": false })
+                }
                 // Tool failures are results the model can react to, not
                 // protocol errors.
-                Err(text) => json!({ "content": [{ "type": "text", "text": text }], "isError": true }),
+                Err(text) => {
+                    json!({ "content": [{ "type": "text", "text": text }], "isError": true })
+                }
             })
         }
         "resources/list" => Ok(json!({ "resources": [] })),
@@ -229,7 +236,11 @@ mod tests {
     #[test]
     fn notifications_get_no_response_and_unknown_methods_get_an_error() {
         let mut b = bridge();
-        assert!(handle(&mut b, &json!({"jsonrpc":"2.0","method":"notifications/initialized"})).is_none());
+        assert!(handle(
+            &mut b,
+            &json!({"jsonrpc":"2.0","method":"notifications/initialized"})
+        )
+        .is_none());
         let r = handle(&mut b, &json!({"jsonrpc":"2.0","id":3,"method":"nope"})).unwrap();
         assert_eq!(r["error"]["code"], -32601);
         let r = handle(&mut b, &json!({"jsonrpc":"2.0","id":4,"method":"ping"})).unwrap();
@@ -239,7 +250,11 @@ mod tests {
     #[test]
     fn workers_do_not_see_orchestrator_tools() {
         let mut b = bridge();
-        let r = handle(&mut b, &json!({"jsonrpc":"2.0","id":5,"method":"tools/list"})).unwrap();
+        let r = handle(
+            &mut b,
+            &json!({"jsonrpc":"2.0","id":5,"method":"tools/list"}),
+        )
+        .unwrap();
         let names: Vec<&str> = r["result"]["tools"]
             .as_array()
             .unwrap()
@@ -249,7 +264,11 @@ mod tests {
         assert!(names.contains(&"agent_send"));
         assert!(!names.contains(&"task_create"));
         b.orchestrator = Some(true);
-        let r = handle(&mut b, &json!({"jsonrpc":"2.0","id":6,"method":"tools/list"})).unwrap();
+        let r = handle(
+            &mut b,
+            &json!({"jsonrpc":"2.0","id":6,"method":"tools/list"}),
+        )
+        .unwrap();
         assert!(r["result"]["tools"]
             .as_array()
             .unwrap()

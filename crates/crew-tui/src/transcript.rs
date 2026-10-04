@@ -36,7 +36,9 @@ fn line(part: Part, text: impl Into<String>) -> TLine {
 
 /// `── prompt · 15:22:45 ─────`, as wide as the pane.
 fn rule(label: &str, at: Option<i64>, cols: usize) -> String {
-    let at = at.map(|at| format!(" · {}", &fmt_clock(at)[..8])).unwrap_or_default();
+    let at = at
+        .map(|at| format!(" · {}", &fmt_clock(at)[..8]))
+        .unwrap_or_default();
     let head = fit(&format!("── {label}{at} "), cols);
     let fill = cols.saturating_sub(width(&head));
     format!("{head}{}", "─".repeat(fill))
@@ -53,7 +55,11 @@ fn wrap_text(text: &str, cols: usize) -> Vec<String> {
             continue;
         }
         let indent: String = raw.chars().take_while(|c| *c == ' ').collect();
-        let indent = if indent.len() * 2 > cols { String::new() } else { indent };
+        let indent = if indent.len() * 2 > cols {
+            String::new()
+        } else {
+            indent
+        };
         for part in wrap(raw.trim_start(), cols - indent.len()) {
             out.push(format!("{indent}{part}"));
         }
@@ -66,7 +72,10 @@ pub fn layout(entries: &[TranscriptEntry], truncated: bool, cols: usize) -> Vec<
     let cols = cols.max(8);
     let mut lines = Vec::new();
     if truncated {
-        lines.push(line(Part::Rule, fit("── earlier entries are not shown", cols)));
+        lines.push(line(
+            Part::Rule,
+            fit("── earlier entries are not shown", cols),
+        ));
     }
     let mut last: Option<TranscriptKind> = None;
     for entry in entries {
@@ -79,10 +88,18 @@ pub fn layout(entries: &[TranscriptEntry], truncated: bool, cols: usize) -> Vec<
         match entry.kind {
             TranscriptKind::Prompt => {
                 lines.push(line(Part::Rule, rule("prompt", entry.at, cols)));
-                lines.extend(wrap_text(&entry.text, cols).into_iter().map(|t| line(Part::Prompt, t)));
+                lines.extend(
+                    wrap_text(&entry.text, cols)
+                        .into_iter()
+                        .map(|t| line(Part::Prompt, t)),
+                );
             }
             TranscriptKind::Reply => {
-                lines.extend(wrap_text(&entry.text, cols).into_iter().map(|t| line(Part::Reply, t)));
+                lines.extend(
+                    wrap_text(&entry.text, cols)
+                        .into_iter()
+                        .map(|t| line(Part::Reply, t)),
+                );
             }
             TranscriptKind::Tool => {
                 lines.push(line(Part::Tool, fit(&format!("▸ {}", entry.text), cols)));
@@ -111,10 +128,16 @@ mod tests {
     #[test]
     fn a_transcript_is_laid_out_turn_by_turn() {
         let entries = [
-            entry(TranscriptKind::Prompt, "[crew] Review the report and say what is wrong with it."),
+            entry(
+                TranscriptKind::Prompt,
+                "[crew] Review the report and say what is wrong with it.",
+            ),
             entry(TranscriptKind::Reply, "Reading it first.\n\n    let x = 1;"),
             entry(TranscriptKind::Tool, "Read  /work/report.md"),
-            entry(TranscriptKind::Tool, "Bash  cargo test --workspace --all-targets -- --nocapture"),
+            entry(
+                TranscriptKind::Tool,
+                "Bash  cargo test --workspace --all-targets -- --nocapture",
+            ),
             entry(TranscriptKind::Note, "context compacted"),
             entry(TranscriptKind::Reply, "Approved."),
         ];
@@ -154,7 +177,10 @@ mod tests {
             text: "  - one two three four five six seven".to_string(),
         }];
         let lines = layout(&timed, false, 24);
-        assert!(lines[0].text.starts_with("── prompt · ") && lines[0].text.ends_with("──"), "{lines:?}");
+        assert!(
+            lines[0].text.starts_with("── prompt · ") && lines[0].text.ends_with("──"),
+            "{lines:?}"
+        );
         assert_eq!(lines[1].text, "  - one two three four");
         assert_eq!(lines[2].text, "  five six seven");
         assert!(layout(&[], false, 40).is_empty());

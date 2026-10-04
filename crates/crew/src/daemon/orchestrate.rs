@@ -210,8 +210,13 @@ call session_complete with the final report."
             .task(task_id)
             .agent(agent_id),
         );
-        let message = NewMessage::new(self.dispatcher_for(agent_id), agent_id, MessageType::Task, body)
-            .metadata(json!({ "task_id": task_id }));
+        let message = NewMessage::new(
+            self.dispatcher_for(agent_id),
+            agent_id,
+            MessageType::Task,
+            body,
+        )
+        .metadata(json!({ "task_id": task_id }));
         if let Err(e) = self.send_message(message).await {
             self.emit(
                 NewEvent::new(
@@ -235,12 +240,21 @@ call session_complete with the final report."
             (Some(id), _) => model
                 .task(id)
                 .ok_or_else(|| RpcError::not_found(format!("no task '{id}'")))?,
-            (None, Who::Agent(agent)) => active_task(&model.tasks, agent)
-                .ok_or_else(|| RpcError::not_found("you have no task in progress; name a task by its id"))?,
+            (None, Who::Agent(agent)) => active_task(&model.tasks, agent).ok_or_else(|| {
+                RpcError::not_found("you have no task in progress; name a task by its id")
+            })?,
             (None, Who::Operator) => return Err(RpcError::invalid("specify the task id")),
         };
-        let dependencies = task.dependencies.iter().filter_map(|d| model.task(d)).cloned().collect();
-        Ok(TaskCard { task: task.clone(), dependencies })
+        let dependencies = task
+            .dependencies
+            .iter()
+            .filter_map(|d| model.task(d))
+            .cloned()
+            .collect();
+        Ok(TaskCard {
+            task: task.clone(),
+            dependencies,
+        })
     }
 
     /// Revise a card. Whoever is at work on it (or reviewing it) is pointed
@@ -253,12 +267,21 @@ call session_complete with the final report."
         title: Option<String>,
         description: Option<String>,
     ) -> Result<Task, RpcError> {
-        let title = title.map(|t| truncate_chars(&one_line(t.trim()), 200)).filter(|t| !t.is_empty());
-        let description = description.map(|d| d.trim().to_string()).filter(|d| !d.is_empty());
+        let title = title
+            .map(|t| truncate_chars(&one_line(t.trim()), 200))
+            .filter(|t| !t.is_empty());
+        let description = description
+            .map(|d| d.trim().to_string())
+            .filter(|d| !d.is_empty());
         if title.is_none() && description.is_none() {
-            return Err(RpcError::invalid("give the card a new title or description"));
+            return Err(RpcError::invalid(
+                "give the card a new title or description",
+            ));
         }
-        if description.as_ref().is_some_and(|d| d.len() > MAX_MESSAGE_BYTES) {
+        if description
+            .as_ref()
+            .is_some_and(|d| d.len() > MAX_MESSAGE_BYTES)
+        {
             return Err(RpcError::invalid(format!(
                 "a description is limited to {MAX_MESSAGE_BYTES} bytes"
             )));
@@ -295,7 +318,12 @@ call session_complete with the final report."
         }
         let changed = changed.join(" and ");
         self.emit(
-            NewEvent::new("scheduler", "task.edited", format!("task {id}: {changed} revised by {}", who.sender())).task(id),
+            NewEvent::new(
+                "scheduler",
+                "task.edited",
+                format!("task {id}: {changed} revised by {}", who.sender()),
+            )
+            .task(id),
         );
         if task.title != before.title {
             if let Some(agent) = &task.assigned_agent {
@@ -307,13 +335,19 @@ call session_complete with the final report."
             }
         }
         let reader = match task.status {
-            TaskStatus::Working | TaskStatus::Waiting | TaskStatus::Blocked => task.assigned_agent.clone(),
+            TaskStatus::Working | TaskStatus::Waiting | TaskStatus::Blocked => {
+                task.assigned_agent.clone()
+            }
             TaskStatus::Review => task.reviewer.clone(),
             _ => None,
         };
         if let Some(reader) = reader {
-            let body = format!("Card {id} revised by {} ({changed}): task_get(\"{id}\") reads it.", who.sender());
-            let message = NewMessage::new("scheduler", &reader, MessageType::Status, body).metadata(json!({ "task_id": id }));
+            let body = format!(
+                "Card {id} revised by {} ({changed}): task_get(\"{id}\") reads it.",
+                who.sender()
+            );
+            let message = NewMessage::new("scheduler", &reader, MessageType::Status, body)
+                .metadata(json!({ "task_id": id }));
             if let Err(e) = self.send_message(message).await {
                 tracing::warn!("telling {reader} that card {id} changed: {}", e.message);
             }
@@ -328,9 +362,9 @@ call session_complete with the final report."
             Who::Agent(me) => message.from == *me || recipients.iter().any(|r| r == me),
             Who::Operator => true,
         });
-        found
-            .map(|(message, _)| message)
-            .ok_or_else(|| RpcError::not_found(format!("no message '{id}' sent or received by you")))
+        found.map(|(message, _)| message).ok_or_else(|| {
+            RpcError::not_found(format!("no message '{id}' sent or received by you"))
+        })
     }
 
     // ---- task graph edits ----------------------------------------------
@@ -377,10 +411,15 @@ call session_complete with the final report."
                 return Err(RpcError::not_found(format!("no agent '{agent}'")));
             }
             if task.status.is_terminal() {
-                return Err(RpcError::conflict(format!("task {id} is already {}", task.status)));
+                return Err(RpcError::conflict(format!(
+                    "task {id} is already {}",
+                    task.status
+                )));
             }
-            if matches!(task.status, TaskStatus::Working | TaskStatus::Waiting | TaskStatus::Review)
-                && task.assigned_agent.as_deref() != Some(agent)
+            if matches!(
+                task.status,
+                TaskStatus::Working | TaskStatus::Waiting | TaskStatus::Review
+            ) && task.assigned_agent.as_deref() != Some(agent)
             {
                 let holder = task.assigned_agent.as_deref().unwrap_or("?");
                 let holder_alive = model.agent(holder).is_some_and(|a| !a.status.is_terminal());
@@ -432,8 +471,13 @@ call session_complete with the final report."
             let task = model
                 .task(id)
                 .ok_or_else(|| RpcError::not_found(format!("no task '{id}'")))?;
-            let left = |who: &Option<String>| who.as_deref().is_some_and(|w| model.agent(w).is_none());
-            (task.status, left(&task.assigned_agent), left(&task.reviewer))
+            let left =
+                |who: &Option<String>| who.as_deref().is_some_and(|w| model.agent(w).is_none());
+            (
+                task.status,
+                left(&task.assigned_agent),
+                left(&task.reviewer),
+            )
         };
         if !matches!(status, TaskStatus::Failed | TaskStatus::Blocked) {
             return Err(RpcError::conflict(format!(
@@ -461,7 +505,14 @@ call session_complete with the final report."
         } else {
             ""
         };
-        self.emit(NewEvent::new("scheduler", "task.retry", format!("task {id} queued again{unassigned}")).task(id));
+        self.emit(
+            NewEvent::new(
+                "scheduler",
+                "task.retry",
+                format!("task {id} queued again{unassigned}"),
+            )
+            .task(id),
+        );
         self.replan();
         Ok(task)
     }
@@ -527,7 +578,12 @@ call session_complete with the final report."
     }
 
     /// An agent's self-reported status is reflected on its current task.
-    pub(crate) fn mirror_status_to_task(&self, agent: &str, status: AgentStatus, note: Option<String>) {
+    pub(crate) fn mirror_status_to_task(
+        &self,
+        agent: &str,
+        status: AgentStatus,
+        note: Option<String>,
+    ) {
         let task = {
             let model = self.model();
             active_task(&model.tasks, agent).map(|t| t.id.clone())
@@ -630,9 +686,17 @@ call session_complete with the final report."
         };
         let updated = self
             .update_task(&task.id, |t| {
-                t.result = Some(if result.is_empty() { "done".into() } else { result.clone() });
+                t.result = Some(if result.is_empty() {
+                    "done".into()
+                } else {
+                    result.clone()
+                });
                 for artifact in artifacts {
-                    if !t.artifacts.iter().any(|a| a.kind == artifact.kind && a.value == artifact.value) {
+                    if !t
+                        .artifacts
+                        .iter()
+                        .any(|a| a.kind == artifact.kind && a.value == artifact.value)
+                    {
                         t.artifacts.push(artifact);
                     }
                 }
@@ -658,7 +722,10 @@ call session_complete with the final report."
                     NewEvent::new(
                         "scheduler",
                         "task.review",
-                        format!("task {} by {author} awaits review by {reviewer}", updated.id),
+                        format!(
+                            "task {} by {author} awaits review by {reviewer}",
+                            updated.id
+                        ),
                     )
                     .task(&updated.id)
                     .agent(&author),
@@ -672,7 +739,12 @@ result and commits. git_cherry_pick or git_merge brings the work into your workt
 review_submit(task_id=\"{id}\", approve=true|false, comments=…).",
                     updated.title
                 );
-                let commit = updated.artifacts.iter().rev().find(|a| a.kind == "commit").map(|a| a.value.clone());
+                let commit = updated
+                    .artifacts
+                    .iter()
+                    .rev()
+                    .find(|a| a.kind == "commit")
+                    .map(|a| a.value.clone());
                 let message = NewMessage::new(&author, reviewer, MessageType::ReviewRequest, body)
                     .metadata(json!({ "task_id": updated.id, "commit": commit }))
                     .correlation(Some(format!("review-{}", updated.id)));
@@ -872,10 +944,18 @@ review_submit(task_id=\"{id}\", approve=true|false, comments=…).",
         self.emit(
             NewEvent::new(
                 "scheduler",
-                if approve { "task.approved" } else { "task.changes_requested" },
+                if approve {
+                    "task.approved"
+                } else {
+                    "task.changes_requested"
+                },
                 format!(
                     "{reviewer} {} task {task_id}",
-                    if approve { "approved" } else { "requested changes on" }
+                    if approve {
+                        "approved"
+                    } else {
+                        "requested changes on"
+                    }
                 ),
             )
             .task(task_id)
@@ -886,7 +966,11 @@ review_submit(task_id=\"{id}\", approve=true|false, comments=…).",
                 format!(
                     "Approved: task \"{}\" (id {task_id}).{}",
                     updated.title,
-                    if comments.is_empty() { String::new() } else { format!("\n\n{comments}") }
+                    if comments.is_empty() {
+                        String::new()
+                    } else {
+                        format!("\n\n{comments}")
+                    }
                 )
             } else {
                 format!(

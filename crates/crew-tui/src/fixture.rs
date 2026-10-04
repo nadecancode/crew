@@ -159,23 +159,68 @@ are updated. Which do you want?",
 /// What the daemon lists for the model picker: a few models of each CLI,
 /// one that this machine cannot start.
 pub fn models() -> Vec<ModelChoice> {
-    let model = |runtime, model: &str, name: &str, tier: &str, price: &str, unavailable: Option<&str>| ModelChoice {
-        runtime,
-        model: model.to_string(),
-        name: name.to_string(),
-        tier: tier.to_string(),
-        price: price.to_string(),
-        summary: format!("{name}, as its vendor describes it."),
-        unavailable: unavailable.map(str::to_string),
-    };
+    let model =
+        |runtime, model: &str, name: &str, tier: &str, price: &str, unavailable: Option<&str>| {
+            ModelChoice {
+                runtime,
+                model: model.to_string(),
+                name: name.to_string(),
+                tier: tier.to_string(),
+                price: price.to_string(),
+                summary: format!("{name}, as its vendor describes it."),
+                unavailable: unavailable.map(str::to_string),
+            }
+        };
     vec![
-        model(RuntimeKind::Claude, "fable", "Fable 5.1", "frontier", "$10 / $50 per MTok", None),
-        model(RuntimeKind::Claude, "opus", "Opus 5.5", "strong", "$4 / $20 per MTok", None),
-        model(RuntimeKind::Claude, "sonnet", "Sonnet 5.5", "balanced", "$2 / $10 per MTok", None),
-        model(RuntimeKind::Codex, "gpt-6-astra", "GPT 6 Astra", "frontier", "$5 / $40 per MTok", None),
-        model(RuntimeKind::Codex, "gpt-6-luna", "GPT 6 Luna", "fast", "", Some("not in the model list of this Codex account")),
+        model(
+            RuntimeKind::Claude,
+            "fable",
+            "Fable 5.1",
+            "frontier",
+            "$10 / $50 per MTok",
+            None,
+        ),
+        model(
+            RuntimeKind::Claude,
+            "opus",
+            "Opus 5.5",
+            "strong",
+            "$4 / $20 per MTok",
+            None,
+        ),
+        model(
+            RuntimeKind::Claude,
+            "sonnet",
+            "Sonnet 5.5",
+            "balanced",
+            "$2 / $10 per MTok",
+            None,
+        ),
+        model(
+            RuntimeKind::Codex,
+            "gpt-6-astra",
+            "GPT 6 Astra",
+            "frontier",
+            "$5 / $40 per MTok",
+            None,
+        ),
+        model(
+            RuntimeKind::Codex,
+            "gpt-6-luna",
+            "GPT 6 Luna",
+            "fast",
+            "",
+            Some("not in the model list of this Codex account"),
+        ),
         model(RuntimeKind::Pi, "", "pi's default", "", "", None),
-        model(RuntimeKind::Pi, "anthropic/claude-opus-4-6", "anthropic/claude-opus-4-6", "", "", None),
+        model(
+            RuntimeKind::Pi,
+            "anthropic/claude-opus-4-6",
+            "anthropic/claude-opus-4-6",
+            "",
+            "",
+            None,
+        ),
     ]
 }
 

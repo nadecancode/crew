@@ -34,17 +34,17 @@ use ratatui::crossterm::event::{
     Event as TermEvent, KeyEventKind, KeyboardEnhancementFlags, PopKeyboardEnhancementFlags,
     PushKeyboardEnhancementFlags,
 };
-use ratatui::layout::Rect;
 use ratatui::crossterm::terminal::{
     disable_raw_mode, enable_raw_mode, supports_keyboard_enhancement, EnterAlternateScreen,
     LeaveAlternateScreen,
 };
 use ratatui::crossterm::{cursor, execute};
+use ratatui::layout::Rect;
 use ratatui::Terminal;
 
 pub use app::App;
-pub use launcher::{run_launcher, Launch, Launcher, StyleChoice};
 use app::{Command, View};
+pub use launcher::{run_launcher, Launch, Launcher, StyleChoice};
 use net::UiEvent;
 use theme::Theme;
 
@@ -85,11 +85,13 @@ pub fn run(
         app.set_notice(notice, now_ms());
     }
     // CREW_BELL=0: a question that opens by itself does not ring the bell.
-    if std::env::var("CREW_BELL").is_ok_and(|v| matches!(v.as_str(), "0" | "off" | "false" | "no")) {
+    if std::env::var("CREW_BELL").is_ok_and(|v| matches!(v.as_str(), "0" | "off" | "false" | "no"))
+    {
         app.bell = false;
     }
     // CREW_MOUSE=0 leaves the mouse to the terminal (its own text selection).
-    if std::env::var("CREW_MOUSE").is_ok_and(|v| matches!(v.as_str(), "0" | "off" | "false" | "no")) {
+    if std::env::var("CREW_MOUSE").is_ok_and(|v| matches!(v.as_str(), "0" | "off" | "false" | "no"))
+    {
         app.mouse = false;
         set_mouse(false);
     }
@@ -97,7 +99,13 @@ pub fn run(
 
     stop.store(true, Ordering::Relaxed);
     leave_terminal();
-    result.map(|()| if app.stopped { Exit::Stopped } else { Exit::Detached })
+    result.map(|()| {
+        if app.stopped {
+            Exit::Stopped
+        } else {
+            Exit::Detached
+        }
+    })
 }
 
 fn event_loop(

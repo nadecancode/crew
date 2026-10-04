@@ -57,9 +57,10 @@ pub fn plan(tasks: &[Task], agents: &[AgentView]) -> Vec<Action> {
         if task.status != TaskStatus::Queued && !unstarted_block {
             continue;
         }
-        let failed = task.dependencies.iter().find(|d| {
-            matches!(status.get(d.as_str()), Some(TaskStatus::Failed) | None)
-        });
+        let failed = task
+            .dependencies
+            .iter()
+            .find(|d| matches!(status.get(d.as_str()), Some(TaskStatus::Failed) | None));
         if let Some(dep) = failed {
             if task.status != TaskStatus::Blocked {
                 let reason = if status.contains_key(dep.as_str()) {
@@ -161,10 +162,11 @@ pub fn plan(tasks: &[Task], agents: &[AgentView]) -> Vec<Action> {
                 TaskStatus::Ready => {
                     stuck.push(task.id.clone());
                     match &task.assigned_agent {
-                        Some(agent) => {
-                            reasons.push(format!("'{}' is ready but {agent} is not running", task.id))
+                        Some(agent) => reasons
+                            .push(format!("'{}' is ready but {agent} is not running", task.id)),
+                        None => {
+                            reasons.push(format!("'{}' is ready but no worker is free", task.id))
                         }
-                        None => reasons.push(format!("'{}' is ready but no worker is free", task.id)),
                     }
                 }
                 TaskStatus::Waiting => {
@@ -249,7 +251,12 @@ mod tests {
         ];
         assert_eq!(
             plan(&tasks, &agents(&["x", "y"])),
-            vec![ready("a"), ready("b"), dispatch("a", "x"), dispatch("b", "y")]
+            vec![
+                ready("a"),
+                ready("b"),
+                dispatch("a", "x"),
+                dispatch("b", "y")
+            ]
         );
     }
 

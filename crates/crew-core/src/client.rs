@@ -14,7 +14,9 @@ use serde::de::DeserializeOwned;
 use serde_json::Value;
 
 use crate::paths::Identity;
-use crate::rpc::{Call, Hello, HelloInfo, Push, Request, Role, RpcError, ServerFrame, PROTOCOL_VERSION};
+use crate::rpc::{
+    Call, Hello, HelloInfo, Push, Request, Role, RpcError, ServerFrame, PROTOCOL_VERSION,
+};
 
 #[derive(Debug, thiserror::Error)]
 pub enum ClientError {
@@ -220,7 +222,12 @@ fn read_frame(reader: &mut BufReader<UnixStream>) -> ClientResult<ServerFrame> {
             Ok(n) => n,
             // A read that ran into the connection's timeout reports
             // "resource temporarily unavailable", which says nothing.
-            Err(e) if matches!(e.kind(), io::ErrorKind::WouldBlock | io::ErrorKind::TimedOut) => {
+            Err(e)
+                if matches!(
+                    e.kind(),
+                    io::ErrorKind::WouldBlock | io::ErrorKind::TimedOut
+                ) =>
+            {
                 return Err(ClientError::Timeout);
             }
             Err(e) => return Err(e.into()),

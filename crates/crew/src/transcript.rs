@@ -74,7 +74,9 @@ fn entry(kind: TranscriptKind, at: Option<i64>, text: &str) -> Option<Transcript
 
 /// `mcp__crew__agent_send` reads better as `crew.agent_send`.
 fn tool_name(name: &str) -> String {
-    name.strip_prefix("mcp__").unwrap_or(name).replace("__", ".")
+    name.strip_prefix("mcp__")
+        .unwrap_or(name)
+        .replace("__", ".")
 }
 
 /// A tool call in one line: its name and what it was pointed at.
@@ -84,13 +86,25 @@ fn tool_line(name: &str, input: &Value) -> String {
             // Codex passes some tools their arguments as a JSON string.
             match serde_json::from_str::<Value>(text) {
                 Ok(parsed @ Value::Object(_)) => return tool_line(name, &parsed),
-                _ => text.lines().find(|l| !l.trim().is_empty()).unwrap_or("").to_string(),
+                _ => text
+                    .lines()
+                    .find(|l| !l.trim().is_empty())
+                    .unwrap_or("")
+                    .to_string(),
             }
         }
         Value::Object(fields) => {
-            let named = ["command", "cmd", "file_path", "path", "pattern", "query", "url"]
-                .iter()
-                .find_map(|key| fields.get(*key));
+            let named = [
+                "command",
+                "cmd",
+                "file_path",
+                "path",
+                "pattern",
+                "query",
+                "url",
+            ]
+            .iter()
+            .find_map(|key| fields.get(*key));
             match named {
                 Some(Value::String(text)) => text.clone(),
                 Some(Value::Array(parts)) => parts
@@ -112,9 +126,16 @@ fn tool_line(name: &str, input: &Value) -> String {
 /// Text that the runtime put into the session for itself, not a prompt.
 fn machine_text(text: &str) -> bool {
     let text = text.trim_start();
-    ["<local-command-", "<command-", "<system-reminder>", "<task-notification>", "<environment_context>", "<user_instructions>"]
-        .iter()
-        .any(|tag| text.starts_with(tag))
+    [
+        "<local-command-",
+        "<command-",
+        "<system-reminder>",
+        "<task-notification>",
+        "<environment_context>",
+        "<user_instructions>",
+    ]
+    .iter()
+    .any(|tag| text.starts_with(tag))
 }
 
 /// What crew's plugin submitted, without the sentences Claude Code puts
@@ -197,7 +218,11 @@ pub fn claude_entries(text: &str) -> Vec<TranscriptEntry> {
                         Some("tool_use") => {
                             let name = block.get("name").and_then(Value::as_str).unwrap_or("tool");
                             let input = block.get("input").unwrap_or(&Value::Null);
-                            entries.extend(entry(TranscriptKind::Tool, at, &tool_line(name, input)));
+                            entries.extend(entry(
+                                TranscriptKind::Tool,
+                                at,
+                                &tool_line(name, input),
+                            ));
                         }
                         _ => {}
                     }
@@ -218,14 +243,18 @@ pub fn codex_entries(text: &str) -> Vec<TranscriptEntry> {
         };
         let at = timestamp(&line);
         match line.get("type").and_then(Value::as_str) {
-            Some("compacted") => entries.extend(entry(TranscriptKind::Note, at, "context compacted")),
+            Some("compacted") => {
+                entries.extend(entry(TranscriptKind::Note, at, "context compacted"))
+            }
             Some("response_item") => {}
             // A call to an MCP server (crew's tools among them) is recorded
             // only as an item, not as a response item.
             Some("event_msg") => {
                 let item = line.pointer("/payload/item");
-                let is_call = line.pointer("/payload/type").and_then(Value::as_str) == Some("item_completed")
-                    && item.and_then(|i| i.get("type")).and_then(Value::as_str) == Some("McpToolCall");
+                let is_call = line.pointer("/payload/type").and_then(Value::as_str)
+                    == Some("item_completed")
+                    && item.and_then(|i| i.get("type")).and_then(Value::as_str)
+                        == Some("McpToolCall");
                 if let (true, Some(item)) = (is_call, item) {
                     let field = |key: &str| item.get(key).and_then(Value::as_str).unwrap_or("");
                     let name = format!("{}.{}", field("server"), field("tool"));
@@ -250,7 +279,10 @@ pub fn codex_entries(text: &str) -> Vec<TranscriptEntry> {
                 let Some(Value::Array(blocks)) = item.get("content") else {
                     continue;
                 };
-                for text in blocks.iter().filter_map(|b| b.get("text").and_then(Value::as_str)) {
+                for text in blocks
+                    .iter()
+                    .filter_map(|b| b.get("text").and_then(Value::as_str))
+                {
                     if kind == TranscriptKind::Prompt && machine_text(text) {
                         continue;
                     }
@@ -288,7 +320,9 @@ pub fn pi_entries(text: &str) -> Vec<TranscriptEntry> {
             Some("message") => {}
             _ => continue,
         }
-        let Some(message) = line.get("message") else { continue };
+        let Some(message) = line.get("message") else {
+            continue;
+        };
         let kind = match message.get("role").and_then(Value::as_str) {
             Some("user") => TranscriptKind::Prompt,
             Some("assistant") => TranscriptKind::Reply,
@@ -310,7 +344,11 @@ pub fn pi_entries(text: &str) -> Vec<TranscriptEntry> {
                                 .iter()
                                 .find_map(|key| block.get(*key))
                                 .unwrap_or(&Value::Null);
-                            entries.extend(entry(TranscriptKind::Tool, at, &tool_line(name, input)));
+                            entries.extend(entry(
+                                TranscriptKind::Tool,
+                                at,
+                                &tool_line(name, input),
+                            ));
                         }
                         _ => {}
                     }
@@ -339,13 +377,18 @@ pub struct LastTurn {
 /// The latest turn in a session's `entries`: the prompts since the turn
 /// before, and what came after them. `None` before the first prompt.
 pub fn last_turn(entries: &[TranscriptEntry]) -> Option<LastTurn> {
-    let start = entries.iter().rposition(|e| e.kind == TranscriptKind::Prompt)?;
+    let start = entries
+        .iter()
+        .rposition(|e| e.kind == TranscriptKind::Prompt)?;
     let first = entries[..start]
         .iter()
         .rposition(|e| e.kind != TranscriptKind::Prompt)
         .map_or(0, |at| at + 1);
     let mut turn = LastTurn {
-        input: entries[first..=start].iter().map(|e| e.text.clone()).collect(),
+        input: entries[first..=start]
+            .iter()
+            .map(|e| e.text.clone())
+            .collect(),
         ..LastTurn::default()
     };
     let mut closing: Vec<&str> = Vec::new();
@@ -390,7 +433,9 @@ fn header(line: &str, names: &[&str]) -> Option<(Vec<String>, String)> {
     let mut rest = line.trim_start();
     let mut found: Vec<String> = Vec::new();
     while let Some(after) = rest.strip_prefix('@') {
-        let end = after.find(|c: char| !(c.is_ascii_alphanumeric() || c == '-' || c == '_')).unwrap_or(after.len());
+        let end = after
+            .find(|c: char| !(c.is_ascii_alphanumeric() || c == '-' || c == '_'))
+            .unwrap_or(after.len());
         let (name, tail) = after.split_at(end);
         let named: Vec<&str> = match name {
             "all" => names.iter().copied().filter(|n| *n != "operator").collect(),
@@ -411,7 +456,13 @@ fn header(line: &str, names: &[&str]) -> Option<(Vec<String>, String)> {
     if found.is_empty() {
         return None;
     }
-    Some((found, rest.strip_prefix(':').unwrap_or(rest).trim_start().to_string()))
+    Some((
+        found,
+        rest.strip_prefix(':')
+            .unwrap_or(rest)
+            .trim_start()
+            .to_string(),
+    ))
 }
 
 fn sections(reply: &str, names: &[&str]) -> (String, Vec<(Vec<String>, String)>) {
@@ -446,7 +497,9 @@ fn sections(reply: &str, names: &[&str]) -> (String, Vec<(Vec<String>, String)>)
 /// A model's own words are not read into: what a turn did says more.
 pub fn runtime_refusal(text: &str) -> Option<String> {
     let text = text.replace('\u{2019}', "'");
-    if !text.contains("safeguards flagged this message") && !text.contains("can't help with this. Start a new session") {
+    if !text.contains("safeguards flagged this message")
+        && !text.contains("can't help with this. Start a new session")
+    {
         return None;
     }
     let category = text
@@ -471,7 +524,11 @@ mod tests {
     }
 
     fn at(kind: TranscriptKind, text: &str) -> TranscriptEntry {
-        TranscriptEntry { kind, at: None, text: text.to_string() }
+        TranscriptEntry {
+            kind,
+            at: None,
+            text: text.to_string(),
+        }
     }
 
     #[test]
@@ -480,20 +537,45 @@ mod tests {
         let reply = "Port 8080.\n@db: schema ok, a1b2c3.\nRebase first.\n@lead migration lands today\n```java\n@Override\n@db: not a message\n```\n@nobody: just text";
         let (lead, parts) = addressed(reply, &names);
         assert_eq!(lead, "Port 8080.");
-        assert_eq!(parts[0], ("db".to_string(), "schema ok, a1b2c3.\nRebase first.".to_string()));
+        assert_eq!(
+            parts[0],
+            (
+                "db".to_string(),
+                "schema ok, a1b2c3.\nRebase first.".to_string()
+            )
+        );
         assert_eq!(parts[1].0, "lead");
         assert!(parts[1].1.starts_with("migration lands today\n```java\n@Override\n@db: not a message\n```\n@nobody: just text"), "{parts:?}");
         assert_eq!(parts.len(), 2);
         // An email address, an annotation or a name nobody has is text.
-        assert_eq!(addressed("Mail me@db.io or use @Override.", &names), ("Mail me@db.io or use @Override.".to_string(), Vec::new()));
-        assert_eq!(addressed("@operator: done", &names).1, [("operator".to_string(), "done".to_string())]);
+        assert_eq!(
+            addressed("Mail me@db.io or use @Override.", &names),
+            ("Mail me@db.io or use @Override.".to_string(), Vec::new())
+        );
+        assert_eq!(
+            addressed("@operator: done", &names).1,
+            [("operator".to_string(), "done".to_string())]
+        );
         // Several at once, or everyone but the operator.
-        let both = [("db".to_string(), "schema changed".to_string()), ("lead".to_string(), "schema changed".to_string())];
+        let both = [
+            ("db".to_string(), "schema changed".to_string()),
+            ("lead".to_string(), "schema changed".to_string()),
+        ];
         assert_eq!(addressed("@db @lead: schema changed", &names).1, both);
         assert_eq!(addressed("@db, @lead schema changed", &names).1, both);
-        assert_eq!(addressed("@all: freeze main", &names).1.iter().map(|(n, _)| n.as_str()).collect::<Vec<_>>(), ["db", "lead"]);
+        assert_eq!(
+            addressed("@all: freeze main", &names)
+                .1
+                .iter()
+                .map(|(n, _)| n.as_str())
+                .collect::<Vec<_>>(),
+            ["db", "lead"]
+        );
         // A name that is not one stops the list: the rest is text.
-        assert_eq!(addressed("@db: see @lead's note", &names).1, [("db".to_string(), "see @lead's note".to_string())]);
+        assert_eq!(
+            addressed("@db: see @lead's note", &names).1,
+            [("db".to_string(), "see @lead's note".to_string())]
+        );
     }
 
     #[test]
@@ -519,7 +601,10 @@ mod tests {
         assert_eq!(last_turn(&ended_on_a_tool).unwrap().final_reply, "");
         // Not answered yet: the input, and nothing else.
         let turn = last_turn(&entries[..4]).unwrap();
-        assert_eq!((turn.input.len(), turn.reply.as_str(), turn.tools), (2, "", 0));
+        assert_eq!(
+            (turn.input.len(), turn.reply.as_str(), turn.tools),
+            (2, "", 0)
+        );
         assert_eq!(last_turn(&[at(Reply, "hello")]), None);
     }
 
@@ -527,8 +612,17 @@ mod tests {
     fn a_refusal_is_the_runtimes_notice_not_the_models_wording() {
         let flagged = "API Error: Opus 4.8's safeguards flagged this message (https://www.anthropic.com/legal/aup). Our intentionally broad safeguards allow us to deliver more capabilities faster, but can sometimes flag legitimate coding and cybersecurity tasks. Claude Code can't respond to this message with Opus 4.8. Details: `[cyber]` Request ID: req_1";
         assert_eq!(runtime_refusal(flagged).as_deref(), Some("cyber"));
-        assert_eq!(runtime_refusal("API Error: Claude can't help with this. Start a new session to continue.").as_deref(), Some("safeguards"));
-        for words in ["I can't help with that.", "Done: the parser handles empty input now."] {
+        assert_eq!(
+            runtime_refusal(
+                "API Error: Claude can't help with this. Start a new session to continue."
+            )
+            .as_deref(),
+            Some("safeguards")
+        );
+        for words in [
+            "I can't help with that.",
+            "Done: the parser handles empty input now.",
+        ] {
             assert_eq!(runtime_refusal(words), None, "{words}");
         }
     }
@@ -584,31 +678,51 @@ mod tests {
         let item = |payload: Value| json!({ "timestamp": "2026-10-02T19:46:31.613Z", "type": "response_item", "payload": payload });
         let text = lines(&[
             json!({ "type": "session_meta", "payload": { "id": "t" } }),
-            item(json!({ "type": "message", "role": "developer", "content": [{ "type": "input_text", "text": "rules" }] })),
-            item(json!({ "type": "message", "role": "user", "content": [{ "type": "input_text", "text": "<environment_context>cwd</environment_context>" }] })),
-            item(json!({ "type": "message", "role": "user", "content": [{ "type": "input_text", "text": "[crew] Review the report." }] })),
+            item(
+                json!({ "type": "message", "role": "developer", "content": [{ "type": "input_text", "text": "rules" }] }),
+            ),
+            item(
+                json!({ "type": "message", "role": "user", "content": [{ "type": "input_text", "text": "<environment_context>cwd</environment_context>" }] }),
+            ),
+            item(
+                json!({ "type": "message", "role": "user", "content": [{ "type": "input_text", "text": "[crew] Review the report." }] }),
+            ),
             item(json!({ "type": "reasoning", "summary": [] })),
-            item(json!({ "type": "custom_tool_call", "name": "exec", "input": "\nconst r = await tools.exec_command({cmd: \"ls\"});\ntext(r);" })),
+            item(
+                json!({ "type": "custom_tool_call", "name": "exec", "input": "\nconst r = await tools.exec_command({cmd: \"ls\"});\ntext(r);" }),
+            ),
             item(json!({ "type": "custom_tool_call_output", "output": "files" })),
-            item(json!({ "type": "function_call", "name": "shell", "arguments": "{\"command\":[\"git\",\"status\"]}" })),
-            item(json!({ "type": "local_shell_call", "action": { "command": ["cargo", "check"] } })),
+            item(
+                json!({ "type": "function_call", "name": "shell", "arguments": "{\"command\":[\"git\",\"status\"]}" }),
+            ),
+            item(
+                json!({ "type": "local_shell_call", "action": { "command": ["cargo", "check"] } }),
+            ),
             json!({ "type": "event_msg", "payload": { "type": "token_count" } }),
             // A call to crew's MCP server is recorded only as an item.
             json!({ "type": "event_msg", "payload": { "type": "item_completed", "item": {
                 "type": "McpToolCall", "server": "crew", "tool": "agent_send", "arguments": { "to": "lead", "body": "done" } } } }),
             json!({ "type": "event_msg", "payload": { "type": "item_completed", "item": { "type": "Reasoning" } } }),
             json!({ "type": "compacted", "timestamp": "2026-10-02T20:00:00Z", "payload": { "message": "…" } }),
-            item(json!({ "type": "message", "role": "assistant", "content": [{ "type": "output_text", "text": "Approved." }] })),
+            item(
+                json!({ "type": "message", "role": "assistant", "content": [{ "type": "output_text", "text": "Approved." }] }),
+            ),
         ]);
         let entries = codex_entries(&text);
         assert_eq!(
             kinds(&entries),
             [
                 (TranscriptKind::Prompt, "[crew] Review the report."),
-                (TranscriptKind::Tool, "exec  const r = await tools.exec_command({cmd: \"ls\"});"),
+                (
+                    TranscriptKind::Tool,
+                    "exec  const r = await tools.exec_command({cmd: \"ls\"});"
+                ),
                 (TranscriptKind::Tool, "shell  git status"),
                 (TranscriptKind::Tool, "shell  cargo check"),
-                (TranscriptKind::Tool, "crew.agent_send  {\"body\":\"done\",\"to\":\"lead\"}"),
+                (
+                    TranscriptKind::Tool,
+                    "crew.agent_send  {\"body\":\"done\",\"to\":\"lead\"}"
+                ),
                 (TranscriptKind::Note, "context compacted"),
                 (TranscriptKind::Reply, "Approved."),
             ]
@@ -623,19 +737,25 @@ mod tests {
             json!({ "type": "session", "version": 3, "id": "s", "cwd": "/w" }),
             json!({ "type": "model_change", "provider": "anthropic", "modelId": "claude-opus-4-6" }),
             json!({ "type": "thinking_level_change", "thinkingLevel": "high" }),
-            message(json!({ "role": "user", "content": [{ "type": "text", "text": "[crew] Review the report." }] })),
+            message(
+                json!({ "role": "user", "content": [{ "type": "text", "text": "[crew] Review the report." }] }),
+            ),
             message(json!({ "role": "assistant", "content": [
                 { "type": "thinking", "text": "hm" },
                 { "type": "text", "text": "Reading it." },
                 { "type": "toolCall", "name": "read", "args": "{\"path\":\"report.md\"}" },
             ], "usage": { "input": 1, "output": 2, "cacheRead": 3, "cacheWrite": 0, "totalTokens": 6 } })),
-            message(json!({ "role": "toolResult", "toolCallId": "c1", "content": [{ "type": "text", "text": "# Report" }] })),
+            message(
+                json!({ "role": "toolResult", "toolCallId": "c1", "content": [{ "type": "text", "text": "# Report" }] }),
+            ),
             message(json!({ "role": "assistant", "content": [
                 { "type": "toolCall", "name": "bash", "arguments": { "command": "cargo check" } },
             ] })),
             json!({ "type": "compaction", "summary": "…", "tokensBefore": 100000 }),
             message(json!({ "role": "user", "content": "plain text prompt" })),
-            message(json!({ "role": "assistant", "content": [{ "type": "text", "text": "Approved." }] })),
+            message(
+                json!({ "role": "assistant", "content": [{ "type": "text", "text": "Approved." }] }),
+            ),
         ]);
         let entries = pi_entries(&text);
         assert_eq!(
@@ -668,7 +788,11 @@ mod tests {
         assert!(all.available && !all.truncated);
         assert_eq!(all.entries.len(), 11);
         let last = &all.entries[10].text;
-        assert!(last.ends_with("\n[26 more characters]"), "{}", &last[last.len() - 40..]);
+        assert!(
+            last.ends_with("\n[26 more characters]"),
+            "{}",
+            &last[last.len() - 40..]
+        );
 
         let newest = read(&path, RuntimeKind::Claude, 3);
         assert!(newest.truncated);
@@ -681,6 +805,11 @@ mod tests {
         let none = read(&dir.path().join("missing.jsonl"), RuntimeKind::Claude, 10);
         assert!(!none.available && none.entries.is_empty());
         // A tool's line is kept short.
-        assert!(tool_line("Bash", &json!({ "command": "y".repeat(500) })).chars().count() <= MAX_TOOL_CHARS);
+        assert!(
+            tool_line("Bash", &json!({ "command": "y".repeat(500) }))
+                .chars()
+                .count()
+                <= MAX_TOOL_CHARS
+        );
     }
 }

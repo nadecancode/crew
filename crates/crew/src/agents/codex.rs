@@ -85,11 +85,17 @@ impl AgentRuntime for CodexRuntime {
             overrides.push(format!("{key}={}", toml_value(&value)));
         };
         set("mcp_servers.crew.command", json!(crew_bin));
-        set("mcp_servers.crew.args", json!(["mcp", "--identity", identity]));
+        set(
+            "mcp_servers.crew.args",
+            json!(["mcp", "--identity", identity]),
+        );
         // Agents run with approval policy "never", under which Codex refuses
         // MCP tools that would need approval; the crew tools are the agent's
         // own coordination channel, so they are approved up front.
-        set("mcp_servers.crew.default_tools_approval_mode", json!("approve"));
+        set(
+            "mcp_servers.crew.default_tools_approval_mode",
+            json!("approve"),
+        );
         // Codex appends the event JSON as the final argument.
         set(
             "notify",
@@ -120,24 +126,39 @@ impl AgentRuntime for CodexRuntime {
         }
         if ctx.long_context {
             set("model_context_window", json!(LONG_CONTEXT_WINDOW));
-            set("model_auto_compact_token_limit", json!(LONG_CONTEXT_COMPACT_AT));
+            set(
+                "model_auto_compact_token_limit",
+                json!(LONG_CONTEXT_COMPACT_AT),
+            );
         }
         // An endpoint or key from the crew config becomes a model provider of
         // its own, so the user's Codex login and providers play no part. The
         // key itself travels in the environment of the process that talks to
         // the model, never on the command line.
         let endpoint = ctx.endpoint;
-        let mut env: Vec<(String, String)> =
-            endpoint.env.iter().map(|(k, v)| (k.clone(), v.clone())).collect();
+        let mut env: Vec<(String, String)> = endpoint
+            .env
+            .iter()
+            .map(|(k, v)| (k.clone(), v.clone()))
+            .collect();
         if endpoint.base_url.is_some() || endpoint.api_key.is_some() {
             let base_url = endpoint.base_url.as_deref().unwrap_or(OPENAI_API);
             let wire_api = endpoint.wire_api.as_deref().unwrap_or("responses");
             set("model_provider", json!(PROVIDER));
             set(&format!("model_providers.{PROVIDER}.name"), json!(PROVIDER));
-            set(&format!("model_providers.{PROVIDER}.base_url"), json!(base_url));
-            set(&format!("model_providers.{PROVIDER}.wire_api"), json!(wire_api));
+            set(
+                &format!("model_providers.{PROVIDER}.base_url"),
+                json!(base_url),
+            );
+            set(
+                &format!("model_providers.{PROVIDER}.wire_api"),
+                json!(wire_api),
+            );
             if let Some(key) = &endpoint.api_key {
-                set(&format!("model_providers.{PROVIDER}.env_key"), json!(CODEX_KEY_ENV));
+                set(
+                    &format!("model_providers.{PROVIDER}.env_key"),
+                    json!(CODEX_KEY_ENV),
+                );
                 env.push((CODEX_KEY_ENV.to_string(), key.expose().to_string()));
             }
         }
@@ -303,7 +324,9 @@ impl AgentRuntime for CodexRuntime {
         if asks && (lower.contains("trust and continue") || lower.contains("yes")) {
             // The affirmative option is normally preselected; if the cursor
             // sits elsewhere, pick option 1 by number instead.
-            let on_trust = cursor_on(screen, |l| l.contains("trust and continue") || l.contains("yes"));
+            let on_trust = cursor_on(screen, |l| {
+                l.contains("trust and continue") || l.contains("yes")
+            });
             return Some(Dialog {
                 kind: "trust",
                 description: "Codex is asking whether to trust this folder".into(),
@@ -386,7 +409,9 @@ mod tests {
         };
         let spec = CodexRuntime.launch(&ctx).unwrap();
         assert_eq!(spec.program, "codex");
-        assert!(spec.args.contains(&r#"mcp_servers.crew.command="/bin/crew""#.to_string()));
+        assert!(spec
+            .args
+            .contains(&r#"mcp_servers.crew.command="/bin/crew""#.to_string()));
         assert!(spec.args.contains(
             &r#"mcp_servers.crew.args=["mcp","--identity","/state/agents/codex-1/identity.json"]"#
                 .to_string()
@@ -399,29 +424,67 @@ mod tests {
         // writes for other models: Codex's guidance on writing for a person
         // gives way, in the team's voice.
         assert!(spec.args.contains(&r#"model_verbosity="low""#.to_string()));
-        let developer = spec.args.iter().find(|a| a.starts_with("developer_instructions=")).expect("a member's instructions");
-        assert!(developer.contains("standing instructions\\n\\n# Tone and style"), "{developer}");
-        assert!(developer.contains("No person reads this session") && developer.contains("Voice: ultracave"), "{developer}");
+        let developer = spec
+            .args
+            .iter()
+            .find(|a| a.starts_with("developer_instructions="))
+            .expect("a member's instructions");
+        assert!(
+            developer.contains("standing instructions\\n\\n# Tone and style"),
+            "{developer}"
+        );
+        assert!(
+            developer.contains("No person reads this session")
+                && developer.contains("Voice: ultracave"),
+            "{developer}"
+        );
         // The orchestrator is read by the operator: Codex's own guidance on
         // writing stays, and its standing instructions are all crew adds.
-        let orchestrator = Agent { orchestrator: true, ..agent.clone() };
-        let lead = CodexRuntime.launch(&LaunchContext { agent: &orchestrator, ..ctx }).unwrap();
-        let developer = lead.args.iter().find(|a| a.starts_with("developer_instructions=")).expect("the orchestrator's instructions");
-        assert!(developer.contains("standing instructions") && !developer.contains("Tone and style"), "{developer}");
+        let orchestrator = Agent {
+            orchestrator: true,
+            ..agent.clone()
+        };
+        let lead = CodexRuntime
+            .launch(&LaunchContext {
+                agent: &orchestrator,
+                ..ctx
+            })
+            .unwrap();
+        let developer = lead
+            .args
+            .iter()
+            .find(|a| a.starts_with("developer_instructions="))
+            .expect("the orchestrator's instructions");
+        assert!(
+            developer.contains("standing instructions") && !developer.contains("Tone and style"),
+            "{developer}"
+        );
         assert!(!lead.args.iter().any(|a| a.starts_with("model_verbosity=")));
 
         let resumed = CodexRuntime
-            .launch(&LaunchContext { resume: true, ..ctx })
+            .launch(&LaunchContext {
+                resume: true,
+                ..ctx
+            })
             .unwrap();
-        assert_eq!(&resumed.args[resumed.args.len() - 2..], ["resume", "--last"]);
+        assert_eq!(
+            &resumed.args[resumed.args.len() - 2..],
+            ["resume", "--last"]
+        );
         assert!(!resumed.prompt_as_arg);
         assert!(spec.sidecar.is_none());
 
         // The 1M-token context window is two more overrides, asked for only
         // when the model has it; the app-server, which owns the session
         // when there is one, gets them too.
-        let window = ["model_context_window=1000000", "model_auto_compact_token_limit=900000"];
-        assert!(!spec.args.iter().any(|a| a.starts_with("model_context_window")));
+        let window = [
+            "model_context_window=1000000",
+            "model_auto_compact_token_limit=900000",
+        ];
+        assert!(!spec
+            .args
+            .iter()
+            .any(|a| a.starts_with("model_context_window")));
         let long = CodexRuntime
             .launch(&LaunchContext {
                 long_context: true,
@@ -434,8 +497,16 @@ mod tests {
             .unwrap();
         let sidecar = long.sidecar.expect("an app-server sidecar");
         for key in window {
-            assert!(long.args.contains(&key.to_string()), "{key}: {:?}", long.args);
-            assert!(sidecar.args.contains(&key.to_string()), "{key}: {:?}", sidecar.args);
+            assert!(
+                long.args.contains(&key.to_string()),
+                "{key}: {:?}",
+                long.args
+            );
+            assert!(
+                sidecar.args.contains(&key.to_string()),
+                "{key}: {:?}",
+                sidecar.args
+            );
         }
         let at = long.args.iter().position(|a| a == window[0]).unwrap();
         assert_eq!(long.args[at - 1], "-c");
@@ -450,7 +521,11 @@ mod tests {
         )
         .unwrap();
         let endpoint = Endpoint {
-            env: [("CODEX_HOME".to_string(), home.path().to_string_lossy().into_owned())].into(),
+            env: [(
+                "CODEX_HOME".to_string(),
+                home.path().to_string_lossy().into_owned(),
+            )]
+            .into(),
             ..Endpoint::default()
         };
         let settings = AgentSettings::default();
@@ -468,12 +543,24 @@ mod tests {
                 long_context: false,
             })
             .unwrap();
-        let developer = spec.args.iter().find(|a| a.starts_with("developer_instructions=")).unwrap();
-        assert!(developer.starts_with(r#"developer_instructions="Use pnpm, not npm.\n\nstanding instructions\n\n# Tone"#), "{developer}");
+        let developer = spec
+            .args
+            .iter()
+            .find(|a| a.starts_with("developer_instructions="))
+            .unwrap();
+        assert!(
+            developer.starts_with(
+                r#"developer_instructions="Use pnpm, not npm.\n\nstanding instructions\n\n# Tone"#
+            ),
+            "{developer}"
+        );
         // A config without any, or none at all: crew's alone.
         std::fs::write(home.path().join("config.toml"), "model = \"gpt-6\"\n").unwrap();
         assert_eq!(own_developer_instructions(home.path()), None);
-        assert_eq!(own_developer_instructions(&home.path().join("nowhere")), None);
+        assert_eq!(
+            own_developer_instructions(&home.path().join("nowhere")),
+            None
+        );
     }
 
     #[test]
@@ -516,21 +603,31 @@ mod tests {
             r#"model_providers.crew.wire_api="chat""#,
             r#"model_providers.crew.env_key="CREW_CODEX_API_KEY""#,
         ] {
-            assert!(spec.args.contains(&expected.to_string()), "{expected}: {:?}", spec.args);
+            assert!(
+                spec.args.contains(&expected.to_string()),
+                "{expected}: {:?}",
+                spec.args
+            );
         }
         assert!(spec.args.join(" ").contains("--model gateway-model"));
         // The key is in the environment, not in an argument.
         assert!(!spec.args.iter().any(|a| a.contains("sk-crew-codex-secret")));
-        assert!(spec
-            .env
-            .contains(&("CREW_CODEX_API_KEY".to_string(), "sk-crew-codex-secret".to_string())));
+        assert!(spec.env.contains(&(
+            "CREW_CODEX_API_KEY".to_string(),
+            "sk-crew-codex-secret".to_string()
+        )));
 
         // With an app-server the server makes the model calls: it gets the
         // provider and the key too.
         let spec = launch(&endpoint, true);
         let sidecar = spec.sidecar.unwrap();
-        assert!(sidecar.args.contains(&r#"model_provider="crew""#.to_string()));
-        assert!(!sidecar.args.iter().any(|a| a.contains("sk-crew-codex-secret")));
+        assert!(sidecar
+            .args
+            .contains(&r#"model_provider="crew""#.to_string()));
+        assert!(!sidecar
+            .args
+            .iter()
+            .any(|a| a.contains("sk-crew-codex-secret")));
         assert_eq!(sidecar.env[0].0, "CREW_CODEX_API_KEY");
 
         // A key alone moves the session onto the OpenAI API with that key.
@@ -542,7 +639,9 @@ mod tests {
         assert!(spec
             .args
             .contains(&r#"model_providers.crew.base_url="https://api.openai.com/v1""#.to_string()));
-        assert!(spec.args.contains(&r#"model_providers.crew.wire_api="responses""#.to_string()));
+        assert!(spec
+            .args
+            .contains(&r#"model_providers.crew.wire_api="responses""#.to_string()));
     }
 
     #[test]
@@ -602,8 +701,12 @@ mod tests {
         assert_eq!(&spec.args[..2], ["--remote".to_string(), listen]);
 
         // The server carries the permissions as configuration…
-        assert!(sidecar.args.contains(&r#"approval_policy="never""#.to_string()));
-        assert!(sidecar.args.contains(&r#"sandbox_mode="workspace-write""#.to_string()));
+        assert!(sidecar
+            .args
+            .contains(&r#"approval_policy="never""#.to_string()));
+        assert!(sidecar
+            .args
+            .contains(&r#"sandbox_mode="workspace-write""#.to_string()));
         // …so a TUI that resumes the server's session passes no permission
         // flags, which Codex would refuse ("Permission overrides are not
         // supported when resuming a remote task").
@@ -628,13 +731,34 @@ mod tests {
                     long_context: false,
                 })
                 .unwrap();
-            assert_eq!(&resumed.args[resumed.args.len() - 2..], ["resume", "thread-9"]);
-            for flag in ["--dangerously-bypass-approvals-and-sandbox", "--sandbox", "--ask-for-approval"] {
-                assert!(!resumed.args.contains(&flag.to_string()), "{flag}: {:?}", resumed.args);
+            assert_eq!(
+                &resumed.args[resumed.args.len() - 2..],
+                ["resume", "thread-9"]
+            );
+            for flag in [
+                "--dangerously-bypass-approvals-and-sandbox",
+                "--sandbox",
+                "--ask-for-approval",
+            ] {
+                assert!(
+                    !resumed.args.contains(&flag.to_string()),
+                    "{flag}: {:?}",
+                    resumed.args
+                );
             }
             let server = resumed.sidecar.unwrap();
-            let expected = if bypass { "danger-full-access" } else { "workspace-write" };
-            assert!(server.args.contains(&format!("sandbox_mode=\"{expected}\"")), "{:?}", server.args);
+            let expected = if bypass {
+                "danger-full-access"
+            } else {
+                "workspace-write"
+            };
+            assert!(
+                server
+                    .args
+                    .contains(&format!("sandbox_mode=\"{expected}\"")),
+                "{:?}",
+                server.args
+            );
         }
 
         let queue = CodexRuntime
@@ -653,20 +777,31 @@ mod tests {
         let dialog = CodexRuntime.detect_dialog(screen).unwrap();
         assert_eq!(dialog.kind, "trust");
         assert_eq!(dialog.accept_keys, vec!["enter"]);
-        assert!(CodexRuntime.detect_dialog("› Ask Codex to do anything").is_none());
+        assert!(CodexRuntime
+            .detect_dialog("› Ask Codex to do anything")
+            .is_none());
     }
 
     #[test]
     fn detects_the_extra_thought_notice_and_dismisses_it_with_enter() {
         // The input box's own `›` is on screen too.
-        let screen = "› Ask Codex to do anything\n\n  Giving this request a little extra thought\n\n\
+        let screen =
+            "› Ask Codex to do anything\n\n  Giving this request a little extra thought\n\n\
 › 1. Dismiss and keep waiting\n  2. Learn more\n\n  No action is required. Codex will keep \
 waiting, and this menu will close when the response is ready.";
         let dialog = CodexRuntime.detect_dialog(screen).unwrap();
-        assert_eq!((dialog.kind, dialog.accept_keys.as_slice()), ("notice", &["enter"][..]));
+        assert_eq!(
+            (dialog.kind, dialog.accept_keys.as_slice()),
+            ("notice", &["enter"][..])
+        );
         // The cursor moved to "Learn more": the dismiss option by its number.
-        let moved = screen.replace("› 1. Dismiss", "  1. Dismiss").replace("  2. Learn", "› 2. Learn");
-        assert_eq!(CodexRuntime.detect_dialog(&moved).unwrap().accept_keys, vec!["1"]);
+        let moved = screen
+            .replace("› 1. Dismiss", "  1. Dismiss")
+            .replace("  2. Learn", "› 2. Learn");
+        assert_eq!(
+            CodexRuntime.detect_dialog(&moved).unwrap().accept_keys,
+            vec!["1"]
+        );
     }
 
     #[test]

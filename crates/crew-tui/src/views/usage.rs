@@ -41,7 +41,12 @@ fn rows(app: &App) -> Vec<Row<'_>> {
         .into_iter()
         .map(|runtime| Row {
             runtime,
-            quotas: app.session.quotas.iter().filter(|q| q.runtime == runtime).collect(),
+            quotas: app
+                .session
+                .quotas
+                .iter()
+                .filter(|q| q.runtime == runtime)
+                .collect(),
             paused: app
                 .agents
                 .iter()
@@ -154,7 +159,11 @@ fn layout(rows: &[Row<'_>], width: usize) -> Layout {
         .min()
         .unwrap_or(BAR_MAX)
         .clamp(BAR_MIN, BAR_MAX);
-    Layout { columns, row_of, cells }
+    Layout {
+        columns,
+        row_of,
+        cells,
+    }
 }
 
 impl Layout {
@@ -214,7 +223,11 @@ pub fn bar_parts(percent: f32, cells: usize) -> (usize, &'static str, usize) {
     }
     let full = filled / 8;
     let partial = EIGHTHS[filled % 8];
-    (full, partial, cells - full - usize::from(!partial.is_empty()))
+    (
+        full,
+        partial,
+        cells - full - usize::from(!partial.is_empty()),
+    )
 }
 
 /// How long until a reset, short: `45m`, `2h14m`, `1d14h`; never wider than
@@ -248,16 +261,25 @@ fn gauge_text(quota: &Quota, now: i64) -> (String, String) {
 fn gauge(quota: &Quota, cells: usize, theme: &Theme, now: i64) -> Vec<(String, Style)> {
     let percent = quota.percent_used.max(0.0);
     let (full, partial, track) = bar_parts(percent, cells);
-    let fill = Style::default().fg(level_color(theme, percent)).bg(theme.gauge_track);
+    let fill = Style::default()
+        .fg(level_color(theme, percent))
+        .bg(theme.gauge_track);
     let (used, resets) = gauge_text(quota, now);
     vec![
-        (format!("{} ", window_label(&quota.window)), theme.fg(theme.muted)),
+        (
+            format!("{} ", window_label(&quota.window)),
+            theme.fg(theme.muted),
+        ),
         ("█".repeat(full), fill),
         (partial.to_string(), fill),
         (" ".repeat(track), Style::default().bg(theme.gauge_track)),
         (
             used,
-            if now - quota.updated_at > STALE_MS { theme.fg(theme.muted) } else { theme.bold(theme.text) },
+            if now - quota.updated_at > STALE_MS {
+                theme.fg(theme.muted)
+            } else {
+                theme.bold(theme.text)
+            },
         ),
         (resets, theme.fg(theme.dim)),
     ]
@@ -305,7 +327,11 @@ pub fn render(buf: &mut Buffer, area: Rect, app: &App, theme: &Theme, now: i64) 
         for (text, style) in parts {
             let text = fit(&text, (right - x).max(0) as usize);
             // The strip's background, unless the cell brings its own (a bar).
-            let style = if style.bg.is_none() { style.bg(theme.bar_bg) } else { style };
+            let style = if style.bg.is_none() {
+                style.bg(theme.bar_bg)
+            } else {
+                style
+            };
             put_str(buf, area, x, i32::from(y), &text, style);
             x += width(&text) as i32;
         }
@@ -314,7 +340,10 @@ pub fn render(buf: &mut Buffer, area: Rect, app: &App, theme: &Theme, now: i64) 
 
     for row in &rows {
         let name = (
-            format!("{:<NAME_WIDTH$}", format!("{} {}", runtime_glyph(row.runtime), row.runtime)),
+            format!(
+                "{:<NAME_WIDTH$}",
+                format!("{} {}", runtime_glyph(row.runtime), row.runtime)
+            ),
             theme.bold(theme.runtime_color(row.runtime)),
         );
         if !row.paused.is_empty() {
@@ -322,7 +351,13 @@ pub fn render(buf: &mut Buffer, area: Rect, app: &App, theme: &Theme, now: i64) 
                 Some("auth") | Some("credits") => theme.err,
                 _ => theme.warn,
             };
-            line(buf, vec![name.clone(), (paused_text(&row.paused, now), theme.bold(color))]);
+            line(
+                buf,
+                vec![
+                    name.clone(),
+                    (paused_text(&row.paused, now), theme.bold(color)),
+                ],
+            );
         }
         // One line per grid row the runtime has a window in; the name is
         // on the first.
@@ -332,8 +367,17 @@ pub fn render(buf: &mut Buffer, area: Rect, app: &App, theme: &Theme, now: i64) 
             } else {
                 (" ".repeat(NAME_WIDTH), Style::default())
             }];
-            for (column, _) in layout.columns.iter().zip(&layout.row_of).filter(|(_, at)| **at == grid_row) {
-                match row.quotas.iter().find(|q| window_label(&q.window) == column.label) {
+            for (column, _) in layout
+                .columns
+                .iter()
+                .zip(&layout.row_of)
+                .filter(|(_, at)| **at == grid_row)
+            {
+                match row
+                    .quotas
+                    .iter()
+                    .find(|q| window_label(&q.window) == column.label)
+                {
                     Some(quota) => {
                         let mut gauge = gauge(quota, cells, theme, now);
                         // Pad the reset text to the column, then the gap.
@@ -411,14 +455,32 @@ mod tests {
         let lines: Vec<&str> = text.lines().collect();
         assert!(lines[0].starts_with(" ✱ claude session █"), "{text}");
         // A wide screen gives each bar its full width.
-        assert!(lines[0].contains(&format!("session {}  62%  ↻ 1h00m", plain(62.4, BAR_MAX))), "{text}");
-        assert!(lines[0].contains(&format!("week {}  21%", plain(21.0, BAR_MAX))), "{text}");
-        assert!(lines[1].contains(&format!("week {}  96%  ↻ 3d0h", plain(96.0, BAR_MAX))), "{text}");
+        assert!(
+            lines[0].contains(&format!("session {}  62%  ↻ 1h00m", plain(62.4, BAR_MAX))),
+            "{text}"
+        );
+        assert!(
+            lines[0].contains(&format!("week {}  21%", plain(21.0, BAR_MAX))),
+            "{text}"
+        );
+        assert!(
+            lines[1].contains(&format!("week {}  96%  ↻ 3d0h", plain(96.0, BAR_MAX))),
+            "{text}"
+        );
         // The grid: Codex has no session window, so that column stays empty
         // and its week bar sits right under Claude's.
-        let column = |line: &str, what: &str| line.chars().collect::<String>().find(what).map(|at| width(&line[..at]));
+        let column = |line: &str, what: &str| {
+            line.chars()
+                .collect::<String>()
+                .find(what)
+                .map(|at| width(&line[..at]))
+        };
         assert!(lines[1].starts_with(" ❂ codex   "), "{text}");
-        assert_eq!(column(lines[0], "week "), column(lines[1], "week "), "{text}");
+        assert_eq!(
+            column(lines[0], "week "),
+            column(lines[1], "week "),
+            "{text}"
+        );
         assert!(column(lines[0], "week ").is_some());
         // The figures are right-aligned, so they end in the same column too.
         let week = |line: &str| column(&line[line.find("week ").unwrap()..], "%");
@@ -427,7 +489,11 @@ mod tests {
         assert_eq!(bar_parts(50.0, 10), (5, "", 5));
         assert_eq!(bar_parts(33.0, 24), (7, "▉", 16));
         assert_eq!(bar_parts(100.0, 24), (24, "", 0));
-        assert_eq!(bar_parts(140.0, 8), (8, "", 0), "an exceeded spend limit is a full bar");
+        assert_eq!(
+            bar_parts(140.0, 8),
+            (8, "", 0),
+            "an exceeded spend limit is a full bar"
+        );
         // A sliver of use is visible; nothing used is all track.
         assert_eq!(bar_parts(0.2, 10), (0, "▏", 9));
         assert_eq!(bar_parts(0.0, 10), (0, "", 10));
@@ -437,27 +503,59 @@ mod tests {
         assert_eq!(level_color(&theme, 62.0), theme.gauge);
         assert_eq!(level_color(&theme, 75.0), theme.warn);
         assert_eq!(level_color(&theme, 96.0), theme.err);
-        let parts = gauge(&quota(RuntimeKind::Claude, "5h", 33.0, None), 24, &theme, NOW);
+        let parts = gauge(
+            &quota(RuntimeKind::Claude, "5h", 33.0, None),
+            24,
+            &theme,
+            NOW,
+        );
         assert_eq!(parts[4].1, theme.bold(theme.text));
         // A figure from long ago may no longer be true: it is muted.
         let mut old = quota(RuntimeKind::Claude, "week/Fable", 72.0, None);
         old.updated_at = NOW - 8 * 3_600_000;
         assert_eq!(gauge(&old, 24, &theme, NOW)[4].1, theme.fg(theme.muted));
         assert_eq!(parts[0].0, "session ");
-        assert_eq!((parts[1].1.fg, parts[1].1.bg), (Some(theme.gauge), Some(theme.gauge_track)));
-        assert_eq!((parts[3].0.len(), parts[3].1.bg), (16, Some(theme.gauge_track)));
+        assert_eq!(
+            (parts[1].1.fg, parts[1].1.bg),
+            (Some(theme.gauge), Some(theme.gauge_track))
+        );
+        assert_eq!(
+            (parts[3].0.len(), parts[3].1.bg),
+            (16, Some(theme.gauge_track))
+        );
         assert_eq!(parts[4].0, "  33%");
         // How long until a reset, at a glance.
-        assert_eq!((until(30_000), until(45 * 60_000), until(134 * 60_000), until(38 * 3_600_000)), ("1m".into(), "45m".into(), "2h14m".into(), "1d14h".into()));
+        assert_eq!(
+            (
+                until(30_000),
+                until(45 * 60_000),
+                until(134 * 60_000),
+                until(38 * 3_600_000)
+            ),
+            ("1m".into(), "45m".into(), "2h14m".into(), "1d14h".into())
+        );
         assert_eq!(until(400 * 86_400_000), "99d+");
         // With less room the bars shrink together, down to a minimum. Each
         // column keeps room for the reset text at its widest (10), so the
         // grid stays put as the countdown shortens.
         let narrower = draw(&app, 90, 2);
         let cells = (90 - 2 - 9 - (7 + 1 + 5 + 10 + 3) - (4 + 1 + 5 + 10 + 3)) / 2;
-        assert!(narrower.lines().next().unwrap().contains(&format!("session {}  62%", plain(62.4, cells))), "{narrower}");
+        assert!(
+            narrower
+                .lines()
+                .next()
+                .unwrap()
+                .contains(&format!("session {}  62%", plain(62.4, cells))),
+            "{narrower}"
+        );
         let tiny = draw(&app, 40, 3);
-        assert!(tiny.lines().next().unwrap().contains(&format!("session {}  62%", plain(62.4, BAR_MIN))), "{tiny}");
+        assert!(
+            tiny.lines()
+                .next()
+                .unwrap()
+                .contains(&format!("session {}  62%", plain(62.4, BAR_MIN))),
+            "{tiny}"
+        );
         // Narrow screens cut the row off; they never overflow it.
         assert!(draw(&app, 44, 2).lines().all(|l| width(l) <= 44));
     }
@@ -478,13 +576,29 @@ mod tests {
         assert_eq!(height(&app, area), 3);
         let text = draw(&app, 100, 3);
         let lines: Vec<&str> = text.lines().collect();
-        assert!(lines[0].starts_with(" ✱ claude session ") && lines[0].contains(" week "), "{text}");
+        assert!(
+            lines[0].starts_with(" ✱ claude session ") && lines[0].contains(" week "),
+            "{text}"
+        );
         assert!(!lines[0].contains("Fable"), "{text}");
-        assert!(lines[1].starts_with("          Fable week ") && lines[1].contains("   5%  ↻ 1d0h"), "{text}");
-        assert!(lines[2].starts_with(" ❂ codex   ") && lines[2].contains(" week "), "{text}");
+        assert!(
+            lines[1].starts_with("          Fable week ") && lines[1].contains("   5%  ↻ 1d0h"),
+            "{text}"
+        );
+        assert!(
+            lines[2].starts_with(" ❂ codex   ") && lines[2].contains(" week "),
+            "{text}"
+        );
         let column = |line: &str, what: &str| line.find(what).map(|at| width(&line[..at]));
-        assert_eq!(column(lines[0], "week "), column(lines[2], "week "), "{text}");
-        assert!(lines.iter().all(|l| width(l) <= 100 && !l.contains('…')), "{text}");
+        assert_eq!(
+            column(lines[0], "week "),
+            column(lines[2], "week "),
+            "{text}"
+        );
+        assert!(
+            lines.iter().all(|l| width(l) <= 100 && !l.contains('…')),
+            "{text}"
+        );
         // Every bar is the same width, on every row: what the fullest row
         // leaves its two columns.
         let plain = |percent: f32, cells: usize| {
@@ -492,25 +606,45 @@ mod tests {
             format!("{}{partial}{}", "█".repeat(full), " ".repeat(track))
         };
         let cells = (100 - 2 - 9 - (7 + 1 + 5 + 10 + 3) - (4 + 1 + 5 + 10 + 3)) / 2;
-        assert!(lines[0].contains(&format!("session {}   1%", plain(1.0, cells))), "{text}");
-        assert!(lines[1].contains(&format!("Fable week {}   5%", plain(5.0, cells))), "{text}");
-        assert!(lines[2].contains(&format!("week {}  62%", plain(62.0, cells))), "{text}");
+        assert!(
+            lines[0].contains(&format!("session {}   1%", plain(1.0, cells))),
+            "{text}"
+        );
+        assert!(
+            lines[1].contains(&format!("Fable week {}   5%", plain(5.0, cells))),
+            "{text}"
+        );
+        assert!(
+            lines[2].contains(&format!("week {}  62%", plain(62.0, cells))),
+            "{text}"
+        );
 
         // Where there is room they share one row.
         let wide = Rect::new(0, 0, 200, 40);
         assert_eq!(height(&app, wide), 2);
         let text = draw(&app, 200, 2);
         let lines: Vec<&str> = text.lines().collect();
-        assert!(lines[0].contains("Fable week ") && lines[0].contains("   5%  ↻ 1d0h"), "{text}");
+        assert!(
+            lines[0].contains("Fable week ") && lines[0].contains("   5%  ↻ 1d0h"),
+            "{text}"
+        );
         assert!(lines[1].starts_with(" ❂ codex   "), "{text}");
-        assert_eq!(column(lines[0], "week "), column(lines[1], "week "), "{text}");
+        assert_eq!(
+            column(lines[0], "week "),
+            column(lines[1], "week "),
+            "{text}"
+        );
     }
 
     #[test]
     fn paused_agents_lead_their_runtimes_row() {
         let mut app = app();
         let mut park = |id: &str, kind: &str, resets: Option<i64>, retry: Option<i64>| {
-            let agent = app.agents.iter_mut().find(|a| a.id == id).expect("fixture agent");
+            let agent = app
+                .agents
+                .iter_mut()
+                .find(|a| a.id == id)
+                .expect("fixture agent");
             agent.limit = Some(UsageLimit {
                 kind: kind.to_string(),
                 message: "You've hit your usage limit.".to_string(),
@@ -528,9 +662,21 @@ mod tests {
         assert_eq!(height(&app, Rect::new(0, 0, 200, 40)), 2);
         let text = draw(&app, 200, 2);
         let lines: Vec<&str> = text.lines().collect();
-        assert!(lines[0].starts_with(" ✱ claude ⊘ usage limit reached · 2 paused (claude-1, claude-3) · resets "), "{text}");
-        assert!(lines[0].ends_with(" · resumes in 2h00m · u continue now · U restart on a new login"), "{text}");
-        assert!(lines[1].starts_with(" ✱ claude session ██████") && lines[1].contains("█ 100%  ↻ 1h59m"), "{text}");
+        assert!(
+            lines[0].starts_with(
+                " ✱ claude ⊘ usage limit reached · 2 paused (claude-1, claude-3) · resets "
+            ),
+            "{text}"
+        );
+        assert!(
+            lines[0].ends_with(" · resumes in 2h00m · u continue now · U restart on a new login"),
+            "{text}"
+        );
+        assert!(
+            lines[1].starts_with(" ✱ claude session ██████")
+                && lines[1].contains("█ 100%  ↻ 1h59m"),
+            "{text}"
+        );
 
         // A login problem does not lift by waiting.
         let mut app = self::app();
@@ -540,6 +686,9 @@ mod tests {
             ..UsageLimit::default()
         });
         let text = draw(&app, 160, 1);
-        assert!(text.contains("⊘ sign-in needed · 1 paused (claude-2) · waiting for you"), "{text}");
+        assert!(
+            text.contains("⊘ sign-in needed · 1 paused (claude-2) · waiting for you"),
+            "{text}"
+        );
     }
 }

@@ -58,6 +58,9 @@ impl AgentRuntime for ShellRuntime {
 
     /// One short line: a wake-up, not the payload.
     fn nudge(&self, messages: &[Message]) -> String {
-        format!("[crew] {} new message(s); run: crew ctl inbox", messages.len())
+        format!(
+            "[crew] {} new message(s); run: crew ctl inbox",
+            messages.len()
+        )
     }
 }

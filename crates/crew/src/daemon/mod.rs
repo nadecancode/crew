@@ -289,8 +289,12 @@ impl Daemon {
     /// Record a structured event and stream it to subscribers.
     pub(crate) fn emit(&self, event: NewEvent) {
         match event.level {
-            EventLevel::Error => tracing::error!(target: "crew", "{}: {}", event.event_type, event.message),
-            EventLevel::Warn => tracing::warn!(target: "crew", "{}: {}", event.event_type, event.message),
+            EventLevel::Error => {
+                tracing::error!(target: "crew", "{}: {}", event.event_type, event.message)
+            }
+            EventLevel::Warn => {
+                tracing::warn!(target: "crew", "{}: {}", event.event_type, event.message)
+            }
             _ => tracing::info!(target: "crew", "{}: {}", event.event_type, event.message),
         }
         match self.store.append_event(event) {
@@ -382,7 +386,10 @@ impl Daemon {
             };
             self.emit(event);
         }
-        if before.status != after.status || before.progress != after.progress || before.task != after.task {
+        if before.status != after.status
+            || before.progress != after.progress
+            || before.task != after.task
+        {
             self.publish_meta(&after);
         }
         Some(after)
@@ -429,7 +436,9 @@ impl Daemon {
     /// Recompute inbox/outbox counters for the given agents.
     pub(crate) fn refresh_counts(&self, ids: &[String]) {
         for id in ids {
-            let Ok(counts) = self.bus.counts(id) else { continue };
+            let Ok(counts) = self.bus.counts(id) else {
+                continue;
+            };
             self.update_agent(id, |a| {
                 a.inbox_unread = counts.unread;
                 a.inbox_total = counts.inbox_total;
@@ -443,7 +452,11 @@ impl Daemon {
         let s = &model.session;
         SessionInfo {
             project: s.team.as_ref().map(|t| t.project.clone()),
-            objective: s.team.as_ref().map(|t| t.objective.clone()).unwrap_or_default(),
+            objective: s
+                .team
+                .as_ref()
+                .map(|t| t.objective.clone())
+                .unwrap_or_default(),
             style: s.team.as_ref().and_then(|t| t.style.clone()),
             quotas: model.quotas.clone(),
             workspace: self.workspace.to_string_lossy().into_owned(),
@@ -560,8 +573,8 @@ pub async fn start(options: DaemonOptions) -> Result<Running> {
     }
     // Stale socket from a daemon that did not shut down cleanly.
     let _ = std::fs::remove_file(&socket);
-    let listener = UnixListener::bind(&socket)
-        .with_context(|| format!("binding {}", socket.display()))?;
+    let listener =
+        UnixListener::bind(&socket).with_context(|| format!("binding {}", socket.display()))?;
     {
         use std::os::unix::fs::PermissionsExt;
         std::fs::set_permissions(&socket, std::fs::Permissions::from_mode(0o600))?;
@@ -683,7 +696,8 @@ impl Running {
             tokio::spawn(async move { server::accept_loop(daemon, listener).await })
         };
 
-        let mut sigterm = tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())?;
+        let mut sigterm =
+            tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())?;
         let mut sigint = tokio::signal::unix::signal(tokio::signal::unix::SignalKind::interrupt())?;
         tokio::select! {
             _ = stop.changed() => {}

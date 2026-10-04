@@ -129,7 +129,12 @@ fn load_docs<T: serde::de::DeserializeOwned>(conn: &Connection, table: &str) -> 
 
 impl AgentStore for SqliteStore {
     fn save_agent(&self, agent: &Agent) -> Result<()> {
-        upsert_doc(&self.conn(), "agents", &agent.id, &serde_json::to_string(agent)?)
+        upsert_doc(
+            &self.conn(),
+            "agents",
+            &agent.id,
+            &serde_json::to_string(agent)?,
+        )
     }
 
     fn load_agents(&self) -> Result<Vec<Agent>> {
@@ -167,7 +172,12 @@ impl AgentStore for SqliteStore {
 
 impl TaskStore for SqliteStore {
     fn save_task(&self, task: &Task) -> Result<()> {
-        upsert_doc(&self.conn(), "tasks", &task.id, &serde_json::to_string(task)?)
+        upsert_doc(
+            &self.conn(),
+            "tasks",
+            &task.id,
+            &serde_json::to_string(task)?,
+        )
     }
 
     fn load_tasks(&self) -> Result<Vec<Task>> {
@@ -303,7 +313,9 @@ impl MessageStore for SqliteStore {
     fn get_message(&self, id: &str) -> Result<Option<Message>> {
         let conn = self.conn();
         let sql = format!("SELECT {MESSAGE_COLUMNS} FROM messages m WHERE m.id = ?1");
-        Ok(conn.query_row(&sql, params![id], message_from_row).optional()?)
+        Ok(conn
+            .query_row(&sql, params![id], message_from_row)
+            .optional()?)
     }
 
     fn recipients(&self, message_id: &str) -> Result<Vec<String>> {
@@ -408,8 +420,9 @@ impl MessageStore for SqliteStore {
                 rows.collect::<rusqlite::Result<_>>()?
             }
             None => {
-                let sql =
-                    format!("SELECT {MESSAGE_COLUMNS} FROM messages m ORDER BY m.seq DESC LIMIT ?1");
+                let sql = format!(
+                    "SELECT {MESSAGE_COLUMNS} FROM messages m ORDER BY m.seq DESC LIMIT ?1"
+                );
                 let mut stmt = conn.prepare(&sql)?;
                 let rows = stmt.query_map(params![limit], message_from_row)?;
                 rows.collect::<rusqlite::Result<_>>()?
@@ -444,9 +457,11 @@ impl MetaStore for SqliteStore {
     fn get_meta(&self, key: &str) -> Result<Option<String>> {
         Ok(self
             .conn()
-            .query_row("SELECT value FROM meta WHERE key = ?1", params![key], |row| {
-                row.get(0)
-            })
+            .query_row(
+                "SELECT value FROM meta WHERE key = ?1",
+                params![key],
+                |row| row.get(0),
+            )
             .optional()?)
     }
 
@@ -554,7 +569,12 @@ mod tests {
         let mut updated = agent("b");
         updated.status = AgentStatus::Working;
         store.save_agent(&updated).unwrap();
-        let ids: Vec<String> = store.load_agents().unwrap().into_iter().map(|a| a.id).collect();
+        let ids: Vec<String> = store
+            .load_agents()
+            .unwrap()
+            .into_iter()
+            .map(|a| a.id)
+            .collect();
         assert_eq!(ids, ["b", "a", "c"]);
         assert_eq!(store.load_agents().unwrap()[0].status, AgentStatus::Working);
         store.delete_agent("a").unwrap();
@@ -576,9 +596,7 @@ mod tests {
     fn delivery_and_ack_are_tracked_per_recipient() {
         let store = SqliteStore::in_memory().unwrap();
         let m = message("m-1", "a", "*");
-        store
-            .insert_message(&m, &["b".into(), "c".into()])
-            .unwrap();
+        store.insert_message(&m, &["b".into(), "c".into()]).unwrap();
         assert_eq!(store.recipients("m-1").unwrap(), ["b", "c"]);
         assert_eq!(store.undelivered("b").unwrap().len(), 1);
         store.mark_delivered("b", &["m-1".into()], 5).unwrap();
@@ -608,7 +626,12 @@ mod tests {
                 .insert_message(&message(&format!("m-{i}"), from, to), &[to.into()])
                 .unwrap();
         }
-        let last3: Vec<String> = store.history(None, 3).unwrap().into_iter().map(|m| m.id).collect();
+        let last3: Vec<String> = store
+            .history(None, 3)
+            .unwrap()
+            .into_iter()
+            .map(|m| m.id)
+            .collect();
         assert_eq!(last3, ["m-2", "m-3", "m-4"]);
         let for_b: Vec<String> = store
             .history(Some("b"), 10)

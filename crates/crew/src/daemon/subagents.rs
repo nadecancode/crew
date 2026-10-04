@@ -57,9 +57,7 @@ impl Daemon {
                 .agents
                 .iter()
                 .filter(|a| {
-                    a.parent.is_some()
-                        && !a.status.is_terminal()
-                        && a.status != AgentStatus::Done
+                    a.parent.is_some() && !a.status.is_terminal() && a.status != AgentStatus::Done
                 })
                 .count();
             if running >= team.limits.max_subagents {
@@ -115,7 +113,11 @@ to finish",
             runtime: Some(runtime),
             model: model.or_else(|| parent.model.clone()),
             // A scripted parent's subagents run the same script.
-            command: if runtime == RuntimeKind::Shell { command } else { Vec::new() },
+            command: if runtime == RuntimeKind::Shell {
+                command
+            } else {
+                Vec::new()
+            },
             ..AgentSpec::default()
         };
         validate_agent_spec(&spec).map_err(|e| RpcError::invalid(e.to_string()))?;

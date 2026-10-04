@@ -147,7 +147,8 @@ impl Session {
 
     pub fn run_with(&self, team: &TeamConfig, extra: &[&str]) -> String {
         let file = self.root().join("team.yaml");
-        std::fs::write(&file, team.to_yaml().expect("encoding the team")).expect("writing team.yaml");
+        std::fs::write(&file, team.to_yaml().expect("encoding the team"))
+            .expect("writing team.yaml");
         let mut args = vec!["run", "team.yaml", "--no-attach"];
         args.extend_from_slice(extra);
         self.ok(&args)
@@ -209,7 +210,9 @@ impl Session {
     }
 
     pub fn wait_all_done(&self) -> Snapshot {
-        self.wait("every task to be done", |s| s.session.completed_at.is_some())
+        self.wait("every task to be done", |s| {
+            s.session.completed_at.is_some()
+        })
     }
 
     pub fn identity_path(&self, agent: &str) -> PathBuf {
@@ -265,7 +268,12 @@ pub fn find_agent<'a>(snapshot: &'a Snapshot, id: &str) -> &'a Agent {
         .agents
         .iter()
         .find(|a| a.id == id)
-        .unwrap_or_else(|| panic!("no agent {id} in {:?}", snapshot.agents.iter().map(|a| &a.id).collect::<Vec<_>>()))
+        .unwrap_or_else(|| {
+            panic!(
+                "no agent {id} in {:?}",
+                snapshot.agents.iter().map(|a| &a.id).collect::<Vec<_>>()
+            )
+        })
 }
 
 pub fn find_task<'a>(snapshot: &'a Snapshot, id: &str) -> &'a Task {

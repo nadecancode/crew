@@ -21,7 +21,8 @@ use crate::widgets::text::{fit, width};
 const HINTS: &str =
     "esc back · tab next agent · click terminal to type · f full · i type · m message · r refresh · d diff · p pause · R restart · k kill";
 /// While keys go to the agent's terminal.
-const TYPING_HINTS: &str = "ctrl-] stop typing (right-click too) · every other key goes to the agent";
+const TYPING_HINTS: &str =
+    "ctrl-] stop typing (right-click too) · every other key goes to the agent";
 
 /// What a click at column `x`, row `y` lands on: the terminal pane, or
 /// nothing of interest.
@@ -185,7 +186,14 @@ fn panel(buf: &mut Buffer, area: Rect, title: &str, lines: Vec<Line<'static>>, t
 
 /// A panel with a border of its own colour (the terminal pane being typed
 /// into stands out).
-fn panel_in(buf: &mut Buffer, area: Rect, title: &str, lines: Vec<Line<'static>>, border: Style, theme: &Theme) {
+fn panel_in(
+    buf: &mut Buffer,
+    area: Rect,
+    title: &str,
+    lines: Vec<Line<'static>>,
+    border: Style,
+    theme: &Theme,
+) {
     if area.width < 4 || area.height < 2 {
         return;
     }
@@ -261,7 +269,9 @@ fn info_lines(app: &App, agent: &Agent, theme: &Theme, now: i64) -> Vec<Line<'st
     if let Some(fallback) = &agent.fallback {
         let mut value = format!(
             "↓ on {} instead of {}",
-            agent.model_label().unwrap_or_else(|| "another model".into()),
+            agent
+                .model_label()
+                .unwrap_or_else(|| "another model".into()),
             fallback.from
         );
         if !fallback.note.is_empty() {
@@ -371,9 +381,17 @@ fn info_lines(app: &App, agent: &Agent, theme: &Theme, now: i64) -> Vec<Line<'st
             _ => text,
         };
         let fill = if c.window > 0 {
-            format!("{}% full · {} of {}", c.percent, compact_count(c.tokens), compact_count(c.window))
+            format!(
+                "{}% full · {} of {}",
+                c.percent,
+                compact_count(c.tokens),
+                compact_count(c.window)
+            )
         } else {
-            format!("{} tokens (window size not reported)", compact_count(c.tokens))
+            format!(
+                "{} tokens (window size not reported)",
+                compact_count(c.tokens)
+            )
         };
         lines.push(field("context", fill, style, theme));
     }
@@ -564,7 +582,11 @@ fn render_transcript(buf: &mut Buffer, area: Rect, app: &App, theme: &Theme, now
         .transcript_at
         .map(|at| format!(" · read {} ago", fmt_elapsed(now - at)))
         .unwrap_or_default();
-    let title = format!("transcript{age} · ↑{} of {} · ↓ live terminal", scroll + 1, lines.len());
+    let title = format!(
+        "transcript{age} · ↑{} of {} · ↓ live terminal",
+        scroll + 1,
+        lines.len()
+    );
     panel(buf, area, &title, shown, theme);
     true
 }
@@ -573,7 +595,9 @@ fn render_output(buf: &mut Buffer, area: Rect, app: &App, theme: &Theme, now: i6
     let detail = &app.detail;
     let rows = usize::from(area.height.saturating_sub(2));
     // Border, margin and a spare column on the right.
-    detail.cols.set(usize::from(area.width.saturating_sub(4)).max(8));
+    detail
+        .cols
+        .set(usize::from(area.width.saturating_sub(4)).max(8));
     detail.terminal_rect.set(area);
     if !detail.show_diff && detail.scroll > 0 && render_transcript(buf, area, app, theme, now) {
         return;
@@ -612,7 +636,10 @@ fn render_output(buf: &mut Buffer, area: Rect, app: &App, theme: &Theme, now: i6
         } else {
             ""
         };
-        (format!("terminal · {state}{age}{more}"), detail.output.clone())
+        (
+            format!("terminal · {state}{age}{more}"),
+            detail.output.clone(),
+        )
     };
 
     let mut lines: Vec<Line<'static>> = Vec::new();
@@ -622,7 +649,11 @@ fn render_output(buf: &mut Buffer, area: Rect, app: &App, theme: &Theme, now: i6
             theme.fg(theme.err),
         )));
     }
-    if let (false, true, Some(error)) = (detail.show_diff, detail.scroll > 0, &detail.transcript_error) {
+    if let (false, true, Some(error)) = (
+        detail.show_diff,
+        detail.scroll > 0,
+        &detail.transcript_error,
+    ) {
         lines.push(Line::from(Span::styled(
             format!(" transcript unavailable: {}", one_line(error)),
             theme.fg(theme.err),
@@ -645,7 +676,10 @@ fn render_output(buf: &mut Buffer, area: Rect, app: &App, theme: &Theme, now: i6
                 Some(b'@') => theme.fg(theme.orch),
                 _ => theme.fg(theme.text),
             };
-            lines.push(Line::from(Span::styled(format!(" {}", sanitize(line)), style)));
+            lines.push(Line::from(Span::styled(
+                format!(" {}", sanitize(line)),
+                style,
+            )));
         } else {
             // The terminal's own colours, as the daemon read them.
             let mut styled = ansi::line(line, theme.fg(theme.text));

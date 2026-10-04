@@ -10,12 +10,14 @@ use std::collections::{HashMap, HashSet, VecDeque};
 use std::rc::Rc;
 use std::time::Duration;
 
-use crew_core::rpc::{GitOutcome, ModelChoice, OutputResult, Push, SessionInfo, Snapshot, TranscriptResult};
-use ratatui::layout::Rect;
-use crew_core::types::{
-    Agent, AgentStatus, Event, EventLevel, InboxEntry, Message, MessageType, RuntimeKind, Task, TaskStatus,
-    OPERATOR_ID, ORCHESTRATOR_ID,
+use crew_core::rpc::{
+    GitOutcome, ModelChoice, OutputResult, Push, SessionInfo, Snapshot, TranscriptResult,
 };
+use crew_core::types::{
+    Agent, AgentStatus, Event, EventLevel, InboxEntry, Message, MessageType, RuntimeKind, Task,
+    TaskStatus, OPERATOR_ID, ORCHESTRATOR_ID,
+};
+use ratatui::layout::Rect;
 
 use crate::anim::Anims;
 use crate::theme::{spinner_index, SPINNER_MS};
@@ -58,31 +60,55 @@ pub enum View {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Command {
     Quit,
-    FetchOutput { id: String },
+    FetchOutput {
+        id: String,
+    },
     /// The agent's session transcript, for the inspector scrolled up.
-    FetchTranscript { id: String },
-    FetchInbox { id: String },
-    FetchEvents { id: String },
-    FetchDiff { id: String },
+    FetchTranscript {
+        id: String,
+    },
+    FetchInbox {
+        id: String,
+    },
+    FetchEvents {
+        id: String,
+    },
+    FetchDiff {
+        id: String,
+    },
     Kill(String),
     Restart(String),
     Pause(String),
     Resume(String),
     /// Continue every agent paused at a usage limit; `restart` restarts
     /// their sessions so a new login takes effect.
-    ResumeLimited { restart: bool },
+    ResumeLimited {
+        restart: bool,
+    },
     Focus(String),
-    Send { to: String, body: String },
+    Send {
+        to: String,
+        body: String,
+    },
     /// Stop the team: every agent, then the daemon.
     StopTeam,
     /// The operator's answer to the question with this message id.
-    Answer { id: String, body: String },
+    Answer {
+        id: String,
+        body: String,
+    },
     /// Queue a compaction of an agent's context.
     Compact(String),
     /// Type into an agent's terminal: text as one prompt, or an Enter.
-    Type { id: String, text: String },
+    Type {
+        id: String,
+        text: String,
+    },
     /// Keys for an agent's terminal, as the terminal would send them.
-    Keys { id: String, text: String },
+    Keys {
+        id: String,
+        text: String,
+    },
     /// Turn mouse reporting on or off (off leaves the terminal's own text
     /// selection alone).
     SetMouse(bool),
@@ -265,7 +291,11 @@ impl DetailState {
         if let Some((_, lines)) = wrapped.as_ref().filter(|(at, _)| *at == cols) {
             return Some(lines.clone());
         }
-        let lines = Rc::new(transcript::layout(&transcript.entries, transcript.truncated, cols));
+        let lines = Rc::new(transcript::layout(
+            &transcript.entries,
+            transcript.truncated,
+            cols,
+        ));
         *wrapped = Some((cols, lines.clone()));
         Some(lines)
     }
@@ -475,7 +505,11 @@ impl App {
     /// The task `id` is on, else the one it finished last.
     pub fn work_of(&self, id: &str, now: i64) -> Option<WorkOn<'_>> {
         let now = self.server_now(now);
-        let mine = || self.tasks.iter().filter(move |t| t.assigned_agent.as_deref() == Some(id));
+        let mine = || {
+            self.tasks
+                .iter()
+                .filter(move |t| t.assigned_agent.as_deref() == Some(id))
+        };
         let current = mine()
             .filter(|t| !t.status.is_terminal() && t.started_at.is_some())
             .max_by_key(|t| t.started_at);
@@ -582,7 +616,9 @@ impl App {
         if self.detail.pending && now - self.detail.requested_at > OUTPUT_TIMEOUT_MS {
             self.detail.pending = false;
         }
-        if self.detail.transcript_pending && now - self.detail.transcript_requested_at > OUTPUT_TIMEOUT_MS {
+        if self.detail.transcript_pending
+            && now - self.detail.transcript_requested_at > OUTPUT_TIMEOUT_MS
+        {
             self.detail.transcript_pending = false;
             self.detail.transcript_error = Some("the daemon did not answer".to_string());
         }
@@ -628,7 +664,9 @@ impl App {
             _ => {}
         }
         if let Some(since) = detail.scrolled_at {
-            let fresh = detail.transcript_at.is_some_and(|at| at + TRANSCRIPT_FRESH_MS >= since);
+            let fresh = detail
+                .transcript_at
+                .is_some_and(|at| at + TRANSCRIPT_FRESH_MS >= since);
             if !fresh && !detail.transcript_pending && detail.transcript_error.is_none() {
                 detail.transcript_pending = true;
                 detail.transcript_requested_at = now;
@@ -665,7 +703,11 @@ impl App {
         if let Some(Modal::Question(open)) = &self.modal {
             self.shown_questions.insert(open.id.clone());
         }
-        if !self.loaded || self.modal.is_some() || self.help || (self.view == View::Detail && self.detail.typing) {
+        if !self.loaded
+            || self.modal.is_some()
+            || self.help
+            || (self.view == View::Detail && self.detail.typing)
+        {
             return;
         }
         let Some(id) = self
@@ -757,7 +799,8 @@ impl App {
         }
         self.questions = snap.questions;
         let questions = &self.questions;
-        self.answering.retain(|id| questions.iter().any(|q| &q.id == id));
+        self.answering
+            .retain(|id| questions.iter().any(|q| &q.id == id));
         self.loaded = true;
         self.connected = true;
         self.fix_selection(None);
@@ -792,9 +835,7 @@ impl App {
         let roots: HashMap<String, String> = self
             .agents
             .iter()
-            .filter_map(|a| {
-                satellite_parent(&self.agents, a).map(|p| (a.id.clone(), p.id.clone()))
-            })
+            .filter_map(|a| satellite_parent(&self.agents, a).map(|p| (a.id.clone(), p.id.clone())))
             .collect();
         self.agents.sort_by(|a, b| {
             let root_a = roots.get(&a.id).map_or(a.id.as_str(), String::as_str);
@@ -872,7 +913,11 @@ impl App {
         }
         if msg.is_operator_question() {
             if !self.questions.iter().any(|q| q.id == msg.id) {
-                self.set_status(format!("? {} has a question for you", msg.asker()), false, now);
+                self.set_status(
+                    format!("? {} has a question for you", msg.asker()),
+                    false,
+                    now,
+                );
                 self.questions.push(msg.clone());
             }
         } else if msg.from == OPERATOR_ID && msg.kind == MessageType::Answer {
@@ -1023,7 +1068,9 @@ impl App {
                     if !picker.moved {
                         picker.row = self.start_row(&picker.agent, picker.runtime);
                     }
-                    picker.row = picker.row.min(self.model_rows(picker.runtime).len().saturating_sub(1));
+                    picker.row = picker
+                        .row
+                        .min(self.model_rows(picker.runtime).len().saturating_sub(1));
                     self.modal = Some(Modal::Model(picker));
                 }
             }
@@ -1039,7 +1086,11 @@ impl App {
             return Vec::new();
         };
         if agent.runtime == RuntimeKind::Shell {
-            self.set_status(format!("{id} is a shell agent; it runs no model"), true, now);
+            self.set_status(
+                format!("{id} is a shell agent; it runs no model"),
+                true,
+                now,
+            );
             return Vec::new();
         }
         let runtime = agent.runtime;
@@ -1057,7 +1108,10 @@ impl App {
 
     /// The models of one CLI, in the daemon's order.
     pub fn model_rows(&self, runtime: RuntimeKind) -> Vec<&ModelChoice> {
-        self.models.iter().filter(|m| m.runtime == runtime).collect()
+        self.models
+            .iter()
+            .filter(|m| m.runtime == runtime)
+            .collect()
     }
 
     /// The row of `runtime`'s models that agent `id` runs on now.
@@ -1073,7 +1127,11 @@ impl App {
     /// agent runs on, else on the first that can be launched.
     pub fn start_row(&self, id: &str, runtime: RuntimeKind) -> usize {
         self.current_row(id, runtime)
-            .or_else(|| self.model_rows(runtime).iter().position(|m| m.unavailable.is_none()))
+            .or_else(|| {
+                self.model_rows(runtime)
+                    .iter()
+                    .position(|m| m.unavailable.is_none())
+            })
             .unwrap_or(0)
     }
 
@@ -1209,8 +1267,17 @@ mod tests {
         let question = fixture::question(1_000_000);
         app.apply_push(Push::Message(question.clone()), 5);
         app.apply_push(Push::Message(question.clone()), 6);
-        assert_eq!(app.open_questions().len(), 1, "a repeated push is one question");
-        assert!(app.status.as_ref().unwrap().text.contains("orchestrator, for claude-2 has a question"));
+        assert_eq!(
+            app.open_questions().len(),
+            1,
+            "a repeated push is one question"
+        );
+        assert!(app
+            .status
+            .as_ref()
+            .unwrap()
+            .text
+            .contains("orchestrator, for claude-2 has a question"));
 
         // While the answer is on its way the question is out of view; a
         // failed send brings it back.
@@ -1268,7 +1335,11 @@ mod tests {
         snap.agents[0].model = Some("Opus".into());
         snap.agents[1].model = Some("house-model".into());
         snap.agents[2].model_name = Some("Named By The Daemon".into());
-        let (first, second, third) = (snap.agents[0].id.clone(), snap.agents[1].id.clone(), snap.agents[2].id.clone());
+        let (first, second, third) = (
+            snap.agents[0].id.clone(),
+            snap.agents[1].id.clone(),
+            snap.agents[2].id.clone(),
+        );
         app.apply_snapshot(snap, 1_000_000);
         let label = |app: &App, id: &str| app.agent(id).unwrap().model_label();
         assert_eq!(label(&app, &first).as_deref(), Some("Opus 5.5"));
@@ -1406,20 +1477,40 @@ mod tests {
     #[test]
     fn subagents_attach_to_their_parent() {
         let mut app = loaded();
-        let sub = fixture::subagent("claude-3-s1", "claude-3", "tests", AgentStatus::Working, Some(40), 0);
+        let sub = fixture::subagent(
+            "claude-3-s1",
+            "claude-3",
+            "tests",
+            AgentStatus::Working,
+            Some(40),
+            0,
+        );
         app.apply_push(Push::Agent(Box::new(sub)), 0);
         // Listed right after its parent, which is also the order tab walks.
         let ids: Vec<&str> = app.agents.iter().map(|a| a.id.as_str()).collect();
         assert_eq!(
             ids,
-            ["claude-1", "claude-2", "claude-3", "claude-3-s1", "claude-4", "claude-5", "claude-6", "orchestrator"]
+            [
+                "claude-1",
+                "claude-2",
+                "claude-3",
+                "claude-3-s1",
+                "claude-4",
+                "claude-5",
+                "claude-6",
+                "orchestrator"
+            ]
         );
         assert_eq!(app.top_level().count(), 6, "the ring is unchanged");
         assert_eq!(app.workers().count(), 7);
-        let children: Vec<&str> = app.subagents_of("claude-3").map(|a| a.id.as_str()).collect();
+        let children: Vec<&str> = app
+            .subagents_of("claude-3")
+            .map(|a| a.id.as_str())
+            .collect();
         assert_eq!(children, ["claude-3-s1"]);
         assert_eq!(
-            app.satellite_parent(app.agent("claude-3-s1").unwrap()).map(|a| a.id.as_str()),
+            app.satellite_parent(app.agent("claude-3-s1").unwrap())
+                .map(|a| a.id.as_str()),
             Some("claude-3")
         );
         app.selected = Some("claude-3".into());
@@ -1430,9 +1521,23 @@ mod tests {
 
         // A second subagent sorts after the first; one of the orchestrator's
         // has no box to orbit and joins the ring.
-        let second = fixture::subagent("claude-3-s2", "claude-3", "docs", AgentStatus::Spawning, None, 0);
+        let second = fixture::subagent(
+            "claude-3-s2",
+            "claude-3",
+            "docs",
+            AgentStatus::Spawning,
+            None,
+            0,
+        );
         app.apply_push(Push::Agent(Box::new(second)), 0);
-        let hub_child = fixture::subagent("scout", "orchestrator", "research", AgentStatus::Working, None, 0);
+        let hub_child = fixture::subagent(
+            "scout",
+            "orchestrator",
+            "research",
+            AgentStatus::Working,
+            None,
+            0,
+        );
         app.apply_push(Push::Agent(Box::new(hub_child)), 0);
         assert_eq!(app.subagents_of("claude-3").count(), 2);
         assert_eq!(app.top_level().count(), 7);
@@ -1447,17 +1552,34 @@ mod tests {
 
         // The child goes: its parent is untouched and selection moves on.
         app.selected = Some("claude-3-s1".into());
-        app.apply_push(Push::AgentRemoved { id: "claude-3-s1".into() }, 0);
+        app.apply_push(
+            Push::AgentRemoved {
+                id: "claude-3-s1".into(),
+            },
+            0,
+        );
         assert_eq!(app.subagents_of("claude-3").count(), 0);
         assert_eq!(app.selected.as_deref(), Some("claude-4"));
         assert_eq!(app.top_level().count(), 6);
 
         // The parent goes while a child is still around: the orphan rejoins
         // the ring instead of pointing at a box that no longer exists.
-        let sub = fixture::subagent("claude-3-s1", "claude-3", "tests", AgentStatus::Working, None, 0);
+        let sub = fixture::subagent(
+            "claude-3-s1",
+            "claude-3",
+            "tests",
+            AgentStatus::Working,
+            None,
+            0,
+        );
         app.apply_push(Push::Agent(Box::new(sub)), 0);
         app.selected = Some("claude-3-s1".into());
-        app.apply_push(Push::AgentRemoved { id: "claude-3".into() }, 0);
+        app.apply_push(
+            Push::AgentRemoved {
+                id: "claude-3".into(),
+            },
+            0,
+        );
         assert!(app.agent("claude-3").is_none());
         assert_eq!(app.selected.as_deref(), Some("claude-3-s1"));
         let orphan = app.agent("claude-3-s1").unwrap();
@@ -1465,7 +1587,12 @@ mod tests {
         assert_eq!(app.top_level().count(), 6);
         assert_eq!(app.subagents_of("claude-3").count(), 0);
         // And then the orphan itself.
-        app.apply_push(Push::AgentRemoved { id: "claude-3-s1".into() }, 0);
+        app.apply_push(
+            Push::AgentRemoved {
+                id: "claude-3-s1".into(),
+            },
+            0,
+        );
         assert_eq!(app.top_level().count(), 5);
         assert!(app.selected.is_some());
     }
@@ -1481,7 +1608,11 @@ mod tests {
         for id in ["backend", "db", "tests"] {
             let member = fixture::agent(id, id, AgentStatus::Spawning, None, 0);
             app.apply_push(Push::Agent(Box::new(member)), 0);
-            assert_eq!(app.selected.as_deref(), Some("orchestrator"), "selection is stable");
+            assert_eq!(
+                app.selected.as_deref(),
+                Some("orchestrator"),
+                "selection is stable"
+            );
         }
         assert_eq!(app.top_level().count(), 3);
         app.apply_push(Push::AgentRemoved { id: "db".into() }, 0);
@@ -1546,13 +1677,20 @@ mod tests {
         app.detail.pending = false;
         app.detail.output_at = Some(0);
         // At the live terminal nothing but the screen is asked for.
-        assert_eq!(app.due_commands(2000), vec![Command::FetchOutput { id: "claude-3".into() }]);
+        assert_eq!(
+            app.due_commands(2000),
+            vec![Command::FetchOutput {
+                id: "claude-3".into()
+            }]
+        );
         app.detail.pending = false;
         app.detail.output_at = Some(2000);
 
         // Scrolled up, the transcript is: once, however long it takes.
         app.detail.scroll = 3;
-        let fetch = vec![Command::FetchTranscript { id: "claude-3".into() }];
+        let fetch = vec![Command::FetchTranscript {
+            id: "claude-3".into(),
+        }];
         assert_eq!(app.due_commands(2100), fetch);
         assert!(app.detail.transcript_pending);
         assert!(app.due_commands(2200).is_empty());
@@ -1579,7 +1717,10 @@ mod tests {
         assert_eq!(app.detail.transcript_lines(12).unwrap().len(), 3);
         // It stays as read while the reader is in it.
         assert!(app.due_commands(2400).is_empty());
-        assert!(app.due_commands(60_000).iter().all(|c| !matches!(c, Command::FetchTranscript { .. })));
+        assert!(app
+            .due_commands(60_000)
+            .iter()
+            .all(|c| !matches!(c, Command::FetchTranscript { .. })));
 
         // Back at the terminal and soon up again: what was read is shown.
         app.detail.scroll = 0;

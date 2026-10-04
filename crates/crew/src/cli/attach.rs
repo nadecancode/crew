@@ -91,7 +91,9 @@ pub fn run(socket: &Path, agent: &str) -> Result<()> {
                     }
                 }
                 if writer
-                    .send(Call::AttachInput { data: encode(chunk) })
+                    .send(Call::AttachInput {
+                        data: encode(chunk),
+                    })
                     .is_err()
                 {
                     break;

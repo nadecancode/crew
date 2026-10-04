@@ -76,7 +76,9 @@ impl Daemon {
                 rt.first_model = Some(running.to_string());
             }
         }
-        let Some(intended) = self.intended_model(id) else { return };
+        let Some(intended) = self.intended_model(id) else {
+            return;
+        };
         let Some(agent) = self.agent(id) else { return };
         if short_model(running) == short_model(&intended) {
             // A work style's fallback stays marked until crew moves it back.
@@ -91,7 +93,10 @@ impl Daemon {
                     .agent(id),
                 );
                 let daemon = self.clone();
-                let text = format!("[crew] Agent {id} is back on {}.", model_display_name(&intended));
+                let text = format!(
+                    "[crew] Agent {id} is back on {}.",
+                    model_display_name(&intended)
+                );
                 tokio::spawn(async move { daemon.notify_orchestrator(&text).await });
             }
             return;
@@ -168,7 +173,9 @@ impl Daemon {
     /// session now runs on and nothing was noted yet.
     pub(crate) fn note_switch(&self, id: &str, switch: &ModelSwitch) {
         let Some(agent) = self.agent(id) else { return };
-        let Some(fallback) = &agent.fallback else { return };
+        let Some(fallback) = &agent.fallback else {
+            return;
+        };
         let running = agent.running_model.as_deref().unwrap_or_default();
         if !fallback.note.is_empty() || short_model(&switch.to) != short_model(running) {
             return;
@@ -192,10 +199,17 @@ impl Daemon {
         let quotas = self.model().quotas.clone();
         let mut parts: Vec<String> = Vec::new();
         for runtime in [RuntimeKind::Claude, RuntimeKind::Codex] {
-            for q in quotas.iter().filter(|q| q.runtime == runtime && q.window != "5h") {
+            for q in quotas
+                .iter()
+                .filter(|q| q.runtime == runtime && q.window != "5h")
+            {
                 let mut part = format!(
                     "{}{} {:.0}%",
-                    if runtime == RuntimeKind::Codex { "Codex " } else { "" },
+                    if runtime == RuntimeKind::Codex {
+                        "Codex "
+                    } else {
+                        ""
+                    },
                     window_label(&q.window),
                     q.percent_used.max(0.0)
                 );
@@ -214,8 +228,13 @@ impl Daemon {
     /// it can do about it.
     async fn brief_orchestrator_on_fallback(&self, id: &str) {
         let Some(agent) = self.agent(id) else { return };
-        let Some(fallback) = agent.fallback.clone() else { return };
-        let orchestrator_free = self.model().orchestrator().is_some_and(|o| o.limit.is_none());
+        let Some(fallback) = agent.fallback.clone() else {
+            return;
+        };
+        let orchestrator_free = self
+            .model()
+            .orchestrator()
+            .is_some_and(|o| o.limit.is_none());
         if !orchestrator_free {
             return;
         }
@@ -277,7 +296,9 @@ other model family, say) and task_assign its task there.{usage}",
             .agent(id)
             .ok_or_else(|| RpcError::not_found(format!("no agent '{id}'")))?;
         if agent.runtime == RuntimeKind::Shell {
-            return Err(RpcError::invalid(format!("{id} is a shell agent; it runs no model")));
+            return Err(RpcError::invalid(format!(
+                "{id} is a shell agent; it runs no model"
+            )));
         }
         if runtime == Some(RuntimeKind::Shell) {
             return Err(RpcError::invalid("an agent cannot be moved onto a shell"));
@@ -291,7 +312,8 @@ other model family, say) and task_assign its task there.{usage}",
             ));
         }
         let model = model.trim();
-        let malformed = model.len() > 120 || model.chars().any(|c| c.is_whitespace() || c.is_control());
+        let malformed =
+            model.len() > 120 || model.chars().any(|c| c.is_whitespace() || c.is_control());
         if malformed || (model.is_empty() && runtime.is_none()) {
             return Err(RpcError::invalid("not a model name"));
         }
@@ -331,7 +353,15 @@ agent_add a member for it instead",
                 )));
             }
             return self
-                .move_to_runtime(who, &agent, assigned.runtime, assigned.model, name, note, true)
+                .move_to_runtime(
+                    who,
+                    &agent,
+                    assigned.runtime,
+                    assigned.model,
+                    name,
+                    note,
+                    true,
+                )
                 .await;
         }
         let new = assigned.model;
@@ -373,7 +403,9 @@ agent_add a member for it instead",
                     "{id} moves from {} to {} ({who}){}",
                     shown(before.as_deref()),
                     shown(new.as_deref()),
-                    note.as_deref().map(|n| format!(": {}", crew_core::util::one_line(n))).unwrap_or_default()
+                    note.as_deref()
+                        .map(|n| format!(": {}", crew_core::util::one_line(n)))
+                        .unwrap_or_default()
                 ),
             )
             .agent(id),
@@ -409,7 +441,12 @@ left off; if you were in the middle of a step, check its state before repeating 
         tokio::task::spawn_blocking(move || crate::models::Availability::runtime(runtime))
             .await
             .map_err(internal)?
-            .map_err(|why| RpcError::invalid(format!("cannot move {id} to {}: {why}", crate::models::runtime_label(runtime))))?;
+            .map_err(|why| {
+                RpcError::invalid(format!(
+                    "cannot move {id} to {}: {why}",
+                    crate::models::runtime_label(runtime)
+                ))
+            })?;
         // Read before anything changes.
         let last_words = self
             .agent_transcript(id, 200)
@@ -423,7 +460,10 @@ left off; if you were in the middle of a step, check its state before repeating 
                 None => format!("{cli} on its default model"),
             }
         };
-        let from = describe(agent.runtime, agent.model_name.as_deref().or(agent.model.as_deref()));
+        let from = describe(
+            agent.runtime,
+            agent.model_name.as_deref().or(agent.model.as_deref()),
+        );
         let to = describe(runtime, name.as_deref().or(model.as_deref()));
         let brief = {
             let m = self.model();
@@ -469,7 +509,8 @@ left off; if you were in the middle of a step, check its state before repeating 
                 spec.runtime = Some(runtime);
                 spec.model = model.clone();
                 if let Some(team) = &team {
-                    local.settings = super::supervisor::agent_settings(team, &spec, agent.orchestrator);
+                    local.settings =
+                        super::supervisor::agent_settings(team, &spec, agent.orchestrator);
                 }
                 if persist {
                     local.spec = spec;
@@ -502,7 +543,9 @@ left off; if you were in the middle of a step, check its state before repeating 
                 "agent.runtime_set",
                 format!(
                     "{id} moves from {from} to {to} ({who}), in a fresh session handed the work{}",
-                    note.as_deref().map(|n| format!(": {}", crew_core::util::one_line(n))).unwrap_or_default()
+                    note.as_deref()
+                        .map(|n| format!(": {}", crew_core::util::one_line(n)))
+                        .unwrap_or_default()
                 ),
             )
             .agent(id),

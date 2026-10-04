@@ -85,7 +85,10 @@ impl Daemon {
         let id = id.to_string();
         tokio::spawn(async move {
             if let Err(e) = daemon.restart_agent_with(&id, None).await {
-                tracing::warn!("restarting {id} without the 1M context failed: {}", e.message);
+                tracing::warn!(
+                    "restarting {id} without the 1M context failed: {}",
+                    e.message
+                );
             }
         });
         true
@@ -97,10 +100,9 @@ impl Daemon {
         let reading = ContextUsage::new(tokens, window, now_ms());
         // Codex says nothing when it compacts; its window shrinking does.
         let shrank = agent.runtime == RuntimeKind::Codex
-            && agent
-                .context
-                .as_ref()
-                .is_some_and(|before| before.tokens >= CODEX_DROP_FLOOR && tokens * 2 < before.tokens);
+            && agent.context.as_ref().is_some_and(|before| {
+                before.tokens >= CODEX_DROP_FLOOR && tokens * 2 < before.tokens
+            });
         if shrank {
             self.context_compacted(id).await;
         }
@@ -143,7 +145,11 @@ impl Daemon {
         if !warn {
             return;
         }
-        let figures = format!("{percent}% full ({} of {} tokens)", thousands(tokens), thousands(window));
+        let figures = format!(
+            "{percent}% full ({} of {} tokens)",
+            thousands(tokens),
+            thousands(window)
+        );
         self.emit(
             NewEvent::new(
                 "daemon",
@@ -256,7 +262,12 @@ compacts a teammate's",
         let (keep, sent_at, ready, turn_active) = {
             let mut model = self.model();
             let rt = model.rt(id);
-            (rt.compact_keep.clone(), rt.compact_sent_at, rt.ready, rt.turn_active)
+            (
+                rt.compact_keep.clone(),
+                rt.compact_sent_at,
+                rt.ready,
+                rt.turn_active,
+            )
         };
         if let Some((_, tx)) = self.listener(id) {
             if now - sent_at < SOCKET_RETRY_MS {
@@ -303,7 +314,10 @@ compacts a teammate's",
             NewEvent::new(
                 "daemon",
                 "agent.compact_skipped",
-                format!("{id}'s context was not compacted: {}", truncate_chars(&one_line(why), 200)),
+                format!(
+                    "{id}'s context was not compacted: {}",
+                    truncate_chars(&one_line(why), 200)
+                ),
             )
             .agent(id)
             .warn(),
@@ -385,9 +399,9 @@ still {} on this team.",
                 " Your open task is {} (\"{}\"): task_get(\"{}\") reads its card.",
                 task.id, task.title, task.id
             )),
-            None if agent.orchestrator => {
-                note.push_str(" You are the orchestrator: tasks_list and agents_list show where the plan stands.")
-            }
+            None if agent.orchestrator => note.push_str(
+                " You are the orchestrator: tasks_list and agents_list show where the plan stands.",
+            ),
             None => note.push_str(" You have no open task right now."),
         }
         if let Some(keep) = keep {
@@ -407,7 +421,11 @@ carry on where you left off; if nothing was in progress, there is nothing to do 
     /// What an agent was told, wrote and did: the newest `limit` entries
     /// of the session file its runtime keeps. Empty for an agent that has no
     /// such file (a shell agent, a session that has not started).
-    pub(crate) async fn agent_transcript(&self, id: &str, limit: usize) -> Result<TranscriptResult, RpcError> {
+    pub(crate) async fn agent_transcript(
+        &self,
+        id: &str,
+        limit: usize,
+    ) -> Result<TranscriptResult, RpcError> {
         let (agent, transcript, rollout) = {
             let mut model = self.model();
             let Some(agent) = model.agent(id).cloned() else {
@@ -431,7 +449,9 @@ carry on where you left off; if nothing was in progress, there is nothing to do 
                     .filter(|p| p.is_file())
                     .or_else(|| crate::limits::codex_rollout_path(&session, started)),
                 // The crew extension says where pi keeps the session.
-                RuntimeKind::Pi => transcript.map(std::path::PathBuf::from).filter(|p| p.is_file()),
+                RuntimeKind::Pi => transcript
+                    .map(std::path::PathBuf::from)
+                    .filter(|p| p.is_file()),
                 RuntimeKind::Shell => None,
             }?;
             Some(crate::transcript::read(&path, runtime, limit))
@@ -451,10 +471,17 @@ carry on where you left off; if nothing was in progress, there is nothing to do 
                 if agent.runtime != RuntimeKind::Claude || agent.status.is_terminal() {
                     continue;
                 }
-                let Some(session) = agent.session_id.clone() else { continue };
+                let Some(session) = agent.session_id.clone() else {
+                    continue;
+                };
                 let rt = model.rt(&agent.id);
-                let complete = agent.running_model.is_some() && agent.effort.is_some() && rt.context_reported;
-                let every = if complete { TRANSCRIPT_RECHECK_MS } else { TRANSCRIPT_EVERY_MS };
+                let complete =
+                    agent.running_model.is_some() && agent.effort.is_some() && rt.context_reported;
+                let every = if complete {
+                    TRANSCRIPT_RECHECK_MS
+                } else {
+                    TRANSCRIPT_EVERY_MS
+                };
                 if now - rt.facts_checked_at < every {
                     continue;
                 }
@@ -483,7 +510,9 @@ carry on where you left off; if nothing was in progress, there is nothing to do 
             if let Some(switch) = &facts.switch {
                 self.note_switch(&id, switch);
             }
-            let Some(tokens) = facts.context_tokens else { continue };
+            let Some(tokens) = facts.context_tokens else {
+                continue;
+            };
             // The transcript says how many tokens, not out of how many: the
             // window is the 1M one when crew started the session in it, else
             // whatever was last known (0: not known).
@@ -493,7 +522,10 @@ carry on where you left off; if nothing was in progress, there is nothing to do 
                     continue;
                 }
                 let long = model.local.get(&id).is_some_and(|l| l.long_context);
-                let known = model.agent(&id).and_then(|a| a.context.as_ref()).map_or(0, |c| c.window);
+                let known = model
+                    .agent(&id)
+                    .and_then(|a| a.context.as_ref())
+                    .map_or(0, |c| c.window);
                 // More in the window than the standard one holds: it can
                 // only be the 1M one.
                 if long || tokens > STANDARD_CONTEXT_TOKENS {

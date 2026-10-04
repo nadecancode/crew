@@ -130,7 +130,10 @@ fn agent_cells(app: &App, topo: Rect) -> Vec<(String, Rect)> {
         let mut entries: Vec<&Agent> = Vec::new();
         entries.extend(app.orchestrator());
         entries.extend(app.workers());
-        let selected = entries.iter().position(|a| app.is_selected(&a.id)).unwrap_or(0);
+        let selected = entries
+            .iter()
+            .position(|a| app.is_selected(&a.id))
+            .unwrap_or(0);
         let first = selected.saturating_sub(rows.saturating_sub(1));
         return entries
             .iter()
@@ -147,7 +150,10 @@ fn agent_cells(app: &App, topo: Rect) -> Vec<(String, Rect)> {
     if let Some(orchestrator) = app.orchestrator() {
         cells.push((orchestrator.id.clone(), layout.center));
     }
-    let counts: Vec<usize> = tops.iter().map(|parent| app.subagents_of(&parent.id).count()).collect();
+    let counts: Vec<usize> = tops
+        .iter()
+        .map(|parent| app.subagents_of(&parent.id).count())
+        .collect();
     let satellites = layout::satellites(topo, &layout, &counts);
     for (i, (agent, rect)) in tops.iter().zip(&layout.agents).enumerate() {
         cells.push((agent.id.clone(), *rect));
@@ -179,7 +185,9 @@ pub fn hit(app: &App, area: Rect, x: u16, y: u16) -> Option<Hit> {
             .find(|(_, cell)| cell.contains(at))
             .map(|(id, cell)| {
                 // A box's bottom border carries what it runs on.
-                let runs_a_model = app.agent(&id).is_some_and(|a| a.runtime != RuntimeKind::Shell);
+                let runs_a_model = app
+                    .agent(&id)
+                    .is_some_and(|a| a.runtime != RuntimeKind::Shell);
                 if runs_a_model && cell.height >= 3 && y == cell.bottom() - 1 {
                     Hit::Model(id)
                 } else {
@@ -211,7 +219,9 @@ fn render_topology(buf: &mut Buffer, area: Rect, app: &App, theme: &Theme, now: 
         return;
     };
     let server_now = app.server_now(now);
-    let idle_for = |agent: &Agent| (agent.last_activity_at > 0).then(|| (server_now - agent.last_activity_at).max(0));
+    let idle_for = |agent: &Agent| {
+        (agent.last_activity_at > 0).then(|| (server_now - agent.last_activity_at).max(0))
+    };
     let subs: Vec<Vec<&Agent>> = tops
         .iter()
         .map(|parent| app.subagents_of(&parent.id).collect())
@@ -271,7 +281,11 @@ fn render_topology(buf: &mut Buffer, area: Rect, app: &App, theme: &Theme, now: 
     }
 
     let questions = app.open_questions();
-    let asking = |id: &str| questions.iter().any(|q| q.from == id || q.asked_by() == Some(id));
+    let asking = |id: &str| {
+        questions
+            .iter()
+            .any(|q| q.from == id || q.asked_by() == Some(id))
+    };
     for (i, (agent, rect)) in tops.iter().zip(&topo.agents).enumerate() {
         let hidden = &subs[i][satellites[i].len()..];
         let decor = Decor {
@@ -507,12 +521,17 @@ fn render_compact(
         let waits = if is_hub {
             !questions.is_empty()
         } else {
-            questions.iter().any(|q| q.from == agent.id || q.asked_by() == Some(agent.id.as_str()))
+            questions
+                .iter()
+                .any(|q| q.from == agent.id || q.asked_by() == Some(agent.id.as_str()))
         };
         let (icon, icon_color) = if waits {
             ("?", theme.warn)
         } else {
-            (agent_icon(agent.status, agent.paused, now), theme.state_color(agent))
+            (
+                agent_icon(agent.status, agent.paused, now),
+                theme.state_color(agent),
+            )
         };
         put_str(buf, area, status_x, y, icon, theme.bold(icon_color));
         let tail = if is_hub {
@@ -536,7 +555,11 @@ fn render_compact(
                 work_x,
                 y,
                 &work,
-                if current { theme.fg(theme.text) } else { theme.fg(theme.muted) },
+                if current {
+                    theme.fg(theme.text)
+                } else {
+                    theme.fg(theme.muted)
+                },
             );
             // What it is doing, while it works and room is left.
             let (what, _, tone) = crate::widgets::agent_box::doing(agent, &decor);
@@ -544,7 +567,14 @@ fn render_compact(
             let left = (i32::from(area.right()) - after).max(0) as usize;
             if tone == crate::widgets::agent_box::Tone::Live && left > 6 {
                 put_str(buf, area, after - 2, y, "·", theme.fg(theme.dim));
-                put_str(buf, area, after, y, &fit(&what, left), theme.fg(theme.muted));
+                put_str(
+                    buf,
+                    area,
+                    after,
+                    y,
+                    &fit(&what, left),
+                    theme.fg(theme.muted),
+                );
             }
         }
     }
@@ -701,7 +731,14 @@ fn render_footer(buf: &mut Buffer, area: Rect, app: &App, theme: &Theme, now: i6
 
     if app.stopping {
         let text = "stopping the team: agents first, then the daemon…";
-        put_str(buf, area, x, yi, &fit(text, w), theme.bold(theme.warn).bg(theme.bar_bg));
+        put_str(
+            buf,
+            area,
+            x,
+            yi,
+            &fit(text, w),
+            theme.bold(theme.warn).bg(theme.bar_bg),
+        );
         return;
     }
     if let Some(status) = &app.status {

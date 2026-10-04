@@ -29,15 +29,19 @@ pub fn ctl(cmd: CtlCommand) -> Result<()> {
     client.set_timeout(Some(Duration::from_secs(120)))?;
     let (name, args): (&str, Value) = match cmd {
         CtlCommand::List => ("agents_list", json!({})),
-        CtlCommand::Send { to, body, kind } => {
-            ("agent_send", json!({ "to": to, "body": body, "type": kind }))
-        }
+        CtlCommand::Send { to, body, kind } => (
+            "agent_send",
+            json!({ "to": to, "body": body, "type": kind }),
+        ),
         CtlCommand::Broadcast { body } => ("agent_broadcast", json!({ "body": body })),
         CtlCommand::Inbox { all } => ("agent_inbox", json!({ "all": all })),
-        CtlCommand::Status { status, note } => ("agent_status", json!({ "status": status, "note": note })),
-        CtlCommand::Progress { percent, message } => {
-            ("task_update", json!({ "percent": percent, "message": message }))
+        CtlCommand::Status { status, note } => {
+            ("agent_status", json!({ "status": status, "note": note }))
         }
+        CtlCommand::Progress { percent, message } => (
+            "task_update",
+            json!({ "percent": percent, "message": message }),
+        ),
         CtlCommand::Tasks => ("tasks_list", json!({})),
         CtlCommand::Task { id } => ("task_get", json!({ "id": id })),
         CtlCommand::Done { result } => ("task_complete", json!({ "result": result })),
@@ -47,12 +51,14 @@ pub fn ctl(cmd: CtlCommand) -> Result<()> {
         CtlCommand::GitStatus => ("git_status", json!({})),
         CtlCommand::CherryPick { commit } => ("git_cherry_pick", json!({ "commit": commit })),
         CtlCommand::Merge { agent } => ("git_merge", json!({ "from_agent": agent })),
-        CtlCommand::Spawn { task, role, id } => {
-            ("agent_spawn", json!({ "task": task, "role": role, "id": id }))
-        }
-        CtlCommand::ReviewRequest { agent, artifact } => {
-            ("review_request", json!({ "agent_id": agent, "artifact": artifact }))
-        }
+        CtlCommand::Spawn { task, role, id } => (
+            "agent_spawn",
+            json!({ "task": task, "role": role, "id": id }),
+        ),
+        CtlCommand::ReviewRequest { agent, artifact } => (
+            "review_request",
+            json!({ "agent_id": agent, "artifact": artifact }),
+        ),
         CtlCommand::Review {
             task,
             approve,
