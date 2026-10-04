@@ -1,10 +1,12 @@
 // A WebSocket client in plain node: the test sets Host and Origin itself and
-// sees pushes, replies and the close frame with their arrival times.
+// sees pushes, replies and the close frame with their arrival times. With
+// `ignoreClose` it is a client that does not do as it is told: it keeps its
+// socket and keeps writing after the server said goodbye.
 import { randomBytes } from "node:crypto";
 import { connect } from "node:net";
 
 /** Resolves with null when the upgrade is refused, else a client. */
-export function open(port, host, { origin = `http://${host}`, onPush = () => {}, timeoutMs = 8000 } = {}) {
+export function open(port, host, { origin = `http://${host}`, onPush = () => {}, timeoutMs = 8000, ignoreClose = false } = {}) {
   return new Promise((resolve) => {
     const sock = connect(port, "127.0.0.1");
     sock.setNoDelay(true);
@@ -20,7 +22,7 @@ export function open(port, host, { origin = `http://${host}`, onPush = () => {},
           : (() => { const h = Buffer.alloc(10); h[0] = 0x81; h[1] = 0x80 | 127; h.writeBigUInt64BE(BigInt(payload.length), 2); return h; })();
         const body = Buffer.from(payload);
         for (let i = 0; i < body.length; i++) body[i] ^= mask[i % 4];
-        sock.write(Buffer.concat([head, mask, body]));
+        try { sock.write(Buffer.concat([head, mask, body])); } catch { /* the other end is gone */ }
       },
       call(method, params) {
         const id = next++;
@@ -60,7 +62,7 @@ export function open(port, host, { origin = `http://${host}`, onPush = () => {},
         if (buf.length < off + len) return;
         const opcode = buf[0] & 0x0f, body = buf.subarray(off, off + len);
         buf = buf.subarray(off + len);
-        if (opcode === 8) { client.closed = { code: body.length >= 2 ? body.readUInt16BE(0) : 1005, reason: body.subarray(2).toString() }; closedResolve(client.closed); sock.destroy(); return; }
+        if (opcode === 8) { client.closed = { code: body.length >= 2 ? body.readUInt16BE(0) : 1005, reason: body.subarray(2).toString() }; closedResolve(client.closed); if (!ignoreClose) sock.destroy(); continue; }
         if (opcode !== 1) continue;
         let frame;
         try { frame = JSON.parse(body.toString()); } catch { continue; }
