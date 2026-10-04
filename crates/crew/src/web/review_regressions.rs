@@ -93,13 +93,13 @@ async fn reviewer_stop_reclaims_a_subscriber_blocked_on_its_reply() {
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn reviewer_failed_hello_write_does_not_consume_auth_capacity() {
-    use crate::daemon::server::{Session, Transport};
+    use crate::daemon::server::Session;
     let (_temp, running) = daemon().await;
     let daemon = running.daemon.clone();
     let info = daemon.web.open(&daemon, None).await.unwrap();
     let token = daemon.web.pair(&daemon, &code_of(&info)).unwrap().token;
     let admitted = daemon.web.admit(&daemon).unwrap();
-    let (mut session, frames) = Session::new(&daemon, Transport::Web);
+    let (mut session, frames) = Session::web(&daemon, admitted.lease.clone());
     drop(frames);
     assert!(
         !session
@@ -111,9 +111,9 @@ async fn reviewer_failed_hello_write_does_not_consume_auth_capacity() {
             .await
     );
     // This is ws::run's `request == false` branch: no authenticated(id) call.
-    session.close();
+    drop(session);
     drop(admitted);
-    let authenticated = daemon.web.registry().authenticated;
+    let authenticated = daemon.web.registry().authenticated();
     daemon.web.stop(&daemon, None).await;
     assert_eq!(
         authenticated, 0,
@@ -159,7 +159,7 @@ async fn reviewer_unauthenticated_deadline_survives_backpressure() {
     })
     .await;
     tokio::time::sleep(Duration::from_secs(8)).await;
-    let count = daemon.web.registry().unauthenticated;
+    let count = daemon.web.registry().unauthenticated();
     daemon.web.stop(&daemon, None).await;
     assert_eq!(
         count, 0,

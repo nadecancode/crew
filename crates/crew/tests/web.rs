@@ -1224,3 +1224,15 @@ fn pushes_reach_the_browser_in_time() {
     );
     assert!(median <= 10, "median {median} ms: {sorted:?}");
 }
+
+#[test]
+fn port_zero_is_refused() {
+    let s = start_empty_daemon();
+    let ws_dir = s.workspace.to_string_lossy().into_owned();
+    let out = s.crew(&["web", "--port", "0", "--json", "-C", &ws_dir]);
+    assert!(!out.status.success());
+    assert!(stderr(&out).contains("--port"), "{}", stderr(&out));
+    let reply = Raw::operator(&s).call("web_open", json!({"port": 0}));
+    assert_eq!(reply["error"]["code"], "invalid", "{reply}");
+    assert_eq!(s.snapshot().session.web, "");
+}
