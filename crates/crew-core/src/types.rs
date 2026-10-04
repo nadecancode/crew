@@ -18,6 +18,11 @@ pub const MAX_MESSAGE_BYTES: usize = 64 * 1024;
 /// Hard cap on one protocol frame (one JSON line).
 pub const MAX_FRAME_BYTES: usize = 1024 * 1024;
 
+/// Provider failures/refusals are error-level agent events; their text is
+/// retained in Agent.error as well as the event history.
+pub const AGENT_ERROR_EVENT: &str = "agent.error";
+pub const AGENT_REFUSED_EVENT: &str = "agent.refused";
+
 macro_rules! string_enum {
     ($(#[$meta:meta])* $name:ident { $($variant:ident => $text:literal),+ $(,)? }) => {
         $(#[$meta])*
@@ -276,7 +281,7 @@ pub struct Agent {
     pub paused: bool,
     /// Why the agent is blocked: `permission`, `dialog`, `self`,
     /// `unresponsive`, `usage_limit`, `refused` (its model declined the
-    /// turn's content).
+    /// turn's content), or `provider_error` (the runtime could not finish the turn).
     #[serde(default)]
     pub block_kind: Option<String>,
     /// Set while the agent waits for a usage limit to lift.

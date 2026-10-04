@@ -77,6 +77,50 @@ fn app() -> App {
     app
 }
 
+#[test]
+fn provider_errors_override_stale_activity_and_stay_visible_without_event_history() {
+    use crew_tui::widgets::agent_box::{doing, status_tail, work_line, Decor, Tone};
+    for kind in ["provider_error", "refused"] {
+        let mut snap = fixture::snapshot(NOW);
+        let agent = snap.agents.iter_mut().find(|a| a.id == "claude-1").unwrap();
+        agent.status = AgentStatus::Blocked;
+        agent.block_kind = Some(kind.into());
+        agent.activity = "unresponsive old activity".into();
+        agent.error = Some("DENIED provider message\u{1b}]52;c;bad\u{7}".into());
+        let decor = Decor::default();
+        let (what, _, tone) = doing(agent, &decor);
+        assert!(what.starts_with("DENIED provider message"), "{what}");
+        assert_eq!(tone, Tone::Bad);
+        assert!(
+            !status_tail(agent).contains('%'),
+            "stale progress must not hide the error"
+        );
+        assert!(work_line(agent, &decor).0.starts_with("DENIED"));
+        snap.events.clear();
+        let mut a = App::new();
+        a.apply_snapshot(snap, NOW);
+        for (width, height) in [(42, 24), (120, 40)] {
+            let screen = render_to_string(&a, width, height, NOW);
+            assert!(screen.contains("DEN"), "{screen}");
+            assert!(!screen.contains("unresponsive"), "{screen}");
+            let mut terminal = Terminal::new(TestBackend::new(width, height)).unwrap();
+            terminal
+                .draw(|frame| views::render(frame, &a, &Theme::truecolor(), NOW))
+                .unwrap();
+            assert!(terminal
+                .backend()
+                .buffer()
+                .content()
+                .iter()
+                .all(|cell| !cell.symbol().chars().any(char::is_control)));
+        }
+        a.open_detail("claude-1", NOW);
+        let screen = render_to_string(&a, 120, 40, NOW);
+        assert!(screen.contains("DENIED provider message"), "{screen}");
+        assert!(!screen.contains("unresponsive old activity"), "{screen}");
+    }
+}
+
 /// Geometry queries use the dashboard's area below the persistent warning.
 fn dashboard_area(app: &App, width: u16, height: u16) -> ratatui::layout::Rect {
     let header = u16::from(height > 0 && app.session.sandbox != "required");

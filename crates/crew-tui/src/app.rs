@@ -821,7 +821,21 @@ impl App {
             Push::AgentRemoved { id } => self.remove_agent(&id),
             Push::Task(task) => self.upsert_task(*task),
             Push::Message(msg) => self.add_message(msg, now),
-            Push::Event(event) => self.add_event(event),
+            Push::Event(event) => {
+                let fresh = self
+                    .events
+                    .back()
+                    .is_none_or(|last| event.seq == 0 || event.seq > last.seq);
+                if fresh
+                    && matches!(
+                        event.event_type.as_str(),
+                        crew_core::AGENT_ERROR_EVENT | crew_core::AGENT_REFUSED_EVENT
+                    )
+                {
+                    self.set_notice(event.message.clone(), now);
+                }
+                self.add_event(event);
+            }
             Push::Session(session) => self.session = *session,
             Push::Shutdown => {
                 self.daemon_stopped = true;
@@ -1280,6 +1294,31 @@ mod tests {
         let mut app = App::new();
         app.apply_snapshot(fixture::snapshot(1_000_000), 1_000_000);
         app
+    }
+
+    #[test]
+    fn provider_error_events_are_visible_errors_without_an_unresponsive_diagnosis() {
+        let mut app = loaded();
+        for kind in ["agent.error", "agent.refused"] {
+            let event = fixture::event(
+                10_000,
+                crew_core::EventLevel::Error,
+                "daemon",
+                kind,
+                Some("claude-1"),
+                "claude-1: provider refused this turn",
+                1_000_000,
+            );
+            app.apply_push(Push::Event(event), 1_000_000);
+            let status = app
+                .status
+                .as_ref()
+                .expect("provider error must be visible on the dashboard");
+            assert!(status.is_error);
+            assert!(status.text.contains("provider refused"));
+            assert!(!status.text.contains("unresponsive"));
+            app.events.clear();
+        }
     }
 
     #[test]

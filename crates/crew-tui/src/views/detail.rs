@@ -255,7 +255,7 @@ fn info_lines(app: &App, agent: &Agent, theme: &Theme, now: i64) -> Vec<Line<'st
         text,
         theme,
     ));
-    if !agent.activity.is_empty() {
+    if !agent.activity.is_empty() && crate::widgets::agent_box::provider_error(agent).is_none() {
         lines.push(field("activity", one_line(&agent.activity), text, theme));
     }
     // The runtime, the model (as named in the team, else as the session

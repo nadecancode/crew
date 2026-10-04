@@ -24,6 +24,14 @@ pub fn progress_of(agent: &Agent) -> Option<u8> {
 
 /// `◐  51%` when progress is known, `○ waiting` otherwise.
 pub fn status_tail(agent: &Agent) -> String {
+    if provider_error(agent).is_some() {
+        return if agent.block_kind.as_deref() == Some("refused") {
+            "refused"
+        } else {
+            "error"
+        }
+        .into();
+    }
     match progress_of(agent) {
         Some(p) => format!("{p:>3}%"),
         None if agent.paused => "paused".to_string(),
@@ -34,12 +42,39 @@ pub fn status_tail(agent: &Agent) -> String {
 fn border_style(agent: &Agent, selected: bool, theme: &Theme) -> Style {
     if selected {
         theme.bold(theme.text)
+    } else if provider_error(agent).is_some() {
+        theme.fg(theme.err)
     } else {
         match agent.status {
             AgentStatus::Failed => theme.fg(theme.err),
             AgentStatus::Blocked => theme.fg(theme.warn),
             _ => theme.fg(theme.dim),
         }
+    }
+}
+
+/// A provider-blocked turn is an error, even if old activity/progress is
+/// still present. Missing text in an older snapshot keeps a clear diagnosis.
+pub(crate) fn provider_error(agent: &Agent) -> Option<&str> {
+    if agent.status == AgentStatus::Blocked
+        && matches!(
+            agent.block_kind.as_deref(),
+            Some("refused" | "provider_error")
+        )
+    {
+        Some(
+            agent
+                .error
+                .as_deref()
+                .filter(|s| !s.trim().is_empty())
+                .unwrap_or(if agent.block_kind.as_deref() == Some("refused") {
+                    "provider refused the turn"
+                } else {
+                    "provider error"
+                }),
+        )
+    } else {
+        None
     }
 }
 
@@ -348,6 +383,9 @@ pub enum Tone {
 /// tool it is running (the runtimes report each call) and how long it has
 /// been on its task; else its state and how long it has been in it.
 pub fn doing(agent: &Agent, decor: &Decor<'_>) -> (String, String, Tone) {
+    if let Some(error) = provider_error(agent) {
+        return (one_line(error), String::new(), Tone::Bad);
+    }
     let elapsed = |ms: Option<i64>| ms.map(fmt_elapsed).unwrap_or_default();
     let under_way = decor.work.filter(|w| !w.done).and_then(|w| w.elapsed);
     if agent.paused {
@@ -398,6 +436,9 @@ pub fn doing(agent: &Agent, decor: &Decor<'_>) -> (String, String, Tone) {
 /// What the first row of a box says: the task the agent is on, or the one it
 /// finished last, else its role; and whether that is current.
 pub fn work_line<'a>(agent: &'a Agent, decor: &Decor<'a>) -> (&'a str, bool) {
+    if let Some(error) = provider_error(agent) {
+        return (error, false);
+    }
     match (decor.work, agent.task.as_deref()) {
         (Some(work), _) => (work.title, !work.done),
         (None, Some(task)) => (task, true),

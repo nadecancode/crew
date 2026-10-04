@@ -144,6 +144,9 @@ impl Theme {
 
     /// The colour of an agent's state; at work it shows its runtime's.
     pub fn state_color(&self, agent: &Agent) -> Color {
+        if crate::widgets::agent_box::provider_error(agent).is_some() {
+            return self.err;
+        }
         match agent.status {
             AgentStatus::Working => self.runtime_color(agent.runtime),
             status => self.agent_color(status),

@@ -741,6 +741,38 @@ mod compatibility_tests {
         }
     }
 
+    #[test]
+    fn provider_events_and_legacy_agents_keep_the_snapshot_wire_shape() {
+        let mut wire = json!({
+            "session":{"workspace":"/ws", "state_dir":"/ws/.crew", "daemon_started_at":0,
+                "daemon_pid":1, "version":"old"},
+            "agents":[{"id":"a", "name":"a", "role":"worker", "status":"blocked",
+                "runtime":"shell", "workdir":"/ws", "backend":"pty", "last_activity_at":0}],
+            "tasks":[], "messages":[], "events":[], "server_time":0,
+        });
+        let old: Snapshot = serde_json::from_value(wire.clone()).unwrap();
+        assert_eq!(old.agents[0].error, None);
+        assert_eq!(old.agents[0].block_kind, None);
+        for (event_type, block_kind) in [
+            (crate::AGENT_ERROR_EVENT, "provider_error"),
+            (crate::AGENT_REFUSED_EVENT, "refused"),
+        ] {
+            wire["agents"][0]["block_kind"] = json!(block_kind);
+            wire["agents"][0]["error"] = json!("provider said: rate limit");
+            wire["events"] = json!([{"seq":1, "timestamp":0, "source":"daemon",
+                "event_type":event_type, "agent_id":"a", "message":"provider said: rate limit",
+                "level":"error"}]);
+            let snapshot: Snapshot = serde_json::from_value(wire.clone()).unwrap();
+            assert_eq!(snapshot.events[0].event_type, event_type);
+            assert_eq!(snapshot.events[0].level, EventLevel::Error);
+            assert_eq!(
+                snapshot.agents[0].error.as_deref(),
+                Some("provider said: rate limit")
+            );
+            assert_eq!(snapshot.agents[0].block_kind.as_deref(), Some(block_kind));
+        }
+    }
+
     fn enum_values<T: Serialize>(values: &[T]) -> Value {
         serde_json::to_value(values).unwrap()
     }
