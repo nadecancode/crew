@@ -1,6 +1,6 @@
 // §multi-perf against real daemons and the real server (notes/web-multi.md §multi-tests "Live"):
 // P17 a switch, P18 a question in a workspace that is not on screen, P19 an idle page with five
-// joined workspaces, P20 the server's memory. Prints a report; fails when a limit is exceeded.
+// joined workspaces, P20 the server's memory and idle wake-ups. Prints a report; fails when a limit is exceeded.
 // Timing limits scale with CREW_PERF_SCALE, counts never do.
 import { readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
@@ -162,7 +162,7 @@ test("P19: an idle page with five joined workspaces makes no index traffic", asy
   await ctx.close();
 });
 
-test("P20: the server with five joined workspaces and three sessions, idle: memory, and wake-ups only at its tick and its pings", async ({ daemon: A, sibling }) => {
+test("P20: the server with five joined workspaces and three sessions, idle: memory, and wake-ups only for its tick, pings and timer wheel", async ({ daemon: A, sibling }) => {
   test.setTimeout(240_000);
   const others = ["beta", "gamma", "delta", "epsilon"].map((n) => sibling(n));
   A.start();

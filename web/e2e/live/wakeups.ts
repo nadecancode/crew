@@ -1,10 +1,10 @@
 // What the dashboard server may do while nothing happens (notes/web-multi.md §multi-perf P20): wake
-// at its 5 s housekeeping tick and when it sends a WebSocket ping, and at no other time. A recorder
+// at its 5 s housekeeping tick, when it sends a WebSocket ping, and for the runtime's timer wheel. A recorder
 // samples the sum of the server threads' voluntary context switches every 20 ms; a wake-up is a run of
 // samples in which it moved. The pings are seen directly, at the clients' end: every wake-up must be on
-// the tick's lattice (period 5 s, phase found from the data) or at a ping the test's own connections
-// received. Anything else is polling, at whatever period; `wakeups.spec.ts` proves that on synthetic
-// schedules.
+// the tick's lattice (period 5 s, phase found from the data), at a ping the test's own connections
+// received, or on the wheel's 4096 ms lattice. `wakeups.spec.ts` checks synthetic polling schedules;
+// a poll exactly in phase with an allowed schedule needs the server's frozen-clock test to detect it.
 
 export const SAMPLE_MS = 20;
 /** Samples this close are one wake-up. */
@@ -14,14 +14,14 @@ export const MAX_SPAN_MS = 300;
 export const TICK_MS = 5000;
 /** How far from its schedule a wake-up may fall and still be the tick's. */
 export const TICK_TOLERANCE_MS = 300;
-/** A ping is seen at the client some microseconds after the server woke for it; the sampler
- * sees the switch up to one sample late. */
 /** tokio's timer wheel keeps a timer further off than 4 s in a slot of 4096 ms and the runtime wakes at the
  * slot's start to move it down (tokio 1.53, time/wheel: level 2). A pending 20 s ping or a 5 s tick is such a timer,
  * so the runtime itself wakes on a lattice of 4096 ms whose phase is the process's own. These wake-ups are
  * counted apart, bounded (one per slot) and reported; polling is not on that lattice except by chance at that very period. */
 export const WHEEL_MS = 4096;
 export const WHEEL_TOLERANCE_MS = 40;
+/** A ping is seen at the client some microseconds after the server woke for it; the sampler
+ * sees the switch up to one sample late. The earlier window includes the wheel's 64 ms step. */
 export const PING_BEFORE_MS = 120;
 export const PING_AFTER_MS = 40;
 
