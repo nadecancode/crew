@@ -375,7 +375,7 @@ echo more > "$WT/a/more.txt"; commit a "a: continued under jj" >/dev/null
 eq "$(git rev-parse agents/a~1)" "$G1" "jj continues the git branch"
 
 # ================================================= moving a workspace jj -> git
-# §decisions D2 "Back to git": the team is stopped and a jj workspace still has
+# §decisions D2 "Back to git" (hidden layout): the team is stopped and a jj workspace still has
 # uncommitted work. By hand, with plain jj (no pins but the ones the steps give).
 hand() { JJ_USER=u JJ_EMAIL=u@example.com "$JJ" --no-pager --color never --quiet "$@"; }
 BIG='snapshot.max-new-file-size="1TiB"'
@@ -402,11 +402,6 @@ eq "$(git -C .crew/worktrees/a rev-parse HEAD)" "$SAVED" "git worktree is at the
 [ -f .crew/worktrees/a/dirty.txt ] && [ -f .crew/worktrees/a/more.txt ] && [ -f .crew/worktrees/a/wa.txt ] || fail "saved work missing from the git worktree"
 eq "$(wc -c < .crew/worktrees/a/big.bin)" 1500000 "the large file was saved"
 eq "$(git -C .crew/worktrees/a status --porcelain)" "" "git worktree is clean"
-# jj's keep refs stay behind in git; this removes them
-git for-each-ref --format='delete %(refname)' refs/jj/ | git update-ref --stdin
-eq "$(git for-each-ref refs/jj/ | wc -l)" 0 "keep refs removed"
-git fsck --connectivity-only >/dev/null 2>&1 || fail "repository damaged"
-eq "$(git rev-parse agents/a)" "$SAVED" "branch after cleanup"
 
 # ================================================================ native layout
 NS=$T/native; mkdir -p "$NS"; cd "$NS"
