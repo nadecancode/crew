@@ -561,7 +561,9 @@ impl Hub {
                             w.task.abort();
                         }
                         match self.daemons.check(&info) {
-                            Ok(()) => Some((info, m.generation)),
+                            Ok(()) => {
+                                Some((info, m.generation, m.gauge.hold(), m.revoked.subscribe()))
+                            }
                             Err(why) => {
                                 m.stop_retry();
                                 changed |= m.set(WorkspaceState::Unreachable, why);
@@ -576,12 +578,22 @@ impl Hub {
             }
             dial
         };
-        let Some((info, generation)) = dial else {
+        // The dial counts for its generation (a removal waits for it) and
+        // ends when the generation is revoked: nothing it would still say
+        // reaches the daemon after the removal answered.
+        let Some((info, generation, guard, mut revoked)) = dial else {
             return;
         };
-        let dialled = self.watch_dial(&info).await;
+        let dialled = tokio::select! {
+            biased;
+            _ = revoked.wait_for(|r| *r) => return,
+            dialled = self.watch_dial(&info) => dialled,
+        };
         let mut t = self.table();
         let epoch = t.epochs + 1;
+        if t.closed || *revoked.borrow() {
+            return;
+        }
         let Some(m) = t.member(id).filter(|m| m.generation == generation) else {
             return;
         };
@@ -595,7 +607,7 @@ impl Hub {
                     self.clone(),
                     id.to_string(),
                     epoch,
-                    m.gauge.hold(),
+                    guard,
                     dialled,
                     out_rx,
                 ));
@@ -874,6 +886,7 @@ async fn call(dialled: &mut Dialled, id: u64, c: Call) -> Result<ServerFrame, St
             .ok_or_else(|| "it closed the connection".to_string())?;
         let frame: ServerFrame =
             serde_json::from_slice(&buf).map_err(|_| "it sent something else".to_string())?;
+        buf.clear();
         if frame.id == Some(id) {
             return Ok(frame);
         }
@@ -897,7 +910,9 @@ async fn watching(
                 if line.is_none() {
                     break;
                 }
-                let Ok(frame) = serde_json::from_slice::<ServerFrame>(&buf) else { continue };
+                let frame = serde_json::from_slice::<ServerFrame>(&buf);
+                buf.clear();
+                let Ok(frame) = frame else { continue };
                 if let Some(Push::Summary(summary)) = frame.push {
                     hub.apply_summary(&id, epoch, summary);
                 }

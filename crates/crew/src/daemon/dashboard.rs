@@ -43,6 +43,9 @@ pub(crate) struct Summaries {
     /// only when a message to or from the operator went by).
     questions_dirty: AtomicBool,
     questions: Mutex<u32>,
+    /// One refresh at a time, from its capture to its publication: a
+    /// capture is never published after a later one.
+    refresh: Mutex<()>,
     /// Wakes the task; shared with it, which holds the daemon only weakly.
     wake: Arc<Notify>,
     /// The task that recomputes it, started by the first watcher.
@@ -51,6 +54,10 @@ pub(crate) struct Summaries {
     /// watcher: the gap that registering first closes.
     #[cfg(test)]
     pub(crate) capture_first: Mutex<Option<Duration>>,
+    /// Hold one captured summary before publication to exercise concurrent
+    /// refreshes, without changing the state either refresh captured.
+    #[cfg(test)]
+    publish_hold: Mutex<Option<(std::sync::mpsc::Sender<()>, std::sync::mpsc::Receiver<()>)>>,
 }
 
 impl Default for Summaries {
@@ -60,10 +67,13 @@ impl Default for Summaries {
             dirty: AtomicBool::new(true),
             questions_dirty: AtomicBool::new(true),
             questions: Mutex::new(0),
+            refresh: Mutex::new(()),
             wake: Arc::new(Notify::new()),
             task: OnceLock::new(),
             #[cfg(test)]
             capture_first: Mutex::new(None),
+            #[cfg(test)]
+            publish_hold: Mutex::new(None),
         }
     }
 }
@@ -111,6 +121,7 @@ impl Daemon {
     /// case), and publish it with a new `rev` if it differs.
     fn refresh_summary(&self, force: bool) {
         let summaries = &self.summaries;
+        let _one_at_a_time = summaries.refresh.lock().unwrap_or_else(|e| e.into_inner());
         if !summaries.dirty.swap(false, Ordering::SeqCst) && !force {
             return;
         }
@@ -154,6 +165,14 @@ impl Daemon {
                     .count() as u32,
             }
         };
+        #[cfg(test)]
+        {
+            let hold = summaries.publish_hold.lock().unwrap().take();
+            if let Some((captured, resume)) = hold {
+                captured.send(()).unwrap();
+                resume.recv_timeout(Duration::from_secs(5)).unwrap();
+            }
+        }
         summaries.tx.send_if_modified(|current| {
             let same = WorkspaceSummary {
                 rev: current.rev,

@@ -158,7 +158,8 @@ fn replace_server() -> Result<Option<Vec<String>>> {
         // SAFETY: a signal to the process `web.json` names, which is_live
         // checked by its start time and boot.
         unsafe { libc::kill(old.pid as libc::pid_t, libc::SIGTERM) };
-        println!(
+        // Not on stdout: `--json` prints only the address there.
+        eprintln!(
             "note       the server it replaces spoke protocol {}: its workspaces are shown again with \
 `crew web` in each, or `crew web --all`",
             old.protocol
@@ -187,14 +188,18 @@ pub fn web(
 ) -> Result<()> {
     // Before anything else: an agent never gets a pairing code.
     crew_core::client::refuse_in_agent_context()?;
+    // A restart carries the memberships of a server of this protocol over,
+    // stopped ones included: then the daemon it was run in need not run.
+    let carried = restart && live_server().is_some_and(|old| old.protocol == PROTOCOL_VERSION);
     let state_dir = match how {
         // The daemon it was run for must run, and speak this protocol.
-        WebJoin::This => {
-            let (_, info) = target.connect("cli")?;
-            Some(info.state_dir)
-        }
+        WebJoin::This => match target.connect("cli") {
+            Ok((_, info)) => Some(info.state_dir),
+            Err(_) if carried => None,
+            Err(e) => return Err(e),
+        },
         WebJoin::All => {
-            if paths::list_sessions().is_empty() {
+            if !carried && paths::list_sessions().is_empty() {
                 bail!(
                     "no crew session is running (start one with `crew run`); nothing was started"
                 );
@@ -253,7 +258,13 @@ fn state_dir_of(target: &Target) -> Result<PathBuf> {
             .with_context(|| format!("resolving {}", dir.display()))?;
         return Ok(paths::state_dir(&dir));
     }
-    if let Ok(info) = paths::discover(None, target.project.as_deref()) {
+    // A project named is that project's, or an error: never the directory
+    // this was run in.
+    if let Some(project) = target.project.as_deref() {
+        let info = paths::discover(None, Some(project))?;
+        return Ok(PathBuf::from(info.state_dir));
+    }
+    if let Ok(info) = paths::discover(None, None) {
         if !info.state_dir.is_empty() {
             return Ok(PathBuf::from(info.state_dir));
         }
