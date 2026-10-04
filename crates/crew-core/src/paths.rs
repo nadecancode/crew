@@ -506,6 +506,13 @@ fn session_hash(state_dir: &Path) -> u64 {
     fnv1a64(state_dir.to_string_lossy().as_bytes())
 }
 
+/// The first loopback port the web dashboard of this workspace tries:
+/// `23000 + (h mod 1000)`, with `h` the hash that names the socket. The same
+/// workspace gets the same number, below the kernel's ephemeral range.
+pub fn web_port(state_dir: &Path) -> u16 {
+    23000 + (session_hash(state_dir) % 1000) as u16
+}
+
 /// Registry of running daemons, so `crew attach` works from any directory.
 pub fn registry_dir() -> PathBuf {
     let base = match std::env::var_os("XDG_STATE_HOME") {
@@ -1256,6 +1263,20 @@ mod tests {
         assert_eq!(a, b);
         assert_ne!(a, c);
         assert!(a.to_string_lossy().len() < 100, "{}", a.display());
+    }
+
+    #[test]
+    fn the_web_port_is_stable_and_below_the_ephemeral_range() {
+        let a = Path::new("/some/workspace/.crew");
+        assert_eq!(web_port(a), web_port(a));
+        assert_eq!(web_port(a), 23000 + (session_hash(a) % 1000) as u16);
+        for dir in [
+            "/a/.crew",
+            "/b/.crew",
+            "/some/very/long/workspace/path/.crew",
+        ] {
+            assert!((23000..24000).contains(&web_port(Path::new(dir))));
+        }
     }
 
     #[test]

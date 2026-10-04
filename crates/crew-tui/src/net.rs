@@ -604,6 +604,7 @@ mod tests {
                         version: "test".into(),
                         protocol,
                         pid: 1,
+                        web_proof: None,
                     })
                     .unwrap(),
                 ),

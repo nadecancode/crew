@@ -132,6 +132,7 @@ change identity",
                 version: VERSION.to_string(),
                 protocol: PROTOCOL_VERSION,
                 pid: std::process::id(),
+                web_proof: None,
             };
             debug_assert!(matches!(
                 (&who, hello.role),
@@ -544,6 +545,16 @@ change identity",
                     .await
                     .map_err(internal)?;
                 Ok(Value::Null)
+            }
+
+            Call::WebOpen { .. }
+            | Call::WebClose
+            | Call::WebPair { .. }
+            | Call::WebPrefs { .. } => {
+                operator_only(&who)?;
+                Err(RpcError::unavailable(
+                    "the web dashboard is not implemented yet",
+                ))
             }
         }
     }
