@@ -136,6 +136,8 @@ pub fn resume(target: &Target, agents: Vec<String>, restart: bool) -> Result<()>
 /// A usage figure older than this is said to be old.
 const STALE_QUOTA_MS: i64 = 20 * 60_000;
 
+/// The usage part of `crew status`: how much of each account's windows is
+/// spent, and who is paused at a limit.
 fn usage_lines(snapshot: &Snapshot) -> Vec<String> {
     let now = snapshot.server_time;
     let mut lines = Vec::new();

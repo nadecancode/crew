@@ -13,8 +13,6 @@ use super::super::{attach as raw_attach, AgentCommand, TaskCommand};
 use super::Target;
 use crate::mcp::tools::{render_agents, render_tasks};
 
-/// The usage part of `crew status`: how much of each account's windows is
-/// spent, and who is paused at a limit.
 /// A session transcript as plain text: each prompt under a rule with its
 /// time, replies as written, tool calls one to a line.
 fn transcript_text(transcript: &TranscriptResult) -> String {
