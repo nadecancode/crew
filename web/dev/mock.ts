@@ -135,6 +135,8 @@ export interface MockConn {
   readonly authenticated: boolean;
   /** After `hello`: null for the index, else the workspace's id. */
   readonly workspace: string | null | undefined;
+  /** Text messages sent to the browser on it. */
+  readonly sent: number;
   /** Receives the pushes of `mock.push` (after `subscribe` was answered). */
   readonly subscribed: boolean;
   /** The agent whose terminal this connection carries (after `attach`). */
@@ -407,6 +409,7 @@ class Connection implements MockConn {
   workspace: string | null | undefined = undefined;
   /** Its workspace's generation was revoked: nothing is forwarded any more. */
   revoked = false;
+  sent = 0;
   subscribed = false;
   attached: string | null = null;
   /** Run once the answer to the current request was written: how
@@ -454,7 +457,9 @@ class Connection implements MockConn {
   }
 
   send(frame: unknown): void {
-    if (this.open) this.#socket.write(encodeFrame(OP_TEXT, Buffer.from(JSON.stringify(frame))));
+    if (!this.open) return;
+    this.sent++;
+    this.#socket.write(encodeFrame(OP_TEXT, Buffer.from(JSON.stringify(frame))));
   }
 
   push(push: Push | PushFrame): void {

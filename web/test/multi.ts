@@ -40,9 +40,11 @@ export function listing(rev: number, joined: WorkspaceEntry[], others: Workspace
   return { rev, joined, others };
 }
 
-/** The index connection's socket (its hello names no workspace). */
-export const indexSocket = () => [...FakeSocket.all].reverse().find((s) => s.sent.length === 0 || s.workspace === undefined)!;
-/** The newest socket for workspace `id`; with `opened`, only one that sent its hello. */
+/** The index connection's socket: the newest whose hello named no
+ * workspace, else the first (it has not said hello yet). */
+export const indexSocket = () =>
+  [...FakeSocket.all].reverse().find((s) => s.sent.some((r) => r.method === "hello") && s.workspace === undefined) ?? FakeSocket.all[0];
+/** The sockets whose hello named workspace `id`. */
 export const workspaceSockets = (id: string) => FakeSocket.all.filter((s) => s.workspace === id);
 export const newest = () => FakeSocket.all[FakeSocket.all.length - 1];
 

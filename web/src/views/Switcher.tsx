@@ -14,7 +14,7 @@
 // another.
 
 import { For, Show, createMemo, createSignal, onCleanup, onMount } from "solid-js";
-import { useApp, workspaceName } from "../app";
+import { otherCounts, shownName, useApp, workspaceName } from "../app";
 import type { OtherSession, WorkspaceEntry } from "../protocol";
 
 /** A directory as the operator reads it: their home as `~`. */
@@ -38,12 +38,9 @@ function rowState(e: WorkspaceEntry): string {
 export function SwitcherButton() {
   const app = useApp();
   const { page } = app;
-  const name = () => {
-    const e = page.hub.entry(app.link.id);
-    return app.store.state.session?.project ?? (e ? workspaceName(e) : app.link.id === null ? "no workspace" : "not in this dashboard");
-  };
-  const questions = () => page.others().reduce((n, e) => n + (e.summary?.questions ?? 0), 0);
-  const attention = () => page.others().reduce((n, e) => n + (e.summary?.attention ?? 0), 0);
+  const name = () => shownName(app) ?? (app.link.id === null ? "no workspace" : "not in this dashboard");
+  const questions = () => otherCounts(page).questions;
+  const attention = () => otherCounts(page).attention;
   let button!: HTMLButtonElement;
   return (
     <span class="switcher">
@@ -168,8 +165,8 @@ function SwitcherList(props: { close(refocus: boolean): void }) {
             >
               <span class={`ws-dot ws-${r.entry.state}`}>{DOT[r.entry.state]}</span>
               <span class="ws-name">{workspaceName(r.entry)}</span>
-              <span class="ws-dir mono">{homeDir(r.entry.workspace)}</span>
-              <span class="ws-state">{rowState(r.entry)}</span>
+              <span class="ws-dir mono" title={r.entry.workspace}>{homeDir(r.entry.workspace)}</span>
+              <span class="ws-state" title={rowState(r.entry)}>{rowState(r.entry)}</span>
               <span class="ws-tasks mono">
                 <Show when={r.entry.state === "running" && r.entry.summary}>tasks {r.entry.summary!.tasks_done}/{r.entry.summary!.tasks}</Show>
               </span>

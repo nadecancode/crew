@@ -159,6 +159,8 @@ export function createDashboardPrefs(call: Caller, timers: Timers = window) {
     /** A workspace's `keys` and `panel` from before: taken for what the
      * server's file does not hold yet, once. */
     adopt(old: { keys?: boolean; panel?: number | null }): void {
+      // Unread, the server's file is unknown: nothing is written over it.
+      if (!kept.loaded) return;
       const keys = old.keys !== undefined && !kept.had("keys");
       const panel = old.panel !== undefined && old.panel !== null && !kept.had("panel");
       if (!keys && !panel) return;
@@ -166,7 +168,8 @@ export function createDashboardPrefs(call: Caller, timers: Timers = window) {
     },
     setKeys: (on: boolean) => kept.update((x) => ({ ...x, keys: on })),
     setPanel: (px: number | null) => kept.update((x) => ({ ...x, panel: px })),
-    setLast: (id: string) => kept.prefs.last !== id && kept.update((x) => ({ ...x, last: id })),
+    /** Written by the page itself, so only over what was read. */
+    setLast: (id: string) => kept.loaded && kept.prefs.last !== id && kept.update((x) => ({ ...x, last: id })),
   };
 }
 

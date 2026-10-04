@@ -79,6 +79,10 @@ describe("each key does its action on the selected agent", () => {
     press(app, ops, "?");
     expect(ui.dialog()).toEqual({ kind: "help" });
     ui.closeDialog();
+    // w opens the workspace switcher.
+    press(app, ops, "w");
+    expect(app.page.switcher()).toBe(true);
+    app.page.setSwitcher(false);
     // Nothing selected yet: the TUI's word for it.
     press(app, ops, "p");
     expect(ui.status()?.text).toBe("no agent selected");

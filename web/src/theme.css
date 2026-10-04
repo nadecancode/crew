@@ -73,7 +73,8 @@ ul, ol { margin: 0; padding-left: 18px; }
 
 /* Page */
 .page { display: flex; flex-direction: column; height: 100%; }
-.page.readonly .page-body, .page.readonly .usage-strip, .page.readonly .question-banner, .page.readonly .message-box { opacity: 0.55; }
+.page.readonly.loaded .page-body, .page.readonly .usage-strip, .page.readonly .question-banner, .page.readonly .message-box { opacity: 0.55; }
+.ws-text { color: var(--muted); } .ws-text b { color: var(--text); }
 .status-bar {
   display: flex; align-items: center; gap: 12px; padding: 5px 12px; background: var(--bar-bg); border-bottom: 1px solid var(--line);
   white-space: nowrap; min-height: 34px;
@@ -83,10 +84,12 @@ ul, ol { margin: 0; padding-left: 18px; }
 .switcher .project { font-weight: 600; border-color: transparent; background: none; padding: 1px 6px; }
 .badge { font: 11px var(--mono); padding: 0 5px; border: 1px solid; border-radius: 8px; }
 .badge.q { color: var(--orch); } .badge.att { color: var(--err); }
-.switcher-pop { position: absolute; top: calc(100% + 6px); left: 0; z-index: 40; min-width: 560px; max-width: calc(100vw - 24px); background: var(--panel); border: 1px solid var(--line); border-radius: 6px; padding: 4px; box-shadow: 0 6px 24px #0008; }
+.switcher-pop { position: absolute; top: calc(100% + 6px); left: 0; z-index: 40; min-width: 680px; max-width: calc(100vw - 24px); background: var(--panel); border: 1px solid var(--line); border-radius: 6px; padding: 4px; box-shadow: 0 6px 24px #0008; }
 .switcher-list:focus-visible { outline: none; }
-.switcher-row { display: grid; grid-template-columns: 14px minmax(70px, auto) minmax(90px, 1fr) auto auto auto 16px; gap: 10px; align-items: center; padding: 3px 8px; border-radius: 4px; cursor: pointer; white-space: nowrap; }
-.switcher-row.other { cursor: default; grid-template-columns: 14px minmax(70px, auto) minmax(90px, 1fr) auto auto; }
+.switcher-row { display: grid; grid-template-columns: 14px 130px 170px 1fr auto auto 20px; gap: 10px; align-items: center; padding: 3px 8px; border-radius: 4px; cursor: pointer; white-space: nowrap; }
+.switcher-row > :not(kbd) { overflow: hidden; text-overflow: ellipsis; }
+.switcher-row.other { cursor: default; grid-template-columns: 14px 130px 170px 1fr auto; }
+.ws-state { text-align: right; }
 .switcher-row.active { background: var(--node-hi); outline: 1px solid var(--dim); }
 .switcher-row[aria-current] .ws-name { color: var(--orch); }
 .switcher-row.dimmed { color: var(--muted); }

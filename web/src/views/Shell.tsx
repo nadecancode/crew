@@ -11,7 +11,7 @@
 // a bar that says why.
 
 import { For, Match, Show, Switch, createEffect, createMemo, createSignal, on, onCleanup, onMount, type JSX } from "solid-js";
-import { AppContext, useApp, workspaceName, type Page } from "../app";
+import { AppContext, pageTitle, useApp, workspaceName, type Page } from "../app";
 import { useSecond } from "../clock";
 import { clockTime, fmtElapsed, runtimeGlyph } from "../format";
 import { AgentGraph } from "../graph/AgentGraph";
@@ -61,13 +61,7 @@ export function Shell() {
 
   // The page title: `<project> · crew`, with the questions waiting in any
   // joined workspace in front: `(3) payments · crew`.
-  createEffect(() => {
-    const here = app.store.state.loaded ? app.store.openQuestions().length : app.page.hub.entry(app.link.id)?.summary?.questions ?? 0;
-    const n = here + app.page.others().reduce((k, e) => k + (e.summary?.questions ?? 0), 0);
-    const entry = app.page.hub.entry(app.link.id);
-    const project = app.store.state.session?.project ?? (entry ? workspaceName(entry) : null);
-    document.title = `${n > 0 ? `(${n}) ` : ""}${project ? `${project} · ` : ""}crew`;
-  });
+  createEffect(() => (document.title = pageTitle(app)));
 
   // A dialog does not outlive the workspace it was opened for.
   createEffect(on(link.shown, (s) => s === "removed" && ui.closeDialog()));
@@ -112,7 +106,7 @@ export function Shell() {
           <div class="page-body" classList={{ full: ui.panelFull() }}>
             <main id="main" class="main" data-region="main" aria-label="main area">
               <Switch>
-                <Match when={!app.store.state.loaded}><Empty><WorkspaceText /></Empty></Match>
+                <Match when={!app.store.state.loaded}><Empty><div class="ws-text"><WorkspaceText /></div></Empty></Match>
                 <Match when={ui.view() === "graph"}><AgentGraph /></Match>
                 <Match when={ui.view() === "tasks"}><TaskDag /></Match>
                 <Match when={ui.view() === "logs"}><Logs /></Match>
@@ -213,7 +207,7 @@ function WorkspaceBar() {
 function ConnBar() {
   const { link } = useApp();
   return (
-    <Show when={!link.live()}>
+    <Show when={link.conn() !== "live"}>
       <div class="conn-bar" classList={{ stopped: link.conn() === "stopped" || link.conn() === "signed-out" }} role="status">
         <Show when={link.conn() === "stopped" || link.conn() === "signed-out"} fallback={<p>reconnecting… what you see is what the dashboard last knew; nothing can be sent until the server answers.</p>}>
           <StopText />
@@ -247,7 +241,7 @@ function StatusBar() {
       <Show when={s()?.objective}><span class="objective" title={s()!.objective}>{s()!.objective}</span></Show>
       <span class="spacer" />
       <Show when={elapsed()}><span class="muted" title="how long the team has been running">{elapsed()}</span></Show>
-      <span title="tasks done / all">tasks <b>{done()}/{store.state.tasks.length}</b></span>
+      <Show when={store.state.loaded}><span title="tasks done / all">tasks <b>{done()}/{store.state.tasks.length}</b></span></Show>
       <Show when={s()?.vcs}><span class="vcs" title={s()!.vcs_note || `agents work with ${s()!.vcs}`} classList={{ warn: !!s()!.vcs_note }}>{s()!.vcs}</span></Show>
       <Show when={s()?.sandbox}><span classList={{ warn: s()!.sandbox !== "required" }}>{s()!.sandbox === "required" ? "sandbox" : "no sandbox"}</span></Show>
       <nav class="views" aria-label="views">
@@ -339,11 +333,12 @@ function QuestionBanner() {
 }
 
 const HINTS: Record<string, string> = {
-  main: "arrows walk the agents · enter inspector · m message · / command · t tasks · l logs · v usage · + - 0 zoom · ? keys",
+  main: "arrows walk the agents · enter inspector · m message · / command · t tasks · l logs · v usage · w workspaces · + - 0 zoom · ? keys",
   panel: "esc closes · tab moves through the panel · f fills the main area · d diff · i prompt · r refresh",
   compose: "enter sends · shift-enter new line · tab completes a command · esc leaves the box",
   terminal: "keys go to the agent · ctrl-] gives the keyboard back",
-  status: "tab moves on to the graph · ? keys and commands",
+  status: "tab moves on to the graph · w switches workspace · ? keys and commands",
+  switcher: "arrows move · enter switches · 1–9 directly · typing filters · esc closes",
   usage: "u continue now · U restart on the current login",
   questions: "a answers · 1–6 pick a suggested answer in the dialog",
 };

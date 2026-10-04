@@ -170,7 +170,12 @@ export function createPage(env: Env, session: Session, terminal: Promise<Termina
   }
 
   hub.onLive(() => {
-    if (chosen) return;
+    if (chosen) {
+      // The workspace on screen is the one last on screen.
+      const id = app().link.id;
+      if (id !== null && hub.entry(id)) hub.prefs.setLast(id);
+      return;
+    }
     chosen = true;
     const id = choose();
     // The address keeps its view and selection; only the workspace is added.
@@ -421,6 +426,32 @@ export function createApp(page: Page, id: string | null, place: Place) {
 }
 
 export type App = ReturnType<typeof createApp>;
+
+/** Questions waiting and agents needing attention in the joined workspaces
+ * not on screen: the switcher's badges. */
+export function otherCounts(page: Page): { questions: number; attention: number } {
+  let questions = 0, attention = 0;
+  for (const e of page.others()) {
+    questions += e.summary?.questions ?? 0;
+    attention += e.summary?.attention ?? 0;
+  }
+  return { questions, attention };
+}
+
+/** The workspace's name on screen: its team's, else the listing's. */
+export function shownName(app: App): string | null {
+  const e = app.page.hub.entry(app.link.id);
+  return app.store.state.session?.project ?? (e ? workspaceName(e) : null);
+}
+
+/** The document's title: `<project> · crew`, with the questions waiting in
+ * any joined workspace in front, `(3) payments · crew`. */
+export function pageTitle(app: App): string {
+  const here = app.store.state.loaded ? app.store.openQuestions().length : app.page.hub.entry(app.link.id)?.summary?.questions ?? 0;
+  const n = here + otherCounts(app.page).questions;
+  const project = shownName(app);
+  return `${n > 0 ? `(${n}) ` : ""}${project ? `${project} · ` : ""}crew`;
+}
 
 export const AppContext = createContext<App>();
 
