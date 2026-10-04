@@ -19,7 +19,7 @@ const BUILTIN_INDEX: &str = "<!doctype html>
 <body>
 <h1>crew</h1>
 <p>The web dashboard is not part of this build of crew.</p>
-<p>Build it with <code>just web-build</code> and build crew again, or keep using <code>crew attach</code>.</p>
+<p>Build it with <code>cd web &amp;&amp; bun run build</code> and build crew again, or keep using <code>crew attach</code>.</p>
 </body>
 </html>
 ";

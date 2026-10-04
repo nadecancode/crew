@@ -187,8 +187,8 @@ answers: `crew answer 2`.")]
     /// Serve the dashboard in the browser and open it (a one-time pairing
     /// address; Chromium-based browsers and Firefox)
     Web {
-        /// Serve on exactly this port
-        #[arg(long)]
+        /// Serve on exactly this port (1-65535)
+        #[arg(long, value_parser = clap::value_parser!(u16).range(1..))]
         port: Option<u16>,
         /// Print the address without opening the browser
         #[arg(long)]

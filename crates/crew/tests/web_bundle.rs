@@ -136,7 +136,7 @@ fn the_bundle_is_what_its_manifest_and_sources_say() {
     if !manifest.exists() {
         assert!(
             !dist.join("index.html").exists(),
-            "web-dist/ has a bundle but no manifest.json: run `just web-build`"
+            "web-dist/ has a bundle but no manifest.json: run `cd web && bun run build`"
         );
         let index = String::from_utf8(served_index()).unwrap();
         assert!(
@@ -187,7 +187,7 @@ fn the_bundle_is_what_its_manifest_and_sources_say() {
     assert_eq!(
         manifest["source"],
         source_fingerprint(&web),
-        "web-dist/ was built from other sources than web/: run `just web-build` and commit \
+        "web-dist/ was built from other sources than web/: run `cd web && bun run build` and commit \
 the bundle"
     );
 
