@@ -8,6 +8,8 @@ use crew_core::{RuntimeKind, ORCHESTRATOR_ID};
 use super::Daemon;
 use crate::agents::AgentSettings;
 
+#[cfg(test)]
+mod binary_tests;
 mod control;
 mod creation;
 mod dialogs;

@@ -1261,6 +1261,7 @@
       "server_time": 1760000000000,
       "session": {
         "backend": "herdr",
+        "binary_warning": "",
         "completed_at": null,
         "daemon_pid": 4000,
         "daemon_started_at": 1759999240000,

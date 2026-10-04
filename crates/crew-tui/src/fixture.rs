@@ -400,6 +400,7 @@ pub fn snapshot(now: i64) -> Snapshot {
             vcs_note: String::new(),
             web: String::new(),
             socket_warning: String::new(),
+            binary_warning: String::new(),
             daemon_started_at: now - 760_000,
             team_started_at: Some(now - 754_000),
             completed_at: None,

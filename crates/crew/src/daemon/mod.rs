@@ -25,6 +25,7 @@ use crate::message_bus::{LocalBus, MessageBus, NewMessage, SendOutcome};
 use crate::persistence::{NewEvent, SqliteStore, Store};
 use crate::process::{PaneMeta, ProcEvent, ProcessManager};
 
+pub(crate) mod binary;
 mod context;
 mod dashboard;
 mod delivery;
@@ -85,6 +86,11 @@ pub(crate) struct AgentLocal {
     /// still its own.
     #[serde(default)]
     pub launch: Option<String>,
+    /// The copy of the crew binary it was launched with (`crew-<id>`,
+    /// daemon::binary): kept across daemon restarts, so a process launched
+    /// with another build's is not adopted.
+    #[serde(default)]
+    pub binary: Option<String>,
     pub tasks_completed: u32,
     /// The account refused the model's 1M-token context variant; it is
     /// not asked for again.
@@ -258,8 +264,14 @@ impl Drop for IdReservation {
 pub struct DaemonOptions {
     /// Directory the team works in; state lives in `<workspace>/.crew`.
     pub workspace: PathBuf,
-    /// Path of the crew binary handed to agents (MCP bridge, hooks).
+    /// Path of the crew binary handed to agents (MCP bridge, hooks), unless
+    /// `pin` replaces it.
     pub crew_bin: PathBuf,
+    /// The running crew binary (`/proc/self/exe`) when the crew binary is
+    /// becoming a daemon: a copy of it is kept in `<state>/bin` and handed
+    /// out instead of `crew_bin` (daemon::binary). An in-process daemon (a
+    /// test) has none and hands out `crew_bin`.
+    pub pin: Option<PathBuf>,
 }
 
 /// Shared daemon state. Public only because `Daemon` derefs to it; every
@@ -270,7 +282,9 @@ pub struct Inner {
     pub(crate) socket: PathBuf,
     /// Computed once from the socket this daemon binds.
     socket_warning: String,
+    /// What agents are handed as the crew binary: `binary`'s path.
     pub(crate) crew_bin: PathBuf,
+    pub(crate) binary: binary::Binary,
     pub(crate) store: Arc<dyn Store>,
     pub(crate) bus: Arc<dyn MessageBus>,
     pub(crate) push: broadcast::Sender<Push>,
@@ -627,6 +641,7 @@ impl Daemon {
             vcs_note: s.vcs_note.clone(),
             web: self.watched.url().unwrap_or_default(),
             socket_warning: self.socket_warning.clone(),
+            binary_warning: self.binary.warning().unwrap_or_default(),
             daemon_started_at: self.started_at,
             team_started_at: s.team_started_at,
             completed_at: s.completed_at,
@@ -898,6 +913,12 @@ pub async fn start(options: DaemonOptions) -> Result<Running> {
             );
         }
     }
+    // The crew binary agents are handed: a copy of the running one, kept
+    // under the workspace lock, when the crew binary is becoming a daemon.
+    let binary = match options.pin {
+        Some(running) => binary::Binary::pin(&state_dir, &running, options.crew_bin),
+        None => binary::Binary::given(options.crew_bin),
+    };
     // A new operator token for every start that wins the lock, written before
     // the socket is bound: a client never finds a socket without its token.
     let token = crew_core::util::new_token();
@@ -943,7 +964,8 @@ pub async fn start(options: DaemonOptions) -> Result<Running> {
         state_dir: state_dir.clone(),
         socket: socket.clone(),
         socket_warning,
-        crew_bin: options.crew_bin,
+        crew_bin: binary.path().to_path_buf(),
+        binary,
         store,
         bus,
         push,
@@ -999,6 +1021,9 @@ pub async fn start(options: DaemonOptions) -> Result<Running> {
     if !daemon.socket_warning.is_empty() {
         daemon
             .emit(NewEvent::new("daemon", "daemon.socket_fallback", &daemon.socket_warning).warn());
+    }
+    if let Some(warning) = daemon.binary.warning() {
+        daemon.emit(NewEvent::new("daemon", "daemon.unpinned", warning).warn());
     }
     Ok(Running {
         daemon,
@@ -1058,7 +1083,10 @@ impl Running {
             })
         };
 
-        daemon.recover().await;
+        if daemon.recover().await {
+            // Nothing runs another build's copy of crew now.
+            daemon.sweep_binaries();
+        }
 
         let accept_task = {
             let daemon = daemon.clone();
@@ -1105,6 +1133,7 @@ mod tests {
         let running = start(DaemonOptions {
             workspace: temp.path().to_path_buf(),
             crew_bin: std::env::current_exe().unwrap(),
+            pin: None,
         })
         .await
         .unwrap();
@@ -1169,6 +1198,7 @@ mod tests {
         let running = start(DaemonOptions {
             workspace: temp.path().to_path_buf(),
             crew_bin: std::env::current_exe().unwrap(),
+            pin: None,
         })
         .await
         .unwrap();
@@ -1221,6 +1251,7 @@ mod tests {
         let running = start(DaemonOptions {
             workspace: temp.path().to_path_buf(),
             crew_bin: std::env::current_exe().unwrap(),
+            pin: None,
         })
         .await
         .unwrap();
@@ -1298,6 +1329,7 @@ mod tests {
             .block_on(start(DaemonOptions {
                 workspace,
                 crew_bin: std::env::current_exe().unwrap(),
+                pin: None,
             }))
             .unwrap();
         let info = serde_json::to_value(running.daemon.session_info()).unwrap();
@@ -1384,6 +1416,7 @@ mod tests {
             .block_on(start(DaemonOptions {
                 workspace,
                 crew_bin: std::env::current_exe().unwrap(),
+                pin: None,
             }))
             .unwrap();
         let reported =

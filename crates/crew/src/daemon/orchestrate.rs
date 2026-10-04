@@ -1462,6 +1462,7 @@ mod review_tests {
         let mut running = super::super::start(super::super::DaemonOptions {
             workspace: temp.path().to_path_buf(),
             crew_bin: std::env::current_exe().unwrap(),
+            pin: None,
         })
         .await
         .unwrap();

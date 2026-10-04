@@ -13,6 +13,7 @@
     "vcs_note": "",
     "web": "",
     "socket_warning": "",
+    "binary_warning": "",
     "daemon_started_at": 1759999240000,
     "team_started_at": 1759999246000,
     "completed_at": null,
