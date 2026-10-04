@@ -31,12 +31,22 @@ const inspected = (app: App) => {
   return s?.kind === "agent" ? s.id : null;
 };
 
-/** Hand a key to the main view's list or graph, focusing it first. */
+/** Hand a key to the main view's list or graph, focusing it first. The
+ * forwarded event reaches the page's handler again on its way up: it is
+ * cancelable, so the list's preventDefault ends it there, and a forwarded key
+ * is never forwarded twice. */
+let forwarding = false;
 function toMain(key: string): void {
+  if (forwarding) return;
   const target = document.querySelector<HTMLElement>("#main .vlist, #main [data-task][tabindex='0']");
   if (!target) return;
   target.focus();
-  target.dispatchEvent(new KeyboardEvent("keydown", { key, bubbles: true }));
+  forwarding = true;
+  try {
+    target.dispatchEvent(new KeyboardEvent("keydown", { key, bubbles: true, cancelable: true }));
+  } finally {
+    forwarding = false;
+  }
 }
 
 export const KEYS: KeyDef[] = [

@@ -157,10 +157,11 @@ export function createApp(env: Env, session: Session, terminal: Promise<Terminal
   }
 
   async function answer(id: string, body: string): Promise<boolean> {
+    // The question is hidden from the call on: once answered it stays hidden
+    // until the operator's answer message (or a snapshot without it) removes it.
     store.setAnswering(id, true);
     try {
       await link.call("answer", { id, body });
-      store.setAnswering(id, false);
       ui.setStatus("✓ answer sent");
       return true;
     } catch (e) {

@@ -7,7 +7,7 @@
     "mock": "node dev/serve.ts",
     "build": "tsc --noEmit && vite build && node scripts/stamp.ts",
     "test": "vitest run",
-    "e2e": "playwright test"
+    "e2e": "playwright test --project=mock --project=perf"
   },
   "dependencies": {
     "@xterm/addon-fit": "^0.11.0",

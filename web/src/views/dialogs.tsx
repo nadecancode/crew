@@ -2,7 +2,7 @@
 // with `esc`, and give focus back to where it was. A confirmation names what
 // will happen and to whom; focus starts on "cancel".
 
-import { For, Match, Show, Switch, createMemo, createResource, createSignal, onMount, type JSX } from "solid-js";
+import { For, Match, Show, Switch, createEffect, createMemo, createResource, createSignal, on, onMount, type JSX } from "solid-js";
 import { useApp } from "../app";
 import { COMMANDS, DECLINED, usage } from "../commands";
 import { fmtElapsed, runtimeLabel } from "../format";
@@ -13,13 +13,20 @@ import type { Confirm } from "../ui";
 
 const FOCUSABLE = "button:not([disabled]), [href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex='-1'])";
 
-/** A modal dialog: focus stays inside; esc closes. */
-export function Modal(props: { title: string; label?: string; class?: string; onClose(): void; children: JSX.Element; initial?: string }) {
+/** A modal dialog: focus stays inside; esc closes. `refocus` names what
+ * redraws the dialog's controls: when it changes and the focused control went
+ * with the redraw, focus goes back to the first one. */
+export function Modal(props: { title: string; label?: string; class?: string; onClose(): void; children: JSX.Element; initial?: string; refocus?: () => unknown }) {
   let box!: HTMLDivElement;
-  onMount(() => {
-    const first = (props.initial && box.querySelector<HTMLElement>(props.initial)) || box.querySelector<HTMLElement>(FOCUSABLE);
-    (first ?? box).focus();
-  });
+  const focusFirst = () => {
+    const wanted = props.initial ? [...box.querySelectorAll<HTMLElement>(props.initial)].find((el) => !(el as HTMLButtonElement).disabled) : undefined;
+    (wanted ?? box.querySelector<HTMLElement>(FOCUSABLE) ?? box).focus();
+  };
+  onMount(focusFirst);
+  createEffect(on(() => props.refocus?.(), () => queueMicrotask(() => {
+    const at = document.activeElement;
+    if (box.isConnected && (at === box || !box.contains(at))) focusFirst();
+  }), { defer: true }));
   const onKey = (e: KeyboardEvent) => {
     if (e.key === "Escape") {
       e.preventDefault();
@@ -66,6 +73,8 @@ function QuestionDialog(props: { id: string }) {
   const index = () => open().findIndex((x) => x.id === props.id);
   const [own, setOwn] = createSignal("");
   const [sending, setSending] = createSignal(false);
+  // Another question: its own answer starts empty.
+  createEffect(on(() => props.id, () => setOwn(""), { defer: true }));
   const send = async (body: string) => {
     const question = q();
     if (!question || !body.trim() || sending()) return;
@@ -95,7 +104,7 @@ function QuestionDialog(props: { id: string }) {
     ui.updateDialog({ kind: "question", id: next.id });
   };
   return (
-    <Modal title={open().length > 1 ? `question ${index() + 1} of ${open().length}` : "question"} label="question" class="question-dialog" onClose={() => ui.closeDialog()} initial=".options button, textarea">
+    <Modal title={open().length > 1 ? `question ${index() + 1} of ${open().length}` : "question"} label="question" class="question-dialog" onClose={() => ui.closeDialog()} initial=".options button, textarea" refocus={() => [props.id, open().length, sending(), link.live()]}>
       <Show when={q()} fallback={<><p>This question has been answered.</p><div class="dialog-actions"><button onClick={() => ui.closeDialog()}>close</button></div></>}>
         {(question) => (
           <div onKeyDown={onKey}>

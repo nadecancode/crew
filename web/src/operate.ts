@@ -57,8 +57,10 @@ export function operations(app: App) {
     },
     focusPane(id = ui.selected()) {
       if (!id) return noSelection();
-      if (store.state.session?.backend !== "herdr") {
-        ui.setStatus("g jumps to a herdr pane; this session uses the pty backend: the terminal tab shows it", true);
+      // Each agent runs on a backend of its own, as the inspector's button checks.
+      const backend = store.agent(id)?.backend ?? store.state.session?.backend;
+      if (backend !== "herdr") {
+        ui.setStatus(`g jumps to a herdr pane; ${id} runs on the ${backend || "pty"} backend: the terminal tab shows it`, true);
         return;
       }
       void actions.focus(id);
