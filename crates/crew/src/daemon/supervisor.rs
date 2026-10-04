@@ -2001,7 +2001,13 @@ defaults.auto_trust: true in the team file.",
                 t.note = None;
             });
         }
-        self.requeue_if_sessionless(id).await;
+        if start == Start::Fresh {
+            // Its session is left whatever the old one reported last (its
+            // stop hook while it was killed may have confirmed it again).
+            self.requeue_forgotten_work(id).await;
+        } else {
+            self.requeue_if_sessionless(id).await;
+        }
         self.update_agent(id, |a| {
             a.status = AgentStatus::Spawning;
             a.error = None;
