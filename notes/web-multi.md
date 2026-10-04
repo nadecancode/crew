@@ -67,6 +67,11 @@ Both are replayed in the spike: the page's rules as a model in
 `measure.mjs`, in revision 2's version ("revision 2, reproduced") and in
 this one; a connection that holds on, and a browser that does not read.
 
+**Approved** by the reviewer through revision 3 (m-362ebcc3d2e6, commit
+d4bb9043; `review/web-multi-design-final.md`). The spike is a prototype: the
+tests of §multi-tests, the forced end of a removal and the slow reader among
+them, are gates for the implementation.
+
 **Verification.** What was uncertain was tried against two real daemons
 (built from main, protocol 5) with a prototype of the shared server:
 `notes/multi-spike/run.sh` replays it and prints `PASS` (node 24.19.0).
