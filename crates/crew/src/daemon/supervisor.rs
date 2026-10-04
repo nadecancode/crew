@@ -338,8 +338,26 @@ impl Daemon {
 
     /// Start (or restart) an agent's process; `since` is Daemon::stops when
     /// the start was asked for. A stop asked for after that makes it give up
-    /// at its next step, taking down what it had started.
+    /// at its next step, taking down what it had started; what goes wrong
+    /// after the stop is not the agent's failure (the stop has made it
+    /// Stopped), so it is not returned.
     pub(crate) async fn spawn_agent(
+        &self,
+        id: &str,
+        resume: bool,
+        notice: Option<String>,
+        since: u64,
+    ) -> Result<()> {
+        match self.start_agent(id, resume, notice, since).await {
+            Err(e) if self.stops(id) != since => {
+                tracing::info!("{id}: a start given up for a stop ended in: {e:#}");
+                Ok(())
+            }
+            started => started,
+        }
+    }
+
+    async fn start_agent(
         &self,
         id: &str,
         resume: bool,
@@ -352,6 +370,11 @@ impl Daemon {
         // nothing running and seed its home while the other's sandboxes
         // start, nor write it beside a helper's sandbox.
         let launch = self.launch_lease(id).write_owned().await;
+        // Stopped while it waited for its turn: a launch after the stop may
+        // be running, and retiring would take it for this one's predecessor.
+        if stopped() {
+            return Ok(());
+        }
         let procs = self.procs().map_err(|e| anyhow!(e.message))?;
         // Before anything of the agent's writable tree is touched (even made):
         // nothing of its previous sandboxes may be left (D2).

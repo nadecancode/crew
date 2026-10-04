@@ -7589,6 +7589,64 @@ fn an_agent_killed_while_it_starts_stays_stopped() {
 }
 
 #[test]
+fn an_agent_killed_while_it_starts_stays_stopped_when_the_start_then_fails() {
+    let s = Session::new();
+    // A `codex` whose app-server says it was asked for, waits for the gate,
+    // and then exits without opening its socket: the start fails.
+    let bin = s.root().join("bin");
+    std::fs::create_dir_all(&bin).unwrap();
+    let (asked, gate) = (s.root().join("asked"), s.root().join("gate"));
+    write_program(
+        &bin.join("codex"),
+        &format!(
+            "#!/bin/sh\nif [ \"$1\" = app-server ]; then : > '{}'; while [ ! -e '{}' ]; do sleep 0.05; done; exit 1; fi\nexec '{CREW}' fake-cli codex \"$@\"\n",
+            asked.display(),
+            gate.display()
+        ),
+    );
+    let team = s.team(
+        "kill-then-fail",
+        vec![AgentSpec {
+            id: "x".into(),
+            role: "implementation".into(),
+            runtime: Some(RuntimeKind::Codex),
+            ..AgentSpec::default()
+        }],
+        vec![],
+    );
+    std::fs::write(s.root().join("team.yaml"), team.to_yaml().unwrap()).unwrap();
+    let mut path = vec![bin.clone()];
+    path.extend(std::env::split_paths(&std::env::var_os("PATH").unwrap()));
+    let out = s
+        .command()
+        .env("PATH", std::env::join_paths(path).unwrap())
+        .args(["run", "team.yaml", "--no-attach"])
+        .output()
+        .unwrap();
+    assert!(out.status.success(), "{}", stderr(&out));
+    s.wait_for("the app-server to be asked for", || asked.exists());
+    s.agent_cmd(&["kill", "x"]);
+    s.wait("x to be stopped", |snap| {
+        find_agent(snap, "x").status == AgentStatus::Stopped
+    });
+    // The start fails now that the app-server exits: the operator stopped
+    // the agent, so it stays stopped, not failed.
+    std::fs::write(&gate, "").unwrap();
+    let until = std::time::Instant::now() + std::time::Duration::from_secs(3);
+    let mut x = find_agent(&s.snapshot(), "x").clone();
+    while x.status == AgentStatus::Stopped && std::time::Instant::now() < until {
+        std::thread::sleep(std::time::Duration::from_millis(50));
+        x = find_agent(&s.snapshot(), "x").clone();
+    }
+    s.stop();
+    assert_eq!(
+        (x.status, x.error),
+        (AgentStatus::Stopped, None),
+        "the stopped agent was marked failed by its start"
+    );
+}
+
+#[test]
 fn a_fresh_restart_starts_a_new_session_instead_of_resuming_the_old_one() {
     let s = Session::new();
     // A `codex` that notes, for every session it is started with, the

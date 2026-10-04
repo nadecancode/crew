@@ -1256,4 +1256,71 @@ mod tests {
         assert!(!agent_dir.join("rw").exists(), "its writable tree was made");
         assert_eq!(std::fs::read_dir(&agent_dir).unwrap().count(), 2);
     }
+
+    #[tokio::test]
+    async fn a_start_that_a_stop_overtook_leaves_the_launch_after_it_alone() {
+        let temp = tempfile::tempdir().unwrap();
+        let running = super::super::start(super::super::DaemonOptions {
+            workspace: temp.path().to_path_buf(),
+            crew_bin: std::env::current_exe().unwrap(),
+        })
+        .await
+        .unwrap();
+        let daemon = running.daemon.clone();
+        let mut team = crew_core::config::TeamConfig::from_yaml(
+            "project: overtaken\nobjective: overtaken\nagents:\n  - id: a\n    role: work\n",
+        )
+        .unwrap();
+        team.workspace.sandbox.mode = crew_core::config::SandboxMode::Required;
+        daemon.model().session.team = Some(team);
+        let agent: crew_core::Agent = serde_json::from_value(serde_json::json!({
+            "id": "a", "name": "a", "role": "work", "status": "stopped", "runtime": "shell",
+            "workdir": temp.path().to_str().unwrap(), "backend": "pty", "last_activity_at": 0
+        }))
+        .unwrap();
+        daemon.model().agents.push(agent);
+        *daemon.procs.write().unwrap() = Some(Arc::new(crate::process::pty::PtyManager::new(
+            daemon.proc_tx.clone(),
+        )));
+        // A start is asked for; before it gets its turn the operator stops
+        // the agent, and the launch after that is up first: its sidecar runs
+        // and its sandbox is in the ledger, not yet reported gone.
+        let overtaken = daemon.stops("a");
+        daemon.kill_agent("a").await.unwrap();
+        let sidecar = tokio::process::Command::new("sleep")
+            .arg("300")
+            .kill_on_drop(true)
+            .spawn()
+            .unwrap();
+        let pid = sidecar.id().unwrap();
+        daemon.sidecars.lock().unwrap().insert(
+            "a".into(),
+            crate::daemon::SidecarProc {
+                child: sidecar,
+                socket: temp.path().join("sidecar.sock"),
+                env: Vec::new(),
+            },
+        );
+        daemon
+            .ledger
+            .start("a", "sidecar")
+            .unwrap()
+            .update(|r| r.pid = Some(pid));
+
+        let started = daemon.spawn_agent("a", false, None, overtaken).await;
+        let sidecar_runs = daemon
+            .sidecars
+            .lock()
+            .unwrap()
+            .get_mut("a")
+            .is_some_and(|s| matches!(s.child.try_wait(), Ok(None)));
+        assert!(
+            sidecar_runs,
+            "a start a stop overtook stopped the next launch's sidecar"
+        );
+        assert!(
+            started.is_ok(),
+            "a start a stop overtook went on to the next launch's sandboxes: {started:?}"
+        );
+    }
 }
