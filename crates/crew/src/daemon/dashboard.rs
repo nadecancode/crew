@@ -202,6 +202,12 @@ impl Daemon {
                     // Nobody watches: it stays dirty, for whoever asks next.
                     if daemon.summaries.tx.receiver_count() > 0 {
                         daemon.refresh_summary(false);
+                        drop(daemon);
+                        // Changes in the meantime are folded into the next
+                        // computation: no watcher gets more than one push per
+                        // `SUMMARY_EVERY`, so computing more often is waste
+                        // (a busy team pushes thousands of changes a second).
+                        tokio::time::sleep(SUMMARY_EVERY).await;
                     }
                 }
             });
