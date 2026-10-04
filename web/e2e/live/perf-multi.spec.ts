@@ -2,10 +2,12 @@
 // P17 a switch, P18 a question in a workspace that is not on screen, P19 an idle page with five
 // joined workspaces, P20 the server's memory. Prints a report; fails when a limit is exceeded.
 // Timing limits scale with CREW_PERF_SCALE, counts never do.
-import { readFileSync } from "node:fs";
+import { readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import type { Page } from "@playwright/test";
 import { CREW_BIN, expect, test, teamYaml } from "./harness.ts";
+import type { Daemon } from "./harness.ts";
+import { signedIn } from "./rawws.mjs";
 
 const SCALE = Number(process.env.CREW_PERF_SCALE ?? 1);
 const report: Record<string, unknown> = {};
@@ -27,8 +29,23 @@ test("P17: a switch, from enter in the switcher to the other workspace's first f
   const B = sibling("beta");
   A.start(teamYaml(A.ws, A.vcs, 4, { project: A.project }));
   B.start(teamYaml(B.ws, B.vcs, 4, { project: "beta" }));
-  // History for each: real messages, so the snapshot is not empty.
-  for (let i = 0; i < 40; i++) (A.send(i % 2 ? "echo" : "idle", `history ${i}`), B.send(i % 2 ? "echo" : "idle", `history ${i}`));
+  // History for each, as the budget names it: 300 messages and 1000 events in each snapshot.
+  const history = async (d: Daemon) => {
+    const info = d.web();
+    const label = new URL(info.url).host;
+    const op = (await signedIn(info.port, label, `http://${label}`, new URLSearchParams(new URL(info.pair_url).hash.slice(1)).get("pair")!, 6, info.workspace)) as unknown as { send(m: string, p: object): number; replies: number; errors: number };
+    const r0 = op.replies;
+    for (let i = 0; i < 330; i++) op.send("send", { to: ["idle", "echo", "w1", "w2", "w3", "w4"][i % 6], type: "message", body: `history ${i}`, id: `w-hist-${i}` });
+    while (op.replies - r0 < 330) await new Promise((r) => setTimeout(r, 50));
+    expect(op.errors).toBe(0);
+    const messages = (JSON.parse(d.c(["messages", "--json", "-n", "500"])) as unknown[]).length;
+    let events = 0;
+    d.until(`${d.project}: 1000 events`, () => ((events = Math.max(...d.events().map((e) => e.seq))), events >= 1000), 60_000);
+    expect(messages, `${d.project}: messages in the snapshot`).toBeGreaterThanOrEqual(300);
+    expect(events, `${d.project}: events in the snapshot`).toBeGreaterThanOrEqual(1000);
+    return { messages: Math.min(messages, 300), events: Math.min(events, 1000) };
+  };
+  const occupancy = { [A.project]: await history(A), beta: await history(B) };
   await openLive(A.web());
   B.web();
   await button(page).click();
@@ -63,7 +80,7 @@ test("P17: a switch, from enter in the switcher to the other workspace's first f
     await page.waitForTimeout(150);
   }
   const done = await page.evaluate(() => (window as unknown as { __sw: { done: number[] } }).__sw.done);
-  report.p17_switch_ms = { ...stats(done), agents: 10, history_messages_each: 40 };
+  report.p17_switch_ms = { ...stats(done), agents: 10, snapshot_occupancy: occupancy };
   expect(stats(done).p95!).toBeLessThanOrEqual(150 * SCALE);
 });
 
@@ -136,12 +153,29 @@ test("P19, P20: an idle page with five joined workspaces makes no index traffic;
   const index = sockets.filter((s) => s.kind === "index");
   expect(index.length).toBe(1);
   const before = { sent: index[0].sent, received: index[0].received };
-  await page.waitForTimeout(60_000);
+  const serverPid = JSON.parse(readFileSync(join(A.root, "run/crew/web.json"), "utf8")).pid as number;
+  // Wake-ups of the server while idle: the voluntary context switches of all its threads, sampled every 50 ms;
+  // a bin in which the sum moved is one wake-up (a burst of switches is one).
+  const switches = () => { let n = 0; for (const t of readdirSync(`/proc/${serverPid}/task`)) { const m = /voluntary_ctxt_switches:\s+(\d+)/.exec(readFileSync(`/proc/${serverPid}/task/${t}/status`, "utf8")); n += Number(m?.[1] ?? 0); } return n; };
+  const wakeups: number[] = [];
+  let last = switches();
+  const t0 = Date.now();
+  while (Date.now() - t0 < 60_000) {
+    await page.waitForTimeout(50);
+    const now = switches();
+    if (now !== last) (wakeups.push(Date.now() - t0), last = now);
+  }
+  // Clusters closer than 200 ms are one.
+  const clusters = wakeups.filter((t, i) => i === 0 || t - wakeups[i - 1] > 200);
+  const gaps = clusters.slice(1).map((t, i) => t - clusters[i]);
+  report.p20_server_wakeups_60s = { clusters: clusters.length, shortest_gap_ms: gaps.length ? Math.min(...gaps) : null, median_gap_ms: gaps.length ? [...gaps].sort((a, b) => a - b)[Math.floor(gaps.length / 2)] : null, open_connections: 3 * 2 + 4 * 0 };
   const idle = { index_frames_sent: index[0].sent - before.sent, index_frames_received: index[0].received - before.received };
   report.p19_idle_60s_five_workspaces = idle;
   expect(idle.index_frames_sent).toBe(0);
   expect(idle.index_frames_received).toBe(0);
-  const serverPid = JSON.parse(readFileSync(join(A.root, "run/crew/web.json"), "utf8")).pid as number;
+  // Nothing recurs faster than the 5 s housekeeping tick except the pings (20 s per connection, three pages
+  // with two connections each): at most 12 ticks and 18 pings in 60 s, with room for a few more.
+  expect(clusters.length).toBeLessThanOrEqual(36);
   const rssKb = Number(/VmRSS:\s+(\d+) kB/.exec(readFileSync(`/proc/${serverPid}/status`, "utf8"))?.[1]);
   const release = CREW_BIN.includes("/release/");
   report.p20_server_rss_mb = { rss: +(rssKb / 1024).toFixed(1), build: release ? "release" : "debug" };
