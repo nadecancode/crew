@@ -45,3 +45,17 @@ test("a poll at the tick's own period and phase is the tick (slower than that is
   const same = [...moved, ...poll(5000, 2500)].sort((a, b) => a - b);
   expect(verdict(same, pings).ok).toBe(true);
 });
+
+test("the runtime's own timer-wheel wake-ups (a lattice of 4096 ms) are counted apart and pass; a poll at half that period fails", () => {
+  const { pings, moved } = permitted();
+  const wheel: number[] = [];
+  for (let at = 1014; at < MS; at += 4096) wheel.push(at, at + 10);
+  const withWheel = [...moved, ...wheel].sort((a, b) => a - b);
+  const v = verdict(withWheel, pings);
+  expect(v.ok, v.why.join("; ")).toBe(true);
+  expect(v.wheel).toBeGreaterThan(5);
+  for (const every of [2048, 1024, 2000, 3000]) {
+    const polled = [...moved, ...poll(every, 1014)].sort((a, b) => a - b);
+    expect(verdict(polled, pings).ok, `${every} ms`).toBe(false);
+  }
+});

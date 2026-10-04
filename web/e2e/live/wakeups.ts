@@ -16,6 +16,12 @@ export const TICK_MS = 5000;
 export const TICK_TOLERANCE_MS = 300;
 /** A ping is seen at the client some microseconds after the server woke for it; the sampler
  * sees the switch up to one sample late. */
+/** tokio's timer wheel keeps a timer further off than 4 s in a slot of 4096 ms and the runtime wakes at the
+ * slot's start to move it down (tokio 1.53, time/wheel: level 2). A pending 20 s ping or a 5 s tick is such a timer,
+ * so the runtime itself wakes on a lattice of 4096 ms whose phase is the process's own. These wake-ups are
+ * counted apart, bounded (one per slot) and reported; polling is not on that lattice except by chance at that very period. */
+export const WHEEL_MS = 4096;
+export const WHEEL_TOLERANCE_MS = 40;
 export const PING_BEFORE_MS = 120;
 export const PING_AFTER_MS = 40;
 
@@ -37,7 +43,7 @@ const near = (value: number, period: number) => {
   return Math.min(r, period - r);
 };
 
-export type Verdict = { ok: boolean; wakeups: number; ticks: number; pings: number; unexplained: number[]; longest_span_ms: number; why: string[] };
+export type Verdict = { ok: boolean; wakeups: number; ticks: number; pings: number; wheel: number; unexplained: number[]; longest_span_ms: number; why: string[] };
 
 /** `moved`: when the counter was seen to move; `pings`: when the clients received a ping; both in ms
  * from the same origin. */
@@ -52,10 +58,19 @@ export function verdict(moved: number[], pings: number[]): Verdict {
   }
   const onTick = (t: number) => best.hits >= 0 && near(t - best.phase, TICK_MS) <= TICK_TOLERANCE_MS;
   const onPing = (t: number) => pings.some((p) => t >= p - PING_BEFORE_MS && t <= p + PING_AFTER_MS);
-  const unexplained = at.filter((t) => !onTick(t) && !onPing(t));
+  const rest = at.filter((t) => !onTick(t) && !onPing(t));
+  // The runtime's own: the lattice of 4096 ms, phase from the data.
+  let wheel = { phase: 0, hits: -1 };
+  for (const candidate of rest) {
+    const phase = ((candidate % WHEEL_MS) + WHEEL_MS) % WHEEL_MS;
+    const hits = rest.filter((t) => near(t - phase, WHEEL_MS) <= WHEEL_TOLERANCE_MS).length;
+    if (hits > wheel.hits) wheel = { phase, hits };
+  }
+  const onWheel = (t: number) => wheel.hits >= 0 && near(t - wheel.phase, WHEEL_MS) <= WHEEL_TOLERANCE_MS;
+  const unexplained = rest.filter((t) => !onWheel(t));
   const longest = Math.max(0, ...w.map((x) => x.span));
   const why: string[] = [];
-  if (unexplained.length) why.push(`${unexplained.length} wake-ups are neither the 5 s tick nor a ping: at ${unexplained.slice(0, 8).join(", ")} ms`);
+  if (unexplained.length) why.push(`${unexplained.length} wake-ups are neither the 5 s tick, a ping nor the timer wheel's 4096 ms lattice: at ${unexplained.slice(0, 8).join(", ")} ms`);
   if (longest > MAX_SPAN_MS) why.push(`a wake-up lasted ${longest} ms (limit ${MAX_SPAN_MS})`);
-  return { ok: why.length === 0, wakeups: w.length, ticks: Math.max(best.hits, 0), pings: pings.length, unexplained, longest_span_ms: longest, why };
+  return { ok: why.length === 0, wakeups: w.length, ticks: Math.max(best.hits, 0), pings: pings.length, wheel: rest.length - unexplained.length, unexplained, longest_span_ms: longest, why };
 }

@@ -200,7 +200,7 @@ test("P20: the server with five joined workspaces and three sessions, idle: memo
   const v = verdict(moved, pings);
   const w = cluster(moved);
   const gaps = w.slice(1).map((x, i) => x.at - w[i].at);
-  report.p20_server_wakeups_60s = { wakeups: v.wakeups, ticks: v.ticks, pings_received: v.pings, unexplained: v.unexplained, longest_span_ms: v.longest_span_ms, shortest_gap_ms: gaps.length ? Math.min(...gaps) : null, connections: 6 };
+  report.p20_server_wakeups_60s = { wakeups: v.wakeups, ticks: v.ticks, pings_received: v.pings, timer_wheel: v.wheel, unexplained: v.unexplained, longest_span_ms: v.longest_span_ms, shortest_gap_ms: gaps.length ? Math.min(...gaps) : null, connections: 6 };
   expect(v.pings, "the sessions' connections were pinged").toBeGreaterThan(0);
   expect(v.ok, v.why.join("; ")).toBe(true);
   const rssKb = Number(/VmRSS:\s+(\d+) kB/.exec(readFileSync(`/proc/${serverPid}/status`, "utf8"))?.[1]);
