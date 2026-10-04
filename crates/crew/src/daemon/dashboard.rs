@@ -49,6 +49,10 @@ pub(crate) struct Summaries {
     /// Test count: how many times it was computed.
     #[cfg(test)]
     pub(crate) computed: std::sync::atomic::AtomicU64,
+    /// Test window in which changes are folded together, in place of
+    /// `SUMMARY_EVERY`.
+    #[cfg(test)]
+    pub(crate) fold_for: Mutex<Option<Duration>>,
     /// Wakes the task; shared with it, which holds the daemon only weakly.
     wake: Arc<Notify>,
     /// The task that recomputes it, started by the first watcher.
@@ -73,6 +77,8 @@ impl Default for Summaries {
             refresh: Mutex::new(()),
             #[cfg(test)]
             computed: std::sync::atomic::AtomicU64::new(0),
+            #[cfg(test)]
+            fold_for: Mutex::new(None),
             wake: Arc::new(Notify::new()),
             task: OnceLock::new(),
             #[cfg(test)]
@@ -209,12 +215,21 @@ impl Daemon {
                     // Nobody watches: it stays dirty, for whoever asks next.
                     if daemon.summaries.tx.receiver_count() > 0 {
                         daemon.refresh_summary(false);
+                        #[cfg(test)]
+                        let fold = daemon
+                            .summaries
+                            .fold_for
+                            .lock()
+                            .unwrap()
+                            .unwrap_or(SUMMARY_EVERY);
+                        #[cfg(not(test))]
+                        let fold = SUMMARY_EVERY;
                         drop(daemon);
                         // Changes in the meantime are folded into the next
                         // computation: no watcher gets more than one push per
                         // `SUMMARY_EVERY`, so computing more often is waste
                         // (a busy team pushes thousands of changes a second).
-                        tokio::time::sleep(SUMMARY_EVERY).await;
+                        tokio::time::sleep(fold).await;
                     }
                 }
             });
