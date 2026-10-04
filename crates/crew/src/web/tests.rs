@@ -1,4 +1,5 @@
 use super::*;
+use crate::daemon::Daemon;
 
 #[path = "review_regressions.rs"]
 mod review_regressions;
@@ -319,7 +320,7 @@ struct Before {
 }
 
 async fn before_the_stop(daemon: &Daemon) -> (Before, Steps) {
-    let info = daemon.web.open(daemon, None).await.unwrap();
+    let info = daemon.open_web(None).await.unwrap();
     let serving = daemon.web.serving().unwrap();
     let addresses = addresses(daemon).await;
     let mut pairing = connect(&serving, V4).await;
@@ -335,7 +336,7 @@ async fn before_the_stop(daemon: &Daemon) -> (Before, Steps) {
     for ip in &addresses {
         waiting.push(connect(&serving, *ip).await);
     }
-    let code = code_of(&daemon.web.open(daemon, None).await.unwrap());
+    let code = code_of(&daemon.open_web(None).await.unwrap());
     let (hook, steps) = mpsc::unbounded_channel();
     *daemon.web.stop_hook.lock().unwrap() = Some(hook);
     let before = Before {
@@ -419,13 +420,13 @@ async fn web_close_revokes_then_closes_then_releases_both_listeners() {
     let token = before.token.clone();
     let stop = {
         let daemon = daemon.clone();
-        tokio::spawn(async move { daemon.web.stop(&daemon, None).await })
+        tokio::spawn(async move { daemon.web.stop(None).await })
     };
     walk_the_stop(&daemon, before, &mut steps, false).await;
     assert!(stop.await.unwrap());
     // Codes and sessions are gone for good: a new start knows neither.
     *daemon.web.stop_hook.lock().unwrap() = None;
-    daemon.web.open(&daemon, None).await.unwrap();
+    daemon.open_web(None).await.unwrap();
     assert_eq!(daemon.web.registry().sessions(), 0);
     assert_eq!(daemon.web.registry().codes.len(), 1);
     let serving = daemon.web.serving().unwrap();
@@ -491,10 +492,10 @@ async fn on_one_address_a_later_ipv6_is_kept_and_a_taken_one_stops_the_server() 
 
     // No IPv6 loopback: served on 127.0.0.1 alone, and still after a tick
     // that finds none.
-    daemon.web.open(&daemon, None).await.unwrap();
+    daemon.open_web(None).await.unwrap();
     let serving = daemon.web.serving().unwrap();
     assert!(!on_ipv6(&daemon).await);
-    daemon.web.tick(&daemon).await;
+    daemon.web.tick().await;
     assert_eq!(daemon.web.serving(), Some(serving.clone()));
     assert!(!on_ipv6(&daemon).await);
 
@@ -502,7 +503,7 @@ async fn on_one_address_a_later_ipv6_is_kept_and_a_taken_one_stops_the_server() 
         // [::1] comes up: bound on the next tick and kept, whatever the
         // ticks after it find.
         v6.store(REAL, Ordering::SeqCst);
-        daemon.web.tick(&daemon).await;
+        daemon.web.tick().await;
         assert!(on_ipv6(&daemon).await);
         let mut ws = connect(&serving, V6).await;
         assert_eq!(
@@ -510,12 +511,12 @@ async fn on_one_address_a_later_ipv6_is_kept_and_a_taken_one_stops_the_server() 
             true
         );
         v6.store(TAKEN, Ordering::SeqCst);
-        daemon.web.tick(&daemon).await;
+        daemon.web.tick().await;
         assert!(on_ipv6(&daemon).await);
         assert_eq!(daemon.web.serving(), Some(serving.clone()));
-        daemon.web.stop(&daemon, None).await;
+        daemon.web.stop(None).await;
     } else {
-        daemon.web.stop(&daemon, None).await;
+        daemon.web.stop(None).await;
     }
 
     // On 127.0.0.1 alone with a session open, someone takes [::1]: the
@@ -528,7 +529,7 @@ async fn on_one_address_a_later_ipv6_is_kept_and_a_taken_one_stops_the_server() 
     v6.store(TAKEN, Ordering::SeqCst);
     let tick = {
         let daemon = daemon.clone();
-        tokio::spawn(async move { daemon.web.tick(&daemon).await })
+        tokio::spawn(async move { daemon.web.tick().await })
     };
     walk_the_stop(&daemon, before, &mut steps, false).await;
     tick.await.unwrap();
@@ -550,7 +551,7 @@ async fn on_one_address_a_later_ipv6_is_kept_and_a_taken_one_stops_the_server() 
     // Every session was revoked.
     *daemon.web.stop_hook.lock().unwrap() = None;
     v6.store(NO_IPV6, Ordering::SeqCst);
-    daemon.web.open(&daemon, None).await.unwrap();
+    daemon.open_web(None).await.unwrap();
     let mut ws = connect(&daemon.web.serving().unwrap(), V4).await;
     assert_eq!(
         hello(&mut ws, &token).await["error"]["code"],

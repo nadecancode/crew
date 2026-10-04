@@ -55,7 +55,7 @@ fn goodbye(order: Option<Ctl>, stopping: bool) -> Option<CloseFrame> {
     }
 }
 
-pub(super) async fn serve(daemon: Daemon, mut stream: TcpStream, admitted: Admitted) {
+pub(crate) async fn serve(daemon: Daemon, mut stream: TcpStream, admitted: Admitted) {
     let Some(serving) = daemon.web.serving() else {
         return;
     };

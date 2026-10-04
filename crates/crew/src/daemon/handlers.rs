@@ -119,7 +119,7 @@ impl Daemon {
                     "web_pair is for the web dashboard's connections",
                 ));
             }
-            return reply(self.web.pair(self, &code)?);
+            return reply(self.web.pair(&code)?);
         }
         if let Call::Hello(hello) = call {
             // A connection is who it first said it was: an agent's code must
@@ -136,7 +136,7 @@ change identity",
             // surely as a newer one. The code lets clients say "restart".
             if hello.protocol != PROTOCOL_VERSION {
                 if conn.transport == Transport::Web {
-                    self.web.refused(self);
+                    self.web.refused();
                 }
                 return Err(RpcError::new(
                     "protocol",
@@ -159,7 +159,7 @@ change identity",
                 // alone.
                 Transport::Web => {
                     if hello.role != Role::Operator {
-                        self.web.refused(self);
+                        self.web.refused();
                         return Err(RpcError::unauthorized(
                             "the web dashboard signs in as the operator only",
                         ));
@@ -168,7 +168,7 @@ change identity",
                         conn.lease.as_ref().map(|l| l.id).ok_or_else(|| {
                             RpcError::internal("a web connection without a lease")
                         })?;
-                    match self.web.hello(self, lease, hello.token.as_deref()) {
+                    match self.web.hello(lease, hello.token.as_deref()) {
                         Ok((_, secret)) => {
                             web_proof = Some(secret);
                             Who::Operator
@@ -623,12 +623,12 @@ change identity",
             Call::WebOpen { port, .. } => {
                 operator_only(&who)?;
                 not_on_the_web(conn, "web_open")?;
-                reply(self.web.open(self, port).await?)
+                reply(self.open_web(port).await?)
             }
             Call::WebClose { .. } => {
                 operator_only(&who)?;
                 not_on_the_web(conn, "web_close")?;
-                Ok(json!({ "stopped": self.web.stop(self, None).await }))
+                Ok(json!({ "stopped": self.web.stop(None).await }))
             }
             Call::WebPair { .. } => unreachable!("handled above"),
             Call::WebPrefs { set } => {

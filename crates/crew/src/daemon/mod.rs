@@ -293,7 +293,7 @@ pub struct Inner {
     /// The version control backend of the session (Daemon::vcs).
     pub(crate) vcs: RwLock<Option<Arc<dyn crate::vcs::Vcs>>>,
     /// The web dashboard's server (`crew web`).
-    pub(crate) web: crate::web::Web,
+    pub(crate) web: std::sync::Arc<crate::web::Web>,
     /// What a workspace switcher shows of this session.
     pub(crate) summaries: dashboard::Summaries,
     /// The dashboard server's watch on this daemon, if any.
@@ -955,7 +955,7 @@ pub async fn start(options: DaemonOptions) -> Result<Running> {
         hooks: Mutex::new(HashMap::new()),
         stops: Mutex::new(HashMap::new()),
         vcs: RwLock::new(None),
-        web: crate::web::Web::default(),
+        web: Default::default(),
         summaries: Default::default(),
         watched: Default::default(),
         vcs_ops: std::sync::atomic::AtomicU64::new(1),
@@ -1047,7 +1047,7 @@ impl Running {
                 loop {
                     tick.tick().await;
                     daemon.housekeeping().await;
-                    daemon.web.tick(&daemon).await;
+                    daemon.web.tick().await;
                     // Re-plan on the tick too: a stall is only reported once
                     // it has lasted a while.
                     daemon.replan();
@@ -1083,7 +1083,7 @@ impl Running {
         tokio::time::sleep(std::time::Duration::from_millis(150)).await;
         // The web server stops before the socket and the registration go:
         // its sessions, then its connections, then its listeners.
-        daemon.web.stop(&daemon, None).await;
+        daemon.web.stop(None).await;
         accept_task.abort();
         told_task.abort();
         events_task.abort();

@@ -6,8 +6,8 @@ use super::*;
 async fn reviewer_port_zero_does_not_report_an_unusable_address() {
     let (_temp, running) = daemon().await;
     let daemon = running.daemon.clone();
-    let opened = daemon.web.open(&daemon, Some(0)).await;
-    daemon.web.stop(&daemon, None).await;
+    let opened = daemon.open_web(Some(0)).await;
+    daemon.web.stop(None).await;
     if let Ok(info) = opened {
         assert_ne!(
             info.port, 0,
@@ -39,7 +39,7 @@ async fn reviewer_stop_reclaims_a_subscriber_blocked_on_its_reply() {
         );
         Ok(listener)
     }));
-    let info = daemon.web.open(&daemon, None).await.unwrap();
+    let info = daemon.open_web(None).await.unwrap();
     let serving = daemon.web.serving().unwrap();
     let mut socket = connect(&serving, V4).await;
     let paired = call(&mut socket, 1, "web_pair", json!({"code": code_of(&info)})).await;
@@ -62,7 +62,7 @@ async fn reviewer_stop_reclaims_a_subscriber_blocked_on_its_reply() {
         .await
         .unwrap();
     tokio::time::sleep(Duration::from_millis(200)).await;
-    assert!(daemon.web.stop(&daemon, None).await);
+    assert!(daemon.web.stop(None).await);
     assert!(daemon.web.registry().conns.is_empty());
     tokio::time::sleep(Duration::from_millis(100)).await;
     daemon.push(crew_core::rpc::Push::Pty {
@@ -96,9 +96,9 @@ async fn reviewer_failed_hello_write_does_not_consume_auth_capacity() {
     use crate::daemon::server::Session;
     let (_temp, running) = daemon().await;
     let daemon = running.daemon.clone();
-    let info = daemon.web.open(&daemon, None).await.unwrap();
-    let token = daemon.web.pair(&daemon, &code_of(&info)).unwrap().token;
-    let admitted = daemon.web.admit(&daemon).unwrap();
+    let info = daemon.open_web(None).await.unwrap();
+    let token = daemon.web.pair(&code_of(&info)).unwrap().token;
+    let admitted = daemon.web.admit().unwrap();
     let (mut session, frames) = Session::web(&daemon, admitted.lease.clone());
     drop(frames);
     assert!(
@@ -114,7 +114,7 @@ async fn reviewer_failed_hello_write_does_not_consume_auth_capacity() {
     drop(session);
     drop(admitted);
     let authenticated = daemon.web.registry().authenticated();
-    daemon.web.stop(&daemon, None).await;
+    daemon.web.stop(None).await;
     assert_eq!(
         authenticated, 0,
         "a failed reply consumed an authenticated slot forever"
@@ -144,7 +144,7 @@ async fn reviewer_unauthenticated_deadline_survives_backpressure() {
         );
         Ok(listener)
     }));
-    daemon.web.open(&daemon, None).await.unwrap();
+    daemon.open_web(None).await.unwrap();
     let serving = daemon.web.serving().unwrap();
     let mut socket = connect(&serving, V4).await;
     let request = json!({"id":1,"method":"x".repeat(3000)}).to_string();
@@ -160,7 +160,7 @@ async fn reviewer_unauthenticated_deadline_survives_backpressure() {
     .await;
     tokio::time::sleep(Duration::from_secs(8)).await;
     let count = daemon.web.registry().unauthenticated();
-    daemon.web.stop(&daemon, None).await;
+    daemon.web.stop(None).await;
     assert_eq!(
         count, 0,
         "the 5 s hello deadline stopped being checked while a reply was blocked"
