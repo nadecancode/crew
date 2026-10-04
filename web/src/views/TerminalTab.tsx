@@ -59,10 +59,11 @@ function PtyTerminal(props: { id: string }) {
     setEnded(false);
     handle = mod.mountTerminal(host, {
       agent: props.id,
+      workspace: link.id!,
       env: link.env,
       session: link.session,
       state: (s) => setState(s),
-      proofFailed: () => link.stop("proof"),
+      stopPage: (reason) => link.stop(reason),
       ended: () => setEnded(true),
     });
     handle.setReadOnly(!link.live());

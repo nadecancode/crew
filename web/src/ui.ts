@@ -1,8 +1,14 @@
-// What the page shows besides the daemon's state: the route and selection,
-// the side panel, dialogs, the status line and notices.
+// What the page shows besides the daemon's state. The status line and
+// notices are the page's (`createChrome`); the route and selection, the
+// side panel and dialogs are the workspace's on screen (`createUi`), made
+// anew for each workspace and disposed with it (notes/web-multi.md §multi-ui
+// "A switch").
 
 import { createSignal } from "solid-js";
 import { formatRoute, parseRoute, sameSelection, type Route, type Selection, type View } from "./route";
+
+/** A workspace's route: its view and its one selection. */
+export type Place = Omit<Route, "workspace">;
 
 export type InspectorTab = "overview" | "terminal" | "transcript" | "diff";
 
@@ -23,7 +29,8 @@ export type Dialog =
 export type Compose = { to: string; text: string; prompt: boolean };
 
 export type StatusLine = { text: string; error: boolean; id: number };
-export type Notice = { text: string; id: number };
+/** A notice may offer one action ("switch"). */
+export type Notice = { text: string; id: number; action?: { label: string; run(): void } };
 
 export type LogFilter = { agent: string | null; level: "debug" | "info" | "warn" | "error"; text: string; vcs: boolean };
 
@@ -36,15 +43,62 @@ const NOTICE_MS = 30_000;
 type Loc = { hash: string };
 type Hist = { pushState(data: unknown, unused: string, url?: string): void; replaceState(data: unknown, unused: string, url?: string): void };
 
-export function createUi(loc: Loc = location, hist: Hist = history) {
-  const [route, setRouteSignal] = createSignal<Route>(parseRoute(loc.hash));
+/** The page's: the status line and notices, kept across switches. */
+export function createChrome() {
+  const [status, setStatusSignal] = createSignal<StatusLine | null>(null);
+  const [notices, setNotices] = createSignal<Notice[]>([]);
+  let statusTimer: number | null = null;
+  let nextId = 1;
+
+  function setStatus(text: string, error = false): void {
+    if (statusTimer !== null) window.clearTimeout(statusTimer);
+    const id = nextId++;
+    setStatusSignal({ text, error, id });
+    statusTimer = window.setTimeout(() => {
+      statusTimer = null;
+      setStatusSignal((s) => (s?.id === id ? null : s));
+    }, error ? STATUS_ERROR_MS : STATUS_MS);
+  }
+
+  function notice(text: string, action?: Notice["action"]): void {
+    const id = nextId++;
+    setNotices((ns) => [...ns.slice(-3), { text, id, action }]);
+    window.setTimeout(() => setNotices((ns) => ns.filter((n) => n.id !== id)), NOTICE_MS);
+  }
+
+  return {
+    status,
+    setStatus,
+    clearStatus: () => setStatusSignal(null),
+    notices,
+    notice,
+    dismissNotice: (id: number) => setNotices((ns) => ns.filter((n) => n.id !== id)),
+  };
+}
+
+export type Chrome = ReturnType<typeof createChrome>;
+
+export type UiOptions = {
+  /** The workspace on screen; its id goes into every address. */
+  workspace?: string | null;
+  /** Its route when it opens: the address's, or the one it had when left. */
+  place?: Place;
+  chrome?: Chrome;
+  loc?: Loc;
+  hist?: Hist;
+};
+
+export function createUi(o: UiOptions = {}) {
+  const loc = o.loc ?? location;
+  const hist = o.hist ?? history;
+  const workspace = o.workspace ?? null;
+  const chrome = o.chrome ?? createChrome();
+  const [route, setRouteSignal] = createSignal<Place>(o.place ?? parseRoute(loc.hash));
   /** The agent keys act on, and the graph's one tab stop. */
   const [selected, setSelected] = createSignal<string | null>(route().sel?.kind === "agent" ? (route().sel as { id: string }).id : null);
   const [tab, setTab] = createSignal<InspectorTab>("overview");
   const [panelFull, setPanelFull] = createSignal(false);
   const [dialog, setDialogSignal] = createSignal<Dialog | null>(null);
-  const [status, setStatusSignal] = createSignal<StatusLine | null>(null);
-  const [notices, setNotices] = createSignal<Notice[]>([]);
   const [menu, setMenu] = createSignal<ContextMenu | null>(null);
   const [compose, setCompose] = createSignal<Compose>({ to: "*", text: "", prompt: false });
   /** Bumped by the refresh key: the inspector reads its tab again. */
@@ -58,40 +112,25 @@ export function createUi(loc: Loc = location, hist: Hist = history) {
   const shownQuestions = new Set<string>();
   /** Where focus goes back to when a dialog or the side panel closes. */
   const focusStack: (HTMLElement | null)[] = [];
-  let statusTimer: number | null = null;
-  let nextId = 1;
 
-  function setRoute(next: Route, push = true): void {
+  /** This workspace's address for `place`. */
+  const address = (place: Place) => formatRoute({ workspace, ...place });
+
+  function setRoute(next: Place, push = true): void {
     const cur = route();
     if (cur.view === next.view && sameSelection(cur.sel, next.sel)) return;
     if (next.sel?.kind === "agent") setSelected(next.sel.id);
     if (next.sel?.kind === "agent" && !(cur.sel?.kind === "agent" && cur.sel.id === next.sel.id)) setTab("overview");
-    setRouteSignal(next);
-    const hash = formatRoute(next);
+    setRouteSignal({ view: next.view, sel: next.sel });
+    const hash = address(next);
     if (loc.hash !== hash) (push ? hist.pushState : hist.replaceState).call(hist, null, "", hash);
   }
 
-  /** Back and forward. */
+  /** Back and forward within this workspace. */
   function fromLocation(): void {
     const next = parseRoute(loc.hash);
     if (next.sel?.kind === "agent") setSelected(next.sel.id);
-    setRouteSignal(next);
-  }
-
-  function setStatus(text: string, error = false): void {
-    if (statusTimer !== null) window.clearTimeout(statusTimer);
-    const id = nextId++;
-    setStatusSignal({ text, error, id });
-    statusTimer = window.setTimeout(() => {
-      statusTimer = null;
-      setStatusSignal((s) => (s?.id === id ? null : s));
-    }, error ? STATUS_ERROR_MS : STATUS_MS);
-  }
-
-  function notice(text: string): void {
-    const id = nextId++;
-    setNotices((ns) => [...ns.slice(-3), { text, id }]);
-    window.setTimeout(() => setNotices((ns) => ns.filter((n) => n.id !== id)), NOTICE_MS);
+    setRouteSignal({ view: next.view, sel: next.sel });
   }
 
   function openDialog(d: Dialog): void {
@@ -109,9 +148,11 @@ export function createUi(loc: Loc = location, hist: Hist = history) {
   }
 
   return {
+    workspace,
     route,
     setRoute,
     fromLocation,
+    address,
     view: () => route().view,
     sel: () => route().sel,
     setView: (view: View) => setRoute({ view, sel: route().sel }),
@@ -127,12 +168,12 @@ export function createUi(loc: Loc = location, hist: Hist = history) {
     closeDialog,
     /** Replace the open dialog's state (typing in the compose box). */
     updateDialog: (d: Dialog) => setDialogSignal(d),
-    status,
-    setStatus,
-    clearStatus: () => setStatusSignal(null),
-    notices,
-    notice,
-    dismissNotice: (id: number) => setNotices((ns) => ns.filter((n) => n.id !== id)),
+    status: chrome.status,
+    setStatus: chrome.setStatus,
+    clearStatus: chrome.clearStatus,
+    notices: chrome.notices,
+    notice: chrome.notice,
+    dismissNotice: chrome.dismissNotice,
     menu,
     setMenu,
     compose,

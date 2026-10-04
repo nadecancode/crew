@@ -1,31 +1,34 @@
 // The page's half of the snapshot barrier (notes/web-design.md §transport
 // "A snapshot is a barrier", §tests "order.test.ts").
 import { beforeEach, describe, expect, test } from "vitest";
-import { Session, STORAGE_KEY } from "../src/net/session";
-import { createLink } from "../src/net/state";
+import { createHub } from "../src/net/hub";
+import { Session } from "../src/net/session";
+import { createWorkspaceLink } from "../src/net/workspace";
 import { decodeSnapshot, type Agent, type Snapshot } from "../src/protocol";
 import { createState } from "../src/store/store";
-import { FakeSocket, MemoryStorage, fakeEnv, settle, sha256 } from "./fakes";
+import { FakeSocket, fakeEnv, settle } from "./fakes";
 import { fixture } from "./fixtures";
+import { A, SECRET, entry, indexSocket, listing, serveIndex, stored } from "./multi";
 
-const SECRET = "proof";
 const base = (): Snapshot => decodeSnapshot(fixture("snapshot.json"));
 
+/** The workspace connection, past its proof, before `subscribe` is answered. */
 async function live() {
-  const st = new MemoryStorage();
-  st.setItem(STORAGE_KEY, JSON.stringify({ token: "t", verifier: sha256(SECRET) }));
   const store = createState();
-  const link = createLink(fakeEnv(), new Session(st, null), {
+  const hub = createHub(fakeEnv(), new Session(stored(), null));
+  const link = createWorkspaceLink(hub, A, {
     snapshot: (s, now) => store.applySnapshot(s, now),
     push: (p, now) => store.applyPush(p, now),
     shutdown: () => {},
     now: () => Date.now(),
   });
+  hub.start();
   link.start();
+  await serveIndex(indexSocket(), listing(1, [entry(A)]), settle);
   const s = FakeSocket.all[FakeSocket.all.length - 1];
   s.open();
   await settle();
-  s.reply(s.last("hello").id, { role: "operator", protocol: 5, version: "x", pid: 1, web_proof: SECRET });
+  s.reply(s.last("hello").id, { role: "operator", protocol: 6, version: "x", pid: 1, web_proof: SECRET });
   await settle();
   return { s, store, link };
 }

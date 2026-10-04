@@ -3,7 +3,7 @@
 // crates/crew/tests/fixtures/web/ are the normative examples; test/protocol.test.ts
 // reads every one of them through these decoders.
 
-export const PROTOCOL = 5;
+export const PROTOCOL = 6;
 
 export const ORCHESTRATOR_ID = "orchestrator";
 export const OPERATOR_ID = "operator";
@@ -20,9 +20,10 @@ export const RUNTIME_KIND = ["claude", "codex", "pi", "shell"] as const;
 export const EVENT_LEVEL = ["debug", "info", "warn", "error"] as const;
 export const TRANSCRIPT_KIND = ["prompt", "reply", "tool", "note"] as const;
 export const ROLE = ["operator", "agent"] as const;
-export const PUSH_KIND = ["event", "message", "agent", "agent_removed", "task", "session", "resync", "deliver", "compact", "pty", "pty_closed", "shutdown"] as const;
+export const PUSH_KIND = ["event", "message", "agent", "agent_removed", "task", "session", "resync", "deliver", "compact", "pty", "pty_closed", "shutdown", "summary", "workspaces"] as const;
 export const VCS_ACTION = ["workspace", "commit", "cherry_pick", "merge", "integrate", "status", "diff"] as const;
 export const VCS_OUTCOME = ["started", "ok", "conflict", "error"] as const;
+export const WORKSPACE_STATE = ["running", "stopped", "incompatible", "unreachable"] as const;
 
 export type AgentStatus = (typeof AGENT_STATUS)[number];
 export type TaskStatus = (typeof TASK_STATUS)[number];
@@ -32,6 +33,7 @@ export type EventLevel = (typeof EVENT_LEVEL)[number];
 export type TranscriptKind = (typeof TRANSCRIPT_KIND)[number];
 export type VcsAction = (typeof VCS_ACTION)[number];
 export type VcsOutcome = (typeof VCS_OUTCOME)[number];
+export type WorkspaceState = (typeof WORKSPACE_STATE)[number];
 
 export type Usage = { input_tokens: number; output_tokens: number; cache_read_tokens: number; cache_creation_tokens: number; turns: number };
 export type ContextUsage = { tokens: number; window: number; percent: number; updated_at: number };
@@ -194,6 +196,43 @@ export type TranscriptResult = { entries: TranscriptEntry[]; available: boolean;
 
 export type RpcError = { code: string; message: string };
 
+// The dashboard server's own (notes/web-multi.md §multi-join "What the listing
+// holds", §multi-transport "Summaries").
+
+/** What a workspace switcher shows of a session: counts only, no text. */
+export type WorkspaceSummary = {
+  rev: number;
+  project?: string | null;
+  agents: number;
+  working: number;
+  attention: number;
+  questions: number;
+  tasks: number;
+  tasks_done: number;
+};
+/** One run of a workspace's daemon, as the registry publishes it. */
+export type DaemonRef = { pid: number; started_at: number };
+export type WorkspaceEntry = {
+  /** 16 hex digits: the stem of the daemon's socket. */
+  id: string;
+  /** Greater after the workspace was taken out and joined again. */
+  generation: number;
+  /** The daemon the server watches; absent unless `running`. */
+  daemon?: DaemonRef | null;
+  project?: string | null;
+  /** The workspace directory. */
+  workspace: string;
+  state: WorkspaceState;
+  /** Why, for `incompatible` and `unreachable`. */
+  detail: string;
+  summary?: WorkspaceSummary | null;
+  joined_at: number;
+};
+/** A running session of this user that is not joined: named, not reachable. */
+export type OtherSession = { id: string; project?: string | null; workspace: string };
+/** The listing, whole each time: the `workspaces` reply and push. */
+export type Workspaces = { rev: number; joined: WorkspaceEntry[]; others: OtherSession[] };
+
 export type Push =
   | { kind: "event"; data: Event }
   | { kind: "message"; data: Message }
@@ -204,7 +243,9 @@ export type Push =
   | { kind: "resync" }
   | { kind: "pty"; data: { data: string } }
   | { kind: "pty_closed" }
-  | { kind: "shutdown" };
+  | { kind: "shutdown" }
+  /** On the index connection only. */
+  | { kind: "workspaces"; data: Workspaces };
 
 export type Frame =
   | { kind: "result"; id: number; result: unknown }
@@ -387,12 +428,14 @@ export function decodePush(v: unknown): Push | null {
     case "task": return { kind, data: decodeTask(o.data) };
     case "session": return { kind, data: decodeSession(o.data) };
     case "pty": return { kind, data: { data: str(obj(o.data, "pty"), "data", "pty") } };
+    case "workspaces": return { kind, data: decodeWorkspaces(o.data) };
     case "resync":
     case "pty_closed":
     case "shutdown":
       return { kind };
-    // `deliver` and `compact` are for agents; anything else is a kind this
-    // page does not know. Both are ignored.
+    // `deliver` and `compact` are for agents, `summary` for the dashboard
+    // server's watch; anything else is a kind this page does not know. All
+    // are ignored.
     default:
       return null;
   }
@@ -504,6 +547,43 @@ export function decodeTranscript(v: unknown): TranscriptResult {
   def(o, "available", false, isBool, "agent_transcript");
   def(o, "truncated", false, isBool, "agent_transcript");
   return o as TranscriptResult;
+}
+
+export function decodeSummary(v: unknown, what = "summary"): WorkspaceSummary {
+  const o = obj(v, what);
+  num(o, "rev", what);
+  opt(o, "project", isStr, what);
+  for (const k of ["agents", "working", "attention", "questions", "tasks", "tasks_done"]) def(o, k, 0, isNum, what);
+  return o as WorkspaceSummary;
+}
+
+export function decodeWorkspaces(v: unknown, what = "workspaces"): Workspaces {
+  const o = obj(v, what);
+  num(o, "rev", what);
+  o.joined = list(o.joined ?? [], (e, w) => {
+    const x = obj(e, w);
+    str(x, "id", w);
+    num(x, "generation", w);
+    oneOf(x, "state", WORKSPACE_STATE, w);
+    def(x, "workspace", "", isStr, w);
+    def(x, "detail", "", isStr, w);
+    def(x, "joined_at", 0, isNum, w);
+    opt(x, "project", isStr, w);
+    if (isObj(x.daemon)) {
+      num(x.daemon, "pid", `${w}.daemon`);
+      num(x.daemon, "started_at", `${w}.daemon`);
+    } else opt(x, "daemon", isObj, w);
+    if (x.summary != null) x.summary = decodeSummary(x.summary, `${w}.summary`);
+    return x as WorkspaceEntry;
+  }, `${what}.joined`);
+  o.others = list(o.others ?? [], (e, w) => {
+    const x = obj(e, w);
+    str(x, "id", w);
+    def(x, "workspace", "", isStr, w);
+    opt(x, "project", isStr, w);
+    return x as OtherSession;
+  }, `${what}.others`);
+  return o as Workspaces;
 }
 
 export const decodeEvents = (v: unknown): Event[] => list(v, decodeEvent, "events");

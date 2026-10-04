@@ -1,4 +1,5 @@
-// The measurements of notes/web-design.md §perf, against the built bundle and
+// The measurements of notes/web-design.md §perf and notes/web-multi.md
+// §multi-perf, against the built bundle and
 // the mock (synthetic load through the real WebSocket, decoders and
 // reducers). Prints one report and fails when a limit is exceeded. Timing
 // limits scale with CREW_PERF_SCALE on a slow machine; counts never do.
@@ -6,6 +7,7 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import type { Page } from "@playwright/test";
 import type { Mock } from "./fixtures.ts";
+import type { MockState } from "../dev/mock.ts";
 import { expect, test } from "./fixtures.ts";
 
 const SCALE = Number(process.env.CREW_PERF_SCALE ?? 1);
@@ -20,9 +22,8 @@ function stats(values: number[]): Stats {
   return { n: s.length, p50: q(0.5), p95: q(0.95), max: q(1) };
 }
 
-/** Grow the mock's state to the live budget's size: 300 messages, 1000 events. */
-function grow(mock: Mock) {
-  const st = mock.state;
+/** Grow a workspace's state to the live budget's size: 300 messages, 1000 events. */
+function grow(mock: Mock, st: MockState = mock.state) {
   const ids = st.agents.map((a) => a.id as string);
   const t = mock.now();
   let seq = Math.max(0, ...st.events.map((e) => e.seq as number));
@@ -84,7 +85,7 @@ function frames(page: Page, ms: number) {
   }, ms);
 }
 
-const perf = (page: Page) => page.evaluate(() => (window as unknown as { crewPerf: { log: { apply: number[]; toFrame: number[]; lag: number[]; live: number | null } } }).crewPerf.log);
+const perf = (page: Page) => page.evaluate(() => (window as unknown as { crewPerf: { log: { apply: number[]; toFrame: number[]; lag: number[]; live: number | null; switches: number[] } } }).crewPerf.log);
 const measure = (page: Page, on: boolean) => page.evaluate((on) => (window as unknown as { crewPerf: { measure(on: boolean): void } }).crewPerf.measure(on), on);
 
 test("P1–P4: the bundle's sizes", () => {
@@ -186,6 +187,56 @@ test.describe("ten agents", () => {
     });
     if (out.p15_heap_mb !== null) expect(out.p15_heap_mb as number).toBeLessThanOrEqual(60);
     report.load = out;
+  });
+});
+
+test.describe("two workspaces of ten agents", () => {
+  test.use({
+    mockOptions: { workspaces: [{ fixture: "team10" }, { fixture: "team10", project: "search", workspace: "/home/op/work/search" }] },
+    viewport: { width: 1440, height: 900 },
+  });
+
+  test("P17: a switch, from the key in the switcher to the first frame with the other workspace's snapshot applied", async ({ page, mock, openPage }) => {
+    grow(mock, mock.workspace(0).state);
+    grow(mock, mock.workspace(1).state);
+    await openPage();
+    await expect(page.locator(".node.member")).toHaveCount(10);
+    await measure(page, true);
+    const n = 20;
+    for (let i = 0; i < n; i++) {
+      await page.keyboard.press("w");
+      await page.keyboard.press(i % 2 === 0 ? "2" : "1");
+      await expect(page.locator("[data-switcher-button]")).toHaveText(i % 2 === 0 ? "search ▾" : "checkout-rewrite ▾");
+      await expect.poll(async () => (await perf(page)).switches.length).toBe(i + 1);
+      await expect(page.locator(".node.member")).toHaveCount(10);
+    }
+    await measure(page, false);
+    const s = stats((await perf(page)).switches);
+    report.p17_switch_ms = s;
+    expect(s.p95!).toBeLessThanOrEqual(150 * SCALE);
+  });
+});
+
+test.describe("five workspaces", () => {
+  test.use({
+    mockOptions: { workspaces: ["payments", "search", "billing", "infra", "docs"].map((project) => ({ fixture: "snapshot" as const, project, workspace: `/home/op/work/${project}` })) },
+  });
+
+  test("P19: an idle page with five joined workspaces receives no index frame and makes no call in 60 s", async ({ page, mock, openPage }) => {
+    test.setTimeout(120_000);
+    await openPage();
+    await page.waitForTimeout(1000);
+    const index = () => mock.connections.filter((c) => c.workspace === null);
+    const sentBefore = index().reduce((n, c) => n + c.sent, 0);
+    const callsBefore = mock.calls.length;
+    await page.waitForTimeout(60_000);
+    const out = {
+      index_frames: index().reduce((n, c) => n + c.sent, 0) - sentBefore,
+      calls: mock.calls.slice(callsBefore).filter((c) => c.method !== "ping").map((c) => c.method),
+    };
+    report.p19_idle_60s = out;
+    expect(out.index_frames).toBe(0);
+    expect(out.calls).toEqual([]);
   });
 });
 

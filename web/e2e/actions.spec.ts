@@ -338,7 +338,7 @@ test.describe("operator actions", () => {
     expect(csp).toEqual([]);
   });
 
-  test("stop the team asks first (the status bar, S); esc and cancel send nothing; the shutdown push ends the page", async ({ page, mock, csp, openPage }) => {
+  test("stop the team asks first (the status bar, S); esc and cancel send nothing; the team's stop leaves the page live and the workspace not running", async ({ page, mock, csp, openPage }) => {
     await openPage();
     await inspect(page, "claude-2");
     const stop = page.locator(".status-bar").getByRole("button", { name: "stop team" });
@@ -363,10 +363,13 @@ test.describe("operator actions", () => {
     await button(dialog, "stop the team").click();
     expect((await mock.waitForCall("shutdown")).params).toEqual({ stop_agents: true });
 
-    await mock.shutdown();
-    await expect(page.locator('[data-conn="stopped"]').first()).toBeAttached();
-    await expect(page.getByText(/The team was stopped at/).first()).toBeVisible();
+    mock.stopDaemon();
+    await expect(page.locator('[data-workspace-state="not-running"]')).toBeAttached();
+    await expect(page.locator('[data-conn="live"]').first()).toBeAttached();
+    await expect(page.locator("[data-workspace-bar]")).toContainText("checkout-rewrite is not running");
     await expect(stop).toBeDisabled();
+    // What it showed stays, dimmed.
+    await expect(page.locator(".node.member").first()).toBeVisible();
     expect(csp).toEqual([]);
   });
 
