@@ -131,6 +131,7 @@ export function AgentGraph() {
   const onNodeMove = (e: PointerEvent) => {
     if (!pressed || e.pointerId !== pressed.pointer || !api) return;
     if (!pressed.moved && Math.abs(e.clientX - pressed.sx) + Math.abs(e.clientY - pressed.sy) <= CLICK_SLOP) return;
+    if (!pressed.moved) api.hold();
     pressed.moved = true;
     setHover(null);
     const w = api.worldAt(e.clientX, e.clientY);
@@ -335,6 +336,7 @@ export function AgentGraph() {
             selected={!!hubAgent() && ui.selected() === hubAgent()!.id}
             onDown={(e) => hubAgent() && onNodeDown(e, hubAgent()!.id)} onMove={onNodeMove} onUp={onNodeUp}
             onKey={(e) => hubAgent() && onNodeKey(e, hubAgent()!.id)}
+            onFocus={() => hubAgent() && ui.setSelected(hubAgent()!.id)}
             onHover={(e) => hubAgent() && hoverAt({ kind: "agent", id: hubAgent()!.id })(e)} onLeave={unhover}
             onQuestion={() => {
               const q = questionOf(hubAgent()?.id ?? ORCHESTRATOR_ID) ?? store.openQuestions()[0];
@@ -350,6 +352,7 @@ export function AgentGraph() {
                   selected={ui.selected() === agent.id} tabStop={tabStop() === agent.id} asking={asking(agent.id)}
                   onDown={(e) => onNodeDown(e, agent.id)} onMove={onNodeMove} onUp={onNodeUp}
                   onKey={(e) => onNodeKey(e, agent.id)}
+                  onFocus={() => ui.setSelected(agent.id)}
                   onHover={hoverAt({ kind: "agent", id: agent.id })} onLeave={unhover}
                   onTask={(task, e) => {
                     e.stopPropagation();

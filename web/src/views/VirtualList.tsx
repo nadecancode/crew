@@ -33,8 +33,10 @@ export function VirtualList<T>(props: {
 
   const range = createMemo(() => {
     const n = props.count();
-    const first = Math.max(0, Math.floor(top() / H) - OVERSCAN);
-    const last = Math.min(n, Math.ceil((top() + height()) / H) + OVERSCAN);
+    // Never past the end, whatever the scroll position says.
+    const t = Math.min(top(), Math.max(0, n * H - height()));
+    const first = Math.max(0, Math.floor(t / H) - OVERSCAN);
+    const last = Math.min(n, Math.ceil((t + height()) / H) + OVERSCAN);
     return { first, items: props.slice(first, last), total: n };
   });
 

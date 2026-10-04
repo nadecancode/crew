@@ -19,6 +19,8 @@ export type ViewportApi = {
   panBy(dx: number, dy: number): void;
   /** The operator moved the view: it is no longer refitted on its own. */
   moved: () => boolean;
+  /** Stop following the content (a node is being dragged). */
+  hold(): void;
 };
 
 export function Viewport(props: {
@@ -58,6 +60,7 @@ export function Viewport(props: {
       setView(pan(view(), dx, dy));
     },
     moved,
+    hold: () => setMoved(true),
   };
   props.api?.(api);
 

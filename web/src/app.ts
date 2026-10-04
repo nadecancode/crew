@@ -24,7 +24,13 @@ import type { ViewportApi } from "./graph/Viewport";
 import { createUi } from "./ui";
 
 /** Timings for §perf, read by e2e/perf.spec.ts. No state and no credential. */
-export type PerfLog = { apply: number[]; toFrame: number[]; lag: number[] };
+export type PerfLog = {
+  apply: number[];
+  toFrame: number[];
+  lag: number[];
+  /** When the first snapshot was applied and the frame after it presented (ms since the navigation). */
+  live: number | null;
+};
 
 export type TerminalModule = typeof TerminalChunk;
 
@@ -44,14 +50,17 @@ export function createApp(env: Env, session: Session, terminal: Promise<Terminal
       if (ui.logFilter().agent === id) ui.setLogFilter({ ...ui.logFilter(), agent: null });
     },
   });
-  const perf: PerfLog = { apply: [], toFrame: [], lag: [] };
+  const perf: PerfLog = { apply: [], toFrame: [], lag: [], live: null };
   const [teamStopped, setTeamStopped] = createSignal(false);
   let measuring = false;
   const link = createLink(
     env,
     session,
     {
-      snapshot: (snap, t) => store.applySnapshot(snap, t),
+      snapshot(snap, t) {
+        store.applySnapshot(snap, t);
+        if (perf.live === null) requestAnimationFrame(() => requestAnimationFrame(() => (perf.live ??= performance.now())));
+      },
       push: (push: Push, t: number) => store.applyPush(push, t),
       shutdown: () => setTeamStopped(true),
       now,

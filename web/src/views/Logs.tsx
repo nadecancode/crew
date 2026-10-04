@@ -86,7 +86,7 @@ export function Logs() {
         <input type="search" placeholder="filter text" aria-label="filter text" value={f().text} onInput={(e) => ui.setLogFilter({ ...f(), text: e.currentTarget.value })} />
         <Show when={filtering()}><button onClick={() => ui.setLogFilter({ agent: null, level: "debug", text: "", vcs: false })}>clear</button></Show>
         <span class="spacer" />
-        <span class="muted">{count()} of {store.events.length}</span>
+        <span class="muted">{count()} of {(store.eventsVersion(), store.events.length)}</span>
         <button disabled={!link.live() || loading() || store.events.length >= MAX_EVENTS} onClick={loadOlder}>load older</button>
       </div>
       <div class="log-head" aria-hidden="true"><span class="time">time</span><span class="level">level</span><span class="source">source</span><span class="type">type</span><span class="agent">agent</span><span class="msg">message</span></div>

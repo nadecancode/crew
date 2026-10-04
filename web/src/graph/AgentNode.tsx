@@ -21,6 +21,8 @@ type NodeEvents = {
   onQuestion(): void;
   onModel(): void;
   onMenu(e: MouseEvent): void;
+  /** Focus on a node selects it: the keys act on it. */
+  onFocus(): void;
   /** Double click: the inspector on its terminal tab. */
   onOpen(): void;
 };
@@ -66,6 +68,7 @@ export function AgentNode(props: NodeEvents & {
       onPointerEnter={props.onHover}
       onPointerLeave={props.onLeave}
       onKeyDown={props.onKey}
+      onFocus={props.onFocus}
       onDblClick={(e) => {
         e.stopPropagation();
         props.onOpen();
@@ -151,6 +154,7 @@ export function HubNode(props: NodeEvents & { box: Box; agent: Agent | undefined
       onPointerEnter={props.onHover}
       onPointerLeave={props.onLeave}
       onKeyDown={props.onKey}
+      onFocus={props.onFocus}
       onDblClick={(e) => (e.stopPropagation(), props.onOpen())}
       onContextMenu={props.onMenu}
     >

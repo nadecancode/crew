@@ -151,12 +151,15 @@ export function operations(app: App) {
       const sc = slashCommand(text);
       if (sc) {
         try {
-          ops.effect(run(sc[0], sc[1], {
+          const effect = run(sc[0], sc[1], {
             agents: store.state.agents.map((a) => a.id),
             to,
             selected: ui.selected(),
             orchestrator: store.state.agents.find(isOrchestrator)?.id ?? null,
-          }));
+          });
+          // `/exit` and `/mouse` answer in the hint line.
+          if (effect.kind === "note") return { keep: false, hint: effect.text };
+          ops.effect(effect);
           return { keep: false };
         } catch (err) {
           return { keep: true, hint: err instanceof Error ? err.message : String(err) };

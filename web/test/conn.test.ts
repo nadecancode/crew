@@ -219,3 +219,40 @@ test("nothing pushed before the proof matched reaches the page", async () => {
   expect(pushes).toEqual(["resync"]);
   expect(GIVE_UP_MS).toBe(30_000);
 });
+
+test("a send whose reply was lost goes once more with the same id after the reconnect; nothing else is replayed", async () => {
+  const { createApp } = await import("../src/app");
+  const st = stored();
+  const app = createApp(fakeEnv(), new Session(st, null), new Promise(() => {}));
+  app.link.start();
+  const serveAll = async (s: FakeSocket) => {
+    s.open();
+    await settle();
+    s.reply(s.last("hello").id, { role: "operator", protocol: 5, version: "x", pid: 1, web_proof: SECRET });
+    await settle();
+    s.reply(s.last("subscribe").id, { subscribed: true });
+    await settle();
+    s.reply(s.last("snapshot").id, fixture("snapshot.json"));
+    await settle();
+  };
+  await serveAll(sock());
+  expect(app.link.conn()).toBe("live");
+  const sent = app.actions.send("claude-1", "hello there");
+  const paused = app.actions.pause("claude-2");
+  await settle();
+  const first = sock();
+  const id = first.last("send").params.id;
+  expect(id).toMatch(/^w-[0-9a-f]{16}$/);
+  first.drop();
+  await new Promise((r) => setTimeout(r, 400));
+  const second = sock();
+  expect(second).not.toBe(first);
+  await serveAll(second);
+  await settle();
+  expect(second.last("send").params).toEqual({ to: "claude-1", type: "message", body: "hello there", id });
+  expect(second.methods().filter((m) => m === "agent_pause")).toEqual([]);
+  second.reply(second.last("send").id, { message: { id, from: "operator", to: "claude-1", type: "message", body: "hello there", timestamp: 0 }, duplicate: true, recipients: ["claude-1"] });
+  expect(await sent).toBe(true);
+  await paused;
+  expect(app.ui.status()?.text).toBe("✓ message sent to claude-1");
+});

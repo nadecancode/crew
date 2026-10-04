@@ -91,6 +91,9 @@ export function noRequestsAfterStart(page: Page, mock?: Mock): { readonly reques
   const seen: string[] = [];
   const started: { from: number; to: number }[] = [];
   let current: { from: number; to: number } | null = null;
+  // What a document asked for before its `load` event: such a request may reach
+  // the mock a moment after `load`, but it was made at the start.
+  const early = new Set<string>();
   page.on("request", (r) => {
     if (r.isNavigationRequest() && r.frame() === page.mainFrame()) {
       if (current) current.to = Date.now();
@@ -98,6 +101,7 @@ export function noRequestsAfterStart(page: Page, mock?: Mock): { readonly reques
       return;
     }
     if (current) seen.push(`page: ${r.method()} ${r.url()}`);
+    else early.add(new URL(r.url()).pathname);
   });
   page.on("load", () => {
     current = { from: Date.now(), to: Infinity };
@@ -106,7 +110,7 @@ export function noRequestsAfterStart(page: Page, mock?: Mock): { readonly reques
   return {
     get requests() {
       const received = (mock?.requests ?? [])
-        .filter((q) => !q.upgrade && !ignored.has(q.path.split("?")[0]))
+        .filter((q) => !q.upgrade && !ignored.has(q.path.split("?")[0]) && !early.has(q.path.split("?")[0]))
         .filter((q) => started.some((w) => q.time >= w.from && q.time < w.to))
         .map((q) => `mock: ${q.method} ${q.path} (${q.status})`);
       return [...seen, ...received];

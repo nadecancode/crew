@@ -86,6 +86,7 @@ ul, ol { margin: 0; padding-left: 18px; }
 .conn[data-conn="live"] .dot { color: var(--ok); }
 .conn[data-conn="reconnecting"] .dot { color: var(--warn); }
 .conn[data-conn="stopped"] .dot, .conn[data-conn="signed-out"] .dot { color: var(--err); }
+.warning.note { font-weight: normal; letter-spacing: 0; }
 .warning { background: #3a2a14; color: var(--warn); padding: 2px 12px; font-weight: 600; font-size: 12px; letter-spacing: 0.02em; }
 .conn-bar { background: #2c1c1c; color: var(--text); padding: 6px 12px; border-bottom: 1px solid #5a2c2c; }
 .conn-bar:not(.stopped) { background: #2c2716; border-color: #5a4c22; }
@@ -302,7 +303,7 @@ pre.body { background: var(--bg-term); border: 1px solid var(--line); border-rad
 .insp-tasks, .insp-messages, .insp-problems { list-style: none; padding: 0; font-size: 12px; }
 .insp-messages li, .insp-problems li { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-family: var(--mono); }
 .insp-tasks li { margin-bottom: 4px; }
-.msg-line { white-space: nowrap; }
+.insp-messages .msg-line { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; display: block; width: 100%; }
 .transcript { display: flex; flex-direction: column; flex: 1; min-height: 0; }
 .tr-detail { max-height: 40%; overflow: auto; border-top: 1px solid var(--line); padding: 4px 10px; }
 .diff { padding: 0; }

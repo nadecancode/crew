@@ -182,7 +182,14 @@ function ModelDialog(props: { agent: string }) {
       </div>
       <Show when={!models.loading} fallback={<p class="muted"><span class="spin">◐</span> asking the daemon what can be started here…</p>}>
         <Show when={!models.error} fallback={<p class="err">the models could not be listed: {models.error?.message ?? String(models.error)}</p>}>
-          <ul class="models" role="listbox" aria-label={`${runtimeLabel(runtime())} models`}>
+          <ul class="models" role="listbox" aria-label={`${runtimeLabel(runtime())} models`} onKeyDown={(e) => {
+            const items = [...e.currentTarget.querySelectorAll<HTMLButtonElement>("button")];
+            const i = items.indexOf(document.activeElement as HTMLButtonElement);
+            const step = e.key === "ArrowDown" || e.key === "j" ? 1 : e.key === "ArrowUp" || e.key === "k" ? -1 : 0;
+            if (!step || items.length === 0) return;
+            e.preventDefault();
+            items[Math.min(items.length - 1, Math.max(0, i + step))].focus();
+          }}>
             <For each={rows()} fallback={<li class="muted">no {runtimeLabel(runtime())} models are known</li>}>
               {(m) => (
                 <li>

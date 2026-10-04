@@ -213,6 +213,7 @@ function Warnings() {
     <>
       <Show when={sandbox()}><div class="warning" role="note">{sandbox()}</div></Show>
       <Show when={store.state.session?.socket_warning}><div class="warning" role="note">SOCKET IN /tmp · using a private temporary directory</div></Show>
+      <Show when={store.state.session?.vcs_note}><div class="warning note" role="note">{store.state.session!.vcs_note}</div></Show>
     </>
   );
 }
