@@ -43,6 +43,9 @@ pub(crate) struct Summaries {
     /// only when a message to or from the operator went by).
     questions_dirty: AtomicBool,
     questions: Mutex<u32>,
+    /// One refresh at a time, from its capture to its publication: a
+    /// capture is never published after a later one.
+    refresh: Mutex<()>,
     /// Wakes the task; shared with it, which holds the daemon only weakly.
     wake: Arc<Notify>,
     /// The task that recomputes it, started by the first watcher.
@@ -64,6 +67,7 @@ impl Default for Summaries {
             dirty: AtomicBool::new(true),
             questions_dirty: AtomicBool::new(true),
             questions: Mutex::new(0),
+            refresh: Mutex::new(()),
             wake: Arc::new(Notify::new()),
             task: OnceLock::new(),
             #[cfg(test)]
@@ -117,6 +121,7 @@ impl Daemon {
     /// case), and publish it with a new `rev` if it differs.
     fn refresh_summary(&self, force: bool) {
         let summaries = &self.summaries;
+        let _one_at_a_time = summaries.refresh.lock().unwrap_or_else(|e| e.into_inner());
         if !summaries.dirty.swap(false, Ordering::SeqCst) && !force {
             return;
         }
