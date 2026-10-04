@@ -169,6 +169,24 @@ pub enum Isolation {
     Shared,
 }
 
+/// Which version control tool isolates the agents (`workspace.vcs`).
+#[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum VcsChoice {
+    /// jj when it is on PATH (0.44 or newer), git otherwise; a workspace
+    /// keeps the tool it was set up with.
+    #[default]
+    Auto,
+    Jj,
+    Git,
+}
+
+impl VcsChoice {
+    fn is_default(&self) -> bool {
+        *self == Self::default()
+    }
+}
+
 /// OS sandbox policy. Off remains the default until the release gate passes.
 #[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq, Default)]
 #[serde(rename_all = "snake_case")]
@@ -244,6 +262,9 @@ pub struct WorkspaceConfig {
     /// Create the directory and `git init` it (with an initial commit) when missing.
     #[serde(default)]
     pub init: bool,
+    /// The version control tool: `auto` (jj when available), `jj` or `git`.
+    #[serde(default, skip_serializing_if = "VcsChoice::is_default")]
+    pub vcs: VcsChoice,
     /// Revision agent branches start from.
     #[serde(default = "default_base")]
     pub base: String,
@@ -265,6 +286,7 @@ impl Default for WorkspaceConfig {
             path: default_workspace_path(),
             isolation: Isolation::default(),
             init: false,
+            vcs: VcsChoice::default(),
             base: default_base(),
             sandbox: SandboxConfig::default(),
         }

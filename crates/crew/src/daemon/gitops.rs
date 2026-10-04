@@ -116,8 +116,9 @@ git in it (use a git repository as the workspace, or workspace.init: true)",
         let dir = self.git_dir(agent)?;
         self.ensure_repo(&dir).await?;
         let author = agent.to_string();
+        let vcs = self.vcs();
         let commit = self
-            .agent_git(agent, move || git::commit_all(&dir, &author, &message))
+            .agent_git(agent, move || vcs.commit_all(&dir, &author, &message))
             .await?;
         // Attach the commit to the task the agent is working on.
         let task = {
@@ -160,8 +161,9 @@ git in it (use a git repository as the workspace, or workspace.init: true)",
     ) -> Result<GitOutcome, RpcError> {
         let dir = self.git_dir(agent)?;
         self.ensure_repo(&dir).await?;
+        let vcs = self.vcs();
         let text = self
-            .agent_git(agent, move || git::diff(&dir, against.as_deref()))
+            .agent_git(agent, move || vcs.diff(&dir, against.as_deref()))
             .await?;
         Ok(GitOutcome {
             ok: true,
@@ -173,7 +175,8 @@ git in it (use a git repository as the workspace, or workspace.init: true)",
     pub(crate) async fn git_status(&self, agent: &str) -> Result<GitOutcome, RpcError> {
         let dir = self.git_dir(agent)?;
         self.ensure_repo(&dir).await?;
-        let text = self.agent_git(agent, move || git::status(&dir)).await?;
+        let vcs = self.vcs();
+        let text = self.agent_git(agent, move || vcs.status(&dir)).await?;
         Ok(GitOutcome {
             ok: true,
             text,
@@ -191,9 +194,11 @@ git in it (use a git repository as the workspace, or workspace.init: true)",
         self.ensure_repo(&dir).await?;
         let author = agent.to_string();
         let rev = commit.clone();
+        let vcs = self.vcs();
         let outcome = self
-            .agent_git(agent, move || git::cherry_pick(&dir, &author, &rev))
-            .await?;
+            .agent_git(agent, move || vcs.cherry_pick(&dir, &author, &rev))
+            .await?
+            .outcome;
         self.report_git(agent, &outcome);
         if let Some(applied) = &outcome.commit {
             self.emit(
@@ -238,11 +243,10 @@ git in it (use a git repository as the workspace, or workspace.init: true)",
             })?,
             // A member who has left the team leaves its branch behind.
             None => {
-                let (repo, branch) = (self.workspace.clone(), git::branch_for(&from_agent));
+                let (vcs, branch) = (self.vcs(), git::branch_for(&from_agent));
                 let exists = worktrees && {
                     let branch = branch.clone();
-                    self.git(move || Ok(git::branch_exists(&repo, &branch)))
-                        .await?
+                    self.git(move || Ok(vcs.branch_exists(&branch))).await?
                 };
                 if !exists {
                     return Err(RpcError::not_found(format!("no agent '{from_agent}'")));
@@ -254,8 +258,9 @@ git in it (use a git repository as the workspace, or workspace.init: true)",
         self.ensure_repo(&dir).await?;
         let author = agent.to_string();
         let rev = branch.clone();
+        let vcs = self.vcs();
         let outcome = self
-            .agent_git(agent, move || git::merge(&dir, &author, &rev))
+            .agent_git(agent, move || vcs.merge(&dir, &author, &rev))
             .await?;
         self.report_git(agent, &outcome);
         if let Some(applied) = &outcome.commit {
@@ -309,7 +314,7 @@ git in it (use a git repository as the workspace, or workspace.init: true)",
         }
         let daemon = self.clone();
         let (worktree, steps) = self
-            .git(move || daemon.integration(&sandbox, &base, &agents))
+            .git(move || daemon.integration(&sandbox, &base, &agents, &mut |_| {}))
             .await?;
         let mut merged = Vec::new();
         let mut conflicts = Vec::new();

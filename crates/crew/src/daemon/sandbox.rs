@@ -18,6 +18,7 @@ use crate::sandbox::probe::UntrustedNixDaemon;
 use crate::sandbox::profile::{self, Built, Extra, Host, Request, Role, Session};
 use crate::sandbox::spec::{launcher_env, Spec};
 use crate::sandbox::{probe, run};
+use crate::vcs::{IntegrationStep, Vcs, Workspace};
 
 /// The daemon's paths that every profile is built from.
 struct Layout {
@@ -477,19 +478,21 @@ type HelperFor<'a> = &'a dyn Fn(&Path) -> Result<Arc<dyn Launcher>>;
 /// own configuration can run then (design-b3.md §3.2, helper profiles).
 /// Making it runs no git inside it.
 fn provision_worktree(
-    repo: &Path,
+    vcs: &dyn Vcs,
     worktrees_dir: &Path,
     id: &str,
     base: &str,
     helper: Option<HelperFor>,
-) -> Result<git::Worktree> {
-    let Some(helper) = helper else {
-        return git::ensure_worktree(repo, worktrees_dir, id, base);
-    };
-    let (worktree, needs_population) = git::add_worktree(repo, worktrees_dir, id, base)?;
+) -> Result<Workspace> {
+    let (worktree, needs_population) = vcs.add_workspace(worktrees_dir, id, base)?;
     if needs_population {
-        let launcher = helper(&worktree.path)?;
-        git::launch::with_launcher(launcher, || git::populate_worktree(&worktree))?;
+        match helper {
+            Some(helper) => {
+                let launcher = helper(&worktree.path)?;
+                git::launch::with_launcher(launcher, || vcs.populate(&worktree))?;
+            }
+            None => vcs.populate(&worktree)?,
+        }
     }
     Ok(worktree)
 }
@@ -498,24 +501,25 @@ fn provision_worktree(
 /// and every agent branch merged into it through `helper`'s launcher when
 /// there is one: a hook or filter from any agent's branch can run there.
 fn integrate(
-    repo: &Path,
+    vcs: &dyn Vcs,
     worktrees_dir: &Path,
     base: &str,
     agents: &[String],
     helper: Option<HelperFor>,
-) -> Result<(git::Worktree, Vec<git::IntegrationStep>)> {
-    let Some(helper) = helper else {
-        return git::integrate(repo, worktrees_dir, base, agents);
-    };
+    on_step: &mut dyn FnMut(&IntegrationStep),
+) -> Result<(Workspace, Vec<IntegrationStep>)> {
     let (worktree, needs_population) =
-        git::add_worktree(repo, worktrees_dir, git::INTEGRATION_DIR, base)?;
-    let launcher = helper(&worktree.path)?;
-    let steps = git::launch::with_launcher(launcher, || -> Result<_> {
+        vcs.add_workspace(worktrees_dir, git::INTEGRATION_DIR, base)?;
+    let mut run = || -> Result<_> {
         if needs_population {
-            git::populate_worktree(&worktree)?;
+            vcs.populate(&worktree)?;
         }
-        git::merge_agents(&worktree, agents)
-    })?;
+        vcs.merge_agents(&worktree, agents, on_step)
+    };
+    let steps = match helper {
+        Some(helper) => git::launch::with_launcher(helper(&worktree.path)?, run)?,
+        None => run()?,
+    };
     Ok((worktree, steps))
 }
 
@@ -657,17 +661,19 @@ impl Daemon {
         config: &SandboxConfig,
         base: &str,
         agents: &[String],
-    ) -> Result<(git::Worktree, Vec<git::IntegrationStep>)> {
+        on_step: &mut dyn FnMut(&IntegrationStep),
+    ) -> Result<(Workspace, Vec<IntegrationStep>)> {
         let helper = |worktree: &Path| -> Result<Arc<dyn Launcher>> {
             Ok(Arc::new(self.helper_launcher(config, worktree)?))
         };
         let required = config.mode == SandboxMode::Required;
         integrate(
-            &self.workspace,
+            self.vcs().as_ref(),
             &self.worktrees_dir(),
             base,
             agents,
             required.then_some(&helper as HelperFor),
+            on_step,
         )
     }
 
@@ -678,14 +684,14 @@ impl Daemon {
         team: &TeamConfig,
         id: &str,
         base: &str,
-    ) -> Result<git::Worktree> {
+    ) -> Result<Workspace> {
         let config = &team.workspace.sandbox;
         let helper = |worktree: &Path| -> Result<Arc<dyn Launcher>> {
             Ok(Arc::new(self.helper_launcher(config, worktree)?))
         };
         let required = config.mode == SandboxMode::Required;
         provision_worktree(
-            &self.workspace,
+            self.vcs().as_ref(),
             &self.worktrees_dir(),
             id,
             base,
@@ -1122,7 +1128,14 @@ mod tests {
             Ok(recorder.clone())
         };
 
-        let made = provision_worktree(&ws, &worktrees, "a", "main", Some(&helper)).unwrap();
+        let made = provision_worktree(
+            &crate::vcs::Git::new(&ws),
+            &worktrees,
+            "a",
+            "main",
+            Some(&helper),
+        )
+        .unwrap();
         assert_eq!(made.path, worktrees.join("a"));
         assert_eq!(
             std::fs::read_to_string(made.path.join("tracked.txt")).unwrap(),
@@ -1142,7 +1155,14 @@ mod tests {
         assert_eq!(calls.get(), 1);
 
         // Reused once filled: nothing runs in it again.
-        provision_worktree(&ws, &worktrees, "a", "main", Some(&helper)).unwrap();
+        provision_worktree(
+            &crate::vcs::Git::new(&ws),
+            &worktrees,
+            "a",
+            "main",
+            Some(&helper),
+        )
+        .unwrap();
         assert_eq!(calls.get(), 1);
     }
 
@@ -1164,8 +1184,15 @@ mod tests {
             Ok(recorder.clone())
         };
 
-        let (made, steps) =
-            integrate(&ws, &worktrees, "main", &["a".to_string()], Some(&helper)).unwrap();
+        let (made, steps) = integrate(
+            &crate::vcs::Git::new(&ws),
+            &worktrees,
+            "main",
+            &["a".to_string()],
+            Some(&helper),
+            &mut |_| {},
+        )
+        .unwrap();
         assert_eq!(made.path, integration);
         assert_eq!(steps.len(), 1);
         assert!(steps[0].outcome.ok, "{:?}", steps[0].outcome);

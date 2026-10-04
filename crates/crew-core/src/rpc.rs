@@ -700,6 +700,14 @@ pub struct SessionInfo {
     /// `off`, `required`, or empty before a team is loaded or from older peers.
     #[serde(default)]
     pub sandbox: String,
+    /// The version control tool agents work with: `jj`, `git`, or empty when
+    /// they share the checkout, before a team is loaded, or from older peers.
+    #[serde(default)]
+    pub vcs: String,
+    /// Why `vcs` is git although jj is the default (the fallback's notice);
+    /// empty otherwise.
+    #[serde(default)]
+    pub vcs_note: String,
     /// The daemon's startup warning when its bound socket uses the private
     /// /tmp fallback; empty for the preferred runtime directory or older peers.
     #[serde(default)]
@@ -1055,6 +1063,9 @@ pub struct CommitInfo {
     pub branch: String,
     pub summary: String,
     pub files_changed: usize,
+    /// jj's change id of the commit; None under git.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub change_id: Option<String>,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq, Default)]

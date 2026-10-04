@@ -60,6 +60,13 @@ pub(crate) struct SessionState {
     /// with a plan ended. Members it adds after that are temporary.
     #[serde(default)]
     pub founded_at: Option<i64>,
+    /// The version control backend the agents' workspaces were set up
+    /// with (`jj` or `git`); empty when they share the checkout.
+    #[serde(default)]
+    pub vcs: String,
+    /// Why it is git although jj is the default; empty otherwise.
+    #[serde(default)]
+    pub vcs_note: String,
 }
 
 /// Per-agent state that is persisted but is not part of the public `Agent`.
@@ -282,6 +289,10 @@ pub struct Inner {
     pub(crate) hooks: Mutex<HashMap<String, Arc<tokio::sync::RwLock<()>>>>,
     /// How many stops of each agent have been asked for (Daemon::stops).
     pub(crate) stops: Mutex<HashMap<String, u64>>,
+    /// The version control backend of the session (Daemon::vcs).
+    pub(crate) vcs: RwLock<Option<Arc<dyn crate::vcs::Vcs>>>,
+    /// Numbers VCS operations for their events (`v<n>`).
+    pub(crate) vcs_ops: std::sync::atomic::AtomicU64,
     /// Git operations run one at a time.
     pub(crate) git_lock: tokio::sync::Mutex<()>,
     /// Planning and applying the plan is one critical section, so two
@@ -599,6 +610,8 @@ impl Daemon {
                 })
                 .unwrap_or_default()
                 .to_string(),
+            vcs: s.vcs.clone(),
+            vcs_note: s.vcs_note.clone(),
             socket_warning: self.socket_warning.clone(),
             daemon_started_at: self.started_at,
             team_started_at: s.team_started_at,
@@ -668,6 +681,26 @@ impl Daemon {
 
     pub(crate) fn worktrees_dir(&self) -> PathBuf {
         self.state_dir.join("worktrees")
+    }
+
+    /// The version control backend of the session: the one `load_team`
+    /// selected, or after a restart the one the session was set up with.
+    pub(crate) fn vcs(&self) -> Arc<dyn crate::vcs::Vcs> {
+        if let Some(vcs) = self.vcs.read().unwrap_or_else(|e| e.into_inner()).clone() {
+            return vcs;
+        }
+        let kind = self.model().session.vcs.clone();
+        let restored = crate::vcs::restore(&kind, &self.workspace, &self.state_dir);
+        self.vcs
+            .write()
+            .unwrap_or_else(|e| e.into_inner())
+            .get_or_insert(restored)
+            .clone()
+    }
+
+    /// Make `vcs` the session's backend.
+    pub(crate) fn set_vcs(&self, vcs: Arc<dyn crate::vcs::Vcs>) {
+        *self.vcs.write().unwrap_or_else(|e| e.into_inner()) = Some(vcs);
     }
 
     /// Ask the scheduler loop to re-plan.
@@ -912,6 +945,8 @@ pub async fn start(options: DaemonOptions) -> Result<Running> {
         launches: Mutex::new(HashMap::new()),
         hooks: Mutex::new(HashMap::new()),
         stops: Mutex::new(HashMap::new()),
+        vcs: RwLock::new(None),
+        vcs_ops: std::sync::atomic::AtomicU64::new(1),
         git_lock: tokio::sync::Mutex::new(()),
         plan_lock: tokio::sync::Mutex::new(()),
         team_lock: tokio::sync::Mutex::new(()),
