@@ -410,7 +410,7 @@ impl Daemon {
                 .get(id)
                 .is_some_and(|l| l.session_confirmed));
         self.fall_back_by_style(id, None, Some(fresh)).await;
-        let (agent, local, team, agents, tasks, token, worktrees) = {
+        let (mut agent, mut local, team, agents, tasks, token, worktrees) = {
             let model = self.model();
             let agent = model
                 .agent(id)
@@ -431,6 +431,21 @@ impl Daemon {
                 model.session.isolation == "worktree",
             )
         };
+        if start == Start::Fresh {
+            // Its new session is chosen here, where nothing of the old one
+            // runs any more, and this start uses it whatever the model says:
+            // the old session reporting itself as it was stopped (its stop
+            // hook) does not hand it back.
+            agent.session_id = chosen_session_id(agent.runtime);
+            local.session_confirmed = false;
+            self.model()
+                .local
+                .entry(id.to_string())
+                .or_default()
+                .session_confirmed = false;
+            self.save_local(id);
+            self.update_agent(id, |a| a.session_id = agent.session_id.clone());
+        }
         let runtime = runtime_for(agent.runtime);
 
         let agent_dir = self.agent_dir(id);

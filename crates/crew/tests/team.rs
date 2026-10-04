@@ -7737,3 +7737,88 @@ fn a_fresh_restart_starts_a_new_session_instead_of_resuming_the_old_one() {
         "the old session id stayed"
     );
 }
+
+#[test]
+fn a_fresh_restart_is_not_handed_back_the_old_session_by_its_last_hook() {
+    let s = Session::new();
+    let identity = s.workspace.join(".crew/agents/x/identity.json");
+    // A `claude` that notes, for every session it is started with, how
+    // ("resume <id>", "session-id <id>" or "none"), and, told to stop,
+    // reports its session through the stop hook the way Claude Code does at
+    // the end of a turn, before it exits. (It keeps its terminal: a job sh
+    // runs in the background reads /dev/null unless told otherwise.)
+    let bin = s.root().join("bin");
+    std::fs::create_dir_all(&bin).unwrap();
+    let log = s.root().join("sessions");
+    write_program(
+        &bin.join("claude"),
+        &format!(
+            "#!/bin/sh\nr=none; s=; p=\nfor a in \"$@\"; do\n  [ \"$p\" = --resume ] && r=\"resume $a\" && s=$a\n  [ \"$p\" = --session-id ] && r=\"session-id $a\" && s=$a\n  p=$a\ndone\necho \"$r\" >> '{log}'\ntrap '\"{CREW}\" hook stop --identity \"{identity}\" \"{{\\\"session_id\\\":\\\"$s\\\"}}\"; exit 0' TERM\n'{CREW}' fake-cli claude \"$@\" <&0 &\nwait $!\n",
+            log = log.display(),
+            identity = identity.display(),
+        ),
+    );
+    let team = s.team(
+        "fresh-late-hook",
+        vec![AgentSpec {
+            id: "x".into(),
+            role: "implementation".into(),
+            runtime: Some(RuntimeKind::Claude),
+            ..AgentSpec::default()
+        }],
+        vec![],
+    );
+    std::fs::write(s.root().join("team.yaml"), team.to_yaml().unwrap()).unwrap();
+    let mut path = vec![bin.clone()];
+    path.extend(std::env::split_paths(&std::env::var_os("PATH").unwrap()));
+    let out = s
+        .command()
+        .env("PATH", std::env::join_paths(path).unwrap())
+        .args(["run", "team.yaml", "--no-attach"])
+        .output()
+        .unwrap();
+    assert!(out.status.success(), "{}", stderr(&out));
+    let sessions = || std::fs::read_to_string(&log).unwrap_or_default();
+    let up = |n: usize| {
+        s.wait("x to be up", |snap| {
+            let x = find_agent(snap, "x");
+            x.pid.is_some() && x.status != AgentStatus::Spawning
+        });
+        s.wait_for("its session", || sessions().lines().count() >= n);
+    };
+    up(1);
+    let old = find_agent(&s.snapshot(), "x")
+        .session_id
+        .clone()
+        .expect("a Claude agent's chosen session id");
+    let socket = std::path::PathBuf::from(
+        serde_json::from_str::<Value>(&std::fs::read_to_string(&identity).unwrap()).unwrap()
+            ["socket"]
+            .as_str()
+            .unwrap(),
+    );
+    let (mut operator, _) = crew_core::client::Client::operator(&socket, "test").unwrap();
+    // Restarted fresh; as it is stopped, its stop hook reports the old
+    // session again.
+    operator
+        .call_value(crew_core::rpc::Call::AgentRestartFresh { id: "x".into() })
+        .unwrap();
+    up(2);
+    let lines: Vec<String> = sessions().lines().map(String::from).collect();
+    let session_id = find_agent(&s.snapshot(), "x").session_id.clone();
+    s.stop();
+    assert_eq!(
+        lines[0],
+        format!("session-id {old}"),
+        "the first start: {lines:?}"
+    );
+    assert!(
+        !lines[1].contains(&old),
+        "the fresh start went back to the old session: {lines:?}"
+    );
+    assert_ne!(
+        session_id.as_deref(),
+        Some(old.as_str()),
+        "the old session id stayed"
+    );
+}
