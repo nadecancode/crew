@@ -41,7 +41,8 @@ use serde_json::{json, Value};
 use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader};
 use tokio::net::unix::{OwnedReadHalf, OwnedWriteHalf};
 use tokio::net::{TcpListener, TcpStream, UnixStream};
-use tokio::sync::{broadcast, mpsc, watch, Notify};
+use tokio::sync::{broadcast, mpsc, oneshot, watch, Notify};
+use tokio::task::AbortHandle;
 use tokio_tungstenite::tungstenite::handshake::derive_accept_key;
 use tokio_tungstenite::tungstenite::protocol::frame::coding::CloseCode;
 use tokio_tungstenite::tungstenite::protocol::{CloseFrame, Role, WebSocketConfig};
@@ -101,6 +102,8 @@ struct Joined {
     /// True once this membership was revoked.
     revoked: watch::Sender<bool>,
     open: Arc<Gauge>,
+    /// The tasks of the connections admitted under it.
+    tasks: Vec<AbortHandle>,
 }
 
 #[derive(Default)]
@@ -123,7 +126,7 @@ impl Tables {
     fn join(&mut self, id: &str, last: DaemonInfo) -> u64 {
         self.generations += 1;
         self.rev += 1;
-        let joined = Joined { generation: self.generations, last, running: false, watch: None, retries: 0, revoked: watch::channel(false).0, open: Gauge::new() };
+        let joined = Joined { generation: self.generations, last, running: false, watch: None, retries: 0, revoked: watch::channel(false).0, open: Gauge::new(), tasks: Vec::new() };
         self.joined.insert(id.to_string(), joined);
         self.generations
     }
@@ -154,6 +157,8 @@ struct Knobs {
     v1_reconcile: AtomicBool,
     /// Revision 1 as one could read it: a rescan asked for while one runs is dropped.
     lossy_rescan: AtomicBool,
+    /// A connection that is told its membership was revoked holds its daemon this much longer.
+    stuck_pipe_ms: AtomicU64,
 }
 
 struct Shared {
@@ -423,11 +428,16 @@ async fn main() {
             let (stream, _) = listener.accept().await.unwrap();
             stream.set_nodelay(true).ok();
             let shared = shared.clone();
-            tokio::spawn(async move {
-                if let Err(e) = serve(shared, stream).await {
+            // The task is handed its own handle, so a membership can abort
+            // the connections that were admitted under it.
+            let (me_tx, me_rx) = oneshot::channel();
+            let task = tokio::spawn(async move {
+                let Ok(me) = me_rx.await else { return };
+                if let Err(e) = serve(shared, stream, me).await {
                     eprintln!("conn: {e}");
                 }
             });
+            let _ = me_tx.send(task.abort_handle());
         }
     };
     tokio::spawn(accept(v6, shared.clone()));
@@ -439,7 +449,7 @@ async fn respond(stream: &mut TcpStream, status: &str) -> std::io::Result<()> {
     stream.shutdown().await
 }
 
-async fn serve(shared: Arc<Shared>, mut stream: TcpStream) -> Res<()> {
+async fn serve(shared: Arc<Shared>, mut stream: TcpStream, me: AbortHandle) -> Res<()> {
     let mut head = Vec::with_capacity(1024);
     let mut chunk = [0u8; 1024];
     while !head.windows(4).any(|w| w == b"\r\n\r\n") {
@@ -471,7 +481,7 @@ async fn serve(shared: Arc<Shared>, mut stream: TcpStream) -> Res<()> {
     config.max_message_size = Some(1024 * 1024);
     config.max_frame_size = Some(1024 * 1024);
     let ws = WebSocketStream::from_raw_socket(stream, Role::Server, Some(config)).await;
-    session(shared, ws).await
+    session(shared, ws, me).await
 }
 
 fn error(id: &Value, code: &str, message: &str) -> Message {
@@ -521,6 +531,9 @@ async fn control(shared: &Arc<Shared>, v: &Value) -> Option<Value> {
             if let Some(on) = p["lossy_rescan"].as_bool() {
                 shared.knobs.lossy_rescan.store(on, Ordering::SeqCst);
             }
+            if let Some(ms) = p["stuck_pipe_ms"].as_u64() {
+                shared.knobs.stuck_pipe_ms.store(ms, Ordering::SeqCst);
+            }
             ok(json!({}))
         }
         "spike_remove" => {
@@ -543,8 +556,20 @@ async fn control(shared: &Arc<Shared>, v: &Value) -> Option<Value> {
                     if let Some(w) = j.watch.take() {
                         w.task.abort();
                     }
+                    // A connection that has not let go within a second is
+                    // aborted. Asking a task to stop does not stop it: its
+                    // future, and the daemon's side that future owns, is
+                    // dropped when the runtime gets to it. So the count is
+                    // waited for again, and the answer follows the drop.
+                    let mut aborted = 0;
+                    if tokio::time::timeout(Duration::from_secs(1), j.open.drained()).await.is_err() {
+                        for task in j.tasks.iter().filter(|t| !t.is_finished()) {
+                            task.abort();
+                            aborted += 1;
+                        }
+                    }
                     let drained = tokio::time::timeout(Duration::from_secs(5), j.open.drained()).await.is_ok();
-                    ok(json!({"removed": true, "drained": drained, "generation": j.generation}))
+                    ok(json!({"removed": true, "drained": drained, "aborted": aborted, "generation": j.generation}))
                 }
                 Some(j) => {
                     let generation = j.generation;
@@ -570,7 +595,7 @@ async fn control(shared: &Arc<Shared>, v: &Value) -> Option<Value> {
     }
 }
 
-async fn session(shared: Arc<Shared>, ws: WebSocketStream<TcpStream>) -> Res<()> {
+async fn session(shared: Arc<Shared>, ws: WebSocketStream<TcpStream>, me: AbortHandle) -> Res<()> {
     let (mut tx, mut rx) = ws.split();
     // Before hello: `ping`, `web_pair`, `hello`.
     let open = loop {
@@ -591,15 +616,20 @@ async fn session(shared: Arc<Shared>, ws: WebSocketStream<TcpStream>) -> Res<()>
                 // Admission, under the table's lock: the open is counted for
                 // the generation it found before anything is dialled.
                 let admitted = {
-                    let t = shared.tables.lock().unwrap();
-                    match t.joined.get(ws_id) {
+                    let mut t = shared.tables.lock().unwrap();
+                    match t.joined.get_mut(ws_id) {
                         None => Err(("not_found", "that workspace is not in this dashboard")),
                         Some(j) if !j.running => Err(("unavailable", "that workspace is not running")),
-                        Some(j) => Ok((j.last.clone(), j.revoked.subscribe(), j.open.hold())),
+                        Some(j) => {
+                            j.tasks.push(me.clone());
+                            Ok((j.last.clone(), j.revoked.subscribe(), j.open.hold()))
+                        }
                     }
                 };
                 match admitted {
                     Err((code, message)) => tx.send(error(&id, code, message)).await?,
+                    // Spike only: this open is answered with an error of the test's choosing.
+                    Ok(_) if v["params"]["spike_refuse"].is_string() => tx.send(error(&id, v["params"]["spike_refuse"].as_str().unwrap_or_default(), "as the test asked")).await?,
                     Ok(_) if v["params"]["spike_fail_dial"].as_bool() == Some(true) => {
                         // A dial that fails while the watch is healthy. The
                         // server looks at that workspace again; nothing changes.
@@ -691,7 +721,9 @@ async fn session(shared: Arc<Shared>, ws: WebSocketStream<TcpStream>) -> Res<()>
         match step {
             Step::Revoked => {
                 // Let go of the daemon first; the goodbye to the browser is
-                // not what the removal waits for.
+                // not what the removal waits for. (The knob: a connection
+                // that does not let go.)
+                tokio::time::sleep(Duration::from_millis(shared.knobs.stuck_pipe_ms.load(Ordering::SeqCst))).await;
                 drop((lines, unix_tx));
                 drop(held);
                 tx.send(close(4002, GONE)).await?;

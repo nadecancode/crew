@@ -163,11 +163,11 @@ check("M2 a switch has its snapshot within 50 ms at p95", q(sw, 0.95) / 1000 < 5
 }
 
 // --- M5: taking a workspace out --------------------------------------------------
+const remove = (revoke) => index.call("spike_remove", { id: B, revoke });
+const join = () => index.call("spike_join", { id: B });
 {
   let opB = await unixOperator(b);
   const delivered = async (id) => !(await opB.call("message_get", { id })).error;
-  const remove = (revoke) => index.call("spike_remove", { id: B, revoke });
-  const join = () => index.call("spike_join", { id: B });
   /** A client that ignores the index and every goodbye: it sends a message
    * every 5 ms from before the removal until 300 ms after its answer. */
   async function stubborn(revoke, tag) {
@@ -252,6 +252,39 @@ check("M2 a switch has its snapshot within 50 ms at p95", q(sw, 0.95) / 1000 < 5
     p.close();
     await join();
   }
+  // Forced: a connection that does not let go is aborted after a second, and
+  // the answer waits until its daemon side is really gone.
+  {
+    await knobs({ stuck_pipe_ms: 8000 });
+    const { c } = await viaHub(B, undefined, { ignoreClose: true });
+    const t0 = Date.now();
+    const r = await remove(true);
+    const took = Date.now() - t0;
+    const id = `m-spike-stuck-${t0}`;
+    c.sendRaw(JSON.stringify({ id: 1, method: "send", params: { to: "w1", type: "message", body: "after the abort", id } }));
+    await sleep(300);
+    check("M5 a connection that holds on is aborted after a second; the removal answers when its daemon side is gone, not when the abort was asked", r.result?.drained === true && r.result.aborted === 1 && took >= 1000 && took < 2500 && !(await delivered(id)), `answered after ${took} ms, ${r.result?.aborted} aborted`);
+    await knobs({ stuck_pipe_ms: 0 });
+    c.close();
+    await join();
+  }
+  // A browser that does not read: its connection is stuck writing to it and
+  // never looks at the revocation.
+  {
+    const { c } = await viaHub(B, undefined, { ignoreClose: true });
+    c.pause();
+    for (let i = 0; i < 200; i++) c.sendRaw(JSON.stringify({ id: 5000 + i, method: "snapshot", params: { messages: 300, events: 1000 } }));
+    await sleep(1500);
+    const t0 = Date.now();
+    const r = await remove(true);
+    const took = Date.now() - t0;
+    const id = `m-spike-slow-${t0}`;
+    c.sendRaw(JSON.stringify({ id: 1, method: "send", params: { to: "w1", type: "message", body: "after the abort", id } }));
+    await sleep(300);
+    check("M5 a browser that does not read cannot hold the removal up: its connection is aborted, then the answer", r.result?.drained === true && r.result.aborted >= 1 && took >= 1000 && took < 2500 && !(await delivered(id)), `answered after ${took} ms, ${r.result?.aborted} aborted`);
+    c.close();
+    await join();
+  }
   opB.close();
 }
 
@@ -267,6 +300,87 @@ check("M2 a switch has its snapshot within 50 ms at p95", q(sw, 0.95) / 1000 < 5
   check("M7 (revision 1, reproduced) a dial fails, the listing still says running and nothing more is said: a page waiting for a listing would wait for ever", first.error?.code === "unavailable" && quiet);
   const second = await p.call("hello", helloParams({ workspace: A }));
   check("M7 trying again while the listing says running gets through", second.result?.project === "a");
+  p.close();
+}
+
+// --- M8: the page's rules for a connection's outcome, replayed ----------------------
+// The spike has no page. This is a model of what §multi-ui says the page does
+// for one workspace, as revision 2 had it and as revision 3 has it, driven by
+// the real hub. `closeDelay` is how late the page notices a close.
+function pageModel(rule, id, firstHello = {}) {
+  const m = { state: "none", listing: null, conn: null, attempt: 0, tried: 0, closeDelay: 0 };
+  const entryOf = () => m.listing?.joined.find((w) => w.id === id);
+  async function evaluate() {
+    const e = entryOf();
+    if (!e) return void (m.state = "removed");
+    if (!e.running) return void (m.state = "not-running");
+    if (m.conn) return void (m.state = "live");
+    m.state = "connecting";
+    const attempt = ++m.attempt;
+    const c = await open(HUB_PORT, hubHost, { ignoreClose: true });
+    const h = await c.call("hello", helloParams({ workspace: id, ...(m.tried++ === 0 ? firstHello : {}) }));
+    if (attempt !== m.attempt) return c.close();
+    if (h.error) { c.close(); return outcome(attempt, h.error.code); }
+    m.conn = c;
+    m.state = "live";
+    c.whenClosed.then((closed) => setTimeout(() => outcome(attempt, closed?.code ?? 1006), m.closeDelay));
+  }
+  async function outcome(attempt, what) {
+    if (attempt !== m.attempt) return; // from a connection it replaced: dropped, in both versions
+    m.conn?.close();
+    m.conn = null;
+    if (rule === 2) {
+      // Revision 2: these say what the workspace is, until another listing comes.
+      if (what === 4002 || what === "not_found") return void (m.state = "removed");
+      if (what === "protocol") return void (m.state = "incompatible");
+      return evaluate();
+    }
+    // Revision 3: an outcome ends its attempt and says nothing about the
+    // workspace. These three mean the listing the attempt was started under
+    // may be out of date: ask, then act on the newest listing there is,
+    // whether or not the answer was newer.
+    if (what === 4002 || what === "not_found" || what === "protocol") {
+      const r = await listing();
+      if (!m.listing || r.rev > m.listing.rev) m.listing = r;
+    }
+    return evaluate();
+  }
+  return {
+    m,
+    /** A listing reaches the page. */
+    async listing(l) { if (m.listing && l.rev <= m.listing.rev) return; m.listing = l; await evaluate(); },
+    close() { m.attempt++; m.conn?.close(); },
+  };
+}
+for (const rule of [2, 3]) {
+  // Taken out and joined again within one coalescing interval: the page gets
+  // one listing, "running", and then the old connection's close.
+  const p = pageModel(rule, B);
+  await p.listing(await listing());
+  const g0 = (await entry(B)).generation;
+  p.m.closeDelay = 400;
+  await remove(true);
+  await join();
+  await until(async () => (await entry(B))?.running === true);
+  await p.listing(await listing());
+  await sleep(1500);
+  const now = await listing();
+  const e = now.joined.find((w) => w.id === B);
+  if (rule === 2) check("M8 (revision 2, reproduced) taken out and joined again, the old close arrives after the new listing: the page says removed, the listing says running, and nothing more will be said", p.m.state === "removed" && e?.running === true && e.generation > g0 && now.rev === p.m.listing.rev);
+  else {
+    const snap = await p.m.conn?.call("snapshot", { messages: 0, events: 0 });
+    check("M8 the old close ends the old attempt and nothing else: the page asks for the listing, finds running, and is live on the new generation", p.m.state === "live" && p.m.attempt === 2 && snap?.result?.session?.project === "b" && e.generation > g0);
+  }
+  p.close();
+}
+for (const rule of [2, 3]) {
+  // An error that is about a daemon that is no longer the one the listing shows.
+  const p = pageModel(rule, B, { spike_refuse: "protocol" });
+  await p.listing(await listing());
+  await sleep(800);
+  const now = await listing();
+  if (rule === 2) check("M8 (revision 2, reproduced) a late `protocol` answer: the page says incompatible, the listing says running, and nothing more will be said", p.m.state === "incompatible" && now.joined.find((w) => w.id === B)?.running === true && now.rev === p.m.listing.rev);
+  else check("M8 a late `protocol` answer ends its attempt: the listing, asked again and unchanged, still says running, and the next attempt is live", p.m.state === "live" && p.m.attempt === 2 && now.rev === p.m.listing.rev);
   p.close();
 }
 

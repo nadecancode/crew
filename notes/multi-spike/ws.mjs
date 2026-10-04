@@ -35,6 +35,8 @@ export function open(port, host, { origin = `http://${host}`, onPush = () => {},
       /** Replies to ids nobody waits for (a smuggled request's). */
       stray: [],
       close() { sock.destroy(); },
+      /** Stop reading: what the server writes piles up until it cannot write. */
+      pause() { sock.pause(); },
       whenClosed: null,
     };
     let closedResolve;

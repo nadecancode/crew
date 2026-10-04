@@ -49,13 +49,32 @@ to):
 Each fault was replayed in the spike before the rule that replaces it; those
 lines of its output say "revision 1, reproduced".
 
+**Revision 3.** After the review of revision 2 (m-da819a0798dc,
+`review/web-multi-design-r2.md`; the findings above are closed):
+- **P2, an outcome is about its attempt.** Revision 2 made the listing the
+  authority and then let a 4002 close, `not_found` and `protocol` set
+  `removed` and `incompatible` all the same. Such a report can be about a
+  connection older than the newest listing: a workspace taken out and joined
+  again within one push interval, a daemon since replaced. No outcome sets a
+  state any more: it ends its attempt, the page asks for the listing where
+  the outcome says the listing may be stale, and acts on the newest listing
+  it then has, an unchanged one included (§multi-ui "Two levels").
+- **The forced end of a removal** is spelled out: cancelling a task is a
+  request; the removal awaits the cancelled tasks and the generation's count
+  before it answers (§multi-join "Leaving", step 4).
+
+Both are replayed in the spike: the page's rules as a model in
+`measure.mjs`, in revision 2's version ("revision 2, reproduced") and in
+this one; a connection that holds on, and a browser that does not read.
+
 **Verification.** What was uncertain was tried against two real daemons
 (built from main, protocol 5) with a prototype of the shared server:
 `notes/multi-spike/run.sh` replays it and prints `PASS` (node 24.19.0).
-`hub/` is the prototype (Rust, 732 lines: one port, an index connection, one
+`hub/` is the prototype (Rust, 764 lines: one port, an index connection, one
 daemon connection per WebSocket, memberships with generations, watches
 reconciled against the registry, listings with revisions), `measure.mjs`
-the measurements and the replays. Findings from those runs are marked
+the measurements and the replays, with a model of the page's rules for a
+workspace connection (the spike has no page). Findings from those runs are marked
 **(observed)**. The spike is evidence, not the implementation: it takes its
 label, pairing code and secret as arguments; a rescan joins every running
 session it was not told to leave out; its control calls are calls of the
@@ -443,11 +462,32 @@ the generation** of the membership they were admitted under, and
    forwarding in both directions and drops the daemon's side, and only then
    closes its WebSocket, with 4002 ("taken out of this dashboard"). The
    watch is closed.
-4. **Waits** until no pending open and no connection of that generation
-   holds a connection to the daemon. One that has not let go within 1 s is
-   aborted, which drops it. The goodbye to a browser is not waited for: a
-   browser that does not read cannot hold the removal up.
-5. **Answers** `{"removed": true}`, and the listing is pushed without it.
+4. **Waits for the generation to drain.** Every pending open and every
+   connection holds a guard of its generation for exactly as long as it
+   owns a connection to the daemon, or may still get one; the count of
+   those guards is what is waited for.
+   - A unit that has not let go within 1 s is **cancelled, and the
+     cancellation is awaited**. `abort()` on a task is a request: the task's
+     future, and the daemon's side that future owns, is dropped when the
+     runtime next gets to it, not when `abort()` returns. So the server
+     aborts the task; awaits its join handle, which resolves once the future
+     was dropped; awaits likewise every task that one owns and that could
+     hold the daemon's side (a connection's writer task, as `ws.rs` has
+     today: `AbortOnDrop` ends such a child when its owner is dropped, and
+     the child is awaited too, or is built so that it never holds the
+     daemon's side); and then waits for the count again.
+   - Only a count of zero lets the removal go on. Nothing on a connection's
+     path may block a thread: what blocks cannot be cancelled.
+   - The goodbye to a browser is not part of the count. A browser that does
+     not read leaves its connection stuck in a write, where it never looks
+     at the revocation; that connection is one of those cancelled after the
+     second (**observed**: a connection made to hold on for 8 s, and one
+     stuck writing to a client that had stopped reading, were each aborted
+     after 1 s; the removal answered 2 ms later with the count at zero, and
+     nothing sent afterwards was delivered).
+5. **Answers** `{"removed": true}`, and the listing is pushed without it. If
+   the count could not be brought to zero (no test may reach this), the
+   answer is `internal`, the log says so, and the membership stays revoked.
 
 What this guarantees: when `crew web --remove` returns, nothing a browser
 sends reaches that workspace's daemon through the server, whatever the page
@@ -483,6 +523,11 @@ pub struct Workspaces {
 }
 pub struct WorkspaceEntry {
     pub id: String,
+    /// The membership's generation: greater after the workspace was taken
+    /// out and joined again.
+    pub generation: u64,
+    /// The daemon the server's watch is on. Absent unless `running`.
+    pub daemon: Option<DaemonRef>,
     pub project: Option<String>,
     /// The workspace directory.
     pub workspace: String,
@@ -506,6 +551,8 @@ pub enum WorkspaceState {
     /// does not answer. `detail` says which.
     Unreachable,
 }
+/// One run of a workspace's daemon, as the registry publishes it.
+pub struct DaemonRef { pub pid: u32, pub started_at: i64 }
 pub struct OtherSession { pub id: String, pub project: Option<String>, pub workspace: String }
 ```
 
@@ -899,45 +946,88 @@ server's file has none.
 page's state) and `net/workspace.ts` (today's link, for one workspace id).
 
 **The listing says what a workspace is. A connection says only what happened
-to that connection.** The page shows `not-running`, `incompatible` or
-`removed` because the newest listing says so, and for no other reason. The
-rules that follow from it:
+to that connection**, and by the time the page hears of it the listing may
+already describe a later membership or a later daemon. So the state of the
+workspace on screen is **computed**, from the newest listing and from
+whether the page has a live connection, and nothing a connection reports
+sets it:
 
-- A workspace connection is opened only while the page is `live` and the
-  listing says the workspace is `running`. Its `hello` carries the id.
-- **While the listing says `running` and the page has no live connection to
-  the workspace, it tries**: at once the first time and whenever the listing
-  turns to `running`, then with today's backoff (250 ms doubling to 5 s,
-  ±20 %), **for as long as the listing says `running`**. The state is
-  `connecting` or `reconnecting`; what was shown stays, read-only and
-  dimmed. There is no giving up into a state that only a change of the
-  listing would end, because nothing promises that change: one dial that
-  fails while the daemon and the server's watch are healthy leaves the
-  listing as it is, and an idle workspace says nothing more (**observed**:
-  after a failed dial the revision did not move and no push came; the next
-  try got through).
-- Every way a workspace connection can end leads there and nowhere else: a
-  close with 4001 or any other code, the daemon's `shutdown` push,
-  `unavailable` to its `hello`, a timeout, a snapshot after `resync` that
-  fails. None of them is taken to mean that the daemon stopped. If it did
-  stop, the server knows (the watch ended, or the failed dial made it
-  reconcile, §multi-server) and the listing says so within that reconcile;
-  the tries stop then.
-- When the listing says the workspace is not `running`: no connection and no
-  tries; the banner (below). When it says `running` again: connect at once.
-- A close with 4002, or `not_found` to a `hello`: `removed`. No tries; the
-  next listing is the truth. `protocol` to a workspace's `hello`:
-  `incompatible`, no tries until a listing says `running`. (On the index
-  connection `protocol` still stops the page: its own server does not speak
-  its protocol.)
+| the newest listing says | the page's connection | shown | the page |
+|---|---|---|---|
+| the workspace is not joined | any | `removed` | closes it; no tries |
+| `stopped`, `unreachable` | any | `not-running` | closes it; no tries |
+| `incompatible` | any | `incompatible` | closes it; no tries |
+| `running` | live | `live` | |
+| `running` | none | `connecting`, `reconnecting` | tries |
+
+It is evaluated when a newer listing is applied, when the current attempt
+ends, and when the index connection becomes live. What was shown stays,
+read-only and dimmed, whenever the state is not `live`.
+
+**An attempt** is one try to connect: a socket, its `hello`, and what
+follows on it. It has a number, and it records the `generation` and the
+`daemon` of the workspace's entry in the listing it was started under. Only
+the current attempt's reports are acted on; whatever the socket of an
+earlier attempt still delivers is dropped, as `conn.ts` drops the events of
+a socket it has replaced.
+
+**What an outcome does.** Every way the current attempt can end (a close
+with any code, an error to its `hello`, the daemon's `shutdown` push, a
+timeout, a snapshot after `resync` that fails) ends that attempt and nothing
+else: its connection is closed, and the state is evaluated again from the
+listing.
+
+- 4002, `not_found` and `protocol` say that the listing the attempt was
+  started under may be out of date. Before it evaluates, the page calls
+  `workspaces`, and then evaluates with the newest listing it has: the reply
+  if its `rev` is greater, the one it already had otherwise. **A reply with
+  an equal `rev` settles it just the same**: it says that the listing the
+  page has is the current one, and the page acts on that. It is not applied
+  a second time, and nothing waits for a push that need not come.
+- Any other outcome: evaluated at once. The server reconciles the workspace
+  when a dial fails or a daemon's side ends (§multi-server), so if the
+  daemon did stop, a listing says so within that reconcile.
+
+**Tries.** While the evaluation says so: a new attempt after the backoff
+delay (250 ms doubling to 5 s, ±20 %), for as long as the listing says
+`running`. There is no giving up into a state that only a change of the
+listing would end, because nothing promises that change. The delay starts
+over, and the next attempt is made at once, when the entry's `generation` or
+`daemon` differ from those the last attempt recorded, and when the
+workspace turns to `running` in the listing.
+
+Why no outcome may set a state (**observed**; the last two with a model of
+these rules run against the real server, in revision 2's version and in
+this one):
+
+- One dial fails while the daemon and the server's watch are healthy. The
+  listing does not change and an idle workspace says nothing more: the
+  revision did not move and no push came. A page that waited for a listing
+  would wait for ever; the next try got through.
+- A workspace is taken out and joined again within one push interval. The
+  page gets one listing, `running`, with the new generation, and then the
+  old connection's 4002. Revision 2's page said `removed` and stayed there,
+  with the listing saying `running` and nothing more to come. This page ends
+  the old attempt, asks for the listing, finds `running` under a generation
+  it has not tried, and is live on its second attempt.
+- A `protocol` answer that is about a daemon since replaced. Revision 2's
+  page said `incompatible`, for good. This one asks, finds the listing
+  unchanged and `running`, and its next attempt is live.
+
+The rest:
+
+- A workspace connection is opened only while the page is `live`. Its
+  `hello` carries the id.
 - When the index connection is lost the page is `reconnecting` and
-  read-only as today, whatever the workspace connection does, and the last
-  listing is not acted on until the index is live again. When the page
-  stops, every connection is closed and nothing is requested again.
+  read-only as today, whatever the workspace connection does; no attempt is
+  started and no listing is acted on until the index is live again. When the
+  page stops, every connection is closed and nothing is requested again.
 - A failed proof on a workspace or terminal connection stops the page
   (`link.stop("proof")` as the terminal does today). `unauthorized` on one
   does too: the session is the server's, whichever connection learns that
-  it is gone.
+  it is gone. These two are about the page's server, not about a workspace,
+  and are the only reports of a workspace connection that reach beyond its
+  attempt.
 
 ### Which workspace
 
@@ -1021,10 +1111,12 @@ button) is closed, not carried over.
   sentence on an empty main area.
 - `incompatible`: "payments was started by another version of crew (0.1.0,
   protocol 5). Restart the team to see it here."
-- `removed` (a workspace taken out with `crew web --remove` while on
-  screen): "payments was taken out of this dashboard", and the switcher.
-  The page does not have to cooperate for that to be true: the server has
-  ended its connections (§multi-join "Leaving").
+- `removed` (the listing no longer has the workspace: it was taken out
+  with `crew web --remove` while on screen): "payments was taken out of this
+  dashboard", and the switcher. The page does not have to cooperate for
+  that to be true: the server has ended its connections (§multi-join
+  "Leaving"). If it is joined again, the listing has it again and the page
+  connects.
 
 ---
 
@@ -1177,9 +1269,18 @@ the test's own and real daemons beside it:
   - a dial that completes in the instant of the removal fails its commit:
     `not_found`, and the daemon's side is closed (the test holds the commit
     with a hook and removes then);
-  - a connection that does not let go (its task is blocked by a hook) is
-    aborted after 1 s and the answer still comes, after the abort;
-  - a browser that does not read its socket does not delay the answer;
+  - a connection that does not let go (a hook holds it in an await after
+    the revocation) is cancelled after 1 s, and the answer is sent only
+    after its future was dropped: the hook's guard records its own drop,
+    and the test compares that time with the answer's, not with the time
+    `abort()` was called. The same with the daemon's side moved into the
+    connection's writer task: that child is ended and awaited too;
+  - a browser that does not read its socket, while the daemon sends more
+    than the socket buffers hold: the connection is stuck in a write and
+    never sees the revocation; it is cancelled after 1 s, the answer
+    follows the drop, and the daemon receives nothing afterwards;
+  - the count that cannot reach zero (a guard leaked by a hook): `internal`,
+    logged, and `hello` for the workspace stays `not_found`;
   - joining again: a greater generation, a new `hello` works, the old
     connections stay closed;
   - under `join = "all"`, rescans do not join a removed workspace; `crew web`
@@ -1287,11 +1388,36 @@ the test's own and real daemons beside it:
   daemon's `shutdown` push, with `unavailable`, with a timeout, is tried
   again at 250 ms, 500 ms … 5 s without limit and is live again when a try
   succeeds; the tries stop when a listing says `stopped` and a connection is
-  made at once when one says `running`; 4002 and `not_found` make it
-  `removed` with no tries;
+  made at once when one says `running`;
+  **an outcome is about its attempt** (fake sockets and timers, every step
+  in a fixed order):
+  - the delayed old close: a listing at rev N (`running`, generation G) and
+    a live connection; a listing at rev N+1 (`running`, generation G+1: the
+    removal and the rejoin, coalesced); then the first connection closes
+    with 4002. The page calls `workspaces`; the reply has rev N+1; a new
+    attempt is made at once and is live. `[data-workspace-state]` never was
+    `removed`;
+  - the same with the reply's `rev` greater and the workspace absent from
+    it: `removed`, no attempt; and greater with the workspace `running`:
+    live;
+  - the late `protocol`: under a listing that says `running`, the attempt's
+    `hello` is answered `protocol`; the page asks; the reply has the same
+    `rev`; the next attempt is live. It never was `incompatible`. With a
+    reply that says `incompatible`: that, and no attempt;
+  - `not_found` to a `hello`, the same three replies;
+  - a 4002, a `protocol` and a close that arrive from an attempt already
+    replaced: dropped; no call, no change of state;
+  - a reply with an equal `rev` is not applied to the store a second time
+    (no reconcile, no render), and still settles the state;
+  - the backoff starts over when `generation` or `daemon` of the entry
+    differ from the last attempt's, and not otherwise;
   route parsing and rewriting with `/w/<id>`; the pairing fragment with
   `&w=`; the choice of workspace; the switcher's rows from fixtures; title
   and badges from summaries; preferences split in two.
+- Playwright, `mock`, for the same race in a real browser: the mock takes a
+  workspace out and joins it again within 100 ms, sends one listing, and
+  holds the old socket's close frame back for 300 ms; the tab ends `live`
+  and shows the workspace's agents. The same with a held `protocol` answer.
 - Playwright, `mock` (the mock server gains an index and two workspaces):
   the switcher by keyboard and by mouse; a switch disposes the old store
   (no element of the old workspace remains, checked while the new snapshot
@@ -1384,7 +1510,10 @@ recipes.
   not say the daemon stopped) and 4002 when the workspace was taken out;
   `hello` errors `not_found`, `unavailable`, `protocol`, `unauthorized`.
 - A listing has a `rev`; the page applies only a greater one. What a
-  workspace *is* comes from the listing, never from a connection.
+  workspace *is* comes from the listing, never from a connection: a close
+  code or an error ends an attempt and, at most, makes the page ask for the
+  listing. An entry has `generation` and `daemon` for the page's attempts
+  to record.
 - A text message has no line break.
 
 ### Risks to watch
@@ -1401,11 +1530,14 @@ recipes.
   exist (a published daemon that cannot be dialled; the daemon's own
   `web_rescan`) are armed by a failure and end with it.
 - **State set from a connection**: anywhere the server writes `stopped`, or
-  the page shows `not-running`, because a connection ended rather than
-  because the registry, or the listing, said so, the races of revision 1
-  are back.
+  the page shows `not-running`, `removed` or `incompatible`, because a
+  connection ended or answered an error rather than because the registry,
+  or the listing, said so, the races of revisions 1 and 2 are back.
 - **Removal that trusts the page**: closing the WebSocket is not the
   guarantee; the daemon's side being dropped before the answer is.
+- **Removal that trusts `abort()`**: answering when the cancellation was
+  asked for, not when the cancelled tasks and their children were awaited
+  and the count is zero.
 - **The watch is not a subscriber**: if it subscribed, the server would
   receive every push of every team and P20 would depend on the teams.
 - **Tests that leave servers behind**: every harness stops its server; the
