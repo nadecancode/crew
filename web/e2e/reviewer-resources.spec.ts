@@ -46,3 +46,19 @@ test("a failed model listing displays its error without an uncaught exception", 
   expect(errors).toEqual([]);
   await expect(page.getByRole("dialog", { name: "model and CLI" })).toContainText("review catalog is unavailable");
 });
+
+test("changing an uncached message after stop never displays another message's body", async ({ page, mock, openPage }) => {
+  mock.on("message_get", (params: { id: string }) => ({
+    id: params.id, from: "orchestrator", to: "operator", type: "message",
+    body: `Body belonging to ${params.id}`, timestamp: mock.now(), correlation_id: null, reply_to: null, metadata: null,
+  }));
+  await openPage();
+  await page.evaluate(() => { location.hash = "/?message=review-first"; });
+  await expect(page.getByText("Body belonging to review-first")).toBeVisible();
+  await mock.shutdown();
+  await expect(page.locator('[data-conn="stopped"]')).toBeAttached();
+  await page.evaluate(() => { location.hash = "/?message=review-second"; });
+  await expect(page.locator(".message-panel .panel-title")).toHaveText("message review-second");
+  await expect(page.getByText("Body belonging to review-first")).toHaveCount(0);
+  await expect(page.locator(".message-panel")).toContainText("not connected");
+});
