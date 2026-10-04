@@ -25,6 +25,81 @@ use tokio_tungstenite::WebSocketStream;
 
 type Ws = WebSocketStream<TcpStream>;
 
+#[test]
+fn reviewer_restart_preserves_a_dashboard_whose_workspaces_are_stopped() {
+    let s = Session::new();
+    let state = running(&s);
+    let server = Server::start(&s);
+    let mut control = server.control();
+    let before = control.open(&state);
+    s.ok(&["stop", "-C", &s.workspace.to_string_lossy()]);
+    let out = s.crew(&["web", "--restart", "--no-open", "--json"]);
+    assert!(out.status.success(), "{}", stderr(&out));
+    let after: WebInfo = serde_json::from_slice(&out.stdout).unwrap();
+    assert_ne!(before.url, after.url);
+    let mut replacement = Control::connect(&runtime(&s).join("web.sock"), true);
+    let listing = replacement.listing();
+    assert_eq!(listing.joined.len(), 1);
+    assert_eq!(listing.joined[0].id, crew_core::paths::session_id(&state));
+    assert_eq!(listing.joined[0].state, WorkspaceState::Stopped);
+}
+
+#[test]
+fn reviewer_another_protocol_server_is_kept_until_explicit_restart() {
+    let s = Session::new();
+    let state = running(&s);
+    let mut server = Server::start(&s);
+    let mut control = server.control();
+    let before = control.open(&state);
+    // Discovery sees another protocol. The stand-in process still obeys
+    // SIGTERM, which is the replacement path for an incompatible server.
+    let path = runtime(&s).join("web.json");
+    let mut info: Value = serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();
+    info["protocol"] = json!(PROTOCOL_VERSION + 1);
+    std::fs::write(&path, serde_json::to_vec(&info).unwrap()).unwrap();
+    let refused = s.crew(&["web", "--all", "--no-open", "--json"]);
+    assert!(!refused.status.success());
+    assert!(stderr(&refused).contains("another version of crew"));
+    assert!(!server.exited_within(Duration::from_millis(100)));
+    assert_eq!(control.call("ping", json!({}))["result"]["pong"], true);
+    let replaced = s.ok(&[
+        "web",
+        "--restart",
+        "--no-open",
+        "--json",
+        "-C",
+        &s.workspace.to_string_lossy(),
+    ]);
+    let after: WebInfo = serde_json::from_str(&replaced).unwrap();
+    assert_ne!(before.url, after.url);
+    assert!(server.exited_within(Duration::from_secs(5)));
+    assert!(!s.snapshot().session.web.is_empty());
+}
+
+#[test]
+fn reviewer_remove_does_not_fall_back_from_an_explicit_missing_project() {
+    let s = Session::new();
+    let state = running(&s);
+    let server = Server::start(&s);
+    let mut control = server.control();
+    control.open(&state);
+    let out = s
+        .command()
+        .current_dir(&s.workspace)
+        .args(["web", "--remove", "--project", "not-a-running-project"])
+        .output()
+        .unwrap();
+    assert!(
+        !out.status.success(),
+        "removing a missing project must fail"
+    );
+    assert_eq!(
+        control.listing().joined.len(),
+        1,
+        "the current workspace must remain joined"
+    );
+}
+
 /// A session with a daemon running in `workspace`, and its state directory.
 fn running(s: &Session) -> PathBuf {
     std::fs::create_dir_all(&s.workspace).unwrap();

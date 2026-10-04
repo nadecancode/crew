@@ -1,7 +1,7 @@
 # Shared-server review: initial findings
 
 Review in progress on `4a5b1b2d`. The independent baseline workspace suite
-passed 879 tests, with two ignored. The two new regressions below fail on
+passed 879 tests, with two ignored. The five new regressions below fail on
 that revision; the remaining source review is not yet complete.
 
 ## P2: Cancelling a partial daemon read discards the frame prefix
@@ -48,3 +48,47 @@ Run the focused checks with:
 This includes two older passing reviewer regressions and the two new
 failing cases. The tests added in this review do not change production
 behavior.
+
+## P2: Restart requires a running daemon before replacing the server
+
+`cli::ops::web::web` resolves and connects to the current workspace before
+it calls `replace_server`; `--all` also refuses when no daemon runs. Thus
+`crew web --restart` cannot replace a dashboard whose joined workspaces
+are all stopped, although the command operates on the shared server and
+the design requires restoration of stopped memberships. It can similarly
+require an unnecessary workspace selection when multiple daemons run.
+
+`reviewer_restart_preserves_a_dashboard_whose_workspaces_are_stopped`
+starts and joins a daemon, stops it while its server lingers, and invokes
+the documented restart command. It fails with `no crew daemon is running`
+before touching the server. A replacement that can read the old server's
+listing should restore that listing without requiring a live target.
+
+## P2: Cross-protocol restart produces invalid JSON output
+
+The incompatible-server branch of `replace_server` prints its note to
+stdout even when the caller requested `--json`. The successful replacement
+then prints the JSON document after that note, breaking clients that parse
+the command's output.
+
+`reviewer_another_protocol_server_is_kept_until_explicit_restart` first
+verifies that an incompatible server is refused and remains running, then
+requests replacement with `--json`. The latter succeeds, but JSON parsing
+fails at the note. Keep diagnostics off JSON stdout.
+
+## P2: A missing explicit project removes the current workspace
+
+`state_dir_of` discards errors from `paths::discover`, including errors for
+an explicitly supplied `--project`, and falls back to the current
+directory. In joined workspace A, `crew web --remove --project
+not-a-running-project` therefore succeeds and removes A instead of
+reporting that the requested project could not be found.
+
+`reviewer_remove_does_not_fall_back_from_an_explicit_missing_project`
+reproduces this against the real server. Preserve explicit target errors;
+use the stopped-workspace fallback only when its target is unambiguous.
+
+Run these three process regressions with
+`./scripts/build-env cargo test -p crew --test web_server reviewer_`.
+The remaining protocol-5 migration gate in the design also needs coverage
+through the CLI; the existing stand-in protocol test covers the hub only.
