@@ -1,5 +1,8 @@
 use super::*;
 
+#[path = "review_regressions.rs"]
+mod review_regressions;
+
 fn serving() -> Registry {
     Registry {
         serving: Some(Serving {
