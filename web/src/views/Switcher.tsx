@@ -22,6 +22,18 @@ export function homeDir(path: string): string {
   return path.replace(/^(\/home\/[^/]+|\/Users\/[^/]+|\/root)(?=\/|$)/, "~");
 }
 
+/** One word for a POSIX shell: as it is when nothing in it is special, else
+ * single-quoted. */
+export function shellQuote(word: string): string {
+  return /^[A-Za-z0-9_\/.,:@%+=-]+$/.test(word) ? word : `'${word.replace(/'/g, `'\\''`)}'`;
+}
+
+/** The command that adds a running session to the dashboard: its exact
+ * directory, quoted, never abbreviated (`~` would be the reader's home). */
+export function addCommand(workspace: string): string {
+  return `crew web -C ${shellQuote(workspace)}`;
+}
+
 const DOT: Record<WorkspaceEntry["state"], string> = { running: "●", stopped: "○", unreachable: "○", incompatible: "⚠" };
 
 /** What a row says of a workspace besides its name and directory. */
@@ -190,14 +202,16 @@ function SwitcherList(props: { close(refocus: boolean): void }) {
 }
 
 function OtherRow(props: { other: OtherSession }) {
-  const command = () => `crew web -C ${homeDir(props.other.workspace)}`;
+  // Shown short, copied exact.
+  const shown = () => `crew web -C ${homeDir(props.other.workspace)}`;
+  const command = () => addCommand(props.other.workspace);
   const [copied, setCopied] = createSignal(false);
   return (
     <div class="switcher-row other" data-other={props.other.id}>
       <span class="ws-dot" />
       <span class="ws-name">{props.other.project ?? props.other.workspace.split("/").filter(Boolean).pop() ?? props.other.id}</span>
       <span class="ws-dir mono">{homeDir(props.other.workspace)}</span>
-      <code class="ws-cmd">{command()}</code>
+      <code class="ws-cmd" title={command()}>{shown()}</code>
       <button
         onClick={() => {
           void navigator.clipboard?.writeText(command()).then(() => setCopied(true), () => {});

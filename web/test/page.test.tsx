@@ -6,7 +6,7 @@ import { beforeEach, describe, expect, test } from "vitest";
 import { AppContext, createPage, otherCounts, pageTitle } from "../src/app";
 import { Session } from "../src/net/session";
 import { formatRoute, parseRoute } from "../src/route";
-import { SwitcherButton, homeDir } from "../src/views/Switcher";
+import { SwitcherButton, addCommand, homeDir, shellQuote } from "../src/views/Switcher";
 import { FakeSocket, fakeEnv, settle } from "./fakes";
 import { fixture } from "./fixtures";
 import { A, B, entry, indexSocket, listing, newest, serveIndex, serveWorkspace, stored } from "./multi";
@@ -41,6 +41,16 @@ describe("addresses", () => {
     expect(formatRoute({ workspace: A, view: "tasks", sel: { kind: "agent", id: "a b" } })).toBe(`#/w/${A}/tasks?agent=a%20b`);
     expect(formatRoute({ workspace: null, view: "logs", sel: null })).toBe("#/logs");
     for (const hash of [`#/w/${A}/`, `#/w/${B}/usage?message=m-1`, `#/w/${A}/logs?event=3`]) expect(formatRoute(parseRoute(hash))).toBe(hash);
+  });
+
+  test("the command that adds a session names its exact directory, quoted for a shell", () => {
+    expect(addCommand("/home/op/work/docs")).toBe("crew web -C /home/op/work/docs");
+    expect(addCommand("/srv/crew work/billing")).toBe("crew web -C '/srv/crew work/billing'");
+    expect(addCommand("/home/op/o'brien")).toBe("crew web -C '/home/op/o'\\''brien'");
+    expect(addCommand("/home/another-operator/project")).toBe("crew web -C /home/another-operator/project");
+    expect(shellQuote("$(rm -rf ~)")).toBe("'$(rm -rf ~)'");
+    expect(shellQuote("~/x")).toBe("'~/x'");
+    expect(shellQuote("")).toBe("''");
   });
 
   test("home is shown as ~", () => {
