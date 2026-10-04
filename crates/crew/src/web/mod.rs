@@ -591,6 +591,9 @@ use another",
             pair_url: format!("{}#pair={code}", serving.url()),
             expires_in_secs: (CODE_TTL_MS / 1000) as u32,
             started,
+            workspace: None,
+            workspace_url: None,
+            joined: Vec::new(),
         })
     }
 

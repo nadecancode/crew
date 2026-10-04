@@ -9,7 +9,7 @@
   {
     "error": {
       "code": "protocol",
-      "message": "client speaks protocol 4, daemon speaks 5"
+      "message": "client speaks protocol 5, daemon speaks 6"
     },
     "id": 2
   },

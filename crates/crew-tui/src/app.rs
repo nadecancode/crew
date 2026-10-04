@@ -865,7 +865,9 @@ impl App {
             | Push::Pty { .. }
             | Push::PtyClosed
             | Push::Compact { .. }
-            | Push::Deliver { .. } => return,
+            | Push::Deliver { .. }
+            | Push::Summary(_)
+            | Push::Workspaces(_) => return,
         }
         self.dirty = true;
     }

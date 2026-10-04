@@ -12,9 +12,10 @@ Every timestamp is built from one fixed moment, so the files are stable.
 |---|---|
 | `snapshot.json`, `subagents.json`, `team10.json` | `Snapshot`s: the TUI's reference session, the same with subagents, ten workers |
 | `pushes.jsonl` | one `ServerFrame` per line: every push kind the page handles, a `vcs.*` event for every row of jj-design §events, `agent.error` and `agent.refused`, an operator question and its answer, `pty`/`pty_closed`, `resync`, `shutdown`, and a push of a kind that does not exist (to be ignored) |
-| `results.json` | `{ "<method>": [result, …] }`: example results of every call of §transport's table, plus `tasks_list`, `git_merge` (clean and conflicted), `web_open`, `web_close` |
+| `results.json` | `{ "<method>": [result, …] }`: example results of every call of §transport's table, plus `tasks_list`, `git_merge` (clean and conflicted), `web_open`, `web_close`, `workspaces`, `summary` |
 | `errors.json` | one error `ServerFrame` per `RpcError` code the daemon uses |
 | `enums.json` | `protocol` and every enum's values, VCS actions and outcomes included |
+| `multi.json` | protocol 6 (notes/web-multi.md §multi-tests): the index and a workspace `hello` (request, reply, the `hello` the server sends the daemon instead, the four refusals), `workspaces` reply and push (every `WorkspaceState`, a session not joined), `summary` reply and push, `web_attach`, `web_event`, the control socket's `web_open` and `web_close`, the daemon's `invalid` for `web_open`, `web_close`, `web_pair`, and the close codes 4001, 4002 and 1008 |
 | `commands.json` | the dashboard's slash commands (`crew_tui::slash::DASHBOARD`) |
 | `anim.json` | animation cases from `crew_tui::anim::Anims`, below |
 

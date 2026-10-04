@@ -14,12 +14,21 @@ use serde_json::Value;
 use crate::config::{AgentSpec, TaskSpec, TeamConfig};
 use crate::types::{
     Agent, AgentStatus, Artifact, Event, InboxEntry, Message, MessageType, RuntimeKind, Task,
+    WebEventKind, WorkspaceState,
 };
 
 /// Bump for new/renamed enum values, removed/renamed fields or changed meanings.
 /// New optional fields with `serde(default)` do not require a bump.
 /// Peers require an exact match; restart running teams after upgrading.
-pub const PROTOCOL_VERSION: u32 = 5;
+pub const PROTOCOL_VERSION: u32 = 6;
+
+/// The dashboard server closes a page's workspace connection with this when
+/// the daemon's side of it ended. It says nothing about the daemon: the
+/// listing does (notes/web-multi.md §multi-transport).
+pub const CLOSE_WORKSPACE_ENDED: u16 = 4001;
+/// The dashboard server closes a page's workspace connection with this when
+/// the workspace was taken out of the dashboard (`crew web --remove`).
+pub const CLOSE_WORKSPACE_REMOVED: u16 = 4002;
 
 #[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
@@ -42,6 +51,14 @@ pub struct Hello {
     pub client: String,
     #[serde(default)]
     pub protocol: u32,
+    /// Set by the dashboard server on a connection it opens for a browser:
+    /// the daemon then treats the connection as a web session (W7).
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub web: bool,
+    /// From a browser to the dashboard server: the workspace this
+    /// connection is for. Absent: the index connection. A daemon ignores it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub workspace: Option<String>,
 }
 
 impl std::fmt::Debug for Hello {
@@ -52,6 +69,8 @@ impl std::fmt::Debug for Hello {
             .field("token", &self.token.as_ref().map(|_| "<redacted>"))
             .field("client", &self.client)
             .field("protocol", &self.protocol)
+            .field("web", &self.web)
+            .field("workspace", &self.workspace)
             .finish()
     }
 }
@@ -424,18 +443,60 @@ pub enum Call {
         cols: u16,
     },
 
-    /// Operator, on the daemon socket: serve the web dashboard if it is not
-    /// served yet, and make a one-time pairing code for one browser.
+    /// Operator, on the dashboard server's control socket: join a workspace
+    /// (`workspace`: its state directory), every running session (`all`),
+    /// or the memberships of a server being replaced (`restore`: state
+    /// directories); serve the dashboard if it is not served yet; make a
+    /// one-time pairing code for one browser. A daemon answers `invalid`.
     WebOpen {
         #[serde(default)]
         port: Option<u16>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        workspace: Option<String>,
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        all: bool,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        restore: Option<Vec<String>>,
     },
-    /// Operator, on the daemon socket: stop serving; every web session ends.
-    #[serde(deserialize_with = "empty_params")]
-    WebClose,
+    /// Operator, on the control socket: with `workspace` (its id or state
+    /// directory), take it out of the dashboard; without, stop the server.
+    /// A daemon answers `invalid`.
+    WebClose {
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        workspace: Option<String>,
+    },
     /// A browser, before `hello`: trade a pairing code for a session token.
+    /// The dashboard server's; a daemon answers `invalid`.
     WebPair {
         code: String,
+    },
+    /// The control socket and a page's index connection: the dashboard's
+    /// listing (`Workspaces`).
+    #[serde(deserialize_with = "empty_params")]
+    Workspaces,
+    /// Operator, on the control socket: reconcile every joined workspace
+    /// with the registry (a daemon says it started).
+    #[serde(deserialize_with = "empty_params")]
+    WebRescan,
+    /// Operator: what a workspace switcher shows of this session. With
+    /// `watch`, the connection then gets a `summary` push whenever the
+    /// summary changed: the first change at once, then at most one per
+    /// 250 ms.
+    Summary {
+        #[serde(default)]
+        watch: bool,
+    },
+    /// Operator on the socket, not web: this connection is the dashboard
+    /// server's watch. `SessionInfo.web` is `url` until it ends.
+    WebAttach {
+        url: String,
+    },
+    /// On the watch: something about the dashboard the session's log should
+    /// hold.
+    WebEvent {
+        kind: WebEventKind,
+        #[serde(default)]
+        count: u32,
     },
     /// Operator, either transport: the dashboard's preferences for this
     /// workspace. With `set` they are replaced first. Answers
@@ -525,9 +586,14 @@ impl Call {
             Call::AttachInput { .. } => "attach_input",
             Call::AttachResize { .. } => "attach_resize",
             Call::WebOpen { .. } => "web_open",
-            Call::WebClose => "web_close",
+            Call::WebClose { .. } => "web_close",
             Call::WebPair { .. } => "web_pair",
             Call::WebPrefs { .. } => "web_prefs",
+            Call::Workspaces => "workspaces",
+            Call::WebRescan => "web_rescan",
+            Call::Summary { .. } => "summary",
+            Call::WebAttach { .. } => "web_attach",
+            Call::WebEvent { .. } => "web_event",
         }
     }
 }
@@ -680,8 +746,13 @@ pub enum Push {
     },
     /// The attached agent's process ended.
     PtyClosed,
-    /// The daemon is shutting down.
+    /// The daemon is shutting down; on a page's index connection, the
+    /// dashboard server.
     Shutdown,
+    /// On a `summary {watch: true}` connection: the summary changed.
+    Summary(WorkspaceSummary),
+    /// On a page's index connection: the dashboard's listing changed.
+    Workspaces(Workspaces),
     /// An additive push the peer understands but this client does not.
     /// Produced only while deserializing; never sent by the daemon.
     #[serde(other)]
@@ -815,6 +886,16 @@ pub struct WebInfo {
     pub expires_in_secs: u32,
     /// This call started the server (it was not running).
     pub started: bool,
+    /// The id of the workspace this call was made for; absent for `--all`
+    /// run outside a session.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub workspace: Option<String>,
+    /// `url` with `#/w/<workspace>/`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub workspace_url: Option<String>,
+    /// The ids this call joined (not those that were joined already).
+    #[serde(default)]
+    pub joined: Vec<String>,
 }
 
 impl std::fmt::Debug for WebInfo {
@@ -825,8 +906,86 @@ impl std::fmt::Debug for WebInfo {
             .field("pair_url", &"<redacted>")
             .field("expires_in_secs", &self.expires_in_secs)
             .field("started", &self.started)
+            .field("workspace", &self.workspace)
+            .field("workspace_url", &self.workspace_url)
+            .field("joined", &self.joined)
             .finish()
     }
+}
+
+/// What the `workspaces` call answers and the `workspaces` push carries:
+/// the whole listing, each time (notes/web-multi.md §multi-join).
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq, Default)]
+pub struct Workspaces {
+    /// The revision of this listing: greater than that of every listing the
+    /// server made before it. A page applies only a greater one.
+    pub rev: u64,
+    /// Joined, in the order they were joined.
+    pub joined: Vec<WorkspaceEntry>,
+    /// Running sessions of this user that are not joined: names only.
+    #[serde(default)]
+    pub others: Vec<OtherSession>,
+}
+
+/// A joined workspace, as the dashboard server knows it.
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
+pub struct WorkspaceEntry {
+    /// 16 hex digits: the stem of its daemon's socket and registry entry.
+    pub id: String,
+    /// The membership's generation: greater after the workspace was taken
+    /// out and joined again.
+    pub generation: u64,
+    /// The daemon the server's watch is on. Absent unless `running`.
+    #[serde(default)]
+    pub daemon: Option<DaemonRef>,
+    #[serde(default)]
+    pub project: Option<String>,
+    /// The workspace directory.
+    pub workspace: String,
+    pub state: WorkspaceState,
+    /// Why, for `incompatible` and `unreachable`; else empty.
+    #[serde(default)]
+    pub detail: String,
+    /// The last summary its daemon gave; kept while it is stopped.
+    #[serde(default)]
+    pub summary: Option<WorkspaceSummary>,
+    pub joined_at: i64,
+}
+
+/// One run of a workspace's daemon, as the registry publishes it.
+#[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq)]
+pub struct DaemonRef {
+    pub pid: u32,
+    pub started_at: i64,
+}
+
+/// A running session of this user that is not joined.
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
+pub struct OtherSession {
+    pub id: String,
+    #[serde(default)]
+    pub project: Option<String>,
+    pub workspace: String,
+}
+
+/// What a workspace switcher shows of a session (`summary`).
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq, Default)]
+pub struct WorkspaceSummary {
+    /// Grows with every change of the summary, for the daemon's life.
+    pub rev: u64,
+    /// The team's name once one is loaded.
+    #[serde(default)]
+    pub project: Option<String>,
+    pub agents: u32,
+    /// Agents whose status is `working`.
+    pub working: u32,
+    /// Agents that cannot go on by themselves: `blocked` (whatever the
+    /// kind) or `failed`.
+    pub attention: u32,
+    /// Questions put to the operator that nobody answered yet.
+    pub questions: u32,
+    pub tasks: u32,
+    pub tasks_done: u32,
 }
 
 /// What `web_pair` answers. `Debug` leaves the token out.
@@ -866,7 +1025,8 @@ mod compatibility_tests {
             Call::Credential,
             Call::TasksList,
             Call::Integrate,
-            Call::WebClose,
+            Call::Workspaces,
+            Call::WebRescan,
         ] {
             let canonical = serde_json::to_value(&call).unwrap();
             assert!(canonical.get("params").is_none());
@@ -1012,6 +1172,8 @@ mod compatibility_tests {
             Push::Pty { .. } => "pty",
             Push::PtyClosed => "pty_closed",
             Push::Shutdown => "shutdown",
+            Push::Summary(_) => "summary",
+            Push::Workspaces(_) => "workspaces",
             Push::Unknown => "unknown",
         };
         let pushes = vec![
@@ -1023,7 +1185,9 @@ mod compatibility_tests {
             Push::Session(Box::default()), Push::Resync,
             Push::Deliver { ids: vec![], text: String::new() },
             Push::Compact { instructions: None }, Push::Pty { data: String::new() },
-            Push::PtyClosed, Push::Shutdown, Push::Unknown,
+            Push::PtyClosed, Push::Shutdown,
+            Push::Summary(WorkspaceSummary::default()), Push::Workspaces(Workspaces::default()),
+            Push::Unknown,
         ];
         let push_kinds: Vec<_> = pushes
             .iter()
@@ -1046,18 +1210,22 @@ mod compatibility_tests {
             "message_type": enum_values(MessageType::ALL), "runtime_kind": enum_values(RuntimeKind::ALL),
             "event_level": enum_values(EventLevel::ALL), "transcript_kind": enum_values(TranscriptKind::ALL),
             "role": enum_values(&roles), "push": push_kinds,
+            "workspace_state": enum_values(WorkspaceState::ALL),
+            "web_event_kind": enum_values(WebEventKind::ALL),
         });
-        let version_5 = json!({
+        let version_6 = json!({
             "agent_status": ["spawning","idle","working","waiting","blocked","done","failed","stopped"],
             "task_status": ["queued","ready","working","waiting","blocked","review","done","failed"],
             "message_type": ["task","message","question","answer","status","review_request","review_result","artifact","error"],
             "runtime_kind": ["claude","codex","pi","shell"], "event_level": ["debug","info","warn","error"],
             "transcript_kind": ["prompt","reply","tool","note"], "role": ["operator","agent"],
-            "push": ["event","message","agent","agent_removed","task","session","resync","deliver","compact","pty","pty_closed","shutdown","unknown"],
+            "push": ["event","message","agent","agent_removed","task","session","resync","deliver","compact","pty","pty_closed","shutdown","summary","workspaces","unknown"],
+            "workspace_state": ["running","stopped","incompatible","unreachable"],
+            "web_event_kind": ["paired","auth_failed"],
         });
         assert_eq!(
             (PROTOCOL_VERSION, actual),
-            (5, version_5),
+            (6, version_6),
             "bump PROTOCOL_VERSION and update this list"
         );
     }
@@ -1066,14 +1234,59 @@ mod compatibility_tests {
     fn the_web_calls_round_trip_and_their_secrets_stay_out_of_debug() {
         for (call, wire) in [
             (
-                Call::WebOpen { port: Some(23417) },
-                json!({"method":"web_open","params":{"port":23417}}),
+                Call::WebOpen {
+                    port: Some(23417),
+                    workspace: Some("/w/payments/.crew".into()),
+                    all: false,
+                    restore: None,
+                },
+                json!({"method":"web_open","params":{"port":23417,"workspace":"/w/payments/.crew"}}),
             ),
             (
-                Call::WebOpen { port: None },
-                json!({"method":"web_open","params":{"port":null}}),
+                Call::WebOpen {
+                    port: None,
+                    workspace: None,
+                    all: true,
+                    restore: None,
+                },
+                json!({"method":"web_open","params":{"port":null,"all":true}}),
             ),
-            (Call::WebClose, json!({"method":"web_close"})),
+            (
+                Call::WebOpen {
+                    port: None,
+                    workspace: None,
+                    all: false,
+                    restore: Some(vec!["/w/a/.crew".into(), "/w/b/.crew".into()]),
+                },
+                json!({"method":"web_open","params":{"port":null,"restore":["/w/a/.crew","/w/b/.crew"]}}),
+            ),
+            (
+                Call::WebClose { workspace: None },
+                json!({"method":"web_close","params":{}}),
+            ),
+            (
+                Call::WebClose {
+                    workspace: Some("946d4617aa702870".into()),
+                },
+                json!({"method":"web_close","params":{"workspace":"946d4617aa702870"}}),
+            ),
+            (
+                Call::Summary { watch: true },
+                json!({"method":"summary","params":{"watch":true}}),
+            ),
+            (
+                Call::WebAttach {
+                    url: "http://c7f3.localhost:23417/".into(),
+                },
+                json!({"method":"web_attach","params":{"url":"http://c7f3.localhost:23417/"}}),
+            ),
+            (
+                Call::WebEvent {
+                    kind: WebEventKind::AuthFailed,
+                    count: 7,
+                },
+                json!({"method":"web_event","params":{"kind":"auth_failed","count":7}}),
+            ),
             (
                 Call::WebPair {
                     code: "c0de".into(),
@@ -1093,7 +1306,21 @@ mod compatibility_tests {
         }
         // Optional parameters may be left out.
         let open: Call = serde_json::from_value(json!({"method":"web_open","params":{}})).unwrap();
-        assert_eq!(open, Call::WebOpen { port: None });
+        assert_eq!(
+            open,
+            Call::WebOpen {
+                port: None,
+                workspace: None,
+                all: false,
+                restore: None
+            }
+        );
+        let close: Call =
+            serde_json::from_value(json!({"method":"web_close","params":{}})).unwrap();
+        assert_eq!(close, Call::WebClose { workspace: None });
+        let summary: Call =
+            serde_json::from_value(json!({"method":"summary","params":{}})).unwrap();
+        assert_eq!(summary, Call::Summary { watch: false });
         let prefs: Call =
             serde_json::from_value(json!({"method":"web_prefs","params":{}})).unwrap();
         assert_eq!(prefs, Call::WebPrefs { set: None });
@@ -1104,6 +1331,9 @@ mod compatibility_tests {
             pair_url: "http://c7f3.localhost:23417/#pair=SECRETCODE".into(),
             expires_in_secs: 120,
             started: true,
+            workspace: Some("946d4617aa702870".into()),
+            workspace_url: Some("http://c7f3.localhost:23417/#/w/946d4617aa702870/".into()),
+            joined: vec!["946d4617aa702870".into()],
         };
         let paired = WebPaired {
             token: "SECRETTOKEN".into(),
@@ -1147,6 +1377,73 @@ mod compatibility_tests {
             "daemon_pid":1, "version":"old"});
         let session: SessionInfo = serde_json::from_value(legacy).unwrap();
         assert_eq!(session.web, "");
+    }
+
+    #[test]
+    fn a_hello_says_web_and_workspace_only_when_it_has_them() {
+        let plain =
+            json!({"role":"operator","agent_id":null,"token":"t","client":"cli","protocol":6});
+        let hello: Hello = serde_json::from_value(plain.clone()).unwrap();
+        assert!(!hello.web);
+        assert_eq!(hello.workspace, None);
+        assert_eq!(serde_json::to_value(&hello).unwrap(), plain);
+        let server = json!({"role":"operator","agent_id":null,"token":"t","client":"web","protocol":6,"web":true});
+        let hello: Hello = serde_json::from_value(server.clone()).unwrap();
+        assert!(hello.web);
+        assert_eq!(serde_json::to_value(&hello).unwrap(), server);
+        let page = json!({"role":"operator","agent_id":null,"token":"t","client":"web","protocol":6,
+            "workspace":"946d4617aa702870"});
+        let hello: Hello = serde_json::from_value(page.clone()).unwrap();
+        assert_eq!(hello.workspace.as_deref(), Some("946d4617aa702870"));
+        assert_eq!(serde_json::to_value(&hello).unwrap(), page);
+        // `WebInfo` as protocol 5 wrote it still reads.
+        let old = json!({"url":"http://c7f3.localhost:23417/","port":23417,
+            "pair_url":"http://c7f3.localhost:23417/#pair=x","expires_in_secs":120,"started":true});
+        let info: WebInfo = serde_json::from_value(old).unwrap();
+        assert_eq!((info.workspace, info.joined.len()), (None, 0));
+    }
+
+    #[test]
+    fn a_listing_round_trips_with_every_state() {
+        let listing = Workspaces {
+            rev: 7,
+            joined: WorkspaceState::ALL
+                .iter()
+                .enumerate()
+                .map(|(i, state)| WorkspaceEntry {
+                    id: format!("{i:016x}"),
+                    generation: i as u64 + 1,
+                    daemon: (*state == WorkspaceState::Running).then_some(DaemonRef {
+                        pid: 4242,
+                        started_at: 1_791_000_000_000,
+                    }),
+                    project: Some(format!("p{i}")),
+                    workspace: format!("/w/{i}"),
+                    state: *state,
+                    detail: String::new(),
+                    summary: Some(WorkspaceSummary {
+                        rev: 3,
+                        agents: 2,
+                        ..WorkspaceSummary::default()
+                    }),
+                    joined_at: 1,
+                })
+                .collect(),
+            others: vec![OtherSession {
+                id: "0b54c1d2e3f4a596".into(),
+                project: None,
+                workspace: "/w/docs".into(),
+            }],
+        };
+        let wire = serde_json::to_value(Push::Workspaces(listing.clone())).unwrap();
+        assert_eq!(wire["kind"], "workspaces");
+        assert_eq!(wire["data"]["joined"][2]["state"], "incompatible");
+        assert_eq!(
+            serde_json::from_value::<Push>(wire).unwrap(),
+            Push::Workspaces(listing)
+        );
+        let summary = serde_json::to_value(Push::Summary(WorkspaceSummary::default())).unwrap();
+        assert_eq!(summary["kind"], "summary");
     }
 
     #[test]
