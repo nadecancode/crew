@@ -583,43 +583,54 @@ change identity",
     /// recipient's session. Direct messages go straight to their recipient —
     /// the orchestrator is never a hop.
     pub(crate) async fn send_message(&self, new: NewMessage) -> Result<SendOutcome, RpcError> {
-        let (recipients, notify_p2p) = {
-            let model = self.model();
-            let recipients: Vec<String> = if new.to == BROADCAST {
-                model
-                    .agents
-                    .iter()
-                    .filter(|a| a.id != new.from)
-                    .map(|a| a.id.clone())
-                    .collect()
-            } else if new.to == OPERATOR_ID || model.agent(&new.to).is_some() {
-                vec![new.to.clone()]
-            } else {
-                return Err(RpcError::not_found(format!(
-                    "no agent '{}' (agents: {})",
-                    new.to,
-                    model
-                        .agents
-                        .iter()
-                        .map(|a| a.id.as_str())
-                        .collect::<Vec<_>>()
-                        .join(", ")
-                )));
-            };
-            if new.to == new.from {
-                return Err(RpcError::invalid("an agent cannot message itself"));
-            }
-            let notify = model
-                .session
-                .team
-                .as_ref()
-                .is_some_and(|t| t.orchestrator.notify_p2p);
-            (recipients, notify)
-        };
+        let (recipients, notify_p2p) = self.recipients_of(&new)?;
         let outcome = self.bus.send(new, recipients)?;
         if outcome.duplicate {
             return Ok(outcome);
         }
+        self.message_sent(&outcome, notify_p2p).await;
+        Ok(outcome)
+    }
+
+    /// Whom `new` goes to, and whether the orchestrator hears of it as a
+    /// direct message between workers (send_message).
+    pub(crate) fn recipients_of(&self, new: &NewMessage) -> Result<(Vec<String>, bool), RpcError> {
+        let model = self.model();
+        let recipients: Vec<String> = if new.to == BROADCAST {
+            model
+                .agents
+                .iter()
+                .filter(|a| a.id != new.from)
+                .map(|a| a.id.clone())
+                .collect()
+        } else if new.to == OPERATOR_ID || model.agent(&new.to).is_some() {
+            vec![new.to.clone()]
+        } else {
+            return Err(RpcError::not_found(format!(
+                "no agent '{}' (agents: {})",
+                new.to,
+                model
+                    .agents
+                    .iter()
+                    .map(|a| a.id.as_str())
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            )));
+        };
+        if new.to == new.from {
+            return Err(RpcError::invalid("an agent cannot message itself"));
+        }
+        let notify = model
+            .session
+            .team
+            .as_ref()
+            .is_some_and(|t| t.orchestrator.notify_p2p);
+        Ok((recipients, notify))
+    }
+
+    /// What follows a message the bus accepted (send_message): the push,
+    /// the event, the counters, delivery to each recipient.
+    pub(crate) async fn message_sent(&self, outcome: &SendOutcome, notify_p2p: bool) {
         let message = &outcome.message;
         self.push(Push::Message(message.clone()));
         let arrow = if message.is_p2p() { "→" } else { "⇉" };
@@ -654,7 +665,6 @@ change identity",
             );
             self.notify_orchestrator(&note).await;
         }
-        Ok(outcome)
     }
 
     /// Send a status line to the orchestrator agent, if there is one.
