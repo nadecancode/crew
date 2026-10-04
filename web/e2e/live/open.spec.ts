@@ -9,7 +9,8 @@ test("pairing through the printed address: live, then agents, tasks and messages
 
   await openLive(info);
   // The fragment is gone from the address.
-  await expect(page).toHaveURL(info.url);
+  await expect(page).toHaveURL(info.workspace_url!);
+  expect(page.url()).not.toContain("pair=");
   for (const id of ["dev", "peer", "rival", "echo", "idle"]) await expect(page.locator(`[data-agent="${id}"]`)).toBeVisible();
 
   // The script runs: the bus shows what the agents say.
@@ -32,7 +33,7 @@ test("pairing through the printed address: live, then agents, tasks and messages
   await stranger.close();
   // In the paired browser the spent address falls back to the stored session; a new tab is live.
   const third = await context.newPage();
-  await third.goto(info.url);
+  await third.goto(info.workspace_url!);
   await third.locator('[data-conn="live"]').waitFor({ state: "attached", timeout: 15_000 });
   await expect(third.locator('[data-agent="dev"]')).toBeVisible();
   // No cookie, no service worker.

@@ -53,8 +53,9 @@ each row in the bus log is a persisted message.
   └──────┘ └──────┘
 ```
 
-- The browser dashboard (`crew web`) is one more client: the daemon serves it
-  on the loopback addresses and speaks the same protocol over a WebSocket.
+- The browser dashboard (`crew web`) is one more client: one per-user server
+  (`crew web-server`) shows every joined workspace on the loopback addresses and
+  carries the daemon's own protocol over WebSockets.
 - The **daemon** is a detached process per workspace. It persists every
   change, so it can be killed and restarted without losing the session.
 - **Agents** are ordinary interactive `claude` / `codex` sessions on real
@@ -680,26 +681,32 @@ hold the agent at a prompt only `crew agent attach` could reach.
 
 ## Web dashboard
 
-The same session in a browser: the agent graph with its message and VCS
+The same sessions in a browser: the agent graph with its message and VCS
 animations, the bus, the task graph, the event log, usage, the inspector (a
 live terminal included) and every operator action of the TUI except starting
-a team. It is served by the daemon itself, on the loopback addresses only
-(no other machine, no TLS, no accounts), and works in Chromium-based browsers
-and Firefox. Safari cannot resolve its address.
+a team. **One dashboard server per user shows every workspace you join to
+it**, and you switch between them in the page. It runs on the loopback
+addresses only (no other machine, no TLS, no accounts), and works in
+Chromium-based browsers and Firefox. Safari cannot resolve its address.
 
 ```sh
-crew web                    # start serving if needed, print the address, open the browser
-crew web --no-open          # print it only
-crew web --json             # the address as JSON (scripts)
-crew web --port 23417       # exactly this port (default: derived from the workspace)
-crew web --stop             # stop serving: every browser session ends
+cd ~/work/payments && crew web      # join this workspace, start the server if needed, open the browser
+cd ~/work/search   && crew web      # join this one too: same address, the open tab shows it in its switcher
+crew web --no-open                  # print the addresses only
+crew web --json                     # WebInfo as JSON (scripts): url, port, pair_url, workspace, workspace_url, joined
+crew web --port 23417               # exactly this port (default: derived from your runtime directory)
+crew web --all                      # join every running session
+crew web --list                     # what the dashboard shows, and what runs beside it
+crew web --remove                   # take this workspace out of the dashboard
+crew web --restart                  # replace the server with this build's, keeping its workspaces
+crew web --stop                     # stop the server: every browser session ends, for every workspace
 ```
 
 `crew web` prints two addresses:
 
 ```
-web        http://c7f3a09b52e14d6f8a1b3c5d7e9f0a2b.localhost:23417/
-open       http://c7f3a09b52e14d6f8a1b3c5d7e9f0a2b.localhost:23417/#pair=3f9a…e1   (works once, for 2 minutes)
+web        http://c7f3a09b52e14d6f8a1b3c5d7e9f0a2b.localhost:23417/#/w/946d4617aa702870/
+open       http://c7f3a09b52e14d6f8a1b3c5d7e9f0a2b.localhost:23417/#pair=3f9a…e1&w=946d4617aa702870   (works once, for 2 minutes)
 ```
 
 **Open the `open` address in your own browser and paste it nowhere else.** Its
@@ -707,9 +714,39 @@ open       http://c7f3a09b52e14d6f8a1b3c5d7e9f0a2b.localhost:23417/#pair=3f9a…
 address at once and keeps its session in that browser's `localStorage` (no
 cookie, no service worker). Another tab of the same address needs no code. To
 sign in another browser, run `crew web` again: it prints the same address with
-a new code. `crew status` shows the `web` line while the dashboard is served.
+a new code. `crew status` shows the `web` line while the workspace is joined.
 
-What keeps it yours:
+### Several workspaces
+
+- **Joining is explicit.** A workspace is in the dashboard only after
+  `crew web` was run in it (or `--all`, or `[web] join = "all"` in your user
+  or global `config.toml`; a project's own file is not read for this, so a
+  workspace cannot opt itself in). It stays joined for the server's life,
+  across restarts of its team. Running sessions you did not join are listed in
+  the switcher under "running, not in this dashboard", with the command that
+  adds them, and nothing can reach them through the server. That is why the
+  default is not "everything": sessions started by scripts, test harnesses or
+  an agent that cleared its environment appear in your registry like any other,
+  and joining them by default would put them in front of your browser.
+- **Switching** is the workspace button in the status bar (`w`, arrows,
+  `enter`, `1`–`9`) or a link `#/w/<id>/…`. Each workspace is a connection of
+  its own through the server; what the one you leave showed is gone from the
+  page, and the page keeps the view it had if you come back.
+- **A question** in a workspace that is not on screen shows as a badge on the
+  switcher, in the title and as one notice with a way there; its text is shown
+  only in its own workspace.
+- **A team that stops and starts again** does not end the tab: the workspace is
+  shown as not running (what it last showed stays, read-only) and comes back in
+  the same tab, with the same session, when its daemon does. This holds for
+  `crew stop` and for a killed daemon.
+- **`crew web --remove`** takes a workspace out: its connections end, nothing
+  the page sends afterwards reaches it, and the page says it was taken out.
+  `crew web` in it again brings it back into the same tab.
+- **`crew web --restart`** starts a server of this build in place of the old
+  one and joins what it held. Open tabs stop (their address is new); no team
+  stops.
+
+### What keeps it yours
 
 - The address has a random name made when the server starts and never used
   again, so a page left over from an earlier run (or served by anything that
@@ -717,20 +754,24 @@ What keeps it yours:
   to that name: `http://127.0.0.1:<port>/` and `http://localhost:<port>/`
   show nothing (421).
 - A page of another origin cannot open the socket. An agent's own token is not
-  a web session, and the web session cannot start or stop the server, or load
-  a team.
+  a web session, and a web session cannot start or stop the server, join a
+  workspace or load a team. Sandboxed agents cannot see the server's files.
 - The server proves itself to the page with a secret that is not in the
-  browser's storage; a tab whose daemon was killed refuses whoever takes the
+  browser's storage; a tab whose server was killed refuses whoever takes the
   port next and stops.
 - Text and terminal output from agents are shown as text, under a strict
   Content-Security-Policy; after it has loaded the page makes no HTTP request
   at all.
-- **After the daemon (or `crew web --stop`) restarts, a tab from before stays
-  stopped by design**: run `crew web` for the new address.
+- **After the server is restarted (`crew web --restart`, `--stop`, or a crash),
+  a tab from before stays stopped by design**: run `crew web` for the new
+  address. A restart of a team is different: the tab goes on (above).
 
-Preferences (node positions, the log filters) are kept by the daemon, per
-workspace. The wire is the daemon's own protocol (version 5) over a
-WebSocket; `crates/crew/tests/fixtures/web/` has its reference frames.
+The layout (node positions, log filters) is kept per workspace by its daemon;
+the dashboard's own preferences (keys, panel, the last workspace) by the
+server. The wire is the daemon's own protocol (version 6) over WebSockets
+through the server; `crates/crew/tests/fixtures/web/` has its reference frames.
+A team started by an older crew keeps its own dashboard until it is restarted
+(restart it after upgrading, then run `crew web`).
 
 ### Building the frontend
 
@@ -750,10 +791,12 @@ Commit the rebuilt `web-dist/` with every change to `web/`: `cargo test` fails
 (`web_bundle`) when the bundle is older than the sources. The browser tests use
 `PLAYWRIGHT_EXECUTABLE_PATH` for a Chromium-based browser when Playwright's own
 does not start (NixOS). `scripts/web-e2e [jj|git]` runs the live project alone:
-a real daemon with scripted agents that commit, cherry-pick, merge and ask a
-question, checked through the page (pairing, live updates, the VCS animations,
-operator actions, the terminal, what stays outside, a killed and restarted
-daemon, the performance budgets).
+real daemons (one or several, sharing one server) with scripted agents that
+commit, cherry-pick, merge and ask a question, checked through the page
+(pairing, live updates, the VCS animations, operator actions, the terminal,
+switching workspaces, daemons that stop and return, `--remove`, `--restart`,
+what stays outside, a killed server and a squatter on its port, the
+performance budgets).
 
 ## Dashboard controls
 
