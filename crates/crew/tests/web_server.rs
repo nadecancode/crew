@@ -371,3 +371,41 @@ fn several_workspaces_one_origin_one_session() {
     });
     s.ok(&["stop", "-C", &s.root().join("b").to_string_lossy()]);
 }
+
+#[test]
+fn a_session_is_in_joined_or_in_others_never_both() {
+    let s = Session::new();
+    let a = running(&s);
+    let b = another(&s, "b");
+    let (a_id, b_id) = (
+        crew_core::paths::session_id(&a),
+        crew_core::paths::session_id(&b),
+    );
+    let server = Server::start(&s);
+    let mut control = server.control();
+    control.open(&a);
+    let wait = |control: &mut Control, done: &dyn Fn(&Workspaces) -> bool| {
+        let deadline = Instant::now() + Duration::from_secs(10);
+        loop {
+            let listing = control.listing();
+            if done(&listing) {
+                return listing;
+            }
+            assert!(Instant::now() < deadline, "{listing:?}");
+            std::thread::sleep(Duration::from_millis(50));
+        }
+    };
+    let listing = wait(&mut control, &|l| l.others.iter().any(|o| o.id == b_id));
+    assert!(listing.joined.iter().all(|w| w.id != b_id));
+    control.open(&b);
+    let listing = control.listing();
+    let joined: Vec<&str> = listing.joined.iter().map(|w| w.id.as_str()).collect();
+    assert_eq!(joined, [a_id.as_str(), b_id.as_str()]);
+    assert!(listing.others.iter().all(|o| o.id != b_id), "{listing:?}");
+    let removed = control.call("web_close", json!({"workspace": b_id}));
+    assert_eq!(removed["result"]["removed"], true, "{removed}");
+    let listing = control.listing();
+    assert!(listing.joined.iter().all(|w| w.id != b_id));
+    assert!(listing.others.iter().any(|o| o.id == b_id), "{listing:?}");
+    s.ok(&["stop", "-C", &s.root().join("b").to_string_lossy()]);
+}

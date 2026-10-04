@@ -453,6 +453,16 @@ impl Hub {
             };
             let m = t.members.remove(at);
             t.removed.insert(id.clone());
+            // Still running: one of the others again.
+            if m.state == WorkspaceState::Running {
+                if let Some(info) = &m.published {
+                    t.others.push(OtherSession {
+                        id: id.clone(),
+                        project: m.project.clone().or(info.project.clone()),
+                        workspace: m.workspace.clone(),
+                    });
+                }
+            }
             m.revoked.send_replace(true);
             self.changed(&mut t);
             m
@@ -736,6 +746,8 @@ impl Hub {
 
     /// A new membership, `stopped` until reconciled.
     fn add(&self, t: &mut Table, id: &str, state_dir: &Path, project: Option<String>) {
+        // Joined: no longer one of the others.
+        t.others.retain(|o| o.id != id);
         t.generations += 1;
         t.members.push(Member {
             id: id.to_string(),
