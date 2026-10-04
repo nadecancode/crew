@@ -6656,8 +6656,16 @@ fn a_turn_codexs_model_refuses_is_noticed_and_whoever_waits_on_it_is_told() {
         .unwrap();
 
     // rev is set aside, so nothing prompts it into the same refusal again...
-    let snap = s.wait("rev to be blocked", |snap| {
+    // (The agent is blocked first and its task right after: wait for both.)
+    let rev_task = |snap: &crew_core::rpc::Snapshot| {
+        snap.tasks
+            .iter()
+            .find(|t| t.assigned_agent.as_deref() == Some("rev"))
+            .map(|t| t.status)
+    };
+    let snap = s.wait("rev and its task to be blocked", |snap| {
         find_agent(snap, "rev").block_kind.as_deref() == Some("refused")
+            && rev_task(snap) == Some(TaskStatus::Blocked)
     });
     let rev = find_agent(&snap, "rev");
     assert_eq!(rev.status, AgentStatus::Blocked);
