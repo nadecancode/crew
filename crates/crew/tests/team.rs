@@ -2423,7 +2423,217 @@ fn agents_work_in_their_own_worktrees_and_exchange_commits() {
     );
     assert_eq!(report["conflicts"][0]["agent"], "rival");
     assert_eq!(report["conflicts"][0]["files"][0], "schema.sql");
-    assert!(s.has_event("git.conflict"));
+
+    // Every version control action left its events.
+    use crew_core::vcs::{VcsAction, VcsEvent, VcsOutcome};
+    let events: Vec<VcsEvent> = s.events().iter().filter_map(VcsEvent::from_event).collect();
+    let find = |action: VcsAction, outcome: VcsOutcome, agent: &str| {
+        events
+            .iter()
+            .find(|e| e.action == action && e.outcome == outcome && e.agent == agent)
+            .unwrap_or_else(|| panic!("no {action:?} {outcome:?} of {agent}: {events:#?}"))
+    };
+    let backend = &done.session.vcs;
+    assert!(backend == "jj" || backend == "git", "{backend}");
+    assert!(events.iter().all(|e| &e.backend == backend), "{events:#?}");
+    let commit = find(VcsAction::Commit, VcsOutcome::Ok, "db");
+    assert_eq!(
+        commit.commit.as_deref(),
+        Some(schema.artifacts[0].value.as_str())
+    );
+    assert_eq!(commit.branch.as_deref(), Some("agents/db"));
+    let picked = find(VcsAction::CherryPick, VcsOutcome::Ok, "ledger");
+    assert_eq!(picked.peer.as_deref(), Some("db"));
+    for id in ["db", "ledger", "rival"] {
+        find(VcsAction::Workspace, VcsOutcome::Started, id);
+        find(VcsAction::Workspace, VcsOutcome::Ok, id);
+    }
+    let conflict = events
+        .iter()
+        .find(|e| {
+            e.action == VcsAction::Integrate
+                && e.outcome == VcsOutcome::Conflict
+                && e.peer.is_some()
+        })
+        .unwrap_or_else(|| panic!("no conflicting integration step: {events:#?}"));
+    assert_eq!(conflict.peer.as_deref(), Some("rival"));
+    assert_eq!(conflict.files, ["schema.sql"]);
+    let tally = events
+        .iter()
+        .find(|e| e.action == VcsAction::Integrate && e.outcome.is_terminal() && e.peer.is_none())
+        .expect("the integration's tally");
+    assert_eq!(tally.outcome, VcsOutcome::Conflict);
+    assert_eq!(tally.summary.as_deref(), Some("2 merged, 1 conflict"));
+    // Every start has exactly one end, after it, with its op.
+    for (at, start) in events
+        .iter()
+        .enumerate()
+        .filter(|(_, e)| e.outcome == VcsOutcome::Started)
+    {
+        let ends: Vec<_> = events
+            .iter()
+            .enumerate()
+            .filter(|(_, e)| e.op == start.op && e.outcome.is_terminal())
+            .collect();
+        assert_eq!(ends.len(), 1, "{start:?}: {ends:?}");
+        assert!(ends[0].0 > at, "{start:?} ends before it starts");
+        assert_eq!(ends[0].1.action, start.action);
+    }
+    if backend == "jj" {
+        // Plain git sees the agents' work, and the checkout is untouched.
+        let git = |args: &[&str]| {
+            let out = std::process::Command::new("git")
+                .arg("-C")
+                .arg(&s.workspace)
+                .args(args)
+                .output()
+                .unwrap();
+            String::from_utf8_lossy(&out.stdout).trim().to_string()
+        };
+        assert_eq!(
+            git(&["rev-parse", "refs/heads/agents/db"]),
+            schema.artifacts[0].value
+        );
+        assert_eq!(git(&["status", "--porcelain"]), "");
+        assert!(!s.workspace.join(".jj").exists());
+    }
+}
+
+/// The jj the daemon would find: `CREW_JJ`, else `jj` on PATH.
+fn jj_on_this_host() -> bool {
+    if std::env::var_os("CREW_JJ").is_some_and(|v| !v.is_empty()) {
+        return true;
+    }
+    std::env::var_os("PATH")
+        .map(|path| std::env::split_paths(&path).any(|dir| dir.join("jj").is_file()))
+        .unwrap_or(false)
+}
+
+/// Start `team` with `CREW_JJ` set to `jj` (None: as the host has it); the
+/// output of `crew run`.
+fn start_with_jj(s: &Session, team: &crew_core::config::TeamConfig, jj: Option<&str>) -> String {
+    let file = s.root().join("team.yaml");
+    std::fs::write(&file, team.to_yaml().unwrap()).unwrap();
+    let mut cmd = s.command();
+    if let Some(jj) = jj {
+        cmd.env("CREW_JJ", jj);
+    }
+    let output = cmd
+        .args(["run", "team.yaml", "--no-attach"])
+        .output()
+        .unwrap();
+    assert!(output.status.success(), "{}", stderr(&output));
+    String::from_utf8_lossy(&output.stdout).into_owned()
+}
+
+/// The `session.vcs` event of the team's start.
+fn session_vcs(s: &Session) -> crew_core::Event {
+    s.events()
+        .into_iter()
+        .find(|e| e.event_type == "session.vcs")
+        .expect("a session.vcs event")
+}
+
+#[test]
+fn a_team_start_says_which_version_control_runs_and_why() {
+    use crew_core::config::VcsChoice;
+    use crew_core::EventLevel;
+    // jj is not there: git, with a warning that says how to get jj.
+    let s = Session::new();
+    let mut team = s.team("vcs-absent", vec![agent("a", "", &[])], vec![]);
+    team.workspace.vcs = VcsChoice::Auto;
+    let out = start_with_jj(&s, &team, Some("/nonexistent/jj"));
+    assert!(out.contains("isolation worktree, vcs git"), "{out}");
+    assert!(
+        out.contains("note: version control: git, because jj is not on PATH"),
+        "{out}"
+    );
+    let session = s.snapshot().session;
+    assert_eq!(session.vcs, "git");
+    assert!(
+        session.vcs_note.contains("Install jj 0.44 or newer"),
+        "{}",
+        session.vcs_note
+    );
+    let event = session_vcs(&s);
+    assert_eq!(event.level, EventLevel::Warn);
+    assert_eq!(event.message, session.vcs_note);
+    assert!(s
+        .ok(&["status", "-C", &s.workspace.to_string_lossy()])
+        .contains("note       version control: git"));
+    drop(s);
+
+    if !jj_on_this_host() {
+        if std::env::var("CREW_TEST_VCS").as_deref() == Ok("jj") {
+            panic!("CREW_TEST_VCS=jj, but jj is not on PATH");
+        }
+        eprintln!("skipped the rest: jj is not on PATH");
+        return;
+    }
+    // A git worktree from an earlier session keeps the workspace on git.
+    let s = Session::new();
+    let ws = &s.workspace;
+    std::fs::create_dir_all(ws).unwrap();
+    let git = |args: &[&str]| {
+        let ok = std::process::Command::new("git")
+            .arg("-C")
+            .arg(ws)
+            .args(["-c", "user.name=u", "-c", "user.email=u@example.com"])
+            .args(args)
+            .status()
+            .unwrap()
+            .success();
+        assert!(ok, "git {args:?}");
+    };
+    git(&["init", "-q", "-b", "main"]);
+    git(&["commit", "-q", "--allow-empty", "-m", "first"]);
+    git(&[
+        "worktree",
+        "add",
+        "-q",
+        ".crew/worktrees/old",
+        "-b",
+        "agents/old",
+    ]);
+    let mut team = s.team("vcs-sticky", vec![agent("a", "", &[])], vec![]);
+    team.workspace.vcs = VcsChoice::Auto;
+    let out = start_with_jj(&s, &team, None);
+    assert!(out.contains("vcs git"), "{out}");
+    let session = s.snapshot().session;
+    assert_eq!(session.vcs, "git");
+    assert!(
+        session.vcs_note.contains("from earlier sessions (old)"),
+        "{}",
+        session.vcs_note
+    );
+    assert!(
+        session.vcs_note.contains("Moving a workspace to jj"),
+        "{}",
+        session.vcs_note
+    );
+    drop(s);
+
+    // Nothing in the way: jj, said at info level.
+    let s = Session::new();
+    let mut team = s.team("vcs-jj", vec![agent("a", "", &[])], vec![]);
+    team.workspace.vcs = VcsChoice::Auto;
+    let out = start_with_jj(&s, &team, None);
+    assert!(out.contains("vcs jj"), "{out}");
+    assert!(!out.contains("note:"), "{out}");
+    let session = s.snapshot().session;
+    assert_eq!(
+        (session.vcs.as_str(), session.vcs_note.as_str()),
+        ("jj", "")
+    );
+    let event = session_vcs(&s);
+    assert_eq!(event.level, EventLevel::Info);
+    assert!(
+        event.message.starts_with("version control: jj "),
+        "{}",
+        event.message
+    );
+    assert!(s.workspace.join(".crew/jj/.jj").is_dir());
+    assert!(!s.workspace.join(".jj").exists());
 }
 
 // ---------------------------------------------------------------------------

@@ -71,6 +71,18 @@ impl Root {
         }
     }
 
+    /// Create the regular file `rel` holding `bytes`; it must not exist yet
+    /// (a symlink in its place counts as existing and is not followed).
+    pub fn write_new(&self, rel: &str, bytes: &[u8]) -> io::Result<()> {
+        use std::io::Write;
+        let fd = self.at(
+            rel,
+            libc::O_WRONLY | libc::O_CREAT | libc::O_EXCL | libc::O_NOFOLLOW,
+            0o644,
+        )?;
+        File::from(fd).write_all(bytes)
+    }
+
     /// Remove the file `rel` (a symlink is removed itself, never followed).
     pub fn remove(&self, rel: &str) {
         let (Some(dir), Some(name)) = (Path::new(rel).parent(), Path::new(rel).file_name()) else {
