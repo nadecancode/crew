@@ -1973,10 +1973,16 @@ defaults.auto_trust: true in the team file.",
         // A start still on its way (an earlier restart's, a crash restart's)
         // gives up: this restart takes over from it.
         let since = self.stop_requested(id);
+        // A stop (a kill, a later restart) asked for while this one waits
+        // takes over: this one changes nothing more.
+        let overtaken = || self.stops(id) != since;
         let procs = self.procs()?;
         if procs.is_alive(id) {
             self.model().rt(id).expected_exit = true;
             procs.kill(id).await.map_err(internal)?;
+            if overtaken() {
+                return Ok(());
+            }
         }
         // Tasks that were parked because the agent died or was stopped go
         // back to the scheduler.
@@ -2007,6 +2013,9 @@ defaults.auto_trust: true in the team file.",
             self.requeue_forgotten_work(id).await;
         } else {
             self.requeue_if_sessionless(id).await;
+        }
+        if overtaken() {
+            return Ok(());
         }
         self.update_agent(id, |a| {
             a.status = AgentStatus::Spawning;
@@ -2303,5 +2312,119 @@ may have missed."
         } else {
             ORCHESTRATOR_ID
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::agents::LaunchSpec;
+    use crate::process::Spawned;
+    use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+    use std::sync::Arc;
+    use tokio::sync::Notify;
+
+    /// Processes whose first kill waits until it is released (rev-core's
+    /// fixture): a restart can be held inside its kill of the old session.
+    struct FirstKillWaits {
+        alive: AtomicBool,
+        kills: AtomicUsize,
+        entered: Notify,
+        release: Notify,
+    }
+
+    #[async_trait::async_trait]
+    impl ProcessManager for FirstKillWaits {
+        fn name(&self) -> &'static str {
+            "pty"
+        }
+        async fn spawn(&self, _: &LaunchSpec) -> Result<Spawned> {
+            anyhow::bail!("a restart a stop overtook must not start anything")
+        }
+        async fn submit_prompt(&self, _: &str, _: &str) -> Result<()> {
+            Ok(())
+        }
+        async fn write_raw(&self, _: &str, _: &[u8]) -> Result<()> {
+            Ok(())
+        }
+        async fn screen(&self, _: &str, _: usize) -> Result<String> {
+            Ok(String::new())
+        }
+        async fn pause(&self, _: &str) -> Result<()> {
+            Ok(())
+        }
+        async fn resume(&self, _: &str) -> Result<()> {
+            Ok(())
+        }
+        async fn kill(&self, _: &str) -> Result<()> {
+            if self.kills.fetch_add(1, Ordering::SeqCst) == 0 {
+                self.entered.notify_one();
+                self.release.notified().await;
+            }
+            self.alive.store(false, Ordering::SeqCst);
+            Ok(())
+        }
+        fn is_alive(&self, _: &str) -> bool {
+            self.alive.load(Ordering::SeqCst)
+        }
+        async fn adopt(&self, _: &crew_core::Agent) -> Result<bool> {
+            Ok(false)
+        }
+    }
+
+    #[tokio::test]
+    async fn a_restart_a_kill_overtook_while_it_stopped_the_old_session_changes_nothing() {
+        let temp = tempfile::tempdir().unwrap();
+        let running = super::super::start(super::super::DaemonOptions {
+            workspace: temp.path().to_path_buf(),
+            crew_bin: std::env::current_exe().unwrap(),
+        })
+        .await
+        .unwrap();
+        let daemon = running.daemon.clone();
+        let agent: Agent = serde_json::from_value(serde_json::json!({
+            "id": "a", "name": "a", "role": "work", "status": "working", "runtime": "shell",
+            "workdir": temp.path().to_str().unwrap(), "backend": "pty", "last_activity_at": 0
+        }))
+        .unwrap();
+        daemon.model().agents.push(agent);
+        let task: crew_core::Task = serde_json::from_value(serde_json::json!({
+            "id": "t", "title": "t", "description": "", "status": "working",
+            "assigned_agent": "a", "created_at": 0
+        }))
+        .unwrap();
+        daemon.model().tasks.push(task);
+        let procs = Arc::new(FirstKillWaits {
+            alive: AtomicBool::new(true),
+            kills: AtomicUsize::new(0),
+            entered: Notify::new(),
+            release: Notify::new(),
+        });
+        *daemon.procs.write().unwrap() = Some(procs.clone());
+
+        // A restart waits for the old session to go; meanwhile the operator
+        // stops the agent, which blocks its task.
+        let restart = tokio::spawn({
+            let daemon = daemon.clone();
+            async move { daemon.restart_agent("a").await }
+        });
+        procs.entered.notified().await;
+        daemon.kill_agent("a").await.unwrap();
+        procs.release.notify_one();
+        restart.await.unwrap().unwrap();
+        tokio::task::yield_now().await;
+
+        let status = daemon.agent("a").unwrap().status;
+        let task = daemon.model().tasks[0].clone();
+        assert_eq!(
+            status,
+            AgentStatus::Stopped,
+            "the restart the kill overtook set the agent going again"
+        );
+        assert_eq!(
+            (task.status, task.note.as_deref()),
+            (TaskStatus::Blocked, Some("agent a was stopped")),
+            "the restart the kill overtook reopened the task the kill blocked"
+        );
     }
 }
