@@ -1063,11 +1063,29 @@ restart {id} fresh or move it to another CLI."
     /// Agent `id`'s next launch begins: its mark, put in the environment of
     /// every process the launch starts, from which a hook of an earlier
     /// launch, arriving late, is told apart (on_hook).
+    /// A hook still being handled is let finish first, so that everything
+    /// it does (its handlers wait, for a dialog, for a listener) is done
+    /// before the new launch starts out.
     pub(crate) async fn begin_launch(&self, id: &str) -> String {
+        let lease = self.hook_lease(id);
+        let _no_hook_running = lease.write().await;
         let launch = uuid::Uuid::new_v4().to_string();
         self.model().local.entry(id.to_string()).or_default().launch = Some(launch.clone());
         self.save_local(id);
         launch
+    }
+
+    /// Agent `id`'s hook lease: a hook holds it shared while it is handled,
+    /// begin_launch alone for the moment it changes the launch. Neither
+    /// waits for the launch lease while holding it, nor does a hook's
+    /// handling wait for a launch, so the two cannot wait on each other.
+    fn hook_lease(&self, id: &str) -> std::sync::Arc<tokio::sync::RwLock<()>> {
+        self.hooks
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .entry(id.to_string())
+            .or_default()
+            .clone()
     }
 
     /// A runtime hook of agent `id`, run by a process of `launch` (when it
@@ -1081,6 +1099,11 @@ restart {id} fresh or move it to another CLI."
         payload: &Value,
     ) {
         let Some(agent) = self.agent(id) else { return };
+        // Held until the hook is handled, all its signals: its launch stays
+        // the current one meanwhile (begin_launch waits), so nothing it
+        // does reaches a later launch.
+        let lease = self.hook_lease(id);
+        let _handling = lease.read().await;
         if let Some(launch) = launch {
             let current = self.model().local.get(id).and_then(|l| l.launch.clone());
             if current.is_some_and(|current| current != launch) {
@@ -2527,5 +2550,114 @@ mod tests {
             (after_restart.status, after_restart.error),
             "the kill the restart overtook overwrote what the restart did"
         );
+    }
+
+    #[tokio::test]
+    async fn a_hook_being_handled_when_its_launch_is_replaced_finishes_before_the_new_one_begins() {
+        let temp = tempfile::tempdir().unwrap();
+        let running = super::super::start(super::super::DaemonOptions {
+            workspace: temp.path().to_path_buf(),
+            crew_bin: std::env::current_exe().unwrap(),
+        })
+        .await
+        .unwrap();
+        let daemon = running.daemon.clone();
+        let agent: Agent = serde_json::from_value(serde_json::json!({
+            "id": "a", "name": "a", "role": "work", "status": "spawning", "runtime": "claude",
+            "session_id": "before", "workdir": temp.path().to_str().unwrap(), "backend": "pty",
+            "last_activity_at": 0
+        }))
+        .unwrap();
+        daemon.model().agents.push(agent);
+        let old = daemon.begin_launch("a").await;
+        *daemon.procs.write().unwrap() = Some(Arc::new(crate::process::pty::PtyManager::new(
+            daemon.proc_tx.clone(),
+        )));
+
+        // A startup dialog being looked at holds the old launch's Ready
+        // (rev-core's fixture): its session-start hook is half handled.
+        let dialog = daemon.delivery_lock("dialog:a");
+        let held = dialog.lock().await;
+        let hook = tokio::spawn({
+            let (daemon, old) = (daemon.clone(), old.clone());
+            async move {
+                let payload = serde_json::json!({ "session_id": "old-session" });
+                daemon
+                    .on_hook("a", Some(&old), "session-start", &payload)
+                    .await;
+            }
+        });
+        for _ in 0..1000 {
+            if daemon.agent("a").unwrap().session_id.as_deref() == Some("old-session") {
+                break;
+            }
+            tokio::task::yield_now().await;
+        }
+        assert_eq!(
+            daemon.agent("a").unwrap().session_id.as_deref(),
+            Some("old-session"),
+            "the hook did not get to its Ready"
+        );
+
+        // The replacement begins, and starts out as start_agent does.
+        let replacement = tokio::spawn({
+            let daemon = daemon.clone();
+            async move {
+                let new = daemon.begin_launch("a").await;
+                daemon
+                    .model()
+                    .rt
+                    .insert("a".into(), super::super::AgentRuntimeState::default());
+                daemon.update_agent("a", |a| {
+                    a.session_id = Some("new-session".into());
+                    a.status = AgentStatus::Spawning;
+                });
+                new
+            }
+        });
+        for _ in 0..100 {
+            tokio::task::yield_now().await;
+        }
+        assert!(
+            !replacement.is_finished(),
+            "the new launch began while a hook of the old one was being handled"
+        );
+        drop(held);
+        hook.await.unwrap();
+        let new = replacement.await.unwrap();
+        // A hook of the old launch arriving now is dropped.
+        let payload = serde_json::json!({ "session_id": "old-session" });
+        daemon
+            .on_hook("a", Some(&old), "session-start", &payload)
+            .await;
+
+        let a = daemon.agent("a").unwrap();
+        assert_eq!(
+            (a.status, a.session_id.as_deref()),
+            (AgentStatus::Spawning, Some("new-session")),
+            "the old launch's hook changed the new one"
+        );
+        assert!(
+            !daemon.model().rt("a").ready,
+            "the old launch's Ready made the new one ready"
+        );
+        assert_eq!(
+            daemon.model().local["a"].launch.as_deref(),
+            Some(new.as_str())
+        );
+
+        // The new launch's own hooks are taken while its start still holds
+        // the launch lease: they wait for nothing it holds.
+        let starting = daemon.launch_lease("a");
+        let _starting = starting.write().await;
+        let activity =
+            serde_json::json!({ "tool_name": "Bash", "tool_input": { "command": "new" } });
+        tokio::time::timeout(
+            std::time::Duration::from_secs(5),
+            daemon.on_hook("a", Some(&new), "pre-tool-use", &activity),
+        )
+        .await
+        .expect("a hook of the starting launch waited for its start");
+        assert!(daemon.agent("a").unwrap().activity.contains("new"));
     }
 }

@@ -278,6 +278,8 @@ pub struct Inner {
     pub(crate) ledger: retire::Ledger,
     /// Each agent's launch lease (Daemon::launch_lease).
     pub(crate) launches: Mutex<HashMap<String, Arc<tokio::sync::RwLock<()>>>>,
+    /// Each agent's hook lease (Daemon::on_hook, Daemon::begin_launch).
+    pub(crate) hooks: Mutex<HashMap<String, Arc<tokio::sync::RwLock<()>>>>,
     /// How many stops of each agent have been asked for (Daemon::stops).
     pub(crate) stops: Mutex<HashMap<String, u64>>,
     /// Git operations run one at a time.
@@ -889,6 +891,7 @@ pub async fn start(options: DaemonOptions) -> Result<Running> {
         sidecars: Mutex::new(HashMap::new()),
         ledger,
         launches: Mutex::new(HashMap::new()),
+        hooks: Mutex::new(HashMap::new()),
         stops: Mutex::new(HashMap::new()),
         git_lock: tokio::sync::Mutex::new(()),
         plan_lock: tokio::sync::Mutex::new(()),
