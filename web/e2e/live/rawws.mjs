@@ -21,6 +21,7 @@ export function rawWs(port, host, origin, { timeoutMs = 8000 } = {}) {
     const client = {
       upgraded: true,
       closed: false,
+      pings: [],
       replies: 0,
       errors: 0,
       send(method, params = {}) {
@@ -76,6 +77,15 @@ export function rawWs(port, host, origin, { timeoutMs = 8000 } = {}) {
         const opcode = buf[0] & 0x0f;
         const body = buf.subarray(off, off + len);
         buf = buf.subarray(off + len);
+        if (opcode === 9) {
+          // A ping: answer it (a server closes a client that does not) and note when it came.
+          client.pings.push(Date.now());
+          const mask = randomBytes(4);
+          const data = Buffer.from(body);
+          for (let i = 0; i < data.length; i++) data[i] ^= mask[i % 4];
+          sock.write(Buffer.concat([Buffer.from([0x8a, 0x80 | data.length]), mask, data]));
+          continue;
+        }
         if (opcode !== 1) continue;
         let frame;
         try {

@@ -6,6 +6,7 @@ import { readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import type { Page } from "@playwright/test";
 import { CREW_BIN, expect, test, teamYaml } from "./harness.ts";
+import { SAMPLE_MS, cluster, verdict } from "./wakeups.ts";
 import type { Daemon } from "./harness.ts";
 import { signedIn } from "./rawws.mjs";
 
@@ -33,17 +34,25 @@ test("P17: a switch, from enter in the switcher to the other workspace's first f
   const history = async (d: Daemon) => {
     const info = d.web();
     const label = new URL(info.url).host;
-    const op = (await signedIn(info.port, label, `http://${label}`, new URLSearchParams(new URL(info.pair_url).hash.slice(1)).get("pair")!, 6, info.workspace)) as unknown as { send(m: string, p: object): number; replies: number; errors: number };
+    const op = (await signedIn(info.port, label, `http://${label}`, new URLSearchParams(new URL(info.pair_url).hash.slice(1)).get("pair")!, 6, info.workspace)) as unknown as { send(m: string, p: object): number; replies: number; errors: number; close(): void; index: { close(): void } };
     const r0 = op.replies;
     for (let i = 0; i < 330; i++) op.send("send", { to: ["idle", "echo", "w1", "w2", "w3", "w4"][i % 6], type: "message", body: `history ${i}`, id: `w-hist-${i}` });
     while (op.replies - r0 < 330) await new Promise((r) => setTimeout(r, 50));
     expect(op.errors).toBe(0);
-    const messages = (JSON.parse(d.c(["messages", "--json", "-n", "500"])) as unknown[]).length;
+    // The snapshot the page asks for ({messages: 300, events: 1000}), read as the page reads it: wait for the
+    // daemon to have the events, then count the arrays it answers with.
     let events = 0;
     d.until(`${d.project}: 1000 events`, () => ((events = Math.max(...d.events().map((e) => e.seq))), events >= 1000), 60_000);
-    expect(messages, `${d.project}: messages in the snapshot`).toBeGreaterThanOrEqual(300);
-    expect(events, `${d.project}: events in the snapshot`).toBeGreaterThanOrEqual(1000);
-    return { messages: Math.min(messages, 300), events: Math.min(events, 1000) };
+    const probe = (await signedIn(info.port, label, `http://${label}`, new URLSearchParams(new URL(d.web().pair_url).hash.slice(1)).get("pair")!, 6, info.workspace)) as unknown as { call(m: string, p?: object): Promise<{ result?: { messages: unknown[]; events: unknown[] } }>; close(): void; index: { close(): void } };
+    await probe.call("subscribe", {});
+    const snap = (await probe.call("snapshot", { messages: 300, events: 1000 })).result!;
+    probe.close();
+    probe.index.close();
+    op.close();
+    op.index.close();
+    expect(snap.messages.length, `${d.project}: messages in the snapshot`).toBe(300);
+    expect(snap.events.length, `${d.project}: events in the snapshot`).toBe(1000);
+    return { messages: snap.messages.length, events: snap.events.length };
   };
   const occupancy = { [A.project]: await history(A), beta: await history(B) };
   await openLive(A.web());
@@ -118,7 +127,7 @@ test("P18: a question asked in a workspace that is not on screen: from the daemo
   expect(stats(lat).p95!).toBeLessThanOrEqual(500 * SCALE);
 });
 
-test("P19, P20: an idle page with five joined workspaces makes no index traffic; the server's memory", async ({ browser, daemon: A, sibling, openLive }) => {
+test("P19: an idle page with five joined workspaces makes no index traffic", async ({ browser, daemon: A, sibling, openLive }) => {
   test.setTimeout(240_000);
   const others = ["beta", "gamma", "delta", "epsilon"].map((n) => sibling(n));
   A.start();
@@ -141,45 +150,61 @@ test("P19, P20: an idle page with five joined workspaces makes no index traffic;
   await button(page).click();
   await expect(list(page).getByRole("option")).toHaveCount(5, { timeout: 20_000 });
   await page.keyboard.press("Escape");
-  // Two more pages: three in all.
-  const more = [];
-  for (let i = 0; i < 2; i++) {
-    const c = await browser.newContext({ viewport: { width: 1440, height: 900 } });
-    const p = await c.newPage();
-    await openLive(A.web(), p);
-    more.push(c);
-  }
   await page.waitForTimeout(3000);
   const index = sockets.filter((s) => s.kind === "index");
   expect(index.length).toBe(1);
   const before = { sent: index[0].sent, received: index[0].received };
-  const serverPid = JSON.parse(readFileSync(join(A.root, "run/crew/web.json"), "utf8")).pid as number;
-  // Wake-ups of the server while idle: the voluntary context switches of all its threads, sampled every 50 ms;
-  // a bin in which the sum moved is one wake-up (a burst of switches is one).
-  const switches = () => { let n = 0; for (const t of readdirSync(`/proc/${serverPid}/task`)) { const m = /voluntary_ctxt_switches:\s+(\d+)/.exec(readFileSync(`/proc/${serverPid}/task/${t}/status`, "utf8")); n += Number(m?.[1] ?? 0); } return n; };
-  const wakeups: number[] = [];
-  let last = switches();
-  const t0 = Date.now();
-  while (Date.now() - t0 < 60_000) {
-    await page.waitForTimeout(50);
-    const now = switches();
-    if (now !== last) (wakeups.push(Date.now() - t0), last = now);
-  }
-  // Clusters closer than 200 ms are one.
-  const clusters = wakeups.filter((t, i) => i === 0 || t - wakeups[i - 1] > 200);
-  const gaps = clusters.slice(1).map((t, i) => t - clusters[i]);
-  report.p20_server_wakeups_60s = { clusters: clusters.length, shortest_gap_ms: gaps.length ? Math.min(...gaps) : null, median_gap_ms: gaps.length ? [...gaps].sort((a, b) => a - b)[Math.floor(gaps.length / 2)] : null, open_connections: 3 * 2 + 4 * 0 };
+  await page.waitForTimeout(60_000);
   const idle = { index_frames_sent: index[0].sent - before.sent, index_frames_received: index[0].received - before.received };
   report.p19_idle_60s_five_workspaces = idle;
   expect(idle.index_frames_sent).toBe(0);
   expect(idle.index_frames_received).toBe(0);
-  // Nothing recurs faster than the 5 s housekeeping tick except the pings (20 s per connection, three pages
-  // with two connections each): at most 12 ticks and 18 pings in 60 s, with room for a few more.
-  expect(clusters.length).toBeLessThanOrEqual(36);
-  const rssKb = Number(/VmRSS:\s+(\d+) kB/.exec(readFileSync(`/proc/${serverPid}/status`, "utf8"))?.[1]);
-  const release = CREW_BIN.includes("/release/");
-  report.p20_server_rss_mb = { rss: +(rssKb / 1024).toFixed(1), build: release ? "release" : "debug" };
-  expect(rssKb / 1024).toBeLessThanOrEqual(40);
-  for (const c of more) await c.close();
   await ctx.close();
+});
+
+test("P20: the server with five joined workspaces and three sessions, idle: memory, and wake-ups only at its tick and its pings", async ({ daemon: A, sibling }) => {
+  test.setTimeout(240_000);
+  const others = ["beta", "gamma", "delta", "epsilon"].map((n) => sibling(n));
+  A.start();
+  for (const d of others) d.start(teamYaml(d.ws, d.vcs, 0, { project: d.project }));
+  const info = A.web();
+  for (const d of others) d.web();
+  const label = new URL(info.url).host;
+  // Three sessions, as three pages hold: an index connection and a workspace connection each. Their ends
+  // answer pings and write down when each came.
+  type Conn = { pings: number[]; close(): void; index: { pings: number[]; close(): void } };
+  const sessions: Conn[] = [];
+  for (let i = 0; i < 3; i++) {
+    const pair = new URLSearchParams(new URL(A.web().pair_url).hash.slice(1)).get("pair")!;
+    sessions.push((await signedIn(info.port, label, `http://${label}`, pair, 6, info.workspace)) as unknown as Conn);
+  }
+  const serverPid = JSON.parse(readFileSync(join(A.root, "run/crew/web.json"), "utf8")).pid as number;
+  const switches = () => {
+    let n = 0;
+    for (const t of readdirSync(`/proc/${serverPid}/task`)) {
+      const m = /voluntary_ctxt_switches:\s+(\d+)/.exec(readFileSync(`/proc/${serverPid}/task/${t}/status`, "utf8"));
+      n += Number(m?.[1] ?? 0);
+    }
+    return n;
+  };
+  await new Promise((r) => setTimeout(r, 3000));
+  const t0 = Date.now();
+  const moved: number[] = [];
+  let last = switches();
+  while (Date.now() - t0 < 60_000) {
+    await new Promise((r) => setTimeout(r, SAMPLE_MS));
+    const now = switches();
+    if (now !== last) (moved.push(Date.now() - t0), last = now);
+  }
+  const pings = sessions.flatMap((s) => [...s.pings, ...s.index.pings]).map((p) => p - t0).filter((p) => p >= 0);
+  const v = verdict(moved, pings);
+  const w = cluster(moved);
+  const gaps = w.slice(1).map((x, i) => x.at - w[i].at);
+  report.p20_server_wakeups_60s = { wakeups: v.wakeups, ticks: v.ticks, pings_received: v.pings, unexplained: v.unexplained, longest_span_ms: v.longest_span_ms, shortest_gap_ms: gaps.length ? Math.min(...gaps) : null, connections: 6 };
+  expect(v.pings, "the sessions' connections were pinged").toBeGreaterThan(0);
+  expect(v.ok, v.why.join("; ")).toBe(true);
+  const rssKb = Number(/VmRSS:\s+(\d+) kB/.exec(readFileSync(`/proc/${serverPid}/status`, "utf8"))?.[1]);
+  report.p20_server_rss_mb = { rss: +(rssKb / 1024).toFixed(1), build: CREW_BIN.includes("/release/") ? "release" : "debug" };
+  expect(rssKb / 1024).toBeLessThanOrEqual(40);
+  for (const s of sessions) (s.close(), s.index.close());
 });
