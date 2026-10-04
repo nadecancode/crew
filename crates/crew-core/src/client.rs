@@ -32,10 +32,8 @@ pub enum ClientError {
     Closed,
     #[error("protocol error: {0}")]
     Protocol(String),
-    #[error("the crew daemon speaks protocol {daemon}, this crew speaks {client}: restart the team after upgrading, or use the binary that started it")]
-    Version { daemon: u32, client: u32 },
-    #[error("incompatible crew protocol: {0}; restart the team after upgrading, or use the binary that started it")]
-    IncompatibleProtocol(String),
+    #[error("{0}")]
+    Mismatch(Box<Mismatch>),
     #[error("cannot read operator token at {path}: {message}")]
     OperatorToken { path: String, message: String },
     #[error("no operator token at {path}: operator commands must run as the user who started the daemon, outside agent sandboxes")]
@@ -55,7 +53,7 @@ impl ClientError {
         )
     }
     pub fn is_protocol_mismatch(&self) -> bool {
-        matches!(self, Self::Version { .. } | Self::IncompatibleProtocol(_))
+        matches!(self, Self::Mismatch(_))
     }
     /// An operator credential failure needs a visible error, not a reconnect loop.
     pub fn is_operator_auth_error(&self) -> bool {
@@ -68,24 +66,148 @@ impl ClientError {
     }
 }
 
-fn check_hello(result: ClientResult<HelloInfo>) -> ClientResult<HelloInfo> {
-    let info = match result {
-        Err(ClientError::Rpc(error))
-            if error.code == "protocol"
-            // Legacy v1 daemons used the generic invalid code for this error.
-            || (error.code == "invalid" && error.message.starts_with("client speaks protocol ")) =>
-        {
-            return Err(ClientError::IncompatibleProtocol(error.message));
-        }
-        result => result?,
-    };
-    if info.protocol != PROTOCOL_VERSION {
-        return Err(ClientError::Version {
-            daemon: info.protocol,
-            client: PROTOCOL_VERSION,
-        });
+/// This build of crew and a daemon of another protocol: what is known of
+/// each side, said as one sentence that names both and what to do
+/// (notes/binary-pinning.md B8).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Mismatch {
+    pub client_version: String,
+    pub client_protocol: u32,
+    /// Absent from a daemon older than this sentence.
+    pub daemon_version: Option<String>,
+    /// Absent when the daemon's refusal did not say it in a known form.
+    pub daemon_protocol: Option<u32>,
+    pub workspace: Option<String>,
+    /// Named when the workspace is not known.
+    pub socket: String,
+    /// The process that holds the daemon's socket, as the kernel says (not
+    /// as the daemon does): what `crew stop` signals, since a daemon of
+    /// another protocol cannot be asked.
+    pub daemon_pid: Option<u32>,
+}
+
+impl Mismatch {
+    /// From a daemon's answer to `hello`: its refusal (`code` `protocol`,
+    /// or the generic `invalid` of a protocol 1 daemon), or a `HelloInfo`
+    /// of another protocol. `None` for any other answer.
+    fn from_hello(result: &ClientResult<HelloInfo>, socket: &Path) -> Option<Self> {
+        let (daemon_version, daemon_protocol, workspace) = match result {
+            Err(ClientError::Rpc(error))
+                if error.code == "protocol"
+                    || (error.code == "invalid"
+                        && error.message.starts_with("client speaks protocol ")) =>
+            {
+                let data = error.data.as_ref();
+                let field = |name: &str| data.and_then(|data| data.get(name));
+                (
+                    field("version").and_then(Value::as_str).map(str::to_string),
+                    field("protocol")
+                        .and_then(Value::as_u64)
+                        .and_then(|p| u32::try_from(p).ok())
+                        .or_else(|| refused_protocol(&error.message)),
+                    field("workspace")
+                        .and_then(Value::as_str)
+                        .filter(|w| !w.is_empty())
+                        .map(str::to_string),
+                )
+            }
+            Ok(info) if info.protocol != PROTOCOL_VERSION => {
+                (Some(info.version.clone()), Some(info.protocol), None)
+            }
+            _ => return None,
+        };
+        Some(Self {
+            client_version: env!("CARGO_PKG_VERSION").to_string(),
+            client_protocol: PROTOCOL_VERSION,
+            daemon_version,
+            daemon_protocol,
+            workspace: workspace.or_else(|| registered_workspace(socket)),
+            socket: socket.display().to_string(),
+            daemon_pid: None,
+        })
     }
-    Ok(info)
+}
+
+impl std::fmt::Display for Mismatch {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "crew {} (protocol {}) cannot talk to the daemon ",
+            self.client_version, self.client_protocol
+        )?;
+        match &self.workspace {
+            Some(workspace) => write!(f, "of {workspace}")?,
+            None => write!(f, "at {}", self.socket)?,
+        }
+        match (&self.daemon_version, self.daemon_protocol) {
+            (Some(version), Some(protocol)) => {
+                write!(f, ", which is crew {version} (protocol {protocol})")?
+            }
+            (Some(version), None) => write!(f, ", which is crew {version}")?,
+            (None, Some(protocol)) => write!(f, ", which speaks protocol {protocol}")?,
+            (None, None) => write!(f, ", which speaks another protocol")?,
+        }
+        write!(f, ": restart the team (`crew stop`, then `crew run`)")
+    }
+}
+
+/// The daemon's protocol from the refusal every daemon so far has sent:
+/// "client speaks protocol N, daemon speaks M".
+fn refused_protocol(message: &str) -> Option<u32> {
+    let (_, rest) = message.split_once("daemon speaks ")?;
+    let digits = rest.split(|c: char| !c.is_ascii_digit()).next()?;
+    digits.parse().ok()
+}
+
+/// The workspace of the daemon registered with this socket, for a daemon
+/// that does not say it. Read only: stale entries are left to
+/// `list_sessions`.
+fn registered_workspace(socket: &Path) -> Option<String> {
+    workspace_in_registry(&crate::paths::registry_dir(), socket)
+}
+
+fn workspace_in_registry(registry: &Path, socket: &Path) -> Option<String> {
+    let entries = std::fs::read_dir(registry).ok()?;
+    entries.flatten().find_map(|entry| {
+        let text = std::fs::read_to_string(entry.path()).ok()?;
+        let info: crate::paths::DaemonInfo = serde_json::from_str(&text).ok()?;
+        (Path::new(&info.socket) == socket && !info.workspace.is_empty()).then_some(info.workspace)
+    })
+}
+
+fn check_hello(result: ClientResult<HelloInfo>, socket: &Path) -> ClientResult<HelloInfo> {
+    match Mismatch::from_hello(&result, socket) {
+        Some(mismatch) => Err(ClientError::Mismatch(Box::new(mismatch))),
+        None => result,
+    }
+}
+
+/// The pid of the process at the other end of `stream`, from the kernel.
+#[cfg(target_os = "linux")]
+fn peer_pid(stream: &UnixStream) -> Option<u32> {
+    use std::os::fd::AsRawFd;
+    let mut cred = libc::ucred {
+        pid: 0,
+        uid: 0,
+        gid: 0,
+    };
+    let mut len = std::mem::size_of::<libc::ucred>() as libc::socklen_t;
+    // SAFETY: SO_PEERCRED fills a ucred of the length given.
+    let rc = unsafe {
+        libc::getsockopt(
+            stream.as_raw_fd(),
+            libc::SOL_SOCKET,
+            libc::SO_PEERCRED,
+            (&mut cred as *mut libc::ucred).cast(),
+            &mut len,
+        )
+    };
+    (rc == 0 && cred.pid > 0).then_some(cred.pid as u32)
+}
+
+#[cfg(not(target_os = "linux"))]
+fn peer_pid(_stream: &UnixStream) -> Option<u32> {
+    None
 }
 
 pub type ClientResult<T> = Result<T, ClientError>;
@@ -148,15 +270,19 @@ impl Client {
         // Negotiate even without credentials so old daemons keep H8's
         // actionable upgrade error. A current daemon still cannot grant us
         // operator access without the token.
-        let result = check_hello(c.call(Call::Hello(Hello {
-            role: Role::Operator,
-            agent_id: None,
-            token,
-            client: client.to_string(),
-            protocol: PROTOCOL_VERSION,
-            web: false,
-            workspace: None,
-        })));
+        let result = check_hello(
+            c.call(Call::Hello(Hello {
+                role: Role::Operator,
+                agent_id: None,
+                token,
+                client: client.to_string(),
+                protocol: PROTOCOL_VERSION,
+                web: false,
+                workspace: None,
+            })),
+            socket,
+        )
+        .map_err(|error| c.with_peer(error));
         let missing = || ClientError::MissingOperatorToken {
             path: crate::paths::operator_token_path(socket)
                 .display()
@@ -178,17 +304,33 @@ impl Client {
 
     /// Connect and authenticate as an agent.
     pub fn agent(identity: &Identity, client: &str) -> ClientResult<(Self, HelloInfo)> {
-        let mut c = Self::connect(Path::new(&identity.socket))?;
-        let info = check_hello(c.call(Call::Hello(Hello {
-            role: Role::Agent,
-            agent_id: Some(identity.agent_id.clone()),
-            token: Some(identity.token.clone()),
-            client: client.to_string(),
-            protocol: PROTOCOL_VERSION,
-            web: false,
-            workspace: None,
-        })))?;
+        let socket = Path::new(&identity.socket);
+        let mut c = Self::connect(socket)?;
+        let info = check_hello(
+            c.call(Call::Hello(Hello {
+                role: Role::Agent,
+                agent_id: Some(identity.agent_id.clone()),
+                token: Some(identity.token.clone()),
+                client: client.to_string(),
+                protocol: PROTOCOL_VERSION,
+                web: false,
+                workspace: None,
+            })),
+            socket,
+        )
+        .map_err(|error| c.with_peer(error))?;
         Ok((c, info))
+    }
+
+    /// A mismatch, with the pid of the process that answered.
+    fn with_peer(&self, error: ClientError) -> ClientError {
+        match error {
+            ClientError::Mismatch(mut mismatch) => {
+                mismatch.daemon_pid = peer_pid(&self.writer);
+                ClientError::Mismatch(mismatch)
+            }
+            error => error,
+        }
     }
 
     /// Bound how long a call may wait for the daemon (`None` waits forever).
@@ -428,10 +570,24 @@ mod tests {
                 .expect("old daemon must fail");
             let hello = peer.join().unwrap();
             assert!(error.is_protocol_mismatch(), "{error}");
-            assert!(error.to_string().contains("restart the team"), "{error}");
+            let ClientError::Mismatch(mismatch) = &error else {
+                unreachable!()
+            };
+            // The peer runs in this process: that is the pid `crew stop` signals.
+            if cfg!(target_os = "linux") {
+                assert_eq!(mismatch.daemon_pid, Some(std::process::id()));
+            }
+            let text = error.to_string();
             assert!(
-                error.to_string().contains("binary that started it"),
-                "{error}"
+                text.contains(&format!(
+                    "cannot talk to the daemon at {}",
+                    socket.display()
+                )),
+                "{text}"
+            );
+            assert!(
+                text.ends_with(": restart the team (`crew stop`, then `crew run`)"),
+                "{text}"
             );
             assert_eq!(
                 hello
@@ -791,11 +947,15 @@ mod tests {
         }
         for error in [
             ClientError::Rpc(RpcError::invalid("bad request")),
-            ClientError::Version {
-                daemon: 0,
-                client: PROTOCOL_VERSION,
-            },
-            ClientError::IncompatibleProtocol("another build".into()),
+            ClientError::Mismatch(Box::new(Mismatch {
+                client_version: "0.1.0".into(),
+                client_protocol: PROTOCOL_VERSION,
+                daemon_version: None,
+                daemon_protocol: Some(0),
+                workspace: None,
+                socket: "socket".into(),
+                daemon_pid: None,
+            })),
         ] {
             assert!(!error.is_disconnect(), "{error}");
         }
@@ -951,17 +1111,104 @@ mod tests {
     }
 
     #[test]
-    fn hello_protocol_refusals_have_a_restart_hint() {
-        for error in [
-            RpcError::new("protocol", "client speaks protocol 2, daemon speaks 3"),
-            RpcError::invalid("client speaks protocol 2, daemon speaks 1"),
+    fn a_mismatch_names_both_sides_and_says_restart_the_team() {
+        let socket = Path::new("/run/user/1000/crew/test-mismatch.sock");
+        let ours = format!(
+            "crew {} (protocol {PROTOCOL_VERSION})",
+            env!("CARGO_PKG_VERSION")
+        );
+        let said = |result: ClientResult<HelloInfo>| {
+            let error = check_hello(result, socket).unwrap_err();
+            assert!(error.is_protocol_mismatch(), "{error}");
+            assert!(!error.is_disconnect(), "{error}");
+            error.to_string()
+        };
+        // A daemon that says who it is.
+        let refusal = RpcError::new("protocol", "client speaks protocol 9, daemon speaks 7")
+            .with_data(json!({"version": "0.2.0", "protocol": 7, "workspace": "/w/payments"}));
+        assert_eq!(
+            said(Err(ClientError::Rpc(refusal))),
+            format!(
+                "{ours} cannot talk to the daemon of /w/payments, which is crew 0.2.0 \
+(protocol 7): restart the team (`crew stop`, then `crew run`)"
+            )
+        );
+        // Daemons from before that: the protocol is in their message.
+        for (refusal, protocol) in [
+            (
+                RpcError::new("protocol", "client speaks protocol 2, daemon speaks 3"),
+                3,
+            ),
+            (
+                RpcError::invalid("client speaks protocol 2, daemon speaks 1"),
+                1,
+            ),
         ] {
-            let error = check_hello(Err(ClientError::Rpc(error))).unwrap_err();
-            assert!(error.is_protocol_mismatch());
-            assert!(error.to_string().contains("restart"));
+            assert_eq!(
+                said(Err(ClientError::Rpc(refusal))),
+                format!(
+                    "{ours} cannot talk to the daemon at {}, which speaks protocol {protocol}: \
+restart the team (`crew stop`, then `crew run`)",
+                    socket.display()
+                )
+            );
         }
-        let error =
-            check_hello(Err(ClientError::Rpc(RpcError::invalid("other error")))).unwrap_err();
+        // Data of an unexpected shape is not taken, and does not hide the message.
+        let odd = RpcError::new("protocol", "client speaks protocol 2, daemon speaks 3")
+            .with_data(json!({"version": 3, "protocol": "three", "workspace": ""}));
+        assert!(said(Err(ClientError::Rpc(odd))).contains(", which speaks protocol 3: "));
+        let unknown = RpcError::new("protocol", "no");
+        assert!(said(Err(ClientError::Rpc(unknown))).contains(", which speaks another protocol: "));
+        // A daemon that accepted the hello but speaks another protocol.
+        let info = |protocol| HelloInfo {
+            role: Role::Agent,
+            agent_id: Some("worker".into()),
+            project: None,
+            version: "0.0.9".into(),
+            protocol,
+            pid: 1,
+            web_proof: None,
+        };
+        assert!(said(Ok(info(PROTOCOL_VERSION + 1))).contains(&format!(
+            ", which is crew 0.0.9 (protocol {}): ",
+            PROTOCOL_VERSION + 1
+        )));
+        assert!(check_hello(Ok(info(PROTOCOL_VERSION)), socket).is_ok());
+        let error = check_hello(
+            Err(ClientError::Rpc(RpcError::invalid("other error"))),
+            socket,
+        )
+        .unwrap_err();
         assert!(!error.is_protocol_mismatch());
+    }
+
+    #[test]
+    fn a_daemon_that_does_not_say_its_workspace_is_found_in_the_registry() {
+        let registry = tempfile::tempdir().unwrap();
+        let socket = registry.path().join("daemon.sock");
+        let entry = |socket: &Path, workspace: &str| {
+            json!({"workspace": workspace, "state_dir": format!("{workspace}/.crew"),
+                "socket": socket, "pid": 1, "started_at": 0})
+            .to_string()
+        };
+        assert_eq!(workspace_in_registry(registry.path(), &socket), None);
+        let write = |name: &str, text: String| {
+            std::fs::write(registry.path().join(name), text).unwrap();
+        };
+        write("broken.json", "{".into());
+        write(
+            "other.json",
+            entry(Path::new("/elsewhere.sock"), "/w/other"),
+        );
+        assert_eq!(workspace_in_registry(registry.path(), &socket), None);
+        write("this.json", entry(&socket, "/w/payments"));
+        assert_eq!(
+            workspace_in_registry(registry.path(), &socket).as_deref(),
+            Some("/w/payments")
+        );
+        assert_eq!(
+            workspace_in_registry(&registry.path().join("none"), &socket),
+            None
+        );
     }
 }

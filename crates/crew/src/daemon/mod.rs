@@ -184,6 +184,9 @@ pub(crate) struct AgentRuntimeState {
     /// Since when it has been free of tasks on another CLI's fallback while
     /// its own model can be used again (it goes back then).
     pub home_free_since: Option<i64>,
+    /// When its crew tools were last said to speak another protocol (0:
+    /// not since the daemon started).
+    pub protocol_warned_at: i64,
 }
 
 #[derive(Default)]

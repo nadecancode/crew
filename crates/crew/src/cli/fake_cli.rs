@@ -82,7 +82,8 @@ fn record(dir: &Path, name: &str, args: &[String]) -> Result<()> {
 
 fn hook(event: &str, payload: Value) {
     let identity = env_path("CREW_IDENTITY");
-    super::agent_side::hook(event, identity.as_deref(), Some(payload.to_string()));
+    // Like the real CLIs, a stand-in goes on after a hook that failed.
+    let _ = super::agent_side::hook(event, identity.as_deref(), Some(payload.to_string()));
 }
 
 /// Keep the terminal session up, echoing what is typed into `reply`.

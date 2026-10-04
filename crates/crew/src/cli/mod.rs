@@ -638,11 +638,7 @@ pub fn run(cli: Cli) -> Result<()> {
             event,
             identity,
             payload,
-        } => {
-            // A hook must never disturb the session it runs in.
-            agent_side::hook(&event, identity.identity.as_deref(), payload);
-            Ok(())
-        }
+        } => agent_side::hook(&event, identity.identity.as_deref(), payload),
         Command::Bridge(identity) => agent_side::bridge(identity.identity.as_deref()),
         Command::Delivered { identity, ids } => {
             agent_side::delivered(identity.identity.as_deref(), ids)
