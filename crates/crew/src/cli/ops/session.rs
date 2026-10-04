@@ -91,6 +91,9 @@ pub fn status(target: &Target, json: bool) -> Result<()> {
         s.daemon_pid,
         fmt_elapsed(snapshot.server_time - s.daemon_started_at)
     );
+    if !s.binary_warning.is_empty() {
+        println!("warning    {}", s.binary_warning);
+    }
     let done = snapshot
         .tasks
         .iter()

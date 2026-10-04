@@ -1,0 +1,580 @@
+//! The crew binary a daemon hands out (notes/binary-pinning.md).
+//!
+//! Everything a daemon starts or writes down for its agents names a crew
+//! binary: their MCP server, hooks, credential helper and extension, the
+//! `{crew}` of a shell agent, `crew sandbox-run` and what it runs inside.
+//! Rebuilding crew replaces the file at the path the daemon was started
+//! from, and a session that starts after that (after a compaction, a usage
+//! fallback, a restart) would run another build against this daemon: every
+//! crew tool would fail. So a daemon the crew binary started keeps a copy
+//! of the binary it runs in `<state>/bin` and hands out that copy for as
+//! long as it lives. Nothing outside crew changes it.
+//!
+//! The copy is read from the running inode (`/proc/self/exe`), whatever has
+//! become of its path, and is named by build: `crew-<id>`, where `<id>` is
+//! 16 hex digits of a hash of that inode's device, number, size and
+//! modification time, so the same file run again finds its copy there.
+//! Copies outlive the daemon, as agents on herdr do, which hold the path
+//! they were launched with. An agent launched with another copy is not
+//! adopted (supervisor/recovery.rs), and once recovery has decided about
+//! every agent, the other copies are deleted.
+
+use std::ffi::CString;
+use std::fs::{self, File};
+use std::io;
+use std::os::unix::ffi::OsStrExt;
+use std::os::unix::fs::{MetadataExt, OpenOptionsExt, PermissionsExt};
+use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Mutex;
+
+use anyhow::anyhow;
+use sha2::{Digest, Sha256};
+
+use super::Daemon;
+use crate::persistence::NewEvent;
+use crate::sandbox::pin::{Identity, Kind};
+
+/// `<state>/bin`, where the copies are kept.
+pub(crate) const BIN_DIR: &str = "bin";
+
+/// What a daemon hands out as the crew binary.
+pub(crate) struct Binary {
+    path: PathBuf,
+    mode: Mode,
+    /// The copy could not be made again; said once, until it can.
+    failing: AtomicBool,
+}
+
+enum Mode {
+    /// The path the daemon was given: an in-process daemon (a test) keeps it.
+    Given,
+    Pinned(Pin),
+    /// No copy could be kept, for this reason: the path the binary was
+    /// started from is handed out.
+    Unpinned(String),
+}
+
+struct Pin {
+    /// The running binary, copied again when the copy goes.
+    source: PathBuf,
+    dir: PathBuf,
+    name: String,
+    /// The copy as it was made. Held while a copy is made or the directory
+    /// swept.
+    made: Mutex<Made>,
+}
+
+/// What a file was when it was looked at: a file replaced, or written in
+/// place, is another.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct Made {
+    dev: u64,
+    ino: u64,
+    size: u64,
+    mtime_ns: i128,
+}
+
+impl Made {
+    fn of(meta: &fs::Metadata) -> Self {
+        Self {
+            dev: meta.dev(),
+            ino: meta.ino(),
+            size: meta.size(),
+            mtime_ns: i128::from(meta.mtime()) * 1_000_000_000 + i128::from(meta.mtime_nsec()),
+        }
+    }
+}
+
+impl Binary {
+    /// The path given, handed out as it is.
+    pub(crate) fn given(path: PathBuf) -> Self {
+        Self {
+            path,
+            mode: Mode::Given,
+            failing: AtomicBool::new(false),
+        }
+    }
+
+    /// A copy of `source`, the running binary (`/proc/self/exe`), in
+    /// `<state_dir>/bin`: found there or made. When none can be kept, the
+    /// daemon hands out `started_from`, the path it was started from.
+    /// Blocking.
+    pub(crate) fn pin(state_dir: &Path, source: &Path, started_from: PathBuf) -> Self {
+        let dir = state_dir.join(BIN_DIR);
+        let (path, mode) = match keep(&dir, source) {
+            Ok((name, made)) => (
+                dir.join(&name),
+                Mode::Pinned(Pin {
+                    source: source.to_path_buf(),
+                    dir,
+                    name,
+                    made: Mutex::new(made),
+                }),
+            ),
+            Err(reason) => (started_from, Mode::Unpinned(reason)),
+        };
+        Self {
+            path,
+            mode,
+            failing: AtomicBool::new(false),
+        }
+    }
+
+    /// What everything the daemon starts is handed. The same for the
+    /// daemon's whole life.
+    pub(crate) fn path(&self) -> &Path {
+        &self.path
+    }
+
+    /// The copy's name (`crew-<id>`), recorded with each agent launched
+    /// with it; `None` when the daemon hands out no copy.
+    pub(crate) fn name(&self) -> Option<&str> {
+        match &self.mode {
+            Mode::Pinned(pin) => Some(&pin.name),
+            Mode::Given | Mode::Unpinned(_) => None,
+        }
+    }
+
+    /// The copy as it was made, which a sandbox binds and nothing else.
+    pub(crate) fn identity(&self) -> Option<Identity> {
+        let Mode::Pinned(pin) = &self.mode else {
+            return None;
+        };
+        let made = *pin.made.lock().unwrap_or_else(|e| e.into_inner());
+        Some(Identity {
+            dev: made.dev,
+            ino: made.ino,
+            kind: Kind::File,
+        })
+    }
+
+    /// When no copy could be kept: what the operator is told.
+    pub(crate) fn warning(&self) -> Option<String> {
+        let Mode::Unpinned(reason) = &self.mode else {
+            return None;
+        };
+        Some(format!(
+            "could not keep a copy of the crew binary ({reason}): replacing {} while this team runs \
+will break its agents' tools",
+            self.path.display()
+        ))
+    }
+
+    /// Whether the copy handed out is still the one made: there, a regular
+    /// file of this user's that nobody else can write, as it was made. If
+    /// not, it is made again from the running binary under the same name,
+    /// and what had become of it is returned. Blocking.
+    pub(crate) fn check(&self) -> Result<Option<String>, String> {
+        let Mode::Pinned(pin) = &self.mode else {
+            return Ok(None);
+        };
+        let mut made = pin.made.lock().unwrap_or_else(|e| e.into_inner());
+        let what = match fs::symlink_metadata(&self.path) {
+            Ok(meta) if intact(&meta, &made) => return Ok(None),
+            Ok(_) => "was replaced or changed",
+            Err(e) if e.kind() == io::ErrorKind::NotFound => "was gone",
+            Err(_) => "could not be looked at",
+        };
+        let remade = crew_core::paths::ensure_private_dir(&pin.dir)
+            .map_err(|e| format!("{e:#}"))
+            .and_then(|()| {
+                let mut source = File::open(&pin.source)
+                    .map_err(|e| format!("reading {}: {e}", pin.source.display()))?;
+                copy(&mut source, &pin.dir, &pin.name).map_err(|e| e.to_string())
+            });
+        match remade {
+            Ok(new) => {
+                *made = new;
+                Ok(Some(format!(
+                    "the copy of the crew binary at {} {what}: it was made again from the running \
+binary",
+                    self.path.display()
+                )))
+            }
+            Err(e) => Err(format!(
+                "the copy of the crew binary at {} {what}, and it could not be made again: {e}",
+                self.path.display()
+            )),
+        }
+    }
+
+    /// Delete everything in `<state>/bin` but the copy handed out: what
+    /// earlier daemons kept, and what a copy cut short left. Called once
+    /// recovery has decided about every agent, when none runs another copy.
+    /// Returns the names deleted.
+    pub(crate) fn sweep(&self) -> Vec<String> {
+        let Mode::Pinned(pin) = &self.mode else {
+            return Vec::new();
+        };
+        // Not beside a copy being made, whose temporary file would go.
+        let _made = pin.made.lock().unwrap_or_else(|e| e.into_inner());
+        let Ok(entries) = fs::read_dir(&pin.dir) else {
+            return Vec::new();
+        };
+        let mut removed = Vec::new();
+        for entry in entries.flatten() {
+            let name = entry.file_name();
+            if name.as_bytes() == pin.name.as_bytes() {
+                continue;
+            }
+            let path = entry.path();
+            let gone = match entry.file_type() {
+                Ok(kind) if kind.is_dir() => fs::remove_dir_all(&path),
+                _ => fs::remove_file(&path),
+            };
+            if gone.is_ok() {
+                removed.push(name.to_string_lossy().into_owned());
+            }
+        }
+        removed
+    }
+}
+
+/// The copy of `source` in `dir`, found or made: its name and what it is.
+fn keep(dir: &Path, source: &Path) -> Result<(String, Made), String> {
+    let mut file = File::open(source).map_err(|e| format!("reading {}: {e}", source.display()))?;
+    let running = file
+        .metadata()
+        .map_err(|e| format!("reading {}: {e}", source.display()))?;
+    let name = format!("crew-{}", build_id(&running));
+    crew_core::paths::ensure_private_dir(dir).map_err(|e| format!("{e:#}"))?;
+    runnable(dir)?;
+    if let Ok(meta) = fs::symlink_metadata(dir.join(&name)) {
+        if as_made(&meta, running.size()) {
+            return Ok((name, Made::of(&meta)));
+        }
+    }
+    let made = copy(&mut file, dir, &name)
+        .map_err(|e| format!("copying it into {}: {e}", dir.display()))?;
+    Ok((name, made))
+}
+
+/// 16 hex digits naming the build a running inode is.
+fn build_id(running: &fs::Metadata) -> String {
+    let made = Made::of(running);
+    let mut hash = Sha256::new();
+    hash.update(made.dev.to_le_bytes());
+    hash.update(made.ino.to_le_bytes());
+    hash.update(made.size.to_le_bytes());
+    hash.update(made.mtime_ns.to_le_bytes());
+    hash.finalize()[..8]
+        .iter()
+        .map(|b| format!("{b:02x}"))
+        .collect()
+}
+
+/// Whether a file found under a copy's name is one as `copy` makes them,
+/// of a binary `size` bytes long.
+fn as_made(meta: &fs::Metadata, size: u64) -> bool {
+    meta.file_type().is_file()
+        && meta.uid() == crew_core::paths::uid()
+        && meta.mode() & 0o7777 == 0o500
+        && meta.nlink() == 1
+        && meta.size() == size
+}
+
+/// Whether the copy is still the file made.
+fn intact(meta: &fs::Metadata, made: &Made) -> bool {
+    meta.file_type().is_file()
+        && meta.uid() == crew_core::paths::uid()
+        && meta.mode() & 0o022 == 0
+        && Made::of(meta) == *made
+}
+
+/// Copy `source` to `dir/name`: written under a temporary name, made
+/// read-and-run for its owner only, synced, then renamed into place.
+fn copy(source: &mut File, dir: &Path, name: &str) -> io::Result<Made> {
+    let temp = dir.join(format!(".{name}.{}", std::process::id()));
+    let _ = fs::remove_file(&temp);
+    let copied = (|| {
+        let mut out = fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .mode(0o600)
+            .custom_flags(libc::O_NOFOLLOW)
+            .open(&temp)?;
+        io::copy(source, &mut out)?;
+        out.set_permissions(fs::Permissions::from_mode(0o500))?;
+        out.sync_all()?;
+        let made = Made::of(&out.metadata()?);
+        fs::rename(&temp, dir.join(name))?;
+        File::open(dir)?.sync_all()?;
+        Ok(made)
+    })();
+    if copied.is_err() {
+        let _ = fs::remove_file(&temp);
+    }
+    copied
+}
+
+/// A copy in `dir` can be run: its file system is neither read-only nor
+/// mounted `noexec`, which a file's mode does not show.
+fn runnable(dir: &Path) -> Result<(), String> {
+    let c_dir = CString::new(dir.as_os_str().as_bytes())
+        .map_err(|_| format!("{} contains a NUL byte", dir.display()))?;
+    // SAFETY: statvfs is plain integers; all-zero is a valid value.
+    let mut st: libc::statvfs = unsafe { std::mem::zeroed() };
+    // SAFETY: `c_dir` is a valid C string and `st` a valid out-pointer.
+    if unsafe { libc::statvfs(c_dir.as_ptr(), &mut st) } != 0 {
+        return Err(format!("{}: {}", dir.display(), io::Error::last_os_error()));
+    }
+    match refusal(st.f_flag) {
+        Some(why) => Err(format!("{} {why}", dir.display())),
+        None => Ok(()),
+    }
+}
+
+/// Why a file system mounted with `flags` (statvfs's) cannot hold a copy
+/// that runs.
+fn refusal(flags: libc::c_ulong) -> Option<&'static str> {
+    if flags & libc::ST_RDONLY != 0 {
+        Some("is on a read-only file system")
+    } else if flags & libc::ST_NOEXEC != 0 {
+        Some("is on a file system mounted noexec")
+    } else {
+        None
+    }
+}
+
+impl Daemon {
+    /// Binary::check, before every launch and on the housekeeping tick: a
+    /// copy made again is a warning; one that cannot be is an error, said
+    /// once until it can. Blocking.
+    pub(crate) fn check_binary(&self) -> anyhow::Result<()> {
+        match self.binary.check() {
+            Ok(remade) => {
+                self.binary.failing.store(false, Ordering::SeqCst);
+                if let Some(what) = remade {
+                    self.emit(NewEvent::new("daemon", "daemon.repinned", what).warn());
+                }
+                Ok(())
+            }
+            Err(e) => {
+                if !self.binary.failing.swap(true, Ordering::SeqCst) {
+                    self.emit(NewEvent::new("daemon", "daemon.repin_failed", &e).error());
+                }
+                Err(anyhow!(e))
+            }
+        }
+    }
+
+    pub(crate) async fn binary_housekeeping(&self) {
+        let daemon = self.clone();
+        let _ = tokio::task::spawn_blocking(move || daemon.check_binary()).await;
+    }
+
+    /// Once recovery has decided about every agent: the copies other builds
+    /// kept go.
+    pub(crate) fn sweep_binaries(&self) {
+        let removed = self.binary.sweep();
+        if !removed.is_empty() {
+            tracing::info!(
+                "deleted {} from {}",
+                removed.join(", "),
+                self.state_dir.join(BIN_DIR).display()
+            );
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// A stand-in for the running binary.
+    fn build(dir: &Path, name: &str, contents: &str) -> PathBuf {
+        let path = dir.join(name);
+        std::fs::write(&path, contents).unwrap();
+        path
+    }
+
+    fn state() -> (tempfile::TempDir, PathBuf) {
+        let temp = tempfile::tempdir().unwrap();
+        let state = temp.path().canonicalize().unwrap().join(".crew");
+        crew_core::paths::ensure_private_dir(&state).unwrap();
+        (temp, state)
+    }
+
+    fn names(dir: &Path) -> Vec<String> {
+        let mut names: Vec<String> = fs::read_dir(dir)
+            .unwrap()
+            .map(|e| e.unwrap().file_name().to_string_lossy().into_owned())
+            .collect();
+        names.sort();
+        names
+    }
+
+    #[test]
+    fn the_copy_is_private_named_by_build_and_found_again_by_the_same_build() {
+        let (temp, state) = state();
+        let running = build(temp.path(), "crew", "build one");
+        let pinned = Binary::pin(&state, &running, running.clone());
+        let name = pinned.name().unwrap().to_string();
+        assert!(
+            name.starts_with("crew-") && name.len() == "crew-".len() + 16,
+            "{name}"
+        );
+        assert_eq!(pinned.path(), state.join("bin").join(&name));
+        assert_eq!(fs::read_to_string(pinned.path()).unwrap(), "build one");
+        let meta = fs::symlink_metadata(pinned.path()).unwrap();
+        assert_eq!(meta.mode() & 0o7777, 0o500);
+        let dir = fs::metadata(state.join("bin")).unwrap();
+        assert_eq!(dir.mode() & 0o7777, 0o700);
+        assert_eq!(pinned.warning(), None);
+        assert_eq!(
+            pinned.identity(),
+            Some(Identity {
+                dev: meta.dev(),
+                ino: meta.ino(),
+                kind: Kind::File
+            })
+        );
+
+        // The same file run again: the same name, and no copy.
+        let again = Binary::pin(&state, &running, running.clone());
+        assert_eq!(again.name(), Some(name.as_str()));
+        let after = fs::symlink_metadata(again.path()).unwrap();
+        assert_eq!(Made::of(&after), Made::of(&meta), "the copy was made again");
+        assert_eq!(names(&state.join("bin")), vec![name]);
+    }
+
+    #[test]
+    fn another_build_gets_its_own_copy_and_the_sweep_leaves_only_it() {
+        let (temp, state) = state();
+        let one = build(temp.path(), "one", "build one");
+        let first = Binary::pin(&state, &one, one.clone());
+        // Another build: another file (what `cargo build` makes).
+        let two = build(temp.path(), "two", "build two");
+        let second = Binary::pin(&state, &two, two.clone());
+        assert_ne!(first.name(), second.name());
+        assert_eq!(fs::read_to_string(second.path()).unwrap(), "build two");
+        // What a copy cut short leaves.
+        fs::write(state.join("bin/.crew-0000000000000000.77"), "half").unwrap();
+        assert_eq!(names(&state.join("bin")).len(), 3);
+
+        let mut removed = second.sweep();
+        removed.sort();
+        let mut expected = vec![
+            first.name().unwrap().to_string(),
+            ".crew-0000000000000000.77".to_string(),
+        ];
+        expected.sort();
+        assert_eq!(removed, expected);
+        assert_eq!(
+            names(&state.join("bin")),
+            vec![second.name().unwrap().to_string()]
+        );
+        // A daemon handed its binary keeps away from the directory.
+        assert!(Binary::given(two.clone()).sweep().is_empty());
+    }
+
+    #[test]
+    fn a_copy_gone_or_replaced_is_made_again_under_its_name() {
+        let (temp, state) = state();
+        let running = build(temp.path(), "crew", "the build");
+        let pinned = Binary::pin(&state, &running, running.clone());
+        assert_eq!(pinned.check(), Ok(None));
+
+        fs::remove_file(pinned.path()).unwrap();
+        let said = pinned.check().unwrap().expect("a warning");
+        assert!(said.contains("was gone"), "{said}");
+        assert_eq!(fs::read_to_string(pinned.path()).unwrap(), "the build");
+        let meta = fs::symlink_metadata(pinned.path()).unwrap();
+        let now = pinned.identity().unwrap();
+        assert_eq!((now.dev, now.ino), (meta.dev(), meta.ino()));
+        assert_eq!(pinned.check(), Ok(None));
+
+        // A file planted under its name, with another inode: replaced, and
+        // what a sandbox binds follows the new copy.
+        let planted = state.join("bin/planted");
+        fs::write(&planted, "not crew").unwrap();
+        fs::set_permissions(&planted, fs::Permissions::from_mode(0o500)).unwrap();
+        let planted_ino = fs::metadata(&planted).unwrap().ino();
+        fs::rename(&planted, pinned.path()).unwrap();
+        let said = pinned.check().unwrap().expect("a warning");
+        assert!(said.contains("was replaced"), "{said}");
+        assert_eq!(fs::read_to_string(pinned.path()).unwrap(), "the build");
+        let now = pinned.identity().unwrap();
+        let meta = fs::symlink_metadata(pinned.path()).unwrap();
+        assert_eq!((now.dev, now.ino), (meta.dev(), meta.ino()));
+        assert_ne!(now.ino, planted_ino);
+
+        // Made writable by others: the same inode, but no longer the copy.
+        fs::set_permissions(pinned.path(), fs::Permissions::from_mode(0o722)).unwrap();
+        assert!(pinned.check().unwrap().is_some());
+        assert_eq!(
+            fs::symlink_metadata(pinned.path()).unwrap().mode() & 0o7777,
+            0o500
+        );
+    }
+
+    #[test]
+    fn a_planted_file_found_at_start_is_replaced_unless_it_is_as_made() {
+        let (temp, state) = state();
+        let running = build(temp.path(), "crew", "the build");
+        let name = Binary::pin(&state, &running, running.clone())
+            .name()
+            .unwrap()
+            .to_string();
+        let path = state.join("bin").join(&name);
+        fs::remove_file(&path).unwrap();
+        // Writable, and of another length: not one of crew's copies.
+        fs::write(&path, "x").unwrap();
+        let pinned = Binary::pin(&state, &running, running.clone());
+        assert_eq!(fs::read_to_string(pinned.path()).unwrap(), "the build");
+    }
+
+    #[test]
+    fn without_a_usable_directory_the_daemon_hands_out_its_own_path_and_says_why() {
+        let (temp, state) = state();
+        let running = build(temp.path(), "crew", "the build");
+        // `<state>/bin` cannot be made: a file is in its way.
+        fs::write(state.join("bin"), "").unwrap();
+        let unpinned = Binary::pin(&state, &running, running.clone());
+        assert_eq!(unpinned.path(), running);
+        assert_eq!(unpinned.name(), None);
+        assert_eq!(unpinned.identity(), None);
+        assert_eq!(unpinned.check(), Ok(None));
+        assert!(unpinned.sweep().is_empty());
+        let warning = unpinned.warning().unwrap();
+        assert!(
+            warning.starts_with("could not keep a copy of the crew binary (")
+                && warning.ends_with(&format!(
+                    "): replacing {} while this team runs will break its agents' tools",
+                    running.display()
+                )),
+            "{warning}"
+        );
+
+        // A running binary that cannot be read: the same.
+        let gone = Binary::pin(&state, &temp.path().join("missing"), running.clone());
+        assert!(gone.warning().unwrap().contains("reading"));
+    }
+
+    #[test]
+    fn read_only_and_noexec_file_systems_are_refused() {
+        assert_eq!(refusal(0), None);
+        assert_eq!(
+            refusal(libc::ST_NOEXEC | libc::ST_NOSUID),
+            Some("is on a file system mounted noexec")
+        );
+        assert_eq!(
+            refusal(libc::ST_RDONLY | libc::ST_NOEXEC),
+            Some("is on a read-only file system")
+        );
+        let temp = tempfile::tempdir().unwrap();
+        assert_eq!(runnable(temp.path()), Ok(()));
+    }
+
+    #[test]
+    fn a_daemon_given_its_binary_hands_it_out_as_it_is() {
+        let given = Binary::given("/opt/crew".into());
+        assert_eq!(given.path(), Path::new("/opt/crew"));
+        assert_eq!(
+            (given.name(), given.identity(), given.warning()),
+            (None, None, None)
+        );
+        assert_eq!(given.check(), Ok(None));
+    }
+}

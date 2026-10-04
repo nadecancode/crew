@@ -1,24 +1,25 @@
 //! Recovery after a daemon restart: agents still running re-adopted, the rest restarted.
 
+use std::sync::Arc;
+
 use crew_core::{AgentStatus, TaskStatus};
 
 use crate::daemon::Daemon;
 use crate::persistence::NewEvent;
+use crate::process::ProcessManager;
 
 impl Daemon {
     /// After a daemon restart: rebuild the process backend from persisted
     /// state, re-adopt agents that are still running, and restart the rest.
-    pub(crate) async fn recover(&self) {
-        let (session, agents, task_count) = {
+    /// Returns whether every agent was decided about, so that none still
+    /// runs another build's copy of crew (daemon::binary).
+    pub(crate) async fn recover(&self) -> bool {
+        let (session, agents) = {
             let model = self.model();
-            (
-                model.session.clone(),
-                model.agents.clone(),
-                model.tasks.len(),
-            )
+            (model.session.clone(), model.agents.clone())
         };
         let Some(team) = session.team.clone() else {
-            return;
+            return true;
         };
         let procs = match self.build_backend(
             &session.backend,
@@ -36,11 +37,22 @@ impl Daemon {
                     )
                     .error(),
                 );
-                return;
+                // Agents that outlived the previous daemon may still run.
+                return agents.iter().all(|a| a.status.is_terminal());
             }
         };
         *self.procs.write().unwrap_or_else(|e| e.into_inner()) = Some(procs.clone());
+        self.recover_agents(procs).await;
+        true
+    }
 
+    /// Re-adopt each agent still running that was launched with this
+    /// daemon's copy of crew; restart the others that are needed.
+    pub(crate) async fn recover_agents(&self, procs: Arc<dyn ProcessManager>) {
+        let (agents, task_count) = {
+            let model = self.model();
+            (model.agents.clone(), model.tasks.len())
+        };
         let mut adopted = 0;
         let mut restarted = 0;
         for agent in &agents {
@@ -48,10 +60,42 @@ impl Daemon {
                 continue;
             }
             if procs.adopt(agent).await.unwrap_or(false) {
-                adopted += 1;
-                self.model().rt(&agent.id).ready = true;
-                self.request_delivery(&agent.id);
-                continue;
+                let launched_with = self
+                    .model()
+                    .local
+                    .get(&agent.id)
+                    .and_then(|l| l.binary.clone());
+                if launched_with.as_deref() == self.binary.name() {
+                    adopted += 1;
+                    self.model().rt(&agent.id).ready = true;
+                    self.request_delivery(&agent.id);
+                    continue;
+                }
+                // Its crew tools are another build's, which would speak to
+                // this daemon in another protocol: it is stopped, and goes
+                // on as an agent that did not survive.
+                self.emit(
+                    NewEvent::new(
+                        "daemon",
+                        "agent.other_build",
+                        format!(
+                            "{} runs another build of crew ({}); it is stopped, not adopted",
+                            agent.id,
+                            launched_with.as_deref().unwrap_or("none recorded")
+                        ),
+                    )
+                    .agent(&agent.id)
+                    .warn(),
+                );
+                self.model().rt(&agent.id).expected_exit = true;
+                if let Err(e) = procs.kill(&agent.id).await {
+                    tracing::warn!("stopping {}: {e:#}", agent.id);
+                }
+                // An exit reported for the old process now is not this agent's.
+                self.update_agent(&agent.id, |a| {
+                    a.pid = None;
+                    a.backend_ref = None;
+                });
             }
             // The process did not outlive the previous daemon.
             let needed = {

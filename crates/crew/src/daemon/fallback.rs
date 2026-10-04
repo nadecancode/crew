@@ -574,6 +574,7 @@ mod vcs_lock_tests {
         let running = crate::daemon::start(crate::daemon::DaemonOptions {
             workspace: temp.path().to_path_buf(),
             crew_bin: std::env::current_exe().unwrap(),
+            pin: None,
         })
         .await
         .unwrap();

@@ -813,6 +813,11 @@ pub struct SessionInfo {
     /// /tmp fallback; empty for the preferred runtime directory or older peers.
     #[serde(default)]
     pub socket_warning: String,
+    /// The daemon's warning when it could not keep a copy of its binary to
+    /// hand its agents (a rebuild while the team runs breaks their tools);
+    /// empty when it did, or from older peers.
+    #[serde(default)]
+    pub binary_warning: String,
     pub daemon_started_at: i64,
     #[serde(default)]
     pub team_started_at: Option<i64>,

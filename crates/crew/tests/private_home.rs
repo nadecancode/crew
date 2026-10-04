@@ -30,9 +30,10 @@ fn sandboxes_available() -> bool {
 
 /// Wrapper scripts for `claude`, `codex` and `pi`, installed the way the real
 /// CLIs are: the program in `real/`, a symlink to it in `bin/`, which is what
-/// goes on PATH. The tree sits beside the crew binary: that is mounted into
-/// the sandbox, and `/tmp` is not.
-fn fake_clis() -> (tempfile::TempDir, PathBuf) {
+/// goes on PATH. The tree sits beside the crew binary, not under `/tmp`,
+/// which a sandbox never mounts; they run the crew binary `s`'s sandboxes
+/// mount, the daemon's copy.
+fn fake_clis(s: &Session) -> (tempfile::TempDir, PathBuf) {
     let dir = tempfile::tempdir_in(Path::new(CREW).parent().unwrap()).unwrap();
     let base = dir.path().canonicalize().unwrap();
     std::fs::create_dir_all(base.join("real")).unwrap();
@@ -41,7 +42,10 @@ fn fake_clis() -> (tempfile::TempDir, PathBuf) {
         let path = base.join("real").join(name);
         std::fs::write(
             &path,
-            format!("#!/bin/sh\nexec '{CREW}' fake-cli {name} \"$@\"\n"),
+            format!(
+                "#!/bin/sh\nexec {} fake-cli {name} \"$@\"\n",
+                s.sandboxed_crew()
+            ),
         )
         .unwrap();
         std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o755)).unwrap();
@@ -74,7 +78,7 @@ fn sandboxed_clis_keep_their_files_in_private_homes_seeded_without_the_operators
         return;
     }
     let s = Session::new();
-    let (_fakes, bin) = fake_clis();
+    let (_fakes, bin) = fake_clis(&s);
     let path = std::env::var_os("PATH").unwrap_or_default();
     let mut dirs = vec![bin];
     dirs.extend(std::env::split_paths(&path));
@@ -317,7 +321,7 @@ fn a_codex_endpoint_home_gives_both_the_instructions_and_the_seeded_model_settin
         return;
     }
     let s = Session::new();
-    let (_fakes, bin) = fake_clis();
+    let (_fakes, bin) = fake_clis(&s);
     // Only this command's PATH: the test binary is shared with other tests.
     let path = std::env::var_os("PATH").unwrap_or_default();
     let mut dirs = vec![bin];

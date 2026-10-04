@@ -238,10 +238,16 @@ impl Daemon {
             }
             _ => false,
         };
+        // The copy of crew it is handed is still the one made, and is
+        // recorded with it: a process of another build's is not adopted
+        // after a daemon restart (daemon::binary).
+        let daemon = self.clone();
+        tokio::task::spawn_blocking(move || daemon.check_binary()).await??;
         {
             let mut model = self.model();
             if let Some(local) = model.local.get_mut(id) {
                 local.long_context = long_context;
+                local.binary = self.binary.name().map(str::to_string);
             }
         }
         self.save_local(id);
