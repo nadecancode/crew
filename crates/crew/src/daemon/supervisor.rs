@@ -1895,7 +1895,7 @@ defaults.auto_trust: true in the team file.",
             return Err(RpcError::not_found(format!("no agent '{id}'")));
         }
         // A start in progress gives up at its next step.
-        self.stop_requested(id);
+        let mine = self.stop_requested(id);
         let procs = self.procs()?;
         {
             let mut model = self.model();
@@ -1906,6 +1906,11 @@ defaults.auto_trust: true in the team file.",
             rt.pending_prompt = None;
         }
         procs.kill(id).await.map_err(internal)?;
+        // A restart asked for while this waited has taken over: what it
+        // started (a sidecar, a session) and set is not this kill's.
+        if self.stops(id) != mine {
+            return Ok(());
+        }
         self.stop_sidecar(id);
         self.update_agent(id, |a| {
             a.status = AgentStatus::Stopped;
@@ -2425,6 +2430,69 @@ mod tests {
             (task.status, task.note.as_deref()),
             (TaskStatus::Blocked, Some("agent a was stopped")),
             "the restart the kill overtook reopened the task the kill blocked"
+        );
+    }
+
+    #[tokio::test]
+    async fn a_kill_a_restart_overtook_while_it_stopped_the_session_changes_nothing() {
+        let temp = tempfile::tempdir().unwrap();
+        let running = super::super::start(super::super::DaemonOptions {
+            workspace: temp.path().to_path_buf(),
+            crew_bin: std::env::current_exe().unwrap(),
+        })
+        .await
+        .unwrap();
+        let daemon = running.daemon.clone();
+        let mut team = TeamConfig::from_yaml(
+            "project: overtaken\nobjective: overtaken\nagents:\n  - id: a\n    role: work\n",
+        )
+        .unwrap();
+        team.workspace.sandbox.mode = crew_core::config::SandboxMode::Off;
+        daemon.model().session.team = Some(team);
+        let agent: Agent = serde_json::from_value(serde_json::json!({
+            "id": "a", "name": "a", "role": "work", "status": "working", "runtime": "shell",
+            "workdir": temp.path().to_str().unwrap(), "backend": "pty", "last_activity_at": 0
+        }))
+        .unwrap();
+        daemon.model().agents.push(agent);
+        let procs = Arc::new(FirstKillWaits {
+            alive: AtomicBool::new(true),
+            kills: AtomicUsize::new(0),
+            entered: Notify::new(),
+            release: Notify::new(),
+        });
+        *daemon.procs.write().unwrap() = Some(procs.clone());
+
+        // The operator stops the agent; while the kill waits for its session
+        // to go, the operator restarts it, and that restart's start runs (and
+        // fails: these processes cannot be started).
+        let kill = tokio::spawn({
+            let daemon = daemon.clone();
+            async move { daemon.kill_agent("a").await }
+        });
+        procs.entered.notified().await;
+        daemon.restart_agent("a").await.unwrap();
+        for _ in 0..500 {
+            if daemon.agent("a").unwrap().status == AgentStatus::Failed {
+                break;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+        }
+        let after_restart = daemon.agent("a").unwrap();
+        procs.release.notify_one();
+        kill.await.unwrap().unwrap();
+
+        let after_kill = daemon.agent("a").unwrap();
+        assert_eq!(
+            after_restart.status,
+            AgentStatus::Failed,
+            "{:?}",
+            after_restart.error
+        );
+        assert_eq!(
+            (after_kill.status, after_kill.error),
+            (after_restart.status, after_restart.error),
+            "the kill the restart overtook overwrote what the restart did"
         );
     }
 }
