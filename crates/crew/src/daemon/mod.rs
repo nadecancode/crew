@@ -530,6 +530,15 @@ impl Daemon {
         Ok(Some(after))
     }
 
+    /// `task` as it was just stored (with a message, by the bus): the model
+    /// and the clients get it.
+    pub(crate) fn task_saved(&self, task: &Task) {
+        if let Some(t) = self.model().tasks.iter_mut().find(|t| t.id == task.id) {
+            *t = task.clone();
+        }
+        self.push(Push::Task(Box::new(task.clone())));
+    }
+
     /// Recompute inbox/outbox counters for the given agents.
     pub(crate) fn refresh_counts(&self, ids: &[String]) {
         for id in ids {

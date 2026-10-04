@@ -1131,6 +1131,11 @@ with review_submit(task_id=\"{}\", approve=true|false).",
         approve: bool,
         comments: String,
     ) -> Result<Task, RpcError> {
+        // One verdict at a time, and none beside the scheduler: the task is
+        // read, checked and changed under the plan lock, so the scheduler
+        // cannot hand the author something else in between, and two
+        // verdicts cannot both find it awaiting review.
+        let planning = self.plan_lock.lock().await;
         let task = self
             .model()
             .task(task_id)
@@ -1163,82 +1168,57 @@ with review_submit(task_id=\"{}\", approve=true|false).",
         let comments = truncate_chars(comments.trim(), MAX_RESULT_CHARS);
         let now = now_ms();
         // An author already on another task gets the rework back once that
-        // task is finished: an agent works on one task at a time. Checked
-        // under the plan lock, so the scheduler cannot hand the author
-        // something else in between.
-        let planning = if approve {
-            None
-        } else {
-            Some(self.plan_lock.lock().await)
-        };
+        // task is finished: an agent works on one task at a time.
         let queued = !approve
             && author
                 .as_deref()
                 .is_some_and(|a| active_task(&self.model().tasks, a).is_some());
-        // The author is told the verdict before it is applied: a verdict that
-        // cannot be told is not applied (the task stays in Review), and the
-        // reviewer and the orchestrator hear of it.
-        if let Some(author) = author.as_deref().filter(|a| *a != reviewer) {
-            let body = if approve {
-                format!(
-                    "Approved: task \"{}\" (id {task_id}).{}",
-                    task.title,
-                    if comments.is_empty() {
-                        String::new()
-                    } else {
-                        format!("\n\n{comments}")
-                    }
-                )
+        let mut updated = task.clone();
+        if approve {
+            updated.status = TaskStatus::Done;
+            updated.completed_at = Some(now);
+            updated.note = None;
+        } else {
+            updated.status = if queued {
+                TaskStatus::Ready
             } else {
-                // In a shared workspace there is nothing to commit: the work is
-                // already where everyone sees it.
-                let commit = if self.model().session.isolation == "shared" {
-                    ""
-                } else {
-                    "git_commit, "
-                };
-                let next = if queued {
-                    format!(
-                        "Finish your current task first: this one is handed back to you after \
-it. Then address them, {commit}and call task_complete again."
-                    )
-                } else {
-                    format!("Address them, {commit}then call task_complete again.")
-                };
-                format!(
-                    "Changes requested on task \"{}\" (id {task_id}):\n\n{comments}\n\n{next}",
-                    task.title
-                )
+                TaskStatus::Working
             };
-            let message = NewMessage::new(&reviewer, author, MessageType::ReviewResult, body)
-                .metadata(json!({ "task_id": task_id, "approved": approve }))
-                .correlation(Some(format!("review-{task_id}")));
-            if let Err(e) = self.send_message(message).await {
+            updated.progress = None;
+            updated.note = Some(format!("changes requested by {reviewer}"));
+        }
+        // The verdict is told to the author in the same write that applies
+        // it: both are stored, or neither is. One that cannot be (the bus or
+        // the database refuses) is not applied: the task stays in Review,
+        // and the reviewer and the orchestrator hear of it.
+        match author.as_deref().filter(|a| *a != reviewer) {
+            Some(author) => {
+                let message =
+                    self.review_result(&task, &reviewer, author, approve, &comments, queued);
+                let stored = self.recipients_of(&message).and_then(|(recipients, p2p)| {
+                    let outcome = self.bus.send_with_task(message, recipients, &updated)?;
+                    Ok((outcome, p2p))
+                });
+                match stored {
+                    Ok((outcome, p2p)) => {
+                        self.task_saved(&updated);
+                        drop(planning);
+                        self.message_sent(&outcome, p2p).await;
+                    }
+                    Err(e) => {
+                        drop(planning);
+                        return Err(self
+                            .review_result_unsent(&task, &reviewer, author, approve, &comments, &e)
+                            .await);
+                    }
+                }
+            }
+            None => {
+                let saved = self.try_update_task(task_id, |t| *t = updated.clone());
                 drop(planning);
-                return Err(self
-                    .review_result_unsent(&task, &reviewer, author, approve, &comments, &e)
-                    .await);
+                saved?.ok_or_else(|| RpcError::not_found("task vanished"))?;
             }
         }
-        let updated = if approve {
-            self.try_update_task(task_id, |t| {
-                t.status = TaskStatus::Done;
-                t.completed_at = Some(now);
-                t.note = None;
-            })
-        } else {
-            self.try_update_task(task_id, |t| {
-                t.status = if queued {
-                    TaskStatus::Ready
-                } else {
-                    TaskStatus::Working
-                };
-                t.progress = None;
-                t.note = Some(format!("changes requested by {reviewer}"));
-            })
-        };
-        drop(planning);
-        let updated = updated?.ok_or_else(|| RpcError::not_found("task vanished"))?;
 
         self.emit(
             NewEvent::new(
@@ -1273,6 +1253,54 @@ it. Then address them, {commit}and call task_complete again."
         }
         self.replan();
         Ok(updated)
+    }
+
+    /// The message telling `author` the verdict on `task` (`queued`: the
+    /// author is on another task, which it finishes first).
+    fn review_result(
+        &self,
+        task: &Task,
+        reviewer: &str,
+        author: &str,
+        approve: bool,
+        comments: &str,
+        queued: bool,
+    ) -> NewMessage {
+        let task_id = &task.id;
+        let body = if approve {
+            format!(
+                "Approved: task \"{}\" (id {task_id}).{}",
+                task.title,
+                if comments.is_empty() {
+                    String::new()
+                } else {
+                    format!("\n\n{comments}")
+                }
+            )
+        } else {
+            // In a shared workspace there is nothing to commit: the work is
+            // already where everyone sees it.
+            let commit = if self.model().session.isolation == "shared" {
+                ""
+            } else {
+                "git_commit, "
+            };
+            let next = if queued {
+                format!(
+                    "Finish your current task first: this one is handed back to you after \
+it. Then address them, {commit}and call task_complete again."
+                )
+            } else {
+                format!("Address them, {commit}then call task_complete again.")
+            };
+            format!(
+                "Changes requested on task \"{}\" (id {task_id}):\n\n{comments}\n\n{next}",
+                task.title
+            )
+        };
+        NewMessage::new(reviewer, author, MessageType::ReviewResult, body)
+            .metadata(json!({ "task_id": task_id, "approved": approve }))
+            .correlation(Some(format!("review-{task_id}")))
     }
 
     /// A verdict on `task` that could not be told to its author: it is not

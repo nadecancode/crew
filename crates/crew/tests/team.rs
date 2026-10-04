@@ -1215,18 +1215,49 @@ fn a_review_result_that_cannot_be_sent_is_not_applied_and_the_orchestrator_is_to
     s.wait("write to be in review", |snap| {
         find_task(snap, "write").status == TaskStatus::Review
     });
-    // The database refuses review results.
     let db = rusqlite::Connection::open(s.workspace.join(".crew/crew.db")).unwrap();
+    let verdict = |approve: bool, comments: &str| {
+        let args = json!({ "task_id": "write", "approve": approve, "comments": comments });
+        s.ctl("critic", &["tool", "review_submit", &args.to_string()])
+    };
+    let told = || {
+        s.messages()
+            .into_iter()
+            .filter(|m| m.kind == MessageType::ReviewResult)
+            .collect::<Vec<_>>()
+    };
+
+    // The database refuses the task's change: the verdict is neither
+    // applied nor told (the author must not act on one that did not hold).
+    db.execute_batch(
+        "CREATE TRIGGER refuse_task_write BEFORE UPDATE ON tasks \
+         WHEN NEW.id = 'write' \
+         BEGIN SELECT RAISE(ABORT, 'no task write'); END;",
+    )
+    .unwrap();
+    for approve in [false, true] {
+        let out = verdict(approve, "only if it holds");
+        assert!(
+            told().is_empty(),
+            "approve={approve}: the author was told a verdict that was not applied: {:?}",
+            told()
+        );
+        assert_eq!(find_task(&s.snapshot(), "write").status, TaskStatus::Review);
+        let said = format!("{}{}", stdout(&out), stderr(&out));
+        assert!(
+            said.contains("no task write") && said.contains("stays in Review"),
+            "approve={approve}: {said}"
+        );
+    }
+    db.execute_batch("DROP TRIGGER refuse_task_write;").unwrap();
+
+    // The database refuses review results.
     db.execute_batch(
         "CREATE TRIGGER refuse_review_result BEFORE INSERT ON messages \
          WHEN NEW.kind = 'review_result' \
          BEGIN SELECT RAISE(ABORT, 'the disk is full'); END;",
     )
     .unwrap();
-    let verdict = |approve: bool, comments: &str| {
-        let args = json!({ "task_id": "write", "approve": approve, "comments": comments });
-        s.ctl("critic", &["tool", "review_submit", &args.to_string()])
-    };
 
     // Neither verdict can be told to the author: neither is applied, the
     // critic hears it, and so does the orchestrator, with the verdict.
@@ -1234,7 +1265,7 @@ fn a_review_result_that_cannot_be_sent_is_not_applied_and_the_orchestrator_is_to
         let out = verdict(approve, comments);
         let said = format!("{}{}", stdout(&out), stderr(&out));
         assert!(
-            said.contains("could not be sent to author") && said.contains("stays in Review"),
+            said.contains("the disk is full") && said.contains("stays in Review"),
             "approve={approve}: {said}"
         );
         let held = s.snapshot();

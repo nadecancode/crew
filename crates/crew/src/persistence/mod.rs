@@ -98,6 +98,14 @@ pub trait MessageStore: Send + Sync {
     /// Persist a message and one delivery row per recipient. Returns `false`
     /// (and stores nothing) when a message with this id already exists.
     fn insert_message(&self, message: &Message, recipients: &[String]) -> Result<bool>;
+    /// `insert_message` and `save_task(task)` in one write: both are
+    /// stored, or neither is.
+    fn insert_message_with_task(
+        &self,
+        message: &Message,
+        recipients: &[String],
+        task: &Task,
+    ) -> Result<bool>;
     fn get_message(&self, id: &str) -> Result<Option<Message>>;
     fn recipients(&self, message_id: &str) -> Result<Vec<String>>;
     /// Messages addressed to `agent`, oldest first.

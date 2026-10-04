@@ -277,35 +277,64 @@ fn message_from_row(row: &Row<'_>) -> rusqlite::Result<Message> {
     })
 }
 
+/// Insert `message` and its delivery rows within `tx`; `false` (nothing
+/// inserted) when its id is already taken.
+fn insert_message_in(
+    tx: &rusqlite::Transaction<'_>,
+    message: &Message,
+    recipients: &[String],
+) -> Result<bool> {
+    let inserted = tx.execute(
+        "INSERT OR IGNORE INTO messages
+             (id, sender, recipient, kind, body, timestamp, correlation_id, reply_to, metadata)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
+        params![
+            message.id,
+            message.from,
+            message.to,
+            message.kind.as_str(),
+            message.body,
+            message.timestamp,
+            message.correlation_id,
+            message.reply_to,
+            serde_json::to_string(&message.metadata)?,
+        ],
+    )?;
+    if inserted == 0 {
+        return Ok(false);
+    }
+    for recipient in recipients {
+        tx.execute(
+            "INSERT OR IGNORE INTO deliveries (message_id, recipient) VALUES (?1, ?2)",
+            params![message.id, recipient],
+        )?;
+    }
+    Ok(true)
+}
+
 impl MessageStore for SqliteStore {
     fn insert_message(&self, message: &Message, recipients: &[String]) -> Result<bool> {
         let mut conn = self.conn();
         let tx = conn.transaction()?;
-        let inserted = tx.execute(
-            "INSERT OR IGNORE INTO messages
-             (id, sender, recipient, kind, body, timestamp, correlation_id, reply_to, metadata)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
-            params![
-                message.id,
-                message.from,
-                message.to,
-                message.kind.as_str(),
-                message.body,
-                message.timestamp,
-                message.correlation_id,
-                message.reply_to,
-                serde_json::to_string(&message.metadata)?,
-            ],
-        )?;
-        if inserted == 0 {
+        let inserted = insert_message_in(&tx, message, recipients)?;
+        if inserted {
+            tx.commit()?;
+        }
+        Ok(inserted)
+    }
+
+    fn insert_message_with_task(
+        &self,
+        message: &Message,
+        recipients: &[String],
+        task: &Task,
+    ) -> Result<bool> {
+        let mut conn = self.conn();
+        let tx = conn.transaction()?;
+        if !insert_message_in(&tx, message, recipients)? {
             return Ok(false);
         }
-        for recipient in recipients {
-            tx.execute(
-                "INSERT OR IGNORE INTO deliveries (message_id, recipient) VALUES (?1, ?2)",
-                params![message.id, recipient],
-            )?;
-        }
+        upsert_doc(&tx, "tasks", &task.id, &serde_json::to_string(task)?)?;
         tx.commit()?;
         Ok(true)
     }

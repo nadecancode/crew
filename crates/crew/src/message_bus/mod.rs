@@ -9,7 +9,7 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
 
 use crew_core::util::{new_id, now_ms};
-use crew_core::{InboxEntry, Message, MessageType, BROADCAST, MAX_MESSAGE_BYTES};
+use crew_core::{InboxEntry, Message, MessageType, Task, BROADCAST, MAX_MESSAGE_BYTES};
 use serde_json::Value;
 use tokio::sync::broadcast;
 
@@ -90,6 +90,14 @@ pub trait MessageBus: Send + Sync {
     /// Accept a message for the given recipients. For a direct message
     /// `recipients` is `[to]`; for a broadcast it is everyone but the sender.
     fn send(&self, message: NewMessage, recipients: Vec<String>) -> Result<SendOutcome, BusError>;
+    /// `send`, with `task` saved in the same write as the message: both are
+    /// stored, or neither is (and nothing is published).
+    fn send_with_task(
+        &self,
+        message: NewMessage,
+        recipients: Vec<String>,
+        task: &Task,
+    ) -> Result<SendOutcome, BusError>;
     /// Read an agent's inbox, oldest first.
     fn receive(
         &self,
@@ -141,61 +149,16 @@ fn valid_message_id(id: &str) -> bool {
 
 impl MessageBus for LocalBus {
     fn send(&self, new: NewMessage, recipients: Vec<String>) -> Result<SendOutcome, BusError> {
-        if new.body.trim().is_empty() {
-            return Err(BusError::Empty);
-        }
-        let limit = self.max_bytes.load(Ordering::Relaxed);
-        if new.body.len() > limit {
-            return Err(BusError::TooLarge {
-                size: new.body.len(),
-                limit,
-            });
-        }
-        if recipients.is_empty() && new.to != BROADCAST {
-            return Err(BusError::NoRecipients);
-        }
-        let id = match new.id {
-            Some(id) if valid_message_id(&id) => id,
-            Some(id) => return Err(BusError::InvalidId(id)),
-            None => new_id("m"),
-        };
-        let message = Message {
-            id,
-            from: new.from,
-            to: new.to,
-            kind: new.kind,
-            body: new.body,
-            timestamp: now_ms(),
-            correlation_id: new.correlation_id,
-            reply_to: new.reply_to,
-            metadata: new.metadata,
-        };
-        if !self.store.insert_message(&message, &recipients)? {
-            // Same id again: hand back the original and deliver nothing.
-            let original = self
-                .store
-                .get_message(&message.id)?
-                .ok_or_else(|| anyhow::anyhow!("duplicate message vanished"))?;
-            if original.from != message.from {
-                return Err(BusError::IdConflict(message.id));
-            }
-            let recipients = self.store.recipients(&original.id)?;
-            return Ok(SendOutcome {
-                message: original,
-                duplicate: true,
-                recipients,
-            });
-        }
-        // No subscribers is fine; history is the source of truth.
-        let _ = self.tx.send(BusEvent {
-            message: message.clone(),
-            recipients: recipients.clone(),
-        });
-        Ok(SendOutcome {
-            message,
-            duplicate: false,
-            recipients,
-        })
+        self.accept(new, recipients, None)
+    }
+
+    fn send_with_task(
+        &self,
+        new: NewMessage,
+        recipients: Vec<String>,
+        task: &Task,
+    ) -> Result<SendOutcome, BusError> {
+        self.accept(new, recipients, Some(task))
     }
 
     fn receive(
@@ -246,6 +209,79 @@ impl MessageBus for LocalBus {
 
     fn max_bytes(&self) -> usize {
         self.max_bytes.load(Ordering::Relaxed)
+    }
+}
+
+impl LocalBus {
+    /// Accept a message (and save `task` with it, when given): send and
+    /// send_with_task.
+    fn accept(
+        &self,
+        new: NewMessage,
+        recipients: Vec<String>,
+        task: Option<&Task>,
+    ) -> Result<SendOutcome, BusError> {
+        if new.body.trim().is_empty() {
+            return Err(BusError::Empty);
+        }
+        let limit = self.max_bytes.load(Ordering::Relaxed);
+        if new.body.len() > limit {
+            return Err(BusError::TooLarge {
+                size: new.body.len(),
+                limit,
+            });
+        }
+        if recipients.is_empty() && new.to != BROADCAST {
+            return Err(BusError::NoRecipients);
+        }
+        let id = match new.id {
+            Some(id) if valid_message_id(&id) => id,
+            Some(id) => return Err(BusError::InvalidId(id)),
+            None => new_id("m"),
+        };
+        let message = Message {
+            id,
+            from: new.from,
+            to: new.to,
+            kind: new.kind,
+            body: new.body,
+            timestamp: now_ms(),
+            correlation_id: new.correlation_id,
+            reply_to: new.reply_to,
+            metadata: new.metadata,
+        };
+        let inserted = match task {
+            Some(task) => self
+                .store
+                .insert_message_with_task(&message, &recipients, task)?,
+            None => self.store.insert_message(&message, &recipients)?,
+        };
+        if !inserted {
+            // Same id again: hand back the original and deliver nothing.
+            let original = self
+                .store
+                .get_message(&message.id)?
+                .ok_or_else(|| anyhow::anyhow!("duplicate message vanished"))?;
+            if original.from != message.from {
+                return Err(BusError::IdConflict(message.id));
+            }
+            let recipients = self.store.recipients(&original.id)?;
+            return Ok(SendOutcome {
+                message: original,
+                duplicate: true,
+                recipients,
+            });
+        }
+        // No subscribers is fine; history is the source of truth.
+        let _ = self.tx.send(BusEvent {
+            message: message.clone(),
+            recipients: recipients.clone(),
+        });
+        Ok(SendOutcome {
+            message,
+            duplicate: false,
+            recipients,
+        })
     }
 }
 
