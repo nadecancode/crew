@@ -7739,6 +7739,103 @@ fn a_fresh_restart_starts_a_new_session_instead_of_resuming_the_old_one() {
 }
 
 #[test]
+fn a_restart_takes_over_from_a_restart_still_starting() {
+    let s = Session::new();
+    // A `codex` that notes how each session starts ("resume <id>" or
+    // "fresh"), and whose second app-server (the first restart's) says it
+    // was asked for and waits for the gate.
+    let bin = s.root().join("bin");
+    std::fs::create_dir_all(&bin).unwrap();
+    let (log, first, second, gate) = (
+        s.root().join("sessions"),
+        s.root().join("first"),
+        s.root().join("second"),
+        s.root().join("gate"),
+    );
+    write_program(
+        &bin.join("codex"),
+        &format!(
+            "#!/bin/sh\nif [ \"$1\" = app-server ]; then\n  if [ ! -e '{first}' ]; then : > '{first}'\n  elif [ ! -e '{second}' ]; then : > '{second}'; while [ ! -e '{gate}' ]; do sleep 0.05; done\n  fi\nelse r=fresh; p=; for a in \"$@\"; do [ \"$p\" = resume ] && r=\"resume $a\"; p=$a; done; echo \"$r\" >> '{log}'; fi\nexec '{CREW}' fake-cli codex \"$@\"\n",
+            first = first.display(),
+            second = second.display(),
+            gate = gate.display(),
+            log = log.display(),
+        ),
+    );
+    let team = s.team(
+        "restart-over-restart",
+        vec![AgentSpec {
+            id: "x".into(),
+            role: "implementation".into(),
+            runtime: Some(RuntimeKind::Codex),
+            ..AgentSpec::default()
+        }],
+        vec![],
+    );
+    std::fs::write(s.root().join("team.yaml"), team.to_yaml().unwrap()).unwrap();
+    let mut path = vec![bin.clone()];
+    path.extend(std::env::split_paths(&std::env::var_os("PATH").unwrap()));
+    let out = s
+        .command()
+        .env("PATH", std::env::join_paths(path).unwrap())
+        .args(["run", "team.yaml", "--no-attach"])
+        .output()
+        .unwrap();
+    assert!(out.status.success(), "{}", stderr(&out));
+    let sessions = || std::fs::read_to_string(&log).unwrap_or_default();
+    s.wait("x to be up", |snap| {
+        let x = find_agent(snap, "x");
+        x.pid.is_some() && x.status != AgentStatus::Spawning
+    });
+    s.wait_for("its session", || !sessions().is_empty());
+    let identity = s.workspace.join(".crew/agents/x/identity.json");
+    let notify = s
+        .command()
+        .args(["hook", "codex-notify", "--identity"])
+        .arg(&identity)
+        .arg(r#"{"type":"agent-turn-complete","thread-id":"old-thread"}"#)
+        .output()
+        .unwrap();
+    assert!(notify.status.success(), "{}", stderr(&notify));
+    s.wait("its session id", |snap| {
+        find_agent(snap, "x").session_id.as_deref() == Some("old-thread")
+    });
+    let socket = std::path::PathBuf::from(
+        serde_json::from_str::<Value>(&std::fs::read_to_string(&identity).unwrap()).unwrap()
+            ["socket"]
+            .as_str()
+            .unwrap(),
+    );
+    let (mut operator, _) = crew_core::client::Client::operator(&socket, "test").unwrap();
+    // A restart that waits for its app-server, and a fresh restart asked
+    // for meanwhile: the later one is what runs.
+    operator
+        .call_value(crew_core::rpc::Call::AgentRestart { id: "x".into() })
+        .unwrap();
+    s.wait_for("the restart's app-server to be asked for", || {
+        second.exists()
+    });
+    operator
+        .call_value(crew_core::rpc::Call::AgentRestartFresh { id: "x".into() })
+        .unwrap();
+    std::fs::write(&gate, "").unwrap();
+    s.wait_for("the next session", || sessions().lines().count() >= 2);
+    let snap = s.wait("x to be up or failed", |snap| {
+        let x = find_agent(snap, "x");
+        x.status == AgentStatus::Failed || (x.pid.is_some() && x.status != AgentStatus::Spawning)
+    });
+    let x = find_agent(&snap, "x").clone();
+    let lines: Vec<String> = sessions().lines().map(String::from).collect();
+    s.stop();
+    assert_eq!(
+        lines,
+        ["fresh", "fresh"],
+        "the restart the fresh one took over from still started"
+    );
+    assert_ne!(x.status, AgentStatus::Failed, "{:?}", x.error);
+}
+
+#[test]
 fn a_fresh_restart_is_not_handed_back_the_old_session_by_its_last_hook() {
     let s = Session::new();
     let identity = s.workspace.join(".crew/agents/x/identity.json");

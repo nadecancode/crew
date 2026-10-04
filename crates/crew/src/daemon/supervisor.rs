@@ -338,18 +338,21 @@ impl Daemon {
         });
     }
 
-    /// How many stops of agent `id` have been asked for. A start takes this
-    /// when it is asked for and gives up once it has changed: a stop asked
-    /// for while the start waits (for its sandboxes, its sidecar, its
-    /// process) is not lost to it.
+    /// How many stops of agent `id` have been asked for (a kill, or a
+    /// restart taking over). A start takes this when it is asked for and
+    /// gives up once it has changed: a stop asked for while the start waits
+    /// (for its sandboxes, its sidecar, its process) is not lost to it.
     pub(crate) fn stops(&self, id: &str) -> u64 {
         let stops = self.stops.lock().unwrap_or_else(|e| e.into_inner());
         stops.get(id).copied().unwrap_or(0)
     }
 
-    fn stop_requested(&self, id: &str) {
+    /// Asks for a stop of agent `id`; the count after it.
+    fn stop_requested(&self, id: &str) -> u64 {
         let mut stops = self.stops.lock().unwrap_or_else(|e| e.into_inner());
-        *stops.entry(id.to_string()).or_default() += 1;
+        let count = stops.entry(id.to_string()).or_default();
+        *count += 1;
+        *count
     }
 
     /// Start (or restart) an agent's process; `since` is Daemon::stops when
@@ -1958,6 +1961,9 @@ defaults.auto_trust: true in the team file.",
             return Err(RpcError::not_found(format!("no agent '{id}'")));
         }
         self.limit_lifted(id, "restarted");
+        // A start still on its way (an earlier restart's, a crash restart's)
+        // gives up: this restart takes over from it.
+        let since = self.stop_requested(id);
         let procs = self.procs()?;
         if procs.is_alive(id) {
             self.model().rt(id).expected_exit = true;
@@ -1995,7 +2001,6 @@ defaults.auto_trust: true in the team file.",
         });
         self.emit(NewEvent::new("daemon", "agent.restart", format!("restarting {id}")).agent(id));
         let daemon = self.clone();
-        let since = self.stops(id);
         let id = id.to_string();
         tokio::spawn(async move {
             if let Err(e) = daemon.spawn_agent(&id, start, notice, since).await {
