@@ -51,6 +51,12 @@ The replayed gap and the two fixes are in the spike (`origin.spec.ts`).
 gate for the implementation: the order in which a server stops (§security
 "The listener", "Stopping").
 
+**Budget P1 raised during implementation** (web, m-2f19582ef628): 150 KB was
+an estimate from the spike, which had none of the inspector, dialogs, DAG,
+usage view or hover cards; the whole app of §ui and §graphs measures 191 KB.
+P1 is now 220 KB. No feature is cut for it, and P4 (the whole bundle, 600 KB)
+is unchanged (§perf "Budgets").
+
 **Verification.** The transport, the security checks, the build and the
 performance figures below were tried in a spike against a real daemon (this
 branch, protocol 4) running the scripted team of `examples/dry-run.yaml`:
@@ -1673,7 +1679,7 @@ the charts).
 
 | # | budget | limit | spike **(observed)** |
 |---|---|---|---|
-| P1 | script needed for the dashboard (everything but the terminal chunk), minified | ≤ 150 KB (about 50 KB gzip) | 31.8 KB |
+| P1 | script needed for the dashboard (everything but the terminal chunk), minified | ≤ 220 KB (about 70 KB gzip) | 31.8 KB; the whole app: 191 KB (172 KB app, 19 KB solid-js) |
 | P2 | stylesheet | ≤ 30 KB | 5.0 KB (3.6 KB of it xterm's) |
 | P3 | terminal chunk (xterm.js), requested at the start beside the first paint, used when a terminal first opens | ≤ 350 KB | 331 KB |
 | P4 | the whole of `web-dist/` | ≤ 600 KB | 369 KB |
@@ -1689,6 +1695,15 @@ the charts).
 | P14 | terminal: key → echoed output in the page, pty backend, p95 | ≤ 20 ms | 4.2–4.4 ms |
 | P15 | JS heap with both rings full | ≤ 60 MB | 7–11 MB (5000 events, few messages) |
 | P16 | server: `Daemon::push` → bytes written to the WebSocket, p95 | ≤ 1 ms | not separable in the relay (P7 includes it); the bridge test prints it |
+
+**What P1 is for.** On loopback the size of the script is not what the
+operator waits for; P5 and P6 are. P1 is a ceiling against growth nobody
+decided on (a library pulled in, code duplicated), about 15 % above the app
+as specified. It is not a target to cut features for. If P5 or P6 is missed,
+the remedy is to take what the first screen does not draw (inspector,
+dialogs, DAG, usage view, hover cards) out of the entry script into a second
+chunk that the entry requests when the document starts, as the terminal chunk
+is (§security allows no later request); the sum still counts against P1.
 
 P7 and P9 together are the push-to-paint latency: under 45 ms at p95, of
 which all but a few milliseconds is waiting for the display's next frame.

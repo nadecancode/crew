@@ -1,0 +1,33 @@
+#!/usr/bin/env bash
+# Browser tests of the web dashboard against a real crew daemon (the `live`
+# Playwright project, web/e2e/live; notes/web-design.md §tests).
+#
+#   scripts/web-e2e [jj|git] [playwright args…]
+#
+# `jj` (the default) and `git` are the version control backend every team is
+# started with (CREW_TEST_VCS). jj comes from nixpkgs when it is not on PATH
+# and nix is there. Set CREW_TEST_SANDBOX=require to run the scripted agents
+# in bubblewrap sandboxes. PLAYWRIGHT_EXECUTABLE_PATH names a Chromium-based
+# browser when Playwright's own does not start (NixOS).
+set -euo pipefail
+
+cd "$(dirname "$0")/.."
+vcs=jj
+case "${1:-}" in jj|git) vcs=$1; shift ;; esac
+
+./scripts/build-env cargo build -p crew
+(cd web && [ -d node_modules ] || bun install --frozen-lockfile)
+
+run=(bunx playwright test --project=live "$@")
+export CREW_BIN="$PWD/target/debug/crew" CREW_TEST_VCS="$vcs"
+cd web
+need=()
+if [ "$vcs" = jj ] && [ -z "${CREW_JJ:-}" ] && ! command -v jj >/dev/null; then need+=(nixpkgs#jujutsu); fi
+if [ "${CREW_TEST_SANDBOX:-}" = require ]; then
+    command -v bwrap >/dev/null || need+=(nixpkgs#bubblewrap)
+    command -v socat >/dev/null || need+=(nixpkgs#socat)
+fi
+if command -v nix >/dev/null && [ ${#need[@]} -gt 0 ]; then
+    exec nix shell "${need[@]}" --command "${run[@]}"
+fi
+exec "${run[@]}"
