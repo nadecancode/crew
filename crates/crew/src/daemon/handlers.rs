@@ -51,7 +51,7 @@ fn operator_only(who: &Who) -> Result<(), RpcError> {
 /// with whoever holds the operator token file, and the browser does not
 /// launch teams.
 fn not_on_the_web(conn: &Conn, method: &str) -> Result<(), RpcError> {
-    if conn.transport == Transport::Web {
+    if conn.transport == Transport::Web || conn.web {
         return Err(RpcError::forbidden(format!(
             "{method} is not available to the web dashboard"
         )));
@@ -148,7 +148,12 @@ change identity",
             }
             let mut web_proof = None;
             let who = match conn.transport {
-                Transport::Socket => self.authenticate(hello.role, hello.agent_id, hello.token)?,
+                Transport::Socket => {
+                    let who = self.authenticate(hello.role, hello.agent_id, hello.token)?;
+                    // The dashboard server's mark: it only takes away.
+                    conn.web = hello.web;
+                    who
+                }
                 // Only a live web session's token, and only as the operator:
                 // the operator token and agents' tokens work on the socket
                 // alone.
@@ -634,9 +639,22 @@ change identity",
                 "{} is the dashboard server's: run `crew web`",
                 call_name
             ))),
-            Call::Summary { .. } | Call::WebAttach { .. } | Call::WebEvent { .. } => Err(
-                RpcError::invalid(format!("{call_name} is not served by this daemon yet")),
-            ),
+            Call::Summary { watch } => {
+                operator_only(&who)?;
+                reply(self.summary(conn, watch).await)
+            }
+            Call::WebAttach { url } => {
+                operator_only(&who)?;
+                not_on_the_web(conn, "web_attach")?;
+                self.web_attach(conn, url)?;
+                Ok(json!({ "attached": true }))
+            }
+            Call::WebEvent { kind, count } => {
+                operator_only(&who)?;
+                not_on_the_web(conn, "web_event")?;
+                self.web_event(conn, kind, count)?;
+                Ok(json!({ "ok": true }))
+            }
         }
     }
 

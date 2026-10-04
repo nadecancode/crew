@@ -9,7 +9,7 @@
 //! same frames through the same [`Session`], with its own checks in front.
 
 use crew_core::paths::uid;
-use crew_core::rpc::{Call, Push, Request, Role, RpcError, ServerFrame};
+use crew_core::rpc::{Call, Push, Request, Role, RpcError, ServerFrame, WorkspaceSummary};
 use crew_core::util::ct_eq;
 use crew_core::MAX_FRAME_BYTES;
 use serde_json::Value;
@@ -59,6 +59,11 @@ pub(crate) struct Conn {
     pub id: u64,
     pub transport: Transport,
     pub who: Option<Who>,
+    /// Its `hello` said `web`: the dashboard server opened it for a browser,
+    /// which may not do what W7 keeps from a web session.
+    pub web: bool,
+    /// This connection is the dashboard server's watch (`web_attach`).
+    pub web_attached: bool,
     /// On the web transport: the connection's lease, held by every task of
     /// it (see [`crate::web::Lease`]).
     pub lease: Option<Arc<crate::web::Lease>>,
@@ -73,6 +78,10 @@ pub(crate) struct Conn {
     pub listening: Option<String>,
     /// Forwarder for pushes or terminal output on this connection.
     pub stream_task: Option<JoinHandle<()>>,
+    /// A summary watch to start once the pending response has been queued.
+    pub summary_after_reply: Option<tokio::sync::watch::Receiver<WorkspaceSummary>>,
+    /// Forwarder of the summary's changes (`summary {watch: true}`).
+    pub summary_task: Option<JoinHandle<()>>,
     /// Agent whose terminal this connection is attached to.
     pub attached: Option<String>,
     /// The connection is to be closed once the pending response is sent (a
@@ -101,12 +110,16 @@ impl Session {
                 .fetch_add(1, std::sync::atomic::Ordering::Relaxed),
             transport,
             who: None,
+            web: false,
+            web_attached: false,
             lease: None,
             tx,
             subscribe_after_reply: None,
             subscribed: false,
             listening: None,
             stream_task: None,
+            summary_after_reply: None,
+            summary_task: None,
             attached: None,
             close_after_reply: false,
             #[cfg(test)]
@@ -185,6 +198,9 @@ impl Session {
         if let Some(rx) = self.conn.subscribe_after_reply.take() {
             self.daemon.start_subscription(&mut self.conn, rx);
         }
+        if let Some(rx) = self.conn.summary_after_reply.take() {
+            self.daemon.start_summary_watch(&mut self.conn, rx);
+        }
     }
 
     /// Queue a frame that answers no request (an oversized message).
@@ -214,8 +230,14 @@ impl Drop for Session {
         if let Some(task) = self.conn.stream_task.take() {
             task.abort();
         }
+        if let Some(task) = self.conn.summary_task.take() {
+            task.abort();
+        }
         if let Some(agent) = self.conn.listening.take() {
             self.daemon.listener_gone(&agent, self.conn.id);
+        }
+        if self.conn.web_attached {
+            self.daemon.web_detached(self.conn.id);
         }
     }
 }

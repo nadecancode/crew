@@ -513,6 +513,23 @@ pub fn web_port(state_dir: &Path) -> u16 {
     23000 + (session_hash(state_dir) % 1000) as u16
 }
 
+/// The dashboard server's files, in the runtime directory beside the
+/// daemons' sockets (notes/web-multi.md §multi-server): its control socket.
+/// Its token is `operator_token_path` of it (`web.token`).
+pub fn web_socket() -> PathBuf {
+    runtime_dir().join("web.sock")
+}
+
+/// The dashboard server's single-instance lock.
+pub fn web_lock() -> PathBuf {
+    runtime_dir().join("web.lock")
+}
+
+/// What the running dashboard server publishes of itself (`WebServerInfo`).
+pub fn web_info_path() -> PathBuf {
+    runtime_dir().join("web.json")
+}
+
 /// Registry of running daemons, so `crew attach` works from any directory.
 pub fn registry_dir() -> PathBuf {
     let base = match std::env::var_os("XDG_STATE_HOME") {
