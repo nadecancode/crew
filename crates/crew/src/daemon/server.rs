@@ -21,7 +21,6 @@ use tokio::task::JoinHandle;
 use super::Daemon;
 
 /// What carries a connection's frames.
-#[allow(dead_code)] // Web: until crate::web serves
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum Transport {
     /// The daemon's Unix socket: one JSON object per line.
@@ -57,12 +56,10 @@ impl Who {
 
 pub(crate) struct Conn {
     pub id: u64,
-    #[allow(dead_code)] // until crate::web serves
     pub transport: Transport,
     pub who: Option<Who>,
     /// On the web transport: the session whose token this connection
     /// presented.
-    #[allow(dead_code)] // until crate::web serves
     pub web_session: Option<u64>,
     pub tx: mpsc::Sender<ServerFrame>,
     /// A subscription to start once the pending response has been queued:
@@ -77,6 +74,9 @@ pub(crate) struct Conn {
     pub stream_task: Option<JoinHandle<()>>,
     /// Agent whose terminal this connection is attached to.
     pub attached: Option<String>,
+    /// The connection is to be closed once the pending response is sent (a
+    /// web `hello` beyond the limit of connections).
+    pub close_after_reply: bool,
     /// Test hook: how long to wait between capturing a snapshot and queueing
     /// its reply, the window the barrier closes.
     #[cfg(test)]
@@ -89,7 +89,6 @@ pub(crate) struct Session {
     conn: Conn,
 }
 
-#[allow(dead_code)] // id, web_session, authenticated: until crate::web serves
 impl Session {
     /// A new connection, and the frames for it (responses and pushes) in the
     /// order they must be written.
@@ -108,6 +107,7 @@ impl Session {
             listening: None,
             stream_task: None,
             attached: None,
+            close_after_reply: false,
             #[cfg(test)]
             after_capture: None,
         };
@@ -185,8 +185,9 @@ impl Session {
         self.conn.who.is_some()
     }
 
-    pub fn id(&self) -> u64 {
-        self.conn.id
+    /// The last reply asked for the connection to be closed.
+    pub fn close_requested(&self) -> bool {
+        self.conn.close_after_reply
     }
 
     /// The web session this connection presented, once authenticated.

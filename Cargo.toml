@@ -30,6 +30,10 @@ tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["fmt"] }
 base64 = "0.22"
 tempfile = "3"
+tokio-tungstenite = { version = "0.28", default-features = false, features = ["handshake"] }
+futures-util = { version = "0.3", default-features = false, features = ["sink"] }
+httparse = "1"
+sha2 = "0.10"
 
 [profile.release]
 opt-level = 3

@@ -31,3 +31,4 @@ pub mod styles;
 pub mod tasks;
 pub mod transcript;
 pub mod vcs;
+pub mod web;
