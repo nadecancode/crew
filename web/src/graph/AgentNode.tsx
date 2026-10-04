@@ -145,7 +145,7 @@ export function HubNode(props: NodeEvents & { box: Box; agent: Agent | undefined
       data-agent={a()?.id}
       role={a() ? "button" : undefined}
       aria-label={a() ? `${a()!.id}, ${a()!.status}` : "hub"}
-      tabindex={a() ? (props.tabStop ? 0 : -1) : undefined}
+      tabindex={a() && props.tabStop ? 0 : -1}
       transform={`translate(${props.box.x} ${props.box.y})`}
       onPointerDown={props.onDown}
       onPointerMove={props.onMove}
