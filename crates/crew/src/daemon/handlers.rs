@@ -151,6 +151,15 @@ change identity",
 
             Call::Snapshot { messages, events } => {
                 operator_only(&who)?;
+                if conn.subscribed {
+                    // A barrier in this connection's push stream: the
+                    // marker first, then the old forwarder is gone, then the
+                    // capture. Pushes before the reply are older than it;
+                    // every push sent after the marker follows it.
+                    let marker = self.push.subscribe();
+                    self.stop_stream(conn).await;
+                    conn.subscribe_after_reply = Some(marker);
+                }
                 reply(self.snapshot(
                     messages.unwrap_or(200).min(2000),
                     events.unwrap_or(300).min(5000),
@@ -158,7 +167,7 @@ change identity",
             }
             Call::Subscribe => {
                 operator_only(&who)?;
-                conn.subscribe_after_reply = true;
+                conn.subscribe_after_reply = Some(self.push.subscribe());
                 Ok(json!({ "subscribed": true }))
             }
             Call::LoadTeam {
@@ -773,6 +782,7 @@ change identity",
         if let Some(task) = conn.stream_task.take() {
             task.abort();
         }
+        conn.subscribed = false;
         conn.attached = Some(agent.to_string());
         let tx = conn.tx.clone();
         let encode = |bytes: &[u8]| base64::engine::general_purpose::STANDARD.encode(bytes);
