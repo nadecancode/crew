@@ -51,6 +51,10 @@ pub(crate) struct Summaries {
     /// watcher: the gap that registering first closes.
     #[cfg(test)]
     pub(crate) capture_first: Mutex<Option<Duration>>,
+    /// Hold one captured summary before publication to exercise concurrent
+    /// refreshes, without changing the state either refresh captured.
+    #[cfg(test)]
+    publish_hold: Mutex<Option<(std::sync::mpsc::Sender<()>, std::sync::mpsc::Receiver<()>)>>,
 }
 
 impl Default for Summaries {
@@ -64,6 +68,8 @@ impl Default for Summaries {
             task: OnceLock::new(),
             #[cfg(test)]
             capture_first: Mutex::new(None),
+            #[cfg(test)]
+            publish_hold: Mutex::new(None),
         }
     }
 }
@@ -154,6 +160,14 @@ impl Daemon {
                     .count() as u32,
             }
         };
+        #[cfg(test)]
+        {
+            let hold = summaries.publish_hold.lock().unwrap().take();
+            if let Some((captured, resume)) = hold {
+                captured.send(()).unwrap();
+                resume.recv_timeout(Duration::from_secs(5)).unwrap();
+            }
+        }
         summaries.tx.send_if_modified(|current| {
             let same = WorkspaceSummary {
                 rev: current.rev,

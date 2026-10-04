@@ -32,6 +32,41 @@ fn task(id: &str, status: &str) -> Task {
     .unwrap()
 }
 
+#[tokio::test]
+async fn reviewer_concurrent_refreshes_do_not_publish_old_counts_with_a_new_revision() {
+    let (_temp, running) = daemon().await;
+    let daemon = running.daemon.clone();
+    daemon.model().agents.push(agent("a", "idle"));
+    daemon.refresh_summary(true);
+    let (captured_tx, captured_rx) = std::sync::mpsc::channel();
+    let (resume_tx, resume_rx) = std::sync::mpsc::channel();
+    *daemon.summaries.publish_hold.lock().unwrap() = Some((captured_tx, resume_rx));
+    let older = std::thread::spawn({
+        let daemon = daemon.clone();
+        move || daemon.refresh_summary(true)
+    });
+    captured_rx.recv_timeout(Duration::from_secs(5)).unwrap();
+    daemon.update_agent("a", |a| a.status = AgentStatus::Working);
+    let (finished_tx, finished_rx) = std::sync::mpsc::channel();
+    let newer = std::thread::spawn({
+        let daemon = daemon.clone();
+        move || {
+            daemon.refresh_summary(false);
+            let _ = finished_tx.send(());
+        }
+    });
+    // With serialized capture/publication the newer refresh waits here;
+    // without it the newer state publishes first and is then overwritten.
+    let _ = finished_rx.recv_timeout(Duration::from_millis(100));
+    resume_tx.send(()).unwrap();
+    older.join().unwrap();
+    newer.join().unwrap();
+    let final_summary = daemon.summaries.tx.borrow().clone();
+    assert_eq!(daemon.model().agents[0].status, AgentStatus::Working);
+    assert_eq!(final_summary.working, 1, "{final_summary:?}");
+    assert!(!daemon.summaries.dirty.load(Ordering::SeqCst));
+}
+
 /// A connection on the socket and its frames, after a `hello`.
 struct Peer {
     session: Session,

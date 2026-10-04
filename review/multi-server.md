@@ -1,8 +1,9 @@
-# Shared-server review: initial findings
+# Shared-server review: changes requested
 
-Review in progress on `4a5b1b2d`. The independent baseline workspace suite
-passed 879 tests, with two ignored. The five new regressions below fail on
-that revision; the remaining source review is not yet complete.
+Reviewed `4a5b1b2d` against revision 3 of `notes/web-multi.md`. Changes
+requested for the six P2 findings below. The independent baseline workspace
+suite passed 879 tests, with two ignored. Each new regression below fails
+on the reviewed revision.
 
 ## P2: Cancelling a partial daemon read discards the frame prefix
 
@@ -45,9 +46,9 @@ Run the focused checks with:
 ./scripts/build-env cargo test -p crew --lib reviewer_
 ```
 
-This includes two older passing reviewer regressions and the two new
-failing cases. The tests added in this review do not change production
-behavior.
+This includes two older passing reviewer regressions and the three new
+failing library cases. The tests and test-only scheduling hook added in
+this review do not change production behavior.
 
 ## P2: Restart requires a running daemon before replacing the server
 
@@ -92,3 +93,30 @@ Run these three process regressions with
 `./scripts/build-env cargo test -p crew --test web_server reviewer_`.
 The remaining protocol-5 migration gate in the design also needs coverage
 through the CLI; the existing stand-in protocol test covers the hub only.
+
+## P2: Concurrent summary refreshes can publish stale counts permanently
+
+`Daemon::refresh_summary` captures the model under its lock, releases that
+lock, and later publishes the counts under the watch channel's lock. The
+background refresh and a connection's forced refresh can run concurrently.
+A later capture may publish first; the older capture then overwrites it
+and receives an even higher revision. With the dirty flag already clear,
+nothing makes the counts converge until another relevant change occurs.
+
+`reviewer_concurrent_refreshes_do_not_publish_old_counts_with_a_new_revision`
+uses a test-only scheduling hook after capture. It holds a capture with
+zero working agents, changes the model to one working agent, lets the newer
+refresh publish, and releases the older capture. The final summary is
+`rev: 3, working: 0`, while the agent remains `Working` and the dirty flag
+is false. Serialize capture and publication, including updates to the
+question-count cache, or reject captures that became obsolete.
+
+## Review coverage
+
+Reviewed the new process lifecycle, control socket, browser pipe, membership
+admission and removal, reconciliation and watch ordering, daemon summary and
+web restrictions, CLI migration, sandbox profile assertions, and protocol
+contract. Existing process, authentication, origin, stop-order and hub
+tests passed in the independent workspace run. The focused new library and
+process tests expose gaps not covered by that baseline. No approval is
+given until the findings are resolved and their regressions pass.
