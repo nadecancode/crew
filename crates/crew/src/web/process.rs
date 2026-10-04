@@ -396,6 +396,11 @@ pub fn run(port: Option<u16>) -> Result<()> {
     let settings = Settings::load();
     let runtime = tokio::runtime::Builder::new_multi_thread()
         .enable_all()
+        // The registry is read on a thread of the blocking pool, one read at
+        // a time (`Registered::sessions`); that thread then waits for the
+        // next for ever instead of waking 10 s later to exit, a wake-up of
+        // an idle server outside its tick (notes/web-multi.md P20).
+        .thread_keep_alive(Duration::MAX)
         .build()
         .context("starting the async runtime")?;
     let result = runtime.block_on(serve(port, settings, socket, token_path));
