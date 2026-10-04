@@ -13,6 +13,7 @@ use crew_core::rpc::{Call, Push, Request, Role, RpcError, ServerFrame};
 use crew_core::util::ct_eq;
 use crew_core::MAX_FRAME_BYTES;
 use serde_json::Value;
+use std::sync::Arc;
 use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader};
 use tokio::net::{UnixListener, UnixStream};
 use tokio::sync::{broadcast, mpsc};
@@ -58,9 +59,9 @@ pub(crate) struct Conn {
     pub id: u64,
     pub transport: Transport,
     pub who: Option<Who>,
-    /// On the web transport: the session whose token this connection
-    /// presented.
-    pub web_session: Option<u64>,
+    /// On the web transport: the connection's lease, held by every task of
+    /// it (see [`crate::web::Lease`]).
+    pub lease: Option<Arc<crate::web::Lease>>,
     pub tx: mpsc::Sender<ServerFrame>,
     /// A subscription to start once the pending response has been queued:
     /// from now (`subscribe`), or from a receiver taken before a snapshot was
@@ -100,7 +101,7 @@ impl Session {
                 .fetch_add(1, std::sync::atomic::Ordering::Relaxed),
             transport,
             who: None,
-            web_session: None,
+            lease: None,
             tx,
             subscribe_after_reply: None,
             subscribed: false,
@@ -116,6 +117,16 @@ impl Session {
             conn,
         };
         (session, rx)
+    }
+
+    /// A connection of the web dashboard, held by `lease`.
+    pub fn web(
+        daemon: &Daemon,
+        lease: Arc<crate::web::Lease>,
+    ) -> (Self, mpsc::Receiver<ServerFrame>) {
+        let (mut session, frames) = Self::new(daemon, Transport::Web);
+        session.conn.lease = Some(lease);
+        (session, frames)
     }
 
     /// Handle one request as received (one line, one text message): parse,
@@ -190,24 +201,34 @@ impl Session {
         self.conn.close_after_reply
     }
 
-    /// The web session this connection presented, once authenticated.
-    pub fn web_session(&self) -> Option<u64> {
-        self.conn.web_session
-    }
-
     #[cfg(test)]
     pub fn delay_after_capture(&mut self, wait: std::time::Duration) {
         self.conn.after_capture = Some(wait);
     }
+}
 
-    /// The connection ended: stop its stream task, release its listener slot.
-    pub fn close(mut self) {
+impl Drop for Session {
+    /// The connection ended, or the task that served it was aborted: its
+    /// stream task stops, its listener slot is released.
+    fn drop(&mut self) {
         if let Some(task) = self.conn.stream_task.take() {
             task.abort();
         }
         if let Some(agent) = self.conn.listening.take() {
             self.daemon.listener_gone(&agent, self.conn.id);
         }
+    }
+}
+
+impl Conn {
+    /// Spawn a task of this connection (a forwarder): on the web it holds
+    /// the connection's lease until it is gone.
+    pub fn spawn<F>(&self, task: F) -> JoinHandle<F::Output>
+    where
+        F: std::future::Future + Send + 'static,
+        F::Output: Send + 'static,
+    {
+        crate::web::spawn_held(self.lease.clone(), task)
     }
 }
 
@@ -281,7 +302,7 @@ async fn handle(daemon: Daemon, stream: UnixStream) {
             break;
         }
     }
-    session.close();
+    drop(session);
     let _ = writer.await;
 }
 
@@ -338,7 +359,7 @@ impl Daemon {
         }
         conn.subscribed = true;
         let tx = conn.tx.clone();
-        conn.stream_task = Some(tokio::spawn(async move {
+        conn.stream_task = Some(conn.spawn(async move {
             loop {
                 let frame = match rx.recv().await {
                     Ok(push) => ServerFrame::push(push),
@@ -592,7 +613,7 @@ mod tests {
             check_order(&frames, last);
             // 3: the page's rule ends in the daemon's final state.
             assert_eq!(state, last, "run {run}: the page ended stale: {frames:?}");
-            session.close();
+            drop(session);
         }
     }
 
@@ -624,7 +645,7 @@ mod tests {
         );
         check_order(&frames, last);
         assert_eq!(state, last);
-        session.close();
+        drop(session);
     }
 
     #[tokio::test]
@@ -659,6 +680,6 @@ mod tests {
         assert_eq!(first.id, Some(2));
         let next = rx.recv().await.unwrap();
         assert!(matches!(next.push, Some(Push::Agent(_))), "{next:?}");
-        session.close();
+        drop(session);
     }
 }

@@ -158,9 +158,12 @@ change identity",
                             "the web dashboard signs in as the operator only",
                         ));
                     }
-                    match self.web.hello(self, hello.token.as_deref()) {
-                        Ok((session, secret)) => {
-                            conn.web_session = Some(session);
+                    let lease =
+                        conn.lease.as_ref().map(|l| l.id).ok_or_else(|| {
+                            RpcError::internal("a web connection without a lease")
+                        })?;
+                    match self.web.hello(self, lease, hello.token.as_deref()) {
+                        Ok((_, secret)) => {
                             web_proof = Some(secret);
                             Who::Operator
                         }
@@ -846,7 +849,7 @@ change identity",
         let encode = |bytes: &[u8]| base64::engine::general_purpose::STANDARD.encode(bytes);
         let snapshot = encode(&attachment.snapshot);
         let mut output = attachment.output;
-        conn.stream_task = Some(tokio::spawn(async move {
+        conn.stream_task = Some(conn.spawn(async move {
             if tx
                 .send(ServerFrame::push(Push::Pty { data: snapshot }))
                 .await

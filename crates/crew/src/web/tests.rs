@@ -43,25 +43,36 @@ fn the_seventeenth_session_drops_the_idle_one_with_the_oldest_hello() {
         tokens.push(r.pair(&code, i as i64).unwrap().token);
     }
     // Every session but the first two has a connection open; of the two
-    // idle ones, the second said hello last.
+    // idle ones, the second said hello last (on a connection gone since).
+    let mut open = Vec::new();
     for token in &tokens[2..] {
-        r.hello(token, 50).unwrap();
+        open.push(signed_in(&mut r, token, 50));
     }
-    let (second, _) = r.hello(&tokens[1], 60).unwrap();
-    r.authenticated -= 1;
-    r.sessions.iter_mut().find(|s| s.id == second).unwrap().open = 0;
+    let gone = signed_in(&mut r, &tokens[1], 60);
+    r.release(gone);
     let code = r.code(70);
-    r.pair(&code, 70).unwrap();
+    let newest = r.pair(&code, 70).unwrap().token;
     assert_eq!(r.sessions(), MAX_SESSIONS);
-    assert_eq!(r.hello(&tokens[0], 80).unwrap_err().code, "unauthorized");
+    let (conn, _) = r.admit().unwrap();
+    assert_eq!(
+        r.hello(conn, &tokens[0], 80).unwrap_err().code,
+        "unauthorized"
+    );
+    r.release(conn);
     // All sixteen have connections: refused, and the code stays good.
-    for s in &mut r.sessions {
-        s.open = 1;
-    }
+    open.push(signed_in(&mut r, &tokens[1], 85));
+    open.push(signed_in(&mut r, &newest, 85));
     let code = r.code(90);
     assert_eq!(r.pair(&code, 90).unwrap_err().code, "unavailable");
-    r.sessions[0].open = 0;
+    r.release(open[0]);
     assert!(r.pair(&code, 91).is_ok());
+}
+
+/// A connection admitted that said hello with `token`: its id.
+fn signed_in(r: &mut Registry, token: &str, now: i64) -> u64 {
+    let (conn, _) = r.admit().unwrap();
+    r.hello(conn, token, now).unwrap();
+    conn
 }
 
 #[test]
@@ -69,27 +80,65 @@ fn hello_answers_the_secret_whose_hash_the_verifier_is() {
     let mut r = serving();
     let code = r.code(0);
     let paired = r.pair(&code, 0).unwrap();
-    let (_, secret) = r.hello(&paired.token, 1).unwrap();
+    let (conn, _) = r.admit().unwrap();
+    let (_, secret) = r.hello(conn, &paired.token, 1).unwrap();
     assert_eq!(verifier(&secret), paired.verifier);
     assert_ne!(secret, paired.token);
-    assert_eq!(r.hello("nope", 1).unwrap_err().code, "unauthorized");
+    // Once per connection.
+    assert_eq!(
+        r.hello(conn, &paired.token, 1).unwrap_err().code,
+        "forbidden"
+    );
+    let (conn, _) = r.admit().unwrap();
+    assert_eq!(r.hello(conn, "nope", 1).unwrap_err().code, "unauthorized");
     // Stopping: nothing works, and nothing survives.
     r.stopping = true;
-    assert_eq!(r.hello(&paired.token, 2).unwrap_err().code, "unavailable");
+    assert_eq!(
+        r.hello(conn, &paired.token, 2).unwrap_err().code,
+        "unavailable"
+    );
     r.revoke();
     r.stopping = false;
-    assert_eq!(r.hello(&paired.token, 3).unwrap_err().code, "unauthorized");
+    assert_eq!(
+        r.hello(conn, &paired.token, 3).unwrap_err().code,
+        "unauthorized"
+    );
+    // A connection already gone is let in by nothing.
+    r.release(conn);
+    let code = r.code(4);
+    let token = r.pair(&code, 4).unwrap().token;
+    assert_eq!(r.hello(conn, &token, 5).unwrap_err().code, "unavailable");
 }
 
 #[test]
-fn authenticated_connections_are_bounded() {
+fn connections_are_bounded_and_counted_by_what_is_open() {
     let mut r = serving();
     let code = r.code(0);
     let token = r.pair(&code, 0).unwrap().token;
-    for _ in 0..MAX_AUTHENTICATED {
-        r.hello(&token, 1).unwrap();
-    }
-    assert_eq!(r.hello(&token, 1).unwrap_err().code, "unavailable");
+    let signed: Vec<u64> = (0..MAX_AUTHENTICATED)
+        .map(|_| signed_in(&mut r, &token, 1))
+        .collect();
+    let (conn, _) = r.admit().unwrap();
+    assert_eq!(r.hello(conn, &token, 1).unwrap_err().code, "unavailable");
+    // A connection that said hello holds its place until it is gone,
+    // whatever became of the reply; then the place is free again.
+    r.release(signed[0]);
+    assert!(r.hello(conn, &token, 2).is_ok());
+    assert_eq!(
+        (r.authenticated(), r.unauthenticated()),
+        (MAX_AUTHENTICATED, 0)
+    );
+    // Waiting for their hello: as many as allowed, then none.
+    let waiting: Vec<u64> = (0..MAX_UNAUTHENTICATED)
+        .map(|_| r.admit().unwrap().0)
+        .collect();
+    assert!(r.admit().is_none());
+    r.release(waiting[0]);
+    assert!(r.admit().is_some());
+    // Closing: nothing more is let in.
+    r.closing = true;
+    r.release(waiting[1]);
+    assert!(r.admit().is_none());
 }
 
 #[test]

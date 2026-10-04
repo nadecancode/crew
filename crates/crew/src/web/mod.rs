@@ -31,7 +31,7 @@ use crew_core::rpc::{RpcError, WebInfo, WebPaired};
 use crew_core::util::{ct_eq, new_token, now_ms};
 use sha2::{Digest, Sha256};
 use tokio::sync::{watch, Notify};
-use tokio::task::{AbortHandle, JoinHandle};
+use tokio::task::JoinHandle;
 
 use crate::daemon::Daemon;
 use crate::persistence::NewEvent;
@@ -87,20 +87,24 @@ struct WebSession {
     secret: String,
     /// The last successful `hello` (or the pairing).
     last_hello: i64,
-    /// Authenticated connections open with this session.
-    open: usize,
 }
 
-/// A connection the server accepted: closed by `close` when the server
-/// stops.
+/// A connection the server accepted, until the last task of it is gone
+/// (see [`Lease`]). Closed by `close` when the server stops.
 struct ConnEntry {
     close: watch::Sender<bool>,
-    abort: Option<AbortHandle>,
+    /// The connection's task, once spawned.
+    task: Option<JoinHandle<()>>,
+    /// The web session it said `hello` with: it counts as authenticated
+    /// from the moment the registry let it in, not from when the reply was
+    /// sent.
+    session: Option<u64>,
 }
 
-/// Codes, sessions, connections and counters: everything the server keeps
-/// that `dispatch` reads too. Behind a plain mutex, never held across an
-/// await.
+/// Codes, sessions and connections: everything the server keeps that
+/// `dispatch` reads too. Behind a plain mutex, never held across an await.
+/// What is counted (connections with and without a session, a session's
+/// connections) is counted from `conns`, so nothing can drift.
 #[derive(Default)]
 pub(crate) struct Registry {
     serving: Option<Serving>,
@@ -113,8 +117,6 @@ pub(crate) struct Registry {
     next_session: u64,
     conns: HashMap<u64, ConnEntry>,
     next_conn: u64,
-    unauthenticated: usize,
-    authenticated: usize,
     failures: u32,
     failures_reported_at: Option<i64>,
 }
@@ -184,7 +186,7 @@ impl Registry {
                 .sessions
                 .iter()
                 .enumerate()
-                .filter(|(_, s)| s.open == 0)
+                .filter(|(_, s)| self.open(s.id) == 0)
                 .min_by_key(|(_, s)| s.last_hello)
                 .map(|(i, _)| i);
             match idle {
@@ -211,29 +213,75 @@ again"
             token,
             secret,
             last_hello: now,
-            open: 0,
         });
         Ok(paired)
     }
 
-    /// A `hello` with a session token: the session's id and secret. Counts
-    /// the connection as authenticated.
-    pub fn hello(&mut self, token: &str, now: i64) -> Result<(u64, String), RpcError> {
+    /// A connection, unless the server is closing or too many are not
+    /// authenticated yet: its id and the signal that closes it.
+    fn admit(&mut self) -> Option<(u64, watch::Receiver<bool>)> {
+        if self.closing || self.serving.is_none() || self.unauthenticated() >= MAX_UNAUTHENTICATED {
+            return None;
+        }
+        self.next_conn += 1;
+        let (close, rx) = watch::channel(false);
+        self.conns.insert(
+            self.next_conn,
+            ConnEntry {
+                close,
+                task: None,
+                session: None,
+            },
+        );
+        Some((self.next_conn, rx))
+    }
+
+    /// A `hello` with a session token on connection `conn`: the session's
+    /// id and secret. From here the connection counts as authenticated with
+    /// it, for as long as the connection lasts, whatever becomes of the
+    /// reply.
+    pub fn hello(&mut self, conn: u64, token: &str, now: i64) -> Result<(u64, String), RpcError> {
         self.live()?;
-        let Some(session) = self.sessions.iter_mut().find(|s| ct_eq(&s.token, token)) else {
+        let Some(at) = self.sessions.iter().position(|s| ct_eq(&s.token, token)) else {
             return Err(RpcError::unauthorized(
                 "this browser is signed out: run `crew web` and open the address it prints",
             ));
         };
-        if self.authenticated >= MAX_AUTHENTICATED {
+        if self.authenticated() >= MAX_AUTHENTICATED {
             return Err(RpcError::unavailable(format!(
                 "{MAX_AUTHENTICATED} dashboard connections are open; close a tab"
             )));
         }
-        session.open += 1;
+        let session = &mut self.sessions[at];
+        let entry = match self.conns.get_mut(&conn) {
+            Some(entry) if entry.session.is_none() => entry,
+            Some(_) => return Err(RpcError::forbidden("this connection said hello already")),
+            None => return Err(RpcError::unavailable("this connection is closing")),
+        };
+        entry.session = Some(session.id);
         session.last_hello = now;
-        self.authenticated += 1;
         Ok((session.id, session.secret.clone()))
+    }
+
+    /// Connection `conn` is gone, every task of it.
+    fn release(&mut self, conn: u64) {
+        self.conns.remove(&conn);
+    }
+
+    fn unauthenticated(&self) -> usize {
+        self.conns.values().filter(|c| c.session.is_none()).count()
+    }
+
+    fn authenticated(&self) -> usize {
+        self.conns.values().filter(|c| c.session.is_some()).count()
+    }
+
+    /// The connections open with session `id`.
+    fn open(&self, id: u64) -> usize {
+        self.conns
+            .values()
+            .filter(|c| c.session == Some(id))
+            .count()
     }
 
     /// Codes and sessions: every one goes.
@@ -327,45 +375,60 @@ impl Default for Web {
     }
 }
 
-/// A connection the server admitted, until it ends.
-pub(crate) struct Admitted {
+/// A connection the server accepted, held by every task of it (the
+/// connection's own, its writer, its push forwarder): the connection is
+/// gone, and leaves the registry, when the last of them is. Whatever a task
+/// holds is dropped before its lease (see [`spawn_held`]), so by then no
+/// frame of it can be written any more.
+pub(crate) struct Lease {
     daemon: Daemon,
-    id: u64,
-    /// The web session it authenticated with.
-    session: Option<u64>,
-    pub close: watch::Receiver<bool>,
+    pub(crate) id: u64,
 }
 
-impl Admitted {
-    /// It said `hello` with session `session`: no longer counted as
-    /// unauthenticated.
-    pub fn authenticated(&mut self, session: u64) {
-        if self.session.is_some() {
-            return;
-        }
-        self.session = Some(session);
-        self.daemon.web.registry().unauthenticated -= 1;
-    }
-}
-
-impl Drop for Admitted {
+impl Drop for Lease {
     fn drop(&mut self) {
         let web = &self.daemon.web;
-        {
-            let mut registry = web.registry();
-            registry.conns.remove(&self.id);
-            match self.session {
-                None => registry.unauthenticated -= 1,
-                Some(id) => {
-                    registry.authenticated -= 1;
-                    if let Some(session) = registry.sessions.iter_mut().find(|s| s.id == id) {
-                        session.open = session.open.saturating_sub(1);
-                    }
-                }
-            }
-        }
+        web.registry().release(self.id);
         web.gone.notify_waiters();
     }
+}
+
+/// A future that holds a lease: its own state is dropped first, the lease
+/// last, whether it ran to its end or was aborted.
+pub(crate) struct Held<F> {
+    task: std::pin::Pin<Box<F>>,
+    _lease: Option<Arc<Lease>>,
+}
+
+impl<F: std::future::Future> std::future::Future for Held<F> {
+    type Output = F::Output;
+
+    fn poll(
+        self: std::pin::Pin<&mut Self>,
+        cx: &mut std::task::Context<'_>,
+    ) -> std::task::Poll<F::Output> {
+        self.get_mut().task.as_mut().poll(cx)
+    }
+}
+
+/// Spawn a task of the connection `lease` is of (none: a socket
+/// connection's).
+pub(crate) fn spawn_held<F>(lease: Option<Arc<Lease>>, task: F) -> JoinHandle<F::Output>
+where
+    F: std::future::Future + Send + 'static,
+    F::Output: Send + 'static,
+{
+    tokio::spawn(Held {
+        task: Box::pin(task),
+        _lease: lease,
+    })
+}
+
+/// A connection the server admitted: its lease, and the signal that closes
+/// it.
+pub(crate) struct Admitted {
+    pub lease: Arc<Lease>,
+    pub close: watch::Receiver<bool>,
 }
 
 impl Web {
@@ -407,29 +470,19 @@ impl Web {
     /// Accept a connection, unless the server is closing or too many are
     /// not authenticated yet.
     fn admit(&self, daemon: &Daemon) -> Option<Admitted> {
-        let mut registry = self.registry();
-        if registry.closing
-            || registry.serving.is_none()
-            || registry.unauthenticated >= MAX_UNAUTHENTICATED
-        {
-            return None;
-        }
-        registry.unauthenticated += 1;
-        registry.next_conn += 1;
-        let id = registry.next_conn;
-        let (close, rx) = watch::channel(false);
-        registry.conns.insert(id, ConnEntry { close, abort: None });
+        let (id, close) = self.registry().admit()?;
         Some(Admitted {
-            daemon: daemon.clone(),
-            id,
-            session: None,
-            close: rx,
+            lease: Arc::new(Lease {
+                daemon: daemon.clone(),
+                id,
+            }),
+            close,
         })
     }
 
-    fn track(&self, id: u64, abort: AbortHandle) {
+    fn track(&self, id: u64, task: JoinHandle<()>) {
         if let Some(entry) = self.registry().conns.get_mut(&id) {
-            entry.abort = Some(abort);
+            entry.task = Some(task);
         }
     }
 
@@ -461,16 +514,18 @@ impl Web {
         result
     }
 
-    /// `hello` on a web connection with `token`: the session and its secret.
+    /// `hello` with `token` on web connection `conn`: the session and its
+    /// secret.
     pub(crate) fn hello(
         &self,
         daemon: &Daemon,
+        conn: u64,
         token: Option<&str>,
     ) -> Result<(u64, String), RpcError> {
         let now = self.now();
         let (result, report) = {
             let mut registry = self.registry();
-            let result = registry.hello(token.unwrap_or_default(), now);
+            let result = registry.hello(conn, token.unwrap_or_default(), now);
             let report = match &result {
                 Err(e) if e.code == "unauthorized" => registry.failed(now),
                 _ => None,
@@ -498,6 +553,13 @@ impl Web {
         daemon: &Daemon,
         port: Option<u16>,
     ) -> Result<WebInfo, RpcError> {
+        // Port 0 would give each address another port the system picks, and
+        // a name with neither in it.
+        if port == Some(0) {
+            return Err(RpcError::invalid(
+                "port 0 cannot be served: choose a port from 1 to 65535, or leave --port out",
+            ));
+        }
         let mut lifecycle = self.lifecycle.lock().await;
         let started = lifecycle.is_none();
         if let Some(server) = lifecycle.as_ref() {
@@ -610,7 +672,9 @@ use another",
             registry.revoke();
         }
         self.step(1).await;
-        // 2. Every web connection is closed: told to, then made to.
+        // 2. Every web connection is closed: told to, then made to. A
+        // connection is gone when every task of it is (its lease), so once
+        // `conns` is empty nothing of any connection is left to write.
         let closes: Vec<watch::Sender<bool>> = {
             let mut registry = self.registry();
             registry.closing = true;
@@ -619,17 +683,27 @@ use another",
         for close in closes {
             let _ = close.send(true);
         }
-        if !self.wait_closed(std::time::Duration::from_secs(1)).await {
-            let aborts: Vec<AbortHandle> = self
+        let mut waited = std::time::Duration::from_secs(1);
+        while !self.wait_closed(waited).await {
+            // One that did not close (it writes to a browser that does not
+            // read, say): its task is aborted and awaited, which aborts its
+            // writer and its forwarder; then their leases go.
+            let tasks: Vec<JoinHandle<()>> = self
                 .registry()
                 .conns
-                .values()
-                .filter_map(|c| c.abort.clone())
+                .values_mut()
+                .filter_map(|c| c.task.take())
                 .collect();
-            for abort in aborts {
-                abort.abort();
+            for task in &tasks {
+                task.abort();
             }
-            self.wait_closed(std::time::Duration::from_secs(1)).await;
+            for task in tasks {
+                let _ = task.await;
+            }
+            if waited >= std::time::Duration::from_secs(5) {
+                tracing::warn!("web connections are still ending; waiting for them");
+            }
+            waited = std::time::Duration::from_secs(5);
         }
         self.step(2).await;
         // 3. Only then the listeners, both.
@@ -759,9 +833,9 @@ fn spawn_accept(daemon: &Daemon, listener: std::net::TcpListener) -> io::Result<
             let Some(admitted) = daemon.web.admit(&daemon) else {
                 continue;
             };
-            let id = admitted.id;
+            let id = admitted.lease.id;
             let task = tokio::spawn(ws::serve(daemon.clone(), stream, admitted));
-            daemon.web.track(id, task.abort_handle());
+            daemon.web.track(id, task);
         }
     }))
 }

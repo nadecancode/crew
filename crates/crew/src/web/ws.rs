@@ -12,14 +12,15 @@ use futures_util::{SinkExt, StreamExt};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpStream;
 use tokio::sync::mpsc;
+use tokio::task::JoinHandle;
 use tokio_tungstenite::tungstenite::protocol::frame::coding::CloseCode;
 use tokio_tungstenite::tungstenite::protocol::{CloseFrame, Role, WebSocketConfig};
 use tokio_tungstenite::tungstenite::{Error as WsError, Message};
 use tokio_tungstenite::WebSocketStream;
 
 use super::http::{self, Answer};
-use super::Admitted;
-use crate::daemon::server::{Session, Transport};
+use super::{spawn_held, Admitted};
+use crate::daemon::server::Session;
 use crate::daemon::Daemon;
 
 /// A WebSocket must authenticate within this.
@@ -54,7 +55,7 @@ fn goodbye(order: Option<Ctl>, stopping: bool) -> Option<CloseFrame> {
     }
 }
 
-pub(super) async fn serve(daemon: Daemon, mut stream: TcpStream, mut admitted: Admitted) {
+pub(super) async fn serve(daemon: Daemon, mut stream: TcpStream, admitted: Admitted) {
     let Some(serving) = daemon.web.serving() else {
         return;
     };
@@ -91,19 +92,30 @@ pub(super) async fn serve(daemon: Daemon, mut stream: TcpStream, mut admitted: A
         .max_frame_size(Some(crew_core::MAX_FRAME_BYTES));
     let socket =
         WebSocketStream::from_partially_read(stream, rest, Role::Server, Some(config)).await;
-    run(daemon, socket, &mut admitted).await;
+    run(daemon, socket, &admitted).await;
 }
 
-async fn run(daemon: Daemon, socket: WebSocketStream<TcpStream>, admitted: &mut Admitted) {
+/// Aborts its task when dropped: the writer does not outlive the
+/// connection's task, however that ends.
+struct AbortOnDrop<T>(JoinHandle<T>);
+
+impl<T> Drop for AbortOnDrop<T> {
+    fn drop(&mut self) {
+        self.0.abort();
+    }
+}
+
+async fn run(daemon: Daemon, socket: WebSocketStream<TcpStream>, admitted: &Admitted) {
     let (mut sink, mut source) = socket.split();
-    let (mut session, mut frames) = Session::new(&daemon, Transport::Web);
+    let (mut session, mut frames) = Session::web(&daemon, admitted.lease.clone());
     let (ctl, mut ctl_rx) = mpsc::unbounded_channel::<Ctl>();
     let mut close = admitted.close.clone();
 
-    // The writer: frames as they are queued, pings, and the close.
-    let writer = {
+    // The writer: frames as they are queued, pings, and the close. It holds
+    // the connection's lease, and is aborted if this task is.
+    let mut writer = {
         let mut close = close.clone();
-        tokio::spawn(async move {
+        AbortOnDrop(spawn_held(Some(admitted.lease.clone()), async move {
             let mut ping =
                 tokio::time::interval_at(tokio::time::Instant::now() + PING_EVERY, PING_EVERY);
             let last: Option<CloseFrame> = loop {
@@ -143,7 +155,7 @@ async fn run(daemon: Daemon, socket: WebSocketStream<TcpStream>, admitted: &mut 
             }
             let _ = sink.close().await;
             Some(sink)
-        })
+        }))
     };
 
     let hello_by = tokio::time::Instant::now() + HELLO_TIMEOUT;
@@ -188,20 +200,31 @@ async fn run(daemon: Daemon, socket: WebSocketStream<TcpStream>, admitted: &mut 
             ));
             break;
         }
-        if !session.request(text.as_str()).await {
+        let handled = if session.authenticated() {
+            session.request(text.as_str()).await
+        } else {
+            // Before hello a request does nothing that takes time; what can
+            // wait is its reply's place in the queue, behind a browser that
+            // does not read. The deadline holds through it.
+            match tokio::time::timeout_at(hello_by, session.request(text.as_str())).await {
+                Ok(handled) => handled,
+                Err(_) => {
+                    let _ = ctl.send(Ctl::Close(CloseCode::Policy, "say hello first"));
+                    break;
+                }
+            }
+        };
+        if !handled {
             break;
-        }
-        if let Some(id) = session.web_session() {
-            admitted.authenticated(id);
         }
         if session.close_requested() {
             let _ = ctl.send(Ctl::Close(CloseCode::Policy, "refused"));
             break;
         }
     }
-    session.close();
+    drop(session);
     drop(ctl);
-    let sink = tokio::time::timeout(Duration::from_secs(2), writer)
+    let sink = tokio::time::timeout(Duration::from_secs(2), &mut writer.0)
         .await
         .ok()
         .and_then(Result::ok)
