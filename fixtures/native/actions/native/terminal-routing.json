@@ -353,7 +353,8 @@
           },
           "operation_id": 203,
           "kind": "closed_locally",
-          "reason": null
+          "reason": null,
+          "attachment_id": 101
         }
       ],
       "chunks": [

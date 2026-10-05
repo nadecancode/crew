@@ -620,6 +620,7 @@ fn input_outcome_notice_and_terminal_records_construct_without_an_engine() {
         outcomes: vec![OperationNotice {
             scope: scope(),
             operation_id: u64::MAX,
+            attachment_id: None,
             kind: OperationOutcomeKind::Unknown,
             reason: Some(reason()),
         }],

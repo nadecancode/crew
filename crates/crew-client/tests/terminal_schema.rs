@@ -96,6 +96,11 @@ fn dispatch_and_local_close_cannot_be_mistaken_for_a_second_command_or_wire_null
     let cases = fixture();
     assert_eq!(cases["cases"][3]["effects"][0]["kind"], "close_attachment");
     assert_eq!(cases["cases"][3]["notices"][0]["kind"], "closed_locally");
+    assert_eq!(cases["cases"][3]["notices"][0]["attachment_id"], 101);
+    assert_ne!(
+        cases["cases"][3]["notices"][0]["operation_id"],
+        cases["cases"][3]["notices"][0]["attachment_id"]
+    );
     assert_eq!(cases["cases"][3]["inputs"][0]["kind"], "attachment_ended");
     assert_eq!(
         cases["cases"][3]["expected_behavior"]["daemon_acknowledgement"],

@@ -3,27 +3,27 @@
   "baseline_commit": "6049cdf63e36e303327235834f23a798aa5a82c1",
   "references": {
     "send_params": {
-      "path": "crates/crew-core/src/rpc.rs",
-      "line": 79,
+      "path": "crates/crew-protocol/src/rpc.rs",
+      "line": 80,
       "anchor": "pub struct SendParams"
     },
     "rpc_calls": {
       "path": "crates/crew-core/src/rpc.rs",
-      "line": 104,
+      "line": 17,
       "anchor": "pub enum Call"
     },
     "rpc_request": {
       "path": "crates/crew-core/src/rpc.rs",
-      "line": 604,
+      "line": 517,
       "anchor": "pub struct Request"
     },
     "rpc_empty": {
       "path": "crates/crew-core/src/rpc.rs",
-      "line": 518,
+      "line": 431,
       "anchor": "fn empty_params"
     },
     "message_limits": {
-      "path": "crates/crew-core/src/types.rs",
+      "path": "crates/crew-protocol/src/types.rs",
       "line": 17,
       "anchor": "pub const MAX_MESSAGE_BYTES"
     },
@@ -243,7 +243,7 @@
       "anchor": "link.call(\"task_get\""
     },
     "question_limits": {
-      "path": "crates/crew-core/src/types.rs",
+      "path": "crates/crew-protocol/src/types.rs",
       "line": 505,
       "anchor": "pub const MAX_QUESTION_OPTIONS"
     },
@@ -264,82 +264,82 @@
     },
     "call_send": {
       "path": "crates/crew-core/src/rpc.rs",
-      "line": 249,
+      "line": 162,
       "anchor": "Send(SendParams)"
     },
     "call_answer": {
       "path": "crates/crew-core/src/rpc.rs",
-      "line": 267,
+      "line": 180,
       "anchor": "    Answer {"
     },
     "call_agent_pause": {
       "path": "crates/crew-core/src/rpc.rs",
-      "line": 175,
+      "line": 88,
       "anchor": "    AgentPause {"
     },
     "call_agent_resume": {
       "path": "crates/crew-core/src/rpc.rs",
-      "line": 187,
+      "line": 100,
       "anchor": "    AgentResume {"
     },
     "call_agent_kill": {
       "path": "crates/crew-core/src/rpc.rs",
-      "line": 135,
+      "line": 48,
       "anchor": "    AgentKill {"
     },
     "call_agent_restart": {
       "path": "crates/crew-core/src/rpc.rs",
-      "line": 143,
+      "line": 56,
       "anchor": "    AgentRestart {"
     },
     "call_agent_restart_fresh": {
       "path": "crates/crew-core/src/rpc.rs",
-      "line": 150,
+      "line": 63,
       "anchor": "    AgentRestartFresh {"
     },
     "call_agent_compact": {
       "path": "crates/crew-core/src/rpc.rs",
-      "line": 194,
+      "line": 107,
       "anchor": "    AgentCompact {"
     },
     "call_agent_set_model": {
       "path": "crates/crew-core/src/rpc.rs",
-      "line": 158,
+      "line": 71,
       "anchor": "    AgentSetModel {"
     },
     "call_agent_input": {
       "path": "crates/crew-core/src/rpc.rs",
-      "line": 223,
+      "line": 136,
       "anchor": "    AgentInput {"
     },
     "call_agent_focus": {
       "path": "crates/crew-core/src/rpc.rs",
-      "line": 232,
+      "line": 145,
       "anchor": "    AgentFocus {"
     },
     "call_resume": {
       "path": "crates/crew-core/src/rpc.rs",
-      "line": 181,
+      "line": 94,
       "anchor": "    Resume {"
     },
     "call_shutdown": {
       "path": "crates/crew-core/src/rpc.rs",
-      "line": 125,
+      "line": 38,
       "anchor": "    Shutdown {"
     },
     "call_task_get": {
       "path": "crates/crew-core/src/rpc.rs",
-      "line": 321,
+      "line": 234,
       "anchor": "    TaskGet {"
     },
     "call_models_list": {
       "path": "crates/crew-core/src/rpc.rs",
-      "line": 170,
+      "line": 83,
       "anchor": "    ModelsList,"
     },
     "call_tasks_list": {
       "path": "crates/crew-core/src/rpc.rs",
-      "line": 318,
+      "line": 231,
       "anchor": "    TasksList,"
     },
     "initial_state": {
@@ -427,5 +427,6 @@
       "line": 302,
       "anchor": "Call::ModelsList"
     }
-  }
+  },
+  "anchor_scope": "current_integrated_tree"
 }

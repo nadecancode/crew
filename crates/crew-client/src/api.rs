@@ -945,6 +945,7 @@ pub enum OperationOutcomeKind {
 pub struct OperationNotice {
     pub scope: ClientScope,
     pub operation_id: OperationId,
+    pub attachment_id: Option<AttachmentId>,
     pub kind: OperationOutcomeKind,
     pub reason: Option<ClientReason>,
 }

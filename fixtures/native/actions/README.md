@@ -19,11 +19,13 @@ Each `.jsonl` line is one independent case. `id` is stable across consumers;
 `contexts.json`; `given` shallowly replaces its named fields. Case input and
 expected output use fixture notation, not a proposed RPC or FFI interface.
 
-`source_refs` resolve through `sources.json` to baseline `path`, `line` and
-`anchor`. References identify the applicable wire variant, authorization/domain
-check and user-facing behavior. Parser-only and local navigation cases have no
-wire variant. The checker rejects moved anchors rather than silently treating
-another revision as the same baseline.
+`source_refs` resolve through `sources.json` to `path`, `line` and `anchor` in
+the current integrated source tree. The baseline commit identifies the behavior
+being preserved; anchors follow moved or reformatted definitions after portable
+extraction. References identify the wire variant, authorization/domain check and
+user-facing behavior. Parser-only and local navigation cases have no wire
+variant. The checker rejects outdated anchors so source relocation is updated
+explicitly without changing the behavior baseline.
 
 | Layer | Input | Expected observation |
 | --- | --- | --- |
