@@ -777,7 +777,6 @@ pub enum CommandResult {
     Stopping,
     Ok,
     Attached { agent: String },
-    Null,
     Snapshot(Box<Snapshot>),
     Workspaces(Workspaces),
     Agents(Vec<Agent>),
@@ -805,6 +804,7 @@ pub enum OperationOutcome {
     Canceled,
     OutcomeUnknown { reason: ClientReason },
     ClosedLocally { attachment_id: AttachmentId },
+    SentUnacknowledged { attachment_id: AttachmentId },
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -851,6 +851,9 @@ pub struct ClientUpdate {
     pub revision: ClientRevision,
     pub changes: ChangeSet,
     pub effects: Vec<ClientEffect>,
+    /// Final notices emitted only by the core. Held identified-message retries
+    /// have no notice until their sole replay completes or their wait expires.
+    pub outcomes: Vec<OperationNotice>,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -939,6 +942,7 @@ pub enum OperationOutcomeKind {
     Canceled,
     Unknown,
     ClosedLocally,
+    SentUnacknowledged,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]

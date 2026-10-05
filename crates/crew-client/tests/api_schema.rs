@@ -530,6 +530,7 @@ fn input_outcome_notice_and_terminal_records_construct_without_an_engine() {
                 entity: None,
             },
         ],
+        outcomes: vec![],
     };
     round_trip(update.clone());
     for plan in [

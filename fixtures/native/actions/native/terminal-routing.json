@@ -791,6 +791,176 @@
         "wire_requests": 0,
         "other_attachment_id": 102
       }
+    },
+    {
+      "id": "native-terminal-input-unacked",
+      "intents": [
+        {
+          "kind": "attach_input",
+          "data": {
+            "scope": {
+              "endpoint_id": "local:profile-a",
+              "workspace_id": "946d4617aa702870",
+              "generation": 1,
+              "daemon_pid": 1,
+              "daemon_started_at_ms": 1234,
+              "attempt": 1
+            },
+            "attachment_id": 101,
+            "data": [
+              0,
+              27,
+              255
+            ]
+          }
+        }
+      ],
+      "plans": [
+        {
+          "kind": "dispatch",
+          "data": {
+            "operation_id": 204
+          }
+        }
+      ],
+      "effects": [
+        {
+          "kind": "request",
+          "data": {
+            "scope": {
+              "endpoint_id": "local:profile-a",
+              "workspace_id": "946d4617aa702870",
+              "generation": 1,
+              "daemon_pid": 1,
+              "daemon_started_at_ms": 1234,
+              "attempt": 1
+            },
+            "operation_id": 204,
+            "lane": {
+              "terminal": {
+                "attachment_id": 101
+              }
+            },
+            "command": {
+              "kind": "attach_input",
+              "params": {
+                "data": "ABv/"
+              }
+            }
+          }
+        }
+      ],
+      "outcomes": [
+        {
+          "kind": "sent_unacknowledged",
+          "data": {
+            "attachment_id": 101
+          }
+        }
+      ],
+      "notices": [
+        {
+          "scope": {
+            "endpoint_id": "local:profile-a",
+            "workspace_id": "946d4617aa702870",
+            "generation": 1,
+            "daemon_pid": 1,
+            "daemon_started_at_ms": 1234,
+            "attempt": 1
+          },
+          "operation_id": 204,
+          "attachment_id": 101,
+          "kind": "sent_unacknowledged",
+          "reason": null
+        }
+      ],
+      "expected_behavior": {
+        "completion": "FullyWritten",
+        "daemon_acknowledgement": false,
+        "reply_timer": false,
+        "replay": false
+      }
+    },
+    {
+      "id": "native-terminal-input-error-ends",
+      "outcomes": [
+        {
+          "kind": "sent_unacknowledged",
+          "data": {
+            "attachment_id": 101
+          }
+        }
+      ],
+      "inputs": [
+        {
+          "kind": "attachment_ended",
+          "data": {
+            "scope": {
+              "endpoint_id": "local:profile-a",
+              "workspace_id": "946d4617aa702870",
+              "generation": 1,
+              "daemon_pid": 1,
+              "daemon_started_at_ms": 1234,
+              "attempt": 1
+            },
+            "attachment_id": 101,
+            "reason": {
+              "kind": "failed",
+              "data": {
+                "reason": {
+                  "code": "unavailable",
+                  "message": "terminal attachment ended"
+                }
+              }
+            }
+          }
+        }
+      ],
+      "notices": [
+        {
+          "scope": {
+            "endpoint_id": "local:profile-a",
+            "workspace_id": "946d4617aa702870",
+            "generation": 1,
+            "daemon_pid": 1,
+            "daemon_started_at_ms": 1234,
+            "attempt": 1
+          },
+          "operation_id": 204,
+          "attachment_id": 101,
+          "kind": "sent_unacknowledged",
+          "reason": null
+        }
+      ],
+      "chunks": [
+        {
+          "scope": {
+            "endpoint_id": "local:profile-a",
+            "workspace_id": "946d4617aa702870",
+            "generation": 1,
+            "daemon_pid": 1,
+            "daemon_started_at_ms": 1234,
+            "attempt": 1
+          },
+          "attachment_id": 101,
+          "data": [],
+          "ended": {
+            "kind": "failed",
+            "data": {
+              "reason": {
+                "code": "unavailable",
+                "message": "terminal attachment ended"
+              }
+            }
+          }
+        }
+      ],
+      "expected_behavior": {
+        "late_error": "ends captured attachment",
+        "second_operation_outcome": false,
+        "terminal_end_notifications": 1
+      }
     }
-  ]
+  ],
+  "amendment_commit": "d8a762b9f4c72fd65a988aab7a43fc8262e9275b"
 }

@@ -226,7 +226,6 @@ fn every_success_result_constructs_with_bare_array_and_optional_agent_semantics(
         CommandResult::Attached {
             agent: "claude-1".into(),
         },
-        CommandResult::Null,
         CommandResult::Snapshot(Box::new(snapshot.clone())),
         CommandResult::Workspaces(Workspaces::default()),
         CommandResult::Agents(snapshot.agents.clone()),

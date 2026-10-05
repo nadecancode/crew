@@ -148,11 +148,15 @@ checker does not claim end-to-end action, native shell or Apple verification;
 those belong to implementation conformance and platform acceptance suites.
 
 `native/terminal-routing.json` is separately tagged to the approved native
-terminal contract at `986dcb8c`. Its eight cases cover two attachments, scoped
+terminal contract at `986dcb8c`, with the one-way write correction at `d8a762b9`.
+Its ten cases cover two attachments, scoped
 input/resize, local close, stale IDs, unacknowledged Attach, scope retirement and
 duplicate close delivery. `crew-client/tests/terminal_schema.rs` validates real
 record construction/serialization, including `ClosedLocally` and
-`AttachmentEnded`; planner and driver consumers must execute those behavior
+`AttachmentEnded` and `SentUnacknowledged`. Successful terminal writes complete
+only after `FullyWritten`, without a daemon reply; a late error ends that
+attachment and cannot create a second operation outcome. Planner and driver
+consumers must execute those behavior
 cases before their own acceptance. These native rules do not modify the baseline
 web cases or the existing 64 request-byte goldens.
 

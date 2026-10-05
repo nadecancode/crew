@@ -27,7 +27,7 @@ fn fixture() -> Value {
 }
 
 #[test]
-fn eight_contract_tagged_cases_construct_real_records_and_preserve_scope_target() {
+fn ten_contract_tagged_cases_construct_real_records_and_preserve_scope_target() {
     let data = fixture();
     assert_eq!(data["kind"], "native_contract");
     assert_eq!(
@@ -43,6 +43,8 @@ fn eight_contract_tagged_cases_construct_real_records_and_preserve_scope_target(
         "native-terminal-unacked-attach",
         "native-terminal-retire-scope",
         "native-terminal-duplicate-close",
+        "native-terminal-input-unacked",
+        "native-terminal-input-error-ends",
     ];
     let cases = data["cases"].as_array().unwrap();
     assert_eq!(cases.len(), ids.len());
@@ -79,19 +81,16 @@ fn eight_contract_tagged_cases_construct_real_records_and_preserve_scope_target(
 }
 
 #[test]
-fn dispatch_and_local_close_cannot_be_mistaken_for_a_second_command_or_wire_null() {
+fn dispatch_and_local_completions_preserve_attachment_identity_without_daemon_success() {
     let dispatch = serde_json::to_value(ActionPlan::Dispatch { operation_id: 203 }).unwrap();
     assert_eq!(
         dispatch,
         json!({"kind":"dispatch","data":{"operation_id":203}})
     );
     let closed = OperationOutcome::ClosedLocally { attachment_id: 101 };
-    assert_ne!(
+    assert_eq!(
         serde_json::to_value(closed).unwrap(),
-        serde_json::to_value(OperationOutcome::Succeeded {
-            result: CommandResult::Null
-        })
-        .unwrap()
+        json!({"kind":"closed_locally","data":{"attachment_id":101}})
     );
     let cases = fixture();
     assert_eq!(cases["cases"][3]["effects"][0]["kind"], "close_attachment");
@@ -106,4 +105,23 @@ fn dispatch_and_local_close_cannot_be_mistaken_for_a_second_command_or_wire_null
         cases["cases"][3]["expected_behavior"]["daemon_acknowledgement"],
         false
     );
+    assert_eq!(
+        cases["amendment_commit"],
+        "d8a762b9f4c72fd65a988aab7a43fc8262e9275b"
+    );
+    assert_eq!(cases["cases"][8]["notices"][0]["attachment_id"], 101);
+    assert_eq!(
+        cases["cases"][8]["notices"][0]["kind"],
+        "sent_unacknowledged"
+    );
+    assert_eq!(
+        cases["cases"][9]["expected_behavior"]["second_operation_outcome"],
+        false
+    );
+    let unacknowledged = OperationOutcome::SentUnacknowledged { attachment_id: 101 };
+    assert_eq!(
+        serde_json::to_value(unacknowledged).unwrap(),
+        json!({"kind":"sent_unacknowledged","data":{"attachment_id":101}})
+    );
+    assert!(serde_json::from_value::<CommandResult>(json!({"kind":"null"})).is_err());
 }
