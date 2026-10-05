@@ -102,6 +102,6 @@ ongoing work has finished, stop that team with the new executable and start
 its existing team file again, for example `crew -C /path/to/project stop`
 then `crew -C /path/to/project run team.yaml`. No active team was stopped here.
 
-Light appearance keeps its existing green action colour by the operator's
-dark-only scope decision. Dark structural surfaces are neutral gray/black.
+Light appearance keeps its existing green action colour by the orchestrator's
+reading of the operator's dark-mode request. Dark structural surfaces are neutral gray/black.
 Script and CSS headroom remain small and must be measured for future changes.
