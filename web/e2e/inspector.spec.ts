@@ -63,3 +63,66 @@ test("light theme preserves readable terminal text on its dark surface", async (
   });
   expect(contrast).toBeGreaterThanOrEqual(4.5);
 });
+
+for (const text of ["", "retained ended output"]) {
+  test(`an ended ${text ? "nonempty" : "empty"} Herdr terminal explains its state and sends no typed or pasted input`, async ({ page, mock, openPage, csp }) => {
+    const guard = noRequestsAfterStart(page, mock);
+    mock.on("agent_output", () => ({ alive: false, text }));
+    try {
+      await openPage();
+      await page.locator('[data-agent="claude-1"]').focus();
+      await page.keyboard.press("Enter");
+      await page.getByRole("tab", { name: "terminal", exact: true }).click();
+      const terminal = page.locator('.terminal-tab.herdr[data-terminal="claude-1"]');
+      await expect(terminal).toContainText("terminal ended; refresh checks for output");
+      const screen = terminal.locator(".screen");
+      await expect(screen).toHaveText(text);
+      if (text) await expect(screen).toHaveAttribute("tabindex", "0");
+      else await expect(screen).not.toHaveAttribute("tabindex", "0");
+      await expect(terminal).not.toContainText(/click (it )?to type|ctrl-\]/i);
+      await expect(terminal.getByRole("button", { name: "jump to pane", exact: true })).toBeDisabled();
+      const refresh = terminal.getByRole("button", { name: "refresh", exact: true });
+      await expect(refresh).toBeEnabled();
+
+      await screen.dispatchEvent("keydown", { key: "x", code: "KeyX", bubbles: true });
+      await screen.evaluate((el) => {
+        const data = new DataTransfer();
+        data.setData("text/plain", "must not reach the ended terminal");
+        el.dispatchEvent(new ClipboardEvent("paste", { clipboardData: data, bubbles: true }));
+      });
+      // A later read on the same socket makes any input already sent observable.
+      const next = mock.calls.length;
+      await refresh.click();
+      await mock.waitForCall("agent_output", (call) => call.seq >= next);
+      expect(mock.calls.filter((call) => call.method === "agent_input")).toEqual([]);
+      expect(guard.requests).toEqual([]);
+      expect(csp).toEqual([]);
+    } finally { mock.on("agent_output", null); }
+  });
+}
+
+test("live Herdr terminal still accepts typed and pasted input", async ({ page, mock, openPage }) => {
+  const release = setPanelRead(mock, "agent_output", "ready");
+  try {
+    await openPage();
+    await page.locator('[data-agent="claude-1"]').focus();
+    await page.keyboard.press("Enter");
+    await page.getByRole("tab", { name: "terminal", exact: true }).click();
+    const terminal = page.locator('.terminal-tab.herdr[data-terminal="claude-1"]');
+    const screen = terminal.locator(".screen");
+    await expect(screen).toContainText("test result: ok. 12 passed");
+    await expect(screen).toHaveAttribute("tabindex", "0");
+    await expect(terminal.getByRole("button", { name: "jump to pane", exact: true })).toBeEnabled();
+    await screen.focus();
+    await page.keyboard.press("x");
+    const typed = await mock.waitForCall("agent_input", (call) => call.params.text === "x");
+    expect(typed.params).toEqual({ id: "claude-1", text: "x", submit: false });
+    await screen.evaluate((el) => {
+      const data = new DataTransfer();
+      data.setData("text/plain", "pasted evidence");
+      el.dispatchEvent(new ClipboardEvent("paste", { clipboardData: data, bubbles: true }));
+    });
+    const pasted = await mock.waitForCall("agent_input", (call) => call.params.text === "pasted evidence");
+    expect(pasted.params).toEqual({ id: "claude-1", text: "pasted evidence", submit: false });
+  } finally { release(); }
+});
