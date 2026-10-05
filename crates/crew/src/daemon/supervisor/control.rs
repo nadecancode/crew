@@ -21,12 +21,14 @@ impl Daemon {
         {
             let mut model = self.model();
             let rt = model.rt(id);
-            rt.expected_exit = procs.is_alive(id);
+            rt.expected_exit = rt.other_build || procs.is_alive(id);
             rt.ready = false;
             rt.turn_active = false;
             rt.pending_prompt = None;
         }
-        procs.kill(id).await.map_err(internal)?;
+        self.kill_process(procs.as_ref(), id)
+            .await
+            .map_err(internal)?;
         // A restart asked for while this waited has taken over: what it
         // started (a sidecar, a session) and set is not this kill's.
         if self.stops(id) != mine {
@@ -103,9 +105,14 @@ impl Daemon {
         // takes over: this one changes nothing more.
         let overtaken = || self.stops(id) != since;
         let procs = self.procs()?;
-        if procs.is_alive(id) {
+        // A process of another build recovery could not stop goes first,
+        // whatever its backend says of it.
+        let held = self.model().rt(id).other_build;
+        if held || procs.is_alive(id) {
             self.model().rt(id).expected_exit = true;
-            procs.kill(id).await.map_err(internal)?;
+            self.kill_process(procs.as_ref(), id)
+                .await
+                .map_err(internal)?;
             if overtaken() {
                 return Ok(());
             }

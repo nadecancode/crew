@@ -152,6 +152,11 @@ pub(crate) struct AgentRuntimeState {
     pub idle_since: Option<i64>,
     /// We asked the process to stop, so its exit is not a crash.
     pub expected_exit: bool,
+    /// Its process outlived the previous daemon, runs another build's copy
+    /// of crew, and could not be stopped: it is left as it is, record and
+    /// all, neither restarted nor its copy deleted, until a stop of it has
+    /// worked (supervisor/recovery.rs).
+    pub other_build: bool,
     pub transcript: Option<String>,
     pub spawned_at: i64,
     /// Messages pushed to the agent's listener and not yet confirmed.
@@ -1084,7 +1089,9 @@ impl Running {
         };
 
         if daemon.recover().await {
-            // Nothing runs another build's copy of crew now.
+            // Nothing runs another build's copy of crew now. An agent of
+            // another build that could not be stopped leaves the sweep to
+            // the housekeeping tick, once it has been.
             daemon.sweep_binaries();
         }
 

@@ -4,6 +4,7 @@
 
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 
 use anyhow::Result;
@@ -13,7 +14,7 @@ use crew_core::{Agent, AgentStatus};
 use super::Start;
 use crate::agents::{shell_quote, LaunchSpec};
 use crate::daemon::{start, AgentLocal, Daemon, DaemonOptions, Running};
-use crate::process::{ProcessManager, Spawned};
+use crate::process::{ProcEvent, ProcessManager, Spawned};
 
 /// Processes that are only recorded: what was started, what was stopped,
 /// and which agents still run (an adopted one included).
@@ -22,6 +23,7 @@ struct Recorded {
     spawned: Mutex<Vec<LaunchSpec>>,
     killed: Mutex<Vec<String>>,
     alive: Mutex<HashSet<String>>,
+    fail_kill: AtomicBool,
 }
 
 #[async_trait::async_trait]
@@ -54,6 +56,9 @@ impl ProcessManager for Recorded {
     }
     async fn kill(&self, id: &str) -> Result<()> {
         self.killed.lock().unwrap().push(id.to_string());
+        if self.fail_kill.load(Ordering::SeqCst) {
+            anyhow::bail!("the backend could not stop the old process");
+        }
         self.alive.lock().unwrap().remove(id);
         Ok(())
     }
@@ -98,12 +103,20 @@ impl Pinned {
 /// A daemon keeping a copy of a stand-in for the running binary, with a
 /// team of `agents` (`id`, runtime), each working on a task of its own.
 async fn pinned(agents: &[(&str, &str)]) -> Pinned {
+    binary_fixture(agents, false).await
+}
+
+async fn binary_fixture(agents: &[(&str, &str)], cannot_pin: bool) -> Pinned {
     let temp = tempfile::tempdir().unwrap();
     let root = temp.path().canonicalize().unwrap();
     let running_binary = root.join("running-crew");
     std::fs::write(&running_binary, "the running build").unwrap();
     let workspace = root.join("ws");
     std::fs::create_dir(&workspace).unwrap();
+    if cannot_pin {
+        std::fs::create_dir(workspace.join(".crew")).unwrap();
+        std::fs::write(workspace.join(".crew/bin"), "not a directory").unwrap();
+    }
     let on_disk = root.join("target/release/crew");
     let running = start(DaemonOptions {
         workspace: workspace.clone(),
@@ -290,6 +303,164 @@ async fn an_agent_that_outlived_the_daemon_is_adopted_only_if_it_runs_this_build
     assert!(other_builds
         .iter()
         .any(|m| m.contains("unknown") && m.contains("none recorded")));
+}
+
+#[tokio::test]
+async fn reviewer_recovery_does_not_forget_an_old_process_whose_kill_failed() {
+    let p = pinned(&[("other", "shell")]).await;
+    let daemon = p.daemon();
+    {
+        let mut model = daemon.model();
+        model.local.get_mut("other").unwrap().binary = Some("crew-0000000000000000".into());
+        let agent = model.agents.iter_mut().find(|a| a.id == "other").unwrap();
+        agent.pid = Some(12345);
+        agent.backend_ref = Some("old-pane".into());
+    }
+    p.procs.fail_kill.store(true, Ordering::SeqCst);
+    daemon.recover_agents(p.procs.clone()).await;
+    assert!(
+        p.procs.is_alive("other"),
+        "the old process is still running"
+    );
+    let agent = daemon.agent("other").unwrap();
+    assert_eq!(
+        agent.pid,
+        Some(12345),
+        "recovery discarded the surviving process"
+    );
+    assert_eq!(agent.backend_ref.as_deref(), Some("old-pane"));
+    assert_ne!(
+        agent.status,
+        AgentStatus::Spawning,
+        "a replacement was scheduled"
+    );
+}
+
+#[tokio::test]
+async fn reviewer_unpinned_recovery_does_not_treat_two_missing_build_ids_as_a_match() {
+    let p = binary_fixture(&[("old", "shell")], true).await;
+    let daemon = p.daemon();
+    assert!(
+        daemon.binary.warning().is_some(),
+        "a real pin attempt failed"
+    );
+    assert!(daemon.binary.name().is_none());
+    assert!(daemon.model().local["old"].binary.is_none());
+    // An unpinned or legacy process supplies no evidence that its tools
+    // belong to this build. Recovery must restart it to use today's path.
+    daemon.recover_agents(p.procs.clone()).await;
+    assert_eq!(*p.procs.killed.lock().unwrap(), vec!["old".to_string()]);
+}
+
+/// Agent `id` recorded as launched with another build's copy, which is in
+/// `<state>/bin`, and its process (pid 12345, pane "old-pane") as having
+/// outlived the previous daemon. Returns that copy's path.
+fn of_another_build(p: &Pinned, id: &str) -> PathBuf {
+    let daemon = p.daemon();
+    let old = daemon.state_dir.join("bin/crew-0000000000000000");
+    std::fs::write(&old, "another build").unwrap();
+    let mut model = daemon.model();
+    model.local.get_mut(id).unwrap().binary = Some("crew-0000000000000000".into());
+    let agent = model.agents.iter_mut().find(|a| a.id == id).unwrap();
+    agent.pid = Some(12345);
+    agent.backend_ref = Some("old-pane".into());
+    old
+}
+
+/// Its record is the process that outlived the previous daemon, nothing
+/// replaced it, and the copy it runs is still there.
+fn still_held(p: &Pinned, id: &str, old: &Path) {
+    let agent = p.daemon().agent(id).unwrap();
+    assert_eq!(
+        (agent.pid, agent.backend_ref.as_deref()),
+        (Some(12345), Some("old-pane"))
+    );
+    assert_ne!(agent.status, AgentStatus::Spawning);
+    assert!(p.procs.spawned.lock().unwrap().is_empty(), "restarted");
+    assert!(old.exists(), "the copy it runs was deleted");
+}
+
+#[tokio::test]
+async fn an_agent_of_another_build_that_could_not_be_stopped_is_held_until_a_stop_works() {
+    let p = pinned(&[("other", "shell")]).await;
+    let daemon = p.daemon();
+    let old = of_another_build(&p, "other");
+    p.procs.fail_kill.store(true, Ordering::SeqCst);
+    assert!(
+        !daemon.recover_agents(p.procs.clone()).await,
+        "recovery took an agent that still runs another build for decided"
+    );
+    still_held(&p, "other", &old);
+    let events = daemon.store.recent_events(None, 50).unwrap();
+    assert!(
+        events.iter().any(|e| e.event_type == "agent.stop_failed"
+            && e.level == crew_core::EventLevel::Warn
+            && e.message.starts_with("other could not be stopped")),
+        "{events:?}"
+    );
+
+    // What its backend reports of it is not its end; nor is a tick on
+    // which it still cannot be stopped.
+    daemon
+        .on_proc_event(ProcEvent::Exited {
+            agent_id: "other".into(),
+            instance: "12345".into(),
+            code: None,
+            detail: "lost the connection".into(),
+        })
+        .await;
+    daemon.binary_housekeeping().await;
+    tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+    still_held(&p, "other", &old);
+
+    // A stop that works: it is restarted with this daemon's copy, and the
+    // other copy goes.
+    p.procs.fail_kill.store(false, Ordering::SeqCst);
+    daemon.binary_housekeeping().await;
+    for _ in 0..500 {
+        if !p.procs.spawned.lock().unwrap().is_empty() {
+            break;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+    }
+    assert_eq!(Path::new(&p.launched("other").program), p.pin());
+    assert!(!old.exists());
+    let name = daemon.binary.name().unwrap().to_string();
+    assert_eq!(
+        launched_with(daemon, "other").as_deref(),
+        Some(name.as_str())
+    );
+    assert_eq!(
+        std::fs::read_dir(daemon.state_dir.join("bin"))
+            .unwrap()
+            .map(|e| e.unwrap().file_name().to_string_lossy().into_owned())
+            .collect::<Vec<_>>(),
+        [name]
+    );
+}
+
+#[tokio::test]
+async fn an_operators_stop_that_works_ends_the_hold_on_an_agent_of_another_build() {
+    let p = pinned(&[("other", "shell")]).await;
+    let daemon = p.daemon();
+    let old = of_another_build(&p, "other");
+    p.procs.fail_kill.store(true, Ordering::SeqCst);
+    assert!(!daemon.recover_agents(p.procs.clone()).await);
+    // A stop that fails holds it still.
+    assert!(daemon.kill_agent("other").await.is_err());
+    daemon.binary_housekeeping().await;
+    still_held(&p, "other", &old);
+
+    p.procs.fail_kill.store(false, Ordering::SeqCst);
+    daemon.kill_agent("other").await.unwrap();
+    daemon.binary_housekeeping().await;
+    assert!(!old.exists());
+    tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+    assert_eq!(daemon.agent("other").unwrap().status, AgentStatus::Stopped);
+    assert!(
+        p.procs.spawned.lock().unwrap().is_empty(),
+        "a stopped agent was restarted"
+    );
 }
 
 #[tokio::test]
