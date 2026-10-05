@@ -1,0 +1,877 @@
+{
+  "date": "2026-10-05",
+  "kind": "Reviewed native API/UI foundation; not connected app acceptance",
+  "task": "native-foundation-integration",
+  "base": "f3e9f2343934c665ec9a557688c3bcf4b5eaac4d",
+  "source": "706bd6358b4e9d4390b3ac907350c0a5ecc70ce3",
+  "protected_paths_equal": [
+    "web",
+    "crates/crew/web-dist",
+    "crates/crew/src",
+    "crates/crew/tests",
+    "crates/crew/build.rs",
+    "crates/crew/Cargo.toml",
+    "justfile",
+    "scripts/build-env",
+    "scripts/web-e2e",
+    "scripts/native"
+  ],
+  "source_mapping": [
+    {
+      "reviewed": "c8894ee058b5ab5867a65d64a500846a77920d62",
+      "integrated": "6c00b532455f2d1c0c01ce7bc1b31c14ffffe621"
+    },
+    {
+      "reviewed": "a8f3a76267a573f9920659222ed6fe5e6e3eb289",
+      "integrated": "8e221c61a509d91c8b479b2a24a3e4d7a9a1a3a5"
+    },
+    {
+      "reviewed": "dced9fedd2f03d14572c0e3987e91d30ad9a0895",
+      "integrated": "d8addedede92f80f35b081f7fe864fdf59031f32"
+    },
+    {
+      "reviewed": "1b86bd5e2f26c118ff3ae10f8f44b8244d248bf1",
+      "integrated": "c6c96418f382ebd27150656c5d45390765e77543"
+    },
+    {
+      "reviewed": "d44d3ba09d4167909b8f38cca6162668fc5e32c1",
+      "integrated": "4cc5b804fb079180828bdb378a6a8c517cb9ca8a"
+    },
+    {
+      "reviewed": "b8d290048a894f0663fa8baf953eb6041edd1355",
+      "integrated": "a363b7244c1239ff820af06148c5bf2336ed96a9"
+    },
+    {
+      "reviewed": "2b18fb1d8db36be55a5f707de4a02f724d1e9247",
+      "integrated": "b496485a16aefd6a04a7472f4d750d4a89fa4598"
+    },
+    {
+      "reviewed": "7f23df92018809250bb86c03fc46cf35c92bbb5b",
+      "integrated": "e7bd0416a4988b53ce9706320724b9cfc046ea1b"
+    },
+    {
+      "reviewed": "418d2085a682ca5579a88d1c8b0822a54607c323",
+      "integrated": "6dd5b49995d2e729d8090ba32b61ec29b4207a74"
+    },
+    {
+      "reviewed": "93c852cb5833d47984c164d7642609eb27fd3085",
+      "integrated": "19de6ac716c6c1748710f88e0ec319b8bc77fc4c"
+    },
+    {
+      "reviewed": "0cad53044e4ac4929f225795d4cba62a08fb6976",
+      "integrated": "bc99b6c3d21d936a3b596ecda2b8b26915dfd449"
+    },
+    {
+      "reviewed": "ef742690642ffed8bf36fa1653dcaf6a2efff2d1",
+      "integrated": "741bbd811338c9ba019af25486c518291411a2bf"
+    },
+    {
+      "reviewed": "c8535406a5d82684cfcaf736f37ad98a03de57ba",
+      "integrated": "8024575b2f7ae437a5300d58e99e7d84ee864a9c"
+    },
+    {
+      "reviewed": "a159bd039314c680d8c18ca48159c898d4b97917",
+      "integrated": "c18f2205537d4c0d406c642f365e90a81be0bba9"
+    },
+    {
+      "reviewed": "c45703fff782c6a4d2573437771be08a99ba3139",
+      "integrated": "1d350b2228acc9956b892988083b85a600beddc6"
+    },
+    {
+      "reviewed": "d4d31a134b89e62f38e5cf32040708d695affb0e",
+      "integrated": "5477493addcdf35228054d973eef84456d15b180"
+    },
+    {
+      "reviewed": "4479a30185f47672347c2d1e47e8660685b87734",
+      "integrated": "163fe6fca1bb4ad65889119f2afe78fd3a4aea05"
+    }
+  ],
+  "api_alignment_commit": "bfadc1cd735d95692b3a264dad904377700e6e62",
+  "registration_commit": "173431b68e52831b73dff31a7be8d688cc08e8fe",
+  "registration_source": "32ab8f0e8046478700726de64c65e1f91fc509ba",
+  "docs_import_commit": "b410c1c1d09160214df7befd42459d11e1dd8558",
+  "docs": [
+    {
+      "path": "notes/native-architecture.md",
+      "reviewed_commit": "70cc103eab6afac6aac41966603c362423869d73",
+      "sha256": "b3138e7aee081736f2b730f2f186a7daf0686829b79c4a08bb10a2feea1f62d9"
+    },
+    {
+      "path": "notes/native-core-inventory.md",
+      "reviewed_commit": "9b17ce1553841e8365c5d5b81668473cae83c7a8",
+      "sha256": "b20a6d323427d20c93147335b81adece63c1783f6be8b58d762afeaae648e260"
+    },
+    {
+      "path": "notes/native-transport-inventory.md",
+      "reviewed_commit": "51183326a2129d99e36fc167dafe4e87ab779315",
+      "sha256": "4fe77a586fe181c55a330af133d695767fcd40bf1dcf7ef660b976509f296bd6"
+    },
+    {
+      "path": "notes/native-gateway.md",
+      "reviewed_commit": "0a50c4ca43cc67947ca381177c83cfead1774920",
+      "sha256": "eabbf49bb37958aa89402cf6ec832648f5a4b96d5a71f53b47a7f2382cbc4778"
+    },
+    {
+      "path": "notes/native-apps.md",
+      "reviewed_commit": "5015460ab07671adeb748aefff8d733c08a42605",
+      "sha256": "a8164300ba35b23c3b48e847470677dd58a7542f8858ecde9f2238ed182946be"
+    },
+    {
+      "path": "notes/native-platform-feasibility.md",
+      "reviewed_commit": "fc87ae36f0e23268683bcfa64b5e34bb4cc32557",
+      "sha256": "f37083ca5374bae7a56b59ad4386f7035e31eced72f9641bd6eeaa6ae2b32439"
+    },
+    {
+      "path": "notes/native-web-policy.md",
+      "reviewed_commit": "becbeea6c7ac0b9076c9048c5625d9d39779e479",
+      "sha256": "de83bc958e1813d91dd4c405b444053369bfe216ff381b349b520955a19f699a"
+    },
+    {
+      "path": "notes/web-design.md",
+      "reviewed_commit": "28681cebd1e68ec1683f21aa22e564b34e9cd705",
+      "sha256": "11eb05f32daabd99aa9985e7b1c6d61e1dda9d0e4c8b60aad0bd7d5693ebd841"
+    },
+    {
+      "path": "notes/native-platform-feasibility/probe/Cargo.lock",
+      "reviewed_commit": "fc87ae36f0e23268683bcfa64b5e34bb4cc32557",
+      "sha256": "6b2d9aa75591ae2cef4ad7a017bf5df70c6fe4256909d92f42360fc94b3663f5"
+    },
+    {
+      "path": "notes/native-platform-feasibility/probe/Cargo.toml",
+      "reviewed_commit": "fc87ae36f0e23268683bcfa64b5e34bb4cc32557",
+      "sha256": "390a30b48ad92d9ae862827172ae8151a3c726c94f1365ed0918df506374a1c7"
+    },
+    {
+      "path": "notes/native-platform-feasibility/probe/src/bindgen.rs",
+      "reviewed_commit": "fc87ae36f0e23268683bcfa64b5e34bb4cc32557",
+      "sha256": "f7a2dd11fb370e9595bdfa6c32fc41a9b67a60bbab06ec711cb7a03eb873ffa6"
+    },
+    {
+      "path": "notes/native-platform-feasibility/probe/src/lib.rs",
+      "reviewed_commit": "fc87ae36f0e23268683bcfa64b5e34bb4cc32557",
+      "sha256": "4cbed2811e353955d415076ed2a352da08058c740d70dd5ccaab309e9a22379f"
+    }
+  ],
+  "api_blobs": [
+    {
+      "path": "crates/crew-client/src/api.rs",
+      "reviewed_commit": "982cca4e45bc739dca9dd65a23b6a0749cbf377d",
+      "sha256": "0a449ef16f882a5896e688ca994b91607ad54ec0faa08f8290b3ed4e222d0dbc"
+    },
+    {
+      "path": "crates/crew-client/tests/api_schema.rs",
+      "reviewed_commit": "982cca4e45bc739dca9dd65a23b6a0749cbf377d",
+      "sha256": "4a57cc72314c61a89f5473f3f621292c140536991083cf0dbd43dde6256fcddd"
+    },
+    {
+      "path": "crates/crew-client/tests/terminal_schema.rs",
+      "reviewed_commit": "982cca4e45bc739dca9dd65a23b6a0749cbf377d",
+      "sha256": "7d8b94559054ea2848a1a5a0e070bb2e1773355b0b1cefe2cfae04181e73aa92"
+    },
+    {
+      "path": "crates/crew-client/tests/outcome_schema.rs",
+      "reviewed_commit": "982cca4e45bc739dca9dd65a23b6a0749cbf377d",
+      "sha256": "83c7c65bb071a4eecb1e5d683643557c2af7bff293d0ae5b9e0ff95a9b44e201"
+    },
+    {
+      "path": "fixtures/native/actions/native/terminal-routing.json",
+      "reviewed_commit": "982cca4e45bc739dca9dd65a23b6a0749cbf377d",
+      "sha256": "a0595bfd268b64f88a8f3a77bcc955e7a1d9e194613c333e1f3af4597e9519af"
+    },
+    {
+      "path": "fixtures/native/actions/README.md",
+      "reviewed_commit": "982cca4e45bc739dca9dd65a23b6a0749cbf377d",
+      "sha256": "9330f6771c3c14830bbc7d5820caae98e7b879dae6d481cb5262ea6f9e47088b"
+    }
+  ],
+  "apple_blobs": [
+    {
+      "path": "apps/apple/Crew.xcodeproj/.gitignore",
+      "reviewed_commit": "4479a30185f47672347c2d1e47e8660685b87734",
+      "sha256": "2364db91f492bdd19410902eb3a930725311d78bedb3afddf0c854a7dfc351ee"
+    },
+    {
+      "path": "apps/apple/Crew.xcodeproj/project.pbxproj",
+      "reviewed_commit": "4479a30185f47672347c2d1e47e8660685b87734",
+      "sha256": "b2f22538a292375b8e0d8d841bc161fbaf88247a1189c33caeb3920a8f407f53"
+    },
+    {
+      "path": "apps/apple/Crew.xcodeproj/project.xcworkspace/contents.xcworkspacedata",
+      "reviewed_commit": "4479a30185f47672347c2d1e47e8660685b87734",
+      "sha256": "dcc95a1732f632aaf00b004f9ed1adb705e9cc8c777c8a32e32f034286ed54d3"
+    },
+    {
+      "path": "apps/apple/Crew.xcodeproj/xcshareddata/xcschemes/CrewIOS.xcscheme",
+      "reviewed_commit": "4479a30185f47672347c2d1e47e8660685b87734",
+      "sha256": "c5f35dad49a7249d7340fc9ef7f106c824d710a59612513cf2637738b2b40057"
+    },
+    {
+      "path": "apps/apple/Crew.xcodeproj/xcshareddata/xcschemes/CrewMac.xcscheme",
+      "reviewed_commit": "4479a30185f47672347c2d1e47e8660685b87734",
+      "sha256": "91aadc3eb2053d1d0ba38c115619e130b942528fb1b604eef5d3be3083d9157a"
+    },
+    {
+      "path": "apps/apple/CrewApp/CrewApp.swift",
+      "reviewed_commit": "4479a30185f47672347c2d1e47e8660685b87734",
+      "sha256": "f9c0d7b276f88d77130d7f4be42c0b47b6926ac0553acd2ca619b59918cb6d27"
+    },
+    {
+      "path": "apps/apple/CrewApp/README.md",
+      "reviewed_commit": "4479a30185f47672347c2d1e47e8660685b87734",
+      "sha256": "c4756e6281dbb7b6de8e77e0878138a940d0adac70dadab41622a05df3e39d90"
+    },
+    {
+      "path": "apps/apple/CrewApp/Resources/AppIcon.svg",
+      "reviewed_commit": "4479a30185f47672347c2d1e47e8660685b87734",
+      "sha256": "612b8c79163dd0525900d0a94756c14edd6f8ba535702c3678ede7bed00d2701"
+    },
+    {
+      "path": "apps/apple/CrewApp/Resources/Assets.xcassets/AppIcon.appiconset/AppIcon-1024.png",
+      "reviewed_commit": "4479a30185f47672347c2d1e47e8660685b87734",
+      "sha256": "62b26e20207d0c4367319f8e19809d3c855206c84a10266745dd02d67499f351"
+    },
+    {
+      "path": "apps/apple/CrewApp/Resources/Assets.xcassets/AppIcon.appiconset/AppIcon-128.png",
+      "reviewed_commit": "4479a30185f47672347c2d1e47e8660685b87734",
+      "sha256": "afcb7233a69025223010dc3b587f6932fb652aed742b5ceb5e7f883e4908235d"
+    },
+    {
+      "path": "apps/apple/CrewApp/Resources/Assets.xcassets/AppIcon.appiconset/AppIcon-16.png",
+      "reviewed_commit": "4479a30185f47672347c2d1e47e8660685b87734",
+      "sha256": "268037372b6738af0829586fe986c6cd1e00fb9a06fbdc0fb04ae93a34c2fbe1"
+    },
+    {
+      "path": "apps/apple/CrewApp/Resources/Assets.xcassets/AppIcon.appiconset/AppIcon-256.png",
+      "reviewed_commit": "4479a30185f47672347c2d1e47e8660685b87734",
+      "sha256": "7ed49eed2812ff4a383dca1d1ef1a4bae27031d8cf7cd0ae490fecc44b541278"
+    },
+    {
+      "path": "apps/apple/CrewApp/Resources/Assets.xcassets/AppIcon.appiconset/AppIcon-32.png",
+      "reviewed_commit": "4479a30185f47672347c2d1e47e8660685b87734",
+      "sha256": "b5312a19dd85f28708b2ab5df5a7161fc71388c392a0694866e3f95e0a3f113f"
+    },
+    {
+      "path": "apps/apple/CrewApp/Resources/Assets.xcassets/AppIcon.appiconset/AppIcon-512.png",
+      "reviewed_commit": "4479a30185f47672347c2d1e47e8660685b87734",
+      "sha256": "43153dd51846f73f16b338a0645c516be314eaaeef763bfb20c2b464e3503470"
+    },
+    {
+      "path": "apps/apple/CrewApp/Resources/Assets.xcassets/AppIcon.appiconset/AppIcon-64.png",
+      "reviewed_commit": "4479a30185f47672347c2d1e47e8660685b87734",
+      "sha256": "d41d06e844b26379107c8542eff2237fca1b5c33b8b70fccb7542b31826760df"
+    },
+    {
+      "path": "apps/apple/CrewApp/Resources/Assets.xcassets/AppIcon.appiconset/Contents.json",
+      "reviewed_commit": "4479a30185f47672347c2d1e47e8660685b87734",
+      "sha256": "fa839471834b43daee6ec08c59411d9f60298583dfa98b605c65ef84744737b9"
+    },
+    {
+      "path": "apps/apple/CrewApp/Resources/Assets.xcassets/Contents.json",
+      "reviewed_commit": "4479a30185f47672347c2d1e47e8660685b87734",
+      "sha256": "f5fb0e1f3a8142892ed092efb5955c1c2cc537003a89ad7bbdb9dade7fe8985f"
+    },
+    {
+      "path": "apps/apple/CrewApp/Resources/Assets.xcassets/LaunchCanvas.colorset/Contents.json",
+      "reviewed_commit": "4479a30185f47672347c2d1e47e8660685b87734",
+      "sha256": "3e5af80d2d8c1f4a64e094cbd0456e56ff2b4d55ec276aba5bc61db72f99c877"
+    },
+    {
+      "path": "apps/apple/CrewApp/Resources/CrewIOS-Info.plist",
+      "reviewed_commit": "4479a30185f47672347c2d1e47e8660685b87734",
+      "sha256": "91cec1c52039e9465dddb15f7c634fd8b824cc35bcb0be7f1cf4a2dc997a9594"
+    },
+    {
+      "path": "apps/apple/CrewApp/Resources/CrewMac-Info.plist",
+      "reviewed_commit": "4479a30185f47672347c2d1e47e8660685b87734",
+      "sha256": "04d1c091fe90db26f3bca6d820f75c50e9d7e8c5698d8a51e72954b9bf0b2cc6"
+    },
+    {
+      "path": "apps/apple/CrewHost/CrewNavigationCommands.swift",
+      "reviewed_commit": "4479a30185f47672347c2d1e47e8660685b87734",
+      "sha256": "f9cdef62373699ef40406ba640a58d9fe51642ab30f2e56024d96abf8101fb52"
+    },
+    {
+      "path": "apps/apple/CrewHost/CrewPreferences.swift",
+      "reviewed_commit": "4479a30185f47672347c2d1e47e8660685b87734",
+      "sha256": "c11c270650b36c43f21872f933c09eb3638881eec40347448ac956efe98717ee"
+    },
+    {
+      "path": "apps/apple/CrewHost/CrewRootView.swift",
+      "reviewed_commit": "4479a30185f47672347c2d1e47e8660685b87734",
+      "sha256": "51a9587f591b59017827287aed1db1b27682347f08de4e1997ea5bea5904ae05"
+    },
+    {
+      "path": "apps/apple/CrewUI/.gitignore",
+      "reviewed_commit": "4479a30185f47672347c2d1e47e8660685b87734",
+      "sha256": "acc718146d21aae829cba1761475e05de39d73209d83af2ab8487a74843cead0"
+    },
+    {
+      "path": "apps/apple/CrewUI/Package.swift",
+      "reviewed_commit": "4479a30185f47672347c2d1e47e8660685b87734",
+      "sha256": "cf2b90fc533fba1269cb0582c386b4dfc28b13a040eb01f3e85e34469019dd3b"
+    },
+    {
+      "path": "apps/apple/CrewUI/Sources/CrewUI/CrewDestination.swift",
+      "reviewed_commit": "4479a30185f47672347c2d1e47e8660685b87734",
+      "sha256": "4c384790ff79b3af5358287cd8a0b87798226a06dcf1e8c1c1c39a670231f84b"
+    },
+    {
+      "path": "apps/apple/CrewUI/Sources/CrewUI/CrewEmptyState.swift",
+      "reviewed_commit": "4479a30185f47672347c2d1e47e8660685b87734",
+      "sha256": "b8647006ed8fb32992347d06ef167e1bfc68f44d983380c6ce3b00d543fdd9de"
+    },
+    {
+      "path": "apps/apple/CrewUI/Sources/CrewUI/CrewHelpView.swift",
+      "reviewed_commit": "4479a30185f47672347c2d1e47e8660685b87734",
+      "sha256": "59a5a8a14604b21c4b6f3fccc791924f362b634f111fd1bf025d6a91b29aefb6"
+    },
+    {
+      "path": "apps/apple/CrewUI/Sources/CrewUI/CrewNavigation.swift",
+      "reviewed_commit": "4479a30185f47672347c2d1e47e8660685b87734",
+      "sha256": "4764b3e885c89f143ab2291e5ee878f127b793be7843e15355adec284cd5a9b7"
+    },
+    {
+      "path": "apps/apple/CrewUI/Sources/CrewUI/CrewShell.swift",
+      "reviewed_commit": "4479a30185f47672347c2d1e47e8660685b87734",
+      "sha256": "be240cbd12ad8b725f53defc23b472fb8a49e2d97fdd947f65e67deaeebefce9"
+    },
+    {
+      "path": "apps/apple/CrewUI/Sources/CrewUI/CrewTheme.swift",
+      "reviewed_commit": "4479a30185f47672347c2d1e47e8660685b87734",
+      "sha256": "ece2abbeb4eee6984b392d8cf32bd319a67dfe1171999f069489459e57d73f40"
+    },
+    {
+      "path": "apps/apple/CrewUI/Sources/CrewUI/Resources/Theme.xcassets/Contents.json",
+      "reviewed_commit": "4479a30185f47672347c2d1e47e8660685b87734",
+      "sha256": "f5fb0e1f3a8142892ed092efb5955c1c2cc537003a89ad7bbdb9dade7fe8985f"
+    },
+    {
+      "path": "apps/apple/CrewUI/Sources/CrewUI/Resources/Theme.xcassets/CrewAccent.colorset/Contents.json",
+      "reviewed_commit": "4479a30185f47672347c2d1e47e8660685b87734",
+      "sha256": "89518bf4d6d61400b9eb6e3761e6febd9977d7b4235569091d0b5e2fc3768dc4"
+    },
+    {
+      "path": "apps/apple/CrewUI/Sources/CrewUI/Resources/Theme.xcassets/CrewCanvas.colorset/Contents.json",
+      "reviewed_commit": "4479a30185f47672347c2d1e47e8660685b87734",
+      "sha256": "3e5af80d2d8c1f4a64e094cbd0456e56ff2b4d55ec276aba5bc61db72f99c877"
+    },
+    {
+      "path": "apps/apple/CrewUI/Sources/CrewUI/Resources/Theme.xcassets/CrewRaised.colorset/Contents.json",
+      "reviewed_commit": "4479a30185f47672347c2d1e47e8660685b87734",
+      "sha256": "c5dfc8a1b34f9ee7d037465e79185e9f66df0fc70141ddcf6e24db1ba11d4668"
+    },
+    {
+      "path": "apps/apple/CrewUI/Sources/CrewUI/Resources/Theme.xcassets/CrewSurface.colorset/Contents.json",
+      "reviewed_commit": "4479a30185f47672347c2d1e47e8660685b87734",
+      "sha256": "9ee16352cea5f110be0546f0470ac5615bb440744923be2404c51a04843738ce"
+    },
+    {
+      "path": "apps/apple/Tests/CrewShellTests.swift",
+      "reviewed_commit": "4479a30185f47672347c2d1e47e8660685b87734",
+      "sha256": "65f3b4a7b91effd9337d5536cf441305d1c84e27e5a06ca15d64b9553dd0229b"
+    },
+    {
+      "path": "apps/apple/Tests/CrewShellUITests.swift",
+      "reviewed_commit": "4479a30185f47672347c2d1e47e8660685b87734",
+      "sha256": "711ccddc2140219f096ad2bfb52627c320355f4a2ee78dfbc64579f5513e9f1b"
+    },
+    {
+      "path": "apps/apple/Tests/check-source.py",
+      "reviewed_commit": "4479a30185f47672347c2d1e47e8660685b87734",
+      "sha256": "6339d44df13f0d03200bd4bab4051c2a40b542c8b9dec5f1e766007cf027f2f4"
+    }
+  ],
+  "linux_blobs": [
+    {
+      "path": "crates/crew-desktop/Cargo.toml",
+      "reviewed_commit": "d4d31a134b89e62f38e5cf32040708d695affb0e",
+      "sha256": "3a29d1e2915106dd4cc90cbe56f692a5b53909c895204a99fdcc6f2bd4ec844e"
+    },
+    {
+      "path": "crates/crew-desktop/README.md",
+      "reviewed_commit": "d4d31a134b89e62f38e5cf32040708d695affb0e",
+      "sha256": "5ba96d6d70df4db7cf62226a26d384c67c0deaa4701ad3f4a6e6a73a90bf3f9c"
+    },
+    {
+      "path": "crates/crew-desktop/build.rs",
+      "reviewed_commit": "d4d31a134b89e62f38e5cf32040708d695affb0e",
+      "sha256": "45df9818f316e7e9cf117f4e366ee7d48f107f6a3fd40444d4f6ce90d5ac509f"
+    },
+    {
+      "path": "crates/crew-desktop/data/dev.crew.Crew.desktop",
+      "reviewed_commit": "d4d31a134b89e62f38e5cf32040708d695affb0e",
+      "sha256": "1987506310ca6888aa4f6ec426449515cb3a65251a510f6e71feca08386993be"
+    },
+    {
+      "path": "crates/crew-desktop/resources/crew.gresource.xml",
+      "reviewed_commit": "d4d31a134b89e62f38e5cf32040708d695affb0e",
+      "sha256": "18d254b2f008111325a927bb08456aa0976b76644729cafb8fb3a753f918eaec"
+    },
+    {
+      "path": "crates/crew-desktop/resources/dark.css",
+      "reviewed_commit": "d4d31a134b89e62f38e5cf32040708d695affb0e",
+      "sha256": "aeb1c9b015724ef181463517c9e0ac236eb80da0bdb9e827f6fbc5e4e3554a94"
+    },
+    {
+      "path": "crates/crew-desktop/resources/icons/scalable/apps/dev.crew.Crew.svg",
+      "reviewed_commit": "d4d31a134b89e62f38e5cf32040708d695affb0e",
+      "sha256": "213fc172f395177ac5232311e36c81e51cbb91531f55dcc91aa450645d03923c"
+    },
+    {
+      "path": "crates/crew-desktop/resources/light.css",
+      "reviewed_commit": "d4d31a134b89e62f38e5cf32040708d695affb0e",
+      "sha256": "218011e697dc26edb497b728723b8b559abaebcd6e8194632935c4611534b659"
+    },
+    {
+      "path": "crates/crew-desktop/resources/style.css",
+      "reviewed_commit": "d4d31a134b89e62f38e5cf32040708d695affb0e",
+      "sha256": "25bdd4fcf3f1b7801fec4aee0e48ea638e65e21918ed4404d459c96994d294f9"
+    },
+    {
+      "path": "crates/crew-desktop/src/adaptive.rs",
+      "reviewed_commit": "d4d31a134b89e62f38e5cf32040708d695affb0e",
+      "sha256": "20ca0e76bd236a4349527ed7efdd9889de9961d3ad328681eafa64d1ad3f55a7"
+    },
+    {
+      "path": "crates/crew-desktop/src/appearance.rs",
+      "reviewed_commit": "d4d31a134b89e62f38e5cf32040708d695affb0e",
+      "sha256": "a69e76e7307e8d5554731427d1e6eb2a0615a588393633934472b184da320104"
+    },
+    {
+      "path": "crates/crew-desktop/src/application.rs",
+      "reviewed_commit": "d4d31a134b89e62f38e5cf32040708d695affb0e",
+      "sha256": "bcf1818e9bf49e7f4ee709199f42ade5df170fa104895a5e54ad67a20fd8668d"
+    },
+    {
+      "path": "crates/crew-desktop/src/lib.rs",
+      "reviewed_commit": "d4d31a134b89e62f38e5cf32040708d695affb0e",
+      "sha256": "d4c123d9b2801f981147bf8ac21f7cbfcd7fdf5b3538c2aa466b963f1094da78"
+    },
+    {
+      "path": "crates/crew-desktop/src/main.rs",
+      "reviewed_commit": "d4d31a134b89e62f38e5cf32040708d695affb0e",
+      "sha256": "970ad16109bce539f6420c39460543e45fb2d158871465f82e5a85024052b27b"
+    },
+    {
+      "path": "crates/crew-desktop/src/navigation.rs",
+      "reviewed_commit": "d4d31a134b89e62f38e5cf32040708d695affb0e",
+      "sha256": "d979f06448127e965e0b2b5567ab7c695e861a6c747e1d820a7674a9884349ce"
+    },
+    {
+      "path": "crates/crew-desktop/src/shell.rs",
+      "reviewed_commit": "d4d31a134b89e62f38e5cf32040708d695affb0e",
+      "sha256": "d11b551bdce653978b7d0769ddf324c3a1805debf533d1d5c9326699613bc8d3"
+    },
+    {
+      "path": "crates/crew-desktop/src/views/mod.rs",
+      "reviewed_commit": "706bd6358b4e9d4390b3ac907350c0a5ecc70ce3",
+      "sha256": "71bd06f47e06fc49b21c697b087b16fbf84acecea1ff5d6b1925308471d993a4"
+    },
+    {
+      "path": "crates/crew-desktop/tests/keyboard.sh",
+      "reviewed_commit": "d4d31a134b89e62f38e5cf32040708d695affb0e",
+      "sha256": "511f1a389203c29df18585f180132f3c8e27a8d74a603722bae9ca1eb2c4d45a"
+    },
+    {
+      "path": "crates/crew-desktop/tests/run-window-test.sh",
+      "reviewed_commit": "d4d31a134b89e62f38e5cf32040708d695affb0e",
+      "sha256": "dcf1e81a4bf1f85caa817949b57bcdc6568daf5f20665f84a82d4957af7f139b"
+    },
+    {
+      "path": "crates/crew-desktop/tests/window.rs",
+      "reviewed_commit": "706bd6358b4e9d4390b3ac907350c0a5ecc70ce3",
+      "sha256": "886ac9ae4f9225a8cc40058e4aa6f56b732f74f2bbd0f6c402c804e036f03a2b"
+    }
+  ],
+  "lock": {
+    "sha256": "17cecfab6cca213058cbd16dec82d96aa0f4eee06132bb9afafa7c6eee288d64",
+    "added": [
+      "cairo-rs@0.21.5",
+      "cairo-sys-rs@0.21.5",
+      "cfg-expr@0.20.10",
+      "crew-client@0.1.0",
+      "crew-desktop@0.1.0",
+      "crew-protocol@0.1.0",
+      "field-offset@0.3.6",
+      "futures-channel@0.3.34",
+      "futures-executor@0.3.34",
+      "futures-io@0.3.34",
+      "futures-macro@0.3.34",
+      "gdk-pixbuf@0.21.5",
+      "gdk-pixbuf-sys@0.21.5",
+      "gdk4@0.10.3",
+      "gdk4-sys@0.10.3",
+      "gio@0.21.5",
+      "gio-sys@0.21.5",
+      "glib@0.21.5",
+      "glib-macros@0.21.5",
+      "glib-sys@0.21.5",
+      "gobject-sys@0.21.5",
+      "graphene-rs@0.21.5",
+      "graphene-sys@0.21.5",
+      "gsk4@0.10.3",
+      "gsk4-sys@0.10.3",
+      "gtk4@0.10.3",
+      "gtk4-macros@0.10.3",
+      "gtk4-sys@0.10.3",
+      "memoffset@0.9.1",
+      "pango@0.21.5",
+      "pango-sys@0.21.5",
+      "proc-macro-crate@3.5.0",
+      "rustc_version@0.4.1",
+      "semver@1.0.28",
+      "serde_spanned@1.1.1",
+      "system-deps@7.0.8",
+      "target-lexicon@0.13.5",
+      "toml@1.1.6+spec-1.1.0",
+      "toml_datetime@1.1.1+spec-1.1.0",
+      "toml_edit@0.25.15+spec-1.1.0",
+      "toml_parser@1.1.3+spec-1.1.0",
+      "toml_writer@1.1.2+spec-1.1.0",
+      "version-compare@0.2.1",
+      "winnow@1.0.4"
+    ],
+    "removed": [],
+    "compatibility_pins": {
+      "clap": "4.5.61",
+      "clap_builder": "4.5.61",
+      "clap_derive": "4.5.61",
+      "clap_lex": "1.0.1",
+      "uuid": "1.20.0",
+      "instability": "0.3.10",
+      "darling": "0.20.11",
+      "darling_core": "0.20.11",
+      "darling_macro": "0.20.11",
+      "indexmap": "2.13.1",
+      "hashbrown": "0.16.1",
+      "unicode-segmentation": "1.12.0"
+    },
+    "resolver_annotations_only": {
+      "added": [],
+      "removed": [],
+      "changed": [
+        "crew@0.1.0",
+        "crew-core@0.1.0",
+        "futures-util@0.3.34",
+        "toml@0.8.23",
+        "toml_edit@0.22.27"
+      ]
+    }
+  },
+  "source_diff_summary": [
+    "M Cargo.lock",
+    "M Cargo.toml",
+    "M README.md",
+    "A apps/apple/Crew.xcodeproj/.gitignore",
+    "A apps/apple/Crew.xcodeproj/project.pbxproj",
+    "A apps/apple/Crew.xcodeproj/project.xcworkspace/contents.xcworkspacedata",
+    "A apps/apple/Crew.xcodeproj/xcshareddata/xcschemes/CrewIOS.xcscheme",
+    "A apps/apple/Crew.xcodeproj/xcshareddata/xcschemes/CrewMac.xcscheme",
+    "A apps/apple/CrewApp/CrewApp.swift",
+    "A apps/apple/CrewApp/README.md",
+    "A apps/apple/CrewApp/Resources/AppIcon.svg",
+    "A apps/apple/CrewApp/Resources/Assets.xcassets/AppIcon.appiconset/AppIcon-1024.png",
+    "A apps/apple/CrewApp/Resources/Assets.xcassets/AppIcon.appiconset/AppIcon-128.png",
+    "A apps/apple/CrewApp/Resources/Assets.xcassets/AppIcon.appiconset/AppIcon-16.png",
+    "A apps/apple/CrewApp/Resources/Assets.xcassets/AppIcon.appiconset/AppIcon-256.png",
+    "A apps/apple/CrewApp/Resources/Assets.xcassets/AppIcon.appiconset/AppIcon-32.png",
+    "A apps/apple/CrewApp/Resources/Assets.xcassets/AppIcon.appiconset/AppIcon-512.png",
+    "A apps/apple/CrewApp/Resources/Assets.xcassets/AppIcon.appiconset/AppIcon-64.png",
+    "A apps/apple/CrewApp/Resources/Assets.xcassets/AppIcon.appiconset/Contents.json",
+    "A apps/apple/CrewApp/Resources/Assets.xcassets/Contents.json",
+    "A apps/apple/CrewApp/Resources/Assets.xcassets/LaunchCanvas.colorset/Contents.json",
+    "A apps/apple/CrewApp/Resources/CrewIOS-Info.plist",
+    "A apps/apple/CrewApp/Resources/CrewMac-Info.plist",
+    "A apps/apple/CrewHost/CrewNavigationCommands.swift",
+    "A apps/apple/CrewHost/CrewPreferences.swift",
+    "A apps/apple/CrewHost/CrewRootView.swift",
+    "A apps/apple/CrewUI/.gitignore",
+    "A apps/apple/CrewUI/Package.swift",
+    "A apps/apple/CrewUI/Sources/CrewUI/CrewDestination.swift",
+    "A apps/apple/CrewUI/Sources/CrewUI/CrewEmptyState.swift",
+    "A apps/apple/CrewUI/Sources/CrewUI/CrewHelpView.swift",
+    "A apps/apple/CrewUI/Sources/CrewUI/CrewNavigation.swift",
+    "A apps/apple/CrewUI/Sources/CrewUI/CrewShell.swift",
+    "A apps/apple/CrewUI/Sources/CrewUI/CrewTheme.swift",
+    "A apps/apple/CrewUI/Sources/CrewUI/Resources/Theme.xcassets/Contents.json",
+    "A apps/apple/CrewUI/Sources/CrewUI/Resources/Theme.xcassets/CrewAccent.colorset/Contents.json",
+    "A apps/apple/CrewUI/Sources/CrewUI/Resources/Theme.xcassets/CrewCanvas.colorset/Contents.json",
+    "A apps/apple/CrewUI/Sources/CrewUI/Resources/Theme.xcassets/CrewRaised.colorset/Contents.json",
+    "A apps/apple/CrewUI/Sources/CrewUI/Resources/Theme.xcassets/CrewSurface.colorset/Contents.json",
+    "A apps/apple/Tests/CrewShellTests.swift",
+    "A apps/apple/Tests/CrewShellUITests.swift",
+    "A apps/apple/Tests/check-source.py",
+    "A crates/crew-client/Cargo.toml",
+    "A crates/crew-client/src/api.rs",
+    "A crates/crew-client/src/lib.rs",
+    "A crates/crew-client/src/order.rs",
+    "A crates/crew-client/src/work.rs",
+    "A crates/crew-client/tests/api_schema.rs",
+    "A crates/crew-client/tests/command_schema.rs",
+    "A crates/crew-client/tests/n1_state_conformance.rs",
+    "A crates/crew-client/tests/outcome_schema.rs",
+    "A crates/crew-client/tests/terminal_schema.rs",
+    "M crates/crew-core/Cargo.toml",
+    "M crates/crew-core/src/lib.rs",
+    "M crates/crew-core/src/rpc.rs",
+    "A crates/crew-desktop/Cargo.toml",
+    "A crates/crew-desktop/README.md",
+    "A crates/crew-desktop/build.rs",
+    "A crates/crew-desktop/data/dev.crew.Crew.desktop",
+    "A crates/crew-desktop/resources/crew.gresource.xml",
+    "A crates/crew-desktop/resources/dark.css",
+    "A crates/crew-desktop/resources/icons/scalable/apps/dev.crew.Crew.svg",
+    "A crates/crew-desktop/resources/light.css",
+    "A crates/crew-desktop/resources/style.css",
+    "A crates/crew-desktop/src/adaptive.rs",
+    "A crates/crew-desktop/src/appearance.rs",
+    "A crates/crew-desktop/src/application.rs",
+    "A crates/crew-desktop/src/lib.rs",
+    "A crates/crew-desktop/src/main.rs",
+    "A crates/crew-desktop/src/navigation.rs",
+    "A crates/crew-desktop/src/shell.rs",
+    "A crates/crew-desktop/src/views/mod.rs",
+    "A crates/crew-desktop/tests/keyboard.sh",
+    "A crates/crew-desktop/tests/run-window-test.sh",
+    "A crates/crew-desktop/tests/window.rs",
+    "A crates/crew-protocol/Cargo.toml",
+    "A crates/crew-protocol/src/lib.rs",
+    "A crates/crew-protocol/src/rpc.rs",
+    "R crates/{crew-core => crew-protocol}/src/types.rs",
+    "R crates/{crew-core => crew-protocol}/src/vcs.rs",
+    "M crates/crew-tui/Cargo.toml",
+    "M crates/crew-tui/src/app.rs",
+    "A fixtures/native/actions/.gitignore",
+    "A fixtures/native/actions/README.md",
+    "A fixtures/native/actions/answers.jsonl",
+    "A fixtures/native/actions/capabilities.json",
+    "A fixtures/native/actions/check.ts",
+    "A fixtures/native/actions/commands.jsonl",
+    "A fixtures/native/actions/contexts.json",
+    "A fixtures/native/actions/controls.jsonl",
+    "A fixtures/native/actions/messaging.jsonl",
+    "A fixtures/native/actions/native/terminal-routing.json",
+    "A fixtures/native/actions/request-bytes.jsonl",
+    "A fixtures/native/actions/sources.json",
+    "A fixtures/native/actions/wire-probe.rs",
+    "A fixtures/native/actions/wire.jsonl",
+    "A fixtures/native/actions/workspaces.jsonl",
+    "A fixtures/native/state/README.md",
+    "A fixtures/native/state/check-vitest.config.mjs",
+    "A fixtures/native/state/check-web.test.ts",
+    "A fixtures/native/state/check.mjs",
+    "A fixtures/native/state/check.rs",
+    "A fixtures/native/state/completed-ties.case.json",
+    "A fixtures/native/state/optional-values.case.json",
+    "A fixtures/native/state/parked-resumption.case.json",
+    "A fixtures/native/state/schema.json",
+    "A fixtures/native/state/snapshot-replacement.case.json",
+    "A fixtures/native/state/work-choice.case.json",
+    "A notes/native-apps.md",
+    "A notes/native-architecture.md",
+    "A notes/native-core-inventory.md",
+    "A notes/native-gateway.md",
+    "A notes/native-platform-feasibility/probe/Cargo.lock",
+    "A notes/native-platform-feasibility/probe/Cargo.toml",
+    "A notes/native-platform-feasibility/probe/src/bindgen.rs",
+    "A notes/native-platform-feasibility/probe/src/lib.rs",
+    "A notes/native-platform-feasibility.md",
+    "A notes/native-transport-inventory.md",
+    "A notes/native-web-policy.md",
+    "M notes/web-design.md"
+  ],
+  "checks": [
+    {
+      "name": "Portable/API/schema/conformance",
+      "command": "scripts/native/check.sh --conformance",
+      "result": "passed",
+      "portable_tests": 33,
+      "tui_render_tests": 60,
+      "state_wire_tui_steps": 31,
+      "state_web_cases": 5,
+      "action_cases": 127,
+      "action_methods": 15,
+      "source_anchors": 85,
+      "pure_web_cases": 24,
+      "wire_goldens": 64,
+      "valid_wire_cases": 9,
+      "invalid_wire_cases": 11,
+      "wasm_checked": [
+        "crew-protocol",
+        "crew-client"
+      ],
+      "source": "bfadc1cd735d95692b3a264dad904377700e6e62; portable sources byte-equal in final source",
+      "log": "foundation-conformance.log",
+      "log_sha256": "0787ba2836ebec757abdaca642d287b969f855918d08fe6cb63f14ce61a67a0b"
+    },
+    {
+      "name": "Portable strict Clippy",
+      "command": "./scripts/build-env cargo clippy --locked -p crew-protocol -p crew-client --all-targets -- -D warnings",
+      "result": "passed",
+      "log": "foundation-clippy.log",
+      "log_sha256": "4c8680198274db1eff83a3308471d8972f97ff24a0ce5a6915049f6d04360d37"
+    },
+    {
+      "name": "Formatting",
+      "command": "cargo fmt --all -- --check",
+      "result": "passed",
+      "log": "foundation-fmt.log",
+      "log_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "name": "Actual locked default CLI MSRV",
+      "command": "RUSTUP_HOME=\"$PWD/target/cli-msrv-integration/rustup\" CREW_MSRV_TARGET_DIR=\"$PWD/target/native-validation/foundation-msrv\" scripts/check-msrv",
+      "result": "passed",
+      "rust": "1.82.0",
+      "cargo": "1.82.0",
+      "native_packages_registered": true,
+      "log": "foundation-msrv.log",
+      "log_sha256": "0f3080a3660cf1281a603c022b7cc204e33f04fb5ba81e3f1068e8ba2582d6d4"
+    },
+    {
+      "name": "Isolated web/auth integration after RPC extraction",
+      "command": "./scripts/build-env cargo test --locked -p crew --test operator_auth --test web --test web_server --test web_wire",
+      "result": "passed",
+      "passed": 60,
+      "failed": 0,
+      "ignored": 0,
+      "log": "foundation-security.log",
+      "log_sha256": "5a7e23dd1f53dddbe6688e98d7c337a3e9482b4f14e3d048fcca2059c3f47355"
+    },
+    {
+      "name": "Default workspace strict Clippy without GTK environment",
+      "command": "./scripts/build-env cargo clippy --locked --workspace --all-targets -- -D warnings",
+      "result": "passed",
+      "cargo_target": "target/native-validation/foundation-default",
+      "log": "foundation-default-clippy.log",
+      "log_sha256": "f8afb356875f75ac511240e40faf872cf09a34aab0ecc10dc3ca60533a3ac6f1"
+    },
+    {
+      "name": "Embedded dashboard source/bundle check",
+      "command": "./scripts/build-env cargo test --locked -p crew --test web_bundle",
+      "result": "passed",
+      "passed": 2,
+      "failed": 0,
+      "ignored": 0,
+      "log": "foundation-web-bundle.log",
+      "log_sha256": "9779800be7d506eb11062b1283f57d4c90843ba99aab0004541f0e975433fcdb"
+    },
+    {
+      "name": "Integrated GTK binary build",
+      "command": "scripts/native/linux-build.sh -j 2",
+      "result": "passed",
+      "features": [
+        "native-ui",
+        "local"
+      ],
+      "rust": "1.93.1",
+      "cargo": "1.93.1",
+      "log": "foundation-linux-final-build.log",
+      "log_sha256": "7383e847c1443b46d0a9783d231a2cad1b66974c0ad679b0b9d2a9e33d04723a"
+    },
+    {
+      "name": "Empty focus regression before",
+      "command": "crates/crew-desktop/tests/run-window-test.sh",
+      "result": "expected failure on d4 shell plus test-only candidate",
+      "passed": 0,
+      "failed": 1,
+      "expected_failure": "empty Tasks detail must focus the visible named destination control",
+      "log": "empty-focus-before-test.log",
+      "log_sha256": "c6b12328f8b0bf0a607e9b45d666249ac30b1821c5799f78b0b6c118a677b447"
+    },
+    {
+      "name": "Empty focus regression after",
+      "command": "crates/crew-desktop/tests/run-window-test.sh",
+      "result": "passed with 706 source",
+      "passed": 1,
+      "failed": 0,
+      "populated_entry_button_controls_preserved": true,
+      "log": "empty-focus-after-test.log",
+      "log_sha256": "146eb82aca81ecf207ac21ae308bd4f349a41739d85b1144544f665f215dfe9e"
+    },
+    {
+      "name": "Native GTK strict Clippy",
+      "command": "scripts/native/linux-env.sh cargo clippy --locked -p crew-desktop --features native-ui,local --all-targets -- -D warnings",
+      "result": "passed",
+      "log": "empty-focus-clippy.log",
+      "log_sha256": "0aae38e1012264ce3506e30de500496bff90ec93ed3096df91780cd1c7b36eb3"
+    },
+    {
+      "name": "Native formatting",
+      "command": "cargo fmt --all -- --check",
+      "result": "passed",
+      "log": "empty-focus-fmt.log",
+      "log_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    }
+  ],
+  "linux": {
+    "result": "passed; disconnected startup only",
+    "command": "scripts/native/linux-smoke.sh --out target/native-validation/foundation-linux-706bd635 -- \"$PWD/target/native-validation/cargo/debug/crew-desktop\"",
+    "binary_sha256": "d0379ba49bd2ae52828a7607badac3dcc57a0c6be04400876412ed694315b902",
+    "capture": "foundation-integration.png",
+    "capture_sha256": "583dc6f6d7650c6d92fba1a9c51896931ab2a384edbeb5c269d507e1888b6f07",
+    "window": "\nxwininfo: Window id: 0x200005 \"Team — Crew\"\n\n  Absolute upper-left X:  0\n  Absolute upper-left Y:  0\n  Relative upper-left X:  0\n  Relative upper-left Y:  0\n  Width: 1120\n  Height: 720\n  Depth: 32\n  Visual: 0x40\n  Visual Class: TrueColor\n  Border width: 0\n  Class: InputOutput\n  Colormap: 0x200001 (not installed)\n  Bit Gravity State: NorthWestGravity\n  Window Gravity State: NorthWestGravity\n  Backing Store State: NotUseful\n  Save Under State: no\n  Map State: IsViewable\n  Override Redirect State: no\n  Corners:  +0+0  -320+0  -320-240  +0-240\n  -geometry 1120x720+0+0\n\n",
+    "settings": "display=:1004\nwindow=0x200005\napp_pid=250822\nxvfb_pid=250807\nscreen=1440x960x24\ndpi=96\nGDK_SCALE=1\nGDK_DPI_SCALE=1\nGDK_BACKEND=x11\nGSK_RENDERER=cairo\nGDK_DEBUG=no-portals\n",
+    "versions": "GTK 4.22.4\nVTE 0.84.1\nGLib 2.88.3\nxwininfo 1.1.6\nVersion: ImageMagick 7.1.2-29 Q16-HDRI x86_64 b919b37fd:20260727 https://imagemagick.org\ndbus-run-session 1.16.2",
+    "app_log": "MESA-EGL: warning: DRI3 error: Could not get DRI3 device\nMESA-EGL: warning: Ensure your X server supports DRI3 to get accelerated rendering\n",
+    "app_log_note": "MESA DRI3 warnings expected with private Xvfb/Cairo; mapped window/capture passed.",
+    "cleanup": [
+      {
+        "role": "app_pid",
+        "pid": 250822,
+        "alive": false
+      },
+      {
+        "role": "xvfb_pid",
+        "pid": 250807,
+        "alive": false
+      }
+    ]
+  },
+  "independent_keyboard": {
+    "owner": "designer",
+    "evidence_commit": "841e165e0dfed357f836c8839fb2184346784e19",
+    "baseline_evidence_commit": "6fd9434fb7a293dc1cd02d9f3dac155f9dc7bf6f",
+    "message": "m-b9f386c5672b",
+    "binary_sha256": "8c109210360dff7788b021fae83b1ae07313669d34be9a3a6b9d638e4f8e49dc",
+    "real_atspi_assertions": [
+      "empty narrow detail: Destination: Tasks focused/showing/visible",
+      "Alt+Left main: Destination: Tasks focused/showing/visible",
+      "F1: Close focused/showing/visible",
+      "Escape: help removed, Destination: Tasks focused/showing/visible"
+    ],
+    "screen_reader_journey": false
+  },
+  "apple": {
+    "reviewed_source": "4479a30185f47672347c2d1e47e8660685b87734",
+    "files_byte_equal": 39,
+    "source_graph": "Apple shell source graph: 390 checks passed; 101 project objects, six targets, two shared schemes.\nStructural validation only. Apple compilation, simulator/device/UI execution: deferred by operator.\n",
+    "swift_parse_files": 13,
+    "swift_version": "5.10.1 Linux; parsing only",
+    "swift_parse_log": "<unknown>:0: warning: glibc not found for 'x86_64-pc-linux-gnu'; C stdlib may be unavailable\nSwift version 5.10.1 (swift-5.10.1-RELEASE)\nTarget: x86_64-pc-linux-gnu\n",
+    "manifest_dependencies": [],
+    "verification": "Apple verification deferred by operator",
+    "sdk_compile_typecheck_simulator_device_ui_tests_run": false
+  },
+  "web": {
+    "source": "fnv1a64:b1e2e05bd16fb63d",
+    "budgets": {
+      "P1": 230497,
+      "P2": 33906,
+      "P3": 332915,
+      "P4": 598004
+    },
+    "P1_remaining": 3,
+    "source_and_bundle_equal_accepted_root": true
+  },
+  "local_artifacts": "/home/nade/workspaces/personal/crew/.crew/worktrees/qa/target/native-validation/",
+  "not_run": [
+    "Connected native core/daemon/gateway/action/terminal flows",
+    "Full workspace behavioral suite; focused approved extraction/contracts used instead",
+    "Complete Linux screen-reader/Orca journeys; NSR-L03 menu/provider observation unclassified",
+    "Wayland/portal/installed distribution checks",
+    "Apple SwiftUI type checking, Xcode build/link, simulator/device/UI/VoiceOver/signing/distribution",
+    "Unchanged full web mock/live/performance matrix"
+  ],
+  "activation": "No active service/team restart. Rebuilt release image/dashboard reload remain separate; old demo daemon PID 1925176 operator gap."
+}
