@@ -47,7 +47,7 @@ export function TaskPanel(props: { id: string }) {
       <PanelHead title={`task ${props.id}`}>
         <button onClick={() => ui.setView("tasks")} title="the task graph (t)">graph</button>
       </PanelHead>
-      <p class="fetch-state" role="status">{task() && (loading() ? "Loading task details…" : error())}</p>
+      <p class="fetch-state" role="status">{task() && (loading() && !card() && !error() ? "Loading task details…" : error())}</p>
       <Show when={task()} fallback={<EmptyState title={loading() ? "Loading task details…" : "Task unavailable"} description={error() ?? waiting(link, "Loading…")} />}>
         {(t) => (
           <div class="pad scroll" tabindex="0" data-focus-first>
