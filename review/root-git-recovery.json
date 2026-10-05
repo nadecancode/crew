@@ -1,0 +1,290 @@
+{
+  "task": "root-git-recovery",
+  "date": "2026-10-05",
+  "status": "Read-only attribution and proposed repair; no root mutation by QA",
+  "captured": "2026-10-05T22:43:22.877Z",
+  "root": "/home/nade/workspaces/personal/crew",
+  "backup_directory": "/home/nade/workspaces/personal/crew/.crew/worktrees/qa/target/root-git-recovery/2026-10-05T22-43-22.875Z",
+  "stray": {
+    "oid": "e147418ab90a1d7f58d5735e182bca88e317187d",
+    "tree": "80de90521023aab35b427594ce3e71001c4ef92b",
+    "parent": "f3e9f2343934c665ec9a557688c3bcf4b5eaac4d",
+    "author": "t <t@t> 1791239303 -0500",
+    "committer": "t <t@t> 1791239303 -0500",
+    "message": "first"
+  },
+  "base": {
+    "oid": "f3e9f2343934c665ec9a557688c3bcf4b5eaac4d",
+    "tree": "baec4c7d4d4c3870b7029e3ba506697913650563",
+    "parent": "0198317b281e2bde0caf451eb5cdfb48094b3505",
+    "author": "qa <qa@crew.local> 1791232946 -0500",
+    "committer": "qa <qa@crew.local> 1791234782 -0500",
+    "message": "Retain real GTK shell runtime loader recovery evidence"
+  },
+  "tracked_parent_files": 619,
+  "stray_commit_changes": [
+    {
+      "path": "tracked.txt",
+      "before": null,
+      "after": {
+        "path": "tracked.txt",
+        "mode": "100644",
+        "oid": "587be6b4c3f93f93c489c0111bba5596147a26cb"
+      }
+    }
+  ],
+  "index_changes_vs_parent": [
+    {
+      "path": ".crew/config.toml",
+      "before": null,
+      "after": {
+        "path": ".crew/config.toml",
+        "mode": "100644",
+        "oid": "f0289d50958bdc54b88af0b0187f62085756dec2",
+        "stage": 0,
+        "ctime": "2026-10-05T22:28:23.000Z",
+        "mtime": "2026-10-05T22:28:23.000Z",
+        "size": 76
+      }
+    },
+    {
+      "path": "tracked.txt",
+      "before": null,
+      "after": {
+        "path": "tracked.txt",
+        "mode": "100644",
+        "oid": "587be6b4c3f93f93c489c0111bba5596147a26cb",
+        "stage": 0,
+        "ctime": "2026-10-05T22:28:23.000Z",
+        "mtime": "2026-10-05T22:28:23.000Z",
+        "size": 2
+      }
+    }
+  ],
+  "unmerged_index_entries": [],
+  "tracked_worktree_changes_vs_parent": [],
+  "fixture_paths_on_worktree": {
+    "config_exists": false,
+    "tracked_exists": false
+  },
+  "endpoint_fixture": {
+    "test": "endpoints::tests::files_others_can_write_and_files_from_the_repository_are_rejected",
+    "source": "crates/crew/src/endpoints.rs:1132",
+    "git_init_line": 1186,
+    "git_add_line": 1191,
+    "index_oid": "f0289d50958bdc54b88af0b0187f62085756dec2",
+    "blob_size": 76,
+    "literal_matches": true,
+    "value_redacted": true
+  },
+  "sandbox_fixture": {
+    "test": "daemon::sandbox::tests::a_new_worktree_is_filled_through_the_helper_and_made_without_it",
+    "source": "crates/crew/src/daemon/sandbox.rs:1247",
+    "git_init_line": 1262,
+    "git_add_line": 1264,
+    "git_commit_line": 1265,
+    "index_oid": "587be6b4c3f93f93c489c0111bba5596147a26cb",
+    "blob_matches": true
+  },
+  "objects_verified": 90,
+  "metadata_backup_files": 148,
+  "snapshot_files": [
+    {
+      "path": "HEAD",
+      "exists": true,
+      "size": 21,
+      "mode": "644",
+      "mtime": "2026-10-02T13:57:10.964Z",
+      "sha256": "28d25bf82af4c0e2b72f50959b2beb859e3e60b9630a5e8c603dad4ddb2b6e80"
+    },
+    {
+      "path": "refs/heads/main",
+      "exists": false
+    },
+    {
+      "path": "index",
+      "exists": true,
+      "size": 65202,
+      "mode": "644",
+      "mtime": "2026-10-05T22:35:12.852Z",
+      "sha256": "d4b4ff6e5ff647f3cad58aa0efaaedf24016612cade227035a0bdf43729f9619"
+    },
+    {
+      "path": "config",
+      "exists": true,
+      "size": 92,
+      "mode": "644",
+      "mtime": "2026-10-05T22:28:23.713Z",
+      "sha256": "cfe7ba1238c9a78be7535d7c63bcaf5a4d5011d46b07c9b45d3bbf7d6c312dfe"
+    },
+    {
+      "path": "packed-refs",
+      "exists": true,
+      "size": 106632,
+      "mode": "644",
+      "mtime": "2026-10-05T22:28:23.246Z",
+      "sha256": "a8eb0b3206d4930552739f5389f95071bd97d4b8a5a0052c40c7ec3f8950d925"
+    },
+    {
+      "path": "logs/HEAD",
+      "exists": true,
+      "size": 55720,
+      "mode": "644",
+      "mtime": "2026-10-05T22:28:23.188Z",
+      "sha256": "f7dbf5ffaa6e36ed5547ca86ce77a2728cdf970d4fcfd99132d5471c7bf27d34"
+    },
+    {
+      "path": "logs/refs/heads/main",
+      "exists": true,
+      "size": 55720,
+      "mode": "644",
+      "mtime": "2026-10-05T22:28:23.188Z",
+      "sha256": "f7dbf5ffaa6e36ed5547ca86ce77a2728cdf970d4fcfd99132d5471c7bf27d34"
+    },
+    {
+      "path": "ORIG_HEAD",
+      "exists": true,
+      "size": 41,
+      "mode": "644",
+      "mtime": "2026-10-05T21:21:47.812Z",
+      "sha256": "59423b9a0da17fb2b51ac750836add76962c7870a21ceedb85a39a5fb5689b6f"
+    },
+    {
+      "path": "FETCH_HEAD",
+      "exists": true,
+      "size": 262,
+      "mode": "644",
+      "mtime": "2026-10-04T05:44:35.556Z",
+      "sha256": "bcab7514359e0450abf0ba6be2675df0e1aa1fc7d85c5fab79ec376878b55a81"
+    },
+    {
+      "path": "shallow",
+      "exists": false
+    }
+  ],
+  "proposed_index": {
+    "original_sha256": "d4b4ff6e5ff647f3cad58aa0efaaedf24016612cade227035a0bdf43729f9619",
+    "proposed_sha256": "54928bc6fdcdc8db459ef36b0e599e06f6d0c424ea06b2a4cee09f32b6a2f396",
+    "original_entries": 621,
+    "proposed_entries": 619,
+    "removed": [
+      {
+        "path": ".crew/config.toml",
+        "oid": "f0289d50958bdc54b88af0b0187f62085756dec2"
+      },
+      {
+        "path": "tracked.txt",
+        "oid": "587be6b4c3f93f93c489c0111bba5596147a26cb"
+      }
+    ],
+    "dropped_cache_extensions": [
+      "TREE"
+    ],
+    "all_other_encoded_entries_identical": true,
+    "worktree_or_root_metadata_written": false
+  },
+  "reviewer_admission": "m-cc4900056fa8",
+  "attribution_correction": "m-e97a49004775",
+  "replaced_claim": "Host contention was an incorrect first attribution; inherited exported GIT_DIR caused the test writes.",
+  "logs": [
+    {
+      "source": "/tmp/claude-1000/-home-nade-workspaces-personal-crew--crew-worktrees-reviewer/1426380e-429c-4f95-a931-4ce46dc428c0/scratchpad/found2.log",
+      "exists": true,
+      "size": 1360,
+      "mtime": "2026-10-05T22:29:28.226Z",
+      "sha256": "8492b934fcf7d2c9134ec0c20c2f739a0d0dceb63e00fc7becccbca165db523e",
+      "copied": "/home/nade/workspaces/personal/crew/.crew/worktrees/qa/target/root-git-recovery/2026-10-05T22-43-22.875Z/reviewer/found2.log",
+      "relevant": [
+        "test daemon::sandbox::tests::a_new_worktree_is_filled_through_the_helper_and_made_without_it ... FAILED",
+        "test daemon::sandbox::tests::an_agents_jj_does_all_its_work_in_its_sandbox_and_the_helper_integrates ... FAILED",
+        "thread 'daemon::sandbox::tests::a_new_worktree_is_filled_through_the_helper_and_made_without_it' (298713) panicked at crates/crew/src/daemon/sandbox.rs:1282:10:",
+        "thread 'daemon::sandbox::tests::an_agents_jj_does_all_its_work_in_its_sandbox_and_the_helper_integrates' (299160) panicked at crates/crew/src/daemon/sandbox.rs:2256:9:",
+        "test result: FAILED. 476 passed; 2 failed; 0 ignored; 0 measured; 0 filtered out; finished in 20.68s"
+      ]
+    },
+    {
+      "source": "/tmp/claude-1000/-home-nade-workspaces-personal-crew--crew-worktrees-reviewer/1426380e-429c-4f95-a931-4ce46dc428c0/tasks/brwvbnhp6.output",
+      "exists": true,
+      "size": 94,
+      "mtime": "2026-10-05T22:29:28.257Z",
+      "sha256": "616cf50461a9cdf43d9d4aa5b3eacce0a89733a8687955c46f464e3ba31573db",
+      "copied": "/home/nade/workspaces/personal/crew/.crew/worktrees/qa/target/root-git-recovery/2026-10-05T22-43-22.875Z/reviewer/brwvbnhp6.output",
+      "relevant": []
+    }
+  ],
+  "qa_git_overrides": {
+    "GIT_DIR": false,
+    "GIT_WORK_TREE": false,
+    "GIT_INDEX_FILE": false
+  },
+  "root_worktree_and_metadata_written_by_qa": false,
+  "repair": {
+    "actor": "orchestrator only after independent check",
+    "expected_main": "e147418ab90a1d7f58d5735e182bca88e317187d",
+    "recovered_main": "f3e9f2343934c665ec9a557688c3bcf4b5eaac4d",
+    "retention_ref": "refs/crew-recovery/20261005-leaked-git-dir-e147418",
+    "candidate_index": "/home/nade/workspaces/personal/crew/.crew/worktrees/qa/target/root-git-recovery/2026-10-05T22-43-22.875Z/proposed-index",
+    "exclusive_index_lock": true,
+    "ref_transaction_compare_and_swap": true,
+    "index_only_changes": [
+      ".crew/config.toml",
+      "tracked.txt"
+    ],
+    "working_tree_config_unknown_files": "untouched",
+    "foundation_landing": "Separate reviewed exact9da898dd, after recovery verification"
+  },
+  "verification_pending": [
+    "Orchestrator applies bounded repair",
+    "Read-only post-repair verification"
+  ],
+  "prevention": {
+    "qa": "scripts/native/** test runners clear Git3 plus Crew3",
+    "runtime_test_owner": "Scoped sandbox.rs/endpoints.rs raw fixture constructors; assignment required",
+    "existing_production_git_builder_sanitizes_three_overrides": true,
+    "no_production_or_test_source_changed_by_recovery_card": true,
+    "task": "fixture-git-isolation",
+    "required_unsets": [
+      "GIT_DIR",
+      "GIT_WORK_TREE",
+      "GIT_INDEX_FILE",
+      "GIT_COMMON_DIR",
+      "GIT_OBJECT_DIRECTORY",
+      "GIT_ALTERNATE_OBJECT_DIRECTORIES",
+      "CREW_IDENTITY",
+      "CREW_SOCKET",
+      "CREW_LAUNCH"
+    ],
+    "archive_rule": "Explicit per-command --git-dir; never export across tests."
+  },
+  "root_metadata_guard": [
+    {
+      "path": "HEAD",
+      "sha256": "28d25bf82af4c0e2b72f50959b2beb859e3e60b9630a5e8c603dad4ddb2b6e80",
+      "unchanged": true
+    },
+    {
+      "path": "index",
+      "sha256": "d4b4ff6e5ff647f3cad58aa0efaaedf24016612cade227035a0bdf43729f9619",
+      "unchanged": true
+    },
+    {
+      "path": "config",
+      "sha256": "cfe7ba1238c9a78be7535d7c63bcaf5a4d5011d46b07c9b45d3bbf7d6c312dfe",
+      "unchanged": true
+    },
+    {
+      "path": "packed-refs",
+      "sha256": "a8eb0b3206d4930552739f5389f95071bd97d4b8a5a0052c40c7ec3f8950d925",
+      "unchanged": true
+    }
+  ],
+  "independent_proposed_index_verification": {
+    "message": "m-2f54c25af464",
+    "verified_tree": "baec4c7d4d4c3870b7029e3ba506697913650563",
+    "entries": 619,
+    "fixture_paths_absent": true,
+    "root_index_sha256_unchanged": true,
+    "method": "Clean env, explicit private GIT_INDEX_FILE, Git write-tree; no ref/root-index/worktree/config change; a content-addressed tree object may be written.",
+    "repair_plan_approved": true
+  }
+}
