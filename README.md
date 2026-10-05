@@ -856,6 +856,7 @@ are never rewritten:
 | `limits` | Fallback, reset/retry times, context pressure, and queued compaction |
 | `disconnected` | Cached evidence ready for the `disconnect` control |
 | `multi` | Running, stopped, incompatible, unreachable, and unjoined workspaces |
+| `parked` | One architect with independent Working and two parked Waiting cards; `step` submits independent work for review, then resumes the older card |
 
 Scenario clocks are fixed and activity is off. Type `step` in the mock's
 terminal for one controller update; `--activity` opts into timed updates.

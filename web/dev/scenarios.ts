@@ -5,11 +5,48 @@ import type { Handler, Mock, MockConn, MockOptions, MockWorkspace } from "./mock
 import { MESSAGE_TYPE, TASK_STATUS } from "../src/protocol.ts";
 import type { Agent, Event, Message, Task } from "../src/protocol.ts";
 
-export const SCENARIO_NAMES = ["baseline", "busy", "attention", "empty", "long-text", "limits", "disconnected", "multi"] as const;
+export const SCENARIO_NAMES = ["baseline", "busy", "attention", "empty", "long-text", "limits", "disconnected", "multi", "parked"] as const;
 export type ScenarioName = (typeof SCENARIO_NAMES)[number];
 export const SCENARIO_TIME = 1_760_000_000_000;
 export const LONG_TEXT = "Preserve checkout compatibility across currencies, retries, and reconciliation. 日本語の請求明細 · café · مرحبًا · 👩🏽‍💻. ";
 export const QUESTION_ID = "m-scenario-operator-question";
+export const PARKED_TASKS = { older: "parked-old", current: "current", newer: "parked-new" } as const;
+
+function seedParked(ws: MockWorkspace, now: number): void {
+  const agent = ws.state.agents.find((a) => !a.orchestrator && !a.parent);
+  if (!agent) throw new Error("The parked scenario needs a worker in its fixture");
+  for (const other of [...ws.state.agents]) if (!other.orchestrator && other.id !== agent.id) ws.push({ kind: "agent_removed", data: { id: other.id } });
+  // Initial fixture replacement happens before subscription; v6 has no task
+  // deletion push. Subsequent phases update these same three cards by ID.
+  for (const key of ["tasks", "messages", "events", "questions"] as const) ws.state[key].splice(0);
+  const task = (id: string, title: string, status: Task["status"], age: number, progress: number): Task => ({
+    id, title, description: "Keep the pending card inspectable while independent architecture work continues.",
+    status, assigned_agent: agent.id, dependencies: [], reviewer: "orchestrator",
+    created_at: now - 10_000 - age, started_at: now - age, completed_at: null,
+    progress, note: status === "waiting" ? "Waiting for teammate feedback." : null,
+    result: null, timeout_secs: null, artifacts: [],
+  });
+  const current = task(PARKED_TASKS.current, "Prepare independent storage design", "working", 2000, 37);
+  for (const t of [task(PARKED_TASKS.older, "Plan parked API contract", "waiting", 3000, 19), current, task(PARKED_TASKS.newer, "Plan parked migration", "waiting", 1000, 66)]) ws.push({ kind: "task", data: t });
+  ws.push({ kind: "agent", data: { ...agent, role: "Architecture", task: current.title, status: "working", activity: "Preparing the independent storage design", progress: 37, paused: false, limit: null, error: null, block_kind: null, inbox_unread: 0, inbox_total: 0, outbox_total: 0 } });
+  ws.push({ kind: "session", data: { ...ws.state.session, objective: "Continue independent architecture work while earlier decisions are pending.", quotas: [], sandbox: "required" } });
+}
+
+function advanceParked(mock: Mock): void {
+  const current = mock.state.tasks.find((t) => t.id === PARKED_TASKS.current);
+  const older = mock.state.tasks.find((t) => t.id === PARKED_TASKS.older);
+  const newer = mock.state.tasks.find((t) => t.id === PARKED_TASKS.newer);
+  const agent = mock.state.agents.find((a) => a.id === current?.assigned_agent);
+  if (!current || !older || !newer || !agent) return;
+  if (current.status === "working") {
+    mock.push({ kind: "task", data: { ...current, status: "review", progress: 100, result: "Independent storage design submitted for review." } });
+    mock.push({ kind: "agent", data: { ...agent, status: "waiting", task: newer.title, progress: newer.progress, activity: "Waiting for feedback on parked architecture work" } });
+  } else if (current.status === "review") {
+    mock.push({ kind: "task", data: { ...current, status: "done", completed_at: mock.now() } });
+    mock.push({ kind: "task", data: { ...older, status: "working", note: "Feedback received; continuing the original API contract." } });
+    mock.push({ kind: "agent", data: { ...agent, status: "working", task: older.title, progress: older.progress, activity: "Continuing the earlier API contract", last_activity_at: mock.now() } });
+  }
+}
 
 /** Add multi-workspace defaults only when the caller did not supply its own. */
 export function scenarioOptions(options: MockOptions): MockOptions {
@@ -105,6 +142,7 @@ export function seedScenario(mock: Mock, name: ScenarioName): void {
   if (name === "baseline") return;
   for (const ws of mock.workspaces) {
     if (ws.status !== "running") continue;
+    if (name === "parked") { seedParked(ws, now); continue; }
     if (name === "empty") {
       // There is no task/message removal push in v6. These are initial seeds,
       // not runtime deletions; no subscriber has seen this state yet.
@@ -139,6 +177,7 @@ export function seedScenario(mock: Mock, name: ScenarioName): void {
 
 /** One explicit live step. No scenario installs a timer by default. */
 export function advanceScenario(mock: Mock, name: ScenarioName): void {
+  if (name === "parked") { advanceParked(mock); return; }
   if (name === "disconnected") {
     mock.setStatus(mock.workspace().id, "unreachable", "Mock daemon socket unavailable; cached evidence retained.");
     for (const c of mock.workspace().connections) c.drop();

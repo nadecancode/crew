@@ -2,7 +2,7 @@
 import { readFileSync } from "node:fs";
 import { expect, test } from "vitest";
 import { startMock } from "../dev/mock.ts";
-import { advanceScenario, SCENARIO_NAMES, SCENARIO_TIME } from "../dev/scenarios.ts";
+import { advanceScenario, PARKED_TASKS, SCENARIO_NAMES, SCENARIO_TIME } from "../dev/scenarios.ts";
 import { decodeSnapshot, decodeWorkspaces, TASK_STATUS } from "../src/protocol.ts";
 import { FIXTURES } from "./fixtures";
 
@@ -33,6 +33,34 @@ test.each(SCENARIO_NAMES)("%s scenario is deterministic v6 data; generated fixtu
   } finally {
     await Promise.all([first.stop(), second.stop()]);
   }
+});
+
+test("parked architecture cards retain identity and original start through review and resumption", async () => {
+  const mock = await startMock({ scenario: "parked", fixture: "subagents" });
+  try {
+    const worker = () => mock.state.agents.find((a) => !a.orchestrator)!;
+    const read = (id: string) => mock.state.tasks.find((t) => t.id === id)!;
+    const originalStart = read(PARKED_TASKS.older).started_at;
+    const newer = structuredClone(read(PARKED_TASKS.newer));
+    expect(mock.state.agents.filter((a) => !a.orchestrator)).toHaveLength(1);
+    expect(mock.state.tasks.map((t) => t.assigned_agent)).toEqual([worker().id, worker().id, worker().id]);
+    expect(mock.state.tasks.filter((t) => t.status === "working").map((t) => t.id)).toEqual([PARKED_TASKS.current]);
+    expect(worker().task).toBe(read(PARKED_TASKS.current).title);
+    advanceScenario(mock, "parked");
+    expect(read(PARKED_TASKS.current).status).toBe("review");
+    expect(mock.state.tasks.filter((t) => t.status === "working")).toEqual([]);
+    expect(worker().task).toBe(newer.title);
+    advanceScenario(mock, "parked");
+    expect(read(PARKED_TASKS.current).status).toBe("done");
+    expect(mock.state.tasks.filter((t) => t.status === "working").map((t) => t.id)).toEqual([PARKED_TASKS.older]);
+    expect(read(PARKED_TASKS.older).started_at).toBe(originalStart);
+    expect(read(PARKED_TASKS.newer)).toEqual(newer);
+    expect(worker().task).toBe(read(PARKED_TASKS.older).title);
+    expect(worker().progress).toBe(read(PARKED_TASKS.older).progress);
+    const final = decodeSnapshot(mock.snapshot());
+    advanceScenario(mock, "parked");
+    expect(decodeSnapshot(mock.snapshot())).toEqual(final);
+  } finally { await mock.stop(); }
 });
 
 test("activity is explicit and changes the same state later snapshots read", async () => {
