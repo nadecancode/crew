@@ -70,10 +70,11 @@ are preserved. This audit does not classify them as disposable. No root ref,
 index, config, worktree file or service was modified by QA. HEAD/index/config/
 packed-ref hashes remained unchanged during the read-only audit.
 
-## Concrete repair proposal for the orchestrator
+## Independently checked repair and outcome
 
-This proposed plan requires independent checking; QA has not executed it. Do not
-perform a broad reset, checkout, restore, clean or worktree rewrite.
+The orchestrator applied the independently checked plan below, then separately
+fast-forwarded the approved foundation. QA performed only read-only post-checks.
+No broad reset, checkout, restore, clean or worktree rewrite was used for repair.
 
 The private `proposed-index` contains the original encoded entries minus only
 `.crew/config.toml` and `tracked.txt`; the stale optional TREE cache is dropped
@@ -87,11 +88,21 @@ modes and blob IDs against `f3e9f234`, and leave the root index untouched.
 Reviewer `m-2f54c25af464` completed that check with a clean environment and
 explicit private index. Git computed the exact parent tree
 `baec4c7d4d4c3870b7029e3ba506697913650563`; it found 619 entries and neither
-fixture path. Root index hash remained unchanged. `write-tree` may write a
-content-addressed tree object; this check changed no ref, root index or
-working-tree/config content. The reviewer also approved the guarded repair
-proposal. Root application and subsequent verification remain unperformed
-at this report checkpoint.
+fixture path. Root index hash remained unchanged. The check changed no ref,
+root index or working-tree/config content, but `write-tree` rewrote the
+**private proposed index** to add its valid TREE cache. This changed 62,344
+bytes / SHA-256 `54928bc6…` to 65,063 bytes / SHA-256 `2aa50720…` and changed
+its file mode from 0600 to 0644. The initial repair preflight correctly stopped
+on that changed hash before acquiring a lock or changing a ref. Reviewer
+`m-6536e5f68db6` confirmed the cause; `write-tree` is not a read-only private-index
+validation. Future read-only checks use `ls-files -s` or `diff-index --cached`.
+
+QA independently decoded the revised candidate: all 619 retained encoded entries
+are byte-identical to the original index entries, its footer is valid, and its
+2,711-byte TREE extension identifies the exact parent tree. The final revised
+candidate is retained separately as `proposed-index-reviewed-2aa50720` under the
+private backup directory, mode 0600. The original no-cache checksum remains in
+the historical proof; only the verified final checksum below guarded application.
 
 | Guard | Expected value |
 | --- | --- |
@@ -99,7 +110,7 @@ at this report checkpoint.
 | Root main | `e147418ab90a1d7f58d5735e182bca88e317187d` |
 | Parent/recovery main | `f3e9f2343934c665ec9a557688c3bcf4b5eaac4d` |
 | Current root index SHA-256 | `d4b4ff6e5ff647f3cad58aa0efaaedf24016612cade227035a0bdf43729f9619` |
-| Proposed index SHA-256 | `54928bc6fdcdc8db459ef36b0e599e06f6d0c424ea06b2a4cee09f32b6a2f396` |
+| Verified final proposed index SHA-256 | `2aa507205736a8f5bd62232049c233a15993e477f6afcb07a2faa534beb86920` |
 | Current local Git config SHA-256 | `cfe7ba1238c9a78be7535d7c63bcaf5a4d5011d46b07c9b45d3bbf7d6c312dfe` |
 
 1. Preserve the original snapshots above and independently validate the private
@@ -142,6 +153,25 @@ at this report checkpoint.
    orchestrator verifies isolation. The already reviewed foundation fast-forward
    to exact `9da898dd` is a separate subsequent landing.
 
+Orchestrator `m-5b0ed4df39d3` records the successful compare-and-swap transaction
+and owned-lock atomic index installation. Main first returned to `f3e9f234`;
+the installed index had the final `2aa50720…` hash, the configuration hash was
+unchanged, both fixture paths remained absent and all 619 baseline working-tree
+files/modes remained unchanged. The backup ref retains the stray commit.
+The subsequent foundation fast-forward is separately recorded in
+`m-e04e5ab42a44` and both root reflogs.
+
+QA's read-only post-audit at 2026-10-05 18:00:09 -0500 independently confirms
+root main exactly `9da898ddd07e92d7715791f998a1993c49a773b7`, retained `e147418`,
+and all 744 final index entries and working-tree bytes/modes equal that reviewed
+commit. No staged, unmerged, missing or tracked-content difference remains;
+no index lock or fixture path exists. Local config still hashes to `cfe7ba12…`.
+The landed foundation's index hashes to
+`424d235269d7fe9c4919d81bafd930aca5d53e843f76928309eb4b3c736a9d70`.
+Metadata was stable during the post-audit. No operator listener or team restart
+occurred. The machine record retains this post-audit and the earlier repair
+guards separately.
+
 ## Regression prevention boundary
 
 Future fixture commands must clear the Git repository/common/object/index
@@ -157,5 +187,5 @@ against the operator root or expand this recovery into a production rewrite.
 
 QA owns `scripts/native/**` runner changes; `fixture-git-isolation` tracks the
 bounded raw test-constructor hardening. The present card changes no production
-or test source. Native source work
-can continue independently while unsafe Git-fixture runs remain paused.
+or test source. Isolated tests may resume under the orchestrator's cleared-env
+rule. Native source work continues independently.

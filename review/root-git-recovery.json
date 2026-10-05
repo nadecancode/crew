@@ -1,7 +1,7 @@
 {
   "task": "root-git-recovery",
   "date": "2026-10-05",
-  "status": "Read-only attribution and proposed repair; no root mutation by QA",
+  "status": "Orchestrator guarded repair applied; QA read-only post-audit passes; approved foundation separately landed.",
   "captured": "2026-10-05T22:43:22.877Z",
   "root": "/home/nade/workspaces/personal/crew",
   "backup_directory": "/home/nade/workspaces/personal/crew/.crew/worktrees/qa/target/root-git-recovery/2026-10-05T22-43-22.875Z",
@@ -223,7 +223,7 @@
     "expected_main": "e147418ab90a1d7f58d5735e182bca88e317187d",
     "recovered_main": "f3e9f2343934c665ec9a557688c3bcf4b5eaac4d",
     "retention_ref": "refs/crew-recovery/20261005-leaked-git-dir-e147418",
-    "candidate_index": "/home/nade/workspaces/personal/crew/.crew/worktrees/qa/target/root-git-recovery/2026-10-05T22-43-22.875Z/proposed-index",
+    "candidate_index": "/home/nade/workspaces/personal/crew/.crew/worktrees/qa/target/root-git-recovery/2026-10-05T22-43-22.875Z/proposed-index-reviewed-2aa50720",
     "exclusive_index_lock": true,
     "ref_transaction_compare_and_swap": true,
     "index_only_changes": [
@@ -231,12 +231,12 @@
       "tracked.txt"
     ],
     "working_tree_config_unknown_files": "untouched",
-    "foundation_landing": "Separate reviewed exact9da898dd, after recovery verification"
+    "foundation_landing": "Separate reviewed exact9da898dd, after recovery verification",
+    "final_index_hash_at_recovery": "2aa507205736a8f5bd62232049c233a15993e477f6afcb07a2faa534beb86920",
+    "applied_message": "m-5b0ed4df39d3",
+    "foundation_landed_message": "m-e04e5ab42a44"
   },
-  "verification_pending": [
-    "Orchestrator applies bounded repair",
-    "Read-only post-repair verification"
-  ],
+  "verification_pending": [],
   "prevention": {
     "qa": "scripts/native/** test runners clear Git3 plus Crew3",
     "runtime_test_owner": "Scoped sandbox.rs/endpoints.rs raw fixture constructors; assignment required",
@@ -284,7 +284,71 @@
     "entries": 619,
     "fixture_paths_absent": true,
     "root_index_sha256_unchanged": true,
-    "method": "Clean env, explicit private GIT_INDEX_FILE, Git write-tree; no ref/root-index/worktree/config change; a content-addressed tree object may be written.",
-    "repair_plan_approved": true
+    "method": "Clean env, explicit private GIT_INDEX_FILE, Git write-tree; rewrote private candidate TREE cache/mode, but no root-ref/index/worktree/config change.",
+    "repair_plan_approved": true,
+    "private_index_rewritten": true
+  },
+  "proposed_index_final": {
+    "original_sha256": "d4b4ff6e5ff647f3cad58aa0efaaedf24016612cade227035a0bdf43729f9619",
+    "initial_no_cache_sha256": "54928bc6fdcdc8db459ef36b0e599e06f6d0c424ea06b2a4cee09f32b6a2f396",
+    "final_sha256": "2aa507205736a8f5bd62232049c233a15993e477f6afcb07a2faa534beb86920",
+    "final_size": 65063,
+    "retained_final": "/home/nade/workspaces/personal/crew/.crew/worktrees/qa/target/root-git-recovery/2026-10-05T22-43-22.875Z/proposed-index-reviewed-2aa50720",
+    "all_other_encoded_entries_identical": true,
+    "entries": 619,
+    "checksum_valid": true,
+    "extensions": [
+      {
+        "name": "TREE",
+        "size": 2711,
+        "tree": {
+          "name": "",
+          "counts": "619 6",
+          "oid": "baec4c7d4d4c3870b7029e3ba506697913650563"
+        }
+      }
+    ],
+    "validation_side_effect": "Reviewer git write-tree added valid TREE cache to private candidate; root refs/index/worktree unchanged.",
+    "reviewer_admission": "m-6536e5f68db6",
+    "root_index_note": "The current root index differs because the orchestrator had already repaired then landed the foundation when QA decoded the final private candidate."
+  },
+  "post_audit": {
+    "captured": "2026-10-05T23:00:09.706Z",
+    "head": "ref: refs/heads/main",
+    "main": "9da898ddd07e92d7715791f998a1993c49a773b7",
+    "retention_ref": "refs/crew-recovery/20261005-leaked-git-dir-e147418",
+    "retained_commit": "e147418ab90a1d7f58d5735e182bca88e317187d",
+    "expected_commit": "9da898ddd07e92d7715791f998a1993c49a773b7",
+    "expected_tree": "74d19812d37bff0d743124d21895c43524e5e524",
+    "index_sha256": "424d235269d7fe9c4919d81bafd930aca5d53e843f76928309eb4b3c736a9d70",
+    "index_entries": 744,
+    "expected_entries": 744,
+    "index_differences": [],
+    "missing_index_entries": [],
+    "working_tree_differences": [],
+    "fixture_paths_absent": true,
+    "index_lock_absent": true,
+    "config_sha256": "cfe7ba1238c9a78be7535d7c63bcaf5a4d5011d46b07c9b45d3bbf7d6c312dfe",
+    "config_unchanged": true,
+    "metadata_stable_during_read": true,
+    "reflogs": [
+      {
+        "path": "logs/HEAD",
+        "tail": [
+          "f3e9f2343934c665ec9a557688c3bcf4b5eaac4d e147418ab90a1d7f58d5735e182bca88e317187d t <t@t> 1791239303 -0500\tcommit: first",
+          "e147418ab90a1d7f58d5735e182bca88e317187d f3e9f2343934c665ec9a557688c3bcf4b5eaac4d nade <i@nade.me> 1791241036 -0500\tRecover isolated fixture metadata after inherited GIT_DIR",
+          "f3e9f2343934c665ec9a557688c3bcf4b5eaac4d 9da898ddd07e92d7715791f998a1993c49a773b7 nade <i@nade.me> 1791241058 -0500\tmerge 9da898ddd07e92d7715791f998a1993c49a773b7: Fast-forward"
+        ]
+      },
+      {
+        "path": "logs/refs/heads/main",
+        "tail": [
+          "f3e9f2343934c665ec9a557688c3bcf4b5eaac4d e147418ab90a1d7f58d5735e182bca88e317187d t <t@t> 1791239303 -0500\tcommit: first",
+          "e147418ab90a1d7f58d5735e182bca88e317187d f3e9f2343934c665ec9a557688c3bcf4b5eaac4d nade <i@nade.me> 1791241036 -0500\tRecover isolated fixture metadata after inherited GIT_DIR",
+          "f3e9f2343934c665ec9a557688c3bcf4b5eaac4d 9da898ddd07e92d7715791f998a1993c49a773b7 nade <i@nade.me> 1791241058 -0500\tmerge 9da898ddd07e92d7715791f998a1993c49a773b7: Fast-forward"
+        ]
+      }
+    ],
+    "root_writes_by_qa": false
   }
 }
