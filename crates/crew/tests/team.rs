@@ -455,6 +455,218 @@ fn the_mcp_bridge_exposes_the_tools_and_sends_as_its_agent() {
 // ---------------------------------------------------------------------------
 
 #[test]
+fn new_ready_cards_start_while_an_unrelated_worker_is_held() {
+    let s = Session::new();
+    s.run(&s.team(
+        "parallel-roles",
+        vec![
+            agent(
+                "worker",
+                "implementation",
+                &[
+                    "--on-task=wait-message operator",
+                    "--on-task=done implemented",
+                ],
+            ),
+            agent(
+                "designer",
+                "design",
+                &["--on-task=wait-message operator", "--on-task=done designed"],
+            ),
+            agent("qa", "verification", &["--on-task=done verified"]),
+        ],
+        vec![task("implementation", "worker", &[])],
+    ));
+    s.wait_for("the worker to receive implementation", || {
+        s.agent_cmd(&["output", "worker"])
+            .contains("Task implementation is yours")
+    });
+
+    // Add work to an idle role after another member is already working.
+    // No worker completion or orchestrator turn is needed to dispatch it.
+    let ws = s.workspace.to_string_lossy().into_owned();
+    for id in ["design", "design-next"] {
+        s.ok(&["task", "add", "--id", id, "--agent", "designer", "-C", &ws]);
+    }
+    s.ok(&[
+        "task",
+        "add",
+        "--id",
+        "verify",
+        "--agent",
+        "qa",
+        "--depends-on",
+        "implementation,design,design-next",
+        "-C",
+        &ws,
+    ]);
+    let concurrent = s.wait("design dispatched without releasing the worker", |snap| {
+        find_task(snap, "design").status == TaskStatus::Working
+            && find_task(snap, "design-next").status == TaskStatus::Ready
+    });
+    assert_eq!(
+        find_task(&concurrent, "implementation").status,
+        TaskStatus::Working
+    );
+    assert_eq!(find_task(&concurrent, "verify").status, TaskStatus::Queued);
+    assert!(find_task(&concurrent, "design-next").started_at.is_none());
+    assert!(find_task(&concurrent, "verify").started_at.is_none());
+    s.wait_for(
+        "the designer to receive design while the worker is held",
+        || {
+            s.agent_cmd(&["output", "designer"])
+                .contains("Task design is yours")
+        },
+    );
+
+    s.send("designer", "finish design");
+    let next = s.wait("the designer to move to its next card", |snap| {
+        find_task(snap, "design").status == TaskStatus::Done
+            && find_task(snap, "design-next").status == TaskStatus::Working
+    });
+    assert_eq!(
+        find_task(&next, "implementation").status,
+        TaskStatus::Working
+    );
+    assert_eq!(find_task(&next, "verify").status, TaskStatus::Queued);
+    s.send("worker", "finish implementation");
+    let last_dependency = s.wait("implementation done with design-next still open", |snap| {
+        find_task(snap, "implementation").status == TaskStatus::Done
+    });
+    assert_eq!(
+        find_task(&last_dependency, "design-next").status,
+        TaskStatus::Working
+    );
+    assert_eq!(
+        find_task(&last_dependency, "verify").status,
+        TaskStatus::Queued
+    );
+    s.send("designer", "finish design-next");
+    let done = s.wait_all_done();
+    assert!(
+        find_task(&done, "design").started_at.unwrap()
+            < find_task(&done, "implementation").completed_at.unwrap()
+    );
+    assert!(
+        find_task(&done, "design-next").started_at.unwrap()
+            >= find_task(&done, "design").completed_at.unwrap()
+    );
+    for id in ["implementation", "design", "design-next"] {
+        assert!(
+            find_task(&done, "verify").started_at.unwrap()
+                >= find_task(&done, id).completed_at.unwrap()
+        );
+    }
+    let messages = s.messages();
+    for id in ["implementation", "design", "design-next", "verify"] {
+        assert_eq!(
+            messages
+                .iter()
+                .filter(|m| { m.kind == MessageType::Task && m.metadata["task_id"] == id })
+                .count(),
+            1,
+            "{id} dispatched more than once"
+        );
+    }
+}
+
+#[test]
+fn independent_cards_run_during_review_while_approval_dependents_wait() {
+    let s = Session::new();
+    let mut team = s.team(
+        "parallel-review",
+        vec![
+            agent(
+                "author",
+                "implementation",
+                &[
+                    "--on-task=wait-message operator",
+                    "--on-task=done implemented",
+                ],
+            ),
+            agent(
+                "critic",
+                "review",
+                &[
+                    "--on-review=wait-message operator",
+                    r#"--on-review=tool review_submit {"task_id":"first","approve":true,"comments":"reviewed"}"#,
+                ],
+            ),
+            agent(
+                "designer",
+                "design",
+                &["--on-task=wait-message operator", "--on-task=done designed"],
+            ),
+        ],
+        vec![
+            task("first", "author", &[]),
+            task("second", "author", &[]),
+            task("approved-design", "designer", &["first"]),
+        ],
+    );
+    team.tasks[0].reviewer = Some("critic".into());
+    s.run(&team);
+    s.wait_for("the author to receive first", || {
+        s.agent_cmd(&["output", "author"])
+            .contains("Task first is yours")
+    });
+    s.send("author", "submit first for review");
+    s.wait_for("the critic to receive the review", || {
+        s.agent_cmd(&["output", "critic"])
+            .contains("review_request from author")
+    });
+    let ws = s.workspace.to_string_lossy().into_owned();
+    s.ok(&[
+        "task",
+        "add",
+        "--id",
+        "preparation",
+        "--agent",
+        "designer",
+        "-C",
+        &ws,
+    ]);
+    let concurrent = s.wait("independent cards running beside the held review", |snap| {
+        find_task(snap, "second").status == TaskStatus::Working
+            && find_task(snap, "preparation").status == TaskStatus::Working
+    });
+    assert_eq!(find_task(&concurrent, "first").status, TaskStatus::Review);
+    assert_eq!(
+        find_task(&concurrent, "approved-design").status,
+        TaskStatus::Queued
+    );
+    assert!(find_task(&concurrent, "approved-design")
+        .started_at
+        .is_none());
+    s.wait_for("the designer to receive independent preparation", || {
+        s.agent_cmd(&["output", "designer"])
+            .contains("Task preparation is yours")
+    });
+    s.send("designer", "finish preparation");
+    let prepared = s.wait("preparation to finish before approval", |snap| {
+        find_task(snap, "preparation").status == TaskStatus::Done
+    });
+    assert_eq!(find_task(&prepared, "first").status, TaskStatus::Review);
+    assert_eq!(
+        find_task(&prepared, "approved-design").status,
+        TaskStatus::Queued
+    );
+    s.send("critic", "approve first");
+    let approved = s.wait("approval to release its dependent", |snap| {
+        find_task(snap, "first").status == TaskStatus::Done
+            && find_task(snap, "approved-design").status == TaskStatus::Working
+    });
+    assert_eq!(find_task(&approved, "second").status, TaskStatus::Working);
+    s.send("author", "finish second");
+    s.send("designer", "finish approved-design");
+    let done = s.wait_all_done();
+    let approved_at = find_task(&done, "first").completed_at.unwrap();
+    assert!(find_task(&done, "second").started_at.unwrap() < approved_at);
+    assert!(find_task(&done, "preparation").completed_at.unwrap() < approved_at);
+    assert!(find_task(&done, "approved-design").started_at.unwrap() >= approved_at);
+}
+
+#[test]
 fn a_task_starts_only_after_all_its_dependencies_are_done() {
     let s = Session::new();
     let team = s.team(

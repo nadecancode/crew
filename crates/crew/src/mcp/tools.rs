@@ -341,14 +341,15 @@ the closest models to take instead. Check it before choosing a model for a new m
         orchestrator(
             "task_create",
             "Put a task on the board. The scheduler hands it to its agent, by id, once its \
-dependencies are done; the agent reads the card with task_get.",
+dependencies are done; the agent reads the card with task_get. Create independent cards \
+immediately so free members can work while other tasks run or await review.",
             object(
                 json!({
                     "id": { "type": "string", "description": "Short id: lowercase letters, digits, - and _" },
                     "title": { "type": "string" },
                     "description": { "type": "string", "description": "What is to be done and how to tell it is done; point to docs, tasks, messages and commits by path or id instead of restating them" },
                     "agent": { "type": "string", "description": "Assignee (omit to let the scheduler pick)" },
-                    "depends_on": { "type": "array", "items": { "type": "string" } },
+                    "depends_on": { "type": "array", "items": { "type": "string" }, "description": "Completion gates: only tasks whose finished, approved output is needed before any part of this card can start. Split independent preparation into a separate card; no dependency is needed merely to order phases or prevent two tasks on the same agent." },
                     "reviewer": { "type": "string" },
                     "timeout_secs": { "type": "integer", "minimum": 1 },
                 }),

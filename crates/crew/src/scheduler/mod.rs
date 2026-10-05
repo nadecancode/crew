@@ -328,6 +328,46 @@ mod tests {
     }
 
     #[test]
+    fn independent_preparation_does_not_wait_for_a_whole_implementation_phase() {
+        let mut implementation = task("implementation", Some("worker"), &[], TaskStatus::Review);
+        implementation.reviewer = Some("reviewer".into());
+        let mut tasks = vec![
+            implementation,
+            task(
+                "design-prep",
+                Some("designer"),
+                &["implementation"],
+                TaskStatus::Queued,
+            ),
+            task(
+                "verify",
+                Some("qa"),
+                &["implementation", "design-prep"],
+                TaskStatus::Queued,
+            ),
+        ];
+        let views = agents(&["worker", "designer", "qa", "reviewer"]);
+        // A broad phase dependency holds even an idle designer until the
+        // entire implementation and its review finish.
+        assert!(plan(&tasks, &views).is_empty());
+
+        // Independent preparation can start now; final verification still
+        // requires both deliverables, including implementation approval.
+        tasks[1].dependencies.clear();
+        assert_eq!(
+            plan(&tasks, &views),
+            vec![ready("design-prep"), dispatch("design-prep", "designer")]
+        );
+        tasks[1].status = TaskStatus::Done;
+        assert!(plan(&tasks, &views).is_empty());
+        tasks[0].status = TaskStatus::Done;
+        assert_eq!(
+            plan(&tasks, &views),
+            vec![ready("verify"), dispatch("verify", "qa")]
+        );
+    }
+
+    #[test]
     fn an_agent_gets_one_task_at_a_time() {
         let mut tasks = vec![
             task("a", Some("x"), &[], TaskStatus::Queued),

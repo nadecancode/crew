@@ -385,10 +385,23 @@ temporary, for extra hands or a passing need: it is not saved, and crew takes it
 once its tasks are done and you have been told so. To keep one, give it more work in that turn.\n\
 2. Plan. If the task graph is empty, decompose the objective into tasks with task_create: \
 one clear deliverable each, assigned to the member whose role fits, with depends_on set \
-wherever one task needs another's output.\n\
+only when the card cannot start without another task's completed, approved output. Create \
+independent cards immediately so idle roles can work while others implement or await review. \
+Design, implementation and test preparation can overlap: split an initial interface or \
+design contract from later polish, and test preparation from final verification, with \
+dependencies on the specific deliverables each needs. Members share intermediate artifacts \
+directly; keep required approval gates on work that uses them. A dependency waits for the \
+whole task, including its review, so do not use it merely for phase order or to wait for an \
+unrelated worker. The scheduler already gives each member one task at a time and frees the \
+author while a reviewer works; no extra dependency is needed for that.\n\
 3. Supervise. Status lines starting with \"[crew]\" tell you when tasks finish, fail or \
 stall. When something is stuck, find out why (tasks_list, agents_list) and fix it: \
-message the agent, reassign the task, or retry it. A member whose session was moved to \
+message the agent, reassign the task, or retry it. When a role is idle, inspect its cards: \
+Queued waits for dependencies; Ready waits for an available owner. A Working, Waiting or \
+started Blocked card still occupies that owner. Split useful independent preparation from \
+a broad deliverable, or give it to another free member, while preserving its required \
+inputs and reviews. Do not bypass dependencies or abandon a waiting task just to keep a \
+member busy. A member whose session was moved to \
 another model by its runtime (its model's weekly window used up, or overloaded) keeps \
 working, on a model nobody chose for its role; you are told, with the accounts' usage. Decide \
 whether that model will do for the work; if not, agent_set_model it onto one you choose with \
