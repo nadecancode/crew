@@ -25,7 +25,8 @@ sizes/hashes, and the absence of extra assets were independently recomputed:
 
 ## Fresh checks
 
-From the repository root:
+From QA's worktree repository root,
+`/home/nade/workspaces/personal/crew/.crew/worktrees/qa`:
 
 ```sh
 just web-check
@@ -55,7 +56,9 @@ restart, pairing and action cases operate on those scripted test teams.
 Reviewer and designer held builds/browser work during the timing checks.
 `CREW_PERF_SCALE` was unset: original thresholds applied.
 
-Logs remain in ignored `target/recovery-{build,web-check,live,web-bundle,budget}.log`;
+Logs remain in QA's ignored
+`/home/nade/workspaces/personal/crew/.crew/worktrees/qa/target/` as
+`recovery-{build,web-check,live,web-bundle,budget}.log`;
 extracted measurements are `target/recovery-live{,-multi}-perf.json`.
 Playwright's output path is relative to `web/`; its successful run record was
 moved afterward to ignored `target/recovery-live-results/`.
@@ -73,7 +76,9 @@ byte for byte equal to this checkpoint. Active operator-team daemon PID
 
 Both running executable images and the current root release executable have
 SHA-256 `d40f215508b87e3d5cbf7a9e86336d5c63b93ee3059f3eb7dbc7eba70fdbb310`.
-The listener and operator daemon started after that release build. The
+Reviewer confirmed the chain: root checkout clean at `6049cdf6` since
+12:12:21, release binary mtime 12:24:53, listener start 12:25:44, operator
+daemon start 12:26:01 on 2026-10-05 (local time). The
 dashboard assets and current operator team are therefore already active;
 neither needs a recovery reload. No active team or listener was stopped,
 restarted or re-paired by this verification.
@@ -108,14 +113,20 @@ JS
 
 ## Presentation evidence and remaining gaps
 
-Designer owns the focused current-production-asset visual check in
-`verify-delivered-design`; current source, manifest and activation provenance
-were shared directly after the live timing window.
+Designer completed the focused current-production-asset visual check in
+`verify-delivered-design`; its [evidence and two captures](../notes/web-revamp/recovery-6049cdf6/evidence.json)
+record independent/review/resumed work, separately inspectable Waiting details,
+neutral dark surfaces and light appearance without overflow. Current source,
+manifest and activation provenance were shared directly after the live timing window.
 Existing [runtime presentation captures](runtime-presentation/index.html)
 and [neutral sign-off](../notes/web-revamp/neutral-signoff/index.html) remain
 the retained gallery; no replacement capture matrix was requested.
 
-No verification failure remains. The separate demo's older runtime is the
-remaining activation gap; the current operator team and dashboard are active.
+All checks above pass. Designer also found the pre-existing medium focus gap
+`RECOVERY-FOCUS-1`: crossing from an agent inspector to Tasks, then closing
+a focused task detail can leave focus on the document body. It is tracked on
+`web-focus-fallback`, `web-focus-regression` and `web-focus-integration`;
+correction remains separate. The separate demo's older runtime is the
+activation gap; the current operator team and dashboard are active.
 P1 and P2 headroom remain small; future source changes must keep the measured
 ceilings. No speculative redesign or runtime rewrite was performed.
