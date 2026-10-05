@@ -68,6 +68,22 @@ test("Shift+F10 and visible More reach the same selected agent menu from Team Li
   await page.keyboard.press("Escape");
 });
 
+test("Team and Tasks remember the chosen presentation across local view navigation", async ({ page, openPage }) => {
+  await openPage();
+  const team = page.getByRole("group", { name: "Team presentation", exact: true });
+  await team.getByRole("button", { name: "List", exact: true }).click();
+  await page.keyboard.press("v"); await page.keyboard.press("v");
+  await expect(team.getByRole("button", { name: "List", exact: true })).toHaveAttribute("aria-pressed", "true");
+  await team.getByRole("button", { name: "Graph", exact: true }).click();
+  await page.keyboard.press("l"); await page.keyboard.press("l");
+  await expect(team.getByRole("button", { name: "Graph", exact: true })).toHaveAttribute("aria-pressed", "true");
+  await page.keyboard.press("t");
+  const tasks = page.getByRole("group", { name: "Tasks presentation", exact: true });
+  await tasks.getByRole("button", { name: "List", exact: true }).click();
+  await page.keyboard.press("t"); await page.keyboard.press("t");
+  await expect(tasks.getByRole("button", { name: "List", exact: true })).toHaveAttribute("aria-pressed", "true");
+});
+
 test.describe("narrow default", () => {
   test.use({ viewport: { width: 390, height: 844 } });
   test("Team and Tasks start in List; a reader can select Graph", async ({ page, openPage }) => {
@@ -81,6 +97,8 @@ test.describe("narrow default", () => {
     await graph.press("Enter");
     await expect(page.locator(".agent-graph")).toBeVisible();
     await expect(page.getByRole("listbox", { name: "team list", exact: true })).toHaveCount(0);
+    await page.keyboard.press("v"); await page.keyboard.press("v");
+    await expect(team.getByRole("button", { name: "Graph", exact: true })).toHaveAttribute("aria-pressed", "true");
     await page.keyboard.press("t");
     await expect(page.getByRole("group", { name: "Tasks presentation", exact: true }).getByRole("button", { name: "List", exact: true })).toHaveAttribute("aria-pressed", "true");
     await expect(page.getByRole("listbox", { name: "task list", exact: true })).toBeVisible();
