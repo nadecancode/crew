@@ -59,3 +59,5 @@ if (scene === 'attention') {
 }
 if (scene === 'dag') element.querySelector('.view').innerHTML = dag();
 if (scene === 'replacement') element.classList.add('replacement');
+
+element.classList.toggle('compact-objective', active !== 'team');
