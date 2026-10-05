@@ -1,0 +1,245 @@
+{
+  "source": "fnv1a64:f22f3cf5ad74d25f",
+  "bundle": "9d2e838747fefae2684c66dd56ae854215446bbd",
+  "producer": "graph",
+  "externalGallery": "/tmp/crew-runtime-presentation",
+  "fullCases": 30,
+  "captures": [
+    {
+      "theme": "dark",
+      "phase": "independent",
+      "surface": "team-graph-inspector",
+      "states": {
+        "current": "current",
+        "taskStatuses": {
+          "parked-old": "waiting",
+          "current": "working",
+          "parked-new": "waiting"
+        }
+      },
+      "image": "dark-independent-team-graph-inspector.png",
+      "audit": {
+        "viewport": {
+          "width": 1440,
+          "height": 960
+        },
+        "documentWidth": 1440,
+        "overflow": false,
+        "palette": {
+          "body": "rgb(18, 18, 18)",
+          "text": "rgb(237, 237, 237)",
+          "theme": "dark"
+        },
+        "contrast": {
+          "checked": 146,
+          "disabledSkipped": 1,
+          "failures": []
+        },
+        "unnamedControls": [],
+        "targetsBelow44px": [],
+        "focused": {
+          "element": "button",
+          "outline": "rgb(140, 183, 242) none 3px",
+          "outlineOffset": "0px"
+        },
+        "panelWidth": 390,
+        "note": "Contrast checks visible HTML text on solid sRGB CSS backgrounds and SVG node fills; disabled text excluded. Canvas, gradients, overlap, control boundaries, narrow target exceptions, and screen-reader behavior require manual review."
+      }
+    },
+    {
+      "theme": "dark",
+      "phase": "resumed",
+      "surface": "team-graph-inspector",
+      "states": {
+        "current": "parked-old",
+        "taskStatuses": {
+          "parked-old": "working",
+          "current": "done",
+          "parked-new": "waiting"
+        }
+      },
+      "image": "dark-resumed-team-graph-inspector.png",
+      "audit": {
+        "viewport": {
+          "width": 1440,
+          "height": 960
+        },
+        "documentWidth": 1440,
+        "overflow": false,
+        "palette": {
+          "body": "rgb(18, 18, 18)",
+          "text": "rgb(237, 237, 237)",
+          "theme": "dark"
+        },
+        "contrast": {
+          "checked": 112,
+          "disabledSkipped": 1,
+          "failures": []
+        },
+        "unnamedControls": [],
+        "targetsBelow44px": [],
+        "focused": {
+          "element": "button",
+          "outline": "rgb(140, 183, 242) none 3px",
+          "outlineOffset": "0px"
+        },
+        "panelWidth": 390,
+        "note": "Contrast checks visible HTML text on solid sRGB CSS backgrounds and SVG node fills; disabled text excluded. Canvas, gradients, overlap, control boundaries, narrow target exceptions, and screen-reader behavior require manual review."
+      }
+    },
+    {
+      "theme": "dark",
+      "phase": "blocked",
+      "surface": "team-graph-inspector",
+      "states": {
+        "current": "parked-old",
+        "taskStatuses": {
+          "parked-old": "blocked",
+          "current": "done",
+          "parked-new": "waiting"
+        }
+      },
+      "image": "dark-blocked-team-graph-inspector.png",
+      "audit": {
+        "viewport": {
+          "width": 1440,
+          "height": 960
+        },
+        "documentWidth": 1440,
+        "overflow": false,
+        "palette": {
+          "body": "rgb(18, 18, 18)",
+          "text": "rgb(237, 237, 237)",
+          "theme": "dark"
+        },
+        "contrast": {
+          "checked": 112,
+          "disabledSkipped": 1,
+          "failures": []
+        },
+        "unnamedControls": [],
+        "targetsBelow44px": [],
+        "focused": {
+          "element": "button",
+          "outline": "rgb(140, 183, 242) none 3px",
+          "outlineOffset": "0px"
+        },
+        "panelWidth": 390,
+        "note": "Contrast checks visible HTML text on solid sRGB CSS backgrounds and SVG node fills; disabled text excluded. Canvas, gradients, overlap, control boundaries, narrow target exceptions, and screen-reader behavior require manual review."
+      }
+    },
+    {
+      "theme": "light",
+      "phase": "independent",
+      "surface": "team-list",
+      "states": {
+        "current": "current"
+      },
+      "image": "light-independent-team-list.png",
+      "audit": {
+        "viewport": {
+          "width": 1440,
+          "height": 960
+        },
+        "documentWidth": 1440,
+        "overflow": false,
+        "palette": {
+          "body": "rgb(245, 246, 243)",
+          "text": "rgb(24, 35, 33)",
+          "theme": "light"
+        },
+        "contrast": {
+          "checked": 105,
+          "disabledSkipped": 1,
+          "failures": []
+        },
+        "unnamedControls": [],
+        "targetsBelow44px": [],
+        "focused": {
+          "element": "button",
+          "outline": "rgb(17, 110, 89) none 3px",
+          "outlineOffset": "0px"
+        },
+        "panelWidth": 390,
+        "note": "Contrast checks visible HTML text on solid sRGB CSS backgrounds and SVG node fills; disabled text excluded. Canvas, gradients, overlap, control boundaries, narrow target exceptions, and screen-reader behavior require manual review."
+      }
+    },
+    {
+      "theme": "dark",
+      "phase": "independent",
+      "surface": "waiting-task-detail",
+      "states": {
+        "selected": "parked-new",
+        "executing": "current"
+      },
+      "image": "dark-independent-waiting-task-detail.png",
+      "audit": {
+        "viewport": {
+          "width": 1440,
+          "height": 960
+        },
+        "documentWidth": 1440,
+        "overflow": false,
+        "palette": {
+          "body": "rgb(18, 18, 18)",
+          "text": "rgb(237, 237, 237)",
+          "theme": "dark"
+        },
+        "contrast": {
+          "checked": 70,
+          "disabledSkipped": 1,
+          "failures": []
+        },
+        "unnamedControls": [],
+        "targetsBelow44px": [],
+        "focused": {
+          "element": "parked-new, waiting",
+          "outline": "rgb(237, 237, 237) none 3px",
+          "outlineOffset": "0px"
+        },
+        "panelWidth": 390,
+        "note": "Contrast checks visible HTML text on solid sRGB CSS backgrounds and SVG node fills; disabled text excluded. Canvas, gradients, overlap, control boundaries, narrow target exceptions, and screen-reader behavior require manual review."
+      }
+    },
+    {
+      "theme": "light",
+      "phase": "resumed",
+      "surface": "task-list",
+      "states": {
+        "taskStatuses": {
+          "parked-old": "working",
+          "current": "done",
+          "parked-new": "waiting"
+        }
+      },
+      "image": "light-resumed-task-list.png",
+      "audit": {
+        "viewport": {
+          "width": 1440,
+          "height": 960
+        },
+        "documentWidth": 1440,
+        "overflow": false,
+        "palette": {
+          "body": "rgb(245, 246, 243)",
+          "text": "rgb(24, 35, 33)",
+          "theme": "light"
+        },
+        "contrast": {
+          "checked": 99,
+          "disabledSkipped": 1,
+          "failures": []
+        },
+        "unnamedControls": [],
+        "targetsBelow44px": [],
+        "focused": {
+          "element": "button",
+          "outline": "rgb(17, 110, 89) none 3px",
+          "outlineOffset": "0px"
+        },
+        "panelWidth": 390,
+        "note": "Contrast checks visible HTML text on solid sRGB CSS backgrounds and SVG node fills; disabled text excluded. Canvas, gradients, overlap, control boundaries, narrow target exceptions, and screen-reader behavior require manual review."
+      }
+    }
+  ]
+}
