@@ -193,6 +193,7 @@ function HerdrScreen(props: { agent: Agent }) {
         <button disabled={!link.live()} onClick={() => ops.focusPane(props.agent.id)}>jump to pane</button>
         <button disabled={!link.live()} onClick={() => ui.refresh()} title="read the screen again (r)">refresh</button>
       </div>
+      <Show when={error() && screen() !== null}><p class="pad warn" role="status">{error()}</p></Show>
       <Show when={screen() !== null} fallback={<p class="pad muted">{error() ?? waiting(link, "reading the screen…")}</p>}>
         <pre class="screen" tabindex="0" aria-label={`the terminal of ${props.agent.id}`} onKeyDown={onKey} onPaste={onPaste}><Sgr text={screen()!} /></pre>
       </Show>
