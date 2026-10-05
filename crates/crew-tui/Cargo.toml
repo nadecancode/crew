@@ -7,6 +7,7 @@ license.workspace = true
 rust-version.workspace = true
 
 [dependencies]
+crew-client = { path = "../crew-client" }
 crew-core = { path = "../crew-core" }
 anyhow.workspace = true
 ratatui.workspace = true

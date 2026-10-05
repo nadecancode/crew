@@ -10,12 +10,13 @@ use std::collections::{HashMap, HashSet, VecDeque};
 use std::rc::Rc;
 use std::time::Duration;
 
+use crew_client::is_orchestrator;
 use crew_core::rpc::{
     GitOutcome, ModelChoice, OutputResult, Push, SessionInfo, Snapshot, TranscriptResult,
 };
 use crew_core::types::{
     Agent, AgentStatus, Event, EventLevel, InboxEntry, Message, MessageType, RuntimeKind, Task,
-    TaskStatus, OPERATOR_ID, ORCHESTRATOR_ID,
+    TaskStatus, OPERATOR_ID,
 };
 use ratatui::layout::Rect;
 
@@ -395,27 +396,12 @@ impl Default for App {
 
 /// Order ids so that `claude-2` sorts before `claude-10`.
 pub fn natural_cmp(a: &str, b: &str) -> Ordering {
-    fn split(s: &str) -> (&str, Option<u64>) {
-        let digits = s.bytes().rev().take_while(u8::is_ascii_digit).count();
-        let (head, tail) = s.split_at(s.len() - digits);
-        (head, tail.parse().ok())
-    }
-    let (ah, an) = split(a);
-    let (bh, bn) = split(b);
-    ah.cmp(bh).then(an.cmp(&bn)).then(a.cmp(b))
-}
-
-fn is_orchestrator(agent: &Agent) -> bool {
-    agent.orchestrator || agent.id == ORCHESTRATOR_ID
+    crew_client::natural_cmp(a, b)
 }
 
 fn satellite_parent<'a>(agents: &'a [Agent], agent: &Agent) -> Option<&'a Agent> {
-    if is_orchestrator(agent) {
-        return None;
-    }
-    let parent_id = agent.parent.as_deref()?;
-    let parent = agents.iter().find(|a| a.id == parent_id)?;
-    (parent.id != agent.id && !is_orchestrator(parent) && parent.parent.is_none()).then_some(parent)
+    let parent_id = crew_client::satellite_parent_id(agents, agent)?;
+    agents.iter().find(|a| a.id == parent_id)
 }
 
 impl App {
@@ -518,42 +504,13 @@ impl App {
 
     /// Executing work precedes parked cards and other started work.
     pub fn work_of(&self, id: &str, now: i64) -> Option<WorkOn<'_>> {
-        let now = self.server_now(now);
-        let mine = || {
-            self.tasks
-                .iter()
-                .filter(move |t| t.assigned_agent.as_deref() == Some(id))
-        };
-        let rank = |t: &Task| match t.status {
-            TaskStatus::Working => 2,
-            TaskStatus::Blocked if t.started_at.is_some() => 2,
-            TaskStatus::Waiting => 1,
-            _ => 0,
-        };
-        let current = mine()
-            .filter(|t| !t.status.is_terminal() && (rank(t) > 0 || t.started_at.is_some()))
-            .reduce(|current, task| {
-                if (rank(task), task.started_at) > (rank(current), current.started_at) {
-                    task
-                } else {
-                    current
-                }
-            });
-        if let Some(task) = current {
-            return Some(WorkOn {
-                title: &task.title,
-                done: false,
-                elapsed: task.started_at.map(|at| (now - at).max(0)),
-            });
-        }
-        mine()
-            .filter(|t| t.status == TaskStatus::Done)
-            .max_by_key(|t| t.completed_at)
-            .map(|task| WorkOn {
-                title: &task.title,
-                done: true,
-                elapsed: task.completed_at.map(|at| (now - at).max(0)),
-            })
+        let work = crew_client::current_work(&self.tasks, id, self.server_now(now))?;
+        let task = self.tasks.iter().find(|task| task.id == work.task_id)?;
+        Some(WorkOn {
+            title: &task.title,
+            done: work.done,
+            elapsed: work.elapsed_ms,
+        })
     }
 
     /// The daemon's idea of "now", for elapsed-time displays.
@@ -887,20 +844,7 @@ impl App {
     /// Workers in natural id order, each followed by its subagents, then the
     /// orchestrator. This is also the order `tab` walks.
     fn sort_agents(&mut self) {
-        let roots: HashMap<String, String> = self
-            .agents
-            .iter()
-            .filter_map(|a| satellite_parent(&self.agents, a).map(|p| (a.id.clone(), p.id.clone())))
-            .collect();
-        self.agents.sort_by(|a, b| {
-            let root_a = roots.get(&a.id).map_or(a.id.as_str(), String::as_str);
-            let root_b = roots.get(&b.id).map_or(b.id.as_str(), String::as_str);
-            is_orchestrator(a)
-                .cmp(&is_orchestrator(b))
-                .then_with(|| natural_cmp(root_a, root_b))
-                .then_with(|| roots.contains_key(&a.id).cmp(&roots.contains_key(&b.id)))
-                .then_with(|| natural_cmp(&a.id, &b.id))
-        });
+        crew_client::sort_agents(&mut self.agents);
     }
 
     fn upsert_agent(&mut self, agent: Agent) {
@@ -1549,6 +1493,46 @@ mod tests {
             ids,
             ["architect", "claude-1", "claude-2", "claude-10", "db"]
         );
+    }
+
+    #[test]
+    fn shared_work_query_preserves_titles_and_applies_clock_offset_once() {
+        let mut app = loaded();
+        app.clock_offset = 250;
+        let mut executing = app.tasks[0].clone();
+        executing.id = "executing".into();
+        executing.title = "Executing title".into();
+        executing.assigned_agent = Some("a".into());
+        executing.status = TaskStatus::Working;
+        executing.started_at = Some(100);
+        let mut parked = executing.clone();
+        parked.id = "parked".into();
+        parked.title = "Parked title".into();
+        parked.status = TaskStatus::Waiting;
+        parked.started_at = Some(200);
+        app.tasks = vec![parked, executing];
+        assert_eq!(
+            app.work_of("a", 500),
+            Some(WorkOn {
+                title: "Executing title",
+                done: false,
+                elapsed: Some(650),
+            })
+        );
+
+        for task in &mut app.tasks {
+            task.status = TaskStatus::Done;
+            task.completed_at = Some(600);
+        }
+        assert_eq!(
+            app.work_of("a", 500),
+            Some(WorkOn {
+                title: "Executing title",
+                done: true,
+                elapsed: Some(150),
+            })
+        );
+        assert!(app.work_of("missing", 500).is_none());
     }
 
     #[test]

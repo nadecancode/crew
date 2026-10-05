@@ -7,9 +7,9 @@ pub mod config;
 pub mod paths;
 pub mod rpc;
 pub mod signals;
-pub mod types;
 pub mod util;
-pub mod vcs;
+
+pub use crew_protocol::{types, vcs};
 
 pub use types::*;
 

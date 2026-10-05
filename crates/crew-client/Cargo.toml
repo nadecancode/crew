@@ -1,0 +1,13 @@
+[package]
+name = "crew-client"
+description = "Deterministic crew client queries independent of transport and presentation"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+crew-protocol = { path = "../crew-protocol" }
+
+[dev-dependencies]
+serde_json.workspace = true

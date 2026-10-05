@@ -302,11 +302,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "crew-client"
+version = "0.1.0"
+dependencies = [
+ "crew-protocol",
+ "serde_json",
+]
+
+[[package]]
 name = "crew-core"
 version = "0.1.0"
 dependencies = [
  "anyhow",
  "chrono",
+ "crew-protocol",
  "libc",
  "serde",
  "serde_json",
@@ -318,10 +327,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "crew-protocol"
+version = "0.1.0"
+dependencies = [
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "crew-tui"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "crew-client",
  "crew-core",
  "ratatui",
  "serde",
