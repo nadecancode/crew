@@ -49,7 +49,7 @@ export function EntityList<T extends { id: string; status: string }>(props: {
             </div>
             <div class="summary-title">{summary().title}</div>
             <div class="summary-info muted">{summary().info}</div>
-            <div class="summary-info muted">{summary().detail}</div>
+            <div class="summary-info summary-detail muted">{summary().detail}</div>
           </div>
         </div>;
       }} />

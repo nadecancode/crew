@@ -189,7 +189,6 @@ function HerdrScreen(props: { agent: Agent }) {
     <div class="terminal-tab herdr" data-terminal={props.agent.id}>
       <div class="term-bar">
         <span class="muted">herdr pane {props.agent.backend_ref ?? ""} · the last screen; click it to type into the agent, ctrl-] gives the keyboard back</span>
-        <span class="spacer" />
         <button disabled={!link.live()} onClick={() => ops.focusPane(props.agent.id)}>jump to pane</button>
         <button disabled={!link.live()} onClick={() => ui.refresh()} title="read the screen again (r)">refresh</button>
       </div>
