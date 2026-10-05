@@ -124,7 +124,7 @@ export function createUi(o: UiOptions = {}) {
   function setRoute(next: Place, push = true): void {
     const cur = route();
     if (cur.view === next.view && sameSelection(cur.sel, next.sel)) return;
-    if (next.sel && !cur.sel && !busOpen()) panelFocus = document.activeElement as HTMLElement | null;
+    if (next.sel && !cur.sel) panelFocus = document.activeElement as HTMLElement | null;
     if (next.sel?.kind === "agent") setSelected(next.sel.id);
     if (next.sel?.kind === "agent" && !(cur.sel?.kind === "agent" && cur.sel.id === next.sel.id)) setTab("overview");
     setRouteSignal({ view: next.view, sel: next.sel });
@@ -159,7 +159,7 @@ export function createUi(o: UiOptions = {}) {
     setPanelFull(false);
     setRoute({ view: route().view, sel: null });
     queueMicrotask(() => {
-      if (panelFocus?.isConnected) panelFocus.focus();
+      if (panelFocus?.isConnected && panelFocus !== document.body) panelFocus.focus();
       else if (id) document.querySelector<HTMLElement>(`[data-agent="${CSS.escape(id)}"]`)?.focus();
     });
   }
@@ -193,7 +193,7 @@ export function createUi(o: UiOptions = {}) {
     setPanelFull,
     busOpen,
     setBusOpen: (open: boolean) => {
-      if (open && !busOpen() && !route().sel) panelFocus = document.activeElement as HTMLElement | null;
+      if (open && !busOpen()) panelFocus = document.activeElement as HTMLElement | null;
       setBusOpen(open);
     },
     panelOpen: () => !!route().sel || busOpen(),
