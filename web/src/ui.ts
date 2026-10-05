@@ -100,6 +100,7 @@ export function createUi(o: UiOptions = {}) {
   const [panelFull, setPanelFull] = createSignal(false);
   /** The message bus explicitly opened in a compact workspace. */
   const [busOpen, setBusOpen] = createSignal(false);
+  const [viewport, setViewport] = createSignal(window.innerWidth);
   const [dialog, setDialogSignal] = createSignal<Dialog | null>(null);
   const [menu, setMenu] = createSignal<ContextMenu | null>(null);
   const [compose, setCompose] = createSignal<Compose>({ to: "*", text: "", prompt: false });
@@ -114,6 +115,8 @@ export function createUi(o: UiOptions = {}) {
   const shownQuestions = new Set<string>();
   /** Where focus goes back to when a dialog or the side panel closes. */
   const focusStack: (HTMLElement | null)[] = [];
+  let panelFocus: HTMLElement | null = null;
+  let menuFocus: HTMLElement | null = null;
 
   /** This workspace's address for `place`. */
   const address = (place: Place) => formatRoute({ workspace, ...place });
@@ -121,6 +124,7 @@ export function createUi(o: UiOptions = {}) {
   function setRoute(next: Place, push = true): void {
     const cur = route();
     if (cur.view === next.view && sameSelection(cur.sel, next.sel)) return;
+    if (next.sel && !cur.sel && !busOpen()) panelFocus = document.activeElement as HTMLElement | null;
     if (next.sel?.kind === "agent") setSelected(next.sel.id);
     if (next.sel?.kind === "agent" && !(cur.sel?.kind === "agent" && cur.sel.id === next.sel.id)) setTab("overview");
     setRouteSignal({ view: next.view, sel: next.sel });
@@ -149,6 +153,22 @@ export function createUi(o: UiOptions = {}) {
     queueMicrotask(() => back?.isConnected && back.focus());
   }
 
+  function closePanel(): void {
+    const id = selected();
+    setBusOpen(false);
+    setPanelFull(false);
+    setRoute({ view: route().view, sel: null });
+    queueMicrotask(() => {
+      if (panelFocus?.isConnected) panelFocus.focus();
+      else if (id) document.querySelector<HTMLElement>(`[data-agent="${CSS.escape(id)}"]`)?.focus();
+    });
+  }
+
+  function closeMenu(refocus = true): void {
+    setMenu(null);
+    if (refocus && menuFocus?.isConnected) menuFocus.focus();
+  }
+
   return {
     workspace,
     route,
@@ -157,7 +177,13 @@ export function createUi(o: UiOptions = {}) {
     address,
     view: () => route().view,
     sel: () => route().sel,
-    setView: (view: View) => setRoute({ view, sel: route().sel }),
+    setView: (view: View) => {
+      if (viewport() < 768) {
+        setBusOpen(false);
+        setPanelFull(false);
+      }
+      setRoute({ view, sel: viewport() < 768 ? null : route().sel });
+    },
     select: (sel: Selection) => setRoute({ view: route().view, sel }),
     selected,
     setSelected,
@@ -166,7 +192,14 @@ export function createUi(o: UiOptions = {}) {
     panelFull,
     setPanelFull,
     busOpen,
-    setBusOpen,
+    setBusOpen: (open: boolean) => {
+      if (open && !busOpen() && !route().sel) panelFocus = document.activeElement as HTMLElement | null;
+      setBusOpen(open);
+    },
+    panelOpen: () => !!route().sel || busOpen(),
+    closePanel,
+    viewport,
+    setViewport,
     dialog,
     openDialog,
     closeDialog,
@@ -179,7 +212,11 @@ export function createUi(o: UiOptions = {}) {
     notice: chrome.notice,
     dismissNotice: chrome.dismissNotice,
     menu,
-    setMenu,
+    setMenu: (m: ContextMenu | null) => {
+      if (m) menuFocus = document.activeElement as HTMLElement | null;
+      setMenu(m);
+    },
+    closeMenu,
     compose,
     setCompose,
     refreshTick,
@@ -187,7 +224,13 @@ export function createUi(o: UiOptions = {}) {
     logFilter,
     setLogFilter,
     busPair,
-    setBusPair,
+    setBusPair: (pair: [string, string] | null) => {
+      if (pair) {
+        if (!route().sel && !busOpen()) panelFocus = document.activeElement as HTMLElement | null;
+        setBusOpen(true);
+      }
+      setBusPair(pair);
+    },
     hoverPair,
     setHoverPair,
     shownQuestions,

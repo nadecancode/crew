@@ -129,6 +129,8 @@ const textual = (el: Element | null) =>
  * terminal or the workspace switcher. */
 export function keyboardFree(app: App, target: Element | null = document.activeElement): boolean {
   if (app.ui.dialog()) return false;
+  if (app.ui.menu()) return false;
+  if (target?.closest?.(".workspace-actions[open]")) return false;
   if (textual(target)) return false;
   if (target?.closest?.("[data-terminal]")) return false;
   // The workspace switcher's list takes its own keys.
@@ -151,14 +153,8 @@ export function handleKey(app: App, ops: Operations, e: KeyboardEvent): void {
   if (e.ctrlKey || e.metaKey || e.altKey) return;
   if (e.key === "Escape") {
     app.ui.setMenu(null);
-    const sel = app.ui.sel();
-    if (sel) {
-      app.ui.select(null);
-      app.ui.setPanelFull(false);
-      // Focus goes back to the node the panel was opened from.
-      const id = sel.kind === "agent" ? sel.id : app.ui.selected();
-      if (id) queueMicrotask(() => document.querySelector<HTMLElement>(`[data-agent="${CSS.escape(id)}"]`)?.focus());
-    } else app.ui.clearStatus();
+    if (app.ui.panelOpen()) app.ui.closePanel();
+    else app.ui.clearStatus();
     return;
   }
   if (!app.prefs.prefs.keys) return;
