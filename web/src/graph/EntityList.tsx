@@ -43,7 +43,9 @@ export function EntityList<T extends { id: string; status: string }>(props: {
         onContextMenu={(e) => props.menu?.(e, item.id)}>
           <div class="entity-summary">
             <div class="summary-head"><b class={`mono ${summary().tone ?? ""}`}>{summary().name ?? item.id}</b><span>{summary().status ?? item.status}</span>
-              <Show when={props.menu}><button aria-label={`More actions for ${item.id}`} aria-haspopup="menu" tabindex="-1" onClick={(e) => { e.stopPropagation(); props.menu?.(e, item.id); }}>More</button></Show>
+              <Show when={props.menu}><button aria-label={`More actions for ${item.id}`} aria-haspopup="menu" tabindex="-1"
+                onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") e.stopPropagation(); }}
+                onClick={(e) => { e.stopPropagation(); props.menu?.(e, item.id); }}>More</button></Show>
             </div>
             <div class="summary-title">{summary().title}</div>
             <div class="summary-info muted">{summary().info}</div>
