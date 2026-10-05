@@ -1,0 +1,3026 @@
+{
+  "01-narrow-detail": [
+    {
+      "depth": 0,
+      "role": "application",
+      "name": "crew-desktop",
+      "states": []
+    },
+    {
+      "depth": 1,
+      "role": "frame",
+      "name": "Tasks — Crew",
+      "states": [
+        "showing",
+        "visible"
+      ],
+      "bounds": [
+        0,
+        0,
+        560,
+        600
+      ]
+    },
+    {
+      "depth": 2,
+      "role": "grouping",
+      "name": "",
+      "states": [
+        "showing",
+        "visible"
+      ],
+      "bounds": [
+        0,
+        0,
+        550,
+        544
+      ]
+    },
+    {
+      "depth": 3,
+      "role": "panel",
+      "name": "",
+      "states": [
+        "showing",
+        "visible"
+      ],
+      "bounds": [
+        0,
+        0,
+        550,
+        544
+      ]
+    },
+    {
+      "depth": 4,
+      "role": "panel",
+      "name": "",
+      "states": [
+        "showing",
+        "visible",
+        "focusable"
+      ],
+      "bounds": [
+        0,
+        0,
+        550,
+        544
+      ]
+    },
+    {
+      "depth": 5,
+      "role": "panel",
+      "name": "",
+      "states": [
+        "showing",
+        "visible"
+      ],
+      "bounds": [
+        0,
+        0,
+        550,
+        544
+      ]
+    },
+    {
+      "depth": 6,
+      "role": "label",
+      "name": "Details",
+      "states": [
+        "showing",
+        "visible"
+      ],
+      "bounds": [
+        0,
+        0,
+        550,
+        41
+      ]
+    },
+    {
+      "depth": 6,
+      "role": "grouping",
+      "name": "",
+      "states": [
+        "showing",
+        "visible"
+      ],
+      "bounds": [
+        0,
+        0,
+        550,
+        503
+      ]
+    },
+    {
+      "depth": 7,
+      "role": "panel",
+      "name": "",
+      "states": [
+        "showing",
+        "visible"
+      ],
+      "bounds": [
+        0,
+        0,
+        550,
+        503
+      ]
+    },
+    {
+      "depth": 8,
+      "role": "panel",
+      "name": "",
+      "states": [
+        "showing",
+        "visible"
+      ],
+      "bounds": [
+        0,
+        0,
+        550,
+        503
+      ]
+    },
+    {
+      "depth": 9,
+      "role": "scroll pane",
+      "name": "",
+      "states": [
+        "showing",
+        "visible"
+      ],
+      "bounds": [
+        0,
+        0,
+        550,
+        503
+      ]
+    },
+    {
+      "depth": 10,
+      "role": "panel",
+      "name": "",
+      "states": [
+        "showing",
+        "visible"
+      ],
+      "bounds": [
+        0,
+        0,
+        550,
+        503
+      ]
+    },
+    {
+      "depth": 11,
+      "role": "panel",
+      "name": "",
+      "states": [
+        "showing",
+        "visible"
+      ],
+      "bounds": [
+        0,
+        0,
+        292,
+        120
+      ]
+    },
+    {
+      "depth": 12,
+      "role": "label",
+      "name": "Nothing selected",
+      "states": [
+        "showing",
+        "visible"
+      ],
+      "bounds": [
+        0,
+        0,
+        292,
+        24
+      ]
+    },
+    {
+      "depth": 12,
+      "role": "label",
+      "name": "Choose an item in the main view to read its details.",
+      "states": [
+        "showing",
+        "visible"
+      ],
+      "bounds": [
+        0,
+        0,
+        292,
+        32
+      ]
+    },
+    {
+      "depth": 7,
+      "role": "panel",
+      "name": "",
+      "states": [
+        "showing",
+        "visible"
+      ],
+      "bounds": [
+        0,
+        0,
+        2069881440,
+        31582
+      ]
+    },
+    {
+      "depth": 7,
+      "role": "panel",
+      "name": "",
+      "states": [
+        "showing",
+        "visible"
+      ],
+      "bounds": [
+        0,
+        0,
+        2069881440,
+        31582
+      ]
+    },
+    {
+      "depth": 7,
+      "role": "panel",
+      "name": "",
+      "states": [
+        "showing",
+        "visible"
+      ],
+      "bounds": [
+        0,
+        0,
+        2069881440,
+        31582
+      ]
+    },
+    {
+      "depth": 2,
+      "role": "grouping",
+      "name": "",
+      "states": [
+        "showing",
+        "visible"
+      ],
+      "bounds": [
+        0,
+        0,
+        552,
+        47
+      ]
+    },
+    {
+      "depth": 3,
+      "role": "panel",
+      "name": "",
+      "states": [
+        "showing",
+        "visible"
+      ],
+      "bounds": [
+        0,
+        0,
+        540,
+        46
+      ]
+    },
+    {
+      "depth": 4,
+      "role": "panel",
+      "name": "",
+      "states": [
+        "showing",
+        "visible"
+      ],
+      "bounds": [
+        0,
+        0,
+        540,
+        46
+      ]
+    },
+    {
+      "depth": 5,
+      "role": "panel",
+      "name": "",
+      "states": [
+        "showing",
+        "visible"
+      ],
+      "bounds": [
+        0,
+        0,
+        78,
+        46
+      ]
+    },
+    {
+      "depth": 6,
+      "role": "toggle button",
+      "name": "Show or hide sidebar",
+      "states": [
+        "showing",
+        "visible",
+        "focusable"
+      ],
+      "bounds": [
+        0,
+        0,
+        36,
+        34
+      ]
+    },
+    {
+      "depth": 6,
+      "role": "button",
+      "name": "Back to previous pane",
+      "states": [
+        "showing",
+        "visible",
+        "focusable"
+      ],
+      "bounds": [
+        0,
+        0,
+        36,
+        34
+      ]
+    },
+    {
+      "depth": 5,
+      "role": "button",
+      "name": "Destination: Tasks",
+      "states": [
+        "showing",
+        "visible"
+      ],
+      "bounds": [
+        0,
+        0,
+        78,
+        34
+      ]
+    },
+    {
+      "depth": 6,
+      "role": "toggle button",
+      "name": "Destination: Tasks",
+      "states": [
+        "showing",
+        "visible",
+        "focused",
+        "focusable"
+      ],
+      "bounds": [
+        0,
+        0,
+        78,
+        34
+      ]
+    },
+    {
+      "depth": 7,
+      "role": "panel",
+      "name": "",
+      "states": [
+        "showing",
+        "visible"
+      ],
+      "bounds": [
+        0,
+        0,
+        56,
+        24
+      ]
+    },
+    {
+      "depth": 8,
+      "role": "grouping",
+      "name": "",
+      "states": [
+        "showing",
+        "visible"
+      ],
+      "bounds": [
+        0,
+        0,
+        36,
+        24
+      ]
+    },
+    {
+      "depth": 9,
+      "role": "label",
+      "name": "Tasks",
+      "states": [
+        "showing",
+        "visible"
+      ],
+      "bounds": [
+        0,
+        0,
+        36,
+        24
+      ]
+    },
+    {
+      "depth": 8,
+      "role": "panel",
+      "name": "",
+      "states": [
+        "showing",
+        "visible"
+      ],
+      "bounds": [
+        0,
+        0,
+        16,
+        24
+      ]
+    },
+    {
+      "depth": 5,
+      "role": "panel",
+      "name": "",
+      "states": [
+        "showing",
+        "visible"
+      ],
+      "bounds": [
+        0,
+        0,
+        360,
+        46
+      ]
+    },
+    {
+      "depth": 6,
+      "role": "button",
+      "name": "Application menu",
+      "states": [
+        "showing",
+        "visible"
+      ],
+      "bounds": [
+        0,
+        0,
+        36,
+        34
+      ]
+    },
+    {
+      "depth": 7,
+      "role": "toggle button",
+      "name": "Application menu",
+      "states": [
+        "showing",
+        "visible",
+        "focusable"
+      ],
+      "bounds": [
+        0,
+        0,
+        36,
+        34
+      ]
+    },
+    {
+      "depth": 8,
+      "role": "panel",
+      "name": "",
+      "states": [
+        "showing",
+        "visible"
+      ],
+      "bounds": [
+        0,
+        0,
+        16,
+        24
+      ]
+    },
+    {
+      "depth": 6,
+      "role": "toggle button",
+      "name": "Show or hide details",
+      "states": [
+        "showing",
+        "visible",
+        "focusable"
+      ],
+      "bounds": [
+        0,
+        0,
+        36,
+        34
+      ]
+    },
+    {
+      "depth": 6,
+      "role": "panel",
+      "name": "",
+      "states": [
+        "showing",
+        "visible"
+      ],
+      "bounds": [
+        0,
+        0,
+        136,
+        46
+      ]
+    },
+    {
+      "depth": 7,
+      "role": "button",
+      "name": "Workspaces, none connected",
+      "states": [
+        "showing",
+        "visible"
+      ],
+      "bounds": [
+        0,
+        0,
+        136,
+        34
+      ]
+    },
+    {
+      "depth": 8,
+      "role": "toggle button",
+      "name": "Workspaces, none connected",
+      "states": [
+        "showing",
+        "visible",
+        "focusable"
+      ],
+      "bounds": [
+        0,
+        0,
+        136,
+        34
+      ]
+    },
+    {
+      "depth": 9,
+      "role": "panel",
+      "name": "",
+      "states": [
+        "showing",
+        "visible"
+      ],
+      "bounds": [
+        0,
+        0,
+        114,
+        24
+      ]
+    },
+    {
+      "depth": 10,
+      "role": "grouping",
+      "name": "",
+      "states": [
+        "showing",
+        "visible"
+      ],
+      "bounds": [
+        0,
+        0,
+        94,
+        24
+      ]
+    },
+    {
+      "depth": 11,
+      "role": "label",
+      "name": "No workspace",
+      "states": [
+        "showing",
+        "visible"
+      ],
+      "bounds": [
+        0,
+        0,
+        94,
+        24
+      ]
+    },
+    {
+      "depth": 10,
+      "role": "panel",
+      "name": "",
+      "states": [
+        "showing",
+        "visible"
+      ],
+      "bounds": [
+        0,
+        0,
+        16,
+        24
+      ]
+    },
+    {
+      "depth": 6,
+      "role": "grouping",
+      "name": "",
+      "states": [
+        "showing",
+        "visible"
+      ],
+      "bounds": [
+        0,
+        0,
+        133,
+        46
+      ]
+    },
+    {
+      "depth": 7,
+      "role": "button",
+      "name": "Minimize",
+      "states": [
+        "showing",
+        "visible",
+        "focusable"
+      ],
+      "bounds": [
+        0,
+        0,
+        40,
+        46
+      ]
+    },
+    {
+      "depth": 7,
+      "role": "button",
+      "name": "Maximize",
+      "states": [
+        "showing",
+        "visible",
+        "focusable"
+      ],
+      "bounds": [
+        0,
+        0,
+        40,
+        46
+      ]
+    },
+    {
+      "depth": 7,
+      "role": "button",
+      "name": "Close",
+      "states": [
+        "showing",
+        "visible",
+        "focusable"
+      ],
+      "bounds": [
+        0,
+        0,
+        41,
+        46
+      ]
+    }
+  ],
+  "02-narrow-main": [
+    {
+      "depth": 0,
+      "role": "application",
+      "name": "crew-desktop",
+      "states": []
+    },
+    {
+      "depth": 1,
+      "role": "frame",
+      "name": "Tasks — Crew",
+      "states": [
+        "showing",
+        "visible"
+      ],
+      "bounds": [
+        0,
+        0,
+        560,
+        600
+      ]
+    },
+    {
+      "depth": 2,
+      "role": "grouping",
+      "name": "",
+      "states": [
+        "showing",
+        "visible"
+      ],
+      "bounds": [
+        0,
+        0,
+        550,
+        544
+      ]
+    },
+    {
+      "depth": 3,
+      "role": "panel",
+      "name": "",
+      "states": [
+        "showing",
+        "visible"
+      ],
+      "bounds": [
+        0,
+        0,
+        550,
+        544
+      ]
+    },
+    {
+      "depth": 4,
+      "role": "panel",
+      "name": "",
+      "states": [
+        "showing",
+        "visible",
+        "focusable"
+      ],
+      "bounds": [
+        0,
+        0,
+        550,
+        544
+      ]
+    },
+    {
+      "depth": 5,
+      "role": "grouping",
+      "name": "",
+      "states": [
+        "showing",
+        "visible"
+      ],
+      "bounds": [
+        0,
+        0,
+        550,
+        544
+      ]
+    },
+    {
+      "depth": 6,
+      "role": "panel",
+      "name": "",
+      "states": [
+        "showing",
+        "visible"
+      ],
+      "bounds": [
+        0,
+        0,
+        550,
+        544
+      ]
+    },
+    {
+      "depth": 7,
+      "role": "panel",
+      "name": "",
+      "states": [
+        "showing",
+        "visible"
+      ],
+      "bounds": [
+        0,
+        0,
+        550,
+        544
+      ]
+    },
+    {
+      "depth": 8,
+      "role": "scroll pane",
+      "name": "",
+      "states": [
+        "showing",
+        "visible"
+      ],
+      "bounds": [
+        0,
+        0,
+        550,
+        544
+      ]
+    },
+    {
+      "depth": 9,
+      "role": "panel",
+      "name": "",
+      "states": [
+        "showing",
+        "visible"
+      ],
+      "bounds": [
+        0,
+        0,
+        550,
+        544
+      ]
+    },
+    {
+      "depth": 10,
+      "role": "panel",
+      "name": "",
+      "states": [
+        "showing",
+        "visible"
+      ],
+      "bounds": [
+        0,
+        0,
+        335,
+        120
+      ]
+    },
+    {
+      "depth": 11,
+      "role": "label",
+      "name": "No task board loaded",
+      "states": [
+        "showing",
+        "visible"
+      ],
+      "bounds": [
+        0,
+        0,
+        335,
+        24
+      ]
+    },
+    {
+      "depth": 11,
+      "role": "label",
+      "name": "Connect to a workspace to inspect tasks and their dependencies.",
+      "states": [
+        "showing",
+        "visible"
+      ],
+      "bounds": [
+        0,
+        0,
+        335,
+        32
+      ]
+    },
+    {
+      "depth": 6,
+      "role": "panel",
+      "name": "",
+      "states": [
+        "showing",
+        "visible"
+      ],
+      "bounds": [
+        0,
+        0,
+        2069881440,
+        31582
+      ]
+    },
+    {
+      "depth": 6,
+      "role": "panel",
+      "name": "",
+      "states": [
+        "showing",
+        "visible"
+      ],
+      "bounds": [
+        0,
+        0,
+        2069881440,
+        31582
+      ]
+    },
+    {
+      "depth": 6,
+      "role": "panel",
+      "name": "",
+      "states": [
+        "showing",
+        "visible"
+      ],
+      "bounds": [
+        0,
+        0,
+        2069881440,
+        31582
+      ]
+    },
+    {
+      "depth": 2,
+      "role": "grouping",
+      "name": "",
+      "states": [
+        "showing",
+        "visible"
+      ],
+      "bounds": [
+        0,
+        0,
+        552,
+        47
+      ]
+    },
+    {
+      "depth": 3,
+      "role": "panel",
+      "name": "",
+      "states": [
+        "showing",
+        "visible"
+      ],
+      "bounds": [
+        0,
+        0,
+        540,
+        46
+      ]
+    },
+    {
+      "depth": 4,
+      "role": "panel",
+      "name": "",
+      "states": [
+        "showing",
+        "visible"
+      ],
+      "bounds": [
+        0,
+        0,
+        540,
+        46
+      ]
+    },
+    {
+      "depth": 5,
+      "role": "panel",
+      "name": "",
+      "states": [
+        "showing",
+        "visible"
+      ],
+      "bounds": [
+        0,
+        0,
+        36,
+        46
+      ]
+    },
+    {
+      "depth": 6,
+      "role": "toggle button",
+      "name": "Show or hide sidebar",
+      "states": [
+        "showing",
+        "visible",
+        "focusable"
+      ],
+      "bounds": [
+        0,
+        0,
+        36,
+        34
+      ]
+    },
+    {
+      "depth": 5,
+      "role": "button",
+      "name": "Destination: Tasks",
+      "states": [
+        "showing",
+        "visible"
+      ],
+      "bounds": [
+        0,
+        0,
+        78,
+        34
+      ]
+    },
+    {
+      "depth": 6,
+      "role": "toggle button",
+      "name": "Destination: Tasks",
+      "states": [
+        "showing",
+        "visible",
+        "focused",
+        "focusable"
+      ],
+      "bounds": [
+        0,
+        0,
+        78,
+        34
+      ]
+    },
+    {
+      "depth": 7,
+      "role": "panel",
+      "name": "",
+      "states": [
+        "showing",
+        "visible"
+      ],
+      "bounds": [
+        0,
+        0,
+        56,
+        24
+      ]
+    },
+    {
+      "depth": 8,
+      "role": "grouping",
+      "name": "",
+      "states": [
+        "showing",
+        "visible"
+      ],
+      "bounds": [
+        0,
+        0,
+        36,
+        24
+      ]
+    },
+    {
+      "depth": 9,
+      "role": "label",
+      "name": "Tasks",
+      "states": [
+        "showing",
+        "visible"
+      ],
+      "bounds": [
+        0,
+        0,
+        36,
+        24
+      ]
+    },
+    {
+      "depth": 8,
+      "role": "panel",
+      "name": "",
+      "states": [
+        "showing",
+        "visible"
+      ],
+      "bounds": [
+        0,
+        0,
+        16,
+        24
+      ]
+    },
+    {
+      "depth": 5,
+      "role": "panel",
+      "name": "",
+      "states": [
+        "showing",
+        "visible"
+      ],
+      "bounds": [
+        0,
+        0,
+        360,
+        46
+      ]
+    },
+    {
+      "depth": 6,
+      "role": "button",
+      "name": "Application menu",
+      "states": [
+        "showing",
+        "visible"
+      ],
+      "bounds": [
+        0,
+        0,
+        36,
+        34
+      ]
+    },
+    {
+      "depth": 7,
+      "role": "toggle button",
+      "name": "Application menu",
+      "states": [
+        "showing",
+        "visible",
+        "focusable"
+      ],
+      "bounds": [
+        0,
+        0,
+        36,
+        34
+      ]
+    },
+    {
+      "depth": 8,
+      "role": "panel",
+      "name": "",
+      "states": [
+        "showing",
+        "visible"
+      ],
+      "bounds": [
+        0,
+        0,
+        16,
+        24
+      ]
+    },
+    {
+      "depth": 6,
+      "role": "toggle button",
+      "name": "Show or hide details",
+      "states": [
+        "showing",
+        "visible",
+        "focusable"
+      ],
+      "bounds": [
+        0,
+        0,
+        36,
+        34
+      ]
+    },
+    {
+      "depth": 6,
+      "role": "panel",
+      "name": "",
+      "states": [
+        "showing",
+        "visible"
+      ],
+      "bounds": [
+        0,
+        0,
+        136,
+        46
+      ]
+    },
+    {
+      "depth": 7,
+      "role": "button",
+      "name": "Workspaces, none connected",
+      "states": [
+        "showing",
+        "visible"
+      ],
+      "bounds": [
+        0,
+        0,
+        136,
+        34
+      ]
+    },
+    {
+      "depth": 8,
+      "role": "toggle button",
+      "name": "Workspaces, none connected",
+      "states": [
+        "showing",
+        "visible",
+        "focusable"
+      ],
+      "bounds": [
+        0,
+        0,
+        136,
+        34
+      ]
+    },
+    {
+      "depth": 9,
+      "role": "panel",
+      "name": "",
+      "states": [
+        "showing",
+        "visible"
+      ],
+      "bounds": [
+        0,
+        0,
+        114,
+        24
+      ]
+    },
+    {
+      "depth": 10,
+      "role": "grouping",
+      "name": "",
+      "states": [
+        "showing",
+        "visible"
+      ],
+      "bounds": [
+        0,
+        0,
+        94,
+        24
+      ]
+    },
+    {
+      "depth": 11,
+      "role": "label",
+      "name": "No workspace",
+      "states": [
+        "showing",
+        "visible"
+      ],
+      "bounds": [
+        0,
+        0,
+        94,
+        24
+      ]
+    },
+    {
+      "depth": 10,
+      "role": "panel",
+      "name": "",
+      "states": [
+        "showing",
+        "visible"
+      ],
+      "bounds": [
+        0,
+        0,
+        16,
+        24
+      ]
+    },
+    {
+      "depth": 6,
+      "role": "grouping",
+      "name": "",
+      "states": [
+        "showing",
+        "visible"
+      ],
+      "bounds": [
+        0,
+        0,
+        133,
+        46
+      ]
+    },
+    {
+      "depth": 7,
+      "role": "button",
+      "name": "Minimize",
+      "states": [
+        "showing",
+        "visible",
+        "focusable"
+      ],
+      "bounds": [
+        0,
+        0,
+        40,
+        46
+      ]
+    },
+    {
+      "depth": 7,
+      "role": "button",
+      "name": "Maximize",
+      "states": [
+        "showing",
+        "visible",
+        "focusable"
+      ],
+      "bounds": [
+        0,
+        0,
+        40,
+        46
+      ]
+    },
+    {
+      "depth": 7,
+      "role": "button",
+      "name": "Close",
+      "states": [
+        "showing",
+        "visible",
+        "focusable"
+      ],
+      "bounds": [
+        0,
+        0,
+        41,
+        46
+      ]
+    }
+  ],
+  "03-help-open": [
+    {
+      "depth": 0,
+      "role": "application",
+      "name": "crew-desktop",
+      "states": []
+    },
+    {
+      "depth": 1,
+      "role": "frame",
+      "name": "Tasks — Crew",
+      "states": [
+        "showing",
+        "visible"
+      ],
+      "bounds": [
+        0,
+        0,
+        560,
+        600
+      ]
+    },
+    {
+      "depth": 2,
+      "role": "grouping",
+      "name": "",
+      "states": [
+        "showing",
+        "visible"
+      ],
+      "bounds": [
+        0,
+        0,
+        550,
+        544
+      ]
+    },
+    {
+      "depth": 3,
+      "role": "panel",
+      "name": "",
+      "states": [
+        "showing",
+        "visible"
+      ],
+      "bounds": [
+        0,
+        0,
+        550,
+        544
+      ]
+    },
+    {
+      "depth": 4,
+      "role": "panel",
+      "name": "",
+      "states": [
+        "showing",
+        "visible",
+        "focusable"
+      ],
+      "bounds": [
+        0,
+        0,
+        550,
+        544
+      ]
+    },
+    {
+      "depth": 5,
+      "role": "grouping",
+      "name": "",
+      "states": [
+        "showing",
+        "visible"
+      ],
+      "bounds": [
+        0,
+        0,
+        550,
+        544
+      ]
+    },
+    {
+      "depth": 6,
+      "role": "panel",
+      "name": "",
+      "states": [
+        "showing",
+        "visible"
+      ],
+      "bounds": [
+        0,
+        0,
+        550,
+        544
+      ]
+    },
+    {
+      "depth": 7,
+      "role": "panel",
+      "name": "",
+      "states": [
+        "showing",
+        "visible"
+      ],
+      "bounds": [
+        0,
+        0,
+        550,
+        544
+      ]
+    },
+    {
+      "depth": 8,
+      "role": "scroll pane",
+      "name": "",
+      "states": [
+        "showing",
+        "visible"
+      ],
+      "bounds": [
+        0,
+        0,
+        550,
+        544
+      ]
+    },
+    {
+      "depth": 9,
+      "role": "panel",
+      "name": "",
+      "states": [
+        "showing",
+        "visible"
+      ],
+      "bounds": [
+        0,
+        0,
+        550,
+        544
+      ]
+    },
+    {
+      "depth": 10,
+      "role": "panel",
+      "name": "",
+      "states": [
+        "showing",
+        "visible"
+      ],
+      "bounds": [
+        0,
+        0,
+        335,
+        120
+      ]
+    },
+    {
+      "depth": 11,
+      "role": "label",
+      "name": "No task board loaded",
+      "states": [
+        "showing",
+        "visible"
+      ],
+      "bounds": [
+        0,
+        0,
+        335,
+        24
+      ]
+    },
+    {
+      "depth": 11,
+      "role": "label",
+      "name": "Connect to a workspace to inspect tasks and their dependencies.",
+      "states": [
+        "showing",
+        "visible"
+      ],
+      "bounds": [
+        0,
+        0,
+        335,
+        32
+      ]
+    },
+    {
+      "depth": 6,
+      "role": "panel",
+      "name": "",
+      "states": [
+        "showing",
+        "visible"
+      ],
+      "bounds": [
+        0,
+        0,
+        2069881440,
+        31582
+      ]
+    },
+    {
+      "depth": 6,
+      "role": "panel",
+      "name": "",
+      "states": [
+        "showing",
+        "visible"
+      ],
+      "bounds": [
+        0,
+        0,
+        2069881440,
+        31582
+      ]
+    },
+    {
+      "depth": 6,
+      "role": "panel",
+      "name": "",
+      "states": [
+        "showing",
+        "visible"
+      ],
+      "bounds": [
+        0,
+        0,
+        2069881440,
+        31582
+      ]
+    },
+    {
+      "depth": 2,
+      "role": "grouping",
+      "name": "",
+      "states": [
+        "showing",
+        "visible"
+      ],
+      "bounds": [
+        0,
+        0,
+        552,
+        47
+      ]
+    },
+    {
+      "depth": 3,
+      "role": "panel",
+      "name": "",
+      "states": [
+        "showing",
+        "visible"
+      ],
+      "bounds": [
+        0,
+        0,
+        540,
+        46
+      ]
+    },
+    {
+      "depth": 4,
+      "role": "panel",
+      "name": "",
+      "states": [
+        "showing",
+        "visible"
+      ],
+      "bounds": [
+        0,
+        0,
+        540,
+        46
+      ]
+    },
+    {
+      "depth": 5,
+      "role": "panel",
+      "name": "",
+      "states": [
+        "showing",
+        "visible"
+      ],
+      "bounds": [
+        0,
+        0,
+        36,
+        46
+      ]
+    },
+    {
+      "depth": 6,
+      "role": "toggle button",
+      "name": "Show or hide sidebar",
+      "states": [
+        "showing",
+        "visible",
+        "focusable"
+      ],
+      "bounds": [
+        0,
+        0,
+        36,
+        34
+      ]
+    },
+    {
+      "depth": 5,
+      "role": "button",
+      "name": "Destination: Tasks",
+      "states": [
+        "showing",
+        "visible"
+      ],
+      "bounds": [
+        0,
+        0,
+        78,
+        34
+      ]
+    },
+    {
+      "depth": 6,
+      "role": "toggle button",
+      "name": "Destination: Tasks",
+      "states": [
+        "showing",
+        "visible",
+        "focusable"
+      ],
+      "bounds": [
+        0,
+        0,
+        78,
+        34
+      ]
+    },
+    {
+      "depth": 7,
+      "role": "panel",
+      "name": "",
+      "states": [
+        "showing",
+        "visible"
+      ],
+      "bounds": [
+        0,
+        0,
+        56,
+        24
+      ]
+    },
+    {
+      "depth": 8,
+      "role": "grouping",
+      "name": "",
+      "states": [
+        "showing",
+        "visible"
+      ],
+      "bounds": [
+        0,
+        0,
+        36,
+        24
+      ]
+    },
+    {
+      "depth": 9,
+      "role": "label",
+      "name": "Tasks",
+      "states": [
+        "showing",
+        "visible"
+      ],
+      "bounds": [
+        0,
+        0,
+        36,
+        24
+      ]
+    },
+    {
+      "depth": 8,
+      "role": "panel",
+      "name": "",
+      "states": [
+        "showing",
+        "visible"
+      ],
+      "bounds": [
+        0,
+        0,
+        16,
+        24
+      ]
+    },
+    {
+      "depth": 5,
+      "role": "panel",
+      "name": "",
+      "states": [
+        "showing",
+        "visible"
+      ],
+      "bounds": [
+        0,
+        0,
+        360,
+        46
+      ]
+    },
+    {
+      "depth": 6,
+      "role": "button",
+      "name": "Application menu",
+      "states": [
+        "showing",
+        "visible"
+      ],
+      "bounds": [
+        0,
+        0,
+        36,
+        34
+      ]
+    },
+    {
+      "depth": 7,
+      "role": "toggle button",
+      "name": "Application menu",
+      "states": [
+        "showing",
+        "visible",
+        "focusable"
+      ],
+      "bounds": [
+        0,
+        0,
+        36,
+        34
+      ]
+    },
+    {
+      "depth": 8,
+      "role": "panel",
+      "name": "",
+      "states": [
+        "showing",
+        "visible"
+      ],
+      "bounds": [
+        0,
+        0,
+        16,
+        24
+      ]
+    },
+    {
+      "depth": 6,
+      "role": "toggle button",
+      "name": "Show or hide details",
+      "states": [
+        "showing",
+        "visible",
+        "focusable"
+      ],
+      "bounds": [
+        0,
+        0,
+        36,
+        34
+      ]
+    },
+    {
+      "depth": 6,
+      "role": "panel",
+      "name": "",
+      "states": [
+        "showing",
+        "visible"
+      ],
+      "bounds": [
+        0,
+        0,
+        136,
+        46
+      ]
+    },
+    {
+      "depth": 7,
+      "role": "button",
+      "name": "Workspaces, none connected",
+      "states": [
+        "showing",
+        "visible"
+      ],
+      "bounds": [
+        0,
+        0,
+        136,
+        34
+      ]
+    },
+    {
+      "depth": 8,
+      "role": "toggle button",
+      "name": "Workspaces, none connected",
+      "states": [
+        "showing",
+        "visible",
+        "focusable"
+      ],
+      "bounds": [
+        0,
+        0,
+        136,
+        34
+      ]
+    },
+    {
+      "depth": 9,
+      "role": "panel",
+      "name": "",
+      "states": [
+        "showing",
+        "visible"
+      ],
+      "bounds": [
+        0,
+        0,
+        114,
+        24
+      ]
+    },
+    {
+      "depth": 10,
+      "role": "grouping",
+      "name": "",
+      "states": [
+        "showing",
+        "visible"
+      ],
+      "bounds": [
+        0,
+        0,
+        94,
+        24
+      ]
+    },
+    {
+      "depth": 11,
+      "role": "label",
+      "name": "No workspace",
+      "states": [
+        "showing",
+        "visible"
+      ],
+      "bounds": [
+        0,
+        0,
+        94,
+        24
+      ]
+    },
+    {
+      "depth": 10,
+      "role": "panel",
+      "name": "",
+      "states": [
+        "showing",
+        "visible"
+      ],
+      "bounds": [
+        0,
+        0,
+        16,
+        24
+      ]
+    },
+    {
+      "depth": 6,
+      "role": "grouping",
+      "name": "",
+      "states": [
+        "showing",
+        "visible"
+      ],
+      "bounds": [
+        0,
+        0,
+        133,
+        46
+      ]
+    },
+    {
+      "depth": 7,
+      "role": "button",
+      "name": "Minimize",
+      "states": [
+        "showing",
+        "visible",
+        "focusable"
+      ],
+      "bounds": [
+        0,
+        0,
+        40,
+        46
+      ]
+    },
+    {
+      "depth": 7,
+      "role": "button",
+      "name": "Maximize",
+      "states": [
+        "showing",
+        "visible",
+        "focusable"
+      ],
+      "bounds": [
+        0,
+        0,
+        40,
+        46
+      ]
+    },
+    {
+      "depth": 7,
+      "role": "button",
+      "name": "Close",
+      "states": [
+        "showing",
+        "visible",
+        "focusable"
+      ],
+      "bounds": [
+        0,
+        0,
+        41,
+        46
+      ]
+    },
+    {
+      "depth": 1,
+      "role": "frame",
+      "name": "Keyboard Shortcuts",
+      "states": [
+        "showing",
+        "visible"
+      ],
+      "bounds": [
+        0,
+        0,
+        580,
+        500
+      ]
+    },
+    {
+      "depth": 2,
+      "role": "scroll pane",
+      "name": "",
+      "states": [
+        "showing",
+        "visible",
+        "focusable"
+      ],
+      "bounds": [
+        0,
+        0,
+        580,
+        500
+      ]
+    },
+    {
+      "depth": 3,
+      "role": "panel",
+      "name": "",
+      "states": [
+        "showing",
+        "visible"
+      ],
+      "bounds": [
+        0,
+        0,
+        580,
+        500
+      ]
+    },
+    {
+      "depth": 4,
+      "role": "panel",
+      "name": "",
+      "states": [
+        "showing",
+        "visible"
+      ],
+      "bounds": [
+        0,
+        0,
+        532,
+        452
+      ]
+    },
+    {
+      "depth": 5,
+      "role": "panel",
+      "name": "",
+      "states": [
+        "showing",
+        "visible"
+      ],
+      "bounds": [
+        0,
+        0,
+        532,
+        240
+      ]
+    },
+    {
+      "depth": 6,
+      "role": "label",
+      "name": "Team / Tasks / Messages / Events / Usage",
+      "states": [
+        "showing",
+        "visible"
+      ],
+      "bounds": [
+        0,
+        0,
+        275,
+        16
+      ]
+    },
+    {
+      "depth": 6,
+      "role": "label",
+      "name": "Ctrl+1 / 2 / 3 / 4 / 5",
+      "states": [
+        "showing",
+        "visible",
+        "focusable"
+      ],
+      "bounds": [
+        0,
+        0,
+        130,
+        16
+      ]
+    },
+    {
+      "depth": 6,
+      "role": "label",
+      "name": "Show or hide sidebar",
+      "states": [
+        "showing",
+        "visible"
+      ],
+      "bounds": [
+        0,
+        0,
+        275,
+        16
+      ]
+    },
+    {
+      "depth": 6,
+      "role": "label",
+      "name": "Ctrl+B",
+      "states": [
+        "showing",
+        "visible",
+        "focusable"
+      ],
+      "bounds": [
+        0,
+        0,
+        130,
+        16
+      ]
+    },
+    {
+      "depth": 6,
+      "role": "label",
+      "name": "Show or hide details",
+      "states": [
+        "showing",
+        "visible"
+      ],
+      "bounds": [
+        0,
+        0,
+        275,
+        16
+      ]
+    },
+    {
+      "depth": 6,
+      "role": "label",
+      "name": "Ctrl+I",
+      "states": [
+        "showing",
+        "visible",
+        "focusable"
+      ],
+      "bounds": [
+        0,
+        0,
+        130,
+        16
+      ]
+    },
+    {
+      "depth": 6,
+      "role": "label",
+      "name": "Back from compact navigation or details",
+      "states": [
+        "showing",
+        "visible"
+      ],
+      "bounds": [
+        0,
+        0,
+        275,
+        16
+      ]
+    },
+    {
+      "depth": 6,
+      "role": "label",
+      "name": "Alt+Left",
+      "states": [
+        "showing",
+        "visible",
+        "focusable"
+      ],
+      "bounds": [
+        0,
+        0,
+        130,
+        16
+      ]
+    },
+    {
+      "depth": 6,
+      "role": "label",
+      "name": "Move between controls",
+      "states": [
+        "showing",
+        "visible"
+      ],
+      "bounds": [
+        0,
+        0,
+        275,
+        16
+      ]
+    },
+    {
+      "depth": 6,
+      "role": "label",
+      "name": "Tab / Shift+Tab",
+      "states": [
+        "showing",
+        "visible",
+        "focusable"
+      ],
+      "bounds": [
+        0,
+        0,
+        130,
+        16
+      ]
+    },
+    {
+      "depth": 6,
+      "role": "label",
+      "name": "Move through destinations",
+      "states": [
+        "showing",
+        "visible"
+      ],
+      "bounds": [
+        0,
+        0,
+        275,
+        16
+      ]
+    },
+    {
+      "depth": 6,
+      "role": "label",
+      "name": "Up / Down",
+      "states": [
+        "showing",
+        "visible",
+        "focusable"
+      ],
+      "bounds": [
+        0,
+        0,
+        130,
+        16
+      ]
+    },
+    {
+      "depth": 6,
+      "role": "label",
+      "name": "Keyboard shortcuts",
+      "states": [
+        "showing",
+        "visible"
+      ],
+      "bounds": [
+        0,
+        0,
+        275,
+        16
+      ]
+    },
+    {
+      "depth": 6,
+      "role": "label",
+      "name": "F1",
+      "states": [
+        "showing",
+        "visible",
+        "focusable"
+      ],
+      "bounds": [
+        0,
+        0,
+        130,
+        16
+      ]
+    },
+    {
+      "depth": 6,
+      "role": "label",
+      "name": "Close window",
+      "states": [
+        "showing",
+        "visible"
+      ],
+      "bounds": [
+        0,
+        0,
+        275,
+        16
+      ]
+    },
+    {
+      "depth": 6,
+      "role": "label",
+      "name": "Ctrl+W",
+      "states": [
+        "showing",
+        "visible",
+        "focusable"
+      ],
+      "bounds": [
+        0,
+        0,
+        130,
+        16
+      ]
+    },
+    {
+      "depth": 6,
+      "role": "label",
+      "name": "Quit application",
+      "states": [
+        "showing",
+        "visible"
+      ],
+      "bounds": [
+        0,
+        0,
+        275,
+        16
+      ]
+    },
+    {
+      "depth": 6,
+      "role": "label",
+      "name": "Ctrl+Q",
+      "states": [
+        "showing",
+        "visible",
+        "focusable"
+      ],
+      "bounds": [
+        0,
+        0,
+        130,
+        16
+      ]
+    },
+    {
+      "depth": 5,
+      "role": "button",
+      "name": "Close",
+      "states": [
+        "showing",
+        "visible",
+        "focused",
+        "focusable"
+      ],
+      "bounds": [
+        0,
+        0,
+        71,
+        34
+      ]
+    },
+    {
+      "depth": 6,
+      "role": "label",
+      "name": "Close",
+      "states": [
+        "showing",
+        "visible"
+      ],
+      "bounds": [
+        0,
+        0,
+        37,
+        24
+      ]
+    }
+  ],
+  "04-help-closed": [
+    {
+      "depth": 0,
+      "role": "application",
+      "name": "crew-desktop",
+      "states": []
+    },
+    {
+      "depth": 1,
+      "role": "frame",
+      "name": "Tasks — Crew",
+      "states": [
+        "showing",
+        "visible"
+      ],
+      "bounds": [
+        0,
+        0,
+        560,
+        600
+      ]
+    },
+    {
+      "depth": 2,
+      "role": "grouping",
+      "name": "",
+      "states": [
+        "showing",
+        "visible"
+      ],
+      "bounds": [
+        0,
+        0,
+        550,
+        544
+      ]
+    },
+    {
+      "depth": 3,
+      "role": "panel",
+      "name": "",
+      "states": [
+        "showing",
+        "visible"
+      ],
+      "bounds": [
+        0,
+        0,
+        550,
+        544
+      ]
+    },
+    {
+      "depth": 4,
+      "role": "panel",
+      "name": "",
+      "states": [
+        "showing",
+        "visible",
+        "focusable"
+      ],
+      "bounds": [
+        0,
+        0,
+        550,
+        544
+      ]
+    },
+    {
+      "depth": 5,
+      "role": "grouping",
+      "name": "",
+      "states": [
+        "showing",
+        "visible"
+      ],
+      "bounds": [
+        0,
+        0,
+        550,
+        544
+      ]
+    },
+    {
+      "depth": 6,
+      "role": "panel",
+      "name": "",
+      "states": [
+        "showing",
+        "visible"
+      ],
+      "bounds": [
+        0,
+        0,
+        550,
+        544
+      ]
+    },
+    {
+      "depth": 7,
+      "role": "panel",
+      "name": "",
+      "states": [
+        "showing",
+        "visible"
+      ],
+      "bounds": [
+        0,
+        0,
+        550,
+        544
+      ]
+    },
+    {
+      "depth": 8,
+      "role": "scroll pane",
+      "name": "",
+      "states": [
+        "showing",
+        "visible"
+      ],
+      "bounds": [
+        0,
+        0,
+        550,
+        544
+      ]
+    },
+    {
+      "depth": 9,
+      "role": "panel",
+      "name": "",
+      "states": [
+        "showing",
+        "visible"
+      ],
+      "bounds": [
+        0,
+        0,
+        550,
+        544
+      ]
+    },
+    {
+      "depth": 10,
+      "role": "panel",
+      "name": "",
+      "states": [
+        "showing",
+        "visible"
+      ],
+      "bounds": [
+        0,
+        0,
+        335,
+        120
+      ]
+    },
+    {
+      "depth": 11,
+      "role": "label",
+      "name": "No task board loaded",
+      "states": [
+        "showing",
+        "visible"
+      ],
+      "bounds": [
+        0,
+        0,
+        335,
+        24
+      ]
+    },
+    {
+      "depth": 11,
+      "role": "label",
+      "name": "Connect to a workspace to inspect tasks and their dependencies.",
+      "states": [
+        "showing",
+        "visible"
+      ],
+      "bounds": [
+        0,
+        0,
+        335,
+        32
+      ]
+    },
+    {
+      "depth": 6,
+      "role": "panel",
+      "name": "",
+      "states": [
+        "showing",
+        "visible"
+      ],
+      "bounds": [
+        0,
+        0,
+        2069881440,
+        31582
+      ]
+    },
+    {
+      "depth": 6,
+      "role": "panel",
+      "name": "",
+      "states": [
+        "showing",
+        "visible"
+      ],
+      "bounds": [
+        0,
+        0,
+        2069881440,
+        31582
+      ]
+    },
+    {
+      "depth": 6,
+      "role": "panel",
+      "name": "",
+      "states": [
+        "showing",
+        "visible"
+      ],
+      "bounds": [
+        0,
+        0,
+        2069881440,
+        31582
+      ]
+    },
+    {
+      "depth": 2,
+      "role": "grouping",
+      "name": "",
+      "states": [
+        "showing",
+        "visible"
+      ],
+      "bounds": [
+        0,
+        0,
+        552,
+        47
+      ]
+    },
+    {
+      "depth": 3,
+      "role": "panel",
+      "name": "",
+      "states": [
+        "showing",
+        "visible"
+      ],
+      "bounds": [
+        0,
+        0,
+        540,
+        46
+      ]
+    },
+    {
+      "depth": 4,
+      "role": "panel",
+      "name": "",
+      "states": [
+        "showing",
+        "visible"
+      ],
+      "bounds": [
+        0,
+        0,
+        540,
+        46
+      ]
+    },
+    {
+      "depth": 5,
+      "role": "panel",
+      "name": "",
+      "states": [
+        "showing",
+        "visible"
+      ],
+      "bounds": [
+        0,
+        0,
+        36,
+        46
+      ]
+    },
+    {
+      "depth": 6,
+      "role": "toggle button",
+      "name": "Show or hide sidebar",
+      "states": [
+        "showing",
+        "visible",
+        "focusable"
+      ],
+      "bounds": [
+        0,
+        0,
+        36,
+        34
+      ]
+    },
+    {
+      "depth": 5,
+      "role": "button",
+      "name": "Destination: Tasks",
+      "states": [
+        "showing",
+        "visible"
+      ],
+      "bounds": [
+        0,
+        0,
+        78,
+        34
+      ]
+    },
+    {
+      "depth": 6,
+      "role": "toggle button",
+      "name": "Destination: Tasks",
+      "states": [
+        "showing",
+        "visible",
+        "focused",
+        "focusable"
+      ],
+      "bounds": [
+        0,
+        0,
+        78,
+        34
+      ]
+    },
+    {
+      "depth": 7,
+      "role": "panel",
+      "name": "",
+      "states": [
+        "showing",
+        "visible"
+      ],
+      "bounds": [
+        0,
+        0,
+        56,
+        24
+      ]
+    },
+    {
+      "depth": 8,
+      "role": "grouping",
+      "name": "",
+      "states": [
+        "showing",
+        "visible"
+      ],
+      "bounds": [
+        0,
+        0,
+        36,
+        24
+      ]
+    },
+    {
+      "depth": 9,
+      "role": "label",
+      "name": "Tasks",
+      "states": [
+        "showing",
+        "visible"
+      ],
+      "bounds": [
+        0,
+        0,
+        36,
+        24
+      ]
+    },
+    {
+      "depth": 8,
+      "role": "panel",
+      "name": "",
+      "states": [
+        "showing",
+        "visible"
+      ],
+      "bounds": [
+        0,
+        0,
+        16,
+        24
+      ]
+    },
+    {
+      "depth": 5,
+      "role": "panel",
+      "name": "",
+      "states": [
+        "showing",
+        "visible"
+      ],
+      "bounds": [
+        0,
+        0,
+        360,
+        46
+      ]
+    },
+    {
+      "depth": 6,
+      "role": "button",
+      "name": "Application menu",
+      "states": [
+        "showing",
+        "visible"
+      ],
+      "bounds": [
+        0,
+        0,
+        36,
+        34
+      ]
+    },
+    {
+      "depth": 7,
+      "role": "toggle button",
+      "name": "Application menu",
+      "states": [
+        "showing",
+        "visible",
+        "focusable"
+      ],
+      "bounds": [
+        0,
+        0,
+        36,
+        34
+      ]
+    },
+    {
+      "depth": 8,
+      "role": "panel",
+      "name": "",
+      "states": [
+        "showing",
+        "visible"
+      ],
+      "bounds": [
+        0,
+        0,
+        16,
+        24
+      ]
+    },
+    {
+      "depth": 6,
+      "role": "toggle button",
+      "name": "Show or hide details",
+      "states": [
+        "showing",
+        "visible",
+        "focusable"
+      ],
+      "bounds": [
+        0,
+        0,
+        36,
+        34
+      ]
+    },
+    {
+      "depth": 6,
+      "role": "panel",
+      "name": "",
+      "states": [
+        "showing",
+        "visible"
+      ],
+      "bounds": [
+        0,
+        0,
+        136,
+        46
+      ]
+    },
+    {
+      "depth": 7,
+      "role": "button",
+      "name": "Workspaces, none connected",
+      "states": [
+        "showing",
+        "visible"
+      ],
+      "bounds": [
+        0,
+        0,
+        136,
+        34
+      ]
+    },
+    {
+      "depth": 8,
+      "role": "toggle button",
+      "name": "Workspaces, none connected",
+      "states": [
+        "showing",
+        "visible",
+        "focusable"
+      ],
+      "bounds": [
+        0,
+        0,
+        136,
+        34
+      ]
+    },
+    {
+      "depth": 9,
+      "role": "panel",
+      "name": "",
+      "states": [
+        "showing",
+        "visible"
+      ],
+      "bounds": [
+        0,
+        0,
+        114,
+        24
+      ]
+    },
+    {
+      "depth": 10,
+      "role": "grouping",
+      "name": "",
+      "states": [
+        "showing",
+        "visible"
+      ],
+      "bounds": [
+        0,
+        0,
+        94,
+        24
+      ]
+    },
+    {
+      "depth": 11,
+      "role": "label",
+      "name": "No workspace",
+      "states": [
+        "showing",
+        "visible"
+      ],
+      "bounds": [
+        0,
+        0,
+        94,
+        24
+      ]
+    },
+    {
+      "depth": 10,
+      "role": "panel",
+      "name": "",
+      "states": [
+        "showing",
+        "visible"
+      ],
+      "bounds": [
+        0,
+        0,
+        16,
+        24
+      ]
+    },
+    {
+      "depth": 6,
+      "role": "grouping",
+      "name": "",
+      "states": [
+        "showing",
+        "visible"
+      ],
+      "bounds": [
+        0,
+        0,
+        133,
+        46
+      ]
+    },
+    {
+      "depth": 7,
+      "role": "button",
+      "name": "Minimize",
+      "states": [
+        "showing",
+        "visible",
+        "focusable"
+      ],
+      "bounds": [
+        0,
+        0,
+        40,
+        46
+      ]
+    },
+    {
+      "depth": 7,
+      "role": "button",
+      "name": "Maximize",
+      "states": [
+        "showing",
+        "visible",
+        "focusable"
+      ],
+      "bounds": [
+        0,
+        0,
+        40,
+        46
+      ]
+    },
+    {
+      "depth": 7,
+      "role": "button",
+      "name": "Close",
+      "states": [
+        "showing",
+        "visible",
+        "focusable"
+      ],
+      "bounds": [
+        0,
+        0,
+        41,
+        46
+      ]
+    }
+  ]
+}

@@ -17,13 +17,17 @@
     "toolchain": "rustc 1.93.1 via +1.93",
     "build_times_seconds": {
       "baseline": 27.57,
-      "candidate": 0.83
+      "candidate": 0.83,
+      "corrected": 0.94
     },
     "scope": "real disconnected native shell; no core, transport or terminal integration",
     "display": "private Xvfb 1440x960x24, 96dpi; Openbox; GDK_BACKEND=x11, GSK_RENDERER=cairo, scale 1",
     "atspi": "private dbus-daemon using selected at-spi2-core accessibility.conf; GTK_A11Y=atspi; pyatspi 2.58.1",
     "bounds_limit": "AT-SPI bounds are raw provider output; window geometry and PNG dimensions establish capture sizes",
-    "capture_environment_limit": "designer pure environment omitted the ambient librsvg loader cache; graph final images use normal approved native environment. Missing SVG glyphs in discarded designer overview captures are not a product finding."
+    "capture_environment_limit": "designer pure environment omitted the ambient librsvg loader cache; graph final images use normal approved native environment. Missing SVG glyphs in discarded designer overview captures are not a product finding.",
+    "source_focus_correction": "706bd6358b4e9d4390b3ac907350c0a5ecc70ce3",
+    "designer_corrected_binary_sha256": "8c109210360dff7788b021fae83b1ae07313669d34be9a3a6b9d638e4f8e49dc",
+    "corrected_capture_environment": "Same private Xvfb/Openbox/AT-SPI setup, with pinned librsvg2.62.3 GDK_PIXBUF_MODULE_FILE explicitly retained. SVG icons rendered correctly."
   },
   "captures": [
     {
@@ -55,6 +59,16 @@
       "width": 580,
       "height": 500,
       "sha256": "ea3548f4038606e39ecf5ae9dd217db73b3687a189bb89c383a210612b9848ae"
+    },
+    {
+      "file": "corrected-empty-focus-560.png",
+      "original": "target/native-shell-review-c457/run05/corrected-empty-focus-560.png",
+      "producer": "designer",
+      "source": "706bd6358b4e9d4390b3ac907350c0a5ecc70ce3",
+      "binary_sha256": "8c109210360dff7788b021fae83b1ae07313669d34be9a3a6b9d638e4f8e49dc",
+      "width": 560,
+      "height": 600,
+      "sha256": "e6a0e1786baf1a9b1b0f83809d036e6365b6516b62187fe97cf092b6435c1a44"
     }
   ],
   "findings": [
@@ -65,8 +79,8 @@
     },
     {
       "id": "NSR-L02",
-      "state": "empty-view focus target needs owner correction or explicit named viewport decision",
-      "owner": "graph"
+      "state": "fixed in706bd635; real private keyboard/AT-SPI empty detail/back and F1/Escape replay passed",
+      "owner": "qa (native-linux-empty-focus)"
     },
     {
       "id": "NSR-L03",
@@ -75,8 +89,9 @@
     }
   ],
   "cleanup": {
-    "recorded_pids": 14,
+    "recorded_pids": 18,
     "present_at_check": 0,
-    "operator_processes": "not touched"
+    "operator_processes": "not touched",
+    "corrected_run_pids_gone": 4
   }
 }

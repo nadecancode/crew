@@ -8,10 +8,11 @@ It supplements the later `native-visual-signoff`; an unconnected shell is not a
 connected application. No operator session, credential or listener is changed.
 
 Status: bounded early review complete. The captured Linux hierarchy and palette
-match the foundation contract; one keyboard defect is fixed and two accessibility
-observations need follow-up. Apple source/icon inspection found no material design
-disagreement. This is not final native visual or accessibility sign-off, and no
-complete native acceptance row is passed by this checkpoint.
+match the foundation contract. Escape dismissal and empty-view focus are corrected
+and independently replayed; the menu accessibility-provider observation remains
+unclassified. Apple source/icon inspection found no material design disagreement.
+This is not final native visual or accessibility sign-off, and no complete native
+acceptance row is passed by this checkpoint.
 
 ## Apple: source and asset inspection
 
@@ -48,19 +49,26 @@ not an observed focus defect.
 ## Linux: actual shell review
 
 The initial published crate is `c45703fff782c6a4d2573437771be08a99ba3139`;
-the reviewed follow-up is `d4d31a134b89e62f38e5cf32040708d695affb0e`.
+the first reviewed follow-up is `d4d31a134b89e62f38e5cf32040708d695affb0e`.
+The subsequent empty-focus correction is
+`706bd6358b4e9d4390b3ac907350c0a5ecc70ce3` from QA's dedicated
+`native-linux-empty-focus` card. The records below preserve the original
+`d4d31a13` behavior separately from that corrected target.
 Workspace registration is separately `32ab8f0e8046478700726de64c65e1f91fc509ba`.
-Both source versions were staged into an ignored directory in the designer's
+All three crate revisions were staged into an ignored directory in the designer's
 workspace and built with the registered lockfile, `cargo +1.93 build --locked
 -p crew-desktop --features native-ui -j 2`. The `+1.93` toolchain reported
 `rustc 1.93.1`; initial build completed in 27.57 seconds and the follow-up in
-0.83 seconds. No product or root workspace file was edited.
+0.83 seconds. The later correction rebuilt in 0.94 seconds. No product or root
+workspace file was edited by the designer.
 
 The independent binaries have SHA-256 values
 `0ab9aab3b2f7a331521684340781a4d43bc15b0016a50f80668e2d7ec0044434`
 (initial) and
 `ac0dc72ec0ba69412141ebb7e10f281639e944c3422b324f8e2489432a8fddd1`
-(follow-up). Runtime library setup used the exact approved QA helper
+(first follow-up). The independently built corrected binary is
+`8c109210360dff7788b021fae83b1ae07313669d34be9a3a6b9d638e4f8e49dc`.
+Runtime library setup used the exact approved QA helper
 `0198317b281e2bde0caf451eb5cdfb48094b3505`. A private Xvfb display,
 Openbox window manager, D-Bus session and accessibility bus were used; no
 operator display, daemon, listener or configuration was changed. The actual
@@ -79,7 +87,7 @@ loader-baseline image is not used for this design verdict.
 | Appearance | Dark app-owned canvas/panel surfaces are neutral gray; light appearance is warm neutral with green selection. Native focus remains independently visible from selection in the wide capture. The existing Crew icon and labelled native controls remain consistent. No colour or layout redesign is needed from these captures. |
 | Five destinations | On the follow-up binary, real Ctrl+1 through Ctrl+5 input produced Team, Tasks, Messages, Events and Usage window titles. No connection or domain action was fabricated. |
 | Header traversal | On the initial binary, Tab/Shift-Tab reached the sidebar toggle, destination menu, application menu, detail toggle and workspace control; real AT-SPI exposed their names and focus. The follow-up adds native menu chevrons. This does not prove every future feature view's keyboard path. |
-| Compact panes | Ctrl+I, resize from 1024×600 to 560×600, Alt+Left and Ctrl+B moved among detail, main and sidebar without losing the Tasks destination. Showing the compact sidebar focused its selected Tasks row. Empty main/detail focus is the separate NSR-L02 finding below. |
+| Compact panes | Ctrl+I, resize from 1024×600 to 560×600, Alt+Left and Ctrl+B moved among detail, main and sidebar without losing the Tasks destination. Showing the compact sidebar focused its selected Tasks row. `d4d31a13` left empty main/detail focus unnamed; the `706bd635` replay focuses the visible named destination control in both panes, as recorded separately in NSR-L02. |
 | Modal help | F1 opened Keyboard Shortcuts with Close focused. On the initial source, Escape did not dismiss it; Return did close it and restored the Tasks row. The follow-up's real Escape input removed the help frame and restored Tasks focus. |
 | Local appearance and quit | Native menu keyboard input changed appearance to dark. Ctrl+Q then ended the client. These were local shell actions; no team was loaded or stopped. |
 | Accessibility exposure | The real AT-SPI tree exposed the five destination row names, selected Tasks/Team states, named header controls, disconnected text, empty-state headings and modal Close focus. Native GMenu item labels are the separate NSR-L03 observation below. This was a programmatic accessibility inspection, not an Orca journey. |
@@ -100,10 +108,11 @@ Evidence: [before/after-Escape record](shell-review-20261005/atspi-baseline-esca
 [follow-up record](shell-review-20261005/atspi-d4-focus-menu.json), and the
 [initial modal still open after Escape](shell-review-20261005/baseline-shortcuts-after-escape.png).
 
-### NSR-L02 — Empty compact views focus an unnamed scroll pane
+### NSR-L02 — Empty compact views focused an unnamed scroll pane; corrected
 
-Owner: `graph`; correction requested in `m-4a36b92a34f8` and source cause
-confirmed in `m-5f7beeb09273`. This is a focus-context issue for keyboard/assistive use;
+Original author: `graph`; correction requested in `m-4a36b92a34f8` and source
+cause confirmed in `m-5f7beeb09273`. The orchestrator assigned the bounded
+`native-linux-empty-focus` correction to `qa`. This was a focus-context issue for keyboard/assistive use;
 Tab and the named header controls remain available, so no keyboard trap is
 claimed.
 
@@ -114,14 +123,26 @@ which improves the earlier behavior, but focus does not reach the named
 `Destination: Tasks` control described by the intended no-row fallback.
 The source's `focus_visible_view` accepts `child_focus` from the empty scroller.
 
-The empty view should either contribute no accidental focus target so the named
-destination fallback runs, or have a deliberate, useful accessible viewport name
-and visible focus behavior. Preserve keyboard scrolling and retained focus in
-real evidence/feature views. Do not disable focus on every scroller.
+The correction `706bd635` sets `can_focus(false)` and `focusable(false)` on the
+static `views::empty_state` scroller only. Real evidence/feature scrolling and
+focus remain outside this change. QA supplied a focused native regression; this
+design review independently rebuilt the exact corrected crate and replayed the
+real keyboard sequence on the private display/accessibility bus.
+
+Four observed assertions pass: the narrow empty detail focuses the visible,
+showing `Destination: Tasks` toggle; Alt+Left returns to the main pane with that
+same named control focused; F1 focuses Close in Keyboard Shortcuts; Escape closes
+help and restores `Destination: Tasks`. The corrected capture also shows its
+visible native focus ring. This closes the observed empty-view focus defect;
+the independent source gate remains the dedicated fix card's reviewer.
+
 The `02-narrow-detail` and `03-narrow-main` entries in the
 [follow-up AT-SPI record](shell-review-20261005/atspi-d4-focus-menu.json)
-preserve this observation. It needs resolution before claiming the corresponding
-native keyboard/accessibility acceptance.
+preserve the original observation. The distinct
+[corrected AT-SPI record](shell-review-20261005/atspi-706-focus.json) and
+[four assertion results](shell-review-20261005/focus-706-assertions.txt) document
+the `706bd635` replay. This bounded result does not resolve the separate menu
+provider observation or establish full screen-reader acceptance.
 
 ### NSR-L03 — Native menu labels are unresolved in the AT-SPI probe
 
@@ -150,6 +171,12 @@ resolving the observation. Evidence:
 
 ![Linux Tasks empty detail, dark, 560×600](shell-review-20261005/linux-tasks-dark-560.png)
 
+The two overview images above preserve `d4d31a13`. The following independently
+captured `706bd635` image shows the named destination focus after returning from
+empty detail and dismissing shortcut help:
+
+![Corrected empty Tasks focus, dark, 560×600](shell-review-20261005/corrected-empty-focus-560.png)
+
 [evidence.json](shell-review-20261005/evidence.json) records each image's source,
 producer, binary hash, dimensions and file hash. The
 [tool versions](shell-review-20261005/tool-versions.txt) identify GTK 4.22.4,
@@ -159,7 +186,7 @@ geometry and PNG dimensions establish image size rather than those bounds.
 The [diagnostic probe](shell-review-20261005/probe-atspi.py) preserves the tree
 reader used here with an explicit guard for the owned private accessibility
 bus. It is evidence tooling, not a native application module or a screen-reader
-test. All 14 recorded application/display/window-manager/accessibility-bus PIDs
+test. All 18 recorded application/display/window-manager/accessibility-bus PIDs
 from the completed runs were checked absent after cleanup.
 
 Two harness limits were isolated from product findings. The initial private
@@ -169,7 +196,9 @@ AT-SPI configuration. A `--pure` designer environment also omitted the normal
 `GDK_PIXBUF_MODULE_FILE` pointing to the pinned librsvg 2.62.3 loader cache:
 icon lookup succeeded but several SVG glyphs rendered as missing. Graph's normal
 approved runtime captures render them correctly. The discarded designer overview
-images are not used to allege missing product icons.
+images are not used to allege missing product icons. The final corrected replay
+explicitly retained that pinned SVG loader cache; its independently captured
+icons rendered correctly.
 
 The bounded review does not cover connected agents/tasks, terminal rendering,
 grant setup, live updates or mutations. It also does not replace actual

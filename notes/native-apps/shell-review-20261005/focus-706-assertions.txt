@@ -1,0 +1,4 @@
+PASS 01-narrow-detail-tree.json 'Destination: Tasks' toggle button focused/showing/visible
+PASS 02-narrow-main-tree.json 'Destination: Tasks' toggle button focused/showing/visible
+PASS 03-help-open-tree.json 'Close' button focused/showing/visible
+PASS 04-help-closed-tree.json 'Destination: Tasks' toggle button focused/showing/visible
