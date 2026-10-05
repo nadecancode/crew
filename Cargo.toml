@@ -1,6 +1,7 @@
 [workspace]
 resolver = "2"
-members = ["crates/crew-protocol", "crates/crew-client", "crates/crew-core", "crates/crew-tui", "crates/crew"]
+members = ["crates/crew-protocol", "crates/crew-client", "crates/crew-core", "crates/crew-tui", "crates/crew", "crates/crew-desktop"]
+default-members = ["crates/crew-protocol", "crates/crew-client", "crates/crew-core", "crates/crew-tui", "crates/crew"]
 
 [workspace.package]
 version = "0.1.0"
