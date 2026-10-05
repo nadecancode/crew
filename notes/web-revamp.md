@@ -474,6 +474,25 @@ For the neutral-theme correction, the local `ui-ux-pro-max` query `neutral dark 
 <a id="signoff"></a>
 ## §signoff — delivered dashboard
 
+### Current verdict: neutral appearance and task presentation retained
+
+**Visual verification: approved** for source `fnv1a64:f22f3cf5ad74d25f`, production bundle `9d2e838747fefae2684c66dd56ae854215446bbd`, delivered in `6049cdf63e36e303327235834f23a798aa5a82c1`. This bounded recovery check was performed on 2026-10-05. It extends the preceding neutral-palette sign-off to the delivered task projection; it does not relabel the older gallery as current-source evidence or rerun the broad capture matrix. [Final integrated review](../review/final-neutral-and-overlap.md) and [runtime acceptance](../review/runtime-delivery.md) retain their original verification scope.
+
+Compared with the preceding target, the only production source change under `web/src` is `format.ts::workOf`: executing work takes priority over parked Waiting cards. The stylesheet is byte-identical (`assets/style-DlOjRRu5.css`, `fnv1a64:fea4fef0900f767d`); explicit light/dark appearance choices, structural gray dark tokens, selection markers, and component layouts retain the earlier contract. I examined all six [retained current-source task captures](../review/runtime-presentation/index.html), including independent, older resumed, started Blocked, and separately inspectable Waiting work in both themes.
+
+I then opened the committed production assets against an isolated `subagents` / `parked` mock using `agent-browser`. The served manifest and all six file hashes matched the target. Graph, Team List, and inspector showed the independent task; after the first scenario step, List and inspector showed the newer Waiting task while independent work was in review; after the second step, all three showed the resumed older task. Opening the other Waiting task kept its own status and did not change current work. The [dark 1440px inspector](web-revamp/recovery-6049cdf6/dark-independent-inspector.png) retains neutral surfaces and a bright selected-node outline. The [light 390px task detail](web-revamp/recovery-6049cdf6/light-waiting-detail-narrow.png) finishes loading without horizontal overflow. Selected list rows retain blue dark and green light markers; a normal narrow Task List open/Escape returns focus to the selected task. [Exact evidence and reproduction](web-revamp/recovery-6049cdf6/evidence.json) distinguish these new checks from retained screenshots. No active listener or team daemon was restarted.
+
+The source-reading contrast check passes all 57 checks again. Current measured bundle sizes are:
+
+| Budget | Delivered bytes | Ceiling | Remaining |
+|---|---|---|---|
+| P1 nonterminal script | 230,415 | 230,500 | 85 |
+| P2 stylesheets | 33,906 | 34,000 | 94 |
+| P3 terminal script | 332,915 | 350,000 | 17,085 |
+| P4 entire bundle | 597,922 | 600,000 | 2,078 |
+
+No palette or task-presentation regression was found. One focus-restoration edge case was observed and sent to `ui`/`reviewer`: open a task from the Team inspector at desktop width, switch to Tasks while keeping its detail open, resize to 390px, then Escape. The detail closes but focus falls to the document body because its original agent trigger no longer exists; opening and closing directly from the narrow Task List restores focus correctly. This is existing `ui.ts::closePanel` behaviour, not introduced by the task projection. It remains explicitly recorded for triage rather than implied covered by visual approval. The approved scope, light-palette decision, P1–P4 ceilings, and deliberate deferrals below are unchanged; this check is not a full accessibility audit.
+
 ### Neutral-palette sign-off: preceding production target
 
 **Visual sign-off: approved** for production bundle `064037442ab479f5bbbe921361dda492757bf253`, source `fnv1a64:50c88732a97c7d7b`, reviewed on 2026-10-05 from QA's integrated revision `6f851ae0`. This supersedes the earlier green dark-palette approval. The operator's corrected appearance is delivered: neutral charcoal/black canvas, panels, text, controls, and terminal; blue general actions; purposeful colour for state, runtime identity, and the labelled usage series.

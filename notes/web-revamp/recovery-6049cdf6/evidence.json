@@ -1,0 +1,57 @@
+{
+  "date": "2026-10-05",
+  "verdict": "Neutral appearance and task presentation retained; focus-restoration edge case recorded for triage",
+  "baseline": "6049cdf63e36e303327235834f23a798aa5a82c1",
+  "bundle": "9d2e838747fefae2684c66dd56ae854215446bbd",
+  "source": "fnv1a64:f22f3cf5ad74d25f",
+  "previousNeutralSource": "fnv1a64:50c88732a97c7d7b",
+  "productionSourceDifference": "Only web/src/format.ts::workOf changed under web/src between bundle 064037442ab479f5bbbe921361dda492757bf253 and baseline 6049cdf63e36e303327235834f23a798aa5a82c1.",
+  "stylesheet": { "path": "assets/style-DlOjRRu5.css", "hash": "fnv1a64:fea4fef0900f767d", "bytes": 33906, "unchangedFromNeutralSignoff": true },
+  "measured": { "P1": 230415, "P2": 33906, "P3": 332915, "P4": 597922 },
+  "ceilings": { "P1": 230500, "P2": 34000, "P3": 350000, "P4": 600000 },
+  "contrast": { "command": "node notes/web-revamp/contrast.mjs", "passed": 57, "failed": 0, "darkQuietMinimum": 5.54, "darkControlMinimum": 3.79 },
+  "retainedEvidence": {
+    "gallery": "../../../review/runtime-presentation/index.html",
+    "measurements": "../../../review/runtime-presentation/evidence.json",
+    "inspectedImages": 6,
+    "coverage": ["independent work", "older resumed work", "started Blocked work", "individually inspectable Waiting task", "dark and light themes"],
+    "limitation": "Retained Waiting-detail image includes its initial Loading task details label. The new bounded check explicitly waited for aria-busy=false. Retained samples do not include the review transition; the new browser check observed it."
+  },
+  "browser": {
+    "tool": "agent-browser 0.15.0",
+    "executable": "/etc/profiles/per-user/nade/bin/brave",
+    "engine": "HeadlessChrome/151.0.0.0",
+    "serverCommand": "node web/dev/serve.ts --port 0 --fixture subagents --scenario parked",
+    "usesProductionAssets": true,
+    "servedManifestMatches": true,
+    "servedFilesChecked": 6,
+    "servedFileByteLengthsAndFnvHashesMatch": true,
+    "namedSession": "designer-recovery",
+    "resourcesClosed": true,
+    "activeListenerOrDaemonRestarted": false
+  },
+  "checks": [
+    { "phase": "independent", "view": "Team Graph + inspector", "expectedTask": "current", "title": "Prepare independent storage design", "waitingTasks": ["parked-old", "parked-new"], "passed": true },
+    { "phase": "independent", "view": "Team List", "expectedTask": "current", "title": "Prepare independent storage design", "darkSelectedMarker": "rgb(140, 183, 242) 3px 0px 0px 0px inset", "otherHoveredRowMarker": "none", "passed": true },
+    { "phase": "review after first step", "view": "Team List + inspector", "expectedTask": "parked-new", "title": "Plan parked migration", "taskStatuses": { "parked-old": "waiting", "current": "review", "parked-new": "waiting" }, "passed": true },
+    { "phase": "resumed after second step", "view": "Team Graph + List + inspector", "expectedTask": "parked-old", "title": "Plan parked API contract", "taskStatuses": { "parked-old": "working", "current": "done", "parked-new": "waiting" }, "passed": true },
+    { "phase": "resumed", "view": "Waiting task detail", "selectedTask": "parked-new", "status": "waiting", "progress": 66, "graphCurrentTask": "parked-old", "ariaBusy": "false", "passed": true },
+    { "phase": "resumed", "view": "Light Task List open/Escape at 390px", "selectedTask": "parked-new", "focusedLabelAfterEscape": "parked-new, waiting", "selectedMarker": "rgb(17, 110, 89) 3px 0px 0px 0px inset", "documentWidth": 390, "passed": true }
+  ],
+  "captures": [
+    { "image": "dark-independent-inspector.png", "theme": "dark", "width": 1440, "height": 960, "documentWidth": 1440, "canvas": "rgb(18, 18, 18)", "text": "rgb(237, 237, 237)", "reproduce": "Start the mock, open its emitted production pairing URL, set 1440x960 and Dark, open claude-1 from Team Graph. Capture independent current-work inspector before stepping the scenario." },
+    { "image": "light-waiting-detail-narrow.png", "theme": "light", "width": 390, "height": 844, "documentWidth": 390, "documentHeight": 844, "canvas": "rgb(245, 246, 243)", "text": "rgb(24, 35, 33)", "reproduce": "Send step twice to mock stdin. Open parked-new from claude-1 inspector and wait for task-panel aria-busy=false; select Light and Tasks, then resize to 390x844. Capture the Waiting detail." }
+  ],
+  "finding": {
+    "id": "RECOVERY-FOCUS-1",
+    "owners": ["ui", "reviewer"],
+    "state": "reported for triage",
+    "source": "web/src/ui.ts::closePanel",
+    "reproduce": "At 1440px open claude-1 inspector from Team Graph, open parked-new from its task list, switch Tasks while retaining detail, resize to 390px, press Escape.",
+    "observed": "Task detail closes; document.activeElement is BODY. Original agent trigger is unmounted and fallback only queries data-agent.",
+    "expected": "Focus returns to an available task or view control after the original trigger is removed.",
+    "control": "At 390px opening parked-new directly from Task List and pressing Escape returns focus to the selected parked-new task row.",
+    "introducedByProjectionChange": false
+  },
+  "limits": ["Bounded visual check, not a repeated full capture matrix or screen-reader audit.", "Source, stylesheet and fixtures unchanged by this recovery task.", "Approved scope, palette decisions, deliberate deferrals and P1-P4 ceilings remain unchanged."]
+}
