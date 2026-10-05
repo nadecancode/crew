@@ -203,7 +203,7 @@ pub enum ClientInput {
     Snapshot {
         scope: ClientScope,
         operation_id: OperationId,
-        snapshot: Snapshot,
+        snapshot: Box<Snapshot>,
     },
     Push {
         scope: ClientScope,
