@@ -1,0 +1,1123 @@
+// !$*UTF8*$!
+{
+	archiveVersion = 1;
+	classes = {
+
+	};
+	objectVersion = 56;
+	objects = {
+		5CA2A4B9986D9EB897FF11A8 = {
+			isa = PBXFileReference;
+			lastKnownFileType = sourcecode.swift;
+			path = CrewApp.swift;
+			sourceTree = "<group>";
+		};
+		9B0FD68836BED3D52FF96C48 = {
+			isa = PBXFileReference;
+			lastKnownFileType = sourcecode.swift;
+			path = CrewRootView.swift;
+			sourceTree = "<group>";
+		};
+		3A1B44EAADE1DC47C1730BE0 = {
+			isa = PBXFileReference;
+			lastKnownFileType = sourcecode.swift;
+			path = CrewPreferences.swift;
+			sourceTree = "<group>";
+		};
+		B6F919EE7B21BBAD5C97ABA5 = {
+			isa = PBXFileReference;
+			lastKnownFileType = sourcecode.swift;
+			path = CrewNavigationCommands.swift;
+			sourceTree = "<group>";
+		};
+		62DFC771FBBACA928105BE74 = {
+			isa = PBXFileReference;
+			lastKnownFileType = folder.assetcatalog;
+			path = Assets.xcassets;
+			sourceTree = "<group>";
+		};
+		C57096BBAA8D2D8AE5D0A2F6 = {
+			isa = PBXFileReference;
+			lastKnownFileType = text.plist.xml;
+			path = "CrewMac-Info.plist";
+			sourceTree = "<group>";
+		};
+		25ADFC575ECE3929F8647473 = {
+			isa = PBXFileReference;
+			lastKnownFileType = text.plist.xml;
+			path = "CrewIOS-Info.plist";
+			sourceTree = "<group>";
+		};
+		486B97D2176A43155FF4C528 = {
+			isa = PBXFileReference;
+			lastKnownFileType = text.xml;
+			path = AppIcon.svg;
+			sourceTree = "<group>";
+		};
+		CAF64F1A9855C081A65D487D = {
+			isa = PBXFileReference;
+			lastKnownFileType = sourcecode.swift;
+			path = CrewShellTests.swift;
+			sourceTree = "<group>";
+		};
+		D8F0DE16D01D604A20A6CD3F = {
+			isa = PBXFileReference;
+			lastKnownFileType = sourcecode.swift;
+			path = CrewShellUITests.swift;
+			sourceTree = "<group>";
+		};
+		D675E58D0D7D17A82CA05F84 = {
+			isa = PBXFileReference;
+			lastKnownFileType = text.script.python;
+			path = "check-source.py";
+			sourceTree = "<group>";
+		};
+		D93872A559A499EE9DEF3D65 = {
+			isa = PBXFileReference;
+			lastKnownFileType = folder;
+			path = CrewUI;
+			sourceTree = "<group>";
+		};
+		B88B32477E16CED4E93167DD = {
+			isa = PBXGroup;
+			children = (
+				62DFC771FBBACA928105BE74,
+				C57096BBAA8D2D8AE5D0A2F6,
+				25ADFC575ECE3929F8647473,
+				486B97D2176A43155FF4C528,
+			);
+			path = Resources;
+			sourceTree = "<group>";
+		};
+		AB7791B9572E09CD1F7CAB70 = {
+			isa = PBXGroup;
+			children = (
+				5CA2A4B9986D9EB897FF11A8,
+				B88B32477E16CED4E93167DD,
+			);
+			path = CrewApp;
+			sourceTree = "<group>";
+		};
+		A0C7B2A3C8B7D56BC9C76B65 = {
+			isa = PBXGroup;
+			children = (
+				9B0FD68836BED3D52FF96C48,
+				3A1B44EAADE1DC47C1730BE0,
+				B6F919EE7B21BBAD5C97ABA5,
+			);
+			path = CrewHost;
+			sourceTree = "<group>";
+		};
+		C19589F981216D9C3DC91270 = {
+			isa = PBXGroup;
+			children = (
+				CAF64F1A9855C081A65D487D,
+				D8F0DE16D01D604A20A6CD3F,
+				D675E58D0D7D17A82CA05F84,
+			);
+			path = Tests;
+			sourceTree = "<group>";
+		};
+		46EE296C84CBDBDDCDF20784 = {
+			isa = XCLocalSwiftPackageReference;
+			relativePath = CrewUI;
+		};
+		3DEC09A9EBB4CCD85FFC7959 = {
+			isa = XCBuildConfiguration;
+			name = Debug;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				CODE_SIGNING_ALLOWED = NO;
+				ENABLE_USER_SCRIPT_SANDBOXING = YES;
+				SWIFT_VERSION = 5.0;
+				GCC_C_LANGUAGE_STANDARD = gnu17;
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++20";
+				DEBUG_INFORMATION_FORMAT = dwarf;
+				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
+				SWIFT_ACTIVE_COMPILATION_CONDITIONS = "$(inherited) DEBUG";
+				ENABLE_TESTABILITY = YES;
+			};
+		};
+		B12E341F416BE8D9AD07E911 = {
+			isa = XCBuildConfiguration;
+			name = Release;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				CODE_SIGNING_ALLOWED = NO;
+				ENABLE_USER_SCRIPT_SANDBOXING = YES;
+				SWIFT_VERSION = 5.0;
+				GCC_C_LANGUAGE_STANDARD = gnu17;
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++20";
+				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
+				SWIFT_OPTIMIZATION_LEVEL = "-O";
+				SWIFT_ACTIVE_COMPILATION_CONDITIONS = "$(inherited)";
+				ENABLE_TESTABILITY = NO;
+			};
+		};
+		625B50128FC7F37276B14467 = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				3DEC09A9EBB4CCD85FFC7959,
+				B12E341F416BE8D9AD07E911,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		AC30D76C0571923F150FF280 = {
+			isa = PBXFileReference;
+			explicitFileType = wrapper.application;
+			includeInIndex = 0;
+			path = CrewMac.app;
+			sourceTree = BUILT_PRODUCTS_DIR;
+		};
+		FB0E15106773A759C5BA651E = {
+			isa = XCSwiftPackageProductDependency;
+			package = 46EE296C84CBDBDDCDF20784;
+			productName = CrewUI;
+		};
+		6199CC535C1620073B2089BF = {
+			isa = PBXBuildFile;
+			productRef = FB0E15106773A759C5BA651E;
+		};
+		9768C7A7852AE51328D62194 = {
+			isa = XCBuildConfiguration;
+			name = Debug;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				CODE_SIGNING_ALLOWED = NO;
+				ENABLE_USER_SCRIPT_SANDBOXING = YES;
+				SWIFT_VERSION = 5.0;
+				GCC_C_LANGUAGE_STANDARD = gnu17;
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++20";
+				SDKROOT = macosx;
+				SUPPORTED_PLATFORMS = macosx;
+				MACOSX_DEPLOYMENT_TARGET = 14.0;
+				ENABLE_APP_SANDBOX = NO;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/../Frameworks",
+				);
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = "CrewApp/Resources/CrewMac-Info.plist";
+				PRODUCT_BUNDLE_IDENTIFIER = dev.crew.Crew;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				MARKETING_VERSION = 1.0;
+				CURRENT_PROJECT_VERSION = 1;
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				DEBUG_INFORMATION_FORMAT = dwarf;
+				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
+				SWIFT_ACTIVE_COMPILATION_CONDITIONS = "$(inherited) DEBUG";
+				ENABLE_TESTABILITY = YES;
+			};
+		};
+		7623795FDCD208D915C5AEBE = {
+			isa = XCBuildConfiguration;
+			name = Release;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				CODE_SIGNING_ALLOWED = NO;
+				ENABLE_USER_SCRIPT_SANDBOXING = YES;
+				SWIFT_VERSION = 5.0;
+				GCC_C_LANGUAGE_STANDARD = gnu17;
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++20";
+				SDKROOT = macosx;
+				SUPPORTED_PLATFORMS = macosx;
+				MACOSX_DEPLOYMENT_TARGET = 14.0;
+				ENABLE_APP_SANDBOX = NO;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/../Frameworks",
+				);
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = "CrewApp/Resources/CrewMac-Info.plist";
+				PRODUCT_BUNDLE_IDENTIFIER = dev.crew.Crew;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				MARKETING_VERSION = 1.0;
+				CURRENT_PROJECT_VERSION = 1;
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
+				SWIFT_OPTIMIZATION_LEVEL = "-O";
+				SWIFT_ACTIVE_COMPILATION_CONDITIONS = "$(inherited)";
+				ENABLE_TESTABILITY = NO;
+			};
+		};
+		178FC11E2864BCA8134D6B42 = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				9768C7A7852AE51328D62194,
+				7623795FDCD208D915C5AEBE,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		9206886868EDAEC35D2AF669 = {
+			isa = PBXBuildFile;
+			fileRef = 5CA2A4B9986D9EB897FF11A8;
+		};
+		51AECB5E7FAEFC1A50C82501 = {
+			isa = PBXBuildFile;
+			fileRef = 9B0FD68836BED3D52FF96C48;
+		};
+		4A73A56BA8DCD69290081DA7 = {
+			isa = PBXBuildFile;
+			fileRef = 3A1B44EAADE1DC47C1730BE0;
+		};
+		B235627449B168D90AD53E2F = {
+			isa = PBXBuildFile;
+			fileRef = B6F919EE7B21BBAD5C97ABA5;
+		};
+		1F92C13E69E3CF3366548E5B = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				9206886868EDAEC35D2AF669,
+				51AECB5E7FAEFC1A50C82501,
+				4A73A56BA8DCD69290081DA7,
+				B235627449B168D90AD53E2F,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		18390D1D98D68352ADDF3A12 = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				6199CC535C1620073B2089BF,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		971A1EC2C28D71667D58E80C = {
+			isa = PBXBuildFile;
+			fileRef = 62DFC771FBBACA928105BE74;
+		};
+		3A2EF7F373B8B12A5D90E060 = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				971A1EC2C28D71667D58E80C,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		B87573D53419971936CBA7F1 = {
+			isa = PBXNativeTarget;
+			name = CrewMac;
+			productName = CrewMac;
+			productType = "com.apple.product-type.application";
+			productReference = AC30D76C0571923F150FF280;
+			buildConfigurationList = 178FC11E2864BCA8134D6B42;
+			buildPhases = (
+				1F92C13E69E3CF3366548E5B,
+				18390D1D98D68352ADDF3A12,
+				3A2EF7F373B8B12A5D90E060,
+			);
+			buildRules = ();
+			dependencies = ();
+			packageProductDependencies = (
+				FB0E15106773A759C5BA651E,
+			);
+		};
+		B27DD95C4D4AC6FDFBD45297 = {
+			isa = PBXFileReference;
+			explicitFileType = wrapper.cfbundle;
+			includeInIndex = 0;
+			path = CrewMacTests.xctest;
+			sourceTree = BUILT_PRODUCTS_DIR;
+		};
+		4E0E118CD3728D4D5A4BCDB8 = {
+			isa = XCSwiftPackageProductDependency;
+			package = 46EE296C84CBDBDDCDF20784;
+			productName = CrewUI;
+		};
+		47F17C2AD122851D26365246 = {
+			isa = PBXBuildFile;
+			productRef = 4E0E118CD3728D4D5A4BCDB8;
+		};
+		1513A7818A7564CC2377F603 = {
+			isa = XCBuildConfiguration;
+			name = Debug;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				CODE_SIGNING_ALLOWED = NO;
+				ENABLE_USER_SCRIPT_SANDBOXING = YES;
+				SWIFT_VERSION = 5.0;
+				GCC_C_LANGUAGE_STANDARD = gnu17;
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++20";
+				SDKROOT = macosx;
+				SUPPORTED_PLATFORMS = macosx;
+				MACOSX_DEPLOYMENT_TARGET = 14.0;
+				ENABLE_APP_SANDBOX = NO;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/../Frameworks",
+				);
+				GENERATE_INFOPLIST_FILE = YES;
+				PRODUCT_BUNDLE_IDENTIFIER = dev.crew.CrewMacTests;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/CrewMac.app/Contents/MacOS/CrewMac";
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				DEBUG_INFORMATION_FORMAT = dwarf;
+				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
+				SWIFT_ACTIVE_COMPILATION_CONDITIONS = "$(inherited) DEBUG";
+				ENABLE_TESTABILITY = YES;
+			};
+		};
+		CFF6960A1ACF50B16F0E3061 = {
+			isa = XCBuildConfiguration;
+			name = Release;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				CODE_SIGNING_ALLOWED = NO;
+				ENABLE_USER_SCRIPT_SANDBOXING = YES;
+				SWIFT_VERSION = 5.0;
+				GCC_C_LANGUAGE_STANDARD = gnu17;
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++20";
+				SDKROOT = macosx;
+				SUPPORTED_PLATFORMS = macosx;
+				MACOSX_DEPLOYMENT_TARGET = 14.0;
+				ENABLE_APP_SANDBOX = NO;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/../Frameworks",
+				);
+				GENERATE_INFOPLIST_FILE = YES;
+				PRODUCT_BUNDLE_IDENTIFIER = dev.crew.CrewMacTests;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/CrewMac.app/Contents/MacOS/CrewMac";
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
+				SWIFT_OPTIMIZATION_LEVEL = "-O";
+				SWIFT_ACTIVE_COMPILATION_CONDITIONS = "$(inherited)";
+				ENABLE_TESTABILITY = NO;
+			};
+		};
+		AB811A2AE6064EAD69E5D488 = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				1513A7818A7564CC2377F603,
+				CFF6960A1ACF50B16F0E3061,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		6240840DD74B3DF03E9A600A = {
+			isa = PBXBuildFile;
+			fileRef = CAF64F1A9855C081A65D487D;
+		};
+		849B771AE84178DEB3143199 = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				6240840DD74B3DF03E9A600A,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		4A5CAD207FAC2D50192E5CB1 = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				47F17C2AD122851D26365246,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		72530158547FF5A03B2CB37C = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = ();
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		158AE20F3F0B28C63A92E587 = {
+			isa = PBXContainerItemProxy;
+			containerPortal = 6F5E48B003A2FF40ECDDF19E;
+			proxyType = 1;
+			remoteGlobalIDString = B87573D53419971936CBA7F1;
+			remoteInfo = CrewMac;
+		};
+		D12D8E194E6A05974B2C9EA3 = {
+			isa = PBXTargetDependency;
+			target = B87573D53419971936CBA7F1;
+			targetProxy = 158AE20F3F0B28C63A92E587;
+		};
+		27EA1EF87E3468BDA8FB404E = {
+			isa = PBXNativeTarget;
+			name = CrewMacTests;
+			productName = CrewMacTests;
+			productType = "com.apple.product-type.bundle.unit-test";
+			productReference = B27DD95C4D4AC6FDFBD45297;
+			buildConfigurationList = AB811A2AE6064EAD69E5D488;
+			buildPhases = (
+				849B771AE84178DEB3143199,
+				4A5CAD207FAC2D50192E5CB1,
+				72530158547FF5A03B2CB37C,
+			);
+			buildRules = ();
+			dependencies = (
+				D12D8E194E6A05974B2C9EA3,
+			);
+			packageProductDependencies = (
+				4E0E118CD3728D4D5A4BCDB8,
+			);
+		};
+		E1A039176CA037D19E55AB00 = {
+			isa = PBXFileReference;
+			explicitFileType = wrapper.cfbundle;
+			includeInIndex = 0;
+			path = CrewMacUITests.xctest;
+			sourceTree = BUILT_PRODUCTS_DIR;
+		};
+		412AC6858CA2E7493CDF1E51 = {
+			isa = XCBuildConfiguration;
+			name = Debug;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				CODE_SIGNING_ALLOWED = NO;
+				ENABLE_USER_SCRIPT_SANDBOXING = YES;
+				SWIFT_VERSION = 5.0;
+				GCC_C_LANGUAGE_STANDARD = gnu17;
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++20";
+				SDKROOT = macosx;
+				SUPPORTED_PLATFORMS = macosx;
+				MACOSX_DEPLOYMENT_TARGET = 14.0;
+				ENABLE_APP_SANDBOX = NO;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/../Frameworks",
+				);
+				GENERATE_INFOPLIST_FILE = YES;
+				PRODUCT_BUNDLE_IDENTIFIER = dev.crew.CrewMacUITests;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				TEST_TARGET_NAME = CrewMac;
+				DEBUG_INFORMATION_FORMAT = dwarf;
+				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
+				SWIFT_ACTIVE_COMPILATION_CONDITIONS = "$(inherited) DEBUG";
+				ENABLE_TESTABILITY = YES;
+			};
+		};
+		7B55A025E44E300CF7BB629A = {
+			isa = XCBuildConfiguration;
+			name = Release;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				CODE_SIGNING_ALLOWED = NO;
+				ENABLE_USER_SCRIPT_SANDBOXING = YES;
+				SWIFT_VERSION = 5.0;
+				GCC_C_LANGUAGE_STANDARD = gnu17;
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++20";
+				SDKROOT = macosx;
+				SUPPORTED_PLATFORMS = macosx;
+				MACOSX_DEPLOYMENT_TARGET = 14.0;
+				ENABLE_APP_SANDBOX = NO;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/../Frameworks",
+				);
+				GENERATE_INFOPLIST_FILE = YES;
+				PRODUCT_BUNDLE_IDENTIFIER = dev.crew.CrewMacUITests;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				TEST_TARGET_NAME = CrewMac;
+				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
+				SWIFT_OPTIMIZATION_LEVEL = "-O";
+				SWIFT_ACTIVE_COMPILATION_CONDITIONS = "$(inherited)";
+				ENABLE_TESTABILITY = NO;
+			};
+		};
+		4AD18FD96C1FF21B77642770 = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				412AC6858CA2E7493CDF1E51,
+				7B55A025E44E300CF7BB629A,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		0F5730B76AB0D792C207517C = {
+			isa = PBXBuildFile;
+			fileRef = D8F0DE16D01D604A20A6CD3F;
+		};
+		ED1CDECCB460A0259F6A510E = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				0F5730B76AB0D792C207517C,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		AC689AB0C29668D1B00143F2 = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = ();
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		7BC4FE2FAF5DAE133B11BA0B = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = ();
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		63705AC74C5124C20626FED5 = {
+			isa = PBXContainerItemProxy;
+			containerPortal = 6F5E48B003A2FF40ECDDF19E;
+			proxyType = 1;
+			remoteGlobalIDString = B87573D53419971936CBA7F1;
+			remoteInfo = CrewMac;
+		};
+		05E521353C87EB8CD64173EE = {
+			isa = PBXTargetDependency;
+			target = B87573D53419971936CBA7F1;
+			targetProxy = 63705AC74C5124C20626FED5;
+		};
+		F3A0C05DEFFF549015F200EA = {
+			isa = PBXNativeTarget;
+			name = CrewMacUITests;
+			productName = CrewMacUITests;
+			productType = "com.apple.product-type.bundle.ui-testing";
+			productReference = E1A039176CA037D19E55AB00;
+			buildConfigurationList = 4AD18FD96C1FF21B77642770;
+			buildPhases = (
+				ED1CDECCB460A0259F6A510E,
+				AC689AB0C29668D1B00143F2,
+				7BC4FE2FAF5DAE133B11BA0B,
+			);
+			buildRules = ();
+			dependencies = (
+				05E521353C87EB8CD64173EE,
+			);
+			packageProductDependencies = ();
+		};
+		B89146023051182BF4612315 = {
+			isa = PBXFileReference;
+			explicitFileType = wrapper.application;
+			includeInIndex = 0;
+			path = CrewIOS.app;
+			sourceTree = BUILT_PRODUCTS_DIR;
+		};
+		CAE553CD228DC9B849D4E88C = {
+			isa = XCSwiftPackageProductDependency;
+			package = 46EE296C84CBDBDDCDF20784;
+			productName = CrewUI;
+		};
+		63191E2FCC112434131D191C = {
+			isa = PBXBuildFile;
+			productRef = CAE553CD228DC9B849D4E88C;
+		};
+		975943CDD8199E28D21DC939 = {
+			isa = XCBuildConfiguration;
+			name = Debug;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				CODE_SIGNING_ALLOWED = NO;
+				ENABLE_USER_SCRIPT_SANDBOXING = YES;
+				SWIFT_VERSION = 5.0;
+				GCC_C_LANGUAGE_STANDARD = gnu17;
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++20";
+				SDKROOT = iphoneos;
+				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+				SUPPORTS_MACCATALYST = NO;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+				);
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = "CrewApp/Resources/CrewIOS-Info.plist";
+				PRODUCT_BUNDLE_IDENTIFIER = dev.crew.Crew;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				MARKETING_VERSION = 1.0;
+				CURRENT_PROJECT_VERSION = 1;
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				DEBUG_INFORMATION_FORMAT = dwarf;
+				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
+				SWIFT_ACTIVE_COMPILATION_CONDITIONS = "$(inherited) DEBUG";
+				ENABLE_TESTABILITY = YES;
+			};
+		};
+		6E0CAAFCF3EAF06EAFF7C0B9 = {
+			isa = XCBuildConfiguration;
+			name = Release;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				CODE_SIGNING_ALLOWED = NO;
+				ENABLE_USER_SCRIPT_SANDBOXING = YES;
+				SWIFT_VERSION = 5.0;
+				GCC_C_LANGUAGE_STANDARD = gnu17;
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++20";
+				SDKROOT = iphoneos;
+				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+				SUPPORTS_MACCATALYST = NO;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+				);
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = "CrewApp/Resources/CrewIOS-Info.plist";
+				PRODUCT_BUNDLE_IDENTIFIER = dev.crew.Crew;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				MARKETING_VERSION = 1.0;
+				CURRENT_PROJECT_VERSION = 1;
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
+				SWIFT_OPTIMIZATION_LEVEL = "-O";
+				SWIFT_ACTIVE_COMPILATION_CONDITIONS = "$(inherited)";
+				ENABLE_TESTABILITY = NO;
+			};
+		};
+		03EBD9D6BDF5517CC217965E = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				975943CDD8199E28D21DC939,
+				6E0CAAFCF3EAF06EAFF7C0B9,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		52792A324DECFD36194DF0AE = {
+			isa = PBXBuildFile;
+			fileRef = 5CA2A4B9986D9EB897FF11A8;
+		};
+		B3FEDEB03BB6730B28DC5DCF = {
+			isa = PBXBuildFile;
+			fileRef = 9B0FD68836BED3D52FF96C48;
+		};
+		3858C0652A689F504D358A67 = {
+			isa = PBXBuildFile;
+			fileRef = 3A1B44EAADE1DC47C1730BE0;
+		};
+		8614DD996C7C26EEE342B55E = {
+			isa = PBXBuildFile;
+			fileRef = B6F919EE7B21BBAD5C97ABA5;
+		};
+		781F182B88AFF8334BDBDB6E = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				52792A324DECFD36194DF0AE,
+				B3FEDEB03BB6730B28DC5DCF,
+				3858C0652A689F504D358A67,
+				8614DD996C7C26EEE342B55E,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		F0AE603A8BEBD0013785DAE0 = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				63191E2FCC112434131D191C,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		DB79765F0046E56D5D27E5F9 = {
+			isa = PBXBuildFile;
+			fileRef = 62DFC771FBBACA928105BE74;
+		};
+		80FD1602568A5633E9B4B4EB = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				DB79765F0046E56D5D27E5F9,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		0301844D9C30513CF7BF3DF8 = {
+			isa = PBXNativeTarget;
+			name = CrewIOS;
+			productName = CrewIOS;
+			productType = "com.apple.product-type.application";
+			productReference = B89146023051182BF4612315;
+			buildConfigurationList = 03EBD9D6BDF5517CC217965E;
+			buildPhases = (
+				781F182B88AFF8334BDBDB6E,
+				F0AE603A8BEBD0013785DAE0,
+				80FD1602568A5633E9B4B4EB,
+			);
+			buildRules = ();
+			dependencies = ();
+			packageProductDependencies = (
+				CAE553CD228DC9B849D4E88C,
+			);
+		};
+		25B783F65D943FA109AB4C5A = {
+			isa = PBXFileReference;
+			explicitFileType = wrapper.cfbundle;
+			includeInIndex = 0;
+			path = CrewIOSTests.xctest;
+			sourceTree = BUILT_PRODUCTS_DIR;
+		};
+		62025B4C0CEE5EEF00DFC139 = {
+			isa = XCSwiftPackageProductDependency;
+			package = 46EE296C84CBDBDDCDF20784;
+			productName = CrewUI;
+		};
+		45E61F325E4BDAECFBC604D5 = {
+			isa = PBXBuildFile;
+			productRef = 62025B4C0CEE5EEF00DFC139;
+		};
+		90A9FD0004C640CD8B1438BB = {
+			isa = XCBuildConfiguration;
+			name = Debug;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				CODE_SIGNING_ALLOWED = NO;
+				ENABLE_USER_SCRIPT_SANDBOXING = YES;
+				SWIFT_VERSION = 5.0;
+				GCC_C_LANGUAGE_STANDARD = gnu17;
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++20";
+				SDKROOT = iphoneos;
+				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+				SUPPORTS_MACCATALYST = NO;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+				);
+				GENERATE_INFOPLIST_FILE = YES;
+				PRODUCT_BUNDLE_IDENTIFIER = dev.crew.CrewIOSTests;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/CrewIOS.app/CrewIOS";
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				DEBUG_INFORMATION_FORMAT = dwarf;
+				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
+				SWIFT_ACTIVE_COMPILATION_CONDITIONS = "$(inherited) DEBUG";
+				ENABLE_TESTABILITY = YES;
+			};
+		};
+		44E750AC4F005028D5CE059D = {
+			isa = XCBuildConfiguration;
+			name = Release;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				CODE_SIGNING_ALLOWED = NO;
+				ENABLE_USER_SCRIPT_SANDBOXING = YES;
+				SWIFT_VERSION = 5.0;
+				GCC_C_LANGUAGE_STANDARD = gnu17;
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++20";
+				SDKROOT = iphoneos;
+				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+				SUPPORTS_MACCATALYST = NO;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+				);
+				GENERATE_INFOPLIST_FILE = YES;
+				PRODUCT_BUNDLE_IDENTIFIER = dev.crew.CrewIOSTests;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/CrewIOS.app/CrewIOS";
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
+				SWIFT_OPTIMIZATION_LEVEL = "-O";
+				SWIFT_ACTIVE_COMPILATION_CONDITIONS = "$(inherited)";
+				ENABLE_TESTABILITY = NO;
+			};
+		};
+		E0C1597863136210DD30EFE9 = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				90A9FD0004C640CD8B1438BB,
+				44E750AC4F005028D5CE059D,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		E83D8CC255EFF8F0F0C42F68 = {
+			isa = PBXBuildFile;
+			fileRef = CAF64F1A9855C081A65D487D;
+		};
+		A7982D16D8424C2C837FEBD3 = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				E83D8CC255EFF8F0F0C42F68,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		07EED85E0FCF13764A6BB11B = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				45E61F325E4BDAECFBC604D5,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		ECA2AEA9D4F8C981D5ACC7AD = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = ();
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		03D091A7D052BB0D11AABE4F = {
+			isa = PBXContainerItemProxy;
+			containerPortal = 6F5E48B003A2FF40ECDDF19E;
+			proxyType = 1;
+			remoteGlobalIDString = 0301844D9C30513CF7BF3DF8;
+			remoteInfo = CrewIOS;
+		};
+		6615A9A606022DAF0B42221C = {
+			isa = PBXTargetDependency;
+			target = 0301844D9C30513CF7BF3DF8;
+			targetProxy = 03D091A7D052BB0D11AABE4F;
+		};
+		219E7FACFE76B31E6B2C481F = {
+			isa = PBXNativeTarget;
+			name = CrewIOSTests;
+			productName = CrewIOSTests;
+			productType = "com.apple.product-type.bundle.unit-test";
+			productReference = 25B783F65D943FA109AB4C5A;
+			buildConfigurationList = E0C1597863136210DD30EFE9;
+			buildPhases = (
+				A7982D16D8424C2C837FEBD3,
+				07EED85E0FCF13764A6BB11B,
+				ECA2AEA9D4F8C981D5ACC7AD,
+			);
+			buildRules = ();
+			dependencies = (
+				6615A9A606022DAF0B42221C,
+			);
+			packageProductDependencies = (
+				62025B4C0CEE5EEF00DFC139,
+			);
+		};
+		757A7396B0C0DAB96777A3BF = {
+			isa = PBXFileReference;
+			explicitFileType = wrapper.cfbundle;
+			includeInIndex = 0;
+			path = CrewIOSUITests.xctest;
+			sourceTree = BUILT_PRODUCTS_DIR;
+		};
+		812D045B7771AC732C1E7FB5 = {
+			isa = XCBuildConfiguration;
+			name = Debug;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				CODE_SIGNING_ALLOWED = NO;
+				ENABLE_USER_SCRIPT_SANDBOXING = YES;
+				SWIFT_VERSION = 5.0;
+				GCC_C_LANGUAGE_STANDARD = gnu17;
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++20";
+				SDKROOT = iphoneos;
+				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+				SUPPORTS_MACCATALYST = NO;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+				);
+				GENERATE_INFOPLIST_FILE = YES;
+				PRODUCT_BUNDLE_IDENTIFIER = dev.crew.CrewIOSUITests;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				TEST_TARGET_NAME = CrewIOS;
+				DEBUG_INFORMATION_FORMAT = dwarf;
+				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
+				SWIFT_ACTIVE_COMPILATION_CONDITIONS = "$(inherited) DEBUG";
+				ENABLE_TESTABILITY = YES;
+			};
+		};
+		BC4B3F9ACFC6B7C01132FCCD = {
+			isa = XCBuildConfiguration;
+			name = Release;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				CODE_SIGNING_ALLOWED = NO;
+				ENABLE_USER_SCRIPT_SANDBOXING = YES;
+				SWIFT_VERSION = 5.0;
+				GCC_C_LANGUAGE_STANDARD = gnu17;
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++20";
+				SDKROOT = iphoneos;
+				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+				SUPPORTS_MACCATALYST = NO;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+				);
+				GENERATE_INFOPLIST_FILE = YES;
+				PRODUCT_BUNDLE_IDENTIFIER = dev.crew.CrewIOSUITests;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				TEST_TARGET_NAME = CrewIOS;
+				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
+				SWIFT_OPTIMIZATION_LEVEL = "-O";
+				SWIFT_ACTIVE_COMPILATION_CONDITIONS = "$(inherited)";
+				ENABLE_TESTABILITY = NO;
+			};
+		};
+		06850D9E821406525C7D5522 = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				812D045B7771AC732C1E7FB5,
+				BC4B3F9ACFC6B7C01132FCCD,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		02843C9E98965E94B057C732 = {
+			isa = PBXBuildFile;
+			fileRef = D8F0DE16D01D604A20A6CD3F;
+		};
+		121CF4E8E00102E9D7DA45A5 = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				02843C9E98965E94B057C732,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		91DDA4084D778ADEEE02661D = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = ();
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		EE4FFE40724D768C8BCD3EC2 = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = ();
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		FFD09B8EA963B32A7347FC5E = {
+			isa = PBXContainerItemProxy;
+			containerPortal = 6F5E48B003A2FF40ECDDF19E;
+			proxyType = 1;
+			remoteGlobalIDString = 0301844D9C30513CF7BF3DF8;
+			remoteInfo = CrewIOS;
+		};
+		EE123F5F590B0937D97F675F = {
+			isa = PBXTargetDependency;
+			target = 0301844D9C30513CF7BF3DF8;
+			targetProxy = FFD09B8EA963B32A7347FC5E;
+		};
+		0D791FC51472DDBDD2957FA5 = {
+			isa = PBXNativeTarget;
+			name = CrewIOSUITests;
+			productName = CrewIOSUITests;
+			productType = "com.apple.product-type.bundle.ui-testing";
+			productReference = 757A7396B0C0DAB96777A3BF;
+			buildConfigurationList = 06850D9E821406525C7D5522;
+			buildPhases = (
+				121CF4E8E00102E9D7DA45A5,
+				91DDA4084D778ADEEE02661D,
+				EE4FFE40724D768C8BCD3EC2,
+			);
+			buildRules = ();
+			dependencies = (
+				EE123F5F590B0937D97F675F,
+			);
+			packageProductDependencies = ();
+		};
+		4BF11C43D602ACF0A0427D65 = {
+			isa = PBXGroup;
+			children = (
+				AC30D76C0571923F150FF280,
+				B27DD95C4D4AC6FDFBD45297,
+				E1A039176CA037D19E55AB00,
+				B89146023051182BF4612315,
+				25B783F65D943FA109AB4C5A,
+				757A7396B0C0DAB96777A3BF,
+			);
+			name = Products;
+			sourceTree = "<group>";
+		};
+		49B5035E5F5BC7EC48D0F378 = {
+			isa = PBXGroup;
+			children = (
+				AB7791B9572E09CD1F7CAB70,
+				A0C7B2A3C8B7D56BC9C76B65,
+				D93872A559A499EE9DEF3D65,
+				C19589F981216D9C3DC91270,
+				4BF11C43D602ACF0A0427D65,
+			);
+			sourceTree = "<group>";
+		};
+		6F5E48B003A2FF40ECDDF19E = {
+			isa = PBXProject;
+			attributes = {
+				BuildIndependentTargetsInParallel = YES;
+				LastSwiftUpdateCheck = 1600;
+				LastUpgradeCheck = 1600;
+				TargetAttributes = {
+					B87573D53419971936CBA7F1 = {
+						CreatedOnToolsVersion = 16.0;
+					};
+					27EA1EF87E3468BDA8FB404E = {
+						CreatedOnToolsVersion = 16.0;
+						TestTargetID = B87573D53419971936CBA7F1;
+					};
+					F3A0C05DEFFF549015F200EA = {
+						CreatedOnToolsVersion = 16.0;
+						TestTargetID = B87573D53419971936CBA7F1;
+					};
+					0301844D9C30513CF7BF3DF8 = {
+						CreatedOnToolsVersion = 16.0;
+					};
+					219E7FACFE76B31E6B2C481F = {
+						CreatedOnToolsVersion = 16.0;
+						TestTargetID = 0301844D9C30513CF7BF3DF8;
+					};
+					0D791FC51472DDBDD2957FA5 = {
+						CreatedOnToolsVersion = 16.0;
+						TestTargetID = 0301844D9C30513CF7BF3DF8;
+					};
+				};
+			};
+			buildConfigurationList = 625B50128FC7F37276B14467;
+			compatibilityVersion = "Xcode 14.0";
+			developmentRegion = en;
+			hasScannedForEncodings = 0;
+			knownRegions = (
+				en,
+				Base,
+			);
+			mainGroup = 49B5035E5F5BC7EC48D0F378;
+			productRefGroup = 4BF11C43D602ACF0A0427D65;
+			projectDirPath = "";
+			projectRoot = "";
+			packageReferences = (
+				46EE296C84CBDBDDCDF20784,
+			);
+			targets = (
+				B87573D53419971936CBA7F1,
+				27EA1EF87E3468BDA8FB404E,
+				F3A0C05DEFFF549015F200EA,
+				0301844D9C30513CF7BF3DF8,
+				219E7FACFE76B31E6B2C481F,
+				0D791FC51472DDBDD2957FA5,
+			);
+		};
+	};
+	rootObject = 6F5E48B003A2FF40ECDDF19E;
+}
