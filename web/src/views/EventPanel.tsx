@@ -27,6 +27,7 @@ export function EventPanel(props: { seq: number }) {
           const v = () => vcsOf(e());
           return (
             <div class="pad scroll" tabindex="0" data-focus-first>
+              <pre class="body"><Linked text={e().message} /></pre>
               <dl class="facts">
                 <dt>time</dt><dd>{clockTime(e().timestamp)}</dd>
                 <dt>level</dt><dd class={`lv-${e().level}`}>{e().level}</dd>
@@ -35,7 +36,6 @@ export function EventPanel(props: { seq: number }) {
                 <Show when={e().agent_id}><dt>agent</dt><dd><AgentLink id={e().agent_id!} /></dd></Show>
                 <Show when={e().task_id}><dt>task</dt><dd><button class="link" onClick={() => ui.select({ kind: "task", id: e().task_id! })}>{e().task_id}</button></dd></Show>
               </dl>
-              <pre class="body"><Linked text={e().message} /></pre>
               <Show when={v()}>
                 {(x) => (
                   <dl class="facts vcs-facts">

@@ -1,5 +1,5 @@
 // The bus (notes/web-design.md §ui "Bus"): the message list, newest at the
-// bottom, virtual. A row: time, from → to, type, first line; coloured by kind
+// bottom, virtual. A row: endpoints, type, time, and a two-line body preview;
 // as in the TUI. Click or `enter`: the message's panel. Hovering a row lights
 // the link between its two agents on the graph; clicking a link filters the
 // list to that pair.
@@ -10,7 +10,7 @@ import { clockTime, oneLine } from "../format";
 import { decodeMessages, isBroadcast, isP2p, ORCHESTRATOR_ID, OPERATOR_ID, type Message } from "../protocol";
 import { VirtualList } from "./VirtualList";
 
-export const BUS_ROW = 22;
+export const BUS_ROW = 84;
 
 export function kindOf(m: Message): "orch" | "p2p" | "broadcast" {
   if (isBroadcast(m)) return "broadcast";
@@ -67,13 +67,14 @@ export function Bus() {
   return (
     <div class="panel-body bus">
       <div class="panel-head">
-        <h2 class="panel-title">bus</h2>
-        <Show when={ui.busPair()}>
-          <span class="chip filter">{ui.busPair()![0]} ↔ {ui.busPair()![1]} <button aria-label="clear the filter" onClick={() => ui.setBusPair(null)}>×</button></span>
-        </Show>
+        <h2 class="panel-title">Message bus</h2>
+        <span class="muted">{count()} loaded</span>
         <span class="spacer" />
-        <button disabled={!link.live() || loading()} onClick={loadOlder} title="ask the daemon for older messages">load older</button>
+        <button disabled={!link.live() || loading()} onClick={loadOlder} title="ask the daemon for older messages">{loading() ? "Loading…" : "Load older"}</button>
       </div>
+        <Show when={ui.busPair()}>
+          <div class="bus-scope"><span class="chip filter">{ui.busPair()![0]} ↔ {ui.busPair()![1]} <button aria-label="clear the filter" onClick={() => ui.setBusPair(null)}>×</button></span></div>
+        </Show>
       <VirtualList
         label="messages"
         class="bus-list"
@@ -91,15 +92,17 @@ export function Bus() {
           const m = at(i);
           if (m) ui.select({ kind: "message", id: m.id });
         }}
-        empty={<div class="empty">no messages yet</div>}
+        empty={<div class="empty">{ui.busPair() ? "No messages between these agents" : "No messages yet"}</div>}
         render={(m: Message) => (
           <div class={`bus-row k-${kindOf(m)} t-${m.type}`} data-message={m.id}
             onPointerEnter={() => ui.setHoverPair([m.from, m.to])} onPointerLeave={() => ui.setHoverPair(null)}
             onClick={() => ui.select({ kind: "message", id: m.id })}>
-            <span class="time">{clockTime(m.timestamp)}</span>
-            <span class="who"><span class="from">{m.from}</span> → <span class="to">{m.to === "*" ? "all" : m.to}</span></span>
-            <span class="type">{m.type}</span>
-            <span class="first">{oneLine(m.body.split("\n", 1)[0])}</span>
+            <div class="bus-meta">
+              <span class="who"><span class="from">{m.from}</span> → <span class="to">{m.to === "*" ? "all" : m.to}</span></span>
+              <span class="type">{m.type}</span>
+              <span class="time">{clockTime(m.timestamp)}</span>
+            </div>
+            <span class="first">{oneLine(m.body)}</span>
           </div>
         )}
       />

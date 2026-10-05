@@ -53,6 +53,22 @@ export function TaskPanel(props: { id: string }) {
               <Show when={t().timeout_secs}><dt>timeout</dt><dd>{t().timeout_secs}s</dd></Show>
             </dl>
             <Show when={t().description}><pre class="body"><Linked text={t().description} /></pre></Show>
+            <Show when={t().dependencies.length}>
+              <h4>builds on</h4>
+              <ul class="deps">
+                <For each={t().dependencies}>
+                  {(id) => {
+                    const dep = () => card()?.dependencies.find((d) => d.id === id) ?? store.state.tasks.find((x) => x.id === id);
+                    return (
+                      <li>
+                        <button class="link" onClick={() => ui.select({ kind: "task", id })}>{id}</button>{" "}
+                        <Show when={dep()}><span class={taskTone(dep()!.status)}>{dep()!.status}</span> <span class="muted">{dep()!.result?.split("\n", 1)[0]}</span></Show>
+                      </li>
+                    );
+                  }}
+                </For>
+              </ul>
+            </Show>
             <Show when={t().result}>
               <h4>result</h4>
               <pre class="body"><Linked text={t().result!} /></pre>
@@ -73,22 +89,7 @@ export function TaskPanel(props: { id: string }) {
                 </For>
               </ul>
             </Show>
-            <Show when={t().dependencies.length}>
-              <h4>builds on</h4>
-              <ul class="deps">
-                <For each={t().dependencies}>
-                  {(id) => {
-                    const dep = () => card()?.dependencies.find((d) => d.id === id) ?? store.state.tasks.find((x) => x.id === id);
-                    return (
-                      <li>
-                        <button class="link" onClick={() => ui.select({ kind: "task", id })}>{id}</button>{" "}
-                        <Show when={dep()}><span class={taskTone(dep()!.status)}>{dep()!.status}</span> <span class="muted">{dep()!.result?.split("\n", 1)[0]}</span></Show>
-                      </li>
-                    );
-                  }}
-                </For>
-              </ul>
-            </Show>
+
           </div>
         )}
       </Show>
