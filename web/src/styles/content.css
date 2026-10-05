@@ -1,5 +1,5 @@
 /* Fixed-height lists; geometry comes from VirtualList's rowHeight. */
-.vlist { overflow: auto; flex: 1; min-height: 0; position: relative; contain: strict; overflow-anchor: none; }
+.vlist { overflow: auto; flex: 1; min-height: 0; position: relative; contain: strict; overflow-anchor: none; outline: none; }
 .vlist:focus-visible { box-shadow: inset 0 0 0 2px var(--focus); }
 .vlist-pad { position: relative; }
 .vlist-rows { position: absolute; inset: 0 0 auto; will-change: transform; }

@@ -107,7 +107,7 @@ export function Bus() {
               <span class="type">{m.type}</span>
               <span class="time">{clockTime(m.timestamp)}</span>
             </div>
-            <span class="first">{oneLine(m.body)}</span>
+            <span class="first">{oneLine(m.body.slice(0, 2048))}</span>
           </div>
         )}
       />
