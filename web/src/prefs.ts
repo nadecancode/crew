@@ -4,7 +4,7 @@
 //
 // - what belongs to a workspace, `layout` (where agents were dragged): its
 //   daemon's `web_prefs`, on the workspace connection;
-// - what belongs to the operator, `keys`, `panel` and `last` (the workspace
+// - what belongs to the operator, `theme`, `keys`, `panel` and `last` (the workspace
 //   last on screen): the dashboard server's `web_prefs`, on the index.
 //
 // Each is read after `hello`; every field the page uses is validated, unknown
@@ -17,6 +17,7 @@ import { createStore, reconcile, unwrap } from "solid-js/store";
 import { WORKSPACE_ID } from "./route";
 
 export type Point = { x: number; y: number };
+export type Theme = "system" | "light" | "dark";
 /** A workspace's: kept by its daemon. */
 export type LayoutPrefs = {
   /** Where the operator dragged agents on the graph, by id. */
@@ -24,6 +25,8 @@ export type LayoutPrefs = {
 };
 /** The operator's: kept by the dashboard server. */
 export type DashboardPrefs = {
+  /** Appearance follows the system unless the operator chose a palette. */
+  theme: Theme;
   /** Single-key shortcuts (`/keys off` turns them off). */
   keys: boolean;
   /** Width of the side panel, in pixels. */
@@ -34,7 +37,7 @@ export type DashboardPrefs = {
 /** What the page reads of both: the views' one object. */
 export type Prefs = LayoutPrefs & Omit<DashboardPrefs, "last">;
 
-export const DEFAULT_PREFS: Prefs = { layout: {}, keys: true, panel: null };
+export const DEFAULT_PREFS: Prefs = { layout: {}, keys: true, panel: null, theme: "system" };
 export const WRITE_DELAY_MS = 500;
 const MAX_LAYOUT = 512;
 
@@ -57,19 +60,20 @@ export function validateLayout(raw: unknown): LayoutPrefs {
 
 /** What the page keeps of the server's `web_prefs`: known fields of the right type. */
 export function validateDashboard(raw: unknown): DashboardPrefs {
-  const out: DashboardPrefs = { keys: true, panel: null, last: null };
+  const out: DashboardPrefs = { keys: true, panel: null, last: null, theme: "system" };
   const o = record(raw);
   if (!o) return out;
   if (typeof o.keys === "boolean") out.keys = o.keys;
   if (finite(o.panel) && o.panel >= 240 && o.panel <= 4000) out.panel = Math.round(o.panel);
   if (typeof o.last === "string" && WORKSPACE_ID.test(o.last)) out.last = o.last;
+  if (o.theme === "system" || o.theme === "light" || o.theme === "dark") out.theme = o.theme;
   return out;
 }
 
 /** Both at once, as the page shows them. */
 export function validate(raw: unknown): Prefs {
-  const { keys, panel } = validateDashboard(raw);
-  return { ...validateLayout(raw), keys, panel };
+  const { keys, panel, theme } = validateDashboard(raw);
+  return { ...validateLayout(raw), keys, panel, theme };
 }
 
 type Caller = (method: string, params?: unknown) => Promise<unknown>;
@@ -173,6 +177,7 @@ export function createDashboardPrefs(call: Caller, timers: Timers = window) {
       if (typeof raw?.keys === "boolean") established.add("keys");
       if (read.panel !== null) established.add("panel");
       if (read.last !== null) established.add("last");
+      if (raw?.theme === "system" || raw?.theme === "light" || raw?.theme === "dark") established.add("theme");
     },
     get loaded() {
       return kept.loaded;
@@ -191,6 +196,7 @@ export function createDashboardPrefs(call: Caller, timers: Timers = window) {
     },
     setKeys: (on: boolean) => set("keys", on),
     setPanel: (px: number | null) => set("panel", px),
+    setTheme: (theme: Theme) => set("theme", theme),
     /** Written by the page itself, so only over what was read. */
     setLast: (id: string) => kept.loaded && kept.prefs.last !== id && set("last", id),
   };
@@ -211,6 +217,9 @@ export function joinPrefs(layout: LayoutPrefsApi, dashboard: DashboardPrefsApi) 
     get panel() {
       return dashboard.prefs.panel;
     },
+    get theme() {
+      return dashboard.prefs.theme;
+    },
   };
   return {
     prefs,
@@ -221,6 +230,7 @@ export function joinPrefs(layout: LayoutPrefsApi, dashboard: DashboardPrefsApi) 
     resetLayout: layout.resetLayout,
     setKeys: dashboard.setKeys,
     setPanel: dashboard.setPanel,
+    setTheme: dashboard.setTheme,
   };
 }
 
