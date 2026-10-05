@@ -1,0 +1,1456 @@
+{
+  "source": "fnv1a64:a06acf830c69fb8c",
+  "fixture": "subagents",
+  "reducedMotion": true,
+  "failures": 0,
+  "renderedTextChecks": 5173,
+  "captures": [
+    {
+      "id": "busy-bus-dark-desktop",
+      "scenario": "busy",
+      "surface": "bus",
+      "theme": "dark",
+      "viewport": {
+        "width": 1440,
+        "height": 960
+      },
+      "deviceScaleFactor": 1,
+      "documentWidth": 1440,
+      "palette": {
+        "body": "rgb(18, 18, 18)",
+        "text": "rgb(237, 237, 237)",
+        "theme": "dark"
+      },
+      "panelWidth": 390,
+      "renderedTextChecks": 188,
+      "contrastFailures": [],
+      "unnamedControls": [],
+      "overflow": false,
+      "pageErrors": [],
+      "csp": [],
+      "afterLoadRequests": [],
+      "rowHeights": [
+        84
+      ]
+    },
+    {
+      "id": "busy-events-dark-desktop",
+      "scenario": "busy",
+      "surface": "events",
+      "theme": "dark",
+      "viewport": {
+        "width": 1440,
+        "height": 960
+      },
+      "deviceScaleFactor": 1,
+      "documentWidth": 1440,
+      "palette": {
+        "body": "rgb(18, 18, 18)",
+        "text": "rgb(237, 237, 237)",
+        "theme": "dark"
+      },
+      "panelWidth": 390,
+      "renderedTextChecks": 150,
+      "contrastFailures": [],
+      "unnamedControls": [],
+      "overflow": false,
+      "pageErrors": [],
+      "csp": [],
+      "afterLoadRequests": [],
+      "rowHeights": [
+        36
+      ]
+    },
+    {
+      "id": "busy-task-dark-desktop",
+      "scenario": "busy",
+      "surface": "task",
+      "theme": "dark",
+      "viewport": {
+        "width": 1440,
+        "height": 960
+      },
+      "deviceScaleFactor": 1,
+      "documentWidth": 1440,
+      "palette": {
+        "body": "rgb(18, 18, 18)",
+        "text": "rgb(237, 237, 237)",
+        "theme": "dark"
+      },
+      "panelWidth": 390,
+      "renderedTextChecks": 143,
+      "contrastFailures": [],
+      "unnamedControls": [],
+      "overflow": false,
+      "pageErrors": [],
+      "csp": [],
+      "afterLoadRequests": [],
+      "rowHeights": []
+    },
+    {
+      "id": "busy-message-dark-desktop",
+      "scenario": "busy",
+      "surface": "message",
+      "theme": "dark",
+      "viewport": {
+        "width": 1440,
+        "height": 960
+      },
+      "deviceScaleFactor": 1,
+      "documentWidth": 1440,
+      "palette": {
+        "body": "rgb(18, 18, 18)",
+        "text": "rgb(237, 237, 237)",
+        "theme": "dark"
+      },
+      "panelWidth": 390,
+      "renderedTextChecks": 135,
+      "contrastFailures": [],
+      "unnamedControls": [],
+      "overflow": false,
+      "pageErrors": [],
+      "csp": [],
+      "afterLoadRequests": [],
+      "rowHeights": []
+    },
+    {
+      "id": "busy-event-dark-desktop",
+      "scenario": "busy",
+      "surface": "event",
+      "theme": "dark",
+      "viewport": {
+        "width": 1440,
+        "height": 960
+      },
+      "deviceScaleFactor": 1,
+      "documentWidth": 1440,
+      "palette": {
+        "body": "rgb(18, 18, 18)",
+        "text": "rgb(237, 237, 237)",
+        "theme": "dark"
+      },
+      "panelWidth": 390,
+      "renderedTextChecks": 150,
+      "contrastFailures": [],
+      "unnamedControls": [],
+      "overflow": false,
+      "pageErrors": [],
+      "csp": [],
+      "afterLoadRequests": [],
+      "rowHeights": [
+        36
+      ]
+    },
+    {
+      "id": "busy-usage-dark-desktop",
+      "scenario": "busy",
+      "surface": "usage",
+      "theme": "dark",
+      "viewport": {
+        "width": 1440,
+        "height": 960
+      },
+      "deviceScaleFactor": 1,
+      "documentWidth": 1440,
+      "palette": {
+        "body": "rgb(18, 18, 18)",
+        "text": "rgb(237, 237, 237)",
+        "theme": "dark"
+      },
+      "panelWidth": 390,
+      "renderedTextChecks": 177,
+      "contrastFailures": [],
+      "unnamedControls": [],
+      "overflow": false,
+      "pageErrors": [],
+      "csp": [],
+      "afterLoadRequests": [],
+      "rowHeights": [
+        84
+      ]
+    },
+    {
+      "id": "busy-bus-dark-narrow",
+      "scenario": "busy",
+      "surface": "bus",
+      "theme": "dark",
+      "viewport": {
+        "width": 390,
+        "height": 844
+      },
+      "deviceScaleFactor": 1,
+      "documentWidth": 390,
+      "palette": {
+        "body": "rgb(18, 18, 18)",
+        "text": "rgb(237, 237, 237)",
+        "theme": "dark"
+      },
+      "panelWidth": 390,
+      "renderedTextChecks": 107,
+      "contrastFailures": [],
+      "unnamedControls": [],
+      "overflow": false,
+      "pageErrors": [],
+      "csp": [],
+      "afterLoadRequests": [],
+      "rowHeights": [
+        84
+      ]
+    },
+    {
+      "id": "busy-events-dark-narrow",
+      "scenario": "busy",
+      "surface": "events",
+      "theme": "dark",
+      "viewport": {
+        "width": 390,
+        "height": 844
+      },
+      "deviceScaleFactor": 1,
+      "documentWidth": 390,
+      "palette": {
+        "body": "rgb(18, 18, 18)",
+        "text": "rgb(237, 237, 237)",
+        "theme": "dark"
+      },
+      "panelWidth": 0,
+      "renderedTextChecks": 113,
+      "contrastFailures": [],
+      "unnamedControls": [],
+      "overflow": false,
+      "pageErrors": [],
+      "csp": [],
+      "afterLoadRequests": [],
+      "rowHeights": [
+        64
+      ]
+    },
+    {
+      "id": "busy-task-dark-narrow",
+      "scenario": "busy",
+      "surface": "task",
+      "theme": "dark",
+      "viewport": {
+        "width": 390,
+        "height": 844
+      },
+      "deviceScaleFactor": 1,
+      "documentWidth": 390,
+      "palette": {
+        "body": "rgb(18, 18, 18)",
+        "text": "rgb(237, 237, 237)",
+        "theme": "dark"
+      },
+      "panelWidth": 390,
+      "renderedTextChecks": 47,
+      "contrastFailures": [],
+      "unnamedControls": [],
+      "overflow": false,
+      "pageErrors": [],
+      "csp": [],
+      "afterLoadRequests": [],
+      "rowHeights": []
+    },
+    {
+      "id": "busy-message-dark-narrow",
+      "scenario": "busy",
+      "surface": "message",
+      "theme": "dark",
+      "viewport": {
+        "width": 390,
+        "height": 844
+      },
+      "deviceScaleFactor": 1,
+      "documentWidth": 390,
+      "palette": {
+        "body": "rgb(18, 18, 18)",
+        "text": "rgb(237, 237, 237)",
+        "theme": "dark"
+      },
+      "panelWidth": 390,
+      "renderedTextChecks": 49,
+      "contrastFailures": [],
+      "unnamedControls": [],
+      "overflow": false,
+      "pageErrors": [],
+      "csp": [],
+      "afterLoadRequests": [],
+      "rowHeights": []
+    },
+    {
+      "id": "busy-event-dark-narrow",
+      "scenario": "busy",
+      "surface": "event",
+      "theme": "dark",
+      "viewport": {
+        "width": 390,
+        "height": 844
+      },
+      "deviceScaleFactor": 1,
+      "documentWidth": 390,
+      "palette": {
+        "body": "rgb(18, 18, 18)",
+        "text": "rgb(237, 237, 237)",
+        "theme": "dark"
+      },
+      "panelWidth": 390,
+      "renderedTextChecks": 52,
+      "contrastFailures": [],
+      "unnamedControls": [],
+      "overflow": false,
+      "pageErrors": [],
+      "csp": [],
+      "afterLoadRequests": [],
+      "rowHeights": []
+    },
+    {
+      "id": "busy-usage-dark-narrow",
+      "scenario": "busy",
+      "surface": "usage",
+      "theme": "dark",
+      "viewport": {
+        "width": 390,
+        "height": 844
+      },
+      "deviceScaleFactor": 1,
+      "documentWidth": 390,
+      "palette": {
+        "body": "rgb(18, 18, 18)",
+        "text": "rgb(237, 237, 237)",
+        "theme": "dark"
+      },
+      "panelWidth": 0,
+      "renderedTextChecks": 59,
+      "contrastFailures": [],
+      "unnamedControls": [],
+      "overflow": false,
+      "pageErrors": [],
+      "csp": [],
+      "afterLoadRequests": [],
+      "rowHeights": []
+    },
+    {
+      "id": "busy-bus-light-desktop",
+      "scenario": "busy",
+      "surface": "bus",
+      "theme": "light",
+      "viewport": {
+        "width": 1440,
+        "height": 960
+      },
+      "deviceScaleFactor": 1,
+      "documentWidth": 1440,
+      "palette": {
+        "body": "rgb(245, 246, 243)",
+        "text": "rgb(24, 35, 33)",
+        "theme": "light"
+      },
+      "panelWidth": 390,
+      "renderedTextChecks": 188,
+      "contrastFailures": [],
+      "unnamedControls": [],
+      "overflow": false,
+      "pageErrors": [],
+      "csp": [],
+      "afterLoadRequests": [],
+      "rowHeights": [
+        84
+      ]
+    },
+    {
+      "id": "busy-events-light-desktop",
+      "scenario": "busy",
+      "surface": "events",
+      "theme": "light",
+      "viewport": {
+        "width": 1440,
+        "height": 960
+      },
+      "deviceScaleFactor": 1,
+      "documentWidth": 1440,
+      "palette": {
+        "body": "rgb(245, 246, 243)",
+        "text": "rgb(24, 35, 33)",
+        "theme": "light"
+      },
+      "panelWidth": 390,
+      "renderedTextChecks": 150,
+      "contrastFailures": [],
+      "unnamedControls": [],
+      "overflow": false,
+      "pageErrors": [],
+      "csp": [],
+      "afterLoadRequests": [],
+      "rowHeights": [
+        36
+      ]
+    },
+    {
+      "id": "busy-task-light-desktop",
+      "scenario": "busy",
+      "surface": "task",
+      "theme": "light",
+      "viewport": {
+        "width": 1440,
+        "height": 960
+      },
+      "deviceScaleFactor": 1,
+      "documentWidth": 1440,
+      "palette": {
+        "body": "rgb(245, 246, 243)",
+        "text": "rgb(24, 35, 33)",
+        "theme": "light"
+      },
+      "panelWidth": 390,
+      "renderedTextChecks": 143,
+      "contrastFailures": [],
+      "unnamedControls": [],
+      "overflow": false,
+      "pageErrors": [],
+      "csp": [],
+      "afterLoadRequests": [],
+      "rowHeights": []
+    },
+    {
+      "id": "busy-message-light-desktop",
+      "scenario": "busy",
+      "surface": "message",
+      "theme": "light",
+      "viewport": {
+        "width": 1440,
+        "height": 960
+      },
+      "deviceScaleFactor": 1,
+      "documentWidth": 1440,
+      "palette": {
+        "body": "rgb(245, 246, 243)",
+        "text": "rgb(24, 35, 33)",
+        "theme": "light"
+      },
+      "panelWidth": 390,
+      "renderedTextChecks": 135,
+      "contrastFailures": [],
+      "unnamedControls": [],
+      "overflow": false,
+      "pageErrors": [],
+      "csp": [],
+      "afterLoadRequests": [],
+      "rowHeights": []
+    },
+    {
+      "id": "busy-event-light-desktop",
+      "scenario": "busy",
+      "surface": "event",
+      "theme": "light",
+      "viewport": {
+        "width": 1440,
+        "height": 960
+      },
+      "deviceScaleFactor": 1,
+      "documentWidth": 1440,
+      "palette": {
+        "body": "rgb(245, 246, 243)",
+        "text": "rgb(24, 35, 33)",
+        "theme": "light"
+      },
+      "panelWidth": 390,
+      "renderedTextChecks": 150,
+      "contrastFailures": [],
+      "unnamedControls": [],
+      "overflow": false,
+      "pageErrors": [],
+      "csp": [],
+      "afterLoadRequests": [],
+      "rowHeights": [
+        36
+      ]
+    },
+    {
+      "id": "busy-usage-light-desktop",
+      "scenario": "busy",
+      "surface": "usage",
+      "theme": "light",
+      "viewport": {
+        "width": 1440,
+        "height": 960
+      },
+      "deviceScaleFactor": 1,
+      "documentWidth": 1440,
+      "palette": {
+        "body": "rgb(245, 246, 243)",
+        "text": "rgb(24, 35, 33)",
+        "theme": "light"
+      },
+      "panelWidth": 390,
+      "renderedTextChecks": 177,
+      "contrastFailures": [],
+      "unnamedControls": [],
+      "overflow": false,
+      "pageErrors": [],
+      "csp": [],
+      "afterLoadRequests": [],
+      "rowHeights": [
+        84
+      ]
+    },
+    {
+      "id": "busy-bus-light-narrow",
+      "scenario": "busy",
+      "surface": "bus",
+      "theme": "light",
+      "viewport": {
+        "width": 390,
+        "height": 844
+      },
+      "deviceScaleFactor": 1,
+      "documentWidth": 390,
+      "palette": {
+        "body": "rgb(245, 246, 243)",
+        "text": "rgb(24, 35, 33)",
+        "theme": "light"
+      },
+      "panelWidth": 390,
+      "renderedTextChecks": 107,
+      "contrastFailures": [],
+      "unnamedControls": [],
+      "overflow": false,
+      "pageErrors": [],
+      "csp": [],
+      "afterLoadRequests": [],
+      "rowHeights": [
+        84
+      ]
+    },
+    {
+      "id": "busy-events-light-narrow",
+      "scenario": "busy",
+      "surface": "events",
+      "theme": "light",
+      "viewport": {
+        "width": 390,
+        "height": 844
+      },
+      "deviceScaleFactor": 1,
+      "documentWidth": 390,
+      "palette": {
+        "body": "rgb(245, 246, 243)",
+        "text": "rgb(24, 35, 33)",
+        "theme": "light"
+      },
+      "panelWidth": 0,
+      "renderedTextChecks": 113,
+      "contrastFailures": [],
+      "unnamedControls": [],
+      "overflow": false,
+      "pageErrors": [],
+      "csp": [],
+      "afterLoadRequests": [],
+      "rowHeights": [
+        64
+      ]
+    },
+    {
+      "id": "busy-task-light-narrow",
+      "scenario": "busy",
+      "surface": "task",
+      "theme": "light",
+      "viewport": {
+        "width": 390,
+        "height": 844
+      },
+      "deviceScaleFactor": 1,
+      "documentWidth": 390,
+      "palette": {
+        "body": "rgb(245, 246, 243)",
+        "text": "rgb(24, 35, 33)",
+        "theme": "light"
+      },
+      "panelWidth": 390,
+      "renderedTextChecks": 47,
+      "contrastFailures": [],
+      "unnamedControls": [],
+      "overflow": false,
+      "pageErrors": [],
+      "csp": [],
+      "afterLoadRequests": [],
+      "rowHeights": []
+    },
+    {
+      "id": "busy-message-light-narrow",
+      "scenario": "busy",
+      "surface": "message",
+      "theme": "light",
+      "viewport": {
+        "width": 390,
+        "height": 844
+      },
+      "deviceScaleFactor": 1,
+      "documentWidth": 390,
+      "palette": {
+        "body": "rgb(245, 246, 243)",
+        "text": "rgb(24, 35, 33)",
+        "theme": "light"
+      },
+      "panelWidth": 390,
+      "renderedTextChecks": 49,
+      "contrastFailures": [],
+      "unnamedControls": [],
+      "overflow": false,
+      "pageErrors": [],
+      "csp": [],
+      "afterLoadRequests": [],
+      "rowHeights": []
+    },
+    {
+      "id": "busy-event-light-narrow",
+      "scenario": "busy",
+      "surface": "event",
+      "theme": "light",
+      "viewport": {
+        "width": 390,
+        "height": 844
+      },
+      "deviceScaleFactor": 1,
+      "documentWidth": 390,
+      "palette": {
+        "body": "rgb(245, 246, 243)",
+        "text": "rgb(24, 35, 33)",
+        "theme": "light"
+      },
+      "panelWidth": 390,
+      "renderedTextChecks": 52,
+      "contrastFailures": [],
+      "unnamedControls": [],
+      "overflow": false,
+      "pageErrors": [],
+      "csp": [],
+      "afterLoadRequests": [],
+      "rowHeights": []
+    },
+    {
+      "id": "busy-usage-light-narrow",
+      "scenario": "busy",
+      "surface": "usage",
+      "theme": "light",
+      "viewport": {
+        "width": 390,
+        "height": 844
+      },
+      "deviceScaleFactor": 1,
+      "documentWidth": 390,
+      "palette": {
+        "body": "rgb(245, 246, 243)",
+        "text": "rgb(24, 35, 33)",
+        "theme": "light"
+      },
+      "panelWidth": 0,
+      "renderedTextChecks": 59,
+      "contrastFailures": [],
+      "unnamedControls": [],
+      "overflow": false,
+      "pageErrors": [],
+      "csp": [],
+      "afterLoadRequests": [],
+      "rowHeights": []
+    },
+    {
+      "id": "busy-bus-dark-zoom",
+      "scenario": "busy",
+      "surface": "bus",
+      "theme": "dark",
+      "viewport": {
+        "width": 720,
+        "height": 480
+      },
+      "deviceScaleFactor": 2,
+      "documentWidth": 720,
+      "palette": {
+        "body": "rgb(18, 18, 18)",
+        "text": "rgb(237, 237, 237)",
+        "theme": "dark"
+      },
+      "panelWidth": 720,
+      "renderedTextChecks": 73,
+      "contrastFailures": [],
+      "unnamedControls": [],
+      "overflow": false,
+      "pageErrors": [],
+      "csp": [],
+      "afterLoadRequests": [],
+      "rowHeights": [
+        84
+      ]
+    },
+    {
+      "id": "busy-events-dark-zoom",
+      "scenario": "busy",
+      "surface": "events",
+      "theme": "dark",
+      "viewport": {
+        "width": 720,
+        "height": 480
+      },
+      "deviceScaleFactor": 2,
+      "documentWidth": 720,
+      "palette": {
+        "body": "rgb(18, 18, 18)",
+        "text": "rgb(237, 237, 237)",
+        "theme": "dark"
+      },
+      "panelWidth": 0,
+      "renderedTextChecks": 98,
+      "contrastFailures": [],
+      "unnamedControls": [],
+      "overflow": false,
+      "pageErrors": [],
+      "csp": [],
+      "afterLoadRequests": [],
+      "rowHeights": [
+        64
+      ]
+    },
+    {
+      "id": "busy-task-dark-zoom",
+      "scenario": "busy",
+      "surface": "task",
+      "theme": "dark",
+      "viewport": {
+        "width": 720,
+        "height": 480
+      },
+      "deviceScaleFactor": 2,
+      "documentWidth": 720,
+      "palette": {
+        "body": "rgb(18, 18, 18)",
+        "text": "rgb(237, 237, 237)",
+        "theme": "dark"
+      },
+      "panelWidth": 720,
+      "renderedTextChecks": 43,
+      "contrastFailures": [],
+      "unnamedControls": [],
+      "overflow": false,
+      "pageErrors": [],
+      "csp": [],
+      "afterLoadRequests": [],
+      "rowHeights": []
+    },
+    {
+      "id": "busy-message-dark-zoom",
+      "scenario": "busy",
+      "surface": "message",
+      "theme": "dark",
+      "viewport": {
+        "width": 720,
+        "height": 480
+      },
+      "deviceScaleFactor": 2,
+      "documentWidth": 720,
+      "palette": {
+        "body": "rgb(18, 18, 18)",
+        "text": "rgb(237, 237, 237)",
+        "theme": "dark"
+      },
+      "panelWidth": 720,
+      "renderedTextChecks": 45,
+      "contrastFailures": [],
+      "unnamedControls": [],
+      "overflow": false,
+      "pageErrors": [],
+      "csp": [],
+      "afterLoadRequests": [],
+      "rowHeights": []
+    },
+    {
+      "id": "busy-event-dark-zoom",
+      "scenario": "busy",
+      "surface": "event",
+      "theme": "dark",
+      "viewport": {
+        "width": 720,
+        "height": 480
+      },
+      "deviceScaleFactor": 2,
+      "documentWidth": 720,
+      "palette": {
+        "body": "rgb(18, 18, 18)",
+        "text": "rgb(237, 237, 237)",
+        "theme": "dark"
+      },
+      "panelWidth": 720,
+      "renderedTextChecks": 40,
+      "contrastFailures": [],
+      "unnamedControls": [],
+      "overflow": false,
+      "pageErrors": [],
+      "csp": [],
+      "afterLoadRequests": [],
+      "rowHeights": []
+    },
+    {
+      "id": "busy-usage-dark-zoom",
+      "scenario": "busy",
+      "surface": "usage",
+      "theme": "dark",
+      "viewport": {
+        "width": 720,
+        "height": 480
+      },
+      "deviceScaleFactor": 2,
+      "documentWidth": 720,
+      "palette": {
+        "body": "rgb(18, 18, 18)",
+        "text": "rgb(237, 237, 237)",
+        "theme": "dark"
+      },
+      "panelWidth": 0,
+      "renderedTextChecks": 45,
+      "contrastFailures": [],
+      "unnamedControls": [],
+      "overflow": false,
+      "pageErrors": [],
+      "csp": [],
+      "afterLoadRequests": [],
+      "rowHeights": []
+    },
+    {
+      "id": "empty-bus-dark-desktop",
+      "scenario": "empty",
+      "surface": "bus",
+      "theme": "dark",
+      "viewport": {
+        "width": 1440,
+        "height": 960
+      },
+      "deviceScaleFactor": 1,
+      "documentWidth": 1440,
+      "palette": {
+        "body": "rgb(18, 18, 18)",
+        "text": "rgb(237, 237, 237)",
+        "theme": "dark"
+      },
+      "panelWidth": 390,
+      "renderedTextChecks": 38,
+      "contrastFailures": [],
+      "unnamedControls": [],
+      "overflow": false,
+      "pageErrors": [],
+      "csp": [],
+      "afterLoadRequests": [],
+      "rowHeights": []
+    },
+    {
+      "id": "empty-events-dark-desktop",
+      "scenario": "empty",
+      "surface": "events",
+      "theme": "dark",
+      "viewport": {
+        "width": 1440,
+        "height": 960
+      },
+      "deviceScaleFactor": 1,
+      "documentWidth": 1440,
+      "palette": {
+        "body": "rgb(18, 18, 18)",
+        "text": "rgb(237, 237, 237)",
+        "theme": "dark"
+      },
+      "panelWidth": 390,
+      "renderedTextChecks": 40,
+      "contrastFailures": [],
+      "unnamedControls": [],
+      "overflow": false,
+      "pageErrors": [],
+      "csp": [],
+      "afterLoadRequests": [],
+      "rowHeights": []
+    },
+    {
+      "id": "empty-usage-dark-desktop",
+      "scenario": "empty",
+      "surface": "usage",
+      "theme": "dark",
+      "viewport": {
+        "width": 1440,
+        "height": 960
+      },
+      "deviceScaleFactor": 1,
+      "documentWidth": 1440,
+      "palette": {
+        "body": "rgb(18, 18, 18)",
+        "text": "rgb(237, 237, 237)",
+        "theme": "dark"
+      },
+      "panelWidth": 390,
+      "renderedTextChecks": 50,
+      "contrastFailures": [],
+      "unnamedControls": [],
+      "overflow": false,
+      "pageErrors": [],
+      "csp": [],
+      "afterLoadRequests": [],
+      "rowHeights": []
+    },
+    {
+      "id": "empty-bus-dark-narrow",
+      "scenario": "empty",
+      "surface": "bus",
+      "theme": "dark",
+      "viewport": {
+        "width": 390,
+        "height": 844
+      },
+      "deviceScaleFactor": 1,
+      "documentWidth": 390,
+      "palette": {
+        "body": "rgb(18, 18, 18)",
+        "text": "rgb(237, 237, 237)",
+        "theme": "dark"
+      },
+      "panelWidth": 390,
+      "renderedTextChecks": 33,
+      "contrastFailures": [],
+      "unnamedControls": [],
+      "overflow": false,
+      "pageErrors": [],
+      "csp": [],
+      "afterLoadRequests": [],
+      "rowHeights": []
+    },
+    {
+      "id": "empty-events-dark-narrow",
+      "scenario": "empty",
+      "surface": "events",
+      "theme": "dark",
+      "viewport": {
+        "width": 390,
+        "height": 844
+      },
+      "deviceScaleFactor": 1,
+      "documentWidth": 390,
+      "palette": {
+        "body": "rgb(18, 18, 18)",
+        "text": "rgb(237, 237, 237)",
+        "theme": "dark"
+      },
+      "panelWidth": 0,
+      "renderedTextChecks": 35,
+      "contrastFailures": [],
+      "unnamedControls": [],
+      "overflow": false,
+      "pageErrors": [],
+      "csp": [],
+      "afterLoadRequests": [],
+      "rowHeights": []
+    },
+    {
+      "id": "empty-usage-dark-narrow",
+      "scenario": "empty",
+      "surface": "usage",
+      "theme": "dark",
+      "viewport": {
+        "width": 390,
+        "height": 844
+      },
+      "deviceScaleFactor": 1,
+      "documentWidth": 390,
+      "palette": {
+        "body": "rgb(18, 18, 18)",
+        "text": "rgb(237, 237, 237)",
+        "theme": "dark"
+      },
+      "panelWidth": 0,
+      "renderedTextChecks": 44,
+      "contrastFailures": [],
+      "unnamedControls": [],
+      "overflow": false,
+      "pageErrors": [],
+      "csp": [],
+      "afterLoadRequests": [],
+      "rowHeights": []
+    },
+    {
+      "id": "long-text-bus-dark-desktop",
+      "scenario": "long-text",
+      "surface": "bus",
+      "theme": "dark",
+      "viewport": {
+        "width": 1440,
+        "height": 960
+      },
+      "deviceScaleFactor": 1,
+      "documentWidth": 1440,
+      "palette": {
+        "body": "rgb(18, 18, 18)",
+        "text": "rgb(237, 237, 237)",
+        "theme": "dark"
+      },
+      "panelWidth": 390,
+      "renderedTextChecks": 173,
+      "contrastFailures": [],
+      "unnamedControls": [],
+      "overflow": false,
+      "pageErrors": [],
+      "csp": [],
+      "afterLoadRequests": [],
+      "rowHeights": [
+        84
+      ]
+    },
+    {
+      "id": "long-text-events-dark-desktop",
+      "scenario": "long-text",
+      "surface": "events",
+      "theme": "dark",
+      "viewport": {
+        "width": 1440,
+        "height": 960
+      },
+      "deviceScaleFactor": 1,
+      "documentWidth": 1440,
+      "palette": {
+        "body": "rgb(18, 18, 18)",
+        "text": "rgb(237, 237, 237)",
+        "theme": "dark"
+      },
+      "panelWidth": 390,
+      "renderedTextChecks": 133,
+      "contrastFailures": [],
+      "unnamedControls": [],
+      "overflow": false,
+      "pageErrors": [],
+      "csp": [],
+      "afterLoadRequests": [],
+      "rowHeights": [
+        36
+      ]
+    },
+    {
+      "id": "long-text-task-dark-desktop",
+      "scenario": "long-text",
+      "surface": "task",
+      "theme": "dark",
+      "viewport": {
+        "width": 1440,
+        "height": 960
+      },
+      "deviceScaleFactor": 1,
+      "documentWidth": 1440,
+      "palette": {
+        "body": "rgb(18, 18, 18)",
+        "text": "rgb(237, 237, 237)",
+        "theme": "dark"
+      },
+      "panelWidth": 390,
+      "renderedTextChecks": 118,
+      "contrastFailures": [],
+      "unnamedControls": [],
+      "overflow": false,
+      "pageErrors": [],
+      "csp": [],
+      "afterLoadRequests": [],
+      "rowHeights": []
+    },
+    {
+      "id": "long-text-bus-dark-narrow",
+      "scenario": "long-text",
+      "surface": "bus",
+      "theme": "dark",
+      "viewport": {
+        "width": 390,
+        "height": 844
+      },
+      "deviceScaleFactor": 1,
+      "documentWidth": 390,
+      "palette": {
+        "body": "rgb(18, 18, 18)",
+        "text": "rgb(237, 237, 237)",
+        "theme": "dark"
+      },
+      "panelWidth": 390,
+      "renderedTextChecks": 86,
+      "contrastFailures": [],
+      "unnamedControls": [],
+      "overflow": false,
+      "pageErrors": [],
+      "csp": [],
+      "afterLoadRequests": [],
+      "rowHeights": [
+        84
+      ]
+    },
+    {
+      "id": "long-text-events-dark-narrow",
+      "scenario": "long-text",
+      "surface": "events",
+      "theme": "dark",
+      "viewport": {
+        "width": 390,
+        "height": 844
+      },
+      "deviceScaleFactor": 1,
+      "documentWidth": 390,
+      "palette": {
+        "body": "rgb(18, 18, 18)",
+        "text": "rgb(237, 237, 237)",
+        "theme": "dark"
+      },
+      "panelWidth": 0,
+      "renderedTextChecks": 116,
+      "contrastFailures": [],
+      "unnamedControls": [],
+      "overflow": false,
+      "pageErrors": [],
+      "csp": [],
+      "afterLoadRequests": [],
+      "rowHeights": [
+        64
+      ]
+    },
+    {
+      "id": "long-text-task-dark-narrow",
+      "scenario": "long-text",
+      "surface": "task",
+      "theme": "dark",
+      "viewport": {
+        "width": 390,
+        "height": 844
+      },
+      "deviceScaleFactor": 1,
+      "documentWidth": 390,
+      "palette": {
+        "body": "rgb(18, 18, 18)",
+        "text": "rgb(237, 237, 237)",
+        "theme": "dark"
+      },
+      "panelWidth": 390,
+      "renderedTextChecks": 35,
+      "contrastFailures": [],
+      "unnamedControls": [],
+      "overflow": false,
+      "pageErrors": [],
+      "csp": [],
+      "afterLoadRequests": [],
+      "rowHeights": []
+    },
+    {
+      "id": "busy-task-pending-dark-desktop",
+      "scenario": "busy",
+      "surface": "task-pending",
+      "theme": "dark",
+      "viewport": {
+        "width": 1440,
+        "height": 960
+      },
+      "deviceScaleFactor": 1,
+      "documentWidth": 1440,
+      "palette": {
+        "body": "rgb(18, 18, 18)",
+        "text": "rgb(237, 237, 237)",
+        "theme": "dark"
+      },
+      "panelWidth": 390,
+      "renderedTextChecks": 144,
+      "contrastFailures": [],
+      "unnamedControls": [],
+      "overflow": false,
+      "pageErrors": [],
+      "csp": [],
+      "afterLoadRequests": [],
+      "rowHeights": []
+    },
+    {
+      "id": "busy-task-error-dark-desktop",
+      "scenario": "busy",
+      "surface": "task-error",
+      "theme": "dark",
+      "viewport": {
+        "width": 1440,
+        "height": 960
+      },
+      "deviceScaleFactor": 1,
+      "documentWidth": 1440,
+      "palette": {
+        "body": "rgb(18, 18, 18)",
+        "text": "rgb(237, 237, 237)",
+        "theme": "dark"
+      },
+      "panelWidth": 390,
+      "renderedTextChecks": 144,
+      "contrastFailures": [],
+      "unnamedControls": [],
+      "overflow": false,
+      "pageErrors": [],
+      "csp": [],
+      "afterLoadRequests": [],
+      "rowHeights": []
+    },
+    {
+      "id": "busy-message-pending-dark-desktop",
+      "scenario": "busy",
+      "surface": "message-pending",
+      "theme": "dark",
+      "viewport": {
+        "width": 1440,
+        "height": 960
+      },
+      "deviceScaleFactor": 1,
+      "documentWidth": 1440,
+      "palette": {
+        "body": "rgb(18, 18, 18)",
+        "text": "rgb(237, 237, 237)",
+        "theme": "dark"
+      },
+      "panelWidth": 390,
+      "renderedTextChecks": 128,
+      "contrastFailures": [],
+      "unnamedControls": [],
+      "overflow": false,
+      "pageErrors": [],
+      "csp": [],
+      "afterLoadRequests": [],
+      "rowHeights": []
+    },
+    {
+      "id": "busy-message-error-dark-desktop",
+      "scenario": "busy",
+      "surface": "message-error",
+      "theme": "dark",
+      "viewport": {
+        "width": 1440,
+        "height": 960
+      },
+      "deviceScaleFactor": 1,
+      "documentWidth": 1440,
+      "palette": {
+        "body": "rgb(18, 18, 18)",
+        "text": "rgb(237, 237, 237)",
+        "theme": "dark"
+      },
+      "panelWidth": 390,
+      "renderedTextChecks": 128,
+      "contrastFailures": [],
+      "unnamedControls": [],
+      "overflow": false,
+      "pageErrors": [],
+      "csp": [],
+      "afterLoadRequests": [],
+      "rowHeights": []
+    },
+    {
+      "id": "busy-event-missing-dark-desktop",
+      "scenario": "busy",
+      "surface": "event-missing",
+      "theme": "dark",
+      "viewport": {
+        "width": 1440,
+        "height": 960
+      },
+      "deviceScaleFactor": 1,
+      "documentWidth": 1440,
+      "palette": {
+        "body": "rgb(18, 18, 18)",
+        "text": "rgb(237, 237, 237)",
+        "theme": "dark"
+      },
+      "panelWidth": 390,
+      "renderedTextChecks": 126,
+      "contrastFailures": [],
+      "unnamedControls": [],
+      "overflow": false,
+      "pageErrors": [],
+      "csp": [],
+      "afterLoadRequests": [],
+      "rowHeights": [
+        36
+      ]
+    },
+    {
+      "id": "busy-events-error-dark-desktop",
+      "scenario": "busy",
+      "surface": "events-error",
+      "theme": "dark",
+      "viewport": {
+        "width": 1440,
+        "height": 960
+      },
+      "deviceScaleFactor": 1,
+      "documentWidth": 1440,
+      "palette": {
+        "body": "rgb(18, 18, 18)",
+        "text": "rgb(237, 237, 237)",
+        "theme": "dark"
+      },
+      "panelWidth": 390,
+      "renderedTextChecks": 187,
+      "contrastFailures": [],
+      "unnamedControls": [],
+      "overflow": false,
+      "pageErrors": [],
+      "csp": [],
+      "afterLoadRequests": [],
+      "rowHeights": [
+        36,
+        84
+      ]
+    },
+    {
+      "id": "busy-task-pending-dark-narrow",
+      "scenario": "busy",
+      "surface": "task-pending",
+      "theme": "dark",
+      "viewport": {
+        "width": 390,
+        "height": 844
+      },
+      "deviceScaleFactor": 1,
+      "documentWidth": 390,
+      "palette": {
+        "body": "rgb(18, 18, 18)",
+        "text": "rgb(237, 237, 237)",
+        "theme": "dark"
+      },
+      "panelWidth": 390,
+      "renderedTextChecks": 47,
+      "contrastFailures": [],
+      "unnamedControls": [],
+      "overflow": false,
+      "pageErrors": [],
+      "csp": [],
+      "afterLoadRequests": [],
+      "rowHeights": []
+    },
+    {
+      "id": "busy-task-error-dark-narrow",
+      "scenario": "busy",
+      "surface": "task-error",
+      "theme": "dark",
+      "viewport": {
+        "width": 390,
+        "height": 844
+      },
+      "deviceScaleFactor": 1,
+      "documentWidth": 390,
+      "palette": {
+        "body": "rgb(18, 18, 18)",
+        "text": "rgb(237, 237, 237)",
+        "theme": "dark"
+      },
+      "panelWidth": 390,
+      "renderedTextChecks": 47,
+      "contrastFailures": [],
+      "unnamedControls": [],
+      "overflow": false,
+      "pageErrors": [],
+      "csp": [],
+      "afterLoadRequests": [],
+      "rowHeights": []
+    },
+    {
+      "id": "busy-message-pending-dark-narrow",
+      "scenario": "busy",
+      "surface": "message-pending",
+      "theme": "dark",
+      "viewport": {
+        "width": 390,
+        "height": 844
+      },
+      "deviceScaleFactor": 1,
+      "documentWidth": 390,
+      "palette": {
+        "body": "rgb(18, 18, 18)",
+        "text": "rgb(237, 237, 237)",
+        "theme": "dark"
+      },
+      "panelWidth": 390,
+      "renderedTextChecks": 42,
+      "contrastFailures": [],
+      "unnamedControls": [],
+      "overflow": false,
+      "pageErrors": [],
+      "csp": [],
+      "afterLoadRequests": [],
+      "rowHeights": []
+    },
+    {
+      "id": "busy-message-error-dark-narrow",
+      "scenario": "busy",
+      "surface": "message-error",
+      "theme": "dark",
+      "viewport": {
+        "width": 390,
+        "height": 844
+      },
+      "deviceScaleFactor": 1,
+      "documentWidth": 390,
+      "palette": {
+        "body": "rgb(18, 18, 18)",
+        "text": "rgb(237, 237, 237)",
+        "theme": "dark"
+      },
+      "panelWidth": 390,
+      "renderedTextChecks": 42,
+      "contrastFailures": [],
+      "unnamedControls": [],
+      "overflow": false,
+      "pageErrors": [],
+      "csp": [],
+      "afterLoadRequests": [],
+      "rowHeights": []
+    },
+    {
+      "id": "busy-event-missing-dark-narrow",
+      "scenario": "busy",
+      "surface": "event-missing",
+      "theme": "dark",
+      "viewport": {
+        "width": 390,
+        "height": 844
+      },
+      "deviceScaleFactor": 1,
+      "documentWidth": 390,
+      "palette": {
+        "body": "rgb(18, 18, 18)",
+        "text": "rgb(237, 237, 237)",
+        "theme": "dark"
+      },
+      "panelWidth": 390,
+      "renderedTextChecks": 39,
+      "contrastFailures": [],
+      "unnamedControls": [],
+      "overflow": false,
+      "pageErrors": [],
+      "csp": [],
+      "afterLoadRequests": [],
+      "rowHeights": []
+    },
+    {
+      "id": "busy-events-error-dark-narrow",
+      "scenario": "busy",
+      "surface": "events-error",
+      "theme": "dark",
+      "viewport": {
+        "width": 390,
+        "height": 844
+      },
+      "deviceScaleFactor": 1,
+      "documentWidth": 390,
+      "palette": {
+        "body": "rgb(18, 18, 18)",
+        "text": "rgb(237, 237, 237)",
+        "theme": "dark"
+      },
+      "panelWidth": 0,
+      "renderedTextChecks": 114,
+      "contrastFailures": [],
+      "unnamedControls": [],
+      "overflow": false,
+      "pageErrors": [],
+      "csp": [],
+      "afterLoadRequests": [],
+      "rowHeights": [
+        64
+      ]
+    }
+  ]
+}
