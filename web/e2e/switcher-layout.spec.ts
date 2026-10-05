@@ -25,3 +25,20 @@ for (const width of [390, 1440]) {
     });
   });
 }
+
+test.describe("multi-workspace switcher at desktop width", () => {
+  test.use({ viewport: { width: 1440, height: 844 }, mockOptions: { scenario: "multi" } });
+
+  test("every joined workspace name fits beside its state", async ({ page, mock, openPage }) => {
+    await openPage();
+    await page.locator("[data-switcher-button]").click();
+    const rows = page.getByRole("listbox", { name: "workspaces", exact: true }).locator(".switcher-row");
+    await expect(rows).toHaveCount(mock.listing().joined.length);
+    for (const row of await rows.all()) {
+      const name = row.locator(".ws-name");
+      const size = await name.evaluate((el) => ({ name: el.textContent, client: el.clientWidth, scroll: el.scrollWidth }));
+      expect(size.client, `${size.name} must have reading width`).toBeGreaterThan(0);
+      expect(size.scroll, `${size.name} must not clip`).toBeLessThanOrEqual(size.client);
+    }
+  });
+});
