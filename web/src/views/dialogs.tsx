@@ -73,17 +73,15 @@ function QuestionDialog(props: { id: string }) {
   const index = () => open().findIndex((x) => x.id === props.id);
   const [own, setOwn] = createSignal("");
   const [sending, setSending] = createSignal(false);
-  const [error, setError] = createSignal<string | null>(null);
   // Another question: its own answer starts empty.
-  createEffect(on(() => props.id, () => { setOwn(""); setError(null); }, { defer: true }));
+  createEffect(on(() => props.id, () => { setOwn(""); }, { defer: true }));
   const send = async (body: string) => {
     const question = q();
     if (!question || !body.trim() || sending() || !link.live()) return;
     setSending(true);
-    setError(null);
     const ok = await app.actions.answer(question.id, body);
     setSending(false);
-    if (!ok) return setError(ui.status()?.text ?? "The answer was not sent.");
+    if (!ok) return;
     // On to the next question, if any.
     const next = store.openQuestions().find((x) => x.id !== question.id);
     if (next) ui.updateDialog({ kind: "question", id: next.id });
@@ -107,7 +105,7 @@ function QuestionDialog(props: { id: string }) {
   };
   return (
     <Modal title={open().length > 1 ? `question ${index() + 1} of ${open().length}` : "question"} label="question" class="question-dialog" onClose={() => ui.closeDialog()} initial=".options button, textarea" refocus={() => [props.id, open().length, sending(), link.live()]}>
-      <Show when={q()} fallback={<><p role="status">{sending() ? "Sending answer…" : "This question has been answered."}</p><div class="dialog-actions"><button onClick={() => ui.closeDialog()}>close</button></div></>}>
+      <Show when={q()} fallback={<><p>This question has been answered.</p><div class="dialog-actions"><button onClick={() => ui.closeDialog()}>close</button></div></>}>
         {(question) => (
           <div onKeyDown={onKey}>
             <p class="asker"><b>{asker(question())}</b> <span class="muted">· {fmtElapsed(store.serverNow(Date.now()) - question().timestamp)} ago</span></p>
@@ -129,7 +127,6 @@ function QuestionDialog(props: { id: string }) {
                   }
                 }} />
             </label>
-            <Show when={error()}><p class="err" role="alert">{error()}</p></Show>
             <div class="dialog-actions">
               <Show when={open().length > 1}>
                 <button onClick={() => step(-1)}>previous</button>

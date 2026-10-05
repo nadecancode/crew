@@ -243,11 +243,7 @@ function StatusBar() {
       <button disabled={!link.live()} onClick={() => ops.command()} title="command line (Ctrl K)">Commands <kbd aria-hidden="true">Ctrl K</kbd></button>
       <label class="appearance">Appearance <select aria-label="Appearance" value={prefs.prefs.theme} onChange={(e) => prefs.setTheme(e.currentTarget.value as Theme)}><option value="system">System</option><option value="light">Light</option><option value="dark">Dark</option></select></label>
       <button onClick={() => ui.openDialog({ kind: "help" })} title="keys and commands (?)" aria-label="keys and commands">?</button>
-      <details class="workspace-actions" onFocusOut={(e) => !e.currentTarget.contains(e.relatedTarget as Node | null) && (e.currentTarget.open = false)} onKeyDown={(e) => {
-        if (e.key === "Escape") { e.preventDefault(); e.stopPropagation(); e.currentTarget.open = false; e.currentTarget.querySelector("summary")?.focus(); }
-      }}><summary aria-label="Workspace actions" title="Workspace actions">⋯</summary><div class="popover">
-        <button class="danger" disabled={!link.live() || app.isPending("shutdown")} onClick={(e) => { const d = e.currentTarget.closest("details")!; d.open = false; d.querySelector("summary")?.focus(); ops.stop(); }} title="stop the team (S)">stop team</button>
-      </div></details>
+      <select aria-label="Workspace actions" disabled={!link.live() || app.isPending("shutdown")} onChange={(e) => { if (e.currentTarget.value === "stop") { e.currentTarget.value = ""; ops.stop(); } }}><option value="">Workspace actions</option><option value="stop">stop team</option></select>
     </header>
   );
 }
