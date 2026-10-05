@@ -23,7 +23,8 @@ button:is(.primary, .on, [aria-pressed="true"]) { border-color: var(--orch); col
 button.link { min-height: 0; background: none; border: none; padding: 0; color: inherit; text-align: left; white-space: normal; }
 button.link:hover { text-decoration: underline; background: none; }
 :focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
-input, select, textarea { padding: 4px 8px;  color: var(--orch); }
+input, select, textarea { padding: 4px 8px; }
+a { color: var(--orch); }
 code, kbd, .mono, pre { font-family: var(--mono); }
 kbd { font-size: 11px; border: 1px solid var(--line); border-radius: 3px; padding: 0 4px; background: var(--node-hi); }
 pre { margin: 0; white-space: pre-wrap; word-break: break-word; } .gauge { color: var(--gauge); } .rt-codex { color: var(--codex); } .rt-pi { color: var(--pi); } .rt-shell { color: var(--shell); }
@@ -125,7 +126,7 @@ pre.body { background: var(--node-hi); border: 1px solid var(--line); border-rad
 .entry h1 { margin: 0 0 8px; font-size: 18px; }
 
 .badge { font: 600 12px/1.4 var(--mono); border: 1px solid var(--line); border-radius: var(--radius-sm); padding: 1px 5px; color: var(--muted); background: var(--node-hi); }
-.badge.ask { color: var(--surface); background: var(--warn); border-color: var(--warn); cursor: pointer; }
+.badge.ask { min-height: 0; color: var(--surface); background: var(--warn); border-color: var(--warn); cursor: pointer; }
 .models button.now, .badge:is(.q, .unread, .pending) { color: var(--orch); }
 .badge.limit, .badge.paused { color: var(--warn); }
 .tabs { display: flex; gap: 2px; padding: 0 10px; }
@@ -147,7 +148,8 @@ pre.body { background: var(--node-hi); border: 1px solid var(--line); border-rad
 .models .summary { overflow: hidden; text-overflow: ellipsis; }
 .help-cols { display: flex; gap: 18px; flex-wrap: wrap; }
 .help-keys, .help-commands { border-collapse: collapse; font-size: 12px; }
-:is(.help-keys, .help-commands) :is(td, th) { padding: 2px 8px; text-align: left; vertical-align: top;  color: var(--muted); font-weight: normal; }
+:is(.help-keys, .help-commands) :is(td, th) { padding: 2px 8px; text-align: left; vertical-align: top; }
+:is(.help-keys, .help-commands) th { color: var(--muted); font-weight: normal; }
 .context-menu { position: fixed; z-index: 35; background: var(--panel); border: 1px solid var(--dim); border-radius: 7px; padding: 4px; display: flex; min-width: 170px; box-shadow: var(--elevation); }
 .context-menu button { border: none; background: none; text-align: left; padding: 3px 10px; }
 .context-menu button:is(:hover, :focus-visible):not(:disabled) { background: var(--node-hi); }
