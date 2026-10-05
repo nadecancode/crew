@@ -1,0 +1,431 @@
+{
+  "format_version": 1,
+  "baseline_commit": "6049cdf63e36e303327235834f23a798aa5a82c1",
+  "references": {
+    "send_params": {
+      "path": "crates/crew-core/src/rpc.rs",
+      "line": 79,
+      "anchor": "pub struct SendParams"
+    },
+    "rpc_calls": {
+      "path": "crates/crew-core/src/rpc.rs",
+      "line": 104,
+      "anchor": "pub enum Call"
+    },
+    "rpc_request": {
+      "path": "crates/crew-core/src/rpc.rs",
+      "line": 604,
+      "anchor": "pub struct Request"
+    },
+    "rpc_empty": {
+      "path": "crates/crew-core/src/rpc.rs",
+      "line": 518,
+      "anchor": "fn empty_params"
+    },
+    "message_limits": {
+      "path": "crates/crew-core/src/types.rs",
+      "line": 17,
+      "anchor": "pub const MAX_MESSAGE_BYTES"
+    },
+    "identity": {
+      "path": "crates/crew/src/daemon/server.rs",
+      "line": 32,
+      "anchor": "fn sender"
+    },
+    "authorization": {
+      "path": "crates/crew/src/daemon/handlers.rs",
+      "line": 41,
+      "anchor": "fn operator_only"
+    },
+    "dispatch": {
+      "path": "crates/crew/src/daemon/handlers.rs",
+      "line": 241,
+      "anchor": "Call::LoadTeam"
+    },
+    "send_dispatch": {
+      "path": "crates/crew/src/daemon/handlers.rs",
+      "line": 672,
+      "anchor": "pub(crate) async fn handle_send"
+    },
+    "recipients": {
+      "path": "crates/crew/src/daemon/handlers.rs",
+      "line": 732,
+      "anchor": "pub(crate) fn recipients_of"
+    },
+    "bus": {
+      "path": "crates/crew/src/message_bus/mod.rs",
+      "line": 142,
+      "anchor": "fn valid_message_id"
+    },
+    "bus_accept": {
+      "path": "crates/crew/src/message_bus/mod.rs",
+      "line": 218,
+      "anchor": "fn accept"
+    },
+    "questions": {
+      "path": "crates/crew/src/daemon/questions.rs",
+      "line": 203,
+      "anchor": "pub(crate) async fn answer_question"
+    },
+    "operator_question": {
+      "path": "crates/crew/src/daemon/questions.rs",
+      "line": 36,
+      "anchor": "pub(crate) fn check_operator_question"
+    },
+    "agent_control": {
+      "path": "crates/crew/src/daemon/supervisor/control.rs",
+      "line": 14,
+      "anchor": "pub(crate) async fn kill_agent"
+    },
+    "pause_agent": {
+      "path": "crates/crew/src/daemon/supervisor/control.rs",
+      "line": 174,
+      "anchor": "pub(crate) async fn pause_agent"
+    },
+    "limit_resume": {
+      "path": "crates/crew/src/daemon/limits.rs",
+      "line": 252,
+      "anchor": "pub(crate) async fn resume_limited"
+    },
+    "compact": {
+      "path": "crates/crew/src/daemon/context.rs",
+      "line": 184,
+      "anchor": "pub(crate) async fn compact_agent"
+    },
+    "task_card": {
+      "path": "crates/crew/src/daemon/orchestrate.rs",
+      "line": 410,
+      "anchor": "pub(crate) fn task_card"
+    },
+    "web_actions": {
+      "path": "web/src/app.ts",
+      "line": 254,
+      "anchor": "const [pending, setPending]"
+    },
+    "web_send": {
+      "path": "web/src/app.ts",
+      "line": 287,
+      "anchor": "const newMessageId"
+    },
+    "web_answer": {
+      "path": "web/src/app.ts",
+      "line": 327,
+      "anchor": "async function answer"
+    },
+    "web_prompt": {
+      "path": "web/src/app.ts",
+      "line": 372,
+      "anchor": "async prompt"
+    },
+    "submit": {
+      "path": "web/src/operate.ts",
+      "line": 148,
+      "anchor": "async submit"
+    },
+    "operations": {
+      "path": "web/src/operate.ts",
+      "line": 18,
+      "anchor": "const ops"
+    },
+    "commands": {
+      "path": "web/src/commands.ts",
+      "line": 131,
+      "anchor": "export function run"
+    },
+    "slash": {
+      "path": "web/src/commands.ts",
+      "line": 36,
+      "anchor": "export function slashCommand"
+    },
+    "rust_slash": {
+      "path": "crates/crew-core/src/util.rs",
+      "line": 166,
+      "anchor": "pub fn slash_command"
+    },
+    "tui_commands": {
+      "path": "crates/crew-tui/src/input/commands.rs",
+      "line": 10,
+      "anchor": "pub(super) fn run_slash"
+    },
+    "question_dialog": {
+      "path": "web/src/views/dialogs.tsx",
+      "line": 68,
+      "anchor": "function QuestionDialog"
+    },
+    "confirm": {
+      "path": "web/src/views/dialogs.tsx",
+      "line": 227,
+      "anchor": "function ConfirmDialog"
+    },
+    "model_dialog": {
+      "path": "web/src/views/dialogs.tsx",
+      "line": 146,
+      "anchor": "function ModelDialog"
+    },
+    "message_box": {
+      "path": "web/src/views/MessageBox.tsx",
+      "line": 25,
+      "anchor": "const submit"
+    },
+    "menu": {
+      "path": "web/src/views/ContextMenu.tsx",
+      "line": 21,
+      "anchor": "const items"
+    },
+    "inspector": {
+      "path": "web/src/views/Inspector.tsx",
+      "line": 42,
+      "anchor": "const can"
+    },
+    "web_timeout": {
+      "path": "web/src/net/conn.ts",
+      "line": 57,
+      "anchor": "export function timeoutFor"
+    },
+    "web_conn": {
+      "path": "web/src/net/conn.ts",
+      "line": 181,
+      "anchor": "call<T = unknown>"
+    },
+    "tui_timeout": {
+      "path": "crates/crew-tui/src/net.rs",
+      "line": 45,
+      "anchor": "fn request_timeout"
+    },
+    "workspace": {
+      "path": "web/src/net/workspace.ts",
+      "line": 114,
+      "anchor": "function evaluate"
+    },
+    "workspace_link": {
+      "path": "web/src/net/workspace.ts",
+      "line": 277,
+      "anchor": "live: ()"
+    },
+    "choose_workspace": {
+      "path": "web/src/app.ts",
+      "line": 131,
+      "anchor": "function choose"
+    },
+    "switch_workspace": {
+      "path": "web/src/app.ts",
+      "line": 140,
+      "anchor": "function switchTo"
+    },
+    "switcher": {
+      "path": "web/src/views/Switcher.tsx",
+      "line": 119,
+      "anchor": "Only joined rows"
+    },
+    "route": {
+      "path": "web/src/route.ts",
+      "line": 25,
+      "anchor": "export function parseRoute"
+    },
+    "workspace_admit": {
+      "path": "crates/crew/src/web/hub.rs",
+      "line": 358,
+      "anchor": "pub(crate) fn admit"
+    },
+    "web_index": {
+      "path": "crates/crew/src/web/page.rs",
+      "line": 401,
+      "anchor": "fn index_call"
+    },
+    "web_control": {
+      "path": "crates/crew/src/web/control.rs",
+      "line": 130,
+      "anchor": "match call"
+    },
+    "task_panel": {
+      "path": "web/src/views/TaskPanel.tsx",
+      "line": 30,
+      "anchor": "link.call(\"task_get\""
+    },
+    "question_limits": {
+      "path": "crates/crew-core/src/types.rs",
+      "line": 505,
+      "anchor": "pub const MAX_QUESTION_OPTIONS"
+    },
+    "spec_ids": {
+      "path": "crates/crew-core/src/util.rs",
+      "line": 63,
+      "anchor": "pub fn is_valid_id"
+    },
+    "web_ui": {
+      "path": "web/src/ui.ts",
+      "line": 91,
+      "anchor": "export function createUi"
+    },
+    "tui_confirm": {
+      "path": "crates/crew-tui/src/input/dialogs.rs",
+      "line": 20,
+      "anchor": "Modal::ConfirmKill"
+    },
+    "call_send": {
+      "path": "crates/crew-core/src/rpc.rs",
+      "line": 249,
+      "anchor": "Send(SendParams)"
+    },
+    "call_answer": {
+      "path": "crates/crew-core/src/rpc.rs",
+      "line": 267,
+      "anchor": "    Answer {"
+    },
+    "call_agent_pause": {
+      "path": "crates/crew-core/src/rpc.rs",
+      "line": 175,
+      "anchor": "    AgentPause {"
+    },
+    "call_agent_resume": {
+      "path": "crates/crew-core/src/rpc.rs",
+      "line": 187,
+      "anchor": "    AgentResume {"
+    },
+    "call_agent_kill": {
+      "path": "crates/crew-core/src/rpc.rs",
+      "line": 135,
+      "anchor": "    AgentKill {"
+    },
+    "call_agent_restart": {
+      "path": "crates/crew-core/src/rpc.rs",
+      "line": 143,
+      "anchor": "    AgentRestart {"
+    },
+    "call_agent_restart_fresh": {
+      "path": "crates/crew-core/src/rpc.rs",
+      "line": 150,
+      "anchor": "    AgentRestartFresh {"
+    },
+    "call_agent_compact": {
+      "path": "crates/crew-core/src/rpc.rs",
+      "line": 194,
+      "anchor": "    AgentCompact {"
+    },
+    "call_agent_set_model": {
+      "path": "crates/crew-core/src/rpc.rs",
+      "line": 158,
+      "anchor": "    AgentSetModel {"
+    },
+    "call_agent_input": {
+      "path": "crates/crew-core/src/rpc.rs",
+      "line": 223,
+      "anchor": "    AgentInput {"
+    },
+    "call_agent_focus": {
+      "path": "crates/crew-core/src/rpc.rs",
+      "line": 232,
+      "anchor": "    AgentFocus {"
+    },
+    "call_resume": {
+      "path": "crates/crew-core/src/rpc.rs",
+      "line": 181,
+      "anchor": "    Resume {"
+    },
+    "call_shutdown": {
+      "path": "crates/crew-core/src/rpc.rs",
+      "line": 125,
+      "anchor": "    Shutdown {"
+    },
+    "call_task_get": {
+      "path": "crates/crew-core/src/rpc.rs",
+      "line": 321,
+      "anchor": "    TaskGet {"
+    },
+    "call_models_list": {
+      "path": "crates/crew-core/src/rpc.rs",
+      "line": 170,
+      "anchor": "    ModelsList,"
+    },
+    "call_tasks_list": {
+      "path": "crates/crew-core/src/rpc.rs",
+      "line": 318,
+      "anchor": "    TasksList,"
+    },
+    "initial_state": {
+      "path": "web/src/store/store.ts",
+      "line": 65,
+      "anchor": "loaded: false"
+    },
+    "configured_message_limit": {
+      "path": "crates/crew/src/message_bus/mod.rs",
+      "line": 207,
+      "anchor": ".store(limit.clamp(1, MAX_MESSAGE_BYTES)"
+    },
+    "handler_send": {
+      "path": "crates/crew/src/daemon/handlers.rs",
+      "line": 399,
+      "anchor": "Call::Send(params)"
+    },
+    "handler_answer": {
+      "path": "crates/crew/src/daemon/handlers.rs",
+      "line": 400,
+      "anchor": "Call::Answer {"
+    },
+    "handler_agent_pause": {
+      "path": "crates/crew/src/daemon/handlers.rs",
+      "line": 315,
+      "anchor": "Call::AgentPause {"
+    },
+    "handler_agent_resume": {
+      "path": "crates/crew/src/daemon/handlers.rs",
+      "line": 325,
+      "anchor": "Call::AgentResume {"
+    },
+    "handler_agent_kill": {
+      "path": "crates/crew/src/daemon/handlers.rs",
+      "line": 265,
+      "anchor": "Call::AgentKill {"
+    },
+    "handler_agent_restart": {
+      "path": "crates/crew/src/daemon/handlers.rs",
+      "line": 275,
+      "anchor": "Call::AgentRestart {"
+    },
+    "handler_agent_restart_fresh": {
+      "path": "crates/crew/src/daemon/handlers.rs",
+      "line": 280,
+      "anchor": "Call::AgentRestartFresh {"
+    },
+    "handler_agent_compact": {
+      "path": "crates/crew/src/daemon/handlers.rs",
+      "line": 314,
+      "anchor": "Call::AgentCompact {"
+    },
+    "handler_agent_set_model": {
+      "path": "crates/crew/src/daemon/handlers.rs",
+      "line": 285,
+      "anchor": "Call::AgentSetModel {"
+    },
+    "handler_agent_input": {
+      "path": "crates/crew/src/daemon/handlers.rs",
+      "line": 362,
+      "anchor": "Call::AgentInput {"
+    },
+    "handler_agent_focus": {
+      "path": "crates/crew/src/daemon/handlers.rs",
+      "line": 380,
+      "anchor": "Call::AgentFocus {"
+    },
+    "handler_resume": {
+      "path": "crates/crew/src/daemon/handlers.rs",
+      "line": 320,
+      "anchor": "Call::Resume {"
+    },
+    "handler_shutdown": {
+      "path": "crates/crew/src/daemon/handlers.rs",
+      "line": 250,
+      "anchor": "Call::Shutdown {"
+    },
+    "handler_task_get": {
+      "path": "crates/crew/src/daemon/handlers.rs",
+      "line": 499,
+      "anchor": "Call::TaskGet {"
+    },
+    "handler_models_list": {
+      "path": "crates/crew/src/daemon/handlers.rs",
+      "line": 302,
+      "anchor": "Call::ModelsList"
+    }
+  }
+}

@@ -1,0 +1,619 @@
+{
+  "format_version": 1,
+  "baseline_commit": "6049cdf63e36e303327235834f23a798aa5a82c1",
+  "meaning": "Current source behavior; native availability is not frozen by this table.",
+  "read_only": {
+    "writable_when": "hub_live && workspace_shown === 'live'",
+    "server_read_only_role": false,
+    "web_session_scope": "all joined workspaces",
+    "states": [
+      {
+        "hub_live": true,
+        "workspace_shown": "none",
+        "writable": false
+      },
+      {
+        "hub_live": true,
+        "workspace_shown": "connecting",
+        "writable": false
+      },
+      {
+        "hub_live": true,
+        "workspace_shown": "reconnecting",
+        "writable": false
+      },
+      {
+        "hub_live": true,
+        "workspace_shown": "not-running",
+        "writable": false
+      },
+      {
+        "hub_live": true,
+        "workspace_shown": "incompatible",
+        "writable": false
+      },
+      {
+        "hub_live": true,
+        "workspace_shown": "removed",
+        "writable": false
+      },
+      {
+        "hub_live": false,
+        "workspace_shown": "live",
+        "writable": false
+      },
+      {
+        "hub_live": true,
+        "workspace_shown": "live",
+        "writable": true
+      }
+    ],
+    "source_refs": [
+      "workspace_link",
+      "workspace",
+      "web_actions"
+    ]
+  },
+  "confirmations": {
+    "owner": "client",
+    "kinds": [
+      "kill",
+      "restart-fresh",
+      "restart-paused",
+      "stop"
+    ],
+    "server_confirmation_field": false,
+    "cancel_or_escape_calls": 0,
+    "source_refs": [
+      "confirm",
+      "tui_confirm",
+      "rpc_calls"
+    ]
+  },
+  "limits": {
+    "max_message_bytes": 65536,
+    "max_question_options": 6,
+    "max_option_chars": 200,
+    "spec_id_pattern": "[a-z][a-z0-9_-]{0,31}",
+    "message_id_pattern": "[A-Za-z0-9_.:-]{1,64}",
+    "note": "Message limit counts UTF-8 bytes, configurable downward. Question option count/length apply to question producers, not freeform answer length. Spec ID validator applies to creation; existing IDs are used verbatim.",
+    "source_refs": [
+      "message_limits",
+      "question_limits",
+      "spec_ids",
+      "bus",
+      "operator_question"
+    ]
+  },
+  "operations": [
+    {
+      "method": "send",
+      "channels": {
+        "unix_operator": "allowed",
+        "web_workspace": "allowed",
+        "web_index": "invalid",
+        "dashboard_control": "invalid",
+        "gateway_device": {
+          "Read": "pending native-gateway-contract",
+          "Control": "pending native-gateway-contract",
+          "Terminal": "pending native-gateway-contract"
+        }
+      },
+      "current_web_ui": "composer",
+      "confirmation": "none",
+      "timeout_ms": 3000,
+      "note": "Authenticated sender; composer uses type=message. A type=task bus message does not create a task.",
+      "source_refs": [
+        "call_send",
+        "send_dispatch",
+        "submit",
+        "handler_send"
+      ]
+    },
+    {
+      "method": "answer",
+      "channels": {
+        "unix_operator": "allowed",
+        "web_workspace": "allowed",
+        "web_index": "invalid",
+        "dashboard_control": "invalid",
+        "gateway_device": {
+          "Read": "pending native-gateway-contract",
+          "Control": "pending native-gateway-contract",
+          "Terminal": "pending native-gateway-contract"
+        }
+      },
+      "current_web_ui": "question dialog",
+      "confirmation": "none",
+      "timeout_ms": 3000,
+      "note": "Question message ID; daemon trims answer and routes to asker plus asked_by copy.",
+      "source_refs": [
+        "call_answer",
+        "authorization",
+        "questions",
+        "web_answer",
+        "question_dialog",
+        "handler_answer"
+      ]
+    },
+    {
+      "method": "agent_pause",
+      "channels": {
+        "unix_operator": "allowed",
+        "web_workspace": "allowed",
+        "web_index": "invalid",
+        "dashboard_control": "invalid",
+        "gateway_device": {
+          "Read": "pending native-gateway-contract",
+          "Control": "pending native-gateway-contract",
+          "Terminal": "pending native-gateway-contract"
+        }
+      },
+      "current_web_ui": "inspector/menu/command",
+      "confirmation": "none",
+      "timeout_ms": 3000,
+      "note": "Requires live process. Manually paused flag differs from usage limit.",
+      "source_refs": [
+        "call_agent_pause",
+        "authorization",
+        "pause_agent",
+        "web_actions",
+        "operations",
+        "handler_agent_pause"
+      ]
+    },
+    {
+      "method": "agent_resume",
+      "channels": {
+        "unix_operator": "allowed",
+        "web_workspace": "allowed",
+        "web_index": "invalid",
+        "dashboard_control": "invalid",
+        "gateway_device": {
+          "Read": "pending native-gateway-contract",
+          "Control": "pending native-gateway-contract",
+          "Terminal": "pending native-gateway-contract"
+        }
+      },
+      "current_web_ui": "inspector/menu/command",
+      "confirmation": "none",
+      "timeout_ms": 30000,
+      "note": "Resumes manual suspension; not the usage-limit resume operation.",
+      "source_refs": [
+        "call_agent_resume",
+        "authorization",
+        "pause_agent",
+        "web_actions",
+        "operations",
+        "handler_agent_resume"
+      ]
+    },
+    {
+      "method": "agent_restart",
+      "channels": {
+        "unix_operator": "allowed",
+        "web_workspace": "allowed",
+        "web_index": "invalid",
+        "dashboard_control": "invalid",
+        "gateway_device": {
+          "Read": "pending native-gateway-contract",
+          "Control": "pending native-gateway-contract",
+          "Terminal": "pending native-gateway-contract"
+        }
+      },
+      "current_web_ui": "menu/command",
+      "confirmation": "none",
+      "timeout_ms": 30000,
+      "note": "Resumes old conversation.",
+      "source_refs": [
+        "call_agent_restart",
+        "authorization",
+        "agent_control",
+        "web_actions",
+        "operations",
+        "handler_agent_restart"
+      ]
+    },
+    {
+      "method": "agent_restart_fresh",
+      "channels": {
+        "unix_operator": "allowed",
+        "web_workspace": "allowed",
+        "web_index": "invalid",
+        "dashboard_control": "invalid",
+        "gateway_device": {
+          "Read": "pending native-gateway-contract",
+          "Control": "pending native-gateway-contract",
+          "Terminal": "pending native-gateway-contract"
+        }
+      },
+      "current_web_ui": "menu/command",
+      "confirmation": "restart-fresh",
+      "timeout_ms": 30000,
+      "note": "Drops old conversation; dedicated method, not agent_restart flag.",
+      "source_refs": [
+        "call_agent_restart_fresh",
+        "authorization",
+        "agent_control",
+        "web_actions",
+        "confirm",
+        "tui_confirm",
+        "handler_agent_restart_fresh"
+      ]
+    },
+    {
+      "method": "agent_kill",
+      "channels": {
+        "unix_operator": "allowed",
+        "web_workspace": "allowed",
+        "web_index": "invalid",
+        "dashboard_control": "invalid",
+        "gateway_device": {
+          "Read": "pending native-gateway-contract",
+          "Control": "pending native-gateway-contract",
+          "Terminal": "pending native-gateway-contract"
+        }
+      },
+      "current_web_ui": "menu/command",
+      "confirmation": "kill",
+      "timeout_ms": 30000,
+      "note": "Stops member process; active task becomes blocked and remains open.",
+      "source_refs": [
+        "call_agent_kill",
+        "authorization",
+        "agent_control",
+        "web_actions",
+        "confirm",
+        "tui_confirm",
+        "handler_agent_kill"
+      ]
+    },
+    {
+      "method": "agent_compact",
+      "channels": {
+        "unix_operator": "allowed",
+        "web_workspace": "allowed",
+        "web_index": "invalid",
+        "dashboard_control": "invalid",
+        "gateway_device": {
+          "Read": "pending native-gateway-contract",
+          "Control": "pending native-gateway-contract",
+          "Terminal": "pending native-gateway-contract"
+        }
+      },
+      "current_web_ui": "menu/command",
+      "confirmation": "none",
+      "timeout_ms": 3000,
+      "note": "Operator names id; terminal-status or shell runtime refused.",
+      "source_refs": [
+        "call_agent_compact",
+        "compact",
+        "web_actions",
+        "operations",
+        "handler_agent_compact"
+      ]
+    },
+    {
+      "method": "agent_set_model",
+      "channels": {
+        "unix_operator": "allowed",
+        "web_workspace": "allowed",
+        "web_index": "invalid",
+        "dashboard_control": "invalid",
+        "gateway_device": {
+          "Read": "pending native-gateway-contract",
+          "Control": "pending native-gateway-contract",
+          "Terminal": "pending native-gateway-contract"
+        }
+      },
+      "current_web_ui": "model dialog",
+      "confirmation": "none",
+      "timeout_ms": 30000,
+      "note": "Current or unavailable row sends no mutation. Same runtime resumes; changed runtime starts fresh.",
+      "source_refs": [
+        "call_agent_set_model",
+        "dispatch",
+        "web_actions",
+        "model_dialog",
+        "handler_agent_set_model"
+      ]
+    },
+    {
+      "method": "agent_input",
+      "channels": {
+        "unix_operator": "allowed",
+        "web_workspace": "allowed",
+        "web_index": "invalid",
+        "dashboard_control": "invalid",
+        "gateway_device": {
+          "Read": "pending native-gateway-contract",
+          "Control": "pending native-gateway-contract",
+          "Terminal": "pending native-gateway-contract"
+        }
+      },
+      "current_web_ui": "prompt box",
+      "confirmation": "none",
+      "timeout_ms": 3000,
+      "note": "Nonempty text submits one prompt. Empty prompt writes carriage return, submit=false.",
+      "source_refs": [
+        "call_agent_input",
+        "authorization",
+        "dispatch",
+        "web_prompt",
+        "handler_agent_input"
+      ]
+    },
+    {
+      "method": "agent_focus",
+      "channels": {
+        "unix_operator": "allowed",
+        "web_workspace": "allowed",
+        "web_index": "invalid",
+        "dashboard_control": "invalid",
+        "gateway_device": {
+          "Read": "pending native-gateway-contract",
+          "Control": "pending native-gateway-contract",
+          "Terminal": "pending native-gateway-contract"
+        }
+      },
+      "current_web_ui": "herdr menu/shortcut",
+      "confirmation": "none",
+      "timeout_ms": 3000,
+      "note": "UI offers pane focus for herdr only.",
+      "source_refs": [
+        "call_agent_focus",
+        "authorization",
+        "dispatch",
+        "operations",
+        "handler_agent_focus"
+      ]
+    },
+    {
+      "method": "resume",
+      "channels": {
+        "unix_operator": "allowed",
+        "web_workspace": "allowed",
+        "web_index": "invalid",
+        "dashboard_control": "invalid",
+        "gateway_device": {
+          "Read": "pending native-gateway-contract",
+          "Control": "pending native-gateway-contract",
+          "Terminal": "pending native-gateway-contract"
+        }
+      },
+      "current_web_ui": "usage banner/command",
+      "confirmation": "restart-paused_if_restart_true",
+      "timeout_ms": 90000,
+      "note": "agents=[] targets nonterminal members at usage limits. restart=false has no confirmation.",
+      "source_refs": [
+        "call_resume",
+        "authorization",
+        "limit_resume",
+        "web_actions",
+        "confirm",
+        "tui_confirm",
+        "handler_resume"
+      ]
+    },
+    {
+      "method": "shutdown",
+      "channels": {
+        "unix_operator": "allowed",
+        "web_workspace": "allowed",
+        "web_index": "invalid",
+        "dashboard_control": "invalid",
+        "gateway_device": {
+          "Read": "pending native-gateway-contract",
+          "Control": "pending native-gateway-contract",
+          "Terminal": "pending native-gateway-contract"
+        }
+      },
+      "current_web_ui": "workspace toolbar/command",
+      "confirmation": "stop",
+      "timeout_ms": 90000,
+      "note": "UI sends stop_agents=true; selected team/daemon stop, dashboard server and other teams remain separate.",
+      "source_refs": [
+        "call_shutdown",
+        "authorization",
+        "dispatch",
+        "web_actions",
+        "confirm",
+        "tui_confirm",
+        "handler_shutdown"
+      ]
+    },
+    {
+      "method": "task_get",
+      "channels": {
+        "unix_operator": "allowed",
+        "web_workspace": "allowed",
+        "web_index": "invalid",
+        "dashboard_control": "invalid",
+        "gateway_device": {
+          "Read": "pending native-gateway-contract",
+          "Control": "pending native-gateway-contract",
+          "Terminal": "pending native-gateway-contract"
+        }
+      },
+      "current_web_ui": "task panel",
+      "confirmation": "none",
+      "timeout_ms": 3000,
+      "note": "Operator must name task ID. Task UI offers read/navigation/copy only.",
+      "source_refs": [
+        "call_task_get",
+        "task_card",
+        "task_panel",
+        "handler_task_get"
+      ]
+    },
+    {
+      "method": "models_list",
+      "channels": {
+        "unix_operator": "allowed",
+        "web_workspace": "allowed",
+        "web_index": "invalid",
+        "dashboard_control": "invalid",
+        "gateway_device": {
+          "Read": "pending native-gateway-contract",
+          "Control": "pending native-gateway-contract",
+          "Terminal": "pending native-gateway-contract"
+        }
+      },
+      "current_web_ui": "model dialog",
+      "confirmation": "none",
+      "timeout_ms": 20000,
+      "note": "Read used by model picker; no params.",
+      "source_refs": [
+        "call_models_list",
+        "authorization",
+        "dispatch",
+        "model_dialog",
+        "handler_models_list"
+      ]
+    }
+  ],
+  "excluded_operations": [
+    {
+      "method": "agent_remove",
+      "reason": "RPC exists; no dashboard surface or existing dashboard confirmation to inherit.",
+      "source_refs": [
+        "dispatch"
+      ]
+    },
+    {
+      "group": "other agent/task/git mutations and agent-only tools",
+      "reason": "No current dashboard action surface. This corpus does not expose additional Call variants.",
+      "source_refs": [
+        "rpc_calls",
+        "commands",
+        "menu",
+        "task_panel"
+      ]
+    },
+    {
+      "method": "load_team",
+      "channels": {
+        "unix_operator": "allowed",
+        "web_workspace": "forbidden",
+        "web_index": "invalid",
+        "dashboard_control": "invalid",
+        "gateway_device": {
+          "Read": "pending native-gateway-contract",
+          "Control": "pending native-gateway-contract",
+          "Terminal": "pending native-gateway-contract"
+        }
+      },
+      "reason": "Trusted Unix operator allowed; web=true forbidden. No dashboard action surface.",
+      "source_refs": [
+        "dispatch",
+        "authorization"
+      ]
+    },
+    {
+      "method": "web_attach",
+      "channels": {
+        "unix_operator": "allowed",
+        "web_workspace": "forbidden",
+        "web_index": "invalid",
+        "dashboard_control": "invalid",
+        "gateway_device": {
+          "Read": "pending native-gateway-contract",
+          "Control": "pending native-gateway-contract",
+          "Terminal": "pending native-gateway-contract"
+        }
+      },
+      "reason": "Trusted Unix operator allowed; web=true forbidden. No dashboard action surface.",
+      "source_refs": [
+        "dispatch",
+        "authorization"
+      ]
+    },
+    {
+      "method": "web_event",
+      "channels": {
+        "unix_operator": "allowed",
+        "web_workspace": "forbidden",
+        "web_index": "invalid",
+        "dashboard_control": "invalid",
+        "gateway_device": {
+          "Read": "pending native-gateway-contract",
+          "Control": "pending native-gateway-contract",
+          "Terminal": "pending native-gateway-contract"
+        }
+      },
+      "reason": "Trusted Unix operator allowed; web=true forbidden. No dashboard action surface.",
+      "source_refs": [
+        "dispatch",
+        "authorization"
+      ]
+    },
+    {
+      "method": "web_open",
+      "channels": {
+        "unix_operator": "invalid",
+        "web_workspace": "invalid",
+        "web_index": "invalid",
+        "dashboard_control": "allowed",
+        "gateway_device": {
+          "Read": "pending native-gateway-contract",
+          "Control": "pending native-gateway-contract",
+          "Terminal": "pending native-gateway-contract"
+        }
+      },
+      "reason": "Control socket operation. A daemon refuses this call for every role; browser session carries no web.token authority.",
+      "source_refs": [
+        "dispatch",
+        "web_control"
+      ]
+    },
+    {
+      "method": "web_close",
+      "channels": {
+        "unix_operator": "invalid",
+        "web_workspace": "invalid",
+        "web_index": "invalid",
+        "dashboard_control": "allowed",
+        "gateway_device": {
+          "Read": "pending native-gateway-contract",
+          "Control": "pending native-gateway-contract",
+          "Terminal": "pending native-gateway-contract"
+        }
+      },
+      "reason": "Control socket operation. A daemon refuses this call for every role; browser session carries no web.token authority.",
+      "source_refs": [
+        "dispatch",
+        "web_control"
+      ]
+    },
+    {
+      "method": "web_rescan",
+      "channels": {
+        "unix_operator": "invalid",
+        "web_workspace": "invalid",
+        "web_index": "invalid",
+        "dashboard_control": "allowed",
+        "gateway_device": {
+          "Read": "pending native-gateway-contract",
+          "Control": "pending native-gateway-contract",
+          "Terminal": "pending native-gateway-contract"
+        }
+      },
+      "reason": "Control socket operation. A daemon refuses this call for every role; browser session carries no web.token authority.",
+      "source_refs": [
+        "dispatch",
+        "web_control"
+      ]
+    }
+  ],
+  "gateway_device": {
+    "tiers": [
+      "Read",
+      "Control",
+      "Terminal"
+    ],
+    "default_tier": "Read",
+    "method_mapping_source": "notes/native-gateway.md",
+    "method_mapping_status": "pending native-gateway-contract",
+    "tier_decision_message": "m-7db8b1b663e8"
+  }
+}

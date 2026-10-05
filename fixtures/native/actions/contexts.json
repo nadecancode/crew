@@ -1,0 +1,203 @@
+{
+  "web_live": {
+    "hub_live": true,
+    "workspace_shown": "live",
+    "workspace_id": "946d4617aa702870",
+    "role": "operator",
+    "random_bytes": [
+      1,
+      2,
+      3,
+      4,
+      5,
+      6,
+      7,
+      8
+    ],
+    "pending": [],
+    "selected": "claude-1",
+    "seed_fixture": "crates/crew/tests/fixtures/web/snapshot.json"
+  },
+  "daemon_operator": {
+    "authenticated": true,
+    "role": "operator",
+    "web": false,
+    "agent_ids": [
+      "claude-1",
+      "claude-2",
+      "claude-3",
+      "claude-4",
+      "claude-5",
+      "claude-6",
+      "orchestrator"
+    ],
+    "task_ids": [
+      "db",
+      "queue",
+      "ledger",
+      "search",
+      "notify",
+      "billing"
+    ],
+    "max_message_bytes": 65536,
+    "process_alive": {
+      "claude-1": true
+    },
+    "seed_fixture": "crates/crew/tests/fixtures/web/snapshot.json"
+  },
+  "daemon_web": {
+    "authenticated": true,
+    "role": "operator",
+    "web": true,
+    "agent_ids": [
+      "claude-1",
+      "claude-2",
+      "claude-3",
+      "claude-4",
+      "claude-5",
+      "claude-6",
+      "orchestrator"
+    ],
+    "process_alive": {
+      "claude-1": true
+    },
+    "seed_fixture": "crates/crew/tests/fixtures/web/snapshot.json"
+  },
+  "daemon_agent": {
+    "authenticated": true,
+    "role": "agent",
+    "agent_id": "claude-1",
+    "orchestrator": false,
+    "agent_ids": [
+      "claude-1",
+      "claude-2",
+      "claude-3",
+      "claude-4",
+      "claude-5",
+      "claude-6",
+      "orchestrator"
+    ],
+    "seed_fixture": "crates/crew/tests/fixtures/web/snapshot.json"
+  },
+  "command": {
+    "agents": [
+      "claude-1",
+      "claude-2"
+    ],
+    "to": "*",
+    "selected": "claude-2",
+    "orchestrator": "orchestrator"
+  },
+  "question": {
+    "authenticated": true,
+    "hub_live": true,
+    "workspace_shown": "live",
+    "role": "operator",
+    "question": {
+      "body": "The legacy export writes amounts as integer cents; the new ledger API wants decimal strings. Converting in the adapter keeps every downstream report working but hides the mismatch; changing the export is cleaner and breaks the two finance dashboards until they are updated. Which do you want?",
+      "correlation_id": null,
+      "from": "orchestrator",
+      "id": "m-9001",
+      "metadata": {
+        "asked_by": "claude-2",
+        "options": [
+          "Convert in the adapter",
+          "Change the export and update the dashboards"
+        ]
+      },
+      "reply_to": null,
+      "timestamp": 1759999816200,
+      "to": "operator",
+      "type": "question"
+    },
+    "sending": false,
+    "question_open": true,
+    "asker_on_team": true,
+    "asked_by_on_team": true
+  },
+  "workspace_listing": {
+    "hub_live": true,
+    "listing": {
+      "joined": [
+        {
+          "daemon": {
+            "pid": 4242,
+            "started_at": 1759996400000
+          },
+          "detail": "",
+          "generation": 1,
+          "id": "946d4617aa702870",
+          "joined_at": 1759999940001,
+          "project": "payments",
+          "state": "running",
+          "summary": {
+            "agents": 6,
+            "attention": 1,
+            "project": "payments",
+            "questions": 2,
+            "rev": 12,
+            "tasks": 6,
+            "tasks_done": 4,
+            "working": 3
+          },
+          "workspace": "/home/op/work/payments"
+        },
+        {
+          "daemon": null,
+          "detail": "",
+          "generation": 2,
+          "id": "4c2e8a1b9d0f3e57",
+          "joined_at": 1759999940002,
+          "project": "billing",
+          "state": "stopped",
+          "summary": {
+            "agents": 6,
+            "attention": 1,
+            "project": "payments",
+            "questions": 2,
+            "rev": 12,
+            "tasks": 6,
+            "tasks_done": 4,
+            "working": 3
+          },
+          "workspace": "/home/op/work/billing"
+        },
+        {
+          "daemon": null,
+          "detail": "started by another version of crew (protocol 5): restart the team",
+          "generation": 3,
+          "id": "7a1d2c3b4e5f6071",
+          "joined_at": 1759999940003,
+          "project": "infra",
+          "state": "incompatible",
+          "summary": null,
+          "workspace": "/home/op/work/infra"
+        },
+        {
+          "daemon": null,
+          "detail": "its daemon did not answer within 2 s",
+          "generation": 5,
+          "id": "e0f1a2b3c4d5e6f7",
+          "joined_at": 1759999940005,
+          "project": "search",
+          "state": "unreachable",
+          "summary": null,
+          "workspace": "/home/op/work/search"
+        }
+      ],
+      "others": [
+        {
+          "id": "0b54c1d2e3f4a596",
+          "project": "docs",
+          "workspace": "/home/op/work/docs"
+        }
+      ],
+      "rev": 41
+    },
+    "current_workspace": "946d4617aa702870",
+    "last": null
+  },
+  "wire": {
+    "protocol": 6
+  }
+}
