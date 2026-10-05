@@ -10,12 +10,12 @@ const timers = { setTimeout: (f: () => void, ms: number) => setTimeout(f, ms) as
 
 test("fields of the wrong type and unknown keys are dropped", () => {
   expect(validate({ layout: { a: { x: 1, y: 2 }, b: { x: "1", y: 2 }, c: null, d: { x: Infinity, y: 0 } }, keys: "no", panel: 500, extra: 1 }))
-    .toEqual({ layout: { a: { x: 1, y: 2 } }, keys: true, panel: 500 });
-  expect(validate(null)).toEqual({ layout: {}, keys: true, panel: null });
-  expect(validate([1, 2])).toEqual({ layout: {}, keys: true, panel: null });
-  expect(validate({ keys: false, panel: 10 })).toEqual({ layout: {}, keys: false, panel: null });
+    .toEqual({ layout: { a: { x: 1, y: 2 } }, keys: true, panel: 500, theme: "system" });
+  expect(validate(null)).toEqual({ layout: {}, keys: true, panel: null, theme: "system" });
+  expect(validate([1, 2])).toEqual({ layout: {}, keys: true, panel: null, theme: "system" });
+  expect(validate({ keys: false, panel: 10 })).toEqual({ layout: {}, keys: false, panel: null, theme: "system" });
   expect(validateLayout({ layout: { a: { x: 1, y: 2 } }, keys: false })).toEqual({ layout: { a: { x: 1, y: 2 } } });
-  expect(validateDashboard({ keys: false, panel: 600, last: "946d4617aa702870", layout: {} })).toEqual({ keys: false, panel: 600, last: "946d4617aa702870" });
+  expect(validateDashboard({ keys: false, panel: 600, last: "946d4617aa702870", layout: {} })).toEqual({ keys: false, panel: 600, last: "946d4617aa702870", theme: "system" });
   expect(validateDashboard({ last: "../../etc" }).last).toBeNull();
 });
 
@@ -46,12 +46,52 @@ test("the operator's are the server's: keys, panel, last; written whole, 500 ms 
     return { prefs: { keys: false, last: "946d4617aa702870", layout: { a: { x: 1, y: 1 } } } };
   }, timers);
   await p.load();
-  expect(p.prefs).toEqual({ keys: false, panel: null, last: "946d4617aa702870" });
+  expect(p.prefs).toEqual({ keys: false, panel: null, last: "946d4617aa702870", theme: "system" });
   p.setKeys(true);
   p.setPanel(480);
   p.setLast("0b54c1d2e3f4a596");
   await vi.advanceTimersByTimeAsync(WRITE_DELAY_MS);
   expect(calls.slice(1)).toEqual([["web_prefs", { set: { keys: true, panel: 480, last: "0b54c1d2e3f4a596" } }]]);
+});
+
+test("theme accepts only three choices and stores defaults only after an operator choice", async () => {
+  vi.useFakeTimers();
+  for (const theme of ["system", "light", "dark"]) expect(validateDashboard({ theme }).theme).toBe(theme);
+  for (const theme of [null, 1, {}, [], "Dark", "night", "<style>"]) expect(validateDashboard({ theme }).theme).toBe("system");
+  const writes: unknown[] = [];
+  const prefs = createDashboardPrefs(async (_method, params) => {
+    if ((params as { set?: unknown }).set) writes.push((params as { set: unknown }).set);
+    return { prefs: { theme: "invalid" } };
+  }, timers);
+  await prefs.load();
+  prefs.setLast("946d4617aa702870");
+  await vi.advanceTimersByTimeAsync(WRITE_DELAY_MS);
+  expect(writes).toEqual([{ last: "946d4617aa702870" }]);
+  prefs.setTheme("dark");
+  await vi.advanceTimersByTimeAsync(WRITE_DELAY_MS);
+  expect(writes.at(-1)).toEqual({ last: "946d4617aa702870", theme: "dark" });
+});
+
+test("theme restores from the index and never migrates from a workspace", async () => {
+  vi.useFakeTimers();
+  const writes: unknown[] = [];
+  const restored = createDashboardPrefs(async (_method, params) => {
+    if ((params as { set?: unknown }).set) writes.push((params as { set: unknown }).set);
+    return { prefs: { theme: "dark" } };
+  }, timers);
+  await restored.load();
+  expect(restored.prefs.theme).toBe("dark");
+  restored.setLast("946d4617aa702870");
+  await vi.advanceTimersByTimeAsync(WRITE_DELAY_MS);
+  expect(writes).toEqual([{ last: "946d4617aa702870", theme: "dark" }]);
+  const layout = createLayoutPrefs(async () => ({ prefs: { theme: "dark", keys: false, panel: 600, layout: {} } }), timers);
+  const dashboard = createDashboardPrefs(async () => ({ prefs: {} }), timers);
+  await Promise.all([layout.load(), dashboard.load()]);
+  dashboard.adopt(layout.legacy());
+  expect(joinPrefs(layout, dashboard).prefs.theme).toBe("system");
+  dashboard.setTheme("light");
+  dashboard.adopt(layout.legacy());
+  expect(joinPrefs(layout, dashboard).prefs.theme).toBe("light");
 });
 
 test("a workspace's keys and panel from before are read once, as defaults, when the server has none", async () => {
