@@ -64,9 +64,9 @@ test("it follows the tail at the bottom, and stays put when scrolled up", async 
   expect(rows()).toEqual(before);
 });
 
-function responsiveList(follow?: boolean, initial: string | null = "row-22") {
+function responsiveList(follow?: boolean, initial: string | null = "row-22", initialHeight = 36) {
   const [items, setItems] = createSignal(Array.from({ length: 1000 }, (_, i) => ({ id: `row-${i}` })));
-  const [rowHeight, setRowHeight] = createSignal(36);
+  const [rowHeight, setRowHeight] = createSignal(initialHeight);
   const [chosen, setChosen] = createSignal<string | null>(initial);
   const result = render(() => {
     const selected = createMemo(() => {
@@ -156,4 +156,23 @@ test("follow=false restores an existing selection without jumping to the tail", 
   await tick();
   expect(list.selectedKey()).toBe("row-400");
   expect(list.el.querySelector('[data-key="row-newest"]')).toBeNull();
+});
+
+test("a row taller than its viewport keeps selected identity at the top on mount and keys", async () => {
+  const descriptor = Object.getOwnPropertyDescriptor(HTMLElement.prototype, "clientHeight")!;
+  Object.defineProperty(HTMLElement.prototype, "clientHeight", { configurable: true, get() { return this.classList.contains("vlist") ? 80 : 0; } });
+  try {
+    const list = responsiveList(false, "row-400", 160);
+    await tick();
+    expect(list.el.scrollTop).toBe(400 * 160);
+    expect(list.selectedKey()).toBe("row-400");
+    list.el.dispatchEvent(new KeyboardEvent("keydown", { key: "Home", bubbles: true, cancelable: true }));
+    await tick();
+    expect(list.el.scrollTop).toBe(0);
+    expect(list.selectedKey()).toBe("row-0");
+    list.el.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowDown", bubbles: true, cancelable: true }));
+    await tick();
+    expect(list.el.scrollTop).toBe(160);
+    expect(list.selectedKey()).toBe("row-1");
+  } finally { Object.defineProperty(HTMLElement.prototype, "clientHeight", descriptor); }
 });
