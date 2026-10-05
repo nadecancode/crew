@@ -22,9 +22,9 @@ daemon was launched with that copy.
 |---|---|
 | B1 | The pin is a **copy**, read from `/proc/self/exe` (the running inode, whatever became of its path), in the workspace's state directory: `<state>/bin/crew-<id>`, mode 0500, in a 0700 directory. Written under a temporary name, fsynced, renamed. No hard link. |
 | B2 | `<id>` names the **build**, not the daemon: 16 hex digits of a hash of the running inode's `(dev, ino, size, mtime_ns)`. The same file run again gives the same name. |
-| B3 | The pin is **not removed when the daemon exits**. A daemon that starts finds its own pin there (no copy) or makes it; after recovery it deletes every other file in `<state>/bin`. |
-| B4 | An agent that outlived the previous daemon is **adopted only if it was launched with this daemon's pin**; otherwise it is restarted. The daemon records the pin name each agent was launched with. |
-| B5 | Pinning happens where the crew binary becomes a daemon (`cli/daemonize.rs`, `run_foreground`), not in `daemon::start`: an in-process daemon of a test keeps the `crew_bin` it was given. |
+| B3 | The pin is **not removed when the daemon exits**. A daemon that starts uses the file it finds under its pin's name only if that file is **byte for byte the binary it is running**; otherwise it makes the pin (again). After recovery it deletes every other file in `<state>/bin`. |
+| B4 | An agent that outlived the previous daemon is **adopted only if it was launched with this daemon's pin, and that pin was found intact at this start**; otherwise it is restarted. The daemon records the pin name each agent was launched with. |
+| B5 | Only a daemon the crew binary started pins: the CLI's daemon entry (`cli/daemonize.rs`) asks for it, and the copy is made inside `daemon::start`, under the workspace's lock, so that two daemons starting at once cannot both write `<state>/bin`. An in-process daemon of a test does not ask and keeps the `crew_bin` it was given. (As implemented; the first version of this note put the copy itself in the CLI, outside the lock.) |
 | B6 | In a sandbox the pin is a **generated path of the session**, bound read-only at its own path inside the masked `.crew`, by descriptor and identity like every mount (`sandbox/pin.rs`). It is not a toolchain path under rule 2, and the `target/` exception of `Profile::toolchain` goes. |
 | B7 | A pin that cannot be made does not stop the team: the daemon runs unpinned and says so (event `daemon.unpinned`, warn; a line in `crew status`). A pin that disappears is made again from `/proc/self/exe` (checked when an agent is launched and on the housekeeping tick). |
 | B8 | A mismatch that still happens is **never silent**: every client's refusal names both sides and says "restart the team"; `crew mcp` starts and answers each tool call with it; a hook reports it without blocking the agent's CLI; the daemon emits a warn event naming the agent. |
@@ -75,6 +75,37 @@ size, mtime_ns)` of the running inode is read in one `fstat`; a file that is
 replaced has another inode, and one written in place another mtime. Two
 identical rebuilds get two names: one needless copy and one round of
 restarts, which is the safe direction.
+
+**A file found at start is compared, not recognised** (added after the
+review of the implementation, m-88140ec953e5). The name says which build a
+file should be; it does not say that the file is that build. A file of the
+right shape (regular, this user's, 0500, one link, the right size) under the
+right name can hold anything: the reviewer replaced a stopped daemon's pin
+with other bytes of the same length, and the next start handed it out. That
+breaks the rule this note is for. So at start the file found is compared
+with the running binary, byte for byte, read from the descriptor the copy
+would be made from; identical, it is the pin; anything else, it is replaced
+by a copy (temporary name, sync, rename), with a warn event saying that the
+file found was not this build. The comparison costs less than the copy it
+saves (**observed**: 163 MB in 30 ms, 15 MB in under 5 ms, from the page
+cache). A recorded identity of the last copy was the alternative; it would
+live in the same `.crew` as the pin, would have to be kept right across
+crashes, and would still only say what a daemon once wrote. The running
+binary is the one thing a daemon can compare with that nobody else can have
+changed.
+
+Two consequences:
+
+- B4: agents recorded with a pin that had to be replaced at this start are
+  restarted, not adopted. What they ran while the file was something else
+  cannot be known.
+- While the daemon lives, the check before a launch and on the tick compares
+  the file with what the daemon holds in memory of the copy it verified or
+  made: device, inode, size, modification time **and change time**. A file
+  written in place and given its old modification time back has another
+  change time, which a user cannot set. (The change time is not part of the
+  build's name: linking or renaming the build tree's file changes it without
+  changing the build.)
 
 **In the workspace, not shared per user.** A shared store
 (`$XDG_STATE_HOME/crew/bin`) would save 15 MB per further workspace and
@@ -159,6 +190,15 @@ event. The running inode is always there to copy.
   `daemon.unpinned` is emitted, `crew status` says so.
 - A file planted in `<state>/bin` under the pin's name with another inode is
   not used by a sandbox (the identity check) and is replaced.
+- Between two starts the pin is replaced by a file of the same size, owner,
+  mode and link count with other bytes (one byte changed is enough), and,
+  separately, written in place with its modification time restored: the next
+  start does not hand it out; the pin is the running binary again, the event
+  says so, and an agent recorded with that pin is restarted, not adopted.
+  The same file changed while the daemon runs, modification time restored:
+  made again within a tick.
+- A second start from the same file with the pin untouched still makes no
+  copy (the pin's inode is the same), and reads it once.
 - B8: the sentence from the CLI; `crew mcp` against a daemon of another
   protocol answers `tools/call` with it; the hook's exit code; the daemon's
   event, once a minute at most.
