@@ -78,6 +78,110 @@ fn app() -> App {
 }
 
 #[test]
+fn parked_work_never_replaces_the_executing_task_in_the_dashboard() {
+    use crew_tui::widgets::agent_box::{work_line, Decor};
+
+    for status in [TaskStatus::Working, TaskStatus::Blocked] {
+        let mut app = app();
+        let mut executing = fixture::task("executing", "claude-1", status, &[], NOW);
+        executing.started_at = Some(NOW - 30_000);
+        let mut parked = fixture::task("parked", "claude-1", TaskStatus::Waiting, &[], NOW);
+        parked.started_at = Some(NOW - 10_000);
+        let mut newer = fixture::task("newer", "claude-1", TaskStatus::Waiting, &[], NOW);
+        newer.started_at = Some(NOW - 5_000);
+        app.tasks = vec![parked, executing, newer];
+        let agent = app.agents.iter_mut().find(|a| a.id == "claude-1").unwrap();
+        agent.task = Some("implement executing".into());
+        agent.status = if status == TaskStatus::Working {
+            AgentStatus::Working
+        } else {
+            AgentStatus::Blocked
+        };
+        let work = app.work_of("claude-1", NOW).unwrap();
+        assert_eq!(work.title, "implement executing");
+        assert_eq!(work.elapsed, Some(30_000));
+        assert!(!work.done);
+        let agent = app.agent("claude-1").unwrap();
+        let decor = Decor {
+            work: Some(work),
+            ..Decor::default()
+        };
+        assert_eq!(work_line(agent, &decor).0, "implement executing");
+        let screen = render_to_string(&app, 100, 6, NOW);
+        let row = screen.lines().find(|l| l.contains("claude-1")).unwrap();
+        assert!(row.contains("implement executing"), "{screen}");
+        assert!(!row.contains("implement newer"), "{screen}");
+
+        app.tasks[1].status = TaskStatus::Done;
+        app.tasks[1].completed_at = Some(NOW);
+        app.tasks[0].status = TaskStatus::Working;
+        let resumed = app.work_of("claude-1", NOW).unwrap();
+        assert_eq!(resumed.title, "implement parked");
+        assert_eq!(resumed.elapsed, Some(10_000));
+        assert_eq!(app.tasks[2].status, TaskStatus::Waiting);
+    }
+}
+
+#[test]
+fn parked_cards_remain_separate_and_inspectable_in_the_task_view() {
+    let mut app = app();
+    app.tasks = vec![
+        fixture::task("executing", "claude-1", TaskStatus::Working, &[], NOW),
+        fixture::task("parked-a", "claude-1", TaskStatus::Waiting, &[], NOW),
+        fixture::task("parked-b", "claude-1", TaskStatus::Waiting, &[], NOW),
+    ];
+    app.view = View::Tasks;
+    let screen = render_to_string(&app, 120, 30, NOW);
+    for (id, status) in [
+        ("executing", "working"),
+        ("parked-a", "waiting"),
+        ("parked-b", "waiting"),
+    ] {
+        let row = screen.lines().find(|l| l.contains(id)).unwrap();
+        assert!(row.contains("claude-1") && row.contains(status), "{screen}");
+    }
+    assert_eq!(app.tasks_for("claude-1").count(), 3);
+}
+
+#[test]
+fn waiting_projection_uses_the_same_stable_selection_as_default_task_operations() {
+    let mut app = app();
+    let mut first = fixture::task("first", "claude-1", TaskStatus::Waiting, &[], NOW);
+    first.started_at = Some(NOW - 5_000);
+    let mut second = fixture::task("second", "claude-1", TaskStatus::Waiting, &[], NOW);
+    second.started_at = first.started_at;
+    let mut review = fixture::task("review", "claude-1", TaskStatus::Review, &[], NOW);
+    review.started_at = Some(NOW - 1_000);
+    app.tasks = vec![first, second, review];
+    assert_eq!(
+        app.work_of("claude-1", NOW).unwrap().title,
+        "implement first"
+    );
+
+    app.tasks[0].started_at = None;
+    assert_eq!(
+        app.work_of("claude-1", NOW).unwrap().title,
+        "implement second"
+    );
+    app.tasks[1].started_at = None;
+    let waiting = app.work_of("claude-1", NOW).unwrap();
+    assert_eq!(waiting.title, "implement first");
+    assert_eq!(waiting.elapsed, None);
+
+    // An unstarted blocked card is not executing; a working card is,
+    // even when its timestamp has not been reported in this snapshot.
+    app.tasks[0].status = TaskStatus::Blocked;
+    assert_eq!(
+        app.work_of("claude-1", NOW).unwrap().title,
+        "implement second"
+    );
+    app.tasks[1].status = TaskStatus::Working;
+    let working = app.work_of("claude-1", NOW).unwrap();
+    assert_eq!(working.title, "implement second");
+    assert_eq!(working.elapsed, None);
+}
+
+#[test]
 fn provider_errors_override_stale_activity_and_stay_visible_without_event_history() {
     use crew_tui::widgets::agent_box::{doing, status_tail, work_line, Decor, Tone};
     for kind in ["provider_error", "refused"] {

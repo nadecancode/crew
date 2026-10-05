@@ -516,7 +516,7 @@ impl App {
         (done, self.tasks.len())
     }
 
-    /// The task `id` is on, else the one it finished last.
+    /// Executing work precedes parked cards and other started work.
     pub fn work_of(&self, id: &str, now: i64) -> Option<WorkOn<'_>> {
         let now = self.server_now(now);
         let mine = || {
@@ -524,9 +524,21 @@ impl App {
                 .iter()
                 .filter(move |t| t.assigned_agent.as_deref() == Some(id))
         };
+        let rank = |t: &Task| match t.status {
+            TaskStatus::Working => 2,
+            TaskStatus::Blocked if t.started_at.is_some() => 2,
+            TaskStatus::Waiting => 1,
+            _ => 0,
+        };
         let current = mine()
-            .filter(|t| !t.status.is_terminal() && t.started_at.is_some())
-            .max_by_key(|t| t.started_at);
+            .filter(|t| !t.status.is_terminal() && (rank(t) > 0 || t.started_at.is_some()))
+            .reduce(|current, task| {
+                if (rank(task), task.started_at) > (rank(current), current.started_at) {
+                    task
+                } else {
+                    current
+                }
+            });
         if let Some(task) = current {
             return Some(WorkOn {
                 title: &task.title,
