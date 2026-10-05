@@ -1,29 +1,63 @@
-// WCAG relative-luminance checks for meaningful text and control boundaries.
-// The decorative divider --line is deliberately excluded.
-const surfaces = {
-  light: ['#f5f6f3', '#ffffff', '#eef1ed', '#e7f3ec', '#fff4df', '#faeaea'],
-  dark: ['#101716', '#17201e', '#1e2a26', '#203a2f', '#332b1b', '#382424'],
-};
-const tokens = {
-  light: { text:'#182321', muted:'#53635d', quiet:'#596b62', action:'#116e59', info:'#315ebe', ok:'#216e4d', warn:'#8a570b', err:'#b23b3b', accent:'#9a491e', codex:'#136b66', pi:'#82620c', shell:'#6954ab', p2p:'#ab3e68', border:'#75867d' },
-  dark: { text:'#e5eeea', muted:'#a7b8b0', quiet:'#9aafa4', action:'#71d5ae', info:'#8cb7f2', ok:'#7ccea3', warn:'#e5bf6b', err:'#f39595', accent:'#e8ac82', codex:'#70cbbb', pi:'#debd6f', shell:'#bda5ec', p2p:'#f0a0bd', border:'#79978a' },
-};
+// Check the implemented palette, not a second copy of its expected colours.
+// Run from any directory; an optional argument selects another theme.css.
+import { readFile } from 'node:fs/promises';
+const source = process.argv[2] ?? new URL('../../web/src/theme.css', import.meta.url);
+const css = await readFile(source, 'utf8');
+const declarations = new Map([...css.matchAll(/--([\w-]+)\s*:\s*([^;]+);/g)].map(([, name, value]) => [name, value.trim()]));
+function resolve(name, theme, path = []) {
+  if (path.includes(name)) throw new Error(`Cyclic colour token: ${[...path, name].join(', ')}`);
+  let value = declarations.get(name);
+  if (!value) throw new Error(`Missing colour token: --${name}`);
+  const pair = /^light-dark\(([^,]+),\s*([^)]+)\)$/.exec(value);
+  if (pair) value = pair[theme === 'light' ? 1 : 2].trim();
+  const alias = /^var\(--([\w-]+)\)$/.exec(value);
+  if (alias) return resolve(alias[1], theme, [...path, name]);
+  if (/^#[\da-f]{3}$/i.test(value)) value = '#' + [...value.slice(1)].map(x => x + x).join('');
+  if (!/^#[\da-f]{6}$/i.test(value)) throw new Error(`Unsupported colour value for --${name}: ${value}`);
+  return value.toLowerCase();
+}
+function channels(hex) {
+  return hex.slice(1).match(/../g).map(x => parseInt(x, 16));
+}
 function luminance(hex) {
-  const channels = hex.slice(1).match(/../g).map(x => parseInt(x, 16) / 255)
+  const [r, g, b] = channels(hex).map(x => x / 255)
     .map(x => x <= .04045 ? x / 12.92 : ((x + .055) / 1.055) ** 2.4);
-  return .2126 * channels[0] + .7152 * channels[1] + .0722 * channels[2];
+  return .2126 * r + .7152 * g + .0722 * b;
 }
 function contrast(a, b) {
   const values = [luminance(a), luminance(b)].sort((a, b) => b - a);
   return (values[0] + .05) / (values[1] + .05);
 }
 let failed = false;
-for (const theme of ['light', 'dark']) {
-  for (const [name, value] of Object.entries(tokens[theme])) {
-    const minimum = Math.min(...surfaces[theme].map(background => contrast(value, background)));
-    const threshold = name === 'border' ? 3 : 4.5;
-    console.log(`${theme} ${name}: minimum ${minimum.toFixed(2)}:1`);
-    if (minimum < threshold) failed = true;
-  }
+function check(condition, message) {
+  console.log(`${condition ? 'PASS' : 'FAIL'} ${message}`);
+  if (!condition) failed = true;
 }
+const surfaceNames = ['canvas', 'surface', 'surface-raised', 'action-surface', 'warn-surface', 'err-surface'];
+const textNames = ['text', 'muted', 'quiet', 'action', 'info', 'ok', 'warn', 'err', 'accent', 'codex', 'pi', 'shell', 'p2p'];
+const seriesNames = ['token-input', 'token-output', 'token-cache-read', 'token-cache-write'];
+const neutralNames = ['canvas', 'surface', 'surface-raised', 'action-surface', 'text', 'muted', 'quiet', 'line', 'control-border', 'bg-term', 'term-text', 'term-selection'];
+for (const theme of ['light', 'dark']) {
+  const surfaces = surfaceNames.map(name => resolve(name, theme));
+  for (const name of [...textNames, ...seriesNames, 'control-border']) {
+    const minimum = Math.min(...surfaces.map(background => contrast(resolve(name, theme), background)));
+    const threshold = name === 'control-border' ? 3 : 4.5;
+    check(minimum >= threshold, `${theme} --${name}: minimum ${minimum.toFixed(2)}:1 (requires ${threshold}:1)`);
+  }
+  const series = seriesNames.map(name => resolve(name, theme));
+  check(new Set(series).size === series.length, `${theme} usage series have four distinct colours`);
+  for (const background of ['bg-term', 'term-selection']) {
+    const ratio = contrast(resolve('term-text', theme), resolve(background, theme));
+    check(ratio >= 4.5, `${theme} terminal text on --${background}: ${ratio.toFixed(2)}:1`);
+  }
+  const primary = contrast(resolve('canvas', theme), resolve('action', theme));
+  check(primary >= 4.5, `${theme} primary button text: ${primary.toFixed(2)}:1`);
+}
+for (const name of neutralNames) {
+  const value = resolve(name, 'dark');
+  const [r, g, b] = channels(value);
+  check(r === g && g === b, `dark --${name}: ${value} achromatic`);
+}
+const [red, green, blue] = channels(resolve('action', 'dark'));
+check(blue > green && blue > red, 'dark action uses blue; green remains a semantic accent');
 if (failed) process.exitCode = 1;

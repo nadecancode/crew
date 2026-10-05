@@ -170,5 +170,6 @@
       "viewport": "narrow",
       "reproduce": "bun run gallery --out '/tmp/crew-integrated-gallery/repro/baseline-terminal-ended-light-narrow' --scenario baseline --surface terminal-ended --theme light --viewport narrow --fixture subagents --strict"
     }
-  ]
+  ],
+  "paletteStatus": "Historical: green dark palette superseded by operator correction on 2026-10-05; see ../../web-revamp.md section signoff for current acceptance."
 }

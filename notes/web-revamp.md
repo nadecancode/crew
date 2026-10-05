@@ -2,7 +2,7 @@
 
 Design for the existing `crew web` application in `web/`. This is an operator workspace: understand what the team is doing, locate the work that needs attention, inspect the evidence, and act without losing context. The public website is outside this change.
 
-The direction is a quiet, legible operational interface. Use a warm light canvas or an ink dark canvas, clear typography, thin divisions, and one restrained action colour. Keep the live graph and the useful density of a developer tool. Spend space on message bodies, current work, relationships, and actionable state rather than decoration.
+The direction is a quiet, legible operational interface. Use a warm light canvas or a neutral charcoal dark canvas, clear typography, thin divisions, and one restrained action colour: blue in dark mode. Dark canvas, panels, text, borders, and selected backgrounds use achromatic gray values; no green cast. Keep the live graph and the useful density of a developer tool. Spend space on message bodies, current work, relationships, and actionable state rather than decoration.
 
 This document replaces the visual/layout recommendations in [web-design.md §ui](web-design.md#ui) and the node appearance, interaction presentation, and usage-strip layout paragraphs of [§graphs](web-design.md#graphs), while retaining that document's security, transport, keyboard, and performance contracts and [web-multi.md](web-multi.md), except for the explicitly approved P1/P2 changes in §budget. The implementation must not require new daemon data or a protocol revision. The delivery tiers in §budget govern scope: T0 is required; T1 content and both List modes are now funded by the orchestrator decision recorded in §budget, still conditional on measured bytes; remaining T2 descriptions are not acceptance requirements unless an allowance is assigned before work begins. Tiers take precedence over the complete future interaction descriptions in §views/§content. Any new §views behaviour not explicitly named in T0 is optional under the T1 rule: it requires a measured delta within the assigned slice allowance before acceptance scope expands.
 
@@ -15,6 +15,8 @@ This document replaces the visual/layout recommendations in [web-design.md §ui]
 - [Editable mockup](web-revamp/mockups/index.html): `?scene=team|inspector|tasks|dag|events|usage|question|attention|replacement&theme=light|dark`. Static, authored sample content; buttons are visual references. These files never ship in `web-dist`.
 
 Mockups show hierarchy, surfaces, and spacing, not new wire values. Wording is illustrative; the implementation shows the actual objective, task titles, IDs, model, and diagnostics. The mockup's sandbox is assumed `required`; the existing warning must appear when it is not. Keep the visible subagent and runtime distinctions required below. References mix delivery tiers: the DAG/attention/panel layouts are T0; usage aggregate/attention count/timestamps are T1; List modes are funded T1; bus filter/follow controls remain T2. See §budget before treating a visible optional control as implementation scope.
+
+The reference images and original sign-off gallery predate the operator's 2026-10-05 dark-theme correction. Their green palette is superseded by §system below. They remain evidence for layout and the historical implementation, not colour approval for the revised dashboard.
 
 <a id="audit"></a>
 ## §audit — current application
@@ -78,16 +80,16 @@ Names describe purpose. `theme.css` defines the values and compatibility aliases
 
 | Semantic token | Light | Dark |
 |---|---|---|
-| `--canvas` | `#f5f6f3` | `#101716` |
-| `--surface` | `#ffffff` | `#17201e` |
-| `--surface-raised` | `#eef1ed` | `#1e2a26` |
-| `--text` | `#182321` | `#e5eeea` |
-| `--muted` | `#53635d` | `#a7b8b0` |
-| `--quiet` | `#596b62` | `#9aafa4` |
-| `--line` | `#d9e1dc` | `#2c3c35` |
-| `--control-border` | `#75867d` | `#79978a` |
-| `--action` | `#116e59` | `#71d5ae` |
-| `--action-surface` | `#e7f3ec` | `#203a2f` |
+| `--canvas` | `#f5f6f3` | `#121212` |
+| `--surface` | `#ffffff` | `#1a1a1a` |
+| `--surface-raised` | `#eef1ed` | `#242424` |
+| `--text` | `#182321` | `#ededed` |
+| `--muted` | `#53635d` | `#b5b5b5` |
+| `--quiet` | `#596b62` | `#a3a3a3` |
+| `--line` | `#d9e1dc` | `#363636` |
+| `--control-border` | `#75867d` | `#858585` |
+| `--action` | `#116e59` | `#8cb7f2` |
+| `--action-surface` | `#e7f3ec` | `#242424` |
 | `--info` / `--focus` | `#315ebe` | `#8cb7f2` |
 | `--ok` | `#216e4d` | `#7ccea3` |
 | `--warn` | `#8a570b` | `#e5bf6b` |
@@ -103,10 +105,19 @@ Names describe purpose. `theme.css` defines the values and compatibility aliases
 | `--token-output` | `#116e59` | `#71d5ae` |
 | `--token-cache-read` | `#6954ab` | `#bda5ec` |
 | `--token-cache-write` | `#8a570b` | `#e5bf6b` |
+| `--bg-term` | `#101010` | `#101010` |
+| `--term-text` | `#ededed` | `#ededed` |
+| `--term-selection` | `#414141` | `#414141` |
 
-Aliases: `--bg = --canvas`, `--panel/--node = --surface`, `--bar-bg/--node-hi = --surface-raised`, `--orch = --info`, `--dim = --quiet`, `--faint = --line`, `--gauge = --action`, `--gauge-track = --line`. Keep `--p2p` pink, distinct from the shell runtime. Usage categories use the four `--token-*` names exclusively; a labelled usage legend defines those hues within the chart, independently of runtime identity. `--bg-term` can remain near-black in both modes; its text and xterm theme must form their own matching palette.
+Aliases: `--bg = --canvas`, `--panel/--node = --surface`, `--bar-bg/--node-hi = --surface-raised`, `--orch = --info`, `--dim = --quiet`, `--faint = --line`, `--gauge = --action`, `--gauge-track = --line`. Keep `--p2p` pink, distinct from the shell runtime. Usage categories use the four `--token-*` names exclusively; a labelled usage legend defines those hues within the chart, independently of runtime identity. `--token-output` retains the explicit green values in the table and must no longer alias `--action`, because dark action and token input are now blue. The terminal uses the neutral palette in both appearances, including xterm fallbacks.
 
-Measured examples: light muted on white 6.34:1; dark muted on surface 8.03:1. Across canvas, surface, raised, action, warning and error surfaces, the minimum quiet-text contrast is 4.87:1 light / 5.29:1 dark; the minimum control-border contrast is 3.30:1 light / 3.87:1 dark. Action on `--surface` is 6.18:1 light / 9.38:1 dark; on `--action-surface` it is 5.42:1 light / 6.93:1 dark. [contrast.mjs](web-revamp/contrast.mjs) checks these six surfaces. Use the strong border for controls whose boundary is needed; `--line` is a decorative divider. Test composed warning, selection, disabled, and chart states separately. Do not apply container opacity to meaningful read-only text until contrast is lost; show a stale tint and status banner while keeping text readable.
+The dark structural tokens above must have equal red, green, and blue channels. Warning/error surfaces, runtime identities, status indicators, usage series, and diff content retain their purposeful colours. Use colour for a small indicator, text, border, or measured data; do not tint the shell, canvas, panels, composer, or selected rows green. List/control selection combines a gray fill with a blue border, underline, or row marker. Selected graph nodes use the bright neutral `--text` outline in dark mode so selection remains distinct from blue keyboard focus and the blue orchestrator frame; retain green light-mode selection with `stroke: light-dark(var(--action), var(--text))`. Existing labels and glyphs continue to distinguish meaning without colour.
+
+`--action-surface` and `--surface-raised` intentionally share `#242424` in dark mode. Hovered and selected bus/event rows have the same gray fill, but only selected rows have the persistent 3px blue marker. This distinction is accepted (`R-GREEN-4`); a second tinted or brighter selection surface is unnecessary.
+
+Light appearance keeps the existing warm neutral palette, green action, and light scrim. This correction targets the operator's dark-mode request; it does not introduce a second light redesign. The terminal is always dark and therefore receives the neutral terminal values in either appearance.
+
+Measured examples: light muted on white 6.34:1; dark muted on surface 8.49:1. Across canvas, surface, raised, action, warning and error surfaces, the minimum quiet-text contrast is 4.87:1 light / 5.54:1 dark; the minimum control-border contrast is 3.30:1 light / 3.79:1 dark. Action on `--surface` is 6.18:1 light / 8.43:1 dark; on `--action-surface` it is 5.42:1 light / 7.52:1 dark. [contrast.mjs](web-revamp/contrast.mjs) reads the actual `theme.css` tokens, checks these six surfaces, verifies dark structural neutrality and terminal contrast, and guards distinct usage series. Use the strong border for controls whose boundary is needed; `--line` is a decorative divider. Test composed warning, selection, disabled, and chart states separately. Do not apply container opacity to meaningful read-only text until contrast is lost; show a stale tint and status banner while keeping text readable.
 
 Default `theme=system`; Light/Dark/System choices are in the visible appearance control. Persist only the choice, as another validated dashboard `web_prefs` field on the index connection. The existing endpoint stores an opaque JSON preference object; this is a frontend schema extension, not new daemon data. Do not use browser storage as a second preference authority. A system media change updates the palette only in System mode. Initial system palette comes from CSS before preference load. An explicit preference differing from the system may produce one palette change while `web_prefs` arrives; this small loopback-load flash is accepted. Do not add browser storage to eliminate it.
 
@@ -411,10 +422,12 @@ Visible copy changes to account for deliberately: “graph” navigation becomes
 
 ### Order and shared interfaces
 
-1. Reviewer approves this design and reference images.
-2. `ui` lands a small foundation commit first: tokens, primitives, and extraction of the existing styles into the ownership files below. It builds and preserves existing behaviour. Send that commit directly to `graph`, `content`, and `qa`.
-3. `ui`, `graph`, and `content` implement in their owned files on the foundation. `qa` builds scenarios/gallery/tests in parallel on the same foundation. Coordinate additions to a shared interface through its owner; no two agents edit `theme.css` or `ui.ts` independently.
-4. `qa` integrates all slice commits, builds `web-dist`, runs suites and records screenshot/budget evidence. Designer reviews final live screenshots against these references; reviewer handles code/security/functional sign-off. Fixes stay with the owning slice, then integrate and re-check the affected cases.
+1. Designer publishes the smallest usable decision or interface immediately. Reviewer reviews that artifact while implementers begin independent work in their owned files. A full design review is not a start gate for already agreed work.
+2. For a new foundation, `ui` lands tokens, primitives, and style extraction as a small commit and sends it directly to `graph`, `content`, and `qa`. Only work that consumes that interface waits for it; design, source audits, scenario preparation, and unrelated changes continue. This foundation already exists for the neutral-theme correction.
+3. `ui`, `graph`, and `content` implement their slices concurrently. `qa` prepares scenarios and validation while source candidates are in progress. Coordinate a shared interface through its owner; no two agents edit `theme.css` or `ui.ts` independently. Designer starts the next ready design task while previous implementation runs, and remains available for focused questions.
+4. Candidate commits enable scoped review and capture before all slices finish. `qa` integrates accepted candidates, builds `web-dist`, and records final screenshot/budget evidence. Designer signs off the resulting live screenshots; reviewer handles code/security/functional sign-off. Final acceptance depends on the actual integrated artifacts, not the order in which agents finished their independent work.
+
+Dependencies express a required artifact, decision, or shared-resource constraint. Do not add a dependency merely because another agent is busy. A role awaiting one response should continue other ready work; if the prerequisite is truly missing, record exactly what it is. These rules govern this work split; investigation of scheduler dispatch and global queue behaviour is a separate backend task.
 
 Foundation exports under `web/src/components/`: `Icon`, `StatusBadge`, `EmptyState`, `ViewHeader`. Preserve `PanelHead` in `views/SidePanel.tsx`. Add `ui.busOpen()/setBusOpen(boolean)` for explicit narrow bus visibility; SidePanel also opens for an entity selection or pair selection. Content uses existing `ui.select`, `ui.setBusPair`, and filters; graph uses existing `ui.setMenu` for a visible More trigger. Graph/List choice is local view state, not a new route/protocol. If a primitive's API needs changing, ask `ui` to change it.
 
@@ -454,12 +467,34 @@ Help ownership deliberately moves from the card's content grouping to `ui` becau
 
 Applied the local `ui-ux-pro-max` and `agent-browser` skills. The design-system search's documentation-landing suggestion was not a fit and was discarded. A narrower `real-time monitoring dashboard` style query matched the monitoring/attention use case. Adopted its legibility, explicit state and keyboard principles; did not adopt suggested polling, continuous pulse, external fonts, GSAP, or chart libraries because they conflict with this product's existing contracts. The screen-specific design above is based on the running application and its actual protocol.
 
+For the neutral-theme correction, the local `ui-ux-pro-max` query `neutral dark dashboard contrast` matched text contrast and visible focus guidance. Applied those checks to the actual colour tokens and retained production captures. No new framework, asset, font, motion, or polling behaviour is needed.
+
 <a id="signoff"></a>
 ## §signoff — delivered dashboard
 
-### Verdict and target
+### Current verdict: neutral-theme correction required
 
-**Visual sign-off: approved** for integrated bundle `d092f4a73d804fd12c79605c2b465940119318dc`, source `fnv1a64:14e8acd06e0d4cac`, reviewed on 2026-10-05. The dashboard delivers the intended hierarchy, matched light/dark appearance, readable message previews, clearer evidence panels, and both List modes. The specific visual issues raised during implementation and final inspection are resolved. Final code, security, live-daemon, and performance approval remains with the reviewer of `integrate`.
+On 2026-10-05 the operator rejected the green dark appearance. **The historical colour approval below is superseded; the corrected palette still needs integrated visual verification.** The reviewed delivery remains useful evidence for its hierarchy, functionality, and deliberate budget decisions.
+
+Finding `R-GREEN-1` (also reported as `QA-DARK-01`) is confirmed on delivered main `15de7cf0`, whose source fingerprint is `fnv1a64:14e8acd06e0d4cac`. Inspection covered `theme.css`, the terminal fallbacks, the final integration review, and four retained production captures: [busy Team desktop](web-revamp/signoff/busy-team-dark-desktop.png), [long Team List narrow](web-revamp/signoff/long-text-team-list-dark-narrow.png), [transcript tablet](web-revamp/signoff/baseline-transcript-empty-dark-tablet.png), and [busy Events desktop](web-revamp/signoff/busy-events-dark-desktop.png). The green cast comes from the shared structural tokens and the widespread mint action token. No additional material design defect was identified in this scoped reinspection; accepted deferrals below remain accepted.
+
+| Surface | Required correction | Owner |
+|---|---|---|
+| Shell, view bars, bus, inspector, controls, composer, popovers | Use the neutral dark canvas/surface/raised/text/border tokens in §system; remove mint from general action chrome | `ui` |
+| Team and task graph, List modes, selection, gauges | Inherit neutral fills and blue action from shared tokens; preserve semantic/runtime accents and existing selection shape cues | `graph` audit; `ui` tokens |
+| Events, message rows, task details, usage | Neutral reading surfaces and selection; keep warning/error meaning and four distinct labelled usage categories | `content` audit; `ui` tokens |
+| Terminal and its fallback configuration | Neutral background, foreground, cursor, and selection; preserve ANSI/diff semantics | `graph` |
+| Delivered bundle and evidence | Rebuild after source integration; capture the actual revised components and report their source fingerprint | `qa` |
+
+The source-token check passes all 57 checks on `ui` candidate `2578c713`, including minimum dark quiet-text contrast 5.54:1, control-boundary contrast 3.79:1, and primary-button contrast 9.07:1. The same check rejects all 12 green structural tokens and the mint general-action token on the inherited source. This is source validation, not integrated visual approval. Candidate review additionally identified `R-GREEN-3`: blue action, keyboard focus, and orchestrator framing collided on graph selection. The selected-node rule above resolves that collision while preserving light selection.
+
+The candidate's actual [Team at 1280px](web-revamp/neutral-preview/team-dark-desktop.png) and [Help at 390px](web-revamp/neutral-preview/help-dark-narrow.png) were also inspected. Canvas, panels, dialog, text, and controls now read as neutral charcoal/gray; general actions are blue. Remaining green marks carry status, runtime, or usage meaning. These captures demonstrate the agreed palette, but precede the graph selection correction and final bundle integration. [Candidate evidence](web-revamp/neutral-preview/evidence.json) names their producer, source candidate, and remaining verification.
+
+Sign-off requires all dark structural values to be achromatic, six-surface text contrast at least 4.5:1, necessary control boundaries at least 3:1, and retained selection/focus cues. Run `node notes/web-revamp/contrast.mjs` against the revised source. Check real dark Team, a selected List row, Events, Usage, a dialog, and terminal/inspector at representative desktop and narrow sizes; also confirm unchanged light appearance outside the always-dark terminal. Preserve source ownership, existing interaction/security contracts, and every approved size ceiling. A passing old gallery or a recoloured static mockup cannot satisfy this corrected visual requirement.
+
+### Historical verdict and target
+
+**Historical visual sign-off: approved before the operator's palette correction** for integrated bundle `d092f4a73d804fd12c79605c2b465940119318dc`, source `fnv1a64:14e8acd06e0d4cac`, reviewed on 2026-10-05. The dashboard delivered the intended hierarchy, readable message previews, clearer evidence panels, and both List modes. The specific issues raised during that implementation and inspection were resolved. Final code, security, live-daemon, and performance review of that delivery is recorded in [web-revamp-integrate.md](../review/web-revamp-integrate.md).
 
 [Delivered-screen gallery](web-revamp/signoff/index.html) retains 14 representative production captures; [evidence.json](web-revamp/signoff/evidence.json) records their source and reproduction commands. These are actual app components, separate from the static reference mockups.
 
@@ -494,7 +529,7 @@ The integrator reports the final target green for `just web-test` (175), mock/pe
 | Available empty transcript appeared as an unexplained blank panel | `graph`, `8f378cf7`, adds an explicit empty-result label | [Empty transcript](web-revamp/signoff/baseline-transcript-empty-dark-tablet.png) |
 | Ended Herdr screen remained blank with a typing hint | `graph`, `8f378cf7`, uses the returned `alive` value: ended/read-only guidance, disabled Jump, preserved Refresh, and no key/paste/queued input | [Ended terminal](web-revamp/signoff/baseline-terminal-ended-light-narrow.png); paired QA input-guard tests |
 
-The three final P2 findings became `polish-help-focus` and `polish-terminal-states`; they were not silently accepted as finished behaviour. No additional visual fix is required for this target.
+The three final P2 findings became `polish-help-focus` and `polish-terminal-states`; they were not silently accepted as finished behaviour. At that review, no additional visual fix had been identified. The later operator correction is tracked separately above.
 
 ### Deliberate differences accepted
 

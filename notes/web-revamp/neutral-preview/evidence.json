@@ -1,0 +1,24 @@
+{
+  "status": "Candidate palette evaluation; not final integrated sign-off",
+  "candidate": "2578c713",
+  "base": "15de7cf0",
+  "producer": "ui",
+  "handoff": "m-a20701f03518",
+  "reviewer": "designer",
+  "date": "2026-10-05",
+  "samples": [
+    {
+      "image": "team-dark-desktop.png",
+      "sourceFile": "/tmp/crew-ui-neutral-team.png",
+      "viewportWidth": 1280,
+      "finding": "Neutral canvas, panels, text and control boundaries; blue general actions. Small green marks remain semantic. Graph fit density matches the accepted inherited behavior."
+    },
+    {
+      "image": "help-dark-narrow.png",
+      "sourceFile": "/tmp/crew-ui-neutral-help-narrow.png",
+      "viewportWidth": 390,
+      "finding": "Neutral dialog and scrim, legible copy and heading visible at opening."
+    }
+  ],
+  "remaining": "Integrate graph selection correction R-GREEN-3 and terminal fallbacks, then verify the rebuilt production target with QA evidence."
+}
