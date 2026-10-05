@@ -140,7 +140,7 @@ export function VirtualList<T>(props: {
 
   const ensureVisible = (i: number) => {
     const y = i * H();
-    if (y < el.scrollTop) el.scrollTop = y;
+    if (H() >= el.clientHeight || y < el.scrollTop) el.scrollTop = y;
     else if (y + H() > el.scrollTop + el.clientHeight) el.scrollTop = y + H() - el.clientHeight;
     onScroll();
   };
