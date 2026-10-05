@@ -6,26 +6,26 @@
 
 export type SlashCommand = { name: string; aliases: string[]; args: string; about: string; web?: "declined" | "new" };
 
-export const COMMANDS: SlashCommand[] = [
-  { name: "exit", aliases: ["quit", "q"], args: "", about: "leave the dashboard — the team keeps running", web: "declined" },
-  { name: "stop", aliases: ["terminate", "shutdown"], args: "", about: "stop the team: every agent and the daemon (asks first)" },
-  { name: "kill", aliases: [], args: "[agent]", about: "stop one agent's process (asks first)" },
-  { name: "restart", aliases: [], args: "[agent]", about: "restart an agent, resuming its session" },
-  { name: "restart-fresh", aliases: [], args: "[agent]", about: "restart without resuming the old conversation (asks first)" },
-  { name: "pause", aliases: [], args: "[agent]", about: "suspend an agent" },
-  { name: "unpause", aliases: [], args: "[agent]", about: "let a suspended agent continue" },
-  { name: "compact", aliases: [], args: "[agent]", about: "compact an agent's context when its turn ends" },
-  { name: "model", aliases: ["cli", "harness"], args: "[agent]", about: "choose the model and CLI an agent runs on" },
-  { name: "resume", aliases: [], args: "", about: "continue the agents paused at a usage limit" },
-  { name: "answer", aliases: ["questions"], args: "", about: "answer the questions the team has for you" },
-  { name: "tasks", aliases: [], args: "", about: "show the task graph" },
-  { name: "logs", aliases: [], args: "", about: "show the event log" },
-  { name: "mouse", aliases: [], args: "", about: "turn mouse clicks on or off (off: drag selects text)", web: "declined" },
-  { name: "help", aliases: ["?"], args: "", about: "keys and commands" },
-  { name: "usage", aliases: [], args: "", about: "show usage: context windows, tokens, quotas", web: "new" },
-  { name: "graph", aliases: [], args: "[reset]", about: "show the agent graph; reset forgets dragged positions", web: "new" },
-  { name: "keys", aliases: [], args: "on|off", about: "turn single-key shortcuts on or off", web: "new" },
-];
+export const COMMANDS: SlashCommand[] = ([
+  ["exit", "leave the dashboard — the team keeps running", undefined, ["quit", "q"], "declined"],
+  ["stop", "stop the team: every agent and the daemon (asks first)", undefined, ["terminate", "shutdown"]],
+  ["kill", "stop one agent's process (asks first)", "[agent]"],
+  ["restart", "restart an agent, resuming its session", "[agent]"],
+  ["restart-fresh", "restart without resuming the old conversation (asks first)", "[agent]"],
+  ["pause", "suspend an agent", "[agent]"],
+  ["unpause", "let a suspended agent continue", "[agent]"],
+  ["compact", "compact an agent's context when its turn ends", "[agent]"],
+  ["model", "choose the model and CLI an agent runs on", "[agent]", ["cli", "harness"]],
+  ["resume", "continue the agents paused at a usage limit"],
+  ["answer", "answer the questions the team has for you", undefined, ["questions"]],
+  ["tasks", "show the task graph"],
+  ["logs", "show the event log"],
+  ["mouse", "turn mouse clicks on or off (off: drag selects text)", undefined, undefined, "declined"],
+  ["help", "keys and commands", undefined, ["?"]],
+  ["usage", "show usage: context windows, tokens, quotas", undefined, undefined, "new"],
+  ["graph", "show the agent graph; reset forgets dragged positions", "[reset]", undefined, "new"],
+  ["keys", "turn single-key shortcuts on or off", "on|off", undefined, "new"]
+] as [string, string, string?, string[]?, SlashCommand["web"]?][]).map(([name, about, args = "", aliases = [], web]) => ({ name, about, args, aliases, web }));
 
 /** Why a declined command does nothing here. */
 export const DECLINED = "not needed in the browser";
