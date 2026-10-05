@@ -170,7 +170,7 @@ test("P10, P11, P12, P15 against a real daemon: frames under real pushes, rows i
   const ring = async () => {
     if (!(await page.locator(".logs").isVisible())) await page.keyboard.press("l");
     await expect(page.locator(".logs")).toBeVisible();
-    return Number(/of (\d+)/.exec((await page.locator(".logs .muted").first().textContent()) ?? "")?.[1] ?? 0);
+    return Number(/of (\d+)/.exec((await page.locator(".logs .filters .muted").textContent()) ?? "")?.[1] ?? 0);
   };
   const warm = Date.now();
   while ((await ring()) < 5000 && Date.now() - warm < 120_000) expect((await load(op, 1000, 1000, targets)).errors).toBe(0);
