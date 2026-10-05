@@ -12,6 +12,9 @@
 #[path = "../../../crew-core/src/test_support.rs"]
 pub mod test_support;
 
+#[path = "../../src/git_test_support.rs"]
+pub mod git_test_support;
+
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output, Stdio};
 use std::time::{Duration, Instant};
@@ -127,6 +130,7 @@ impl Session {
     /// (`own_crew`).
     pub fn command_of(&self, program: &Path) -> Command {
         let mut cmd = Command::new(program);
+        git_test_support::clear_repository_environment(&mut cmd);
         cmd.current_dir(self.root())
             .env("XDG_RUNTIME_DIR", self.root().join("run"))
             .env("XDG_STATE_HOME", self.root().join("state"))

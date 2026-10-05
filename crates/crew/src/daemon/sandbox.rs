@@ -1245,14 +1245,16 @@ mod tests {
 
     #[test]
     fn a_new_worktree_is_filled_through_the_helper_and_made_without_it() {
+        if crate::git_test_support::isolate_git_fixture(
+            "daemon::sandbox::tests::a_new_worktree_is_filled_through_the_helper_and_made_without_it",
+        ) {
+            return;
+        }
         let dir = tempfile::tempdir().unwrap();
         let ws = dir.path().canonicalize().unwrap().join("ws");
         std::fs::create_dir(&ws).unwrap();
         let git = |args: &[&str]| {
-            let ok = std::process::Command::new("git")
-                .arg("-C")
-                .arg(&ws)
-                .args(["-c", "user.name=t", "-c", "user.email=t@t"])
+            let ok = crate::git_test_support::git(&ws)
                 .args(args)
                 .status()
                 .unwrap()
@@ -2236,9 +2238,7 @@ unsandboxed"
 
         /// Where plain git sees `agents/<id>`.
         fn branch(&self, id: &str) -> String {
-            let out = std::process::Command::new("git")
-                .arg("-C")
-                .arg(&self.ws)
+            let out = crate::git_test_support::git(&self.ws)
                 .args(["rev-parse", &format!("refs/heads/agents/{id}")])
                 .output()
                 .unwrap();

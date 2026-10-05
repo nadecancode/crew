@@ -1130,6 +1130,11 @@ mod tests {
 
     #[test]
     fn files_others_can_write_and_files_from_the_repository_are_rejected() {
+        if crate::git_test_support::isolate_git_fixture(
+            "endpoints::tests::files_others_can_write_and_files_from_the_repository_are_rejected",
+        ) {
+            return;
+        }
         let tmp = tempfile::tempdir().unwrap();
         let ws = tmp.path();
         let path = Scope::Project.path(ws).unwrap();
@@ -1166,17 +1171,7 @@ mod tests {
 
         // Committed to the repository: not this user's decision.
         let git = |args: &[&str]| {
-            assert!(std::process::Command::new("git")
-                .arg("-C")
-                .arg(ws)
-                .args([
-                    "-c",
-                    "user.name=t",
-                    "-c",
-                    "user.email=t@t",
-                    "-c",
-                    "commit.gpgsign=false"
-                ])
+            assert!(crate::git_test_support::git(ws)
                 .args(args)
                 .output()
                 .unwrap()

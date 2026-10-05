@@ -32,3 +32,8 @@ pub mod tasks;
 pub mod transcript;
 pub mod vcs;
 pub mod web;
+
+#[cfg(test)]
+mod git_fixture_tests;
+#[cfg(test)]
+mod git_test_support;

@@ -227,10 +227,7 @@ fn jj_wrapper(before: &str) -> Option<(tempfile::TempDir, PathBuf)> {
 fn workspace_repo(s: &Session, files: &[(&str, &str)]) {
     std::fs::create_dir_all(&s.workspace).unwrap();
     let git = |args: &[&str]| {
-        let ok = Command::new("git")
-            .arg("-C")
-            .arg(&s.workspace)
-            .args(["-c", "user.name=t", "-c", "user.email=t@t"])
+        let ok = common::git_test_support::git(&s.workspace)
             .args(args)
             .status()
             .unwrap()
@@ -401,9 +398,7 @@ fn run_with_env(s: &Session, team: &TeamConfig, env: &[(&str, &str)]) {
 
 /// Set `key` in the workspace repository's own config, as its operator.
 fn repo_config(s: &Session, key: &str, value: &str) {
-    let ok = Command::new("git")
-        .arg("-C")
-        .arg(&s.workspace)
+    let ok = common::git_test_support::git(&s.workspace)
         .args(["config", key, value])
         .status()
         .unwrap()
@@ -2061,9 +2056,7 @@ fn an_agent_cannot_repoint_or_configure_jjs_store() {
         .lines()
         .find_map(|l| l.strip_prefix("Full id: "))
         .unwrap_or_else(|| panic!("{said}{}", common::stderr(&out)));
-    let branch = Command::new("git")
-        .arg("-C")
-        .arg(&s.workspace)
+    let branch = common::git_test_support::git(&s.workspace)
         .args(["rev-parse", "refs/heads/agents/a"])
         .output()
         .unwrap();
