@@ -8,9 +8,13 @@ import { useApp } from "../app";
 import { linkLive, pulse, sweep, markLive, type Link, type Mark } from "../anim/anims";
 import { ORCHESTRATOR_ID, askedBy, type Agent } from "../protocol";
 import { isOrchestrator } from "../store/order";
-import { EmptyState, ViewHeader } from "../components";
+import { useSecond } from "../clock";
+import { EmptyState } from "../components";
 import { AgentNode, HubNode } from "./AgentNode";
+import { agentSummary } from "./Summary";
+import { EntityList } from "./EntityList";
 import { Hover, type HoverTarget } from "./Hover";
+import { Presentation, presentation } from "./Presentation";
 import { radial } from "./radial";
 import { CLICK_SLOP, center, edgePoint, union, type Box, type Pt } from "./view";
 import { Viewport, type ViewportApi } from "./Viewport";
@@ -43,8 +47,10 @@ export function AgentGraph() {
   const app = useApp();
   const { store, ui, prefs, frames } = app;
   const reduced = reducedMotion();
+  const second = useSecond();
   let api: ViewportApi | undefined;
   let host!: HTMLDivElement;
+  const [mode, setMode] = presentation();
 
   const layout = createMemo(() => radial(store.state.agents.map((a) => ({ id: a.id, orchestrator: a.orchestrator, parent: a.parent }))));
   const [drag, setDrag] = createSignal<{ id: string; at: Pt } | null>(null);
@@ -308,8 +314,12 @@ export function AgentGraph() {
 
   return (
     <div class="graph-host" ref={host} classList={{ dragging: !!drag() }}>
-      <ViewHeader title="Team" meta={`${nodes().length} agents`} />
+      <Presentation title="Team" meta={`${nodes().length} agents`} mode={mode()} change={(m) => { setHover(null); setMode(m); }} />
       <Show when={nodes().length} fallback={<EmptyState title="No agents yet" description="Agents appear here when the team starts." />}>
+      <Show when={mode() === "graph"} fallback={
+        <EntityList kind="agent" items={nodes()} selected={ui.selected()} select={ui.setSelected} open={(id) => open(id)} menu={openMenu} satellite={(a) => layout().satellites.has(a.id)}
+          summary={(agent) => agentSummary(agent, store.state.tasks, (second(), store.serverNow(Date.now())), asking(agent.id))} />
+      }>
       <div class="graph-canvas">
       <Show when={p2pLive()}>
         <div class="p2p-banner" role="status">p2p channel OPEN · agents talking directly</div>
@@ -394,6 +404,7 @@ export function AgentGraph() {
       </Viewport>
       <div class="graph-legend" aria-label="Connection legend"><span class="legend-orchestrator">Orchestrator</span><span class="legend-p2p">Direct message</span><span class="legend-vcs">Version control</span><span class="legend-tether">Subagent</span></div>
       </div>
+      </Show>
       </Show>
       <Show when={hover()}>
         <Hover target={hover()!.target} x={hover()!.x} y={hover()!.y} />
