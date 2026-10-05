@@ -845,14 +845,21 @@ and reproduction commands; `manifest.json` records contrast, control names,
 focus, document overflow, runtime errors, CSP violations, and requests after
 load. Gallery files contain no pairing codes, tokens, browser storage, or
 real workspace content, and never enter `web-dist`. Capture errors produce
-a nonzero exit; accessibility findings remain visible for review.
+a nonzero exit. `--strict` also fails on active text contrast below its WCAG
+threshold, unnamed controls, or document overflow. Disabled text is exempt.
+Before the responsive shell lands, baseline captures need the explicit
+`--allow-overflow narrow,zoom` exception for the old 900px minimum width;
+remove it when validating the integrated responsive layout. Every exception
+is named in the manifest and reproduction command. Non-dialog surfaces fail
+if a question or other dialog covers them.
 
 Use `--scenario baseline --surface team,tasks,events,usage --theme light,dark
 --viewport desktop,narrow` for a short pass. The full matrix includes
 1440×960, 1024×768, 390×844, and a 200% desktop equivalent: 720×480 CSS pixels
 at device scale 2. Reduced motion and fixed browser time keep captures
 repeatable. Inspect screenshots and keyboard behavior manually; the solid
-color contrast collector does not evaluate canvas text, gradients, overlap,
+color contrast collector includes SVG node backgrounds but does not evaluate
+canvas text, gradients, overlap,
 control boundaries, or screen-reader announcements. The browser tests cover
 Tab reachability, modal containment, focus return, inert evidence, and panel
 RPC states. Give every Playwright run its own output directory:

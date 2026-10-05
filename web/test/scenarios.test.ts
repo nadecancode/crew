@@ -25,7 +25,10 @@ test.each(SCENARIO_NAMES)("%s scenario is deterministic v6 data; generated fixtu
       expect(first.state.agents.some((a) => a.usage === null)).toBe(true);
       expect(first.state.agents.some((a) => a.usage?.input_tokens === 0)).toBe(true);
       expect(first.state.session.quotas.some((q: { updated_at: number }) => SCENARIO_TIME - q.updated_at > 900_000)).toBe(true);
+      expect(first.state.session.quotas.map((q: { window: string }) => q.window)).toEqual(["5h", "week", "5h"]);
+      expect(first.state.agents.find((a) => a.limit)?.limit.kind).toBe("usage");
     }
+    if (scenario === "attention") expect(first.state.agents.some((a) => a.status === "blocked" && a.block_kind === "refused" && a.error)).toBe(true);
     expect(readFileSync(`${FIXTURES}subagents.json`, "utf8")).toBe(original);
   } finally {
     await Promise.all([first.stop(), second.stop()]);
