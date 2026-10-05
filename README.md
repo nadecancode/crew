@@ -684,8 +684,8 @@ hold the agent at a prompt only `crew agent attach` could reach.
 The same sessions in a browser, in light or dark: the agent graph with its
 message and VCS animations (or a list of the team), the bus, the task graph
 (or a list), the event log, usage, the inspector (a live terminal included)
-and every operator action of the TUI except starting a team. It fits a phone
-as well as a wide screen. **One dashboard server per user shows every
+and every operator action of the TUI except starting a team. It fits a narrow
+window as well as a wide one. **One dashboard server per user shows every
 workspace you join to it**, and you switch between them in the page. It runs
 on the loopback addresses only (no other machine, no TLS, no accounts), and
 works in Chromium-based browsers and Firefox. Safari cannot resolve its address.
