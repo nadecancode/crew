@@ -2,8 +2,8 @@
 // imported by src/ or shipped; report contains no pairing/session material.
 // Run from web/: bun run gallery --out /tmp/crew-gallery --scenario baseline
 import { execFileSync } from "node:child_process";
-import { mkdirSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
-import { dirname, join, relative, resolve } from "node:path";
+import { existsSync, mkdirSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
+import { dirname, isAbsolute, join, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { parseArgs } from "node:util";
 import { chromium } from "@playwright/test";
@@ -23,7 +23,7 @@ const VIEWPORTS = {
   zoom: { width: 720, height: 480 },
 };
 type ViewportName = keyof typeof VIEWPORTS;
-const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "../..");
+const ROOT = realpathSync(resolve(dirname(fileURLToPath(import.meta.url)), "../.."));
 const usage = `usage: node dev/gallery.ts --out <directory outside repository> [--scenario ${SCENARIO_NAMES.join(",")}] [--surface ${SURFACES.join(",")}] [--theme light,dark] [--viewport desktop,tablet,narrow,zoom] [--fixture snapshot|subagents|team10] [--dist <bundle>]`;
 
 function choices<T extends string>(value: string | undefined, allowed: readonly T[], defaults = allowed): T[] {
@@ -38,8 +38,11 @@ const { values } = parseArgs({ options: {
 if (values.help) { console.log(usage); process.exit(0); }
 if (!values.out) throw new Error(usage);
 const out = resolve(values.out);
-const inside = (path: string) => { const rel = relative(ROOT, path); return !rel || (!rel.startsWith("..") && !rel.startsWith("/")); };
+const inside = (path: string) => { const rel = relative(ROOT, path); return rel !== ".." && !rel.startsWith("../") && !isAbsolute(rel); };
 if (inside(out)) throw new Error("Gallery output must be outside the repository");
+let ancestor = dirname(out);
+while (!existsSync(ancestor)) ancestor = dirname(ancestor);
+if (inside(resolve(realpathSync(ancestor), relative(ancestor, out)))) throw new Error("Gallery output resolves inside the repository");
 mkdirSync(out, { recursive: true });
 if (inside(realpathSync(out))) throw new Error("Gallery output resolves inside the repository");
 const scenarios = choices(values.scenario, SCENARIO_NAMES);
