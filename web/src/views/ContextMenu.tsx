@@ -49,7 +49,8 @@ export function ContextMenu() {
       e.preventDefault();
       e.stopPropagation();
       ui.closeMenu();
-    } else if (["ArrowDown", "ArrowUp", "Home", "End"].includes(e.key)) {
+    } else if (e.key === "Tab") ui.closeMenu();
+    else if (["ArrowDown", "ArrowUp", "Home", "End"].includes(e.key)) {
       e.preventDefault();
       buttons[e.key === "Home" ? 0 : e.key === "End" ? buttons.length - 1 : (i + (e.key === "ArrowDown" ? 1 : -1) + buttons.length) % buttons.length]?.focus();
     }
@@ -58,7 +59,7 @@ export function ContextMenu() {
     <Show when={menu()} keyed>
       {(m) =>
       <div class="context-menu popover" role="menu" aria-label={`actions for ${menu()!.agent}`}
-        onFocusOut={(e) => !e.currentTarget.contains(e.relatedTarget as Node | null) && ui.closeMenu(false)}
+        onFocusOut={(e) => e.relatedTarget && !e.currentTarget.contains(e.relatedTarget as Node) && ui.closeMenu(false)}
         onKeyDown={onKey} ref={(e) => {
           el = e;
           queueMicrotask(() => {
