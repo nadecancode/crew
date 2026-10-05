@@ -1,6 +1,6 @@
 // The virtual list (notes/web-design.md §perf 4, §tests "virtual.test.tsx").
 import { render } from "@solidjs/testing-library";
-import { createSignal } from "solid-js";
+import { batch, createMemo, createSignal } from "solid-js";
 import { beforeAll, expect, test } from "vitest";
 import { VirtualList } from "../src/views/VirtualList";
 
@@ -62,4 +62,72 @@ test("it follows the tail at the bottom, and stays put when scrolled up", async 
   await tick();
   expect(el.scrollTop).toBe(200 * H);
   expect(rows()).toEqual(before);
+});
+
+function responsiveList() {
+  const [items, setItems] = createSignal(Array.from({ length: 1000 }, (_, i) => ({ id: `row-${i}` })));
+  const [rowHeight, setRowHeight] = createSignal(36);
+  const [chosen, setChosen] = createSignal<string | null>("row-22");
+  const result = render(() => {
+    const selected = createMemo(() => {
+      const i = items().findIndex((item) => item.id === chosen());
+      return i < 0 ? null : i;
+    });
+    return <VirtualList label="responsive rows" count={() => items().length} slice={(a, b) => items().slice(a, b)}
+      rowHeight={rowHeight()} key={(item) => item.id} selected={selected}
+      onSelect={(i) => setChosen(items()[i].id)} render={(item) => <span class="cell" data-key={item.id}>{item.id}</span>} />;
+  });
+  const el = result.container.querySelector<HTMLDivElement>(".vlist")!;
+  const scroll = (value: number) => { el.scrollTop = value; el.dispatchEvent(new Event("scroll")); };
+  const selectedKey = () => el.querySelector(".vrow.selected .cell")?.getAttribute("data-key");
+  return { el, items, setItems, rowHeight, setRowHeight, scroll, selectedKey, chosen };
+}
+
+test("responsive row height preserves the keyed item, fractional offset, selection and row bound", async () => {
+  const list = responsiveList();
+  await tick();
+  list.scroll(20 * 36 + 9);
+  await tick();
+  expect(list.selectedKey()).toBe("row-22");
+  expect(list.el.querySelectorAll(".vrow").length).toBeLessThanOrEqual(12 + 20);
+  list.setRowHeight(64);
+  await tick();
+  expect(list.el.scrollTop).toBe(20 * 64 + 16);
+  expect(list.selectedKey()).toBe("row-22");
+  expect(list.el.querySelectorAll(".vrow").length).toBeLessThanOrEqual(7 + 20);
+  expect(list.el.querySelector<HTMLElement>(".vrow")?.style.height).toBe("64px");
+  // The ring drops three old rows while this reader is away from the tail.
+  list.setItems(list.items().slice(3));
+  await tick();
+  expect(list.el.scrollTop).toBe(17 * 64 + 16);
+  expect(list.selectedKey()).toBe("row-22");
+  list.setRowHeight(36);
+  await tick();
+  expect(list.el.scrollTop).toBe(17 * 36 + 9);
+  expect(list.selectedKey()).toBe("row-22");
+});
+
+test("responsive rows still follow the last item through resize and append", async () => {
+  const list = responsiveList();
+  await tick();
+  list.setRowHeight(64);
+  list.setItems([...list.items(), { id: "row-newest" }]);
+  await tick(); await tick();
+  expect(list.el.querySelector('[data-key="row-newest"]')).not.toBeNull();
+  expect(list.el.querySelector<HTMLElement>(".vlist-pad")?.style.height).toBe("64064px");
+  expect(list.el.querySelectorAll(".vrow").length).toBeLessThanOrEqual(7 + 20);
+});
+
+test("same-batch row resize and ring eviction preserve the key and its fractional offset", async () => {
+  const list = responsiveList();
+  await tick();
+  list.scroll(20 * 36 + 9);
+  await tick();
+  batch(() => {
+    list.setRowHeight(64);
+    list.setItems(list.items().slice(3));
+  });
+  await tick();
+  expect(list.el.scrollTop).toBe(17 * 64 + 16);
+  expect(list.selectedKey()).toBe("row-22");
 });

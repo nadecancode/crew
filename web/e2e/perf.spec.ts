@@ -177,7 +177,7 @@ test.describe("ten agents", () => {
     const log = await perf(page);
     out.apply_ms_under_load = stats(log.apply);
     const rows = await page.locator(".log-row").count();
-    const visible = await page.locator(".log-list").evaluate((el) => Math.ceil(el.clientHeight / 22));
+    const visible = await page.locator(".log-list").evaluate((el) => Math.ceil(el.clientHeight / (innerWidth < 768 ? 64 : 36)));
     out.p12_log_rows_in_dom = { rows, visible, events: await page.locator(".logs .muted").first().textContent() };
     expect(rows).toBeLessThanOrEqual(visible + 20 + 1);
     // Both rings full: 5000 events, 1000 messages.
