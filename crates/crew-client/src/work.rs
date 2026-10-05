@@ -42,7 +42,9 @@ pub fn current_work(tasks: &[Task], agent_id: &str, server_now_ms: i64) -> Optio
         return Some(CurrentWork {
             task_id: task.id.clone(),
             done: false,
-            elapsed_ms: task.started_at.map(|at| (server_now_ms - at).max(0)),
+            elapsed_ms: task
+                .started_at
+                .map(|at| server_now_ms.saturating_sub(at).max(0)),
         });
     }
     mine()
@@ -51,7 +53,9 @@ pub fn current_work(tasks: &[Task], agent_id: &str, server_now_ms: i64) -> Optio
         .map(|task| CurrentWork {
             task_id: task.id.clone(),
             done: true,
-            elapsed_ms: task.completed_at.map(|at| (server_now_ms - at).max(0)),
+            elapsed_ms: task
+                .completed_at
+                .map(|at| server_now_ms.saturating_sub(at).max(0)),
         })
 }
 
@@ -281,6 +285,25 @@ mod tests {
         ] {
             assert_eq!(current_work(&tasks, "a", 1000), expected);
         }
+    }
+
+    #[test]
+    fn extreme_timestamps_saturate_elapsed_without_changing_selection() {
+        let active = task("A", TaskStatus::Working, Some(i64::MIN), None);
+        assert_eq!(
+            current_work(&[active], "a", i64::MAX),
+            work("A", false, Some(i64::MAX))
+        );
+        let completed = task("A", TaskStatus::Done, None, Some(i64::MIN));
+        assert_eq!(
+            current_work(&[completed], "a", i64::MAX),
+            work("A", true, Some(i64::MAX))
+        );
+        let future = task("A", TaskStatus::Working, Some(i64::MAX), None);
+        assert_eq!(
+            current_work(&[future], "a", i64::MIN),
+            work("A", false, Some(0))
+        );
     }
 
     #[test]
