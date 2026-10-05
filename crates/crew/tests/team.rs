@@ -7402,6 +7402,153 @@ fn a_turn_codex_refuses_goes_to_the_work_styles_pi_model_and_the_member_comes_ba
 }
 
 #[test]
+fn a_member_that_took_over_a_refused_turn_goes_back_before_its_next_task() {
+    use std::io::Write as _;
+    use std::os::unix::fs::PermissionsExt;
+
+    let s = Session::new();
+    let root = s.root().to_path_buf();
+    std::fs::create_dir_all(root.join("bin")).unwrap();
+    for (name, script) in [("codex", FAKE_LIMITED_CODEX), ("pi", FAKE_PI)] {
+        std::fs::write(root.join("bin").join(name), script).unwrap();
+        std::fs::set_permissions(
+            root.join("bin").join(name),
+            std::fs::Permissions::from_mode(0o755),
+        )
+        .unwrap();
+    }
+    let day = chrono::Local::now().format("%Y/%m/%d").to_string();
+    let sessions = root.join("codex-home/sessions").join(day);
+    std::fs::create_dir_all(&sessions).unwrap();
+    let rollout = sessions.join("rollout-2026-01-01T00-00-00-thread-queue.jsonl");
+    let event = |payload: Value| json!({ "type": "event_msg", "payload": payload }).to_string();
+    let secs = || chrono::Utc::now().timestamp();
+    let first = [
+        json!({ "type": "turn_context", "payload": { "model": "gpt-6-astra", "effort": "max" } })
+            .to_string(),
+        event(json!({ "type": "task_started", "turn_id": "t-1" })),
+        event(
+            json!({ "type": "task_complete", "turn_id": "t-1", "last_agent_message": "on it", "completed_at": secs() }),
+        ),
+    ];
+    std::fs::write(&rollout, first.join("\n") + "\n").unwrap();
+
+    let mut team = s.team(
+        "queue",
+        vec![],
+        vec![task("t1", "rev", &[]), task("t2", "rev", &["t1"])],
+    );
+    team.defaults.delivery = crew_core::config::DeliveryChoice::Terminal;
+    team.defaults.refusal_fallbacks = vec!["glm-5.3".to_string()];
+    team.orchestrator = OrchestratorConfig {
+        agent: true,
+        runtime: Some(RuntimeKind::Shell),
+        command: scripted(&[]),
+        ..OrchestratorConfig::default()
+    };
+    team.agents.push(AgentSpec {
+        id: "rev".to_string(),
+        role: "reviews the design".to_string(),
+        runtime: Some(RuntimeKind::Codex),
+        model: Some("gpt-6-astra".to_string()),
+        ..AgentSpec::default()
+    });
+    std::fs::write(root.join("team.yaml"), team.to_yaml().unwrap()).unwrap();
+    let path = format!(
+        "{}:{}",
+        root.join("bin").display(),
+        std::env::var("PATH").unwrap_or_default()
+    );
+    let out = s
+        .command()
+        .env("PATH", path)
+        .args(["run", "team.yaml", "--no-attach"])
+        .output()
+        .unwrap();
+    assert!(out.status.success(), "{}", stderr(&out));
+    s.wait("rev to take t1", |snap| {
+        find_agent(snap, "rev").status != AgentStatus::Spawning
+            && find_task(snap, "t1").status == TaskStatus::Working
+    });
+    let identity = s.identity_path("rev").to_string_lossy().into_owned();
+    let hook = |event: &str, payload: &str| {
+        let out = s.crew(&["hook", event, "--identity", &identity, payload]);
+        assert!(out.status.success(), "{event}: {}", stderr(&out));
+    };
+    hook(
+        "codex-notify",
+        r#"{"type":"agent-turn-complete","thread-id":"thread-queue"}"#,
+    );
+    s.wait("rev's session file to be read", |snap| {
+        find_agent(snap, "rev").running_model.as_deref() == Some("gpt-6-astra")
+    });
+
+    // The orchestrator asks after t1, and Codex refuses that turn.
+    let out = s.ctl(
+        "orchestrator",
+        &[
+            "tool",
+            "agent_send",
+            &json!({ "to": "rev", "body": "Review the auth module for t1" }).to_string(),
+        ],
+    );
+    assert!(out.status.success(), "{}", stderr(&out));
+    s.wait("rev to take the message", |snap| {
+        find_agent(snap, "rev").status == AgentStatus::Working
+    });
+    let refused = [
+        event(json!({ "type": "task_started", "turn_id": "t-2" })),
+        json!({ "type": "response_item", "payload": { "type": "message", "role": "user", "content": [{ "type": "input_text", "text": "Review the auth module for t1" }] } }).to_string(),
+        event(json!({ "type": "task_complete", "turn_id": "t-2", "last_agent_message": null, "completed_at": secs(), "error": {
+            "message": "This content was flagged for possible cybersecurity risk.", "codex_error_info": "cyber_policy" } })),
+    ];
+    let mut file = std::fs::OpenOptions::new()
+        .append(true)
+        .open(&rollout)
+        .unwrap();
+    file.write_all((refused.join("\n") + "\n").as_bytes())
+        .unwrap();
+    s.wait("rev to move to pi, still on t1", |snap| {
+        let rev = find_agent(snap, "rev");
+        rev.runtime == RuntimeKind::Pi
+            && rev.fallback.is_some()
+            && find_task(snap, "t1").status == TaskStatus::Working
+    });
+    let args = || {
+        std::fs::read_to_string(s.workspace.join(".crew/agents/rev/fake-args")).unwrap_or_default()
+    };
+    s.wait_for("the pi session to be handed the refused turn", || {
+        let args = args();
+        args.contains("--model\nzai/glm-5.3\n") && args.contains("Review the auth module for t1")
+    });
+
+    // pi finishes t1 and its turn. rev goes back to Codex before it is
+    // handed t2: were t2 handed to it on pi, it would stay there as long as
+    // work came.
+    let done = json!({ "task_id": "t1", "result": "reviewed" }).to_string();
+    let out = s.ctl("rev", &["tool", "task_complete", &done]);
+    assert!(out.status.success(), "{}", stderr(&out));
+    hook("turn-start", "{}");
+    hook("turn-end", "{}");
+    let snap = s.wait("rev to go back to Codex with t2", |snap| {
+        let t2 = find_task(snap, "t2");
+        find_agent(snap, "rev").runtime == RuntimeKind::Codex
+            && t2.status == TaskStatus::Working
+            && t2.assigned_agent.as_deref() == Some("rev")
+    });
+    let rev = find_agent(&snap, "rev");
+    assert_eq!(rev.model.as_deref(), Some("gpt-6-astra"));
+    assert!(rev.fallback.is_none());
+    let events = s.events();
+    let at = |what: &dyn Fn(&crew_core::Event) -> bool| events.iter().position(what);
+    let back = at(&|e| e.event_type == "agent.model_restored").expect("rev went back");
+    let handed =
+        at(&|e| e.event_type == "task.dispatched" && e.message == "task t2 dispatched to rev")
+            .expect("t2 handed to rev");
+    assert!(back < handed, "t2 was handed to rev on pi");
+}
+
+#[test]
 fn a_turn_that_ends_without_a_tool_call_is_asked_again_and_only_one_that_declines_is_refused() {
     use std::io::Write as _;
     use std::os::unix::fs::PermissionsExt;
