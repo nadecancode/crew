@@ -1,7 +1,7 @@
 // Development-only v6 scenarios. Generated Rust fixtures remain normative and
 // untouched. Initial data is seeded before subscription; later activity uses
 // the same controller pushes as the browser tests.
-import type { Mock, MockConn, MockOptions, MockWorkspace } from "./mock.ts";
+import type { Handler, Mock, MockConn, MockOptions, MockWorkspace } from "./mock.ts";
 import { MESSAGE_TYPE, TASK_STATUS } from "../src/protocol.ts";
 import type { Agent, Event, Message, Task } from "../src/protocol.ts";
 
@@ -151,6 +151,7 @@ export const PANEL_METHODS = ["inbox", "events", "task_get", "message_get", "age
 export type PanelMethod = (typeof PANEL_METHODS)[number];
 export const READ_MODES = ["ready", "pending", "error", "empty", "unavailable", "truncated"] as const;
 export type ReadMode = (typeof READ_MODES)[number];
+const readHandlers = new WeakMap<Mock, Map<PanelMethod, Handler>>();
 
 function panelResult(mock: Mock, method: PanelMethod, p: Record<string, any>, conn: MockConn, mode: ReadMode): unknown {
   const s = mock.workspace(conn.workspace ?? 0).state;
@@ -183,11 +184,22 @@ function panelResult(mock: Mock, method: PanelMethod, p: Record<string, any>, co
 export function setPanelRead(mock: Mock, method: PanelMethod, mode: ReadMode): () => void {
   let release = () => {};
   const gate = new Promise<void>((done) => { release = done; });
-  mock.on(method, async (params, conn) => {
+  const handlers = readHandlers.get(mock) ?? new Map<PanelMethod, Handler>();
+  readHandlers.set(mock, handlers);
+  const handler: Handler = async (params, conn) => {
     if (mode === "error") throw { code: "unavailable", message: `Mock ${method} read failed. Previously loaded evidence is unchanged.` };
     const result = structuredClone(panelResult(mock, method, params ?? {}, conn, mode));
     if (mode === "pending") await gate;
     return result;
-  });
-  return () => { release(); mock.on(method, null); };
+  };
+  handlers.set(method, handler);
+  mock.on(method, handler);
+  let released = false;
+  return () => {
+    if (released) return;
+    released = true;
+    release();
+    // Releasing an old pending read must not erase a newer read mode.
+    if (handlers.get(method) === handler) { handlers.delete(method); mock.on(method, null); }
+  };
 }
