@@ -562,7 +562,7 @@ mod tests {
         );
         // A real teammate may also be named scheduler. Its answers are
         // ordinary news; only the daemon's generic status notices are held.
-        let answer = send("scheduler", MessageType::Answer, Value::Null);
+        let answer = send("scheduler", MessageType::Answer, serde_json::Value::Null);
         daemon.record_task_wakeups("owner", &[answer]).unwrap();
         assert_eq!(daemon.model().local["owner"].task_wakeups.len(), 2);
     }
