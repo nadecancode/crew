@@ -97,14 +97,20 @@ test("without an orchestrator agent the empty hub is not a tab stop: tab enters 
   await expect(page.locator(".node.hub.empty")).toHaveCount(1);
   await page.getByRole("button", { name: "keys and commands" }).focus();
   const stops: string[] = [];
-  for (let i = 0; i < 6; i++) {
+  let reachedComposer = false;
+  for (let i = 0; i < 60; i++) {
     await page.keyboard.press("Tab");
     stops.push(await page.evaluate(() => {
       const el = document.activeElement;
       if (!el?.closest(".viewport")) return "outside";
       return el.getAttribute("data-agent") ? `node:${el.getAttribute("data-agent")}:${el.getAttribute("tabindex")}` : `graph:${el.getAttribute("class")}`;
     }));
+    if (await page.locator("#compose-text").evaluate((el) => el === document.activeElement)) {
+      reachedComposer = true;
+      break;
+    }
   }
+  expect(reachedComposer, stops.join(", ")).toBe(true);
   const inGraph = stops.filter((s) => s !== "outside");
   expect(inGraph).toEqual(["node:claude-1:0"]);
 });
