@@ -305,7 +305,9 @@ dependencies = [
 name = "crew-client"
 version = "0.1.0"
 dependencies = [
+ "crew-core",
  "crew-protocol",
+ "serde",
  "serde_json",
 ]
 

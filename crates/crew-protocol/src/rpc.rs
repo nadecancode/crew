@@ -6,7 +6,9 @@
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
-use crate::types::{Agent, Event, InboxEntry, Message, MessageType, RuntimeKind, Task, WorkspaceState};
+use crate::types::{
+    Agent, Event, InboxEntry, Message, MessageType, RuntimeKind, Task, WorkspaceState,
+};
 
 /// Bump for new/renamed enum values, removed/renamed fields or changed meanings.
 /// New optional fields with `serde(default)` do not require a bump.
@@ -609,4 +611,3 @@ pub struct TranscriptResult {
     #[serde(default)]
     pub truncated: bool,
 }
-

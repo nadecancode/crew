@@ -1,9 +1,10 @@
 //! Current work selection with the terminal dashboard's existing semantics.
 
 use crew_protocol::{Task, TaskStatus};
+use serde::{Deserialize, Serialize};
 
 /// The task to show as an agent's current work, with caller-supplied time.
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct CurrentWork {
     pub task_id: String,
     pub done: bool,
