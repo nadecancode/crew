@@ -595,6 +595,10 @@ its execution slot. Use an explicit task id to inspect, update or finish a
 parked card during other work. To resume it with `agent_status("working",
 task_id: "…")`, finish or park the executing card first.
 
+Before parking source changes, checkpoint them or record which card owns
+the pending edits. `git_commit` commits the whole worktree; preserve that
+ownership when committing the next card's changes.
+
 Messages still reach the agent during independent work. Teammate or operator
 news leaves a durable cue for parked cards, even after the inbox is read;
 scoped messages target their card, and unscoped news lets each parked card

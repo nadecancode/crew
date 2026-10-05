@@ -312,7 +312,10 @@ about, and tell a teammate (agent_send) before changing anything they own.\n"
         "\n## Finishing\n\
 When your task is done: {done}. crew tells the orchestrator when your task finishes, fails or stalls, \
 so do not send it progress or status reports: task_update records progress where it can \
-see it. If you must wait for a teammate, call agent_status(\"waiting\", \
+see it. Before parking source changes, checkpoint them with git_commit where that tool is \
+available, or record which pending edits belong to this card and keep their ownership clear \
+during the next card. git_commit commits the whole worktree, so a later card's commit must \
+not silently include parked unfinished work. If you must wait for a teammate, call agent_status(\"waiting\", \
 \"<who and what>\") and end this turn. That card stays parked while another independent Ready \
 card may arrive. Id-less task calls address your executing card, otherwise your most recently \
 started Waiting card (equal starts keep board order). Name a parked card by id when acting \
