@@ -96,9 +96,23 @@ changed.
 
 Two consequences:
 
-- B4: agents recorded with a pin that had to be replaced at this start are
-  restarted, not adopted. What they ran while the file was something else
-  cannot be known.
+- B4: agents recorded with a pin that was not found intact at this start
+  are restarted, not adopted. "Found intact" is literal: the file was there
+  and was the running binary. It covers both ways of not being so
+  (m-0431254c0f69):
+  - **replaced** (other bytes under the name): what those agents ran while
+    the file was something else cannot be known;
+  - **missing**, and made again by this start: what was under the name
+    before it went cannot be looked at any more, and while it was gone every
+    hook and every MCP start of those agents failed with ENOENT, so a
+    session that survived may have lost its crew tools without a word.
+    Adopting it would keep it that way; restarting it gives it tools that
+    work.
+
+  Neither happens in an ordinary run: a start of the same build finds its
+  pin, and a start of another build restarts those agents for the name
+  alone. A pin made at start because this build never ran here has no agent
+  recorded with it.
 - While the daemon lives, the check before a launch and on the tick compares
   the file with what the daemon holds in memory of the copy it verified or
   made: device, inode, size, modification time **and change time**. A file
@@ -199,6 +213,10 @@ event. The running inode is always there to copy.
   made again within a tick.
 - A second start from the same file with the pin untouched still makes no
   copy (the pin's inode is the same), and reads it once.
+- Between two starts the pin is deleted: the next start makes it again, and
+  an agent that survived and is recorded with that pin is restarted, not
+  adopted (as when the pin was replaced). With the pin found intact the same
+  agent is adopted.
 - B8: the sentence from the CLI; `crew mcp` against a daemon of another
   protocol answers `tools/call` with it; the hook's exit code; the daemon's
   event, once a minute at most.

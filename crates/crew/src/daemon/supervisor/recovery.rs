@@ -74,12 +74,12 @@ impl Daemon {
                     continue;
                 }
                 // Its crew tools are another build's, which would speak to
-                // this daemon in another protocol, or whatever the copy it
-                // was launched with was before this start made it again: it
-                // is stopped, and goes on as an agent that did not survive.
+                // this daemon in another protocol, or its copy was missing
+                // or changed before this start made it again: it is stopped,
+                // and goes on as an agent that did not survive.
                 let what = match launched_with.as_deref() {
                     Some(name) if Some(name) == self.binary.name() => format!(
-                        "{} was launched with {name}, which was not this build when this daemon \
+                        "{} was launched with {name}, which was not found intact when this daemon \
 started; it is stopped, not adopted",
                         agent.id
                     ),

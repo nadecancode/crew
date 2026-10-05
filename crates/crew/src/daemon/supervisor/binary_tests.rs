@@ -137,13 +137,14 @@ async fn pinned(agents: &[(&str, &str)]) -> Pinned {
 }
 
 async fn binary_fixture(agents: &[(&str, &str)], cannot_pin: bool) -> Pinned {
-    binary_fixture_with_cache(agents, cannot_pin, None).await
+    binary_fixture_with_cache(agents, cannot_pin, None, false).await
 }
 
 async fn binary_fixture_with_cache(
     agents: &[(&str, &str)],
     cannot_pin: bool,
     cached_bytes: Option<&str>,
+    remove_cache: bool,
 ) -> Pinned {
     let temp = tempfile::tempdir().unwrap();
     let root = temp.path().canonicalize().unwrap();
@@ -167,6 +168,9 @@ async fn binary_fixture_with_cache(
         std::fs::set_permissions(cached.path(), std::fs::Permissions::from_mode(0o700)).unwrap();
         std::fs::write(cached.path(), bytes).unwrap();
         std::fs::set_permissions(cached.path(), std::fs::Permissions::from_mode(0o500)).unwrap();
+        if remove_cache {
+            std::fs::remove_file(cached.path()).unwrap();
+        }
     }
     let on_disk = root.join("target/release/crew");
     let running = start(DaemonOptions {
@@ -305,7 +309,13 @@ async fn a_launch_makes_a_copy_that_went_missing_again_first() {
 
 #[tokio::test]
 async fn an_agent_that_outlived_the_daemon_is_adopted_only_if_it_runs_this_build() {
-    let p = pinned(&[("same", "shell"), ("other", "shell"), ("unknown", "shell")]).await;
+    let p = binary_fixture_with_cache(
+        &[("same", "shell"), ("other", "shell"), ("unknown", "shell")],
+        false,
+        Some("the running build"),
+        false,
+    )
+    .await;
     let daemon = p.daemon();
     let name = daemon.binary.name().unwrap().to_string();
     {
@@ -680,7 +690,13 @@ async fn reviewer_a_late_stop_retry_does_not_clear_the_replacements_record() {
 
 #[tokio::test]
 async fn reviewer_replacing_a_cached_pin_restarts_its_old_agents_and_reports_the_repair() {
-    let p = binary_fixture_with_cache(&[("same", "shell")], false, Some("a different build")).await;
+    let p = binary_fixture_with_cache(
+        &[("same", "shell")],
+        false,
+        Some("a different build"),
+        false,
+    )
+    .await;
     let daemon = p.daemon();
     assert_eq!(
         std::fs::read_to_string(p.pin()).unwrap(),
@@ -747,7 +763,13 @@ async fn a_stop_given_up_halfway_leaves_an_agent_of_another_build_held() {
 async fn an_agent_recorded_with_a_copy_replaced_at_start_is_restarted_and_the_event_says_why() {
     // Between two starts of this build, its copy was written over with
     // other bytes of the same length, and its mode put back.
-    let p = binary_fixture_with_cache(&[("same", "shell")], false, Some("the bUnning build")).await;
+    let p = binary_fixture_with_cache(
+        &[("same", "shell")],
+        false,
+        Some("the bUnning build"),
+        false,
+    )
+    .await;
     let daemon = p.daemon();
     let name = daemon.binary.name().unwrap().to_string();
     let events = daemon.store.recent_events(None, 50).unwrap();
@@ -780,11 +802,58 @@ running binary, and agents launched with it are restarted, not adopted",
         events.iter().any(|e| e.event_type == "agent.other_build"
             && e.message
                 == format!(
-                    "same was launched with {name}, which was not this build when this daemon \
+                    "same was launched with {name}, which was not found intact when this daemon \
 started; it is stopped, not adopted"
                 )),
         "{events:?}"
     );
+}
+
+#[tokio::test]
+async fn reviewer_only_a_pin_found_intact_at_start_can_adopt_a_surviving_agent() {
+    for missing in [false, true] {
+        let p = binary_fixture_with_cache(
+            &[("same", "shell")],
+            false,
+            Some("the running build"),
+            missing,
+        )
+        .await;
+        let daemon = p.daemon();
+        let name = daemon.binary.name().unwrap().to_string();
+        daemon.model().local.get_mut("same").unwrap().binary = Some(name);
+        assert_eq!(
+            std::fs::read_to_string(p.pin()).unwrap(),
+            "the running build"
+        );
+
+        daemon.recover_agents(p.procs.clone()).await;
+
+        let expected: Vec<String> = if missing { vec!["same".into()] } else { vec![] };
+        assert_eq!(
+            *p.procs.killed.lock().unwrap(),
+            expected,
+            "missing at startup: {missing}; a recreated path does not restore a survivor's tools"
+        );
+        if missing {
+            for _ in 0..500 {
+                if !p.procs.spawned.lock().unwrap().is_empty() {
+                    break;
+                }
+                tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+            }
+            assert_eq!(Path::new(&p.launched("same").program), p.pin());
+            let events = daemon.store.recent_events(None, 50).unwrap();
+            assert!(
+                events.iter().any(|e| e.event_type == "agent.other_build"
+                    && e.message.contains("was not found intact")),
+                "{events:?}"
+            );
+        } else {
+            assert!(p.procs.spawned.lock().unwrap().is_empty());
+            assert!(daemon.model().rt("same").ready);
+        }
+    }
 }
 
 #[tokio::test]
