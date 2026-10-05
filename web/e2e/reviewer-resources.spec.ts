@@ -40,7 +40,8 @@ test("a failed model listing displays its error without an uncaught exception", 
   mock.on("models_list", () => { throw { code: "unavailable", message: "review catalog is unavailable" }; });
   await openPage();
   await page.evaluate(() => { location.hash = "/?agent=claude-2"; });
-  await page.getByRole("toolbar", { name: "actions for claude-2" }).getByRole("button", { name: "model", exact: true }).click();
+  await page.getByRole("toolbar", { name: "actions for claude-2" }).getByRole("button", { name: "More", exact: true }).click();
+  await page.getByRole("menu", { name: "actions for claude-2", exact: true }).getByRole("menuitem", { name: "model and CLI", exact: true }).click();
   await mock.waitForCall("models_list");
   await page.waitForTimeout(100);
   expect(errors).toEqual([]);
