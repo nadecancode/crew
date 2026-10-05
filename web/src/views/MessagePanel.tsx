@@ -4,16 +4,18 @@
 
 import { For, Show, createResource, createSignal } from "solid-js";
 import { useApp } from "../app";
-import { clockTime } from "../format";
+import { absoluteTime, clockTime } from "../format";
 import { askedBy, decodeMessage, options, type Message } from "../protocol";
 import { Linked } from "../text";
 import { kindOf } from "./Bus";
 import { PanelHead } from "./SidePanel";
 import { waiting } from "./waiting";
+import { useOps } from "./ops";
 
 export function MessagePanel(props: { id: string }) {
   const app = useApp();
   const { store, ui, link } = app;
+  const ops = useOps();
   const local = (id: string): Message | undefined => {
     store.messagesVersion();
     for (const m of store.messages.newest()) if (m.id === id) return m;
@@ -21,7 +23,7 @@ export function MessagePanel(props: { id: string }) {
   };
   // Asked only while the page is live; asked again when it is live again.
   const [askedFor, setAskedFor] = createSignal<string | null>(null);
-  const [fetched] = createResource(
+  const [fetched, { refetch }] = createResource(
     () => (local(props.id) || !link.live() ? null : props.id),
     (id) => (setAskedFor(id), link.call("message_get", { id }, decodeMessage)),
   );
@@ -48,26 +50,27 @@ export function MessagePanel(props: { id: string }) {
   };
   const go = (id: string) => ui.select({ kind: "message", id });
   return (
-    <div class="panel-body message-panel">
+    <div class="panel-body message-panel" aria-busy={fetched.loading}>
       <PanelHead title={`message ${props.id}`} />
-      <Show when={message()} fallback={<p class="pad muted">{why()}</p>}>
+      <Show when={message()} fallback={<div class="pad muted fetch-state" role="status">{why()}<Show when={failed() && link.live()}> <button onClick={() => void refetch()}>Retry</button></Show></div>}>
         {(m) => (
           <div class="pad scroll" tabindex="0" data-focus-first>
             <dl class="facts">
               <dt>from</dt><dd><AgentLink id={m().from} /></dd>
               <dt>to</dt><dd>{m().to === "*" ? "everyone" : <AgentLink id={m().to} />}</dd>
               <dt>type</dt><dd class={`k-${kindOf(m())}`}>{m().type}</dd>
-              <dt>sent</dt><dd>{clockTime(m().timestamp)}</dd>
+              <dt>sent</dt><dd title={absoluteTime(m().timestamp)}>{clockTime(m().timestamp)}</dd>
               <Show when={askedBy(m())}><dt>for</dt><dd>{askedBy(m())}</dd></Show>
               <Show when={m().reply_to}><dt>reply to</dt><dd><button class="link" onClick={() => go(m().reply_to!)}>{m().reply_to}</button></dd></Show>
             </dl>
+            <button class="message-sender" disabled={!link.live()} onClick={() => ops.compose(m().from)}>Message sender</button>
             <pre class="body"><Linked text={m().body} /></pre>
             <Show when={options(m()).length}>
               <p class="muted">suggested answers:</p>
               <ul><For each={options(m())}>{(o) => <li>{o}</li>}</For></ul>
             </Show>
             <Show when={replies().length}>
-              <p class="muted">replies:</p>
+              <p class="muted">replies in loaded history:</p>
               <ul class="replies">
                 <For each={replies()}>{(r) => <li><button class="link" onClick={() => go(r.id)}>{r.from}: {r.body.split("\n", 1)[0]}</button></li>}</For>
               </ul>

@@ -5,7 +5,7 @@
 
 import { For, Show, createEffect, createSignal, on, onCleanup } from "solid-js";
 import { useApp } from "../app";
-import { taskIcon, taskTone } from "../format";
+import { absoluteTime, fmtElapsed, taskIcon, taskTone } from "../format";
 import { decodeTaskCard, type TaskCard } from "../protocol";
 import { Linked } from "../text";
 import { AgentLink } from "./MessagePanel";
@@ -40,6 +40,10 @@ export function TaskPanel(props: { id: string }) {
   createEffect(on(() => [props.id, JSON.stringify(local() ?? null), link.live()], () => void fetch()));
   createEffect(on(app.ui.refreshTick, () => void fetch(), { defer: true }));
   const task = () => local() ?? (card()?.task.id === props.id ? card()!.task : undefined);
+  const dates = (): [string, number | null | undefined][] => {
+    const t = task();
+    return t ? [["created", t.created_at], ["started", t.started_at], ["completed", t.completed_at]].filter(([, value]) => value != null) as [string, number][] : [];
+  };
   const copy = (value: string) => navigator.clipboard?.writeText(value).then(() => ui.setStatus(`copied ${value}`), () => ui.setStatus("could not copy", true));
   return (
     <div class="panel-body task-panel" aria-busy={loading()}>
@@ -91,12 +95,18 @@ export function TaskPanel(props: { id: string }) {
                       <span class="muted">{a.kind}</span>{" "}
                       <button class="link mono" title={`Copy ${a.kind}`} onClick={() => copy(a.value)}>{a.value}</button>
                       <Show when={a.description}> <span>{a.description}</span></Show>
+                      <div class="muted artifact-meta"><Show when={a.agent}>By <AgentLink id={a.agent!} /> · </Show>{absoluteTime(a.created_at)}</div>
                     </li>
                   )}
                 </For>
               </ul>
             </Show>
-            <Show when={t().timeout_secs}><h4>timeout</h4><p>{t().timeout_secs}s</p></Show>
+            <h4>timeline</h4>
+            <dl class="facts">
+              <For each={dates()}>{([label, ms]) => <><dt>{label}</dt><dd>{absoluteTime(ms!)}</dd></>}</For>
+              <Show when={t().started_at != null && t().completed_at != null}><dt>elapsed</dt><dd>{fmtElapsed(t().completed_at! - t().started_at!)}</dd></Show>
+              <Show when={t().timeout_secs != null}><dt>timeout</dt><dd>{t().timeout_secs}s</dd></Show>
+            </dl>
           </div>
         )}
       </Show>
