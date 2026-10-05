@@ -45,7 +45,7 @@ for (const fixture of cases) {
         assert.equal(frame.kind, "push");
         if (frame.kind === "push") assert.equal(store.applyPush(frame.push, step.at_ms), true);
       }
-      const expected = { ...step.expect, ...step.client_expect?.web };
+      const expected = { ...step.expect, ...step.legacy_client_expect?.web };
       const work = Object.fromEntries(Object.keys(expected.work ?? {}).map((id) => {
         const value = workOf(store.state.tasks, id, store.serverNow(step.at_ms));
         return [id, value ? { task_id: value.task.id, done: value.done, elapsed_ms: value.elapsed } : null];

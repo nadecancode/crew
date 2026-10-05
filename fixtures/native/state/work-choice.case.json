@@ -132,7 +132,8 @@
             "elapsed_ms": 1000
           }
         }
-      }
+      },
+      "source": "web/test/work.test.ts; crates/crew-tui/tests/render.rs:80-179"
     },
     {
       "at_ms": 1000,
@@ -157,7 +158,8 @@
             "elapsed_ms": 900
           }
         }
-      }
+      },
+      "source": "web/test/work.test.ts; crates/crew-tui/tests/render.rs:80-179"
     },
     {
       "at_ms": 1000,
@@ -182,7 +184,8 @@
             "elapsed_ms": null
           }
         }
-      }
+      },
+      "source": "web/test/work.test.ts; crates/crew-tui/tests/render.rs:80-179"
     },
     {
       "at_ms": 1000,
@@ -207,7 +210,8 @@
             "elapsed_ms": 900
           }
         }
-      }
+      },
+      "source": "web/test/work.test.ts; crates/crew-tui/tests/render.rs:80-179"
     },
     {
       "at_ms": 1000,
@@ -234,7 +238,8 @@
             "elapsed_ms": 900
           }
         }
-      }
+      },
+      "source": "web/test/work.test.ts; crates/crew-tui/tests/render.rs:80-179"
     },
     {
       "at_ms": 1000,
@@ -261,7 +266,8 @@
             "elapsed_ms": 700
           }
         }
-      }
+      },
+      "source": "web/test/work.test.ts; crates/crew-tui/tests/render.rs:80-179"
     },
     {
       "at_ms": 1000,
@@ -288,7 +294,8 @@
             "elapsed_ms": 0
           }
         }
-      }
+      },
+      "source": "web/test/work.test.ts; crates/crew-tui/tests/render.rs:80-179"
     },
     {
       "at_ms": 1000,
@@ -314,7 +321,8 @@
             "elapsed_ms": 200
           }
         }
-      }
+      },
+      "source": "web/test/work.test.ts; crates/crew-tui/tests/render.rs:80-179"
     },
     {
       "at_ms": 1000,
@@ -394,7 +402,12 @@
           "other-agent-working",
           "failed-later"
         ]
-      }
+      },
+      "source": "web/test/work.test.ts; crates/crew-tui/tests/render.rs:80-179"
     }
-  ]
+  ],
+  "transport_modes": {
+    "web": "one_connection_barrier",
+    "tui": "two_connection_overlap"
+  }
 }

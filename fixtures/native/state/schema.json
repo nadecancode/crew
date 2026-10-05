@@ -11,7 +11,8 @@
     "id",
     "description",
     "provenance",
-    "steps"
+    "steps",
+    "transport_modes"
   ],
   "properties": {
     "schema_version": {
@@ -46,6 +47,22 @@
       "minItems": 1,
       "items": {
         "$ref": "#/$defs/step"
+      }
+    },
+    "transport_modes": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "web",
+        "tui"
+      ],
+      "properties": {
+        "web": {
+          "const": "one_connection_barrier"
+        },
+        "tui": {
+          "const": "two_connection_overlap"
+        }
       }
     }
   },
@@ -183,7 +200,8 @@
       "required": [
         "at_ms",
         "reason",
-        "expect"
+        "expect",
+        "source"
       ],
       "oneOf": [
         {
@@ -247,19 +265,19 @@
         "expect": {
           "$ref": "#/$defs/expectation"
         },
-        "client_expect": {
+        "source": {
+          "type": "string",
+          "minLength": 1
+        },
+        "legacy_client_expect": {
           "type": "object",
-          "description": "Observed legacy client differences only; shared policy remains undecided.",
+          "description": "Existing web behavior only; common expectations follow approved N1/TUI shared-core semantics.",
           "additionalProperties": false,
           "required": [
-            "web",
-            "tui"
+            "web"
           ],
           "properties": {
             "web": {
-              "$ref": "#/$defs/expectation"
-            },
-            "tui": {
               "$ref": "#/$defs/expectation"
             }
           }

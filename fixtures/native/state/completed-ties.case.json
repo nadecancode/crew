@@ -3,13 +3,14 @@
   "protocol": 6,
   "source_revision": "6049cdf63e36e303327235834f23a798aa5a82c1",
   "id": "completed-ties",
-  "description": "Document existing web/TUI differences in completed-card ties without choosing a future shared policy.",
+  "description": "Shared-core completed fallback follows approved N1/TUI semantics; legacy web differences remain explicit.",
   "provenance": [
     "crates/crew-core/src/types.rs",
     "crates/crew-core/src/rpc.rs",
     "crates/crew/tests/fixtures/web/snapshot.json",
     "web/src/format.ts:workOf",
-    "crates/crew-tui/src/app.rs:App::work_of"
+    "crates/crew-tui/src/app.rs:App::work_of",
+    "notes/native-architecture.md at a6f70568:N1 current_work"
   ],
   "steps": [
     {
@@ -59,27 +60,26 @@
         "questions": [],
         "server_time": 1100
       },
-      "reason": "Equal known completion times currently pick the first web card and the last TUI card; shared-core convergence needs an explicit reviewed decision.",
+      "reason": "Approved N1 current_work keeps the TUI last card among equal known completion times; legacy web keeps the first card.",
       "expect": {
         "task_ids": [
           "done-first",
           "done-second"
-        ]
+        ],
+        "work": {
+          "claude-1": {
+            "task_id": "done-second",
+            "done": true,
+            "elapsed_ms": 100
+          }
+        }
       },
-      "client_expect": {
+      "source": "notes/native-architecture.md at a6f70568:N1 current_work",
+      "legacy_client_expect": {
         "web": {
           "work": {
             "claude-1": {
               "task_id": "done-first",
-              "done": true,
-              "elapsed_ms": 100
-            }
-          }
-        },
-        "tui": {
-          "work": {
-            "claude-1": {
-              "task_id": "done-second",
               "done": true,
               "elapsed_ms": 100
             }
@@ -134,7 +134,7 @@
         "questions": [],
         "server_time": 1100
       },
-      "reason": "A null completion followed by zero currently ties on the web but is ordered as unknown before known in the TUI. Neither expectation treats null as a measured timestamp.",
+      "reason": "Approved N1 current_work orders known zero completion above unknown null; legacy web coalesces both for selection while elapsed for null remains unknown.",
       "expect": {
         "tasks": {
           "done-first": {
@@ -143,9 +143,17 @@
           "done-second": {
             "completed_at": 0
           }
+        },
+        "work": {
+          "claude-1": {
+            "task_id": "done-second",
+            "done": true,
+            "elapsed_ms": 1100
+          }
         }
       },
-      "client_expect": {
+      "source": "notes/native-architecture.md at a6f70568:N1 current_work",
+      "legacy_client_expect": {
         "web": {
           "work": {
             "claude-1": {
@@ -154,17 +162,12 @@
               "elapsed_ms": null
             }
           }
-        },
-        "tui": {
-          "work": {
-            "claude-1": {
-              "task_id": "done-second",
-              "done": true,
-              "elapsed_ms": 1100
-            }
-          }
         }
       }
     }
-  ]
+  ],
+  "transport_modes": {
+    "web": "one_connection_barrier",
+    "tui": "two_connection_overlap"
+  }
 }

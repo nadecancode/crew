@@ -72,7 +72,8 @@
             "artifacts": []
           }
         }
-      }
+      },
+      "source": "crates/crew-core/src/types.rs:Agent/Task serde defaults; web/test/store.test.ts"
     },
     {
       "at_ms": 1000,
@@ -127,7 +128,8 @@
             "activity": "Measured zero"
           }
         }
-      }
+      },
+      "source": "crates/crew-core/src/types.rs:Agent/Task serde defaults; web/test/store.test.ts"
     },
     {
       "at_ms": 1000,
@@ -160,7 +162,8 @@
             "progress": 0
           }
         }
-      }
+      },
+      "source": "crates/crew-core/src/types.rs:Agent/Task serde defaults; web/test/store.test.ts"
     },
     {
       "at_ms": 1000,
@@ -191,7 +194,8 @@
             "context": null
           }
         }
-      }
+      },
+      "source": "crates/crew-core/src/types.rs:Agent/Task serde defaults; web/test/store.test.ts"
     },
     {
       "at_ms": 1000,
@@ -224,7 +228,12 @@
             "progress": null
           }
         }
-      }
+      },
+      "source": "crates/crew-core/src/types.rs:Agent/Task serde defaults; web/test/store.test.ts"
     }
-  ]
+  ],
+  "transport_modes": {
+    "web": "one_connection_barrier",
+    "tui": "two_connection_overlap"
+  }
 }

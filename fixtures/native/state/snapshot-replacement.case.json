@@ -167,7 +167,8 @@
             "exists": true
           }
         ]
-      }
+      },
+      "source": "web/test/store.test.ts:snapshot, then pushes; crates/crew-tui/src/app.rs:812-883,967-1040"
     },
     {
       "at_ms": 1759999999800,
@@ -200,7 +201,8 @@
             "exists": true
           }
         ]
-      }
+      },
+      "source": "web/test/store.test.ts:snapshot, then pushes; crates/crew-tui/src/app.rs:812-883,967-1040"
     },
     {
       "at_ms": 1759999999850,
@@ -231,7 +233,8 @@
             "message": "claude-1 is working"
           }
         ]
-      }
+      },
+      "source": "web/test/store.test.ts:snapshot, then pushes; crates/crew-tui/src/app.rs:812-883,967-1040"
     },
     {
       "at_ms": 1759999999900,
@@ -256,7 +259,8 @@
         "event_seqs": [
           6
         ]
-      }
+      },
+      "source": "web/test/store.test.ts:snapshot, then pushes; crates/crew-tui/src/app.rs:812-883,967-1040"
     },
     {
       "at_ms": 1759999999950,
@@ -282,7 +286,8 @@
           6,
           7
         ]
-      }
+      },
+      "source": "web/test/store.test.ts:snapshot, then pushes; crates/crew-tui/src/app.rs:812-883,967-1040"
     },
     {
       "at_ms": 1760000000000,
@@ -326,7 +331,8 @@
         "question_ids": [
           "m-9001"
         ]
-      }
+      },
+      "source": "web/test/store.test.ts:snapshot, then pushes; crates/crew-tui/src/app.rs:812-883,967-1040"
     },
     {
       "at_ms": 1760000000100,
@@ -429,7 +435,8 @@
             "exists": true
           }
         ]
-      }
+      },
+      "source": "web/test/store.test.ts:snapshot, then pushes; crates/crew-tui/src/app.rs:812-883,967-1040"
     },
     {
       "at_ms": 1760000000150,
@@ -455,7 +462,8 @@
           20,
           0
         ]
-      }
+      },
+      "source": "web/test/store.test.ts:snapshot, then pushes; crates/crew-tui/src/app.rs:812-883,967-1040"
     },
     {
       "at_ms": 1760000000200,
@@ -492,7 +500,12 @@
             "exists": true
           }
         ]
-      }
+      },
+      "source": "web/test/store.test.ts:snapshot, then pushes; crates/crew-tui/src/app.rs:812-883,967-1040"
     }
-  ]
+  ],
+  "transport_modes": {
+    "web": "one_connection_barrier",
+    "tui": "two_connection_overlap"
+  }
 }

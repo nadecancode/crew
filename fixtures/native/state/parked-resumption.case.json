@@ -123,7 +123,8 @@
             "exists": true
           }
         ]
-      }
+      },
+      "source": "web/dev/scenarios.ts:seedParked/advanceParked; web/e2e/parked-work.spec.ts"
     },
     {
       "at_ms": 1760000000100,
@@ -163,7 +164,8 @@
             "status": "review"
           }
         }
-      }
+      },
+      "source": "web/dev/scenarios.ts:seedParked/advanceParked; web/e2e/parked-work.spec.ts"
     },
     {
       "at_ms": 1760000000100,
@@ -200,7 +202,8 @@
             "task": "Plan parked migration"
           }
         }
-      }
+      },
+      "source": "web/dev/scenarios.ts:seedParked/advanceParked; web/e2e/parked-work.spec.ts"
     },
     {
       "at_ms": 1760000000200,
@@ -242,7 +245,8 @@
             "completed_at": 1760000000200
           }
         }
-      }
+      },
+      "source": "web/dev/scenarios.ts:seedParked/advanceParked; web/e2e/parked-work.spec.ts"
     },
     {
       "at_ms": 1760000000200,
@@ -314,7 +318,8 @@
             "exists": true
           }
         ]
-      }
+      },
+      "source": "web/dev/scenarios.ts:seedParked/advanceParked; web/e2e/parked-work.spec.ts"
     },
     {
       "at_ms": 1760000000200,
@@ -359,7 +364,12 @@
             "exists": true
           }
         ]
-      }
+      },
+      "source": "web/dev/scenarios.ts:seedParked/advanceParked; web/e2e/parked-work.spec.ts"
     }
-  ]
+  ],
+  "transport_modes": {
+    "web": "one_connection_barrier",
+    "tui": "two_connection_overlap"
+  }
 }

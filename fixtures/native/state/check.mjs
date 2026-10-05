@@ -1,6 +1,6 @@
 // Build existing libraries, then check the same corpus with both existing
 // clients. No Cargo manifests, generated wire fixtures, or product files change.
-import { mkdtempSync, readdirSync, rmSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
@@ -8,7 +8,18 @@ import { fileURLToPath } from "node:url";
 const directory = fileURLToPath(new URL("./", import.meta.url));
 const root = fileURLToPath(new URL("../../../", import.meta.url));
 const files = readdirSync(directory).filter((name) => name.endsWith(".case.json")).sort().map((name) => join(directory, name));
-const scratch = mkdtempSync(join(directory, ".check-"));
+const artifacts = join(root, "target/native-validation");
+mkdirSync(artifacts, { recursive: true });
+const scratch = mkdtempSync(join(artifacts, "state-"));
+
+function safeIntegers(value, path) {
+  if (typeof value === "number" && Number.isInteger(value) && !Number.isSafeInteger(value)) {
+    throw new Error(path + ": integer exceeds JavaScript's exact range; do not round IDs, counters, or milliseconds");
+  }
+  if (value !== null && typeof value === "object") {
+    for (const [key, field] of Object.entries(value)) safeIntegers(field, path + "." + key);
+  }
+}
 
 function run(command, args, capture = false) {
   const result = spawnSync(command, args, {
@@ -23,6 +34,7 @@ function run(command, args, capture = false) {
 }
 
 try {
+  for (const file of files) safeIntegers(JSON.parse(readFileSync(file, "utf8")), file);
   const output = run("./scripts/build-env", ["cargo", "build", "--locked", "-p", "crew-tui", "--message-format=json"], true);
   const libraries = new Map();
   for (const line of output.trim().split("\n")) {

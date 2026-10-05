@@ -111,23 +111,43 @@ fn main() {
             if let Some(snapshot) = step.get("snapshot") {
                 let decoded: Snapshot =
                     serde_json::from_value(snapshot.clone()).expect("Rust Snapshot DTO");
+                let encoded = serde_json::to_value(&decoded).expect("serialize Snapshot");
+                subset(
+                    &encoded,
+                    snapshot,
+                    &format!("{id}/{index}: wire round-trip"),
+                );
+                let again: Snapshot =
+                    serde_json::from_value(encoded.clone()).expect("canonical Snapshot DTO");
+                assert_eq!(
+                    serde_json::to_value(again).unwrap(),
+                    encoded,
+                    "{id}/{index}: canonical Snapshot round-trip"
+                );
                 app.apply_snapshot(decoded, at);
             } else {
                 let frame: ServerFrame =
                     serde_json::from_value(step["frame"].clone()).expect("Rust ServerFrame DTO");
+                let encoded = serde_json::to_value(&frame).expect("serialize ServerFrame");
+                subset(
+                    &encoded,
+                    &step["frame"],
+                    &format!("{id}/{index}: wire round-trip"),
+                );
+                let again: ServerFrame =
+                    serde_json::from_value(encoded.clone()).expect("canonical ServerFrame DTO");
+                assert_eq!(
+                    serde_json::to_value(again).unwrap(),
+                    encoded,
+                    "{id}/{index}: canonical ServerFrame round-trip"
+                );
                 assert!(
                     frame.id.is_none() && frame.result.is_none() && frame.error.is_none(),
                     "push-only frame"
                 );
                 app.apply_push(frame.push.expect("frame push"), at);
             }
-            let mut expected = step["expect"].clone();
-            if let Some(client) = step.get("client_expect").and_then(|c| c.get("tui")) {
-                expected
-                    .as_object_mut()
-                    .expect("expect object")
-                    .extend(client.as_object().expect("client expect object").clone());
-            }
+            let expected = &step["expect"];
             let actual = observation(&app, &expected, at);
             subset(
                 &actual,
@@ -140,5 +160,8 @@ fn main() {
         println!("{id}: {} steps", steps.len());
     }
     assert!(cases > 0, "no cases supplied");
+    println!(
+        "Wire round-trip: {total} inputs, all supplied fields preserved; canonical DTOs equal"
+    );
     println!("Rust DTO/TUI conformance: {cases} cases, {total} steps");
 }
