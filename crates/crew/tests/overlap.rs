@@ -168,6 +168,7 @@ fn explicit_parked_operations_keep_executing_projection_and_refuse_second_execut
         "task_update",
         json!({"percent":61, "message":"current preparation"}),
     );
+    tool(&s, "agent_status", json!({"status":"working"}));
     tool(
         &s,
         "task_update",
@@ -189,6 +190,13 @@ fn explicit_parked_operations_keep_executing_projection_and_refuse_second_execut
         json!({"status":"waiting", "task_id":"parked", "note":"still waiting"}),
     );
     let before = s.snapshot();
+    s.send("owner", "Answer for the parked card.");
+    s.wait_for("parked news", || {
+        s.messages()
+            .iter()
+            .any(|m| m.body == "Answer for the parked card.")
+    });
+    tool(&s, "agent_inbox", json!({}));
     assert_eq!(find_agent(&before, "owner").progress, Some(61));
     assert_eq!(
         find_agent(&before, "owner").task.as_deref(),
@@ -201,6 +209,7 @@ fn explicit_parked_operations_keep_executing_projection_and_refuse_second_execut
         json!({"task_id":"parked", "result":"completed explicitly"}),
     );
     let after = s.snapshot();
+    assert_eq!(find_agent(&after, "owner").status, AgentStatus::Working);
     assert_eq!(find_agent(&after, "owner").progress, Some(61));
     assert_eq!(
         find_agent(&after, "owner").task.as_deref(),
@@ -210,6 +219,10 @@ fn explicit_parked_operations_keep_executing_projection_and_refuse_second_execut
     assert!(tool(&s, "task_get", json!({})).starts_with("current [working]"));
     tool(&s, "task_complete", json!({"result":"current done"}));
     s.wait_all_done();
+    assert!(
+        !s.has_event("task.resumed"),
+        "finished parked card drops its cue"
+    );
 }
 
 #[test]

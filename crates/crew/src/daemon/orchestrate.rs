@@ -347,6 +347,8 @@ until the database takes writes again, tasks wait where they are.",
         let body = prompt::task_dispatch(&task);
         self.project_task(agent_id);
         self.model().rt(agent_id).self_status = None;
+        self.settle(agent_id);
+        self.update_agent(agent_id, |a| a.activity = format!("task: {}", task.title));
         self.emit(
             NewEvent::new(
                 "scheduler",
@@ -1122,9 +1124,12 @@ with review_submit(task_id=\"{}\", approve=true|false).",
         let now = now_ms();
         let was_current = {
             let model = self.model();
-            model.task(id).and_then(|task| task.assigned_agent.as_deref()).is_some_and(|agent| {
-                active_task(&model.tasks, agent).is_some_and(|current| current.id == id)
-            })
+            model
+                .task(id)
+                .and_then(|task| task.assigned_agent.as_deref())
+                .is_some_and(|agent| {
+                    active_task(&model.tasks, agent).is_some_and(|current| current.id == id)
+                })
         };
         let mut claimed = false;
         let Some(task) = self.try_update_task(id, |t| {

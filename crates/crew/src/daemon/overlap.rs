@@ -36,239 +36,6 @@ pub(super) fn track_pause(model: &mut Model, before: &Task, after: &Task) -> Opt
     Some(agent.to_string())
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::daemon::{start, DaemonOptions};
-    use crate::process::Spawned;
-    use crew_core::Agent;
-
-    fn card(id: &str, status: TaskStatus, started: i64) -> Task {
-        serde_json::from_value(json!({
-            "id":id, "title":id, "status":status, "assigned_agent":"owner",
-            "created_at":started, "started_at":started, "progress":41
-        }))
-        .unwrap()
-    }
-
-    fn owner(workspace: &std::path::Path) -> Agent {
-        serde_json::from_value(json!({
-            "id":"owner", "name":"owner", "role":"architect", "status":"waiting",
-            "runtime":"shell", "workdir":workspace, "backend":"pty", "last_activity_at":0
-        }))
-        .unwrap()
-    }
-
-    struct Alive;
-    #[async_trait::async_trait]
-    impl ProcessManager for Alive {
-        fn name(&self) -> &'static str {
-            "pty"
-        }
-        async fn spawn(&self, _: &crate::agents::LaunchSpec) -> anyhow::Result<Spawned> {
-            unreachable!()
-        }
-        async fn submit_prompt(&self, _: &str, _: &str) -> anyhow::Result<()> {
-            Ok(())
-        }
-        async fn write_raw(&self, _: &str, _: &[u8]) -> anyhow::Result<()> {
-            Ok(())
-        }
-        async fn screen(&self, _: &str, _: usize) -> anyhow::Result<String> {
-            Ok(String::new())
-        }
-        async fn pause(&self, _: &str) -> anyhow::Result<()> {
-            Ok(())
-        }
-        async fn resume(&self, _: &str) -> anyhow::Result<()> {
-            Ok(())
-        }
-        async fn kill(&self, _: &str) -> anyhow::Result<()> {
-            Ok(())
-        }
-        fn is_alive(&self, _: &str) -> bool {
-            true
-        }
-        async fn adopt(&self, _: &Agent) -> anyhow::Result<bool> {
-            Ok(true)
-        }
-    }
-
-    #[tokio::test]
-    async fn a_saved_read_answer_survives_daemon_restart_and_resumes_once() {
-        let temp = tempfile::tempdir().unwrap();
-        let options = || DaemonOptions {
-            workspace: temp.path().to_path_buf(),
-            crew_bin: std::env::current_exe().unwrap(),
-            pin: None,
-        };
-        let answer;
-        {
-            let running = start(options()).await.unwrap();
-            let daemon = &running.daemon;
-            let agent = owner(temp.path());
-            daemon.store.save_agent(&agent).unwrap();
-            daemon.model().agents.push(agent);
-            let first = card("first", TaskStatus::Working, 1);
-            daemon.store.save_task(&first).unwrap();
-            daemon.model().tasks.push(first);
-            daemon
-                .mirror_status_to_task("owner", AgentStatus::Waiting, Some("on schema".into()))
-                .unwrap();
-            let current = card("current", TaskStatus::Working, 2);
-            daemon.store.save_task(&current).unwrap();
-            daemon.model().tasks.push(current);
-            answer = daemon
-                .bus
-                .send(
-                    NewMessage::new("schema", "owner", MessageType::Answer, "schema available"),
-                    vec!["owner".into()],
-                )
-                .unwrap()
-                .message;
-            daemon
-                .record_task_wakeups("owner", std::slice::from_ref(&answer))
-                .unwrap();
-            daemon
-                .bus
-                .mark_delivered("owner", &[answer.id.clone()])
-                .unwrap();
-            daemon.bus.acknowledge("owner", None).unwrap();
-        }
-        // A new daemon reloads the durable task and private local state.
-        let running = start(options()).await.unwrap();
-        let daemon = &running.daemon;
-        assert_eq!(
-            daemon.model().local["owner"].task_wakeups["first"],
-            [answer.id.clone()]
-        );
-        assert!(daemon.model().local["owner"].task_pauses["first"]
-            .since
-            .is_some());
-        assert!(daemon.bus.undelivered("owner").unwrap().is_empty());
-        daemon
-            .complete_task(
-                &super::super::server::Who::Agent("owner".into()),
-                None,
-                "current finished".into(),
-                vec![],
-            )
-            .await
-            .unwrap();
-        daemon.resume_parked_tasks(Some(&Alive), &[]).await;
-        daemon.resume_parked_tasks(Some(&Alive), &[]).await;
-        assert_eq!(
-            daemon.model().task("first").unwrap().status,
-            TaskStatus::Working
-        );
-        assert_eq!(
-            daemon.agent("owner").unwrap().task.as_deref(),
-            Some("first")
-        );
-        assert_eq!(daemon.agent("owner").unwrap().progress, Some(41));
-        let notices: Vec<_> = daemon
-            .bus
-            .history(Some("owner"), 20)
-            .unwrap()
-            .into_iter()
-            .filter(|m| m.metadata["task_resumption"] == true)
-            .collect();
-        assert_eq!(notices.len(), 1);
-        assert_eq!(notices[0].metadata["message_ids"], json!([answer.id]));
-        assert!(daemon.bus.get(&answer.id).unwrap().is_some());
-    }
-
-    #[tokio::test]
-    async fn scheduler_bookkeeping_is_cue_free_scoped_news_targets_only_its_card() {
-        let temp = tempfile::tempdir().unwrap();
-        let running = start(DaemonOptions {
-            workspace: temp.path().to_path_buf(),
-            crew_bin: std::env::current_exe().unwrap(),
-            pin: None,
-        })
-        .await
-        .unwrap();
-        let daemon = &running.daemon;
-        daemon.model().tasks.extend([
-            card("older", TaskStatus::Waiting, 1),
-            card("newer", TaskStatus::Waiting, 2),
-        ]);
-        let send = |from, kind, metadata| {
-            daemon
-                .bus
-                .send(
-                    NewMessage::new(from, "owner", kind, "news").metadata(metadata),
-                    vec!["owner".into()],
-                )
-                .unwrap()
-                .message
-        };
-        for message in [
-            send("scheduler", MessageType::Status, json!({})),
-            send(
-                "scheduler",
-                MessageType::Task,
-                json!({"task_id":"independent"}),
-            ),
-            send(
-                "other",
-                MessageType::ReviewRequest,
-                json!({"task_id":"review-other"}),
-            ),
-            send(
-                "scheduler",
-                MessageType::Status,
-                json!({"task_id":"older", "task_resumption":true}),
-            ),
-        ] {
-            daemon.record_task_wakeups("owner", &[message]).unwrap();
-        }
-        assert!(daemon.model().local.get("owner").is_none());
-        let scoped = send("operator", MessageType::Message, json!({"task_id":"older"}));
-        daemon
-            .record_task_wakeups("owner", std::slice::from_ref(&scoped))
-            .unwrap();
-        assert_eq!(daemon.model().local["owner"].task_wakeups.len(), 1);
-        assert_eq!(
-            daemon.model().local["owner"].task_wakeups["older"],
-            [scoped.id.clone()]
-        );
-        daemon.clear_task_wakeups("owner", "older");
-        daemon.record_task_wakeups("owner", &[scoped]).unwrap();
-        assert!(
-            daemon.model().local["owner"].task_wakeups.is_empty(),
-            "replayed delivery cannot recreate a consumed cue"
-        );
-    }
-
-    #[test]
-    fn waiting_time_is_excluded_without_changing_task_identity_or_start_order() {
-        let mut model = Model::default();
-        let working = card("first", TaskStatus::Working, 1);
-        let mut waiting = working.clone();
-        waiting.status = TaskStatus::Waiting;
-        track_pause(&mut model, &working, &waiting);
-        model
-            .local
-            .get_mut("owner")
-            .unwrap()
-            .task_pauses
-            .get_mut("first")
-            .unwrap()
-            .since = Some(crew_core::util::now_ms() - 50_000);
-        track_pause(&mut model, &waiting, &working);
-        let pause = &model.local["owner"].task_pauses["first"];
-        assert!(pause.total_ms >= 50_000);
-        assert!(pause.since.is_none());
-        assert_eq!(working.started_at, waiting.started_at);
-        let mut retried = working.clone();
-        retried.status = TaskStatus::Queued;
-        retried.started_at = None;
-        track_pause(&mut model, &working, &retried);
-        assert!(!model.local["owner"].task_pauses.contains_key("first"));
-    }
-}
-
 impl Daemon {
     /// Agent metadata follows the same selection as id-less task calls.
     pub(crate) fn project_task(&self, agent: &str) {
@@ -467,6 +234,8 @@ report waiting again if its answer is still missing. Id-less task calls now addr
                     self.clear_task_wakeups(&agent, &task.id);
                     self.model().rt(&agent).self_status = None;
                     self.project_task(&agent);
+                    self.settle(&agent);
+                    self.update_agent(&agent, |a| a.activity = format!("resuming {}", task.title));
                     self.emit(
                         NewEvent::new(
                             "scheduler",
@@ -482,5 +251,238 @@ report waiting again if its answer is still missing. Id-less task calls now addr
                 Err(e) => tracing::warn!("resuming task {}: {}", task.id, e.message),
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::daemon::{start, DaemonOptions};
+    use crate::process::Spawned;
+    use crew_core::Agent;
+
+    fn card(id: &str, status: TaskStatus, started: i64) -> Task {
+        serde_json::from_value(json!({
+            "id":id, "title":id, "status":status, "assigned_agent":"owner",
+            "created_at":started, "started_at":started, "progress":41
+        }))
+        .unwrap()
+    }
+
+    fn owner(workspace: &std::path::Path) -> Agent {
+        serde_json::from_value(json!({
+            "id":"owner", "name":"owner", "role":"architect", "status":"waiting",
+            "runtime":"shell", "workdir":workspace, "backend":"pty", "last_activity_at":0
+        }))
+        .unwrap()
+    }
+
+    struct Alive;
+    #[async_trait::async_trait]
+    impl ProcessManager for Alive {
+        fn name(&self) -> &'static str {
+            "pty"
+        }
+        async fn spawn(&self, _: &crate::agents::LaunchSpec) -> anyhow::Result<Spawned> {
+            unreachable!()
+        }
+        async fn submit_prompt(&self, _: &str, _: &str) -> anyhow::Result<()> {
+            Ok(())
+        }
+        async fn write_raw(&self, _: &str, _: &[u8]) -> anyhow::Result<()> {
+            Ok(())
+        }
+        async fn screen(&self, _: &str, _: usize) -> anyhow::Result<String> {
+            Ok(String::new())
+        }
+        async fn pause(&self, _: &str) -> anyhow::Result<()> {
+            Ok(())
+        }
+        async fn resume(&self, _: &str) -> anyhow::Result<()> {
+            Ok(())
+        }
+        async fn kill(&self, _: &str) -> anyhow::Result<()> {
+            Ok(())
+        }
+        fn is_alive(&self, _: &str) -> bool {
+            true
+        }
+        async fn adopt(&self, _: &Agent) -> anyhow::Result<bool> {
+            Ok(true)
+        }
+    }
+
+    #[tokio::test]
+    async fn a_saved_read_answer_survives_daemon_restart_and_resumes_once() {
+        let temp = tempfile::tempdir().unwrap();
+        let options = || DaemonOptions {
+            workspace: temp.path().to_path_buf(),
+            crew_bin: std::env::current_exe().unwrap(),
+            pin: None,
+        };
+        let answer;
+        {
+            let running = start(options()).await.unwrap();
+            let daemon = &running.daemon;
+            let agent = owner(temp.path());
+            daemon.store.save_agent(&agent).unwrap();
+            daemon.model().agents.push(agent);
+            let first = card("first", TaskStatus::Working, 1);
+            daemon.store.save_task(&first).unwrap();
+            daemon.model().tasks.push(first);
+            daemon
+                .mirror_status_to_task("owner", AgentStatus::Waiting, Some("on schema".into()))
+                .unwrap();
+            let current = card("current", TaskStatus::Working, 2);
+            daemon.store.save_task(&current).unwrap();
+            daemon.model().tasks.push(current);
+            answer = daemon
+                .bus
+                .send(
+                    NewMessage::new("schema", "owner", MessageType::Answer, "schema available"),
+                    vec!["owner".into()],
+                )
+                .unwrap()
+                .message;
+            daemon
+                .record_task_wakeups("owner", std::slice::from_ref(&answer))
+                .unwrap();
+            daemon
+                .bus
+                .mark_delivered("owner", std::slice::from_ref(&answer.id))
+                .unwrap();
+            daemon.bus.acknowledge("owner", None).unwrap();
+        }
+        // A new daemon reloads the durable task and private local state.
+        let running = start(options()).await.unwrap();
+        let daemon = &running.daemon;
+        assert_eq!(
+            daemon.model().local["owner"].task_wakeups["first"],
+            std::slice::from_ref(&answer.id)
+        );
+        assert!(daemon.model().local["owner"].task_pauses["first"]
+            .since
+            .is_some());
+        assert!(daemon.bus.undelivered("owner").unwrap().is_empty());
+        daemon
+            .complete_task(
+                &super::super::server::Who::Agent("owner".into()),
+                None,
+                "current finished".into(),
+                vec![],
+            )
+            .await
+            .unwrap();
+        daemon.resume_parked_tasks(Some(&Alive), &[]).await;
+        daemon.resume_parked_tasks(Some(&Alive), &[]).await;
+        assert_eq!(
+            daemon.model().task("first").unwrap().status,
+            TaskStatus::Working
+        );
+        assert_eq!(
+            daemon.agent("owner").unwrap().task.as_deref(),
+            Some("first")
+        );
+        assert_eq!(daemon.agent("owner").unwrap().progress, Some(41));
+        let notices: Vec<_> = daemon
+            .bus
+            .history(Some("owner"), 20)
+            .unwrap()
+            .into_iter()
+            .filter(|m| m.metadata["task_resumption"] == true)
+            .collect();
+        assert_eq!(notices.len(), 1);
+        assert_eq!(notices[0].metadata["message_ids"], json!([answer.id]));
+        assert!(daemon.bus.get(&answer.id).unwrap().is_some());
+    }
+
+    #[tokio::test]
+    async fn scheduler_bookkeeping_is_cue_free_scoped_news_targets_only_its_card() {
+        let temp = tempfile::tempdir().unwrap();
+        let running = start(DaemonOptions {
+            workspace: temp.path().to_path_buf(),
+            crew_bin: std::env::current_exe().unwrap(),
+            pin: None,
+        })
+        .await
+        .unwrap();
+        let daemon = &running.daemon;
+        daemon.model().tasks.extend([
+            card("older", TaskStatus::Waiting, 1),
+            card("newer", TaskStatus::Waiting, 2),
+        ]);
+        let send = |from, kind, metadata| {
+            daemon
+                .bus
+                .send(
+                    NewMessage::new(from, "owner", kind, "news").metadata(metadata),
+                    vec!["owner".into()],
+                )
+                .unwrap()
+                .message
+        };
+        for message in [
+            send("scheduler", MessageType::Status, json!({})),
+            send(
+                "scheduler",
+                MessageType::Task,
+                json!({"task_id":"independent"}),
+            ),
+            send(
+                "other",
+                MessageType::ReviewRequest,
+                json!({"task_id":"review-other"}),
+            ),
+            send(
+                "scheduler",
+                MessageType::Status,
+                json!({"task_id":"older", "task_resumption":true}),
+            ),
+        ] {
+            daemon.record_task_wakeups("owner", &[message]).unwrap();
+        }
+        assert!(!daemon.model().local.contains_key("owner"));
+        let scoped = send("operator", MessageType::Message, json!({"task_id":"older"}));
+        daemon
+            .record_task_wakeups("owner", std::slice::from_ref(&scoped))
+            .unwrap();
+        assert_eq!(daemon.model().local["owner"].task_wakeups.len(), 1);
+        assert_eq!(
+            daemon.model().local["owner"].task_wakeups["older"],
+            std::slice::from_ref(&scoped.id)
+        );
+        daemon.clear_task_wakeups("owner", "older");
+        daemon.record_task_wakeups("owner", &[scoped]).unwrap();
+        assert!(
+            daemon.model().local["owner"].task_wakeups.is_empty(),
+            "replayed delivery cannot recreate a consumed cue"
+        );
+    }
+
+    #[test]
+    fn waiting_time_is_excluded_without_changing_task_identity_or_start_order() {
+        let mut model = Model::default();
+        let working = card("first", TaskStatus::Working, 1);
+        let mut waiting = working.clone();
+        waiting.status = TaskStatus::Waiting;
+        track_pause(&mut model, &working, &waiting);
+        model
+            .local
+            .get_mut("owner")
+            .unwrap()
+            .task_pauses
+            .get_mut("first")
+            .unwrap()
+            .since = Some(crew_core::util::now_ms() - 50_000);
+        track_pause(&mut model, &waiting, &working);
+        let pause = &model.local["owner"].task_pauses["first"];
+        assert!(pause.total_ms >= 50_000);
+        assert!(pause.since.is_none());
+        assert_eq!(working.started_at, waiting.started_at);
+        let mut retried = working.clone();
+        retried.status = TaskStatus::Queued;
+        retried.started_at = None;
+        track_pause(&mut model, &working, &retried);
+        assert!(!model.local["owner"].task_pauses.contains_key("first"));
     }
 }
