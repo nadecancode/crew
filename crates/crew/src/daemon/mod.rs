@@ -181,8 +181,8 @@ pub(crate) struct AgentRuntimeState {
     pub compact_offset: u64,
     /// The orchestrator was told that this window is getting full.
     pub context_warned: bool,
-    /// Since when it has been free of tasks on another CLI's fallback while
-    /// its own model can be used again (it goes back then).
+    /// Since when it has been free of tasks on a fallback it leaves before
+    /// it takes another task (it goes back then).
     pub home_free_since: Option<i64>,
 }
 

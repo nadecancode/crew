@@ -19,7 +19,8 @@
 //! sessions' reports and Claude Code's usage cache). From another CLI the
 //! agent goes back between tasks, so once its own model can be used again
 //! it is handed no new task until it is back: a queue of work would
-//! otherwise keep it away for good.
+//! otherwise keep it away for good. The same holds for an agent moved for a
+//! refusal (turns.rs), which goes back once that work is done.
 
 use crew_core::rpc::Quota;
 use crew_core::types::{model_display_name, ModelFallback};
@@ -611,43 +612,83 @@ take the first model after it:",
             }
         }
         for (id, home) in away {
-            // Moved for a refusal: back once that work is done.
-            if home.refused.is_some() {
-                if self.refused_work_done(&id, &home, now) {
-                    if let Some(agent) = self.agent(&id) {
-                        self.go_home(&agent, home).await;
-                    }
-                }
-                continue;
-            }
             let Some(agent) = self.agent(&id) else {
                 continue;
             };
-            let due = self.home_due(&home, &quotas, now);
-            let other_cli = home.runtime != agent.runtime;
             let on_task = crate::tasks::active_task(&self.model().tasks, &id).is_some();
-            // Due back from another CLI and free of tasks (the scheduler
-            // hands it none now): since when, and since when quiet.
+            let waits = self.waits_home(&agent, &home, &quotas, now);
+            // Going back between tasks and free of them (the scheduler hands
+            // it none now): since when, and since when quiet.
             let quiet_since = {
                 let mut m = self.model();
                 let rt = m.rt(&id);
-                rt.home_free_since =
-                    (due && other_cli && !on_task).then(|| rt.home_free_since.unwrap_or(now));
+                rt.home_free_since = (waits && !on_task).then(|| rt.home_free_since.unwrap_or(now));
                 rt.home_free_since
                     .map(|since| since.max(rt.last_output_at).max(agent.last_activity_at))
+            };
+            // It goes once its turn is over; if crew does not see that turn
+            // end, once the session has been quiet a while all the same.
+            let waited_out = !agent.status.is_terminal()
+                && !agent.paused
+                && agent.status != crew_core::AgentStatus::Spawning
+                && quiet_since.is_some_and(|since| now - since >= HOME_TURN_GRACE_MS);
+            // Moved for a refusal: back once that work is done.
+            if home.refused.is_some() {
+                if waited_out || self.refused_work_done(&id, &home, now) {
+                    self.go_home(&agent, home).await;
+                }
+                continue;
+            }
+            let other_cli = home.runtime != agent.runtime;
+            let due = if other_cli {
+                waits
+            } else {
+                self.home_due(&home, &quotas, now)
             };
             if !due || agent.status.is_terminal() || agent.paused || other_cli && on_task {
                 continue;
             }
             let resting = between_turns.contains(&id) || agent.limit.is_some();
-            // It goes once its turn is over; if crew does not see that turn
-            // end, once the session has been quiet a while all the same.
-            let waited_out = agent.status != crew_core::AgentStatus::Spawning
-                && quiet_since.is_some_and(|since| now - since >= HOME_TURN_GRACE_MS);
             if !resting && !waited_out {
                 continue;
             }
             self.go_home(&agent, home).await;
+        }
+    }
+
+    /// Whether `agent`, on a fallback, goes back to `home` before it takes
+    /// another task: from another CLI once its own model can be used again;
+    /// after a refusal (on any CLI) once the work it took over is done (a
+    /// turn of its since the move has ended, or a task of its was finished),
+    /// unless it stays for refusing again and again.
+    fn waits_home(
+        &self,
+        agent: &crew_core::Agent,
+        home: &HomeModel,
+        quotas: &[Quota],
+        now: i64,
+    ) -> bool {
+        match home.refused {
+            Some(_) => {
+                let (refusals, done) = {
+                    let m = self.model();
+                    let id = agent.id.as_str();
+                    let turned =
+                        m.rt.get(id)
+                            .is_some_and(|rt| rt.turn_ended_at > home.moved_at);
+                    let finished = m.tasks.iter().any(|t| {
+                        t.assigned_agent.as_deref() == Some(id)
+                            && t.completed_at.is_some_and(|at| at > home.moved_at)
+                    });
+                    let refusals = m.local.get(id).map_or(0, |l| l.refusals);
+                    (refusals, turned || finished)
+                };
+                done && refusals < super::turns::STAY_AFTER
+                    && self
+                        .model_out(home.runtime, home.model.as_deref())
+                        .is_none()
+            }
+            None => home.runtime != agent.runtime && self.home_due(home, quotas, now),
         }
     }
 
@@ -667,28 +708,24 @@ take the first model after it:",
                 .is_none()
     }
 
-    /// The members free of tasks on a work style's fallback of another CLI
-    /// whose own model can be used again. They go back between tasks, so
-    /// the scheduler hands them no new task until they are back.
+    /// The members free of tasks that go back to their own model before
+    /// they take another (`waits_home`), so the scheduler hands them none
+    /// until they are back.
     pub(crate) fn homeward(&self) -> Vec<String> {
         let now = now_ms();
         let (quotas, away) = {
             let m = self.model();
-            let away: Vec<(String, HomeModel)> = m
+            let away: Vec<(crew_core::Agent, HomeModel)> = m
                 .agents
                 .iter()
                 .filter(|a| !a.orchestrator && crate::tasks::active_task(&m.tasks, &a.id).is_none())
-                .filter_map(|a| {
-                    let home = m.local.get(&a.id)?.home.clone()?;
-                    (home.refused.is_none() && home.runtime != a.runtime)
-                        .then(|| (a.id.clone(), home))
-                })
+                .filter_map(|a| Some((a.clone(), m.local.get(&a.id)?.home.clone()?)))
                 .collect();
             (m.quotas.clone(), away)
         };
         away.into_iter()
-            .filter(|(_, home)| self.home_due(home, &quotas, now))
-            .map(|(id, _)| id)
+            .filter(|(agent, home)| self.waits_home(agent, home, &quotas, now))
+            .map(|(agent, _)| agent.id)
             .collect()
     }
 
@@ -947,6 +984,31 @@ mod homeward_tests {
         daemon.fallback_housekeeping().await;
         assert!(restored(&daemon), "back once quiet");
         assert!(daemon.model().local["x"].home.is_none());
+        assert!(daemon.homeward().is_empty());
+    }
+
+    #[tokio::test]
+    async fn an_agent_moved_for_a_refusal_waits_for_new_tasks_once_that_work_is_done() {
+        let (_temp, running) = away_on_codex().await;
+        let daemon = running.daemon.clone();
+        let moved_at = now_ms() - 30 * MINUTE;
+        if let Some(home) = daemon.model().local.get_mut("x").unwrap().home.as_mut() {
+            home.refused = Some("cyber_policy".into());
+        }
+        // It has not done the work it took over yet: it takes its tasks.
+        assert!(daemon.homeward().is_empty());
+
+        // A task of its finished since the move: the next waits for it.
+        let task: crew_core::Task = serde_json::from_value(serde_json::json!({
+            "id": "t", "title": "t", "description": "", "assigned_agent": "x", "status": "done",
+            "dependencies": [], "created_at": 0, "completed_at": moved_at + MINUTE
+        }))
+        .unwrap();
+        daemon.model().tasks.push(task);
+        assert_eq!(daemon.homeward(), vec!["x".to_string()]);
+
+        // One that refused again and again stays where it is.
+        daemon.model().local.get_mut("x").unwrap().refusals = super::super::turns::STAY_AFTER;
         assert!(daemon.homeward().is_empty());
     }
 }

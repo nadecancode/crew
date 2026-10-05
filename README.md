@@ -1426,7 +1426,10 @@ The member is marked (`↓ GLM 5.3`), the log has `agent.model_policy`, and
 the orchestrator is told, with nothing to decide. The roster keeps the
 member's own model, and it goes back to that model once the work is done:
 when a turn on the other model has ended, nothing has happened for 15
-seconds, and it has no task under way. A member refused a second time stays
+seconds, and it has no task under way. Once a turn of its there has ended or
+it has finished a task, it is handed no new task until it is back (and if
+crew does not see its turn end, it goes once its session has been quiet for
+a minute). A member refused a second time stays
 on the other model; move it back with `s` when you want. This never applies
 to the orchestrator, whose model is yours to choose. The built-in styles say
 `[glm-5.3, deepseek-v4-flash]`, shown in the launcher under `refused`.

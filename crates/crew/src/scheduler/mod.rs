@@ -21,7 +21,7 @@ pub struct AgentView {
     /// A turn is running or a message is on its way to the agent: something
     /// may still happen even if no task is formally "working".
     pub active: bool,
-    /// About to go back to its own model on another CLI, between tasks: it
+    /// About to go back to its own model from a fallback, between tasks: it
     /// is handed no new task until it is back.
     pub homeward: bool,
 }
