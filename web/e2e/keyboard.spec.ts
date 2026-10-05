@@ -31,14 +31,14 @@ async function walk(page: Page, key: "Tab" | "Shift+Tab", until: (w: string) => 
 
 test("tab goes from the status bar through the graph (one stop) and the side panel to the message box, and back", async ({ page, openPage, csp }) => {
   await openPage();
-  await page.getByRole("button", { name: "graph" }).focus();
+  await page.getByRole("navigation", { name: "views" }).getByRole("button", { name: "Team", exact: true }).focus();
   const forward = await walk(page, "Tab", (w) => w === "compose");
   const nodes = forward.filter((w) => w.startsWith("node:"));
   expect(nodes).toEqual(["node:claude-1"]);
   const iNode = forward.indexOf("node:claude-1");
   expect(forward.findIndex((w) => w.startsWith("status:"))).toBeLessThan(iNode);
   expect(forward.findIndex((w) => w.startsWith("panel:"))).toBeGreaterThan(iNode);
-  const back = await walk(page, "Shift+Tab", (w) => w === "status:graph");
+  const back = await walk(page, "Shift+Tab", (w) => w === "status:Team");
   expect(back.filter((w) => w.startsWith("node:"))).toEqual(["node:claude-1"]);
   expect(csp).toEqual([]);
 });
@@ -180,7 +180,8 @@ test("nothing fires while a text field has focus; after /keys off a k does nothi
   await page.keyboard.press("Escape");
   await page.locator('[data-agent="claude-4"]').focus();
   await page.keyboard.press("Enter");
-  await page.locator(".insp-actions").getByRole("button", { name: "kill" }).click();
+  await page.locator(".insp-actions").getByRole("button", { name: "More", exact: true }).click();
+  await page.getByRole("menu", { name: "actions for claude-4", exact: true }).getByRole("menuitem", { name: "kill…", exact: true }).click();
   await page.getByRole("dialog", { name: "kill agent" }).getByRole("button", { name: "kill claude-4" }).click();
   await mock.waitForCall("agent_kill", (c) => (c.params as { id: string }).id === "claude-4");
 });
