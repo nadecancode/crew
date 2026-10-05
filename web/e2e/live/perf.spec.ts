@@ -170,7 +170,7 @@ test("P10, P11, P12, P15 against a real daemon: frames under real pushes, rows i
   const ring = async () => {
     if (!(await page.locator(".logs").isVisible())) await page.keyboard.press("l");
     await expect(page.locator(".logs")).toBeVisible();
-    return Number(/of (\d+)/.exec((await page.locator(".logs .muted").first().textContent()) ?? "")?.[1] ?? 0);
+    return Number(/of (\d+)/.exec((await page.locator(".logs .filters .muted").textContent()) ?? "")?.[1] ?? 0);
   };
   const warm = Date.now();
   while ((await ring()) < 5000 && Date.now() - warm < 120_000) expect((await load(op, 1000, 1000, targets)).errors).toBe(0);
@@ -223,7 +223,7 @@ test("P10, P11, P12, P15 against a real daemon: frames under real pushes, rows i
     expect(long.length, name).toBe(0);
   }
   const rows = await page.locator(".log-row").count();
-  const visible = await page.locator(".log-list").evaluate((el) => Math.ceil(el.clientHeight / 22));
+  const visible = await page.locator(".log-list").evaluate((el) => Math.ceil(el.clientHeight / (innerWidth < 768 ? 64 : 36)));
   out.p12_log_rows_in_dom = { rows, visible };
   expect(rows).toBeLessThanOrEqual(visible + 20 + 1);
   out.p15_heap_mb = await page.evaluate(() => {

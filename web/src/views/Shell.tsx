@@ -4,8 +4,8 @@
 //   main area (graph, tasks, logs, usage) | side panel
 //   message box · footer
 //
-// A page that is reconnecting or stopped is read-only: what it last knew,
-// dimmed, every control disabled, and a bar that says which and what to do.
+// A page that is reconnecting or stopped retains the last known workspace
+// and disables mutations beneath a visible availability notice.
 // So is a workspace that is not live while the page is (notes/web-multi.md
 // §multi-ui "Not running, incompatible"): what it last showed, dimmed, under
 // a bar that says why.
@@ -17,6 +17,7 @@ import { clockTime, fmtElapsed, runtimeGlyph } from "../format";
 import { AgentGraph } from "../graph/AgentGraph";
 import { TaskDag } from "../graph/TaskDag";
 import { handleKey, keyboardFree } from "../keys";
+import type { Theme } from "../prefs";
 import { operations } from "../operate";
 import { asker } from "../protocol";
 import { ContextMenu } from "./ContextMenu";
@@ -47,13 +48,22 @@ export function Shell() {
   const app = useApp();
   const ops = operations(app);
   const { ui, link } = app;
+  const media = typeof matchMedia === "function" ? matchMedia("(prefers-color-scheme: dark)") : null;
+  const [dark, setDark] = createSignal(media?.matches ?? false);
+  createEffect(() => {
+    const theme = app.prefs.prefs.theme;
+    document.documentElement.dataset.theme = theme === "system" ? (dark() ? "dark" : "light") : theme;
+  });
 
   onMount(() => {
     const onKey = (e: KeyboardEvent) => handleKey(app, ops, e);
     const onHash = () => app.page.fromLocation();
+    const appearance = () => setDark(media?.matches ?? false);
+    media?.addEventListener("change", appearance);
     document.addEventListener("keydown", onKey);
     window.addEventListener("hashchange", onHash);
     onCleanup(() => {
+      media?.removeEventListener("change", appearance);
       document.removeEventListener("keydown", onKey);
       window.removeEventListener("hashchange", onHash);
     });
@@ -95,16 +105,18 @@ export function Shell() {
 
   return (
     <OpsContext.Provider value={ops}>
-      <div class="page" classList={{ readonly: readOnly(), loaded: app.store.state.loaded }} data-conn-state={state()} data-workspace-state={link.shown()}>
+      <div class="page" classList={{ readonly: readOnly(), loaded: app.store.state.loaded, team: ui.view() === "graph" }} data-conn-state={state()} data-workspace-state={link.shown()}>
         <Show when={app.store.state.loaded || link.conn() === "live"} fallback={<Entry />}>
           <StatusBar />
+          <WorkspaceSummary />
+          <ViewNav />
           <Warnings />
           <ConnBar />
           <WorkspaceBar />
           <UsageStrip />
           <QuestionBanner />
-          <div class="page-body" classList={{ full: ui.panelFull() }}>
-            <main id="main" class="main" data-region="main" aria-label="main area">
+          <div class="page-body" classList={{ full: ui.panelFull(), replacement: ui.viewport() < 768 && ui.panelOpen() }}>
+            <main id="main" class="main" data-region="main" aria-label="main area" inert={ui.panelFull() || (ui.viewport() < 768 && ui.panelOpen())}>
               <Switch>
                 <Match when={!app.store.state.loaded}><Empty><div class="ws-text"><WorkspaceText /></div></Empty></Match>
                 <Match when={ui.view() === "graph"}><AgentGraph /></Match>
@@ -220,42 +232,53 @@ function ConnBar() {
 function StatusBar() {
   const app = useApp();
   const ops = useOps();
-  const { store, ui, link } = app;
+  const { ui, link, prefs } = app;
+  const conn = () => link.conn() === "connecting" ? "reconnecting" : link.conn();
+  return (
+    <header class="status-bar" data-region="status">
+      <span class="brand"><span class="gauge" aria-hidden="true">◆</span> crew</span>
+      <SwitcherButton />
+      <span class="spacer" />
+      <span class="conn" data-conn={conn()} role="status" aria-live="polite"><span class="dot" aria-hidden="true">●</span> Dashboard {conn() === "signed-out" ? "signed out" : conn()}</span>
+      <button disabled={!link.live()} onClick={() => ops.command()} title="command line (Ctrl K)">Commands <kbd aria-hidden="true">Ctrl K</kbd></button>
+      <label class="appearance">Appearance <select aria-label="Appearance" value={prefs.prefs.theme} onChange={(e) => prefs.setTheme(e.currentTarget.value as Theme)}><option value="system">System</option><option value="light">Light</option><option value="dark">Dark</option></select></label>
+      <button onClick={() => ui.openDialog({ kind: "help" })} title="keys and commands (?)" aria-label="keys and commands">?</button>
+      <button disabled={!link.live() || app.isPending("shutdown")} onClick={() => ops.stop()} title="Workspace actions: stop the team (S)">stop team</button>
+    </header>
+  );
+}
+
+function WorkspaceSummary() {
+  const { store } = useApp();
   const second = useSecond();
   const s = () => store.state.session;
   const elapsed = () => {
     second();
     const start = s()?.team_started_at;
-    if (!start) return null;
-    const end = s()?.completed_at ?? store.serverNow(Date.now());
-    return fmtElapsed(end - start);
+    return start ? fmtElapsed((s()?.completed_at ?? store.serverNow(Date.now())) - start) : null;
   };
-  const done = () => store.state.tasks.filter((t) => t.status === "done").length;
-  const conn = () => (link.conn() === "connecting" ? "reconnecting" : link.conn());
-  const connText = () => ({ live: "live", reconnecting: "reconnecting", "signed-out": "signed out", stopped: "stopped" } as Record<string, string>)[conn()] ?? conn();
-  const views = [["graph", "graph", ""], ["tasks", "tasks", "t"], ["logs", "logs", "l"], ["usage", "usage", "v"]] as const;
-  return (
-    <header class="status-bar" data-region="status">
-      <span class="brand"><span class="orch">◆</span> crew</span>
-      <SwitcherButton />
-      <Show when={s()?.objective}><span class="objective" title={s()!.objective}>{s()!.objective}</span></Show>
-      <span class="spacer" />
-      <Show when={elapsed()}><span class="muted" title="how long the team has been running">{elapsed()}</span></Show>
-      <Show when={store.state.loaded}><span title="tasks done / all">tasks <b>{done()}/{store.state.tasks.length}</b></span></Show>
-      <Show when={s()?.vcs}><span class="vcs" title={s()!.vcs_note || `agents work with ${s()!.vcs}`} classList={{ warn: !!s()!.vcs_note }}>{s()!.vcs}</span></Show>
-      <Show when={s()?.sandbox}><span classList={{ warn: s()!.sandbox !== "required" }}>{s()!.sandbox === "required" ? "sandbox" : "no sandbox"}</span></Show>
-      <nav class="views" aria-label="views">
-        <For each={views}>
-          {([v, label, key]) => (
-            <button classList={{ on: ui.view() === v }} aria-pressed={ui.view() === v} onClick={() => ui.setView(v)} title={key ? `${label} (${key})` : label}>{label}</button>
-          )}
-        </For>
-      </nav>
-      <button onClick={() => ui.openDialog({ kind: "help" })} title="keys and commands (?)" aria-label="keys and commands">?</button>
-      <button class="danger" disabled={!link.live() || app.isPending("shutdown")} onClick={() => ops.stop()} title="stop the team (S)">stop team</button>
-      <span class="conn" data-conn={conn()} role="status" aria-live="polite"><span class="dot">●</span> {connText()}</span>
-    </header>
-  );
+  const counts = createMemo(() => [
+    [store.state.agents.length, "Agents"],
+    [store.state.agents.filter((a) => a.status === "working" && !a.paused).length, "Working"],
+    [`${store.state.tasks.filter((t) => t.status === "done").length}/${store.state.tasks.length}`, "Tasks complete"],
+    [store.openQuestions().length, "Questions"],
+  ].map(([value, label]) => [store.state.loaded ? value : "—", label]));
+  return <section class="workspace-summary" aria-label="workspace summary">
+    <div class="objective-block"><details class="objective"><summary title="Expand objective"><h1>{s()?.objective || s()?.project || "Workspace"}</h1></summary></details>
+      <p class="workspace-meta"><span title={s()?.workspace}>{homeDir(s()?.workspace ?? "")}</span> · {elapsed()} <span class="vcs" title={s()?.vcs_note || `agents work with ${s()?.vcs}`}>{s()?.vcs}</span><Show when={s()?.sandbox}> · {s()?.sandbox === "required" ? "sandbox" : s()?.sandbox === "off" ? "no sandbox" : "sandbox unconfirmed"}</Show></p>
+      <Show when={s()?.summary || s()?.completed_at != null}><details class="completion"><summary>Team completed <Show when={s()?.completed_at != null}>{clockTime(s()!.completed_at!)}</Show></summary><p>{s()?.summary}</p></details></Show>
+    </div>
+    <dl class="summary-counts"><For each={counts()}>{([value, label]) => <div><dd>{value}</dd><dt>{label}</dt></div>}</For></dl>
+  </section>;
+}
+
+function ViewNav() {
+  const { ui, link } = useApp();
+  const ops = useOps();
+  const views = [["graph", "Team", ""], ["tasks", "Tasks", "t"], ["logs", "Events", "l"], ["usage", "Usage", "v"]] as const;
+  return <nav class="views" data-region="status" aria-label="views"><For each={views}>{([v, label, key]) => <button classList={{ on: ui.view() === v }} aria-pressed={ui.view() === v} onClick={() => ui.setView(v)} title={key ? `${label} (${key})` : label}>{label}</button>}</For>
+    <span class="spacer" /><button class="bus-toggle" onClick={() => { ui.setBusOpen(true); ui.select(null); ui.setPanelFull(false); }}>Message bus</button><button disabled={!link.live()} onClick={() => ops.compose()}>Message <kbd aria-hidden="true">m</kbd></button>
+  </nav>;
 }
 
 /** The TUI's banners: no sandbox, a socket in /tmp. Fixed text, never the raw wire value. */

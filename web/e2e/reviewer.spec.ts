@@ -58,7 +58,7 @@ test("a full message ring preserves the visible message when its oldest row leav
   for (let i = 0; i < 1050; i++) mock.push(make(i));
   await expect(page.locator('[data-message="review-1049"]')).toBeAttached();
   const list = page.locator(".bus-list");
-  await list.evaluate((el) => { el.scrollTop = 400 * 22; el.dispatchEvent(new Event("scroll")); });
+  await list.evaluate((el) => { el.scrollTop = 400 * 84; el.dispatchEvent(new Event("scroll")); });
   const firstVisible = () => list.evaluate((el) => {
     const edge = el.getBoundingClientRect().top;
     return [...el.querySelectorAll<HTMLElement>("[data-message]")].find((row) => row.getBoundingClientRect().top >= edge)?.dataset.message;
@@ -90,7 +90,8 @@ test("a rejected prompt keeps the operator's text for retry", async ({ page, moc
   mock.on("agent_input", () => { throw { code: "unavailable", message: "agent unavailable" }; });
   await openPage();
   await page.evaluate(() => { location.hash = "/?agent=claude-2"; });
-  await page.getByRole("toolbar", { name: "actions for claude-2" }).getByRole("button", { name: "prompt", exact: true }).click();
+  await page.getByRole("toolbar", { name: "actions for claude-2" }).getByRole("button", { name: "More", exact: true }).click();
+  await page.getByRole("menu", { name: "actions for claude-2", exact: true }).getByRole("menuitem", { name: "prompt", exact: true }).click();
   const box = page.locator("#compose-text");
   await box.fill("Carefully drafted instructions that were never delivered");
   await box.press("Enter");

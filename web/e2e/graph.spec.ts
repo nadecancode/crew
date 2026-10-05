@@ -97,14 +97,20 @@ test("without an orchestrator agent the empty hub is not a tab stop: tab enters 
   await expect(page.locator(".node.hub.empty")).toHaveCount(1);
   await page.getByRole("button", { name: "keys and commands" }).focus();
   const stops: string[] = [];
-  for (let i = 0; i < 6; i++) {
+  let reachedComposer = false;
+  for (let i = 0; i < 60; i++) {
     await page.keyboard.press("Tab");
     stops.push(await page.evaluate(() => {
       const el = document.activeElement;
       if (!el?.closest(".viewport")) return "outside";
       return el.getAttribute("data-agent") ? `node:${el.getAttribute("data-agent")}:${el.getAttribute("tabindex")}` : `graph:${el.getAttribute("class")}`;
     }));
+    if (await page.locator("#compose-text").evaluate((el) => el === document.activeElement)) {
+      reachedComposer = true;
+      break;
+    }
   }
+  expect(reachedComposer, stops.join(", ")).toBe(true);
   const inGraph = stops.filter((s) => s !== "outside");
   expect(inGraph).toEqual(["node:claude-1:0"]);
 });
@@ -163,7 +169,9 @@ test("a context menu offers the actions of a node", async ({ page, openPage }) =
   await page.locator('[data-agent="claude-4"] .node-head').click({ button: "right" });
   const menu = page.getByRole("menu", { name: "actions for claude-4" });
   await expect(menu).toBeVisible();
-  await expect(menu.getByRole("menuitem")).toHaveText(["message", "pause", "restart", "model and CLI", "compact", "open terminal", "kill…"]);
+  const names = ["message", "prompt", "pause", "restart", "restart fresh…", "model and CLI", "compact", "open terminal", "jump to pane", "kill…"];
+  await expect(menu.getByRole("menuitem")).toHaveCount(names.length);
+  for (const [i, name] of names.entries()) await expect(menu.getByRole("menuitem").nth(i)).toHaveAccessibleName(name);
   await page.keyboard.press("Escape");
   await expect(menu).toHaveCount(0);
 });

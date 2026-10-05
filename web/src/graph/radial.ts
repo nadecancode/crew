@@ -8,13 +8,13 @@ import { ORCHESTRATOR_ID } from "../protocol";
 import { isOrchestrator, satelliteParent } from "../store/order";
 import { center, overlaps, type Box } from "./view";
 
-export const NODE_W = 212;
-export const NODE_H = 80;
-export const HUB_W = 236;
-export const HUB_H = 80;
-export const SAT_W = 180;
-export const SAT_H = 64;
-const GAP = 28;
+export const NODE_W = 244;
+export const NODE_H = 132;
+export const HUB_W = 260;
+export const HUB_H = 132;
+export const SAT_W = 200;
+export const SAT_H = 80;
+const GAP = 36;
 
 type A = { id: string; orchestrator: boolean; parent?: string | null };
 

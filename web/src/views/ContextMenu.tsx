@@ -1,7 +1,7 @@
 // A node's context menu (notes/web-design.md §graphs "Interaction"):
-// message, pause/resume, restart, model, compact, kill.
+// Every agent operation is available from More and the graph's context menu.
 
-import { For, Show, onCleanup, onMount } from "solid-js";
+import { For, Show, createEffect, onCleanup, onMount } from "solid-js";
 import { useApp } from "../app";
 import { useOps } from "./ops";
 
@@ -13,7 +13,7 @@ export function ContextMenu() {
   let el: HTMLDivElement | undefined;
   onMount(() => {
     const close = (e: PointerEvent) => {
-      if (menu() && el && !el.contains(e.target as Node)) ui.setMenu(null);
+      if (menu() && el && !el.contains(e.target as Node)) ui.closeMenu(false);
     };
     document.addEventListener("pointerdown", close, true);
     onCleanup(() => document.removeEventListener("pointerdown", close, true));
@@ -23,44 +23,62 @@ export function ContextMenu() {
     const a = m ? store.agent(m.agent) : undefined;
     if (!a) return [];
     return [
-      ["message", () => ops.compose(a.id)],
-      [a.paused ? "resume" : "pause", () => void actions.togglePause(a)],
-      ["restart", () => void actions.restart(a.id)],
-      ["model and CLI", () => ops.model(a.id)],
-      ["compact", () => void actions.compact(a.id)],
-      ["open terminal", () => ops.open(a.id, "terminal")],
-      ["kill…", () => ui.openDialog({ kind: "confirm", confirm: { kind: "kill", agent: a.id } })],
-    ] as [string, () => void][];
+      ["message", () => ops.compose(a.id), ""],
+      ["prompt", () => ops.prompt(a.id), ""],
+      [a.paused ? "resume" : "pause", () => void actions.togglePause(a), `agent_${a.paused ? "resume" : "pause"}`],
+      ["restart", () => void actions.restart(a.id), "agent_restart"],
+      ["restart fresh…", () => ui.openDialog({ kind: "confirm", confirm: { kind: "restart-fresh", agent: a.id } }), "agent_restart_fresh"],
+      ["model and CLI", () => ops.model(a.id), "agent_set_model"],
+      ["compact", () => void actions.compact(a.id), "agent_compact"],
+      ["open terminal", () => ops.open(a.id, "terminal"), "local"],
+      ...((a.backend ?? store.state.session?.backend) === "herdr" ? [["jump to pane", () => ops.focusPane(a.id), "agent_focus"]] : []),
+      ["kill…", () => ui.openDialog({ kind: "confirm", confirm: { kind: "kill", agent: a.id } }), "agent_kill"],
+    ] as [string, () => void, string][];
   };
+  createEffect(() => {
+    if (!menu()) return;
+    if (!items().length) return ui.closeMenu(false);
+    queueMicrotask(() => {
+      if (menu() && el?.isConnected && !el.contains(document.activeElement)) el.querySelector<HTMLElement>("button:not([disabled])")?.focus();
+    });
+  });
   const onKey = (e: KeyboardEvent) => {
     const buttons = [...(el?.querySelectorAll<HTMLButtonElement>("button:not([disabled])") ?? [])];
     const i = buttons.indexOf(document.activeElement as HTMLButtonElement);
     if (e.key === "Escape") {
       e.preventDefault();
       e.stopPropagation();
-      const id = menu()?.agent;
-      ui.setMenu(null);
-      if (id) document.querySelector<HTMLElement>(`[data-agent="${CSS.escape(id)}"]`)?.focus();
-    } else if (e.key === "ArrowDown" || e.key === "ArrowUp") {
+      ui.closeMenu();
+    } else if (e.key === "Tab") ui.closeMenu();
+    else if (e.key === "ArrowDown" || e.key === "ArrowUp") {
       e.preventDefault();
       buttons[(i + (e.key === "ArrowDown" ? 1 : -1) + buttons.length) % buttons.length]?.focus();
     }
   };
   return (
-    <Show when={menu() && items().length}>
-      <div class="context-menu" role="menu" aria-label={`actions for ${menu()!.agent}`}
-        style={{ left: `${Math.min(menu()!.x, window.innerWidth - 200)}px`, top: `${Math.min(menu()!.y, window.innerHeight - 260)}px` }}
-        onKeyDown={onKey} ref={(e) => ((el = e), queueMicrotask(() => e.querySelector<HTMLElement>("button")?.focus()))}>
+    <Show when={menu()} keyed>
+      {(m) =>
+      <div class="context-menu popover" role="menu" aria-label={`actions for ${menu()!.agent}`}
+        onFocusOut={(e) => e.relatedTarget && !e.currentTarget.contains(e.relatedTarget as Node) && ui.closeMenu(false)}
+        onKeyDown={onKey} ref={(e) => {
+          el = e;
+          queueMicrotask(() => {
+            const r = e.getBoundingClientRect();
+            e.style.left = `${Math.max(8, Math.min(m.x, window.innerWidth - r.width - 8))}px`;
+            e.style.top = `${Math.max(8, Math.min(m.y, window.innerHeight - r.height - 8))}px`;
+            e.querySelector<HTMLElement>("button:not([disabled])")?.focus();
+          });
+        }}>
         <div class="menu-title">{menu()!.agent}</div>
         <For each={items()}>
-          {([label, run]) => (
-            <button role="menuitem" disabled={!link.live() && label !== "open terminal"} onClick={() => {
-              ui.setMenu(null);
+          {([label, run, method]) => (
+            <button role="menuitem" classList={{ danger: method === "agent_kill" }} disabled={method !== "local" && (!link.live() || (!!method && app.isPending(method, m.agent)))} onClick={() => {
+              ui.closeMenu();
               run();
             }}>{label}</button>
           )}
         </For>
-      </div>
+      </div>}
     </Show>
   );
 }

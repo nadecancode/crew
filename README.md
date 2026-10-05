@@ -681,13 +681,14 @@ hold the agent at a prompt only `crew agent attach` could reach.
 
 ## Web dashboard
 
-The same sessions in a browser: the agent graph with its message and VCS
-animations, the bus, the task graph, the event log, usage, the inspector (a
-live terminal included) and every operator action of the TUI except starting
-a team. **One dashboard server per user shows every workspace you join to
-it**, and you switch between them in the page. It runs on the loopback
-addresses only (no other machine, no TLS, no accounts), and works in
-Chromium-based browsers and Firefox. Safari cannot resolve its address.
+The same sessions in a browser, in light or dark: the agent graph with its
+message and VCS animations (or a list of the team), the bus, the task graph
+(or a list), the event log, usage, the inspector (a live terminal included)
+and every operator action of the TUI except starting a team. It fits a phone
+as well as a wide screen. **One dashboard server per user shows every
+workspace you join to it**, and you switch between them in the page. It runs
+on the loopback addresses only (no other machine, no TLS, no accounts), and
+works in Chromium-based browsers and Firefox. Safari cannot resolve its address.
 
 ```sh
 cd ~/work/payments && crew web      # join this workspace, start the server if needed, open the browser
@@ -715,6 +716,33 @@ address at once and keeps its session in that browser's `localStorage` (no
 cookie, no service worker). Another tab of the same address needs no code. To
 sign in another browser, run `crew web` again: it prints the same address with
 a new code. `crew status` shows the `web` line while the workspace is joined.
+
+### The page
+
+- **The header** names the workspace and its objective (click to read it
+  whole), with counts of agents, those working, tasks complete and open
+  questions. Under it are the views: Team, Tasks (`t`), Events (`l`) and
+  Usage (`v`), the message bus and Message (`m`).
+- **Team and Tasks** each show as a Graph or a List. The choice lasts as long
+  as the tab; a window narrower than 640px opens on List. Both keep the
+  selection and keyboard navigation when you switch.
+- **The side panel** holds the message bus (each row shows who wrote to whom,
+  the type and the first two lines of the body) or what you opened: an
+  agent's inspector, a task, an event, a message. Drag its edge (or focus it
+  and use the arrow keys) to resize it; below 768px wide it takes the place of
+  the main area until you close it.
+- **The inspector** leads with what the agent is doing, its problems and its
+  mailbox. Message and pause are buttons; every other action (prompt,
+  restart, restart fresh, model and CLI, compact, jump to pane, open
+  terminal, kill) is in its More menu, which a right-click on the agent or
+  `shift+F10` also opens.
+- **Usage** totals the tokens the runtimes reported and says how many agents
+  reported any; an agent that reported nothing shows "not reported", never
+  zero.
+- **The status bar** has the workspace switcher (`w`), Commands (`ctrl+k`, the
+  command line), Appearance, help (`?`) and stop team (`S`, asks first).
+  Appearance follows the system's light or dark preference unless you choose
+  Light or Dark.
 
 ### Several workspaces
 
@@ -767,11 +795,11 @@ a new code. `crew status` shows the `web` line while the workspace is joined.
   address. A restart of a team is different: the tab goes on (above).
 
 The layout (node positions, log filters) is kept per workspace by its daemon;
-the dashboard's own preferences (keys, panel, the last workspace) by the
-server. The wire is the daemon's own protocol (version 6) over WebSockets
-through the server; `crates/crew/tests/fixtures/web/` has its reference frames.
-A team started by an older crew keeps its own dashboard until it is restarted
-(restart it after upgrading, then run `crew web`).
+the dashboard's own preferences (appearance, keys, panel, the last workspace)
+by the server. The wire is the daemon's own protocol (version 6) over
+WebSockets through the server; `crates/crew/tests/fixtures/web/` has its
+reference frames. A team started by an older crew keeps its own dashboard until
+it is restarted (restart it after upgrading, then run `crew web`).
 
 ### Building the frontend
 
@@ -797,6 +825,74 @@ commit, cherry-pick, merge and ask a question, checked through the page
 switching workspaces, daemons that stop and return, `--remove`, `--restart`,
 what stays outside, a killed server and a squatter on its port, the
 performance budgets).
+
+For the frontend development loop, start the mock and Vite in separate
+terminals:
+
+```sh
+cd web && bun install
+bun run mock --fixture subagents --scenario busy  # terminal 1
+bun run dev                                     # terminal 2
+```
+
+Open the development pairing address printed by the mock. Each code works
+once for two minutes; Enter prints fresh codes. Without `--scenario`, the
+existing fixture and two-workspace development setup are unchanged.
+Scenarios layer protocol-v6 data over `--fixture`; generated Rust fixtures
+are never rewritten:
+
+| Scenario | Content |
+| --- | --- |
+| `baseline` | The generated fixture as it is |
+| `busy` | Every task status, mixed runtimes, dependencies, replies, artifacts, reported/zero/missing usage, and fresh/stale quotas |
+| `attention` | Two operator questions, warnings, blocked/failed agents, and paused usage limits |
+| `empty` | An unloaded team with no agents, tasks, messages, events, or quota reports |
+| `long-text` | Long objectives, titles, evidence, and Unicode text |
+| `limits` | Fallback, reset/retry times, context pressure, and queued compaction |
+| `disconnected` | Cached evidence ready for the `disconnect` control |
+| `multi` | Running, stopped, incompatible, unreachable, and unjoined workspaces |
+
+Scenario clocks are fixed and activity is off. Type `step` in the mock's
+terminal for one controller update; `--activity` opts into timed updates.
+Type `disconnect`, `stop`, `remove`, or `shutdown` to exercise availability.
+`--reads pending|error|empty|unavailable|truncated|ready` sets panel RPC
+responses; typing `ready` releases held reads and restores fixture handlers.
+Browser tests use the same `startMock({ scenario, fixture })`,
+`advanceScenario`, and `setPanelRead` controller helpers.
+
+Capture the built application, including its production CSP, with:
+
+```sh
+bun run build
+PLAYWRIGHT_EXECUTABLE_PATH=/path/to/chromium bun run gallery --out /tmp/crew-gallery
+```
+
+The output directory must be outside the repository. `index.html` shows
+real component screenshots with routes, fixture/scenario names, dimensions,
+and reproduction commands; `manifest.json` records contrast, control names,
+focus, document overflow, runtime errors, CSP violations, and requests after
+load. Gallery files contain no pairing codes, tokens, browser storage, or
+real workspace content, and never enter `web-dist`. Capture errors produce
+a nonzero exit. `--strict` also fails on active text contrast below its WCAG
+threshold, unnamed controls, or document overflow. Disabled text is exempt.
+Every viewport, 390px wide and 200% zoom included, fits without horizontal
+document overflow; there is no exception. Non-dialog surfaces fail if a
+question or other dialog covers them.
+
+Use `--scenario baseline --surface team,tasks,events,usage --theme light,dark
+--viewport desktop,narrow` for a short pass. The full matrix includes
+1440×960, 1024×768, 390×844, and a 200% desktop equivalent: 720×480 CSS pixels
+at device scale 2. Reduced motion and fixed browser time keep captures
+repeatable. Inspect screenshots and keyboard behavior manually; the solid
+color contrast collector includes SVG node backgrounds but does not evaluate
+canvas text, gradients, overlap,
+control boundaries, or screen-reader announcements. The browser tests cover
+Tab reachability, modal containment, focus return, inert evidence, and panel
+RPC states. Give every Playwright run its own output directory:
+
+```sh
+PLAYWRIGHT_EXECUTABLE_PATH=/path/to/chromium bunx playwright test --project=mock --output /tmp/crew-web-mock
+```
 
 ## Dashboard controls
 
