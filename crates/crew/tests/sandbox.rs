@@ -922,7 +922,10 @@ fn a_sandboxed_agent_runs_the_daemons_copy_of_crew_whatever_becomes_of_its_file(
     let copy = s.crew_copy();
     assert!(copy.starts_with("/tmp"), "{}", copy.display());
     // The agent's process on the host is `crew sandbox-run`, from the copy.
-    let pid = find_agent(&s.snapshot(), "a").pid.unwrap();
+    let snap = s.wait("a to have a pid", |snap| {
+        find_agent(snap, "a").pid.is_some()
+    });
+    let pid = find_agent(&snap, "a").pid.unwrap();
     assert!(common::runs(pid, &copy));
 
     // Replaced, as a build does.
