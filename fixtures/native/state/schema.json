@@ -1,0 +1,270 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Crew native client state conformance fixture",
+  "description": "Fixture vocabulary only, not a shared client API. Current Rust DTO deserialization validates the embedded wire objects.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "protocol",
+    "source_revision",
+    "id",
+    "description",
+    "provenance",
+    "steps"
+  ],
+  "properties": {
+    "schema_version": {
+      "const": 1
+    },
+    "protocol": {
+      "const": 6
+    },
+    "source_revision": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{40}$"
+    },
+    "id": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9-]*$"
+    },
+    "description": {
+      "type": "string",
+      "minLength": 1
+    },
+    "provenance": {
+      "type": "array",
+      "minItems": 1,
+      "uniqueItems": true,
+      "items": {
+        "type": "string",
+        "minLength": 1
+      }
+    },
+    "steps": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "$ref": "#/$defs/step"
+      }
+    }
+  },
+  "$defs": {
+    "expectation": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "agent_ids": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "uniqueItems": true
+        },
+        "task_ids": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "uniqueItems": true
+        },
+        "agents": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "object"
+          }
+        },
+        "tasks": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "object"
+          }
+        },
+        "work": {
+          "type": "object",
+          "additionalProperties": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "task_id",
+                  "done",
+                  "elapsed_ms"
+                ],
+                "properties": {
+                  "task_id": {
+                    "type": "string"
+                  },
+                  "done": {
+                    "type": "boolean"
+                  },
+                  "elapsed_ms": {
+                    "type": [
+                      "integer",
+                      "null"
+                    ],
+                    "minimum": 0
+                  }
+                }
+              }
+            ]
+          }
+        },
+        "message_ids": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "uniqueItems": true
+        },
+        "messages": {
+          "type": "array",
+          "items": {
+            "type": "object"
+          }
+        },
+        "event_seqs": {
+          "type": "array",
+          "items": {
+            "type": "integer"
+          }
+        },
+        "events": {
+          "type": "array",
+          "items": {
+            "type": "object"
+          }
+        },
+        "question_ids": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "uniqueItems": true
+        },
+        "clock_offset_ms": {
+          "type": "integer"
+        },
+        "selection_validity": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "kind",
+              "id",
+              "exists"
+            ],
+            "properties": {
+              "kind": {
+                "enum": [
+                  "agent",
+                  "task"
+                ]
+              },
+              "id": {
+                "type": "string"
+              },
+              "exists": {
+                "type": "boolean"
+              }
+            }
+          }
+        }
+      }
+    },
+    "step": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "at_ms",
+        "reason",
+        "expect"
+      ],
+      "oneOf": [
+        {
+          "required": [
+            "snapshot"
+          ]
+        },
+        {
+          "required": [
+            "frame"
+          ]
+        }
+      ],
+      "properties": {
+        "at_ms": {
+          "type": "integer",
+          "minimum": -9007199254740991,
+          "maximum": 9007199254740991
+        },
+        "reason": {
+          "type": "string",
+          "minLength": 1
+        },
+        "snapshot": {
+          "type": "object",
+          "description": "Exact snapshot RPC result; deserialize as crew_core::rpc::Snapshot. No fixture patches or inheritance."
+        },
+        "frame": {
+          "type": "object",
+          "description": "Exact push envelope; deserialize as crew_core::rpc::ServerFrame.",
+          "additionalProperties": false,
+          "required": [
+            "push"
+          ],
+          "properties": {
+            "push": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "kind",
+                "data"
+              ],
+              "properties": {
+                "kind": {
+                  "enum": [
+                    "agent",
+                    "agent_removed",
+                    "task",
+                    "message",
+                    "event",
+                    "session"
+                  ]
+                },
+                "data": {
+                  "type": "object"
+                }
+              }
+            }
+          }
+        },
+        "expect": {
+          "$ref": "#/$defs/expectation"
+        },
+        "client_expect": {
+          "type": "object",
+          "description": "Observed legacy client differences only; shared policy remains undecided.",
+          "additionalProperties": false,
+          "required": [
+            "web",
+            "tui"
+          ],
+          "properties": {
+            "web": {
+              "$ref": "#/$defs/expectation"
+            },
+            "tui": {
+              "$ref": "#/$defs/expectation"
+            }
+          }
+        }
+      }
+    }
+  }
+}

@@ -1,0 +1,365 @@
+{
+  "schema_version": 1,
+  "protocol": 6,
+  "source_revision": "6049cdf63e36e303327235834f23a798aa5a82c1",
+  "id": "parked-resumption",
+  "description": "Independent execution, review, and older-card resumption preserve every parked card and its identity.",
+  "provenance": [
+    "crates/crew-core/src/types.rs",
+    "crates/crew-core/src/rpc.rs",
+    "crates/crew/tests/fixtures/web/snapshot.json",
+    "web/dev/scenarios.ts:seedParked/advanceParked",
+    "web/e2e/parked-work.spec.ts",
+    "review/runtime-delivery.md"
+  ],
+  "steps": [
+    {
+      "at_ms": 1760000000000,
+      "snapshot": {
+        "session": {
+          "workspace": "/work/demo",
+          "state_dir": "/work/demo/.crew",
+          "daemon_started_at": 1759999240000,
+          "daemon_pid": 4000,
+          "version": "0.1.0"
+        },
+        "agents": [
+          {
+            "id": "claude-1",
+            "name": "claude-1",
+            "role": "billing",
+            "status": "working",
+            "runtime": "claude",
+            "workdir": "/work/demo/.crew/worktrees/claude-1",
+            "backend": "herdr",
+            "last_activity_at": 1759999998000,
+            "task": "Prepare independent storage design",
+            "progress": 37,
+            "activity": "Preparing the independent storage design"
+          }
+        ],
+        "tasks": [
+          {
+            "id": "parked-old",
+            "title": "Plan parked API contract",
+            "status": "waiting",
+            "assigned_agent": "claude-1",
+            "created_at": 1759999987000,
+            "description": "Keep the pending card inspectable while independent architecture work continues.",
+            "reviewer": "orchestrator",
+            "started_at": 1759999997000,
+            "progress": 19,
+            "note": "Waiting for teammate feedback.",
+            "artifacts": [
+              {
+                "kind": "note",
+                "value": "Retained API draft",
+                "created_at": 1759999997500
+              }
+            ]
+          },
+          {
+            "id": "current",
+            "title": "Prepare independent storage design",
+            "status": "working",
+            "assigned_agent": "claude-1",
+            "created_at": 1759999988000,
+            "description": "Keep the pending card inspectable while independent architecture work continues.",
+            "reviewer": "orchestrator",
+            "started_at": 1759999998000,
+            "progress": 37
+          },
+          {
+            "id": "parked-new",
+            "title": "Plan parked migration",
+            "status": "waiting",
+            "assigned_agent": "claude-1",
+            "created_at": 1759999989000,
+            "description": "Keep the pending card inspectable while independent architecture work continues.",
+            "reviewer": "orchestrator",
+            "started_at": 1759999999000,
+            "progress": 66,
+            "note": "Waiting for teammate feedback."
+          }
+        ],
+        "messages": [],
+        "events": [],
+        "questions": [],
+        "server_time": 1760000000000
+      },
+      "reason": "Independent work stays current while both Waiting cards remain inspectable.",
+      "expect": {
+        "work": {
+          "claude-1": {
+            "task_id": "current",
+            "done": false,
+            "elapsed_ms": 2000
+          }
+        },
+        "task_ids": [
+          "parked-old",
+          "current",
+          "parked-new"
+        ],
+        "tasks": {
+          "parked-old": {
+            "status": "waiting",
+            "progress": 19
+          },
+          "parked-new": {
+            "status": "waiting",
+            "progress": 66
+          }
+        },
+        "selection_validity": [
+          {
+            "kind": "task",
+            "id": "parked-old",
+            "exists": true
+          },
+          {
+            "kind": "task",
+            "id": "parked-new",
+            "exists": true
+          }
+        ]
+      }
+    },
+    {
+      "at_ms": 1760000000100,
+      "frame": {
+        "push": {
+          "kind": "task",
+          "data": {
+            "id": "current",
+            "title": "Prepare independent storage design",
+            "status": "review",
+            "assigned_agent": "claude-1",
+            "created_at": 1759999988000,
+            "description": "Keep the pending card inspectable while independent architecture work continues.",
+            "reviewer": "orchestrator",
+            "started_at": 1759999998000,
+            "progress": 100,
+            "result": "Independent storage design submitted for review."
+          }
+        }
+      },
+      "reason": "Submitting execution for review exposes the most recently started Waiting card; a later Review card does not hide parked work.",
+      "expect": {
+        "work": {
+          "claude-1": {
+            "task_id": "parked-new",
+            "done": false,
+            "elapsed_ms": 1100
+          }
+        },
+        "task_ids": [
+          "parked-old",
+          "current",
+          "parked-new"
+        ],
+        "tasks": {
+          "current": {
+            "status": "review"
+          }
+        }
+      }
+    },
+    {
+      "at_ms": 1760000000100,
+      "frame": {
+        "push": {
+          "kind": "agent",
+          "data": {
+            "id": "claude-1",
+            "name": "claude-1",
+            "role": "billing",
+            "status": "waiting",
+            "runtime": "claude",
+            "workdir": "/work/demo/.crew/worktrees/claude-1",
+            "backend": "herdr",
+            "last_activity_at": 1759999998000,
+            "task": "Plan parked migration",
+            "progress": 66,
+            "activity": "Waiting for feedback on parked architecture work"
+          }
+        }
+      },
+      "reason": "The agent update agrees with the parked fallback without changing task identity or board membership.",
+      "expect": {
+        "work": {
+          "claude-1": {
+            "task_id": "parked-new",
+            "done": false,
+            "elapsed_ms": 1100
+          }
+        },
+        "agents": {
+          "claude-1": {
+            "status": "waiting",
+            "task": "Plan parked migration"
+          }
+        }
+      }
+    },
+    {
+      "at_ms": 1760000000200,
+      "frame": {
+        "push": {
+          "kind": "task",
+          "data": {
+            "id": "current",
+            "title": "Prepare independent storage design",
+            "status": "done",
+            "assigned_agent": "claude-1",
+            "created_at": 1759999988000,
+            "description": "Keep the pending card inspectable while independent architecture work continues.",
+            "reviewer": "orchestrator",
+            "started_at": 1759999998000,
+            "progress": 100,
+            "result": "Independent storage design submitted for review.",
+            "completed_at": 1760000000200
+          }
+        }
+      },
+      "reason": "Completing the independent card leaves both Waiting cards in their original positions.",
+      "expect": {
+        "work": {
+          "claude-1": {
+            "task_id": "parked-new",
+            "done": false,
+            "elapsed_ms": 1200
+          }
+        },
+        "task_ids": [
+          "parked-old",
+          "current",
+          "parked-new"
+        ],
+        "tasks": {
+          "current": {
+            "status": "done",
+            "completed_at": 1760000000200
+          }
+        }
+      }
+    },
+    {
+      "at_ms": 1760000000200,
+      "frame": {
+        "push": {
+          "kind": "task",
+          "data": {
+            "id": "parked-old",
+            "title": "Plan parked API contract",
+            "status": "working",
+            "assigned_agent": "claude-1",
+            "created_at": 1759999987000,
+            "description": "Keep the pending card inspectable while independent architecture work continues.",
+            "reviewer": "orchestrator",
+            "started_at": 1759999997000,
+            "progress": 19,
+            "note": "Feedback received; continuing the original API contract.",
+            "artifacts": [
+              {
+                "kind": "note",
+                "value": "Retained API draft",
+                "created_at": 1759999997500
+              }
+            ]
+          }
+        }
+      },
+      "reason": "Resuming the older card makes it current ahead of a newer Waiting card while retaining its original start, progress, and artifact.",
+      "expect": {
+        "work": {
+          "claude-1": {
+            "task_id": "parked-old",
+            "done": false,
+            "elapsed_ms": 3200
+          }
+        },
+        "task_ids": [
+          "parked-old",
+          "current",
+          "parked-new"
+        ],
+        "tasks": {
+          "parked-old": {
+            "title": "Plan parked API contract",
+            "status": "working",
+            "assigned_agent": "claude-1",
+            "created_at": 1759999987000,
+            "started_at": 1759999997000,
+            "progress": 19,
+            "note": "Feedback received; continuing the original API contract.",
+            "artifacts": [
+              {
+                "kind": "note",
+                "value": "Retained API draft",
+                "created_at": 1759999997500
+              }
+            ]
+          },
+          "parked-new": {
+            "status": "waiting",
+            "started_at": 1759999999000,
+            "progress": 66
+          }
+        },
+        "selection_validity": [
+          {
+            "kind": "task",
+            "id": "parked-new",
+            "exists": true
+          }
+        ]
+      }
+    },
+    {
+      "at_ms": 1760000000200,
+      "frame": {
+        "push": {
+          "kind": "agent",
+          "data": {
+            "id": "claude-1",
+            "name": "claude-1",
+            "role": "billing",
+            "status": "working",
+            "runtime": "claude",
+            "workdir": "/work/demo/.crew/worktrees/claude-1",
+            "backend": "herdr",
+            "last_activity_at": 1760000000200,
+            "task": "Plan parked API contract",
+            "progress": 19,
+            "activity": "Continuing the earlier API contract"
+          }
+        }
+      },
+      "reason": "The displayed task title follows the resumed original card; inspecting another parked card remains valid.",
+      "expect": {
+        "work": {
+          "claude-1": {
+            "task_id": "parked-old",
+            "done": false,
+            "elapsed_ms": 3200
+          }
+        },
+        "agents": {
+          "claude-1": {
+            "status": "working",
+            "task": "Plan parked API contract",
+            "progress": 19
+          }
+        },
+        "selection_validity": [
+          {
+            "kind": "task",
+            "id": "parked-new",
+            "exists": true
+          }
+        ]
+      }
+    }
+  ]
+}

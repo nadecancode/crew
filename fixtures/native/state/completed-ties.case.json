@@ -1,0 +1,170 @@
+{
+  "schema_version": 1,
+  "protocol": 6,
+  "source_revision": "6049cdf63e36e303327235834f23a798aa5a82c1",
+  "id": "completed-ties",
+  "description": "Document existing web/TUI differences in completed-card ties without choosing a future shared policy.",
+  "provenance": [
+    "crates/crew-core/src/types.rs",
+    "crates/crew-core/src/rpc.rs",
+    "crates/crew/tests/fixtures/web/snapshot.json",
+    "web/src/format.ts:workOf",
+    "crates/crew-tui/src/app.rs:App::work_of"
+  ],
+  "steps": [
+    {
+      "at_ms": 1100,
+      "snapshot": {
+        "session": {
+          "workspace": "/work/demo",
+          "state_dir": "/work/demo/.crew",
+          "daemon_started_at": 1759999240000,
+          "daemon_pid": 4000,
+          "version": "0.1.0"
+        },
+        "agents": [
+          {
+            "id": "claude-1",
+            "name": "claude-1",
+            "role": "billing",
+            "status": "working",
+            "runtime": "claude",
+            "workdir": "/work/demo/.crew/worktrees/claude-1",
+            "backend": "herdr",
+            "last_activity_at": 1759999998000
+          }
+        ],
+        "tasks": [
+          {
+            "id": "done-first",
+            "title": "done-first",
+            "status": "done",
+            "assigned_agent": "claude-1",
+            "created_at": 0,
+            "started_at": 100,
+            "completed_at": 1000
+          },
+          {
+            "id": "done-second",
+            "title": "done-second",
+            "status": "done",
+            "assigned_agent": "claude-1",
+            "created_at": 0,
+            "started_at": 200,
+            "completed_at": 1000
+          }
+        ],
+        "messages": [],
+        "events": [],
+        "questions": [],
+        "server_time": 1100
+      },
+      "reason": "Equal known completion times currently pick the first web card and the last TUI card; shared-core convergence needs an explicit reviewed decision.",
+      "expect": {
+        "task_ids": [
+          "done-first",
+          "done-second"
+        ]
+      },
+      "client_expect": {
+        "web": {
+          "work": {
+            "claude-1": {
+              "task_id": "done-first",
+              "done": true,
+              "elapsed_ms": 100
+            }
+          }
+        },
+        "tui": {
+          "work": {
+            "claude-1": {
+              "task_id": "done-second",
+              "done": true,
+              "elapsed_ms": 100
+            }
+          }
+        }
+      }
+    },
+    {
+      "at_ms": 1100,
+      "snapshot": {
+        "session": {
+          "workspace": "/work/demo",
+          "state_dir": "/work/demo/.crew",
+          "daemon_started_at": 1759999240000,
+          "daemon_pid": 4000,
+          "version": "0.1.0"
+        },
+        "agents": [
+          {
+            "id": "claude-1",
+            "name": "claude-1",
+            "role": "billing",
+            "status": "working",
+            "runtime": "claude",
+            "workdir": "/work/demo/.crew/worktrees/claude-1",
+            "backend": "herdr",
+            "last_activity_at": 1759999998000
+          }
+        ],
+        "tasks": [
+          {
+            "id": "done-first",
+            "title": "done-first",
+            "status": "done",
+            "assigned_agent": "claude-1",
+            "created_at": 0,
+            "started_at": 100,
+            "completed_at": null
+          },
+          {
+            "id": "done-second",
+            "title": "done-second",
+            "status": "done",
+            "assigned_agent": "claude-1",
+            "created_at": 0,
+            "started_at": 200,
+            "completed_at": 0
+          }
+        ],
+        "messages": [],
+        "events": [],
+        "questions": [],
+        "server_time": 1100
+      },
+      "reason": "A null completion followed by zero currently ties on the web but is ordered as unknown before known in the TUI. Neither expectation treats null as a measured timestamp.",
+      "expect": {
+        "tasks": {
+          "done-first": {
+            "completed_at": null
+          },
+          "done-second": {
+            "completed_at": 0
+          }
+        }
+      },
+      "client_expect": {
+        "web": {
+          "work": {
+            "claude-1": {
+              "task_id": "done-first",
+              "done": true,
+              "elapsed_ms": null
+            }
+          }
+        },
+        "tui": {
+          "work": {
+            "claude-1": {
+              "task_id": "done-second",
+              "done": true,
+              "elapsed_ms": 1100
+            }
+          }
+        }
+      }
+    }
+  ]
+}

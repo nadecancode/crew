@@ -1,0 +1,498 @@
+{
+  "schema_version": 1,
+  "protocol": 6,
+  "source_revision": "6049cdf63e36e303327235834f23a798aa5a82c1",
+  "id": "snapshot-replacement",
+  "description": "Snapshots replace collections; entity removal invalidates a selected reference without deleting task history, and replayed pushes do not duplicate history.",
+  "provenance": [
+    "crates/crew-core/src/types.rs",
+    "crates/crew-core/src/rpc.rs",
+    "crates/crew/tests/fixtures/web/snapshot.json",
+    "crates/crew/tests/fixtures/web/pushes.jsonl",
+    "web/test/store.test.ts",
+    "crates/crew-tui/src/app.rs:apply_snapshot/apply_push/remove_agent"
+  ],
+  "steps": [
+    {
+      "at_ms": 1759999999750,
+      "snapshot": {
+        "session": {
+          "workspace": "/work/demo",
+          "state_dir": "/work/demo/.crew",
+          "daemon_started_at": 1759999240000,
+          "daemon_pid": 4000,
+          "version": "0.1.0"
+        },
+        "agents": [
+          {
+            "id": "claude-1",
+            "name": "claude-1",
+            "role": "billing",
+            "status": "working",
+            "runtime": "claude",
+            "workdir": "/work/demo/.crew/worktrees/claude-1",
+            "backend": "herdr",
+            "last_activity_at": 1759999998000
+          },
+          {
+            "id": "claude-2",
+            "name": "claude-2",
+            "role": "billing",
+            "status": "working",
+            "runtime": "claude",
+            "workdir": "/work/demo/.crew/worktrees/claude-1",
+            "backend": "herdr",
+            "last_activity_at": 1759999998000
+          }
+        ],
+        "tasks": [
+          {
+            "id": "before",
+            "title": "before",
+            "status": "working",
+            "assigned_agent": "claude-1",
+            "created_at": 0,
+            "started_at": 1759999999700
+          },
+          {
+            "id": "removed-owner-history",
+            "title": "removed-owner-history",
+            "status": "done",
+            "assigned_agent": "claude-2",
+            "created_at": 0,
+            "completed_at": 1759999999000
+          }
+        ],
+        "messages": [
+          {
+            "id": "m-0001",
+            "from": "claude-3",
+            "to": "claude-5",
+            "type": "question",
+            "body": "your trait bound broke Transaction::commit(), can you relax it?",
+            "timestamp": 1759999980006,
+            "correlation_id": null,
+            "reply_to": null,
+            "metadata": null
+          },
+          {
+            "body": "The legacy export writes amounts as integer cents; the new ledger API wants decimal strings. Converting in the adapter keeps every downstream report working but hides the mismatch; changing the export is cleaner and breaks the two finance dashboards until they are updated. Which do you want?",
+            "correlation_id": null,
+            "from": "orchestrator",
+            "id": "m-9001",
+            "metadata": {
+              "asked_by": "claude-2",
+              "options": [
+                "Convert in the adapter",
+                "Change the export and update the dashboards"
+              ]
+            },
+            "reply_to": null,
+            "timestamp": 1759999816200,
+            "to": "operator",
+            "type": "question"
+          }
+        ],
+        "events": [
+          {
+            "seq": 6,
+            "timestamp": 1759999981500,
+            "source": "daemon",
+            "event_type": "agent.status",
+            "agent_id": "claude-1",
+            "task_id": null,
+            "message": "claude-1 is working",
+            "level": "info",
+            "data": null
+          }
+        ],
+        "questions": [
+          {
+            "body": "The legacy export writes amounts as integer cents; the new ledger API wants decimal strings. Converting in the adapter keeps every downstream report working but hides the mismatch; changing the export is cleaner and breaks the two finance dashboards until they are updated. Which do you want?",
+            "correlation_id": null,
+            "from": "orchestrator",
+            "id": "m-9001",
+            "metadata": {
+              "asked_by": "claude-2",
+              "options": [
+                "Convert in the adapter",
+                "Change the export and update the dashboards"
+              ]
+            },
+            "reply_to": null,
+            "timestamp": 1759999816200,
+            "to": "operator",
+            "type": "question"
+          }
+        ],
+        "server_time": 1760000000000
+      },
+      "reason": "The first snapshot establishes complete collections and the daemon clock offset.",
+      "expect": {
+        "agent_ids": [
+          "claude-1",
+          "claude-2"
+        ],
+        "task_ids": [
+          "before",
+          "removed-owner-history"
+        ],
+        "message_ids": [
+          "m-0001",
+          "m-9001"
+        ],
+        "event_seqs": [
+          6
+        ],
+        "question_ids": [
+          "m-9001"
+        ],
+        "clock_offset_ms": 250,
+        "work": {
+          "claude-1": {
+            "task_id": "before",
+            "done": false,
+            "elapsed_ms": 300
+          }
+        },
+        "selection_validity": [
+          {
+            "kind": "agent",
+            "id": "claude-2",
+            "exists": true
+          },
+          {
+            "kind": "task",
+            "id": "before",
+            "exists": true
+          }
+        ]
+      }
+    },
+    {
+      "at_ms": 1759999999800,
+      "frame": {
+        "push": {
+          "kind": "agent_removed",
+          "data": {
+            "id": "claude-2"
+          }
+        }
+      },
+      "reason": "Removing the selected agent invalidates that reference while its historical task remains inspectable.",
+      "expect": {
+        "agent_ids": [
+          "claude-1"
+        ],
+        "task_ids": [
+          "before",
+          "removed-owner-history"
+        ],
+        "selection_validity": [
+          {
+            "kind": "agent",
+            "id": "claude-2",
+            "exists": false
+          },
+          {
+            "kind": "task",
+            "id": "removed-owner-history",
+            "exists": true
+          }
+        ]
+      }
+    },
+    {
+      "at_ms": 1759999999850,
+      "frame": {
+        "push": {
+          "kind": "event",
+          "data": {
+            "seq": 6,
+            "timestamp": 1759999981500,
+            "source": "daemon",
+            "event_type": "agent.status",
+            "agent_id": "claude-1",
+            "task_id": null,
+            "message": "Replayed sequence must not replace the original event",
+            "level": "info",
+            "data": null
+          }
+        }
+      },
+      "reason": "A duplicate event sequence keeps the original record.",
+      "expect": {
+        "event_seqs": [
+          6
+        ],
+        "events": [
+          {
+            "seq": 6,
+            "message": "claude-1 is working"
+          }
+        ]
+      }
+    },
+    {
+      "at_ms": 1759999999900,
+      "frame": {
+        "push": {
+          "kind": "event",
+          "data": {
+            "seq": 5,
+            "timestamp": 1759999981500,
+            "source": "daemon",
+            "event_type": "agent.status",
+            "agent_id": "claude-1",
+            "task_id": null,
+            "message": "Older replay must be ignored",
+            "level": "info",
+            "data": null
+          }
+        }
+      },
+      "reason": "An older event push does not re-enter loaded history.",
+      "expect": {
+        "event_seqs": [
+          6
+        ]
+      }
+    },
+    {
+      "at_ms": 1759999999950,
+      "frame": {
+        "push": {
+          "kind": "event",
+          "data": {
+            "seq": 7,
+            "timestamp": 1760000000000,
+            "source": "daemon",
+            "event_type": "agent.status",
+            "agent_id": "claude-1",
+            "task_id": null,
+            "message": "New event after snapshot",
+            "level": "info",
+            "data": null
+          }
+        }
+      },
+      "reason": "A newer event appends once in arrival order.",
+      "expect": {
+        "event_seqs": [
+          6,
+          7
+        ]
+      }
+    },
+    {
+      "at_ms": 1760000000000,
+      "frame": {
+        "push": {
+          "kind": "message",
+          "data": {
+            "body": "Replayed message must not replace the original question",
+            "correlation_id": null,
+            "from": "orchestrator",
+            "id": "m-9001",
+            "metadata": {
+              "asked_by": "claude-2",
+              "options": [
+                "Convert in the adapter",
+                "Change the export and update the dashboards"
+              ]
+            },
+            "reply_to": null,
+            "timestamp": 1759999816200,
+            "to": "operator",
+            "type": "question"
+          }
+        }
+      },
+      "reason": "A recently seen message ID is deduplicated and retains the original question body.",
+      "expect": {
+        "message_ids": [
+          "m-0001",
+          "m-9001"
+        ],
+        "messages": [
+          {
+            "id": "m-0001"
+          },
+          {
+            "id": "m-9001",
+            "body": "The legacy export writes amounts as integer cents; the new ledger API wants decimal strings. Converting in the adapter keeps every downstream report working but hides the mismatch; changing the export is cleaner and breaks the two finance dashboards until they are updated. Which do you want?"
+          }
+        ],
+        "question_ids": [
+          "m-9001"
+        ]
+      }
+    },
+    {
+      "at_ms": 1760000000100,
+      "snapshot": {
+        "session": {
+          "workspace": "/work/demo",
+          "state_dir": "/work/demo/.crew",
+          "daemon_started_at": 1759999240000,
+          "daemon_pid": 4000,
+          "version": "0.1.0"
+        },
+        "agents": [
+          {
+            "id": "claude-1",
+            "name": "claude-1",
+            "role": "billing",
+            "status": "working",
+            "runtime": "claude",
+            "workdir": "/work/demo/.crew/worktrees/claude-1",
+            "backend": "herdr",
+            "last_activity_at": 1759999998000
+          }
+        ],
+        "tasks": [
+          {
+            "id": "after",
+            "title": "after",
+            "status": "working",
+            "assigned_agent": "claude-1",
+            "created_at": 0,
+            "started_at": 1760000000200
+          }
+        ],
+        "messages": [
+          {
+            "id": "m-0002",
+            "from": "orchestrator",
+            "to": "claude-4",
+            "type": "task",
+            "body": "pin tokio 1.41 across the workspace",
+            "timestamp": 1759999980177,
+            "correlation_id": null,
+            "reply_to": null,
+            "metadata": null
+          }
+        ],
+        "events": [
+          {
+            "seq": 20,
+            "timestamp": 1760000000400,
+            "source": "daemon",
+            "event_type": "agent.status",
+            "agent_id": "claude-1",
+            "task_id": null,
+            "message": "Authoritative replacement history",
+            "level": "info",
+            "data": null
+          }
+        ],
+        "questions": [],
+        "server_time": 1760000000400
+      },
+      "reason": "An authoritative replacement removes absent tasks/messages/events/questions, invalidates the absent selected task, and refreshes clock offset.",
+      "expect": {
+        "agent_ids": [
+          "claude-1"
+        ],
+        "task_ids": [
+          "after"
+        ],
+        "message_ids": [
+          "m-0002"
+        ],
+        "event_seqs": [
+          20
+        ],
+        "question_ids": [],
+        "clock_offset_ms": 300,
+        "work": {
+          "claude-1": {
+            "task_id": "after",
+            "done": false,
+            "elapsed_ms": 200
+          }
+        },
+        "selection_validity": [
+          {
+            "kind": "task",
+            "id": "before",
+            "exists": false
+          },
+          {
+            "kind": "agent",
+            "id": "claude-2",
+            "exists": false
+          },
+          {
+            "kind": "task",
+            "id": "after",
+            "exists": true
+          }
+        ]
+      }
+    },
+    {
+      "at_ms": 1760000000150,
+      "frame": {
+        "push": {
+          "kind": "event",
+          "data": {
+            "seq": 0,
+            "timestamp": 1760000000450,
+            "source": "daemon",
+            "event_type": "agent.status",
+            "agent_id": "claude-1",
+            "task_id": null,
+            "message": "Unsequenced diagnostic event",
+            "level": "info",
+            "data": null
+          }
+        }
+      },
+      "reason": "Sequence zero is an unsequenced diagnostic record and may append to loaded history.",
+      "expect": {
+        "event_seqs": [
+          20,
+          0
+        ]
+      }
+    },
+    {
+      "at_ms": 1760000000200,
+      "frame": {
+        "push": {
+          "kind": "agent_removed",
+          "data": {
+            "id": "claude-1"
+          }
+        }
+      },
+      "reason": "A later removal invalidates the remaining selected agent while the task board and histories remain intact.",
+      "expect": {
+        "agent_ids": [],
+        "task_ids": [
+          "after"
+        ],
+        "message_ids": [
+          "m-0002"
+        ],
+        "event_seqs": [
+          20,
+          0
+        ],
+        "selection_validity": [
+          {
+            "kind": "agent",
+            "id": "claude-1",
+            "exists": false
+          },
+          {
+            "kind": "task",
+            "id": "after",
+            "exists": true
+          }
+        ]
+      }
+    }
+  ]
+}

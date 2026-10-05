@@ -1,0 +1,400 @@
+{
+  "schema_version": 1,
+  "protocol": 6,
+  "source_revision": "6049cdf63e36e303327235834f23a798aa5a82c1",
+  "id": "work-choice",
+  "description": "Executing and started Blocked work take precedence; parked ties retain board order and unstarted queued work stays out of current work.",
+  "provenance": [
+    "crates/crew-core/src/types.rs",
+    "crates/crew-core/src/rpc.rs",
+    "crates/crew/tests/fixtures/web/snapshot.json",
+    "web/test/work.test.ts",
+    "web/src/format.ts:workOf",
+    "crates/crew-tui/src/app.rs:App::work_of"
+  ],
+  "steps": [
+    {
+      "at_ms": 1000,
+      "snapshot": {
+        "session": {
+          "workspace": "/work/demo",
+          "state_dir": "/work/demo/.crew",
+          "daemon_started_at": 1759999240000,
+          "daemon_pid": 4000,
+          "version": "0.1.0"
+        },
+        "agents": [
+          {
+            "id": "claude-1",
+            "name": "claude-1",
+            "role": "billing",
+            "status": "blocked",
+            "runtime": "claude",
+            "workdir": "/work/demo/.crew/worktrees/claude-1",
+            "backend": "herdr",
+            "last_activity_at": 1759999998000
+          },
+          {
+            "id": "claude-2",
+            "name": "claude-2",
+            "role": "billing",
+            "status": "working",
+            "runtime": "claude",
+            "workdir": "/work/demo/.crew/worktrees/claude-1",
+            "backend": "herdr",
+            "last_activity_at": 1759999998000
+          }
+        ],
+        "tasks": [
+          {
+            "id": "started-blocked",
+            "title": "started-blocked",
+            "status": "blocked",
+            "assigned_agent": "claude-1",
+            "created_at": 0,
+            "started_at": 0
+          },
+          {
+            "id": "waiting-first",
+            "title": "waiting-first",
+            "status": "waiting",
+            "assigned_agent": "claude-1",
+            "created_at": 0,
+            "started_at": 100
+          },
+          {
+            "id": "waiting-tied",
+            "title": "waiting-tied",
+            "status": "waiting",
+            "assigned_agent": "claude-1",
+            "created_at": 0,
+            "started_at": 100
+          },
+          {
+            "id": "review-later",
+            "title": "review-later",
+            "status": "review",
+            "assigned_agent": "claude-1",
+            "created_at": 0,
+            "started_at": 300
+          },
+          {
+            "id": "last-done",
+            "title": "last-done",
+            "status": "done",
+            "assigned_agent": "claude-1",
+            "created_at": 0,
+            "started_at": 1,
+            "completed_at": 900
+          },
+          {
+            "id": "unstarted-ready",
+            "title": "unstarted-ready",
+            "status": "ready",
+            "assigned_agent": "claude-1",
+            "created_at": 0
+          },
+          {
+            "id": "unstarted-blocked",
+            "title": "unstarted-blocked",
+            "status": "blocked",
+            "assigned_agent": "claude-1",
+            "created_at": 0
+          },
+          {
+            "id": "other-agent-working",
+            "title": "other-agent-working",
+            "status": "working",
+            "assigned_agent": "claude-2",
+            "created_at": 0,
+            "started_at": 700
+          },
+          {
+            "id": "failed-later",
+            "title": "failed-later",
+            "status": "failed",
+            "assigned_agent": "claude-1",
+            "created_at": 0,
+            "started_at": 999
+          }
+        ],
+        "messages": [],
+        "events": [],
+        "questions": [],
+        "server_time": 1000
+      },
+      "reason": "Zero is a known start: a started Blocked card remains current ahead of Waiting and Review. Another agent’s execution and a Failed card cannot take its place.",
+      "expect": {
+        "work": {
+          "claude-1": {
+            "task_id": "started-blocked",
+            "done": false,
+            "elapsed_ms": 1000
+          }
+        }
+      }
+    },
+    {
+      "at_ms": 1000,
+      "frame": {
+        "push": {
+          "kind": "task",
+          "data": {
+            "id": "started-blocked",
+            "title": "started-blocked",
+            "status": "blocked",
+            "assigned_agent": "claude-1",
+            "created_at": 0
+          }
+        }
+      },
+      "reason": "Without a start, Blocked work yields to Waiting. Equal Waiting starts preserve the first board entry.",
+      "expect": {
+        "work": {
+          "claude-1": {
+            "task_id": "waiting-first",
+            "done": false,
+            "elapsed_ms": 900
+          }
+        }
+      }
+    },
+    {
+      "at_ms": 1000,
+      "frame": {
+        "push": {
+          "kind": "task",
+          "data": {
+            "id": "working-unknown",
+            "title": "working-unknown",
+            "status": "working",
+            "assigned_agent": "claude-1",
+            "created_at": 0
+          }
+        }
+      },
+      "reason": "Execution remains current even before a start timestamp is known; elapsed stays unknown.",
+      "expect": {
+        "work": {
+          "claude-1": {
+            "task_id": "working-unknown",
+            "done": false,
+            "elapsed_ms": null
+          }
+        }
+      }
+    },
+    {
+      "at_ms": 1000,
+      "frame": {
+        "push": {
+          "kind": "task",
+          "data": {
+            "id": "working-unknown",
+            "title": "working-unknown",
+            "status": "failed",
+            "assigned_agent": "claude-1",
+            "created_at": 0
+          }
+        }
+      },
+      "reason": "Failed work no longer provides current work.",
+      "expect": {
+        "work": {
+          "claude-1": {
+            "task_id": "waiting-first",
+            "done": false,
+            "elapsed_ms": 900
+          }
+        }
+      }
+    },
+    {
+      "at_ms": 1000,
+      "frame": {
+        "push": {
+          "kind": "task",
+          "data": {
+            "id": "waiting-first",
+            "title": "waiting-first",
+            "status": "done",
+            "assigned_agent": "claude-1",
+            "created_at": 0,
+            "started_at": 100,
+            "completed_at": 1000
+          }
+        }
+      },
+      "reason": "Completing one Waiting card leaves the other current ahead of newer Review.",
+      "expect": {
+        "work": {
+          "claude-1": {
+            "task_id": "waiting-tied",
+            "done": false,
+            "elapsed_ms": 900
+          }
+        }
+      }
+    },
+    {
+      "at_ms": 1000,
+      "frame": {
+        "push": {
+          "kind": "task",
+          "data": {
+            "id": "waiting-tied",
+            "title": "waiting-tied",
+            "status": "done",
+            "assigned_agent": "claude-1",
+            "created_at": 0,
+            "started_at": 100,
+            "completed_at": 1001
+          }
+        }
+      },
+      "reason": "Started Review is the fallback after parked work ends.",
+      "expect": {
+        "work": {
+          "claude-1": {
+            "task_id": "review-later",
+            "done": false,
+            "elapsed_ms": 700
+          }
+        }
+      }
+    },
+    {
+      "at_ms": 1000,
+      "frame": {
+        "push": {
+          "kind": "task",
+          "data": {
+            "id": "review-later",
+            "title": "review-later",
+            "status": "done",
+            "assigned_agent": "claude-1",
+            "created_at": 0,
+            "started_at": 300,
+            "completed_at": 999
+          }
+        }
+      },
+      "reason": "The latest completed card supplies recent work; a future completion clamps elapsed to zero. Unstarted Ready and Blocked cards remain excluded.",
+      "expect": {
+        "work": {
+          "claude-1": {
+            "task_id": "waiting-tied",
+            "done": true,
+            "elapsed_ms": 0
+          }
+        }
+      }
+    },
+    {
+      "at_ms": 1000,
+      "frame": {
+        "push": {
+          "kind": "task",
+          "data": {
+            "id": "unstarted-ready",
+            "title": "unstarted-ready",
+            "status": "ready",
+            "assigned_agent": "claude-1",
+            "created_at": 0,
+            "started_at": 800
+          }
+        }
+      },
+      "reason": "A started Ready card remains a presentation fallback in an existing transient snapshot; this observation does not authorize dispatch.",
+      "expect": {
+        "work": {
+          "claude-1": {
+            "task_id": "unstarted-ready",
+            "done": false,
+            "elapsed_ms": 200
+          }
+        }
+      }
+    },
+    {
+      "at_ms": 1000,
+      "snapshot": {
+        "session": {
+          "workspace": "/work/demo",
+          "state_dir": "/work/demo/.crew",
+          "daemon_started_at": 1759999240000,
+          "daemon_pid": 4000,
+          "version": "0.1.0"
+        },
+        "agents": [
+          {
+            "id": "claude-1",
+            "name": "claude-1",
+            "role": "billing",
+            "status": "working",
+            "runtime": "claude",
+            "workdir": "/work/demo/.crew/worktrees/claude-1",
+            "backend": "herdr",
+            "last_activity_at": 1759999998000
+          }
+        ],
+        "tasks": [
+          {
+            "id": "unstarted-ready",
+            "title": "unstarted-ready",
+            "status": "ready",
+            "assigned_agent": "claude-1",
+            "created_at": 0
+          },
+          {
+            "id": "unstarted-blocked",
+            "title": "unstarted-blocked",
+            "status": "blocked",
+            "assigned_agent": "claude-1",
+            "created_at": 0
+          },
+          {
+            "id": "queued",
+            "title": "queued",
+            "status": "queued",
+            "assigned_agent": "claude-1",
+            "created_at": 0
+          },
+          {
+            "id": "other-agent-working",
+            "title": "other-agent-working",
+            "status": "working",
+            "assigned_agent": "claude-2",
+            "created_at": 0,
+            "started_at": 700
+          },
+          {
+            "id": "failed-later",
+            "title": "failed-later",
+            "status": "failed",
+            "assigned_agent": "claude-1",
+            "created_at": 0,
+            "started_at": 999
+          }
+        ],
+        "messages": [],
+        "events": [],
+        "questions": [],
+        "server_time": 1000
+      },
+      "reason": "An agent with only unstarted Ready, Queued, Blocked, or Failed work has no current task.",
+      "expect": {
+        "work": {
+          "claude-1": null
+        },
+        "task_ids": [
+          "unstarted-ready",
+          "unstarted-blocked",
+          "queued",
+          "other-agent-working",
+          "failed-later"
+        ]
+      }
+    }
+  ]
+}

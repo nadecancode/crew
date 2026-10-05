@@ -1,0 +1,230 @@
+{
+  "schema_version": 1,
+  "protocol": 6,
+  "source_revision": "6049cdf63e36e303327235834f23a798aa5a82c1",
+  "id": "optional-values",
+  "description": "Missing or null optional values stay unknown; measured zero remains present, and complete replacements clear old optional data.",
+  "provenance": [
+    "crates/crew-core/src/types.rs",
+    "crates/crew-core/src/rpc.rs",
+    "crates/crew/tests/fixtures/web/snapshot.json",
+    "web/test/work.test.ts",
+    "web/test/store.test.ts",
+    "web/src/protocol.ts:decodeAgent/decodeTask"
+  ],
+  "steps": [
+    {
+      "at_ms": 1000,
+      "snapshot": {
+        "session": {
+          "workspace": "/work/demo",
+          "state_dir": "/work/demo/.crew",
+          "daemon_started_at": 1759999240000,
+          "daemon_pid": 4000,
+          "version": "0.1.0"
+        },
+        "agents": [
+          {
+            "id": "claude-1",
+            "name": "claude-1",
+            "role": "billing",
+            "status": "working",
+            "runtime": "claude",
+            "workdir": "/work/demo/.crew/worktrees/claude-1",
+            "backend": "herdr",
+            "last_activity_at": 1759999998000
+          }
+        ],
+        "tasks": [
+          {
+            "id": "optional",
+            "title": "optional",
+            "status": "working",
+            "assigned_agent": "claude-1",
+            "created_at": 0
+          }
+        ],
+        "messages": [],
+        "events": [],
+        "questions": [],
+        "server_time": 1000
+      },
+      "reason": "An absent start, progress, usage, or context is unknown rather than measured zero.",
+      "expect": {
+        "work": {
+          "claude-1": {
+            "task_id": "optional",
+            "done": false,
+            "elapsed_ms": null
+          }
+        },
+        "agents": {
+          "claude-1": {
+            "progress": null,
+            "usage": null,
+            "context": null
+          }
+        },
+        "tasks": {
+          "optional": {
+            "started_at": null,
+            "progress": null,
+            "artifacts": []
+          }
+        }
+      }
+    },
+    {
+      "at_ms": 1000,
+      "frame": {
+        "push": {
+          "kind": "agent",
+          "data": {
+            "id": "claude-1",
+            "name": "claude-1",
+            "role": "billing",
+            "status": "working",
+            "runtime": "claude",
+            "workdir": "/work/demo/.crew/worktrees/claude-1",
+            "backend": "herdr",
+            "last_activity_at": 1759999998000,
+            "progress": 0,
+            "activity": "Measured zero",
+            "usage": {
+              "input_tokens": 0,
+              "output_tokens": 0,
+              "cache_read_tokens": 0,
+              "cache_creation_tokens": 0,
+              "turns": 0
+            },
+            "context": {
+              "tokens": 0,
+              "window": 1000,
+              "percent": 0,
+              "updated_at": 0
+            }
+          }
+        }
+      },
+      "reason": "Reported zero progress, tokens, and context usage are known values.",
+      "expect": {
+        "agents": {
+          "claude-1": {
+            "progress": 0,
+            "usage": {
+              "input_tokens": 0,
+              "output_tokens": 0,
+              "cache_read_tokens": 0,
+              "cache_creation_tokens": 0,
+              "turns": 0
+            },
+            "context": {
+              "tokens": 0,
+              "window": 1000,
+              "percent": 0,
+              "updated_at": 0
+            },
+            "activity": "Measured zero"
+          }
+        }
+      }
+    },
+    {
+      "at_ms": 1000,
+      "frame": {
+        "push": {
+          "kind": "task",
+          "data": {
+            "id": "optional",
+            "title": "optional",
+            "status": "working",
+            "assigned_agent": "claude-1",
+            "created_at": 0,
+            "started_at": 0,
+            "progress": 0
+          }
+        }
+      },
+      "reason": "A zero task start is known, so elapsed is measurable; zero progress is preserved.",
+      "expect": {
+        "work": {
+          "claude-1": {
+            "task_id": "optional",
+            "done": false,
+            "elapsed_ms": 1000
+          }
+        },
+        "tasks": {
+          "optional": {
+            "started_at": 0,
+            "progress": 0
+          }
+        }
+      }
+    },
+    {
+      "at_ms": 1000,
+      "frame": {
+        "push": {
+          "kind": "agent",
+          "data": {
+            "id": "claude-1",
+            "name": "claude-1",
+            "role": "billing",
+            "status": "working",
+            "runtime": "claude",
+            "workdir": "/work/demo/.crew/worktrees/claude-1",
+            "backend": "herdr",
+            "last_activity_at": 1759999998000,
+            "usage": null,
+            "context": null
+          }
+        }
+      },
+      "reason": "An entity push is a complete replacement: absent progress/activity and null usage/context clear the previous measurement.",
+      "expect": {
+        "agents": {
+          "claude-1": {
+            "progress": null,
+            "activity": "",
+            "usage": null,
+            "context": null
+          }
+        }
+      }
+    },
+    {
+      "at_ms": 1000,
+      "frame": {
+        "push": {
+          "kind": "task",
+          "data": {
+            "id": "optional",
+            "title": "optional",
+            "status": "working",
+            "assigned_agent": "claude-1",
+            "created_at": 0,
+            "started_at": null,
+            "progress": null
+          }
+        }
+      },
+      "reason": "Explicit null start/progress behaves like omission; the old zero start must not survive replacement.",
+      "expect": {
+        "work": {
+          "claude-1": {
+            "task_id": "optional",
+            "done": false,
+            "elapsed_ms": null
+          }
+        },
+        "tasks": {
+          "optional": {
+            "started_at": null,
+            "progress": null
+          }
+        }
+      }
+    }
+  ]
+}
