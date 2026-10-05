@@ -24,7 +24,6 @@ export function SidePanel() {
   onMount(() => {
     const resize = () => {
       ui.setViewport(window.innerWidth);
-      if (!compact() && (prefs.prefs.panel ?? 0) > max()) prefs.setPanel(max());
     };
     window.addEventListener("resize", resize);
     onCleanup(() => window.removeEventListener("resize", resize));
@@ -107,7 +106,7 @@ export function PanelHead(props: { title: string; sub?: string; children?: JSX.E
   return (
     <div class="panel-head">
       <h2 class="panel-title" tabindex="-1" title={props.title}>{props.title}</h2>
-      <Show when={props.sub}><span class="muted">{props.sub}</span></Show>
+      <Show when={props.sub}><span class="muted" title={props.sub}>{props.sub}</span></Show>
       <span class="spacer" />
       {props.children}
       <Show when={ui.sel() || ui.panelFull() || ui.viewport() < 768}>
