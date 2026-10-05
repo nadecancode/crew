@@ -320,7 +320,9 @@ Meaningful new tests: theme preference validation/restoration; derived counts do
 <a id="budget"></a>
 ## §budget — delivery tiers and byte allocation
 
-Decision: orchestrator `m-3e4be3cb6e90`, following review `f1de9a6a:review/web-revamp-design-r2.md`, authorizes P1 from 220,000 to **228,000 bytes** and P2 from 30,000 to **34,000 bytes**. P3 remains 350,000; P4 remains 600,000; P5–P20 remain unchanged. This is the sole approved budget increase. It funds T1 content and both List modes while retaining measured per-slice limits and the remaining scope tiers. No assumed deduplication credit and no "we will fit it at integration" exception. Static mockup CSS is a visual reference, not code to paste into the product.
+Budget decisions: orchestrator `m-3e4be3cb6e90` first raised P1 to 228,000 bytes and P2 to 34,000. The subsequent decision `m-362e9ff64bfe` (confirmed for integration in `m-e37211103ae0`) raises **P1 to 230,500 bytes** to retain both List modes. **P2 remains 34,000; P3 350,000; P4 600,000; P5–P20 unchanged.** No further raise is authorized. If the integrated build exceeds P1, the fixed fallback is to cut **Team List only**, including its follow-ups; preserve Task List and T0. Team List remains a separate reversible commit stack.
+
+This supersedes the earlier allocation totals at `8675c845`. T1 work remains conditional on measured bytes; no assumed deduplication credit. Static mockup CSS is a visual reference, not code to paste into the product. The reviewer records grants and proven shared-byte credits in `review/web-revamp-budget-ledger.md`; its combined-build records supersede estimates made by summing standalone slices.
 
 ### Required T0
 
@@ -328,24 +330,27 @@ T0 remains the revamp baseline: semantic light/dark tokens and theme choice; typ
 
 T0 alone does not introduce new List/filter/data surfaces. The funded T1 extension below adds content and two List modes. Existing pointer/keyboard graph navigation, tail follow, pair filter, local log filters and detail panels remain available throughout. No new dataset or protocol is needed.
 
-### Allowances
+### Allowances and final combined accounting
 
-The frozen measurement baseline is commit `12207423` (product source unchanged from audited bundle): P1 213,530; P2 28,487; P3 332,896; P4 575,599 bytes. Headroom under the approved ceilings is 14,470 script bytes and 5,513 CSS bytes. All figures are minified production bytes, not gzip. Per-slice allowance is the net change against the same approved foundation, including any QA test-independent source fix pulled into the slice. Moving files/chunks is not a saving: P1 sums all nonterminal script.
+The original audit baseline at `12207423` is P1 213,530 / P2 28,487 / P3 332,896 / P4 575,599 bytes. The approved foundation `6f5ae5d5` is P1 213,570 / P2 29,227 / P3 332,896 / P4 576,379. All figures are minified production bytes, not gzip. P1 sums every nonterminal script chunk; moving code between files does not create savings.
 
-| Stage/slice | Maximum net P1 change | Maximum net P2 change | Measurement base |
-|---|---|---|---|
-| `ui` foundation | +1,000 | +1,400 | Frozen product baseline |
-| `ui` remainder | +2,200 | +1,200 | Approved foundation |
-| `graph`, including Team/Task List | +6,500 | +1,400 | Approved foundation |
-| `content`, including funded T1 facts | +3,500 | +1,200 | Approved foundation |
-| Integration reserve at maximum foundation size | 1,270 | 313 | Unallocated; reviewer-controlled |
-| Total maximum change | 14,470 | 5,513 | Reaches, never raises, approved P1/P2 ceilings |
+The reviewer reserved the following amounts after the second P1 raise, over the approved foundation:
 
-Foundation review must report measured `F1`/`F2`, plus P3/P4 and all manifest asset sizes. After foundation, exact reserve = `228000 - F1 - 12200` script and `34000 - F2 - 3800` CSS. If foundation is smaller, additional headroom stays in reserve; no slice can spend it silently. If it exceeds its own caps, revise it before downstream work. Reviewer may reassign measured reserve or a completed slice's unused allowance in a recorded review comment; the sum must still fit P1/P2. No slice can approve its own allowance increase.
+| Slice / reserve | Net P1 allowance | Net P2 allowance |
+|---|---|---|
+| `ui` remainder, before shared-byte credit | +2,200 | +1,200 |
+| `graph`, both List modes included | +10,161 | +1,400 |
+| `content`, funded T1 coverage included | +4,050 | +1,200 |
+| All three at these caps | +16,411 | +3,800 |
+| Unassigned reserve at that point | 519 | 973 |
 
-Graph owns terminal theme changes only: P3 growth allowance at most 256 bytes (revamp target ≤333,152). No terminal dependency/features are added. Including that allowance, full maximum script/CSS growth is 20,239 bytes; projected P4 upper bound **595,838**, leaving 4,162 bytes under the unchanged 600,000 ceiling. Still measure P4: fonts, assets, manifest or unexpected chunks cannot hide outside P1/P2. QA/dev/gallery/tests add zero shipped bytes.
+The corresponding totals are P1 229,981 / P2 33,027 before the reserve, reaching the approved ceilings when the reserve is included. The 519 script bytes were held for integration. Credits can be granted only for measured unused allowance or bytes proved shared by a combined build; a slice cannot authorize its own increase.
 
-Every slice review request includes source commit, approved foundation commit, QA test commit, production build command, P1/P2/P3/P4 measured totals and deltas, relevant tests, and features delivered by tier. A slice above its allowance is not approvable even if its isolated build passes P1. All slices share remaining space; four individually green absolute-budget checks are insufficient. Integration remeasures the combined bundle before final approval.
+The combined build subsequently demonstrated shared primitive/minifier savings. The reviewer accepted standalone `ui` growth up to +3,316 script / +2,184 CSS, graph's own script share up to +10,097 excluding UI/list prerequisites, and the actual three-way build under all ceilings. These standalone deltas are **not additive**: prerequisites and shared code must be counted once. After this reassignment, additions must be offset within the same slice or explicitly recorded by the reviewer; do not reuse the earlier reserve as fresh headroom.
+
+Terminal changes remain theme-only, with the original +256-byte internal allowance (revamp target P3 ≤333,152). At the final ceilings plus that terminal target and 686-byte HTML, the conservative P4 maximum is 598,338, leaving 1,662 bytes under P4. Every build still measures P4 directly; assets cannot hide outside the script/CSS accounting. QA/dev/gallery/tests ship zero bytes.
+
+Every slice review names source and test commits, the approved foundation, build command, actual P1/P2/P3/P4 and relevant suites. Final acceptance uses the integrated production manifest. For reviewed integration `fd9d868d`, bundle commit `ae8f8a2b`, the measured totals are **230,128 / 33,842 / 332,915 / 597,571**: margins **372 / 158 / 17,085 / 2,429** bytes. Both List modes are present; the Team-List-only fallback was **not used**. Pending polish must stay within the same ceilings; §signoff records the final target and any later measurements.
 
 ### Funded T1, conditional T2, and cut order
 
@@ -355,7 +360,7 @@ Any other new §views behaviour not named in T0 follows the same optional T1 mea
 
 T2 remains outside committed implementation scope: additional Task List search/status/assignee filtering; full 390px/coarse-pointer specialization beyond the List default; explicit Follow/Jump counters; bus search/type filter; usage-series isolation; raw Event.data/message metadata; session details disclosure; icons beyond six. Build none speculatively while required T0 and funded T1 work remains.
 
-If an optional candidate makes its slice or integration exceed the allocation, cut in this fixed order (first removed first): (1) extra icon paths and raw data/metadata; (2) session details and usage isolation; (3) bus search/type and explicit-follow counters; (4) full sub-640px/coarse-pointer specialization and extra task filters; (5) optional summary/usage aggregates and attention count; (6) extra lifecycle/fallback/artifact facts beyond today's display; (7) new retry/toggle controls; (8) Team List; (9) Task List. Existing functionality is never a cut candidate. Before deferring either funded List mode, report the measured shortfall to orchestrator/reviewer for reserve reassignment or an explicit scope decision. If T0 alone does not fit after ordinary replacement/refactoring, stop that slice for design review with its measured delta; no further budget increase is authorized here.
+During slice development, optional work was trimmed in this order (first removed first): (1) extra icon paths and raw data/metadata; (2) session details and usage isolation; (3) bus search/type and explicit-follow counters; (4) full sub-640px/coarse-pointer specialization and extra task filters; (5) optional summary/usage aggregates and attention count; (6) extra lifecycle/fallback/artifact facts beyond today's display; (7) new retry/toggle controls; (8) Team List; (9) Task List. Existing functionality is never a cut candidate. The later orchestrator decision overrides that development order at final integration: if P1 exceeds 230,500, cut Team List only; do not remove Task List or unrelated T0/T1 work instead. Report the measured result. No further budget increase is authorized.
 
 Mockup scope labels matter: Team/Task List and extra aggregates are funded T1 references; new filters/follow controls remain T2. DAG, attention shell, inspector, bus rows, themes, and panel replacement are T0 references. Omit an unapproved optional control entirely. Final QA report lists actual tiers delivered and any deferred references.
 
@@ -374,12 +379,12 @@ Retain the two-level index/workspace state model; workspace status comes from th
 
 | Gate | Limit | Audited committed bundle | Headroom |
 |---|---|---|---|
-| P1 nonterminal JS | 228,000 bytes | 213,530 | 14,470 |
+| P1 nonterminal JS | 230,500 bytes | 213,530 | 16,970 |
 | P2 all CSS | 34,000 bytes | 28,487 | 5,513 |
 | P3 terminal JS | 350,000 bytes | 332,896 | 17,104 |
 | P4 entire `web-dist` | 600,000 bytes | 575,599 | 24,401 |
 
-These are ceilings, not suggestions. Replace/refactor existing styles and duplicated view markup; do not append a second theme below the old one. Extracting styles does not create size headroom by itself. No icon/chart/animation/component library, shipped font, or mockup image. `qa` updates only the P1/P2 assertions and their labels in `web/test/budget.test.ts` to 228/34 KB, recording the orchestrator decision; P3/P4 and the exact three runtime dependencies remain unchanged. Those two values supersede the older P1/P2 table in `notes/web-design.md`; no other §perf term changes. `qa` reports final sizes before integration completes. If the design cannot fit, bring a concrete byte breakdown and simpler implementation to review; never quietly increase a budget.
+These are ceilings, not suggestions. Replace/refactor existing styles and duplicated view markup; do not append a second theme below the old one. Extracting styles does not create size headroom by itself. No icon/chart/animation/component library, shipped font, or mockup image. `qa`/`integrator` update only the P1/P2 assertions and their labels in `web/test/budget.test.ts` and `web/e2e/perf.spec.ts` to 230.5/34 KB, recording the orchestrator decision; P3/P4 and the exact three runtime dependencies remain unchanged. Those two values supersede the older P1/P2 table in `notes/web-design.md`; no other §perf term changes. `qa` reports final sizes before integration completes. If the design cannot fit, bring a concrete byte breakdown and simpler implementation to review; never quietly increase a budget.
 
 Other performance invariants: P5/P6 first paint/live readiness; P7–P11 push/frame latency; P12 visible virtual rows +20; P13 no idle frames/sub-second timers; P14 terminal latency; P15 bounded heap; P17–P20 multi-workspace switching/idle constraints from `web-multi.md`. Keep the existing bounded rings and event-driven animations. Do not continuously animate the Live indicator or poll for freshness.
 
