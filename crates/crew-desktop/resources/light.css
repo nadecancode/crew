@@ -1,0 +1,15 @@
+@define-color crew_canvas #faf9f6;
+@define-color crew_panel #f3f1ec;
+@define-color crew_raised #e5ede6;
+@define-color crew_text #222222;
+@define-color crew_muted #555555;
+@define-color crew_accent #19633f;
+@define-color crew_border #c2c1bc;
+.crew-window, .crew-main { background: @crew_canvas; color: @crew_text; }
+.crew-sidebar, .crew-detail { background: @crew_panel; color: @crew_text; }
+.crew-sidebar { border-right: 1px solid @crew_border; }
+.crew-detail-heading { border-bottom: 1px solid @crew_border; }
+.crew-muted { color: @crew_muted; }
+.crew-navigation { background: transparent; }
+.crew-navigation row:selected { background: @crew_raised; color: @crew_accent; }
+.crew-status { border-top: 1px solid @crew_border; }

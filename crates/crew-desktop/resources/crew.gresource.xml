@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<gresources>
+  <gresource prefix="/dev/crew/Crew">
+    <file>style.css</file>
+    <file>light.css</file>
+    <file>dark.css</file>
+    <file>icons/scalable/apps/dev.crew.Crew.svg</file>
+  </gresource>
+</gresources>

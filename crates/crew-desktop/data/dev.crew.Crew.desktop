@@ -1,0 +1,12 @@
+[Desktop Entry]
+Type=Application
+Name=Crew
+Comment=Read and operate Crew workspaces
+Exec=crew-desktop
+TryExec=crew-desktop
+Icon=dev.crew.Crew
+Terminal=false
+Categories=Development;Utility;
+Keywords=agents;tasks;operations;
+StartupNotify=true
+StartupWMClass=crew-desktop

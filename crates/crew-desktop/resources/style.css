@@ -1,0 +1,8 @@
+/* Geometry only. Native font settings, focus rings and contrast take priority. */
+.crew-navigation row { padding: 12px 16px; border-left: 3px solid transparent; }
+.crew-navigation row:selected { border-left-color: currentColor; }
+.crew-navigation row box { margin: 0; }
+.crew-status { padding: 16px; }
+.crew-detail-heading { padding: 12px 16px; }
+.crew-workspace { padding: 16px; }
+.crew-title { font-weight: bold; }
