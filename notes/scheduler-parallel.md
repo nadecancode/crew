@@ -53,6 +53,14 @@ artifacts directly and retain any required approval. Supervision distinguishes
 queued prerequisite waits from ready cards waiting for an available owner.
 There is no automatic removal of dependencies or change to the dispatcher.
 
+This guidance change does not let an agent with a current `Waiting` card start
+its next independent `Ready` card. That card still waits silently while other
+agents are active. The scripted regressions establish existing runtime
+concurrency and dependency gates, but cannot measure whether a real orchestrator
+will make better plans from the new instructions. The requested same-agent
+overlap requires separate runtime suspension and resumption work, tracked by
+`runtime-overlap`.
+
 For example, a `design-prep` card with a phase dependency on `implementation`
 stays queued throughout implementation and review. If that preparation uses
 inputs already available, its own card can have no such dependency and starts
@@ -99,3 +107,34 @@ sandbox tests sent manual fake-Codex hooks with that unrelated launch marker;
 the daemon correctly dropped them as stale, and those tests timed out waiting
 for their session id. The test command above isolates that ambient context.
 No production hook or sandbox code was changed for this test-environment issue.
+
+## Verification on 2026-10-05
+
+The fake Codex app-server also wrote its rollout under a fixed
+`sessions/2026/10/03` directory. The daemon searches the agent's local launch
+date and the adjacent days, so that fixture became invisible on 2026-10-05.
+An export of baseline `main` at `15de7cf0`, built into this repository's target
+directory with the ambient crew variables cleared, reproduced
+`compaction_does_not_read_through_symlinks` failing after 45.58 seconds while
+waiting for the compaction note. This failure predates the guidance change.
+
+Separate commit `5e639b57` derives the fake server's rollout directory, filename
+and timestamp from its local clock. The standalone fixture test now discovers
+the file through the daemon's real `AgentFiles::codex_rollout` lookup using the
+launch time and checks its timestamp. The sandbox compaction test discovers the
+actual rollout instead of naming a fixed date.
+
+With this fixture repair and the guidance candidate:
+
+- `cargo fmt --all -- --check` passed.
+- `cargo clippy --workspace --all-targets -- -D warnings` passed.
+- `cargo test --workspace`, with the environment isolation shown above, passed:
+  948 tests, zero failures, two ignored. This includes all 470 crew library
+  tests, 86 real-daemon team tests, 29 sandbox tests, 80 core tests and 118 TUI
+  library tests.
+
+The first isolated workspace run stopped at an existing web test's pre-start
+assertion, `something listens before crew web`. Each test's random runtime path
+chooses its initial loopback port from the same 1,000-port range, so an unrelated
+listener can collide. The full rerun passed, including all 21 web daemon tests;
+no web source or production port handling was changed.
