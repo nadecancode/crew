@@ -526,6 +526,37 @@ mod tests {
     }
 
     #[test]
+    fn reviewer_a_same_size_replacement_is_not_accepted_as_the_running_build_at_restart() {
+        let (temp, state) = state();
+        let running = build(temp.path(), "crew", "the build");
+        let first = Binary::pin(&state, &running, running.clone());
+        let path = first.path().to_path_buf();
+        drop(first);
+        // Between daemon starts, another file took the cached copy's name.
+        // Its shape matches a copy, but its bytes are a different build.
+        let replacement = state.join("bin/replacement");
+        fs::write(&replacement, "not crew!").unwrap();
+        fs::set_permissions(&replacement, fs::Permissions::from_mode(0o500)).unwrap();
+        fs::rename(&replacement, &path).unwrap();
+        let again = Binary::pin(&state, &running, running.clone());
+        assert_eq!(again.path(), path);
+        assert_eq!(fs::read(again.path()).unwrap(), fs::read(&running).unwrap());
+    }
+
+    #[test]
+    fn reviewer_a_copy_without_execute_permission_is_repaired_before_launch() {
+        let (temp, state) = state();
+        let running = build(temp.path(), "crew", "the build");
+        let pinned = Binary::pin(&state, &running, running.clone());
+        fs::set_permissions(pinned.path(), fs::Permissions::from_mode(0o400)).unwrap();
+        assert!(
+            pinned.check().unwrap().is_some(),
+            "an unusable copy was accepted"
+        );
+        assert_eq!(fs::metadata(pinned.path()).unwrap().mode() & 0o7777, 0o500);
+    }
+
+    #[test]
     fn without_a_usable_directory_the_daemon_hands_out_its_own_path_and_says_why() {
         let (temp, state) = state();
         let running = build(temp.path(), "crew", "the build");

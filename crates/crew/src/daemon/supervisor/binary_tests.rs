@@ -4,6 +4,7 @@
 
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 
 use anyhow::Result;
@@ -22,6 +23,7 @@ struct Recorded {
     spawned: Mutex<Vec<LaunchSpec>>,
     killed: Mutex<Vec<String>>,
     alive: Mutex<HashSet<String>>,
+    fail_kill: AtomicBool,
 }
 
 #[async_trait::async_trait]
@@ -54,6 +56,9 @@ impl ProcessManager for Recorded {
     }
     async fn kill(&self, id: &str) -> Result<()> {
         self.killed.lock().unwrap().push(id.to_string());
+        if self.fail_kill.load(Ordering::SeqCst) {
+            anyhow::bail!("the backend could not stop the old process");
+        }
         self.alive.lock().unwrap().remove(id);
         Ok(())
     }
@@ -98,12 +103,20 @@ impl Pinned {
 /// A daemon keeping a copy of a stand-in for the running binary, with a
 /// team of `agents` (`id`, runtime), each working on a task of its own.
 async fn pinned(agents: &[(&str, &str)]) -> Pinned {
+    binary_fixture(agents, false).await
+}
+
+async fn binary_fixture(agents: &[(&str, &str)], cannot_pin: bool) -> Pinned {
     let temp = tempfile::tempdir().unwrap();
     let root = temp.path().canonicalize().unwrap();
     let running_binary = root.join("running-crew");
     std::fs::write(&running_binary, "the running build").unwrap();
     let workspace = root.join("ws");
     std::fs::create_dir(&workspace).unwrap();
+    if cannot_pin {
+        std::fs::create_dir(workspace.join(".crew")).unwrap();
+        std::fs::write(workspace.join(".crew/bin"), "not a directory").unwrap();
+    }
     let on_disk = root.join("target/release/crew");
     let running = start(DaemonOptions {
         workspace: workspace.clone(),
@@ -290,6 +303,53 @@ async fn an_agent_that_outlived_the_daemon_is_adopted_only_if_it_runs_this_build
     assert!(other_builds
         .iter()
         .any(|m| m.contains("unknown") && m.contains("none recorded")));
+}
+
+#[tokio::test]
+async fn reviewer_recovery_does_not_forget_an_old_process_whose_kill_failed() {
+    let p = pinned(&[("other", "shell")]).await;
+    let daemon = p.daemon();
+    {
+        let mut model = daemon.model();
+        model.local.get_mut("other").unwrap().binary = Some("crew-0000000000000000".into());
+        let agent = model.agents.iter_mut().find(|a| a.id == "other").unwrap();
+        agent.pid = Some(12345);
+        agent.backend_ref = Some("old-pane".into());
+    }
+    p.procs.fail_kill.store(true, Ordering::SeqCst);
+    daemon.recover_agents(p.procs.clone()).await;
+    assert!(
+        p.procs.is_alive("other"),
+        "the old process is still running"
+    );
+    let agent = daemon.agent("other").unwrap();
+    assert_eq!(
+        agent.pid,
+        Some(12345),
+        "recovery discarded the surviving process"
+    );
+    assert_eq!(agent.backend_ref.as_deref(), Some("old-pane"));
+    assert_ne!(
+        agent.status,
+        AgentStatus::Spawning,
+        "a replacement was scheduled"
+    );
+}
+
+#[tokio::test]
+async fn reviewer_unpinned_recovery_does_not_treat_two_missing_build_ids_as_a_match() {
+    let p = binary_fixture(&[("old", "shell")], true).await;
+    let daemon = p.daemon();
+    assert!(
+        daemon.binary.warning().is_some(),
+        "a real pin attempt failed"
+    );
+    assert!(daemon.binary.name().is_none());
+    assert!(daemon.model().local["old"].binary.is_none());
+    // An unpinned or legacy process supplies no evidence that its tools
+    // belong to this build. Recovery must restart it to use today's path.
+    daemon.recover_agents(p.procs.clone()).await;
+    assert_eq!(*p.procs.killed.lock().unwrap(), vec!["old".to_string()]);
 }
 
 #[tokio::test]
