@@ -55,9 +55,16 @@ test("with the inspector open, tab reaches its tabs and its action buttons; esc 
   await expect(page.getByRole("tab", { name: "terminal" })).toBeFocused();
   await page.keyboard.press("ArrowLeft");
   const seen = await walk(page, "Shift+Tab", (w) => w.startsWith("node:"));
-  for (const action of ["message", "prompt", "pause", "restart", "restart fresh", "compact", "model", "jump to pane", "kill"]) {
+  for (const action of ["message", "pause", "More"]) {
     expect(seen.some((w) => w.startsWith("panel:") && w.includes(action)), action).toBe(true);
   }
+  await page.getByRole("toolbar", { name: "actions for claude-2" }).getByRole("button", { name: "More", exact: true }).focus();
+  await page.keyboard.press("Enter");
+  const menu = page.getByRole("menu", { name: "actions for claude-2", exact: true });
+  for (const action of ["message", "prompt", "pause", "restart", "restart fresh…", "compact", "model and CLI", "jump to pane", "kill…"]) {
+    await expect(menu.getByRole("menuitem", { name: action, exact: true })).toBeVisible();
+  }
+  await page.keyboard.press("Escape");
   await page.getByRole("tab", { name: "overview" }).focus();
   await page.keyboard.press("Escape");
   await expect(page.locator("[data-inspector]")).toHaveCount(0);
