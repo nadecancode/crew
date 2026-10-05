@@ -535,7 +535,7 @@ The orchestrator keeps each runtime's own guidance, since you read it.
 | `agent_broadcast(body)` | message everyone |
 | `agent_inbox(id?)` | read (and acknowledge) messages; with an id, that one message, if you sent or received it |
 | `tasks_list` / `task_get(id?)` | the board; one task's card (default: your task in progress) |
-| `agent_status(status, note)` | working / waiting / blocked / idle |
+| `agent_status(status, note, task_id?)` | working / waiting / blocked / idle; name a parked card explicitly |
 | `task_update(percent, message)` | report progress |
 | `task_complete(result)` / `task_fail(reason)` | finish the current task |
 | `git_commit` / `git_diff` / `git_status` / `git_cherry_pick` / `git_merge` | work with your workspace; same tools under jj and git, a jj change id is shown beside the commit id and accepted as a revision |
@@ -578,7 +578,8 @@ function of the graph and agent availability, re-run on every change:
 
 - a task becomes `ready` when all dependencies are `done`, and is dispatched
   to its agent; unassigned tasks go to the least-loaded free worker;
-- an agent holds one task at a time;
+- an agent executes one task at a time; Waiting cards stay parked with their
+  owner while independent Ready work can start after the current turn ends;
 - a failed dependency blocks its dependents; `crew task retry <id>` requeues;
 - a task with a `reviewer` is `done` only after `review_submit(approve=true)`;
 - if nothing can make progress for a while, a `scheduler.stall` event is
@@ -586,6 +587,23 @@ function of the graph and agent availability, re-run on every change:
 
 `crew task list|show|add|edit|assign|retry|done` reads and edits the graph by
 hand.
+
+Calls without a task id address the executing card (Working or a started
+Blocked card). If none executes, they select the Waiting card with the latest
+`started_at`; equal start times keep board order. A started Blocked card keeps
+its execution slot. Use an explicit task id to inspect, update or finish a
+parked card during other work. To resume it with `agent_status("working",
+task_id: "…")`, finish or park the executing card first.
+
+Messages still reach the agent during independent work. Teammate or operator
+news leaves a durable cue for parked cards, even after the inbox is read;
+scoped messages target their card, and unscoped news lets each parked card
+inspect it once. Generic scheduler notices and new task/review requests do
+not create cues. When capacity returns, cards with cues resume before new
+Ready work, latest start first, with links to the original messages. If an
+answer is still missing, reporting Waiting again consumes that cue; another
+resume requires new news. Parked time does not use the task's timeout, and
+parking never completes a dependency or bypasses review approval.
 
 ### A board of cards
 

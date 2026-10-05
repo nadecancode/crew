@@ -385,14 +385,7 @@ still {} on this team.",
         );
         let task = {
             let model = self.model();
-            model
-                .tasks
-                .iter()
-                .find(|t| {
-                    t.assigned_agent.as_deref() == Some(agent.id.as_str())
-                        && matches!(t.status, TaskStatus::Working | TaskStatus::Blocked)
-                })
-                .cloned()
+            crate::tasks::active_task(&model.tasks, &agent.id).cloned()
         };
         match &task {
             Some(task) => note.push_str(&format!(
@@ -403,6 +396,20 @@ still {} on this team.",
                 " You are the orchestrator: tasks_list and agents_list show where the plan stands.",
             ),
             None => note.push_str(" You have no open task right now."),
+        }
+        let parked: Vec<_> = self
+            .model()
+            .tasks
+            .iter()
+            .filter(|t| {
+                t.assigned_agent.as_deref() == Some(&agent.id)
+                    && t.status == TaskStatus::Waiting
+                    && task.as_ref().is_none_or(|selected| selected.id != t.id)
+            })
+            .map(|t| t.id.clone())
+            .collect();
+        if !parked.is_empty() {
+            note.push_str(&format!(" Parked Waiting cards: {}. Name them by id when acting on them during another card.", parked.join(", ")));
         }
         if let Some(keep) = keep {
             note.push_str(&format!("\nWhat was to be kept in mind: {keep}"));

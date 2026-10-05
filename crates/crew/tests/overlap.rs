@@ -300,3 +300,77 @@ fn a_parked_card_does_not_release_its_dependents_and_started_blocked_keeps_slot(
     assert!(out.status.success(), "{}", stderr(&out));
     s.wait_all_done();
 }
+
+#[test]
+fn reparking_consumes_each_news_cue_and_cue_free_cards_leave_ready_work_available() {
+    let s = Session::new();
+    s.run(&s.team(
+        "parked-repark",
+        vec![agent("owner", "architect", &[])],
+        vec![
+            task("first", "owner", &[]),
+            task("second", "owner", &[]),
+            task("current", "owner", &[]),
+            task("next", "owner", &[]),
+        ],
+    ));
+    for id in ["first", "second"] {
+        working(&s, id);
+        park(&s);
+    }
+    working(&s, "current");
+    // Dispatching a new card is not a cue for either parked card.
+    assert!(!s.has_event("task.resumed"));
+    s.send("owner", "There is new information to inspect.");
+    s.wait_for("new mail", || {
+        find_agent(&s.snapshot(), "owner").inbox_total >= 4
+    });
+    tool(&s, "agent_inbox", json!({}));
+    tool(&s, "task_complete", json!({"result":"current done"}));
+    for id in ["second", "first"] {
+        working(&s, id);
+        tool(
+            &s,
+            "agent_status",
+            json!({"status":"waiting", "task_id":id, "note":"answer still missing"}),
+        );
+    }
+    working(&s, "next");
+    assert_eq!(
+        s.events()
+            .iter()
+            .filter(|e| e.event_type == "task.resumed")
+            .count(),
+        2
+    );
+    tool(&s, "task_complete", json!({"result":"next done"}));
+    let waiting = s.wait("owner waiting after yielding independent work", |snap| {
+        find_agent(snap, "owner").status == AgentStatus::Waiting
+    });
+    assert_eq!(find_task(&waiting, "first").status, TaskStatus::Waiting);
+    assert_eq!(find_task(&waiting, "second").status, TaskStatus::Waiting);
+    // Explicit status and inbox reads trigger ordinary runtime work, but do
+    // not turn the old news into another cue or another resume notice.
+    park(&s);
+    tool(&s, "agent_inbox", json!({"all":true}));
+    assert_eq!(
+        s.events()
+            .iter()
+            .filter(|e| e.event_type == "task.resumed")
+            .count(),
+        2
+    );
+    s.send("owner", "Another answer has arrived.");
+    working(&s, "second");
+    tool(&s, "task_complete", json!({"result":"second done"}));
+    working(&s, "first");
+    tool(&s, "task_complete", json!({"result":"first done"}));
+    s.wait_all_done();
+    assert_eq!(
+        s.events()
+            .iter()
+            .filter(|e| e.event_type == "task.resumed")
+            .count(),
+        4
+    );
+}

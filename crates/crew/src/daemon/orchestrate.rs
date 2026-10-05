@@ -1120,6 +1120,12 @@ with review_submit(task_id=\"{}\", approve=true|false).",
     /// `fail_task`, returning a refused save to the caller.
     async fn try_fail_task(&self, id: &str, reason: String) -> Result<(), RpcError> {
         let now = now_ms();
+        let was_current = {
+            let model = self.model();
+            model.task(id).and_then(|task| task.assigned_agent.as_deref()).is_some_and(|agent| {
+                active_task(&model.tasks, agent).is_some_and(|current| current.id == id)
+            })
+        };
         let mut claimed = false;
         let Some(task) = self.try_update_task(id, |t| {
             if t.status.is_terminal() {
@@ -1147,7 +1153,9 @@ with review_submit(task_id=\"{}\", approve=true|false).",
             event = event.agent(agent);
             self.clear_task_wakeups(agent, id);
             self.project_task(agent);
-            self.settle(agent);
+            if was_current {
+                self.settle(agent);
+            }
         }
         self.emit(event);
         let leaving = task
