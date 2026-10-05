@@ -68,6 +68,10 @@ pub fn empty_state(icon: &str, title: &str, description: &str) -> gtk::ScrolledW
     body.add_css_class("crew-muted");
     column.append(&body);
     gtk::ScrolledWindow::builder()
+        // Static empty prose contributes no keyboard target. Let the shell
+        // restore the named destination control; feature scrollers stay native.
+        .can_focus(false)
+        .focusable(false)
         .hscrollbar_policy(gtk::PolicyType::Never)
         .vscrollbar_policy(gtk::PolicyType::Automatic)
         .hexpand(true)

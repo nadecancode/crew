@@ -57,6 +57,46 @@ fn native_navigation_layout_focus_and_lifecycle() {
         ["<Control>2"]
     );
 
+    // Static disconnected pages have no row or reading control to restore.
+    // Navigation, compact detail and Back must retain named visible context.
+    shell.navigate(Destination::Tasks);
+    settle();
+    let destination_control = descendants(shell.window().upcast_ref())
+        .into_iter()
+        .filter_map(|widget| widget.downcast::<gtk::MenuButton>().ok())
+        .find(|button| {
+            button
+                .child()
+                .and_then(|child| child.downcast::<gtk::Label>().ok())
+                .is_some_and(|label| label.text() == "Tasks")
+        })
+        .unwrap();
+    assert!(gtk::test_accessible_has_property(
+        &destination_control,
+        gtk::AccessibleProperty::Label
+    ));
+    shell.set_detail_visible(true);
+    shell.window().set_default_size(560, 600);
+    until(|| shell.is_compact());
+    settle();
+    assert!(destination_control.is_drawable());
+    assert!(
+        has_focus(shell.window(), &destination_control),
+        "empty Tasks detail must focus the visible named destination control"
+    );
+    gtk::prelude::WidgetExt::activate_action(shell.window(), "win.back", None).unwrap();
+    settle();
+    assert!(!shell.is_detail_visible());
+    assert!(destination_control.is_drawable());
+    assert!(
+        has_focus(shell.window(), &destination_control),
+        "empty Tasks main after Back must focus the visible named destination control"
+    );
+    shell.window().set_default_size(1120, 720);
+    until(|| !shell.is_compact());
+    shell.navigate(Destination::Team);
+    settle();
+
     // Real native controls exercise page persistence and return focus. These are
     // UI widgets, not a second domain model or a simulated successful service.
     let team_entry = gtk::Entry::builder().text("retained team draft").build();
