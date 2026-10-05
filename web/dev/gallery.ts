@@ -14,7 +14,7 @@ import { advanceScenario, QUESTION_ID, SCENARIO_NAMES, SCENARIO_TIME, setPanelRe
 import type { PanelMethod, ReadMode, ScenarioName } from "./scenarios.ts";
 import { auditPage } from "./a11y.ts";
 
-export const SURFACES = ["team", "tasks", "task-detail", "events", "event-detail", "usage", "inspector", "terminal", "transcript", "diff", "message-detail", "switcher", "help", "confirm", "context-menu", "model", "question", "pending", "error", "transcript-empty", "transcript-unavailable", "transcript-truncated", "diff-empty", "terminal-ended", "workspace-disconnected", "workspace-stopped", "workspace-removed", "dashboard-stopped"] as const;
+export const SURFACES = ["team", "team-graph", "team-list", "tasks", "tasks-graph", "tasks-list", "task-detail", "events", "event-detail", "usage", "inspector", "terminal", "transcript", "diff", "message-detail", "switcher", "help", "confirm", "context-menu", "model", "question", "pending", "error", "inspector-pending", "inspector-error", "diff-pending", "diff-error", "terminal-pending", "terminal-error", "transcript-empty", "transcript-unavailable", "transcript-truncated", "diff-empty", "terminal-ended", "workspace-disconnected", "workspace-stopped", "workspace-removed", "dashboard-stopped"] as const;
 type Surface = (typeof SURFACES)[number];
 const VIEWPORTS = {
   desktop: { width: 1440, height: 960 }, tablet: { width: 1024, height: 768 }, narrow: { width: 390, height: 844 },
@@ -70,7 +70,7 @@ async function prepare(page: Page, mock: Mock, surface: Surface, releases: (() =
   const task = mock.state.tasks.find((t) => t.id === "scenario-done") ?? mock.state.tasks[0];
   const message = mock.state.messages.at(-1);
   const event = [...mock.state.events].reverse().find((e) => e.source === "vcs") ?? mock.state.events.at(-1);
-  const agentSurfaces = ["inspector", "terminal", "transcript", "diff", "context-menu", "model", "pending", "error", "transcript-empty", "transcript-unavailable", "transcript-truncated", "diff-empty", "terminal-ended"];
+  const agentSurfaces = ["inspector", "terminal", "transcript", "diff", "context-menu", "model", "pending", "error", "inspector-pending", "inspector-error", "diff-pending", "diff-error", "terminal-pending", "terminal-error", "transcript-empty", "transcript-unavailable", "transcript-truncated", "diff-empty", "terminal-ended"];
   if (agentSurfaces.includes(surface) && !agent) return "Scenario has no agents";
   if (surface === "task-detail" && !task) return "Scenario has no tasks";
   if (surface === "message-detail" && !message) return "Scenario has no messages";
@@ -78,7 +78,21 @@ async function prepare(page: Page, mock: Mock, surface: Surface, releases: (() =
   const read = (method: PanelMethod, mode: ReadMode) => releases.push(setPanelRead(mock, method, mode));
   switch (surface) {
     case "team": break;
-    case "tasks": await route(page, mock, "tasks"); await page.locator(".task-dag").waitFor(); break;
+    case "tasks": await route(page, mock, "tasks"); if (mock.state.tasks.length) await page.locator("#main [data-task]").first().waitFor(); break;
+    case "team-graph": case "tasks-graph": {
+      if (surface === "tasks-graph") await route(page, mock, "tasks");
+      const graph = page.getByRole("button", { name: "Graph", exact: true });
+      if (await graph.count()) await graph.evaluate((el) => (el as HTMLElement).click());
+      else if (await page.getByRole("button", { name: "List", exact: true }).count()) return "Graph presentation is not present in this build";
+      break;
+    }
+    case "team-list": case "tasks-list": {
+      if (surface === "tasks-list") await route(page, mock, "tasks");
+      const list = page.getByRole("button", { name: "List", exact: true });
+      if (!await list.count()) return "List presentation is not present in this build";
+      await list.evaluate((el) => (el as HTMLElement).click());
+      break;
+    }
     case "task-detail": await route(page, mock, `tasks?task=${encodeURIComponent(task!.id)}`); await page.locator(".task-panel .task-title").waitFor(); break;
     case "events": await route(page, mock, "logs"); await page.locator(".log-list").waitFor(); break;
     case "event-detail": await route(page, mock, `logs?event=${event!.seq}`); await page.locator(".event-panel").waitFor(); break;
@@ -98,9 +112,12 @@ async function prepare(page: Page, mock: Mock, surface: Surface, releases: (() =
     case "workspace-removed": mock.remove(mock.workspace().id); await page.locator('[data-workspace-state="removed"]').waitFor(); break;
     case "dashboard-stopped": await mock.shutdown(); await page.locator('[data-conn="stopped"]').waitFor(); break;
     default: {
-      const mode: ReadMode = surface === "pending" ? "pending" : surface === "error" ? "error" : surface === "transcript-empty" || surface === "diff-empty" ? "empty" : surface === "transcript-unavailable" || surface === "terminal-ended" ? "unavailable" : surface === "transcript-truncated" ? "truncated" : "ready";
+      const mode: ReadMode = surface === "pending" || surface.endsWith("-pending") ? "pending" : surface === "error" || surface.endsWith("-error") ? "error" : surface === "transcript-empty" || surface === "diff-empty" ? "empty" : surface === "transcript-unavailable" || surface === "terminal-ended" ? "unavailable" : surface === "transcript-truncated" ? "truncated" : "ready";
       if (surface === "diff" || surface === "diff-empty") read("git_diff", mode);
       else if (surface === "terminal" || surface === "terminal-ended") read("agent_output", mode);
+      else if (surface.startsWith("diff-")) read("git_diff", mode);
+      else if (surface.startsWith("terminal-")) read("agent_output", mode);
+      else if (surface.startsWith("inspector-")) { read("inbox", mode); read("events", mode); }
       else if (surface !== "inspector" && surface !== "model" && surface !== "context-menu") read("agent_transcript", mode);
       await route(page, mock, `?agent=${encodeURIComponent(agent)}`);
       await page.locator(`[data-inspector="${agent}"]`).waitFor();
@@ -110,7 +127,7 @@ async function prepare(page: Page, mock: Mock, surface: Surface, releases: (() =
       } else if (surface === "model") {
         await page.locator("body").click({ position: { x: 2, y: 2 } }); await page.keyboard.press("s"); await page.getByRole("dialog", { name: "model and CLI", exact: true }).waitFor();
         await mock.waitForCall("models_list"); await page.locator(".models").waitFor();
-      } else if (surface !== "inspector") {
+      } else if (!surface.startsWith("inspector")) {
         const tab = surface.startsWith("diff") ? "diff" : surface.startsWith("terminal") ? "terminal" : "transcript";
         await page.getByRole("tab", { name: tab, exact: true }).evaluate((el) => (el as HTMLElement).click());
         const method = tab === "diff" ? "git_diff" : tab === "terminal" ? "agent_output" : "agent_transcript";
@@ -133,7 +150,7 @@ function galleryHtml() {
   return `<!doctype html><html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width"><title>Crew real-component screenshot gallery</title><link rel="stylesheet" href="gallery.css"><body><header><h1>Crew dashboard captures</h1><p>Built application against deterministic mock data. Fixture content only; no authentication data. Source ${escape(manifest.source)}. Contrast/target measurements need manual review; failures retained as evidence. Zoom uses a 720×480 CSS viewport at device scale 2.</p><p><a href="manifest.json">Manifest and accessibility evidence</a> · <a href="#">All captures</a></p></header><main>${rows}</main><script src="gallery.js"></script></body></html>`;
 }
 function report() {
-  writeFileSync(join(out, "manifest.json"), JSON.stringify({ source: manifest.source, commit: execFileSync("git", ["rev-parse", "HEAD"], { cwd: ROOT, encoding: "utf8" }).trim(), fixture, scenarioClock: SCENARIO_TIME, tiers: "T0 baseline; optional List/filter surfaces excluded until approved", failures, captures }, null, 2) + "\n");
+  writeFileSync(join(out, "manifest.json"), JSON.stringify({ source: manifest.source, commit: execFileSync("git", ["rev-parse", "HEAD"], { cwd: ROOT, encoding: "utf8" }).trim(), fixture, scenarioClock: SCENARIO_TIME, tiers: "T0 and funded T1 facts/List modes; additional T2 filters/follow/metadata excluded", failures, captures }, null, 2) + "\n");
   writeFileSync(join(out, "index.html"), galleryHtml());
   writeFileSync(join(out, "gallery.css"), "body{font:14px/1.5 system-ui;margin:24px;background:#f5f6f3;color:#182321}main{display:grid;gap:24px;grid-template-columns:repeat(auto-fit,minmax(min(100%,480px),1fr))}article{background:white;padding:16px;min-width:0}img{width:100%;height:auto;border:1px solid #82948b}pre{white-space:pre-wrap;overflow-wrap:anywhere}a{color:#315ebe}[hidden]{display:none}");
   writeFileSync(join(out, "gallery.js"), `function select(){const p=location.hash.split('/');const id=p.length===6&&p[1]==='gallery'?p.slice(2).join('-'):null;for(const a of document.querySelectorAll('article'))a.hidden=!!id&&a.id!==id;}addEventListener('hashchange',select);select();`);
