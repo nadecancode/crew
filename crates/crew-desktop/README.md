@@ -27,6 +27,10 @@ cargo -V
 scripts/native/linux-build.sh -j 2
 scripts/native/linux-smoke.sh -- "$PWD/target/native-validation/cargo/debug/crew-desktop"
 crates/crew-desktop/tests/run-window-test.sh
+# Actual key events and captures on the same isolated display; xdotool is a
+# test tool, not an application dependency.
+nix-shell -I nixpkgs="$NATIVE_NIXPKGS" -p xdotool --run \
+  'crates/crew-desktop/tests/run-window-test.sh --keyboard'
 ```
 
 The native runners use their own display, session bus, and configuration/state
@@ -75,6 +79,10 @@ Ctrl+1–5 select destinations; Ctrl+B toggles the sidebar; Ctrl+I toggles detai
 Alt+Left returns from compact navigation/details; F1 opens native shortcut help;
 Ctrl+W closes the window; Ctrl+Q quits. Native sidebar selection remains distinct
 from keyboard focus. Appearance and Help stay outside the five destinations.
+Escape dismisses shortcut help and restores its opener. The keyboard capture
+runner checks real destination hotkeys and local close/back controls. Its dark
+capture invokes the same exported local GAction as the native appearance menu;
+it adds no daemon call or test-only application API.
 
 For local installation, place `data/dev.crew.Crew.desktop` in the applications
 directory and `resources/icons/scalable/apps/dev.crew.Crew.svg` in the scalable

@@ -193,6 +193,7 @@ impl Shell {
             .child(&destination_label)
             .menu_model(&destinations_menu())
             .build();
+        destination_button.set_always_show_arrow(true);
         name(&destination_button, "Choose destination");
         header.set_title_widget(Some(&destination_button));
         let workspace_slot = gtk::Box::new(gtk::Orientation::Horizontal, 0);
@@ -591,6 +592,28 @@ impl Shell {
             dialog,
             move |_| dialog.close()
         ));
+        let keys = gtk::EventControllerKey::new();
+        keys.connect_key_pressed(glib::clone!(
+            #[weak]
+            dialog,
+            #[upgrade_or]
+            glib::Propagation::Proceed,
+            move |_, key, _, modifiers| {
+                if key == gtk::gdk::Key::Escape
+                    && !modifiers.intersects(
+                        gtk::gdk::ModifierType::CONTROL_MASK
+                            | gtk::gdk::ModifierType::ALT_MASK
+                            | gtk::gdk::ModifierType::SUPER_MASK,
+                    )
+                {
+                    dialog.close();
+                    glib::Propagation::Stop
+                } else {
+                    glib::Propagation::Proceed
+                }
+            }
+        ));
+        dialog.add_controller(keys);
         self.restore_after_dialog(&dialog);
         dialog.present();
         close.grab_focus();
@@ -694,6 +717,7 @@ fn workspace_selector() -> gtk::MenuButton {
     let button = gtk::MenuButton::builder()
         .child(&ellipsized_label("No workspace", 12))
         .build();
+    button.set_always_show_arrow(true);
     name(&button, "Workspaces, none connected");
     let content = gtk::Box::new(gtk::Orientation::Vertical, 8);
     content.add_css_class("crew-workspace");

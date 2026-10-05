@@ -63,7 +63,8 @@ pub fn empty_state(icon: &str, title: &str, description: &str) -> gtk::ScrolledW
     body.set_wrap(true);
     body.set_max_width_chars(42);
     body.set_justify(gtk::Justification::Center);
-    body.set_selectable(true);
+    // Empty-state prose is not an entity/evidence focus target. Keyboard
+    // navigation falls back to the destination control when no row exists.
     body.add_css_class("crew-muted");
     column.append(&body);
     gtk::ScrolledWindow::builder()
