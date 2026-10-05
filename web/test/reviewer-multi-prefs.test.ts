@@ -44,5 +44,5 @@ test("remembering the last workspace does not suppress migration of either missi
   prefs.setLast("946d4617aa702870");
   prefs.adopt({ keys: false });
   prefs.adopt({ panel: 700 });
-  expect(prefs.prefs).toEqual({ keys: false, panel: 700, last: "946d4617aa702870" });
+  expect(prefs.prefs).toEqual({ keys: false, panel: 700, last: "946d4617aa702870", theme: "system" });
 });
