@@ -154,6 +154,14 @@ mod tests {
     }
 
     #[test]
+    fn parent_precedes_child_even_when_child_id_sorts_first() {
+        let mut agents = vec![agent("helper", Some("worker")), agent("worker", None)];
+        sort_agents(&mut agents);
+        let ids: Vec<_> = agents.iter().map(|a| a.id.as_str()).collect();
+        assert_eq!(ids, ["worker", "helper"]);
+    }
+
+    #[test]
     fn equal_sort_keys_keep_input_order_and_flagged_lead_sorts_last() {
         let mut first = agent("worker", None);
         first.name = "first".into();

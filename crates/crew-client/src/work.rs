@@ -249,6 +249,17 @@ mod tests {
         for (tasks, expected) in [
             (
                 vec![
+                    task("A", Done, None, Some(20)),
+                    task("B", Done, None, Some(10)),
+                ],
+                work("A", true, Some(980)),
+            ),
+            (
+                vec![task("A", Done, None, Some(5)), task("B", Done, None, None)],
+                work("A", true, Some(995)),
+            ),
+            (
+                vec![
                     task("A", Done, None, Some(50)),
                     task("B", Done, None, Some(50)),
                 ],

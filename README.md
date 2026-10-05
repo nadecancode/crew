@@ -1650,7 +1650,9 @@ Cargo workspace:
 
 | Crate | Contents |
 | --- | --- |
-| `crew-core` | domain types, the wire protocol (`rpc.rs`), blocking client, team config, paths |
+| `crew-protocol` | platform-independent domain types and VCS event payloads |
+| `crew-client` | pure agent ordering and current-work queries; caller-supplied time, no transport or UI |
+| `crew-core` | domain reexports, the wire protocol (`rpc.rs`), blocking client, team config, paths |
 | `crew` | `daemon/` (state, server, supervisor, delivery, orchestration, roster, subagents, git ops), `message_bus/`, `persistence/`, `scheduler/`, `tasks/`, `agents/` (Claude, Codex, pi, shell), `process/` (pty, herdr), `vcs/` (jj backend and selection) and `git/` (git backend, shared helpers), `web/` (the browser dashboard's server: HTTP, WebSocket, pairing; `build.rs` embeds `web-dist/`), `mcp/`, `cli/` |
 | `crew-tui` | the ratatui dashboard |
 | `web/` (not a crate) | the browser dashboard's frontend (Solid, Vite, bun); its built bundle is `crates/crew/web-dist/` |
