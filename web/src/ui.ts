@@ -122,12 +122,14 @@ export function createUi(o: UiOptions = {}) {
   const address = (place: Place) => formatRoute({ workspace, ...place });
 
   function setRoute(next: Place, push = true): void {
-    const cur = route();
-    if (cur.view === next.view && sameSelection(cur.sel, next.sel)) return;
-    if (next.sel && !cur.sel) panelFocus = document.activeElement as HTMLElement | null;
-    if (next.sel?.kind === "agent") setSelected(next.sel.id);
-    if (next.sel?.kind === "agent" && !(cur.sel?.kind === "agent" && cur.sel.id === next.sel.id)) setTab("overview");
-    setRouteSignal({ view: next.view, sel: next.sel });
+    const cur = route(), sel = next.sel;
+    if (cur.view === next.view && sameSelection(cur.sel, sel)) return;
+    if (sel && !cur.sel) panelFocus = document.activeElement as HTMLElement | null;
+    if (sel?.kind === "agent") {
+      setSelected(sel.id);
+      if (!(cur.sel?.kind === "agent" && cur.sel.id === sel.id)) setTab("overview");
+    }
+    setRouteSignal({ view: next.view, sel });
     const hash = address(next);
     if (loc.hash !== hash) (push ? hist.pushState : hist.replaceState).call(hist, null, "", hash);
   }
@@ -154,13 +156,14 @@ export function createUi(o: UiOptions = {}) {
   }
 
   function closePanel(): void {
-    const id = selected();
+    const sel = route().sel;
     setBusOpen(false);
     setPanelFull(false);
     setRoute({ view: route().view, sel: null });
     queueMicrotask(() => {
-      if (panelFocus?.isConnected && panelFocus !== document.body) panelFocus.focus();
-      else if (id) document.querySelector<HTMLElement>(`[data-agent="${CSS.escape(id)}"]`)?.focus();
+      // A rendered rectangle excludes detached and display:none openers.
+      if (panelFocus !== document.body && panelFocus?.getClientRects()[0] && getComputedStyle(panelFocus).visibility !== "hidden") panelFocus.focus();
+      else (sel && "id" in sel && document.querySelector<HTMLElement>(`#main [data-${sel.kind}="${CSS.escape(sel.id)}"]`) || document.querySelector<HTMLElement>(".views .on"))?.focus();
     });
   }
 
