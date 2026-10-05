@@ -35,7 +35,7 @@
 .node-body button,.node-body .task-link { pointer-events:auto; }
 .node-head { display:flex; align-items:center; gap:4px; white-space:nowrap; }
 .node-head .id { overflow:hidden; text-overflow:ellipsis; font:600 13px var(--mono); flex:1; }
-.agent-status { font-size:12px; white-space:nowrap; }
+.agent-status { font-size:12px; }
 .node-body .node-more { min-height:0; border:0; padding:0; background:none; display:flex; }
 .node-row { display:flex; align-items:center; gap:6px; white-space:nowrap; min-width:0; }
 .node-row .work,.node-row .what { overflow:hidden; text-overflow:ellipsis; flex:1; min-width:0; }
@@ -94,7 +94,6 @@
 .overview { padding:16px; }
 .overview section { padding-bottom:16px; border-bottom:1px solid var(--line); }
 .overview h3 { margin:16px 0 8px; }
-.overview p { margin:8px 0; overflow-wrap:anywhere; }
 .current-work { background:var(--surface-raised); padding:12px; border-radius:var(--radius); }
 .current-work h3 { margin-top:0; color:var(--muted); font-size:12px; }
 .current-title { font-size:16px; font-weight:600; }
