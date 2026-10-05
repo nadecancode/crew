@@ -72,7 +72,11 @@ test("the server's shutdown ends the page: no retry, the storage emptied, what i
   await expect(page.locator(".logs")).toBeVisible();
   await page.keyboard.press("l");
   await page.locator('[data-agent="claude-2"] .node-head').click();
-  for (const name of ["pause", "restart", "kill", "message"]) await expect(page.locator(".insp-actions").getByRole("button", { name, exact: true })).toBeDisabled();
+  for (const name of ["pause", "message"]) await expect(page.locator(".insp-actions").getByRole("button", { name, exact: true })).toBeDisabled();
+  await page.locator(".insp-actions").getByRole("button", { name: "More", exact: true }).click();
+  const menu = page.getByRole("menu", { name: "actions for claude-2", exact: true });
+  for (const name of ["message", "prompt", "pause", "restart", "restart fresh…", "model and CLI", "compact", "jump to pane", "kill…"]) await expect(menu.getByRole("menuitem", { name, exact: true })).toBeDisabled();
+  await expect(menu.getByRole("menuitem", { name: "open terminal", exact: true })).toBeEnabled();
   const requests = mock.requests.length;
   await page.waitForTimeout(2000);
   expect(mock.requests.length).toBe(requests);
