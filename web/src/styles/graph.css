@@ -50,7 +50,7 @@
 .node-row.foot { font-size: 11px; color: var(--muted); }
 .node-row.foot .bar { width: 60px; height: 6px; }
 .node-row .ctx { display: inline-flex; align-items: center; gap: 4px; font-family: var(--mono); }
-.node .model { border: none; background: none; padding: 0; margin-left: auto; color: var(--muted); font-size: 11px; }
+.node .model { min-height: 0; border: none; background: none; padding: 0; margin-left: auto; color: var(--muted); font-size: 11px; }
 .node .model.fallback { color: var(--warn); font-weight: 600; }
 .node .model:hover { color: var(--text); text-decoration: underline; }
 .satellite .node-body { padding: 5px 8px; }
@@ -93,7 +93,7 @@
 .task-head .tstatus { margin-left: auto; font-weight: normal; font-size: 11px; }
 .ttitle { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--muted); }
 .task-foot { display: flex; gap: 8px; align-items: center; font-size: 11px; }
-.task-foot button { pointer-events: auto; border: none; background: none; padding: 0; font-family: var(--mono); }
+.task-foot button { min-height: 0; pointer-events: auto; border: none; background: none; padding: 0; font-family: var(--mono); }
 .task-foot .bar { width: 50px; height: 5px; margin-left: auto; }
 .edge { fill: none; stroke: var(--dim); stroke-width: 1.5; }
 .edge.lit { stroke: var(--orch); stroke-width: 2; } .edge.dim { opacity: 0.2; }

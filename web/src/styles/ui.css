@@ -74,7 +74,7 @@ pre { margin: 0; white-space: pre-wrap; word-break: break-word; } .gauge { color
 
 .question-banner { gap: 10px; padding: 5px 12px; background: var(--warn-surface); border-bottom: 1px solid var(--warn);
 }
-.question-banner .q-mark { color: var(--warn); font-weight: 700; font-size: 15px; }
+.question-banner .q-mark { color: var(--warn); }
 .question-banner .q-text { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 1; }
 
 .page-body { flex: 1; display: grid; grid-template-columns: minmax(0, 1fr) var(--panel-w); min-height: 0; position: relative; }
