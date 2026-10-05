@@ -87,15 +87,15 @@ function seedBusy(ws: MockWorkspace, now: number): void {
 
 function seedLimits(ws: MockWorkspace, now: number): void {
   ws.push({ kind: "session", data: { ...ws.state.session, quotas: [
-    { runtime: "claude", window: "five_hour", percent_used: 92, resets_at: now + 900_000, updated_at: now - 10_000 },
-    { runtime: "claude", window: "seven_day", percent_used: 64, resets_at: now + 86_400_000, updated_at: now - 3_600_000 },
-    { runtime: "codex", window: "five_hour", percent_used: 0, resets_at: null, updated_at: now - 10_000 },
+    { runtime: "claude", window: "5h", percent_used: 92, resets_at: now + 900_000, updated_at: now - 10_000 },
+    { runtime: "claude", window: "week", percent_used: 64, resets_at: now + 86_400_000, updated_at: now - 3_600_000 },
+    { runtime: "codex", window: "5h", percent_used: 0, resets_at: null, updated_at: now - 10_000 },
   ] } });
   const a = ws.state.agents.find((a) => !a.orchestrator && !a.parent);
   if (a) ws.push({ kind: "agent", data: {
     ...a, paused: true, block_kind: "usage_limit", compact_pending: true,
     context: { tokens: 184_000, window: 200_000, percent: 92, updated_at: now - 10_000 },
-    limit: { kind: "usage_limit", message: "Usage window exhausted; automatic retry after the reset.", since: now - 120_000, resets_at: now + 900_000, retry_at: now + 960_000, attempts: 2 },
+    limit: { kind: "usage", message: "Usage window exhausted; automatic retry after the reset.", since: now - 120_000, resets_at: now + 900_000, retry_at: now + 960_000, attempts: 2 },
     fallback: { from: "opus", note: "Requested model unavailable in the current usage window.", since: now - 180_000, policy: true },
   } });
 }
@@ -124,6 +124,8 @@ export function seedScenario(mock: Mock, name: ScenarioName): void {
     }
     if (name === "attention") {
       ws.push({ kind: "session", data: { ...ws.state.session, sandbox: "off", socket_warning: "Socket permissions allow other local users to connect.", vcs_note: "Working tree has changes outside the agent branches." } });
+      const refused = ws.state.agents.find((a) => a.status === "blocked" && !a.limit);
+      if (refused) ws.push({ kind: "agent", data: { ...refused, block_kind: "refused", error: "The provider refused this action. Review the request before continuing.", activity: "Waiting for review of a refused action" } });
       for (let i = 0; i < 2; i++) ws.push({ kind: "message", data: {
         id: `${QUESTION_ID}-${i}`, from: "orchestrator", to: "operator", type: "question",
         body: "The legacy export writes amounts as integer cents. Which compatibility strategy should the adapter use?",
