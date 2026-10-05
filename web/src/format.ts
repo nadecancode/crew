@@ -194,6 +194,9 @@ export function clockTime(ms: number): string {
   return [d.getHours(), d.getMinutes(), d.getSeconds()].map((n) => String(n).padStart(2, "0")).join(":");
 }
 
+/** An absolute date and time in the browser's locale and time zone. */
+export const absoluteTime = (ms: number): string => new Date(ms).toLocaleString();
+
 /** `Mon 14:03` or `14:03` today: when a usage window resets. */
 export function resetTime(ms: number, nowMs: number): string {
   const d = new Date(ms);
