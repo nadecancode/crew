@@ -37,8 +37,13 @@ case "$(uname -s)" in
     Linux) native_host_library="$CARGO_TARGET_DIR/release/libcrew_client_ffi.so" ;;
     *) echo "unavailable: binding generation host must be Linux or macOS" >&2; exit 2 ;;
 esac
-./scripts/build-env cargo "+$native_toolchain" run --locked -p crew-client-ffi --features bindgen,local \
-    --bin crew-client-bindgen -- generate --library "$native_host_library" --language swift --out-dir "$native_out/generated"
+(
+    # UniFFI resolves crate metadata from cwd. Disable optional formatter discovery
+    # so source freshness does not depend on Linux/Apple formatter availability.
+    cd "$native_repo/crates/crew-client-ffi"
+    "$native_repo/scripts/build-env" cargo "+$native_toolchain" run --locked -p crew-client-ffi --features bindgen,local \
+        --bin crew-client-bindgen -- generate --no-format --library "$native_host_library" --language swift --out-dir "$native_out/generated"
+)
 mkdir -p "$native_out/Sources/Generated/Swift" "$native_out/Sources/Generated/Headers"
 shopt -s nullglob
 native_swift=("$native_out/generated/"*.swift)

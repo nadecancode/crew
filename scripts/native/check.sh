@@ -30,8 +30,8 @@ export CREW_NATIVE_FIXTURE_CACHE="$native_repo/target/native-validation/fixture-
 ./scripts/build-env cargo test --locked -p crew-protocol -p crew-client
 ./scripts/build-env cargo test --locked -p crew-tui --test render
 ./scripts/build-env cargo check --locked --target wasm32-unknown-unknown -p crew-protocol -p crew-client
-cargo tree --locked -p crew-protocol -e normal
-cargo tree --locked -p crew-client -e normal
+./scripts/build-env cargo tree --locked -p crew-protocol -e normal
+./scripts/build-env cargo tree --locked -p crew-client -e normal
 if "$native_conformance"; then
     ./scripts/build-env node fixtures/native/state/check.mjs
     ./scripts/build-env bun fixtures/native/actions/check.ts --wire
