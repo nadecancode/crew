@@ -30,18 +30,26 @@ export async function auditPage(page: Page) {
       for (let p: HTMLElement | null = el; p; p = p.parentElement) chain.unshift(p);
       let bg = [255, 255, 255];
       for (const p of chain) {
+        // HTML node copy is inside foreignObject, on a sibling SVG rect.
+        // Use that rendered fill before composing any HTML backgrounds.
+        if (p.tagName === "foreignObject") {
+          const rect = p.parentElement?.querySelector(":scope > rect.box");
+          const fill = rect ? rgba(getComputedStyle(rect).fill) : null;
+          if (fill) bg = over(fill, bg);
+        }
         const color = rgba(getComputedStyle(p).backgroundColor);
         if (color) bg = over(color, bg);
       }
       return bg;
     };
     const contrast: { element: string; text: string; ratio: number; required: number }[] = [];
-    let checked = 0;
+    let checked = 0, disabledSkipped = 0;
     for (const el of document.querySelectorAll<HTMLElement>("body *")) {
       if (!(el instanceof HTMLElement)) continue;
       if (!visible(el) || ["SCRIPT", "STYLE", "CANVAS", "SVG", "OPTION"].includes(el.tagName)) continue;
       const text = [...el.childNodes].filter((n) => n.nodeType === Node.TEXT_NODE).map((n) => n.textContent).join(" ").trim();
       if (!text || el.closest(".xterm")) continue;
+      if (el.closest(":disabled, [aria-disabled=true]")) { disabledSkipped++; continue; }
       const css = getComputedStyle(el), fg = rgba(css.color);
       if (!fg) continue;
       const bg = background(el);
@@ -59,9 +67,9 @@ export async function auditPage(page: Page) {
       if (!visible(el)) continue;
       const labels = (el as HTMLInputElement).labels;
       const name = el.getAttribute("aria-label") || el.getAttribute("aria-labelledby")?.split(/\s+/).map((id) => document.getElementById(id)?.textContent).join(" ") || (labels ? [...labels].map((l) => l.textContent).join(" ") : "") || (el.matches("button,[role=button],[role=tab]") ? el.textContent?.trim() : "");
-      if (!name) unnamed.push(identify(el));
+      if (!name?.trim()) unnamed.push(identify(el));
       const r = el.getBoundingClientRect();
-      if (r.height < 44 || r.width < 44) smallTargets.push({ element: identify(el), width: +r.width.toFixed(1), height: +r.height.toFixed(1) });
+      if (innerWidth < 640 && (r.height < 44 || r.width < 44)) smallTargets.push({ element: identify(el), width: +r.width.toFixed(1), height: +r.height.toFixed(1) });
     }
     const active = document.activeElement as HTMLElement | null;
     const focus = active ? getComputedStyle(active) : null;
@@ -69,10 +77,21 @@ export async function auditPage(page: Page) {
       viewport: { width: innerWidth, height: innerHeight }, documentWidth: document.documentElement.scrollWidth,
       overflow: document.documentElement.scrollWidth > innerWidth,
       palette: { body: getComputedStyle(document.body).backgroundColor, text: getComputedStyle(document.body).color, theme: document.documentElement.getAttribute("data-theme") },
-      contrast: { checked, failures: contrast }, unnamedControls: unnamed, targetsBelow44px: smallTargets,
+      contrast: { checked, disabledSkipped, failures: contrast }, unnamedControls: unnamed, targetsBelow44px: smallTargets,
       focused: active ? { element: identify(active), outline: focus?.outline, outlineOffset: focus?.outlineOffset } : null,
       panelWidth: document.querySelector("#side-panel")?.getBoundingClientRect().width ?? null,
-      note: "Contrast checks solid sRGB text surfaces only; canvas, gradients, overlap, control boundaries, target exceptions, and screen-reader behavior require manual review.",
+      note: "Contrast checks visible HTML text on solid sRGB CSS backgrounds and SVG node fills; disabled text excluded. Canvas, gradients, overlap, control boundaries, narrow target exceptions, and screen-reader behavior require manual review.",
     };
   });
+}
+
+export type AccessibilityAudit = Awaited<ReturnType<typeof auditPage>>;
+
+/** Strict gates are opt-in for baseline comparison, mandatory for sign-off. */
+export function a11yFailures(audit: AccessibilityAudit, allowOverflow = false): string[] {
+  return [
+    ...audit.contrast.failures.map((f) => `Text contrast ${f.ratio}:1 < ${f.required}:1 (${f.element}: ${f.text})`),
+    ...audit.unnamedControls.map((name) => `Unnamed control: ${name}`),
+    ...(audit.overflow && !allowOverflow ? [`Document overflow: ${audit.documentWidth}px > ${audit.viewport.width}px`] : []),
+  ];
 }

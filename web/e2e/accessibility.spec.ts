@@ -1,5 +1,5 @@
 import { expect, noRequestsAfterStart, test } from "./fixtures.ts";
-import { auditPage } from "../dev/a11y.ts";
+import { a11yFailures, auditPage } from "../dev/a11y.ts";
 
 test.use({ mockOptions: { scenario: "busy", fixture: "subagents" }, viewport: { width: 1440, height: 960 } });
 
@@ -59,5 +59,21 @@ test("capture includes inspectable accessibility evidence from rendered controls
   const evidence = await auditPage(page);
   expect(evidence.contrast.checked).toBeGreaterThan(0);
   expect(evidence.focused?.element).toBe("claude-1, working");
+  expect(a11yFailures(evidence)).toEqual([]);
   await testInfo.attach("accessibility-evidence", { body: JSON.stringify(evidence, null, 2), contentType: "application/json" });
+});
+
+test("strict collector gates active contrast, names, and overflow while exempting disabled text", async ({ page }) => {
+  // Synthetic page tests the measurement tool only; galleries always use the
+  // real production application. This page has no production CSP to bypass.
+  await page.setContent('<main style="min-width:1800px;color:#000;background:#fff;font:14px system-ui"><p style="color:#aaa">Unreadable active text</p><button disabled style="color:#aaa;background:#fff">Disabled control</button><input aria-label=" "><button>Named control</button></main>');
+  const evidence = await auditPage(page);
+  expect(evidence.contrast.failures.some((f) => f.text === "Unreadable active text")).toBe(true);
+  expect(evidence.contrast.failures.some((f) => f.text === "Disabled control")).toBe(false);
+  expect(evidence.contrast.disabledSkipped).toBeGreaterThan(0);
+  expect(evidence.unnamedControls).toHaveLength(1);
+  expect(evidence.overflow).toBe(true);
+  expect(a11yFailures(evidence).some((f) => f.startsWith("Document overflow"))).toBe(true);
+  expect(a11yFailures(evidence, true).some((f) => f.startsWith("Document overflow"))).toBe(false);
+  expect(a11yFailures(evidence, true).length).toBeGreaterThan(0);
 });
