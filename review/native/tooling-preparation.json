@@ -1,0 +1,26 @@
+{
+  "date": "2026-10-05",
+  "kind": "GTK toolkit harness preparation; not Crew native app acceptance",
+  "command": "NATIVE_NIXPKGS=/nix/store/ab93n7qqycnn3xfdnav0wnqqigvddd5r-source scripts/native/tests/tooling.sh",
+  "source": "scripts/native/tests/probe.c",
+  "artifacts": "target/native-validation/tooling-1TPWyk",
+  "capture": "tooling-preparation.png",
+  "sha256": "161e00660e92f5797905a993675505ae6772337bc6b4298592a0b2b7cd8033e1",
+  "tool_versions": "GTK 4.22.4\nVTE 0.84.1\nGLib 2.88.3\nxwininfo 1.1.6\nVersion: ImageMagick 7.1.2-29 Q16-HDRI x86_64 b919b37fd:20260727 https://imagemagick.org\ndbus-run-session 1.16.2\nCopyright (C) 2003-2006 Red Hat, Inc.\nCopyright (C) 2006 Thiago Macieira\nCopyright © 2011-2012 Nokia Corporation\nCopyright © 2018, 2021 Ralf Habacker\n\nThis is free software; see the source for copying conditions.\nThere is NO warranty; not even for MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.\n",
+  "capture_settings": "display=:1438\nwindow=0x200005\napp_pid=3111273\nxvfb_pid=3111241\nscreen=1440x960x24\ndpi=96\nGDK_SCALE=1\nGDK_DPI_SCALE=1\nGDK_BACKEND=x11\nGSK_RENDERER=cairo\nGDK_DEBUG=no-portals\n",
+  "actual_window": "\nxwininfo: Window id: 0x200005 \"Native validation toolkit probe\"\n\n  Absolute upper-left X:  0\n  Absolute upper-left Y:  0\n  Relative upper-left X:  0\n  Relative upper-left Y:  0\n  Width: 480\n  Height: 240\n  Depth: 32\n  Visual: 0x40\n  Visual Class: TrueColor\n  Border width: 0\n  Class: InputOutput\n  Colormap: 0x200001 (not installed)\n  Bit Gravity State: NorthWestGravity\n  Window Gravity State: NorthWestGravity\n  Backing Store State: NotUseful\n  Save Under State: no\n  Map State: IsViewable\n  Override Redirect State: no\n  Corners:  +0+0  -960+0  -960-720  +0-720\n  -geometry 480x240+0+0\n\n",
+  "actual_gtk_settings": "MESA-EGL: warning: DRI3 error: Could not get DRI3 device\nMESA-EGL: warning: Ensure your X server supports DRI3 to get accelerated rendering\ngtk_xft_dpi=98304\ngtk_font_name=Sans 10\n",
+  "checks": {
+    "mapped_gtk_window": true,
+    "early_exit_rejected": true,
+    "no_window_rejected": true,
+    "recorded_child_processes_gone": true,
+    "active_operator_display_daemon_listener_untouched": true
+  },
+  "not_run": [
+    "Crew native app build or daemon flows",
+    "Crew shared core/conformance on new source",
+    "Apple compile/link/simulator/device",
+    "Wayland/native accessibility"
+  ]
+}
