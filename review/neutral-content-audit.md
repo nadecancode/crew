@@ -2,6 +2,12 @@
 
 Task: `neutral-content`, responding to operator `w-763e0ac4eafc8f5b`.
 
+Follow-up: designer finding R-GREEN-5 exposed a missing persistent selection cue in Team/Task lists
+and Transcript after this audit. The bus/event marker checks below did not cover those consumers.
+The shared selector correction, paired regressions, and actual selected-versus-hover captures are
+recorded in [the neutral-selection audit](neutral-selection-audit.md). This report retains the
+original candidate's measurements and screenshots.
+
 The shared neutral palette fixes the content views without a content source change. Message bus,
 Events, task/message/event detail, Usage, and local loading/error/empty states already use semantic
 tokens. Their dark backgrounds now resolve to charcoal, selected rows to neutral gray, and actions

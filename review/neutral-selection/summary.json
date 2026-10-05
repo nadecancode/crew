@@ -1,0 +1,761 @@
+{
+  "source": "fnv1a64:50c88732a97c7d7b",
+  "captures": [
+    {
+      "id": "team-dark",
+      "theme": "dark",
+      "surface": "team",
+      "selection": {
+        "background": "rgb(36, 36, 36)",
+        "height": 160,
+        "children": [
+          {
+            "class": "team-row selected",
+            "shadow": "rgb(140, 183, 242) 3px 0px 0px 0px inset",
+            "background": "rgba(0, 0, 0, 0)"
+          }
+        ]
+      },
+      "hover": {
+        "background": "rgb(36, 36, 36)",
+        "children": [
+          {
+            "class": "team-row",
+            "shadow": "none"
+          }
+        ]
+      },
+      "audit": {
+        "viewport": {
+          "width": 1440,
+          "height": 960
+        },
+        "documentWidth": 1440,
+        "overflow": false,
+        "palette": {
+          "body": "rgb(18, 18, 18)",
+          "text": "rgb(237, 237, 237)",
+          "theme": "dark"
+        },
+        "contrast": {
+          "checked": 132,
+          "disabledSkipped": 1,
+          "failures": []
+        },
+        "unnamedControls": [],
+        "targetsBelow44px": [],
+        "focused": {
+          "element": "team list",
+          "outline": "rgb(237, 237, 237) none 3px",
+          "outlineOffset": "2px"
+        },
+        "panelWidth": 390,
+        "note": "Contrast checks visible HTML text on solid sRGB CSS backgrounds and SVG node fills; disabled text excluded. Canvas, gradients, overlap, control boundaries, narrow target exceptions, and screen-reader behavior require manual review."
+      },
+      "failures": [],
+      "image": "team-dark.png"
+    },
+    {
+      "id": "task-dark",
+      "theme": "dark",
+      "surface": "task",
+      "selection": {
+        "background": "rgb(36, 36, 36)",
+        "height": 160,
+        "children": [
+          {
+            "class": "task-row selected",
+            "shadow": "rgb(140, 183, 242) 3px 0px 0px 0px inset",
+            "background": "rgba(0, 0, 0, 0)"
+          }
+        ]
+      },
+      "hover": {
+        "background": "rgb(36, 36, 36)",
+        "children": [
+          {
+            "class": "task-row",
+            "shadow": "none"
+          }
+        ]
+      },
+      "audit": {
+        "viewport": {
+          "width": 1440,
+          "height": 960
+        },
+        "documentWidth": 1440,
+        "overflow": false,
+        "palette": {
+          "body": "rgb(18, 18, 18)",
+          "text": "rgb(237, 237, 237)",
+          "theme": "dark"
+        },
+        "contrast": {
+          "checked": 128,
+          "disabledSkipped": 1,
+          "failures": []
+        },
+        "unnamedControls": [],
+        "targetsBelow44px": [],
+        "focused": {
+          "element": "task list",
+          "outline": "rgb(237, 237, 237) none 3px",
+          "outlineOffset": "2px"
+        },
+        "panelWidth": 390,
+        "note": "Contrast checks visible HTML text on solid sRGB CSS backgrounds and SVG node fills; disabled text excluded. Canvas, gradients, overlap, control boundaries, narrow target exceptions, and screen-reader behavior require manual review."
+      },
+      "failures": [],
+      "image": "task-dark.png"
+    },
+    {
+      "id": "transcript-dark",
+      "theme": "dark",
+      "surface": "transcript",
+      "selection": {
+        "background": "rgb(36, 36, 36)",
+        "height": 22,
+        "children": [
+          {
+            "class": "tr-row k-tool",
+            "shadow": "rgb(140, 183, 242) 3px 0px 0px 0px inset",
+            "background": "rgba(0, 0, 0, 0)"
+          }
+        ]
+      },
+      "hover": {
+        "background": "rgb(36, 36, 36)",
+        "children": [
+          {
+            "class": "tr-row k-prompt",
+            "shadow": "none"
+          }
+        ]
+      },
+      "audit": {
+        "viewport": {
+          "width": 1440,
+          "height": 960
+        },
+        "documentWidth": 1440,
+        "overflow": false,
+        "palette": {
+          "body": "rgb(18, 18, 18)",
+          "text": "rgb(237, 237, 237)",
+          "theme": "dark"
+        },
+        "contrast": {
+          "checked": 153,
+          "disabledSkipped": 1,
+          "failures": []
+        },
+        "unnamedControls": [],
+        "targetsBelow44px": [],
+        "focused": {
+          "element": "transcript",
+          "outline": "rgb(237, 237, 237) none 3px",
+          "outlineOffset": "2px"
+        },
+        "panelWidth": 390,
+        "note": "Contrast checks visible HTML text on solid sRGB CSS backgrounds and SVG node fills; disabled text excluded. Canvas, gradients, overlap, control boundaries, narrow target exceptions, and screen-reader behavior require manual review."
+      },
+      "failures": [],
+      "image": "transcript-dark.png"
+    },
+    {
+      "id": "bus-dark",
+      "theme": "dark",
+      "surface": "bus",
+      "selection": {
+        "background": "rgb(36, 36, 36)",
+        "height": 84,
+        "children": [
+          {
+            "class": "bus-row k-orch t-task",
+            "shadow": "rgb(140, 183, 242) 3px 0px 0px 0px inset",
+            "background": "rgba(0, 0, 0, 0)"
+          }
+        ]
+      },
+      "hover": {
+        "background": "rgb(36, 36, 36)",
+        "children": [
+          {
+            "class": "bus-row k-p2p t-question",
+            "shadow": "none"
+          }
+        ]
+      },
+      "audit": {
+        "viewport": {
+          "width": 1440,
+          "height": 960
+        },
+        "documentWidth": 1440,
+        "overflow": false,
+        "palette": {
+          "body": "rgb(18, 18, 18)",
+          "text": "rgb(237, 237, 237)",
+          "theme": "dark"
+        },
+        "contrast": {
+          "checked": 175,
+          "disabledSkipped": 1,
+          "failures": []
+        },
+        "unnamedControls": [],
+        "targetsBelow44px": [],
+        "focused": {
+          "element": "messages",
+          "outline": "rgb(237, 237, 237) none 3px",
+          "outlineOffset": "2px"
+        },
+        "panelWidth": 390,
+        "note": "Contrast checks visible HTML text on solid sRGB CSS backgrounds and SVG node fills; disabled text excluded. Canvas, gradients, overlap, control boundaries, narrow target exceptions, and screen-reader behavior require manual review."
+      },
+      "failures": [],
+      "image": "bus-dark.png"
+    },
+    {
+      "id": "events-dark",
+      "theme": "dark",
+      "surface": "events",
+      "selection": {
+        "background": "rgb(36, 36, 36)",
+        "height": 36,
+        "children": [
+          {
+            "class": "log-row lv-info",
+            "shadow": "rgb(140, 183, 242) 3px 0px 0px 0px inset",
+            "background": "rgb(36, 36, 36)"
+          }
+        ]
+      },
+      "hover": {
+        "background": "rgb(36, 36, 36)",
+        "children": [
+          {
+            "class": "log-row lv-info",
+            "shadow": "none"
+          }
+        ]
+      },
+      "audit": {
+        "viewport": {
+          "width": 1440,
+          "height": 960
+        },
+        "documentWidth": 1440,
+        "overflow": false,
+        "palette": {
+          "body": "rgb(18, 18, 18)",
+          "text": "rgb(237, 237, 237)",
+          "theme": "dark"
+        },
+        "contrast": {
+          "checked": 135,
+          "disabledSkipped": 1,
+          "failures": []
+        },
+        "unnamedControls": [],
+        "targetsBelow44px": [],
+        "focused": {
+          "element": "event log",
+          "outline": "rgb(237, 237, 237) none 3px",
+          "outlineOffset": "2px"
+        },
+        "panelWidth": 390,
+        "note": "Contrast checks visible HTML text on solid sRGB CSS backgrounds and SVG node fills; disabled text excluded. Canvas, gradients, overlap, control boundaries, narrow target exceptions, and screen-reader behavior require manual review."
+      },
+      "failures": [],
+      "image": "events-dark.png"
+    },
+    {
+      "id": "events-warn-dark",
+      "theme": "dark",
+      "surface": "events-warn",
+      "selection": {
+        "background": "rgb(36, 36, 36)",
+        "height": 36,
+        "children": [
+          {
+            "class": "log-row lv-warn vcs",
+            "shadow": "rgb(140, 183, 242) 3px 0px 0px 0px inset",
+            "background": "rgb(36, 36, 36)"
+          }
+        ]
+      },
+      "hover": {
+        "background": "rgb(36, 36, 36)",
+        "children": [
+          {
+            "class": "log-row lv-info",
+            "shadow": "none"
+          }
+        ]
+      },
+      "audit": {
+        "viewport": {
+          "width": 1440,
+          "height": 960
+        },
+        "documentWidth": 1440,
+        "overflow": false,
+        "palette": {
+          "body": "rgb(18, 18, 18)",
+          "text": "rgb(237, 237, 237)",
+          "theme": "dark"
+        },
+        "contrast": {
+          "checked": 149,
+          "disabledSkipped": 1,
+          "failures": []
+        },
+        "unnamedControls": [],
+        "targetsBelow44px": [],
+        "focused": {
+          "element": "event log",
+          "outline": "rgb(237, 237, 237) none 3px",
+          "outlineOffset": "2px"
+        },
+        "panelWidth": 390,
+        "note": "Contrast checks visible HTML text on solid sRGB CSS backgrounds and SVG node fills; disabled text excluded. Canvas, gradients, overlap, control boundaries, narrow target exceptions, and screen-reader behavior require manual review."
+      },
+      "failures": [],
+      "image": "events-warn-dark.png"
+    },
+    {
+      "id": "events-error-dark",
+      "theme": "dark",
+      "surface": "events-error",
+      "selection": {
+        "background": "rgb(36, 36, 36)",
+        "height": 36,
+        "children": [
+          {
+            "class": "log-row lv-error",
+            "shadow": "rgb(140, 183, 242) 3px 0px 0px 0px inset",
+            "background": "rgb(36, 36, 36)"
+          }
+        ]
+      },
+      "hover": {
+        "background": "rgb(36, 36, 36)",
+        "children": [
+          {
+            "class": "log-row lv-info",
+            "shadow": "none"
+          }
+        ]
+      },
+      "audit": {
+        "viewport": {
+          "width": 1440,
+          "height": 960
+        },
+        "documentWidth": 1440,
+        "overflow": false,
+        "palette": {
+          "body": "rgb(18, 18, 18)",
+          "text": "rgb(237, 237, 237)",
+          "theme": "dark"
+        },
+        "contrast": {
+          "checked": 135,
+          "disabledSkipped": 1,
+          "failures": []
+        },
+        "unnamedControls": [],
+        "targetsBelow44px": [],
+        "focused": {
+          "element": "event log",
+          "outline": "rgb(237, 237, 237) none 3px",
+          "outlineOffset": "2px"
+        },
+        "panelWidth": 390,
+        "note": "Contrast checks visible HTML text on solid sRGB CSS backgrounds and SVG node fills; disabled text excluded. Canvas, gradients, overlap, control boundaries, narrow target exceptions, and screen-reader behavior require manual review."
+      },
+      "failures": [],
+      "image": "events-error-dark.png"
+    },
+    {
+      "id": "team-light",
+      "theme": "light",
+      "surface": "team",
+      "selection": {
+        "background": "rgb(231, 243, 236)",
+        "height": 160,
+        "children": [
+          {
+            "class": "team-row selected",
+            "shadow": "rgb(17, 110, 89) 3px 0px 0px 0px inset",
+            "background": "rgba(0, 0, 0, 0)"
+          }
+        ]
+      },
+      "hover": {
+        "background": "rgb(238, 241, 237)",
+        "children": [
+          {
+            "class": "team-row",
+            "shadow": "none"
+          }
+        ]
+      },
+      "audit": {
+        "viewport": {
+          "width": 1440,
+          "height": 960
+        },
+        "documentWidth": 1440,
+        "overflow": false,
+        "palette": {
+          "body": "rgb(245, 246, 243)",
+          "text": "rgb(24, 35, 33)",
+          "theme": "light"
+        },
+        "contrast": {
+          "checked": 132,
+          "disabledSkipped": 1,
+          "failures": []
+        },
+        "unnamedControls": [],
+        "targetsBelow44px": [],
+        "focused": {
+          "element": "team list",
+          "outline": "rgb(24, 35, 33) none 3px",
+          "outlineOffset": "2px"
+        },
+        "panelWidth": 390,
+        "note": "Contrast checks visible HTML text on solid sRGB CSS backgrounds and SVG node fills; disabled text excluded. Canvas, gradients, overlap, control boundaries, narrow target exceptions, and screen-reader behavior require manual review."
+      },
+      "failures": [],
+      "image": "team-light.png"
+    },
+    {
+      "id": "task-light",
+      "theme": "light",
+      "surface": "task",
+      "selection": {
+        "background": "rgb(231, 243, 236)",
+        "height": 160,
+        "children": [
+          {
+            "class": "task-row selected",
+            "shadow": "rgb(17, 110, 89) 3px 0px 0px 0px inset",
+            "background": "rgba(0, 0, 0, 0)"
+          }
+        ]
+      },
+      "hover": {
+        "background": "rgb(238, 241, 237)",
+        "children": [
+          {
+            "class": "task-row",
+            "shadow": "none"
+          }
+        ]
+      },
+      "audit": {
+        "viewport": {
+          "width": 1440,
+          "height": 960
+        },
+        "documentWidth": 1440,
+        "overflow": false,
+        "palette": {
+          "body": "rgb(245, 246, 243)",
+          "text": "rgb(24, 35, 33)",
+          "theme": "light"
+        },
+        "contrast": {
+          "checked": 128,
+          "disabledSkipped": 1,
+          "failures": []
+        },
+        "unnamedControls": [],
+        "targetsBelow44px": [],
+        "focused": {
+          "element": "task list",
+          "outline": "rgb(24, 35, 33) none 3px",
+          "outlineOffset": "2px"
+        },
+        "panelWidth": 390,
+        "note": "Contrast checks visible HTML text on solid sRGB CSS backgrounds and SVG node fills; disabled text excluded. Canvas, gradients, overlap, control boundaries, narrow target exceptions, and screen-reader behavior require manual review."
+      },
+      "failures": [],
+      "image": "task-light.png"
+    },
+    {
+      "id": "transcript-light",
+      "theme": "light",
+      "surface": "transcript",
+      "selection": {
+        "background": "rgb(231, 243, 236)",
+        "height": 22,
+        "children": [
+          {
+            "class": "tr-row k-tool",
+            "shadow": "rgb(17, 110, 89) 3px 0px 0px 0px inset",
+            "background": "rgba(0, 0, 0, 0)"
+          }
+        ]
+      },
+      "hover": {
+        "background": "rgb(238, 241, 237)",
+        "children": [
+          {
+            "class": "tr-row k-prompt",
+            "shadow": "none"
+          }
+        ]
+      },
+      "audit": {
+        "viewport": {
+          "width": 1440,
+          "height": 960
+        },
+        "documentWidth": 1440,
+        "overflow": false,
+        "palette": {
+          "body": "rgb(245, 246, 243)",
+          "text": "rgb(24, 35, 33)",
+          "theme": "light"
+        },
+        "contrast": {
+          "checked": 153,
+          "disabledSkipped": 1,
+          "failures": []
+        },
+        "unnamedControls": [],
+        "targetsBelow44px": [],
+        "focused": {
+          "element": "transcript",
+          "outline": "rgb(24, 35, 33) none 3px",
+          "outlineOffset": "2px"
+        },
+        "panelWidth": 390,
+        "note": "Contrast checks visible HTML text on solid sRGB CSS backgrounds and SVG node fills; disabled text excluded. Canvas, gradients, overlap, control boundaries, narrow target exceptions, and screen-reader behavior require manual review."
+      },
+      "failures": [],
+      "image": "transcript-light.png"
+    },
+    {
+      "id": "bus-light",
+      "theme": "light",
+      "surface": "bus",
+      "selection": {
+        "background": "rgb(231, 243, 236)",
+        "height": 84,
+        "children": [
+          {
+            "class": "bus-row k-orch t-task",
+            "shadow": "rgb(17, 110, 89) 3px 0px 0px 0px inset",
+            "background": "rgba(0, 0, 0, 0)"
+          }
+        ]
+      },
+      "hover": {
+        "background": "rgb(238, 241, 237)",
+        "children": [
+          {
+            "class": "bus-row k-p2p t-question",
+            "shadow": "none"
+          }
+        ]
+      },
+      "audit": {
+        "viewport": {
+          "width": 1440,
+          "height": 960
+        },
+        "documentWidth": 1440,
+        "overflow": false,
+        "palette": {
+          "body": "rgb(245, 246, 243)",
+          "text": "rgb(24, 35, 33)",
+          "theme": "light"
+        },
+        "contrast": {
+          "checked": 175,
+          "disabledSkipped": 1,
+          "failures": []
+        },
+        "unnamedControls": [],
+        "targetsBelow44px": [],
+        "focused": {
+          "element": "messages",
+          "outline": "rgb(24, 35, 33) none 3px",
+          "outlineOffset": "2px"
+        },
+        "panelWidth": 390,
+        "note": "Contrast checks visible HTML text on solid sRGB CSS backgrounds and SVG node fills; disabled text excluded. Canvas, gradients, overlap, control boundaries, narrow target exceptions, and screen-reader behavior require manual review."
+      },
+      "failures": [],
+      "image": "bus-light.png"
+    },
+    {
+      "id": "events-light",
+      "theme": "light",
+      "surface": "events",
+      "selection": {
+        "background": "rgb(231, 243, 236)",
+        "height": 36,
+        "children": [
+          {
+            "class": "log-row lv-info",
+            "shadow": "rgb(17, 110, 89) 3px 0px 0px 0px inset",
+            "background": "rgb(231, 243, 236)"
+          }
+        ]
+      },
+      "hover": {
+        "background": "rgb(238, 241, 237)",
+        "children": [
+          {
+            "class": "log-row lv-info",
+            "shadow": "none"
+          }
+        ]
+      },
+      "audit": {
+        "viewport": {
+          "width": 1440,
+          "height": 960
+        },
+        "documentWidth": 1440,
+        "overflow": false,
+        "palette": {
+          "body": "rgb(245, 246, 243)",
+          "text": "rgb(24, 35, 33)",
+          "theme": "light"
+        },
+        "contrast": {
+          "checked": 135,
+          "disabledSkipped": 1,
+          "failures": []
+        },
+        "unnamedControls": [],
+        "targetsBelow44px": [],
+        "focused": {
+          "element": "event log",
+          "outline": "rgb(24, 35, 33) none 3px",
+          "outlineOffset": "2px"
+        },
+        "panelWidth": 390,
+        "note": "Contrast checks visible HTML text on solid sRGB CSS backgrounds and SVG node fills; disabled text excluded. Canvas, gradients, overlap, control boundaries, narrow target exceptions, and screen-reader behavior require manual review."
+      },
+      "failures": [],
+      "image": "events-light.png"
+    },
+    {
+      "id": "events-warn-light",
+      "theme": "light",
+      "surface": "events-warn",
+      "selection": {
+        "background": "rgb(231, 243, 236)",
+        "height": 36,
+        "children": [
+          {
+            "class": "log-row lv-warn vcs",
+            "shadow": "rgb(17, 110, 89) 3px 0px 0px 0px inset",
+            "background": "rgb(231, 243, 236)"
+          }
+        ]
+      },
+      "hover": {
+        "background": "rgb(238, 241, 237)",
+        "children": [
+          {
+            "class": "log-row lv-info",
+            "shadow": "none"
+          }
+        ]
+      },
+      "audit": {
+        "viewport": {
+          "width": 1440,
+          "height": 960
+        },
+        "documentWidth": 1440,
+        "overflow": false,
+        "palette": {
+          "body": "rgb(245, 246, 243)",
+          "text": "rgb(24, 35, 33)",
+          "theme": "light"
+        },
+        "contrast": {
+          "checked": 149,
+          "disabledSkipped": 1,
+          "failures": []
+        },
+        "unnamedControls": [],
+        "targetsBelow44px": [],
+        "focused": {
+          "element": "event log",
+          "outline": "rgb(24, 35, 33) none 3px",
+          "outlineOffset": "2px"
+        },
+        "panelWidth": 390,
+        "note": "Contrast checks visible HTML text on solid sRGB CSS backgrounds and SVG node fills; disabled text excluded. Canvas, gradients, overlap, control boundaries, narrow target exceptions, and screen-reader behavior require manual review."
+      },
+      "failures": [],
+      "image": "events-warn-light.png"
+    },
+    {
+      "id": "events-error-light",
+      "theme": "light",
+      "surface": "events-error",
+      "selection": {
+        "background": "rgb(231, 243, 236)",
+        "height": 36,
+        "children": [
+          {
+            "class": "log-row lv-error",
+            "shadow": "rgb(17, 110, 89) 3px 0px 0px 0px inset",
+            "background": "rgb(231, 243, 236)"
+          }
+        ]
+      },
+      "hover": {
+        "background": "rgb(238, 241, 237)",
+        "children": [
+          {
+            "class": "log-row lv-info",
+            "shadow": "none"
+          }
+        ]
+      },
+      "audit": {
+        "viewport": {
+          "width": 1440,
+          "height": 960
+        },
+        "documentWidth": 1440,
+        "overflow": false,
+        "palette": {
+          "body": "rgb(245, 246, 243)",
+          "text": "rgb(24, 35, 33)",
+          "theme": "light"
+        },
+        "contrast": {
+          "checked": 135,
+          "disabledSkipped": 1,
+          "failures": []
+        },
+        "unnamedControls": [],
+        "targetsBelow44px": [],
+        "focused": {
+          "element": "event log",
+          "outline": "rgb(24, 35, 33) none 3px",
+          "outlineOffset": "2px"
+        },
+        "panelWidth": 390,
+        "note": "Contrast checks visible HTML text on solid sRGB CSS backgrounds and SVG node fills; disabled text excluded. Canvas, gradients, overlap, control boundaries, narrow target exceptions, and screen-reader behavior require manual review."
+      },
+      "failures": [],
+      "image": "events-error-light.png"
+    }
+  ]
+}
