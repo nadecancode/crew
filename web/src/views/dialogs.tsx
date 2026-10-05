@@ -45,7 +45,7 @@ export function Modal(props: { title: string; label?: string; class?: string; on
   return (
     <div class="scrim" onPointerDown={(e) => e.target === e.currentTarget && props.onClose()}>
       <div ref={box} class={`dialog popover ${props.class ?? ""}`} role="dialog" aria-modal="true" aria-label={props.label ?? props.title} tabindex="-1" onKeyDown={onKey}>
-        <h2 class="dialog-title">{props.title}</h2>
+        <h2 class="dialog-title" tabindex="-1">{props.title}</h2>
         {props.children}
       </div>
     </div>
@@ -265,7 +265,7 @@ export function HelpDialog() {
   const { ui, prefs } = useApp();
   const commands = COMMANDS;
   return (
-    <Modal title="keys and commands" class="help-dialog" onClose={() => ui.closeDialog()}>
+    <Modal title="keys and commands" class="help-dialog" initial=".dialog-title" onClose={() => ui.closeDialog()}>
       <div class="help-cols">
         <table class="help-keys" aria-label="keys">
           <thead><tr><th>key</th><th>does</th><th>in the TUI</th></tr></thead>
