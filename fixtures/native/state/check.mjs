@@ -1,14 +1,16 @@
 // Build existing libraries, then check the same corpus with both existing
 // clients. No Cargo manifests, generated wire fixtures, or product files change.
 import { mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync } from "node:fs";
-import { dirname, join } from "node:path";
+import { dirname, join, resolve } from "node:path";
 import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 
 const directory = fileURLToPath(new URL("./", import.meta.url));
 const root = fileURLToPath(new URL("../../../", import.meta.url));
 const files = readdirSync(directory).filter((name) => name.endsWith(".case.json")).sort().map((name) => join(directory, name));
-const artifacts = join(root, "target/native-validation");
+const artifacts = process.env.CREW_NATIVE_FIXTURE_CACHE
+  ? resolve(root, process.env.CREW_NATIVE_FIXTURE_CACHE, "state")
+  : join(root, "target/native-validation");
 mkdirSync(artifacts, { recursive: true });
 const scratch = mkdtempSync(join(artifacts, "state-"));
 

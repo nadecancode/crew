@@ -81,6 +81,15 @@ This rejects misspelled optional fields instead of accepting serde's ignored
 fields. Scratch compilation uses the ignored `target/native-validation/` path.
 The checker changes no Cargo manifests or product code.
 
+The integration runner can set `CREW_NATIVE_FIXTURE_CACHE` to a cache root;
+relative roots resolve against the repository. The state checker writes its
+scratch compilation and Vitest cache beneath that root's `state/` directory.
+Cargo inherits the caller's `CARGO_TARGET_DIR` without replacing it. For example:
+
+```sh
+CREW_NATIVE_FIXTURE_CACHE=target/native-validation/fixture-cache node fixtures/native/state/check.mjs
+```
+
 All timestamps are fixed integer i64 milliseconds. This corpus stays within
 JavaScript's safe integer range; its runner rejects larger numeric IDs,
 counters, or times rather than rounding values above 2^53. String IDs stay
