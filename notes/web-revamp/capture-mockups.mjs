@@ -5,12 +5,22 @@ const { chromium } = require('@playwright/test');
 const browser = await chromium.launch({ executablePath: process.env.PLAYWRIGHT_EXECUTABLE_PATH });
 const captures = [];
 try {
-  for (const scene of ['team', 'inspector', 'tasks', 'events', 'usage', 'question']) {
+  for (const scene of ['team', 'inspector', 'tasks', 'events', 'usage', 'question', 'attention', 'dag']) {
     for (const theme of ['light', 'dark']) {
       const page = await browser.newPage({ viewport: { width: 1440, height: 960 }, reducedMotion: 'reduce' });
       await page.goto(new URL(`./mockups/index.html?scene=${scene}&theme=${theme}`, import.meta.url).href);
       const file = `${scene}-${theme}-desktop.png`;
       await page.screenshot({ path: new URL(`./mockups/${file}`, import.meta.url).pathname });
+      captures.push(file);
+      await page.close();
+    }
+  }
+  for (const [scene, size, viewport] of [['replacement', 'narrow', {width:700,height:900}], ['inspector', 'compact', {width:1024,height:768}]]) {
+    for (const theme of ['light', 'dark']) {
+      const page=await browser.newPage({viewport,reducedMotion:'reduce'});
+      await page.goto(new URL(`./mockups/index.html?scene=${scene}&theme=${theme}`,import.meta.url).href);
+      const file=`${scene}-${theme}-${size}.png`;
+      await page.screenshot({path:new URL(`./mockups/${file}`,import.meta.url).pathname});
       captures.push(file);
       await page.close();
     }
