@@ -309,7 +309,13 @@ async fn a_launch_makes_a_copy_that_went_missing_again_first() {
 
 #[tokio::test]
 async fn an_agent_that_outlived_the_daemon_is_adopted_only_if_it_runs_this_build() {
-    let p = pinned(&[("same", "shell"), ("other", "shell"), ("unknown", "shell")]).await;
+    let p = binary_fixture_with_cache(
+        &[("same", "shell"), ("other", "shell"), ("unknown", "shell")],
+        false,
+        Some("the running build"),
+        false,
+    )
+    .await;
     let daemon = p.daemon();
     let name = daemon.binary.name().unwrap().to_string();
     {
@@ -796,7 +802,7 @@ running binary, and agents launched with it are restarted, not adopted",
         events.iter().any(|e| e.event_type == "agent.other_build"
             && e.message
                 == format!(
-                    "same was launched with {name}, which was not this build when this daemon \
+                    "same was launched with {name}, which was not found intact when this daemon \
 started; it is stopped, not adopted"
                 )),
         "{events:?}"
@@ -829,7 +835,21 @@ async fn reviewer_only_a_pin_found_intact_at_start_can_adopt_a_surviving_agent()
             expected,
             "missing at startup: {missing}; a recreated path does not restore a survivor's tools"
         );
-        if !missing {
+        if missing {
+            for _ in 0..500 {
+                if !p.procs.spawned.lock().unwrap().is_empty() {
+                    break;
+                }
+                tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+            }
+            assert_eq!(Path::new(&p.launched("same").program), p.pin());
+            let events = daemon.store.recent_events(None, 50).unwrap();
+            assert!(
+                events.iter().any(|e| e.event_type == "agent.other_build"
+                    && e.message.contains("was not found intact")),
+                "{events:?}"
+            );
+        } else {
             assert!(p.procs.spawned.lock().unwrap().is_empty());
             assert!(daemon.model().rt("same").ready);
         }

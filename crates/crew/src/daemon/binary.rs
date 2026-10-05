@@ -67,13 +67,20 @@ struct Pin {
     source: PathBuf,
     dir: PathBuf,
     name: String,
-    /// A file was under its name at start that was not the running binary,
-    /// and was replaced: what agents launched with that name ran is not
-    /// known.
-    replaced: bool,
+    /// Only a copy found intact at start identifies what surviving agents
+    /// ran. Making a copy again does not restore their hooks or tools.
+    at_start: AtStart,
     /// The copy as it was made. Held while a copy is made or the directory
     /// swept.
     made: Mutex<Made>,
+}
+
+/// What was under the copy's name when the daemon started.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum AtStart {
+    Intact,
+    Missing,
+    Replaced,
 }
 
 /// What a file was when it was looked at: a file replaced, or written in
@@ -119,13 +126,13 @@ impl Binary {
     pub(crate) fn pin(state_dir: &Path, source: &Path, started_from: PathBuf) -> Self {
         let dir = state_dir.join(BIN_DIR);
         let (path, mode) = match keep(&dir, source) {
-            Ok((name, made, replaced)) => (
+            Ok((name, made, at_start)) => (
                 dir.join(&name),
                 Mode::Pinned(Pin {
                     source: source.to_path_buf(),
                     dir,
                     name,
-                    replaced,
+                    at_start,
                     made: Mutex::new(made),
                 }),
             ),
@@ -158,11 +165,14 @@ impl Binary {
     /// recorded for it) runs the build this daemon runs. A daemon that
     /// could not keep a copy cannot tell what anything runs: an agent
     /// recorded without a name was launched with whatever file was at some
-    /// path then. Nor can one whose copy was something else at start: an
-    /// agent launched with that name ran whatever was there then.
+    /// path then. Nor can one whose copy was missing or something else at
+    /// start: an agent launched with that name ran whatever was there
+    /// then, and its tools may have failed while the copy was gone.
     pub(crate) fn launched_this(&self, launched_with: Option<&str>) -> bool {
         match &self.mode {
-            Mode::Pinned(pin) => !pin.replaced && launched_with == Some(pin.name.as_str()),
+            Mode::Pinned(pin) => {
+                pin.at_start == AtStart::Intact && launched_with == Some(pin.name.as_str())
+            }
             // An in-process daemon (a test) has only the path it was given.
             Mode::Given => launched_with.is_none(),
             Mode::Unpinned(_) => false,
@@ -192,7 +202,7 @@ impl Binary {
     /// running binary, and was replaced: what the operator is told.
     pub(crate) fn replaced(&self) -> Option<String> {
         match &self.mode {
-            Mode::Pinned(pin) if pin.replaced => Some(format!(
+            Mode::Pinned(pin) if pin.at_start == AtStart::Replaced => Some(format!(
                 "the copy of the crew binary at {} was not this build: it was made again from the \
 running binary, and agents launched with it are restarted, not adopted",
                 self.path.display()
@@ -284,8 +294,8 @@ binary",
 }
 
 /// The copy of `source` in `dir`, found or made: its name, what it is, and
-/// whether something else was under its name and was replaced.
-fn keep(dir: &Path, source: &Path) -> Result<(String, Made, bool), String> {
+/// what was under its name at start.
+fn keep(dir: &Path, source: &Path) -> Result<(String, Made, AtStart), String> {
     let mut file = File::open(source).map_err(|e| format!("reading {}: {e}", source.display()))?;
     let running = file
         .metadata()
@@ -295,12 +305,16 @@ fn keep(dir: &Path, source: &Path) -> Result<(String, Made, bool), String> {
     runnable(dir)?;
     let path = dir.join(&name);
     if let Some(made) = kept(&path, &file, running.size()) {
-        return Ok((name, made, false));
+        return Ok((name, made, AtStart::Intact));
     }
-    let replaced = fs::symlink_metadata(&path).is_ok();
+    let at_start = if fs::symlink_metadata(&path).is_ok() {
+        AtStart::Replaced
+    } else {
+        AtStart::Missing
+    };
     let made = copy(&mut file, dir, &name)
         .map_err(|e| format!("copying it into {}: {e}", dir.display()))?;
-    Ok((name, made, replaced))
+    Ok((name, made, at_start))
 }
 
 /// The copy an earlier daemon of this build kept at `path`, if that is
@@ -760,13 +774,17 @@ mod tests {
         fs::remove_file(&path).unwrap();
         let made_anew = Binary::pin(&state, &running, running.clone());
         assert_eq!(made_anew.replaced(), None);
-        assert!(made_anew.launched_this(Some(&name)));
+        assert!(!made_anew.launched_this(Some(&name)));
     }
 
     #[test]
-    fn what_an_agent_runs_is_known_from_a_copy_or_a_given_path_only() {
+    fn what_an_agent_runs_is_known_from_an_intact_copy_or_a_given_path_only() {
         let (temp, state) = state();
         let running = build(temp.path(), "crew", "the build");
+        // A new copy says nothing about agents that survived an earlier
+        // daemon. Only a copy found intact identifies what they ran.
+        let fresh = Binary::pin(&state, &running, running.clone());
+        assert!(!fresh.launched_this(fresh.name()));
         let pinned = Binary::pin(&state, &running, running.clone());
         let name = pinned.name().unwrap();
         assert!(pinned.launched_this(Some(name)));
