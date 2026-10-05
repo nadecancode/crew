@@ -81,7 +81,7 @@ reviewer, where it stands. Without an id, your task in progress.";
 
 const TOOLS_WORKER: &str = "\
 - task_update(percent, message) — report progress on your current task at meaningful milestones.
-- agent_status(status, note) — set your status: working, waiting (on a teammate) or blocked.
+- agent_status(status, note, task_id?) — set your status: working, waiting (park a card) or blocked.
 - git_commit(message) — commit everything in your worktree; returns the commit id.
 - git_diff(against?) / git_status() — inspect your changes.
 - git_cherry_pick(commit) / git_merge(from_agent) — bring a teammate's work into your branch.
@@ -313,7 +313,14 @@ about, and tell a teammate (agent_send) before changing anything they own.\n"
 When your task is done: {done}. crew tells the orchestrator when your task finishes, fails or stalls, \
 so do not send it progress or status reports: task_update records progress where it can \
 see it. If you must wait for a teammate, call agent_status(\"waiting\", \
-\"<who and what>\") and stop; you will be prompted when their message arrives.\n"
+\"<who and what>\") and end this turn. That card stays parked while another independent Ready \
+card may arrive. Id-less task calls address your executing card, otherwise your most recently \
+started Waiting card (equal starts keep board order). Name a parked card by id when acting \
+on it during another task. Incoming messages are retained and crew points you back to parked \
+work after the executing card finishes; report waiting again if its answer is still missing. \
+To resume a parked card explicitly, finish or park the executing card first, then call \
+agent_status(\"working\", task_id: \"<parked id>\"). If it needs no more work, \
+task_complete(task_id: \"<parked id>\") finishes it directly.\n"
     );
     out
 }
@@ -397,8 +404,10 @@ author while a reviewer works; no extra dependency is needed for that.\n\
 3. Supervise. Status lines starting with \"[crew]\" tell you when tasks finish, fail or \
 stall. When something is stuck, find out why (tasks_list, agents_list) and fix it: \
 message the agent, reassign the task, or retry it. When a role is idle, inspect its cards: \
-Queued waits for dependencies; Ready waits for an available owner. A Working, Waiting or \
-started Blocked card still occupies that owner. Split useful independent preparation from \
+Queued waits for dependencies; Ready waits for an available owner. A Working or started \
+Blocked card occupies that owner. A Waiting card is parked: its owner can take independent \
+Ready work once the current turn ends, then resume parked work when its messages arrive. \
+Split useful independent preparation from \
 a broad deliverable, or give it to another free member, while preserving its required \
 inputs and reviews. Do not bypass dependencies or abandon a waiting task just to keep a \
 member busy. A member whose session was moved to \

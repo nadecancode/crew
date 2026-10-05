@@ -21,6 +21,9 @@ pub struct AgentView {
     /// A turn is running or a message is on its way to the agent: something
     /// may still happen even if no task is formally "working".
     pub active: bool,
+    /// A runtime turn or input hold (permission, usage limit) still owns
+    /// the session. Parking a card frees its slot only after the turn yields.
+    pub turn_active: bool,
     /// About to go back to its own model from a fallback, between tasks: it
     /// is handed no new task until it is back.
     pub homeward: bool,
@@ -115,7 +118,7 @@ pub fn plan(tasks: &[Task], agents: &[AgentView]) -> Vec<Action> {
         .collect();
     let takes_work: HashSet<&str> = agents
         .iter()
-        .filter(|a| a.runnable && !a.homeward)
+        .filter(|a| a.runnable && !a.homeward && !a.turn_active)
         .map(|a| a.id.as_str())
         .collect();
 
@@ -175,7 +178,7 @@ pub fn plan(tasks: &[Task], agents: &[AgentView]) -> Vec<Action> {
         _ => false,
     }) || agents
         .iter()
-        .any(|a| a.runnable && (a.active || a.homeward));
+        .any(|a| a.runnable && (a.active || a.turn_active || a.homeward));
     if !progressing {
         let mut stuck = Vec::new();
         let mut reasons = Vec::new();
@@ -278,6 +281,7 @@ mod tests {
                 orchestrator: *id == "orchestrator",
                 runnable: true,
                 active: false,
+                turn_active: false,
                 homeward: false,
             })
             .collect()
@@ -459,20 +463,82 @@ mod tests {
     }
 
     #[test]
-    fn a_ready_task_whose_agent_waits_on_another_is_a_stall_that_says_so() {
-        // The agent is up, but its own earlier task is waiting: the ready
-        // one is not handed over, and the report names the task in the way
-        // rather than calling the agent down.
+    fn a_waiting_owner_can_start_an_independent_ready_card() {
         let mut on = task("integrate", Some("qa"), &[], TaskStatus::Waiting);
         on.started_at = Some(1);
         let next = task("land", Some("qa"), &[], TaskStatus::Ready);
         let actions = plan(&[on, next], &agents(&["qa"]));
+        assert_eq!(actions, vec![dispatch("land", "qa")]);
+    }
+
+    #[test]
+    fn parking_waits_for_a_turn_boundary_and_keeps_started_blocked_occupied() {
+        let mut parked = task("parked", Some("x"), &[], TaskStatus::Waiting);
+        parked.started_at = Some(1);
+        let cards = vec![
+            parked.clone(),
+            task("next", Some("x"), &[], TaskStatus::Ready),
+        ];
+        let mut views = agents(&["x"]);
+        views[0].turn_active = true;
+        assert_eq!(plan(&cards, &views), vec![]);
+        views[0].turn_active = false;
+        assert_eq!(plan(&cards, &views), vec![dispatch("next", "x")]);
+        parked.status = TaskStatus::Blocked;
+        let actions = plan(&[parked, cards[1].clone()], &views);
+        assert!(!actions.iter().any(|a| matches!(a, Action::Dispatch { .. })));
         assert!(
-            matches!(&actions[..], [Action::Stall { tasks, reason }]
-                if tasks == &["integrate", "land"]
-                    && reason.contains("'land' is ready but qa is still on 'integrate' (waiting)")),
-            "{actions:?}"
+            matches!(actions.as_slice(), [Action::Stall { reason, .. }] if reason.contains("is still on 'parked' (blocked)"))
         );
+    }
+
+    #[test]
+    fn parked_card_combinations_never_dispatch_two_cards_to_one_owner() {
+        for statuses in [
+            [
+                TaskStatus::Waiting,
+                TaskStatus::Waiting,
+                TaskStatus::Ready,
+                TaskStatus::Ready,
+            ],
+            [
+                TaskStatus::Waiting,
+                TaskStatus::Working,
+                TaskStatus::Ready,
+                TaskStatus::Ready,
+            ],
+            [
+                TaskStatus::Waiting,
+                TaskStatus::Blocked,
+                TaskStatus::Ready,
+                TaskStatus::Ready,
+            ],
+        ] {
+            let cards: Vec<_> = statuses
+                .iter()
+                .enumerate()
+                .map(|(index, status)| {
+                    let mut t = task(&format!("t{index}"), Some("x"), &[], *status);
+                    if !matches!(status, TaskStatus::Ready) {
+                        t.started_at = Some(1);
+                    }
+                    t
+                })
+                .collect();
+            let actions = plan(&cards, &agents(&["x"]));
+            let dispatched = actions
+                .iter()
+                .filter(|a| matches!(a, Action::Dispatch { .. }))
+                .count();
+            assert_eq!(
+                dispatched,
+                usize::from(!cards.iter().any(occupies_agent)),
+                "{statuses:?}"
+            );
+            if dispatched > 0 {
+                assert!(actions.contains(&dispatch("t2", "x")), "creation order");
+            }
+        }
     }
 
     #[test]

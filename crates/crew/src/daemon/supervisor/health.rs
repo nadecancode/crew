@@ -149,7 +149,13 @@ restart {id} fresh or move it to another CLI."
                 if let (TaskStatus::Working, Some(secs), Some(started), false) =
                     (task.status, task.timeout_secs, task.started_at, parked)
                 {
-                    if now - started > (secs as i64) * 1000 {
+                    let waiting_ms = task
+                        .assigned_agent
+                        .as_deref()
+                        .and_then(|agent| model.local.get(agent))
+                        .and_then(|local| local.task_pauses.get(&task.id))
+                        .map_or(0, |pause| pause.total_ms);
+                    if now - started - waiting_ms > (secs as i64) * 1000 {
                         todo.push(Todo::Timeout {
                             task_id: task.id.clone(),
                             secs,

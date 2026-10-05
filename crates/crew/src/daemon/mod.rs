@@ -34,6 +34,7 @@ mod gitops;
 mod handlers;
 mod limits;
 mod orchestrate;
+mod overlap;
 mod policy;
 mod questions;
 mod retire;
@@ -112,6 +113,21 @@ pub(crate) struct AgentLocal {
     /// How often its model has refused a turn.
     #[serde(default)]
     pub refusals: u32,
+    /// Messages received while cards were parked. A consumed inbox message
+    /// still points the member back to its card once execution capacity
+    /// returns. Private state; the public task/status protocol is unchanged.
+    #[serde(default)]
+    pub task_wakeups: HashMap<String, Vec<String>>,
+    #[serde(default)]
+    pub task_wakeup_seen: HashMap<String, HashSet<String>>,
+    #[serde(default)]
+    pub task_pauses: HashMap<String, TaskPause>,
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug, Default)]
+pub(crate) struct TaskPause {
+    pub since: Option<i64>,
+    pub total_ms: i64,
 }
 
 /// Per-agent state that only matters while the daemon is running.
@@ -559,22 +575,40 @@ impl Daemon {
         id: &str,
         f: impl FnOnce(&mut Task),
     ) -> Result<Option<Task>, RpcError> {
-        let after = {
+        self.try_update_task_checked(id, |_, task| {
+            f(task);
+            Ok(())
+        })
+    }
+
+    /// Check the whole model and change a card in one critical section.
+    /// Execution-slot checks must not race a dispatch or an explicit resume.
+    pub(crate) fn try_update_task_checked(
+        &self,
+        id: &str,
+        f: impl FnOnce(&Model, &mut Task) -> Result<(), RpcError>,
+    ) -> Result<Option<Task>, RpcError> {
+        let (after, pause_changed) = {
             let mut model = self.model();
-            let Some(task) = model.tasks.iter_mut().find(|t| t.id == id) else {
+            let Some(task) = model.task(id) else {
                 return Ok(None);
             };
             let mut after = task.clone();
-            f(&mut after);
+            let before = task.clone();
+            f(&model, &mut after)?;
             if after == *task {
                 return Ok(Some(after));
             }
             self.store
                 .save_task(&after)
                 .map_err(|e| RpcError::internal(format!("persisting task {id} failed: {e:#}")))?;
-            *task = after.clone();
-            after
+            *model.tasks.iter_mut().find(|t| t.id == id).unwrap() = after.clone();
+            let pause_changed = overlap::track_pause(&mut model, &before, &after);
+            (after, pause_changed)
         };
+        if let Some(agent) = pause_changed {
+            self.save_local(&agent);
+        }
         self.push(Push::Task(Box::new(after.clone())));
         Ok(Some(after))
     }
@@ -592,17 +626,32 @@ impl Daemon {
         message: NewMessage,
         recipients: Vec<String>,
     ) -> Result<Option<(Task, SendOutcome)>, RpcError> {
-        let (after, outcome) = {
+        self.try_update_task_telling_checked(id, |_, task| f(task), message, recipients)
+    }
+
+    pub(crate) fn try_update_task_telling_checked(
+        &self,
+        id: &str,
+        f: impl FnOnce(&Model, &mut Task) -> Result<(), RpcError>,
+        message: NewMessage,
+        recipients: Vec<String>,
+    ) -> Result<Option<(Task, SendOutcome)>, RpcError> {
+        let (after, outcome, pause_changed) = {
             let mut model = self.model();
-            let Some(task) = model.tasks.iter_mut().find(|t| t.id == id) else {
+            let Some(task) = model.task(id) else {
                 return Ok(None);
             };
             let mut after = task.clone();
-            f(&mut after)?;
+            let before = task.clone();
+            f(&model, &mut after)?;
             let outcome = self.bus.send_with_task(message, recipients, &after)?;
-            *task = after.clone();
-            (after, outcome)
+            *model.tasks.iter_mut().find(|t| t.id == id).unwrap() = after.clone();
+            let pause_changed = overlap::track_pause(&mut model, &before, &after);
+            (after, outcome, pause_changed)
         };
+        if let Some(agent) = pause_changed {
+            self.save_local(&agent);
+        }
         self.push(Push::Task(Box::new(after.clone())));
         Ok(Some((after, outcome)))
     }

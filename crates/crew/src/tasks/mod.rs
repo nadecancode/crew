@@ -100,18 +100,36 @@ pub fn check_reviewer(spec: &TaskSpec) -> Result<(), String> {
 /// A task occupies its agent while the agent is expected to act on it.
 pub fn occupies_agent(task: &Task) -> bool {
     match task.status {
-        TaskStatus::Working | TaskStatus::Waiting => true,
+        TaskStatus::Working => true,
         // Blocked after it was started: the agent itself is stuck on it.
         TaskStatus::Blocked => task.started_at.is_some(),
         _ => false,
     }
 }
 
-/// The task an agent is currently on, if any.
-pub fn active_task<'a>(tasks: &'a [Task], agent: &str) -> Option<&'a Task> {
+/// The task occupying an agent's execution slot, if any. Waiting cards are
+/// parked: they keep their owner without preventing independent work.
+pub fn executing_task<'a>(tasks: &'a [Task], agent: &str) -> Option<&'a Task> {
     tasks
         .iter()
         .find(|t| t.assigned_agent.as_deref() == Some(agent) && occupies_agent(t))
+}
+
+/// The executing card, otherwise the most recently started waiting card.
+/// Equal start times keep board order. This is also the default target for
+/// task calls when no task id is supplied.
+pub fn active_task<'a>(tasks: &'a [Task], agent: &str) -> Option<&'a Task> {
+    executing_task(tasks, agent).or_else(|| {
+        tasks
+            .iter()
+            .filter(|t| {
+                t.assigned_agent.as_deref() == Some(agent) && t.status == TaskStatus::Waiting
+            })
+            .fold(None, |selected: Option<&Task>, task| match selected {
+                Some(current) if current.started_at >= task.started_at => Some(current),
+                _ => Some(task),
+            })
+    })
 }
 
 /// `(done, total)` across all tasks.
@@ -189,5 +207,29 @@ mod tests {
         assert!(occupies_agent(&t));
         t.status = TaskStatus::Review;
         assert!(!occupies_agent(&t), "author is free while under review");
+    }
+
+    #[test]
+    fn selection_prefers_execution_then_latest_waiting_with_stable_ties() {
+        let card = |id: &str, status, started| {
+            let mut task = task_from_spec(&spec(id, &[]), 0);
+            task.assigned_agent = Some("x".into());
+            task.status = status;
+            task.started_at = Some(started);
+            task
+        };
+        let mut cards = vec![
+            card("older", TaskStatus::Waiting, 1),
+            card("executing", TaskStatus::Working, 2),
+            card("newer", TaskStatus::Waiting, 3),
+            card("tie", TaskStatus::Waiting, 3),
+        ];
+        assert_eq!(active_task(&cards, "x").unwrap().id, "executing");
+        cards[1].status = TaskStatus::Blocked;
+        assert_eq!(active_task(&cards, "x").unwrap().id, "executing");
+        cards[1].status = TaskStatus::Done;
+        assert_eq!(active_task(&cards, "x").unwrap().id, "newer");
+        assert!(executing_task(&cards, "x").is_none());
+        assert!(!occupies_agent(&cards[0]));
     }
 }

@@ -240,10 +240,18 @@ impl Daemon {
     /// task goes back to the scheduler to be handed out again, and each
     /// review it was asked for is asked for again.
     pub(super) async fn requeue_forgotten_work(&self, id: &str) {
-        let (task, reviews) = {
+        let (tasks, reviews) = {
             let model = self.model();
             (
-                active_task(&model.tasks, id).map(|t| t.id.clone()),
+                model
+                    .tasks
+                    .iter()
+                    .filter(|t| {
+                        t.assigned_agent.as_deref() == Some(id)
+                            && (crate::tasks::occupies_agent(t) || t.status == TaskStatus::Waiting)
+                    })
+                    .map(|t| t.id.clone())
+                    .collect::<Vec<_>>(),
                 model
                     .tasks
                     .iter()
@@ -252,13 +260,15 @@ impl Daemon {
                     .collect::<Vec<_>>(),
             )
         };
-        if let Some(task) = task {
+        for task in tasks {
             self.update_task(&task, |t| {
                 t.status = TaskStatus::Ready;
                 t.started_at = None;
                 t.note = Some("re-dispatched after the agent restarted".into());
             });
+            self.clear_task_wakeups(id, &task);
         }
+        self.project_task(id);
         // A request still waiting to be delivered reaches the new session.
         let waiting = self.bus.undelivered(id).unwrap_or_default();
         for task in reviews {

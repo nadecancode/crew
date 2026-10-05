@@ -123,12 +123,14 @@ with an id, that one message (one you sent or received), e.g. one a card or a te
         ),
         tool(
             "agent_status",
-            "Set your own status: \"working\", \"waiting\" (on a teammate), \"blocked\" (cannot \
-proceed) or \"idle\". Add a note saying on whom or what.",
+            "Set your status: working, waiting (park this card), blocked or idle. Add a note \
+saying on whom or what. task_id addresses a parked card explicitly; working refuses if another \
+card executes. Defaults to the executing card, otherwise the latest started waiting card.",
             object(
                 json!({
                     "status": { "type": "string", "enum": ["working", "waiting", "blocked", "idle"] },
                     "note": { "type": "string" },
+                    "task_id": { "type": "string" },
                 }),
                 &["status"],
             ),
@@ -839,9 +841,10 @@ pub fn call(client: &mut Client, name: &str, args: &Value) -> Result<ToolOutput,
                 Call::StatusUpdate {
                     status,
                     note: opt_str(args, "note"),
+                    task_id: opt_str(args, "task_id"),
                 },
             )?;
-            out(format!("Status set to {}.", agent.status), raw)
+            out(format!("Status set to {}. Default task: executing card, otherwise latest started waiting card; equal starts keep board order.", agent.status), raw)
         }
         "tasks_list" => {
             let (tasks, raw): (Vec<Task>, _) = rpc(client, Call::TasksList)?;

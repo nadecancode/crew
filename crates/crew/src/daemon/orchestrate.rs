@@ -96,6 +96,7 @@ impl Daemon {
         let _planning = self.plan_lock.lock().await;
         let procs = self.procs().ok();
         let homeward = self.homeward();
+        self.resume_parked_tasks(procs.as_deref(), &homeward).await;
         let (tasks, agents) = {
             let model = self.model();
             if model.session.team.is_none() {
@@ -120,6 +121,12 @@ impl Daemon {
                         && (matches!(a.status, AgentStatus::Working | AgentStatus::Spawning)
                             || a.limit.is_some()),
                     homeward: homeward.contains(&a.id),
+                    turn_active: model
+                        .rt
+                        .get(&a.id)
+                        .is_some_and(|rt| rt.turn_active || rt.pending_prompt.is_some())
+                        || a.limit.is_some()
+                        || a.status == AgentStatus::Blocked,
                 })
                 .collect();
             (model.tasks.clone(), agents)
@@ -312,14 +319,25 @@ until the database takes writes again, tasks wait where they are.",
         // is handed out, so a task is never dispatched twice, nor without its
         // owner (an assignment the database refused).
         let mut claimed = false;
-        let Some(task) = self.update_task(task_id, |t| {
+        let Ok(Some(task)) = self.try_update_task_checked(task_id, |model, t| {
             if t.status == TaskStatus::Ready && t.assigned_agent.as_deref() == Some(agent_id) {
+                if tasks::executing_task(&model.tasks, agent_id).is_some()
+                    || model.rt.get(agent_id).is_some_and(|rt| rt.turn_active)
+                    || !t.dependencies.iter().all(|id| {
+                        model
+                            .task(id)
+                            .is_some_and(|dep| dep.status == TaskStatus::Done)
+                    })
+                {
+                    return Ok(());
+                }
                 t.status = TaskStatus::Working;
                 t.started_at = Some(now);
                 t.progress = Some(0);
                 t.note = None;
                 claimed = true;
             }
+            Ok(())
         }) else {
             return;
         };
@@ -327,10 +345,7 @@ until the database takes writes again, tasks wait where they are.",
             return;
         }
         let body = prompt::task_dispatch(&task);
-        self.update_agent(agent_id, |a| {
-            a.task = Some(task.title.clone());
-            a.progress = Some(0);
-        });
+        self.project_task(agent_id);
         self.model().rt(agent_id).self_status = None;
         self.emit(
             NewEvent::new(
@@ -472,11 +487,7 @@ until the database takes writes again, tasks wait where they are.",
         );
         if task.title != before.title {
             if let Some(agent) = &task.assigned_agent {
-                self.update_agent(agent, |a| {
-                    if a.task.as_deref() == Some(before.title.as_str()) {
-                        a.task = Some(task.title.clone());
-                    }
-                });
+                self.project_task(agent);
             }
         }
         let reader = match task.status {
@@ -598,11 +609,8 @@ until the database takes writes again, tasks wait where they are.",
             })?
             .ok_or_else(|| RpcError::not_found(format!("no task '{id}'")))?;
         if let Some(previous) = previous.filter(|p| p != agent) {
-            self.update_agent(&previous, |a| {
-                if a.task.as_deref() == Some(task.title.as_str()) {
-                    a.task = None;
-                }
-            });
+            self.clear_task_wakeups(&previous, id);
+            self.project_task(&previous);
         }
         self.emit(
             NewEvent::new(
@@ -706,10 +714,15 @@ until the database takes writes again, tasks wait where they are.",
             })?;
         }
         let now = now_ms();
+        let is_current = task
+            .as_deref()
+            .is_none_or(|id| active_task(&self.model().tasks, agent).is_some_and(|t| t.id == id));
         self.update_agent(agent, |a| {
-            a.progress = Some(percent);
-            if let Some(message) = &message {
-                a.activity = message.clone();
+            if is_current {
+                a.progress = Some(percent);
+                if let Some(message) = &message {
+                    a.activity = message.clone();
+                }
             }
             a.last_activity_at = now;
         });
@@ -736,28 +749,77 @@ until the database takes writes again, tasks wait where they are.",
         status: AgentStatus,
         note: Option<String>,
     ) -> Result<(), RpcError> {
+        self.mirror_status_to_task_id(agent, status, note, None)
+            .map(|_| ())
+    }
+
+    pub(crate) fn mirror_status_to_task_id(
+        &self,
+        agent: &str,
+        status: AgentStatus,
+        note: Option<String>,
+        task_id: Option<String>,
+    ) -> Result<Option<String>, RpcError> {
+        let explicit = task_id.is_some();
         let task = {
             let model = self.model();
-            active_task(&model.tasks, agent).map(|t| t.id.clone())
+            task_id.or_else(|| active_task(&model.tasks, agent).map(|t| t.id.clone()))
         };
-        let Some(task) = task else { return Ok(()) };
-        self.try_update_task(&task, |t| match status {
-            AgentStatus::Waiting => {
-                t.status = TaskStatus::Waiting;
-                t.note = note.clone();
+        let Some(task) = task else { return Ok(None) };
+        self.try_update_task_checked(&task, |model, t| {
+            if t.assigned_agent.as_deref() != Some(agent) {
+                return Err(RpcError::forbidden(format!("task {} is not yours", t.id)));
             }
-            AgentStatus::Blocked => {
-                t.status = TaskStatus::Blocked;
-                t.note = note.clone();
+            if !explicit
+                && active_task(&model.tasks, agent).is_none_or(|current| current.id != t.id)
+            {
+                return Err(RpcError::conflict(
+                    "current task changed; retry the status report",
+                ));
             }
-            _ => {
-                if matches!(t.status, TaskStatus::Waiting | TaskStatus::Blocked) {
-                    t.status = TaskStatus::Working;
-                    t.note = note.clone();
+            if !matches!(
+                t.status,
+                TaskStatus::Working | TaskStatus::Waiting | TaskStatus::Blocked
+            ) || (t.status == TaskStatus::Blocked && t.started_at.is_none())
+            {
+                return Err(RpcError::conflict(format!(
+                    "task {} has no started work to report on",
+                    t.id
+                )));
+            }
+            if status != AgentStatus::Waiting {
+                if let Some(current) =
+                    tasks::executing_task(&model.tasks, agent).filter(|current| current.id != t.id)
+                {
+                    return Err(RpcError::conflict(format!(
+                        "another task is executing: {}. Finish or park it first to resume {}; \
+if no more work is needed, task_complete(task_id=\"{}\") can finish the parked card directly",
+                        current.id, t.id, t.id
+                    )));
                 }
             }
-        })?;
-        Ok(())
+            match status {
+                AgentStatus::Waiting => {
+                    t.status = TaskStatus::Waiting;
+                    t.note = note.clone();
+                }
+                AgentStatus::Blocked => {
+                    t.status = TaskStatus::Blocked;
+                    t.note = note.clone();
+                }
+                _ => {
+                    if matches!(t.status, TaskStatus::Waiting | TaskStatus::Blocked) {
+                        t.status = TaskStatus::Working;
+                        t.note = note.clone();
+                    }
+                }
+            }
+            Ok(())
+        })?
+        .ok_or_else(|| RpcError::not_found(format!("no task '{task}'")))?;
+        self.clear_task_wakeups(agent, &task);
+        self.project_task(agent);
+        Ok(Some(task))
     }
 
     // ---- completion -----------------------------------------------------
@@ -795,6 +857,9 @@ until the database takes writes again, tasks wait where they are.",
         artifacts: Vec<Artifact>,
     ) -> Result<Task, RpcError> {
         let task = self.resolve_task(who, task_id)?;
+        let was_current = task.assigned_agent.as_deref().is_some_and(|agent| {
+            active_task(&self.model().tasks, agent).is_some_and(|current| current.id == task.id)
+        });
         match task.status {
             // Completing twice is harmless.
             TaskStatus::Done | TaskStatus::Review => return Ok(task),
@@ -853,8 +918,18 @@ until the database takes writes again, tasks wait where they are.",
                 Some(_) => (None, true),
             },
         };
+        let mut claimed = false;
         let updated = self
-            .try_update_task(&task.id, |t| {
+            .try_update_task_checked(&task.id, |_, t| {
+                if matches!(t.status, TaskStatus::Done | TaskStatus::Review) {
+                    return Ok(());
+                }
+                if t.status != task.status {
+                    return Err(RpcError::conflict(
+                        "task changed before completion; read its card again",
+                    ));
+                }
+                claimed = true;
                 t.result = Some(if result.is_empty() {
                     "done".into()
                 } else {
@@ -881,10 +956,17 @@ until the database takes writes again, tasks wait where they are.",
                         t.note = None;
                     }
                 }
+                Ok(())
             })?
             .ok_or_else(|| RpcError::not_found("task vanished"))?;
 
-        self.model().rt(&author).self_status = None;
+        if !claimed {
+            return Ok(updated);
+        }
+        self.clear_task_wakeups(&author, &task.id);
+        if was_current {
+            self.model().rt(&author).self_status = None;
+        }
         match &reviewer {
             Some(reviewer) => {
                 self.emit(
@@ -917,12 +999,16 @@ yourself"
             }
             None => self.finish_task(&updated, &author).await,
         }
-        self.update_agent(&author, |a| {
-            a.task = None;
-            a.progress = Some(100);
-            a.activity = format!("finished {}", updated.title);
-        });
-        self.settle(&author);
+        if was_current && tasks::executing_task(&self.model().tasks, &author).is_none() {
+            self.update_agent(&author, |a| {
+                a.progress = Some(100);
+                a.activity = format!("finished {}", updated.title);
+            });
+        }
+        self.project_task(&author);
+        if was_current {
+            self.settle(&author);
+        }
         self.replan();
         Ok(updated)
     }
@@ -1034,7 +1120,12 @@ with review_submit(task_id=\"{}\", approve=true|false).",
     /// `fail_task`, returning a refused save to the caller.
     async fn try_fail_task(&self, id: &str, reason: String) -> Result<(), RpcError> {
         let now = now_ms();
+        let mut claimed = false;
         let Some(task) = self.try_update_task(id, |t| {
+            if t.status.is_terminal() {
+                return;
+            }
+            claimed = true;
             t.status = TaskStatus::Failed;
             t.completed_at = Some(now);
             t.note = Some(reason.clone());
@@ -1042,6 +1133,9 @@ with review_submit(task_id=\"{}\", approve=true|false).",
         else {
             return Ok(());
         };
+        if !claimed {
+            return Ok(());
+        }
         let mut event = NewEvent::new(
             "scheduler",
             "task.failed",
@@ -1051,11 +1145,8 @@ with review_submit(task_id=\"{}\", approve=true|false).",
         .error();
         if let Some(agent) = &task.assigned_agent {
             event = event.agent(agent);
-            self.update_agent(agent, |a| {
-                if a.task.as_deref() == Some(task.title.as_str()) {
-                    a.task = None;
-                }
-            });
+            self.clear_task_wakeups(agent, id);
+            self.project_task(agent);
             self.settle(agent);
         }
         self.emit(event);
@@ -1080,6 +1171,9 @@ with review_submit(task_id=\"{}\", approve=true|false).",
         reason: String,
     ) -> Result<Task, RpcError> {
         let task = self.resolve_task(who, task_id)?;
+        let was_current = task.assigned_agent.as_deref().is_some_and(|agent| {
+            active_task(&self.model().tasks, agent).is_some_and(|current| current.id == task.id)
+        });
         if task.status.is_terminal() {
             return Err(RpcError::conflict(format!(
                 "task {} is already {}",
@@ -1091,7 +1185,7 @@ with review_submit(task_id=\"{}\", approve=true|false).",
             .await?;
         // Only once it is stored: giving up ends what the agent said about
         // itself (waiting, blocked), so it settles afresh.
-        if let Some(agent) = &task.assigned_agent {
+        if let Some(agent) = task.assigned_agent.as_ref().filter(|_| was_current) {
             self.model().rt(agent).self_status = None;
             self.settle(agent);
         }

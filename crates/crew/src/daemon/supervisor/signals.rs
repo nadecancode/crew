@@ -86,7 +86,11 @@ impl Daemon {
             };
         }
         if active_task(&model.tasks, id).is_some() {
-            return AgentStatus::Idle;
+            return if crate::tasks::executing_task(&model.tasks, id).is_some() {
+                AgentStatus::Idle
+            } else {
+                AgentStatus::Waiting
+            };
         }
         let open = model
             .tasks

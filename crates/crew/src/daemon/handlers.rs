@@ -467,9 +467,13 @@ change identity",
             }
             Call::MessageGet { id } => reply(self.message_by_id(&who, &id)?),
 
-            Call::StatusUpdate { status, note } => {
+            Call::StatusUpdate {
+                status,
+                note,
+                task_id,
+            } => {
                 let agent = agent_only(&who)?.to_string();
-                self.self_status(&agent, status, note)?;
+                self.self_status(&agent, status, note, task_id)?;
                 reply(self.agent(&agent))
             }
             Call::Decline { reason } => {
@@ -695,7 +699,19 @@ change identity",
     /// recipients, persists, publishes, and triggers delivery into each
     /// recipient's session. Direct messages go straight to their recipient —
     /// the orchestrator is never a hop.
-    pub(crate) async fn send_message(&self, new: NewMessage) -> Result<SendOutcome, RpcError> {
+    pub(crate) async fn send_message(&self, mut new: NewMessage) -> Result<SendOutcome, RpcError> {
+        // Replies can identify a parked card even after the sender has
+        // started independent work. Preserve caller-supplied task scope.
+        if new.metadata.is_null() {
+            new.metadata = json!({});
+        }
+        if let Some(metadata) = new.metadata.as_object_mut() {
+            if let Some(task) = crate::tasks::active_task(&self.model().tasks, &new.from) {
+                metadata
+                    .entry("from_task_id")
+                    .or_insert_with(|| json!(task.id));
+            }
+        }
         let (recipients, notify_p2p) = self.recipients_of(&new)?;
         let outcome = self.bus.send(new, recipients)?;
         if outcome.duplicate {
@@ -765,6 +781,11 @@ change identity",
         let mut touched = outcome.recipients.clone();
         touched.push(message.from.clone());
         self.refresh_counts(&touched);
+        for recipient in &outcome.recipients {
+            if let Err(e) = self.record_task_wakeups(recipient, std::slice::from_ref(message)) {
+                tracing::error!("{}", e.message);
+            }
+        }
         self.update_agent(&message.from, |a| a.last_activity_at = message.timestamp);
         for recipient in &outcome.recipients {
             self.request_delivery(recipient);
@@ -817,6 +838,7 @@ change identity",
         agent: &str,
         status: AgentStatus,
         note: Option<String>,
+        task_id: Option<String>,
     ) -> Result<(), RpcError> {
         if !matches!(
             status,
@@ -829,7 +851,15 @@ change identity",
         let note = note.map(|n| crew_core::util::truncate_chars(n.trim(), 300));
         // The task first: a refused save is the caller's error, and nothing
         // else has changed then.
-        self.mirror_status_to_task(agent, status, note.clone())?;
+        let selected = self.mirror_status_to_task_id(agent, status, note.clone(), task_id)?;
+        let is_current = selected.as_deref().is_none_or(|id| {
+            crate::tasks::active_task(&self.model().tasks, agent).is_some_and(|t| t.id == id)
+        });
+        self.project_task(agent);
+        if !is_current {
+            self.replan();
+            return Ok(());
+        }
         {
             let mut model = self.model();
             let rt = model.rt(agent);

@@ -174,6 +174,12 @@ impl Daemon {
             Ok(pending) if !pending.is_empty() => pending,
             _ => return,
         };
+        if let Err(e) = self.record_task_wakeups(id, &pending) {
+            tracing::error!("{}", e.message);
+            drop(_guard);
+            self.retry_delivery(id, 1_000);
+            return;
+        }
         let now = now_ms();
         let listener = self.listener(id);
         let sidecar = self.sidecar_socket(id);
@@ -396,10 +402,14 @@ impl Daemon {
                 }
                 a.last_activity_at = now;
             });
-            // A task that was waiting on this message is being worked on again.
-            if let Err(e) = self.mirror_status_to_task(id, AgentStatus::Working, None) {
-                tracing::error!("{}", e.message);
+            // Mid-card messages must never resume a different parked card.
+            // At rest the planner uses its durable cue and a resume notice.
+            if crate::tasks::executing_task(&self.model().tasks, id).is_some() {
+                if let Err(e) = self.mirror_status_to_task(id, AgentStatus::Working, None) {
+                    tracing::error!("{}", e.message);
+                }
             }
+            self.replan();
         }
         self.emit(
             NewEvent::new(

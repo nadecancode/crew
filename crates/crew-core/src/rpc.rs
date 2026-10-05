@@ -297,6 +297,8 @@ pub enum Call {
         status: AgentStatus,
         #[serde(default)]
         note: Option<String>,
+        #[serde(default)]
+        task_id: Option<String>,
     },
     /// The agent will not do what its current turn asked of it (it goes
     /// against its guidelines or usage policies): crew hands that work to
