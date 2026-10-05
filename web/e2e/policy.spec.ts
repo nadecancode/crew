@@ -83,7 +83,7 @@ test("no policy violation and no request across every view, inspector tab and di
   await page.locator('[data-task="ledger"]').click();
   await expect(page.locator("#side-panel .task-panel")).toContainText("implement ledger");
   // (`l` on a focused task walks the DAG: the view's button instead.)
-  await page.locator(".status-bar").getByRole("button", { name: "logs" }).click();
+  await page.getByRole("navigation", { name: "views", exact: true }).getByRole("button", { name: "Events", exact: true }).click();
   await page.locator('#main [data-seq="4"]').dblclick();
   await expect(page.locator("#side-panel .event-panel")).toContainText("cherry_pick");
   await page.keyboard.press("v");

@@ -275,7 +275,7 @@ test.describe("operator actions", () => {
     await expect(dialog.getByRole("tab", { selected: true })).toBeFocused();
     await page.keyboard.press("2");
     await expect(dialog.getByRole("tab", { selected: true })).toContainText("Codex");
-    await expect(dialog.getByRole("option", { name: /GPT 6 Luna/ })).toContainText("not here");
+    await expect(dialog.getByRole("option", { name: /GPT 6 Luna/ })).toContainText("Unavailable: not in the model list of this Codex account");
     await page.keyboard.press("ArrowLeft");
     await expect(dialog.getByRole("tab", { selected: true })).toContainText("Claude Code");
     await expect(dialog.getByRole("option", { selected: true })).toContainText("Opus 5.5");
@@ -347,7 +347,7 @@ test.describe("operator actions", () => {
   test("stop the team asks first (the status bar, S); esc and cancel send nothing; the team's stop leaves the page live and the workspace not running", async ({ page, mock, csp, openPage }) => {
     await openPage();
     await inspect(page, "claude-2");
-    const stop = page.locator(".status-bar").getByRole("button", { name: "stop team" });
+    const stop = page.locator(".status-bar").getByRole("button", { name: "stop team", exact: true });
     const dialog = page.getByRole("dialog", { name: "stop the team" });
 
     await stop.click();
