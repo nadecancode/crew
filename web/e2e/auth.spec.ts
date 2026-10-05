@@ -59,7 +59,8 @@ test("after the document started the page asks its origin for nothing, the termi
   for (const key of ["t", "l", "v", "v", "?"]) await page.keyboard.press(key);
   await page.keyboard.press("Escape");
   await page.locator('[data-agent="claude-2"] .node-head').click();
-  await page.getByRole("button", { name: "model", exact: true }).click();
+  await page.getByRole("toolbar", { name: "actions for claude-2", exact: true }).getByRole("button", { name: "More", exact: true }).click();
+  await page.getByRole("menu", { name: "actions for claude-2", exact: true }).getByRole("menuitem", { name: "model and CLI", exact: true }).click();
   await expect(page.getByRole("dialog", { name: "model and CLI" })).toBeVisible();
   await page.keyboard.press("Escape");
   expect(guard.requests).toEqual([]);
