@@ -37,6 +37,13 @@ default; `NATIVE_RUST_TOOLCHAIN` overrides that selection with an installed
 toolchain. The CLI/portable Rust 1.82 floor is
 unchanged; compilation here does not establish that older-toolchain gate.
 
+The launcher derives runtime library directories from the selected GTK/VTE
+pkg-config link closure, then prepends them to the spawned command's
+`LD_LIBRARY_PATH`. It preserves an existing value and adds no empty directory
+component. This also runs after entering `nix-shell`: development pkg-config
+paths alone do not let an executable without Nix runtime paths locate GTK.
+The caller's environment and toolkit versions are unchanged.
+
 ## Linux build, run and capture
 
 After the Linux package lands:
