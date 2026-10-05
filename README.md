@@ -847,11 +847,9 @@ load. Gallery files contain no pairing codes, tokens, browser storage, or
 real workspace content, and never enter `web-dist`. Capture errors produce
 a nonzero exit. `--strict` also fails on active text contrast below its WCAG
 threshold, unnamed controls, or document overflow. Disabled text is exempt.
-Before the responsive shell lands, baseline captures need the explicit
-`--allow-overflow narrow,zoom` exception for the old 900px minimum width;
-remove it when validating the integrated responsive layout. Every exception
-is named in the manifest and reproduction command. Non-dialog surfaces fail
-if a question or other dialog covers them.
+Every viewport, 390px wide and 200% zoom included, fits without horizontal
+document overflow; there is no exception. Non-dialog surfaces fail if a
+question or other dialog covers them.
 
 Use `--scenario baseline --surface team,tasks,events,usage --theme light,dark
 --viewport desktop,narrow` for a short pass. The full matrix includes
