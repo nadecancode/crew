@@ -51,13 +51,12 @@
 .replies button { overflow-wrap: anywhere; }
 
 /* Usage: readable facts, with an explicitly labelled internal table scroller. */
-.usage-view { position: absolute; inset: 0; padding: 16px 24px 24px; }
+.usage-view { position: absolute; inset: 0; padding: 16px 24px; }
 .legend { display: flex; flex-wrap: wrap; gap: 12px; font-size: 12px; color: var(--muted); }
 .swatch { display: inline-block; width: 10px; height: 10px; border-radius: 2px; vertical-align: middle; }
 .s0 { fill: var(--token-input); background: var(--token-input); } .s1 { fill: var(--token-output); background: var(--token-output); } .s2 { fill: var(--token-cache-read); background: var(--token-cache-read); } .s3 { fill: var(--token-cache-write); background: var(--token-cache-write); }
 .usage-scroll { overflow-x: auto; }
 .usage-table { border-collapse: collapse; width: 100%; min-width: 640px; font-size: 13px; }
-.usage-table:has(td[colspan]) { min-width: 0; }
 .usage-table th { text-align: left; color: var(--muted); font-weight: normal; }
 .usage-table :is(th, td) { padding: 10px 8px; border-bottom: 1px solid var(--line); }
 .usage-table td { font-family: var(--mono); }
