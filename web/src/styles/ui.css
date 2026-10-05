@@ -87,7 +87,7 @@ pre { margin: 0; white-space: pre-wrap; }
 .q-text { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 1; }
 
 /* A compact inspector replaces the main view instead of covering it. */
-.page-body { flex: 1; display: flex; min-height: 240px; position: relative; }
+.page-body { flex: 1; display: flex; min-height: 400px; position: relative; }
 .main { position: relative; flex: 1; min-width: 0; min-height: 0; overflow: hidden; }
 .side-panel { position: relative; flex: none; width: var(--panel-w); background: var(--panel); border-left: 1px solid var(--line); display: flex; flex-direction: column; min-height: 0; }
 .page-body.full .main, .page-body.replacement .main { display: none; }
