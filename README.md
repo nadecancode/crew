@@ -826,6 +826,11 @@ switching workspaces, daemons that stop and return, `--remove`, `--restart`,
 what stays outside, a killed server and a squatter on its port, the
 performance budgets).
 
+The running dashboard serves assets embedded in its `crew` binary. To see a
+frontend change, rebuild or reinstall `crew`, run that new binary with
+`crew web --restart`, and open the fresh pairing address it prints. Tabs from
+the previous dashboard server stay stopped; the team daemon keeps running.
+
 For the frontend development loop, start the mock and Vite in separate
 terminals:
 
