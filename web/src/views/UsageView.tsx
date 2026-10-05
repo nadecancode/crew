@@ -10,7 +10,7 @@ import { useSecond } from "../clock";
 import { absoluteTime, clockTime, resetTime, runtimeGlyph, tokens, windowSize } from "../format";
 import type { Agent } from "../protocol";
 import { EmptyState, ViewHeader } from "../components";
-import { levelTone, reportedTokens, until, usageRows, windowLabel, STALE_MS } from "./usage";
+import { levelTone, reportedTokens, until, usageRows, usageTotals, windowLabel, STALE_MS } from "./usage";
 
 const SERIES = ["input", "output", "cache read", "cache written"] as const;
 const total = (a: Agent) => (a.usage ? reportedTokens(a.usage) : 0);
@@ -21,6 +21,7 @@ export function UsageView() {
   const second = useSecond();
   const now = () => (second(), store.serverNow(Date.now()));
   const agents = createMemo(() => [...store.state.agents].sort((a, b) => total(b) - total(a) || a.id.localeCompare(b.id)));
+  const totals = createMemo(() => usageTotals(store.state.agents));
   const max = () => Math.max(1, ...agents().map(total));
   const rows = createMemo(() => usageRows(store.state.session?.quotas ?? [], store.state.agents));
   const [hover, setHover] = createSignal<string | null>(null);
@@ -32,6 +33,7 @@ export function UsageView() {
   return (
     <div class="usage-view scroll" tabindex="0" aria-label="usage">
       <ViewHeader title="Usage" meta="Reported by this team's runtimes" />
+      <p>Total reported tokens <strong>{totals().reported ? tokens(totals().tokens) : "Not reported"}</strong> · {totals().reported} of {agents().length} agents reporting</p>
       <section>
         <h3>agents <span class="muted">by tokens</span></h3>
         <div class="legend">
