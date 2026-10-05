@@ -5,16 +5,16 @@
 
 :root {
   color-scheme: light dark;
-  --canvas: light-dark(#f5f6f3, #101716);
-  --surface: light-dark(#fff, #17201e);
-  --surface-raised: light-dark(#eef1ed, #1e2a26);
-  --text: light-dark(#182321, #e5eeea);
-  --muted: light-dark(#53635d, #a7b8b0);
-  --quiet: light-dark(#596b62, #9aafa4);
-  --line: light-dark(#d9e1dc, #2c3c35);
-  --control-border: light-dark(#75867d, #79978a);
-  --action: light-dark(#116e59, #71d5ae);
-  --action-surface: light-dark(#e7f3ec, #203a2f);
+  --canvas: light-dark(#f5f6f3, #121212);
+  --surface: light-dark(#fff, #1a1a1a);
+  --surface-raised: light-dark(#eef1ed, #242424);
+  --text: light-dark(#182321, #ededed);
+  --muted: light-dark(#53635d, #b5b5b5);
+  --quiet: light-dark(#596b62, #a3a3a3);
+  --line: light-dark(#d9e1dc, #363636);
+  --control-border: light-dark(#75867d, #858585);
+  --action: light-dark(#116e59, #8cb7f2);
+  --action-surface: light-dark(#e7f3ec, #242424);
   --info: light-dark(#315ebe, #8cb7f2);
   --ok: light-dark(#216e4d, #7ccea3);
   --warn: light-dark(#8a570b, #e5bf6b);
@@ -40,12 +40,12 @@
   --gauge: var(--action);
   --gauge-track: var(--line);
   --token-input: var(--info);
-  --token-output: var(--action);
+  --token-output: light-dark(#116e59, #71d5ae);
   --token-cache-read: var(--shell);
   --token-cache-write: var(--warn);
-  --bg-term: #111815;
-  --term-text: #e5eeea;
-  --term-selection: #3d4f47;
+  --bg-term: #101010;
+  --term-text: #ededed;
+  --term-selection: #414141;
   --ui: system-ui, -apple-system, "Segoe UI", Roboto, Ubuntu, Cantarell, "Noto Sans", sans-serif;
   --mono: ui-monospace, SFMono-Regular, "JetBrains Mono", Menlo, Consolas, "DejaVu Sans Mono", monospace;
   --font-xs: 12px;
