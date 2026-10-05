@@ -33,9 +33,10 @@ for (const mode of ["empty", "unavailable", "truncated", "error"] as const) {
       await page.getByRole("tab", { name: "transcript", exact: true }).click();
       const transcript = page.locator(".transcript");
       if (mode === "empty") {
-        await expect(page.locator(".transcript-list")).toBeVisible();
+        await expect(transcript).toContainText("no transcript entries yet");
         await expect(page.locator(".transcript-list .vrow")).toHaveCount(0);
         await expect(transcript).not.toContainText(/reading|loading/i);
+        await expect(transcript).not.toContainText(/no session file|not available|unavailable|failed/i);
       }
       if (mode === "unavailable") await expect(transcript).toContainText(/no session file|not available|unavailable/i);
       if (mode === "truncated") {
