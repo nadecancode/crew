@@ -1,5 +1,18 @@
 #!/usr/bin/env bash
 # Sourced by runners. Build/capture output stays in this checkout.
+native_clear_inherited_context() {
+    # A fixture's `git -C` does not override an inherited repository/index.
+    # Keep Git/legacy agent context out of fixture children, while retaining
+    # toolchain paths, caller options and unrelated environment.
+    unset CREW_IDENTITY CREW_SOCKET CREW_LAUNCH
+    local native_name
+    for native_name in "${!GIT_@}" "${!HERDR_@}"; do
+        [ -z "$native_name" ] || unset "$native_name"
+    done
+}
+
+native_clear_inherited_context
+
 native_new_output() {
     local requested=$1 prefix=$2 base="$native_repo/target/native-validation" part cursor
     for part in "$native_repo/target" "$base"; do
@@ -32,5 +45,5 @@ native_cargo_target() {
     done
     if [ -L "$native_repo/target/native-validation/cargo" ]; then echo "cargo target must not be a symlink" >&2; exit 64; fi
     export CARGO_TARGET_DIR="$native_repo/target/native-validation/cargo"
-    unset CREW_IDENTITY CREW_SOCKET CREW_LAUNCH
+    native_clear_inherited_context
 }

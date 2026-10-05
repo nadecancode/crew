@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # GTK development/runtime tools; --headless adds isolated capture tools.
 set -euo pipefail
-unset CREW_IDENTITY CREW_SOCKET CREW_LAUNCH
+source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/common.sh"
 
 headless=false
 if [ "${1:-}" = --headless ]; then headless=true; shift; fi

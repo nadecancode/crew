@@ -16,7 +16,14 @@ The source and feature names follow `notes/native-architecture.md`: portable
 
 Run scripts from any directory. Build/capture output stays under this
 checkout's `target/native-validation/`; Cargo uses its `cargo/` directory.
-Inherited `CREW_IDENTITY`, `CREW_SOCKET` and `CREW_LAUNCH` are removed. Output
+Inherited `CREW_IDENTITY`, `CREW_SOCKET` and `CREW_LAUNCH` are removed. Git's
+repository/index/object/ref/configuration context (`GIT_*`) and legacy agent
+context (`HERDR_*`) are also removed before
+build/test subprocesses. An inherited `GIT_DIR` overrides a fixture's `git -C`
+and previously redirected a review run into root metadata. The boundary lives
+in sourced `common.sh` and runs again when `linux-env.sh` re-enters after Nix.
+Toolchain selection, GTK/pkg-config/runtime paths, caller arguments and unrelated
+environment remain available. Output
 directories must be new, stay under that prefix and contain no symlink or
 traversal components. Missing source/toolchain produces a named nonzero result,
 never a passing skip. No script touches the production listener or team.
@@ -43,6 +50,35 @@ pkg-config link closure, then prepends them to the spawned command's
 component. This also runs after entering `nix-shell`: development pkg-config
 paths alone do not let an executable without Nix runtime paths locate GTK.
 The caller's environment and toolkit versions are unchanged.
+
+## Runner environment isolation
+
+Run the bounded environment regression from any directory:
+
+```sh
+scripts/native/tests/environment.sh
+```
+
+It supplies disposable repository/index/ref/object and Crew-context sentinels,
+then observes actual child environments at the common boundary, Linux's available
+toolkit path, Nix bootstrap/re-entry and Linux build dispatch. The Nix test hook
+deliberately introduces context after the first boundary; re-entry must remove
+it again. It also checks spaced/literal arguments, retained Rust/Nix selection,
+Cargo and loader paths, ordinary environment and unchanged foreign metadata
+sentinels. The compiler/package/bootstrap commands in this regression are
+observers, so their success is not a Cargo build, GTK application or Apple pass.
+The existing `tests/tooling.sh` remains the real isolated GTK capture/cleanup gate.
+
+The prefix boundary includes Git's local variables, namespace, discovery and
+injected configuration, including keys beyond the active configuration count.
+It matches the raw fixture isolation policy rather than relying on a list that
+can omit another repository selector.
+Use explicit per-command repository arguments for an archive read; never export
+Git overrides across test runs. Runtime's separate `fixture-git-isolation` owns
+the affected raw Rust fixture constructors. The recovery and retained root
+backups are documented in [root Git recovery](../review/root-git-recovery.md).
+This runner correction changes no product source or immutable earlier evidence;
+Apple compilation and execution remain deferred by operator.
 
 ## Linux build, run and capture
 

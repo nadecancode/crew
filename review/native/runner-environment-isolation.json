@@ -1,0 +1,177 @@
+{
+  "task": "native-test-runner-isolation",
+  "date": "2026-10-05",
+  "source_baseline": "d4e0f979309b195dd5aa7b20515c12a3a9624664",
+  "root_incident": "review/root-git-recovery.md",
+  "policy": {
+    "cleared": [
+      "GIT_*",
+      "HERDR_*",
+      "CREW_IDENTITY",
+      "CREW_SOCKET",
+      "CREW_LAUNCH"
+    ],
+    "boundary": "Sourced common.sh, Cargo target preparation, Linux environment/re-entry",
+    "unrelated_environment_and_caller_arguments_preserved": true,
+    "raw_fixture_owner": "runtime/fixture-git-isolation"
+  },
+  "checks": [
+    {
+      "name": "Before expected failure",
+      "exit": 1,
+      "log": "runner-environment-before.log",
+      "sha256": "28df0350d0aa95c1e3244502370ce3cb093ced325bb86dae95e7aca44bc82349",
+      "output": "inherited context reached child: GIT_ALTERNATE_OBJECT_DIRECTORIES\n"
+    },
+    {
+      "name": "Four actual runner boundaries and preserved arguments/environment",
+      "exit": 0,
+      "log": "runner-environment.log",
+      "sha256": "bc31739389a4a2c655c66e303846d41929cc8a986309da231d6c73bc1d673ec9",
+      "output": "environment checks passed: common, Linux available/re-entry/build, caller args/environment, foreign sentinels\nartifacts: /home/nade/workspaces/personal/crew/.crew/worktrees/qa/target/native-validation/environment-v1Mcas\n"
+    },
+    {
+      "name": "Actual inherited-context GTK tooling probe",
+      "exit": 0,
+      "log": "runner-isolation-tooling.log",
+      "sha256": "00b8a98a1b5a15cded42bc6bd56564be8def3149974cf89a8d9efc5ebedb7e63",
+      "output": "native window observed; capture /home/nade/workspaces/personal/crew/.crew/worktrees/qa/target/native-validation/tooling-6GEcQd/window/screen.png\ntooling checks passed: GTK mapped-window capture, early exit, no window, process cleanup\nartifacts: /home/nade/workspaces/personal/crew/.crew/worktrees/qa/target/native-validation/tooling-6GEcQd\n"
+    },
+    {
+      "name": "Apple build deferred on Linux",
+      "exit": 2,
+      "log": "runner-isolation-apple-build.log",
+      "sha256": "65cc4e11b92ca7074450eacb37e8d7c091ab7b995c37cd0b71fe74a77dd93a11",
+      "output": "unavailable: Apple build/test requires macOS with Xcode; operator deferred runner verification\n"
+    },
+    {
+      "name": "iOS test destination required",
+      "exit": 64,
+      "log": "runner-isolation-apple-test.log",
+      "sha256": "39c07629e63ba98254cc4f254d3520111cb11d3ae19f820333e882ff508ab31f",
+      "output": "iOS tests require an explicit simulator destination\n"
+    },
+    {
+      "name": "Missing FFI/bindgen named rejection",
+      "exit": 2,
+      "log": "runner-isolation-apple-bindings.log",
+      "sha256": "14e2cfdd88c5139a5e6904c6ada0fc58a2f7fc637662d9493b66c5ea3cef1f5d",
+      "output": "unavailable: crew-client-ffi and crew-client-bindgen have not landed\n"
+    },
+    {
+      "name": "Output escape rejected",
+      "exit": 64,
+      "log": "runner-isolation-output-gate.log",
+      "sha256": "d44da2ecf156e420698d01a4b6d51ec28bdc77d852b2d6032f8867e823896a33",
+      "output": "output must be under /home/nade/workspaces/personal/crew/.crew/worktrees/qa/target/native-validation\n"
+    }
+  ],
+  "shell_syntax_scripts": 11,
+  "observer_only_context_values": [
+    "GIT_ALTERNATE_OBJECT_DIRECTORIES",
+    "GIT_CONFIG",
+    "GIT_CONFIG_PARAMETERS",
+    "GIT_CONFIG_COUNT",
+    "GIT_OBJECT_DIRECTORY",
+    "GIT_DIR",
+    "GIT_WORK_TREE",
+    "GIT_IMPLICIT_WORK_TREE",
+    "GIT_GRAFT_FILE",
+    "GIT_INDEX_FILE",
+    "GIT_NO_REPLACE_OBJECTS",
+    "GIT_REPLACE_REF_BASE",
+    "GIT_PREFIX",
+    "GIT_SHALLOW_FILE",
+    "GIT_COMMON_DIR",
+    "GIT_NAMESPACE",
+    "GIT_CONFIG_KEY_0",
+    "GIT_CONFIG_VALUE_0",
+    "GIT_CONFIG_KEY_23",
+    "GIT_CONFIG_VALUE_23",
+    "GIT_CEILING_DIRECTORIES",
+    "GIT_DISCOVERY_ACROSS_FILESYSTEM",
+    "GIT_CONFIG_GLOBAL",
+    "GIT_AUTHOR_NAME",
+    "GIT_FUTURE_REPOSITORY_CONTEXT",
+    "HERDR_IDENTITY",
+    "HERDR_SOCKET",
+    "HERDR_LAUNCH",
+    "CREW_IDENTITY",
+    "CREW_SOCKET",
+    "CREW_LAUNCH"
+  ],
+  "observer_artifacts": "/home/nade/workspaces/personal/crew/.crew/worktrees/qa/target/native-validation/environment-v1Mcas",
+  "foreign_sentinels_unchanged": true,
+  "toolkit_probe": {
+    "artifacts": "/home/nade/workspaces/personal/crew/.crew/worktrees/qa/target/native-validation/tooling-6GEcQd",
+    "kind": "Actual GTK toolkit probe; not Crew native app acceptance",
+    "window": "\nxwininfo: Window id: 0x200005 \"Native validation toolkit probe\"\n\n  Absolute upper-left X:  0\n  Absolute upper-left Y:  0\n  Relative upper-left X:  0\n  Relative upper-left Y:  0\n  Width: 480\n  Height: 240\n  Depth: 32\n  Visual: 0x40\n  Visual Class: TrueColor\n  Border width: 0\n  Class: InputOutput\n  Colormap: 0x200001 (not installed)\n  Bit Gravity State: NorthWestGravity\n  Window Gravity State: NorthWestGravity\n  Backing Store State: NotUseful\n  Save Under State: no\n  Map State: IsViewable\n  Override Redirect State: no\n  Corners:  +0+0  -960+0  -960-720  +0-720\n  -geometry 480x240+0+0\n\n",
+    "settings": "display=:8743\nwindow=0x200005\napp_pid=868617\nxvfb_pid=868546\nscreen=1440x960x24\ndpi=96\nGDK_SCALE=1\nGDK_DPI_SCALE=1\nGDK_BACKEND=x11\nGSK_RENDERER=cairo\nGDK_DEBUG=no-portals\n",
+    "versions": "GTK 4.22.4\nVTE 0.84.1\nGLib 2.88.3\nxwininfo 1.1.6\nVersion: ImageMagick 7.1.2-29 Q16-HDRI x86_64 b919b37fd:20260727 https://imagemagick.org\ndbus-run-session 1.16.2",
+    "process_checks": [
+      {
+        "result": "window",
+        "role": "app_pid",
+        "pid": 868617,
+        "alive": false
+      },
+      {
+        "result": "window",
+        "role": "xvfb_pid",
+        "pid": 868546,
+        "alive": false
+      },
+      {
+        "result": "early-exit",
+        "role": "app_pid",
+        "pid": 869441,
+        "alive": false
+      },
+      {
+        "result": "early-exit",
+        "role": "xvfb_pid",
+        "pid": 869325,
+        "alive": false
+      },
+      {
+        "result": "no-window",
+        "role": "app_pid",
+        "pid": 869587,
+        "alive": false
+      },
+      {
+        "result": "no-window",
+        "role": "xvfb_pid",
+        "pid": 869536,
+        "alive": false
+      }
+    ]
+  },
+  "local_artifacts": "/home/nade/workspaces/personal/crew/.crew/worktrees/qa/target/native-validation/",
+  "not_run": [
+    "Product/native connected-app tests",
+    "Apple build/link/simulator/device/UI execution",
+    "Unchanged full Rust/web matrices"
+  ],
+  "immutable_prior_evidence_unchanged": true,
+  "real_root_git_mutations": 0,
+  "shell_syntax": {
+    "scripts": [
+      "scripts/native/apple-bindings.sh",
+      "scripts/native/apple-build.sh",
+      "scripts/native/apple-run.sh",
+      "scripts/native/apple-test.sh",
+      "scripts/native/check.sh",
+      "scripts/native/common.sh",
+      "scripts/native/linux-build.sh",
+      "scripts/native/linux-env.sh",
+      "scripts/native/linux-smoke.sh",
+      "scripts/native/tests/environment.sh",
+      "scripts/native/tests/tooling.sh"
+    ],
+    "each_script_checked": true,
+    "log": "runner-isolation-syntax.log",
+    "sha256": "a6577389c2ff422bca7d7ca3445821f474ab9c811eb76196c084b396df765b4d"
+  },
+  "relative_links_resolve": true
+}
