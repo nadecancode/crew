@@ -607,8 +607,18 @@ impl Actions {
             } => {
                 running(agent(id, context)?)?;
                 // Raw terminal input can be empty; submitted prompts cannot.
-                // Terminal text is bounded by its encoded frame, not by the
-                // message bus's independent 64 KiB body cap.
+                // Coalesced raw batches stay within the shared 64 KiB bound.
+                // Whitespace and control characters remain valid raw input.
+                if let Some(text) = text
+                    .as_ref()
+                    .filter(|text| !*submit && text.len() > policy::VALIDATION_LIMITS.message_bytes)
+                {
+                    return Err(ClientError::TooLarge {
+                        actual: text.len() as u64,
+                        limit: policy::VALIDATION_LIMITS.message_bytes as u64,
+                    }
+                    .into());
+                }
                 if *submit && text.as_deref().unwrap_or_default().trim().is_empty() {
                     return Err(invalid("text", "a submitted prompt needs some text").into());
                 }
@@ -872,6 +882,15 @@ impl Actions {
                 other.scope.endpoint_id == proposal.scope.endpoint_id
                     && other.scope.workspace_id == proposal.scope.workspace_id
                     && left.id == right.id
+            }
+            (
+                Some(Command::AgentInput { submit: left, .. }),
+                Some(Command::AgentInput { submit: right, .. }),
+            ) => {
+                other.scope == proposal.scope
+                    && *left
+                    && *right
+                    && other.targets == proposal.targets
             }
             (Some(left), Some(right))
                 if other.scope == proposal.scope && proposal.route == Route::Action =>
@@ -1533,10 +1552,12 @@ impl Actions {
         }) {
             let same = |proposal: &Proposal| {
                 proposal.scope == current.scope
-                    && proposal
-                        .command
-                        .as_ref()
-                        .is_some_and(|command| command.kind() == method)
+                    && proposal.command.as_ref().is_some_and(|command| {
+                        command.kind() == method
+                            // AgentInput availability describes the submitted
+                            // prompt control. Raw streams plan full intents.
+                            && !matches!(command, Command::AgentInput { submit: false, .. })
+                    })
                     && target.is_none_or(|target| proposal.targets.iter().any(|id| id == target))
             };
             if self.pending.values().any(|pending| same(&pending.proposal))

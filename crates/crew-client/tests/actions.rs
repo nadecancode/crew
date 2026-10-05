@@ -1925,3 +1925,225 @@ fn logical_retry_invalidation_leaves_exact_scope_work_to_existing_retirement_gua
     assert!(retired.effects.iter().any(|effect| matches!(effect, ClientEffect::CloseAttachment { attachment_id, .. } if *attachment_id == attach)));
     assert_eq!(actions.pending_count(), 0);
 }
+
+fn input(facts: &Facts, text: &str, submit: bool) -> ActionIntent {
+    ActionIntent::AgentInput {
+        scope: facts.scope(),
+        id: "claude-1".into(),
+        text: Some(text.into()),
+        submit,
+    }
+}
+
+#[test]
+fn successive_outstanding_raw_batches_dispatch_with_distinct_ids_and_captured_bytes() {
+    let facts = Facts::new();
+    let mut actions = planner();
+    let first = plan(&mut actions, &facts, input(&facts, "\u{1b}[A", false));
+    let second = plan(&mut actions, &facts, input(&facts, "账目\r", false));
+    let (first_id, first_scope, first_lane, first_command) = request(&first);
+    let (second_id, second_scope, second_lane, second_command) = request(&second);
+    assert_ne!(first_id, second_id);
+    assert_eq!(
+        (first_scope, second_scope),
+        (&facts.scope(), &facts.scope())
+    );
+    assert_eq!(
+        (first_lane, second_lane),
+        (RequestLane::Action, RequestLane::Action)
+    );
+    assert_eq!(
+        first_command,
+        &Command::AgentInput {
+            id: "claude-1".into(),
+            text: Some("\u{1b}[A".into()),
+            submit: false
+        }
+    );
+    assert_eq!(
+        second_command,
+        &Command::AgentInput {
+            id: "claude-1".into(),
+            text: Some("账目\r".into()),
+            submit: false
+        }
+    );
+    assert_eq!(actions.pending_count(), 2);
+    for id in [first_id, second_id] {
+        let finished = actions
+            .finish(
+                &facts.scope(),
+                id,
+                OperationOutcome::Succeeded {
+                    result: CommandResult::Ok,
+                },
+                &facts.context(),
+                now(1_001),
+            )
+            .unwrap();
+        assert_eq!(finished.completions.len(), 1);
+        assert_eq!(finished.completions[0].operation_id, id);
+        assert_eq!(
+            finished.completions[0].notice().kind,
+            OperationOutcomeKind::Success
+        );
+    }
+    assert_eq!(actions.pending_count(), 0);
+}
+
+#[test]
+fn raw_batches_and_submitted_prompts_never_block_each_other_in_either_order() {
+    let facts = Facts::new();
+    for raw_first in [true, false] {
+        let mut actions = planner();
+        let first = plan(&mut actions, &facts, input(&facts, "first", !raw_first));
+        if raw_first {
+            let available = actions.availability(
+                ActionKind::AgentInput,
+                Some("claude-1"),
+                &facts.context(),
+                now(1_001),
+            );
+            assert!(available.available && available.reason.is_none());
+        }
+        let second = plan(&mut actions, &facts, input(&facts, "second", raw_first));
+        assert_ne!(request(&first).0, request(&second).0);
+        assert_eq!(actions.pending_count(), 2);
+        let unavailable = actions.availability(
+            ActionKind::AgentInput,
+            Some("claude-1"),
+            &facts.context(),
+            now(1_001),
+        );
+        assert_eq!(unavailable.reason.unwrap().code, "already_pending");
+        // The availability row describes the prompt button; a full raw intent
+        // still dispatches while that button reports a pending prompt.
+        request(&plan(&mut actions, &facts, input(&facts, "raw", false)));
+    }
+}
+
+#[test]
+fn a_second_submitted_prompt_keeps_its_existing_duplicate_guard() {
+    let facts = Facts::new();
+    let mut actions = planner();
+    let first = plan(&mut actions, &facts, input(&facts, "first prompt", true));
+    assert_eq!(
+        unavailable(&plan(
+            &mut actions,
+            &facts,
+            input(&facts, "second prompt", true)
+        )),
+        "already_pending"
+    );
+    assert_eq!(actions.pending_count(), 1);
+    actions
+        .finish(
+            &facts.scope(),
+            request(&first).0,
+            OperationOutcome::Succeeded {
+                result: CommandResult::Ok,
+            },
+            &facts.context(),
+            now(1_001),
+        )
+        .unwrap();
+    request(&plan(
+        &mut actions,
+        &facts,
+        input(&facts, "second prompt", true),
+    ));
+}
+
+#[test]
+fn raw_batches_keep_capacity_utf8_byte_bounds_and_terminal_grant_preflight() {
+    let mut facts = Facts::new();
+    let mut actions = Actions::new(2).unwrap();
+    request(&plan(&mut actions, &facts, input(&facts, "\r\n", false)));
+    request(&plan(&mut actions, &facts, input(&facts, " ", false)));
+    assert_eq!(
+        unavailable(&plan(&mut actions, &facts, input(&facts, "third", false))),
+        "operation_capacity"
+    );
+    let exact = "é".repeat(MAX_MESSAGE_BYTES / 2);
+    request(&plan(&mut planner(), &facts, input(&facts, &exact, false)));
+    let too_large = format!("{exact}é");
+    assert!(
+        matches!(planner().plan(input(&facts, &too_large, false), &facts.context(), now(1_001)), Err(ClientError::TooLarge { actual, limit }) if actual == (MAX_MESSAGE_BYTES + 2) as u64 && limit == MAX_MESSAGE_BYTES as u64)
+    );
+    facts.gateway(vec![GrantTier::Read, GrantTier::Control]);
+    assert_eq!(
+        unavailable(&plan(&mut planner(), &facts, input(&facts, "x", false))),
+        "grant_required"
+    );
+    facts.connection.grant.tiers.push(GrantTier::Terminal);
+    request(&plan(&mut planner(), &facts, input(&facts, "x", false)));
+}
+
+#[test]
+fn raw_closed_and_retired_outcomes_are_unknown_once_without_replay_or_stale_attribution() {
+    let mut facts = Facts::new();
+    let proven = facts.scope();
+    let mut actions = planner();
+    let first = request(&plan(&mut actions, &facts, input(&facts, "a", false))).0;
+    let second = request(&plan(&mut actions, &facts, input(&facts, "b", false))).0;
+    let closed = actions
+        .finish(
+            &proven,
+            first,
+            unknown("closed"),
+            &facts.context(),
+            now(1_001),
+        )
+        .unwrap();
+    assert_eq!(closed.completions.len(), 1);
+    assert_eq!(
+        closed.completions[0].notice().kind,
+        OperationOutcomeKind::Unknown
+    );
+    assert!(closed.effects.is_empty());
+    let mut stale = proven.clone();
+    stale.attempt += 1;
+    assert_eq!(
+        actions
+            .finish(
+                &stale,
+                second,
+                OperationOutcome::Succeeded {
+                    result: CommandResult::Ok
+                },
+                &facts.context(),
+                now(1_002)
+            )
+            .unwrap(),
+        ActionUpdate::default()
+    );
+    let retired = actions.retire(&proven, why("revoked"), now(1_003)).unwrap();
+    assert_eq!(retired.completions.len(), 1);
+    assert_eq!(retired.completions[0].operation_id, second);
+    assert_eq!(
+        retired.completions[0].notice().kind,
+        OperationOutcomeKind::Unknown
+    );
+    assert!(retired.effects.is_empty());
+    assert_eq!(
+        actions
+            .finish(
+                &proven,
+                second,
+                OperationOutcome::Succeeded {
+                    result: CommandResult::Ok
+                },
+                &facts.context(),
+                now(1_004)
+            )
+            .unwrap(),
+        ActionUpdate::default()
+    );
+    facts.connection.scope.attempt += 1;
+    assert_eq!(
+        actions
+            .resynchronized(&facts.context(), now(1_005))
+            .unwrap(),
+        ActionUpdate::default()
+    );
+}
