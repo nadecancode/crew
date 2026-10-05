@@ -23,17 +23,17 @@ export function ContextMenu() {
     const a = m ? store.agent(m.agent) : undefined;
     if (!a) return [];
     return [
-      ["message", () => ops.compose(a.id), "m", ""],
-      ["prompt", () => ops.prompt(a.id), "i", ""],
-      [a.paused ? "resume" : "pause", () => void actions.togglePause(a), "p", `agent_${a.paused ? "resume" : "pause"}`],
-      ["restart", () => void actions.restart(a.id), "r", "agent_restart"],
-      ["restart fresh…", () => ui.openDialog({ kind: "confirm", confirm: { kind: "restart-fresh", agent: a.id } }), "", "agent_restart_fresh"],
-      ["model and CLI", () => ops.model(a.id), "s", "agent_set_model"],
-      ["compact", () => void actions.compact(a.id), "", "agent_compact"],
-      ["open terminal", () => ops.open(a.id, "terminal"), "", "local"],
-      ...((a.backend ?? store.state.session?.backend) === "herdr" ? [["jump to pane", () => ops.focusPane(a.id), "g", "agent_focus"]] : []),
-      ["kill…", () => ui.openDialog({ kind: "confirm", confirm: { kind: "kill", agent: a.id } }), "k", "agent_kill"],
-    ] as [string, () => void, string, string][];
+      ["message", () => ops.compose(a.id), ""],
+      ["prompt", () => ops.prompt(a.id), ""],
+      [a.paused ? "resume" : "pause", () => void actions.togglePause(a), `agent_${a.paused ? "resume" : "pause"}`],
+      ["restart", () => void actions.restart(a.id), "agent_restart"],
+      ["restart fresh…", () => ui.openDialog({ kind: "confirm", confirm: { kind: "restart-fresh", agent: a.id } }), "agent_restart_fresh"],
+      ["model and CLI", () => ops.model(a.id), "agent_set_model"],
+      ["compact", () => void actions.compact(a.id), "agent_compact"],
+      ["open terminal", () => ops.open(a.id, "terminal"), "local"],
+      ...((a.backend ?? store.state.session?.backend) === "herdr" ? [["jump to pane", () => ops.focusPane(a.id), "agent_focus"]] : []),
+      ["kill…", () => ui.openDialog({ kind: "confirm", confirm: { kind: "kill", agent: a.id } }), "agent_kill"],
+    ] as [string, () => void, string][];
   };
   createEffect(() => {
     if (!menu()) return;
@@ -50,9 +50,9 @@ export function ContextMenu() {
       e.stopPropagation();
       ui.closeMenu();
     } else if (e.key === "Tab") ui.closeMenu();
-    else if (["ArrowDown", "ArrowUp", "Home", "End"].includes(e.key)) {
+    else if (e.key === "ArrowDown" || e.key === "ArrowUp") {
       e.preventDefault();
-      buttons[e.key === "Home" ? 0 : e.key === "End" ? buttons.length - 1 : (i + (e.key === "ArrowDown" ? 1 : -1) + buttons.length) % buttons.length]?.focus();
+      buttons[(i + (e.key === "ArrowDown" ? 1 : -1) + buttons.length) % buttons.length]?.focus();
     }
   };
   return (
@@ -71,11 +71,11 @@ export function ContextMenu() {
         }}>
         <div class="menu-title">{menu()!.agent}</div>
         <For each={items()}>
-          {([label, run, key, method]) => (
+          {([label, run, method]) => (
             <button role="menuitem" classList={{ danger: method === "agent_kill" }} disabled={method !== "local" && (!link.live() || (!!method && app.isPending(method, m.agent)))} onClick={() => {
               ui.closeMenu();
               run();
-            }}>{label}<kbd aria-hidden="true">{key}</kbd></button>
+            }}>{label}</button>
           )}
         </For>
       </div>}
