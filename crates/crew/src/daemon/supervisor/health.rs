@@ -63,6 +63,9 @@ restart {id} fresh or move it to another CLI."
 
     pub(crate) async fn housekeeping(&self) {
         let now = now_ms();
+        // Before anything else, team or none: the copy of crew agents are
+        // handed is still the one made.
+        self.binary_housekeeping().await;
         let Some(limits) = self.model().session.team.as_ref().map(|t| t.limits.clone()) else {
             return;
         };

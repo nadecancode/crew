@@ -95,6 +95,7 @@ impl Daemon {
     pub(crate) async fn apply_plan(&self) {
         let _planning = self.plan_lock.lock().await;
         let procs = self.procs().ok();
+        let homeward = self.homeward();
         let (tasks, agents) = {
             let model = self.model();
             if model.session.team.is_none() {
@@ -118,6 +119,7 @@ impl Daemon {
                     active: !a.orchestrator
                         && (matches!(a.status, AgentStatus::Working | AgentStatus::Spawning)
                             || a.limit.is_some()),
+                    homeward: homeward.contains(&a.id),
                 })
                 .collect();
             (model.tasks.clone(), agents)
@@ -1460,6 +1462,7 @@ mod review_tests {
         let mut running = super::super::start(super::super::DaemonOptions {
             workspace: temp.path().to_path_buf(),
             crew_bin: std::env::current_exe().unwrap(),
+            pin: None,
         })
         .await
         .unwrap();

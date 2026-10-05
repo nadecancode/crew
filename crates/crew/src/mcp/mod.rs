@@ -380,4 +380,79 @@ mod tests {
             .unwrap()
             .contains("cannot reach the crew daemon"));
     }
+
+    #[test]
+    fn a_daemon_of_another_build_is_said_in_every_tool_call() {
+        use std::io::{BufRead, BufReader, Write};
+        let dir = tempfile::tempdir().unwrap();
+        let socket = dir.path().join("crew.sock");
+        let listener = std::os::unix::net::UnixListener::bind(&socket).unwrap();
+        // A daemon one protocol ahead, refusing every hello as daemons do.
+        let other = crew_core::rpc::PROTOCOL_VERSION + 1;
+        std::thread::spawn(move || {
+            for stream in listener.incoming() {
+                let Ok(mut stream) = stream else { return };
+                let mut line = String::new();
+                if BufReader::new(stream.try_clone().unwrap())
+                    .read_line(&mut line)
+                    .unwrap_or(0)
+                    == 0
+                {
+                    continue;
+                }
+                let hello: Value = serde_json::from_str(&line).unwrap();
+                let refusal = crew_core::rpc::RpcError::new(
+                    "protocol",
+                    format!(
+                        "client speaks protocol {}, daemon speaks {other}",
+                        hello["params"]["protocol"]
+                    ),
+                )
+                .with_data(
+                    json!({"version": "9.9.9", "protocol": other, "workspace": "/w/payments"}),
+                );
+                let reply =
+                    crew_core::rpc::ServerFrame::err(hello["id"].as_u64().unwrap(), refusal);
+                writeln!(stream, "{}", serde_json::to_string(&reply).unwrap()).unwrap();
+            }
+        });
+        let mut b = Bridge {
+            identity: Identity {
+                socket: socket.to_string_lossy().into_owned(),
+                agent_id: "claude-1".into(),
+                token: "t".into(),
+            },
+            client: None,
+            orchestrator: None,
+        };
+        let sentence = format!(
+            "crew {} (protocol {}) cannot talk to the daemon of /w/payments, which is crew 9.9.9 \
+(protocol {other}): restart the team (`crew stop`, then `crew run`)",
+            env!("CARGO_PKG_VERSION"),
+            crew_core::rpc::PROTOCOL_VERSION
+        );
+        // The handshake completes whatever the daemon says.
+        let r = handle(
+            &mut b,
+            &json!({"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":LATEST_PROTOCOL}}),
+        )
+        .unwrap();
+        assert_eq!(r["result"]["serverInfo"]["name"], "crew");
+        let r = handle(
+            &mut b,
+            &json!({"jsonrpc":"2.0","id":2,"method":"tools/list"}),
+        )
+        .unwrap();
+        assert!(!r["result"]["tools"].as_array().unwrap().is_empty());
+        // And every call answers with the sentence.
+        for (id, name) in [(3, "agents_list"), (4, "task_complete")] {
+            let r = handle(
+                &mut b,
+                &json!({"jsonrpc":"2.0","id":id,"method":"tools/call","params":{"name":name,"arguments":{}}}),
+            )
+            .unwrap();
+            assert_eq!(r["result"]["isError"], true);
+            assert_eq!(r["result"]["content"][0]["text"], sentence.as_str());
+        }
+    }
 }

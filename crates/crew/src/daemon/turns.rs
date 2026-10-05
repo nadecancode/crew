@@ -47,7 +47,7 @@ const BY: &str = "the work style";
 /// How much of what was refused the model taking over is handed.
 const HANDED_CHARS: usize = 6_000;
 /// After this many refusals an agent stays on the model that took over.
-const STAY_AFTER: u32 = 2;
+pub(super) const STAY_AFTER: u32 = 2;
 /// How long it rests after the work before it goes back: a reply to what
 /// it did may be on its way.
 const RESTED_MS: i64 = 15_000;
@@ -920,6 +920,7 @@ mod provider_error_tests {
         let running = super::super::start(super::super::DaemonOptions {
             workspace: temp.path().to_path_buf(),
             crew_bin: std::env::current_exe().unwrap(),
+            pin: None,
         })
         .await
         .unwrap();
@@ -1023,6 +1024,7 @@ mod empty_turn_tests {
         let running = super::super::start(super::super::DaemonOptions {
             workspace: temp.path().to_path_buf(),
             crew_bin: std::env::current_exe().unwrap(),
+            pin: None,
         })
         .await
         .unwrap();

@@ -14,7 +14,9 @@
 //!   network.
 //!
 //! Every profile gets the system trees, the toolchain leaves and the PATH
-//! entries that pass validation, all read-only.
+//! entries that pass validation, all read-only, and the crew binary: the
+//! daemon's copy of it in `.crew/bin` (daemon::binary), bound by the
+//! identity it was made with, or else a binary outside every protected path.
 
 use std::ffi::{OsStr, OsString};
 use std::os::unix::ffi::OsStrExt;
@@ -60,6 +62,10 @@ pub struct Host {
     pub path: OsString,
     pub bwrap: PathBuf,
     pub crew_bin: PathBuf,
+    /// `crew_bin` is the daemon's copy of its binary (daemon::binary), and
+    /// this was its identity when it was made: it is bound as a path of the
+    /// session, exactly that file.
+    pub crew_pin: Option<Identity>,
     /// `$CARGO_HOME/bin`: rustup's proxies.
     pub cargo_bin: PathBuf,
     pub rustup_home: PathBuf,
@@ -84,6 +90,7 @@ impl Host {
             path: env("PATH").unwrap_or_default(),
             bwrap: bwrap.to_path_buf(),
             crew_bin: crew_bin.to_path_buf(),
+            crew_pin: None,
             cargo_bin: cargo_home.join("bin"),
             rustup_home: env("RUSTUP_HOME").map_or_else(|| home.join(".rustup"), PathBuf::from),
             gitconfig: home.join(".gitconfig"),
@@ -517,16 +524,16 @@ impl<'a> Builder<'a> {
 
     fn toolchain(&mut self) -> Result<(), String> {
         let host = self.host;
-        let crew_bin = canonical_file(&host.crew_bin)?;
-        // The binary may sit in the main checkout's target/ (a development
-        // build): one read-only file, an exception to rule 2.
-        let in_checkout = crew_bin.starts_with(self.request.session.workspace.join("target"));
-        if !in_checkout {
-            self.protected
-                .check(&crew_bin)
-                .map_err(|e| format!("the crew binary cannot be bound: {e}"))?;
+        match host.crew_pin {
+            Some(id) => self.crew_pin(&host.crew_bin, id)?,
+            None => {
+                let crew_bin = canonical_file(&host.crew_bin)?;
+                self.protected
+                    .check(&crew_bin)
+                    .map_err(|e| format!("the crew binary cannot be bound: {e}"))?;
+                self.bind_scanned(&crew_bin, false, &[])?;
+            }
         }
-        self.bind_scanned(&crew_bin, false, &[])?;
         if let Some(cli) = self.request.cli {
             self.protected
                 .validate(&install_root(cli)?)
@@ -545,6 +552,46 @@ impl<'a> Builder<'a> {
                 self.warnings.push(format!("toolchain path left out: {e}"));
             }
         }
+        Ok(())
+    }
+
+    /// The daemon's copy of its binary: a path of the session, not a
+    /// toolchain path, bound read-only at its own path (beneath the masked
+    /// `.crew` where there is one). It must be exactly the file the daemon
+    /// made: a regular file directly in `<state>/bin`, the operator's, not
+    /// writable by group or others, with the identity it had when it was
+    /// made, which the mount is checked against too.
+    fn crew_pin(&mut self, pin: &Path, id: Identity) -> Result<(), String> {
+        let refused =
+            |why: &str| format!("the crew binary cannot be bound: {} {why}", pin.display());
+        let dir = self
+            .request
+            .session
+            .workspace
+            .join(crew_core::paths::STATE_DIR_NAME)
+            .join(crate::daemon::binary::BIN_DIR);
+        if pin.parent() != Some(dir.as_path()) {
+            return Err(refused(&format!("is not in {}", dir.display())));
+        }
+        canonical(pin)?;
+        let meta = std::fs::symlink_metadata(pin).map_err(|e| refused(&e.to_string()))?;
+        let found = Identity {
+            dev: meta.dev(),
+            ino: meta.ino(),
+            kind: Kind::File,
+        };
+        if !meta.file_type().is_file() || id.kind != Kind::File || found != id {
+            return Err(refused("is not the copy the daemon made"));
+        }
+        if meta.uid() != crew_core::paths::uid() || meta.mode() & 0o022 != 0 {
+            return Err(refused("may be written by someone else"));
+        }
+        self.mounts.push(Mount::Bind {
+            path: pin.to_path_buf(),
+            id,
+            writable: false,
+        });
+        self.covered.push(pin.to_path_buf());
         Ok(())
     }
 
@@ -845,8 +892,11 @@ fn utf8(path: &Path) -> Result<String, String> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::os::unix::fs::symlink;
+    use std::os::unix::fs::{symlink, PermissionsExt};
     use std::os::unix::net::UnixListener;
+
+    /// The daemon's copy of its binary, in the fixture's workspace.
+    const PIN: &str = ".crew/bin/crew-0123456789abcdef";
 
     /// A host and session laid out the way crew lays them out, in a
     /// temporary directory: a home with a toolchain and secrets, a
@@ -922,6 +972,7 @@ mod tests {
             &ws.join(".crew/agents/a/identity.json"),
             &ws.join(".crew/agents/b/identity.json"),
             &ws.join("target/release/crew"),
+            &ws.join(PIN),
             &ws.join("secret.txt"),
             &run.join("0123.token"),
         ]);
@@ -940,6 +991,7 @@ mod tests {
             home.join(".local/bin/claude"),
         )
         .unwrap();
+        std::fs::set_permissions(ws.join(PIN), std::fs::Permissions::from_mode(0o500)).unwrap();
         let socket = run.join("0123.sock");
         let listener = UnixListener::bind(&socket).unwrap();
         let mut protected = Protected::new(&home);
@@ -952,7 +1004,8 @@ mod tests {
             home: home.clone(),
             path: std::env::join_paths([home.join(".cargo/bin")]).unwrap(),
             bwrap: "/usr/bin/bwrap".into(),
-            crew_bin: ws.join("target/release/crew"),
+            crew_bin: ws.join(PIN),
+            crew_pin: Some(identify(&ws.join(PIN)).unwrap()),
             cargo_bin: home.join(".cargo/bin"),
             rustup_home: home.join(".rustup"),
             gitconfig: home.join(".gitconfig"),
@@ -1120,7 +1173,7 @@ mod tests {
         assert_eq!(
             under(&f.ws),
             vec![
-                (f.ws.join("target/release/crew"), false),
+                (f.ws.join(PIN), false),
                 (f.git.clone(), false),
                 (f.git.join("objects"), true),
                 (f.git.join("refs"), true),
@@ -1191,7 +1244,7 @@ mod tests {
         assert!(!spec.new_session);
         assert_eq!(spec.allow_unix, vec![f.run.clone()]);
         assert_eq!(spec.min_landlock_abi, 9);
-        assert_eq!(spec.crew_bin, f.ws.join("target/release/crew"));
+        assert_eq!(spec.crew_bin, f.ws.join(PIN));
     }
 
     #[test]
@@ -1241,6 +1294,70 @@ mod tests {
         assert!(!visible(&spec, &f.git.join("config")));
         assert!(visible(&spec, &p.agent));
         assert_eq!(spec.cwd, f.ws);
+    }
+
+    #[test]
+    fn the_daemons_copy_of_crew_is_bound_beneath_the_masked_state_exactly_as_made() {
+        let f = fixture();
+        let pin = f.ws.join(PIN);
+        let p = f.paths("orchestrator");
+        mkdirs(&[&p.agent.join("rw")]);
+        let role = Role::Orchestrator {
+            agent_dir: &p.agent,
+            sidecar_dir: None,
+        };
+        let spec = f.build(role, &Extra::default(), &[]).unwrap().spec;
+        assert!(visible(&spec, &pin), "the orchestrator cannot run crew");
+        assert!(!visible(&spec, &f.ws.join(".crew/crew.db")));
+        let bound = spec.mounts.iter().find(|m| m.path() == pin).unwrap();
+        assert!(
+            matches!(bound, Mount::Bind { id, writable: false, .. } if Some(*id) == f.host.crew_pin),
+            "{bound:?}"
+        );
+        let spec = f.worker(&Extra::default()).unwrap().spec;
+        assert!(visible(&spec, &pin), "a worker cannot run crew");
+        assert!(!visible(&spec, &f.ws.join(".crew/crew.db")));
+
+        // Another file under its name: not the copy that was made.
+        let planted = f.ws.join(".crew/bin/planted");
+        touch(&[&planted]);
+        std::fs::set_permissions(&planted, std::fs::Permissions::from_mode(0o500)).unwrap();
+        std::fs::rename(&planted, &pin).unwrap();
+        let error = f.worker(&Extra::default()).unwrap_err();
+        assert!(error.contains("is not the copy the daemon made"), "{error}");
+
+        // The copy as made, but writable by others.
+        let mut f = fixture();
+        let pin = f.ws.join(PIN);
+        std::fs::set_permissions(&pin, std::fs::Permissions::from_mode(0o520)).unwrap();
+        let error = f.worker(&Extra::default()).unwrap_err();
+        assert!(error.contains("may be written by someone else"), "{error}");
+
+        // Anywhere but the daemon's directory, it is not a copy of the daemon's.
+        let elsewhere = f.ws.join("target/release/crew");
+        f.host.crew_bin = elsewhere.clone();
+        f.host.crew_pin = Some(identify(&elsewhere).unwrap());
+        let error = f.worker(&Extra::default()).unwrap_err();
+        assert!(error.contains("is not in"), "{error}");
+    }
+
+    #[test]
+    fn a_crew_binary_that_is_no_copy_is_a_toolchain_path_with_no_exception_for_target() {
+        let mut f = fixture();
+        f.host.crew_pin = None;
+        f.host.crew_bin = f.ws.join("target/release/crew");
+        let error = f.worker(&Extra::default()).unwrap_err();
+        assert!(
+            error.starts_with("the crew binary cannot be bound"),
+            "{error}"
+        );
+        // Outside every protected path, it is bound as it is.
+        let installed = f.root.join("opt/crew");
+        touch(&[&installed]);
+        f.host.crew_bin = installed.clone();
+        let spec = f.worker(&Extra::default()).unwrap().spec;
+        assert!(binds(&spec).contains(&(installed.clone(), false)));
+        assert_eq!(spec.crew_bin, installed);
     }
 
     #[test]
@@ -1582,7 +1699,7 @@ mod tests {
         let f = jj_fixture();
         let built = f.worker(&Extra::default()).unwrap();
         let p = f.paths("a");
-        let mut expected = vec![(f.ws.join("target/release/crew"), false)];
+        let mut expected = vec![(f.ws.join(PIN), false)];
         expected.extend(jj_store_table(&f, &p.worktree));
         expected.extend([(p.agent.clone(), false), (p.agent.join("rw"), true)]);
         assert_eq!(binds_under(&built.spec, &f.ws), expected);
@@ -1618,7 +1735,7 @@ mod tests {
             nix_daemon: None,
         };
         let spec = build(&f.host, &request).unwrap().spec;
-        let mut expected = vec![(f.ws.join("target/release/crew"), false)];
+        let mut expected = vec![(f.ws.join(PIN), false)];
         expected.extend(jj_store_table(&f, &p.worktree));
         assert_eq!(binds_under(&spec, &f.ws), expected);
         assert!(visible(&spec, &jj), "the jj it runs");

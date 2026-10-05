@@ -2,8 +2,8 @@
 
 use base64::Engine;
 use crew_core::rpc::{
-    Call, HelloInfo, InboxResult, OutputResult, Push, Role, RpcError, SendParams, SendResult,
-    ServerFrame, PROTOCOL_VERSION,
+    Call, Hello, HelloInfo, InboxResult, OutputResult, Push, Role, RpcError, SendParams,
+    SendResult, ServerFrame, PROTOCOL_VERSION,
 };
 use crew_core::{AgentStatus, MessageType, BROADCAST, OPERATOR_ID};
 use serde::Serialize;
@@ -107,6 +107,46 @@ impl Daemon {
         }
     }
 
+    /// An agent's crew tools said `hello` in another protocol: they run
+    /// another build of crew than this daemon (notes/binary-pinning.md B8).
+    /// Said as a warn event, at most once a minute per agent, so the
+    /// operator learns of it even when the agent says nothing; only for a
+    /// hello that carries the agent's own token.
+    fn protocol_refused(&self, hello: &Hello) {
+        const EVERY_MS: i64 = 60_000;
+        if hello.role != Role::Agent {
+            return;
+        }
+        let Ok(Who::Agent(id)) =
+            self.authenticate(hello.role, hello.agent_id.clone(), hello.token.clone())
+        else {
+            return;
+        };
+        let now = crew_core::util::now_ms();
+        {
+            let mut model = self.model();
+            let rt = model.rt(&id);
+            if rt.protocol_warned_at != 0 && now - rt.protocol_warned_at < EVERY_MS {
+                return;
+            }
+            rt.protocol_warned_at = now;
+        }
+        self.emit(
+            NewEvent::new(
+                "daemon",
+                "agent.protocol_mismatch",
+                format!(
+                    "{id}'s crew tools speak protocol {}, this daemon speaks \
+{PROTOCOL_VERSION}: restart the agent",
+                    hello.protocol
+                ),
+            )
+            .agent(&id)
+            .warn()
+            .data(json!({ "client": hello.client, "protocol": hello.protocol })),
+        );
+    }
+
     pub(crate) async fn dispatch(&self, conn: &mut Conn, call: Call) -> Reply {
         let call_name = call.method();
         if let Call::Ping = call {
@@ -132,13 +172,19 @@ change identity",
             // Exactly this version: an older client misreads newer frames as
             // surely as a newer one. The code lets clients say "restart".
             if hello.protocol != PROTOCOL_VERSION {
+                self.protocol_refused(&hello);
                 return Err(RpcError::new(
                     "protocol",
                     format!(
                         "client speaks protocol {}, daemon speaks {PROTOCOL_VERSION}",
                         hello.protocol
                     ),
-                ));
+                )
+                .with_data(json!({
+                    "version": VERSION,
+                    "protocol": PROTOCOL_VERSION,
+                    "workspace": self.workspace.to_string_lossy(),
+                })));
             }
             let who = self.authenticate(hello.role, hello.agent_id, hello.token)?;
             // The dashboard server's mark on a browser's connection: it only

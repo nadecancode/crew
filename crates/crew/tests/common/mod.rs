@@ -120,7 +120,13 @@ impl Session {
     }
 
     pub fn command(&self) -> Command {
-        let mut cmd = Command::new(CREW);
+        self.command_of(Path::new(CREW))
+    }
+
+    /// `command()`, running `program`, a crew binary of the test's own
+    /// (`own_crew`).
+    pub fn command_of(&self, program: &Path) -> Command {
+        let mut cmd = Command::new(program);
         cmd.current_dir(self.root())
             .env("XDG_RUNTIME_DIR", self.root().join("run"))
             .env("XDG_STATE_HOME", self.root().join("state"))
@@ -164,6 +170,59 @@ impl Session {
     /// Write the team file and `crew run` it.
     pub fn run(&self, team: &TeamConfig) -> String {
         self.run_with(team, &[])
+    }
+
+    /// `run`, with the team's daemon started from `program` (`own_crew`).
+    pub fn run_from(&self, program: &Path, team: &TeamConfig) -> String {
+        let file = self.root().join("team.yaml");
+        std::fs::write(&file, team.to_yaml().expect("encoding the team"))
+            .expect("writing team.yaml");
+        let output = self
+            .command_of(program)
+            .args(["run", "team.yaml", "--no-attach"])
+            .output()
+            .expect("running crew");
+        assert!(
+            output.status.success(),
+            "crew run failed:\n{}\n{}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
+        String::from_utf8_lossy(&output.stdout).into_owned()
+    }
+
+    /// A crew binary of the test's own, `<root>/<name>`, to start a daemon
+    /// from when the test replaces or removes the file it was started from.
+    pub fn own_crew(&self, name: &str) -> PathBuf {
+        let path = self.root().join(name);
+        std::fs::copy(CREW, &path).expect("copying crew");
+        path
+    }
+
+    /// What is in `<state>/bin`, where the daemon keeps its copy of crew.
+    pub fn crew_copies(&self) -> Vec<PathBuf> {
+        let dir = self.workspace.join(".crew/bin");
+        let mut copies: Vec<PathBuf> = std::fs::read_dir(&dir)
+            .map(|entries| entries.map(|e| e.unwrap().path()).collect())
+            .unwrap_or_default();
+        copies.sort();
+        copies
+    }
+
+    /// Shell words for the only crew binary this session's sandboxes mount:
+    /// the daemon's copy in `<state>/bin`, looked up when they run.
+    pub fn sandboxed_crew(&self) -> String {
+        format!(
+            "\"$(ls -d '{}'/crew-* | head -n 1)\"",
+            self.workspace.join(".crew/bin").display()
+        )
+    }
+
+    /// The daemon's copy of crew, when it keeps exactly one.
+    pub fn crew_copy(&self) -> PathBuf {
+        let copies = self.crew_copies();
+        assert_eq!(copies.len(), 1, "{copies:?}");
+        copies[0].clone()
     }
 
     pub fn run_with(&self, team: &TeamConfig, extra: &[&str]) -> String {
@@ -286,6 +345,29 @@ impl Drop for Session {
             let _ = self.crew(&["web", "--stop"]);
         }
     }
+}
+
+/// Whether process `pid` runs the file now at `path` (the same inode),
+/// whatever path it was started by.
+pub fn runs(pid: u32, path: &Path) -> bool {
+    use std::os::unix::fs::MetadataExt;
+    let (Ok(running), Ok(file)) = (
+        std::fs::metadata(format!("/proc/{pid}/exe")),
+        std::fs::metadata(path),
+    ) else {
+        return false;
+    };
+    (running.dev(), running.ino()) == (file.dev(), file.ino())
+}
+
+/// Variable `name` of process `pid`'s environment.
+pub fn env_of(pid: u32, name: &str) -> Option<String> {
+    let environ = std::fs::read(format!("/proc/{pid}/environ")).ok()?;
+    let prefix = format!("{name}=");
+    environ
+        .split(|b| *b == 0)
+        .find_map(|entry| entry.strip_prefix(prefix.as_bytes()))
+        .map(|value| String::from_utf8_lossy(value).into_owned())
 }
 
 pub fn find_agent<'a>(snapshot: &'a Snapshot, id: &str) -> &'a Agent {

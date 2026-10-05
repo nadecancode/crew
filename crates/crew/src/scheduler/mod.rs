@@ -21,6 +21,9 @@ pub struct AgentView {
     /// A turn is running or a message is on its way to the agent: something
     /// may still happen even if no task is formally "working".
     pub active: bool,
+    /// About to go back to its own model from a fallback, between tasks: it
+    /// is handed no new task until it is back.
+    pub homeward: bool,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -110,6 +113,11 @@ pub fn plan(tasks: &[Task], agents: &[AgentView]) -> Vec<Action> {
         .filter(|a| a.runnable)
         .map(|a| a.id.as_str())
         .collect();
+    let takes_work: HashSet<&str> = agents
+        .iter()
+        .filter(|a| a.runnable && !a.homeward)
+        .map(|a| a.id.as_str())
+        .collect();
 
     for task in tasks.iter_mut() {
         if task.status != TaskStatus::Ready {
@@ -122,7 +130,8 @@ pub fn plan(tasks: &[Task], agents: &[AgentView]) -> Vec<Action> {
                 let reviewer = task.reviewer.as_deref();
                 let candidate = agents
                     .iter()
-                    .filter(|a| a.runnable && !a.orchestrator && !busy.contains(&a.id))
+                    .filter(|a| takes_work.contains(a.id.as_str()) && !a.orchestrator)
+                    .filter(|a| !busy.contains(&a.id))
                     .filter(|a| reviewer != Some(a.id.as_str()))
                     .min_by_key(|a| (load.get(&a.id).copied().unwrap_or(0), a.id.clone()));
                 let Some(candidate) = candidate else { continue };
@@ -135,7 +144,7 @@ pub fn plan(tasks: &[Task], agents: &[AgentView]) -> Vec<Action> {
                 candidate.id.clone()
             }
         };
-        if runnable.contains(agent.as_str()) && !busy.contains(&agent) {
+        if takes_work.contains(agent.as_str()) && !busy.contains(&agent) {
             actions.push(Action::Dispatch {
                 task: task.id.clone(),
                 agent: agent.clone(),
@@ -158,12 +167,15 @@ pub fn plan(tasks: &[Task], agents: &[AgentView]) -> Vec<Action> {
             .is_some_and(|r| runnable.contains(r) && t.assigned_agent.as_deref() != Some(r))
     };
     // A waiting task is not stuck while the teammate it waits on is busy
-    // (for instance answering its question).
+    // (for instance answering its question), nor while an agent is on its
+    // way back to its own model.
     let progressing = tasks.iter().any(|t| match t.status {
         TaskStatus::Working => true,
         TaskStatus::Review => reviewable(t),
         _ => false,
-    }) || agents.iter().any(|a| a.runnable && a.active);
+    }) || agents
+        .iter()
+        .any(|a| a.runnable && (a.active || a.homeward));
     if !progressing {
         let mut stuck = Vec::new();
         let mut reasons = Vec::new();
@@ -173,8 +185,22 @@ pub fn plan(tasks: &[Task], agents: &[AgentView]) -> Vec<Action> {
                 TaskStatus::Ready => {
                     stuck.push(task.id.clone());
                     match &task.assigned_agent {
-                        Some(agent) => reasons
-                            .push(format!("'{}' is ready but {agent} is not running", task.id)),
+                        Some(agent) => {
+                            // A running agent still on another task is not
+                            // handed this one: say which, not that it is down.
+                            let on = tasks.iter().find(|t| {
+                                t.id != task.id
+                                    && t.assigned_agent.as_deref() == Some(agent.as_str())
+                                    && occupies_agent(t)
+                            });
+                            let why = match on {
+                                Some(on) if runnable.contains(agent.as_str()) => {
+                                    format!("{agent} is still on '{}' ({})", on.id, on.status)
+                                }
+                                _ => format!("{agent} is not running"),
+                            };
+                            reasons.push(format!("'{}' is ready but {why}", task.id))
+                        }
                         None => {
                             reasons.push(format!("'{}' is ready but no worker is free", task.id))
                         }
@@ -252,6 +278,7 @@ mod tests {
                 orchestrator: *id == "orchestrator",
                 runnable: true,
                 active: false,
+                homeward: false,
             })
             .collect()
     }
@@ -388,6 +415,55 @@ mod tests {
         assert!(
             matches!(&actions[..], [Action::Stall { reason, .. }] if reason.contains("x is not running")),
             "{actions:?}"
+        );
+    }
+
+    #[test]
+    fn a_ready_task_whose_agent_waits_on_another_is_a_stall_that_says_so() {
+        // The agent is up, but its own earlier task is waiting: the ready
+        // one is not handed over, and the report names the task in the way
+        // rather than calling the agent down.
+        let mut on = task("integrate", Some("qa"), &[], TaskStatus::Waiting);
+        on.started_at = Some(1);
+        let next = task("land", Some("qa"), &[], TaskStatus::Ready);
+        let actions = plan(&[on, next], &agents(&["qa"]));
+        assert!(
+            matches!(&actions[..], [Action::Stall { tasks, reason }]
+                if tasks == &["integrate", "land"]
+                    && reason.contains("'land' is ready but qa is still on 'integrate' (waiting)")),
+            "{actions:?}"
+        );
+    }
+
+    #[test]
+    fn an_agent_on_its_way_back_to_its_own_model_is_handed_no_new_task() {
+        let tasks = vec![
+            task("next", Some("qa"), &[], TaskStatus::Ready),
+            task("free", None, &[], TaskStatus::Ready),
+        ];
+        let mut views = agents(&["qa"]);
+        views[0].homeward = true;
+        // Neither its own task nor a free one, and no stall: it is coming.
+        assert_eq!(plan(&tasks, &views), vec![]);
+        views[0].homeward = false;
+        assert_eq!(plan(&tasks, &views), vec![dispatch("next", "qa")]);
+        // A free task waits for it to be back too, and is handed over then.
+        let tasks = vec![
+            task("next", Some("qa"), &[], TaskStatus::Done),
+            task("free", None, &[], TaskStatus::Ready),
+        ];
+        views[0].homeward = true;
+        assert_eq!(plan(&tasks, &views), vec![]);
+        views[0].homeward = false;
+        assert_eq!(
+            plan(&tasks, &views),
+            vec![
+                Action::Assign {
+                    task: "free".into(),
+                    agent: "qa".into()
+                },
+                dispatch("free", "qa"),
+            ]
         );
     }
 

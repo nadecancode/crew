@@ -610,6 +610,12 @@ pub struct Request {
 pub struct RpcError {
     pub code: String,
     pub message: String,
+    /// What a client can act on beyond the message, by code. `protocol`
+    /// (a refused `hello`): the daemon's `version`, `protocol` and
+    /// `workspace`. Kept loose, since a client reads it from a daemon of
+    /// another protocol.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub data: Option<Value>,
 }
 
 impl RpcError {
@@ -617,7 +623,13 @@ impl RpcError {
         Self {
             code: code.to_string(),
             message: message.into(),
+            data: None,
         }
+    }
+
+    pub fn with_data(mut self, data: Value) -> Self {
+        self.data = Some(data);
+        self
     }
 
     pub fn unauthorized(message: impl Into<String>) -> Self {
@@ -813,6 +825,11 @@ pub struct SessionInfo {
     /// /tmp fallback; empty for the preferred runtime directory or older peers.
     #[serde(default)]
     pub socket_warning: String,
+    /// The daemon's warning when it could not keep a copy of its binary to
+    /// hand its agents (a rebuild while the team runs breaks their tools);
+    /// empty when it did, or from older peers.
+    #[serde(default)]
+    pub binary_warning: String,
     pub daemon_started_at: i64,
     #[serde(default)]
     pub team_started_at: Option<i64>,

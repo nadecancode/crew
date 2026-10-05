@@ -136,6 +136,12 @@ impl Daemon {
                 .map(|l| l.settings.max_restarts)
                 .unwrap_or(0);
             let rt = model.rt(id);
+            // A process of another build recovery could not stop ends when
+            // a stop of it works (stop_other_builds), not when its backend
+            // reports an exit or loses sight of it.
+            if rt.other_build {
+                return;
+            }
             rt.ready = false;
             rt.turn_active = false;
             rt.pending_prompt = None;

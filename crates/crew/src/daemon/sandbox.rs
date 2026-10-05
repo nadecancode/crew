@@ -14,6 +14,7 @@ use crate::agents::LaunchSpec;
 use crate::git;
 use crate::git::launch::{Launcher, SandboxLauncher};
 use crate::persistence::NewEvent;
+use crate::sandbox::pin::Identity;
 use crate::sandbox::probe::UntrustedNixDaemon;
 use crate::sandbox::profile::{self, Built, Extra, Host, Request, Role, Session};
 use crate::sandbox::spec::{launcher_env, Spec};
@@ -502,6 +503,7 @@ fn untrusted_nix_daemon(path: Option<&OsString>) -> Result<UntrustedNixDaemon, S
 /// The host, probed now, and the daemon's layout. Blocking.
 fn host_and_layout(
     crew_bin: &Path,
+    crew_pin: Option<Identity>,
     workspace: &Path,
     store: Store,
     socket: &Path,
@@ -509,7 +511,8 @@ fn host_and_layout(
     let path = std::env::var_os("PATH");
     let available = probe::probe(crew_bin, path.as_ref())
         .map_err(|e| anyhow!("agents cannot be sandboxed on this host: {e}"))?;
-    let host = Host::detect(crew_bin, &available.bwrap, available.landlock_abi);
+    let mut host = Host::detect(crew_bin, &available.bwrap, available.landlock_abi);
+    host.crew_pin = crew_pin;
     Ok((host, Layout::new(workspace, store, socket, &cache_home())?))
 }
 
@@ -691,7 +694,11 @@ impl Daemon {
         }
         let crew_bin = self.crew_bin.clone();
         let nix_daemon = config.nix_daemon;
+        let daemon = self.clone();
         let (host, nix) = tokio::task::spawn_blocking(move || {
+            // The probe runs the copy of crew agents get. One that cannot be
+            // made again is an error event already, and fails the probe.
+            let _ = daemon.check_binary();
             let path = std::env::var_os("PATH");
             let host = probe::probe(&crew_bin, path.as_ref()).map(drop);
             let nix = nix_daemon.then(|| untrusted_nix_daemon(path.as_ref()).map(drop));
@@ -761,8 +768,15 @@ impl Daemon {
     /// Blocking: probes the host.
     fn helper_launcher(&self, config: &SandboxConfig, worktree: &Path) -> Result<SandboxLauncher> {
         let vcs = self.vcs();
-        let (host, layout) =
-            host_and_layout(&self.crew_bin, &self.workspace, vcs.store(), &self.socket)?;
+        // It runs the copy of crew the daemon hands out, as it was made.
+        self.check_binary()?;
+        let (host, layout) = host_and_layout(
+            &self.crew_bin,
+            self.binary.identity(),
+            &self.workspace,
+            vcs.store(),
+            &self.socket,
+        )?;
         let admin = admin_of(&layout.store, worktree)?;
         // jj runs by the path the daemon selected, which the profile binds;
         // git is found on the sandbox's PATH.
@@ -870,8 +884,13 @@ workspace.sandbox.mode: off"
         // Reported once per start of the session; the agent's git, sidecar
         // and queue commands leave out the same things and say nothing more.
         let report = run.terminal.is_some();
+        let daemon = self.clone();
         let (built, program) = tokio::task::spawn_blocking(move || -> Result<_> {
-            let (host, layout) = host_and_layout(&crew_bin, &workspace, vcs.store(), &socket)?;
+            // It runs the copy of crew the daemon hands out, as it was made.
+            daemon.check_binary()?;
+            let crew_pin = daemon.binary.identity();
+            let (host, layout) =
+                host_and_layout(&crew_bin, crew_pin, &workspace, vcs.store(), &socket)?;
             let path = std::env::var_os("PATH");
             let found = Found::new(&run.program, path.as_ref(), &crew_bin)?;
             let at = Placement {
@@ -1452,6 +1471,7 @@ mod tests {
         let running = super::super::start(super::super::DaemonOptions {
             workspace: fx.ws.clone(),
             crew_bin: std::env::current_exe().unwrap(),
+            pin: None,
         })
         .await
         .unwrap();
@@ -1722,6 +1742,7 @@ unsandboxed"
         let running = super::super::start(super::super::DaemonOptions {
             workspace: fx.ws.clone(),
             crew_bin: std::env::current_exe().unwrap(),
+            pin: None,
         })
         .await
         .unwrap();
@@ -2461,6 +2482,7 @@ refused'; fi\n",
         let running = super::super::start(super::super::DaemonOptions {
             workspace: fx.ws.clone(),
             crew_bin: std::env::current_exe().unwrap(),
+            pin: None,
         })
         .await
         .unwrap();

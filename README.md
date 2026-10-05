@@ -681,13 +681,14 @@ hold the agent at a prompt only `crew agent attach` could reach.
 
 ## Web dashboard
 
-The same sessions in a browser: the agent graph with its message and VCS
-animations, the bus, the task graph, the event log, usage, the inspector (a
-live terminal included) and every operator action of the TUI except starting
-a team. **One dashboard server per user shows every workspace you join to
-it**, and you switch between them in the page. It runs on the loopback
-addresses only (no other machine, no TLS, no accounts), and works in
-Chromium-based browsers and Firefox. Safari cannot resolve its address.
+The same sessions in a browser, in light or dark: the agent graph with its
+message and VCS animations (or a list of the team), the bus, the task graph
+(or a list), the event log, usage, the inspector (a live terminal included)
+and every operator action of the TUI except starting a team. It fits a narrow
+window as well as a wide one. **One dashboard server per user shows every
+workspace you join to it**, and you switch between them in the page. It runs
+on the loopback addresses only (no other machine, no TLS, no accounts), and
+works in Chromium-based browsers and Firefox. Safari cannot resolve its address.
 
 ```sh
 cd ~/work/payments && crew web      # join this workspace, start the server if needed, open the browser
@@ -715,6 +716,33 @@ address at once and keeps its session in that browser's `localStorage` (no
 cookie, no service worker). Another tab of the same address needs no code. To
 sign in another browser, run `crew web` again: it prints the same address with
 a new code. `crew status` shows the `web` line while the workspace is joined.
+
+### The page
+
+- **The header** names the workspace and its objective (click to read it
+  whole), with counts of agents, those working, tasks complete and open
+  questions. Under it are the views: Team, Tasks (`t`), Events (`l`) and
+  Usage (`v`), the message bus and Message (`m`).
+- **Team and Tasks** each show as a Graph or a List. The choice lasts as long
+  as the tab; a window narrower than 640px opens on List. Both keep the
+  selection and keyboard navigation when you switch.
+- **The side panel** holds the message bus (each row shows who wrote to whom,
+  the type and the first two lines of the body) or what you opened: an
+  agent's inspector, a task, an event, a message. Drag its edge (or focus it
+  and use the arrow keys) to resize it; below 768px wide it takes the place of
+  the main area until you close it.
+- **The inspector** leads with what the agent is doing, its problems and its
+  mailbox. Message and pause are buttons; every other action (prompt,
+  restart, restart fresh, model and CLI, compact, jump to pane, open
+  terminal, kill) is in its More menu, which a right-click on the agent or
+  `shift+F10` also opens.
+- **Usage** totals the tokens the runtimes reported and says how many agents
+  reported any; an agent that reported nothing shows "not reported", never
+  zero.
+- **The status bar** has the workspace switcher (`w`), Commands (`ctrl+k`, the
+  command line), Appearance, help (`?`) and stop team (`S`, asks first).
+  Appearance follows the system's light or dark preference unless you choose
+  Light or Dark.
 
 ### Several workspaces
 
@@ -767,11 +795,11 @@ a new code. `crew status` shows the `web` line while the workspace is joined.
   address. A restart of a team is different: the tab goes on (above).
 
 The layout (node positions, log filters) is kept per workspace by its daemon;
-the dashboard's own preferences (keys, panel, the last workspace) by the
-server. The wire is the daemon's own protocol (version 6) over WebSockets
-through the server; `crates/crew/tests/fixtures/web/` has its reference frames.
-A team started by an older crew keeps its own dashboard until it is restarted
-(restart it after upgrading, then run `crew web`).
+the dashboard's own preferences (appearance, keys, panel, the last workspace)
+by the server. The wire is the daemon's own protocol (version 6) over
+WebSockets through the server; `crates/crew/tests/fixtures/web/` has its
+reference frames. A team started by an older crew keeps its own dashboard until
+it is restarted (restart it after upgrading, then run `crew web`).
 
 ### Building the frontend
 
@@ -847,11 +875,9 @@ load. Gallery files contain no pairing codes, tokens, browser storage, or
 real workspace content, and never enter `web-dist`. Capture errors produce
 a nonzero exit. `--strict` also fails on active text contrast below its WCAG
 threshold, unnamed controls, or document overflow. Disabled text is exempt.
-Before the responsive shell lands, baseline captures need the explicit
-`--allow-overflow narrow,zoom` exception for the old 900px minimum width;
-remove it when validating the integrated responsive layout. Every exception
-is named in the manifest and reproduction command. Non-dialog surfaces fail
-if a question or other dialog covers them.
+Every viewport, 390px wide and 200% zoom included, fits without horizontal
+document overflow; there is no exception. Non-dialog surfaces fail if a
+question or other dialog covers them.
 
 Use `--scenario baseline --surface team,tasks,events,usage --theme light,dark
 --viewport desktop,narrow` for a short pass. The full matrix includes
@@ -1436,7 +1462,10 @@ log has `agent.model_policy`, and the orchestrator is told, with nothing to
 decide. The roster keeps the member's own model. Once a reading since the move
 (or the reset time) says the model can be used again, the member goes back:
 between turns on the same CLI (its session resumed), between tasks from the
-other CLI. Choosing a model yourself (`s`, `crew agent model`) or by the
+other CLI. From then on it is handed no new task until it is back, and once
+it has finished the one it is on it goes when its turn ends (or, if crew
+does not see that turn end, once its session has been quiet for a minute).
+Choosing a model yourself (`s`, `crew agent model`) or by the
 orchestrator (`agent_set_model`) replaces the fallback, and nothing goes back
 by itself. It applies to the orchestrator as well: the rule is yours, written in
 the style. The built-in styles say `fable: [opus]`, which the launcher shows
@@ -1493,7 +1522,10 @@ The member is marked (`↓ GLM 5.3`), the log has `agent.model_policy`, and
 the orchestrator is told, with nothing to decide. The roster keeps the
 member's own model, and it goes back to that model once the work is done:
 when a turn on the other model has ended, nothing has happened for 15
-seconds, and it has no task under way. A member refused a second time stays
+seconds, and it has no task under way. Once a turn of its there has ended or
+it has finished a task, it is handed no new task until it is back (and if
+crew does not see its turn end, it goes once its session has been quiet for
+a minute). A member refused a second time stays
 on the other model; move it back with `s` when you want. This never applies
 to the orchestrator, whose model is yours to choose. The built-in styles say
 `[glm-5.3, deepseek-v4-flash]`, shown in the launcher under `refused`.

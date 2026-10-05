@@ -6289,6 +6289,156 @@ fn a_work_style_puts_members_on_its_fallback_while_their_models_window_is_used_u
 }
 
 #[test]
+fn a_member_the_work_style_moves_to_another_cli_keeps_getting_its_tasks_and_comes_back() {
+    use std::os::unix::fs::PermissionsExt;
+
+    let s = Session::new();
+    let root = s.root().to_path_buf();
+    std::fs::create_dir_all(root.join("bin")).unwrap();
+    std::fs::create_dir_all(root.join("claude-home")).unwrap();
+    for (name, script) in [("claude", FAKE_CLAUDE_WITH_LIMITS), ("codex", FAKE_RUNTIME)] {
+        std::fs::write(root.join("bin").join(name), script).unwrap();
+        std::fs::set_permissions(
+            root.join("bin").join(name),
+            std::fs::Permissions::from_mode(0o755),
+        )
+        .unwrap();
+    }
+    let limits = json!([
+        { "kind": "weekly_all", "percent": 60, "resets_at": "2030-01-03T00:00:00+00:00" },
+    ]);
+    std::fs::write(root.join("claude-home/limits.json"), limits.to_string()).unwrap();
+    let path = format!(
+        "{}:{}",
+        root.join("bin").display(),
+        std::env::var("PATH").unwrap_or_default()
+    );
+    let identity = |id: &str| s.identity_path(id).to_string_lossy().into_owned();
+    let hook = |id: &str, event: &str, payload: &str| {
+        let out = s.crew(&["hook", event, "--identity", &identity(id), payload]);
+        assert!(out.status.success(), "{event}: {}", stderr(&out));
+    };
+    let read = |id: &str| {
+        std::fs::read_to_string(s.workspace.join(".crew/agents").join(id).join("fake-args"))
+            .unwrap_or_default()
+    };
+
+    let mut team = s.team(
+        "crossfallback",
+        vec![],
+        vec![task("t1", "qa", &[]), task("t2", "qa", &["t1"])],
+    );
+    team.defaults.delivery = crew_core::config::DeliveryChoice::Terminal;
+    team.defaults
+        .model_fallbacks
+        .insert("sonnet".to_string(), vec!["gpt-6-astra".to_string()]);
+    team.orchestrator = OrchestratorConfig {
+        agent: true,
+        runtime: Some(RuntimeKind::Shell),
+        command: scripted(&[]),
+        ..OrchestratorConfig::default()
+    };
+    for (id, model) in [("lead", "haiku"), ("qa", "sonnet")] {
+        team.agents.push(AgentSpec {
+            id: id.to_string(),
+            runtime: Some(RuntimeKind::Claude),
+            model: Some(model.to_string()),
+            ..AgentSpec::default()
+        });
+    }
+    std::fs::write(root.join("team.yaml"), team.to_yaml().unwrap()).unwrap();
+    let out = s
+        .command()
+        .env("PATH", &path)
+        .args(["run", "team.yaml", "--no-attach"])
+        .output()
+        .unwrap();
+    assert!(out.status.success(), "{}", stderr(&out));
+    s.wait("qa to take t1 on Claude Code", |snap| {
+        find_agent(snap, "qa").status != AgentStatus::Spawning
+            && find_task(snap, "t1").status == TaskStatus::Working
+    });
+    let session = find_agent(&s.snapshot(), "qa").session_id.clone().unwrap();
+    hook(
+        "qa",
+        "session-start",
+        &json!({ "session_id": session, "transcript_path": "/nonexistent" }).to_string(),
+    );
+
+    // The account's week runs out, resetting in a little while; between
+    // turns the work style puts qa on Codex.
+    let resets = chrono::Utc::now() + chrono::Duration::seconds(25);
+    hook(
+        "qa",
+        "usage",
+        &json!({ "rate_limits": [{ "kind": "seven_day", "percentUsed": 100, "resetsAt": resets.to_rfc3339() }] })
+            .to_string(),
+    );
+    hook("qa", "stop", "{}");
+    let snap = s.wait("qa to move to Codex", |snap| {
+        let qa = find_agent(snap, "qa");
+        qa.runtime == RuntimeKind::Codex
+            && qa.status != AgentStatus::Spawning
+            && qa.fallback.as_ref().is_some_and(|f| f.policy)
+    });
+    // Still on t1, which its new session is handed.
+    let t1 = find_task(&snap, "t1");
+    assert_eq!(
+        (t1.status, t1.assigned_agent.as_deref()),
+        (TaskStatus::Working, Some("qa"))
+    );
+    s.wait_for("the Codex session to be handed t1", || {
+        let args = read("qa");
+        args.contains("gpt-6-astra") && args.contains("Task t1 is yours")
+    });
+    assert!(s
+        .events()
+        .iter()
+        .any(|e| e.event_type == "agent.runtime_set"
+            && e.message
+                .contains("to Codex on GPT 6 Astra (the work style)")));
+
+    // Codex's turn ends. The window resets and a reading says so. qa
+    // finishes t1, and goes back to Claude Code before it is handed t2: were
+    // t2 handed to it on Codex, it would stay there as long as work came.
+    hook(
+        "qa",
+        "codex-notify",
+        r#"{"type":"agent-turn-complete","thread-id":"thread-qa"}"#,
+    );
+    let wait = (resets - chrono::Utc::now()).num_milliseconds().max(0) as u64 + 500;
+    std::thread::sleep(std::time::Duration::from_millis(wait));
+    hook(
+        "lead",
+        "usage",
+        r#"{"rate_limits":[{"kind":"seven_day","percentUsed":10}]}"#,
+    );
+    let done = json!({ "task_id": "t1", "result": "done" }).to_string();
+    let out = s.ctl("qa", &["tool", "task_complete", &done]);
+    assert!(out.status.success(), "{}", stderr(&out));
+    let snap = s.wait("qa to go back to Claude Code with t2", |snap| {
+        let t2 = find_task(snap, "t2");
+        find_agent(snap, "qa").runtime == RuntimeKind::Claude
+            && t2.status == TaskStatus::Working
+            && t2.assigned_agent.as_deref() == Some("qa")
+    });
+    let qa = find_agent(&snap, "qa");
+    assert_eq!(qa.model.as_deref(), Some("sonnet"));
+    assert!(qa.fallback.is_none());
+    s.wait_for("the Claude Code session to be handed t2", || {
+        let args = read("qa");
+        args.contains("--model\nsonnet[1m]\n") && args.contains("Task t2 is yours")
+    });
+    let events = s.events();
+    let at = |what: &dyn Fn(&crew_core::Event) -> bool| events.iter().position(what);
+    let back = at(&|e| e.event_type == "agent.model_restored").expect("qa went back");
+    let handed =
+        at(&|e| e.event_type == "task.dispatched" && e.message == "task t2 dispatched to qa")
+            .expect("t2 handed to qa");
+    assert!(back < handed, "t2 was handed to qa on Codex");
+}
+
+#[test]
 fn the_orchestrator_staffs_the_team_around_the_models_whose_window_is_used_up() {
     use std::os::unix::fs::PermissionsExt;
 
@@ -7249,6 +7399,153 @@ fn a_turn_codex_refuses_goes_to_the_work_styles_pi_model_and_the_member_comes_ba
     s.wait_for("the orchestrator to hear it", || {
         told("orchestrator").contains("rev is back on GPT 6 Astra: the work it refused is done")
     });
+}
+
+#[test]
+fn a_member_that_took_over_a_refused_turn_goes_back_before_its_next_task() {
+    use std::io::Write as _;
+    use std::os::unix::fs::PermissionsExt;
+
+    let s = Session::new();
+    let root = s.root().to_path_buf();
+    std::fs::create_dir_all(root.join("bin")).unwrap();
+    for (name, script) in [("codex", FAKE_LIMITED_CODEX), ("pi", FAKE_PI)] {
+        std::fs::write(root.join("bin").join(name), script).unwrap();
+        std::fs::set_permissions(
+            root.join("bin").join(name),
+            std::fs::Permissions::from_mode(0o755),
+        )
+        .unwrap();
+    }
+    let day = chrono::Local::now().format("%Y/%m/%d").to_string();
+    let sessions = root.join("codex-home/sessions").join(day);
+    std::fs::create_dir_all(&sessions).unwrap();
+    let rollout = sessions.join("rollout-2026-01-01T00-00-00-thread-queue.jsonl");
+    let event = |payload: Value| json!({ "type": "event_msg", "payload": payload }).to_string();
+    let secs = || chrono::Utc::now().timestamp();
+    let first = [
+        json!({ "type": "turn_context", "payload": { "model": "gpt-6-astra", "effort": "max" } })
+            .to_string(),
+        event(json!({ "type": "task_started", "turn_id": "t-1" })),
+        event(
+            json!({ "type": "task_complete", "turn_id": "t-1", "last_agent_message": "on it", "completed_at": secs() }),
+        ),
+    ];
+    std::fs::write(&rollout, first.join("\n") + "\n").unwrap();
+
+    let mut team = s.team(
+        "queue",
+        vec![],
+        vec![task("t1", "rev", &[]), task("t2", "rev", &["t1"])],
+    );
+    team.defaults.delivery = crew_core::config::DeliveryChoice::Terminal;
+    team.defaults.refusal_fallbacks = vec!["glm-5.3".to_string()];
+    team.orchestrator = OrchestratorConfig {
+        agent: true,
+        runtime: Some(RuntimeKind::Shell),
+        command: scripted(&[]),
+        ..OrchestratorConfig::default()
+    };
+    team.agents.push(AgentSpec {
+        id: "rev".to_string(),
+        role: "reviews the design".to_string(),
+        runtime: Some(RuntimeKind::Codex),
+        model: Some("gpt-6-astra".to_string()),
+        ..AgentSpec::default()
+    });
+    std::fs::write(root.join("team.yaml"), team.to_yaml().unwrap()).unwrap();
+    let path = format!(
+        "{}:{}",
+        root.join("bin").display(),
+        std::env::var("PATH").unwrap_or_default()
+    );
+    let out = s
+        .command()
+        .env("PATH", path)
+        .args(["run", "team.yaml", "--no-attach"])
+        .output()
+        .unwrap();
+    assert!(out.status.success(), "{}", stderr(&out));
+    s.wait("rev to take t1", |snap| {
+        find_agent(snap, "rev").status != AgentStatus::Spawning
+            && find_task(snap, "t1").status == TaskStatus::Working
+    });
+    let identity = s.identity_path("rev").to_string_lossy().into_owned();
+    let hook = |event: &str, payload: &str| {
+        let out = s.crew(&["hook", event, "--identity", &identity, payload]);
+        assert!(out.status.success(), "{event}: {}", stderr(&out));
+    };
+    hook(
+        "codex-notify",
+        r#"{"type":"agent-turn-complete","thread-id":"thread-queue"}"#,
+    );
+    s.wait("rev's session file to be read", |snap| {
+        find_agent(snap, "rev").running_model.as_deref() == Some("gpt-6-astra")
+    });
+
+    // The orchestrator asks after t1, and Codex refuses that turn.
+    let out = s.ctl(
+        "orchestrator",
+        &[
+            "tool",
+            "agent_send",
+            &json!({ "to": "rev", "body": "Review the auth module for t1" }).to_string(),
+        ],
+    );
+    assert!(out.status.success(), "{}", stderr(&out));
+    s.wait("rev to take the message", |snap| {
+        find_agent(snap, "rev").status == AgentStatus::Working
+    });
+    let refused = [
+        event(json!({ "type": "task_started", "turn_id": "t-2" })),
+        json!({ "type": "response_item", "payload": { "type": "message", "role": "user", "content": [{ "type": "input_text", "text": "Review the auth module for t1" }] } }).to_string(),
+        event(json!({ "type": "task_complete", "turn_id": "t-2", "last_agent_message": null, "completed_at": secs(), "error": {
+            "message": "This content was flagged for possible cybersecurity risk.", "codex_error_info": "cyber_policy" } })),
+    ];
+    let mut file = std::fs::OpenOptions::new()
+        .append(true)
+        .open(&rollout)
+        .unwrap();
+    file.write_all((refused.join("\n") + "\n").as_bytes())
+        .unwrap();
+    s.wait("rev to move to pi, still on t1", |snap| {
+        let rev = find_agent(snap, "rev");
+        rev.runtime == RuntimeKind::Pi
+            && rev.fallback.is_some()
+            && find_task(snap, "t1").status == TaskStatus::Working
+    });
+    let args = || {
+        std::fs::read_to_string(s.workspace.join(".crew/agents/rev/fake-args")).unwrap_or_default()
+    };
+    s.wait_for("the pi session to be handed the refused turn", || {
+        let args = args();
+        args.contains("--model\nzai/glm-5.3\n") && args.contains("Review the auth module for t1")
+    });
+
+    // pi finishes t1 and its turn. rev goes back to Codex before it is
+    // handed t2: were t2 handed to it on pi, it would stay there as long as
+    // work came.
+    let done = json!({ "task_id": "t1", "result": "reviewed" }).to_string();
+    let out = s.ctl("rev", &["tool", "task_complete", &done]);
+    assert!(out.status.success(), "{}", stderr(&out));
+    hook("turn-start", "{}");
+    hook("turn-end", "{}");
+    let snap = s.wait("rev to go back to Codex with t2", |snap| {
+        let t2 = find_task(snap, "t2");
+        find_agent(snap, "rev").runtime == RuntimeKind::Codex
+            && t2.status == TaskStatus::Working
+            && t2.assigned_agent.as_deref() == Some("rev")
+    });
+    let rev = find_agent(&snap, "rev");
+    assert_eq!(rev.model.as_deref(), Some("gpt-6-astra"));
+    assert!(rev.fallback.is_none());
+    let events = s.events();
+    let at = |what: &dyn Fn(&crew_core::Event) -> bool| events.iter().position(what);
+    let back = at(&|e| e.event_type == "agent.model_restored").expect("rev went back");
+    let handed =
+        at(&|e| e.event_type == "task.dispatched" && e.message == "task t2 dispatched to rev")
+            .expect("t2 handed to rev");
+    assert!(back < handed, "t2 was handed to rev on pi");
 }
 
 #[test]

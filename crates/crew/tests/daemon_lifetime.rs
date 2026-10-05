@@ -45,6 +45,7 @@ fn an_unserved_start_withdraws_its_files_and_live_handles_keep_the_lock() {
         .block_on(crew::daemon::start(crew::daemon::DaemonOptions {
             workspace: workspace.clone(),
             crew_bin: env!("CARGO_BIN_EXE_crew").into(),
+            pin: None,
         }))
         .unwrap();
     let state_dir = workspace.canonicalize().unwrap().join(".crew");

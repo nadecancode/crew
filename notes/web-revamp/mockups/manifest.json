@@ -1,0 +1,26 @@
+{
+  "captures": [
+    "team-light-desktop.png",
+    "team-dark-desktop.png",
+    "inspector-light-desktop.png",
+    "inspector-dark-desktop.png",
+    "tasks-light-desktop.png",
+    "tasks-dark-desktop.png",
+    "events-light-desktop.png",
+    "events-dark-desktop.png",
+    "usage-light-desktop.png",
+    "usage-dark-desktop.png",
+    "question-light-desktop.png",
+    "question-dark-desktop.png",
+    "attention-light-desktop.png",
+    "attention-dark-desktop.png",
+    "dag-light-desktop.png",
+    "dag-dark-desktop.png",
+    "replacement-light-narrow.png",
+    "replacement-dark-narrow.png",
+    "inspector-light-compact.png",
+    "inspector-dark-compact.png",
+    "team-light-narrow.png",
+    "team-dark-narrow.png"
+  ]
+}

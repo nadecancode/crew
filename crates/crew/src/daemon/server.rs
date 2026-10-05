@@ -375,6 +375,7 @@ mod tests {
         let running = super::super::start(super::super::DaemonOptions {
             workspace: temp.path().to_path_buf(),
             crew_bin: std::env::current_exe().unwrap(),
+            pin: None,
         })
         .await
         .unwrap();
@@ -668,5 +669,78 @@ mod tests {
         let next = rx.recv().await.unwrap();
         assert!(matches!(next.push, Some(Push::Agent(_))), "{next:?}");
         drop(session);
+    }
+
+    /// A `hello` that is refused, on a connection of its own.
+    async fn refused_hello(daemon: &Daemon, hello: Value) -> RpcError {
+        let (mut session, mut rx) = Session::new(daemon);
+        assert!(session.request(&request(1, "hello", hello)).await);
+        let reply = rx.recv().await.unwrap();
+        assert!(!session.authenticated());
+        reply.error.expect("the hello was refused")
+    }
+
+    #[tokio::test]
+    async fn a_hello_in_another_protocol_is_told_who_the_daemon_is_and_an_agent_is_named() {
+        use crew_core::rpc::PROTOCOL_VERSION;
+        let (_temp, running) = daemon().await;
+        let daemon = running.daemon.clone();
+        daemon.model().tokens.insert("a".into(), "token-a".into());
+        let other = PROTOCOL_VERSION + 1;
+        let warnings = || {
+            daemon
+                .store
+                .recent_events(None, 100)
+                .unwrap()
+                .into_iter()
+                .filter(|e| e.event_type == "agent.protocol_mismatch")
+                .collect::<Vec<_>>()
+        };
+        // Whoever asks is told the daemon's build; the message stays what
+        // clients of every protocol so far read.
+        let refusal = refused_hello(
+            &daemon,
+            serde_json::json!({"role": "operator", "token": daemon.operator_token,
+                "client": "cli", "protocol": other}),
+        )
+        .await;
+        assert_eq!(refusal.code, "protocol");
+        assert_eq!(
+            refusal.message,
+            format!("client speaks protocol {other}, daemon speaks {PROTOCOL_VERSION}")
+        );
+        assert_eq!(
+            refusal.data,
+            Some(serde_json::json!({
+                "version": super::super::VERSION,
+                "protocol": PROTOCOL_VERSION,
+                "workspace": daemon.workspace.to_string_lossy(),
+            }))
+        );
+        // An agent is named only with its own token.
+        let agent = |token: &str, client: &str| {
+            serde_json::json!({"role": "agent", "agent_id": "a", "token": token,
+                "client": client, "protocol": other})
+        };
+        refused_hello(&daemon, agent("not-a's", "mcp")).await;
+        assert!(warnings().is_empty());
+        refused_hello(&daemon, agent("token-a", "mcp")).await;
+        let said = warnings();
+        assert_eq!(said.len(), 1, "{said:?}");
+        assert_eq!(said[0].agent_id.as_deref(), Some("a"));
+        assert_eq!(said[0].level, crew_core::EventLevel::Warn);
+        assert_eq!(
+            said[0].message,
+            format!(
+                "a's crew tools speak protocol {other}, this daemon speaks {PROTOCOL_VERSION}: \
+restart the agent"
+            )
+        );
+        // At most once a minute.
+        refused_hello(&daemon, agent("token-a", "hook")).await;
+        assert_eq!(warnings().len(), 1);
+        daemon.model().rt("a").protocol_warned_at -= 61_000;
+        refused_hello(&daemon, agent("token-a", "hook")).await;
+        assert_eq!(warnings().len(), 2);
     }
 }

@@ -98,12 +98,15 @@ pub fn ctl(cmd: CtlCommand) -> Result<()> {
     Ok(())
 }
 
-/// Forward a runtime hook event to the daemon. Never fails and never prints:
-/// hook output can end up in the agent's context, and a failing hook can
-/// block the session.
-pub fn hook(event: &str, identity_path: Option<&Path>, payload: Option<String>) {
+/// Forward a runtime hook event to the daemon. Never prints and fails only
+/// for a daemon of another build: hook output can end up in the agent's
+/// context, and a failing hook can block the session. That one failure is
+/// said on stderr with exit code 1, which no runtime takes as blocking
+/// (Claude Code blocks on 2), so the operator sees why the team's tools
+/// fail (notes/binary-pinning.md B8).
+pub fn hook(event: &str, identity_path: Option<&Path>, payload: Option<String>) -> Result<()> {
     let Ok(identity) = identity(identity_path) else {
-        return;
+        return Ok(());
     };
     let payload = match payload {
         Some(text) => text,
@@ -117,8 +120,10 @@ pub fn hook(event: &str, identity_path: Option<&Path>, payload: Option<String>) 
         }
     };
     let payload: Value = serde_json::from_str(payload.trim()).unwrap_or(Value::Null);
-    let Ok((mut client, _)) = Client::agent(&identity, "hook") else {
-        return;
+    let mut client = match Client::agent(&identity, "hook") {
+        Ok((client, _)) => client,
+        Err(error) if error.is_protocol_mismatch() => return Err(error.into()),
+        Err(_) => return Ok(()),
     };
     let _ = client.set_timeout(Some(Duration::from_secs(5)));
     let _ = client.call_value(Call::Hook {
@@ -128,6 +133,7 @@ pub fn hook(event: &str, identity_path: Option<&Path>, payload: Option<String>) 
         // late hook of a replaced launch is then told apart.
         launch: std::env::var("CREW_LAUNCH").ok().filter(|l| !l.is_empty()),
     });
+    Ok(())
 }
 
 /// Hold the agent's delivery channel open. Each delivery is printed as one

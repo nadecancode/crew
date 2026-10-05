@@ -1,0 +1,606 @@
+{
+  "fixture": "subagents",
+  "note": "Light means OS color preference; current app has no light palette. Narrow screenshots intentionally retain clipping.",
+  "captures": [
+    {
+      "file": "agents-dark-desktop.png",
+      "scheme": "dark",
+      "size": "desktop",
+      "viewport": 1440,
+      "documentWidth": 1440,
+      "bodyBackground": "rgb(21, 22, 27)",
+      "bodyMinWidth": "900px",
+      "panelWidth": 460
+    },
+    {
+      "file": "tasks-dark-desktop.png",
+      "scheme": "dark",
+      "size": "desktop",
+      "viewport": 1440,
+      "documentWidth": 1440,
+      "bodyBackground": "rgb(21, 22, 27)",
+      "bodyMinWidth": "900px",
+      "panelWidth": 460
+    },
+    {
+      "file": "task-detail-dark-desktop.png",
+      "scheme": "dark",
+      "size": "desktop",
+      "viewport": 1440,
+      "documentWidth": 1440,
+      "bodyBackground": "rgb(21, 22, 27)",
+      "bodyMinWidth": "900px",
+      "panelWidth": 460
+    },
+    {
+      "file": "events-dark-desktop.png",
+      "scheme": "dark",
+      "size": "desktop",
+      "viewport": 1440,
+      "documentWidth": 1440,
+      "bodyBackground": "rgb(21, 22, 27)",
+      "bodyMinWidth": "900px",
+      "panelWidth": 460
+    },
+    {
+      "file": "event-detail-dark-desktop.png",
+      "scheme": "dark",
+      "size": "desktop",
+      "viewport": 1440,
+      "documentWidth": 1440,
+      "bodyBackground": "rgb(21, 22, 27)",
+      "bodyMinWidth": "900px",
+      "panelWidth": 460
+    },
+    {
+      "file": "usage-dark-desktop.png",
+      "scheme": "dark",
+      "size": "desktop",
+      "viewport": 1440,
+      "documentWidth": 1440,
+      "bodyBackground": "rgb(21, 22, 27)",
+      "bodyMinWidth": "900px",
+      "panelWidth": 460
+    },
+    {
+      "file": "inspector-dark-desktop.png",
+      "scheme": "dark",
+      "size": "desktop",
+      "viewport": 1440,
+      "documentWidth": 1440,
+      "bodyBackground": "rgb(21, 22, 27)",
+      "bodyMinWidth": "900px",
+      "panelWidth": 460
+    },
+    {
+      "file": "terminal-dark-desktop.png",
+      "scheme": "dark",
+      "size": "desktop",
+      "viewport": 1440,
+      "documentWidth": 1440,
+      "bodyBackground": "rgb(21, 22, 27)",
+      "bodyMinWidth": "900px",
+      "panelWidth": 460
+    },
+    {
+      "file": "transcript-dark-desktop.png",
+      "scheme": "dark",
+      "size": "desktop",
+      "viewport": 1440,
+      "documentWidth": 1440,
+      "bodyBackground": "rgb(21, 22, 27)",
+      "bodyMinWidth": "900px",
+      "panelWidth": 460
+    },
+    {
+      "file": "diff-dark-desktop.png",
+      "scheme": "dark",
+      "size": "desktop",
+      "viewport": 1440,
+      "documentWidth": 1440,
+      "bodyBackground": "rgb(21, 22, 27)",
+      "bodyMinWidth": "900px",
+      "panelWidth": 460
+    },
+    {
+      "file": "message-detail-dark-desktop.png",
+      "scheme": "dark",
+      "size": "desktop",
+      "viewport": 1440,
+      "documentWidth": 1440,
+      "bodyBackground": "rgb(21, 22, 27)",
+      "bodyMinWidth": "900px",
+      "panelWidth": 460
+    },
+    {
+      "file": "switcher-dark-desktop.png",
+      "scheme": "dark",
+      "size": "desktop",
+      "viewport": 1440,
+      "documentWidth": 1440,
+      "bodyBackground": "rgb(21, 22, 27)",
+      "bodyMinWidth": "900px",
+      "panelWidth": 460
+    },
+    {
+      "file": "help-dark-desktop.png",
+      "scheme": "dark",
+      "size": "desktop",
+      "viewport": 1440,
+      "documentWidth": 1440,
+      "bodyBackground": "rgb(21, 22, 27)",
+      "bodyMinWidth": "900px",
+      "panelWidth": 460
+    },
+    {
+      "file": "confirm-dark-desktop.png",
+      "scheme": "dark",
+      "size": "desktop",
+      "viewport": 1440,
+      "documentWidth": 1440,
+      "bodyBackground": "rgb(21, 22, 27)",
+      "bodyMinWidth": "900px",
+      "panelWidth": 460
+    },
+    {
+      "file": "context-menu-dark-desktop.png",
+      "scheme": "dark",
+      "size": "desktop",
+      "viewport": 1440,
+      "documentWidth": 1440,
+      "bodyBackground": "rgb(21, 22, 27)",
+      "bodyMinWidth": "900px",
+      "panelWidth": 460
+    },
+    {
+      "file": "agents-dark-narrow.png",
+      "scheme": "dark",
+      "size": "narrow",
+      "viewport": 390,
+      "documentWidth": 907,
+      "bodyBackground": "rgb(21, 22, 27)",
+      "bodyMinWidth": "900px",
+      "panelWidth": 380
+    },
+    {
+      "file": "tasks-dark-narrow.png",
+      "scheme": "dark",
+      "size": "narrow",
+      "viewport": 390,
+      "documentWidth": 907,
+      "bodyBackground": "rgb(21, 22, 27)",
+      "bodyMinWidth": "900px",
+      "panelWidth": 380
+    },
+    {
+      "file": "task-detail-dark-narrow.png",
+      "scheme": "dark",
+      "size": "narrow",
+      "viewport": 390,
+      "documentWidth": 907,
+      "bodyBackground": "rgb(21, 22, 27)",
+      "bodyMinWidth": "900px",
+      "panelWidth": 460
+    },
+    {
+      "file": "events-dark-narrow.png",
+      "scheme": "dark",
+      "size": "narrow",
+      "viewport": 390,
+      "documentWidth": 907,
+      "bodyBackground": "rgb(21, 22, 27)",
+      "bodyMinWidth": "900px",
+      "panelWidth": 380
+    },
+    {
+      "file": "event-detail-dark-narrow.png",
+      "scheme": "dark",
+      "size": "narrow",
+      "viewport": 390,
+      "documentWidth": 907,
+      "bodyBackground": "rgb(21, 22, 27)",
+      "bodyMinWidth": "900px",
+      "panelWidth": 460
+    },
+    {
+      "file": "usage-dark-narrow.png",
+      "scheme": "dark",
+      "size": "narrow",
+      "viewport": 390,
+      "documentWidth": 907,
+      "bodyBackground": "rgb(21, 22, 27)",
+      "bodyMinWidth": "900px",
+      "panelWidth": 380
+    },
+    {
+      "file": "inspector-dark-narrow.png",
+      "scheme": "dark",
+      "size": "narrow",
+      "viewport": 390,
+      "documentWidth": 907,
+      "bodyBackground": "rgb(21, 22, 27)",
+      "bodyMinWidth": "900px",
+      "panelWidth": 460
+    },
+    {
+      "file": "terminal-dark-narrow.png",
+      "scheme": "dark",
+      "size": "narrow",
+      "viewport": 390,
+      "documentWidth": 907,
+      "bodyBackground": "rgb(21, 22, 27)",
+      "bodyMinWidth": "900px",
+      "panelWidth": 460
+    },
+    {
+      "file": "transcript-dark-narrow.png",
+      "scheme": "dark",
+      "size": "narrow",
+      "viewport": 390,
+      "documentWidth": 907,
+      "bodyBackground": "rgb(21, 22, 27)",
+      "bodyMinWidth": "900px",
+      "panelWidth": 460
+    },
+    {
+      "file": "diff-dark-narrow.png",
+      "scheme": "dark",
+      "size": "narrow",
+      "viewport": 390,
+      "documentWidth": 907,
+      "bodyBackground": "rgb(21, 22, 27)",
+      "bodyMinWidth": "900px",
+      "panelWidth": 460
+    },
+    {
+      "file": "message-detail-dark-narrow.png",
+      "scheme": "dark",
+      "size": "narrow",
+      "viewport": 390,
+      "documentWidth": 907,
+      "bodyBackground": "rgb(21, 22, 27)",
+      "bodyMinWidth": "900px",
+      "panelWidth": 460
+    },
+    {
+      "file": "switcher-dark-narrow.png",
+      "scheme": "dark",
+      "size": "narrow",
+      "viewport": 390,
+      "documentWidth": 907,
+      "bodyBackground": "rgb(21, 22, 27)",
+      "bodyMinWidth": "900px",
+      "panelWidth": 380
+    },
+    {
+      "file": "help-dark-narrow.png",
+      "scheme": "dark",
+      "size": "narrow",
+      "viewport": 390,
+      "documentWidth": 907,
+      "bodyBackground": "rgb(21, 22, 27)",
+      "bodyMinWidth": "900px",
+      "panelWidth": 380
+    },
+    {
+      "file": "confirm-dark-narrow.png",
+      "scheme": "dark",
+      "size": "narrow",
+      "viewport": 390,
+      "documentWidth": 907,
+      "bodyBackground": "rgb(21, 22, 27)",
+      "bodyMinWidth": "900px",
+      "panelWidth": 380
+    },
+    {
+      "file": "context-menu-dark-narrow.png",
+      "scheme": "dark",
+      "size": "narrow",
+      "viewport": 390,
+      "documentWidth": 907,
+      "bodyBackground": "rgb(21, 22, 27)",
+      "bodyMinWidth": "900px",
+      "panelWidth": 380
+    },
+    {
+      "file": "agents-light-desktop.png",
+      "scheme": "light",
+      "size": "desktop",
+      "viewport": 1440,
+      "documentWidth": 1440,
+      "bodyBackground": "rgb(21, 22, 27)",
+      "bodyMinWidth": "900px",
+      "panelWidth": 460
+    },
+    {
+      "file": "tasks-light-desktop.png",
+      "scheme": "light",
+      "size": "desktop",
+      "viewport": 1440,
+      "documentWidth": 1440,
+      "bodyBackground": "rgb(21, 22, 27)",
+      "bodyMinWidth": "900px",
+      "panelWidth": 460
+    },
+    {
+      "file": "task-detail-light-desktop.png",
+      "scheme": "light",
+      "size": "desktop",
+      "viewport": 1440,
+      "documentWidth": 1440,
+      "bodyBackground": "rgb(21, 22, 27)",
+      "bodyMinWidth": "900px",
+      "panelWidth": 460
+    },
+    {
+      "file": "events-light-desktop.png",
+      "scheme": "light",
+      "size": "desktop",
+      "viewport": 1440,
+      "documentWidth": 1440,
+      "bodyBackground": "rgb(21, 22, 27)",
+      "bodyMinWidth": "900px",
+      "panelWidth": 460
+    },
+    {
+      "file": "event-detail-light-desktop.png",
+      "scheme": "light",
+      "size": "desktop",
+      "viewport": 1440,
+      "documentWidth": 1440,
+      "bodyBackground": "rgb(21, 22, 27)",
+      "bodyMinWidth": "900px",
+      "panelWidth": 460
+    },
+    {
+      "file": "usage-light-desktop.png",
+      "scheme": "light",
+      "size": "desktop",
+      "viewport": 1440,
+      "documentWidth": 1440,
+      "bodyBackground": "rgb(21, 22, 27)",
+      "bodyMinWidth": "900px",
+      "panelWidth": 460
+    },
+    {
+      "file": "inspector-light-desktop.png",
+      "scheme": "light",
+      "size": "desktop",
+      "viewport": 1440,
+      "documentWidth": 1440,
+      "bodyBackground": "rgb(21, 22, 27)",
+      "bodyMinWidth": "900px",
+      "panelWidth": 460
+    },
+    {
+      "file": "terminal-light-desktop.png",
+      "scheme": "light",
+      "size": "desktop",
+      "viewport": 1440,
+      "documentWidth": 1440,
+      "bodyBackground": "rgb(21, 22, 27)",
+      "bodyMinWidth": "900px",
+      "panelWidth": 460
+    },
+    {
+      "file": "transcript-light-desktop.png",
+      "scheme": "light",
+      "size": "desktop",
+      "viewport": 1440,
+      "documentWidth": 1440,
+      "bodyBackground": "rgb(21, 22, 27)",
+      "bodyMinWidth": "900px",
+      "panelWidth": 460
+    },
+    {
+      "file": "diff-light-desktop.png",
+      "scheme": "light",
+      "size": "desktop",
+      "viewport": 1440,
+      "documentWidth": 1440,
+      "bodyBackground": "rgb(21, 22, 27)",
+      "bodyMinWidth": "900px",
+      "panelWidth": 460
+    },
+    {
+      "file": "message-detail-light-desktop.png",
+      "scheme": "light",
+      "size": "desktop",
+      "viewport": 1440,
+      "documentWidth": 1440,
+      "bodyBackground": "rgb(21, 22, 27)",
+      "bodyMinWidth": "900px",
+      "panelWidth": 460
+    },
+    {
+      "file": "switcher-light-desktop.png",
+      "scheme": "light",
+      "size": "desktop",
+      "viewport": 1440,
+      "documentWidth": 1440,
+      "bodyBackground": "rgb(21, 22, 27)",
+      "bodyMinWidth": "900px",
+      "panelWidth": 460
+    },
+    {
+      "file": "help-light-desktop.png",
+      "scheme": "light",
+      "size": "desktop",
+      "viewport": 1440,
+      "documentWidth": 1440,
+      "bodyBackground": "rgb(21, 22, 27)",
+      "bodyMinWidth": "900px",
+      "panelWidth": 460
+    },
+    {
+      "file": "confirm-light-desktop.png",
+      "scheme": "light",
+      "size": "desktop",
+      "viewport": 1440,
+      "documentWidth": 1440,
+      "bodyBackground": "rgb(21, 22, 27)",
+      "bodyMinWidth": "900px",
+      "panelWidth": 460
+    },
+    {
+      "file": "context-menu-light-desktop.png",
+      "scheme": "light",
+      "size": "desktop",
+      "viewport": 1440,
+      "documentWidth": 1440,
+      "bodyBackground": "rgb(21, 22, 27)",
+      "bodyMinWidth": "900px",
+      "panelWidth": 460
+    },
+    {
+      "file": "agents-light-narrow.png",
+      "scheme": "light",
+      "size": "narrow",
+      "viewport": 390,
+      "documentWidth": 907,
+      "bodyBackground": "rgb(21, 22, 27)",
+      "bodyMinWidth": "900px",
+      "panelWidth": 380
+    },
+    {
+      "file": "tasks-light-narrow.png",
+      "scheme": "light",
+      "size": "narrow",
+      "viewport": 390,
+      "documentWidth": 907,
+      "bodyBackground": "rgb(21, 22, 27)",
+      "bodyMinWidth": "900px",
+      "panelWidth": 380
+    },
+    {
+      "file": "task-detail-light-narrow.png",
+      "scheme": "light",
+      "size": "narrow",
+      "viewport": 390,
+      "documentWidth": 907,
+      "bodyBackground": "rgb(21, 22, 27)",
+      "bodyMinWidth": "900px",
+      "panelWidth": 460
+    },
+    {
+      "file": "events-light-narrow.png",
+      "scheme": "light",
+      "size": "narrow",
+      "viewport": 390,
+      "documentWidth": 907,
+      "bodyBackground": "rgb(21, 22, 27)",
+      "bodyMinWidth": "900px",
+      "panelWidth": 380
+    },
+    {
+      "file": "event-detail-light-narrow.png",
+      "scheme": "light",
+      "size": "narrow",
+      "viewport": 390,
+      "documentWidth": 907,
+      "bodyBackground": "rgb(21, 22, 27)",
+      "bodyMinWidth": "900px",
+      "panelWidth": 460
+    },
+    {
+      "file": "usage-light-narrow.png",
+      "scheme": "light",
+      "size": "narrow",
+      "viewport": 390,
+      "documentWidth": 907,
+      "bodyBackground": "rgb(21, 22, 27)",
+      "bodyMinWidth": "900px",
+      "panelWidth": 380
+    },
+    {
+      "file": "inspector-light-narrow.png",
+      "scheme": "light",
+      "size": "narrow",
+      "viewport": 390,
+      "documentWidth": 907,
+      "bodyBackground": "rgb(21, 22, 27)",
+      "bodyMinWidth": "900px",
+      "panelWidth": 460
+    },
+    {
+      "file": "terminal-light-narrow.png",
+      "scheme": "light",
+      "size": "narrow",
+      "viewport": 390,
+      "documentWidth": 907,
+      "bodyBackground": "rgb(21, 22, 27)",
+      "bodyMinWidth": "900px",
+      "panelWidth": 460
+    },
+    {
+      "file": "transcript-light-narrow.png",
+      "scheme": "light",
+      "size": "narrow",
+      "viewport": 390,
+      "documentWidth": 907,
+      "bodyBackground": "rgb(21, 22, 27)",
+      "bodyMinWidth": "900px",
+      "panelWidth": 460
+    },
+    {
+      "file": "diff-light-narrow.png",
+      "scheme": "light",
+      "size": "narrow",
+      "viewport": 390,
+      "documentWidth": 907,
+      "bodyBackground": "rgb(21, 22, 27)",
+      "bodyMinWidth": "900px",
+      "panelWidth": 460
+    },
+    {
+      "file": "message-detail-light-narrow.png",
+      "scheme": "light",
+      "size": "narrow",
+      "viewport": 390,
+      "documentWidth": 907,
+      "bodyBackground": "rgb(21, 22, 27)",
+      "bodyMinWidth": "900px",
+      "panelWidth": 460
+    },
+    {
+      "file": "switcher-light-narrow.png",
+      "scheme": "light",
+      "size": "narrow",
+      "viewport": 390,
+      "documentWidth": 907,
+      "bodyBackground": "rgb(21, 22, 27)",
+      "bodyMinWidth": "900px",
+      "panelWidth": 380
+    },
+    {
+      "file": "help-light-narrow.png",
+      "scheme": "light",
+      "size": "narrow",
+      "viewport": 390,
+      "documentWidth": 907,
+      "bodyBackground": "rgb(21, 22, 27)",
+      "bodyMinWidth": "900px",
+      "panelWidth": 380
+    },
+    {
+      "file": "confirm-light-narrow.png",
+      "scheme": "light",
+      "size": "narrow",
+      "viewport": 390,
+      "documentWidth": 907,
+      "bodyBackground": "rgb(21, 22, 27)",
+      "bodyMinWidth": "900px",
+      "panelWidth": 380
+    },
+    {
+      "file": "context-menu-light-narrow.png",
+      "scheme": "light",
+      "size": "narrow",
+      "viewport": 390,
+      "documentWidth": 907,
+      "bodyBackground": "rgb(21, 22, 27)",
+      "bodyMinWidth": "900px",
+      "panelWidth": 380
+    }
+  ]
+}

@@ -2,9 +2,11 @@
 //! `status`, `resume`, `frame`, `stop`.
 
 use std::io::IsTerminal;
+use std::path::Path;
 
 use anyhow::{anyhow, bail, Result};
-use crew_core::paths::{self};
+use crew_core::client::{Client, ClientError, Mismatch};
+use crew_core::paths::{self, DaemonInfo};
 use crew_core::rpc::{Call, Snapshot};
 use crew_core::util::{fmt_elapsed, now_ms, one_line};
 use crew_core::{Agent, RuntimeKind, TaskStatus};
@@ -91,6 +93,9 @@ pub fn status(target: &Target, json: bool) -> Result<()> {
         s.daemon_pid,
         fmt_elapsed(snapshot.server_time - s.daemon_started_at)
     );
+    if !s.binary_warning.is_empty() {
+        println!("warning    {}", s.binary_warning);
+    }
     let done = snapshot
         .tasks
         .iter()
@@ -272,7 +277,12 @@ pub fn frame(target: &Target, size: &str) -> Result<()> {
 }
 
 pub fn stop(target: &Target, keep_agents: bool) -> Result<()> {
-    let (mut client, info) = target.connect("cli")?;
+    let info = target.discover()?;
+    let mut client = match Client::operator(Path::new(&info.socket), "cli") {
+        Ok((client, _)) => client,
+        Err(ClientError::Mismatch(mismatch)) => return stop_another_build(&info, &mismatch),
+        Err(error) => return Err(error.into()),
+    };
     match client.call_value(Call::Shutdown {
         stop_agents: !keep_agents,
     }) {
@@ -302,6 +312,38 @@ pub fn stop(target: &Target, keep_agents: bool) -> Result<()> {
         } else {
             ""
         }
+    );
+    Ok(())
+}
+
+/// A daemon of another build of crew cannot be asked to stop: the process
+/// that holds its socket is sent SIGTERM, on which it stops as with
+/// `--keep-agents` (notes/binary-pinning.md B8). Without that, the restart
+/// a mismatch calls for could not begin here.
+fn stop_another_build(info: &DaemonInfo, mismatch: &Mismatch) -> Result<()> {
+    let Some(pid) = mismatch.daemon_pid else {
+        bail!("{mismatch}; the process that holds its socket is not known, so it cannot be stopped from here");
+    };
+    // SAFETY: a signal to the process that holds the daemon's socket and
+    // answered as a crew daemon, by the kernel's account of the connection.
+    if unsafe { libc::kill(pid as libc::pid_t, libc::SIGTERM) } != 0 {
+        bail!(
+            "{mismatch}; it could not be stopped (pid {pid}): {}",
+            std::io::Error::last_os_error()
+        );
+    }
+    wait_for_exit(pid);
+    if paths::pid_alive(pid) {
+        bail!("the crew daemon (pid {pid}) of another build of crew was sent SIGTERM but is still running");
+    }
+    let protocol = mismatch
+        .daemon_protocol
+        .map(|protocol| format!("protocol {protocol}"))
+        .unwrap_or_else(|| "another protocol".into());
+    let workspace = mismatch.workspace.as_deref().unwrap_or(&info.workspace);
+    println!(
+        "stopped the crew daemon for {workspace} with SIGTERM, as with --keep-agents: it spoke \
+{protocol}"
     );
     Ok(())
 }

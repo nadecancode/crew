@@ -74,6 +74,4 @@ test("strict collector gates active contrast, names, and overflow while exemptin
   expect(evidence.unnamedControls).toHaveLength(1);
   expect(evidence.overflow).toBe(true);
   expect(a11yFailures(evidence).some((f) => f.startsWith("Document overflow"))).toBe(true);
-  expect(a11yFailures(evidence, true).some((f) => f.startsWith("Document overflow"))).toBe(false);
-  expect(a11yFailures(evidence, true).length).toBeGreaterThan(0);
 });

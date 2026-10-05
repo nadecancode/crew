@@ -612,12 +612,12 @@ for attempt in none guessed; do
   echo "HELLO $attempt $reply"
   case "$reply" in *'"result"'*) echo "REACHED operator-$attempt";; esac
 done
-'{crew}' ctl inbox >/dev/null 2>&1 && echo 'AGENT-CALL ok'
+{crew} ctl inbox >/dev/null 2>&1 && echo 'AGENT-CALL ok'
 true"#,
         none = hello(""),
         guess = hello(&guessed),
         socat = socat.display(),
-        crew = CREW,
+        crew = s.sandboxed_crew(),
     );
     s.run(&sandboxed(&s, vec![probing(&s, "a", &script)], vec![]));
     let report = report(&s, "a");
@@ -885,6 +885,72 @@ fn kill_tears_down_the_pty_tree() {
     s.stop();
 }
 
+/// A sandboxed agent runs the daemon's copy of crew (notes/binary-pinning.md
+/// B6), with the workspace under /tmp, which no sandbox mounts: whatever
+/// becomes of the file the daemon was started from, and whatever is planted
+/// under the copy's name, which the daemon makes again before the launch.
+#[test]
+fn a_sandboxed_agent_runs_the_daemons_copy_of_crew_whatever_becomes_of_its_file() {
+    use std::os::unix::fs::PermissionsExt;
+    if require_sandbox().is_none() {
+        return;
+    }
+    let s = Session::new();
+    workspace_repo(&s, &[]);
+    let crew = s.own_crew("crew");
+    let team = sandboxed(
+        &s,
+        vec![agent("a", "", &["--on-start=send operator status up"])],
+        vec![],
+    );
+    s.run_from(&crew, &team);
+    let ups = || {
+        s.messages()
+            .iter()
+            .filter(|m| m.from == "a" && m.body == "up")
+            .count()
+    };
+    let restarted = |old: u32, n: usize| -> u32 {
+        s.agent_cmd(&["restart", "a"]);
+        s.wait_for("a to be up again", || ups() == n);
+        let snap = s.wait("a to run again", |snap| {
+            find_agent(snap, "a").pid.is_some_and(|p| p != old)
+        });
+        find_agent(&snap, "a").pid.unwrap()
+    };
+    s.wait_for("a to be up", || ups() == 1);
+    let copy = s.crew_copy();
+    assert!(copy.starts_with("/tmp"), "{}", copy.display());
+    // The agent's process on the host is `crew sandbox-run`, from the copy.
+    let snap = s.wait("a to have a pid", |snap| {
+        find_agent(snap, "a").pid.is_some()
+    });
+    let pid = find_agent(&snap, "a").pid.unwrap();
+    assert!(common::runs(pid, &copy));
+
+    // Replaced, as a build does.
+    let new = s.root().join("crew.new");
+    write_executable(&new, "#!/bin/sh\nexit 3\n");
+    std::fs::rename(&new, &crew).unwrap();
+    let pid = restarted(pid, 2);
+    assert!(common::runs(pid, &copy));
+
+    // Another file planted under the copy's name is not bound: the copy is
+    // made again before the launch.
+    let planted = copy.with_file_name("planted");
+    write_executable(&planted, "#!/bin/sh\nexit 3\n");
+    std::fs::set_permissions(&planted, std::fs::Permissions::from_mode(0o500)).unwrap();
+    std::fs::rename(&planted, &copy).unwrap();
+    let pid = restarted(pid, 3);
+    assert!(common::runs(pid, &copy));
+    assert_eq!(
+        std::fs::metadata(&copy).unwrap().len(),
+        std::fs::metadata(CREW).unwrap().len()
+    );
+    assert!(s.has_event("daemon.repinned"));
+    s.stop();
+}
+
 #[test]
 fn required_refuses_without_bwrap() {
     if require_sandbox().is_none() {
@@ -1147,7 +1213,11 @@ fn integrate_hooks_have_no_authority() {
         // commands are refused under CREW_IDENTITY anyway, since G1).
         reach(
             "daemon",
-            &format!("CREW_IDENTITY='{}' '{CREW}' ctl inbox", identity.display()),
+            &format!(
+                "CREW_IDENTITY='{}' {} ctl inbox",
+                identity.display(),
+                s.sandboxed_crew()
+            ),
         ),
         reach(
             "network",
@@ -1257,9 +1327,11 @@ fn git_status_ignores_agent_fsmonitor() {
 /// Wrappers for `claude`, `codex` and `pi` that run `crew fake-cli`,
 /// installed the way the real CLIs are: the program in `real/`, a symlink to
 /// it in `bin/` (the directory that goes on PATH), beside the crew binary
-/// (mounted in a sandbox; `/tmp` is not). The `codex` wrapper also notes,
-/// in its `$CODEX_HOME`, the mount namespace and arguments of a queue run.
-fn fake_clis() -> (tempfile::TempDir, PathBuf) {
+/// (not under `/tmp`, which a sandbox never mounts); they run the crew
+/// binary `s`'s sandboxes mount, the daemon's copy. The `codex` wrapper also
+/// notes, in its `$CODEX_HOME`, the mount namespace and arguments of a queue
+/// run.
+fn fake_clis(s: &Session) -> (tempfile::TempDir, PathBuf) {
     let dir = tempfile::tempdir_in(Path::new(CREW).parent().unwrap()).unwrap();
     let base = dir.path().canonicalize().unwrap();
     std::fs::create_dir_all(base.join("real")).unwrap();
@@ -1278,7 +1350,10 @@ echo tried >> \"$CODEX_HOME/tamper\"; }\n"
         let path = base.join("real").join(name);
         write_executable(
             &path,
-            &format!("#!/bin/sh\n{note}exec '{CREW}' fake-cli {name} \"$@\"\n"),
+            &format!(
+                "#!/bin/sh\n{note}exec {} fake-cli {name} \"$@\"\n",
+                s.sandboxed_crew()
+            ),
         );
         std::os::unix::fs::symlink(&path, base.join("bin").join(name)).unwrap();
     }
@@ -1336,7 +1411,7 @@ fn codex_sidecar_and_queue_run_sandboxed() {
     }
     let s = Session::new();
     workspace_repo(&s, &[]);
-    let (_fakes, bin) = fake_clis();
+    let (_fakes, bin) = fake_clis(&s);
     let team = sandboxed(&s, vec![codex_agent("x")], vec![]);
     run_with_env(&s, &team, &[("PATH", &path_with(&bin))]);
     wait_up(&s, "x");
@@ -1404,7 +1479,7 @@ fn kill_tears_down_the_sidecar_tree() {
     }
     let s = Session::new();
     workspace_repo(&s, &[]);
-    let (_fakes, bin) = fake_clis();
+    let (_fakes, bin) = fake_clis(&s);
     let team = sandboxed(&s, vec![codex_agent("x")], vec![]);
     run_with_env(&s, &team, &[("PATH", &path_with(&bin))]);
     wait_up(&s, "x");
@@ -1431,7 +1506,7 @@ fn compaction_does_not_read_through_symlinks() {
     }
     let s = Session::new();
     workspace_repo(&s, &[]);
-    let (_fakes, bin) = fake_clis();
+    let (_fakes, bin) = fake_clis(&s);
     let team = sandboxed(&s, vec![codex_agent("x")], vec![]);
     run_with_env(&s, &team, &[("PATH", &path_with(&bin))]);
     wait_up(&s, "x");
@@ -1508,7 +1583,7 @@ fn daemon_writes_do_not_follow_planted_links() {
     }
     let s = Session::new();
     workspace_repo(&s, &[]);
-    let (_fakes, bin) = fake_clis();
+    let (_fakes, bin) = fake_clis(&s);
     // The operator's Codex settings, which seeding copies (filtered).
     let operator = s.root().join("codex-home");
     std::fs::create_dir_all(&operator).unwrap();
@@ -1588,8 +1663,9 @@ fn host_toolchain_layout_starts() {
     let s = Session::new();
     workspace_repo(&s, &[]);
     let ws = s.workspace.canonicalize().unwrap();
-    // crew built in the checkout's target/, as on the operator's host: one
-    // read-only file is bound from there.
+    // crew built in the checkout's target/, as on the operator's host: its
+    // agents are handed the daemon's copy of it, and nothing of target/ is
+    // bound.
     let release = ws.join("target/release");
     std::fs::create_dir_all(&release).unwrap();
     let crew = release.join("crew");
@@ -1630,9 +1706,9 @@ fn host_toolchain_layout_starts() {
   (cd "$HOME" && git config --global user.name) | grep -q fixture && echo 'WORKS gitconfig'
   jj --version && echo 'WORKS jj'
 }} > "$HOME/report" 2>&1
-exec '{}' fake-cli claude "$@"
+exec {} fake-cli claude "$@"
 "#,
-            crew.display()
+            s.sandboxed_crew()
         ),
     );
     std::fs::create_dir_all(home.join(".local/bin")).unwrap();
@@ -1716,7 +1792,7 @@ exec '{}' fake-cli claude "$@"
 /// `<A>/rw/vcs-ran`. Ahead of both on PATH, the crew binary's own directory
 /// (left out too: the binary is bound by itself); in `second/`, a `crew`
 /// that notes it ran in `<A>/rw/crew-fallback`.
-fn two_installations() -> (tempfile::TempDir, String) {
+fn two_installations(s: &Session) -> (tempfile::TempDir, String) {
     let dir = tempfile::tempdir_in(Path::new(CREW).parent().unwrap()).unwrap();
     let base = dir.path().canonicalize().unwrap();
     let path = std::env::var_os("PATH").unwrap();
@@ -1730,7 +1806,8 @@ fn two_installations() -> (tempfile::TempDir, String) {
         let bin = base.join(which);
         std::fs::create_dir_all(&bin).unwrap();
         let codex = format!(
-            "#!/bin/sh\necho \"{which} $1\" >> \"$CODEX_HOME/ran\"\nexec '{CREW}' fake-cli codex \"$@\"\n"
+            "#!/bin/sh\necho \"{which} $1\" >> \"$CODEX_HOME/ran\"\nexec {} fake-cli codex \"$@\"\n",
+            s.sandboxed_crew()
         );
         let vcs = |real: &Path| {
             format!(
@@ -1770,7 +1847,7 @@ fn each_sandboxed_launch_runs_the_cli_the_daemon_found_not_another() {
     }
     let s = Session::new();
     workspace_repo(&s, &[]);
-    let (_installations, path) = two_installations();
+    let (_installations, path) = two_installations(&s);
     let mut team = sandboxed(
         &s,
         vec![

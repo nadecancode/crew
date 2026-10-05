@@ -828,7 +828,12 @@ impl ProcessManager for Herdr {
                 tracing::debug!("pane.close: {e:#}");
                 Ok(())
             }
-            Err(e) => Err(e),
+            Err(e) => {
+                // Still there: what is asked of it next must not take it
+                // for gone.
+                pane.alive.store(true, Ordering::SeqCst);
+                Err(e)
+            }
         }
     }
 
