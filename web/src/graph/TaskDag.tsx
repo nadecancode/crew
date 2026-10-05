@@ -75,6 +75,7 @@ export function TaskDag() {
   };
   const onKey = (e: KeyboardEvent, id: string) => {
     if (e.altKey || e.ctrlKey || e.metaKey) return;
+    if ((e.target as Element).closest("button")) return;
     const k = e.key;
     const map: Record<string, [number, number]> = { ArrowDown: [0, 1], j: [0, 1], ArrowUp: [0, -1], k: [0, -1], ArrowLeft: [-1, 0], h: [-1, 0], ArrowRight: [1, 0], l: [1, 0] };
     if (map[k]) {
