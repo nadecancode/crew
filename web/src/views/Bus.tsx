@@ -1,16 +1,18 @@
 // The bus (notes/web-design.md §ui "Bus"): the message list, newest at the
-// bottom, virtual. A row: time, from → to, type, first line; coloured by kind
+// bottom, virtual. A row: endpoints, type, time, and a two-line body preview;
 // as in the TUI. Click or `enter`: the message's panel. Hovering a row lights
 // the link between its two agents on the graph; clicking a link filters the
 // list to that pair.
 
-import { Show, createMemo, createSignal } from "solid-js";
+import { Show, createMemo, createSignal, onCleanup } from "solid-js";
 import { useApp } from "../app";
 import { clockTime, oneLine } from "../format";
 import { decodeMessages, isBroadcast, isP2p, ORCHESTRATOR_ID, OPERATOR_ID, type Message } from "../protocol";
+import { EmptyState } from "../components";
 import { VirtualList } from "./VirtualList";
+import { PanelHead } from "./SidePanel";
 
-export const BUS_ROW = 22;
+export const BUS_ROW = 84;
 
 export function kindOf(m: Message): "orch" | "p2p" | "broadcast" {
   if (isBroadcast(m)) return "broadcast";
@@ -29,6 +31,9 @@ export function Bus() {
   // The selected row by identity: it stays selected as rows come and go.
   const [selectedId, setSelectedId] = createSignal<string | null>(null);
   const [loading, setLoading] = createSignal(false);
+  const [error, setError] = createSignal<string | null>(null);
+  let active = true;
+  onCleanup(() => (active = false));
   const filtered = createMemo(() => {
     store.messagesVersion();
     const pair = ui.busPair();
@@ -52,28 +57,29 @@ export function Bus() {
   });
 
   const loadOlder = async () => {
+    if (!link.live() || loading()) return;
     setLoading(true);
+    setError(null);
     try {
       const have = store.messages.length;
       const list = await link.call("history", { limit: Math.min(have + 300, store.messages.capacity) }, decodeMessages);
-      store.prependMessages(list);
+      if (active) store.prependMessages(list);
     } catch (e) {
-      ui.setStatus(`older messages: ${e instanceof Error ? e.message : e}`, true);
+      if (active) setError(`Older messages: ${e instanceof Error ? e.message : e}`);
     } finally {
-      setLoading(false);
+      if (active) setLoading(false);
     }
   };
 
   return (
-    <div class="panel-body bus">
-      <div class="panel-head">
-        <h2 class="panel-title">bus</h2>
+    <div class="panel-body bus" aria-busy={loading()}>
+      <PanelHead title="Message bus" sub={`${count()} loaded`}>
+        <button disabled={!link.live() || loading()} onClick={loadOlder} title="ask the daemon for older messages">{loading() ? "Loading…" : "Load older"}</button>
+      </PanelHead>
         <Show when={ui.busPair()}>
-          <span class="chip filter">{ui.busPair()![0]} ↔ {ui.busPair()![1]} <button aria-label="clear the filter" onClick={() => ui.setBusPair(null)}>×</button></span>
+          <div class="bus-scope"><span class="chip filter">{ui.busPair()![0]} ↔ {ui.busPair()![1]} <button aria-label="clear the filter" onClick={() => ui.setBusPair(null)}>×</button></span></div>
         </Show>
-        <span class="spacer" />
-        <button disabled={!link.live() || loading()} onClick={loadOlder} title="ask the daemon for older messages">load older</button>
-      </div>
+      <Show when={error()}><div class="fetch-state err" role="status">{error()}</div></Show>
       <VirtualList
         label="messages"
         class="bus-list"
@@ -91,15 +97,17 @@ export function Bus() {
           const m = at(i);
           if (m) ui.select({ kind: "message", id: m.id });
         }}
-        empty={<div class="empty">no messages yet</div>}
+        empty={<EmptyState title={ui.busPair() ? "No messages between these agents" : "No messages yet"} description="Messages appear here as the team communicates." />}
         render={(m: Message) => (
           <div class={`bus-row k-${kindOf(m)} t-${m.type}`} data-message={m.id}
             onPointerEnter={() => ui.setHoverPair([m.from, m.to])} onPointerLeave={() => ui.setHoverPair(null)}
             onClick={() => ui.select({ kind: "message", id: m.id })}>
-            <span class="time">{clockTime(m.timestamp)}</span>
-            <span class="who"><span class="from">{m.from}</span> → <span class="to">{m.to === "*" ? "all" : m.to}</span></span>
-            <span class="type">{m.type}</span>
-            <span class="first">{oneLine(m.body.split("\n", 1)[0])}</span>
+            <div class="bus-meta">
+              <span class="who"><span class="from">{m.from}</span> → <span class="to">{m.to === "*" ? "all" : m.to}</span></span>
+              <span class="type">{m.type}</span>
+              <span class="time">{clockTime(m.timestamp)}</span>
+            </div>
+            <span class="first">{oneLine(m.body.slice(0, 2048))}</span>
           </div>
         )}
       />

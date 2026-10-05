@@ -6,6 +6,7 @@ import { For, Show, createResource, createSignal } from "solid-js";
 import { useApp } from "../app";
 import { clockTime } from "../format";
 import { askedBy, decodeMessage, options, type Message } from "../protocol";
+import { EmptyState } from "../components";
 import { Linked } from "../text";
 import { kindOf } from "./Bus";
 import { PanelHead } from "./SidePanel";
@@ -48,9 +49,9 @@ export function MessagePanel(props: { id: string }) {
   };
   const go = (id: string) => ui.select({ kind: "message", id });
   return (
-    <div class="panel-body message-panel">
+    <div class="panel-body message-panel" aria-busy={fetched.loading}>
       <PanelHead title={`message ${props.id}`} />
-      <Show when={message()} fallback={<p class="pad muted">{why()}</p>}>
+      <Show when={message()} fallback={<EmptyState title={fetched.loading ? "Loading message…" : "Message unavailable"} description={why()} />}>
         {(m) => (
           <div class="pad scroll" tabindex="0" data-focus-first>
             <dl class="facts">
@@ -67,7 +68,7 @@ export function MessagePanel(props: { id: string }) {
               <ul><For each={options(m())}>{(o) => <li>{o}</li>}</For></ul>
             </Show>
             <Show when={replies().length}>
-              <p class="muted">replies:</p>
+              <p class="muted">replies in loaded history:</p>
               <ul class="replies">
                 <For each={replies()}>{(r) => <li><button class="link" onClick={() => go(r.id)}>{r.from}: {r.body.split("\n", 1)[0]}</button></li>}</For>
               </ul>

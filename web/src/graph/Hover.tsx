@@ -1,7 +1,7 @@
 // The card shown while the pointer rests on a node, a link, a pulse, a mark
 // or a task (notes/web-design.md §graphs "Interaction").
 
-import { For, Match, Show, Switch } from "solid-js";
+import { For, Match, Show, Switch, createEffect, createSignal, onCleanup } from "solid-js";
 import { useApp } from "../app";
 import { fmtElapsed, oneLine, runningLabel, tokens } from "../format";
 import { askedBy, type VcsEvent } from "../protocol";
@@ -19,8 +19,21 @@ export function Hover(props: { target: HoverTarget; x: number; y: number }) {
   const { store } = app;
   const now = () => store.serverNow(Date.now());
   const firstLine = (s: string) => oneLine(s.split("\n", 1)[0]).slice(0, 160);
+  let el!: HTMLDivElement;
+  let disposed = false;
+  const [at, setAt] = createSignal({ x: props.x + 14, y: props.y + 14 });
+  createEffect(() => {
+    const { x, y, target } = props;
+    void target;
+    queueMicrotask(() => {
+      if (disposed || !el?.offsetParent) return;
+      const host = el.offsetParent as HTMLElement;
+      setAt({ x: Math.max(8, Math.min(x + 14, host.clientWidth - el.offsetWidth - 8)), y: Math.max(8, Math.min(y + 14, host.clientHeight - el.offsetHeight - 8)) });
+    });
+  });
+  onCleanup(() => { disposed = true; });
   return (
-    <div class="hover-card" role="tooltip" style={{ left: `${props.x + 14}px`, top: `${props.y + 14}px` }}>
+    <div ref={el} class="hover-card" role="tooltip" style={{ left: `${at().x}px`, top: `${at().y}px` }}>
       <Switch>
         <Match when={props.target.kind === "agent" && store.agent((props.target as { id: string }).id)}>
           {(agent) => {

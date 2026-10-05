@@ -6,6 +6,10 @@
 // state flashes its outline once.
 
 import { For, Show, createEffect, createMemo, createSignal, on } from "solid-js";
+import { EmptyState } from "../components";
+import { Presentation, presentation } from "./Presentation";
+import { EntityList } from "./EntityList";
+import { taskSummary } from "./Summary";
 import { useApp } from "../app";
 import { MARK_SWEEP_MS } from "../anim/anims";
 import { now as clock } from "../clock";
@@ -19,12 +23,14 @@ export function TaskDag() {
   const app = useApp();
   const { store, ui } = app;
   let host!: HTMLDivElement;
+  const [mode, setMode] = presentation();
   const layout = createMemo(() => layered(store.state.tasks.map((t) => ({ id: t.id, dependencies: [...t.dependencies] }))));
   const bounds = createMemo(() => union([...layout().boxes.values()]));
   const [hover, setHover] = createSignal<string | null>(null);
   const lit = createMemo(() => (hover() ? lineage(store.state.tasks, hover()!) : null));
   const selectedTask = () => (ui.sel()?.kind === "task" ? (ui.sel() as { id: string }).id : null);
   const [cursor, setCursor] = createSignal<string | null>(null);
+  createEffect(on(selectedTask, (id) => { if (id) setCursor(id); }));
   const tabStop = () => {
     const ids = layout().layers.flat();
     const c = cursor() ?? selectedTask();
@@ -69,6 +75,7 @@ export function TaskDag() {
   };
   const onKey = (e: KeyboardEvent, id: string) => {
     if (e.altKey || e.ctrlKey || e.metaKey) return;
+    if ((e.target as Element).closest("button")) return;
     const k = e.key;
     const map: Record<string, [number, number]> = { ArrowDown: [0, 1], j: [0, 1], ArrowUp: [0, -1], k: [0, -1], ArrowLeft: [-1, 0], h: [-1, 0], ArrowRight: [1, 0], l: [1, 0] };
     if (map[k]) {
@@ -91,8 +98,11 @@ export function TaskDag() {
 
   return (
     <div class="dag-host" ref={host}>
-      <Show when={store.state.tasks.length > 0} fallback={<div class="empty">no tasks yet</div>}>
-        <Viewport label="task graph" class="task-dag" bounds={bounds} api={(a) => (app.views.tasks = a)} onBackground={() => ui.sel()?.kind === "task" && ui.select(null)}>
+      <Presentation title="Tasks" meta={`${store.state.tasks.filter((t) => t.status === "done").length}/${store.state.tasks.length} complete`} mode={mode()} change={setMode} />
+      <Show when={store.state.tasks.length > 0} fallback={<EmptyState title="No tasks yet" description="Tasks and their dependencies appear here when work is assigned." />}>
+      <Show when={mode() === "graph"} fallback={<EntityList kind="task" items={layout().layers.flat().map((id) => store.state.tasks.find((t) => t.id === id)!)} selected={cursor() ?? selectedTask()} select={setCursor} open={(id) => ui.select({ kind:"task", id })} summary={(task) => taskSummary(task, store.state.tasks)} />}>
+      <div class="graph-canvas">
+        <Viewport label="task graph" class="task-dag" bounds={bounds} api={(a) => (app.views.tasks = a)} onDispose={() => app.views.tasks = undefined} onBackground={() => ui.sel()?.kind === "task" && ui.select(null)}>
           <g class="edges">
             <For each={layout().edges}>
               {(e) => <path class="edge" classList={{ dim: !!lit() && !(lit()!.has(e.from) && lit()!.has(e.to)), lit: !!lit() && lit()!.has(e.from) && lit()!.has(e.to) }} d={edgePath(e.from, e.to)} />}
@@ -151,6 +161,9 @@ export function TaskDag() {
             }}
           </For>
         </Viewport>
+        <div class="graph-legend">Dependencies read left to right · Hover a task to trace its lineage</div>
+      </div>
+      </Show>
       </Show>
     </div>
   );

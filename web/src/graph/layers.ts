@@ -5,10 +5,10 @@
 
 import type { Box } from "./view";
 
-export const TASK_W = 220;
-export const TASK_H = 72;
+export const TASK_W = 244;
+export const TASK_H = 116;
 const COL_GAP = 96;
-const ROW_GAP = 22;
+const ROW_GAP = 28;
 
 type T = { id: string; dependencies: readonly string[] };
 

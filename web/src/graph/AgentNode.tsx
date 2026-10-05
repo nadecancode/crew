@@ -5,6 +5,7 @@
 // in-session subagents `⑂N`).
 
 import { Show, createMemo } from "solid-js";
+import { Icon } from "../components";
 import { useApp } from "../app";
 import { useSecond } from "../clock";
 import { agentIcon, badge, doing, progressOf, providerError, runningLabel, runtimeGlyph, stateTone, statusTail, windowSize, workLine, workOf } from "../format";
@@ -79,14 +80,19 @@ export function AgentNode(props: NodeEvents & {
       <foreignObject width={props.box.w} height={props.box.h}>
         <div class="node-body">
           <div class="node-head">
-            <span class={`glyph rt-${a().runtime}`}>{props.satellite ? "↳" : runtimeGlyph(a().runtime)}</span>
+            <span class={`glyph rt-${a().runtime}`}>{runtimeGlyph(a().runtime)}</span>
             <span class={`id rt-${a().runtime}`}>{a().id}</span>
+            <span class={`agent-status ${stateTone(a())}`}>{a().paused ? "paused" : a().status}</span>
+            <button class="node-more" aria-label={`More actions for ${a().id}`} aria-haspopup="menu" tabindex="-1" onPointerDown={(e) => e.stopPropagation()} onClick={props.onMenu}><Icon name="more" /></button>
+          </div>
+          <div class="node-flags">
             <Show when={props.asking}>
               <button class="badge ask" title="answer the question" onPointerDown={(e) => e.stopPropagation()} onClick={(e) => (e.stopPropagation(), props.onQuestion())} tabindex="-1">?</button>
             </Show>
             <Show when={unread() > 0}><span class="badge unread" title={`${unread()} unread`}>✉{unread()}</span></Show>
             <Show when={a().limit}><span class="badge limit" title={a().limit!.message}>limit</span></Show>
             <Show when={a().paused}><span class="badge paused">‖</span></Show>
+            <Show when={a().compact_pending}><span class="badge" title="compaction queued" aria-label="compaction queued">C</span></Show>
             <Show when={badge(a())}><span class="badge">{badge(a())}</span></Show>
             <Show when={pending()}><span class="badge pending" title="waiting for the daemon">…</span></Show>
           </div>
@@ -108,7 +114,7 @@ export function AgentNode(props: NodeEvents & {
             <div class="node-row foot">
               <Show when={ctx()} fallback={<Show when={progress() !== null}><span class="bar"><span class="fill" style={{ width: `${progress()}%` }} /></span></Show>}>
                 <span class="ctx" title={`context ${ctx()!.percent}% of ${windowSize(ctx()!.window)}`}>
-                  {windowSize(ctx()!.window)} <span class="bar gauge"><span class="fill" style={{ width: `${ctx()!.percent}%` }} /></span> {ctx()!.percent}%
+                  Context {windowSize(ctx()!.window)} <span class="bar gauge"><span class="fill" style={{ width: `${ctx()!.percent}%` }} /></span> {ctx()!.percent}%
                 </span>
               </Show>
               <Show when={model()}>
@@ -164,6 +170,7 @@ export function HubNode(props: NodeEvents & { box: Box; agent: Agent | undefined
           <div class="node-head">
             <span class="glyph orch">◆</span>
             <span class="id orch">{a()?.id ?? "orchestrator"}</span>
+            <Show when={a()}><button class="node-more" aria-label={`More actions for ${a()?.id}`} aria-haspopup="menu" tabindex="-1" onPointerDown={(e) => e.stopPropagation()} onClick={props.onMenu}><Icon name="more" /></button></Show>
             <Show when={questions() > 0}>
               <button class="badge ask" tabindex="-1" onPointerDown={(e) => e.stopPropagation()} onClick={(e) => (e.stopPropagation(), props.onQuestion())}>?</button>
             </Show>

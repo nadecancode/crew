@@ -14,6 +14,11 @@ const status = (page: Page) => page.locator("footer .status-line");
 const button = (scope: Page | Locator, name: string) => scope.getByRole("button", { name, exact: true });
 const calls = (mock: Mock, method: string) => mock.calls.filter((c) => c.method === method);
 
+async function moreAction(page: Page, id: string, name: string): Promise<Locator> {
+  await button(toolbar(page, id), "More").click();
+  return page.getByRole("menu", { name: `actions for ${id}`, exact: true }).getByRole("menuitem", { name, exact: true });
+}
+
 /** Select an agent by its node's header (the centre of a node is its task's
  * title, a link of its own) and wait for its inspector. */
 async function inspect(page: Page, id: string): Promise<void> {
@@ -142,10 +147,9 @@ test.describe("operator actions", () => {
     expect(csp).toEqual([]);
   });
 
-  test("restart: the toolbar button and R; the node shows a pending mark until the daemon answers", async ({ page, mock, csp, openPage }) => {
+  test("restart: More and R; the node shows a pending mark until the daemon answers", async ({ page, mock, csp, openPage }) => {
     await openPage();
     await inspect(page, "claude-2");
-    const tb = toolbar(page, "claude-2");
     let release!: () => void;
     const gate = new Promise<void>((r) => (release = r));
     mock.on("agent_restart", async (p: { id: string }) => {
@@ -153,14 +157,16 @@ test.describe("operator actions", () => {
       return structuredClone(mock.state.agents.find((a) => a.id === p.id));
     });
 
-    await button(tb, "restart").click();
+    await (await moreAction(page, "claude-2", "restart")).click();
     expect((await mock.waitForCall("agent_restart")).params).toEqual({ id: "claude-2" });
     await expect(node(page, "claude-2").locator(".badge.pending")).toBeVisible();
-    await expect(button(tb, "restart")).toBeDisabled();
+    const restart = await moreAction(page, "claude-2", "restart");
+    await expect(restart).toBeDisabled();
     release();
     await expect(node(page, "claude-2").locator(".badge.pending")).toHaveCount(0);
-    await expect(button(tb, "restart")).toBeEnabled();
+    await expect(restart).toBeEnabled();
     await expect(status(page)).toHaveText("✓ restart claude-2");
+    await page.keyboard.press("Escape");
 
     mock.on("agent_restart", null);
     const before = calls(mock, "agent_restart").length;
@@ -173,25 +179,25 @@ test.describe("operator actions", () => {
   test("restart fresh asks first; esc and cancel send nothing", async ({ page, mock, csp, openPage }) => {
     await openPage();
     await inspect(page, "claude-2");
-    const fresh = button(toolbar(page, "claude-2"), "restart fresh");
+    const more = button(toolbar(page, "claude-2"), "More");
     const dialog = page.getByRole("dialog", { name: "restart claude-2 fresh · no resume" });
 
-    await fresh.click();
+    await (await moreAction(page, "claude-2", "restart fresh…")).click();
     await expect(dialog).toBeVisible();
     await expect(dialog).toContainText("The old conversation is not resumed.");
     await expect(button(dialog, "cancel")).toBeFocused();
     await page.keyboard.press("Escape");
     await expect(dialog).toHaveCount(0);
-    await expect(fresh).toBeFocused();
+    await expect(more).toBeFocused();
     await expect(page.locator("#side-panel [data-inspector='claude-2']")).toBeVisible();
 
-    await fresh.click();
+    await (await moreAction(page, "claude-2", "restart fresh…")).click();
     await button(dialog, "cancel").click();
     await expect(dialog).toHaveCount(0);
     await settle(page, mock);
     expect(calls(mock, "agent_restart_fresh")).toEqual([]);
 
-    await fresh.click();
+    await (await moreAction(page, "claude-2", "restart fresh…")).click();
     await button(dialog, "restart fresh").click();
     await expect(dialog).toHaveCount(0);
     expect((await mock.waitForCall("agent_restart_fresh")).params).toEqual({ id: "claude-2" });
@@ -219,7 +225,7 @@ test.describe("operator actions", () => {
     await settle(page, mock);
     expect(calls(mock, "agent_kill")).toEqual([]);
 
-    await button(toolbar(page, "claude-4"), "kill").click();
+    await (await moreAction(page, "claude-4", "kill…")).click();
     await button(dialog, "kill claude-4").click();
     expect((await mock.waitForCall("agent_kill")).params).toEqual({ id: "claude-4" });
     await expect(status(page)).toHaveText("✓ kill claude-4");
@@ -237,7 +243,7 @@ test.describe("operator actions", () => {
     await expect(status(page)).toHaveText("✓ compaction of claude-3's context queued");
 
     await inspect(page, "claude-5");
-    await button(toolbar(page, "claude-5"), "compact").click();
+    await (await moreAction(page, "claude-5", "compact")).click();
     expect((await mock.waitForCall("agent_compact", (c) => c.params.id === "claude-5")).params).toEqual({ id: "claude-5" });
     await expect(status(page)).toHaveText("✓ compaction of claude-5's context queued");
     expect(csp).toEqual([]);
@@ -246,7 +252,7 @@ test.describe("operator actions", () => {
   test("model and CLI: the dialog lists models_list and sets {id, model, runtime}", async ({ page, mock, csp, openPage }) => {
     await openPage();
     await inspect(page, "claude-2");
-    await button(toolbar(page, "claude-2"), "model").click();
+    await (await moreAction(page, "claude-2", "model and CLI")).click();
     const dialog = page.getByRole("dialog", { name: "model and CLI" });
     await expect(dialog).toBeVisible();
     expect((await mock.waitForCall("models_list")).params ?? null).toBeNull();
@@ -376,7 +382,7 @@ test.describe("operator actions", () => {
   test("prompt: the inspector's prompt button and i submit {id, text, submit: true}", async ({ page, mock, csp, openPage }) => {
     await openPage();
     await inspect(page, "claude-2");
-    await button(toolbar(page, "claude-2"), "prompt").click();
+    await (await moreAction(page, "claude-2", "prompt")).click();
     const box = page.getByRole("textbox", { name: "prompt for claude-2" });
     await expect(box).toBeFocused();
     await box.fill("run the tests and report");
@@ -398,7 +404,7 @@ test.describe("operator actions", () => {
   test("jump to pane: agent_focus on herdr, from the toolbar and g", async ({ page, mock, csp, openPage }) => {
     await openPage();
     await inspect(page, "claude-2");
-    await button(toolbar(page, "claude-2"), "jump to pane").click();
+    await (await moreAction(page, "claude-2", "jump to pane")).click();
     expect((await mock.waitForCall("agent_focus")).params).toEqual({ id: "claude-2" });
     await expect(status(page)).toHaveText("✓ focus claude-2");
 
