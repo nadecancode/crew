@@ -8,6 +8,7 @@ import { useApp } from "../app";
 import { linkLive, pulse, sweep, markLive, type Link, type Mark } from "../anim/anims";
 import { ORCHESTRATOR_ID, askedBy, type Agent } from "../protocol";
 import { isOrchestrator } from "../store/order";
+import { EmptyState, ViewHeader } from "../components";
 import { AgentNode, HubNode } from "./AgentNode";
 import { Hover, type HoverTarget } from "./Hover";
 import { radial } from "./radial";
@@ -58,7 +59,7 @@ export function AgentGraph() {
     return c ? { x: c.x - base.w / 2, y: c.y - base.h / 2, w: base.w, h: base.h } : base;
   };
   const hubBox = () => box(ORCHESTRATOR_ID)!;
-  const bounds = createMemo(() => union([...layout().boxes.keys()].map((id) => box(id)!).filter(Boolean)));
+  const bounds = createMemo(() => union([...layout().boxes.keys()].map((id) => box(id)).filter((b): b is Box => !!b).map((b) => ({ ...b, h: b.h + 32 }))));
 
   const hubAgent = () => store.state.agents.find(isOrchestrator);
   const workers = () => store.state.agents.filter((a) => !isOrchestrator(a));
@@ -82,6 +83,7 @@ export function AgentGraph() {
     queueMicrotask(() => focusNode(next));
   };
   const open = (id: string, tab: "overview" | "terminal" = "overview") => {
+    setHover(null);
     ui.select({ kind: "agent", id });
     ui.setTab(tab);
   };
@@ -107,10 +109,20 @@ export function AgentGraph() {
         step(nodes()[nodes().length - 1]?.id ?? id, 0);
         break;
       case "Enter":
+      case " ":
         e.preventDefault();
         e.stopPropagation();
         open(id);
         queueMicrotask(() => (document.querySelector("#side-panel [data-focus-first]") as HTMLElement | null)?.focus());
+        break;
+      case "F10":
+      case "ContextMenu":
+        if (e.shiftKey || e.key === "ContextMenu") {
+          e.preventDefault();
+          e.stopPropagation();
+          const r = (e.currentTarget as Element).getBoundingClientRect();
+          ui.setMenu({ agent: id, x: r.left, y: r.bottom });
+        }
         break;
     }
   };
@@ -142,9 +154,9 @@ export function AgentGraph() {
     if (!p || e.pointerId !== p.pointer) return;
     pressed = null;
     const d = drag();
-    if (p.moved && d) prefs.setPosition(d.id, d.at);
+    if (p.moved && d && e.type !== "pointercancel") prefs.setPosition(d.id, d.at);
     setDrag(null);
-    if (!p.moved) {
+    if (!p.moved && e.type !== "pointercancel") {
       ui.setSelected(p.id);
       open(p.id);
     }
@@ -188,6 +200,7 @@ export function AgentGraph() {
         ui.setRoute({ view: "logs", sel: { kind: "event", seq: l.event.seq } });
       } else if (l.kind !== "vcs") {
         ui.setBusPair([l.from, l.to]);
+        ui.setBusOpen(true);
         if (ui.sel()?.kind === "agent") ui.select(null);
       }
     };
@@ -295,10 +308,14 @@ export function AgentGraph() {
 
   return (
     <div class="graph-host" ref={host} classList={{ dragging: !!drag() }}>
+      <ViewHeader title="Team" meta={`${nodes().length} agents`} />
+      <Show when={nodes().length} fallback={<EmptyState title="No agents yet" description="Agents appear here when the team starts." />}>
+      <div class="graph-canvas">
       <Show when={p2pLive()}>
         <div class="p2p-banner" role="status">p2p channel OPEN · agents talking directly</div>
       </Show>
       <Viewport label="agent graph" class="agent-graph" bounds={bounds} api={(a) => ((api = a), (app.views.graph = a))}
+        onDispose={() => { app.views.graph = undefined; api = undefined; }}
         onBackground={() => {
           ui.setSelected(null);
           ui.setBusPair(null);
@@ -375,6 +392,9 @@ export function AgentGraph() {
           <For each={workers()}>{(agent) => <MarkView id={agent.id} />}</For>
         </g>
       </Viewport>
+      <div class="graph-legend" aria-label="Connection legend"><span class="legend-orchestrator">Orchestrator</span><span class="legend-p2p">Direct message</span><span class="legend-vcs">Version control</span><span class="legend-tether">Subagent</span></div>
+      </div>
+      </Show>
       <Show when={hover()}>
         <Hover target={hover()!.target} x={hover()!.x} y={hover()!.y} />
       </Show>
@@ -386,6 +406,7 @@ export function AgentGraph() {
     e.stopPropagation();
     setHover(null);
     ui.setSelected(id);
-    ui.setMenu({ agent: id, x: e.clientX, y: e.clientY });
+    const r = e.type === "contextmenu" ? { left: e.clientX, bottom: e.clientY } : (e.currentTarget as Element).getBoundingClientRect();
+    ui.setMenu({ agent: id, x: r.left, y: r.bottom });
   }
 }

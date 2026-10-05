@@ -12,7 +12,7 @@
 import { For, Match, Show, Switch, createEffect, createMemo, createSignal, on, onMount, type JSX } from "solid-js";
 import { useApp } from "../app";
 import { useSecond } from "../clock";
-import { agentIcon, clockTime, fmtElapsed, modelLabel, oneLine, runningLabel, runtimeGlyph, stateTone, statusTail, taskIcon, taskTone, tokens } from "../format";
+import { agentIcon, clockTime, fmtElapsed, modelLabel, oneLine, runningLabel, runtimeGlyph, stateTone, statusTail, taskIcon, taskTone, tokens, workOf } from "../format";
 import { decodeEvents, decodeGitOutcome, decodeInbox, decodeTranscript, isP2p, type Agent, type Event, type GitOutcome, type InboxEntry, type TranscriptEntry, type TranscriptResult } from "../protocol";
 import { Linked } from "../text";
 import type { InspectorTab } from "../ui";
@@ -66,15 +66,9 @@ export function Inspector(props: { agent: Agent }) {
         <Show when={a().started_at}><span class="muted">up {fmtElapsed(serverNow() - a().started_at!)}</span></Show>
       </div>
       <div class="insp-actions" role="toolbar" aria-label={`actions for ${a().id}`}>
-        <button disabled={!can()} onClick={() => ops.compose(a().id)} title="message (m)">message</button>
-        <button disabled={!can()} onClick={() => ops.prompt(a().id)} title="prompt box (i)">prompt</button>
+        <button class="primary" disabled={!can()} onClick={() => ops.compose(a().id)} title="message (m)">message</button>
         <button disabled={!can() || pending("agent_pause") || pending("agent_resume")} onClick={() => void app.actions.togglePause(a())} title="pause / resume (p)">{a().paused ? "resume" : "pause"}</button>
-        <button disabled={!can() || pending("agent_restart")} onClick={() => void app.actions.restart(a().id)} title="restart (R)">restart</button>
-        <button disabled={!can() || pending("agent_restart_fresh")} onClick={() => ui.openDialog({ kind: "confirm", confirm: { kind: "restart-fresh", agent: a().id } })}>restart fresh</button>
-        <button disabled={!can() || pending("agent_compact")} onClick={() => void app.actions.compact(a().id)}>compact</button>
-        <button disabled={!can()} onClick={() => ops.model(a().id)} title="model and CLI (s)">model</button>
-        <Show when={a().backend === "herdr"}><button disabled={!can()} onClick={() => ops.focusPane(a().id)} title="jump to its herdr pane (g)">jump to pane</button></Show>
-        <button class="danger" disabled={!can() || pending("agent_kill")} onClick={() => ui.openDialog({ kind: "confirm", confirm: { kind: "kill", agent: a().id } })} title="kill (k)">kill</button>
+        <button aria-haspopup="menu" onClick={(e) => { const r = e.currentTarget.getBoundingClientRect(); ui.setMenu({ agent:a().id, x:r.left, y:r.bottom }); }}>More</button>
       </div>
       <div class="tabs" role="tablist" aria-label="inspector" onKeyDown={tabKey}>
         <For each={TABS}>
@@ -101,6 +95,10 @@ function Scroll(props: { key: string; children: JSX.Element; class?: string }) {
   let el!: HTMLDivElement;
   onMount(() => (el.scrollTop = scrolls.get(props.key) ?? 0));
   return <div ref={el} class={`scroll ${props.class ?? ""}`} tabindex="0" onScroll={() => scrolls.set(props.key, el.scrollTop)}>{props.children}</div>;
+}
+
+function Facts(props: { rows:[string,string,string?][] }) {
+  return <dl class="facts"><For each={props.rows}>{([key,value,tone]) => <><dt>{key}</dt><dd class={tone ?? ""}>{value}</dd></>}</For></dl>;
 }
 
 function Overview(props: { agent: Agent }) {
@@ -160,6 +158,8 @@ function Overview(props: { agent: Agent }) {
     return out;
   };
 
+  const work = createMemo(() => workOf(store.state.tasks, a().id, serverNow()));
+  const process = ["backend","delivery","parent","subagents","in-session","pid","workdir","session","restarts","compact"];
   const tasks = () => store.state.tasks.filter((t) => t.assigned_agent === a().id || t.reviewer === a().id);
   const messages = createMemo(() => {
     store.messagesVersion();
@@ -184,10 +184,46 @@ function Overview(props: { agent: Agent }) {
 
   return (
     <Scroll key={`${a().id}:overview`} class="overview">
-      <dl class="facts">
-        <For each={facts()}>{([k, v, tone]) => <><dt>{k}</dt><dd class={tone ?? ""}>{v}</dd></>}</For>
-      </dl>
-      <h4>tasks</h4>
+      <section class="current-work"><h3>Current work</h3><Show when={work()}>{(w) => <button class="link current-title" onClick={() => ui.select({kind:"task",id:w().task.id})}>{w().task.title}</button>}</Show><Facts rows={facts().filter(([key]) => ["status","task","activity"].includes(key))} /></section>
+      <section><h3>Session</h3><Facts rows={facts().filter(([key]) => !process.includes(key) && !["status","task","activity","error"].includes(key))} /></section>
+      <section>
+      <h3>Problems</h3>
+      <ul class="insp-problems">
+        <Show when={a().error}><li class="err">{oneLine(a().error!)}</li></Show>
+        <For each={problems()} fallback={<Show when={!a().error}><li class="dim">none</li></Show>}>
+          {(e) => (
+            <li>
+              <button class="link" onClick={() => ui.setRoute({ view: "logs", sel: { kind: "event", seq: e.seq } })}>
+                <span class="dim">{clockTime(e.timestamp)}</span> <span class={`lv-${e.level}`}>{e.level}</span> <span class="muted">{e.event_type}</span> <Linked text={oneLine(e.message)} />
+              </button>
+            </li>
+          )}
+        </For>
+      </ul>
+      </section><section>
+      <h3>Messages</h3>
+      <ul class="insp-messages">
+        <For each={messages()} fallback={<li class="dim">no messages yet</li>}>
+          {(m) => {
+            const out = m.from === a().id;
+            const mark = () => {
+              if (out) return "";
+              const d = inbox().get(m.id);
+              return d?.acked_at ? "Read" : d?.delivered_at ? "Delivered" : "";
+            };
+            return (
+              <li>
+                <button class="link msg-line" onClick={() => ui.select({ kind: "message", id: m.id })}>
+                  <span class="dim">{clockTime(m.timestamp)}</span> <span class={isP2p(m) ? "accent" : "orch"}>{out ? "→" : "←"} {out ? m.to : m.from}</span>{" "}
+                  <span class="ok" title={mark()}>{mark()}</span> <span class="muted">{m.type}</span> {oneLine(m.body).slice(0, 140)}
+                </button>
+              </li>
+            );
+          }}
+        </For>
+      </ul>
+      </section><section>
+      <h3>Assigned and review tasks</h3>
       <ul class="insp-tasks">
         <For each={tasks()} fallback={<li class="dim">no tasks assigned</li>}>
           {(t) => (
@@ -202,40 +238,8 @@ function Overview(props: { agent: Agent }) {
           )}
         </For>
       </ul>
-      <h4>messages</h4>
-      <ul class="insp-messages">
-        <For each={messages()} fallback={<li class="dim">no messages yet</li>}>
-          {(m) => {
-            const out = m.from === a().id;
-            const mark = () => {
-              if (out) return "";
-              const d = inbox().get(m.id);
-              return d?.acked_at ? "✓✓" : d?.delivered_at ? "✓" : "";
-            };
-            return (
-              <li>
-                <button class="link msg-line" onClick={() => ui.select({ kind: "message", id: m.id })}>
-                  <span class="dim">{clockTime(m.timestamp)}</span> <span class={isP2p(m) ? "accent" : "orch"}>{out ? "→" : "←"} {out ? m.to : m.from}</span>{" "}
-                  <span class="ok" title={mark() === "✓✓" ? "read" : mark() ? "delivered" : ""}>{mark()}</span> <span class="muted">{m.type}</span> {oneLine(m.body).slice(0, 140)}
-                </button>
-              </li>
-            );
-          }}
-        </For>
-      </ul>
-      <h4>problems</h4>
-      <ul class="insp-problems">
-        <Show when={a().error}><li class="err">{oneLine(a().error!)}</li></Show>
-        <For each={problems()} fallback={<Show when={!a().error}><li class="dim">none</li></Show>}>
-          {(e) => (
-            <li>
-              <button class="link" onClick={() => ui.setRoute({ view: "logs", sel: { kind: "event", seq: e.seq } })}>
-                <span class="dim">{clockTime(e.timestamp)}</span> <span class={`lv-${e.level}`}>{e.level}</span> <span class="muted">{e.event_type}</span> <Linked text={oneLine(e.message)} />
-              </button>
-            </li>
-          )}
-        </For>
-      </ul>
+      </section>
+      <details class="process-details"><summary>Process and delivery details</summary><Facts rows={facts().filter(([key]) => process.includes(key))} /></details>
     </Scroll>
   );
 }
@@ -263,6 +267,7 @@ function Transcript(props: { agent: Agent }) {
   const chosen = (): TranscriptEntry | undefined => (cursor() !== null ? entries()[cursor()!] : undefined);
   return (
     <div class="transcript">
+      <Show when={result() && error()}><p class="pad warn" role="status">{error()}</p></Show>
       <Show when={result()} fallback={<p class="pad muted">{error() ?? waiting(link, "reading the session…")}</p>}>
         <Show when={result()!.available} fallback={<p class="pad muted">this runtime keeps no session file crew can read, or it was not found</p>}>
           <Show when={result()!.truncated}><p class="pad dim">older entries are not shown</p></Show>
@@ -308,6 +313,7 @@ function Diff(props: { agent: Agent }) {
   const lines = () => (diff()?.text ?? "").split("\n");
   return (
     <Scroll key={`${a().id}:diff`} class="diff">
+      <Show when={diff() && error()}><p class="pad warn" role="status">{error()}</p></Show>
       <Show when={diff()} fallback={<p class="pad muted">{error() ?? waiting(link, "reading the diff…")}</p>}>
         <Show when={diff()!.text.trim()} fallback={<p class="pad muted">no uncommitted changes</p>}>
           <pre class="diff-text">
