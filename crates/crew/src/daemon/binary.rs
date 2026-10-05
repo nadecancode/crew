@@ -17,9 +17,10 @@
 //! name only says which build a copy was made for: one found there is used
 //! only if it holds the running binary's bytes, and is made again if not.
 //! Copies outlive the daemon, as agents on herdr do, which hold the path
-//! they were launched with. An agent launched with another copy is not
-//! adopted (supervisor/recovery.rs), and once recovery has decided about
-//! every agent, the other copies are deleted: at once, or, when an agent of
+//! they were launched with. An agent launched with another copy, or with
+//! one that had to be made again at start, is not adopted
+//! (supervisor/recovery.rs), and once recovery has decided about every
+//! agent, the other copies are deleted: at once, or, when an agent of
 //! another build could not be stopped, once it has been.
 
 use std::ffi::CString;
@@ -66,6 +67,10 @@ struct Pin {
     source: PathBuf,
     dir: PathBuf,
     name: String,
+    /// A file was under its name at start that was not the running binary,
+    /// and was replaced: what agents launched with that name ran is not
+    /// known.
+    replaced: bool,
     /// The copy as it was made. Held while a copy is made or the directory
     /// swept.
     made: Mutex<Made>,
@@ -114,12 +119,13 @@ impl Binary {
     pub(crate) fn pin(state_dir: &Path, source: &Path, started_from: PathBuf) -> Self {
         let dir = state_dir.join(BIN_DIR);
         let (path, mode) = match keep(&dir, source) {
-            Ok((name, made)) => (
+            Ok((name, made, replaced)) => (
                 dir.join(&name),
                 Mode::Pinned(Pin {
                     source: source.to_path_buf(),
                     dir,
                     name,
+                    replaced,
                     made: Mutex::new(made),
                 }),
             ),
@@ -152,10 +158,11 @@ impl Binary {
     /// recorded for it) runs the build this daemon runs. A daemon that
     /// could not keep a copy cannot tell what anything runs: an agent
     /// recorded without a name was launched with whatever file was at some
-    /// path then.
+    /// path then. Nor can one whose copy was something else at start: an
+    /// agent launched with that name ran whatever was there then.
     pub(crate) fn launched_this(&self, launched_with: Option<&str>) -> bool {
         match &self.mode {
-            Mode::Pinned(pin) => launched_with == Some(pin.name.as_str()),
+            Mode::Pinned(pin) => !pin.replaced && launched_with == Some(pin.name.as_str()),
             // An in-process daemon (a test) has only the path it was given.
             Mode::Given => launched_with.is_none(),
             Mode::Unpinned(_) => false,
@@ -179,6 +186,19 @@ impl Binary {
             ino: made.ino,
             kind: Kind::File,
         })
+    }
+
+    /// When the file found under the copy's name at start was not the
+    /// running binary, and was replaced: what the operator is told.
+    pub(crate) fn replaced(&self) -> Option<String> {
+        match &self.mode {
+            Mode::Pinned(pin) if pin.replaced => Some(format!(
+                "the copy of the crew binary at {} was not this build: it was made again from the \
+running binary, and agents launched with it are restarted, not adopted",
+                self.path.display()
+            )),
+            _ => None,
+        }
     }
 
     /// When no copy could be kept: what the operator is told.
@@ -263,8 +283,9 @@ binary",
     }
 }
 
-/// The copy of `source` in `dir`, found or made: its name and what it is.
-fn keep(dir: &Path, source: &Path) -> Result<(String, Made), String> {
+/// The copy of `source` in `dir`, found or made: its name, what it is, and
+/// whether something else was under its name and was replaced.
+fn keep(dir: &Path, source: &Path) -> Result<(String, Made, bool), String> {
     let mut file = File::open(source).map_err(|e| format!("reading {}: {e}", source.display()))?;
     let running = file
         .metadata()
@@ -272,12 +293,14 @@ fn keep(dir: &Path, source: &Path) -> Result<(String, Made), String> {
     let name = format!("crew-{}", build_id(&running));
     crew_core::paths::ensure_private_dir(dir).map_err(|e| format!("{e:#}"))?;
     runnable(dir)?;
-    if let Some(made) = kept(&dir.join(&name), &file, running.size()) {
-        return Ok((name, made));
+    let path = dir.join(&name);
+    if let Some(made) = kept(&path, &file, running.size()) {
+        return Ok((name, made, false));
     }
+    let replaced = fs::symlink_metadata(&path).is_ok();
     let made = copy(&mut file, dir, &name)
         .map_err(|e| format!("copying it into {}: {e}", dir.display()))?;
-    Ok((name, made))
+    Ok((name, made, replaced))
 }
 
 /// The copy an earlier daemon of this build kept at `path`, if that is
@@ -706,24 +729,38 @@ mod tests {
         let pinned = Binary::pin(&state, &running, running.clone());
         assert_eq!(fs::read_to_string(pinned.path()).unwrap(), "the build");
         assert_ne!(made(&path), planted);
+        // What an agent launched with that name ran is not known.
+        let name = pinned.name().unwrap().to_string();
+        assert!(pinned.replaced().is_some());
+        assert!(!pinned.launched_this(Some(&name)));
 
         // The running binary's bytes: kept as it is, no copy made.
         let kept = made(&path);
         let again = Binary::pin(&state, &running, running.clone());
         assert_eq!(made(again.path()), kept);
+        assert_eq!(again.replaced(), None);
+        assert!(again.launched_this(Some(&name)));
 
         // A link to the running binary is not followed; a FIFO is not
         // waited on.
         fs::remove_file(&path).unwrap();
         std::os::unix::fs::symlink(&running, &path).unwrap();
-        Binary::pin(&state, &running, running.clone());
+        let linked = Binary::pin(&state, &running, running.clone());
         assert!(fs::symlink_metadata(&path).unwrap().file_type().is_file());
+        assert!(linked.replaced().is_some());
         fs::remove_file(&path).unwrap();
         let fifo = CString::new(path.as_os_str().as_bytes()).unwrap();
         // SAFETY: a valid C string.
         assert_eq!(unsafe { libc::mkfifo(fifo.as_ptr(), 0o600) }, 0);
-        Binary::pin(&state, &running, running.clone());
+        let piped = Binary::pin(&state, &running, running.clone());
         assert_eq!(fs::read_to_string(&path).unwrap(), "the build");
+        assert!(piped.replaced().is_some());
+
+        // Nothing there: made, and nothing replaced.
+        fs::remove_file(&path).unwrap();
+        let made_anew = Binary::pin(&state, &running, running.clone());
+        assert_eq!(made_anew.replaced(), None);
+        assert!(made_anew.launched_this(Some(&name)));
     }
 
     #[test]

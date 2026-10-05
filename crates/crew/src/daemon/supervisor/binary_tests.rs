@@ -706,6 +706,88 @@ async fn reviewer_replacing_a_cached_pin_restarts_its_old_agents_and_reports_the
 }
 
 #[tokio::test]
+async fn a_stop_given_up_halfway_leaves_an_agent_of_another_build_held() {
+    let p = pinned(&[("other", "shell")]).await;
+    let daemon = p.daemon();
+    let old = of_another_build(&p, "other");
+    p.procs.fail_kill.store(true, Ordering::SeqCst);
+    assert!(!daemon.recover_agents(p.procs.clone()).await);
+
+    // An operator's stop, dropped while the backend has not answered.
+    p.procs.fail_kill.store(false, Ordering::SeqCst);
+    p.procs.wait_kill.store(true, Ordering::SeqCst);
+    let stop = tokio::spawn({
+        let daemon = daemon.clone();
+        async move { daemon.kill_agent("other").await }
+    });
+    tokio::time::timeout(
+        std::time::Duration::from_secs(3),
+        p.procs.kill_entered.notified(),
+    )
+    .await
+    .unwrap();
+    stop.abort();
+    assert!(stop.await.unwrap_err().is_cancelled());
+    still_held(&p, "other", &old);
+
+    // It is still the tick's to stop, and once that works it is restarted
+    // with this daemon's copy and the other copy goes.
+    daemon.binary_housekeeping().await;
+    for _ in 0..500 {
+        if !p.procs.spawned.lock().unwrap().is_empty() {
+            break;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+    }
+    assert_eq!(Path::new(&p.launched("other").program), p.pin());
+    assert!(!old.exists());
+}
+
+#[tokio::test]
+async fn an_agent_recorded_with_a_copy_replaced_at_start_is_restarted_and_the_event_says_why() {
+    // Between two starts of this build, its copy was written over with
+    // other bytes of the same length, and its mode put back.
+    let p = binary_fixture_with_cache(&[("same", "shell")], false, Some("the bUnning build")).await;
+    let daemon = p.daemon();
+    let name = daemon.binary.name().unwrap().to_string();
+    let events = daemon.store.recent_events(None, 50).unwrap();
+    let repinned: Vec<_> = events
+        .iter()
+        .filter(|e| e.event_type == "daemon.repinned")
+        .collect();
+    assert_eq!(repinned.len(), 1, "{events:?}");
+    assert_eq!(repinned[0].level, crew_core::EventLevel::Warn);
+    assert_eq!(
+        repinned[0].message,
+        format!(
+            "the copy of the crew binary at {} was not this build: it was made again from the \
+running binary, and agents launched with it are restarted, not adopted",
+            p.pin().display()
+        )
+    );
+
+    daemon.model().local.get_mut("same").unwrap().binary = Some(name.clone());
+    daemon.recover_agents(p.procs.clone()).await;
+    for _ in 0..500 {
+        if !p.procs.spawned.lock().unwrap().is_empty() {
+            break;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+    }
+    assert_eq!(Path::new(&p.launched("same").program), p.pin());
+    let events = daemon.store.recent_events(None, 50).unwrap();
+    assert!(
+        events.iter().any(|e| e.event_type == "agent.other_build"
+            && e.message
+                == format!(
+                    "same was launched with {name}, which was not this build when this daemon \
+started; it is stopped, not adopted"
+                )),
+        "{events:?}"
+    );
+}
+
+#[tokio::test]
 async fn an_in_process_daemon_keeps_the_binary_it_was_given_and_makes_no_copy() {
     let temp = tempfile::tempdir().unwrap();
     let given = std::env::current_exe().unwrap();

@@ -157,6 +157,10 @@ pub(crate) struct AgentRuntimeState {
     /// all, neither restarted nor its copy deleted, until a stop of it has
     /// worked (supervisor/recovery.rs).
     pub other_build: bool,
+    /// One stop of that process at a time (recovery's, an operator's, the
+    /// housekeeping tick's): it stays held through each, and only one that
+    /// worked ends the hold. Given up halfway, a stop leaves it held.
+    pub other_build_stop: Arc<tokio::sync::Mutex<()>>,
     pub transcript: Option<String>,
     pub spawned_at: i64,
     /// Messages pushed to the agent's listener and not yet confirmed.
@@ -1029,6 +1033,9 @@ pub async fn start(options: DaemonOptions) -> Result<Running> {
     }
     if let Some(warning) = daemon.binary.warning() {
         daemon.emit(NewEvent::new("daemon", "daemon.unpinned", warning).warn());
+    }
+    if let Some(replaced) = daemon.binary.replaced() {
+        daemon.emit(NewEvent::new("daemon", "daemon.repinned", replaced).warn());
     }
     Ok(Running {
         daemon,

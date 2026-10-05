@@ -74,34 +74,36 @@ impl Daemon {
                     continue;
                 }
                 // Its crew tools are another build's, which would speak to
-                // this daemon in another protocol: it is stopped, and goes
-                // on as an agent that did not survive.
+                // this daemon in another protocol, or whatever the copy it
+                // was launched with was before this start made it again: it
+                // is stopped, and goes on as an agent that did not survive.
+                let what = match launched_with.as_deref() {
+                    Some(name) if Some(name) == self.binary.name() => format!(
+                        "{} was launched with {name}, which was not this build when this daemon \
+started; it is stopped, not adopted",
+                        agent.id
+                    ),
+                    _ => format!(
+                        "{} runs another build of crew ({}); it is stopped, not adopted",
+                        agent.id,
+                        launched_with.as_deref().unwrap_or("none recorded")
+                    ),
+                };
                 self.emit(
-                    NewEvent::new(
-                        "daemon",
-                        "agent.other_build",
-                        format!(
-                            "{} runs another build of crew ({}); it is stopped, not adopted",
-                            agent.id,
-                            launched_with.as_deref().unwrap_or("none recorded")
-                        ),
-                    )
-                    .agent(&agent.id)
-                    .warn(),
+                    NewEvent::new("daemon", "agent.other_build", what)
+                        .agent(&agent.id)
+                        .warn(),
                 );
-                self.model().rt(&agent.id).expected_exit = true;
-                if let Err(e) = procs.kill(&agent.id).await {
+                // Held from here: what its backend reports while it is being
+                // stopped is not its end.
+                self.model().rt(&agent.id).other_build = true;
+                if let Some(Err(e)) = self.stop_other_build(procs.as_ref(), &agent.id, true).await {
                     // It may still run, with the copy it was launched with:
                     // it is left as it is until a stop of it works.
                     held += 1;
                     self.hold_other_build(&agent.id, &e);
                     continue;
                 }
-                // An exit reported for the old process now is not this agent's.
-                self.update_agent(&agent.id, |a| {
-                    a.pid = None;
-                    a.backend_ref = None;
-                });
             }
             // The process did not outlive the previous daemon.
             if self.resume_or_stop(agent).await {
@@ -218,22 +220,16 @@ current task where you left off, and call agent_inbox to check for messages you 
         };
         for id in held {
             let since = self.stops(&id);
-            // Taken while the stop runs: an operator's stop beside it does
-            // not count on it, nor this one on theirs.
-            let taken = std::mem::take(&mut self.model().rt(&id).other_build);
-            if !taken {
-                continue;
+            match self.stop_other_build(procs.as_ref(), &id, false).await {
+                Some(Ok(())) => {}
+                Some(Err(e)) => {
+                    tracing::debug!("stopping {id}, of another build, again: {e:#}");
+                    continue;
+                }
+                // Another stop of it is under way, or has worked: it
+                // decides what follows.
+                None => continue,
             }
-            if let Err(e) = procs.kill(&id).await {
-                tracing::debug!("stopping {id}, of another build, again: {e:#}");
-                self.model().rt(&id).other_build = true;
-                continue;
-            }
-            // An exit reported for the old process now is not this agent's.
-            self.update_agent(&id, |a| {
-                a.pid = None;
-                a.backend_ref = None;
-            });
             // A stop or restart asked for meanwhile takes it from here.
             if self.stops(&id) != since {
                 continue;
@@ -247,18 +243,57 @@ current task where you left off, and call agent_inbox to check for messages you 
     }
 
     /// Stop agent `id`'s process for an operator's stop or restart, or a
-    /// retirement. A process recovery left running another build's copy is
-    /// no longer held once it is stopped, and still is if it could not be.
+    /// retirement. A process recovery left running another build's copy
+    /// is stopped one stop at a time, and stays held until one worked: a
+    /// stop that finds another worked before it has nothing left to stop.
     pub(crate) async fn kill_process(
         &self,
         procs: &dyn ProcessManager,
         id: &str,
     ) -> anyhow::Result<()> {
-        let held = std::mem::take(&mut self.model().rt(id).other_build);
-        let stopped = procs.kill(id).await;
-        if held && stopped.is_err() {
-            self.model().rt(id).other_build = true;
+        if !self.model().rt(id).other_build {
+            return procs.kill(id).await;
         }
-        stopped
+        self.stop_other_build(procs, id, true)
+            .await
+            .unwrap_or(Ok(()))
+    }
+
+    /// Stop agent `id`'s process of another build, one stop of it at a
+    /// time: it stays held while the stop runs, so neither the sweep of the
+    /// copy it runs nor what its backend reports of it comes between, and
+    /// a stop given up halfway leaves it held. Once a stop worked, its
+    /// record goes (an exit reported for the old process now is not this
+    /// agent's), then the hold. `None` when it was not tried: no longer
+    /// held, or, unless `wait`, another stop of it under way.
+    async fn stop_other_build(
+        &self,
+        procs: &dyn ProcessManager,
+        id: &str,
+        wait: bool,
+    ) -> Option<anyhow::Result<()>> {
+        let one = self.model().rt(id).other_build_stop.clone();
+        let _one = if wait {
+            one.lock_owned().await
+        } else {
+            one.try_lock_owned().ok()?
+        };
+        {
+            let mut model = self.model();
+            let rt = model.rt(id);
+            if !rt.other_build {
+                return None;
+            }
+            rt.expected_exit = true;
+        }
+        if let Err(e) = procs.kill(id).await {
+            return Some(Err(e));
+        }
+        self.update_agent(id, |a| {
+            a.pid = None;
+            a.backend_ref = None;
+        });
+        self.model().rt(id).other_build = false;
+        Some(Ok(()))
     }
 }
