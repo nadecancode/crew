@@ -24,6 +24,10 @@ struct Recorded {
     killed: Mutex<Vec<String>>,
     alive: Mutex<HashSet<String>>,
     fail_kill: AtomicBool,
+    wait_kill: AtomicBool,
+    kill_entered: tokio::sync::Notify,
+    kill_release: tokio::sync::Notify,
+    spawn_with_identity: AtomicBool,
 }
 
 #[async_trait::async_trait]
@@ -35,6 +39,14 @@ impl ProcessManager for Recorded {
         self.spawned.lock().unwrap().push(spec.clone());
         self.alive.lock().unwrap().insert(spec.agent_id.clone());
         Ok(Spawned {
+            pid: self
+                .spawn_with_identity
+                .load(Ordering::SeqCst)
+                .then_some(23456),
+            backend_ref: self
+                .spawn_with_identity
+                .load(Ordering::SeqCst)
+                .then(|| "new-pane".into()),
             ready: true,
             ..Spawned::default()
         })
@@ -56,10 +68,28 @@ impl ProcessManager for Recorded {
     }
     async fn kill(&self, id: &str) -> Result<()> {
         self.killed.lock().unwrap().push(id.to_string());
-        if self.fail_kill.load(Ordering::SeqCst) {
+        let launches = || {
+            self.spawned
+                .lock()
+                .unwrap()
+                .iter()
+                .filter(|spec| spec.agent_id == id)
+                .count()
+        };
+        let stopped_instance = launches();
+        let fail = self.fail_kill.load(Ordering::SeqCst);
+        if self.wait_kill.swap(false, Ordering::SeqCst) {
+            self.kill_entered.notify_one();
+            self.kill_release.notified().await;
+        }
+        if fail {
             anyhow::bail!("the backend could not stop the old process");
         }
-        self.alive.lock().unwrap().remove(id);
+        // A delayed reply belongs to the process being stopped, not to a
+        // replacement that another operation launched before it arrived.
+        if launches() == stopped_instance {
+            self.alive.lock().unwrap().remove(id);
+        }
         Ok(())
     }
     fn is_alive(&self, id: &str) -> bool {
@@ -107,6 +137,14 @@ async fn pinned(agents: &[(&str, &str)]) -> Pinned {
 }
 
 async fn binary_fixture(agents: &[(&str, &str)], cannot_pin: bool) -> Pinned {
+    binary_fixture_with_cache(agents, cannot_pin, None).await
+}
+
+async fn binary_fixture_with_cache(
+    agents: &[(&str, &str)],
+    cannot_pin: bool,
+    cached_bytes: Option<&str>,
+) -> Pinned {
     let temp = tempfile::tempdir().unwrap();
     let root = temp.path().canonicalize().unwrap();
     let running_binary = root.join("running-crew");
@@ -116,6 +154,19 @@ async fn binary_fixture(agents: &[(&str, &str)], cannot_pin: bool) -> Pinned {
     if cannot_pin {
         std::fs::create_dir(workspace.join(".crew")).unwrap();
         std::fs::write(workspace.join(".crew/bin"), "not a directory").unwrap();
+    }
+    if let Some(bytes) = cached_bytes {
+        use std::os::unix::fs::PermissionsExt;
+
+        let cached = crate::daemon::binary::Binary::pin(
+            &workspace.join(".crew"),
+            &running_binary,
+            running_binary.clone(),
+        );
+        assert!(cached.name().is_some());
+        std::fs::set_permissions(cached.path(), std::fs::Permissions::from_mode(0o700)).unwrap();
+        std::fs::write(cached.path(), bytes).unwrap();
+        std::fs::set_permissions(cached.path(), std::fs::Permissions::from_mode(0o500)).unwrap();
     }
     let on_disk = root.join("target/release/crew");
     let running = start(DaemonOptions {
@@ -461,6 +512,197 @@ async fn an_operators_stop_that_works_ends_the_hold_on_an_agent_of_another_build
         p.procs.spawned.lock().unwrap().is_empty(),
         "a stopped agent was restarted"
     );
+}
+
+#[tokio::test]
+async fn reviewer_an_inflight_operator_stop_keeps_the_old_binary_pinned() {
+    let p = pinned(&[("other", "shell")]).await;
+    let daemon = p.daemon();
+    let old = of_another_build(&p, "other");
+    p.procs.fail_kill.store(true, Ordering::SeqCst);
+    assert!(!daemon.recover_agents(p.procs.clone()).await);
+
+    p.procs.wait_kill.store(true, Ordering::SeqCst);
+    let stop = tokio::spawn({
+        let daemon = daemon.clone();
+        async move { daemon.kill_agent("other").await }
+    });
+    tokio::time::timeout(
+        std::time::Duration::from_secs(3),
+        p.procs.kill_entered.notified(),
+    )
+    .await
+    .unwrap();
+    // A fix may serialize this tick behind the pending stop; either way
+    // the old copy must remain until that stop has actually succeeded.
+    let _ = tokio::time::timeout(
+        std::time::Duration::from_secs(1),
+        daemon.binary_housekeeping(),
+    )
+    .await;
+    let kept = old.exists();
+    p.procs.kill_release.notify_one();
+    assert!(stop.await.unwrap().is_err());
+
+    assert!(p.procs.is_alive("other"));
+    assert!(
+        kept,
+        "the old copy was swept while its stop was still pending"
+    );
+    still_held(&p, "other", &old);
+}
+
+#[tokio::test]
+async fn reviewer_a_failed_stop_retry_keeps_its_record_during_backend_events() {
+    let p = pinned(&[("other", "shell")]).await;
+    let daemon = p.daemon();
+    let old = of_another_build(&p, "other");
+    p.procs.fail_kill.store(true, Ordering::SeqCst);
+    assert!(!daemon.recover_agents(p.procs.clone()).await);
+
+    p.procs.wait_kill.store(true, Ordering::SeqCst);
+    let retry = tokio::spawn({
+        let daemon = daemon.clone();
+        async move { daemon.stop_other_builds().await }
+    });
+    tokio::time::timeout(
+        std::time::Duration::from_secs(3),
+        p.procs.kill_entered.notified(),
+    )
+    .await
+    .unwrap();
+    daemon
+        .on_proc_event(ProcEvent::Exited {
+            agent_id: "other".into(),
+            instance: "12345".into(),
+            code: None,
+            detail: "lost the connection".into(),
+        })
+        .await;
+    p.procs.kill_release.notify_one();
+    assert!(!retry.await.unwrap());
+
+    assert!(p.procs.is_alive("other"));
+    still_held(&p, "other", &old);
+}
+
+#[tokio::test]
+async fn reviewer_initial_recovery_keeps_its_record_during_a_failed_stop() {
+    let p = pinned(&[("other", "shell")]).await;
+    let daemon = p.daemon();
+    let old = of_another_build(&p, "other");
+    p.procs.fail_kill.store(true, Ordering::SeqCst);
+    p.procs.wait_kill.store(true, Ordering::SeqCst);
+    let recovery = tokio::spawn({
+        let daemon = daemon.clone();
+        let procs = p.procs.clone();
+        async move { daemon.recover_agents(procs).await }
+    });
+    tokio::time::timeout(
+        std::time::Duration::from_secs(3),
+        p.procs.kill_entered.notified(),
+    )
+    .await
+    .unwrap();
+    daemon
+        .on_proc_event(ProcEvent::Exited {
+            agent_id: "other".into(),
+            instance: "12345".into(),
+            code: None,
+            detail: "lost the connection".into(),
+        })
+        .await;
+    p.procs.kill_release.notify_one();
+    assert!(!recovery.await.unwrap());
+
+    assert!(p.procs.is_alive("other"));
+    still_held(&p, "other", &old);
+}
+
+#[tokio::test]
+async fn reviewer_a_late_stop_retry_does_not_clear_the_replacements_record() {
+    let p = pinned(&[("other", "shell")]).await;
+    let daemon = p.daemon();
+    of_another_build(&p, "other");
+    p.procs.fail_kill.store(true, Ordering::SeqCst);
+    assert!(!daemon.recover_agents(p.procs.clone()).await);
+
+    p.procs.fail_kill.store(false, Ordering::SeqCst);
+    p.procs.wait_kill.store(true, Ordering::SeqCst);
+    p.procs.spawn_with_identity.store(true, Ordering::SeqCst);
+    let retry = tokio::spawn({
+        let daemon = daemon.clone();
+        async move { daemon.stop_other_builds().await }
+    });
+    tokio::time::timeout(
+        std::time::Duration::from_secs(3),
+        p.procs.kill_entered.notified(),
+    )
+    .await
+    .unwrap();
+
+    // A later operator restart completes its stop and launch while the
+    // housekeeping retry still waits for the earlier stop's response.
+    let restart = tokio::spawn({
+        let daemon = daemon.clone();
+        async move { daemon.restart_agent("other").await }
+    });
+    // Allow either a later restart overtaking this retry or serialization
+    // of the two stops. In both cases the final process record must belong
+    // to the replacement returned by Recorded::spawn.
+    let _ = tokio::time::timeout(std::time::Duration::from_secs(1), async {
+        while daemon.agent("other").unwrap().pid != Some(23456) {
+            tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+        }
+    })
+    .await;
+    p.procs.kill_release.notify_one();
+    retry.await.unwrap();
+    restart.await.unwrap().unwrap();
+    for _ in 0..500 {
+        if !p.procs.spawned.lock().unwrap().is_empty()
+            && daemon.agent("other").unwrap().status != AgentStatus::Spawning
+        {
+            break;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+    }
+    assert_eq!(p.procs.spawned.lock().unwrap().len(), 1);
+    assert!(p.procs.is_alive("other"));
+
+    let agent = daemon.agent("other").unwrap();
+    assert_eq!(
+        (agent.pid, agent.backend_ref.as_deref()),
+        (Some(23456), Some("new-pane")),
+        "the earlier retry erased the later restart's process"
+    );
+}
+
+#[tokio::test]
+async fn reviewer_replacing_a_cached_pin_restarts_its_old_agents_and_reports_the_repair() {
+    let p = binary_fixture_with_cache(&[("same", "shell")], false, Some("a different build")).await;
+    let daemon = p.daemon();
+    assert_eq!(
+        std::fs::read_to_string(p.pin()).unwrap(),
+        "the running build"
+    );
+    let said = daemon
+        .store
+        .recent_events(None, 50)
+        .unwrap()
+        .iter()
+        .any(|e| e.level == crew_core::EventLevel::Warn && e.message.contains("build"));
+    daemon.model().local.get_mut("same").unwrap().binary =
+        Some(daemon.binary.name().unwrap().to_string());
+
+    daemon.recover_agents(p.procs.clone()).await;
+
+    assert_eq!(
+        *p.procs.killed.lock().unwrap(),
+        vec!["same".to_string()],
+        "an agent using the replaced copy was adopted by name alone"
+    );
+    assert!(said, "startup repaired a different build without a warning");
 }
 
 #[tokio::test]
