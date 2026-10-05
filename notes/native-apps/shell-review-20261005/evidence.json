@@ -1,0 +1,82 @@
+{
+  "task": "native-shell-design-review",
+  "date": "2026-10-05",
+  "reference": "5015460ab07671adeb748aefff8d733c08a42605",
+  "apple": {
+    "source": "4479a30185f47672347c2d1e47e8660685b87734",
+    "scope": "source and raster icon inspection only",
+    "runtime": "Apple verification deferred by operator"
+  },
+  "linux": {
+    "source_baseline": "c45703fff782c6a4d2573437771be08a99ba3139",
+    "source_candidate": "d4d31a134b89e62f38e5cf32040708d695affb0e",
+    "workspace_registration": "32ab8f0e8046478700726de64c65e1f91fc509ba",
+    "runtime_helper": "0198317b281e2bde0caf451eb5cdfb48094b3505",
+    "designer_baseline_binary_sha256": "0ab9aab3b2f7a331521684340781a4d43bc15b0016a50f80668e2d7ec0044434",
+    "designer_candidate_binary_sha256": "ac0dc72ec0ba69412141ebb7e10f281639e944c3422b324f8e2489432a8fddd1",
+    "toolchain": "rustc 1.93.1 via +1.93",
+    "build_times_seconds": {
+      "baseline": 27.57,
+      "candidate": 0.83
+    },
+    "scope": "real disconnected native shell; no core, transport or terminal integration",
+    "display": "private Xvfb 1440x960x24, 96dpi; Openbox; GDK_BACKEND=x11, GSK_RENDERER=cairo, scale 1",
+    "atspi": "private dbus-daemon using selected at-spi2-core accessibility.conf; GTK_A11Y=atspi; pyatspi 2.58.1",
+    "bounds_limit": "AT-SPI bounds are raw provider output; window geometry and PNG dimensions establish capture sizes",
+    "capture_environment_limit": "designer pure environment omitted the ambient librsvg loader cache; graph final images use normal approved native environment. Missing SVG glyphs in discarded designer overview captures are not a product finding."
+  },
+  "captures": [
+    {
+      "file": "linux-team-light-1024.png",
+      "original": "/home/nade/workspaces/personal/crew/.crew/worktrees/graph/target/native-validation/linux-window-test-2A2pv4/1-Team-light.png",
+      "producer": "graph",
+      "source": "d4d31a134b89e62f38e5cf32040708d695affb0e",
+      "binary_sha256": "755b12c20ed0a8b8e47af42fdbf5cf4f52863389771a85ee904c2f0a0809637b",
+      "width": 1024,
+      "height": 600,
+      "sha256": "f287b82666055abb06b088eb922a547d0755f612499602016cc42b7f99a53b61"
+    },
+    {
+      "file": "linux-tasks-dark-560.png",
+      "original": "/home/nade/workspaces/personal/crew/.crew/worktrees/graph/target/native-validation/linux-window-test-2A2pv4/8-Tasks-narrow-details.png",
+      "producer": "graph",
+      "source": "d4d31a134b89e62f38e5cf32040708d695affb0e",
+      "binary_sha256": "755b12c20ed0a8b8e47af42fdbf5cf4f52863389771a85ee904c2f0a0809637b",
+      "width": 560,
+      "height": 600,
+      "sha256": "84f52f6c4fafa96f8d7587b79dc73f985af4621cfe69b07d15e6a43ffdf29419"
+    },
+    {
+      "file": "baseline-shortcuts-after-escape.png",
+      "original": "target/native-shell-review-c457/run03/03-shortcuts-after-escape.png",
+      "producer": "designer",
+      "source": "c45703fff782c6a4d2573437771be08a99ba3139",
+      "binary_sha256": "0ab9aab3b2f7a331521684340781a4d43bc15b0016a50f80668e2d7ec0044434",
+      "width": 580,
+      "height": 500,
+      "sha256": "ea3548f4038606e39ecf5ae9dd217db73b3687a189bb89c383a210612b9848ae"
+    }
+  ],
+  "findings": [
+    {
+      "id": "NSR-L01",
+      "state": "fixed in d4d31a13; independently replayed",
+      "owner": "graph"
+    },
+    {
+      "id": "NSR-L02",
+      "state": "empty-view focus target needs owner correction or explicit named viewport decision",
+      "owner": "graph"
+    },
+    {
+      "id": "NSR-L03",
+      "state": "unresolved AT-SPI menu-label export; no screen-reader pass claimed",
+      "owner": "graph/qa"
+    }
+  ],
+  "cleanup": {
+    "recorded_pids": 14,
+    "present_at_check": 0,
+    "operator_processes": "not touched"
+  }
+}
