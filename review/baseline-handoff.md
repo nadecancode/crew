@@ -22,7 +22,7 @@ baseline is; the first is a defect that still has to be fixed.
 
 ## The recovery reports
 
-Three commits, each adding documentation and evidence only. Take exactly these, in this order; they
+Four commits, each adding documentation and evidence only. Take exactly these, in this order; they
 apply to `main` without conflict (checked by applying them to a copy of `main`).
 
 | commit | adds | reviewed as |
@@ -30,6 +30,7 @@ apply to `main` without conflict (checked by applying them to a copy of `main`).
 | `15a5aa0d` | [current-production-verification.md](current-production-verification.md) | `verify-current-delivery`, approved |
 | `1f789299` | provenance wording in `notes/web-revamp.md` | `verify-delivered-design`, approved |
 | `0a1c1f84` | the current verdict in `notes/web-revamp.md` §signoff, two captures and `notes/web-revamp/recovery-6049cdf6/evidence.json` | `verify-delivered-design`, approved |
+| `8958d97d` | the focus gap below, with its severity and both ways of reproducing it, in the same two files | read afterwards, approved |
 
 Do not merge the `agents/designer` branch itself: it also holds a native draft and a copy of
 `notes/native-architecture.md` older than the approved one.
@@ -83,8 +84,10 @@ team and dashboard.
 
 1. **Focus is lost after closing a task detail reached across views (RECOVERY-FOCUS-1).** Found by
    `designer`. Open an agent on the Team graph, open one of its tasks from the inspector, switch to
-   Tasks with the detail still open, press Escape: the detail closes and focus falls to the document
-   body. `web/src/ui.ts` remembers the element that opened the panel only when the panel opens from
+   Tasks with the detail still open, move focus into the detail and press Escape: the detail closes
+   and focus falls to the document body. At 390 px the layout moves focus into the detail by itself;
+   at 1440 px Escape straight after choosing Tasks leaves focus on the Tasks button, and the defect
+   shows once the detail has been focused. `web/src/ui.ts` remembers the element that opened the panel only when the panel opens from
    nothing (line 126), and `closePanel` (lines 156 to 165) falls back to an agent node, which the Tasks
    view does not have. Opening and closing a task from the Tasks list itself returns focus correctly.
    This is in the approved source and predates this round; I did not find it in the final review. It
