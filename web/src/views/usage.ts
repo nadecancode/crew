@@ -7,16 +7,14 @@ import type { Agent, Quota, RuntimeKind, Usage } from "../protocol";
 export const reportedTokens = (usage: Usage) => usage.input_tokens + usage.output_tokens + usage.cache_read_tokens + usage.cache_creation_tokens;
 
 export function usageTotals(agents: readonly Agent[]) {
-  let tokens = 0, turns = 0, reported = 0, limited = 0;
+  let tokens = 0, reported = 0;
   for (const agent of agents) {
     if (agent.usage) {
       tokens += reportedTokens(agent.usage);
-      turns += agent.usage.turns;
       reported++;
     }
-    if (agent.limit && agent.paused) limited++;
   }
-  return { tokens, turns, reported, limited };
+  return { tokens, reported };
 }
 
 /** A figure nobody has reported for this long is muted. */

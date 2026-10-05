@@ -52,7 +52,7 @@ export function UsageView() {
                     <td><button class={`link rt-${a.runtime}`} onClick={() => open(a.id)}>{runtimeGlyph(a.runtime)} {a.id}</button></td>
                     <td>
                       <Show when={a.context} fallback={<span class="dim">not reported</span>}>
-                        <span class="ctx" tabindex="0" role="img" aria-label={`${a.context!.percent}% · ${a.context!.tokens} of ${a.context!.window} tokens`} title={`${a.context!.percent}% · ${tokens(a.context!.tokens)} of ${tokens(a.context!.window)}`}>
+                        <span class="ctx" role="img" aria-label={`${a.context!.percent}% · ${a.context!.tokens} of ${a.context!.window} tokens`} title={`${a.context!.percent}% · ${tokens(a.context!.tokens)} of ${tokens(a.context!.window)}`}>
                           <svg class="gauge-svg" viewBox="0 0 100 8" preserveAspectRatio="none" aria-hidden="true">
                             <rect class="track" width="100" height="8" rx="2" />
                             <rect class={`fill ${levelTone(a.context!.percent)}`} width={a.context!.percent} height="8" rx="2" />
@@ -63,7 +63,7 @@ export function UsageView() {
                     </td>
                     <td>
                       <Show when={a.usage} fallback={<span class="dim">not reported</span>}>
-                        <span class="stack" tabindex="0" role="img" aria-label={breakdown()} title={breakdown()}>
+                        <span class="stack" role="img" aria-label={breakdown()} title={breakdown()}>
                           <svg class="stack-svg" viewBox="0 0 200 10" preserveAspectRatio="none" aria-hidden="true">
                             {(() => {
                               let x = 0;
