@@ -243,7 +243,7 @@ function StatusBar() {
       <button disabled={!link.live()} onClick={() => ops.command()} title="command line (Ctrl K)">Commands <kbd aria-hidden="true">Ctrl K</kbd></button>
       <label class="appearance">Appearance <select aria-label="Appearance" value={prefs.prefs.theme} onChange={(e) => prefs.setTheme(e.currentTarget.value as Theme)}><option value="system">System</option><option value="light">Light</option><option value="dark">Dark</option></select></label>
       <button onClick={() => ui.openDialog({ kind: "help" })} title="keys and commands (?)" aria-label="keys and commands">?</button>
-      <select aria-label="Workspace actions" disabled={!link.live() || app.isPending("shutdown")} onChange={(e) => { if (e.currentTarget.value === "stop") { e.currentTarget.value = ""; ops.stop(); } }}><option value="">Workspace actions</option><option value="stop">stop team</option></select>
+      <button disabled={!link.live() || app.isPending("shutdown")} onClick={() => ops.stop()} title="Workspace actions: stop the team (S)">stop team</button>
     </header>
   );
 }
@@ -265,7 +265,7 @@ function WorkspaceSummary() {
   ].map(([value, label]) => [store.state.loaded ? value : "—", label]));
   return <section class="workspace-summary" aria-label="workspace summary">
     <div class="objective-block"><details class="objective"><summary title="Expand objective"><h1>{s()?.objective || s()?.project || "Workspace"}</h1></summary></details>
-      <p class="workspace-meta"><span title={s()?.workspace}>{homeDir(s()?.workspace ?? "")}</span> · {elapsed()} <span class="vcs" title={s()?.vcs_note || `agents work with ${s()?.vcs}`}>{s()?.vcs}</span> · {s()?.sandbox === "required" ? "sandbox" : "no sandbox"}</p>
+      <p class="workspace-meta"><span title={s()?.workspace}>{homeDir(s()?.workspace ?? "")}</span> · {elapsed()} <span class="vcs" title={s()?.vcs_note || `agents work with ${s()?.vcs}`}>{s()?.vcs}</span><Show when={s()?.sandbox}> · {s()?.sandbox === "required" ? "sandbox" : s()?.sandbox === "off" ? "no sandbox" : "sandbox unconfirmed"}</Show></p>
       <Show when={s()?.summary || s()?.completed_at != null}><details class="completion"><summary>Team completed <Show when={s()?.completed_at != null}>{clockTime(s()!.completed_at!)}</Show></summary><p>{s()?.summary}</p></details></Show>
     </div>
     <dl class="summary-counts"><For each={counts()}>{([value, label]) => <div><dd>{value}</dd><dt>{label}</dt></div>}</For></dl>

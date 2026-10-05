@@ -70,7 +70,7 @@ export function MessageBox() {
           </label>
         </Show>
         <textarea id="compose-text" rows="1" aria-label={c().prompt ? `prompt for ${c().to}` : "message, or a / command"} spellcheck={false}
-          placeholder={link.live() ? (c().prompt ? "typed into the agent's terminal as one prompt" : "Message the team, or type / for a command") : "read-only: not connected"}
+          placeholder={link.live() ? (c().prompt ? "typed into the agent's terminal as one prompt" : "Message / command") : "read-only: not connected"}
           disabled={!link.live()} value={c().text}
           onFocus={(e) => {
             if (e.relatedTarget instanceof HTMLElement && !e.currentTarget.closest("section")!.contains(e.relatedTarget)) back = e.relatedTarget;
