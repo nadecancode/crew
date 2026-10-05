@@ -1,0 +1,123 @@
+{
+  "task": "git-isolation-integration",
+  "date": "2026-10-05",
+  "base": "d4e0f979309b195dd5aa7b20515c12a3a9624664",
+  "source": "0886ccd0c12f3e6e9b939b59c581562f80be0563",
+  "runner": "95688127cbf01ba7b5c9967ad5417a39a4d493a6",
+  "fixture": {
+    "reviewed": "1122d9367428b7dad1754793651f208168705ab8",
+    "integrated": "0886ccd0c12f3e6e9b939b59c581562f80be0563",
+    "patch_comparison": {
+      "original": "1122d9367428b7dad1754793651f208168705ab8",
+      "applied": "0886ccd0",
+      "comparison": "Exact Git patch bytes except index hashes and hunk range/heading lines; not a Git patch-id claim",
+      "normalized_sha256": "4522815cee37e98cc0e24ba28a6573118eae55f96d875c175282313891627db3"
+    }
+  },
+  "source_inventory": [
+    "M crates/crew/src/daemon/sandbox.rs",
+    "M crates/crew/src/endpoints.rs",
+    "A crates/crew/src/git_fixture_tests.rs",
+    "A crates/crew/src/git_test_support.rs",
+    "M crates/crew/src/lib.rs",
+    "M crates/crew/tests/common/mod.rs",
+    "M crates/crew/tests/sandbox.rs",
+    "M notes/native-validation.md",
+    "A review/fixture-git-isolation.md",
+    "A review/native/runner-environment-isolation.json",
+    "A review/native/runner-environment-isolation.md",
+    "M scripts/native/common.sh",
+    "M scripts/native/linux-env.sh",
+    "A scripts/native/tests/environment.sh"
+  ],
+  "protected_equal": [
+    "web",
+    "crates/crew/web-dist",
+    "Cargo.toml",
+    "Cargo.lock",
+    "crates/crew/Cargo.toml",
+    "crates/crew-core",
+    "crates/crew-client",
+    "crates/crew-protocol",
+    "crates/crew-tui",
+    "apps/apple",
+    "crates/crew-desktop",
+    "crates/crew/src/git"
+  ],
+  "production_prefixes_equal": [
+    "crates/crew/src/endpoints.rs",
+    "crates/crew/src/daemon/sandbox.rs",
+    "crates/crew/src/lib.rs except two cfg(test) module declarations"
+  ],
+  "checks": {
+    "permanent_foreign_regression": {
+      "passed": 1,
+      "child_cases": 6,
+      "foreign_entire_byte_maps_preserved": true
+    },
+    "sandbox_unit": {
+      "cases": 25,
+      "initial_self_skips": 5,
+      "completion_runs": 5
+    },
+    "sandbox_integration": {
+      "cases": 29,
+      "initial_self_skips": 5,
+      "completion_runs": 5,
+      "pinned_socat": true
+    },
+    "initial_skip_messages": [
+      "test daemon::sandbox::tests::a_name_through_a_recreated_system_link_keeps_its_name_inside ... skipped: the host lacks a built crew binary",
+      "test daemon::sandbox::tests::a_name_whose_link_crosses_what_the_sandbox_hides_runs_by_its_bound_file ... skipped: the host lacks a built crew binary",
+      "test daemon::sandbox::tests::an_agents_jj_does_all_its_work_in_its_sandbox_and_the_helper_integrates ... skipped: the host lacks a built crew binary",
+      "test daemon::sandbox::tests::files_move_between_directories_on_one_writable_mount_and_nowhere_else ... skipped: the host lacks a built crew binary",
+      "test daemon::sandbox::tests::under_jj_files_move_inside_the_workspace_and_the_object_store_only ... skipped: the host lacks a built crew binary",
+      "test agent_cannot_reach_host_sockets ... skipped: `socat` is not on PATH (`just test-sandbox` provides it)",
+      "test agent_without_crew_identity_cannot_become_operator ... skipped: `socat` is not on PATH (`just test-sandbox` provides it)",
+      "test integrate_hooks_have_no_authority ... skipped: `socat` is not on PATH (`just test-sandbox` provides it)",
+      "test jjs_integration_runs_with_no_authority ... skipped: `socat` is not on PATH (`just test-sandbox` provides it)",
+      "test the_harness_finds_a_usable_sandbox_and_its_controls_reach_the_host ... skipped: `socat` is not on PATH (`just test-sandbox` provides it)"
+    ],
+    "completion_logs_have_no_skips": true,
+    "executed_top_level_cases": 55,
+    "actual_default_cli_msrv": {
+      "rust": "1.82.0",
+      "cargo": "1.82.0",
+      "locked": true,
+      "build_and_help_passed": true,
+      "build_seconds": 22.41
+    },
+    "native_runner_observer_groups": 4,
+    "script_syntax_checked_individually": 11
+  },
+  "logs": [
+    {
+      "file": "git-isolation-fixtures.log",
+      "sha256": "951f32d83195eb6075edf0debf4ab39140494cd18944d1da2dba230e05a8c5d3"
+    },
+    {
+      "file": "git-isolation-socat-controls.log",
+      "sha256": "d4c24eed28d3c05e57354f7e5a9f8a5b82858a6cb4c843d61ec35a5fc70af764"
+    },
+    {
+      "file": "git-isolation-built-bin-controls.log",
+      "sha256": "a72f3e411aaf5beed5d2fd8e42be30121f4d1b1616e06f09aa6c06cf4c9695d9"
+    },
+    {
+      "file": "git-isolation-msrv.log",
+      "sha256": "e1f9ef1e01d1bf558a95a2bba41062ae32c4ddde3ed20c8085e8182efed2ccd7"
+    },
+    {
+      "file": "git-isolation-runner.log",
+      "sha256": "4ec6d557cf095a409b1bfd9348a99ece4065c62f0b82648116680b234e3cef96"
+    }
+  ],
+  "local_artifacts": "/home/nade/workspaces/personal/crew/.crew/worktrees/qa/target/native-validation/",
+  "context_boundary": "Sourced native/common.sh clears inherited GIT_*/HERDR_* and CREW_IDENTITY/SOCKET/LAUNCH; negative children inject only disposable overrides.",
+  "not_repeated": [
+    "Full workspace/browser/native GTK/Apple matrix",
+    "Accepted broad fixture library/Clippy and real GTK tooling evidence"
+  ],
+  "apple": "Apple verification deferred by operator",
+  "root_or_operator_mutation": false
+}
