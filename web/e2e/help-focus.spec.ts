@@ -1,6 +1,6 @@
 import { expect, noRequestsAfterStart, test } from "./fixtures.ts";
 
-for (const viewport of [{ width: 390, height: 844 }, { width: 720, height: 480 }]) {
+for (const viewport of [{ width: 390, height: 844 }, { width: 720, height: 480 }, { width: 1440, height: 960 }]) {
   test.describe(`Help at ${viewport.width}×${viewport.height}`, () => {
     test.use({ viewport });
 
