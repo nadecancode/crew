@@ -16,6 +16,8 @@ export function VirtualList<T>(props: {
   /** Rows `from` to `to` (exclusive), oldest first; read with the list's version signal. */
   slice: (from: number, to: number) => T[];
   rowHeight: number;
+  /** Reading lists may opt out of tail-following (default true). */
+  follow?: boolean;
   render: (item: T, index: () => number, selected: () => boolean) => JSX.Element;
   label: string;
   class?: string;
@@ -34,6 +36,7 @@ export function VirtualList<T>(props: {
   const [top, setTop] = createSignal(0);
   const [height, setHeight] = createSignal(400);
   const [stick, setStick] = createSignal(true);
+  const following = () => props.follow !== false && stick();
   const H = () => props.rowHeight;
 
   const range = createMemo(() => {
@@ -52,21 +55,26 @@ export function VirtualList<T>(props: {
   onMount(() => {
     const ro = new ResizeObserver(() => {
       setHeight(el.clientHeight);
-      if (stick()) toBottom();
+      if (following()) toBottom();
     });
     ro.observe(el);
     onCleanup(() => ro.disconnect());
     setHeight(el.clientHeight || 400);
-    toBottom();
+    if (following()) toBottom();
+    else {
+      const selected = props.selected?.();
+      if (selected != null) ensureVisible(selected);
+      setAnchor();
+    }
   });
   // Follow the tail while the reader is at the bottom.
   createEffect(on(() => props.count(), () => {
-    if (stick()) queueMicrotask(() => el && toBottom());
+    if (following()) queueMicrotask(() => el && toBottom());
   }, { defer: true }));
   // Older rows put in front: the same rows stay under the reader.
   createEffect(on(() => props.prepended?.() ?? 0, (n, prev) => {
     const added = n - (prev ?? 0);
-    if (added > 0 && !stick() && !props.key) queueMicrotask(() => {
+    if (added > 0 && !following() && !props.key) queueMicrotask(() => {
       el.scrollTop += added * H();
       setTop(el.scrollTop);
     });
@@ -90,7 +98,7 @@ export function VirtualList<T>(props: {
     if (previous === undefined) return;
     const row = el.scrollTop / previous;
     queueMicrotask(() => {
-      if (stick()) toBottom();
+      if (following()) toBottom();
       else {
         el.scrollTop = row * h;
         setTop(el.scrollTop);
@@ -101,7 +109,7 @@ export function VirtualList<T>(props: {
   // The rows changed: where the anchor went, the view goes (nearest first, as
   // a few rows dropped or added is the common case).
   createEffect(on(() => (props.count(), props.slice(0, 0)), () => {
-    if (!props.key || stick() || !anchor) return;
+    if (!props.key || following() || !anchor) return;
     const a = anchor;
     untrack(() => {
       const n = props.count();
