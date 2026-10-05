@@ -143,7 +143,7 @@ pub struct CommandPolicy {
 
 macro_rules! commands {
     ($($name:literal: ($about:literal, $args:literal, [$($alias:literal),*], $web:expr)),+ $(,)?) => {
-        pub static COMMANDS: &[CommandPolicy] = &[
+        pub const COMMANDS: &[CommandPolicy] = &[
             $(CommandPolicy { name: $name, about: $about, args: $args,
                 aliases: &[$($alias),*], web: $web }),+
         ];

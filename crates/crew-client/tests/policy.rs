@@ -41,9 +41,15 @@ fn policy_covers_the_closed_catalogue_once_and_preserves_current_timeout_fallbac
 #[test]
 fn descriptors_are_borrowed_authority_with_four_confirmations_and_one_replay_class() {
     let exported = web_policy();
-    assert!(std::ptr::eq(exported.method_timeouts, METHODS));
-    assert!(std::ptr::eq(exported.commands, COMMANDS));
-    assert!(std::ptr::eq(exported.statuses, STATUSES));
+    assert_eq!(exported.method_timeouts, METHODS);
+    assert_eq!(exported.commands, COMMANDS);
+    assert_eq!(exported.statuses, STATUSES);
+    for command in exported.commands {
+        assert_eq!(command_policy(command.name), Some(command));
+        for alias in command.aliases {
+            assert_eq!(command_policy(alias), Some(command));
+        }
+    }
     let confirmations: Vec<_> = METHODS
         .iter()
         .filter_map(|policy| match policy.confirmation {
