@@ -63,7 +63,9 @@ the existing `web/dev/a11y.ts` thresholds; it does not claim a complete assistiv
 The `agent-browser` session independently checked the selected event background, focus ring, and
 row geometry. Local `ui-ux-pro-max` guidance supported text contrast and focus checks.
 
-Replay from repository root after `cd web && bun run build`:
+Replay from repository root after `cd web && bun run build`. On NixOS, set
+`PLAYWRIGHT_EXECUTABLE_PATH` to the local Chromium executable; otherwise the script uses Playwright's
+default browser:
 
 ```sh
 node review/neutral-content/capture.mjs

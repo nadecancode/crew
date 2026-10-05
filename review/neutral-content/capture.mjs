@@ -15,7 +15,7 @@ const { chromium } = require("@playwright/test");
 const out = join(root, "web/test-results/content-neutral");
 mkdirSync(out, { recursive: true });
 const manifest = JSON.parse(readFileSync(join(DEFAULT_DIST, "manifest.json"), "utf8"));
-const browser = await chromium.launch({ executablePath: process.env.PLAYWRIGHT_EXECUTABLE_PATH || "/etc/profiles/per-user/nade/bin/brave" });
+const browser = await chromium.launch({ executablePath: process.env.PLAYWRIGHT_EXECUTABLE_PATH || undefined });
 const captures = [];
 const viewports = {
   desktop: { width: 1440, height: 960 },
