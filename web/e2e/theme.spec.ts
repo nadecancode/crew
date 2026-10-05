@@ -10,6 +10,52 @@ const categories = ["token-input", "token-output", "token-cache-read", "token-ca
 const names = [...new Set([...surfaces, ...text, ...neutrals, ...categories])];
 type Palette = Record<string, number[]>;
 
+for (const theme of ["light", "dark"] as const) for (const listName of ["team list", "task list", "messages", "event log", "transcript"] as const) {
+  test(`${theme} selected virtual row stays marked while another ${listName} row is hovered`, async ({ page, mock, openPage, csp }, testInfo) => {
+    mock.prefs = { keys: true, theme };
+    if (listName === "event log") {
+      const event = mock.state.events[0];
+      mock.state.events = [{ ...event, seq: 1, level: "warn" }, { ...event, seq: 2, level: "error" }];
+    }
+    await openPage();
+    await expect(page.locator("html")).toHaveAttribute("data-theme", theme);
+    if (listName === "team list") await page.getByRole("group", { name: "Team presentation", exact: true }).getByRole("button", { name: "List", exact: true }).click();
+    if (listName === "task list") {
+      await page.getByRole("navigation", { name: "views", exact: true }).getByRole("button", { name: "Tasks", exact: true }).click();
+      await page.getByRole("group", { name: "Tasks presentation", exact: true }).getByRole("button", { name: "List", exact: true }).click();
+    }
+    if (listName === "event log") await page.getByRole("navigation", { name: "views", exact: true }).getByRole("button", { name: "Events", exact: true }).click();
+    if (listName === "transcript") {
+      await page.locator('.agent-graph [data-agent="claude-1"]').focus();
+      await page.keyboard.press("Enter");
+      await page.getByRole("tab", { name: "transcript", exact: true }).click();
+    }
+    const list = page.getByRole("listbox", { name: listName, exact: true });
+    await expect(list.locator(".vrow").nth(1)).toBeVisible();
+    await list.focus();
+    await page.keyboard.press("Home");
+    await page.keyboard.press("ArrowDown");
+    const selected = list.locator(".vrow.selected");
+    const hovered = list.locator(".vrow").first();
+    await hovered.hover();
+    await expect(selected).toHaveAttribute("aria-selected", "true");
+    await expect(hovered).toHaveAttribute("aria-selected", "false");
+    const shadow = () => selected.locator(":scope > *").first().evaluate((el) => getComputedStyle(el).boxShadow);
+    const hoverShadow = await hovered.locator(":scope > *").first().evaluate((el) => getComputedStyle(el).boxShadow);
+    expect(await shadow(), `${theme} ${listName} visible selection marker`).not.toBe("none");
+    expect(await shadow(), `${theme} ${listName} selection differs from hover`).not.toBe(hoverShadow);
+    if (listName === "event log") {
+      await expect(selected.locator(".log-row")).toHaveClass(/lv-error/);
+      await page.keyboard.press("Home");
+      await list.locator(".vrow").nth(1).hover();
+      await expect(selected.locator(".log-row")).toHaveClass(/lv-warn/);
+      expect(await shadow(), "warning row keeps marker over its own background").not.toBe("none");
+    }
+    expect(csp).toEqual([]);
+    await testInfo.attach("selected-and-hovered-rows", { body: await page.screenshot({ animations: "disabled" }), contentType: "image/png" });
+  });
+}
+
 async function palette(page: Page): Promise<Palette> {
   return page.evaluate((names) => {
     // Resolve light-dark() and aliases in the browser, rather than duplicating
