@@ -23,7 +23,7 @@ export function TaskDag() {
   const app = useApp();
   const { store, ui } = app;
   let host!: HTMLDivElement;
-  const [mode, setMode] = presentation();
+  const [mode, setMode] = presentation("tasks");
   const layout = createMemo(() => layered(store.state.tasks.map((t) => ({ id: t.id, dependencies: [...t.dependencies] }))));
   const bounds = createMemo(() => union([...layout().boxes.values()]));
   const [hover, setHover] = createSignal<string | null>(null);
@@ -99,7 +99,7 @@ export function TaskDag() {
   return (
     <div class="dag-host" ref={host}>
       <Presentation title="Tasks" meta={`${store.state.tasks.filter((t) => t.status === "done").length}/${store.state.tasks.length} complete`} mode={mode()} change={setMode} />
-      <Show when={store.state.tasks.length > 0} fallback={<EmptyState title="No tasks yet" description="Tasks and their dependencies appear here when work is assigned." />}>
+      <Show when={store.state.tasks.length > 0} fallback={<EmptyState title="No tasks yet" description="Tasks appear when work is assigned." />}>
       <Show when={mode() === "graph"} fallback={<EntityList kind="task" items={layout().layers.flat().map((id) => store.state.tasks.find((t) => t.id === id)!)} selected={cursor() ?? selectedTask()} select={setCursor} open={(id) => ui.select({ kind:"task", id })} summary={(task) => taskSummary(task, store.state.tasks)} />}>
       <div class="graph-canvas">
         <Viewport label="task graph" class="task-dag" bounds={bounds} api={(a) => (app.views.tasks = a)} onDispose={() => app.views.tasks = undefined} onBackground={() => ui.sel()?.kind === "task" && ui.select(null)}>
