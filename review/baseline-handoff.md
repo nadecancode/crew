@@ -95,6 +95,9 @@ team and dashboard.
    trapped or lost, the user starts again from the top of the page. It is tracked on the tasks
    `web-focus-fallback`, `web-focus-regression` and `web-focus-integration`, and has to be corrected
    before the project as a whole is delivered. The fix has to fit in the 85 bytes left, or free some.
+   Closure: source `a20d78405151b5d91c103929e0efeaddcb08774d`, regression
+   `bfe84371df4631d1938bb2e395660aaed6e3960e`, bundle
+   `af94debf57a63dada4404680f6230b0823a54bfd`; see [integrated acceptance](focus-integration.md).
 2. **The `demo` session still runs the previous binary.** Its daemon (pid 1925176, workspace
    `demo-workspace`, started 2026-10-04) holds the deleted earlier release image. It gets the new
    scheduling only after it is stopped and started with the current binary. That is the operator's to
