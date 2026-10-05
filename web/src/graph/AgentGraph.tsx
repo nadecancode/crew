@@ -95,6 +95,7 @@ export function AgentGraph() {
   };
   const onNodeKey = (e: KeyboardEvent, id: string) => {
     if (e.altKey || e.ctrlKey || e.metaKey) return;
+    if ((e.target as Element).closest("button")) return;
     switch (e.key) {
       case "ArrowRight":
       case "ArrowDown":
