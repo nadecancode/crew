@@ -111,6 +111,15 @@ probe builds the existing `crew-core` library, decodes the requests using real
 `request-bytes.jsonl`. No new Cargo manifest or product test is required;
 temporary probe output stays in ignored `.cache/`.
 
+QA can set `CREW_NATIVE_FIXTURE_CACHE` to a shared output root; the action
+checker writes its probe under that root's `actions/` subdirectory. Relative
+roots resolve against the repository root. Set `CARGO_TARGET_DIR` separately
+to keep Cargo output in the same validation area:
+
+```sh
+CREW_NATIVE_FIXTURE_CACHE=target/native-validation/fixture-cache CARGO_TARGET_DIR=target/native-validation/cargo bun fixtures/native/actions/check.ts --wire
+```
+
 On NixOS, use the repository development shell for the C linker:
 
 ```sh

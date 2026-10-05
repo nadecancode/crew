@@ -120,7 +120,8 @@ if (process.argv.includes("--wire") || process.argv.includes("--write-wire")) {
   };
   const core = library("crew_core");
   const json = library("serde_json");
-  const cache = join(here, ".cache");
+  const cacheRoot = process.env.CREW_NATIVE_FIXTURE_CACHE;
+  const cache = cacheRoot ? resolve(repo, cacheRoot, "actions") : join(here, ".cache");
   mkdirSync(cache, { recursive: true });
   const probe = join(cache, "wire-probe");
   execute("rustc", [join(here, "wire-probe.rs"), "--edition=2021", "-L", `dependency=${dirname(core)}`, "-L", `dependency=${dirname(json)}`, "--extern", `crew_core=${core}`, "--extern", `serde_json=${json}`, "-o", probe]);
