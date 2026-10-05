@@ -7,6 +7,7 @@
 // the viewport itself has focus: pan.
 
 import { createEffect, createSignal, onCleanup, onMount, type JSX } from "solid-js";
+import { Icon } from "../components";
 import { CLICK_SLOP, fit, pan, toWorld, zoomAt, type Box, type Pt, type Size, type View } from "./view";
 
 export type ViewportApi = {
@@ -31,6 +32,7 @@ export function Viewport(props: {
   onBackground?(): void;
   /** The API, for the key table and the parent. */
   api?(api: ViewportApi): void;
+  onDispose?(): void;
   children: JSX.Element;
 }) {
   let svg!: SVGSVGElement;
@@ -63,6 +65,7 @@ export function Viewport(props: {
     hold: () => setMoved(true),
   };
   props.api?.(api);
+  onCleanup(() => props.onDispose?.());
 
   onMount(() => {
     const ro = new ResizeObserver(() => {
@@ -140,6 +143,12 @@ export function Viewport(props: {
   };
 
   return (
+    <div class="viewport-frame">
+      <div class="zoom-tools" role="group" aria-label={`${props.label} tools`}>
+        <button class="icon-button" aria-label="Zoom out" title="Zoom out (-)" onClick={() => api.zoom(1 / 1.25)}><Icon name="minus" /></button>
+        <button class="icon-button" aria-label="Zoom in" title="Zoom in (+)" onClick={() => api.zoom(1.25)}><Icon name="plus" /></button>
+        <button title="Fit graph (0)" onClick={() => api.fit()}><Icon name="fit" /> Fit</button>
+      </div>
     <svg
       ref={svg}
       class={`viewport ${props.class ?? ""}`}
@@ -158,5 +167,6 @@ export function Viewport(props: {
     >
       <g transform={`translate(${view().x} ${view().y}) scale(${view().k})`}>{props.children}</g>
     </svg>
+    </div>
   );
 }

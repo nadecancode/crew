@@ -68,9 +68,9 @@ export function mountTerminal(host: HTMLElement, o: TerminalOptions): TerminalHa
     allowProposedApi: false,
     theme: {
       background: css("--bg-term", "#111217"),
-      foreground: css("--text", "#ccd0d8"),
-      cursor: css("--text", "#ccd0d8"),
-      selectionBackground: css("--faint", "#343740"),
+      foreground: css("--term-text", "#e5eeea"),
+      cursor: css("--term-text", "#e5eeea"),
+      selectionBackground: css("--term-selection", "#3d4f47"),
     },
     linkHandler: {
       activate(_e, uri) {
