@@ -98,6 +98,8 @@ export function createUi(o: UiOptions = {}) {
   const [selected, setSelected] = createSignal<string | null>(route().sel?.kind === "agent" ? (route().sel as { id: string }).id : null);
   const [tab, setTab] = createSignal<InspectorTab>("overview");
   const [panelFull, setPanelFull] = createSignal(false);
+  /** The message bus explicitly opened in a compact workspace. */
+  const [busOpen, setBusOpen] = createSignal(false);
   const [dialog, setDialogSignal] = createSignal<Dialog | null>(null);
   const [menu, setMenu] = createSignal<ContextMenu | null>(null);
   const [compose, setCompose] = createSignal<Compose>({ to: "*", text: "", prompt: false });
@@ -163,6 +165,8 @@ export function createUi(o: UiOptions = {}) {
     setTab,
     panelFull,
     setPanelFull,
+    busOpen,
+    setBusOpen,
     dialog,
     openDialog,
     closeDialog,
