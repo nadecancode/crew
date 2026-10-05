@@ -3,7 +3,7 @@
 // Resizable, and it can take the whole main area (`f`). `esc` closes it and
 // gives focus back to the node it was opened from (keys.ts).
 
-import { Match, Show, Switch, createSignal, onCleanup, type JSX } from "solid-js";
+import { Match, Show, Switch, createEffect, createMemo, createSignal, on, onCleanup, onMount, type JSX } from "solid-js";
 import { useApp } from "../app";
 import { Bus } from "./Bus";
 import { EventPanel } from "./EventPanel";
@@ -11,13 +11,29 @@ import { Inspector } from "./Inspector";
 import { MessagePanel } from "./MessagePanel";
 import { TaskPanel } from "./TaskPanel";
 
-const MIN = 300;
+const MIN = 320;
 
 export function SidePanel() {
   const app = useApp();
   const { ui, prefs } = app;
+  const compact = createMemo(() => ui.viewport() < 768);
   const [dragW, setDragW] = createSignal<number | null>(null);
-  const width = () => dragW() ?? prefs.prefs.panel ?? 460;
+  const max = () => compact() ? ui.viewport() : Math.max(MIN, ui.viewport() - 420);
+  const width = () => Math.min(max(), Math.max(MIN, dragW() ?? prefs.prefs.panel ?? 390));
+  let panel!: HTMLElement;
+  onMount(() => {
+    const resize = () => {
+      ui.setViewport(window.innerWidth);
+      if (!compact() && (prefs.prefs.panel ?? 0) > max()) prefs.setPanel(max());
+    };
+    window.addEventListener("resize", resize);
+    onCleanup(() => window.removeEventListener("resize", resize));
+  });
+  createEffect(on([ui.sel, ui.busOpen, compact], () => {
+    if (compact() && ui.panelOpen()) queueMicrotask(() => {
+      if (panel?.isConnected && !ui.dialog()) (panel.querySelector<HTMLElement>("[data-focus-first], .panel-title") ?? panel).focus();
+    });
+  }));
   let start: { x: number; w: number; id: number } | null = null;
   const down = (e: PointerEvent) => {
     start = { x: e.clientX, w: width(), id: e.pointerId };
@@ -25,7 +41,7 @@ export function SidePanel() {
   };
   const move = (e: PointerEvent) => {
     if (!start || e.pointerId !== start.id) return;
-    setDragW(Math.max(MIN, Math.min(window.innerWidth - 320, start.w + (start.x - e.clientX))));
+    setDragW(Math.min(max(), Math.max(MIN, start.w + (start.x - e.clientX))));
   };
   const up = (e: PointerEvent) => {
     if (!start || e.pointerId !== start.id) return;
@@ -36,7 +52,7 @@ export function SidePanel() {
   };
   const keyResize = (e: KeyboardEvent) => {
     const step = e.shiftKey ? 80 : 20;
-    if (e.key === "ArrowLeft") (e.preventDefault(), prefs.setPanel(Math.min(window.innerWidth - 320, width() + step)));
+    if (e.key === "ArrowLeft") (e.preventDefault(), prefs.setPanel(Math.min(max(), width() + step)));
     if (e.key === "ArrowRight") (e.preventDefault(), prefs.setPanel(Math.max(MIN, width() - step)));
   };
   onCleanup(() => (start = null));
@@ -49,8 +65,8 @@ export function SidePanel() {
     return s ? `${s.kind}:${"id" in s ? s.id : s.seq}` : null;
   };
   return (
-    <aside id="side-panel" class="side-panel" data-region="panel" aria-label="side panel" style={{ "--panel-w": `${width()}px` }} classList={{ open: !!sel() }}>
-      <div class="resizer" role="separator" aria-orientation="vertical" aria-label="resize the side panel" tabindex="-1"
+    <aside ref={panel} id="side-panel" class="side-panel" data-region="panel" aria-label="side panel" tabindex="-1" style={{ "--panel-w": `${width()}px` }} classList={{ open: ui.panelOpen() }}>
+      <div class="resizer" role="separator" aria-orientation="vertical" aria-label="resize the side panel" aria-valuemin={MIN} aria-valuemax={max()} aria-valuenow={width()} title="Arrow keys resize; Shift takes larger steps" tabindex="0"
         onPointerDown={down} onPointerMove={move} onPointerUp={up} onPointerCancel={up} onKeyDown={keyResize} />
       <Show when={shown()} keyed fallback={<Bus />}>{(_key: string) => (
       <Switch>
@@ -90,17 +106,13 @@ export function PanelHead(props: { title: string; sub?: string; children?: JSX.E
   const { ui } = useApp();
   return (
     <div class="panel-head">
-      <h2 class="panel-title" title={props.title}>{props.title}</h2>
+      <h2 class="panel-title" tabindex="-1" title={props.title}>{props.title}</h2>
       <Show when={props.sub}><span class="muted">{props.sub}</span></Show>
       <span class="spacer" />
       {props.children}
-      <button class="close" aria-label="close the panel (esc)" title="close (esc)" onClick={() => {
-        const s = ui.sel();
-        ui.select(null);
-        ui.setPanelFull(false);
-        const id = s?.kind === "agent" ? s.id : ui.selected();
-        if (id) queueMicrotask(() => document.querySelector<HTMLElement>(`[data-agent="${CSS.escape(id)}"]`)?.focus());
-      }}>×</button>
+      <Show when={ui.sel() || ui.panelFull() || ui.viewport() < 768}>
+        <button class="close" aria-label="close the panel (esc)" title="close (esc)" onClick={() => ui.closePanel()}>×</button>
+      </Show>
     </div>
   );
 }

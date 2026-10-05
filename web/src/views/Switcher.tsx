@@ -174,7 +174,7 @@ function SwitcherList(props: { close(refocus: boolean): void }) {
 
   return (
     <div
-      class="switcher-pop"
+      class="switcher-pop popover"
       data-region="switcher"
       // Tab moves on to the copy buttons; the list closes once focus leaves it.
       onFocusOut={(e) => {

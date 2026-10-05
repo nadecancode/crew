@@ -44,7 +44,7 @@ export function Modal(props: { title: string; label?: string; class?: string; on
   };
   return (
     <div class="scrim" onPointerDown={(e) => e.target === e.currentTarget && props.onClose()}>
-      <div ref={box} class={`dialog ${props.class ?? ""}`} role="dialog" aria-modal="true" aria-label={props.label ?? props.title} tabindex="-1" onKeyDown={onKey}>
+      <div ref={box} class={`dialog popover ${props.class ?? ""}`} role="dialog" aria-modal="true" aria-label={props.label ?? props.title} tabindex="-1" onKeyDown={onKey}>
         <h2 class="dialog-title">{props.title}</h2>
         {props.children}
       </div>
@@ -73,15 +73,17 @@ function QuestionDialog(props: { id: string }) {
   const index = () => open().findIndex((x) => x.id === props.id);
   const [own, setOwn] = createSignal("");
   const [sending, setSending] = createSignal(false);
+  const [error, setError] = createSignal<string | null>(null);
   // Another question: its own answer starts empty.
-  createEffect(on(() => props.id, () => setOwn(""), { defer: true }));
+  createEffect(on(() => props.id, () => { setOwn(""); setError(null); }, { defer: true }));
   const send = async (body: string) => {
     const question = q();
     if (!question || !body.trim() || sending() || !link.live()) return;
     setSending(true);
+    setError(null);
     const ok = await app.actions.answer(question.id, body);
     setSending(false);
-    if (!ok) return;
+    if (!ok) return setError(ui.status()?.text ?? "The answer was not sent.");
     // On to the next question, if any.
     const next = store.openQuestions().find((x) => x.id !== question.id);
     if (next) ui.updateDialog({ kind: "question", id: next.id });
@@ -105,7 +107,7 @@ function QuestionDialog(props: { id: string }) {
   };
   return (
     <Modal title={open().length > 1 ? `question ${index() + 1} of ${open().length}` : "question"} label="question" class="question-dialog" onClose={() => ui.closeDialog()} initial=".options button, textarea" refocus={() => [props.id, open().length, sending(), link.live()]}>
-      <Show when={q()} fallback={<><p>This question has been answered.</p><div class="dialog-actions"><button onClick={() => ui.closeDialog()}>close</button></div></>}>
+      <Show when={q()} fallback={<><p role="status">{sending() ? "Sending answer…" : "This question has been answered."}</p><div class="dialog-actions"><button onClick={() => ui.closeDialog()}>close</button></div></>}>
         {(question) => (
           <div onKeyDown={onKey}>
             <p class="asker"><b>{asker(question())}</b> <span class="muted">· {fmtElapsed(store.serverNow(Date.now()) - question().timestamp)} ago</span></p>
@@ -120,13 +122,14 @@ function QuestionDialog(props: { id: string }) {
             <label class="own">your own answer
               <textarea rows="3" value={own()} onInput={(e) => setOwn(e.currentTarget.value)} disabled={!link.live()}
                 onKeyDown={(e) => {
-                  if (e.key === "Enter" && !e.shiftKey) {
+                  if (e.key === "Enter" && !e.shiftKey && !e.isComposing) {
                     e.preventDefault();
                     if (own().trim().startsWith("/")) return ui.setStatus("that is a command, not an answer — esc closes this box first", true);
                     void send(own());
                   }
                 }} />
             </label>
+            <Show when={error()}><p class="err" role="alert">{error()}</p></Show>
             <div class="dialog-actions">
               <Show when={open().length > 1}>
                 <button onClick={() => step(-1)}>previous</button>
@@ -205,10 +208,10 @@ function ModelDialog(props: { agent: string }) {
                   <button role="option" aria-selected={current(m)} classList={{ now: current(m), unavailable: !!m.unavailable }} disabled={!link.live()} onClick={() => choose(m)}
                     title={m.unavailable ? `Cannot be started here: ${m.unavailable}` : m.summary}>
                     <span class="mark">{current(m) ? "●" : ""}</span>
-                    <span class="name">{m.name}</span>
+                    <span class="model-body"><span class="name">{m.name}</span>
                     <span class="tier muted">{m.tier}</span>
                     <span class="price muted">{m.price}</span>
-                    <span class="summary">{m.unavailable ? "not here" : m.summary}</span>
+                    <span class="summary">{m.unavailable ? `Unavailable: ${m.unavailable}` : m.summary}</span></span>
                     <span class="now-label">{current(m) ? "now" : ""}</span>
                   </button>
                 </li>
