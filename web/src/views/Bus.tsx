@@ -4,7 +4,7 @@
 // the link between its two agents on the graph; clicking a link filters the
 // list to that pair.
 
-import { Show, createMemo, createSignal } from "solid-js";
+import { Show, createMemo, createSignal, onCleanup } from "solid-js";
 import { useApp } from "../app";
 import { clockTime, oneLine } from "../format";
 import { decodeMessages, isBroadcast, isP2p, ORCHESTRATOR_ID, OPERATOR_ID, type Message } from "../protocol";
@@ -29,6 +29,9 @@ export function Bus() {
   // The selected row by identity: it stays selected as rows come and go.
   const [selectedId, setSelectedId] = createSignal<string | null>(null);
   const [loading, setLoading] = createSignal(false);
+  const [error, setError] = createSignal<string | null>(null);
+  let active = true;
+  onCleanup(() => (active = false));
   const filtered = createMemo(() => {
     store.messagesVersion();
     const pair = ui.busPair();
@@ -52,20 +55,22 @@ export function Bus() {
   });
 
   const loadOlder = async () => {
+    if (!link.live() || loading()) return;
     setLoading(true);
+    setError(null);
     try {
       const have = store.messages.length;
       const list = await link.call("history", { limit: Math.min(have + 300, store.messages.capacity) }, decodeMessages);
-      store.prependMessages(list);
+      if (active) store.prependMessages(list);
     } catch (e) {
-      ui.setStatus(`older messages: ${e instanceof Error ? e.message : e}`, true);
+      if (active) setError(`Older messages: ${e instanceof Error ? e.message : e}`);
     } finally {
-      setLoading(false);
+      if (active) setLoading(false);
     }
   };
 
   return (
-    <div class="panel-body bus">
+    <div class="panel-body bus" aria-busy={loading()}>
       <div class="panel-head">
         <h2 class="panel-title">Message bus</h2>
         <span class="muted">{count()} loaded</span>
@@ -75,6 +80,7 @@ export function Bus() {
         <Show when={ui.busPair()}>
           <div class="bus-scope"><span class="chip filter">{ui.busPair()![0]} ↔ {ui.busPair()![1]} <button aria-label="clear the filter" onClick={() => ui.setBusPair(null)}>×</button></span></div>
         </Show>
+      <Show when={error()}><div class="fetch-state err" role="status">{error()}</div></Show>
       <VirtualList
         label="messages"
         class="bus-list"

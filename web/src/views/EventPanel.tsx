@@ -3,7 +3,7 @@
 
 import { For, Show } from "solid-js";
 import { useApp } from "../app";
-import { clockTime } from "../format";
+import { absoluteTime, clockTime } from "../format";
 import { vcsOf, type Event } from "../protocol";
 import { actionName } from "../anim/anims";
 import { Linked } from "../text";
@@ -22,14 +22,14 @@ export function EventPanel(props: { seq: number }) {
   return (
     <div class="panel-body event-panel">
       <PanelHead title={`event ${props.seq}`} />
-      <Show when={event()} fallback={<p class="pad muted">not in the page's log any more</p>}>
+      <Show when={event()} fallback={<div class="pad muted">This event is no longer in the page's history. <button onClick={() => { ui.select(null); ui.setView("logs"); }}>Back to Events</button></div>}>
         {(e) => {
           const v = () => vcsOf(e());
           return (
             <div class="pad scroll" tabindex="0" data-focus-first>
               <pre class="body"><Linked text={e().message} /></pre>
               <dl class="facts">
-                <dt>time</dt><dd>{clockTime(e().timestamp)}</dd>
+                <dt>time</dt><dd title={absoluteTime(e().timestamp)}>{clockTime(e().timestamp)}</dd>
                 <dt>level</dt><dd class={`lv-${e().level}`}>{e().level}</dd>
                 <dt>type</dt><dd class="mono">{e().event_type}</dd>
                 <dt>source</dt><dd>{e().source}</dd>

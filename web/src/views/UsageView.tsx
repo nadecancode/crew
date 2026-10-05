@@ -7,12 +7,12 @@
 import { For, Show, createMemo, createSignal } from "solid-js";
 import { useApp } from "../app";
 import { useSecond } from "../clock";
-import { clockTime, resetTime, runtimeGlyph, tokens, windowSize } from "../format";
+import { absoluteTime, clockTime, resetTime, runtimeGlyph, tokens, windowSize } from "../format";
 import type { Agent } from "../protocol";
-import { levelTone, until, usageRows, windowLabel, STALE_MS } from "./usage";
+import { levelTone, reportedTokens, until, usageRows, usageTotals, windowLabel, STALE_MS } from "./usage";
 
 const SERIES = ["input", "output", "cache read", "cache written"] as const;
-const total = (a: Agent) => (a.usage ? a.usage.input_tokens + a.usage.output_tokens + a.usage.cache_read_tokens + a.usage.cache_creation_tokens : 0);
+const total = (a: Agent) => (a.usage ? reportedTokens(a.usage) : 0);
 
 export function UsageView() {
   const app = useApp();
@@ -20,6 +20,7 @@ export function UsageView() {
   const second = useSecond();
   const now = () => (second(), store.serverNow(Date.now()));
   const agents = createMemo(() => [...store.state.agents].sort((a, b) => total(b) - total(a) || a.id.localeCompare(b.id)));
+  const totals = createMemo(() => usageTotals(store.state.agents));
   const max = () => Math.max(1, ...agents().map(total));
   const rows = createMemo(() => usageRows(store.state.session?.quotas ?? [], store.state.agents));
   const [hover, setHover] = createSignal<string | null>(null);
@@ -30,11 +31,21 @@ export function UsageView() {
 
   return (
     <div class="usage-view scroll" tabindex="0" aria-label="usage">
+      <h2>Usage</h2>
+      <dl class="usage-totals">
+        <For each={[
+          ["Total reported tokens", totals().reported ? tokens(totals().tokens) : "Not reported"],
+          ["Reported turns", totals().reported ? totals().turns : "Not reported"],
+          ["Paused at a limit", totals().limited],
+        ]}>{([label, value]) => <div><dt>{label}</dt><dd>{value}</dd></div>}</For>
+      </dl>
+      <p class="muted">{totals().reported} of {agents().length} agents reporting · includes input, output, cache read and cache written tokens.</p>
       <section>
         <h3>agents <span class="muted">by tokens</span></h3>
         <div class="legend">
           <For each={SERIES}>{(s, i) => <span><span class={`swatch s${i()}`} /> {s}</span>}</For>
         </div>
+        <div class="usage-scroll" tabindex="0" role="region" aria-label="Per-agent usage table, scroll horizontally">
         <table class="usage-table">
           <thead><tr><th>agent</th><th>context</th><th>tokens</th><th class="num">turns</th><th class="num">compactions</th></tr></thead>
           <tbody>
@@ -81,9 +92,10 @@ export function UsageView() {
             </For>
           </tbody>
         </table>
+        </div>
       </section>
 
-      <Show when={rows().length > 0}>
+      <Show when={rows().length > 0} fallback={<p class="muted">Usage windows have not been reported.</p>}>
         <section>
           <h3>usage windows</h3>
           <For each={rows()}>
@@ -92,7 +104,7 @@ export function UsageView() {
                 <span class={`rt rt-${row.runtime}`}>{runtimeGlyph(row.runtime)} {row.runtime}</span>
                 <For each={row.quotas}>
                   {(q) => (
-                    <div class="window" classList={{ stale: now() - q.updated_at > STALE_MS }} title={`reported ${clockTime(q.updated_at)}`}>
+                    <div class="window" classList={{ stale: now() - q.updated_at > STALE_MS }} title={`reported ${absoluteTime(q.updated_at)}`}>
                       <div class="muted">{windowLabel(q.window)}</div>
                       <svg class="window-svg" viewBox="0 0 100 12" preserveAspectRatio="none" aria-hidden="true">
                         <rect class="track" width="100" height="12" rx="3" />
@@ -101,6 +113,7 @@ export function UsageView() {
                       <div><b>{Math.round(Math.max(0, q.percent_used))}%</b> used
                         <Show when={q.resets_at}> · resets {resetTime(q.resets_at!, now())}<Show when={q.resets_at! > now()}> (in {until(q.resets_at! - now())})</Show></Show>
                       </div>
+                      <div class="muted">{now() - q.updated_at > STALE_MS ? "Stale · " : ""}Reported {until(now() - q.updated_at)} ago</div>
                     </div>
                   )}
                 </For>
