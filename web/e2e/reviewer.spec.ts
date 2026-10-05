@@ -90,7 +90,8 @@ test("a rejected prompt keeps the operator's text for retry", async ({ page, moc
   mock.on("agent_input", () => { throw { code: "unavailable", message: "agent unavailable" }; });
   await openPage();
   await page.evaluate(() => { location.hash = "/?agent=claude-2"; });
-  await page.getByRole("toolbar", { name: "actions for claude-2" }).getByRole("button", { name: "prompt", exact: true }).click();
+  await page.getByRole("toolbar", { name: "actions for claude-2" }).getByRole("button", { name: "More", exact: true }).click();
+  await page.getByRole("menu", { name: "actions for claude-2", exact: true }).getByRole("menuitem", { name: "prompt", exact: true }).click();
   const box = page.locator("#compose-text");
   await box.fill("Carefully drafted instructions that were never delivered");
   await box.press("Enter");

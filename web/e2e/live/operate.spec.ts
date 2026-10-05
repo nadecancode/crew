@@ -69,7 +69,8 @@ test("pause and resume, then kill after the confirmation", async ({ page, daemon
   await page.keyboard.press("Escape");
   await expect(dialog).toHaveCount(0);
   expect(daemon.events().some((e) => e.event_type === "agent.killed")).toBe(false);
-  await tb.getByRole("button", { name: "kill", exact: true }).click();
+  await tb.getByRole("button", { name: "More", exact: true }).click();
+  await page.getByRole("menu", { name: "actions for idle", exact: true }).getByRole("menuitem", { name: "kill…", exact: true }).click();
   await dialog.getByRole("button", { name: "kill idle" }).click();
   daemon.until("agent.killed", () => daemon.events().some((e) => e.event_type === "agent.killed" && e.agent_id === "idle"));
   await expect(status(page)).toHaveText("✓ kill idle");
