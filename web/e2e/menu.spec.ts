@@ -80,3 +80,13 @@ test("agent updates refocus a retained menu; removing that agent closes it", asy
   mock.push({ kind: "agent_removed", data: { id: a.id } });
   await expect(menu).toHaveCount(0);
 });
+
+test("Tab and Shift+Tab close the menu and continue through page controls", async ({ page, openPage }) => {
+  await openPage();
+  for (const key of ["Tab", "Shift+Tab"]) {
+    const { menu } = await menuFor(page, "claude-4");
+    await page.keyboard.press(key);
+    await expect(menu).toHaveCount(0);
+    expect(await page.evaluate(() => document.activeElement !== document.body && !document.activeElement?.closest('[role="menu"]'))).toBe(true);
+  }
+});

@@ -88,10 +88,10 @@ export async function auditPage(page: Page) {
 export type AccessibilityAudit = Awaited<ReturnType<typeof auditPage>>;
 
 /** Strict gates are opt-in for baseline comparison, mandatory for sign-off. */
-export function a11yFailures(audit: AccessibilityAudit, allowOverflow = false): string[] {
+export function a11yFailures(audit: AccessibilityAudit): string[] {
   return [
     ...audit.contrast.failures.map((f) => `Text contrast ${f.ratio}:1 < ${f.required}:1 (${f.element}: ${f.text})`),
     ...audit.unnamedControls.map((name) => `Unnamed control: ${name}`),
-    ...(audit.overflow && !allowOverflow ? [`Document overflow: ${audit.documentWidth}px > ${audit.viewport.width}px`] : []),
+    ...(audit.overflow ? [`Document overflow: ${audit.documentWidth}px > ${audit.viewport.width}px`] : []),
   ];
 }

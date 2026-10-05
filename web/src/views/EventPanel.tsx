@@ -5,6 +5,7 @@ import { For, Show } from "solid-js";
 import { useApp } from "../app";
 import { clockTime } from "../format";
 import { vcsOf, type Event } from "../protocol";
+import { EmptyState } from "../components";
 import { actionName } from "../anim/anims";
 import { Linked } from "../text";
 import { AgentLink } from "./MessagePanel";
@@ -22,11 +23,12 @@ export function EventPanel(props: { seq: number }) {
   return (
     <div class="panel-body event-panel">
       <PanelHead title={`event ${props.seq}`} />
-      <Show when={event()} fallback={<p class="pad muted">not in the page's log any more</p>}>
+      <Show when={event()} fallback={<EmptyState title="Event unavailable" description="This event is no longer in the page's history." />}>
         {(e) => {
           const v = () => vcsOf(e());
           return (
             <div class="pad scroll" tabindex="0" data-focus-first>
+              <pre class="body"><Linked text={e().message} /></pre>
               <dl class="facts">
                 <dt>time</dt><dd>{clockTime(e().timestamp)}</dd>
                 <dt>level</dt><dd class={`lv-${e().level}`}>{e().level}</dd>
@@ -35,7 +37,6 @@ export function EventPanel(props: { seq: number }) {
                 <Show when={e().agent_id}><dt>agent</dt><dd><AgentLink id={e().agent_id!} /></dd></Show>
                 <Show when={e().task_id}><dt>task</dt><dd><button class="link" onClick={() => ui.select({ kind: "task", id: e().task_id! })}>{e().task_id}</button></dd></Show>
               </dl>
-              <pre class="body"><Linked text={e().message} /></pre>
               <Show when={v()}>
                 {(x) => (
                   <dl class="facts vcs-facts">
