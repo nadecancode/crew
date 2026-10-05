@@ -37,6 +37,13 @@ probe and [runtime environment evidence](linux-runtime-environment.md) remain
 intact; the older development-binary capture is not used as evidence for this
 integrated source.
 
+The separately approved [early shell design review](../../notes/native-apps/shell-review-20261005.md)
+and its exact evidence imports are `6fd9434f` as `8f241950` followed by
+`841e165e` as `36a5eb59`; approval `m-12a6234d0915` covers those reports.
+They retain original `d4d31a13` behavior separately from the real corrected
+keyboard/AT-SPI replay. Reviewer `m-af7c8b435434` also reproduces the focused
+before-fail/after-pass test and approves source correction `706bd635`.
+
 ## Package and lock integration
 
 The workspace contains protocol, client, core, TUI, CLI and desktop packages.

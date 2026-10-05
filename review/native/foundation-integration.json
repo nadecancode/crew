@@ -873,5 +873,92 @@
     "Apple SwiftUI type checking, Xcode build/link, simulator/device/UI/VoiceOver/signing/distribution",
     "Unchanged full web mock/live/performance matrix"
   ],
-  "activation": "No active service/team restart. Rebuilt release image/dashboard reload remain separate; old demo daemon PID 1925176 operator gap."
+  "activation": "No active service/team restart. Rebuilt release image/dashboard reload remain separate; old demo daemon PID 1925176 operator gap.",
+  "additional_evidence": {
+    "review_approval": "m-12a6234d0915",
+    "empty_focus_source_approval": "m-af7c8b435434",
+    "report_commit": "feb7d0574ef60df3673c98e5f7b096bb0c34f2bf",
+    "imports": [
+      {
+        "reviewed": "6fd9434fb7a293dc1cd02d9f3dac155f9dc7bf6f",
+        "integrated": "8f241950820d8539d03b1dacbf270678f5524c28"
+      },
+      {
+        "reviewed": "841e165e0dfed357f836c8839fb2184346784e19",
+        "integrated": "36a5eb599117d556b407951011ee24a5ca9bd7eb"
+      }
+    ],
+    "blobs": [
+      {
+        "path": "notes/native-apps/shell-review-20261005/atspi-706-focus.json",
+        "reviewed_commit": "841e165e0dfed357f836c8839fb2184346784e19",
+        "sha256": "a29ab38c69bf17a4e7b4d36f9522958675b30412a468d70a6e198d6147ad6298"
+      },
+      {
+        "path": "notes/native-apps/shell-review-20261005/atspi-baseline-escape.json",
+        "reviewed_commit": "841e165e0dfed357f836c8839fb2184346784e19",
+        "sha256": "4f0aa6b24cea30fe5c32d85c163de4deae962bf052a6bd7ce5b176509d607784"
+      },
+      {
+        "path": "notes/native-apps/shell-review-20261005/atspi-d4-focus-menu.json",
+        "reviewed_commit": "841e165e0dfed357f836c8839fb2184346784e19",
+        "sha256": "670c46639e460f9a266451f34e22c2657c438da7bfa527606c746a384a309788"
+      },
+      {
+        "path": "notes/native-apps/shell-review-20261005/atspi-d4-menu-relations.txt",
+        "reviewed_commit": "841e165e0dfed357f836c8839fb2184346784e19",
+        "sha256": "ac40731967cfc949ca7f1f03bda144a081cc844b2b6f20fc5a0e4f86ea7f68f8"
+      },
+      {
+        "path": "notes/native-apps/shell-review-20261005/baseline-shortcuts-after-escape.png",
+        "reviewed_commit": "841e165e0dfed357f836c8839fb2184346784e19",
+        "sha256": "ea3548f4038606e39ecf5ae9dd217db73b3687a189bb89c383a210612b9848ae"
+      },
+      {
+        "path": "notes/native-apps/shell-review-20261005/corrected-empty-focus-560.png",
+        "reviewed_commit": "841e165e0dfed357f836c8839fb2184346784e19",
+        "sha256": "e6a0e1786baf1a9b1b0f83809d036e6365b6516b62187fe97cf092b6435c1a44"
+      },
+      {
+        "path": "notes/native-apps/shell-review-20261005/evidence.json",
+        "reviewed_commit": "841e165e0dfed357f836c8839fb2184346784e19",
+        "sha256": "ce9d17ead15fb98eccb6c0c9be0a8f28a9f7b68b838cb0ecd711cffd9009cf7a"
+      },
+      {
+        "path": "notes/native-apps/shell-review-20261005/focus-706-assertions.txt",
+        "reviewed_commit": "841e165e0dfed357f836c8839fb2184346784e19",
+        "sha256": "e09175c3595311e3ee6b9a4181a25f9ae6a10b69de96d62b4dab98cf13c56bae"
+      },
+      {
+        "path": "notes/native-apps/shell-review-20261005/linux-tasks-dark-560.png",
+        "reviewed_commit": "841e165e0dfed357f836c8839fb2184346784e19",
+        "sha256": "84f52f6c4fafa96f8d7587b79dc73f985af4621cfe69b07d15e6a43ffdf29419"
+      },
+      {
+        "path": "notes/native-apps/shell-review-20261005/linux-team-light-1024.png",
+        "reviewed_commit": "841e165e0dfed357f836c8839fb2184346784e19",
+        "sha256": "f287b82666055abb06b088eb922a547d0755f612499602016cc42b7f99a53b61"
+      },
+      {
+        "path": "notes/native-apps/shell-review-20261005/probe-atspi.py",
+        "reviewed_commit": "841e165e0dfed357f836c8839fb2184346784e19",
+        "sha256": "72ac4f81627c47d9654b1e9787fb63d3b1c1733f0aa25f0a9ab993f41f90bf11"
+      },
+      {
+        "path": "notes/native-apps/shell-review-20261005/tool-versions.txt",
+        "reviewed_commit": "841e165e0dfed357f836c8839fb2184346784e19",
+        "sha256": "abbb0720829bb919d340e3c0ad4027460c408d59be08a1a49840c14061c61bec"
+      },
+      {
+        "path": "notes/native-apps/shell-review-20261005.md",
+        "reviewed_commit": "841e165e0dfed357f836c8839fb2184346784e19",
+        "sha256": "6944157f0c0d348d1fa811648abc2894082c9f385bbdfb6cc56d50cedac2518a"
+      }
+    ]
+  },
+  "link_check": {
+    "markdown_files": 67,
+    "relative_links": 163,
+    "missing": []
+  }
 }
