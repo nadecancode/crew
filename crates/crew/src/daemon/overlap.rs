@@ -162,7 +162,10 @@ impl Daemon {
             // Generic scheduler bookkeeping is not news for parked work.
             // A scoped card edit is relevant; dispatches and review requests
             // never are. Teammate/operator traffic may be unscoped.
-            if message.from == "scheduler" && explicit.is_none() {
+            if message.from == "scheduler"
+                && message.kind == MessageType::Status
+                && explicit.is_none()
+            {
                 continue;
             }
             let replied = message
@@ -557,6 +560,11 @@ mod tests {
             daemon.model().local["owner"].task_wakeups.is_empty(),
             "replayed delivery cannot recreate a consumed cue"
         );
+        // A real teammate may also be named scheduler. Its answers are
+        // ordinary news; only the daemon's generic status notices are held.
+        let answer = send("scheduler", MessageType::Answer, Value::Null);
+        daemon.record_task_wakeups("owner", &[answer]).unwrap();
+        assert_eq!(daemon.model().local["owner"].task_wakeups.len(), 2);
     }
 
     #[test]
