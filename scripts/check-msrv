@@ -1,0 +1,32 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# Exercise the default CLI with the compiler advertised in Cargo.toml. Keep the
+# target separate from regular builds and never install or start a daemon.
+crew_repo_root=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
+cd "$crew_repo_root"
+
+crew_msrv_toolchain=1.82.0
+crew_msrv_target=${CREW_MSRV_TARGET_DIR:-"$crew_repo_root/target/msrv"}
+if ! crew_msrv_rustc=$(rustup which --toolchain "$crew_msrv_toolchain" rustc); then
+    printf 'Install the compatibility toolchain first: rustup toolchain install %s --profile minimal\n' "$crew_msrv_toolchain" >&2
+    exit 1
+fi
+crew_msrv_version=$("$crew_msrv_rustc" --version)
+case "$crew_msrv_version" in
+    "rustc 1.82.0 "*) ;;
+    *) printf 'Expected rustc 1.82.0, got %s\n' "$crew_msrv_version" >&2; exit 1 ;;
+esac
+printf '%s\n' "$crew_msrv_version"
+rustup run "$crew_msrv_toolchain" cargo --version
+
+RUSTC="$crew_msrv_rustc" CARGO_TARGET_DIR="$crew_msrv_target" \
+    ./scripts/build-env rustup run "$crew_msrv_toolchain" cargo build --locked -p crew --bin crew
+
+crew_msrv_binary="$crew_msrv_target/debug/crew"
+"$crew_msrv_binary" --version
+"$crew_msrv_binary" --help >/dev/null
+for crew_msrv_command in run attach web stop; do
+    "$crew_msrv_binary" "$crew_msrv_command" --help >/dev/null
+done
+printf 'Default CLI builds and parses help with Rust %s and the committed lockfile.\n' "$crew_msrv_toolchain"

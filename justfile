@@ -12,6 +12,10 @@ build:
 install:
     ./scripts/build-env cargo install --path crates/crew --locked
 
+# Build and smoke-check the default CLI with its advertised Rust version.
+msrv-check:
+    ./scripts/check-msrv
+
 # Link `crew` into ~/.local/bin so the command follows this checkout: after
 # `just build` the shell runs the new binary, no reinstall needed.
 link: build

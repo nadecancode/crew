@@ -66,17 +66,23 @@ each row in the bus log is a persisted message.
 
 ## Installation
 
-Requires Rust 1.82+ and a C compiler (SQLite is bundled).
+The default CLI requires Rust 1.82+ and a C compiler (SQLite is bundled).
+Use the committed lockfile when installing with the minimum Rust version.
 
 ```sh
-cargo install --path crates/crew        # installs `crew`
+cargo install --locked --path crates/crew        # installs `crew`
 # on NixOS / without a compiler on PATH:
-./scripts/build-env cargo install --path crates/crew     # or: just install
+./scripts/build-env cargo install --locked --path crates/crew     # or: just install
 ```
 
 Working on crew itself? `just link` symlinks `~/.local/bin/crew` to this
 checkout's release build instead, so `just build` is all it takes to update
 the command.
+
+Check the default CLI's minimum compiler with
+`rustup toolchain install 1.82.0 --profile minimal`, then `just msrv-check`.
+The gate uses the committed lockfile and a separate build directory; it builds
+the CLI and parses help without installing it or starting a daemon.
 
 ## Prerequisites
 
