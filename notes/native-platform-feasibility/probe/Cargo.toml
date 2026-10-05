@@ -1,0 +1,31 @@
+[package]
+name = "crew-platform-probe"
+version = "0.0.0"
+edition = "2021"
+rust-version = "1.93"
+publish = false
+
+[workspace]
+
+[lib]
+crate-type = ["rlib", "cdylib", "staticlib"]
+
+[[bin]]
+name = "uniffi-bindgen"
+path = "src/bindgen.rs"
+required-features = ["bindgen"]
+
+[features]
+gtk-smoke = ["dep:gtk"]
+terminal-smoke = ["gtk-smoke", "dep:vte4"]
+bindgen = ["uniffi/cli"]
+
+[target.'cfg(target_os = "linux")'.dependencies]
+gtk = { package = "gtk4", version = "=0.10.3", optional = true }
+vte4 = { version = "=0.9.0", optional = true }
+
+[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+uniffi = "=0.31.0"
+
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+wasm-bindgen = "=0.2.128"

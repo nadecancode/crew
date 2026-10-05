@@ -127,6 +127,20 @@ Sections: [§scope](#scope) · [§transport](#transport) · [§security](#securi
 | W12 | The Rust side publishes **wire fixtures** generated from the real types; the frontend's decoders, its mock server and its tests read them. Nothing is generated into the frontend's tree. | §tests |
 | W13 | On a subscribed connection a **snapshot is a barrier**: no push before its reply is newer than it, every push after its marker follows it. The server guarantees it; the page relies on it. | §transport |
 
+Native-sharing amendment to W12, 2026-10-05: the orchestrator approved one
+committed generated production-policy file,
+`web/src/generated/client-policy.ts`, emitted by
+`crates/crew-client/examples/generate_web_policy.rs` from the typed descriptors
+used by the Rust client itself. A Rust freshness test compares exact output;
+production imports replace existing policy without changing behavior. This
+exception does not move generated wire fixtures into the frontend, add a
+runtime dependency, introduce WASM, change CSP, or increase any byte/performance
+ceiling. Web still builds without Cargo and `cargo install` without Node. The
+separate adoption card follows the reviewed baseline handoff and must rebuild
+and review the embedded bundle. See [native-architecture.md](native-architecture.md),
+"Reuse, web amendment and acceptance evidence". Authorization:
+`m-331755b19fb4`; review conditions: `m-acb7e01564a8`.
+
 ### Not built (v1)
 
 - Launching a team from the browser (the launcher, `crew run`): the dashboard
