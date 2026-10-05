@@ -143,7 +143,7 @@ pre.body { background: var(--node-hi); border: 1px solid var(--line); border-rad
 .switcher { position: relative; display: flex; align-items: center; gap: 6px; min-width: 0; }
 .switcher .project { font-weight: 600; border-color: transparent; background: none; max-width: 24ch; overflow: hidden; text-overflow: ellipsis; }
 .switcher-pop { position: absolute; top: calc(100% + 8px); left: 0; z-index: 40; width: min(560px, calc(100vw - 24px)); max-height: min(560px, calc(100dvh - 80px)); overflow: auto;    padding: 4px;  }
-.switcher-row { display: flex; align-items: center; gap: 8px; padding: 8px; border-radius: 4px; cursor: pointer; }
+.switcher-row { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding: 8px; border-radius: 4px; cursor: pointer; }
 .switcher-row > * { flex: none; max-width: 100%; }
 .switcher-row > :is(.ws-name, .ws-dir, .ws-cmd) { flex: 1 12ch; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .switcher-row.active { background: var(--action-surface); }
@@ -184,7 +184,6 @@ pre.body { background: var(--node-hi); border: 1px solid var(--line); border-rad
   .workspace-meta { display: none; }
 }
 @media (max-width: 767px) {
-  .switcher-row { flex-wrap: wrap; }
   .status-bar, .workspace-summary, .views, .message-box { padding-inline: 16px; }
   .status-bar kbd { display: none; }
   .workspace-summary { gap: 12px; flex-wrap: wrap; }
