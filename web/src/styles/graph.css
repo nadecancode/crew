@@ -82,10 +82,10 @@
 .team-list,.task-list { padding:0; }
 .team-row,.task-row { height:100%; border-bottom:1px solid var(--line); cursor:pointer; }
 .team-row.satellite { border-left:2px dashed var(--control-border); margin-left:16px; }
-.entity-summary { padding:12px 16px; font-size:13px; }
+.entity-summary { padding:10px 16px; font-size:13px; }
 .summary-head { display:flex; gap:8px; align-items:center; font-size:12px; } .summary-head b { overflow:hidden; text-overflow:ellipsis; min-width:0; flex:1; }
-.summary-title,.summary-info { white-space:normal; display:-webkit-box; -webkit-box-orient:vertical; -webkit-line-clamp:2; overflow:hidden; margin-top:6px; }
-.summary-info { font-size:12px; }
+.summary-title,.summary-info { white-space:normal; display:-webkit-box; -webkit-box-orient:vertical; -webkit-line-clamp:2; overflow:hidden; margin-top:4px; }
+.summary-info { font-size:12px; -webkit-line-clamp:1; } .summary-detail { -webkit-line-clamp:2; }
 /* Inspector evidence. */
 .insp-head { display:flex; flex-wrap:wrap; gap:4px 12px; align-items:center; padding:12px 16px; font:12px var(--mono); }
 .insp-head .glyph { font-weight:600; } .insp-head .model { color:var(--muted); }
