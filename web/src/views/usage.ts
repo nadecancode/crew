@@ -1,7 +1,23 @@
 // Usage figures as the TUI words them (crates/crew-tui/src/views/usage.rs).
 
 import { fmtElapsed } from "../format";
-import type { Agent, Quota, RuntimeKind } from "../protocol";
+import type { Agent, Quota, RuntimeKind, Usage } from "../protocol";
+
+/** Includes all four reported token categories, without a pricing estimate. */
+export const reportedTokens = (usage: Usage) => usage.input_tokens + usage.output_tokens + usage.cache_read_tokens + usage.cache_creation_tokens;
+
+export function usageTotals(agents: readonly Agent[]) {
+  let tokens = 0, turns = 0, reported = 0, limited = 0;
+  for (const agent of agents) {
+    if (agent.usage) {
+      tokens += reportedTokens(agent.usage);
+      turns += agent.usage.turns;
+      reported++;
+    }
+    if (agent.limit && agent.paused) limited++;
+  }
+  return { tokens, turns, reported, limited };
+}
 
 /** A figure nobody has reported for this long is muted. */
 export const STALE_MS = 20 * 60_000;

@@ -24,6 +24,9 @@ export function Logs() {
   media.addEventListener("change", resize);
   onCleanup(() => media.removeEventListener("change", resize));
   const [loading, setLoading] = createSignal(false);
+  const [error, setError] = createSignal<string | null>(null);
+  let active = true;
+  onCleanup(() => (active = false));
   const f = () => ui.logFilter();
   const filtering = () => !!(f().agent || f().vcs || f().text || f().level !== "debug");
   const filtered = createMemo(() => {
@@ -58,21 +61,23 @@ export function Logs() {
   });
 
   const loadOlder = async () => {
+    if (!link.live() || loading()) return;
     setLoading(true);
+    setError(null);
     try {
       const limit = Math.min(MAX_EVENTS, store.events.length + 1000);
       const list = await link.call("events", { limit }, decodeEvents);
-      store.prependEvents(list);
+      if (active) store.prependEvents(list);
     } catch (e) {
-      ui.setStatus(`older events: ${e instanceof Error ? e.message : e}`, true);
+      if (active) setError(`Older events: ${e instanceof Error ? e.message : e}`);
     } finally {
-      setLoading(false);
+      if (active) setLoading(false);
     }
   };
 
   const agents = () => store.state.agents.map((a) => a.id);
   return (
-    <div class="logs" data-view="logs">
+    <div class="logs" data-view="logs" aria-busy={loading()}>
       <div class="content-head"><h2>Events</h2><span class="muted">{count()} loaded · search covers loaded events</span></div>
       <div class="filters" role="toolbar" aria-label="event filters">
         <label>agent
@@ -93,6 +98,7 @@ export function Logs() {
         <span class="muted">{count()} of {(store.eventsVersion(), store.events.length)}</span>
         <button disabled={!link.live() || loading() || store.events.length >= MAX_EVENTS} onClick={loadOlder}>{loading() ? "Loading…" : "Load older"}</button>
       </div>
+      <Show when={error()}><div class="fetch-state err" role="status">{error()}</div></Show>
       <div class="log-head" aria-hidden="true"><span class="time">time</span><span class="level">level</span><span class="source-type">source / type</span><span class="agent">agent</span><span class="msg">message</span></div>
       <VirtualList
         label="event log"
