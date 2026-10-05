@@ -1,8 +1,10 @@
 //! Platform-independent domain types shared by crew clients and the daemon.
 //!
-//! This crate contains the domain records and version control event payloads.
-//! RPC requests and transport remain in `crew-core` during the first extraction.
+//! This crate contains domain records, configuration-free protocol records and
+//! version control event payloads. Host RPC calls, configuration and transport
+//! remain in `crew-core`.
 
+pub mod rpc;
 pub mod types;
 pub mod vcs;
 
