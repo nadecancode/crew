@@ -9,10 +9,12 @@ import type { Locator, Page } from "@playwright/test";
 import { expect, noRequestsAfterStart, test } from "./fixtures.ts";
 import type { Mock } from "./fixtures.ts";
 
-const ROW = 22;
+const BUS_ROW = 84;
+const LOG_ROW = 36;
+const LOG_NARROW_ROW = 64;
 const busList = (page: Page) => page.locator("#side-panel .bus-list");
 const logList = (page: Page) => page.locator("#main .log-list");
-const logCount = (page: Page) => page.getByRole("toolbar", { name: "log filters" }).locator("span.muted", { hasText: / of / });
+const logCount = (page: Page) => page.getByRole("toolbar", { name: "event filters" }).locator("span.muted", { hasText: / of / });
 
 function message(mock: Mock, id: string, from: string, to: string, body: string) {
   return { kind: "message", data: { id, from, to, type: "message", body, timestamp: mock.now(), correlation_id: null, reply_to: null, metadata: null } };
@@ -24,7 +26,7 @@ function event(seq: number, timestamp: number, over: EventOver = {}) {
 }
 
 /** How many rows the list holds (its spacer is one row height per row). */
-const rows = (list: Locator) => list.locator(".vlist-pad").evaluate((el, h) => Math.round(el.getBoundingClientRect().height / h), ROW);
+const rows = (list: Locator, rowHeight = LOG_ROW) => list.locator(".vlist-pad").evaluate((el, h) => Math.round(el.getBoundingClientRect().height / h), rowHeight);
 
 /** The `attr` of the first row whose bottom is below the list's top edge. */
 const firstVisible = (list: Locator, attr: string) =>
@@ -60,10 +62,10 @@ test("the bus follows the tail, and scrolled up it stays where the reader is", a
   await openPage();
   const list = busList(page);
   await expect(list.locator("[data-message='m-0007']")).toBeVisible();
-  const before = await rows(list);
+  const before = await rows(list, BUS_ROW);
 
   for (let i = 1; i <= 60; i++) mock.push(message(mock, `m-b${String(i).padStart(3, "0")}`, "orchestrator", `claude-${(i % 6) + 1}`, `step ${i} of the plan`));
-  await expect.poll(() => rows(list)).toBe(before + 60);
+  await expect.poll(() => rows(list, BUS_ROW)).toBe(before + 60);
   await expect(list.locator("[data-message='m-b060']")).toBeInViewport();
   expect(await atBottom(list)).toBe(true);
   mock.push(message(mock, "m-b061", "claude-1", "claude-2", "one more"));
@@ -71,11 +73,11 @@ test("the bus follows the tail, and scrolled up it stays where the reader is", a
   expect(await atBottom(list)).toBe(true);
 
   // Scrolled up: new messages do not move what is being read.
-  const y = await scrollTo(list, 10 * ROW + 5);
+  const y = await scrollTo(list, 10 * BUS_ROW + 5);
   const first = await firstVisible(list, "data-message");
   expect(first).not.toBeNull();
   for (let i = 62; i <= 81; i++) mock.push(message(mock, `m-b${String(i).padStart(3, "0")}`, "claude-3", "claude-5", `later ${i}`));
-  await expect.poll(() => rows(list)).toBe(before + 81);
+  await expect.poll(() => rows(list, BUS_ROW)).toBe(before + 81);
   expect(await firstVisible(list, "data-message")).toBe(first);
   expect(await list.evaluate((el) => el.scrollTop)).toBe(y);
   await expect(list.locator("[data-message='m-b081']")).not.toBeInViewport();
@@ -93,6 +95,7 @@ for (const which of ["bus", "log"] as const) {
   test(`a full ${which} drops its oldest rows without moving the rows being read, and keeps the selected row`, async ({ page, mock, csp, openPage }) => {
     await openPage();
     const cap = which === "bus" ? 1000 : 5000;
+    const rowHeight = which === "bus" ? BUS_ROW : LOG_ROW;
     const attr = which === "bus" ? "data-message" : "data-seq";
     const push = (i: number) =>
       mock.push(which === "bus"
@@ -103,9 +106,9 @@ for (const which of ["bus", "log"] as const) {
     for (let i = 0; i < cap + 50; i++) push(i);
     const last = which === "bus" ? "review-" + (cap + 49) : String(100_000 + cap + 49);
     await expect(list.locator(`[${attr}="${last}"]`)).toBeInViewport();
-    expect(await rows(list)).toBe(cap);
+    expect(await rows(list, rowHeight)).toBe(cap);
     // Scrolled up to row 400 of the full list.
-    await scrollTo(list, 400 * ROW);
+    await scrollTo(list, 400 * rowHeight);
     const first = await firstVisible(list, attr);
     const want = which === "bus" ? "review-450" : String(100_450);
     expect(first).toBe(want);
@@ -160,6 +163,8 @@ test("the bus filters to the pair of a link clicked in the graph; hovering a row
   await page.getByRole("button", { name: "clear the filter" }).click();
   await expect(page.locator("#side-panel .chip.filter")).toHaveCount(0);
   await expect(shown).toHaveCount(10);
+  await expect.poll(() => rows(list, BUS_ROW)).toBe(10);
+  await expect(list.locator("[data-message='m-back']")).toBeInViewport();
   expect(csp).toEqual([]);
 });
 
@@ -172,13 +177,13 @@ test("the bus's load older asks history and keeps the reader's place", async ({ 
   }));
   await openPage();
   const list = busList(page);
-  await expect.poll(() => rows(list)).toBe(300);
+  await expect.poll(() => rows(list, BUS_ROW)).toBe(300);
   await scrollTo(list, 0);
   expect(await firstVisible(list, "data-message")).toBe("m-h100");
 
-  await page.locator("#side-panel").getByRole("button", { name: "load older" }).click();
+  await page.locator("#side-panel").getByRole("button", { name: "Load older", exact: true }).click();
   expect((await mock.waitForCall("history")).params).toEqual({ limit: 600 });
-  await expect.poll(() => rows(list)).toBe(400);
+  await expect.poll(() => rows(list, BUS_ROW)).toBe(400);
   // The same row is under the reader; the older ones are above it.
   expect(await firstVisible(list, "data-message")).toBe("m-h100");
   await scrollTo(list, 0);
@@ -198,7 +203,7 @@ test("the log follows the tail, and scrolled up it stays where the reader is", a
   await expect(list.locator("[data-seq='180']")).toBeInViewport();
   expect(await atBottom(list)).toBe(true);
 
-  const y = await scrollTo(list, 20 * ROW + 7);
+  const y = await scrollTo(list, 20 * LOG_ROW + 7);
   const first = await firstVisible(list, "data-seq");
   expect(first).not.toBeNull();
   for (let seq = 181; seq <= 220; seq++) mock.push({ kind: "event", data: event(seq, mock.now()) });
@@ -224,7 +229,7 @@ test("the log filters by agent, level, vcs and text", async ({ page, mock, csp, 
     mock.push({ kind: "event", data: event(seq, mock.now(), over) });
   }
   await expect(logCount(page)).toHaveText("36 of 36");
-  const filters = page.getByRole("toolbar", { name: "log filters" });
+  const filters = page.getByRole("toolbar", { name: "event filters" });
   const [agent, level] = [filters.locator("select").nth(0), filters.locator("select").nth(1)];
 
   await agent.selectOption("claude-1");
@@ -244,7 +249,7 @@ test("the log filters by agent, level, vcs and text", async ({ page, mock, csp, 
   expect(await seqs(page)).toEqual([4, 5, 105, 110, 115, 120, 125, 130]);
   await level.selectOption("debug");
 
-  const vcs = filters.getByRole("button", { name: "vcs" });
+  const vcs = filters.getByRole("button", { name: "Version control", exact: true });
   await vcs.click();
   await expect(vcs).toHaveAttribute("aria-pressed", "true");
   await expect(logCount(page)).toHaveText("1 of 36");
@@ -259,7 +264,7 @@ test("the log filters by agent, level, vcs and text", async ({ page, mock, csp, 
   await text.fill("RETRIED");
   expect(await seqs(page)).toEqual([110, 120, 130]);
   await text.fill("no such thing");
-  await expect(logList(page)).toContainText("nothing matches the filters");
+  await expect(logList(page)).toContainText("No events match these filters");
 
   // `f` filters to the selected agent.
   await filters.getByRole("button", { name: "clear" }).click();
@@ -285,7 +290,7 @@ test("the log's load older asks events and keeps the reader's place", async ({ p
   await scrollTo(list, 0);
   expect(await firstVisible(list, "data-seq")).toBe("501");
 
-  await page.getByRole("toolbar", { name: "log filters" }).getByRole("button", { name: "load older" }).click();
+  await page.getByRole("toolbar", { name: "event filters" }).getByRole("button", { name: "Load older", exact: true }).click();
   expect((await mock.waitForCall("events", (c) => c.params?.agent === undefined)).params).toEqual({ limit: 2000 });
   await expect(logCount(page)).toHaveText("1500 of 1500");
   expect(await firstVisible(list, "data-seq")).toBe("501");
@@ -305,7 +310,7 @@ test("5000 events: the log keeps fewer than 80 rows in the DOM and still follows
   expect(await logList(page).locator(".log-row").count()).toBeLessThan(80);
   await expect(logList(page).locator("[data-seq='5100']")).toBeInViewport();
   // Scrolling through keeps it small.
-  await scrollTo(logList(page), 2500 * ROW);
+  await scrollTo(logList(page), 2500 * LOG_ROW);
   await expect(logList(page).locator("[data-seq='2601']")).toBeAttached();
   expect(await logList(page).locator(".log-row").count()).toBeLessThan(80);
   expect(csp).toEqual([]);
@@ -356,5 +361,36 @@ test("in the log view, k with the focus outside the list moves the selection one
   await expect.poll(selected, { timeout: 2000 }).toBe("5");
   expect(errors).toEqual([]);
   expect(mock.calls.filter((c) => c.method === "agent_kill")).toEqual([]);
+  expect(csp).toEqual([]);
+});
+
+test("event rows change from 36 to 64px without moving the keyed fractional scroll anchor", async ({ page, mock, openPage, csp }) => {
+  mock.state.events = Array.from({ length: 1000 }, (_, i) => event(i + 1, mock.now() - 1000 + i));
+  await openPage();
+  await page.keyboard.press("l");
+  const list = logList(page);
+  await scrollTo(list, 400 * LOG_ROW + LOG_ROW / 4);
+  const anchor = await firstVisible(list, "data-seq");
+  expect(anchor).toBe("401");
+  await expect.poll(() => list.locator(".vrow").first().evaluate((el) => el.getBoundingClientRect().height)).toBe(LOG_ROW);
+  await expect.poll(() => list.locator(".log-row").first().evaluate((el) => el.getBoundingClientRect().height)).toBe(LOG_ROW);
+  await page.setViewportSize({ width: 700, height: 900 });
+  await expect.poll(() => list.locator(".vrow").first().evaluate((el) => el.getBoundingClientRect().height)).toBe(LOG_NARROW_ROW);
+  expect(await firstVisible(list, "data-seq")).toBe(anchor);
+  expect(await list.evaluate((el) => el.scrollTop)).toBe(400 * LOG_NARROW_ROW + LOG_NARROW_ROW / 4);
+  expect(await rows(list, LOG_NARROW_ROW)).toBe(1000);
+  await expect.poll(() => list.locator(".log-row").first().evaluate((el) => el.getBoundingClientRect().height)).toBe(LOG_NARROW_ROW);
+  const visible = await list.evaluate((el) => {
+    const box = el.getBoundingClientRect();
+    return [...el.querySelectorAll(".log-row")].filter((row) => {
+      const r = row.getBoundingClientRect();
+      return r.bottom > box.top && r.top < box.bottom;
+    }).length;
+  });
+  expect(await list.locator(".log-row").count()).toBeLessThanOrEqual(visible + 20);
+  await page.setViewportSize({ width: 1400, height: 900 });
+  await expect.poll(() => list.locator(".vrow").first().evaluate((el) => el.getBoundingClientRect().height)).toBe(LOG_ROW);
+  expect(await firstVisible(list, "data-seq")).toBe(anchor);
+  expect(await list.evaluate((el) => el.scrollTop)).toBe(400 * LOG_ROW + LOG_ROW / 4);
   expect(csp).toEqual([]);
 });

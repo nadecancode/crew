@@ -58,7 +58,7 @@ test("a full message ring preserves the visible message when its oldest row leav
   for (let i = 0; i < 1050; i++) mock.push(make(i));
   await expect(page.locator('[data-message="review-1049"]')).toBeAttached();
   const list = page.locator(".bus-list");
-  await list.evaluate((el) => { el.scrollTop = 400 * 22; el.dispatchEvent(new Event("scroll")); });
+  await list.evaluate((el) => { el.scrollTop = 400 * 84; el.dispatchEvent(new Event("scroll")); });
   const firstVisible = () => list.evaluate((el) => {
     const edge = el.getBoundingClientRect().top;
     return [...el.querySelectorAll<HTMLElement>("[data-message]")].find((row) => row.getBoundingClientRect().top >= edge)?.dataset.message;
