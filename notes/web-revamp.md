@@ -350,7 +350,7 @@ The combined build subsequently demonstrated shared primitive/minifier savings. 
 
 Terminal changes remain theme-only, with the original +256-byte internal allowance (revamp target P3 ≤333,152). At the final ceilings plus that terminal target and 686-byte HTML, the conservative P4 maximum is 598,338, leaving 1,662 bytes under P4. Every build still measures P4 directly; assets cannot hide outside the script/CSS accounting. QA/dev/gallery/tests ship zero bytes.
 
-Every slice review names source and test commits, the approved foundation, build command, actual P1/P2/P3/P4 and relevant suites. Final acceptance uses the integrated production manifest. For reviewed integration `fd9d868d`, bundle commit `ae8f8a2b`, the measured totals are **230,128 / 33,842 / 332,915 / 597,571**: margins **372 / 158 / 17,085 / 2,429** bytes. Both List modes are present; the Team-List-only fallback was **not used**. Pending polish must stay within the same ceilings; §signoff records the final target and any later measurements.
+Every slice review names source and test commits, the approved foundation, build command, actual P1/P2/P3/P4 and relevant suites. Final acceptance uses the integrated production manifest. The initial visual target `fd9d868d` was a pre-check, not approval of the `integrate` task. The final rebuilt target `d092f4a7` (source `fnv1a64:14e8acd06e0d4cac`) measures **230,360 / 33,888 / 332,915 / 597,849**: margins **140 / 112 / 17,085 / 2,151** bytes. Both List modes are present; the Team-List-only fallback was **not used**. These final figures include switcher, Help-focus, transcript-empty, and Herdr-ended polish and supersede the initial `ae8f8a2b` bundle.
 
 ### Funded T1, conditional T2, and cut order
 
@@ -453,3 +453,56 @@ Help ownership deliberately moves from the card's content grouping to `ui` becau
 ### Design provenance
 
 Applied the local `ui-ux-pro-max` and `agent-browser` skills. The design-system search's documentation-landing suggestion was not a fit and was discarded. A narrower `real-time monitoring dashboard` style query matched the monitoring/attention use case. Adopted its legibility, explicit state and keyboard principles; did not adopt suggested polling, continuous pulse, external fonts, GSAP, or chart libraries because they conflict with this product's existing contracts. The screen-specific design above is based on the running application and its actual protocol.
+
+<a id="signoff"></a>
+## §signoff — delivered dashboard
+
+### Verdict and target
+
+**Visual sign-off: approved** for integrated bundle `d092f4a73d804fd12c79605c2b465940119318dc`, source `fnv1a64:14e8acd06e0d4cac`, reviewed on 2026-10-05. The dashboard delivers the intended hierarchy, matched light/dark appearance, readable message previews, clearer evidence panels, and both List modes. The specific visual issues raised during implementation and final inspection are resolved. Final code, security, live-daemon, and performance approval remains with the reviewer of `integrate`.
+
+[Delivered-screen gallery](web-revamp/signoff/index.html) retains 14 representative production captures; [evidence.json](web-revamp/signoff/evidence.json) records their source and reproduction commands. These are actual app components, separate from the static reference mockups.
+
+| Budget | Final measured bytes | Ceiling | Remaining |
+|---|---|---|---|
+| P1 nonterminal script | 230,360 | 230,500 | 140 |
+| P2 stylesheets | 33,888 | 34,000 | 112 |
+| P3 terminal script | 332,915 | 350,000 | 17,085 |
+| P4 entire bundle | 597,849 | 600,000 | 2,151 |
+
+Both Team List and Task List shipped. The orchestrator's Team-List-only fallback was not needed. The final measured manifest, not a sum of standalone slice estimates, is the budget evidence.
+
+### What was checked
+
+The final integrated matrix at `/tmp/crew-integrated-gallery/index.html` covers eight scenarios and 38 surfaces, each in light/dark and desktop/tablet/narrow/200%-equivalent layouts: 2,432 cases, 2,248 images, and 184 explicit no-entity skips. The final manifest names `d092f4a7` and source `fnv1a64:14e8acd06e0d4cac` and reports zero strict failures without overflow exemptions. I manually sampled 38 images across the main views, inspector/evidence tabs, dialogs, workspace states, loading/errors, and long-text cases. Follow-up images were reviewed after the targeted fixes.
+
+The final-source polish matrix at `/tmp/crew-qa-polish-final-strict/index.html` covers baseline and multi-workspace switcher, Help, empty transcript, and ended terminal at all four viewport sizes in both themes: 64 captures, zero strict failures, no overflow exemption. Its source fingerprint matches the final integrated bundle. Help at 390px, multi-workspace identities/badges, transcript emptiness, and the ended Herdr state were visually rechecked from it. The regenerated full matrix has the same final source fingerprint; its manifest is the authoritative automated capture result.
+
+I also opened the committed production app against `bun run mock`, rather than relying only on static captures. Checks included explicit appearance selection; Team/Task List keyboard selection; Enter into the selected inspector/task; Escape restoring the selected Task List and focus; Stop confirmation initially focusing Cancel and returning focus after Escape; and the distinct index-live/workspace-not-running state with the composer disabled. The stopped-document notice retained its new-address instruction. A final live check on `d092f4a7` at 390×844 confirmed Help opens at scroll position zero with its heading focused, Tab reaches Close within the modal, and Escape closes it and returns focus to the Help trigger.
+
+The integrator reports the final target green for `just web-test` (175), mock/performance browser checks (210), live jj checks (36), `just web-check`, and `web_bundle` (2). Those automated results complement the manual visual review; they do not imply a screen-reader audit or certification of every contrast composition.
+
+### Findings resolved before sign-off
+
+| Finding | Resolution and owner | Final evidence |
+|---|---|---|
+| Long inspector role squeezed the agent ID to a few pixels and consumed the reading area | `ui` reserves identity width and bounds subordinate role text, with full role text retained; the page can scroll vertically on constrained windows | [Long-role inspector](web-revamp/signoff/long-text-inspector-light-narrow.png) |
+| Selecting a 160px List row in a shorter viewport clipped its ID at the top | `content` top-aligns an oversized selected row; `graph` keeps summary content within its row geometry | [Task List at 200% equivalent](web-revamp/signoff/long-text-tasks-list-light-zoom.png) |
+| Herdr toolbar gave half its width to a redundant spacer | `graph` removed the spacer; note uses the space beside actions | Terminal captures in the final gallery |
+| Narrow switcher columns squeezed workspace names, paths, and status/count data | `ui` keeps status/count cells intact and wraps identity/path content; multi-workspace states remain distinguishable | [Multi-workspace switcher](web-revamp/signoff/multi-switcher-light-narrow.png) |
+| Help initially focused Close, opening scrolled to its bottom | `ui`, `6e6856c2`, focuses the heading at the top; modal containment and return focus remain | [Before](web-revamp/signoff/help-initial-scroll.png), [after](web-revamp/signoff/baseline-help-light-narrow.png) |
+| Available empty transcript appeared as an unexplained blank panel | `graph`, `8f378cf7`, adds an explicit empty-result label | [Empty transcript](web-revamp/signoff/baseline-transcript-empty-dark-tablet.png) |
+| Ended Herdr screen remained blank with a typing hint | `graph`, `8f378cf7`, uses the returned `alive` value: ended/read-only guidance, disabled Jump, preserved Refresh, and no key/paste/queued input | [Ended terminal](web-revamp/signoff/baseline-terminal-ended-light-narrow.png); paired QA input-guard tests |
+
+The three final P2 findings became `polish-help-focus` and `polish-terminal-states`; they were not silently accepted as finished behaviour. No additional visual fix is required for this target.
+
+### Deliberate differences accepted
+
+- The shipped chrome uses a native Appearance select and a neutral Stop team button with the existing confirmation. The proposed Workspace actions menu, additional menu hints/Home/End handling, and sticky dialog footer were trimmed after measured budget review. Every existing operation and shortcut remains available.
+- Short/narrow windows use wrapping chrome, a minimum 400px work region, and vertical page scrolling. This keeps evidence and filters usable when warning, quota, and question strips coexist. It deliberately permits content below the first viewport while avoiding document-wide horizontal scrolling.
+- Graph Fit can make labels small in large or long dependency layouts. Visible zoom/fit controls and readable List alternatives are retained; the proposed numeric zoom readout and extra hint were cut. Fixed 160px List rows use bounded previews with complete evidence available in the detail panels.
+- T1 delivered the two List modes and reported-token totals with reporting coverage, alongside the improved inspector hierarchy and explicit unknown/freshness/read states. Additional lifecycle dates, artifact provenance, new Retry controls, turns/paused summary cards, and several optional disclosures were cut after measuring the slice costs. The protocol inventory above remains a map of available data, not a claim that every optional field gained a new surface.
+- T2 bus search/type filters, explicit Follow/Jump counters, extra task filters, raw metadata viewers, and broader touch specialization remain deferred. Many narrow controls remain below 44px; that informational gallery finding is accepted for this desktop loopback dashboard and is not a claim of full touch optimization. Keyboard access, visible focus, safe confirmation, and readable replacement panels were retained.
+- The system palette can appear briefly before an explicit stored appearance loads. This was accepted in §system; no browser-storage workaround or late asset request was introduced.
+
+The delivered UI is judged against the approved tiers and retained behaviour, with the reference images guiding hierarchy and rhythm. Exact decorative spacing from a static composition is not a new runtime requirement.

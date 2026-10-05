@@ -1,0 +1,174 @@
+{
+  "target": "d092f4a73d804fd12c79605c2b465940119318dc",
+  "source": "fnv1a64:14e8acd06e0d4cac",
+  "fullMatrix": {
+    "cases": 2432,
+    "images": 2248,
+    "skips": 184,
+    "strict": true,
+    "failures": 0,
+    "externalGallery": "/tmp/crew-integrated-gallery"
+  },
+  "measured": {
+    "P1": 230360,
+    "P2": 33888,
+    "P3": 332915,
+    "P4": 597849
+  },
+  "ceilings": {
+    "P1": 230500,
+    "P2": 34000,
+    "P3": 350000,
+    "P4": 600000
+  },
+  "fallbackUsed": false,
+  "liveChecks": {
+    "initialReview": "fd9d868d",
+    "listKeyboard": "ArrowDown/Enter opened claude-2; Home/ArrowDown/Enter opened task queue; Escape restored task list focus and selection task-list-1.",
+    "confirmation": "Stop confirmation initially focused Cancel; Escape restored stop team button.",
+    "availability": "Index stayed live while workspace became not-running; composer disabled. Dashboard shutdown showed final stopped notice and disabled composer.",
+    "finalReview": "d092f4a7 at 390x844: Help opened at scrollTop0, heading top63.20, heading focused. Tab reached Close within dialog; Escape closed and restored Help trigger."
+  },
+  "samples": [
+    {
+      "id": "baseline-team-light-desktop",
+      "title": "Team, light desktop",
+      "image": "baseline-team-light-desktop.png",
+      "scenario": "baseline",
+      "surface": "team",
+      "theme": "light",
+      "viewport": "desktop",
+      "reproduce": "bun run gallery --out '/tmp/crew-integrated-gallery/repro/baseline-team-light-desktop' --scenario baseline --surface team --theme light --viewport desktop --fixture subagents --strict"
+    },
+    {
+      "id": "busy-team-dark-desktop",
+      "title": "Busy team, dark desktop",
+      "image": "busy-team-dark-desktop.png",
+      "scenario": "busy",
+      "surface": "team",
+      "theme": "dark",
+      "viewport": "desktop",
+      "reproduce": "bun run gallery --out '/tmp/crew-integrated-gallery/repro/busy-team-dark-desktop' --scenario busy --surface team --theme dark --viewport desktop --fixture subagents --strict"
+    },
+    {
+      "id": "baseline-tasks-graph-light-tablet",
+      "title": "Task graph, tablet",
+      "image": "baseline-tasks-graph-light-tablet.png",
+      "scenario": "baseline",
+      "surface": "tasks-graph",
+      "theme": "light",
+      "viewport": "tablet",
+      "reproduce": "bun run gallery --out '/tmp/crew-integrated-gallery/repro/baseline-tasks-graph-light-tablet' --scenario baseline --surface tasks-graph --theme light --viewport tablet --fixture subagents --strict"
+    },
+    {
+      "id": "long-text-team-list-dark-narrow",
+      "title": "Long text Team List, narrow",
+      "image": "long-text-team-list-dark-narrow.png",
+      "scenario": "long-text",
+      "surface": "team-list",
+      "theme": "dark",
+      "viewport": "narrow",
+      "reproduce": "bun run gallery --out '/tmp/crew-integrated-gallery/repro/long-text-team-list-dark-narrow' --scenario long-text --surface team-list --theme dark --viewport narrow --fixture subagents --strict"
+    },
+    {
+      "id": "long-text-tasks-list-light-zoom",
+      "title": "Task List, 200% equivalent",
+      "image": "long-text-tasks-list-light-zoom.png",
+      "scenario": "long-text",
+      "surface": "tasks-list",
+      "theme": "light",
+      "viewport": "zoom",
+      "reproduce": "bun run gallery --out '/tmp/crew-integrated-gallery/repro/long-text-tasks-list-light-zoom' --scenario long-text --surface tasks-list --theme light --viewport zoom --fixture subagents --strict"
+    },
+    {
+      "id": "long-text-inspector-light-narrow",
+      "title": "Long role inspector, narrow",
+      "image": "long-text-inspector-light-narrow.png",
+      "scenario": "long-text",
+      "surface": "inspector",
+      "theme": "light",
+      "viewport": "narrow",
+      "reproduce": "bun run gallery --out '/tmp/crew-integrated-gallery/repro/long-text-inspector-light-narrow' --scenario long-text --surface inspector --theme light --viewport narrow --fixture subagents --strict"
+    },
+    {
+      "id": "limits-usage-light-desktop",
+      "title": "Usage limits and coverage",
+      "image": "limits-usage-light-desktop.png",
+      "scenario": "limits",
+      "surface": "usage",
+      "theme": "light",
+      "viewport": "desktop",
+      "reproduce": "bun run gallery --out '/tmp/crew-integrated-gallery/repro/limits-usage-light-desktop' --scenario limits --surface usage --theme light --viewport desktop --fixture subagents --strict"
+    },
+    {
+      "id": "busy-events-dark-desktop",
+      "title": "Event reading and severity",
+      "image": "busy-events-dark-desktop.png",
+      "scenario": "busy",
+      "surface": "events",
+      "theme": "dark",
+      "viewport": "desktop",
+      "reproduce": "bun run gallery --out '/tmp/crew-integrated-gallery/repro/busy-events-dark-desktop' --scenario busy --surface events --theme dark --viewport desktop --fixture subagents --strict"
+    },
+    {
+      "id": "attention-question-light-narrow",
+      "title": "Operator question, narrow",
+      "image": "attention-question-light-narrow.png",
+      "scenario": "attention",
+      "surface": "question",
+      "theme": "light",
+      "viewport": "narrow",
+      "reproduce": "bun run gallery --out '/tmp/crew-integrated-gallery/repro/attention-question-light-narrow' --scenario attention --surface question --theme light --viewport narrow --fixture subagents --strict"
+    },
+    {
+      "id": "baseline-dashboard-stopped-dark-desktop",
+      "title": "Stopped dashboard, cached evidence",
+      "image": "baseline-dashboard-stopped-dark-desktop.png",
+      "scenario": "baseline",
+      "surface": "dashboard-stopped",
+      "theme": "dark",
+      "viewport": "desktop",
+      "reproduce": "bun run gallery --out '/tmp/crew-integrated-gallery/repro/baseline-dashboard-stopped-dark-desktop' --scenario baseline --surface dashboard-stopped --theme dark --viewport desktop --fixture subagents --strict"
+    },
+    {
+      "id": "multi-switcher-light-narrow",
+      "title": "Final multi-workspace switcher",
+      "image": "multi-switcher-light-narrow.png",
+      "scenario": "multi",
+      "surface": "switcher",
+      "theme": "light",
+      "viewport": "narrow",
+      "reproduce": "bun run gallery --out '/tmp/crew-integrated-gallery/repro/multi-switcher-light-narrow' --scenario multi --surface switcher --theme light --viewport narrow --fixture subagents --strict"
+    },
+    {
+      "id": "baseline-help-light-narrow",
+      "title": "Final Help initial position",
+      "image": "baseline-help-light-narrow.png",
+      "scenario": "baseline",
+      "surface": "help",
+      "theme": "light",
+      "viewport": "narrow",
+      "reproduce": "bun run gallery --out '/tmp/crew-integrated-gallery/repro/baseline-help-light-narrow' --scenario baseline --surface help --theme light --viewport narrow --fixture subagents --strict"
+    },
+    {
+      "id": "baseline-transcript-empty-dark-tablet",
+      "title": "Final empty transcript label",
+      "image": "baseline-transcript-empty-dark-tablet.png",
+      "scenario": "baseline",
+      "surface": "transcript-empty",
+      "theme": "dark",
+      "viewport": "tablet",
+      "reproduce": "bun run gallery --out '/tmp/crew-integrated-gallery/repro/baseline-transcript-empty-dark-tablet' --scenario baseline --surface transcript-empty --theme dark --viewport tablet --fixture subagents --strict"
+    },
+    {
+      "id": "baseline-terminal-ended-light-narrow",
+      "title": "Final ended terminal state",
+      "image": "baseline-terminal-ended-light-narrow.png",
+      "scenario": "baseline",
+      "surface": "terminal-ended",
+      "theme": "light",
+      "viewport": "narrow",
+      "reproduce": "bun run gallery --out '/tmp/crew-integrated-gallery/repro/baseline-terminal-ended-light-narrow' --scenario baseline --surface terminal-ended --theme light --viewport narrow --fixture subagents --strict"
+    }
+  ]
+}
