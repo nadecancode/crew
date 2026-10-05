@@ -144,6 +144,7 @@ impl Daemon {
             }
             rt.ready = false;
             rt.turn_active = false;
+            rt.parking_turn = false;
             rt.pending_prompt = None;
             (
                 std::mem::take(&mut rt.expected_exit),

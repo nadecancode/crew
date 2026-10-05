@@ -844,7 +844,7 @@ pub fn call(client: &mut Client, name: &str, args: &Value) -> Result<ToolOutput,
                     task_id: opt_str(args, "task_id"),
                 },
             )?;
-            out(format!("Status set to {}. Default task: executing card, otherwise latest started waiting card; equal starts keep board order.", agent.status), raw)
+            out(format!("Status set to {}.", agent.status), raw)
         }
         "tasks_list" => {
             let (tasks, raw): (Vec<Task>, _) = rpc(client, Call::TasksList)?;

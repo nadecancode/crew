@@ -413,8 +413,12 @@ change identity",
                         .receive(&agent, unread_only, limit.unwrap_or(50).clamp(1, 500))?;
                 // Only the agent itself consumes its inbox; the operator just looks.
                 if ack && matches!(who, Who::Agent(_)) && !messages.is_empty() {
+                    let received: Vec<_> =
+                        messages.iter().map(|entry| entry.message.clone()).collect();
+                    self.record_task_wakeups(&agent, &received)?;
                     let ids: Vec<String> = messages.iter().map(|m| m.message.id.clone()).collect();
                     self.bus.mark_delivered(&agent, &ids)?;
+                    self.resume_waiting_from_delivery(&agent, &ids);
                     self.bus.acknowledge(&agent, Some(&ids))?;
                     self.refresh_counts(std::slice::from_ref(&agent));
                 }
@@ -702,14 +706,16 @@ change identity",
     pub(crate) async fn send_message(&self, mut new: NewMessage) -> Result<SendOutcome, RpcError> {
         // Replies can identify a parked card even after the sender has
         // started independent work. Preserve caller-supplied task scope.
-        if new.metadata.is_null() {
-            new.metadata = json!({});
-        }
-        if let Some(metadata) = new.metadata.as_object_mut() {
-            if let Some(task) = crate::tasks::active_task(&self.model().tasks, &new.from) {
+        let from_task =
+            crate::tasks::active_task(&self.model().tasks, &new.from).map(|t| t.id.clone());
+        if let Some(task) = from_task {
+            if new.metadata.is_null() {
+                new.metadata = json!({});
+            }
+            if let Some(metadata) = new.metadata.as_object_mut() {
                 metadata
                     .entry("from_task_id")
-                    .or_insert_with(|| json!(task.id));
+                    .or_insert_with(|| json!(task));
             }
         }
         let (recipients, notify_p2p) = self.recipients_of(&new)?;

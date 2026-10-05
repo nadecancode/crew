@@ -295,6 +295,7 @@ impl Daemon {
             let mut model = self.model();
             let rt = model.rt(id);
             rt.turn_active = false;
+            rt.parking_turn = false;
             rt.turn_ended_at = now;
             rt.idle_since = Some(now);
             // What this turn was given; what is delivered from here on is the next one's.

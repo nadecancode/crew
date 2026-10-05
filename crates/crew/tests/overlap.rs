@@ -384,6 +384,145 @@ fn reparking_consumes_each_news_cue_and_cue_free_cards_leave_ready_work_availabl
             .iter()
             .filter(|e| e.event_type == "task.resumed")
             .count(),
-        4
+        3
     );
+}
+
+#[test]
+fn an_at_rest_answer_resumes_in_its_delivery_without_a_second_notice() {
+    let s = Session::new();
+    s.run(&s.team(
+        "parked-direct-answer",
+        vec![agent("owner", "architect", &[])],
+        vec![task("design", "owner", &[])],
+    ));
+    working(&s, "design");
+    tool(&s, "agent_inbox", json!({}));
+    park(&s);
+    let before = s
+        .events()
+        .iter()
+        .filter(|e| e.event_type == "message.delivered" && e.agent_id.as_deref() == Some("owner"))
+        .count();
+    s.send("owner", "The requested answer is available.");
+    working(&s, "design");
+    s.wait_for("answer delivery logged", || {
+        s.events()
+            .iter()
+            .filter(|e| {
+                e.event_type == "message.delivered" && e.agent_id.as_deref() == Some("owner")
+            })
+            .count()
+            > before
+    });
+    assert!(!s.has_event("task.resumed"));
+    assert!(!s
+        .messages()
+        .iter()
+        .any(|m| m.metadata["task_resumption"] == true));
+    let after = s
+        .events()
+        .iter()
+        .filter(|e| e.event_type == "message.delivered" && e.agent_id.as_deref() == Some("owner"))
+        .count();
+    assert_eq!(after, before + 1);
+    tool(&s, "task_complete", json!({"result":"design done"}));
+    s.wait_all_done();
+}
+
+#[test]
+fn rework_uses_a_parked_owners_free_slot_without_redispatching_the_card() {
+    let s = Session::new();
+    let mut rework = task("rework", "owner", &[]);
+    rework.reviewer = Some("critic".into());
+    s.run(&s.team(
+        "parked-rework",
+        vec![
+            agent("owner", "architect", &[]),
+            agent("critic", "review", &[]),
+        ],
+        vec![rework, task("parked", "owner", &[])],
+    ));
+    working(&s, "rework");
+    tool(&s, "task_complete", json!({"result":"first version"}));
+    working(&s, "parked");
+    park(&s);
+    let verdict = |approve| {
+        let out = s.ctl(
+            "critic",
+            &[
+                "tool",
+                "review_submit",
+                &json!({"task_id":"rework", "approve":approve, "comments":"reviewed"}).to_string(),
+            ],
+        );
+        assert!(out.status.success(), "{}", stderr(&out));
+    };
+    verdict(false);
+    working(&s, "rework");
+    assert!(tool(&s, "task_get", json!({})).starts_with("rework [working]"));
+    assert_eq!(
+        find_task(&s.snapshot(), "parked").status,
+        TaskStatus::Waiting
+    );
+    assert_eq!(
+        s.events()
+            .iter()
+            .filter(|e| e.event_type == "task.dispatched" && e.task_id.as_deref() == Some("rework"))
+            .count(),
+        1
+    );
+    tool(&s, "task_complete", json!({"result":"revised version"}));
+    verdict(true);
+    tool(
+        &s,
+        "task_complete",
+        json!({"task_id":"parked", "result":"parked work done"}),
+    );
+    s.wait_all_done();
+}
+
+#[test]
+fn a_fresh_restart_clears_the_turn_that_parked_and_redispatches_open_cards() {
+    if common::test_support::isolate_operator_test(
+        "a_fresh_restart_clears_the_turn_that_parked_and_redispatches_open_cards",
+    ) {
+        return;
+    }
+    let s = Session::new();
+    s.run(&s.team(
+        "parked-fresh-restart",
+        vec![agent("owner", "architect", &[])],
+        vec![task("first", "owner", &[]), task("next", "owner", &[])],
+    ));
+    working(&s, "first");
+    let identity = crew_core::paths::Identity::load(&s.identity_path("owner")).unwrap();
+    let (mut client, _) = crew_core::client::Client::agent(&identity, "parking-test").unwrap();
+    client
+        .call_value(crew_core::rpc::Call::Hook {
+            event: "turn-start".into(),
+            payload: Value::Null,
+            launch: None,
+        })
+        .unwrap();
+    park(&s);
+    assert_eq!(find_task(&s.snapshot(), "next").status, TaskStatus::Ready);
+    let (mut operator, _) =
+        crew_core::client::Client::operator(std::path::Path::new(&identity.socket), "restart-test")
+            .unwrap();
+    operator
+        .call_value(crew_core::rpc::Call::AgentRestartFresh { id: "owner".into() })
+        .unwrap();
+    working(&s, "first");
+    s.wait_for("first redispatched to the fresh session", || {
+        s.events()
+            .iter()
+            .filter(|e| e.event_type == "task.dispatched" && e.task_id.as_deref() == Some("first"))
+            .count()
+            == 2
+    });
+    tool(&s, "task_complete", json!({"result":"first after restart"}));
+    working(&s, "next");
+    tool(&s, "task_complete", json!({"result":"next after restart"}));
+    s.wait_all_done();
 }

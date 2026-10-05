@@ -22,6 +22,14 @@ pub(super) fn track_pause(model: &mut Model, before: &Task, after: &Task) -> Opt
     if after.started_at.is_none()
         || after.started_at != before.started_at
         || after.status.is_terminal()
+        || after.status == TaskStatus::Review
+    {
+        local.task_wakeups.remove(&after.id);
+        local.task_wakeup_seen.remove(&after.id);
+    }
+    if after.started_at.is_none()
+        || after.started_at != before.started_at
+        || after.status.is_terminal()
     {
         local.task_pauses.remove(&after.id);
     } else {
@@ -46,6 +54,75 @@ impl Daemon {
                 a.progress = task.progress;
             }
         });
+    }
+
+    /// New cue messages should reach a free parked owner directly, instead
+    /// of starting an extra resume-notice turn before the answer arrives.
+    pub(crate) fn pending_task_wakeup(&self, agent: &str, pending: &[Message]) -> bool {
+        let model = self.model();
+        model.local.get(agent).is_some_and(|local| {
+            model.tasks.iter().any(|task| {
+                task.assigned_agent.as_deref() == Some(agent)
+                    && task.status == TaskStatus::Waiting
+                    && local
+                        .task_wakeups
+                        .get(&task.id)
+                        .is_some_and(|ids| pending.iter().any(|message| ids.contains(&message.id)))
+            })
+        })
+    }
+
+    /// At-rest delivery resumes the card whose cue is actually in this
+    /// batch. Messages delivered during another card leave a durable cue
+    /// instead; only those later need a separate planner notice.
+    pub(crate) fn resume_waiting_from_delivery(&self, agent: &str, ids: &[String]) {
+        let task = {
+            let model = self.model();
+            if executing_task(&model.tasks, agent).is_some() {
+                return;
+            }
+            let Some(local) = model.local.get(agent) else {
+                return;
+            };
+            let waiting: Vec<_> = model
+                .tasks
+                .iter()
+                .filter(|task| {
+                    task.assigned_agent.as_deref() == Some(agent)
+                        && task.status == TaskStatus::Waiting
+                        && local
+                            .task_wakeups
+                            .get(&task.id)
+                            .is_some_and(|cues| cues.iter().any(|cue| ids.contains(cue)))
+                })
+                .cloned()
+                .collect();
+            active_task(&waiting, agent).map(|t| t.id.clone())
+        };
+        let Some(task) = task else { return };
+        let mut claimed = false;
+        let resumed = self.try_update_task_checked(&task, |model, current| {
+            if current.status == TaskStatus::Waiting
+                && executing_task(&model.tasks, agent).is_none()
+                && model.agent(agent).is_some_and(|a| !a.status.is_terminal())
+            {
+                current.status = TaskStatus::Working;
+                claimed = true;
+            }
+            Ok(())
+        });
+        match resumed {
+            Ok(_) if claimed => {
+                self.clear_task_wakeups(agent, &task);
+                let mut model = self.model();
+                model.rt(agent).self_status = None;
+                model.rt(agent).parking_turn = false;
+                drop(model);
+                self.project_task(agent);
+            }
+            Err(e) => tracing::error!("{}", e.message),
+            _ => {}
+        }
     }
 
     /// Save before publishing the cue. Delivery retries this operation before
@@ -154,6 +231,18 @@ impl Daemon {
         }
     }
 
+    pub(crate) fn forget_task_waiting_state(&self, agent: &str, task: &str) {
+        let changed = self.model().local.get_mut(agent).is_some_and(|local| {
+            let cues = local.task_wakeups.remove(task).is_some();
+            let seen = local.task_wakeup_seen.remove(task).is_some();
+            let pause = local.task_pauses.remove(task).is_some();
+            cues || seen || pause
+        });
+        if changed {
+            self.save_local(agent);
+        }
+    }
+
     /// Called under the planning lock. A pending parked card resumes before
     /// new Ready work, newest start first; ties keep board order. A running
     /// turn must yield first, including the turn that parked its card.
@@ -187,7 +276,10 @@ impl Daemon {
                     let waiting: Vec<_> = model
                         .tasks
                         .iter()
-                        .filter(|t| wakeups.get(&t.id).is_some_and(|ids| !ids.is_empty()))
+                        .filter(|t| {
+                            t.status == TaskStatus::Waiting
+                                && wakeups.get(&t.id).is_some_and(|ids| !ids.is_empty())
+                        })
                         .cloned()
                         .collect();
                     let task = active_task(&waiting, &agent.id)?;
@@ -196,6 +288,14 @@ impl Daemon {
                 .collect()
         };
         for (agent, task, messages) in candidates {
+            let pending = self.bus.undelivered(&agent).unwrap_or_default();
+            if messages
+                .iter()
+                .all(|id| pending.iter().any(|message| message.id == *id))
+            {
+                self.request_delivery(&agent);
+                continue;
+            }
             let quoted: Vec<_> = messages.iter().take(32).cloned().collect();
             let body = format!(
                 "Resume your parked task {} (\"{}\"). task_get(\"{}\") reads its card. \
@@ -484,5 +584,93 @@ mod tests {
         retried.started_at = None;
         track_pause(&mut model, &working, &retried);
         assert!(!model.local["owner"].task_pauses.contains_key("first"));
+    }
+
+    #[tokio::test]
+    async fn a_blocked_owner_stalls_using_the_daemons_actual_agent_view() {
+        let temp = tempfile::tempdir().unwrap();
+        let running = start(DaemonOptions {
+            workspace: temp.path().to_path_buf(),
+            crew_bin: std::env::current_exe().unwrap(),
+            pin: None,
+        })
+        .await
+        .unwrap();
+        let daemon = &running.daemon;
+        {
+            let mut model = daemon.model();
+            model.session.team =
+                Some(crew_core::config::TeamConfig::from_yaml("project: blocked-view\n").unwrap());
+            let mut agent = owner(temp.path());
+            agent.status = AgentStatus::Blocked;
+            agent.block_kind = Some("self".into());
+            model.agents.push(agent);
+            model.tasks.push(card("blocked", TaskStatus::Blocked, 1));
+            model.tasks.push(card("next", TaskStatus::Ready, 2));
+        }
+        *daemon.procs.write().unwrap() = Some(std::sync::Arc::new(Alive));
+        daemon.apply_plan().await;
+        let model = daemon.model();
+        assert!(model
+            .stall
+            .as_ref()
+            .is_some_and(|(reason, _, _)| reason.contains("blocked")));
+        assert_eq!(model.task("next").unwrap().status, TaskStatus::Ready);
+    }
+
+    #[tokio::test]
+    async fn only_the_turn_that_parked_a_card_holds_the_next_ready_dispatch() {
+        let temp = tempfile::tempdir().unwrap();
+        let running = start(DaemonOptions {
+            workspace: temp.path().to_path_buf(),
+            crew_bin: std::env::current_exe().unwrap(),
+            pin: None,
+        })
+        .await
+        .unwrap();
+        let daemon = &running.daemon;
+        {
+            let mut model = daemon.model();
+            model.session.team =
+                Some(crew_core::config::TeamConfig::from_yaml("project: parking-turn\n").unwrap());
+            let mut agent = owner(temp.path());
+            agent.status = AgentStatus::Working;
+            model.agents.push(agent);
+            model.tasks.push(card("first", TaskStatus::Ready, 1));
+            // A launch optimistically marks its first prompt active. That
+            // alone must not starve ordinary Ready cards if no stop hook
+            // arrives (the existing fresh-restart runtime contract).
+            model.rt("owner").turn_active = true;
+        }
+        *daemon.procs.write().unwrap() = Some(std::sync::Arc::new(Alive));
+        daemon.apply_plan().await;
+        assert_eq!(
+            daemon.model().task("first").unwrap().status,
+            TaskStatus::Working
+        );
+        daemon
+            .mirror_status_to_task("owner", AgentStatus::Waiting, Some("on schema".into()))
+            .unwrap();
+        daemon
+            .model()
+            .tasks
+            .push(card("next", TaskStatus::Ready, 2));
+        daemon.apply_plan().await;
+        assert_eq!(
+            daemon.model().task("next").unwrap().status,
+            TaskStatus::Ready
+        );
+        daemon
+            .on_signal("owner", crate::agents::Signal::TurnEnded)
+            .await;
+        daemon.apply_plan().await;
+        assert_eq!(
+            daemon.model().task("next").unwrap().status,
+            TaskStatus::Working
+        );
+        assert_eq!(
+            daemon.model().task("first").unwrap().status,
+            TaskStatus::Waiting
+        );
     }
 }

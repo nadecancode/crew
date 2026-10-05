@@ -119,12 +119,17 @@ impl Daemon {
                     // goes on when the limit lifts.
                     active: !a.orchestrator
                         && (matches!(a.status, AgentStatus::Working | AgentStatus::Spawning)
-                            || a.limit.is_some()),
+                            || a.limit.is_some()
+                            || (a.status != AgentStatus::Blocked
+                                && model
+                                    .rt
+                                    .get(&a.id)
+                                    .is_some_and(|rt| rt.parking_turn && rt.turn_active))),
                     homeward: homeward.contains(&a.id),
                     turn_active: model
                         .rt
                         .get(&a.id)
-                        .is_some_and(|rt| rt.turn_active || rt.pending_prompt.is_some())
+                        .is_some_and(|rt| rt.parking_turn && rt.turn_active)
                         || a.limit.is_some()
                         || a.status == AgentStatus::Blocked,
                 })
@@ -135,8 +140,12 @@ impl Daemon {
         let agents: Vec<AgentView> = agents
             .into_iter()
             .map(|mut a| {
-                if a.runnable && !a.active && !a.orchestrator {
-                    a.active = !self.bus.undelivered(&a.id).unwrap_or_default().is_empty();
+                if a.runnable {
+                    let pending = self.bus.undelivered(&a.id).unwrap_or_default();
+                    a.turn_active |= self.pending_task_wakeup(&a.id, &pending);
+                    if !a.active && !a.orchestrator {
+                        a.active = !pending.is_empty();
+                    }
                 }
                 a
             })
@@ -322,7 +331,14 @@ until the database takes writes again, tasks wait where they are.",
         let Ok(Some(task)) = self.try_update_task_checked(task_id, |model, t| {
             if t.status == TaskStatus::Ready && t.assigned_agent.as_deref() == Some(agent_id) {
                 if tasks::executing_task(&model.tasks, agent_id).is_some()
-                    || model.rt.get(agent_id).is_some_and(|rt| rt.turn_active)
+                    || (model
+                        .rt
+                        .get(agent_id)
+                        .is_some_and(|rt| rt.parking_turn && rt.turn_active)
+                        && model.tasks.iter().any(|task| {
+                            task.assigned_agent.as_deref() == Some(agent_id)
+                                && task.status == TaskStatus::Waiting
+                        }))
                     || !t.dependencies.iter().all(|id| {
                         model
                             .task(id)
@@ -347,6 +363,7 @@ until the database takes writes again, tasks wait where they are.",
         let body = prompt::task_dispatch(&task);
         self.project_task(agent_id);
         self.model().rt(agent_id).self_status = None;
+        self.model().rt(agent_id).parking_turn = false;
         self.settle(agent_id);
         self.update_agent(agent_id, |a| a.activity = format!("task: {}", task.title));
         self.emit(
@@ -611,7 +628,7 @@ until the database takes writes again, tasks wait where they are.",
             })?
             .ok_or_else(|| RpcError::not_found(format!("no task '{id}'")))?;
         if let Some(previous) = previous.filter(|p| p != agent) {
-            self.clear_task_wakeups(&previous, id);
+            self.forget_task_waiting_state(&previous, id);
             self.project_task(&previous);
         }
         self.emit(
@@ -821,6 +838,11 @@ if no more work is needed, task_complete(task_id=\"{}\") can finish the parked c
         .ok_or_else(|| RpcError::not_found(format!("no task '{task}'")))?;
         self.clear_task_wakeups(agent, &task);
         self.project_task(agent);
+        let mut model = self.model();
+        let rt = model.rt(agent);
+        if status == AgentStatus::Waiting {
+            rt.parking_turn = rt.turn_active;
+        }
         Ok(Some(task))
     }
 
@@ -968,6 +990,7 @@ if no more work is needed, task_complete(task_id=\"{}\") can finish the parked c
         self.clear_task_wakeups(&author, &task.id);
         if was_current {
             self.model().rt(&author).self_status = None;
+            self.model().rt(&author).parking_turn = false;
         }
         match &reviewer {
             Some(reviewer) => {
@@ -1281,16 +1304,31 @@ with review_submit(task_id=\"{}\", approve=true|false).",
         let queued = !approve
             && author
                 .as_deref()
-                .is_some_and(|a| active_task(&self.model().tasks, a).is_some());
+                .is_some_and(|a| tasks::executing_task(&self.model().tasks, a).is_some());
         // The verdict, made to the task as it is when it is stored (a card
         // edit or a progress report meanwhile is kept), if it is still
         // awaiting review.
-        let verdict = |t: &mut Task| -> Result<(), RpcError> {
+        let verdict = |model: &super::Model, t: &mut Task| -> Result<(), RpcError> {
             if t.status != TaskStatus::Review {
                 return Err(RpcError::conflict(format!(
                     "task {task_id} is {}, not awaiting review",
                     t.status
                 )));
+            }
+            if t.assigned_agent != task.assigned_agent || t.reviewer != task.reviewer {
+                return Err(RpcError::conflict(
+                    "task ownership changed before review; read its card again",
+                ));
+            }
+            if !approve
+                && !queued
+                && t.assigned_agent
+                    .as_deref()
+                    .is_some_and(|agent| tasks::executing_task(&model.tasks, agent).is_some())
+            {
+                return Err(RpcError::conflict(
+                    "execution capacity changed before review; retry the verdict",
+                ));
             }
             if approve {
                 t.status = TaskStatus::Done;
@@ -1317,9 +1355,11 @@ with review_submit(task_id=\"{}\", approve=true|false).",
                     self.review_result(&task, &reviewer, author, approve, &comments, queued);
                 let mut refused = None;
                 let stored = self.recipients_of(&message).and_then(|(recipients, p2p)| {
-                    let apply =
-                        |t: &mut Task| verdict(t).inspect_err(|e| refused = Some(e.clone()));
-                    let told = self.try_update_task_telling(task_id, apply, message, recipients)?;
+                    let apply = |model: &super::Model, t: &mut Task| {
+                        verdict(model, t).inspect_err(|e| refused = Some(e.clone()))
+                    };
+                    let told =
+                        self.try_update_task_telling_checked(task_id, apply, message, recipients)?;
                     Ok(told.map(|(updated, outcome)| (updated, outcome, p2p)))
                 });
                 if let Some(e) = refused {
@@ -1341,16 +1381,8 @@ with review_submit(task_id=\"{}\", approve=true|false).",
                 }
             }
             None => {
-                let mut refused = None;
-                let saved = self.try_update_task(task_id, |t| {
-                    if let Err(e) = verdict(t) {
-                        refused = Some(e);
-                    }
-                });
+                let saved = self.try_update_task_checked(task_id, verdict);
                 drop(planning);
-                if let Some(e) = refused {
-                    return Err(e);
-                }
                 saved?.ok_or_else(|| RpcError::not_found("task vanished"))?
             }
         };
@@ -1378,11 +1410,16 @@ with review_submit(task_id=\"{}\", approve=true|false).",
         if let Some(author) = &author {
             if approve {
                 self.finish_task(&updated, author).await;
-                self.settle(author);
+                if tasks::executing_task(&self.model().tasks, author).is_none() {
+                    self.settle(author);
+                }
             } else if !queued {
+                self.model().rt(author).self_status = None;
+                self.model().rt(author).parking_turn = false;
+                self.project_task(author);
+                self.settle(author);
                 self.update_agent(author, |a| {
-                    a.task = Some(updated.title.clone());
-                    a.progress = None;
+                    a.activity = format!("changes requested on {}", updated.title);
                 });
             }
         }

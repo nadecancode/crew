@@ -605,6 +605,13 @@ answer is still missing, reporting Waiting again consumes that cue; another
 resume requires new news. Parked time does not use the task's timeout, and
 parking never completes a dependency or bypasses review approval.
 
+An answer delivered while the owner is at rest resumes its matching parked
+card in that delivery, without a second notice. Stopping an owner blocks its
+executing card, or its selected Waiting card if nothing executes; its other
+Waiting cards remain parked. Restart with a confirmed session requeues the
+card blocked by the stop and retains the other parked cards. Fresh or
+sessionless restart redispatches every open owned card to the new session.
+
 ### A board of cards
 
 The graph works like a kanban board, and work is referred to by id rather

@@ -139,6 +139,9 @@ pub(crate) struct AgentRuntimeState {
     /// the bus messages it contains.
     pub pending_prompt: Option<(String, Vec<String>)>,
     pub turn_active: bool,
+    /// The active turn parked its card and must yield before another Ready
+    /// card starts. A launch's optimistic turn flag is not this handoff.
+    pub parking_turn: bool,
     /// When its last turn ended, and when messages were last put into its
     /// session (0: not since the daemon started).
     pub turn_ended_at: i64,
@@ -478,9 +481,12 @@ impl Daemon {
     }
 
     pub(crate) fn save_local(&self, agent_id: &str) {
-        let local = self.model().local.get(agent_id).cloned();
-        if let Some(local) = local {
-            if let Ok(json) = serde_json::to_string(&local) {
+        // Serialize and store under the model lock, as task writes do. An
+        // older settings snapshot must not overwrite newer parked-message
+        // cues while another caller is storing the same metadata row.
+        let model = self.model();
+        if let Some(local) = model.local.get(agent_id) {
+            if let Ok(json) = serde_json::to_string(local) {
                 if let Err(e) = self.store.set_meta(&local_key(agent_id), &json) {
                     tracing::error!("persisting agent settings failed: {e:#}");
                 }
@@ -619,6 +625,7 @@ impl Daemon {
     /// to the task as it is now, all under the model lock, so a change of
     /// it made meanwhile by any writer is kept. `f` refusing (Err) changes
     /// nothing.
+    #[cfg(test)]
     pub(crate) fn try_update_task_telling(
         &self,
         id: &str,

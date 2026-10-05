@@ -375,6 +375,7 @@ impl Daemon {
         if let Err(e) = self.bus.mark_delivered(id, ids) {
             tracing::error!("marking messages delivered for {id}: {e}");
         }
+        self.resume_waiting_from_delivery(id, ids);
         let now = now_ms();
         let Some(agent) = self.agent(id) else { return };
         let interactive = agent.runtime != RuntimeKind::Shell;
@@ -402,15 +403,14 @@ impl Daemon {
                 }
                 a.last_activity_at = now;
             });
-            // Mid-card messages must never resume a different parked card.
-            // At rest the planner uses its durable cue and a resume notice.
+            // Mid-card messages never resume a different parked card.
             if crate::tasks::executing_task(&self.model().tasks, id).is_some() {
                 if let Err(e) = self.mirror_status_to_task(id, AgentStatus::Working, None) {
                     tracing::error!("{}", e.message);
                 }
             }
-            self.replan();
         }
+        self.replan();
         self.emit(
             NewEvent::new(
                 "bus",

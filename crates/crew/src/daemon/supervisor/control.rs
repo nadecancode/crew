@@ -24,6 +24,7 @@ impl Daemon {
             rt.expected_exit = rt.other_build || procs.is_alive(id);
             rt.ready = false;
             rt.turn_active = false;
+            rt.parking_turn = false;
             rt.pending_prompt = None;
         }
         self.kill_process(procs.as_ref(), id)

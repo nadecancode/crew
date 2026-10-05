@@ -97,6 +97,7 @@ impl Daemon {
             let mut model = self.model();
             let rt = model.rt(id);
             rt.turn_active = false;
+            rt.parking_turn = false;
             rt.idle_since = None;
             rt.limit_attempts
         };

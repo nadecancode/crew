@@ -118,7 +118,13 @@ pub fn plan(tasks: &[Task], agents: &[AgentView]) -> Vec<Action> {
         .collect();
     let takes_work: HashSet<&str> = agents
         .iter()
-        .filter(|a| a.runnable && !a.homeward && !a.turn_active)
+        .filter(|a| a.runnable && !a.homeward)
+        .filter(|a| {
+            !a.turn_active
+                || !tasks.iter().any(|t| {
+                    t.assigned_agent.as_deref() == Some(&a.id) && t.status == TaskStatus::Waiting
+                })
+        })
         .map(|a| a.id.as_str())
         .collect();
 
@@ -178,7 +184,7 @@ pub fn plan(tasks: &[Task], agents: &[AgentView]) -> Vec<Action> {
         _ => false,
     }) || agents
         .iter()
-        .any(|a| a.runnable && (a.active || a.turn_active || a.homeward));
+        .any(|a| a.runnable && (a.active || a.homeward));
     if !progressing {
         let mut stuck = Vec::new();
         let mut reasons = Vec::new();
@@ -481,10 +487,13 @@ mod tests {
         ];
         let mut views = agents(&["x"]);
         views[0].turn_active = true;
+        views[0].active = true;
         assert_eq!(plan(&cards, &views), vec![]);
         views[0].turn_active = false;
+        views[0].active = false;
         assert_eq!(plan(&cards, &views), vec![dispatch("next", "x")]);
         parked.status = TaskStatus::Blocked;
+        views[0].turn_active = true;
         let actions = plan(&[parked, cards[1].clone()], &views);
         assert!(!actions.iter().any(|a| matches!(a, Action::Dispatch { .. })));
         assert!(
