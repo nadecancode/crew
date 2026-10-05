@@ -8,7 +8,8 @@ This document replaces the visual/layout recommendations in [web-design.md §ui]
 
 ## Reference material
 
-- [Delivered neutral dashboard](web-revamp/neutral-signoff/index.html): current approved production captures and evidence.
+- [Current task presentation](../review/runtime-presentation/index.html): production captures for source `fnv1a64:f22f3cf5ad74d25f`; see the current verdict in §signoff.
+- [Neutral-palette sign-off](web-revamp/neutral-signoff/index.html): approved appearance evidence from the preceding production target, source `fnv1a64:50c88732a97c7d7b`.
 - [Original visual gallery](web-revamp/index.html): historical screenshots and proposed screens, grouped by surface.
 - [Light team reference](web-revamp/mockups/team-light-desktop.png), [dark team reference](web-revamp/mockups/team-dark-desktop.png), [narrow team reference](web-revamp/mockups/team-light-narrow.png).
 - [Attention state](web-revamp/mockups/attention-light-desktop.png), [task DAG](web-revamp/mockups/dag-dark-desktop.png), [700px panel replacement](web-revamp/mockups/replacement-light-narrow.png), [1024px split layout](web-revamp/mockups/inspector-light-compact.png).
@@ -473,11 +474,11 @@ For the neutral-theme correction, the local `ui-ux-pro-max` query `neutral dark 
 <a id="signoff"></a>
 ## §signoff — delivered dashboard
 
-### Current verdict: neutral dashboard approved
+### Neutral-palette sign-off: preceding production target
 
 **Visual sign-off: approved** for production bundle `064037442ab479f5bbbe921361dda492757bf253`, source `fnv1a64:50c88732a97c7d7b`, reviewed on 2026-10-05 from QA's integrated revision `6f851ae0`. This supersedes the earlier green dark-palette approval. The operator's corrected appearance is delivered: neutral charcoal/black canvas, panels, text, controls, and terminal; blue general actions; purposeful colour for state, runtime identity, and the labelled usage series.
 
-The [current delivered-screen gallery](web-revamp/neutral-signoff/index.html) retains eleven actual production captures: eight from the final QA gallery and three from my live checks. [Evidence](web-revamp/neutral-signoff/evidence.json) pins the source fingerprint, bundle, stylesheet, reproduction steps, contrast results, and accepted limits. The historical before image is explicitly labelled and is not counted among the eleven final-target captures.
+The [neutral-palette gallery](web-revamp/neutral-signoff/index.html) retains eleven actual production captures: eight from that target's final QA gallery and three from my live checks. [Evidence](web-revamp/neutral-signoff/evidence.json) pins the source fingerprint, bundle, stylesheet, reproduction steps, contrast results, and accepted limits. The historical before image is explicitly labelled and is not counted among the eleven final-target captures.
 
 The final strict QA gallery at `/tmp/crew-qa-neutral-final/index.html` covers 48 cases: 12 surfaces, both themes, desktop and 390px narrow. Its manifest names the same source and integrated revision, with zero failures. I sampled the four main views, selected Team List, terminal, transcript, Help, and light inspector from that final gallery. Dense fitted task graphs remain dependent on the existing Zoom and List controls; narrow windows with all status strips remain vertically scrollable. These are retained, previously accepted behaviours.
 
