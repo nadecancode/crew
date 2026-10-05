@@ -67,6 +67,12 @@ test("usage preserves explicit zero reports and unknown reports in separate rows
 
 test("quota age marks stale only after the freshness boundary", async ({ page, mock, openPage }) => {
   await page.clock.setFixedTime(SCENARIO_TIME);
+  // The store calibrates its epoch offset from performance time; freeze both
+  // clocks so this exact 1ms boundary is independent of page-load duration.
+  await page.addInitScript((time) => {
+    Object.defineProperty(performance, "timeOrigin", { configurable: true, value: time });
+    Object.defineProperty(performance, "now", { configurable: true, value: () => 0 });
+  }, SCENARIO_TIME);
   mock.state.session.quotas = [
     { runtime: "claude", window: "5h", percent_used: 25, updated_at: SCENARIO_TIME - STALE_MS, resets_at: null },
     { runtime: "claude", window: "week", percent_used: 60, updated_at: SCENARIO_TIME - STALE_MS - 1, resets_at: null },
@@ -78,6 +84,23 @@ test("quota age marks stale only after the freshness boundary", async ({ page, m
   await expect(windows.nth(0)).toContainText("Reported");
   await expect(windows.nth(1)).toHaveClass(/stale/);
   await expect(windows.nth(1)).toContainText("Stale · Reported");
+});
+
+test("reported total names coverage, counts zero reports, and distinguishes unknown total", async ({ page, mock, openPage }) => {
+  for (const a of mock.state.agents) a.usage = a.id === "claude-1" ? { input_tokens: 10, output_tokens: 20, cache_read_tokens: 30, cache_creation_tokens: 40, turns: 2 } : a.id === "claude-2" ? { input_tokens: 0, output_tokens: 0, cache_read_tokens: 0, cache_creation_tokens: 0, turns: 0 } : null;
+  await openPage(); await page.keyboard.press("v");
+  const total = page.locator(".usage-view > p").filter({ hasText: "Total reported tokens" });
+  await expect(total).toContainText("Total reported tokens");
+  await expect(total).toContainText("100");
+  await expect(page.locator(".usage-view")).toContainText(`2 of ${mock.state.agents.length} agents reporting`);
+  for (const a of [...mock.state.agents]) mock.push({ kind: "agent", data: { ...a, usage: null } });
+  await expect(total).toContainText("Not reported");
+  await expect(page.locator(".usage-view")).toContainText(`0 of ${mock.state.agents.length} agents reporting`);
+  const a = mock.state.agents.find((a) => a.id === "claude-2")!;
+  mock.push({ kind: "agent", data: { ...a, usage: { input_tokens: 0, output_tokens: 0, cache_read_tokens: 0, cache_creation_tokens: 0, turns: 0 } } });
+  await expect(total).not.toContainText("Not reported");
+  await expect(total).toContainText("0");
+  await expect(page.locator(".usage-view")).toContainText(`1 of ${mock.state.agents.length} agents reporting`);
 });
 
 test("one real context sample appears as a visible point without a fabricated interval", async ({ page, mock, openPage }) => {

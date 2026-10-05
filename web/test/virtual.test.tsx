@@ -64,17 +64,17 @@ test("it follows the tail at the bottom, and stays put when scrolled up", async 
   expect(rows()).toEqual(before);
 });
 
-function responsiveList() {
+function responsiveList(follow?: boolean, initial: string | null = "row-22") {
   const [items, setItems] = createSignal(Array.from({ length: 1000 }, (_, i) => ({ id: `row-${i}` })));
   const [rowHeight, setRowHeight] = createSignal(36);
-  const [chosen, setChosen] = createSignal<string | null>("row-22");
+  const [chosen, setChosen] = createSignal<string | null>(initial);
   const result = render(() => {
     const selected = createMemo(() => {
       const i = items().findIndex((item) => item.id === chosen());
       return i < 0 ? null : i;
     });
     return <VirtualList label="responsive rows" count={() => items().length} slice={(a, b) => items().slice(a, b)}
-      rowHeight={rowHeight()} key={(item) => item.id} selected={selected}
+      rowHeight={rowHeight()} key={(item) => item.id} selected={selected} follow={follow}
       onSelect={(i) => setChosen(items()[i].id)} render={(item) => <span class="cell" data-key={item.id}>{item.id}</span>} />;
   });
   const el = result.container.querySelector<HTMLDivElement>(".vlist")!;
@@ -130,4 +130,30 @@ test("same-batch row resize and ring eviction preserve the key and its fractiona
   await tick();
   expect(list.el.scrollTop).toBe(17 * 64 + 16);
   expect(list.selectedKey()).toBe("row-22");
+});
+
+test("follow=false starts at the top and appends leave its keyed reading position", async () => {
+  const list = responsiveList(false, null);
+  await tick();
+  expect(list.el.scrollTop).toBe(0);
+  expect(list.el.querySelector('[data-key="row-0"]')).not.toBeNull();
+  expect(list.el.querySelector('[data-key="row-999"]')).toBeNull();
+  list.scroll(20 * 36 + 9);
+  list.setItems([...list.items(), { id: "row-newest" }]);
+  await tick();
+  expect(list.el.scrollTop).toBe(20 * 36 + 9);
+  list.setItems(list.items().slice(3));
+  await tick();
+  expect(list.el.scrollTop).toBe(17 * 36 + 9);
+});
+
+test("follow=false restores an existing selection without jumping to the tail", async () => {
+  const list = responsiveList(false, "row-400");
+  await tick();
+  expect(list.selectedKey()).toBe("row-400");
+  expect(list.el.querySelector('[data-key="row-999"]')).toBeNull();
+  list.setItems([...list.items(), { id: "row-newest" }]);
+  await tick();
+  expect(list.selectedKey()).toBe("row-400");
+  expect(list.el.querySelector('[data-key="row-newest"]')).toBeNull();
 });
