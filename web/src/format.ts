@@ -95,20 +95,22 @@ export type WorkOn = { task: Task; done: boolean; elapsed: number | null };
 
 /** Executing work precedes parked cards and other started work (`App::work_of`). */
 export function workOf(tasks: readonly Task[], id: string, serverNow: number): WorkOn | null {
-  let current: Task | null = null, last: Task | null = null, currentRank = -1;
+  let current: Task | null = null, last: Task | null = null, currentRank = -1, currentAt = -Infinity;
   for (const t of tasks) {
     if (t.assigned_agent !== id) continue;
-    if (t.status === "done") {
+    const status = t.status, at = t.started_at;
+    if (status === "done") {
       if (!last || (t.completed_at ?? 0) > (last.completed_at ?? 0)) last = t;
-    } else if (t.status !== "failed") {
-      const rank = t.status === "working" || (t.status === "blocked" && t.started_at != null) ? 2 : t.status === "waiting" ? 1 : 0;
-      if ((rank || t.started_at != null) && (!current || rank > currentRank || (rank === currentRank && (t.started_at ?? -Infinity) > (current.started_at ?? -Infinity)))) {
+    } else if (status !== "failed") {
+      const rank = status === "working" || (status === "blocked" && at != null) ? 2 : status === "waiting" ? 1 : 0;
+      if ((rank || at != null) && (rank > currentRank || (rank === currentRank && (at ?? -Infinity) > currentAt))) {
         current = t;
         currentRank = rank;
+        currentAt = at ?? -Infinity;
       }
     }
   }
-  if (current) return { task: current, done: false, elapsed: current.started_at != null ? Math.max(0, serverNow - current.started_at) : null };
+  if (current) return { task: current, done: false, elapsed: currentAt === -Infinity ? null : Math.max(0, serverNow - currentAt) };
   return last ? { task: last, done: true, elapsed: last.completed_at != null ? Math.max(0, serverNow - last.completed_at) : null } : null;
 }
 
