@@ -223,7 +223,7 @@ test("P10, P11, P12, P15 against a real daemon: frames under real pushes, rows i
     expect(long.length, name).toBe(0);
   }
   const rows = await page.locator(".log-row").count();
-  const visible = await page.locator(".log-list").evaluate((el) => Math.ceil(el.clientHeight / 22));
+  const visible = await page.locator(".log-list").evaluate((el) => Math.ceil(el.clientHeight / (innerWidth < 768 ? 64 : 36)));
   out.p12_log_rows_in_dom = { rows, visible };
   expect(rows).toBeLessThanOrEqual(visible + 20 + 1);
   out.p15_heap_mb = await page.evaluate(() => {
