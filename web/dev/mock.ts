@@ -24,6 +24,8 @@ import type { AddressInfo, Socket } from "node:net";
 import { dirname, extname, join, resolve } from "node:path";
 import type { Duplex } from "node:stream";
 import { fileURLToPath } from "node:url";
+import { scenarioOptions, seedScenario } from "./scenarios.ts";
+import type { ScenarioName } from "./scenarios.ts";
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "../..");
 export const FIXTURES = join(ROOT, "crates/crew/tests/fixtures/web");
@@ -79,6 +81,12 @@ export type MockOptions = {
   /** The built bundle; `crates/crew/web-dist` by default. */
   dist?: string;
   fixture?: FixtureName;
+  /** Development scenario layered over the selected generated fixture. */
+  scenario?: ScenarioName;
+  /** Hold server time still for repeatable captures; scenarios default true. */
+  freezeTime?: boolean;
+  /** Override the fixture's server clock, without changing production clocks. */
+  serverTime?: number;
   /** Answer only to `<label>.localhost:<port>` (Host) and its origin (the
    * upgrade's Origin). False behind the Vite dev proxy, which presents
    * `localhost:5173`. */
@@ -263,8 +271,9 @@ export interface Mock {
 }
 
 export async function startMock(options: MockOptions = {}): Promise<Mock> {
-  const mock = new MockServer(options);
+  const mock = new MockServer(scenarioOptions(options));
   await mock.listen(options.port ?? 0);
+  if (options.scenario) seedScenario(mock, options.scenario);
   return mock;
 }
 
@@ -795,6 +804,7 @@ class MockServer implements Mock {
   #waiters: Waiter[] = [];
   #generations = 0;
   #serverTime: number;
+  #freezeTime: boolean;
   #startedAt = Date.now();
   #stopping = false;
   #stopped = false;
@@ -811,7 +821,8 @@ class MockServer implements Mock {
       if (o.joined !== false) this.#join(ws);
     });
     this.others = clone(options.others ?? []);
-    this.#serverTime = readJson(`${this.workspaces[0].fixture}.json`).server_time;
+    this.#serverTime = options.serverTime ?? readJson(`${this.workspaces[0].fixture}.json`).server_time;
+    this.#freezeTime = options.freezeTime ?? !!options.scenario;
   }
 
   /** The first workspace: what the controller's daemon methods act on. */
@@ -838,7 +849,7 @@ class MockServer implements Mock {
   }
 
   now(): number {
-    return this.#serverTime + (Date.now() - this.#startedAt);
+    return this.#serverTime + (this.#freezeTime ? 0 : Date.now() - this.#startedAt);
   }
 
   workspace(which: string | number = 0): Workspace {

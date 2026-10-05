@@ -23,6 +23,8 @@ import type { Mock, MockOptions } from "../dev/mock.ts";
 export { expect };
 export { NO_REPLY } from "../dev/mock.ts";
 export type { HttpRecord, Mock, MockCall, MockConn, MockOptions, Push, PushFrame } from "../dev/mock.ts";
+export { advanceScenario, PANEL_METHODS, READ_MODES, SCENARIO_NAMES, setPanelRead } from "../dev/scenarios.ts";
+export type { PanelMethod, ReadMode, ScenarioName } from "../dev/scenarios.ts";
 
 type Fixtures = {
   /** The test's mock: `test.use({ mockOptions: { fixture: "subagents" } })`. */

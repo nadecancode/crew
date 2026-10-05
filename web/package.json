@@ -5,6 +5,7 @@
   "scripts": {
     "dev": "vite",
     "mock": "node dev/serve.ts",
+    "gallery": "node dev/gallery.ts",
     "build": "tsc --noEmit && vite build && node scripts/stamp.ts",
     "test": "vitest run",
     "e2e": "playwright test --project=mock --project=perf"
