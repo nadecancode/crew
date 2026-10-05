@@ -1,0 +1,795 @@
+{
+  "format_version": 1,
+  "kind": "native_contract",
+  "contract_commit": "986dcb8ccfc8126d0d0568b9241167fcebe2e1ce",
+  "validation_scope": "N2A constructor/shape; planner/driver behavior requires real consumers",
+  "source_ref": "notes/native-architecture.md:707",
+  "cases": [
+    {
+      "id": "native-terminal-two-attach",
+      "intents": [
+        {
+          "kind": "attach",
+          "data": {
+            "scope": {
+              "endpoint_id": "local:profile-a",
+              "workspace_id": "946d4617aa702870",
+              "generation": 1,
+              "daemon_pid": 1,
+              "daemon_started_at_ms": 1234,
+              "attempt": 1
+            },
+            "agent": "claude-1",
+            "rows": 24,
+            "cols": 80
+          }
+        },
+        {
+          "kind": "attach",
+          "data": {
+            "scope": {
+              "endpoint_id": "local:profile-a",
+              "workspace_id": "946d4617aa702870",
+              "generation": 1,
+              "daemon_pid": 1,
+              "daemon_started_at_ms": 1234,
+              "attempt": 1
+            },
+            "agent": "claude-2",
+            "rows": 24,
+            "cols": 80
+          }
+        }
+      ],
+      "plans": [
+        {
+          "kind": "dispatch",
+          "data": {
+            "operation_id": 101
+          }
+        },
+        {
+          "kind": "dispatch",
+          "data": {
+            "operation_id": 102
+          }
+        }
+      ],
+      "effects": [
+        {
+          "kind": "request",
+          "data": {
+            "scope": {
+              "endpoint_id": "local:profile-a",
+              "workspace_id": "946d4617aa702870",
+              "generation": 1,
+              "daemon_pid": 1,
+              "daemon_started_at_ms": 1234,
+              "attempt": 1
+            },
+            "operation_id": 101,
+            "lane": {
+              "terminal": {
+                "attachment_id": 101
+              }
+            },
+            "command": {
+              "kind": "attach",
+              "params": {
+                "agent": "claude-1",
+                "rows": 24,
+                "cols": 80
+              }
+            }
+          }
+        },
+        {
+          "kind": "request",
+          "data": {
+            "scope": {
+              "endpoint_id": "local:profile-a",
+              "workspace_id": "946d4617aa702870",
+              "generation": 1,
+              "daemon_pid": 1,
+              "daemon_started_at_ms": 1234,
+              "attempt": 1
+            },
+            "operation_id": 102,
+            "lane": {
+              "terminal": {
+                "attachment_id": 102
+              }
+            },
+            "command": {
+              "kind": "attach",
+              "params": {
+                "agent": "claude-2",
+                "rows": 24,
+                "cols": 80
+              }
+            }
+          }
+        }
+      ],
+      "outcomes": [
+        {
+          "kind": "succeeded",
+          "data": {
+            "result": {
+              "kind": "attached",
+              "data": {
+                "agent": "claude-1"
+              }
+            }
+          }
+        },
+        {
+          "kind": "succeeded",
+          "data": {
+            "result": {
+              "kind": "attached",
+              "data": {
+                "agent": "claude-2"
+              }
+            }
+          }
+        }
+      ],
+      "expected_behavior": {
+        "pending_until_ack": true,
+        "live_attachment_ids": [
+          101,
+          102
+        ],
+        "route_key": "full_scope_and_attachment_id"
+      }
+    },
+    {
+      "id": "native-terminal-route-input",
+      "intents": [
+        {
+          "kind": "attach_input",
+          "data": {
+            "scope": {
+              "endpoint_id": "local:profile-a",
+              "workspace_id": "946d4617aa702870",
+              "generation": 1,
+              "daemon_pid": 1,
+              "daemon_started_at_ms": 1234,
+              "attempt": 1
+            },
+            "attachment_id": 101,
+            "data": [
+              65,
+              66,
+              67
+            ]
+          }
+        }
+      ],
+      "plans": [
+        {
+          "kind": "dispatch",
+          "data": {
+            "operation_id": 201
+          }
+        }
+      ],
+      "effects": [
+        {
+          "kind": "request",
+          "data": {
+            "scope": {
+              "endpoint_id": "local:profile-a",
+              "workspace_id": "946d4617aa702870",
+              "generation": 1,
+              "daemon_pid": 1,
+              "daemon_started_at_ms": 1234,
+              "attempt": 1
+            },
+            "operation_id": 201,
+            "lane": {
+              "terminal": {
+                "attachment_id": 101
+              }
+            },
+            "command": {
+              "kind": "attach_input",
+              "params": {
+                "data": "QUJD"
+              }
+            }
+          }
+        }
+      ],
+      "expected_behavior": {
+        "routed_attachment_id": 101,
+        "other_attachment_id": 102,
+        "other_attachment_input": 0,
+        "replay": false
+      }
+    },
+    {
+      "id": "native-terminal-route-resize",
+      "intents": [
+        {
+          "kind": "attach_resize",
+          "data": {
+            "scope": {
+              "endpoint_id": "local:profile-a",
+              "workspace_id": "946d4617aa702870",
+              "generation": 1,
+              "daemon_pid": 1,
+              "daemon_started_at_ms": 1234,
+              "attempt": 1
+            },
+            "attachment_id": 102,
+            "rows": 40,
+            "cols": 100
+          }
+        }
+      ],
+      "plans": [
+        {
+          "kind": "dispatch",
+          "data": {
+            "operation_id": 202
+          }
+        }
+      ],
+      "effects": [
+        {
+          "kind": "request",
+          "data": {
+            "scope": {
+              "endpoint_id": "local:profile-a",
+              "workspace_id": "946d4617aa702870",
+              "generation": 1,
+              "daemon_pid": 1,
+              "daemon_started_at_ms": 1234,
+              "attempt": 1
+            },
+            "operation_id": 202,
+            "lane": {
+              "terminal": {
+                "attachment_id": 102
+              }
+            },
+            "command": {
+              "kind": "attach_resize",
+              "params": {
+                "rows": 40,
+                "cols": 100
+              }
+            }
+          }
+        }
+      ],
+      "expected_behavior": {
+        "routed_attachment_id": 102,
+        "other_attachment_id": 101,
+        "other_attachment_resize": 0
+      }
+    },
+    {
+      "id": "native-terminal-close-one",
+      "intents": [
+        {
+          "kind": "detach",
+          "data": {
+            "scope": {
+              "endpoint_id": "local:profile-a",
+              "workspace_id": "946d4617aa702870",
+              "generation": 1,
+              "daemon_pid": 1,
+              "daemon_started_at_ms": 1234,
+              "attempt": 1
+            },
+            "attachment_id": 101
+          }
+        }
+      ],
+      "plans": [
+        {
+          "kind": "dispatch",
+          "data": {
+            "operation_id": 203
+          }
+        }
+      ],
+      "effects": [
+        {
+          "kind": "close_attachment",
+          "data": {
+            "scope": {
+              "endpoint_id": "local:profile-a",
+              "workspace_id": "946d4617aa702870",
+              "generation": 1,
+              "daemon_pid": 1,
+              "daemon_started_at_ms": 1234,
+              "attempt": 1
+            },
+            "operation_id": 203,
+            "attachment_id": 101
+          }
+        }
+      ],
+      "outcomes": [
+        {
+          "kind": "closed_locally",
+          "data": {
+            "attachment_id": 101
+          }
+        }
+      ],
+      "inputs": [
+        {
+          "kind": "attachment_ended",
+          "data": {
+            "scope": {
+              "endpoint_id": "local:profile-a",
+              "workspace_id": "946d4617aa702870",
+              "generation": 1,
+              "daemon_pid": 1,
+              "daemon_started_at_ms": 1234,
+              "attempt": 1
+            },
+            "attachment_id": 101,
+            "reason": {
+              "kind": "detach"
+            }
+          }
+        }
+      ],
+      "notices": [
+        {
+          "scope": {
+            "endpoint_id": "local:profile-a",
+            "workspace_id": "946d4617aa702870",
+            "generation": 1,
+            "daemon_pid": 1,
+            "daemon_started_at_ms": 1234,
+            "attempt": 1
+          },
+          "operation_id": 203,
+          "kind": "closed_locally",
+          "reason": null
+        }
+      ],
+      "chunks": [
+        {
+          "scope": {
+            "endpoint_id": "local:profile-a",
+            "workspace_id": "946d4617aa702870",
+            "generation": 1,
+            "daemon_pid": 1,
+            "daemon_started_at_ms": 1234,
+            "attempt": 1
+          },
+          "attachment_id": 101,
+          "data": [],
+          "ended": {
+            "kind": "detach"
+          }
+        }
+      ],
+      "expected_behavior": {
+        "live_attachment_ids": [
+          102
+        ],
+        "close_outcomes": 1,
+        "end_notifications": 1,
+        "wire_requests": 0,
+        "daemon_acknowledgement": false
+      }
+    },
+    {
+      "id": "native-terminal-stale-id",
+      "intents": [
+        {
+          "kind": "attach_input",
+          "data": {
+            "scope": {
+              "endpoint_id": "local:profile-a",
+              "workspace_id": "946d4617aa702870",
+              "generation": 1,
+              "daemon_pid": 1,
+              "daemon_started_at_ms": 1234,
+              "attempt": 1
+            },
+            "attachment_id": 99,
+            "data": [
+              65
+            ]
+          }
+        },
+        {
+          "kind": "attach_resize",
+          "data": {
+            "scope": {
+              "endpoint_id": "local:profile-a",
+              "workspace_id": "946d4617aa702870",
+              "generation": 1,
+              "daemon_pid": 1,
+              "daemon_started_at_ms": 1234,
+              "attempt": 1
+            },
+            "attachment_id": 99,
+            "rows": 24,
+            "cols": 80
+          }
+        },
+        {
+          "kind": "detach",
+          "data": {
+            "scope": {
+              "endpoint_id": "local:profile-a",
+              "workspace_id": "946d4617aa702870",
+              "generation": 1,
+              "daemon_pid": 1,
+              "daemon_started_at_ms": 1234,
+              "attempt": 1
+            },
+            "attachment_id": 99
+          }
+        }
+      ],
+      "plans": [
+        {
+          "kind": "unavailable",
+          "data": {
+            "reason": {
+              "code": "stale_attachment",
+              "message": "Attachment is not live in this scope"
+            }
+          }
+        },
+        {
+          "kind": "unavailable",
+          "data": {
+            "reason": {
+              "code": "stale_attachment",
+              "message": "Attachment is not live in this scope"
+            }
+          }
+        },
+        {
+          "kind": "unavailable",
+          "data": {
+            "reason": {
+              "code": "stale_attachment",
+              "message": "Attachment is not live in this scope"
+            }
+          }
+        }
+      ],
+      "effects": [],
+      "expected_behavior": {
+        "wire_requests": 0,
+        "close_outcomes": 0
+      }
+    },
+    {
+      "id": "native-terminal-unacked-attach",
+      "intents": [
+        {
+          "kind": "attach",
+          "data": {
+            "scope": {
+              "endpoint_id": "local:profile-a",
+              "workspace_id": "946d4617aa702870",
+              "generation": 1,
+              "daemon_pid": 1,
+              "daemon_started_at_ms": 1234,
+              "attempt": 1
+            },
+            "agent": "claude-1",
+            "rows": 24,
+            "cols": 80
+          }
+        },
+        {
+          "kind": "attach_input",
+          "data": {
+            "scope": {
+              "endpoint_id": "local:profile-a",
+              "workspace_id": "946d4617aa702870",
+              "generation": 1,
+              "daemon_pid": 1,
+              "daemon_started_at_ms": 1234,
+              "attempt": 1
+            },
+            "attachment_id": 101,
+            "data": [
+              65
+            ]
+          }
+        }
+      ],
+      "effects": [
+        {
+          "kind": "request",
+          "data": {
+            "scope": {
+              "endpoint_id": "local:profile-a",
+              "workspace_id": "946d4617aa702870",
+              "generation": 1,
+              "daemon_pid": 1,
+              "daemon_started_at_ms": 1234,
+              "attempt": 1
+            },
+            "operation_id": 101,
+            "lane": {
+              "terminal": {
+                "attachment_id": 101
+              }
+            },
+            "command": {
+              "kind": "attach",
+              "params": {
+                "agent": "claude-1",
+                "rows": 24,
+                "cols": 80
+              }
+            }
+          }
+        }
+      ],
+      "outcomes": [
+        {
+          "kind": "rejected",
+          "data": {
+            "code": "forbidden",
+            "message": "Terminal grant required"
+          }
+        },
+        {
+          "kind": "not_sent",
+          "data": {
+            "reason": {
+              "code": "closed",
+              "message": "connection closed"
+            }
+          }
+        },
+        {
+          "kind": "canceled"
+        },
+        {
+          "kind": "outcome_unknown",
+          "data": {
+            "reason": {
+              "code": "closed",
+              "message": "connection closed"
+            }
+          }
+        }
+      ],
+      "expected_behavior": {
+        "alternative_outcomes": true,
+        "input_unavailable_before_ack": true,
+        "provisional_retired_for": [
+          "rejected",
+          "not_sent",
+          "canceled",
+          "outcome_unknown"
+        ],
+        "replay": false
+      }
+    },
+    {
+      "id": "native-terminal-retire-scope",
+      "inputs": [
+        {
+          "kind": "unbind",
+          "data": {
+            "scope": {
+              "endpoint_id": "local:profile-a",
+              "workspace_id": "946d4617aa702870",
+              "generation": 1,
+              "daemon_pid": 1,
+              "daemon_started_at_ms": 1234,
+              "attempt": 1
+            },
+            "reason": {
+              "code": "retired",
+              "message": "Connection attempt retired"
+            }
+          }
+        },
+        {
+          "kind": "attachment_ended",
+          "data": {
+            "scope": {
+              "endpoint_id": "local:profile-a",
+              "workspace_id": "946d4617aa702870",
+              "generation": 1,
+              "daemon_pid": 1,
+              "daemon_started_at_ms": 1234,
+              "attempt": 1
+            },
+            "attachment_id": 101,
+            "reason": {
+              "kind": "disconnect"
+            }
+          }
+        }
+      ],
+      "intents": [
+        {
+          "kind": "attach_input",
+          "data": {
+            "scope": {
+              "endpoint_id": "local:profile-a",
+              "workspace_id": "946d4617aa702870",
+              "generation": 1,
+              "daemon_pid": 1,
+              "daemon_started_at_ms": 1234,
+              "attempt": 2
+            },
+            "attachment_id": 101,
+            "data": [
+              65
+            ]
+          }
+        }
+      ],
+      "plans": [
+        {
+          "kind": "unavailable",
+          "data": {
+            "reason": {
+              "code": "stale_attachment",
+              "message": "Attachment is not live in this scope"
+            }
+          }
+        }
+      ],
+      "effects": [],
+      "expected_behavior": {
+        "old_attempt": 1,
+        "new_attempt": 2,
+        "old_attachment_ids": [
+          101,
+          102
+        ],
+        "wire_requests": 0,
+        "old_scope_retired": true
+      }
+    },
+    {
+      "id": "native-terminal-duplicate-close",
+      "intents": [
+        {
+          "kind": "detach",
+          "data": {
+            "scope": {
+              "endpoint_id": "local:profile-a",
+              "workspace_id": "946d4617aa702870",
+              "generation": 1,
+              "daemon_pid": 1,
+              "daemon_started_at_ms": 1234,
+              "attempt": 1
+            },
+            "attachment_id": 101
+          }
+        },
+        {
+          "kind": "detach",
+          "data": {
+            "scope": {
+              "endpoint_id": "local:profile-a",
+              "workspace_id": "946d4617aa702870",
+              "generation": 1,
+              "daemon_pid": 1,
+              "daemon_started_at_ms": 1234,
+              "attempt": 1
+            },
+            "attachment_id": 101
+          }
+        }
+      ],
+      "plans": [
+        {
+          "kind": "dispatch",
+          "data": {
+            "operation_id": 203
+          }
+        },
+        {
+          "kind": "unavailable",
+          "data": {
+            "reason": {
+              "code": "stale_attachment",
+              "message": "Attachment is not live in this scope"
+            }
+          }
+        }
+      ],
+      "effects": [
+        {
+          "kind": "close_attachment",
+          "data": {
+            "scope": {
+              "endpoint_id": "local:profile-a",
+              "workspace_id": "946d4617aa702870",
+              "generation": 1,
+              "daemon_pid": 1,
+              "daemon_started_at_ms": 1234,
+              "attempt": 1
+            },
+            "operation_id": 203,
+            "attachment_id": 101
+          }
+        },
+        {
+          "kind": "close_attachment",
+          "data": {
+            "scope": {
+              "endpoint_id": "local:profile-a",
+              "workspace_id": "946d4617aa702870",
+              "generation": 1,
+              "daemon_pid": 1,
+              "daemon_started_at_ms": 1234,
+              "attempt": 1
+            },
+            "operation_id": 203,
+            "attachment_id": 101
+          }
+        }
+      ],
+      "outcomes": [
+        {
+          "kind": "closed_locally",
+          "data": {
+            "attachment_id": 101
+          }
+        }
+      ],
+      "inputs": [
+        {
+          "kind": "attachment_ended",
+          "data": {
+            "scope": {
+              "endpoint_id": "local:profile-a",
+              "workspace_id": "946d4617aa702870",
+              "generation": 1,
+              "daemon_pid": 1,
+              "daemon_started_at_ms": 1234,
+              "attempt": 1
+            },
+            "attachment_id": 101,
+            "reason": {
+              "kind": "detach"
+            }
+          }
+        },
+        {
+          "kind": "attachment_ended",
+          "data": {
+            "scope": {
+              "endpoint_id": "local:profile-a",
+              "workspace_id": "946d4617aa702870",
+              "generation": 1,
+              "daemon_pid": 1,
+              "daemon_started_at_ms": 1234,
+              "attempt": 1
+            },
+            "attachment_id": 101,
+            "reason": {
+              "kind": "detach"
+            }
+          }
+        }
+      ],
+      "expected_behavior": {
+        "duplicate_effect_delivery": true,
+        "close_outcomes": 1,
+        "end_notifications": 1,
+        "second_intent_unavailable": true,
+        "wire_requests": 0,
+        "other_attachment_id": 102
+      }
+    }
+  ]
+}

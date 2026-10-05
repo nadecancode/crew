@@ -1,4 +1,12 @@
-//! Portable protocol 6 records shared by Crew clients and the daemon.
+//! Wire protocol: newline-delimited JSON over the daemon's Unix socket.
+//!
+//! A client sends `Request` lines (`{"id":1,"method":"send","params":{..}}`)
+//! and receives `ServerFrame` lines: either the response to a request
+//! (`{"id":1,"result":..}` / `{"id":1,"error":..}`) or, after `subscribe`,
+//! unsolicited pushes (`{"push":{..}}`).
+//!
+//! The same calls back the MCP tools, `crew ctl` and the dashboard, so adding
+//! another front end never needs a protocol change.
 //!
 //! Host configuration-bearing calls and their request envelope remain in
 //! `crew-core`; its rpc module reexports these unchanged wire definitions.

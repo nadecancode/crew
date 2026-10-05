@@ -70,6 +70,8 @@ limits; `agents: []` means all eligible limited agents, and `restart: true`
 restarts their processes while resuming conversations. `agent_restart_fresh`
 discards the old conversation. A `send` with `type: task` is a message, not task
 creation; current task details offer read/navigation/copy controls.
+For agents, `done` is a live completion state; only `failed` and `stopped` are
+terminal process states.
 
 Message bodies retain whitespace and are limited by UTF-8 bytes. Answers are
 trimmed by the daemon. The source's six options/200 characters constrain
@@ -142,6 +144,15 @@ bun fixtures/native/actions/check.ts --write-wire
 Daemon and dialog expectations are source-grounded test vectors. This local
 checker does not claim end-to-end action, native shell or Apple verification;
 those belong to implementation conformance and platform acceptance suites.
+
+`native/terminal-routing.json` is separately tagged to the approved native
+terminal contract at `986dcb8c`. Its eight cases cover two attachments, scoped
+input/resize, local close, stale IDs, unacknowledged Attach, scope retirement and
+duplicate close delivery. `crew-client/tests/terminal_schema.rs` validates real
+record construction/serialization, including `ClosedLocally` and
+`AttachmentEnded`; planner and driver consumers must execute those behavior
+cases before their own acceptance. These native rules do not modify the baseline
+web cases or the existing 64 request-byte goldens.
 
 Baseline verification on Linux, 2026-10-05, using the NixOS command above:
 

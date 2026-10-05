@@ -214,6 +214,11 @@ pub enum ClientInput {
         operation_id: OperationId,
         outcome: OperationOutcome,
     },
+    AttachmentEnded {
+        scope: ClientScope,
+        attachment_id: AttachmentId,
+        reason: TerminalEnd,
+    },
     Wake {
         timer_id: TimerId,
         monotonic_ms: u64,
@@ -759,7 +764,6 @@ pub enum ActionPlan {
     },
     Dispatch {
         operation_id: OperationId,
-        command: Command,
     },
 }
 
@@ -800,6 +804,7 @@ pub enum OperationOutcome {
     NotSent { reason: ClientReason },
     Canceled,
     OutcomeUnknown { reason: ClientReason },
+    ClosedLocally { attachment_id: AttachmentId },
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -808,7 +813,7 @@ pub enum RequestLane {
     State,
     Read,
     Action,
-    Terminal,
+    Terminal { attachment_id: AttachmentId },
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -833,6 +838,11 @@ pub enum ClientEffect {
     Notice {
         code: String,
         entity: Option<EntityKey>,
+    },
+    CloseAttachment {
+        scope: ClientScope,
+        operation_id: OperationId,
+        attachment_id: AttachmentId,
     },
 }
 
@@ -928,6 +938,7 @@ pub enum OperationOutcomeKind {
     NotSent,
     Canceled,
     Unknown,
+    ClosedLocally,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
