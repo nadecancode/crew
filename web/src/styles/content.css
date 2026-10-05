@@ -6,7 +6,7 @@
 .vrow { overflow: hidden; white-space: nowrap; }
 .vrow:hover { background: var(--surface-raised); }
 .vrow.selected { background: var(--action-surface); }
-.vrow.selected :is(.bus-row, .log-row) { box-shadow: inset 3px 0 var(--action); }
+.vrow.selected > * { box-shadow: inset 3px 0 var(--action); }
 .bus .panel-head { flex-wrap: wrap; }
 .bus .panel-title { font-family: var(--ui); }
 .bus-scope, .fetch-state { padding: 8px 16px; font-size: 12px; border-bottom: 1px solid var(--line); overflow-wrap: anywhere; }
