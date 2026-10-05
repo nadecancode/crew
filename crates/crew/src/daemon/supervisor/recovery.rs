@@ -2,7 +2,7 @@
 
 use std::sync::Arc;
 
-use crew_core::{AgentStatus, TaskStatus};
+use crew_core::{Agent, AgentStatus, TaskStatus};
 
 use crate::daemon::Daemon;
 use crate::persistence::NewEvent;
@@ -42,19 +42,21 @@ impl Daemon {
             }
         };
         *self.procs.write().unwrap_or_else(|e| e.into_inner()) = Some(procs.clone());
-        self.recover_agents(procs).await;
-        true
+        self.recover_agents(procs).await
     }
 
     /// Re-adopt each agent still running that was launched with this
-    /// daemon's copy of crew; restart the others that are needed.
-    pub(crate) async fn recover_agents(&self, procs: Arc<dyn ProcessManager>) {
+    /// daemon's copy of crew; restart the others that are needed. Returns
+    /// whether every agent was decided about: not when one of another build
+    /// could not be stopped and runs on.
+    pub(crate) async fn recover_agents(&self, procs: Arc<dyn ProcessManager>) -> bool {
         let (agents, task_count) = {
             let model = self.model();
             (model.agents.clone(), model.tasks.len())
         };
         let mut adopted = 0;
         let mut restarted = 0;
+        let mut held = 0;
         for agent in &agents {
             if agent.status.is_terminal() {
                 continue;
@@ -65,7 +67,7 @@ impl Daemon {
                     .local
                     .get(&agent.id)
                     .and_then(|l| l.binary.clone());
-                if launched_with.as_deref() == self.binary.name() {
+                if self.binary.launched_this(launched_with.as_deref()) {
                     adopted += 1;
                     self.model().rt(&agent.id).ready = true;
                     self.request_delivery(&agent.id);
@@ -89,7 +91,11 @@ impl Daemon {
                 );
                 self.model().rt(&agent.id).expected_exit = true;
                 if let Err(e) = procs.kill(&agent.id).await {
-                    tracing::warn!("stopping {}: {e:#}", agent.id);
+                    // It may still run, with the copy it was launched with:
+                    // it is left as it is until a stop of it works.
+                    held += 1;
+                    self.hold_other_build(&agent.id, &e);
+                    continue;
                 }
                 // An exit reported for the old process now is not this agent's.
                 self.update_agent(&agent.id, |a| {
@@ -98,56 +104,161 @@ impl Daemon {
                 });
             }
             // The process did not outlive the previous daemon.
-            let needed = {
-                let model = self.model();
-                // Its own work, or a review it still owes.
-                let open = model.tasks.iter().any(|t| {
-                    (t.assigned_agent.as_deref() == Some(agent.id.as_str())
-                        && !t.status.is_terminal())
-                        || (t.status == TaskStatus::Review
-                            && t.reviewer.as_deref() == Some(agent.id.as_str()))
-                });
-                open || (agent.orchestrator && model.session.summary.is_none())
-            } || super::super::delivery::wakes(
-                agent,
-                &self.bus.undelivered(&agent.id).unwrap_or_default(),
-                true,
-            );
-            if needed {
+            if self.resume_or_stop(agent).await {
                 restarted += 1;
-                self.requeue_if_sessionless(&agent.id).await;
-                self.update_agent(&agent.id, |a| {
-                    a.status = AgentStatus::Spawning;
-                    a.pid = None;
-                    a.activity = "restarting after a daemon restart".into();
-                });
-                self.spawn_in_background(
-                    &agent.id,
-                    true,
-                    Some(
-                        "[crew] The crew daemon was restarted and your session was resumed. \
-Continue your current task where you left off, and call agent_inbox to check for messages you \
-may have missed."
-                            .to_string(),
-                    ),
-                );
-            } else {
-                self.update_agent(&agent.id, |a| {
-                    if a.status != AgentStatus::Done {
-                        a.status = AgentStatus::Stopped;
-                    }
-                    a.pid = None;
-                });
             }
         }
+        if held > 0 {
+            self.binary.defer_sweep();
+        }
+        let unstopped = if held > 0 {
+            format!(", {held} of another build could not be stopped")
+        } else {
+            String::new()
+        };
         self.emit(NewEvent::new(
             "daemon",
             "daemon.recovered",
             format!(
-                "recovered {} agents and {task_count} tasks from the database ({adopted} still running, {restarted} restarted)",
+                "recovered {} agents and {task_count} tasks from the database ({adopted} still running, {restarted} restarted{unstopped})",
                 agents.len()
             ),
         ));
         self.replan();
+        held == 0
+    }
+
+    /// Agent `id`'s process of another build could not be stopped: its
+    /// record (pid, backend reference) stays, and nothing restarts it until
+    /// a stop of it works (stop_other_builds, or an operator's stop).
+    fn hold_other_build(&self, id: &str, error: &anyhow::Error) {
+        self.model().rt(id).other_build = true;
+        self.update_agent(id, |a| {
+            a.activity = "runs another build of crew, which could not be stopped".into();
+        });
+        self.emit(
+            NewEvent::new(
+                "daemon",
+                "agent.stop_failed",
+                format!(
+                    "{id} could not be stopped ({error:#}): it is left running another build of \
+crew, and restarted once a stop of it works"
+                ),
+            )
+            .agent(id)
+            .warn(),
+        );
+    }
+
+    /// An agent whose process did not outlive the previous daemon, or was
+    /// stopped for running another build: restarted if it is needed,
+    /// stopped otherwise. Returns whether it was restarted.
+    async fn resume_or_stop(&self, agent: &Agent) -> bool {
+        let needed = {
+            let model = self.model();
+            // Its own work, or a review it still owes.
+            let open = model.tasks.iter().any(|t| {
+                (t.assigned_agent.as_deref() == Some(agent.id.as_str()) && !t.status.is_terminal())
+                    || (t.status == TaskStatus::Review
+                        && t.reviewer.as_deref() == Some(agent.id.as_str()))
+            });
+            open || (agent.orchestrator && model.session.summary.is_none())
+        } || super::super::delivery::wakes(
+            agent,
+            &self.bus.undelivered(&agent.id).unwrap_or_default(),
+            true,
+        );
+        if !needed {
+            self.update_agent(&agent.id, |a| {
+                if a.status != AgentStatus::Done {
+                    a.status = AgentStatus::Stopped;
+                }
+                a.pid = None;
+            });
+            return false;
+        }
+        self.requeue_if_sessionless(&agent.id).await;
+        self.update_agent(&agent.id, |a| {
+            a.status = AgentStatus::Spawning;
+            a.pid = None;
+            a.activity = "restarting after a daemon restart".into();
+        });
+        self.spawn_in_background(
+            &agent.id,
+            true,
+            Some(
+                "[crew] The crew daemon was restarted and your session was resumed. Continue your \
+current task where you left off, and call agent_inbox to check for messages you may have missed."
+                    .to_string(),
+            ),
+        );
+        true
+    }
+
+    /// The agents recovery left running another build's copy: each that
+    /// can be stopped now is, and goes on as an agent that did not survive
+    /// the previous daemon. What a backend reports of such a process (an
+    /// exit, a lost connection) is not taken for its end: a stop that
+    /// worked is. Returns whether none is left.
+    pub(crate) async fn stop_other_builds(&self) -> bool {
+        let held: Vec<String> = {
+            let model = self.model();
+            model
+                .rt
+                .iter()
+                .filter(|(_, rt)| rt.other_build)
+                .map(|(id, _)| id.clone())
+                .collect()
+        };
+        if held.is_empty() {
+            return true;
+        }
+        let Ok(procs) = self.procs() else {
+            return false;
+        };
+        for id in held {
+            let since = self.stops(&id);
+            // Taken while the stop runs: an operator's stop beside it does
+            // not count on it, nor this one on theirs.
+            let taken = std::mem::take(&mut self.model().rt(&id).other_build);
+            if !taken {
+                continue;
+            }
+            if let Err(e) = procs.kill(&id).await {
+                tracing::debug!("stopping {id}, of another build, again: {e:#}");
+                self.model().rt(&id).other_build = true;
+                continue;
+            }
+            // An exit reported for the old process now is not this agent's.
+            self.update_agent(&id, |a| {
+                a.pid = None;
+                a.backend_ref = None;
+            });
+            // A stop or restart asked for meanwhile takes it from here.
+            if self.stops(&id) != since {
+                continue;
+            }
+            if let Some(agent) = self.agent(&id) {
+                self.resume_or_stop(&agent).await;
+                self.replan();
+            }
+        }
+        self.model().rt.values().all(|rt| !rt.other_build)
+    }
+
+    /// Stop agent `id`'s process for an operator's stop or restart, or a
+    /// retirement. A process recovery left running another build's copy is
+    /// no longer held once it is stopped, and still is if it could not be.
+    pub(crate) async fn kill_process(
+        &self,
+        procs: &dyn ProcessManager,
+        id: &str,
+    ) -> anyhow::Result<()> {
+        let held = std::mem::take(&mut self.model().rt(id).other_build);
+        let stopped = procs.kill(id).await;
+        if held && stopped.is_err() {
+            self.model().rt(id).other_build = true;
+        }
+        stopped
     }
 }

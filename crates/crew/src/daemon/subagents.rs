@@ -225,7 +225,7 @@ to finish",
                 return;
             }
             daemon.model().rt(&id).expected_exit = true;
-            if procs.kill(&id).await.is_ok() {
+            if daemon.kill_process(procs.as_ref(), &id).await.is_ok() {
                 daemon.update_agent(&id, |a| {
                     a.pid = None;
                     a.activity = "retired".into();

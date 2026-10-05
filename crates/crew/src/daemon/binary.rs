@@ -13,17 +13,20 @@
 //! The copy is read from the running inode (`/proc/self/exe`), whatever has
 //! become of its path, and is named by build: `crew-<id>`, where `<id>` is
 //! 16 hex digits of a hash of that inode's device, number, size and
-//! modification time, so the same file run again finds its copy there.
+//! modification time, so the same file run again finds its copy there. The
+//! name only says which build a copy was made for: one found there is used
+//! only if it holds the running binary's bytes, and is made again if not.
 //! Copies outlive the daemon, as agents on herdr do, which hold the path
 //! they were launched with. An agent launched with another copy is not
 //! adopted (supervisor/recovery.rs), and once recovery has decided about
-//! every agent, the other copies are deleted.
+//! every agent, the other copies are deleted: at once, or, when an agent of
+//! another build could not be stopped, once it has been.
 
 use std::ffi::CString;
 use std::fs::{self, File};
 use std::io;
 use std::os::unix::ffi::OsStrExt;
-use std::os::unix::fs::{MetadataExt, OpenOptionsExt, PermissionsExt};
+use std::os::unix::fs::{FileExt, MetadataExt, OpenOptionsExt, PermissionsExt};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Mutex;
@@ -44,6 +47,9 @@ pub(crate) struct Binary {
     mode: Mode,
     /// The copy could not be made again; said once, until it can.
     failing: AtomicBool,
+    /// Recovery left an agent running another build's copy, which it could
+    /// not stop: the other copies are deleted once none is left.
+    sweep_waits: AtomicBool,
 }
 
 enum Mode {
@@ -66,13 +72,16 @@ struct Pin {
 }
 
 /// What a file was when it was looked at: a file replaced, or written in
-/// place, is another.
+/// place, is another. Its change time counts as well, which anything done
+/// to the file moves and nobody can set back: a file written in place and
+/// given its old modification time again is still another.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 struct Made {
     dev: u64,
     ino: u64,
     size: u64,
     mtime_ns: i128,
+    ctime_ns: i128,
 }
 
 impl Made {
@@ -82,6 +91,7 @@ impl Made {
             ino: meta.ino(),
             size: meta.size(),
             mtime_ns: i128::from(meta.mtime()) * 1_000_000_000 + i128::from(meta.mtime_nsec()),
+            ctime_ns: i128::from(meta.ctime()) * 1_000_000_000 + i128::from(meta.ctime_nsec()),
         }
     }
 }
@@ -93,6 +103,7 @@ impl Binary {
             path,
             mode: Mode::Given,
             failing: AtomicBool::new(false),
+            sweep_waits: AtomicBool::new(false),
         }
     }
 
@@ -118,6 +129,7 @@ impl Binary {
             path,
             mode,
             failing: AtomicBool::new(false),
+            sweep_waits: AtomicBool::new(false),
         }
     }
 
@@ -134,6 +146,26 @@ impl Binary {
             Mode::Pinned(pin) => Some(&pin.name),
             Mode::Given | Mode::Unpinned(_) => None,
         }
+    }
+
+    /// Whether an agent launched with `launched_with` (the copy's name
+    /// recorded for it) runs the build this daemon runs. A daemon that
+    /// could not keep a copy cannot tell what anything runs: an agent
+    /// recorded without a name was launched with whatever file was at some
+    /// path then.
+    pub(crate) fn launched_this(&self, launched_with: Option<&str>) -> bool {
+        match &self.mode {
+            Mode::Pinned(pin) => launched_with == Some(pin.name.as_str()),
+            // An in-process daemon (a test) has only the path it was given.
+            Mode::Given => launched_with.is_none(),
+            Mode::Unpinned(_) => false,
+        }
+    }
+
+    /// Recovery left an agent running another build's copy: the sweep
+    /// waits until none is left (Daemon::binary_housekeeping).
+    pub(crate) fn defer_sweep(&self) {
+        self.sweep_waits.store(true, Ordering::SeqCst);
     }
 
     /// The copy as it was made, which a sandbox binds and nothing else.
@@ -162,7 +194,7 @@ will break its agents' tools",
     }
 
     /// Whether the copy handed out is still the one made: there, a regular
-    /// file of this user's that nobody else can write, as it was made. If
+    /// file of this user's, read-and-run for them alone, as it was made. If
     /// not, it is made again from the running binary under the same name,
     /// and what had become of it is returned. Blocking.
     pub(crate) fn check(&self) -> Result<Option<String>, String> {
@@ -240,14 +272,62 @@ fn keep(dir: &Path, source: &Path) -> Result<(String, Made), String> {
     let name = format!("crew-{}", build_id(&running));
     crew_core::paths::ensure_private_dir(dir).map_err(|e| format!("{e:#}"))?;
     runnable(dir)?;
-    if let Ok(meta) = fs::symlink_metadata(dir.join(&name)) {
-        if as_made(&meta, running.size()) {
-            return Ok((name, Made::of(&meta)));
-        }
+    if let Some(made) = kept(&dir.join(&name), &file, running.size()) {
+        return Ok((name, made));
     }
     let made = copy(&mut file, dir, &name)
         .map_err(|e| format!("copying it into {}: {e}", dir.display()))?;
     Ok((name, made))
+}
+
+/// The copy an earlier daemon of this build kept at `path`, if that is
+/// what is there: a file as `copy` makes them, holding the bytes of
+/// `running`, `size` long. Its name says which build it was made for, not
+/// what is in it, so it is compared with the running binary. That reads
+/// both (from the page cache, as a rule), which costs less than hashing
+/// them and much less than a copy synced to disk.
+fn kept(path: &Path, running: &File, size: u64) -> Option<Made> {
+    // Not through a link, and without waiting on a FIFO.
+    let found = fs::OpenOptions::new()
+        .read(true)
+        .custom_flags(libc::O_NOFOLLOW | libc::O_NONBLOCK)
+        .open(path)
+        .ok()?;
+    let meta = found.metadata().ok()?;
+    let same = as_made(&meta, size) && same_bytes(&found, running).ok()?;
+    same.then(|| Made::of(&meta))
+}
+
+/// Whether two files hold the same bytes, compared a chunk at a time.
+fn same_bytes(a: &File, b: &File) -> io::Result<bool> {
+    const CHUNK: usize = 1 << 20;
+    let (mut x, mut y) = (vec![0; CHUNK], vec![0; CHUNK]);
+    let mut offset = 0;
+    loop {
+        let n = fill_at(a, &mut x, offset)?;
+        if fill_at(b, &mut y, offset)? != n || x[..n] != y[..n] {
+            return Ok(false);
+        }
+        if n == 0 {
+            return Ok(true);
+        }
+        offset += n as u64;
+    }
+}
+
+/// Read `file` from `offset` until `buf` is full or the file ends; how much
+/// was read.
+fn fill_at(file: &File, buf: &mut [u8], offset: u64) -> io::Result<usize> {
+    let mut filled = 0;
+    while filled < buf.len() {
+        match file.read_at(&mut buf[filled..], offset + filled as u64) {
+            Ok(0) => break,
+            Ok(n) => filled += n,
+            Err(e) if e.kind() == io::ErrorKind::Interrupted => {}
+            Err(e) => return Err(e),
+        }
+    }
+    Ok(filled)
 }
 
 /// 16 hex digits naming the build a running inode is.
@@ -264,8 +344,8 @@ fn build_id(running: &fs::Metadata) -> String {
         .collect()
 }
 
-/// Whether a file found under a copy's name is one as `copy` makes them,
-/// of a binary `size` bytes long.
+/// Whether a file found under a copy's name has the shape `copy` gives
+/// them, for a binary `size` bytes long.
 fn as_made(meta: &fs::Metadata, size: u64) -> bool {
     meta.file_type().is_file()
         && meta.uid() == crew_core::paths::uid()
@@ -274,11 +354,12 @@ fn as_made(meta: &fs::Metadata, size: u64) -> bool {
         && meta.size() == size
 }
 
-/// Whether the copy is still the file made.
+/// Whether the copy is still the file made, and can still be run: a mode
+/// changed (made unrunnable, or writable) leaves the rest as it was.
 fn intact(meta: &fs::Metadata, made: &Made) -> bool {
     meta.file_type().is_file()
         && meta.uid() == crew_core::paths::uid()
-        && meta.mode() & 0o022 == 0
+        && meta.mode() & 0o7777 == 0o500
         && Made::of(meta) == *made
 }
 
@@ -297,8 +378,9 @@ fn copy(source: &mut File, dir: &Path, name: &str) -> io::Result<Made> {
         io::copy(source, &mut out)?;
         out.set_permissions(fs::Permissions::from_mode(0o500))?;
         out.sync_all()?;
-        let made = Made::of(&out.metadata()?);
         fs::rename(&temp, dir.join(name))?;
+        // After the rename, which moves the change time.
+        let made = Made::of(&out.metadata()?);
         File::open(dir)?.sync_all()?;
         Ok(made)
     })();
@@ -362,6 +444,12 @@ impl Daemon {
     pub(crate) async fn binary_housekeeping(&self) {
         let daemon = self.clone();
         let _ = tokio::task::spawn_blocking(move || daemon.check_binary()).await;
+        // Agents recovery could not stop are stopped now if they can be;
+        // the copies other builds kept go once none runs one.
+        if self.binary.sweep_waits.load(Ordering::SeqCst) && self.stop_other_builds().await {
+            self.binary.sweep_waits.store(false, Ordering::SeqCst);
+            self.sweep_binaries();
+        }
     }
 
     /// Once recovery has decided about every agent: the copies other builds
@@ -554,6 +642,110 @@ mod tests {
             "an unusable copy was accepted"
         );
         assert_eq!(fs::metadata(pinned.path()).unwrap().mode() & 0o7777, 0o500);
+    }
+
+    #[test]
+    fn a_copy_whose_mode_changed_is_made_again() {
+        let (temp, state) = state();
+        let running = build(temp.path(), "crew", "the build");
+        let pinned = Binary::pin(&state, &running, running.clone());
+        // Not runnable; writable by its owner; set-user-ID.
+        for mode in [0o400, 0o700, 0o4500] {
+            fs::set_permissions(pinned.path(), fs::Permissions::from_mode(mode)).unwrap();
+            let said = pinned.check().unwrap();
+            assert!(
+                said.is_some_and(|s| s.contains("was replaced or changed")),
+                "{mode:o}"
+            );
+            let meta = fs::symlink_metadata(pinned.path()).unwrap();
+            assert_eq!(meta.mode() & 0o7777, 0o500, "{mode:o}");
+            assert_eq!(pinned.check(), Ok(None), "{mode:o}");
+        }
+    }
+
+    #[test]
+    fn a_copy_written_in_place_is_made_again_whatever_its_mtime_says() {
+        let (temp, state) = state();
+        let running = build(temp.path(), "crew", "the build");
+        let pinned = Binary::pin(&state, &running, running.clone());
+        let before = fs::symlink_metadata(pinned.path()).unwrap();
+        // Past the file system's clock tick, as anything later is.
+        std::thread::sleep(std::time::Duration::from_millis(50));
+        // Other bytes of the same length, then the mode and the
+        // modification time it had: only the change time tells.
+        fs::set_permissions(pinned.path(), fs::Permissions::from_mode(0o700)).unwrap();
+        fs::write(pinned.path(), "not crew!").unwrap();
+        fs::set_permissions(pinned.path(), fs::Permissions::from_mode(0o500)).unwrap();
+        File::open(pinned.path())
+            .unwrap()
+            .set_modified(before.modified().unwrap())
+            .unwrap();
+        let after = fs::symlink_metadata(pinned.path()).unwrap();
+        assert_eq!(
+            (after.ino(), after.size(), after.modified().unwrap()),
+            (before.ino(), before.size(), before.modified().unwrap())
+        );
+        assert!(pinned.check().unwrap().is_some());
+        assert_eq!(fs::read_to_string(pinned.path()).unwrap(), "the build");
+    }
+
+    #[test]
+    fn a_file_found_at_start_is_used_only_if_it_holds_the_running_binary() {
+        let (temp, state) = state();
+        let running = build(temp.path(), "crew", "the build");
+        let path = Binary::pin(&state, &running, running.clone())
+            .path()
+            .to_path_buf();
+        let made = |path: &Path| Made::of(&fs::symlink_metadata(path).unwrap());
+
+        // As a copy is made, with other bytes, written where the copy was.
+        fs::set_permissions(&path, fs::Permissions::from_mode(0o700)).unwrap();
+        fs::write(&path, "the bUild").unwrap();
+        fs::set_permissions(&path, fs::Permissions::from_mode(0o500)).unwrap();
+        let planted = made(&path);
+        let pinned = Binary::pin(&state, &running, running.clone());
+        assert_eq!(fs::read_to_string(pinned.path()).unwrap(), "the build");
+        assert_ne!(made(&path), planted);
+
+        // The running binary's bytes: kept as it is, no copy made.
+        let kept = made(&path);
+        let again = Binary::pin(&state, &running, running.clone());
+        assert_eq!(made(again.path()), kept);
+
+        // A link to the running binary is not followed; a FIFO is not
+        // waited on.
+        fs::remove_file(&path).unwrap();
+        std::os::unix::fs::symlink(&running, &path).unwrap();
+        Binary::pin(&state, &running, running.clone());
+        assert!(fs::symlink_metadata(&path).unwrap().file_type().is_file());
+        fs::remove_file(&path).unwrap();
+        let fifo = CString::new(path.as_os_str().as_bytes()).unwrap();
+        // SAFETY: a valid C string.
+        assert_eq!(unsafe { libc::mkfifo(fifo.as_ptr(), 0o600) }, 0);
+        Binary::pin(&state, &running, running.clone());
+        assert_eq!(fs::read_to_string(&path).unwrap(), "the build");
+    }
+
+    #[test]
+    fn what_an_agent_runs_is_known_from_a_copy_or_a_given_path_only() {
+        let (temp, state) = state();
+        let running = build(temp.path(), "crew", "the build");
+        let pinned = Binary::pin(&state, &running, running.clone());
+        let name = pinned.name().unwrap();
+        assert!(pinned.launched_this(Some(name)));
+        assert!(!pinned.launched_this(Some("crew-0000000000000000")));
+        assert!(!pinned.launched_this(None));
+
+        let given = Binary::given(running.clone());
+        assert!(given.launched_this(None));
+        assert!(!given.launched_this(Some(name)));
+
+        fs::remove_dir_all(state.join("bin")).unwrap();
+        fs::write(state.join("bin"), "").unwrap();
+        let unpinned = Binary::pin(&state, &running, running.clone());
+        assert!(unpinned.warning().is_some());
+        assert!(!unpinned.launched_this(None));
+        assert!(!unpinned.launched_this(Some(name)));
     }
 
     #[test]
