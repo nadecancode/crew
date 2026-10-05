@@ -15,7 +15,7 @@
 import { Show, createEffect, createSignal, on, onCleanup, onMount } from "solid-js";
 import { useApp } from "../app";
 import type { ConnState } from "../net/conn";
-import { decodeOutput, type Agent } from "../protocol";
+import { decodeOutput, type Agent, type OutputResult } from "../protocol";
 import type { TerminalHandle } from "../term/Terminal";
 import { Sgr } from "../text";
 import { useOps } from "./ops";
@@ -89,7 +89,7 @@ function PtyTerminal(props: { id: string }) {
   return (
     <div class="terminal-tab" data-terminal={props.id}>
       <Show when={state() === "unavailable"}>
-        <p class="pad warn">The terminal's code was not loaded when this page started; this page cannot load it now. Open a new tab from <code>crew web</code>.</p>
+        <p class="pad warn">Terminal code unavailable; this page cannot load it. Open a new tab from <code>crew web</code>.</p>
       </Show>
       <Show when={(state() === "stopped" || stopped()) && !ended()}>
         <div class="term-note warn">{stopped() ? "not attached · this page is stopped" : "disconnected · it attaches again when the dashboard is live"}</div>
@@ -126,8 +126,10 @@ function HerdrScreen(props: { agent: Agent }) {
   const app = useApp();
   const ops = useOps();
   const { link, ui } = app;
-  const [screen, setScreen] = createSignal<string | null>(null);
+  const [screen, setScreen] = createSignal<OutputResult | null>(null);
   const [error, setError] = createSignal<string | null>(null);
+  const input = () => link.live() && screen()?.alive;
+  let pending = "";
   let lastRead = 0;
   let inFlight = false;
   let again: number | null = null;
@@ -141,7 +143,7 @@ function HerdrScreen(props: { agent: Agent }) {
     inFlight = true;
     lastRead = Date.now();
     link.call("agent_output", { id: props.agent.id, lines: 300, screen: true, ansi: true }, decodeOutput)
-      .then((r) => (setScreen(r.text), setError(null)), (e) => setError(e instanceof Error ? e.message : String(e)))
+      .then((r) => (setScreen(r), setError(null), !r.alive && (pending = "")), (e) => setError(e instanceof Error ? e.message : String(e)))
       .finally(() => (inFlight = false));
   };
   onCleanup(() => again !== null && window.clearTimeout(again));
@@ -149,10 +151,9 @@ function HerdrScreen(props: { agent: Agent }) {
   createEffect(on(() => [props.agent.id, props.agent.last_activity_at, ui.refreshTick(), link.live()], read));
 
   // Keys typed here go to the agent; what piles up while a call is out goes in the next.
-  let pending = "";
   let sending = false;
   const flush = () => {
-    if (sending || !pending || !link.live()) return;
+    if (sending || !pending || !input()) return;
     const text = pending;
     pending = "";
     sending = true;
@@ -171,7 +172,7 @@ function HerdrScreen(props: { agent: Agent }) {
       return;
     }
     const t = keyText(e);
-    if (t === null || !link.live()) return;
+    if (t === null || !input()) return;
     e.preventDefault();
     e.stopPropagation();
     pending += t;
@@ -179,7 +180,7 @@ function HerdrScreen(props: { agent: Agent }) {
   };
   const onPaste = (e: ClipboardEvent) => {
     const text = e.clipboardData?.getData("text/plain");
-    if (!text || !link.live()) return;
+    if (!text || !input()) return;
     e.preventDefault();
     pending += text;
     flush();
@@ -188,13 +189,13 @@ function HerdrScreen(props: { agent: Agent }) {
   return (
     <div class="terminal-tab herdr" data-terminal={props.agent.id}>
       <div class="term-bar">
-        <span class="muted">herdr pane {props.agent.backend_ref ?? ""} · the last screen; click it to type into the agent, ctrl-] gives the keyboard back</span>
-        <button disabled={!link.live()} onClick={() => ops.focusPane(props.agent.id)}>jump to pane</button>
+        <span class="muted">herdr pane {props.agent.backend_ref ?? ""} · {input() ? "last screen; click to type; ctrl-] returns to dashboard" : screen()?.alive === false ? "terminal ended; refresh checks for output" : "read only"}</span>
+        <button disabled={!input()} onClick={() => ops.focusPane(props.agent.id)}>jump to pane</button>
         <button disabled={!link.live()} onClick={() => ui.refresh()} title="read the screen again (r)">refresh</button>
       </div>
-      <Show when={error() && screen() !== null}><p class="pad warn" role="status">{error()}</p></Show>
-      <Show when={screen() !== null} fallback={<p class="pad muted">{error() ?? waiting(link, "reading the screen…")}</p>}>
-        <pre class="screen" tabindex="0" aria-label={`the terminal of ${props.agent.id}`} onKeyDown={onKey} onPaste={onPaste}><Sgr text={screen()!} /></pre>
+      <Show when={error() && screen()}><p class="pad warn" role="status">{error()}</p></Show>
+      <Show when={screen()} fallback={<p class="pad muted">{error() ?? waiting(link, "reading the screen…")}</p>}>
+        <pre class="screen" tabindex={screen()!.text || input() ? 0 : -1} aria-label={`terminal ${props.agent.id}`} onKeyDown={onKey} onPaste={onPaste}><Sgr text={screen()!.text} /></pre>
       </Show>
     </div>
   );

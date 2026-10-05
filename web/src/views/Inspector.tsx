@@ -138,16 +138,20 @@ function Overview(props: { agent: Agent }) {
     if (kids.length) out.push(["subagents", kids.join(", ")]);
     if (ag.subagents > 0) out.push(["in-session", `${ag.subagents} subagents`]);
     out.push(["pid", ag.pid != null ? (ag.exit_code != null ? `${ag.pid} (exited ${ag.exit_code})` : String(ag.pid)) : ag.exit_code != null ? `exited ${ag.exit_code}` : "—"]);
-    out.push(["workdir", ag.workdir]);
-    out.push(["branch", ag.branch ?? "—"]);
-    out.push(["session", ag.session_id ?? "—"]);
-    out.push(["started", ag.started_at != null ? `${clockTime(ag.started_at)} · up ${fmtElapsed(serverNow() - ag.started_at)}` : "not started"]);
-    out.push(["last seen", `${fmtElapsed(serverNow() - ag.last_activity_at)} ago`]);
-    out.push(["restarts", String(ag.restarts)]);
-    out.push(["mailbox", `${ag.inbox_unread} unread of ${ag.inbox_total} · ${ag.outbox_total} sent`]);
+    out.push(
+      ["workdir", ag.workdir],
+      ["branch", ag.branch ?? "—"],
+      ["session", ag.session_id ?? "—"],
+      ["started", ag.started_at != null ? `${clockTime(ag.started_at)} · up ${fmtElapsed(serverNow() - ag.started_at)}` : "not started"],
+      ["last seen", `${fmtElapsed(serverNow() - ag.last_activity_at)} ago`],
+      ["restarts", String(ag.restarts)],
+      ["mailbox", `${ag.inbox_unread} unread of ${ag.inbox_total} · ${ag.outbox_total} sent`],
+    );
     if (ag.usage) {
-      out.push(["tokens", `${tokens(ag.usage.input_tokens)} in · ${tokens(ag.usage.output_tokens)} out · ${ag.usage.turns} turns`]);
-      out.push(["cache", `${tokens(ag.usage.cache_read_tokens)} read · ${tokens(ag.usage.cache_creation_tokens)} written`]);
+      out.push(
+        ["tokens", `${tokens(ag.usage.input_tokens)} in · ${tokens(ag.usage.output_tokens)} out · ${ag.usage.turns} turns`],
+        ["cache", `${tokens(ag.usage.cache_read_tokens)} read · ${tokens(ag.usage.cache_creation_tokens)} written`],
+      );
     } else out.push(["tokens", "not reported", "dim"]);
     if (ag.context) {
       const c = ag.context;
@@ -269,8 +273,9 @@ function Transcript(props: { agent: Agent }) {
     <div class="transcript">
       <Show when={result() && error()}><p class="pad warn" role="status">{error()}</p></Show>
       <Show when={result()} fallback={<p class="pad muted">{error() ?? waiting(link, "reading the session…")}</p>}>
-        <Show when={result()!.available} fallback={<p class="pad muted">this runtime keeps no session file crew can read, or it was not found</p>}>
+        <Show when={result()!.available} fallback={<p class="pad muted">session file unavailable for this runtime</p>}>
           <Show when={result()!.truncated}><p class="pad dim">older entries are not shown</p></Show>
+          <Show when={!entries().length}><p class="pad muted">no transcript entries yet</p></Show>
           <VirtualList label="transcript" class="transcript-list" count={() => entries().length} slice={(f, t) => entries().slice(f, t)} rowHeight={TRANSCRIPT_ROW}
             selected={cursor} onSelect={setCursor} onOpen={setCursor}
             render={(e: TranscriptEntry) => (
@@ -326,4 +331,3 @@ function Diff(props: { agent: Agent }) {
     </Scroll>
   );
 }
-
