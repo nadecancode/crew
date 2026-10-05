@@ -4,19 +4,25 @@
 // while scrolled to the bottom; scrolled up it stays where the reader is.
 // "Load older" asks `events` with a larger limit (the daemon caps it at 5000).
 
-import { For, Show, createMemo, createSignal } from "solid-js";
+import { For, Show, createMemo, createSignal, onCleanup } from "solid-js";
 import { useApp } from "../app";
 import { clockTime, oneLine } from "../format";
 import { EVENT_LEVEL, decodeEvents, type Event, type EventLevel } from "../protocol";
 import { MAX_EVENTS } from "../store/store";
 import { VirtualList } from "./VirtualList";
 
-export const LOG_ROW = 22;
+export const LOG_ROW = 36;
+export const LOG_NARROW_ROW = 64;
 const RANK: Record<EventLevel, number> = { debug: 0, info: 1, warn: 2, error: 3 };
 
 export function Logs() {
   const app = useApp();
   const { store, ui, link } = app;
+  const media = window.matchMedia("(max-width: 767px)");
+  const [narrow, setNarrow] = createSignal(media.matches);
+  const resize = () => setNarrow(media.matches);
+  media.addEventListener("change", resize);
+  onCleanup(() => media.removeEventListener("change", resize));
   const [loading, setLoading] = createSignal(false);
   const f = () => ui.logFilter();
   const filtering = () => !!(f().agent || f().vcs || f().text || f().level !== "debug");
@@ -67,7 +73,8 @@ export function Logs() {
   const agents = () => store.state.agents.map((a) => a.id);
   return (
     <div class="logs" data-view="logs">
-      <div class="filters" role="toolbar" aria-label="log filters">
+      <div class="content-head"><h2>Events</h2><span class="muted">{count()} loaded · search covers loaded events</span></div>
+      <div class="filters" role="toolbar" aria-label="event filters">
         <label>agent
           <select value={f().agent ?? ""} onChange={(e) => ui.setLogFilter({ ...f(), agent: e.currentTarget.value || null })}>
             <option value="">all</option>
@@ -79,20 +86,20 @@ export function Logs() {
             <For each={EVENT_LEVEL}>{(l) => <option value={l}>{l === "debug" ? "all" : `${l} and up`}</option>}</For>
           </select>
         </label>
-        <button aria-pressed={f().vcs} classList={{ on: f().vcs }} onClick={() => ui.setLogFilter({ ...f(), vcs: !f().vcs })} title="only version control events">vcs</button>
-        <input type="search" placeholder="filter text" aria-label="filter text" value={f().text} onInput={(e) => ui.setLogFilter({ ...f(), text: e.currentTarget.value })} />
+        <button aria-pressed={f().vcs} classList={{ on: f().vcs }} onClick={() => ui.setLogFilter({ ...f(), vcs: !f().vcs })} title="only version control events">Version control</button>
+        <label>Search <input type="search" aria-label="filter text" value={f().text} onInput={(e) => ui.setLogFilter({ ...f(), text: e.currentTarget.value })} /></label>
         <Show when={filtering()}><button onClick={() => ui.setLogFilter({ agent: null, level: "debug", text: "", vcs: false })}>clear</button></Show>
         <span class="spacer" />
         <span class="muted">{count()} of {(store.eventsVersion(), store.events.length)}</span>
-        <button disabled={!link.live() || loading() || store.events.length >= MAX_EVENTS} onClick={loadOlder}>load older</button>
+        <button disabled={!link.live() || loading() || store.events.length >= MAX_EVENTS} onClick={loadOlder}>{loading() ? "Loading…" : "Load older"}</button>
       </div>
-      <div class="log-head" aria-hidden="true"><span class="time">time</span><span class="level">level</span><span class="source">source</span><span class="type">type</span><span class="agent">agent</span><span class="msg">message</span></div>
+      <div class="log-head" aria-hidden="true"><span class="time">time</span><span class="level">level</span><span class="source-type">source / type</span><span class="agent">agent</span><span class="msg">message</span></div>
       <VirtualList
         label="event log"
         class="log-list"
         count={count}
         slice={slice}
-        rowHeight={LOG_ROW}
+        rowHeight={narrow() ? LOG_NARROW_ROW : LOG_ROW}
         key={(e: Event) => e.seq}
         selected={cursor}
         onSelect={(i) => {
@@ -108,8 +115,7 @@ export function Logs() {
           <div class={`log-row lv-${e.level}`} classList={{ vcs: e.source === "vcs" }} data-seq={e.seq}>
             <span class="time">{clockTime(e.timestamp)}</span>
             <span class="level">{e.level}</span>
-            <span class="source">{e.source}</span>
-            <span class="type">{e.event_type}</span>
+            <span class="source-type"><span class="source">{e.source}</span> · <span class="type">{e.event_type}</span></span>
             <span class="agent">{e.agent_id ?? ""}</span>
             <span class="msg">{oneLine(e.message)}</span>
           </div>

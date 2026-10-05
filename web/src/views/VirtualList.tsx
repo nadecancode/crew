@@ -34,14 +34,14 @@ export function VirtualList<T>(props: {
   const [top, setTop] = createSignal(0);
   const [height, setHeight] = createSignal(400);
   const [stick, setStick] = createSignal(true);
-  const H = props.rowHeight;
+  const H = () => props.rowHeight;
 
   const range = createMemo(() => {
     const n = props.count();
     // Never past the end, whatever the scroll position says.
-    const t = Math.min(top(), Math.max(0, n * H - height()));
-    const first = Math.max(0, Math.floor(t / H) - OVERSCAN);
-    const last = Math.min(n, Math.ceil((t + height()) / H) + OVERSCAN);
+    const t = Math.min(top(), Math.max(0, n * H() - height()));
+    const first = Math.max(0, Math.floor(t / H()) - OVERSCAN);
+    const last = Math.min(n, Math.ceil((t + height()) / H()) + OVERSCAN);
     return { first, items: props.slice(first, last), total: n };
   });
 
@@ -67,7 +67,7 @@ export function VirtualList<T>(props: {
   createEffect(on(() => props.prepended?.() ?? 0, (n, prev) => {
     const added = n - (prev ?? 0);
     if (added > 0 && !stick() && !props.key) queueMicrotask(() => {
-      el.scrollTop += added * H;
+      el.scrollTop += added * H();
       setTop(el.scrollTop);
     });
   }, { defer: true }));
@@ -80,10 +80,24 @@ export function VirtualList<T>(props: {
   };
   const setAnchor = () => {
     if (!props.key) return;
-    const i = Math.floor(el.scrollTop / H);
+    const i = Math.floor(el.scrollTop / H());
     const key = untrack(() => keyAt(i));
     anchor = key === undefined ? null : { i, key };
   };
+  // A responsive row keeps the same item and fractional offset under the
+  // reader. Wait for the new spacer geometry before assigning scrollTop.
+  createEffect(on(H, (h, previous) => {
+    if (previous === undefined) return;
+    const row = el.scrollTop / previous;
+    queueMicrotask(() => {
+      if (stick()) toBottom();
+      else {
+        el.scrollTop = row * h;
+        setTop(el.scrollTop);
+        setAnchor();
+      }
+    });
+  }, { defer: true }));
   // The rows changed: where the anchor went, the view goes (nearest first, as
   // a few rows dropped or added is the common case).
   createEffect(on(() => (props.count(), props.slice(0, 0)), () => {
@@ -95,7 +109,7 @@ export function VirtualList<T>(props: {
       for (let d = 1; d < n; d++) {
         for (const j of [a.i - d, a.i + d]) {
           if (j < 0 || j >= n || keyAt(j) !== a.key) continue;
-          el.scrollTop += (j - a.i) * H;
+          el.scrollTop += (j - a.i) * H();
           anchor = { i: j, key: a.key };
           setTop(el.scrollTop);
           return;
@@ -110,13 +124,13 @@ export function VirtualList<T>(props: {
   const onScroll = () => {
     setAnchor();
     setTop(el.scrollTop);
-    setStick(el.scrollTop + el.clientHeight >= el.scrollHeight - H / 2);
+    setStick(el.scrollTop + el.clientHeight >= el.scrollHeight - H() / 2);
   };
 
   const ensureVisible = (i: number) => {
-    const y = i * H;
+    const y = i * H();
     if (y < el.scrollTop) el.scrollTop = y;
-    else if (y + H > el.scrollTop + el.clientHeight) el.scrollTop = y + H - el.clientHeight;
+    else if (y + H() > el.scrollTop + el.clientHeight) el.scrollTop = y + H() - el.clientHeight;
     onScroll();
   };
   const move = (to: number) => {
@@ -126,11 +140,11 @@ export function VirtualList<T>(props: {
     props.onSelect?.(i);
     ensureVisible(i);
   };
-  const page = () => Math.max(1, Math.floor(el.clientHeight / H) - 1);
+  const page = () => Math.max(1, Math.floor(el.clientHeight / H()) - 1);
   const onKey = (e: KeyboardEvent) => {
     if (e.altKey || e.ctrlKey || e.metaKey) return;
     const cur = props.selected?.() ?? null;
-    const at = cur ?? Math.min(props.count() - 1, Math.floor((el.scrollTop + el.clientHeight) / H) - 1);
+    const at = cur ?? Math.min(props.count() - 1, Math.floor((el.scrollTop + el.clientHeight) / H()) - 1);
     const keys: Record<string, () => void> = {
       ArrowDown: () => move(at + 1),
       j: () => move(at + 1),
@@ -153,13 +167,13 @@ export function VirtualList<T>(props: {
   return (
     <div ref={el} class={`vlist ${props.class ?? ""}`} tabindex="0" role="listbox" aria-label={props.label} onScroll={onScroll} onKeyDown={onKey}
       aria-activedescendant={props.selected?.() != null ? `${props.label.replace(/\W+/g, "-")}-${props.selected!()}` : undefined}>
-      <div class="vlist-pad" style={{ height: `${range().total * H}px` }}>
-        <div class="vlist-rows" style={{ transform: `translateY(${range().first * H}px)` }}>
+      <div class="vlist-pad" style={{ height: `${range().total * H()}px` }}>
+        <div class="vlist-rows" style={{ transform: `translateY(${range().first * H()}px)` }}>
           <For each={range().items}>
             {(item, k) => {
               const i = () => range().first + k();
               return (
-              <div class="vrow" role="option" id={`${props.label.replace(/\W+/g, "-")}-${i()}`} style={{ height: `${H}px` }}
+              <div class="vrow" role="option" id={`${props.label.replace(/\W+/g, "-")}-${i()}`} style={{ height: `${H()}px` }}
                 aria-selected={props.selected?.() === i()}
                 classList={{ selected: props.selected?.() === i() }}
                 onClick={() => props.onSelect?.(i())}

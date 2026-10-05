@@ -32,7 +32,7 @@ export function UsageView() {
     <div class="usage-view scroll" tabindex="0" aria-label="usage">
       <section>
         <h3>agents <span class="muted">by tokens</span></h3>
-        <div class="legend" aria-hidden="true">
+        <div class="legend">
           <For each={SERIES}>{(s, i) => <span><span class={`swatch s${i()}`} /> {s}</span>}</For>
         </div>
         <table class="usage-table">
@@ -46,7 +46,7 @@ export function UsageView() {
                     <td><button class={`link rt-${a.runtime}`} onClick={() => open(a.id)}>{runtimeGlyph(a.runtime)} {a.id}</button></td>
                     <td>
                       <Show when={a.context} fallback={<span class="dim">not reported</span>}>
-                        <span class="ctx" title={`${a.context!.percent}% · ${tokens(a.context!.tokens)} of ${tokens(a.context!.window)}`}>
+                        <span class="ctx" tabindex="0" aria-label={`${a.context!.percent}% · ${a.context!.tokens} of ${a.context!.window} tokens`} title={`${a.context!.percent}% · ${tokens(a.context!.tokens)} of ${tokens(a.context!.window)}`}>
                           <svg class="gauge-svg" viewBox="0 0 100 8" preserveAspectRatio="none" aria-hidden="true">
                             <rect class="track" width="100" height="8" rx="2" />
                             <rect class={`fill ${levelTone(a.context!.percent)}`} width={a.context!.percent} height="8" rx="2" />
@@ -57,7 +57,7 @@ export function UsageView() {
                     </td>
                     <td>
                       <Show when={a.usage} fallback={<span class="dim">not reported</span>}>
-                        <span class="stack" title={SERIES.map((s, i) => `${s} ${tokens(parts()[i])}`).join(" · ")}>
+                        <span class="stack" tabindex="0" aria-label={SERIES.map((s, i) => `${s} ${parts()[i]}`).join(" · ")} title={SERIES.map((s, i) => `${s} ${tokens(parts()[i])}`).join(" · ")}>
                           <svg class="stack-svg" viewBox="0 0 200 10" preserveAspectRatio="none" aria-hidden="true">
                             {(() => {
                               let x = 0;
@@ -138,7 +138,7 @@ function ContextLines(props: { hover: () => string | null; setHover(id: string |
   const x = (t: number) => PAD + ((t - span()!.t0) / (span()!.t1 - span()!.t0)) * (W - 2 * PAD);
   const y = (p: number) => H - PAD + 8 - (p / 100) * (H - 2 * PAD);
   const path = (points: { t: number; percent: number }[]) =>
-    points.map((p, i) => `${i ? "L" : "M"}${x(p.t).toFixed(1)} ${y(p.percent).toFixed(1)}`).join("") + (points.length === 1 ? `L${(x(points[0].t) + 4).toFixed(1)} ${y(points[0].percent).toFixed(1)}` : "");
+    points.map((p, i) => `${i ? "L" : "M"}${x(p.t).toFixed(1)} ${y(p.percent).toFixed(1)}`).join("");
   const runtimeOf = (id: string) => store.agent(id)?.runtime ?? "shell";
   return (
     <Show when={span()} fallback={<p class="dim">no agent has reported its context window yet</p>}>
@@ -148,10 +148,15 @@ function ContextLines(props: { hover: () => string | null; setHover(id: string |
         <text class="axis" x={W - PAD} y={H - 4} text-anchor="end">{clockTime(span()!.t1)}</text>
         <For each={series()}>
           {(s) => (
-            <path class={`ctx-line rt-${runtimeOf(s.id)}`} classList={{ hover: props.hover() === s.id, dim: !!props.hover() && props.hover() !== s.id }} d={path(s.points)}
+            <g class={`rt-${runtimeOf(s.id)}`}>
+            <Show when={s.points.length === 1}>
+              <circle cx={x(s.points[0].t)} cy={y(s.points[0].percent)} r="3" fill="currentColor" />
+            </Show>
+            <path class="ctx-line" classList={{ hover: props.hover() === s.id, dim: !!props.hover() && props.hover() !== s.id }} d={path(s.points)}
               onPointerEnter={() => props.setHover(s.id)} onPointerLeave={() => props.setHover(null)}>
               <title>{s.id}: {s.points[s.points.length - 1].percent}% now</title>
             </path>
+            </g>
           )}
         </For>
       </svg>
