@@ -13,7 +13,7 @@
 .fetch-state { margin: 0; }
 .fetch-state:empty { display: none; }
 .bus-scope .chip { font-size: 12px; white-space: normal; overflow-wrap: anywhere; }
-.bus-row { height: 100%; padding: 8px 16px; display: flex; flex-direction: column; justify-content: center; gap: 8px; border-bottom: 1px solid var(--line); cursor: pointer; }
+.bus-row { height: 100%; padding: 8px 16px; display: flex; flex-direction: column; gap: 8px; border-bottom: 1px solid var(--line); cursor: pointer; }
 .bus-meta { display: flex; align-items: baseline; gap: 8px; font: 12px/1.5 var(--mono); color: var(--muted); }
 .bus-meta .who { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
 .bus-row.k-orch .who { color: var(--orch); }
