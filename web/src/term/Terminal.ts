@@ -67,10 +67,10 @@ export function mountTerminal(host: HTMLElement, o: TerminalOptions): TerminalHa
     cursorBlink: false,
     allowProposedApi: false,
     theme: {
-      background: css("--bg-term", "#111217"),
-      foreground: css("--term-text", "#e5eeea"),
-      cursor: css("--term-text", "#e5eeea"),
-      selectionBackground: css("--term-selection", "#3d4f47"),
+      background: css("--bg-term", "#101010"),
+      foreground: css("--term-text", "#ededed"),
+      cursor: css("--term-text", "#ededed"),
+      selectionBackground: css("--term-selection", "#414141"),
     },
     linkHandler: {
       activate(_e, uri) {
