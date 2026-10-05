@@ -417,6 +417,26 @@ mod tests {
 
     #[tokio::test]
     async fn a_saved_read_answer_survives_daemon_restart_and_resumes_once() {
+        // Other library tests fork sandbox probes; a probe forked during
+        // this test can temporarily inherit the workspace lock. Exercise
+        // the actual drop/restart in a process running this test alone.
+        const PROBE: &str = "CREW_PARKED_RESTART_PROBE";
+        if std::env::var_os(PROBE).is_none() {
+            let output = std::process::Command::new(std::env::current_exe().unwrap())
+                .args(["--exact", "daemon::overlap::tests::a_saved_read_answer_survives_daemon_restart_and_resumes_once", "--nocapture"])
+                .env(PROBE, "1")
+                .env_remove("CREW_IDENTITY")
+                .env_remove("CREW_SOCKET")
+                .env_remove("CREW_LAUNCH")
+                .output().unwrap();
+            assert!(
+                output.status.success(),
+                "{}{}",
+                String::from_utf8_lossy(&output.stdout),
+                String::from_utf8_lossy(&output.stderr)
+            );
+            return;
+        }
         let temp = tempfile::tempdir().unwrap();
         let options = || DaemonOptions {
             workspace: temp.path().to_path_buf(),
