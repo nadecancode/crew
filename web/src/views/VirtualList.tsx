@@ -81,26 +81,29 @@ export function VirtualList<T>(props: {
   }, { defer: true }));
 
   // The row at the top of the view, by identity.
-  let anchor: { i: number; key: string | number } | null = null;
+  let anchor: { i: number; key: string | number; offset: number } | null = null;
   const keyAt = (i: number) => {
     const item = props.slice(i, i + 1)[0];
     return item === undefined ? undefined : props.key!(item);
   };
   const setAnchor = () => {
     if (!props.key) return;
-    const i = Math.floor(el.scrollTop / H());
+    const row = el.scrollTop / H();
+    const i = Math.floor(row);
     const key = untrack(() => keyAt(i));
-    anchor = key === undefined ? null : { i, key };
+    anchor = key === undefined ? null : { i, key, offset: row - i };
   };
   // A responsive row keeps the same item and fractional offset under the
   // reader. Wait for the new spacer geometry before assigning scrollTop.
-  createEffect(on(H, (h, previous) => {
-    if (previous === undefined) return;
-    const row = el.scrollTop / previous;
+  let lastH = untrack(H);
+  createEffect(on(H, (h) => {
+    const row = el.scrollTop / lastH;
+    const offset = anchor?.offset ?? row % 1;
+    lastH = h;
     queueMicrotask(() => {
       if (following()) toBottom();
       else {
-        el.scrollTop = row * h;
+        el.scrollTop = ((anchor?.i ?? Math.floor(row)) + offset) * h;
         setTop(el.scrollTop);
         setAnchor();
       }
@@ -118,7 +121,7 @@ export function VirtualList<T>(props: {
         for (const j of [a.i - d, a.i + d]) {
           if (j < 0 || j >= n || keyAt(j) !== a.key) continue;
           el.scrollTop += (j - a.i) * H();
-          anchor = { i: j, key: a.key };
+          anchor = { ...a, i: j };
           setTop(el.scrollTop);
           return;
         }
