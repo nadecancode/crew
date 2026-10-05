@@ -1,0 +1,270 @@
+{
+  "verdict": "Visual sign-off approved",
+  "date": "2026-10-05",
+  "target": "064037442ab479f5bbbe921361dda492757bf253",
+  "source": "fnv1a64:50c88732a97c7d7b",
+  "integratedRevision": "6f851ae0de626adc07bef49c1a3b9613a12c55d7",
+  "inspectedFrom": "e93626c7 (designer merge of agents/qa; no product changes)",
+  "productionStylesheet": "assets/style-DlOjRRu5.css",
+  "fullGallery": {
+    "source": "fnv1a64:50c88732a97c7d7b",
+    "commit": "6f851ae0de626adc07bef49c1a3b9613a12c55d7",
+    "externalGallery": "/tmp/crew-qa-neutral-final",
+    "captures": 48,
+    "strict": true,
+    "failures": 0
+  },
+  "measured": {
+    "P1": 230360,
+    "P2": 33906,
+    "P3": 332915,
+    "P4": 597867
+  },
+  "ceilings": {
+    "P1": 230500,
+    "P2": 34000,
+    "P3": 350000,
+    "P4": 600000
+  },
+  "sourceChecks": {
+    "command": "node notes/web-revamp/contrast.mjs",
+    "passed": 57,
+    "failed": 0,
+    "quietMinimumDark": 5.54,
+    "controlMinimumDark": 3.79,
+    "primaryButtonDark": 9.07
+  },
+  "liveChecks": {
+    "source": "fnv1a64:50c88732a97c7d7b",
+    "browser": "agent-browser with Brave 1.93.136",
+    "mock": "node web/dev/serve.ts --port 47738 --fixture subagents --scenario baseline",
+    "appearance": "Explicit Dark and Light switch palettes; light canvas rgb(245,246,243).",
+    "teamSelection": "Selected second row retains blue 3px inset marker; hovered first row has no marker. Both backgrounds rgb(36,36,36) in dark. Light retains original fills and adds green 3px marker.",
+    "transcriptSelection": "At 390x844 selected second transcript row retains blue 3px inset marker while first row hovered; detail remains visible.",
+    "help": "At 390x844 heading focused, scrollTop0, panel rgb(26,26,26), documentWidth390. Tab reaches Close; Escape returns focus to Help trigger.",
+    "confirmation": "Stop confirmation initially focuses Cancel; Escape cancels and returns focus to Stop team trigger."
+  },
+  "reportedChecks": {
+    "reporter": "reviewer",
+    "message": "m-4efa610982fc",
+    "mockAndPerfPassed": 225,
+    "bundleMatchesIndependentBuild": true
+  },
+  "resolved": [
+    "R-GREEN-1: achromatic dark surfaces and text; blue general action, purposeful semantic colours retained.",
+    "R-GREEN-3: neutral dark graph selection distinct from blue focus; light selection preserved.",
+    "R-GREEN-5: direct-child marker on every selected VirtualList row."
+  ],
+  "accepted": [
+    "R-GREEN-4: selected and hovered dark rows share gray fill; persistent selection marker distinguishes them.",
+    "Light Team/Task/Transcript selection gains green 3px marker; light tokens remain unchanged.",
+    "Previously approved graph fit, vertical scrolling, and budget deferrals remain."
+  ],
+  "historicalComparison": {
+    "image": "team-selection-hover-before.png",
+    "source": "fnv1a64:cf8956b55a22c53c",
+    "target": "a1823f6dd455652685210236c59c5ac6bdb436b3",
+    "finding": "R-GREEN-5 before correction: selected and hovered Team rows indistinguishable."
+  },
+  "samples": [
+    {
+      "id": "busy-team-graph-dark-desktop",
+      "title": "Neutral dark Team and message bus",
+      "image": "busy-team-graph-dark-desktop.png",
+      "producer": "qa",
+      "theme": "dark",
+      "scenario": "busy",
+      "surface": "team-graph",
+      "viewport": "desktop",
+      "width": 1440,
+      "height": 960,
+      "reproduce": "bun run gallery --out '/tmp/crew-qa-neutral-final/repro/busy-team-graph-dark-desktop' --scenario busy --surface team-graph --theme dark --viewport desktop --fixture subagents --strict",
+      "audit": {
+        "documentWidth": 1440,
+        "overflow": false,
+        "contrastChecks": 188,
+        "contrastFailures": 0,
+        "unnamedControls": 0
+      }
+    },
+    {
+      "id": "busy-tasks-graph-dark-desktop",
+      "title": "Dark task graph; Zoom and List retained",
+      "image": "busy-tasks-graph-dark-desktop.png",
+      "producer": "qa",
+      "theme": "dark",
+      "scenario": "busy",
+      "surface": "tasks-graph",
+      "viewport": "desktop",
+      "width": 1440,
+      "height": 960,
+      "reproduce": "bun run gallery --out '/tmp/crew-qa-neutral-final/repro/busy-tasks-graph-dark-desktop' --scenario busy --surface tasks-graph --theme dark --viewport desktop --fixture subagents --strict",
+      "audit": {
+        "documentWidth": 1440,
+        "overflow": false,
+        "contrastChecks": 184,
+        "contrastFailures": 0,
+        "unnamedControls": 0
+      }
+    },
+    {
+      "id": "busy-events-dark-desktop",
+      "title": "Dark Events with warning and error states",
+      "image": "busy-events-dark-desktop.png",
+      "producer": "qa",
+      "theme": "dark",
+      "scenario": "busy",
+      "surface": "events",
+      "viewport": "desktop",
+      "width": 1440,
+      "height": 960,
+      "reproduce": "bun run gallery --out '/tmp/crew-qa-neutral-final/repro/busy-events-dark-desktop' --scenario busy --surface events --theme dark --viewport desktop --fixture subagents --strict",
+      "audit": {
+        "documentWidth": 1440,
+        "overflow": false,
+        "contrastChecks": 186,
+        "contrastFailures": 0,
+        "unnamedControls": 0
+      }
+    },
+    {
+      "id": "busy-usage-dark-desktop",
+      "title": "Dark Usage with four labelled series",
+      "image": "busy-usage-dark-desktop.png",
+      "producer": "qa",
+      "theme": "dark",
+      "scenario": "busy",
+      "surface": "usage",
+      "viewport": "desktop",
+      "width": 1440,
+      "height": 960,
+      "reproduce": "bun run gallery --out '/tmp/crew-qa-neutral-final/repro/busy-usage-dark-desktop' --scenario busy --surface usage --theme dark --viewport desktop --fixture subagents --strict",
+      "audit": {
+        "documentWidth": 1440,
+        "overflow": false,
+        "contrastChecks": 177,
+        "contrastFailures": 0,
+        "unnamedControls": 0
+      }
+    },
+    {
+      "id": "busy-terminal-dark-desktop",
+      "title": "Neutral terminal and bright graph selection",
+      "image": "busy-terminal-dark-desktop.png",
+      "producer": "qa",
+      "theme": "dark",
+      "scenario": "busy",
+      "surface": "terminal",
+      "viewport": "desktop",
+      "width": 1440,
+      "height": 960,
+      "reproduce": "bun run gallery --out '/tmp/crew-qa-neutral-final/repro/busy-terminal-dark-desktop' --scenario busy --surface terminal --theme dark --viewport desktop --fixture subagents --strict",
+      "audit": {
+        "documentWidth": 1440,
+        "overflow": false,
+        "contrastChecks": 146,
+        "contrastFailures": 0,
+        "unnamedControls": 0
+      }
+    },
+    {
+      "id": "busy-team-list-dark-narrow",
+      "title": "Selected Team List at 390px",
+      "image": "busy-team-list-dark-narrow.png",
+      "producer": "qa",
+      "theme": "dark",
+      "scenario": "busy",
+      "surface": "team-list",
+      "viewport": "narrow",
+      "width": 390,
+      "height": 844,
+      "reproduce": "bun run gallery --out '/tmp/crew-qa-neutral-final/repro/busy-team-list-dark-narrow' --scenario busy --surface team-list --theme dark --viewport narrow --fixture subagents --strict",
+      "audit": {
+        "documentWidth": 390,
+        "overflow": false,
+        "contrastChecks": 51,
+        "contrastFailures": 0,
+        "unnamedControls": 0
+      }
+    },
+    {
+      "id": "busy-help-dark-narrow",
+      "title": "Help at 390px, heading initially visible",
+      "image": "busy-help-dark-narrow.png",
+      "producer": "qa",
+      "theme": "dark",
+      "scenario": "busy",
+      "surface": "help",
+      "viewport": "narrow",
+      "width": 390,
+      "height": 844,
+      "reproduce": "bun run gallery --out '/tmp/crew-qa-neutral-final/repro/busy-help-dark-narrow' --scenario busy --surface help --theme dark --viewport narrow --fixture subagents --strict",
+      "audit": {
+        "documentWidth": 390,
+        "overflow": false,
+        "contrastChecks": 94,
+        "contrastFailures": 0,
+        "unnamedControls": 0
+      }
+    },
+    {
+      "id": "busy-inspector-light-narrow",
+      "title": "Retained light inspector at 390px",
+      "image": "busy-inspector-light-narrow.png",
+      "producer": "qa",
+      "theme": "light",
+      "scenario": "busy",
+      "surface": "inspector",
+      "viewport": "narrow",
+      "width": 390,
+      "height": 844,
+      "reproduce": "bun run gallery --out '/tmp/crew-qa-neutral-final/repro/busy-inspector-light-narrow' --scenario busy --surface inspector --theme light --viewport narrow --fixture subagents --strict",
+      "audit": {
+        "documentWidth": 390,
+        "overflow": false,
+        "contrastChecks": 56,
+        "contrastFailures": 0,
+        "unnamedControls": 0
+      }
+    },
+    {
+      "id": "team-selection-hover-dark",
+      "title": "Dark selected row remains distinct while another row is hovered",
+      "image": "team-selection-hover-dark.png",
+      "producer": "designer",
+      "theme": "dark",
+      "scenario": "baseline",
+      "surface": "team-list",
+      "viewport": "desktop",
+      "width": 1440,
+      "height": 960,
+      "reproduce": "Start bun run mock --port 0 --fixture subagents --scenario baseline, open its production pairing URL, choose Dark, Team, List. Focus team list, press ArrowDown, hover claude-1. The second row retains its blue 3px marker."
+    },
+    {
+      "id": "team-selection-hover-light",
+      "title": "Light palette retained; selected rows gain a consistent green marker",
+      "image": "team-selection-hover-light.png",
+      "producer": "designer",
+      "theme": "light",
+      "scenario": "baseline",
+      "surface": "team-list",
+      "viewport": "desktop",
+      "width": 1440,
+      "height": 960,
+      "reproduce": "From the preceding Team List state choose Light, then hover claude-1 again. The second row retains its green 3px marker and original light selection fill."
+    },
+    {
+      "id": "transcript-selection-hover-dark-narrow",
+      "title": "Transcript selection marker at 390px with a different row hovered",
+      "image": "transcript-selection-hover-dark-narrow.png",
+      "producer": "designer",
+      "theme": "dark",
+      "scenario": "baseline",
+      "surface": "transcript",
+      "viewport": "narrow",
+      "width": 390,
+      "height": 844,
+      "reproduce": "Set 390x844, choose Dark, open claude-1 from Team List, choose transcript. Focus transcript list, press Home then ArrowDown, hover the first row. Selected second row keeps blue 3px marker."
+    }
+  ]
+}

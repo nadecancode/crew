@@ -8,7 +8,8 @@ This document replaces the visual/layout recommendations in [web-design.md §ui]
 
 ## Reference material
 
-- [Visual gallery](web-revamp/index.html): current screenshots and proposed screens, grouped by surface.
+- [Delivered neutral dashboard](web-revamp/neutral-signoff/index.html): current approved production captures and evidence.
+- [Original visual gallery](web-revamp/index.html): historical screenshots and proposed screens, grouped by surface.
 - [Light team reference](web-revamp/mockups/team-light-desktop.png), [dark team reference](web-revamp/mockups/team-dark-desktop.png), [narrow team reference](web-revamp/mockups/team-light-narrow.png).
 - [Attention state](web-revamp/mockups/attention-light-desktop.png), [task DAG](web-revamp/mockups/dag-dark-desktop.png), [700px panel replacement](web-revamp/mockups/replacement-light-narrow.png), [1024px split layout](web-revamp/mockups/inspector-light-compact.png).
 - [Inspector](web-revamp/mockups/inspector-dark-desktop.png), [tasks and task detail](web-revamp/mockups/tasks-light-desktop.png), [events](web-revamp/mockups/events-light-desktop.png), [usage](web-revamp/mockups/usage-dark-desktop.png), [question](web-revamp/mockups/question-light-desktop.png).
@@ -16,7 +17,7 @@ This document replaces the visual/layout recommendations in [web-design.md §ui]
 
 Mockups show hierarchy, surfaces, and spacing, not new wire values. Wording is illustrative; the implementation shows the actual objective, task titles, IDs, model, and diagnostics. The mockup's sandbox is assumed `required`; the existing warning must appear when it is not. Keep the visible subagent and runtime distinctions required below. References mix delivery tiers: the DAG/attention/panel layouts are T0; usage aggregate/attention count/timestamps are T1; List modes are funded T1; bus filter/follow controls remain T2. See §budget before treating a visible optional control as implementation scope.
 
-The reference images and original sign-off gallery predate the operator's 2026-10-05 dark-theme correction. Their green palette is superseded by §system below. They remain evidence for layout and the historical implementation, not colour approval for the revised dashboard.
+The original reference images and original sign-off gallery predate the operator's 2026-10-05 dark-theme correction. Their green palette is superseded by §system below. They remain evidence for layout and the historical implementation, not colour approval for the revised dashboard.
 
 <a id="audit"></a>
 ## §audit — current application
@@ -113,9 +114,9 @@ Aliases: `--bg = --canvas`, `--panel/--node = --surface`, `--bar-bg/--node-hi = 
 
 The dark structural tokens above must have equal red, green, and blue channels. Warning/error surfaces, runtime identities, status indicators, usage series, and diff content retain their purposeful colours. Use colour for a small indicator, text, border, or measured data; do not tint the shell, canvas, panels, composer, or selected rows green. List/control selection combines a gray fill with a blue border, underline, or row marker. Selected graph nodes use the bright neutral `--text` outline in dark mode so selection remains distinct from blue keyboard focus and the blue orchestrator frame; retain green light-mode selection with `stroke: light-dark(var(--action), var(--text))`. Existing labels and glyphs continue to distinguish meaning without colour.
 
-`--action-surface` and `--surface-raised` intentionally share `#242424` in dark mode. Hovered and selected bus/event rows have the same gray fill, but only selected rows have the persistent 3px blue marker. This distinction is accepted (`R-GREEN-4`); a second tinted or brighter selection surface is unnecessary.
+`--action-surface` and `--surface-raised` intentionally share `#242424` in dark mode. Hovered and selected rows have the same gray fill, but only selected rows have the persistent 3px blue marker. Apply that marker to the direct child of every selected `VirtualList` row: messages, events, Team List, Task List, and transcript. This distinction is accepted (`R-GREEN-4`) after extending the marker to all consumers (`R-GREEN-5`); a second tinted or brighter selection surface is unnecessary.
 
-Light appearance keeps the existing warm neutral palette, green action, and light scrim. This correction targets the operator's dark-mode request; it does not introduce a second light redesign. The terminal is always dark and therefore receives the neutral terminal values in either appearance.
+Light appearance keeps the existing warm neutral palette, green action, and light scrim. This correction targets the operator's dark-mode request; it does not introduce a second light redesign. The terminal is always dark and therefore receives the neutral terminal values in either appearance. Team, Task, and transcript selection also gains the existing green 3px marker in light mode; this small interaction-cue addition is accepted so every list consistently marks selection.
 
 Measured examples: light muted on white 6.34:1; dark muted on surface 8.49:1. Across canvas, surface, raised, action, warning and error surfaces, the minimum quiet-text contrast is 4.87:1 light / 5.54:1 dark; the minimum control-border contrast is 3.30:1 light / 3.79:1 dark. Action on `--surface` is 6.18:1 light / 8.43:1 dark; on `--action-surface` it is 5.42:1 light / 7.52:1 dark. [contrast.mjs](web-revamp/contrast.mjs) reads the actual `theme.css` tokens, checks these six surfaces, verifies dark structural neutrality and terminal contrast, and guards distinct usage series. Use the strong border for controls whose boundary is needed; `--line` is a decorative divider. Test composed warning, selection, disabled, and chart states separately. Do not apply container opacity to meaningful read-only text until contrast is lost; show a stale tint and status banner while keeping text readable.
 
@@ -472,25 +473,34 @@ For the neutral-theme correction, the local `ui-ux-pro-max` query `neutral dark 
 <a id="signoff"></a>
 ## §signoff — delivered dashboard
 
-### Current verdict: neutral-theme correction required
+### Current verdict: neutral dashboard approved
 
-On 2026-10-05 the operator rejected the green dark appearance. **The historical colour approval below is superseded; the corrected palette still needs integrated visual verification.** The reviewed delivery remains useful evidence for its hierarchy, functionality, and deliberate budget decisions.
+**Visual sign-off: approved** for production bundle `064037442ab479f5bbbe921361dda492757bf253`, source `fnv1a64:50c88732a97c7d7b`, reviewed on 2026-10-05 from QA's integrated revision `6f851ae0`. This supersedes the earlier green dark-palette approval. The operator's corrected appearance is delivered: neutral charcoal/black canvas, panels, text, controls, and terminal; blue general actions; purposeful colour for state, runtime identity, and the labelled usage series.
 
-Finding `R-GREEN-1` (also reported as `QA-DARK-01`) is confirmed on delivered main `15de7cf0`, whose source fingerprint is `fnv1a64:14e8acd06e0d4cac`. Inspection covered `theme.css`, the terminal fallbacks, the final integration review, and four retained production captures: [busy Team desktop](web-revamp/signoff/busy-team-dark-desktop.png), [long Team List narrow](web-revamp/signoff/long-text-team-list-dark-narrow.png), [transcript tablet](web-revamp/signoff/baseline-transcript-empty-dark-tablet.png), and [busy Events desktop](web-revamp/signoff/busy-events-dark-desktop.png). The green cast comes from the shared structural tokens and the widespread mint action token. No additional material design defect was identified in this scoped reinspection; accepted deferrals below remain accepted.
+The [current delivered-screen gallery](web-revamp/neutral-signoff/index.html) retains eleven actual production captures: eight from the final QA gallery and three from my live checks. [Evidence](web-revamp/neutral-signoff/evidence.json) pins the source fingerprint, bundle, stylesheet, reproduction steps, contrast results, and accepted limits. The historical before image is explicitly labelled and is not counted among the eleven final-target captures.
 
-| Surface | Required correction | Owner |
+The final strict QA gallery at `/tmp/crew-qa-neutral-final/index.html` covers 48 cases: 12 surfaces, both themes, desktop and 390px narrow. Its manifest names the same source and integrated revision, with zero failures. I sampled the four main views, selected Team List, terminal, transcript, Help, and light inspector from that final gallery. Dense fitted task graphs remain dependent on the existing Zoom and List controls; narrow windows with all status strips remain vertically scrollable. These are retained, previously accepted behaviours.
+
+I also opened the final production bundle against the `subagents` baseline mock with `agent-browser`, verifying the loaded `assets/style-DlOjRRu5.css` against the bundle manifest. At 1440px, a selected Team row retains its blue 3px marker while another gray row is hovered; the light counterpart keeps the original fills and a green marker. At 390px, a selected transcript row remains distinguishable while another row is hovered, and its detail remains visible. Explicit appearance choices update the actual palette. Help opens with its heading focused at scroll position zero; Tab reaches Close and Escape returns focus to Help. Stop confirmation initially focuses Cancel; Escape cancels and restores focus to Stop team. The document width remains 390px in the narrow Help check.
+
+| Finding | Delivered resolution | Evidence |
 |---|---|---|
-| Shell, view bars, bus, inspector, controls, composer, popovers | Use the neutral dark canvas/surface/raised/text/border tokens in §system; remove mint from general action chrome | `ui` |
-| Team and task graph, List modes, selection, gauges | Inherit neutral fills and blue action from shared tokens; preserve semantic/runtime accents and existing selection shape cues | `graph` audit; `ui` tokens |
-| Events, message rows, task details, usage | Neutral reading surfaces and selection; keep warning/error meaning and four distinct labelled usage categories | `content` audit; `ui` tokens |
-| Terminal and its fallback configuration | Neutral background, foreground, cursor, and selection; preserve ANSI/diff semantics | `graph` |
-| Delivered bundle and evidence | Rebuild after source integration; capture the actual revised components and report their source fingerprint | `qa` |
+| `R-GREEN-1` / `QA-DARK-01`: green surfaces and mint general-action chrome | `ui` `2578c713` supplies achromatic structural tokens and blue dark actions; `graph` `15ed4cdf` aligns terminal fallbacks | [Dark Team](web-revamp/neutral-signoff/busy-team-graph-dark-desktop.png), [terminal](web-revamp/neutral-signoff/busy-terminal-dark-desktop.png) |
+| `R-GREEN-3`: selected graph frame matched keyboard focus and orchestrator hue | `graph` `89034e85` uses bright neutral dark selection and preserves green light selection through `light-dark` | Selected node beside blue orchestrator in the terminal capture; both-theme focus checks |
+| `R-GREEN-5`: selected and hovered Team/Task/transcript rows looked identical | `content` `0b072f44` extends the existing child marker to every selected virtual-list row; QA `2069b4c2` checks all five list types in both themes, including warning/error event backgrounds | [Selected/hovered Team](web-revamp/neutral-signoff/team-selection-hover-dark.png), [narrow transcript](web-revamp/neutral-signoff/transcript-selection-hover-dark-narrow.png) |
 
-The source-token check passes all 57 checks on `ui` candidate `2578c713`, including minimum dark quiet-text contrast 5.54:1, control-boundary contrast 3.79:1, and primary-button contrast 9.07:1. The same check rejects all 12 green structural tokens and the mint general-action token on the inherited source. This is source validation, not integrated visual approval. Candidate review additionally identified `R-GREEN-3`: blue action, keyboard focus, and orchestrator framing collided on graph selection. The selected-node rule above resolves that collision while preserving light selection.
+`R-GREEN-4` is accepted with the universal persistent marker: selected and hovered dark rows may share a gray fill. Light palette tokens remain unchanged; the always-dark terminal is now neutral and Team/Task/transcript selection gains the same green marker already used by message/event rows. These limited additions preserve the light appearance's intent.
 
-The candidate's actual [Team at 1280px](web-revamp/neutral-preview/team-dark-desktop.png) and [Help at 390px](web-revamp/neutral-preview/help-dark-narrow.png) were also inspected. Canvas, panels, dialog, text, and controls now read as neutral charcoal/gray; general actions are blue. Remaining green marks carry status, runtime, or usage meaning. These captures demonstrate the agreed palette, but precede the graph selection correction and final bundle integration. [Candidate evidence](web-revamp/neutral-preview/evidence.json) names their producer, source candidate, and remaining verification.
+The source-reading `contrast.mjs` passes 57 checks, including all 12 achromatic dark structural tokens, six-surface text/control contrast, terminal contrast, primary-button text, and distinct usage colours. Minimum dark quiet-text contrast is 5.54:1; necessary control boundaries reach 3.79:1; primary-button text reaches 9.07:1. The reviewer independently reports 225 passing mock/performance checks and byte-identical rebuilt assets on this exact bundle. Those checks do not constitute a screen-reader audit or certification of every possible composition.
 
-Sign-off requires all dark structural values to be achromatic, six-surface text contrast at least 4.5:1, necessary control boundaries at least 3:1, and retained selection/focus cues. Run `node notes/web-revamp/contrast.mjs` against the revised source. Check real dark Team, a selected List row, Events, Usage, a dialog, and terminal/inspector at representative desktop and narrow sizes; also confirm unchanged light appearance outside the always-dark terminal. Preserve source ownership, existing interaction/security contracts, and every approved size ceiling. A passing old gallery or a recoloured static mockup cannot satisfy this corrected visual requirement.
+| Budget | Final measured bytes | Ceiling | Remaining |
+|---|---|---|---|
+| P1 nonterminal script | 230,360 | 230,500 | 140 |
+| P2 stylesheets | 33,906 | 34,000 | 94 |
+| P3 terminal script | 332,915 | 350,000 | 17,085 |
+| P4 entire bundle | 597,867 | 600,000 | 2,133 |
+
+No material visual finding remains open for this target. The functional scope, byte ceilings, and deliberate deferrals below remain intact. Code, security, scheduler behaviour, and final delivery acceptance remain the reviewer's responsibility.
 
 ### Historical verdict and target
 
