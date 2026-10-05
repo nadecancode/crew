@@ -798,6 +798,69 @@ switching workspaces, daemons that stop and return, `--remove`, `--restart`,
 what stays outside, a killed server and a squatter on its port, the
 performance budgets).
 
+For the frontend development loop, start the mock and Vite in separate
+terminals:
+
+```sh
+cd web && bun install
+bun run mock --fixture subagents --scenario busy  # terminal 1
+bun run dev                                     # terminal 2
+```
+
+Open the development pairing address printed by the mock. Each code works
+once for two minutes; Enter prints fresh codes. Without `--scenario`, the
+existing fixture and two-workspace development setup are unchanged.
+Scenarios layer protocol-v6 data over `--fixture`; generated Rust fixtures
+are never rewritten:
+
+| Scenario | Content |
+| --- | --- |
+| `baseline` | The generated fixture as it is |
+| `busy` | Every task status, mixed runtimes, dependencies, replies, artifacts, reported/zero/missing usage, and fresh/stale quotas |
+| `attention` | Two operator questions, warnings, blocked/failed agents, and paused usage limits |
+| `empty` | An unloaded team with no agents, tasks, messages, events, or quota reports |
+| `long-text` | Long objectives, titles, evidence, and Unicode text |
+| `limits` | Fallback, reset/retry times, context pressure, and queued compaction |
+| `disconnected` | Cached evidence ready for the `disconnect` control |
+| `multi` | Running, stopped, incompatible, unreachable, and unjoined workspaces |
+
+Scenario clocks are fixed and activity is off. Type `step` in the mock's
+terminal for one controller update; `--activity` opts into timed updates.
+Type `disconnect`, `stop`, `remove`, or `shutdown` to exercise availability.
+`--reads pending|error|empty|unavailable|truncated|ready` sets panel RPC
+responses; typing `ready` releases held reads and restores fixture handlers.
+Browser tests use the same `startMock({ scenario, fixture })`,
+`advanceScenario`, and `setPanelRead` controller helpers.
+
+Capture the built application, including its production CSP, with:
+
+```sh
+bun run build
+PLAYWRIGHT_EXECUTABLE_PATH=/path/to/chromium bun run gallery --out /tmp/crew-gallery
+```
+
+The output directory must be outside the repository. `index.html` shows
+real component screenshots with routes, fixture/scenario names, dimensions,
+and reproduction commands; `manifest.json` records contrast, control names,
+focus, document overflow, runtime errors, CSP violations, and requests after
+load. Gallery files contain no pairing codes, tokens, browser storage, or
+real workspace content, and never enter `web-dist`. Capture errors produce
+a nonzero exit; accessibility findings remain visible for review.
+
+Use `--scenario baseline --surface team,tasks,events,usage --theme light,dark
+--viewport desktop,narrow` for a short pass. The full matrix includes
+1440×960, 1024×768, 390×844, and a 200% desktop equivalent: 720×480 CSS pixels
+at device scale 2. Reduced motion and fixed browser time keep captures
+repeatable. Inspect screenshots and keyboard behavior manually; the solid
+color contrast collector does not evaluate canvas text, gradients, overlap,
+control boundaries, or screen-reader announcements. The browser tests cover
+Tab reachability, modal containment, focus return, inert evidence, and panel
+RPC states. Give every Playwright run its own output directory:
+
+```sh
+PLAYWRIGHT_EXECUTABLE_PATH=/path/to/chromium bunx playwright test --project=mock --output /tmp/crew-web-mock
+```
+
 ## Dashboard controls
 
 | Key | Action |
