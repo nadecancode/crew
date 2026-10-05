@@ -9,6 +9,7 @@ import { useApp } from "../app";
 import { clockTime, oneLine } from "../format";
 import { EVENT_LEVEL, decodeEvents, type Event, type EventLevel } from "../protocol";
 import { MAX_EVENTS } from "../store/store";
+import { EmptyState, ViewHeader } from "../components";
 import { VirtualList } from "./VirtualList";
 
 export const LOG_ROW = 36;
@@ -78,7 +79,7 @@ export function Logs() {
   const agents = () => store.state.agents.map((a) => a.id);
   return (
     <div class="logs" data-view="logs" aria-busy={loading()}>
-      <div class="content-head"><h2>Events</h2><span class="muted">{count()} loaded · search covers loaded events</span></div>
+      <ViewHeader title="Events" meta={`${count()} loaded`} description="Search covers loaded events." />
       <div class="filters" role="toolbar" aria-label="event filters">
         <label>agent
           <select value={f().agent ?? ""} onChange={(e) => ui.setLogFilter({ ...f(), agent: e.currentTarget.value || null })}>
@@ -116,7 +117,7 @@ export function Logs() {
           const e = at(i);
           if (e) ui.select({ kind: "event", seq: e.seq });
         }}
-        empty={<div class="empty">{filtering() ? "nothing matches the filters" : "no events yet"}</div>}
+        empty={<EmptyState title={filtering() ? "No events match these filters" : "No events yet"} description={filtering() ? "Clear the filters to see loaded events." : "Events appear as the team works."} />}
         render={(e: Event) => (
           <div class={`log-row lv-${e.level}`} classList={{ vcs: e.source === "vcs" }} data-seq={e.seq}>
             <span class="time">{clockTime(e.timestamp)}</span>
