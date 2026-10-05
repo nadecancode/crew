@@ -42,6 +42,30 @@ test("failed task dependency reads retain cached content with a local error", as
   } finally { release(); }
 });
 
+test("task push refresh is quiet and keeps the title at its previous position", async ({ page, mock, openPage }) => {
+  await openPage();
+  const task = mock.state.tasks.find((t) => t.id === "scenario-done")!;
+  await page.evaluate((id) => { location.hash = `#/w/${location.hash.split("/")[2]}/tasks?task=${id}`; }, task.id);
+  const panel = page.locator(".task-panel"), title = panel.locator(".task-title");
+  await expect(title).toHaveText(task.title);
+  await mock.waitForCall("task_get", (c) => c.params.id === task.id);
+  await expect(panel).toHaveAttribute("aria-busy", "false");
+  await expect(panel.locator(".fetch-state")).toHaveText("");
+  const before = (await title.boundingBox())!.y;
+  const from = mock.calls.length, release = setPanelRead(mock, "task_get", "pending");
+  try {
+    mock.push({ kind: "task", data: { ...task, note: "Updated review evidence" } });
+    await mock.waitForCall("task_get", (c) => c.seq >= from);
+    await expect(panel).toHaveAttribute("aria-busy", "true");
+    await expect(panel.locator(".fetch-state")).toHaveText("");
+    expect((await title.boundingBox())!.y).toBeCloseTo(before, 1);
+    release();
+    await expect(panel).toHaveAttribute("aria-busy", "false");
+    await expect(panel.locator(".fetch-state")).toHaveText("");
+    expect((await title.boundingBox())!.y).toBeCloseTo(before, 1);
+  } finally { release(); }
+});
+
 test("task artifact copy sends every machine value to the clipboard API", async ({ page, mock, openPage }) => {
   await page.addInitScript(() => {
     (window as unknown as { __copies: string[] }).__copies = [];
