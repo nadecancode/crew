@@ -1543,8 +1543,14 @@ fn compaction_does_not_read_through_symlinks() {
     s.wait_for("/compact to be typed", || {
         s.agent_cmd(&["output", "x"]).contains("/compact")
     });
-    let rollout =
-        codex_home.join("sessions/2026/10/03/rollout-2026-10-03T12-00-00-fake-thread.jsonl");
+    let agent_dir = ws.join(".crew/agents/x");
+    let files = crew::agents::files::AgentFiles::private(
+        agent_dir.clone(),
+        std::fs::File::open(&agent_dir).unwrap().into(),
+    );
+    let snapshot = s.snapshot();
+    let started = common::find_agent(&snapshot, "x").started_at.unwrap();
+    let rollout = files.codex_rollout("fake-thread", started).unwrap().path;
     let mut file = std::fs::OpenOptions::new()
         .append(true)
         .open(&rollout)

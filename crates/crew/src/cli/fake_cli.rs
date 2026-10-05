@@ -149,11 +149,20 @@ fn codex(args: &[String]) -> Result<()> {
         };
         let listener = UnixListener::bind(listen).with_context(|| format!("binding {listen}"))?;
         // The rollout is written by whoever owns the session: the server.
+        // Discovery looks around the launch's local date, as Codex does.
+        let now = chrono::Local::now();
+        let rollout = dir
+            .join("sessions")
+            .join(now.format("%Y/%m/%d").to_string())
+            .join(format!(
+                "rollout-{}-fake-thread.jsonl",
+                now.format("%Y-%m-%dT%H-%M-%S")
+            ));
         write(
-            &dir.join("sessions/2026/10/03/rollout-2026-10-03T12-00-00-fake-thread.jsonl"),
+            &rollout,
             &format!(
                 "{}\n",
-                json!({ "type": "response_item", "timestamp": "2026-10-03T12:00:00Z",
+                json!({ "type": "response_item", "timestamp": now.to_rfc3339(),
                         "payload": { "type": "message", "role": "assistant",
                                      "content": [{ "type": "output_text", "text": "hello from the fake" }] } })
             ),

@@ -62,16 +62,30 @@ fn the_fake_codex_server_binds_its_socket_and_keeps_its_rollout_in_codex_home() 
     let dir = tempfile::tempdir().unwrap();
     let socket = dir.path().join("s.sock");
     let listen = format!("unix://{}", socket.display());
+    let codex_home = dir.path().join("rw/home/codex");
+    let started = chrono::Local::now().timestamp_millis();
+    let files = crew::agents::files::AgentFiles::private(
+        dir.path().to_path_buf(),
+        std::fs::File::open(dir.path()).unwrap().into(),
+    );
     let mut child = fake(
         "codex",
         &["app-server", "--listen", &listen],
-        &[("CODEX_HOME", &dir.path().join("home"))],
+        &[("CODEX_HOME", &codex_home)],
     );
     wait_for("the socket", || UnixStream::connect(&socket).is_ok());
-    let rollout = dir
-        .path()
-        .join("home/sessions/2026/10/03/rollout-2026-10-03T12-00-00-fake-thread.jsonl");
-    wait_for("the rollout", || rollout.is_file());
+    // Use the daemon's discovery instead of an expected date literal: a
+    // rollout outside the launch-date window is invisible to compaction.
+    wait_for("the rollout", || {
+        files.codex_rollout("fake-thread", started).is_some()
+    });
+    let rollout = files.codex_rollout("fake-thread", started).unwrap();
+    assert!(rollout.path.starts_with(&codex_home));
+    let row: serde_json::Value = serde_json::from_reader(rollout.file).unwrap();
+    let timestamp = chrono::DateTime::parse_from_rfc3339(row["timestamp"].as_str().unwrap())
+        .unwrap()
+        .timestamp_millis();
+    assert!((started..=chrono::Local::now().timestamp_millis()).contains(&timestamp));
     child.kill().unwrap();
     child.wait().unwrap();
 }
