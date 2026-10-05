@@ -8,7 +8,9 @@ import { Show, createMemo, createSignal, onCleanup } from "solid-js";
 import { useApp } from "../app";
 import { clockTime, oneLine } from "../format";
 import { decodeMessages, isBroadcast, isP2p, ORCHESTRATOR_ID, OPERATOR_ID, type Message } from "../protocol";
+import { EmptyState } from "../components";
 import { VirtualList } from "./VirtualList";
+import { PanelHead } from "./SidePanel";
 
 export const BUS_ROW = 84;
 
@@ -71,12 +73,9 @@ export function Bus() {
 
   return (
     <div class="panel-body bus" aria-busy={loading()}>
-      <div class="panel-head">
-        <h2 class="panel-title">Message bus</h2>
-        <span class="muted">{count()} loaded</span>
-        <span class="spacer" />
+      <PanelHead title="Message bus" sub={`${count()} loaded`}>
         <button disabled={!link.live() || loading()} onClick={loadOlder} title="ask the daemon for older messages">{loading() ? "Loading…" : "Load older"}</button>
-      </div>
+      </PanelHead>
         <Show when={ui.busPair()}>
           <div class="bus-scope"><span class="chip filter">{ui.busPair()![0]} ↔ {ui.busPair()![1]} <button aria-label="clear the filter" onClick={() => ui.setBusPair(null)}>×</button></span></div>
         </Show>
@@ -98,7 +97,7 @@ export function Bus() {
           const m = at(i);
           if (m) ui.select({ kind: "message", id: m.id });
         }}
-        empty={<div class="empty">{ui.busPair() ? "No messages between these agents" : "No messages yet"}</div>}
+        empty={<EmptyState title={ui.busPair() ? "No messages between these agents" : "No messages yet"} description="Messages appear here as the team communicates." />}
         render={(m: Message) => (
           <div class={`bus-row k-${kindOf(m)} t-${m.type}`} data-message={m.id}
             onPointerEnter={() => ui.setHoverPair([m.from, m.to])} onPointerLeave={() => ui.setHoverPair(null)}

@@ -9,7 +9,8 @@ import { useApp } from "../app";
 import { useSecond } from "../clock";
 import { absoluteTime, clockTime, resetTime, runtimeGlyph, tokens, windowSize } from "../format";
 import type { Agent } from "../protocol";
-import { levelTone, reportedTokens, until, usageRows, usageTotals, windowLabel, STALE_MS } from "./usage";
+import { EmptyState, ViewHeader } from "../components";
+import { levelTone, reportedTokens, until, usageRows, windowLabel, STALE_MS } from "./usage";
 
 const SERIES = ["input", "output", "cache read", "cache written"] as const;
 const total = (a: Agent) => (a.usage ? reportedTokens(a.usage) : 0);
@@ -20,7 +21,6 @@ export function UsageView() {
   const second = useSecond();
   const now = () => (second(), store.serverNow(Date.now()));
   const agents = createMemo(() => [...store.state.agents].sort((a, b) => total(b) - total(a) || a.id.localeCompare(b.id)));
-  const totals = createMemo(() => usageTotals(store.state.agents));
   const max = () => Math.max(1, ...agents().map(total));
   const rows = createMemo(() => usageRows(store.state.session?.quotas ?? [], store.state.agents));
   const [hover, setHover] = createSignal<string | null>(null);
@@ -31,15 +31,7 @@ export function UsageView() {
 
   return (
     <div class="usage-view scroll" tabindex="0" aria-label="usage">
-      <h2>Usage</h2>
-      <dl class="usage-totals">
-        <For each={[
-          ["Total reported tokens", totals().reported ? tokens(totals().tokens) : "Not reported"],
-          ["Reported turns", totals().reported ? totals().turns : "Not reported"],
-          ["Paused at a limit", totals().limited],
-        ]}>{([label, value]) => <div><dt>{label}</dt><dd>{value}</dd></div>}</For>
-      </dl>
-      <p class="muted">{totals().reported} of {agents().length} agents reporting · includes input, output, cache read and cache written tokens.</p>
+      <ViewHeader title="Usage" meta="Reported by this team's runtimes" />
       <section>
         <h3>agents <span class="muted">by tokens</span></h3>
         <div class="legend">
@@ -49,15 +41,16 @@ export function UsageView() {
         <table class="usage-table">
           <thead><tr><th>agent</th><th>context</th><th>tokens</th><th class="num">turns</th><th class="num">compactions</th></tr></thead>
           <tbody>
-            <For each={agents()}>
+            <For each={agents()} fallback={<tr><td colspan="5">No agents yet</td></tr>}>
               {(a) => {
                 const parts = () => (a.usage ? [a.usage.input_tokens, a.usage.output_tokens, a.usage.cache_read_tokens, a.usage.cache_creation_tokens] : []);
+                const breakdown = () => SERIES.map((s, i) => `${s} ${parts()[i]}`).join(" · ");
                 return (
                   <tr classList={{ hover: hover() === a.id }} onPointerEnter={() => setHover(a.id)} onPointerLeave={() => setHover(null)}>
                     <td><button class={`link rt-${a.runtime}`} onClick={() => open(a.id)}>{runtimeGlyph(a.runtime)} {a.id}</button></td>
                     <td>
                       <Show when={a.context} fallback={<span class="dim">not reported</span>}>
-                        <span class="ctx" tabindex="0" aria-label={`${a.context!.percent}% · ${a.context!.tokens} of ${a.context!.window} tokens`} title={`${a.context!.percent}% · ${tokens(a.context!.tokens)} of ${tokens(a.context!.window)}`}>
+                        <span class="ctx" tabindex="0" role="img" aria-label={`${a.context!.percent}% · ${a.context!.tokens} of ${a.context!.window} tokens`} title={`${a.context!.percent}% · ${tokens(a.context!.tokens)} of ${tokens(a.context!.window)}`}>
                           <svg class="gauge-svg" viewBox="0 0 100 8" preserveAspectRatio="none" aria-hidden="true">
                             <rect class="track" width="100" height="8" rx="2" />
                             <rect class={`fill ${levelTone(a.context!.percent)}`} width={a.context!.percent} height="8" rx="2" />
@@ -68,7 +61,7 @@ export function UsageView() {
                     </td>
                     <td>
                       <Show when={a.usage} fallback={<span class="dim">not reported</span>}>
-                        <span class="stack" tabindex="0" aria-label={SERIES.map((s, i) => `${s} ${parts()[i]}`).join(" · ")} title={SERIES.map((s, i) => `${s} ${tokens(parts()[i])}`).join(" · ")}>
+                        <span class="stack" tabindex="0" role="img" aria-label={breakdown()} title={breakdown()}>
                           <svg class="stack-svg" viewBox="0 0 200 10" preserveAspectRatio="none" aria-hidden="true">
                             {(() => {
                               let x = 0;
@@ -125,7 +118,7 @@ export function UsageView() {
       </Show>
 
       <section>
-        <h3>context since this page was opened</h3>
+        <h3>context since this page opened</h3>
         <p class="muted">The daemon keeps no usage history: these lines start when the page did, and start again after a reload.</p>
         <ContextLines hover={hover} setHover={setHover} />
       </section>
@@ -151,25 +144,20 @@ function ContextLines(props: { hover: () => string | null; setHover(id: string |
   const x = (t: number) => PAD + ((t - span()!.t0) / (span()!.t1 - span()!.t0)) * (W - 2 * PAD);
   const y = (p: number) => H - PAD + 8 - (p / 100) * (H - 2 * PAD);
   const path = (points: { t: number; percent: number }[]) =>
-    points.map((p, i) => `${i ? "L" : "M"}${x(p.t).toFixed(1)} ${y(p.percent).toFixed(1)}`).join("");
+    points.map((p, i) => `${i ? "L" : "M"}${x(p.t).toFixed(1)} ${y(p.percent).toFixed(1)}`).join("") + (points.length === 1 ? "l0,0" : "");
   const runtimeOf = (id: string) => store.agent(id)?.runtime ?? "shell";
   return (
-    <Show when={span()} fallback={<p class="dim">no agent has reported its context window yet</p>}>
+    <Show when={span()} fallback={<EmptyState title="No context samples yet" description="No runtime has reported its context window." />}>
       <svg class="lines-svg" viewBox={`0 0 ${W} ${H}`} role="img" aria-label="context window use per agent over time">
         <For each={[0, 50, 100]}>{(p) => <><line class="grid" x1={PAD} x2={W - PAD} y1={y(p)} y2={y(p)} /><text class="axis" x={4} y={y(p) + 4}>{p}%</text></>}</For>
         <text class="axis" x={PAD} y={H - 4}>{clockTime(span()!.t0)}</text>
         <text class="axis" x={W - PAD} y={H - 4} text-anchor="end">{clockTime(span()!.t1)}</text>
         <For each={series()}>
           {(s) => (
-            <g class={`rt-${runtimeOf(s.id)}`}>
-            <Show when={s.points.length === 1}>
-              <circle cx={x(s.points[0].t)} cy={y(s.points[0].percent)} r="3" fill="currentColor" />
-            </Show>
-            <path class="ctx-line" classList={{ hover: props.hover() === s.id, dim: !!props.hover() && props.hover() !== s.id }} d={path(s.points)}
+            <path class={`ctx-line rt-${runtimeOf(s.id)}`} classList={{ point: s.points.length === 1, hover: props.hover() === s.id, dim: !!props.hover() && props.hover() !== s.id }} d={path(s.points)}
               onPointerEnter={() => props.setHover(s.id)} onPointerLeave={() => props.setHover(null)}>
               <title>{s.id}: {s.points[s.points.length - 1].percent}% now</title>
             </path>
-            </g>
           )}
         </For>
       </svg>
