@@ -38,6 +38,7 @@ export async function auditPage(page: Page) {
     const contrast: { element: string; text: string; ratio: number; required: number }[] = [];
     let checked = 0;
     for (const el of document.querySelectorAll<HTMLElement>("body *")) {
+      if (!(el instanceof HTMLElement)) continue;
       if (!visible(el) || ["SCRIPT", "STYLE", "CANVAS", "SVG", "OPTION"].includes(el.tagName)) continue;
       const text = [...el.childNodes].filter((n) => n.nodeType === Node.TEXT_NODE).map((n) => n.textContent).join(" ").trim();
       if (!text || el.closest(".xterm")) continue;

@@ -66,3 +66,22 @@ test("a delayed old transcript cannot replace another selected agent's evidence"
     await expect(page.locator(".transcript-list .vrow")).not.toHaveCount(0);
   } finally { release(); }
 });
+
+test("releasing an old held read preserves a newer controller error mode", async ({ page, mock, openPage }) => {
+  const old = setPanelRead(mock, "agent_transcript", "pending");
+  let current = () => {};
+  try {
+    await openPage();
+    await page.locator('[data-agent="claude-1"]').focus();
+    await page.keyboard.press("Enter");
+    await page.getByRole("tab", { name: "transcript", exact: true }).click();
+    await mock.waitForCall("agent_transcript");
+    current = setPanelRead(mock, "agent_transcript", "error");
+    old(); old();
+    await expect(page.locator(".transcript-list")).toContainText("Compatibility tests passed.");
+    await page.evaluate(() => { location.hash = location.hash.replace("agent=claude-1", "agent=claude-2"); });
+    await expect(page.locator('[data-inspector="claude-2"]')).toBeVisible();
+    await page.getByRole("tab", { name: "transcript", exact: true }).click();
+    await expect(page.locator(".transcript")).toContainText("Mock agent_transcript read failed.");
+  } finally { old(); current(); }
+});
