@@ -1,6 +1,6 @@
 {
   "date": "2026-10-05",
-  "verdict": "Neutral appearance and task presentation retained; focus-restoration edge case recorded for triage",
+  "verdict": "Neutral appearance and task presentation retained; known medium accessibility focus gap does not block baseline recovery per reviewer",
   "baseline": "6049cdf63e36e303327235834f23a798aa5a82c1",
   "bundle": "9d2e838747fefae2684c66dd56ae854215446bbd",
   "source": "fnv1a64:f22f3cf5ad74d25f",
@@ -45,13 +45,17 @@
   "finding": {
     "id": "RECOVERY-FOCUS-1",
     "owners": ["ui", "reviewer"],
-    "state": "reported for triage",
+    "state": "known material gap; nonblocking for baseline recovery per reviewer",
+    "severity": "medium accessibility defect: focus order; no trap or data loss",
+    "reviewerTriageMessage": "m-5b01d8960110",
     "source": "web/src/ui.ts::closePanel",
     "reproduce": "At 1440px open claude-1 inspector from Team Graph, open parked-new from its task list, switch Tasks while retaining detail, resize to 390px, press Escape.",
     "observed": "Task detail closes; document.activeElement is BODY. Original agent trigger is unmounted and fallback only queries data-agent.",
+    "desktopWithoutResize": { "width": 1440, "height": 960, "escapeImmediatelyAfterTasksClick": "Focus stays on Tasks navigation button.", "escapeAfterTaskReadingRegionFocused": "Task detail closes; document.activeElement is BODY; task graph exists; original agent trigger does not exist.", "readingRegionSelector": ".task-panel [data-focus-first]" },
     "expected": "Focus returns to an available task or view control after the original trigger is removed.",
     "control": "At 390px opening parked-new directly from Task List and pressing Escape returns focus to the selected parked-new task row.",
-    "introducedByProjectionChange": false
+    "introducedByProjectionChange": false,
+    "followup": "Separate web card, owner ui. Preserve saved trigger when available; otherwise restore closed selection's task/agent row or current view tab stop. Targeted regression and production rebuild must remain within P1-P4; only 85 nonterminal script bytes remain. No fix included in recovery."
   },
   "limits": ["Bounded visual check, not a repeated full capture matrix or screen-reader audit.", "Source, stylesheet and fixtures unchanged by this recovery task.", "Approved scope, palette decisions, deliberate deferrals and P1-P4 ceilings remain unchanged."]
 }
