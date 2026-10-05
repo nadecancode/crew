@@ -1,0 +1,58 @@
+{
+  "date": "2026-10-05",
+  "kind": "Native Linux runtime environment proof; disconnected development shell only",
+  "helper_baseline": "d0b1e4e9b5140982254e83c98b588ee25f8bd592",
+  "helper_candidate": "0198317b281e2bde0caf451eb5cdfb48094b3505",
+  "nixpkgs": "/nix/store/ab93n7qqycnn3xfdnav0wnqqigvddd5r-source",
+  "binary": {
+    "owner": "graph",
+    "source": "/home/nade/workspaces/personal/crew/.crew/worktrees/graph/target/native-validation/linux-shell-loader-baseline/crew-desktop",
+    "retained": "/home/nade/workspaces/personal/crew/.crew/worktrees/qa/target/native-validation/linux-runtime-env/crew-desktop",
+    "sha256": "9e98ed6697325b58a62f81042fc63220e941c20f529558bb8c5aaec473e3cc51",
+    "provenance": "Graph supplied immutable development binary in m-46e95653e4f8; source still changing at that build. This capture does not establish c45703ff or later source acceptance.",
+    "owner_reported_rust_cargo": "1.93.1"
+  },
+  "before": {
+    "helper": "Exact common.sh/linux-env.sh/linux-smoke.sh from d0b1e4e9 in private before-tooling tree",
+    "runner_exit": 1,
+    "app_log": "/home/nade/workspaces/personal/crew/.crew/worktrees/qa/target/native-validation/linux-runtime-env/crew-desktop: error while loading shared libraries: libgtk-4.so.1: cannot open shared object file: No such file or directory\n",
+    "unresolved_libraries": [
+      "libgtk-4.so.1",
+      "libpango-1.0.so.0",
+      "libgio-2.0.so.0",
+      "libgobject-2.0.so.0",
+      "libglib-2.0.so.0"
+    ]
+  },
+  "after": {
+    "runner_exit": 0,
+    "unresolved_libraries": [],
+    "capture": "linux-runtime-environment.png",
+    "capture_sha256": "e31265ea407178bf2516d3d7507e256599a3a3d19a6e64f9a9530709faf8c3df",
+    "window": "\nxwininfo: Window id: 0x200005 \"Crew\"\n\n  Absolute upper-left X:  0\n  Absolute upper-left Y:  0\n  Relative upper-left X:  0\n  Relative upper-left Y:  0\n  Width: 1120\n  Height: 720\n  Depth: 32\n  Visual: 0x40\n  Visual Class: TrueColor\n  Border width: 0\n  Class: InputOutput\n  Colormap: 0x200001 (not installed)\n  Bit Gravity State: NorthWestGravity\n  Window Gravity State: NorthWestGravity\n  Backing Store State: NotUseful\n  Save Under State: no\n  Map State: IsViewable\n  Override Redirect State: no\n  Corners:  +0+0  -320+0  -320-240  +0-240\n  -geometry 1120x720+0+0\n\n",
+    "settings": "display=:8006\nwindow=0x200005\napp_pid=3827822\nxvfb_pid=3827809\nscreen=1440x960x24\ndpi=96\nGDK_SCALE=1\nGDK_DPI_SCALE=1\nGDK_BACKEND=x11\nGSK_RENDERER=cairo\nGDK_DEBUG=no-portals\n",
+    "versions": "GTK 4.22.4\nVTE 0.84.1\nGLib 2.88.3\nxwininfo 1.1.6\nVersion: ImageMagick 7.1.2-29 Q16-HDRI x86_64 b919b37fd:20260727 https://imagemagick.org\ndbus-run-session 1.16.2",
+    "app_log": "MESA-EGL: warning: DRI3 error: Could not get DRI3 device\nMESA-EGL: warning: Ensure your X server supports DRI3 to get accelerated rendering\n",
+    "app_log_note": "MESA DRI3 warnings expected under private Xvfb/Cairo; mapped window and capture passed."
+  },
+  "checks": {
+    "unchanged_binary_before_after": true,
+    "gtk_loader_failure_reproduced": true,
+    "real_crew_shell_window_mapped": true,
+    "no_unresolved_libraries_after": true,
+    "before_after_owned_app_xvfb_children_gone": true,
+    "inherited_loader_suffix_preserved": true,
+    "caller_environment_unchanged": true,
+    "no_empty_library_directory_added": true,
+    "spaced_argument_and_non_repository_cwd_preserved": true,
+    "changed_launcher_shell_syntax": true
+  },
+  "local_artifacts": "/home/nade/workspaces/personal/crew/.crew/worktrees/qa/target/native-validation/linux-runtime-env",
+  "not_run": [
+    "Final Linux shell source/design acceptance",
+    "Connected core/daemon/gateway/actions/terminal flows",
+    "Native accessibility journeys or Wayland/desktop portal behavior",
+    "Apple build/link/simulator/device",
+    "Unchanged web/native matrices"
+  ]
+}
