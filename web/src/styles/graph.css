@@ -28,7 +28,7 @@
 .node.st-blocked .box,.node.asking .box { stroke:var(--warn); }
 .node.hub .box { stroke:var(--orch); } .node.hub.asking .box { stroke:var(--warn); }
 .node.hub.empty { cursor:default; }
-.node.selected .box,.task.selected .box { stroke:var(--text); stroke-width:2.5; }
+.node.selected .box,.task.selected .box { stroke:light-dark(var(--action),var(--text)); stroke-width:2.5; }
 .node:focus-visible .box,.task:focus-visible .box { stroke:var(--focus); stroke-width:3; }
 .node foreignObject,.task foreignObject { pointer-events:none; }
 .node-body { pointer-events:none; height:100%; padding:8px; display:flex; flex-direction:column; gap:2px; font-size:13px; line-height:1.3; overflow:hidden; }
