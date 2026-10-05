@@ -163,7 +163,9 @@ test("a context menu offers the actions of a node", async ({ page, openPage }) =
   await page.locator('[data-agent="claude-4"] .node-head').click({ button: "right" });
   const menu = page.getByRole("menu", { name: "actions for claude-4" });
   await expect(menu).toBeVisible();
-  await expect(menu.getByRole("menuitem")).toHaveText(["message", "pause", "restart", "model and CLI", "compact", "open terminal", "kill…"]);
+  const names = ["message", "prompt", "pause", "restart", "restart fresh…", "model and CLI", "compact", "open terminal", "jump to pane", "kill…"];
+  await expect(menu.getByRole("menuitem")).toHaveCount(names.length);
+  for (const [i, name] of names.entries()) await expect(menu.getByRole("menuitem").nth(i)).toHaveAccessibleName(name);
   await page.keyboard.press("Escape");
   await expect(menu).toHaveCount(0);
 });
