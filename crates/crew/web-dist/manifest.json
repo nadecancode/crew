@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "source": "fnv1a64:cf8956b55a22c53c",
+  "source": "fnv1a64:50c88732a97c7d7b",
   "files": [
     {
       "path": "assets/Terminal-C44rcl0d.js",
@@ -18,9 +18,9 @@
       "hash": "fnv1a64:2569ca10ce2e0fd9"
     },
     {
-      "path": "assets/style-CPZ7Ukgg.css",
-      "bytes": 33927,
-      "hash": "fnv1a64:49bd427aef8d06f2"
+      "path": "assets/style-DlOjRRu5.css",
+      "bytes": 33906,
+      "hash": "fnv1a64:fea4fef0900f767d"
     },
     {
       "path": "assets/xterm-lz32akA6.js",
@@ -30,7 +30,7 @@
     {
       "path": "index.html",
       "bytes": 686,
-      "hash": "fnv1a64:fa9ad8d38e8c42ab"
+      "hash": "fnv1a64:140c9ef6e845fb78"
     }
   ]
 }
