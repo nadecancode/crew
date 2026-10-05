@@ -124,7 +124,7 @@ Sections: [§scope](#scope) · [§transport](#transport) · [§security](#securi
 | W9 | SolidJS 1.9, Vite 7, TypeScript, bun. No router, no component kit, no state library. xterm.js is the one large dependency, in a chunk of its own beside the first paint. | §build |
 | W10 | Graphs and charts are **hand-written SVG**: no graph, layout or chart library. | §graphs |
 | W11 | The animation state machine is a port of `crew_tui::anim::Anims`; parity with the TUI is tested with cases generated from the Rust code. | §graphs |
-| W12 | The Rust side publishes **wire fixtures** generated from the real types; the frontend's decoders, its mock server and its tests read them. Nothing is generated into the frontend's tree. | §tests |
+| W12 | The Rust side publishes **wire fixtures** generated from the real types; the frontend's decoders, its mock server and its tests read them. The sole frontend-generation exception is `web/src/generated/client-policy.ts`, emitted from live shared Rust policy by `crates/crew-client/examples/generate_web_policy.rs` and checked byte-for-byte by Rust. | §tests |
 | W13 | On a subscribed connection a **snapshot is a barrier**: no push before its reply is newer than it, every push after its marker follows it. The server guarantees it; the page relies on it. | §transport |
 
 Native-sharing amendment to W12, 2026-10-05: the orchestrator approved one
@@ -1790,6 +1790,24 @@ machine the timing limits may be scaled by `CREW_PERF_SCALE`, the counts
 
 Three layers, each runnable on its own: Rust (no node), vitest (no daemon, no
 browser), Playwright (a browser; with the mock, or with a real daemon).
+
+### Shared client policy (W12 exception; owner: content)
+
+The narrow client-policy exception shares the current method timeouts and slash
+command metadata with `crew-client/src/policy.rs::web_policy()`. The Rust action
+runtime and the emitter read the same typed descriptors. Regenerate explicitly:
+
+```sh
+cargo run --locked -p crew-client --example generate_web_policy > web/src/generated/client-policy.ts
+```
+
+`crates/crew-client/tests/web_policy.rs` rejects stale output. Normal web builds
+read the committed TypeScript module and need no Cargo; Rust installation needs
+no Node. The exception adds no runtime dependency, CSP permission or WASM.
+Connection retry logic, confirmations, reducers, ranking and retention remain
+their existing TypeScript implementations. They are not a shared Rust browser
+engine. Generated declarations that have no production consumer do not count
+as runtime reuse. No other source under `web/` is generated.
 
 ### Wire fixtures (W12; owner: vcs)
 

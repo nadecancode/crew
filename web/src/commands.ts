@@ -4,28 +4,10 @@
 // sent as a message. `/exit` and `/mouse` have nothing to do in a browser and
 // say so; `/usage`, `/graph [reset]` and `/keys on|off` are the browser's own.
 
-export type SlashCommand = { name: string; aliases: string[]; args: string; about: string; web?: "declined" | "new" };
+import { COMMANDS, type GeneratedCommand } from "./generated/client-policy";
 
-export const COMMANDS: SlashCommand[] = ([
-  ["exit", "leave the dashboard — the team keeps running", undefined, ["quit", "q"], "declined"],
-  ["stop", "stop the team: every agent and the daemon (asks first)", undefined, ["terminate", "shutdown"]],
-  ["kill", "stop one agent's process (asks first)", "[agent]"],
-  ["restart", "restart an agent, resuming its session", "[agent]"],
-  ["restart-fresh", "restart without resuming the old conversation (asks first)", "[agent]"],
-  ["pause", "suspend an agent", "[agent]"],
-  ["unpause", "let a suspended agent continue", "[agent]"],
-  ["compact", "compact an agent's context when its turn ends", "[agent]"],
-  ["model", "choose the model and CLI an agent runs on", "[agent]", ["cli", "harness"]],
-  ["resume", "continue the agents paused at a usage limit"],
-  ["answer", "answer the questions the team has for you", undefined, ["questions"]],
-  ["tasks", "show the task graph"],
-  ["logs", "show the event log"],
-  ["mouse", "turn mouse clicks on or off (off: drag selects text)", undefined, undefined, "declined"],
-  ["help", "keys and commands", undefined, ["?"]],
-  ["usage", "show usage: context windows, tokens, quotas", undefined, undefined, "new"],
-  ["graph", "show the agent graph; reset forgets dragged positions", "[reset]", undefined, "new"],
-  ["keys", "turn single-key shortcuts on or off", "on|off", undefined, "new"]
-] as [string, string, string?, string[]?, SlashCommand["web"]?][]).map(([name, about, args = "", aliases = [], web]) => ({ name, about, args, aliases, web }));
+export { COMMANDS };
+export type SlashCommand = GeneratedCommand;
 
 /** Why a declined command does nothing here. */
 export const DECLINED = "not needed in the browser";

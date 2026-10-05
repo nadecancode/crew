@@ -8,6 +8,7 @@
 // the index (net/hub.ts), a workspace's state socket (net/workspace.ts) and
 // terminal sockets (term/) build on it.
 
+import { timeoutFor } from "../generated/client-policy";
 import { DecodeError, PROTOCOL, decodeFrame, decodeHello, decodePaired, type Push, type RpcError } from "../protocol";
 import { proves, type Credential, type Session } from "./session";
 
@@ -53,24 +54,7 @@ export class CallError extends Error {
   }
 }
 
-/** Per-method timeouts, as the TUI's (`net.rs`). */
-export function timeoutFor(method: string): number {
-  switch (method) {
-    case "agent_kill":
-    case "agent_restart":
-    case "agent_restart_fresh":
-    case "agent_resume":
-    case "agent_set_model":
-      return 30_000;
-    case "resume":
-    case "shutdown":
-      return 90_000;
-    case "models_list":
-      return 20_000;
-    default:
-      return 3_000;
-  }
-}
+export { timeoutFor };
 
 export const RETRY_FIRST_MS = 250;
 export const RETRY_MAX_MS = 5_000;
