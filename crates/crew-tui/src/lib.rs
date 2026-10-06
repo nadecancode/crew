@@ -85,12 +85,13 @@ pub fn run(
             return Err(error).context("starting terminal input");
         }
     };
+    let mut app = App::new();
     let subscriber = net::spawn_subscriber(socket.to_path_buf(), tx.clone(), stop.clone());
-    let mut requests = net::spawn_requester(socket.to_path_buf(), tx);
+    let mut requests =
+        net::spawn_scoped_requester(socket.to_path_buf(), tx, Some(app.shared.dispatch_guard()));
     requests.subscriber = Some(subscriber);
 
     let theme = Theme::detect();
-    let mut app = App::new();
     app.model_names = model_names;
     if let Some(notice) = notice {
         app.set_notice(notice, now_ms());
@@ -109,6 +110,7 @@ pub fn run(
     let result = event_loop(&mut terminal, &mut app, &theme, &rx, &requests, &signals);
 
     stop.store(true, Ordering::Relaxed);
+    requests.restart_subscriber();
     let _ = input.join();
     leave_terminal();
     if result.is_ok() && app.daemon_stopped && !app.stopped {
@@ -284,6 +286,7 @@ fn handle(
         }
         UiEvent::Input(_) => app.mark_dirty(),
         UiEvent::Reply(reply) => {
+            let before = app.shared.read(crew_client::ClientCore::revision);
             let reconnect = matches!(
                 reply.as_ref(),
                 app::Reply::Shared {
@@ -293,7 +296,7 @@ fn handle(
                 }
             );
             app.apply_reply(*reply, now);
-            if reconnect {
+            if reconnect && app.shared.read(crew_client::ClientCore::revision) != before {
                 app.disconnected_at(now);
                 requests.restart_subscriber();
             }
@@ -309,15 +312,12 @@ fn handle(
 fn send_shared(app: &mut App, command: Command, requests: &net::Requests, now: i64) {
     if let Command::Keys { id, text } = &command {
         if let Some(scope) = app.shared.read(|core| core.scope().cloned()) {
-            if requests
-                .send(Command::RawKeys {
-                    scope,
-                    id: id.clone(),
-                    text: text.clone(),
-                })
-                .is_err()
-            {
-                app.set_status("keys not delivered: request worker closed", true, now);
+            if let Err(error) = requests.send(Command::RawKeys {
+                scope,
+                id: id.clone(),
+                text: text.clone(),
+            }) {
+                app.set_status(format!("keys not delivered: {error}"), true, now);
             }
         } else {
             app.set_status("keys not delivered: no authenticated snapshot", true, now);
@@ -327,7 +327,7 @@ fn send_shared(app: &mut App, command: Command, requests: &net::Requests, now: i
     for planned in app.prepare(command, now) {
         let scope = planned.scope.clone();
         let operation_id = planned.operation_id;
-        if requests.send(Command::Planned(Box::new(planned))).is_err() {
+        if let Err(error) = requests.send(Command::Planned(Box::new(planned))) {
             app.apply_reply(
                 app::Reply::Shared {
                     scope,
@@ -335,7 +335,7 @@ fn send_shared(app: &mut App, command: Command, requests: &net::Requests, now: i
                     outcome: crew_client::OperationOutcome::NotSent {
                         reason: crew_client::ClientReason {
                             code: "closed".into(),
-                            message: "request worker closed".into(),
+                            message: error.to_string(),
                         },
                     },
                 },

@@ -11,7 +11,7 @@
 
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::mpsc::{self, Receiver, Sender};
+use std::sync::mpsc::{self, Receiver, Sender, SyncSender};
 use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::Duration;
@@ -209,10 +209,32 @@ pub fn spawn_subscriber(
 /// their own worker; replies come back on the UI channel.
 #[derive(Clone)]
 pub struct Requests {
-    main: Sender<Command>,
-    slow: Sender<Command>,
-    keys: Sender<Command>,
+    main: SyncSender<Command>,
+    slow: SyncSender<Command>,
+    keys: SyncSender<Command>,
     pub subscriber: Option<Arc<Mutex<Option<crew_core::client::FrameWriter>>>>,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum QueueError {
+    Full,
+    Closed,
+}
+
+impl std::fmt::Display for QueueError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(match self {
+            Self::Full => "request queue is full",
+            Self::Closed => "request worker closed",
+        })
+    }
+}
+
+fn enqueue(tx: &SyncSender<Command>, command: Command) -> Result<(), QueueError> {
+    tx.try_send(command).map_err(|error| match error {
+        mpsc::TrySendError::Full(_) => QueueError::Full,
+        mpsc::TrySendError::Disconnected(_) => QueueError::Closed,
+    })
 }
 
 impl Requests {
@@ -223,11 +245,11 @@ impl Requests {
             }
         }
     }
-    pub fn send(&self, command: Command) -> Result<(), mpsc::SendError<Command>> {
+    pub fn send(&self, command: Command) -> Result<(), QueueError> {
         if let Command::Planned(planned) = &command {
             if let Ok(typed) = planned.typed() {
                 return match typed.kind() {
-                    crew_client::CommandKind::AgentInput => self.keys.send(command),
+                    crew_client::CommandKind::AgentInput => enqueue(&self.keys, command),
                     crew_client::CommandKind::AgentKill
                     | crew_client::CommandKind::AgentRestart
                     | crew_client::CommandKind::AgentRestartFresh
@@ -235,13 +257,13 @@ impl Requests {
                     | crew_client::CommandKind::Resume
                     | crew_client::CommandKind::AgentSetModel
                     | crew_client::CommandKind::Shutdown
-                    | crew_client::CommandKind::ModelsList => self.slow.send(command),
-                    _ => self.main.send(command),
+                    | crew_client::CommandKind::ModelsList => enqueue(&self.slow, command),
+                    _ => enqueue(&self.main, command),
                 };
             }
         }
         match command {
-            Command::Keys { .. } | Command::RawKeys { .. } => self.keys.send(command),
+            Command::Keys { .. } | Command::RawKeys { .. } => enqueue(&self.keys, command),
             Command::Kill(_)
             | Command::Restart(_)
             | Command::RestartFresh(_)
@@ -249,16 +271,25 @@ impl Requests {
             | Command::ResumeLimited { .. }
             | Command::SetModel { .. }
             | Command::StopTeam
-            | Command::FetchModels => self.slow.send(command),
-            other => self.main.send(other),
+            | Command::FetchModels => enqueue(&self.slow, command),
+            other => enqueue(&self.main, other),
         }
     }
 }
 
+#[cfg(test)]
 pub fn spawn_requester(socket: PathBuf, tx: Sender<UiEvent>) -> Requests {
-    let main = spawn_commands(socket.clone(), tx.clone(), "crew-tui-req");
-    let slow = spawn_commands(socket.clone(), tx.clone(), "crew-tui-slow");
-    let keys = spawn_typist(socket, tx);
+    spawn_scoped_requester(socket, tx, None)
+}
+
+pub fn spawn_scoped_requester(
+    socket: PathBuf,
+    tx: Sender<UiEvent>,
+    guard: Option<Arc<Mutex<Option<crew_client::ClientScope>>>>,
+) -> Requests {
+    let main = spawn_commands(socket.clone(), tx.clone(), "crew-tui-req", guard.clone());
+    let slow = spawn_commands(socket.clone(), tx.clone(), "crew-tui-slow", guard.clone());
+    let keys = spawn_typist(socket, tx, guard);
     Requests {
         main,
         slow,
@@ -267,14 +298,37 @@ pub fn spawn_requester(socket: PathBuf, tx: Sender<UiEvent>) -> Requests {
     }
 }
 
-fn spawn_commands(socket: PathBuf, tx: Sender<UiEvent>, name: &str) -> Sender<Command> {
-    let (cmd_tx, cmd_rx): (Sender<Command>, Receiver<Command>) = mpsc::channel();
+fn spawn_commands(
+    socket: PathBuf,
+    tx: Sender<UiEvent>,
+    name: &str,
+    guard: Option<Arc<Mutex<Option<crew_client::ClientScope>>>>,
+) -> SyncSender<Command> {
+    let (cmd_tx, cmd_rx): (SyncSender<Command>, Receiver<Command>) = mpsc::sync_channel(64);
     let run = move || {
         let mut requester = Requester {
             socket,
             client: None,
         };
         for command in cmd_rx {
+            if let Command::Planned(planned) = &command {
+                if !scope_current(&guard, &planned.scope) {
+                    let reply = Reply::Shared {
+                        scope: planned.scope.clone(),
+                        operation_id: planned.operation_id,
+                        outcome: crew_client::OperationOutcome::NotSent {
+                            reason: crew_client::ClientReason {
+                                code: "scope_changed".into(),
+                                message: "queued request discarded: scope retired".into(),
+                            },
+                        },
+                    };
+                    if tx.send(UiEvent::Reply(Box::new(reply))).is_err() {
+                        return;
+                    }
+                    continue;
+                }
+            }
             let Some(reply) = requester.run(command) else {
                 continue;
             };
@@ -291,8 +345,12 @@ fn spawn_commands(socket: PathBuf, tx: Sender<UiEvent>, name: &str) -> Sender<Co
 /// the daemon's backend answers each call on its own clock (herdr: about a
 /// tenth of a second), so behind a screen read a key would arrive late, and
 /// keys that piled up meanwhile go in one call.
-fn spawn_typist(socket: PathBuf, tx: Sender<UiEvent>) -> Sender<Command> {
-    let (keys_tx, keys_rx): (Sender<Command>, Receiver<Command>) = mpsc::channel();
+fn spawn_typist(
+    socket: PathBuf,
+    tx: Sender<UiEvent>,
+    guard: Option<Arc<Mutex<Option<crew_client::ClientScope>>>>,
+) -> SyncSender<Command> {
+    let (keys_tx, keys_rx): (SyncSender<Command>, Receiver<Command>) = mpsc::sync_channel(64);
     let run = move || {
         let mut requester = Requester {
             socket,
@@ -333,6 +391,10 @@ fn spawn_typist(socket: PathBuf, tx: Sender<UiEvent>) -> Sender<Command> {
                         continue;
                     }
                 };
+                if !scope_current(&guard, &planned.scope) {
+                    discard_scoped_keys(&scope, &id, &keys_rx, &mut carried);
+                    continue;
+                }
                 let reply = requester.planned(planned);
                 let failed = matches!(&reply, Reply::Shared { outcome,.. } if !matches!(outcome,crew_client::OperationOutcome::Succeeded { .. }));
                 if tx.send(UiEvent::Reply(Box::new(reply))).is_err() {
@@ -344,6 +406,11 @@ fn spawn_typist(socket: PathBuf, tx: Sender<UiEvent>) -> Sender<Command> {
                 continue;
             }
             if let Command::Planned(_) = &first {
+                if let Command::Planned(planned) = &first {
+                    if !scope_current(&guard, &planned.scope) {
+                        continue;
+                    }
+                }
                 if let Some(reply) = requester.run(first) {
                     if tx.send(UiEvent::Reply(Box::new(reply))).is_err() {
                         return;
@@ -366,6 +433,15 @@ fn spawn_typist(socket: PathBuf, tx: Sender<UiEvent>) -> Sender<Command> {
         .name("crew-tui-keys".into())
         .spawn(run);
     keys_tx
+}
+
+fn scope_current(
+    guard: &Option<Arc<Mutex<Option<crew_client::ClientScope>>>>,
+    scope: &crew_client::ClientScope,
+) -> bool {
+    guard
+        .as_ref()
+        .is_none_or(|guard| guard.lock().expect("dispatch scope lock").as_ref() == Some(scope))
 }
 
 fn gather_scoped_keys(
@@ -793,6 +869,92 @@ mod tests {
 
     use super::*;
     use crate::fixture;
+
+    fn captured_scope(attempt: u64) -> crew_client::ClientScope {
+        crew_client::ClientScope {
+            endpoint_id: "tui:test".into(),
+            workspace_id: "/work/demo".into(),
+            generation: None,
+            daemon_pid: Some(4000),
+            daemon_started_at_ms: Some(1),
+            attempt,
+        }
+    }
+
+    #[test]
+    fn scoped_coalescing_preserves_utf8_order_and_never_crosses_a_scope_or_target() {
+        let scope = captured_scope(1);
+        let (tx, rx) = mpsc::channel();
+        let raw = |scope: crew_client::ClientScope, id: &str, text: &str| Command::RawKeys {
+            scope,
+            id: id.into(),
+            text: text.into(),
+        };
+        let original = format!("{}日a", "x".repeat(65535));
+        tx.send(raw(scope.clone(), "a", "b")).unwrap();
+        tx.send(raw(captured_scope(2), "a", "new epoch")).unwrap();
+        let mut first = original.clone();
+        let carried = gather_scoped_keys(&scope, "a", &mut first, &rx).unwrap();
+        assert_eq!(first.len(), 65535);
+        let Command::RawKeys {
+            text: mut second, ..
+        } = carried
+        else {
+            panic!("carried");
+        };
+        let next = gather_scoped_keys(&scope, "a", &mut second, &rx).unwrap();
+        assert_eq!(format!("{first}{second}"), format!("{original}b"));
+        assert_eq!(next, raw(captured_scope(2), "a", "new epoch"));
+        tx.send(raw(scope.clone(), "b", "other terminal")).unwrap();
+        let mut current = "a".into();
+        assert_eq!(
+            gather_scoped_keys(&scope, "a", &mut current, &rx),
+            Some(raw(scope, "b", "other terminal"))
+        );
+        assert_eq!(current, "a");
+    }
+
+    #[test]
+    fn failed_terminal_scope_discards_its_unsent_bytes_and_preserves_other_targets() {
+        let scope = captured_scope(1);
+        let (tx, rx) = mpsc::channel();
+        for (id, text) in [("a", "unsent1"), ("a", "unsent2"), ("b", "keep")] {
+            tx.send(Command::RawKeys {
+                scope: scope.clone(),
+                id: id.into(),
+                text: text.into(),
+            })
+            .unwrap();
+        }
+        let mut carried = Some(Command::RawKeys {
+            scope: scope.clone(),
+            id: "a".into(),
+            text: "held".into(),
+        });
+        discard_scoped_keys(&scope, "a", &rx, &mut carried);
+        assert_eq!(
+            carried,
+            Some(Command::RawKeys {
+                scope,
+                id: "b".into(),
+                text: "keep".into()
+            })
+        );
+        assert!(rx.try_recv().is_err());
+    }
+
+    #[test]
+    fn worker_queue_full_is_visible_and_nonblocking() {
+        let (tx, rx) = mpsc::sync_channel(1);
+        enqueue(&tx, Command::Quit).unwrap();
+        assert_eq!(
+            enqueue(&tx, Command::SetMouse(false)),
+            Err(QueueError::Full)
+        );
+        assert_eq!(rx.recv().unwrap(), Command::Quit);
+        drop(rx);
+        assert_eq!(enqueue(&tx, Command::Quit), Err(QueueError::Closed));
+    }
 
     const OPERATOR_TOKEN: &str = "synthetic-tui-operator-token";
 

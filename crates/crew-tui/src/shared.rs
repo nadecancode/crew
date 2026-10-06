@@ -5,6 +5,7 @@ use std::cell::RefCell;
 use std::collections::{BTreeMap, VecDeque};
 use std::fmt;
 use std::rc::Rc;
+use std::sync::{Arc, Mutex};
 
 use crew_client::*;
 use crew_core::rpc::{Push, Snapshot};
@@ -44,6 +45,7 @@ pub(crate) struct Host {
     confirmation: Option<(ConfirmationId, UiCommand)>,
     input_epoch: u64,
     monotonic_override: Option<u64>,
+    dispatch: Arc<Mutex<Option<ClientScope>>>,
 }
 
 impl fmt::Debug for Shared {
@@ -81,11 +83,16 @@ impl Shared {
             confirmation: None,
             input_epoch: 0,
             monotonic_override: None,
+            dispatch: Arc::new(Mutex::new(None)),
         })))
     }
 
     pub fn read<T>(&self, read: impl FnOnce(&ClientCore) -> T) -> T {
         read(&self.0.borrow().core)
+    }
+
+    pub fn dispatch_guard(&self) -> Arc<Mutex<Option<ClientScope>>> {
+        self.0.borrow().dispatch.clone()
     }
 
     pub fn last_now(&self) -> i64 {
@@ -431,6 +438,12 @@ impl Host {
     }
 
     fn accept(&mut self, update: &ClientUpdate) -> Result<(), ClientError> {
+        *self.dispatch.lock().expect("dispatch scope lock") =
+            if self.core.workspace_status() == WorkspaceStatus::Live {
+                self.core.scope().cloned()
+            } else {
+                None
+            };
         for effect in &update.effects {
             match effect {
                 ClientEffect::Request {
@@ -627,4 +640,265 @@ fn merge(target: &mut ClientUpdate, next: ClientUpdate) {
     target.changes.reset |= next.changes.reset;
     target.effects.extend(next.effects);
     target.outcomes.extend(next.outcomes);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::{app::App, fixture};
+
+    fn loaded() -> App {
+        let mut app = App::new();
+        app.apply_snapshot(fixture::snapshot(1_000_000), 1_000_000);
+        app
+    }
+
+    #[test]
+    fn reviewed_state_vectors_use_the_real_terminal_adapter_and_keep_native_work_semantics() {
+        use crew_core::rpc::ServerFrame;
+        use serde_json::{json, Value};
+        for text in [
+            include_str!("../../../fixtures/native/state/work-choice.case.json"),
+            include_str!("../../../fixtures/native/state/parked-resumption.case.json"),
+            include_str!("../../../fixtures/native/state/completed-ties.case.json"),
+            include_str!("../../../fixtures/native/state/optional-values.case.json"),
+            include_str!("../../../fixtures/native/state/snapshot-replacement.case.json"),
+        ] {
+            let case: Value = serde_json::from_str(text).unwrap();
+            let mut app = App::new();
+            for (index, step) in case["steps"].as_array().unwrap().iter().enumerate() {
+                let at = step["at_ms"].as_i64().unwrap();
+                if let Some(snapshot) = step.get("snapshot") {
+                    app.apply_snapshot(serde_json::from_value(snapshot.clone()).unwrap(), at);
+                } else {
+                    let frame: ServerFrame = serde_json::from_value(step["frame"].clone()).unwrap();
+                    app.apply_push(frame.push.unwrap(), at);
+                }
+                let mut agent_ids: Vec<_> = app.agents.iter().map(|agent| &agent.id).collect();
+                agent_ids.sort();
+                let agents: BTreeMap<_, _> =
+                    app.agents.iter().map(|agent| (&agent.id, agent)).collect();
+                let tasks: BTreeMap<_, _> = app.tasks.iter().map(|task| (&task.id, task)).collect();
+                let work: BTreeMap<_, _> = app
+                    .agents
+                    .iter()
+                    .map(|agent| {
+                        (
+                            &agent.id,
+                            crew_client::current_work(&app.tasks, &agent.id, app.server_now(at)),
+                        )
+                    })
+                    .collect();
+                let actual = json!({"agent_ids":agent_ids,"agents":agents,"task_ids":app.tasks.iter().map(|task|&task.id).collect::<Vec<_>>(),"tasks":tasks,
+                    "messages":app.messages,"message_ids":app.messages.iter().map(|message|&message.id).collect::<Vec<_>>(),
+                    "events":app.events,"event_seqs":app.events.iter().map(|event|event.seq).collect::<Vec<_>>(),
+                    "question_ids":app.open_questions().iter().map(|question|&question.id).collect::<Vec<_>>(),"work":work,"clock_offset_ms":app.clock_offset});
+                let mut expected = step["expect"].clone();
+                expected
+                    .as_object_mut()
+                    .unwrap()
+                    .remove("selection_validity");
+                subset(&actual, &expected, &format!("{}:{index}", case["id"]));
+            }
+        }
+    }
+
+    fn subset(actual: &serde_json::Value, expected: &serde_json::Value, path: &str) {
+        use serde_json::Value;
+        match expected {
+            Value::Object(fields) => {
+                for (key, expected) in fields {
+                    subset(
+                        actual
+                            .get(key)
+                            .unwrap_or_else(|| panic!("{path}.{key}:missing")),
+                        expected,
+                        &format!("{path}.{key}"),
+                    );
+                }
+            }
+            Value::Array(items) => {
+                let values = actual.as_array().unwrap();
+                assert_eq!(values.len(), items.len(), "{path}");
+                for (index, (actual, expected)) in values.iter().zip(items).enumerate() {
+                    subset(actual, expected, &format!("{path}[{index}]"));
+                }
+            }
+            _ => assert_eq!(actual, expected, "{path}"),
+        }
+    }
+
+    #[test]
+    fn four_confirmations_capture_scope_and_agent_facts_before_the_dialog_answer() {
+        let mut app = loaded();
+        app.modal = Some(Modal::ConfirmKill("claude-1".into()));
+        app.capture_confirmation(1_000_000);
+        let mut agent = app.shared.read(|core| {
+            core.agents()
+                .iter()
+                .find(|a| a.id == "claude-1")
+                .unwrap()
+                .clone()
+        });
+        agent.pid = Some(9999);
+        app.apply_push(Push::Agent(Box::new(agent)), 1_000_001);
+        assert!(app
+            .prepare(UiCommand::Kill("claude-1".into()), 1_000_002)
+            .is_empty());
+        assert!(app.status.as_ref().unwrap().is_error);
+        app.modal = Some(Modal::ConfirmStop);
+        app.capture_confirmation(1_000_003);
+        app.disconnected_at(1_000_004);
+        assert!(app.prepare(UiCommand::StopTeam, 1_000_005).is_empty());
+        assert!(!app
+            .shared
+            .read(|core| core.workspace_status() == WorkspaceStatus::Live));
+    }
+
+    #[test]
+    fn raw_bursts_and_prompts_coexist_in_both_orders_without_replaying_unknown_input() {
+        for raw_first in [false, true] {
+            let mut app = loaded();
+            let raw = UiCommand::Keys {
+                id: "claude-1".into(),
+                text: "日本".into(),
+            };
+            let prompt = UiCommand::Type {
+                id: "claude-1".into(),
+                text: "inspect".into(),
+            };
+            let (first, second) = if raw_first {
+                (raw, prompt)
+            } else {
+                (prompt, raw)
+            };
+            let first = app.prepare(first, 1_000_001);
+            assert_eq!(first.len(), 1);
+            let second = app.prepare(second, 1_000_002);
+            assert_eq!(second.len(), 1);
+            assert_ne!(first[0].operation_id, second[0].operation_id);
+            let repeated = app.prepare(
+                UiCommand::Type {
+                    id: "claude-1".into(),
+                    text: "second prompt".into(),
+                },
+                1_000_003,
+            );
+            assert!(repeated.is_empty());
+            for planned in first.into_iter().chain(second) {
+                app.apply_reply(
+                    crate::app::Reply::Shared {
+                        scope: planned.scope,
+                        operation_id: planned.operation_id,
+                        outcome: OperationOutcome::OutcomeUnknown {
+                            reason: ClientReason {
+                                code: "closed".into(),
+                                message: "closed".into(),
+                            },
+                        },
+                    },
+                    1_000_004,
+                );
+            }
+            app.disconnected_at(1_000_005);
+            app.apply_snapshot(fixture::snapshot(1_000_000), 1_000_006);
+            assert!(
+                app.shared.take_requests().is_empty(),
+                "written input has no automatic replay"
+            );
+        }
+    }
+
+    #[test]
+    fn stale_input_epochs_and_old_replies_cannot_change_the_reconnected_projection() {
+        let mut app = loaded();
+        assert!(app.shared.accept_epoch(1, true));
+        let planned = app
+            .prepare(
+                UiCommand::FetchOutput {
+                    id: "claude-1".into(),
+                },
+                1_000_001,
+            )
+            .remove(0);
+        app.disconnected_at(1_000_002);
+        assert!(app.shared.accept_epoch(2, true));
+        let mut snapshot = fixture::snapshot(1_000_000);
+        snapshot.session.daemon_pid = 9000;
+        snapshot.session.daemon_started_at = 1_000_000;
+        snapshot.agents[0].activity = "new incarnation".into();
+        app.apply_snapshot(snapshot, 1_000_003);
+        assert!(!app.shared.accept_epoch(1, false));
+        assert!(!app.shared.accept_epoch(1, true));
+        let before = app.shared.read(ClientCore::revision);
+        app.apply_reply(
+            crate::app::Reply::Shared {
+                scope: planned.scope,
+                operation_id: planned.operation_id,
+                outcome: OperationOutcome::Succeeded {
+                    result: CommandResult::Output(crew_core::rpc::OutputResult {
+                        text: "old process".into(),
+                        alive: true,
+                    }),
+                },
+            },
+            1_000_004,
+        );
+        assert_eq!(app.shared.read(ClientCore::revision), before);
+        assert!(app.shared.read(|core| core
+            .agents()
+            .iter()
+            .any(|agent| agent.activity == "new incarnation")));
+    }
+
+    #[test]
+    fn a_held_send_has_one_final_notice_and_expires_on_monotonic_time() {
+        let mut app = loaded();
+        app.shared.set_clock(ClockSample {
+            wall_ms: 1_000_000,
+            monotonic_ms: 10,
+        });
+        let planned = app
+            .prepare(
+                UiCommand::Send {
+                    to: "claude-1".into(),
+                    body: "hello".into(),
+                },
+                1_000_000,
+            )
+            .remove(0);
+        app.shared.set_clock(ClockSample {
+            wall_ms: 1_000_001,
+            monotonic_ms: 11,
+        });
+        app.apply_reply(
+            crate::app::Reply::Shared {
+                scope: planned.scope,
+                operation_id: planned.operation_id,
+                outcome: OperationOutcome::OutcomeUnknown {
+                    reason: ClientReason {
+                        code: "closed".into(),
+                        message: "closed".into(),
+                    },
+                },
+            },
+            1_000_001,
+        );
+        assert!(
+            !app.status
+                .as_ref()
+                .is_some_and(|status| status.text.contains("closed")),
+            "held send has no final notice yet"
+        );
+        app.disconnected_at(1_000_002);
+        app.shared.set_clock(ClockSample {
+            wall_ms: -10,
+            monotonic_ms: 30_011,
+        });
+        app.tick(-10);
+        assert!(app.status.as_ref().unwrap().text.contains("closed"));
+        app.status = None;
+        app.tick(-10);
+        assert!(app.status.is_none(), "expiry emits only once");
+    }
 }

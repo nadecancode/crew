@@ -56,7 +56,7 @@ macro_rules! shared_command {
 }
 
 /// Commands of the dashboard's message box.
-pub static DASHBOARD: &[SlashCommand] = &[
+pub const DASHBOARD: &[SlashCommand] = &[
     shared_command!(0),
     shared_command!(1),
     shared_command!(2),
