@@ -1,0 +1,130 @@
+# Design-precheck scripted team: deterministic, token-free, isolated.
+# @WS@ is replaced with the private workspace path.
+project: payments-precheck
+
+objective: >
+  Build the pieces of a tiny payments service: billing, queue, ledger,
+  notifications, database schema and search.
+
+workspace:
+  path: "@WS@"
+  init: true
+
+backend: pty
+
+orchestrator:
+  agent: false
+
+defaults:
+  runtime: shell
+
+agents:
+  - id: claude-1
+    role: billing
+    command:
+      - "{crew}"
+      - scripted-agent
+      - --on-task=progress 15 reading the invoice model
+      - --on-task=sleep 4000
+      - --on-task=write billing.rs pub fn invoice() {}
+      - --on-task=progress 51 invoice generation with tax lines and rounding rules for multi-currency totals
+      - --on-task=sleep 600000
+      - --on-task=commit Add billing module
+      - --on-task=done billing module with invoice generation
+
+  - id: claude-2
+    role: queue
+    command:
+      - "{crew}"
+      - scripted-agent
+      - --on-task=progress 40 job queue
+      - --on-task=sleep 1200
+      - --on-task=write queue.rs pub struct Queue;
+      - --on-task=commit Add job queue
+      - --on-task=done job queue implemented with retry and dead-letter handling
+
+  - id: claude-3
+    role: ledger
+    command:
+      - "{crew}"
+      - scripted-agent
+      - --on-task=progress 20 designing the ledger
+      - --on-task=sleep 1000
+      - --on-task=send claude-5 question I changed Transaction::commit() and need a committed_at column on transactions. Can you add it and send me the commit?
+      - --on-task=status waiting on claude-5 for the schema change
+      - --on-task=wait-message claude-5
+      - --on-task=status working applying the schema commit
+      - --on-task=cherry-pick
+      - --on-task=progress 70 writing ledger entries
+      - --on-task=write ledger.rs pub struct Ledger;
+      - --on-task=sleep 600000
+      - --on-task=commit Add transaction ledger
+      - --on-task=done ledger implemented on top of claude-5's schema
+
+  - id: claude-4
+    role: notify
+    command:
+      - "{crew}"
+      - scripted-agent
+      - --on-task=progress 50 notification templates
+      - --on-task=sleep 1000
+      - --on-task=write notify.rs pub fn notify() {}
+      - --on-task=commit Add notifications
+      - --on-task=done notifications implemented
+
+  - id: claude-5
+    role: db
+    command:
+      - "{crew}"
+      - scripted-agent
+      - --on-task=progress 30 base schema
+      - --on-task=write schema.sql CREATE TABLE transactions (id INTEGER PRIMARY KEY);
+      - --on-task=commit Add base schema
+      - --on-task=status waiting for schema requests from the team
+      - --on-task=wait-message claude-3
+      - --on-task=status working adding committed_at for claude-3
+      - --on-task=progress 80 migration
+      - --on-task=sleep 1200
+      - --on-task=write migration_001.sql ALTER TABLE transactions ADD COLUMN committed_at INTEGER;
+      - --on-task=commit Add committed_at to transactions
+      - --on-task=publish claude-3 Added committed_at. Cherry-pick it into your branch.
+      - --on-task=done schema with committed_at migration
+
+  - id: claude-6
+    role: search
+    command:
+      - "{crew}"
+      - scripted-agent
+      - --on-task=progress 60 indexing
+      - --on-task=sleep 2000
+      - --on-task=fail search index build needs an operator decision on the tokenizer
+
+  - id: asker
+    role: release
+    command:
+      - "{crew}"
+      - scripted-agent
+      - --on-start=sleep 3000
+      - --on-start=send operator question Ship the committed_at migration in this release, or hold it for the next one?
+      - --on-start=status waiting for the operator's release decision
+
+tasks:
+  - id: billing
+    title: Implement billing
+    agent: claude-1
+  - id: queue
+    title: Implement the job queue
+    agent: claude-2
+  - id: db
+    title: Design the database schema
+    agent: claude-5
+  - id: ledger
+    title: Implement the transaction ledger
+    agent: claude-3
+  - id: search
+    title: Implement search
+    agent: claude-6
+  - id: notify
+    title: Implement notifications
+    agent: claude-4
+    depends_on: [ledger, queue]

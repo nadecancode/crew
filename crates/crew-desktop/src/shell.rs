@@ -21,6 +21,86 @@ type DestinationObserver = Box<dyn Fn(Destination)>;
 /// The sidebar keeps this width whatever its status text says.
 pub const SIDEBAR_WIDTH: i32 = 184;
 
+mod fixed_width {
+    use gtk::{glib, prelude::*, subclass::prelude::*};
+    use std::cell::{Cell, OnceCell};
+
+    #[derive(Default)]
+    pub struct FixedWidth {
+        pub width: Cell<i32>,
+        pub child: OnceCell<gtk::Widget>,
+    }
+
+    #[glib::object_subclass]
+    impl ObjectSubclass for FixedWidth {
+        const NAME: &'static str = "CrewFixedWidth";
+        type Type = super::FixedWidth;
+        type ParentType = gtk::Widget;
+    }
+
+    impl ObjectImpl for FixedWidth {
+        fn dispose(&self) {
+            if let Some(child) = self.child.get() {
+                child.unparent();
+            }
+        }
+    }
+
+    impl WidgetImpl for FixedWidth {
+        fn request_mode(&self) -> gtk::SizeRequestMode {
+            gtk::SizeRequestMode::HeightForWidth
+        }
+
+        fn measure(&self, orientation: gtk::Orientation, for_size: i32) -> (i32, i32, i32, i32) {
+            let Some(child) = self.child.get().filter(|child| child.is_visible()) else {
+                return (0, 0, -1, -1);
+            };
+            // The child's natural width (a long unwrapped line) is ignored:
+            // the request is the fixed width, or the child's minimum if larger
+            // (large text), and its height follows from that width.
+            let (child_min, ..) = child.measure(gtk::Orientation::Horizontal, -1);
+            let width = self.width.get().max(child_min);
+            match orientation {
+                gtk::Orientation::Horizontal => (width, width, -1, -1),
+                _ => {
+                    let (min, natural, ..) = child.measure(
+                        gtk::Orientation::Vertical,
+                        if for_size < 0 { width } else { for_size },
+                    );
+                    (min, natural, -1, -1)
+                }
+            }
+        }
+
+        fn size_allocate(&self, width: i32, height: i32, baseline: i32) {
+            if let Some(child) = self.child.get() {
+                child.allocate(width, height, baseline, None);
+            }
+        }
+    }
+}
+
+glib::wrapper! {
+    /// Requests a fixed width for its child however wide the child's
+    /// natural size is; it still expands when the child asks to.
+    pub struct FixedWidth(ObjectSubclass<fixed_width::FixedWidth>)
+        @extends gtk::Widget, @implements gtk::Accessible, gtk::Buildable, gtk::ConstraintTarget;
+}
+
+impl FixedWidth {
+    fn new(width: i32, child: &impl IsA<gtk::Widget>) -> Self {
+        use gtk::subclass::prelude::ObjectSubclassIsExt;
+        let this: Self = glib::Object::new();
+        this.imp().width.set(width);
+        child.set_parent(&this);
+        this.imp()
+            .child
+            .set(child.clone().upcast())
+            .expect("one child");
+        this
+    }
+}
+
 struct Inner {
     window: gtk::ApplicationWindow,
     adaptive: AdaptiveBox,
@@ -128,20 +208,10 @@ impl Shell {
         status_detail.set_wrap(true);
         status_detail.add_css_class("crew-muted");
         status_slot.append(&status_detail);
-        // The status text wraps inside the sidebar. Without a horizontal
-        // scrollbar the clip requests only its child's minimum width, so a
-        // long status line cannot widen the sidebar and shift the main pane.
-        let status_clip = gtk::ScrolledWindow::builder()
-            .child(&status_slot)
-            .hscrollbar_policy(gtk::PolicyType::Never)
-            .vscrollbar_policy(gtk::PolicyType::Never)
-            .propagate_natural_height(true)
-            .build();
         let sidebar = gtk::Box::new(gtk::Orientation::Vertical, 0);
-        sidebar.set_width_request(SIDEBAR_WIDTH);
         sidebar.add_css_class("crew-sidebar");
         sidebar.append(&nav_scroll);
-        sidebar.append(&status_clip);
+        sidebar.append(&status_slot);
 
         let detail_heading = gtk::Label::new(Some("Details"));
         detail_heading.set_xalign(0.0);
@@ -167,7 +237,9 @@ impl Shell {
         let adaptive = AdaptiveBox::new();
         adaptive.set_hexpand(true);
         adaptive.set_vexpand(true);
-        adaptive.append(&sidebar);
+        // The status text wraps inside the sidebar: a long status line cannot
+        // widen it and shift the main pane.
+        adaptive.append(&FixedWidth::new(SIDEBAR_WIDTH, &sidebar));
         adaptive.append(&content);
         window.set_child(Some(&adaptive));
 
@@ -320,8 +392,16 @@ impl Shell {
     }
 
     /// Replace a destination's native main view without recreating other pages.
+    /// Focus that was in the replaced page, or nowhere, goes to the new
+    /// page's first control rather than being lost.
     pub fn set_main(&self, destination: Destination, widget: &impl IsA<gtk::Widget>) {
-        replace_child(&self.0.main_slots[destination.index()], widget);
+        let slot = &self.0.main_slots[destination.index()];
+        let orphaned = gtk::prelude::GtkWindowExt::focus(&self.0.window)
+            .is_none_or(|focus| focus.is_ancestor(slot));
+        replace_child(slot, widget);
+        if orphaned && destination == self.destination() {
+            self.focus_visible_view();
+        }
     }
 
     /// Updating detail content never opens it or steals focus. Feature views

@@ -52,6 +52,8 @@ pub fn build() -> gtk::Application {
                 glib::Propagation::Proceed
             });
             window.window().present();
+            // Start on the page's first control, not on whatever GTK picks.
+            window.focus_page();
             *shell.borrow_mut() = Some(window);
         }
     });

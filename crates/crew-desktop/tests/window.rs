@@ -57,6 +57,58 @@ fn native_navigation_layout_focus_and_lifecycle() {
         ["<Control>2"]
     );
 
+    // G2: keyboard focus entering a destination row selects it in GTK's list
+    // box, but only activation (Enter, Space or a click) navigates; the
+    // selection keeps marking the current destination.
+    let rows: Vec<gtk::ListBoxRow> = descendants(navigation.upcast_ref())
+        .into_iter()
+        .filter_map(|widget| widget.downcast::<gtk::ListBoxRow>().ok())
+        .collect();
+    assert_eq!(rows.len(), Destination::ALL.len());
+    navigation.select_row(Some(&rows[Destination::Usage.index()]));
+    settle();
+    assert_eq!(shell.destination(), Destination::Team);
+    assert_eq!(navigation.selected_row().as_ref(), Some(&rows[0]));
+    rows[Destination::Tasks.index()].grab_focus();
+    settle();
+    assert_eq!(shell.destination(), Destination::Team);
+    rows[Destination::Tasks.index()].activate();
+    settle();
+    assert_eq!(shell.destination(), Destination::Tasks);
+    assert_eq!(
+        navigation.selected_row().as_ref(),
+        Some(&rows[Destination::Tasks.index()])
+    );
+    assert!(
+        rows[Destination::Tasks.index()].is_focus(),
+        "activating from the sidebar keeps focus there"
+    );
+    shell.navigate(Destination::Team);
+    settle();
+
+    // G7: the sidebar keeps its width whatever the status says.
+    let sidebar = navigation
+        .ancestor(gtk::Box::static_type())
+        .and_downcast::<gtk::Box>()
+        .unwrap();
+    let status = gtk::Label::builder()
+        .label("Ready")
+        .wrap(true)
+        .xalign(0.0)
+        .build();
+    shell.set_status_widget(&status);
+    until(|| sidebar.width() > 0);
+    let width = sidebar.width();
+    status.set_label("Action pending · awaiting the daemon's result for a long running operation");
+    settle();
+    until(|| sidebar.width() == width);
+    for _ in 0..5 {
+        settle();
+        std::thread::sleep(Duration::from_millis(10));
+    }
+    assert_eq!(sidebar.width(), width, "long status text wraps in place");
+    assert!(status.height() > 0);
+
     // Static disconnected pages have no row or reading control to restore.
     // Navigation, compact detail and Back must retain named visible context.
     shell.navigate(Destination::Tasks);

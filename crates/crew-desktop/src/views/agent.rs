@@ -272,9 +272,18 @@ impl AgentInspector {
             let live = live.clone();
             move |attached| {
                 if let Some(attach) = attach.upgrade() {
+                    let had_focus = attach.is_focus();
                     attach.set_sensitive(
                         !attached && live.get() && available(&latest.borrow(), ActionKind::Attach),
                     );
+                    // Once attached, focus goes on to the terminal's controls
+                    // rather than being lost with Attach.
+                    if had_focus && !attach.is_sensitive() {
+                        crate::shell::focus_past(
+                            attach.upcast_ref(),
+                            gtk::DirectionType::TabForward,
+                        );
+                    }
                 }
             }
         });
