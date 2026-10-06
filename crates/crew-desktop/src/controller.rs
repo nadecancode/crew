@@ -160,6 +160,9 @@ pub struct Controller {
     auxiliary: RefCell<Vec<gtk::Dialog>>,
     pages: RefCell<Vec<(Destination, gtk::Box)>>,
     controls: Controls,
+    /// Remote profiles and gateway setup (`native-linux-gateway`).
+    #[cfg(feature = "gateway")]
+    remote: Rc<crate::remote::Remote>,
 }
 
 impl Controller {
@@ -315,6 +318,11 @@ impl Controller {
                 auxiliary: RefCell::new(Vec::new()),
                 pages: RefCell::new(Vec::new()),
                 controls: Controls::default(),
+                #[cfg(feature = "gateway")]
+                remote: crate::remote::Remote::new(
+                    weak.clone() as Weak<dyn crate::remote::Host>,
+                    crate::remote::profile::ProfileStore::user(),
+                ),
             }
         });
         let status_box = gtk::Box::new(gtk::Orientation::Vertical, 8);
@@ -606,6 +614,8 @@ impl Controller {
                 connection,
                 workspaces,
             } => {
+                #[cfg(feature = "gateway")]
+                self.remote.context_settled();
                 if instance != self.instance.get() {
                     return;
                 }
@@ -617,8 +627,12 @@ impl Controller {
                 }
                 *self.connection.borrow_mut() = connection;
                 *self.listing.borrow_mut() = workspaces;
+                #[cfg(feature = "gateway")]
+                self.remote.changed();
             }
             Response::Error(error) => self.result.set_label(&error.to_string()),
+            #[cfg(feature = "gateway")]
+            Response::Remote(response) => self.remote.respond(response),
             Response::Notice { instance, notice } => {
                 if instance == self.instance.get() {
                     self.notice(notice);
@@ -723,6 +737,11 @@ impl Controller {
         ));
         if let Some((_, agent)) = self.agent.borrow().as_ref() {
             agent.set_live(self.live.get());
+        }
+        #[cfg(feature = "gateway")]
+        {
+            let connection = self.connection.borrow().clone();
+            self.remote.notice(&notice, connection.as_ref());
         }
         for outcome in notice.outcomes {
             self.outcome(outcome);
@@ -2472,6 +2491,12 @@ impl Controller {
         self.auxiliary.borrow_mut().push(dialog);
     }
     pub fn connections(&self) {
+        #[cfg(feature = "gateway")]
+        {
+            self.remote.open();
+            return;
+        }
+        #[allow(unreachable_code)]
         let dialog = gtk::Dialog::builder()
             .transient_for(self.shell.window())
             .modal(true)
@@ -2586,6 +2611,44 @@ impl Controller {
         dialogs::escape(&dialog);
         dialog.present();
         self.auxiliary.borrow_mut().push(dialog);
+    }
+}
+
+/// Connections settings read the controller's verified context and local
+/// discovery; remote setup requests travel through the same service.
+#[cfg(feature = "gateway")]
+impl crate::remote::Host for Controller {
+    fn send(&self, request: Request) -> bool {
+        Controller::send(self, request)
+    }
+    fn parent(&self) -> gtk::ApplicationWindow {
+        self.shell.window().clone()
+    }
+    fn local_entries(&self) -> (Vec<crate::remote::LocalEntry>, Option<String>) {
+        let entries = self
+            .profiles
+            .borrow()
+            .iter()
+            .map(|profile| crate::remote::LocalEntry {
+                title: profile.project.as_deref().unwrap_or("Crew").to_owned(),
+                detail: profile.workspace.clone(),
+                profile_id: profile.profile.id.clone(),
+                endpoint_id: profile.profile.endpoint_id.clone(),
+                workspace_key: profile.profile.workspace_key.clone(),
+            })
+            .collect();
+        let error = self
+            .profile_error
+            .borrow()
+            .as_ref()
+            .map(|reason| reason.message.clone());
+        (entries, error)
+    }
+    fn connection(&self) -> Option<ConnectionContext> {
+        self.connection.borrow().clone()
+    }
+    fn listing(&self) -> Option<crew_protocol::rpc::Workspaces> {
+        self.listing.borrow().clone()
     }
 }
 

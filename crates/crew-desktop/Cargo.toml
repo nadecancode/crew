@@ -15,6 +15,10 @@ required-features = ["native-ui"]
 default = []
 native-ui = ["dep:gtk", "dep:vte4", "dep:crew-client", "dep:crew-protocol"]
 local = ["dep:crew-client-transport", "crew-client-transport/local", "dep:tokio"]
+# Remote profiles, gateway enrollment and the Secret Service device signer.
+gateway = ["local", "crew-client-transport/gateway", "dep:ed25519-dalek", "dep:zeroize", "dep:getrandom", "dep:serde", "dep:serde_json"]
+# Real isolated gateway/daemon composition tests.
+gateway-tests = ["gateway", "crew/native-gateway"]
 
 [target.'cfg(target_os = "linux")'.dependencies]
 gtk = { package = "gtk4", version = "=0.10.3", features = ["v4_6"], optional = true }
@@ -23,9 +27,15 @@ crew-client = { path = "../crew-client", optional = true }
 crew-protocol = { path = "../crew-protocol", optional = true }
 crew-client-transport = { path = "../crew-client-transport", optional = true }
 tokio = { workspace = true, optional = true }
+ed25519-dalek = { version = "=2.2.0", default-features = false, features = ["std", "fast", "zeroize"], optional = true }
+zeroize = { version = "=1.8.2", optional = true }
+getrandom = { version = "=0.3.4", optional = true }
+serde = { workspace = true, optional = true }
+serde_json = { workspace = true, optional = true }
 
 [target.'cfg(target_os = "linux")'.dev-dependencies]
 serde_json.workspace = true
+sha2.workspace = true
 tempfile.workspace = true
 crew-core = { path = "../crew-core" }
 crew = { path = "../crew", default-features = false }

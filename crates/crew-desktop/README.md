@@ -26,13 +26,16 @@ scripts/native/linux-build.sh -j 2
 scripts/native/linux-smoke.sh -- "$PWD/target/native-validation/cargo/debug/crew-desktop"
 crates/crew-desktop/tests/run-window-test.sh
 crates/crew-desktop/tests/run-window-test.sh --client
+crates/crew-desktop/tests/run-window-test.sh --gateway
 nix-shell -I nixpkgs="$NATIVE_NIXPKGS" -p xdotool --run \
   'crates/crew-desktop/tests/run-window-test.sh --keyboard'
 ```
 
 Default features are empty. `native-ui` enables Linux-only GTK/VTE and portable
-projection types; `local` enables the real local Rust service. The GUI build
-runner enables both. Default CLI builds need no GTK development environment.
+projection types; `local` enables the real local Rust service; `gateway` adds
+remote profiles, gateway enrollment and the Secret Service device signer, and
+`gateway-tests` its isolated gateway/daemon tests. The GUI build runner enables
+`native-ui,local`; a remote-capable build adds `gateway`. Default CLI builds need no GTK development environment.
 QA owns the final shared workspace/lock registration; its bounded dependency
 changes are delivered separately from the desktop source.
 
@@ -94,6 +97,34 @@ Alt+Left returns from compact navigation/details; F1 opens shortcut help;
 Ctrl+W closes the window; Ctrl+Q quits. Appearance follows native contrast and
 text settings. Dark app-owned surfaces remain neutral. There are no continuous
 decorative animations or graph refits after every push.
+
+## Remote connections
+
+With `gateway`, Connections (the workspace selector) lists this computer's
+workspaces and remote hosts and runs the reverse-approval setup in
+`src/remote`. A remote profile stores only public host metadata in
+`$XDG_CONFIG_HOME/crew-desktop/connections.json` (owner-only, atomically
+replaced). The host fingerprint is typed from `crew native status` at the
+trusted host console and passed to the connector's `GatewayProfile::trust`;
+the pasted profile never supplies its own trust check. The connector owns TLS,
+proofs, enrollment, grants and revocation; GTK renders typed progress and safe
+reasons and sends explicit requests.
+
+The device signing key is an Ed25519 seed in the user's Secret Service
+default collection (GNOME Keyring, KWallet or compatible). Only public-key
+retrieval and explicit user actions may show the keyring's unlock prompt;
+signing returns Locked promptly so the short authentication deadline never
+waits on a person. There is no plaintext key file. When no Secret Service is
+available, the only alternative is the explicit **Use until this app closes**
+choice, which keeps the key in memory and needs a new approval after Crew
+closes. Remove from this app retires the local key; host access remains until
+revoked at the trusted host console.
+
+`run-window-test.sh --gateway` drives the GTK pages with a recording host,
+the signer against a private GNOME Keyring, then the production service
+against isolated daemons and a loopback gateway with the synthetic test
+certificate. It uses a short private runtime directory under `/tmp` for Crew
+and keyring sockets and removes it on exit, and fails on any GTK critical.
 
 ## Validation boundaries
 

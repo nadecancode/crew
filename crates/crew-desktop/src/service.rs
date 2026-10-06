@@ -34,6 +34,9 @@ pub enum Request {
     Disconnect,
     Lifecycle(bool),
     Close,
+    /// Remote profile setup and sessions, delivered by `native-linux-gateway`.
+    #[cfg(feature = "gateway")]
+    Remote(crate::remote::RemoteRequest),
 }
 
 pub enum Response {
@@ -65,6 +68,8 @@ pub enum Response {
         workspaces: Option<crew_protocol::rpc::Workspaces>,
     },
     Error(ClientError),
+    #[cfg(feature = "gateway")]
+    Remote(crate::remote::RemoteResponse),
 }
 
 /// UI-only service interface over the real native service. A view test double
@@ -146,11 +151,91 @@ impl ServiceHandle {
     }
 }
 
-fn core() -> Result<ClientCore, ClientError> {
+pub(crate) fn core() -> Result<ClientCore, ClientError> {
     ClientCore::new(ClientConfig {
         limits: crew_client::policy::NATIVE_LIMITS,
         snapshot_mode: SnapshotMode::OrderedConnection,
     })
+}
+
+fn make_session(profiles: &[LocalWorkspace]) -> Result<NativeSession, ClientError> {
+    core().and_then(|core| {
+        NativeSession::local(
+            core,
+            Protocol6Codec,
+            profiles
+                .iter()
+                .map(|workspace| workspace.profile.clone())
+                .collect(),
+            DriverConfig::default(),
+        )
+    })
+}
+
+/// Replace the worker's session. A new instance tag rejects every late
+/// callback, query and plan result from the previous session.
+fn bind(
+    session: &mut NativeSession,
+    next: NativeSession,
+    instance: &mut u64,
+    responses: &tokio::sync::mpsc::Sender<Response>,
+) -> Result<(), ClientError> {
+    let _ = session.unregister_observer();
+    let _ = session.close();
+    *session = next;
+    *instance = instance
+        .checked_add(1)
+        .expect("native session instance range");
+    let _ = responses.blocking_send(Response::Session(*instance));
+    session.observe(Arc::new(Observer {
+        responses: responses.clone(),
+        instance: *instance,
+    }))
+}
+
+#[cfg(feature = "gateway")]
+type RemoteWorker = Option<crate::remote::Worker>;
+#[cfg(not(feature = "gateway"))]
+type RemoteWorker = ();
+
+#[cfg(feature = "gateway")]
+fn is_remote(request: &Request) -> bool {
+    matches!(request, Request::Remote(_))
+}
+#[cfg(not(feature = "gateway"))]
+fn is_remote(_: &Request) -> bool {
+    false
+}
+
+#[cfg(feature = "gateway")]
+fn remote_active(remote: &RemoteWorker) -> bool {
+    remote
+        .as_ref()
+        .is_some_and(|worker| worker.active().is_some())
+}
+#[cfg(not(feature = "gateway"))]
+fn remote_active(_: &RemoteWorker) -> bool {
+    false
+}
+
+/// Return from a bound remote profile to the protected local service.
+#[cfg(feature = "gateway")]
+fn leave_remote(
+    remote: &mut RemoteWorker,
+    profiles: &[LocalWorkspace],
+    session: &mut NativeSession,
+    instance: &mut u64,
+    responses: &tokio::sync::mpsc::Sender<Response>,
+) -> Result<(), ClientError> {
+    let Some(worker) = remote.as_mut().filter(|worker| worker.active().is_some()) else {
+        return Ok(());
+    };
+    worker.left();
+    make_session(profiles).and_then(|next| bind(session, next, instance, responses))?;
+    let _ = responses.blocking_send(Response::Remote(crate::remote::RemoteResponse::Active(
+        None,
+    )));
+    Ok(())
 }
 
 fn worker(requests: mpsc::Receiver<Request>, responses: tokio::sync::mpsc::Sender<Response>) {
@@ -164,19 +249,6 @@ fn worker(requests: mpsc::Receiver<Request>, responses: tokio::sync::mpsc::Sende
             let _ = responses.blocking_send(Response::Profiles(Err(reason)));
             Vec::new()
         }
-    };
-    let make_session = |profiles: &[LocalWorkspace]| {
-        core().and_then(|core| {
-            NativeSession::local(
-                core,
-                Protocol6Codec,
-                profiles
-                    .iter()
-                    .map(|workspace| workspace.profile.clone())
-                    .collect(),
-                DriverConfig::default(),
-            )
-        })
     };
     let mut session = match make_session(&profiles) {
         Ok(session) => session,
@@ -195,6 +267,10 @@ fn worker(requests: mpsc::Receiver<Request>, responses: tokio::sync::mpsc::Sende
         return;
     }
     let mut connection_requested = false;
+    #[cfg(feature = "gateway")]
+    let mut remote: RemoteWorker = crate::remote::Worker::new();
+    #[cfg(not(feature = "gateway"))]
+    let remote: RemoteWorker = ();
     while let Ok(request) = requests.recv() {
         if responses.is_closed() {
             break;
@@ -207,7 +283,7 @@ fn worker(requests: mpsc::Receiver<Request>, responses: tokio::sync::mpsc::Sende
                 | Request::SelectWorkspace(_)
                 | Request::Reconnect
                 | Request::Disconnect
-        );
+        ) || is_remote(&request);
         let result = match request {
             Request::Context => Ok(()),
             Request::RefreshProfiles => {
@@ -217,23 +293,10 @@ fn worker(requests: mpsc::Receiver<Request>, responses: tokio::sync::mpsc::Sende
                         let _ = responses.blocking_send(Response::Profiles(Ok(profiles.clone())));
                         // Rebuild only while explicitly disconnected; discovery
                         // must not silently rebind a verified active workspace.
-                        if !connection_requested {
-                            let _ = session.unregister_observer();
-                            let _ = session.close();
-                            match make_session(&profiles) {
-                                Ok(next) => {
-                                    session = next;
-                                    instance = instance
-                                        .checked_add(1)
-                                        .expect("native session instance range");
-                                    let _ = responses.blocking_send(Response::Session(instance));
-                                    session.observe(Arc::new(Observer {
-                                        responses: responses.clone(),
-                                        instance,
-                                    }))
-                                }
-                                Err(error) => Err(error),
-                            }
+                        if !connection_requested && !remote_active(&remote) {
+                            make_session(&profiles).and_then(|next| {
+                                bind(&mut session, next, &mut instance, &responses)
+                            })
                         } else {
                             Ok(())
                         }
@@ -249,6 +312,17 @@ fn worker(requests: mpsc::Receiver<Request>, responses: tokio::sync::mpsc::Sende
                 endpoint_id,
                 workspace_id,
             } => {
+                // A local profile replaces any bound remote profile first.
+                #[cfg(feature = "gateway")]
+                let result = leave_remote(
+                    &mut remote,
+                    &profiles,
+                    &mut session,
+                    &mut instance,
+                    &responses,
+                )
+                .and_then(|()| session.connect(profile_id, endpoint_id, workspace_id));
+                #[cfg(not(feature = "gateway"))]
                 let result = session.connect(profile_id, endpoint_id, workspace_id);
                 if result.is_ok() {
                     connection_requested = true;
@@ -293,6 +367,44 @@ fn worker(requests: mpsc::Receiver<Request>, responses: tokio::sync::mpsc::Sende
             }
             Request::Lifecycle(active) => session.lifecycle(active),
             Request::Close => break,
+            #[cfg(feature = "gateway")]
+            Request::Remote(request) => {
+                use crate::remote::{RemoteResponse, Step};
+                match remote
+                    .as_mut()
+                    .map(|worker| worker.handle(request, &responses))
+                {
+                    None => Err(ClientError::InternalFailure {
+                        code: "remote_worker".into(),
+                    }),
+                    Some(Step::Done) => Ok(()),
+                    Some(Step::Bind {
+                        profile,
+                        session: next,
+                    }) => bind(&mut session, next, &mut instance, &responses).and_then(|()| {
+                        connection_requested = true;
+                        let _ = responses.blocking_send(Response::Remote(RemoteResponse::Active(
+                            Some(profile.id.clone()),
+                        )));
+                        remote
+                            .as_mut()
+                            .map_or(Ok(()), |worker| worker.bound(&profile, &session))
+                    }),
+                    Some(Step::Local) => {
+                        let result = leave_remote(
+                            &mut remote,
+                            &profiles,
+                            &mut session,
+                            &mut instance,
+                            &responses,
+                        );
+                        if result.is_ok() {
+                            connection_requested = false;
+                        }
+                        result
+                    }
+                }
+            }
         };
         if let Err(error) = result {
             let _ = responses.blocking_send(Response::Error(error));

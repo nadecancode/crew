@@ -518,11 +518,16 @@ dependencies = [
  "crew-client-transport",
  "crew-core",
  "crew-protocol",
+ "ed25519-dalek",
+ "getrandom 0.3.4",
  "gtk4",
+ "serde",
  "serde_json",
+ "sha2",
  "tempfile",
  "tokio",
  "vte4",
+ "zeroize",
 ]
 
 [[package]]
