@@ -453,8 +453,16 @@ dependencies = [
  "crew-client",
  "crew-client-transport",
  "crew-protocol",
+ "ed25519-dalek",
+ "futures-util",
+ "rustls",
+ "rustls-pemfile",
  "serde_json",
+ "sha2",
  "tempfile",
+ "tokio",
+ "tokio-rustls",
+ "tokio-tungstenite",
  "uniffi",
 ]
 
