@@ -1234,43 +1234,15 @@ fn name_model(names: &HashMap<String, String>, agent: &mut Agent) {
 /// depends on something in layer n-1. Returns indices into `tasks`. Unknown
 /// dependencies are ignored and cycles are cut rather than looping.
 pub fn task_layers(tasks: &[Task]) -> Vec<Vec<usize>> {
-    #[derive(Clone, Copy)]
-    enum Depth {
-        Unknown,
-        Visiting,
-        Known(usize),
-    }
-
-    fn depth(i: usize, tasks: &[Task], index: &HashMap<&str, usize>, memo: &mut [Depth]) -> usize {
-        match memo[i] {
-            Depth::Known(d) => return d,
-            Depth::Visiting => return 0,
-            Depth::Unknown => {}
-        }
-        memo[i] = Depth::Visiting;
-        let mut d = 0;
-        for dep in &tasks[i].dependencies {
-            if let Some(&j) = index.get(dep.as_str()) {
-                d = d.max(depth(j, tasks, index, memo) + 1);
-            }
-        }
-        memo[i] = Depth::Known(d);
-        d
-    }
-
-    let index: HashMap<&str, usize> = tasks
-        .iter()
-        .enumerate()
-        .map(|(i, t)| (t.id.as_str(), i))
-        .collect();
-    let mut memo = vec![Depth::Unknown; tasks.len()];
+    let projected = crew_client::topology::task_data(tasks)
+        .expect("a terminal task board fits the shared layer count");
     let mut layers: Vec<Vec<usize>> = Vec::new();
-    for i in 0..tasks.len() {
-        let d = depth(i, tasks, &index, &mut memo);
-        if layers.len() <= d {
-            layers.resize_with(d + 1, Vec::new);
+    for (index, task) in projected.tasks.iter().enumerate() {
+        let layer = task.layer as usize;
+        if layers.len() <= layer {
+            layers.resize_with(layer + 1, Vec::new);
         }
-        layers[d].push(i);
+        layers[layer].push(index);
     }
     layers
 }

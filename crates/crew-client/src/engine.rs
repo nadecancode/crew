@@ -342,6 +342,40 @@ impl ClientCore {
     pub fn reason(&self) -> Option<&ClientReason> {
         self.state.reason.as_ref()
     }
+
+    /// Immutable domain access for Rust hosts with an existing presentation
+    /// model. These borrows expose no reducers, queues, cursors or credentials.
+    pub fn session(&self) -> Option<&crew_protocol::rpc::SessionInfo> {
+        self.state.session.as_ref()
+    }
+
+    pub fn agents(&self) -> &[crew_protocol::Agent] {
+        &self.state.agents
+    }
+
+    pub fn tasks(&self) -> &[crew_protocol::Task] {
+        &self.state.tasks
+    }
+
+    pub fn messages(&self) -> impl DoubleEndedIterator<Item = &crew_protocol::Message> + '_ {
+        self.state.messages.items()
+    }
+
+    pub fn events(&self) -> impl DoubleEndedIterator<Item = &crew_protocol::Event> + '_ {
+        self.state.events.items()
+    }
+
+    pub fn visible_questions(&self) -> impl Iterator<Item = &crew_protocol::Message> + '_ {
+        self.state.questions.visible()
+    }
+
+    pub fn questions(&self) -> &[crew_protocol::Message] {
+        &self.state.questions.open
+    }
+
+    pub fn pending_answer_ids(&self) -> impl Iterator<Item = &str> + '_ {
+        self.actions.pending_answer_ids()
+    }
 }
 
 impl ClientApi for ClientCore {

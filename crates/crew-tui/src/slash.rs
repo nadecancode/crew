@@ -6,7 +6,7 @@
 //! so `/exit` typed out of habit cannot start a team or land in an agent's
 //! conversation.
 
-pub use crew_core::util::slash_command;
+pub use crew_client::policy::slash_command;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct SlashCommand {
@@ -41,73 +41,37 @@ const fn command(
     }
 }
 
+// Membership/order belongs to the terminal UI. Descriptions, arguments and
+// aliases come from the live shared policy descriptors.
+macro_rules! shared_command {
+    ($index:expr) => {{
+        let descriptor = &crew_client::policy::COMMANDS[$index];
+        SlashCommand {
+            name: descriptor.name,
+            aliases: descriptor.aliases,
+            args: descriptor.args,
+            about: descriptor.about,
+        }
+    }};
+}
+
 /// Commands of the dashboard's message box.
-pub const DASHBOARD: &[SlashCommand] = &[
-    command(
-        "exit",
-        &["quit", "q"],
-        "",
-        "leave the dashboard — the team keeps running",
-    ),
-    command(
-        "stop",
-        &["terminate", "shutdown"],
-        "",
-        "stop the team: every agent and the daemon (asks first)",
-    ),
-    command(
-        "kill",
-        &[],
-        "[agent]",
-        "stop one agent's process (asks first)",
-    ),
-    command(
-        "restart",
-        &[],
-        "[agent]",
-        "restart an agent, resuming its session",
-    ),
-    command(
-        "restart-fresh",
-        &[],
-        "[agent]",
-        "restart without resuming the old conversation (asks first)",
-    ),
-    command("pause", &[], "[agent]", "suspend an agent"),
-    command("unpause", &[], "[agent]", "let a suspended agent continue"),
-    command(
-        "compact",
-        &[],
-        "[agent]",
-        "compact an agent's context when its turn ends",
-    ),
-    command(
-        "model",
-        &["cli", "harness"],
-        "[agent]",
-        "choose the model and CLI an agent runs on",
-    ),
-    command(
-        "resume",
-        &[],
-        "",
-        "continue the agents paused at a usage limit",
-    ),
-    command(
-        "answer",
-        &["questions"],
-        "",
-        "answer the questions the team has for you",
-    ),
-    command("tasks", &[], "", "show the task graph"),
-    command("logs", &[], "", "show the event log"),
-    command(
-        "mouse",
-        &[],
-        "",
-        "turn mouse clicks on or off (off: drag selects text)",
-    ),
-    command("help", &["?"], "", "keys and commands"),
+pub static DASHBOARD: &[SlashCommand] = &[
+    shared_command!(0),
+    shared_command!(1),
+    shared_command!(2),
+    shared_command!(3),
+    shared_command!(4),
+    shared_command!(5),
+    shared_command!(6),
+    shared_command!(7),
+    shared_command!(8),
+    shared_command!(9),
+    shared_command!(10),
+    shared_command!(11),
+    shared_command!(12),
+    shared_command!(13),
+    shared_command!(14),
 ];
 
 /// Commands of the launcher's objective box.
