@@ -553,11 +553,12 @@ impl AgentInspector {
         let paused = latest.as_ref().is_some_and(|agent| agent.agent.paused);
         let mut reasons = Vec::new();
         for control in self.controls.iter() {
-            match control.kind {
-                ActionKind::Pause => control.button.set_visible(!paused),
-                ActionKind::Resume => control.button.set_visible(paused),
-                _ => (),
-            }
+            let shown = match control.kind {
+                ActionKind::Pause => !paused,
+                ActionKind::Resume => paused,
+                _ => true,
+            };
+            control.button.set_visible(shown);
             let availability = latest
                 .as_ref()
                 .and_then(|agent| agent.actions.iter().find(|a| a.action == control.kind));
@@ -572,8 +573,8 @@ impl AgentInspector {
             match (&control.reason, reason) {
                 (Some(label), reason) => {
                     label.set_label(reason.unwrap_or_default());
-                    // The reason sits beside its item and goes with it.
-                    label.set_visible(control.button.is_visible() && reason.is_some());
+                    // The reason sits under its item and goes with it.
+                    label.set_visible(shown && reason.is_some());
                 }
                 (None, Some(reason)) => reasons.push(format!(
                     "{}: {reason}",
