@@ -1,4 +1,4 @@
-//! Provisional composition regression against exact shared Core 2dde20fc.
+//! Composition regression reviewed against exact shared Core 93266067.
 //! Final transport validation repeats this on the accepted integrated engine.
 
 #![cfg(feature = "real-core-tests")]

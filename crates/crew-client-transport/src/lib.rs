@@ -7,6 +7,9 @@ pub mod driver;
 pub mod framing;
 pub mod ports;
 
+#[cfg(feature = "gateway")]
+pub mod gateway;
+
 #[cfg(all(feature = "local", any(target_os = "linux", target_os = "macos")))]
 pub mod local;
 

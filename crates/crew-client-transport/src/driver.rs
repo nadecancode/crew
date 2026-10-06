@@ -1737,6 +1737,9 @@ impl<C: ClientApi, W: CommandCodec> SessionDriver<C, W> {
                 TransportEnd::Revoked
                     | TransportEnd::GrantChanged
                     | TransportEnd::Authentication
+                    | TransportEnd::CredentialLocked
+                    | TransportEnd::CredentialUnavailable
+                    | TransportEnd::TlsTrust
                     | TransportEnd::Permission
             ) {
                 self.listing = None;
@@ -1750,6 +1753,9 @@ impl<C: ClientApi, W: CommandCodec> SessionDriver<C, W> {
                     TransportEnd::Revoked
                     | TransportEnd::Authentication
                     | TransportEnd::MissingCredential
+                    | TransportEnd::CredentialLocked
+                    | TransportEnd::CredentialUnavailable
+                    | TransportEnd::TlsTrust
                     | TransportEnd::Permission
                     | TransportEnd::AgentContext => EndpointStatus::SignedOut,
                     TransportEnd::Stopped => EndpointStatus::Disconnected,

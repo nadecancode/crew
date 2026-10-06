@@ -29,6 +29,8 @@ pub enum TransportEnd {
     Authentication,
     AgentContext,
     MissingCredential,
+    CredentialLocked,
+    CredentialUnavailable,
     Permission,
     ProtocolMismatch,
     TlsTrust,
@@ -58,6 +60,10 @@ impl TransportEnd {
                 "missing_credential",
                 "No protected operator credential is available.",
             ),
+            Self::CredentialLocked => ("key_locked", "Unlock device access before connecting."),
+            Self::CredentialUnavailable => {
+                ("key_unavailable", "Device secure storage is unavailable.")
+            }
             Self::Permission => ("permission", "Protected local access is unavailable."),
             Self::ProtocolMismatch => (
                 "protocol",

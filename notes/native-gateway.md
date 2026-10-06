@@ -97,6 +97,33 @@ path for discovery, no `--all` enrollment default exists, and registry
 presence alone grants nothing. Stopped selected workspaces remain selected;
 their registry identity and daemon incarnation are revalidated before dialing.
 
+Every workspace-purpose open verifies a fresh registry entry and checked Unix
+socket against the protected selection. On the same authenticated upstream
+connection, the gateway issues an internal `Snapshot { messages: 0, events: 0 }`
+before replying `GatewayOpened`. Discovery, dial and snapshot share a 3-second
+deadline, a live device/grant check, the existing pending budget and cancellation
+on revocation/stop. The snapshot stays within the existing 1 MiB frame bound.
+Its workspace/state directory, daemon PID and daemon startup UTC milliseconds
+must match the protected membership, fresh registry and `hello` PID. A mismatch,
+unexpected/error reply or timeout refuses the open with sanitized `unavailable`;
+no internal snapshot, identity diagnostic or private frame reaches the device.
+Recheck the membership and grant after verification and before the opened reply.
+This internal read does not expand the device's method permissions.
+
+`GatewayOpened.route` carries the resulting server-verified `GatewayRoute`.
+Index opens have `route: null`; Workspace, Read, Action and Terminal opens
+require it. `workspace_id` names the protected selection; `workspace_generation`
+is the immutable native membership generation (1 today), also used by its index
+entry, and is separate from `grant_generation`. Native memberships remain in
+the private registry after all grants are removed; no remove/rejoin membership
+operation exists in v1. `daemon` is the dialed session's verified v6
+`DaemonRef { pid, started_at }`. It is not team/session start time, process
+clock ticks or a copied index hint. The connector compares this route against
+its captured expected scope and refuses missing/mismatched route facts before
+any device command. A listing/open daemon-restart race therefore cannot promote
+stale index metadata into verified authority. This changes native-v1 metadata
+only; protocol-6 records and browser transports stay unchanged.
+
 Gateway compromise exposes its granted Crew resources and its host-side
 operator authority; it is not a new OS isolation boundary. Device compromise
 provides only that device's granted API access while its public key remains
@@ -244,7 +271,8 @@ After authentication, the gateway returns separate metadata:
 | --- | --- |
 | `GatewayAuthority` | `endpoint_id`, new-per-start `endpoint_epoch`, `device_id`, `device_generation`, `credential_expires_at` (UTC ms), `server_time` |
 | `WorkspaceGrant` | `workspace_id`, `grant_generation`, ordered `capabilities` (`read`, optionally `control`, `terminal`), explicit allowed action identifiers |
-| `GatewayOpened` | authority, purpose, optional workspace/grant, current compatible daemon `HelloInfo` when connected |
+| `GatewayRoute` | protected `workspace_id`, immutable `workspace_generation`, same-dial verified v6 `DaemonRef { pid, started_at }` |
+| `GatewayOpened` | authority, purpose, optional workspace/grant, `route` (None only for Index), current compatible daemon `HelloInfo` when connected |
 | `GatewayListing` | authority, grant records and filtered v6 `Workspaces`; `others` always empty |
 
 Endpoint UUID is persistent; endpoint epoch is fresh random 128 bits per
@@ -285,6 +313,14 @@ listing revision changes only when its visible authorized entries/grants
 change, with pushes at most once per 100 ms. `others=[]`; neither initial
 listing nor updates contain ungranted names, paths, objectives, counts or
 questions. Device-owned preferences are local, not shared browser `web_prefs`.
+
+Visible grant records and joined entries contain exactly the same workspace
+ids in the same order. A persistent grant whose member has not yet appeared in
+the asynchronous discovery cache remains internal; discovery publishes the
+entry and grant together at a new listing revision. Temporarily missing cached
+membership metadata does not remove its persistent authorization. This also
+applies while a summary watch restarts after the last grant was revoked and
+then regranted; no listing entry or daemon incarnation is fabricated.
 
 Every workspace request, subscription and terminal write checks active
 device/grant generation, expiry, immutable route, purpose and the policy
@@ -543,6 +579,7 @@ must not be the reason a server rejects a forbidden action.
 | G12 network budgets | Exhaust TLS/HTTP/auth/enrollment/queue/request/device capacities, including bounded source-bucket churn; memory stays bounded, no unauthorized work occurs, local administration and an existing healthy authorized device remain usable. |
 | G13 sandbox/source skew | With XDG_STATE_HOME inside and outside home, registry/key stay under the protected runtime; real agent sandbox cannot read/open native registry/control/TLS-key paths or approve/enroll itself. External TLS-key path refuses startup. Mismatched authenticated protocol returns safe incompatibility, never raw daemon path; old scope/callbacks after grant change are ignored. |
 | G14 unchanged dashboard | Existing `web`, `web_server`, `web_wire`, `operator_auth` tests remain byte/source unchanged and pass (60 at reviewed checkpoint); browser exact Host/Origin, code/proof, loopback/control/W7 and individual team lifetime retain behavior. |
+| G15 verified route | Every workspace-purpose open returns same-dial workspace/generation/PID/start facts; Index has no route. Wrong registry PID/start/workspace refuses the open without private diagnostics. A daemon restart between listing and open yields the actual new incarnation, never the cached listing. Internal snapshot/reply stays private and bounded; revoked/changed grants cannot complete verification. Connector refuses a route-less or mismatched workspace open before any send. |
 
 Required implementation commands once those suites exist:
 
