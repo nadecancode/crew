@@ -1,0 +1,24 @@
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 3.92s
+     Running tests/gateway.rs (target/native-validation/cargo/debug/deps/gateway-8ff7f81495ae6fa7)
+
+running 1 test
+MESA-EGL: warning: DRI3 error: Could not get DRI3 device
+MESA-EGL: warning: Ensure your X server supports DRI3 to get accelerated rendering
+
+(crew-desktop:135519): Gtk-WARNING **: 00:09:15.590: Widget reports min height of 336 for width of 608, but overall min height of 398
+
+(crew-desktop:135519): Gtk-WARNING **: 00:09:15.952: Widget reports min height of 336 for width of 608, but overall min height of 398
+Deterministic Connections presentation passed
+Secret Service signer passed
+
+(crew-desktop:135519): Gtk-WARNING **: 00:09:18.912: Widget reports min height of 336 for width of 608, but overall min height of 398
+
+(crew-desktop:135519): Gtk-WARNING **: 00:09:24.495: Widget reports min height of 301 for width of 672, but min width of 610 for height of 261
+
+(crew-desktop:135519): Gtk-WARNING **: 00:09:24.497: Widget reports min height of 301 for width of 672, but min width of 610 for height of 261
+Live isolated gateway journey passed
+test remote_connections_secret_store_and_isolated_gateway ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 15.02s
+
+native gateway assertions passed; evidence <content-worktree>/target/native-validation/content-polish/src-a5619fb5/target/native-validation/gateway-run
