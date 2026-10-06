@@ -1,0 +1,31 @@
+[package]
+name = "crew-client-transport"
+description = "Scoped native Crew session driver and bounded transport adapters"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version = "1.93"
+
+[features]
+default = []
+runtime = ["dep:tokio"]
+local = ["runtime", "dep:crew-core", "dep:libc"]
+real-core-tests = []
+
+[dependencies]
+crew-client = { path = "../crew-client" }
+crew-protocol = { path = "../crew-protocol" }
+serde_json.workspace = true
+serde.workspace = true
+base64.workspace = true
+tokio = { workspace = true, optional = true }
+
+[target.'cfg(any(target_os = "linux", target_os = "macos"))'.dependencies]
+crew-core = { path = "../crew-core", optional = true }
+libc = { workspace = true, optional = true }
+
+[dev-dependencies]
+tempfile.workspace = true
+
+[target.'cfg(any(target_os = "linux", target_os = "macos"))'.dev-dependencies]
+crew = { path = "../crew", default-features = false }
