@@ -31,10 +31,12 @@ unset CREW_IDENTITY CREW_SOCKET CREW_LAUNCH
 cd "$native_repo"
 rustc "+$native_toolchain" -Vv > "$native_out/rust-version.txt"
 cksum Cargo.lock > "$native_out/lockfile.txt"
-./scripts/build-env cargo "+$native_toolchain" build --locked -p crew-client-ffi --features bindings,local --release
+# Generate from an unstripped dev-profile host library: the release profile strips
+# the UniFFI metadata symbols that library-mode generation reads.
+./scripts/build-env cargo "+$native_toolchain" build --locked -p crew-client-ffi --features bindings,local
 case "$(uname -s)" in
-    Darwin) native_host_library="$CARGO_TARGET_DIR/release/libcrew_client_ffi.dylib" ;;
-    Linux) native_host_library="$CARGO_TARGET_DIR/release/libcrew_client_ffi.so" ;;
+    Darwin) native_host_library="$CARGO_TARGET_DIR/debug/libcrew_client_ffi.dylib" ;;
+    Linux) native_host_library="$CARGO_TARGET_DIR/debug/libcrew_client_ffi.so" ;;
     *) echo "unavailable: binding generation host must be Linux or macOS" >&2; exit 2 ;;
 esac
 (

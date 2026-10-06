@@ -176,7 +176,13 @@ def agent_node(app, agent_id, timeout=10):
 def select_agent(app, agent_id):
     app.key("ctrl+1")
     act(agent_node(app, agent_id))
-    find(root(app), name=f"Agent {agent_id}", role="label", timeout=10)
+    # The inspector names its agent: `Agent <id>` before polish v2-v5, the bare
+    # id beside the Agent actions menu after it.
+    shown = wait_for(lambda: find_all(root(app), name=f"Agent {agent_id}", role="label")
+                     or (find_all(root(app), name="Agent actions", role="toggle button")
+                         and find_all(root(app), name=agent_id, role="label")), timeout=10)
+    if not shown:
+        raise LookupError(f"inspector for {agent_id} did not open")
 
 
 def connect(rec, app, label):
@@ -301,7 +307,7 @@ def l04_tasks(rec, app):
     app.key("ctrl+1")
     dev = agent_node(app, "dev")
     rec.check(safe(lambda: dev.getState().contains(pyatspi.STATE_SELECTED) or
-                   bool(find_all(root(app), name="Agent dev", role="label")), False),
+                   bool(find_all(root(app), name="Agent dev", role="label") or find_all(root(app), name="dev", role="label")), False),
               "returning to Team keeps the selected agent", dev.name)
 
 
