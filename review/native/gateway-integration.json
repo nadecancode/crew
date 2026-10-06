@@ -1,0 +1,1286 @@
+{
+  "schemaVersion": 1,
+  "status": "verification complete; final independent fast-forward verdict pending",
+  "baseline": "e27cb12d70f49d5252a42b0a1164b057634a5cc0",
+  "productSource": "26bf2ebeaa5270e2b085fb8697e91134e44d6784",
+  "sourceProof": {
+    "baseline": "e27cb12d70f49d5252a42b0a1164b057634a5cc0",
+    "entries": [
+      {
+        "path": "crates/crew/Cargo.toml",
+        "authority": "19c62f5226c3bdbc26ead73108f6f41d4033b87e",
+        "bytes": 1773,
+        "gitBlob": "919966c2cb4456af4b701a00747e938a310d3050",
+        "sha256": "c84698bbd4afa1ea085652cd6f4da6a831395d51aebf74fce4da21308b71faf2"
+      },
+      {
+        "path": "crates/crew/src/cli/mod.rs",
+        "authority": "19c62f5226c3bdbc26ead73108f6f41d4033b87e",
+        "bytes": 26971,
+        "gitBlob": "015a153f590bdfcae12b25c60d956ae519bb118b",
+        "sha256": "fbd6f99db596f2b7b5847be440aabad44e1935bb7929b3b89fef39f7b7baadec"
+      },
+      {
+        "path": "crates/crew/src/cli/ops/mod.rs",
+        "authority": "19c62f5226c3bdbc26ead73108f6f41d4033b87e",
+        "bytes": 1174,
+        "gitBlob": "dda3f2eaef0c488b15d8bae4e7336c067d7f205e",
+        "sha256": "2d01feffd9292578d117cdaceda1b42d396d3479a7688232257c00ec3a477a3b"
+      },
+      {
+        "path": "crates/crew/src/cli/ops/native.rs",
+        "authority": "19c62f5226c3bdbc26ead73108f6f41d4033b87e",
+        "bytes": 8710,
+        "gitBlob": "81c20f5f1001501f1fb31d7a5042671490d737f4",
+        "sha256": "a9c62be80a0824a1880718b8abfa366e0a350a97c2d42fde3777c5f05d2e2f42"
+      },
+      {
+        "path": "crates/crew/src/lib.rs",
+        "authority": "19c62f5226c3bdbc26ead73108f6f41d4033b87e",
+        "bytes": 1276,
+        "gitBlob": "9c00856ff731adcc99859e0590f6676d82b4fdd9",
+        "sha256": "dd79c79fe2e46d81f8b356b0ee30fdb776b5d979bceff62a3d1609a44e083427"
+      },
+      {
+        "path": "crates/crew/src/native/admin.rs",
+        "authority": "19c62f5226c3bdbc26ead73108f6f41d4033b87e",
+        "bytes": 2029,
+        "gitBlob": "d4a2741c6df776fdc1cc3499b4a501eebcf896d1",
+        "sha256": "5ada3a1152da0276d9f4bb2af66958b6cd297e42534592a3320319bb68142f12"
+      },
+      {
+        "path": "crates/crew/src/native/auth.rs",
+        "authority": "19c62f5226c3bdbc26ead73108f6f41d4033b87e",
+        "bytes": 10012,
+        "gitBlob": "cefeca4793d4d0a5d2598b2c823c57fc80ba1731",
+        "sha256": "02318e5e1e8023e3ce07feb6dd9f5a20f5cfa41f31b4227732574dea567910d3"
+      },
+      {
+        "path": "crates/crew/src/native/control.rs",
+        "authority": "19c62f5226c3bdbc26ead73108f6f41d4033b87e",
+        "bytes": 7688,
+        "gitBlob": "8e6d6982223335bf62a2fd9942ecccf2278c5f95",
+        "sha256": "911dcc4a80eaba7b311b4e21a0422d1b839ac1cdc7458fefb6aa4715d401e126"
+      },
+      {
+        "path": "crates/crew/src/native/http.rs",
+        "authority": "19c62f5226c3bdbc26ead73108f6f41d4033b87e",
+        "bytes": 4097,
+        "gitBlob": "b04dc1d8b2e2c3f683940022b5e5775d4156e6e5",
+        "sha256": "90a275b2c2db4a34aedb058c78c4a44680f16d0bc2c9f8c9521b5db8b9de9ea2"
+      },
+      {
+        "path": "crates/crew/src/native/limits.rs",
+        "authority": "19c62f5226c3bdbc26ead73108f6f41d4033b87e",
+        "bytes": 2294,
+        "gitBlob": "ec64f5edb645049d7859caae5175a1aabcf411d1",
+        "sha256": "77c919e6975a0db483b6af45e58cadb7004d8d5a8231cb835ec503e41b80ece8"
+      },
+      {
+        "path": "crates/crew/src/native/members.rs",
+        "authority": "19c62f5226c3bdbc26ead73108f6f41d4033b87e",
+        "bytes": 8284,
+        "gitBlob": "5544a2e33bddfe1de8893a87f2ae6c29ac01150d",
+        "sha256": "60391ac6e0ad0a82b6a7475e7251d5360a23ef48faa789eb359e7f1cf7cd44e0"
+      },
+      {
+        "path": "crates/crew/src/native/mod.rs",
+        "authority": "19c62f5226c3bdbc26ead73108f6f41d4033b87e",
+        "bytes": 1315,
+        "gitBlob": "c5649ae79d65e9290fc203b0ed647a459a908078",
+        "sha256": "027727bc0d0e47664cee923e052cb15a0aa6b360b5d34cc36018d3ac2ce98ecc"
+      },
+      {
+        "path": "crates/crew/src/native/policy.rs",
+        "authority": "19c62f5226c3bdbc26ead73108f6f41d4033b87e",
+        "bytes": 15405,
+        "gitBlob": "f2c09ef82339ddf0a2f2a438b1d089e0cb8a494b",
+        "sha256": "7b4f5bc8d2da00fb4566cbed4a55e546950c977323e8ab5665f2b9c2dfec5088"
+      },
+      {
+        "path": "crates/crew/src/native/route.rs",
+        "authority": "19c62f5226c3bdbc26ead73108f6f41d4033b87e",
+        "bytes": 3961,
+        "gitBlob": "5a98e8bf239d6bc6dc67ef62b59a1538c1fff74a",
+        "sha256": "4cc76cc2a84ee9276d5dc53bdce4df1a333985b3614e434571623bf1785aa378"
+      },
+      {
+        "path": "crates/crew/src/native/run.rs",
+        "authority": "19c62f5226c3bdbc26ead73108f6f41d4033b87e",
+        "bytes": 5001,
+        "gitBlob": "0dd91b4ea815ae1db64098a24e0c43bfbdd0d303",
+        "sha256": "01ec93668df0da9c733e9385c332defa703d4caca4e07ffc6f0e042ce42f41c0"
+      },
+      {
+        "path": "crates/crew/src/native/service.rs",
+        "authority": "19c62f5226c3bdbc26ead73108f6f41d4033b87e",
+        "bytes": 26810,
+        "gitBlob": "77cc2f6db0c96c1c95218bfcf095bd942b3e49df",
+        "sha256": "263f3184c47d36b33bd6ef2f4d31fb996a271d729e8b727b82658b08771275a6"
+      },
+      {
+        "path": "crates/crew/src/native/store.rs",
+        "authority": "19c62f5226c3bdbc26ead73108f6f41d4033b87e",
+        "bytes": 11848,
+        "gitBlob": "8f36a46ec88c72cbfaae1bf58b7d291f253fc5d9",
+        "sha256": "43030a628edd2b65424fda5e8852e747ab0ea71688153413fcc31540ab96fdc1"
+      },
+      {
+        "path": "crates/crew/src/native/tls.rs",
+        "authority": "19c62f5226c3bdbc26ead73108f6f41d4033b87e",
+        "bytes": 3914,
+        "gitBlob": "473b6b8957145b4d69ece68bc0e2ecbdbcc76f65",
+        "sha256": "f2bc4aaa0b1e7c5810f03e6f9e6663edc9975c06e3d35cfc54d6001ee8b2be63"
+      },
+      {
+        "path": "crates/crew/src/native/ws.rs",
+        "authority": "19c62f5226c3bdbc26ead73108f6f41d4033b87e",
+        "bytes": 17302,
+        "gitBlob": "d658c0a94634709ae7e2d253853ca32b89fef6dd",
+        "sha256": "9b409b3160b6a9be8682743855f1c9539d0bc43020338362b4ccb387262d2ede"
+      },
+      {
+        "path": "crates/crew/tests/fixtures/native/README.md",
+        "authority": "19c62f5226c3bdbc26ead73108f6f41d4033b87e",
+        "bytes": 593,
+        "gitBlob": "2dce30c6f9eb6e674a8035a452bd9a1e84c2b100",
+        "sha256": "420a771958f9452c087c41b609c10cd46ad4580e8a1c291a634d56bcda8d7f37"
+      },
+      {
+        "path": "crates/crew/tests/fixtures/native/cert.pem",
+        "authority": "19c62f5226c3bdbc26ead73108f6f41d4033b87e",
+        "bytes": 635,
+        "gitBlob": "760b6a170cc1a4226545c0dff87cf7fe9ee1623e",
+        "sha256": "10792e650c0099c4bcee9997fc026047934cac8a799d6bf7a4b72d08973350bf"
+      },
+      {
+        "path": "crates/crew/tests/fixtures/native/expired.pem",
+        "authority": "19c62f5226c3bdbc26ead73108f6f41d4033b87e",
+        "bytes": 583,
+        "gitBlob": "01c6a0419834f8d6aed7d991398674c86df3e39b",
+        "sha256": "8681af978b7fd61a35d9fb4d8fbd64413948683323a4484450ebb5ea7c85ac38"
+      },
+      {
+        "path": "crates/crew/tests/fixtures/native/key.pem",
+        "authority": "19c62f5226c3bdbc26ead73108f6f41d4033b87e",
+        "bytes": 241,
+        "gitBlob": "2677e4a23301e268f6914debc4f8ea8155c42edc",
+        "sha256": "dd20920be700e4744f630e4d0a48e3ba7ab94e125521f2cad5855bef6307b91d"
+      },
+      {
+        "path": "crates/crew/tests/native_gateway.rs",
+        "authority": "19c62f5226c3bdbc26ead73108f6f41d4033b87e",
+        "bytes": 60270,
+        "gitBlob": "23a327ea1a902a9c4df3a7202c7e825bee5cc759",
+        "sha256": "5dab5b0fafd4755685f274bb9849fbfb950d292b54d5b2fb5a10dd4c975a8cb9"
+      },
+      {
+        "path": "notes/native-gateway.md",
+        "authority": "19c62f5226c3bdbc26ead73108f6f41d4033b87e",
+        "bytes": 44359,
+        "gitBlob": "41d3bef423decebb876c30efa4cb8632405b44b2",
+        "sha256": "adae6cab5b70df7b0c7aca3cf52b1b50b245b471701684889380ef5dabe5705c"
+      },
+      {
+        "path": "review/native-gateway-generation.md",
+        "authority": "19c62f5226c3bdbc26ead73108f6f41d4033b87e",
+        "bytes": 2587,
+        "gitBlob": "5225139534f5638c46677064578e337657cd8e6d",
+        "sha256": "744ee2fab330b4662fb0b390fbf20d63c20492cb9576814d4692c32d12557947"
+      },
+      {
+        "path": "review/native-gateway-listing-coherence.md",
+        "authority": "19c62f5226c3bdbc26ead73108f6f41d4033b87e",
+        "bytes": 3233,
+        "gitBlob": "fb66e05fce9b3bdea2d19e834eee08d85c7db320",
+        "sha256": "33968f63cb57c7a061b41dd1cb1668c8ed79dc983faa3ba1253377d958a72109"
+      },
+      {
+        "path": "crates/crew-protocol/src/lib.rs",
+        "authority": "759aea95dd7b11f9df0e71da181b3f89cc00d3a1",
+        "bytes": 345,
+        "gitBlob": "44d2444428780f82950ec98c0c712e7e59c2327f",
+        "sha256": "de5530296cddc79aad4bc02e48b628bc532d6813b171a1086676ea2c130b8b24"
+      },
+      {
+        "path": "crates/crew-protocol/src/native.rs",
+        "authority": "759aea95dd7b11f9df0e71da181b3f89cc00d3a1",
+        "bytes": 17372,
+        "gitBlob": "c5b09451e87afb76fb70ee294187c008be5ce86a",
+        "sha256": "9c60c8fd79bc54d04dbb1b1f2535bc96031b39c48350224bf223f1e80ad4bf52"
+      },
+      {
+        "path": "notes/native-gateway-delivery.md",
+        "authority": "759aea95dd7b11f9df0e71da181b3f89cc00d3a1",
+        "bytes": 12134,
+        "gitBlob": "2b0409e74d1bd31a6b72342a5b06ff44befdada7",
+        "sha256": "9d9648c13d484af1670b2ab9d1c339f218c322e321d84da44670bcaf02a75514"
+      },
+      {
+        "path": "crates/crew-client-transport/Cargo.toml",
+        "authority": "1eaefd36c40fc87f27f932c6edd6b9d11dad1516",
+        "bytes": 1758,
+        "gitBlob": "b58909d9b1cf134bd16cb574106c33b1a9fddf35",
+        "sha256": "23bec6b47ad0b4a4f4908897f1a9217868c9f0f952338da82994a293037d509f"
+      },
+      {
+        "path": "crates/crew-client-transport/README.md",
+        "authority": "1eaefd36c40fc87f27f932c6edd6b9d11dad1516",
+        "bytes": 15026,
+        "gitBlob": "b14b58588d2b963405ece79a88e82dd361990368",
+        "sha256": "366d6e168d79653ff2dc436b47df7d08e8bdd55d5db537849fef3b52be6a51cd"
+      },
+      {
+        "path": "crates/crew-client-transport/src/clock.rs",
+        "authority": "1eaefd36c40fc87f27f932c6edd6b9d11dad1516",
+        "bytes": 1024,
+        "gitBlob": "76ec22e1bc438aa8bdae8ce9bfe69a497640b7b9",
+        "sha256": "b4f5c1b113b56ada6d4e3f2b6e133cbe7f5d35f5f222a95d2bf02a427cc93164"
+      },
+      {
+        "path": "crates/crew-client-transport/src/driver.rs",
+        "authority": "1eaefd36c40fc87f27f932c6edd6b9d11dad1516",
+        "bytes": 80270,
+        "gitBlob": "40743bdfb13934d4a3de8db127832253b8c1ca73",
+        "sha256": "88137bad79cea57b939c92c30b6f10909d346bc2fe02de7a9b204397e42b6220"
+      },
+      {
+        "path": "crates/crew-client-transport/src/framing.rs",
+        "authority": "1eaefd36c40fc87f27f932c6edd6b9d11dad1516",
+        "bytes": 3982,
+        "gitBlob": "a593c3947af2186dbb4372af4e53c74c5a1a059d",
+        "sha256": "1ab2ecd5056064057beb0470c4f06c94226f44eafb1bfd5bbff85e57fef08014"
+      },
+      {
+        "path": "crates/crew-client-transport/src/gateway/authority.rs",
+        "authority": "1eaefd36c40fc87f27f932c6edd6b9d11dad1516",
+        "bytes": 17854,
+        "gitBlob": "f4778ed009ca028927891b1008e064b0b99c5e1f",
+        "sha256": "27d8de2198e41872c86bdaa0efa9f25a2e2af3ba8046f67e1c918514fbf26e1c"
+      },
+      {
+        "path": "crates/crew-client-transport/src/gateway/connector.rs",
+        "authority": "1eaefd36c40fc87f27f932c6edd6b9d11dad1516",
+        "bytes": 19060,
+        "gitBlob": "637c081e90d50915de73529cee9be21c6cc0d731",
+        "sha256": "0c7fad11eefff26480e69570bd928bd3bd005487000843b5ed1fdd7c90bbda64"
+      },
+      {
+        "path": "crates/crew-client-transport/src/gateway/memory.rs",
+        "authority": "1eaefd36c40fc87f27f932c6edd6b9d11dad1516",
+        "bytes": 3144,
+        "gitBlob": "6e70b7d7dd1c0eaec8cc9e4524559201e318593a",
+        "sha256": "47fe336057129fa12ff2931fb2e42fd031acfe3d5a80d9081bfa9239bb00eaa9"
+      },
+      {
+        "path": "crates/crew-client-transport/src/gateway/mod.rs",
+        "authority": "1eaefd36c40fc87f27f932c6edd6b9d11dad1516",
+        "bytes": 2826,
+        "gitBlob": "e7c0bda8f1baf297ec3b20a90296f6742226e80b",
+        "sha256": "91069c22382b16533ff2d1cf2d54795a57fd5bf67ae6e23b85b1ce501032a4e1"
+      },
+      {
+        "path": "crates/crew-client-transport/src/gateway/profile.rs",
+        "authority": "1eaefd36c40fc87f27f932c6edd6b9d11dad1516",
+        "bytes": 3714,
+        "gitBlob": "10506bbce1e1c1352626ff1fd2261fe9244d29ec",
+        "sha256": "e3388a93f5f810d31f023fdc42341e0e7681b75d124942ae022513d4060ad50d"
+      },
+      {
+        "path": "crates/crew-client-transport/src/gateway/setup.rs",
+        "authority": "1eaefd36c40fc87f27f932c6edd6b9d11dad1516",
+        "bytes": 14783,
+        "gitBlob": "ac5f9b59f8b89a59788ba6d3221b7a7d913b6035",
+        "sha256": "71ceebd8a3b21f574c986568e03b6ef5fa46fb8c437bacc859ce6545139b36ee"
+      },
+      {
+        "path": "crates/crew-client-transport/src/gateway/signer.rs",
+        "authority": "1eaefd36c40fc87f27f932c6edd6b9d11dad1516",
+        "bytes": 2381,
+        "gitBlob": "acd70496fac1cff622acfe20349057a23cb074d3",
+        "sha256": "60c0155244ca507ae046b1a1dfe7cea064f6669839e18c3279f5b4c15f5e9420"
+      },
+      {
+        "path": "crates/crew-client-transport/src/gateway/tests.rs",
+        "authority": "1eaefd36c40fc87f27f932c6edd6b9d11dad1516",
+        "bytes": 20883,
+        "gitBlob": "a3e4186e6c5c9b35f69f73a6b994dab1194907c2",
+        "sha256": "ddd8c850084762eca48104eba01d8a2356b93b372c54fb7a7c98b8e19315f9d5"
+      },
+      {
+        "path": "crates/crew-client-transport/src/gateway/tls_tests.rs",
+        "authority": "1eaefd36c40fc87f27f932c6edd6b9d11dad1516",
+        "bytes": 11649,
+        "gitBlob": "0438da3d31872aa44316c0748900c1f252670aad",
+        "sha256": "0d30872743ce9eddc1c1bf2c172f6d1ba724276dd3216f007238d79df70f957c"
+      },
+      {
+        "path": "crates/crew-client-transport/src/gateway/wire.rs",
+        "authority": "1eaefd36c40fc87f27f932c6edd6b9d11dad1516",
+        "bytes": 7694,
+        "gitBlob": "d5e95378cf733bee995235ce6adbb669fdcb80c2",
+        "sha256": "0576a45a3ef08beb1cc9ef701d480f2f4d2d54e3b8681f7c652f8431a38987a1"
+      },
+      {
+        "path": "crates/crew-client-transport/src/lib.rs",
+        "authority": "1eaefd36c40fc87f27f932c6edd6b9d11dad1516",
+        "bytes": 755,
+        "gitBlob": "0f296c3e1b46ae02cd4c7d5c642e24a3849b58fd",
+        "sha256": "82ee82c842dab658fd3e8781a48fb79e11360e022e7ebece0c7a1157328d7bf6"
+      },
+      {
+        "path": "crates/crew-client-transport/src/local.rs",
+        "authority": "1eaefd36c40fc87f27f932c6edd6b9d11dad1516",
+        "bytes": 19724,
+        "gitBlob": "0b73d8183c5c3e042d981b9daa9e247eecd69159",
+        "sha256": "47deaf4e7890e0c704476b8e7665de12c49b837aeaa88f669677964e6711e059"
+      },
+      {
+        "path": "crates/crew-client-transport/src/ports.rs",
+        "authority": "1eaefd36c40fc87f27f932c6edd6b9d11dad1516",
+        "bytes": 6297,
+        "gitBlob": "70961c56a19ce48619cee0df8be4d29e6d0b0a10",
+        "sha256": "ab55e1bd256a3f0f4176fb63802440b25aba402a396b9a538b25de86aa38e3b5"
+      },
+      {
+        "path": "crates/crew-client-transport/src/queue.rs",
+        "authority": "1eaefd36c40fc87f27f932c6edd6b9d11dad1516",
+        "bytes": 8880,
+        "gitBlob": "eccf1168b5318f42d00a31176f61de6d76627aaa",
+        "sha256": "1c9e5072fa26f94528b545aa2367a05ba0a67909fee6ebfdfe60db3ee50fda73"
+      },
+      {
+        "path": "crates/crew-client-transport/src/service.rs",
+        "authority": "1eaefd36c40fc87f27f932c6edd6b9d11dad1516",
+        "bytes": 36066,
+        "gitBlob": "a2c5e4c58bc5ea1b1bcc73c5e4732210001105f9",
+        "sha256": "bd471578e79ec77bcfa11bfe3bd0b67a39aa41a91dd07a7213a4540f5578bf70"
+      },
+      {
+        "path": "crates/crew-client-transport/tests/attachment_notice.rs",
+        "authority": "1eaefd36c40fc87f27f932c6edd6b9d11dad1516",
+        "bytes": 17742,
+        "gitBlob": "e003dbf486b6bcab610d45f21f340645f521f940",
+        "sha256": "b6b64a98700d41ea403129c96a3407c69f13a90fb71edb9bde17c4d7e65c5b92"
+      },
+      {
+        "path": "crates/crew-client-transport/tests/common/mod.rs",
+        "authority": "1eaefd36c40fc87f27f932c6edd6b9d11dad1516",
+        "bytes": 16077,
+        "gitBlob": "c1e51cb95a67366920eea59081ba440978573212",
+        "sha256": "3b3efbfb2acea932caedad1e16835ad6c116d8856f8616fd1c6ea49366fe96a0"
+      },
+      {
+        "path": "crates/crew-client-transport/tests/driver.rs",
+        "authority": "1eaefd36c40fc87f27f932c6edd6b9d11dad1516",
+        "bytes": 30397,
+        "gitBlob": "6ce505d32c7f2738e370cfabda2e4ee8eefc34c9",
+        "sha256": "38d408fb2b8afacdda41d2b89feebf48378d0c5263e70acb7fba792a2440fd16"
+      },
+      {
+        "path": "crates/crew-client-transport/tests/fixtures/gateway/README.md",
+        "authority": "1eaefd36c40fc87f27f932c6edd6b9d11dad1516",
+        "bytes": 550,
+        "gitBlob": "195ce7e9aba77610476d43784c327ecd3165d5f7",
+        "sha256": "08edbb966a31702bd226957f1d4d62b8758c38e6f6209298370c6f8c9ec83f7a"
+      },
+      {
+        "path": "crates/crew-client-transport/tests/fixtures/gateway/cert.pem",
+        "authority": "1eaefd36c40fc87f27f932c6edd6b9d11dad1516",
+        "bytes": 635,
+        "gitBlob": "760b6a170cc1a4226545c0dff87cf7fe9ee1623e",
+        "sha256": "10792e650c0099c4bcee9997fc026047934cac8a799d6bf7a4b72d08973350bf"
+      },
+      {
+        "path": "crates/crew-client-transport/tests/fixtures/gateway/expired.pem",
+        "authority": "1eaefd36c40fc87f27f932c6edd6b9d11dad1516",
+        "bytes": 583,
+        "gitBlob": "01c6a0419834f8d6aed7d991398674c86df3e39b",
+        "sha256": "8681af978b7fd61a35d9fb4d8fbd64413948683323a4484450ebb5ea7c85ac38"
+      },
+      {
+        "path": "crates/crew-client-transport/tests/fixtures/gateway/key.pem",
+        "authority": "1eaefd36c40fc87f27f932c6edd6b9d11dad1516",
+        "bytes": 241,
+        "gitBlob": "2677e4a23301e268f6914debc4f8ea8155c42edc",
+        "sha256": "dd20920be700e4744f630e4d0a48e3ba7ab94e125521f2cad5855bef6307b91d"
+      },
+      {
+        "path": "crates/crew-client-transport/tests/fixtures/gateway/wrong-name.pem",
+        "authority": "1eaefd36c40fc87f27f932c6edd6b9d11dad1516",
+        "bytes": 639,
+        "gitBlob": "e73b0dc4a507c8ac76216f4d5b85174edd67e9f2",
+        "sha256": "6cbb84b6ef4d0dd7092219d4a4416f17ea9a6a1c56eac10c4baddd16b96935d5"
+      },
+      {
+        "path": "crates/crew-client-transport/tests/gateway_daemon.rs",
+        "authority": "1eaefd36c40fc87f27f932c6edd6b9d11dad1516",
+        "bytes": 31086,
+        "gitBlob": "2650c839e8a9d24eee07051a73e6d94a5c27516c",
+        "sha256": "2c62deb2e02b2cc6fcd40e116bf45f89d01df3108bf47cedbb6729a1dc230c66"
+      },
+      {
+        "path": "crates/crew-client-transport/tests/local_daemon.rs",
+        "authority": "1eaefd36c40fc87f27f932c6edd6b9d11dad1516",
+        "bytes": 24086,
+        "gitBlob": "4323faa2deaa0a3eed77cbd6186b1c02d9e4ed0d",
+        "sha256": "e698fea5f2482a44f39dad564bb958f79e7f1327a5f0c4122f37a4fb51827b40"
+      },
+      {
+        "path": "crates/crew-client-transport/tests/local_negative.rs",
+        "authority": "1eaefd36c40fc87f27f932c6edd6b9d11dad1516",
+        "bytes": 5068,
+        "gitBlob": "8e7f29eb9ff2fbd5a2b26f358003e305d428a7bb",
+        "sha256": "e2aeb81a7b0cbff0a1f05fca6c2b80fe82a0e9cfa896b014ed92e8f1d65c698a"
+      },
+      {
+        "path": "crates/crew-client-transport/tests/real_core_lifecycle.rs",
+        "authority": "1eaefd36c40fc87f27f932c6edd6b9d11dad1516",
+        "bytes": 6257,
+        "gitBlob": "80dbbaac940dc6cf30cf71680fd017fdea075594",
+        "sha256": "77c506cb44caea3ebc66997305fc0a24461e462185161f6e741b7c323d0e3ba0"
+      },
+      {
+        "path": "crates/crew/src/process/pty.rs",
+        "authority": "f94d0d8b72992a546b5e5b5690fb202a3787ef17",
+        "bytes": 44434,
+        "gitBlob": "d5f52b6a9ad4f15688003a1e91e8c8808d255bd0",
+        "sha256": "5b3aea7ffa2ac0673b07cefbb285b46154dd31f625be9c98afd74edf8098fe9b"
+      },
+      {
+        "path": "crates/crew/tests/pty_lifecycle.rs",
+        "authority": "f94d0d8b72992a546b5e5b5690fb202a3787ef17",
+        "bytes": 4034,
+        "gitBlob": "36ad1310923861d57ca895e44b9f8a85f7b9b086",
+        "sha256": "8e6f516beaa242d09b45e4b9ee3ff174a7b17533e95a47c3adac926943087b08"
+      },
+      {
+        "path": "review/native-pty-lifecycle.md",
+        "authority": "f94d0d8b72992a546b5e5b5690fb202a3787ef17",
+        "bytes": 5266,
+        "gitBlob": "adf3dd34ce3617455acd823b77114969b4d0b4b1",
+        "sha256": "962d6fc48c9e4fd8d852d8e3cac20282b20610eac09e3697e9ffa3a9ba9f0e19"
+      }
+    ],
+    "protected": {
+      "compared": 583,
+      "changed": [],
+      "scope": "Core/localFFI/generated/web/defaultdaemon/safeguards unchanged except reviewed process/pty.rs lifecycle correction"
+    },
+    "ptyCorrection": {
+      "authority": "f94d0d8b72992a546b5e5b5690fb202a3787ef17",
+      "approval": "m-ef15b7d2a17b",
+      "productionPaths": [
+        "crates/crew/src/process/pty.rs"
+      ],
+      "integratedHead": "26bf2ebeaa5270e2b085fb8697e91134e44d6784"
+    }
+  },
+  "changedPaths": [
+    "M Cargo.lock",
+    "M crates/crew/Cargo.toml",
+    "M crates/crew/src/cli/mod.rs",
+    "M crates/crew/src/cli/ops/mod.rs",
+    "A crates/crew/src/cli/ops/native.rs",
+    "M crates/crew/src/lib.rs",
+    "A crates/crew/src/native/admin.rs",
+    "A crates/crew/src/native/auth.rs",
+    "A crates/crew/src/native/control.rs",
+    "A crates/crew/src/native/http.rs",
+    "A crates/crew/src/native/limits.rs",
+    "A crates/crew/src/native/members.rs",
+    "A crates/crew/src/native/mod.rs",
+    "A crates/crew/src/native/policy.rs",
+    "A crates/crew/src/native/route.rs",
+    "A crates/crew/src/native/run.rs",
+    "A crates/crew/src/native/service.rs",
+    "A crates/crew/src/native/store.rs",
+    "A crates/crew/src/native/tls.rs",
+    "A crates/crew/src/native/ws.rs",
+    "M crates/crew/src/process/pty.rs",
+    "A crates/crew/tests/fixtures/native/README.md",
+    "A crates/crew/tests/fixtures/native/cert.pem",
+    "A crates/crew/tests/fixtures/native/expired.pem",
+    "A crates/crew/tests/fixtures/native/key.pem",
+    "A crates/crew/tests/native_gateway.rs",
+    "A crates/crew/tests/pty_lifecycle.rs",
+    "M crates/crew-client-transport/Cargo.toml",
+    "M crates/crew-client-transport/README.md",
+    "M crates/crew-client-transport/src/driver.rs",
+    "A crates/crew-client-transport/src/gateway/authority.rs",
+    "A crates/crew-client-transport/src/gateway/connector.rs",
+    "A crates/crew-client-transport/src/gateway/memory.rs",
+    "A crates/crew-client-transport/src/gateway/mod.rs",
+    "A crates/crew-client-transport/src/gateway/profile.rs",
+    "A crates/crew-client-transport/src/gateway/setup.rs",
+    "A crates/crew-client-transport/src/gateway/signer.rs",
+    "A crates/crew-client-transport/src/gateway/tests.rs",
+    "A crates/crew-client-transport/src/gateway/tls_tests.rs",
+    "A crates/crew-client-transport/src/gateway/wire.rs",
+    "M crates/crew-client-transport/src/lib.rs",
+    "M crates/crew-client-transport/src/ports.rs",
+    "A crates/crew-client-transport/tests/attachment_notice.rs",
+    "A crates/crew-client-transport/tests/fixtures/gateway/README.md",
+    "A crates/crew-client-transport/tests/fixtures/gateway/cert.pem",
+    "A crates/crew-client-transport/tests/fixtures/gateway/expired.pem",
+    "A crates/crew-client-transport/tests/fixtures/gateway/key.pem",
+    "A crates/crew-client-transport/tests/fixtures/gateway/wrong-name.pem",
+    "A crates/crew-client-transport/tests/gateway_daemon.rs",
+    "M crates/crew-client-transport/tests/real_core_lifecycle.rs",
+    "M crates/crew-protocol/src/lib.rs",
+    "A crates/crew-protocol/src/native.rs",
+    "A notes/native-gateway-delivery.md",
+    "M notes/native-gateway.md",
+    "A review/native-gateway-generation.md",
+    "A review/native-gateway-listing-coherence.md",
+    "A review/native-pty-lifecycle.md"
+  ],
+  "lock": {
+    "baseline": "e27cb12d",
+    "source": "19c62f52",
+    "baselinePackages": 280,
+    "combinedPackages": 302,
+    "additions": [
+      "base64ct@1.8.3",
+      "const-oid@0.9.6",
+      "curve25519-dalek@4.1.3",
+      "curve25519-dalek-derive@0.1.1",
+      "der@0.7.10",
+      "ed25519@2.2.3",
+      "ed25519-dalek@2.2.0",
+      "fiat-crypto@0.2.9",
+      "getrandom@0.2.17",
+      "pkcs8@0.10.2",
+      "rand_core@0.6.4",
+      "ring@0.17.14",
+      "rustls@0.23.45",
+      "rustls-pemfile@2.2.0",
+      "rustls-pki-types@1.15.1",
+      "rustls-webpki@0.103.15",
+      "signature@2.2.0",
+      "spki@0.7.3",
+      "subtle@2.6.1",
+      "tokio-rustls@0.26.6",
+      "untrusted@0.9.0",
+      "zeroize@1.8.2"
+    ],
+    "localNewEdges": {
+      "crew@0.1.0": [
+        "crew-protocol",
+        "ed25519-dalek",
+        "rustls",
+        "rustls-pemfile",
+        "tokio-rustls",
+        "zeroize"
+      ],
+      "crew-client-transport@0.1.0": [
+        "ed25519-dalek",
+        "futures-util",
+        "rustls",
+        "rustls-pemfile",
+        "sha2",
+        "tokio-rustls",
+        "tokio-tungstenite",
+        "zeroize"
+      ]
+    },
+    "annotations": [
+      {
+        "package": "rand@0.9.5",
+        "dependency": "rand_core",
+        "version": "0.9.5"
+      },
+      {
+        "package": "rand_chacha@0.9.0",
+        "dependency": "rand_core",
+        "version": "0.9.5"
+      },
+      {
+        "package": "rand_core@0.9.5",
+        "dependency": "getrandom",
+        "version": "0.3.4"
+      },
+      {
+        "package": "tempfile@3.27.0",
+        "dependency": "getrandom",
+        "version": "0.3.4"
+      },
+      {
+        "package": "uuid@1.20.0",
+        "dependency": "getrandom",
+        "version": "0.3.4"
+      }
+    ],
+    "removed": [],
+    "existingVersionsAndChecksumsUnchanged": true,
+    "finalSha256": "1803b78a106a2d01195d9617da3afc7b290810a26f7b8edbf9e623042adaeb8b",
+    "postCheckVersionsAndChecksumsVerified": true
+  },
+  "members": {
+    "workspace": 8,
+    "default": 5,
+    "rootManifestUnchanged": true,
+    "workspaceIds": [
+      "path+file:///home/nade/workspaces/personal/crew/.crew/worktrees/qa/crates/crew-protocol#0.1.0",
+      "path+file:///home/nade/workspaces/personal/crew/.crew/worktrees/qa/crates/crew-client#0.1.0",
+      "path+file:///home/nade/workspaces/personal/crew/.crew/worktrees/qa/crates/crew-core#0.1.0",
+      "path+file:///home/nade/workspaces/personal/crew/.crew/worktrees/qa/crates/crew-tui#0.1.0",
+      "path+file:///home/nade/workspaces/personal/crew/.crew/worktrees/qa/crates/crew#0.1.0",
+      "path+file:///home/nade/workspaces/personal/crew/.crew/worktrees/qa/crates/crew-desktop#0.1.0",
+      "path+file:///home/nade/workspaces/personal/crew/.crew/worktrees/qa/crates/crew-client-ffi#0.1.0",
+      "path+file:///home/nade/workspaces/personal/crew/.crew/worktrees/qa/crates/crew-client-transport#0.1.0"
+    ],
+    "defaultIds": [
+      "path+file:///home/nade/workspaces/personal/crew/.crew/worktrees/qa/crates/crew-protocol#0.1.0",
+      "path+file:///home/nade/workspaces/personal/crew/.crew/worktrees/qa/crates/crew-client#0.1.0",
+      "path+file:///home/nade/workspaces/personal/crew/.crew/worktrees/qa/crates/crew-core#0.1.0",
+      "path+file:///home/nade/workspaces/personal/crew/.crew/worktrees/qa/crates/crew-tui#0.1.0",
+      "path+file:///home/nade/workspaces/personal/crew/.crew/worktrees/qa/crates/crew#0.1.0"
+    ]
+  },
+  "earlyIndependentApproval": {
+    "source": "e7b1625d18f41ed328bf816fe7d7ff494acd0003",
+    "message": "m-ffa29fea3545",
+    "rootFastForwardVerdict": false
+  },
+  "defaultMembersBeforePty": {
+    "rows": [
+      {
+        "suite": "unittests src/lib.rs (target/ci/debug/deps/crew-29ab15914f342afd)",
+        "status": "ok",
+        "passed": 479,
+        "failed": 0,
+        "ignored": 0
+      },
+      {
+        "suite": "unittests src/main.rs (target/ci/debug/deps/crew-67d9349d7b138f75)",
+        "status": "ok",
+        "passed": 0,
+        "failed": 0,
+        "ignored": 0
+      },
+      {
+        "suite": "tests/binary_pin.rs (target/ci/debug/deps/binary_pin-2f49060f40bde67c)",
+        "status": "ok",
+        "passed": 4,
+        "failed": 0,
+        "ignored": 0
+      },
+      {
+        "suite": "tests/credential_files.rs (target/ci/debug/deps/credential_files-7889a08966dc0b1a)",
+        "status": "ok",
+        "passed": 1,
+        "failed": 0,
+        "ignored": 0
+      },
+      {
+        "suite": "tests/daemon_lifetime.rs (target/ci/debug/deps/daemon_lifetime-bc33296ccbcb6ea5)",
+        "status": "ok",
+        "passed": 1,
+        "failed": 0,
+        "ignored": 0
+      },
+      {
+        "suite": "tests/fake_cli.rs (target/ci/debug/deps/fake_cli-f6bbc1b0de79d8b5)",
+        "status": "ok",
+        "passed": 3,
+        "failed": 0,
+        "ignored": 0
+      },
+      {
+        "suite": "tests/git_helper_sandbox.rs (target/ci/debug/deps/git_helper_sandbox-b79a447ba77c33ff)",
+        "status": "ok",
+        "passed": 1,
+        "failed": 0,
+        "ignored": 0
+      },
+      {
+        "suite": "tests/mismatch.rs (target/ci/debug/deps/mismatch-3fcc372a41287911)",
+        "status": "ok",
+        "passed": 2,
+        "failed": 0,
+        "ignored": 0
+      },
+      {
+        "suite": "tests/native_gateway.rs (target/ci/debug/deps/native_gateway-11315079634c52dd)",
+        "status": "ok",
+        "passed": 1,
+        "failed": 0,
+        "ignored": 0
+      },
+      {
+        "suite": "tests/operator_auth.rs (target/ci/debug/deps/operator_auth-fb47a3bf227b4736)",
+        "status": "ok",
+        "passed": 14,
+        "failed": 0,
+        "ignored": 0
+      },
+      {
+        "suite": "tests/overlap.rs (target/ci/debug/deps/overlap-54cbe95dec675bf6)",
+        "status": "ok",
+        "passed": 8,
+        "failed": 0,
+        "ignored": 0
+      },
+      {
+        "suite": "tests/private_home.rs (target/ci/debug/deps/private_home-7137605b00114fb4)",
+        "status": "ok",
+        "passed": 2,
+        "failed": 0,
+        "ignored": 0
+      },
+      {
+        "suite": "tests/pty_sandbox.rs (target/ci/debug/deps/pty_sandbox-35f8f6bef0d4e2a8)",
+        "status": "ok",
+        "passed": 2,
+        "failed": 0,
+        "ignored": 0
+      },
+      {
+        "suite": "tests/real_cli.rs (target/ci/debug/deps/real_cli-af7f659c8e63a3b1)",
+        "status": "ok",
+        "passed": 0,
+        "failed": 0,
+        "ignored": 1
+      },
+      {
+        "suite": "tests/sandbox.rs (target/ci/debug/deps/sandbox-505071aaf85787c8)",
+        "status": "ok",
+        "passed": 29,
+        "failed": 0,
+        "ignored": 0
+      },
+      {
+        "suite": "tests/sandbox_launch.rs (target/ci/debug/deps/sandbox_launch-12e2c98c6dd0a6a7)",
+        "status": "ok",
+        "passed": 29,
+        "failed": 0,
+        "ignored": 0
+      },
+      {
+        "suite": "tests/shared_git.rs (target/ci/debug/deps/shared_git-524868b184b7d501)",
+        "status": "ok",
+        "passed": 1,
+        "failed": 0,
+        "ignored": 0
+      },
+      {
+        "suite": "tests/team.rs (target/ci/debug/deps/team-2f92f7b94b696e0c)",
+        "status": "ok",
+        "passed": 86,
+        "failed": 0,
+        "ignored": 0
+      },
+      {
+        "suite": "tests/web.rs (target/ci/debug/deps/web-01518720b89767f4)",
+        "status": "ok",
+        "passed": 21,
+        "failed": 0,
+        "ignored": 0
+      },
+      {
+        "suite": "tests/web_bundle.rs (target/ci/debug/deps/web_bundle-de377069d87ba8f6)",
+        "status": "ok",
+        "passed": 2,
+        "failed": 0,
+        "ignored": 0
+      },
+      {
+        "suite": "tests/web_server.rs (target/ci/debug/deps/web_server-4f3f5fcc5e00e702)",
+        "status": "ok",
+        "passed": 16,
+        "failed": 0,
+        "ignored": 0
+      },
+      {
+        "suite": "tests/web_wire.rs (target/ci/debug/deps/web_wire-087fac9d16c83f4e)",
+        "status": "ok",
+        "passed": 9,
+        "failed": 0,
+        "ignored": 0
+      },
+      {
+        "suite": "unittests src/lib.rs (target/ci/debug/deps/crew_client-cfb241a46fe939e2)",
+        "status": "ok",
+        "passed": 70,
+        "failed": 0,
+        "ignored": 0
+      },
+      {
+        "suite": "tests/actions.rs (target/ci/debug/deps/actions-89cdcaa95dac0395)",
+        "status": "ok",
+        "passed": 35,
+        "failed": 0,
+        "ignored": 0
+      },
+      {
+        "suite": "tests/api_schema.rs (target/ci/debug/deps/api_schema-af03e59282931542)",
+        "status": "ok",
+        "passed": 7,
+        "failed": 0,
+        "ignored": 0
+      },
+      {
+        "suite": "tests/client_api_conformance.rs (target/ci/debug/deps/client_api_conformance-18b976c5008f4794)",
+        "status": "ok",
+        "passed": 1,
+        "failed": 0,
+        "ignored": 0
+      },
+      {
+        "suite": "tests/command_schema.rs (target/ci/debug/deps/command_schema-c071b77738e4d505)",
+        "status": "ok",
+        "passed": 5,
+        "failed": 0,
+        "ignored": 0
+      },
+      {
+        "suite": "tests/command_wire.rs (target/ci/debug/deps/command_wire-50cb052533407e30)",
+        "status": "ok",
+        "passed": 5,
+        "failed": 0,
+        "ignored": 0
+      },
+      {
+        "suite": "tests/n1_state_conformance.rs (target/ci/debug/deps/n1_state_conformance-50a3214ced16f240)",
+        "status": "ok",
+        "passed": 4,
+        "failed": 0,
+        "ignored": 0
+      },
+      {
+        "suite": "tests/outcome_schema.rs (target/ci/debug/deps/outcome_schema-bcf56a62c7f5bfac)",
+        "status": "ok",
+        "passed": 1,
+        "failed": 0,
+        "ignored": 0
+      },
+      {
+        "suite": "tests/policy.rs (target/ci/debug/deps/policy-981c97c85573a839)",
+        "status": "ok",
+        "passed": 4,
+        "failed": 0,
+        "ignored": 0
+      },
+      {
+        "suite": "tests/policy_const.rs (target/ci/debug/deps/policy_const-a1f6717b36c6c5ef)",
+        "status": "ok",
+        "passed": 1,
+        "failed": 0,
+        "ignored": 0
+      },
+      {
+        "suite": "tests/terminal_schema.rs (target/ci/debug/deps/terminal_schema-c43c71d38e30a7e8)",
+        "status": "ok",
+        "passed": 2,
+        "failed": 0,
+        "ignored": 0
+      },
+      {
+        "suite": "tests/web_policy.rs (target/ci/debug/deps/web_policy-3d70bc33cc6d2e3c)",
+        "status": "ok",
+        "passed": 5,
+        "failed": 0,
+        "ignored": 0
+      },
+      {
+        "suite": "unittests src/lib.rs (target/ci/debug/deps/crew_core-066dd36349cef529)",
+        "status": "ok",
+        "passed": 74,
+        "failed": 0,
+        "ignored": 0
+      },
+      {
+        "suite": "unittests src/lib.rs (target/ci/debug/deps/crew_protocol-81b18f27185c9836)",
+        "status": "ok",
+        "passed": 10,
+        "failed": 0,
+        "ignored": 0
+      },
+      {
+        "suite": "unittests src/lib.rs (target/ci/debug/deps/crew_tui-00a988d937864f55)",
+        "status": "ok",
+        "passed": 119,
+        "failed": 0,
+        "ignored": 1
+      },
+      {
+        "suite": "tests/render.rs (target/ci/debug/deps/render-2b11cbeacd5f2f96)",
+        "status": "ok",
+        "passed": 60,
+        "failed": 0,
+        "ignored": 0
+      },
+      {
+        "suite": "crew",
+        "status": "ok",
+        "passed": 0,
+        "failed": 0,
+        "ignored": 0
+      },
+      {
+        "suite": "crew_client",
+        "status": "ok",
+        "passed": 0,
+        "failed": 0,
+        "ignored": 0
+      },
+      {
+        "suite": "crew_core",
+        "status": "ok",
+        "passed": 0,
+        "failed": 0,
+        "ignored": 0
+      },
+      {
+        "suite": "crew_protocol",
+        "status": "ok",
+        "passed": 0,
+        "failed": 0,
+        "ignored": 0
+      },
+      {
+        "suite": "crew_tui",
+        "status": "ok",
+        "passed": 0,
+        "failed": 0,
+        "ignored": 0
+      }
+    ],
+    "passed": 1114,
+    "failed": 0,
+    "ignored": 2,
+    "ignoredCases": [
+      "test two_real_claude_code_agents_talk_directly ... ignored, needs the Claude Code CLI and spends tokens",
+      "test net::tests::live_dashboard_against_a_scripted_daemon ... ignored, needs an interactive terminal"
+    ],
+    "selfSkipLines": []
+  },
+  "finalPtyChecks": {
+    "source": "26bf2ebeaa5270e2b085fb8697e91134e44d6784",
+    "incremental": false,
+    "steps": [
+      {
+        "name": "pty-unit",
+        "command": "./scripts/build-env cargo test --locked -p crew --features native-gateway --lib process::pty::tests:: -- --test-threads=1 --nocapture",
+        "log": "target/native-validation/gateway-integration/pty-unit.log",
+        "code": 0,
+        "elapsedSeconds": 24.014,
+        "freeBytesBefore": 180822347776
+      },
+      {
+        "name": "pty-handler-attach",
+        "command": "./scripts/build-env cargo test --locked -p crew --features native-gateway --test pty_lifecycle --test pty_sandbox -- --test-threads=1 --nocapture",
+        "log": "target/native-validation/gateway-integration/pty-handler-attach.log",
+        "code": 0,
+        "elapsedSeconds": 13.527,
+        "freeBytesBefore": 180475084800
+      },
+      {
+        "name": "native-binary",
+        "command": "./scripts/build-env cargo build --locked -p crew --features native-gateway --bin crew",
+        "log": "target/native-validation/gateway-integration/native-binary.log",
+        "code": 0,
+        "elapsedSeconds": 11.39,
+        "freeBytesBefore": 179865800704
+      },
+      {
+        "name": "pty-fmt",
+        "command": "./scripts/build-env cargo fmt --all --check",
+        "log": "target/native-validation/gateway-integration/pty-fmt.log",
+        "code": 0,
+        "elapsedSeconds": 1.334,
+        "freeBytesBefore": 179221430272
+      },
+      {
+        "name": "pty-clippy",
+        "command": "./scripts/build-env cargo clippy --locked -p crew --features native-gateway --all-targets -- -D warnings",
+        "log": "target/native-validation/gateway-integration/pty-clippy.log",
+        "code": 0,
+        "elapsedSeconds": 11.971,
+        "freeBytesBefore": 179216818176
+      },
+      {
+        "name": "pty-msrv",
+        "command": "RUSTUP_HOME=\"$PWD/target/cli-msrv-integration/rustup\" CREW_MSRV_TARGET_DIR=\"$PWD/target/native-validation/git-isolation-msrv\" ./scripts/check-msrv",
+        "log": "target/native-validation/gateway-integration/pty-msrv.log",
+        "code": 0,
+        "elapsedSeconds": 15.78,
+        "freeBytesBefore": 179183489024
+      }
+    ]
+  },
+  "fixtureBinary": {
+    "source": "26bf2ebeaa5270e2b085fb8697e91134e44d6784",
+    "features": [
+      "native-gateway"
+    ],
+    "compiler": "rustc1.93.1",
+    "path": "target/native-validation/gateway-integration/bin/crew",
+    "sha256": "eaadd984a683ae1d920a4c97800235fc4de21245b4f6a9f6c5aac1615517be45",
+    "bytes": 200829992
+  },
+  "nativeGatewayMsrvBoundary": {
+    "compiler": "Cargo1.82.0",
+    "status": "expected feature rejection; native feature requires1.93",
+    "package": "base64ct1.8.3",
+    "error": "feature edition2024 is required",
+    "log": "target/native-validation/gateway-integration/msrv.log"
+  },
+  "k5": {
+    "status": "passed",
+    "owner": "native-transport",
+    "acceptanceMessage": "m-8ec1689d3959",
+    "productSource": "26bf2ebeaa5270e2b085fb8697e91134e44d6784",
+    "productArchiveFiles": 851,
+    "testHarness": "d06db944eb2894e86b1a145278185ae7ada4f2c4",
+    "overlayPaths": [
+      "crates/crew-client-transport/Cargo.toml",
+      "crates/crew-client-transport/tests/gateway_daemon.rs",
+      "crates/crew-client-transport/tests/journey/mod.rs"
+    ],
+    "productionOverlay": false,
+    "passed": 2,
+    "failed": 0,
+    "testElapsedSeconds": 1.62,
+    "compileElapsedSeconds": 14.09,
+    "fixtureBinarySha256": "eaadd984a683ae1d920a4c97800235fc4de21245b4f6a9f6c5aac1615517be45",
+    "ownerLog": "target/native-validation/k5-26bf-journeys.log",
+    "ownerBinaryManifest": "target/native-validation/k5-26bf-binary.json",
+    "cases": [
+      "journey::real_local_native_engine_tasks_questions_confirmed_controls_and_two_terminal_scopes",
+      "journey::real_scoped_native_engine_read_default_control_terminal_and_revocation_on_actual_ptys"
+    ]
+  },
+  "earlierOwnerAcceptance": [
+    {
+      "message": "m-e7b7b460868a",
+      "owner": "native-transport",
+      "productSource": "e7b1625d18f41ed328bf816fe7d7ff494acd0003",
+      "passed": 56,
+      "log": "target/native-validation/k5-e7-56.log"
+    },
+    {
+      "message": "m-29cb67afa99d",
+      "owner": "native-transport",
+      "productSource": "e7b1625d18f41ed328bf816fe7d7ff494acd0003",
+      "passed": 31,
+      "log": "target/native-validation/k5-e7-local31-exact.log"
+    }
+  ],
+  "logs": [
+    {
+      "owner": "qa",
+      "path": "target/native-validation/gateway-integration/default-failure-controls.log",
+      "bytes": 700,
+      "sha256": "efb33fb0185bfea3b274ce5e9705e2b308e87fee0d8535a975fd18517f25ed2c"
+    },
+    {
+      "owner": "qa",
+      "path": "target/native-validation/gateway-integration/default-final-tests.log",
+      "bytes": 99482,
+      "sha256": "e68601108e79d77467e1fc4763f2f9196d7329b0da12c83add819ae12ee5f5a1"
+    },
+    {
+      "owner": "qa",
+      "path": "target/native-validation/gateway-integration/early-compile.log",
+      "bytes": 8482,
+      "sha256": "d8f141313fbe7e461557b22e942d458c9dbaebb459349518889d62b5616c6473"
+    },
+    {
+      "owner": "qa",
+      "path": "target/native-validation/gateway-integration/ffi-lint-wasm.log",
+      "bytes": 24989,
+      "sha256": "d9f63a957999520203e9e1740182c05def1a66b7f12ef8392c2a65f181d722ca"
+    },
+    {
+      "owner": "qa",
+      "path": "target/native-validation/gateway-integration/metadata.log",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "owner": "qa",
+      "path": "target/native-validation/gateway-integration/msrv.log",
+      "bytes": 1483,
+      "sha256": "b77d857d3f26f5213b30429238b27774cedd11ec9d0aa3634075519601ac4f06"
+    },
+    {
+      "owner": "qa",
+      "path": "target/native-validation/gateway-integration/native-binary.log",
+      "bytes": 390,
+      "sha256": "333c61a8ed4c0684a395785a093fe6a445d091a90919b91c2ec498e64abbb829"
+    },
+    {
+      "owner": "qa",
+      "path": "target/native-validation/gateway-integration/pty-clippy.log",
+      "bytes": 1060,
+      "sha256": "027483f1a31da63c77c6046f473ce8244209841fd0f3d03239217ba783653f15"
+    },
+    {
+      "owner": "qa",
+      "path": "target/native-validation/gateway-integration/pty-fmt.log",
+      "bytes": 147,
+      "sha256": "1aa10b8b333431b01c7875165dd5d5f46402c0154d16414ba91fd2b28e601687"
+    },
+    {
+      "owner": "qa",
+      "path": "target/native-validation/gateway-integration/pty-handler-attach.log",
+      "bytes": 1059,
+      "sha256": "1d1031b28b5760e980d1248ac7c473094fe069fce2e5fae3ca620972a422f517"
+    },
+    {
+      "owner": "qa",
+      "path": "target/native-validation/gateway-integration/pty-msrv.log",
+      "bytes": 1072,
+      "sha256": "73c57ae15dfc4105436ca807a6e7c0449b392794dbe36eb80fdb872bc308168b"
+    },
+    {
+      "owner": "qa",
+      "path": "target/native-validation/gateway-integration/pty-unit.log",
+      "bytes": 2469,
+      "sha256": "4b3ce64829c980079565d4c5de8fa5b803176abdf499d2c76eeb14703b75a70f"
+    },
+    {
+      "owner": "qa",
+      "path": "target/native-validation/gateway-integration/server-default-tests.log",
+      "bytes": 48029,
+      "sha256": "cef545d83b405e54e55ea2d9aa487c72d226a40ef2a5991b166697d900b9768d"
+    }
+  ],
+  "activation": {
+    "operatorServicesChanged": false,
+    "rootChanged": false,
+    "deviceEnrollmentChanged": false,
+    "appleExecution": "deferred by operator",
+    "connectedNativeAppAcceptance": "separate pending cards"
+  },
+  "integratedChecks": {
+    "serverUnit": {
+      "passed": 12,
+      "failed": 0,
+      "source": "e7b1625d"
+    },
+    "serverReal": {
+      "passed": 19,
+      "failed": 0,
+      "source": "e7b1625d"
+    },
+    "unchangedPostPtyProducer": {
+      "passed": 19,
+      "legacyWebAuthPassed": 60,
+      "authority": "f94d0d8b",
+      "approval": "m-ef15b7d2a17b"
+    },
+    "finalPty": {
+      "unitPassed": 16,
+      "realHandlerPassed": 1,
+      "existingSandboxPassed": 2,
+      "source": "26bf2ebe"
+    },
+    "ffi": {
+      "featureSelections": [
+        "bindgen,local",
+        "bindgen"
+      ],
+      "passedEach": 20,
+      "generatedFreshBoth": true,
+      "source": "e7b1625d"
+    },
+    "wasm": {
+      "packages": [
+        "crew-client",
+        "crew-protocol"
+      ],
+      "status": "passed",
+      "source": "e7b1625d"
+    },
+    "metadata": {
+      "workspaceMembers": 8,
+      "defaultMembers": 5,
+      "status": "passed",
+      "source": "26bf2ebe"
+    },
+    "normalTrees": {
+      "defaultCliGatewayCrypto": false,
+      "pureTransportRuntime": false,
+      "source": "e7b1625d"
+    }
+  },
+  "retainedFailures": {
+    "firstDefaultLibrary": {
+      "passed": 477,
+      "failed": 2,
+      "source": "before PTY pick; affected sources equal baseline",
+      "cases": [
+        "daemon::server::tests::a_lagging_subscriber_resyncs_and_converges",
+        "daemon::turns::empty_turn_tests::the_runtimes_own_refusals_are_still_refusals"
+      ],
+      "eachFocusedControlPassed": 1,
+      "finalDefaultMembers": {
+        "passed": 1114,
+        "failed": 0,
+        "ignored": 2
+      },
+      "interpretation": "known intermittent failures; no candidate source defect or unproven host-contention explanation",
+      "reviewerMessage": "m-ffa29fea3545"
+    },
+    "producerEnospc": {
+      "owner": "runtime",
+      "initialGatewayPassed": 17,
+      "initialFixtureFailed": 2,
+      "recoveredGatewayPassed": 19,
+      "report": "review/native-pty-lifecycle.md",
+      "qaFinalEnospc": false
+    }
+  },
+  "isolation": {
+    "clearedInheritedPrefixes": [
+      "GIT_",
+      "HERDR_",
+      "CREW_"
+    ],
+    "deliberateMsrvTargetOverride": "CREW_MSRV_TARGET_DIR",
+    "privateFixtureRuntimeStateConfig": true,
+    "incremental": false,
+    "minFreeGiB": 100,
+    "serialHeavySlot": true,
+    "storageRelease": "m-1a27ff9e9ef2",
+    "qaCleanup": {
+      "at": "2026-10-06T01:55:04.074Z",
+      "removed": [
+        "target/ci/debug/incremental",
+        "target/native-validation/cargo/debug/incremental"
+      ],
+      "onlyQAReproducibleIncrementalCaches": true,
+      "sourceBinariesLogsBackupsPreserved": true
+    },
+    "scope": "Final26bf focused checks; earlier runs clear GIT_/HERDR_ and the three crew identity variables."
+  },
+  "imports": [
+    {
+      "commit": "baeb7b500a89ab5ae4534a6a9e9c51e5e0df4cd9",
+      "role": "exact server19c/protocol759"
+    },
+    {
+      "commit": "dcb8e63cc5ae6345edcbf3405c8d9efa9fbe74b2",
+      "role": "exact transport1ea and corrected gateway docs"
+    },
+    {
+      "commit": "a633ee1e8ccc6184785ef15d69ad861b67c98d0c",
+      "role": "exact route delivery notes759"
+    },
+    {
+      "commit": "e7b1625d18f41ed328bf816fe7d7ff494acd0003",
+      "role": "bounded optional gateway lock union"
+    },
+    {
+      "commit": "65d8fe31d70209b69de892c8942e7dd93d4950c6",
+      "role": "lock canonical serialization only"
+    },
+    {
+      "commit": "26bf2ebeaa5270e2b085fb8697e91134e44d6784",
+      "role": "patch-equivalent approved f94 PTY correction"
+    }
+  ]
+}
