@@ -251,6 +251,9 @@ impl ClientCore {
     }
 
     pub fn view(&self, query: ViewQuery, clock: ClockSample) -> Result<ViewData, ClientError> {
+        if let ViewQuery::Availability { intent } = query {
+            return availability_view(&self.state, &self.actions, &intent, clock);
+        }
         crate::presentation::view(&self.state, &self.actions, query, clock)
     }
 
@@ -385,6 +388,24 @@ pub(crate) fn context(state: &ClientState) -> ActionContext<'_> {
         questions: &state.questions.open,
         session: state.session.as_ref(),
     }
+}
+
+/// Both the public Core route and the projection module use the same borrowed
+/// preflight. The result stays tied to the caller's captured intent scope.
+pub(crate) fn availability_view(
+    state: &ClientState,
+    actions: &Actions,
+    intent: &ActionIntent,
+    clock: ClockSample,
+) -> Result<ViewData, ClientError> {
+    let availability = actions.intent_availability(intent, &context(state), clock)?;
+    Ok(ViewData {
+        scope: Some(crate::actions::action_scope(intent).clone()),
+        revision: state.revision,
+        synchronized_at_ms: state.synchronized_at_ms,
+        freshness: state.freshness(),
+        payload: ViewPayload::Availability(availability),
+    })
 }
 
 fn why(code: &str, message: &str) -> ClientReason {

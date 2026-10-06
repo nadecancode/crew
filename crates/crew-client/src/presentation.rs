@@ -33,6 +33,9 @@ pub(crate) fn view(
     clock: ClockSample,
 ) -> Result<ViewData, ClientError> {
     let payload = match query {
+        ViewQuery::Availability { intent } => {
+            return crate::engine::availability_view(state, actions, &intent, clock)
+        }
         ViewQuery::Overview => ViewPayload::Overview(Box::new(overview(state)?)),
         ViewQuery::Team => ViewPayload::Team(Box::new(TeamData {
             agents: state

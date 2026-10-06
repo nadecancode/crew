@@ -519,6 +519,11 @@ pub struct ResourceRequest {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "kind", content = "data", rename_all = "snake_case")]
 pub enum ViewQuery {
+    /// Read the planner's immutable preflight for this captured intent. The
+    /// query allocates no operation, confirmation or timer identifiers.
+    Availability {
+        intent: Box<ActionIntent>,
+    },
     Overview,
     Team,
     Tasks,
@@ -548,6 +553,8 @@ pub enum ViewQuery {
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "kind", content = "data", rename_all = "snake_case")]
 pub enum ViewPayload {
+    /// The availability reason belongs to the query's captured intent scope.
+    Availability(ActionAvailability),
     Overview(Box<OverviewData>),
     Team(Box<TeamData>),
     Tasks(Box<TasksData>),
@@ -604,7 +611,7 @@ pub enum ActionKind {
     Detach,
 }
 
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "kind", content = "data", rename_all = "snake_case")]
 pub enum ActionIntent {
     SendMessage {

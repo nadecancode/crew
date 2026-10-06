@@ -189,6 +189,9 @@ fn every_query_and_payload_constructs_with_the_actual_protocol_records() {
         vcs_only: true,
     };
     for query in [
+        ViewQuery::Availability {
+            intent: Box::new(ActionIntent::StopTeam { scope: scope() }),
+        },
         ViewQuery::Overview,
         ViewQuery::Team,
         ViewQuery::Tasks,
@@ -255,6 +258,11 @@ fn every_query_and_payload_constructs_with_the_actual_protocol_records() {
         }],
     };
     for payload in [
+        ViewPayload::Availability(ActionAvailability {
+            action: ActionKind::StopTeam,
+            available: false,
+            reason: Some(reason()),
+        }),
         ViewPayload::Overview(Box::new(OverviewData {
             session: Some(data.session),
             agent_count: 7,
