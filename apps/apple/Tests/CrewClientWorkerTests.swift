@@ -225,7 +225,9 @@ final class CrewClientWorkerTests: XCTestCase {
         observer.changed(notice: CrewTestFixtures.notice)
         let scope = CrewTestFixtures.scope
         let first = CrewWatchedIntent(control: "send", intent: .sendMessage(scope: scope, to: "synthetic-agent", body: "a", messageId: "synthetic-id"))
-        let edited = CrewWatchedIntent(control: "send", intent: .sendMessage(scope: scope, to: "synthetic-agent", body: "ab", messageId: "synthetic-id"))
+        // The recording client rejects an empty body, so the edited answer
+        // differs from the retained one.
+        let edited = CrewWatchedIntent(control: "send", intent: .sendMessage(scope: scope, to: "synthetic-agent", body: "", messageId: "synthetic-id"))
         model.watchAvailability([first])
         await model.waitForAvailability()
         let answered = CrewControlAvailability(available: true, reason: nil)
@@ -233,9 +235,10 @@ final class CrewClientWorkerTests: XCTestCase {
         // The view modifier watches the new entry before releasing the old.
         model.watchAvailability([edited])
         model.unwatchAvailability([first])
+        // The read runs on the main actor, so it cannot land before this await.
         XCTAssertEqual(model.availability(edited.intent, control: "send"), answered)
         await model.waitForAvailability()
-        XCTAssertEqual(model.availability(edited.intent, control: "send"), answered)
+        XCTAssertEqual(model.availability(edited.intent, control: "send"), CrewControlAvailability(available: false, reason: "body: must not be empty"))
         model.unwatchAvailability([edited])
         XCTAssertEqual(model.availability(edited.intent, control: "send"), .checking)
         await model.close()
