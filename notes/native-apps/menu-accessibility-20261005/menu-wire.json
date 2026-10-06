@@ -1,0 +1,1271 @@
+{
+  "crew": [
+    {
+      "depth": 17,
+      "bus": ":1.0",
+      "path": "/dev/crew/Crew/a11y/770a4535_5769_41f6_b228_a7dc5ce653a8",
+      "cached": {
+        "name": "",
+        "role": "menu item",
+        "states": [
+          "showing",
+          "visible",
+          "focused",
+          "focusable"
+        ]
+      },
+      "after_clear": {
+        "name": "",
+        "role": "menu item",
+        "states": [
+          "showing",
+          "visible",
+          "focused",
+          "focusable"
+        ]
+      },
+      "dbus": {
+        "properties": [
+          {
+            "Name": "",
+            "Description": "",
+            "Parent": [
+              ":1.0",
+              "/dev/crew/Crew/a11y/ba7bdbc8_9f0e_478c_93f2_e47e3db3b69b"
+            ],
+            "ChildCount": 1,
+            "Locale": "C",
+            "AccessibleId": "",
+            "HelpText": ""
+          }
+        ],
+        "role": [
+          "menu item"
+        ],
+        "states": [
+          [
+            1124079616,
+            512
+          ]
+        ],
+        "interfaces": [
+          [
+            "org.a11y.atspi.Accessible",
+            "org.a11y.atspi.Component",
+            "org.a11y.atspi.Action"
+          ]
+        ]
+      },
+      "relations": [
+        [
+          [
+            2,
+            [
+              [
+                ":1.0",
+                "/dev/crew/Crew/a11y/b04f8d58_fb07_4dbb_abd0_92a43d29af58"
+              ]
+            ]
+          ]
+        ]
+      ],
+      "relation_targets": [
+        {
+          "type": 2,
+          "bus": ":1.0",
+          "path": "/dev/crew/Crew/a11y/b04f8d58_fb07_4dbb_abd0_92a43d29af58",
+          "libatspi": {
+            "name": "",
+            "role": "invalid",
+            "states": [
+              "showing",
+              "visible"
+            ]
+          },
+          "dbus": {
+            "properties": [
+              {
+                "Name": "",
+                "Description": "",
+                "Parent": [
+                  ":1.0",
+                  "/dev/crew/Crew/a11y/770a4535_5769_41f6_b228_a7dc5ce653a8"
+                ],
+                "ChildCount": 0,
+                "Locale": "C",
+                "AccessibleId": "",
+                "HelpText": ""
+              }
+            ],
+            "role": [
+              "presentation"
+            ],
+            "states": [
+              [
+                1124073472,
+                0
+              ]
+            ],
+            "interfaces": [
+              [
+                "org.a11y.atspi.Accessible",
+                "org.a11y.atspi.Component",
+                "org.a11y.atspi.Text",
+                "org.a11y.atspi.Action",
+                "org.a11y.atspi.Hypertext"
+              ]
+            ]
+          },
+          "text": [
+            "Show Sidebar"
+          ]
+        }
+      ]
+    },
+    {
+      "depth": 17,
+      "bus": ":1.0",
+      "path": "/dev/crew/Crew/a11y/6370c278_e7f6_4550_b446_8178929f32d3",
+      "cached": {
+        "name": "",
+        "role": "menu item",
+        "states": [
+          "showing",
+          "visible",
+          "focusable"
+        ]
+      },
+      "after_clear": {
+        "name": "",
+        "role": "menu item",
+        "states": [
+          "showing",
+          "visible",
+          "focusable"
+        ]
+      },
+      "dbus": {
+        "properties": [
+          {
+            "Name": "",
+            "Description": "",
+            "Parent": [
+              ":1.0",
+              "/dev/crew/Crew/a11y/ba7bdbc8_9f0e_478c_93f2_e47e3db3b69b"
+            ],
+            "ChildCount": 1,
+            "Locale": "C",
+            "AccessibleId": "",
+            "HelpText": ""
+          }
+        ],
+        "role": [
+          "menu item"
+        ],
+        "states": [
+          [
+            1124075520,
+            512
+          ]
+        ],
+        "interfaces": [
+          [
+            "org.a11y.atspi.Accessible",
+            "org.a11y.atspi.Component",
+            "org.a11y.atspi.Action"
+          ]
+        ]
+      },
+      "relations": [
+        [
+          [
+            2,
+            [
+              [
+                ":1.0",
+                "/dev/crew/Crew/a11y/cefad796_c0c1_4aa0_84d9_5cb44326bbfe"
+              ]
+            ]
+          ]
+        ]
+      ],
+      "relation_targets": [
+        {
+          "type": 2,
+          "bus": ":1.0",
+          "path": "/dev/crew/Crew/a11y/cefad796_c0c1_4aa0_84d9_5cb44326bbfe",
+          "libatspi": {
+            "name": "",
+            "role": "invalid",
+            "states": [
+              "showing",
+              "visible"
+            ]
+          },
+          "dbus": {
+            "properties": [
+              {
+                "Name": "",
+                "Description": "",
+                "Parent": [
+                  ":1.0",
+                  "/dev/crew/Crew/a11y/6370c278_e7f6_4550_b446_8178929f32d3"
+                ],
+                "ChildCount": 0,
+                "Locale": "C",
+                "AccessibleId": "",
+                "HelpText": ""
+              }
+            ],
+            "role": [
+              "presentation"
+            ],
+            "states": [
+              [
+                1124073472,
+                0
+              ]
+            ],
+            "interfaces": [
+              [
+                "org.a11y.atspi.Accessible",
+                "org.a11y.atspi.Component",
+                "org.a11y.atspi.Text",
+                "org.a11y.atspi.Action",
+                "org.a11y.atspi.Hypertext"
+              ]
+            ]
+          },
+          "text": [
+            "Show Details"
+          ]
+        }
+      ]
+    },
+    {
+      "depth": 15,
+      "bus": ":1.0",
+      "path": "/dev/crew/Crew/a11y/90912176_feb4_414a_b98b_d9888af2b716",
+      "cached": {
+        "name": "",
+        "role": "menu item",
+        "states": [
+          "showing",
+          "visible",
+          "focusable"
+        ]
+      },
+      "after_clear": {
+        "name": "",
+        "role": "menu item",
+        "states": [
+          "showing",
+          "visible",
+          "focusable"
+        ]
+      },
+      "dbus": {
+        "properties": [
+          {
+            "Name": "",
+            "Description": "",
+            "Parent": [
+              ":1.0",
+              "/dev/crew/Crew/a11y/bea8caf6_c2a7_4877_9ef8_03aa27d1a21e"
+            ],
+            "ChildCount": 2,
+            "Locale": "C",
+            "AccessibleId": "",
+            "HelpText": ""
+          }
+        ],
+        "role": [
+          "menu item"
+        ],
+        "states": [
+          [
+            1124076032,
+            1024
+          ]
+        ],
+        "interfaces": [
+          [
+            "org.a11y.atspi.Accessible",
+            "org.a11y.atspi.Component",
+            "org.a11y.atspi.Action"
+          ]
+        ]
+      },
+      "relations": [
+        [
+          [
+            2,
+            [
+              [
+                ":1.0",
+                "/dev/crew/Crew/a11y/32b011b2_6e4d_4cdb_93e6_a6c401fe810e"
+              ]
+            ]
+          ]
+        ]
+      ],
+      "relation_targets": [
+        {
+          "type": 2,
+          "bus": ":1.0",
+          "path": "/dev/crew/Crew/a11y/32b011b2_6e4d_4cdb_93e6_a6c401fe810e",
+          "libatspi": {
+            "name": "",
+            "role": "invalid",
+            "states": [
+              "showing",
+              "visible"
+            ]
+          },
+          "dbus": {
+            "properties": [
+              {
+                "Name": "",
+                "Description": "",
+                "Parent": [
+                  ":1.0",
+                  "/dev/crew/Crew/a11y/90912176_feb4_414a_b98b_d9888af2b716"
+                ],
+                "ChildCount": 0,
+                "Locale": "C",
+                "AccessibleId": "",
+                "HelpText": ""
+              }
+            ],
+            "role": [
+              "presentation"
+            ],
+            "states": [
+              [
+                1124073472,
+                0
+              ]
+            ],
+            "interfaces": [
+              [
+                "org.a11y.atspi.Accessible",
+                "org.a11y.atspi.Component",
+                "org.a11y.atspi.Text",
+                "org.a11y.atspi.Action",
+                "org.a11y.atspi.Hypertext"
+              ]
+            ]
+          },
+          "text": [
+            "Appearance"
+          ]
+        }
+      ]
+    },
+    {
+      "depth": 17,
+      "bus": ":1.0",
+      "path": "/dev/crew/Crew/a11y/824496d7_4b53_472e_baab_44fa67124c8b",
+      "cached": {
+        "name": "",
+        "role": "menu item",
+        "states": [
+          "showing",
+          "visible",
+          "focusable"
+        ]
+      },
+      "after_clear": {
+        "name": "",
+        "role": "menu item",
+        "states": [
+          "showing",
+          "visible",
+          "focusable"
+        ]
+      },
+      "dbus": {
+        "properties": [
+          {
+            "Name": "",
+            "Description": "",
+            "Parent": [
+              ":1.0",
+              "/dev/crew/Crew/a11y/05aaa441_edff_49bb_b30c_cdf63a726512"
+            ],
+            "ChildCount": 1,
+            "Locale": "C",
+            "AccessibleId": "",
+            "HelpText": ""
+          }
+        ],
+        "role": [
+          "menu item"
+        ],
+        "states": [
+          [
+            1124075520,
+            0
+          ]
+        ],
+        "interfaces": [
+          [
+            "org.a11y.atspi.Accessible",
+            "org.a11y.atspi.Component",
+            "org.a11y.atspi.Action"
+          ]
+        ]
+      },
+      "relations": [
+        [
+          [
+            2,
+            [
+              [
+                ":1.0",
+                "/dev/crew/Crew/a11y/a86f9947_2a40_40f6_83f7_059c1506ce97"
+              ]
+            ]
+          ]
+        ]
+      ],
+      "relation_targets": [
+        {
+          "type": 2,
+          "bus": ":1.0",
+          "path": "/dev/crew/Crew/a11y/a86f9947_2a40_40f6_83f7_059c1506ce97",
+          "libatspi": {
+            "name": "",
+            "role": "invalid",
+            "states": [
+              "showing",
+              "visible"
+            ]
+          },
+          "dbus": {
+            "properties": [
+              {
+                "Name": "",
+                "Description": "",
+                "Parent": [
+                  ":1.0",
+                  "/dev/crew/Crew/a11y/824496d7_4b53_472e_baab_44fa67124c8b"
+                ],
+                "ChildCount": 0,
+                "Locale": "C",
+                "AccessibleId": "",
+                "HelpText": ""
+              }
+            ],
+            "role": [
+              "presentation"
+            ],
+            "states": [
+              [
+                1124073472,
+                0
+              ]
+            ],
+            "interfaces": [
+              [
+                "org.a11y.atspi.Accessible",
+                "org.a11y.atspi.Component",
+                "org.a11y.atspi.Text",
+                "org.a11y.atspi.Action",
+                "org.a11y.atspi.Hypertext"
+              ]
+            ]
+          },
+          "text": [
+            "Keyboard Shortcuts"
+          ]
+        }
+      ]
+    },
+    {
+      "depth": 17,
+      "bus": ":1.0",
+      "path": "/dev/crew/Crew/a11y/325fbada_eb2d_477e_a662_737e0cd55ba7",
+      "cached": {
+        "name": "",
+        "role": "menu item",
+        "states": [
+          "showing",
+          "visible",
+          "focusable"
+        ]
+      },
+      "after_clear": {
+        "name": "",
+        "role": "menu item",
+        "states": [
+          "showing",
+          "visible",
+          "focusable"
+        ]
+      },
+      "dbus": {
+        "properties": [
+          {
+            "Name": "",
+            "Description": "",
+            "Parent": [
+              ":1.0",
+              "/dev/crew/Crew/a11y/05aaa441_edff_49bb_b30c_cdf63a726512"
+            ],
+            "ChildCount": 1,
+            "Locale": "C",
+            "AccessibleId": "",
+            "HelpText": ""
+          }
+        ],
+        "role": [
+          "menu item"
+        ],
+        "states": [
+          [
+            1124075520,
+            0
+          ]
+        ],
+        "interfaces": [
+          [
+            "org.a11y.atspi.Accessible",
+            "org.a11y.atspi.Component",
+            "org.a11y.atspi.Action"
+          ]
+        ]
+      },
+      "relations": [
+        [
+          [
+            2,
+            [
+              [
+                ":1.0",
+                "/dev/crew/Crew/a11y/77834a65_bb37_4ccd_bed1_6fdc35294671"
+              ]
+            ]
+          ]
+        ]
+      ],
+      "relation_targets": [
+        {
+          "type": 2,
+          "bus": ":1.0",
+          "path": "/dev/crew/Crew/a11y/77834a65_bb37_4ccd_bed1_6fdc35294671",
+          "libatspi": {
+            "name": "",
+            "role": "invalid",
+            "states": [
+              "showing",
+              "visible"
+            ]
+          },
+          "dbus": {
+            "properties": [
+              {
+                "Name": "",
+                "Description": "",
+                "Parent": [
+                  ":1.0",
+                  "/dev/crew/Crew/a11y/325fbada_eb2d_477e_a662_737e0cd55ba7"
+                ],
+                "ChildCount": 0,
+                "Locale": "C",
+                "AccessibleId": "",
+                "HelpText": ""
+              }
+            ],
+            "role": [
+              "presentation"
+            ],
+            "states": [
+              [
+                1124073472,
+                0
+              ]
+            ],
+            "interfaces": [
+              [
+                "org.a11y.atspi.Accessible",
+                "org.a11y.atspi.Component",
+                "org.a11y.atspi.Text",
+                "org.a11y.atspi.Action",
+                "org.a11y.atspi.Hypertext"
+              ]
+            ]
+          },
+          "text": [
+            "About Crew"
+          ]
+        }
+      ]
+    },
+    {
+      "depth": 17,
+      "bus": ":1.0",
+      "path": "/dev/crew/Crew/a11y/f8028903_fd16_424b_b214_b8aab1f76266",
+      "cached": {
+        "name": "",
+        "role": "menu item",
+        "states": [
+          "showing",
+          "visible",
+          "focusable"
+        ]
+      },
+      "after_clear": {
+        "name": "",
+        "role": "menu item",
+        "states": [
+          "showing",
+          "visible",
+          "focusable"
+        ]
+      },
+      "dbus": {
+        "properties": [
+          {
+            "Name": "",
+            "Description": "",
+            "Parent": [
+              ":1.0",
+              "/dev/crew/Crew/a11y/05aaa441_edff_49bb_b30c_cdf63a726512"
+            ],
+            "ChildCount": 1,
+            "Locale": "C",
+            "AccessibleId": "",
+            "HelpText": ""
+          }
+        ],
+        "role": [
+          "menu item"
+        ],
+        "states": [
+          [
+            1124075520,
+            0
+          ]
+        ],
+        "interfaces": [
+          [
+            "org.a11y.atspi.Accessible",
+            "org.a11y.atspi.Component",
+            "org.a11y.atspi.Action"
+          ]
+        ]
+      },
+      "relations": [
+        [
+          [
+            2,
+            [
+              [
+                ":1.0",
+                "/dev/crew/Crew/a11y/fb53cfc8_1754_42b9_b063_59989f68e251"
+              ]
+            ]
+          ]
+        ]
+      ],
+      "relation_targets": [
+        {
+          "type": 2,
+          "bus": ":1.0",
+          "path": "/dev/crew/Crew/a11y/fb53cfc8_1754_42b9_b063_59989f68e251",
+          "libatspi": {
+            "name": "",
+            "role": "invalid",
+            "states": [
+              "showing",
+              "visible"
+            ]
+          },
+          "dbus": {
+            "properties": [
+              {
+                "Name": "",
+                "Description": "",
+                "Parent": [
+                  ":1.0",
+                  "/dev/crew/Crew/a11y/f8028903_fd16_424b_b214_b8aab1f76266"
+                ],
+                "ChildCount": 0,
+                "Locale": "C",
+                "AccessibleId": "",
+                "HelpText": ""
+              }
+            ],
+            "role": [
+              "presentation"
+            ],
+            "states": [
+              [
+                1124073472,
+                0
+              ]
+            ],
+            "interfaces": [
+              [
+                "org.a11y.atspi.Accessible",
+                "org.a11y.atspi.Component",
+                "org.a11y.atspi.Text",
+                "org.a11y.atspi.Action",
+                "org.a11y.atspi.Hypertext"
+              ]
+            ]
+          },
+          "text": [
+            "Quit"
+          ]
+        }
+      ]
+    }
+  ],
+  "comparison": [
+    {
+      "depth": 3,
+      "bus": ":1.2",
+      "path": "/dev/crew/MenuAccessibilityComparison/a11y/72172131_8d8f_40f1_a5ff_b3c94efb0310",
+      "cached": {
+        "name": "Plain control label",
+        "role": "button",
+        "states": [
+          "showing",
+          "visible",
+          "focusable"
+        ]
+      },
+      "after_clear": {
+        "name": "Plain control label",
+        "role": "button",
+        "states": [
+          "showing",
+          "visible",
+          "focusable"
+        ]
+      },
+      "dbus": {
+        "properties": [
+          {
+            "Name": "Plain control label",
+            "Description": "",
+            "Parent": [
+              ":1.2",
+              "/dev/crew/MenuAccessibilityComparison/a11y/d327e451_d605_4e22_98ed_ff9371a29928"
+            ],
+            "ChildCount": 1,
+            "Locale": "C",
+            "AccessibleId": "",
+            "HelpText": ""
+          }
+        ],
+        "role": [
+          "button"
+        ],
+        "states": [
+          [
+            1124075520,
+            0
+          ]
+        ],
+        "interfaces": [
+          [
+            "org.a11y.atspi.Accessible",
+            "org.a11y.atspi.Component",
+            "org.a11y.atspi.Action"
+          ]
+        ]
+      },
+      "relations": [
+        [
+          [
+            2,
+            [
+              [
+                ":1.2",
+                "/dev/crew/MenuAccessibilityComparison/a11y/9f899fad_2395_441d_802d_b0078f1b2958"
+              ]
+            ]
+          ]
+        ]
+      ],
+      "relation_targets": [
+        {
+          "type": 2,
+          "bus": ":1.2",
+          "path": "/dev/crew/MenuAccessibilityComparison/a11y/9f899fad_2395_441d_802d_b0078f1b2958",
+          "libatspi": {
+            "name": "Plain control label",
+            "role": "label",
+            "states": [
+              "showing",
+              "visible"
+            ]
+          },
+          "dbus": {
+            "properties": [
+              {
+                "Name": "Plain control label",
+                "Description": "",
+                "Parent": [
+                  ":1.2",
+                  "/dev/crew/MenuAccessibilityComparison/a11y/72172131_8d8f_40f1_a5ff_b3c94efb0310"
+                ],
+                "ChildCount": 0,
+                "Locale": "C",
+                "AccessibleId": "",
+                "HelpText": ""
+              }
+            ],
+            "role": [
+              "label"
+            ],
+            "states": [
+              [
+                1124073472,
+                0
+              ]
+            ],
+            "interfaces": [
+              [
+                "org.a11y.atspi.Accessible",
+                "org.a11y.atspi.Component",
+                "org.a11y.atspi.Text",
+                "org.a11y.atspi.Action",
+                "org.a11y.atspi.Hypertext"
+              ]
+            ]
+          },
+          "text": [
+            "Plain control label"
+          ]
+        }
+      ]
+    },
+    {
+      "depth": 3,
+      "bus": ":1.2",
+      "path": "/dev/crew/MenuAccessibilityComparison/a11y/bfeb8f12_aca6_4f0f_b0ff_aa71605623b3",
+      "cached": {
+        "name": "Direct checkbox label",
+        "role": "check box",
+        "states": [
+          "showing",
+          "visible",
+          "focusable"
+        ]
+      },
+      "after_clear": {
+        "name": "Direct checkbox label",
+        "role": "check box",
+        "states": [
+          "showing",
+          "visible",
+          "focusable"
+        ]
+      },
+      "dbus": {
+        "properties": [
+          {
+            "Name": "Direct checkbox label",
+            "Description": "",
+            "Parent": [
+              ":1.2",
+              "/dev/crew/MenuAccessibilityComparison/a11y/d327e451_d605_4e22_98ed_ff9371a29928"
+            ],
+            "ChildCount": 2,
+            "Locale": "C",
+            "AccessibleId": "",
+            "HelpText": ""
+          }
+        ],
+        "role": [
+          "checkbox"
+        ],
+        "states": [
+          [
+            1124075520,
+            512
+          ]
+        ],
+        "interfaces": [
+          [
+            "org.a11y.atspi.Accessible",
+            "org.a11y.atspi.Component",
+            "org.a11y.atspi.Action"
+          ]
+        ]
+      },
+      "relations": [
+        []
+      ],
+      "relation_targets": []
+    },
+    {
+      "depth": 12,
+      "bus": ":1.2",
+      "path": "/dev/crew/MenuAccessibilityComparison/a11y/950412e9_2213_4af6_bbb1_a0dab8b6ce4b",
+      "cached": {
+        "name": "",
+        "role": "menu item",
+        "states": [
+          "showing",
+          "visible",
+          "focused",
+          "focusable"
+        ]
+      },
+      "after_clear": {
+        "name": "",
+        "role": "menu item",
+        "states": [
+          "showing",
+          "visible",
+          "focused",
+          "focusable"
+        ]
+      },
+      "dbus": {
+        "properties": [
+          {
+            "Name": "",
+            "Description": "",
+            "Parent": [
+              ":1.2",
+              "/dev/crew/MenuAccessibilityComparison/a11y/6a173a09_bfc9_46d2_8a67_1707f3aa2e6f"
+            ],
+            "ChildCount": 1,
+            "Locale": "C",
+            "AccessibleId": "",
+            "HelpText": ""
+          }
+        ],
+        "role": [
+          "menu item"
+        ],
+        "states": [
+          [
+            1124079616,
+            0
+          ]
+        ],
+        "interfaces": [
+          [
+            "org.a11y.atspi.Accessible",
+            "org.a11y.atspi.Component",
+            "org.a11y.atspi.Action"
+          ]
+        ]
+      },
+      "relations": [
+        [
+          [
+            2,
+            [
+              [
+                ":1.2",
+                "/dev/crew/MenuAccessibilityComparison/a11y/741359bf_d4c0_413d_b2d0_f85f5502d33b"
+              ]
+            ]
+          ]
+        ]
+      ],
+      "relation_targets": [
+        {
+          "type": 2,
+          "bus": ":1.2",
+          "path": "/dev/crew/MenuAccessibilityComparison/a11y/741359bf_d4c0_413d_b2d0_f85f5502d33b",
+          "libatspi": {
+            "name": "",
+            "role": "invalid",
+            "states": [
+              "showing",
+              "visible"
+            ]
+          },
+          "dbus": {
+            "properties": [
+              {
+                "Name": "",
+                "Description": "",
+                "Parent": [
+                  ":1.2",
+                  "/dev/crew/MenuAccessibilityComparison/a11y/950412e9_2213_4af6_bbb1_a0dab8b6ce4b"
+                ],
+                "ChildCount": 0,
+                "Locale": "C",
+                "AccessibleId": "",
+                "HelpText": ""
+              }
+            ],
+            "role": [
+              "presentation"
+            ],
+            "states": [
+              [
+                1124073472,
+                0
+              ]
+            ],
+            "interfaces": [
+              [
+                "org.a11y.atspi.Accessible",
+                "org.a11y.atspi.Component",
+                "org.a11y.atspi.Text",
+                "org.a11y.atspi.Action",
+                "org.a11y.atspi.Hypertext"
+              ]
+            ]
+          },
+          "text": [
+            "Plain menu label"
+          ]
+        }
+      ]
+    },
+    {
+      "depth": 12,
+      "bus": ":1.2",
+      "path": "/dev/crew/MenuAccessibilityComparison/a11y/780b327b_a825_492f_961f_07d49f22f144",
+      "cached": {
+        "name": "",
+        "role": "menu item",
+        "states": [
+          "showing",
+          "visible",
+          "focusable",
+          "checked"
+        ]
+      },
+      "after_clear": {
+        "name": "",
+        "role": "menu item",
+        "states": [
+          "showing",
+          "visible",
+          "focusable",
+          "checked"
+        ]
+      },
+      "dbus": {
+        "properties": [
+          {
+            "Name": "",
+            "Description": "",
+            "Parent": [
+              ":1.2",
+              "/dev/crew/MenuAccessibilityComparison/a11y/6a173a09_bfc9_46d2_8a67_1707f3aa2e6f"
+            ],
+            "ChildCount": 1,
+            "Locale": "C",
+            "AccessibleId": "",
+            "HelpText": ""
+          }
+        ],
+        "role": [
+          "menu item"
+        ],
+        "states": [
+          [
+            1124075536,
+            512
+          ]
+        ],
+        "interfaces": [
+          [
+            "org.a11y.atspi.Accessible",
+            "org.a11y.atspi.Component",
+            "org.a11y.atspi.Action"
+          ]
+        ]
+      },
+      "relations": [
+        [
+          [
+            2,
+            [
+              [
+                ":1.2",
+                "/dev/crew/MenuAccessibilityComparison/a11y/4ef28853_f3bc_47a2_b7a2_43427b345b30"
+              ]
+            ]
+          ]
+        ]
+      ],
+      "relation_targets": [
+        {
+          "type": 2,
+          "bus": ":1.2",
+          "path": "/dev/crew/MenuAccessibilityComparison/a11y/4ef28853_f3bc_47a2_b7a2_43427b345b30",
+          "libatspi": {
+            "name": "",
+            "role": "invalid",
+            "states": [
+              "showing",
+              "visible"
+            ]
+          },
+          "dbus": {
+            "properties": [
+              {
+                "Name": "",
+                "Description": "",
+                "Parent": [
+                  ":1.2",
+                  "/dev/crew/MenuAccessibilityComparison/a11y/780b327b_a825_492f_961f_07d49f22f144"
+                ],
+                "ChildCount": 0,
+                "Locale": "C",
+                "AccessibleId": "",
+                "HelpText": ""
+              }
+            ],
+            "role": [
+              "presentation"
+            ],
+            "states": [
+              [
+                1124073472,
+                0
+              ]
+            ],
+            "interfaces": [
+              [
+                "org.a11y.atspi.Accessible",
+                "org.a11y.atspi.Component",
+                "org.a11y.atspi.Text",
+                "org.a11y.atspi.Action",
+                "org.a11y.atspi.Hypertext"
+              ]
+            ]
+          },
+          "text": [
+            "Checked menu label"
+          ]
+        }
+      ]
+    },
+    {
+      "depth": 12,
+      "bus": ":1.2",
+      "path": "/dev/crew/MenuAccessibilityComparison/a11y/112db88d_f42e_4510_bf01_8cc6c4a54b46",
+      "cached": {
+        "name": "",
+        "role": "menu item",
+        "states": [
+          "showing",
+          "visible",
+          "focusable"
+        ]
+      },
+      "after_clear": {
+        "name": "",
+        "role": "menu item",
+        "states": [
+          "showing",
+          "visible",
+          "focusable"
+        ]
+      },
+      "dbus": {
+        "properties": [
+          {
+            "Name": "",
+            "Description": "",
+            "Parent": [
+              ":1.2",
+              "/dev/crew/MenuAccessibilityComparison/a11y/6a173a09_bfc9_46d2_8a67_1707f3aa2e6f"
+            ],
+            "ChildCount": 2,
+            "Locale": "C",
+            "AccessibleId": "",
+            "HelpText": ""
+          }
+        ],
+        "role": [
+          "menu item"
+        ],
+        "states": [
+          [
+            1124076032,
+            1024
+          ]
+        ],
+        "interfaces": [
+          [
+            "org.a11y.atspi.Accessible",
+            "org.a11y.atspi.Component",
+            "org.a11y.atspi.Action"
+          ]
+        ]
+      },
+      "relations": [
+        [
+          [
+            2,
+            [
+              [
+                ":1.2",
+                "/dev/crew/MenuAccessibilityComparison/a11y/fa311fe8_2638_44e0_857a_4c0c42959195"
+              ]
+            ]
+          ]
+        ]
+      ],
+      "relation_targets": [
+        {
+          "type": 2,
+          "bus": ":1.2",
+          "path": "/dev/crew/MenuAccessibilityComparison/a11y/fa311fe8_2638_44e0_857a_4c0c42959195",
+          "libatspi": {
+            "name": "",
+            "role": "invalid",
+            "states": [
+              "showing",
+              "visible"
+            ]
+          },
+          "dbus": {
+            "properties": [
+              {
+                "Name": "",
+                "Description": "",
+                "Parent": [
+                  ":1.2",
+                  "/dev/crew/MenuAccessibilityComparison/a11y/112db88d_f42e_4510_bf01_8cc6c4a54b46"
+                ],
+                "ChildCount": 0,
+                "Locale": "C",
+                "AccessibleId": "",
+                "HelpText": ""
+              }
+            ],
+            "role": [
+              "presentation"
+            ],
+            "states": [
+              [
+                1124073472,
+                0
+              ]
+            ],
+            "interfaces": [
+              [
+                "org.a11y.atspi.Accessible",
+                "org.a11y.atspi.Component",
+                "org.a11y.atspi.Text",
+                "org.a11y.atspi.Action",
+                "org.a11y.atspi.Hypertext"
+              ]
+            ]
+          },
+          "text": [
+            "Submenu label"
+          ]
+        }
+      ]
+    }
+  ]
+}

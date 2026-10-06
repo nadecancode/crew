@@ -165,6 +165,12 @@ resolving the observation. Evidence:
 [menu subtree](shell-review-20261005/atspi-d4-focus-menu.json) and
 [raw label relations](shell-review-20261005/atspi-d4-menu-relations.txt).
 
+Subsequent diagnostic: [Linux menu accessibility classification](menu-accessibility-20261005.md)
+reproduces the blank Name with native controls and resolves the relation through
+its Text interface and actual Orca speech-generation output. It classifies the
+observation without a Crew-specific source correction or a full screen-reader
+pass. The early checkpoint and raw evidence above remain historical records.
+
 ### Retained captures and test boundaries
 
 ![Linux Team, light, 1024×600](shell-review-20261005/linux-team-light-1024.png)

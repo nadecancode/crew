@@ -1,0 +1,12 @@
+GTK 4.22.4
+GLib 2.88.3
+AT-SPI 2.60.6
+xdotool version 4.20260303.1
+Version: ImageMagick 7.1.2-29 Q16-HDRI x86_64 b919b37fd:20260727 https://imagemagick.org
+Python 3.14.7
+8c109210360dff7788b021fae83b1ae07313669d34be9a3a6b9d638e4f8e49dc  /home/nade/workspaces/personal/crew/.crew/worktrees/designer/target/native-shell-review-c457/cargo/debug/crew-desktop
+ff2f2f4ed50f2934b65a7e1a61683483e3166b6cc8eb9b09694579f930d03430  /home/nade/workspaces/personal/crew/.crew/worktrees/designer/target/native-menu-a11y/comparison.py
+Orca 50.2 (/nix/store/r42ln7vhn9dcahfs8gys99amp0h314hv-orca-50.2)
+pyatspi 2.58.1
+Nixpkgs /nix/store/ab93n7qqycnn3xfdnav0wnqqigvddd5r-source
+X11; Cairo; scale 1; DPI scale 1; private 1440x960 display

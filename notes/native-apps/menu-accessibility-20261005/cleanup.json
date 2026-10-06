@@ -1,0 +1,58 @@
+{
+  "pids": [
+    {
+      "pid": 1437801,
+      "present": false
+    },
+    {
+      "pid": 1437813,
+      "present": false
+    },
+    {
+      "pid": 1438303,
+      "present": false
+    },
+    {
+      "pid": 1438305,
+      "present": false
+    },
+    {
+      "pid": 1437840,
+      "present": false
+    },
+    {
+      "pid": 1438057,
+      "present": false
+    },
+    {
+      "pid": 1438047,
+      "present": false
+    },
+    {
+      "pid": 1558024,
+      "present": false
+    },
+    {
+      "pid": 1558046,
+      "present": false
+    },
+    {
+      "pid": 1564653,
+      "present": false
+    },
+    {
+      "pid": 1564684,
+      "present": false
+    },
+    {
+      "pid": 1438624,
+      "present": false
+    },
+    {
+      "pid": 1583404,
+      "present": false
+    }
+  ],
+  "display_lock_present": false,
+  "display_socket_present": false
+}

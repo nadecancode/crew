@@ -1,0 +1,158 @@
+{
+  "task": "native-menu-accessibility",
+  "date": "2026-10-05",
+  "classification": "GTK4.22.4 provider Name exposure with an incomplete original probe interpretation; no Crew-specific menu-label defect demonstrated",
+  "scope": "Disconnected reviewed shell; no full screen-reader, acoustic, connected-app or integrated-tree acceptance",
+  "source": {
+    "crate": [
+      "c45703fff782c6a4d2573437771be08a99ba3139",
+      "d4d31a134b89e62f38e5cf32040708d695affb0e",
+      "706bd6358b4e9d4390b3ac907350c0a5ecc70ce3"
+    ],
+    "registration": "32ab8f0e8046478700726de64c65e1f91fc509ba",
+    "runtime_helper": "0198317b281e2bde0caf451eb5cdfb48094b3505",
+    "shell_sha256": "d11b551bdce653978b7d0769ddf324c3a1805debf533d1d5c9326699613bc8d3",
+    "unchanged_crate_checked_against": "e27cb12d70f49d5252a42b0a1164b057634a5cc0",
+    "binary_path": "target/native-shell-review-c457/cargo/debug/crew-desktop",
+    "binary_sha256": "8c109210360dff7788b021fae83b1ae07313669d34be9a3a6b9d638e4f8e49dc"
+  },
+  "upstream": {
+    "gtk_source": "/nix/store/kf64y6s024nzcynaihhy12h82142g800-gtk-4.22.4.tar.xz",
+    "gtk_patch": "fix-32bit-VkImage-null.patch",
+    "gtk_atcontext_sha256": "a05e11f46204c3bfac83d27cd7454de0b0d8f788152c3f9ca6c28cb7cdb54c96",
+    "gtk_modelbutton_sha256": "8c8da4ff46b5e6a0cd4826aff405a162d5270286582bea0481f76eb8cf8015f2",
+    "orca_ax_utilities_sha256": "510183f122b4c989221a85a759dfc538c60363b94b160d9d69de7e656d6c17ff",
+    "source_comparison": "GTK Nix tar files equal GNOME4.22.4 source; packaged Orca utility equal GNOME50.2 source"
+  },
+  "observations": {
+    "crew_items": 6,
+    "standalone_items": 3,
+    "labels_available_through_relation_text": true,
+    "cache_clear_did_not_change_names": true,
+    "actual_orca_output_contains_all_six_crew_labels": true,
+    "audio_unavailable": true,
+    "application_escape_returns_named_focus": true,
+    "appearance_checked_changed": [
+      "Light",
+      "System"
+    ],
+    "destination_changed": [
+      "Team",
+      "Tasks"
+    ],
+    "comparison_check_changed": [
+      true,
+      false
+    ],
+    "no_required_crew_source_fix": true
+  },
+  "raw_files": [
+    {
+      "path": "target/native-menu-a11y/run01/crew-menu-dbus.json",
+      "sha256": "8a243472adff3e7f4dc47fec716a292681eb9f11433428df8f99fda0bf645b7d",
+      "bytes": 55808
+    },
+    {
+      "path": "target/native-menu-a11y/run01/comparison-menu-dbus.json",
+      "sha256": "3813af4f27b751443444851fa8fa35b40947a89972765c76d93759ebca619d4d",
+      "bytes": 46515
+    },
+    {
+      "path": "target/native-menu-a11y/run01/keyboard-sequence.json",
+      "sha256": "567c0c1b6f32b9928ece57e25326230a54c0572330a3bfe4b73c751180cac6b3",
+      "bytes": 62721
+    },
+    {
+      "path": "target/native-menu-a11y/run01/destination-open.json",
+      "sha256": "82a99a9730de93c7c5bf18ec7e93a2c23d3e2668d4a115016c3b80598f636ebe",
+      "bytes": 50350
+    },
+    {
+      "path": "target/native-menu-a11y/run01/destination-next.json",
+      "sha256": "62d7bcd1e1f63ce76cea3036d4871f2de93b9875f6dba032ac3d04c742acc388",
+      "bytes": 50350
+    },
+    {
+      "path": "target/native-menu-a11y/run01/destination-selected.json",
+      "sha256": "c79d6e3f2aa52e055dbdff39c6c8b473cce7dd7f7bf59d7f150ca070b71d3be0",
+      "bytes": 30279
+    },
+    {
+      "path": "target/native-menu-a11y/run01/comparison-checked.json",
+      "sha256": "876a0c9f3b23714794362bd22e0ca36a9b5771c8713bc9976bcd3328d75f080c",
+      "bytes": 46271
+    },
+    {
+      "path": "target/native-menu-a11y/run01/comparison-unchecked.json",
+      "sha256": "3e48924414fc090ad14eecb76e68c472dc91d0ee7e3f36bce6c07acc8c410743",
+      "bytes": 46233
+    },
+    {
+      "path": "target/native-menu-a11y/run01/orca-debug.txt",
+      "sha256": "1089df3d1a9b4f870ef7ca91deadec1e9714905d9444732fda9f37901ded537b",
+      "bytes": 813411
+    },
+    {
+      "path": "target/native-menu-a11y/run01/orca-fixed-debug.txt",
+      "sha256": "efd66bce5e43d59e4e9223d8c7795b7da4fcfb06d92777281f295084da0d16f0",
+      "bytes": 2275046
+    }
+  ],
+  "files": [
+    {
+      "path": "cleanup.json",
+      "sha256": "e0edfc140ab9460885569caccfd748475ed3ab5013e24bfab0f4c2cce2865e34",
+      "bytes": 841
+    },
+    {
+      "path": "comparison.py",
+      "sha256": "ff2f2f4ed50f2934b65a7e1a61683483e3166b6cc8eb9b09694579f930d03430",
+      "bytes": 2108
+    },
+    {
+      "path": "harness-restoration.json",
+      "sha256": "5e1eb462aaad37188fc41e01d6421dd7f8a6ca297f015811fe98cdc60c63841f",
+      "bytes": 3499
+    },
+    {
+      "path": "keyboard.json",
+      "sha256": "43c2c18e187649e2a21f872a9830036a295a129318be41e85568fed9b2443ce5",
+      "bytes": 9099
+    },
+    {
+      "path": "keyboard.py",
+      "sha256": "d32a9b0cfa1425d14881542534fb5412cf9e954c6d48a04afb89ba0bdac47fa2",
+      "bytes": 2872
+    },
+    {
+      "path": "menu-wire.json",
+      "sha256": "b5495604d60751ab67ea00df0bc44341f789cc5fcbf05f682745eda0e3fe87ed",
+      "bytes": 29745
+    },
+    {
+      "path": "orca-speech.txt",
+      "sha256": "b26da982bd5430ef00a09c4dbc88fd3d249d3ad43e1392c6f7001cc34f38caf4",
+      "bytes": 10585
+    },
+    {
+      "path": "probe.py",
+      "sha256": "3f0a1bf627e7f094ce5e728632a19c972b3e3c2efa7783dacb45572ddf1bbd92",
+      "bytes": 3953
+    },
+    {
+      "path": "run-orca.sh",
+      "sha256": "589729d5f12a232f5b1ff4369ea3d9df72dd8b57d276e36113278d7cc8f0d6a6",
+      "bytes": 2070
+    },
+    {
+      "path": "run-session.sh",
+      "sha256": "e31c7697ede2d6c0f3359dae1c747c10711d589950c0202805af4f3eb7681864",
+      "bytes": 3509
+    },
+    {
+      "path": "tools.txt",
+      "sha256": "b0b9ed2a64a3ace2c7e9e4080f9c2a26cb687411a4d3e45c2a1563f0e2993b73",
+      "bytes": 717
+    }
+  ]
+}

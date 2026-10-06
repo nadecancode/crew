@@ -1,0 +1,120 @@
+{
+  "authorization": "m-b0010d2a4415",
+  "original_path": "/home/nade/.local/share/orca",
+  "backup_path": "/home/nade/workspaces/personal/crew/.crew/worktrees/designer/target/native-menu-a11y/attributed-orca-backup",
+  "before": {
+    "": {
+      "kind": "directory",
+      "mode": 448,
+      "uid": 1000,
+      "size": 4096,
+      "mtime_ns": 1791247842161951700,
+      "ctime_ns": 1791247842161951700,
+      "inode": 9085006,
+      "sha256": null,
+      "birth": "2026-10-05 19:50:42.161211763 -0500"
+    },
+    "__pycache__": {
+      "kind": "directory",
+      "mode": 448,
+      "uid": 1000,
+      "size": 4096,
+      "mtime_ns": 1791247842161967429,
+      "ctime_ns": 1791247842161967429,
+      "inode": 9085034,
+      "sha256": null,
+      "birth": "2026-10-05 19:50:42.161837444 -0500"
+    },
+    "__pycache__/orca-customizations.cpython-314.pyc": {
+      "kind": "file",
+      "mode": 384,
+      "uid": 1000,
+      "size": 150,
+      "mtime_ns": 1791247842161967429,
+      "ctime_ns": 1791247842161967429,
+      "inode": 9085035,
+      "sha256": "8046772b453711c24bab98b637c1ca49f23b2821df699b0e5387e9efa43bea1d",
+      "birth": "2026-10-05 19:50:42.161951700 -0500"
+    },
+    "orca-customizations.py": {
+      "kind": "file",
+      "mode": 448,
+      "uid": 1000,
+      "size": 0,
+      "mtime_ns": 1791247842161837444,
+      "ctime_ns": 1791247842161837444,
+      "inode": 9085033,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "birth": "2026-10-05 19:50:42.161837444 -0500"
+    },
+    "sounds": {
+      "kind": "directory",
+      "mode": 448,
+      "uid": 1000,
+      "size": 4096,
+      "mtime_ns": 1791247842161211763,
+      "ctime_ns": 1791247842161211763,
+      "inode": 9085032,
+      "sha256": null,
+      "birth": "2026-10-05 19:50:42.161211763 -0500"
+    }
+  },
+  "after": {
+    "": {
+      "kind": "directory",
+      "mode": 448,
+      "uid": 1000,
+      "size": 4096,
+      "mtime_ns": 1791247842161951700,
+      "ctime_ns": 1791248276581535627,
+      "inode": 9085006,
+      "sha256": null,
+      "birth": "2026-10-05 19:50:42.161211763 -0500"
+    },
+    "__pycache__": {
+      "kind": "directory",
+      "mode": 448,
+      "uid": 1000,
+      "size": 4096,
+      "mtime_ns": 1791247842161967429,
+      "ctime_ns": 1791247842161967429,
+      "inode": 9085034,
+      "sha256": null,
+      "birth": "2026-10-05 19:50:42.161837444 -0500"
+    },
+    "__pycache__/orca-customizations.cpython-314.pyc": {
+      "kind": "file",
+      "mode": 384,
+      "uid": 1000,
+      "size": 150,
+      "mtime_ns": 1791247842161967429,
+      "ctime_ns": 1791247842161967429,
+      "inode": 9085035,
+      "sha256": "8046772b453711c24bab98b637c1ca49f23b2821df699b0e5387e9efa43bea1d",
+      "birth": "2026-10-05 19:50:42.161951700 -0500"
+    },
+    "orca-customizations.py": {
+      "kind": "file",
+      "mode": 448,
+      "uid": 1000,
+      "size": 0,
+      "mtime_ns": 1791247842161837444,
+      "ctime_ns": 1791247842161837444,
+      "inode": 9085033,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "birth": "2026-10-05 19:50:42.161837444 -0500"
+    },
+    "sounds": {
+      "kind": "directory",
+      "mode": 448,
+      "uid": 1000,
+      "size": 4096,
+      "mtime_ns": 1791247842161211763,
+      "ctime_ns": 1791247842161211763,
+      "inode": 9085032,
+      "sha256": null,
+      "birth": "2026-10-05 19:50:42.161211763 -0500"
+    }
+  },
+  "status": "moved intact; original path absent; no deletion"
+}

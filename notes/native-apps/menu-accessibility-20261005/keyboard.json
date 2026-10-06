@@ -1,0 +1,463 @@
+{
+  "steps": [
+    {
+      "stage": "01-application-first",
+      "focus": [
+        {
+          "role": "menu item",
+          "name": "",
+          "states": [
+            "showing",
+            "visible",
+            "focused",
+            "focusable"
+          ],
+          "relation_text": [
+            "Show Sidebar"
+          ],
+          "dbus_name": ""
+        }
+      ],
+      "checked": []
+    },
+    {
+      "stage": "02-application-down-1",
+      "focus": [
+        {
+          "role": "menu item",
+          "name": "",
+          "states": [
+            "showing",
+            "visible",
+            "focused",
+            "focusable"
+          ],
+          "relation_text": [
+            "Show Details"
+          ],
+          "dbus_name": ""
+        }
+      ],
+      "checked": []
+    },
+    {
+      "stage": "02-application-down-2",
+      "focus": [
+        {
+          "role": "menu item",
+          "name": "",
+          "states": [
+            "showing",
+            "visible",
+            "focused",
+            "focusable",
+            "expanded"
+          ],
+          "relation_text": [
+            "Appearance"
+          ],
+          "dbus_name": ""
+        }
+      ],
+      "checked": []
+    },
+    {
+      "stage": "02-application-down-3",
+      "focus": [
+        {
+          "role": "menu item",
+          "name": "",
+          "states": [
+            "showing",
+            "visible",
+            "focused",
+            "focusable"
+          ],
+          "relation_text": [
+            "Keyboard Shortcuts"
+          ],
+          "dbus_name": ""
+        }
+      ],
+      "checked": []
+    },
+    {
+      "stage": "02-application-down-4",
+      "focus": [
+        {
+          "role": "menu item",
+          "name": "",
+          "states": [
+            "showing",
+            "visible",
+            "focused",
+            "focusable"
+          ],
+          "relation_text": [
+            "About Crew"
+          ],
+          "dbus_name": ""
+        }
+      ],
+      "checked": []
+    },
+    {
+      "stage": "02-application-down-5",
+      "focus": [
+        {
+          "role": "menu item",
+          "name": "",
+          "states": [
+            "showing",
+            "visible",
+            "focused",
+            "focusable"
+          ],
+          "relation_text": [
+            "Quit"
+          ],
+          "dbus_name": ""
+        }
+      ],
+      "checked": []
+    },
+    {
+      "stage": "03-application-dismissed",
+      "focus": [
+        {
+          "role": "toggle button",
+          "name": "Application menu",
+          "states": [
+            "showing",
+            "visible",
+            "focused",
+            "focusable"
+          ],
+          "relation_text": []
+        }
+      ],
+      "checked": []
+    },
+    {
+      "stage": "04-appearance-open",
+      "focus": [
+        {
+          "role": "menu item",
+          "name": "",
+          "states": [
+            "showing",
+            "visible",
+            "focused",
+            "focusable",
+            "checked"
+          ],
+          "relation_text": [
+            "Light"
+          ],
+          "dbus_name": ""
+        }
+      ],
+      "checked": [
+        "Light"
+      ]
+    },
+    {
+      "stage": "05-appearance-down-1",
+      "focus": [
+        {
+          "role": "menu item",
+          "name": "",
+          "states": [
+            "showing",
+            "visible",
+            "focused",
+            "focusable"
+          ],
+          "relation_text": [
+            "Dark"
+          ],
+          "dbus_name": ""
+        }
+      ],
+      "checked": [
+        "Light"
+      ]
+    },
+    {
+      "stage": "05-appearance-down-2",
+      "focus": [
+        {
+          "role": "menu item",
+          "name": "",
+          "states": [
+            "showing",
+            "visible",
+            "focused",
+            "focusable",
+            "expanded"
+          ],
+          "relation_text": [
+            "Appearance"
+          ],
+          "dbus_name": ""
+        }
+      ],
+      "checked": [
+        "Light"
+      ]
+    },
+    {
+      "stage": "05-appearance-down-3",
+      "focus": [
+        {
+          "role": "menu item",
+          "name": "",
+          "states": [
+            "showing",
+            "visible",
+            "focused",
+            "focusable"
+          ],
+          "relation_text": [
+            "System"
+          ],
+          "dbus_name": ""
+        }
+      ],
+      "checked": [
+        "Light"
+      ]
+    },
+    {
+      "stage": "06-appearance-chosen",
+      "focus": [
+        {
+          "role": "toggle button",
+          "name": "Application menu",
+          "states": [
+            "showing",
+            "visible",
+            "focused",
+            "focusable"
+          ],
+          "relation_text": []
+        }
+      ],
+      "checked": []
+    },
+    {
+      "stage": "07-appearance-reopened",
+      "focus": [
+        {
+          "role": "menu item",
+          "name": "",
+          "states": [
+            "showing",
+            "visible",
+            "focused",
+            "focusable",
+            "checked"
+          ],
+          "relation_text": [
+            "System"
+          ],
+          "dbus_name": ""
+        }
+      ],
+      "checked": [
+        "System"
+      ]
+    },
+    {
+      "stage": "08-appearance-dismissed",
+      "focus": [
+        {
+          "role": "toggle button",
+          "name": "Application menu",
+          "states": [
+            "showing",
+            "visible",
+            "focused",
+            "focusable"
+          ],
+          "relation_text": []
+        }
+      ],
+      "checked": []
+    }
+  ],
+  "destination": [
+    {
+      "file": "destination-open.json",
+      "objects": [
+        {
+          "name": "Team",
+          "role": "list item",
+          "states": [
+            "showing",
+            "visible",
+            "focusable",
+            "selected"
+          ],
+          "relation_text": []
+        },
+        {
+          "name": "",
+          "role": "menu item",
+          "states": [
+            "showing",
+            "visible",
+            "focused",
+            "focusable"
+          ],
+          "relation_text": [
+            "Team"
+          ]
+        }
+      ]
+    },
+    {
+      "file": "destination-next.json",
+      "objects": [
+        {
+          "name": "Team",
+          "role": "list item",
+          "states": [
+            "showing",
+            "visible",
+            "focusable",
+            "selected"
+          ],
+          "relation_text": []
+        },
+        {
+          "name": "",
+          "role": "menu item",
+          "states": [
+            "showing",
+            "visible",
+            "focused",
+            "focusable"
+          ],
+          "relation_text": [
+            "Tasks"
+          ]
+        }
+      ]
+    },
+    {
+      "file": "destination-selected.json",
+      "objects": [
+        {
+          "name": "Tasks",
+          "role": "list item",
+          "states": [
+            "showing",
+            "visible",
+            "focusable",
+            "selected"
+          ],
+          "relation_text": []
+        },
+        {
+          "name": "Destination: Tasks",
+          "role": "toggle button",
+          "states": [
+            "showing",
+            "visible",
+            "focused",
+            "focusable"
+          ],
+          "relation_text": []
+        }
+      ]
+    }
+  ],
+  "comparison_check": [
+    {
+      "file": "comparison-checked.json",
+      "items": [
+        {
+          "name": "",
+          "role": "menu item",
+          "states": [
+            "showing",
+            "visible",
+            "focusable"
+          ],
+          "relation_text": [
+            "Plain menu label"
+          ]
+        },
+        {
+          "name": "",
+          "role": "menu item",
+          "states": [
+            "showing",
+            "visible",
+            "focused",
+            "focusable",
+            "checked"
+          ],
+          "relation_text": [
+            "Checked menu label"
+          ]
+        },
+        {
+          "name": "",
+          "role": "menu item",
+          "states": [
+            "showing",
+            "visible",
+            "focusable"
+          ],
+          "relation_text": [
+            "Submenu label"
+          ]
+        }
+      ]
+    },
+    {
+      "file": "comparison-unchecked.json",
+      "items": [
+        {
+          "name": "",
+          "role": "menu item",
+          "states": [
+            "showing",
+            "visible",
+            "focused",
+            "focusable"
+          ],
+          "relation_text": [
+            "Plain menu label"
+          ]
+        },
+        {
+          "name": "",
+          "role": "menu item",
+          "states": [
+            "showing",
+            "visible",
+            "focusable"
+          ],
+          "relation_text": [
+            "Checked menu label"
+          ]
+        },
+        {
+          "name": "",
+          "role": "menu item",
+          "states": [
+            "showing",
+            "visible",
+            "focusable"
+          ],
+          "relation_text": [
+            "Submenu label"
+          ]
+        }
+      ]
+    }
+  ]
+}

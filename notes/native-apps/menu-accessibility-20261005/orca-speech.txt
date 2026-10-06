@@ -1,0 +1,100 @@
+Orca 50.2 actual event/speech-generation output; audio transport unavailable.
+Source: target/native-menu-a11y/run01/orca-fixed-debug.txt
+SHA-256: efd66bce5e43d59e4e9223d8c7795b7da4fcfb06d92777281f295084da0d16f0
+Line numbers refer to the full retained raw log.
+
+101: 19:53:06.436682 - ERROR: Failed to connect to Speech Dispatcher: Can't open socket using method unix_socket
+102:                   Original error: [Errno 2] No such file or directory
+103:                   Additional error: Can't find Speech Dispatcher spawn command /nix/store/0zrxdvqm882hksrrfmks4wf686p2906j-speech-dispatcher-0.12.1/bin/speech-dispatcher
+302: 19:53:06.451732 - SPEECH OUTPUT: 'Screen reader on.' {'established': False}
+771: 19:53:06.484687 - SPEECH OUTPUT: 'Team — Crew' {'established': False, 'family': {'name': '', 'gender': None, 'lang': 'C', 'dialect': '', 'variant': None}}
+1157: 19:53:06.570498 - SPEECH OUTPUT: 'Application menu' {'established': False, 'family': {'name': '', 'gender': None, 'lang': 'C', 'dialect': '', 'variant': None}}
+1162: 19:53:06.570562 - SPEECH OUTPUT: 'toggle button not pressed.' {'established': False}
+1167: 19:53:06.570602 - SPEECH OUTPUT: 'opens popup' {'established': False}
+1699: 19:54:15.659046 - SPEECH OUTPUT: 'pressed' {'established': False}
+2262: 19:54:15.715122 - SPEECH OUTPUT: 'menu' {'established': False}
+2268: 19:54:15.715289 - SPEECH OUTPUT: 'Show Sidebar' {'established': False, 'family': {'name': '', 'gender': None, 'lang': 'C', 'dialect': '', 'variant': None}}
+2273: 19:54:15.715508 - SPEECH OUTPUT: 'not checked.' {'established': False}
+2278: 19:54:15.715594 - SPEECH OUTPUT: 'Ctrl+B.' {'established': False}
+2882: 19:54:15.991883 - SPEECH OUTPUT: 'Show Details' {'established': False, 'family': {'name': '', 'gender': None, 'lang': 'C', 'dialect': '', 'variant': None}}
+2887: 19:54:15.991938 - SPEECH OUTPUT: 'not checked.' {'established': False}
+2892: 19:54:15.991985 - SPEECH OUTPUT: 'Ctrl+I.' {'established': False}
+3404: 19:54:16.540150 - SPEECH OUTPUT: 'Appearance' {'established': False, 'family': {'name': '', 'gender': None, 'lang': 'C', 'dialect': '', 'variant': None}}
+3409: 19:54:16.540218 - SPEECH OUTPUT: 'expanded.' {'established': False}
+3414: 19:54:16.540247 - SPEECH OUTPUT: 'opens popup' {'established': False}
+3813: 19:54:17.140770 - SPEECH OUTPUT: 'Keyboard Shortcuts.' {'established': False, 'family': {'name': '', 'gender': None, 'lang': 'C', 'dialect': '', 'variant': None}}
+3818: 19:54:17.140824 - SPEECH OUTPUT: 'F1.' {'established': False}
+4177: 19:54:17.720399 - SPEECH OUTPUT: 'About Crew.' {'established': False, 'family': {'name': '', 'gender': None, 'lang': 'C', 'dialect': '', 'variant': None}}
+4558: 19:54:18.311453 - SPEECH OUTPUT: 'Quit.' {'established': False, 'family': {'name': '', 'gender': None, 'lang': 'C', 'dialect': '', 'variant': None}}
+4563: 19:54:18.311499 - SPEECH OUTPUT: 'Ctrl+Q.' {'established': False}
+5330: 19:54:18.939913 - SPEECH OUTPUT: 'Application menu' {'established': False, 'family': {'name': '', 'gender': None, 'lang': 'C', 'dialect': '', 'variant': None}}
+5335: 19:54:18.939958 - SPEECH OUTPUT: 'toggle button not pressed.' {'established': False}
+5340: 19:54:18.939986 - SPEECH OUTPUT: 'opens popup' {'established': False}
+6015: 19:54:19.828501 - SPEECH OUTPUT: 'pressed' {'established': False}
+6559: 19:54:19.887357 - SPEECH OUTPUT: 'menu' {'established': False}
+6565: 19:54:19.887490 - SPEECH OUTPUT: 'Show Sidebar' {'established': False, 'family': {'name': '', 'gender': None, 'lang': 'C', 'dialect': '', 'variant': None}}
+6570: 19:54:19.887515 - SPEECH OUTPUT: 'not checked.' {'established': False}
+6575: 19:54:19.887537 - SPEECH OUTPUT: 'Ctrl+B.' {'established': False}
+7179: 19:54:20.027830 - SPEECH OUTPUT: 'Show Details' {'established': False, 'family': {'name': '', 'gender': None, 'lang': 'C', 'dialect': '', 'variant': None}}
+7184: 19:54:20.027888 - SPEECH OUTPUT: 'not checked.' {'established': False}
+7189: 19:54:20.027923 - SPEECH OUTPUT: 'Ctrl+I.' {'established': False}
+7701: 19:54:20.423720 - SPEECH OUTPUT: 'Appearance' {'established': False, 'family': {'name': '', 'gender': None, 'lang': 'C', 'dialect': '', 'variant': None}}
+7706: 19:54:20.423765 - SPEECH OUTPUT: 'expanded.' {'established': False}
+7711: 19:54:20.423794 - SPEECH OUTPUT: 'opens popup' {'established': False}
+8240: 19:54:20.846420 - SPEECH OUTPUT: 'Light' {'established': False, 'family': {'name': '', 'gender': None, 'lang': 'C', 'dialect': '', 'variant': None}}
+8245: 19:54:20.846469 - SPEECH OUTPUT: 'checked.' {'established': False}
+8920: 19:54:21.431726 - SPEECH OUTPUT: 'Dark' {'established': False, 'family': {'name': '', 'gender': None, 'lang': 'C', 'dialect': '', 'variant': None}}
+8925: 19:54:21.431792 - SPEECH OUTPUT: 'not checked.' {'established': False}
+9339: 19:54:22.015009 - SPEECH OUTPUT: 'Appearance' {'established': False, 'family': {'name': '', 'gender': None, 'lang': 'C', 'dialect': '', 'variant': None}}
+9344: 19:54:22.015081 - SPEECH OUTPUT: 'expanded.' {'established': False}
+9349: 19:54:22.015117 - SPEECH OUTPUT: 'opens popup' {'established': False}
+9764: 19:54:22.578958 - SPEECH OUTPUT: 'System' {'established': False, 'family': {'name': '', 'gender': None, 'lang': 'C', 'dialect': '', 'variant': None}}
+9769: 19:54:22.579014 - SPEECH OUTPUT: 'not checked.' {'established': False}
+10557: 19:54:23.165867 - SPEECH OUTPUT: 'Application menu' {'established': False, 'family': {'name': '', 'gender': None, 'lang': 'C', 'dialect': '', 'variant': None}}
+10562: 19:54:23.165916 - SPEECH OUTPUT: 'toggle button not pressed.' {'established': False}
+10567: 19:54:23.165945 - SPEECH OUTPUT: 'opens popup' {'established': False}
+11538: 19:54:24.026288 - SPEECH OUTPUT: 'pressed' {'established': False}
+12082: 19:54:24.067180 - SPEECH OUTPUT: 'menu' {'established': False}
+12088: 19:54:24.067312 - SPEECH OUTPUT: 'Show Sidebar' {'established': False, 'family': {'name': '', 'gender': None, 'lang': 'C', 'dialect': '', 'variant': None}}
+12093: 19:54:24.067336 - SPEECH OUTPUT: 'not checked.' {'established': False}
+12098: 19:54:24.067359 - SPEECH OUTPUT: 'Ctrl+B.' {'established': False}
+12701: 19:54:24.224043 - SPEECH OUTPUT: 'Show Details' {'established': False, 'family': {'name': '', 'gender': None, 'lang': 'C', 'dialect': '', 'variant': None}}
+12706: 19:54:24.224097 - SPEECH OUTPUT: 'not checked.' {'established': False}
+12711: 19:54:24.224126 - SPEECH OUTPUT: 'Ctrl+I.' {'established': False}
+13223: 19:54:24.639598 - SPEECH OUTPUT: 'Appearance' {'established': False, 'family': {'name': '', 'gender': None, 'lang': 'C', 'dialect': '', 'variant': None}}
+13228: 19:54:24.639639 - SPEECH OUTPUT: 'expanded.' {'established': False}
+13233: 19:54:24.639664 - SPEECH OUTPUT: 'opens popup' {'established': False}
+13756: 19:54:25.070733 - SPEECH OUTPUT: 'System' {'established': False, 'family': {'name': '', 'gender': None, 'lang': 'C', 'dialect': '', 'variant': None}}
+13761: 19:54:25.070793 - SPEECH OUTPUT: 'checked.' {'established': False}
+14827: 19:54:25.718513 - SPEECH OUTPUT: 'Application menu' {'established': False, 'family': {'name': '', 'gender': None, 'lang': 'C', 'dialect': '', 'variant': None}}
+14832: 19:54:25.718605 - SPEECH OUTPUT: 'toggle button not pressed.' {'established': False}
+14837: 19:54:25.718668 - SPEECH OUTPUT: 'opens popup' {'established': False}
+15878: 19:55:08.896701 - SPEECH OUTPUT: 'expanded' {'established': False}
+15884: 19:55:08.896834 - SPEECH OUTPUT: 'Destination: Team' {'established': False, 'family': {'name': '', 'gender': None, 'lang': 'C', 'dialect': '', 'variant': None}}
+15889: 19:55:08.896856 - SPEECH OUTPUT: 'menu' {'established': False}
+15894: 19:55:08.896880 - SPEECH OUTPUT: 'Team.' {'established': False, 'family': {'name': '', 'gender': None, 'lang': 'C', 'dialect': '', 'variant': None}}
+15899: 19:55:08.896898 - SPEECH OUTPUT: 'Ctrl+1.' {'established': False}
+16492: 19:55:09.206673 - SPEECH OUTPUT: 'Tasks.' {'established': False, 'family': {'name': '', 'gender': None, 'lang': 'C', 'dialect': '', 'variant': None}}
+16497: 19:55:09.206722 - SPEECH OUTPUT: 'Ctrl+2.' {'established': False}
+17448: 19:55:09.839138 - SPEECH OUTPUT: 'Destination: Tasks' {'established': False, 'family': {'name': '', 'gender': None, 'lang': 'C', 'dialect': '', 'variant': None}}
+17453: 19:55:09.839189 - SPEECH OUTPUT: 'toggle button not pressed.' {'established': False}
+17458: 19:55:09.839219 - SPEECH OUTPUT: 'opens popup' {'established': False}
+18073: 19:55:09.887239 - SPEECH OUTPUT: 'Destinations' {'established': False, 'family': {'name': '', 'gender': None, 'lang': 'C', 'dialect': '', 'variant': None}}
+18078: 19:55:09.887279 - SPEECH OUTPUT: 'List with 5 items' {'established': False}
+18083: 19:55:09.887317 - SPEECH OUTPUT: 'Tasks.' {'established': False, 'family': {'name': '', 'gender': None, 'lang': 'C', 'dialect': '', 'variant': None}}
+19194: 19:56:33.584759 - SPEECH OUTPUT: 'GTK menu comparison' {'established': False, 'family': {'name': '', 'gender': None, 'lang': 'C', 'dialect': '', 'variant': None}}
+19707: 19:56:33.619424 - SPEECH OUTPUT: 'expanded' {'established': False}
+19712: 19:56:33.619472 - SPEECH OUTPUT: 'menu' {'established': False}
+19717: 19:56:33.619500 - SPEECH OUTPUT: 'Plain menu label.' {'established': False, 'family': {'name': '', 'gender': None, 'lang': 'C', 'dialect': '', 'variant': None}}
+20249: 19:56:33.755591 - SPEECH OUTPUT: 'Checked menu label' {'established': False, 'family': {'name': '', 'gender': None, 'lang': 'C', 'dialect': '', 'variant': None}}
+20254: 19:56:33.755639 - SPEECH OUTPUT: 'checked.' {'established': False}
+21062: 19:56:34.350302 - SPEECH OUTPUT: 'Model menu' {'established': False, 'family': {'name': '', 'gender': None, 'lang': 'C', 'dialect': '', 'variant': None}}
+21067: 19:56:34.350346 - SPEECH OUTPUT: 'toggle button not pressed.' {'established': False}
+21072: 19:56:34.350376 - SPEECH OUTPUT: 'opens popup' {'established': False}
+21801: 19:56:34.855757 - SPEECH OUTPUT: 'pressed' {'established': False}
+22270: 19:56:34.891834 - SPEECH OUTPUT: 'menu' {'established': False}
+22275: 19:56:34.891885 - SPEECH OUTPUT: 'Plain menu label.' {'established': False, 'family': {'name': '', 'gender': None, 'lang': 'C', 'dialect': '', 'variant': None}}
+23059: 19:56:35.440368 - SPEECH OUTPUT: 'Model menu' {'established': False, 'family': {'name': '', 'gender': None, 'lang': 'C', 'dialect': '', 'variant': None}}
+23064: 19:56:35.440410 - SPEECH OUTPUT: 'toggle button not pressed.' {'established': False}
+23069: 19:56:35.440439 - SPEECH OUTPUT: 'opens popup' {'established': False}
+23510: 19:56:36.623625 - SPEECH OUTPUT: 'Screen reader off.' {'established': False}
