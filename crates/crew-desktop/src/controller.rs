@@ -1480,6 +1480,12 @@ impl Controller {
                 target_ids,
             }) => {
                 self.cancel_confirmation();
+                // Core keeps the opener unavailable while it holds the
+                // confirmation; that is not news to show beside it.
+                let held = action
+                    .opener
+                    .upgrade()
+                    .and_then(|opener| self.controls.hold(&opener));
                 let dialog = dialogs::confirmation(
                     self.shell.window(),
                     kind,
@@ -1518,6 +1524,10 @@ impl Controller {
                         let opener = action.opener.clone();
                         move || {
                             if let Some(c) = weak.upgrade() {
+                                if let Some(id) = held {
+                                    c.controls.release(id);
+                                    c.refresh_control(id);
+                                }
                                 c.return_focus(&opener);
                             }
                         }

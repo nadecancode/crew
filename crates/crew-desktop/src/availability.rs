@@ -20,6 +20,8 @@ struct Binding {
     reason: glib::WeakRef<gtk::Label>,
     intent: Intent,
     pending: Rc<Cell<bool>>,
+    /// Its confirmation is open: unavailable, with no reason shown.
+    held: Cell<bool>,
 }
 /// Bindings by control, and the controls whose reason waits for input.
 #[derive(Default)]
@@ -44,6 +46,7 @@ impl Controls {
                 reason: reason.downgrade(),
                 intent,
                 pending,
+                held: Cell::new(false),
             },
         );
     }
@@ -81,6 +84,10 @@ impl Controls {
         let Some(button) = binding.button.upgrade() else {
             return;
         };
+        if binding.held.get() {
+            button.set_sensitive(false);
+            return;
+        }
         let (available, explanation) = match result {
             Ok(value) => (
                 value.available,
@@ -99,12 +106,43 @@ impl Controls {
     }
     pub fn unavailable(&self, id: u64, explanation: &str) {
         if let Some(binding) = self.0.borrow().get(&id) {
+            if binding.held.get() {
+                return;
+            }
             if let Some(button) = binding.button.upgrade() {
                 button.set_sensitive(false);
             }
             if let Some(reason) = binding.reason.upgrade() {
                 show(&reason, if self.quiet(id) { "" } else { explanation });
             }
+        }
+    }
+    /// While a confirmation that `opener` opened is on screen, keep the
+    /// control unavailable without the reason Core gives for it ("this
+    /// action is already pending"). Returns the control to release.
+    pub fn hold(&self, opener: &gtk::Widget) -> Option<u64> {
+        let bindings = self.0.borrow();
+        let (id, binding) = bindings.iter().find(|(_, binding)| {
+            binding
+                .button
+                .upgrade()
+                .is_some_and(|button| button.upcast_ref::<gtk::Widget>() == opener)
+        })?;
+        binding.held.set(true);
+        if let Some(button) = binding.button.upgrade() {
+            button.set_sensitive(false);
+            button.set_tooltip_text(None);
+            button.update_property(&[gtk::accessible::Property::Description("")]);
+        }
+        if let Some(reason) = binding.reason.upgrade() {
+            show(&reason, "");
+        }
+        Some(*id)
+    }
+    /// The confirmation has closed; the next availability answer applies.
+    pub fn release(&self, id: u64) {
+        if let Some(binding) = self.0.borrow().get(&id) {
+            binding.held.set(false);
         }
     }
     pub fn remove(&self, id: u64) {

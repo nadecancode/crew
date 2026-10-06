@@ -51,26 +51,22 @@ mod fixed_width {
             gtk::SizeRequestMode::HeightForWidth
         }
 
-        fn measure(&self, orientation: gtk::Orientation, for_size: i32) -> (i32, i32, i32, i32) {
+        fn measure(&self, orientation: gtk::Orientation, _for_size: i32) -> (i32, i32, i32, i32) {
             let Some(child) = self.child.get().filter(|child| child.is_visible()) else {
                 return (0, 0, -1, -1);
             };
             // The child's natural width (a long unwrapped line) is ignored:
             // the request is the fixed width, or the child's minimum if larger
-            // (large text), and its height follows from that width.
+            // (large text), and its height follows from that width. Heights
+            // are measured at that width for any proposed width too: GTK
+            // requires no width to need less height than none at all, and a
+            // wider proposal would wrap the status text into fewer lines.
             let (child_min, ..) = child.measure(gtk::Orientation::Horizontal, -1);
             let width = self.width.get().max(child_min);
             match orientation {
                 gtk::Orientation::Horizontal => (width, width, -1, -1),
                 _ => {
-                    let (min, natural, ..) = child.measure(
-                        gtk::Orientation::Vertical,
-                        if for_size < 0 {
-                            width
-                        } else {
-                            for_size.max(child_min)
-                        },
-                    );
+                    let (min, natural, ..) = child.measure(gtk::Orientation::Vertical, width);
                     (min, natural, -1, -1)
                 }
             }
@@ -370,16 +366,20 @@ impl Shell {
             }
         });
         shell.0.navigation.add_controller(sidebar_keys(&shell));
-        // Activated again (a dialog closed), GTK may put focus on the split
-        // pane's handle when the page it was in has been replaced: move it
-        // into the page.
+        // When the focused control is removed with its page (connecting while
+        // a dialog is open), GTK falls back to a container of the page, such
+        // as the split pane's handle: move focus into the page instead. A
+        // handle the user moved to from a live control keeps focus.
         let weak = Rc::downgrade(&shell.0);
-        shell.0.window.connect_is_active_notify(move |window| {
+        let last = Rc::new(RefCell::new(glib::WeakRef::<gtk::Widget>::new()));
+        shell.0.window.connect_focus_widget_notify(move |window| {
             let Some(inner) = weak.upgrade() else { return };
+            let focus = gtk::prelude::GtkWindowExt::focus(window);
+            let previous = last.borrow().upgrade();
+            last.borrow_mut().set(focus.as_ref());
             let slot = &inner.main_slots[inner.destination.get().index()];
-            if window.is_active()
-                && gtk::prelude::GtkWindowExt::focus(window).is_some_and(|f| slot.is_ancestor(&f))
-            {
+            let removed = previous.is_none_or(|p| p.root().is_none());
+            if removed && focus.is_some_and(|f| slot.is_ancestor(&f)) {
                 Shell(inner).focus_visible_view();
             }
         });

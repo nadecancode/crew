@@ -134,8 +134,13 @@ key ctrl+1
 press_to Tab "Stop team…" 20
 key Return
 expect_focus "Cancel"
+sleep 1
 note "the opener while the confirmation is open:"
 reader tree "Team — Crew" | grep -E "button 'Stop team…'" >>"$transcript" || true
+if reader tree "Team — Crew" | grep -qi "already pending"; then
+    fail "the page shows the pending reason while the confirmation is open"
+fi
+note "no pending reason is shown while it is open"
 capture 04-stop-team-dialog
 key Escape
 expect_focus "Stop team…"
@@ -156,6 +161,7 @@ for name in "Kill…" "Restart fresh…"; do
     press_to Tab "$name" 20
     key Return
     expect_focus "Cancel"
+    capture "04-$(printf %s "${name%…}" | tr " " "-" | tr "[:upper:]" "[:lower:]")-dialog"
     key Escape
     expect_focus "Agent actions"
     sleep 2
@@ -184,9 +190,10 @@ controls
 press_to Tab "Attach terminal" 60
 key Return
 sleep 2
-note "after Attach, focus moves on:"
-[ "$(focused)" != "" ] || fail "focus was lost when Attach became unavailable"
-record
+note "after Attach, focus is on the terminal, which says how to leave it:"
+expect_focus "Agent terminal"
+reader focus | grep -q "F6 leaves the terminal" || fail "the attached terminal does not announce F6"
+capture 06-terminal-attached
 controls
 note "accessible text of the attached terminal before any new output:"
 reader text "Agent terminal" >>"$transcript" || fail "terminal has no accessible text"
@@ -198,11 +205,11 @@ expect_focus "Agent terminal"
 note "F6:"
 key F6
 expect_focus "Detach terminal"
-capture 06-terminal-after-f6
-note "Return on Detach:"
+capture 07-terminal-after-f6
+note "Return on Detach, focus back on Attach terminal:"
 key Return
-[ "$(focused)" != "" ] || fail "focus was lost when Detach became unavailable"
-record
+expect_focus "Attach terminal"
+capture 08-after-detach
 controls
 
 note ""
@@ -211,6 +218,6 @@ key F1
 wait_for "Keyboard Shortcuts" 5 has
 reader tree "Keyboard Shortcuts" | grep -E "terminal|F6|destination|Enter|Up / Down" >>"$transcript"
 reader tree "Keyboard Shortcuts" | grep -q "label 'F6'" || fail "help does not name F6"
-capture 07-shortcuts
+capture 09-shortcuts
 key Escape
 note "PASS"

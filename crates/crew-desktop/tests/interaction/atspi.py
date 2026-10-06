@@ -28,7 +28,13 @@ def states(node):
 
 
 def line(node, depth):
-    return f"{depth} {node.getRoleName()} {node.name!r}  {','.join(states(node))}"
+    text = f"{depth} {node.getRoleName()} {node.name!r}  {','.join(states(node))}"
+    try:
+        if node.description:
+            text += f"  description {node.description!r}"
+    except Exception:
+        pass
+    return text
 
 
 def walk(node, depth=0):

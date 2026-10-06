@@ -232,6 +232,7 @@ fn gtk_scoped_views_confirmation_terminal_order_and_live_local_service() {
     recorder.queries(&c, &core);
     assert!(refresh.has_focus() || refresh.is_focus());
     capture("fixture-waiting-detail");
+    layout_follow_ups(&c, &shell, &core, &task, &inspector);
     shell.navigate(Destination::Team);
     assert!(
         c.agent.borrow().is_some(),
@@ -576,6 +577,22 @@ fn keyboard_focus(c: &Controller, recorder: &Recording, core: &ClientCore) {
     });
     let dialog = c.confirmation.borrow().as_ref().unwrap().dialog.clone();
     assert!(focus().is_none_or(|f| f != stop.clone().upcast::<gtk::Widget>()));
+    // V1: while the confirmation is open, Core's "already pending" reason
+    // for the opener is not shown under the page's controls.
+    c.refresh_controls();
+    answer_availability(
+        c,
+        recorder,
+        ActionKind::StopTeam,
+        Some("this action is already pending"),
+    );
+    let reasons = page_reasons(&page);
+    assert!(
+        !reasons.contains("already pending"),
+        "the open confirmation's opener shows no pending reason: {reasons}"
+    );
+    assert!(!stop.is_sensitive());
+    assert_eq!(stop.tooltip_text(), None);
     dialog.response(gtk::ResponseType::Cancel);
     until(|| focus().is_some());
     let waiting = focus().unwrap();
@@ -716,6 +733,19 @@ fn keyboard_focus(c: &Controller, recorder: &Recording, core: &ClientCore) {
     });
     let dialog = c.confirmation.borrow().as_ref().unwrap().dialog.clone();
     dialog.response(gtk::ResponseType::Cancel);
+    // Held while open, the opener is available again once Core says so.
+    until(|| {
+        recorder.0.borrow().iter().any(|r| {
+            matches!(
+                r,
+                Request::Query {
+                    query: ViewQuery::Availability { .. },
+                    ..
+                }
+            )
+        })
+    });
+    answer_availability(c, recorder, ActionKind::ResumeLimited, None);
     until(|| restart.is_focus());
     recorder.queries(c, core);
 
@@ -850,6 +880,53 @@ fn keyboard_focus(c: &Controller, recorder: &Recording, core: &ClientCore) {
     shown.close();
     let _ = (attach, detach, copy);
 
+    // V6: an Attach the operator asked for takes focus to the terminal,
+    // which announces how to leave it. V7: Detach gives focus back to
+    // Attach terminal.
+    c.shell.navigate(Destination::Team);
+    c.shell.set_detail_visible(true);
+    inspector.set_live(true);
+    settle();
+    let attach = button(&inspector.root, "Attach terminal");
+    attach.set_sensitive(true);
+    attach.grab_focus();
+    attach.emit_clicked();
+    let attach_plan = recorder.plan_token();
+    let renderer = TerminalView::new(Rc::new(|_| ()));
+    renderer.bind(scope(), 61);
+    inspector.terminal.adopt(renderer.clone());
+    until(|| renderer.terminal.is_focus());
+    assert!(gtk::test_accessible_has_property(
+        &renderer.terminal,
+        gtk::AccessibleProperty::Description
+    ));
+    assert!(!attach.is_sensitive());
+    let detach = button(&renderer.root, "Detach terminal");
+    detach.grab_focus();
+    detach.emit_clicked();
+    until(|| attach.is_focus());
+    // An attach that was not asked for here leaves focus where it is.
+    let refresh = button(&page, "Refresh");
+    refresh.grab_focus();
+    let other = TerminalView::new(Rc::new(|_| ()));
+    other.bind(scope(), 62);
+    inspector.terminal.adopt(other.clone());
+    settle();
+    assert!(refresh.is_focus(), "only an explicit Attach moves focus");
+    other.end("Terminal ended · read-only");
+    c.respond(Response::Action {
+        instance: 1,
+        token: attach_plan,
+        scope: scope(),
+        result: Ok(ActionPlan::Unavailable {
+            reason: ClientReason {
+                code: "test".into(),
+                message: "Not attached in this test".into(),
+            },
+        }),
+    });
+    settle();
+
     // G17: a disconnected page offers Choose workspace, which opens
     // Connections.
     let empty = views::disconnected(Destination::Team);
@@ -879,6 +956,165 @@ fn keyboard_focus(c: &Controller, recorder: &Recording, core: &ClientCore) {
 }
 
 /// Show a graph's page in its List/Graph stack and let it allocate.
+/// Designer follow-ups V2–V5: the sidebar status measure and blank result
+/// line, one tab row with a More menu, inspector titles and the task result
+/// among its facts.
+fn layout_follow_ups(
+    c: &Controller,
+    shell: &Shell,
+    core: &ClientCore,
+    task: &views::task_detail::TaskInspector,
+    inspector: &views::agent::AgentInspector,
+) {
+    // V2: no blank line under the status, and the sidebar needs no less
+    // height for a proposed width than for none (GTK size-cache consistency;
+    // wrapped status text used to break it).
+    c.result.set_label("");
+    assert!(!c.result.is_visible(), "an empty result line is hidden");
+    c.result
+        .set_label("Action pending · awaiting the daemon's result");
+    assert!(c.result.is_visible());
+    let sidebar = descendants(shell.window().upcast_ref())
+        .into_iter()
+        .find(|w| w.type_().name() == "CrewFixedWidth")
+        .expect("fixed-width sidebar");
+    let (overall, ..) = sidebar.measure(gtk::Orientation::Vertical, -1);
+    for width in [184, 303, 585, 926] {
+        let (min, ..) = sidebar.measure(gtk::Orientation::Vertical, width);
+        assert!(
+            min >= overall,
+            "sidebar min height {min} for width {width}, {overall} overall"
+        );
+    }
+    c.result.set_label("");
+
+    // V3: tabs stay on one row; those that do not fit wait in a More menu,
+    // the selected tab stays in the row, and a tab chosen there takes focus.
+    let tabs = views::common::Tabs::new("Probe sections");
+    for name in [
+        "Overview",
+        "Transcript",
+        "Diff",
+        "Inbox",
+        "Terminal",
+        "Host screen",
+    ] {
+        tabs.append(name, &gtk::Label::new(Some(name)));
+    }
+    let tab_buttons: Vec<gtk::ToggleButton> = descendants(tabs.root.upcast_ref())
+        .into_iter()
+        .filter_map(|w| w.downcast::<gtk::ToggleButton>().ok())
+        .filter(|b| b.has_css_class("crew-tab"))
+        .collect();
+    assert_eq!(tab_buttons.len(), 6);
+    assert!(tab_buttons
+        .iter()
+        .all(|b| b.accessible_role() == gtk::AccessibleRole::Tab));
+    let more = descendants(tabs.root.upcast_ref())
+        .into_iter()
+        .find_map(|w| w.downcast::<gtk::MenuButton>().ok())
+        .expect("More menu");
+    let in_row = |b: &gtk::ToggleButton| b.is_child_visible() && b.is_mapped();
+    let narrow = gtk::Window::builder()
+        .default_width(320)
+        .default_height(200)
+        .child(&tabs.root)
+        .build();
+    narrow.present();
+    until(|| narrow.is_mapped() && in_row(&tab_buttons[0]));
+    assert!(
+        more.is_child_visible() && !in_row(&tab_buttons[5]),
+        "Host screen waits in More"
+    );
+    let row_y = |b: &gtk::ToggleButton| b.compute_bounds(&tabs.root).unwrap().y();
+    let first = row_y(&tab_buttons[0]);
+    assert!(
+        tab_buttons
+            .iter()
+            .filter(|b| in_row(b))
+            .all(|b| row_y(b) == first),
+        "one row of tabs"
+    );
+    tabs.select(5);
+    until(|| in_row(&tab_buttons[5]));
+    more.popup();
+    settle();
+    let offered: Vec<gtk::Button> = descendants(more.popover().unwrap().upcast_ref())
+        .into_iter()
+        .filter_map(|w| w.downcast::<gtk::Button>().ok())
+        .filter(|b| b.is_visible())
+        .collect();
+    let label = |b: &gtk::Button| b.label().map(|l| l.to_string());
+    let hidden: Vec<_> = tab_buttons
+        .iter()
+        .filter(|b| !in_row(b))
+        .map(|b| label(b.upcast_ref()))
+        .collect();
+    assert!(!hidden.is_empty());
+    assert_eq!(offered.iter().map(label).collect::<Vec<_>>(), hidden);
+    offered[0].emit_clicked();
+    let chosen = tab_buttons
+        .iter()
+        .find(|b| label(b.upcast_ref()) == hidden[0])
+        .unwrap();
+    until(|| in_row(chosen) && chosen.is_focus());
+    assert!(chosen.is_active());
+    narrow.set_child(None::<&gtk::Widget>);
+    narrow.close();
+    let wide = gtk::Window::builder()
+        .default_width(1000)
+        .default_height(200)
+        .child(&tabs.root)
+        .build();
+    wide.present();
+    until(|| wide.is_mapped() && tab_buttons.iter().all(in_row));
+    assert!(!more.is_child_visible(), "no More menu when every tab fits");
+    wide.close();
+    // The keyboard checks later on expect the main window active again.
+    shell.window().present();
+    until(|| shell.window().is_active());
+
+    // V4: an inspector shows its own title, so the pane heading is only the
+    // compact page title; other details keep it.
+    let heading = descendants(shell.window().upcast_ref())
+        .into_iter()
+        .find(|w| w.has_css_class("crew-detail-heading"))
+        .expect("detail heading");
+    shell.navigate(Destination::Team);
+    settle();
+    assert_eq!(heading.is_visible(), shell.is_compact());
+    shell.set_detail(Destination::Team, "Details", &gtk::Label::new(None));
+    assert!(heading.is_visible());
+    shell.set_inspector(Destination::Team, "Agent claude-1", &inspector.root);
+    assert_eq!(heading.is_visible(), shell.is_compact());
+
+    // V5: a task's result is one of its facts, in the same grid.
+    let ViewPayload::TaskDetail(detail) = core
+        .view(
+            ViewQuery::TaskDetail {
+                id: "parked-old".into(),
+            },
+            clock(),
+        )
+        .unwrap()
+        .payload
+    else {
+        panic!("task detail projection");
+    };
+    let mut finished = (*detail).clone();
+    finished.task.as_mut().unwrap().task.result = Some("Merged with the queue".into());
+    task.update(&finished);
+    let facts = descendants(task.root.upcast_ref())
+        .into_iter()
+        .filter_map(|w| w.downcast::<gtk::Grid>().ok())
+        .find(|grid| text(grid).contains("Assigned to"))
+        .expect("task facts");
+    assert!(text(&facts).contains("Result\nMerged with the queue"));
+    task.update(&detail);
+    shell.navigate(Destination::Tasks);
+    settle();
+}
+
 fn show_graph(graph: &views::graph::Graph) {
     graph
         .root
@@ -1808,4 +2044,66 @@ fn capture(name: &str) {
             .unwrap()
             .success());
     }
+}
+/// Answers every outstanding availability query for `action` as Core would,
+/// unavailable with `reason` or available without one.
+fn answer_availability(
+    c: &Controller,
+    recorder: &Recording,
+    action: ActionKind,
+    reason: Option<&str>,
+) {
+    let is_availability = |request: &Request| {
+        matches!(
+            request,
+            Request::Query {
+                query: ViewQuery::Availability { .. },
+                ..
+            }
+        )
+    };
+    let tokens: Vec<u64> = recorder
+        .0
+        .borrow()
+        .iter()
+        .filter_map(|request| match request {
+            Request::Query { token, .. } if is_availability(request) => Some(*token),
+            _ => None,
+        })
+        .collect();
+    recorder
+        .0
+        .borrow_mut()
+        .retain(|request| !is_availability(request));
+    for token in tokens {
+        c.respond(Response::View {
+            instance: 1,
+            token,
+            expected_scope: Some(scope()),
+            result: Ok(ViewData {
+                scope: Some(scope()),
+                revision: 1,
+                synchronized_at_ms: None,
+                freshness: Freshness::Fresh,
+                payload: ViewPayload::Availability(ActionAvailability {
+                    action,
+                    available: reason.is_none(),
+                    reason: reason.map(|message| ClientReason {
+                        code: "already_pending".into(),
+                        message: message.into(),
+                    }),
+                }),
+            }),
+        });
+    }
+}
+/// The text of the reason labels on a page.
+fn page_reasons(page: &gtk::Box) -> String {
+    descendants(page.upcast_ref())
+        .into_iter()
+        .filter_map(|w| w.downcast::<gtk::Label>().ok())
+        .filter(|l| l.has_css_class("crew-muted") || l.has_css_class("error"))
+        .map(|l| l.label().to_string())
+        .collect::<Vec<_>>()
+        .join("\n")
 }
