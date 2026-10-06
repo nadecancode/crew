@@ -366,16 +366,20 @@ impl Shell {
             }
         });
         shell.0.navigation.add_controller(sidebar_keys(&shell));
-        // Activated again (a dialog closed), GTK may put focus on the split
-        // pane's handle when the page it was in has been replaced: move it
-        // into the page.
+        // When the focused control is removed with its page (connecting while
+        // a dialog is open), GTK falls back to a container of the page, such
+        // as the split pane's handle: move focus into the page instead. A
+        // handle the user moved to from a live control keeps focus.
         let weak = Rc::downgrade(&shell.0);
-        shell.0.window.connect_is_active_notify(move |window| {
+        let last = Rc::new(RefCell::new(glib::WeakRef::<gtk::Widget>::new()));
+        shell.0.window.connect_focus_widget_notify(move |window| {
             let Some(inner) = weak.upgrade() else { return };
+            let focus = gtk::prelude::GtkWindowExt::focus(window);
+            let previous = last.borrow().upgrade();
+            last.borrow_mut().set(focus.as_ref());
             let slot = &inner.main_slots[inner.destination.get().index()];
-            if window.is_active()
-                && gtk::prelude::GtkWindowExt::focus(window).is_some_and(|f| slot.is_ancestor(&f))
-            {
+            let removed = previous.is_none_or(|p| p.root().is_none());
+            if removed && focus.is_some_and(|f| slot.is_ancestor(&f)) {
                 Shell(inner).focus_visible_view();
             }
         });

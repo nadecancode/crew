@@ -281,16 +281,45 @@ impl AgentInspector {
         // Attach is offered only while nothing is attached here.
         let latest: Rc<RefCell<Option<AgentPresentation>>> = Rc::new(RefCell::new(None));
         let live = Rc::new(Cell::new(false));
+        // An attach the operator asked for here takes focus to the terminal;
+        // one that ends while its controls have focus gives it back to Attach.
+        let requested = Rc::new(Cell::new(false));
+        attach.connect_clicked({
+            let requested = requested.clone();
+            move |_| requested.set(true)
+        });
         terminal.connect_attached({
             let attach = attach.downgrade();
+            // Weak: the listener is stored in the terminal view itself.
+            let panel = terminal.root.downgrade();
             let latest = latest.clone();
             let live = live.clone();
             move |attached| {
-                if let Some(attach) = attach.upgrade() {
-                    keep_focus_on_disable(
-                        attach.upcast_ref(),
-                        !attached && live.get() && available(&latest.borrow(), ActionKind::Attach),
-                    );
+                let Some(attach) = attach.upgrade() else {
+                    return;
+                };
+                let Some(panel) = panel.upgrade() else {
+                    return;
+                };
+                let in_terminal = gtk::prelude::WidgetExt::root(&attach)
+                    .and_then(|root| root.focus())
+                    .is_some_and(|focus| focus.is_ancestor(&panel));
+                keep_focus_on_disable(
+                    attach.upcast_ref(),
+                    !attached && live.get() && available(&latest.borrow(), ActionKind::Attach),
+                );
+                if attached && requested.replace(false) {
+                    // After the panel has adopted the renderer that attached.
+                    let panel = panel.downgrade();
+                    gtk::glib::idle_add_local_once(move || {
+                        if let Some(terminal) =
+                            panel.upgrade().and_then(|p| shown_terminal(p.upcast_ref()))
+                        {
+                            focus_when_shown(terminal.upcast_ref());
+                        }
+                    });
+                } else if !attached && in_terminal && attach.is_sensitive() {
+                    attach.grab_focus();
                 }
             }
         });
@@ -622,4 +651,37 @@ fn keep_focus_on_disable(control: &gtk::Widget, sensitive: bool) {
     if had_focus && !sensitive {
         crate::shell::focus_past(control, gtk::DirectionType::TabForward);
     }
+}
+
+/// Focus `widget` now, or once it is shown (a page that is switching in).
+fn focus_when_shown(widget: &gtk::Widget) {
+    if widget.is_mapped() {
+        widget.grab_focus();
+        return;
+    }
+    let handler = Rc::new(RefCell::new(None));
+    *handler.borrow_mut() = Some(widget.connect_map({
+        let handler = handler.clone();
+        move |widget| {
+            widget.grab_focus();
+            if let Some(id) = handler.borrow_mut().take() {
+                widget.disconnect(id);
+            }
+        }
+    }));
+}
+
+/// The terminal a panel shows: the adopted renderer replaces the panel's own.
+fn shown_terminal(panel: &gtk::Widget) -> Option<vte4::Terminal> {
+    let mut child = panel.first_child();
+    while let Some(widget) = child {
+        if let Ok(terminal) = widget.clone().downcast::<vte4::Terminal>() {
+            return Some(terminal);
+        }
+        if let Some(found) = shown_terminal(&widget) {
+            return Some(found);
+        }
+        child = widget.next_sibling();
+    }
+    None
 }

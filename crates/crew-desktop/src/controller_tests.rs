@@ -576,6 +576,22 @@ fn keyboard_focus(c: &Controller, recorder: &Recording, core: &ClientCore) {
     });
     let dialog = c.confirmation.borrow().as_ref().unwrap().dialog.clone();
     assert!(focus().is_none_or(|f| f != stop.clone().upcast::<gtk::Widget>()));
+    // V1: while the confirmation is open, Core's "already pending" reason
+    // for the opener is not shown under the page's controls.
+    c.refresh_controls();
+    answer_availability(
+        c,
+        recorder,
+        ActionKind::StopTeam,
+        Some("this action is already pending"),
+    );
+    let reasons = page_reasons(&page);
+    assert!(
+        !reasons.contains("already pending"),
+        "the open confirmation's opener shows no pending reason: {reasons}"
+    );
+    assert!(!stop.is_sensitive());
+    assert_eq!(stop.tooltip_text(), None);
     dialog.response(gtk::ResponseType::Cancel);
     until(|| focus().is_some());
     let waiting = focus().unwrap();
@@ -716,6 +732,19 @@ fn keyboard_focus(c: &Controller, recorder: &Recording, core: &ClientCore) {
     });
     let dialog = c.confirmation.borrow().as_ref().unwrap().dialog.clone();
     dialog.response(gtk::ResponseType::Cancel);
+    // Held while open, the opener is available again once Core says so.
+    until(|| {
+        recorder.0.borrow().iter().any(|r| {
+            matches!(
+                r,
+                Request::Query {
+                    query: ViewQuery::Availability { .. },
+                    ..
+                }
+            )
+        })
+    });
+    answer_availability(c, recorder, ActionKind::ResumeLimited, None);
     until(|| restart.is_focus());
     recorder.queries(c, core);
 
@@ -849,6 +878,53 @@ fn keyboard_focus(c: &Controller, recorder: &Recording, core: &ClientCore) {
     until(|| refreshed.get() > 0);
     shown.close();
     let _ = (attach, detach, copy);
+
+    // V6: an Attach the operator asked for takes focus to the terminal,
+    // which announces how to leave it. V7: Detach gives focus back to
+    // Attach terminal.
+    c.shell.navigate(Destination::Team);
+    c.shell.set_detail_visible(true);
+    inspector.set_live(true);
+    settle();
+    let attach = button(&inspector.root, "Attach terminal");
+    attach.set_sensitive(true);
+    attach.grab_focus();
+    attach.emit_clicked();
+    let attach_plan = recorder.plan_token();
+    let renderer = TerminalView::new(Rc::new(|_| ()));
+    renderer.bind(scope(), 61);
+    inspector.terminal.adopt(renderer.clone());
+    until(|| renderer.terminal.is_focus());
+    assert!(gtk::test_accessible_has_property(
+        &renderer.terminal,
+        gtk::AccessibleProperty::Description
+    ));
+    assert!(!attach.is_sensitive());
+    let detach = button(&renderer.root, "Detach terminal");
+    detach.grab_focus();
+    detach.emit_clicked();
+    until(|| attach.is_focus());
+    // An attach that was not asked for here leaves focus where it is.
+    let refresh = button(&page, "Refresh");
+    refresh.grab_focus();
+    let other = TerminalView::new(Rc::new(|_| ()));
+    other.bind(scope(), 62);
+    inspector.terminal.adopt(other.clone());
+    settle();
+    assert!(refresh.is_focus(), "only an explicit Attach moves focus");
+    other.end("Terminal ended · read-only");
+    c.respond(Response::Action {
+        instance: 1,
+        token: attach_plan,
+        scope: scope(),
+        result: Ok(ActionPlan::Unavailable {
+            reason: ClientReason {
+                code: "test".into(),
+                message: "Not attached in this test".into(),
+            },
+        }),
+    });
+    settle();
 
     // G17: a disconnected page offers Choose workspace, which opens
     // Connections.
@@ -1808,4 +1884,66 @@ fn capture(name: &str) {
             .unwrap()
             .success());
     }
+}
+/// Answers every outstanding availability query for `action` as Core would,
+/// unavailable with `reason` or available without one.
+fn answer_availability(
+    c: &Controller,
+    recorder: &Recording,
+    action: ActionKind,
+    reason: Option<&str>,
+) {
+    let is_availability = |request: &Request| {
+        matches!(
+            request,
+            Request::Query {
+                query: ViewQuery::Availability { .. },
+                ..
+            }
+        )
+    };
+    let tokens: Vec<u64> = recorder
+        .0
+        .borrow()
+        .iter()
+        .filter_map(|request| match request {
+            Request::Query { token, .. } if is_availability(request) => Some(*token),
+            _ => None,
+        })
+        .collect();
+    recorder
+        .0
+        .borrow_mut()
+        .retain(|request| !is_availability(request));
+    for token in tokens {
+        c.respond(Response::View {
+            instance: 1,
+            token,
+            expected_scope: Some(scope()),
+            result: Ok(ViewData {
+                scope: Some(scope()),
+                revision: 1,
+                synchronized_at_ms: None,
+                freshness: Freshness::Fresh,
+                payload: ViewPayload::Availability(ActionAvailability {
+                    action,
+                    available: reason.is_none(),
+                    reason: reason.map(|message| ClientReason {
+                        code: "already_pending".into(),
+                        message: message.into(),
+                    }),
+                }),
+            }),
+        });
+    }
+}
+/// The text of the reason labels on a page.
+fn page_reasons(page: &gtk::Box) -> String {
+    descendants(page.upcast_ref())
+        .into_iter()
+        .filter_map(|w| w.downcast::<gtk::Label>().ok())
+        .filter(|l| l.has_css_class("crew-muted") || l.has_css_class("error"))
+        .map(|l| l.label().to_string())
+        .collect::<Vec<_>>()
+        .join("\n")
 }

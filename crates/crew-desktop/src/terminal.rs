@@ -202,20 +202,23 @@ impl TerminalView {
                 let current = binding.borrow().clone();
                 let had_focus = detach.is_focus();
                 active.set(false);
-                detach.set_sensitive(false);
                 if let Some(terminal) = terminal.upgrade() {
                     terminal.set_input_enabled(false);
+                    terminal.update_property(&[gtk::accessible::Property::Description("")]);
                 }
                 if let Some(status) = status.upgrade() {
                     status.set_label("Detached · read-only");
                 }
+                // The listener hears it while Detach still has focus, so the
+                // panel can take focus back to its Attach control.
                 let notify = listener.borrow().clone();
                 if let Some(notify) = notify {
                     notify(false);
                 }
-                // Focus moves back to the control before Detach (Attach, now
-                // available again) rather than being lost with it.
-                if had_focus {
+                detach.set_sensitive(false);
+                // Otherwise focus moves back to the control before Detach
+                // rather than being lost with it.
+                if had_focus && keeps_focus(detach.upcast_ref()) {
                     crate::shell::focus_past(detach.upcast_ref(), gtk::DirectionType::TabBackward);
                 }
                 if let Some((scope, attachment_id)) = current {
@@ -254,6 +257,9 @@ impl TerminalView {
         self.terminal.set_input_enabled(true);
         self.status
             .set_label("Attached · input goes to this agent's terminal");
+        // What a screen reader says on reaching the terminal.
+        self.terminal
+            .update_property(&[gtk::accessible::Property::Description(ATTACHED)]);
         self.changed();
         // GTK allocation triggers resize. Before the captured panel is
         // associated, preserve the successful request's initial 80x24 size.
@@ -286,12 +292,12 @@ impl TerminalView {
     fn changed(&self) {
         let active = self.is_active();
         let had_focus = self.detach.is_focus();
-        self.detach.set_sensitive(self.active.get());
         let listener = self.listener.borrow().clone();
         if let Some(listener) = listener {
             listener(active);
         }
-        if had_focus && !self.detach.is_sensitive() {
+        self.detach.set_sensitive(self.active.get());
+        if had_focus && !self.detach.is_sensitive() && keeps_focus(self.detach.upcast_ref()) {
             crate::shell::focus_past(self.detach.upcast_ref(), gtk::DirectionType::TabBackward);
         }
     }
@@ -319,6 +325,8 @@ impl TerminalView {
         self.active.set(false);
         self.terminal.set_input_enabled(false);
         self.status.set_label(label);
+        self.terminal
+            .update_property(&[gtk::accessible::Property::Description("")]);
         self.changed();
     }
     pub fn binding(&self) -> Option<(ClientScope, AttachmentId)> {
@@ -357,4 +365,15 @@ fn resize(
             cols,
         });
     }
+}
+
+/// Announced when an attached terminal gets focus.
+pub const ATTACHED: &str = "Attached. F6 leaves the terminal.";
+
+/// Whether focus is still on `control` or nowhere: nobody has moved it.
+fn keeps_focus(control: &gtk::Widget) -> bool {
+    control
+        .root()
+        .and_then(|root| root.focus())
+        .is_none_or(|focus| focus == *control)
 }
