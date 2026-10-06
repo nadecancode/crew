@@ -14,6 +14,7 @@ if [[ ${1:-} != --inside ]]; then
         CREW_SOURCE_FOUNDATION_DEV = p.lib.getDev p.swiftPackages.Foundation;
         CREW_SOURCE_DISPATCH = p.swiftPackages.Dispatch;
         CREW_SOURCE_DISPATCH_DEV = p.lib.getDev p.swiftPackages.Dispatch;
+        CREW_SOURCE_XCTEST = p.swiftPackages.XCTest;
       }
     ' --run "$crew_replay"
 fi
@@ -39,5 +40,17 @@ swiftc -typecheck -parse-as-library -swift-version 5 \
     apps/apple/CrewHost/CrewSendDraft.swift \
     apps/apple/CrewHost/CrewNoticeRouting.swift \
     apps/apple/CrewHost/CrewExternalLinks.swift
-printf '%s\n' 'Portable generated-record/worker source check passed.' \
+# The Foundation-only unit test sources typecheck together with those host
+# sources against the corelibs XCTest module. They are not run here: running
+# them needs the Rust FFI library, and their Apple targets are not built.
+swiftc -typecheck -parse-as-library -swift-version 5 \
+    "${crew_includes[@]}" -I "$crew_output" \
+    -I "$CREW_SOURCE_XCTEST/lib/swift/linux/x86_64" \
+    apps/apple/CrewHost/CrewSendDraft.swift \
+    apps/apple/CrewHost/CrewNoticeRouting.swift \
+    apps/apple/CrewHost/CrewExternalLinks.swift \
+    apps/apple/Tests/CrewSendDraftTests.swift \
+    apps/apple/Tests/CrewNoticeRoutingTests.swift \
+    apps/apple/Tests/CrewExternalLinksTests.swift
+printf '%s\n' 'Portable generated-record/worker and Foundation test-source check passed.' \
     'Apple SwiftUI compilation, linking, Xcode and native execution: deferred by operator.'

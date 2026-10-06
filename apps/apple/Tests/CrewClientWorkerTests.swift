@@ -114,7 +114,60 @@ final class CrewClientWorkerTests: XCTestCase {
         XCTAssertFalse(client.calls.contains("plan"))
     }
 
-    func testIdentifiedSendHeldAcrossReconnectConsumesOldProposalReceipt() async throws {
+    /// Dispatch, connection loss, new verified attempt, reopened composer and
+    /// the Core's replayed final notice: original operation ID, new scope.
+    func testHeldSendCompletesWithNewAttemptScopeAndKeepsLaterEdits() async throws {
+        let (model, client, observer, original, current) = try await heldSend()
+        let reopened = CrewDraftKey(scope: current, purpose: original.purpose)
+        XCTAssertTrue(model.sendPending(reopened))
+        XCTAssertEqual(model.sendReceipt(reopened), CrewSendReceipt(recipient: "synthetic-agent", body: "pending identified message", state: .held))
+        model.sendDraft(reopened).wrappedValue = "later edit"
+        XCTAssertEqual(model.sendReceipt(reopened)?.body, "pending identified message")
+        observer.changed(notice: live(current, revision: 3, outcomes: [OperationNotice(scope: current, operationId: 1, attachmentId: nil, kind: .success, reason: nil)]))
+        XCTAssertFalse(model.sendPending(reopened))
+        XCTAssertNil(model.sendReceipt(reopened))
+        XCTAssertEqual(model.sendDraft(reopened).wrappedValue, "later edit")
+        XCTAssertEqual(client.calls.filter { $0 == "plan" }.count, 1)
+        await model.close()
+    }
+
+    func testHeldSendUnknownKeepsBodyAndExplanation() async throws {
+        let (model, client, observer, original, current) = try await heldSend()
+        let reopened = CrewDraftKey(scope: current, purpose: original.purpose)
+        let unknown = OperationNotice(scope: current, operationId: 1, attachmentId: nil, kind: .unknown, reason: nil)
+        observer.changed(notice: live(current, revision: 3, outcomes: [unknown]))
+        XCTAssertFalse(model.sendPending(reopened))
+        XCTAssertEqual(model.sendDraft(reopened).wrappedValue, "pending identified message")
+        XCTAssertEqual(model.sendReceipt(reopened)?.state, .outcome(unknown))
+        XCTAssertEqual(client.calls.filter { $0 == "plan" }.count, 1)
+        await model.close()
+    }
+
+    func testRevocationPurgesHeldReceiptAndIgnoresLaterNotice() async throws {
+        let (model, client, observer, original, current) = try await heldSend()
+        let reopened = CrewDraftKey(scope: current, purpose: original.purpose)
+        observer.changed(notice: ClientNotice(scope: current, revision: 3, changes: CrewTestFixtures.notice.changes, endpoint: .authenticated, workspace: .accessRevoked, reason: nil, outcomes: []))
+        XCTAssertFalse(model.sendPending(reopened))
+        XCTAssertNil(model.sendReceipt(reopened))
+        XCTAssertEqual(model.sendDraft(reopened).wrappedValue, "")
+        observer.changed(notice: live(current, revision: 4, outcomes: [OperationNotice(scope: current, operationId: 1, attachmentId: nil, kind: .success, reason: nil)]))
+        XCTAssertNil(model.sendReceipt(reopened))
+        XCTAssertEqual(client.calls.filter { $0 == "plan" }.count, 1)
+        await model.close()
+    }
+
+    func testClientReplacementPurgesHeldReceipt() async throws {
+        let (model, _, _, original, current) = try await heldSend()
+        let replacement = RecordingCrewClient()
+        try await model.install(replacement)
+        let reopened = CrewDraftKey(scope: current, purpose: original.purpose)
+        XCTAssertFalse(model.sendPending(reopened))
+        XCTAssertNil(model.sendReceipt(reopened))
+        XCTAssertFalse(replacement.calls.contains("plan"))
+        await model.close()
+    }
+
+    private func heldSend() async throws -> (CrewSessionModel, RecordingCrewClient, any ClientObserver, CrewDraftKey, ClientScope) {
         let model = CrewSessionModel()
         let client = RecordingCrewClient()
         try await model.install(client)
@@ -128,14 +181,11 @@ final class CrewClientWorkerTests: XCTestCase {
         XCTAssertEqual(client.calls.filter { $0 == "plan" }.count, 1)
         let current = ClientScope(endpointId: originalScope.endpointId, workspaceId: originalScope.workspaceId, generation: originalScope.generation, daemonPid: originalScope.daemonPid, daemonStartedAtMs: originalScope.daemonStartedAtMs, attempt: originalScope.attempt + 1)
         observer.changed(notice: ClientNotice(scope: current, revision: 2, changes: CrewTestFixtures.notice.changes, endpoint: .reconnecting, workspace: .reconnecting, reason: nil, outcomes: []))
-        let reopened = CrewDraftKey(scope: current, purpose: original.purpose)
-        XCTAssertTrue(model.sendPending(reopened))
-        XCTAssertEqual(model.sendDraft(reopened).wrappedValue, "pending identified message")
-        observer.changed(notice: ClientNotice(scope: current, revision: 3, changes: CrewTestFixtures.notice.changes, endpoint: .authenticated, workspace: .live, reason: nil, outcomes: [OperationNotice(scope: originalScope, operationId: 1, attachmentId: nil, kind: .success, reason: nil)]))
-        XCTAssertFalse(model.sendPending(reopened))
-        XCTAssertEqual(model.sendDraft(reopened).wrappedValue, "")
-        XCTAssertEqual(client.calls.filter { $0 == "plan" }.count, 1)
-        await model.close()
+        return (model, client, observer, original, current)
+    }
+
+    private func live(_ scope: ClientScope, revision: UInt64, outcomes: [OperationNotice]) -> ClientNotice {
+        ClientNotice(scope: scope, revision: revision, changes: CrewTestFixtures.notice.changes, endpoint: .authenticated, workspace: .live, reason: nil, outcomes: outcomes)
     }
 
 }

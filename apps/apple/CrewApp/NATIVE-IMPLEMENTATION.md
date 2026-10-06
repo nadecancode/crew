@@ -364,29 +364,68 @@ sequence.
 
 ## Identified send receipts across the barrier
 
-The reconnect receipt path was corrected after `m-ab8ca181ef62`. The shared
-Core may hold an identified Send and replay it once after a newer snapshot
-barrier; its final notice still carries the captured old proposal scope and
-operation ID. UI receipt identity therefore uses the same client instance,
-endpoint, workspace and unique operation ID, while action dispatch continues
-to use the complete current scope. Reauthorization preserves the pending
-operation and shows “Reconnecting; previous send still pending.” The UI neither
-replays the message nor enables another submission before its real outcome.
-An old-proposal success clears only unchanged submitted text; newer edits stay.
-Workspace/client retirement and learned revocation remove that operation
-association. A separate bounded receipt history handles an outcome that arrives
-before the actor's plan continuation, including a scope change during that
-continuation. The generic view/terminal paths keep their full-scope fences.
+The reconnect receipt path follows the accepted A07 rule (`m-f1f49bcc8be4`,
+`m-2fc64e643973`). The shared Core may hold an identified Send and replay it
+once after a newer snapshot barrier. It rebinds the held proposal to the newly
+verified canonical scope, so the final notice carries the **original operation
+ID with the new attempt's scope** (`real_core_lifecycle.rs:157-158`). UI receipt
+correlation is therefore the client instance (the model's instance fence),
+endpoint, workspace and operation ID. It never requires full scope equality or
+the old attempt. Action dispatch continues to use the complete current scope.
 
-Native source tests cover the old-proposal outcome after reauthorization,
-edits during the held send, and model-level Dispatch → connection loss → new
-scope → reopened composer → old-scope receipt with exactly one plan call.
-Their execution remains **Apple verification deferred by operator**. The actual
-Foundation receipt/routing/worker sources continue to typecheck on Linux; this
-is not a Rust replay or Apple application run.
+The submitted message is an immutable receipt, separate from the editable
+draft. While the Core holds it, the composer shows the original body and
+recipient read-only, states that it is still pending after reconnect, and says
+that closing the sheet does not cancel it. Later edits are a separate draft.
+The wire message ID is not displayed. The UI neither replans nor resends, and
+Send stays disabled until the real outcome. Only a matching final notice
+resolves the receipt: success clears the editor only if it still holds the
+exact submitted text, so later edits survive; Unknown and the other non-success
+outcomes keep the body and show the outcome on the receipt. Mismatching
+endpoint, workspace or operation notices are ignored. Learned revocation,
+workspace removal, sign-out and client replacement purge the receipt, because
+the Core retires the held retry and no notice will arrive. A separate bounded
+receipt history handles an outcome that arrives before the actor's plan
+continuation, including a scope change during that continuation. The generic
+view/terminal paths keep their full-scope fences.
+
+Native source cases: `CrewSendDraftTests` covers new-attempt-scope success
+with the original operation ID, the immutable receipt beside later edits,
+held Unknown retention and retirement purge; `CrewClientWorkerTests` covers
+the model sequence Dispatch → connection loss → new attempt → reopened
+composer → new-attempt-scope success (exactly one plan call, later edit kept),
+held Unknown retention, revocation purge with a later notice ignored, and
+client replacement purge. Their execution remains **Apple verification deferred
+by operator**; the Foundation-only test sources now typecheck on Linux (below).
+This is not a Rust replay or Apple application run.
 
 Restored evidence routes also activate their captured entity/read under the
 current scope, rather than showing a perpetual loading state after another
 destination cleared the display cache. A newly active wide destination always
 normalizes its physical inspector path, including one with no selection;
 another destination's saved open route is not treated as Back.
+
+## Native test sources
+
+Each source below belongs to both the `CrewMacTests`/`CrewIOSTests` unit
+bundles, except the UI-test source, which belongs to both UI-test bundles. None
+has been executed: **Apple execution deferred by operator**.
+
+| Source | Cases | Linux evidence |
+| --- | --- | --- |
+| `Tests/CrewSendDraftTests.swift` | 9 | typechecks with its host source and corelibs XCTest |
+| `Tests/CrewNoticeRoutingTests.swift` | 5 | typechecks with its host source and corelibs XCTest |
+| `Tests/CrewExternalLinksTests.swift` | 4 | typechecks with its host source and corelibs XCTest |
+| `Tests/CrewClientWorkerTests.swift` | 10 | parses; the model cases need SwiftUI/Observation |
+| `Tests/CrewShellTests.swift` | 13 | parses; needs SwiftUI |
+| `Tests/AppleDeviceKeyVaultTests.swift` | 5 | parses; needs CryptoKit/Security |
+| `Tests/CrewShellUITests.swift` | 2 | parses; needs an Apple UI-test runner |
+
+`bash apps/apple/Tests/check-worker.sh` emits the actual generated
+`CrewBindings` module, typechecks the Foundation worker/receipt/routing/link
+host sources, then typechecks the three Foundation test sources together with
+those host sources against the pinned Swift 5.10.1 corelibs XCTest. On Linux the
+`@testable import CrewMac`/`CrewIOS` lines are compiled out, so the tests and
+host sources share one module. Tests are typechecked, not run: running them
+needs the matching Rust FFI library, and no Apple target is built. The four
+generated Sendable warnings above are unchanged.

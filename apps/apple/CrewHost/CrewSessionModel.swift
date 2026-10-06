@@ -309,16 +309,20 @@ final class CrewSessionModel {
     /// observer outcome; this does not wait for delivery or trigger a replay.
     func waitForSubmissionBatch() async { await actionTask?.value }
 
+    /// Successful acknowledgement or a connection explanation. A non-success
+    /// outcome belongs to the submitted receipt, not to the editable text.
     func sendExplanation(_ key: CrewDraftKey) -> String? {
-        if let outcome = sendDrafts[key]?.lastOutcome { return CrewFailure.outcome(outcome) }
+        if let outcome = sendDrafts[key]?.lastOutcome, outcome.kind == .success { return CrewFailure.outcome(outcome) }
         return sendDrafts[key]?.explanation
     }
+
+    func sendReceipt(_ key: CrewDraftKey) -> CrewSendReceipt? { sendDrafts[key]?.receipt }
 
     func send(_ key: CrewDraftKey, to: String) {
         guard key.scope == scope else { return }
         if sendDrafts[key] == nil { sendDrafts[key] = CrewSendDraft(scope: key.scope) }
         sendDrafts[key]?.reauthorize(key.scope)
-        guard let attempt = sendDrafts[key]?.begin() else { return }
+        guard let attempt = sendDrafts[key]?.begin(to: to) else { return }
         enqueue(.sendMessage(scope: key.scope, to: to, body: attempt.body, messageId: attempt.messageId), attachmentRequest: nil, sendDraft: key)
     }
 
@@ -884,6 +888,14 @@ enum CrewFailure {
         case .ProtocolMismatch(let expected, let actual, _): return "Protocol mismatch: app \(expected), host \(actual.map(String.init) ?? "unknown")."
         case .TooLarge: return "The response exceeded the supported size. Request a smaller read."
         case .InternalFailure: return "The client operation could not complete. Reconnect or try again explicitly."
+        }
+    }
+
+    static func receipt(_ receipt: CrewSendReceipt) -> String {
+        switch receipt.state {
+        case .awaiting: return "Submitted; awaiting the host's outcome."
+        case .held: return "Still pending after reconnect. This app will not send it again; the host's outcome resolves it."
+        case .outcome(let notice): return outcome(notice)
         }
     }
 

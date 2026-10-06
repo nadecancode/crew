@@ -65,6 +65,53 @@ public struct CrewTextEvidence: View {
     }
 }
 
+/// A message that has already been submitted, shown read-only and separate
+/// from the editable draft. The caller supplies the receipt status; closing
+/// the containing sheet does not cancel a pending send.
+public struct CrewSubmittedMessageView: View {
+    private let recipient: String
+    private let messageBody: String
+    private let status: String
+    private let pending: Bool
+
+    public init(recipient: String, body: String, status: String, pending: Bool) {
+        self.recipient = recipient
+        self.messageBody = body
+        self.status = status
+        self.pending = pending
+    }
+
+    public var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(spacing: 8) {
+                if pending { ProgressView().accessibilityHidden(true) }
+                Text(pending ? "Submitted message" : "Last submitted message")
+                    .font(.headline)
+                    .accessibilityAddTraits(.isHeader)
+            }
+            Text(verbatim: "To \(recipient)")
+                .font(.callout)
+                .foregroundStyle(.secondary)
+            Text(verbatim: messageBody)
+                .font(.body)
+                .fixedSize(horizontal: false, vertical: true)
+                .textSelection(.enabled)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(8)
+                .background(CrewPalette.canvas, in: RoundedRectangle(cornerRadius: 6))
+            Text(verbatim: status)
+                .font(.callout)
+            if pending {
+                Text("Closing this sheet does not cancel it. Later edits below are a separate draft.")
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+            }
+        }
+        .padding(16)
+        .accessibilityElement(children: .contain)
+    }
+}
+
 /// A UI-owned draft. Return remains a newline in the native editor. Only the
 /// explicit button calls the action; its caller supplies shared eligibility
 /// and pending state. A failed or unknown outcome cannot clear the draft here.

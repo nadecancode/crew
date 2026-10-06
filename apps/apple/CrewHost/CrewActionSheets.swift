@@ -30,12 +30,17 @@ struct CrewActionSheetView: View {
                 case .compose(let key):
                     let recipient: String = { if case .agent(let id) = key.entity { return id }; return "all" }()
                     let draftKey = CrewDraftKey(scope: key.scope, purpose: "message:\(recipient)")
-                    VStack(alignment: .leading) {
+                    ScrollView { VStack(alignment: .leading) {
+                        // The Core's held message is shown as its immutable
+                        // receipt; the editor below may already hold new text.
+                        if let receipt = model.sendReceipt(draftKey) {
+                            CrewSubmittedMessageView(recipient: receipt.recipient, body: receipt.body, status: CrewFailure.receipt(receipt), pending: receipt.isPending)
+                        }
                         CrewDraftEditor(title: "Message", text: model.sendDraft(draftKey), submitLabel: "Send", targetDescription: "\(recipient) · \(key.scope.workspaceId)", submitAvailable: model.scope == key.scope && model.isLive, pending: model.sendPending(draftKey), unavailableReason: model.scope == key.scope && model.isLive ? nil : "Reconnect and reopen this target before sending") {
                             model.send(draftKey, to: recipient)
                         }
                         if let explanation = model.sendExplanation(draftKey) { Text(verbatim: explanation).font(.callout).padding(16) }
-                    }
+                    } }
                 case .prompt(let key):
                     if case .agent(let id) = key.entity {
                         CrewDraftEditor(title: "Terminal prompt", text: model.draft(CrewDraftKey(scope: key.scope, purpose: "prompt:\(id)")), submitLabel: "Submit prompt", targetDescription: "Terminal input to \(id) · \(key.scope.workspaceId)", submitAvailable: model.scope == key.scope && model.isLive, pending: model.pending, unavailableReason: model.scope == key.scope && model.isLive ? nil : "Reconnect and reopen this terminal target before submitting") {
