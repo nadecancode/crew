@@ -57,9 +57,21 @@ runs the crew-desktop GTK suite on a private display with a short runtime
 directory (`--window` for the window test). All scripts are in
 [content-polish-20261006/](content-polish-20261006/).
 
-Checks on the final source: crew-desktop `--lib` 7/7 and `--test window` 1/1
-on private Xvfb; strict Clippy (`-D warnings`, all targets) for `native-ui,local`
-and `native-ui,local,gateway`; `cargo fmt --check` clean.
+Gateway journey: `crates/crew-desktop/tests/run-window-test.sh --gateway` on an export
+of this commit passes 1/1 ([log](content-polish-20261006/gateway-run.log)). Its
+status checks read the lifecycle phrases from `src/lifecycle.rs`, and the
+withheld and granted agent controls are checked on the Actions menu items.
+The size-cache warning "min height of 336 for width of 592 (608 on main), but overall min
+height of 398" also appears in main `b3238139`'s own gateway run
+([log](content-polish-20261006/gateway-run-main.log)), so it is not from
+the adaptive layout (the same warning shows with or without its measure
+change; that change is reverted). The full capture run on this source logs no
+GTK size warnings. Four smaller ones (widths 213–303) remain in the gateway
+run; the window minimum is 398 × 452 in the capture session.
+
+Checks on the final source: crew-desktop `--lib` 7/7, `--test window` 1/1 and `--test gateway` 1/1
+on private Xvfb; strict Clippy (`-D warnings`, all targets) for `native-ui,local`,
+`native-ui,local,gateway` and `native-ui,gateway-tests`; `cargo fmt --check` clean.
 
 Not covered here: screen-reader journeys, Apple, and the remote gateway
 screens beyond the shared Connections row.

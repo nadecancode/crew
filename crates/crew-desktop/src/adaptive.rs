@@ -46,15 +46,6 @@ mod imp {
         }
 
         fn measure(&self, orientation: gtk::Orientation, _for_size: i32) -> (i32, i32, i32, i32) {
-            if orientation == gtk::Orientation::Vertical {
-                // Ask the layout's height at the width it is laid out at (see
-                // `size_allocate`), never at an unspecified width: for wrapped
-                // content that answer is taller than at any real width, and the
-                // panes' size caches then report an inconsistent minimum.
-                let (wide_min, _, _, _) = self.child().measure(gtk::Orientation::Horizontal, -1);
-                let width = self.obj().width().max(wide_min);
-                return self.child().measure(orientation, width);
-            }
             let (min, natural, min_baseline, natural_baseline) =
                 self.child().measure(orientation, -1);
             if orientation == gtk::Orientation::Horizontal && !self.compact.get() {

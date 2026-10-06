@@ -91,8 +91,13 @@ fn text(widget: &impl IsA<gtk::Widget>) -> String {
 /// The window status reads the lifecycle phrase for a live workspace, from the
 /// same table the app renders, so a copy change cannot drift from this check.
 fn status_live(window: &gtk::ApplicationWindow) -> bool {
-    let phrase =
-        crew_desktop::lifecycle::phrase(EndpointStatus::Authenticated, WorkspaceStatus::Live);
+    status_reads(
+        window,
+        crew_desktop::lifecycle::phrase(EndpointStatus::Authenticated, WorkspaceStatus::Live),
+    )
+}
+/// Some visible label's first line is this lifecycle phrase.
+fn status_reads(window: &gtk::ApplicationWindow, phrase: &str) -> bool {
     descendants(window.upcast_ref())
         .into_iter()
         .filter(|w| w.is_visible())
@@ -115,6 +120,17 @@ fn click(widget: &impl IsA<gtk::Widget>, name: &str) {
     assert!(button.is_sensitive(), "{name} is enabled");
     button.emit_clicked();
     settle();
+}
+/// A widget inside an inspector's section pages (`views::common::Tabs`).
+fn in_inspector_tabs(widget: &impl IsA<gtk::Widget>) -> bool {
+    let mut node = widget.as_ref().parent();
+    while let Some(parent) = node {
+        if parent.has_css_class("crew-tab-pages") {
+            return true;
+        }
+        node = parent.parent();
+    }
+    false
 }
 fn button_labelled(widget: &impl IsA<gtk::Widget>, label: &str) -> gtk::Button {
     descendants(widget.as_ref())
@@ -1207,12 +1223,26 @@ fn live(app: &gtk::Application) {
     until("live alpha", || status_live(&window));
     until("team listed", || text(&window).contains("pty-fixture"));
     row(&window, "pty-fixture").activate();
+    // Agent controls are in the inspector's Actions menu, closed here: each
+    // withheld item carries its reason (beside it in the menu, and as its
+    // tooltip).
+    let menu_item = |label: &str| {
+        descendants(window.upcast_ref())
+            .into_iter()
+            .filter_map(|w| w.downcast::<gtk::Button>().ok())
+            .find(|b| b.label().as_deref() == Some(label))
+    };
     until("agent controls withheld", || {
-        text(&window).contains("Pause: Control authority is required")
+        menu_item("Pause").is_some_and(|pause| {
+            !pause.is_sensitive()
+                && pause
+                    .tooltip_text()
+                    .is_some_and(|reason| reason.contains("Control authority is required"))
+        })
     });
     let attach = button_labelled(&window, "Attach terminal");
     until("terminal attach allowed", || attach.is_sensitive());
-    assert!(!button_labelled(&window, "Pause").is_sensitive());
+    assert!(!menu_item("Pause").unwrap().is_sensitive());
     capture("live-gateway-read-terminal");
     attach.emit_clicked();
     // The identified renderer exists only after the Attach notice; input is
@@ -1224,17 +1254,19 @@ fn live(app: &gtk::Application) {
             .filter_map(|w| w.downcast::<vte4::Terminal>().ok())
             .find(|t| {
                 use vte4::prelude::*;
-                t.is_input_enabled() && t.ancestor(gtk::Notebook::static_type()).is_some()
+                t.is_input_enabled() && in_inspector_tabs(t)
             });
         found.is_some()
     });
     until_shows(&window, "Attached · input goes to this agent's terminal");
     let terminal = found.unwrap();
-    let tabs = terminal
-        .ancestor(gtk::Notebook::static_type())
-        .and_downcast::<gtk::Notebook>()
-        .unwrap();
-    tabs.set_current_page(Some(4));
+    // Attach terminal opens the inspector's Terminal section.
+    descendants(window.upcast_ref())
+        .into_iter()
+        .filter_map(|w| w.downcast::<gtk::ToggleButton>().ok())
+        .find(|tab| tab.label().as_deref() == Some("Terminal"))
+        .expect("Terminal tab")
+        .set_active(true);
     until("terminal shown", || terminal.is_realized());
     // Keyboard input reaches only the focused terminal of the active window.
     activate(&window);
@@ -1267,7 +1299,7 @@ fn live(app: &gtk::Application) {
     });
     row(&window, "pty-fixture").activate();
     until("control enabled", || {
-        button_labelled(&window, "Pause").is_sensitive()
+        menu_item("Pause").is_some_and(|pause| pause.is_sensitive())
     });
     capture("live-gateway-control-granted");
 
@@ -1307,9 +1339,7 @@ fn live(app: &gtk::Application) {
     // Normal service restart with retained state: the same key reconnects
     // and refreshes authority and snapshot before acting again.
     gateway.restart();
-    until("service stop observed", || {
-        text(&window).contains("Disconnected")
-    });
+    until("service stop observed", || !status_live(&window));
     let dialog = open_connections(&controller, |_| true);
     if find(&dialog, &format!("details:{profile_id}")).is_none() {
         click(&dialog, "connections");
@@ -1338,7 +1368,10 @@ fn live(app: &gtk::Application) {
         &dialog,
         "Unlock this device's credential storage and try again.",
     );
-    assert!(text(&window).contains("SignedOut"));
+    assert!(status_reads(
+        &window,
+        crew_desktop::lifecycle::phrase(EndpointStatus::SignedOut, WorkspaceStatus::NoneSelected),
+    ));
     capture("live-gateway-keyring-locked");
     // Unlocking happens outside Crew (here the private keyring's own
     // interface); Try again authenticates the same key afresh.
@@ -1352,7 +1385,15 @@ fn live(app: &gtk::Application) {
 
     // Host revocation of the device ends access on every channel.
     admin("native_revoke", json!({"device_id": device_id}));
-    until("device revoked", || text(&window).contains("SignedOut"));
+    until("device revoked", || {
+        status_reads(
+            &window,
+            crew_desktop::lifecycle::phrase(
+                EndpointStatus::SignedOut,
+                WorkspaceStatus::NoneSelected,
+            ),
+        )
+    });
     capture("live-gateway-device-revoked");
     let saved_text = std::fs::read_to_string(&saved_path).unwrap();
     for forbidden in ["PRIVATE KEY", "signature", &code] {
