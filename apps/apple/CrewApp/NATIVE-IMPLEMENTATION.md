@@ -389,7 +389,9 @@ says "Message sent."; success after later edits is shown on the receipt
 the other non-success outcomes and Core refusals before dispatch keep the
 body and show their reason on the receipt. Mismatching endpoint, workspace
 or operation notices are ignored. Receipt status changes are posted as
-VoiceOver announcements.
+VoiceOver announcements. So is the editor's own note (such as "Message sent."), which
+the next edit removes. The compose, prompt and question sheets scroll, and a
+long submitted body is bounded inside the receipt.
 
 Learned revocation, workspace removal and sign-out purge the draft and its
 receipt, because the Core retires the held retry and no notice will arrive.
@@ -443,9 +445,14 @@ any shared notice or new input. A malformed intent fails only its own entry
 with the same `ClientError` that `plan` returns; a closed client fails the
 read. The reason shown is the Core's canonical `ClientReason.message`. An
 intent captured under an earlier connection attempt is never queried: it
-says "Reopen this target from the current workspace connection." Until the
-answer for the current input arrives, the control is disabled without a
-reason line, so typing does not flash text. No mutating plan probe, grant
+says "Reopen this target from the current workspace connection." Each
+control registers under a stable name; while the answer for edited input is
+outstanding it keeps that control's previous answer, so typing does not
+flash the button or its reason. A control with no answer yet (just opened, or
+after a scope change) is disabled without a reason line. The planner still
+revalidates the exact submitted intent, and a refusal lands on the receipt.
+Queries follow each keystroke; if device testing shows typing lag, debounce
+belongs in the view modifier, never in the model. No mutating plan probe, grant
 list or Swift policy decides eligibility, and execution still revalidates
 through `plan`. The Send availability intent and the dispatched intent are the
 same value: the draft keeps one stable candidate ID until Send uses it.
@@ -453,7 +460,9 @@ same value: the draft keeps one stable candidate ID until Send uses it.
 Native source cases in `CrewClientWorkerTests`: Core answers for exact
 intents (unavailable with reason, available, malformed), re-reading after a
 shared notice, no query for an earlier attempt's intent, no plan call, and the
-composer's queried intent equalling the planned intent. `CrewSendDraftTests`
+composer's queried intent equalling the planned intent. A further case keeps a
+control's last answer while its edited intent is checked and forgets it when
+the control disappears. `CrewSendDraftTests`
 covers candidate ID stability and its use by Send. The worker read typechecks
 on Linux against the released bindings; the SwiftUI composition and the
 model cases remain **Apple verification deferred by operator**.
@@ -469,7 +478,7 @@ has been executed: **Apple execution deferred by operator**.
 | `Tests/CrewSendDraftTests.swift` | 12 | typechecks with its host source and corelibs XCTest |
 | `Tests/CrewNoticeRoutingTests.swift` | 5 | typechecks with its host source and corelibs XCTest |
 | `Tests/CrewExternalLinksTests.swift` | 4 | typechecks with its host source and corelibs XCTest |
-| `Tests/CrewClientWorkerTests.swift` | 12 | parses; the model cases need SwiftUI/Observation |
+| `Tests/CrewClientWorkerTests.swift` | 13 | parses; the model cases need SwiftUI/Observation |
 | `Tests/CrewShellTests.swift` | 13 | parses; needs SwiftUI |
 | `Tests/AppleDeviceKeyVaultTests.swift` | 5 | parses; needs CryptoKit/Security |
 | `Tests/CrewShellUITests.swift` | 2 | parses; needs an Apple UI-test runner |
@@ -485,3 +494,16 @@ needs the matching Rust FFI library, and no Apple target is built. Swift
 documented above plus `ActionIntent` and `ActionAvailability` in the
 availability read. All six are UniFFI conformances generated under
 `#if compiler(>=6)`, the selected Apple compiler; none is suppressed.
+
+## Deferred Apple-run checks recorded from review
+
+These are source-reviewed but need the deferred Apple run:
+
+- Compose Send stays reachable at accessibility Dynamic Type (AX5), at iPhone
+  SE size, and with the keyboard up; the receipt status is never truncated.
+- `AccessibilityNotification.Announcement` resolves with `import
+  Accessibility` (added) and VoiceOver hears receipt changes and "Message
+  sent." once each.
+- Typing in compose, prompt, answer and model-note fields shows no lag from
+  the per-keystroke availability query; debounce in the view modifier if it
+  does.

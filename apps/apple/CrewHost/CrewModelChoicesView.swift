@@ -25,8 +25,8 @@ struct CrewModelChoicesView: View {
                 Text("A model change using the current CLI resumes the session. Changing the CLI starts a fresh session.")
             }
             Section("Models and CLIs") {
-                ForEach(Array(models.models.enumerated()), id: \.offset) { _, choice in
-                    let availability = model.availability(intent(choice))
+                ForEach(Array(models.models.enumerated()), id: \.offset) { offset, choice in
+                    let availability = model.availability(intent(choice), control: "model:\(offset)")
                     VStack(alignment: .leading, spacing: 8) {
                         Text(verbatim: choice.name).font(.headline)
                         CrewLabeledValue("CLI", value: String(describing: choice.runtime))
@@ -46,7 +46,9 @@ struct CrewModelChoicesView: View {
             }
             if let feedback = model.feedback { Section("Result") { Text(verbatim: feedback) } }
         }
-        .crewAvailability(model, models.models.compactMap(intent))
+        .crewAvailability(model, models.models.enumerated().compactMap { offset, choice in
+            intent(choice).map { CrewWatchedIntent(control: "model:\(offset)", intent: $0) }
+        })
     }
 
     /// The exact setModel intent this choice and note would submit.

@@ -1,3 +1,4 @@
+import Accessibility
 import CrewBindings
 import CrewUI
 import SwiftUI
@@ -30,36 +31,49 @@ struct CrewActionSheetView: View {
                 case .compose(let key):
                     let recipient: String = { if case .agent(let id) = key.entity { return id }; return "all" }()
                     let draftKey = CrewDraftKey(scope: key.scope, purpose: "message:\(recipient)")
+                    let control = "send:\(draftKey.purpose)"
                     let intent = model.sendIntent(draftKey, to: recipient)
-                    let availability = model.availability(intent)
-                    VStack(alignment: .leading) {
-                        // The Core's held message is shown as its immutable
-                        // receipt; the editor below may already hold new text.
-                        if let receipt = model.sendReceipt(draftKey) {
-                            CrewSubmittedMessageView(recipient: receipt.recipient, body: receipt.body, status: CrewFailure.receipt(receipt), pending: receipt.isPending)
+                    let availability = model.availability(intent, control: control)
+                    // Scrolls like the question sheet, so Send stays reachable
+                    // with the keyboard up and at accessibility text sizes.
+                    ScrollView {
+                        VStack(alignment: .leading) {
+                            // The Core's held message is shown as its immutable
+                            // receipt; the editor below may already hold new text.
+                            if let receipt = model.sendReceipt(draftKey) {
+                                CrewSubmittedMessageView(recipient: receipt.recipient, body: receipt.body, status: CrewFailure.receipt(receipt), pending: receipt.isPending)
+                            }
+                            CrewDraftEditor(title: "Message", text: model.sendDraft(draftKey), submitLabel: "Send", targetDescription: "\(recipient) · \(key.scope.workspaceId)", submitAvailable: availability.available, pending: model.sendPending(draftKey), unavailableReason: model.sendPending(draftKey) ? "Send after the submitted message above resolves." : availability.reason) {
+                                model.send(draftKey, to: recipient)
+                            }
+                            if let explanation = model.sendExplanation(draftKey) { Text(verbatim: explanation).font(.callout).padding(16) }
                         }
-                        CrewDraftEditor(title: "Message", text: model.sendDraft(draftKey), submitLabel: "Send", targetDescription: "\(recipient) · \(key.scope.workspaceId)", submitAvailable: availability.available, pending: model.sendPending(draftKey), unavailableReason: model.sendPending(draftKey) ? "Send after the submitted message above resolves." : availability.reason) {
-                            model.send(draftKey, to: recipient)
-                        }
-                        if let explanation = model.sendExplanation(draftKey) { Text(verbatim: explanation).font(.callout).padding(16) }
                     }
                     .onAppear { model.prepareSendDraft(draftKey) }
-                    .crewAvailability(model, intent.map { [$0] } ?? [])
+                    .onChange(of: model.sendExplanation(draftKey)) { _, explanation in
+                        if let explanation { AccessibilityNotification.Announcement(explanation).post() }
+                    }
+                    .crewAvailability(model, intent.map { [CrewWatchedIntent(control: control, intent: $0)] } ?? [])
                 case .prompt(let key):
                     if case .agent(let id) = key.entity {
                         let draft = model.draft(CrewDraftKey(scope: key.scope, purpose: "prompt:\(id)"))
+                        let control = "prompt:\(id)"
                         let intent = ActionIntent.agentInput(scope: key.scope, id: id, text: draft.wrappedValue, submit: true)
-                        let availability = model.availability(intent)
-                        CrewDraftEditor(title: "Terminal prompt", text: draft, submitLabel: "Submit prompt", targetDescription: "Terminal input to \(id) · \(key.scope.workspaceId)", submitAvailable: availability.available, pending: model.pending, unavailableReason: availability.reason) {
-                            model.perform(intent)
+                        let availability = model.availability(intent, control: control)
+                        ScrollView {
+                            CrewDraftEditor(title: "Terminal prompt", text: draft, submitLabel: "Submit prompt", targetDescription: "Terminal input to \(id) · \(key.scope.workspaceId)", submitAvailable: availability.available, pending: model.pending, unavailableReason: availability.reason) {
+                                model.perform(intent)
+                            }
                         }
-                        .crewAvailability(model, [intent])
+                        .crewAvailability(model, [CrewWatchedIntent(control: control, intent: intent)])
                     }
                 case .question(let key, let message, let info):
                     let draft = model.draft(CrewDraftKey(scope: key.scope, purpose: "answer:\(message.id)"))
                     let answer = { (body: String) in ActionIntent.answer(scope: key.scope, questionId: message.id, body: body) }
-                    CrewQuestionView(question: message, info: info, draft: draft, availability: { model.availability(answer($0)) }, pending: model.pending, answer: { model.perform(answer($0)) }, later: { dismiss() })
-                        .crewAvailability(model, ([draft.wrappedValue] + info.options).map(answer))
+                    let draftControl = "answer:\(message.id)"
+                    let optionControl = { (option: String) in "answer:\(message.id):option:\(option)" }
+                    CrewQuestionView(question: message, info: info, draft: draft, answerAvailability: model.availability(answer(draft.wrappedValue), control: draftControl), optionAvailability: { model.availability(answer($0), control: optionControl($0)) }, pending: model.pending, answer: { model.perform(answer($0)) }, later: { dismiss() })
+                        .crewAvailability(model, [CrewWatchedIntent(control: draftControl, intent: answer(draft.wrappedValue))] + info.options.map { CrewWatchedIntent(control: optionControl($0), intent: answer($0)) })
                 case .terminal:
                     VStack(alignment: .leading, spacing: 16) {
                         Text(verbatim: model.terminalStatus ?? "Opening terminal").font(.callout)

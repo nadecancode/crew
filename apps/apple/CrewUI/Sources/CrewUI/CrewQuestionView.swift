@@ -7,7 +7,8 @@ import SwiftUI
 public struct CrewQuestionView: View {
     private let question: Message
     private let info: QuestionInfo
-    private let availability: (String) -> CrewControlAvailability
+    private let answerAvailability: CrewControlAvailability
+    private let optionAvailability: (String) -> CrewControlAvailability
     private let pending: Bool
     private let answer: (String) -> Void
     private let later: () -> Void
@@ -17,7 +18,8 @@ public struct CrewQuestionView: View {
         question: Message,
         info: QuestionInfo,
         draft: Binding<String>,
-        availability: @escaping (String) -> CrewControlAvailability,
+        answerAvailability: CrewControlAvailability,
+        optionAvailability: @escaping (String) -> CrewControlAvailability,
         pending: Bool,
         answer: @escaping (String) -> Void,
         later: @escaping () -> Void
@@ -25,7 +27,8 @@ public struct CrewQuestionView: View {
         self.question = question
         self.info = info
         self._draft = draft
-        self.availability = availability
+        self.answerAvailability = answerAvailability
+        self.optionAvailability = optionAvailability
         self.pending = pending
         self.answer = answer
         self.later = later
@@ -48,7 +51,7 @@ public struct CrewQuestionView: View {
                                     .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
                             }
                             .buttonStyle(.bordered)
-                            .disabled(!availability(option).available || pending)
+                            .disabled(!optionAvailability(option).available || pending)
                         }
                     }
                 }
@@ -57,9 +60,9 @@ public struct CrewQuestionView: View {
                     text: $draft,
                     submitLabel: "Answer",
                     targetDescription: info.asker,
-                    submitAvailable: availability(draft).available,
+                    submitAvailable: answerAvailability.available,
                     pending: pending,
-                    unavailableReason: availability(draft).reason
+                    unavailableReason: answerAvailability.reason
                 ) { answer(draft) }
                 Button(action: later) {
                     Text("Later").frame(minWidth: 44, minHeight: 44)

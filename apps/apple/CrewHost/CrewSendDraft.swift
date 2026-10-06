@@ -10,7 +10,8 @@ import Foundation
 /// about the submitted message is stated on that receipt.
 struct CrewSendDraft {
     private(set) var scope: ClientScope
-    var body = ""
+    /// Editing the text retires any note about the previous text.
+    var body = "" { didSet { if body != oldValue { explanation = nil } } }
     private(set) var operationId: UInt64?
     /// A note about the editable text itself, never about the receipt.
     private(set) var explanation: String?

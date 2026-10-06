@@ -18,6 +18,7 @@ final class CrewSendDraftTests: XCTestCase {
         XCTAssertNil(draft.receipt)
         XCTAssertEqual(draft.explanation, "Message sent.")
         draft.body = "second message"
+        XCTAssertNil(draft.explanation, "Editing retires the note about the previous text")
         let second = try XCTUnwrap(draft.begin(to: recipient))
         XCTAssertNotEqual(first.messageId, second.messageId)
         XCTAssertEqual(second.body, "second message")

@@ -67,9 +67,9 @@ struct CrewRootView: View {
                     Button("Compose message", systemImage: "square.and.pencil") {
                         actionSheet = .compose(EntityKey(scope: scope, entity: .workspace))
                     }
-                    workspaceAction("Continue agents paused at limit", .resumeLimited(scope: scope, restart: false))
-                    workspaceAction("Restart agents paused at limit", .resumeLimited(scope: scope, restart: true))
-                    workspaceAction("Stop team", .stopTeam(scope: scope), role: .destructive)
+                    workspaceAction("Continue agents paused at limit", .resumeLimited(scope: scope, restart: false), control: "workspace:continue")
+                    workspaceAction("Restart agents paused at limit", .resumeLimited(scope: scope, restart: true), control: "workspace:restart")
+                    workspaceAction("Stop team", .stopTeam(scope: scope), control: "workspace:stop", role: .destructive)
                 }
                 Button("Connections", systemImage: "network", action: showConnections)
                 #if os(iOS)
@@ -236,7 +236,7 @@ struct CrewRootView: View {
                         }
                         .toolbar { Button("Newest", action: model.newestEvents) }
                     case .usage(let data):
-                        CrewUsageView(scope: scope, usage: data, selectAgent: { selectFromRoot(EntityKey(scope: scope, entity: .agent($0))) }, continueAvailability: model.availability(.resumeLimited(scope: scope, restart: false)), restartAvailability: model.availability(.resumeLimited(scope: scope, restart: true)), continueLimited: { model.perform(.resumeLimited(scope: scope, restart: false)) }, restartLimited: { model.perform(.resumeLimited(scope: scope, restart: true)) }, selected: openerByDestination[destination], focus: canRestoreFocus ? focus : nil, active: navigation.selection == destination && (usesInspector || navigation.path(for: destination).isEmpty))
+                        CrewUsageView(scope: scope, usage: data, selectAgent: { selectFromRoot(EntityKey(scope: scope, entity: .agent($0))) }, continueAvailability: model.availability(.resumeLimited(scope: scope, restart: false), control: "workspace:continue"), restartAvailability: model.availability(.resumeLimited(scope: scope, restart: true), control: "workspace:restart"), continueLimited: { model.perform(.resumeLimited(scope: scope, restart: false)) }, restartLimited: { model.perform(.resumeLimited(scope: scope, restart: true)) }, selected: openerByDestination[destination], focus: canRestoreFocus ? focus : nil, active: navigation.selection == destination && (usesInspector || navigation.path(for: destination).isEmpty))
                     default: ContentUnavailableView("This view is unavailable", systemImage: destination.symbol)
                     }
                     }
@@ -436,15 +436,19 @@ struct CrewRootView: View {
                       rendered: renderedKeys.subtracting(model.notice?.changes.removed ?? []), destination: navigation.selection)
     }
 
-    private var workspaceIntents: [ActionIntent] {
+    private var workspaceIntents: [CrewWatchedIntent] {
         guard let scope = model.scope else { return [] }
-        return [.resumeLimited(scope: scope, restart: false), .resumeLimited(scope: scope, restart: true), .stopTeam(scope: scope)]
+        return [
+            CrewWatchedIntent(control: "workspace:continue", intent: .resumeLimited(scope: scope, restart: false)),
+            CrewWatchedIntent(control: "workspace:restart", intent: .resumeLimited(scope: scope, restart: true)),
+            CrewWatchedIntent(control: "workspace:stop", intent: .stopTeam(scope: scope))
+        ]
     }
 
     /// A menu item cannot show a reason line, so the Core's reason is its help
     /// text and accessibility hint. Confirmation still comes from the Core.
-    private func workspaceAction(_ title: String, _ intent: ActionIntent, role: ButtonRole? = nil) -> some View {
-        let availability = model.availability(intent)
+    private func workspaceAction(_ title: String, _ intent: ActionIntent, control: String, role: ButtonRole? = nil) -> some View {
+        let availability = model.availability(intent, control: control)
         return Button(title, role: role) { model.perform(intent) }
             .disabled(!availability.available)
             .help(availability.reason ?? title)

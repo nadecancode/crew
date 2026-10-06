@@ -35,6 +35,8 @@ final class CrewSessionModel {
     private var availabilityResults: [ActionIntent: CrewAvailabilityRead.Result] = [:]
     private var availabilityTask: _Concurrency.Task<Void, Never>?
     private var availabilityStale = false
+    private var availabilityControls: [String: ActionIntent] = [:]
+    private var lastAvailability: [String: CrewControlAvailability] = [:]
 
     private(set) var localProfiles: [LocalProfileInfo] = []
     private(set) var discovering = false
@@ -334,40 +336,58 @@ final class CrewSessionModel {
         return .sendMessage(scope: key.scope, to: recipient, body: draft.body, messageId: draft.candidateMessageId)
     }
 
-    /// Controls register the exact intent they would submit. Each answer is
-    /// the Core's read-only availability query for that intent; nothing is
-    /// planned, reserved or dispatched, and execution still revalidates.
-    func watchAvailability(_ intents: [ActionIntent]) {
+    /// Controls register the exact intent they would submit, under a stable
+    /// control name. Each answer is the Core's read-only availability query
+    /// for that intent; nothing is planned, reserved or dispatched, and
+    /// execution still revalidates.
+    func watchAvailability(_ entries: [CrewWatchedIntent]) {
         var unanswered = false
-        for intent in intents {
-            availabilityWatchers[intent, default: 0] += 1
-            if availabilityResults[intent] == nil { unanswered = true }
+        for entry in entries {
+            availabilityWatchers[entry.intent, default: 0] += 1
+            availabilityControls[entry.control] = entry.intent
+            if let result = availabilityResults[entry.intent] {
+                lastAvailability[entry.control] = presentation(result)
+            } else {
+                unanswered = true
+            }
         }
         if unanswered { refreshAvailability() }
     }
 
-    func unwatchAvailability(_ intents: [ActionIntent]) {
-        for intent in intents {
-            guard let count = availabilityWatchers[intent] else { continue }
+    /// A control that moved on to a newer intent keeps its last answer; one
+    /// that disappeared forgets it.
+    func unwatchAvailability(_ entries: [CrewWatchedIntent]) {
+        for entry in entries {
+            if availabilityControls[entry.control] == entry.intent {
+                availabilityControls[entry.control] = nil
+                lastAvailability[entry.control] = nil
+            }
+            guard let count = availabilityWatchers[entry.intent] else { continue }
             if count > 1 {
-                availabilityWatchers[intent] = count - 1
+                availabilityWatchers[entry.intent] = count - 1
             } else {
-                availabilityWatchers[intent] = nil
-                availabilityResults[intent] = nil
+                availabilityWatchers[entry.intent] = nil
+                availabilityResults[entry.intent] = nil
             }
         }
     }
 
     /// Eligibility and the Core's canonical reason for one captured intent.
     /// An intent from an earlier connection is never queried against the
-    /// current one; until the current answer arrives the control is disabled.
-    func availability(_ intent: ActionIntent?) -> CrewControlAvailability {
-        guard let intent else { return .checking }
+    /// current one. While the answer for edited input is outstanding, the
+    /// control keeps its previous answer, so typing does not flash; the
+    /// planner still revalidates the exact intent on submission.
+    func availability(_ intent: ActionIntent?, control: String) -> CrewControlAvailability {
+        guard let intent else { return lastAvailability[control] ?? .checking }
         guard hasClient, intent.scope == scope else {
             return CrewControlAvailability(available: false, reason: "Reopen this target from the current workspace connection.")
         }
-        switch availabilityResults[intent] {
-        case nil: return .checking
+        if let result = availabilityResults[intent] { return presentation(result) }
+        return lastAvailability[control] ?? .checking
+    }
+
+    private func presentation(_ result: CrewAvailabilityRead.Result) -> CrewControlAvailability {
+        switch result {
         case .answered(let answer): return CrewControlAvailability(available: answer.available, reason: answer.reason?.message)
         case .failed(let error): return CrewControlAvailability(available: false, reason: CrewFailure.message(error))
         }
@@ -384,16 +404,21 @@ final class CrewSessionModel {
                 availabilityStale = false
                 let intents = availabilityWatchers.keys.filter { $0.scope == scope }
                 guard !intents.isEmpty else { break }
+                var results: [ActionIntent: CrewAvailabilityRead.Result] = [:]
                 do {
                     let reads = try await worker.availability(intents, instance: token)
                     guard instance == token else { return }
-                    for read in reads where availabilityWatchers[read.intent] != nil && read.intent.scope == scope {
-                        availabilityResults[read.intent] = read.result
-                    }
+                    for read in reads { results[read.intent] = read.result }
                 } catch {
                     guard instance == token else { return }
                     let failure = error as? ClientError ?? .ClosedClient
-                    for intent in intents where availabilityWatchers[intent] != nil { availabilityResults[intent] = .failed(failure) }
+                    for intent in intents { results[intent] = .failed(failure) }
+                }
+                for (intent, result) in results where availabilityWatchers[intent] != nil && intent.scope == scope {
+                    availabilityResults[intent] = result
+                }
+                for (control, intent) in availabilityControls {
+                    if let result = availabilityResults[intent] { lastAvailability[control] = presentation(result) }
                 }
             }
             if instance == token { availabilityTask = nil }
@@ -640,6 +665,7 @@ final class CrewSessionModel {
                 (update.scope?.endpointId == oldScope?.endpointId && update.scope?.workspaceId == oldScope?.workspaceId)
             clearScopedViews(preserveHeldSends: sameWorkspace)
             availabilityResults.removeAll()
+            lastAvailability.removeAll()
             if let current = update.scope {
                 for key in sendDrafts.keys {
                     if key.scope.endpointId == current.endpointId && key.scope.workspaceId == current.workspaceId { sendDrafts[key]?.reauthorize(current) }
@@ -922,6 +948,7 @@ final class CrewSessionModel {
         availabilityTask = nil
         availabilityStale = false
         availabilityResults.removeAll()
+        lastAvailability.removeAll()
         invalidated = []
         notice = nil
         workspaces = nil
@@ -1032,26 +1059,34 @@ enum CrewFailure {
     }
 }
 
-/// Registers the exact intents a visible control would submit. New intents
-/// are watched before old ones are released, so a shared intent keeps its
+/// One visible control and the exact intent it would submit now.
+struct CrewWatchedIntent: Equatable {
+    let control: String
+    let intent: ActionIntent
+}
+
+/// Registers the exact intents visible controls would submit. New intents
+/// are watched before old ones are released, so a control keeps its last
 /// answer while the input around it changes.
 struct CrewAvailabilityWatch: ViewModifier {
     let model: CrewSessionModel
-    let intents: [ActionIntent]
+    let intents: [CrewWatchedIntent]
 
     func body(content: Content) -> some View {
         content
             .onAppear { model.watchAvailability(intents) }
             .onDisappear { model.unwatchAvailability(intents) }
             .onChange(of: intents) { old, new in
-                model.watchAvailability(new)
-                model.unwatchAvailability(old)
+                // Only changed entries move; an unchanged control keeps its
+                // registration and answer.
+                model.watchAvailability(new.filter { !old.contains($0) })
+                model.unwatchAvailability(old.filter { !new.contains($0) })
             }
     }
 }
 
 extension View {
-    func crewAvailability(_ model: CrewSessionModel, _ intents: [ActionIntent]) -> some View {
+    func crewAvailability(_ model: CrewSessionModel, _ intents: [CrewWatchedIntent]) -> some View {
         modifier(CrewAvailabilityWatch(model: model, intents: intents))
     }
 }

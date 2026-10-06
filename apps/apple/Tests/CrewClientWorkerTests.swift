@@ -189,12 +189,13 @@ final class CrewClientWorkerTests: XCTestCase {
         let stop = ActionIntent.stopTeam(scope: scope)
         let resume = ActionIntent.resumeLimited(scope: scope, restart: false)
         let empty = ActionIntent.sendMessage(scope: scope, to: "synthetic-agent", body: "", messageId: "synthetic-id")
-        XCTAssertEqual(model.availability(stop), .checking)
-        model.watchAvailability([stop, resume, empty])
+        let entries = [CrewWatchedIntent(control: "stop", intent: stop), CrewWatchedIntent(control: "resume", intent: resume), CrewWatchedIntent(control: "send", intent: empty)]
+        XCTAssertEqual(model.availability(stop, control: "stop"), .checking)
+        model.watchAvailability(entries)
         await model.waitForAvailability()
-        XCTAssertEqual(model.availability(stop), CrewControlAvailability(available: false, reason: "Synthetic Core reason"))
-        XCTAssertEqual(model.availability(resume), CrewControlAvailability(available: true, reason: nil))
-        XCTAssertEqual(model.availability(empty), CrewControlAvailability(available: false, reason: "body: must not be empty"))
+        XCTAssertEqual(model.availability(stop, control: "stop"), CrewControlAvailability(available: false, reason: "Synthetic Core reason"))
+        XCTAssertEqual(model.availability(resume, control: "resume"), CrewControlAvailability(available: true, reason: nil))
+        XCTAssertEqual(model.availability(empty, control: "send"), CrewControlAvailability(available: false, reason: "body: must not be empty"))
         XCTAssertFalse(client.calls.contains("plan"))
 
         // A shared change re-reads every watched intent.
@@ -207,10 +208,36 @@ final class CrewClientWorkerTests: XCTestCase {
         let current = ClientScope(endpointId: scope.endpointId, workspaceId: scope.workspaceId, generation: scope.generation, daemonPid: scope.daemonPid, daemonStartedAtMs: scope.daemonStartedAtMs, attempt: scope.attempt + 1)
         observer.changed(notice: ClientNotice(scope: current, revision: 3, changes: CrewTestFixtures.notice.changes, endpoint: .authenticated, workspace: .live, reason: nil, outcomes: []))
         await model.waitForAvailability()
-        XCTAssertEqual(model.availability(stop), CrewControlAvailability(available: false, reason: "Reopen this target from the current workspace connection."))
+        XCTAssertEqual(model.availability(stop, control: "stop"), CrewControlAvailability(available: false, reason: "Reopen this target from the current workspace connection."))
         XCTAssertEqual(client.calls.filter { $0 == "availability" }.count, before + 3)
-        model.unwatchAvailability([stop, resume, empty])
+        model.unwatchAvailability(entries)
         XCTAssertFalse(client.calls.contains("plan"))
+        await model.close()
+    }
+
+    /// While edited input is being checked, a control keeps its previous
+    /// answer instead of flashing disabled; a vanished control forgets it.
+    func testEditedInputKeepsTheControlsLastAnswerUntilChecked() async throws {
+        let model = CrewSessionModel()
+        let client = RecordingCrewClient()
+        try await model.install(client)
+        let observer = try XCTUnwrap(client.observer)
+        observer.changed(notice: CrewTestFixtures.notice)
+        let scope = CrewTestFixtures.scope
+        let first = CrewWatchedIntent(control: "send", intent: .sendMessage(scope: scope, to: "synthetic-agent", body: "a", messageId: "synthetic-id"))
+        let edited = CrewWatchedIntent(control: "send", intent: .sendMessage(scope: scope, to: "synthetic-agent", body: "ab", messageId: "synthetic-id"))
+        model.watchAvailability([first])
+        await model.waitForAvailability()
+        let answered = CrewControlAvailability(available: true, reason: nil)
+        XCTAssertEqual(model.availability(first.intent, control: "send"), answered)
+        // The view modifier watches the new entry before releasing the old.
+        model.watchAvailability([edited])
+        model.unwatchAvailability([first])
+        XCTAssertEqual(model.availability(edited.intent, control: "send"), answered)
+        await model.waitForAvailability()
+        XCTAssertEqual(model.availability(edited.intent, control: "send"), answered)
+        model.unwatchAvailability([edited])
+        XCTAssertEqual(model.availability(edited.intent, control: "send"), .checking)
         await model.close()
     }
 
