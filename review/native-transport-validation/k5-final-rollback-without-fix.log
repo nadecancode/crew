@@ -1,0 +1,24 @@
+   Compiling crew-client-transport v0.1.0 (/home/nade/workspaces/personal/crew/.crew/worktrees/content/crates/crew-client-transport)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 1.45s
+     Running unittests src/lib.rs (target/native-validation/k5-final/target/debug/deps/crew_client_transport-039921e2922bbe07)
+
+running 1 test
+test gateway::tests::fresh_grant_proof_ahead_of_index_preserves_new_channel_and_never_rolls_back ... FAILED
+
+failures:
+
+---- gateway::tests::fresh_grant_proof_ahead_of_index_preserves_new_channel_and_never_rolls_back stdout ----
+
+thread 'gateway::tests::fresh_grant_proof_ahead_of_index_preserves_new_channel_and_never_rolls_back' (2672202) panicked at crates/crew-client-transport/src/gateway/tests.rs:74:5:
+assertion `left == right` failed
+  left: Ok(())
+ right: Err(Malformed)
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+
+failures:
+    gateway::tests::fresh_grant_proof_ahead_of_index_preserves_new_channel_and_never_rolls_back
+
+test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 20 filtered out; finished in 0.00s
+
+error: test failed, to rerun pass `-p crew-client-transport --lib`

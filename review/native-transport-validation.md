@@ -1,9 +1,10 @@
 # Native transport validation evidence
 
 This checkpoint records the accepted K5 local and scoped gateway journeys on
-the combined Rust source. It does not establish a connected GTK/Apple UI or
-tested Apple secure storage. Apple execution remains deferred by the operator.
-Additional transport fault coverage remains on the validation card.
+the combined Rust source, and the final checkpoint that adds a real
+lost-mutation-reply journey and the connector grant rollback hardening. It
+does not establish a connected GTK/Apple UI or tested Apple secure storage.
+Apple execution remains deferred by the operator.
 
 ## Exact source and harness
 
@@ -27,7 +28,8 @@ kept at that checkpoint. The sole test overlay is the approved harness
 
 This overlay adds the explicit `journey-tests` feature and test fixtures. It
 does not change connector, Core, daemon or wire behavior. The separate owned
-grant rollback hardening `1fdae07e` is not overlaid onto the K5 product tree.
+grant rollback hardening `1fdae07e` is not overlaid onto the K5 product tree;
+the final checkpoint below adds it.
 
 The combined lock SHA-256 is
 `1803b78a106a2d01195d9617da3afc7b290810a26f7b8edbf9e623042adaeb8b`.
@@ -98,6 +100,91 @@ synthetic public test keys are used. Cleanup stops only the fixture team.
 The committed [journey log](native-transport-validation/k5-26bf-journeys.log)
 has SHA-256
 `fe5bbb78d0348ba893dedd9a79fb48730393353a23e59075de210b3223dc8b79`.
+
+## Final checkpoint
+
+The final source is `ea7488e98d90def4acad05b75def910ed8c89c35`, built on main
+`2185ecb810ffe83df2ce58b4ff5e668a9a10d4fe` from four transport-only commits:
+
+| Commit | Origin | Change |
+| --- | --- | --- |
+| `5515e60ed56c14d26d8db7bd825e2387b5b5952b` | `1fdae07e` | Refuse a newer listing that rolls a grant back to an older generation |
+| `939e97e10d67a1afc98c5ee00f856a4c7d710703` | `d06db944` | Journey harness, unchanged from the K5 overlay |
+| `b92eea6d5969cf47ad8d0848ca239444cee80cf7` | `7245e880` | Real local mutation reply-loss journey |
+| `ea7488e98d90def4acad05b75def910ed8c89c35` | `353b5446` | Fresh-scope assertion after the lost reply |
+
+Main differs from `26bf2ebe` only in `review/` evidence, so outside
+`crates/crew-client-transport` the tree is the K5 product byte for byte. The
+lock SHA-256 is still
+`1803b78a106a2d01195d9617da3afc7b290810a26f7b8edbf9e623042adaeb8b` and the PTY
+source SHA-256 is still
+`5b3aea7ffa2ac0673b07cefbb285b46154dd31f625be9c98afd74edf8098fe9b`. The
+transport paths that differ from `26bf2ebe` are:
+
+| Path | SHA-256 |
+| --- | --- |
+| `crates/crew-client-transport/Cargo.toml` | `d0f7542a58d9fd927aca43fc08d278bdffbcff92f9189d16618ed84c79a81e40` |
+| `crates/crew-client-transport/src/gateway/authority.rs` | `a057e34106233216d710e24fed5b5be39f3874bdebc7da27a3a43684a2221b6f` |
+| `crates/crew-client-transport/src/gateway/tests.rs` | `6bd5486ed673e0b16c72af10b5ba7fed7edaae43871eae0c5fce56e3a7dc7371` |
+| `crates/crew-client-transport/tests/gateway_daemon.rs` | `5daa2d9a292f3351ea26f6eb5bef44b0850655a11048d245c28a08b38d8e0085` |
+| `crates/crew-client-transport/tests/journey/mod.rs` | `c11aa8d89ebfeacf054eec15bc562fe6f8a82ed297e7619887f701c5810d566d` |
+
+The fixture binary is the same QA artifact (SHA-256 `eaadd984…17be45`). The
+scoped target was seeded from the K5 cache without its incremental directory;
+the K5 cache itself was left unchanged. Commands, run from the content
+worktree with Rust 1.93.1:
+
+```sh
+CARGO_INCREMENTAL=0 \
+CARGO_TARGET_DIR=$PWD/target/native-validation/k5-final/target \
+CREW_NATIVE_VALIDATION_BIN=/home/nade/workspaces/personal/crew/.crew/worktrees/qa/target/native-validation/gateway-integration/bin/crew \
+  bash scripts/build-env cargo test --locked -p crew-client-transport \
+  --features journey-tests --test gateway_daemon journey:: -- --nocapture
+CARGO_INCREMENTAL=0 \
+CARGO_TARGET_DIR=$PWD/target/native-validation/k5-final/target \
+  bash scripts/build-env cargo test --locked -p crew-client-transport \
+  --features journey-tests --lib \
+  gateway::tests::fresh_grant_proof_ahead_of_index_preserves_new_channel_and_never_rolls_back \
+  -- --exact
+CARGO_INCREMENTAL=0 \
+CARGO_TARGET_DIR=$PWD/target/native-validation/k5-final/target \
+  bash scripts/build-env cargo clippy --locked -p crew-client-transport \
+  --features journey-tests --all-targets -- -D warnings
+bash scripts/build-env cargo fmt -p crew-client-transport --check
+```
+
+All three journeys passed (3/3, 1.67 s, build 15.32 s) between
+2026-10-06T03:12:17Z and 03:12:34Z with 182 GiB available. The two K5
+journeys pass unchanged with the rollback hardening in the connector.
+
+The reply-loss journey wraps the actual protected `LocalTransport` in a
+connector that forwards every verified event unchanged, except that once
+the real writer reports an `agent_pause` request `FullyWritten` on the
+Action lane, it drops that request's reply frame and closes the real socket.
+Core, daemon handlers, authentication and framing are not substituted. The
+real engine reports exactly one `Unknown` outcome in the captured scope with
+no attachment identity. After an explicit reconnect, the newer attempt keeps
+the same daemon identity, and a fresh scoped `AgentDetail` query shows the
+daemon did pause the agent. The request was written once and never replayed,
+no further outcome for that operation arrives, and the stale-scope intent
+plans as unavailable.
+
+The rollback unit test passed. With `authority.rs` temporarily restored to
+`2185ecb8` it fails at `tests.rs:74` (`left: Ok(())`, `right:
+Err(Malformed)`): a newer listing could lower a proven grant generation.
+Strict Clippy over all transport targets with the journey features and
+`rustfmt --check` passed.
+
+| Evidence | Result | SHA-256 |
+| --- | --- | --- |
+| [Journeys](native-transport-validation/k5-final-journeys.log) | 3/3 | `e0583ae27366f7ca2b8e065409cf9f8faad723eca5eaa39f2d6f9fca941eafd5` |
+| [Rollback unit](native-transport-validation/k5-final-rollback.log) | 1/1 | `040a50d999afdfc167231af190d181bd84a89e441840f54eb8299e5683daf233` |
+| [Rollback unit without fix](native-transport-validation/k5-final-rollback-without-fix.log) | fails as expected | `bcb59ffdd8266df79be99ff0a4adfb3173d8afcac36c39f3ce0950e9f254ed8e` |
+| [Clippy](native-transport-validation/k5-final-clippy.log) | clean | `995401da50ff843e7905ddbf1ee4b3247c92973a2402bae076e98a9863009a89` |
+
+The unchanged 56/31 suites below were not repeated. Of the four commits,
+only `5515e60e` changes connector code, and its unit is the one shown
+above. The scoped journey exercises the same listing path.
 
 ## Retained accepted evidence
 
