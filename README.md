@@ -935,6 +935,120 @@ RPC states. Give every Playwright run its own output directory:
 PLAYWRIGHT_EXECUTABLE_PATH=/path/to/chromium bunx playwright test --project=mock --output /tmp/crew-web-mock
 ```
 
+## Native apps
+
+Crew has native applications for Linux (GTK 4 with a VTE terminal), macOS and
+iOS (SwiftUI). They show the same sessions as the dashboards: the five
+destinations Team, Tasks, Messages, Events and Usage, the inspector with its
+evidence and a terminal, questions, messages and the operator actions. They
+are native toolkits, not a web view or React Native. The state, histories,
+projections, command policy and action planning they use come from the
+`crew-client` Rust crate, which the terminal dashboard uses as well; the Apple
+apps reach it through the `crew-client-ffi` UniFFI bridge. Closing an app
+never stops the team: Stop team is its own confirmed action.
+
+An app connects one of two ways:
+
+- **This computer.** On Linux and macOS, the app finds the running sessions of
+  your user (the same registry `crew` uses) and connects as the local
+  operator, with the full action set. Nothing is exposed to the network.
+- **A remote host,** through the opt-in native gateway: a TLS endpoint on a
+  host you choose, with per-device keys you approve at that host's console
+  and per-workspace grants. This is the only way the iOS app connects.
+
+### Linux app
+
+Building the GTK app needs GTK 4 and VTE development files; the native code
+was verified with Rust 1.93 (the CLI's 1.82 floor is unchanged). On NixOS,
+`scripts/native/linux-env.sh` supplies the reviewed toolkit:
+
+```sh
+export NATIVE_NIXPKGS=/nix/store/ab93n7qqycnn3xfdnav0wnqqigvddd5r-source   # optional pin
+scripts/native/linux-build.sh --features gateway   # target/native-validation/cargo/debug/crew-desktop
+scripts/native/linux-env.sh target/native-validation/cargo/debug/crew-desktop
+```
+
+Without `--features gateway` the app has local connections only. Remote
+profiles keep their device key in the desktop keyring (Secret Service); where
+none is available the app says so, and offers to keep the key in memory until
+it closes, never in a file. **Choose workspace** in the header opens
+Connections: pick this computer's workspace and **Connect**, or **Add remote
+connection**. Ctrl+1–5 switch destinations, Ctrl+B and Ctrl+I show or hide
+the sidebar and the details, F1 lists the shortcuts.
+`crates/crew-desktop/README.md` has the desktop file and icon for a local
+installation.
+
+### Apple apps
+
+`apps/apple/Crew.xcodeproj` has the `CrewMac` and `CrewIOS` schemes (iOS 17,
+macOS 14). They need Xcode, a Swift 6 compiler and the Rust bridge built for
+the Apple targets; `apps/apple/CrewApp/README.md` ("Connected application
+runner") gives the commands. Device keys stay in the Keychain, which needs a
+development-signed build. **These apps have not been built or run here**: Apple
+compilation, simulator, device, Keychain and VoiceOver checks wait for an Apple
+runner. On Linux only the project files, Swift sources and generated bindings
+are checked (see `notes/native-validation.md`).
+
+### Connecting a device to a remote host
+
+The gateway is not in the default build and nothing listens until you start
+it. On the host, from an ordinary terminal (never from inside an agent):
+
+```sh
+cargo install --path crates/crew --locked --features native-gateway
+crew native paths           # the private runtime directory; the TLS key must be a file directly in native_dir
+crew native start --listen 192.0.2.10:7443 --endpoint wss://crew-host.example:7443/native/ws \
+    --tls-cert /path/to/cert.pem --tls-key "$NATIVE_DIR/key.pem" --name "Work host"
+crew native status          # the public host profile and the TLS fingerprint
+```
+
+The listen address must be an explicit address and port, and the endpoint a
+`wss://host:port/native/ws` address whose certificate is valid for that host.
+On the device, **Add remote connection**, paste the output of
+`crew native status` as the public profile, and type the fingerprint you read
+at the host console: the app trusts the host only when they match, group by
+group. Name the device and choose **Request access**. Then, at the host:
+
+```sh
+crew native enroll          # opens a 120-second window for one request
+crew native pending         # the request: device label, key hash and comparison code
+crew native approve <enrollment-id> --code <comparison code> --key-hash <hash> \
+    --workspace ~/work/payments [--control] [--terminal]
+```
+
+Approve only when the four groups of the comparison code match what the
+device shows. Read is always granted; `--control` (messages, answers, agent
+and team controls) and `--terminal` (terminal input) are separate. Agents act
+with their existing host permissions either way: a workspace grant limits
+what Crew lets the device do, it is not an OS or filesystem sandbox. Grants
+can change later, and a device can be removed:
+
+```sh
+crew native devices                                   # devices, grants and expiry
+crew native grant <device-id> --workspace ~/work/payments --control
+crew native revoke <device-id> [--workspace <grant>]  # ends its channels; other devices are unaffected
+crew native stop                                      # stops the gateway; devices and grants stay
+```
+
+**Disconnect** in the app closes its connection and keeps the profile and key;
+**Remove from this app** retires the device key locally but does not revoke
+the host's grant, so revoke it at the host as well. A normal gateway restart
+keeps grants and devices reconnect. If the host loses its private runtime
+state (for example after logout or reboot of a tmpfs runtime directory), the
+endpoint must be provisioned again and each device approved again with a new
+key. The gateway never exposes the browser dashboard, never accepts `crew web`
+pairing codes, and the app has no way to approve itself or list other devices.
+
+### Limits
+
+- Apple apps are source-complete but unbuilt and unrun here (see above).
+- The Linux app is verified on GTK 4.22.4 and VTE 0.84.1 under X11 with
+  private test displays; a real Wayland session, older distribution toolkits,
+  screen-reader listening tests and system large-text settings are not yet
+  verified. Packaging, signing and store distribution are not provided.
+- The gateway serves remote devices only through its own grants; it starts
+  no team, joins no workspace and has no remote administration.
+
 ## Dashboard controls
 
 | Key | Action |
