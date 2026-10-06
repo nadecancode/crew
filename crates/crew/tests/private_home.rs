@@ -55,12 +55,31 @@ fn fake_clis(s: &Session) -> (tempfile::TempDir, PathBuf) {
     (dir, bin)
 }
 
+/// Wait for a fake's record, whole: the fake writes it in place, so it can
+/// be seen before it is complete.
 fn wait_for_file(s: &Session, path: &Path) {
-    s.wait_for(&format!("{}", path.display()), || path.is_file());
+    s.wait_for(&format!("{}", path.display()), || {
+        std::fs::read(path).is_ok_and(|bytes| serde_json::from_slice::<Value>(&bytes).is_ok())
+    });
 }
 
 fn json(path: &Path) -> Value {
     serde_json::from_str(&std::fs::read_to_string(path).unwrap()).unwrap()
+}
+
+/// Whether a fake `claude` with `home` as its configuration directory was
+/// asked for `/usage`, whichever record it kept.
+fn asked_for_usage(home: &Path) -> bool {
+    let Ok(entries) = std::fs::read_dir(home) else {
+        return false;
+    };
+    entries.flatten().any(|entry| {
+        entry
+            .file_name()
+            .to_string_lossy()
+            .starts_with("fake-claude")
+            && std::fs::read_to_string(entry.path()).is_ok_and(|text| text.contains("\"/usage\""))
+    })
 }
 
 fn runtime_agent(id: &str, runtime: RuntimeKind) -> AgentSpec {
@@ -214,7 +233,10 @@ fn sandboxed_clis_keep_their_files_in_private_homes_seeded_without_the_operators
     let settings = json(&home("c").join("claude/settings.json"));
     assert_eq!(settings["model"], "opus");
     assert!(settings.get("hooks").is_none(), "{settings}");
-    assert!(home("c").join("claude/projects/-fake").is_dir());
+    // The fake writes its transcript there after recording what it saw.
+    s.wait_for("the transcript in the private home", || {
+        home("c").join("claude/projects/-fake").is_dir()
+    });
     // The daemon reads the transcript from there, through the agent's root.
     s.wait_for("the transcript through the daemon", || {
         s.agent_cmd(&["transcript", "c"])
@@ -272,7 +294,13 @@ fn sandboxed_clis_keep_their_files_in_private_homes_seeded_without_the_operators
         "the daemon opened a path the agent named"
     );
 
-    // The operator's homes were not used: no fake CLI wrote there.
+    // The daemon's own usage probe (`claude -p /usage`) runs as the operator,
+    // in the operator's home, on a housekeeping tick once a Claude agent is
+    // up. Wait for it, so the check below always covers it.
+    s.wait_for("the daemon's usage probe", || {
+        asked_for_usage(&operator_claude)
+    });
+    // The operator's homes were not used: no agent session wrote there.
     for operator in [&operator_claude, &operator_codex] {
         assert!(
             !operator.join("projects").exists() && !operator.join("fake-claude.json").exists(),

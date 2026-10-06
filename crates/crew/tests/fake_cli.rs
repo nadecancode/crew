@@ -58,6 +58,26 @@ fn the_fake_claude_keeps_its_files_in_its_configuration_directory() {
 }
 
 #[test]
+fn the_fake_claude_in_print_mode_answers_once_without_a_session() {
+    let dir = tempfile::tempdir().unwrap();
+    let status = fake(
+        "claude",
+        &["-p", "/usage", "--no-session-persistence"],
+        &[("CLAUDE_CONFIG_DIR", dir.path())],
+    )
+    .wait()
+    .unwrap();
+    assert!(status.success());
+    let seen: serde_json::Value = serde_json::from_str(
+        &std::fs::read_to_string(dir.path().join("fake-claude-print.json")).unwrap(),
+    )
+    .unwrap();
+    assert_eq!(seen["args"][1], "/usage");
+    assert!(!dir.path().join("fake-claude.json").exists());
+    assert!(!dir.path().join("projects").exists());
+}
+
+#[test]
 fn the_fake_codex_server_binds_its_socket_and_keeps_its_rollout_in_codex_home() {
     let dir = tempfile::tempdir().unwrap();
     let socket = dir.path().join("s.sock");

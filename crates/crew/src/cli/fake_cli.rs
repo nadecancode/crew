@@ -98,6 +98,11 @@ fn stay_up(mut reply: impl FnMut(&str)) {
 
 fn claude(args: &[String]) -> Result<()> {
     let dir = home_dir("CLAUDE_CONFIG_DIR", ".claude")?;
+    // Print mode (the daemon's own `claude -p /usage`) answers once and
+    // exits, like the real one: no session, transcript or hook.
+    if args.iter().any(|a| a == "-p" || a == "--print") {
+        return record(&dir, "fake-claude-print.json", args);
+    }
     record(&dir, "fake-claude.json", args)?;
     // And one per agent (--name), for agents that share a configuration directory.
     if let Some(name) = flag(args, "--name") {
