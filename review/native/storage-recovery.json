@@ -1,0 +1,366 @@
+{
+  "task": "validation-storage-recovery",
+  "sourceCommit": "c37bff6f492befd78db7829dc89a661a5cdd51ee",
+  "filesystem": {
+    "source": "/dev/nvme1n1p2",
+    "mount": "/",
+    "sharedPaths": [
+      "/tmp",
+      "workspace",
+      "/nix/store"
+    ],
+    "type": "ext4",
+    "kernelOption": "noquota",
+    "initialAvailableGiBApprox": 27,
+    "inodeUsePercent": 12,
+    "cause": "ENOSPC during isolated Git fixture setup; transient block pressure supported by post-teardown low space and recovery after cache deletion. Exact free space at failure not sampled; inode exhaustion and quota are not supported by observed evidence."
+  },
+  "runtimeFailures": {
+    "tests": [
+      "enabled::explicit_terminal_grant_echoes_then_grant_revoke_closes_attachment",
+      "enabled::explicit_control_messages_are_allowed_but_do_not_grant_terminal"
+    ],
+    "paths": [
+      "/tmp/crew-t4SrEus/ws/.git",
+      "/tmp/crew-tzKrNg5/ws/.git"
+    ],
+    "phase": "git init -q -b main before agents started",
+    "error": "No space left on device",
+    "originalPassed": 17,
+    "originalFailed": 2,
+    "postTeardownAvailableGiBApprox": 4,
+    "logs": [
+      {
+        "path": "/home/nade/workspaces/personal/crew/.crew/worktrees/runtime/target/pty-lifecycle/native-gateway.log",
+        "birthTime": "2026-10-06T01:49:19.180Z",
+        "lastWrite": "2026-10-06T01:49:33.209Z",
+        "bytes": 3144,
+        "sha256": "171a6cd57d4af12d80976cd584c4aedd02c96c6264511be99c703ad8ba4316fd",
+        "selected": [
+          {
+            "line": 7,
+            "text": "test enabled::explicit_terminal_grant_echoes_then_grant_revoke_closes_attachment ... FAILED"
+          },
+          {
+            "line": 8,
+            "text": "test enabled::explicit_control_messages_are_allowed_but_do_not_grant_terminal ... FAILED"
+          },
+          {
+            "line": 26,
+            "text": "failures:"
+          },
+          {
+            "line": 28,
+            "text": "---- enabled::explicit_terminal_grant_echoes_then_grant_revoke_closes_attachment stdout ----"
+          },
+          {
+            "line": 30,
+            "text": "thread 'enabled::explicit_terminal_grant_echoes_then_grant_revoke_closes_attachment' (1973199) panicked at crates/crew/tests/common/mod.rs:161:9:"
+          },
+          {
+            "line": 33,
+            "text": "crew: invalid: git init -q -b main failed: /tmp/crew-t4SrEus/ws/.git: No space left on device"
+          },
+          {
+            "line": 37,
+            "text": "---- enabled::explicit_control_messages_are_allowed_but_do_not_grant_terminal stdout ----"
+          },
+          {
+            "line": 39,
+            "text": "thread 'enabled::explicit_control_messages_are_allowed_but_do_not_grant_terminal' (1973198) panicked at crates/crew/tests/common/mod.rs:161:9:"
+          },
+          {
+            "line": 42,
+            "text": "crew: invalid: git init -q -b main failed: /tmp/crew-tzKrNg5/ws/.git: No space left on device"
+          },
+          {
+            "line": 46,
+            "text": "failures:"
+          },
+          {
+            "line": 47,
+            "text": "    enabled::explicit_control_messages_are_allowed_but_do_not_grant_terminal"
+          },
+          {
+            "line": 48,
+            "text": "    enabled::explicit_terminal_grant_echoes_then_grant_revoke_closes_attachment"
+          },
+          {
+            "line": 50,
+            "text": "test result: FAILED. 17 passed; 2 failed; 0 ignored; 0 measured; 0 filtered out; finished in 5.23s"
+          }
+        ]
+      },
+      {
+        "path": "/home/nade/workspaces/personal/crew/.crew/worktrees/runtime/target/pty-lifecycle/native-gateway-recovered.log",
+        "birthTime": "2026-10-06T01:54:28.610Z",
+        "lastWrite": "2026-10-06T01:54:58.190Z",
+        "bytes": 2489,
+        "sha256": "1682ee614a459d6092dc02921e3017695f80e66d338848768213093f2fe4139d",
+        "selected": [
+          {
+            "line": 24,
+            "text": "test enabled::explicit_control_messages_are_allowed_but_do_not_grant_terminal ... ok"
+          },
+          {
+            "line": 25,
+            "text": "test enabled::explicit_terminal_grant_echoes_then_grant_revoke_closes_attachment ... ok"
+          },
+          {
+            "line": 30,
+            "text": "test result: ok. 19 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 7.98s"
+          }
+        ]
+      }
+    ],
+    "recoveredPassed": 19,
+    "afterClosureTargetedRerun": {
+      "disposition": "Reuse the already logged post-recovery 19/19 run; no duplicate two-case or broad run.",
+      "authorizationMessage": "m-d82b42e19775",
+      "verifiedLines": [
+        24,
+        25
+      ],
+      "verifiedTests": [
+        "enabled::explicit_terminal_grant_echoes_then_grant_revoke_closes_attachment",
+        "enabled::explicit_control_messages_are_allowed_but_do_not_grant_terminal"
+      ],
+      "originalEnvironmentFailuresRetained": true
+    }
+  },
+  "ownerCleanup": {
+    "runtime": {
+      "paths": [
+        "target/debug/incremental"
+      ],
+      "bytesGiBApprox": 13,
+      "evidenceMessage": "m-41e5ae1b43f5",
+      "exactBytesNotRecorded": true
+    },
+    "qa": {
+      "paths": [
+        "target/ci/debug/incremental",
+        "target/native-validation/cargo/debug/incremental"
+      ],
+      "bytesGiBApprox": 11,
+      "evidencePath": "/home/nade/workspaces/personal/crew/.crew/worktrees/qa/target/native-validation/gateway-integration/cache-recovery.json",
+      "exactBytesNotRecorded": true
+    },
+    "reviewer": {
+      "root": "/home/nade/workspaces/personal/crew/.crew/worktrees/reviewer/target",
+      "directories": [
+        "ci",
+        "ci-182",
+        "ci-wasm",
+        "debug",
+        "gw",
+        "gw-182",
+        "gw-wasm",
+        "gw-wasm2",
+        "rt",
+        "rt-attach",
+        "rt-availc",
+        "rt-availc-182",
+        "rt-conn",
+        "rt-connf",
+        "rt-const-182",
+        "rt-feas",
+        "rt-ffi",
+        "rt-ffi2",
+        "rt-ffi4",
+        "rt-ffi5",
+        "rt-ffi-final",
+        "rt-focus",
+        "rt-found",
+        "rt-found2",
+        "rt-found2-msrv",
+        "rt-gen",
+        "rt-gitiso",
+        "rt-gitiso-int",
+        "rt-gw",
+        "rt-gw2",
+        "rt-gwf",
+        "rt-gwf-msrv",
+        "rt-main",
+        "rt-msrv",
+        "rt-msrv-land",
+        "rt-msrv-stable",
+        "rt-n1",
+        "rt-n1-mut",
+        "rt-n1-wasm",
+        "rt-n2a",
+        "rt-n2b",
+        "rt-n2bf",
+        "rt-n2c",
+        "rt-n3",
+        "rt-n7",
+        "rt-raw",
+        "rt-rawcore",
+        "rt-subset",
+        "tmp"
+      ],
+      "directoryCount": 49,
+      "bytesGiBApprox": 136,
+      "scratchRemoved": [
+        "gtk",
+        "gtk2",
+        "gtk2b"
+      ],
+      "scratchGiBApprox": 3.3,
+      "evidenceMessages": [
+        "m-8a10604fcb6b",
+        "m-3eb8aa4affd8"
+      ],
+      "retained": "16 rt-*.log files and CACHEDIR.TAG; source archives/memory preserved",
+      "beforeAvailableGiBApprox": 27,
+      "afterAvailableGiBApprox": 167,
+      "exactByteCountNotRecorded": true
+    },
+    "content": {
+      "startedAt": "2026-10-06T02:03:22.030Z",
+      "finishedAt": "2026-10-06T02:03:22.136Z",
+      "removed": [
+        {
+          "relative": "target/debug/incremental",
+          "absolute": "/home/nade/workspaces/personal/crew/.crew/worktrees/content/target/debug/incremental",
+          "files": 22114,
+          "dirs": 384
+        },
+        {
+          "relative": "target/native-validation/cargo/debug/incremental",
+          "absolute": "/home/nade/workspaces/personal/crew/.crew/worktrees/content/target/native-validation/cargo/debug/incremental",
+          "files": 221,
+          "dirs": 3
+        },
+        {
+          "relative": "target/wasm32-unknown-unknown/debug/incremental",
+          "absolute": "/home/nade/workspaces/personal/crew/.crew/worktrees/content/target/wasm32-unknown-unknown/debug/incremental",
+          "files": 30,
+          "dirs": 10
+        }
+      ],
+      "removedEntries": 22762,
+      "reclaimableAllocatedBytes": "7373410304",
+      "beforeAvailableBytes": "178279374848",
+      "afterAvailableBytes": "185652785152",
+      "observedAvailableDelta": "7373410304",
+      "beforeFreeInodes": "216922013",
+      "afterFreeInodes": "216935827",
+      "protectedFilesVerified": 509,
+      "protectedManifest": "protected-files.json",
+      "uniqueAllocatedBytes": "7464411136",
+      "inodesWithLinksOutsideCandidates": 29,
+      "compilerProcessesBefore": [],
+      "openCacheHandlesBefore": [],
+      "protectedManifestSha256": "30a5fed9c080f6ffe233e80e18e791d672025112c76eb1f04a199d76a9f77bf2"
+    }
+  },
+  "probe": {
+    "at": "2026-10-06T02:05:18.361Z",
+    "folder": "/tmp/crew-content-storage-probe-TUpi0R",
+    "repo": "/tmp/crew-content-storage-probe-TUpi0R/repo",
+    "clearedPrefixes": [
+      "GIT_",
+      "CREW_",
+      "HERDR_"
+    ],
+    "fixtureCommit": "b0e19ebe5faeb604ce5cffb0de9e1ced9dcc5634",
+    "results": [
+      {
+        "args": [
+          "init",
+          "--initial-branch=main"
+        ],
+        "code": 0,
+        "stdout": "Initialized empty Git repository in /tmp/crew-content-storage-probe-TUpi0R/repo/.git/\n",
+        "stderr": ""
+      },
+      {
+        "args": [
+          "add",
+          "tracked.txt"
+        ],
+        "code": 0,
+        "stdout": "",
+        "stderr": ""
+      },
+      {
+        "args": [
+          "commit",
+          "-m",
+          "Storage probe"
+        ],
+        "code": 0,
+        "stdout": "[main (root-commit) b0e19eb] Storage probe\n 1 file changed, 1 insertion(+)\n create mode 100644 tracked.txt\n",
+        "stderr": ""
+      },
+      {
+        "args": [
+          "rev-parse",
+          "HEAD"
+        ],
+        "code": 0,
+        "stdout": "b0e19ebe5faeb604ce5cffb0de9e1ced9dcc5634\n",
+        "stderr": ""
+      },
+      {
+        "args": [
+          "show",
+          "HEAD:tracked.txt"
+        ],
+        "code": 0,
+        "stdout": "storage probe\n",
+        "stderr": ""
+      },
+      {
+        "args": [
+          "fsck",
+          "--full"
+        ],
+        "code": 0,
+        "stdout": "",
+        "stderr": ""
+      },
+      {
+        "args": [
+          "status",
+          "--porcelain"
+        ],
+        "code": 0,
+        "stdout": "",
+        "stderr": ""
+      }
+    ],
+    "writtenReadBackBytes": 1048576,
+    "availableBytes": "184095002624",
+    "freeInodes": "216932056",
+    "fsckPassed": true,
+    "workspaceRoot": "/home/nade/workspaces/personal/crew/.crew/worktrees/content",
+    "scratchRetainedForReview": true
+  },
+  "headroom": {
+    "at": "2026-10-06T02:07:36.397Z",
+    "availableBytes": "180832505856",
+    "freeInodes": "216927156",
+    "totalInodes": "244162560"
+  },
+  "recommendations": {
+    "maximumConcurrentHeavyBuilds": 1,
+    "availableGiBFloor": 100,
+    "CARGO_INCREMENTAL": "0",
+    "targetReuse": "Reuse owned targets per toolchain/profile; retain binaries, logs, captures and source evidence; no global or cross-worktree cleanup."
+  },
+  "preservation": "Product source, root history/config/recovery refs, operator services, logs/captures/binaries/toolchains unchanged by content recovery. 509 protected local artifact files hash-equal.",
+  "operationalVerdict": {
+    "status": "PASS",
+    "pauseReleased": true,
+    "releaseMessages": [
+      "m-d82b42e19775",
+      "m-1a27ff9e9ef2"
+    ],
+    "firstHeavyOwner": "qa",
+    "nextRequestedHeavyOwner": "native-transport",
+    "noFurtherCleanupNeeded": true
+  },
+  "evidenceDirectory": "/home/nade/workspaces/personal/crew/.crew/worktrees/content/target/native-validation/storage-recovery"
+}
