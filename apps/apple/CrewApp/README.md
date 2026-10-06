@@ -7,6 +7,11 @@ load a workspace, take a Crew action, or implement terminal rendering.
 `native-apple-ui` supplies those later through the real Rust bridge. No domain
 records or transport implementation are duplicated in Swift.
 
+The foundation description and executed results below refer to approved
+`4479a301`. Subsequent substantive implementation is tracked separately in
+[Native implementation](NATIVE-IMPLEMENTATION.md); its source checkpoints do
+not establish a connected app or an Apple build.
+
 `Crew.xcodeproj` is checked in, with shared `CrewMac` and `CrewIOS` schemes.
 Both schemes include unit and UI test targets. App sources under `CrewApp` and
 `CrewHost` are shared; native tabs and per-destination stacks serve compact iOS,
@@ -53,7 +58,7 @@ load that library. This is a tool environment requirement, not an app dependency
 The shell adds no external Swift package. Consequently it needs no remote
 package resolution or `Package.resolved` entry at this checkpoint.
 
-On the Linux host, the source validator reported **390 checks passed**, covering
+At `4479a301`, the Linux source validator reported **390 checks passed**, covering
 101 project objects, six targets, two shared schemes, plists, resources and icon
 dimensions. Syntax parsing of 13 Swift files passed. SwiftPM manifest evaluation
 reported no external dependencies, the `CrewUI` library target with processed
@@ -138,3 +143,33 @@ regular-to-compact resizing, largest Dynamic Type, macOS 1024×600 and narrow
 windows, restore hidden sidebar, independent windows, sheet/window focus return,
 Full Keyboard Access, VoiceOver, system/light/dark, increased contrast, and
 reduced motion. This checkpoint has no decorative timers or animations.
+
+## Connected application runner
+
+**Apple verification deferred by operator.** The connected app links the real
+Rust bridge. On an Apple runner with Xcode, a Swift 6 compiler and the pinned
+Rust toolchain, from a committed checkout that contains the reviewed
+`crew-client-ffi` source matching `apps/apple/CrewClient/Sources/Generated`:
+
+```sh
+scripts/native/apple-bindings.sh --target macos --out "$PWD/target/native-validation/apple-bindings-macos"
+scripts/native/apple-bindings.sh --target ios --out "$PWD/target/native-validation/apple-bindings-ios"
+# Check the staged headers/module map against the committed ones and install
+# the XCFramework into the ignored CrewClient/Artifacts directory:
+apps/apple/scripts/install-artifacts.sh --framework <staged CrewClientFFI.xcframework>
+scripts/native/apple-test.sh --target macos --bindings <staged directory>
+scripts/native/apple-test.sh --target ios \
+  --destination 'platform=iOS Simulator,id=<listed-simulator-UDID>' --bindings <staged directory>
+```
+
+Expected results, when run: both schemes build against the staged framework;
+the unit-test sources listed in `NATIVE-IMPLEMENTATION.md` ("Native test
+sources") and the two UI tests pass on each destination. Their Linux evidence is
+typechecking only (`bash apps/apple/Tests/check-worker.sh`).
+
+Device-key storage uses the data-protection Keychain. The unit tests use
+synthetic in-memory storage, but real gateway setup needs a development-signed
+build whose entitlements allow Keychain access; an unsigned build reports
+"This device's secure storage is unavailable", which is the intended explicit
+failure, not a fallback. Connection cases C01–C20 additionally need a host
+running the opt-in native gateway service and its trusted console.

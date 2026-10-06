@@ -18,6 +18,9 @@ use crate::{
 
 type DestinationObserver = Box<dyn Fn(Destination)>;
 
+/// The sidebar keeps this width whatever its status text says.
+pub const SIDEBAR_WIDTH: i32 = 184;
+
 struct Inner {
     window: gtk::ApplicationWindow,
     adaptive: AdaptiveBox,
@@ -125,11 +128,20 @@ impl Shell {
         status_detail.set_wrap(true);
         status_detail.add_css_class("crew-muted");
         status_slot.append(&status_detail);
+        // The status text wraps inside the sidebar. Without a horizontal
+        // scrollbar the clip requests only its child's minimum width, so a
+        // long status line cannot widen the sidebar and shift the main pane.
+        let status_clip = gtk::ScrolledWindow::builder()
+            .child(&status_slot)
+            .hscrollbar_policy(gtk::PolicyType::Never)
+            .vscrollbar_policy(gtk::PolicyType::Never)
+            .propagate_natural_height(true)
+            .build();
         let sidebar = gtk::Box::new(gtk::Orientation::Vertical, 0);
-        sidebar.set_width_request(184);
+        sidebar.set_width_request(SIDEBAR_WIDTH);
         sidebar.add_css_class("crew-sidebar");
         sidebar.append(&nav_scroll);
-        sidebar.append(&status_slot);
+        sidebar.append(&status_clip);
 
         let detail_heading = gtk::Label::new(Some("Details"));
         detail_heading.set_xalign(0.0);
@@ -246,14 +258,29 @@ impl Shell {
             appearance_action,
         }));
         shell.install_actions(app);
+        // Only activation (Enter, Space or a click) changes the destination.
+        // Arrow keys move focus within the list and Tab leaves it, so the
+        // sidebar is a single Tab stop.
         let weak = Rc::downgrade(&shell.0);
-        shell.0.navigation.connect_row_selected(move |_, row| {
-            if let (Some(inner), Some(row)) = (weak.upgrade(), row) {
+        shell.0.navigation.connect_row_activated(move |_, row| {
+            if let Some(inner) = weak.upgrade() {
                 if let Some(destination) = Destination::ALL.get(row.index() as usize) {
                     Shell(inner).navigate(*destination);
                 }
             }
         });
+        // GTK's list box selects the row that keyboard focus enters; the
+        // selection keeps marking the current destination instead.
+        let weak = Rc::downgrade(&shell.0);
+        shell.0.navigation.connect_row_selected(move |list, row| {
+            if let Some(inner) = weak.upgrade() {
+                let current = &inner.rows[inner.destination.get().index()];
+                if row != Some(current) {
+                    list.select_row(Some(current));
+                }
+            }
+        });
+        shell.0.navigation.add_controller(sidebar_keys(&shell));
         let weak = Rc::downgrade(&shell.0);
         shell.0.adaptive.connect_compact_notify(move |_| {
             if let Some(inner) = weak.upgrade() {
@@ -423,6 +450,12 @@ impl Shell {
         self.0.detail_action.set_state(&detail.to_variant());
     }
 
+    /// Focus the current page's first control, or its remembered focus, as
+    /// navigation does. For callers whose own focus target has gone.
+    pub fn focus_page(&self) {
+        self.focus_visible_view();
+    }
+
     fn remember_main_focus(&self) {
         if let Some(focus) = gtk::prelude::GtkWindowExt::focus(&self.0.window) {
             let index = self.destination().index();
@@ -552,7 +585,12 @@ impl Shell {
             ("Show or hide details", "Ctrl+I"),
             ("Back from compact navigation or details", "Alt+Left"),
             ("Move between controls", "Tab / Shift+Tab"),
-            ("Move through destinations", "Up / Down"),
+            ("Move between destinations in the sidebar", "Up / Down"),
+            ("Open the focused destination", "Enter"),
+            (
+                "Leave an attached terminal (other keys go to the agent)",
+                "F6",
+            ),
             ("Keyboard shortcuts", "F1"),
             ("Close window", "Ctrl+W"),
             ("Quit application", "Ctrl+Q"),
@@ -566,7 +604,6 @@ impl Shell {
             let keys = gtk::Label::new(Some(keys));
             keys.set_wrap(true);
             keys.set_xalign(0.0);
-            keys.set_selectable(true);
             grid.attach(&description, 0, row as i32, 1, 1);
             grid.attach(&keys, 1, row as i32, 1, 1);
         }
@@ -651,6 +688,84 @@ impl Shell {
             }
             glib::Propagation::Proceed
         });
+    }
+}
+
+/// Arrow keys move focus between destinations without selecting one; Tab and
+/// Shift+Tab leave the list from whichever destination has focus.
+fn sidebar_keys(shell: &Shell) -> gtk::EventControllerKey {
+    let keys = gtk::EventControllerKey::new();
+    keys.set_propagation_phase(gtk::PropagationPhase::Capture);
+    let weak = Rc::downgrade(&shell.0);
+    keys.connect_key_pressed(move |_, key, _, modifiers| {
+        use gtk::gdk::{Key, ModifierType};
+        let Some(inner) = weak.upgrade() else {
+            return glib::Propagation::Proceed;
+        };
+        if modifiers.intersects(
+            ModifierType::CONTROL_MASK | ModifierType::ALT_MASK | ModifierType::SUPER_MASK,
+        ) {
+            return glib::Propagation::Proceed;
+        }
+        let Some(index) = inner.rows.iter().position(|row| row.is_focus()) else {
+            return glib::Propagation::Proceed;
+        };
+        let last = inner.rows.len() - 1;
+        let target = match key {
+            Key::Up | Key::KP_Up => index.saturating_sub(1),
+            Key::Down | Key::KP_Down => (index + 1).min(last),
+            Key::Home | Key::KP_Home => 0,
+            Key::End | Key::KP_End => last,
+            Key::Tab | Key::KP_Tab | Key::ISO_Left_Tab => {
+                let backward =
+                    key == Key::ISO_Left_Tab || modifiers.contains(ModifierType::SHIFT_MASK);
+                focus_past(
+                    inner.navigation.upcast_ref(),
+                    if backward {
+                        gtk::DirectionType::TabBackward
+                    } else {
+                        gtk::DirectionType::TabForward
+                    },
+                );
+                return glib::Propagation::Stop;
+            }
+            _ => return glib::Propagation::Proceed,
+        };
+        inner.rows[target].grab_focus();
+        glib::Propagation::Stop
+    });
+    keys
+}
+
+/// Move focus to the next focusable widget outside `widget` in `direction`,
+/// wrapping at the window's edge as Tab does.
+pub(crate) fn focus_past(widget: &gtk::Widget, direction: gtk::DirectionType) -> bool {
+    let forward = direction == gtk::DirectionType::TabForward;
+    let mut node = widget.clone();
+    while let Some(parent) = node.parent() {
+        let mut sibling = if forward {
+            node.next_sibling()
+        } else {
+            node.prev_sibling()
+        };
+        while let Some(candidate) = sibling {
+            if candidate.is_visible() && candidate.child_focus(direction) {
+                return true;
+            }
+            sibling = if forward {
+                candidate.next_sibling()
+            } else {
+                candidate.prev_sibling()
+            };
+        }
+        node = parent;
+    }
+    match node.downcast::<gtk::Window>() {
+        Ok(window) => {
+            gtk::prelude::GtkWindowExt::set_focus(&window, None::<&gtk::Widget>);
+            window.child_focus(direction)
+        }
+        Err(_) => false,
     }
 }
 

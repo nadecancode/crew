@@ -39,7 +39,28 @@ pub fn disconnected(destination: Destination) -> gtk::ScrolledWindow {
             "Connect to a workspace to see reported tokens, context, and limits.",
         ),
     };
-    empty_state(destination.icon(), title, description)
+    let (page, column) = empty_page(destination.icon(), title, description);
+    // The way out of the empty state is a connection: Choose workspace opens
+    // Connections (`win.connections`, installed by the controller).
+    let choose = gtk::Button::builder()
+        .label("Choose workspace")
+        .action_name("win.connections")
+        .halign(gtk::Align::Center)
+        .build();
+    choose.add_css_class("suggested-action");
+    column.append(&choose);
+    // Unlike static empty prose, this page has a control to focus.
+    page.set_can_focus(true);
+    page
+}
+
+/// Append a control to a flowing row of controls. The row's own child
+/// wrapper is not a focus stop, so Tab visits each control once.
+pub fn add_control(row: &gtk::FlowBox, control: &impl IsA<gtk::Widget>) {
+    row.insert(control, -1);
+    if let Some(wrapper) = control.parent() {
+        wrapper.set_focusable(false);
+    }
 }
 
 pub fn no_selection() -> gtk::ScrolledWindow {
@@ -51,6 +72,12 @@ pub fn no_selection() -> gtk::ScrolledWindow {
 }
 
 pub fn empty_state(icon: &str, title: &str, description: &str) -> gtk::ScrolledWindow {
+    empty_page(icon, title, description).0
+}
+
+/// An empty state and the column holding its prose, for a caller that adds an
+/// action below it.
+fn empty_page(icon: &str, title: &str, description: &str) -> (gtk::ScrolledWindow, gtk::Box) {
     let column = gtk::Box::new(gtk::Orientation::Vertical, 12);
     column.set_halign(gtk::Align::Center);
     column.set_valign(gtk::Align::Center);
@@ -78,7 +105,7 @@ pub fn empty_state(icon: &str, title: &str, description: &str) -> gtk::ScrolledW
     // navigation falls back to the destination control when no row exists.
     body.add_css_class("crew-muted");
     column.append(&body);
-    gtk::ScrolledWindow::builder()
+    let page = gtk::ScrolledWindow::builder()
         // Static empty prose contributes no keyboard target. Let the shell
         // restore the named destination control; feature scrollers stay native.
         .can_focus(false)
@@ -88,5 +115,6 @@ pub fn empty_state(icon: &str, title: &str, description: &str) -> gtk::ScrolledW
         .hexpand(true)
         .vexpand(true)
         .child(&column)
-        .build()
+        .build();
+    (page, column)
 }

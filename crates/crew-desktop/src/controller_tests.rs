@@ -642,15 +642,16 @@ fn restored_identity(c: &Controller, recorder: &Recording, unknown: u64, current
 
     c.restore_receipt(unknown);
     grant_send(c, recorder, current);
-    let (_, readdressed) = last_form(c);
-    let entry = descendants(readdressed.dialog.upcast_ref())
-        .into_iter()
-        .find_map(|w| w.downcast::<gtk::Entry>().ok())
-        .expect("recipient entry");
-    entry.set_text("claude-2");
+    let (readdressed_id, readdressed) = last_form(c);
+    let picker = c.forms.borrow()[&readdressed_id]
+        .recipients
+        .clone()
+        .expect("labelled To selector");
+    assert_eq!(picker.recipient(), "claude-1");
+    assert!(picker.select(RecipientPicker::EVERYONE));
     readdressed.dialog.response(gtk::ResponseType::Accept);
     let (_, to, _, readdressed_id) = last_send(recorder);
-    assert_eq!(to, "claude-2");
+    assert_eq!(to, "*", "Everyone is the team broadcast");
     assert!(readdressed_id != "receipt-2002" && readdressed_id != edited_id);
     let unknown_form = c.forms.borrow().get(&unknown).unwrap().form.clone();
     assert!(unknown_form.receipt.get());

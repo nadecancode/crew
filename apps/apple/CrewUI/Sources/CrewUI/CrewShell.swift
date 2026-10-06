@@ -10,17 +10,22 @@ public struct CrewShell<Content: View, WorkspaceControl: View, Utilities: View>:
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
     #endif
     @State private var columnVisibility: NavigationSplitViewVisibility = .automatic
+    @FocusState private var destinationFocus: CrewDestination?
+    @AccessibilityFocusState private var readingDestination: CrewDestination?
+    private let focus: CrewFocus?
     private let content: (CrewDestination) -> Content
     private let workspace: () -> WorkspaceControl
     private let utilities: () -> Utilities
 
     public init(
         navigation: CrewNavigation,
+        focus: CrewFocus? = nil,
         @ViewBuilder content: @escaping (CrewDestination) -> Content,
         @ViewBuilder workspace: @escaping () -> WorkspaceControl,
         @ViewBuilder utilities: @escaping () -> Utilities
     ) {
         self.navigation = navigation
+        self.focus = focus
         self.content = content
         self.workspace = workspace
         self.utilities = utilities
@@ -85,7 +90,26 @@ public struct CrewShell<Content: View, WorkspaceControl: View, Utilities: View>:
         NavigationStack(path: navigation.pathBinding(for: destination)) {
             content(destination)
                 .navigationTitle(destination.title)
-                .toolbar { shellToolbar }
+                .toolbar {
+                    ToolbarItem(placement: .principal) {
+                        Button(destination.title) { navigation.selection = destination }
+                            .focused($destinationFocus, equals: destination)
+                            .accessibilityFocused($readingDestination, equals: destination)
+                            .accessibilityLabel("\(destination.title) destination")
+                            .accessibilityIdentifier("crew.current-destination")
+                            #if os(iOS)
+                            .frame(minWidth: 44, minHeight: 44)
+                            #endif
+                    }
+                    shellToolbar
+                }
+                .onChange(of: focus?.request?.id) { _, _ in
+                    guard navigation.selection == destination, let request = focus?.request,
+                          request.destination == destination, request.target == nil else { return }
+                    destinationFocus = destination
+                    readingDestination = destination
+                    focus?.consume(request.id)
+                }
         }
         .id(destination)
         .accessibilityIdentifier("crew.content.\(destination.rawValue)")

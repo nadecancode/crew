@@ -7,8 +7,19 @@ let package = Package(
     name: "CrewUI",
     platforms: [.iOS(.v17), .macOS(.v14)],
     products: [.library(name: "CrewUI", targets: ["CrewUI"])],
+    dependencies: [
+        .package(path: "../CrewClient"),
+        .package(url: "https://github.com/migueldeicaza/SwiftTerm.git", exact: "1.19.0")
+    ],
     targets: [
-        .target(name: "CrewUI", resources: [.process("Resources")])
+        .target(
+            name: "CrewUI",
+            dependencies: [
+                .product(name: "CrewBindings", package: "CrewClient"),
+                .product(name: "SwiftTerm", package: "SwiftTerm")
+            ],
+            resources: [.process("Resources")]
+        )
     ],
     swiftLanguageVersions: [.v5]
 )

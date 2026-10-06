@@ -63,10 +63,11 @@ def locate(object_id, parent):
 locate(root["mainGroup"], APPLE)
 targets = {objects[key]["name"]: objects[key] for key in root["targets"]}
 require(set(targets) == {"CrewMac", "CrewMacTests", "CrewMacUITests", "CrewIOS", "CrewIOSTests", "CrewIOSUITests"}, "Six app/test targets required")
-require(len(root["packageReferences"]) == 1, "Shell must resolve one real presentation package")
-package = objects[root["packageReferences"][0]]
-require(package["isa"] == "XCLocalSwiftPackageReference", "Presentation package must be local")
-require((APPLE / package["relativePath"] / "Package.swift").is_file(), "Missing SwiftPM manifest")
+require({objects[key]["relativePath"] for key in root["packageReferences"]} == {"CrewUI", "CrewClient"}, "Presentation and actual generated client packages required")
+for package_id in root["packageReferences"]:
+    package = objects[package_id]
+    require(package["isa"] == "XCLocalSwiftPackageReference", "Presentation/client package must be local")
+    require((APPLE / package["relativePath"] / "Package.swift").is_file(), "Missing SwiftPM manifest")
 
 expected_sources = set((APPLE / "CrewApp").glob("*.swift")) | set((APPLE / "CrewHost").glob("*.swift"))
 for application, sdk, floor_key, floor in (
@@ -83,7 +84,7 @@ for application, sdk, floor_key, floor in (
             if phase["isa"] == "PBXSourcesBuildPhase":
                 sources.add(locations[build["fileRef"]])
             elif phase["isa"] == "PBXFrameworksBuildPhase":
-                require(objects[build["productRef"]]["productName"] == "CrewUI", "No fabricated native bridge dependency")
+                require(objects[build["productRef"]]["productName"] in {"CrewUI", "CrewBindings"}, "Unknown app framework dependency")
     require(sources == expected_sources, f"Incomplete source phase for {application}")
     configurations = objects[target["buildConfigurationList"]]["buildConfigurations"]
     for configuration_id in configurations:
@@ -98,14 +99,14 @@ for application, sdk, floor_key, floor in (
         require(info["CFBundleDisplayName"] == "Crew", "Incorrect display name")
         require(info["CFBundlePackageType"] == "APPL", "Incorrect application bundle type")
     for suffix, product_type, source_file in (
-        ("Tests", "com.apple.product-type.bundle.unit-test", "CrewShellTests.swift"),
-        ("UITests", "com.apple.product-type.bundle.ui-testing", "CrewShellUITests.swift"),
+        ("Tests", "com.apple.product-type.bundle.unit-test", {"CrewShellTests.swift", "AppleDeviceKeyVaultTests.swift", "CrewClientWorkerTests.swift", "CrewSendDraftTests.swift", "CrewNoticeRoutingTests.swift", "CrewExternalLinksTests.swift", "CrewGatewayTests.swift"}),
+        ("UITests", "com.apple.product-type.bundle.ui-testing", {"CrewShellUITests.swift"}),
     ):
         test = targets[application + suffix]
         require(test["productType"] == product_type, "Incorrect test bundle type")
         require(any(objects[dep]["target"] in root["targets"] and objects[objects[dep]["target"]]["name"] == application for dep in test["dependencies"]), "Missing test-host dependency")
         source_phase = next(objects[key] for key in test["buildPhases"] if objects[key]["isa"] == "PBXSourcesBuildPhase")
-        require({locations[objects[key]["fileRef"]].name for key in source_phase["files"]} == {source_file}, "Wrong test source")
+        require({locations[objects[key]["fileRef"]].name for key in source_phase["files"]} == source_file, "Wrong test source")
     scheme = ET.parse(APPLE / f"Crew.xcodeproj/xcshareddata/xcschemes/{application}.xcscheme").getroot()
     for buildable in scheme.findall(".//BuildableReference"):
         name = buildable.attrib["BlueprintName"]
@@ -114,6 +115,10 @@ for application, sdk, floor_key, floor in (
     require({item.attrib["BlueprintName"] for item in scheme.findall("./TestAction/Testables/TestableReference/BuildableReference")} == {application + "Tests", application + "UITests"}, "Scheme must test both bundles")
 
 ET.parse(APPLE / "Crew.xcodeproj/project.xcworkspace/contents.xcworkspacedata")
+pins = json.loads((APPLE / "Crew.xcodeproj/project.xcworkspace/xcshareddata/swiftpm/Package.resolved").read_text())["pins"]
+require(len(pins) == 1 and pins[0]["identity"] == "swiftterm", "Only the reviewed terminal package should be pinned")
+require(pins[0]["state"]["version"] == "1.19.0", "Wrong terminal package version")
+require(pins[0]["state"]["revision"] == "464df5207fc2432e16c9a23abe538187196daf5f", "Wrong terminal package revision")
 icons = APPLE / "CrewApp/Resources/Assets.xcassets/AppIcon.appiconset"
 icon_spec = json.loads((icons / "Contents.json").read_text())
 for image in icon_spec["images"]:

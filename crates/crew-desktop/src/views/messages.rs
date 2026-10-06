@@ -88,9 +88,9 @@ impl MessagesView {
         controls.set_selection_mode(gtk::SelectionMode::None);
         controls.set_min_children_per_line(1);
         controls.set_max_children_per_line(3);
-        controls.insert(&agent, -1);
-        controls.insert(&peer, -1);
-        controls.insert(&kind, -1);
+        super::add_control(&controls, &agent);
+        super::add_control(&controls, &peer);
+        super::add_control(&controls, &kind);
         root.append(&controls);
         let list = EntityList::new("Messages", select);
         let empty = super::empty_state(

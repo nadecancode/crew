@@ -5,7 +5,10 @@ use super::{
 use crate::terminal::TerminalView;
 use crew_client::api::*;
 use gtk::prelude::*;
-use std::{cell::RefCell, rc::Rc};
+use std::{
+    cell::{Cell, RefCell},
+    rc::Rc,
+};
 
 pub struct AgentCallbacks {
     pub action: Rc<dyn Fn(ActionIntent)>,
@@ -31,6 +34,7 @@ pub struct AgentInspector {
     controls: Vec<(ActionKind, gtk::Button)>,
     evidence: Vec<(ResourceKey, EvidenceView)>,
     latest: Rc<RefCell<Option<AgentPresentation>>>,
+    live: Rc<Cell<bool>>,
 }
 impl AgentInspector {
     pub fn new(key: EntityKey, callbacks: AgentCallbacks) -> Self {
@@ -81,7 +85,7 @@ impl AgentInspector {
                     })
                 }
             });
-            actions.insert(&button, -1);
+            super::add_control(&actions, &button);
             controls.push((kind, button));
         }
         let model = gtk::Button::with_label("Model and CLI");
@@ -90,7 +94,7 @@ impl AgentInspector {
             let key = key.clone();
             move |_| callback(key.clone())
         });
-        actions.insert(&model, -1);
+        super::add_control(&actions, &model);
         controls.push((ActionKind::SetModel, model));
         let compose = gtk::Button::with_label("Message agent");
         compose.connect_clicked({
@@ -98,7 +102,7 @@ impl AgentInspector {
             let id = id.clone();
             move |_| callback(id.clone())
         });
-        actions.insert(&compose, -1);
+        super::add_control(&actions, &compose);
         controls.push((ActionKind::SendMessage, compose));
         let reasons = common::text("");
         reasons.add_css_class("crew-muted");
@@ -151,6 +155,21 @@ impl AgentInspector {
             move |_| callback(key.clone())
         });
         terminal_page.append(&attach);
+        // Attach is offered only while nothing is attached here.
+        let latest: Rc<RefCell<Option<AgentPresentation>>> = Rc::new(RefCell::new(None));
+        let live = Rc::new(Cell::new(false));
+        terminal.connect_attached({
+            let attach = attach.downgrade();
+            let latest = latest.clone();
+            let live = live.clone();
+            move |attached| {
+                if let Some(attach) = attach.upgrade() {
+                    attach.set_sensitive(
+                        !attached && live.get() && available(&latest.borrow(), ActionKind::Attach),
+                    );
+                }
+            }
+        });
         controls.push((ActionKind::Attach, attach));
         terminal_page.append(&terminal.root);
         tabs.append_page(&terminal_page, Some(&gtk::Label::new(Some("Terminal"))));
@@ -208,7 +227,8 @@ impl AgentInspector {
             messages,
             controls,
             evidence,
-            latest: Rc::new(RefCell::new(None)),
+            latest,
+            live,
         }
     }
     pub fn update(&self, data: &AgentDetailData, live: bool) {
@@ -327,13 +347,15 @@ impl AgentInspector {
         }
     }
     pub fn set_live(&self, live: bool) {
+        self.live.set(live);
         let latest = self.latest.borrow();
         let mut reasons = Vec::new();
         for (kind, button) in &self.controls {
             let availability = latest
                 .as_ref()
                 .and_then(|agent| agent.actions.iter().find(|a| a.action == *kind));
-            button.set_sensitive(live && availability.is_some_and(|a| a.available));
+            let attached = *kind == ActionKind::Attach && self.terminal.is_active();
+            button.set_sensitive(live && !attached && availability.is_some_and(|a| a.available));
             if let Some(reason) = availability.and_then(|a| a.reason.as_ref()) {
                 button.set_tooltip_text(Some(&reason.message));
                 reasons.push(format!(
@@ -354,4 +376,11 @@ impl AgentInspector {
         }
         self.reasons.set_label(&reasons.join("\n"));
     }
+}
+
+fn available(agent: &Option<AgentPresentation>, kind: ActionKind) -> bool {
+    agent
+        .as_ref()
+        .and_then(|agent| agent.actions.iter().find(|a| a.action == kind))
+        .is_some_and(|a| a.available)
 }
