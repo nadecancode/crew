@@ -50,21 +50,16 @@ impl TaskInspector {
         body.append(&cycle);
         let artifacts = gtk::Box::new(gtk::Orientation::Vertical, 8);
         body.append(&artifacts);
-        let tabs = gtk::Notebook::new();
-        tabs.set_scrollable(true);
-        tabs.set_vexpand(true);
-        tabs.append_page(&common::scroll(&body), Some(&gtk::Label::new(Some("Task"))));
+        let tabs = common::Tabs::new("Task sections");
+        tabs.append("Task", &common::scroll(&body));
         let resource = ResourceKey {
             entity: key,
             kind: ResourceKind::TaskCard,
             options: ReadOptions::Default,
         };
         let evidence = EvidenceView::new(move || read(resource.clone()));
-        tabs.append_page(
-            &evidence.root,
-            Some(&gtk::Label::new(Some("Complete card"))),
-        );
-        root.append(&tabs);
+        tabs.append("Complete card", &evidence.root);
+        root.append(&tabs.root);
         Self {
             root,
             title,
