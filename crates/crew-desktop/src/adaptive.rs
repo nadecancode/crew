@@ -69,11 +69,10 @@ mod imp {
 
         fn size_allocate(&self, width: i32, height: i32, baseline: i32) {
             // Until the collapse below takes effect, the wide layout keeps its
-            // own minimum and is clipped rather than squeezed. Its height
-            // follows its width, so the minimum is asked for no particular
-            // height: a width-for-height answer would contradict GTK's cached
-            // height-for-width sizes.
-            let (wide_min, _, _, _) = self.child().measure(gtk::Orientation::Horizontal, -1);
+            // own minimum and is clipped rather than squeezed. The minimum is
+            // the one for this height: for no particular height it can be
+            // narrower than this height needs, which GTK rejects.
+            let (wide_min, _, _, _) = self.child().measure(gtk::Orientation::Horizontal, height);
             self.child()
                 .allocate(width.max(wide_min), height, baseline, None);
             // GtkBox's layout manager bypasses Widget::size_allocate. This
