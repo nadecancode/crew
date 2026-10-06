@@ -2,7 +2,7 @@
 //! confirmations, resources, retry and transport; GTK owns local UI state.
 use crate::{
     availability::{Controls, Input as ControlInput, Intent},
-    dialogs::{self, Form},
+    dialogs::{self, Form, RecipientPicker},
     navigation::Destination,
     service::{ClientService, Request, Response, ServiceHandle},
     shell::Shell,
@@ -44,6 +44,8 @@ enum QueryTarget {
         form: u64,
         intent: Box<ActionIntent>,
     },
+    /// Agents for the To selector of the compose form with this token.
+    Recipients(u64),
 }
 #[derive(Clone)]
 struct PendingAction {
@@ -51,12 +53,16 @@ struct PendingAction {
     form: Option<u64>,
     terminal: Option<TerminalView>,
     canceled: bool,
+    /// The control that had focus when the action was invoked: a
+    /// confirmation returns focus there once it closes.
+    opener: glib::WeakRef<gtk::Widget>,
 }
 struct OpenForm {
     form: Form,
     scope: ClientScope,
     target: String,
     submitted: Option<ActionIntent>,
+    recipients: Option<RecipientPicker>,
 }
 /// Unsent text belongs to its endpoint, workspace and purpose, never to one
 /// connection attempt: an ordinary reconnect keeps it, while a submission
@@ -145,6 +151,7 @@ pub struct Controller {
     early_outcomes: RefCell<Vec<OperationNotice>>,
     attachments: RefCell<Vec<(ClientScope, AttachmentId, TerminalView)>>,
     confirmation: RefCell<Option<Confirmation>>,
+    focus_return: RefCell<Option<(glib::WeakRef<gtk::Widget>, glib::SignalHandlerId)>>,
     forms: RefCell<BTreeMap<u64, OpenForm>>,
     drafts: RefCell<Vec<(DraftKey, String)>>,
     questions: RefCell<Vec<crew_protocol::Message>>,
@@ -291,6 +298,7 @@ impl Controller {
                 early_outcomes: RefCell::new(Vec::new()),
                 attachments: RefCell::new(Vec::new()),
                 confirmation: RefCell::new(None),
+                focus_return: RefCell::new(None),
                 forms: RefCell::new(BTreeMap::new()),
                 drafts: RefCell::new(Vec::new()),
                 questions: RefCell::new(Vec::new()),
@@ -336,6 +344,17 @@ impl Controller {
             }
         });
         controller.shell.set_workspace_selector(&connections);
+        // Empty disconnected pages offer the same Connections entry point.
+        let choose = gtk::gio::SimpleAction::new("connections", None);
+        choose.connect_activate({
+            let weak = controller.weak.clone();
+            move |_, _| {
+                if let Some(c) = weak.upgrade() {
+                    c.connections();
+                }
+            }
+        });
+        controller.shell.window().add_action(&choose);
         for (destination, widget) in [
             (
                 Destination::Team,
@@ -363,7 +382,7 @@ impl Controller {
                     }
                 }
             });
-            controls.insert(&refresh, -1);
+            views::add_control(&controls, &refresh);
             if destination == Destination::Messages || destination == Destination::Team {
                 let compose = gtk::Button::with_label("New message");
                 compose.connect_clicked({
@@ -374,7 +393,7 @@ impl Controller {
                         }
                     }
                 });
-                controls.insert(&compose, -1);
+                views::add_control(&controls, &compose);
                 if destination == Destination::Messages {
                     let receipts = gtk::Button::with_label("Message receipts");
                     receipts.connect_clicked({
@@ -385,11 +404,11 @@ impl Controller {
                             }
                         }
                     });
-                    controls.insert(&receipts, -1);
+                    views::add_control(&controls, &receipts);
                 }
             }
             if destination == Destination::Team {
-                controls.insert(&controller.questions_button, -1);
+                views::add_control(&controls, &controller.questions_button);
                 page.append(&controller.overview);
                 let stop = gtk::Button::with_label("Stop team");
                 stop.connect_clicked({
@@ -429,7 +448,7 @@ impl Controller {
                 let group = gtk::Box::new(gtk::Orientation::Vertical, 4);
                 group.append(&stop);
                 group.append(&reason);
-                controls.insert(&group, -1);
+                views::add_control(&controls, &group);
             }
             if destination == Destination::Usage {
                 for (name, restart) in [
@@ -478,7 +497,7 @@ impl Controller {
                     let group = gtk::Box::new(gtk::Orientation::Vertical, 4);
                     group.append(&button);
                     group.append(&reason);
-                    controls.insert(&group, -1);
+                    views::add_control(&controls, &group);
                 }
             }
             page.append(&controls);
@@ -853,6 +872,18 @@ impl Controller {
             }
             (QueryTarget::Main(Destination::Team), ViewPayload::Team(team)) => {
                 self.team.update(data.scope.as_ref(), &team)
+            }
+            (QueryTarget::Recipients(form), ViewPayload::Team(team)) => {
+                let picker = self
+                    .forms
+                    .borrow()
+                    .get(&form)
+                    .and_then(|open| open.recipients.clone());
+                if let Some(picker) = picker {
+                    let agents: Vec<String> =
+                        team.agents.iter().map(|m| m.agent.id.clone()).collect();
+                    picker.set_agents(&agents, &picker.recipient());
+                }
             }
             (QueryTarget::Main(Destination::Tasks), ViewPayload::Tasks(tasks)) => {
                 self.tasks.update(data.scope.as_ref(), &tasks)
@@ -1283,6 +1314,10 @@ impl Controller {
                 .set_label("This action belongs to a workspace that is no longer selected.");
             return;
         }
+        // Captured now: by the time a confirmation arrives Core may already
+        // report the action pending and the opener may have lost focus.
+        let opener = glib::WeakRef::new();
+        opener.set(gtk::prelude::GtkWindowExt::focus(self.shell.window()).as_ref());
         let token = self.token();
         if self.send(Request::Plan {
             token,
@@ -1309,6 +1344,7 @@ impl Controller {
                     form,
                     terminal,
                     canceled: false,
+                    opener,
                 },
             );
         }
@@ -1450,6 +1486,15 @@ impl Controller {
                             }
                         }
                     }),
+                    Rc::new({
+                        let weak = self.weak.clone();
+                        let opener = action.opener.clone();
+                        move || {
+                            if let Some(c) = weak.upgrade() {
+                                c.return_focus(&opener);
+                            }
+                        }
+                    }),
                 );
                 *self.confirmation.borrow_mut() = Some(Confirmation {
                     id: confirmation_id,
@@ -1459,6 +1504,55 @@ impl Controller {
             }
             Ok(ActionPlan::Unavailable { reason }) => self.action_failed(&action, &reason.message),
             Err(error) => self.action_failed(&action, &error.to_string()),
+        }
+    }
+    /// After a confirmation closes, focus goes back to the control that
+    /// opened it. Core keeps that control unavailable until it has settled
+    /// the held confirmation, so focus waits on the nearest available
+    /// control and moves back when the opener is enabled again, unless the
+    /// user has moved it meanwhile. An opener that is gone leaves focus on
+    /// the page's first control.
+    fn return_focus(&self, opener: &glib::WeakRef<gtk::Widget>) {
+        self.clear_focus_return();
+        let window = self.shell.window();
+        let Some(opener) = opener.upgrade().filter(|o| o.is_mapped()) else {
+            self.shell.focus_page();
+            return;
+        };
+        if opener.is_sensitive() && opener.grab_focus() {
+            return;
+        }
+        gtk::prelude::GtkWindowExt::set_focus(window, None::<&gtk::Widget>);
+        if !focus_near(&opener) {
+            self.shell.focus_page();
+        }
+        let placed = glib::WeakRef::new();
+        placed.set(gtk::prelude::GtkWindowExt::focus(window).as_ref());
+        let window = window.downgrade();
+        let weak = self.weak.clone();
+        let handler = opener.connect_sensitive_notify(move |opener| {
+            if !opener.is_sensitive() || !opener.is_mapped() {
+                return;
+            }
+            let untouched = window.upgrade().is_some_and(|window| {
+                gtk::prelude::GtkWindowExt::focus(&window)
+                    .is_none_or(|focus| placed.upgrade().is_some_and(|placed| placed == focus))
+            });
+            if untouched {
+                opener.grab_focus();
+            }
+            if let Some(c) = weak.upgrade() {
+                c.clear_focus_return();
+            }
+        });
+        *self.focus_return.borrow_mut() = Some((opener.downgrade(), handler));
+    }
+    fn clear_focus_return(&self) {
+        let pending = self.focus_return.borrow_mut().take();
+        if let Some((opener, handler)) = pending {
+            if let Some(opener) = opener.upgrade() {
+                opener.disconnect(handler);
+            }
         }
     }
     fn action_failed(&self, action: &PendingAction, message: &str) {
@@ -1899,21 +1993,16 @@ impl Controller {
         let token = self.token();
         let target = format!("message:{recipient}");
         let identity = Rc::new(RefCell::new(MessageIdentity::new(origin)));
-        let entry = gtk::Entry::builder()
-            .text(&recipient)
-            .placeholder_text("Agent ID or * for broadcast")
-            .build();
-        entry.update_property(&[gtk::accessible::Property::Label(
-            "Recipient; * broadcasts to the team",
-        )]);
-        let form = Form::new(self.shell.window(), "New message", &format!("Workspace {} · recipient * broadcasts to the team. Return inserts a newline; Send submits explicitly.", scope.workspace_id), &initial.unwrap_or_else(|| self.draft(&scope, &target)), "Send",
-            Rc::new({ let weak = self.weak.clone(); let scope = scope.clone(); let entry = entry.clone(); let identity = identity.clone(); move |body| if let Some(c) = weak.upgrade() {
-                let recipient = entry.text().to_string();
+        let picker = RecipientPicker::new(&recipient);
+        let form = Form::new(self.shell.window(), "New message", &format!("Workspace {} · Everyone sends to the whole team. Return inserts a newline; Send submits explicitly.", scope.workspace_id), &initial.unwrap_or_else(|| self.draft(&scope, &target)), "Send",
+            Rc::new({ let weak = self.weak.clone(); let scope = scope.clone(); let picker = picker.clone(); let identity = identity.clone(); move |body| if let Some(c) = weak.upgrade() {
+                let recipient = picker.recipient();
                 if !c.command(&body, &recipient, &scope) { let message_id = identity.borrow_mut().submit(&recipient, &body); c.plan(ActionIntent::SendMessage { scope: scope.clone(), to: recipient, body, message_id }, Some(token), None); }
                 else { let form = c.forms.borrow().get(&token).map(|f| f.form.clone()); if let Some(form) = form { form.failed(c.result.label().as_str()); } }
-            }}), Rc::new({ let weak = self.weak.clone(); let scope = scope.clone(); let entry = entry.clone(); move |text| if let Some(c) = weak.upgrade() { c.save_draft(&scope, &format!("message:{}", entry.text()), &text); let receipt = c.forms.borrow().get(&token).is_some_and(|open| open.form.receipt.get()); if !receipt { c.forms.borrow_mut().remove(&token); c.controls.remove(token); } } }));
-        form.dialog.content_area().prepend(&entry);
-        form.add_editor(&entry);
+            }}), Rc::new({ let weak = self.weak.clone(); let scope = scope.clone(); let picker = picker.clone(); move |text| if let Some(c) = weak.upgrade() { c.save_draft(&scope, &format!("message:{}", picker.recipient()), &text); let receipt = c.forms.borrow().get(&token).is_some_and(|open| open.form.receipt.get()); if !receipt { c.forms.borrow_mut().remove(&token); c.controls.remove(token); } } }));
+        form.dialog.content_area().prepend(&picker.root);
+        form.add_editor(&picker.dropdown);
+        form.name_editor("Message");
         self.bind_form_control(
             token,
             &form,
@@ -1921,18 +2010,19 @@ impl Controller {
                 let weak = self.weak.clone();
                 let scope = scope.clone();
                 let buffer = form.buffer.clone();
-                let entry = entry.downgrade();
+                let picker = picker.clone();
                 move || {
-                    let (Some(c), Some(entry)) = (weak.upgrade(), entry.upgrade()) else {
+                    let Some(c) = weak.upgrade() else {
                         return ControlInput::Invalid("Editor closed.".into());
                     };
                     let body = common::buffer_text(&buffer);
-                    let message_id = identity.borrow().peek(entry.text().as_str(), &body);
-                    c.composer_input(&scope, &body, entry.text().as_str(), &message_id)
+                    let recipient = picker.recipient();
+                    let message_id = identity.borrow().peek(&recipient, &body);
+                    c.composer_input(&scope, &body, &recipient, &message_id)
                 }
             }),
         );
-        entry.connect_changed({
+        picker.dropdown.connect_selected_notify({
             let weak = self.weak.clone();
             move |_| {
                 if let Some(c) = weak.upgrade() {
@@ -1947,8 +2037,11 @@ impl Controller {
                 scope,
                 target,
                 submitted: None,
+                recipients: Some(picker),
             },
         );
+        // The team's agents fill the To selector once the projection arrives.
+        self.query(ViewQuery::Team, QueryTarget::Recipients(token));
     }
     fn prompt(&self, key: EntityKey) {
         let Entity::Agent(id) = key.entity else {
@@ -1959,6 +2052,7 @@ impl Controller {
         let form = Form::new(self.shell.window(), "Send prompt", &format!("Prompt {id} in workspace {}. This is host terminal input, separate from a team message.", key.scope.workspace_id), &self.draft(&key.scope, &target), "Submit prompt",
             Rc::new({ let weak = self.weak.clone(); let scope = key.scope.clone(); let id = id.clone(); move |text| if let Some(c) = weak.upgrade() { c.plan(ActionIntent::AgentInput { scope: scope.clone(), id: id.clone(), text: Some(text), submit: true }, Some(token), None); } }),
             Rc::new({ let weak = self.weak.clone(); let scope = key.scope.clone(); let target = target.clone(); move |text| if let Some(c) = weak.upgrade() { c.save_draft(&scope, &target, &text); let receipt = c.forms.borrow().get(&token).is_some_and(|open| open.form.receipt.get()); if !receipt { c.forms.borrow_mut().remove(&token); c.controls.remove(token); } } }));
+        form.name_editor("Prompt");
         self.bind_form_control(
             token,
             &form,
@@ -1982,6 +2076,7 @@ impl Controller {
                 scope: key.scope,
                 target,
                 submitted: None,
+                recipients: None,
             },
         );
     }
@@ -2037,6 +2132,7 @@ impl Controller {
                 }
             }),
         );
+        form.name_editor("Answer");
         self.bind_form_control(
             token,
             &form,
@@ -2100,6 +2196,7 @@ impl Controller {
                 scope,
                 target,
                 submitted: None,
+                recipients: None,
             },
         );
     }
@@ -2587,6 +2684,22 @@ impl Controller {
         dialog.present();
         self.auxiliary.borrow_mut().push(dialog);
     }
+}
+
+/// Focus the first available control in the nearest container of `widget`
+/// that has one: the same row of actions, then the panel or page.
+fn focus_near(widget: &gtk::Widget) -> bool {
+    let mut node = widget.parent();
+    while let Some(ancestor) = node {
+        if ancestor.is::<gtk::Window>() {
+            return false;
+        }
+        if ancestor.child_focus(gtk::DirectionType::TabForward) {
+            return true;
+        }
+        node = ancestor.parent();
+    }
+    false
 }
 
 fn outcome_wording(kind: OperationOutcomeKind) -> &'static str {

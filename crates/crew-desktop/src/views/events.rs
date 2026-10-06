@@ -72,9 +72,9 @@ impl EventsView {
         });
         level.connect_changed(move |_| changed());
         root.append(&search);
-        controls.insert(&agent, -1);
-        controls.insert(&level, -1);
-        controls.insert(&vcs, -1);
+        super::add_control(&controls, &agent);
+        super::add_control(&controls, &level);
+        super::add_control(&controls, &vcs);
         root.append(&controls);
         let list = EntityList::new("Events", select);
         let empty = super::empty_state(

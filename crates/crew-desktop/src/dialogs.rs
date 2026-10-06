@@ -163,14 +163,106 @@ impl Form {
             .borrow_mut()
             .push(widget.clone().upcast());
     }
+    /// The editor's accessible name, which says what the text is for.
+    pub fn name_editor(&self, name: &str) {
+        self.editor
+            .update_property(&[gtk::accessible::Property::Label(name)]);
+    }
 }
 
+/// Everyone in the team (`*`, a broadcast) or one agent. The labelled To
+/// selector a message is composed with.
+#[derive(Clone)]
+pub struct RecipientPicker {
+    pub root: gtk::Box,
+    pub dropdown: gtk::DropDown,
+    names: gtk::StringList,
+    /// The recipient each entry stands for, in the dropdown's order.
+    values: Rc<RefCell<Vec<String>>>,
+}
+impl RecipientPicker {
+    pub const EVERYONE: &'static str = "*";
+
+    pub fn new(recipient: &str) -> Self {
+        let names = gtk::StringList::new(&[]);
+        let dropdown = gtk::DropDown::builder().model(&names).build();
+        let label = gtk::Label::with_mnemonic("_To");
+        label.set_mnemonic_widget(Some(&dropdown));
+        dropdown.update_property(&[gtk::accessible::Property::Label("To")]);
+        let root = gtk::Box::new(gtk::Orientation::Horizontal, 12);
+        root.set_margin_top(16);
+        root.set_margin_start(16);
+        root.set_margin_end(16);
+        root.append(&label);
+        root.append(&dropdown);
+        let picker = Self {
+            root,
+            dropdown,
+            names,
+            values: Rc::new(RefCell::new(Vec::new())),
+        };
+        picker.set_agents(&[], recipient);
+        picker
+    }
+
+    /// Offer Everyone and `agents`, keeping `selected` (also when it is no
+    /// longer in the team, so a restored message keeps its recipient).
+    pub fn set_agents(&self, agents: &[String], selected: &str) {
+        let mut values = vec![Self::EVERYONE.to_owned()];
+        values.extend(agents.iter().filter(|id| *id != Self::EVERYONE).cloned());
+        if !values.iter().any(|value| value == selected) {
+            values.push(selected.to_owned());
+        }
+        let names: Vec<&str> = values
+            .iter()
+            .map(|value| {
+                if value == Self::EVERYONE {
+                    "Everyone"
+                } else {
+                    value.as_str()
+                }
+            })
+            .collect();
+        self.names.splice(0, self.names.n_items(), &names);
+        let index = values
+            .iter()
+            .position(|value| value == selected)
+            .unwrap_or(0);
+        *self.values.borrow_mut() = values;
+        self.dropdown.set_selected(index as u32);
+    }
+
+    pub fn recipient(&self) -> String {
+        self.values
+            .borrow()
+            .get(self.dropdown.selected() as usize)
+            .cloned()
+            .unwrap_or_else(|| Self::EVERYONE.to_owned())
+    }
+
+    /// Select `recipient` if it is offered.
+    pub fn select(&self, recipient: &str) -> bool {
+        let index = self
+            .values
+            .borrow()
+            .iter()
+            .position(|value| value == recipient);
+        if let Some(index) = index {
+            self.dropdown.set_selected(index as u32);
+        }
+        index.is_some()
+    }
+}
+
+/// `closed` runs after the dialog has closed, whatever the answer, so the
+/// caller can return focus to the control that opened it.
 pub fn confirmation(
     parent: &gtk::ApplicationWindow,
     kind: ConfirmationKind,
     targets: &[String],
     confirm: Rc<dyn Fn()>,
     cancel: Rc<dyn Fn()>,
+    closed: Rc<dyn Fn()>,
 ) -> gtk::Dialog {
     let names = targets.join(", ");
     let (title, description, button) = match kind {
@@ -193,18 +285,22 @@ pub fn confirmation(
     let destructive = dialog.add_button(button, gtk::ResponseType::Accept);
     destructive.add_css_class("destructive-action");
     dialog.set_default_response(gtk::ResponseType::Cancel);
-    let opener = glib::WeakRef::<gtk::Widget>::new();
-    opener.set(gtk::prelude::GtkWindowExt::focus(parent).as_ref());
+    let answered = Cell::new(false);
     dialog.connect_response(move |dialog, response| {
+        // Closing the dialog answers again with a delete response; only the
+        // first answer counts.
+        if answered.replace(true) {
+            return;
+        }
         if response == gtk::ResponseType::Accept {
             confirm();
         } else {
             cancel();
         }
         dialog.close();
-        if let Some(opener) = opener.upgrade().filter(|w| w.is_mapped()) {
-            opener.grab_focus();
-        }
+        // After GTK has finished handing activation back to the main window.
+        let closed = closed.clone();
+        glib::idle_add_local_once(move || closed());
     });
     escape(&dialog);
     dialog.present();
