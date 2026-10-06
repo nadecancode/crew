@@ -91,14 +91,22 @@ pub fn column() -> gtk::Box {
     column
 }
 
+/// Plain wrapped text. Not selectable: list rows, status and reason lines
+/// must not take the pointer click or become a focus stop.
 pub fn text(value: &str) -> gtk::Label {
     gtk::Label::builder()
         .label(value)
         .xalign(0.0)
         .wrap(true)
         .wrap_mode(gtk::pango::WrapMode::WordChar)
-        .selectable(true)
         .build()
+}
+
+/// Copyable text for inspector facts, evidence and detail bodies.
+pub fn selectable(value: &str) -> gtk::Label {
+    let label = text(value);
+    label.set_selectable(true);
+    label
 }
 
 pub fn heading(value: &str) -> gtk::Label {
@@ -112,7 +120,7 @@ pub fn fact(container: &gtk::Box, name: &str, value: &str) {
     let label = text(name);
     label.add_css_class("crew-muted");
     line.append(&label);
-    line.append(&text(value));
+    line.append(&selectable(value));
     container.append(&line);
 }
 

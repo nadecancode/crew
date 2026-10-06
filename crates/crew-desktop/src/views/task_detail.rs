@@ -15,7 +15,7 @@ impl TaskInspector {
     pub fn new(key: EntityKey, read: Rc<dyn Fn(ResourceKey)>) -> Self {
         let root = gtk::Box::new(gtk::Orientation::Vertical, 8);
         let body = common::column();
-        let summary = common::text("Loading task…");
+        let summary = common::selectable("Loading task…");
         body.append(&summary);
         let artifacts = gtk::Box::new(gtk::Orientation::Vertical, 8);
         body.append(&artifacts);
@@ -59,7 +59,7 @@ impl TaskInspector {
         if *self.last_artifacts.borrow() != task.artifacts {
             common::clear(&self.artifacts);
             for artifact in &task.artifacts {
-                self.artifacts.append(&common::text(&format!(
+                self.artifacts.append(&common::selectable(&format!(
                     "{}: {}\n{}",
                     artifact.kind, artifact.value, artifact.description
                 )));

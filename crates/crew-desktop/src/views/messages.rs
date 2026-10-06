@@ -172,7 +172,7 @@ pub fn detail(
     )));
     common::fact(&body, "Type", message.kind.as_str());
     common::fact(&body, "Message", &message.id);
-    body.append(&common::text(&message.body));
+    body.append(&common::selectable(&message.body));
     if let Some(id) = &message.reply_to {
         let button = gtk::Button::with_label("Open parent message");
         let id = id.clone();

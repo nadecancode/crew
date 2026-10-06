@@ -148,6 +148,6 @@ pub fn detail(event: Option<&crew_protocol::Event>) -> gtk::ScrolledWindow {
     common::fact(&body, "Level", event.level.as_str());
     common::fact(&body, "Agent", event.agent_id.as_deref().unwrap_or("Team"));
     common::fact(&body, "Sequence", &event.seq.to_string());
-    body.append(&common::text(&event.message));
+    body.append(&common::selectable(&event.message));
     common::scroll(&body)
 }

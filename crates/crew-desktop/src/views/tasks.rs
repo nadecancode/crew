@@ -188,7 +188,7 @@ pub fn detail(data: &TaskDetailData) -> gtk::ScrolledWindow {
     for artifact in &task.artifacts {
         common::fact(&body, &artifact.kind, &artifact.value);
         if !artifact.description.is_empty() {
-            body.append(&common::text(&artifact.description));
+            body.append(&common::selectable(&artifact.description));
         }
     }
     if let Some(error) = &data.card.error {
