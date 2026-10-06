@@ -1,0 +1,7 @@
+GTK 4.22.4
+GLib 2.88.3
+AT-SPI 2.60.6
+xdotool version 4.20260303.1
+Version: ImageMagick 7.1.2-29 Q16-HDRI x86_64 b919b37fd:20260727 https://imagemagick.org
+796cc4d62753980f4d3a9cdf77060fbdb1b354b812c8f9e0bfcd1d23cd8dd02c  <designer-worktree>/target/native-design-precheck/crew-desktop-aafbf0dc-local
+1d30e44799ffe14516d3446790d82c0e46dbb53c236897247bb3b8fde1796df2  <designer-worktree>/target/native-design-precheck/src-aafbf0dc/target/native-validation/cargo/debug/crew
