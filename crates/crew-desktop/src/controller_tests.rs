@@ -1166,6 +1166,33 @@ fn live_local(app: &gtk::Application) {
         c.connection.borrow().as_ref().unwrap().mode,
         ConnectionMode::LocalOperator
     );
+    // One handler's burst larger than the worker channel waits in order on
+    // the GTK side; nothing is refused as busy and every answer arrives.
+    let live = c.scope.borrow().clone().unwrap();
+    let burst: Vec<QueryTarget> = (0..64)
+        .map(|i| {
+            QueryTarget::Detail(EntityKey {
+                scope: live.clone(),
+                entity: Entity::Agent(format!("burst-{i}")),
+            })
+        })
+        .collect();
+    for target in &burst {
+        c.query(ViewQuery::Overview, target.clone());
+    }
+    assert!(!c.result.label().contains("busy"));
+    assert_eq!(
+        c.queries
+            .borrow()
+            .values()
+            .filter(|t| burst.contains(t))
+            .count(),
+        64,
+        "every burst query was accepted"
+    );
+    live_until(&c, || {
+        !c.queries.borrow().values().any(|t| burst.contains(t))
+    });
     shell.navigate(Destination::Messages);
     let (mut caller, _) = crew_core::client::Client::operator(&socket, "gtk-private-test").unwrap();
     let _: crew_core::rpc::SendResult = caller
