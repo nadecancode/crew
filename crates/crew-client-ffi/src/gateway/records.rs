@@ -101,20 +101,58 @@ impl fmt::Debug for PublicProfile {
     }
 }
 
-/// Decode an imported host profile with the real native protocol schema. This
-/// is bounded configuration import, not a JSON app-state or frame interface.
+/// The `crew native status` result wraps the profile with the endpoint epoch.
+/// Only that exact shape is accepted; the epoch is not part of the profile.
+fn native_status(text: &str) -> Option<native::PublicProfile> {
+    let serde_json::Value::Object(mut status) = serde_json::from_str(text).ok()? else {
+        return None;
+    };
+    let epoch = status.remove("endpoint_epoch")?;
+    let profile = status.remove("profile")?;
+    if !status.is_empty() {
+        return None;
+    }
+    serde_json::from_value::<native::HexBytes<16>>(epoch).ok()?;
+    serde_json::from_value(profile).ok()
+}
+
+/// Decode an imported host profile with the real native protocol schema:
+/// either the bare public profile or the complete `crew native status`
+/// output. This is bounded configuration import, not a JSON app-state or
+/// frame interface, and it does not make the profile trusted.
 #[uniffi::export]
 pub fn parse_gateway_profile(text: String) -> Result<PublicProfile, GatewayError> {
     if text.len() > crew_protocol::types::MAX_FRAME_BYTES {
         return Err(invalid_profile());
     }
     serde_json::from_str::<native::PublicProfile>(&text)
+        .ok()
+        .or_else(|| native_status(&text))
         .map(Into::into)
-        .map_err(|_| invalid_profile())
+        .ok_or_else(invalid_profile)
 }
 
-/// Constructed only by an explicit independent fingerprint comparison. The
-/// imported profile's own fingerprint must not supply that second argument.
+/// The canonical form of a fingerprint a person typed or pasted: ASCII
+/// whitespace and colons removed, letters lowercased. Returns None unless the
+/// result is exactly 64 hex digits, so a form can flag the fingerprint field
+/// itself before `GatewayProfile.trust` compares it.
+#[uniffi::export]
+pub fn normalize_fingerprint(text: String) -> Option<String> {
+    if text.len() > 512 {
+        return None;
+    }
+    let canonical: String = text
+        .chars()
+        .filter(|c| !c.is_ascii_whitespace() && *c != ':')
+        .map(|c| c.to_ascii_lowercase())
+        .collect();
+    native::LeafHash::from_hex(&canonical)
+        .ok()
+        .map(|_| canonical)
+}
+
+/// A pinned host profile. It exists only after an explicit fingerprint
+/// comparison; nothing else constructs one.
 #[derive(uniffi::Object)]
 pub struct GatewayProfile {
     pub(crate) inner: transport::GatewayProfile,
@@ -122,14 +160,22 @@ pub struct GatewayProfile {
 
 #[uniffi::export]
 impl GatewayProfile {
+    /// `verified_fingerprint` is the leaf SHA-256 that the person read from
+    /// the trusted host's own `crew native status` output, in any form
+    /// `normalize_fingerprint` accepts. Never pass the imported profile's
+    /// `tls_leaf_sha256`: a mismatch is the `tls_trust` failure that protects
+    /// against a substituted profile. A malformed fingerprint or profile is
+    /// `invalid_profile`. `id` is the app's stable local name for this
+    /// profile, later used by `connect(profileId:)`.
     #[uniffi::constructor]
     pub fn trust(
         id: String,
         profile: PublicProfile,
         verified_fingerprint: String,
     ) -> Result<Arc<Self>, GatewayError> {
-        let fingerprint =
-            native::LeafHash::from_hex(&verified_fingerprint).map_err(|_| invalid_profile())?;
+        let fingerprint = normalize_fingerprint(verified_fingerprint)
+            .and_then(|text| native::LeafHash::from_hex(&text).ok())
+            .ok_or_else(invalid_profile)?;
         let profile = transport::GatewayProfile::trust(id, profile.try_into()?, fingerprint)?;
         Ok(Arc::new(Self { inner: profile }))
     }

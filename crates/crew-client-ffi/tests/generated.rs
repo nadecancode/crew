@@ -111,6 +111,28 @@ fn swift_identity_and_private_boundary_are_explicit() {
         "func plan(intent: ActionIntent) throws  -> ActionPlan",
         "func observe(observer: ClientObserver) throws  -> UInt64",
         "func removeObserver(subscriptionId: UInt64) throws",
+        "public func parseGatewayProfile(text: String)throws  -> PublicProfile",
+        "public func normalizeFingerprint(text: String) -> String?",
+        "public static func trust(id: String, profile: PublicProfile, verifiedFingerprint: String)throws  -> GatewayProfile",
+        "public static func gateway(profile: GatewayProfile, signer: DeviceSigner)throws  -> CrewClient",
+        "func enroll(label: String, observer: SetupObserver) throws  -> EnrollmentHandle",
+        "func retireDeviceAccess() throws",
+        "public protocol DeviceSigner: AnyObject, Sendable",
+        "func publicKey(reply: PublicKeyReply)",
+        "func signAuth(transcript: AuthTranscript, reply: SignatureReply)",
+        "func signEnrollment(transcript: EnrollTranscript, reply: SignatureReply)",
+        "func retire(reply: RetirementReply)",
+        "func complete(bytes: Data) throws",
+        "func fail(error: SignerError) throws",
+        "func isPending()  -> Bool",
+        "func signingBytes()  -> Data",
+        "public protocol SetupObserver: AnyObject, Sendable",
+        "func changed(update: EnrollmentUpdate)",
+        "func finished(result: EnrollmentResult)",
+        "func failed(reason: ClientReason)",
+        "public struct SetupContext: Equatable, Hashable",
+        "public enum GatewayError: Swift.Error",
+        "case Failure(code: String, message: String",
     ] {
         assert!(
             swift.contains(declaration),
@@ -133,6 +155,16 @@ fn swift_identity_and_private_boundary_are_explicit() {
         "Push",
         "Snapshot",
         "ProfileSelection",
+        "GatewayClient",
+        "GatewayConnector",
+        "MemoryDeviceSigner",
+        "SignerBridge",
+        "Fence",
+        "AuthParams",
+        "EnrollParams",
+        "HandshakeRequest",
+        "GatewayOpened",
+        "GatewayAuthority",
     ] {
         for kind in ["struct", "enum", "class", "protocol"] {
             for suffix in [":", " "] {
@@ -145,4 +177,28 @@ fn swift_identity_and_private_boundary_are_explicit() {
     }
     assert!(!swift.contains("webProof"));
     assert!(!swift.contains("operatorToken"));
+    // Signing is only ever over a Rust-sealed transcript: no generic signing
+    // entry point, and neither transcripts nor replies have a constructor.
+    assert!(!swift.contains("func sign("));
+    assert!(!swift.to_lowercase().contains("privatekey"));
+    for class in [
+        "AuthTranscript",
+        "EnrollTranscript",
+        "PublicKeyReply",
+        "SignatureReply",
+        "RetirementReply",
+        "EnrollmentHandle",
+    ] {
+        let start = swift
+            .find(&format!("open class {class}: "))
+            .unwrap_or_else(|| panic!("missing class {class}"));
+        let body = &swift[start..];
+        let end = body[1..]
+            .find("open class ")
+            .map_or(body.len(), |end| end + 1);
+        assert!(
+            body[..end].contains("No primary constructor declared for this class."),
+            "{class} must be constructed only in Rust"
+        );
+    }
 }

@@ -616,6 +616,11 @@ uint32_t uniffi_crew_client_ffi_fn_func_protocol_version(RustCallStatus *_Nonnul
     
 );
 #endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_CREW_CLIENT_FFI_FN_FUNC_NORMALIZE_FINGERPRINT
+#define UNIFFI_FFIDEF_UNIFFI_CREW_CLIENT_FFI_FN_FUNC_NORMALIZE_FINGERPRINT
+RustBuffer uniffi_crew_client_ffi_fn_func_normalize_fingerprint(RustBuffer text, RustCallStatus *_Nonnull out_status
+);
+#endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_CREW_CLIENT_FFI_FN_FUNC_PARSE_GATEWAY_PROFILE
 #define UNIFFI_FFIDEF_UNIFFI_CREW_CLIENT_FFI_FN_FUNC_PARSE_GATEWAY_PROFILE
 RustBuffer uniffi_crew_client_ffi_fn_func_parse_gateway_profile(RustBuffer text, RustCallStatus *_Nonnull out_status
@@ -889,6 +894,12 @@ void ffi_crew_client_ffi_rust_future_complete_void(uint64_t handle, RustCallStat
 #ifndef UNIFFI_FFIDEF_UNIFFI_CREW_CLIENT_FFI_CHECKSUM_FUNC_PROTOCOL_VERSION
 #define UNIFFI_FFIDEF_UNIFFI_CREW_CLIENT_FFI_CHECKSUM_FUNC_PROTOCOL_VERSION
 uint16_t uniffi_crew_client_ffi_checksum_func_protocol_version(void
+    
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_CREW_CLIENT_FFI_CHECKSUM_FUNC_NORMALIZE_FINGERPRINT
+#define UNIFFI_FFIDEF_UNIFFI_CREW_CLIENT_FFI_CHECKSUM_FUNC_NORMALIZE_FINGERPRINT
+uint16_t uniffi_crew_client_ffi_checksum_func_normalize_fingerprint(void
     
 );
 #endif

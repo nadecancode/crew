@@ -133,13 +133,15 @@ impl GatewayState {
         let source = self.source.clone();
         let task_control = control.clone();
         runtime.spawn(async move {
-            let _lease = lease;
             // A provider panic must also release the handle and publish a safe
             // terminal failure. No panic is propagated across the FFI boundary.
             let result = tokio::spawn(async move { source.enroll(label, adapter).await })
                 .await
                 .unwrap_or_else(|_| Err(stopped()));
             let final_event = task_control.finish(result);
+            // Release the lease before the terminal callback can run, so an
+            // observer retrying from it never finds its own attempt busy.
+            drop(lease);
             // The source publishes at most Connecting, AwaitingApproval, and
             // one terminal event. Capacity four reserves space for the result
             // even while a foreign UI callback is blocked.
@@ -174,8 +176,12 @@ impl Drop for EnrollmentLease {
     }
 }
 
-/// Callbacks enqueue short ordered UI work. `failed` is only for a source
-/// startup error before a context exists; it is never paired with `finished`.
+/// One Rust thread per attempt delivers these callbacks in order; each should
+/// hand short work to the UI executor and return. Every update and result
+/// carries the attempt's `SetupContext`; check it before publishing. Exactly
+/// one of `finished` or `failed` ends an attempt. `failed` means the attempt
+/// could not start, before any context existed. `AwaitingApproval` arrives
+/// only after the pinned host accepted this device's proof.
 #[uniffi::export(callback_interface)]
 pub trait SetupObserver: Send + Sync {
     fn changed(&self, update: EnrollmentUpdate);
@@ -276,6 +282,8 @@ enum Publication {
     Failed(ClientReason),
 }
 
+/// Controls one enrollment attempt. Dropping the handle cancels the attempt;
+/// its terminal callback is still delivered.
 #[derive(uniffi::Object)]
 pub struct EnrollmentHandle {
     control: Arc<EnrollmentControl>,
@@ -283,6 +291,10 @@ pub struct EnrollmentHandle {
 
 #[uniffi::export]
 impl EnrollmentHandle {
+    /// Request cancellation; false once the attempt has finished. If the proof
+    /// may already have reached the host, the result is `OutcomeUnknown`, not
+    /// `Canceled`: recover by connecting with the same key, never by enrolling
+    /// again automatically.
     pub fn cancel(&self) -> bool {
         self.control.cancel()
     }

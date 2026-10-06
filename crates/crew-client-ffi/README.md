@@ -6,8 +6,9 @@ portable records and actual Rust `NativeSession`. `CrewClient.local()` composes
 the real shared `ClientCore` with the local connector and native policy presets.
 `CrewClient::from_session` remains a Rust-only composition seam for approved
 connectors. Both the core and local driver use the reviewed producer sources
-named below. No substitute engine or placeholder action is used. Gateway
-construction and device signing are a separate binding integration.
+named below. No substitute engine or placeholder action is used.
+`CrewClient.gateway(profile:signer:)` composes the same core with the reviewed
+gateway connector for a pinned host profile and a platform device signer.
 
 The portable crates do not depend on UniFFI. `records/shared.rs` uses remote
 declarations to implement conversion on the actual Rust types; generated struct
@@ -27,9 +28,10 @@ Native tooling uses Rust 1.93.1. The default feature set does not compile the
 foreign-language runtime; it remains outside the default CLI dependency graph.
 Enable `bindings` for the records and synchronous session facade, or `bindgen`
 for the host generator. Bindings use the shared transport's platform-neutral
-`runtime` feature. `local` adds only the Linux/macOS Unix connector; it does not
-change the exported Swift API. iOS does not compile Unix discovery. Without the
-local feature or on an unsupported platform, the same `local()` method returns
+`runtime` and `gateway` features on every target. `local` adds only the
+Linux/macOS Unix connector; it does not change the exported Swift API. iOS does
+not compile Unix discovery. Without the local feature or on an unsupported
+platform, the same `local()` method returns
 `ClientError::InvalidInput { field: "local", reason: "local_unavailable" }`.
 The iOS app offers only its separately approved gateway connection setup.
 The generated `ClientObserver` protocol provides `changed(notice:)` and
@@ -92,6 +94,59 @@ committed copies live under
 rewrite them. The Apple package/project owner stages the separately built
 XCFramework before linking; a Linux `.so` is not an Apple binary.
 
+## Gateway setup
+
+Gateway TLS, proofs, enrollment and grants stay in the Rust transport; Swift
+never sees a socket, handshake record, grant parser or private key.
+
+1. `parseGatewayProfile(text:)` decodes an imported public profile, either the
+   bare profile or the complete `crew native status` output. It contains only
+   public bootstrap metadata and does not make the profile trusted.
+2. The person reads the leaf fingerprint from the trusted host's own
+   `crew native status` and enters it. `normalizeFingerprint(text:)` removes
+   ASCII whitespace and colons and lowercases; nil marks the field as
+   malformed. `GatewayProfile.trust(id:profile:verifiedFingerprint:)` pins
+   the profile. Passing the imported profile's own `tlsLeafSha256` would
+   defeat the check; a mismatch fails with `tls_trust`.
+3. `CrewClient.gateway(profile:signer:)` asks the signer for its public key
+   (unlock or user presence, up to 30 s) and returns a disconnected client.
+   Like `local()`, call it on a dedicated platform worker, never on the main
+   actor or the signer's own actor. `connect(profileId:)` with
+   `profile.profileId()` then authenticates the device and opens its index.
+4. `enroll(label:observer:)` registers a new device at the pinned host. The
+   observer receives `changed` updates (`Connecting`, then `AwaitingApproval`
+   with the comparison code only after the host accepted this exact proof)
+   and exactly one terminal callback: `finished(result:)`, or `failed(reason:)`
+   when the attempt could not start. Every update and result carries the
+   attempt's `SetupContext`. A thrown error means no attempt started. The
+   returned `EnrollmentHandle` cancels that attempt; dropping it cancels too.
+   A cancel after the proof may have reached the host ends `OutcomeUnknown`:
+   recover by connecting with the same key, never by enrolling again.
+5. `retireDeviceAccess()` closes the client, fences its sessions and asks the
+   signer to retire the local key. The host keeps the device grant until it is
+   revoked at the trusted host console.
+
+`DeviceSigner` is the platform credential store: `publicKey(reply:)`,
+`signAuth(transcript:reply:)`, `signEnrollment(transcript:reply:)` and
+`retire(reply:)`. Each call enqueues work on the platform credential actor and
+returns; the answer goes through the one-shot reply object from any thread.
+Only `publicKey` may prompt. The signing calls run inside the 5 s network
+deadline and fail with `locked`, `unavailable` or `canceled` instead of
+prompting. Transcripts are Rust-constructed objects whose only accessor is
+`signingBytes()` (at most 150 bytes for authentication, exactly 174 for
+enrollment); there is no generic signing call and no key or store handle
+crosses the interface. Rust checks public key and signature widths (32 and 64
+bytes), rejects weak keys and verifies each signature before sending it. A
+second completion, or one after Rust stopped waiting, returns `AlreadyCompleted`
+and changes nothing. A different public key for the same client fails with
+`invalid_proof` and fences its sessions.
+
+Gateway failures use `GatewayError.Failure(code:message:)` with the transport
+reason verbatim: `invalid_profile`, `tls_trust`, `key_locked`,
+`key_unavailable`, `key_canceled`, `key_retired`, `invalid_proof`,
+`setup_busy`, or a transport end code such as `stopped` or `timeout`. It is
+separate from `ClientError`.
+
 ## Verification and provenance
 
 ```sh
@@ -119,6 +174,17 @@ Availability answers through the facade equal the core's own for available,
 stale-scope and unavailable intents, malformed intents fail as `plan` does, and
 repeated queries reserve no confirmation ID. Every core view query and payload
 is converted once, so a new view variant cannot ship without a binding sample.
+Gateway tests drive the exported objects with a Rust stand-in for the platform
+signer and an isolated pinned loopback TLS peer using the transport's synthetic
+gateway fixture. They cover profile import and fingerprint normalization,
+flattened error codes for every transport failure, single unlock without
+dialing, typed unlock failures and weak or wrong-width keys, FIFO enrollment
+progress and approval under one attempt, cancel before the proof write
+(`Canceled`) and after it (`OutcomeUnknown`, also on handle drop), late and
+repeated replies, startup failure and busy refusal, forged signatures refused
+before any proof is sent, a sealed authentication transcript signed through the
+foreign signer, key change, close and local retirement. They are not a Crew
+daemon or gateway acceptance test.
 The real local factory is tested in a child process with a private empty registry,
 including its agent-context refusal, and profile IDs are checked without a dial.
 These tests do not claim a real-daemon application journey; that remains an
@@ -135,6 +201,8 @@ output before live integration. The codec/policy files are exact reviewed
 Its source-only import and workspace/lock registration are separate commits.
 The availability query consumes reviewed producer `c37bff6f` and core query
 `f3d73b16`, imported unchanged onto integrated main `2185ecb8`.
+The gateway objects bind the reviewed callable ports `af6ce390` as integrated
+in that main (connector `1eaefd36`); this package changes no transport source.
 At the local bridge checkpoint, the complete client package, including its test
 set, was byte-equal to the reviewed producer `93266067`, including the actual
 action/projection modules and unchanged reviewed API. Its 133 tests and the 20

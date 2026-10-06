@@ -142,9 +142,15 @@ impl fmt::Debug for RetirementReply {
     }
 }
 
-/// Enqueue bounded work on the platform credential actor, then return. Only
-/// `public_key` may prompt/unlock. The proof callbacks must never prompt.
-/// Retain the reply while work runs; dropping it cancels that request.
+/// The platform credential store. Each call enqueues bounded work on the
+/// platform's credential actor and returns at once; the answer goes through
+/// the reply object, from any thread. Only `public_key` may unlock or ask for
+/// user presence, within 30 s. `sign_auth` and `sign_enrollment` run inside
+/// the 5 s network deadline: they must not prompt, and fail with `Locked`,
+/// `Unavailable` or `Canceled` when signing cannot proceed. Sign exactly the
+/// transcript's bytes and never log them. No call returns or exports a
+/// private key or store handle. Keep the reply while work runs; dropping it
+/// unanswered cancels the request.
 #[uniffi::export(callback_interface)]
 pub trait DeviceSigner: Send + Sync {
     fn public_key(&self, reply: Arc<PublicKeyReply>);

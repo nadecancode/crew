@@ -1231,13 +1231,27 @@ public func FfiConverterTypeEnrollTranscript_lower(_ value: EnrollTranscript) ->
 
 
 
+/**
+ * Controls one enrollment attempt. Dropping the handle cancels the attempt;
+ * its terminal callback is still delivered.
+ */
 public protocol EnrollmentHandleProtocol: AnyObject, Sendable {
     
+    /**
+     * Request cancellation; false once the attempt has finished. If the proof
+     * may already have reached the host, the result is `OutcomeUnknown`, not
+     * `Canceled`: recover by connecting with the same key, never by enrolling
+     * again automatically.
+     */
     func cancel()  -> Bool
     
     func isFinished()  -> Bool
     
 }
+/**
+ * Controls one enrollment attempt. Dropping the handle cancels the attempt;
+ * its terminal callback is still delivered.
+ */
 open class EnrollmentHandle: EnrollmentHandleProtocol, @unchecked Sendable {
     fileprivate let handle: UInt64
 
@@ -1291,6 +1305,12 @@ open class EnrollmentHandle: EnrollmentHandleProtocol, @unchecked Sendable {
     
 
     
+    /**
+     * Request cancellation; false once the attempt has finished. If the proof
+     * may already have reached the host, the result is `OutcomeUnknown`, not
+     * `Canceled`: recover by connecting with the same key, never by enrolling
+     * again automatically.
+     */
 open func cancel() -> Bool  {
     return try!  FfiConverterBool.lift(try! rustCall() {
     uniffi_crew_client_ffi_fn_method_enrollmenthandle_cancel(
@@ -1358,8 +1378,8 @@ public func FfiConverterTypeEnrollmentHandle_lower(_ value: EnrollmentHandle) ->
 
 
 /**
- * Constructed only by an explicit independent fingerprint comparison. The
- * imported profile's own fingerprint must not supply that second argument.
+ * A pinned host profile. It exists only after an explicit fingerprint
+ * comparison; nothing else constructs one.
  */
 public protocol GatewayProfileProtocol: AnyObject, Sendable {
     
@@ -1369,8 +1389,8 @@ public protocol GatewayProfileProtocol: AnyObject, Sendable {
     
 }
 /**
- * Constructed only by an explicit independent fingerprint comparison. The
- * imported profile's own fingerprint must not supply that second argument.
+ * A pinned host profile. It exists only after an explicit fingerprint
+ * comparison; nothing else constructs one.
  */
 open class GatewayProfile: GatewayProfileProtocol, @unchecked Sendable {
     fileprivate let handle: UInt64
@@ -1423,6 +1443,15 @@ open class GatewayProfile: GatewayProfileProtocol, @unchecked Sendable {
     }
 
     
+    /**
+     * `verified_fingerprint` is the leaf SHA-256 that the person read from
+     * the trusted host's own `crew native status` output, in any form
+     * `normalize_fingerprint` accepts. Never pass the imported profile's
+     * `tls_leaf_sha256`: a mismatch is the `tls_trust` failure that protects
+     * against a substituted profile. A malformed fingerprint or profile is
+     * `invalid_profile`. `id` is the app's stable local name for this
+     * profile, later used by `connect(profileId:)`.
+     */
 public static func trust(id: String, profile: PublicProfile, verifiedFingerprint: String)throws  -> GatewayProfile  {
     return try  FfiConverterTypeGatewayProfile_lift(try rustCallWithError(FfiConverterTypeGatewayError_lift) {
     uniffi_crew_client_ffi_fn_constructor_gatewayprofile_trust(
@@ -11153,9 +11182,15 @@ public func FfiConverterCallbackInterfaceClientObserver_lower(_ v: ClientObserve
 
 
 /**
- * Enqueue bounded work on the platform credential actor, then return. Only
- * `public_key` may prompt/unlock. The proof callbacks must never prompt.
- * Retain the reply while work runs; dropping it cancels that request.
+ * The platform credential store. Each call enqueues bounded work on the
+ * platform's credential actor and returns at once; the answer goes through
+ * the reply object, from any thread. Only `public_key` may unlock or ask for
+ * user presence, within 30 s. `sign_auth` and `sign_enrollment` run inside
+ * the 5 s network deadline: they must not prompt, and fail with `Locked`,
+ * `Unavailable` or `Canceled` when signing cannot proceed. Sign exactly the
+ * transcript's bytes and never log them. No call returns or exports a
+ * private key or store handle. Keep the reply while work runs; dropping it
+ * unanswered cancels the request.
  */
 public protocol DeviceSigner: AnyObject, Sendable {
     
@@ -11364,8 +11399,12 @@ public func FfiConverterCallbackInterfaceDeviceSigner_lower(_ v: DeviceSigner) -
 
 
 /**
- * Callbacks enqueue short ordered UI work. `failed` is only for a source
- * startup error before a context exists; it is never paired with `finished`.
+ * One Rust thread per attempt delivers these callbacks in order; each should
+ * hand short work to the UI executor and return. Every update and result
+ * carries the attempt's `SetupContext`; check it before publishing. Exactly
+ * one of `finished` or `failed` ends an attempt. `failed` means the attempt
+ * could not start, before any context existed. `AwaitingApproval` arrives
+ * only after the pinned host accepted this device's proof.
  */
 public protocol SetupObserver: AnyObject, Sendable {
     
@@ -13432,8 +13471,23 @@ public func protocolVersion() -> UInt32  {
 })
 }
 /**
- * Decode an imported host profile with the real native protocol schema. This
- * is bounded configuration import, not a JSON app-state or frame interface.
+ * The canonical form of a fingerprint a person typed or pasted: ASCII
+ * whitespace and colons removed, letters lowercased. Returns None unless the
+ * result is exactly 64 hex digits, so a form can flag the fingerprint field
+ * itself before `GatewayProfile.trust` compares it.
+ */
+public func normalizeFingerprint(text: String) -> String?  {
+    return try!  FfiConverterOptionString.lift(try! rustCall() {
+    uniffi_crew_client_ffi_fn_func_normalize_fingerprint(
+        FfiConverterString.lower(text),$0
+    )
+})
+}
+/**
+ * Decode an imported host profile with the real native protocol schema:
+ * either the bare public profile or the complete `crew native status`
+ * output. This is bounded configuration import, not a JSON app-state or
+ * frame interface, and it does not make the profile trusted.
  */
 public func parseGatewayProfile(text: String)throws  -> PublicProfile  {
     return try  FfiConverterTypePublicProfile_lift(try rustCallWithError(FfiConverterTypeGatewayError_lift) {
@@ -13468,7 +13522,10 @@ private let initializationResult: InitializationResult = {
     if (uniffi_crew_client_ffi_checksum_func_protocol_version() != 58565) {
         return InitializationResult.apiChecksumMismatch
     }
-    if (uniffi_crew_client_ffi_checksum_func_parse_gateway_profile() != 48254) {
+    if (uniffi_crew_client_ffi_checksum_func_normalize_fingerprint() != 4314) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_crew_client_ffi_checksum_func_parse_gateway_profile() != 33) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_crew_client_ffi_checksum_func_message_question_info() != 48000) {
@@ -13486,7 +13543,7 @@ private let initializationResult: InitializationResult = {
     if (uniffi_crew_client_ffi_checksum_method_gatewayprofile_public_profile() != 33146) {
         return InitializationResult.apiChecksumMismatch
     }
-    if (uniffi_crew_client_ffi_checksum_method_enrollmenthandle_cancel() != 14389) {
+    if (uniffi_crew_client_ffi_checksum_method_enrollmenthandle_cancel() != 27057) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_crew_client_ffi_checksum_method_enrollmenthandle_is_finished() != 50236) {
@@ -13570,7 +13627,7 @@ private let initializationResult: InitializationResult = {
     if (uniffi_crew_client_ffi_checksum_method_crewclient_workspaces() != 36605) {
         return InitializationResult.apiChecksumMismatch
     }
-    if (uniffi_crew_client_ffi_checksum_constructor_gatewayprofile_trust() != 14569) {
+    if (uniffi_crew_client_ffi_checksum_constructor_gatewayprofile_trust() != 16414) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_crew_client_ffi_checksum_constructor_crewclient_gateway() != 36370) {
