@@ -29,12 +29,16 @@ fn isolated(name: &str) -> bool {
         .tempdir_in("/tmp")
         .unwrap();
     let mut process = std::process::Command::new(std::env::current_exe().unwrap());
+    let validation_binary = std::env::var_os("CREW_NATIVE_VALIDATION_BIN");
     for (key, _) in std::env::vars_os() {
         if key.to_str().is_some_and(|key| {
             key.starts_with("GIT_") || key.starts_with("HERDR_") || key.starts_with("CREW_")
         }) {
             process.env_remove(key);
         }
+    }
+    if let Some(binary) = validation_binary {
+        process.env("CREW_NATIVE_VALIDATION_BIN", binary);
     }
     let output = process
         .args(["--exact", name, "--nocapture"])
@@ -83,6 +87,10 @@ struct Host {
 
 impl Host {
     async fn start() -> Self {
+        Self::start_with_crew(std::env::current_exe().unwrap()).await
+    }
+
+    async fn start_with_crew(crew_bin: PathBuf) -> Self {
         let workspace = tempfile::Builder::new()
             .prefix("crew-gw-w")
             .tempdir_in("/tmp")
@@ -90,7 +98,7 @@ impl Host {
         let canonical = workspace.path().canonicalize().unwrap();
         let daemon = crew::daemon::start(crew::daemon::DaemonOptions {
             workspace: canonical.clone(),
-            crew_bin: std::env::current_exe().unwrap(),
+            crew_bin,
             pin: None,
         })
         .await
@@ -207,6 +215,15 @@ impl Host {
 
 impl Drop for Host {
     fn drop(&mut self) {
+        // A failed rich journey still tears down only its synthetic PTY team.
+        if self.daemon.is_some() {
+            if let Ok((mut caller, _)) =
+                crew_core::client::Client::operator(&self.socket, "native-test-cleanup")
+            {
+                let _ = caller.set_timeout(Some(Duration::from_secs(3)));
+                let _ = caller.call_value(crew_core::rpc::Call::Shutdown { stop_agents: true });
+            }
+        }
         if let Some(task) = self.gateway.take() {
             task.abort();
         }
@@ -215,6 +232,10 @@ impl Drop for Host {
         }
     }
 }
+
+#[cfg(feature = "journey-tests")]
+#[path = "journey/mod.rs"]
+mod journey;
 
 struct TestSigner {
     key: ed25519_dalek::SigningKey,
@@ -309,6 +330,17 @@ async fn enroll(
     control: bool,
     lifetime: u64,
 ) -> GatewayDeviceAccess {
+    enroll_capabilities(host, client, signer, control, false, lifetime).await
+}
+
+async fn enroll_capabilities(
+    host: &Host,
+    client: &GatewayClient,
+    signer: &TestSigner,
+    control: bool,
+    terminal: bool,
+    lifetime: u64,
+) -> GatewayDeviceAccess {
     admin("native_enroll", json!({})).await;
     let before = crew_core::util::now_ms();
     let (progress, mut updates) = tokio::sync::mpsc::channel(8);
@@ -338,7 +370,7 @@ async fn enroll(
     let pending = admin("native_pending", json!({})).await;
     assert_eq!(pending[0]["comparison_code"], *comparison_code);
     admin("native_approve", json!({"enrollment_id":enrollment_id,"comparison_code":comparison_code,"public_key_hash":key_hash,
-        "grants":[{"workspace":host.workspace,"control":control,"terminal":false}],"lifetime_secs":lifetime})).await;
+        "grants":[{"workspace":host.workspace,"control":control,"terminal":terminal}],"lifetime_secs":lifetime})).await;
     let result = tokio::time::timeout(WAIT, enrollment)
         .await
         .unwrap()
