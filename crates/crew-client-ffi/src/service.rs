@@ -8,6 +8,10 @@ use std::sync::{Arc, Mutex};
 use crew_client_transport::NativeSession;
 
 use crate::callbacks::ClientObserver;
+use crate::gateway::{
+    gateway_boundary, invalid_profile, stopped, DeviceSigner, EnrollmentHandle, GatewayError,
+    GatewayProfile, GatewayState, SetupObserver,
+};
 use crate::records::{
     ActionIntent, ActionPlan, ClientError, ClientNotice, ConnectionContext, TerminalChunk,
     ViewData, ViewQuery, Workspaces,
@@ -63,6 +67,7 @@ pub struct CrewClient {
     session: NativeSession,
     profiles: BTreeMap<String, ProfileSelection>,
     local_profiles: Vec<LocalProfileInfo>,
+    gateway: Option<Arc<GatewayState>>,
     registrations: Mutex<Registrations>,
     closed: AtomicBool,
 }
@@ -74,13 +79,14 @@ impl CrewClient {
         session: NativeSession,
         profiles: Vec<ProfileSelection>,
     ) -> Result<Arc<Self>, ClientError> {
-        Self::compose(session, profiles, Vec::new())
+        Self::compose(session, profiles, Vec::new(), None)
     }
 
     fn compose(
         session: NativeSession,
         profiles: Vec<ProfileSelection>,
         local_profiles: Vec<LocalProfileInfo>,
+        gateway: Option<Arc<GatewayState>>,
     ) -> Result<Arc<Self>, ClientError> {
         if profiles.len() > 128 {
             return Err(ClientError::TooLarge {
@@ -118,6 +124,7 @@ impl CrewClient {
             session,
             profiles: selections,
             local_profiles,
+            gateway,
             registrations: Mutex::new(Registrations::default()),
             closed: AtomicBool::new(false),
         }))
@@ -174,7 +181,7 @@ impl CrewClient {
                     profiles,
                     crew_client_transport::DriverConfig::default(),
                 )?;
-                Self::compose(session, selections, infos)
+                Self::compose(session, selections, infos, None)
             })
         }
         #[cfg(not(all(feature = "local", any(target_os = "linux", target_os = "macos"))))]
@@ -190,6 +197,64 @@ impl CrewClient {
     /// valid only for this client instance; reconnect still authenticates anew.
     pub fn local_profiles(&self) -> Result<Vec<LocalProfileInfo>, ClientError> {
         self.call(|| Ok(self.local_profiles.clone()))
+    }
+
+    /// Create a disconnected gateway client from a trusted profile and the
+    /// platform signer. The signer's `public_key` request (unlock or user
+    /// presence) completes before this returns, so it may wait up to the
+    /// transport's 30 s unlock deadline. Call it only on a dedicated blocking
+    /// platform worker, never on the main actor or the signer's own credential
+    /// actor. No connection is attempted; call `connect(profileId:)` with
+    /// `GatewayProfile.profileId()` afterwards. The same Rust gateway client
+    /// backs this session, `enroll` and `retireDeviceAccess`.
+    #[uniffi::constructor]
+    pub fn gateway(
+        profile: Arc<GatewayProfile>,
+        signer: Box<dyn DeviceSigner>,
+    ) -> Result<Arc<Self>, GatewayError> {
+        gateway_boundary(|| {
+            let gateway = GatewayState::new(&profile, signer)?;
+            let session = gateway.session()?;
+            let selection = ProfileSelection {
+                profile_id: gateway.source.profile().profile_id().into(),
+                endpoint_id: gateway.source.profile().endpoint_id(),
+                workspace_hint: None,
+            };
+            Self::compose(session, vec![selection], Vec::new(), Some(gateway))
+                .map_err(|_| stopped())
+        })
+    }
+
+    /// Start enrollment of this device at the pinned host. The returned handle
+    /// cancels only this attempt. Once a handle is returned, the observer gets
+    /// exactly one terminal callback: `failed` when the attempt could not start,
+    /// otherwise `finished` with the same `SetupContext` as every progress
+    /// update. A thrown error means no attempt started and no callback follows.
+    pub fn enroll(
+        &self,
+        label: String,
+        observer: Box<dyn SetupObserver>,
+    ) -> Result<Arc<EnrollmentHandle>, GatewayError> {
+        gateway_boundary(|| {
+            if self.closed.load(Ordering::Acquire) {
+                return Err(stopped());
+            }
+            self.gateway
+                .as_ref()
+                .ok_or_else(invalid_profile)?
+                .enroll(label, observer)
+        })
+    }
+
+    /// Close this client, fence its sessions and ask the signer to retire the
+    /// local key. The host keeps the device grant until it is revoked at the
+    /// trusted host console. Worker-only: the signer may take up to 30 s.
+    pub fn retire_device_access(&self) -> Result<(), GatewayError> {
+        gateway_boundary(|| {
+            let gateway = self.gateway.as_ref().ok_or_else(invalid_profile)?;
+            let _ = self.close();
+            gateway.retire()
+        })
     }
 
     pub fn connect(&self, profile_id: String) -> Result<(), ClientError> {
@@ -321,6 +386,9 @@ impl CrewClient {
         boundary(|| {
             if self.closed.swap(true, Ordering::AcqRel) {
                 return Ok(());
+            }
+            if let Some(gateway) = &self.gateway {
+                gateway.close();
             }
             let previous = match self.registrations.lock() {
                 Ok(mut registrations) => registrations.current.take(),

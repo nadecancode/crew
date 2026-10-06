@@ -257,6 +257,55 @@ typedef void (*UniffiCallbackInterfaceClientObserverMethod1)(uint64_t, RustBuffe
     );
 
 #endif
+#ifndef UNIFFI_FFIDEF_CALLBACK_INTERFACE_SETUP_OBSERVER_METHOD0
+#define UNIFFI_FFIDEF_CALLBACK_INTERFACE_SETUP_OBSERVER_METHOD0
+typedef void (*UniffiCallbackInterfaceSetupObserverMethod0)(uint64_t, RustBuffer, void* _Nonnull, 
+        RustCallStatus *_Nonnull uniffiCallStatus
+    );
+
+#endif
+#ifndef UNIFFI_FFIDEF_CALLBACK_INTERFACE_SETUP_OBSERVER_METHOD1
+#define UNIFFI_FFIDEF_CALLBACK_INTERFACE_SETUP_OBSERVER_METHOD1
+typedef void (*UniffiCallbackInterfaceSetupObserverMethod1)(uint64_t, RustBuffer, void* _Nonnull, 
+        RustCallStatus *_Nonnull uniffiCallStatus
+    );
+
+#endif
+#ifndef UNIFFI_FFIDEF_CALLBACK_INTERFACE_SETUP_OBSERVER_METHOD2
+#define UNIFFI_FFIDEF_CALLBACK_INTERFACE_SETUP_OBSERVER_METHOD2
+typedef void (*UniffiCallbackInterfaceSetupObserverMethod2)(uint64_t, RustBuffer, void* _Nonnull, 
+        RustCallStatus *_Nonnull uniffiCallStatus
+    );
+
+#endif
+#ifndef UNIFFI_FFIDEF_CALLBACK_INTERFACE_DEVICE_SIGNER_METHOD0
+#define UNIFFI_FFIDEF_CALLBACK_INTERFACE_DEVICE_SIGNER_METHOD0
+typedef void (*UniffiCallbackInterfaceDeviceSignerMethod0)(uint64_t, uint64_t, void* _Nonnull, 
+        RustCallStatus *_Nonnull uniffiCallStatus
+    );
+
+#endif
+#ifndef UNIFFI_FFIDEF_CALLBACK_INTERFACE_DEVICE_SIGNER_METHOD1
+#define UNIFFI_FFIDEF_CALLBACK_INTERFACE_DEVICE_SIGNER_METHOD1
+typedef void (*UniffiCallbackInterfaceDeviceSignerMethod1)(uint64_t, uint64_t, uint64_t, void* _Nonnull, 
+        RustCallStatus *_Nonnull uniffiCallStatus
+    );
+
+#endif
+#ifndef UNIFFI_FFIDEF_CALLBACK_INTERFACE_DEVICE_SIGNER_METHOD2
+#define UNIFFI_FFIDEF_CALLBACK_INTERFACE_DEVICE_SIGNER_METHOD2
+typedef void (*UniffiCallbackInterfaceDeviceSignerMethod2)(uint64_t, uint64_t, uint64_t, void* _Nonnull, 
+        RustCallStatus *_Nonnull uniffiCallStatus
+    );
+
+#endif
+#ifndef UNIFFI_FFIDEF_CALLBACK_INTERFACE_DEVICE_SIGNER_METHOD3
+#define UNIFFI_FFIDEF_CALLBACK_INTERFACE_DEVICE_SIGNER_METHOD3
+typedef void (*UniffiCallbackInterfaceDeviceSignerMethod3)(uint64_t, uint64_t, void* _Nonnull, 
+        RustCallStatus *_Nonnull uniffiCallStatus
+    );
+
+#endif
 #ifndef UNIFFI_FFIDEF_V_TABLE_CALLBACK_INTERFACE_CLIENT_OBSERVER
 #define UNIFFI_FFIDEF_V_TABLE_CALLBACK_INTERFACE_CLIENT_OBSERVER
 typedef struct UniffiVTableCallbackInterfaceClientObserver {
@@ -267,6 +316,179 @@ typedef struct UniffiVTableCallbackInterfaceClientObserver {
 } UniffiVTableCallbackInterfaceClientObserver;
 
 #endif
+#ifndef UNIFFI_FFIDEF_V_TABLE_CALLBACK_INTERFACE_SETUP_OBSERVER
+#define UNIFFI_FFIDEF_V_TABLE_CALLBACK_INTERFACE_SETUP_OBSERVER
+typedef struct UniffiVTableCallbackInterfaceSetupObserver {
+    UniffiCallbackInterfaceFree _Nonnull uniffiFree;
+    UniffiCallbackInterfaceClone _Nonnull uniffiClone;
+    UniffiCallbackInterfaceSetupObserverMethod0 _Nonnull changed;
+    UniffiCallbackInterfaceSetupObserverMethod1 _Nonnull finished;
+    UniffiCallbackInterfaceSetupObserverMethod2 _Nonnull failed;
+} UniffiVTableCallbackInterfaceSetupObserver;
+
+#endif
+#ifndef UNIFFI_FFIDEF_V_TABLE_CALLBACK_INTERFACE_DEVICE_SIGNER
+#define UNIFFI_FFIDEF_V_TABLE_CALLBACK_INTERFACE_DEVICE_SIGNER
+typedef struct UniffiVTableCallbackInterfaceDeviceSigner {
+    UniffiCallbackInterfaceFree _Nonnull uniffiFree;
+    UniffiCallbackInterfaceClone _Nonnull uniffiClone;
+    UniffiCallbackInterfaceDeviceSignerMethod0 _Nonnull publicKey;
+    UniffiCallbackInterfaceDeviceSignerMethod1 _Nonnull signAuth;
+    UniffiCallbackInterfaceDeviceSignerMethod2 _Nonnull signEnrollment;
+    UniffiCallbackInterfaceDeviceSignerMethod3 _Nonnull retire;
+} UniffiVTableCallbackInterfaceDeviceSigner;
+
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_CREW_CLIENT_FFI_FN_CLONE_AUTHTRANSCRIPT
+#define UNIFFI_FFIDEF_UNIFFI_CREW_CLIENT_FFI_FN_CLONE_AUTHTRANSCRIPT
+uint64_t uniffi_crew_client_ffi_fn_clone_authtranscript(uint64_t handle, RustCallStatus *_Nonnull out_status
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_CREW_CLIENT_FFI_FN_FREE_AUTHTRANSCRIPT
+#define UNIFFI_FFIDEF_UNIFFI_CREW_CLIENT_FFI_FN_FREE_AUTHTRANSCRIPT
+void uniffi_crew_client_ffi_fn_free_authtranscript(uint64_t handle, RustCallStatus *_Nonnull out_status
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_CREW_CLIENT_FFI_FN_METHOD_AUTHTRANSCRIPT_SIGNING_BYTES
+#define UNIFFI_FFIDEF_UNIFFI_CREW_CLIENT_FFI_FN_METHOD_AUTHTRANSCRIPT_SIGNING_BYTES
+RustBuffer uniffi_crew_client_ffi_fn_method_authtranscript_signing_bytes(uint64_t ptr, RustCallStatus *_Nonnull out_status
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_CREW_CLIENT_FFI_FN_CLONE_ENROLLTRANSCRIPT
+#define UNIFFI_FFIDEF_UNIFFI_CREW_CLIENT_FFI_FN_CLONE_ENROLLTRANSCRIPT
+uint64_t uniffi_crew_client_ffi_fn_clone_enrolltranscript(uint64_t handle, RustCallStatus *_Nonnull out_status
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_CREW_CLIENT_FFI_FN_FREE_ENROLLTRANSCRIPT
+#define UNIFFI_FFIDEF_UNIFFI_CREW_CLIENT_FFI_FN_FREE_ENROLLTRANSCRIPT
+void uniffi_crew_client_ffi_fn_free_enrolltranscript(uint64_t handle, RustCallStatus *_Nonnull out_status
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_CREW_CLIENT_FFI_FN_METHOD_ENROLLTRANSCRIPT_SIGNING_BYTES
+#define UNIFFI_FFIDEF_UNIFFI_CREW_CLIENT_FFI_FN_METHOD_ENROLLTRANSCRIPT_SIGNING_BYTES
+RustBuffer uniffi_crew_client_ffi_fn_method_enrolltranscript_signing_bytes(uint64_t ptr, RustCallStatus *_Nonnull out_status
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_CREW_CLIENT_FFI_FN_CLONE_GATEWAYPROFILE
+#define UNIFFI_FFIDEF_UNIFFI_CREW_CLIENT_FFI_FN_CLONE_GATEWAYPROFILE
+uint64_t uniffi_crew_client_ffi_fn_clone_gatewayprofile(uint64_t handle, RustCallStatus *_Nonnull out_status
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_CREW_CLIENT_FFI_FN_FREE_GATEWAYPROFILE
+#define UNIFFI_FFIDEF_UNIFFI_CREW_CLIENT_FFI_FN_FREE_GATEWAYPROFILE
+void uniffi_crew_client_ffi_fn_free_gatewayprofile(uint64_t handle, RustCallStatus *_Nonnull out_status
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_CREW_CLIENT_FFI_FN_CONSTRUCTOR_GATEWAYPROFILE_TRUST
+#define UNIFFI_FFIDEF_UNIFFI_CREW_CLIENT_FFI_FN_CONSTRUCTOR_GATEWAYPROFILE_TRUST
+uint64_t uniffi_crew_client_ffi_fn_constructor_gatewayprofile_trust(RustBuffer id, RustBuffer profile, RustBuffer verified_fingerprint, RustCallStatus *_Nonnull out_status
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_CREW_CLIENT_FFI_FN_METHOD_GATEWAYPROFILE_PROFILE_ID
+#define UNIFFI_FFIDEF_UNIFFI_CREW_CLIENT_FFI_FN_METHOD_GATEWAYPROFILE_PROFILE_ID
+RustBuffer uniffi_crew_client_ffi_fn_method_gatewayprofile_profile_id(uint64_t ptr, RustCallStatus *_Nonnull out_status
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_CREW_CLIENT_FFI_FN_METHOD_GATEWAYPROFILE_PUBLIC_PROFILE
+#define UNIFFI_FFIDEF_UNIFFI_CREW_CLIENT_FFI_FN_METHOD_GATEWAYPROFILE_PUBLIC_PROFILE
+RustBuffer uniffi_crew_client_ffi_fn_method_gatewayprofile_public_profile(uint64_t ptr, RustCallStatus *_Nonnull out_status
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_CREW_CLIENT_FFI_FN_CLONE_ENROLLMENTHANDLE
+#define UNIFFI_FFIDEF_UNIFFI_CREW_CLIENT_FFI_FN_CLONE_ENROLLMENTHANDLE
+uint64_t uniffi_crew_client_ffi_fn_clone_enrollmenthandle(uint64_t handle, RustCallStatus *_Nonnull out_status
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_CREW_CLIENT_FFI_FN_FREE_ENROLLMENTHANDLE
+#define UNIFFI_FFIDEF_UNIFFI_CREW_CLIENT_FFI_FN_FREE_ENROLLMENTHANDLE
+void uniffi_crew_client_ffi_fn_free_enrollmenthandle(uint64_t handle, RustCallStatus *_Nonnull out_status
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_CREW_CLIENT_FFI_FN_METHOD_ENROLLMENTHANDLE_CANCEL
+#define UNIFFI_FFIDEF_UNIFFI_CREW_CLIENT_FFI_FN_METHOD_ENROLLMENTHANDLE_CANCEL
+int8_t uniffi_crew_client_ffi_fn_method_enrollmenthandle_cancel(uint64_t ptr, RustCallStatus *_Nonnull out_status
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_CREW_CLIENT_FFI_FN_METHOD_ENROLLMENTHANDLE_IS_FINISHED
+#define UNIFFI_FFIDEF_UNIFFI_CREW_CLIENT_FFI_FN_METHOD_ENROLLMENTHANDLE_IS_FINISHED
+int8_t uniffi_crew_client_ffi_fn_method_enrollmenthandle_is_finished(uint64_t ptr, RustCallStatus *_Nonnull out_status
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_CREW_CLIENT_FFI_FN_CLONE_PUBLICKEYREPLY
+#define UNIFFI_FFIDEF_UNIFFI_CREW_CLIENT_FFI_FN_CLONE_PUBLICKEYREPLY
+uint64_t uniffi_crew_client_ffi_fn_clone_publickeyreply(uint64_t handle, RustCallStatus *_Nonnull out_status
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_CREW_CLIENT_FFI_FN_FREE_PUBLICKEYREPLY
+#define UNIFFI_FFIDEF_UNIFFI_CREW_CLIENT_FFI_FN_FREE_PUBLICKEYREPLY
+void uniffi_crew_client_ffi_fn_free_publickeyreply(uint64_t handle, RustCallStatus *_Nonnull out_status
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_CREW_CLIENT_FFI_FN_METHOD_PUBLICKEYREPLY_COMPLETE
+#define UNIFFI_FFIDEF_UNIFFI_CREW_CLIENT_FFI_FN_METHOD_PUBLICKEYREPLY_COMPLETE
+void uniffi_crew_client_ffi_fn_method_publickeyreply_complete(uint64_t ptr, RustBuffer bytes, RustCallStatus *_Nonnull out_status
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_CREW_CLIENT_FFI_FN_METHOD_PUBLICKEYREPLY_FAIL
+#define UNIFFI_FFIDEF_UNIFFI_CREW_CLIENT_FFI_FN_METHOD_PUBLICKEYREPLY_FAIL
+void uniffi_crew_client_ffi_fn_method_publickeyreply_fail(uint64_t ptr, RustBuffer error, RustCallStatus *_Nonnull out_status
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_CREW_CLIENT_FFI_FN_METHOD_PUBLICKEYREPLY_IS_PENDING
+#define UNIFFI_FFIDEF_UNIFFI_CREW_CLIENT_FFI_FN_METHOD_PUBLICKEYREPLY_IS_PENDING
+int8_t uniffi_crew_client_ffi_fn_method_publickeyreply_is_pending(uint64_t ptr, RustCallStatus *_Nonnull out_status
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_CREW_CLIENT_FFI_FN_CLONE_RETIREMENTREPLY
+#define UNIFFI_FFIDEF_UNIFFI_CREW_CLIENT_FFI_FN_CLONE_RETIREMENTREPLY
+uint64_t uniffi_crew_client_ffi_fn_clone_retirementreply(uint64_t handle, RustCallStatus *_Nonnull out_status
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_CREW_CLIENT_FFI_FN_FREE_RETIREMENTREPLY
+#define UNIFFI_FFIDEF_UNIFFI_CREW_CLIENT_FFI_FN_FREE_RETIREMENTREPLY
+void uniffi_crew_client_ffi_fn_free_retirementreply(uint64_t handle, RustCallStatus *_Nonnull out_status
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_CREW_CLIENT_FFI_FN_METHOD_RETIREMENTREPLY_COMPLETE
+#define UNIFFI_FFIDEF_UNIFFI_CREW_CLIENT_FFI_FN_METHOD_RETIREMENTREPLY_COMPLETE
+void uniffi_crew_client_ffi_fn_method_retirementreply_complete(uint64_t ptr, RustCallStatus *_Nonnull out_status
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_CREW_CLIENT_FFI_FN_METHOD_RETIREMENTREPLY_FAIL
+#define UNIFFI_FFIDEF_UNIFFI_CREW_CLIENT_FFI_FN_METHOD_RETIREMENTREPLY_FAIL
+void uniffi_crew_client_ffi_fn_method_retirementreply_fail(uint64_t ptr, RustBuffer error, RustCallStatus *_Nonnull out_status
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_CREW_CLIENT_FFI_FN_METHOD_RETIREMENTREPLY_IS_PENDING
+#define UNIFFI_FFIDEF_UNIFFI_CREW_CLIENT_FFI_FN_METHOD_RETIREMENTREPLY_IS_PENDING
+int8_t uniffi_crew_client_ffi_fn_method_retirementreply_is_pending(uint64_t ptr, RustCallStatus *_Nonnull out_status
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_CREW_CLIENT_FFI_FN_CLONE_SIGNATUREREPLY
+#define UNIFFI_FFIDEF_UNIFFI_CREW_CLIENT_FFI_FN_CLONE_SIGNATUREREPLY
+uint64_t uniffi_crew_client_ffi_fn_clone_signaturereply(uint64_t handle, RustCallStatus *_Nonnull out_status
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_CREW_CLIENT_FFI_FN_FREE_SIGNATUREREPLY
+#define UNIFFI_FFIDEF_UNIFFI_CREW_CLIENT_FFI_FN_FREE_SIGNATUREREPLY
+void uniffi_crew_client_ffi_fn_free_signaturereply(uint64_t handle, RustCallStatus *_Nonnull out_status
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_CREW_CLIENT_FFI_FN_METHOD_SIGNATUREREPLY_COMPLETE
+#define UNIFFI_FFIDEF_UNIFFI_CREW_CLIENT_FFI_FN_METHOD_SIGNATUREREPLY_COMPLETE
+void uniffi_crew_client_ffi_fn_method_signaturereply_complete(uint64_t ptr, RustBuffer bytes, RustCallStatus *_Nonnull out_status
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_CREW_CLIENT_FFI_FN_METHOD_SIGNATUREREPLY_FAIL
+#define UNIFFI_FFIDEF_UNIFFI_CREW_CLIENT_FFI_FN_METHOD_SIGNATUREREPLY_FAIL
+void uniffi_crew_client_ffi_fn_method_signaturereply_fail(uint64_t ptr, RustBuffer error, RustCallStatus *_Nonnull out_status
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_CREW_CLIENT_FFI_FN_METHOD_SIGNATUREREPLY_IS_PENDING
+#define UNIFFI_FFIDEF_UNIFFI_CREW_CLIENT_FFI_FN_METHOD_SIGNATUREREPLY_IS_PENDING
+int8_t uniffi_crew_client_ffi_fn_method_signaturereply_is_pending(uint64_t ptr, RustCallStatus *_Nonnull out_status
+);
+#endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_CREW_CLIENT_FFI_FN_CLONE_CREWCLIENT
 #define UNIFFI_FFIDEF_UNIFFI_CREW_CLIENT_FFI_FN_CLONE_CREWCLIENT
 uint64_t uniffi_crew_client_ffi_fn_clone_crewclient(uint64_t handle, RustCallStatus *_Nonnull out_status
@@ -275,6 +497,11 @@ uint64_t uniffi_crew_client_ffi_fn_clone_crewclient(uint64_t handle, RustCallSta
 #ifndef UNIFFI_FFIDEF_UNIFFI_CREW_CLIENT_FFI_FN_FREE_CREWCLIENT
 #define UNIFFI_FFIDEF_UNIFFI_CREW_CLIENT_FFI_FN_FREE_CREWCLIENT
 void uniffi_crew_client_ffi_fn_free_crewclient(uint64_t handle, RustCallStatus *_Nonnull out_status
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_CREW_CLIENT_FFI_FN_CONSTRUCTOR_CREWCLIENT_GATEWAY
+#define UNIFFI_FFIDEF_UNIFFI_CREW_CLIENT_FFI_FN_CONSTRUCTOR_CREWCLIENT_GATEWAY
+uint64_t uniffi_crew_client_ffi_fn_constructor_crewclient_gateway(uint64_t profile, uint64_t signer, RustCallStatus *_Nonnull out_status
 );
 #endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_CREW_CLIENT_FFI_FN_CONSTRUCTOR_CREWCLIENT_LOCAL
@@ -313,6 +540,11 @@ RustBuffer uniffi_crew_client_ffi_fn_method_crewclient_connection_context(uint64
 void uniffi_crew_client_ffi_fn_method_crewclient_disconnect(uint64_t ptr, RustCallStatus *_Nonnull out_status
 );
 #endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_CREW_CLIENT_FFI_FN_METHOD_CREWCLIENT_ENROLL
+#define UNIFFI_FFIDEF_UNIFFI_CREW_CLIENT_FFI_FN_METHOD_CREWCLIENT_ENROLL
+uint64_t uniffi_crew_client_ffi_fn_method_crewclient_enroll(uint64_t ptr, RustBuffer label, uint64_t observer, RustCallStatus *_Nonnull out_status
+);
+#endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_CREW_CLIENT_FFI_FN_METHOD_CREWCLIENT_LOCAL_PROFILES
 #define UNIFFI_FFIDEF_UNIFFI_CREW_CLIENT_FFI_FN_METHOD_CREWCLIENT_LOCAL_PROFILES
 RustBuffer uniffi_crew_client_ffi_fn_method_crewclient_local_profiles(uint64_t ptr, RustCallStatus *_Nonnull out_status
@@ -343,6 +575,11 @@ void uniffi_crew_client_ffi_fn_method_crewclient_reconnect(uint64_t ptr, RustCal
 void uniffi_crew_client_ffi_fn_method_crewclient_remove_observer(uint64_t ptr, uint64_t subscription_id, RustCallStatus *_Nonnull out_status
 );
 #endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_CREW_CLIENT_FFI_FN_METHOD_CREWCLIENT_RETIRE_DEVICE_ACCESS
+#define UNIFFI_FFIDEF_UNIFFI_CREW_CLIENT_FFI_FN_METHOD_CREWCLIENT_RETIRE_DEVICE_ACCESS
+void uniffi_crew_client_ffi_fn_method_crewclient_retire_device_access(uint64_t ptr, RustCallStatus *_Nonnull out_status
+);
+#endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_CREW_CLIENT_FFI_FN_METHOD_CREWCLIENT_SELECT_WORKSPACE
 #define UNIFFI_FFIDEF_UNIFFI_CREW_CLIENT_FFI_FN_METHOD_CREWCLIENT_SELECT_WORKSPACE
 void uniffi_crew_client_ffi_fn_method_crewclient_select_workspace(uint64_t ptr, RustBuffer workspace_id, RustCallStatus *_Nonnull out_status
@@ -363,10 +600,25 @@ RustBuffer uniffi_crew_client_ffi_fn_method_crewclient_workspaces(uint64_t ptr, 
 void uniffi_crew_client_ffi_fn_init_callback_vtable_clientobserver(const UniffiVTableCallbackInterfaceClientObserver* _Nonnull vtable
 );
 #endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_CREW_CLIENT_FFI_FN_INIT_CALLBACK_VTABLE_SETUPOBSERVER
+#define UNIFFI_FFIDEF_UNIFFI_CREW_CLIENT_FFI_FN_INIT_CALLBACK_VTABLE_SETUPOBSERVER
+void uniffi_crew_client_ffi_fn_init_callback_vtable_setupobserver(const UniffiVTableCallbackInterfaceSetupObserver* _Nonnull vtable
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_CREW_CLIENT_FFI_FN_INIT_CALLBACK_VTABLE_DEVICESIGNER
+#define UNIFFI_FFIDEF_UNIFFI_CREW_CLIENT_FFI_FN_INIT_CALLBACK_VTABLE_DEVICESIGNER
+void uniffi_crew_client_ffi_fn_init_callback_vtable_devicesigner(const UniffiVTableCallbackInterfaceDeviceSigner* _Nonnull vtable
+);
+#endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_CREW_CLIENT_FFI_FN_FUNC_PROTOCOL_VERSION
 #define UNIFFI_FFIDEF_UNIFFI_CREW_CLIENT_FFI_FN_FUNC_PROTOCOL_VERSION
 uint32_t uniffi_crew_client_ffi_fn_func_protocol_version(RustCallStatus *_Nonnull out_status
     
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_CREW_CLIENT_FFI_FN_FUNC_PARSE_GATEWAY_PROFILE
+#define UNIFFI_FFIDEF_UNIFFI_CREW_CLIENT_FFI_FN_FUNC_PARSE_GATEWAY_PROFILE
+RustBuffer uniffi_crew_client_ffi_fn_func_parse_gateway_profile(RustBuffer text, RustCallStatus *_Nonnull out_status
 );
 #endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_CREW_CLIENT_FFI_FN_FUNC_MESSAGE_QUESTION_INFO
@@ -640,9 +892,105 @@ uint16_t uniffi_crew_client_ffi_checksum_func_protocol_version(void
     
 );
 #endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_CREW_CLIENT_FFI_CHECKSUM_FUNC_PARSE_GATEWAY_PROFILE
+#define UNIFFI_FFIDEF_UNIFFI_CREW_CLIENT_FFI_CHECKSUM_FUNC_PARSE_GATEWAY_PROFILE
+uint16_t uniffi_crew_client_ffi_checksum_func_parse_gateway_profile(void
+    
+);
+#endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_CREW_CLIENT_FFI_CHECKSUM_FUNC_MESSAGE_QUESTION_INFO
 #define UNIFFI_FFIDEF_UNIFFI_CREW_CLIENT_FFI_CHECKSUM_FUNC_MESSAGE_QUESTION_INFO
 uint16_t uniffi_crew_client_ffi_checksum_func_message_question_info(void
+    
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_CREW_CLIENT_FFI_CHECKSUM_METHOD_AUTHTRANSCRIPT_SIGNING_BYTES
+#define UNIFFI_FFIDEF_UNIFFI_CREW_CLIENT_FFI_CHECKSUM_METHOD_AUTHTRANSCRIPT_SIGNING_BYTES
+uint16_t uniffi_crew_client_ffi_checksum_method_authtranscript_signing_bytes(void
+    
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_CREW_CLIENT_FFI_CHECKSUM_METHOD_ENROLLTRANSCRIPT_SIGNING_BYTES
+#define UNIFFI_FFIDEF_UNIFFI_CREW_CLIENT_FFI_CHECKSUM_METHOD_ENROLLTRANSCRIPT_SIGNING_BYTES
+uint16_t uniffi_crew_client_ffi_checksum_method_enrolltranscript_signing_bytes(void
+    
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_CREW_CLIENT_FFI_CHECKSUM_METHOD_GATEWAYPROFILE_PROFILE_ID
+#define UNIFFI_FFIDEF_UNIFFI_CREW_CLIENT_FFI_CHECKSUM_METHOD_GATEWAYPROFILE_PROFILE_ID
+uint16_t uniffi_crew_client_ffi_checksum_method_gatewayprofile_profile_id(void
+    
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_CREW_CLIENT_FFI_CHECKSUM_METHOD_GATEWAYPROFILE_PUBLIC_PROFILE
+#define UNIFFI_FFIDEF_UNIFFI_CREW_CLIENT_FFI_CHECKSUM_METHOD_GATEWAYPROFILE_PUBLIC_PROFILE
+uint16_t uniffi_crew_client_ffi_checksum_method_gatewayprofile_public_profile(void
+    
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_CREW_CLIENT_FFI_CHECKSUM_METHOD_ENROLLMENTHANDLE_CANCEL
+#define UNIFFI_FFIDEF_UNIFFI_CREW_CLIENT_FFI_CHECKSUM_METHOD_ENROLLMENTHANDLE_CANCEL
+uint16_t uniffi_crew_client_ffi_checksum_method_enrollmenthandle_cancel(void
+    
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_CREW_CLIENT_FFI_CHECKSUM_METHOD_ENROLLMENTHANDLE_IS_FINISHED
+#define UNIFFI_FFIDEF_UNIFFI_CREW_CLIENT_FFI_CHECKSUM_METHOD_ENROLLMENTHANDLE_IS_FINISHED
+uint16_t uniffi_crew_client_ffi_checksum_method_enrollmenthandle_is_finished(void
+    
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_CREW_CLIENT_FFI_CHECKSUM_METHOD_PUBLICKEYREPLY_COMPLETE
+#define UNIFFI_FFIDEF_UNIFFI_CREW_CLIENT_FFI_CHECKSUM_METHOD_PUBLICKEYREPLY_COMPLETE
+uint16_t uniffi_crew_client_ffi_checksum_method_publickeyreply_complete(void
+    
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_CREW_CLIENT_FFI_CHECKSUM_METHOD_PUBLICKEYREPLY_FAIL
+#define UNIFFI_FFIDEF_UNIFFI_CREW_CLIENT_FFI_CHECKSUM_METHOD_PUBLICKEYREPLY_FAIL
+uint16_t uniffi_crew_client_ffi_checksum_method_publickeyreply_fail(void
+    
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_CREW_CLIENT_FFI_CHECKSUM_METHOD_PUBLICKEYREPLY_IS_PENDING
+#define UNIFFI_FFIDEF_UNIFFI_CREW_CLIENT_FFI_CHECKSUM_METHOD_PUBLICKEYREPLY_IS_PENDING
+uint16_t uniffi_crew_client_ffi_checksum_method_publickeyreply_is_pending(void
+    
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_CREW_CLIENT_FFI_CHECKSUM_METHOD_RETIREMENTREPLY_COMPLETE
+#define UNIFFI_FFIDEF_UNIFFI_CREW_CLIENT_FFI_CHECKSUM_METHOD_RETIREMENTREPLY_COMPLETE
+uint16_t uniffi_crew_client_ffi_checksum_method_retirementreply_complete(void
+    
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_CREW_CLIENT_FFI_CHECKSUM_METHOD_RETIREMENTREPLY_FAIL
+#define UNIFFI_FFIDEF_UNIFFI_CREW_CLIENT_FFI_CHECKSUM_METHOD_RETIREMENTREPLY_FAIL
+uint16_t uniffi_crew_client_ffi_checksum_method_retirementreply_fail(void
+    
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_CREW_CLIENT_FFI_CHECKSUM_METHOD_RETIREMENTREPLY_IS_PENDING
+#define UNIFFI_FFIDEF_UNIFFI_CREW_CLIENT_FFI_CHECKSUM_METHOD_RETIREMENTREPLY_IS_PENDING
+uint16_t uniffi_crew_client_ffi_checksum_method_retirementreply_is_pending(void
+    
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_CREW_CLIENT_FFI_CHECKSUM_METHOD_SIGNATUREREPLY_COMPLETE
+#define UNIFFI_FFIDEF_UNIFFI_CREW_CLIENT_FFI_CHECKSUM_METHOD_SIGNATUREREPLY_COMPLETE
+uint16_t uniffi_crew_client_ffi_checksum_method_signaturereply_complete(void
+    
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_CREW_CLIENT_FFI_CHECKSUM_METHOD_SIGNATUREREPLY_FAIL
+#define UNIFFI_FFIDEF_UNIFFI_CREW_CLIENT_FFI_CHECKSUM_METHOD_SIGNATUREREPLY_FAIL
+uint16_t uniffi_crew_client_ffi_checksum_method_signaturereply_fail(void
+    
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_CREW_CLIENT_FFI_CHECKSUM_METHOD_SIGNATUREREPLY_IS_PENDING
+#define UNIFFI_FFIDEF_UNIFFI_CREW_CLIENT_FFI_CHECKSUM_METHOD_SIGNATUREREPLY_IS_PENDING
+uint16_t uniffi_crew_client_ffi_checksum_method_signaturereply_is_pending(void
     
 );
 #endif
@@ -682,6 +1030,12 @@ uint16_t uniffi_crew_client_ffi_checksum_method_crewclient_disconnect(void
     
 );
 #endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_CREW_CLIENT_FFI_CHECKSUM_METHOD_CREWCLIENT_ENROLL
+#define UNIFFI_FFIDEF_UNIFFI_CREW_CLIENT_FFI_CHECKSUM_METHOD_CREWCLIENT_ENROLL
+uint16_t uniffi_crew_client_ffi_checksum_method_crewclient_enroll(void
+    
+);
+#endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_CREW_CLIENT_FFI_CHECKSUM_METHOD_CREWCLIENT_LOCAL_PROFILES
 #define UNIFFI_FFIDEF_UNIFFI_CREW_CLIENT_FFI_CHECKSUM_METHOD_CREWCLIENT_LOCAL_PROFILES
 uint16_t uniffi_crew_client_ffi_checksum_method_crewclient_local_profiles(void
@@ -718,6 +1072,12 @@ uint16_t uniffi_crew_client_ffi_checksum_method_crewclient_remove_observer(void
     
 );
 #endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_CREW_CLIENT_FFI_CHECKSUM_METHOD_CREWCLIENT_RETIRE_DEVICE_ACCESS
+#define UNIFFI_FFIDEF_UNIFFI_CREW_CLIENT_FFI_CHECKSUM_METHOD_CREWCLIENT_RETIRE_DEVICE_ACCESS
+uint16_t uniffi_crew_client_ffi_checksum_method_crewclient_retire_device_access(void
+    
+);
+#endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_CREW_CLIENT_FFI_CHECKSUM_METHOD_CREWCLIENT_SELECT_WORKSPACE
 #define UNIFFI_FFIDEF_UNIFFI_CREW_CLIENT_FFI_CHECKSUM_METHOD_CREWCLIENT_SELECT_WORKSPACE
 uint16_t uniffi_crew_client_ffi_checksum_method_crewclient_select_workspace(void
@@ -736,6 +1096,18 @@ uint16_t uniffi_crew_client_ffi_checksum_method_crewclient_workspaces(void
     
 );
 #endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_CREW_CLIENT_FFI_CHECKSUM_CONSTRUCTOR_GATEWAYPROFILE_TRUST
+#define UNIFFI_FFIDEF_UNIFFI_CREW_CLIENT_FFI_CHECKSUM_CONSTRUCTOR_GATEWAYPROFILE_TRUST
+uint16_t uniffi_crew_client_ffi_checksum_constructor_gatewayprofile_trust(void
+    
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_CREW_CLIENT_FFI_CHECKSUM_CONSTRUCTOR_CREWCLIENT_GATEWAY
+#define UNIFFI_FFIDEF_UNIFFI_CREW_CLIENT_FFI_CHECKSUM_CONSTRUCTOR_CREWCLIENT_GATEWAY
+uint16_t uniffi_crew_client_ffi_checksum_constructor_crewclient_gateway(void
+    
+);
+#endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_CREW_CLIENT_FFI_CHECKSUM_CONSTRUCTOR_CREWCLIENT_LOCAL
 #define UNIFFI_FFIDEF_UNIFFI_CREW_CLIENT_FFI_CHECKSUM_CONSTRUCTOR_CREWCLIENT_LOCAL
 uint16_t uniffi_crew_client_ffi_checksum_constructor_crewclient_local(void
@@ -751,6 +1123,48 @@ uint16_t uniffi_crew_client_ffi_checksum_method_clientobserver_changed(void
 #ifndef UNIFFI_FFIDEF_UNIFFI_CREW_CLIENT_FFI_CHECKSUM_METHOD_CLIENTOBSERVER_TERMINAL
 #define UNIFFI_FFIDEF_UNIFFI_CREW_CLIENT_FFI_CHECKSUM_METHOD_CLIENTOBSERVER_TERMINAL
 uint16_t uniffi_crew_client_ffi_checksum_method_clientobserver_terminal(void
+    
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_CREW_CLIENT_FFI_CHECKSUM_METHOD_SETUPOBSERVER_CHANGED
+#define UNIFFI_FFIDEF_UNIFFI_CREW_CLIENT_FFI_CHECKSUM_METHOD_SETUPOBSERVER_CHANGED
+uint16_t uniffi_crew_client_ffi_checksum_method_setupobserver_changed(void
+    
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_CREW_CLIENT_FFI_CHECKSUM_METHOD_SETUPOBSERVER_FINISHED
+#define UNIFFI_FFIDEF_UNIFFI_CREW_CLIENT_FFI_CHECKSUM_METHOD_SETUPOBSERVER_FINISHED
+uint16_t uniffi_crew_client_ffi_checksum_method_setupobserver_finished(void
+    
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_CREW_CLIENT_FFI_CHECKSUM_METHOD_SETUPOBSERVER_FAILED
+#define UNIFFI_FFIDEF_UNIFFI_CREW_CLIENT_FFI_CHECKSUM_METHOD_SETUPOBSERVER_FAILED
+uint16_t uniffi_crew_client_ffi_checksum_method_setupobserver_failed(void
+    
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_CREW_CLIENT_FFI_CHECKSUM_METHOD_DEVICESIGNER_PUBLIC_KEY
+#define UNIFFI_FFIDEF_UNIFFI_CREW_CLIENT_FFI_CHECKSUM_METHOD_DEVICESIGNER_PUBLIC_KEY
+uint16_t uniffi_crew_client_ffi_checksum_method_devicesigner_public_key(void
+    
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_CREW_CLIENT_FFI_CHECKSUM_METHOD_DEVICESIGNER_SIGN_AUTH
+#define UNIFFI_FFIDEF_UNIFFI_CREW_CLIENT_FFI_CHECKSUM_METHOD_DEVICESIGNER_SIGN_AUTH
+uint16_t uniffi_crew_client_ffi_checksum_method_devicesigner_sign_auth(void
+    
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_CREW_CLIENT_FFI_CHECKSUM_METHOD_DEVICESIGNER_SIGN_ENROLLMENT
+#define UNIFFI_FFIDEF_UNIFFI_CREW_CLIENT_FFI_CHECKSUM_METHOD_DEVICESIGNER_SIGN_ENROLLMENT
+uint16_t uniffi_crew_client_ffi_checksum_method_devicesigner_sign_enrollment(void
+    
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_CREW_CLIENT_FFI_CHECKSUM_METHOD_DEVICESIGNER_RETIRE
+#define UNIFFI_FFIDEF_UNIFFI_CREW_CLIENT_FFI_CHECKSUM_METHOD_DEVICESIGNER_RETIRE
+uint16_t uniffi_crew_client_ffi_checksum_method_devicesigner_retire(void
     
 );
 #endif

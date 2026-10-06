@@ -17,7 +17,7 @@ required-features = ["bindgen"]
 
 [features]
 default = []
-bindings = ["dep:uniffi", "dep:crew-client-transport", "crew-client-transport/runtime"]
+bindings = ["dep:uniffi", "dep:crew-client-transport", "crew-client-transport/gateway", "dep:tokio"]
 bindgen = ["bindings", "uniffi/cli", "uniffi/cargo-metadata"]
 local = ["bindings", "crew-client-transport/local"]
 
@@ -26,7 +26,15 @@ crew-client = { path = "../crew-client" }
 crew-protocol = { path = "../crew-protocol" }
 crew-client-transport = { path = "../crew-client-transport", optional = true }
 serde_json.workspace = true
+tokio = { workspace = true, optional = true }
 uniffi = { version = "=0.31.0", default-features = false, optional = true }
 
 [dev-dependencies]
 tempfile.workspace = true
+ed25519-dalek = { version = "=2.2.0", default-features = false, features = ["std", "fast", "zeroize"] }
+rustls = { version = "=0.23.45", default-features = false, features = ["std", "ring"] }
+tokio-rustls = { version = "=0.26.6", default-features = false, features = ["ring"] }
+rustls-pemfile = "=2.2.0"
+sha2.workspace = true
+tokio-tungstenite.workspace = true
+futures-util.workspace = true

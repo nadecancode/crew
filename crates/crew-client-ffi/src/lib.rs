@@ -17,6 +17,9 @@ pub mod callbacks;
 #[cfg(feature = "bindings")]
 pub mod service;
 
+#[cfg(feature = "bindings")]
+pub mod gateway;
+
 /// The daemon protocol understood by this binding's shared Rust dependency.
 #[cfg(feature = "bindings")]
 #[uniffi::export]
