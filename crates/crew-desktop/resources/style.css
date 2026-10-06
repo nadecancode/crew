@@ -11,7 +11,6 @@
 .crew-chip { border: 1px solid currentColor; border-radius: 999px; padding: 1px 8px; font-size: smaller; }
 /* Entity lists: rows carry their own 12/24-pixel margins. */
 .crew-list > row { padding: 0; }
-.crew-section-list { background: transparent; }
 .crew-row { padding: 12px 0; }
 .crew-attention { font-weight: bold; }
 /* Wrapping tab row: the selected tab carries an underline in the accent. */

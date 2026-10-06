@@ -30,6 +30,11 @@
 button.suggested-action { background-image: none; background-color: @crew_accent; color: @crew_accent_fg; }
 button.suggested-action:hover { background-image: none; background-color: shade(@crew_accent, 1.08); }
 button.suggested-action:active { background-image: none; background-color: shade(@crew_accent, 0.9); }
+.crew-list { background-color: @crew_canvas; }
+.crew-section-list { background-color: transparent; }
+button.flat.destructive-action { background-image: none; background-color: transparent; color: @crew_tone_danger; }
+button.flat.destructive-action:hover { background-color: alpha(@crew_tone_danger, 0.12); }
+button.flat.destructive-action:disabled { color: alpha(@crew_tone_danger, 0.5); }
 .crew-list > row:selected { background-color: @crew_raised; color: @crew_text; box-shadow: inset 3px 0 @crew_accent; }
 .crew-row + .crew-row { border-top: 1px solid @crew_border; }
 .crew-warning, .crew-attention { color: @crew_tone_warning; }
