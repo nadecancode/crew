@@ -11,6 +11,7 @@ pub struct TeamView {
     empty: gtk::ScrolledWindow,
     graph: super::graph::Graph,
     pairs: gtk::Box,
+    pairs_group: gtk::Expander,
     pair: Rc<dyn Fn(ClientScope, String, String)>,
 }
 
@@ -24,8 +25,21 @@ impl TeamView {
         stack.add_titled(&graph.root, Some("graph"), "Graph");
         let switcher = gtk::StackSwitcher::builder().stack(&stack).build();
         root.append(&switcher);
+        // Pair navigation is collapsed and height-bounded so a large team or
+        // enlarged text cannot push the agent list out of view.
         let pairs = gtk::Box::new(gtk::Orientation::Vertical, 4);
-        root.append(&pairs);
+        let pairs_scroll = gtk::ScrolledWindow::builder()
+            .child(&pairs)
+            .hscrollbar_policy(gtk::PolicyType::Never)
+            .propagate_natural_height(true)
+            .max_content_height(180)
+            .build();
+        let pairs_group = gtk::Expander::builder()
+            .label("Conversations between related agents")
+            .child(&pairs_scroll)
+            .visible(false)
+            .build();
+        root.append(&pairs_group);
         let empty = super::empty_state(
             "system-run-symbolic",
             "No agents loaded",
@@ -39,11 +53,18 @@ impl TeamView {
             empty,
             graph,
             pairs,
+            pairs_group,
             pair,
         }
     }
 
     pub fn update(&self, scope: Option<&ClientScope>, data: &TeamData) {
+        self.pairs_group
+            .set_visible(scope.is_some() && !data.relations.is_empty());
+        self.pairs_group.set_label(Some(&format!(
+            "Conversations between related agents ({})",
+            data.relations.len()
+        )));
         let Some(scope) = scope else {
             common::clear(&self.pairs);
             self.list.replace(Vec::new());

@@ -58,6 +58,54 @@ struct OpenForm {
     target: String,
     submitted: Option<ActionIntent>,
 }
+/// Unsent text belongs to its endpoint, workspace and purpose, never to one
+/// connection attempt: an ordinary reconnect keeps it, while a submission
+/// still plans with the current verified scope.
+#[derive(Clone, PartialEq, Eq)]
+struct DraftKey {
+    endpoint_id: String,
+    workspace_id: String,
+    purpose: String,
+}
+impl DraftKey {
+    fn new(scope: &ClientScope, purpose: &str) -> Self {
+        Self {
+            endpoint_id: scope.endpoint_id.clone(),
+            workspace_id: scope.workspace_id.clone(),
+            purpose: purpose.into(),
+        }
+    }
+}
+/// A deduplication ID names one exact (recipient, body) pair. An unchanged
+/// retry keeps its ID; an edited body or recipient takes a fresh one on
+/// explicit submission, because the message bus returns the original message
+/// as a duplicate without delivering the edit.
+struct MessageIdentity {
+    bound: Option<(String, String, String)>,
+    fresh: String,
+}
+impl MessageIdentity {
+    fn new(bound: Option<(String, String, String)>) -> Self {
+        Self {
+            bound,
+            fresh: glib::uuid_string_random().to_string(),
+        }
+    }
+    fn peek(&self, to: &str, body: &str) -> String {
+        match &self.bound {
+            Some((t, b, id)) if t == to && b == body => id.clone(),
+            _ => self.fresh.clone(),
+        }
+    }
+    fn submit(&mut self, to: &str, body: &str) -> String {
+        let id = self.peek(to, body);
+        if id == self.fresh {
+            self.bound = Some((to.into(), body.into(), id.clone()));
+            self.fresh = glib::uuid_string_random().to_string();
+        }
+        id
+    }
+}
 struct Confirmation {
     id: u64,
     scope: ClientScope,
@@ -98,7 +146,7 @@ pub struct Controller {
     attachments: RefCell<Vec<(ClientScope, AttachmentId, TerminalView)>>,
     confirmation: RefCell<Option<Confirmation>>,
     forms: RefCell<BTreeMap<u64, OpenForm>>,
-    drafts: RefCell<Vec<(ClientScope, String, String)>>,
+    drafts: RefCell<Vec<(DraftKey, String)>>,
     questions: RefCell<Vec<crew_protocol::Message>>,
     message_filter: RefCell<MessageFilter>,
     event_filter: RefCell<EventFilter>,
@@ -772,7 +820,7 @@ impl Controller {
                         scope: original,
                         to,
                         message_id,
-                        ..
+                        body: submitted,
                     }),
                 )) = current
                 {
@@ -789,9 +837,14 @@ impl Controller {
                         {
                             return;
                         }
-                        self.forms.borrow_mut().remove(&form);
-                        old.close();
-                        self.compose_with_id(to, Some(body), message_id);
+                        // The original stays a read-only receipt with its own
+                        // outcome; the restored editor is a new submission.
+                        old.dialog.set_visible(false);
+                        self.compose_message(
+                            to.clone(),
+                            Some(body),
+                            Some((to, submitted, message_id)),
+                        );
                     }
                 }
             }
@@ -1507,9 +1560,10 @@ impl Controller {
                     if let Some(form) = form {
                         self.controls.remove(id);
                         if let ActionIntent::SendMessage { body, .. } = &action.intent {
-                            self.drafts.borrow_mut().retain(|(scope, target, text)| {
-                                scope != &form.scope || target != &form.target || text != body
-                            });
+                            let key = DraftKey::new(&form.scope, &form.target);
+                            self.drafts
+                                .borrow_mut()
+                                .retain(|(k, text)| k != &key || text != body);
                         } else {
                             self.save_draft(&form.scope, &form.target, "");
                         }
@@ -1808,23 +1862,32 @@ impl Controller {
         }
     }
     fn save_draft(&self, scope: &ClientScope, target: &str, text: &str) {
+        let key = DraftKey::new(scope, target);
         let mut drafts = self.drafts.borrow_mut();
-        drafts.retain(|(s, t, _)| s != scope || t != target);
+        drafts.retain(|(k, _)| k != &key);
         if !text.is_empty() {
-            drafts.push((scope.clone(), target.into(), text.into()));
+            drafts.push((key, text.into()));
         }
     }
     fn draft(&self, scope: &ClientScope, target: &str) -> String {
+        let key = DraftKey::new(scope, target);
         self.drafts
             .borrow()
             .iter()
-            .find(|(s, t, _)| s == scope && t == target)
-            .map_or(String::new(), |(_, _, text)| text.clone())
+            .find(|(k, _)| k == &key)
+            .map_or(String::new(), |(_, text)| text.clone())
     }
     pub fn compose(&self, recipient: String) {
-        self.compose_with_id(recipient, None, glib::uuid_string_random().to_string());
+        self.compose_message(recipient, None, None);
     }
-    fn compose_with_id(&self, recipient: String, initial: Option<String>, message_id: String) {
+    /// `origin` is a restored (recipient, body, message ID); that ID stays
+    /// bound to exactly that pair.
+    fn compose_message(
+        &self,
+        recipient: String,
+        initial: Option<String>,
+        origin: Option<(String, String, String)>,
+    ) {
         let Some(scope) = self.scope.borrow().clone() else {
             self.result
                 .set_label("Choose a workspace before composing a message.");
@@ -1832,6 +1895,7 @@ impl Controller {
         };
         let token = self.token();
         let target = format!("message:{recipient}");
+        let identity = Rc::new(RefCell::new(MessageIdentity::new(origin)));
         let entry = gtk::Entry::builder()
             .text(&recipient)
             .placeholder_text("Agent ID or * for broadcast")
@@ -1840,9 +1904,9 @@ impl Controller {
             "Recipient; * broadcasts to the team",
         )]);
         let form = Form::new(self.shell.window(), "New message", &format!("Workspace {} · recipient * broadcasts to the team. Return inserts a newline; Send submits explicitly.", scope.workspace_id), &initial.unwrap_or_else(|| self.draft(&scope, &target)), "Send",
-            Rc::new({ let weak = self.weak.clone(); let scope = scope.clone(); let entry = entry.clone(); let message_id = message_id.clone(); move |body| if let Some(c) = weak.upgrade() {
+            Rc::new({ let weak = self.weak.clone(); let scope = scope.clone(); let entry = entry.clone(); let identity = identity.clone(); move |body| if let Some(c) = weak.upgrade() {
                 let recipient = entry.text().to_string();
-                if !c.command(&body, &recipient, &scope) { c.plan(ActionIntent::SendMessage { scope: scope.clone(), to: recipient, body, message_id: message_id.clone() }, Some(token), None); }
+                if !c.command(&body, &recipient, &scope) { let message_id = identity.borrow_mut().submit(&recipient, &body); c.plan(ActionIntent::SendMessage { scope: scope.clone(), to: recipient, body, message_id }, Some(token), None); }
                 else { let form = c.forms.borrow().get(&token).map(|f| f.form.clone()); if let Some(form) = form { form.failed(c.result.label().as_str()); } }
             }}), Rc::new({ let weak = self.weak.clone(); let scope = scope.clone(); let entry = entry.clone(); move |text| if let Some(c) = weak.upgrade() { c.save_draft(&scope, &format!("message:{}", entry.text()), &text); let receipt = c.forms.borrow().get(&token).is_some_and(|open| open.form.receipt.get()); if !receipt { c.forms.borrow_mut().remove(&token); c.controls.remove(token); } } }));
         form.dialog.content_area().prepend(&entry);
@@ -1859,12 +1923,9 @@ impl Controller {
                     let (Some(c), Some(entry)) = (weak.upgrade(), entry.upgrade()) else {
                         return ControlInput::Invalid("Editor closed.".into());
                     };
-                    c.composer_input(
-                        &scope,
-                        &common::buffer_text(&buffer),
-                        entry.text().as_str(),
-                        &message_id,
-                    )
+                    let body = common::buffer_text(&buffer);
+                    let message_id = identity.borrow().peek(entry.text().as_str(), &body);
+                    c.composer_input(&scope, &body, entry.text().as_str(), &message_id)
                 }
             }),
         );

@@ -447,10 +447,14 @@ fn begin_receipt(c: &Controller, recorder: &Recording, body: &str, operation: u6
         instance: 1,
         notice: notice(Some(scope())),
     });
-    c.compose_with_id(
+    c.compose_message(
         "claude-1".into(),
         Some(body.into()),
-        format!("receipt-{operation}"),
+        Some((
+            "claude-1".into(),
+            body.into(),
+            format!("receipt-{operation}"),
+        )),
     );
     let id = *c.forms.borrow().keys().next_back().unwrap();
     let form = c.forms.borrow().get(&id).unwrap().form.clone();
@@ -466,15 +470,173 @@ fn begin_receipt(c: &Controller, recorder: &Recording, body: &str, operation: u6
     });
     (id, form)
 }
-fn reconnected_receipts(c: &Controller, recorder: &Recording) {
+fn last_form(c: &Controller) -> (u64, Form) {
+    let id = *c.forms.borrow().keys().next_back().unwrap();
+    let form = c.forms.borrow().get(&id).unwrap().form.clone();
+    (id, form)
+}
+/// The latest planned message as (scope, recipient, body, message ID).
+fn last_send(recorder: &Recording) -> (ClientScope, String, String, String) {
+    recorder
+        .0
+        .borrow()
+        .iter()
+        .rev()
+        .find_map(|request| match request {
+            Request::Plan {
+                intent:
+                    ActionIntent::SendMessage {
+                        scope,
+                        to,
+                        body,
+                        message_id,
+                    },
+                ..
+            } => Some((scope.clone(), to.clone(), body.clone(), message_id.clone())),
+            _ => None,
+        })
+        .expect("one planned message")
+}
+/// Answers the latest availability query as Core would for an eligible send.
+fn grant_send(c: &Controller, recorder: &Recording, scope: &ClientScope) {
+    let token = recorder
+        .0
+        .borrow()
+        .iter()
+        .rev()
+        .find_map(|request| match request {
+            Request::Query {
+                token,
+                query: ViewQuery::Availability { .. },
+                ..
+            } => Some(*token),
+            _ => None,
+        })
+        .expect("one availability query");
+    c.respond(Response::View {
+        instance: 1,
+        token,
+        expected_scope: Some(scope.clone()),
+        result: Ok(ViewData {
+            scope: Some(scope.clone()),
+            revision: 1,
+            synchronized_at_ms: None,
+            freshness: Freshness::Fresh,
+            payload: ViewPayload::Availability(ActionAvailability {
+                action: ActionKind::SendMessage,
+                available: true,
+                reason: None,
+            }),
+        }),
+    });
+}
+fn unsent_draft_across_reconnect(c: &Controller, recorder: &Recording) {
     c.respond(Response::Notice {
         instance: 1,
         notice: notice(Some(scope())),
     });
-    c.compose_with_id(
+    c.compose("claude-1".into());
+    let (id, form) = last_form(c);
+    form.buffer.set_text("Unsent across reconnect");
+    let mut reconnected = scope();
+    reconnected.attempt = 2;
+    c.respond(Response::Notice {
+        instance: 1,
+        notice: notice(Some(reconnected.clone())),
+    });
+    assert!(!c.forms.borrow().contains_key(&id));
+    c.compose("claude-1".into());
+    let (_, form) = last_form(c);
+    assert_eq!(
+        common::buffer_text(&form.buffer),
+        "Unsent across reconnect",
+        "unsent text is kept by endpoint/workspace/purpose, not by attempt"
+    );
+    form.dialog.response(gtk::ResponseType::Accept);
+    let (planned, _, body, _) = last_send(recorder);
+    assert_eq!(
+        planned, reconnected,
+        "the restored draft plans with the current verified scope"
+    );
+    assert_eq!(body, "Unsent across reconnect");
+    c.respond(Response::Action {
+        instance: 1,
+        token: recorder.plan_token(),
+        scope: reconnected,
+        result: Ok(ActionPlan::Unavailable {
+            reason: ClientReason {
+                code: "offline".into(),
+                message: "Workspace unavailable".into(),
+            },
+        }),
+    });
+    form.dialog.response(gtk::ResponseType::Cancel);
+}
+/// Accepted A whose reply was lost: the original receipt stays read-only;
+/// an unchanged restore keeps A's ID, any edit takes a fresh ID.
+fn restored_identity(c: &Controller, recorder: &Recording, unknown: u64, current: &ClientScope) {
+    c.restore_receipt(unknown);
+    grant_send(c, recorder, current);
+    let (_, unchanged) = last_form(c);
+    assert!(c.forms.borrow().contains_key(&unknown));
+    assert_eq!(
+        common::buffer_text(&unchanged.buffer),
+        "Unknown submitted body"
+    );
+    unchanged.dialog.response(gtk::ResponseType::Accept);
+    let (planned, to, body, message_id) = last_send(recorder);
+    assert_eq!(&planned, current);
+    assert_eq!(
+        (to.as_str(), body.as_str()),
+        ("claude-1", "Unknown submitted body")
+    );
+    assert_eq!(
+        message_id, "receipt-2002",
+        "an unchanged retry keeps the original ID"
+    );
+
+    c.restore_receipt(unknown);
+    grant_send(c, recorder, current);
+    let (_, edited) = last_form(c);
+    edited.buffer.set_text("Edited B body");
+    edited.dialog.response(gtk::ResponseType::Accept);
+    let (_, _, body, edited_id) = last_send(recorder);
+    assert_eq!(body, "Edited B body");
+    assert_ne!(
+        edited_id, "receipt-2002",
+        "an edited body cannot reuse A's ID, which the bus would return as a duplicate"
+    );
+
+    c.restore_receipt(unknown);
+    grant_send(c, recorder, current);
+    let (_, readdressed) = last_form(c);
+    let entry = descendants(readdressed.dialog.upcast_ref())
+        .into_iter()
+        .find_map(|w| w.downcast::<gtk::Entry>().ok())
+        .expect("recipient entry");
+    entry.set_text("claude-2");
+    readdressed.dialog.response(gtk::ResponseType::Accept);
+    let (_, to, _, readdressed_id) = last_send(recorder);
+    assert_eq!(to, "claude-2");
+    assert!(readdressed_id != "receipt-2002" && readdressed_id != edited_id);
+    let unknown_form = c.forms.borrow().get(&unknown).unwrap().form.clone();
+    assert!(unknown_form.receipt.get());
+    assert!(unknown_form.error.label().contains("Outcome unknown"));
+}
+fn reconnected_receipts(c: &Controller, recorder: &Recording) {
+    unsent_draft_across_reconnect(c, recorder);
+    c.respond(Response::Notice {
+        instance: 1,
+        notice: notice(Some(scope())),
+    });
+    c.compose_message(
         "claude-1".into(),
         Some("Early reconnected success".into()),
-        "receipt-early".into(),
+        Some((
+            "claude-1".into(),
+            "Early reconnected success".into(),
+            "receipt-early".into(),
+        )),
     );
     let early_id = *c.forms.borrow().keys().next_back().unwrap();
     let early_form = c.forms.borrow().get(&early_id).unwrap().form.clone();
@@ -614,6 +776,7 @@ fn reconnected_receipts(c: &Controller, recorder: &Recording) {
     assert_eq!(common::buffer_text(&form.buffer), "Unknown submitted body");
     assert!(form.error.label().contains("Outcome unknown"));
     assert!(!form.submit.is_sensitive());
+    restored_identity(c, recorder, id, &after);
     let (edited_id, edited) = begin_receipt(c, recorder, "Acknowledged original", 2003);
     edited.buffer.set_text("Later edited draft");
     c.respond(Response::Notice {

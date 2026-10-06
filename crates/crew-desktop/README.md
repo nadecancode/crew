@@ -68,8 +68,15 @@ workspace and original operation ID; the shared core alone owns its same-ID
 retry. Close preserves the receipt without canceling the host operation.
 Success clears only the submitted text, while unknown outcomes retain it and
 ask the operator to check message history. Explicit restoration checks the
-current verified scope and shared availability before opening an editor. Known
-revocation, removal, sign-out or service replacement purges affected receipts.
+current verified scope and shared availability before opening an editor; the
+original receipt stays read-only with its own outcome. A message ID belongs to
+one exact recipient and body: an unchanged restored retry keeps it, while an
+edited body or recipient takes a fresh ID on explicit submission, since the
+message bus would otherwise return the original as a duplicate. Unsent drafts
+are kept by endpoint, workspace and purpose, so an ordinary reconnect keeps
+them; a new submission still plans with the current verified scope. Known
+revocation, removal, sign-out or service replacement purges affected receipts
+and drafts.
 
 A successful Attach notice creates a renderer identified by native instance,
 full scope and attachment ID before any output is displayed. A later plan
