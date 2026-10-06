@@ -1,0 +1,11 @@
+ten consecutive `run-window-test.sh --interaction` runs on 83e9ebc9 (main 2da46639 + fix)
+run 1 exit 0 PASS
+run 2 exit 0 PASS
+run 3 exit 0 PASS
+run 4 exit 0 PASS
+run 5 exit 0 PASS
+run 6 exit 0 PASS
+run 7 exit 0 PASS
+run 8 exit 0 PASS
+run 9 exit 0 PASS
+run 10 exit 0 PASS
