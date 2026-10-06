@@ -27,6 +27,8 @@ public final class CrewNavigation {
         )
     }
 
+    public func resetPaths() { paths.removeAll() }
+
     public var sidebarSelection: Binding<CrewDestination?> {
         Binding(
             get: { self.selection },

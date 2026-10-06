@@ -13,11 +13,6 @@ struct CrewApp: App {
             CrewNavigationCommands()
         }
 
-        Window("Connections", id: "connections") {
-            CrewConnectionsWindow()
-        }
-        .defaultSize(width: 560, height: 520)
-
         Settings {
             CrewAppearanceSettings()
                 .frame(minWidth: 360, idealWidth: 460, minHeight: 200)

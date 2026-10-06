@@ -28,6 +28,7 @@ public struct CrewTerminalIdentity: Hashable {
 @MainActor
 public final class CrewTerminalRenderer: NSObject, TerminalViewDelegate {
     public let identity: CrewTerminalIdentity
+    public private(set) var endReason: TerminalEnd?
     let view: SwiftTerm.TerminalView
     private var inputAvailable = false
     private var ended = false
@@ -120,7 +121,7 @@ public final class CrewTerminalRenderer: NSObject, TerminalViewDelegate {
         guard identity.scope == chunk.scope, identity.attachmentId == chunk.attachmentId, !ended else { return }
         // Disable input before feeding an ending chunk, including any emulator
         // response generated while its final output is interpreted.
-        if chunk.ended != nil { end() }
+        if let reason = chunk.ended { endReason = reason; end() }
         if !chunk.data.isEmpty { view.feed(byteArray: Array(chunk.data)[...]) }
     }
 

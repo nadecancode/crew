@@ -1,0 +1,725 @@
+import CrewBindings
+import CrewUI
+import Foundation
+import Observation
+import SwiftUI
+
+/// Per-window presentation over the real Rust client. Cached values are the
+/// generated projections themselves. No wire parsing, clock, policy, reducer,
+/// optimistic domain mutation, or durable private-content cache lives here.
+@MainActor
+@Observable
+final class CrewSessionModel {
+    private let worker = CrewClientWorker()
+    private var instance = UUID()
+    private var hasClient = false
+    private var active = true
+    private var readTask: _Concurrency.Task<Void, Never>?
+    private var invalidated: Set<ViewQuery> = []
+    private var readGeneration: UInt64 = 0
+    private var queries: [CrewDestination: ViewQuery] = [:]
+    private var operationHistory: [OperationNotice] = []
+    private var pendingJobs = 0
+    private var actionTask: _Concurrency.Task<Void, Never>?
+    private var actionQueue: [CrewQueuedAction] = []
+    private var activeAttachRequest: UUID?
+    private var actionGeneration: UInt64 = 0
+    private var terminalRenderers: [CrewTerminalIdentity: CrewTerminalRenderer] = [:]
+
+    private(set) var localProfiles: [LocalProfileInfo] = []
+    private(set) var discovering = false
+    private(set) var connectionRequested = false
+    private(set) var notice: ClientNotice?
+    private(set) var context: ConnectionContext?
+    private(set) var workspaces: Workspaces?
+    private(set) var views: [CrewDestination: ViewData] = [:]
+    private(set) var overview: ViewData?
+    private(set) var questions: ViewData?
+    private(set) var detail: ViewData?
+    private(set) var selected: EntityKey?
+    private(set) var resource: ViewData?
+    private(set) var selectedResource: ResourceKey?
+    private(set) var confirmation: CrewConfirmation?
+    private(set) var feedback: String?
+    private(set) var error: String?
+    private(set) var unknownTerminalChunks: UInt64 = 0
+    private(set) var terminal: CrewTerminalRenderer?
+    private(set) var terminalStatus: String?
+    private(set) var terminalAgent: EntityKey?
+    private var attachingOperation: (scope: ClientScope, operation: UInt64, agent: EntityKey)?
+    private var expectedAttachmentScope: ClientScope?
+    private var drafts: [CrewDraftKey: String] = [:]
+
+    var destination: CrewDestination = .team {
+        didSet { if destination != oldValue { invalidate(query(for: destination)) } }
+    }
+
+    var scope: ClientScope? { notice?.scope }
+    var pending: Bool { pendingJobs > 0 }
+    var isLive: Bool { active && notice?.workspace == .live && currentView?.freshness == .fresh }
+    var currentView: ViewData? { views[destination] }
+    var presentationStatus: String {
+        if !active { return "Suspended; last-known data" }
+        return notice.map { CrewFailure.workspace($0.workspace) } ?? "Not connected"
+    }
+
+    var session: SessionInfo? {
+        guard case .overview(let data) = overview?.payload else { return nil }
+        return data.session
+    }
+
+    var team: TeamData? {
+        guard case .team(let data) = views[.team]?.payload else { return nil }
+        return data
+    }
+
+    var tasks: TasksData? {
+        guard case .tasks(let data) = views[.tasks]?.payload else { return nil }
+        return data
+    }
+
+    func query(for destination: CrewDestination) -> ViewQuery {
+        if let stored = queries[destination] { return stored }
+        switch destination {
+        case .team: return .team
+        case .tasks: return .tasks
+        case .messages: return .messages(before: nil, limit: 100, filter: MessageFilter(endpoints: .all, kind: nil, text: ""))
+        case .events: return .events(before: nil, limit: 100, filter: EventFilter(agentId: nil, level: nil, text: "", vcsOnly: false))
+        case .usage: return .usage
+        }
+    }
+
+    #if os(macOS)
+    func discoverLocal() async {
+        guard !discovering else { return }
+        discovering = true
+        defer { discovering = false }
+        retirePresentation()
+        let token = instance
+        let observer = makeObserver(token)
+        do {
+            let profiles = try await worker.discoverLocal(observer: observer, instance: token)
+            guard instance == token else { return }
+            hasClient = true
+            try await worker.setActive(active, instance: token)
+            localProfiles = profiles
+            error = nil
+            invalidate(.overview)
+        } catch {
+            guard instance == token else { return }
+            self.error = CrewFailure.message(error)
+        }
+    }
+    #endif
+
+    /// The gateway owner supplies a real generated factory result. No fake
+    /// client or unverified endpoint parameters enter connected composition.
+    func install(_ client: any CrewClientProtocol) async throws {
+        retirePresentation()
+        let token = instance
+        try await worker.install(client, observer: makeObserver(token), instance: token)
+        guard instance == token else { return }
+        hasClient = true
+        try await worker.setActive(active, instance: token)
+        invalidate(.overview)
+    }
+
+    func connect(profile: LocalProfileInfo) {
+        guard hasClient, !connectionRequested else { return }
+        connectionRequested = true
+        let token = instance
+        _Concurrency.Task {
+            do {
+                try await worker.connect(profileId: profile.profileId, instance: token)
+                guard instance == token else { return }
+                connectionRequested = false
+                error = nil
+                invalidate(.overview)
+            } catch {
+                guard instance == token else { return }
+                connectionRequested = false
+                self.error = CrewFailure.message(error)
+            }
+        }
+    }
+
+    func selectWorkspace(_ id: String) {
+        cancelConfirmation()
+        endTerminal("Workspace changed")
+        selected = nil
+        detail = nil
+        selectedResource = nil
+        resource = nil
+        readGeneration &+= 1
+        let token = instance
+        _Concurrency.Task {
+            do {
+                try await worker.selectWorkspace(id, instance: token)
+                guard instance == token else { return }
+                invalidate(.overview)
+                invalidate(query(for: destination))
+            } catch {
+                guard instance == token else { return }
+                self.error = CrewFailure.message(error)
+            }
+        }
+    }
+
+    func select(_ key: EntityKey) {
+        guard key.scope == scope, selected != key else { return }
+        cancelConfirmation()
+        selected = key
+        detail = nil
+        selectedResource = nil
+        resource = nil
+        readGeneration &+= 1
+        invalidated = invalidated.filter { query in
+            switch query { case .agentDetail, .taskDetail, .evidence: return false; default: return true }
+        }
+        switch key.entity {
+        case .agent(let id): invalidate(.agentDetail(id: id))
+        case .task(let id): invalidate(.taskDetail(id: id))
+        case .message, .event:
+            let kind: ResourceKind
+            if case .message = key.entity { kind = .message } else { kind = .event }
+            readResource(ResourceKey(entity: key, kind: kind, options: .default))
+        case .workspace: break
+        }
+    }
+
+    func closeDetail() {
+        cancelConfirmation()
+        selected = nil
+        detail = nil
+        selectedResource = nil
+        resource = nil
+        readGeneration &+= 1
+    }
+
+    func readResource(_ key: ResourceKey) {
+        guard key.entity.scope == scope else { return }
+        selectedResource = key
+        resource = nil
+        readGeneration &+= 1
+        invalidate(.evidence(key: key))
+        perform(.read(scope: key.entity.scope, resource: ResourceRequest(key: key)))
+    }
+
+    func refreshResource(_ key: ResourceKey) {
+        guard key == selectedResource else { return }
+        perform(.read(scope: key.entity.scope, resource: ResourceRequest(key: key)))
+        invalidate(.evidence(key: key))
+    }
+
+    func closeResource(_ key: ResourceKey) {
+        guard selectedResource == key else { return }
+        selectedResource = nil
+        resource = nil
+        readGeneration &+= 1
+    }
+
+    func setMessageFilter(_ filter: MessageFilter) {
+        queries[.messages] = .messages(before: nil, limit: 100, filter: filter)
+        invalidate(query(for: .messages))
+    }
+
+    func setEventFilter(_ filter: EventFilter) {
+        queries[.events] = .events(before: nil, limit: 100, filter: filter)
+        invalidate(query(for: .events))
+    }
+
+    func loadOlderMessages() {
+        guard case .messages(let page) = views[.messages]?.payload,
+              case .messages(_, let limit, let filter) = query(for: .messages) else { return }
+        queries[.messages] = .messages(before: page.before, limit: limit, filter: filter)
+        invalidate(query(for: .messages))
+    }
+
+    func loadOlderEvents() {
+        guard case .events(let page) = views[.events]?.payload,
+              case .events(_, let limit, let filter) = query(for: .events) else { return }
+        queries[.events] = .events(before: page.before, limit: limit, filter: filter)
+        invalidate(query(for: .events))
+    }
+
+    func newestMessages() { queries[.messages] = nil; invalidate(query(for: .messages)) }
+    func newestEvents() { queries[.events] = nil; invalidate(query(for: .events)) }
+
+    func draft(_ key: CrewDraftKey) -> Binding<String> {
+        Binding(get: { self.drafts[key] ?? "" }, set: { self.drafts[key] = $0 })
+    }
+
+    /// A typed intent is submitted once. Rust preflight supplies eligibility,
+    /// exact confirmation targets and real outcomes; mutations are not replayed.
+    func perform(_ intent: ActionIntent) {
+        enqueue(intent, attachmentRequest: nil)
+    }
+
+    private func enqueue(_ intent: ActionIntent, attachmentRequest: UUID?) {
+        guard hasClient else { return }
+        // One bounded consumer preserves invocation order, including raw keys.
+        // Lifecycle and scope changes discard work rather than replaying it.
+        if case .attachInput(_, _, let data) = intent {
+            let buffered = actionQueue.reduce(0) { count, intent in
+                if case .attachInput(_, _, let bytes) = intent.intent { return count + bytes.count }
+                return count
+            }
+            if data.count > 65_536 - buffered {
+                endTerminal("Terminal input backlog exceeded; open a new terminal explicitly")
+                discardQueuedActions()
+                return
+            }
+        }
+        guard actionQueue.count < 32 else {
+            feedback = "Too many pending actions. Wait for the current outcome before trying again."
+            if case .attachInput = intent {
+                endTerminal("Terminal input backlog exceeded; open a new terminal explicitly")
+                discardQueuedActions()
+            }
+            return
+        }
+        actionQueue.append(CrewQueuedAction(intent: intent, attachmentRequest: attachmentRequest))
+        pendingJobs = actionQueue.count + (actionTask == nil ? 0 : 1)
+        guard actionTask == nil else { return }
+        let token = instance
+        let generation = actionGeneration
+        actionTask = _Concurrency.Task {
+            while instance == token, actionGeneration == generation, !actionQueue.isEmpty {
+                let command = actionQueue.removeFirst()
+                let intent = command.intent
+                pendingJobs = actionQueue.count + 1
+                do {
+                    let plan = try await worker.plan(intent, instance: token)
+                    guard instance == token, actionGeneration == generation else { return }
+                    switch plan {
+                    case .unavailable(let reason):
+                        feedback = reason.message
+                        if case .attach = intent { endTerminal(reason.message) }
+                    case .confirm(let id, let kind, let scope, let targets):
+                        guard self.scope == scope else {
+                            await worker.cancelConfirmation(id, instance: token)
+                            continue
+                        }
+                        cancelConfirmation()
+                        confirmation = CrewConfirmation(id: id, kind: kind, scope: scope, targets: targets)
+                    case .dispatch(let id):
+                        feedback = operationHistory.last { $0.operationId == id && $0.scope == self.scope }.map(CrewFailure.outcome) ?? "Submitted; awaiting outcome"
+                        if case .attach(let scope, let agent, _, _) = intent {
+                            let key = EntityKey(scope: scope, entity: .agent(agent))
+                            guard terminalAgent == key, expectedAttachmentScope == scope, activeAttachRequest == command.attachmentRequest else {
+                                _ = try? await worker.plan(.detach(scope: scope, attachmentId: id), instance: token)
+                                continue
+                            }
+                            attachingOperation = (scope, id, key)
+                            if let outcome = operationHistory.last(where: { $0.scope == scope && $0.operationId == id }) {
+                                applyAttachment(outcome)
+                            }
+                        }
+                    }
+                } catch {
+                    guard instance == token, actionGeneration == generation else { return }
+                    feedback = CrewFailure.message(error)
+                    if case .attach = intent { endTerminal(feedback ?? "Terminal could not open") }
+                }
+            }
+            if instance == token, actionGeneration == generation { actionTask = nil; pendingJobs = 0 }
+        }
+    }
+
+    func confirm(_ confirmation: CrewConfirmation) {
+        guard self.confirmation == confirmation, scope == confirmation.scope else { return }
+        self.confirmation = nil
+        let token = instance
+        _Concurrency.Task {
+            do { try await worker.confirm(confirmation.id, instance: token) }
+            catch {
+                guard instance == token else { return }
+                feedback = CrewFailure.message(error)
+            }
+        }
+    }
+
+    func cancelConfirmation() {
+        guard let confirmation else { return }
+        self.confirmation = nil
+        let token = instance
+        _Concurrency.Task { await worker.cancelConfirmation(confirmation.id, instance: token) }
+    }
+
+    func attach(_ agent: EntityKey) {
+        guard agent.scope == scope, case .agent(let id) = agent.entity else { return }
+        closeTerminal()
+        terminalAgent = agent
+        terminalStatus = "Opening terminal"
+        expectedAttachmentScope = agent.scope
+        let request = UUID()
+        activeAttachRequest = request
+        enqueue(.attach(scope: agent.scope, agent: id, rows: 24, cols: 80), attachmentRequest: request)
+    }
+
+    func closeTerminal() {
+        actionQueue.removeAll { command in
+            switch command.intent { case .attachInput, .attachResize: return true; default: return false }
+        }
+        if let identity = terminal?.identity {
+            perform(.detach(scope: identity.scope, attachmentId: identity.attachmentId))
+        }
+        endTerminal("Terminal closed")
+        terminal = nil
+        terminalAgent = nil
+    }
+
+    func setActive(_ active: Bool) {
+        self.active = active
+        if !active { cancelConfirmation(); discardQueuedActions(); endTerminal("Suspended; reconnect before opening a new terminal") }
+        guard hasClient else { return }
+        let token = instance
+        _Concurrency.Task {
+            do {
+                try await worker.setActive(active, instance: token)
+                guard instance == token else { return }
+                if active { invalidate(.overview); invalidate(query(for: destination)) }
+            } catch {
+                guard instance == token else { return }
+                self.error = CrewFailure.message(error)
+            }
+        }
+    }
+
+    func reconnect() {
+        guard hasClient else { return }
+        cancelConfirmation()
+        discardQueuedActions()
+        endTerminal("Disconnected; terminal input is not replayed")
+        let token = instance
+        _Concurrency.Task {
+            do { try await worker.reconnect(instance: token) }
+            catch { if instance == token { self.error = CrewFailure.message(error) } }
+        }
+    }
+
+    func disconnect() {
+        guard hasClient else { return }
+        cancelConfirmation()
+        discardQueuedActions()
+        endTerminal("Disconnected")
+        let token = instance
+        _Concurrency.Task {
+            do { try await worker.disconnect(instance: token) }
+            catch { if instance == token { self.error = CrewFailure.message(error) } }
+        }
+    }
+
+    func close() async {
+        let token = instance
+        retirePresentation()
+        localProfiles = []
+        await worker.close(instance: token)
+    }
+
+    func questionInfo(_ message: Message) async throws -> QuestionInfo {
+        try await worker.questionInfo(message, instance: instance)
+    }
+
+    func showError(_ error: Error) { feedback = CrewFailure.message(error) }
+
+    func refresh() { invalidate(.overview); invalidate(query(for: destination)) }
+
+    private func makeObserver(_ token: UUID) -> CrewUIObserver {
+        CrewUIObserver(notice: { [weak self] notice in
+            guard let self, self.instance == token else { return }
+            self.receive(notice)
+        }, terminal: { [weak self] chunk in
+            guard let self, self.instance == token else { return }
+            self.receive(chunk)
+        })
+    }
+
+    private func receive(_ update: ClientNotice) {
+        let oldScope = scope
+        notice = update
+        if update.scope != oldScope {
+            clearScopedViews()
+            readGeneration &+= 1
+        }
+        if update.workspace == .accessRevoked || update.workspace == .removed || update.endpoint == .signedOut {
+            drafts = drafts.filter { key, _ in
+                guard let oldScope else { return false }
+                return key.scope.endpointId != oldScope.endpointId || key.scope.workspaceId != oldScope.workspaceId
+            }
+            workspaces = nil
+            readGeneration &+= 1
+            clearScopedViews()
+        }
+        if !update.changes.removed.isEmpty, let selected, update.changes.removed.contains(selected) { closeDetail() }
+        if update.changes.availability || update.changes.reset || update.changes.pending {
+            // Never reinterpret an old confirmation under changed authority.
+            cancelConfirmation()
+        }
+        if update.changes.availability, terminal != nil { endTerminal("Availability changed; open a new terminal explicitly") }
+        if update.workspace != .live { endTerminal("\(CrewFailure.workspace(update.workspace)); terminal input disabled") }
+        for outcome in update.outcomes {
+            operationHistory.append(outcome)
+            if operationHistory.count > 32 { operationHistory.removeFirst(operationHistory.count - 32) }
+            if outcome.scope == scope {
+                feedback = CrewFailure.outcome(outcome)
+                // Identified Attach success precedes terminal chunks. Create
+                // its exact native renderer before data, even when the actor's
+                // plan continuation has not associated the panel yet.
+                if outcome.kind == .success, let id = outcome.attachmentId {
+                    let identity = CrewTerminalIdentity(scope: outcome.scope, attachmentId: id)
+                    if terminalRenderers[identity] == nil && expectedAttachmentScope == outcome.scope {
+                        if terminalRenderers.count < 2 { terminalRenderers[identity] = makeRenderer(identity) }
+                        else { endTerminal("Too many terminal attachments; open a new terminal explicitly") }
+                    }
+                }
+                applyAttachment(outcome)
+            }
+        }
+        let changes = update.changes
+        if changes.reset || changes.session || changes.availability { invalidate(.overview) }
+        if changes.reset || changes.questions { invalidate(.questions) }
+        if changes.reset || changes.availability || changes.pending || affects(destination, changes) { invalidate(query(for: destination)) }
+        if let selected {
+            switch selected.entity {
+            case .agent(let id):
+                if changes.reset || changes.agents.contains(id) || !changes.tasks.isEmpty || changes.messages || changes.availability || changes.pending {
+                    invalidate(.agentDetail(id: id))
+                }
+            case .task(let id): if changes.reset || changes.tasks.contains(id) { invalidate(.taskDetail(id: id)) }
+            default: break
+            }
+        }
+        if let selectedResource, changes.pending || changes.reset { invalidate(.evidence(key: selectedResource)) }
+    }
+
+    private func receive(_ chunk: TerminalChunk) {
+        guard chunk.scope == scope, active else { unknownTerminalChunks &+= 1; return }
+        let identity = CrewTerminalIdentity(scope: chunk.scope, attachmentId: chunk.attachmentId)
+        guard let renderer = terminalRenderers[identity] else { unknownTerminalChunks &+= 1; return }
+        renderer.receive(chunk)
+        if let ended = chunk.ended, terminal?.identity == identity {
+            terminalStatus = CrewFailure.terminal(ended)
+        }
+    }
+
+    private func applyAttachment(_ outcome: OperationNotice) {
+        guard let attachingOperation, outcome.scope == attachingOperation.scope, outcome.operationId == attachingOperation.operation else { return }
+        switch outcome.kind {
+        case .success:
+            if let id = outcome.attachmentId {
+                let identity = CrewTerminalIdentity(scope: outcome.scope, attachmentId: id)
+                terminal = terminalRenderers[identity]
+                self.attachingOperation = nil
+                expectedAttachmentScope = nil
+                terminalStatus = terminal?.endReason.map(CrewFailure.terminal) ?? "Terminal open"
+                terminal?.setInputAvailable(active && notice?.workspace == .live)
+            }
+        case .rejected, .notSent, .canceled, .unknown, .closedLocally:
+            endTerminal(CrewFailure.outcome(outcome))
+        case .sentUnacknowledged: break
+        }
+    }
+
+    private func makeRenderer(_ identity: CrewTerminalIdentity) -> CrewTerminalRenderer {
+        let renderer = CrewTerminalRenderer(identity: identity, input: { [weak self] identity, data in
+            guard let self, self.active, self.terminal?.identity == identity, self.scope == identity.scope else { return }
+            self.perform(.attachInput(scope: identity.scope, attachmentId: identity.attachmentId, data: data))
+        }, resize: { [weak self] identity, rows, cols in
+            guard let self, self.active, self.terminal?.identity == identity, self.scope == identity.scope,
+                  let rows = UInt16(exactly: rows), let cols = UInt16(exactly: cols), rows > 0, cols > 0 else { return }
+            self.perform(.attachResize(scope: identity.scope, attachmentId: identity.attachmentId, rows: rows, cols: cols))
+        }, openLink: { [weak self] _ in self?.feedback = "Copy the link and review it before opening outside Crew" })
+        // Core acceptance of this exact scoped attach is required. Until its
+        // real outcome arrives, early bytes may render but input stays disabled.
+        renderer.setInputAvailable(false)
+        return renderer
+    }
+
+    private func endTerminal(_ message: String) {
+        for renderer in terminalRenderers.values { renderer.end() }
+        terminalRenderers.removeAll()
+        terminalStatus = message
+        activeAttachRequest = nil
+        attachingOperation = nil
+        expectedAttachmentScope = nil
+    }
+
+    private func affects(_ destination: CrewDestination, _ changes: ChangeSet) -> Bool {
+        switch destination {
+        case .team: return !changes.agents.isEmpty || !changes.tasks.isEmpty || !changes.removed.isEmpty
+        case .tasks: return !changes.tasks.isEmpty || !changes.removed.isEmpty
+        case .messages: return changes.messages
+        case .events: return changes.events
+        case .usage: return changes.usage || !changes.agents.isEmpty
+        }
+    }
+
+    private func invalidate(_ query: ViewQuery) {
+        // Retain only the current request for each presentation slot. Changed
+        // filter text or entity IDs cannot grow a backlog of obsolete reads.
+        invalidated = invalidated.filter { old in
+            switch (old, query) {
+            case (.messages, .messages), (.events, .events), (.agentDetail, .agentDetail),
+                 (.taskDetail, .taskDetail), (.evidence, .evidence): return false
+            default: return true
+            }
+        }
+        invalidated.insert(query)
+        guard hasClient, readTask == nil else { return }
+        let token = instance
+        readTask = _Concurrency.Task {
+            while instance == token, !invalidated.isEmpty {
+                let requests = Array(invalidated)
+                invalidated.removeAll()
+                let generation = readGeneration
+                do {
+                    let result = try await worker.read(requests, instance: token)
+                    guard instance == token else { return }
+                    if generation == readGeneration {
+                        if result.context?.scope == scope { context = result.context }
+                        workspaces = result.workspaces
+                    }
+                    for item in result.views where item.data.scope == scope {
+                        apply(item, generation: generation)
+                    }
+                } catch {
+                    guard instance == token else { return }
+                    self.error = CrewFailure.message(error)
+                }
+            }
+            if instance == token { readTask = nil }
+        }
+    }
+
+    private func apply(_ item: CrewQueriedView, generation: UInt64) {
+        switch item.query {
+        case .overview: overview = item.data
+        case .questions: questions = item.data
+        case .agentDetail, .taskDetail:
+            guard generation == readGeneration else { return }
+            detail = item.data
+        case .evidence(let key):
+            guard generation == readGeneration, selectedResource == key else { return }
+            resource = item.data
+        default:
+            for destination in CrewDestination.allCases where item.query == query(for: destination) {
+                views[destination] = item.data
+            }
+        }
+    }
+
+    private func discardQueuedActions() {
+        actionQueue.removeAll()
+        actionTask?.cancel()
+        actionTask = nil
+        actionGeneration &+= 1
+        pendingJobs = 0
+    }
+
+    private func clearScopedViews() {
+        invalidated.removeAll()
+        discardQueuedActions()
+        cancelConfirmation()
+        endTerminal("Workspace connection changed")
+        terminal = nil
+        terminalAgent = nil
+        context = nil
+        views = [:]
+        overview = nil
+        questions = nil
+        selected = nil
+        detail = nil
+        selectedResource = nil
+        resource = nil
+        queries = [:]
+        operationHistory = []
+    }
+
+    private func retirePresentation() {
+        instance = UUID()
+        hasClient = false
+        readTask?.cancel()
+        readTask = nil
+        invalidated = []
+        notice = nil
+        workspaces = nil
+        pendingJobs = 0
+        connectionRequested = false
+        clearScopedViews()
+    }
+}
+
+private struct CrewQueuedAction {
+    let intent: ActionIntent
+    let attachmentRequest: UUID?
+}
+
+struct CrewDraftKey: Hashable {
+    let scope: ClientScope
+    let purpose: String
+}
+
+struct CrewConfirmation: Identifiable, Equatable {
+    let id: UInt64
+    let kind: ConfirmationKind
+    let scope: ClientScope
+    let targets: [String]
+}
+
+/// Safe user-facing formatting of typed outcomes, not diagnostic reflection.
+/// No arbitrary transport error string, key reference or wire frame is shown.
+enum CrewFailure {
+    static func message(_ error: Error) -> String {
+        guard let error = error as? ClientError else { return "The client operation could not complete. Reconnect or try again explicitly." }
+        switch error {
+        case .ClosedClient: return "Connection is closed. Open Connections to reconnect."
+        case .CursorExpired: return "This history page expired. Return to the newest page."
+        case .StaleConfirmation: return "The target or its availability changed. Review the action again."
+        case .InvalidInput(let field, let reason): return "\(field): \(reason)"
+        case .DecodeFailure: return "The host response could not be read. Check the app and host versions."
+        case .ProtocolMismatch(let expected, let actual, _): return "Protocol mismatch: app \(expected), host \(actual.map(String.init) ?? "unknown")."
+        case .TooLarge: return "The response exceeded the supported size. Request a smaller read."
+        case .InternalFailure: return "The client operation could not complete. Reconnect or try again explicitly."
+        }
+    }
+
+    static func outcome(_ notice: OperationNotice) -> String {
+        if let reason = notice.reason { return reason.message }
+        switch notice.kind {
+        case .success: return "Action completed"
+        case .rejected: return "Action rejected"
+        case .notSent: return "Action was not sent"
+        case .canceled: return "Action canceled"
+        case .unknown: return "Outcome unknown. Check the host before retrying."
+        case .closedLocally: return "Closed in this app"
+        case .sentUnacknowledged: return "Sent; acknowledgement unavailable. Check before retrying."
+        }
+    }
+
+    static func workspace(_ status: WorkspaceStatus) -> String {
+        switch status {
+        case .noneSelected: return "Choose a workspace"
+        case .connecting: return "Synchronizing team"
+        case .live: return "Live"
+        case .reconnecting: return "Reconnecting; last-known data"
+        case .stopped: return "Team is not running"
+        case .unreachable: return "Team cannot be reached"
+        case .incompatible: return "The app and host use incompatible versions"
+        case .removed, .accessRevoked: return "This workspace is no longer available to this device"
+        case .neverJoined: return "Workspace is not joined"
+        }
+    }
+
+    static func terminal(_ end: TerminalEnd) -> String {
+        switch end {
+        case .normal: return "Terminal ended"
+        case .detach: return "Terminal detached"
+        case .disconnect: return "Terminal disconnected"
+        case .revocation: return "Terminal access revoked"
+        case .overflow: return "Terminal output overflowed; open a new terminal explicitly"
+        case .unsupported: return "Interactive terminal is unavailable for this backend"
+        case .failed(let reason): return reason.message
+        }
+    }
+}

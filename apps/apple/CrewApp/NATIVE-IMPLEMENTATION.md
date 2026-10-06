@@ -2,8 +2,9 @@
 
 The approved navigation foundation is `4479a301`. Substantive implementation
 uses the reviewed N2A source at `a159bd03` and the connection experience at
-`5015460a`. The app currently remains unconnected; this document distinguishes
-source preparation from working client behavior.
+`5015460a`. Source now composes the real local facade on macOS. Gateway composition is
+still required for iOS; source preparation and unperformed native execution
+remain distinct.
 
 ## Host storage and presentation checkpoint
 
@@ -40,8 +41,8 @@ or unknown draft. Dynamic strings render verbatim and copying is explicit.
 `CrewClipboard.swift` performs that user-requested OS copy, with local-only
 iOS clipboard items. It is not a terminal OSC clipboard handler.
 
-These components are prepared for the real typed views. They are not currently
-wired into a fabricated service. Shared records and the live facade come from
+These components are now composed with the real typed facade in the local
+source checkpoint below. No fabricated service is used. Shared records and the live facade come from
 `native-ffi`; generated sources remain its owner's responsibility. Connection,
 workspace, content, action, terminal and lifecycle acceptance are still pending.
 
@@ -65,9 +66,9 @@ staging runner instead; this helper has not installed or built an Apple binary.
 MessagePage, EventPage and UsagePresentation. It preserves the supplied order
 and shared current-work choice; native selection constructs the full generated
 EntityKey. Dates/numbers and labels are platform formatting. Unknown usage and
-context remain absent rather than zero. The lists are not yet wired to a live
-service. Details, relationships, quota controls, setup, actions and lifecycle
-integration remain required.
+context remain absent rather than zero. The local facade composition below now wires these lists and details.
+Relationships, quota controls, gateway setup and native acceptance remain
+required.
 
 `CrewTerminalSurface.swift` now supplies native UIKit/AppKit SwiftTerm rendering
 with platform byte/input/resize callbacks. Its UI identity is the full scope
@@ -108,3 +109,83 @@ remain part of `native-apple-ui`. Source/manifest/parsing checks are reported
 per checkpoint. Native compilation, simulator/device, focus, VoiceOver,
 contrast, size/motion and signing checks remain separately labelled **Apple
 verification deferred by operator**.
+
+## Real local facade composition checkpoint
+
+The generated files imported at `db872753` are byte-identical to the approved
+local bridge `cc30064c` (`66be8de8` generation). `CrewClientWorker` now owns the
+actual facade on a Swift actor. macOS explicitly discovers protected profiles
+with `CrewClient.local()`; selecting one calls `connect(profileId:)`. No
+socket registry, daemon facts, credentials, clock, wire parser or domain
+reducer is recreated in Swift. iOS never offers or calls the Unix/local factory.
+
+`CrewSessionModel` caches actual generated `ViewData`, context and workspace
+records. MainActor publication checks the client-instance UUID and full scope;
+worker calls also reject a retired instance before reaching a replacement
+client. A single in-flight read loop handles bounded invalidations. One bounded
+command consumer preserves raw-key invocation order; its 32 entries and 64 KiB
+raw-input allowance are discarded on scope/lifecycle changes rather than
+replayed. Drafts remain in memory under their captured scope. Mutations use
+`plan`, exact shared confirmations and typed outcomes without optimistic
+updates or automatic retry. Unknown and sent-unacknowledged outcomes remain
+explicit. Ordinary closing disposes the observer and client without Shutdown.
+
+The real Rust dispatcher supplies FIFO, bounded callbacks outside its locks.
+The observer synchronously hands each short callback to the main executor,
+with direct inline handling when already on the main thread. Callback return
+provides backpressure; the UI handler never waits for a worker call or invokes
+synchronous FFI. Queries are scheduled independently after invalidation. This
+handoff was approved by the bridge owner in `m-1cd69655c0d2`.
+
+Native root composition now includes profile/workspace selection, the five
+provided projection lists, agent/task details, question sheets, explicit
+message/prompt drafts, scoped evidence reads, model/CLI selection and exactly
+the four shared confirmations. Connections is a per-window native sheet on
+both Apple platforms, so it operates that window's actual client. Navigation
+paths reset on a scope retirement, rather than addressing a replacement client
+with an old entity. Gateway setup still explicitly waits for the separate
+`native-gateway-bindings` factory/setup/signer exports; this partial checkpoint
+is not a completed iOS application or a passing connection test.
+
+Terminal composition requires the approved `native-attach-notice` source
+correction and ordering evidence before completion. Successful Attach notices
+must carry their explicit scoped attachment ID before output. The host creates
+that exact renderer on the identified notice even when the actor continuation
+has not yet bound the agent/panel. Later association never resets an existing
+or ended renderer. Unknown chunks are discarded and counted. No first-chunk
+identity inference or pre-attachment byte queue is used. The record/ABI shape
+is unchanged; the producer's exact reviewed source is a separate dependency.
+
+Available Linux source checks for this checkpoint:
+
+```sh
+nix-shell --pure \
+  -I nixpkgs=/nix/store/ab93n7qqycnn3xfdnav0wnqqigvddd5r-source \
+  -p python3Packages.openstep-plist \
+  --run 'python3 apps/apple/Tests/check-source.py'
+nix-shell --pure \
+  -I nixpkgs=/nix/store/ab93n7qqycnn3xfdnav0wnqqigvddd5r-source \
+  -p swift \
+  --run 'find apps/apple -name "*.swift" -type f -print0 | xargs -0 swiftc -frontend -parse'
+bash apps/apple/Tests/check-worker.sh
+```
+
+Project graph: 511 checks, 138 objects, six targets, two shared schemes.
+Swift 5.10.1 parses all 30 files. The portable worker check emits a Swift module
+from the **actual** generated Swift and C headers, then typechecks the
+Foundation worker/observer adapter in Swift 5 language mode. It neither links
+Rust nor substitutes fake bindings. On this older Linux compiler it reports
+four Sendable warnings: UniFFI's actual generated Sendable conformances are
+conditional on compiler 6, the selected Apple compiler. The Nix compiler also
+reports its existing missing-glibc warning. Neither warning is suppressed or
+presented as an Apple build result.
+
+Five additional native test cases cover worker execution away from main,
+instance replacement fencing, FIFO terminal end delivery, blocked-main
+backpressure and an already-running callback after close/unregister. These
+use an implementation of the real generated protocol only in tests; production
+uses real Rust factories. Their execution, SwiftUI typechecking, linking,
+Xcode builds, UI/keyboard/focus/VoiceOver, simulator/device, CryptoKit/Keychain
+and signing checks remain **Apple verification deferred by operator**.
+Graphs, quota/history controls, adaptive inspector/focus refinements, reviewed
+Attach producer evidence and actual gateway composition remain required.

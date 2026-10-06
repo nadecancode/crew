@@ -36,7 +36,7 @@ final class CrewShellUITests: XCTestCase {
         }
     }
 
-    func testConnectionsExplainsUnavailableSetupWithoutAuthenticating() {
+    func testOpeningConnectionsDoesNotAuthenticateOrStartATeam() {
         let app = XCUIApplication()
         app.launch()
         let open = app.buttons["crew.open-connections"].firstMatch
@@ -46,11 +46,11 @@ final class CrewShellUITests: XCTestCase {
         #else
         open.tap()
         #endif
-        XCTAssertTrue(app.staticTexts["No connections"].waitForExistence(timeout: 5))
-        XCTAssertTrue(app.staticTexts["Connection setup is currently unavailable. No host is connected and no workspace has been loaded."].exists)
         #if os(macOS)
-        app.buttons["crew.connections-close"].click()
+        XCTAssertTrue(app.staticTexts["Local operator access uses this Mac's protected Crew connection. It does not start a team or expose a server."].waitForExistence(timeout: 5))
+        app.buttons["crew.sheet-done"].click()
         #else
+        XCTAssertTrue(app.staticTexts["A scoped Crew gateway connects iPhone, iPad, Mac and Linux to explicitly approved workspaces."].waitForExistence(timeout: 5))
         app.buttons["crew.sheet-done"].tap()
         #endif
         XCTAssertTrue(open.waitForExistence(timeout: 5))

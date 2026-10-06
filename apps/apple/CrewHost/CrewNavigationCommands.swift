@@ -4,7 +4,6 @@ import SwiftUI
 
 struct CrewNavigationCommands: Commands {
     @FocusedValue(\.crewNavigation) private var navigation
-    @Environment(\.openWindow) private var openWindow
 
     var body: some Commands {
         CommandMenu("Navigate") {
@@ -14,8 +13,9 @@ struct CrewNavigationCommands: Commands {
                     .disabled(navigation == nil)
             }
             Divider()
-            Button("Connections") { openWindow(id: "connections") }
+            Button("Connections") { navigation?.presentedSheet = .connections }
                 .keyboardShortcut(",", modifiers: [.command, .shift])
+                .disabled(navigation == nil)
         }
         CommandGroup(replacing: .help) {
             Button("Crew Help") { navigation?.presentedSheet = .help }
