@@ -15,3 +15,7 @@
 .crew-attention { font-weight: bold; }
 /* Wrapping tab row: the selected tab carries an underline in the accent. */
 .crew-tab { border-radius: 0; padding: 8px 12px; }
+/* Graph nodes: one measured size; selection is a persistent border,
+   independent of the native focus ring. */
+.crew-graph-node { padding: 10px 12px; border-radius: 8px; }
+.crew-graph-node.selected { border: 2px solid currentColor; }

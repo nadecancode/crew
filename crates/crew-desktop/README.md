@@ -47,6 +47,19 @@ controller retains selections per destination; native scrolling and graph zoom
 remain local presentation state. Graphs consume the shared task layers and
 satellite relationships; they do not calculate domain work or eligibility.
 
+Both graphs place layers in columns from left to right, centred per layer,
+and keep list order within a layer. The Team graph shows the orchestrator, or
+the scheduler when the team has none, coordinating its members, with subagents
+tethered to their parents; the Task graph draws each dependency towards the
+task that waits on it and names unresolved dependencies on the node. A wide
+layer wraps into several columns; edges between non-adjacent columns run
+through the gaps between nodes. Every node carries a status chip with text
+and semantic colour. Zoom scales the drawing uniformly, so text never
+rewraps; Fit puts the whole graph in view and runs by itself only when a graph
+first appears. The graph is one Tab stop: arrow keys move between nodes,
+Home/End go to the first and last, and Enter opens the node. Each node's
+accessible description states its relationships.
+
 `service.rs` runs protected discovery and all `NativeSession` calls on a Rust
 worker. Bounded typed channels deliver notices, query results and terminal
 chunks to GTK's main context. Widgets do no socket, credential, file or protocol

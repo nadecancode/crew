@@ -2,7 +2,7 @@ mod common;
 
 use common::*;
 use crew_client::api::*;
-use crew_client_transport::{HostEffect, HostEvent, SendDisposition, TransportEnd};
+use crew_client_transport::{HostEffect, HostEvent, HostUpdate, SendDisposition, TransportEnd};
 use serde_json::json;
 use std::sync::atomic::Ordering;
 
@@ -927,4 +927,191 @@ fn close_and_background_leave_team_running_and_never_replay_terminal_bytes() {
         .iter()
         .all(|effect| !matches!(effect, HostEffect::Send { .. })));
     assert_eq!(driver.timer_count(), 0);
+}
+
+fn opens(update: &HostUpdate) -> Vec<(u64, crew_client_transport::ChannelPurpose, u64)> {
+    update
+        .effects
+        .iter()
+        .filter_map(|effect| match effect {
+            HostEffect::Open {
+                channel_id,
+                purpose,
+                attempt,
+                ..
+            } => Some((*channel_id, *purpose, *attempt)),
+            _ => None,
+        })
+        .collect()
+}
+
+fn gateway_listing(ids: &[&str]) -> crew_protocol::rpc::Workspaces {
+    crew_protocol::rpc::Workspaces {
+        rev: 1,
+        joined: ids
+            .iter()
+            .map(|id| crew_protocol::rpc::WorkspaceEntry {
+                id: (*id).into(),
+                generation: 1,
+                daemon: Some(crew_protocol::rpc::DaemonRef {
+                    pid: PID,
+                    started_at: STARTED,
+                }),
+                project: None,
+                workspace: format!("{WORKSPACE}/{id}"),
+                state: crew_protocol::WorkspaceState::Running,
+                detail: String::new(),
+                summary: None,
+                joined_at: 1,
+            })
+            .collect(),
+        others: Vec::new(),
+    }
+}
+
+/// Authenticate a gateway index and open the first listed workspace route.
+/// Returns the index channel and the live route channel.
+fn gateway_live(driver: &mut Driver) -> (u64, u64) {
+    let connecting = driver
+        .connect("profile".into(), "host".into(), None)
+        .unwrap();
+    let [(index, crew_client_transport::ChannelPurpose::Index, attempt)] = opens(&connecting)[..]
+    else {
+        panic!("a gateway selection starts with its index")
+    };
+    let opened = driver
+        .handle(HostEvent::EndpointOpened {
+            channel_id: index,
+            endpoint_id: "host".into(),
+            attempt,
+        })
+        .unwrap();
+    let (_, request, _) = send(&opened, "workspaces");
+    driver
+        .handle(HostEvent::Listing {
+            channel_id: index,
+            request_id: Some(request),
+            listing: gateway_listing(&["aaaaaaaaaaaaaaaa", "bbbbbbbbbbbbbbbb"]),
+        })
+        .unwrap();
+    let selected = driver.select_workspace("aaaaaaaaaaaaaaaa".into()).unwrap();
+    let root = gateway_opened(driver, &selected);
+    (index, root)
+}
+
+fn gateway_opened(driver: &mut Driver, update: &HostUpdate) -> u64 {
+    let (root, expected) = update
+        .effects
+        .iter()
+        .find_map(|effect| match effect {
+            HostEffect::Open {
+                channel_id,
+                purpose: crew_client_transport::ChannelPurpose::Workspace,
+                expected_scope: Some(scope),
+                ..
+            } => Some((*channel_id, scope.clone())),
+            _ => None,
+        })
+        .unwrap();
+    let mut context = context(expected.attempt);
+    context.mode = ConnectionMode::ScopedGateway;
+    context.scope = expected;
+    context.scope.daemon_pid = Some(PID);
+    context.scope.daemon_started_at_ms = Some(STARTED);
+    context.grant.workspace_ids = vec![context.scope.workspace_id.clone()];
+    let open = driver
+        .handle(HostEvent::WorkspaceOpened {
+            channel_id: root,
+            context,
+            peer: PeerInfo {
+                version: "0.1.0".into(),
+                protocol: 6,
+                pid: PID,
+                project: None,
+            },
+        })
+        .unwrap();
+    let (_, request, _) = send(&open, "subscribe");
+    let loading = reply(driver, root, request, json!({"subscribed":true}));
+    let (_, request, _) = send(&loading, "snapshot");
+    let live = reply(
+        driver,
+        root,
+        request,
+        serde_json::to_value(snapshot()).unwrap(),
+    );
+    assert_eq!(live.notice.workspace, WorkspaceStatus::Live);
+    root
+}
+
+#[test]
+fn gateway_reconnect_reopens_the_index_beside_the_selected_workspace() {
+    let (mut driver, probe, _) = driver();
+    let (_, _) = gateway_live(&mut driver);
+    let reconnect = driver.reconnect().unwrap();
+    let opened = opens(&reconnect);
+    assert_eq!(opened.len(), 2, "index and workspace: {opened:?}");
+    let (index, purpose, index_attempt) = opened[0];
+    assert_eq!(purpose, crew_client_transport::ChannelPurpose::Index);
+    let (_, purpose, root_attempt) = opened[1];
+    assert_eq!(purpose, crew_client_transport::ChannelPurpose::Workspace);
+    assert!(index_attempt < root_attempt);
+    // The endpoint attempt is the index's, so the route binds under it.
+    assert!(matches!(
+        probe.lock().unwrap().inputs.last(),
+        Some(ClientInput::EndpointChanged { attempt, status: EndpointStatus::Connecting, .. })
+            if *attempt == index_attempt
+    ));
+    let root = gateway_opened(&mut driver, &reconnect);
+    driver
+        .handle(HostEvent::EndpointOpened {
+            channel_id: index,
+            endpoint_id: "host".into(),
+            attempt: index_attempt,
+        })
+        .unwrap();
+    // A workspace-only revocation now leaves the device signed in.
+    let ended = driver
+        .handle(HostEvent::Ended {
+            channel_id: root,
+            reason: TransportEnd::GrantChanged,
+        })
+        .unwrap();
+    assert_eq!(ended.notice.endpoint, EndpointStatus::Authenticated);
+    assert_eq!(ended.notice.workspace, WorkspaceStatus::AccessRevoked);
+    assert!(opens(&ended).is_empty());
+}
+
+#[test]
+fn gateway_route_refusal_with_index_keeps_the_device_signed_in() {
+    let (mut driver, _, _) = driver();
+    let (_, root) = gateway_live(&mut driver);
+    // The gateway refuses an ungranted workspace route generically.
+    let ended = driver
+        .handle(HostEvent::Ended {
+            channel_id: root,
+            reason: TransportEnd::Authentication,
+        })
+        .unwrap();
+    assert_eq!(ended.notice.endpoint, EndpointStatus::Authenticated);
+    assert_eq!(ended.notice.workspace, WorkspaceStatus::AccessRevoked);
+    assert_eq!(driver.workspaces().unwrap().joined.len(), 2);
+}
+
+#[test]
+fn local_route_refusal_still_signs_out_without_opening_an_index() {
+    let (mut driver, _, _) = driver();
+    let (root, _) = bootstrap(&mut driver);
+    let ended = driver
+        .handle(HostEvent::Ended {
+            channel_id: root,
+            reason: TransportEnd::Authentication,
+        })
+        .unwrap();
+    assert_eq!(ended.notice.endpoint, EndpointStatus::SignedOut);
+    assert!(opens(&ended).is_empty());
+    let reconnect = driver.reconnect().unwrap();
+    assert!(opens(&reconnect)
+        .iter()
+        .all(|(_, purpose, _)| *purpose == crew_client_transport::ChannelPurpose::Workspace));
 }

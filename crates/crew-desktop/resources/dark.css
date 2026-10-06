@@ -40,3 +40,6 @@ button.flat.destructive-action:disabled { color: alpha(@crew_tone_danger, 0.5); 
 .crew-warning, .crew-attention { color: @crew_tone_warning; }
 .crew-tab-pages { border-top: 1px solid @crew_border; }
 .crew-tab:checked { background: transparent; color: @crew_text; box-shadow: inset 0 -3px @crew_accent; }
+.crew-graph-node { background: @crew_panel; border: 1px solid @crew_border; }
+.crew-graph-node.crew-graph-hub { border-style: dashed; }
+.crew-graph-node.selected { border: 2px solid @crew_accent; }

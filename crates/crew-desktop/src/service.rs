@@ -1,7 +1,13 @@
 //! GTK host adapter. Protected discovery and every service call run on a Rust
 //! worker. A bounded typed channel marshals results to the GTK main context.
 
-use std::sync::{mpsc, Arc};
+use std::{
+    cell::{Cell, RefCell},
+    collections::VecDeque,
+    rc::Rc,
+    sync::{mpsc, Arc},
+    time::Duration,
+};
 
 use crew_client::api::*;
 use crew_client::engine::ClientCore;
@@ -78,29 +84,86 @@ pub trait ClientService {
     fn submit(&self, request: Request) -> Result<(), ClientReason>;
 }
 
+/// Requests that may wait on the GTK side while the worker is behind.
+const BACKLOG: usize = 1024;
+
 pub struct ServiceHandle {
     requests: mpsc::SyncSender<Request>,
+    /// One GTK handler can submit more requests than the worker channel holds
+    /// while the worker waits for GTK to take its responses. Those requests
+    /// wait here, in order, and move to the worker from the main loop.
+    backlog: Rc<RefCell<VecDeque<Request>>>,
+    flushing: Rc<Cell<bool>>,
     delivery: gtk::glib::JoinHandle<()>,
+}
+
+fn busy() -> ClientReason {
+    ClientReason {
+        code: "busy".into(),
+        message: "The client is busy. Try again.".into(),
+    }
+}
+
+fn closed() -> ClientReason {
+    ClientReason {
+        code: "closed".into(),
+        message: "The client has closed.".into(),
+    }
 }
 
 impl ClientService for ServiceHandle {
     fn submit(&self, request: Request) -> Result<(), ClientReason> {
-        self.requests
-            .try_send(request)
-            .map_err(|failure| ClientReason {
-                code: if matches!(failure, mpsc::TrySendError::Full(_)) {
-                    "busy"
-                } else {
-                    "closed"
+        {
+            let mut backlog = self.backlog.borrow_mut();
+            if !backlog.is_empty() {
+                if backlog.len() >= BACKLOG {
+                    return Err(busy());
                 }
-                .into(),
-                message: if matches!(failure, mpsc::TrySendError::Full(_)) {
-                    "The client is busy. Try again."
-                } else {
-                    "The client has closed."
+                backlog.push_back(request);
+            } else {
+                match self.requests.try_send(request) {
+                    Ok(()) => return Ok(()),
+                    Err(mpsc::TrySendError::Disconnected(_)) => return Err(closed()),
+                    Err(mpsc::TrySendError::Full(request)) => backlog.push_back(request),
                 }
-                .into(),
-            })
+            }
+        }
+        self.flush_later();
+        Ok(())
+    }
+}
+
+impl ServiceHandle {
+    fn flush_later(&self) {
+        if self.flushing.replace(true) {
+            return;
+        }
+        let backlog = Rc::downgrade(&self.backlog);
+        let requests = self.requests.clone();
+        let flushing = self.flushing.clone();
+        gtk::glib::timeout_add_local(Duration::from_millis(1), move || {
+            let Some(backlog) = backlog.upgrade() else {
+                return gtk::glib::ControlFlow::Break;
+            };
+            let mut backlog = backlog.borrow_mut();
+            while let Some(request) = backlog.pop_front() {
+                match requests.try_send(request) {
+                    Ok(()) => {}
+                    Err(mpsc::TrySendError::Full(request)) => {
+                        backlog.push_front(request);
+                        return gtk::glib::ControlFlow::Continue;
+                    }
+                    Err(mpsc::TrySendError::Disconnected(_)) => backlog.clear(),
+                }
+            }
+            flushing.set(false);
+            gtk::glib::ControlFlow::Break
+        });
+    }
+
+    /// Requests waiting on the GTK side.
+    pub fn backlog(&self) -> usize {
+        self.backlog.borrow().len()
     }
 }
 
@@ -147,7 +210,12 @@ impl ServiceHandle {
                 worker(receiver, responses);
             })
             .expect("native service worker");
-        Self { requests, delivery }
+        Self {
+            requests,
+            backlog: Rc::new(RefCell::new(VecDeque::new())),
+            flushing: Rc::new(Cell::new(false)),
+            delivery,
+        }
     }
 }
 
