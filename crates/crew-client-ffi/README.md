@@ -61,6 +61,16 @@ protocol frames, a caller-supplied clock or transport command encoding.
 before an index is verified it stays absent. `connectionContext()` likewise
 returns only an established context, without a synthetic workspace identity.
 
+`query(query: .availability(intent:))` reports whether one complete
+`ActionIntent` is available now, without planning it. The Rust core runs the
+same immutable preflight as `plan`: the result is
+`ViewPayload.availability(ActionAvailability)` carrying the planner's canonical
+`ClientReason`, and a malformed intent throws the same `ClientError` that `plan`
+would. `ViewData.scope` is the intent's captured scope, not the current
+selection. The query allocates no operation or confirmation ID and changes no
+revision. It is not a reservation; executing the action repeats the check.
+`BoxedIntent` is a Swift alias of `ActionIntent`.
+
 From the repository root, after applying the separate workspace registration:
 
 ```sh
@@ -105,6 +115,10 @@ Service tests use the actual `NativeSession` with an explicit test-only
 replacement, stale removal, blocked-callback teardown, disposal from a callback,
 last-reference cleanup and finite panic errors. Separate tests compose the real
 core, reduce a generated repository snapshot and query it through the facade.
+Availability answers through the facade equal the core's own for available,
+stale-scope and unavailable intents, malformed intents fail as `plan` does, and
+repeated queries reserve no confirmation ID. Every core view query and payload
+is converted once, so a new view variant cannot ship without a binding sample.
 The real local factory is tested in a child process with a private empty registry,
 including its agent-context refusal, and profile IDs are checked without a dial.
 These tests do not claim a real-daemon application journey; that remains an
@@ -119,14 +133,17 @@ API amendments must update the remote declarations and regenerate the committed
 output before live integration. The codec/policy files are exact reviewed
 `134ac54b` source; the transport crate is exact reviewed `aa0dc24a` source.
 Its source-only import and workspace/lock registration are separate commits.
-The complete client package, including its test set, is byte-equal to the
-reviewed producer `93266067`, including the actual action/projection modules and
-unchanged reviewed API. Its 133 tests and the 20 FFI tests pass together. The 31
-transport tests also pass with that exact core and the FFI on the same graph,
-including real isolated-daemon authentication, the shared-core retry lifecycle,
-bounded terminal chunks and observer behavior. All Git, Crew and Herdr context
-overrides were removed from the transport test environment. These results do
-not replace final native app journeys or gateway composition.
+The availability query consumes reviewed producer `c37bff6f` and core query
+`f3d73b16`, imported unchanged onto integrated main `2185ecb8`.
+At the local bridge checkpoint, the complete client package, including its test
+set, was byte-equal to the reviewed producer `93266067`, including the actual
+action/projection modules and unchanged reviewed API. Its 133 tests and the 20
+FFI tests passed together. The 31 transport tests also passed with that exact
+core and the FFI on the same graph, including real isolated-daemon
+authentication, the shared-core retry lifecycle, bounded terminal chunks and
+observer behavior. All Git, Crew and Herdr context overrides were removed from
+the transport test environment. These results do not replace final native app
+journeys or gateway composition.
 
 Strict Clippy, formatting, both-feature generation freshness and the default
 dependency graph checks pass. The same lockfile also builds and links the

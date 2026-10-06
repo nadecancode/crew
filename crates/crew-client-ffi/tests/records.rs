@@ -286,3 +286,197 @@ fn local_discovery_projection_has_only_picker_metadata() {
         assert_eq!(project, source.project);
     }
 }
+
+fn fixture_core(scope: &ClientScope, tiers: Vec<GrantTier>) -> crew_client::ClientCore {
+    let snapshot: rpc::Snapshot =
+        serde_json::from_str(include_str!("../../crew/tests/fixtures/web/snapshot.json")).unwrap();
+    let clock = fixture_clock();
+    let mut core = crew_client::ClientCore::new(ClientConfig {
+        limits: crew_client::policy::NATIVE_LIMITS,
+        snapshot_mode: SnapshotMode::OrderedConnection,
+    })
+    .unwrap();
+    for input in [
+        client::ClientInput::Bind {
+            scope: scope.clone(),
+            mode: ConnectionMode::ScopedGateway,
+            grant: Grant {
+                grant_id: "device:grant".into(),
+                tiers,
+                workspace_ids: vec![scope.workspace_id.clone()],
+                expires_at_ms: None,
+            },
+            snapshot_mode: SnapshotMode::OrderedConnection,
+        },
+        client::ClientInput::SnapshotStarted {
+            scope: scope.clone(),
+            operation_id: 1 << 63,
+        },
+        client::ClientInput::Snapshot {
+            scope: scope.clone(),
+            operation_id: 1 << 63,
+            snapshot: Box::new(snapshot),
+        },
+    ] {
+        core.apply(input, clock).unwrap();
+    }
+    core
+}
+
+fn fixture_clock() -> ClockSample {
+    ClockSample {
+        wall_ms: 1_760_000_000_000,
+        monotonic_ms: 100,
+    }
+}
+
+#[test]
+fn availability_query_and_reasons_cross_the_real_converters() {
+    for intent in [
+        ActionIntent::SendMessage {
+            scope: scope(7),
+            to: "claude-1".into(),
+            body: "測定 🦀 e\u{301}\n\0 preserved".into(),
+            message_id: "m-stable".into(),
+        },
+        ActionIntent::AttachInput {
+            scope: scope(u64::MAX),
+            attachment_id: u64::MAX,
+            data: vec![0, 27, 255, b'\r'],
+        },
+        ActionIntent::StopTeam { scope: scope(0) },
+    ] {
+        let query = ViewQuery::Availability {
+            intent: Box::new(intent),
+        };
+        assert_eq!(roundtrip(query.clone()), query);
+    }
+    for reason in [
+        None,
+        Some(ClientReason {
+            code: "stale_scope".into(),
+            message: "測定 connection changed".into(),
+        }),
+    ] {
+        let availability = ActionAvailability {
+            action: ActionKind::AttachInput,
+            available: reason.is_none(),
+            reason,
+        };
+        let native: ViewData = client::ViewData {
+            scope: Some(scope(0)),
+            revision: u64::MAX,
+            synchronized_at_ms: Some(i64::MIN),
+            freshness: Freshness::Stale,
+            payload: client::ViewPayload::Availability(availability.clone()),
+        }
+        .into();
+        let native = roundtrip(native);
+        assert_eq!(native.scope, Some(scope(0)));
+        assert_eq!(native.revision, u64::MAX);
+        assert_eq!(native.synchronized_at_ms, Some(i64::MIN));
+        assert_eq!(native.freshness, Freshness::Stale);
+        assert_eq!(native.payload, ViewPayload::Availability(availability));
+    }
+}
+
+/// Every Core view crosses the native converters with its own variant. The
+/// exhaustive matches stop compiling when the Core adds a query or payload, so
+/// a new view cannot ship without a binding sample here.
+#[test]
+fn every_core_view_query_and_payload_keeps_its_variant_across_the_binding() {
+    let captured = scope(1);
+    let core = fixture_core(&captured, vec![GrantTier::Read, GrantTier::Control]);
+    let evidence = ResourceKey {
+        entity: EntityKey {
+            scope: captured.clone(),
+            entity: Entity::Agent("claude-1".into()),
+        },
+        kind: ResourceKind::Output,
+        options: ReadOptions::Default,
+    };
+    let queries = [
+        ViewQuery::Availability {
+            intent: Box::new(ActionIntent::StopTeam {
+                scope: captured.clone(),
+            }),
+        },
+        ViewQuery::Overview,
+        ViewQuery::Team,
+        ViewQuery::Tasks,
+        ViewQuery::AgentDetail {
+            id: "claude-1".into(),
+        },
+        ViewQuery::TaskDetail { id: "db".into() },
+        ViewQuery::Messages {
+            before: None,
+            limit: 200,
+            filter: MessageFilter {
+                endpoints: MessageEndpoints::All,
+                kind: None,
+                text: String::new(),
+            },
+        },
+        ViewQuery::Events {
+            before: None,
+            limit: 200,
+            filter: EventFilter {
+                agent_id: None,
+                level: None,
+                text: String::new(),
+                vcs_only: false,
+            },
+        },
+        ViewQuery::Usage,
+        ViewQuery::Questions,
+        ViewQuery::Evidence { key: evidence },
+    ];
+    let mut kinds = std::collections::BTreeSet::new();
+    for query in queries {
+        let kind = match &query {
+            ViewQuery::Availability { .. } => "availability",
+            ViewQuery::Overview => "overview",
+            ViewQuery::Team => "team",
+            ViewQuery::Tasks => "tasks",
+            ViewQuery::AgentDetail { .. } => "agent_detail",
+            ViewQuery::TaskDetail { .. } => "task_detail",
+            ViewQuery::Messages { .. } => "messages",
+            ViewQuery::Events { .. } => "events",
+            ViewQuery::Usage => "usage",
+            ViewQuery::Questions => "questions",
+            ViewQuery::Evidence { .. } => "evidence",
+        };
+        assert!(kinds.insert(kind), "duplicate sample {kind}");
+        assert_eq!(serde_json::to_value(&query).unwrap()["kind"], kind);
+        assert_eq!(roundtrip(query.clone()), query);
+
+        let source = core.view(query, fixture_clock()).unwrap();
+        assert_eq!(serde_json::to_value(&source.payload).unwrap()["kind"], kind);
+        let native = roundtrip(ViewData::from(source.clone()));
+        let native_kind = match &native.payload {
+            ViewPayload::Availability(value) => {
+                let client::ViewPayload::Availability(expected) = &source.payload else {
+                    unreachable!("kind checked above")
+                };
+                assert_eq!(value, expected);
+                "availability"
+            }
+            ViewPayload::Overview(_) => "overview",
+            ViewPayload::Team(_) => "team",
+            ViewPayload::Tasks(_) => "tasks",
+            ViewPayload::AgentDetail(_) => "agent_detail",
+            ViewPayload::TaskDetail(_) => "task_detail",
+            ViewPayload::Messages(_) => "messages",
+            ViewPayload::Events(_) => "events",
+            ViewPayload::Usage(_) => "usage",
+            ViewPayload::Questions(_) => "questions",
+            ViewPayload::Evidence(_) => "evidence",
+        };
+        assert_eq!(native_kind, kind);
+        assert_eq!(native.scope, source.scope);
+        assert_eq!(native.revision, source.revision);
+        assert_eq!(native.synchronized_at_ms, source.synchronized_at_ms);
+        assert_eq!(native.freshness, source.freshness);
+    }
+    assert_eq!(kinds.len(), 11, "one sample per Core view");
+}

@@ -4,6 +4,7 @@
 //! Struct construction and exhaustive enum matches catch upstream field drift.
 //! Opaque JSON and boxed view payloads are adapted separately in `views`.
 
+use super::views::BoxedIntent;
 pub use crew_client::api::{
     ActionAvailability, ActionIntent, ActionKind, ActionPlan, AgentAction, AgentPresentation,
     AgentRelation, AgentUsage, ChangeSet, ClientConfig, ClientError, ClientLimits, ClientNotice,
@@ -877,6 +878,9 @@ pub struct ResourceRequest {
 
 #[uniffi::remote(Enum)]
 pub enum ViewQuery {
+    Availability {
+        intent: BoxedIntent,
+    },
     Overview,
     Team,
     Tasks,

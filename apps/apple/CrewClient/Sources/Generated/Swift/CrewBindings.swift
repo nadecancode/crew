@@ -8801,6 +8801,8 @@ public func FfiConverterTypeTranscriptKind_lower(_ value: TranscriptKind) -> Rus
 
 public enum ViewPayload: Equatable, Hashable {
     
+    case availability(ActionAvailability
+    )
     case overview(BoxedOverview
     )
     case team(BoxedTeam
@@ -8842,34 +8844,37 @@ public struct FfiConverterTypeViewPayload: FfiConverterRustBuffer {
         let variant: Int32 = try readInt(&buf)
         switch variant {
         
-        case 1: return .overview(try FfiConverterTypeBoxedOverview.read(from: &buf)
+        case 1: return .availability(try FfiConverterTypeActionAvailability.read(from: &buf)
         )
         
-        case 2: return .team(try FfiConverterTypeBoxedTeam.read(from: &buf)
+        case 2: return .overview(try FfiConverterTypeBoxedOverview.read(from: &buf)
         )
         
-        case 3: return .tasks(try FfiConverterTypeBoxedTasks.read(from: &buf)
+        case 3: return .team(try FfiConverterTypeBoxedTeam.read(from: &buf)
         )
         
-        case 4: return .agentDetail(try FfiConverterTypeBoxedAgentDetail.read(from: &buf)
+        case 4: return .tasks(try FfiConverterTypeBoxedTasks.read(from: &buf)
         )
         
-        case 5: return .taskDetail(try FfiConverterTypeBoxedTaskDetail.read(from: &buf)
+        case 5: return .agentDetail(try FfiConverterTypeBoxedAgentDetail.read(from: &buf)
         )
         
-        case 6: return .messages(try FfiConverterTypeBoxedMessages.read(from: &buf)
+        case 6: return .taskDetail(try FfiConverterTypeBoxedTaskDetail.read(from: &buf)
         )
         
-        case 7: return .events(try FfiConverterTypeBoxedEvents.read(from: &buf)
+        case 7: return .messages(try FfiConverterTypeBoxedMessages.read(from: &buf)
         )
         
-        case 8: return .usage(try FfiConverterTypeBoxedUsage.read(from: &buf)
+        case 8: return .events(try FfiConverterTypeBoxedEvents.read(from: &buf)
         )
         
-        case 9: return .questions(try FfiConverterSequenceTypeMessage.read(from: &buf)
+        case 9: return .usage(try FfiConverterTypeBoxedUsage.read(from: &buf)
         )
         
-        case 10: return .evidence(try FfiConverterTypeBoxedEvidence.read(from: &buf)
+        case 10: return .questions(try FfiConverterSequenceTypeMessage.read(from: &buf)
+        )
+        
+        case 11: return .evidence(try FfiConverterTypeBoxedEvidence.read(from: &buf)
         )
         
         default: throw UniffiInternalError.unexpectedEnumCase
@@ -8880,53 +8885,58 @@ public struct FfiConverterTypeViewPayload: FfiConverterRustBuffer {
         switch value {
         
         
-        case let .overview(v1):
+        case let .availability(v1):
             writeInt(&buf, Int32(1))
+            FfiConverterTypeActionAvailability.write(v1, into: &buf)
+            
+        
+        case let .overview(v1):
+            writeInt(&buf, Int32(2))
             FfiConverterTypeBoxedOverview.write(v1, into: &buf)
             
         
         case let .team(v1):
-            writeInt(&buf, Int32(2))
+            writeInt(&buf, Int32(3))
             FfiConverterTypeBoxedTeam.write(v1, into: &buf)
             
         
         case let .tasks(v1):
-            writeInt(&buf, Int32(3))
+            writeInt(&buf, Int32(4))
             FfiConverterTypeBoxedTasks.write(v1, into: &buf)
             
         
         case let .agentDetail(v1):
-            writeInt(&buf, Int32(4))
+            writeInt(&buf, Int32(5))
             FfiConverterTypeBoxedAgentDetail.write(v1, into: &buf)
             
         
         case let .taskDetail(v1):
-            writeInt(&buf, Int32(5))
+            writeInt(&buf, Int32(6))
             FfiConverterTypeBoxedTaskDetail.write(v1, into: &buf)
             
         
         case let .messages(v1):
-            writeInt(&buf, Int32(6))
+            writeInt(&buf, Int32(7))
             FfiConverterTypeBoxedMessages.write(v1, into: &buf)
             
         
         case let .events(v1):
-            writeInt(&buf, Int32(7))
+            writeInt(&buf, Int32(8))
             FfiConverterTypeBoxedEvents.write(v1, into: &buf)
             
         
         case let .usage(v1):
-            writeInt(&buf, Int32(8))
+            writeInt(&buf, Int32(9))
             FfiConverterTypeBoxedUsage.write(v1, into: &buf)
             
         
         case let .questions(v1):
-            writeInt(&buf, Int32(9))
+            writeInt(&buf, Int32(10))
             FfiConverterSequenceTypeMessage.write(v1, into: &buf)
             
         
         case let .evidence(v1):
-            writeInt(&buf, Int32(10))
+            writeInt(&buf, Int32(11))
             FfiConverterTypeBoxedEvidence.write(v1, into: &buf)
             
         }
@@ -8954,6 +8964,8 @@ public func FfiConverterTypeViewPayload_lower(_ value: ViewPayload) -> RustBuffe
 
 public enum ViewQuery: Equatable, Hashable {
     
+    case availability(intent: BoxedIntent
+    )
     case overview
     case team
     case tasks
@@ -8990,29 +9002,32 @@ public struct FfiConverterTypeViewQuery: FfiConverterRustBuffer {
         let variant: Int32 = try readInt(&buf)
         switch variant {
         
-        case 1: return .overview
-        
-        case 2: return .team
-        
-        case 3: return .tasks
-        
-        case 4: return .agentDetail(id: try FfiConverterString.read(from: &buf)
+        case 1: return .availability(intent: try FfiConverterTypeBoxedIntent.read(from: &buf)
         )
         
-        case 5: return .taskDetail(id: try FfiConverterString.read(from: &buf)
+        case 2: return .overview
+        
+        case 3: return .team
+        
+        case 4: return .tasks
+        
+        case 5: return .agentDetail(id: try FfiConverterString.read(from: &buf)
         )
         
-        case 6: return .messages(before: try FfiConverterOptionTypeHistoryCursor.read(from: &buf), limit: try FfiConverterUInt32.read(from: &buf), filter: try FfiConverterTypeMessageFilter.read(from: &buf)
+        case 6: return .taskDetail(id: try FfiConverterString.read(from: &buf)
         )
         
-        case 7: return .events(before: try FfiConverterOptionTypeHistoryCursor.read(from: &buf), limit: try FfiConverterUInt32.read(from: &buf), filter: try FfiConverterTypeEventFilter.read(from: &buf)
+        case 7: return .messages(before: try FfiConverterOptionTypeHistoryCursor.read(from: &buf), limit: try FfiConverterUInt32.read(from: &buf), filter: try FfiConverterTypeMessageFilter.read(from: &buf)
         )
         
-        case 8: return .usage
+        case 8: return .events(before: try FfiConverterOptionTypeHistoryCursor.read(from: &buf), limit: try FfiConverterUInt32.read(from: &buf), filter: try FfiConverterTypeEventFilter.read(from: &buf)
+        )
         
-        case 9: return .questions
+        case 9: return .usage
         
-        case 10: return .evidence(key: try FfiConverterTypeResourceKey.read(from: &buf)
+        case 10: return .questions
+        
+        case 11: return .evidence(key: try FfiConverterTypeResourceKey.read(from: &buf)
         )
         
         default: throw UniffiInternalError.unexpectedEnumCase
@@ -9023,52 +9038,57 @@ public struct FfiConverterTypeViewQuery: FfiConverterRustBuffer {
         switch value {
         
         
-        case .overview:
+        case let .availability(intent):
             writeInt(&buf, Int32(1))
+            FfiConverterTypeBoxedIntent.write(intent, into: &buf)
+            
         
-        
-        case .team:
+        case .overview:
             writeInt(&buf, Int32(2))
         
         
-        case .tasks:
+        case .team:
             writeInt(&buf, Int32(3))
         
         
-        case let .agentDetail(id):
+        case .tasks:
             writeInt(&buf, Int32(4))
-            FfiConverterString.write(id, into: &buf)
-            
         
-        case let .taskDetail(id):
+        
+        case let .agentDetail(id):
             writeInt(&buf, Int32(5))
             FfiConverterString.write(id, into: &buf)
             
         
-        case let .messages(before,limit,filter):
+        case let .taskDetail(id):
             writeInt(&buf, Int32(6))
+            FfiConverterString.write(id, into: &buf)
+            
+        
+        case let .messages(before,limit,filter):
+            writeInt(&buf, Int32(7))
             FfiConverterOptionTypeHistoryCursor.write(before, into: &buf)
             FfiConverterUInt32.write(limit, into: &buf)
             FfiConverterTypeMessageFilter.write(filter, into: &buf)
             
         
         case let .events(before,limit,filter):
-            writeInt(&buf, Int32(7))
+            writeInt(&buf, Int32(8))
             FfiConverterOptionTypeHistoryCursor.write(before, into: &buf)
             FfiConverterUInt32.write(limit, into: &buf)
             FfiConverterTypeEventFilter.write(filter, into: &buf)
             
         
         case .usage:
-            writeInt(&buf, Int32(8))
-        
-        
-        case .questions:
             writeInt(&buf, Int32(9))
         
         
-        case let .evidence(key):
+        case .questions:
             writeInt(&buf, Int32(10))
+        
+        
+        case let .evidence(key):
+            writeInt(&buf, Int32(11))
             FfiConverterTypeResourceKey.write(key, into: &buf)
             
         }
@@ -11022,6 +11042,50 @@ public func FfiConverterTypeBoxedEvidence_lift(_ value: RustBuffer) throws -> Bo
 #endif
 public func FfiConverterTypeBoxedEvidence_lower(_ value: BoxedEvidence) -> RustBuffer {
     return FfiConverterTypeBoxedEvidence.lower(value)
+}
+
+
+
+/**
+ * Typealias from the type name used in the UDL file to the builtin type.  This
+ * is needed because the UDL type name is used in function/method signatures.
+ */
+public typealias BoxedIntent = ActionIntent
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeBoxedIntent: FfiConverter {
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> BoxedIntent {
+        return try FfiConverterTypeActionIntent.read(from: &buf)
+    }
+
+    public static func write(_ value: BoxedIntent, into buf: inout [UInt8]) {
+        return FfiConverterTypeActionIntent.write(value, into: &buf)
+    }
+
+    public static func lift(_ value: RustBuffer) throws -> BoxedIntent {
+        return try FfiConverterTypeActionIntent_lift(value)
+    }
+
+    public static func lower(_ value: BoxedIntent) -> RustBuffer {
+        return FfiConverterTypeActionIntent_lower(value)
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeBoxedIntent_lift(_ value: RustBuffer) throws -> BoxedIntent {
+    return try FfiConverterTypeBoxedIntent.lift(value)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeBoxedIntent_lower(_ value: BoxedIntent) -> RustBuffer {
+    return FfiConverterTypeBoxedIntent.lower(value)
 }
 
 

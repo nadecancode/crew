@@ -517,3 +517,145 @@ fn unknown_and_retired_profile_ids_never_dial() {
     );
     assert_eq!(dials.load(Ordering::Acquire), 0);
 }
+
+fn availability(intent: ActionIntent) -> ViewQuery {
+    ViewQuery::Availability {
+        intent: Box::new(intent),
+    }
+}
+
+fn gateway_core(captured: &ClientScope, clock: ClockSample) -> crew_client::ClientCore {
+    let snapshot: crew_protocol::rpc::Snapshot =
+        serde_json::from_str(include_str!("../../crew/tests/fixtures/web/snapshot.json")).unwrap();
+    let mut core = crew_client::ClientCore::new(ClientConfig {
+        limits: crew_client::policy::NATIVE_LIMITS,
+        snapshot_mode: SnapshotMode::OrderedConnection,
+    })
+    .unwrap();
+    for input in [
+        ClientInput::Bind {
+            scope: captured.clone(),
+            mode: ConnectionMode::ScopedGateway,
+            grant: Grant {
+                grant_id: "device:grant".into(),
+                tiers: vec![GrantTier::Read, GrantTier::Control],
+                workspace_ids: vec![captured.workspace_id.clone()],
+                expires_at_ms: None,
+            },
+            snapshot_mode: SnapshotMode::OrderedConnection,
+        },
+        ClientInput::SnapshotStarted {
+            scope: captured.clone(),
+            operation_id: 1 << 63,
+        },
+        ClientInput::Snapshot {
+            scope: captured.clone(),
+            operation_id: 1 << 63,
+            snapshot: Box::new(snapshot),
+        },
+    ] {
+        core.apply(input, clock).unwrap();
+    }
+    core
+}
+
+/// Availability travels the real facade, service worker and Core query. The
+/// native value equals the Core's own answer for the same captured intent,
+/// and repeated queries reserve no operation or confirmation identity.
+#[test]
+fn availability_crosses_the_actual_facade_with_core_reasons_and_no_planning() {
+    use crew_client_ffi::records::{ViewData as NativeView, ViewPayload as NativePayload};
+    let captured = ClientScope {
+        endpoint_id: "gateway:test".into(),
+        workspace_id: "/work/demo".into(),
+        generation: Some(1),
+        daemon_pid: Some(4000),
+        daemon_started_at_ms: Some(1),
+        attempt: 1,
+    };
+    let clock = ClockSample {
+        wall_ms: 1_760_000_000_000,
+        monotonic_ms: 0,
+    };
+    let mut twin = gateway_core(&captured, clock);
+    let session = NativeSession::with_connector(
+        gateway_core(&captured, clock),
+        Protocol6Codec,
+        NoConnections,
+        DriverConfig::default(),
+    )
+    .unwrap();
+    let client = CrewClient::from_session(session, Vec::new()).unwrap();
+    let revision = client.query(ViewQuery::Team).unwrap().revision;
+
+    let mut stale = captured.clone();
+    stale.attempt = 0;
+    let kill = ActionIntent::Agent {
+        scope: captured.clone(),
+        id: "claude-1".into(),
+        action: AgentAction::Kill,
+    };
+    let mut codes = std::collections::BTreeSet::new();
+    for intent in [
+        ActionIntent::SendMessage {
+            scope: captured.clone(),
+            to: "claude-1".into(),
+            body: "測定 🦀".into(),
+            message_id: "m-stable".into(),
+        },
+        kill.clone(),
+        ActionIntent::StopTeam {
+            scope: stale.clone(),
+        },
+        ActionIntent::Answer {
+            scope: captured.clone(),
+            question_id: "missing".into(),
+            body: "yes".into(),
+        },
+    ] {
+        let expected: NativeView = twin
+            .view(availability(intent.clone()), clock)
+            .unwrap()
+            .into();
+        for _ in 0..3 {
+            assert_eq!(
+                client.query(availability(intent.clone())).unwrap(),
+                expected
+            );
+        }
+        assert_eq!(
+            expected.scope.as_ref(),
+            Some(crew_client::actions::action_scope(&intent))
+        );
+        let NativePayload::Availability(value) = expected.payload else {
+            panic!("typed availability payload expected")
+        };
+        assert_eq!(value.available, value.reason.is_none());
+        codes.insert(value.reason.map(|reason| reason.code));
+    }
+    assert!(codes.contains(&None));
+    assert!(codes.contains(&Some("stale_scope".into())));
+    assert!(
+        codes.len() >= 3,
+        "available and distinct Core reasons: {codes:?}"
+    );
+
+    // A malformed intent fails exactly as planning does; it is not a reason.
+    let malformed = ActionIntent::SendMessage {
+        scope: captured.clone(),
+        to: "claude-1".into(),
+        body: String::new(),
+        message_id: "m-empty".into(),
+    };
+    assert_eq!(
+        client.query(availability(malformed.clone())).unwrap_err(),
+        twin.plan(malformed, clock).unwrap_err()
+    );
+
+    // Queries changed no revision and reserved no confirmation identity.
+    assert_eq!(client.query(ViewQuery::Team).unwrap().revision, revision);
+    let planned = client.plan(kill.clone()).unwrap();
+    assert!(matches!(planned, ActionPlan::Confirm { .. }));
+    assert_eq!(planned, twin.plan(kill, clock).unwrap().plan);
+    client.close().unwrap();
+}

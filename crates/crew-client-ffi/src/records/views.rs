@@ -433,9 +433,13 @@ boxed_value!(BoxedMessages, MessagePage);
 boxed_value!(BoxedEvents, EventPage);
 boxed_value!(BoxedUsage, UsagePresentation);
 boxed_value!(BoxedEvidence, ResourceState);
+// Availability queries keep Rust's boxed intent. Swift passes the complete
+// ActionIntent it would submit; answering the query allocates nothing.
+boxed_value!(BoxedIntent, ActionIntent);
 
 #[derive(Clone, Debug, PartialEq, uniffi::Enum)]
 pub enum ViewPayload {
+    Availability(ActionAvailability),
     Overview(BoxedOverview),
     Team(BoxedTeam),
     Tasks(BoxedTasks),
@@ -451,6 +455,7 @@ pub enum ViewPayload {
 impl From<client::ViewPayload> for ViewPayload {
     fn from(value: client::ViewPayload) -> Self {
         match value {
+            client::ViewPayload::Availability(value) => Self::Availability(value),
             client::ViewPayload::Overview(value) => Self::Overview(value),
             client::ViewPayload::Team(value) => Self::Team(value),
             client::ViewPayload::Tasks(value) => Self::Tasks(value),
