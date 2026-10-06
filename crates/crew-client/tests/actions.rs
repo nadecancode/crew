@@ -2147,3 +2147,160 @@ fn raw_closed_and_retired_outcomes_are_unknown_once_without_replay_or_stale_attr
         ActionUpdate::default()
     );
 }
+
+#[test]
+fn attach_success_notice_identifies_the_live_attachment_before_any_terminal_chunk_exists() {
+    let facts = Facts::new();
+    let mut actions = planner();
+    let decision = plan(
+        &mut actions,
+        &facts,
+        ActionIntent::Attach {
+            scope: facts.scope(),
+            agent: "claude-1".into(),
+            rows: 24,
+            cols: 80,
+        },
+    );
+    let (id, scope, lane, _) = request(&decision);
+    assert_eq!(lane, RequestLane::Terminal { attachment_id: id });
+    assert!(decision.update.completions.is_empty());
+    assert!(!actions.attachment_is_live(scope, id));
+    let finished = actions
+        .finish(
+            scope,
+            id,
+            OperationOutcome::Succeeded {
+                result: CommandResult::Attached {
+                    agent: "claude-1".into(),
+                },
+            },
+            &facts.context(),
+            now(1_001),
+        )
+        .unwrap();
+    assert_eq!(finished.completions.len(), 1);
+    let notice = finished.completions[0].notice();
+    assert_eq!(notice.scope, facts.scope());
+    assert_eq!(notice.operation_id, id);
+    assert_eq!(notice.kind, OperationOutcomeKind::Success);
+    assert_eq!(notice.attachment_id, Some(id));
+    assert!(notice.reason.is_none());
+    assert!(actions.attachment_is_live(&notice.scope, notice.attachment_id.unwrap()));
+    assert_eq!(
+        actions
+            .finish(
+                scope,
+                id,
+                OperationOutcome::Succeeded {
+                    result: CommandResult::Attached {
+                        agent: "claude-1".into()
+                    },
+                },
+                &facts.context(),
+                now(1_002)
+            )
+            .unwrap(),
+        ActionUpdate::default()
+    );
+}
+
+#[test]
+fn send_and_answer_success_notices_keep_no_attachment_identity() {
+    let facts = Facts::new();
+    let fixtures: Value =
+        serde_json::from_str(include_str!("../../crew/tests/fixtures/web/results.json")).unwrap();
+    for (intent, method) in [
+        (message(&facts), "send"),
+        (
+            ActionIntent::Answer {
+                scope: facts.scope(),
+                question_id: facts.questions[0].id.clone(),
+                body: "Use the adapter".into(),
+            },
+            "answer",
+        ),
+    ] {
+        let mut actions = planner();
+        let id = request(&plan(&mut actions, &facts, intent)).0;
+        let result: SendResult = serde_json::from_value(fixtures[method][0].clone()).unwrap();
+        let finished = actions
+            .finish(
+                &facts.scope(),
+                id,
+                OperationOutcome::Succeeded {
+                    result: CommandResult::Sent(Box::new(result)),
+                },
+                &facts.context(),
+                now(1_001),
+            )
+            .unwrap();
+        assert_eq!(finished.completions.len(), 1);
+        let notice = finished.completions[0].notice();
+        assert_eq!(notice.operation_id, id);
+        assert_eq!(notice.kind, OperationOutcomeKind::Success);
+        assert_eq!(notice.attachment_id, None);
+    }
+}
+
+#[test]
+fn stale_failed_or_ended_attach_cannot_publish_an_identified_success_notice() {
+    let facts = Facts::new();
+    let attach = || ActionIntent::Attach {
+        scope: facts.scope(),
+        agent: "claude-1".into(),
+        rows: 24,
+        cols: 80,
+    };
+    for outcome in [
+        OperationOutcome::Rejected {
+            code: "unavailable".into(),
+            message: "terminal unavailable".into(),
+        },
+        OperationOutcome::NotSent {
+            reason: why("not_sent"),
+        },
+        OperationOutcome::Canceled,
+        unknown("closed"),
+    ] {
+        let mut actions = planner();
+        let id = request(&plan(&mut actions, &facts, attach())).0;
+        let finished = actions
+            .finish(&facts.scope(), id, outcome, &facts.context(), now(1_001))
+            .unwrap();
+        assert_eq!(finished.completions.len(), 1);
+        assert_ne!(
+            finished.completions[0].notice().kind,
+            OperationOutcomeKind::Success
+        );
+        assert_eq!(finished.completions[0].notice().attachment_id, None);
+        assert!(!actions.attachment_is_live(&facts.scope(), id));
+    }
+    let mut actions = planner();
+    let id = request(&plan(&mut actions, &facts, attach())).0;
+    let mut stale = facts.scope();
+    stale.attempt += 1;
+    let ack = || OperationOutcome::Succeeded {
+        result: CommandResult::Attached {
+            agent: "claude-1".into(),
+        },
+    };
+    assert_eq!(
+        actions
+            .finish(&stale, id, ack(), &facts.context(), now(1_001))
+            .unwrap(),
+        ActionUpdate::default()
+    );
+    assert!(!actions.attachment_is_live(&facts.scope(), id));
+    actions.attachment_ended(&facts.scope(), id);
+    let late = actions
+        .finish(&facts.scope(), id, ack(), &facts.context(), now(1_002))
+        .unwrap();
+    assert_eq!(late.completions.len(), 1);
+    assert_eq!(
+        late.completions[0].notice().kind,
+        OperationOutcomeKind::Unknown
+    );
+    assert_eq!(late.completions[0].notice().attachment_id, None);
+    assert!(!actions.attachment_is_live(&facts.scope(), id));
+}

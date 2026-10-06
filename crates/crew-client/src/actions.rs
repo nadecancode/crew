@@ -1586,6 +1586,9 @@ fn completed(id: OperationId, pending: Pending, outcome: OperationOutcome) -> Co
 impl CompletedOperation {
     pub fn notice(&self) -> OperationNotice {
         let (kind, attachment_id, reason) = match &self.outcome {
+            OperationOutcome::Succeeded {
+                result: CommandResult::Attached { .. },
+            } => (OperationOutcomeKind::Success, Some(self.operation_id), None),
             OperationOutcome::Succeeded { .. } => (OperationOutcomeKind::Success, None, None),
             OperationOutcome::Rejected { code, message } => (
                 OperationOutcomeKind::Rejected,
