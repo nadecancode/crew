@@ -585,6 +585,13 @@ same dedupe path; query filters do not add unsupported daemon parameters.
 Canonicalized effective read options are part of the resource key, so two
 transcript/history limits or diff revisions cannot share an accidental cache
 entry. Request sequence still guards stale completions for that exact key.
+The completed-resource cache is bounded by `ClientLimits.pending_operations`,
+evicting least-recently-used nonloading entries. Loading entries are never
+evicted and are separately bounded by the pending-operation limit, keeping total
+retained resource entries at most twice that limit. An evicted resource queries
+as Idle. Scope retirement purges affected entries; no unbounded tombstone map
+is added. Duration calculations use saturating subtraction, including the N1
+current-work helper, without changing ranks, ties or ordinary timestamp results.
 
 Usage sums use checked `u64` arithmetic: no reporters produces `None`; reported
 zero stays `Some(zero)`. Any overflow makes the total unavailable and sets
@@ -729,6 +736,25 @@ reported as `AttachmentEnded` before subsequent input planning and produces
 one terminal end notification, not a fake daemon action response. Explicit
 Detach gets one `ClosedLocally` operation outcome and one end notification.
 
+Attach-notice clarification (`m-1dc00f8e11b2`): the successful Attached result
+produces `OperationNotice { kind: Success, operation_id,
+attachment_id: Some(operation_id), ... }`. All other ordinary successes keep
+`attachment_id: None`; failure outcomes are unchanged. This is a meaning for
+the existing optional field, not a new record, outcome kind or wire field.
+The core's final notice is published through `changed` before any terminal
+bytes for that attachment. A platform's continuation of `plan` may run after
+those callbacks, even though Rust has already returned the operation ID.
+
+The UI creates a terminal renderer only from that identified Attach success,
+keyed by client instance, full scope and attachment ID. It routes subsequent
+chunks only to that exact renderer; unknown IDs are dropped and counted, not
+buffered before attachment or matched by workspace/selected agent. The later
+plan result associates its captured panel/agent by the same operation ID and
+does not reset an existing or ended renderer. A canceled panel still cleans up
+its actual attachment when the result arrives. Producer regressions verify the
+successful Attach identity, unchanged ordinary success, the Core outcome path,
+and notice-before-data delivery using the real core.
+
 The `attach`, `attach_input` and `attach_resize` wire methods and parameters are
 unchanged; attachment identity is local routing metadata, never an added RPC
 parameter. Existing 64 Request-byte goldens remain valid. Before N2A release,
@@ -864,6 +890,39 @@ Queue overflow closes the affected channel, marks already-started mutations
 outcome-unknown, and requires a fresh snapshot before live state. Terminal
 overflow detaches visibly instead of dropping bytes or replaying input.
 
+The adapter's exact pre-live normalization reason is `canonical_scope`. An
+active, byte-identical Bind is idempotent; a changed Bind cannot reuse a live
+attempt. Before that attempt becomes live, the driver may explicitly Unbind
+with this reason and Bind a refined context from the same authenticated channel.
+Known PID, start time and membership generation cannot be replaced with
+different values; absent facts may be filled in. Mode, endpoint, attempt and
+grant identity, tiers and expiry remain fixed. For LocalOperator only, the
+initial profile workspace key may become the canonical workspace from that
+channel's verified snapshot, with the same single-key replacement in
+`Grant.workspace_ids`. ScopedGateway workspace IDs and grants do not use this
+exception. The core may retain the old context for validation while unbound;
+it does not treat retained facts as a live connection.
+
+A held identified-message retry survives same-workspace provisional
+normalization. Only the subsequent complete, verified snapshot permits its
+retry policy to decide whether to dispatch. An explicit endpoint/workspace
+switch retires the retained old scope immediately, including while no active
+connection exists. Unknown proof is not proof of a different daemon; known
+contradictory proof is not a refinement. These rules prevent both accidental
+retirement during bootstrap and replay into a different workspace.
+
+If an Action connection closes with pending work, the native driver retires
+that workspace's lanes, retains the independent endpoint Index, and reconnects
+the state lane with a fresh attempt and barrier snapshot. This conservative
+strategy supplies verified state for Core's retry decision; the driver does
+not copy retry eligibility or replay other mutations. Registered Core policy
+timers survive this closed-scope reconnect unless Core emits `CancelTimer`.
+Their unique timer IDs reach Core even after the active connection attempt has
+changed; Core validates the retained operation and immutable scope. Connection
+and IO timers retain attempt guards, and canceled/replaced opaque timer handles
+are ignored. Explicit stop/dispose performs Core cleanup and then cancels all
+timers. A socket loss must not erase the held Send retry's expiration wake-up.
+
 The local connector is `LocalTransport::open(profile, purpose, observer)`. It
 owns protected operator-token loading, refuses an agent identity, performs the
 existing exact-version `hello`, then returns frames through a bounded observer
@@ -930,14 +989,43 @@ UI thread. The opaque `profile_id` resolves through the approved connector;
 gateway profile/enrollment/credential callbacks are finalized on its own card,
 not treated as arbitrary executable configuration here.
 
+The local factory is `CrewClient.local()`. It composes the real shared
+`ClientCore` using native policy limits and OrderedConnection with
+`NativeSession::local`. Discovery uses only the connector's protected
+`discover_profiles()` path, including its agent-context refusal. The factory
+does not dial; the caller explicitly selects an opaque `profile_id` afterward.
+`localProfiles()` exposes the construction-time discovery snapshot as
+`LocalProfileInfo { profile_id, workspace, project: Option<String> }`. These
+records contain no socket, token, PID, start time or OS handle. The IDs belong
+to that client instance; a fresh discovery snapshot uses a new client.
+Discovery metadata never supplies verified ClientScope facts. Unknown IDs and
+calls on a disposed client return typed errors before any connection attempt.
+
+The generated ABI includes the same object, methods and local factory on every
+platform. The `bindings` feature enables the platform-neutral transport
+`runtime`; `local` adds only the Linux/macOS Unix connector. Where that connector
+is absent, `local()` returns
+`ClientError::InvalidInput { field: "local", reason: "local_unavailable" }`.
+The iOS UI never offers local discovery. Freshness tests generate both with and
+without the local feature and require identical committed ABI sources; this
+does not replace the deferred Apple compiler/linker checks.
+
+Per `m-712aa438f958`, N4 delivers this real Core/local bridge, typed observers,
+listing access and deterministic ABI after its producer source is approved.
+The separate `native-gateway-bindings` card owns the gateway factory,
+DeviceSigner and enrollment/setup bindings against the reviewed connector.
+Apple UI and final live integration require that gateway composition; N4
+completion alone is not evidence of a connected iOS application.
+
 `ClientNotice` has `scope: Option<ClientScope>`, `revision: u64`,
 `changes: ChangeSet`, `endpoint: EndpointStatus`, `workspace: WorkspaceStatus`,
 `reason: Option<ClientReason>`, and `outcomes: Vec<OperationNotice>`.
 `OperationNotice` has scope, operation ID, outcome kind (success/rejected/
 not-sent/canceled/unknown/sent-unacknowledged/closed-locally), optional attachment
-ID (Some for SentUnacknowledged and ClosedLocally, None for ordinary outcomes),
+ID (Some for successful Attach, SentUnacknowledged and ClosedLocally; None for
+other ordinary outcomes),
 and optional safe reason; wire result data stays in
-state/resource projections. `ClientObserver::updated(ClientNotice)` delivers
+state/resource projections. `ClientObserver::changed(ClientNotice)` delivers
 that record. `TerminalChunk` has `scope`, `attachment_id: u64`, `data: Vec<u8>`
 bounded to 64 KiB, and `ended: Option<TerminalEnd>`; end values are normal end,
 detach, disconnect, revocation, overflow, unsupported, or safe failure reason.
@@ -947,6 +1035,14 @@ coalesce replaceable invalidations, never silently discard operation outcomes
 or terminal data. On sustained terminal backlog, detach with a visible overflow
 reason. Unregistering an observer prevents new queued deliveries; already
 enqueued native callbacks still check instance/scope identity before publishing.
+The facade follows NativeSession's single-observer model: a new `observe`
+replaces the previous subscription and returns a fresh ID. Removing an obsolete
+ID is a no-op and cannot remove its replacement. The adapter deactivates the old
+subscription before replacement/removal, including any remaining terminal
+chunks in a callback batch. A callback already executing may finish. Callback
+invocation and final foreign-reference release occur outside wrapper and driver
+state locks; a callback can dispose its client without waiting for its own
+dispatcher thread to join.
 
 Linux marshals notifications into its GTK main context. Apple uses a `CrewHost`
 actor to serialize facade calls and a `@MainActor` observable model to publish
