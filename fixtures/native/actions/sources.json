@@ -129,13 +129,15 @@
     },
     "commands": {
       "path": "web/src/commands.ts",
-      "line": 131,
-      "anchor": "export function run"
+      "anchor": "export function run",
+      "line": 113,
+      "source_commit": "5333e1e703eacf109f6a9cd07095aa2e660107b3"
     },
     "slash": {
       "path": "web/src/commands.ts",
-      "line": 36,
-      "anchor": "export function slashCommand"
+      "anchor": "export function slashCommand",
+      "line": 18,
+      "source_commit": "5333e1e703eacf109f6a9cd07095aa2e660107b3"
     },
     "rust_slash": {
       "path": "crates/crew-core/src/util.rs",
@@ -178,14 +180,16 @@
       "anchor": "const can"
     },
     "web_timeout": {
-      "path": "web/src/net/conn.ts",
-      "line": 57,
-      "anchor": "export function timeoutFor"
+      "path": "web/src/generated/client-policy.ts",
+      "anchor": "export function timeoutFor",
+      "line": 3,
+      "source_commit": "5333e1e703eacf109f6a9cd07095aa2e660107b3"
     },
     "web_conn": {
       "path": "web/src/net/conn.ts",
-      "line": 181,
-      "anchor": "call<T = unknown>"
+      "anchor": "call<T = unknown>",
+      "line": 165,
+      "source_commit": "5333e1e703eacf109f6a9cd07095aa2e660107b3"
     },
     "tui_timeout": {
       "path": "crates/crew-tui/src/net.rs",
@@ -428,5 +432,39 @@
       "anchor": "Call::ModelsList"
     }
   },
-  "anchor_scope": "current_integrated_tree"
+  "anchor_scope": "current_integrated_tree",
+  "reference_history": {
+    "commands": [
+      {
+        "path": "web/src/commands.ts",
+        "line": 131,
+        "anchor": "export function run",
+        "source_commit": "6049cdf63e36e303327235834f23a798aa5a82c1"
+      }
+    ],
+    "slash": [
+      {
+        "path": "web/src/commands.ts",
+        "line": 36,
+        "anchor": "export function slashCommand",
+        "source_commit": "6049cdf63e36e303327235834f23a798aa5a82c1"
+      }
+    ],
+    "web_conn": [
+      {
+        "path": "web/src/net/conn.ts",
+        "line": 181,
+        "anchor": "call<T = unknown>",
+        "source_commit": "6049cdf63e36e303327235834f23a798aa5a82c1"
+      }
+    ],
+    "web_timeout": [
+      {
+        "path": "web/src/net/conn.ts",
+        "line": 57,
+        "anchor": "export function timeoutFor",
+        "source_commit": "6049cdf63e36e303327235834f23a798aa5a82c1"
+      }
+    ]
+  }
 }

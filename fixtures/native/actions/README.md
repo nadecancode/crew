@@ -27,6 +27,12 @@ user-facing behavior. Parser-only and local navigation cases have no wire
 variant. The checker rejects outdated anchors so source relocation is updated
 explicitly without changing the behavior baseline.
 
+Shared web policy `5333e1e7` relocates four command/connection references. Their
+active `source_commit` identifies that reviewed source, including `timeoutFor`
+in the generated module. `reference_history` retains the prior baseline path,
+line and anchor for each relocation. Case inputs, expected outputs, reference
+IDs and wire byte goldens remain unchanged.
+
 | Layer | Input | Expected observation |
 | --- | --- | --- |
 | `compose` | Arguments to `operations.submit` | Outgoing call, draft `keep` result |
