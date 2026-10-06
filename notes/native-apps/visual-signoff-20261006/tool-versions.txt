@@ -1,0 +1,6 @@
+crew-desktop native-ui,local,gateway from export of main 3c6c3d32: b9b96c52c25b6b519f83587d5042180de9ec9fa89725cb5565250117ebe41fd5
+crew native-gateway from the same export: cc7c711c613430f2ac5fe8ca39962c92bf7400513cb317c89e3a4fb71ee784ec
+GTK 4.22.4
+GLib 2.88.3
+AT-SPI 2.60.6
+xdotool version 4.20260303.1

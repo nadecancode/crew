@@ -1,0 +1,100 @@
+[
+ {
+  "depth": 7,
+  "role": "menu",
+  "name": "Application menu",
+  "showing": true,
+  "checked": false,
+  "labelled_by": [
+   {
+    "role": "button",
+    "name": "Application menu",
+    "text": null
+   }
+  ]
+ },
+ {
+  "depth": 17,
+  "role": "menu item",
+  "name": "",
+  "showing": true,
+  "checked": true,
+  "labelled_by": [
+   {
+    "role": "invalid",
+    "name": "",
+    "text": "Show Sidebar"
+   }
+  ]
+ },
+ {
+  "depth": 17,
+  "role": "menu item",
+  "name": "",
+  "showing": true,
+  "checked": false,
+  "labelled_by": [
+   {
+    "role": "invalid",
+    "name": "",
+    "text": "Show Details"
+   }
+  ]
+ },
+ {
+  "depth": 15,
+  "role": "menu item",
+  "name": "",
+  "showing": true,
+  "checked": false,
+  "labelled_by": [
+   {
+    "role": "invalid",
+    "name": "",
+    "text": "Appearance"
+   }
+  ]
+ },
+ {
+  "depth": 17,
+  "role": "menu item",
+  "name": "",
+  "showing": true,
+  "checked": false,
+  "labelled_by": [
+   {
+    "role": "invalid",
+    "name": "",
+    "text": "Keyboard Shortcuts"
+   }
+  ]
+ },
+ {
+  "depth": 17,
+  "role": "menu item",
+  "name": "",
+  "showing": true,
+  "checked": false,
+  "labelled_by": [
+   {
+    "role": "invalid",
+    "name": "",
+    "text": "About Crew"
+   }
+  ]
+ },
+ {
+  "depth": 17,
+  "role": "menu item",
+  "name": "",
+  "showing": true,
+  "checked": false,
+  "labelled_by": [
+   {
+    "role": "invalid",
+    "name": "",
+    "text": "Quit"
+   }
+  ]
+ }
+]
