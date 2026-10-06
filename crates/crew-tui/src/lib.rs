@@ -255,9 +255,13 @@ fn handle(
         } => {
             if app.shared.read(|core| core.scope() == Some(&scope)) {
                 let mut planned = app.prepare(Command::Keys { id, text }, now).into_iter();
-                let _ = reply.send(planned.next());
+                if let Err(error) = reply.send(planned.next()) {
+                    if let Some(planned) = error.0 {
+                        undelivered(app, planned, "closed", "terminal input worker closed", now);
+                    }
+                }
                 for request in planned {
-                    let _ = requests.send(Command::Planned(Box::new(request)));
+                    send_planned(app, request, requests, now);
                 }
             } else {
                 app.set_status(
@@ -304,7 +308,7 @@ fn handle(
         UiEvent::Fatal(error) => return Err(error.into()),
     }
     for planned in app.shared.take_requests() {
-        let _ = requests.send(Command::Planned(Box::new(planned)));
+        send_planned(app, planned, requests, now);
     }
     Ok(())
 }
@@ -325,24 +329,40 @@ fn send_shared(app: &mut App, command: Command, requests: &net::Requests, now: i
         return;
     }
     for planned in app.prepare(command, now) {
-        let scope = planned.scope.clone();
-        let operation_id = planned.operation_id;
-        if let Err(error) = requests.send(Command::Planned(Box::new(planned))) {
-            app.apply_reply(
-                app::Reply::Shared {
-                    scope,
-                    operation_id,
-                    outcome: crew_client::OperationOutcome::NotSent {
-                        reason: crew_client::ClientReason {
-                            code: "closed".into(),
-                            message: error.to_string(),
-                        },
-                    },
-                },
-                now,
-            );
-        }
+        send_planned(app, planned, requests, now);
     }
+}
+
+fn send_planned(app: &mut App, planned: shared::Planned, requests: &net::Requests, now: i64) {
+    let captured = planned.clone();
+    if let Err(error) = requests.send(Command::Planned(Box::new(planned))) {
+        undelivered(
+            app,
+            captured,
+            match error {
+                net::QueueError::Full => "queue_full",
+                net::QueueError::Closed => "closed",
+            },
+            &error.to_string(),
+            now,
+        );
+    }
+}
+
+fn undelivered(app: &mut App, planned: shared::Planned, code: &str, message: &str, now: i64) {
+    app.apply_reply(
+        app::Reply::Shared {
+            scope: planned.scope,
+            operation_id: planned.operation_id,
+            outcome: crew_client::OperationOutcome::NotSent {
+                reason: crew_client::ClientReason {
+                    code: code.into(),
+                    message: message.into(),
+                },
+            },
+        },
+        now,
+    );
 }
 
 fn enter_terminal() -> io::Result<Terminal<CrosstermBackend<Stdout>>> {

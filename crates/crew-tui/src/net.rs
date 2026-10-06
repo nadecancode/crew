@@ -17,10 +17,12 @@ use std::thread;
 use std::time::Duration;
 
 use crew_core::client::{Client, ClientError, ClientResult};
+use crew_core::rpc::{Call, Push, Snapshot};
+#[cfg(test)]
 use crew_core::rpc::{
-    Call, GitOutcome, InboxResult, ModelChoice, ModelsResult, OutputResult, Push, SendParams,
-    Snapshot, TranscriptResult,
+    GitOutcome, InboxResult, ModelChoice, ModelsResult, OutputResult, SendParams, TranscriptResult,
 };
+#[cfg(test)]
 use crew_core::types::{Event, MessageType};
 use ratatui::crossterm::event as term;
 
@@ -28,31 +30,19 @@ use crate::app::{Command, Reply};
 
 const SNAPSHOT_MESSAGES: usize = 300;
 const SNAPSHOT_EVENTS: usize = 400;
-const REQUEST_TIMEOUT: Duration = Duration::from_secs(3);
-/// Lifecycle actions may wait for process exit, probes and a new session.
-const ACTION_TIMEOUT: Duration = Duration::from_secs(30);
-/// Stopping a team waits for each agent to exit.
-const STOP_TIMEOUT: Duration = Duration::from_secs(90);
-/// Listing the models waits for pi to list its own.
-const MODELS_TIMEOUT: Duration = Duration::from_secs(20);
+const REQUEST_TIMEOUT: Duration = Duration::from_millis(crew_client::policy::DEFAULT_TIMEOUT_MS);
 const RECONNECT_DELAY: Duration = Duration::from_secs(1);
 /// Terminal rows requested for the inspector's output capture: the screen,
 /// and scrollback where the backend has it at hand.
+#[cfg(test)]
 const OUTPUT_LINES: usize = 300;
 /// Entries of the session transcript the inspector asks for.
+#[cfg(test)]
 const TRANSCRIPT_ENTRIES: usize = 400;
 
+#[cfg(test)]
 fn request_timeout(call: &Call) -> Duration {
-    match call {
-        Call::AgentKill { .. }
-        | Call::AgentRestart { .. }
-        | Call::AgentRestartFresh { .. }
-        | Call::AgentResume { .. }
-        | Call::AgentSetModel { .. } => ACTION_TIMEOUT,
-        Call::Resume { .. } | Call::Shutdown { .. } => STOP_TIMEOUT,
-        Call::ModelsList => MODELS_TIMEOUT,
-        _ => REQUEST_TIMEOUT,
-    }
+    Duration::from_millis(crew_client::policy::timeout_for(call.method()))
 }
 
 pub enum UiEvent {
@@ -534,6 +524,7 @@ struct Requester {
 }
 
 impl Requester {
+    #[cfg(test)]
     fn call<T: serde::de::DeserializeOwned>(&mut self, call: Call) -> Result<T, String> {
         if self.client.is_none() {
             let (client, _) = Client::operator(&self.socket, "tui").map_err(|e| e.to_string())?;
@@ -558,11 +549,12 @@ impl Requester {
 
     /// Stop every agent and the daemon. Agents are given a moment to exit
     /// one after the other, so this gets a connection with more patience.
+    #[cfg(test)]
     fn stop_team(&mut self) -> Result<(), String> {
         self.client = None;
         let (mut client, _) = Client::operator(&self.socket, "tui").map_err(|e| e.to_string())?;
         client
-            .set_timeout(Some(STOP_TIMEOUT))
+            .set_timeout(Some(request_timeout(&Call::Shutdown { stop_agents: true })))
             .map_err(|e| e.to_string())?;
         match client.call::<serde_json::Value>(Call::Shutdown { stop_agents: true }) {
             Ok(_) => Ok(()),
@@ -573,10 +565,11 @@ impl Requester {
 
     /// The models agents can be put on. The daemon asks pi for its own,
     /// which takes a moment, so this gets a connection with more patience.
+    #[cfg(test)]
     fn models(&mut self) -> Result<Vec<ModelChoice>, String> {
         let (mut client, _) = Client::operator(&self.socket, "tui").map_err(|e| e.to_string())?;
         client
-            .set_timeout(Some(MODELS_TIMEOUT))
+            .set_timeout(Some(request_timeout(&Call::ModelsList)))
             .map_err(|e| e.to_string())?;
         match client.call::<ModelsResult>(Call::ModelsList) {
             Ok(result) => Ok(result.models),
@@ -585,12 +578,27 @@ impl Requester {
         }
     }
 
+    #[cfg(test)]
     fn action(&mut self, label: String, call: Call) -> Reply {
         let result = self.call::<serde_json::Value>(call).map(|_| ());
         Reply::Action { label, result }
     }
 
     fn run(&mut self, command: Command) -> Option<Reply> {
+        match command {
+            Command::Planned(planned) => Some(self.planned(*planned)),
+            Command::Quit | Command::SetMouse(_) | Command::RawKeys { .. } => None,
+            #[cfg(test)]
+            legacy => self.run_legacy(legacy),
+            #[cfg(not(test))]
+            _ => Some(Reply::Keys(Err("unplanned daemon command rejected".into()))),
+        }
+    }
+
+    /// Existing transport tests retain their legacy command surface. Production
+    /// requests reach the daemon only after the shared planner returns a request.
+    #[cfg(test)]
+    fn run_legacy(&mut self, command: Command) -> Option<Reply> {
         Some(match command {
             Command::Planned(planned) => self.planned(*planned),
             Command::Quit | Command::SetMouse(_) | Command::RawKeys { .. } => return None,
@@ -1249,7 +1257,7 @@ mod tests {
             request_timeout(&Call::AgentRestartFresh {
                 id: "worker".into()
             }),
-            ACTION_TIMEOUT
+            Duration::from_secs(30)
         );
     }
 
