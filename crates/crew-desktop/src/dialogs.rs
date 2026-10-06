@@ -54,7 +54,8 @@ impl Form {
         view.buffer().set_text(draft);
         body.append(&common::scroll(&view));
         let error = common::text("");
-        error.add_css_class("error");
+        // Muted for availability reasons; `failed` marks a failed submit.
+        error.add_css_class("crew-muted");
         body.append(&error);
         dialog.content_area().append(&body);
         dialog.add_button("Cancel", gtk::ResponseType::Cancel);
@@ -110,9 +111,13 @@ impl Form {
             editor.set_sensitive(false);
         }
         self.submit.set_sensitive(false);
+        self.error.remove_css_class("error");
+        self.error.add_css_class("crew-muted");
         self.error.set_label("Sending…");
     }
     pub fn failed(&self, message: &str) {
+        self.error.remove_css_class("crew-muted");
+        self.error.add_css_class("error");
         self.pending.set(false);
         self.editor.set_editable(true);
         for editor in self.extra_editors.borrow().iter() {

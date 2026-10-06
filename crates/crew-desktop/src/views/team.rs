@@ -24,6 +24,9 @@ impl TeamView {
         stack.add_titled(list.widget(), Some("list"), "List");
         stack.add_titled(&graph.root, Some("graph"), "Graph");
         let switcher = gtk::StackSwitcher::builder().stack(&stack).build();
+        switcher.set_halign(gtk::Align::Start);
+        switcher.set_margin_start(24);
+        switcher.set_margin_bottom(8);
         root.append(&switcher);
         // Pair navigation is collapsed and height-bounded so a large team or
         // enlarged text cannot push the agent list out of view.
@@ -121,35 +124,38 @@ impl TeamView {
                 .iter()
                 .map(|member| {
                     let agent = &member.agent;
-                    let body = common::column();
-                    body.append(&common::heading(&format!("{} · {}", agent.name, agent.id)));
-                    body.append(&common::text(&format!(
-                        "{} · {} · {}",
-                        agent.role, agent.runtime, member.status_label
-                    )));
-                    if let Some(work) = &member.current_work {
-                        body.append(&common::text(&format!(
-                            "{} task {}",
-                            if work.done { "Completed" } else { "Current" },
-                            work.task_id
-                        )));
-                        if work.elapsed_ms.is_none() {
-                            body.append(&common::text("Start time not reported"));
-                        }
-                    } else if let Some(task) = &agent.task {
-                        body.append(&common::text(task));
+                    let body = common::row();
+                    body.append(&common::row_title(
+                        &agent.id,
+                        Some(common::status_chip(&member.status_label, member.tone)),
+                    ));
+                    let mut identity = vec![agent.role.clone(), agent.runtime.to_string()];
+                    if agent.name != agent.id && !agent.name.is_empty() {
+                        identity.insert(0, agent.name.clone());
+                    }
+                    body.append(&common::muted(&identity.join(" · ")));
+                    let progress = agent
+                        .progress
+                        .map_or(String::new(), |progress| format!(" · {progress}%"));
+                    let work = match &member.current_work {
+                        Some(work) if work.done => Some(format!("Completed {}", work.task_id)),
+                        Some(work) => Some(format!("Working on {}{progress}", work.task_id)),
+                        None => agent.task.clone(),
+                    };
+                    if let Some(work) = work {
+                        body.append(&common::text(&work));
                     }
                     if !member.waiting_task_ids.is_empty() {
-                        body.append(&common::text(&format!(
+                        body.append(&common::muted(&format!(
                             "Waiting: {}",
                             member.waiting_task_ids.join(", ")
                         )));
                     }
                     if let Some(parent) = &member.satellite_parent_id {
-                        body.append(&common::text(&format!("Subagent of {parent}")));
+                        body.append(&common::muted(&format!("Subagent of {parent}")));
                     }
                     for warning in &member.warnings {
-                        body.append(&common::text(&warning.text));
+                        body.append(&common::warning(&warning.text));
                     }
                     let label = format!(
                         "{}, {}, {}, current task {}",

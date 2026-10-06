@@ -18,6 +18,7 @@ impl EntityList {
     pub fn new(label: &str, select: Select) -> Self {
         let list = gtk::ListBox::new();
         list.set_selection_mode(gtk::SelectionMode::Single);
+        list.add_css_class("crew-list");
         list.update_property(&[gtk::accessible::Property::Label(label)]);
         let keys = Rc::new(std::cell::RefCell::new(BTreeMap::<i32, EntityKey>::new()));
         list.connect_row_activated({
@@ -70,6 +71,10 @@ impl EntityList {
 
     pub fn widget(&self) -> &gtk::ScrolledWindow {
         &self.root
+    }
+
+    pub fn list(&self) -> &gtk::ListBox {
+        &self.list
     }
 }
 
@@ -174,6 +179,23 @@ pub fn reason() -> gtk::Label {
     label.set_visible(false);
     label.connect_label_notify(|label| label.set_visible(!label.label().is_empty()));
     label
+}
+
+/// A warning: an icon and the warning colour, with the text itself carrying
+/// the meaning.
+pub fn warning(value: &str) -> gtk::Box {
+    let line = gtk::Box::new(gtk::Orientation::Horizontal, 8);
+    line.add_css_class("crew-warning");
+    let icon = gtk::Image::builder()
+        .icon_name("dialog-warning-symbolic")
+        .accessible_role(gtk::AccessibleRole::Presentation)
+        .valign(gtk::Align::Start)
+        .build();
+    line.append(&icon);
+    let label = text(value);
+    label.set_hexpand(true);
+    line.append(&label);
+    line
 }
 
 /// Facts as two columns: muted names, copyable values. Rows are kept and
@@ -294,7 +316,6 @@ pub fn task_tone(status: crew_protocol::TaskStatus) -> crew_client::api::Tone {
 
 /// A status chip: the status text plus its semantic colour, never colour alone.
 pub fn status_chip(text: &str, tone: crew_client::api::Tone) -> gtk::Label {
-    use crew_client::api::Tone;
     let chip = gtk::Label::builder()
         .label(text)
         .selectable(false)
@@ -302,12 +323,46 @@ pub fn status_chip(text: &str, tone: crew_client::api::Tone) -> gtk::Label {
         .valign(gtk::Align::Center)
         .build();
     chip.add_css_class("crew-chip");
-    chip.add_css_class(match tone {
-        Tone::Neutral => "tone-neutral",
-        Tone::Info => "tone-info",
-        Tone::Success => "tone-success",
-        Tone::Warning => "tone-warning",
-        Tone::Danger => "tone-danger",
-    });
+    chip.add_css_class(tone_class(tone));
     chip
+}
+
+const TONE_CLASSES: [&str; 5] = [
+    "tone-neutral",
+    "tone-info",
+    "tone-success",
+    "tone-warning",
+    "tone-danger",
+];
+
+fn tone_class(tone: crew_client::api::Tone) -> &'static str {
+    use crew_client::api::Tone;
+    match tone {
+        Tone::Neutral => TONE_CLASSES[0],
+        Tone::Info => TONE_CLASSES[1],
+        Tone::Success => TONE_CLASSES[2],
+        Tone::Warning => TONE_CLASSES[3],
+        Tone::Danger => TONE_CLASSES[4],
+    }
+}
+
+/// Change a chip in place when its status changes.
+pub fn set_status_chip(chip: &gtk::Label, text: &str, tone: crew_client::api::Tone) {
+    if chip.label() != text {
+        chip.set_label(text);
+    }
+    for class in TONE_CLASSES {
+        chip.remove_css_class(class);
+    }
+    chip.add_css_class(tone_class(tone));
+}
+
+/// An elapsed time in seconds, minutes or hours and minutes.
+pub fn duration(ms: i64) -> String {
+    let seconds = ms.max(0) / 1000;
+    match seconds {
+        0..=59 => format!("{seconds} s"),
+        60..=3599 => format!("{} min", seconds / 60),
+        _ => format!("{} h {} min", seconds / 3600, seconds % 3600 / 60),
+    }
 }

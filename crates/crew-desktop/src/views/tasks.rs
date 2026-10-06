@@ -20,6 +20,9 @@ impl TasksView {
         stack.add_titled(list.widget(), Some("list"), "List");
         stack.add_titled(&graph.root, Some("graph"), "Graph");
         let switcher = gtk::StackSwitcher::builder().stack(&stack).build();
+        switcher.set_halign(gtk::Align::Start);
+        switcher.set_margin_start(24);
+        switcher.set_margin_bottom(8);
         root.append(&switcher);
         let empty = super::empty_state(
             "view-list-symbolic",
@@ -84,23 +87,33 @@ impl TasksView {
                 .iter()
                 .map(|item| {
                     let task = &item.task;
-                    let body = common::column();
-                    body.append(&common::heading(&task.title));
-                    body.append(&common::text(&format!(
-                        "{} · {} · {}",
-                        task.id,
-                        task.status,
-                        task.assigned_agent.as_deref().unwrap_or("Unassigned")
-                    )));
+                    let body = common::row();
+                    body.append(&common::row_title(
+                        &task.title,
+                        Some(common::status_chip(
+                            task.status.as_str(),
+                            common::task_tone(task.status),
+                        )),
+                    ));
+                    let mut detail = vec![
+                        task.id.clone(),
+                        task.assigned_agent
+                            .clone()
+                            .unwrap_or_else(|| "Unassigned".into()),
+                    ];
                     if let Some(progress) = task.progress {
-                        body.append(&common::text(&format!("{progress}%")));
+                        detail.push(format!("{progress}%"));
                     }
+                    if let Some(reviewer) = &task.reviewer {
+                        detail.push(format!("review by {reviewer}"));
+                    }
+                    body.append(&common::muted(&detail.join(" · ")));
                     if let Some(note) = &task.note {
                         body.append(&common::text(note));
                     }
                     if !item.dependencies.is_empty() {
-                        body.append(&common::text(&format!(
-                            "Dependencies: {}",
+                        body.append(&common::muted(&format!(
+                            "Depends on {}",
                             item.dependencies
                                 .iter()
                                 .map(|dependency| format!(
@@ -115,7 +128,7 @@ impl TasksView {
                         )));
                     }
                     if item.in_cycle {
-                        body.append(&common::text("Dependency cycle"));
+                        body.append(&common::warning("Part of a dependency cycle"));
                     }
                     (
                         EntityKey {

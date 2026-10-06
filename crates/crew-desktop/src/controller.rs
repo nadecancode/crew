@@ -141,8 +141,7 @@ pub struct Controller {
     usage: UsageView,
     status: gtk::Label,
     result: gtk::Label,
-    overview: gtk::Label,
-    questions_button: gtk::Button,
+    header: views::overview::OverviewHeader,
     workspace_label: gtk::Label,
     next_token: Cell<u64>,
     queries: RefCell<BTreeMap<u64, QueryTarget>>,
@@ -258,8 +257,14 @@ impl Controller {
             let result = common::text("");
             status.set_max_width_chars(22);
             result.set_max_width_chars(22);
-            let overview = common::text("");
-            let questions_button = gtk::Button::with_label("Questions (0)");
+            let header = views::overview::OverviewHeader::new(Rc::new({
+                let weak = weak.clone();
+                move || {
+                    if let Some(c) = weak.upgrade() {
+                        c.question(0);
+                    }
+                }
+            }));
             let workspace_label = gtk::Label::builder()
                 .label("Choose workspace")
                 .ellipsize(gtk::pango::EllipsizeMode::End)
@@ -288,8 +293,7 @@ impl Controller {
                 usage: UsageView::new(),
                 status,
                 result,
-                overview,
-                questions_button,
+                header,
                 workspace_label,
                 next_token: Cell::new(1),
                 queries: RefCell::new(BTreeMap::new()),
@@ -368,11 +372,28 @@ impl Controller {
             (Destination::Events, controller.events.root.clone().upcast()),
             (Destination::Usage, controller.usage.root.clone().upcast()),
         ] {
-            let page = gtk::Box::new(gtk::Orientation::Vertical, 8);
+            let page = gtk::Box::new(gtk::Orientation::Vertical, 0);
+            if destination == Destination::Team {
+                page.append(&controller.header.root);
+            }
+            // Page actions at their natural size, 24 pixels from the page edge.
             let controls = gtk::FlowBox::new();
             controls.set_selection_mode(gtk::SelectionMode::None);
             controls.set_min_children_per_line(1);
-            controls.set_max_children_per_line(4);
+            controls.set_max_children_per_line(6);
+            controls.set_column_spacing(8);
+            controls.set_row_spacing(8);
+            controls.set_halign(gtk::Align::Start);
+            controls.set_margin_top(12);
+            controls.set_margin_bottom(12);
+            controls.set_margin_start(24);
+            controls.set_margin_end(24);
+            // One reason line under the row keeps every button the same height
+            // and says a shared reason once.
+            let reason = common::reason();
+            reason.set_margin_start(24);
+            reason.set_margin_end(24);
+            reason.set_margin_bottom(12);
             let refresh = gtk::Button::with_label("Refresh");
             refresh.connect_clicked({
                 let weak = controller.weak.clone();
@@ -408,9 +429,8 @@ impl Controller {
                 }
             }
             if destination == Destination::Team {
-                views::add_control(&controls, &controller.questions_button);
-                page.append(&controller.overview);
-                let stop = gtk::Button::with_label("Stop team");
+                let stop = gtk::Button::with_label("Stop team…");
+                stop.add_css_class("destructive-action");
                 stop.connect_clicked({
                     let weak = controller.weak.clone();
                     move |_| {
@@ -421,8 +441,6 @@ impl Controller {
                         }
                     }
                 });
-                let reason = common::text("");
-                reason.set_max_width_chars(26);
                 let control = controller.token();
                 controller.bind_control(
                     control,
@@ -445,10 +463,7 @@ impl Controller {
                     }),
                     Rc::new(Cell::new(false)),
                 );
-                let group = gtk::Box::new(gtk::Orientation::Vertical, 4);
-                group.append(&stop);
-                group.append(&reason);
-                views::add_control(&controls, &group);
+                views::add_control(&controls, &stop);
             }
             if destination == Destination::Usage {
                 for (name, restart) in [
@@ -470,8 +485,6 @@ impl Controller {
                             }
                         }
                     });
-                    let reason = common::text("");
-                    reason.set_max_width_chars(26);
                     let control = controller.token();
                     controller.bind_control(
                         control,
@@ -494,25 +507,15 @@ impl Controller {
                         }),
                         Rc::new(Cell::new(false)),
                     );
-                    let group = gtk::Box::new(gtk::Orientation::Vertical, 4);
-                    group.append(&button);
-                    group.append(&reason);
-                    views::add_control(&controls, &group);
+                    views::add_control(&controls, &button);
                 }
             }
             page.append(&controls);
+            page.append(&reason);
             page.append(&widget);
             controller.shell.set_main(destination, &page);
             controller.pages.borrow_mut().push((destination, page));
         }
-        controller.questions_button.connect_clicked({
-            let weak = controller.weak.clone();
-            move |_| {
-                if let Some(c) = weak.upgrade() {
-                    c.question(0);
-                }
-            }
-        });
         controller.shell.connect_destination_changed({
             let weak = controller.weak.clone();
             move |destination| {
@@ -897,26 +900,10 @@ impl Controller {
                 self.usage.update(&usage)
             }
             (QueryTarget::Overview, ViewPayload::Overview(overview)) => {
-                let session = overview.session.as_ref();
-                self.overview.set_label(&format!(
-                    "{}\n{}\n{} agents · {} working · {} of {} tasks done · {} questions{}",
-                    session.map_or("No workspace loaded", |s| s.workspace.as_str()),
-                    session.map_or("", |s| s.objective.as_str()),
-                    overview.agent_count,
-                    overview.working_count,
-                    overview.done_count,
-                    overview.task_count,
-                    overview.question_count,
-                    overview
-                        .warnings
-                        .iter()
-                        .map(|w| format!("\n{}", w.text))
-                        .collect::<String>()
-                ));
+                self.header.update(&overview)
             }
             (QueryTarget::Questions, ViewPayload::Questions(questions)) => {
-                self.questions_button
-                    .set_label(&format!("Questions ({})", questions.len()));
+                self.header.set_questions(&questions);
                 for form in self.forms.borrow().values() {
                     if let Some(id) = form.target.strip_prefix("answer:") {
                         if !questions.iter().any(|q| q.id == id) {
@@ -1356,10 +1343,15 @@ impl Controller {
         self.refresh_control(id);
     }
     fn bind_form_control(&self, id: u64, form: &Form, intent: Intent) {
+        // No reason line until the text has had input: an empty editor is
+        // not an error. A restored draft counts as input.
+        let touched = Rc::new(Cell::new(!common::buffer_text(&form.buffer).is_empty()));
+        self.controls.wait_for_input(id, touched.clone());
         self.bind_control(id, &form.submit, &form.error, intent, form.pending.clone());
         form.buffer.connect_changed({
             let weak = self.weak.clone();
             move |_| {
+                touched.set(true);
                 if let Some(c) = weak.upgrade() {
                     c.refresh_control(id);
                 }
@@ -1897,7 +1889,6 @@ impl Controller {
             self.listing.borrow_mut().take();
             self.drafts.borrow_mut().clear();
             self.questions.borrow_mut().clear();
-            self.questions_button.set_label("Questions (0)");
         }
         for dialog in self.auxiliary.borrow_mut().drain(..) {
             dialog.close();
@@ -1906,13 +1897,12 @@ impl Controller {
             self.shell
                 .set_detail(destination, "Details", &views::no_selection());
         }
-        self.overview.set_label(if purge {
+        self.header.clear(if purge {
             "Access unavailable"
         } else {
             "No workspace loaded"
         });
         self.questions.borrow_mut().clear();
-        self.questions_button.set_label("Questions (0)");
         self.team.update(
             None,
             &TeamData {

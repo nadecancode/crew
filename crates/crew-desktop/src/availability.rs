@@ -21,8 +21,12 @@ struct Binding {
     intent: Intent,
     pending: Rc<Cell<bool>>,
 }
+/// Bindings by control, and the controls whose reason waits for input.
 #[derive(Default)]
-pub struct Controls(RefCell<BTreeMap<u64, Binding>>);
+pub struct Controls(
+    RefCell<BTreeMap<u64, Binding>>,
+    RefCell<BTreeMap<u64, Rc<Cell<bool>>>>,
+);
 impl Controls {
     pub fn bind(
         &self,
@@ -42,6 +46,14 @@ impl Controls {
                 pending,
             },
         );
+    }
+    /// Show no reason line for this control until `touched` is set: before
+    /// any input, a disabled control with an empty field is not an error.
+    pub fn wait_for_input(&self, id: u64, touched: Rc<Cell<bool>>) {
+        self.1.borrow_mut().insert(id, touched);
+    }
+    fn quiet(&self, id: u64) -> bool {
+        self.1.borrow().get(&id).is_some_and(|touched| !touched.get())
     }
     pub fn ids(&self) -> Vec<u64> {
         self.0.borrow().keys().copied().collect()
@@ -78,7 +90,7 @@ impl Controls {
         button.update_property(&[gtk::accessible::Property::Description(&explanation)]);
         if let Some(reason) = binding.reason.upgrade() {
             if !binding.pending.get() {
-                reason.set_label(&explanation);
+                show(&reason, if self.quiet(id) { "" } else { &explanation });
             }
         }
     }
@@ -88,12 +100,13 @@ impl Controls {
                 button.set_sensitive(false);
             }
             if let Some(reason) = binding.reason.upgrade() {
-                reason.set_label(explanation);
+                show(&reason, if self.quiet(id) { "" } else { explanation });
             }
         }
     }
     pub fn remove(&self, id: u64) {
         self.0.borrow_mut().remove(&id);
+        self.1.borrow_mut().remove(&id);
     }
     pub fn local(&self, id: u64) {
         if let Some(binding) = self.0.borrow().get(&id) {
@@ -107,4 +120,16 @@ impl Controls {
             }
         }
     }
+}
+
+/// An availability reason reads as a note, not an error: only a failed
+/// submit is styled as one.
+fn show(reason: &gtk::Label, text: &str) {
+    // A failed submit stays visible until there is something else to say.
+    if text.is_empty() && reason.has_css_class("error") {
+        return;
+    }
+    reason.remove_css_class("error");
+    reason.add_css_class("crew-muted");
+    reason.set_label(text);
 }

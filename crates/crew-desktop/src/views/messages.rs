@@ -129,15 +129,18 @@ impl MessagesView {
             page.items
                 .iter()
                 .map(|message| {
-                    let body = common::column();
-                    body.append(&common::text(&format!(
-                        "{} to {} · {}",
-                        message.from, message.to, message.kind
-                    )));
-                    body.append(&common::text(&message.body));
-                    body.append(&common::text(&format!(
+                    let body = common::row();
+                    body.append(&common::row_title(
+                        &format!("{} to {}", message.from, message.to),
+                        None,
+                    ));
+                    let preview = common::text(&message.body);
+                    preview.set_lines(3);
+                    preview.set_ellipsize(gtk::pango::EllipsizeMode::End);
+                    body.append(&preview);
+                    body.append(&common::muted(&format!(
                         "{} · {}",
-                        message.id,
+                        message.kind,
                         common::timestamp(message.timestamp)
                     )));
                     (

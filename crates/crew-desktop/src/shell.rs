@@ -161,7 +161,9 @@ impl Shell {
         content.set_shrink_end_child(false);
         content.set_start_child(Some(&main_stack));
         content.set_end_child(Some(&detail_container));
-        content.set_position(620);
+        // A visible handle, and an inspector wide enough for its tabs.
+        content.set_wide_handle(true);
+        content.set_position(420);
         let adaptive = AdaptiveBox::new();
         adaptive.set_hexpand(true);
         adaptive.set_vexpand(true);

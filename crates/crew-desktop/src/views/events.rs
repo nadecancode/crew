@@ -108,18 +108,21 @@ impl EventsView {
                 .iter()
                 .filter_map(|event| {
                     let seq = u64::try_from(event.seq).ok()?;
-                    let body = common::column();
-                    body.append(&common::text(&format!(
-                        "{} · {} · {}",
-                        event.level,
-                        event.event_type,
-                        event.agent_id.as_deref().unwrap_or("Team")
-                    )));
-                    body.append(&common::text(&event.message));
-                    body.append(&common::text(&format!(
-                        "Sequence {} · {}",
-                        event.seq,
-                        common::timestamp(event.timestamp)
+                    let body = common::row();
+                    let (level, tone) = level_marker(event.level);
+                    body.append(&common::row_title(
+                        &event.event_type,
+                        Some(common::status_chip(level, tone)),
+                    ));
+                    let message = common::text(&event.message);
+                    message.set_lines(3);
+                    message.set_ellipsize(gtk::pango::EllipsizeMode::End);
+                    body.append(&message);
+                    body.append(&common::muted(&format!(
+                        "{} · {} · #{}",
+                        event.agent_id.as_deref().unwrap_or("Team"),
+                        common::timestamp(event.timestamp),
+                        event.seq
                     )));
                     Some((
                         EntityKey {
@@ -135,5 +138,16 @@ impl EventsView {
                 })
                 .collect(),
         );
+    }
+}
+
+/// Each level reads as a word as well as a colour.
+fn level_marker(level: crew_protocol::EventLevel) -> (&'static str, Tone) {
+    use crew_protocol::EventLevel;
+    match level {
+        EventLevel::Debug => ("Debug", Tone::Neutral),
+        EventLevel::Info => ("Info", Tone::Info),
+        EventLevel::Warn => ("Warning", Tone::Warning),
+        EventLevel::Error => ("Error", Tone::Danger),
     }
 }
