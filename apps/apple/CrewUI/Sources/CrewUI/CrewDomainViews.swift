@@ -264,16 +264,16 @@ public struct CrewUsageView: View {
     private let selectAgent: (String) -> Void
     private let continueLimited: () -> Void
     private let restartLimited: () -> Void
-    private let resumeAvailable: Bool
-    private let resumeReason: String?
+    private let continueAvailability: CrewControlAvailability
+    private let restartAvailability: CrewControlAvailability
     private let selected: EntityKey?
     private let focus: CrewFocus?
     private let active: Bool
 
-    public init(scope: ClientScope, usage: UsagePresentation, selectAgent: @escaping (String) -> Void, resumeAvailable: Bool, resumeReason: String?, continueLimited: @escaping () -> Void, restartLimited: @escaping () -> Void, selected: EntityKey? = nil, focus: CrewFocus? = nil, active: Bool = true) {
+    public init(scope: ClientScope, usage: UsagePresentation, selectAgent: @escaping (String) -> Void, continueAvailability: CrewControlAvailability, restartAvailability: CrewControlAvailability, continueLimited: @escaping () -> Void, restartLimited: @escaping () -> Void, selected: EntityKey? = nil, focus: CrewFocus? = nil, active: Bool = true) {
         self.scope = scope; self.selected = selected; self.focus = focus; self.active = active
         self.usage = usage; self.selectAgent = selectAgent
-        self.resumeAvailable = resumeAvailable; self.resumeReason = resumeReason
+        self.continueAvailability = continueAvailability; self.restartAvailability = restartAvailability
         self.continueLimited = continueLimited; self.restartLimited = restartLimited
     }
 
@@ -326,9 +326,10 @@ public struct CrewUsageView: View {
                         if !group.pausedAgentIds.isEmpty {
                             Text("Paused at a usage limit").font(.headline)
                             ForEach(group.pausedAgentIds, id: \.self) { id in Button(id) { selectAgent(id) } }
-                            Button("Continue agents paused at limit", action: continueLimited).disabled(!resumeAvailable)
-                            Button("Restart agents paused at limit", action: restartLimited).disabled(!resumeAvailable)
-                            if let resumeReason { Text(verbatim: resumeReason).font(.callout).foregroundStyle(.secondary) }
+                            Button("Continue agents paused at limit", action: continueLimited).disabled(!continueAvailability.available)
+                            if let reason = continueAvailability.reason { Text(verbatim: reason).font(.callout).foregroundStyle(.secondary) }
+                            Button("Restart agents paused at limit", action: restartLimited).disabled(!restartAvailability.available)
+                            if let reason = restartAvailability.reason, reason != continueAvailability.reason { Text(verbatim: reason).font(.callout).foregroundStyle(.secondary) }
                         }
                     }
                 }

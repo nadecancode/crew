@@ -2,9 +2,11 @@
 
 The approved navigation foundation is `4479a301`. Substantive implementation
 uses the reviewed N2A source at `a159bd03` and the connection experience at
-`5015460a`. Source now composes the real local facade on macOS. Gateway composition is
-still required for iOS; source preparation and unperformed native execution
-remain distinct.
+`5015460a`. Source now composes the real local facade on macOS and the
+released shared availability query for action controls (see "Shared action
+availability"). Gateway composition is still required for iOS; source
+preparation and unperformed native execution remain distinct. Later sections
+supersede the remaining-gate lists of earlier checkpoints.
 
 ## Host storage and presentation checkpoint
 
@@ -374,36 +376,87 @@ endpoint, workspace and operation ID. It never requires full scope equality or
 the old attempt. Action dispatch continues to use the complete current scope.
 
 The submitted message is an immutable receipt, separate from the editable
-draft. While the Core holds it, the composer shows the original body and
-recipient read-only, states that it is still pending after reconnect, and says
-that closing the sheet does not cancel it. Later edits are a separate draft.
-The wire message ID is not displayed. The UI neither replans nor resends, and
-Send stays disabled until the real outcome. Only a matching final notice
-resolves the receipt: success clears the editor only if it still holds the
-exact submitted text, so later edits survive; Unknown and the other non-success
-outcomes keep the body and show the outcome on the receipt. Mismatching
-endpoint, workspace or operation notices are ignored. Learned revocation,
-workspace removal, sign-out and client replacement purge the receipt, because
-the Core retires the held retry and no notice will arrive. A separate bounded
-receipt history handles an outcome that arrives before the actor's plan
-continuation, including a scope change during that continuation. The generic
-view/terminal paths keep their full-scope fences.
+draft, and everything known about it is stated on that receipt rather than
+beside the editor. While the Core holds it, the composer shows the original
+body and recipient read-only, states that it is still pending after
+reconnect, and says that closing the sheet does not cancel it; the disabled
+Send states "Send after the submitted message above resolves." Later edits
+are a separate draft. The wire message ID is not displayed. The UI neither
+replans nor resends. Only a matching final notice resolves the receipt.
+Success with the exact submitted text still in the editor clears both and
+says "Message sent."; success after later edits is shown on the receipt
+("Last submitted message", Sent.) and leaves those edits untouched. Unknown,
+the other non-success outcomes and Core refusals before dispatch keep the
+body and show their reason on the receipt. Mismatching endpoint, workspace
+or operation notices are ignored. Receipt status changes are posted as
+VoiceOver announcements.
+
+Learned revocation, workspace removal and sign-out purge the draft and its
+receipt, because the Core retires the held retry and no notice will arrive.
+Client replacement and a workspace change retire a pending receipt as
+**unknown** instead: the message may already have been delivered, so it stays
+visible ("Outcome unknown after the connection changed…"), keeps its ID so an
+unchanged explicit retry still deduplicates, and no explanation is placed
+beside later edits. A draft with nothing pending is unaffected by retirement.
+A separate bounded receipt history handles an outcome that arrives before the
+actor's plan continuation, including a scope change during that continuation.
+The generic view/terminal paths keep their full-scope fences.
 
 Native source cases: `CrewSendDraftTests` covers new-attempt-scope success
-with the original operation ID, the immutable receipt beside later edits,
-held Unknown retention and retirement purge; `CrewClientWorkerTests` covers
-the model sequence Dispatch → connection loss → new attempt → reopened
-composer → new-attempt-scope success (exactly one plan call, later edit kept),
-held Unknown retention, revocation purge with a later notice ignored, and
-client replacement purge. Their execution remains **Apple verification deferred
-by operator**; the Foundation-only test sources now typecheck on Linux (below).
-This is not a Rust replay or Apple application run.
+with the original operation ID, success shown on the receipt beside later
+edits, held Unknown retention, a refusal before dispatch on the receipt,
+retirement as unknown with ID retention, and retirement leaving unsubmitted or
+already-resolved drafts unchanged. `CrewClientWorkerTests` covers the model
+sequence Dispatch → connection loss → new attempt → reopened composer →
+new-attempt-scope success (exactly one plan call, later edit kept), held
+Unknown retention, revocation purge with a later notice ignored, and client
+replacement retiring the receipt as unknown without touching other drafts.
+Their execution remains **Apple verification deferred by operator**; the
+Foundation-only test sources typecheck on Linux (below). This is not a Rust
+replay or Apple application run.
 
 Restored evidence routes also activate their captured entity/read under the
 current scope, rather than showing a perpetual loading state after another
 destination cleared the display cache. A newly active wide destination always
 normalizes its physical inspector path, including one with no selection;
 another destination's saved open route is not treated as Back.
+
+## Shared action availability
+
+The generated `CrewBindings.swift` from the reviewer-approved
+`native-availability-bindings` release `75173b46` (sha256 `db9b3632…`) was
+imported byte for byte in `e1b8fc32`; the C header and module map are
+unchanged. Its source chain is `5165ff56` (`c37bff6f` producer preflight),
+`a4252ec4` (`f3d73b16` Core query) and `75173b46` (FFI), which QA lands
+together.
+
+Controls now take eligibility and the disabled reason from the shared Core's
+read-only `ViewQuery.availability(intent:)` for the **exact** intent they
+would submit: message Send (including its deduplication ID), terminal prompt
+submission, question answers (the typed draft and each suggested answer),
+model/CLI choices with the current note, and the workspace-wide Continue,
+Restart and Stop team controls in the options menu and the usage view.
+Agent detail actions keep the Core's per-agent projection availability.
+Each control registers its intent while visible; one in-flight worker read
+answers every registered intent in the current scope and is repeated after
+any shared notice or new input. A malformed intent fails only its own entry
+with the same `ClientError` that `plan` returns; a closed client fails the
+read. The reason shown is the Core's canonical `ClientReason.message`. An
+intent captured under an earlier connection attempt is never queried: it
+says "Reopen this target from the current workspace connection." Until the
+answer for the current input arrives, the control is disabled without a
+reason line, so typing does not flash text. No mutating plan probe, grant
+list or Swift policy decides eligibility, and execution still revalidates
+through `plan`. The Send availability intent and the dispatched intent are the
+same value: the draft keeps one stable candidate ID until Send uses it.
+
+Native source cases in `CrewClientWorkerTests`: Core answers for exact
+intents (unavailable with reason, available, malformed), re-reading after a
+shared notice, no query for an earlier attempt's intent, no plan call, and the
+composer's queried intent equalling the planned intent. `CrewSendDraftTests`
+covers candidate ID stability and its use by Send. The worker read typechecks
+on Linux against the released bindings; the SwiftUI composition and the
+model cases remain **Apple verification deferred by operator**.
 
 ## Native test sources
 
@@ -413,10 +466,10 @@ has been executed: **Apple execution deferred by operator**.
 
 | Source | Cases | Linux evidence |
 | --- | --- | --- |
-| `Tests/CrewSendDraftTests.swift` | 9 | typechecks with its host source and corelibs XCTest |
+| `Tests/CrewSendDraftTests.swift` | 12 | typechecks with its host source and corelibs XCTest |
 | `Tests/CrewNoticeRoutingTests.swift` | 5 | typechecks with its host source and corelibs XCTest |
 | `Tests/CrewExternalLinksTests.swift` | 4 | typechecks with its host source and corelibs XCTest |
-| `Tests/CrewClientWorkerTests.swift` | 10 | parses; the model cases need SwiftUI/Observation |
+| `Tests/CrewClientWorkerTests.swift` | 12 | parses; the model cases need SwiftUI/Observation |
 | `Tests/CrewShellTests.swift` | 13 | parses; needs SwiftUI |
 | `Tests/AppleDeviceKeyVaultTests.swift` | 5 | parses; needs CryptoKit/Security |
 | `Tests/CrewShellUITests.swift` | 2 | parses; needs an Apple UI-test runner |
@@ -427,5 +480,8 @@ host sources, then typechecks the three Foundation test sources together with
 those host sources against the pinned Swift 5.10.1 corelibs XCTest. On Linux the
 `@testable import CrewMac`/`CrewIOS` lines are compiled out, so the tests and
 host sources share one module. Tests are typechecked, not run: running them
-needs the matching Rust FFI library, and no Apple target is built. The four
-generated Sendable warnings above are unchanged.
+needs the matching Rust FFI library, and no Apple target is built. Swift
+5.10.1 reports six Sendable warnings in `CrewClientWorker.swift`: the four
+documented above plus `ActionIntent` and `ActionAvailability` in the
+availability read. All six are UniFFI conformances generated under
+`#if compiler(>=6)`, the selected Apple compiler; none is suppressed.

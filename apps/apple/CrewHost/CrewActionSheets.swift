@@ -30,26 +30,36 @@ struct CrewActionSheetView: View {
                 case .compose(let key):
                     let recipient: String = { if case .agent(let id) = key.entity { return id }; return "all" }()
                     let draftKey = CrewDraftKey(scope: key.scope, purpose: "message:\(recipient)")
-                    ScrollView { VStack(alignment: .leading) {
+                    let intent = model.sendIntent(draftKey, to: recipient)
+                    let availability = model.availability(intent)
+                    VStack(alignment: .leading) {
                         // The Core's held message is shown as its immutable
                         // receipt; the editor below may already hold new text.
                         if let receipt = model.sendReceipt(draftKey) {
                             CrewSubmittedMessageView(recipient: receipt.recipient, body: receipt.body, status: CrewFailure.receipt(receipt), pending: receipt.isPending)
                         }
-                        CrewDraftEditor(title: "Message", text: model.sendDraft(draftKey), submitLabel: "Send", targetDescription: "\(recipient) · \(key.scope.workspaceId)", submitAvailable: model.scope == key.scope && model.isLive, pending: model.sendPending(draftKey), unavailableReason: model.scope == key.scope && model.isLive ? nil : "Reconnect and reopen this target before sending") {
+                        CrewDraftEditor(title: "Message", text: model.sendDraft(draftKey), submitLabel: "Send", targetDescription: "\(recipient) · \(key.scope.workspaceId)", submitAvailable: availability.available, pending: model.sendPending(draftKey), unavailableReason: model.sendPending(draftKey) ? "Send after the submitted message above resolves." : availability.reason) {
                             model.send(draftKey, to: recipient)
                         }
                         if let explanation = model.sendExplanation(draftKey) { Text(verbatim: explanation).font(.callout).padding(16) }
-                    } }
+                    }
+                    .onAppear { model.prepareSendDraft(draftKey) }
+                    .crewAvailability(model, intent.map { [$0] } ?? [])
                 case .prompt(let key):
                     if case .agent(let id) = key.entity {
-                        CrewDraftEditor(title: "Terminal prompt", text: model.draft(CrewDraftKey(scope: key.scope, purpose: "prompt:\(id)")), submitLabel: "Submit prompt", targetDescription: "Terminal input to \(id) · \(key.scope.workspaceId)", submitAvailable: model.scope == key.scope && model.isLive, pending: model.pending, unavailableReason: model.scope == key.scope && model.isLive ? nil : "Reconnect and reopen this terminal target before submitting") {
-                            let text = model.draft(CrewDraftKey(scope: key.scope, purpose: "prompt:\(id)")).wrappedValue
-                            model.perform(.agentInput(scope: key.scope, id: id, text: text, submit: true))
+                        let draft = model.draft(CrewDraftKey(scope: key.scope, purpose: "prompt:\(id)"))
+                        let intent = ActionIntent.agentInput(scope: key.scope, id: id, text: draft.wrappedValue, submit: true)
+                        let availability = model.availability(intent)
+                        CrewDraftEditor(title: "Terminal prompt", text: draft, submitLabel: "Submit prompt", targetDescription: "Terminal input to \(id) · \(key.scope.workspaceId)", submitAvailable: availability.available, pending: model.pending, unavailableReason: availability.reason) {
+                            model.perform(intent)
                         }
+                        .crewAvailability(model, [intent])
                     }
                 case .question(let key, let message, let info):
-                    CrewQuestionView(question: message, info: info, draft: model.draft(CrewDraftKey(scope: key.scope, purpose: "answer:\(message.id)")), answerAvailable: model.scope == key.scope && model.isLive, pending: model.pending, reason: model.scope == key.scope && model.isLive ? nil : "This question's scope is no longer live", answer: { model.perform(.answer(scope: key.scope, questionId: message.id, body: $0)) }, later: { dismiss() })
+                    let draft = model.draft(CrewDraftKey(scope: key.scope, purpose: "answer:\(message.id)"))
+                    let answer = { (body: String) in ActionIntent.answer(scope: key.scope, questionId: message.id, body: body) }
+                    CrewQuestionView(question: message, info: info, draft: draft, availability: { model.availability(answer($0)) }, pending: model.pending, answer: { model.perform(answer($0)) }, later: { dismiss() })
+                        .crewAvailability(model, ([draft.wrappedValue] + info.options).map(answer))
                 case .terminal:
                     VStack(alignment: .leading, spacing: 16) {
                         Text(verbatim: model.terminalStatus ?? "Opening terminal").font(.callout)

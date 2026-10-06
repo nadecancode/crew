@@ -65,6 +65,22 @@ public struct CrewTextEvidence: View {
     }
 }
 
+/// Eligibility of one exact captured action, as answered by the shared core's
+/// read-only availability query. The reason is the core's canonical text.
+/// While the answer for the current input is outstanding, the control is
+/// disabled without a reason, so typing does not flash explanatory text.
+public struct CrewControlAvailability: Equatable {
+    public let available: Bool
+    public let reason: String?
+
+    public init(available: Bool, reason: String?) {
+        self.available = available
+        self.reason = reason
+    }
+
+    public static let checking = CrewControlAvailability(available: false, reason: nil)
+}
+
 /// A message that has already been submitted, shown read-only and separate
 /// from the editable draft. The caller supplies the receipt status; closing
 /// the containing sheet does not cancel a pending send.
@@ -73,6 +89,7 @@ public struct CrewSubmittedMessageView: View {
     private let messageBody: String
     private let status: String
     private let pending: Bool
+    @ScaledMetric(relativeTo: .body) private var receiptHeight: CGFloat = 120
 
     public init(recipient: String, body: String, status: String, pending: Bool) {
         self.recipient = recipient
@@ -92,13 +109,14 @@ public struct CrewSubmittedMessageView: View {
             Text(verbatim: "To \(recipient)")
                 .font(.callout)
                 .foregroundStyle(.secondary)
-            Text(verbatim: messageBody)
-                .font(.body)
-                .fixedSize(horizontal: false, vertical: true)
-                .textSelection(.enabled)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .padding(8)
-                .background(CrewPalette.canvas, in: RoundedRectangle(cornerRadius: 6))
+            // Bounded so a long submitted message cannot push the editable
+            // draft out of the sheet; the editor keeps its own scrolling.
+            ViewThatFits(in: .vertical) {
+                submittedText
+                ScrollView { submittedText }
+            }
+            .frame(maxHeight: receiptHeight)
+            .background(CrewPalette.canvas, in: RoundedRectangle(cornerRadius: 6))
             Text(verbatim: status)
                 .font(.callout)
             if pending {
@@ -109,6 +127,17 @@ public struct CrewSubmittedMessageView: View {
         }
         .padding(16)
         .accessibilityElement(children: .contain)
+        // Receipt changes arrive without user action; announce them.
+        .onChange(of: status) { _, status in AccessibilityNotification.Announcement(status).post() }
+    }
+
+    private var submittedText: some View {
+        Text(verbatim: messageBody)
+            .font(.body)
+            .fixedSize(horizontal: false, vertical: true)
+            .textSelection(.enabled)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(8)
     }
 }
 

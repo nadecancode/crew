@@ -50,6 +50,27 @@ actor CrewClientWorker {
         )
     }
 
+    /// Read-only Core availability for each captured intent. A malformed
+    /// intent fails only its own entry, with the same error `plan` returns;
+    /// a closed client fails the whole read. Nothing here plans or dispatches.
+    func availability(_ intents: [ActionIntent], instance: UUID) throws -> [CrewAvailabilityRead] {
+        try _Concurrency.Task.checkCancellation()
+        let client = try requireClient(instance)
+        return try intents.map { intent in
+            do {
+                let data = try client.query(query: .availability(intent: intent))
+                guard case .availability(let availability) = data.payload, data.scope == intent.scope else {
+                    return CrewAvailabilityRead(intent: intent, result: .failed(.DecodeFailure(message: "availability view")))
+                }
+                return CrewAvailabilityRead(intent: intent, result: .answered(availability))
+            } catch ClientError.ClosedClient {
+                throw ClientError.ClosedClient
+            } catch let error as ClientError {
+                return CrewAvailabilityRead(intent: intent, result: .failed(error))
+            }
+        }
+    }
+
     func plan(_ intent: ActionIntent, instance: UUID) throws -> ActionPlan {
         try _Concurrency.Task.checkCancellation()
         return try requireClient(instance).plan(intent: intent)
@@ -135,6 +156,31 @@ final class CrewUIObserver: ClientObserver, @unchecked Sendable {
             MainActor.assumeIsolated { operation() }
         } else {
             DispatchQueue.main.sync { MainActor.assumeIsolated { operation() } }
+        }
+    }
+}
+
+/// One availability answer for exactly the intent that was asked about.
+struct CrewAvailabilityRead: Sendable {
+    enum Result: Equatable, Sendable {
+        case answered(ActionAvailability)
+        case failed(ClientError)
+    }
+
+    let intent: ActionIntent
+    let result: Result
+}
+
+extension ActionIntent {
+    /// The captured scope every intent carries; read only to fence results.
+    var scope: ClientScope {
+        switch self {
+        case .sendMessage(let scope, _, _, _), .answer(let scope, _, _), .agent(let scope, _, _),
+             .setModel(let scope, _, _, _, _), .agentInput(let scope, _, _, _),
+             .resumeLimited(let scope, _), .stopTeam(let scope), .read(let scope, _),
+             .attach(let scope, _, _, _), .attachInput(let scope, _, _),
+             .attachResize(let scope, _, _, _), .detach(let scope, _):
+            return scope
         }
     }
 }

@@ -31,6 +31,10 @@ final class CrewSessionModel {
     private var activeAttachRequest: UUID?
     private var actionGeneration: UInt64 = 0
     private var terminalRenderers: [CrewTerminalIdentity: CrewTerminalRenderer] = [:]
+    private var availabilityWatchers: [ActionIntent: Int] = [:]
+    private var availabilityResults: [ActionIntent: CrewAvailabilityRead.Result] = [:]
+    private var availabilityTask: _Concurrency.Task<Void, Never>?
+    private var availabilityStale = false
 
     private(set) var localProfiles: [LocalProfileInfo] = []
     private(set) var discovering = false
@@ -305,24 +309,103 @@ final class CrewSessionModel {
 
     func sendPending(_ key: CrewDraftKey) -> Bool { sendDrafts[key]?.pending == true }
 
+    /// Drain only the current availability read (tests and diagnostics).
+    func waitForAvailability() async { await availabilityTask?.value }
+
     /// Drain only the current UI submission batch. Rust completion remains an
     /// observer outcome; this does not wait for delivery or trigger a replay.
     func waitForSubmissionBatch() async { await actionTask?.value }
 
-    /// Successful acknowledgement or a connection explanation. A non-success
-    /// outcome belongs to the submitted receipt, not to the editable text.
-    func sendExplanation(_ key: CrewDraftKey) -> String? {
-        if let outcome = sendDrafts[key]?.lastOutcome, outcome.kind == .success { return CrewFailure.outcome(outcome) }
-        return sendDrafts[key]?.explanation
-    }
+    /// A note about the editable text only. Everything about a submitted
+    /// message, including its outcome, belongs to its receipt.
+    func sendExplanation(_ key: CrewDraftKey) -> String? { sendDrafts[key]?.explanation }
 
     func sendReceipt(_ key: CrewDraftKey) -> CrewSendReceipt? { sendDrafts[key]?.receipt }
+
+    /// Create the draft record when its composer opens, so the availability
+    /// query and an explicit Send use the same deduplication ID.
+    func prepareSendDraft(_ key: CrewDraftKey) {
+        if sendDrafts[key] == nil { sendDrafts[key] = CrewSendDraft(scope: key.scope) }
+    }
+
+    /// The exact intent an explicit Send would dispatch for this draft.
+    func sendIntent(_ key: CrewDraftKey, to recipient: String) -> ActionIntent? {
+        guard let draft = sendDrafts[key] else { return nil }
+        return .sendMessage(scope: key.scope, to: recipient, body: draft.body, messageId: draft.candidateMessageId)
+    }
+
+    /// Controls register the exact intent they would submit. Each answer is
+    /// the Core's read-only availability query for that intent; nothing is
+    /// planned, reserved or dispatched, and execution still revalidates.
+    func watchAvailability(_ intents: [ActionIntent]) {
+        var unanswered = false
+        for intent in intents {
+            availabilityWatchers[intent, default: 0] += 1
+            if availabilityResults[intent] == nil { unanswered = true }
+        }
+        if unanswered { refreshAvailability() }
+    }
+
+    func unwatchAvailability(_ intents: [ActionIntent]) {
+        for intent in intents {
+            guard let count = availabilityWatchers[intent] else { continue }
+            if count > 1 {
+                availabilityWatchers[intent] = count - 1
+            } else {
+                availabilityWatchers[intent] = nil
+                availabilityResults[intent] = nil
+            }
+        }
+    }
+
+    /// Eligibility and the Core's canonical reason for one captured intent.
+    /// An intent from an earlier connection is never queried against the
+    /// current one; until the current answer arrives the control is disabled.
+    func availability(_ intent: ActionIntent?) -> CrewControlAvailability {
+        guard let intent else { return .checking }
+        guard hasClient, intent.scope == scope else {
+            return CrewControlAvailability(available: false, reason: "Reopen this target from the current workspace connection.")
+        }
+        switch availabilityResults[intent] {
+        case nil: return .checking
+        case .answered(let answer): return CrewControlAvailability(available: answer.available, reason: answer.reason?.message)
+        case .failed(let error): return CrewControlAvailability(available: false, reason: CrewFailure.message(error))
+        }
+    }
+
+    /// One in-flight read answers every watched intent in the current scope.
+    /// Notices and newly watched input mark it stale; it loops until current.
+    private func refreshAvailability() {
+        availabilityStale = true
+        guard hasClient, availabilityTask == nil else { return }
+        let token = instance
+        availabilityTask = _Concurrency.Task {
+            while instance == token, availabilityStale {
+                availabilityStale = false
+                let intents = availabilityWatchers.keys.filter { $0.scope == scope }
+                guard !intents.isEmpty else { break }
+                do {
+                    let reads = try await worker.availability(intents, instance: token)
+                    guard instance == token else { return }
+                    for read in reads where availabilityWatchers[read.intent] != nil && read.intent.scope == scope {
+                        availabilityResults[read.intent] = read.result
+                    }
+                } catch {
+                    guard instance == token else { return }
+                    let failure = error as? ClientError ?? .ClosedClient
+                    for intent in intents where availabilityWatchers[intent] != nil { availabilityResults[intent] = .failed(failure) }
+                }
+            }
+            if instance == token { availabilityTask = nil }
+        }
+    }
 
     func send(_ key: CrewDraftKey, to: String) {
         guard key.scope == scope else { return }
         if sendDrafts[key] == nil { sendDrafts[key] = CrewSendDraft(scope: key.scope) }
         sendDrafts[key]?.reauthorize(key.scope)
         guard let attempt = sendDrafts[key]?.begin(to: to) else { return }
+        // Same intent as sendIntent(_:to:), which the availability query used.
         enqueue(.sendMessage(scope: key.scope, to: to, body: attempt.body, messageId: attempt.messageId), attachmentRequest: nil, sendDraft: key)
     }
 
@@ -492,7 +575,7 @@ final class CrewSessionModel {
             do {
                 try await worker.setActive(active, instance: token)
                 guard instance == token else { return }
-                if active { invalidate(.overview); invalidate(query(for: destination)) }
+                if active { invalidate(.overview); invalidate(query(for: destination)); refreshAvailability() }
             } catch {
                 guard instance == token else { return }
                 self.error = CrewFailure.message(error)
@@ -556,10 +639,11 @@ final class CrewSessionModel {
             let sameWorkspace = update.scope == nil || oldScope == nil ||
                 (update.scope?.endpointId == oldScope?.endpointId && update.scope?.workspaceId == oldScope?.workspaceId)
             clearScopedViews(preserveHeldSends: sameWorkspace)
+            availabilityResults.removeAll()
             if let current = update.scope {
                 for key in sendDrafts.keys {
                     if key.scope.endpointId == current.endpointId && key.scope.workspaceId == current.workspaceId { sendDrafts[key]?.reauthorize(current) }
-                    else { sendDrafts[key]?.retireOperation("Workspace changed; check the host before retrying") }
+                    else { sendDrafts[key]?.retireOperation() }
                 }
             }
             readGeneration &+= 1
@@ -636,6 +720,9 @@ final class CrewSessionModel {
             }
         }
         if let selectedResource, (changes.pending && !terminalCapacityOnly) || changes.reset { invalidate(.evidence(key: selectedResource)) }
+        // Any shared change may alter eligibility; answers for watched controls
+        // are re-read together, never inferred from the change set.
+        refreshAvailability()
     }
 
     private func receive(_ chunk: TerminalChunk) {
@@ -768,7 +855,7 @@ final class CrewSessionModel {
         olderOperations.removeAll()
         if let key = executingSend {
             if preserveHeldSends { sendDrafts[key]?.hold() }
-            else { sendDrafts[key]?.retireOperation("Outcome unknown after the connection changed. Check the host before retrying.") }
+            else { sendDrafts[key]?.retireOperation() }
             executingSend = nil
         }
         for command in actionQueue {
@@ -781,7 +868,7 @@ final class CrewSessionModel {
         pendingJobs = 0
         for key in sendDrafts.keys {
             if preserveHeldSends { sendDrafts[key]?.hold() }
-            else { sendDrafts[key]?.retireOperation("Connection changed; check the host before retrying") }
+            else { sendDrafts[key]?.retireOperation() }
         }
     }
 
@@ -831,6 +918,10 @@ final class CrewSessionModel {
         hasClient = false
         readTask?.cancel()
         readTask = nil
+        availabilityTask?.cancel()
+        availabilityTask = nil
+        availabilityStale = false
+        availabilityResults.removeAll()
         invalidated = []
         notice = nil
         workspaces = nil
@@ -895,7 +986,9 @@ enum CrewFailure {
         switch receipt.state {
         case .awaiting: return "Submitted; awaiting the host's outcome."
         case .held: return "Still pending after reconnect. This app will not send it again; the host's outcome resolves it."
-        case .outcome(let notice): return outcome(notice)
+        case .outcome(let notice): return notice.kind == .success ? (notice.reason?.message ?? "Sent.") : outcome(notice)
+        case .retired: return "Outcome unknown after the connection changed. This app will not send it again; check the host before retrying."
+        case .notDispatched(let reason): return reason
         }
     }
 
@@ -936,5 +1029,29 @@ enum CrewFailure {
         case .unsupported: return "Interactive terminal is unavailable for this backend"
         case .failed(let reason): return reason.message
         }
+    }
+}
+
+/// Registers the exact intents a visible control would submit. New intents
+/// are watched before old ones are released, so a shared intent keeps its
+/// answer while the input around it changes.
+struct CrewAvailabilityWatch: ViewModifier {
+    let model: CrewSessionModel
+    let intents: [ActionIntent]
+
+    func body(content: Content) -> some View {
+        content
+            .onAppear { model.watchAvailability(intents) }
+            .onDisappear { model.unwatchAvailability(intents) }
+            .onChange(of: intents) { old, new in
+                model.watchAvailability(new)
+                model.unwatchAvailability(old)
+            }
+    }
+}
+
+extension View {
+    func crewAvailability(_ model: CrewSessionModel, _ intents: [ActionIntent]) -> some View {
+        modifier(CrewAvailabilityWatch(model: model, intents: intents))
     }
 }

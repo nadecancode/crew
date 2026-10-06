@@ -2,13 +2,13 @@ import CrewBindings
 import SwiftUI
 
 /// QuestionInfo comes from messageQuestionInfo in the shared Rust bridge.
-/// Permission and outcomes come from the core; this view owns only a draft.
+/// Availability and outcomes come from the core, per exact answer body;
+/// this view owns only a draft.
 public struct CrewQuestionView: View {
     private let question: Message
     private let info: QuestionInfo
-    private let answerAvailable: Bool
+    private let availability: (String) -> CrewControlAvailability
     private let pending: Bool
-    private let reason: String?
     private let answer: (String) -> Void
     private let later: () -> Void
     @Binding private var draft: String
@@ -17,18 +17,16 @@ public struct CrewQuestionView: View {
         question: Message,
         info: QuestionInfo,
         draft: Binding<String>,
-        answerAvailable: Bool,
+        availability: @escaping (String) -> CrewControlAvailability,
         pending: Bool,
-        reason: String?,
         answer: @escaping (String) -> Void,
         later: @escaping () -> Void
     ) {
         self.question = question
         self.info = info
         self._draft = draft
-        self.answerAvailable = answerAvailable
+        self.availability = availability
         self.pending = pending
-        self.reason = reason
         self.answer = answer
         self.later = later
     }
@@ -50,7 +48,7 @@ public struct CrewQuestionView: View {
                                     .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
                             }
                             .buttonStyle(.bordered)
-                            .disabled(!answerAvailable || pending)
+                            .disabled(!availability(option).available || pending)
                         }
                     }
                 }
@@ -59,9 +57,9 @@ public struct CrewQuestionView: View {
                     text: $draft,
                     submitLabel: "Answer",
                     targetDescription: info.asker,
-                    submitAvailable: answerAvailable,
+                    submitAvailable: availability(draft).available,
                     pending: pending,
-                    unavailableReason: reason
+                    unavailableReason: availability(draft).reason
                 ) { answer(draft) }
                 Button(action: later) {
                     Text("Later").frame(minWidth: 44, minHeight: 44)

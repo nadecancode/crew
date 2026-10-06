@@ -1,4 +1,5 @@
 import CrewBindings
+import CrewUI
 import Foundation
 import XCTest
 #if os(macOS)
@@ -156,14 +157,77 @@ final class CrewClientWorkerTests: XCTestCase {
         await model.close()
     }
 
-    func testClientReplacementPurgesHeldReceipt() async throws {
+    /// Send A, edit B, replace the client: A may already be delivered, so its
+    /// receipt stays visible as unknown; B is untouched and nothing is sent.
+    func testClientReplacementRetiresHeldReceiptAsUnknown() async throws {
         let (model, _, _, original, current) = try await heldSend()
+        let reopened = CrewDraftKey(scope: current, purpose: original.purpose)
+        model.sendDraft(reopened).wrappedValue = "message B"
+        let untouched = CrewDraftKey(scope: current, purpose: "message:other-agent")
+        model.sendDraft(untouched).wrappedValue = "never submitted"
         let replacement = RecordingCrewClient()
         try await model.install(replacement)
-        let reopened = CrewDraftKey(scope: current, purpose: original.purpose)
         XCTAssertFalse(model.sendPending(reopened))
-        XCTAssertNil(model.sendReceipt(reopened))
+        XCTAssertEqual(model.sendReceipt(reopened), CrewSendReceipt(recipient: "synthetic-agent", body: "pending identified message", state: .retired))
+        XCTAssertEqual(model.sendDraft(reopened).wrappedValue, "message B")
+        XCTAssertNil(model.sendExplanation(reopened))
+        XCTAssertNil(model.sendReceipt(untouched))
+        XCTAssertNil(model.sendExplanation(untouched))
         XCTAssertFalse(replacement.calls.contains("plan"))
+        await model.close()
+    }
+
+    /// Controls read the Core's answer for their exact intent. A malformed
+    /// intent fails only itself; nothing is planned or dispatched.
+    func testAvailabilityUsesTheCoreAnswerForTheExactIntent() async throws {
+        let model = CrewSessionModel()
+        let client = RecordingCrewClient()
+        try await model.install(client)
+        let observer = try XCTUnwrap(client.observer)
+        observer.changed(notice: CrewTestFixtures.notice)
+        let scope = CrewTestFixtures.scope
+        let stop = ActionIntent.stopTeam(scope: scope)
+        let resume = ActionIntent.resumeLimited(scope: scope, restart: false)
+        let empty = ActionIntent.sendMessage(scope: scope, to: "synthetic-agent", body: "", messageId: "synthetic-id")
+        XCTAssertEqual(model.availability(stop), .checking)
+        model.watchAvailability([stop, resume, empty])
+        await model.waitForAvailability()
+        XCTAssertEqual(model.availability(stop), CrewControlAvailability(available: false, reason: "Synthetic Core reason"))
+        XCTAssertEqual(model.availability(resume), CrewControlAvailability(available: true, reason: nil))
+        XCTAssertEqual(model.availability(empty), CrewControlAvailability(available: false, reason: "body: must not be empty"))
+        XCTAssertFalse(client.calls.contains("plan"))
+
+        // A shared change re-reads every watched intent.
+        let before = client.calls.filter { $0 == "availability" }.count
+        observer.changed(notice: ClientNotice(scope: scope, revision: 2, changes: CrewTestFixtures.notice.changes, endpoint: .authenticated, workspace: .live, reason: nil, outcomes: []))
+        await model.waitForAvailability()
+        XCTAssertEqual(client.calls.filter { $0 == "availability" }.count, before + 3)
+
+        // An intent captured under an earlier attempt is never asked about.
+        let current = ClientScope(endpointId: scope.endpointId, workspaceId: scope.workspaceId, generation: scope.generation, daemonPid: scope.daemonPid, daemonStartedAtMs: scope.daemonStartedAtMs, attempt: scope.attempt + 1)
+        observer.changed(notice: ClientNotice(scope: current, revision: 3, changes: CrewTestFixtures.notice.changes, endpoint: .authenticated, workspace: .live, reason: nil, outcomes: []))
+        await model.waitForAvailability()
+        XCTAssertEqual(model.availability(stop), CrewControlAvailability(available: false, reason: "Reopen this target from the current workspace connection."))
+        XCTAssertEqual(client.calls.filter { $0 == "availability" }.count, before + 3)
+        model.unwatchAvailability([stop, resume, empty])
+        XCTAssertFalse(client.calls.contains("plan"))
+        await model.close()
+    }
+
+    /// The composer's availability intent is the one Send dispatches.
+    func testSendAvailabilityIntentMatchesTheDispatchedIntent() async throws {
+        let model = CrewSessionModel()
+        let client = RecordingCrewClient()
+        try await model.install(client)
+        let observer = try XCTUnwrap(client.observer)
+        observer.changed(notice: CrewTestFixtures.notice)
+        let key = CrewDraftKey(scope: CrewTestFixtures.scope, purpose: "message:synthetic-agent")
+        model.prepareSendDraft(key)
+        model.sendDraft(key).wrappedValue = "exact text"
+        let queried = try XCTUnwrap(model.sendIntent(key, to: "synthetic-agent"))
+        model.send(key, to: "synthetic-agent")
+        await model.waitForSubmissionBatch()
+        XCTAssertEqual(client.planned, [queried])
         await model.close()
     }
 
@@ -210,9 +274,11 @@ private final class RecordingCrewClient: CrewClientProtocol, @unchecked Sendable
     private var recordedCalls: [String] = []
     private var main = false
     private var storedObserver: (any ClientObserver)?
+    private var plannedIntents: [ActionIntent] = []
     var calls: [String] { lock.lock(); defer { lock.unlock() }; return recordedCalls }
     var calledOnMain: Bool { lock.lock(); defer { lock.unlock() }; return main }
     var observer: (any ClientObserver)? { lock.lock(); defer { lock.unlock() }; return storedObserver }
+    var planned: [ActionIntent] { lock.lock(); defer { lock.unlock() }; return plannedIntents }
 
     private func record(_ call: String) {
         lock.lock(); defer { lock.unlock() }
@@ -236,10 +302,22 @@ private final class RecordingCrewClient: CrewClientProtocol, @unchecked Sendable
     func connectionContext() throws -> ConnectionContext? { record("context"); return nil }
     func workspaces() throws -> Workspaces? { record("workspaces"); return nil }
     func query(query: ViewQuery) throws -> ViewData {
+        if case .availability(let intent) = query {
+            record("availability")
+            if case .sendMessage(_, _, let body, _) = intent, body.isEmpty { throw ClientError.InvalidInput(field: "body", reason: "must not be empty") }
+            let blocked: Bool = { if case .stopTeam = intent { return true }; return false }()
+            let answer = ActionAvailability(action: blocked ? .stopTeam : .resumeLimited, available: !blocked, reason: blocked ? ClientReason(code: "synthetic", message: "Synthetic Core reason") : nil)
+            return ViewData(scope: intent.scope, revision: 1, synchronizedAtMs: nil, freshness: .fresh, payload: .availability(answer))
+        }
         record("query")
         return ViewData(scope: CrewTestFixtures.scope, revision: 1, synchronizedAtMs: nil, freshness: .fresh, payload: .team(TeamData(agents: [], relations: [])))
     }
-    func plan(intent: ActionIntent) throws -> ActionPlan { record("plan"); return .dispatch(operationId: 1) }
+    func plan(intent: ActionIntent) throws -> ActionPlan {
+        record("plan")
+        lock.lock(); defer { lock.unlock() }
+        plannedIntents.append(intent)
+        return .dispatch(operationId: 1)
+    }
     func confirm(confirmationId: UInt64) throws { record("confirm") }
     func cancelConfirmation(confirmationId: UInt64) throws { record("cancel") }
     func disconnect() throws { record("disconnect") }
