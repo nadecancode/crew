@@ -117,7 +117,7 @@ bash scripts/build-env cargo test --locked -p crew-client-transport \
 
 | Evidence | Result | SHA-256 |
 | --- | --- | --- |
-| [Gateway/native log](native-transport-validation/k5-e7-56.log) | 56/56 | `8594813161554d61028e47e0cd956fee2d46e405dc5bca5219e65d495a` |
+| [Gateway/native log](native-transport-validation/k5-e7-56.log) | 56/56 | `8594813161554d61028e47e0c4e1e0cd956fee2d46e405dc5bca5219e65d495a` |
 | [Original local log](native-transport-validation/k5-e7-local31.log) | 31/31 | `ae0a73d8c9ea96a61360d9b64872bea86a77e034cf622141abaae885bad503c6` |
 
 The separately approved `cbc6a505` four-case consumer evidence covers real
