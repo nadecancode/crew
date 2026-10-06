@@ -151,6 +151,7 @@ separate from `ClientError`.
 
 ```sh
 ./scripts/build-env cargo test --locked -p crew-client-ffi --features bindgen,local
+./scripts/build-env cargo test --locked -p crew-client-ffi --features bindgen,gateway-tests
 ./scripts/build-env cargo clippy --locked -p crew-client-ffi --all-targets --features bindgen,local -- -D warnings
 ```
 
@@ -185,6 +186,20 @@ repeated replies, startup failure and busy refusal, forged signatures refused
 before any proof is sent, a sealed authentication transcript signed through the
 foreign signer, key change, close and local retirement. They are not a Crew
 daemon or gateway acceptance test.
+
+With the Linux-only `gateway-tests` feature, `tests/gateway_live.rs` drives the
+same exported objects against a real Crew daemon and native gateway on
+loopback, each test in a child process with private runtime, state and config
+directories and the transport's synthetic TLS identity. Console steps (open
+enrollment, approve the shown code, grant, revoke) use the gateway's private
+admin socket as `crew native` does. The tests import `crew native status`
+output with a grouped fingerprint, enroll, connect, select the verified route,
+compare availability with planning under a read-only grant, follow a real
+Control grant change and a workspace revocation, and retire locally while the
+host record remains. They also cover an unenrolled key, cancel before and after
+the proof reached the host, recovery with the same key, refused re-enrollment
+and device revocation. A Rust stand-in still plays the platform signer; Apple
+compilation, Keychain and device execution are not exercised.
 The real local factory is tested in a child process with a private empty registry,
 including its agent-context refusal, and profile IDs are checked without a dial.
 These tests do not claim a real-daemon application journey; that remains an
