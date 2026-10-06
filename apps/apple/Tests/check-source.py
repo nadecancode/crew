@@ -114,6 +114,10 @@ for application, sdk, floor_key, floor in (
     require({item.attrib["BlueprintName"] for item in scheme.findall("./TestAction/Testables/TestableReference/BuildableReference")} == {application + "Tests", application + "UITests"}, "Scheme must test both bundles")
 
 ET.parse(APPLE / "Crew.xcodeproj/project.xcworkspace/contents.xcworkspacedata")
+pins = json.loads((APPLE / "Crew.xcodeproj/project.xcworkspace/xcshareddata/swiftpm/Package.resolved").read_text())["pins"]
+require(len(pins) == 1 and pins[0]["identity"] == "swiftterm", "Only the reviewed terminal package should be pinned")
+require(pins[0]["state"]["version"] == "1.19.0", "Wrong terminal package version")
+require(pins[0]["state"]["revision"] == "464df5207fc2432e16c9a23abe538187196daf5f", "Wrong terminal package revision")
 icons = APPLE / "CrewApp/Resources/Assets.xcassets/AppIcon.appiconset"
 icon_spec = json.loads((icons / "Contents.json").read_text())
 for image in icon_spec["images"]:

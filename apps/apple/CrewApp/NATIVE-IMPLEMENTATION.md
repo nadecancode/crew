@@ -47,6 +47,28 @@ workspace, content, action, terminal and lifecycle acceptance are still pending.
 
 ## Required remaining integration
 
+`CrewTerminalSurface.swift` now supplies native UIKit/AppKit SwiftTerm rendering
+with platform byte/input/resize callbacks. Its UI identity is the full scope
+plus attachment ID; connected composition must use generated `ClientScope`, not
+an abbreviated string or raw attachment ID. Output is routed only to that
+identity, input requires native focus and shared availability, and ended
+renderers cannot be re-enabled. Mobile raw focus has no software keyboard;
+software Return belongs to the separate explicit prompt draft. OSC clipboard
+reads/writes are denied, terminal titles/directories are not OS actions, and
+explicit link activation goes through the host's shared safe-link policy.
+Rendering keeps 2,000 scrollback lines and a 4 MiB kitty image cache, with a
+steady initial cursor; these are renderer memory settings, not measured release
+performance budgets. No daemon attachment or terminal workflow has run here.
+
+The SwiftTerm package declaration pins version 1.19.0. The committed Xcode
+resolution input pins its upstream tag's verified commit
+`464df5207fc2432e16c9a23abe538187196daf5f`. Its
+[tagged source](https://github.com/migueldeicaza/SwiftTerm/tree/v1.19.0) requires
+Swift tools 6.0. Actual Swift 6 dependency resolution, UIKit/AppKit compilation
+and renderer/keyboard/accessibility tests remain **Apple verification deferred
+by operator**. Linux manifest evaluation describes only the root package; it
+does not resolve or compile SwiftTerm.
+
 The app must consume the real generated `CrewBindings` records and facade,
 then link the matching staged `CrewClientFFI.xcframework`. No conditional import,
 empty library or mocked transport substitutes for that step. Native terminal
