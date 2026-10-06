@@ -63,10 +63,11 @@ def locate(object_id, parent):
 locate(root["mainGroup"], APPLE)
 targets = {objects[key]["name"]: objects[key] for key in root["targets"]}
 require(set(targets) == {"CrewMac", "CrewMacTests", "CrewMacUITests", "CrewIOS", "CrewIOSTests", "CrewIOSUITests"}, "Six app/test targets required")
-require(len(root["packageReferences"]) == 1, "Shell must resolve one real presentation package")
-package = objects[root["packageReferences"][0]]
-require(package["isa"] == "XCLocalSwiftPackageReference", "Presentation package must be local")
-require((APPLE / package["relativePath"] / "Package.swift").is_file(), "Missing SwiftPM manifest")
+require({objects[key]["relativePath"] for key in root["packageReferences"]} == {"CrewUI", "CrewClient"}, "Presentation and actual generated client packages required")
+for package_id in root["packageReferences"]:
+    package = objects[package_id]
+    require(package["isa"] == "XCLocalSwiftPackageReference", "Presentation/client package must be local")
+    require((APPLE / package["relativePath"] / "Package.swift").is_file(), "Missing SwiftPM manifest")
 
 expected_sources = set((APPLE / "CrewApp").glob("*.swift")) | set((APPLE / "CrewHost").glob("*.swift"))
 for application, sdk, floor_key, floor in (
@@ -83,7 +84,7 @@ for application, sdk, floor_key, floor in (
             if phase["isa"] == "PBXSourcesBuildPhase":
                 sources.add(locations[build["fileRef"]])
             elif phase["isa"] == "PBXFrameworksBuildPhase":
-                require(objects[build["productRef"]]["productName"] == "CrewUI", "No fabricated native bridge dependency")
+                require(objects[build["productRef"]]["productName"] in {"CrewUI", "CrewBindings"}, "Unknown app framework dependency")
     require(sources == expected_sources, f"Incomplete source phase for {application}")
     configurations = objects[target["buildConfigurationList"]]["buildConfigurations"]
     for configuration_id in configurations:

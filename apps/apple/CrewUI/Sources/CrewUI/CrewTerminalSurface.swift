@@ -1,3 +1,4 @@
+import CrewBindings
 import Foundation
 import SwiftTerm
 import SwiftUI
@@ -7,14 +8,14 @@ import AppKit
 import UIKit
 #endif
 
-/// UI attachment identity. Connected composition supplies the generated
-/// ClientScope as Scope, including all optional incarnation and attempt facts.
+/// UI attachment identity using the complete generated ClientScope,
+/// including all optional incarnation and attempt facts.
 /// An attachment ID alone cannot address this renderer or its callbacks.
-public struct CrewTerminalIdentity<Scope: Hashable>: Hashable {
-    public let scope: Scope
+public struct CrewTerminalIdentity: Hashable {
+    public let scope: ClientScope
     public let attachmentId: UInt64
 
-    public init(scope: Scope, attachmentId: UInt64) {
+    public init(scope: ClientScope, attachmentId: UInt64) {
         self.scope = scope
         self.attachmentId = attachmentId
     }
@@ -25,19 +26,19 @@ public struct CrewTerminalIdentity<Scope: Hashable>: Hashable {
 /// Input availability comes from the real shared service; this is not a grant
 /// or connection implementation. Closed instances cannot be re-enabled.
 @MainActor
-public final class CrewTerminalRenderer<Scope: Hashable>: NSObject, TerminalViewDelegate {
-    public let identity: CrewTerminalIdentity<Scope>
+public final class CrewTerminalRenderer: NSObject, TerminalViewDelegate {
+    public let identity: CrewTerminalIdentity
     let view: SwiftTerm.TerminalView
     private var inputAvailable = false
     private var ended = false
-    private var input: ((CrewTerminalIdentity<Scope>, Data) -> Void)?
-    private var resize: ((CrewTerminalIdentity<Scope>, Int, Int) -> Void)?
+    private var input: ((CrewTerminalIdentity, Data) -> Void)?
+    private var resize: ((CrewTerminalIdentity, Int, Int) -> Void)?
     private var openLink: ((String) -> Void)?
 
     public init(
-        identity: CrewTerminalIdentity<Scope>,
-        input: @escaping (CrewTerminalIdentity<Scope>, Data) -> Void,
-        resize: @escaping (CrewTerminalIdentity<Scope>, Int, Int) -> Void,
+        identity: CrewTerminalIdentity,
+        input: @escaping (CrewTerminalIdentity, Data) -> Void,
+        resize: @escaping (CrewTerminalIdentity, Int, Int) -> Void,
         openLink: @escaping (String) -> Void
     ) {
         self.identity = identity
@@ -115,9 +116,12 @@ public final class CrewTerminalRenderer<Scope: Hashable>: NSObject, TerminalView
         #endif
     }
 
-    public func receive(_ data: Data, identity: CrewTerminalIdentity<Scope>) {
-        guard self.identity == identity, !ended else { return }
-        view.feed(byteArray: Array(data)[...])
+    public func receive(_ chunk: TerminalChunk) {
+        guard identity.scope == chunk.scope, identity.attachmentId == chunk.attachmentId, !ended else { return }
+        // Disable input before feeding an ending chunk, including any emulator
+        // response generated while its final output is interpreted.
+        if chunk.ended != nil { end() }
+        if !chunk.data.isEmpty { view.feed(byteArray: Array(chunk.data)[...]) }
     }
 
     public func end() {
@@ -174,20 +178,20 @@ public final class CrewTerminalRenderer<Scope: Hashable>: NSObject, TerminalView
 }
 
 #if os(macOS)
-public struct CrewTerminalSurface<Scope: Hashable>: NSViewRepresentable {
-    private let renderer: CrewTerminalRenderer<Scope>
+public struct CrewTerminalSurface: NSViewRepresentable {
+    private let renderer: CrewTerminalRenderer
 
-    public init(renderer: CrewTerminalRenderer<Scope>) { self.renderer = renderer }
+    public init(renderer: CrewTerminalRenderer) { self.renderer = renderer }
 
     public func makeNSView(context: Context) -> SwiftTerm.TerminalView { renderer.view }
     public func updateNSView(_ view: SwiftTerm.TerminalView, context: Context) {}
 }
 #elseif os(iOS)
-public struct CrewTerminalSurface<Scope: Hashable>: UIViewRepresentable {
-    private let renderer: CrewTerminalRenderer<Scope>
+public struct CrewTerminalSurface: UIViewRepresentable {
+    private let renderer: CrewTerminalRenderer
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
 
-    public init(renderer: CrewTerminalRenderer<Scope>) { self.renderer = renderer }
+    public init(renderer: CrewTerminalRenderer) { self.renderer = renderer }
 
     public func makeUIView(context: Context) -> SwiftTerm.TerminalView { renderer.view }
     public func updateUIView(_ view: SwiftTerm.TerminalView, context: Context) {

@@ -96,6 +96,12 @@
 			path = CrewUI;
 			sourceTree = "<group>";
 		};
+		95FC70AA42625EFA4E673B40 = {
+			isa = PBXFileReference;
+			lastKnownFileType = folder;
+			path = CrewClient;
+			sourceTree = "<group>";
+		};
 		B88B32477E16CED4E93167DD = {
 			isa = PBXGroup;
 			children = (
@@ -142,6 +148,10 @@
 		46EE296C84CBDBDDCDF20784 = {
 			isa = XCLocalSwiftPackageReference;
 			relativePath = CrewUI;
+		};
+		759B57EA610A6FE1A332391B = {
+			isa = XCLocalSwiftPackageReference;
+			relativePath = CrewClient;
 		};
 		3DEC09A9EBB4CCD85FFC7959 = {
 			isa = XCBuildConfiguration;
@@ -203,6 +213,15 @@
 		6199CC535C1620073B2089BF = {
 			isa = PBXBuildFile;
 			productRef = FB0E15106773A759C5BA651E;
+		};
+		E3190017B1B387A8A7A96860 = {
+			isa = XCSwiftPackageProductDependency;
+			package = 759B57EA610A6FE1A332391B;
+			productName = CrewBindings;
+		};
+		4B8E0D161C7E47B902825195 = {
+			isa = PBXBuildFile;
+			productRef = E3190017B1B387A8A7A96860;
 		};
 		9768C7A7852AE51328D62194 = {
 			isa = XCBuildConfiguration;
@@ -323,6 +342,7 @@
 			buildActionMask = 2147483647;
 			files = (
 				6199CC535C1620073B2089BF,
+				4B8E0D161C7E47B902825195,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -354,6 +374,7 @@
 			dependencies = ();
 			packageProductDependencies = (
 				FB0E15106773A759C5BA651E,
+				E3190017B1B387A8A7A96860,
 			);
 		};
 		B27DD95C4D4AC6FDFBD45297 = {
@@ -371,6 +392,15 @@
 		47F17C2AD122851D26365246 = {
 			isa = PBXBuildFile;
 			productRef = 4E0E118CD3728D4D5A4BCDB8;
+		};
+		81DDA934F6C5E3D877A7B749 = {
+			isa = XCSwiftPackageProductDependency;
+			package = 759B57EA610A6FE1A332391B;
+			productName = CrewBindings;
+		};
+		F3288C17DD9AF057C742BD5F = {
+			isa = PBXBuildFile;
+			productRef = 81DDA934F6C5E3D877A7B749;
 		};
 		1513A7818A7564CC2377F603 = {
 			isa = XCBuildConfiguration;
@@ -465,6 +495,7 @@
 			buildActionMask = 2147483647;
 			files = (
 				47F17C2AD122851D26365246,
+				F3288C17DD9AF057C742BD5F,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -504,6 +535,7 @@
 			);
 			packageProductDependencies = (
 				4E0E118CD3728D4D5A4BCDB8,
+				81DDA934F6C5E3D877A7B749,
 			);
 		};
 		E1A039176CA037D19E55AB00 = {
@@ -652,6 +684,15 @@
 			isa = PBXBuildFile;
 			productRef = CAE553CD228DC9B849D4E88C;
 		};
+		26B07221176A19569A036F7A = {
+			isa = XCSwiftPackageProductDependency;
+			package = 759B57EA610A6FE1A332391B;
+			productName = CrewBindings;
+		};
+		3C74827830DCB4B6B7941FBA = {
+			isa = PBXBuildFile;
+			productRef = 26B07221176A19569A036F7A;
+		};
 		975943CDD8199E28D21DC939 = {
 			isa = XCBuildConfiguration;
 			name = Debug;
@@ -773,6 +814,7 @@
 			buildActionMask = 2147483647;
 			files = (
 				63191E2FCC112434131D191C,
+				3C74827830DCB4B6B7941FBA,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -804,6 +846,7 @@
 			dependencies = ();
 			packageProductDependencies = (
 				CAE553CD228DC9B849D4E88C,
+				26B07221176A19569A036F7A,
 			);
 		};
 		25B783F65D943FA109AB4C5A = {
@@ -821,6 +864,15 @@
 		45E61F325E4BDAECFBC604D5 = {
 			isa = PBXBuildFile;
 			productRef = 62025B4C0CEE5EEF00DFC139;
+		};
+		CAB5B8473779F887F86D7D5B = {
+			isa = XCSwiftPackageProductDependency;
+			package = 759B57EA610A6FE1A332391B;
+			productName = CrewBindings;
+		};
+		9253F45554408996DA77ACAD = {
+			isa = PBXBuildFile;
+			productRef = CAB5B8473779F887F86D7D5B;
 		};
 		90A9FD0004C640CD8B1438BB = {
 			isa = XCBuildConfiguration;
@@ -917,6 +969,7 @@
 			buildActionMask = 2147483647;
 			files = (
 				45E61F325E4BDAECFBC604D5,
+				9253F45554408996DA77ACAD,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -956,6 +1009,7 @@
 			);
 			packageProductDependencies = (
 				62025B4C0CEE5EEF00DFC139,
+				CAB5B8473779F887F86D7D5B,
 			);
 		};
 		757A7396B0C0DAB96777A3BF = {
@@ -1109,6 +1163,7 @@
 				AB7791B9572E09CD1F7CAB70,
 				A0C7B2A3C8B7D56BC9C76B65,
 				D93872A559A499EE9DEF3D65,
+				95FC70AA42625EFA4E673B40,
 				C19589F981216D9C3DC91270,
 				4BF11C43D602ACF0A0427D65,
 			);
@@ -1159,6 +1214,7 @@
 			projectRoot = "";
 			packageReferences = (
 				46EE296C84CBDBDDCDF20784,
+				759B57EA610A6FE1A332391B,
 			);
 			targets = (
 				B87573D53419971936CBA7F1,

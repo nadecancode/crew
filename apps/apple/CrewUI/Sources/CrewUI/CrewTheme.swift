@@ -28,6 +28,10 @@ public enum CrewPalette {
     public static let surface = Color("CrewSurface", bundle: .module)
     public static let raised = Color("CrewRaised", bundle: .module)
     public static let accent = Color("CrewAccent", bundle: .module)
+    public static let info = Color("CrewInfo", bundle: .module)
+    public static let success = Color("CrewSuccess", bundle: .module)
+    public static let warning = Color("CrewWarning", bundle: .module)
+    public static let danger = Color("CrewDanger", bundle: .module)
 }
 
 public struct CrewAppearancePicker: View {

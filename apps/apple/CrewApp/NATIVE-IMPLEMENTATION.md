@@ -47,6 +47,28 @@ workspace, content, action, terminal and lifecycle acceptance are still pending.
 
 ## Required remaining integration
 
+Generated record sources from `6aa48a90` were imported byte for byte in
+`35e6b0f8`, with the source owner's approval; no Rust package or root lockfile
+was imported. `CrewClient/Package.swift` now declares the real generated Swift
+wrapper and the separate `CrewClientFFI` binary target. Xcode targets consume
+the wrapper, and `CrewUI` imports its typed records. The binary path is empty
+until an actual matching artifact is staged; no empty XCFramework is created.
+
+The explicit developer helper is
+`apps/apple/scripts/install-artifacts.sh --framework <staged-framework>`.
+It checks archive format, required platform slices, and exact committed ABI
+headers/module map, then installs to the ignored artifact directory. It rejects
+an existing destination. QA continues to use its private source copy and
+staging runner instead; this helper has not installed or built an Apple binary.
+
+`CrewDomainViews.swift` adds native lists for generated TeamData, TasksData,
+MessagePage, EventPage and UsagePresentation. It preserves the supplied order
+and shared current-work choice; native selection constructs the full generated
+EntityKey. Dates/numbers and labels are platform formatting. Unknown usage and
+context remain absent rather than zero. The lists are not yet wired to a live
+service. Details, relationships, quota controls, setup, actions and lifecycle
+integration remain required.
+
 `CrewTerminalSurface.swift` now supplies native UIKit/AppKit SwiftTerm rendering
 with platform byte/input/resize callbacks. Its UI identity is the full scope
 plus attachment ID; connected composition must use generated `ClientScope`, not
@@ -56,7 +78,9 @@ renderers cannot be re-enabled. Mobile raw focus has no software keyboard;
 software Return belongs to the separate explicit prompt draft. OSC clipboard
 reads/writes are denied, terminal titles/directories are not OS actions, and
 explicit link activation goes through the host's shared safe-link policy.
-Rendering keeps 2,000 scrollback lines and a 4 MiB kitty image cache, with a
+The renderer now accepts only the actual generated TerminalChunk. An ending
+chunk disables input before its final data is fed; later chunks cannot reopen
+that instance. Rendering keeps 2,000 scrollback lines and a 4 MiB kitty image cache, with a
 steady initial cursor; these are renderer memory settings, not measured release
 performance budgets. No daemon attachment or terminal workflow has run here.
 
