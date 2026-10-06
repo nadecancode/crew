@@ -303,7 +303,9 @@ fn running(agent: &Agent) -> Result<(), PlanFailure> {
     }
 }
 
-fn scope_of(intent: &ActionIntent) -> &ClientScope {
+/// The immutable scope supplied by the caller, including for unavailable
+/// intents. A view must retain this identity rather than substitute selection.
+pub fn action_scope(intent: &ActionIntent) -> &ClientScope {
     match intent {
         ActionIntent::SendMessage { scope, .. }
         | ActionIntent::Answer { scope, .. }
@@ -317,6 +319,31 @@ fn scope_of(intent: &ActionIntent) -> &ClientScope {
         | ActionIntent::AttachInput { scope, .. }
         | ActionIntent::AttachResize { scope, .. }
         | ActionIntent::Detach { scope, .. } => scope,
+    }
+}
+
+fn action_kind(intent: &ActionIntent) -> ActionKind {
+    match intent {
+        ActionIntent::SendMessage { .. } => ActionKind::SendMessage,
+        ActionIntent::Answer { .. } => ActionKind::Answer,
+        ActionIntent::Agent { action, .. } => match action {
+            AgentAction::Pause => ActionKind::Pause,
+            AgentAction::Resume => ActionKind::Resume,
+            AgentAction::Compact => ActionKind::Compact,
+            AgentAction::Restart => ActionKind::Restart,
+            AgentAction::RestartFresh => ActionKind::RestartFresh,
+            AgentAction::Kill => ActionKind::Kill,
+            AgentAction::Focus => ActionKind::Focus,
+        },
+        ActionIntent::SetModel { .. } => ActionKind::SetModel,
+        ActionIntent::AgentInput { .. } => ActionKind::AgentInput,
+        ActionIntent::ResumeLimited { .. } => ActionKind::ResumeLimited,
+        ActionIntent::StopTeam { .. } => ActionKind::StopTeam,
+        ActionIntent::Read { .. } => ActionKind::Read,
+        ActionIntent::Attach { .. } => ActionKind::Attach,
+        ActionIntent::AttachInput { .. } => ActionKind::AttachInput,
+        ActionIntent::AttachResize { .. } => ActionKind::AttachResize,
+        ActionIntent::Detach { .. } => ActionKind::Detach,
     }
 }
 
@@ -494,7 +521,7 @@ impl Actions {
         context: &ActionContext<'_>,
         clock: ClockSample,
     ) -> Result<Proposal, PlanFailure> {
-        let scope = scope_of(&intent).clone();
+        let scope = action_scope(&intent).clone();
         // Check identity before validating or exposing facts about a stale target.
         let current = connection(&scope, context, clock, None)?;
         let mut targets = Vec::new();
@@ -820,13 +847,67 @@ impl Actions {
             })
     }
 
+    fn preflight(
+        &self,
+        intent: ActionIntent,
+        context: &ActionContext<'_>,
+        clock: ClockSample,
+    ) -> Result<Proposal, PlanFailure> {
+        let proposal = self.prepare(intent, context, clock)?;
+        if self.pending_count() >= self.maximum {
+            return Err(unavailable(
+                "operation_capacity",
+                "too many pending operations",
+            ));
+        }
+        if self.duplicate(&proposal) {
+            return Err(unavailable(
+                "already_pending",
+                "this action is already pending",
+            ));
+        }
+        // Check exhaustion without allocating. Availability and execution must
+        // agree even at the final operation or confirmation ID boundary.
+        if proposal.confirmation.is_some() {
+            check_counter(self.next_confirmation, "confirmation_id_exhausted")?;
+        } else {
+            check_counter(self.next_operation, "operation_id_exhausted")?;
+        }
+        Ok(proposal)
+    }
+
+    /// Exact eligibility for a complete captured intent at the supplied clock.
+    /// Available means execution would dispatch or request confirmation in the
+    /// same state. Invalid payloads return the same error as `plan`.
+    ///
+    /// This borrows operation state, retains nothing from the intent and creates
+    /// no IDs, confirmations, timers, effects or notices. It is not a reservation:
+    /// actual execution repeats the preflight against its current context.
+    pub fn intent_availability(
+        &self,
+        intent: &ActionIntent,
+        context: &ActionContext<'_>,
+        clock: ClockSample,
+    ) -> Result<ActionAvailability, ClientError> {
+        let reason = match self.preflight(intent.clone(), context, clock) {
+            Ok(_) => None,
+            Err(PlanFailure::Unavailable(reason)) => Some(reason),
+            Err(PlanFailure::Invalid(error)) => return Err(error),
+        };
+        Ok(ActionAvailability {
+            action: action_kind(intent),
+            available: reason.is_none(),
+            reason,
+        })
+    }
+
     pub fn plan(
         &mut self,
         intent: ActionIntent,
         context: &ActionContext<'_>,
         clock: ClockSample,
     ) -> Result<ActionDecision, ClientError> {
-        let proposal = match self.prepare(intent, context, clock) {
+        let proposal = match self.preflight(intent, context, clock) {
             Ok(proposal) => proposal,
             Err(PlanFailure::Invalid(error)) => return Err(error),
             Err(PlanFailure::Unavailable(reason)) => {
@@ -836,22 +917,6 @@ impl Actions {
                 })
             }
         };
-        if self.pending_count() >= self.maximum {
-            return Ok(ActionDecision {
-                plan: ActionPlan::Unavailable {
-                    reason: reason("operation_capacity", "too many pending operations"),
-                },
-                update: ActionUpdate::default(),
-            });
-        }
-        if self.duplicate(&proposal) {
-            return Ok(ActionDecision {
-                plan: ActionPlan::Unavailable {
-                    reason: reason("already_pending", "this action is already pending"),
-                },
-                update: ActionUpdate::default(),
-            });
-        }
         if let Some(kind) = proposal.confirmation {
             let id = allocate(&mut self.next_confirmation, "confirmation_id_exhausted")?;
             let plan = ActionPlan::Confirm {
@@ -1664,15 +1729,24 @@ fn pending_update(questions: bool) -> ActionUpdate {
 }
 
 fn allocate(next: &mut u64, code: &str) -> Result<u64, ClientError> {
-    if *next > CORE_OPERATION_ID_MAX {
-        return Err(ClientError::InternalFailure { code: code.into() });
-    }
+    check_counter(*next, code)?;
     let id = *next;
     *next = next
         .checked_add(1)
         .ok_or_else(|| ClientError::InternalFailure { code: code.into() })?;
     Ok(id)
 }
+
+fn check_counter(next: u64, code: &str) -> Result<(), ClientError> {
+    if next > CORE_OPERATION_ID_MAX {
+        return Err(ClientError::InternalFailure { code: code.into() });
+    }
+    Ok(())
+}
+
+#[cfg(test)]
+#[path = "actions/availability_tests.rs"]
+mod availability_tests;
 
 #[cfg(test)]
 mod tests {
