@@ -376,6 +376,8 @@ fn gtk_scoped_views_confirmation_terminal_order_and_live_local_service() {
     );
     assert_eq!(shell.window().title(), original_title);
     eprintln!("OSC safety checked");
+    keyboard_focus(&c, &recorder, &core);
+    eprintln!("Keyboard focus and terminal controls checked");
 
     c.compose("claude-1".into());
     eprintln!("Opening retained draft");
@@ -469,6 +471,340 @@ fn gtk_scoped_views_confirmation_terminal_order_and_live_local_service() {
 
     live_local(&app);
     eprintln!("Starting production local service");
+}
+
+/// The design precheck's keyboard findings on actual controls: one Tab stop
+/// per control (G9), focus back on the opener after every confirmation
+/// (G3), the labelled To selector (G14), terminal controls that follow the
+/// attachment (G15) and Choose workspace on a disconnected page (G17).
+fn keyboard_focus(c: &Controller, recorder: &Recording, core: &ClientCore) {
+    let window = c.shell.window().clone();
+    let focus = || gtk::prelude::GtkWindowExt::focus(&window);
+    c.shell.navigate(Destination::Team);
+    c.shell.set_detail_visible(false);
+    settle();
+    let page = c.pages.borrow()[Destination::Team.index()].1.clone();
+
+    // G9: Tab (GtkWindow's move-focus) visits each control once and never a
+    // label or a flow box child.
+    let refresh = button(&page, "Refresh");
+    refresh.grab_focus();
+    let mut stops = vec![focus().unwrap()];
+    loop {
+        window.child_focus(gtk::DirectionType::TabForward);
+        match focus() {
+            Some(next) if next.is_ancestor(&page) && !stops.contains(&next) => stops.push(next),
+            _ => break,
+        }
+    }
+    let names: Vec<String> = stops
+        .iter()
+        .map(|w| {
+            w.downcast_ref::<gtk::Button>()
+                .and_then(|b| b.label())
+                .map_or_else(|| w.type_().name().to_owned(), |l| l.to_string())
+        })
+        .collect();
+    assert!(
+        stops.iter().all(|w| w.is::<gtk::Button>()),
+        "every Team page Tab stop is a control: {names:?}"
+    );
+    assert_eq!(
+        names.iter().filter(|n| *n == "Refresh").count(),
+        1,
+        "{names:?}"
+    );
+    for label in descendants(page.upcast_ref())
+        .into_iter()
+        .filter_map(|w| w.downcast::<gtk::Label>().ok())
+    {
+        assert!(
+            !label.is_focusable() && !label.is_selectable(),
+            "{} is not a focus stop",
+            label.label()
+        );
+    }
+
+    // G3: Stop team, opened from the keyboard. Core reports the action
+    // pending while it holds the confirmation, so the opener is unavailable
+    // when the dialog closes; focus waits nearby and goes back once Core
+    // enables it again.
+    let stop = button(&page, "Stop team");
+    stop.set_sensitive(true);
+    stop.grab_focus();
+    stop.emit_clicked();
+    let token = recorder.plan_token();
+    stop.set_sensitive(false);
+    c.respond(Response::Action {
+        instance: 1,
+        token,
+        scope: scope(),
+        result: Ok(ActionPlan::Confirm {
+            confirmation_id: 41,
+            kind: ConfirmationKind::StopTeam,
+            scope: scope(),
+            target_ids: Vec::new(),
+        }),
+    });
+    let dialog = c.confirmation.borrow().as_ref().unwrap().dialog.clone();
+    assert!(focus().is_none_or(|f| f != stop.clone().upcast::<gtk::Widget>()));
+    dialog.response(gtk::ResponseType::Cancel);
+    until(|| focus().is_some());
+    let waiting = focus().unwrap();
+    assert!(
+        waiting.is_ancestor(&page)
+            && waiting.is_sensitive()
+            && waiting != stop.clone().upcast::<gtk::Widget>(),
+        "focus waits on the nearest available control, not nowhere"
+    );
+    let sent =
+        |request: fn(&Request) -> bool| recorder.0.borrow().iter().filter(|r| request(r)).count();
+    assert_eq!(
+        sent(|r| matches!(r, Request::Cancel(41))),
+        1,
+        "one answer per dialog"
+    );
+    assert_eq!(sent(|r| matches!(r, Request::Confirm(41))), 0);
+    stop.set_sensitive(true);
+    until(|| stop.has_focus() || stop.is_focus());
+
+    // The user moved on before Core settled: focus stays where they put it.
+    stop.emit_clicked();
+    let token = recorder.plan_token();
+    stop.set_sensitive(false);
+    c.respond(Response::Action {
+        instance: 1,
+        token,
+        scope: scope(),
+        result: Ok(ActionPlan::Confirm {
+            confirmation_id: 42,
+            kind: ConfirmationKind::StopTeam,
+            scope: scope(),
+            target_ids: Vec::new(),
+        }),
+    });
+    let dialog = c.confirmation.borrow().as_ref().unwrap().dialog.clone();
+    dialog.response(gtk::ResponseType::Cancel);
+    until(|| focus().is_some());
+    refresh.grab_focus();
+    let compose = button(&page, "New message");
+    compose.grab_focus();
+    stop.set_sensitive(true);
+    settle();
+    assert!(compose.is_focus(), "a later user move is not overridden");
+
+    // Kill and Restart fresh from the agent inspector; a decision returns
+    // focus as Cancel does.
+    c.select(key(Entity::Agent("claude-1".into())));
+    recorder.queries(c, core);
+    let inspector = c.agent.borrow().as_ref().unwrap().1.clone();
+    for (name, kind, id, accept) in [
+        ("Kill", ConfirmationKind::KillAgent, 43, true),
+        ("Restart fresh", ConfirmationKind::RestartFresh, 44, false),
+    ] {
+        let opener = button(&inspector.root, name);
+        opener.set_sensitive(true);
+        opener.grab_focus();
+        opener.emit_clicked();
+        let token = recorder.plan_token();
+        c.respond(Response::Action {
+            instance: 1,
+            token,
+            scope: scope(),
+            result: Ok(ActionPlan::Confirm {
+                confirmation_id: id,
+                kind,
+                scope: scope(),
+                target_ids: vec!["claude-1".into()],
+            }),
+        });
+        let dialog = c.confirmation.borrow().as_ref().unwrap().dialog.clone();
+        dialog.response(if accept {
+            gtk::ResponseType::Accept
+        } else {
+            gtk::ResponseType::Cancel
+        });
+        until(|| opener.is_focus());
+        let confirms = sent(|r| matches!(r, Request::Confirm(_)));
+        let cancels = sent(|r| matches!(r, Request::Cancel(_)));
+        let _ = (confirms, cancels);
+        if accept {
+            assert_eq!(
+                recorder
+                    .0
+                    .borrow()
+                    .iter()
+                    .filter(|r| matches!(r, Request::Confirm(c) if *c == id))
+                    .count(),
+                1
+            );
+            assert_eq!(
+                recorder
+                    .0
+                    .borrow()
+                    .iter()
+                    .filter(|r| matches!(r, Request::Cancel(c) if *c == id))
+                    .count(),
+                0,
+                "closing a confirmed dialog does not cancel it"
+            );
+        }
+    }
+
+    // Restart after limit, opened on Usage.
+    c.shell.navigate(Destination::Usage);
+    settle();
+    let usage = c.pages.borrow()[Destination::Usage.index()].1.clone();
+    let restart = button(&usage, "Restart after limit");
+    restart.set_sensitive(true);
+    restart.grab_focus();
+    restart.emit_clicked();
+    let token = recorder.plan_token();
+    c.respond(Response::Action {
+        instance: 1,
+        token,
+        scope: scope(),
+        result: Ok(ActionPlan::Confirm {
+            confirmation_id: 45,
+            kind: ConfirmationKind::RestartLimited,
+            scope: scope(),
+            target_ids: vec!["claude-1".into()],
+        }),
+    });
+    let dialog = c.confirmation.borrow().as_ref().unwrap().dialog.clone();
+    dialog.response(gtk::ResponseType::Cancel);
+    until(|| restart.is_focus());
+    recorder.queries(c, core);
+
+    // An opener that has gone leaves focus on the page, never nowhere.
+    c.shell.navigate(Destination::Team);
+    c.shell.set_detail_visible(true);
+    settle();
+    let kill = button(&inspector.root, "Kill");
+    kill.set_sensitive(true);
+    kill.grab_focus();
+    kill.emit_clicked();
+    let token = recorder.plan_token();
+    c.respond(Response::Action {
+        instance: 1,
+        token,
+        scope: scope(),
+        result: Ok(ActionPlan::Confirm {
+            confirmation_id: 46,
+            kind: ConfirmationKind::KillAgent,
+            scope: scope(),
+            target_ids: vec!["claude-1".into()],
+        }),
+    });
+    c.shell
+        .set_detail(Destination::Team, "Agent claude-1", &gtk::Label::new(None));
+    let dialog = c.confirmation.borrow().as_ref().unwrap().dialog.clone();
+    dialog.response(gtk::ResponseType::Cancel);
+    until(|| focus().is_some());
+    assert!(focus().unwrap().is_ancestor(&page));
+    c.shell
+        .set_detail(Destination::Team, "Agent claude-1", &inspector.root);
+    settle();
+
+    // G14: a labelled To selector offering Everyone and the team's agents,
+    // and an editor named for what it holds.
+    c.compose("claude-1".into());
+    let (form_id, form) = last_form(c);
+    recorder.queries(c, core);
+    let picker = c.forms.borrow()[&form_id].recipients.clone().unwrap();
+    assert_eq!(picker.recipient(), "claude-1");
+    let to = descendants(picker.root.upcast_ref())
+        .into_iter()
+        .find_map(|w| w.downcast::<gtk::Label>().ok())
+        .unwrap();
+    assert_eq!(to.text(), "To");
+    assert_eq!(to.mnemonic_widget(), Some(picker.dropdown.clone().upcast()));
+    assert!(picker.select(RecipientPicker::EVERYONE));
+    assert_eq!(picker.recipient(), "*");
+    assert!(picker.select("claude-1"), "the team's agents are offered");
+    form.dialog.response(gtk::ResponseType::Cancel);
+    settle();
+
+    // G15: Copy needs a selection, Detach an attachment, and Attach is
+    // offered only while nothing is attached.
+    let page_terminal = &inspector.terminal;
+    let attach = button(&inspector.root, "Attach PTY terminal");
+    let detach = button(&inspector.root, "Detach terminal");
+    let copy = button(&inspector.root, "Copy selection");
+    inspector.set_live(true);
+    if !page_terminal.is_active() {
+        assert!(!detach.is_sensitive() && !copy.is_sensitive());
+    }
+    let standalone = TerminalView::new(Rc::new(|_| ()));
+    let attached = Rc::new(Cell::new(None));
+    standalone.connect_attached({
+        let attached = attached.clone();
+        move |value| attached.set(Some(value))
+    });
+    assert_eq!(attached.get(), Some(false));
+    let controls = |view: &TerminalView| {
+        (
+            button(&view.root, "Detach terminal"),
+            button(&view.root, "Copy selection"),
+        )
+    };
+    let (own_detach, own_copy) = controls(&standalone);
+    assert!(!own_detach.is_sensitive() && !own_copy.is_sensitive());
+    standalone.bind(scope(), 51);
+    assert_eq!(attached.get(), Some(true));
+    assert!(own_detach.is_sensitive());
+    standalone.accept(&TerminalChunk {
+        scope: scope(),
+        attachment_id: 51,
+        data: b"selectable\r\n".to_vec(),
+        ended: None,
+    });
+    let holder = gtk::Window::builder().child(&standalone.root).build();
+    holder.present();
+    until(|| standalone.terminal.is_realized());
+    standalone.terminal.select_all();
+    until(|| own_copy.is_sensitive());
+    standalone.terminal.unselect_all();
+    until(|| !own_copy.is_sensitive());
+    own_detach.emit_clicked();
+    assert_eq!(attached.get(), Some(false));
+    assert!(!own_detach.is_sensitive());
+    // An adopted renderer reports through the panel that adopted it.
+    let renderer = TerminalView::new(Rc::new(|_| ()));
+    renderer.bind(scope(), 52);
+    standalone.adopt(renderer.clone());
+    assert_eq!(attached.get(), Some(true));
+    renderer.end("Terminal ended · read-only");
+    assert_eq!(attached.get(), Some(false));
+    holder.close();
+    let _ = (attach, detach, copy);
+
+    // G17: a disconnected page offers Choose workspace, which opens
+    // Connections.
+    let empty = views::disconnected(Destination::Team);
+    c.shell.set_main(Destination::Team, &empty);
+    settle();
+    let choose = button(&empty, "Choose workspace");
+    assert_eq!(choose.action_name().as_deref(), Some("win.connections"));
+    assert!(
+        choose.is_sensitive(),
+        "the controller installs win.connections"
+    );
+    c.shell.focus_page();
+    until(|| choose.is_focus());
+    let connections = || {
+        gtk::Window::list_toplevels()
+            .into_iter()
+            .filter_map(|w| w.downcast::<gtk::Window>().ok())
+            .find(|w| w.is_visible() && w.title().as_deref() == Some("Connect to Crew"))
+    };
+    assert!(connections().is_none());
+    choose.emit_clicked();
+    until(|| connections().is_some());
+    connections().unwrap().close();
+    settle();
+    c.shell.set_main(Destination::Team, &page);
+    settle();
 }
 
 struct PrivateDaemon {

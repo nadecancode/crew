@@ -72,6 +72,9 @@ glib::wrapper! {
         @extends gtk::Widget, @implements gtk::Accessible, gtk::Buildable, gtk::ConstraintTarget;
 }
 
+/// Hears whether a terminal is attached.
+type AttachedListener = Rc<dyn Fn(bool)>;
+
 #[derive(Clone)]
 pub struct TerminalView {
     pub root: gtk::Box,
@@ -84,7 +87,7 @@ pub struct TerminalView {
     adopted: Rc<RefCell<Option<TerminalView>>>,
     detach: gtk::Button,
     /// Told whether the terminal is attached whenever that changes.
-    listener: Rc<RefCell<Option<Rc<dyn Fn(bool)>>>>,
+    listener: Rc<RefCell<Option<AttachedListener>>>,
 }
 impl TerminalView {
     pub fn new(action: Rc<dyn Fn(ActionIntent)>) -> Self {
@@ -262,7 +265,7 @@ impl TerminalView {
     /// `listener` hears whether this terminal is attached, now and whenever
     /// that changes, also through a renderer it adopts.
     pub fn connect_attached(&self, listener: impl Fn(bool) + 'static) {
-        let listener: Rc<dyn Fn(bool)> = Rc::new(listener);
+        let listener: AttachedListener = Rc::new(listener);
         *self.listener.borrow_mut() = Some(listener.clone());
         if let Some(renderer) = self.adopted.borrow().as_ref() {
             *renderer.listener.borrow_mut() = Some(listener);
