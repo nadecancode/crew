@@ -594,19 +594,29 @@ fn keyboard_focus(c: &Controller, recorder: &Recording, core: &ClientCore) {
     settle();
     assert!(compose.is_focus(), "a later user move is not overridden");
 
-    // Kill and Restart fresh from the agent inspector; a decision returns
-    // focus as Cancel does.
+    // Kill and Restart fresh, chosen from the inspector's Actions menu,
+    // which closes on the choice: focus returns to Actions after the
+    // confirmation, and a decision returns it as Cancel does.
     c.select(key(Entity::Agent("claude-1".into())));
     recorder.queries(c, core);
     let inspector = c.agent.borrow().as_ref().unwrap().1.clone();
+    let actions = descendants(inspector.root.upcast_ref())
+        .into_iter()
+        .filter_map(|w| w.downcast::<gtk::MenuButton>().ok())
+        .find(|b| b.label().as_deref() == Some("Actions"))
+        .expect("Agent actions menu");
     for (name, kind, id, accept) in [
         ("Kill…", ConfirmationKind::KillAgent, 43, true),
         ("Restart fresh…", ConfirmationKind::RestartFresh, 44, false),
     ] {
-        let opener = button(&inspector.root, name);
-        opener.set_sensitive(true);
-        opener.grab_focus();
-        opener.emit_clicked();
+        actions.popup();
+        let item = button(&inspector.root, name);
+        item.set_sensitive(true);
+        until(|| item.is_mapped());
+        item.grab_focus();
+        item.emit_clicked();
+        until(|| !item.is_mapped());
+        let opener = actions.clone();
         let token = recorder.plan_token();
         c.respond(Response::Action {
             instance: 1,
@@ -625,7 +635,12 @@ fn keyboard_focus(c: &Controller, recorder: &Recording, core: &ClientCore) {
         } else {
             gtk::ResponseType::Cancel
         });
-        until(|| opener.is_focus());
+        // A menu button keeps focus on its inner toggle.
+        until(|| {
+            focus().is_some_and(|f| {
+                f == opener.clone().upcast::<gtk::Widget>() || f.is_ancestor(&opener)
+            })
+        });
         let confirms = sent(|r| matches!(r, Request::Confirm(_)));
         let cancels = sent(|r| matches!(r, Request::Cancel(_)));
         let _ = (confirms, cancels);

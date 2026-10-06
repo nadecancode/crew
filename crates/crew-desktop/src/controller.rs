@@ -1526,7 +1526,18 @@ impl Controller {
     fn return_focus(&self, opener: &glib::WeakRef<gtk::Widget>) {
         self.clear_focus_return();
         let window = self.shell.window();
-        let Some(opener) = opener.upgrade().filter(|o| o.is_mapped()) else {
+        // An item of a menu that has closed hands focus back to the button
+        // that opened the menu.
+        let opener = opener.upgrade().map(|opener| {
+            if opener.is_mapped() {
+                return opener;
+            }
+            opener
+                .ancestor(gtk::Popover::static_type())
+                .and_then(|popover| popover.parent())
+                .unwrap_or(opener)
+        });
+        let Some(opener) = opener.filter(|o| o.is_mapped()) else {
             self.shell.focus_page();
             return;
         };

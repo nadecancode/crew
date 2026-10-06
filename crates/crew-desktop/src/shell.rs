@@ -125,6 +125,8 @@ struct Inner {
     compact_sidebar: Cell<bool>,
     detail_requested: [Cell<bool>; 5],
     main_focus: [glib::WeakRef<gtk::Widget>; 5],
+    /// Page focus was asked for before the window was shown.
+    focus_on_map: Cell<bool>,
     observers: RefCell<Vec<DestinationObserver>>,
     appearance: Rc<AppearanceController>,
     sidebar_action: gio::SimpleAction,
@@ -324,6 +326,7 @@ impl Shell {
             compact_sidebar: Cell::new(false),
             detail_requested: std::array::from_fn(|_| Cell::new(false)),
             main_focus: std::array::from_fn(|_| glib::WeakRef::new()),
+            focus_on_map: Cell::new(false),
             observers: RefCell::new(Vec::new()),
             appearance,
             sidebar_action,
@@ -355,6 +358,14 @@ impl Shell {
             }
         });
         shell.0.navigation.add_controller(sidebar_keys(&shell));
+        let weak = Rc::downgrade(&shell.0);
+        shell.0.window.connect_map(move |_| {
+            if let Some(inner) = weak.upgrade() {
+                if inner.focus_on_map.replace(false) {
+                    Shell(inner).focus_visible_view();
+                }
+            }
+        });
         let weak = Rc::downgrade(&shell.0);
         shell.0.adaptive.connect_compact_notify(move |_| {
             if let Some(inner) = weak.upgrade() {
@@ -567,6 +578,12 @@ impl Shell {
                 if inner.main_slots[index].child_focus(gtk::DirectionType::TabForward) {
                     return;
                 }
+            }
+            // Before the window is shown nothing in it takes focus; try again
+            // once it is, rather than settling on the header.
+            if !inner.window.is_mapped() {
+                inner.focus_on_map.set(true);
+                return;
             }
             inner.destination_button.grab_focus();
         });
