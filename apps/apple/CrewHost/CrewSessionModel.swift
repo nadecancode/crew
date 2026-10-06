@@ -18,8 +18,13 @@ final class CrewSessionModel {
     private var invalidated: Set<ViewQuery> = []
     private var readGeneration: UInt64 = 0
     private var queries: [CrewDestination: ViewQuery] = [:]
+    private var viewQueries: [CrewDestination: ViewQuery] = [:]
+    private var hostWindowRequested: Set<CrewDestination> = []
+    private var olderLoads: [CrewDestination: CrewOlderLoad] = [:]
+    private var olderOperations: [UInt64: CrewDestination] = [:]
     private var operationHistory: [OperationNotice] = []
     private var pendingJobs = 0
+    private var executingSend: CrewDraftKey?
     private var actionTask: _Concurrency.Task<Void, Never>?
     private var actionQueue: [CrewQueuedAction] = []
     private var activeAttachRequest: UUID?
@@ -40,6 +45,7 @@ final class CrewSessionModel {
     private(set) var resource: ViewData?
     private(set) var selectedResource: ResourceKey?
     private(set) var confirmation: CrewConfirmation?
+    var externalLink: CrewLinkPreview?
     private(set) var feedback: String?
     private(set) var error: String?
     private(set) var unknownTerminalChunks: UInt64 = 0
@@ -49,6 +55,7 @@ final class CrewSessionModel {
     private var attachingOperation: (scope: ClientScope, operation: UInt64, agent: EntityKey)?
     private var expectedAttachmentScope: ClientScope?
     private var drafts: [CrewDraftKey: String] = [:]
+    private var sendDrafts: [CrewDraftKey: CrewSendDraft] = [:]
 
     var destination: CrewDestination = .team {
         didSet { if destination != oldValue { invalidate(query(for: destination)) } }
@@ -56,8 +63,21 @@ final class CrewSessionModel {
 
     var scope: ClientScope? { notice?.scope }
     var pending: Bool { pendingJobs > 0 }
+    var terminalPending: Bool { expectedAttachmentScope != nil || attachingOperation != nil }
     var isLive: Bool { active && notice?.workspace == .live && currentView?.freshness == .fresh }
     var currentView: ViewData? { views[destination] }
+    var messageFilter: MessageFilter {
+        if case .messages(_, _, let filter) = query(for: .messages) { return filter }
+        return MessageFilter(endpoints: .all, kind: nil, text: "")
+    }
+    var eventFilter: EventFilter {
+        if case .events(_, _, let filter) = query(for: .events) { return filter }
+        return EventFilter(agentId: nil, level: nil, text: "", vcsOnly: false)
+    }
+    func view(for destination: CrewDestination) -> ViewData? {
+        viewQueries[destination] == query(for: destination) ? views[destination] : nil
+    }
+    func loadingOlder(_ destination: CrewDestination) -> Bool { olderLoads[destination] != nil }
     var presentationStatus: String {
         if !active { return "Suspended; last-known data" }
         return notice.map { CrewFailure.workspace($0.workspace) } ?? "Not connected"
@@ -219,34 +239,80 @@ final class CrewSessionModel {
     }
 
     func setMessageFilter(_ filter: MessageFilter) {
+        olderLoads[.messages] = nil
         queries[.messages] = .messages(before: nil, limit: 100, filter: filter)
         invalidate(query(for: .messages))
     }
 
     func setEventFilter(_ filter: EventFilter) {
+        olderLoads[.events] = nil
         queries[.events] = .events(before: nil, limit: 100, filter: filter)
         invalidate(query(for: .events))
     }
 
     func loadOlderMessages() {
+        guard !loadingOlder(.messages) else { return }
         guard case .messages(let page) = views[.messages]?.payload,
               case .messages(_, let limit, let filter) = query(for: .messages) else { return }
-        queries[.messages] = .messages(before: page.before, limit: limit, filter: filter)
-        invalidate(query(for: .messages))
+        let next = ViewQuery.messages(before: page.before, limit: limit, filter: filter)
+        if page.hasOlderLocal { queries[.messages] = next; invalidate(next) }
+        else if page.mayHaveOlderRemote { requestHostWindow(.messages, next: next, kind: .history, limit: 1_000) }
     }
 
     func loadOlderEvents() {
+        guard !loadingOlder(.events) else { return }
         guard case .events(let page) = views[.events]?.payload,
               case .events(_, let limit, let filter) = query(for: .events) else { return }
-        queries[.events] = .events(before: page.before, limit: limit, filter: filter)
+        let next = ViewQuery.events(before: page.before, limit: limit, filter: filter)
+        if page.hasOlderLocal { queries[.events] = next; invalidate(next) }
+        else if page.mayHaveOlderRemote { requestHostWindow(.events, next: next, kind: .events, limit: 5_000) }
+    }
+
+    func newestMessages() {
+        queries[.messages] = .messages(before: nil, limit: 100, filter: messageFilter)
+        invalidate(query(for: .messages))
+    }
+    func newestEvents() {
+        queries[.events] = .events(before: nil, limit: 100, filter: eventFilter)
         invalidate(query(for: .events))
     }
 
-    func newestMessages() { queries[.messages] = nil; invalidate(query(for: .messages)) }
-    func newestEvents() { queries[.events] = nil; invalidate(query(for: .events)) }
+    private func requestHostWindow(_ destination: CrewDestination, next: ViewQuery, kind: ResourceKind, limit: UInt32) {
+        guard let scope else { return }
+        guard !hostWindowRequested.contains(destination) else {
+            feedback = "The bounded host window is already loaded. Older rows outside this window cannot be paged through this protocol."
+            return
+        }
+        // The reviewed native service profile retains 1,000 messages/5,000
+        // events. v6 returns newest N; it has no remote before-cursor field.
+        let key = ResourceKey(entity: EntityKey(scope: scope, entity: .workspace), kind: kind, options: .bounded(limit: limit))
+        olderLoads[destination] = CrewOlderLoad(scope: scope, original: query(for: destination), next: next)
+        hostWindowRequested.insert(destination)
+        enqueue(.read(scope: scope, resource: ResourceRequest(key: key)), attachmentRequest: nil, olderDestination: destination)
+    }
 
     func draft(_ key: CrewDraftKey) -> Binding<String> {
         Binding(get: { self.drafts[key] ?? "" }, set: { self.drafts[key] = $0 })
+    }
+
+    func sendDraft(_ key: CrewDraftKey) -> Binding<String> {
+        Binding(get: { self.sendDrafts[key]?.body ?? "" }, set: { text in
+            if self.sendDrafts[key] == nil { self.sendDrafts[key] = CrewSendDraft(scope: key.scope) }
+            self.sendDrafts[key]?.body = text
+        })
+    }
+
+    func sendPending(_ key: CrewDraftKey) -> Bool { sendDrafts[key]?.pending == true }
+
+    func sendExplanation(_ key: CrewDraftKey) -> String? {
+        if let outcome = sendDrafts[key]?.lastOutcome { return CrewFailure.outcome(outcome) }
+        return sendDrafts[key]?.explanation
+    }
+
+    func send(_ key: CrewDraftKey, to: String) {
+        if sendDrafts[key] == nil { sendDrafts[key] = CrewSendDraft(scope: key.scope) }
+        guard let attempt = sendDrafts[key]?.begin() else { return }
+        enqueue(.sendMessage(scope: key.scope, to: to, body: attempt.body, messageId: attempt.messageId), attachmentRequest: nil, sendDraft: key)
     }
 
     /// A typed intent is submitted once. Rust preflight supplies eligibility,
@@ -255,8 +321,12 @@ final class CrewSessionModel {
         enqueue(intent, attachmentRequest: nil)
     }
 
-    private func enqueue(_ intent: ActionIntent, attachmentRequest: UUID?) {
-        guard hasClient else { return }
+    private func enqueue(_ intent: ActionIntent, attachmentRequest: UUID?, sendDraft: CrewDraftKey? = nil, olderDestination: CrewDestination? = nil) {
+        guard hasClient else {
+            if let sendDraft { sendDrafts[sendDraft]?.notDispatched("No client is connected") }
+            if let olderDestination { failOlder(olderDestination) }
+            return
+        }
         // One bounded consumer preserves invocation order, including raw keys.
         // Lifecycle and scope changes discard work rather than replaying it.
         if case .attachInput(_, _, let data) = intent {
@@ -272,13 +342,15 @@ final class CrewSessionModel {
         }
         guard actionQueue.count < 32 else {
             feedback = "Too many pending actions. Wait for the current outcome before trying again."
+            if let sendDraft { sendDrafts[sendDraft]?.notDispatched(feedback ?? "Action not dispatched") }
+            if let olderDestination { failOlder(olderDestination) }
             if case .attachInput = intent {
                 endTerminal("Terminal input backlog exceeded; open a new terminal explicitly")
                 discardQueuedActions()
             }
             return
         }
-        actionQueue.append(CrewQueuedAction(intent: intent, attachmentRequest: attachmentRequest))
+        actionQueue.append(CrewQueuedAction(intent: intent, attachmentRequest: attachmentRequest, sendDraft: sendDraft, olderDestination: olderDestination))
         pendingJobs = actionQueue.count + (actionTask == nil ? 0 : 1)
         guard actionTask == nil else { return }
         let token = instance
@@ -287,15 +359,22 @@ final class CrewSessionModel {
             while instance == token, actionGeneration == generation, !actionQueue.isEmpty {
                 let command = actionQueue.removeFirst()
                 let intent = command.intent
+                executingSend = command.sendDraft
                 pendingJobs = actionQueue.count + 1
                 do {
                     let plan = try await worker.plan(intent, instance: token)
                     guard instance == token, actionGeneration == generation else { return }
+                    executingSend = nil
                     switch plan {
                     case .unavailable(let reason):
+                        if let destination = command.olderDestination { failOlder(destination) }
                         feedback = reason.message
+                        if let key = command.sendDraft { sendDrafts[key]?.notDispatched(reason.message) }
                         if case .attach = intent { endTerminal(reason.message) }
                     case .confirm(let id, let kind, let scope, let targets):
+                        if let key = command.sendDraft {
+                            sendDrafts[key]?.notDispatched("This command requires confirmation. No message has been sent.")
+                        }
                         guard self.scope == scope else {
                             await worker.cancelConfirmation(id, instance: token)
                             continue
@@ -303,6 +382,16 @@ final class CrewSessionModel {
                         cancelConfirmation()
                         confirmation = CrewConfirmation(id: id, kind: kind, scope: scope, targets: targets)
                     case .dispatch(let id):
+                        if let destination = command.olderDestination {
+                            olderOperations[id] = destination
+                            if let outcome = operationHistory.last(where: { $0.operationId == id && $0.scope == scope }) { finishOlder(outcome) }
+                        }
+                        if let key = command.sendDraft {
+                            sendDrafts[key]?.associate(id)
+                            if let outcome = operationHistory.last(where: { $0.operationId == id && $0.scope == key.scope }) {
+                                sendDrafts[key]?.outcome(outcome)
+                            }
+                        }
                         feedback = operationHistory.last { $0.operationId == id && $0.scope == self.scope }.map(CrewFailure.outcome) ?? "Submitted; awaiting outcome"
                         if case .attach(let scope, let agent, _, _) = intent {
                             let key = EntityKey(scope: scope, entity: .agent(agent))
@@ -318,7 +407,10 @@ final class CrewSessionModel {
                     }
                 } catch {
                     guard instance == token, actionGeneration == generation else { return }
+                    executingSend = nil
                     feedback = CrewFailure.message(error)
+                    if let destination = command.olderDestination { failOlder(destination) }
+                    if let key = command.sendDraft { sendDrafts[key]?.notDispatched(feedback ?? "Action not dispatched") }
                     if case .attach = intent { endTerminal(feedback ?? "Terminal could not open") }
                 }
             }
@@ -447,26 +539,39 @@ final class CrewSessionModel {
                 guard let oldScope else { return false }
                 return key.scope.endpointId != oldScope.endpointId || key.scope.workspaceId != oldScope.workspaceId
             }
+            sendDrafts = sendDrafts.filter { key, _ in
+                guard let oldScope else { return false }
+                return key.scope.endpointId != oldScope.endpointId || key.scope.workspaceId != oldScope.workspaceId
+            }
             workspaces = nil
             readGeneration &+= 1
             clearScopedViews()
         }
         if !update.changes.removed.isEmpty, let selected, update.changes.removed.contains(selected) { closeDetail() }
-        if update.changes.availability || update.changes.reset || update.changes.pending {
-            // Never reinterpret an old confirmation under changed authority.
+        if update.changes.reset {
             cancelConfirmation()
         }
-        if update.changes.availability, terminal != nil { endTerminal("Availability changed; open a new terminal explicitly") }
-        if update.workspace != .live { endTerminal("\(CrewFailure.workspace(update.workspace)); terminal input disabled") }
+        if CrewNoticeRouting.terminalUnavailable(update, hasRenderer: terminal?.isEnded == false || terminalRenderers.values.contains(where: { !$0.isEnded })) {
+            endTerminal("\(CrewFailure.workspace(update.workspace)); terminal input disabled")
+        }
         for outcome in update.outcomes {
             operationHistory.append(outcome)
             if operationHistory.count > 32 { operationHistory.removeFirst(operationHistory.count - 32) }
             if outcome.scope == scope {
+                finishOlder(outcome)
+                for key in sendDrafts.keys { sendDrafts[key]?.outcome(outcome) }
                 feedback = CrewFailure.outcome(outcome)
                 // Identified Attach success precedes terminal chunks. Create
                 // its exact native renderer before data, even when the actor's
                 // plan continuation has not associated the panel yet.
                 if outcome.kind == .success, let id = outcome.attachmentId {
+                    if let attachingOperation,
+                       !CrewNoticeRouting.belongsToRequestedAttach(outcome, scope: attachingOperation.scope, operation: attachingOperation.operation) {
+                        // Another identified attachment never becomes the
+                        // requested panel, even in the same client/scope.
+                        perform(.detach(scope: outcome.scope, attachmentId: id))
+                        continue
+                    }
                     let identity = CrewTerminalIdentity(scope: outcome.scope, attachmentId: id)
                     if terminalRenderers[identity] == nil && expectedAttachmentScope == outcome.scope {
                         if terminalRenderers.count < 2 { terminalRenderers[identity] = makeRenderer(identity) }
@@ -474,23 +579,28 @@ final class CrewSessionModel {
                     }
                 }
                 applyAttachment(outcome)
+                if let identity = terminal?.identity,
+                   CrewNoticeRouting.endsAttachment(outcome, scope: identity.scope, attachment: identity.attachmentId) {
+                    endTerminal(CrewFailure.outcome(outcome))
+                }
             }
         }
         let changes = update.changes
-        if changes.reset || changes.session || changes.availability { invalidate(.overview) }
+        let terminalCapacityOnly = CrewNoticeRouting.terminalCapacityOnly(changes, hasRenderer: terminal != nil)
+        if changes.reset || changes.session || (changes.availability && !terminalCapacityOnly) { invalidate(.overview) }
         if changes.reset || changes.questions { invalidate(.questions) }
-        if changes.reset || changes.availability || changes.pending || affects(destination, changes) { invalidate(query(for: destination)) }
+        if changes.reset || (!terminalCapacityOnly && (changes.availability || changes.pending)) || affects(destination, changes) { invalidate(query(for: destination)) }
         if let selected {
             switch selected.entity {
             case .agent(let id):
-                if changes.reset || changes.agents.contains(id) || !changes.tasks.isEmpty || changes.messages || changes.availability || changes.pending {
+                if changes.reset || changes.agents.contains(id) || !changes.tasks.isEmpty || changes.messages || (!terminalCapacityOnly && (changes.availability || changes.pending)) {
                     invalidate(.agentDetail(id: id))
                 }
             case .task(let id): if changes.reset || changes.tasks.contains(id) { invalidate(.taskDetail(id: id)) }
             default: break
             }
         }
-        if let selectedResource, changes.pending || changes.reset { invalidate(.evidence(key: selectedResource)) }
+        if let selectedResource, (changes.pending && !terminalCapacityOnly) || changes.reset { invalidate(.evidence(key: selectedResource)) }
     }
 
     private func receive(_ chunk: TerminalChunk) {
@@ -509,6 +619,10 @@ final class CrewSessionModel {
         case .success:
             if let id = outcome.attachmentId {
                 let identity = CrewTerminalIdentity(scope: outcome.scope, attachmentId: id)
+                for other in Array(terminalRenderers.keys) where other != identity {
+                    terminalRenderers.removeValue(forKey: other)?.end()
+                    perform(.detach(scope: other.scope, attachmentId: other.attachmentId))
+                }
                 terminal = terminalRenderers[identity]
                 self.attachingOperation = nil
                 expectedAttachmentScope = nil
@@ -529,7 +643,10 @@ final class CrewSessionModel {
             guard let self, self.active, self.terminal?.identity == identity, self.scope == identity.scope,
                   let rows = UInt16(exactly: rows), let cols = UInt16(exactly: cols), rows > 0, cols > 0 else { return }
             self.perform(.attachResize(scope: identity.scope, attachmentId: identity.attachmentId, rows: rows, cols: cols))
-        }, openLink: { [weak self] _ in self?.feedback = "Copy the link and review it before opening outside Crew" })
+        }, openLink: { [weak self] candidate in
+            if let url = CrewExternalLinks.preview(candidate) { self?.externalLink = CrewLinkPreview(url: url) }
+            else { self?.feedback = "This address cannot be opened. Copy and review it as text." }
+        })
         // Core acceptance of this exact scoped attach is required. Until its
         // real outcome arrives, early bytes may render but input stays disabled.
         renderer.setInputAvailable(false)
@@ -605,11 +722,22 @@ final class CrewSessionModel {
         default:
             for destination in CrewDestination.allCases where item.query == query(for: destination) {
                 views[destination] = item.data
+                viewQueries[destination] = item.query
             }
         }
     }
 
     private func discardQueuedActions() {
+        for destination in olderLoads.keys { hostWindowRequested.remove(destination) }
+        olderLoads.removeAll()
+        olderOperations.removeAll()
+        if let key = executingSend {
+            sendDrafts[key]?.notDispatched("Outcome unknown after the connection changed. Check the host before retrying.")
+            executingSend = nil
+        }
+        for command in actionQueue {
+            if let key = command.sendDraft { sendDrafts[key]?.notDispatched("Action not sent after the connection changed") }
+        }
         actionQueue.removeAll()
         actionTask?.cancel()
         actionTask = nil
@@ -625,7 +753,12 @@ final class CrewSessionModel {
         terminal = nil
         terminalAgent = nil
         context = nil
+        externalLink = nil
         views = [:]
+        viewQueries = [:]
+        olderLoads = [:]
+        olderOperations = [:]
+        hostWindowRequested = []
         overview = nil
         questions = nil
         selected = nil
@@ -634,6 +767,22 @@ final class CrewSessionModel {
         resource = nil
         queries = [:]
         operationHistory = []
+    }
+
+    private func finishOlder(_ outcome: OperationNotice) {
+        guard let destination = olderOperations.removeValue(forKey: outcome.operationId),
+              let load = olderLoads.removeValue(forKey: destination), load.scope == outcome.scope else { return }
+        if outcome.kind == .success {
+            if query(for: destination) == load.original { queries[destination] = load.next; invalidate(load.next) }
+        } else {
+            hostWindowRequested.remove(destination)
+            feedback = CrewFailure.outcome(outcome)
+        }
+    }
+
+    private func failOlder(_ destination: CrewDestination) {
+        olderLoads[destination] = nil
+        hostWindowRequested.remove(destination)
     }
 
     private func retirePresentation() {
@@ -653,6 +802,14 @@ final class CrewSessionModel {
 private struct CrewQueuedAction {
     let intent: ActionIntent
     let attachmentRequest: UUID?
+    let sendDraft: CrewDraftKey?
+    let olderDestination: CrewDestination?
+}
+
+private struct CrewOlderLoad {
+    let scope: ClientScope
+    let original: ViewQuery
+    let next: ViewQuery
 }
 
 struct CrewDraftKey: Hashable {

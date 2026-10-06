@@ -47,7 +47,7 @@ struct CrewConnectionsView: View {
                     .font(.callout)
                 // Replaced by the real native-gateway-bindings setup port.
                 // This checkpoint supplies no fabricated profile or enrollment.
-                Text("Gateway setup is awaiting the typed connection service.")
+                Text("Gateway setup is unavailable in this build.")
                     .foregroundStyle(.secondary)
             }
             if let context = model.context {

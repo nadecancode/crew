@@ -22,7 +22,6 @@ struct CrewActionSheetView: View {
     let sheet: CrewActionSheet
     @Bindable var model: CrewSessionModel
     @Environment(\.dismiss) private var dismiss
-    @State private var messageId = UUID().uuidString
 
     var body: some View {
         NavigationStack {
@@ -30,9 +29,12 @@ struct CrewActionSheetView: View {
                 switch sheet {
                 case .compose(let key):
                     let recipient: String = { if case .agent(let id) = key.entity { return id }; return "all" }()
-                    CrewDraftEditor(title: "Message", text: model.draft(CrewDraftKey(scope: key.scope, purpose: "message:\(recipient)")), submitLabel: "Send", targetDescription: "\(recipient) · \(key.scope.workspaceId)", submitAvailable: model.scope == key.scope && model.isLive, pending: model.pending, unavailableReason: model.scope == key.scope && model.isLive ? nil : "Reconnect and reopen this target before sending") {
-                        let text = model.draft(CrewDraftKey(scope: key.scope, purpose: "message:\(recipient)")).wrappedValue
-                        model.perform(.sendMessage(scope: key.scope, to: recipient, body: text, messageId: messageId))
+                    let draftKey = CrewDraftKey(scope: key.scope, purpose: "message:\(recipient)")
+                    VStack(alignment: .leading) {
+                        CrewDraftEditor(title: "Message", text: model.sendDraft(draftKey), submitLabel: "Send", targetDescription: "\(recipient) · \(key.scope.workspaceId)", submitAvailable: model.scope == key.scope && model.isLive, pending: model.sendPending(draftKey), unavailableReason: model.scope == key.scope && model.isLive ? nil : "Reconnect and reopen this target before sending") {
+                            model.send(draftKey, to: recipient)
+                        }
+                        if let explanation = model.sendExplanation(draftKey) { Text(verbatim: explanation).font(.callout).padding(16) }
                     }
                 case .prompt(let key):
                     if case .agent(let id) = key.entity {
@@ -55,8 +57,18 @@ struct CrewActionSheetView: View {
                                 Spacer()
                                 Button("Close terminal") { model.closeTerminal(); dismiss() }
                             }
-                        } else {
+                        } else if model.terminalPending {
                             ProgressView("Waiting for the attachment outcome")
+                        } else {
+                            ContentUnavailableView {
+                                Label("Terminal is not open", systemImage: "terminal")
+                            } description: {
+                                Text(verbatim: model.terminalStatus ?? "The terminal attempt did not complete.")
+                            }
+                            Button("Close") { dismiss() }
+                            if model.scope == sheet.id.scope {
+                                Button("Try opening a new terminal") { model.attach(sheet.id) }
+                            }
                         }
                         Text("Software keyboard Return inserts a newline in the separate prompt draft. Raw keys go only to a focused, live terminal and are never replayed after reconnect.")
                             .font(.callout).foregroundStyle(.secondary)
@@ -80,6 +92,7 @@ struct CrewActionSheetView: View {
         .frame(minWidth: 420, idealWidth: 700, minHeight: 420, idealHeight: 640)
         #endif
         .onDisappear { if case .terminal = sheet { model.closeTerminal() } }
+        .sheet(item: $model.externalLink) { preview in CrewLinkPreviewView(preview: preview) }
     }
 
     private var title: String {

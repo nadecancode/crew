@@ -189,3 +189,71 @@ Xcode builds, UI/keyboard/focus/VoiceOver, simulator/device, CryptoKit/Keychain
 and signing checks remain **Apple verification deferred by operator**.
 Graphs, quota/history controls, adaptive inspector/focus refinements, reviewed
 Attach producer evidence and actual gateway composition remain required.
+
+## Presentation and receipt corrections
+
+This follow-up addresses the bounded source reviews of `8cf7b706`: designer
+`m-811f944d3ff3` and reviewer `m-64141b05587d`. Composer receipt state now ties a
+message ID to its exact body, scope and operation outcome. Known successful
+messages retire that ID and clear only unchanged submitted text. Later edits
+survive the acknowledgement; failed, unknown and unacknowledged same-body
+retries keep the original ID. Slash commands requiring confirmation remain
+commands; their drafts do not wait forever for a message acknowledgement.
+Five native test cases cover sequential success, edits during submission,
+same-ID failure/unknown retention and wrong operation/scope outcomes.
+
+Pending/capacity invalidations no longer end a live terminal or indiscriminately
+cancel its confirmation. Input-only invalidations do not reload full team/detail
+history per keystroke. Terminal teardown is tied to scoped endings, relevant
+outcomes, workspace/lifecycle retirement and explicit close. A second identified
+Attach success cannot replace the requested operation; it is detached. Finished
+attach failure shows its actual explanation and an explicit close/reopen path,
+with no permanent progress indicator. Current/parked work precedes activity
+and process details; limit controls explicitly say agents paused at a limit.
+
+The producer/order authorities are now released: `cda71035` changes only the
+successful Attached notice to `Some(operation_id)`; `cbc6a505` independently
+proves identified-notice-before-buffered/live-byte ordering, duplicate suppression,
+no-output success, failed attach, local detach and stale refusal. The latter
+uses synthetic LocalOperator IO and does not claim a daemon/PTY run. Apple
+source consumes that contract; unowned Rust files are not copied into this
+worktree. The matching integrated library must include this source chain.
+
+Native geometry now provides explicit List/Graph modes, Fit/Zoom and textual
+relationship/dependency alternatives from the supplied TeamData/TasksData.
+Largest accessibility text uses the full list path. Pushes do not refit graphs.
+Native Charts show the four labelled token series and bounded shared context
+samples with text alternatives; quotas show the supplied stale/reset facts.
+Session objective/counts/warnings and explicit message/event filters are
+rendered from generated records. Search labels describe only loaded history.
+Older local pages use the core cursor. A single explicit bounded History/Events
+read expands to the reviewed native retention window (1,000 messages/5,000
+events), then queries that cache. v6 has no remote before-cursor field; the UI
+never claims unbounded paging or repeatedly reloads an already-full window.
+
+The approved platform safe-link adapter follows `web/src/text.tsx`, with native
+absolute-host/no-userinfo restrictions from `m-180b2278cadd`. Foundation parses
+only http/https with a nonempty host and no whitespace/control characters.
+Detected-text punctuation trimming matches linkPieces; exact OSC targets are
+not trimmed. Explicit terminal activation opens a full normalized URL preview;
+a second explicit Open button invokes the OS. There is no OSC-triggered open,
+clipboard read/write, shell execution or reuse of gateway trust material. Four
+native test cases cover accept/reject, punctuation and no-open-without-gesture.
+
+The latest available Linux source checks report 585 project checks / 162
+objects / six targets / two schemes; all 41 Swift files parse. The actual
+Foundation source check also covers composer receipts, notice routing and URL
+validation, still with the four previously documented generated Sendable
+warnings under Swift 5.10.1. These are not SwiftUI or Apple linking results.
+The native test cases, graph/chart/layout/accessibility behavior and all Xcode,
+simulator/device, focus, VoiceOver and signing checks remain **Apple verification
+deferred by operator**.
+
+Required remaining source gates: the complete reviewed
+`native-action-availability` / `native-availability-core` /
+`native-availability-bindings` chain, real `native-gateway-bindings` and
+`native-gateway-connector` composition, adaptive inspector/focus work and final
+native source tests. The availability query will use the full captured intent;
+no mutating plan probe or Swift grant allowlist substitutes for it. The current
+quota controls explicitly remain unavailable until this result is wired.
+This is a checkpoint of an in-progress card, not whole-application acceptance.

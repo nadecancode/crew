@@ -35,6 +35,9 @@ swiftc -emit-module -parse-as-library -swift-version 5 -module-name CrewBindings
     -o "$crew_output/CrewBindings.swiftmodule"
 swiftc -typecheck -parse-as-library -swift-version 5 \
     "${crew_includes[@]}" -I "$crew_output" \
-    apps/apple/CrewHost/CrewClientWorker.swift
+    apps/apple/CrewHost/CrewClientWorker.swift \
+    apps/apple/CrewHost/CrewSendDraft.swift \
+    apps/apple/CrewHost/CrewNoticeRouting.swift \
+    apps/apple/CrewHost/CrewExternalLinks.swift
 printf '%s\n' 'Portable generated-record/worker source check passed.' \
     'Apple SwiftUI compilation, linking, Xcode and native execution: deferred by operator.'

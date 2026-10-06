@@ -30,19 +30,7 @@ public struct CrewAgentDetail: View {
                 Section("Agent") {
                     Text(verbatim: agent.name).font(.title2.bold())
                     CrewLabeledValue("ID", value: agent.id, monospaced: true)
-                    Text(verbatim: agent.role).textSelection(.enabled)
                     CrewToneLabel(presentation.statusLabel, tone: presentation.tone)
-                    Text(verbatim: agent.activity).textSelection(.enabled)
-                    CrewLabeledValue("CLI", value: String(describing: agent.runtime))
-                    CrewLabeledValue("Model", value: agent.model ?? "CLI default")
-                    CrewLabeledValue("Backend", value: agent.backend)
-                    CrewLabeledValue("Work directory", value: agent.workdir, monospaced: true)
-                    if let branch = agent.branch { CrewLabeledValue("Branch", value: branch, monospaced: true) }
-                    Button("Copy work directory") { copy(agent.workdir) }
-                    if let error = agent.error { Text(verbatim: error).foregroundStyle(CrewPalette.danger) }
-                    ForEach(Array(presentation.warnings.enumerated()), id: \.offset) { _, warning in
-                        Label(warning.text, systemImage: "exclamationmark.triangle")
-                    }
                 }
                 if let work = presentation.currentWork {
                     Section("Current work") {
@@ -57,6 +45,14 @@ public struct CrewAgentDetail: View {
                         ForEach(presentation.waitingTaskIds, id: \.self) { id in
                             Button(id) { select(EntityKey(scope: scope, entity: .task(id))) }
                         }
+                    }
+                }
+                Section("Activity and problems") {
+                    Text(verbatim: agent.role).textSelection(.enabled)
+                    Text(verbatim: agent.activity).textSelection(.enabled)
+                    if let error = agent.error { Text(verbatim: error).foregroundStyle(CrewPalette.danger) }
+                    ForEach(Array(presentation.warnings.enumerated()), id: \.offset) { _, warning in
+                        Label(warning.text, systemImage: "exclamationmark.triangle")
                     }
                 }
                 if let parent = presentation.satelliteParentId {
@@ -114,6 +110,18 @@ public struct CrewAgentDetail: View {
                         else { Text("Waiting for an explicit Continue or Restart") }
                         CrewLabeledValue("Attempts", value: limit.attempts.formatted())
                     }
+                }
+                Section("Process details") {
+                    CrewLabeledValue("CLI", value: String(describing: agent.runtime))
+                    CrewLabeledValue("Model", value: agent.model ?? "CLI default")
+                    CrewLabeledValue("Backend", value: agent.backend)
+                    CrewLabeledValue("Work directory", value: agent.workdir, monospaced: true)
+                    if let branch = agent.branch { CrewLabeledValue("Branch", value: branch, monospaced: true) }
+                    if let pid = agent.pid { CrewLabeledValue("Process", value: pid.formatted(), monospaced: true) }
+                    if let started = agent.startedAt { CrewLabeledValue("Started", value: CrewLabels.timestamp(started)) }
+                    if let session = agent.sessionId { CrewLabeledValue("Runtime session", value: session, monospaced: true) }
+                    CrewLabeledValue("Compactions", value: agent.compactions.formatted())
+                    Button("Copy work directory") { copy(agent.workdir) }
                 }
             }
         } else {

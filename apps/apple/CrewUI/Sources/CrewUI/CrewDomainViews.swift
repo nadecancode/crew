@@ -205,14 +205,24 @@ public struct CrewEventList: View {
 
 public struct CrewUsageView: View {
     private let usage: UsagePresentation
+    private let selectAgent: (String) -> Void
+    private let continueLimited: () -> Void
+    private let restartLimited: () -> Void
+    private let resumeAvailable: Bool
+    private let resumeReason: String?
 
-    public init(usage: UsagePresentation) { self.usage = usage }
+    public init(usage: UsagePresentation, selectAgent: @escaping (String) -> Void, resumeAvailable: Bool, resumeReason: String?, continueLimited: @escaping () -> Void, restartLimited: @escaping () -> Void) {
+        self.usage = usage; self.selectAgent = selectAgent
+        self.resumeAvailable = resumeAvailable; self.resumeReason = resumeReason
+        self.continueLimited = continueLimited; self.restartLimited = restartLimited
+    }
 
     public var body: some View {
         List {
             Section("Reported usage") {
                 Text("Reporting coverage: \(usage.reporters) of \(usage.eligible) agents")
                 if let total = usage.total {
+                    CrewTokenChart(usage: total)
                     usageValues(total)
                 } else {
                     Text("No usage reported")
@@ -221,6 +231,7 @@ public struct CrewUsageView: View {
             }
             ForEach(usage.agents, id: \.agentId) { agent in
                 Section(agent.agentId) {
+                    Button("Inspect \(agent.agentId)") { selectAgent(agent.agentId) }
                     if let context = agent.context {
                         CrewLabeledValue("Context", value: "\(context.percent)%")
                         CrewLabeledValue("Context tokens", value: context.tokens.formatted())
@@ -233,6 +244,30 @@ public struct CrewUsageView: View {
                     CrewLabeledValue("Compactions", value: agent.compactions.formatted())
                     Text("Context history includes only samples collected during this client session.")
                         .font(.callout).foregroundStyle(.secondary)
+                    CrewContextHistory(agent: agent)
+                }
+            }
+            ForEach(Array(usage.groups.enumerated()), id: \.offset) { _, group in
+                Section("Usage windows · \(String(describing: group.runtime))") {
+                    ForEach(Array(group.quotas.enumerated()), id: \.offset) { _, row in
+                        VStack(alignment: .leading, spacing: 8) {
+                            Text(verbatim: row.quota.window).font(.headline)
+                            ProgressView(value: Double(row.quota.percentUsed), total: 100) {
+                                Text("\(row.quota.percentUsed.formatted())% used")
+                            }
+                            if row.stale { Label("Stale quota report", systemImage: "clock.badge.exclamationmark") }
+                            CrewLabeledValue("Updated", value: CrewLabels.timestamp(row.quota.updatedAt))
+                            if let reset = row.quota.resetsAt { CrewLabeledValue("Resets", value: CrewLabels.timestamp(reset)) }
+                        }
+                        .padding(.vertical, 8)
+                    }
+                    if !group.pausedAgentIds.isEmpty {
+                        Text("Paused at a usage limit").font(.headline)
+                        ForEach(group.pausedAgentIds, id: \.self) { id in Button(id) { selectAgent(id) } }
+                        Button("Continue agents paused at limit", action: continueLimited).disabled(!resumeAvailable)
+                        Button("Restart agents paused at limit", action: restartLimited).disabled(!resumeAvailable)
+                        if let resumeReason { Text(verbatim: resumeReason).font(.callout).foregroundStyle(.secondary) }
+                    }
                 }
             }
         }

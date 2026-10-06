@@ -7,6 +7,9 @@ struct CrewRootView: View {
     @State private var navigation = CrewNavigation()
     @State private var model = CrewSessionModel()
     @State private var actionSheet: CrewActionSheet?
+    @State private var teamGraph = false
+    @State private var tasksGraph = false
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     @Environment(\.scenePhase) private var scenePhase
     @AppStorage(CrewPreferences.appearanceKey) private var appearanceRaw = CrewAppearance.system.rawValue
 
@@ -45,8 +48,8 @@ struct CrewRootView: View {
                     Button("Compose message", systemImage: "square.and.pencil") {
                         actionSheet = .compose(EntityKey(scope: scope, entity: .workspace))
                     }
-                    Button("Continue paused agents") { model.perform(.resumeLimited(scope: scope, restart: false)) }
-                    Button("Restart paused agents") { model.perform(.resumeLimited(scope: scope, restart: true)) }
+                    Button("Continue agents paused at limit") { model.perform(.resumeLimited(scope: scope, restart: false)) }
+                    Button("Restart agents paused at limit") { model.perform(.resumeLimited(scope: scope, restart: true)) }
                     Button("Stop team", role: .destructive) { model.perform(.stopTeam(scope: scope)) }
                 }
                 Button("Connections", systemImage: "network", action: showConnections)
@@ -105,9 +108,10 @@ struct CrewRootView: View {
     }
 
     @ViewBuilder private func destinationContent(_ destination: CrewDestination) -> some View {
-        if let view = model.views[destination], let scope = view.scope {
+        if let view = model.view(for: destination), let scope = view.scope {
             VStack(spacing: 0) {
                 status(view)
+                if case .overview(let data) = model.overview?.payload { CrewOverviewSummary(data: data, copy: CrewClipboard.copy) }
                 questionBanner(scope)
                 Group {
                     if view.freshness == .loading {
@@ -115,15 +119,40 @@ struct CrewRootView: View {
                     } else if view.freshness == .unavailable {
                         ContentUnavailableView("Workspace content is unavailable", systemImage: "network.slash")
                     } else { switch view.payload {
-                    case .team(let data): CrewTeamList(scope: scope, data: data, taskTitle: { id in model.tasks?.tasks.first { $0.task.id == id }?.task.title }, select: select)
-                    case .tasks(let data): CrewTaskList(scope: scope, data: data, select: select)
+                    case .team(let data):
+                        VStack(spacing: 0) {
+                            graphPicker("Team presentation", selection: $teamGraph)
+                            if teamGraph && !dynamicTypeSize.isAccessibilitySize {
+                                CrewTeamGraph(scope: scope, team: data, select: select, pairMessages: { first, second in
+                                    model.setMessageFilter(MessageFilter(endpoints: .pair(first: first, second: second), kind: nil, text: ""))
+                                    navigation.selection = .messages
+                                })
+                            } else {
+                                CrewTeamList(scope: scope, data: data, taskTitle: { id in model.tasks?.tasks.first { $0.task.id == id }?.task.title }, select: select)
+                            }
+                        }
+                    case .tasks(let data):
+                        VStack(spacing: 0) {
+                            graphPicker("Task presentation", selection: $tasksGraph)
+                            if tasksGraph && !dynamicTypeSize.isAccessibilitySize { CrewTaskGraph(scope: scope, tasks: data, select: select) }
+                            else { CrewTaskList(scope: scope, data: data, select: select) }
+                        }
                     case .messages(let page):
-                        CrewMessageList(scope: scope, page: page, select: select, loadOlder: model.loadOlderMessages)
-                            .toolbar { Button("Newest", action: model.newestMessages) }
+                        VStack(spacing: 0) {
+                            CrewMessageFilters(current: model.messageFilter, apply: model.setMessageFilter)
+                            if model.loadingOlder(.messages) { ProgressView("Reading the bounded host history window") }
+                            CrewMessageList(scope: scope, page: page, select: select, loadOlder: model.loadOlderMessages)
+                        }
+                        .toolbar { Button("Newest", action: model.newestMessages) }
                     case .events(let page):
-                        CrewEventList(scope: scope, page: page, select: select, loadOlder: model.loadOlderEvents)
-                            .toolbar { Button("Newest", action: model.newestEvents) }
-                    case .usage(let data): CrewUsageView(usage: data)
+                        VStack(spacing: 0) {
+                            CrewEventFilters(current: model.eventFilter, apply: model.setEventFilter)
+                            if model.loadingOlder(.events) { ProgressView("Reading the bounded host event window") }
+                            CrewEventList(scope: scope, page: page, select: select, loadOlder: model.loadOlderEvents)
+                        }
+                        .toolbar { Button("Newest", action: model.newestEvents) }
+                    case .usage(let data):
+                        CrewUsageView(usage: data, selectAgent: { select(EntityKey(scope: scope, entity: .agent($0))) }, resumeAvailable: false, resumeReason: "Action availability could not be loaded.", continueLimited: { model.perform(.resumeLimited(scope: scope, restart: false)) }, restartLimited: { model.perform(.resumeLimited(scope: scope, restart: true)) })
                     default: ContentUnavailableView("This view is unavailable", systemImage: destination.symbol)
                     }
                     }
@@ -131,6 +160,8 @@ struct CrewRootView: View {
                 if let feedback = model.feedback { Text(verbatim: feedback).font(.callout).padding(12) }
             }
             .refreshable { model.refresh() }
+        } else if model.notice?.workspace == .live, model.scope != nil {
+            ProgressView("Loading \(destination.title)")
         } else if let notice = model.notice, notice.endpoint != .disconnected {
             ContentUnavailableView {
                 Label(CrewFailure.workspace(notice.workspace), systemImage: "network")
@@ -163,6 +194,16 @@ struct CrewRootView: View {
         .padding(12)
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(CrewPalette.surface)
+    }
+
+    private func graphPicker(_ title: String, selection: Binding<Bool>) -> some View {
+        Picker(title, selection: selection) {
+            Text("List").tag(false)
+            Text("Graph").tag(true)
+        }
+        .pickerStyle(.segmented)
+        .padding(12)
+        .disabled(dynamicTypeSize.isAccessibilitySize)
     }
 
     @ViewBuilder private func questionBanner(_ scope: ClientScope) -> some View {

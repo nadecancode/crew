@@ -29,6 +29,7 @@ public struct CrewTerminalIdentity: Hashable {
 public final class CrewTerminalRenderer: NSObject, TerminalViewDelegate {
     public let identity: CrewTerminalIdentity
     public private(set) var endReason: TerminalEnd?
+    public var isEnded: Bool { ended }
     let view: SwiftTerm.TerminalView
     private var inputAvailable = false
     private var ended = false
