@@ -7,15 +7,19 @@ import SwiftUI
 public struct CrewTeamGraph: View {
     private let scope: ClientScope
     private let team: TeamData
+    private let selected: EntityKey?
+    private let focus: CrewFocus?
+    private let active: Bool
     private let select: (EntityKey) -> Void
     private let pairMessages: (String, String) -> Void
 
-    public init(scope: ClientScope, team: TeamData, select: @escaping (EntityKey) -> Void, pairMessages: @escaping (String, String) -> Void) {
+    public init(scope: ClientScope, team: TeamData, select: @escaping (EntityKey) -> Void, pairMessages: @escaping (String, String) -> Void, selected: EntityKey? = nil, focus: CrewFocus? = nil, active: Bool = true) {
+        self.selected = selected; self.focus = focus; self.active = active
         self.scope = scope; self.team = team; self.select = select; self.pairMessages = pairMessages
     }
 
     public var body: some View {
-        CrewGraphViewport(size: size) {
+        CrewGraphViewport(size: size, focus: focus, active: active) {
             ZStack(alignment: .topLeading) {
                 Canvas { context, _ in
                     for relation in team.relations {
@@ -40,6 +44,7 @@ public struct CrewTeamGraph: View {
                         .overlay(RoundedRectangle(cornerRadius: 12).stroke(.secondary.opacity(0.5)))
                     }
                     .buttonStyle(.plain)
+                    .modifier(CrewEntityFocus(key: EntityKey(scope: scope, entity: .agent(presentation.agent.id)), selected: selected, coordinator: focus, active: active))
                     .position(point(offset))
                     .accessibilityLabel("\(presentation.agent.id), \(presentation.statusLabel), current task \(presentation.currentWork?.taskId ?? "none")")
                     .accessibilityIdentifier("crew.graph.agent.\(presentation.agent.id)")
@@ -69,14 +74,18 @@ public struct CrewTeamGraph: View {
 public struct CrewTaskGraph: View {
     private let scope: ClientScope
     private let tasks: TasksData
+    private let selected: EntityKey?
+    private let focus: CrewFocus?
+    private let active: Bool
     private let select: (EntityKey) -> Void
 
-    public init(scope: ClientScope, tasks: TasksData, select: @escaping (EntityKey) -> Void) {
+    public init(scope: ClientScope, tasks: TasksData, select: @escaping (EntityKey) -> Void, selected: EntityKey? = nil, focus: CrewFocus? = nil, active: Bool = true) {
+        self.selected = selected; self.focus = focus; self.active = active
         self.scope = scope; self.tasks = tasks; self.select = select
     }
 
     public var body: some View {
-        CrewGraphViewport(size: size) {
+        CrewGraphViewport(size: size, focus: focus, active: active) {
             ZStack(alignment: .topLeading) {
                 Canvas { context, _ in
                     for task in tasks.tasks {
@@ -103,6 +112,7 @@ public struct CrewTaskGraph: View {
                             .overlay(RoundedRectangle(cornerRadius: 12).stroke(.secondary.opacity(0.5)))
                         }
                         .buttonStyle(.plain)
+                        .modifier(CrewEntityFocus(key: EntityKey(scope: scope, entity: .task(presentation.task.id)), selected: selected, coordinator: focus, active: active))
                         .position(point)
                         .accessibilityIdentifier("crew.graph.task.\(presentation.task.id)")
                     }
@@ -134,11 +144,14 @@ public struct CrewTaskGraph: View {
 
 private struct CrewGraphViewport<Nodes: View, Relationships: View>: View {
     let size: CGSize
+    let focus: CrewFocus?
+    let active: Bool
     private let nodes: () -> Nodes
     private let relationships: () -> Relationships
     @State private var zoom: CGFloat = 1
 
-    init(size: CGSize, @ViewBuilder nodes: @escaping () -> Nodes, @ViewBuilder relationships: @escaping () -> Relationships) {
+    init(size: CGSize, focus: CrewFocus?, active: Bool, @ViewBuilder nodes: @escaping () -> Nodes, @ViewBuilder relationships: @escaping () -> Relationships) {
+        self.focus = focus; self.active = active
         self.size = size; self.nodes = nodes; self.relationships = relationships
     }
 
@@ -155,10 +168,15 @@ private struct CrewGraphViewport<Nodes: View, Relationships: View>: View {
                     }
                     .frame(minHeight: 44)
                     .padding(.horizontal, 12)
-                    ScrollView([.horizontal, .vertical]) {
-                        nodes()
-                            .scaleEffect(zoom, anchor: .topLeading)
-                            .frame(width: size.width * zoom, height: size.height * zoom, alignment: .topLeading)
+                    ScrollViewReader { proxy in
+                        ScrollView([.horizontal, .vertical]) {
+                            nodes()
+                                .scaleEffect(zoom, anchor: .topLeading)
+                                .frame(width: size.width * zoom, height: size.height * zoom, alignment: .topLeading)
+                        }
+                        .onChange(of: focus?.request?.id) { _, _ in
+                            if active, let key = focus?.request?.target { proxy.scrollTo(key, anchor: .center) }
+                        }
                     }
                     .accessibilityLabel("Native graph. Use the List view for complete text and keyboard navigation.")
                 }

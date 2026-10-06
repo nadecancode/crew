@@ -34,6 +34,13 @@ final class CrewNoticeRoutingTests: XCTestCase {
         XCTAssertFalse(CrewNoticeRouting.endsAttachment(closed, scope: otherAttempt, attachment: 4))
     }
 
+    func testEstablishedAttachmentNotSentOrCanceledDisablesInput() {
+        for kind in [OperationOutcomeKind.notSent, .canceled] {
+            let outcome = OperationNotice(scope: scope, operationId: 8, attachmentId: 4, kind: kind, reason: nil)
+            XCTAssertTrue(CrewNoticeRouting.endsAttachment(outcome, scope: scope, attachment: 4))
+        }
+    }
+
     private let scope = ClientScope(endpointId: "synthetic-endpoint", workspaceId: "synthetic-workspace", generation: 2, daemonPid: 123, daemonStartedAtMs: 1_700_000_000_000, attempt: 4)
     private let changes = ChangeSet(revision: 3, agents: [], tasks: [], removed: [], session: false, questions: false, messages: false, events: false, usage: false, availability: true, pending: true, reset: false)
 }

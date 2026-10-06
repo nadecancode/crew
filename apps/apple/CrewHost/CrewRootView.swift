@@ -6,15 +6,30 @@ import SwiftUI
 struct CrewRootView: View {
     @State private var navigation = CrewNavigation()
     @State private var model = CrewSessionModel()
+    @State private var focus = CrewFocus()
+    @State private var selectionByDestination: [CrewDestination: EntityKey] = [:]
+    @State private var openerByDestination: [CrewDestination: EntityKey] = [:]
+    @State private var inspectorPath = NavigationPath()
+    @State private var windowWidth: CGFloat = 0
     @State private var actionSheet: CrewActionSheet?
     @State private var teamGraph = false
     @State private var tasksGraph = false
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     @Environment(\.scenePhase) private var scenePhase
+    #if os(iOS)
+    @Environment(\.horizontalSizeClass) private var horizontalSizeClass
+    #endif
     @AppStorage(CrewPreferences.appearanceKey) private var appearanceRaw = CrewAppearance.system.rawValue
 
     var body: some View {
-        CrewShell(navigation: navigation) { destination in
+        GeometryReader { geometry in
+            rootSurface
+                .onChange(of: geometry.size.width, initial: true) { _, width in windowWidth = width }
+        }
+    }
+
+    private var rootSurface: some View {
+        CrewShell(navigation: navigation, focus: canRestoreFocus ? focus : nil) { destination in
             destinationContent(destination)
                 .navigationDestination(for: EntityKey.self) { key in
                     detailContent(key)
@@ -24,7 +39,6 @@ struct CrewRootView: View {
                 .navigationDestination(for: ResourceKey.self) { key in
                     resourceContent(key)
                         .navigationTitle("Evidence")
-                        .onDisappear { model.closeResource(key) }
                 }
         } workspace: {
             Menu {
@@ -44,6 +58,10 @@ struct CrewRootView: View {
             .accessibilityIdentifier("crew.workspace")
         } utilities: {
             Menu {
+                Button(navigation.inspectorVisible ? "Hide inspector" : "Show inspector", systemImage: "sidebar.right") {
+                    navigation.inspectorVisible.toggle()
+                }
+                .disabled(!usesInspector)
                 if let scope = model.scope {
                     Button("Compose message", systemImage: "square.and.pencil") {
                         actionSheet = .compose(EntityKey(scope: scope, entity: .workspace))
@@ -78,6 +96,32 @@ struct CrewRootView: View {
             .accessibilityIdentifier("crew.options")
             .help("Actions, connections, appearance and help")
         }
+        .inspector(isPresented: Binding(
+            get: { usesInspector && navigation.inspectorVisible },
+            set: { if usesInspector { navigation.inspectorVisible = $0 } }
+        )) {
+            NavigationStack(path: $inspectorPath) {
+                Group {
+                    if let key = currentSelection {
+                        detailContent(key)
+                            .navigationTitle(detailTitle(key))
+                            .task { model.select(key) }
+                    } else {
+                        ContentUnavailableView("Select an entity", systemImage: "sidebar.right", description: Text("Open an agent, task, message or event to read its details here."))
+                    }
+                }
+                .navigationDestination(for: ResourceKey.self) { key in
+                    resourceContent(key).navigationTitle("Evidence")
+                }
+                .toolbar {
+                    ToolbarItem(placement: .cancellationAction) {
+                        Button("Close detail", systemImage: "xmark") { navigation.inspectorVisible = false }
+                            .keyboardShortcut(.cancelAction)
+                    }
+                }
+            }
+            .inspectorColumnWidth(min: 340, ideal: 400, max: 720)
+        }
         .preferredColorScheme(CrewAppearance(rawValue: appearanceRaw)?.colorScheme)
         .sheet(item: $navigation.presentedSheet) { sheet in
             CrewLocalSheet(sheet: sheet, model: model)
@@ -90,10 +134,39 @@ struct CrewRootView: View {
             Button("Cancel", role: .cancel) { model.cancelConfirmation() }.keyboardShortcut(.defaultAction)
             Button("Confirm", role: .destructive) { model.confirm(confirmation) }
         } message: { confirmation in Text(verbatim: confirmation.consequence) }
-        .onChange(of: navigation.selection, initial: true) { _, destination in model.destination = destination }
+        .onChange(of: navigation.selection, initial: true) { _, destination in
+            model.destination = destination
+            if usesInspector, navigation.inspectorVisible, let key = currentSelection { model.select(key) }
+        }
+        .onChange(of: usesInspector) { _, wide in adaptDetail(wide: wide) }
+        .onChange(of: navigation.inspectorVisible) { _, visible in
+            guard usesInspector else { return }
+            if visible, let key = currentSelection { model.select(key) }
+            else if !visible { closeDetailAndRestore() }
+        }
+        .onChange(of: model.selected) { old, selected in
+            if let selected { selectionByDestination[navigation.selection] = selected }
+            else if let old, old.scope == model.scope,
+                    (!navigation.path(for: navigation.selection).isEmpty || (usesInspector && navigation.inspectorVisible)) {
+                closeDetailAndRestore(closed: old)
+            }
+        }
+        .onChange(of: navigation.path(for: navigation.selection).count) { old, count in
+            if !usesInspector, old > 0, count == 0 { closeDetailAndRestore() }
+        }
         .onChange(of: model.scope) { _, _ in
             navigation.resetPaths()
             actionSheet = nil
+            selectionByDestination = [:]
+            openerByDestination = [:]
+            inspectorPath = NavigationPath()
+            focus.cancel()
+        }
+        .onChange(of: renderedKeys) { _, keys in
+            if let target = focus.request?.target, !keys.contains(target) {
+                focus.restore(opener: openerByDestination[navigation.selection], closed: currentSelection,
+                              rendered: keys, destination: navigation.selection)
+            }
         }
         .onChange(of: scenePhase, initial: true) { _, phase in model.setActive(phase == .active) }
         .task {
@@ -123,36 +196,36 @@ struct CrewRootView: View {
                         VStack(spacing: 0) {
                             graphPicker("Team presentation", selection: $teamGraph)
                             if teamGraph && !dynamicTypeSize.isAccessibilitySize {
-                                CrewTeamGraph(scope: scope, team: data, select: select, pairMessages: { first, second in
+                                CrewTeamGraph(scope: scope, team: data, select: selectFromRoot, pairMessages: { first, second in
                                     model.setMessageFilter(MessageFilter(endpoints: .pair(first: first, second: second), kind: nil, text: ""))
                                     navigation.selection = .messages
-                                })
+                                }, selected: openerByDestination[destination], focus: canRestoreFocus ? focus : nil, active: navigation.selection == destination && (usesInspector || navigation.path(for: destination).isEmpty))
                             } else {
-                                CrewTeamList(scope: scope, data: data, taskTitle: { id in model.tasks?.tasks.first { $0.task.id == id }?.task.title }, select: select)
+                                CrewTeamList(scope: scope, data: data, taskTitle: { id in model.tasks?.tasks.first { $0.task.id == id }?.task.title }, select: selectFromRoot, selected: openerByDestination[destination], focus: canRestoreFocus ? focus : nil, active: navigation.selection == destination && (usesInspector || navigation.path(for: destination).isEmpty))
                             }
                         }
                     case .tasks(let data):
                         VStack(spacing: 0) {
                             graphPicker("Task presentation", selection: $tasksGraph)
-                            if tasksGraph && !dynamicTypeSize.isAccessibilitySize { CrewTaskGraph(scope: scope, tasks: data, select: select) }
-                            else { CrewTaskList(scope: scope, data: data, select: select) }
+                            if tasksGraph && !dynamicTypeSize.isAccessibilitySize { CrewTaskGraph(scope: scope, tasks: data, select: selectFromRoot, selected: openerByDestination[destination], focus: canRestoreFocus ? focus : nil, active: navigation.selection == destination && (usesInspector || navigation.path(for: destination).isEmpty)) }
+                            else { CrewTaskList(scope: scope, data: data, select: selectFromRoot, selected: openerByDestination[destination], focus: canRestoreFocus ? focus : nil, active: navigation.selection == destination && (usesInspector || navigation.path(for: destination).isEmpty)) }
                         }
                     case .messages(let page):
                         VStack(spacing: 0) {
                             CrewMessageFilters(current: model.messageFilter, apply: model.setMessageFilter)
                             if model.loadingOlder(.messages) { ProgressView("Reading the bounded host history window") }
-                            CrewMessageList(scope: scope, page: page, select: select, loadOlder: model.loadOlderMessages)
+                            CrewMessageList(scope: scope, page: page, select: selectFromRoot, loadOlder: model.loadOlderMessages, selected: openerByDestination[destination], focus: canRestoreFocus ? focus : nil, active: navigation.selection == destination && (usesInspector || navigation.path(for: destination).isEmpty))
                         }
                         .toolbar { Button("Newest", action: model.newestMessages) }
                     case .events(let page):
                         VStack(spacing: 0) {
                             CrewEventFilters(current: model.eventFilter, apply: model.setEventFilter)
                             if model.loadingOlder(.events) { ProgressView("Reading the bounded host event window") }
-                            CrewEventList(scope: scope, page: page, select: select, loadOlder: model.loadOlderEvents)
+                            CrewEventList(scope: scope, page: page, select: selectFromRoot, loadOlder: model.loadOlderEvents, selected: openerByDestination[destination], focus: canRestoreFocus ? focus : nil, active: navigation.selection == destination && (usesInspector || navigation.path(for: destination).isEmpty))
                         }
                         .toolbar { Button("Newest", action: model.newestEvents) }
                     case .usage(let data):
-                        CrewUsageView(usage: data, selectAgent: { select(EntityKey(scope: scope, entity: .agent($0))) }, resumeAvailable: false, resumeReason: "Action availability could not be loaded.", continueLimited: { model.perform(.resumeLimited(scope: scope, restart: false)) }, restartLimited: { model.perform(.resumeLimited(scope: scope, restart: true)) })
+                        CrewUsageView(scope: scope, usage: data, selectAgent: { selectFromRoot(EntityKey(scope: scope, entity: .agent($0))) }, resumeAvailable: false, resumeReason: "Action availability could not be loaded.", continueLimited: { model.perform(.resumeLimited(scope: scope, restart: false)) }, restartLimited: { model.perform(.resumeLimited(scope: scope, restart: true)) }, selected: openerByDestination[destination], focus: canRestoreFocus ? focus : nil, active: navigation.selection == destination && (usesInspector || navigation.path(for: destination).isEmpty))
                     default: ContentUnavailableView("This view is unavailable", systemImage: destination.symbol)
                     }
                     }
@@ -253,13 +326,23 @@ struct CrewRootView: View {
     }
 
     private func select(_ key: EntityKey) {
+        selectionByDestination[navigation.selection] = key
         model.select(key)
-        navigation.pathBinding(for: navigation.selection).wrappedValue.append(key)
+        if usesInspector {
+            inspectorPath = NavigationPath()
+            navigation.inspectorVisible = true
+        } else { navigation.pathBinding(for: navigation.selection).wrappedValue.append(key) }
+    }
+
+    private func selectFromRoot(_ key: EntityKey) {
+        openerByDestination[navigation.selection] = key
+        select(key)
     }
 
     private func showEvidence(_ key: ResourceKey) {
         model.readResource(key)
-        navigation.pathBinding(for: navigation.selection).wrappedValue.append(key)
+        if usesInspector { inspectorPath.append(key) }
+        else { navigation.pathBinding(for: navigation.selection).wrappedValue.append(key) }
     }
 
     @ViewBuilder private func resourceContent(_ key: ResourceKey) -> some View {
@@ -285,6 +368,59 @@ struct CrewRootView: View {
     }
 
     private func showConnections() { navigation.presentedSheet = .connections }
+
+    private var canRestoreFocus: Bool { actionSheet == nil && navigation.presentedSheet == nil && model.confirmation == nil }
+
+    private var currentSelection: EntityKey? {
+        guard let key = selectionByDestination[navigation.selection], key.scope == model.scope else { return nil }
+        return key
+    }
+
+    private var usesInspector: Bool {
+        guard model.scope != nil, windowWidth >= 1_040, !dynamicTypeSize.isAccessibilitySize else { return false }
+        #if os(iOS)
+        return horizontalSizeClass == .regular
+        #else
+        return true
+        #endif
+    }
+
+    private func adaptDetail(wide: Bool) {
+        guard navigation.inspectorVisible, let key = currentSelection else { return }
+        let evidence = model.selectedResource
+        if wide {
+            navigation.replacePath(NavigationPath(), for: navigation.selection)
+            inspectorPath = NavigationPath()
+            if let evidence, !key.entity.isReadEntity { inspectorPath.append(evidence) }
+        } else if navigation.path(for: navigation.selection).isEmpty {
+            navigation.pathBinding(for: navigation.selection).wrappedValue.append(key)
+            if let evidence, !key.entity.isReadEntity { navigation.pathBinding(for: navigation.selection).wrappedValue.append(evidence) }
+        }
+    }
+
+    private func closeDetailAndRestore(closed: EntityKey? = nil) {
+        let key = closed ?? model.selected ?? currentSelection
+        navigation.inspectorVisible = false
+        navigation.replacePath(NavigationPath(), for: navigation.selection)
+        inspectorPath = NavigationPath()
+        model.closeDetail()
+        focus.restore(opener: openerByDestination[navigation.selection], closed: key,
+                      rendered: renderedKeys.subtracting(model.notice?.changes.removed ?? []), destination: navigation.selection)
+    }
+
+    private var renderedKeys: Set<EntityKey> {
+        guard let view = model.view(for: navigation.selection), let scope = view.scope else { return [] }
+        switch view.payload {
+        case .team(let data): return Set(data.agents.map { EntityKey(scope: scope, entity: .agent($0.agent.id)) })
+        case .tasks(let data): return Set(data.tasks.map { EntityKey(scope: scope, entity: .task($0.task.id)) })
+        case .messages(let page): return Set(page.items.map { EntityKey(scope: scope, entity: .message($0.id)) })
+        case .events(let page): return Set(page.items.compactMap { event in
+            UInt64(exactly: event.seq).map { EntityKey(scope: scope, entity: .event($0)) }
+        })
+        case .usage(let data): return Set(data.agents.map { EntityKey(scope: scope, entity: .agent($0.agentId)) })
+        default: return []
+        }
+    }
 }
 
 private extension Entity {

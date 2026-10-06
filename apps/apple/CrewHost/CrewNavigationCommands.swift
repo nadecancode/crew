@@ -21,6 +21,14 @@ struct CrewNavigationCommands: Commands {
             Button("Crew Help") { navigation?.presentedSheet = .help }
                 .disabled(navigation == nil)
         }
+        CommandGroup(after: .sidebar) {
+            Toggle("Show Inspector", isOn: Binding(
+                get: { navigation?.inspectorVisible ?? false },
+                set: { navigation?.inspectorVisible = $0 }
+            ))
+            .keyboardShortcut("i", modifiers: [.command, .option])
+            .disabled(navigation == nil)
+        }
     }
 }
 #endif

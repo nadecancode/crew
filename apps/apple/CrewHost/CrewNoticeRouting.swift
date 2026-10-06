@@ -9,7 +9,8 @@ enum CrewNoticeRouting {
 
     static func endsAttachment(_ outcome: OperationNotice, scope: ClientScope, attachment: UInt64) -> Bool {
         guard outcome.scope == scope, outcome.attachmentId == attachment else { return false }
-        return outcome.kind == .closedLocally || outcome.kind == .rejected || outcome.kind == .unknown
+        return outcome.kind == .closedLocally || outcome.kind == .rejected ||
+            outcome.kind == .notSent || outcome.kind == .canceled || outcome.kind == .unknown
     }
 
     static func belongsToRequestedAttach(_ outcome: OperationNotice, scope: ClientScope, operation: UInt64) -> Bool {

@@ -257,3 +257,44 @@ native source tests. The availability query will use the full captured intent;
 no mutating plan probe or Swift grant allowlist substitutes for it. The current
 quota controls explicitly remain unavailable until this result is wired.
 This is a checkpoint of an in-progress card, not whole-application acceptance.
+
+## Adaptive detail and focus source
+
+Native detail now uses the platform inspector column on a wide, regular
+window with readable text size. Width is measured by an outer GeometryReader,
+so opening the inspector cannot turn its own content-width measurement into a
+collapse/reopen loop. Compact width and accessibility text use the existing
+NavigationStack path. Resizing hands the same complete EntityKey/ResourceKey
+to the appropriate container without refetching or readdressing another
+entity. macOS exposes Show Inspector in the View menu; both platforms retain
+the options-menu control and the detail's explicit Close action. No visibility
+preference or selected entity is persisted across app sessions.
+
+A per-window focus coordinator restores a still-rendered original opener,
+then the closed entity in the current surface, then the current destination's
+own native control. IDs are full generated EntityKeys, never raw agent/task
+strings. Native lists/graphs expose selection separately from keyboard and
+VoiceOver focus, and scroll the chosen row into the viewport. A matched focus
+request is consumed once, so a later layout or push cannot replay it; scope
+retirement cancels it. Requests do not move focus while a modal editor,
+confirmation or settings sheet is active. Invalid signed event sequences
+cannot become a fabricated event-zero focus key. Four added native test cases
+cover restore ordering, disappeared/retired identity, consumption and independent
+window inspector state. Their execution remains deferred.
+
+Reviewer follow-up `m-b918bbc3dd7b` is also addressed: attachment notSent and
+canceled outcomes with the established full-scoped attachment ID disable the
+renderer. The additional native routing test covers both cases. While a
+terminal exists, a pending/availability-only notice may also come from another
+Send/Answer operation. The typed receipt/outcome path still updates the
+operator's send draft, older-read state and feedback; only full projection
+refresh is deferred until a domain change. The shared availability query will
+remain independently required before actionable control completion.
+
+Current structural check remains 585 checks / 162 objects / six targets / two
+shared schemes. All 42 Swift files parse on the pinned Linux compiler. These
+source changes add no dependency, generated-byte edit or Rust/root change.
+Native inspector sizing, focus/VoiceOver, keyboard, adaptive handoff and all
+Apple compilation/UI execution remain **Apple verification deferred by
+operator**. Availability and gateway composition are still required source
+work, rather than passed or optional acceptance rows.

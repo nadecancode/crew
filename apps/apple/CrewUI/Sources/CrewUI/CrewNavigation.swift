@@ -8,6 +8,7 @@ import SwiftUI
 public final class CrewNavigation {
     public var selection: CrewDestination = .team
     public var presentedSheet: CrewShellSheet?
+    public var inspectorVisible = true
     private var paths: [CrewDestination: NavigationPath] = [:]
 
     public init() {}
