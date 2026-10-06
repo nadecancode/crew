@@ -179,6 +179,39 @@ fn gtk_scoped_views_confirmation_terminal_order_and_live_local_service() {
     assert!(text(shell.window()).contains("parked-old"));
     assert!(text(shell.window()).contains("parked-new"));
     capture("fixture-team");
+    // Many relations stay in a collapsed, height-bounded group above the list.
+    let ViewPayload::Team(mut team) = core.view(ViewQuery::Team, clock()).unwrap().payload else {
+        panic!("team projection");
+    };
+    team.relations = (0..40)
+        .map(|i| AgentRelation {
+            parent_id: "claude-1".into(),
+            child_id: format!("helper-{i}"),
+        })
+        .collect();
+    c.team.update(Some(&scope()), &team);
+    let pairs = descendants(shell.window().upcast_ref())
+        .into_iter()
+        .find_map(|w| w.downcast::<gtk::Expander>().ok())
+        .expect("pair navigation group");
+    assert!(pairs.is_visible() && !pairs.is_expanded());
+    assert_eq!(
+        pairs.label().as_deref(),
+        Some("Conversations between related agents (40)")
+    );
+    pairs.set_expanded(true);
+    settle();
+    let pairs_scroll = pairs.child().and_downcast::<gtk::ScrolledWindow>().unwrap();
+    assert!(
+        pairs_scroll.height() <= 200,
+        "pair navigation stays bounded"
+    );
+    capture("fixture-team-many-pairs");
+    pairs.set_expanded(false);
+    recorder.queries(&c, &core);
+    c.refresh(Destination::Team);
+    recorder.queries(&c, &core);
+    assert!(!pairs.is_visible(), "the fixture has no relations");
     c.select(key(Entity::Agent("claude-1".into())));
     recorder.queries(&c, &core);
     let inspector = c.agent.borrow().as_ref().unwrap().1.clone();

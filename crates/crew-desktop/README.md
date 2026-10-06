@@ -111,8 +111,12 @@ runner checks that location, preserves private display/state isolation and uses
 the locked dependencies. A staged result must name its prerequisite source
 checkpoint; it is not a default CLI or all-workspace compatibility claim.
 
-The local source checkpoint still needs the final receipt/control test run,
-source review and the final connected UI/accessibility matrix.
+On the integrated main base the receipt/control cases, the production local
+service against a disposable daemon and real PTY, the window and keyboard
+runners, the smoke run and Clippy for both features pass in the checkout
+itself; no staged manifest is needed. The live journey waits for the daemon's
+real PTY process before Attach, since the Team row can precede the spawn.
+Source review and the final connected accessibility matrix remain.
 Gateway verification and Apple execution are separate gates; Apple verification
 is deferred by the operator. Native Linux success never implies Apple success.
 
