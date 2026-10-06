@@ -55,7 +55,16 @@ struct PtyProc {
     /// The process group is known to be empty. Once set, its id may be
     /// recycled, so it is never signalled or probed again.
     group_retired: AtomicBool,
-    output: broadcast::Sender<Vec<u8>>,
+    // Only this slot owns a sender. Reader/waiter references retain the
+    // process and its screen without keeping an ended attachment alive.
+    output: Mutex<Option<broadcast::Sender<Vec<u8>>>>,
+}
+
+impl PtyProc {
+    fn close_output(&self) {
+        let sender = self.output.lock().unwrap_or_else(|e| e.into_inner()).take();
+        drop(sender);
+    }
 }
 
 pub struct PtyManager {
@@ -304,7 +313,7 @@ impl ProcessManager for PtyManager {
             ))),
             alive: Arc::new(AtomicBool::new(true)),
             group_retired: AtomicBool::new(false),
-            output,
+            output: Mutex::new(Some(output)),
         });
 
         // Closed when the reader is done: the exit is reported after what the
@@ -331,7 +340,14 @@ impl ProcessManager for PtyManager {
                                     parser.process(chunk);
                                     answer_queries(chunk, &parser, &proc.writer);
                                 }
-                                let _ = proc.output.send(chunk.to_vec());
+                                if let Some(output) = proc
+                                    .output
+                                    .lock()
+                                    .unwrap_or_else(|e| e.into_inner())
+                                    .as_ref()
+                                {
+                                    let _ = output.send(chunk.to_vec());
+                                }
                                 if last_tick.is_none_or(|t| t.elapsed() >= OUTPUT_TICK) {
                                     last_tick = Some(Instant::now());
                                     let _ = events.send(ProcEvent::Output {
@@ -341,6 +357,9 @@ impl ProcessManager for PtyManager {
                             }
                         }
                     }
+                    // Receivers drain every queued chunk before observing
+                    // closure. Close before the waiter receives the drain.
+                    proc.close_output();
                 })
                 .context("starting the pty reader thread")?;
         }
@@ -359,6 +378,9 @@ impl ProcessManager for PtyManager {
                     // only briefly.
                     let _ = drained_rx.recv_timeout(EXIT_DRAIN);
                     proc.alive.store(false, Ordering::SeqCst);
+                    // A descendant can retain the PTY past the drain bound.
+                    // Later bytes still update the parser, not attachments.
+                    proc.close_output();
                     if pid.is_some_and(|pid| !group_exists(pid)) {
                         proc.group_retired.store(true, Ordering::SeqCst);
                     }
@@ -508,21 +530,45 @@ impl ProcessManager for PtyManager {
     }
 
     fn attach(&self, agent_id: &str) -> Result<Attachment> {
-        let proc = self.live(agent_id)?;
+        let proc = self.get(agent_id)?;
         let parser = proc
             .parser
             .lock()
             .map_err(|_| anyhow!("terminal state poisoned"))?;
         // Subscribe while holding the parser lock so no output is lost or
         // duplicated between the snapshot and the stream.
-        let output = proc.output.subscribe();
+        let output = {
+            let sender = proc
+                .output
+                .lock()
+                .map_err(|_| anyhow!("terminal output poisoned"))?;
+            match sender.as_ref() {
+                Some(sender) => sender.subscribe(),
+                None => {
+                    let (sender, receiver) = broadcast::channel(1);
+                    drop(sender);
+                    receiver
+                }
+            }
+        };
         let mut snapshot = b"\x1b[2J\x1b[H".to_vec();
         snapshot.extend_from_slice(&parser.screen().contents_formatted());
         Ok(Attachment { snapshot, output })
     }
 
     async fn resize(&self, agent_id: &str, rows: u16, cols: u16) -> Result<()> {
-        let proc = self.live(agent_id)?;
+        let proc = self.get(agent_id)?;
+        if !proc.alive.load(Ordering::SeqCst)
+            || proc
+                .output
+                .lock()
+                .map_err(|_| anyhow!("terminal output poisoned"))?
+                .is_none()
+        {
+            // The handler resizes before replaying an attachment. An ended
+            // terminal keeps its retained screen unchanged for that replay.
+            return Ok(());
+        }
         let (rows, cols) = (rows.clamp(5, 500), cols.clamp(20, 1000));
         proc.master
             .lock()
@@ -598,6 +644,137 @@ mod tests {
             "'{needle}' never appeared on screen: {:?}",
             mgr.screen(id, 50).await
         );
+    }
+
+    fn finished_output(output: &mut broadcast::Receiver<Vec<u8>>) -> Result<Vec<u8>> {
+        let mut bytes = Vec::new();
+        loop {
+            match output.try_recv() {
+                Ok(chunk) => bytes.extend_from_slice(&chunk),
+                Err(broadcast::error::TryRecvError::Closed) => return Ok(bytes),
+                Err(error) => bail!("terminal output did not finish after process exit: {error}"),
+            }
+        }
+    }
+
+    #[tokio::test]
+    async fn terminal_output_ends_after_natural_exit_and_kill_without_losing_final_bytes() {
+        for killed in [false, true] {
+            let (tx, mut rx) = mpsc::unbounded_channel();
+            let mgr = PtyManager::new(tx);
+            mgr.spawn(&spec(
+                "a",
+                "sh",
+                &[
+                    "-c",
+                    "trap 'printf \"pty-final\\n\"; exit 0' TERM; printf 'pty-ready\\n'; read -r line; printf 'pty-final\\n'",
+                ],
+            ))
+            .await
+            .unwrap();
+            wait_for_screen(&mgr, "a", "pty-ready").await;
+            let mut attachment = mgr.attach("a").unwrap();
+            let mut second = mgr.attach("a").unwrap();
+            if killed {
+                mgr.kill("a").await.unwrap();
+            } else {
+                mgr.write_raw("a", b"finish\n").await.unwrap();
+            }
+            wait_for_exit(&mut rx).await;
+            let bytes = finished_output(&mut attachment.output).unwrap();
+            let text = String::from_utf8_lossy(&bytes);
+            assert_eq!(text.matches("pty-final").count(), 1, "{text:?}");
+            let bytes = finished_output(&mut second.output).unwrap();
+            let text = String::from_utf8_lossy(&bytes);
+            assert_eq!(text.matches("pty-final").count(), 1, "{text:?}");
+            assert!(mgr.screen("a", 50).await.unwrap().contains("pty-final"));
+            assert!(!mgr.is_alive("a"));
+
+            // Restart replaces the process, not the old attachment's channel.
+            mgr.spawn(&spec(
+                "a",
+                "sh",
+                &[
+                    "-c",
+                    "printf 'new-ready\\n'; read -r line; printf 'new-final\\n'",
+                ],
+            ))
+            .await
+            .unwrap();
+            wait_for_screen(&mgr, "a", "new-ready").await;
+            assert!(matches!(
+                attachment.output.try_recv(),
+                Err(broadcast::error::TryRecvError::Closed)
+            ));
+            let mut replacement = mgr.attach("a").unwrap();
+            assert!(!String::from_utf8_lossy(&replacement.snapshot).contains("pty-final"));
+            mgr.write_raw("a", b"finish\n").await.unwrap();
+            wait_for_exit(&mut rx).await;
+            let bytes = finished_output(&mut replacement.output).unwrap();
+            assert!(String::from_utf8_lossy(&bytes).contains("new-final"));
+        }
+    }
+
+    #[tokio::test]
+    async fn ended_terminal_replay_survives_resize_and_an_eof_liveness_race() {
+        let (tx, mut rx) = mpsc::unbounded_channel();
+        let mgr = PtyManager::new(tx);
+        mgr.spawn(&spec("a", "printf", &["%s", "retained-terminal"]))
+            .await
+            .unwrap();
+        wait_for_exit(&mut rx).await;
+        let before = mgr.screen("a", 50).await.unwrap();
+        let styled = mgr.styled("a", 50).await.unwrap();
+        let proc = mgr.get("a").unwrap();
+        let size = proc.parser.lock().unwrap().screen().size();
+        // EOF may precede the waiter's alive=false store. Both states must
+        // replay a closed attachment without resizing the retained screen.
+        for alive in [false, true] {
+            proc.alive.store(alive, Ordering::SeqCst);
+            mgr.resize("a", 5, 20).await.unwrap();
+            let mut attachment = mgr.attach("a").unwrap();
+            assert!(String::from_utf8_lossy(&attachment.snapshot).contains("retained-terminal"));
+            assert!(matches!(
+                attachment.output.try_recv(),
+                Err(broadcast::error::TryRecvError::Closed)
+            ));
+            assert_eq!(mgr.screen("a", 50).await.unwrap(), before);
+            assert_eq!(mgr.styled("a", 50).await.unwrap(), styled);
+            assert_eq!(proc.parser.lock().unwrap().screen().size(), size);
+        }
+        proc.alive.store(false, Ordering::SeqCst);
+        assert!(mgr.write_raw("a", b"must not run").await.is_err());
+    }
+
+    #[tokio::test]
+    async fn exit_drain_ends_attachments_while_descendant_bytes_still_update_the_screen() {
+        let tmp = tempfile::tempdir().unwrap();
+        let release = tmp.path().join("release");
+        let script = format!(
+            "trap '' HUP; printf 'leader-ready\\n'; read -r line; (while [ ! -f '{}' ]; do sleep 0.05; done; printf 'descendant-final\\n') & exit 0",
+            release.display()
+        );
+        let (tx, mut rx) = mpsc::unbounded_channel();
+        let mgr = PtyManager::new(tx);
+        mgr.spawn(&spec("a", "sh", &["-c", &script])).await.unwrap();
+        wait_for_screen(&mgr, "a", "leader-ready").await;
+        let mut attachment = mgr.attach("a").unwrap();
+        mgr.write_raw("a", b"finish\n").await.unwrap();
+        wait_for_exit(&mut rx).await;
+        let ended = finished_output(&mut attachment.output);
+        // Always release the child before asserting, including before-control
+        // failures, so the fixture cannot leave it holding the PTY open.
+        std::fs::write(&release, b"release").unwrap();
+        wait_for_screen(&mgr, "a", "descendant-final").await;
+        mgr.kill("a").await.unwrap();
+        let bytes = ended.unwrap();
+        assert!(!String::from_utf8_lossy(&bytes).contains("descendant-final"));
+        let mut replay = mgr.attach("a").unwrap();
+        assert!(String::from_utf8_lossy(&replay.snapshot).contains("descendant-final"));
+        assert!(matches!(
+            replay.output.try_recv(),
+            Err(broadcast::error::TryRecvError::Closed)
+        ));
     }
 
     #[test]
