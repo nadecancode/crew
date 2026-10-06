@@ -221,6 +221,9 @@ no-output success, failed attach, local detach and stale refusal. The latter
 uses synthetic LocalOperator IO and does not claim a daemon/PTY run. Apple
 source consumes that contract; unowned Rust files are not copied into this
 worktree. The matching integrated library must include this source chain.
+The integrated `native-transport-validation` checkpoint `ea7488e9` (evidence
+`4cde01b9`, PTY journeys `d06db944`) adds the actual-engine attachment proof
+that this composition relies on.
 
 Native geometry now provides explicit List/Graph modes, Fit/Zoom and textual
 relationship/dependency alternatives from the supplied TeamData/TasksData.
@@ -581,3 +584,17 @@ These are source-reviewed but need the deferred Apple run:
 - Typing in compose, prompt, answer and model-note fields shows no lag from
   the per-keystroke availability query; debounce in the view modifier if it
   does.
+
+## Source gate status
+
+All source gates on `native-apple-ui` are composed: the real local facade on
+macOS; the released availability chain (`75173b46`, imported `e1b8fc32`); the
+released gateway ports (`62d2d7b6`, imported `d49d2451`) for iOS and macOS
+remote connections through `CrewClient.gateway`, the typed `DeviceSigner` and
+the setup ports; and the identified-attachment contract (`cda71035`,
+`cbc6a505`, integrated in `ea7488e9`), with the terminal renderer created from
+the successful Attach's full-scope attachment ID before output. Every check
+reported here is structural, parsing or Linux typechecking against the actual
+generated bindings. No Apple compilation, linking, simulator, device, Keychain,
+VoiceOver or gateway connection has run: **Apple execution deferred by
+operator**.
