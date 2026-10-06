@@ -665,7 +665,9 @@ fn real_native_mutation_reply_loss_is_unknown_once_and_not_replayed_after_fresh_
         service.reconnect().unwrap();
         let newer = notice(&notices, |notice| notice.workspace == WorkspaceStatus::Live && notice.scope.as_ref().is_some_and(|current| current.attempt > scope.attempt)).scope.unwrap();
         assert_eq!(newer.daemon_pid, scope.daemon_pid); assert_eq!(newer.daemon_started_at_ms, scope.daemon_started_at_ms);
-        assert!(matches!(service.query(ViewQuery::AgentDetail { id: "alpha".into() }).unwrap().payload,
+        let fresh = service.query(ViewQuery::AgentDetail { id: "alpha".into() }).unwrap();
+        assert_eq!(fresh.scope.as_ref(), Some(&newer)); assert_eq!(fresh.freshness, Freshness::Fresh);
+        assert!(matches!(fresh.payload,
             ViewPayload::AgentDetail(data) if data.agent.as_ref().is_some_and(|agent| agent.agent.paused)), "the real daemon accepted the mutation despite a lost reply");
         assert_eq!(pauses.load(Ordering::Acquire), 1, "unknown mutation is never replayed");
         while let Ok(notice) = notices.try_recv() {
