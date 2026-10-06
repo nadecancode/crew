@@ -238,10 +238,10 @@ impl Fence {
                 return Ok(());
             }
             if grants.iter().any(|(id, new)| {
-                state
-                    .grants
-                    .get(id)
-                    .is_some_and(|old| old.grant_generation == new.grant_generation && old != new)
+                state.grants.get(id).is_some_and(|old| {
+                    new.grant_generation < old.grant_generation
+                        || (old.grant_generation == new.grant_generation && old != new)
+                })
             }) {
                 return Err(TransportEnd::Malformed);
             }

@@ -63,6 +63,22 @@ fn fresh_grant_proof_ahead_of_index_preserves_new_channel_and_never_rolls_back()
     };
     fence.listing(index, &current).unwrap();
     assert!(fence.admitted(fresh));
+    let rollback = GatewayListing {
+        grants: vec![grant()],
+        listing: Workspaces {
+            rev: 3,
+            ..current.listing.clone()
+        },
+        ..current.clone()
+    };
+    assert_eq!(
+        fence.listing(index, &rollback),
+        Err(crate::TransportEnd::Malformed)
+    );
+    assert!(
+        fence.admitted(fresh),
+        "rejected metadata cannot downgrade the proven grant"
+    );
     let (stop, _cancel) = tokio::sync::watch::channel(None);
     let stale = fence
         .register(Some(grant().workspace_id), stop, queue.register(4).unwrap())
