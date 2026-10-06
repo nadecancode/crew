@@ -14,6 +14,8 @@ pub mod controller;
 #[cfg(all(feature = "native-ui", target_os = "linux"))]
 pub mod dialogs;
 #[cfg(all(feature = "native-ui", target_os = "linux"))]
+pub mod lifecycle;
+#[cfg(all(feature = "native-ui", target_os = "linux"))]
 pub mod navigation;
 #[cfg(all(feature = "native-ui", feature = "local", target_os = "linux"))]
 pub mod service;

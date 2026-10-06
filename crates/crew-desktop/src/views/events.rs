@@ -137,17 +137,3 @@ impl EventsView {
         );
     }
 }
-
-pub fn detail(event: Option<&crew_protocol::Event>) -> gtk::ScrolledWindow {
-    let body = common::column();
-    let Some(event) = event else {
-        body.append(&common::heading("Event not retained"));
-        return common::scroll(&body);
-    };
-    body.append(&common::heading(&event.event_type));
-    common::fact(&body, "Level", event.level.as_str());
-    common::fact(&body, "Agent", event.agent_id.as_deref().unwrap_or("Team"));
-    common::fact(&body, "Sequence", &event.seq.to_string());
-    body.append(&common::selectable(&event.message));
-    common::scroll(&body)
-}

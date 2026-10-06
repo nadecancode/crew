@@ -247,7 +247,7 @@ impl Controller {
                     }
                 }),
             );
-            let status = common::text("Disconnected · no workspace verified");
+            let status = common::text("Not connected");
             let result = common::text("");
             status.set_max_width_chars(22);
             result.set_max_width_chars(22);
@@ -687,11 +687,6 @@ impl Controller {
                         .as_ref()
                         .map_or("No workspace selected", |scope| scope.workspace_id.as_str()),
                 )]);
-            self.workspace_label.set_tooltip_text(
-                visible_scope
-                    .as_ref()
-                    .map(|scope| scope.workspace_id.as_str()),
-            );
             self.message_before.borrow_mut().take();
             self.event_before.borrow_mut().take();
             self.query(ViewQuery::Overview, QueryTarget::Overview);
@@ -712,15 +707,15 @@ impl Controller {
         if !self.live.get() {
             self.cancel_confirmation();
         }
-        self.status.set_label(&format!(
-            "{:?} · {:?}{}",
+        let status = crate::lifecycle::status(
             notice.endpoint,
             notice.workspace,
-            notice
-                .reason
-                .as_ref()
-                .map_or(String::new(), |r| format!("\n{}", r.message))
-        ));
+            notice.reason.as_ref().map(|reason| reason.message.as_str()),
+        );
+        self.status.set_label(&status);
+        if let Some(selector) = self.workspace_label.parent() {
+            selector.set_tooltip_text(Some(&status));
+        }
         if let Some((_, agent)) = self.agent.borrow().as_ref() {
             agent.set_live(self.live.get());
         }
@@ -1382,9 +1377,13 @@ impl Controller {
         match result {
             Ok(ActionPlan::Dispatch { operation_id }) => {
                 let identified_send = matches!(action.intent, ActionIntent::SendMessage { .. });
+                // The global status is for mutations. A read shows its progress
+                // in its own tab; terminal writes would flood it.
                 let quiet = matches!(
                     action.intent,
-                    ActionIntent::AttachInput { .. } | ActionIntent::AttachResize { .. }
+                    ActionIntent::Read { .. }
+                        | ActionIntent::AttachInput { .. }
+                        | ActionIntent::AttachResize { .. }
                 );
                 if !quiet {
                     self.result
@@ -1462,7 +1461,10 @@ impl Controller {
         }
     }
     fn action_failed(&self, action: &PendingAction, message: &str) {
-        self.result.set_label(message);
+        // A failed read is shown by its evidence view, not the global status.
+        if !matches!(action.intent, ActionIntent::Read { .. }) {
+            self.result.set_label(message);
+        }
         if let Some(id) = action.form {
             let form = self.forms.borrow().get(&id).map(|f| f.form.clone());
             if let Some(form) = form {
@@ -1628,7 +1630,9 @@ impl Controller {
             } else {
                 self.action_failed(&action, &message);
             }
-            if outcome.kind == OperationOutcomeKind::Unknown {
+            if outcome.kind == OperationOutcomeKind::Unknown
+                && !matches!(action.intent, ActionIntent::Read { .. })
+            {
                 self.result.set_label(&format!(
                     "Outcome unknown: {message}. Check the current state before trying again."
                 ));

@@ -1,4 +1,4 @@
-use std::{collections::BTreeMap, rc::Rc};
+use std::{cell::RefCell, collections::BTreeMap, rc::Rc};
 
 use crew_client::api::EntityKey;
 use gtk::prelude::*;
@@ -73,22 +73,59 @@ impl EntityList {
     }
 }
 
+/// A pane or page body: 24 pixels from the pane edge, 12 between items.
 pub fn column() -> gtk::Box {
-    let column = gtk::Box::new(gtk::Orientation::Vertical, 8);
-    for edge in [
-        gtk::PositionType::Top,
-        gtk::PositionType::Bottom,
-        gtk::PositionType::Left,
-        gtk::PositionType::Right,
-    ] {
-        match edge {
-            gtk::PositionType::Top => column.set_margin_top(16),
-            gtk::PositionType::Bottom => column.set_margin_bottom(16),
-            gtk::PositionType::Left => column.set_margin_start(16),
-            _ => column.set_margin_end(16),
-        }
-    }
+    let column = gtk::Box::new(gtk::Orientation::Vertical, 12);
+    column.set_margin_top(24);
+    column.set_margin_bottom(24);
+    column.set_margin_start(24);
+    column.set_margin_end(24);
     column
+}
+
+/// One list row's body: 12 pixels above and below, aligned with the page's
+/// 24-pixel edge, 4 between its lines.
+pub fn row() -> gtk::Box {
+    let row = gtk::Box::new(gtk::Orientation::Vertical, 4);
+    row.set_margin_top(12);
+    row.set_margin_bottom(12);
+    row.set_margin_start(24);
+    row.set_margin_end(24);
+    row
+}
+
+/// A row's first line: its identity, then its status chip at the end.
+pub fn row_title(title: &str, chip: Option<gtk::Label>) -> gtk::Box {
+    let line = gtk::Box::new(gtk::Orientation::Horizontal, 12);
+    let label = text(title);
+    label.add_css_class("heading");
+    label.set_hexpand(true);
+    line.append(&label);
+    if let Some(chip) = chip {
+        chip.set_valign(gtk::Align::Start);
+        line.append(&chip);
+    }
+    line
+}
+
+/// A row for a place to connect to: its title, detail and state, with room
+/// at the end for the actions that fit that state.
+pub fn entry_row(title: &str, detail: &str, state: &str) -> gtk::Box {
+    let row = gtk::Box::new(gtk::Orientation::Horizontal, 12);
+    row.add_css_class("crew-row");
+    let lines = gtk::Box::new(gtk::Orientation::Vertical, 4);
+    lines.set_hexpand(true);
+    let name = text(title);
+    name.add_css_class("heading");
+    lines.append(&name);
+    if !detail.is_empty() {
+        lines.append(&muted(detail));
+    }
+    if !state.is_empty() {
+        lines.append(&muted(state));
+    }
+    row.append(&lines);
+    row
 }
 
 /// Plain wrapped text. Not selectable: list rows, status and reason lines
@@ -109,19 +146,106 @@ pub fn selectable(value: &str) -> gtk::Label {
     label
 }
 
-pub fn heading(value: &str) -> gtk::Label {
+/// Secondary text.
+pub fn muted(value: &str) -> gtk::Label {
     let label = text(value);
-    label.add_css_class("title-2");
+    label.add_css_class("crew-muted");
     label
 }
 
-pub fn fact(container: &gtk::Box, name: &str, value: &str) {
-    let line = gtk::Box::new(gtk::Orientation::Vertical, 4);
-    let label = text(name);
-    label.add_css_class("crew-muted");
-    line.append(&label);
-    line.append(&selectable(value));
-    container.append(&line);
+/// A page or entity title.
+pub fn title(value: &str) -> gtk::Label {
+    let label = text(value);
+    label.add_css_class("title-3");
+    label
+}
+
+/// A section title within a page or pane.
+pub fn heading(value: &str) -> gtk::Label {
+    let label = text(value);
+    label.add_css_class("heading");
+    label
+}
+
+/// A reason line for unavailable or failed controls: muted, and hidden while
+/// it has nothing to say so it takes no room.
+pub fn reason() -> gtk::Label {
+    let label = muted("");
+    label.set_visible(false);
+    label.connect_label_notify(|label| label.set_visible(!label.label().is_empty()));
+    label
+}
+
+/// Facts as two columns: muted names, copyable values. Rows are kept and
+/// updated in place, so a pushed update does not move a reader's text
+/// selection; absent and empty values are left out.
+#[derive(Clone)]
+pub struct Facts {
+    pub root: gtk::Grid,
+    rows: Rc<RefCell<Vec<(gtk::Label, gtk::Label)>>>,
+}
+
+impl Default for Facts {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl Facts {
+    pub fn new() -> Self {
+        let root = gtk::Grid::builder()
+            .column_spacing(24)
+            .row_spacing(6)
+            .build();
+        Self {
+            root,
+            rows: Rc::default(),
+        }
+    }
+
+    pub fn with(facts: &[(&str, Option<String>)]) -> Self {
+        let grid = Self::new();
+        grid.set(facts);
+        grid
+    }
+
+    pub fn set(&self, facts: &[(&str, Option<String>)]) {
+        let present: Vec<(&str, &str)> = facts
+            .iter()
+            .filter_map(|(name, value)| {
+                value
+                    .as_deref()
+                    .filter(|value| !value.is_empty())
+                    .map(|value| (*name, value))
+            })
+            .collect();
+        let mut rows = self.rows.borrow_mut();
+        while rows.len() < present.len() {
+            let name = muted("");
+            name.set_valign(gtk::Align::Start);
+            name.set_wrap(false);
+            let value = selectable("");
+            value.set_hexpand(true);
+            let index = rows.len() as i32;
+            self.root.attach(&name, 0, index, 1, 1);
+            self.root.attach(&value, 1, index, 1, 1);
+            rows.push((name, value));
+        }
+        for (index, (name, value)) in rows.iter().enumerate() {
+            let fact = present.get(index);
+            name.set_visible(fact.is_some());
+            value.set_visible(fact.is_some());
+            if let Some((fact_name, fact_value)) = fact {
+                if name.label() != *fact_name {
+                    name.set_label(fact_name);
+                }
+                if value.label() != *fact_value {
+                    value.set_label(fact_value);
+                }
+            }
+        }
+        self.root.set_visible(!present.is_empty());
+    }
 }
 
 pub fn scroll(widget: &impl IsA<gtk::Widget>) -> gtk::ScrolledWindow {

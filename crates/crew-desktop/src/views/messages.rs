@@ -156,28 +156,3 @@ impl MessagesView {
         );
     }
 }
-
-pub fn detail(
-    message: Option<&crew_protocol::Message>,
-    parent: Rc<dyn Fn(String)>,
-) -> gtk::ScrolledWindow {
-    let body = common::column();
-    let Some(message) = message else {
-        body.append(&common::heading("Message no longer available"));
-        return common::scroll(&body);
-    };
-    body.append(&common::heading(&format!(
-        "{} to {}",
-        message.from, message.to
-    )));
-    common::fact(&body, "Type", message.kind.as_str());
-    common::fact(&body, "Message", &message.id);
-    body.append(&common::selectable(&message.body));
-    if let Some(id) = &message.reply_to {
-        let button = gtk::Button::with_label("Open parent message");
-        let id = id.clone();
-        button.connect_clicked(move |_| parent(id.clone()));
-        body.append(&button);
-    }
-    common::scroll(&body)
-}

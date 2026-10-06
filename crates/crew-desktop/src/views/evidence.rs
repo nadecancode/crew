@@ -16,13 +16,26 @@ pub struct EvidenceView {
 }
 impl EvidenceView {
     pub fn new(refresh: impl Fn() + 'static) -> Self {
-        let root = gtk::Box::new(gtk::Orientation::Vertical, 8);
-        let status = common::text("Not loaded");
-        root.append(&status);
-        let refresh_button = gtk::Button::with_label("Refresh evidence");
+        let root = gtk::Box::new(gtk::Orientation::Vertical, 0);
+        // Read progress and failures stay in this tab; the window status line
+        // is for mutations only.
+        let bar = gtk::Box::new(gtk::Orientation::Horizontal, 12);
+        bar.set_margin_top(12);
+        bar.set_margin_bottom(12);
+        bar.set_margin_start(24);
+        bar.set_margin_end(24);
+        let status = common::muted("Not loaded");
+        status.set_hexpand(true);
+        status.set_valign(gtk::Align::Center);
+        bar.append(&status);
+        let refresh_button = gtk::Button::with_label("Refresh");
+        refresh_button.set_valign(gtk::Align::Center);
         refresh_button.connect_clicked(move |_| refresh());
-        root.append(&refresh_button);
+        bar.append(&refresh_button);
+        root.append(&bar);
         let links = gtk::Box::new(gtk::Orientation::Vertical, 4);
+        links.set_margin_start(24);
+        links.set_margin_end(24);
         root.append(&links);
         let view = gtk::TextView::builder()
             .editable(false)
@@ -59,16 +72,15 @@ impl EvidenceView {
         *self.link_signature.borrow_mut() = signature;
     }
     pub fn update(&self, state: &ResourceState) {
-        let label = format!(
-            "{:?} · {:?}{}",
-            state.key.kind,
-            state.status,
-            state
-                .error
-                .as_ref()
-                .map_or(String::new(), |e| format!(" · {}", e.message))
-        );
-        self.status.set_label(&label);
+        let label = status_text(state);
+        if self.status.label() != label {
+            self.status.set_label(&label);
+        }
+        if state.status == ResourceStatus::Failed {
+            self.status.add_css_class("error");
+        } else {
+            self.status.remove_css_class("error");
+        }
         let text = state.value.as_ref().map_or_else(String::new, value_text);
         if common::buffer_text(&self.view.buffer()) != text {
             let offset = self.scroll.vadjustment().value();
@@ -169,14 +181,21 @@ pub fn value_text(value: &ResourceValue) -> String {
             .iter()
             .map(|e| {
                 format!(
-                    "{} to {} · {}\n{}\n{}\nDelivered: {:?}, acknowledged: {:?}",
+                    "{} to {} · {}\n{}\n{}\n{}",
                     e.message.from,
                     e.message.to,
                     e.message.kind,
                     common::timestamp(e.message.timestamp),
                     e.message.body,
-                    e.delivered_at,
-                    e.acked_at
+                    match (e.delivered_at, e.acked_at) {
+                        (None, _) => "Not delivered yet".to_owned(),
+                        (Some(at), None) => format!("Delivered {}", common::timestamp(at)),
+                        (Some(at), Some(read)) => format!(
+                            "Delivered {} · acknowledged {}",
+                            common::timestamp(at),
+                            common::timestamp(read)
+                        ),
+                    }
                 )
             })
             .collect::<Vec<_>>()
@@ -224,5 +243,39 @@ pub fn value_text(value: &ResourceValue) -> String {
             })
             .collect::<Vec<_>>()
             .join("\n\n"),
+    }
+}
+
+fn noun(kind: ResourceKind) -> &'static str {
+    match kind {
+        ResourceKind::TaskCard => "task card",
+        ResourceKind::Message => "message",
+        ResourceKind::Event => "event",
+        ResourceKind::Transcript => "transcript",
+        ResourceKind::Diff => "diff",
+        ResourceKind::Output => "host screen",
+        ResourceKind::Inbox => "inbox",
+        ResourceKind::Models => "model list",
+        ResourceKind::History => "message history",
+        ResourceKind::Events => "event history",
+    }
+}
+
+/// The read's state in words, with the source's own reason where it gave one.
+pub fn status_text(state: &ResourceState) -> String {
+    let noun = noun(state.key.kind);
+    let phrase = match state.status {
+        ResourceStatus::Idle => "Not loaded".to_owned(),
+        ResourceStatus::Loading if state.value.is_some() => format!("Refreshing the {noun}…"),
+        ResourceStatus::Loading => format!("Loading the {noun}…"),
+        ResourceStatus::Ready => format!("Loaded {noun}"),
+        ResourceStatus::Empty => format!("No {noun} to show"),
+        ResourceStatus::Unsupported => format!("The {noun} is not available here"),
+        ResourceStatus::Failed => format!("Could not load the {noun}"),
+        ResourceStatus::Stale => format!("Last known {noun} · refresh when live"),
+    };
+    match &state.error {
+        Some(error) if !error.message.is_empty() => format!("{phrase}\n{}", error.message),
+        _ => phrase,
     }
 }
