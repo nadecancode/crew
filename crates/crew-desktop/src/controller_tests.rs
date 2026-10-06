@@ -862,13 +862,13 @@ fn live_local(app: &gtk::Application) {
         "Connect to local workspace",
     )
     .emit_clicked();
-    until(|| c.live.get());
+    live_until(&c, || c.live.get());
     eprintln!("Private daemon live");
     assert_eq!(
         c.scope.borrow().as_ref().unwrap().workspace_id,
         path.to_string_lossy()
     );
-    until(|| c.connection.borrow().is_some());
+    live_until(&c, || c.connection.borrow().is_some());
     assert_eq!(
         c.connection.borrow().as_ref().unwrap().mode,
         ConnectionMode::LocalOperator
@@ -883,14 +883,16 @@ fn live_local(app: &gtk::Application) {
             ..Default::default()
         }))
         .unwrap();
-    until(|| text(shell.window()).contains("Real private daemon message"));
+    live_until(&c, || {
+        text(shell.window()).contains("Real private daemon message")
+    });
     capture("live-local-messages");
     let scope = c.scope.borrow().clone().unwrap();
     c.select(EntityKey {
         scope,
         entity: Entity::Message("gtk-live-message".into()),
     });
-    until(|| {
+    live_until(&c, || {
         text(shell.window()).contains("Ready")
             && descendants(shell.window().upcast_ref())
                 .iter()
@@ -903,8 +905,10 @@ fn live_local(app: &gtk::Application) {
     form.buffer
         .set_text("Submitted through the real GTK service");
     form.dialog.response(gtk::ResponseType::Accept);
-    until(|| c.forms.borrow().is_empty());
-    until(|| text(shell.window()).contains("Submitted through the real GTK service"));
+    live_until(&c, || c.forms.borrow().is_empty());
+    live_until(&c, || {
+        text(shell.window()).contains("Submitted through the real GTK service")
+    });
     capture("live-local-send");
 
     let config: crew_core::config::TeamConfig = serde_json::from_value(serde_json::json!({
@@ -918,18 +922,34 @@ fn live_local(app: &gtk::Application) {
         })
         .unwrap();
     shell.navigate(Destination::Team);
-    until(|| text(shell.window()).contains("pty-fixture"));
+    live_until(&c, || text(shell.window()).contains("pty-fixture"));
+    // The Team row can precede the real spawn, and the daemon rejects Attach
+    // with "has no process" until the PTY exists. Wait for that process.
+    live_until(&c, || {
+        let snapshot: crew_core::rpc::Snapshot = caller
+            .call(crew_core::rpc::Call::Snapshot {
+                messages: Some(0),
+                events: Some(0),
+            })
+            .unwrap();
+        snapshot
+            .agents
+            .iter()
+            .any(|agent| agent.id == "pty-fixture" && agent.pid.is_some())
+    });
     let live_scope = c.scope.borrow().clone().unwrap();
     let agent_key = EntityKey {
         scope: live_scope.clone(),
         entity: Entity::Agent("pty-fixture".into()),
     };
     c.select(agent_key.clone());
-    until(|| c.agent.borrow().as_ref().unwrap().1.root.is_mapped());
+    live_until(&c, || c.agent.borrow().as_ref().unwrap().1.root.is_mapped());
     let agent = c.agent.borrow().as_ref().unwrap().1.clone();
-    until(|| button(&agent.root, "Attach PTY terminal").is_sensitive());
+    live_until(&c, || {
+        button(&agent.root, "Attach PTY terminal").is_sensitive()
+    });
     button(&agent.root, "Attach PTY terminal").emit_clicked();
-    until(|| agent.terminal.is_active());
+    live_until(&c, || agent.terminal.is_active());
     let tabs = descendants(agent.root.upcast_ref())
         .into_iter()
         .find_map(|w| w.downcast::<gtk::Notebook>().ok())
@@ -944,7 +964,7 @@ fn live_local(app: &gtk::Application) {
         .unwrap()
         .2
         .clone();
-    until(|| renderer.terminal.is_realized());
+    live_until(&c, || renderer.terminal.is_realized());
     c.plan(
         ActionIntent::AttachInput {
             scope,
@@ -954,7 +974,7 @@ fn live_local(app: &gtk::Application) {
         None,
         None,
     );
-    until(|| {
+    live_until(&c, || {
         let output: crew_core::rpc::OutputResult = caller
             .call(crew_core::rpc::Call::AgentOutput {
                 id: "pty-fixture".into(),
@@ -967,7 +987,7 @@ fn live_local(app: &gtk::Application) {
     });
     capture("live-local-terminal");
     button(&renderer.root, "Detach terminal").emit_clicked();
-    until(|| !renderer.is_active());
+    live_until(&c, || !renderer.is_active());
     assert!(
         c.live.get(),
         "local detach keeps the workspace connection usable"
@@ -1028,6 +1048,26 @@ fn until(mut condition: impl FnMut() -> bool) {
     let deadline = Instant::now() + Duration::from_secs(10);
     while !condition() {
         assert!(Instant::now() < deadline, "GTK/service condition timed out");
+        settle();
+        std::thread::sleep(Duration::from_millis(5));
+    }
+    settle();
+}
+/// `until` against the real service, reporting controller state on timeout.
+fn live_until(c: &Controller, mut condition: impl FnMut() -> bool) {
+    let deadline = Instant::now() + Duration::from_secs(10);
+    while !condition() {
+        assert!(
+            Instant::now() < deadline,
+            "GTK/service condition timed out: status {:?}, result {:?}, scope {:?}, \
+             agent panel {}, plans {}, operations {}",
+            c.status.label(),
+            c.result.label(),
+            c.scope.borrow(),
+            c.agent.borrow().is_some(),
+            c.plans.borrow().len(),
+            c.operations.borrow().len()
+        );
         settle();
         std::thread::sleep(Duration::from_millis(5));
     }

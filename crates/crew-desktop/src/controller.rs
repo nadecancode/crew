@@ -416,7 +416,11 @@ impl Controller {
                                 .and_then(|c| c.scope.borrow().clone())
                                 .map_or(
                                     ControlInput::Invalid("Choose a workspace.".into()),
-                                    |scope| ControlInput::Action(ActionIntent::StopTeam { scope }),
+                                    |scope| {
+                                        ControlInput::Action(Box::new(ActionIntent::StopTeam {
+                                            scope,
+                                        }))
+                                    },
                                 )
                         }
                     }),
@@ -462,10 +466,9 @@ impl Controller {
                                     .map_or(
                                         ControlInput::Invalid("Choose a workspace.".into()),
                                         |scope| {
-                                            ControlInput::Action(ActionIntent::ResumeLimited {
-                                                scope,
-                                                restart,
-                                            })
+                                            ControlInput::Action(Box::new(
+                                                ActionIntent::ResumeLimited { scope, restart },
+                                            ))
                                         },
                                     )
                             }
@@ -1339,11 +1342,11 @@ impl Controller {
                 {
                     self.query(
                         ViewQuery::Availability {
-                            intent: Box::new(intent.clone()),
+                            intent: intent.clone(),
                         },
                         QueryTarget::Availability {
                             control: id,
-                            intent: Box::new(intent),
+                            intent,
                         },
                     );
                     return;
@@ -1963,12 +1966,12 @@ impl Controller {
                 let scope = key.scope.clone();
                 let buffer = form.buffer.clone();
                 move || {
-                    ControlInput::Action(ActionIntent::AgentInput {
+                    ControlInput::Action(Box::new(ActionIntent::AgentInput {
                         scope: scope.clone(),
                         id: id.clone(),
                         text: Some(common::buffer_text(&buffer)),
                         submit: true,
-                    })
+                    }))
                 }
             }),
         );
@@ -2042,11 +2045,11 @@ impl Controller {
                 let id = question.id.clone();
                 let buffer = form.buffer.clone();
                 move || {
-                    ControlInput::Action(ActionIntent::Answer {
+                    ControlInput::Action(Box::new(ActionIntent::Answer {
                         scope: scope.clone(),
                         question_id: id.clone(),
                         body: common::buffer_text(&buffer),
-                    })
+                    }))
                 }
             }),
         );
@@ -2262,12 +2265,12 @@ impl Controller {
         message_id: &str,
     ) -> ControlInput {
         let Some((name, rest)) = policy::slash_command(text) else {
-            return ControlInput::Action(ActionIntent::SendMessage {
+            return ControlInput::Action(Box::new(ActionIntent::SendMessage {
                 scope: scope.clone(),
                 to: recipient.into(),
                 body: text.into(),
                 message_id: message_id.into(),
-            });
+            }));
         };
         let Some(command) = policy::command_policy(name) else {
             return ControlInput::Invalid(format!(
@@ -2323,7 +2326,7 @@ impl Controller {
             }
             _ => return ControlInput::Local,
         };
-        ControlInput::Action(action)
+        ControlInput::Action(Box::new(action))
     }
     fn command(&self, text: &str, recipient: &str, captured_scope: &ClientScope) -> bool {
         let Some((name, rest)) = policy::slash_command(text) else {
@@ -2345,7 +2348,7 @@ impl Controller {
                         });
                     }
                 } else {
-                    self.plan(intent, None, None);
+                    self.plan(*intent, None, None);
                 }
             }
             ControlInput::Local => match policy::command_policy(name).map(|command| command.name) {

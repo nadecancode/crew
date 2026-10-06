@@ -10,7 +10,7 @@ use std::{
 
 #[derive(Clone, PartialEq)]
 pub enum Input {
-    Action(ActionIntent),
+    Action(Box<ActionIntent>),
     Local,
     Invalid(String),
 }
@@ -60,7 +60,7 @@ impl Controls {
         let Some(binding) = bindings.get(&id) else {
             return;
         };
-        if (binding.intent)() != Input::Action(captured.clone()) {
+        if (binding.intent)() != Input::Action(Box::new(captured.clone())) {
             return;
         }
         let Some(button) = binding.button.upgrade() else {
