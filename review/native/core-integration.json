@@ -1,0 +1,1609 @@
+{
+  "kind": "reviewed-source-integration",
+  "task": "native-core-integration",
+  "baseline": "1fd2272a29226b9245d5d6fa1e0b4446c08783b0",
+  "productSource": "84befae2f02b3dac38c5fc08d5a1cd6ee7f90774",
+  "compiledHost": "Linux x86_64, Rust 1.93.1",
+  "appleVerification": "Apple verification deferred by operator",
+  "commitments": {
+    "connectedNativeApplication": false,
+    "gatewaySourceIncluded": false,
+    "availabilityExtensionIncluded": false,
+    "platformUIChanged": false,
+    "tuiAdoptionIncluded": false,
+    "rootMutated": false,
+    "operatorServicesTouched": false
+  },
+  "source": {
+    "baseline": "1fd2272a29226b9245d5d6fa1e0b4446c08783b0",
+    "equality": [
+      {
+        "path": "crates/crew-client/Cargo.toml",
+        "authority": "932660671571bcdc934a7cf8928dc9c4c6f3bfd5",
+        "bytes": 423,
+        "gitBlob": "d1dc1a8de970454ab51060d5b1fb91b53325cb92",
+        "sha256": "e1aad3bb9c6c62d6a5bc4690d7129a2a6fec22c8c0669a645866052393685300"
+      },
+      {
+        "path": "crates/crew-client/README.md",
+        "authority": "932660671571bcdc934a7cf8928dc9c4c6f3bfd5",
+        "bytes": 2451,
+        "gitBlob": "6dd2e0a0f94581fb3135855d7205d1237f26abba",
+        "sha256": "5664a6373b97a66697084bdf417dc455ce222140fb9e9a9278e45b76348461f4"
+      },
+      {
+        "path": "crates/crew-client/src/api.rs",
+        "authority": "932660671571bcdc934a7cf8928dc9c4c6f3bfd5",
+        "bytes": 26817,
+        "gitBlob": "ce86fca6f77c3fcd4780f195a5c01808ba5447a0",
+        "sha256": "0a449ef16f882a5896e688ca994b91607ad54ec0faa08f8290b3ed4e222d0dbc"
+      },
+      {
+        "path": "crates/crew-client/src/commands.rs",
+        "authority": "932660671571bcdc934a7cf8928dc9c4c6f3bfd5",
+        "bytes": 9256,
+        "gitBlob": "57000a09fd55e019efc19c03eb45d5ec3b287c4e",
+        "sha256": "84565424897e9b0f5760a6485602a76c5b66da046ce7bdf9c85d79ab2e63305d"
+      },
+      {
+        "path": "crates/crew-client/src/engine.rs",
+        "authority": "932660671571bcdc934a7cf8928dc9c4c6f3bfd5",
+        "bytes": 50880,
+        "gitBlob": "53b6d0ea14979de9d0599e1fa934ab5e6be93725",
+        "sha256": "8380bffc2700922a4f8e1e4437ae7c7ee734a3fd7f825aed0689dd7a9a390ae1"
+      },
+      {
+        "path": "crates/crew-client/src/history.rs",
+        "authority": "932660671571bcdc934a7cf8928dc9c4c6f3bfd5",
+        "bytes": 19785,
+        "gitBlob": "277c0546b077f4b3da8515f1cc0d5f5a8060d731",
+        "sha256": "64eac564b136bfa80ac7a091f944adc6e1095d895b6a8d2c68b0fc147db9c8a5"
+      },
+      {
+        "path": "crates/crew-client/src/lib.rs",
+        "authority": "932660671571bcdc934a7cf8928dc9c4c6f3bfd5",
+        "bytes": 662,
+        "gitBlob": "f31cd76e16fb1b5d937875fee2e21aaebc97607d",
+        "sha256": "1a7d30ad7b4791ccb496025164bd746b988fd13e0fe8411a3ff53880e8a51ba0"
+      },
+      {
+        "path": "crates/crew-client/src/order.rs",
+        "authority": "932660671571bcdc934a7cf8928dc9c4c6f3bfd5",
+        "bytes": 6478,
+        "gitBlob": "7a3fe58e6c16558495de96a48845edc877ce0ed4",
+        "sha256": "e3291b7892aa6b1244629d620bea5bb0e5208d94516597e9af6061132a96f514"
+      },
+      {
+        "path": "crates/crew-client/src/presentation.rs",
+        "authority": "932660671571bcdc934a7cf8928dc9c4c6f3bfd5",
+        "bytes": 34455,
+        "gitBlob": "8411c82044676922b2a747a8de0a40f7dbf9c4d1",
+        "sha256": "7ed322d3abf48c1107e360d018498abd25cab270fbd44f798322b2d723e88662"
+      },
+      {
+        "path": "crates/crew-client/src/questions.rs",
+        "authority": "932660671571bcdc934a7cf8928dc9c4c6f3bfd5",
+        "bytes": 3604,
+        "gitBlob": "2df8621c18c3c3fc5f5e7559c3f1bef9afe576f6",
+        "sha256": "a2b5f3ed85f2896716ea04eb5f4e0b2345a4440a8827006a9d7d4b397cfcb06f"
+      },
+      {
+        "path": "crates/crew-client/src/state.rs",
+        "authority": "932660671571bcdc934a7cf8928dc9c4c6f3bfd5",
+        "bytes": 86935,
+        "gitBlob": "b580067449e3e72871a9a0c352dd2a329eb87a4e",
+        "sha256": "33c662fe0628656c171ac57c2123023ca872dd71c61a07eb4c5cf2d4bcfaed77"
+      },
+      {
+        "path": "crates/crew-client/src/topology.rs",
+        "authority": "932660671571bcdc934a7cf8928dc9c4c6f3bfd5",
+        "bytes": 10382,
+        "gitBlob": "a7fc33626bded0fe76fe797ae1e6613a0e696a71",
+        "sha256": "86ca1c5c0604c89e508b20151ed1b5210734840c57dee10376f1777e505a317b"
+      },
+      {
+        "path": "crates/crew-client/src/usage.rs",
+        "authority": "932660671571bcdc934a7cf8928dc9c4c6f3bfd5",
+        "bytes": 7468,
+        "gitBlob": "4fb056e3968431b6cb481de145abb69897acacaf",
+        "sha256": "2c014ac7316b54145a68e2d7b86753df69cafed2dbeacc732aa99f9049717628"
+      },
+      {
+        "path": "crates/crew-client/src/work.rs",
+        "authority": "932660671571bcdc934a7cf8928dc9c4c6f3bfd5",
+        "bytes": 11235,
+        "gitBlob": "9e3e8795659d19556ca473d2fe956ebd17ccf406",
+        "sha256": "ac81419fd1a962dc4fc0553445fc55b27d01301645bc759ffede94e1fb6c7ad5"
+      },
+      {
+        "path": "crates/crew-client/tests/api_schema.rs",
+        "authority": "932660671571bcdc934a7cf8928dc9c4c6f3bfd5",
+        "bytes": 21079,
+        "gitBlob": "10c249827f8789b2aadfa798fd6d1f2e71377fbb",
+        "sha256": "4a57cc72314c61a89f5473f3f621292c140536991083cf0dbd43dde6256fcddd"
+      },
+      {
+        "path": "crates/crew-client/tests/client_api_conformance.rs",
+        "authority": "932660671571bcdc934a7cf8928dc9c4c6f3bfd5",
+        "bytes": 9719,
+        "gitBlob": "99824fd4a5a6270e9f25f84d8239d2dee88385e8",
+        "sha256": "4aab0c83cafbdeeca1c2a88bea8a6991c32f92293959a466db5b6f1c3635cb31"
+      },
+      {
+        "path": "crates/crew-client/tests/command_schema.rs",
+        "authority": "932660671571bcdc934a7cf8928dc9c4c6f3bfd5",
+        "bytes": 7232,
+        "gitBlob": "2cb139e41f4e5b7b327f984aa4c3eb00f3e59204",
+        "sha256": "35bc1dd96a86a6580564de4365c8d7f98713ee5798545444907357ee2ad02949"
+      },
+      {
+        "path": "crates/crew-client/tests/command_wire.rs",
+        "authority": "932660671571bcdc934a7cf8928dc9c4c6f3bfd5",
+        "bytes": 4704,
+        "gitBlob": "6e52de5c5a44465203acff4919ad88927fd21230",
+        "sha256": "4da324b5ec9e50adc4c847af206f7dd5cb1211d3c36d3ce2178f9e01263f03d0"
+      },
+      {
+        "path": "crates/crew-client/tests/n1_state_conformance.rs",
+        "authority": "932660671571bcdc934a7cf8928dc9c4c6f3bfd5",
+        "bytes": 8846,
+        "gitBlob": "0aadbbdc0ac1892f5d8b0f4fd06c00f8f95b5697",
+        "sha256": "b1af63d82bd4ebaf70c4452ff17af4d45d80d742c7bbe24aec9036bfd53a2ffc"
+      },
+      {
+        "path": "crates/crew-client/tests/outcome_schema.rs",
+        "authority": "932660671571bcdc934a7cf8928dc9c4c6f3bfd5",
+        "bytes": 2158,
+        "gitBlob": "4b2a7500ae5da841f1e0f036472517d712a605e9",
+        "sha256": "83c7c65bb071a4eecb1e5d683643557c2af7bff293d0ae5b9e0ff95a9b44e201"
+      },
+      {
+        "path": "crates/crew-client/tests/support/commands.rs",
+        "authority": "932660671571bcdc934a7cf8928dc9c4c6f3bfd5",
+        "bytes": 4359,
+        "gitBlob": "8068c8e1cfff90f0bb790ecd139e7d7da40651d1",
+        "sha256": "decb2cd19c92259a7ee291507c85906a2f31ad571807c944288d378c3c5e96d7"
+      },
+      {
+        "path": "crates/crew-client/tests/terminal_schema.rs",
+        "authority": "932660671571bcdc934a7cf8928dc9c4c6f3bfd5",
+        "bytes": 4493,
+        "gitBlob": "7cd0a471b9a6f0821c8bf7b58419d4aa77a919a7",
+        "sha256": "7d8b94559054ea2848a1a5a0e070bb2e1773355b0b1cefe2cfae04181e73aa92"
+      },
+      {
+        "path": "crates/crew-client/src/actions.rs",
+        "authority": "cda710359e9068c4f067fbec3e4e50a01c3b014b",
+        "bytes": 63176,
+        "gitBlob": "19a9c344071cad0ad68ab32431731d98c9ffed1e",
+        "sha256": "54d7db498724ba85d9eea42809f3eb3b4371ab43984411cf638ece9e3a8b0ab1"
+      },
+      {
+        "path": "crates/crew-client/tests/actions.rs",
+        "authority": "cda710359e9068c4f067fbec3e4e50a01c3b014b",
+        "bytes": 73876,
+        "gitBlob": "b4a721d4de22e0f1652c6c9c3cd4964a6da7158d",
+        "sha256": "e0c9f77f4a69e0b63d6ec9457710af9142afb0add49d74c2a763f74b47f95cd0"
+      },
+      {
+        "path": "crates/crew-client/src/policy.rs",
+        "authority": "197338322a2963b95937273b077de2e51ca0290a",
+        "bytes": 12031,
+        "gitBlob": "7d144308e26fc9cb7639b52d32691acee65ba25f",
+        "sha256": "6fed090f0a7050e328e86e9c987c1964038becb8ae5f012dab7e9f8a7ef53f7f"
+      },
+      {
+        "path": "crates/crew-client/tests/policy.rs",
+        "authority": "197338322a2963b95937273b077de2e51ca0290a",
+        "bytes": 5433,
+        "gitBlob": "920c720fea1512fdb2888f00792a41b2f9429ea7",
+        "sha256": "f728076a852072703410255c7530dcfad760ddbaa19905690a6810c2e0f1b112"
+      },
+      {
+        "path": "crates/crew-client/tests/policy_const.rs",
+        "authority": "197338322a2963b95937273b077de2e51ca0290a",
+        "bytes": 1480,
+        "gitBlob": "0dffddcca6e9942b4443035ff079e605161836b0",
+        "sha256": "de01d899f6f5a98ae57729a52ff50b72776470323037cf3ec3c1f8dbe8b3f0e7"
+      },
+      {
+        "path": "crates/crew-client/examples/generate_web_policy.rs",
+        "authority": "5333e1e703eacf109f6a9cd07095aa2e660107b3",
+        "bytes": 5123,
+        "gitBlob": "10cc58348a42fe2716ec78671e189f0a0b786dce",
+        "sha256": "d9e1a72d875d8d5804ceea58523a05507edfba85b63e5d3ecedd9e033d5cb370"
+      },
+      {
+        "path": "crates/crew-client/tests/web_policy.rs",
+        "authority": "5333e1e703eacf109f6a9cd07095aa2e660107b3",
+        "bytes": 5283,
+        "gitBlob": "95e69cf5b9aad2995bbc61aef54287122a01e389",
+        "sha256": "f536dcdae0abce199bbe30505bb528616037384dde0cb97c1056429c5dc7c37d"
+      },
+      {
+        "path": "web/src/commands.ts",
+        "authority": "5333e1e703eacf109f6a9cd07095aa2e660107b3",
+        "bytes": 6239,
+        "gitBlob": "d75c6c05cdba2ad5eac679c6e49dcef52938a009",
+        "sha256": "6d65242c4de96d73e7757db9c67214a998b6344d43c0fa4286fea88b65e87f3c"
+      },
+      {
+        "path": "web/src/generated/client-policy.ts",
+        "authority": "5333e1e703eacf109f6a9cd07095aa2e660107b3",
+        "bytes": 2159,
+        "gitBlob": "103791e814ff6c1ccd1d3877fa492d4ba0010be9",
+        "sha256": "adf70f8fa44e889114bb72bf5790cf2f98b0803734877673561b48f9d0207696"
+      },
+      {
+        "path": "web/src/net/conn.ts",
+        "authority": "5333e1e703eacf109f6a9cd07095aa2e660107b3",
+        "bytes": 14559,
+        "gitBlob": "79480b1cb5605661e7438241b63f33346a46cf34",
+        "sha256": "d157bd0dd3ba36b1b106cfe028bde0de5a43f7b6a37e7d1f581009ee60fc0f99"
+      },
+      {
+        "path": "web/test/client-policy.test.ts",
+        "authority": "5333e1e703eacf109f6a9cd07095aa2e660107b3",
+        "bytes": 2966,
+        "gitBlob": "7432700cae2647b36303c86b1fdc5b57dcfad6a7",
+        "sha256": "74420201ab455607b64aef8f4ce9590f1edcbd89f416ea15ff71cd9a6999ff1c"
+      },
+      {
+        "path": "crates/crew-client-transport/Cargo.toml",
+        "authority": "aa0dc24a6f54ad369eae8729640dcc10efca3dd2",
+        "bytes": 919,
+        "gitBlob": "d733cc67d040e99d9a6807f594ee0d12c3362b7c",
+        "sha256": "34a0a7d878beb5b25f95bb6835ad01869152adc7c5b97801dee75e47ca278869"
+      },
+      {
+        "path": "crates/crew-client-transport/README.md",
+        "authority": "aa0dc24a6f54ad369eae8729640dcc10efca3dd2",
+        "bytes": 8160,
+        "gitBlob": "3c6d8ca67b80ed37290d452acd05217a8f3f06de",
+        "sha256": "81fe48649d48e8006418c10a3527a927b279696280ebbf825985a2badb2775b8"
+      },
+      {
+        "path": "crates/crew-client-transport/src/clock.rs",
+        "authority": "aa0dc24a6f54ad369eae8729640dcc10efca3dd2",
+        "bytes": 1024,
+        "gitBlob": "76ec22e1bc438aa8bdae8ce9bfe69a497640b7b9",
+        "sha256": "b4f5c1b113b56ada6d4e3f2b6e133cbe7f5d35f5f222a95d2bf02a427cc93164"
+      },
+      {
+        "path": "crates/crew-client-transport/src/driver.rs",
+        "authority": "aa0dc24a6f54ad369eae8729640dcc10efca3dd2",
+        "bytes": 79958,
+        "gitBlob": "3956da5c80f045a5a6f1155c88343e6c04013a78",
+        "sha256": "e8691ba24e2363918dc67918fa3c49718e7eba247f55458b3c0895394d79f91c"
+      },
+      {
+        "path": "crates/crew-client-transport/src/framing.rs",
+        "authority": "aa0dc24a6f54ad369eae8729640dcc10efca3dd2",
+        "bytes": 3982,
+        "gitBlob": "a593c3947af2186dbb4372af4e53c74c5a1a059d",
+        "sha256": "1ab2ecd5056064057beb0470c4f06c94226f44eafb1bfd5bbff85e57fef08014"
+      },
+      {
+        "path": "crates/crew-client-transport/src/lib.rs",
+        "authority": "aa0dc24a6f54ad369eae8729640dcc10efca3dd2",
+        "bytes": 709,
+        "gitBlob": "db43406e8ed3ce7b01413f5ee838f52985c1cb8c",
+        "sha256": "6146a671978c24fd5a064e08fce3927df397ff9f420de0d933947527741cec62"
+      },
+      {
+        "path": "crates/crew-client-transport/src/local.rs",
+        "authority": "aa0dc24a6f54ad369eae8729640dcc10efca3dd2",
+        "bytes": 19724,
+        "gitBlob": "0b73d8183c5c3e042d981b9daa9e247eecd69159",
+        "sha256": "47deaf4e7890e0c704476b8e7665de12c49b837aeaa88f669677964e6711e059"
+      },
+      {
+        "path": "crates/crew-client-transport/src/ports.rs",
+        "authority": "aa0dc24a6f54ad369eae8729640dcc10efca3dd2",
+        "bytes": 6015,
+        "gitBlob": "bf69547e7ef3cea81d6b328787068ed5444001e0",
+        "sha256": "a4c38e52ed9d4bc9227ccca94635a77de8150764701915dfcaac16dffd2e2b10"
+      },
+      {
+        "path": "crates/crew-client-transport/src/queue.rs",
+        "authority": "aa0dc24a6f54ad369eae8729640dcc10efca3dd2",
+        "bytes": 8880,
+        "gitBlob": "eccf1168b5318f42d00a31176f61de6d76627aaa",
+        "sha256": "1c9e5072fa26f94528b545aa2367a05ba0a67909fee6ebfdfe60db3ee50fda73"
+      },
+      {
+        "path": "crates/crew-client-transport/src/service.rs",
+        "authority": "aa0dc24a6f54ad369eae8729640dcc10efca3dd2",
+        "bytes": 36066,
+        "gitBlob": "a2c5e4c58bc5ea1b1bcc73c5e4732210001105f9",
+        "sha256": "bd471578e79ec77bcfa11bfe3bd0b67a39aa41a91dd07a7213a4540f5578bf70"
+      },
+      {
+        "path": "crates/crew-client-transport/tests/common/mod.rs",
+        "authority": "aa0dc24a6f54ad369eae8729640dcc10efca3dd2",
+        "bytes": 16077,
+        "gitBlob": "c1e51cb95a67366920eea59081ba440978573212",
+        "sha256": "3b3efbfb2acea932caedad1e16835ad6c116d8856f8616fd1c6ea49366fe96a0"
+      },
+      {
+        "path": "crates/crew-client-transport/tests/driver.rs",
+        "authority": "aa0dc24a6f54ad369eae8729640dcc10efca3dd2",
+        "bytes": 30397,
+        "gitBlob": "6ce505d32c7f2738e370cfabda2e4ee8eefc34c9",
+        "sha256": "38d408fb2b8afacdda41d2b89feebf48378d0c5263e70acb7fba792a2440fd16"
+      },
+      {
+        "path": "crates/crew-client-transport/tests/local_daemon.rs",
+        "authority": "aa0dc24a6f54ad369eae8729640dcc10efca3dd2",
+        "bytes": 24086,
+        "gitBlob": "4323faa2deaa0a3eed77cbd6186b1c02d9e4ed0d",
+        "sha256": "e698fea5f2482a44f39dad564bb958f79e7f1327a5f0c4122f37a4fb51827b40"
+      },
+      {
+        "path": "crates/crew-client-transport/tests/local_negative.rs",
+        "authority": "aa0dc24a6f54ad369eae8729640dcc10efca3dd2",
+        "bytes": 5068,
+        "gitBlob": "8e7f29eb9ff2fbd5a2b26f358003e305d428a7bb",
+        "sha256": "e2aeb81a7b0cbff0a1f05fca6c2b80fe82a0e9cfa896b014ed92e8f1d65c698a"
+      },
+      {
+        "path": "crates/crew-client-transport/tests/real_core_lifecycle.rs",
+        "authority": "aa0dc24a6f54ad369eae8729640dcc10efca3dd2",
+        "bytes": 6260,
+        "gitBlob": "8ae8f0381b20eccb3354249dd6624bf3b7b07de1",
+        "sha256": "3dd156ddd50ad33f4a5c2050d527b4b5e36bd3087594128307339fd783c9bbd9"
+      },
+      {
+        "path": "apps/apple/CrewClient/Sources/Generated/Headers/CrewClientFFI.h",
+        "authority": "cc30064c92aab2d0f081a57ff5a9d9c898a3604f",
+        "bytes": 32516,
+        "gitBlob": "14aad8b4be6958a88021d8cbe8dd30113d731a04",
+        "sha256": "a379797195bcb46fd1af0652ddf3fc857cb14053279ebc2706b583d8d605b6ce"
+      },
+      {
+        "path": "apps/apple/CrewClient/Sources/Generated/Headers/CrewClientFFI.modulemap",
+        "authority": "cc30064c92aab2d0f081a57ff5a9d9c898a3604f",
+        "bytes": 136,
+        "gitBlob": "50b761be1b5c9138034f0ab8a16283cbf91dd07e",
+        "sha256": "cea45302e48911ea1339d55f1615ddf0a8e3abe2f924526957d7dd9828391a45"
+      },
+      {
+        "path": "apps/apple/CrewClient/Sources/Generated/Swift/CrewBindings.swift",
+        "authority": "cc30064c92aab2d0f081a57ff5a9d9c898a3604f",
+        "bytes": 343264,
+        "gitBlob": "b3067ec7a84269192d7de0f79368efc795d91c6b",
+        "sha256": "34edad837e9d4bc269ec250400e9ac9fb62244361bbc4a1f16a5f20f0dffebd8"
+      },
+      {
+        "path": "crates/crew-client-ffi/Cargo.toml",
+        "authority": "cc30064c92aab2d0f081a57ff5a9d9c898a3604f",
+        "bytes": 935,
+        "gitBlob": "9ec5ff13283aefd6135506ef5e6deab8bc407dca",
+        "sha256": "3b638d5d072ec7d4ae17c8512fb3446c8414be92f2ab48370c3dc8762c908667"
+      },
+      {
+        "path": "crates/crew-client-ffi/README.md",
+        "authority": "cc30064c92aab2d0f081a57ff5a9d9c898a3604f",
+        "bytes": 8666,
+        "gitBlob": "b2dc233a1c3caa072c77c065f03832a208f945d7",
+        "sha256": "53fe2dbf32f8d07d7b552645aa19ec3a0ce773b48c5b65b5637e594345207167"
+      },
+      {
+        "path": "crates/crew-client-ffi/src/bin/crew-client-bindgen.rs",
+        "authority": "cc30064c92aab2d0f081a57ff5a9d9c898a3604f",
+        "bytes": 49,
+        "gitBlob": "a01b5470614a45e4ce3dfca5556f72e74027a07a",
+        "sha256": "f7a2dd11fb370e9595bdfa6c32fc41a9b67a60bbab06ec711cb7a03eb873ffa6"
+      },
+      {
+        "path": "crates/crew-client-ffi/src/callbacks.rs",
+        "authority": "cc30064c92aab2d0f081a57ff5a9d9c898a3604f",
+        "bytes": 522,
+        "gitBlob": "bc1d49e6d21a3f186fe93450bee7709b967c6c10",
+        "sha256": "0215de0bf6e5d9a23b6b65991b2649c78fd53cf48f014260a3e033c78fb94c1a"
+      },
+      {
+        "path": "crates/crew-client-ffi/src/lib.rs",
+        "authority": "cc30064c92aab2d0f081a57ff5a9d9c898a3604f",
+        "bytes": 749,
+        "gitBlob": "2dff66800e4911d06bca0a4448a433badf9a17b8",
+        "sha256": "8b8ccee65317cd2f606676b2538f8d2c537eeebf00a1c01ad8224c28e5821aa5"
+      },
+      {
+        "path": "crates/crew-client-ffi/src/records/mod.rs",
+        "authority": "cc30064c92aab2d0f081a57ff5a9d9c898a3604f",
+        "bytes": 137,
+        "gitBlob": "11a4c2a41adf9ae5c4bc40ec78608d07dbf5411b",
+        "sha256": "3c9c22409c539b52ca1060c0a359655587e8bc8319c06be4281451903bafcde4"
+      },
+      {
+        "path": "crates/crew-client-ffi/src/records/shared.rs",
+        "authority": "cc30064c92aab2d0f081a57ff5a9d9c898a3604f",
+        "bytes": 26381,
+        "gitBlob": "7be21e8aa8140d91da38871f8054aa129d39b163",
+        "sha256": "859d84da62fc743d3a58f4d0fd6cbe20cd32967bf04874a697d6a676d2c971e8"
+      },
+      {
+        "path": "crates/crew-client-ffi/src/records/views.rs",
+        "authority": "cc30064c92aab2d0f081a57ff5a9d9c898a3604f",
+        "bytes": 14562,
+        "gitBlob": "34f0288cd8a67bddc1f9a1484e734ab48f341d12",
+        "sha256": "28c0ad858b652e0413d34afd7ea4d81c3d2b1c93520378aca65f24e0cd0b6f0d"
+      },
+      {
+        "path": "crates/crew-client-ffi/src/service.rs",
+        "authority": "cc30064c92aab2d0f081a57ff5a9d9c898a3604f",
+        "bytes": 13534,
+        "gitBlob": "d57f8bf4e5036caf13d1bcfd051b37e845305495",
+        "sha256": "42c13f922b59291d1b11c8b9b0840f849f262e92b59631eda7e11e124f12df55"
+      },
+      {
+        "path": "crates/crew-client-ffi/tests/generated.rs",
+        "authority": "cc30064c92aab2d0f081a57ff5a9d9c898a3604f",
+        "bytes": 5729,
+        "gitBlob": "5d84655db001895731382102506e35eeb64044f4",
+        "sha256": "8efcfab1599b37239b966eafe8ecd7a16d24e97671af69963df9bd771deb7c08"
+      },
+      {
+        "path": "crates/crew-client-ffi/tests/records.rs",
+        "authority": "cc30064c92aab2d0f081a57ff5a9d9c898a3604f",
+        "bytes": 10159,
+        "gitBlob": "fac90eb5e4276edeab4d6d21097147cfe734e93d",
+        "sha256": "e1fad0b653ef9c444c20012e8f71fb93284438cc362d05a0849916b4392c4ab1"
+      },
+      {
+        "path": "crates/crew-client-ffi/tests/service.rs",
+        "authority": "cc30064c92aab2d0f081a57ff5a9d9c898a3604f",
+        "bytes": 17366,
+        "gitBlob": "43b945ff71fc04a5a440fb086818f196ad81f909",
+        "sha256": "772d9fdeaa27a5f81cdd52d3e29275f71bf114d75a5b2fc98f50d6c0db956f17"
+      },
+      {
+        "path": "crates/crew-client-ffi/uniffi.toml",
+        "authority": "cc30064c92aab2d0f081a57ff5a9d9c898a3604f",
+        "bytes": 179,
+        "gitBlob": "a2b9f409a92e53dacf4ff5634a3ff6a573280bf3",
+        "sha256": "2154bec774cca70d46ed1f9c55e63fbea8d6a6b2213e572f27e2d7dc59e4331a"
+      },
+      {
+        "path": "notes/native-architecture.md",
+        "authority": "252ecc314a2f7f49c2ab344525cfb383ebf43080",
+        "bytes": 93296,
+        "gitBlob": "31c2732f0a78db53f44be45860a7b09e11284889",
+        "sha256": "e7b70401069e3b9900bb31ea337c2c38bb690d6ca63f2a746b1899ebe0a32a86"
+      }
+    ],
+    "removed": [
+      {
+        "path": "crates/crew-client/tests/projection_modules.rs",
+        "authority": "c0911ff6e4f1254c8c74877daf7c2e6fcc302fc8"
+      }
+    ],
+    "protected": {
+      "files": 385,
+      "changes": [],
+      "allowed": [
+        "fixtures/native/actions/README.md",
+        "fixtures/native/actions/sources.json"
+      ],
+      "newAllowed": [
+        "apps/apple/CrewClient/Sources/Generated/**",
+        "review/native/core-integration.{md,json}"
+      ]
+    },
+    "webContractComposition": {
+      "path": "notes/web-design.md",
+      "source": "5333e1e703eacf109f6a9cd07095aa2e660107b3",
+      "preservedSource": "1fd2272a",
+      "preservedAuthorization": "m-331755b19fb4/m-acb7e01564a8",
+      "preservedLines": 14,
+      "exactSourceAfterRemovingPreservedParagraph": true,
+      "actualGitBlob": "4a645fa0a26a1a1010f8e7eb73388d8e28e41930"
+    },
+    "fixtureProvenance": {
+      "baseline": "1fd2272a",
+      "source": "5333e1e703eacf109f6a9cd07095aa2e660107b3",
+      "authorization": "m-4742323e57e4",
+      "checkpoint": "b7c928ec813641b244c6e9e7ff3d24511e333775",
+      "changedFiles": [
+        "fixtures/native/actions/README.md",
+        "fixtures/native/actions/sources.json"
+      ],
+      "referenceIDs": 85,
+      "history": [
+        "commands",
+        "slash",
+        "web_conn",
+        "web_timeout"
+      ],
+      "allOtherFixtureFilesByteEqual": true,
+      "wireGoldenSHA256": "759fce8d079091fd8f885425d90b5445046f16f7eb3081a540ebcb019264231f"
+    }
+  },
+  "commits": [
+    {
+      "commit": "b2554a049c45d73f6c20238e8b716f8c36f2eb71",
+      "description": "Import reviewed shared client core source from 93266067"
+    },
+    {
+      "commit": "ae15405b5351da1390eae9889333bd0d45ccc047",
+      "description": "Import reviewed local session transport source from aa0dc24a"
+    },
+    {
+      "commit": "bf5b0af2a7666778c3f1465f5c5b3e9cdc020305",
+      "description": "Import reviewed UniFFI source and generated records from cc30064c"
+    },
+    {
+      "commit": "bd42a40e94b444800ee742351b595a51ce3e8234",
+      "description": "Register reviewed local bridge crates while retaining native and CLI lock pins"
+    },
+    {
+      "commit": "69fec49cae5197302e3607edafbc993702bf66e7",
+      "description": "Preserve independent raw input batches alongside submitted prompts"
+    },
+    {
+      "commit": "b6ae3cf568755d68141f5d45d1956d14bb9bb4bc",
+      "description": "Keep the shared command catalogue usable by Rust 1.82 const consumers"
+    },
+    {
+      "commit": "e576a7b50f824a6a3961da5674995f7ace6ab8d5",
+      "description": "Share browser timeout and command metadata from live Rust client policy"
+    },
+    {
+      "commit": "884705a9f69d764b9fbdc3f82fa5b3050e84eaed",
+      "description": "Import approved native bridge and attachment notice contract clarifications"
+    },
+    {
+      "commit": "7b7179e139285034b31a8cb63160fe095bd2c89e",
+      "description": "Rebuild production dashboard assets from reviewed shared web policy"
+    },
+    {
+      "commit": "722a656db6afdfb35b7898beaa28e09c1b547647",
+      "description": "Remove temporary projection harness after real core exports"
+    },
+    {
+      "commit": "78b46af9b35d1aa0a12b2c9cd4c0cd877cd9d8c5",
+      "description": "Keep the combined native lockfile in Cargo's canonical record order"
+    },
+    {
+      "commit": "b7c928ec813641b244c6e9e7ff3d24511e333775",
+      "description": "Preserve action fixture provenance after shared web policy extraction"
+    },
+    {
+      "commit": "84befae2f02b3dac38c5fc08d5a1cd6ee7f90774",
+      "description": "Identify successful terminal attachments in core operation notices"
+    }
+  ],
+  "registration": {
+    "members": [
+      "crew-protocol",
+      "crew-client",
+      "crew-core",
+      "crew-tui",
+      "crew",
+      "crew-desktop",
+      "crew-client-ffi",
+      "crew-client-transport"
+    ],
+    "defaultMembers": [
+      "crew-protocol",
+      "crew-client",
+      "crew-core",
+      "crew-tui",
+      "crew"
+    ],
+    "packageCount": 210,
+    "lockSHA256": "180dd4b92b6abcef76087c0879f55126023983369af87e095f3d42f7e94b515b",
+    "base": "1fd2272a",
+    "authority": "cc30064c",
+    "baselinePackages": 249,
+    "combinedPackages": 280,
+    "additions": [
+      "askama@0.14.0",
+      "askama_derive@0.14.0",
+      "askama_parser@0.14.0",
+      "basic-toml@0.1.10",
+      "camino@1.2.6",
+      "cargo-platform@0.1.9",
+      "cargo_metadata@0.19.2",
+      "crew-client-ffi@0.1.0",
+      "crew-client-transport@0.1.0",
+      "fs-err@2.11.0",
+      "glob@0.3.4",
+      "goblin@0.8.2",
+      "minimal-lexical@0.2.1",
+      "nom@7.1.3",
+      "percent-encoding@2.3.2",
+      "plain@0.2.3",
+      "rustc-hash@2.1.3",
+      "scroll@0.12.0",
+      "scroll_derive@0.12.1",
+      "siphasher@1.0.4",
+      "smawk@0.3.3",
+      "textwrap@0.16.4",
+      "uniffi@0.31.0",
+      "uniffi_bindgen@0.31.0",
+      "uniffi_core@0.31.0",
+      "uniffi_internal_macros@0.31.0",
+      "uniffi_macros@0.31.0",
+      "uniffi_meta@0.31.0",
+      "uniffi_pipeline@0.31.0",
+      "uniffi_udl@0.31.0",
+      "weedle2@5.0.0"
+    ],
+    "replacements": [
+      "crew-client@0.1.0",
+      "errno@0.3.14",
+      "indexmap@2.13.1",
+      "rustix@1.1.5",
+      "semver@1.0.28",
+      "tempfile@3.27.0"
+    ],
+    "annotations": [
+      {
+        "package": "askama_parser@0.14.0",
+        "dependency": "winnow",
+        "version": "0.7.15"
+      },
+      {
+        "package": "uniffi_bindgen@0.31.0",
+        "dependency": "toml",
+        "version": "0.8.23"
+      },
+      {
+        "package": "uniffi_macros@0.31.0",
+        "dependency": "toml",
+        "version": "0.8.23"
+      }
+    ],
+    "removed": [],
+    "canonicalOrderingProof": {
+      "input": "bd42a40e",
+      "packages": 280,
+      "recordOrderingOnly": true,
+      "differences": []
+    },
+    "pins": {
+      "clap": "4.5.61",
+      "clap_builder": "4.5.61",
+      "clap_derive": "4.5.61",
+      "clap_lex": "1.0.1",
+      "uuid": "1.20.0",
+      "instability": "0.3.10",
+      "darling": "0.20.11",
+      "darling_core": "0.20.11",
+      "darling_macro": "0.20.11",
+      "indexmap": "2.13.1",
+      "unicode-segmentation": "1.12.0"
+    }
+  },
+  "checks": {
+    "workspace": {
+      "passed": 1127,
+      "failed": 0,
+      "ignored": 2,
+      "ignoredCases": [
+        "test two_real_claude_code_agents_talk_directly ... ignored, needs the Claude Code CLI and spends tokens",
+        "test net::tests::live_dashboard_against_a_scripted_daemon ... ignored, needs an interactive terminal"
+      ],
+      "selfSkipMessages": [],
+      "results": [
+        {
+          "suite": "unittests src/lib.rs (target/ci/debug/deps/crew-59d5b3446206ceff)",
+          "state": "ok",
+          "passed": 479,
+          "failed": 0,
+          "ignored": 0
+        },
+        {
+          "suite": "unittests src/main.rs (target/ci/debug/deps/crew-ae92b53438fefe10)",
+          "state": "ok",
+          "passed": 0,
+          "failed": 0,
+          "ignored": 0
+        },
+        {
+          "suite": "tests/binary_pin.rs (target/ci/debug/deps/binary_pin-ada519b141dd9b71)",
+          "state": "ok",
+          "passed": 4,
+          "failed": 0,
+          "ignored": 0
+        },
+        {
+          "suite": "tests/credential_files.rs (target/ci/debug/deps/credential_files-2bd7e17e36ed2efb)",
+          "state": "ok",
+          "passed": 1,
+          "failed": 0,
+          "ignored": 0
+        },
+        {
+          "suite": "tests/daemon_lifetime.rs (target/ci/debug/deps/daemon_lifetime-2bcb0b7c5e715e72)",
+          "state": "ok",
+          "passed": 1,
+          "failed": 0,
+          "ignored": 0
+        },
+        {
+          "suite": "tests/fake_cli.rs (target/ci/debug/deps/fake_cli-9d0e70df7b2a20ad)",
+          "state": "ok",
+          "passed": 3,
+          "failed": 0,
+          "ignored": 0
+        },
+        {
+          "suite": "tests/git_helper_sandbox.rs (target/ci/debug/deps/git_helper_sandbox-f06fa8f24d7bcd42)",
+          "state": "ok",
+          "passed": 1,
+          "failed": 0,
+          "ignored": 0
+        },
+        {
+          "suite": "tests/mismatch.rs (target/ci/debug/deps/mismatch-b539af1f66309b1c)",
+          "state": "ok",
+          "passed": 2,
+          "failed": 0,
+          "ignored": 0
+        },
+        {
+          "suite": "tests/operator_auth.rs (target/ci/debug/deps/operator_auth-7ae74dd46a2f6643)",
+          "state": "ok",
+          "passed": 14,
+          "failed": 0,
+          "ignored": 0
+        },
+        {
+          "suite": "tests/overlap.rs (target/ci/debug/deps/overlap-84dc9c88aa9530c4)",
+          "state": "ok",
+          "passed": 8,
+          "failed": 0,
+          "ignored": 0
+        },
+        {
+          "suite": "tests/private_home.rs (target/ci/debug/deps/private_home-29687aa409dd1376)",
+          "state": "ok",
+          "passed": 2,
+          "failed": 0,
+          "ignored": 0
+        },
+        {
+          "suite": "tests/pty_sandbox.rs (target/ci/debug/deps/pty_sandbox-ff0b6f3f0f18d231)",
+          "state": "ok",
+          "passed": 2,
+          "failed": 0,
+          "ignored": 0
+        },
+        {
+          "suite": "tests/real_cli.rs (target/ci/debug/deps/real_cli-b2941db37ab8665e)",
+          "state": "ok",
+          "passed": 0,
+          "failed": 0,
+          "ignored": 1
+        },
+        {
+          "suite": "tests/sandbox.rs (target/ci/debug/deps/sandbox-4b30a1dd7431fead)",
+          "state": "ok",
+          "passed": 29,
+          "failed": 0,
+          "ignored": 0
+        },
+        {
+          "suite": "tests/sandbox_launch.rs (target/ci/debug/deps/sandbox_launch-3b7eb20ef688df40)",
+          "state": "ok",
+          "passed": 29,
+          "failed": 0,
+          "ignored": 0
+        },
+        {
+          "suite": "tests/shared_git.rs (target/ci/debug/deps/shared_git-4324f2e3532ae162)",
+          "state": "ok",
+          "passed": 1,
+          "failed": 0,
+          "ignored": 0
+        },
+        {
+          "suite": "tests/team.rs (target/ci/debug/deps/team-cb7ce5c65ab7b8be)",
+          "state": "ok",
+          "passed": 86,
+          "failed": 0,
+          "ignored": 0
+        },
+        {
+          "suite": "tests/web.rs (target/ci/debug/deps/web-d38da4903ab91176)",
+          "state": "ok",
+          "passed": 21,
+          "failed": 0,
+          "ignored": 0
+        },
+        {
+          "suite": "tests/web_bundle.rs (target/ci/debug/deps/web_bundle-83d3a4bce1c28d8e)",
+          "state": "ok",
+          "passed": 2,
+          "failed": 0,
+          "ignored": 0
+        },
+        {
+          "suite": "tests/web_server.rs (target/ci/debug/deps/web_server-8e61199f2b56a57a)",
+          "state": "ok",
+          "passed": 16,
+          "failed": 0,
+          "ignored": 0
+        },
+        {
+          "suite": "tests/web_wire.rs (target/ci/debug/deps/web_wire-89f97d19f0c00c36)",
+          "state": "ok",
+          "passed": 9,
+          "failed": 0,
+          "ignored": 0
+        },
+        {
+          "suite": "unittests src/lib.rs (target/ci/debug/deps/crew_client-cfb241a46fe939e2)",
+          "state": "ok",
+          "passed": 70,
+          "failed": 0,
+          "ignored": 0
+        },
+        {
+          "suite": "tests/actions.rs (target/ci/debug/deps/actions-89cdcaa95dac0395)",
+          "state": "ok",
+          "passed": 35,
+          "failed": 0,
+          "ignored": 0
+        },
+        {
+          "suite": "tests/api_schema.rs (target/ci/debug/deps/api_schema-af03e59282931542)",
+          "state": "ok",
+          "passed": 7,
+          "failed": 0,
+          "ignored": 0
+        },
+        {
+          "suite": "tests/client_api_conformance.rs (target/ci/debug/deps/client_api_conformance-18b976c5008f4794)",
+          "state": "ok",
+          "passed": 1,
+          "failed": 0,
+          "ignored": 0
+        },
+        {
+          "suite": "tests/command_schema.rs (target/ci/debug/deps/command_schema-c071b77738e4d505)",
+          "state": "ok",
+          "passed": 5,
+          "failed": 0,
+          "ignored": 0
+        },
+        {
+          "suite": "tests/command_wire.rs (target/ci/debug/deps/command_wire-50cb052533407e30)",
+          "state": "ok",
+          "passed": 5,
+          "failed": 0,
+          "ignored": 0
+        },
+        {
+          "suite": "tests/n1_state_conformance.rs (target/ci/debug/deps/n1_state_conformance-50a3214ced16f240)",
+          "state": "ok",
+          "passed": 4,
+          "failed": 0,
+          "ignored": 0
+        },
+        {
+          "suite": "tests/outcome_schema.rs (target/ci/debug/deps/outcome_schema-bcf56a62c7f5bfac)",
+          "state": "ok",
+          "passed": 1,
+          "failed": 0,
+          "ignored": 0
+        },
+        {
+          "suite": "tests/policy.rs (target/ci/debug/deps/policy-981c97c85573a839)",
+          "state": "ok",
+          "passed": 4,
+          "failed": 0,
+          "ignored": 0
+        },
+        {
+          "suite": "tests/policy_const.rs (target/ci/debug/deps/policy_const-a1f6717b36c6c5ef)",
+          "state": "ok",
+          "passed": 1,
+          "failed": 0,
+          "ignored": 0
+        },
+        {
+          "suite": "tests/terminal_schema.rs (target/ci/debug/deps/terminal_schema-c43c71d38e30a7e8)",
+          "state": "ok",
+          "passed": 2,
+          "failed": 0,
+          "ignored": 0
+        },
+        {
+          "suite": "tests/web_policy.rs (target/ci/debug/deps/web_policy-3d70bc33cc6d2e3c)",
+          "state": "ok",
+          "passed": 5,
+          "failed": 0,
+          "ignored": 0
+        },
+        {
+          "suite": "unittests src/lib.rs (target/ci/debug/deps/crew_client_ffi-e30f10dc06207ba4)",
+          "state": "ok",
+          "passed": 0,
+          "failed": 0,
+          "ignored": 0
+        },
+        {
+          "suite": "tests/generated.rs (target/ci/debug/deps/generated-8756c55172d33f6a)",
+          "state": "ok",
+          "passed": 0,
+          "failed": 0,
+          "ignored": 0
+        },
+        {
+          "suite": "tests/records.rs (target/ci/debug/deps/records-5088632b96588c8c)",
+          "state": "ok",
+          "passed": 0,
+          "failed": 0,
+          "ignored": 0
+        },
+        {
+          "suite": "tests/service.rs (target/ci/debug/deps/service-fe3ecd78ed2310f1)",
+          "state": "ok",
+          "passed": 0,
+          "failed": 0,
+          "ignored": 0
+        },
+        {
+          "suite": "unittests src/lib.rs (target/ci/debug/deps/crew_client_transport-dbbae0fafc09fbf2)",
+          "state": "ok",
+          "passed": 2,
+          "failed": 0,
+          "ignored": 0
+        },
+        {
+          "suite": "tests/driver.rs (target/ci/debug/deps/driver-283d58dee17a33a2)",
+          "state": "ok",
+          "passed": 16,
+          "failed": 0,
+          "ignored": 0
+        },
+        {
+          "suite": "tests/local_daemon.rs (target/ci/debug/deps/local_daemon-6bac298857103db9)",
+          "state": "ok",
+          "passed": 0,
+          "failed": 0,
+          "ignored": 0
+        },
+        {
+          "suite": "tests/local_negative.rs (target/ci/debug/deps/local_negative-8108afe8f2dbfd1f)",
+          "state": "ok",
+          "passed": 0,
+          "failed": 0,
+          "ignored": 0
+        },
+        {
+          "suite": "tests/real_core_lifecycle.rs (target/ci/debug/deps/real_core_lifecycle-f3dc1ec8eff4a4b8)",
+          "state": "ok",
+          "passed": 0,
+          "failed": 0,
+          "ignored": 0
+        },
+        {
+          "suite": "unittests src/lib.rs (target/ci/debug/deps/crew_core-066dd36349cef529)",
+          "state": "ok",
+          "passed": 74,
+          "failed": 0,
+          "ignored": 0
+        },
+        {
+          "suite": "unittests src/lib.rs (target/ci/debug/deps/crew_desktop-dae505953abcf319)",
+          "state": "ok",
+          "passed": 0,
+          "failed": 0,
+          "ignored": 0
+        },
+        {
+          "suite": "tests/window.rs (target/ci/debug/deps/window-ccf7163137ba8435)",
+          "state": "ok",
+          "passed": 0,
+          "failed": 0,
+          "ignored": 0
+        },
+        {
+          "suite": "unittests src/lib.rs (target/ci/debug/deps/crew_protocol-81b18f27185c9836)",
+          "state": "ok",
+          "passed": 6,
+          "failed": 0,
+          "ignored": 0
+        },
+        {
+          "suite": "unittests src/lib.rs (target/ci/debug/deps/crew_tui-00a988d937864f55)",
+          "state": "ok",
+          "passed": 119,
+          "failed": 0,
+          "ignored": 1
+        },
+        {
+          "suite": "tests/render.rs (target/ci/debug/deps/render-2b11cbeacd5f2f96)",
+          "state": "ok",
+          "passed": 60,
+          "failed": 0,
+          "ignored": 0
+        },
+        {
+          "suite": "crew",
+          "state": "ok",
+          "passed": 0,
+          "failed": 0,
+          "ignored": 0
+        },
+        {
+          "suite": "crew_client",
+          "state": "ok",
+          "passed": 0,
+          "failed": 0,
+          "ignored": 0
+        },
+        {
+          "suite": "crew_client_ffi",
+          "state": "ok",
+          "passed": 0,
+          "failed": 0,
+          "ignored": 0
+        },
+        {
+          "suite": "crew_client_transport",
+          "state": "ok",
+          "passed": 0,
+          "failed": 0,
+          "ignored": 0
+        },
+        {
+          "suite": "crew_core",
+          "state": "ok",
+          "passed": 0,
+          "failed": 0,
+          "ignored": 0
+        },
+        {
+          "suite": "crew_desktop",
+          "state": "ok",
+          "passed": 0,
+          "failed": 0,
+          "ignored": 0
+        },
+        {
+          "suite": "crew_protocol",
+          "state": "ok",
+          "passed": 0,
+          "failed": 0,
+          "ignored": 0
+        },
+        {
+          "suite": "crew_tui",
+          "state": "ok",
+          "passed": 0,
+          "failed": 0,
+          "ignored": 0
+        }
+      ]
+    },
+    "localTransport": {
+      "features": "local,real-core-tests",
+      "passed": 31,
+      "failed": 0
+    },
+    "ffi": {
+      "featureSelections": [
+        "bindgen,local",
+        "bindgen"
+      ],
+      "eachPassed": 20,
+      "failed": 0,
+      "generatedFreshness": "Both bindings and bindings,local libraries emit the same three committed unformatted files in each selected test run."
+    },
+    "portable": {
+      "fmt": "passed",
+      "clippy": "all-targets -D warnings passed for client/local-transport/FFI; FFI also without local",
+      "wasm": [
+        "crew-protocol",
+        "crew-client"
+      ],
+      "normalDependencyTrees": "No GTK/UniFFI/native transport/rustls/Ed25519 dependency enters the portable/default CLI normal graph."
+    },
+    "compatibility": {
+      "rust": "1.82.0",
+      "cargo": "1.82.0",
+      "cliBuildSeconds": 8.33,
+      "cliVersionAndHelp": "passed: top-level,run,attach,web,stop",
+      "portableCheck": "passed",
+      "constConsumer": "1 passed"
+    },
+    "fixtures": {
+      "state": "31 supplied wire-field round trips and TUI steps; 5 actual web cases passed",
+      "actions": "127 cases,15 methods,85 anchors,24 pure cases;64 byte goldens,9 valid/11 invalid decoded requests passed"
+    },
+    "web": {
+      "unit": 200,
+      "mock": 226,
+      "mockFocus": 5,
+      "budgetTests": 5,
+      "rustBundle": 2,
+      "rustWireAuthServer": 60,
+      "contrast": 57,
+      "sourceMatch": "just web-check passed",
+      "source": "fnv1a64:a249c3169f3b8a02",
+      "scale": 1,
+      "perfFinal": {
+        "sizes_bytes": {
+          "p1_dashboard_script": 230497,
+          "p2_stylesheet": 33906,
+          "p3_terminal_chunk": 332915,
+          "p4_web_dist": 598004
+        },
+        "p5_first_contentful_paint_ms": {
+          "n": 7,
+          "p50": 56,
+          "p95": 76,
+          "max": 76
+        },
+        "p6_live_ms": {
+          "n": 7,
+          "p50": 118.9,
+          "p95": 158.4,
+          "max": 158.4
+        },
+        "single_pushes": {
+          "p7_daemon_to_handler_ms": {
+            "n": 60,
+            "p50": 0,
+            "p95": 1,
+            "max": 1
+          },
+          "p8_apply_ms": {
+            "n": 80,
+            "p50": 0,
+            "p95": 0.2,
+            "max": 0.2
+          },
+          "p9_handler_to_presented_frame_ms": {
+            "n": 80,
+            "p50": 25.4,
+            "p95": 32.6,
+            "max": 33.1
+          }
+        },
+        "load": {
+          "p10_steady_200_per_s_graph": {
+            "sent": 1000,
+            "frame_ms": {
+              "n": 300,
+              "p50": 16.7,
+              "p95": 16.7,
+              "max": 16.8
+            },
+            "long_tasks": 0
+          },
+          "p11_burst_2000_per_s_graph": {
+            "sent": 6000,
+            "frame_ms": {
+              "n": 180,
+              "p50": 16.7,
+              "p95": 16.8,
+              "max": 16.8
+            },
+            "long_tasks": 0
+          },
+          "p10_steady_200_per_s_log": {
+            "sent": 600,
+            "frame_ms": {
+              "n": 180,
+              "p50": 16.7,
+              "p95": 16.8,
+              "max": 16.8
+            },
+            "long_tasks": 0
+          },
+          "p11_burst_2000_per_s_log": {
+            "sent": 6000,
+            "frame_ms": {
+              "n": 180,
+              "p50": 16.7,
+              "p95": 16.7,
+              "max": 16.8
+            },
+            "long_tasks": 0
+          },
+          "apply_ms_under_load": {
+            "n": 13600,
+            "p50": 0,
+            "p95": 0.2,
+            "max": 0.7
+          },
+          "p12_log_rows_in_dom": {
+            "rows": 25,
+            "visible": 15,
+            "events": "5000 of 5000"
+          },
+          "p15_heap_mb": 7.8
+        },
+        "p17_switch_ms": {
+          "n": 20,
+          "p50": 41,
+          "p95": 50.1,
+          "max": 50.1
+        },
+        "p19_idle_60s": {
+          "index_frames": 0,
+          "calls": []
+        },
+        "p13_idle_3s": {
+          "frames": 0,
+          "short_timers": 0
+        },
+        "p14_key_to_echo_ms": {
+          "n": 30,
+          "p50": 4.1,
+          "p95": 5.1,
+          "max": 5.4
+        }
+      },
+      "liveBounded": {
+        "p18_question_badge_ms": {
+          "n": 12,
+          "p50": 251,
+          "p95": 251,
+          "max": 251
+        },
+        "p20_server_wakeups_60s": {
+          "wakeups": 29,
+          "ticks": 16,
+          "pings_received": 18,
+          "timer_wheel": 13,
+          "unexplained": [],
+          "longest_span_ms": 81,
+          "shortest_gap_ms": 61,
+          "connections": 6
+        },
+        "p20_server_rss_mb": {
+          "rss": 28.1,
+          "build": "debug"
+        }
+      },
+      "p16": {
+        "samples": 300,
+        "p50_us": 40.206,
+        "p95_us": 84.73,
+        "limit_us": 1000
+      },
+      "firstRun": {
+        "stats": {
+          "startTime": "2026-10-06T00:18:36.016Z",
+          "duration": 89033.182,
+          "expected": 8,
+          "skipped": 0,
+          "unexpected": 0,
+          "flaky": 0
+        },
+        "overlapMessage": "m-e5e7f0c21fdd"
+      },
+      "focusedRepeat": {
+        "stats": {
+          "startTime": "2026-10-06T00:21:11.755Z",
+          "duration": 22631.689,
+          "expected": 4,
+          "skipped": 0,
+          "unexpected": 0,
+          "flaky": 0
+        }
+      },
+      "finalQuiet": {
+        "stats": {
+          "startTime": "2026-10-06T00:22:10.929Z",
+          "duration": 89003.727,
+          "expected": 8,
+          "skipped": 0,
+          "unexpected": 0,
+          "flaky": 0
+        },
+        "repeatGate": "m-a41e68bee8c2"
+      },
+      "live": {
+        "stats": {
+          "startTime": "2026-10-06T00:24:44.966Z",
+          "duration": 89030.37999999999,
+          "expected": 2,
+          "skipped": 0,
+          "unexpected": 0,
+          "flaky": 0
+        },
+        "binary": "target/ci/debug/crew",
+        "build": "debug",
+        "isolated": true
+      },
+      "operatorListenerTouched": false
+    }
+  },
+  "bundle": {
+    "manifest": {
+      "version": 1,
+      "source": "fnv1a64:a249c3169f3b8a02",
+      "files": [
+        {
+          "path": "assets/Terminal-CigzQU8r.js",
+          "bytes": 2424,
+          "hash": "fnv1a64:62dcc851e71cf085"
+        },
+        {
+          "path": "assets/index-DqkZWbl-.js",
+          "bytes": 211802,
+          "hash": "fnv1a64:0a503992cf0fb951"
+        },
+        {
+          "path": "assets/solid-BRDyfwLp.js",
+          "bytes": 18695,
+          "hash": "fnv1a64:2569ca10ce2e0fd9"
+        },
+        {
+          "path": "assets/style-DlOjRRu5.css",
+          "bytes": 33906,
+          "hash": "fnv1a64:fea4fef0900f767d"
+        },
+        {
+          "path": "assets/xterm-lz32akA6.js",
+          "bytes": 330491,
+          "hash": "fnv1a64:65d76e4715d23d2b"
+        },
+        {
+          "path": "index.html",
+          "bytes": 686,
+          "hash": "fnv1a64:3a850d0591e6d829"
+        }
+      ]
+    },
+    "sizes": [
+      230497,
+      33906,
+      332915,
+      598004
+    ],
+    "ceilings": [
+      230500,
+      34000,
+      350000,
+      600000
+    ],
+    "headroom": [
+      3,
+      94,
+      17085,
+      1996
+    ]
+  },
+  "retainedAttempts": {
+    "runnerPreflight": "First ad-hoc shell omitted native_repo before native_cargo_target; no test ran. workspace-preflight-failed.log retained; corrected before retry.",
+    "initialWorkspace": "573 passed,2 unchanged sandbox_launch socket bind failures,1 ignored; target/native-validation/cargo/debug/.tmpXXXXXX/late.sock is112bytes and exceeds Unix cap108. Short own target/ci controls2/2 and complete final1127/0/2 pass. No source workaround.",
+    "initialFixtureCheck": "Failed commands source anchor moved after N7; four explicit provenance relocations authorized by content and approved m-94924b9fb271. Case/checker/golden bytes unchanged.",
+    "firstPerf": "8 passed but graph reported GTK cargo-check overlap until19:19. Initial log/JSON retained. Focused4 quiet passes retained; reviewer required final full8 quiet pass at m-a41e68bee8c2.",
+    "acceptedOwnerN7": "native-web-policy5333 retained original coldFCP208ms failure and unchanged candidate124/144.9ms pass in content target/native-validation/n7/perf-initial.json and perf-after-control.json. Those are owner evidence, not current QA measurements."
+  },
+  "quietWindow": {
+    "startMessage": "m-1801e9421131",
+    "endAt": "2026-10-06T00:27:03.355Z",
+    "firstRunOverlap": "graph GTK cargo check completed19:19 per m-e5e7f0c21fdd",
+    "repeatGate": "m-a41e68bee8c2",
+    "finalQuietStats": {
+      "startTime": "2026-10-06T00:22:10.929Z",
+      "duration": 89003.727,
+      "expected": 8,
+      "skipped": 0,
+      "unexpected": 0,
+      "flaky": 0
+    },
+    "liveStats": {
+      "startTime": "2026-10-06T00:24:44.966Z",
+      "duration": 89030.37999999999,
+      "expected": 2,
+      "skipped": 0,
+      "unexpected": 0,
+      "flaky": 0
+    },
+    "firstAttemptStats": {
+      "startTime": "2026-10-06T00:18:36.016Z",
+      "duration": 89033.182,
+      "expected": 8,
+      "skipped": 0,
+      "unexpected": 0,
+      "flaky": 0
+    },
+    "firstPerformanceStartedAt": "2026-10-06T00:18:36.016Z"
+  },
+  "quietProcessSamples": [
+    {
+      "at": "2026-10-06T00:23:00.620Z",
+      "activeCompilers": []
+    },
+    {
+      "at": "2026-10-06T00:25:18.930Z",
+      "activeCompilers": []
+    }
+  ],
+  "remainingGates": [
+    "gateway source/connector/generation/route proof and binding ports",
+    "native action availability API and regenerated bindings",
+    "TUI adoption",
+    "complete GTK and Apple app implementation,visual/accessibility/live service verification",
+    "real Core NativeSession Attach notice-before-first-terminal-chunk ordering",
+    "Apple compile/link/simulator/device execution deferred by operator",
+    "operator production binary activation/dashboard reload and older demo daemon image"
+  ],
+  "logsRoot": "/home/nade/workspaces/personal/crew/.crew/worktrees/qa/",
+  "logs": [
+    {
+      "path": "target/native-validation/core-integration/workspace.log",
+      "bytes": 58613,
+      "sha256": "ce877dbaf9af3fc1b8794a614c466c887508401d8158a1afe9b831b8c2d642b7"
+    },
+    {
+      "path": "target/native-validation/core-integration/workspace-preflight-failed.log",
+      "bytes": 65,
+      "sha256": "048aff55d0080890390570fde2f8a0c1bae9ebe67f4e5f8f17753756717a0735"
+    },
+    {
+      "path": "target/native-validation/core-integration/socket-short-target-controls.log",
+      "bytes": 742,
+      "sha256": "aadaa3ba9112db7802455af3380abef658856ae9855cbc0a28b5653d05f899cb"
+    },
+    {
+      "path": "target/native-validation/core-integration/workspace-final.log",
+      "bytes": 104176,
+      "sha256": "e2f24adf4c95ca37057025d9b8b3d6cd3f3bb0ebac49768466f76fe607b82639"
+    },
+    {
+      "path": "target/native-validation/core-integration/local-ffi.log",
+      "bytes": 14859,
+      "sha256": "cea41d0e2a281d6fc5f0b258ab39039542a4fe8586f5f300932a50ab573e7848"
+    },
+    {
+      "path": "target/native-validation/core-integration/local-ffi-final.log",
+      "bytes": 14427,
+      "sha256": "16394dd9799ec146b210be6454e2274d1bff213145a5cf162337e506ae444b40"
+    },
+    {
+      "path": "target/native-validation/core-integration/lint-wasm-corpus.log",
+      "bytes": 9949,
+      "sha256": "fdd4e5f803b2d58327160e2036c975051ef79f24cda4612a66344c38b0be11d1"
+    },
+    {
+      "path": "target/native-validation/core-integration/actions-corpus.log",
+      "bytes": 192,
+      "sha256": "a8d968f3536ec3a1e02c42b94b8e5867baf4152321098a5491f57c88e6500830"
+    },
+    {
+      "path": "target/native-validation/core-integration/dependency-trees.log",
+      "bytes": 14953,
+      "sha256": "f00b9913c9b2b9849fe6429357e17e645e05c4bc4eb4cd7ec1c16dfb2c1b1d4c"
+    },
+    {
+      "path": "target/native-validation/core-integration/msrv.log",
+      "bytes": 2180,
+      "sha256": "23ece60d39afc08b947b4b23df917463ead312c5e324b163bb1f90b0a84a2b6c"
+    },
+    {
+      "path": "target/native-validation/core-integration/msrv-final.log",
+      "bytes": 1212,
+      "sha256": "603da89c3d6991d9b4b95c02e2107eb1c017851968e000a47702c03e88e7993c"
+    },
+    {
+      "path": "target/native-validation/core-integration/web-build-unit.log",
+      "bytes": 881,
+      "sha256": "aa63bc9111616be9512cec83a516d9377db3c4f215eaa60cb4cb2c6968c9cb9f"
+    },
+    {
+      "path": "target/native-validation/core-integration/mock.log",
+      "bytes": 29689,
+      "sha256": "c6631f7f80591b409dd87bd73414676502b8b5e9bc81ed70e6a0125f6db39804"
+    },
+    {
+      "path": "target/native-validation/core-integration/perf.log",
+      "bytes": 2946,
+      "sha256": "15ac9043de10a86a63dce0dd14efcfd20ffada7ef771fe6665f188112ec63676"
+    },
+    {
+      "path": "target/native-validation/core-integration/perf-quiet.log",
+      "bytes": 2310,
+      "sha256": "2437a66816c426ed8738def8177e8c0066a2d7d5d6c380f1c9c72becf36cc2f7"
+    },
+    {
+      "path": "target/native-validation/core-integration/perf-final-quiet.log",
+      "bytes": 2943,
+      "sha256": "89b24924fd9b2b7d47ec71fcdb17a6d695e2306fbb3647e04230251214d14750"
+    },
+    {
+      "path": "target/native-validation/core-integration/live-bounded.log",
+      "bytes": 1317,
+      "sha256": "1bd1bb6a7dd9ffee0b794822ed225aead49af69b1262fb3c35c48b3833bb2c1f"
+    },
+    {
+      "path": "target/native-validation/core-integration/p16-quiet.log",
+      "bytes": 407,
+      "sha256": "01042a11b5240810677f42e5c98df3603a311ffa29bd4f6e420b51d03cb9d223"
+    },
+    {
+      "path": "target/native-validation/core-integration/web-match-contrast.log",
+      "bytes": 2938,
+      "sha256": "2135d238052f8fcdca6c539cac969942f9d1728f24ebacb8dd00d7a13e1f38b6"
+    }
+  ],
+  "sourceChangedPaths": [
+    "M Cargo.lock",
+    "M Cargo.toml",
+    "A apps/apple/CrewClient/Sources/Generated/Headers/CrewClientFFI.h",
+    "A apps/apple/CrewClient/Sources/Generated/Headers/CrewClientFFI.modulemap",
+    "A apps/apple/CrewClient/Sources/Generated/Swift/CrewBindings.swift",
+    "D crates/crew/web-dist/assets/Terminal-BGdv0O_l.js",
+    "A crates/crew/web-dist/assets/Terminal-CigzQU8r.js",
+    "D crates/crew/web-dist/assets/index-BohsVvyI.js",
+    "A crates/crew/web-dist/assets/index-DqkZWbl-.js",
+    "M crates/crew/web-dist/index.html",
+    "M crates/crew/web-dist/manifest.json",
+    "M crates/crew-client/Cargo.toml",
+    "A crates/crew-client/README.md",
+    "A crates/crew-client/examples/generate_web_policy.rs",
+    "A crates/crew-client/src/actions.rs",
+    "A crates/crew-client/src/commands.rs",
+    "A crates/crew-client/src/engine.rs",
+    "A crates/crew-client/src/history.rs",
+    "M crates/crew-client/src/lib.rs",
+    "A crates/crew-client/src/policy.rs",
+    "A crates/crew-client/src/presentation.rs",
+    "A crates/crew-client/src/questions.rs",
+    "A crates/crew-client/src/state.rs",
+    "A crates/crew-client/src/topology.rs",
+    "A crates/crew-client/src/usage.rs",
+    "M crates/crew-client/src/work.rs",
+    "A crates/crew-client/tests/actions.rs",
+    "A crates/crew-client/tests/client_api_conformance.rs",
+    "M crates/crew-client/tests/command_schema.rs",
+    "A crates/crew-client/tests/command_wire.rs",
+    "A crates/crew-client/tests/policy.rs",
+    "A crates/crew-client/tests/policy_const.rs",
+    "A crates/crew-client/tests/support/commands.rs",
+    "A crates/crew-client/tests/web_policy.rs",
+    "A crates/crew-client-ffi/Cargo.toml",
+    "A crates/crew-client-ffi/README.md",
+    "A crates/crew-client-ffi/src/bin/crew-client-bindgen.rs",
+    "A crates/crew-client-ffi/src/callbacks.rs",
+    "A crates/crew-client-ffi/src/lib.rs",
+    "A crates/crew-client-ffi/src/records/mod.rs",
+    "A crates/crew-client-ffi/src/records/shared.rs",
+    "A crates/crew-client-ffi/src/records/views.rs",
+    "A crates/crew-client-ffi/src/service.rs",
+    "A crates/crew-client-ffi/tests/generated.rs",
+    "A crates/crew-client-ffi/tests/records.rs",
+    "A crates/crew-client-ffi/tests/service.rs",
+    "A crates/crew-client-ffi/uniffi.toml",
+    "A crates/crew-client-transport/Cargo.toml",
+    "A crates/crew-client-transport/README.md",
+    "A crates/crew-client-transport/src/clock.rs",
+    "A crates/crew-client-transport/src/driver.rs",
+    "A crates/crew-client-transport/src/framing.rs",
+    "A crates/crew-client-transport/src/lib.rs",
+    "A crates/crew-client-transport/src/local.rs",
+    "A crates/crew-client-transport/src/ports.rs",
+    "A crates/crew-client-transport/src/queue.rs",
+    "A crates/crew-client-transport/src/service.rs",
+    "A crates/crew-client-transport/tests/common/mod.rs",
+    "A crates/crew-client-transport/tests/driver.rs",
+    "A crates/crew-client-transport/tests/local_daemon.rs",
+    "A crates/crew-client-transport/tests/local_negative.rs",
+    "A crates/crew-client-transport/tests/real_core_lifecycle.rs",
+    "M fixtures/native/actions/README.md",
+    "M fixtures/native/actions/sources.json",
+    "M notes/native-architecture.md",
+    "M notes/web-design.md",
+    "M web/src/commands.ts",
+    "A web/src/generated/client-policy.ts",
+    "M web/src/net/conn.ts",
+    "A web/test/client-policy.test.ts"
+  ],
+  "reportPaths": [
+    "review/native/core-integration.md",
+    "review/native/core-integration.json"
+  ],
+  "totalChangedPaths": 72
+}
