@@ -110,9 +110,11 @@ pub fn run(
     let result = event_loop(&mut terminal, &mut app, &theme, &rx, &requests, &signals);
 
     stop.store(true, Ordering::Relaxed);
-    requests.restart_subscriber();
-    let _ = input.join();
+    // Restore the terminal before waiting for host cleanup. A token read or
+    // Unix dial still in progress has not yet published a close handle.
     leave_terminal();
+    requests.shutdown();
+    let _ = input.join();
     if result.is_ok() && app.daemon_stopped && !app.stopped {
         use std::io::Write as _;
         let _ = writeln!(io::stderr(), "the crew daemon stopped");
@@ -272,6 +274,11 @@ fn handle(
                 let _ = reply.send(None);
             }
         }
+        UiEvent::DiscardedInput => app.set_status(
+            "queued terminal input discarded: connection or target changed",
+            true,
+            now,
+        ),
         UiEvent::Input(TermEvent::Key(key)) if key.kind != KeyEventKind::Release => {
             let commands = input::handle_key(app, key, now, page);
             run(app, commands);
