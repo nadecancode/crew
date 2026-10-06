@@ -1,0 +1,288 @@
+   Compiling proc-macro2 v1.0.107
+   Compiling quote v1.0.47
+   Compiling unicode-ident v1.0.26
+   Compiling cfg-if v1.0.5
+   Compiling libc v0.2.189
+   Compiling version_check v0.9.5
+   Compiling serde_core v1.0.229
+   Compiling log v0.4.34
+   Compiling find-msvc-tools v0.1.14
+   Compiling itoa v1.0.18
+   Compiling shlex v2.0.1
+   Compiling getrandom v0.3.4
+   Compiling serde v1.0.229
+   Compiling zerocopy v0.8.59
+   Compiling once_cell v1.21.4
+   Compiling typenum v1.20.1
+   Compiling equivalent v1.0.2
+   Compiling thiserror v2.0.21
+   Compiling bitflags v2.13.2
+   Compiling rustversion v1.0.23
+   Compiling zmij v1.0.23
+   Compiling zeroize v1.8.2
+   Compiling strsim v0.11.1
+   Compiling autocfg v1.5.1
+   Compiling serde_json v1.0.151
+   Compiling smallvec v1.16.2
+   Compiling hashbrown v0.16.1
+   Compiling cpufeatures v0.2.17
+   Compiling fnv v1.0.7
+   Compiling ident_case v1.0.1
+   Compiling memchr v2.8.3
+   Compiling utf8parse v0.2.2
+   Compiling signal-hook v0.3.18
+   Compiling parking_lot_core v0.9.12
+   Compiling semver v1.0.28
+   Compiling heck v0.5.0
+   Compiling anyhow v1.0.104
+   Compiling bytes v1.12.1
+   Compiling ryu v1.0.23
+   Compiling pin-project-lite v0.2.17
+   Compiling cc v1.5.1
+   Compiling rustls-pki-types v1.15.1
+   Compiling subtle v2.6.1
+   Compiling scopeguard v1.2.0
+   Compiling generic-array v0.14.7
+   Compiling ahash v0.8.12
+   Compiling untrusted v0.9.0
+   Compiling rustix v0.38.44
+   Compiling httparse v1.10.1
+   Compiling winnow v0.7.15
+   Compiling toml_write v0.1.2
+   Compiling unicode-width v0.1.14
+   Compiling cfg_aliases v0.1.1
+   Compiling iana-time-zone v0.1.65
+   Compiling lock_api v0.4.14
+   Compiling vcpkg v0.2.15
+   Compiling linux-raw-sys v0.4.15
+   Compiling thiserror v1.0.69
+   Compiling foldhash v0.1.5
+   Compiling rustls v0.23.45
+   Compiling pkg-config v0.3.34
+   Compiling num-traits v0.2.19
+   Compiling instability v0.3.10
+   Compiling rustc_version v0.4.1
+   Compiling either v1.18.0
+   Compiling indexmap v2.13.1
+   Compiling unsafe-libyaml v0.2.11
+   Compiling allocator-api2 v0.2.21
+   Compiling paste v1.0.15
+   Compiling nix v0.28.0
+   Compiling tracing-core v0.1.36
+   Compiling anstyle-parse v1.0.0
+   Compiling http v1.5.0
+   Compiling base64 v0.22.1
+   Compiling static_assertions v1.1.0
+   Compiling signature v2.2.0
+   Compiling hashbrown v0.15.5
+   Compiling itertools v0.13.0
+   Compiling utf-8 v0.7.6
+   Compiling anstyle-query v1.1.5
+   Compiling slab v0.4.12
+   Compiling futures-task v0.3.34
+   Compiling futures-sink v0.3.34
+   Compiling futures-core v0.3.34
+   Compiling anstyle v1.0.14
+   Compiling indoc v2.0.7
+   Compiling is_terminal_polyfill v1.70.2
+   Compiling unicode-segmentation v1.12.0
+   Compiling data-encoding v2.11.1
+   Compiling colorchoice v1.0.5
+   Compiling ed25519 v2.2.3
+   Compiling clap_lex v1.0.1
+   Compiling futures-util v0.3.34
+   Compiling cassowary v0.3.0
+   Compiling curve25519-dalek v4.1.3
+   Compiling unicode-width v0.2.0
+   Compiling lazy_static v1.5.1
+   Compiling arrayvec v0.7.8
+   Compiling castaway v0.2.4
+   Compiling anstream v1.0.0
+   Compiling chrono v0.4.45
+   Compiling syn v2.0.119
+   Compiling syn v3.0.6
+   Compiling compact_str v0.8.2
+   Compiling rustix v1.1.5
+   Compiling sharded-slab v0.1.7
+   Compiling rustls-pemfile v2.2.0
+   Compiling tracing-log v0.2.0
+   Compiling vte_generate_state_changes v0.1.2
+   Compiling lru v0.12.5
+   Compiling thread_local v1.1.10
+   Compiling crypto-common v0.1.7
+   Compiling block-buffer v0.10.4
+   Compiling shell-words v1.1.1
+   Compiling downcast-rs v1.2.1
+   Compiling fallible-streaming-iterator v0.1.9
+   Compiling fallible-iterator v0.3.0
+   Compiling clap_builder v4.5.61
+   Compiling linux-raw-sys v0.12.1
+   Compiling nu-ansi-term v0.50.3
+   Compiling crew v0.1.0 (/home/nade/workspaces/personal/crew/.crew/worktrees/native-transport/target/native-validation/k5-e7/crates/crew)
+   Compiling fastrand v2.5.0
+   Compiling digest v0.10.7
+   Compiling vte v0.11.1
+   Compiling errno v0.3.14
+   Compiling mio v1.2.3
+   Compiling getrandom v0.2.17
+   Compiling socket2 v0.6.5
+   Compiling serial2 v0.2.38
+   Compiling tracing-subscriber v0.3.23
+   Compiling ring v0.17.14
+   Compiling libsqlite3-sys v0.30.1
+   Compiling sha1 v0.10.7
+   Compiling sha2 v0.10.9
+   Compiling rand_core v0.9.5
+   Compiling uuid v1.20.0
+   Compiling signal-hook-registry v1.4.8
+   Compiling parking_lot v0.12.5
+   Compiling signal-hook-mio v0.2.5
+   Compiling crossterm v0.28.1
+   Compiling vt100 v0.15.2
+   Compiling unicode-truncate v1.1.0
+   Compiling tempfile v3.27.0
+   Compiling ppv-lite86 v0.2.21
+   Compiling hashbrown v0.14.5
+   Compiling rand_chacha v0.9.0
+   Compiling rand v0.9.5
+   Compiling serde_derive v1.0.229
+   Compiling thiserror-impl v2.0.21
+   Compiling tokio-macros v2.7.2
+   Compiling async-trait v0.1.92
+   Compiling hashlink v0.9.1
+   Compiling darling_core v0.20.11
+   Compiling tokio v1.53.1
+   Compiling strum_macros v0.26.4
+   Compiling thiserror-impl v1.0.69
+   Compiling curve25519-dalek-derive v0.1.1
+   Compiling clap_derive v4.5.61
+   Compiling tracing-attributes v0.1.31
+   Compiling tungstenite v0.28.0
+   Compiling tracing v0.1.44
+   Compiling filedescriptor v0.8.3
+   Compiling portable-pty v0.9.0
+   Compiling rustls-webpki v0.103.15
+   Compiling ed25519-dalek v2.2.0
+   Compiling strum v0.26.3
+   Compiling darling_macro v0.20.11
+   Compiling clap v4.5.61
+   Compiling darling v0.20.11
+   Compiling ratatui v0.29.0
+   Compiling serde_spanned v0.6.9
+   Compiling toml_datetime v0.6.11
+   Compiling crew-protocol v0.1.0 (/home/nade/workspaces/personal/crew/.crew/worktrees/native-transport/target/native-validation/k5-e7/crates/crew-protocol)
+   Compiling serde_yaml v0.9.34+deprecated
+   Compiling toml_edit v0.22.27
+   Compiling toml v0.8.23
+   Compiling tokio-tungstenite v0.28.0
+   Compiling crew-client v0.1.0 (/home/nade/workspaces/personal/crew/.crew/worktrees/native-transport/target/native-validation/k5-e7/crates/crew-client)
+   Compiling crew-core v0.1.0 (/home/nade/workspaces/personal/crew/.crew/worktrees/native-transport/target/native-validation/k5-e7/crates/crew-core)
+   Compiling tokio-rustls v0.26.6
+   Compiling rusqlite v0.32.1
+   Compiling crew-tui v0.1.0 (/home/nade/workspaces/personal/crew/.crew/worktrees/native-transport/target/native-validation/k5-e7/crates/crew-tui)
+   Compiling crew-client-transport v0.1.0 (/home/nade/workspaces/personal/crew/.crew/worktrees/native-transport/target/native-validation/k5-e7/crates/crew-client-transport)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 35.46s
+     Running unittests src/lib.rs (target/debug/deps/crew_client_transport-d07340e3a9de35e1)
+
+running 21 tests
+test framing::tests::uncertain_utf8_empty_and_multiple_record_submission_fail_closed ... ok
+test gateway::tests::approval_wait_uses_accepted_expiry_and_never_exceeds_protocol_window ... ok
+test gateway::tests::comparison_vector_and_debug_never_serialize_private_material ... ok
+test gateway::tests::grant_change_fences_workspace_lanes_before_listing_and_keeps_index_independent ... ok
+test gateway::tests::fresh_grant_proof_ahead_of_index_preserves_new_channel_and_never_rolls_back ... ok
+test gateway::tests::authority_generations_expiry_listing_revision_and_retirement_fence_old_channels ... ok
+test gateway::tests::native_listing_never_exposes_others_or_ungranted_duplicate_workspaces ... ok
+test gateway::tests::route_is_the_only_scope_proof_and_captured_expectations_never_replace_it ... ok
+test gateway::memory::tests::debug_does_not_reveal_synthetic_seed_and_retirement_erases_access ... ok
+test gateway::tests::index_has_no_workspace_and_opaque_grant_changes_only_with_verified_identity ... ok
+test queue::tests::bytes_are_bounded_and_closed_sinks_cannot_publish_or_register_again ... ok
+test gateway::tests::live_shared_policy_and_gateway_purposes_gate_every_app_method ... ok
+test queue::tests::overflow_keeps_prior_write_progress_and_one_reserved_end_in_order ... ok
+test gateway::tests::trust_requires_explicit_pin_and_rejects_credentials_plaintext_and_hidden_routes ... ok
+test service::tests::callback_byte_budget_counts_terminal_data_even_below_frame_count_limit ... ok
+test framing::tests::chunked_lines_crlf_and_limit_are_checked_before_growth ... ok
+test service::tests::slow_callback_queue_is_bounded_and_preserves_reserved_final_outcomes ... ok
+test gateway::tls_tests::tls_wrong_pin_wrong_name_expiry_and_feature_unioned_tls12_refuse_before_signing ... ok
+test gateway::tls_tests::websocket_frame_bound_is_applied_before_json_decoding ... ok
+test gateway::tls_tests::route_less_or_divergent_authenticated_open_never_becomes_ready ... ok
+test gateway::tls_tests::native_notices_map_to_scoped_ends_and_unknown_native_notices_fail_closed ... ok
+
+test result: ok. 21 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.40s
+
+     Running tests/attachment_notice.rs (target/debug/deps/attachment_notice-051c8847f99b0aed)
+
+running 4 tests
+test real_core_attach_completion_identifies_attachment_in_exactly_one_final_outcome ... ok
+test failed_attach_never_publishes_success_identity_and_closes_its_provisional_attachment ... ok
+test no_output_attach_still_identifies_success_and_local_detach_and_stale_scope_do_not_reopen_it ... ok
+test native_session_identified_attach_notice_precedes_first_buffered_and_live_chunks_for_two_attachments ... ok
+
+test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.02s
+
+     Running tests/driver.rs (target/debug/deps/driver-9638583f32b37950)
+
+running 16 tests
+test known_route_startup_time_cannot_be_replaced_during_first_snapshot ... ok
+test duplicate_authenticated_open_is_noop_and_changed_live_authority_is_retired ... ok
+test canonical_snapshot_precedes_lane_dispatch_and_bootstrap_ids_are_disjoint ... ok
+test old_channel_attempts_frames_and_timers_cannot_change_reconnected_state ... ok
+test lane_snapshot_rejects_same_pid_different_incarnation_before_action_bytes ... ok
+test null_agent_result_is_distinct_from_an_absent_result_or_ambiguous_envelope ... ok
+test core_final_notices_are_held_and_expire_once_while_workspace_is_unbound ... ok
+test terminal_fake_success_is_ignored_and_late_error_ends_once_without_second_outcome ... ok
+test two_terminals_keep_full_scope_routes_and_local_close_targets_exact_attachment ... ok
+test request_deadline_after_write_reports_unknown_once_and_does_not_replay_action ... ok
+test suspend_preserves_core_retry_deadline_but_explicit_dispose_cancels_it ... ok
+test close_and_background_leave_team_running_and_never_replay_terminal_bytes ... ok
+test workspace_reconnect_keeps_authenticated_index_attempt_and_filtered_listing ... ok
+test never_written_partial_write_and_timeout_have_distinct_outcomes ... ok
+test terminal_output_chunks_preserve_bytes_boundaries_buffered_order_and_overflow_end ... ok
+test long_terminal_stream_retires_send_deadlines_and_keeps_bounded_error_correlation ... ok
+
+test result: ok. 16 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.07s
+
+     Running tests/gateway_daemon.rs (target/debug/deps/gateway_daemon-eca251ca63c0e567)
+
+running 6 tests
+test real_gateway_enrollment_cancel_is_known_before_write_and_unknown_after_accepted_proof ... ok
+test real_gateway_rejects_cached_enrollment_proof_for_a_fresh_nonce_without_replaying_or_creating_device ... ok
+test real_gateway_existing_key_recovers_without_reenrollment_and_device_revoke_is_individual ... ok
+test real_gateway_enrolls_read_only_and_rebinds_control_after_grant_change_then_revokes_workspace ... ok
+test real_gateway_restart_fences_old_epoch_then_reconnects_with_fresh_scope_and_same_device_key ... ok
+test real_gateway_wrong_device_and_expired_device_cannot_reconnect_or_gain_workspace_access ... ok
+
+test result: ok. 6 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 3.68s
+
+     Running tests/local_daemon.rs (target/debug/deps/local_daemon-c25f62ac1d6b7f8b)
+
+running 6 tests
+test agent_context_refuses_before_any_native_local_socket_dial ... ok
+test real_daemon_native_service_authenticates_reads_pushes_and_allows_observer_query_reentry ... ok
+test core_input_failure_fences_native_io_and_publishes_safe_client_termination ... ok
+test real_daemon_one_subscribed_socket_snapshot_barrier_covers_interleaved_messages ... ok
+test real_daemon_missing_bad_and_unsafe_token_are_refused_with_safe_diagnostics ... ok
+test real_daemon_reconnect_uses_new_pid_token_and_attempt_on_same_socket_profile ... ok
+
+test result: ok. 6 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.54s
+
+     Running tests/local_negative.rs (target/debug/deps/local_negative-d0e3f8de39d62fe7)
+
+running 2 tests
+test bounded_hello_refuses_oversized_unterminated_and_malformed_lines_before_opening ... ok
+test protected_local_hello_rejects_protocol_role_identity_and_secret_proof_mismatch ... ok
+
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.11s
+
+     Running tests/real_core_lifecycle.rs (target/debug/deps/real_core_lifecycle-e71d743e080bfe6d)
+
+running 1 test
+test real_core_background_foreground_replays_identified_submission_once_after_fresh_proof ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+   Doc-tests crew_client_transport
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+

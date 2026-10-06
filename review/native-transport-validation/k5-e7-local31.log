@@ -1,0 +1,62 @@
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.15s
+     Running unittests src/lib.rs (target/debug/deps/crew_client_transport-7030ca8f6b0c2927)
+
+running 6 tests
+test framing::tests::uncertain_utf8_empty_and_multiple_record_submission_fail_closed ... ok
+test queue::tests::overflow_keeps_prior_write_progress_and_one_reserved_end_in_order ... ok
+test queue::tests::bytes_are_bounded_and_closed_sinks_cannot_publish_or_register_again ... ok
+test service::tests::callback_byte_budget_counts_terminal_data_even_below_frame_count_limit ... ok
+test service::tests::slow_callback_queue_is_bounded_and_preserves_reserved_final_outcomes ... ok
+test framing::tests::chunked_lines_crlf_and_limit_are_checked_before_growth ... ok
+
+test result: ok. 6 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/driver.rs (target/debug/deps/driver-521cb0847c53280d)
+
+running 16 tests
+test known_route_startup_time_cannot_be_replaced_during_first_snapshot ... ok
+test duplicate_authenticated_open_is_noop_and_changed_live_authority_is_retired ... ok
+test old_channel_attempts_frames_and_timers_cannot_change_reconnected_state ... ok
+test lane_snapshot_rejects_same_pid_different_incarnation_before_action_bytes ... ok
+test canonical_snapshot_precedes_lane_dispatch_and_bootstrap_ids_are_disjoint ... ok
+test close_and_background_leave_team_running_and_never_replay_terminal_bytes ... ok
+test null_agent_result_is_distinct_from_an_absent_result_or_ambiguous_envelope ... ok
+test request_deadline_after_write_reports_unknown_once_and_does_not_replay_action ... ok
+test workspace_reconnect_keeps_authenticated_index_attempt_and_filtered_listing ... ok
+test core_final_notices_are_held_and_expire_once_while_workspace_is_unbound ... ok
+test terminal_fake_success_is_ignored_and_late_error_ends_once_without_second_outcome ... ok
+test never_written_partial_write_and_timeout_have_distinct_outcomes ... ok
+test two_terminals_keep_full_scope_routes_and_local_close_targets_exact_attachment ... ok
+test suspend_preserves_core_retry_deadline_but_explicit_dispose_cancels_it ... ok
+test terminal_output_chunks_preserve_bytes_boundaries_buffered_order_and_overflow_end ... ok
+test long_terminal_stream_retires_send_deadlines_and_keeps_bounded_error_correlation ... ok
+
+test result: ok. 16 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.07s
+
+     Running tests/local_daemon.rs (target/debug/deps/local_daemon-e59f68ae3b3185c8)
+
+running 6 tests
+test agent_context_refuses_before_any_native_local_socket_dial ... ok
+test core_input_failure_fences_native_io_and_publishes_safe_client_termination ... ok
+test real_daemon_one_subscribed_socket_snapshot_barrier_covers_interleaved_messages ... ok
+test real_daemon_missing_bad_and_unsafe_token_are_refused_with_safe_diagnostics ... ok
+test real_daemon_native_service_authenticates_reads_pushes_and_allows_observer_query_reentry ... ok
+test real_daemon_reconnect_uses_new_pid_token_and_attempt_on_same_socket_profile ... ok
+
+test result: ok. 6 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.47s
+
+     Running tests/local_negative.rs (target/debug/deps/local_negative-dd114e0013993d73)
+
+running 2 tests
+test bounded_hello_refuses_oversized_unterminated_and_malformed_lines_before_opening ... ok
+test protected_local_hello_rejects_protocol_role_identity_and_secret_proof_mismatch ... ok
+
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.06s
+
+     Running tests/real_core_lifecycle.rs (target/debug/deps/real_core_lifecycle-6d298fc84513b94b)
+
+running 1 test
+test real_core_background_foreground_replays_identified_submission_once_after_fresh_proof ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+

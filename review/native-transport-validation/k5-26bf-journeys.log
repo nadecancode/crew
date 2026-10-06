@@ -1,0 +1,15 @@
+   Compiling crew-protocol v0.1.0 (/home/nade/workspaces/personal/crew/.crew/worktrees/native-transport/target/native-validation/k5-26bf/crates/crew-protocol)
+   Compiling crew v0.1.0 (/home/nade/workspaces/personal/crew/.crew/worktrees/native-transport/target/native-validation/k5-26bf/crates/crew)
+   Compiling crew-client v0.1.0 (/home/nade/workspaces/personal/crew/.crew/worktrees/native-transport/target/native-validation/k5-26bf/crates/crew-client)
+   Compiling crew-core v0.1.0 (/home/nade/workspaces/personal/crew/.crew/worktrees/native-transport/target/native-validation/k5-26bf/crates/crew-core)
+   Compiling crew-tui v0.1.0 (/home/nade/workspaces/personal/crew/.crew/worktrees/native-transport/target/native-validation/k5-26bf/crates/crew-tui)
+   Compiling crew-client-transport v0.1.0 (/home/nade/workspaces/personal/crew/.crew/worktrees/native-transport/target/native-validation/k5-26bf/crates/crew-client-transport)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 14.09s
+     Running tests/gateway_daemon.rs (/home/nade/workspaces/personal/crew/.crew/worktrees/native-transport/target/native-validation/k5-e7/target/debug/deps/gateway_daemon-05caa23572ebb5bb)
+
+running 2 tests
+test journey::real_local_native_engine_tasks_questions_confirmed_controls_and_two_terminal_scopes ... ok
+test journey::real_scoped_native_engine_read_default_control_terminal_and_revocation_on_actual_ptys ... ok
+
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 6 filtered out; finished in 1.62s
+

@@ -1,0 +1,10 @@
+{
+  "source": "26bf2ebeaa5270e2b085fb8697e91134e44d6784",
+  "features": [
+    "native-gateway"
+  ],
+  "compiler": "rustc1.93.1",
+  "path": "target/native-validation/gateway-integration/bin/crew",
+  "sha256": "eaadd984a683ae1d920a4c97800235fc4de21245b4f6a9f6c5aac1615517be45",
+  "bytes": 200829992
+}
