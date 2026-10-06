@@ -230,7 +230,12 @@ impl Shell {
         detail_container.add_css_class("crew-detail");
         detail_container.append(&detail_heading);
         detail_container.append(&detail_stack);
-        let content = gtk::Paned::new(gtk::Orientation::Horizontal);
+        // F8 focuses the split itself. GTK gives a split the generic role,
+        // which cannot carry a name, so it is a named group instead.
+        let content = gtk::Paned::builder()
+            .orientation(gtk::Orientation::Horizontal)
+            .accessible_role(gtk::AccessibleRole::Group)
+            .build();
         content.set_hexpand(true);
         content.set_vexpand(true);
         content.set_resize_start_child(true);
@@ -241,7 +246,6 @@ impl Shell {
         content.set_end_child(Some(&detail_container));
         // A visible handle, and an inspector wide enough for its tabs.
         content.set_wide_handle(true);
-        // F8 focuses the split itself; name it for what the arrow keys do there.
         content.update_property(&[gtk::accessible::Property::Label("Resize details pane")]);
         content.set_position(420);
         let adaptive = AdaptiveBox::new();

@@ -1,0 +1,135 @@
+Linux interaction run (binaries: tool-versions.txt), private Xvfb :5318,
+owned accessibility bus, openbox. Real key input from xdotool.
+Lines: depth role 'name' states (focused objects of the Crew app only).
+
+## G17, G9: startup, disconnected, focus on the page's first control
+  window 'Team — Crew'
+  11 button 'Choose workspace'  focused,focusable,sensitive
+Return opens Connections:
+  window 'Team — Crew'
+  window 'Connect to Crew'
+  9 button 'Connect'  focused,focusable,sensitive
+connected, focus on the connected page's first control:
+  window 'Team — Crew'
+  11 button 'Answer'  focused,focusable,sensitive
+
+## G2: the sidebar is one Tab stop
+  window 'Team — Crew'
+  9 list item 'Team'  focused,focusable,selected,selectable,sensitive
+1: 11 button 'Answer'  focused,focusable,sensitive
+2: 11 button 'Refresh'  focused,focusable,sensitive
+3: 11 button 'New message'  focused,focusable,sensitive
+4: 11 button 'Stop team…'  focused,focusable,sensitive
+Window title: 'Team — Crew'
+
+## G2: arrows move focus, only Enter changes the destination
+  window 'Team — Crew'
+  9 list item 'Messages'  focused,focusable,selectable,sensitive
+Window title: 'Team — Crew'
+  window 'Messages — Crew'
+  9 list item 'Messages'  focused,focusable,selected,selectable,sensitive
+Window title: 'Messages — Crew'
+
+## G9: Tab on the Team page visits each control once
+  window 'Team — Crew'
+  11 button 'Refresh'  focused,focusable,sensitive
+1: 11 button 'New message'  focused,focusable,sensitive
+2: 11 button 'Stop team…'  focused,focusable,sensitive
+3: 11 page tab 'List'  focused,focusable,selectable,sensitive
+4: 11 page tab 'Graph'  focused,focusable,selected,selectable,sensitive
+Window title: 'Team — Crew'
+
+## G3: Stop team… opened from the keyboard; Escape returns focus to it
+  window 'Team — Crew'
+  window 'Stop team'
+  5 button 'Cancel'  focused,focusable,sensitive
+the opener while the confirmation is open:
+  10 button 'Stop team…'  focusable
+no pending reason is shown while it is open
+  window 'Team — Crew'
+  11 button 'Stop team…'  focused,focusable,sensitive
+2 s later:
+  window 'Team — Crew'
+  11 button 'Stop team…'  focused,focusable,sensitive
+
+## G3: Kill… and Restart fresh… from the Actions menu return focus to it
+  window 'Team — Crew'
+  window 'Kill agent'
+  5 button 'Cancel'  focused,focusable,sensitive
+  window 'Team — Crew'
+  13 toggle button 'Agent actions'  focused,focusable,sensitive
+2 s later:
+  window 'Team — Crew'
+  13 toggle button 'Agent actions'  focused,focusable,sensitive
+  window 'Team — Crew'
+  window 'Restart fresh'
+  5 button 'Cancel'  focused,focusable,sensitive
+  window 'Team — Crew'
+  13 toggle button 'Agent actions'  focused,focusable,sensitive
+2 s later:
+  window 'Team — Crew'
+  13 toggle button 'Agent actions'  focused,focusable,sensitive
+
+## G14: New message names its To selector and editor
+  window 'Team — Crew'
+  window 'New message'
+  6 text 'Message'  focused,focusable,sensitive,editable
+  4 label 'To'  sensitive
+  4 combo box 'To'  sensitive
+  5 toggle button 'To'  focusable,sensitive
+  11 label 'Everyone'  sensitive
+  4 label 'Workspace /tmp/crew-int.xrEVm0/ws · Everyone sends to the whole team. Return inserts a newline; Send submits explicitly.'  sensitive
+  5 text 'Message'  focused,focusable,sensitive,editable
+  4 button 'Cancel'  focusable,sensitive
+  5 label 'Cancel'  sensitive
+  4 button 'Send'  focusable  description 'body: some text is required'
+  5 label 'Send'  sensitive
+  window 'Team — Crew'
+  11 button 'New message'  focused,focusable,sensitive
+
+## G15: terminal controls follow the attachment; F6 leaves the terminal
+(the claude-1 inspector is still open)
+  11 button 'Attach terminal'  focusable,sensitive
+  12 label 'Attach terminal'  sensitive
+after Attach, focus is on the terminal, which says how to leave it:
+  window 'Team — Crew'
+  17 terminal 'Agent terminal'  focused,focusable,sensitive  description 'Attached. F6 leaves the terminal.'
+  11 button 'Attach terminal'  focusable
+  12 label 'Attach terminal'  sensitive
+  16 button 'Copy selection'  focusable
+  17 label 'Copy selection'  sensitive
+  16 button 'Detach terminal'  focusable,sensitive
+  17 label 'Detach terminal'  sensitive
+accessible text of the attached terminal before any new output:
+  265 characters, 5 non-empty lines
+  | [crew] 1 new message(s); run: crew ctl inbox
+  | [claude-1] task from orchestrator: Task billing is yours: "Implement billing".
+  | [claude-1] task_update: Progress recorded: 15%.
+Tab typed into the terminal goes to the agent:
+  window 'Team — Crew'
+  17 terminal 'Agent terminal'  focused,focusable,sensitive  description 'Attached. F6 leaves the terminal.'
+F6:
+  window 'Team — Crew'
+  17 button 'Detach terminal'  focused,focusable,sensitive
+Return on Detach, focus back on Attach terminal:
+  window 'Team — Crew'
+  12 button 'Attach terminal'  focused,focusable,sensitive
+  11 button 'Attach terminal'  focused,focusable,sensitive
+  12 label 'Attach terminal'  sensitive
+  16 button 'Copy selection'  focusable
+  17 label 'Copy selection'  sensitive
+  16 button 'Detach terminal'  focusable
+  17 label 'Detach terminal'  sensitive
+R1: 2 s later the window status does not say an action is pending:
+  7 label 'Action acknowledged by the daemon.'  sensitive
+  14 label 'Actions'  sensitive
+  15 label 'Detached · read-only'  sensitive
+
+## G15: shortcut help documents the terminal escape
+  5 label 'Move between destinations in the sidebar'  sensitive
+  5 label 'Up / Down'  sensitive
+  5 label 'Open the focused destination'  sensitive
+  5 label 'Enter'  sensitive
+  5 label 'Leave an attached terminal (Tab goes to the agent)'  sensitive
+  5 label 'F6'  sensitive
+PASS
