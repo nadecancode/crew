@@ -20,6 +20,8 @@ default = []
 bindings = ["dep:uniffi", "dep:crew-client-transport", "crew-client-transport/gateway", "dep:tokio"]
 bindgen = ["bindings", "uniffi/cli", "uniffi/cargo-metadata"]
 local = ["bindings", "crew-client-transport/local"]
+# Live facade tests against an isolated real daemon and native gateway.
+gateway-tests = ["local", "crew/native-gateway"]
 
 [dependencies]
 crew-client = { path = "../crew-client" }
@@ -38,3 +40,7 @@ rustls-pemfile = "=2.2.0"
 sha2.workspace = true
 tokio-tungstenite.workspace = true
 futures-util.workspace = true
+
+[target.'cfg(any(target_os = "linux", target_os = "macos"))'.dev-dependencies]
+crew = { path = "../crew", default-features = false }
+crew-core = { path = "../crew-core" }

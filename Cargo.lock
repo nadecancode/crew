@@ -450,8 +450,10 @@ dependencies = [
 name = "crew-client-ffi"
 version = "0.1.0"
 dependencies = [
+ "crew",
  "crew-client",
  "crew-client-transport",
+ "crew-core",
  "crew-protocol",
  "ed25519-dalek",
  "futures-util",
