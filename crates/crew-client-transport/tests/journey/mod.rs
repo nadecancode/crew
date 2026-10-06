@@ -2,11 +2,19 @@
 //! daemon-owned PTYs. Synthetic agents replace the provider, never ClientApi.
 use super::*;
 use crew_client_transport::local::{discover_profiles, LocalProfile};
+use crew_client_transport::local::{LocalChannel, LocalTransport};
+use crew_client_transport::queue::EventQueue;
+use crew_client_transport::service::{ChannelHandle, Connector};
+use crew_client_transport::{ChannelPurpose, HostEffect, HostEvent, SendDisposition, TransportEnd};
 use crew_core::config::{
     AgentDefaults, AgentSpec, BackendChoice, Isolation, OrchestratorConfig, TaskSpec, TeamConfig,
     WorkspaceConfig,
 };
 use crew_protocol::RuntimeKind;
+use std::future::Future;
+use std::pin::Pin;
+use std::sync::atomic::AtomicU64;
+use tokio::sync::watch;
 
 fn binary() -> PathBuf {
     let path = PathBuf::from(
@@ -505,5 +513,165 @@ fn real_scoped_native_engine_read_default_control_terminal_and_revocation_on_act
         assert!(matches!(service.plan(ActionIntent::AttachInput { scope: granted.clone(), attachment_id: alpha, data:b"revoked bytes".to_vec() }).unwrap(), ActionPlan::Unavailable { .. }));
         assert!(matches!(service.plan(send_intent(&control,"old-control-scope")).unwrap(), ActionPlan::Unavailable { .. }));
         service.close().unwrap(); client.close(); host.close().await;
+    });
+}
+
+/// A transport-loss injector around actual protected local IO. It forwards
+/// verified events unchanged, except for one fully-written mutation's reply.
+/// Core, daemon handlers, authentication and framing are never substituted.
+struct CutReplyConnector {
+    profile: LocalProfile,
+    pauses: Arc<AtomicUsize>,
+}
+
+struct CutReplyChannel {
+    local: Arc<Mutex<LocalChannel>>,
+    cutoff: Arc<AtomicU64>,
+    pauses: Arc<AtomicUsize>,
+    finished: watch::Receiver<bool>,
+}
+
+impl ChannelHandle for CutReplyChannel {
+    fn send(&self, request_id: u64, text: String) -> Result<(), TransportEnd> {
+        let request: Value = serde_json::from_str(&text).map_err(|_| TransportEnd::Malformed)?;
+        if request["method"] == "agent_pause" {
+            self.cutoff.store(request_id, Ordering::Release);
+            self.pauses.fetch_add(1, Ordering::AcqRel);
+        }
+        self.local
+            .lock()
+            .map_err(|_| TransportEnd::Stopped)?
+            .send(request_id, text)
+    }
+    fn close(&self) {
+        if let Ok(local) = self.local.lock() {
+            local.close();
+        }
+    }
+    fn fail(&self, reason: TransportEnd) {
+        if let Ok(local) = self.local.lock() {
+            local.fail(reason);
+        }
+    }
+    fn wait_closed(&mut self) -> Pin<Box<dyn Future<Output = ()> + Send + '_>> {
+        Box::pin(async move {
+            while !*self.finished.borrow_and_update() {
+                if self.finished.changed().await.is_err() {
+                    break;
+                }
+            }
+        })
+    }
+}
+
+impl Drop for CutReplyChannel {
+    fn drop(&mut self) {
+        self.close();
+    }
+}
+
+impl Connector for CutReplyConnector {
+    fn open(
+        &self,
+        effect: &HostEffect,
+        events: &EventQueue,
+    ) -> Result<Box<dyn ChannelHandle>, TransportEnd> {
+        let HostEffect::Open {
+            channel_id,
+            purpose,
+            ..
+        } = effect
+        else {
+            return Err(TransportEnd::Permission);
+        };
+        let inner = EventQueue::new(1)?;
+        let outer = events.register(*channel_id)?;
+        let local = Arc::new(Mutex::new(LocalTransport::open(
+            self.profile.clone(),
+            effect,
+            &inner,
+        )?));
+        let cutoff = Arc::new(AtomicU64::new(0));
+        let (finished, completion) = watch::channel(false);
+        let worker = local.clone();
+        let target = cutoff.clone();
+        let action = *purpose == ChannelPurpose::Action;
+        tokio::spawn(async move {
+            while let Some(event) = inner.recv().await {
+                let request = target.load(Ordering::Acquire);
+                if action && request != 0 {
+                    if let HostEvent::Frame { text, .. } = &event {
+                        let id = serde_json::from_str::<Value>(text)
+                            .ok()
+                            .and_then(|frame| frame["id"].as_u64());
+                        if id == Some(request) {
+                            continue;
+                        }
+                    }
+                }
+                let cut = action
+                    && request != 0
+                    && matches!(&event, HostEvent::SendProgress {
+                    request_id, disposition: SendDisposition::FullyWritten, ..
+                } if *request_id == request);
+                let ended = matches!(event, HostEvent::Ended { .. });
+                if outer.try_send(event).is_err() {
+                    break;
+                }
+                if cut {
+                    // The actual writer reported full acceptance before the
+                    // real socket is closed; the daemon may already have run it.
+                    if let Ok(local) = worker.lock() {
+                        local.fail(TransportEnd::Closed);
+                    }
+                }
+                if ended {
+                    break;
+                }
+            }
+            if let Ok(local) = worker.lock() {
+                local.close();
+            }
+            finished.send_replace(true);
+        });
+        Ok(Box::new(CutReplyChannel {
+            local,
+            cutoff,
+            pauses: self.pauses.clone(),
+            finished: completion,
+        }))
+    }
+}
+
+#[test]
+fn real_native_mutation_reply_loss_is_unknown_once_and_not_replayed_after_fresh_barrier() {
+    let name = "journey::real_native_mutation_reply_loss_is_unknown_once_and_not_replayed_after_fresh_barrier";
+    if isolated(name) {
+        return;
+    }
+    runtime().block_on(async {
+        let host = team().await;
+        let profile = discover_profiles().unwrap().remove(0).profile;
+        let pauses = Arc::new(AtomicUsize::new(0));
+        let service = NativeSession::with_connector(core(), Protocol6Codec,
+            CutReplyConnector { profile: profile.clone(), pauses: pauses.clone() },
+            DriverConfig { reconnect: false, ..Default::default() }).unwrap();
+        let (notices, _, _) = observe(&service);
+        service.connect(profile.id, profile.endpoint_id, Some(profile.workspace_key)).unwrap();
+        let scope = notice(&notices, |notice| notice.workspace == WorkspaceStatus::Live).scope.unwrap();
+        let unknown = dispatch(&service, &notices, ActionIntent::Agent { scope: scope.clone(), id: "alpha".into(), action: AgentAction::Pause }, OperationOutcomeKind::Unknown);
+        assert_eq!(unknown.scope, scope); assert_eq!(unknown.attachment_id, None);
+        assert_eq!(pauses.load(Ordering::Acquire), 1);
+        service.reconnect().unwrap();
+        let newer = notice(&notices, |notice| notice.workspace == WorkspaceStatus::Live && notice.scope.as_ref().is_some_and(|current| current.attempt > scope.attempt)).scope.unwrap();
+        assert_eq!(newer.daemon_pid, scope.daemon_pid); assert_eq!(newer.daemon_started_at_ms, scope.daemon_started_at_ms);
+        assert!(matches!(service.query(ViewQuery::AgentDetail { id: "alpha".into() }).unwrap().payload,
+            ViewPayload::AgentDetail(data) if data.agent.as_ref().is_some_and(|agent| agent.agent.paused)), "the real daemon accepted the mutation despite a lost reply");
+        assert_eq!(pauses.load(Ordering::Acquire), 1, "unknown mutation is never replayed");
+        while let Ok(notice) = notices.try_recv() {
+            assert!(!notice.outcomes.iter().any(|outcome| outcome.operation_id == unknown.operation_id), "one final logical outcome");
+        }
+        assert!(matches!(service.plan(ActionIntent::Agent { scope, id: "alpha".into(), action: AgentAction::Pause }).unwrap(), ActionPlan::Unavailable { .. }));
+        service.close().unwrap(); host.close().await;
     });
 }
