@@ -7,7 +7,8 @@ Rust/Cargo 1.93.1; device enrollment and all live tests use isolated fixtures.
 
 Final product source is `26bf2ebeaa5270e2b085fb8697e91134e44d6784`; this report
 adds evidence only. The [inventory](gateway-integration.json) records 65 exact
-approved source blobs, 583 unchanged protected files, the additive lock union,
+approved source blobs, five committed consumer evidence files, 583 unchanged
+protected files, the additive lock union,
 fixture binary, commands and retained log hashes. Core, local FFI/generated
 Swift, desktop/TUI/Apple shells, web assets and Git safeguards remain unchanged.
 The single existing-daemon production exception is reviewed `process/pty.rs`.
@@ -53,9 +54,11 @@ K5 uses the exact QA native-gateway fixture binary above. Its harness adds only
 `journey-tests` in the transport manifest, `tests/gateway_daemon.rs` and
 `tests/journey/mod.rs`; the Core, server, connector, root manifest and lock remain
 exactly the composed product. This test-only overlay is recorded separately from
-the unchanged 32-file connector delivery. Owner logs remain in its worktree at
-`target/native-validation/k5-26bf-journeys.log` and `k5-26bf-binary.json`;
-message `m-8ec1689d3959` records source, binary identity and pass counts.
+the unchanged 32-file connector delivery. The [committed consumer evidence](../native-transport-validation.md) retains
+the exact binary manifest, two-journey log and earlier 56/31 logs. Message
+`m-8ec1689d3959` records the initial acceptance; the evidence import contains
+reports only and preserves all product source. The separate owned rollback
+follow-up and remaining transport fault coverage are not part of this checkpoint.
 
 The two earlier ignored tests require token-spending real CLI access and an
 interactive terminal. The first earlier default library run retained two

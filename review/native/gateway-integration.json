@@ -462,6 +462,38 @@
         "sha256": "962d6fc48c9e4fd8d852d8e3cac20282b20610eac09e3697e9ffa3a9ba9f0e19"
       }
     ],
+    "evidenceEntries": [
+      {
+        "path": "review/native-transport-validation/k5-26bf-binary.json",
+        "authority": "1c2846cf0e345fba15790a7d0c478f775d644263",
+        "bytes": 299,
+        "sha256": "18d0c652cbdf845b5ef228e15c8a728935761f3a6237f7e30d7a364220ad9376"
+      },
+      {
+        "path": "review/native-transport-validation/k5-26bf-journeys.log",
+        "authority": "1c2846cf0e345fba15790a7d0c478f775d644263",
+        "bytes": 1518,
+        "sha256": "fe5bbb78d0348ba893dedd9a79fb48730393353a23e59075de210b3223dc8b79"
+      },
+      {
+        "path": "review/native-transport-validation/k5-e7-56.log",
+        "authority": "1c2846cf0e345fba15790a7d0c478f775d644263",
+        "bytes": 13381,
+        "sha256": "8594813161554d61028e47e0c4e1e0cd956fee2d46e405dc5bca5219e65d495a"
+      },
+      {
+        "path": "review/native-transport-validation/k5-e7-local31.log",
+        "authority": "1c2846cf0e345fba15790a7d0c478f775d644263",
+        "bytes": 3809,
+        "sha256": "ae0a73d8c9ea96a61360d9b64872bea86a77e034cf622141abaae885bad503c6"
+      },
+      {
+        "path": "review/native-transport-validation.md",
+        "authority": "1c2846cf0e345fba15790a7d0c478f775d644263",
+        "bytes": 6905,
+        "sha256": "fdc8a4d89c6c437d0b5f17c5390b1b2393c10fddf6408e6e315eff38cc2ee8df"
+      }
+    ],
     "protected": {
       "compared": 583,
       "changed": [],
@@ -1050,7 +1082,14 @@
     "cases": [
       "journey::real_local_native_engine_tasks_questions_confirmed_controls_and_two_terminal_scopes",
       "journey::real_scoped_native_engine_read_default_control_terminal_and_revocation_on_actual_ptys"
-    ]
+    ],
+    "evidenceCommit": "1c2846cf0e345fba15790a7d0c478f775d644263",
+    "evidenceImport": "5e631a34",
+    "committedReport": "review/native-transport-validation.md",
+    "committedLog": "review/native-transport-validation/k5-26bf-journeys.log",
+    "logSha256": "fe5bbb78d0348ba893dedd9a79fb48730393353a23e59075de210b3223dc8b79",
+    "narrowApproval": "m-1aa8057e6ce4",
+    "retainedHashCorrection": "pending owner report-only follow-up"
   },
   "earlierOwnerAcceptance": [
     {
@@ -1058,14 +1097,18 @@
       "owner": "native-transport",
       "productSource": "e7b1625d18f41ed328bf816fe7d7ff494acd0003",
       "passed": 56,
-      "log": "target/native-validation/k5-e7-56.log"
+      "log": "target/native-validation/k5-e7-56.log",
+      "committedLog": "review/native-transport-validation/k5-e7-56.log",
+      "sha256": "8594813161554d61028e47e0c4e1e0cd956fee2d46e405dc5bca5219e65d495a"
     },
     {
       "message": "m-29cb67afa99d",
       "owner": "native-transport",
       "productSource": "e7b1625d18f41ed328bf816fe7d7ff494acd0003",
       "passed": 31,
-      "log": "target/native-validation/k5-e7-local31-exact.log"
+      "log": "target/native-validation/k5-e7-local31-exact.log",
+      "committedLog": "review/native-transport-validation/k5-e7-local31.log",
+      "sha256": "ae0a73d8c9ea96a61360d9b64872bea86a77e034cf622141abaae885bad503c6"
     }
   ],
   "logs": [
