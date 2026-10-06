@@ -10,7 +10,12 @@ file.
 
 ## Verdict
 
-**Linux: conditionally signed off.** The connected app meets the
+**Final (addendum, main `af0d8a72`): Linux signed off.** R1, R2 and R3 are fixed
+and rechecked on the landed tip, along with the non-blocking items L1–L5. See
+[Recheck on af0d8a72](#recheck-on-af0d8a72). The rest of this record describes
+the first pass on `3c6c3d32`.
+
+**First pass, `3c6c3d32`: Linux conditionally signed off.** The connected app meets the
 experience contract across the five destinations, inspector, evidence,
 questions, messages, confirmations, terminal, pairing, grants and revocation.
 All precheck findings (G1–G17, LX1–LX5, V1–V8) are closed on this target.
@@ -92,3 +97,25 @@ operator**.
 Hashes of all images are in [captures.sha256](visual-signoff-20261006/captures.sha256).
 Gateway and local acceptance captures are cropped to the window region of
 1440×960 screens at 96 DPI, Cairo renderer except `local-07`.
+
+## Recheck on af0d8a72
+
+Target: main `af0d8a72`, which adds scheduler's R1 fix (`06da55f1`, landed in
+`5c5644c0`) and content's R2, R3 and L1–L5 fixes. The recheck used an own
+locked build from an export of `af0d8a72`: `crew-desktop` `native-ui,local,gateway`
+SHA-256 `23cf687d7150bbc81f5ac979a0b90279a9d51b65bc21b02fa6771bc44062776f`;
+`crew` `native-gateway` is unchanged at `cc7c711c…`.
+
+| Check | Result |
+| --- | --- |
+| Acceptance, gateway suite | 67/67 checks, cleanup empty ([results](visual-signoff-20261006/recheck-acceptance-gateway-results.md)) |
+| Acceptance, local suite | 101/101 checks, cleanup empty ([results](visual-signoff-20261006/recheck-acceptance-local-results.md)) |
+| R1 | Attach claude-1's terminal, then select claude-2 while it is attached: after 2, 5 and 10 seconds the window status still reads "Action acknowledged by the daemon." and never shows a pending line ([capture](visual-signoff-20261006/recheck-r1-path-b.png)). Scheduler's capture covers the explicit Detach path. Detach is now quiet in the window status like other terminal writes; the tab says "Detached · read-only". |
+| R2 | Access granted keeps the dialog at its normal width; the long workspace path is shortened in the middle ([granted](visual-signoff-20261006/recheck-r2-granted.png)). Connection details fit as well ([details](visual-signoff-20261006/recheck-r2-details.png)). |
+| R3 | The header workspace selector on a gateway connection reads the project name, `native-acceptance` ([capture](visual-signoff-20261006/recheck-r3-workspace-label.png)). |
+| L1 | F8 focuses `grouping 'Resize details pane'`. |
+| L2 | Remove from this app is red; Cancel comes first ([capture](visual-signoff-20261006/recheck-l2-remove.png)). |
+
+L3–L5 were taken from content's record and its acceptance results; they were not
+re-observed separately here. The renderer limit and the remaining limits above
+are unchanged.
