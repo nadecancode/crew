@@ -1,0 +1,36 @@
+{
+  "schemaVersion": 1,
+  "card": "native-app-integration",
+  "main": "3d40ed8d",
+  "candidateCommits": ["630b9278", "75670082", "3b84836b"],
+  "candidatePathsBeyondMain": ["README.md", "notes/native-validation.md", "scripts/native/acceptance/cases_gateway.py", "scripts/native/acceptance/cases_local.py", "scripts/native/apple-bindings.sh"],
+  "productDeltas": {
+    "b3238139..3d40ed8d": "crates/crew-desktop, notes/native-apps, scripts/native, notes/native-validation.md",
+    "2da46639..3d40ed8d": "crates/crew-desktop/src/shell.rs, crates/crew-desktop/tests/interaction/atspi.py, crates/crew-desktop/tests/window.rs, notes/native-apps"
+  },
+  "lock": {"packages": 305, "sinceIntegrationPrep": {"added": ["vte4", "vte4-sys", "io-lifetimes"], "removed": 0}, "members": 8, "defaultMembers": 5},
+  "binaries": {"crew-desktop": "c7ffc98032696eeb88afd6c4c5bdfbb332fe9e5de5220b75b5723b503874ca2a", "crew": "d851d9be6ec89adc84cf1d2272a8cde2f9ee04457335ad90038a82f2559814c9"},
+  "checks": [
+    {"name": "metadata/fmt", "tree": "2da46639", "result": "pass"},
+    {"name": "clippy -D warnings (default, crew native-gateway, transport journey-tests, ffi x2, crew-desktop gateway-tests)", "tree": "2da46639; desktop 3d40ed8d", "result": "pass"},
+    {"name": "wasm32 crew-client crew-protocol", "tree": "2da46639", "result": "pass"},
+    {"name": "default members tests", "tree": "2da46639", "passed": 1150, "failed": 0, "ignored": 3},
+    {"name": "crew native_gateway", "tree": "2da46639", "passed": 20, "failed": 0},
+    {"name": "transport journey-tests", "tree": "2da46639", "passed": 63, "failed": 0, "journeys": 3},
+    {"name": "transport local,real-core-tests", "tree": "2da46639", "passed": 38, "failed": 0},
+    {"name": "ffi bindgen,local / bindgen", "tree": "2da46639", "passed": [39, 39], "failed": 0},
+    {"name": "apple-bindings --check-source", "tree": "2da46639", "result": "binding sources match"},
+    {"name": "Rust 1.82 check-msrv", "tree": "2da46639", "result": "pass"},
+    {"name": "TUI live journey", "tree": "b3238139", "passed": 1, "failed": 0},
+    {"name": "web-check/unit/mock/perf/contrast", "tree": "b3238139", "results": ["match", 200, 226, 234, 57]},
+    {"name": "apple on linux check-source/parse/worker/swiftpm", "tree": "b3238139", "results": ["612 checks", "47 files", "pass, 6 Sendable warnings", "2 manifests"]},
+    {"name": "crew-desktop owner runners window/client/gateway/keyboard/interaction", "tree": "3d40ed8d", "results": ["1/0", "7/0", "1/0", "pass", "pass"]},
+    {"name": "acceptance local L01-L16", "tree": "3d40ed8d", "cases": 16, "checks": "101/101"},
+    {"name": "acceptance gateway C01-C08,C10,C12,C14-C16,C18", "tree": "3d40ed8d", "cases": 14, "checks": "67/67"},
+    {"name": "acceptance scale 2 L01,L02,L03,L10,L14", "tree": "3d40ed8d", "cases": 5, "checks": "33/33"}
+  ],
+  "notScripted": ["C09", "C11", "C13", "C17", "C19 screen reader"],
+  "deferred": "Apple compile/link/simulator/device/Keychain/VoiceOver by operator; none claimed",
+  "isolation": {"clearedPrefixes": ["GIT_", "HERDR_", "CREW_", "CLAUDE", "CODEX"], "incremental": false, "operatorServicesTouched": false},
+  "evidence": "target/native-validation/app-integration/{final-3d40ed8d,final-2da46639,prefinal-b3238139,apple-linux}"
+}
