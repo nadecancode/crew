@@ -117,6 +117,9 @@ struct Inner {
     main_slots: [gtk::Box; 5],
     detail_slots: [gtk::Box; 5],
     detail_titles: RefCell<[String; 5]>,
+    /// The detail carries its own title, so the pane heading is only the
+    /// page title of the compact layout.
+    detail_titled: [Cell<bool>; 5],
     detail_heading: gtk::Label,
     detail_container: gtk::Box,
     destination_button: gtk::MenuButton,
@@ -321,6 +324,7 @@ impl Shell {
             main_slots,
             detail_slots,
             detail_titles: RefCell::new(std::array::from_fn(|_| "Details".to_owned())),
+            detail_titled: std::array::from_fn(|_| Cell::new(false)),
             detail_heading,
             detail_container,
             destination_button,
@@ -451,8 +455,30 @@ impl Shell {
         title: &str,
         widget: &impl IsA<gtk::Widget>,
     ) {
+        self.show_detail(destination, title, false, widget);
+    }
+
+    /// Like `set_detail`, for an inspector that shows its own title: the
+    /// pane heading then appears only as the compact layout's page title.
+    pub fn set_inspector(
+        &self,
+        destination: Destination,
+        title: &str,
+        widget: &impl IsA<gtk::Widget>,
+    ) {
+        self.show_detail(destination, title, true, widget);
+    }
+
+    fn show_detail(
+        &self,
+        destination: Destination,
+        title: &str,
+        titled: bool,
+        widget: &impl IsA<gtk::Widget>,
+    ) {
         replace_child(&self.0.detail_slots[destination.index()], widget);
         self.0.detail_titles.borrow_mut()[destination.index()] = title.to_owned();
+        self.0.detail_titled[destination.index()].set(titled);
         self.render();
     }
 
@@ -553,6 +579,13 @@ impl Shell {
         self.0
             .detail_heading
             .set_text(&self.0.detail_titles.borrow()[destination.index()]);
+        // An inspector shows its own title; the heading stays the compact
+        // page title. Without it the detail keeps a 12-pixel top inset.
+        let heading = compact || !self.0.detail_titled[destination.index()].get();
+        self.0.detail_heading.set_visible(heading);
+        self.0
+            .detail_stack
+            .set_margin_top(if heading { 0 } else { 12 });
         self.0.sidebar.set_visible(if compact {
             nav_open
         } else {

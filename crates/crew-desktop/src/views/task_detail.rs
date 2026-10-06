@@ -13,7 +13,6 @@ pub struct TaskInspector {
     chip: gtk::Label,
     facts: Facts,
     description: gtk::Label,
-    outcome: Facts,
     dependencies: gtk::Label,
     cycle: gtk::Box,
     artifacts: gtk::Box,
@@ -40,8 +39,6 @@ impl TaskInspector {
         let description = common::selectable("");
         description.set_visible(false);
         body.append(&description);
-        let outcome = Facts::new();
-        body.append(&outcome.root);
         let dependencies = common::selectable("");
         dependencies.set_visible(false);
         body.append(&dependencies);
@@ -66,7 +63,6 @@ impl TaskInspector {
             chip,
             facts,
             description,
-            outcome,
             dependencies,
             cycle,
             artifacts,
@@ -104,11 +100,11 @@ impl TaskInspector {
             ("Created", Some(common::timestamp(task.created_at))),
             ("Started", task.started_at.map(common::timestamp)),
             ("Completed", task.completed_at.map(common::timestamp)),
+            ("Note", task.note.clone()),
+            ("Result", task.result.clone()),
         ]);
         self.description.set_label(&task.description);
         self.description.set_visible(!task.description.is_empty());
-        self.outcome
-            .set(&[("Note", task.note.clone()), ("Result", task.result.clone())]);
         let dependencies = item
             .dependencies
             .iter()

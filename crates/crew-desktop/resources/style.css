@@ -13,8 +13,9 @@
 .crew-list > row { padding: 0; }
 .crew-row { padding: 12px 0; }
 .crew-attention { font-weight: bold; }
-/* Wrapping tab row: the selected tab carries an underline in the accent. */
-.crew-tab { border-radius: 0; padding: 8px 12px; }
+/* One-line tab row: the selected tab carries an underline in the accent;
+   tabs that do not fit are in the More menu at the end of the row. */
+.crew-tab, .crew-tab-more > button { border-radius: 0; padding: 8px 12px; }
 /* Graph nodes: one measured size; selection is a persistent border,
    independent of the native focus ring. */
 .crew-graph-node { padding: 10px 12px; border-radius: 8px; }

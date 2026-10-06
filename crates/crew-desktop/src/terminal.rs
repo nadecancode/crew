@@ -92,9 +92,16 @@ pub struct TerminalView {
 impl TerminalView {
     pub fn new(action: Rc<dyn Fn(ActionIntent)>) -> Self {
         let root = gtk::Box::new(gtk::Orientation::Vertical, 8);
+        // The status line and controls keep the 12/24-pixel inset of the other
+        // tabs; the terminal itself runs edge to edge.
         let status = common::text("Not attached · read-only");
+        status.set_margin_top(12);
+        status.set_margin_start(24);
+        status.set_margin_end(24);
         root.append(&status);
         let controls = gtk::Box::new(gtk::Orientation::Horizontal, 8);
+        controls.set_margin_start(24);
+        controls.set_margin_end(24);
         // Copy needs a selection and Detach an attachment.
         let copy = gtk::Button::builder()
             .label("Copy selection")

@@ -80,12 +80,12 @@ impl EntityList {
 
 type TabSwitched = Rc<dyn Fn(u32)>;
 
-/// Pages under a row of tabs that wraps instead of scrolling, so every tab
-/// stays visible and reachable by keyboard and assistive technology.
+/// Pages under a one-line row of tabs. Tabs that do not fit are offered in a
+/// More menu at the end of the row instead of scrolling out of reach.
 #[derive(Clone)]
 pub struct Tabs {
     pub root: gtk::Box,
-    bar: gtk::FlowBox,
+    bar: super::tab_bar::TabBar,
     stack: gtk::Stack,
     buttons: Rc<RefCell<Vec<gtk::ToggleButton>>>,
     switched: Rc<RefCell<Vec<TabSwitched>>>,
@@ -94,18 +94,10 @@ pub struct Tabs {
 impl Tabs {
     pub fn new(label: &str) -> Self {
         let root = gtk::Box::new(gtk::Orientation::Vertical, 0);
-        let bar = gtk::FlowBox::builder()
-            .selection_mode(gtk::SelectionMode::None)
-            .min_children_per_line(1)
-            .max_children_per_line(8)
-            .column_spacing(4)
-            .row_spacing(4)
-            .halign(gtk::Align::Start)
-            .margin_start(20)
-            .margin_end(20)
-            .build();
+        let bar = super::tab_bar::TabBar::new(label);
+        bar.set_margin_start(20);
+        bar.set_margin_end(20);
         bar.add_css_class("crew-tabs");
-        bar.update_property(&[gtk::accessible::Property::Label(label)]);
         root.append(&bar);
         let stack = gtk::Stack::builder()
             .hexpand(true)
@@ -131,17 +123,22 @@ impl Tabs {
         let index = buttons.len() as u32;
         let name = index.to_string();
         self.stack.add_named(page, Some(&name));
-        let button = gtk::ToggleButton::with_label(title);
+        let button = gtk::ToggleButton::builder()
+            .label(title)
+            .accessible_role(gtk::AccessibleRole::Tab)
+            .build();
         button.add_css_class("flat");
         button.add_css_class("crew-tab");
         match buttons.first() {
             Some(first) => button.set_group(Some(first)),
             None => button.set_active(true),
         }
+        button.update_state(&[gtk::accessible::State::Selected(Some(button.is_active()))]);
         button.connect_toggled({
             let stack = self.stack.clone();
             let switched = self.switched.clone();
             move |button| {
+                button.update_state(&[gtk::accessible::State::Selected(Some(button.is_active()))]);
                 if button.is_active() {
                     stack.set_visible_child_name(&name);
                     let callbacks = switched.borrow().clone();
@@ -151,7 +148,7 @@ impl Tabs {
                 }
             }
         });
-        super::add_control(&self.bar, &button);
+        self.bar.append(&button);
         buttons.push(button);
         index
     }

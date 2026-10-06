@@ -13,6 +13,7 @@
 .crew-navigation { background: transparent; }
 .crew-navigation row:selected { background: @crew_raised; color: @crew_accent; }
 .crew-status { border-top: 1px solid @crew_border; }
+.crew-status-line { background: @crew_panel; }
 @define-color crew_tone_neutral #b5b5b5;
 @define-color crew_tone_info #8cb7f2;
 @define-color crew_tone_success #7ccea3;

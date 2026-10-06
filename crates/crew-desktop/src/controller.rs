@@ -258,8 +258,20 @@ impl Controller {
             );
             let status = common::text("Not connected");
             let result = common::text("");
-            status.set_max_width_chars(22);
-            result.set_max_width_chars(22);
+            for line in [&status, &result] {
+                line.set_max_width_chars(22);
+                // Each line is as wide as its text and paints the sidebar colour
+                // behind it, so a text change repaints the old line's whole
+                // box, not only its glyphs: the Cairo renderer otherwise left a
+                // glyph pixel of the old text behind.
+                line.set_halign(gtk::Align::Start);
+                // Long text still wraps at the sidebar's width.
+                line.set_natural_wrap_mode(gtk::NaturalWrapMode::None);
+                line.add_css_class("crew-status-line");
+            }
+            // No blank line under the status while there is no result.
+            result.set_visible(false);
+            result.connect_label_notify(|result| result.set_visible(!result.label().is_empty()));
             let header = views::overview::OverviewHeader::new(Rc::new({
                 let weak = weak.clone();
                 move || {
@@ -1062,7 +1074,7 @@ impl Controller {
                             }),
                         },
                     );
-                    self.shell.set_detail(
+                    self.shell.set_inspector(
                         Destination::Team,
                         &format!("Agent {id}"),
                         &inspector.root,
@@ -1084,7 +1096,7 @@ impl Controller {
                             }
                         }),
                     );
-                    self.shell.set_detail(
+                    self.shell.set_inspector(
                         Destination::Tasks,
                         &format!("Task {id}"),
                         &inspector.root,

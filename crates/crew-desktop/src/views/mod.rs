@@ -12,6 +12,7 @@ pub mod evidence;
 pub mod graph;
 pub mod messages;
 pub mod overview;
+mod tab_bar;
 pub mod task_detail;
 pub mod tasks;
 pub mod team;
