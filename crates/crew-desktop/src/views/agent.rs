@@ -287,18 +287,10 @@ impl AgentInspector {
             let live = live.clone();
             move |attached| {
                 if let Some(attach) = attach.upgrade() {
-                    let had_focus = attach.is_focus();
-                    attach.set_sensitive(
+                    keep_focus_on_disable(
+                        attach.upcast_ref(),
                         !attached && live.get() && available(&latest.borrow(), ActionKind::Attach),
                     );
-                    // Once attached, focus goes on to the terminal's controls
-                    // rather than being lost with Attach.
-                    if had_focus && !attach.is_sensitive() {
-                        crate::shell::focus_past(
-                            attach.upcast_ref(),
-                            gtk::DirectionType::TabForward,
-                        );
-                    }
                 }
             }
         });
@@ -571,7 +563,7 @@ impl AgentInspector {
                 .and_then(|agent| agent.actions.iter().find(|a| a.action == control.kind));
             let attached = control.kind == ActionKind::Attach && self.terminal.is_active();
             let sensitive = live && !attached && availability.is_some_and(|a| a.available);
-            control.button.set_sensitive(sensitive);
+            keep_focus_on_disable(control.button.upcast_ref(), sensitive);
             let reason = availability
                 .and_then(|a| a.reason.as_ref())
                 .map(|reason| reason.message.as_str())
@@ -616,4 +608,17 @@ fn inset_row() -> gtk::Box {
     row.set_margin_start(12);
     row.set_margin_end(12);
     row
+}
+
+/// A focused control that becomes unavailable (Attach once attached, an
+/// action Core no longer offers) hands focus on to the next control instead
+/// of leaving nothing focused.
+fn keep_focus_on_disable(control: &gtk::Widget, sensitive: bool) {
+    let had_focus = gtk::prelude::WidgetExt::root(control)
+        .and_then(|root| root.focus())
+        .is_some_and(|focus| focus == *control || focus.is_ancestor(control));
+    control.set_sensitive(sensitive);
+    if had_focus && !sensitive {
+        crate::shell::focus_past(control, gtk::DirectionType::TabForward);
+    }
 }

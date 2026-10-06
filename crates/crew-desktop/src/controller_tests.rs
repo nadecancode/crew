@@ -778,6 +778,16 @@ fn keyboard_focus(c: &Controller, recorder: &Recording, core: &ClientCore) {
     if !page_terminal.is_active() {
         assert!(!detach.is_sensitive() && !copy.is_sensitive());
     }
+    // A focused control that becomes unavailable hands focus on.
+    attach.set_sensitive(true);
+    attach.grab_focus();
+    inspector.set_live(false);
+    let moved = focus();
+    assert!(
+        moved.is_some_and(|f| f != attach.clone().upcast::<gtk::Widget>() && f.is_sensitive()),
+        "Attach hands focus on when it becomes unavailable"
+    );
+    inspector.set_live(true);
     let standalone = TerminalView::new(Rc::new(|_| ()));
     let attached = Rc::new(Cell::new(None));
     standalone.connect_attached({
@@ -826,6 +836,18 @@ fn keyboard_focus(c: &Controller, recorder: &Recording, core: &ClientCore) {
     renderer.end("Terminal ended · read-only");
     assert_eq!(attached.get(), Some(false));
     holder.close();
+    // The screen is refreshed for screen readers once the terminal is laid
+    // out, without waiting for more output.
+    let blank = TerminalView::new(Rc::new(|_| ()));
+    let refreshed = Rc::new(Cell::new(0));
+    blank.terminal.connect_contents_changed({
+        let refreshed = refreshed.clone();
+        move |_| refreshed.set(refreshed.get() + 1)
+    });
+    let shown = gtk::Window::builder().child(&blank.root).build();
+    shown.present();
+    until(|| refreshed.get() > 0);
+    shown.close();
     let _ = (attach, detach, copy);
 
     // G17: a disconnected page offers Choose workspace, which opens

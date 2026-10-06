@@ -235,6 +235,11 @@ impl TerminalView {
             move || {
                 if let Some(terminal) = terminal.upgrade() {
                     resize(&terminal, &binding, &active, &last_size, &action);
+                    // VTE refreshes its accessible text only when output changes
+                    // the screen, so text shown before it was laid out (the
+                    // attachment's first screen) stayed hidden from screen
+                    // readers until the next output. Refresh it once laid out.
+                    terminal.emit_by_name::<()>("contents-changed", &[]);
                 }
             }
         }));

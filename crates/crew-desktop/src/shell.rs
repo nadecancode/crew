@@ -713,10 +713,7 @@ impl Shell {
             ("Move between controls", "Tab / Shift+Tab"),
             ("Move between destinations in the sidebar", "Up / Down"),
             ("Open the focused destination", "Enter"),
-            (
-                "Leave an attached terminal (other keys go to the agent)",
-                "F6",
-            ),
+            ("Leave an attached terminal (Tab goes to the agent)", "F6"),
             ("Keyboard shortcuts", "F1"),
             ("Close window", "Ctrl+W"),
             ("Quit application", "Ctrl+Q"),
@@ -875,7 +872,8 @@ pub(crate) fn focus_past(widget: &gtk::Widget, direction: gtk::DirectionType) ->
             node.prev_sibling()
         };
         while let Some(candidate) = sibling {
-            if candidate.is_visible() && candidate.child_focus(direction) {
+            // Mapped, not merely visible: a stack keeps its hidden pages visible.
+            if candidate.is_mapped() && candidate.child_focus(direction) {
                 return true;
             }
             sibling = if forward {

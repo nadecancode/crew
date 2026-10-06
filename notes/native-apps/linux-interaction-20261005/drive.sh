@@ -190,16 +190,19 @@ note "accessible text of the attached terminal (no new output yet):"
 reader text "Agent terminal" >>"$transcript" || note "  (no text interface)"
 tab_to "Agent terminal" 40
 record
-note "Ctrl+2 typed into the terminal goes to the agent:"
-key ctrl+2
-note "Window title: '$(title)'"
+note "Tab typed into the terminal goes to the agent:"
+key Tab
+record
+note "accessible text after the first screen was shown:"
+reader text "Agent terminal" >>"$transcript" || note "  (no text interface)"
 note "F6:"
 key F6
 record
 capture 06-terminal-after-f6
-note "Return on the focused control:"
+note "Return on the focused control (0.5 s, then 2 s):"
 key Return
-sleep 1
+record
+sleep 1.5
 record
 controls
 
