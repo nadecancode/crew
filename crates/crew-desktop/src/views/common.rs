@@ -172,6 +172,15 @@ pub fn heading(value: &str) -> gtk::Label {
     label
 }
 
+/// One fact as a muted name above its copyable value, for forms and setup
+/// pages that read top to bottom.
+pub fn fact(container: &gtk::Box, name: &str, value: &str) {
+    let line = gtk::Box::new(gtk::Orientation::Vertical, 4);
+    line.append(&muted(name));
+    line.append(&selectable(value));
+    container.append(&line);
+}
+
 /// A reason line for unavailable or failed controls: muted, and hidden while
 /// it has nothing to say so it takes no room.
 pub fn reason() -> gtk::Label {

@@ -7,8 +7,8 @@ cd "$native_repo"
 
 if [ "${1:-}" != --inside-session ]; then
     case "${1:-}" in
-        ""|--keyboard|--client) native_mode=${1:-} ;;
-        *) echo "usage: tests/run-window-test.sh [--keyboard|--client]" >&2; exit 64 ;;
+        ""|--keyboard|--client|--gateway) native_mode=${1:-} ;;
+        *) echo "usage: tests/run-window-test.sh [--keyboard|--client|--gateway]" >&2; exit 64 ;;
     esac
     native_new_output "${NATIVE_LINUX_TEST_OUT:-}" linux-window-test
     mkdir -p "$NATIVE_RUN_DIR"/{runtime,state,config,cache}
@@ -32,7 +32,14 @@ done
 Xvfb ":$native_display" -screen 0 1440x960x24 -dpi 96 -nolisten tcp >"$native_out/xvfb.log" 2>&1 &
 native_xvfb_pid=$!
 native_window_manager_pid=""
+native_keyring_pid=""
+native_keyring_run=""
 cleanup() {
+    if [ -n "$native_keyring_pid" ]; then
+        kill "$native_keyring_pid" 2>/dev/null || true
+        wait "$native_keyring_pid" 2>/dev/null || true
+    fi
+    if [ -n "$native_keyring_run" ]; then rm -rf "$native_keyring_run"; fi
     if [ -n "$native_window_manager_pid" ]; then
         kill "$native_window_manager_pid" 2>/dev/null || true
         wait "$native_window_manager_pid" 2>/dev/null || true
@@ -75,6 +82,32 @@ if [ "$native_mode" = --keyboard ]; then
     unset GTK_A11Y
     cargo build --locked -p crew-desktop --features native-ui,local -j 2 2>&1 | tee "$native_out/build.log"
     "$native_repo/crates/crew-desktop/tests/keyboard.sh" "$native_out" "$CARGO_TARGET_DIR/debug/crew-desktop"
+elif [ "$native_mode" = --gateway ]; then
+    # Crew and GNOME Keyring sockets need short paths: the long per-run
+    # runtime directory would make Crew fall back to the shared /tmp/crew-<uid>.
+    # This private short directory is removed on exit.
+    native_keyring=$(nix-build ${NATIVE_NIXPKGS:+-I "nixpkgs=$NATIVE_NIXPKGS"} "<nixpkgs>" -A gnome-keyring --no-out-link)/bin/gnome-keyring-daemon
+    native_keyring_run=$(mktemp -d /tmp/crew-gw-run-XXXXXX)
+    chmod 700 "$native_keyring_run"
+    CREW_TEST_XDOTOOL=$(nix-build ${NATIVE_NIXPKGS:+-I "nixpkgs=$NATIVE_NIXPKGS"} "<nixpkgs>" -A xdotool --no-out-link)/bin/xdotool
+    export CREW_TEST_XDOTOOL
+    export XDG_DATA_HOME="$native_out/data"
+    mkdir -p "$XDG_DATA_HOME"
+    CREW_TEST_KEYRING_PASSWORD=$(head -c 18 /dev/urandom | base64 | tr -d "/+=")
+    export CREW_TEST_KEYRING_PASSWORD
+    export XDG_RUNTIME_DIR="$native_keyring_run"
+    printf "%s" "$CREW_TEST_KEYRING_PASSWORD" | \
+        "$native_keyring" --unlock --components=secrets --foreground >"$native_out/keyring.log" 2>&1 &
+    native_keyring_pid=$!
+    for _ in {1..100}; do
+        if dbus-send --session --print-reply --dest=org.freedesktop.DBus /org/freedesktop/DBus \
+            org.freedesktop.DBus.NameHasOwner string:org.freedesktop.secrets 2>/dev/null | grep -q "boolean true"; then break; fi
+        sleep 0.1
+    done
+    printf "gnome-keyring=%s\nxdotool=%s\n" "$native_keyring" "$CREW_TEST_XDOTOOL" >>"$native_out/tool-versions.txt"
+    export GTK_A11Y=test CREW_NATIVE_UI_TEST_PRIVATE=1 CREW_NATIVE_UI_EVIDENCE_DIR="$native_out"
+    cargo test --locked -p crew-desktop --features native-ui,gateway-tests --test gateway -- --nocapture 2>&1 | tee "$native_out/test.log"
+    echo "native gateway assertions passed; evidence $native_out"
 elif [ "$native_mode" = --client ]; then
     export GTK_A11Y=test CREW_NATIVE_UI_TEST_PRIVATE=1 CREW_NATIVE_UI_EVIDENCE_DIR="$native_out"
     native_manifest=$(realpath "${CREW_NATIVE_UI_TEST_MANIFEST:-$native_repo/Cargo.toml}")
