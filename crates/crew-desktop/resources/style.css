@@ -11,8 +11,11 @@
 .crew-chip { border: 1px solid currentColor; border-radius: 999px; padding: 1px 8px; font-size: smaller; }
 /* Entity lists: rows carry their own 12/24-pixel margins. */
 .crew-list > row { padding: 0; }
-.crew-section-list { background: transparent; }
 .crew-row { padding: 12px 0; }
 .crew-attention { font-weight: bold; }
 /* Wrapping tab row: the selected tab carries an underline in the accent. */
 .crew-tab { border-radius: 0; padding: 8px 12px; }
+/* Graph nodes: one measured size; selection is a persistent border,
+   independent of the native focus ring. */
+.crew-graph-node { padding: 10px 12px; border-radius: 8px; }
+.crew-graph-node.selected { border: 2px solid currentColor; }

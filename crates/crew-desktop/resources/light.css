@@ -23,14 +23,23 @@
 .crew-chip.tone-success { color: @crew_tone_success; }
 .crew-chip.tone-warning { color: @crew_tone_warning; }
 .crew-chip.tone-danger { color: @crew_tone_danger; }
-/* One selection accent per appearance: lists mark the selected row like the
-   sidebar does, with a persistent bar independent of hover and focus. */
-@define-color accent_bg_color @crew_accent;
-@define-color accent_color @crew_accent;
-@define-color theme_selected_bg_color @crew_accent;
-:root { --accent-bg-color: @crew_accent; --accent-color: @crew_accent; }
+/* One accent per appearance for suggested actions and selection. Lists mark
+   the selected row like the sidebar does, with a persistent bar independent
+   of hover and focus. */
+@define-color crew_accent_fg #ffffff;
+button.suggested-action { background-image: none; background-color: @crew_accent; color: @crew_accent_fg; }
+button.suggested-action:hover { background-image: none; background-color: shade(@crew_accent, 1.12); }
+button.suggested-action:active { background-image: none; background-color: shade(@crew_accent, 0.88); }
+.crew-list { background-color: @crew_canvas; }
+.crew-section-list { background-color: transparent; }
+button.flat.destructive-action { background-image: none; background-color: transparent; color: @crew_tone_danger; }
+button.flat.destructive-action:hover { background-color: alpha(@crew_tone_danger, 0.12); }
+button.flat.destructive-action:disabled { color: alpha(@crew_tone_danger, 0.5); }
 .crew-list > row:selected { background-color: @crew_raised; color: @crew_text; box-shadow: inset 3px 0 @crew_accent; }
 .crew-row + .crew-row { border-top: 1px solid @crew_border; }
 .crew-warning, .crew-attention { color: @crew_tone_warning; }
 .crew-tab-pages { border-top: 1px solid @crew_border; }
 .crew-tab:checked { background: transparent; color: @crew_text; box-shadow: inset 0 -3px @crew_accent; }
+.crew-graph-node { background: @crew_panel; border: 1px solid @crew_border; }
+.crew-graph-node.crew-graph-hub { border-style: dashed; }
+.crew-graph-node.selected { border: 2px solid @crew_accent; }

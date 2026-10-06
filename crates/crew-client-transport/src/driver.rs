@@ -103,6 +103,10 @@ struct Selection {
     endpoint_id: String,
     workspace_hint: Option<String>,
     pinned_workspace: Option<String>,
+    /// The endpoint authenticates a separate index channel (scoped gateway).
+    /// Its device authority and listing outlive any one workspace route, so
+    /// every reconnect reopens it beside the selected workspace.
+    indexed: bool,
 }
 
 struct Channel {
@@ -310,6 +314,7 @@ impl<C: ClientApi, W: CommandCodec> SessionDriver<C, W> {
             endpoint_id,
             workspace_hint,
             pinned_workspace: None,
+            indexed: false,
         });
         self.listing = None;
         self.reconnect_count = 0;
@@ -411,6 +416,9 @@ impl<C: ClientApi, W: CommandCodec> SessionDriver<C, W> {
                     self.cancel_open_timer(channel_id, &mut batch);
                     self.index = Some(channel_id);
                     self.index_attempt = Some(attempt);
+                    if let Some(selection) = &mut self.selection {
+                        selection.indexed = true;
+                    }
                     self.endpoint = EndpointStatus::Authenticated;
                     self.input(
                         ClientInput::EndpointChanged {
@@ -587,7 +595,7 @@ impl<C: ClientApi, W: CommandCodec> SessionDriver<C, W> {
             return Ok(());
         }
         let selection = self.selection.clone().ok_or(ClientError::ClosedClient)?;
-        let attempt = allocate(&mut self.next_attempt)?;
+        let mut attempt = allocate(&mut self.next_attempt)?;
         if self.index.is_none() {
             self.endpoint = EndpointStatus::Connecting;
             self.input(
@@ -599,6 +607,13 @@ impl<C: ClientApi, W: CommandCodec> SessionDriver<C, W> {
                 clock,
                 batch,
             )?;
+            if selection.indexed && selection.workspace_hint.is_some() {
+                // Reopen the endpoint index first, as on the initial connect,
+                // then the selected workspace with its own later attempt.
+                self.index =
+                    Some(self.open_channel(ChannelPurpose::Index, attempt, None, batch, clock)?);
+                attempt = allocate(&mut self.next_attempt)?;
+            }
         }
         if selection.workspace_hint.is_some() {
             self.workspace = WorkspaceStatus::Connecting;
@@ -732,6 +747,11 @@ impl<C: ClientApi, W: CommandCodec> SessionDriver<C, W> {
                 scope.daemon_pid.is_some() && scope.daemon_pid != context.scope.daemon_pid
             }) {
                 return self.end_channel(id, TransportEnd::Closed, true, batch, clock);
+            }
+            if context.mode == ConnectionMode::ScopedGateway {
+                if let Some(selection) = &mut self.selection {
+                    selection.indexed = true;
+                }
             }
             self.binding = Some(context.clone());
             self.visible_scope = Some(context.scope.clone());
@@ -1718,6 +1738,15 @@ impl<C: ClientApi, W: CommandCodec> SessionDriver<C, W> {
                 return self.end_channel(root, reason, true, batch, clock);
             }
         }
+        // A scoped gateway refuses a workspace route generically when only that
+        // workspace's grant is gone. Its separate index still decides whether
+        // the device itself is authorized, so the route alone never signs out.
+        let route_refused = self.index.is_some()
+            && self.selection.as_ref().is_some_and(|value| value.indexed)
+            && matches!(
+                reason,
+                TransportEnd::Authentication | TransportEnd::Permission
+            );
         if root {
             self.root = None;
             self.retire_workspace(reason, batch, clock)?;
@@ -1726,6 +1755,7 @@ impl<C: ClientApi, W: CommandCodec> SessionDriver<C, W> {
                 TransportEnd::Revoked | TransportEnd::GrantChanged => {
                     WorkspaceStatus::AccessRevoked
                 }
+                _ if route_refused => WorkspaceStatus::AccessRevoked,
                 _ => WorkspaceStatus::Reconnecting,
             };
         }

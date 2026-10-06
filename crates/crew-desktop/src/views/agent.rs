@@ -173,7 +173,8 @@ impl AgentInspector {
             ),
             ("Kill…", ActionKind::Kill, Some(AgentAction::Kill), true),
         ] {
-            let item = gtk::Box::new(gtk::Orientation::Horizontal, 12);
+            // The reason sits right under its item, inside the menu's width.
+            let item = gtk::Box::new(gtk::Orientation::Vertical, 0);
             let button = gtk::Button::with_label(name);
             button.add_css_class("flat");
             if let Some(label) = button.child().and_downcast::<gtk::Label>() {
@@ -208,8 +209,9 @@ impl AgentInspector {
             });
             item.append(&button);
             let reason = common::reason();
-            reason.set_max_width_chars(32);
-            reason.set_valign(gtk::Align::Center);
+            reason.set_max_width_chars(36);
+            reason.set_margin_start(12);
+            reason.set_margin_bottom(6);
             item.append(&reason);
             menu.append(&item);
             controls.push(Control {
