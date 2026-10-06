@@ -212,6 +212,12 @@ fn gtk_scoped_views_confirmation_terminal_order_and_live_local_service() {
     c.refresh(Destination::Team);
     recorder.queries(&c, &core);
     assert!(!pairs.is_visible(), "the fixture has no relations");
+    graph_topology(&c, &shell, &core);
+    recorder.queries(&c, &core);
+    c.refresh(Destination::Tasks);
+    c.refresh(Destination::Team);
+    recorder.queries(&c, &core);
+    shell.navigate(Destination::Team);
     c.select(key(Entity::Agent("claude-1".into())));
     recorder.queries(&c, &core);
     let inspector = c.agent.borrow().as_ref().unwrap().1.clone();
@@ -469,6 +475,208 @@ fn gtk_scoped_views_confirmation_terminal_order_and_live_local_service() {
 
     live_local(&app);
     eprintln!("Starting production local service");
+}
+
+/// Show a graph's page in its List/Graph stack and let it allocate.
+fn show_graph(graph: &views::graph::Graph) {
+    graph
+        .root
+        .parent()
+        .and_downcast::<gtk::Stack>()
+        .expect("List/Graph stack")
+        .set_visible_child(&graph.root);
+    frames();
+}
+/// Let the frame clock allocate, so transforms and bounds reflect the change.
+fn frames() {
+    for _ in 0..5 {
+        settle();
+        std::thread::sleep(Duration::from_millis(20));
+    }
+    settle();
+}
+/// Whole graph in view: the zoomed extent fits the scrolled region.
+fn in_view(graph: &views::graph::Graph) -> bool {
+    let scroll = graph
+        .root
+        .last_child()
+        .and_downcast::<gtk::ScrolledWindow>()
+        .unwrap();
+    let (width, height) = graph.extent();
+    width * graph.zoom() <= f64::from(scroll.width()) + 1.0
+        && height * graph.zoom() <= f64::from(scroll.height()) + 1.0
+}
+fn chips(widget: &gtk::Widget) -> Vec<String> {
+    descendants(widget)
+        .into_iter()
+        .filter(|w| w.has_css_class("crew-chip"))
+        .filter_map(|w| w.downcast::<gtk::Label>().ok())
+        .map(|l| l.label().to_string())
+        .collect()
+}
+/// Layered columns centred per layer, drawn relationships, status chips, Fit,
+/// uniform zoom and one-tab-stop keyboard traversal, on both graphs.
+fn graph_topology(c: &Controller, shell: &Shell, core: &ClientCore) {
+    use views::graph::EdgeKind;
+    let ViewPayload::Team(team) = core.view(ViewQuery::Team, clock()).unwrap().payload else {
+        panic!("team projection");
+    };
+    let mut large = (*team).clone();
+    for i in 2..=13 {
+        let mut member = team.agents[0].clone();
+        member.agent.id = format!("claude-{i}");
+        member.agent.name = member.agent.id.clone();
+        large.agents.push(member);
+    }
+    c.team.update(Some(&scope()), &large);
+    let graph = c.team.graph();
+    show_graph(graph);
+    let nodes = graph.nodes();
+    assert_eq!(nodes.len(), 14, "scheduler plus thirteen agents");
+    let edges = graph.edges();
+    assert_eq!(edges.len(), 13);
+    assert!(edges
+        .iter()
+        .all(|e| e.from == 0 && e.kind == EdgeKind::Coordination));
+    let origins = graph.origins();
+    assert!(origins[1..].iter().all(|o| o.0 > origins[0].0));
+    let member_columns = {
+        let mut xs: Vec<i64> = origins[1..].iter().map(|o| o.0 as i64).collect();
+        xs.dedup();
+        xs.len()
+    };
+    assert!(
+        member_columns > 1,
+        "thirteen members wrap into several columns"
+    );
+    let top = origins[1..].iter().map(|o| o.1).fold(f64::MAX, f64::min);
+    let node_height = f64::from(nodes[0].height());
+    let bottom = origins[1..].iter().map(|o| o.1).fold(f64::MIN, f64::max) + node_height;
+    assert!(
+        ((origins[0].1 + node_height / 2.0) - (top + bottom) / 2.0).abs() < 1.0,
+        "the scheduler is centred against its members"
+    );
+    assert_eq!(chips(&nodes[1]), ["working"]);
+    // A push never refits: the graph already fitted its first two nodes.
+    let pushed = graph.zoom();
+    assert!(
+        !in_view(graph),
+        "fourteen nodes overflow at the earlier zoom"
+    );
+    button(&graph.root, "Fit graph").emit_clicked();
+    frames();
+    assert!(
+        in_view(graph) && graph.zoom() < pushed,
+        "Fit scales all fourteen nodes into view"
+    );
+    capture("fixture-team-graph-fit");
+    button(&graph.root, "Zoom in").emit_clicked();
+    button(&graph.root, "Zoom in").emit_clicked();
+    frames();
+    assert!(!in_view(graph));
+    button(&graph.root, "Fit graph").emit_clicked();
+    frames();
+    assert!(in_view(graph), "Fit returns the whole graph to view");
+
+    // Uniform zoom scales the drawing; allocation and text wrapping stay put.
+    let title = descendants(&nodes[1])
+        .into_iter()
+        .find(|w| w.has_css_class("crew-title"))
+        .and_downcast::<gtk::Label>()
+        .unwrap();
+    let (width, lines) = (nodes[1].width(), title.layout().line_count());
+    let before = nodes[1].compute_bounds(&graph.root).unwrap().width();
+    let zoom = graph.zoom();
+    button(&graph.root, "Zoom in").emit_clicked();
+    frames();
+    let after = nodes[1].compute_bounds(&graph.root).unwrap().width();
+    assert_eq!(nodes[1].width(), width);
+    assert_eq!(title.layout().line_count(), lines, "zoom never rewraps");
+    assert!(
+        (f64::from(after) / f64::from(before) - graph.zoom() / zoom).abs() < 0.02,
+        "node bounds scale with zoom: {before} -> {after} at {zoom} -> {}",
+        graph.zoom()
+    );
+
+    // One tab stop; arrows move inside the graph; the scheduler is skipped.
+    assert_eq!(nodes.iter().filter(|n| n.is_focusable()).count(), 1);
+    assert!(!nodes[0].is_focusable());
+    nodes[1].grab_focus();
+    assert!(graph.navigate(gtk::gdk::Key::Down));
+    assert!(nodes[2].is_focus());
+    assert!(graph.navigate(gtk::gdk::Key::End));
+    assert!(nodes[13].is_focus());
+    // Left crosses wrapped member columns and stops before the scheduler.
+    for _ in 0..member_columns + 1 {
+        assert!(graph.navigate(gtk::gdk::Key::Left));
+    }
+    let focused = nodes.iter().position(|n| n.is_focus()).unwrap();
+    assert!(focused > 0 && origins[focused].0 == origins[1].0);
+    assert_eq!(nodes.iter().filter(|n| n.is_focusable()).count(), 1);
+
+    // Task dependencies: two layers, one edge per resolved dependency.
+    let ViewPayload::Tasks(tasks) = core.view(ViewQuery::Tasks, clock()).unwrap().payload else {
+        panic!("tasks projection");
+    };
+    let mut tasks = (*tasks).clone();
+    let first = tasks.tasks[0].task.id.clone();
+    for (i, item) in tasks.tasks.iter_mut().enumerate().skip(1) {
+        item.layer = 1;
+        item.dependencies.push(DependencyState {
+            id: first.clone(),
+            status: Some(tasks_status(i)),
+        });
+    }
+    tasks.tasks[2].dependencies.push(DependencyState {
+        id: "absent".into(),
+        status: None,
+    });
+    shell.navigate(Destination::Tasks);
+    c.tasks.update(Some(&scope()), &tasks);
+    let graph = c.tasks.graph();
+    show_graph(graph);
+    let nodes = graph.nodes();
+    assert_eq!(nodes.len(), 3);
+    let edges = graph.edges();
+    assert_eq!(edges.len(), 2, "the missing dependency has no node or edge");
+    assert!(edges
+        .iter()
+        .all(|e| e.from == 0 && e.kind == EdgeKind::Dependency));
+    let origins = graph.origins();
+    assert!(origins[1].0 > origins[0].0 && origins[1].0 == origins[2].0);
+    assert!(
+        (origins[0].1 - (origins[1].1 + origins[2].1) / 2.0).abs() < 1.0,
+        "layer 0 is centred against layer 1"
+    );
+    assert!(text(&nodes[2]).contains("Missing dependency absent"));
+    assert!(chips(&nodes[0]).len() == 1 && in_view(graph));
+    capture("fixture-task-graph");
+    nodes[0].grab_focus();
+    assert!(graph.navigate(gtk::gdk::Key::Right));
+    assert!(nodes[1].is_focus());
+    assert!(graph.navigate(gtk::gdk::Key::Down));
+    assert!(nodes[2].is_focus());
+    assert!(graph.navigate(gtk::gdk::Key::Left));
+    assert!(nodes[0].is_focus());
+    // A list selection marks the same node in the graph.
+    graph.set_selected(Some(&key(Entity::Task(first))));
+    assert!(nodes[0].has_css_class("selected"));
+    assert!(nodes[0].is_focusable() && !nodes[1].is_focusable());
+    for graph in [c.team.graph(), c.tasks.graph()] {
+        graph
+            .root
+            .parent()
+            .and_downcast::<gtk::Stack>()
+            .unwrap()
+            .set_visible_child_name("list");
+    }
+}
+fn tasks_status(i: usize) -> crew_protocol::TaskStatus {
+    if i == 1 {
+        crew_protocol::TaskStatus::Done
+    } else {
+        crew_protocol::TaskStatus::Working
+    }
 }
 
 struct PrivateDaemon {

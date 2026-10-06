@@ -23,3 +23,6 @@
 .crew-chip.tone-success { color: @crew_tone_success; }
 .crew-chip.tone-warning { color: @crew_tone_warning; }
 .crew-chip.tone-danger { color: @crew_tone_danger; }
+.crew-graph-node { background: @crew_panel; border: 1px solid @crew_border; }
+.crew-graph-node.crew-graph-hub { border-style: dashed; }
+.crew-graph-node.selected { border: 2px solid @crew_accent; }

@@ -9,3 +9,7 @@
 /* Status chips: text plus semantic colour. Colours come from the palette;
    under high contrast the toolkit colour and the border remain. */
 .crew-chip { border: 1px solid currentColor; border-radius: 999px; padding: 1px 8px; font-size: smaller; }
+/* Graph nodes: one measured size; selection is a persistent border,
+   independent of the native focus ring. */
+.crew-graph-node { padding: 10px 12px; border-radius: 8px; }
+.crew-graph-node.selected { border: 2px solid currentColor; }
