@@ -12,7 +12,7 @@
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{self, Receiver, Sender};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::Duration;
 
@@ -56,10 +56,24 @@ fn request_timeout(call: &Call) -> Duration {
 }
 
 pub enum UiEvent {
+    ScopedSnapshot {
+        epoch: u64,
+        snapshot: Box<Snapshot>,
+    },
+    ScopedPush {
+        epoch: u64,
+        push: Box<Push>,
+    },
+    ScopedDisconnected {
+        epoch: u64,
+    },
+    PlanKeys {
+        scope: crew_client::ClientScope,
+        id: String,
+        text: String,
+        reply: Sender<Option<crate::shared::Planned>>,
+    },
     Input(term::Event),
-    Snapshot(Box<Snapshot>),
-    Push(Box<Push>),
-    Disconnected,
     Reply(Box<Reply>),
     Fatal(ClientError),
 }
@@ -84,36 +98,91 @@ pub fn probe(socket: &Path) -> ClientResult<()> {
 /// fall between the two: anything that happened earlier is in the snapshot,
 /// anything later arrives as a push (and reducers are idempotent for the
 /// overlap).
-pub fn spawn_subscriber(socket: PathBuf, tx: Sender<UiEvent>, stop: Arc<AtomicBool>) {
+pub fn spawn_subscriber(
+    socket: PathBuf,
+    tx: Sender<UiEvent>,
+    stop: Arc<AtomicBool>,
+) -> Arc<Mutex<Option<crew_core::client::FrameWriter>>> {
+    let control = Arc::new(Mutex::new(None));
+    let active = control.clone();
     let run = move || {
+        let mut epoch = 0u64;
         while !stop.load(Ordering::Relaxed) {
+            epoch = match epoch.checked_add(1) {
+                Some(epoch) => epoch,
+                None => return,
+            };
             let session = (|| -> ClientResult<()> {
-                let (client, _) = Client::operator(&socket, "tui")?;
-                let mut stream = client.subscribe()?;
+                let (mut client, peer) = Client::operator(&socket, "tui")?;
+                client.call_value(Call::Subscribe)?;
+                let (mut stream, writer) = client.split();
+                *active.lock().expect("subscriber control lock") = Some(writer);
                 let snapshot = fetch_snapshot(&socket)?;
-                if tx.send(UiEvent::Snapshot(Box::new(snapshot))).is_err() {
+                if snapshot.session.daemon_pid != peer.pid {
+                    return Err(ClientError::Protocol(
+                        "snapshot belongs to a different daemon".into(),
+                    ));
+                }
+                let incarnation = (
+                    snapshot.session.workspace.clone(),
+                    snapshot.session.daemon_started_at,
+                );
+                if tx
+                    .send(UiEvent::ScopedSnapshot {
+                        epoch,
+                        snapshot: Box::new(snapshot),
+                    })
+                    .is_err()
+                {
                     return Ok(());
                 }
                 loop {
-                    match stream.next()? {
+                    let Some(push) = stream.next()?.push else {
+                        continue;
+                    };
+                    match push {
                         Push::Resync => {
                             let snapshot = fetch_snapshot(&socket)?;
-                            if tx.send(UiEvent::Snapshot(Box::new(snapshot))).is_err() {
+                            if snapshot.session.daemon_pid != peer.pid
+                                || snapshot.session.workspace != incarnation.0
+                                || snapshot.session.daemon_started_at != incarnation.1
+                            {
+                                return Err(ClientError::Protocol(
+                                    "snapshot daemon incarnation changed".into(),
+                                ));
+                            }
+                            if tx
+                                .send(UiEvent::ScopedSnapshot {
+                                    epoch,
+                                    snapshot: Box::new(snapshot),
+                                })
+                                .is_err()
+                            {
                                 return Ok(());
                             }
                         }
                         Push::Shutdown => {
-                            let _ = tx.send(UiEvent::Push(Box::new(Push::Shutdown)));
+                            let _ = tx.send(UiEvent::ScopedPush {
+                                epoch,
+                                push: Box::new(Push::Shutdown),
+                            });
                             return Ok(());
                         }
                         push => {
-                            if tx.send(UiEvent::Push(Box::new(push))).is_err() {
+                            if tx
+                                .send(UiEvent::ScopedPush {
+                                    epoch,
+                                    push: Box::new(push),
+                                })
+                                .is_err()
+                            {
                                 return Ok(());
                             }
                         }
                     }
                 }
             })();
+            *active.lock().expect("subscriber control lock") = None;
             if session.is_ok() || stop.load(Ordering::Relaxed) {
                 // The UI went away.
                 return;
@@ -124,7 +193,7 @@ pub fn spawn_subscriber(socket: PathBuf, tx: Sender<UiEvent>, stop: Arc<AtomicBo
                     return;
                 }
             }
-            if tx.send(UiEvent::Disconnected).is_err() {
+            if tx.send(UiEvent::ScopedDisconnected { epoch }).is_err() {
                 return;
             }
             thread::sleep(RECONNECT_DELAY);
@@ -133,6 +202,7 @@ pub fn spawn_subscriber(socket: PathBuf, tx: Sender<UiEvent>, stop: Arc<AtomicBo
     let _ = thread::Builder::new()
         .name("crew-tui-sub".into())
         .spawn(run);
+    control
 }
 
 /// The dashboard's fast requests, slow actions and terminal keys each have
@@ -142,12 +212,36 @@ pub struct Requests {
     main: Sender<Command>,
     slow: Sender<Command>,
     keys: Sender<Command>,
+    pub subscriber: Option<Arc<Mutex<Option<crew_core::client::FrameWriter>>>>,
 }
 
 impl Requests {
+    pub fn restart_subscriber(&self) {
+        if let Some(control) = &self.subscriber {
+            if let Some(writer) = control.lock().expect("subscriber control lock").as_ref() {
+                writer.shutdown();
+            }
+        }
+    }
     pub fn send(&self, command: Command) -> Result<(), mpsc::SendError<Command>> {
+        if let Command::Planned(planned) = &command {
+            if let Ok(typed) = planned.typed() {
+                return match typed.kind() {
+                    crew_client::CommandKind::AgentInput => self.keys.send(command),
+                    crew_client::CommandKind::AgentKill
+                    | crew_client::CommandKind::AgentRestart
+                    | crew_client::CommandKind::AgentRestartFresh
+                    | crew_client::CommandKind::AgentResume
+                    | crew_client::CommandKind::Resume
+                    | crew_client::CommandKind::AgentSetModel
+                    | crew_client::CommandKind::Shutdown
+                    | crew_client::CommandKind::ModelsList => self.slow.send(command),
+                    _ => self.main.send(command),
+                };
+            }
+        }
         match command {
-            Command::Keys { .. } => self.keys.send(command),
+            Command::Keys { .. } | Command::RawKeys { .. } => self.keys.send(command),
             Command::Kill(_)
             | Command::Restart(_)
             | Command::RestartFresh(_)
@@ -165,7 +259,12 @@ pub fn spawn_requester(socket: PathBuf, tx: Sender<UiEvent>) -> Requests {
     let main = spawn_commands(socket.clone(), tx.clone(), "crew-tui-req");
     let slow = spawn_commands(socket.clone(), tx.clone(), "crew-tui-slow");
     let keys = spawn_typist(socket, tx);
-    Requests { main, slow, keys }
+    Requests {
+        main,
+        slow,
+        keys,
+        subscriber: None,
+    }
 }
 
 fn spawn_commands(socket: PathBuf, tx: Sender<UiEvent>, name: &str) -> Sender<Command> {
@@ -208,6 +307,50 @@ fn spawn_typist(socket: PathBuf, tx: Sender<UiEvent>) -> Sender<Command> {
                     Err(_) => return,
                 },
             };
+            if let Command::RawKeys {
+                scope,
+                id,
+                mut text,
+            } = first
+            {
+                carried = gather_scoped_keys(&scope, &id, &mut text, &keys_rx);
+                let (reply, planned_rx) = mpsc::channel();
+                if tx
+                    .send(UiEvent::PlanKeys {
+                        scope: scope.clone(),
+                        id: id.clone(),
+                        text,
+                        reply,
+                    })
+                    .is_err()
+                {
+                    return;
+                }
+                let planned = match planned_rx.recv() {
+                    Ok(Some(planned)) => planned,
+                    _ => {
+                        discard_scoped_keys(&scope, &id, &keys_rx, &mut carried);
+                        continue;
+                    }
+                };
+                let reply = requester.planned(planned);
+                let failed = matches!(&reply, Reply::Shared { outcome,.. } if !matches!(outcome,crew_client::OperationOutcome::Succeeded { .. }));
+                if tx.send(UiEvent::Reply(Box::new(reply))).is_err() {
+                    return;
+                }
+                if failed {
+                    discard_scoped_keys(&scope, &id, &keys_rx, &mut carried);
+                }
+                continue;
+            }
+            if let Command::Planned(_) = &first {
+                if let Some(reply) = requester.run(first) {
+                    if tx.send(UiEvent::Reply(Box::new(reply))).is_err() {
+                        return;
+                    }
+                }
+                continue;
+            }
             let Command::Keys { id, mut text } = first else {
                 continue;
             };
@@ -223,6 +366,75 @@ fn spawn_typist(socket: PathBuf, tx: Sender<UiEvent>) -> Sender<Command> {
         .name("crew-tui-keys".into())
         .spawn(run);
     keys_tx
+}
+
+fn gather_scoped_keys(
+    scope: &crew_client::ClientScope,
+    id: &str,
+    text: &mut String,
+    rx: &Receiver<Command>,
+) -> Option<Command> {
+    const LIMIT: usize = 64 * 1024;
+    if text.len() > LIMIT {
+        let mut cut = LIMIT;
+        while !text.is_char_boundary(cut) {
+            cut -= 1;
+        }
+        let rest = text.split_off(cut);
+        return Some(Command::RawKeys {
+            scope: scope.clone(),
+            id: id.into(),
+            text: rest,
+        });
+    }
+    while let Ok(next) = rx.try_recv() {
+        match next {
+            Command::RawKeys {
+                scope: next_scope,
+                id: next_id,
+                text: more,
+            } if next_scope == *scope && next_id == id => {
+                let room = LIMIT - text.len();
+                if more.len() <= room {
+                    text.push_str(&more);
+                } else {
+                    let mut cut = room;
+                    while !more.is_char_boundary(cut) {
+                        cut -= 1;
+                    }
+                    text.push_str(&more[..cut]);
+                    return Some(Command::RawKeys {
+                        scope: next_scope,
+                        id: next_id,
+                        text: more[cut..].into(),
+                    });
+                }
+            }
+            other => return Some(other),
+        }
+    }
+    None
+}
+
+fn discard_scoped_keys(
+    scope: &crew_client::ClientScope,
+    id: &str,
+    rx: &Receiver<Command>,
+    carried: &mut Option<Command>,
+) {
+    let matches = |command: &Command| matches!(command,Command::RawKeys { scope:captured,id:agent,.. } if captured==scope && agent==id);
+    if carried.as_ref().is_some_and(matches) {
+        *carried = None;
+    }
+    // Stop at a different target, preserving the FIFO order of that target.
+    if carried.is_none() {
+        while let Ok(next) = rx.try_recv() {
+            if !matches(&next) {
+                *carried = Some(next);
+                break;
+            }
+        }
+    }
 }
 
 /// Add the keys already waiting for the same terminal to `text`; the first
@@ -304,7 +516,8 @@ impl Requester {
 
     fn run(&mut self, command: Command) -> Option<Reply> {
         Some(match command {
-            Command::Quit | Command::SetMouse(_) => return None,
+            Command::Planned(planned) => self.planned(*planned),
+            Command::Quit | Command::SetMouse(_) | Command::RawKeys { .. } => return None,
             Command::FetchOutput { id } => Reply::Output {
                 result: self.call::<OutputResult>(Call::AgentOutput {
                     id: id.clone(),
@@ -436,6 +649,103 @@ impl Requester {
                 )
             }
         })
+    }
+
+    fn planned(&mut self, planned: crate::shared::Planned) -> Reply {
+        use crew_client::{ClientReason, OperationOutcome};
+        let reason = |code: &str, message: String| ClientReason {
+            code: code.into(),
+            message,
+        };
+        let mut execute = || -> Result<crew_client::OperationOutcome, ClientError> {
+            let typed = planned
+                .typed()
+                .map_err(|error| ClientError::Protocol(error.to_string()))?;
+            let request: crew_core::rpc::Request = serde_json::from_str(
+                &typed
+                    .encode(planned.operation_id)
+                    .map_err(|error| ClientError::Protocol(error.to_string()))?,
+            )
+            .map_err(|error| ClientError::Protocol(error.to_string()))?;
+            if self.client.is_none() {
+                let (client, peer) = Client::operator(&self.socket, "tui")?;
+                if planned.scope.daemon_pid.is_some_and(|pid| pid != peer.pid) {
+                    return Ok(OperationOutcome::NotSent {
+                        reason: reason(
+                            "scope_changed",
+                            "daemon process changed before dispatch".into(),
+                        ),
+                    });
+                }
+                self.client = Some(client);
+            }
+            let client = self
+                .client
+                .as_mut()
+                .expect("operator connection established");
+            client.set_timeout(Some(REQUEST_TIMEOUT))?;
+            let proof: Snapshot = client.call(Call::Snapshot {
+                messages: Some(0),
+                events: Some(0),
+            })?;
+            if proof.session.workspace != planned.scope.workspace_id
+                || planned
+                    .scope
+                    .daemon_started_at_ms
+                    .is_some_and(|at| at != proof.session.daemon_started_at)
+                || planned
+                    .scope
+                    .daemon_pid
+                    .is_some_and(|pid| pid != proof.session.daemon_pid)
+            {
+                return Ok(OperationOutcome::NotSent {
+                    reason: reason(
+                        "scope_changed",
+                        "daemon incarnation changed before dispatch".into(),
+                    ),
+                });
+            }
+            let timeout =
+                Duration::from_millis(crew_client::policy::method_policy(typed.kind()).timeout_ms);
+            client.set_timeout(Some(timeout))?;
+            let outcome = match client.call::<serde_json::Value>(request.call) {
+                Ok(value) => match typed.decode_result(value) {
+                    Ok(result) => OperationOutcome::Succeeded { result },
+                    Err(error) => OperationOutcome::OutcomeUnknown {
+                        reason: reason("decode", error.to_string()),
+                    },
+                },
+                Err(ClientError::Rpc(error)) => OperationOutcome::Rejected {
+                    code: error.code,
+                    message: error.message,
+                },
+                Err(error) => OperationOutcome::OutcomeUnknown {
+                    reason: reason(
+                        if matches!(error, ClientError::Closed | ClientError::Io(_)) {
+                            "closed"
+                        } else {
+                            "timeout"
+                        },
+                        error.to_string(),
+                    ),
+                },
+            };
+            Ok(outcome)
+        };
+        let outcome = execute().unwrap_or_else(|error| OperationOutcome::NotSent {
+            reason: reason("connect", error.to_string()),
+        });
+        if matches!(
+            outcome,
+            OperationOutcome::OutcomeUnknown { .. } | OperationOutcome::NotSent { .. }
+        ) {
+            self.client = None;
+        }
+        Reply::Shared {
+            scope: planned.scope,
+            operation_id: planned.operation_id,
+            outcome,
+        }
     }
 }
 
@@ -603,7 +913,7 @@ mod tests {
                         project: Some("checkout-rewrite".into()),
                         version: "test".into(),
                         protocol,
-                        pid: 1,
+                        pid: fixture::snapshot(1_000).session.daemon_pid,
                         web_proof: None,
                     })
                     .unwrap(),
@@ -699,12 +1009,12 @@ mod tests {
         let stop = Arc::new(AtomicBool::new(false));
         spawn_subscriber(path.clone(), tx, stop.clone());
         expect(&rx, "initial snapshot", |event| match event {
-            UiEvent::Snapshot(_) => Some(()),
+            UiEvent::ScopedSnapshot { .. } => Some(()),
             _ => None,
         });
         daemon.stop();
         expect(&rx, "disconnect", |event| match event {
-            UiEvent::Disconnected => Some(()),
+            UiEvent::ScopedDisconnected { .. } => Some(()),
             _ => None,
         });
         let daemon = FakeDaemon::start_with_protocol(&path, 99);
@@ -821,14 +1131,14 @@ mod tests {
         let stop = Arc::new(AtomicBool::new(false));
         spawn_subscriber(path, tx, stop.clone());
         expect(&rx, "snapshot", |event| match event {
-            UiEvent::Snapshot(_) => Some(()),
+            UiEvent::ScopedSnapshot { .. } => Some(()),
             _ => None,
         });
         daemon.push(Push::Shutdown);
         let event = rx.recv_timeout(Duration::from_secs(2));
         stop.store(true, Ordering::Relaxed);
         daemon.stop();
-        assert!(matches!(event, Ok(UiEvent::Push(push)) if *push == Push::Shutdown));
+        assert!(matches!(event, Ok(UiEvent::ScopedPush { push,.. }) if *push == Push::Shutdown));
         assert!(rx.try_recv().is_err());
     }
 
@@ -905,7 +1215,7 @@ mod tests {
         spawn_subscriber(path.clone(), tx, stop.clone());
 
         let snapshot = expect(&rx, "the initial snapshot", |e| match e {
-            UiEvent::Snapshot(s) => Some(s),
+            UiEvent::ScopedSnapshot { snapshot: s, .. } => Some(s),
             _ => None,
         });
         assert_eq!(snapshot.agents.len(), 7);
@@ -925,7 +1235,7 @@ mod tests {
         let message = fixture::message(1, "claude-3", "claude-5", MessageType::Question, "hi", 5);
         daemon.push(Push::Message(message.clone()));
         let got = expect(&rx, "the message push", |e| match e {
-            UiEvent::Push(p) => Some(*p),
+            UiEvent::ScopedPush { push: p, .. } => Some(*p),
             _ => None,
         });
         assert_eq!(got, Push::Message(message));
@@ -933,28 +1243,28 @@ mod tests {
         // Falling behind makes the daemon ask for a fresh snapshot.
         daemon.push(Push::Resync);
         expect(&rx, "the resync snapshot", |e| match e {
-            UiEvent::Snapshot(_) => Some(()),
+            UiEvent::ScopedSnapshot { .. } => Some(()),
             _ => None,
         });
 
         // The daemon goes away: the UI is told, and the thread keeps retrying.
         daemon.stop();
         expect(&rx, "the disconnect notice", |e| match e {
-            UiEvent::Disconnected => Some(()),
+            UiEvent::ScopedDisconnected { .. } => Some(()),
             _ => None,
         });
         assert!(probe(&path).is_err());
 
         let daemon = FakeDaemon::start(&path);
         expect(&rx, "the snapshot after reconnecting", |e| match e {
-            UiEvent::Snapshot(_) => Some(()),
+            UiEvent::ScopedSnapshot { .. } => Some(()),
             _ => None,
         });
 
         // A graceful shutdown ends the subscription and reaches the UI.
         daemon.push(Push::Shutdown);
         expect(&rx, "the shutdown notice", |e| match e {
-            UiEvent::Push(push) if *push == Push::Shutdown => Some(()),
+            UiEvent::ScopedPush { push, .. } if *push == Push::Shutdown => Some(()),
             _ => None,
         });
         stop.store(true, Ordering::Relaxed);

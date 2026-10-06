@@ -14,9 +14,10 @@ use crew_client::is_orchestrator;
 use crew_core::rpc::{
     GitOutcome, ModelChoice, OutputResult, Push, SessionInfo, Snapshot, TranscriptResult,
 };
+#[cfg(test)]
+use crew_core::types::OPERATOR_ID;
 use crew_core::types::{
-    Agent, AgentStatus, Event, EventLevel, InboxEntry, Message, MessageType, RuntimeKind, Task,
-    TaskStatus, OPERATOR_ID,
+    Agent, AgentStatus, Event, EventLevel, InboxEntry, Message, RuntimeKind, Task, TaskStatus,
 };
 use ratatui::layout::Rect;
 
@@ -63,6 +64,14 @@ pub enum View {
 /// A request for the daemon, produced by key handling and timers.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Command {
+    /// Request already validated and allocated by the portable engine.
+    Planned(Box<crate::shared::Planned>),
+    /// Scope-captured terminal bytes awaiting host coalescing and Core planning.
+    RawKeys {
+        scope: crew_client::ClientScope,
+        id: String,
+        text: String,
+    },
     Quit,
     FetchOutput {
         id: String,
@@ -132,6 +141,11 @@ pub enum Command {
 /// The daemon's answer to a `Command`.
 #[derive(Clone, Debug)]
 pub enum Reply {
+    Shared {
+        scope: crew_client::ClientScope,
+        operation_id: crew_client::OperationId,
+        outcome: crew_client::OperationOutcome,
+    },
     Output {
         agent: String,
         result: Result<OutputResult, String>,
@@ -331,6 +345,7 @@ pub struct StatusLine {
 
 #[derive(Clone, Debug)]
 pub struct App {
+    pub(crate) shared: crate::shared::Shared,
     /// Last drawn screen size, used to clamp keyboard scrolling to wrapped text.
     pub(crate) screen: Cell<Rect>,
     pub session: SessionInfo,
@@ -407,6 +422,7 @@ fn satellite_parent<'a>(agents: &'a [Agent], agent: &Agent) -> Option<&'a Agent>
 impl App {
     pub fn new() -> Self {
         Self {
+            shared: crate::shared::Shared::new(),
             screen: Cell::new(Rect::new(0, 0, 80, 24)),
             session: SessionInfo::default(),
             agents: Vec::new(),
@@ -577,6 +593,14 @@ impl App {
 
     /// Advance time-driven state; marks the app dirty when a redraw is due.
     pub fn tick(&mut self, now: i64) {
+        match self.shared.wake(now) {
+            Ok(updates) => {
+                for update in updates {
+                    self.present_update(&update, now);
+                }
+            }
+            Err(error) => self.set_notice(error.to_string(), now),
+        }
         self.pop_question(now);
         let moving = self.anims.animating(now);
         if self.anims.gc(now) || moving || self.was_moving {
@@ -626,7 +650,11 @@ impl App {
             }
             ms.max(5)
         };
-        Duration::from_millis(ms as u64)
+        Duration::from_millis(
+            self.shared
+                .next_timer(now)
+                .map_or(ms as u64, |deadline| deadline.min(ms as u64)),
+        )
     }
 
     /// Requests that are due on a timer: the detail view's terminal capture,
@@ -730,6 +758,15 @@ impl App {
 
     /// The daemon connection was lost.
     pub fn disconnected(&mut self) {
+        self.disconnected_at(self.shared.last_now());
+    }
+
+    pub(crate) fn disconnected_at(&mut self, now: i64) {
+        match self.shared.disconnect(now) {
+            Ok(Some(update)) => self.present_update(&update, now),
+            Ok(None) => {}
+            Err(error) => self.set_notice(error.to_string(), now),
+        }
         self.connected = false;
         if self.stopping {
             // It went away because this dashboard stopped it.
@@ -767,118 +804,154 @@ impl App {
     // ---- reducers --------------------------------------------------------
 
     pub fn apply_snapshot(&mut self, snap: Snapshot, now: i64) {
-        self.clock_offset = snap.server_time - now;
-        self.session = snap.session;
-        self.agents = snap.agents;
-        for agent in &mut self.agents {
-            name_model(&self.model_names, agent);
+        self.clock_offset = (i128::from(snap.server_time) - i128::from(now))
+            .clamp(i128::from(i64::MIN), i128::from(i64::MAX)) as i64;
+        match self.shared.snapshot(snap, now) {
+            Ok(update) => {
+                self.present_update(&update, now);
+                self.resume_vcs(now);
+                self.fix_selection(None);
+                self.dirty = true;
+            }
+            Err(error) => self.set_notice(error.to_string(), now),
         }
-        self.sort_agents();
-        self.tasks = snap.tasks;
-        self.messages = snap.messages.into();
-        while self.messages.len() > MAX_MESSAGES {
-            self.messages.pop_front();
-        }
-        self.events = snap.events.into();
-        while self.events.len() > MAX_EVENTS {
-            self.events.pop_front();
-        }
-        self.resume_vcs(now);
-        self.questions = snap.questions;
-        let questions = &self.questions;
-        self.answering
-            .retain(|id| questions.iter().any(|q| &q.id == id));
-        self.loaded = true;
-        self.connected = true;
-        self.fix_selection(None);
-        self.dirty = true;
+    }
+
+    /// Refresh presentation caches from the sole authoritative domain store.
+    /// Unrelated pushes and visual ticks do not copy retained history.
+    fn refresh_shared(&mut self, changes: &crew_client::ChangeSet) {
+        let shared = self.shared.clone();
+        shared.read(|core| {
+            if changes.reset || changes.session {
+                self.session = core.session().cloned().unwrap_or_default();
+            }
+            if changes.reset || !changes.agents.is_empty() || !changes.removed.is_empty() {
+                let previous = std::mem::take(&mut self.agents);
+                self.agents = core
+                    .agents()
+                    .iter()
+                    .map(|agent| {
+                        if !changes.reset && !changes.agents.contains(&agent.id) {
+                            if let Some(cached) =
+                                previous.iter().find(|cached| cached.id == agent.id)
+                            {
+                                return cached.clone();
+                            }
+                        }
+                        agent.clone()
+                    })
+                    .collect();
+                for agent in &mut self.agents {
+                    name_model(&self.model_names, agent);
+                }
+            }
+            if changes.reset || !changes.tasks.is_empty() {
+                self.tasks = core.tasks().to_vec();
+            }
+            if changes.reset || changes.messages {
+                self.messages = core.messages().cloned().collect();
+            }
+            if changes.reset || changes.events {
+                self.events = core.events().cloned().collect();
+            }
+            if changes.reset || changes.questions {
+                self.questions = core.questions().to_vec();
+                self.answering = core.pending_answer_ids().map(str::to_owned).collect();
+            }
+            self.connected = core.workspace_status() == crew_client::WorkspaceStatus::Live;
+            self.loaded = core.session().is_some();
+        });
     }
 
     pub fn apply_push(&mut self, push: Push, now: i64) {
-        match push {
-            Push::Agent(mut agent) => {
-                name_model(&self.model_names, &mut agent);
-                self.upsert_agent(*agent);
+        // Shutdown also closes an initial terminal whose first snapshot never
+        // arrived. Exit/navigation are host state, not domain reduction.
+        if matches!(push, Push::Shutdown) {
+            self.daemon_stopped = true;
+            self.stopped |= self.stopping;
+            self.should_quit = true;
+            self.stopping = false;
+        }
+        let removed = if let Push::AgentRemoved { id } = &push {
+            self.agents
+                .iter()
+                .position(|agent| &agent.id == id)
+                .map(|index| (id.clone(), index))
+        } else {
+            None
+        };
+        let question_was_present = match &push {
+            Push::Message(message) => self.questions.iter().any(|q| q.id == message.id),
+            _ => false,
+        };
+        let update = match self.shared.push(push.clone(), now) {
+            Ok(Some(update)) => update,
+            Ok(None) => {
+                self.dirty |= self.should_quit;
+                return;
             }
-            Push::AgentRemoved { id } => self.remove_agent(&id),
-            Push::Task(task) => self.upsert_task(*task),
-            Push::Message(msg) => self.add_message(msg, now),
-            Push::Event(event) => {
-                let fresh = self
-                    .events
-                    .back()
-                    .is_none_or(|last| event.seq == 0 || event.seq > last.seq);
-                if fresh {
-                    self.start_vcs(&event, now);
+            Err(error) => {
+                self.set_notice(error.to_string(), now);
+                return;
+            }
+        };
+        self.present_update(&update, now);
+        if let Some((id, index)) = removed {
+            if update
+                .changes
+                .removed
+                .iter()
+                .any(|key| key.entity == crew_client::Entity::Agent(id.clone()))
+            {
+                self.anims.remove_agent(&id);
+                self.fix_selection(Some(index));
+                if self.view == View::Detail && self.detail.agent == id {
+                    self.view = View::Dashboard;
                 }
-                if fresh
-                    && matches!(
-                        event.event_type.as_str(),
-                        crew_core::AGENT_ERROR_EVENT | crew_core::AGENT_REFUSED_EVENT
-                    )
-                {
+                if self.logs.filter_agent.as_deref() == Some(&id) {
+                    self.logs.filter_agent = None;
+                }
+            }
+        } else if !update.changes.agents.is_empty() {
+            self.fix_selection(None);
+        }
+        if update.changes.messages {
+            if let Push::Message(message) = &push {
+                if message.is_operator_question() && !question_was_present {
+                    self.set_status(
+                        format!("? {} has a question for you", message.asker()),
+                        false,
+                        now,
+                    );
+                }
+                let workers: Vec<_> = self.workers().map(|agent| agent.id.clone()).collect();
+                self.anims.on_message(message, &workers, now);
+            }
+        }
+        if update.changes.events {
+            if let Push::Event(event) = &push {
+                self.start_vcs(event, now);
+                if self.logs.scroll > 0 {
+                    self.logs.scroll += 1;
+                }
+                if matches!(
+                    event.event_type.as_str(),
+                    crew_core::AGENT_ERROR_EVENT | crew_core::AGENT_REFUSED_EVENT
+                ) {
                     self.set_notice(event.message.clone(), now);
                 }
-                self.add_event(event);
-            }
-            Push::Session(session) => self.session = *session,
-            Push::Shutdown => {
-                self.daemon_stopped = true;
-                self.stopped |= self.stopping;
-                self.should_quit = true;
-                self.stopping = false;
-            }
-            // Handled by the connection layer (refetch / reconnect / attach only).
-            Push::Unknown
-            | Push::Resync
-            | Push::Pty { .. }
-            | Push::PtyClosed
-            | Push::Compact { .. }
-            | Push::Deliver { .. }
-            | Push::Summary(_)
-            | Push::Workspaces(_) => return,
-        }
-        self.dirty = true;
-    }
-
-    /// Workers in natural id order, each followed by its subagents, then the
-    /// orchestrator. This is also the order `tab` walks.
-    fn sort_agents(&mut self) {
-        crew_client::sort_agents(&mut self.agents);
-    }
-
-    fn upsert_agent(&mut self, agent: Agent) {
-        match self.agents.iter_mut().find(|a| a.id == agent.id) {
-            Some(slot) => {
-                let reparented = slot.parent != agent.parent;
-                *slot = agent;
-                if reparented {
-                    self.sort_agents();
-                }
-            }
-            None => {
-                self.agents.push(agent);
-                self.sort_agents();
             }
         }
-        self.fix_selection(None);
-    }
-
-    fn remove_agent(&mut self, id: &str) {
-        let Some(index) = self.agents.iter().position(|a| a.id == id) else {
-            return;
-        };
-        self.agents.remove(index);
-        self.anims.remove_agent(id);
-        // Subagents of a removed parent rejoin the ring until they go too.
-        self.sort_agents();
-        self.fix_selection(Some(index));
-        if self.view == View::Detail && self.detail.agent == id {
-            self.view = View::Dashboard;
-        }
-        if self.logs.filter_agent.as_deref() == Some(id) {
-            self.logs.filter_agent = None;
-        }
+        self.dirty |= update.changes.reset
+            || update.changes.session
+            || update.changes.questions
+            || update.changes.messages
+            || update.changes.events
+            || update.changes.usage
+            || update.changes.availability
+            || !update.changes.agents.is_empty()
+            || !update.changes.tasks.is_empty()
+            || !update.changes.removed.is_empty();
     }
 
     /// Keep the selection pointing at a live agent. `hint` is the index the
@@ -897,42 +970,6 @@ impl App {
         }
         let index = hint.unwrap_or(0).min(self.agents.len() - 1);
         self.selected = Some(self.agents[index].id.clone());
-    }
-
-    fn upsert_task(&mut self, task: Task) {
-        match self.tasks.iter_mut().find(|t| t.id == task.id) {
-            Some(slot) => *slot = task,
-            None => self.tasks.push(task),
-        }
-    }
-
-    fn add_message(&mut self, msg: Message, now: i64) {
-        // A snapshot taken after subscribing can overlap the push stream.
-        if self.messages.iter().rev().take(64).any(|m| m.id == msg.id) {
-            return;
-        }
-        if msg.is_operator_question() {
-            if !self.questions.iter().any(|q| q.id == msg.id) {
-                self.set_status(
-                    format!("? {} has a question for you", msg.asker()),
-                    false,
-                    now,
-                );
-                self.questions.push(msg.clone());
-            }
-        } else if msg.from == OPERATOR_ID && msg.kind == MessageType::Answer {
-            // Answered, here or from another terminal.
-            if let Some(id) = &msg.reply_to {
-                self.questions.retain(|q| &q.id != id);
-                self.answering.remove(id);
-            }
-        }
-        let workers: Vec<String> = self.workers().map(|a| a.id.clone()).collect();
-        self.anims.on_message(&msg, &workers, now);
-        self.messages.push_back(msg);
-        while self.messages.len() > MAX_MESSAGES {
-            self.messages.pop_front();
-        }
     }
 
     /// A VCS event that just arrived starts its animation, unless it is
@@ -962,24 +999,31 @@ impl App {
             .resume(parsed.iter().map(|(e, age)| (e, *age)), now);
     }
 
+    #[cfg(test)]
     fn add_event(&mut self, event: Event) {
-        if let Some(last) = self.events.back() {
-            if event.seq != 0 && event.seq <= last.seq {
-                return;
-            }
-        }
-        self.events.push_back(event);
-        while self.events.len() > MAX_EVENTS {
-            self.events.pop_front();
-        }
-        // Keep a scrolled-back log view anchored on what the user is reading.
-        if self.logs.scroll > 0 {
-            self.logs.scroll += 1;
+        let now = event.timestamp;
+        if let Ok(Some(update)) = self.shared.push(Push::Event(event), now) {
+            self.refresh_shared(&update.changes);
         }
     }
 
     pub fn apply_reply(&mut self, reply: Reply, now: i64) {
         match reply {
+            Reply::Shared {
+                scope,
+                operation_id,
+                outcome,
+            } => match self.shared.finished(scope, operation_id, outcome, now) {
+                Ok((update, completed)) => {
+                    self.refresh_shared(&update.changes);
+                    for (command, outcome) in completed {
+                        if let Some(reply) = presentation_reply(command, outcome) {
+                            self.apply_reply(reply, now);
+                        }
+                    }
+                }
+                Err(error) => self.set_notice(error.to_string(), now),
+            },
             Reply::Output { agent, result } => {
                 if agent != self.detail.agent {
                     return;
@@ -1105,6 +1149,35 @@ impl App {
         self.dirty = true;
     }
 
+    pub(crate) fn prepare(&mut self, command: Command, now: i64) -> Vec<crate::shared::Planned> {
+        match self.shared.dispatch(command, now) {
+            Ok((plan, update)) => {
+                self.refresh_shared(&update.changes);
+                if let crew_client::ActionPlan::Unavailable { reason } = plan {
+                    self.set_status(reason.message, true, now);
+                }
+            }
+            Err(error) => self.set_status(error.to_string(), true, now),
+        }
+        self.shared.take_requests()
+    }
+
+    pub(crate) fn capture_confirmation(&mut self, now: i64) {
+        match self.shared.modal(self.modal.as_ref(), now) {
+            Ok(update) => self.refresh_shared(&update.changes),
+            Err(error) => self.set_status(error.to_string(), true, now),
+        }
+    }
+
+    fn present_update(&mut self, update: &crew_client::ClientUpdate, now: i64) {
+        self.refresh_shared(&update.changes);
+        for (command, outcome) in self.shared.retired(update) {
+            if let Some(reply) = presentation_reply(command, outcome) {
+                self.apply_reply(reply, now);
+            }
+        }
+    }
+
     // ---- models ----------------------------------------------------------
 
     /// Open the model picker for agent `id`; returns the listing it needs.
@@ -1217,6 +1290,92 @@ impl App {
 
 /// Give an agent that came without one its model's proper name, when the
 /// model is one that is known by name.
+fn presentation_reply(command: Command, outcome: crew_client::OperationOutcome) -> Option<Reply> {
+    use crew_client::{CommandResult, OperationOutcome};
+    let result = match outcome {
+        OperationOutcome::Succeeded { result } => Ok(result),
+        OperationOutcome::Rejected { message, .. } => Err(message),
+        OperationOutcome::NotSent { reason } | OperationOutcome::OutcomeUnknown { reason } => {
+            Err(reason.message)
+        }
+        OperationOutcome::Canceled => Err("request canceled".into()),
+        _ => Err("unexpected terminal outcome".into()),
+    };
+    let mismatch = || "daemon reply does not match the request".to_string();
+    Some(match command {
+        Command::FetchOutput { id } => Reply::Output {
+            agent: id,
+            result: result.and_then(|r| match r {
+                CommandResult::Output(value) => Ok(value),
+                _ => Err(mismatch()),
+            }),
+        },
+        Command::FetchTranscript { id } => Reply::Transcript {
+            agent: id,
+            result: result.and_then(|r| match r {
+                CommandResult::Transcript(value) => Ok(value),
+                _ => Err(mismatch()),
+            }),
+        },
+        Command::FetchInbox { id } => Reply::Inbox {
+            agent: id,
+            result: result.and_then(|r| match r {
+                CommandResult::Inbox(value) => Ok(value.messages),
+                _ => Err(mismatch()),
+            }),
+        },
+        Command::FetchEvents { id } => Reply::Events {
+            agent: id,
+            result: result.and_then(|r| match r {
+                CommandResult::Events(value) => Ok(value),
+                _ => Err(mismatch()),
+            }),
+        },
+        Command::FetchDiff { id } => Reply::Diff {
+            agent: id,
+            result: result.and_then(|r| match r {
+                CommandResult::Diff(value) => Ok(*value),
+                _ => Err(mismatch()),
+            }),
+        },
+        Command::FetchModels => Reply::Models(result.and_then(|r| match r {
+            CommandResult::Models(value) => Ok(value.models),
+            _ => Err(mismatch()),
+        })),
+        Command::Answer { id, .. } => Reply::Answered {
+            id,
+            result: result.map(|_| ()),
+        },
+        Command::StopTeam => Reply::Stopped(result.map(|_| ())),
+        Command::Keys { .. } => Reply::Keys(result.map(|_| ())),
+        other => Reply::Action {
+            label: match other {
+                Command::Kill(id) => format!("kill {id}"),
+                Command::Restart(id) => format!("restart {id}"),
+                Command::RestartFresh(id) => format!("restart {id} fresh (no resume)"),
+                Command::Pause(id) => format!("pause {id}"),
+                Command::Resume(id) => format!("resume {id}"),
+                Command::Focus(id) => format!("focus {id}"),
+                Command::Compact(id) => format!("compaction of {id}'s context queued"),
+                Command::Type { id, .. } => format!("typed into {id}"),
+                Command::SetModel { label, .. } => label,
+                Command::Send { to, .. } if to == crew_core::types::BROADCAST => {
+                    "broadcast sent".into()
+                }
+                Command::Send { to, .. } => format!("message sent to {to}"),
+                Command::ResumeLimited { restart: true } => {
+                    "restarted the paused agents on the current login".into()
+                }
+                Command::ResumeLimited { restart: false } => {
+                    "told the paused agents to continue".into()
+                }
+                _ => return None,
+            },
+            result: result.map(|_| ()),
+        },
+    })
+}
+
 fn name_model(names: &HashMap<String, String>, agent: &mut Agent) {
     if agent.model_name.is_some() {
         return;
@@ -1234,6 +1393,8 @@ fn name_model(names: &HashMap<String, String>, agent: &mut Agent) {
 /// depends on something in layer n-1. Returns indices into `tasks`. Unknown
 /// dependencies are ignored and cycles are cut rather than looping.
 pub fn task_layers(tasks: &[Task]) -> Vec<Vec<usize>> {
+    // A daemon frame bounds the board far below u32 depth/layer overflow.
+    // Cycles have explicit shared traversal semantics and cannot panic here.
     let projected = crew_client::topology::task_data(tasks)
         .expect("a terminal task board fits the shared layer count");
     let mut layers: Vec<Vec<usize>> = Vec::new();

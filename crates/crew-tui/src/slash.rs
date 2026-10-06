@@ -183,6 +183,33 @@ mod tests {
     use super::*;
 
     #[test]
+    fn dashboard_membership_and_order_remain_the_terminal_contract() {
+        assert_eq!(
+            DASHBOARD
+                .iter()
+                .map(|command| command.name)
+                .collect::<Vec<_>>(),
+            [
+                "exit",
+                "stop",
+                "kill",
+                "restart",
+                "restart-fresh",
+                "pause",
+                "unpause",
+                "compact",
+                "model",
+                "resume",
+                "answer",
+                "tasks",
+                "logs",
+                "mouse",
+                "help"
+            ]
+        );
+    }
+
+    #[test]
     fn commands_are_found_by_name_or_alias() {
         assert_eq!(find(DASHBOARD, "exit").map(|c| c.name), Some("exit"));
         assert_eq!(find(DASHBOARD, "QUIT").map(|c| c.name), Some("exit"));

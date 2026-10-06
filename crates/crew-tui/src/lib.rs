@@ -14,6 +14,7 @@ pub mod input;
 pub mod launcher;
 pub mod layout;
 mod net;
+mod shared;
 pub mod slash;
 pub mod theme;
 pub mod transcript;
@@ -25,6 +26,7 @@ use std::path::Path;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{self, Receiver, RecvTimeoutError};
 use std::sync::{Arc, Once};
+use std::time::Instant;
 
 use anyhow::{Context, Result};
 use crew_core::signals::TerminationSignals;
@@ -83,8 +85,9 @@ pub fn run(
             return Err(error).context("starting terminal input");
         }
     };
-    net::spawn_subscriber(socket.to_path_buf(), tx.clone(), stop.clone());
-    let requests = net::spawn_requester(socket.to_path_buf(), tx);
+    let subscriber = net::spawn_subscriber(socket.to_path_buf(), tx.clone(), stop.clone());
+    let mut requests = net::spawn_requester(socket.to_path_buf(), tx);
+    requests.subscriber = Some(subscriber);
 
     let theme = Theme::detect();
     let mut app = App::new();
@@ -129,14 +132,19 @@ fn event_loop(
     requests: &net::Requests,
     signals: &TerminationSignals,
 ) -> Result<()> {
+    let started = Instant::now();
     loop {
         if signals.is_pending() {
             return Ok(());
         }
         let now = now_ms();
+        app.shared.set_clock(crew_client::ClockSample {
+            wall_ms: now,
+            monotonic_ms: started.elapsed().as_millis().min(u128::from(u64::MAX)) as u64,
+        });
         app.tick(now);
         for command in app.due_commands(now) {
-            let _ = requests.send(command);
+            send_shared(app, command, requests, now);
         }
         if app.take_dirty() {
             terminal.draw(|frame| views::render(frame, app, theme, now))?;
@@ -154,12 +162,21 @@ fn event_loop(
                 let size = terminal.size().unwrap_or_default();
                 let area = Rect::new(0, 0, size.width, size.height);
                 let page = page_rows(app, area);
+                app.shared.set_clock(crew_client::ClockSample {
+                    wall_ms: now_ms(),
+                    monotonic_ms: started.elapsed().as_millis().min(u128::from(u64::MAX)) as u64,
+                });
                 handle(app, event, requests, page, area)?;
                 if app.should_quit || signals.is_pending() {
                     return Ok(());
                 }
                 // Drain whatever else is queued so a burst costs one redraw.
                 while let Ok(event) = rx.try_recv() {
+                    app.shared.set_clock(crew_client::ClockSample {
+                        wall_ms: now_ms(),
+                        monotonic_ms: started.elapsed().as_millis().min(u128::from(u64::MAX))
+                            as u64,
+                    });
                     let page = page_rows(app, area);
                     handle(app, event, requests, page, area)?;
                     if app.should_quit || signals.is_pending() {
@@ -207,33 +224,125 @@ fn handle(
                     set_mouse(on);
                 }
                 command => {
-                    let _ = requests.send(command);
+                    send_shared(app, command, requests, now);
                 }
             }
         }
     };
     match event {
+        UiEvent::ScopedSnapshot { epoch, snapshot } => {
+            if app.shared.accept_epoch(epoch, true) {
+                app.apply_snapshot(*snapshot, now);
+            }
+        }
+        UiEvent::ScopedPush { epoch, push } => {
+            if app.shared.accept_epoch(epoch, false) {
+                app.apply_push(*push, now);
+            }
+        }
+        UiEvent::ScopedDisconnected { epoch } => {
+            if app.shared.accept_epoch(epoch, false) {
+                app.disconnected_at(now);
+            }
+        }
+        UiEvent::PlanKeys {
+            scope,
+            id,
+            text,
+            reply,
+        } => {
+            if app.shared.read(|core| core.scope() == Some(&scope)) {
+                let mut planned = app.prepare(Command::Keys { id, text }, now).into_iter();
+                let _ = reply.send(planned.next());
+                for request in planned {
+                    let _ = requests.send(Command::Planned(Box::new(request)));
+                }
+            } else {
+                app.set_status(
+                    "queued terminal input discarded: connection or target changed",
+                    true,
+                    now,
+                );
+                let _ = reply.send(None);
+            }
+        }
         UiEvent::Input(TermEvent::Key(key)) if key.kind != KeyEventKind::Release => {
             let commands = input::handle_key(app, key, now, page);
             run(app, commands);
+            app.capture_confirmation(now);
         }
         UiEvent::Input(TermEvent::Key(_)) => {}
         UiEvent::Input(TermEvent::Mouse(mouse)) => {
             let commands = input::handle_mouse(app, mouse, area, now, page);
             run(app, commands);
+            app.capture_confirmation(now);
         }
         UiEvent::Input(TermEvent::Paste(text)) => {
             let commands = input::handle_paste(app, &text, now);
             run(app, commands);
+            app.capture_confirmation(now);
         }
         UiEvent::Input(_) => app.mark_dirty(),
-        UiEvent::Snapshot(snapshot) => app.apply_snapshot(*snapshot, now),
-        UiEvent::Push(push) => app.apply_push(*push, now),
-        UiEvent::Disconnected => app.disconnected(),
-        UiEvent::Reply(reply) => app.apply_reply(*reply, now),
+        UiEvent::Reply(reply) => {
+            let reconnect = matches!(
+                reply.as_ref(),
+                app::Reply::Shared {
+                    outcome: crew_client::OperationOutcome::OutcomeUnknown { .. }
+                        | crew_client::OperationOutcome::NotSent { .. },
+                    ..
+                }
+            );
+            app.apply_reply(*reply, now);
+            if reconnect {
+                app.disconnected_at(now);
+                requests.restart_subscriber();
+            }
+        }
         UiEvent::Fatal(error) => return Err(error.into()),
     }
+    for planned in app.shared.take_requests() {
+        let _ = requests.send(Command::Planned(Box::new(planned)));
+    }
     Ok(())
+}
+
+fn send_shared(app: &mut App, command: Command, requests: &net::Requests, now: i64) {
+    if let Command::Keys { id, text } = &command {
+        if let Some(scope) = app.shared.read(|core| core.scope().cloned()) {
+            if requests
+                .send(Command::RawKeys {
+                    scope,
+                    id: id.clone(),
+                    text: text.clone(),
+                })
+                .is_err()
+            {
+                app.set_status("keys not delivered: request worker closed", true, now);
+            }
+        } else {
+            app.set_status("keys not delivered: no authenticated snapshot", true, now);
+        }
+        return;
+    }
+    for planned in app.prepare(command, now) {
+        let scope = planned.scope.clone();
+        let operation_id = planned.operation_id;
+        if requests.send(Command::Planned(Box::new(planned))).is_err() {
+            app.apply_reply(
+                app::Reply::Shared {
+                    scope,
+                    operation_id,
+                    outcome: crew_client::OperationOutcome::NotSent {
+                        reason: crew_client::ClientReason {
+                            code: "closed".into(),
+                            message: "request worker closed".into(),
+                        },
+                    },
+                },
+                now,
+            );
+        }
+    }
 }
 
 fn enter_terminal() -> io::Result<Terminal<CrosstermBackend<Stdout>>> {
