@@ -1650,11 +1650,11 @@ Cargo workspace:
 
 | Crate | Contents |
 | --- | --- |
-| `crew-protocol` | platform-independent domain types and VCS event payloads |
-| `crew-client` | pure agent ordering and current-work queries; caller-supplied time, no transport or UI |
-| `crew-core` | domain reexports, the wire protocol (`rpc.rs`), blocking client, team config, paths |
+| `crew-protocol` | portable domain types, configuration-free wire records and VCS event payloads |
+| `crew-client` | shared state, histories, questions, projections, command policy and codec; caller-supplied clocks and transport outcomes |
+| `crew-core` | domain and wire reexports, host requests, blocking client, team config and paths |
 | `crew` | `daemon/` (state, server, supervisor, delivery, orchestration, roster, subagents, git ops), `message_bus/`, `persistence/`, `scheduler/`, `tasks/`, `agents/` (Claude, Codex, pi, shell), `process/` (pty, herdr), `vcs/` (jj backend and selection) and `git/` (git backend, shared helpers), `web/` (the browser dashboard's server: HTTP, WebSocket, pairing; `build.rs` embeds `web-dist/`), `mcp/`, `cli/` |
-| `crew-tui` | the ratatui dashboard |
+| `crew-tui` | the ratatui dashboard and local host adapter for `crew-client`; terminal rendering, navigation, key coalescing and socket workers |
 | `web/` (not a crate) | the browser dashboard's frontend (Solid, Vite, bun); its built bundle is `crates/crew/web-dist/` |
 
 The seams, each a trait with one or two implementations:

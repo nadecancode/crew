@@ -103,6 +103,11 @@ impl Shared {
         self.0.borrow_mut().monotonic_override = Some(sample.monotonic_ms);
     }
 
+    pub fn server_now(&self, now: i64) -> i64 {
+        let host = self.0.borrow();
+        host.core.server_now(host.clock(now))
+    }
+
     pub fn next_timer(&self, now: i64) -> Option<u64> {
         let host = self.0.borrow();
         let sample = host.clock(now);

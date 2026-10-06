@@ -343,6 +343,12 @@ impl ClientCore {
         self.state.reason.as_ref()
     }
 
+    /// Server time from the accepted snapshot clock, with the same wide offset
+    /// and clamp used by all shared projections.
+    pub fn server_now(&self, clock: ClockSample) -> i64 {
+        self.state.server_now(clock)
+    }
+
     /// Immutable domain access for Rust hosts with an existing presentation
     /// model. These borrows expose no reducers, queues, cursors or credentials.
     pub fn session(&self) -> Option<&crew_protocol::rpc::SessionInfo> {
@@ -538,6 +544,44 @@ mod tests {
         bind(&mut core, 1);
         load(&mut core, 1, 1 << 63, 0);
         core
+    }
+
+    #[test]
+    fn immutable_server_clock_getter_preserves_the_extreme_snapshot_sample() {
+        let mut core = core();
+        let extreme = ClockSample {
+            wall_ms: i64::MIN,
+            monotonic_ms: 0,
+        };
+        core.apply(
+            ClientInput::SnapshotStarted {
+                scope: scope(1),
+                operation_id: (1 << 63) + 1,
+            },
+            extreme,
+        )
+        .unwrap();
+        let mut snapshot = snapshot();
+        snapshot.server_time = i64::MAX;
+        core.apply(
+            ClientInput::Snapshot {
+                scope: scope(1),
+                operation_id: (1 << 63) + 1,
+                snapshot: Box::new(snapshot),
+            },
+            extreme,
+        )
+        .unwrap();
+        let revision = core.revision();
+        for wall_ms in [i64::MIN, i64::MAX] {
+            let sample = ClockSample {
+                wall_ms,
+                monotonic_ms: 0,
+            };
+            assert_eq!(core.server_now(sample), core.state.server_now(sample));
+            assert_eq!(core.server_now(sample), i64::MAX);
+        }
+        assert_eq!(core.revision(), revision);
     }
 
     #[test]

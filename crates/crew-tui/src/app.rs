@@ -531,14 +531,14 @@ impl App {
 
     /// The daemon's idea of "now", for elapsed-time displays.
     pub fn server_now(&self, now: i64) -> i64 {
-        now + self.clock_offset
+        self.shared.server_now(now)
     }
 
     /// How long the team has been running (frozen once it completed).
     pub fn elapsed_ms(&self, now: i64) -> Option<i64> {
         let start = self.session.team_started_at?;
         let end = self.session.completed_at.unwrap_or(self.server_now(now));
-        Some((end - start).max(0))
+        Some(end.saturating_sub(start).max(0))
     }
 
     /// Messages to or from an agent (broadcasts included), oldest first.
@@ -978,7 +978,7 @@ impl App {
         let Some(vcs) = VcsEvent::from_event(event) else {
             return;
         };
-        if self.server_now(now) - event.timestamp > VCS_FRESH_MS {
+        if self.server_now(now).saturating_sub(event.timestamp) > VCS_FRESH_MS {
             // Too late to play, not too late to end what is still shown as
             // running.
             self.anims.end_op(&vcs.op);
@@ -993,7 +993,12 @@ impl App {
         let parsed: Vec<(VcsEvent, i64)> = self
             .events
             .iter()
-            .filter_map(|e| Some((VcsEvent::from_event(e)?, (server_now - e.timestamp).max(0))))
+            .filter_map(|e| {
+                Some((
+                    VcsEvent::from_event(e)?,
+                    server_now.saturating_sub(e.timestamp).max(0),
+                ))
+            })
             .collect();
         self.anims
             .resume(parsed.iter().map(|(e, age)| (e, *age)), now);
@@ -1631,7 +1636,7 @@ mod tests {
     #[test]
     fn shared_work_query_preserves_titles_and_applies_clock_offset_once() {
         let mut app = loaded();
-        app.clock_offset = 250;
+        let mut snapshot = fixture::snapshot(750);
         let mut executing = app.tasks[0].clone();
         executing.id = "executing".into();
         executing.title = "Executing title".into();
@@ -1643,7 +1648,8 @@ mod tests {
         parked.title = "Parked title".into();
         parked.status = TaskStatus::Waiting;
         parked.started_at = Some(200);
-        app.tasks = vec![parked, executing];
+        snapshot.tasks = vec![parked, executing];
+        app.apply_snapshot(snapshot.clone(), 500);
         assert_eq!(
             app.work_of("a", 500),
             Some(WorkOn {
@@ -1653,10 +1659,11 @@ mod tests {
             })
         );
 
-        for task in &mut app.tasks {
+        for task in &mut snapshot.tasks {
             task.status = TaskStatus::Done;
             task.completed_at = Some(600);
         }
+        app.apply_snapshot(snapshot, 500);
         assert_eq!(
             app.work_of("a", 500),
             Some(WorkOn {
@@ -1666,6 +1673,23 @@ mod tests {
             })
         );
         assert!(app.work_of("missing", 500).is_none());
+    }
+
+    #[test]
+    fn server_clock_wrapper_preserves_extreme_wire_samples_without_overflow() {
+        let mut app = App::new();
+        let mut snapshot = fixture::snapshot(0);
+        snapshot.server_time = i64::MAX;
+        app.apply_snapshot(snapshot, i64::MIN);
+        assert_eq!(
+            app.clock_offset,
+            i64::MAX,
+            "compatibility cache is a clamped offset"
+        );
+        assert_eq!(app.server_now(i64::MIN), i64::MAX);
+        assert_eq!(app.server_now(i64::MAX), i64::MAX);
+        assert_eq!(app.elapsed_ms(0), Some(i64::MAX));
+        assert!(!crate::render_to_string(&app, 100, 30, 0).is_empty());
     }
 
     #[test]
