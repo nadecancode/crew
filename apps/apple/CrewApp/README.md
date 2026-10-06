@@ -7,6 +7,11 @@ load a workspace, take a Crew action, or implement terminal rendering.
 `native-apple-ui` supplies those later through the real Rust bridge. No domain
 records or transport implementation are duplicated in Swift.
 
+The foundation description and executed results below refer to approved
+`4479a301`. Subsequent substantive implementation is tracked separately in
+[Native implementation](NATIVE-IMPLEMENTATION.md); its source checkpoints do
+not establish a connected app or an Apple build.
+
 `Crew.xcodeproj` is checked in, with shared `CrewMac` and `CrewIOS` schemes.
 Both schemes include unit and UI test targets. App sources under `CrewApp` and
 `CrewHost` are shared; native tabs and per-destination stacks serve compact iOS,
@@ -53,7 +58,7 @@ load that library. This is a tool environment requirement, not an app dependency
 The shell adds no external Swift package. Consequently it needs no remote
 package resolution or `Package.resolved` entry at this checkpoint.
 
-On the Linux host, the source validator reported **390 checks passed**, covering
+At `4479a301`, the Linux source validator reported **390 checks passed**, covering
 101 project objects, six targets, two shared schemes, plists, resources and icon
 dimensions. Syntax parsing of 13 Swift files passed. SwiftPM manifest evaluation
 reported no external dependencies, the `CrewUI` library target with processed

@@ -98,14 +98,14 @@ for application, sdk, floor_key, floor in (
         require(info["CFBundleDisplayName"] == "Crew", "Incorrect display name")
         require(info["CFBundlePackageType"] == "APPL", "Incorrect application bundle type")
     for suffix, product_type, source_file in (
-        ("Tests", "com.apple.product-type.bundle.unit-test", "CrewShellTests.swift"),
-        ("UITests", "com.apple.product-type.bundle.ui-testing", "CrewShellUITests.swift"),
+        ("Tests", "com.apple.product-type.bundle.unit-test", {"CrewShellTests.swift", "AppleDeviceKeyVaultTests.swift"}),
+        ("UITests", "com.apple.product-type.bundle.ui-testing", {"CrewShellUITests.swift"}),
     ):
         test = targets[application + suffix]
         require(test["productType"] == product_type, "Incorrect test bundle type")
         require(any(objects[dep]["target"] in root["targets"] and objects[objects[dep]["target"]]["name"] == application for dep in test["dependencies"]), "Missing test-host dependency")
         source_phase = next(objects[key] for key in test["buildPhases"] if objects[key]["isa"] == "PBXSourcesBuildPhase")
-        require({locations[objects[key]["fileRef"]].name for key in source_phase["files"]} == {source_file}, "Wrong test source")
+        require({locations[objects[key]["fileRef"]].name for key in source_phase["files"]} == source_file, "Wrong test source")
     scheme = ET.parse(APPLE / f"Crew.xcodeproj/xcshareddata/xcschemes/{application}.xcscheme").getroot()
     for buildable in scheme.findall(".//BuildableReference"):
         name = buildable.attrib["BlueprintName"]
