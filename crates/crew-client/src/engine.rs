@@ -539,6 +539,90 @@ mod tests {
         load(&mut core, 1, 1 << 63, 0);
         core
     }
+
+    #[test]
+    fn attached_completion_carries_its_lifetime_id_through_the_actual_client_api_once() {
+        let mut core = core();
+        let api: &mut dyn ClientApi = &mut core;
+        let planned = api
+            .plan(
+                ActionIntent::Attach {
+                    scope: scope(1),
+                    agent: "claude-1".into(),
+                    rows: 24,
+                    cols: 80,
+                },
+                clock(1),
+            )
+            .unwrap();
+        let ActionPlan::Dispatch { operation_id } = planned.plan else {
+            panic!("live attachment dispatch");
+        };
+        assert!(planned.update.outcomes.is_empty());
+        let complete = ClientInput::OperationFinished {
+            scope: scope(1),
+            operation_id,
+            outcome: OperationOutcome::Succeeded {
+                result: CommandResult::Attached {
+                    agent: "claude-1".into(),
+                },
+            },
+        };
+        let update = api.apply(complete.clone(), clock(2)).unwrap();
+        assert_eq!(
+            update.outcomes,
+            [OperationNotice {
+                scope: scope(1),
+                operation_id,
+                attachment_id: Some(operation_id),
+                kind: OperationOutcomeKind::Success,
+                reason: None,
+            }]
+        );
+        let repeated = api.apply(complete, clock(3)).unwrap();
+        assert!(repeated.outcomes.is_empty());
+        assert_eq!(repeated.revision, update.revision);
+
+        // The successful notice identifies the established lifetime, rather
+        // than a later silent write's fresh logical operation.
+        let input = api
+            .plan(
+                ActionIntent::AttachInput {
+                    scope: scope(1),
+                    attachment_id: operation_id,
+                    data: b"pwd\r".to_vec(),
+                },
+                clock(4),
+            )
+            .unwrap();
+        let ActionPlan::Dispatch {
+            operation_id: write,
+        } = input.plan
+        else {
+            panic!("established lifetime accepts input");
+        };
+        assert_ne!(write, operation_id);
+        let sent = api
+            .apply(
+                ClientInput::OperationFinished {
+                    scope: scope(1),
+                    operation_id: write,
+                    outcome: OperationOutcome::SentUnacknowledged {
+                        attachment_id: operation_id,
+                    },
+                },
+                clock(5),
+            )
+            .unwrap();
+        assert_eq!(sent.outcomes.len(), 1);
+        assert_eq!(sent.outcomes[0].operation_id, write);
+        assert_eq!(sent.outcomes[0].attachment_id, Some(operation_id));
+        assert_eq!(
+            sent.outcomes[0].kind,
+            OperationOutcomeKind::SentUnacknowledged
+        );
+    }
+
     fn send(core: &mut ClientCore) -> OperationId {
         match core
             .plan(
