@@ -475,7 +475,7 @@ impl Remote {
             .set_visible(!window.history.borrow().is_empty() && !in_ceremony);
         // A page opens on its first control. Error summaries, invalid fields
         // and safe explanations keep focus where the builder put it.
-        let focus = if focus.has_css_class("title-2") {
+        let focus = if focus.is::<gtk::Label>() && focus.widget_name() != "status" {
             first_control(content.upcast_ref()).unwrap_or(focus)
         } else {
             focus
