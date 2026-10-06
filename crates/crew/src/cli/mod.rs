@@ -184,6 +184,9 @@ answers: `crew answer 2`.")]
     },
     /// Merge every agent branch into the integration branch
     Integrate,
+    /// Manage opt-in scoped device access for native applications
+    #[command(subcommand)]
+    Native(ops::NativeCommand),
     /// Serve the dashboard in the browser and open it (a one-time pairing
     /// address; Chromium-based browsers and Firefox)
     Web {
@@ -607,6 +610,7 @@ pub fn run(cli: Cli) -> Result<()> {
         },
         Command::Messages { agent, lines, json } => ops::messages(&target, agent, lines, json),
         Command::Integrate => ops::integrate(&target),
+        Command::Native(command) => ops::native(command),
         Command::Web {
             port,
             no_open,

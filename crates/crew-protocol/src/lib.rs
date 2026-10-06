@@ -4,6 +4,7 @@
 //! version control event payloads. Host RPC calls, configuration and transport
 //! remain in `crew-core`.
 
+pub mod native;
 pub mod rpc;
 pub mod types;
 pub mod vcs;
