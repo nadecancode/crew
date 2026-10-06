@@ -180,9 +180,15 @@ Late error tracking uses a bounded per-channel ID interval, not one retained
 entry per keystroke.
 
 Index authentication/listings have endpoint identity independently of workspace
-scope. A workspace connection failure can leave its index authenticated. An
-action socket that fails with pending work conservatively retires the workspace
-lanes and establishes a new state attempt/barrier; core alone may authorize the
+scope. A workspace connection failure can leave its index authenticated. Once
+a selection has authenticated a gateway index, every reconnect reopens that
+index before the selected workspace, so a later workspace-only revocation or
+grant change leaves the device signed in with a current listing. A gateway
+refusal of one workspace route while the index is open marks only that
+workspace `AccessRevoked`; the index alone decides whether the device signs
+out. Local connections have no index and are unchanged. An action socket that
+fails with pending work conservatively retires the workspace lanes and
+establishes a new state attempt/barrier; core alone may authorize the
 identified-message exception. Generic timeouts do not trigger mutation replay.
 
 ## Bounds and teardown

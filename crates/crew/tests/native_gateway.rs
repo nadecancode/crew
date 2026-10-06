@@ -1465,4 +1465,121 @@ mod enabled {
             drop(pending);
         });
     }
+
+    /// Read pushes and replies until a listing names exactly these workspaces.
+    async fn listing_until(ws: &mut Ws, expected: &[WorkspaceId]) -> Value {
+        let mut wanted: Vec<_> = expected.iter().map(|id| id.to_hex()).collect();
+        wanted.sort();
+        let deadline = tokio::time::Instant::now() + Duration::from_secs(10);
+        loop {
+            assert!(tokio::time::Instant::now() < deadline, "listing {wanted:?}");
+            let frame = next(ws).await;
+            let Some(listing) = frame
+                .get("native_listing")
+                .or_else(|| frame.get("result").filter(|r| r.get("listing").is_some()))
+            else {
+                continue;
+            };
+            let mut joined: Vec<_> = listing["listing"]["joined"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .map(|entry| entry["id"].as_str().unwrap().to_owned())
+                .collect();
+            joined.sort();
+            if joined == wanted {
+                return listing.clone();
+            }
+        }
+    }
+
+    #[test]
+    fn workspace_revoke_after_restart_keeps_the_device_index_and_remaining_workspace() {
+        let host = Host::start();
+        let other = host.session.root().join("other-workspace");
+        std::fs::create_dir_all(&other).unwrap();
+        host.session.ok(&["start", "-C", &other.to_string_lossy()]);
+        let other_id =
+            WorkspaceId::from_hex(&crew_core::paths::session_id(&other.join(".crew"))).unwrap();
+        tokio::runtime::Runtime::new().unwrap().block_on(async {
+            let key = SigningKey::from_bytes(&[21; 32]);
+            let (_enrolled, device) = enroll(&host, &key, false, true).await;
+            host.command(&[
+                "native",
+                "grant",
+                &device.to_hex(),
+                "--workspace",
+                &other.to_string_lossy(),
+            ]);
+            host.command(&[
+                "native",
+                "grant",
+                &device.to_hex(),
+                "--workspace",
+                &host.session.workspace.to_string_lossy(),
+                "--control",
+                "--terminal",
+            ]);
+            host.restart();
+
+            // The same key authenticates the restarted gateway's index and
+            // a route to the selected workspace.
+            let (mut index, opened, _) = auth(&host, &key, ChannelPurpose::Index, None).await;
+            assert!(opened["result"].is_object(), "{opened}");
+            let restarted = call(&mut index, 2, "workspaces", json!({})).await;
+            let rev = restarted["result"]["listing"]["rev"].as_u64().unwrap();
+            assert_eq!(
+                restarted["result"]["listing"]["joined"]
+                    .as_array()
+                    .unwrap()
+                    .len(),
+                2
+            );
+            let (mut route, opened, _) =
+                auth(&host, &key, ChannelPurpose::Workspace, Some(host.workspace())).await;
+            assert!(opened["result"]["route"].is_object(), "{opened}");
+
+            host.command(&[
+                "native",
+                "revoke",
+                &device.to_hex(),
+                "--workspace",
+                &host.workspace().to_hex(),
+            ]);
+            let closed = tokio::time::timeout(Duration::from_secs(5), route.next())
+                .await
+                .unwrap();
+            assert!(
+                matches!(closed, Some(Ok(Message::Close(Some(ref frame)))) if u16::from(frame.code) == 4102),
+                "{closed:?}"
+            );
+            // The index stays open and pushes a newer listing of what remains.
+            let remaining = listing_until(&mut index, &[other_id]).await;
+            assert!(remaining["listing"]["rev"].as_u64().unwrap() > rev);
+            assert_eq!(remaining["grants"][0]["workspace_id"], other_id.to_hex());
+            let ping = call(&mut index, 3, "ping", json!({})).await;
+            assert_eq!(ping["result"]["pong"], true);
+
+            // A fresh device authentication still succeeds. Only the revoked
+            // workspace route is refused, with the generic pre-route answer.
+            let (_fresh, opened, _) = auth(&host, &key, ChannelPurpose::Index, None).await;
+            assert!(opened["result"].is_object(), "{opened}");
+            let (_, refused, _) =
+                auth(&host, &key, ChannelPurpose::Workspace, Some(host.workspace())).await;
+            assert_eq!(refused["error"]["code"], "unauthorized");
+            let (mut kept, opened, _) =
+                auth(&host, &key, ChannelPurpose::Workspace, Some(other_id)).await;
+            assert!(opened["result"]["route"].is_object(), "{opened}");
+            let snapshot = call(&mut kept, 2, "snapshot", json!({})).await;
+            assert!(snapshot["result"]["session"].is_object());
+            assert_eq!(
+                host.command(&["native", "devices"])
+                    .as_array()
+                    .unwrap()
+                    .len(),
+                1
+            );
+        });
+        host.session.ok(&["stop", "-C", &other.to_string_lossy()]);
+    }
 }

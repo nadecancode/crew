@@ -803,3 +803,230 @@ fn real_gateway_restart_fences_old_epoch_then_reconnects_with_fresh_scope_and_sa
         host.close().await;
     });
 }
+
+/// A second isolated daemon whose workspace can be granted to the same device.
+struct ExtraDaemon {
+    _workspace: tempfile::TempDir,
+    workspace: PathBuf,
+    socket: PathBuf,
+    task: Option<tokio::task::JoinHandle<()>>,
+}
+
+impl ExtraDaemon {
+    async fn start() -> Self {
+        let workspace = tempfile::Builder::new()
+            .prefix("crew-gw-b")
+            .tempdir_in("/tmp")
+            .unwrap();
+        let canonical = workspace.path().canonicalize().unwrap();
+        let daemon = crew::daemon::start(crew::daemon::DaemonOptions {
+            workspace: canonical.clone(),
+            crew_bin: std::env::current_exe().unwrap(),
+            pin: None,
+        })
+        .await
+        .unwrap();
+        let socket = daemon.socket().to_path_buf();
+        let task = tokio::spawn(async move {
+            daemon.serve().await.unwrap();
+        });
+        Self {
+            _workspace: workspace,
+            workspace: canonical,
+            socket,
+            task: Some(task),
+        }
+    }
+
+    fn id(&self) -> String {
+        crew_core::paths::session_id(&self.workspace.join(".crew"))
+    }
+
+    async fn close(mut self) {
+        let socket = self.socket.clone();
+        tokio::task::spawn_blocking(move || {
+            let (mut caller, _) =
+                crew_core::client::Client::operator(&socket, "gateway-test").unwrap();
+            let _: Value = caller
+                .call(crew_core::rpc::Call::Shutdown { stop_agents: true })
+                .unwrap();
+        })
+        .await
+        .unwrap();
+        tokio::time::timeout(WAIT, self.task.take().unwrap())
+            .await
+            .unwrap()
+            .unwrap();
+    }
+}
+
+impl Drop for ExtraDaemon {
+    fn drop(&mut self) {
+        if let Some(task) = self.task.take() {
+            task.abort();
+        }
+    }
+}
+
+/// Two granted workspaces on one device: the host's and a second daemon's.
+async fn two_workspace_session(
+    host: &Host,
+    beta: &ExtraDaemon,
+    seed: u8,
+    hint: Option<String>,
+) -> (
+    GatewayClient,
+    GatewayDeviceAccess,
+    NativeSession,
+    sync::Receiver<ClientNotice>,
+) {
+    let signer = Arc::new(TestSigner::new(seed));
+    let client = host.client(signer.clone());
+    let access = enroll(host, &client, &signer, false, 3600).await;
+    admin(
+        "native_grant",
+        json!({"device_id":access.device_id,
+        "selection":{"workspace":beta.workspace,"control":false,"terminal":false}}),
+    )
+    .await;
+    let core = crew_client::ClientCore::new(ClientConfig {
+        limits: NATIVE_LIMITS,
+        snapshot_mode: SnapshotMode::OrderedConnection,
+    })
+    .unwrap();
+    let session = client
+        .session(core, Protocol6Codec, DriverConfig::default())
+        .await
+        .unwrap();
+    let (sender, notices) = sync::channel();
+    session.observe(Arc::new(Observer(sender))).unwrap();
+    session
+        .connect("isolated".into(), client.profile().endpoint_id(), hint)
+        .unwrap();
+    (client, access, session, notices)
+}
+
+/// Wait until the authenticated listing is exactly these running workspaces.
+fn listed(session: &NativeSession, receiver: &sync::Receiver<ClientNotice>, ids: &[String]) {
+    let deadline = Instant::now() + WAIT;
+    let mut last = None;
+    loop {
+        if let Some(listing) = session.workspaces().unwrap() {
+            let running: Vec<_> = listing
+                .joined
+                .iter()
+                .filter(|entry| entry.state == crew_protocol::WorkspaceState::Running)
+                .map(|entry| entry.id.clone())
+                .collect();
+            if running.len() == listing.joined.len()
+                && running.len() == ids.len()
+                && ids.iter().all(|id| running.contains(id))
+            {
+                return;
+            }
+        }
+        last = Some(
+            receiver
+                .recv_timeout(deadline.saturating_duration_since(Instant::now()))
+                .unwrap_or_else(|_| {
+                    panic!(
+                        "listing {ids:?}; have {:?}; last {last:?}",
+                        session.workspaces().unwrap()
+                    )
+                }),
+        );
+    }
+}
+
+fn live_after(receiver: &sync::Receiver<ClientNotice>, attempt: u64) -> ClientScope {
+    notice(receiver, |next| {
+        next.workspace == WorkspaceStatus::Live
+            && next
+                .scope
+                .as_ref()
+                .is_some_and(|scope| scope.attempt > attempt)
+    })
+    .scope
+    .unwrap()
+}
+
+#[test]
+fn real_gateway_restart_then_workspace_revoke_keeps_the_device_and_its_other_workspace() {
+    let name =
+        "real_gateway_restart_then_workspace_revoke_keeps_the_device_and_its_other_workspace";
+    if isolated(name) {
+        return;
+    }
+    runtime().block_on(async {
+        let mut host = Host::start().await;
+        let beta = ExtraDaemon::start().await;
+        let alpha_id = crew_core::paths::session_id(&host.workspace.join(".crew"));
+        let (client, access, session, notices) =
+            two_workspace_session(&host, &beta, 39, None).await;
+        listed(&session, &notices, &[alpha_id.clone(), beta.id()]);
+        session.select_workspace(alpha_id.clone()).unwrap();
+        let alpha = live_after(&notices, 0);
+        admin(
+            "native_grant",
+            json!({"device_id":access.device_id,
+            "selection":{"workspace":host.workspace,"control":true,"terminal":true}}),
+        )
+        .await;
+        notice(&notices, |next| {
+            next.workspace == WorkspaceStatus::AccessRevoked
+        });
+        session.select_workspace(alpha_id.clone()).unwrap();
+        let controlled = live_after(&notices, alpha.attempt);
+
+        // A normal service restart, then the reconnect the app offers.
+        host.restart().await;
+        notice(&notices, |next| {
+            next.endpoint == EndpointStatus::Disconnected
+        });
+        session.reconnect().unwrap();
+        let restarted = live_after(&notices, controlled.attempt);
+        assert_eq!(restarted.workspace_id, alpha_id);
+        listed(&session, &notices, &[alpha_id.clone(), beta.id()]);
+
+        // Revoking only alpha ends its route; the device stays signed in and
+        // the restarted index lists the remaining workspace on its own.
+        admin(
+            "native_revoke",
+            json!({"device_id":access.device_id,"workspace":alpha_id}),
+        )
+        .await;
+        let ended = notice(&notices, |next| {
+            next.workspace == WorkspaceStatus::AccessRevoked
+        });
+        assert_eq!(ended.endpoint, EndpointStatus::Authenticated);
+        assert!(session.connection_context().unwrap().is_none());
+        listed(&session, &notices, &[beta.id()]);
+
+        // An explicit reconnect retries the pinned workspace. The gateway
+        // refuses only that route; the device is not signed out.
+        session.reconnect().unwrap();
+        let refused = notice(&notices, |next| {
+            next.workspace == WorkspaceStatus::AccessRevoked
+                && next
+                    .reason
+                    .as_ref()
+                    .is_some_and(|reason| reason.code == "authentication")
+        });
+        assert_ne!(refused.endpoint, EndpointStatus::SignedOut);
+        notice(&notices, |next| {
+            next.endpoint == EndpointStatus::Authenticated
+        });
+        listed(&session, &notices, &[beta.id()]);
+        session.select_workspace(beta.id()).unwrap();
+        let remaining = live_after(&notices, restarted.attempt);
+        assert_eq!(remaining.workspace_id, beta.id());
+        assert_eq!(
+            session.connection_context().unwrap().unwrap().scope,
+            remaining
+        );
+        session.close().unwrap();
+        client.close();
+        beta.close().await;
+        host.close().await;
+    });
+}
