@@ -35,7 +35,11 @@ impl TeamView {
                 }
             }),
         );
-        let graph = Graph::new("Agent relationships", select);
+        let graph = Graph::new("Agent relationships", select, |layer| match layer {
+            1 => Some("Members".into()),
+            2 => Some("Subagents".into()),
+            _ => None,
+        });
         *marked.borrow_mut() = Some(graph.clone());
         let stack = gtk::Stack::new();
         stack.add_titled(list.widget(), Some("list"), "List");

@@ -32,7 +32,13 @@ impl TasksView {
                 }
             }),
         );
-        let graph = Graph::new("Task dependencies", select);
+        let graph = Graph::new("Task dependencies", select, |layer| {
+            Some(if layer == 0 {
+                "No dependencies".into()
+            } else {
+                format!("Layer {layer}")
+            })
+        });
         *marked.borrow_mut() = Some(graph.clone());
         let stack = gtk::Stack::new();
         stack.add_titled(list.widget(), Some("list"), "List");
@@ -164,14 +170,17 @@ fn topology(scope: &ClientScope, data: &TasksData) -> (Vec<Node>, Vec<Edge>) {
             if let Some(progress) = task.progress {
                 lines.push(format!("{progress}%"));
             }
-            let missing: Vec<&str> = item
+            let missing: Vec<String> = item
                 .dependencies
                 .iter()
                 .filter(|d| d.status.is_none())
-                .map(|d| d.id.as_str())
+                .map(|d| format!("‘{}’", d.id))
                 .collect();
             if !missing.is_empty() {
-                lines.push(format!("Missing dependency {}", missing.join(", ")));
+                lines.push(format!(
+                    "Depends on {} (not in this workspace)",
+                    missing.join(", ")
+                ));
             }
             if item.in_cycle {
                 lines.push("Dependency cycle".into());

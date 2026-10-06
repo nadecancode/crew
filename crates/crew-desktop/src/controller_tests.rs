@@ -549,6 +549,10 @@ fn graph_topology(c: &Controller, shell: &Shell, core: &ClientCore) {
         member_columns > 1,
         "thirteen members wrap into several columns"
     );
+    let geometry = graph.geometry();
+    assert!(geometry.banded && geometry.bands[1].columns.len() == member_columns);
+    assert_eq!(graph.band_titles(), ["Members"], "the hub has no band");
+    views::graph::layout::assert_clean(&geometry);
     let top = origins[1..].iter().map(|o| o.1).fold(f64::MAX, f64::min);
     let node_height = f64::from(nodes[0].height());
     let bottom = origins[1..].iter().map(|o| o.1).fold(f64::MIN, f64::max) + node_height;
@@ -648,8 +652,9 @@ fn graph_topology(c: &Controller, shell: &Shell, core: &ClientCore) {
         (origins[0].1 - (origins[1].1 + origins[2].1) / 2.0).abs() < 1.0,
         "layer 0 is centred against layer 1"
     );
-    assert!(text(&nodes[2]).contains("Missing dependency absent"));
+    assert!(text(&nodes[2]).contains("Depends on ‘absent’ (not in this workspace)"));
     assert!(chips(&nodes[0]).len() == 1 && in_view(graph));
+    assert!(!graph.geometry().banded && graph.band_titles().is_empty());
     capture("fixture-task-graph");
     nodes[0].grab_focus();
     assert!(graph.navigate(gtk::gdk::Key::Right));
@@ -662,6 +667,7 @@ fn graph_topology(c: &Controller, shell: &Shell, core: &ClientCore) {
     graph.set_selected(Some(&key(Entity::Task(first))));
     assert!(nodes[0].has_css_class("selected"));
     assert!(nodes[0].is_focusable() && !nodes[1].is_focusable());
+    wrapped_tasks(c, &tasks);
     for graph in [c.team.graph(), c.tasks.graph()] {
         graph
             .root
@@ -670,6 +676,52 @@ fn graph_topology(c: &Controller, shell: &Shell, core: &ClientCore) {
             .unwrap()
             .set_visible_child_name("list");
     }
+}
+/// Six roots wrap into one titled band; depth stays one band per layer and no
+/// edge runs between sibling rows.
+fn wrapped_tasks(c: &Controller, small: &TasksData) {
+    let template = small.tasks[0].clone();
+    let layers = [0, 0, 0, 0, 0, 0, 1, 2];
+    let dependencies: [&[usize]; 8] = [&[], &[], &[], &[], &[], &[], &[1, 4, 5], &[6, 2]];
+    let tasks = TasksData {
+        tasks: (0..8)
+            .map(|i| {
+                let mut item = template.clone();
+                item.task.id = format!("t{i}");
+                item.task.title = format!("Wrapped task {i}");
+                item.layer = layers[i];
+                item.dependencies = dependencies[i]
+                    .iter()
+                    .map(|&d| DependencyState {
+                        id: format!("t{d}"),
+                        status: Some(tasks_status(d)),
+                    })
+                    .collect();
+                item
+            })
+            .collect(),
+        layers: Vec::new(),
+    };
+    c.tasks.update(Some(&scope()), &tasks);
+    let graph = c.tasks.graph();
+    button(&graph.root, "Fit graph").emit_clicked();
+    frames();
+    let geometry = graph.geometry();
+    assert!(geometry.banded, "six roots wrap at this window size");
+    assert!(geometry.bands[0].columns.len() > 1);
+    assert_eq!(
+        graph.band_titles(),
+        ["No dependencies", "Layer 1", "Layer 2"]
+    );
+    for pair in geometry.bands.windows(2) {
+        assert!(pair[1].left - pair[0].right >= views::graph::layout::BAND_GAP - 0.5);
+    }
+    views::graph::layout::assert_clean(&geometry);
+    assert_eq!(graph.edges().len(), 5);
+    assert!(in_view(graph));
+    capture("fixture-task-graph-bands");
+    c.tasks.update(Some(&scope()), small);
+    frames();
 }
 fn tasks_status(i: usize) -> crew_protocol::TaskStatus {
     if i == 1 {

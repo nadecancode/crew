@@ -1,27 +1,23 @@
 //! Native graph geometry. Domain order, task layers and relationships arrive
 //! from the shared projection; GTK owns only coordinates, zoom and focus.
 //!
-//! Nodes sit in layered columns, centred per column, at one measured size.
-//! Zoom is a uniform transform of the whole drawing, so text scales without
-//! rewrapping. Fit puts the whole graph in view; it runs once when a graph
-//! first appears and otherwise only on request, never after a push.
+//! Nodes sit in layered columns at one measured size; `layout` places them
+//! and routes the edges. Zoom is a uniform transform of the whole drawing, so
+//! text scales without rewrapping. Fit puts the whole graph in view; it runs
+//! once when a graph first appears and otherwise only on request, never after
+//! a push.
+
+pub mod layout;
 
 use super::common::{self, Select};
 use crew_client::api::{EntityKey, Tone};
 use gtk::{glib, graphene, gsk, prelude::*};
+use layout::{Layout, NODE_WIDTH};
 use std::{
     cell::{Cell, RefCell},
     rc::{Rc, Weak},
 };
 
-const NODE_WIDTH: f64 = 220.0;
-const PAD: f64 = 24.0;
-const COLUMN_GAP: f64 = 72.0;
-/// Between the wrapped columns of one layer.
-const SUB_GAP: f64 = 32.0;
-const ROW_GAP: f64 = 24.0;
-/// Preferred width:height of the whole drawing; wide layers wrap towards it.
-const ASPECT: f64 = 1.8;
 const MIN_ZOOM: f64 = 0.25;
 const MAX_ZOOM: f64 = 2.0;
 const ZOOM_STEP: f64 = 1.2;
@@ -57,113 +53,6 @@ pub struct Edge {
     pub kind: EdgeKind,
 }
 
-/// Base (unzoomed) geometry of the current nodes.
-#[derive(Default)]
-struct Geometry {
-    /// Dense layer index per node.
-    layers: Vec<usize>,
-    /// Visual column per node; a wide layer wraps into several columns.
-    columns: Vec<usize>,
-    /// Left edge per visual column.
-    column_x: Vec<f64>,
-    /// Nodes per visual column, top to bottom.
-    column_nodes: Vec<Vec<usize>>,
-    origins: Vec<(f64, f64)>,
-    node_height: f64,
-    width: f64,
-    height: f64,
-}
-
-enum Route {
-    Curve((f64, f64), (f64, f64)),
-    Lines(Vec<(f64, f64)>),
-}
-
-impl Geometry {
-    fn gap_after(&self, column: usize) -> f64 {
-        self.column_x
-            .get(column + 1)
-            .map_or(PAD, |next| next - self.column_x[column] - NODE_WIDTH)
-    }
-
-    fn gap_before(&self, column: usize) -> f64 {
-        column.checked_sub(1).map_or(PAD, |previous| {
-            self.column_x[column] - self.column_x[previous] - NODE_WIDTH
-        })
-    }
-
-    /// The horizontal channel through `column` nearest to `y`: above,
-    /// between or below its nodes.
-    fn row_channel(&self, column: usize, y: f64) -> f64 {
-        let nodes = &self.column_nodes[column];
-        let mut channels = Vec::with_capacity(nodes.len() + 1);
-        if let Some(&first) = nodes.first() {
-            channels.push(self.origins[first].1 - ROW_GAP / 2.0);
-        }
-        for &node in nodes {
-            channels.push(self.origins[node].1 + self.node_height + ROW_GAP / 2.0);
-        }
-        channels
-            .into_iter()
-            .min_by(|a, b| (a - y).abs().total_cmp(&(b - y).abs()))
-            .unwrap_or(y)
-    }
-
-    /// Adjacent columns join with a curve. Longer and backward edges run
-    /// through the column gaps and between rows, never across a node.
-    fn route(&self, from: usize, to: usize) -> Route {
-        let (a, b) = (self.columns[from], self.columns[to]);
-        let half = self.node_height / 2.0;
-        let start = (
-            self.origins[from].0 + NODE_WIDTH,
-            self.origins[from].1 + half,
-        );
-        let end = (self.origins[to].0, self.origins[to].1 + half);
-        if b == a + 1 {
-            return Route::Curve(start, end);
-        }
-        let mut x = self.column_x[a] + NODE_WIDTH + self.gap_after(a) / 2.0;
-        let mut points = vec![start, (x, start.1)];
-        let crossed: Vec<usize> = if b > a {
-            (a + 1..b).collect()
-        } else {
-            (b..=a).rev().collect()
-        };
-        for column in crossed {
-            let y = self.row_channel(column, end.1);
-            points.push((x, y));
-            x = if b > a {
-                self.column_x[column] + NODE_WIDTH + self.gap_after(column) / 2.0
-            } else {
-                self.column_x[column] - self.gap_before(column) / 2.0
-            };
-            points.push((x, y));
-        }
-        points.push((x, end.1));
-        points.push(end);
-        Route::Lines(points)
-    }
-}
-
-/// Rows per visual column: the wrap whose drawing is closest to ASPECT.
-fn rows_per_column(layer_sizes: &[usize], node_height: f64) -> usize {
-    let largest = layer_sizes.iter().copied().max().unwrap_or(1).max(1);
-    let size = |rows: usize| {
-        let columns: usize = layer_sizes.iter().map(|n| n.div_ceil(rows)).sum();
-        let width = 2.0 * PAD
-            + columns as f64 * NODE_WIDTH
-            + layer_sizes.len().saturating_sub(1) as f64 * COLUMN_GAP
-            + columns.saturating_sub(layer_sizes.len()) as f64 * SUB_GAP;
-        let shown = rows.min(largest);
-        let height =
-            2.0 * PAD + shown as f64 * node_height + shown.saturating_sub(1) as f64 * ROW_GAP;
-        (width / height / ASPECT).ln().abs()
-    };
-    (1..=largest)
-        .min_by(|&a, &b| size(a).total_cmp(&size(b)))
-        .unwrap_or(1)
-}
-
 struct Inner {
     scroll: gtk::ScrolledWindow,
     fixed: gtk::Fixed,
@@ -171,7 +60,11 @@ struct Inner {
     widgets: RefCell<Vec<gtk::Widget>>,
     keys: RefCell<Vec<Option<EntityKey>>>,
     edges: RefCell<Vec<Edge>>,
-    geometry: RefCell<Geometry>,
+    layers: RefCell<Vec<u32>>,
+    geometry: RefCell<Layout>,
+    /// Titles for layer bands, shown only while layers wrap.
+    title: Box<dyn Fn(u32) -> Option<String>>,
+    titles: RefCell<Vec<gtk::Label>>,
     selected: RefCell<Option<EntityKey>>,
     zoom: Cell<f64>,
     fitted: Cell<bool>,
@@ -194,7 +87,11 @@ pub struct Graph {
 }
 
 impl Graph {
-    pub fn new(label: &str, select: Select) -> Self {
+    pub fn new(
+        label: &str,
+        select: Select,
+        title: impl Fn(u32) -> Option<String> + 'static,
+    ) -> Self {
         let root = gtk::Box::new(gtk::Orientation::Vertical, 8);
         let controls = gtk::Box::new(gtk::Orientation::Horizontal, 8);
         let minus = gtk::Button::with_label("Zoom out");
@@ -230,7 +127,10 @@ impl Graph {
             widgets: RefCell::new(Vec::new()),
             keys: RefCell::new(Vec::new()),
             edges: RefCell::new(Vec::new()),
-            geometry: RefCell::new(Geometry::default()),
+            layers: RefCell::new(Vec::new()),
+            geometry: RefCell::new(Layout::default()),
+            title: Box::new(title),
+            titles: RefCell::new(Vec::new()),
             selected: RefCell::new(None),
             zoom: Cell::new(1.0),
             fitted: Cell::new(false),
@@ -352,9 +252,8 @@ impl Graph {
             .filter(|e| e.from < nodes.len() && e.to < nodes.len() && e.from != e.to)
             .collect();
         *inner.keys.borrow_mut() = nodes.iter().map(|n| n.key.clone()).collect();
-        let layers = layers(&nodes);
+        *inner.layers.borrow_mut() = nodes.iter().map(|n| n.layer).collect();
         *inner.widgets.borrow_mut() = widgets;
-        inner.geometry.borrow_mut().layers = layers;
         inner.mark_selection();
         inner.layout();
         inner.scroll.hadjustment().set_value(x);
@@ -402,6 +301,21 @@ impl Graph {
         self.inner.geometry.borrow().origins.clone()
     }
 
+    /// The current base geometry: bands, columns and edge routes.
+    pub fn geometry(&self) -> Layout {
+        self.inner.geometry.borrow().clone()
+    }
+
+    /// Band titles currently shown, left to right.
+    pub fn band_titles(&self) -> Vec<String> {
+        self.inner
+            .titles
+            .borrow()
+            .iter()
+            .map(|label| label.label().to_string())
+            .collect()
+    }
+
     pub fn edges(&self) -> Vec<Edge> {
         self.inner.edges.borrow().clone()
     }
@@ -411,18 +325,6 @@ impl Graph {
     pub fn navigate(&self, key: gtk::gdk::Key) -> bool {
         self.inner.key(key) == glib::Propagation::Stop
     }
-}
-
-/// Map each node's layer to a dense index, so an unused layer never leaves an
-/// empty column.
-fn layers(nodes: &[Node]) -> Vec<usize> {
-    let mut layers: Vec<u32> = nodes.iter().map(|n| n.layer).collect();
-    layers.sort_unstable();
-    layers.dedup();
-    nodes
-        .iter()
-        .map(|n| layers.binary_search(&n.layer).unwrap_or(0))
-        .collect()
 }
 
 fn node_widget(node: &Node, inner: &Weak<Inner>) -> gtk::Widget {
@@ -588,8 +490,7 @@ impl Inner {
     }
 
     /// Measure one node height at the base width from native text, then place
-    /// layers left to right, each centred vertically and wrapped into columns
-    /// when that brings the drawing closer to ASPECT.
+    /// the nodes and route the edges for the current viewport.
     fn layout(&self) {
         let widgets = self.widgets.borrow();
         let width = NODE_WIDTH as i32;
@@ -604,68 +505,60 @@ impl Inner {
             widget.set_size_request(width, height);
         }
         drop(widgets);
-        let mut geometry = self.geometry.borrow_mut();
-        let node_height = f64::from(height);
-        let count = geometry.layers.iter().copied().max().map_or(0, |l| l + 1);
-        let mut members = vec![Vec::new(); count];
-        for (node, &layer) in geometry.layers.iter().enumerate() {
-            members[layer].push(node);
+        let viewport = (self.scroll.width() > 0 && self.scroll.height() > 0).then(|| {
+            (
+                f64::from(self.scroll.width()),
+                f64::from(self.scroll.height()),
+            )
+        });
+        let edges: Vec<(usize, usize)> =
+            self.edges.borrow().iter().map(|e| (e.from, e.to)).collect();
+        let geometry = layout::layout(&self.layers.borrow(), &edges, f64::from(height), viewport);
+        for label in self.titles.borrow_mut().drain(..) {
+            self.fixed.remove(&label);
         }
-        let sizes: Vec<usize> = members.iter().map(Vec::len).collect();
-        let rows = rows_per_column(&sizes, node_height);
-        let block = |n: usize| {
-            let n = n.min(rows);
-            n as f64 * node_height + n.saturating_sub(1) as f64 * ROW_GAP
-        };
-        let tallest = sizes.iter().map(|&n| block(n)).fold(0.0, f64::max);
-        let mut origins = vec![(0.0, 0.0); geometry.layers.len()];
-        let mut columns = vec![0; geometry.layers.len()];
-        let mut column_x = Vec::new();
-        let mut column_nodes = Vec::new();
-        let mut x = PAD;
-        for (layer, nodes) in members.iter().enumerate() {
-            let top = PAD + (tallest - block(nodes.len())) / 2.0;
-            for (wrap, chunk) in nodes.chunks(rows).enumerate() {
-                if wrap > 0 {
-                    x += NODE_WIDTH + SUB_GAP;
-                } else if layer > 0 {
-                    x += NODE_WIDTH + COLUMN_GAP;
+        if geometry.banded {
+            for band in &geometry.bands {
+                if let Some(text) = (self.title)(band.layer) {
+                    let label = gtk::Label::builder()
+                        .label(&text)
+                        .xalign(0.0)
+                        .ellipsize(gtk::pango::EllipsizeMode::End)
+                        .width_request((band.right - band.left - 2.0 * layout::BAND_PAD) as i32)
+                        .build();
+                    label.add_css_class("crew-graph-band");
+                    label.add_css_class("crew-muted");
+                    self.fixed.put(&label, 0.0, 0.0);
+                    self.titles.borrow_mut().push(label);
                 }
-                for (row, &node) in chunk.iter().enumerate() {
-                    origins[node] = (x, top + row as f64 * (node_height + ROW_GAP));
-                    columns[node] = column_x.len();
-                }
-                column_x.push(x);
-                column_nodes.push(chunk.to_vec());
             }
         }
-        geometry.width = if column_x.is_empty() {
-            0.0
-        } else {
-            x + NODE_WIDTH + PAD
-        };
-        geometry.height = if column_x.is_empty() {
-            0.0
-        } else {
-            2.0 * PAD + tallest
-        };
-        geometry.origins = origins;
-        geometry.columns = columns;
-        geometry.column_x = column_x;
-        geometry.column_nodes = column_nodes;
-        geometry.node_height = node_height;
-        drop(geometry);
+        *self.geometry.borrow_mut() = geometry;
         self.apply_zoom();
     }
 
     fn apply_zoom(&self) {
         let z = self.zoom.get();
         let geometry = self.geometry.borrow();
-        for (widget, &(x, y)) in self.widgets.borrow().iter().zip(geometry.origins.iter()) {
+        let place = |widget: &gtk::Widget, x: f64, y: f64| {
             let transform = gsk::Transform::new()
                 .translate(&graphene::Point::new((x * z) as f32, (y * z) as f32))
                 .scale(z as f32, z as f32);
             self.fixed.set_child_transform(widget, Some(&transform));
+        };
+        for (widget, &(x, y)) in self.widgets.borrow().iter().zip(geometry.origins.iter()) {
+            place(widget, x, y);
+        }
+        let titled = geometry
+            .bands
+            .iter()
+            .filter(|band| (self.title)(band.layer).is_some());
+        for (label, band) in self.titles.borrow().iter().zip(titled) {
+            place(
+                label.upcast_ref(),
+                band.left + layout::BAND_PAD,
+                band.top + layout::BAND_PAD / 2.0,
+            );
         }
         let width = (geometry.width * z).ceil().min(f64::from(i32::MAX)) as i32;
         let height = (geometry.height * z).ceil().min(f64::from(i32::MAX)) as i32;
@@ -699,8 +592,10 @@ impl Inner {
         }
     }
 
-    /// Scale the whole graph into the visible region, never above 1:1.
+    /// Arrange for the visible region, then scale the whole graph into it,
+    /// never above 1:1.
     fn fit(&self) {
+        self.layout();
         let (width, height) = {
             let geometry = self.geometry.borrow();
             (geometry.width, geometry.height)
@@ -729,12 +624,30 @@ impl Inner {
             f64::from(color.blue()),
         );
         cr.scale(z, z);
-        for edge in self.edges.borrow().iter() {
-            if edge.from >= geometry.origins.len() || edge.to >= geometry.origins.len() {
-                continue;
+        if geometry.banded {
+            for band in &geometry.bands {
+                if (self.title)(band.layer).is_none() {
+                    continue;
+                }
+                rounded_rect(
+                    cr,
+                    band.left,
+                    band.top,
+                    band.right - band.left,
+                    band.bottom - band.top,
+                    10.0,
+                );
+                cr.set_source_rgba(r, g, b, 0.035);
+                let _ = cr.fill_preserve();
+                cr.set_source_rgba(r, g, b, 0.14);
+                cr.set_line_width(1.0);
+                cr.set_dash(&[], 0.0);
+                let _ = cr.stroke();
             }
+        }
+        for (edge, route) in self.edges.borrow().iter().zip(geometry.routes.iter()) {
             let (alpha, width, dashed) = match edge.kind {
-                EdgeKind::Coordination => (0.35, 1.2, false),
+                EdgeKind::Coordination => (0.45, 1.3, false),
                 EdgeKind::Subagent => (0.6, 1.4, true),
                 EdgeKind::Dependency => (0.7, 1.6, false),
             };
@@ -745,28 +658,27 @@ impl Inner {
             } else {
                 cr.set_dash(&[], 0.0);
             }
-            let end = match geometry.route(edge.from, edge.to) {
-                Route::Curve(start, end) => {
-                    let reach = (end.0 - start.0) / 2.0;
-                    cr.move_to(start.0, start.1);
-                    cr.curve_to(start.0 + reach, start.1, end.0 - reach, end.1, end.0, end.1);
-                    end
-                }
-                Route::Lines(points) => {
-                    rounded(cr, &points);
-                    *points.last().expect("routed edge")
-                }
-            };
+            rounded(cr, route);
             let _ = cr.stroke();
-            if edge.kind == EdgeKind::Dependency {
+            if let (EdgeKind::Dependency, Some(&(x, y))) = (edge.kind, route.last()) {
                 cr.set_dash(&[], 0.0);
-                cr.move_to(end.0 - 8.0, end.1 - 5.0);
-                cr.line_to(end.0, end.1);
-                cr.line_to(end.0 - 8.0, end.1 + 5.0);
+                cr.move_to(x - 8.0, y - 5.0);
+                cr.line_to(x, y);
+                cr.line_to(x - 8.0, y + 5.0);
                 let _ = cr.stroke();
             }
         }
     }
+}
+
+fn rounded_rect(cr: &gtk::cairo::Context, x: f64, y: f64, w: f64, h: f64, r: f64) {
+    use std::f64::consts::{FRAC_PI_2, PI};
+    cr.new_sub_path();
+    cr.arc(x + w - r, y + r, r, -FRAC_PI_2, 0.0);
+    cr.arc(x + w - r, y + h - r, r, 0.0, FRAC_PI_2);
+    cr.arc(x + r, y + h - r, r, FRAC_PI_2, PI);
+    cr.arc(x + r, y + r, r, PI, 3.0 * FRAC_PI_2);
+    cr.close_path();
 }
 
 /// A polyline with softened corners.
