@@ -414,7 +414,8 @@ def c16_revoke(rec, app, gateway, device):
     rec.check(ended, "revoked device leaves Live")
     open_connections(app)
     text = wait_for(lambda: (lambda t: t if ("no longer available" in t or "unavailable" in t
-                                             or "revoked" in t.lower()) else None)(page_text(app)), timeout=20)
+                                             or "access ended" in t or "revoked" in t.lower())
+                             else None)(page_text(app)), timeout=20)
     rec.check(text, "app explains the access ended", (text or page_text(app))[:300])
     devices = native("devices")
     rec.check(devices is not None, "host lists devices after revocation", devices)
