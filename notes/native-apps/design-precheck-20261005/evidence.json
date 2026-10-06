@@ -1,0 +1,28 @@
+{
+  "task": "native-design-precheck",
+  "linux_local": {"source": "aafbf0dc", "binary_sha256": "796cc4d62753980f4d3a9cdf77060fbdb1b354b812c8f9e0bfcd1d23cd8dd02c", "daemon_crew_sha256": "1d30e44799ffe14516d3446790d82c0e46dbb53c236897247bb3b8fde1796df2", "features": "native-ui,local", "run": "run02"},
+  "linux_gateway": {"source": "5c79212f", "binary_sha256": "b8807525bf9c093b629582e4ffb2f16b5763cd7c27132431f0cd3239a1c57843", "features": "native-ui,local,gateway", "run": "run04", "profile": "synthetic precheck.invalid, throwaway self-signed certificate, key deleted"},
+  "display": "Xvfb 1440x960x24, 96 DPI, GDK_SCALE=1, GSK_RENDERER=cairo, Openbox",
+  "crop": "window region 1120x720+160+120 (linux-15: 770x600+160+120)",
+  "images": {
+    "gateway-01-s02-unbounded-profile.png": "5bd1fdd7562be542c21dcb0aab1b90b907e7b4efae6909ec626bf7c59b13addd",
+    "gateway-02-s02-stale-error.png": "bb665271c83d216bda234473a55e068568dc56b2bd24090eb61f31255b57617b",
+    "gateway-03-s02b-table.png": "a1f8ed8e2eb8140ce041c1e59fe3a330f7d62516f0b08462aa56603e8669ade7",
+    "gateway-04-s02b-trust.png": "8d1554891082346e6fb712a67e1b3580c30ef4aed059be8129f84297401cb723",
+    "linux-01-disconnected-status.png": "184af330aef7a27e0180522a1b9adbe0d2979c09f673951171aeb242b77099d1",
+    "linux-02-connections-local.png": "1a3f841d751647ded6916bf1c4e8e0f4fc0ffa04ee45875f44dbc7f08d0ef5dd",
+    "linux-03-team-graph-default.png": "c1ebea87d92ff4af09070531dfda904a468e0d1e3f0a7b82f77e3a2eb42ea3e1",
+    "linux-04-team-graph-fit.png": "759e7809dac8999b744f570241ba3c8c68372df4a57d1649a3b2078fd1f83aa3",
+    "linux-05-row-click-caret.png": "65e6f12bf212f1b8cf5a2ddc21543d2f962cf41edf2f640562eba21fe209bb0b",
+    "linux-06-row-edge-inspector.png": "6dcd3c6eca18d5ee6b924d9b2573206f81b8330319fb8007d9557679072a7761",
+    "linux-07-agent-actions.png": "fd0d536f60f0178dbac2f03d57335230f52ce7f53b326a4d64b06554f0ebd67c",
+    "linux-08-task-dag-staircase.png": "47c40a2f9e2235a0f8573c84ff58d63f964dcc76d7f5ef5563119615bdf9fb45",
+    "linux-09-usage.png": "7a36e35ece0d8c8a36f5c09df4b107f679ecda7a1e8108975efc25d7366a3cf6",
+    "linux-10-question-red-reason.png": "d2ce84f94f2f6a5f190e4d93a2a3a19dbc39bd66adc762f01a72aba1dd4aad7f",
+    "linux-11-stop-confirm.png": "528f080e07816f38954e452356764833e1a4240d2c3dfc9e9d08d6b624d891aa",
+    "linux-12-summary-select-all.png": "771690252b82b5772771e32c339b0e6cbc32bfd502bb2e90cb9d0993360e3fe9",
+    "linux-13-terminal-attached.png": "62be69643427e263c54044a3311503955dbadaaaa69ff4e7e74143c616a4f275",
+    "linux-14-dark-team.png": "fcd0723ea408e04d37eab1b9a3264f90dcab3bd89ef1c7884a36f1f9cb53a616",
+    "linux-15-narrow-request-560.png": "5e9b443a755ae9ec420286c617f1e2ceaeab0ab612efa249dcb699c57c713700"
+  }
+}

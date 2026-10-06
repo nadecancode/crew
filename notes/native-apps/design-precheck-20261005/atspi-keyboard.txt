@@ -1,0 +1,58 @@
+Design precheck AT-SPI/keyboard observations, run02 (aafbf0dc local build, binary
+sha256 796cc4d6...), private Xvfb :8081, owned accessibility bus, openbox.
+Lines are the reader's output: depth, role, name, [description], states.
+Real key input came from xdotool on the owned display only.
+
+## Stop team confirmation (pointer open)
+open:
+  1 dialog 'Stop team'  showing,visible,sensitive
+  5 button 'Cancel'  showing,visible,focused,focusable,sensitive
+after Escape (1.5 s and again after 3.5 s):
+  1 frame 'Team — Crew'  showing,visible,sensitive
+  (no focused descendant)
+
+## Stop team confirmation (keyboard open: Tab to Stop team, Return, Escape)
+open:
+  1 dialog 'Stop team'  showing,visible,sensitive
+  5 button 'Cancel'  showing,visible,focused,focusable,sensitive
+after Escape:
+  1 frame 'Team — Crew'  showing,visible,sensitive
+  (no focused descendant)
+
+## New message (pointer open, Escape)
+open:
+  1 dialog 'New message'  showing,visible,sensitive
+  6 text 'Message or answer text'  showing,visible,focused,focusable,sensitive,editable
+after Escape:
+  11 button 'New message'  showing,visible,focused,focusable,sensitive
+
+## Tab walk from the Team destination (after Stop cancel; one Tab per line)
+1: 8 list item 'Team'  showing,visible,focused,focusable,selected,sensitive
+2: 8 list item 'Tasks'  showing,visible,focused,focusable,selected,sensitive
+3: 8 list item 'Messages'  showing,visible,focused,focusable,selected,sensitive
+4: 8 list item 'Events'  showing,visible,focused,focusable,selected,sensitive
+5: 8 list item 'Usage'  showing,visible,focused,focusable,selected,sensitive
+6: 7 label 'Authenticated · Live'  showing,visible,focused,focusable,sensitive
+7: 7 label 'Action acknowledged by the daemon.'  showing,visible,focused,focusable,sensitive
+8: 10 table cell 'Refresh'  showing,visible,focused,focusable,sensitive
+9: 11 button 'Refresh'  showing,visible,focused,focusable,sensitive
+10: 10 table cell 'Continue after limit no agent is paused at a usage limit' 'no agent is paused at a usage limit' ...
+11: 12 label 'no agent is paused at a usage limit'  showing,visible,focused,focusable,sensitive
+12: 10 table cell 'Restart after limit no agent is paused at a usage limit' ...
+Window title after the walk: 'Usage — Crew' (Tab changed the destination five times).
+
+## Tab walk on the Team page (Ctrl+1 first)
+1: 11 button 'Refresh'
+2: 10 table cell 'New message'
+3: 11 button 'New message'
+4: 10 table cell 'Questions (0)'
+5: 11 button 'Questions (0)'
+6: 10 table cell 'Stop team'
+7: 12 button 'Stop team'
+
+## Linux gateway S02 (5c79212f gateway build, run04)
+Verify with empty Connection name:  9 text 'Connection name' focused (summary + field error shown)
+Verify with 60 fingerprint chars:   9 text 'Host fingerprint' focused; scroller shows the top summary,
+                                    the focused field is below the visible area
+Verify this host page opens:        9 label 'Verify this host' focused (heading text highlighted)
+Back from Verify this host:         9 text 'Connection name' focused
