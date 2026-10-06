@@ -99,7 +99,7 @@ for application, sdk, floor_key, floor in (
         require(info["CFBundleDisplayName"] == "Crew", "Incorrect display name")
         require(info["CFBundlePackageType"] == "APPL", "Incorrect application bundle type")
     for suffix, product_type, source_file in (
-        ("Tests", "com.apple.product-type.bundle.unit-test", {"CrewShellTests.swift", "AppleDeviceKeyVaultTests.swift", "CrewClientWorkerTests.swift", "CrewSendDraftTests.swift", "CrewNoticeRoutingTests.swift", "CrewExternalLinksTests.swift"}),
+        ("Tests", "com.apple.product-type.bundle.unit-test", {"CrewShellTests.swift", "AppleDeviceKeyVaultTests.swift", "CrewClientWorkerTests.swift", "CrewSendDraftTests.swift", "CrewNoticeRoutingTests.swift", "CrewExternalLinksTests.swift", "CrewGatewayTests.swift"}),
         ("UITests", "com.apple.product-type.bundle.ui-testing", {"CrewShellUITests.swift"}),
     ):
         test = targets[application + suffix]

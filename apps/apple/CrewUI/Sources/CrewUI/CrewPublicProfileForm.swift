@@ -1,95 +1,176 @@
 import SwiftUI
 
-/// Public input fields only. The host submits these values to the real Rust
-/// profile/trust port; parsing, canonicalization and TLS checks are not done in
-/// this presentation. Entering a profile never connects or grants access.
+/// S02 Host profile. Public input only: the host submits it to the real Rust
+/// profile parser and fingerprint check. Entering a profile never connects
+/// or grants access, and the fingerprint is never filled from the profile.
 public struct CrewPublicProfileForm: View {
+    public enum Field: Hashable { case name, profile, fingerprint }
+
     @Binding private var name: String
-    @Binding private var endpointID: String
-    @Binding private var endpointURL: String
-    @Binding private var trustPEM: String
+    @Binding private var profileText: String
     @Binding private var fingerprint: String
+    private let fingerprintEcho: [String]
+    private let fingerprintCount: Int
     private let pending: Bool
-    private let error: String?
+    private let profileIssue: String?
+    private let fingerprintIssue: String?
+    private let focusRequest: (field: Field, id: UUID)?
     private let review: () -> Void
     private let cancel: () -> Void
     @FocusState private var field: Field?
+    @ScaledMetric(relativeTo: .body) private var profileHeight: CGFloat = 160
 
-    public init(name: Binding<String>, endpointID: Binding<String>, endpointURL: Binding<String>, trustPEM: Binding<String>, fingerprint: Binding<String>, pending: Bool, error: String?, review: @escaping () -> Void, cancel: @escaping () -> Void) {
-        self._name = name; self._endpointID = endpointID; self._endpointURL = endpointURL
-        self._trustPEM = trustPEM; self._fingerprint = fingerprint
-        self.pending = pending; self.error = error; self.review = review; self.cancel = cancel
+    /// `fingerprintEcho` is the caller's grouped echo of the entered value
+    /// with separators removed; `fingerprintCount` is its character count.
+    public init(name: Binding<String>, profileText: Binding<String>, fingerprint: Binding<String>, fingerprintEcho: [String], fingerprintCount: Int, pending: Bool, profileIssue: String?, fingerprintIssue: String?, focusRequest: (field: Field, id: UUID)?, review: @escaping () -> Void, cancel: @escaping () -> Void) {
+        self._name = name; self._profileText = profileText; self._fingerprint = fingerprint
+        self.fingerprintEcho = fingerprintEcho; self.fingerprintCount = fingerprintCount
+        self.pending = pending; self.profileIssue = profileIssue; self.fingerprintIssue = fingerprintIssue
+        self.focusRequest = focusRequest; self.review = review; self.cancel = cancel
     }
 
     public var body: some View {
         Form {
+            Section {
+                TextField("Connection name", text: $name)
+                    .focused($field, equals: .name)
+                Text("A local description for this list. It does not verify the host.").font(.callout)
+            }
             Section("Public host profile") {
-                TextField("Connection name", text: $name).focused($field, equals: .name)
-                Text("This is a local description, not a verified host identity.").font(.callout)
-                TextField("Endpoint UUID", text: $endpointID).font(.body.monospaced()).autocorrectionDisabled().focused($field, equals: .endpointID)
-                TextField("wss:// endpoint ending in /native/ws", text: $endpointURL, axis: .vertical).font(.body.monospaced()).autocorrectionDisabled().focused($field, equals: .endpointURL)
-                TextField("Expected SHA-256 fingerprint", text: $fingerprint, axis: .vertical).font(.body.monospaced()).autocorrectionDisabled().focused($field, equals: .fingerprint)
-                Text("Public certificate / trust material (PEM)").font(.headline)
-                TextEditor(text: $trustPEM).font(.body.monospaced()).frame(minHeight: 160).focused($field, equals: .trustPEM)
-                    .accessibilityLabel("Public certificate or trust material in PEM format")
-            }
-            Section("Before connecting") {
-                Text("Compare the complete fingerprint with crew native status at the trusted host console. A parsed or imported profile has not yet been trusted.")
-                Text("Never paste or scan crew web output into this app. This form accepts public host information, not a browser code, token or private key.")
-                Text("If the host loses its private runtime state, such as after logout or reboot, this profile cannot reconnect automatically. The host operator must provision the endpoint again and approve a new device key.")
-            }
-            if let error {
-                Section("Profile issue") {
-                    Text(verbatim: error).textSelection(.enabled)
+                Text("Paste the output of crew native status from the host.").font(.callout)
+                TextEditor(text: $profileText)
+                    .font(.body.monospaced())
+                    .frame(minHeight: profileHeight)
+                    .autocorrectionDisabled()
+                    #if os(iOS)
+                    .textInputAutocapitalization(.never)
+                    #endif
+                    .focused($field, equals: .profile)
+                    .accessibilityLabel("Public host profile")
+                if let profileIssue {
+                    Text(verbatim: profileIssue).foregroundStyle(CrewPalette.danger).textSelection(.enabled)
                         .accessibilityIdentifier("crew.profile-error")
                 }
             }
+            Section("Host fingerprint") {
+                TextField("Host fingerprint", text: $fingerprint, axis: .vertical)
+                    .font(.body.monospaced())
+                    .autocorrectionDisabled()
+                    #if os(iOS)
+                    .textInputAutocapitalization(.never)
+                    #endif
+                    .focused($field, equals: .fingerprint)
+                Text("From crew native status at the trusted host console. Do not copy it from the profile above.").font(.callout)
+                if !fingerprintEcho.isEmpty {
+                    Text(verbatim: fingerprintEcho.joined(separator: " "))
+                        .font(.body.monospaced())
+                        .textSelection(.enabled)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .accessibilityLabel("Entered fingerprint, \(fingerprintEcho.count) groups")
+                }
+                Text("\(fingerprintCount) of 64").font(.callout).foregroundStyle(.secondary)
+                if let fingerprintIssue {
+                    Text(verbatim: fingerprintIssue).foregroundStyle(CrewPalette.danger).textSelection(.enabled)
+                        .accessibilityIdentifier("crew.fingerprint-error")
+                }
+            }
             Section {
+                Text("Never paste or scan crew web output into this app. This form accepts public host information, not a browser code, token or private key.")
+                    .font(.callout)
                 if pending { ProgressView("Checking public host profile") }
-                Button { review() } label: { Text("Review this host").frame(minHeight: 44) }.disabled(pending)
+                Button { review() } label: { Text("Verify this host").frame(minHeight: 44) }.disabled(pending)
                 Button(action: cancel) { Text("Cancel").frame(minHeight: 44) }
             }
         }
-        .navigationTitle("Host profile")
+        .navigationTitle("Connect to Crew")
+        .onChange(of: focusRequest?.id) { _, _ in if let target = focusRequest?.field { field = target } }
     }
-
-    private enum Field: Hashable { case name, endpointID, endpointURL, trustPEM, fingerprint }
 }
 
-/// Full fingerprint supplied by the validated public-profile port. A user
-/// acknowledgement does not replace the connector's name/chain/validity/pin
-/// verification and never offers a trust-failure bypass.
+/// One aligned group of the two fingerprints on Verify this host.
+public struct CrewFingerprintGroupRow: Identifiable, Equatable {
+    public let index: Int
+    public let profile: String
+    public let entered: String
+    public let differs: Bool
+    public var id: Int { index }
+
+    public init(index: Int, profile: String, entered: String, differs: Bool) {
+        self.index = index; self.profile = profile; self.entered = entered; self.differs = differs
+    }
+}
+
+/// S02b Verify this host. The profile's fingerprint and the operator's entry
+/// are shown group by group, with each difference stated in text. A local
+/// difference withholds the trust action; with matching values the connector
+/// still performs the authoritative comparison and every TLS check.
 public struct CrewHostTrustReview: View {
     private let name: String
     private let endpoint: String
-    private let fingerprint: String
-    private let accept: () -> Void
+    private let endpointID: String
+    private let rows: [CrewFingerprintGroupRow]
+    private let pending: Bool
+    private let issue: String?
+    private let trust: () -> Void
+    private let reviewProfile: () -> Void
     private let cancel: () -> Void
-    @State private var checked = false
 
-    public init(name: String, endpoint: String, fingerprint: String, accept: @escaping () -> Void, cancel: @escaping () -> Void) {
-        self.name = name; self.endpoint = endpoint; self.fingerprint = fingerprint
-        self.accept = accept; self.cancel = cancel
+    public init(name: String, endpoint: String, endpointID: String, rows: [CrewFingerprintGroupRow], pending: Bool, issue: String?, trust: @escaping () -> Void, reviewProfile: @escaping () -> Void, cancel: @escaping () -> Void) {
+        self.name = name; self.endpoint = endpoint; self.endpointID = endpointID; self.rows = rows
+        self.pending = pending; self.issue = issue
+        self.trust = trust; self.reviewProfile = reviewProfile; self.cancel = cancel
     }
+
+    private var matches: Bool { !rows.isEmpty && !rows.contains(where: \.differs) }
 
     public var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 24) {
-                Text("Verify this host").font(.title2.bold())
-                CrewLabeledValue("Connection name", value: name)
+                Text("Verify this host").font(.title2.bold()).accessibilityAddTraits(.isHeader)
+                CrewLabeledValue("Profile name", value: name)
                 CrewLabeledValue("Endpoint", value: endpoint, monospaced: true)
-                Text("Complete expected SHA-256 fingerprint").font(.headline)
-                Text(verbatim: fingerprint).font(.body.monospaced()).textSelection(.enabled)
-                    .fixedSize(horizontal: false, vertical: true)
-                    .accessibilityLabel("Complete expected SHA-256 fingerprint")
-                Text("Compare this fingerprint with crew native status at the trusted host console. Do not rely on the network peer or this connection name to verify it.")
-                Toggle("I checked the fingerprint independently", isOn: $checked)
-                Text("TLS name, certificate chain, signature, validity and pin verification still run before any device proof. A changed or invalid certificate cannot be accepted here.")
-                Button(action: accept) { Text("Use this checked public profile").frame(minHeight: 44) }.disabled(!checked)
+                CrewLabeledValue("Endpoint UUID", value: endpointID, monospaced: true)
+                // Monospaced four-character groups align by column without a
+                // Grid, so each row can be one accessibility element.
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("Fingerprints").font(.headline).accessibilityAddTraits(.isHeader)
+                    Text("Each row: group number, the profile fingerprint, then the value you entered.").font(.callout)
+                    ForEach(rows) { row in
+                        HStack(spacing: 16) {
+                            Text(verbatim: String(format: "%2d", row.index)).font(.body.monospaced()).foregroundStyle(.secondary)
+                            Text(verbatim: row.profile).font(.body.monospaced())
+                            Text(verbatim: row.entered.isEmpty ? "----" : row.entered).font(.body.monospaced())
+                            if row.differs { Text("differs").font(.callout.bold()).foregroundStyle(CrewPalette.danger) }
+                        }
+                        .textSelection(.enabled)
+                        .accessibilityElement(children: .ignore)
+                        .accessibilityLabel(row.differs
+                            ? "Group \(row.index) differs: profile \(row.profile), entered \(row.entered.isEmpty ? "nothing" : row.entered)"
+                            : "Group \(row.index): \(row.profile)")
+                    }
+                }
+                Text("If the host loses its private runtime state, such as after logout or reboot, this profile cannot reconnect automatically. The host operator must provision the endpoint again and approve a new device key.")
+                    .font(.callout)
+                if let issue {
+                    Text(verbatim: issue).foregroundStyle(CrewPalette.danger).textSelection(.enabled)
+                }
+                if matches && issue == nil {
+                    Text("TLS name, certificate chain, signature, validity and pin verification still run before any device proof.")
+                        .font(.callout)
+                    if pending { ProgressView("Checking host trust") }
+                    Button(action: trust) { Text("Trust this host").frame(minHeight: 44) }
+                        .buttonStyle(.borderedProminent)
+                        .disabled(pending)
+                } else {
+                    if !matches {
+                        Text("Host identity could not be verified. Compare the profile with crew native status at the trusted host console.")
+                    }
+                    Button(action: reviewProfile) { Text("Review host profile").frame(minHeight: 44) }
+                }
                 Button(action: cancel) { Text("Cancel").frame(minHeight: 44) }
             }
             .padding(24).frame(maxWidth: 680, alignment: .leading)
         }
-        .navigationTitle("Host trust")
+        .navigationTitle("Connect to Crew")
     }
 }

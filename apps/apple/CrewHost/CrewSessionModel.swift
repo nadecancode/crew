@@ -41,6 +41,8 @@ final class CrewSessionModel {
     private(set) var localProfiles: [LocalProfileInfo] = []
     private(set) var discovering = false
     private(set) var connectionRequested = false
+    /// The trusted gateway profile this window's client was built for.
+    private(set) var gatewayProfileId: String?
     private(set) var notice: ClientNotice?
     private(set) var context: ConnectionContext?
     private(set) var workspaces: Workspaces?
@@ -151,13 +153,44 @@ final class CrewSessionModel {
         invalidate(.overview)
     }
 
-    func connect(profile: LocalProfileInfo) {
+    /// Replace this window's client with a scoped gateway client for a
+    /// trusted profile. The client stays disconnected until an explicit
+    /// connect or, for a new device, until enrollment is approved.
+    func installGateway(_ profile: GatewayProfile, signer: CrewDeviceSigner) async throws {
+        retirePresentation()
+        localProfiles = []
+        let token = instance
+        try await worker.installGateway(profile, signer: signer, observer: makeObserver(token), instance: token)
+        guard instance == token else { return }
+        hasClient = true
+        gatewayProfileId = profile.profileId()
+        error = nil
+        try await worker.setActive(active, instance: token)
+    }
+
+    func enroll(label: String, observer: CrewSetupObserver) async throws -> EnrollmentHandle {
+        try await worker.enroll(label: label, observer: observer, instance: instance)
+    }
+
+    /// Retire this app's device key for the installed gateway client. The
+    /// client closes; host access remains until revoked or expired there.
+    func retireDeviceAccess() async throws {
+        let token = instance
+        retirePresentation()
+        try await worker.retireDeviceAccess(instance: token)
+    }
+
+    func connect(profile: LocalProfileInfo) { connect(profileId: profile.profileId) }
+
+    /// Connect the installed client to an opaque profile: a protected local
+    /// profile, or the trusted gateway profile this client was built for.
+    func connect(profileId: String) {
         guard hasClient, !connectionRequested else { return }
         connectionRequested = true
         let token = instance
         _Concurrency.Task {
             do {
-                try await worker.connect(profileId: profile.profileId, instance: token)
+                try await worker.connect(profileId: profileId, instance: token)
                 guard instance == token else { return }
                 connectionRequested = false
                 error = nil
@@ -942,6 +975,7 @@ final class CrewSessionModel {
     private func retirePresentation() {
         instance = UUID()
         hasClient = false
+        gatewayProfileId = nil
         readTask?.cancel()
         readTask = nil
         availabilityTask?.cancel()

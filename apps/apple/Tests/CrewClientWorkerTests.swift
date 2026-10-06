@@ -354,4 +354,9 @@ private final class RecordingCrewClient: CrewClientProtocol, @unchecked Sendable
     func reconnect() throws { record("reconnect") }
     func selectWorkspace(workspaceId: String) throws { record("select") }
     func setActive(active: Bool) throws { record("active") }
+    func enroll(label: String, observer: any SetupObserver) throws -> EnrollmentHandle {
+        record("enroll")
+        throw GatewayError.Failure(code: "setup_busy", message: "Synthetic client has no gateway.")
+    }
+    func retireDeviceAccess() throws { record("retire") }
 }

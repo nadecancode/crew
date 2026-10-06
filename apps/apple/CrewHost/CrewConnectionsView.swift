@@ -4,10 +4,15 @@ import SwiftUI
 
 /// Local profiles come from CrewClient.local's protected discovery snapshot.
 /// Selecting an opaque profile calls the real facade; no registry, socket path,
-/// daemon identity or workspace is manufactured in Swift.
+/// daemon identity or workspace is manufactured in Swift. Gateway profiles are
+/// the saved public profiles; connecting re-establishes trust in Rust.
 @MainActor
 struct CrewConnectionsView: View {
     @Bindable var model: CrewSessionModel
+    @State private var gateways = CrewGatewayStore().load()
+    @State private var setup: CrewGatewaySetup?
+    @State private var gatewayIssue: String?
+    @State private var gatewayBusy = false
 
     var body: some View {
         List {
@@ -42,20 +47,22 @@ struct CrewConnectionsView: View {
             #endif
             Section("Scoped gateway") {
                 Text("A scoped Crew gateway connects iPhone, iPad, Mac and Linux to explicitly approved workspaces.")
-                Text("Ask the host operator for its public profile. Independently verify the complete TLS fingerprint before connecting.")
                 Text("Never paste or scan crew web output into an app or page.")
                     .font(.callout)
-                // Replaced by the real native-gateway-bindings setup port.
-                // This checkpoint supplies no fabricated profile or enrollment.
-                Text("Gateway setup is unavailable in this build.")
-                    .foregroundStyle(.secondary)
+                ForEach(gateways) { record in gatewayRow(record) }
+                if let gatewayIssue { Text(verbatim: gatewayIssue).textSelection(.enabled) }
+                Button("Add remote connection", systemImage: "plus") { setup = CrewGatewaySetup(model: model) }
+                    .disabled(gatewayBusy)
             }
             if let context = model.context {
-                Section("This connection") {
-                    Text(context.mode == .localOperator ? "Local operator access" : "Scoped device access")
+                Section(context.mode == .localOperator ? "This connection" : "This device's access") {
+                    Text(context.mode == .localOperator ? "Local operator · full Crew access" : "Scoped device access")
                     if context.mode == .scopedGateway {
-                        Text("Read access may expose content, secrets and paths. Control and Terminal can each direct agents with their existing host permissions. Workspace grants restrict Crew access; they do not create an OS or filesystem sandbox.")
+                        CrewLabeledValue("Read", value: context.grant.tiers.contains(.read) ? "Granted" : "Not granted")
+                        CrewLabeledValue("Control", value: context.grant.tiers.contains(.control) ? "Granted" : "Not granted")
+                        CrewLabeledValue("Terminal", value: context.grant.tiers.contains(.terminal) ? "Granted" : "Not granted")
                         if let expiry = context.grant.expiresAtMs { CrewLabeledValue("Access expires", value: CrewLabels.timestamp(expiry)) }
+                        CrewAccessDisclosure()
                     }
                     Button("Reconnect") { model.reconnect() }
                     Button("Disconnect") { model.disconnect() }
@@ -84,6 +91,174 @@ struct CrewConnectionsView: View {
         }
         .navigationTitle("Connections")
         .accessibilityIdentifier("crew.connections")
+        .navigationDestination(isPresented: Binding(
+            get: { setup != nil },
+            set: { presented in
+                guard !presented else { return }
+                setup?.close()
+                setup = nil
+                gateways = CrewGatewayStore().load()
+            }
+        )) {
+            if let setup {
+                CrewGatewaySetupView(setup: setup, model: model) {
+                    setup.close()
+                    self.setup = nil
+                    gateways = CrewGatewayStore().load()
+                }
+            }
+        }
+    }
+
+    /// S01 row and S08 details for one saved gateway profile.
+    @ViewBuilder private func gatewayRow(_ record: CrewGatewayRecord) -> some View {
+        let current = model.gatewayProfileId == record.id
+        VStack(alignment: .leading, spacing: 8) {
+            Text(verbatim: record.connectionName).font(.headline)
+            Text("Scoped gateway").font(.callout)
+            Text(verbatim: record.url).font(.body.monospaced()).textSelection(.enabled)
+                .fixedSize(horizontal: false, vertical: true)
+            if current { Text(verbatim: CrewFailure.workspace(model.notice?.workspace ?? .noneSelected)).font(.callout) }
+            Button(current ? "Reconnect" : "Connect") { connect(record) }
+                .disabled(gatewayBusy || model.connectionRequested)
+            DisclosureGroup("Connection details") {
+                CrewLabeledValue("Profile name", value: record.name)
+                CrewLabeledValue("Endpoint UUID", value: record.endpointId, monospaced: true)
+                if let label = record.deviceLabel { CrewLabeledValue("Device label", value: label) }
+                Text("How to revoke access").font(.headline)
+                Text("At the trusted host console, use crew native devices to find this device, then crew native revoke. This app cannot revoke its own access remotely.")
+                Text("Remove from this app removes this profile and retires this app's device key. Host access remains until revoked or expired.")
+                    .font(.callout)
+                Button("Request access with this profile") {
+                    let flow = CrewGatewaySetup(model: model)
+                    flow.resume(record)
+                    setup = flow
+                }
+                .disabled(gatewayBusy)
+                Button("Remove from this app", role: .destructive) { remove(record) }
+                    .disabled(gatewayBusy)
+            }
+        }
+        .padding(.vertical, 4)
+    }
+
+    private func connect(_ record: CrewGatewayRecord) {
+        gatewayBusy = true
+        gatewayIssue = nil
+        _Concurrency.Task {
+            do { try await CrewGatewayProfiles.connect(record, model: model) }
+            catch { gatewayIssue = CrewGatewayCopy.failure(error) }
+            gatewayBusy = false
+        }
+    }
+
+    private func remove(_ record: CrewGatewayRecord) {
+        gatewayBusy = true
+        gatewayIssue = nil
+        _Concurrency.Task {
+            do { try await CrewGatewayProfiles.remove(record, model: model) }
+            catch { gatewayIssue = error is AppleDeviceKeyFailure ? CrewGatewaySetup.storage(error) : CrewGatewayCopy.failure(error) }
+            gateways = CrewGatewayStore().load()
+            gatewayBusy = false
+        }
+    }
+}
+
+/// The Connect to Crew pages, driven by one setup coordinator.
+@MainActor
+struct CrewGatewaySetupView: View {
+    @Bindable var setup: CrewGatewaySetup
+    let model: CrewSessionModel
+    let done: () -> Void
+
+    var body: some View {
+        Group {
+            switch setup.step {
+            case .profile:
+                let echo = CrewFingerprint.echo(setup.fingerprintText)
+                CrewPublicProfileForm(name: $setup.connectionName, profileText: $setup.profileText, fingerprint: $setup.fingerprintText, fingerprintEcho: CrewFingerprint.groups(echo), fingerprintCount: echo.count, pending: setup.pending, profileIssue: setup.profileIssue, fingerprintIssue: setup.fingerprintIssue, focusRequest: profileFocus, review: setup.review, cancel: done)
+            case .verify(let profile, let entered):
+                CrewHostTrustReview(name: profile.name, endpoint: profile.url, endpointID: profile.endpointId, rows: CrewFingerprint.comparison(profile: profile.tlsLeafSha256, entered: entered).map { CrewFingerprintGroupRow(index: $0.index, profile: $0.profile, entered: $0.entered, differs: $0.differs) }, pending: setup.pending, issue: setup.issue, trust: setup.trustHost, reviewProfile: setup.reviewProfile, cancel: done)
+            case .device:
+                CrewDeviceNameForm(name: $setup.deviceLabel, storageDescription: setup.existingKey
+                    ? "This device already has a key for this host from an earlier request. It is reused; no new key is created."
+                    : "A new device key is created in this device's Keychain, usable only on this device while it is unlocked.",
+                    storageReady: setup.storageReady, pending: setup.pending, issue: setup.issue, proceed: setup.continueWithDevice, cancel: done)
+            case .request:
+                CrewRequestAccessView(host: host, device: setup.deviceLabel, pending: setup.pending, stage: setup.progress, issue: setup.issue, request: setup.requestAccess, cancel: setup.enrolling ? setup.cancelRequest : done)
+            case .compare(let groups, let expires):
+                CrewCompareAtHostView(host: host, device: setup.deviceLabel, groups: groups, status: "\(setup.progress ?? "Waiting for the host operator") · Request expires \(CrewLabels.timestamp(expires))", cancel: setup.cancelRequest)
+            case .granted(let access):
+                granted(access)
+            case .closed(let message, let mayHaveApproved):
+                ScrollView {
+                    VStack(alignment: .leading, spacing: 24) {
+                        Text(verbatim: message).textSelection(.enabled)
+                        if mayHaveApproved {
+                            Button { setup.reconnectToCheck(); done() } label: { Text("Reconnect to check").frame(minHeight: 44) }
+                                .buttonStyle(.borderedProminent)
+                        }
+                        Button(action: done) { Text("Done").frame(minHeight: 44) }
+                    }
+                    .padding(24).frame(maxWidth: 680, alignment: .leading)
+                }
+                .navigationTitle("Connect to Crew")
+            }
+        }
+        .onDisappear { setup.close() }
+    }
+
+    private var host: String {
+        guard let record = setup.record else { return "" }
+        return "\(record.connectionName) · \(record.url)"
+    }
+
+    private var profileFocus: (field: CrewPublicProfileForm.Field, id: UUID)? {
+        guard let request = setup.focusRequest else { return nil }
+        switch request.field {
+        case .name: return (.name, request.id)
+        case .profile: return (.profile, request.id)
+        case .fingerprint: return (.fingerprint, request.id)
+        case .deviceLabel: return nil
+        }
+    }
+
+    /// S07 Access granted: only returned memberships, never invented while
+    /// the listing is loading, and no names of other workspaces.
+    private func granted(_ access: GatewayDeviceAccess) -> some View {
+        List {
+            Section("Access granted") {
+                CrewLabeledValue("Host", value: host)
+                CrewLabeledValue("Device", value: setup.deviceLabel)
+                CrewLabeledValue("Device ID", value: access.deviceId, monospaced: true)
+                CrewLabeledValue("Access expires", value: CrewLabels.timestamp(access.credentialExpiresAtMs))
+            }
+            Section("Workspaces") {
+                if let listing = model.workspaces {
+                    ForEach(listing.joined, id: \.id) { entry in
+                        Button {
+                            model.selectWorkspace(entry.id)
+                            done()
+                        } label: {
+                            VStack(alignment: .leading, spacing: 8) {
+                                Text(verbatim: entry.project ?? entry.workspace).font(.headline)
+                                Text(CrewConnectionLabels.workspace(entry.state))
+                                Text("Open workspace").font(.callout)
+                            }
+                            .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
+                        }
+                    }
+                    if listing.joined.isEmpty {
+                        Text("No workspace access. Ask the host operator to approve a workspace for this device.")
+                    }
+                } else {
+                    ProgressView("Loading workspaces")
+                }
+            }
+            Section { CrewAccessDisclosure() }
+            Section { Button("Done", action: done) }
+        }
+        .navigationTitle("Connect to Crew")
     }
 }
 

@@ -1,3 +1,4 @@
+import Accessibility
 import SwiftUI
 
 /// UI input and instructions only. The native connector owns label validation,
@@ -33,7 +34,7 @@ public struct CrewDeviceNameForm: View {
                 Button(action: cancel) { Text("Cancel").frame(minHeight: 44) }
             }
         }
-        .navigationTitle("This device")
+        .navigationTitle("Connect to Crew")
     }
 }
 
@@ -66,7 +67,7 @@ public struct CrewRequestAccessView: View {
             }
             .padding(24).frame(maxWidth: 680, alignment: .leading)
         }
-        .navigationTitle("Request access")
+        .navigationTitle("Connect to Crew")
     }
 }
 
@@ -104,7 +105,9 @@ public struct CrewCompareAtHostView: View {
             }
             .padding(24).frame(maxWidth: 680, alignment: .leading)
         }
-        .navigationTitle("Compare request")
+        .navigationTitle("Connect to Crew")
+        // Announced once when the verified code appears, not per status tick.
+        .onAppear { AccessibilityNotification.Announcement("Comparison code ready. Compare all four groups at the trusted host console.").post() }
     }
 }
 

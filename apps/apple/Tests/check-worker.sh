@@ -37,6 +37,7 @@ swiftc -emit-module -parse-as-library -swift-version 5 -module-name CrewBindings
 swiftc -typecheck -parse-as-library -swift-version 5 \
     "${crew_includes[@]}" -I "$crew_output" \
     apps/apple/CrewHost/CrewClientWorker.swift \
+    apps/apple/CrewHost/CrewGateway.swift \
     apps/apple/CrewHost/CrewSendDraft.swift \
     apps/apple/CrewHost/CrewNoticeRouting.swift \
     apps/apple/CrewHost/CrewExternalLinks.swift
@@ -46,11 +47,13 @@ swiftc -typecheck -parse-as-library -swift-version 5 \
 swiftc -typecheck -parse-as-library -swift-version 5 \
     "${crew_includes[@]}" -I "$crew_output" \
     -I "$CREW_SOURCE_XCTEST/lib/swift/linux/x86_64" \
+    apps/apple/CrewHost/CrewGateway.swift \
     apps/apple/CrewHost/CrewSendDraft.swift \
     apps/apple/CrewHost/CrewNoticeRouting.swift \
     apps/apple/CrewHost/CrewExternalLinks.swift \
     apps/apple/Tests/CrewSendDraftTests.swift \
     apps/apple/Tests/CrewNoticeRoutingTests.swift \
-    apps/apple/Tests/CrewExternalLinksTests.swift
+    apps/apple/Tests/CrewExternalLinksTests.swift \
+    apps/apple/Tests/CrewGatewayTests.swift
 printf '%s\n' 'Portable generated-record/worker and Foundation test-source check passed.' \
     'Apple SwiftUI compilation, linking, Xcode and native execution: deferred by operator.'

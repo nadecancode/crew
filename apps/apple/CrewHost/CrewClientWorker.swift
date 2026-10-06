@@ -30,6 +30,31 @@ actor CrewClientWorker {
         }
     }
 
+    /// Builds the scoped gateway client from a trusted profile and the typed
+    /// signer, then installs it. The factory blocks while the signer reads the
+    /// device public key (bounded in Rust), so it runs here, never on main.
+    /// The returned client is disconnected until `connect(profileId:)`.
+    func installGateway(_ profile: GatewayProfile, signer: any DeviceSigner, observer: any ClientObserver, instance: UUID) throws {
+        try _Concurrency.Task.checkCancellation()
+        try install(CrewClient.gateway(profile: profile, signer: signer), observer: observer, instance: instance)
+    }
+
+    /// One explicit enrollment attempt on the installed gateway client. A
+    /// throw means no attempt and no callback; a handle means exactly one
+    /// terminal callback on the observer.
+    func enroll(label: String, observer: any SetupObserver, instance: UUID) throws -> EnrollmentHandle {
+        try _Concurrency.Task.checkCancellation()
+        return try requireClient(instance).enroll(label: label, observer: observer)
+    }
+
+    /// Local retirement of this app's device key through the signer; the
+    /// client closes and host access remains until revoked or expired.
+    func retireDeviceAccess(instance: UUID) throws {
+        let client = try requireClient(instance)
+        defer { disposeCurrent() }
+        try client.retireDeviceAccess()
+    }
+
     func connect(profileId: String, instance: UUID) throws {
         try _Concurrency.Task.checkCancellation()
         try requireClient(instance).connect(profileId: profileId)

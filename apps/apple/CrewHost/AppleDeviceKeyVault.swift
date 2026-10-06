@@ -1,3 +1,4 @@
+import CrewBindings
 import CryptoKit
 import Foundation
 import Security
@@ -84,10 +85,10 @@ struct KeychainDeviceSeedStorage: AppleDeviceSeedStorage {
 /// private key. Only the public 32 bytes leave its API; its private 32-byte
 /// seed is stored with device-only, nonsynchronizing, unlocked accessibility.
 ///
-/// The callable signer bridge is supplied separately with the transport owner.
-/// There is deliberately no untyped `sign(Data)` entry point. That bridge must
-/// accept only Rust-constructed AuthTranscript/EnrollTranscript after verified
-/// TLS, and must not expose a store reference or private key through UniFFI.
+/// There is deliberately no untyped `sign(Data)` entry point. Signing accepts
+/// only the Rust-constructed AuthTranscript/EnrollTranscript, through the
+/// `CrewDeviceSigner` callback adapter, and never exposes a store reference or
+/// private key through UniFFI.
 actor AppleDeviceKeyVault {
     private let storage: any AppleDeviceSeedStorage
 
@@ -116,6 +117,46 @@ actor AppleDeviceKeyVault {
             return try Curve25519.Signing.PrivateKey(rawRepresentation: seed)
         } catch {
             throw AppleDeviceKeyFailure.invalidStoredSeed
+        }
+    }
+}
+
+/// The gateway signer's key service. Storage failures become the connector's
+/// typed signer errors; no key, store reference or OS status crosses over.
+extension AppleDeviceKeyVault: CrewDeviceKeys {
+    func devicePublicKey(reference: UUID) throws -> Data {
+        try Self.typed { try publicKey(reference: reference) }
+    }
+
+    func signAuthentication(_ transcript: any AuthTranscriptProtocol, reference: UUID) throws -> Data {
+        try Self.typed { try loadPrivateKey(reference: reference).signature(for: transcript.signingBytes()) }
+    }
+
+    func signEnrollment(_ transcript: any EnrollTranscriptProtocol, reference: UUID) throws -> Data {
+        try Self.typed { try loadPrivateKey(reference: reference).signature(for: transcript.signingBytes()) }
+    }
+
+    func retireDeviceKey(reference: UUID) throws {
+        try Self.typed { try retire(reference: reference) }
+    }
+
+    /// Whether this profile already has a device key: an existing key after a
+    /// lost approval reply is reused rather than replaced.
+    func hasKey(reference: UUID) throws -> Bool {
+        do {
+            _ = try publicKey(reference: reference)
+            return true
+        } catch AppleDeviceKeyFailure.missing {
+            return false
+        }
+    }
+
+    private static func typed<T>(_ operation: () throws -> T) throws -> T {
+        do { return try operation() } catch {
+            switch error as? AppleDeviceKeyFailure {
+            case .locked: throw CrewSignerFailure(error: .locked)
+            case .missing, .alreadyExists, .invalidStoredSeed, .unavailable, nil: throw CrewSignerFailure(error: .unavailable)
+            }
         }
     }
 }

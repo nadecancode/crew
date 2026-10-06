@@ -4,9 +4,10 @@ The approved navigation foundation is `4479a301`. Substantive implementation
 uses the reviewed N2A source at `a159bd03` and the connection experience at
 `5015460a`. Source now composes the real local facade on macOS and the
 released shared availability query for action controls (see "Shared action
-availability"). Gateway composition is still required for iOS; source
-preparation and unperformed native execution remain distinct. Later sections
-supersede the remaining-gate lists of earlier checkpoints.
+availability"), and the scoped gateway on iOS and macOS (see "Scoped gateway
+composition"). Source preparation and unperformed native execution remain
+distinct. Later sections supersede the remaining-gate lists of earlier
+checkpoints.
 
 ## Host storage and presentation checkpoint
 
@@ -467,6 +468,78 @@ covers candidate ID stability and its use by Send. The worker read typechecks
 on Linux against the released bindings; the SwiftUI composition and the
 model cases remain **Apple verification deferred by operator**.
 
+## Scoped gateway composition (iOS and macOS)
+
+The generated Swift and C header come from the `native-gateway-binding-ports`
+release `62d2d7b6`, imported byte for byte in `d49d2451` (Swift sha256
+`6039c186…`, header `d5ed3411…`); the module map is unchanged. Its landing set
+is `dc5f40c2` + `bcbbb322` + `62d2d7b6` + `19c15498` on `75173b46`. The app
+composes those ports and nothing else: profile parsing, fingerprint
+normalization, trust, TLS, device proofs, enrollment, grants and the
+comparison-code check all stay in Rust. Both Apple platforms use the same
+gateway path; iOS has no local option.
+
+Connect to Crew follows S01–S08 and the S02 amendment `ad6ed514`:
+
+- **S02 Host profile**: a local connection name, a public profile paste area
+  ("Paste the output of crew native status from the host.") and a required
+  host fingerprint "From crew native status at the trusted host console. Do
+  not copy it from the profile above." The field is never filled from the
+  profile. A live echo shows the entry as groups of four with "N of 64".
+  `parseGatewayProfile` errors are profile field errors;
+  `normalizeFingerprint` returning nil is a fingerprint field error ("The
+  fingerprint has 64 hexadecimal characters (0–9, a–f). This one has N."); the
+  first invalid field receives focus after the explicit submit. The echo uses
+  the same separator rules but never decides validity. An optional profile
+  file import is not provided.
+- **Verify this host** shows the profile name, wss endpoint, endpoint UUID,
+  the persistence-limit paragraph and both fingerprints group by group, each
+  difference stated in text. A difference offers only Review host profile and
+  Cancel. Matching values offer Trust this host, which calls
+  `GatewayProfile.trust` with the entered value; `tls_trust` shows the
+  contract's failure copy and `invalid_profile` returns to the profile field.
+- **S03 Name this device**: Keychain readiness is checked first. A new
+  profile's Ed25519 key is created by `AppleDeviceKeyVault` under the
+  profile's UUID; a saved profile requesting access again reuses its existing
+  key. The public profile is then saved (public fields and the entered
+  fingerprint only) and `CrewClient.gateway(profile:signer:)` builds this
+  window's disconnected client on the worker actor, never on main.
+- **S04/S05**: Request access makes exactly one `enroll(label:observer:)`
+  call. A throw means no attempt; a returned handle is retained for the
+  attempt's life and receives exactly one terminal callback. The comparison
+  code appears only from `awaitingApproval`, as four literal groups, announced
+  once. Cancel asks the handle to cancel; the terminal callback still decides
+  what is shown. Leaving setup fences late callbacks and cancels the attempt.
+- **S07 Access granted** shows the device ID and expiry, then only the
+  returned workspace listing ("Loading workspaces" until it arrives, "No
+  workspace access" when empty) with Open workspace. Canceled shows "Request
+  closed."; OutcomeUnknown shows the lost-reply copy with Reconnect to check
+  using the same key and profile.
+- **S01/S08 Connections** lists saved gateway profiles with Connect or
+  Reconnect, Connection details, How to revoke access, Request access with
+  this profile, and Remove from this app ("Removes this profile and retires
+  this app's device key. Host access remains until revoked or expired.").
+  Removing the connected profile calls `retireDeviceAccess()` so Rust closes
+  the client and retires the key through the signer; otherwise the key is
+  retired directly. This device's access lists Read, Control and Terminal from
+  the authenticated grant, its expiry and the full disclosure.
+
+`CrewDeviceSigner` is the UniFFI `DeviceSigner` callback. Each request is
+enqueued and returns at once; an already-canceled reply is left alone and
+late completion errors are ignored. Signing accepts only the Rust-constructed
+`AuthTranscript`/`EnrollTranscript`; there is no arbitrary byte signer.
+Keychain failures become the connector's typed `locked`/`unavailable`; no key,
+store reference or OS status crosses the interface. `CrewSetupObserver` hands
+setup callbacks to the main executor in order, like client notices.
+
+Native source cases in `CrewGatewayTests` (Foundation-only, typechecked on
+Linux): fingerprint echo separators and grouping, group-by-group difference
+marking, comparison-code grouping with leading zeroes, contract copy for
+connector codes, public-only saved profile fields and removal, signer reply
+completion with skipped canceled replies, and typed signer failures. The
+SwiftUI flow, Keychain, enrollment against a host and every C01–C20 case
+remain **Apple verification deferred by operator**.
+
 ## Native test sources
 
 Each source below belongs to both the `CrewMacTests`/`CrewIOSTests` unit
@@ -478,6 +551,7 @@ has been executed: **Apple execution deferred by operator**.
 | `Tests/CrewSendDraftTests.swift` | 12 | typechecks with its host source and corelibs XCTest |
 | `Tests/CrewNoticeRoutingTests.swift` | 5 | typechecks with its host source and corelibs XCTest |
 | `Tests/CrewExternalLinksTests.swift` | 4 | typechecks with its host source and corelibs XCTest |
+| `Tests/CrewGatewayTests.swift` | 7 | typechecks with its host source and corelibs XCTest |
 | `Tests/CrewClientWorkerTests.swift` | 13 | parses; the model cases need SwiftUI/Observation |
 | `Tests/CrewShellTests.swift` | 13 | parses; needs SwiftUI |
 | `Tests/AppleDeviceKeyVaultTests.swift` | 5 | parses; needs CryptoKit/Security |
@@ -485,7 +559,7 @@ has been executed: **Apple execution deferred by operator**.
 
 `bash apps/apple/Tests/check-worker.sh` emits the actual generated
 `CrewBindings` module, typechecks the Foundation worker/receipt/routing/link
-host sources, then typechecks the three Foundation test sources together with
+host sources, then typechecks the four Foundation test sources together with
 those host sources against the pinned Swift 5.10.1 corelibs XCTest. On Linux the
 `@testable import CrewMac`/`CrewIOS` lines are compiled out, so the tests and
 host sources share one module. Tests are typechecked, not run: running them
