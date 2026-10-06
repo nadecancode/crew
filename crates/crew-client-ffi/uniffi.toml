@@ -1,0 +1,6 @@
+[bindings.swift]
+module_name = "CrewBindings"
+ffi_module_name = "CrewClientFFI"
+ffi_module_filename = "CrewClientFFI"
+generate_module_map = true
+generate_immutable_records = true

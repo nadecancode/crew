@@ -1,0 +1,32 @@
+[package]
+name = "crew-client-ffi"
+description = "Typed native bindings for the shared Crew client"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version = "1.93"
+publish = false
+
+[lib]
+crate-type = ["rlib", "cdylib", "staticlib"]
+
+[[bin]]
+name = "crew-client-bindgen"
+path = "src/bin/crew-client-bindgen.rs"
+required-features = ["bindgen"]
+
+[features]
+default = []
+bindings = ["dep:uniffi", "dep:crew-client-transport", "crew-client-transport/runtime"]
+bindgen = ["bindings", "uniffi/cli", "uniffi/cargo-metadata"]
+local = ["bindings", "crew-client-transport/local"]
+
+[dependencies]
+crew-client = { path = "../crew-client" }
+crew-protocol = { path = "../crew-protocol" }
+crew-client-transport = { path = "../crew-client-transport", optional = true }
+serde_json.workspace = true
+uniffi = { version = "=0.31.0", default-features = false, optional = true }
+
+[dev-dependencies]
+tempfile.workspace = true
