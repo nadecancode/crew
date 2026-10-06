@@ -23,6 +23,7 @@ final class CrewSessionModel {
     private var olderLoads: [CrewDestination: CrewOlderLoad] = [:]
     private var olderOperations: [UInt64: CrewDestination] = [:]
     private var operationHistory: [OperationNotice] = []
+    private var sendOutcomeHistory: [OperationNotice] = []
     private var pendingJobs = 0
     private var executingSend: CrewDraftKey?
     private var actionTask: _Concurrency.Task<Void, Never>?
@@ -304,6 +305,10 @@ final class CrewSessionModel {
 
     func sendPending(_ key: CrewDraftKey) -> Bool { sendDrafts[key]?.pending == true }
 
+    /// Drain only the current UI submission batch. Rust completion remains an
+    /// observer outcome; this does not wait for delivery or trigger a replay.
+    func waitForSubmissionBatch() async { await actionTask?.value }
+
     func sendExplanation(_ key: CrewDraftKey) -> String? {
         if let outcome = sendDrafts[key]?.lastOutcome { return CrewFailure.outcome(outcome) }
         return sendDrafts[key]?.explanation
@@ -365,6 +370,17 @@ final class CrewSessionModel {
                 pendingJobs = actionQueue.count + 1
                 do {
                     let plan = try await worker.plan(intent, instance: token)
+                    if instance == token, let key = command.sendDraft,
+                       case .sendMessage(_, _, _, let messageId) = intent,
+                       sendDrafts[key]?.matchesMessage(messageId) == true {
+                        switch plan {
+                        case .dispatch(let id):
+                            sendDrafts[key]?.associate(id)
+                            if let outcome = sendOutcomeHistory.last(where: { $0.operationId == id }) { sendDrafts[key]?.outcome(outcome) }
+                        case .unavailable(let reason): sendDrafts[key]?.notDispatched(reason.message)
+                        case .confirm: sendDrafts[key]?.notDispatched("This command requires confirmation. No message has been sent.")
+                        }
+                    }
                     guard instance == token, actionGeneration == generation else { return }
                     executingSend = nil
                     switch plan {
@@ -388,12 +404,6 @@ final class CrewSessionModel {
                             olderOperations[id] = destination
                             if let outcome = operationHistory.last(where: { $0.operationId == id && $0.scope == scope }) { finishOlder(outcome) }
                         }
-                        if let key = command.sendDraft {
-                            sendDrafts[key]?.associate(id)
-                            if let outcome = operationHistory.last(where: { $0.operationId == id && $0.scope == key.scope }) {
-                                sendDrafts[key]?.outcome(outcome)
-                            }
-                        }
                         feedback = operationHistory.last { $0.operationId == id && $0.scope == self.scope }.map(CrewFailure.outcome) ?? "Submitted; awaiting outcome"
                         if case .attach(let scope, let agent, _, _) = intent {
                             let key = EntityKey(scope: scope, entity: .agent(agent))
@@ -408,6 +418,12 @@ final class CrewSessionModel {
                         }
                     }
                 } catch {
+                    if instance == token, let key = command.sendDraft,
+                       case .sendMessage(_, _, _, let messageId) = intent,
+                       sendDrafts[key]?.matchesMessage(messageId) == true,
+                       sendDrafts[key]?.operationId == nil {
+                        sendDrafts[key]?.notDispatched(CrewFailure.message(error))
+                    }
                     guard instance == token, actionGeneration == generation else { return }
                     executingSend = nil
                     feedback = CrewFailure.message(error)
@@ -465,7 +481,7 @@ final class CrewSessionModel {
 
     func setActive(_ active: Bool) {
         self.active = active
-        if !active { cancelConfirmation(); discardQueuedActions(); endTerminal("Suspended; reconnect before opening a new terminal") }
+        if !active { cancelConfirmation(); discardQueuedActions(preserveHeldSends: true); endTerminal("Suspended; reconnect before opening a new terminal") }
         guard hasClient else { return }
         let token = instance
         _Concurrency.Task {
@@ -483,7 +499,7 @@ final class CrewSessionModel {
     func reconnect() {
         guard hasClient else { return }
         cancelConfirmation()
-        discardQueuedActions()
+        discardQueuedActions(preserveHeldSends: true)
         endTerminal("Disconnected; terminal input is not replayed")
         let token = instance
         _Concurrency.Task {
@@ -495,7 +511,7 @@ final class CrewSessionModel {
     func disconnect() {
         guard hasClient else { return }
         cancelConfirmation()
-        discardQueuedActions()
+        discardQueuedActions(preserveHeldSends: true)
         endTerminal("Disconnected")
         let token = instance
         _Concurrency.Task {
@@ -533,7 +549,15 @@ final class CrewSessionModel {
         let oldScope = scope
         notice = update
         if update.scope != oldScope {
-            clearScopedViews()
+            let sameWorkspace = update.scope == nil || oldScope == nil ||
+                (update.scope?.endpointId == oldScope?.endpointId && update.scope?.workspaceId == oldScope?.workspaceId)
+            clearScopedViews(preserveHeldSends: sameWorkspace)
+            if let current = update.scope {
+                for key in sendDrafts.keys {
+                    if key.scope.endpointId == current.endpointId && key.scope.workspaceId == current.workspaceId { sendDrafts[key]?.reauthorize(current) }
+                    else { sendDrafts[key]?.retireOperation("Workspace changed; check the host before retrying") }
+                }
+            }
             readGeneration &+= 1
         }
         if update.workspace == .accessRevoked || update.workspace == .removed || update.endpoint == .signedOut {
@@ -550,6 +574,7 @@ final class CrewSessionModel {
             workspaces = nil
             readGeneration &+= 1
             clearScopedViews()
+            sendOutcomeHistory.removeAll()
         }
         if !update.changes.removed.isEmpty, let selected, update.changes.removed.contains(selected) { closeDetail() }
         if update.changes.reset {
@@ -559,11 +584,13 @@ final class CrewSessionModel {
             endTerminal("\(CrewFailure.workspace(update.workspace)); terminal input disabled")
         }
         for outcome in update.outcomes {
+            sendOutcomeHistory.append(outcome)
+            if sendOutcomeHistory.count > 32 { sendOutcomeHistory.removeFirst(sendOutcomeHistory.count - 32) }
+            for key in sendDrafts.keys { sendDrafts[key]?.outcome(outcome) }
             operationHistory.append(outcome)
             if operationHistory.count > 32 { operationHistory.removeFirst(operationHistory.count - 32) }
             if outcome.scope == scope {
                 finishOlder(outcome)
-                for key in sendDrafts.keys { sendDrafts[key]?.outcome(outcome) }
                 feedback = CrewFailure.outcome(outcome)
                 // Identified Attach success precedes terminal chunks. Create
                 // its exact native renderer before data, even when the actor's
@@ -731,12 +758,13 @@ final class CrewSessionModel {
         }
     }
 
-    private func discardQueuedActions() {
+    private func discardQueuedActions(preserveHeldSends: Bool = true) {
         for destination in olderLoads.keys { hostWindowRequested.remove(destination) }
         olderLoads.removeAll()
         olderOperations.removeAll()
         if let key = executingSend {
-            sendDrafts[key]?.notDispatched("Outcome unknown after the connection changed. Check the host before retrying.")
+            if preserveHeldSends { sendDrafts[key]?.hold() }
+            else { sendDrafts[key]?.retireOperation("Outcome unknown after the connection changed. Check the host before retrying.") }
             executingSend = nil
         }
         for command in actionQueue {
@@ -747,11 +775,15 @@ final class CrewSessionModel {
         actionTask = nil
         actionGeneration &+= 1
         pendingJobs = 0
+        for key in sendDrafts.keys {
+            if preserveHeldSends { sendDrafts[key]?.hold() }
+            else { sendDrafts[key]?.retireOperation("Connection changed; check the host before retrying") }
+        }
     }
 
-    private func clearScopedViews() {
+    private func clearScopedViews(preserveHeldSends: Bool = false) {
         invalidated.removeAll()
-        discardQueuedActions()
+        discardQueuedActions(preserveHeldSends: preserveHeldSends)
         cancelConfirmation()
         endTerminal("Workspace connection changed")
         terminal = nil
@@ -771,6 +803,7 @@ final class CrewSessionModel {
         resource = nil
         queries = [:]
         operationHistory = []
+        if !preserveHeldSends { sendOutcomeHistory = [] }
     }
 
     private func finishOlder(_ outcome: OperationNotice) {

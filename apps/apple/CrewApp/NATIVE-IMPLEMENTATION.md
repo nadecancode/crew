@@ -361,3 +361,32 @@ selected entity stays scoped without two simultaneous detail surfaces. Three
 additional navigation source cases cover Back, open-route transfer and the
 second destination's normalization. They do not claim an executed Apple UI
 sequence.
+
+## Identified send receipts across the barrier
+
+The reconnect receipt path was corrected after `m-ab8ca181ef62`. The shared
+Core may hold an identified Send and replay it once after a newer snapshot
+barrier; its final notice still carries the captured old proposal scope and
+operation ID. UI receipt identity therefore uses the same client instance,
+endpoint, workspace and unique operation ID, while action dispatch continues
+to use the complete current scope. Reauthorization preserves the pending
+operation and shows “Reconnecting; previous send still pending.” The UI neither
+replays the message nor enables another submission before its real outcome.
+An old-proposal success clears only unchanged submitted text; newer edits stay.
+Workspace/client retirement and learned revocation remove that operation
+association. A separate bounded receipt history handles an outcome that arrives
+before the actor's plan continuation, including a scope change during that
+continuation. The generic view/terminal paths keep their full-scope fences.
+
+Native source tests cover the old-proposal outcome after reauthorization,
+edits during the held send, and model-level Dispatch → connection loss → new
+scope → reopened composer → old-scope receipt with exactly one plan call.
+Their execution remains **Apple verification deferred by operator**. The actual
+Foundation receipt/routing/worker sources continue to typecheck on Linux; this
+is not a Rust replay or Apple application run.
+
+Restored evidence routes also activate their captured entity/read under the
+current scope, rather than showing a perpetual loading state after another
+destination cleared the display cache. A newly active wide destination always
+normalizes its physical inspector path, including one with no selection;
+another destination's saved open route is not treated as Back.

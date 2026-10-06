@@ -114,6 +114,30 @@ final class CrewClientWorkerTests: XCTestCase {
         XCTAssertFalse(client.calls.contains("plan"))
     }
 
+    func testIdentifiedSendHeldAcrossReconnectConsumesOldProposalReceipt() async throws {
+        let model = CrewSessionModel()
+        let client = RecordingCrewClient()
+        try await model.install(client)
+        let observer = try XCTUnwrap(client.observer)
+        let originalScope = CrewTestFixtures.scope
+        observer.changed(notice: CrewTestFixtures.notice)
+        let original = CrewDraftKey(scope: originalScope, purpose: "message:synthetic-agent")
+        model.sendDraft(original).wrappedValue = "pending identified message"
+        model.send(original, to: "synthetic-agent")
+        await model.waitForSubmissionBatch()
+        XCTAssertEqual(client.calls.filter { $0 == "plan" }.count, 1)
+        let current = ClientScope(endpointId: originalScope.endpointId, workspaceId: originalScope.workspaceId, generation: originalScope.generation, daemonPid: originalScope.daemonPid, daemonStartedAtMs: originalScope.daemonStartedAtMs, attempt: originalScope.attempt + 1)
+        observer.changed(notice: ClientNotice(scope: current, revision: 2, changes: CrewTestFixtures.notice.changes, endpoint: .reconnecting, workspace: .reconnecting, reason: nil, outcomes: []))
+        let reopened = CrewDraftKey(scope: current, purpose: original.purpose)
+        XCTAssertTrue(model.sendPending(reopened))
+        XCTAssertEqual(model.sendDraft(reopened).wrappedValue, "pending identified message")
+        observer.changed(notice: ClientNotice(scope: current, revision: 3, changes: CrewTestFixtures.notice.changes, endpoint: .authenticated, workspace: .live, reason: nil, outcomes: [OperationNotice(scope: originalScope, operationId: 1, attachmentId: nil, kind: .success, reason: nil)]))
+        XCTAssertFalse(model.sendPending(reopened))
+        XCTAssertEqual(model.sendDraft(reopened).wrappedValue, "")
+        XCTAssertEqual(client.calls.filter { $0 == "plan" }.count, 1)
+        await model.close()
+    }
+
 }
 
 private enum CrewTestFixtures {

@@ -39,6 +39,7 @@ struct CrewRootView: View {
                 .navigationDestination(for: ResourceKey.self) { key in
                     resourceContent(key)
                         .navigationTitle("Evidence")
+                        .task(id: key) { activateResource(key) }
                 }
         } workspace: {
             Menu {
@@ -111,7 +112,7 @@ struct CrewRootView: View {
                     }
                 }
                 .navigationDestination(for: ResourceKey.self) { key in
-                    resourceContent(key).navigationTitle("Evidence")
+                    resourceContent(key).navigationTitle("Evidence").task(id: key) { activateResource(key) }
                 }
                 .toolbar {
                     ToolbarItem(placement: .cancellationAction) {
@@ -364,6 +365,12 @@ struct CrewRootView: View {
         } else { navigation.appendEvidence(key, for: navigation.selection) }
     }
 
+    private func activateResource(_ key: ResourceKey) {
+        guard key.entity.scope == model.scope, navigation.openEvidence(for: navigation.selection) == key else { return }
+        model.select(key.entity)
+        if model.selectedResource != key { model.readResource(key) }
+    }
+
     @ViewBuilder private func resourceContent(_ key: ResourceKey) -> some View {
         if key.entity.scope != model.scope {
             ContentUnavailableView("Evidence is no longer available", systemImage: "network.slash")
@@ -405,13 +412,13 @@ struct CrewRootView: View {
     }
 
     private func adaptDetail(wide: Bool) {
-        guard navigation.inspectorVisible, let key = currentSelection else { return }
         let evidence = navigation.openEvidence(for: navigation.selection)
         if wide {
             navigation.transferToInspector(for: navigation.selection)
             inspectorPath = NavigationPath()
+            guard navigation.inspectorVisible, let key = currentSelection else { return }
             if let evidence, !key.entity.isReadEntity { inspectorPath.append(evidence) }
-        } else if navigation.path(for: navigation.selection).isEmpty {
+        } else if navigation.inspectorVisible, let key = currentSelection, navigation.path(for: navigation.selection).isEmpty {
             navigation.transferToCompact(entity: key, for: navigation.selection)
         }
     }

@@ -56,19 +56,19 @@ final class CrewSendDraftTests: XCTestCase {
         XCTAssertNotEqual(unknown.messageId, try XCTUnwrap(draft.begin()).messageId)
     }
 
-    func testWrongOperationAndRetiredScopeCannotClearTheDraft() throws {
+    func testWrongOperationAndDifferentWorkspaceCannotClearTheDraft() throws {
         var draft = CrewSendDraft(scope: scope)
         draft.body = "scoped text"
         _ = try XCTUnwrap(draft.begin())
         draft.associate(1)
         draft.outcome(outcome(2, .success))
-        let retired = ClientScope(endpointId: scope.endpointId, workspaceId: scope.workspaceId, generation: scope.generation, daemonPid: scope.daemonPid, daemonStartedAtMs: scope.daemonStartedAtMs, attempt: scope.attempt + 1)
+        let retired = ClientScope(endpointId: scope.endpointId, workspaceId: "different-workspace", generation: scope.generation, daemonPid: scope.daemonPid, daemonStartedAtMs: scope.daemonStartedAtMs, attempt: scope.attempt + 1)
         draft.outcome(OperationNotice(scope: retired, operationId: 1, attachmentId: nil, kind: .success, reason: nil))
         XCTAssertTrue(draft.pending)
         XCTAssertEqual(draft.body, "scoped text")
     }
 
-    func testReauthorizationRetainsTextButRetiresOldOperationIdentity() throws {
+    func testHeldOldProposalReceiptCompletesAfterReauthorization() throws {
         var draft = CrewSendDraft(scope: scope)
         draft.body = "retained after ordinary loss"
         let first = try XCTUnwrap(draft.begin())
@@ -76,11 +76,29 @@ final class CrewSendDraftTests: XCTestCase {
         let current = ClientScope(endpointId: scope.endpointId, workspaceId: scope.workspaceId, generation: scope.generation, daemonPid: scope.daemonPid, daemonStartedAtMs: scope.daemonStartedAtMs, attempt: scope.attempt + 1)
         draft.reauthorize(current)
         XCTAssertEqual(draft.body, first.body)
-        XCTAssertFalse(draft.pending)
-        XCTAssertNil(draft.operationId)
+        XCTAssertTrue(draft.pending)
+        XCTAssertTrue(draft.held)
+        XCTAssertEqual(draft.operationId, 1)
+        XCTAssertNil(draft.begin())
         draft.outcome(outcome(1, .success))
-        XCTAssertEqual(draft.body, first.body)
-        XCTAssertEqual(try XCTUnwrap(draft.begin()).messageId, first.messageId)
+        XCTAssertEqual(draft.body, "")
+        XCTAssertFalse(draft.pending)
+        XCTAssertFalse(draft.held)
+        draft.body = "next message"
+        XCTAssertNotEqual(try XCTUnwrap(draft.begin()).messageId, first.messageId)
+    }
+
+    func testHeldOldProposalSuccessDoesNotClearLaterEdits() throws {
+        var draft = CrewSendDraft(scope: scope)
+        draft.body = "submitted text"
+        _ = try XCTUnwrap(draft.begin())
+        draft.associate(1)
+        let current = ClientScope(endpointId: scope.endpointId, workspaceId: scope.workspaceId, generation: scope.generation, daemonPid: scope.daemonPid, daemonStartedAtMs: scope.daemonStartedAtMs, attempt: scope.attempt + 1)
+        draft.reauthorize(current)
+        draft.body = "later edits"
+        draft.outcome(outcome(1, .success))
+        XCTAssertEqual(draft.body, "later edits")
+        XCTAssertFalse(draft.pending)
     }
 
     private let scope = ClientScope(endpointId: "synthetic-endpoint", workspaceId: "synthetic-workspace", generation: 2, daemonPid: 123, daemonStartedAtMs: 1_700_000_000_000, attempt: 4)
