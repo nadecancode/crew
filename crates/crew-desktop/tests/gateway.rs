@@ -88,6 +88,17 @@ fn text(widget: &impl IsA<gtk::Widget>) -> String {
         .collect::<Vec<_>>()
         .join("\n")
 }
+/// The window status reads the lifecycle phrase for a live workspace, from the
+/// same table the app renders, so a copy change cannot drift from this check.
+fn live(window: &gtk::ApplicationWindow) -> bool {
+    let phrase =
+        crew_desktop::lifecycle::phrase(EndpointStatus::Authenticated, WorkspaceStatus::Live);
+    descendants(window.upcast_ref())
+        .into_iter()
+        .filter(|w| w.is_visible())
+        .filter_map(|w| w.downcast::<gtk::Label>().ok())
+        .any(|l| l.label().lines().next() == Some(phrase))
+}
 fn find(widget: &impl IsA<gtk::Widget>, name: &str) -> Option<gtk::Widget> {
     descendants(widget.as_ref())
         .into_iter()
@@ -1193,9 +1204,7 @@ fn live(app: &gtk::Application) {
 
     // Selected workspace: Read+Terminal without Control.
     click(&dialog, &format!("workspace:{}", workspace_id(&alpha)));
-    until("live alpha", || {
-        text(&window).contains("Authenticated · Live")
-    });
+    until("live alpha", || live(&window));
     until("team listed", || text(&window).contains("pty-fixture"));
     row(&window, "pty-fixture").activate();
     until("agent controls withheld", || {
@@ -1254,7 +1263,7 @@ fn live(app: &gtk::Application) {
     click(&dialog, "reopen");
     until("control granted live", || {
         let main = text(&window);
-        main.contains("Authenticated · Live") && !main.contains("Control authority is required")
+        live(&window) && !main.contains("Control authority is required")
     });
     row(&window, "pty-fixture").activate();
     until("control enabled", || {
@@ -1293,9 +1302,7 @@ fn live(app: &gtk::Application) {
     });
     capture("live-gateway-remaining-workspace");
     click(&dialog, &format!("workspace:{}", workspace_id(&beta)));
-    until("beta live", || {
-        text(&window).contains("Authenticated · Live")
-    });
+    until("beta live", || live(&window));
 
     // Normal service restart with retained state: the same key reconnects
     // and refreshes authority and snapshot before acting again.
@@ -1314,7 +1321,7 @@ fn live(app: &gtk::Application) {
     dialog.close();
     until("reconnected after service restart", || {
         let main = text(&window);
-        main.contains("Authenticated · Live") && main.contains(&beta_path)
+        live(&window) && main.contains(&beta_path)
     });
     capture("live-gateway-service-restart");
 
@@ -1341,9 +1348,7 @@ fn live(app: &gtk::Application) {
         find(&dialog, &format!("workspace:{}", workspace_id(&beta))).is_some()
     });
     click(&dialog, &format!("workspace:{}", workspace_id(&beta)));
-    until("reconnected after unlock", || {
-        text(&window).contains("Authenticated · Live")
-    });
+    until("reconnected after unlock", || live(&window));
 
     // Host revocation of the device ends access on every channel.
     admin("native_revoke", json!({"device_id": device_id}));
