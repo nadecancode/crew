@@ -479,6 +479,27 @@ fn gtk_scoped_views_confirmation_terminal_order_and_live_local_service() {
 /// (G3), the labelled To selector (G14), terminal controls that follow the
 /// attachment (G15) and Choose workspace on a disconnected page (G17).
 fn keyboard_focus(c: &Controller, recorder: &Recording, core: &ClientCore) {
+    // G9/G17: a window that starts disconnected opens on Choose workspace,
+    // started the way the application starts it.
+    let app = c.shell.window().application().unwrap();
+    let fresh = Shell::new(&app);
+    let starting = Controller::with_service(fresh.clone(), Rc::new(Recording::default()));
+    starting.respond(Response::Session(1));
+    fresh.window().present();
+    // Starting asks for page focus more than once (the page is replaced
+    // while the window is shown); later requests keep the first choice.
+    fresh.focus_page();
+    fresh.focus_page();
+    until(|| fresh.window().is_mapped());
+    until(|| {
+        gtk::prelude::GtkWindowExt::focus(fresh.window())
+            .and_then(|f| f.downcast::<gtk::Button>().ok())
+            .is_some_and(|b| b.label().as_deref() == Some("Choose workspace"))
+    });
+    fresh.window().close();
+    drop(starting);
+    settle();
+
     let window = c.shell.window().clone();
     let focus = || gtk::prelude::GtkWindowExt::focus(&window);
     c.shell.navigate(Destination::Team);

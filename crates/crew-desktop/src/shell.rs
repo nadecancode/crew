@@ -576,8 +576,20 @@ impl Shell {
             let Some(inner) = weak.upgrade() else {
                 return;
             };
-            inner.focus_fell_back.set(false);
             let index = inner.destination.get().index();
+            let pane = if inner.adaptive.compact() && inner.detail_requested[index].get() {
+                &inner.detail_slots[index]
+            } else {
+                &inner.main_slots[index]
+            };
+            // Requests queue up (a page replaced twice while starting): one
+            // that finds focus already in the pane leaves it there, rather
+            // than moving it on from the control an earlier one chose.
+            if gtk::prelude::GtkWindowExt::focus(&inner.window).is_some_and(|f| f.is_ancestor(pane))
+            {
+                return;
+            }
+            inner.focus_fell_back.set(false);
             if inner.adaptive.compact() && inner.detail_requested[index].get() {
                 if inner.detail_slots[index].child_focus(gtk::DirectionType::TabForward) {
                     return;
