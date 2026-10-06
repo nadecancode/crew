@@ -14,7 +14,8 @@ import time
 import pyatspi
 
 from cases_local import (
-    agent, button, dialog, live_labels, messages, root, status, type_into, WIDTH, HEIGHT,
+    agent, agent_action, button, dialog, live_labels, messages, open_menu, root, status, type_into,
+    WIDTH, HEIGHT,
 )
 from driver import (
     OUT, WS, App, act, crew, find, find_all, visible_text, wait_for,
@@ -241,6 +242,24 @@ def c05_compare(rec, app, gateway):
     return pending[0]
 
 
+# C10 ---------------------------------------------------------------------
+def c10_mismatch(rec, app, gateway, intent):
+    """A host-console approval with the wrong comparison code approves nothing."""
+    code = intent["comparison_code"]
+    wrong = code[:-1] + ("0" if code[-1] != "0" else "1")
+    refused = native("approve", intent["enrollment_id"], "--code", wrong,
+                     "--key-hash", intent["public_key_hash"], "--workspace", os.path.realpath(WS),
+                     "--lifetime-secs", "3600", check=False)
+    rec.check(refused is None, "the host console refuses a mismatched comparison code", refused)
+    time.sleep(3)
+    rec.check("Access granted" not in page_text(app), "the app shows no grant after a mismatch")
+    rec.check(native("devices") in ([], None), "no device was registered", native("devices", check=False))
+    pending = native("pending")
+    rec.check(len(pending) == 1 and pending[0]["enrollment_id"] == intent["enrollment_id"],
+              "one failed comparison leaves the same request pending", pending)
+    rec.capture(app, "after-mismatch")
+
+
 # C06/C08 -------------------------------------------------------------------
 def c06_approve(rec, app, gateway, intent):
     approved = native("approve", intent["enrollment_id"], "--code", intent["comparison_code"],
@@ -292,12 +311,15 @@ def c07_read_only(rec, app, gateway):
     from cases_local import select_agent
     select_agent(app, "idle")
     text = visible_text(root(app))
+    open_menu(app)
     pause = button(root(app), "Pause")
     rec.check(not pause.getState().contains(pyatspi.STATE_SENSITIVE), "Read-only device cannot Pause")
+    text = visible_text(root(app))
     rec.check("Control" in text and "required" in text, "missing Control is named", text[-400:])
+    app.key("Escape")
     from cases_local import terminal_tab
     terminal_tab(app)
-    attach = wait_for(lambda: find(root(app), name="Attach PTY terminal", role="button", timeout=1), timeout=5)
+    attach = wait_for(lambda: find(root(app), name="Attach terminal", role="button", timeout=1), timeout=5)
     rec.check(attach is not None and not attach.getState().contains(pyatspi.STATE_SENSITIVE),
               "Read-only device cannot attach a terminal")
     rec.check("Terminal" in visible_text(root(app)) and "required" in visible_text(root(app)),
@@ -319,14 +341,20 @@ def c15_grant_change(rec, app, gateway, device):
     rec.check(live, "reopened workspace is Live with the new grant")
     from cases_local import select_agent
     select_agent(app, "idle")
-    pause = wait_for(lambda: (lambda b: b if b.getState().contains(pyatspi.STATE_SENSITIVE) else None)(
-        button(root(app), "Pause")), timeout=15)
+    def enabled_pause():
+        open_menu(app)
+        node = button(root(app), "Pause")
+        if node.getState().contains(pyatspi.STATE_SENSITIVE):
+            return node
+        app.key("Escape")
+        return None
+    pause = wait_for(enabled_pause, timeout=15, interval=1)
     rec.check(pause, "Control grant enables Pause")
     if pause:
         act(pause)
         rec.check(wait_for(lambda: agent(status(), "idle").get("paused") is True, timeout=15),
                   "Pause through the gateway reaches the daemon")
-        act(button(root(app), "Unpause"))
+        agent_action(app, "Unpause")
         wait_for(lambda: agent(status(), "idle").get("paused") is False, timeout=15)
     rec.capture(app, "control")
 
@@ -426,6 +454,11 @@ def run(rec):
         def compare(r, a):
             state["intent"] = c05_compare(r, a, gateway)
         rec.run("C05", "Comparison code matches the host console", "N01 C05", compare, app)
+
+        def mismatch(r, a):
+            if r.check(state["intent"] is not None, "an accepted intent exists"):
+                c10_mismatch(r, a, gateway, state["intent"])
+        rec.run("C10", "Mismatched code at the host approves nothing", "N01 C10", mismatch, app)
 
         def approve(r, a):
             if not r.check(state["intent"] is not None, "an accepted intent exists"):

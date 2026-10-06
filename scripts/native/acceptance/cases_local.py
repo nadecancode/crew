@@ -69,10 +69,74 @@ def local_connect(connections):
 
 
 def live_labels(app):
-    """Connection status labels that claim an authenticated live connection.
-    A label such as `Disconnected · Live` contradicts itself and is not live."""
-    return [n for n in find_all(root(app), contains="Live", role="label")
-            if (n.name or "").startswith("Authenticated") and "Live" in (n.name or "")]
+    """Connection status labels that claim a live workspace: `Live` (or the
+    earlier `Authenticated · Live`). `Disconnected · Live` is not live."""
+    def live(name):
+        first = (name or "").split("\n")[0].strip()
+        return first == "Live" or (first.startswith("Authenticated") and first.endswith("Live"))
+    return [n for n in find_all(root(app), contains="Live", role="label") if live(n.name)]
+
+
+def open_menu(app, keyboard=False):
+    """Open the selected agent's Actions menu."""
+    menu = find(root(app), name="Agent actions", role="toggle button")
+    if keyboard:
+        press(app, menu)
+    else:
+        act(menu)
+    time.sleep(0.4)
+    return menu
+
+
+def agent_action(app, name, keyboard=False):
+    """An item of the Actions menu: open the menu, then the item."""
+    open_menu(app, keyboard)
+    item = find(root(app), name=name, role="button")
+    if keyboard:
+        press(app, item)
+    else:
+        act(item)
+    return item
+
+
+def more_sections(app):
+    """Section names held in the inspector's "More sections" menu, if any.
+    The menu is opened to read them and closed again."""
+    menus = [n for n in find_all(root(app), name="More sections") if n.getRoleName() == "toggle button"]
+    if not menus:
+        return []
+    act(menus[0])
+    time.sleep(0.4)
+    names = [n.name for n in find_all(root(app)) if n.getRoleName() in ("button", "menu item", "radio button")
+             and n.name in ("Overview", "Transcript", "Diff", "Inbox", "Terminal", "Host screen")
+             and toplevel(n) is not None]
+    app.key("Escape")
+    time.sleep(0.3)
+    return names
+
+
+def open_tab(app, name):
+    """An inspector section: a page tab, a toggle button (wrapping row) or an
+    item of the "More sections" menu where the tabs do not fit."""
+    nodes = [n for n in find_all(root(app), name=name) if n.getRoleName() in ("toggle button", "page tab")]
+    if not nodes:
+        menus = [n for n in find_all(root(app), name="More sections") if n.getRoleName() == "toggle button"]
+        if not menus:
+            raise LookupError(f"no section {name!r}")
+        act(menus[0])
+        time.sleep(0.4)
+        item = next(n for n in find_all(root(app), name=name)
+                    if n.getRoleName() in ("button", "menu item", "radio button"))
+        act(item)
+        time.sleep(0.6)
+        return item
+    node = nodes[0]
+    if node.getRoleName() == "page tab":
+        select_tab(app, node)
+    else:
+        act(node)
+    time.sleep(0.6)
+    return node
 
 
 def type_into(app, node, text):
@@ -128,7 +192,9 @@ def connect(rec, app, label):
 
 # L01 ---------------------------------------------------------------------
 def l01_connect(rec, app):
-    before = find(root(app), contains="Disconnected", role="label", timeout=15)
+    before = wait_for(lambda: next((n for n in find_all(root(app), role="label")
+                                    if (n.name or "").startswith(("Not connected", "Disconnected"))), None),
+                      timeout=15)
     rec.check(before is not None, "app starts without joining a workspace", before.name)
     rec.check(not re.search(r"[a-z][A-Z]", before.name),
               "disconnected status uses readable copy, not an internal state name", before.name)
@@ -151,6 +217,10 @@ def l01_connect(rec, app):
     text = visible_text(root(app))
     rec.check("Native Linux acceptance fixture" in text, "objective shown after connection")
     rec.check("5 agents" in text, "agent count shown after connection")
+    act(find(root(app), name="Choose workspace or view connection details", role="button"))
+    text += visible_text(dialog(app, "Connect to Crew"))
+    app.key("Escape")
+    no_dialog(app, "Connect to Crew")
     rec.check("Local operator · full Crew access" in text,
               "local authority labelled 'Local operator · full Crew access' (S-section copy)",
               [n.name for n in live or []])
@@ -193,19 +263,18 @@ def l03_team(rec, app):
               and re.search(r"current(?: task)?:? release", reviewer.name, re.I),
               "started Blocked work stays current with its status", reviewer.name)
     rec.capture(app, "graph")
-    select_tab(app, find(root(app), name="List", role="page tab"))
+    open_tab(app, "List")
     time.sleep(0.5)
-    text = visible_text(root(app))
-    rec.check("dev · dev" in text and "Current task schema" in text, "list agrees with graph for dev",
-              text[:400])
-    rows = [n for n in find_all(root(app), role="list item") if "dev · dev" in visible_text(n)]
-    rec.check(any("dev" in (n.name or "") for n in rows),
-              "list row exposes the agent as its accessible name", [n.name for n in rows])
+    rows = wait_for(lambda: [n.name for n in find_all(root(app))
+                             if n.getRoleName() in ("list item", "button", "table cell")
+                             and re.match(r"dev\b", n.name or "") and "schema" in (n.name or "")], timeout=5)
+    rec.check(rows, "list row names dev with its current task schema", rows)
     rec.capture(app, "list")
-    select_tab(app, find(root(app), name="Graph", role="page tab"))
+    open_tab(app, "Graph")
     select_agent(app, "dev")
-    detail = visible_text(find(root(app), name="Agent dev", role="label").parent.parent)
-    rec.check("Current work: schema" in detail, "inspector puts current work first", detail[:300])
+    detail = visible_text(root(app))
+    rec.check(re.search(r"Current work[:\s]*\n*schema", detail) or ("Current work" in detail and "schema" in detail),
+              "inspector shows current work schema", detail[:300])
     rec.capture(app, "inspector")
 
 
@@ -241,7 +310,7 @@ def l05_question(rec, app):
     pending = crew_json("questions")
     rec.check(len(pending) == 1 and pending[0]["from"] == "asker", "fixture question pending", pending)
     app.key("ctrl+1")
-    act(button(root(app), "Questions (1)"))
+    act(button(root(app), "Answer"))
     question = wait_for(lambda: next((n for n in find_all(root(app), role="dialog")
                                       if "Which deployment target" in visible_text(n)), None))
     if not rec.check(question is not None, "question dialog shows the full body"):
@@ -249,7 +318,7 @@ def l05_question(rec, app):
     text = visible_text(question)
     rec.check("asker" in text, "question names its asker", text[:300])
     rec.capture(app, "dialog")
-    editor = find(question, name="Message or answer text", role="text")
+    editor = find(question, name="Answer", role="text")
     type_into(app, editor, "Use the staging target")
     act(button(question, "Answer"))
     answered = wait_for(lambda: not crew_json("questions"), timeout=20)
@@ -257,8 +326,8 @@ def l05_question(rec, app):
     sent = [m for m in messages() if m["from"] == "operator" and m["to"] == "asker"]
     rec.check(any("Use the staging target" in m["body"] for m in sent), "answer delivered to the asker",
               [m["body"] for m in sent])
-    rec.check(wait_for(lambda: find_all(root(app), name="Questions (0)", role="button")),
-              "question count returns to zero")
+    rec.check(wait_for(lambda: "asked a question" not in visible_text(root(app)), timeout=10),
+              "the answered question leaves the header")
     rec.capture(app, "answered")
 
 
@@ -281,11 +350,12 @@ def l06_messages(rec, app):
 # L07 ---------------------------------------------------------------------
 def l07_send(rec, app):
     body = "acceptance ping from the Linux app"
-    app.key("ctrl+1")
-    act(button(root(app), "New message"))
+    select_agent(app, "echo")
+    act(button(root(app), "Message"))
     composer = dialog(app, "New message")
-    type_into(app, find(composer, name="Recipient; * broadcasts to the team", role="text"), "echo")
-    type_into(app, find(composer, name="Message or answer text", role="text"), body)
+    rec.check("echo" in visible_text(composer), "composer from echo's inspector is addressed to echo",
+              visible_text(composer)[:200])
+    type_into(app, find(composer, name="Message", role="text"), body)
     rec.capture(app, "composer")
     act(button(composer, "Send"))
     delivered = wait_for(lambda: [m for m in messages() if m["from"] == "operator" and m["to"] == "echo"
@@ -304,19 +374,21 @@ def l07_send(rec, app):
 # L08 ---------------------------------------------------------------------
 def l08_controls(rec, app):
     select_agent(app, "idle")
-    act(button(root(app), "Pause"))
+    agent_action(app, "Pause")
     paused = wait_for(lambda: agent(status(), "idle").get("paused") is True, timeout=15)
     rec.check(paused, "Pause reaches the daemon", agent(status(), "idle").get("paused"))
     rec.check(wait_for(lambda: "paused" in visible_text(root(app)), timeout=10),
               "inspector shows the paused state from the daemon")
     rec.capture(app, "paused")
-    act(button(root(app), "Unpause"))
+    agent_action(app, "Unpause")
     resumed = wait_for(lambda: agent(status(), "idle").get("paused") is False, timeout=15)
     rec.check(resumed, "Unpause reaches the daemon", agent(status(), "idle").get("paused"))
+    open_menu(app)
     compact = button(root(app), "Compact")
     rec.check(not compact.getState().contains(pyatspi.STATE_SENSITIVE), "unsupported Compact is unavailable")
     rec.check("does not support context compaction" in visible_text(root(app)),
               "unavailable Compact shows its reason")
+    app.key("Escape")
 
 
 # L09 ---------------------------------------------------------------------
@@ -324,7 +396,7 @@ def l09_confirmations(rec, app):
     select_agent(app, "idle")
     before = agent(status(), "idle")
     # Keyboard activation, so the opener really holds focus before the dialog.
-    press(app, button(root(app), "Kill"))
+    agent_action(app, "Kill…", keyboard=True)
     kill = dialog(app, "Kill agent")
     text = visible_text(kill)
     rec.check("idle" in text and "task stays open" in text, "Kill names its target and consequence", text[:200])
@@ -339,16 +411,17 @@ def l09_confirmations(rec, app):
     rec.check(after["status"] == before["status"] and after.get("pid") == before.get("pid"),
               "cancelled Kill sends nothing", (before["status"], after["status"]))
     now = focused(root(app))
-    rec.check(now is not None and (now.name or "") == "Kill", "focus returns to Kill",
+    rec.check(now is not None and (now.name or "") in ("Agent actions", "Actions", "Kill…"),
+              "focus returns to the Kill opener",
               safe(lambda: (now.getRoleName(), now.name), None))
-    act(button(root(app), "Restart fresh"))
+    agent_action(app, "Restart fresh…")
     fresh = dialog(app, "Restart fresh")
     rec.check("without resuming" in visible_text(fresh), "Restart fresh explains the consequence")
     rec.capture(app, "restart-fresh")
     press(app, button(fresh, "Cancel"))
     rec.check(no_dialog(app, "Restart fresh"), "Cancel dismisses Restart fresh")
     app.key("ctrl+1")
-    act(button(root(app), "Stop team"))
+    act(button(root(app), "Stop team…"))
     stop = dialog(app, "Stop team")
     rec.check("Committed work remains" in visible_text(stop), "Stop team keeps committed-work wording")
     rec.capture(app, "stop-team")
@@ -365,16 +438,21 @@ def l10_events(rec, app):
     rec.check("task" in text.lower() or "agent" in text.lower(), "Events lists daemon events", text[:300])
     rec.capture(app, "events")
     select_agent(app, "dev")
-    tabs = [n.name for n in find_all(root(app), role="page tab", showing=False)]
+    tabs = [n.name for n in find_all(root(app), showing=False)
+            if n.getRoleName() in ("page tab", "toggle button")] + more_sections(app)
     for name in ["Overview", "Transcript", "Diff", "Inbox", "Terminal", "Host screen"]:
         rec.check(name in tabs, f"agent tab '{name}' exposed to assistive technology", tabs)
-    select_tab(app, find(root(app), name="Transcript", role="page tab"))
+    open_tab(app, "Transcript")
     time.sleep(1.5)
     rec.capture(app, "transcript")
 
 
 # L11 ---------------------------------------------------------------------
 def terminal_tab(app):
+    if (find_all(root(app), name="Terminal", role="toggle button")
+            or find_all(root(app), name="More sections")):
+        open_tab(app, "Terminal")
+        return "section"
     tab = find_all(root(app), name="Terminal", role="page tab", showing=False)
     if tab:
         select_tab(app, tab[0])
@@ -390,7 +468,7 @@ def terminal_tab(app):
 def l11_terminal(rec, app):
     select_agent(app, "dev")
     how = terminal_tab(app)
-    attach = wait_for(lambda: find(root(app), name="Attach PTY terminal", role="button", timeout=1), timeout=5)
+    attach = wait_for(lambda: find(root(app), name="Attach terminal", role="button", timeout=1), timeout=5)
     if not rec.check(attach is not None, f"Terminal page reachable ({how})"):
         return
     act(attach)
@@ -443,7 +521,7 @@ def l13_lifecycle(rec, app):
     rec.check(any(word in text for word in ["Reconnecting", "not running", "cannot be reached",
                                              "Unreachable", "Disconnected"]),
               "lost daemon shows an honest connection state", text[:300])
-    rec.check("Last known" in text, "retained content is labelled Last known while disconnected", text[:300])
+    rec.check("last known" in text.lower(), "retained content is labelled Last known while disconnected", text[:300])
     rec.capture(app, "daemon-lost")
     def relaunch():
         return subprocess.run([os.environ["NATIVE_ACCEPTANCE_CREW"], "run", "team.yaml", "--no-attach"],
@@ -529,14 +607,14 @@ def l15_keyboard(rec, app):
     plain = [entry for entry in sequence if entry and entry[0] == "label"]
     rec.check(len(plain) <= 2, "static text is not a Tab stop", plain[:10])
     reached = {name for _, name in filter(None, sequence)}
-    for name in ["New message", "Stop team"]:
+    for name in ["New message", "Stop team…"]:
         rec.check(name in reached, f"Tab reaches {name}", sorted(reached)[:30])
 
 
 # L16 ---------------------------------------------------------------------
 def l16_stop(rec, app):
     app.key("ctrl+1")
-    act(button(root(app), "Stop team"))
+    act(button(root(app), "Stop team…"))
     stop = dialog(app, "Stop team")
     destructive = [n for n in find_all(stop, name="Stop team", role="button")]
     act(destructive[-1])

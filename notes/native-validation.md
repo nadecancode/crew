@@ -229,6 +229,7 @@ isolated run, not operator credentials.
 | C12 | N01 C12 | Private Secret Service store ready; memory-only storage not offered while it is; the label is not presented as verification. |
 | C04 | N01 C04 | No host window: one bounded refusal, no pending intent, no retry. |
 | C05 | N01 C05 | After `crew native enroll`, all four code groups equal the host's pending code, each with its own accessible label; the host sees the typed label; no device-side Approve. |
+| C10 | N01 C10 | A host-console approval with a wrong comparison code is refused; the app shows no grant, no device is registered and the same request stays pending. |
 | C06 | N01 N02 C06 C09 | Host approves Read for the workspace; app shows Access granted and only that workspace. |
 | C08 | N01 C08 C18 | Read, Control and Terminal disclosures and the no-sandbox sentence; Disconnect, revoke instructions and local removal offered. |
 | C07 | N08 N11 C07 | Read-only device: Pause and Attach disabled, Control and Terminal named as required, no message dispatched. |
@@ -237,8 +238,7 @@ isolated run, not operator credentials.
 | C16 | N13 C16 | Host revocation ends Live, the app explains it and the team keeps running. |
 | C18 | N13 C18 | Remove from this app explains local key retirement and the remaining host access. |
 
-C09 empty/filtered listings, C10 rejected or expired comparisons, C11 lost
-approval reply, C13 network loss, C17 expiry and renewal and the screen-reader
+C09 empty/filtered listings, C10 expired requests, C11 lost approval reply, C13 network loss, C17 expiry and renewal and the screen-reader
 part of C19 are not yet scripted. The unavailable-keyring path of C12 needs a
 run without the private keyring.
 
@@ -255,6 +255,8 @@ process and removed the runtime directory in every run listed.
 | `acceptance-local-8-scale2` | same, `--scale 2` | L02, L03, L14 pass; L01 the same copy checks. |
 | `acceptance-local-10` | main `b3238139` (gateway app); app `a724c362…`, CLI `6751cd77…` | Local 90/101: as above, and the busy error is gone (graph `fc26357d`). |
 | `acceptance-gateway-8` | same `b3238139` binaries | Gateway 61/62 checks: every case except C14 passes. |
+| `acceptance-local-12` | main `5b0359c9` (content polish and interaction); app `45cb0d22…`, CLI `ebd1a942…` | Local 101/101 checks: L01–L16 pass. |
+| `acceptance-gateway-11` | same `5b0359c9` binaries | Gateway 67/67 checks: C01–C08, C10, C12, C14–C16, C18 pass, including restart then revoke. |
 
 | Finding | Case | Observed on `b3238139` |
 | --- | --- | --- |
@@ -270,14 +272,15 @@ process and removed the runtime directory in every run listed.
 | Stopped gateway leaves a contradictory status | C14 | `Disconnected · Live` |
 | Fast keyboard navigation reported the client busy | L15 | `The client is busy. Try again.` on `19b779bf`; fixed by `fc26357d` |
 
+On `5b0359c9` every finding above is fixed: the local and gateway suites pass
+completely with the polished controls (Actions menu, `Stop team…`, `Attach
+terminal`, section buttons, `Live` / `Not connected`).
+
 The inspector's lists also kept glyph remnants after switching agents
 (`captures/L08-paused.png`); content attributes these to Cairo damage under
-Xvfb. The summary read `1 questions`. Neither is asserted. Findings went to
-their owners: copy and lifecycle to content, keyboard and focus to scheduler,
-the request backlog to graph. Content's pending polish renames controls
-(`Stop team…`, `Kill…` and `Restart fresh…` in an Agent actions menu,
-`Attach terminal`, Connections `Connect`); the cases need those names once
-it lands.
+Xvfb. The summary read `1 questions` (now `asker asked a question`). Neither
+is asserted. Findings went to their owners: copy and lifecycle to content,
+keyboard and focus to scheduler, the request backlog to graph.
 
 ## Shared core and one conformance corpus
 
