@@ -131,7 +131,12 @@ impl AppearanceController {
             Appearance::Light => false,
         };
         self.applying.set(true);
-        self.settings.set_gtk_application_prefer_dark_theme(dark);
+        // GtkSettings may notify/reload its native theme even for an equal
+        // assignment. Multiple retained windows must not repeatedly reload
+        // the theme in response to each other's unchanged preference.
+        if self.settings.is_gtk_application_prefer_dark_theme() != dark {
+            self.settings.set_gtk_application_prefer_dark_theme(dark);
+        }
         self.applying.set(false);
         if high_contrast {
             // Empty provider yields all colors to the platform's contrast theme.

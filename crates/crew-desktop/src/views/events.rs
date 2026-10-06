@@ -1,0 +1,153 @@
+use std::rc::Rc;
+
+use crew_client::api::*;
+use gtk::prelude::*;
+
+use super::common::{self, EntityList, Select};
+
+#[derive(Clone)]
+pub struct EventsView {
+    pub root: gtk::Box,
+    list: EntityList,
+    empty: gtk::ScrolledWindow,
+    older: gtk::Button,
+}
+
+impl EventsView {
+    pub fn new(select: Select, filter: Rc<dyn Fn(EventFilter)>, older: Rc<dyn Fn()>) -> Self {
+        let root = gtk::Box::new(gtk::Orientation::Vertical, 8);
+        let controls = gtk::FlowBox::new();
+        controls.set_selection_mode(gtk::SelectionMode::None);
+        controls.set_min_children_per_line(1);
+        controls.set_max_children_per_line(3);
+        let search = gtk::SearchEntry::new();
+        search.set_hexpand(true);
+        search.set_placeholder_text(Some("Filter loaded events"));
+        search.update_property(&[gtk::accessible::Property::Label("Filter loaded events")]);
+        let vcs = gtk::CheckButton::with_label("VCS only");
+        let agent = gtk::Entry::builder()
+            .placeholder_text("Agent filter")
+            .build();
+        agent.update_property(&[gtk::accessible::Property::Label("Event agent filter")]);
+        let level = gtk::ComboBoxText::new();
+        level.append(Some(""), "All levels");
+        for value in crew_protocol::EventLevel::ALL {
+            level.append(Some(value.as_str()), value.as_str());
+        }
+        level.set_active(Some(0));
+        level.update_property(&[gtk::accessible::Property::Label("Event level filter")]);
+        let changed: Rc<dyn Fn()> = Rc::new({
+            let search = search.downgrade();
+            let vcs = vcs.downgrade();
+            let agent = agent.downgrade();
+            let level = level.downgrade();
+            move || {
+                let (Some(search), Some(vcs), Some(agent), Some(level)) = (
+                    search.upgrade(),
+                    vcs.upgrade(),
+                    agent.upgrade(),
+                    level.upgrade(),
+                ) else {
+                    return;
+                };
+                filter(EventFilter {
+                    agent_id: (!agent.text().is_empty()).then(|| agent.text().to_string()),
+                    level: level.active_id().and_then(|id| id.parse().ok()),
+                    text: search.text().to_string(),
+                    vcs_only: vcs.is_active(),
+                });
+            }
+        });
+        search.connect_search_changed({
+            let changed = changed.clone();
+            move |_| changed()
+        });
+        vcs.connect_toggled({
+            let changed = changed.clone();
+            move |_| changed()
+        });
+        agent.connect_changed({
+            let changed = changed.clone();
+            move |_| changed()
+        });
+        level.connect_changed(move |_| changed());
+        root.append(&search);
+        controls.insert(&agent, -1);
+        controls.insert(&level, -1);
+        controls.insert(&vcs, -1);
+        root.append(&controls);
+        let list = EntityList::new("Events", select);
+        let empty = super::empty_state(
+            "view-list-bullet-symbolic",
+            "No events in this view",
+            "Filters apply to loaded history. Older evidence may still be available.",
+        );
+        root.append(list.widget());
+        root.append(&empty);
+        let older_button = gtk::Button::with_label("Load older");
+        older_button.connect_clicked(move |_| older());
+        root.append(&older_button);
+        Self {
+            root,
+            list,
+            empty,
+            older: older_button,
+        }
+    }
+    pub fn update(&self, scope: Option<&ClientScope>, page: &EventPage, live: bool) {
+        self.older
+            .set_sensitive(live && (page.has_older_local || page.may_have_older_remote));
+        self.empty.set_visible(page.items.is_empty());
+        self.list.root.set_visible(!page.items.is_empty());
+        let Some(scope) = scope else {
+            self.list.replace(Vec::new());
+            return;
+        };
+        self.list.replace(
+            page.items
+                .iter()
+                .filter_map(|event| {
+                    let seq = u64::try_from(event.seq).ok()?;
+                    let body = common::column();
+                    body.append(&common::text(&format!(
+                        "{} · {} · {}",
+                        event.level,
+                        event.event_type,
+                        event.agent_id.as_deref().unwrap_or("Team")
+                    )));
+                    body.append(&common::text(&event.message));
+                    body.append(&common::text(&format!(
+                        "Sequence {} · {}",
+                        event.seq,
+                        common::timestamp(event.timestamp)
+                    )));
+                    Some((
+                        EntityKey {
+                            scope: scope.clone(),
+                            entity: Entity::Event(seq),
+                        },
+                        body.upcast(),
+                        format!(
+                            "{}, {}, {}, {}",
+                            event.seq, event.level, event.event_type, event.message
+                        ),
+                    ))
+                })
+                .collect(),
+        );
+    }
+}
+
+pub fn detail(event: Option<&crew_protocol::Event>) -> gtk::ScrolledWindow {
+    let body = common::column();
+    let Some(event) = event else {
+        body.append(&common::heading("Event not retained"));
+        return common::scroll(&body);
+    };
+    body.append(&common::heading(&event.event_type));
+    common::fact(&body, "Level", event.level.as_str());
+    common::fact(&body, "Agent", event.agent_id.as_deref().unwrap_or("Team"));
+    common::fact(&body, "Sequence", &event.seq.to_string());
+    body.append(&common::text(&event.message));
+    common::scroll(&body)
+}

@@ -1,24 +1,22 @@
 # Crew for Linux
 
-This package owns the native GTK window, local navigation, appearance, and view
-composition. The foundation starts genuinely disconnected: it loads no domain
-records, discovers no socket, and dispatches no daemon action. The shared client
-and approved transport are integrated in the subsequent native UI cards. A
-successful launch of this foundation is not a connected application result.
+Crew's Linux application uses GTK widgets and a VTE terminal. It shares the
+Rust client reducer, projections, action planner and native transport with the
+other native applications. There is no embedded browser or webview.
 
-The application uses the provisional local ID `dev.crew.Crew`, display name
-`Crew`, and the existing Crew diamond icon. Closing the window or choosing Quit
-only closes the client. The package makes no domain ownership, signing, portable
-binary, or publication claim.
+The local application is being validated by `native-linux-ui`. Remote profiles,
+gateway enrollment and device key storage belong to `native-linux-gateway`.
+The provisional application ID is `dev.crew.Crew`; this package makes no domain
+ownership, signing or distribution claim. Closing Crew or choosing Quit closes
+the client and leaves the team running. Stop team is a separate confirmed action.
 
-## Build and inspect
+## Build and run
 
 Native Rust is 1.93 (verified toolchain 1.93.1). GTK4-rs is pinned to 0.10.3 with
-the `v4_6` API feature: custom native menu-button labels need ellipsis at narrow
-widths and enlarged text sizes. The system API floor is GTK 4.6; local execution
-uses the reviewed Nix GTK 4.22.4 environment. Older distributions have not been
-tested. Resources are embedded by `glib-compile-resources`; startup does not
-depend on the working directory or an adjacent source tree.
+the `v4_6` API feature; VTE4-rs is pinned to 0.9.0. The reviewed Nix environment
+supplies GTK 4.22.4 and VTE 0.84.1. Older distribution toolkits have not been
+verified. Resources are embedded by `glib-compile-resources`; startup does not
+depend on an adjacent source tree.
 
 ```sh
 export NATIVE_NIXPKGS=/nix/store/ab93n7qqycnn3xfdnav0wnqqigvddd5r-source
@@ -27,65 +25,81 @@ cargo -V
 scripts/native/linux-build.sh -j 2
 scripts/native/linux-smoke.sh -- "$PWD/target/native-validation/cargo/debug/crew-desktop"
 crates/crew-desktop/tests/run-window-test.sh
-# Actual key events and captures on the same isolated display; xdotool is a
-# test tool, not an application dependency.
+crates/crew-desktop/tests/run-window-test.sh --client
 nix-shell -I nixpkgs="$NATIVE_NIXPKGS" -p xdotool --run \
   'crates/crew-desktop/tests/run-window-test.sh --keyboard'
 ```
 
-The native runners use their own display, session bus, and configuration/state
-directories under `target/native-validation`. They do not drive the operator's
-desktop. The GTK test runs on one initialization thread and explicitly uses
-`GTK_A11Y=test` to assert native accessibility metadata; it does not establish a
-screen-reader journey. Appearance respects native contrast settings and text
-scaling, with no animated page transitions.
+Default features are empty. `native-ui` enables Linux-only GTK/VTE and portable
+projection types; `local` enables the real local Rust service. The GUI build
+runner enables both. Default CLI builds need no GTK development environment.
+QA owns the final shared workspace/lock registration; its bounded dependency
+changes are delivered separately from the desktop source.
 
-Default features are empty. The executable requires `native-ui`; GTK is optional
-and Linux-only. `local` is reserved for the later approved adapter and currently
-enables no transport. Default CLI/workspace builds need no GTK development
-environment. Shared workspace/lock registration belongs to QA; its native delta
-is delivered separately from these package sources.
+## Presentation and service ownership
 
-## Composition and ownership
+The five destinations are Team, Tasks, Messages, Events and Usage. Native lists
+and graphs share qualified entity keys and the same Rust projections. The
+controller retains selections per destination; native scrolling and graph zoom
+remain local presentation state. Graphs consume the shared task layers and
+satellite relationships; they do not calculate domain work or eligibility.
 
-`application.rs`, `shell.rs`, `navigation.rs`, `adaptive.rs`, `appearance.rs`,
-`resources/**`, `data/**`, and the foundation tests belong to the Linux shell.
-`Destination` is a local navigation identity, not a copy of a shared domain type.
-The persistent destinations are Team, Tasks, Messages, Events, and Usage.
+`service.rs` runs protected discovery and all `NativeSession` calls on a Rust
+worker. Bounded typed channels deliver notices, query results and terminal
+chunks to GTK's main context. Widgets do no socket, credential, file or protocol
+IO. A native instance tag and the full `ClientScope` reject late callbacks after
+service replacement, workspace switch or loss of access. Shared Rust owns
+history retention, cursors, resource status, retries and action decisions.
 
-The Linux content card owns `src/views/{team,tasks,messages,events,usage,inspector,
-connections}.rs` and its content tests. The later service/terminal integration
-owns its adapter files within this package. `src/views/mod.rs` currently supplies
-honest disconnected and no-selection widgets; the content owner adds the module
-exports there. No engine or service method stub exists in the foundation.
+`controller.rs` routes projections, local selection, drafts, dialogs and user
+invocations. Agent controls render shared availability. The separate immutable
+intent-availability API is a remaining completion dependency for workspace and
+form controls; the current source checkpoint does not claim that gate passed.
+Plans are used only for explicit invocation. Only Kill, Restart fresh, Restart
+after limit and Stop team open confirmations; Cancel is initially safe/default.
+Software-keyboard Return adds a newline; Send, Answer and Submit prompt are
+explicit buttons. Command-shaped input uses the shared slash parser and never
+falls through to a team message.
 
-`Shell::set_main(destination, widget)` supplies a complete native main view.
-`set_detail(destination, title, widget)` supplies evidence without opening the
-pane or moving focus. `set_workspace_selector(widget)` and `set_status_widget`
-provide native header/status composition slots. The content/service owner must
-validate scope, selection, grants, and read freshness before replacing a slot.
-Graph/terminal views own their scrolling; the shell never wraps them in HTML.
-
-`connect_destination_changed` observes local navigation. `navigate`,
-`set_detail_visible`, `toggle_sidebar`, and `back` perform local presentation
-only. Page widgets persist across destination changes and pane collapse. At
-constrained width or enlarged text, sidebar/details use the same widgets through
-in-window navigation. Visible header/menu controls always restore hidden panes.
-Main-view focus returns to its retained widget where it still exists, then to a
-focusable item or the destination control. Feature views own the more specific
-entity-row fallback after a selected row disappears.
+A successful Attach notice creates a renderer identified by native instance,
+full scope and attachment ID before any output is displayed. A later plan
+continuation associates that existing renderer with its captured agent panel;
+it cannot reset or revive an ended terminal. Unknown/pre-attach chunks are
+discarded and counted. VTE receives bytes from the shared service and never
+spawns a local process. Input is confined to the focused, live terminal; end,
+detach or disconnect makes it read-only. No terminal bytes are replayed after
+reconnect. OSC output does not open links, change application identity or write
+the clipboard. Native Copy selection is an explicit user action. Evidence and
+artifact paths remain selectable/copyable text; no host file is fetched.
 
 Ctrl+1–5 select destinations; Ctrl+B toggles the sidebar; Ctrl+I toggles details;
-Alt+Left returns from compact navigation/details; F1 opens native shortcut help;
-Ctrl+W closes the window; Ctrl+Q quits. Native sidebar selection remains distinct
-from keyboard focus. Appearance and Help stay outside the five destinations.
-Escape dismisses shortcut help and restores its opener. The keyboard capture
-runner checks real destination hotkeys and local close/back controls. Its dark
-capture invokes the same exported local GAction as the native appearance menu;
-it adds no daemon call or test-only application API.
+Alt+Left returns from compact navigation/details; F1 opens shortcut help;
+Ctrl+W closes the window; Ctrl+Q quits. Appearance follows native contrast and
+text settings. Dark app-owned surfaces remain neutral. There are no continuous
+decorative animations or graph refits after every push.
+
+## Validation boundaries
+
+The runners create their own X11 display, session bus and private configuration,
+state and registry under `target/native-validation`; they do not drive the
+operator's desktop or running team. GTK initializes on one test thread.
+`GTK_A11Y=test` checks accessibility metadata, not a completed screen-reader
+journey. `--client` uses a recording service for deterministic presentation
+cases, then the production service against a real disposable daemon and real
+shell PTY. Screenshots are named `fixture-*` and `live-local-*` accordingly.
+
+A lagging worker can supply `CREW_NATIVE_UI_TEST_MANIFEST` pointing to an exact
+reviewed prerequisite archive below its own `target/native-validation`. The
+runner checks that location, preserves private display/state isolation and uses
+the locked dependencies. A staged result must name its prerequisite source
+checkpoint; it is not a default CLI or all-workspace compatibility claim.
+
+The local source checkpoint still needs the reviewed immutable availability
+consumer, final source review and the final connected UI/accessibility matrix.
+Gateway verification and Apple execution are separate gates; Apple verification
+is deferred by the operator. Native Linux success never implies Apple success.
 
 For local installation, place `data/dev.crew.Crew.desktop` in the applications
-directory and `resources/icons/scalable/apps/dev.crew.Crew.svg` in the scalable
-application-icon directory of the chosen prefix. Install the executable in that
-prefix's `bin`. The embedded icon and CSS remain available without an installation;
-distribution packaging and installed-launcher verification are later work.
+directory, `resources/icons/scalable/apps/dev.crew.Crew.svg` in the scalable
+application-icon directory and the executable in `bin`. Installed-launcher and
+distribution verification are separate from a development build/run.

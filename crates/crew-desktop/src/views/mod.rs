@@ -5,6 +5,17 @@ use gtk::prelude::*;
 
 use crate::navigation::Destination;
 
+pub mod agent;
+pub mod common;
+pub mod events;
+pub mod evidence;
+pub mod graph;
+pub mod messages;
+pub mod task_detail;
+pub mod tasks;
+pub mod team;
+pub mod usage;
+
 pub fn disconnected(destination: Destination) -> gtk::ScrolledWindow {
     let (title, description) = match destination {
         Destination::Team => (

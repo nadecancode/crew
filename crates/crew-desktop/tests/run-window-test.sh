@@ -7,13 +7,14 @@ cd "$native_repo"
 
 if [ "${1:-}" != --inside-session ]; then
     case "${1:-}" in
-        ""|--keyboard) native_mode=${1:-} ;;
-        *) echo "usage: tests/run-window-test.sh [--keyboard]" >&2; exit 64 ;;
+        ""|--keyboard|--client) native_mode=${1:-} ;;
+        *) echo "usage: tests/run-window-test.sh [--keyboard|--client]" >&2; exit 64 ;;
     esac
     native_new_output "${NATIVE_LINUX_TEST_OUT:-}" linux-window-test
     mkdir -p "$NATIVE_RUN_DIR"/{runtime,state,config,cache}
     chmod 700 "$NATIVE_RUN_DIR/runtime"
     unset CREW_IDENTITY CREW_SOCKET CREW_LAUNCH AT_SPI_BUS_ADDRESS
+    unset GIT_DIR GIT_WORK_TREE GIT_INDEX_FILE GIT_COMMON_DIR GIT_OBJECT_DIRECTORY GIT_ALTERNATE_OBJECT_DIRECTORIES GIT_NAMESPACE
     export XDG_RUNTIME_DIR="$NATIVE_RUN_DIR/runtime" XDG_STATE_HOME="$NATIVE_RUN_DIR/state"
     export XDG_CONFIG_HOME="$NATIVE_RUN_DIR/config" XDG_CACHE_HOME="$NATIVE_RUN_DIR/cache"
     export CREW_GLOBAL_CONFIG="$NATIVE_RUN_DIR/config/crew.toml"
@@ -59,6 +60,16 @@ if [ "$native_mode" = --keyboard ]; then
     unset GTK_A11Y
     cargo build --locked -p crew-desktop --features native-ui,local -j 2 2>&1 | tee "$native_out/build.log"
     "$native_repo/crates/crew-desktop/tests/keyboard.sh" "$native_out" "$CARGO_TARGET_DIR/debug/crew-desktop"
+elif [ "$native_mode" = --client ]; then
+    export GTK_A11Y=test CREW_NATIVE_UI_TEST_PRIVATE=1 CREW_NATIVE_UI_EVIDENCE_DIR="$native_out"
+    native_manifest=${CREW_NATIVE_UI_TEST_MANIFEST:-$native_repo/Cargo.toml}
+    # A lagging worker may stage exact reviewed runtime prerequisites below its
+    # own artifact root; never substitute another checkout or operator state.
+    case "$native_manifest" in "$native_repo/Cargo.toml"|"$native_repo/target/native-validation/"*/Cargo.toml) ;;
+        *) echo "test manifest must stay in this checkout" >&2; exit 64 ;;
+    esac
+    cargo test --locked --manifest-path "$native_manifest" -p crew-desktop --features native-ui,local --lib -- --nocapture 2>&1 | tee "$native_out/test.log"
+    echo "native client assertions passed; evidence $native_out"
 else
     # GTK's test context retains metadata queried by the native assertions.
     # This is not a screen-reader/AT-SPI journey result.

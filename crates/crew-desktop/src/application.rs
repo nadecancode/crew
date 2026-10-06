@@ -25,12 +25,32 @@ pub fn build() -> gtk::Application {
         .application_id(APPLICATION_ID)
         .build();
     let shell = Rc::new(RefCell::new(None::<Shell>));
+    #[cfg(feature = "local")]
+    let controller = Rc::new(RefCell::new(None::<Rc<crate::controller::Controller>>));
     app.connect_startup(|_| register_resources());
     app.connect_activate(move |app| {
         if let Some(window) = app.windows().first() {
             window.present();
         } else {
             let window = Shell::new(app);
+            #[cfg(feature = "local")]
+            {
+                *controller.borrow_mut() =
+                    Some(crate::controller::Controller::start(window.clone()));
+            }
+            let shell_owner = Rc::downgrade(&shell);
+            #[cfg(feature = "local")]
+            let client_owner = Rc::downgrade(&controller);
+            window.window().connect_close_request(move |_| {
+                if let Some(owner) = shell_owner.upgrade() {
+                    owner.borrow_mut().take();
+                }
+                #[cfg(feature = "local")]
+                if let Some(owner) = client_owner.upgrade() {
+                    owner.borrow_mut().take();
+                }
+                glib::Propagation::Proceed
+            });
             window.window().present();
             *shell.borrow_mut() = Some(window);
         }
