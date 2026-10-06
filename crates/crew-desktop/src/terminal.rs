@@ -200,6 +200,7 @@ impl TerminalView {
             let listener = this.listener.clone();
             move |detach| {
                 let current = binding.borrow().clone();
+                let had_focus = detach.is_focus();
                 active.set(false);
                 detach.set_sensitive(false);
                 if let Some(terminal) = terminal.upgrade() {
@@ -211,6 +212,11 @@ impl TerminalView {
                 let notify = listener.borrow().clone();
                 if let Some(notify) = notify {
                     notify(false);
+                }
+                // Focus moves back to the control before Detach (Attach, now
+                // available again) rather than being lost with it.
+                if had_focus {
+                    crate::shell::focus_past(detach.upcast_ref(), gtk::DirectionType::TabBackward);
                 }
                 if let Some((scope, attachment_id)) = current {
                     action(ActionIntent::Detach {
@@ -274,10 +280,14 @@ impl TerminalView {
     }
     fn changed(&self) {
         let active = self.is_active();
+        let had_focus = self.detach.is_focus();
         self.detach.set_sensitive(self.active.get());
         let listener = self.listener.borrow().clone();
         if let Some(listener) = listener {
             listener(active);
+        }
+        if had_focus && !self.detach.is_sensitive() {
+            crate::shell::focus_past(self.detach.upcast_ref(), gtk::DirectionType::TabBackward);
         }
     }
     pub fn accept(&self, chunk: &TerminalChunk) -> bool {

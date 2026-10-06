@@ -766,9 +766,15 @@ fn keyboard_focus(c: &Controller, recorder: &Recording, core: &ClientCore) {
     until(|| own_copy.is_sensitive());
     standalone.terminal.unselect_all();
     until(|| !own_copy.is_sensitive());
+    own_detach.grab_focus();
     own_detach.emit_clicked();
     assert_eq!(attached.get(), Some(false));
     assert!(!own_detach.is_sensitive());
+    assert!(
+        gtk::prelude::GtkWindowExt::focus(&holder)
+            .is_some_and(|f| f != own_detach.clone().upcast::<gtk::Widget>()),
+        "Detach hands focus on instead of losing it"
+    );
     // An adopted renderer reports through the panel that adopted it.
     let renderer = TerminalView::new(Rc::new(|_| ()));
     renderer.bind(scope(), 52);

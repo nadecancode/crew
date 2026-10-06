@@ -390,8 +390,16 @@ impl Shell {
     }
 
     /// Replace a destination's native main view without recreating other pages.
+    /// Focus that was in the replaced page, or nowhere, goes to the new
+    /// page's first control rather than being lost.
     pub fn set_main(&self, destination: Destination, widget: &impl IsA<gtk::Widget>) {
-        replace_child(&self.0.main_slots[destination.index()], widget);
+        let slot = &self.0.main_slots[destination.index()];
+        let orphaned = gtk::prelude::GtkWindowExt::focus(&self.0.window)
+            .is_none_or(|focus| focus.is_ancestor(slot));
+        replace_child(slot, widget);
+        if orphaned && destination == self.destination() {
+            self.focus_visible_view();
+        }
     }
 
     /// Updating detail content never opens it or steals focus. Feature views
