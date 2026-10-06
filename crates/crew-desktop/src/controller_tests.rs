@@ -332,11 +332,12 @@ fn gtk_scoped_views_confirmation_terminal_order_and_live_local_service() {
         "late continuation cannot revive/reset the ended renderer"
     );
     let renderer = c.attachments.borrow()[0].2.clone();
-    let tabs = descendants(inspector.root.upcast_ref())
+    descendants(inspector.root.upcast_ref())
         .into_iter()
-        .find_map(|w| w.downcast::<gtk::Notebook>().ok())
-        .unwrap();
-    tabs.set_current_page(Some(4));
+        .filter_map(|w| w.downcast::<gtk::ToggleButton>().ok())
+        .find(|tab| tab.label().as_deref() == Some("Terminal"))
+        .expect("Terminal tab")
+        .set_active(true);
     until(|| renderer.terminal.is_realized());
     renderer.terminal.select_all();
     renderer.terminal.copy_clipboard_format(vte4::Format::Text);
@@ -1233,11 +1234,8 @@ fn live_local(app: &gtk::Application) {
     eprintln!("Private daemon discovered");
     c.connections();
     let dialog = c.auxiliary.borrow().last().unwrap().clone();
-    button(
-        dialog.upcast_ref::<gtk::Widget>(),
-        "Connect to local workspace",
-    )
-    .emit_clicked();
+    // One local workspace, not yet connected: its row offers Connect only.
+    button(dialog.upcast_ref::<gtk::Widget>(), "Connect").emit_clicked();
     live_until(&c, || c.live.get());
     eprintln!("Private daemon live");
     assert_eq!(
@@ -1321,16 +1319,15 @@ fn live_local(app: &gtk::Application) {
     c.select(agent_key.clone());
     live_until(&c, || c.agent.borrow().as_ref().unwrap().1.root.is_mapped());
     let agent = c.agent.borrow().as_ref().unwrap().1.clone();
-    live_until(&c, || {
-        button(&agent.root, "Attach terminal").is_sensitive()
-    });
+    live_until(&c, || button(&agent.root, "Attach terminal").is_sensitive());
     button(&agent.root, "Attach terminal").emit_clicked();
     live_until(&c, || agent.terminal.is_active());
-    let tabs = descendants(agent.root.upcast_ref())
+    descendants(agent.root.upcast_ref())
         .into_iter()
-        .find_map(|w| w.downcast::<gtk::Notebook>().ok())
-        .unwrap();
-    tabs.set_current_page(Some(4));
+        .filter_map(|w| w.downcast::<gtk::ToggleButton>().ok())
+        .find(|tab| tab.label().as_deref() == Some("Terminal"))
+        .expect("Terminal tab")
+        .set_active(true);
     let (scope, attachment_id) = agent.terminal.binding().unwrap();
     let renderer = c
         .attachments

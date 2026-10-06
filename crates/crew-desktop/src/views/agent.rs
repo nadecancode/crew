@@ -79,10 +79,9 @@ impl AgentInspector {
             panic!("agent inspector key")
         };
         let root = gtk::Box::new(gtk::Orientation::Vertical, 0);
-        let tabs = gtk::Notebook::new();
-        tabs.set_scrollable(true);
-        tabs.set_hexpand(true);
-        tabs.set_vexpand(true);
+        // Six sections: the tab row wraps at narrow widths rather than
+        // scrolling tabs out of reach.
+        let tabs = common::Tabs::new("Agent sections");
         let mut controls = Vec::new();
 
         // Header: who this is, its state, and the two everyday actions. The
@@ -141,11 +140,31 @@ impl AgentInspector {
         // Pause and Unpause share one place; the agent's state picks which.
         for (name, kind, action, destructive) in [
             ("Pause", ActionKind::Pause, Some(AgentAction::Pause), false),
-            ("Unpause", ActionKind::Resume, Some(AgentAction::Resume), false),
-            ("Compact", ActionKind::Compact, Some(AgentAction::Compact), false),
-            ("Restart", ActionKind::Restart, Some(AgentAction::Restart), false),
+            (
+                "Unpause",
+                ActionKind::Resume,
+                Some(AgentAction::Resume),
+                false,
+            ),
+            (
+                "Compact",
+                ActionKind::Compact,
+                Some(AgentAction::Compact),
+                false,
+            ),
+            (
+                "Restart",
+                ActionKind::Restart,
+                Some(AgentAction::Restart),
+                false,
+            ),
             ("Model and CLI…", ActionKind::SetModel, None, false),
-            ("Jump to host pane", ActionKind::Focus, Some(AgentAction::Focus), false),
+            (
+                "Jump to host pane",
+                ActionKind::Focus,
+                Some(AgentAction::Focus),
+                false,
+            ),
             (
                 "Restart fresh…",
                 ActionKind::RestartFresh,
@@ -224,10 +243,7 @@ impl AgentInspector {
             .child(&process.root)
             .build();
         overview.append(&process_group);
-        tabs.append_page(
-            &common::scroll(&overview),
-            Some(&gtk::Label::new(Some("Overview"))),
-        );
+        tabs.append("Overview", &common::scroll(&overview));
         let mut evidence = Vec::new();
         for (name, kind) in [
             ("Transcript", ResourceKind::Transcript),
@@ -244,22 +260,19 @@ impl AgentInspector {
                 let resource = resource.clone();
                 move || read(resource.clone())
             });
-            tabs.append_page(&view.root, Some(&gtk::Label::new(Some(name))));
+            tabs.append(name, &view.root);
             evidence.push((resource, view));
         }
         let terminal = TerminalView::new(callbacks.action.clone());
         let terminal_page = gtk::Box::new(gtk::Orientation::Vertical, 8);
         terminal_page.append(&terminal.root);
-        let terminal_index =
-            tabs.append_page(&terminal_page, Some(&gtk::Label::new(Some("Terminal"))));
+        let terminal_index = tabs.append("Terminal", &terminal_page);
         attach.connect_clicked({
             let callback = callbacks.attach;
             let key = key.clone();
-            let tabs = tabs.downgrade();
+            let tabs = tabs.clone();
             move |_| {
-                if let Some(tabs) = tabs.upgrade() {
-                    tabs.set_current_page(Some(terminal_index));
-                }
+                tabs.select(terminal_index);
                 callback(key.clone())
             }
         });
@@ -332,11 +345,11 @@ impl AgentInspector {
         });
         screen_page.append(&screen_view.root);
         evidence.push((screen.clone(), screen_view));
-        tabs.append_page(&screen_page, Some(&gtk::Label::new(Some("Host screen"))));
-        tabs.connect_switch_page({
+        tabs.append("Host screen", &screen_page);
+        tabs.connect_switched({
             let evidence: Vec<_> = evidence.iter().map(|(k, _)| k.clone()).collect();
             let read = callbacks.read;
-            move |_, _, index| {
+            move |index| {
                 let slot = match index {
                     1..=3 => Some(index as usize - 1),
                     5 => Some(3),
@@ -347,7 +360,7 @@ impl AgentInspector {
                 }
             }
         });
-        root.append(&tabs);
+        root.append(&tabs.root);
         Self {
             root,
             terminal,

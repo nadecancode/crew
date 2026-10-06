@@ -78,6 +78,95 @@ impl EntityList {
     }
 }
 
+type TabSwitched = Rc<dyn Fn(u32)>;
+
+/// Pages under a row of tabs that wraps instead of scrolling, so every tab
+/// stays visible and reachable by keyboard and assistive technology.
+#[derive(Clone)]
+pub struct Tabs {
+    pub root: gtk::Box,
+    bar: gtk::FlowBox,
+    stack: gtk::Stack,
+    buttons: Rc<RefCell<Vec<gtk::ToggleButton>>>,
+    switched: Rc<RefCell<Vec<TabSwitched>>>,
+}
+
+impl Tabs {
+    pub fn new(label: &str) -> Self {
+        let root = gtk::Box::new(gtk::Orientation::Vertical, 0);
+        let bar = gtk::FlowBox::builder()
+            .selection_mode(gtk::SelectionMode::None)
+            .min_children_per_line(1)
+            .max_children_per_line(8)
+            .column_spacing(4)
+            .row_spacing(4)
+            .halign(gtk::Align::Start)
+            .margin_start(20)
+            .margin_end(20)
+            .build();
+        bar.add_css_class("crew-tabs");
+        bar.update_property(&[gtk::accessible::Property::Label(label)]);
+        root.append(&bar);
+        let stack = gtk::Stack::builder()
+            .hexpand(true)
+            .vexpand(true)
+            .hhomogeneous(false)
+            .vhomogeneous(false)
+            .transition_type(gtk::StackTransitionType::None)
+            .build();
+        stack.add_css_class("crew-tab-pages");
+        root.append(&stack);
+        Self {
+            root,
+            bar,
+            stack,
+            buttons: Rc::default(),
+            switched: Rc::default(),
+        }
+    }
+
+    /// Add a page; the first one is shown. Returns its index.
+    pub fn append(&self, title: &str, page: &impl IsA<gtk::Widget>) -> u32 {
+        let mut buttons = self.buttons.borrow_mut();
+        let index = buttons.len() as u32;
+        let name = index.to_string();
+        self.stack.add_named(page, Some(&name));
+        let button = gtk::ToggleButton::with_label(title);
+        button.add_css_class("flat");
+        button.add_css_class("crew-tab");
+        match buttons.first() {
+            Some(first) => button.set_group(Some(first)),
+            None => button.set_active(true),
+        }
+        button.connect_toggled({
+            let stack = self.stack.clone();
+            let switched = self.switched.clone();
+            move |button| {
+                if button.is_active() {
+                    stack.set_visible_child_name(&name);
+                    let callbacks = switched.borrow().clone();
+                    for callback in callbacks {
+                        callback(index);
+                    }
+                }
+            }
+        });
+        super::add_control(&self.bar, &button);
+        buttons.push(button);
+        index
+    }
+
+    pub fn select(&self, index: u32) {
+        if let Some(button) = self.buttons.borrow().get(index as usize) {
+            button.set_active(true);
+        }
+    }
+
+    pub fn connect_switched(&self, callback: impl Fn(u32) + 'static) {
+        self.switched.borrow_mut().push(Rc::new(callback));
+    }
+}
+
 /// A pane or page body: 24 pixels from the pane edge, 12 between items.
 pub fn column() -> gtk::Box {
     let column = gtk::Box::new(gtk::Orientation::Vertical, 12);
@@ -113,23 +202,31 @@ pub fn row_title(title: &str, chip: Option<gtk::Label>) -> gtk::Box {
     line
 }
 
-/// A row for a place to connect to: its title, detail and state, with room
-/// at the end for the actions that fit that state.
-pub fn entry_row(title: &str, detail: &str, state: &str) -> gtk::Box {
-    let row = gtk::Box::new(gtk::Orientation::Horizontal, 12);
+/// A row for a place to connect to: its title with its state at the end, the
+/// detail below, then the actions that fit that state. Local and gateway
+/// builds present Connections with this one shape.
+pub fn entry_row(title: &str, detail: &str, state: &str, actions: &gtk::Box) -> gtk::Box {
+    let row = gtk::Box::new(gtk::Orientation::Vertical, 4);
     row.add_css_class("crew-row");
-    let lines = gtk::Box::new(gtk::Orientation::Vertical, 4);
-    lines.set_hexpand(true);
+    let head = gtk::Box::new(gtk::Orientation::Horizontal, 8);
     let name = text(title);
     name.add_css_class("heading");
-    lines.append(&name);
+    name.add_css_class("crew-row-title");
+    name.set_hexpand(true);
+    head.append(&name);
+    let state_label = muted(state);
+    state_label.set_wrap(false);
+    state_label.set_xalign(1.0);
+    head.append(&state_label);
+    row.append(&head);
     if !detail.is_empty() {
-        lines.append(&muted(detail));
+        row.append(&muted(detail));
     }
-    if !state.is_empty() {
-        lines.append(&muted(state));
-    }
-    row.append(&lines);
+    actions.set_margin_top(4);
+    row.append(actions);
+    row.update_property(&[gtk::accessible::Property::Label(&format!(
+        "{title}, {state}"
+    ))]);
     row
 }
 

@@ -743,6 +743,7 @@ impl Controller {
         if !self.live.get() {
             self.cancel_confirmation();
         }
+        self.header.set_live(self.live.get());
         let status = crate::lifecycle::status(
             notice.endpoint,
             notice.workspace,
@@ -2596,65 +2597,93 @@ impl Controller {
             .default_height(480)
             .build();
         let body = common::column();
-        body.append(&common::heading("Connections"));
-        body.append(&common::text("Choose a discovered same-host workspace explicitly. Selecting a profile does not join a workspace, start a service or grant access."));
-        if let Some(connection) = self.connection.borrow().as_ref() {
+        body.append(&common::title("Connections"));
+        body.append(&common::muted("Choose a connection explicitly. Selecting a profile does not join a workspace, start a service or grant access."));
+        let connection = self.connection.borrow().clone();
+        if let Some(connection) = connection.as_ref() {
             body.append(&common::text(match connection.mode {
                 ConnectionMode::LocalOperator => "Local operator · full Crew access",
                 ConnectionMode::ScopedGateway => "This device's access · scoped gateway",
             }));
-            for tier in &connection.grant.tiers {
-                body.append(&common::text(&format!("{tier:?}")));
-            }
         }
+        body.append(&common::heading("This computer"));
         if let Some(reason) = self.profile_error.borrow().as_ref() {
-            body.append(&common::text(&reason.message));
+            body.append(&common::warning(&reason.message));
         }
+        let live = self.live.get();
         for profile in self.profiles.borrow().iter() {
-            body.append(&common::text(&format!(
-                "{}\n{}\nLocal workspace · daemon {}",
-                profile.project.as_deref().unwrap_or("Crew"),
-                profile.workspace,
-                profile.daemon_pid
-            )));
-            let connect = gtk::Button::with_label("Connect to local workspace");
-            connect.connect_clicked({
-                let weak = self.weak.clone();
-                let profile = profile.profile.clone();
-                let dialog = dialog.downgrade();
-                move |_| {
-                    if let Some(c) = weak.upgrade() {
-                        c.send(Request::Connect {
-                            profile_id: profile.id.clone(),
-                            endpoint_id: profile.endpoint_id.clone(),
-                            workspace_id: Some(profile.workspace_key.clone()),
-                        });
-                    }
-                    if let Some(dialog) = dialog.upgrade() {
-                        dialog.close();
-                    }
+            let connected = connection
+                .as_ref()
+                .is_some_and(|c| c.scope.workspace_id == profile.profile.workspace_key);
+            let state = match (connected, live) {
+                (false, _) => "Not connected",
+                (true, true) => "Connected",
+                (true, false) => "Reconnecting · last known data",
+            };
+            // Only the actions that fit the state: Connect where not
+            // connected, Disconnect (and Reconnect while not live) where it is.
+            let actions = gtk::Box::new(gtk::Orientation::Horizontal, 8);
+            let requests: &[(&str, u8)] = match (connected, live) {
+                (false, _) => &[("Connect", 0)],
+                (true, true) => &[("Disconnect", 2)],
+                (true, false) => &[("Reconnect", 1), ("Disconnect", 2)],
+            };
+            for &(name, request) in requests {
+                let button = gtk::Button::with_label(name);
+                if request == 0 {
+                    button.add_css_class("suggested-action");
+                    button.update_property(&[gtk::accessible::Property::Label(&format!(
+                        "Connect to local workspace {}",
+                        profile.project.as_deref().unwrap_or("Crew")
+                    ))]);
                 }
-            });
-            body.append(&connect);
+                button.connect_clicked({
+                    let weak = self.weak.clone();
+                    let profile = profile.profile.clone();
+                    let dialog = dialog.downgrade();
+                    move |_| {
+                        if let Some(c) = weak.upgrade() {
+                            c.send(match request {
+                                0 => Request::Connect {
+                                    profile_id: profile.id.clone(),
+                                    endpoint_id: profile.endpoint_id.clone(),
+                                    workspace_id: Some(profile.workspace_key.clone()),
+                                },
+                                1 => Request::Reconnect,
+                                _ => Request::Disconnect,
+                            });
+                        }
+                        if let Some(dialog) = dialog.upgrade() {
+                            dialog.close();
+                        }
+                    }
+                });
+                actions.append(&button);
+            }
+            body.append(&common::entry_row(
+                profile.project.as_deref().unwrap_or("Crew"),
+                &profile.workspace,
+                state,
+                &actions,
+            ));
         }
         if self.profiles.borrow().is_empty() {
-            body.append(&common::text("No local profiles discovered. Start Crew at the host console, then refresh. Protected discovery never scans arbitrary socket paths."));
+            body.append(&common::text("No local workspaces found. Start Crew at the host console, then refresh. Protected discovery never scans arbitrary socket paths."));
         }
+        let current = connection.as_ref().map(|c| c.scope.workspace_id.clone());
         if let Some(listing) = self.listing.borrow().as_ref() {
-            body.append(&common::heading("Joined workspaces"));
-            for entry in &listing.joined {
-                let button = gtk::Button::with_label(&format!(
-                    "{} · {}\n{}{}",
-                    entry.project.as_deref().unwrap_or("Crew"),
-                    entry.state,
-                    entry.workspace,
-                    if entry.detail.is_empty() {
-                        String::new()
-                    } else {
-                        format!("\n{}", entry.detail)
-                    }
-                ));
-                button.connect_clicked({
+            let others: Vec<_> = listing
+                .joined
+                .iter()
+                .filter(|entry| current.as_deref() != Some(entry.id.as_str()))
+                .collect();
+            if !others.is_empty() {
+                body.append(&common::heading("Other joined workspaces"));
+            }
+            for entry in others {
+                let actions = gtk::Box::new(gtk::Orientation::Horizontal, 8);
+                let open = gtk::Button::with_label("Open");
+                open.connect_clicked({
                     let weak = self.weak.clone();
                     let id = entry.id.clone();
                     let dialog = dialog.downgrade();
@@ -2667,35 +2696,36 @@ impl Controller {
                         }
                     }
                 });
-                body.append(&button);
+                actions.append(&open);
+                let detail = if entry.detail.is_empty() {
+                    entry.workspace.clone()
+                } else {
+                    format!("{}\n{}", entry.workspace, entry.detail)
+                };
+                body.append(&common::entry_row(
+                    entry.project.as_deref().unwrap_or("Crew"),
+                    &detail,
+                    &entry.state.to_string(),
+                    &actions,
+                ));
             }
         }
-        for (name, request) in [
-            ("Refresh local profiles", 0),
-            ("Reconnect", 1),
-            ("Disconnect", 2),
-        ] {
-            let button = gtk::Button::with_label(name);
-            button.connect_clicked({
-                let weak = self.weak.clone();
-                let dialog = dialog.downgrade();
-                move |_| {
-                    if let Some(c) = weak.upgrade() {
-                        c.send(match request {
-                            0 => Request::RefreshProfiles,
-                            1 => Request::Reconnect,
-                            _ => Request::Disconnect,
-                        });
-                    }
-                    if let Some(dialog) = dialog.upgrade() {
-                        dialog.close();
-                    }
+        let refresh = gtk::Button::with_label("Refresh");
+        refresh.set_halign(gtk::Align::Start);
+        refresh.connect_clicked({
+            let weak = self.weak.clone();
+            let dialog = dialog.downgrade();
+            move |_| {
+                if let Some(c) = weak.upgrade() {
+                    c.send(Request::RefreshProfiles);
                 }
-            });
-            body.append(&button);
-        }
-        body.append(&common::text("Disconnect or closing Crew leaves the team running. Stop team is a separate confirmed action."));
-        body.append(&common::text("Remote gateway setup is delivered by the separately reviewed connector integration. Browser pairing codes and crew web output are never accepted here."));
+                if let Some(dialog) = dialog.upgrade() {
+                    dialog.close();
+                }
+            }
+        });
+        body.append(&refresh);
+        body.append(&common::muted("Disconnect or closing Crew leaves the team running. Stop team is a separate confirmed action."));
         dialog.content_area().append(&common::scroll(&body));
         dialog.add_button("Close", gtk::ResponseType::Cancel);
         dialog.connect_response(|d, _| d.close());

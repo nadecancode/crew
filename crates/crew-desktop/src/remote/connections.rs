@@ -175,34 +175,10 @@ fn tier_text(tiers: &[GrantTier], tier: GrantTier) -> &'static str {
     }
 }
 
-/// One connection entry with its state and the actions that fit it. Same
-/// shape and classes as `views::common::entry_row`, so local-only and
-/// gateway builds present Connections alike.
+/// One connection entry with its state and the actions that fit it, in the
+/// shape the local-only build uses too.
 fn row(title: &str, detail: &str, state: &str, actions: &gtk::Box) -> gtk::Box {
-    let row = gtk::Box::new(gtk::Orientation::Vertical, 4);
-    row.add_css_class("crew-row");
-    let head = gtk::Box::new(gtk::Orientation::Horizontal, 8);
-    let title_label = gtk::Label::builder()
-        .label(title)
-        .xalign(0.0)
-        .hexpand(true)
-        .wrap(true)
-        .wrap_mode(gtk::pango::WrapMode::WordChar)
-        .build();
-    title_label.add_css_class("crew-row-title");
-    head.append(&title_label);
-    let state_label = gtk::Label::builder().label(state).xalign(1.0).build();
-    state_label.add_css_class("crew-muted");
-    head.append(&state_label);
-    row.append(&head);
-    let detail_label = common::text(detail);
-    detail_label.add_css_class("crew-muted");
-    row.append(&detail_label);
-    row.append(actions);
-    row.update_property(&[gtk::accessible::Property::Label(&format!(
-        "{title}, {state}"
-    ))]);
-    row
+    common::entry_row(title, detail, state, actions)
 }
 
 /// Wide aligned content scrolls sideways instead of truncating identity.
@@ -1965,7 +1941,9 @@ impl Remote {
             .and_then(|p| p.saved_access.as_ref())
             .map(|a| a.device_id.clone());
         // The device ID is typed at the host console: keep it copyable.
-        body.append(&common::selectable(&copy::revoke_instructions(device.as_deref())));
+        body.append(&common::selectable(&copy::revoke_instructions(
+            device.as_deref(),
+        )));
         body.append(&common::text("Revoking ends this device's channels. Commands the host already accepted may finish, and data this device already received is not erased."));
         (body, heading.upcast())
     }
@@ -1980,7 +1958,9 @@ impl Remote {
             .and_then(|p| p.saved_access)
             .map(|a| a.device_id);
         // The device ID is typed at the host console: keep it copyable.
-        body.append(&common::selectable(&copy::revoke_instructions(device.as_deref())));
+        body.append(&common::selectable(&copy::revoke_instructions(
+            device.as_deref(),
+        )));
         let actions = gtk::Box::new(gtk::Orientation::Horizontal, 8);
         let remove = button("confirm-remove", "Remove from this app");
         remove.connect_clicked({

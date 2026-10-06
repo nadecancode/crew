@@ -70,7 +70,10 @@ impl UsageView {
                 &Facts::with(&[
                     ("Input", usage.map(|u| count(u.input_tokens.into()))),
                     ("Output", usage.map(|u| count(u.output_tokens.into()))),
-                    ("Cache read", usage.map(|u| count(u.cache_read_tokens.into()))),
+                    (
+                        "Cache read",
+                        usage.map(|u| count(u.cache_read_tokens.into())),
+                    ),
                     (
                         "Cache written",
                         usage.map(|u| count(u.cache_creation_tokens.into())),
@@ -126,10 +129,7 @@ impl UsageView {
         }
         for group in &data.groups {
             let section = gtk::Box::new(gtk::Orientation::Vertical, 12);
-            section.append(&common::heading(&format!(
-                "{} limits",
-                group.runtime
-            )));
+            section.append(&common::heading(&format!("{} limits", group.runtime)));
             let facts: Vec<(&str, Option<String>)> = group
                 .quotas
                 .iter()

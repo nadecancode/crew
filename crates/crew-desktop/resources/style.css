@@ -14,3 +14,5 @@
 .crew-section-list { background: transparent; }
 .crew-row { padding: 12px 0; }
 .crew-attention { font-weight: bold; }
+/* Wrapping tab row: the selected tab carries an underline in the accent. */
+.crew-tab { border-radius: 0; padding: 8px 12px; }

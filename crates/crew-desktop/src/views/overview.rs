@@ -15,6 +15,8 @@ pub struct OverviewHeader {
     path: gtk::Label,
     objective: gtk::Label,
     counts: gtk::Label,
+    stale: gtk::Label,
+    live: std::rc::Rc<std::cell::Cell<bool>>,
     question: gtk::Label,
     pub answer: gtk::Button,
     warnings: gtk::Box,
@@ -40,6 +42,10 @@ impl OverviewHeader {
         root.append(&objective);
         let line = gtk::Box::new(gtk::Orientation::Horizontal, 12);
         line.set_margin_top(4);
+        // Retained figures are marked until the next live snapshot.
+        let stale = common::status_chip("Last known", crew_client::api::Tone::Warning);
+        stale.set_visible(false);
+        line.append(&stale);
         // One line each; at narrow widths they shorten rather than wrap.
         let counts = common::text("");
         counts.set_wrap(false);
@@ -69,6 +75,8 @@ impl OverviewHeader {
             path,
             objective,
             counts,
+            stale,
+            live: std::rc::Rc::new(std::cell::Cell::new(true)),
             question,
             answer: answer_button,
             warnings,
@@ -97,11 +105,19 @@ impl OverviewHeader {
             overview.done_count,
             plural(overview.task_count, "task", "tasks"),
         ));
+        self.set_live(self.live.get());
         common::clear(&self.warnings);
         for warning in &overview.warnings {
             self.warnings.append(&common::warning(&warning.text));
         }
         self.warnings.set_visible(!overview.warnings.is_empty());
+    }
+
+    /// Mark the counts and warnings as last known while not live.
+    pub fn set_live(&self, live: bool) {
+        self.live.set(live);
+        self.stale
+            .set_visible(!live && !self.counts.label().is_empty());
     }
 
     /// Nothing loaded: only a title saying so.
@@ -111,6 +127,7 @@ impl OverviewHeader {
             label.set_visible(false);
         }
         self.counts.set_label("");
+        self.stale.set_visible(false);
         self.answer.set_visible(false);
         common::clear(&self.warnings);
         self.warnings.set_visible(false);

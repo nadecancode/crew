@@ -53,7 +53,10 @@ impl Controls {
         self.1.borrow_mut().insert(id, touched);
     }
     fn quiet(&self, id: u64) -> bool {
-        self.1.borrow().get(&id).is_some_and(|touched| !touched.get())
+        self.1
+            .borrow()
+            .get(&id)
+            .is_some_and(|touched| !touched.get())
     }
     pub fn ids(&self) -> Vec<u64> {
         self.0.borrow().keys().copied().collect()
