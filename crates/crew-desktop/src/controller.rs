@@ -2132,7 +2132,7 @@ impl Controller {
                 "{} · to {to}",
                 scope.workspace_id
             )));
-            body.append(&common::text(&format!(
+            body.append(&common::selectable(&format!(
                 "Message {message_id}\n\n{submitted}"
             )));
             let status = common::text("");

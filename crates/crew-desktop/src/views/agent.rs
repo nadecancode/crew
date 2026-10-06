@@ -43,7 +43,7 @@ impl AgentInspector {
         tabs.set_hexpand(true);
         tabs.set_vexpand(true);
         let overview = common::column();
-        let summary = common::text("Loading agent…");
+        let summary = common::selectable("Loading agent…");
         overview.append(&summary);
         overview.append(&common::heading("Current and Waiting work"));
         let work = EntityList::new("Current and Waiting task links", callbacks.select.clone());
@@ -113,7 +113,7 @@ impl AgentInspector {
         overview.append(&common::heading("Agent actions"));
         overview.append(&actions);
         overview.append(&reasons);
-        let process = common::text("");
+        let process = common::selectable("");
         let process_group = gtk::Expander::builder()
             .label("Process details")
             .child(&process)
