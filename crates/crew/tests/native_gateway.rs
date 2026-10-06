@@ -87,6 +87,28 @@ mod enabled {
             ))
             .unwrap()
         }
+        /// The operator's native control socket, authenticated now so a later
+        /// call costs one request rather than a `crew native` process start.
+        fn control(&self) -> Control {
+            let socket = self.session.root().join("run/crew/native.sock");
+            let token = crew_core::paths::read_operator_token(&socket)
+                .unwrap()
+                .expect("native control credential");
+            let stream = std::os::unix::net::UnixStream::connect(&socket).unwrap();
+            stream
+                .set_read_timeout(Some(Duration::from_secs(10)))
+                .unwrap();
+            let mut control = Control {
+                reader: std::io::BufReader::new(stream.try_clone().unwrap()),
+                writer: stream,
+                next: 0,
+            };
+            control.call(
+                "hello",
+                json!({"role":"operator","client":"native-test","protocol":6,"token":token}),
+            );
+            control
+        }
         fn restart(&self) {
             self.command(&["native", "stop"]);
             let native = self.session.root().join("run/crew/native");
@@ -109,6 +131,29 @@ mod enabled {
     impl Drop for Host {
         fn drop(&mut self) {
             let _ = self.session.crew(&["native", "stop"]);
+        }
+    }
+
+    struct Control {
+        reader: std::io::BufReader<std::os::unix::net::UnixStream>,
+        writer: std::os::unix::net::UnixStream,
+        next: u64,
+    }
+    impl Control {
+        fn call(&mut self, method: &str, params: Value) -> Value {
+            use std::io::{BufRead, Write};
+            self.next += 1;
+            let mut bytes =
+                serde_json::to_vec(&json!({"id":self.next,"method":method,"params":params}))
+                    .unwrap();
+            bytes.push(b'\n');
+            self.writer.write_all(&bytes).unwrap();
+            let mut reply = String::new();
+            self.reader.read_line(&mut reply).unwrap();
+            let frame: Value = serde_json::from_str(&reply).unwrap();
+            assert_eq!(frame["id"], self.next, "{frame}");
+            assert!(frame["error"].is_null(), "{method}: {frame}");
+            frame["result"].clone()
         }
     }
 
@@ -401,11 +446,18 @@ mod enabled {
             let key = SigningKey::from_bytes(&[27; 32]);
             let (mut index, device) = enroll(&host, &key, true, true).await;
             let pid = host.session.snapshot().session.daemon_pid;
+            // The gateway refuses with `unavailable` once the held hello passes
+            // its 2 s dial deadline. Revoke over a control session opened in
+            // advance, so the revocation normally lands long before that.
+            let mut control = host.control();
             let paused = PausedDaemon(pid);
             // Hold the actual upstream hello, rather than adding a delay or
             // proof bypass to the product. The gateway's local admin stays live.
             // SAFETY: only this test's isolated daemon is signaled.
             assert_eq!(unsafe { libc::kill(pid as libc::pid_t, libc::SIGSTOP) }, 0);
+            // The proof is sent after this instant, so the gateway's dial and
+            // its earliest deadline refusal both come later than this plus 2 s.
+            let proof_sent_after = std::time::Instant::now();
             let (mut ws, _) = begin_auth(
                 &host,
                 &key,
@@ -416,19 +468,30 @@ mod enabled {
             assert!(tokio::time::timeout(Duration::from_millis(100), ws.next())
                 .await
                 .is_err());
-            let started = std::time::Instant::now();
-            host.command(&[
-                "native",
-                "revoke",
-                &device.to_hex(),
-                "--workspace",
-                &host.workspace().to_hex(),
-            ]);
-            assert!(started.elapsed() < Duration::from_secs(2));
+            control.call(
+                "native_revoke",
+                json!({"device_id": device.to_hex(), "workspace": host.workspace().to_hex()}),
+            );
+            // The revocation took effect before its reply. Within this bound it
+            // preceded any dial deadline, so the channel must end silently.
+            let revoked = proof_sent_after.elapsed();
             let closed = tokio::time::timeout(Duration::from_secs(2), ws.next())
                 .await
                 .expect("revoked verification stayed live");
-            assert!(!matches!(closed, Some(Ok(Message::Text(_)))), "{closed:?}");
+            if let Some(Ok(Message::Text(text))) = &closed {
+                // Only a revocation delayed past the deadline (for example a
+                // stalled durable save) lets the gateway answer, and then only
+                // with its refusal. An opened route is never acceptable.
+                assert!(
+                    revoked >= Duration::from_secs(2),
+                    "reply after a revocation that landed first ({revoked:?}): {text}"
+                );
+                let frame: Value = serde_json::from_str(text).unwrap();
+                assert_eq!(frame["id"], 1, "{frame}");
+                assert_eq!(frame["error"]["code"], "unavailable", "{frame}");
+                assert!(frame.get("result").is_none(), "{frame}");
+                eprintln!("revocation took {revoked:?}; the dial deadline answered first");
+            }
             drop(paused);
 
             let listing = call(&mut index, 4, "workspaces", json!({})).await;
