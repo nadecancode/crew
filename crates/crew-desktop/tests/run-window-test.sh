@@ -7,8 +7,8 @@ cd "$native_repo"
 
 if [ "${1:-}" != --inside-session ]; then
     case "${1:-}" in
-        ""|--keyboard|--client|--gateway) native_mode=${1:-} ;;
-        *) echo "usage: tests/run-window-test.sh [--keyboard|--client|--gateway]" >&2; exit 64 ;;
+        ""|--keyboard|--client|--gateway|--interaction) native_mode=${1:-} ;;
+        *) echo "usage: tests/run-window-test.sh [--keyboard|--client|--gateway|--interaction]" >&2; exit 64 ;;
     esac
     native_new_output "${NATIVE_LINUX_TEST_OUT:-}" linux-window-test
     mkdir -p "$NATIVE_RUN_DIR"/{runtime,state,config,cache}
@@ -18,6 +18,11 @@ if [ "${1:-}" != --inside-session ]; then
     export XDG_RUNTIME_DIR="$NATIVE_RUN_DIR/runtime" XDG_STATE_HOME="$NATIVE_RUN_DIR/state"
     export XDG_CONFIG_HOME="$NATIVE_RUN_DIR/config" XDG_CACHE_HOME="$NATIVE_RUN_DIR/cache"
     export CREW_GLOBAL_CONFIG="$NATIVE_RUN_DIR/config/crew.toml"
+    if [ "$native_mode" = --interaction ]; then
+        # Its own displays, buses and daemon: see tests/interaction/run.sh.
+        exec "$native_repo/scripts/native/linux-env.sh" --headless dbus-run-session -- \
+            "$native_repo/crates/crew-desktop/tests/interaction/run.sh" "$NATIVE_RUN_DIR"
+    fi
     exec "$native_repo/scripts/native/linux-env.sh" --headless dbus-run-session -- \
         "$0" --inside-session "$NATIVE_RUN_DIR" "$native_mode"
 fi

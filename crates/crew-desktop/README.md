@@ -29,6 +29,10 @@ crates/crew-desktop/tests/run-window-test.sh --client
 crates/crew-desktop/tests/run-window-test.sh --gateway
 nix-shell -I nixpkgs="$NATIVE_NIXPKGS" -p xdotool --run \
   'crates/crew-desktop/tests/run-window-test.sh --keyboard'
+nix-shell -I nixpkgs="$NATIVE_NIXPKGS" \
+  -p 'python3.withPackages (ps: [ ps.pyatspi ps.pygobject3 ])' \
+  at-spi2-core gobject-introspection openbox xdotool imagemagick --run \
+  'crates/crew-desktop/tests/run-window-test.sh --interaction'
 ```
 
 Default features are empty. `native-ui` enables Linux-only GTK/VTE and portable
@@ -107,7 +111,11 @@ artifact paths remain selectable/copyable text; no host file is fetched.
 
 Ctrl+1–5 select destinations; Ctrl+B toggles the sidebar; Ctrl+I toggles details;
 Alt+Left returns from compact navigation/details; F1 opens shortcut help;
-Ctrl+W closes the window; Ctrl+Q quits. Appearance follows native contrast and
+Ctrl+W closes the window; Ctrl+Q quits. The sidebar is one Tab stop: Up and Down
+move between destinations and Enter opens one. An attached terminal takes Tab;
+F6 leaves it. Every confirmation returns focus to the control that opened it
+(the Actions menu for its items) once Core makes that control available again,
+and a control that becomes unavailable while focused hands focus on. Appearance follows native contrast and
 text settings. Dark app-owned surfaces remain neutral. There are no continuous
 decorative animations or graph refits after every push.
 
@@ -148,6 +156,14 @@ operator's desktop or running team. GTK initializes on one test thread.
 journey. `--client` uses a recording service for deterministic presentation
 cases, then the production service against a real disposable daemon and real
 shell PTY. Screenshots are named `fixture-*` and `live-local-*` accordingly.
+`--keyboard` sends real keys to the disconnected app and checks destinations by
+window title. `--interaction` builds the app and the CLI, starts a scripted team
+on a private daemon with its own display, window manager and accessibility bus,
+then sends real keys and checks what the app reports as focused after each step:
+startup and Connections, the sidebar, Tab order, every reachable confirmation,
+compose, the attached terminal and shortcut help. Its transcript is
+`atspi-keyboard.txt`. It is a keyboard journey through AT-SPI, not a screen
+reader run.
 
 A lagging worker can supply `CREW_NATIVE_UI_TEST_MANIFEST` pointing to an exact
 reviewed prerequisite archive below its own `target/native-validation`. The

@@ -131,6 +131,21 @@ fn native_navigation_layout_focus_and_lifecycle() {
     let choose = gtk::Button::with_label("Choose workspace");
     shell.set_main(Destination::Team, &choose);
     until(|| has_focus(shell.window(), &choose));
+    // Focus left on a container of the page (GTK may put it on the split
+    // pane's handle when the window is activated again) also moves to the
+    // new page's first control.
+    let pane = descendants(shell.window().upcast_ref())
+        .into_iter()
+        .find_map(|widget| widget.downcast::<gtk::Paned>().ok())
+        .unwrap();
+    pane.grab_focus();
+    until(|| {
+        gtk::prelude::GtkWindowExt::focus(shell.window())
+            .is_some_and(|focus| focus == *pane.upcast_ref::<gtk::Widget>())
+    });
+    let connected = gtk::Button::with_label("Refresh");
+    shell.set_main(Destination::Team, &connected);
+    until(|| has_focus(shell.window(), &connected));
 
     // Static disconnected pages have no row or reading control to restore.
     // Navigation, compact detail and Back must retain named visible context.

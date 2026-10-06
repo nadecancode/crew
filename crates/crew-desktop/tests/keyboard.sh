@@ -53,6 +53,22 @@ for native_destination in Team Tasks Messages Events Usage; do
     printf 'Ctrl+%s selected %s\n' "$native_index" "$native_destination" >>"$native_out/keyboard.txt"
     native_index=$((native_index + 1))
 done
+# G2: in the sidebar, arrows move focus and only Enter changes the
+# destination; Tab leaves the sidebar without changing it. Ctrl+1 puts focus
+# on the page's first control; Shift+Tab goes back to the Team destination.
+expect_title_now() {
+    sleep 0.3
+    [ "$(xdotool getwindowname "$native_window")" = "$1 — Crew" ] || { echo "keyboard destination changed: expected $1" >&2; exit 1; }
+}
+xdotool key --clearmodifiers ctrl+1
+check_title Team
+xdotool key --clearmodifiers shift+Tab Down Down
+expect_title_now Team
+xdotool key --clearmodifiers Return
+check_title Messages
+xdotool key --clearmodifiers Tab Tab Tab
+expect_title_now Messages
+printf 'Sidebar: Down/Down kept Team, Enter opened Messages, Tab kept Messages\n' >>"$native_out/keyboard.txt"
 # Exercise the same real local GAction as the native appearance menu. No domain
 # action, test-only app API, or daemon connection is introduced for captures.
 gdbus call --session --dest dev.crew.Crew --object-path /dev/crew/Crew/window/1 \

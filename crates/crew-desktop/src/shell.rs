@@ -366,6 +366,19 @@ impl Shell {
             }
         });
         shell.0.navigation.add_controller(sidebar_keys(&shell));
+        // Activated again (a dialog closed), GTK may put focus on the split
+        // pane's handle when the page it was in has been replaced: move it
+        // into the page.
+        let weak = Rc::downgrade(&shell.0);
+        shell.0.window.connect_is_active_notify(move |window| {
+            let Some(inner) = weak.upgrade() else { return };
+            let slot = &inner.main_slots[inner.destination.get().index()];
+            if window.is_active()
+                && gtk::prelude::GtkWindowExt::focus(window).is_some_and(|f| slot.is_ancestor(&f))
+            {
+                Shell(inner).focus_visible_view();
+            }
+        });
         let weak = Rc::downgrade(&shell.0);
         shell.0.window.connect_map(move |_| {
             if let Some(inner) = weak.upgrade() {
@@ -411,12 +424,15 @@ impl Shell {
     }
 
     /// Replace a destination's native main view without recreating other pages.
-    /// Focus that was in the replaced page, or nowhere, goes to the new
-    /// page's first control rather than being lost.
+    /// Focus that was in the replaced page, on a container of it, or nowhere,
+    /// goes to the new page's first control rather than being lost.
     pub fn set_main(&self, destination: Destination, widget: &impl IsA<gtk::Widget>) {
         let slot = &self.0.main_slots[destination.index()];
         let orphaned = gtk::prelude::GtkWindowExt::focus(&self.0.window).is_none_or(|focus| {
             focus.is_ancestor(slot)
+                // A container of the page (GTK's initial focus may pick the
+                // split pane's handle), not a control in it.
+                || slot.is_ancestor(&focus)
                 || (self.0.focus_fell_back.get()
                     && (focus == *self.0.destination_button.upcast_ref::<gtk::Widget>()
                         || focus.is_ancestor(&self.0.destination_button)))
@@ -590,6 +606,13 @@ impl Shell {
                 return;
             }
             inner.focus_fell_back.set(false);
+            // Focus on a container of the pane (the split pane's handle)
+            // would make the pane's own traversal start past it.
+            if gtk::prelude::GtkWindowExt::focus(&inner.window)
+                .is_some_and(|f| pane.is_ancestor(&f))
+            {
+                gtk::prelude::GtkWindowExt::set_focus(&inner.window, None::<&gtk::Widget>);
+            }
             if inner.adaptive.compact() && inner.detail_requested[index].get() {
                 if inner.detail_slots[index].child_focus(gtk::DirectionType::TabForward) {
                     return;

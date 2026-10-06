@@ -15,7 +15,7 @@ import sys
 
 import pyatspi
 
-if not os.environ.get("AT_SPI_BUS_ADDRESS", "").startswith("unix:path=/tmp/claude-1000/cdp"):
+if not os.environ.get("AT_SPI_BUS_ADDRESS", "").startswith("unix:path=/tmp/crew-int."):
     raise SystemExit("Private interaction accessibility bus required")
 
 KEYS = ["focused", "focusable", "selected", "selectable", "sensitive", "editable"]

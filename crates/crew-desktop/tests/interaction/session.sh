@@ -1,8 +1,9 @@
 #!/usr/bin/env bash
-# Private interaction session (copied from design-precheck-20261005): owned Xvfb, window manager, session and
-# accessibility buses, an isolated Crew daemon with a scripted team, and one
-# crew-desktop client. Never uses the operator display, daemon or listener.
-# Usage: run-session.sh OUT SHORT_ROOT DESKTOP_BIN CREW_BIN TEAM_TEMPLATE
+# Private interaction session (from the design precheck's harness): owned
+# Xvfb, window manager, session and accessibility buses, an isolated Crew
+# daemon with a scripted team, and one crew-desktop client. Never uses the
+# operator display, daemon, listener or provider CLIs.
+# Usage: session.sh OUT SHORT_ROOT DESKTOP_BIN CREW_BIN TEAM_TEMPLATE
 set -euo pipefail
 umask 077
 dp_out=$1 dp_root=$2 dp_desktop=$3 dp_crew=$4 dp_team=$5
@@ -14,6 +15,13 @@ export XDG_RUNTIME_DIR="$dp_root/run" XDG_STATE_HOME="$dp_root/state"
 export XDG_CONFIG_HOME="$dp_root/config" XDG_CACHE_HOME="$dp_root/cache"
 export XDG_DATA_HOME="$dp_root/data" CREW_GLOBAL_CONFIG="$dp_root/etc/config.toml"
 export CODEX_HOME="$dp_root/codex-home" CLAUDE_CONFIG_DIR="$dp_root/claude-home"
+# The daemon may run provider CLIs (a usage probe); private stubs answer.
+mkdir -p "$dp_root/shims"
+for dp_provider in claude codex; do
+  printf '#!/bin/sh\nexit 127\n' >"$dp_root/shims/$dp_provider"
+  chmod 700 "$dp_root/shims/$dp_provider"
+done
+export PATH="$dp_root/shims:$PATH"
 dp_xvfb_pid="" dp_app_pid="" dp_wm_pid="" dp_a11y_pid=""
 cleanup() {
   if [ -n "$dp_app_pid" ]; then kill "$dp_app_pid" 2>/dev/null || true; fi
