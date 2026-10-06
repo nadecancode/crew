@@ -1,0 +1,6 @@
+page tab: 'Overview' showing selected pressed focusable
+page tab: 'Transcript' showing focusable
+page tab: 'Diff' showing focusable
+page tab: 'Inbox' showing focusable
+page tab: 'Terminal' showing focusable
+page tab: 'Host screen' showing focusable

@@ -1,0 +1,6 @@
+page tab: 'List' showing selected pressed focusable
+page tab: 'Graph' showing focusable
+page tab: 'Overview' showing selected pressed focusable
+page tab: 'Transcript' showing focusable
+page tab: 'Diff' showing focusable
+page tab: 'Inbox' showing focusable
