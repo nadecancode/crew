@@ -986,8 +986,8 @@ FFI polling. `CrewClient` exports `connect(profile_id)`, `select_workspace(id)`,
 work, with typed progress/outcomes delivered through the observer; they never
 block the UI on IO. Query/planning are bounded synchronous work called off the
 UI thread. The opaque `profile_id` resolves through the approved connector;
-gateway profile/enrollment/credential callbacks are finalized on its own card,
-not treated as arbitrary executable configuration here.
+gateway profile, enrollment and credential callbacks follow the gateway
+binding contract below, never arbitrary executable configuration.
 
 The local factory is `CrewClient.local()`. It composes the real shared
 `ClientCore` using native policy limits and OrderedConnection with
@@ -1012,10 +1012,26 @@ does not replace the deferred Apple compiler/linker checks.
 
 Per `m-712aa438f958`, N4 delivers this real Core/local bridge, typed observers,
 listing access and deterministic ABI after its producer source is approved.
-The separate `native-gateway-bindings` card owns the gateway factory,
-DeviceSigner and enrollment/setup bindings against the reviewed connector.
-Apple UI and final live integration require that gateway composition; N4
-completion alone is not evidence of a connected iOS application.
+N4 completion alone is not evidence of a connected iOS application.
+
+The gateway binding (`native-gateway-binding-ports`, constraints B1–B9 in
+`m-99eac80325af` and `m-9cd081a59e8f`) adds these exports on every target:
+`parseGatewayProfile` (bare public profile or `crew native status` output),
+`normalizeFingerprint`, `GatewayProfile.trust(id, profile,
+verifiedFingerprint)`, `CrewClient.gateway(profile, signer)`,
+`enroll(label, observer)` returning an `EnrollmentHandle`, and
+`retireDeviceAccess()`. The fingerprint comes from the person's comparison with
+the trusted host console, never from the imported profile. The factory unlocks
+the signer on a platform worker and returns a disconnected client; the same
+Rust gateway client backs its session, enrollment and retirement, so a key
+change or retirement fences every session. `DeviceSigner` is a callback
+interface over Rust-sealed transcripts with one-shot reply objects; only
+`publicKey` may prompt. `SetupObserver` gets ordered updates tagged with the
+attempt's `SetupContext` and exactly one terminal `finished` or, for an attempt
+that could not start, `failed`. `GatewayError` is a flat error carrying the
+transport reason code verbatim. GTK uses the same Rust gateway client directly.
+The live integrated-gateway proof belongs to `native-gateway-ffi-validation`;
+Apple compile and device execution remain deferred.
 
 `ClientNotice` has `scope: Option<ClientScope>`, `revision: u64`,
 `changes: ChangeSet`, `endpoint: EndpointStatus`, `workspace: WorkspaceStatus`,
