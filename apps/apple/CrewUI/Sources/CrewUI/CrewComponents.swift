@@ -7,16 +7,22 @@ public struct CrewLabeledValue: View {
     private let label: String
     private let value: String
     private let monospaced: Bool
+    private let spellsOut: Bool
 
-    public init(_ label: String, value: String, monospaced: Bool = false) {
+    /// `spellsOut` makes VoiceOver read the value character by character, for
+    /// identifiers and hex values compared against the host (leading zeroes
+    /// and letter/digit distinctions must survive).
+    public init(_ label: String, value: String, monospaced: Bool = false, spellsOut: Bool = false) {
         self.label = label
         self.value = value
         self.monospaced = monospaced
+        self.spellsOut = spellsOut
     }
 
     public var body: some View {
         LabeledContent {
             Text(verbatim: value)
+                .speechSpellsOutCharacters(spellsOut)
                 .font(monospaced ? .body.monospaced() : .body)
                 .fixedSize(horizontal: false, vertical: true)
                 .textSelection(.enabled)
@@ -28,6 +34,12 @@ public struct CrewLabeledValue: View {
 
 /// Selectable evidence with explicit copy. Dynamic strings are displayed
 /// verbatim, so evidence never becomes a Markdown link or a file fetch.
+/// A hex group or identifier that VoiceOver reads character by character,
+/// after a spoken prefix such as "Comparison group 2".
+public func crewSpelledLabel(_ prefix: String, _ value: String) -> Text {
+    Text(verbatim: prefix + ": ") + Text(verbatim: value).speechSpellsOutCharacters()
+}
+
 public struct CrewTextEvidence: View {
     private let text: String
     private let copy: () -> Void

@@ -33,6 +33,7 @@ final class CrewGatewaySetup {
     private(set) var step: Step = .profile
     private(set) var profileIssue: String?
     private(set) var fingerprintIssue: String?
+    private(set) var deviceLabelIssue: String?
     private(set) var issue: String?
     private(set) var pending = false
     private(set) var progress: String?
@@ -184,10 +185,11 @@ final class CrewGatewaySetup {
         guard step == .device, storageReady, !pending, let trusted, var record, let reference = record.keyReference else { return }
         let label = deviceLabel.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !label.isEmpty else {
-            issue = "Enter a device name the host operator will recognize."
+            deviceLabelIssue = "Enter a device name the host operator will recognize."
             request(focus: .deviceLabel)
             return
         }
+        deviceLabelIssue = nil
         issue = nil
         pending = true
         record.deviceLabel = label

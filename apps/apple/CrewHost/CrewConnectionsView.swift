@@ -13,6 +13,7 @@ struct CrewConnectionsView: View {
     @State private var setup: CrewGatewaySetup?
     @State private var gatewayIssue: String?
     @State private var gatewayBusy = false
+    @State private var pendingRemoval: CrewGatewayRecord?
 
     var body: some View {
         List {
@@ -55,13 +56,13 @@ struct CrewConnectionsView: View {
                     .disabled(gatewayBusy)
             }
             if let context = model.context {
-                Section(context.mode == .localOperator ? "This connection" : "This device's access") {
+                Section(context.mode == .localOperator ? "This connection" : accessTitle(context)) {
                     Text(context.mode == .localOperator ? "Local operator · full Crew access" : "Scoped device access")
                     if context.mode == .scopedGateway {
                         CrewLabeledValue("Read", value: context.grant.tiers.contains(.read) ? "Granted" : "Not granted")
                         CrewLabeledValue("Control", value: context.grant.tiers.contains(.control) ? "Granted" : "Not granted")
                         CrewLabeledValue("Terminal", value: context.grant.tiers.contains(.terminal) ? "Granted" : "Not granted")
-                        if let expiry = context.grant.expiresAtMs { CrewLabeledValue("Access expires", value: CrewLabels.timestamp(expiry)) }
+                        if let expiry = context.grant.expiresAtMs { CrewLabeledValue("Access expires", value: CrewLabels.timestampWithZone(expiry)) }
                         CrewAccessDisclosure()
                     }
                     Button("Reconnect") { model.reconnect() }
@@ -91,6 +92,22 @@ struct CrewConnectionsView: View {
         }
         .navigationTitle("Connections")
         .accessibilityIdentifier("crew.connections")
+        // Removal deletes this device's key for the host; Cancel is the default.
+        .confirmationDialog(
+            pendingRemoval.map { "Remove \($0.connectionName) from this app?" } ?? "Remove from this app?",
+            isPresented: Binding(get: { pendingRemoval != nil }, set: { if !$0 { pendingRemoval = nil } }),
+            titleVisibility: .visible,
+            presenting: pendingRemoval
+        ) { record in
+            Button("Remove from this app", role: .destructive) {
+                pendingRemoval = nil
+                remove(record)
+            }
+            Button("Cancel", role: .cancel) { pendingRemoval = nil }
+                .keyboardShortcut(.defaultAction)
+        } message: { _ in
+            Text("This deletes this device's key for this host. Host access remains until revoked or it expires.")
+        }
         .navigationDestination(isPresented: Binding(
             get: { setup != nil },
             set: { presented in
@@ -123,7 +140,7 @@ struct CrewConnectionsView: View {
                 .disabled(gatewayBusy || model.connectionRequested)
             DisclosureGroup("Connection details") {
                 CrewLabeledValue("Profile name", value: record.name)
-                CrewLabeledValue("Endpoint UUID", value: record.endpointId, monospaced: true)
+                CrewLabeledValue("Endpoint UUID", value: record.endpointId, monospaced: true, spellsOut: true)
                 if let label = record.deviceLabel { CrewLabeledValue("Device label", value: label) }
                 Text("How to revoke access").font(.headline)
                 Text("At the trusted host console, use crew native devices to find this device, then crew native revoke. This app cannot revoke its own access remotely.")
@@ -135,11 +152,19 @@ struct CrewConnectionsView: View {
                     setup = flow
                 }
                 .disabled(gatewayBusy)
-                Button("Remove from this app", role: .destructive) { remove(record) }
+                Button("Remove from this app", role: .destructive) { pendingRemoval = record }
                     .disabled(gatewayBusy)
             }
         }
         .padding(.vertical, 4)
+    }
+
+    /// The authenticated grant is for the current workspace connection; the
+    /// listing carries no per-workspace powers, so the title names it.
+    private func accessTitle(_ context: ConnectionContext) -> String {
+        let entry = model.workspaces?.joined.first { $0.id == context.scope.workspaceId }
+        guard let name = entry?.project ?? entry?.workspace else { return "Access in the current workspace" }
+        return "Access in \(name)"
     }
 
     private func connect(_ record: CrewGatewayRecord) {
@@ -183,7 +208,7 @@ struct CrewGatewaySetupView: View {
                 CrewDeviceNameForm(name: $setup.deviceLabel, storageDescription: setup.existingKey
                     ? "This device already has a key for this host from an earlier request. It is reused; no new key is created."
                     : "A new device key is created in this device's Keychain, usable only on this device while it is unlocked.",
-                    storageReady: setup.storageReady, pending: setup.pending, issue: setup.issue, proceed: setup.continueWithDevice, cancel: done)
+                    storageReady: setup.storageReady, pending: setup.pending, nameIssue: setup.deviceLabelIssue, issue: setup.issue, focusRequest: setup.focusRequest?.field == .deviceLabel ? setup.focusRequest?.id : nil, proceed: setup.continueWithDevice, cancel: done)
             case .request:
                 CrewRequestAccessView(host: host, device: setup.deviceLabel, pending: setup.pending, stage: setup.progress, issue: setup.issue, request: setup.requestAccess, cancel: setup.enrolling ? setup.cancelRequest : done)
             case .compare(let groups, let expires):
@@ -230,8 +255,8 @@ struct CrewGatewaySetupView: View {
             Section("Access granted") {
                 CrewLabeledValue("Host", value: host)
                 CrewLabeledValue("Device", value: setup.deviceLabel)
-                CrewLabeledValue("Device ID", value: access.deviceId, monospaced: true)
-                CrewLabeledValue("Access expires", value: CrewLabels.timestamp(access.credentialExpiresAtMs))
+                CrewLabeledValue("Device ID", value: access.deviceId, monospaced: true, spellsOut: true)
+                CrewLabeledValue("Access expires", value: CrewLabels.timestampWithZone(access.credentialExpiresAtMs))
             }
             Section("Workspaces") {
                 if let listing = model.workspaces {

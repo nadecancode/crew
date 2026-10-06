@@ -425,4 +425,10 @@ public enum CrewLabels {
         Date(timeIntervalSince1970: Double(milliseconds) / 1_000)
             .formatted(date: .abbreviated, time: .standard)
     }
+
+    /// For access expiry, where the contract requires the time zone.
+    public static func timestampWithZone(_ milliseconds: Int64) -> String {
+        Date(timeIntervalSince1970: Double(milliseconds) / 1_000)
+            .formatted(date: .abbreviated, time: .complete)
+    }
 }

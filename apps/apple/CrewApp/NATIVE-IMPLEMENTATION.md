@@ -614,3 +614,30 @@ Gateway concurrency invariants, recorded from review `m-df48dede88c4`:
   thread with `DispatchQueue.main.sync`. This is safe only while nothing on
   the main thread ever blocks on the worker or on FFI; main-actor code awaits
   the worker and never waits synchronously. Keep that invariant.
+
+## Setup accessibility and wording follow-ups
+
+Designer findings A1–A6 (`m-3cfed7dd2568`, card `native-apple-followups`):
+
+- **A1** Hex and identifier values compared against the host are read
+  character by character: `speechSpellsOutCharacters()` on the fingerprint
+  echo, both fingerprints and their per-group labels on Verify this host, the
+  comparison-code groups, and the endpoint UUID and device ID
+  (`CrewLabeledValue(spellsOut:)`, `crewSpelledLabel`). Leading zeroes and
+  letter/digit distinctions survive.
+- **A2** An empty device name is reported under Device name and focuses that
+  field after the explicit Continue; secure-storage issues stay in their own
+  section.
+- **A3** Remove from this app asks first: "Remove <name> from this app?" with
+  "This deletes this device's key for this host. Host access remains until
+  revoked or it expires." Cancel is the default action.
+- **A4** The authenticated grant is titled "Access in <workspace>" (or "the
+  current workspace"), because the listing carries no per-workspace powers.
+- **A5** Access expiry shows the time zone (`CrewLabels.timestampWithZone`).
+- **A6** The request-access and compare titles, and the Comparison code
+  heading, are accessibility headers.
+
+Linux evidence: all 47 Swift files parse, the portable worker/test typecheck
+passes, the project graph reports 612 checks and the `CrewUI` manifest
+evaluates. These are SwiftUI changes, so VoiceOver speech, focus movement and
+the dialog's default button are **Apple verification deferred by operator**.

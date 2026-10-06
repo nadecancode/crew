@@ -8,19 +8,31 @@ public struct CrewDeviceNameForm: View {
     private let storageDescription: String
     private let storageReady: Bool
     private let pending: Bool
+    private let nameIssue: String?
     private let issue: String?
+    private let focusRequest: UUID?
     private let proceed: () -> Void
     private let cancel: () -> Void
+    @FocusState private var nameFocused: Bool
 
-    public init(name: Binding<String>, storageDescription: String, storageReady: Bool, pending: Bool, issue: String?, proceed: @escaping () -> Void, cancel: @escaping () -> Void) {
+    /// `nameIssue` belongs to the device name field and takes focus when
+    /// `focusRequest` changes after an explicit failed Continue; `issue`
+    /// describes secure storage.
+    public init(name: Binding<String>, storageDescription: String, storageReady: Bool, pending: Bool, nameIssue: String?, issue: String?, focusRequest: UUID?, proceed: @escaping () -> Void, cancel: @escaping () -> Void) {
         self._name = name; self.storageDescription = storageDescription; self.storageReady = storageReady
-        self.pending = pending; self.issue = issue; self.proceed = proceed; self.cancel = cancel
+        self.pending = pending; self.nameIssue = nameIssue; self.issue = issue; self.focusRequest = focusRequest
+        self.proceed = proceed; self.cancel = cancel
     }
 
     public var body: some View {
         Form {
             Section("Name this device") {
                 TextField("Device name", text: $name, prompt: Text("Work phone"))
+                    .focused($nameFocused)
+                if let nameIssue {
+                    Text(verbatim: nameIssue).foregroundStyle(CrewPalette.danger).textSelection(.enabled)
+                        .accessibilityIdentifier("crew.device-name-error")
+                }
                 Text("This label helps the host operator recognize your request; it does not verify the device.")
             }
             Section("Secure storage") {
@@ -35,6 +47,7 @@ public struct CrewDeviceNameForm: View {
             }
         }
         .navigationTitle("Connect to Crew")
+        .onChange(of: focusRequest) { _, request in if request != nil { nameFocused = true } }
     }
 }
 
@@ -55,7 +68,7 @@ public struct CrewRequestAccessView: View {
     public var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 24) {
-                Text("Request this device's access").font(.title2.bold())
+                Text("Request this device's access").font(.title2.bold()).accessibilityAddTraits(.isHeader)
                 CrewLabeledValue("Checked host", value: host)
                 CrewLabeledValue("Device label", value: device)
                 Text("At the trusted host console, open an enrollment window with crew native enroll, then request access here.")
@@ -87,15 +100,15 @@ public struct CrewCompareAtHostView: View {
     public var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 24) {
-                Text("Compare at the trusted host").font(.title2.bold())
+                Text("Compare at the trusted host").font(.title2.bold()).accessibilityAddTraits(.isHeader)
                 CrewLabeledValue("Checked host", value: host)
                 CrewLabeledValue("Untrusted device label", value: device)
-                Text("Comparison code").font(.headline)
+                Text("Comparison code").font(.headline).accessibilityAddTraits(.isHeader)
                 // Adaptive grid wraps only between whole supplied groups.
                 LazyVGrid(columns: [GridItem(.adaptive(minimum: 92), alignment: .leading)], alignment: .leading, spacing: 12) {
                     ForEach(Array(groups.enumerated()), id: \.offset) { index, group in
-                        Text(verbatim: group).font(.title2.monospaced()).textSelection(.enabled)
-                            .accessibilityLabel("Comparison group \(index + 1): \(group)")
+                        Text(verbatim: group).speechSpellsOutCharacters().font(.title2.monospaced()).textSelection(.enabled)
+                            .accessibilityLabel(crewSpelledLabel("Comparison group \(index + 1)", group))
                     }
                 }
                 Text("Compare all four groups with this request at the trusted host console. Approve access there only if they match.")

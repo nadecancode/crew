@@ -66,7 +66,7 @@ public struct CrewPublicProfileForm: View {
                         .font(.body.monospaced())
                         .textSelection(.enabled)
                         .fixedSize(horizontal: false, vertical: true)
-                        .accessibilityLabel("Entered fingerprint, \(fingerprintEcho.count) groups")
+                        .accessibilityLabel(crewSpelledLabel("Entered fingerprint, \(fingerprintEcho.count) groups", fingerprintEcho.joined(separator: " ")))
                 }
                 Text("\(fingerprintCount) of 64").font(.callout).foregroundStyle(.secondary)
                 if let fingerprintIssue {
@@ -129,7 +129,7 @@ public struct CrewHostTrustReview: View {
                 Text("Verify this host").font(.title2.bold()).accessibilityAddTraits(.isHeader)
                 CrewLabeledValue("Profile name", value: name)
                 CrewLabeledValue("Endpoint", value: endpoint, monospaced: true)
-                CrewLabeledValue("Endpoint UUID", value: endpointID, monospaced: true)
+                CrewLabeledValue("Endpoint UUID", value: endpointID, monospaced: true, spellsOut: true)
                 // Monospaced four-character groups align by column without a
                 // Grid, so each row can be one accessibility element.
                 VStack(alignment: .leading, spacing: 4) {
@@ -138,15 +138,15 @@ public struct CrewHostTrustReview: View {
                     ForEach(rows) { row in
                         HStack(spacing: 16) {
                             Text(verbatim: String(format: "%2d", row.index)).font(.body.monospaced()).foregroundStyle(.secondary)
-                            Text(verbatim: row.profile).font(.body.monospaced())
-                            Text(verbatim: row.entered.isEmpty ? "----" : row.entered).font(.body.monospaced())
+                            Text(verbatim: row.profile).speechSpellsOutCharacters().font(.body.monospaced())
+                            Text(verbatim: row.entered.isEmpty ? "----" : row.entered).speechSpellsOutCharacters().font(.body.monospaced())
                             if row.differs { Text("differs").font(.callout.bold()).foregroundStyle(CrewPalette.danger) }
                         }
                         .textSelection(.enabled)
                         .accessibilityElement(children: .ignore)
                         .accessibilityLabel(row.differs
-                            ? "Group \(row.index) differs: profile \(row.profile), entered \(row.entered.isEmpty ? "nothing" : row.entered)"
-                            : "Group \(row.index): \(row.profile)")
+                            ? crewSpelledLabel("Group \(row.index) differs. Profile", row.profile) + Text(verbatim: ". ") + (row.entered.isEmpty ? Text("Nothing entered") : crewSpelledLabel("Entered", row.entered))
+                            : crewSpelledLabel("Group \(row.index)", row.profile))
                     }
                 }
                 Text("If the host loses its private runtime state, such as after logout or reboot, this profile cannot reconnect automatically. The host operator must provision the endpoint again and approve a new device key.")
