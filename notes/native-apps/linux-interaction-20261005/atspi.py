@@ -8,6 +8,7 @@ Usage:
   atspi.py prefix TEXT    exit 0 when a showing object's name starts with TEXT
   atspi.py focused        the name of the focused object, if any
   atspi.py pressprefix T  invoke the first showing button whose name starts with T
+  atspi.py text NAME      the accessible text of the showing object NAME
 """
 import os
 import sys
@@ -84,6 +85,18 @@ elif mode == "prefix":
     for app in crew():
         for node, depth in walk(app):
             if node.name and node.name.startswith(sys.argv[2]) and showing(node):
+                raise SystemExit(0)
+    raise SystemExit(1)
+elif mode == "text":
+    for app in crew():
+        for node, depth in walk(app):
+            if node.name == sys.argv[2] and showing(node):
+                text = node.queryText()
+                content = text.getText(0, -1)
+                lines = [line.rstrip() for line in content.splitlines() if line.strip()]
+                print(f"  {len(content)} characters, {len(lines)} non-empty lines")
+                for line in lines[:3]:
+                    print(f"  | {line}")
                 raise SystemExit(0)
     raise SystemExit(1)
 elif mode == "pressprefix":

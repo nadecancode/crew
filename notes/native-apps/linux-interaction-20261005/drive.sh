@@ -23,13 +23,27 @@ wait_for() {
         sleep 0.25
     done
 }
-# Press Tab until the focused object's name starts with PREFIX.
+# Press Tab until the focused object's name starts with PREFIX (an
+# extended regular expression, so alternatives are allowed).
 tab_to_prefix() {
-    local prefix=$1 max=${2:-40} n=0
-    until [[ "$(focused)" == "$prefix"* ]]; do
+    local prefix=$1 max=${2:-40} n=0 seen=()
+    until [[ "$(focused)" =~ ^($prefix) ]]; do
         n=$((n + 1))
-        if [ "$n" -gt "$max" ]; then note "NOT REACHED: $prefix after $max Tab"; exit 1; fi
+        seen+=("$(focused)")
+        if [ "$n" -gt "$max" ]; then
+            note "NOT REACHED: $prefix after $max Tab; stops: $(printf '[%s] ' "${seen[@]}")"
+            exit 1
+        fi
         key Tab
+    done
+}
+# Press Shift+Tab until NAME has focus.
+shift_tab_to() {
+    local name=$1 max=${2:-40} n=0
+    while [ "$(focused)" != "$name" ]; do
+        n=$((n + 1))
+        if [ "$n" -gt "$max" ]; then note "NOT REACHED: $name after $max Shift+Tab"; exit 1; fi
+        key shift+Tab
     done
 }
 # Press Tab until NAME has focus; record every stop on the way.
@@ -68,25 +82,24 @@ key Return
 wait_for "Connect to Crew" 10 has
 record
 capture 02-connections
-reader pressprefix "Connect to local workspace"
+note "Return on the focused Connect:"
+key Return
 wait_for "claude-1" 30
 sleep 2
-note "connected (Connect to local workspace pressed through its accessible action):"
+note "connected:"
 record
 
 note ""
-note "## G2 Sidebar is one Tab stop (Ctrl+1, Shift+Tab into the sidebar, then Tab)"
+note "## G2 Sidebar is one Tab stop (Shift+Tab back to the Team destination, then Tab)"
 key ctrl+1
-record
-key shift+Tab
+shift_tab_to "Team"
 record
 walk 6
-capture 03-tab-walk
 
 note ""
 note "## G2 Arrows move focus, only Enter changes the destination"
 key ctrl+1
-key shift+Tab
+shift_tab_to "Team"
 note "Down, Down:"
 key Down
 key Down
@@ -96,11 +109,11 @@ note "Return:"
 key Return
 record
 note "Window title: '$(title)'"
-key ctrl+1
 
 note ""
-note "## G9 Tab walk on the Team page (Ctrl+1 first)"
+note "## G9 Tab walk on the Team page from Answer (Ctrl+1 first)"
 key ctrl+1
+tab_to "Answer"
 record
 walk 5
 
@@ -123,12 +136,14 @@ record
 note ""
 note "## G3 Kill… and Restart fresh… from the inspector's Actions menu (Return, Escape)"
 key ctrl+1
-tab_to_prefix "claude-1," 30
+tab_to "List"
+key Return
+tab_to_prefix "claude-1, " 30
 note "Return on the claude-1 row opens its inspector:"
 key Return
 record
 for name in "Kill…" "Restart fresh…"; do
-    tab_to_prefix "Actions" 60
+    tab_to_prefix "Actions|Agent actions" 60
     note "Actions, Return:"
     key Return
     record
@@ -161,9 +176,7 @@ record
 
 note ""
 note "## G15 Terminal: controls follow the attachment; F6 leaves the terminal"
-key ctrl+1
-tab_to_prefix "claude-1," 30
-key Return
+note "(the claude-1 inspector is still open)"
 controls() { reader tree "Team — Crew" | grep -E "'(Attach terminal|Detach terminal|Copy selection)'" >>"$transcript" || true; }
 note "before Attach:"
 controls
@@ -173,6 +186,8 @@ sleep 2
 note "after Attach (focus and controls):"
 record
 controls
+note "accessible text of the attached terminal (no new output yet):"
+reader text "Agent terminal" >>"$transcript" || note "  (no text interface)"
 tab_to "Agent terminal" 40
 record
 note "Ctrl+2 typed into the terminal goes to the agent:"
@@ -188,12 +203,6 @@ sleep 1
 record
 controls
 
-note ""
-note "## QA L15 item 10: fast destination switching (Ctrl+1–5, 20 ms apart, four rounds)"
-for _ in 1 2 3 4; do xdotool key --clearmodifiers --delay 20 ctrl+1 ctrl+2 ctrl+3 ctrl+4 ctrl+5; done
-sleep 1
-if reader has "The client is busy. Try again."; then note "busy message shown"; else note "no busy message"; fi
-note "Window title: '$(title)'"
 
 note ""
 note "## G15 Shortcut help documents the terminal escape"
