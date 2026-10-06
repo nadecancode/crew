@@ -13,3 +13,13 @@
 .crew-navigation { background: transparent; }
 .crew-navigation row:selected { background: @crew_raised; color: @crew_accent; }
 .crew-status { border-top: 1px solid @crew_border; }
+@define-color crew_tone_neutral #53635d;
+@define-color crew_tone_info #315ebe;
+@define-color crew_tone_success #216e4d;
+@define-color crew_tone_warning #8a570b;
+@define-color crew_tone_danger #b23b3b;
+.crew-chip.tone-neutral { color: @crew_tone_neutral; }
+.crew-chip.tone-info { color: @crew_tone_info; }
+.crew-chip.tone-success { color: @crew_tone_success; }
+.crew-chip.tone-warning { color: @crew_tone_warning; }
+.crew-chip.tone-danger { color: @crew_tone_danger; }
