@@ -1201,7 +1201,7 @@ fn live(app: &gtk::Application) {
     until("agent controls withheld", || {
         text(&window).contains("Pause: Control authority is required")
     });
-    let attach = button_labelled(&window, "Attach PTY terminal");
+    let attach = button_labelled(&window, "Attach terminal");
     until("terminal attach allowed", || attach.is_sensitive());
     assert!(!button_labelled(&window, "Pause").is_sensitive());
     capture("live-gateway-read-terminal");

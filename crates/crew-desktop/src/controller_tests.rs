@@ -215,12 +215,12 @@ fn gtk_scoped_views_confirmation_terminal_order_and_live_local_service() {
     c.select(key(Entity::Agent("claude-1".into())));
     recorder.queries(&c, &core);
     let inspector = c.agent.borrow().as_ref().unwrap().1.clone();
-    assert!(text(shell.window()).contains("Current work: current"));
+    assert!(text(shell.window()).contains("Current work\ncurrent"));
     c.select(key(Entity::Task("parked-old".into())));
     recorder.queries(&c, &core);
     assert!(text(shell.window()).contains("Waiting"));
     let task = c.task_inspector.borrow().as_ref().unwrap().1.clone();
-    let refresh = button(&task.root, "Refresh evidence");
+    let refresh = button(&task.root, "Refresh");
     refresh.grab_focus();
     c.refresh(Destination::Tasks);
     recorder.queries(&c, &core);
@@ -529,7 +529,7 @@ fn keyboard_focus(c: &Controller, recorder: &Recording, core: &ClientCore) {
     // pending while it holds the confirmation, so the opener is unavailable
     // when the dialog closes; focus waits nearby and goes back once Core
     // enables it again.
-    let stop = button(&page, "Stop team");
+    let stop = button(&page, "Stop team…");
     stop.set_sensitive(true);
     stop.grab_focus();
     stop.emit_clicked();
@@ -599,8 +599,8 @@ fn keyboard_focus(c: &Controller, recorder: &Recording, core: &ClientCore) {
     recorder.queries(c, core);
     let inspector = c.agent.borrow().as_ref().unwrap().1.clone();
     for (name, kind, id, accept) in [
-        ("Kill", ConfirmationKind::KillAgent, 43, true),
-        ("Restart fresh", ConfirmationKind::RestartFresh, 44, false),
+        ("Kill…", ConfirmationKind::KillAgent, 43, true),
+        ("Restart fresh…", ConfirmationKind::RestartFresh, 44, false),
     ] {
         let opener = button(&inspector.root, name);
         opener.set_sensitive(true);
@@ -680,7 +680,7 @@ fn keyboard_focus(c: &Controller, recorder: &Recording, core: &ClientCore) {
     c.shell.navigate(Destination::Team);
     c.shell.set_detail_visible(true);
     settle();
-    let kill = button(&inspector.root, "Kill");
+    let kill = button(&inspector.root, "Kill…");
     kill.set_sensitive(true);
     kill.grab_focus();
     kill.emit_clicked();
@@ -728,7 +728,7 @@ fn keyboard_focus(c: &Controller, recorder: &Recording, core: &ClientCore) {
     // G15: Copy needs a selection, Detach an attachment, and Attach is
     // offered only while nothing is attached.
     let page_terminal = &inspector.terminal;
-    let attach = button(&inspector.root, "Attach PTY terminal");
+    let attach = button(&inspector.root, "Attach terminal");
     let detach = button(&inspector.root, "Detach terminal");
     let copy = button(&inspector.root, "Copy selection");
     inspector.set_live(true);
@@ -1269,7 +1269,7 @@ fn live_local(app: &gtk::Application) {
         entity: Entity::Message("gtk-live-message".into()),
     });
     live_until(&c, || {
-        text(shell.window()).contains("Ready")
+        text(shell.window()).contains("Loaded message")
             && descendants(shell.window().upcast_ref())
                 .iter()
                 .filter_map(|w| w.clone().downcast::<gtk::TextView>().ok())
@@ -1322,9 +1322,9 @@ fn live_local(app: &gtk::Application) {
     live_until(&c, || c.agent.borrow().as_ref().unwrap().1.root.is_mapped());
     let agent = c.agent.borrow().as_ref().unwrap().1.clone();
     live_until(&c, || {
-        button(&agent.root, "Attach PTY terminal").is_sensitive()
+        button(&agent.root, "Attach terminal").is_sensitive()
     });
-    button(&agent.root, "Attach PTY terminal").emit_clicked();
+    button(&agent.root, "Attach terminal").emit_clicked();
     live_until(&c, || agent.terminal.is_active());
     let tabs = descendants(agent.root.upcast_ref())
         .into_iter()
