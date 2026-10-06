@@ -6,3 +6,6 @@
 .crew-detail-heading { padding: 12px 16px; }
 .crew-workspace { padding: 16px; }
 .crew-title { font-weight: bold; }
+/* Status chips: text plus semantic colour. Colours come from the palette;
+   under high contrast the toolkit colour and the border remain. */
+.crew-chip { border: 1px solid currentColor; border-radius: 999px; padding: 1px 8px; font-size: smaller; }

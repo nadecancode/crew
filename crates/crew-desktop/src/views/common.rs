@@ -153,3 +153,37 @@ pub fn buffer_text(buffer: &gtk::TextBuffer) -> String {
         .text(&buffer.start_iter(), &buffer.end_iter(), true)
         .to_string()
 }
+
+/// One task-status colour mapping for task rows and graph nodes. Agent tone
+/// comes from the shared presentation; the status word always accompanies it.
+pub fn task_tone(status: crew_protocol::TaskStatus) -> crew_client::api::Tone {
+    use crew_client::api::Tone;
+    use crew_protocol::TaskStatus;
+    match status {
+        TaskStatus::Working | TaskStatus::Review => Tone::Info,
+        TaskStatus::Done => Tone::Success,
+        TaskStatus::Failed => Tone::Danger,
+        TaskStatus::Blocked => Tone::Warning,
+        TaskStatus::Queued | TaskStatus::Ready | TaskStatus::Waiting => Tone::Neutral,
+    }
+}
+
+/// A status chip: the status text plus its semantic colour, never colour alone.
+pub fn status_chip(text: &str, tone: crew_client::api::Tone) -> gtk::Label {
+    use crew_client::api::Tone;
+    let chip = gtk::Label::builder()
+        .label(text)
+        .selectable(false)
+        .halign(gtk::Align::Start)
+        .valign(gtk::Align::Center)
+        .build();
+    chip.add_css_class("crew-chip");
+    chip.add_css_class(match tone {
+        Tone::Neutral => "tone-neutral",
+        Tone::Info => "tone-info",
+        Tone::Success => "tone-success",
+        Tone::Warning => "tone-warning",
+        Tone::Danger => "tone-danger",
+    });
+    chip
+}
