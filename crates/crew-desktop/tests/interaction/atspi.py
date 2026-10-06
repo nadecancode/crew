@@ -37,6 +37,25 @@ def line(node, depth):
     return text
 
 
+def path(node):
+    """The accessible path from the window down to `node`: role, name and
+    index among its siblings at each level, so a focused container that has
+    no name of its own is still identified."""
+    steps = []
+    while node is not None:
+        try:
+            role = node.getRoleName()
+            index = node.getIndexInParent()
+            parent = node.parent
+        except Exception:
+            break
+        if role == "application":
+            break
+        steps.append(f"{role}[{index}] {node.name!r}" if node.name else f"{role}[{index}]")
+        node = parent
+    return " > ".join(reversed(steps))
+
+
 def walk(node, depth=0):
     if node is None or depth > 40:
         return
@@ -67,6 +86,8 @@ if mode == "focus":
                 print(f"  window {node.name!r}")
             if node.getState().contains(pyatspi.STATE_FOCUSED):
                 print("  " + line(node, depth))
+                if not node.name:
+                    print("    path: " + path(node))
                 found = True
     if not found:
         print("  (no focused descendant)")

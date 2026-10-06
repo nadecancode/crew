@@ -146,6 +146,41 @@ fn native_navigation_layout_focus_and_lifecycle() {
     let connected = gtk::Button::with_label("Refresh");
     shell.set_main(Destination::Team, &connected);
     until(|| has_focus(shell.window(), &connected));
+    // Connecting sets the same page again (each new scope does). Focus in it
+    // stays on its control rather than moving to the split pane's handle.
+    let page = gtk::Box::new(gtk::Orientation::Vertical, 0);
+    let answer = gtk::Button::with_label("Answer");
+    page.append(&answer);
+    shell.set_main(Destination::Team, &page);
+    until(|| has_focus(shell.window(), &answer));
+    // The page that is already shown is not taken out and put back.
+    let unmapped = Rc::new(Cell::new(0));
+    page.connect_unmap({
+        let unmapped = unmapped.clone();
+        move |_| unmapped.set(unmapped.get() + 1)
+    });
+    for _ in 0..3 {
+        shell.set_main(Destination::Team, &page);
+        // GTK moves focus away from a removed widget after the next frame.
+        for _ in 0..10 {
+            settle();
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        assert!(
+            has_focus(shell.window(), &answer),
+            "focus left the page for {:?}",
+            gtk::prelude::GtkWindowExt::focus(shell.window()).map(|f| f.type_().name())
+        );
+    }
+    assert_eq!(
+        unmapped.get(),
+        0,
+        "setting the shown page again leaves it in place"
+    );
+    // However focus reaches the split pane's handle without the pane keys
+    // (F6, F8), it moves into the page.
+    pane.grab_focus();
+    until(|| has_focus(shell.window(), &answer));
 
     // Static disconnected pages have no row or reading control to restore.
     // Navigation, compact detail and Back must retain named visible context.

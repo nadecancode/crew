@@ -366,20 +366,28 @@ impl Shell {
             }
         });
         shell.0.navigation.add_controller(sidebar_keys(&shell));
-        // When the focused control is removed with its page (connecting while
-        // a dialog is open), GTK falls back to a container of the page, such
-        // as the split pane's handle: move focus into the page instead. A
-        // handle the user moved to from a live control keeps focus.
+        // When the focused control is removed with its page, GTK moves focus
+        // to the first focusable container above it once the next frame is
+        // painted: the split pane, whose own focus is only its resize handle.
+        // Move focus into the page instead. The handle keeps focus only when
+        // the user moved there with the split pane's keys (F6 or F8).
+        let handle_keys = Rc::new(Cell::new(false));
+        let keys = gtk::EventControllerKey::new();
+        keys.set_propagation_phase(gtk::PropagationPhase::Capture);
+        keys.connect_key_pressed({
+            let handle_keys = handle_keys.clone();
+            move |_, key, _, _| {
+                handle_keys.set(matches!(key, gtk::gdk::Key::F6 | gtk::gdk::Key::F8));
+                glib::Propagation::Proceed
+            }
+        });
+        shell.0.window.add_controller(keys);
         let weak = Rc::downgrade(&shell.0);
-        let last = Rc::new(RefCell::new(glib::WeakRef::<gtk::Widget>::new()));
         shell.0.window.connect_focus_widget_notify(move |window| {
             let Some(inner) = weak.upgrade() else { return };
             let focus = gtk::prelude::GtkWindowExt::focus(window);
-            let previous = last.borrow().upgrade();
-            last.borrow_mut().set(focus.as_ref());
             let slot = &inner.main_slots[inner.destination.get().index()];
-            let removed = previous.is_none_or(|p| p.root().is_none());
-            if removed && focus.is_some_and(|f| slot.is_ancestor(&f)) {
+            if !handle_keys.get() && focus.is_some_and(|f| slot.is_ancestor(&f)) {
                 Shell(inner).focus_visible_view();
             }
         });
@@ -967,7 +975,15 @@ fn view_slot() -> gtk::Box {
         .build()
 }
 
+/// Make `widget` the slot's only child. Setting the child it already has
+/// changes nothing: removing and re-adding it would make GTK move focus
+/// that was inside it to the first focusable container above the slot (the
+/// split pane's handle) once the next frame is painted.
 fn replace_child(slot: &gtk::Box, widget: &impl IsA<gtk::Widget>) {
+    let widget = widget.upcast_ref::<gtk::Widget>();
+    if slot.first_child().as_ref() == Some(widget) && widget.next_sibling().is_none() {
+        return;
+    }
     while let Some(child) = slot.first_child() {
         slot.remove(&child);
     }
