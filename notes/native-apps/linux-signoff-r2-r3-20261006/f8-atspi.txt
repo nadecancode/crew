@@ -1,0 +1,5 @@
+F8 after selecting an agent (f8.sh, private session, app bb10accc):
+grouping: 'Resize details pane'
+With the label set but GTK's generic role kept (this card's first build,
+e52cfa99), the same probe printed:
+panel: ''

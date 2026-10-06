@@ -1,0 +1,16 @@
+app bb10accca98fae1d6b865f3cc724ed5fdfe7fb5bdafcb42f18264df0d3aec26a  /home/nade/workspaces/personal/crew/.crew/worktrees/content/target/native-validation/content-polish/r-bin/crew-desktop
+crew a072f2add41e47f1de5dbd30ea329ab96548d6d7ba1e8921ee8f611c22aeae63  /home/nade/workspaces/personal/crew/.crew/worktrees/content/target/native-validation/content-polish/r-bin/crew
+crew 0.1.0
+GTK 4.22.4
+VTE 0.84.1
+GLib 2.88.3
+AT-SPI 2.60.6
+xdotool version 4.20260303.1
+Version: ImageMagick 7.1.2-29 Q16-HDRI x86_64 b919b37fd:20260727 https://imagemagick.org
+Python 3.14.7
+pyatspi (1, 9, 0)
+Openbox 3.6.1
+display=:10037 screen=1440x960x24 dpi=96 GDK_SCALE=1 GDK_BACKEND=x11 GSK_RENDERER=cairo
+animations=false window_manager=openbox
+nixpkgs=/nix/store/ab93n7qqycnn3xfdnav0wnqqigvddd5r-source
+keyring gnome-keyring-daemon: 50.0
