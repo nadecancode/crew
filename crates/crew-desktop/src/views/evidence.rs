@@ -133,28 +133,34 @@ pub fn value_text(value: &ResourceValue) -> String {
         ),
         ResourceValue::Message(message) => {
             message.as_ref().map_or("Message unavailable".into(), |m| {
-                format!(
-                    "{} to {} · {}\n{}\n\n{}\n\nMetadata: {}",
+                let mut text = format!(
+                    "{} to {} · {}\n{}\n\n{}",
                     m.from,
                     m.to,
                     m.kind,
                     common::timestamp(m.timestamp),
                     m.body,
-                    m.metadata
-                )
+                );
+                if let Some(metadata) = extras(m.metadata.to_string()) {
+                    text.push_str(&format!("\n\nMetadata: {metadata}"));
+                }
+                text
             })
         }
         ResourceValue::Event(event) => event.as_ref().map_or("Event not retained".into(), |e| {
-            format!(
-                "{} · {} · {}\nSequence {} · {}\n\n{}\n\n{}",
+            let mut text = format!(
+                "{} · {} · {}\nSequence {} · {}\n\n{}",
                 e.level,
                 e.source,
                 e.event_type,
                 e.seq,
                 common::timestamp(e.timestamp),
                 e.message,
-                e.data
-            )
+            );
+            if let Some(data) = extras(e.data.to_string()) {
+                text.push_str(&format!("\n\n{data}"));
+            }
+            text
         }),
         ResourceValue::TaskCard(card) => format!(
             "{} · {}\n{}\n\n{}\n\nResult: {}\nNote: {}\nDependencies:\n{}\nArtifacts:\n{}",
@@ -246,6 +252,12 @@ pub fn value_text(value: &ResourceValue) -> String {
     }
 }
 
+/// A structured value's text, or nothing when it holds nothing: `null`, an
+/// empty object, list or string.
+fn extras(text: String) -> Option<String> {
+    (!matches!(text.as_str(), "null" | "{}" | "[]" | "\"\"")).then_some(text)
+}
+
 fn noun(kind: ResourceKind) -> &'static str {
     match kind {
         ResourceKind::TaskCard => "task card",
@@ -277,5 +289,40 @@ pub fn status_text(state: &ResourceState) -> String {
     match &state.error {
         Some(error) if !error.message.is_empty() => format!("{phrase}\n{}", error.message),
         _ => phrase,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn absent_message_metadata_is_left_out() {
+        let message = |metadata| {
+            ResourceValue::Message(Some(crew_protocol::Message {
+                id: "m-1".into(),
+                from: "claude-1".into(),
+                to: "operator".into(),
+                kind: crew_protocol::MessageType::Message,
+                body: "Done".into(),
+                timestamp: 0,
+                correlation_id: None,
+                reply_to: None,
+                metadata,
+            }))
+        };
+        for empty in [
+            serde_json::Value::Null,
+            serde_json::json!({}),
+            serde_json::json!([]),
+        ] {
+            let text = value_text(&message(empty));
+            assert!(
+                text.ends_with("Done") && !text.contains("Metadata"),
+                "{text}"
+            );
+        }
+        let text = value_text(&message(serde_json::json!({"task": "billing"})));
+        assert!(text.ends_with("Metadata: {\"task\":\"billing\"}"), "{text}");
     }
 }

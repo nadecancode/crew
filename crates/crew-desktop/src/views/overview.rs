@@ -60,7 +60,6 @@ impl OverviewHeader {
         question.set_valign(gtk::Align::Center);
         asking.append(&question);
         let answer_button = gtk::Button::with_label("Answer");
-        answer_button.add_css_class("suggested-action");
         answer_button.set_valign(gtk::Align::Center);
         answer_button.connect_clicked(move |_| answer());
         asking.append(&answer_button);
@@ -117,6 +116,12 @@ impl OverviewHeader {
     /// Mark the counts and warnings as last known while not live.
     pub fn set_live(&self, live: bool) {
         self.live.set(live);
+        // Answer is the suggested action only while it can be sent.
+        if live {
+            self.answer.add_css_class("suggested-action");
+        } else {
+            self.answer.remove_css_class("suggested-action");
+        }
         self.stale
             .set_visible(!live && !self.counts.label().is_empty());
     }

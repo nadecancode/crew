@@ -181,6 +181,20 @@ fn row(title: &str, detail: &str, state: &str, actions: &gtk::Box) -> gtk::Box {
     common::entry_row(title, detail, state, actions)
 }
 
+/// A host path on one line, shortened in the middle when it does not fit: its
+/// start and the workspace directory at its end stay readable. The full path
+/// is the tooltip and accessible description.
+fn middle_ellipsized(path: &str) -> gtk::Label {
+    let label = gtk::Label::builder()
+        .label(path)
+        .xalign(0.0)
+        .ellipsize(gtk::pango::EllipsizeMode::Middle)
+        .tooltip_text(path)
+        .build();
+    label.update_property(&[gtk::accessible::Property::Description(path)]);
+    label
+}
+
 /// Wide aligned content scrolls sideways instead of truncating identity.
 fn scroll_horizontal(widget: &impl IsA<gtk::Widget>) -> gtk::ScrolledWindow {
     gtk::ScrolledWindow::builder()
@@ -763,7 +777,17 @@ impl Remote {
                             },
                         );
                     }
-                    EndpointStatus::SignedOut => "Device access unavailable",
+                    // The connector's reason names a revocation precisely.
+                    EndpointStatus::SignedOut => {
+                        return self.reasons.borrow().get(&profile.id).map_or_else(
+                            || "Device access unavailable".to_owned(),
+                            |reason| {
+                                copy::problem(reason, Phase::Live, profile.storage)
+                                    .title
+                                    .to_owned()
+                            },
+                        );
+                    }
                     EndpointStatus::Incompatible => "Incompatible versions",
                     EndpointStatus::Stopped => "Native service is unavailable",
                 };
@@ -784,23 +808,29 @@ impl Remote {
 
     fn workspace_buttons(&self, body: &gtk::Box, listing: &Workspaces) {
         for entry in &listing.joined {
-            let label = format!(
-                "{} · {}\n{}{}",
+            // A long host path must not widen the dialog: it is shortened in
+            // the middle, with the full path in the tooltip and accessible
+            // description.
+            let content = gtk::Box::new(gtk::Orientation::Vertical, 2);
+            content.append(&common::text(&format!(
+                "{} · {}",
                 entry.project.as_deref().unwrap_or("Crew"),
-                entry.state,
-                entry.workspace,
-                if entry.detail.is_empty() {
-                    String::new()
-                } else {
-                    format!("\n{}", entry.detail)
-                }
-            );
-            let open = gtk::Button::with_label(&label);
+                entry.state
+            )));
+            content.append(&middle_ellipsized(&entry.workspace));
+            if !entry.detail.is_empty() {
+                content.append(&common::text(&entry.detail));
+            }
+            let open = gtk::Button::builder().child(&content).build();
+            open.set_tooltip_text(Some(&entry.workspace));
             named(&open, &format!("workspace:{}", entry.id));
-            open.update_property(&[gtk::accessible::Property::Label(&format!(
-                "Open workspace {}, {}",
-                entry.workspace, entry.state
-            ))]);
+            open.update_property(&[
+                gtk::accessible::Property::Label(&format!(
+                    "Open workspace {}, {}",
+                    entry.workspace, entry.state
+                )),
+                gtk::accessible::Property::Description(&entry.workspace),
+            ]);
             open.connect_clicked({
                 let weak = self.weak.clone();
                 let id = entry.id.clone();
@@ -1757,7 +1787,7 @@ impl Remote {
                     .find(|w| w.id == connection.scope.workspace_id)
             })
             .map_or(connection.scope.workspace_id.clone(), |w| {
-                w.workspace.clone()
+                w.project.clone().unwrap_or_else(|| w.workspace.clone())
             });
         section(body, &format!("Access in {name}"));
         let tiers = &connection.grant.tiers;
@@ -1916,6 +1946,7 @@ impl Remote {
         revoke.connect_clicked(self.go(Page::Revoke(id.to_owned())));
         actions.append(&revoke);
         let remove = button("remove", "Remove from this app");
+        remove.add_css_class("destructive-action");
         remove.connect_clicked(self.go(Page::Remove(id.to_owned())));
         actions.append(&remove);
         let wrap = gtk::FlowBox::builder()
@@ -1961,8 +1992,10 @@ impl Remote {
         body.append(&common::selectable(&copy::revoke_instructions(
             device.as_deref(),
         )));
+        // Cancel first and focused; removal is the destructive choice.
         let actions = gtk::Box::new(gtk::Orientation::Horizontal, 8);
         let remove = button("confirm-remove", "Remove from this app");
+        remove.add_css_class("destructive-action");
         remove.connect_clicked({
             let weak = self.weak.clone();
             let id = id.to_owned();
@@ -1974,7 +2007,6 @@ impl Remote {
                 }
             }
         });
-        actions.append(&remove);
         let cancel = button("cancel", "Cancel");
         cancel.connect_clicked({
             let weak = self.weak.clone();
@@ -1985,6 +2017,7 @@ impl Remote {
             }
         });
         actions.append(&cancel);
+        actions.append(&remove);
         body.append(&actions);
         (body, cancel.upcast())
     }

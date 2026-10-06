@@ -241,6 +241,8 @@ impl Shell {
         content.set_end_child(Some(&detail_container));
         // A visible handle, and an inspector wide enough for its tabs.
         content.set_wide_handle(true);
+        // F8 focuses the split itself; name it for what the arrow keys do there.
+        content.update_property(&[gtk::accessible::Property::Label("Resize details pane")]);
         content.set_position(420);
         let adaptive = AdaptiveBox::new();
         adaptive.set_hexpand(true);

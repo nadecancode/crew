@@ -663,6 +663,26 @@ fn presentation(app: &gtk::Application) {
     let granted = text(&dialog);
     assert!(granted.contains("/work/alpha") && granted.contains("/work/beta"));
     capture("fixture-gateway-s07-granted");
+    // A long host path keeps the dialog at its width: the path is shortened
+    // in the middle, with the full value in its tooltip.
+    let long = format!(
+        "/home/operator/{}workspace",
+        "a-deeply-nested-directory/".repeat(8)
+    );
+    *recorder.listing.borrow_mut() = Some(
+        serde_json::from_value(json!({"rev": 5, "joined": [
+            {"id": "c3c3c3c3c3c3c3c3", "generation": 1, "project": "long-path",
+             "workspace": long, "state": "running", "joined_at": 3}
+        ]}))
+        .unwrap(),
+    );
+    remote.changed();
+    settle();
+    let open = named(&dialog, "workspace:c3c3c3c3c3c3c3c3");
+    assert_eq!(open.tooltip_text().as_deref(), Some(long.as_str()));
+    let (min, ..) = dialog.measure(gtk::Orientation::Horizontal, -1);
+    assert!(min <= 640, "a long path widens the dialog to {min}");
+    capture("fixture-gateway-s07-long-path");
     *recorder.listing.borrow_mut() =
         Some(serde_json::from_value(json!({"rev": 4, "joined": []})).unwrap());
     remote.changed();
@@ -757,13 +777,33 @@ fn presentation(app: &gtk::Application) {
     ));
     capture("fixture-gateway-access-ended");
 
-    // Remove: local key retirement only, with host revocation instructions.
+    // A revocation the connector names reads as ended, not as unavailable.
+    remote.notice(
+        &notice(
+            EndpointStatus::SignedOut,
+            WorkspaceStatus::NoneSelected,
+            Some("revoked"),
+        ),
+        None,
+    );
+    settle();
     click(&dialog, "connections");
+    assert!(text(&dialog).contains("Device access ended"));
+
+    // Remove: local key retirement only, with host revocation instructions.
+    // Cancel comes first and has focus; removal is styled destructive.
     click(&dialog, &format!("details:{profile_id}"));
+    assert!(named(&dialog, "remove").has_css_class("destructive-action"));
     click(&dialog, "remove");
     let remove = text(&dialog);
     assert!(remove.contains("Host access remains until revoked or expired."));
     assert!(remove.contains("crew native revoke"));
+    assert!(focus_is(&dialog, "cancel"));
+    let confirm = named(&dialog, "confirm-remove");
+    assert!(confirm.has_css_class("destructive-action"));
+    assert!(confirm
+        .prev_sibling()
+        .is_some_and(|w| w.widget_name() == "cancel"));
     click(&dialog, "confirm-remove");
     assert!(matches!(
         recorder.take().as_slice(),

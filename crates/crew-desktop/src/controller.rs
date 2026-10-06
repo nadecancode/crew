@@ -661,6 +661,7 @@ impl Controller {
                 }
                 *self.connection.borrow_mut() = connection;
                 *self.listing.borrow_mut() = workspaces;
+                self.show_workspace();
                 #[cfg(feature = "gateway")]
                 self.remote.changed();
             }
@@ -723,18 +724,8 @@ impl Controller {
         if notice.scope != *self.scope.borrow() || revoked {
             self.invalidate(revoked);
             let visible_scope = if revoked { None } else { notice.scope.clone() };
-            *self.scope.borrow_mut() = visible_scope.clone();
-            self.workspace_label.set_label(
-                visible_scope
-                    .as_ref()
-                    .map_or("Choose workspace", |scope| scope.workspace_id.as_str()),
-            );
-            self.workspace_label
-                .update_property(&[gtk::accessible::Property::Label(
-                    visible_scope
-                        .as_ref()
-                        .map_or("No workspace selected", |scope| scope.workspace_id.as_str()),
-                )]);
+            *self.scope.borrow_mut() = visible_scope;
+            self.show_workspace();
             self.message_before.borrow_mut().take();
             self.event_before.borrow_mut().take();
             self.query(ViewQuery::Overview, QueryTarget::Overview);
@@ -2618,6 +2609,36 @@ impl Controller {
         dialogs::escape(&dialog);
         dialog.present();
         self.auxiliary.borrow_mut().push(dialog);
+    }
+    /// Name the open workspace in the header selector: the listing's project,
+    /// else its path. A local workspace's scope is already its path; a
+    /// gateway's is an opaque ID, named once the listing arrives.
+    fn show_workspace(&self) {
+        let scope = self.scope.borrow();
+        let Some(scope) = scope.as_ref() else {
+            self.workspace_label.set_label("Choose workspace");
+            self.workspace_label
+                .update_property(&[gtk::accessible::Property::Label("No workspace selected")]);
+            return;
+        };
+        let listing = self.listing.borrow();
+        let entry = listing
+            .as_ref()
+            .and_then(|l| l.joined.iter().find(|e| e.id == scope.workspace_id));
+        let (name, path) = entry.map_or((scope.workspace_id.as_str(), None), |entry| {
+            (
+                entry.project.as_deref().unwrap_or(&entry.workspace),
+                Some(entry.workspace.as_str()),
+            )
+        });
+        // The selector's own tooltip carries the connection status.
+        self.workspace_label.set_label(name);
+        let label = match path {
+            Some(path) if path != name => format!("{name}, {path}"),
+            _ => name.to_owned(),
+        };
+        self.workspace_label
+            .update_property(&[gtk::accessible::Property::Label(&label)]);
     }
     pub fn connections(&self) {
         #[cfg(feature = "gateway")]

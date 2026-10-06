@@ -233,6 +233,7 @@ fn gtk_scoped_views_confirmation_terminal_order_and_live_local_service() {
     assert!(refresh.has_focus() || refresh.is_focus());
     capture("fixture-waiting-detail");
     layout_follow_ups(&c, &shell, &core, &task, &inspector);
+    signoff_items(&c);
     shell.navigate(Destination::Team);
     assert!(
         c.agent.borrow().is_some(),
@@ -956,6 +957,46 @@ fn keyboard_focus(c: &Controller, recorder: &Recording, core: &ClientCore) {
 }
 
 /// Show a graph's page in its List/Graph stack and let it allocate.
+/// Sign-off items R3 and L3: the header selector names a listed workspace by
+/// its project, and Answer is the suggested action only while live.
+fn signoff_items(c: &Controller) {
+    let label = || c.workspace_label.label().to_string();
+    let local = label();
+    assert_eq!(local, scope().workspace_id, "a local scope is its path");
+    let listed = |project: Option<&str>| {
+        serde_json::from_value::<crew_protocol::rpc::Workspaces>(serde_json::json!({
+            "rev": 1,
+            "joined": [{"id": scope().workspace_id, "generation": 1, "project": project,
+                        "workspace": "/srv/hosts/demo", "state": "running", "joined_at": 1}]
+        }))
+        .unwrap()
+    };
+    let context = |workspaces| {
+        c.respond(Response::Context {
+            instance: 1,
+            connection: None,
+            workspaces,
+        })
+    };
+    context(Some(listed(Some("demo-project"))));
+    assert_eq!(label(), "demo-project");
+    context(Some(listed(None)));
+    assert_eq!(
+        label(),
+        "/srv/hosts/demo",
+        "the path when there is no project"
+    );
+    context(None);
+    assert_eq!(label(), local);
+
+    let answer = &c.header.answer;
+    c.header.set_live(false);
+    assert!(!answer.has_css_class("suggested-action"));
+    c.header.set_live(true);
+    assert!(answer.has_css_class("suggested-action"));
+    c.header.set_live(c.live.get());
+}
+
 /// Designer follow-ups V2–V5: the sidebar status measure and blank result
 /// line, one tab row with a More menu, inspector titles and the task result
 /// among its facts.
