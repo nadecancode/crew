@@ -465,33 +465,47 @@
     "evidenceEntries": [
       {
         "path": "review/native-transport-validation/k5-26bf-binary.json",
-        "authority": "1c2846cf0e345fba15790a7d0c478f775d644263",
+        "authority": "2e0fb214c5c566a8bbe7e1bc577a97ebaea69f56",
         "bytes": 299,
         "sha256": "18d0c652cbdf845b5ef228e15c8a728935761f3a6237f7e30d7a364220ad9376"
       },
       {
         "path": "review/native-transport-validation/k5-26bf-journeys.log",
-        "authority": "1c2846cf0e345fba15790a7d0c478f775d644263",
+        "authority": "2e0fb214c5c566a8bbe7e1bc577a97ebaea69f56",
         "bytes": 1518,
         "sha256": "fe5bbb78d0348ba893dedd9a79fb48730393353a23e59075de210b3223dc8b79"
       },
       {
         "path": "review/native-transport-validation/k5-e7-56.log",
-        "authority": "1c2846cf0e345fba15790a7d0c478f775d644263",
+        "authority": "2e0fb214c5c566a8bbe7e1bc577a97ebaea69f56",
         "bytes": 13381,
         "sha256": "8594813161554d61028e47e0c4e1e0cd956fee2d46e405dc5bca5219e65d495a"
       },
       {
         "path": "review/native-transport-validation/k5-e7-local31.log",
-        "authority": "1c2846cf0e345fba15790a7d0c478f775d644263",
+        "authority": "2e0fb214c5c566a8bbe7e1bc577a97ebaea69f56",
         "bytes": 3809,
         "sha256": "ae0a73d8c9ea96a61360d9b64872bea86a77e034cf622141abaae885bad503c6"
       },
       {
         "path": "review/native-transport-validation.md",
-        "authority": "1c2846cf0e345fba15790a7d0c478f775d644263",
-        "bytes": 6905,
-        "sha256": "fdc8a4d89c6c437d0b5f17c5390b1b2393c10fddf6408e6e315eff38cc2ee8df"
+        "authority": "2e0fb214c5c566a8bbe7e1bc577a97ebaea69f56",
+        "bytes": 6911,
+        "sha256": "26e746078a5262928021166eee1e48a1ea814ec8250a1b5d648ce4e1746064a6"
+      }
+    ],
+    "operationalEntries": [
+      {
+        "path": "review/native/storage-recovery.md",
+        "authority": "131ff616e883ec00c549b4f7892d6a606d7405e9",
+        "bytes": 5398,
+        "sha256": "adce251de45285b5cb25307b3d47be753e5bf7a97cf9f64bda38936e2cb1a6a1"
+      },
+      {
+        "path": "review/native/storage-recovery.json",
+        "authority": "131ff616e883ec00c549b4f7892d6a606d7405e9",
+        "bytes": 11627,
+        "sha256": "bf9bebef2a81aeff0039b36dc34a96c459ae8a82f415af5be3666cf486b10fa4"
       }
     ],
     "protected": {
@@ -1089,7 +1103,11 @@
     "committedLog": "review/native-transport-validation/k5-26bf-journeys.log",
     "logSha256": "fe5bbb78d0348ba893dedd9a79fb48730393353a23e59075de210b3223dc8b79",
     "narrowApproval": "m-1aa8057e6ce4",
-    "retainedHashCorrection": "pending owner report-only follow-up"
+    "retainedHashCorrection": {
+      "authority": "2e0fb214c5c566a8bbe7e1bc577a97ebaea69f56",
+      "import": "6c2f51b613b4f631b264879621d3df4d89e2969e",
+      "scope": "retained56log SHA-256 table only; raw logs unchanged"
+    }
   },
   "earlierOwnerAcceptance": [
     {
@@ -1325,5 +1343,27 @@
       "commit": "26bf2ebeaa5270e2b085fb8697e91134e44d6784",
       "role": "patch-equivalent approved f94 PTY correction"
     }
-  ]
+  ],
+  "storageAudit": {
+    "authority": "131ff616e883ec00c549b4f7892d6a606d7405e9",
+    "import": "42060db7",
+    "report": "review/native/storage-recovery.md",
+    "inventory": "review/native/storage-recovery.json",
+    "orchestratorInstruction": "m-c652023a8ad3",
+    "rerun": false
+  },
+  "earlierFinalApproval": {
+    "head": "ecbf5b1160a95da09e19c7949510731672cfe172",
+    "message": "m-f6c26fda1411",
+    "independent": {
+      "metadata": true,
+      "fmt": true,
+      "clippyNativeAllTargets": true,
+      "ptyUnitPassed": 16,
+      "realHandlerPassed": 1,
+      "finalGatewayPassed": 19,
+      "actualRust182DefaultBuild": true
+    },
+    "laterChanges": "K5/log/hash correction and storage reports only"
+  }
 }

@@ -7,7 +7,8 @@ Rust/Cargo 1.93.1; device enrollment and all live tests use isolated fixtures.
 
 Final product source is `26bf2ebeaa5270e2b085fb8697e91134e44d6784`; this report
 adds evidence only. The [inventory](gateway-integration.json) records 65 exact
-approved source blobs, five committed consumer evidence files, 583 unchanged
+approved source blobs, five committed consumer evidence files, two operational
+recovery records, 583 unchanged
 protected files, the additive lock union,
 fixture binary, commands and retained log hashes. Core, local FFI/generated
 Swift, desktop/TUI/Apple shells, web assets and Git safeguards remain unchanged.
@@ -21,6 +22,7 @@ The single existing-daemon production exception is reviewed `process/pty.rs`.
 | Connector `1eaefd36` | `dcb8e63c`: entire 32-file transport crate exact, including four identified-attachment consumer cases. Private Core/server/workspace/lock ancestry excluded. |
 | Optional package union | `e7b1625d`, then serialization-only `65d8fe31`; no package membership or default-member change. |
 | PTY lifecycle `f94d0d8b` | `26bf2ebe`: exact production file, real handler regression and [producer evidence](../native-pty-lifecycle.md). Formal approval `m-ef15b7d2a17b`. |
+| Consumer and recovery evidence | Exact standalone imports `1c2846cf`/`2e0fb214` (K5 report, logs and binary manifest) and `131ff616` (storage audit); no product bytes. |
 
 Eight workspace members retain the same five CLI/portable default members.
 The lock has 302 records: all 280 baseline versions/checksums plus 22 exact
@@ -78,7 +80,7 @@ All fixture runners clear inherited `GIT_*`, `HERDR_*` and agent context before
 launching private daemons/workers. Runtime/state/configuration paths and TLS
 credentials belong to disposable fixtures. QA final commands clear `CREW_*`,
 then supply only the explicit local MSRV target override. The shared storage
-pause was honored; only QA's two reproducible incremental caches were removed.
+pause and the [approved recovery audit](storage-recovery.md) were retained; only QA's two reproducible incremental caches were removed.
 Source, logs, binaries, captures and recovery artifacts were preserved. Final
 checks ran serially after coordinated release with `CARGO_INCREMENTAL=0`, a
 100 GiB free-space guard and at least 166 GiB available before each command.
