@@ -50,8 +50,13 @@ pub fn disconnected(destination: Destination) -> gtk::ScrolledWindow {
         .build();
     choose.add_css_class("suggested-action");
     column.append(&choose);
-    // Unlike static empty prose, this page has a control to focus.
-    page.set_can_focus(true);
+    // Unlike static empty prose, this page has a control to focus, while it
+    // is available. A scrolled window open to focus with nothing focusable
+    // inside reports success without taking focus.
+    choose
+        .bind_property("sensitive", &page, "can-focus")
+        .sync_create()
+        .build();
     page
 }
 

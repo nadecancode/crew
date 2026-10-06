@@ -7,6 +7,7 @@ Usage:
   atspi.py has NAME       exit 0 when a showing object is named NAME
   atspi.py prefix TEXT    exit 0 when a showing object's name starts with TEXT
   atspi.py focused        the name of the focused object, if any
+  atspi.py pressprefix T  invoke the first showing button whose name starts with T
 """
 import os
 import sys
@@ -70,7 +71,7 @@ elif mode == "tree":
                 continue
             for node, depth in walk(window):
                 if showing(node) and node.getRoleName() in (
-                    "push button", "toggle button", "combo box", "label", "text",
+                    "push button", "button", "toggle button", "combo box", "label", "text",
                     "list item", "page tab", "terminal", "check box",
                 ) and node.name:
                     print("  " + line(node, depth))
@@ -85,6 +86,13 @@ elif mode == "prefix":
             if node.name and node.name.startswith(sys.argv[2]) and showing(node):
                 raise SystemExit(0)
     raise SystemExit(1)
+elif mode == "pressprefix":
+    for app in crew():
+        for node, depth in walk(app):
+            if node.name and node.name.startswith(sys.argv[2]) and showing(node) and node.getRoleName() in ("push button", "button"):
+                node.queryAction().doAction(0)
+                raise SystemExit(0)
+    raise SystemExit(1)
 elif mode in ("press", "has"):
     name = sys.argv[2]
     for app in crew():
@@ -92,7 +100,7 @@ elif mode in ("press", "has"):
             if node.name == name and showing(node):
                 if mode == "has":
                     raise SystemExit(0)
-                if node.getRoleName() != "push button":
+                if node.getRoleName() not in ("push button", "button"):
                     continue
                 action = node.queryAction()
                 action.doAction(0)

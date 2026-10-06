@@ -68,7 +68,7 @@ key Return
 wait_for "Connect to Crew" 10 has
 record
 capture 02-connections
-reader press "Connect to local workspace"
+reader pressprefix "Connect to local workspace"
 wait_for "claude-1" 30
 sleep 2
 note "connected (Connect to local workspace pressed through its accessible action):"
@@ -105,9 +105,9 @@ record
 walk 5
 
 note ""
-note "## G3 Stop team, keyboard open (Tab to Stop team, Return, Escape)"
+note "## G3 Stop team, keyboard open (Tab to Stop team…, Return, Escape)"
 key ctrl+1
-tab_to "Stop team"
+tab_to "Stop team…"
 record
 key Return
 note "open:"
@@ -121,14 +121,18 @@ note "after 2.5 s:"
 record
 
 note ""
-note "## G3 Kill and Restart fresh from the agent inspector (Return, Escape)"
+note "## G3 Kill… and Restart fresh… from the inspector's Actions menu (Return, Escape)"
 key ctrl+1
 tab_to_prefix "claude-1," 30
 note "Return on the claude-1 row opens its inspector:"
 key Return
 record
-for name in "Kill" "Restart fresh"; do
-    tab_to "$name" 80
+for name in "Kill…" "Restart fresh…"; do
+    tab_to_prefix "Actions" 60
+    note "Actions, Return:"
+    key Return
+    record
+    tab_to "$name" 20
     record
     key Return
     note "open:"
@@ -139,6 +143,7 @@ for name in "Kill" "Restart fresh"; do
     sleep 2
     note "after 2.5 s:"
     record
+    key Escape
 done
 
 note ""
@@ -157,17 +162,18 @@ record
 note ""
 note "## G15 Terminal: controls follow the attachment; F6 leaves the terminal"
 key ctrl+1
-tab_to "Kill" 80
-tab_to "Overview" 80
-key Right Right Right Right
-sleep 0.5
-reader tree "Team — Crew" | grep -E "Attach PTY terminal|Detach terminal|Copy selection" >>"$transcript"
-tab_to "Attach PTY terminal" 20
+tab_to_prefix "claude-1," 30
+key Return
+controls() { reader tree "Team — Crew" | grep -E "'(Attach terminal|Detach terminal|Copy selection)'" >>"$transcript" || true; }
+note "before Attach:"
+controls
+tab_to "Attach terminal" 60
 key Return
 sleep 2
-note "after Attach:"
-reader tree "Team — Crew" | grep -E "Attach PTY terminal|Detach terminal|Copy selection" >>"$transcript"
-tab_to "Agent terminal" 10
+note "after Attach (focus and controls):"
+record
+controls
+tab_to "Agent terminal" 40
 record
 note "Ctrl+2 typed into the terminal goes to the agent:"
 key ctrl+2
@@ -176,10 +182,18 @@ note "F6:"
 key F6
 record
 capture 06-terminal-after-f6
+note "Return on the focused control:"
 key Return
 sleep 1
-note "after Detach (Return on the focused control):"
-reader tree "Team — Crew" | grep -E "Attach PTY terminal|Detach terminal|Copy selection" >>"$transcript"
+record
+controls
+
+note ""
+note "## QA L15 item 10: fast destination switching (Ctrl+1–5, 20 ms apart, four rounds)"
+for _ in 1 2 3 4; do xdotool key --clearmodifiers --delay 20 ctrl+1 ctrl+2 ctrl+3 ctrl+4 ctrl+5; done
+sleep 1
+if reader has "The client is busy. Try again."; then note "busy message shown"; else note "no busy message"; fi
+note "Window title: '$(title)'"
 
 note ""
 note "## G15 Shortcut help documents the terminal escape"

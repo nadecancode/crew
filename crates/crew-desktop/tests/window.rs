@@ -109,6 +109,29 @@ fn native_navigation_layout_focus_and_lifecycle() {
     assert_eq!(sidebar.width(), width, "long status text wraps in place");
     assert!(status.height() > 0);
 
+    // G9: a page with nothing to focus leaves focus on the destination
+    // control; when the page is replaced (connecting, disconnecting) focus
+    // moves to the new page's first control.
+    let destination_team = descendants(shell.window().upcast_ref())
+        .into_iter()
+        .filter_map(|widget| widget.downcast::<gtk::MenuButton>().ok())
+        .find(|button| {
+            button
+                .child()
+                .and_then(|child| child.downcast::<gtk::Label>().ok())
+                .is_some_and(|label| label.text() == "Team")
+        })
+        .unwrap();
+    shell.set_main(
+        Destination::Team,
+        &gtk::Label::new(Some("Nothing to focus")),
+    );
+    shell.focus_page();
+    until(|| has_focus(shell.window(), &destination_team));
+    let choose = gtk::Button::with_label("Choose workspace");
+    shell.set_main(Destination::Team, &choose);
+    until(|| has_focus(shell.window(), &choose));
+
     // Static disconnected pages have no row or reading control to restore.
     // Navigation, compact detail and Back must retain named visible context.
     shell.navigate(Destination::Tasks);

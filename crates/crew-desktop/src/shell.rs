@@ -65,7 +65,11 @@ mod fixed_width {
                 _ => {
                     let (min, natural, ..) = child.measure(
                         gtk::Orientation::Vertical,
-                        if for_size < 0 { width } else { for_size },
+                        if for_size < 0 {
+                            width
+                        } else {
+                            for_size.max(child_min)
+                        },
                     );
                     (min, natural, -1, -1)
                 }
@@ -127,6 +131,9 @@ struct Inner {
     main_focus: [glib::WeakRef<gtk::Widget>; 5],
     /// Page focus was asked for before the window was shown.
     focus_on_map: Cell<bool>,
+    /// Focus sits on the destination control only because the page had
+    /// nothing to focus.
+    focus_fell_back: Cell<bool>,
     observers: RefCell<Vec<DestinationObserver>>,
     appearance: Rc<AppearanceController>,
     sidebar_action: gio::SimpleAction,
@@ -327,6 +334,7 @@ impl Shell {
             detail_requested: std::array::from_fn(|_| Cell::new(false)),
             main_focus: std::array::from_fn(|_| glib::WeakRef::new()),
             focus_on_map: Cell::new(false),
+            focus_fell_back: Cell::new(false),
             observers: RefCell::new(Vec::new()),
             appearance,
             sidebar_action,
@@ -407,8 +415,12 @@ impl Shell {
     /// page's first control rather than being lost.
     pub fn set_main(&self, destination: Destination, widget: &impl IsA<gtk::Widget>) {
         let slot = &self.0.main_slots[destination.index()];
-        let orphaned = gtk::prelude::GtkWindowExt::focus(&self.0.window)
-            .is_none_or(|focus| focus.is_ancestor(slot));
+        let orphaned = gtk::prelude::GtkWindowExt::focus(&self.0.window).is_none_or(|focus| {
+            focus.is_ancestor(slot)
+                || (self.0.focus_fell_back.get()
+                    && (focus == *self.0.destination_button.upcast_ref::<gtk::Widget>()
+                        || focus.is_ancestor(&self.0.destination_button)))
+        });
         replace_child(slot, widget);
         if orphaned && destination == self.destination() {
             self.focus_visible_view();
@@ -564,6 +576,7 @@ impl Shell {
             let Some(inner) = weak.upgrade() else {
                 return;
             };
+            inner.focus_fell_back.set(false);
             let index = inner.destination.get().index();
             if inner.adaptive.compact() && inner.detail_requested[index].get() {
                 if inner.detail_slots[index].child_focus(gtk::DirectionType::TabForward) {
@@ -585,7 +598,9 @@ impl Shell {
                 inner.focus_on_map.set(true);
                 return;
             }
-            inner.destination_button.grab_focus();
+            inner
+                .focus_fell_back
+                .set(inner.destination_button.grab_focus());
         });
     }
 
