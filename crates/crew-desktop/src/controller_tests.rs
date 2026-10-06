@@ -905,6 +905,47 @@ fn keyboard_focus(c: &Controller, recorder: &Recording, core: &ClientCore) {
     detach.grab_focus();
     detach.emit_clicked();
     until(|| attach.is_focus());
+    // R1: a detach closes locally (Core reports ClosedLocally, with no
+    // daemon result), so the window status never says it is pending.
+    c.result.set_label("Before detach");
+    c.plan(
+        ActionIntent::Detach {
+            scope: scope(),
+            attachment_id: 61,
+        },
+        None,
+        None,
+    );
+    let detach_plan = recorder.plan_token();
+    c.respond(Response::Action {
+        instance: 1,
+        token: detach_plan,
+        scope: scope(),
+        result: Ok(ActionPlan::Dispatch { operation_id: 71 }),
+    });
+    assert_eq!(
+        c.result.label(),
+        "Before detach",
+        "a detach is not shown as pending"
+    );
+    let mut closed = notice(Some(scope()));
+    closed.changes = Default::default();
+    closed.outcomes.push(OperationNotice {
+        scope: scope(),
+        operation_id: 71,
+        attachment_id: Some(61),
+        kind: OperationOutcomeKind::ClosedLocally,
+        reason: None,
+    });
+    c.respond(Response::Notice {
+        instance: 1,
+        notice: closed,
+    });
+    assert_eq!(c.result.label(), "Before detach");
+    assert!(
+        !c.operations.borrow().contains_key(&71),
+        "the detach is finished"
+    );
     // An attach that was not asked for here leaves focus where it is.
     let refresh = button(&page, "Refresh");
     refresh.grab_focus();

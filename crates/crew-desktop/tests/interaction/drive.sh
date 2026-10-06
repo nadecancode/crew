@@ -211,6 +211,13 @@ key Return
 expect_focus "Attach terminal"
 capture 08-after-detach
 controls
+note "R1: 2 s later the window status does not say an action is pending:"
+sleep 2
+reader tree "Team — Crew" | grep -E "label '(Action|Detached)" >>"$transcript" || true
+if reader tree "Team — Crew" | grep -q "Action pending"; then
+    fail "status still says an action is pending after Detach"
+fi
+capture 08b-status-after-detach
 
 note ""
 note "## G15: shortcut help documents the terminal escape"

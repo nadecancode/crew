@@ -1442,12 +1442,16 @@ impl Controller {
             Ok(ActionPlan::Dispatch { operation_id }) => {
                 let identified_send = matches!(action.intent, ActionIntent::SendMessage { .. });
                 // The global status is for mutations. A read shows its progress
-                // in its own tab; terminal writes would flood it.
+                // in its own tab; terminal writes would flood it. A detach is
+                // local: Core closes it without a daemon result (ClosedLocally,
+                // which leaves the status alone), and the terminal already says
+                // "Detached · read-only".
                 let quiet = matches!(
                     action.intent,
                     ActionIntent::Read { .. }
                         | ActionIntent::AttachInput { .. }
                         | ActionIntent::AttachResize { .. }
+                        | ActionIntent::Detach { .. }
                 );
                 if !quiet {
                     self.result
