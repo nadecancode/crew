@@ -83,6 +83,8 @@ impl MessagesView {
             move |_| changed()
         });
         kind.connect_changed(move |_| changed());
+        search.set_margin_start(24);
+        search.set_margin_end(24);
         root.append(&search);
         let controls = gtk::FlowBox::new();
         controls.set_selection_mode(gtk::SelectionMode::None);
@@ -91,6 +93,10 @@ impl MessagesView {
         super::add_control(&controls, &agent);
         super::add_control(&controls, &peer);
         super::add_control(&controls, &kind);
+        controls.set_margin_start(24);
+        controls.set_margin_end(24);
+        controls.set_column_spacing(8);
+        controls.set_row_spacing(8);
         root.append(&controls);
         let list = EntityList::new("Messages", select);
         let empty = super::empty_state(
@@ -101,6 +107,13 @@ impl MessagesView {
         root.append(list.widget());
         root.append(&empty);
         let older_button = gtk::Button::with_label("Load older");
+        older_button.set_tooltip_text(Some(
+            "Loads more from the host, up to this client's bounded history",
+        ));
+        older_button.set_halign(gtk::Align::Start);
+        older_button.set_margin_top(12);
+        older_button.set_margin_bottom(12);
+        older_button.set_margin_start(24);
         older_button.connect_clicked(move |_| older());
         root.append(&older_button);
         Self {
@@ -116,7 +129,13 @@ impl MessagesView {
         self.agent.set_text(first);
         self.peer.set_text(second);
     }
+    /// A bounded host read is under way; its progress stays on this page.
+    pub fn loading_older(&self) {
+        self.older.set_label("Loading older…");
+        self.older.set_sensitive(false);
+    }
     pub fn update(&self, scope: Option<&ClientScope>, page: &MessagePage, live: bool) {
+        self.older.set_label("Load older");
         self.older
             .set_sensitive(live && (page.has_older_local || page.may_have_older_remote));
         self.empty.set_visible(page.items.is_empty());

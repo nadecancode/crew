@@ -37,12 +37,17 @@ mod imp {
 
     impl WidgetImpl for AdaptiveBox {
         fn request_mode(&self) -> gtk::SizeRequestMode {
-            self.child().request_mode()
+            // The panes scroll their own content, so the layout's height does
+            // not depend on its width. Reporting a constant size keeps GTK
+            // from deriving the window's minimum width from the current
+            // height (its aspect search), which pinned the window at the wide
+            // layout's width and kept it from reaching the compact one.
+            gtk::SizeRequestMode::ConstantSize
         }
 
-        fn measure(&self, orientation: gtk::Orientation, for_size: i32) -> (i32, i32, i32, i32) {
+        fn measure(&self, orientation: gtk::Orientation, _for_size: i32) -> (i32, i32, i32, i32) {
             let (min, natural, min_baseline, natural_baseline) =
-                self.child().measure(orientation, for_size);
+                self.child().measure(orientation, -1);
             if orientation == gtk::Orientation::Horizontal && !self.compact.get() {
                 // The wide layout needs every pane side by side; the compact one
                 // shows one pane at a time. Report the compact minimum, so a

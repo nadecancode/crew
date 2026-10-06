@@ -1293,7 +1293,11 @@ impl Controller {
                 policy::NATIVE_LIMITS.events
             };
             bound.set(bound.get().saturating_mul(2).min(cap));
-            self.result.set_label("Loading the bounded host history. Older remote history may remain beyond this client's retention.");
+            if messages {
+                self.messages.loading_older();
+            } else {
+                self.events.loading_older();
+            }
             self.read(ResourceKey {
                 entity: EntityKey {
                     scope,

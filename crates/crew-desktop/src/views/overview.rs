@@ -17,6 +17,7 @@ pub struct OverviewHeader {
     counts: gtk::Label,
     stale: gtk::Label,
     live: std::rc::Rc<std::cell::Cell<bool>>,
+    asking: gtk::Box,
     question: gtk::Label,
     pub answer: gtk::Button,
     warnings: gtk::Box,
@@ -46,26 +47,25 @@ impl OverviewHeader {
         let stale = common::status_chip("Last known", crew_client::api::Tone::Warning);
         stale.set_visible(false);
         line.append(&stale);
-        // One line each; at narrow widths they shorten rather than wrap.
         let counts = common::text("");
-        counts.set_wrap(false);
-        counts.set_ellipsize(gtk::pango::EllipsizeMode::End);
+        counts.set_hexpand(true);
         counts.set_valign(gtk::Align::Center);
         line.append(&counts);
+        root.append(&line);
+        // Who is waiting on the operator, with the way to answer beside it.
+        let asking = gtk::Box::new(gtk::Orientation::Horizontal, 12);
         let question = common::text("");
-        question.set_wrap(false);
-        question.set_ellipsize(gtk::pango::EllipsizeMode::End);
         question.add_css_class("crew-attention");
+        question.set_hexpand(true);
         question.set_valign(gtk::Align::Center);
-        question.set_visible(false);
-        line.append(&question);
+        asking.append(&question);
         let answer_button = gtk::Button::with_label("Answer");
         answer_button.add_css_class("suggested-action");
         answer_button.set_valign(gtk::Align::Center);
-        answer_button.set_visible(false);
         answer_button.connect_clicked(move |_| answer());
-        line.append(&answer_button);
-        root.append(&line);
+        asking.append(&answer_button);
+        asking.set_visible(false);
+        root.append(&asking);
         let warnings = gtk::Box::new(gtk::Orientation::Vertical, 4);
         warnings.set_visible(false);
         root.append(&warnings);
@@ -77,6 +77,7 @@ impl OverviewHeader {
             counts,
             stale,
             live: std::rc::Rc::new(std::cell::Cell::new(true)),
+            asking,
             question,
             answer: answer_button,
             warnings,
@@ -123,12 +124,12 @@ impl OverviewHeader {
     /// Nothing loaded: only a title saying so.
     pub fn clear(&self, title: &str) {
         self.title.set_label(title);
-        for label in [&self.path, &self.objective, &self.question] {
+        for label in [&self.path, &self.objective] {
             label.set_visible(false);
         }
         self.counts.set_label("");
         self.stale.set_visible(false);
-        self.answer.set_visible(false);
+        self.asking.set_visible(false);
         common::clear(&self.warnings);
         self.warnings.set_visible(false);
     }
@@ -148,8 +149,7 @@ impl OverviewHeader {
             count => format!("{count} questions from {}", askers.join(", ")),
         };
         self.question.set_label(&text);
-        self.question.set_visible(!questions.is_empty());
-        self.answer.set_visible(!questions.is_empty());
+        self.asking.set_visible(!questions.is_empty());
     }
 }
 

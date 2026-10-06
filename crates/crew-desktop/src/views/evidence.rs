@@ -42,8 +42,8 @@ impl EvidenceView {
             .cursor_visible(true)
             .monospace(true)
             .wrap_mode(gtk::WrapMode::WordChar)
-            .left_margin(12)
-            .right_margin(12)
+            .left_margin(24)
+            .right_margin(24)
             .top_margin(12)
             .bottom_margin(12)
             .build();
