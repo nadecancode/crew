@@ -5,7 +5,7 @@ import Foundation
 /// belongs to one logical message body and captured scope. The shared core
 /// owns dispatch, retry policy and acknowledgement; this tracks its UI receipt.
 struct CrewSendDraft {
-    let scope: ClientScope
+    private(set) var scope: ClientScope
     var body = ""
     private(set) var pending = false
     private(set) var operationId: UInt64?
@@ -13,6 +13,19 @@ struct CrewSendDraft {
     private(set) var explanation: String?
     private var messageId: String?
     private var submittedBody: String?
+
+    init(scope: ClientScope) { self.scope = scope }
+
+    /// Retain text and its same-message deduplication ID after reauthorization
+    /// of this workspace. Old operation identity is never rebound or replayed.
+    mutating func reauthorize(_ current: ClientScope) {
+        guard current.endpointId == scope.endpointId, current.workspaceId == scope.workspaceId, current != scope else { return }
+        scope = current
+        pending = false
+        operationId = nil
+        lastOutcome = nil
+        explanation = "Reconnected. Review the retained text before sending."
+    }
 
     mutating func begin() -> CrewSendAttempt? {
         guard !pending else { return nil }

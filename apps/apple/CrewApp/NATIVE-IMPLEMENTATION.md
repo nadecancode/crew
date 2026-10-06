@@ -298,3 +298,66 @@ Native inspector sizing, focus/VoiceOver, keyboard, adaptive handoff and all
 Apple compilation/UI execution remain **Apple verification deferred by
 operator**. Availability and gateway composition are still required source
 work, rather than passed or optional acceptance rows.
+
+## Public setup presentation preparation
+
+`CrewPublicProfileForm.swift` and `CrewEnrollmentViews.swift` prepare the
+approved S02–S05 reading order with native public fields, full fingerprint
+review, independent-check acknowledgement, device-label/storage explanation,
+explicit host-console enrollment instructions and accepted-code group layout.
+`CrewAccessDisclosure` includes the complete separate Read/Control/Terminal
+and no-OS-sandbox wording. These are presentation components only: they receive
+bindings, supplied public values and callbacks. They neither parse a profile,
+create a key/grant/attempt, fabricate comparison data, predict acceptance nor
+implement any handshake. No trust failure bypass or phone-side Approve button
+is supplied.
+
+The components are deliberately not yet mounted into a simulated flow.
+`native-gateway-bindings` must supply the actual trusted-profile factory,
+sealed-transcript signer replies and setup/session ports first. The connected
+composition will bind only its real results, with per-instance/handle fences
+and ordered callback delivery. Current local source and these prepared views
+do not certify an iOS remote application.
+
+All 44 Swift files parse with the pinned Linux compiler; project validation
+remains 585 checks / 162 objects / six targets / two schemes. No actual Apple
+SDK/typecheck, setup, Keychain, enrollment, device, simulator or accessibility
+run is claimed: **Apple verification deferred by operator**. The full reviewed
+availability source/API/FFI chain and real gateway composition remain required
+before this card can be submitted.
+
+## Reconnect draft retention and accessible presentation
+
+The graph picker now displays the same effective List state that the renderer
+uses at accessibility text sizes, with a readable explanation. The previous
+graph preference can return at a readable size; the UI does not label a forced
+list as Graph.
+
+Per-window draft text uses endpoint/workspace/purpose identity for retention,
+while every action, receipt, confirmation and attachment still carries the
+complete current ClientScope. Reopening the same authorized recipient after
+ordinary reconnect therefore reveals retained text. An explicit send under the
+new live scope retires the old operation association and preserves a same-body
+message ID for safe deduplication; the planner still validates the complete
+current scope and authority. Nothing is automatically dispatched or replayed.
+Old-scope outcomes cannot clear the reopened text. Learned workspace revocation
+purges that workspace's drafts; endpoint sign-out purges its endpoint's drafts.
+Two native source cases exercise ordinary reconnect visibility versus revoke
+purge, and same-body retention with retirement of the old operation identity.
+They remain **Apple verification deferred by operator**.
+
+Available checks still report 585 structural project checks / 162 objects /
+six targets / two schemes; all 44 Swift files parse. The actual Foundation
+worker/receipt/routing/link sources typecheck against the generated bindings.
+This checkpoint does not change the required complete availability/FFI and
+gateway source gates or claim an Apple build, setup, device or UI pass.
+
+The evidence route is now tracked separately from its cached ResourceState.
+Native Back below its recorded stack depth closes that route. A layout transfer
+keeps only an actually open route, so Transcript → Back to agent → widen does
+not resurrect the transcript. Switching to another destination in wide mode
+normalizes its retained compact stack before presenting the inspector; each
+selected entity stays scoped without two simultaneous detail surfaces. Three
+additional navigation source cases cover Back, open-route transfer and the
+second destination's normalization. They do not claim an executed Apple UI
+sequence.

@@ -310,7 +310,9 @@ final class CrewSessionModel {
     }
 
     func send(_ key: CrewDraftKey, to: String) {
+        guard key.scope == scope else { return }
         if sendDrafts[key] == nil { sendDrafts[key] = CrewSendDraft(scope: key.scope) }
+        sendDrafts[key]?.reauthorize(key.scope)
         guard let attempt = sendDrafts[key]?.begin() else { return }
         enqueue(.sendMessage(scope: key.scope, to: to, body: attempt.body, messageId: attempt.messageId), attachmentRequest: nil, sendDraft: key)
     }
@@ -537,10 +539,12 @@ final class CrewSessionModel {
         if update.workspace == .accessRevoked || update.workspace == .removed || update.endpoint == .signedOut {
             drafts = drafts.filter { key, _ in
                 guard let oldScope else { return false }
+                if update.endpoint == .signedOut { return key.scope.endpointId != oldScope.endpointId }
                 return key.scope.endpointId != oldScope.endpointId || key.scope.workspaceId != oldScope.workspaceId
             }
             sendDrafts = sendDrafts.filter { key, _ in
                 guard let oldScope else { return false }
+                if update.endpoint == .signedOut { return key.scope.endpointId != oldScope.endpointId }
                 return key.scope.endpointId != oldScope.endpointId || key.scope.workspaceId != oldScope.workspaceId
             }
             workspaces = nil
@@ -815,6 +819,15 @@ private struct CrewOlderLoad {
 struct CrewDraftKey: Hashable {
     let scope: ClientScope
     let purpose: String
+    static func == (lhs: Self, rhs: Self) -> Bool {
+        lhs.scope.endpointId == rhs.scope.endpointId &&
+            lhs.scope.workspaceId == rhs.scope.workspaceId && lhs.purpose == rhs.purpose
+    }
+    func hash(into hasher: inout Hasher) {
+        hasher.combine(scope.endpointId)
+        hasher.combine(scope.workspaceId)
+        hasher.combine(purpose)
+    }
 }
 
 struct CrewConfirmation: Identifiable, Equatable {

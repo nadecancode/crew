@@ -96,6 +96,24 @@ final class CrewClientWorkerTests: XCTestCase {
         XCTAssertEqual(Array(client.calls.suffix(2)), ["remove-observer", "close"])
     }
 
+    func testDraftVisibleAfterOrdinaryReconnectAndPurgedAfterRevocation() async throws {
+        let model = CrewSessionModel()
+        let client = RecordingCrewClient()
+        try await model.install(client)
+        let observer = try XCTUnwrap(client.observer)
+        observer.changed(notice: CrewTestFixtures.notice)
+        let original = CrewDraftKey(scope: CrewTestFixtures.scope, purpose: "message:synthetic-agent")
+        model.sendDraft(original).wrappedValue = "retained message text"
+        let current = ClientScope(endpointId: original.scope.endpointId, workspaceId: original.scope.workspaceId, generation: original.scope.generation, daemonPid: original.scope.daemonPid, daemonStartedAtMs: original.scope.daemonStartedAtMs, attempt: original.scope.attempt + 1)
+        observer.changed(notice: ClientNotice(scope: current, revision: 2, changes: CrewTestFixtures.notice.changes, endpoint: .authenticated, workspace: .live, reason: nil, outcomes: []))
+        let reopened = CrewDraftKey(scope: current, purpose: original.purpose)
+        XCTAssertEqual(model.sendDraft(reopened).wrappedValue, "retained message text")
+        observer.changed(notice: ClientNotice(scope: current, revision: 3, changes: CrewTestFixtures.notice.changes, endpoint: .authenticated, workspace: .accessRevoked, reason: nil, outcomes: []))
+        XCTAssertEqual(model.sendDraft(reopened).wrappedValue, "")
+        await model.close()
+        XCTAssertFalse(client.calls.contains("plan"))
+    }
+
 }
 
 private enum CrewTestFixtures {

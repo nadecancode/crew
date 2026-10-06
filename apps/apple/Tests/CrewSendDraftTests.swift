@@ -68,6 +68,21 @@ final class CrewSendDraftTests: XCTestCase {
         XCTAssertEqual(draft.body, "scoped text")
     }
 
+    func testReauthorizationRetainsTextButRetiresOldOperationIdentity() throws {
+        var draft = CrewSendDraft(scope: scope)
+        draft.body = "retained after ordinary loss"
+        let first = try XCTUnwrap(draft.begin())
+        draft.associate(1)
+        let current = ClientScope(endpointId: scope.endpointId, workspaceId: scope.workspaceId, generation: scope.generation, daemonPid: scope.daemonPid, daemonStartedAtMs: scope.daemonStartedAtMs, attempt: scope.attempt + 1)
+        draft.reauthorize(current)
+        XCTAssertEqual(draft.body, first.body)
+        XCTAssertFalse(draft.pending)
+        XCTAssertNil(draft.operationId)
+        draft.outcome(outcome(1, .success))
+        XCTAssertEqual(draft.body, first.body)
+        XCTAssertEqual(try XCTUnwrap(draft.begin()).messageId, first.messageId)
+    }
+
     private let scope = ClientScope(endpointId: "synthetic-endpoint", workspaceId: "synthetic-workspace", generation: 2, daemonPid: 123, daemonStartedAtMs: 1_700_000_000_000, attempt: 4)
     private func outcome(_ operation: UInt64, _ kind: OperationOutcomeKind) -> OperationNotice {
         OperationNotice(scope: scope, operationId: operation, attachmentId: nil, kind: kind, reason: nil)

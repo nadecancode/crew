@@ -136,12 +136,13 @@ struct CrewRootView: View {
         } message: { confirmation in Text(verbatim: confirmation.consequence) }
         .onChange(of: navigation.selection, initial: true) { _, destination in
             model.destination = destination
+            if usesInspector { adaptDetail(wide: true) }
             if usesInspector, navigation.inspectorVisible, let key = currentSelection { model.select(key) }
         }
         .onChange(of: usesInspector) { _, wide in adaptDetail(wide: wide) }
         .onChange(of: navigation.inspectorVisible) { _, visible in
             guard usesInspector else { return }
-            if visible, let key = currentSelection { model.select(key) }
+            if visible, let key = currentSelection { adaptDetail(wide: true); model.select(key) }
             else if !visible { closeDetailAndRestore() }
         }
         .onChange(of: model.selected) { old, selected in
@@ -153,6 +154,12 @@ struct CrewRootView: View {
         }
         .onChange(of: navigation.path(for: navigation.selection).count) { old, count in
             if !usesInspector, old > 0, count == 0 { closeDetailAndRestore() }
+        }
+        .onChange(of: navigation.openEvidence(for: navigation.selection)) { old, current in
+            if current == nil, let old { model.closeResource(old) }
+        }
+        .onChange(of: inspectorPath.count) { old, count in
+            if usesInspector, old > 0, count == 0 { navigation.closeEvidence(for: navigation.selection) }
         }
         .onChange(of: model.scope) { _, _ in
             navigation.resetPaths()
@@ -270,13 +277,22 @@ struct CrewRootView: View {
     }
 
     private func graphPicker(_ title: String, selection: Binding<Bool>) -> some View {
-        Picker(title, selection: selection) {
+        let displayed = Binding(
+            get: { selection.wrappedValue && !dynamicTypeSize.isAccessibilitySize },
+            set: { selection.wrappedValue = $0 }
+        )
+        return VStack(alignment: .leading, spacing: 8) {
+        Picker(title, selection: displayed) {
             Text("List").tag(false)
             Text("Graph").tag(true)
         }
         .pickerStyle(.segmented)
         .padding(12)
         .disabled(dynamicTypeSize.isAccessibilitySize)
+        if dynamicTypeSize.isAccessibilitySize {
+            Text("List shown to keep all content readable at this text size.").font(.callout).padding(.horizontal, 12)
+        }
+        }
     }
 
     @ViewBuilder private func questionBanner(_ scope: ClientScope) -> some View {
@@ -329,6 +345,7 @@ struct CrewRootView: View {
         selectionByDestination[navigation.selection] = key
         model.select(key)
         if usesInspector {
+            navigation.closeEvidence(for: navigation.selection)
             inspectorPath = NavigationPath()
             navigation.inspectorVisible = true
         } else { navigation.pathBinding(for: navigation.selection).wrappedValue.append(key) }
@@ -341,8 +358,10 @@ struct CrewRootView: View {
 
     private func showEvidence(_ key: ResourceKey) {
         model.readResource(key)
-        if usesInspector { inspectorPath.append(key) }
-        else { navigation.pathBinding(for: navigation.selection).wrappedValue.append(key) }
+        if usesInspector {
+            navigation.presentEvidenceInInspector(key, for: navigation.selection)
+            inspectorPath.append(key)
+        } else { navigation.appendEvidence(key, for: navigation.selection) }
     }
 
     @ViewBuilder private func resourceContent(_ key: ResourceKey) -> some View {
@@ -387,14 +406,13 @@ struct CrewRootView: View {
 
     private func adaptDetail(wide: Bool) {
         guard navigation.inspectorVisible, let key = currentSelection else { return }
-        let evidence = model.selectedResource
+        let evidence = navigation.openEvidence(for: navigation.selection)
         if wide {
-            navigation.replacePath(NavigationPath(), for: navigation.selection)
+            navigation.transferToInspector(for: navigation.selection)
             inspectorPath = NavigationPath()
             if let evidence, !key.entity.isReadEntity { inspectorPath.append(evidence) }
         } else if navigation.path(for: navigation.selection).isEmpty {
-            navigation.pathBinding(for: navigation.selection).wrappedValue.append(key)
-            if let evidence, !key.entity.isReadEntity { navigation.pathBinding(for: navigation.selection).wrappedValue.append(evidence) }
+            navigation.transferToCompact(entity: key, for: navigation.selection)
         }
     }
 
