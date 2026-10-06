@@ -8,6 +8,7 @@ use std::collections::VecDeque;
 use std::io::{self, BufRead, BufReader, Write};
 use std::os::unix::net::UnixStream;
 use std::path::Path;
+use std::sync::Arc;
 use std::time::Duration;
 
 use serde::de::DeserializeOwned;
@@ -221,6 +222,20 @@ pub struct Client {
     closed: bool,
 }
 
+/// A close-only handle for a host that must interrupt a blocking reader on
+/// shutdown. It exposes no socket IO or request allocator. Closing does not
+/// establish whether a request ran, so hosts must retain their outcome policy.
+#[derive(Clone)]
+pub struct ShutdownHandle {
+    stream: Arc<UnixStream>,
+}
+
+impl ShutdownHandle {
+    pub fn shutdown(&self) {
+        let _ = self.stream.shutdown(std::net::Shutdown::Both);
+    }
+}
+
 /// Operator commands are not available to an agent: refuse when this process
 /// runs as one (`CREW_IDENTITY` is set). Commands that start a daemon call
 /// this before they start it.
@@ -256,6 +271,28 @@ impl Client {
 
     /// Connect and authenticate as the human operator.
     pub fn operator(socket: &Path, client: &str) -> ClientResult<(Self, HelloInfo)> {
+        Self::operator_connected(socket, client, |_| Ok(()))
+    }
+
+    /// Register cancellation immediately after connection, before the first
+    /// hello write. Token reads and a connect still in progress are outside
+    /// this handle's lifetime. Existing operator authentication is unchanged.
+    pub fn operator_with_control(
+        socket: &Path,
+        client: &str,
+        connected: impl FnOnce(ShutdownHandle),
+    ) -> ClientResult<(Self, HelloInfo)> {
+        Self::operator_connected(socket, client, |connection| {
+            connected(connection.shutdown_handle()?);
+            Ok(())
+        })
+    }
+
+    fn operator_connected(
+        socket: &Path,
+        client: &str,
+        connected: impl FnOnce(&Self) -> ClientResult<()>,
+    ) -> ClientResult<(Self, HelloInfo)> {
         refuse_in_agent_context()?;
         let token = crate::paths::read_operator_token(socket).map_err(|error| {
             ClientError::OperatorToken {
@@ -267,6 +304,7 @@ impl Client {
         })?;
         let missing_token = token.is_none();
         let mut c = Self::connect(socket)?;
+        connected(&c)?;
         // Negotiate even without credentials so old daemons keep H8's
         // actionable upgrade error. A current daemon still cannot grant us
         // operator access without the token.
@@ -331,6 +369,14 @@ impl Client {
             }
             error => error,
         }
+    }
+
+    /// Clone a close-only cancellation handle; dropping it leaves the client
+    /// open. Call `shutdown` to interrupt a blocked call from another thread.
+    pub fn shutdown_handle(&self) -> ClientResult<ShutdownHandle> {
+        Ok(ShutdownHandle {
+            stream: Arc::new(self.writer.try_clone()?),
+        })
     }
 
     /// Bound how long a call may wait for the daemon (`None` waits forever).
@@ -979,6 +1025,92 @@ mod tests {
     fn send_frame(server: &mut UnixStream, frame: ServerFrame) {
         serde_json::to_writer(&mut *server, &frame).unwrap();
         server.write_all(b"\n").unwrap();
+    }
+
+    #[test]
+    fn shutdown_handle_interrupts_a_held_call_without_waiting_for_its_deadline() {
+        use std::sync::mpsc;
+        let (mut client, mut server) = paired_client();
+        client.set_timeout(Some(Duration::from_secs(90))).unwrap();
+        let control = client.shutdown_handle().unwrap();
+        let (done, completed) = mpsc::channel();
+        let worker = std::thread::spawn(move || {
+            done.send(client.call_value(Call::Ping)).unwrap();
+        });
+        let mut request = String::new();
+        BufReader::new(server.try_clone().unwrap())
+            .read_line(&mut request)
+            .unwrap();
+        assert!(matches!(
+            serde_json::from_str::<Request>(&request).unwrap().call,
+            Call::Ping
+        ));
+        control.shutdown();
+        control.shutdown(); // Repeated host shutdown is harmless.
+        let result = completed.recv_timeout(Duration::from_secs(1));
+        // Even a regression must not strand a worker in this test process.
+        let _ = server.shutdown(std::net::Shutdown::Both);
+        worker.join().unwrap();
+        assert!(matches!(
+            result.unwrap(),
+            Err(ClientError::Closed | ClientError::Io(_))
+        ));
+        // The peer never replied: cancellation cannot manufacture success.
+        assert!(server.write_all(b"late response\n").is_err());
+    }
+
+    #[test]
+    fn operator_control_is_registered_before_a_held_hello_or_an_already_requested_stop() {
+        if crate::test_support::isolate_operator_test(
+            "client::tests::operator_control_is_registered_before_a_held_hello_or_an_already_requested_stop",
+        ) {
+            return;
+        }
+        use std::os::unix::net::UnixListener;
+        use std::sync::mpsc;
+        for already_stopped in [false, true] {
+            let temp = tempfile::tempdir().unwrap();
+            let socket = temp.path().join("daemon.sock");
+            crate::paths::write_private_file(
+                &crate::paths::operator_token_path(&socket),
+                b"synthetic-cancellation-token",
+            )
+            .unwrap();
+            let listener = UnixListener::bind(&socket).unwrap();
+            let (registered, controls) = mpsc::channel();
+            let (finished, outcomes) = mpsc::channel();
+            let worker = std::thread::spawn(move || {
+                let result = Client::operator_with_control(&socket, "test", |control| {
+                    if already_stopped {
+                        control.shutdown();
+                    }
+                    registered.send(control).unwrap();
+                });
+                finished.send(result.err()).unwrap();
+            });
+            let (server, _) = listener.accept().unwrap();
+            server
+                .set_read_timeout(Some(Duration::from_secs(1)))
+                .unwrap();
+            let control = controls.recv_timeout(Duration::from_secs(1)).unwrap();
+            let mut hello = String::new();
+            let read = BufReader::new(server.try_clone().unwrap())
+                .read_line(&mut hello)
+                .unwrap();
+            if already_stopped {
+                assert_eq!(read, 0, "stop registration must precede hello write");
+            } else {
+                assert!(matches!(
+                    serde_json::from_str::<Request>(&hello).unwrap().call,
+                    Call::Hello(_)
+                ));
+                control.shutdown();
+            }
+            let result = outcomes.recv_timeout(Duration::from_secs(1));
+            let _ = server.shutdown(std::net::Shutdown::Both);
+            worker.join().unwrap();
+            assert!(result.unwrap().unwrap().is_disconnect());
+        }
     }
 
     fn deliver(text: &str) -> Push {
