@@ -584,6 +584,10 @@ These are source-reviewed but need the deferred Apple run:
 - Typing in compose, prompt, answer and model-note fields shows no lag from
   the per-keystroke availability query; debounce in the view modifier if it
   does.
+- The gateway factory does not stall the Keychain prompt on the cooperative
+  pool (see "Gateway concurrency invariants").
+- Unsigned builds report unavailable secure storage; a development-signed
+  build with Keychain access completes S03 key creation.
 
 ## Source gate status
 
@@ -598,3 +602,15 @@ reported here is structural, parsing or Linux typechecking against the actual
 generated bindings. No Apple compilation, linking, simulator, device, Keychain,
 VoiceOver or gateway connection has run: **Apple execution deferred by
 operator**.
+
+Gateway concurrency invariants, recorded from review `m-df48dede88c4`:
+
+- `CrewClientWorker` is an ordinary actor on the cooperative pool.
+  `CrewClient.gateway` blocks it for up to 30 seconds while the signer's
+  `publicKey` task runs on another pool thread. That needs at least two pool
+  threads, which every supported device has. If the deferred Apple run shows
+  the Keychain prompt stalling, move the worker to a dedicated executor.
+- `CrewUIObserver` and `CrewSetupObserver` hand Rust callbacks to the main
+  thread with `DispatchQueue.main.sync`. This is safe only while nothing on
+  the main thread ever blocks on the worker or on FFI; main-actor code awaits
+  the worker and never waits synchronously. Keep that invariant.
