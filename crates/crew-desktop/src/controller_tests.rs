@@ -467,6 +467,49 @@ fn begin_receipt(c: &Controller, recorder: &Recording, body: &str, operation: u6
     (id, form)
 }
 fn reconnected_receipts(c: &Controller, recorder: &Recording) {
+    c.respond(Response::Notice {
+        instance: 1,
+        notice: notice(Some(scope())),
+    });
+    c.compose_with_id(
+        "claude-1".into(),
+        Some("Early reconnected success".into()),
+        "receipt-early".into(),
+    );
+    let early_id = *c.forms.borrow().keys().next_back().unwrap();
+    let early_form = c.forms.borrow().get(&early_id).unwrap().form.clone();
+    early_form.dialog.response(gtk::ResponseType::Accept);
+    let token = recorder.plan_token();
+    let mut early_scope = scope();
+    early_scope.attempt = 2;
+    c.respond(Response::Notice {
+        instance: 1,
+        notice: notice(Some(early_scope.clone())),
+    });
+    let mut early_success = notice(Some(early_scope.clone()));
+    early_success.outcomes.push(OperationNotice {
+        scope: early_scope,
+        operation_id: 2000,
+        attachment_id: None,
+        kind: OperationOutcomeKind::Success,
+        reason: None,
+    });
+    c.respond(Response::Notice {
+        instance: 1,
+        notice: early_success,
+    });
+    assert!(c.forms.borrow().contains_key(&early_id));
+    c.respond(Response::Action {
+        instance: 1,
+        token,
+        scope: scope(),
+        result: Ok(ActionPlan::Dispatch { operation_id: 2000 }),
+    });
+    assert!(
+        !c.forms.borrow().contains_key(&early_id),
+        "early replay success uses endpoint/workspace/op before the old-scope plan continuation"
+    );
+    assert_eq!(common::buffer_text(&early_form.buffer), "");
     let (id, form) = begin_receipt(c, recorder, "Original submitted body", 2001);
     form.dialog.response(gtk::ResponseType::Cancel);
     assert!(
@@ -487,6 +530,10 @@ fn reconnected_receipts(c: &Controller, recorder: &Recording) {
         notice: disconnected,
     });
     assert!(form.pending.get());
+    assert!(
+        c.operations.borrow().contains_key(&2001),
+        "same-workspace reattempt retains the Core-held operation entry"
+    );
     assert!(!form.submit.is_sensitive());
     assert_eq!(common::buffer_text(&form.buffer), "Original submitted body");
     let mut after = scope();

@@ -1325,6 +1325,7 @@ impl Controller {
         }
         match result {
             Ok(ActionPlan::Dispatch { operation_id }) => {
+                let identified_send = matches!(action.intent, ActionIntent::SendMessage { .. });
                 let quiet = matches!(
                     action.intent,
                     ActionIntent::AttachInput { .. } | ActionIntent::AttachResize { .. }
@@ -1338,7 +1339,15 @@ impl Controller {
                     let mut outcomes = self.early_outcomes.borrow_mut();
                     outcomes
                         .iter()
-                        .position(|o| o.scope == scope && o.operation_id == operation_id)
+                        .position(|o| {
+                            o.operation_id == operation_id
+                                && if identified_send {
+                                    o.scope.endpoint_id == scope.endpoint_id
+                                        && o.scope.workspace_id == scope.workspace_id
+                                } else {
+                                    o.scope == scope
+                                }
+                        })
                         .map(|i| outcomes.remove(i))
                 };
                 if let Some(outcome) = early {
@@ -1436,7 +1445,7 @@ impl Controller {
                     | OperationOutcomeKind::ClosedLocally
             ) {
                 self.result.set_label(&outcome.reason.as_ref().map_or_else(
-                    || format!("Operation {:?}", outcome.kind),
+                    || outcome_wording(outcome.kind).into(),
                     |reason| reason.message.clone(),
                 ));
             }
@@ -1542,14 +1551,14 @@ impl Controller {
         } else {
             let message = outcome
                 .reason
-                .map_or_else(|| format!("Action {:?}", outcome.kind), |r| r.message);
+                .map_or_else(|| outcome_wording(outcome.kind).into(), |r| r.message);
             if matches!(action.intent, ActionIntent::SendMessage { .. }) {
                 let explanation = if outcome.kind == OperationOutcomeKind::Unknown {
                     format!(
                         "Outcome unknown: {message}. Check message history before trying again."
                     )
                 } else {
-                    format!("Submission {:?}: {message}", outcome.kind)
+                    format!("{}: {message}", outcome_wording(outcome.kind))
                 };
                 if let Some(id) = action.form {
                     self.controls.remove(id);
@@ -2516,6 +2525,17 @@ impl Controller {
     }
 }
 
+fn outcome_wording(kind: OperationOutcomeKind) -> &'static str {
+    match kind {
+        OperationOutcomeKind::Success => "Acknowledged by the daemon",
+        OperationOutcomeKind::Rejected => "Rejected by the daemon",
+        OperationOutcomeKind::NotSent => "Not sent",
+        OperationOutcomeKind::Canceled => "Canceled",
+        OperationOutcomeKind::Unknown => "Outcome unknown",
+        OperationOutcomeKind::ClosedLocally => "Closed locally",
+        OperationOutcomeKind::SentUnacknowledged => "Sent without an acknowledgment",
+    }
+}
 fn entity_destination(entity: &Entity) -> Destination {
     match entity {
         Entity::Agent(_) | Entity::Workspace => Destination::Team,
