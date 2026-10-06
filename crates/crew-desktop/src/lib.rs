@@ -8,6 +8,8 @@ pub mod appearance;
 #[cfg(all(feature = "native-ui", target_os = "linux"))]
 pub mod application;
 #[cfg(all(feature = "native-ui", feature = "local", target_os = "linux"))]
+mod availability;
+#[cfg(all(feature = "native-ui", feature = "local", target_os = "linux"))]
 pub mod controller;
 #[cfg(all(feature = "native-ui", target_os = "linux"))]
 pub mod dialogs;

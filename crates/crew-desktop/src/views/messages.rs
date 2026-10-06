@@ -11,6 +11,8 @@ pub struct MessagesView {
     list: EntityList,
     empty: gtk::ScrolledWindow,
     older: gtk::Button,
+    agent: gtk::Entry,
+    peer: gtk::Entry,
 }
 
 impl MessagesView {
@@ -106,7 +108,13 @@ impl MessagesView {
             list,
             empty,
             older: older_button,
+            agent,
+            peer,
         }
+    }
+    pub fn set_pair(&self, first: &str, second: &str) {
+        self.agent.set_text(first);
+        self.peer.set_text(second);
     }
     pub fn update(&self, scope: Option<&ClientScope>, page: &MessagePage, live: bool) {
         self.older

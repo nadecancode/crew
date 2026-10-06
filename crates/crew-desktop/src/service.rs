@@ -271,7 +271,7 @@ fn worker(requests: mpsc::Receiver<Request>, responses: tokio::sync::mpsc::Sende
                 Ok(())
             }
             Request::Plan { token, intent } => {
-                let scope = intent_scope(&intent).clone();
+                let scope = crew_client::actions::action_scope(&intent).clone();
                 let result = session.plan(intent);
                 let _ = responses.blocking_send(Response::Action {
                     instance,
@@ -319,21 +319,4 @@ fn worker(requests: mpsc::Receiver<Request>, responses: tokio::sync::mpsc::Sende
     }
     let _ = session.unregister_observer();
     let _ = session.close();
-}
-
-fn intent_scope(intent: &ActionIntent) -> &ClientScope {
-    match intent {
-        ActionIntent::SendMessage { scope, .. }
-        | ActionIntent::Answer { scope, .. }
-        | ActionIntent::Agent { scope, .. }
-        | ActionIntent::SetModel { scope, .. }
-        | ActionIntent::AgentInput { scope, .. }
-        | ActionIntent::ResumeLimited { scope, .. }
-        | ActionIntent::StopTeam { scope }
-        | ActionIntent::Read { scope, .. }
-        | ActionIntent::Attach { scope, .. }
-        | ActionIntent::AttachInput { scope, .. }
-        | ActionIntent::AttachResize { scope, .. }
-        | ActionIntent::Detach { scope, .. } => scope,
-    }
 }

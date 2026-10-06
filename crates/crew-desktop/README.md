@@ -52,14 +52,24 @@ service replacement, workspace switch or loss of access. Shared Rust owns
 history retention, cursors, resource status, retries and action decisions.
 
 `controller.rs` routes projections, local selection, drafts, dialogs and user
-invocations. Agent controls render shared availability. The separate immutable
-intent-availability API is a remaining completion dependency for workspace and
-form controls; the current source checkpoint does not claim that gate passed.
+invocations. Agent controls render shared availability. Workspace and form
+controls query the complete captured intent through the reviewed immutable
+`ViewQuery::Availability` API, showing its exact unavailable reason. The query
+does not plan an operation or allocate confirmation/timer IDs.
 Plans are used only for explicit invocation. Only Kill, Restart fresh, Restart
 after limit and Stop team open confirmations; Cancel is initially safe/default.
 Software-keyboard Return adds a newline; Send, Answer and Submit prompt are
 explicit buttons. Command-shaped input uses the shared slash parser and never
 falls through to a team message.
+
+Submitted message receipts remain read-only across reconnect attempts. GTK
+correlates an authoritative final notice by native service instance, endpoint,
+workspace and original operation ID; the shared core alone owns its same-ID
+retry. Close preserves the receipt without canceling the host operation.
+Success clears only the submitted text, while unknown outcomes retain it and
+ask the operator to check message history. Explicit restoration checks the
+current verified scope and shared availability before opening an editor. Known
+revocation, removal, sign-out or service replacement purges affected receipts.
 
 A successful Attach notice creates a renderer identified by native instance,
 full scope and attachment ID before any output is displayed. A later plan
@@ -94,8 +104,8 @@ runner checks that location, preserves private display/state isolation and uses
 the locked dependencies. A staged result must name its prerequisite source
 checkpoint; it is not a default CLI or all-workspace compatibility claim.
 
-The local source checkpoint still needs the reviewed immutable availability
-consumer, final source review and the final connected UI/accessibility matrix.
+The local source checkpoint still needs the final receipt/control test run,
+source review and the final connected UI/accessibility matrix.
 Gateway verification and Apple execution are separate gates; Apple verification
 is deferred by the operator. Native Linux success never implies Apple success.
 

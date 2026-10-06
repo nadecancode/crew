@@ -17,6 +17,18 @@ pub struct Node {
     pub row: u32,
 }
 
+struct FontWatch {
+    settings: gtk::Settings,
+    handler: RefCell<Option<gtk::glib::SignalHandlerId>>,
+}
+impl Drop for FontWatch {
+    fn drop(&mut self) {
+        if let Some(handler) = self.handler.borrow_mut().take() {
+            self.settings.disconnect(handler);
+        }
+    }
+}
+
 #[derive(Clone)]
 pub struct Graph {
     pub root: gtk::Box,
@@ -30,6 +42,7 @@ pub struct Graph {
     zoom: Rc<Cell<f64>>,
     row_pitch: Rc<Cell<f64>>,
     select: Select,
+    font_watch: Rc<FontWatch>,
 }
 
 impl Graph {
@@ -66,6 +79,10 @@ impl Graph {
             selected: Rc::new(RefCell::new(None)),
             zoom: Rc::new(Cell::new(1.0)),
             row_pitch: Rc::new(Cell::new(145.0)),
+            font_watch: Rc::new(FontWatch {
+                settings: gtk::Settings::default().expect("initialized GTK settings"),
+                handler: RefCell::new(None),
+            }),
         };
         this.canvas.set_draw_func({
             let nodes = this.nodes.clone();
@@ -142,6 +159,19 @@ impl Graph {
                 this.scroll.vadjustment().set_value(0.0);
             }
         });
+        let get = Rc::new(this.handle());
+        *this.font_watch.handler.borrow_mut() = Some(
+            this.font_watch
+                .settings
+                .connect_notify_local(Some("gtk-font-name"), move |_, _| {
+                    let get = get.clone();
+                    gtk::glib::idle_add_local_once(move || {
+                        if let Some(graph) = get() {
+                            graph.layout();
+                        }
+                    });
+                }),
+        );
         this
     }
     fn handle(&self) -> impl Fn() -> Option<Self> + 'static {
@@ -156,6 +186,7 @@ impl Graph {
         let zoom = self.zoom.clone();
         let row_pitch = self.row_pitch.clone();
         let select = self.select.clone();
+        let font_watch = Rc::downgrade(&self.font_watch);
         move || {
             Some(Self {
                 root: root.upgrade()?,
@@ -169,6 +200,7 @@ impl Graph {
                 zoom: zoom.clone(),
                 row_pitch: row_pitch.clone(),
                 select: select.clone(),
+                font_watch: font_watch.upgrade()?,
             })
         }
     }
@@ -216,7 +248,14 @@ impl Graph {
                 let key = node.key.clone();
                 let select = self.select.clone();
                 let selected = self.selected.clone();
-                move |_| {
+                let buttons = Rc::downgrade(&self.buttons);
+                move |button| {
+                    if let Some(buttons) = buttons.upgrade() {
+                        for node in buttons.borrow().iter() {
+                            node.remove_css_class("suggested-action");
+                        }
+                    }
+                    button.add_css_class("suggested-action");
                     *selected.borrow_mut() = Some(key.clone());
                     select(key.clone());
                 }
@@ -241,6 +280,11 @@ impl Graph {
     fn layout(&self) {
         let z = self.zoom.get();
         let nodes = self.nodes.borrow();
+        // Clear the previous zoom's minimum height before measuring native
+        // text, so zoom-out and text-scale changes do not accumulate size.
+        for button in self.buttons.borrow().iter() {
+            button.set_size_request((200.0 * z) as i32, -1);
+        }
         let height = self
             .buttons
             .borrow()

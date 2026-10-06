@@ -1,7 +1,10 @@
 use crate::views::common;
 use crew_client::api::*;
 use gtk::{glib, prelude::*};
-use std::rc::Rc;
+use std::{
+    cell::{Cell, RefCell},
+    rc::Rc,
+};
 
 #[derive(Clone)]
 pub struct Form {
@@ -10,6 +13,12 @@ pub struct Form {
     pub error: gtk::Label,
     pub submit: gtk::Button,
     opener: glib::WeakRef<gtk::Widget>,
+    pub pending: Rc<Cell<bool>>,
+    pub receipt: Rc<Cell<bool>>,
+    closing: Rc<Cell<bool>>,
+    editor: gtk::TextView,
+    extra_editors: Rc<RefCell<Vec<gtk::Widget>>>,
+    caption: gtk::Label,
 }
 impl Form {
     pub fn new(
@@ -31,7 +40,8 @@ impl Form {
         let opener = glib::WeakRef::new();
         opener.set(gtk::prelude::GtkWindowExt::focus(parent).as_ref());
         let body = common::column();
-        body.append(&common::text(description));
+        let caption = common::text(description);
+        body.append(&caption);
         let view = gtk::TextView::builder()
             .wrap_mode(gtk::WrapMode::WordChar)
             .vexpand(true)
@@ -59,13 +69,30 @@ impl Form {
             error,
             submit,
             opener,
+            pending: Rc::new(Cell::new(false)),
+            receipt: Rc::new(Cell::new(false)),
+            closing: Rc::new(Cell::new(false)),
+            editor: view.clone(),
+            extra_editors: Rc::new(RefCell::new(Vec::new())),
+            caption,
         };
         form.dialog.connect_response({
             let buffer = form.buffer.clone();
+            let closing = form.closing.clone();
+            let receipt = form.receipt.clone();
             move |dialog, response| {
+                if closing.get() {
+                    return;
+                }
                 if response == gtk::ResponseType::Accept {
                     send(common::buffer_text(&buffer));
                 } else {
+                    if receipt.get() {
+                        cancel(common::buffer_text(&buffer));
+                        dialog.set_visible(false);
+                        return;
+                    }
+                    closing.set(true);
                     cancel(common::buffer_text(&buffer));
                     dialog.close();
                 }
@@ -77,18 +104,64 @@ impl Form {
         form
     }
     pub fn pending(&self) {
+        self.pending.set(true);
+        self.editor.set_editable(false);
+        for editor in self.extra_editors.borrow().iter() {
+            editor.set_sensitive(false);
+        }
         self.submit.set_sensitive(false);
         self.error.set_label("Sending…");
     }
     pub fn failed(&self, message: &str) {
-        self.submit.set_sensitive(true);
+        self.pending.set(false);
+        self.editor.set_editable(true);
+        for editor in self.extra_editors.borrow().iter() {
+            editor.set_sensitive(true);
+        }
+        self.submit.set_sensitive(false);
         self.error.set_label(message);
     }
     pub fn close(&self) {
+        self.closing.set(true);
         self.dialog.close();
         if let Some(opener) = self.opener.upgrade().filter(|w| w.is_mapped()) {
             opener.grab_focus();
         }
+    }
+    pub fn retain_receipt(&self, explanation: &str) {
+        self.receipt.set(true);
+        self.editor.set_editable(false);
+        self.submit.set_sensitive(false);
+        for editor in self.extra_editors.borrow().iter() {
+            editor.set_sensitive(false);
+        }
+        if let Some(button) = self
+            .dialog
+            .widget_for_response(gtk::ResponseType::Cancel)
+            .and_downcast::<gtk::Button>()
+        {
+            button.set_label("Close");
+        }
+        self.dialog.set_modal(false);
+        self.error.set_label(explanation);
+    }
+    pub fn purge(&self) {
+        self.buffer.set_text("");
+        self.caption.set_label("Access unavailable");
+        self.error.set_label("");
+        for widget in self.extra_editors.borrow().iter() {
+            if let Some(entry) = widget.downcast_ref::<gtk::Entry>() {
+                entry.set_text("");
+            }
+        }
+        self.pending.set(false);
+        self.receipt.set(false);
+        self.close();
+    }
+    pub fn add_editor(&self, widget: &impl IsA<gtk::Widget>) {
+        self.extra_editors
+            .borrow_mut()
+            .push(widget.clone().upcast());
     }
 }
 

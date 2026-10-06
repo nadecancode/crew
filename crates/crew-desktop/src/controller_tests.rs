@@ -19,7 +19,8 @@ impl ClientService for Recording {
 }
 impl Recording {
     fn queries(&self, c: &Controller, core: &ClientCore) {
-        for request in self.0.borrow_mut().drain(..).collect::<Vec<_>>() {
+        let requests = self.0.borrow_mut().drain(..).collect::<Vec<_>>();
+        for request in requests {
             if let Request::Query {
                 token,
                 expected_scope,
@@ -87,6 +88,12 @@ fn key(entity: Entity) -> EntityKey {
     }
 }
 fn core() -> ClientCore {
+    core_with_mode(
+        ConnectionMode::LocalOperator,
+        vec![GrantTier::Read, GrantTier::Control, GrantTier::Terminal],
+    )
+}
+fn core_with_mode(mode: ConnectionMode, tiers: Vec<GrantTier>) -> ClientCore {
     let fixture: serde_json::Value = serde_json::from_str(include_str!(
         "../../../fixtures/native/state/parked-resumption.case.json"
     ))
@@ -100,11 +107,11 @@ fn core() -> ClientCore {
     .unwrap();
     let context = ConnectionContext {
         scope: scope(),
-        mode: ConnectionMode::LocalOperator,
+        mode,
         snapshot_mode: SnapshotMode::OrderedConnection,
         grant: Grant {
             grant_id: "fixture".into(),
-            tiers: vec![GrantTier::Read, GrantTier::Control, GrantTier::Terminal],
+            tiers,
             workspace_ids: vec![scope().workspace_id],
             expires_at_ms: None,
         },
@@ -185,12 +192,13 @@ fn gtk_scoped_views_confirmation_terminal_order_and_live_local_service() {
     c.refresh(Destination::Tasks);
     recorder.queries(&c, &core);
     assert!(refresh.has_focus() || refresh.is_focus());
+    capture("fixture-waiting-detail");
     shell.navigate(Destination::Team);
     assert!(
         c.agent.borrow().is_some(),
         "other destination retains the qualified agent inspector"
     );
-    capture("fixture-waiting-detail");
+    capture("fixture-team-return");
 
     c.plan(
         ActionIntent::Agent {
@@ -339,7 +347,31 @@ fn gtk_scoped_views_confirmation_terminal_order_and_live_local_service() {
     c.compose("claude-1".into());
     eprintln!("Opening retained draft");
     let form = c.forms.borrow().values().next().unwrap().form.clone();
+    let plans_before = recorder
+        .0
+        .borrow()
+        .iter()
+        .filter(|request| matches!(request, Request::Plan { .. }))
+        .count();
     form.buffer.set_text("Retain this draft");
+    assert_eq!(
+        recorder
+            .0
+            .borrow()
+            .iter()
+            .filter(|request| matches!(request, Request::Plan { .. }))
+            .count(),
+        plans_before,
+        "typing and querying availability cannot plan a mutation"
+    );
+    let read_only = core_with_mode(ConnectionMode::ScopedGateway, vec![GrantTier::Read]);
+    recorder.queries(&c, &read_only);
+    assert!(!form.submit.is_sensitive());
+    assert_eq!(form.error.label().as_str(), "Control authority is required");
+    let form_id = *c.forms.borrow().keys().next().unwrap();
+    c.refresh_control(form_id);
+    recorder.queries(&c, &core);
+    assert!(form.submit.is_sensitive());
     form.dialog.response(gtk::ResponseType::Accept);
     let token = recorder.plan_token();
     c.respond(Response::Action {
@@ -354,6 +386,7 @@ fn gtk_scoped_views_confirmation_terminal_order_and_live_local_service() {
         }),
     });
     assert_eq!(common::buffer_text(&form.buffer), "Retain this draft");
+    recorder.queries(&c, &core);
     assert!(form.submit.is_sensitive());
     form.buffer.set_text("/unknown keep");
     form.dialog.response(gtk::ResponseType::Accept);
@@ -361,6 +394,11 @@ fn gtk_scoped_views_confirmation_terminal_order_and_live_local_service() {
     capture("fixture-draft-failure");
     eprintln!("Draft failure retained");
     form.dialog.response(gtk::ResponseType::Cancel);
+    reconnected_receipts(&c, &recorder);
+    c.respond(Response::Notice {
+        instance: 1,
+        notice: notice(Some(scope())),
+    });
     let old_token = {
         c.query(ViewQuery::Team, QueryTarget::Main(Destination::Team));
         c.next_token.get() - 1
@@ -400,6 +438,182 @@ fn gtk_scoped_views_confirmation_terminal_order_and_live_local_service() {
     eprintln!("Starting production local service");
 }
 
+struct PrivateDaemon {
+    socket: PathBuf,
+    thread: Option<std::thread::JoinHandle<()>>,
+}
+fn begin_receipt(c: &Controller, recorder: &Recording, body: &str, operation: u64) -> (u64, Form) {
+    c.respond(Response::Notice {
+        instance: 1,
+        notice: notice(Some(scope())),
+    });
+    c.compose_with_id(
+        "claude-1".into(),
+        Some(body.into()),
+        format!("receipt-{operation}"),
+    );
+    let id = *c.forms.borrow().keys().next_back().unwrap();
+    let form = c.forms.borrow().get(&id).unwrap().form.clone();
+    form.dialog.response(gtk::ResponseType::Accept);
+    let token = recorder.plan_token();
+    c.respond(Response::Action {
+        instance: 1,
+        token,
+        scope: scope(),
+        result: Ok(ActionPlan::Dispatch {
+            operation_id: operation,
+        }),
+    });
+    (id, form)
+}
+fn reconnected_receipts(c: &Controller, recorder: &Recording) {
+    let (id, form) = begin_receipt(c, recorder, "Original submitted body", 2001);
+    form.dialog.response(gtk::ResponseType::Cancel);
+    assert!(
+        c.forms.borrow().contains_key(&id),
+        "Close hides the submitted receipt without canceling or losing it"
+    );
+    let plans = recorder
+        .0
+        .borrow()
+        .iter()
+        .filter(|request| matches!(request, Request::Plan { .. }))
+        .count();
+    let mut disconnected = notice(None);
+    disconnected.endpoint = EndpointStatus::Reconnecting;
+    disconnected.workspace = WorkspaceStatus::Reconnecting;
+    c.respond(Response::Notice {
+        instance: 1,
+        notice: disconnected,
+    });
+    assert!(form.pending.get());
+    assert!(!form.submit.is_sensitive());
+    assert_eq!(common::buffer_text(&form.buffer), "Original submitted body");
+    let mut after = scope();
+    after.attempt = 2;
+    c.respond(Response::Notice {
+        instance: 1,
+        notice: notice(Some(after.clone())),
+    });
+    assert_eq!(
+        recorder
+            .0
+            .borrow()
+            .iter()
+            .filter(|request| matches!(request, Request::Plan { .. }))
+            .count(),
+        plans,
+        "reauthorization cannot replan the held message"
+    );
+    let mut mismatch = notice(Some(after.clone()));
+    mismatch.outcomes.push(OperationNotice {
+        scope: ClientScope {
+            workspace_id: "/wrong".into(),
+            ..after.clone()
+        },
+        operation_id: 2001,
+        attachment_id: None,
+        kind: OperationOutcomeKind::Success,
+        reason: None,
+    });
+    c.respond(Response::Notice {
+        instance: 1,
+        notice: mismatch,
+    });
+    assert!(c.forms.borrow().contains_key(&id));
+    let mut success = notice(Some(after.clone()));
+    success.outcomes.push(OperationNotice {
+        scope: after.clone(),
+        operation_id: 2001,
+        attachment_id: None,
+        kind: OperationOutcomeKind::Success,
+        reason: None,
+    });
+    c.respond(Response::Notice {
+        instance: 1,
+        notice: success,
+    });
+    assert!(
+        !c.forms.borrow().contains_key(&id),
+        "new-attempt scope plus original operation resolves exact receipt"
+    );
+    assert_eq!(
+        common::buffer_text(&form.buffer),
+        "",
+        "matching success clears only the submitted body"
+    );
+
+    let (id, form) = begin_receipt(c, recorder, "Unknown submitted body", 2002);
+    c.respond(Response::Notice {
+        instance: 1,
+        notice: notice(Some(after.clone())),
+    });
+    let mut unknown = notice(Some(after.clone()));
+    unknown.outcomes.push(OperationNotice {
+        scope: after.clone(),
+        operation_id: 2002,
+        attachment_id: None,
+        kind: OperationOutcomeKind::Unknown,
+        reason: Some(ClientReason {
+            code: "closed".into(),
+            message: "Acknowledgment unavailable".into(),
+        }),
+    });
+    c.respond(Response::Notice {
+        instance: 1,
+        notice: unknown,
+    });
+    assert!(c.forms.borrow().contains_key(&id));
+    assert_eq!(common::buffer_text(&form.buffer), "Unknown submitted body");
+    assert!(form.error.label().contains("Outcome unknown"));
+    assert!(!form.submit.is_sensitive());
+    let (edited_id, edited) = begin_receipt(c, recorder, "Acknowledged original", 2003);
+    edited.buffer.set_text("Later edited draft");
+    c.respond(Response::Notice {
+        instance: 1,
+        notice: notice(Some(after.clone())),
+    });
+    let mut edited_success = notice(Some(after.clone()));
+    edited_success.outcomes.push(OperationNotice {
+        scope: after,
+        operation_id: 2003,
+        attachment_id: None,
+        kind: OperationOutcomeKind::Success,
+        reason: None,
+    });
+    c.respond(Response::Notice {
+        instance: 1,
+        notice: edited_success,
+    });
+    assert!(c.forms.borrow().contains_key(&edited_id));
+    assert_eq!(common::buffer_text(&edited.buffer), "Later edited draft");
+    let mut revoke = notice(None);
+    revoke.workspace = WorkspaceStatus::AccessRevoked;
+    c.respond(Response::Notice {
+        instance: 1,
+        notice: revoke,
+    });
+    assert!(c.forms.borrow().is_empty());
+    assert!(c.operations.borrow().is_empty());
+    assert_eq!(
+        common::buffer_text(&form.buffer),
+        "",
+        "learned revocation clears retained receipt text"
+    );
+}
+impl Drop for PrivateDaemon {
+    fn drop(&mut self) {
+        if let Ok((mut caller, _)) =
+            crew_core::client::Client::operator(&self.socket, "gtk-test-cleanup")
+        {
+            let _ = caller
+                .call::<serde_json::Value>(crew_core::rpc::Call::Shutdown { stop_agents: true });
+        }
+        if let Some(thread) = self.thread.take() {
+            let _ = thread.join();
+        }
+    }
+}
 fn live_local(app: &gtk::Application) {
     let workspace = tempfile::Builder::new()
         .prefix("crew-gtk-live")
@@ -422,6 +636,10 @@ fn live_local(app: &gtk::Application) {
         });
     });
     let socket = receive.recv_timeout(Duration::from_secs(10)).unwrap();
+    let mut private_daemon = PrivateDaemon {
+        socket: socket.clone(),
+        thread: Some(daemon),
+    };
     let shell = Shell::new(app);
     let c = Controller::start(shell.clone());
     shell.window().present();
@@ -562,7 +780,7 @@ fn live_local(app: &gtk::Application) {
     let _: serde_json::Value = caller
         .call(crew_core::rpc::Call::Shutdown { stop_agents: true })
         .unwrap();
-    daemon.join().unwrap();
+    private_daemon.thread.take().unwrap().join().unwrap();
 }
 
 fn descendants(widget: &gtk::Widget) -> Vec<gtk::Widget> {

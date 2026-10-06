@@ -23,6 +23,8 @@ pub struct AgentInspector {
     pub terminal: TerminalView,
     key: EntityKey,
     summary: gtk::Label,
+    process: gtk::Label,
+    work: EntityList,
     reasons: gtk::Label,
     tasks: EntityList,
     messages: EntityList,
@@ -43,6 +45,10 @@ impl AgentInspector {
         let overview = common::column();
         let summary = common::text("Loading agent…");
         overview.append(&summary);
+        overview.append(&common::heading("Current and Waiting work"));
+        let work = EntityList::new("Current and Waiting task links", callbacks.select.clone());
+        work.root.set_min_content_height(120);
+        overview.append(&work.root);
         let actions = gtk::FlowBox::new();
         actions.set_selection_mode(gtk::SelectionMode::None);
         actions.set_homogeneous(false);
@@ -94,10 +100,8 @@ impl AgentInspector {
         });
         actions.insert(&compose, -1);
         controls.push((ActionKind::SendMessage, compose));
-        overview.append(&actions);
         let reasons = common::text("");
         reasons.add_css_class("crew-muted");
-        overview.append(&reasons);
         overview.append(&common::heading("Assigned and review tasks"));
         let tasks = EntityList::new("Assigned and review tasks", callbacks.select.clone());
         tasks.root.set_min_content_height(160);
@@ -106,6 +110,15 @@ impl AgentInspector {
         let messages = EntityList::new("Agent messages", callbacks.select);
         messages.root.set_min_content_height(160);
         overview.append(&messages.root);
+        overview.append(&common::heading("Agent actions"));
+        overview.append(&actions);
+        overview.append(&reasons);
+        let process = common::text("");
+        let process_group = gtk::Expander::builder()
+            .label("Process details")
+            .child(&process)
+            .build();
+        overview.append(&process_group);
         tabs.append_page(
             &common::scroll(&overview),
             Some(&gtk::Label::new(Some("Overview"))),
@@ -188,6 +201,8 @@ impl AgentInspector {
             terminal,
             key,
             summary,
+            process,
+            work,
             reasons,
             tasks,
             messages,
@@ -216,11 +231,10 @@ impl AgentInspector {
                     ))
             )
         });
-        let mut summary = format!("{} · {}\n{} · {}\n\nCurrent work: {}\nWaiting cards: {}\nActivity: {}\nModel: {}\nProgress: {}\nContext: {}\n\nRuntime: {}\nBranch: {}\nWorkspace: {}\nMailbox: {} unread / {} received / {} sent\nSubagents: {}\nSession: {}\nBackend: {}\nProcess: {}\nRestarts: {}\nLast activity: {}", a.name, a.id, a.role, member.status_label, current, member.waiting_task_ids.join(", "), a.activity,
+        let mut summary = format!("{} · {}\n{} · {}\n\nCurrent work: {}\nWaiting cards: {}\nActivity: {}\nModel: {}\nProgress: {}\nContext: {}\nRuntime: {}\nBranch: {}\nMailbox: {} unread / {} received / {} sent", a.name, a.id, a.role, member.status_label, current, member.waiting_task_ids.join(", "), a.activity,
             a.model_label().unwrap_or("Not reported".into()), a.progress.map_or("Not reported".into(), |p| format!("{p}%")),
             a.context.as_ref().map_or("Not reported".into(), |c| format!("{}%", c.percent)), a.runtime,
-            a.branch.as_deref().unwrap_or("None"), a.workdir, a.inbox_unread, a.inbox_total, a.outbox_total, a.subagents,
-            a.session_id.as_deref().unwrap_or("Not reported"), a.backend, a.pid.map_or("Not reported".into(), |p| p.to_string()), a.restarts, common::timestamp(a.last_activity_at));
+            a.branch.as_deref().unwrap_or("None"), a.inbox_unread, a.inbox_total, a.outbox_total);
         for warning in &member.warnings {
             summary.push_str(&format!("\n{}", warning.text));
         }
@@ -228,6 +242,43 @@ impl AgentInspector {
             summary.push_str(&format!("\nSubagent of {parent}"));
         }
         self.summary.set_label(&summary);
+        self.process.set_label(&format!("Workspace: {}\nSubagents: {}\nSession: {}\nBackend: {}\nProcess: {}\nRestarts: {}\nLast activity: {}", a.workdir, a.subagents, a.session_id.as_deref().unwrap_or("Not reported"), a.backend, a.pid.map_or("Not reported".into(), |pid| pid.to_string()), a.restarts, common::timestamp(a.last_activity_at)));
+        let links = member
+            .current_work
+            .iter()
+            .map(|work| {
+                (
+                    if work.done { "Completed" } else { "Current" },
+                    &work.task_id,
+                )
+            })
+            .chain(member.waiting_task_ids.iter().map(|id| ("Waiting", id)));
+        self.work.replace(
+            links
+                .map(|(kind, id)| {
+                    let task = data
+                        .assigned_tasks
+                        .iter()
+                        .chain(&data.review_tasks)
+                        .find(|item| &item.task.id == id);
+                    let label = format!(
+                        "{kind}: {id}{}",
+                        task.map_or(String::new(), |item| format!(
+                            " · {} · {}",
+                            item.task.status, item.task.title
+                        ))
+                    );
+                    (
+                        EntityKey {
+                            scope: self.key.scope.clone(),
+                            entity: Entity::Task(id.clone()),
+                        },
+                        common::text(&label).upcast(),
+                        label,
+                    )
+                })
+                .collect(),
+        );
         self.set_live(live);
         self.tasks.replace(
             data.assigned_tasks

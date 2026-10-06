@@ -31,7 +31,12 @@ for _ in {1..20}; do
 done
 Xvfb ":$native_display" -screen 0 1440x960x24 -dpi 96 -nolisten tcp >"$native_out/xvfb.log" 2>&1 &
 native_xvfb_pid=$!
+native_window_manager_pid=""
 cleanup() {
+    if [ -n "$native_window_manager_pid" ]; then
+        kill "$native_window_manager_pid" 2>/dev/null || true
+        wait "$native_window_manager_pid" 2>/dev/null || true
+    fi
     kill "$native_xvfb_pid" 2>/dev/null || true
     wait "$native_xvfb_pid" 2>/dev/null || true
 }
@@ -50,6 +55,16 @@ done
 export DISPLAY=":$native_display" GDK_BACKEND=x11 GSK_RENDERER=cairo GDK_SCALE=1 GDK_DPI_SCALE=1 GDK_DEBUG=no-portals
 unset WAYLAND_DISPLAY
 dbus-update-activation-environment DISPLAY GDK_BACKEND GSK_RENDERER GDK_DEBUG XDG_RUNTIME_DIR
+if [ "$native_mode" = --client ] && [ "${CREW_NATIVE_UI_TEST_WINDOW_MANAGER:-0}" = 1 ]; then
+    command -v openbox >/dev/null || { echo "window-manager capture requires openbox" >&2; exit 2; }
+    openbox --sm-disable >"$native_out/window-manager.log" 2>&1 &
+    native_window_manager_pid=$!
+    sleep 0.25
+    kill -0 "$native_window_manager_pid" || { echo "private window manager failed" >&2; exit 1; }
+    printf 'openbox_pid=%s\n' "$native_window_manager_pid" >"$native_out/window-manager.txt"
+else
+    printf 'no window manager; functional capture only\n' >"$native_out/window-manager.txt"
+fi
 {
     rustc -Vv
     cargo -V
@@ -62,7 +77,7 @@ if [ "$native_mode" = --keyboard ]; then
     "$native_repo/crates/crew-desktop/tests/keyboard.sh" "$native_out" "$CARGO_TARGET_DIR/debug/crew-desktop"
 elif [ "$native_mode" = --client ]; then
     export GTK_A11Y=test CREW_NATIVE_UI_TEST_PRIVATE=1 CREW_NATIVE_UI_EVIDENCE_DIR="$native_out"
-    native_manifest=${CREW_NATIVE_UI_TEST_MANIFEST:-$native_repo/Cargo.toml}
+    native_manifest=$(realpath "${CREW_NATIVE_UI_TEST_MANIFEST:-$native_repo/Cargo.toml}")
     # A lagging worker may stage exact reviewed runtime prerequisites below its
     # own artifact root; never substitute another checkout or operator state.
     case "$native_manifest" in "$native_repo/Cargo.toml"|"$native_repo/target/native-validation/"*/Cargo.toml) ;;

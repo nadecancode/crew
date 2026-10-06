@@ -1,5 +1,6 @@
 use crew_client::api::*;
 use gtk::prelude::*;
+use std::rc::Rc;
 
 use super::common::{self, EntityList, Select};
 
@@ -9,10 +10,12 @@ pub struct TeamView {
     list: EntityList,
     empty: gtk::ScrolledWindow,
     graph: super::graph::Graph,
+    pairs: gtk::Box,
+    pair: Rc<dyn Fn(ClientScope, String, String)>,
 }
 
 impl TeamView {
-    pub fn new(select: Select) -> Self {
+    pub fn new(select: Select, pair: Rc<dyn Fn(ClientScope, String, String)>) -> Self {
         let root = gtk::Box::new(gtk::Orientation::Vertical, 0);
         let list = EntityList::new("Team agents", select.clone());
         let graph = super::graph::Graph::new("Agent relationships", select);
@@ -21,6 +24,8 @@ impl TeamView {
         stack.add_titled(&graph.root, Some("graph"), "Graph");
         let switcher = gtk::StackSwitcher::builder().stack(&stack).build();
         root.append(&switcher);
+        let pairs = gtk::Box::new(gtk::Orientation::Vertical, 4);
+        root.append(&pairs);
         let empty = super::empty_state(
             "system-run-symbolic",
             "No agents loaded",
@@ -33,11 +38,14 @@ impl TeamView {
             list,
             empty,
             graph,
+            pairs,
+            pair,
         }
     }
 
     pub fn update(&self, scope: Option<&ClientScope>, data: &TeamData) {
         let Some(scope) = scope else {
+            common::clear(&self.pairs);
             self.list.replace(Vec::new());
             self.graph.update(Vec::new(), Vec::new());
             self.list.root.set_visible(false);
@@ -45,6 +53,21 @@ impl TeamView {
             return;
         };
         self.empty.set_visible(data.agents.is_empty());
+        common::clear(&self.pairs);
+        for relation in &data.relations {
+            let button = gtk::Button::with_label(&format!(
+                "Messages between {} and {}",
+                relation.parent_id, relation.child_id
+            ));
+            button.connect_clicked({
+                let pair = self.pair.clone();
+                let scope = scope.clone();
+                let first = relation.parent_id.clone();
+                let second = relation.child_id.clone();
+                move |_| pair(scope.clone(), first.clone(), second.clone())
+            });
+            self.pairs.append(&button);
+        }
         self.graph.update(
             data.agents
                 .iter()

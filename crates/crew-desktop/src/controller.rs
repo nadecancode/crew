@@ -1,6 +1,7 @@
 //! GTK presentation/controller. Shared Rust owns data, action eligibility,
 //! confirmations, resources, retry and transport; GTK owns local UI state.
 use crate::{
+    availability::{Controls, Input as ControlInput, Intent},
     dialogs::{self, Form},
     navigation::Destination,
     service::{ClientService, Request, Response, ServiceHandle},
@@ -35,6 +36,14 @@ enum QueryTarget {
     Detail(EntityKey),
     Evidence(ResourceKey),
     Models(EntityKey),
+    Availability {
+        control: u64,
+        intent: Box<ActionIntent>,
+    },
+    RestoreReceipt {
+        form: u64,
+        intent: Box<ActionIntent>,
+    },
 }
 #[derive(Clone)]
 struct PendingAction {
@@ -47,6 +56,7 @@ struct OpenForm {
     form: Form,
     scope: ClientScope,
     target: String,
+    submitted: Option<ActionIntent>,
 }
 struct Confirmation {
     id: u64,
@@ -101,6 +111,7 @@ pub struct Controller {
     model_loading: RefCell<Option<EntityKey>>,
     auxiliary: RefCell<Vec<gtk::Dialog>>,
     pages: RefCell<Vec<(Destination, gtk::Box)>>,
+    controls: Controls,
 }
 
 impl Controller {
@@ -131,7 +142,20 @@ impl Controller {
                     }
                 }
             });
-            let team = TeamView::new(select.clone());
+            let team = TeamView::new(
+                select.clone(),
+                Rc::new({
+                    let weak = weak.clone();
+                    move |scope, first, second| {
+                        if let Some(c) = weak.upgrade() {
+                            if c.scope.borrow().as_ref() == Some(&scope) {
+                                c.messages.set_pair(&first, &second);
+                                c.shell.navigate(Destination::Messages);
+                            }
+                        }
+                    }
+                }),
+            );
             let tasks = TasksView::new(select.clone());
             let messages = MessagesView::new(
                 select.clone(),
@@ -242,6 +266,7 @@ impl Controller {
                 model_loading: RefCell::new(None),
                 auxiliary: RefCell::new(Vec::new()),
                 pages: RefCell::new(Vec::new()),
+                controls: Controls::default(),
             }
         });
         let status_box = gtk::Box::new(gtk::Orientation::Vertical, 8);
@@ -302,6 +327,18 @@ impl Controller {
                     }
                 });
                 controls.insert(&compose, -1);
+                if destination == Destination::Messages {
+                    let receipts = gtk::Button::with_label("Message receipts");
+                    receipts.connect_clicked({
+                        let weak = controller.weak.clone();
+                        move |_| {
+                            if let Some(c) = weak.upgrade() {
+                                c.receipts();
+                            }
+                        }
+                    });
+                    controls.insert(&receipts, -1);
+                }
             }
             if destination == Destination::Team {
                 controls.insert(&controller.questions_button, -1);
@@ -317,7 +354,30 @@ impl Controller {
                         }
                     }
                 });
-                controls.insert(&stop, -1);
+                let reason = common::text("");
+                reason.set_max_width_chars(26);
+                let control = controller.token();
+                controller.bind_control(
+                    control,
+                    &stop,
+                    &reason,
+                    Rc::new({
+                        let weak = controller.weak.clone();
+                        move || {
+                            weak.upgrade()
+                                .and_then(|c| c.scope.borrow().clone())
+                                .map_or(
+                                    ControlInput::Invalid("Choose a workspace.".into()),
+                                    |scope| ControlInput::Action(ActionIntent::StopTeam { scope }),
+                                )
+                        }
+                    }),
+                    Rc::new(Cell::new(false)),
+                );
+                let group = gtk::Box::new(gtk::Orientation::Vertical, 4);
+                group.append(&stop);
+                group.append(&reason);
+                controls.insert(&group, -1);
             }
             if destination == Destination::Usage {
                 for (name, restart) in [
@@ -339,7 +399,35 @@ impl Controller {
                             }
                         }
                     });
-                    controls.insert(&button, -1);
+                    let reason = common::text("");
+                    reason.set_max_width_chars(26);
+                    let control = controller.token();
+                    controller.bind_control(
+                        control,
+                        &button,
+                        &reason,
+                        Rc::new({
+                            let weak = controller.weak.clone();
+                            move || {
+                                weak.upgrade()
+                                    .and_then(|c| c.scope.borrow().clone())
+                                    .map_or(
+                                        ControlInput::Invalid("Choose a workspace.".into()),
+                                        |scope| {
+                                            ControlInput::Action(ActionIntent::ResumeLimited {
+                                                scope,
+                                                restart,
+                                            })
+                                        },
+                                    )
+                            }
+                        }),
+                        Rc::new(Cell::new(false)),
+                    );
+                    let group = gtk::Box::new(gtk::Orientation::Vertical, 4);
+                    group.append(&button);
+                    group.append(&reason);
+                    controls.insert(&group, -1);
                 }
             }
             page.append(&controls);
@@ -367,7 +455,7 @@ impl Controller {
             let weak = controller.weak.clone();
             move |_| {
                 if let Some(c) = weak.upgrade() {
-                    c.invalidate(false);
+                    c.invalidate(true);
                     c.send(Request::Close);
                     c.service.borrow_mut().take();
                 }
@@ -408,7 +496,17 @@ impl Controller {
         }) {
             self.queries
                 .borrow_mut()
-                .retain(|_, older| older != &target);
+                .retain(|_, older| match (&*older, &target) {
+                    (
+                        QueryTarget::Availability {
+                            control: previous, ..
+                        },
+                        QueryTarget::Availability {
+                            control: current, ..
+                        },
+                    ) => previous != current,
+                    _ => older != &target,
+                });
             self.queries.borrow_mut().insert(token, target);
         }
     }
@@ -434,8 +532,10 @@ impl Controller {
         match response {
             Response::Session(instance) => {
                 if instance != self.instance.replace(instance) {
-                    self.invalidate(false);
+                    self.invalidate(true);
                     self.scope.borrow_mut().take();
+                    self.workspace_label.set_label("Choose workspace");
+                    self.workspace_label.set_tooltip_text(None);
                     self.connection.borrow_mut().take();
                     self.listing.borrow_mut().take();
                 }
@@ -456,6 +556,12 @@ impl Controller {
                 workspaces,
             } => {
                 if instance != self.instance.get() {
+                    return;
+                }
+                if connection
+                    .as_ref()
+                    .is_some_and(|context| self.scope.borrow().as_ref() != Some(&context.scope))
+                {
                     return;
                 }
                 *self.connection.borrow_mut() = connection;
@@ -485,7 +591,13 @@ impl Controller {
                 match result {
                     Ok(data) if data.scope == *self.scope.borrow() => self.present(target, data),
                     Ok(_) => (),
-                    Err(error) => self.result.set_label(&error.to_string()),
+                    Err(error) => {
+                        if let QueryTarget::Availability { control, intent } = target {
+                            self.controls.apply(control, &intent, Err(error));
+                        } else {
+                            self.result.set_label(&error.to_string());
+                        }
+                    }
                 }
             }
             Response::Action {
@@ -507,26 +619,25 @@ impl Controller {
     }
     fn notice(&self, notice: ClientNotice) {
         let revoked = notice.workspace == WorkspaceStatus::AccessRevoked
+            || notice.workspace == WorkspaceStatus::Removed
             || notice.endpoint == EndpointStatus::SignedOut;
         if notice.scope != *self.scope.borrow() || revoked {
             self.invalidate(revoked);
-            *self.scope.borrow_mut() = notice.scope.clone();
+            let visible_scope = if revoked { None } else { notice.scope.clone() };
+            *self.scope.borrow_mut() = visible_scope.clone();
             self.workspace_label.set_label(
-                notice
-                    .scope
+                visible_scope
                     .as_ref()
                     .map_or("Choose workspace", |scope| scope.workspace_id.as_str()),
             );
             self.workspace_label
                 .update_property(&[gtk::accessible::Property::Label(
-                    notice
-                        .scope
+                    visible_scope
                         .as_ref()
                         .map_or("No workspace selected", |scope| scope.workspace_id.as_str()),
                 )]);
             self.workspace_label.set_tooltip_text(
-                notice
-                    .scope
+                visible_scope
                     .as_ref()
                     .map(|scope| scope.workspace_id.as_str()),
             );
@@ -622,9 +733,68 @@ impl Controller {
                 );
             }
         }
+        if changes.reset
+            || changes.availability
+            || changes.pending
+            || changes.questions
+            || changes.session
+            || !changes.agents.is_empty()
+        {
+            self.refresh_controls();
+        }
     }
     fn present(&self, target: QueryTarget, data: ViewData) {
         match (target, data.payload) {
+            (
+                QueryTarget::Availability { control, intent },
+                ViewPayload::Availability(availability),
+            ) => self.controls.apply(control, &intent, Ok(availability)),
+            (
+                QueryTarget::RestoreReceipt { form, intent },
+                ViewPayload::Availability(availability),
+            ) => {
+                if !availability.available {
+                    self.result.set_label(
+                        &availability
+                            .reason
+                            .map_or("Restoration unavailable.".into(), |reason| reason.message),
+                    );
+                    return;
+                }
+                let current = self
+                    .forms
+                    .borrow()
+                    .get(&form)
+                    .map(|open| (open.form.clone(), open.submitted.clone()));
+                if let Some((
+                    old,
+                    Some(ActionIntent::SendMessage {
+                        scope: original,
+                        to,
+                        message_id,
+                        ..
+                    }),
+                )) = current
+                {
+                    if old.pending.get()
+                        || self.scope.borrow().as_ref()
+                            != Some(crew_client::actions::action_scope(&intent))
+                    {
+                        return;
+                    }
+                    if let ActionIntent::SendMessage { scope, body, .. } = *intent {
+                        if scope.endpoint_id != original.endpoint_id
+                            || scope.workspace_id != original.workspace_id
+                            || body != common::buffer_text(&old.buffer)
+                        {
+                            return;
+                        }
+                        self.forms.borrow_mut().remove(&form);
+                        old.close();
+                        self.compose_with_id(to, Some(body), message_id);
+                    }
+                }
+            }
             (QueryTarget::Main(Destination::Team), ViewPayload::Team(team)) => {
                 self.team.update(data.scope.as_ref(), &team)
             }
@@ -1051,7 +1221,7 @@ impl Controller {
     }
 
     fn plan(&self, intent: ActionIntent, form: Option<u64>, terminal: Option<TerminalView>) {
-        let scope = action_scope(&intent);
+        let scope = crew_client::actions::action_scope(&intent);
         if self.scope.borrow().as_ref() != Some(scope) {
             self.result
                 .set_label("This action belongs to a workspace that is no longer selected.");
@@ -1066,6 +1236,14 @@ impl Controller {
                 let ui = self.forms.borrow().get(&id).map(|f| f.form.clone());
                 if let Some(ui) = ui {
                     ui.pending();
+                    if matches!(intent, ActionIntent::SendMessage { .. }) {
+                        ui.retain_receipt(
+                            "Submitted · awaiting the daemon's authoritative result.",
+                        );
+                    }
+                }
+                if let Some(open) = self.forms.borrow_mut().get_mut(&id) {
+                    open.submitted = Some(intent.clone());
                 }
             }
             self.plans.borrow_mut().insert(
@@ -1079,11 +1257,70 @@ impl Controller {
             );
         }
     }
+    fn bind_control(
+        &self,
+        id: u64,
+        button: &gtk::Button,
+        reason: &gtk::Label,
+        intent: Intent,
+        pending: Rc<Cell<bool>>,
+    ) {
+        self.controls.bind(id, button, reason, intent, pending);
+        self.refresh_control(id);
+    }
+    fn bind_form_control(&self, id: u64, form: &Form, intent: Intent) {
+        self.bind_control(id, &form.submit, &form.error, intent, form.pending.clone());
+        form.buffer.connect_changed({
+            let weak = self.weak.clone();
+            move |_| {
+                if let Some(c) = weak.upgrade() {
+                    c.refresh_control(id);
+                }
+            }
+        });
+    }
+    fn refresh_control(&self, id: u64) {
+        match self.controls.intent(id) {
+            Some(ControlInput::Action(intent)) => {
+                if self.scope.borrow().as_ref() == Some(crew_client::actions::action_scope(&intent))
+                {
+                    self.query(
+                        ViewQuery::Availability {
+                            intent: Box::new(intent.clone()),
+                        },
+                        QueryTarget::Availability {
+                            control: id,
+                            intent: Box::new(intent),
+                        },
+                    );
+                    return;
+                }
+            }
+            Some(ControlInput::Local) => {
+                self.controls.local(id);
+                return;
+            }
+            Some(ControlInput::Invalid(reason)) => {
+                self.controls.unavailable(id, &reason);
+                return;
+            }
+            None => return,
+        }
+        self.controls
+            .unavailable(id, "Choose a verified workspace to submit this action.");
+    }
+    fn refresh_controls(&self) {
+        for id in self.controls.ids() {
+            self.refresh_control(id);
+        }
+    }
     fn planned(&self, token: u64, scope: ClientScope, result: Result<ActionPlan, ClientError>) {
         let Some(action) = self.plans.borrow_mut().remove(&token) else {
             return;
         };
-        if self.scope.borrow().as_ref() != Some(&scope) {
+        if self.scope.borrow().as_ref() != Some(&scope)
+            && !matches!(&action.intent, ActionIntent::SendMessage { scope: captured, .. } if captured == &scope)
+        {
             return;
         }
         match result {
@@ -1165,6 +1402,8 @@ impl Controller {
             let form = self.forms.borrow().get(&id).map(|f| f.form.clone());
             if let Some(form) = form {
                 form.failed(message);
+                form.receipt.set(false);
+                self.refresh_control(id);
             }
         }
         if let Some(terminal) = &action.terminal {
@@ -1172,12 +1411,38 @@ impl Controller {
         }
     }
     fn outcome(&self, outcome: OperationNotice) {
-        if self.scope.borrow().as_ref() != Some(&outcome.scope) {
+        let known = self.operations.borrow().get(&outcome.operation_id).cloned();
+        let receipt_match = known.as_ref().is_some_and(|action| matches!(&action.intent, ActionIntent::SendMessage { scope, .. } if scope.endpoint_id == outcome.scope.endpoint_id && scope.workspace_id == outcome.scope.workspace_id));
+        if known
+            .as_ref()
+            .is_some_and(|action| matches!(action.intent, ActionIntent::SendMessage { .. }))
+            && !receipt_match
+        {
+            return;
+        }
+        let late_send = self.plans.borrow().values().any(|action| matches!(&action.intent, ActionIntent::SendMessage { scope, .. } if scope.endpoint_id == outcome.scope.endpoint_id && scope.workspace_id == outcome.scope.workspace_id));
+        if self.scope.borrow().as_ref() != Some(&outcome.scope) && !receipt_match && !late_send {
             return;
         }
         let action = self.operations.borrow_mut().remove(&outcome.operation_id);
         let Some(action) = action else {
-            if outcome.kind == OperationOutcomeKind::Success {
+            // Confirm dispatch IDs are intentionally opaque at NativeSession's
+            // host boundary. Surface every scoped failure without attributing
+            // an unrelated read acknowledgment to the confirmed mutation.
+            if !matches!(
+                outcome.kind,
+                OperationOutcomeKind::Success
+                    | OperationOutcomeKind::SentUnacknowledged
+                    | OperationOutcomeKind::ClosedLocally
+            ) {
+                self.result.set_label(&outcome.reason.as_ref().map_or_else(
+                    || format!("Operation {:?}", outcome.kind),
+                    |reason| reason.message.clone(),
+                ));
+            }
+            if self.scope.borrow().as_ref() == Some(&outcome.scope)
+                && outcome.kind == OperationOutcomeKind::Success
+            {
                 if let Some(id) = outcome
                     .attachment_id
                     .filter(|id| *id == outcome.operation_id)
@@ -1217,10 +1482,37 @@ impl Controller {
                 }
             }
             if let Some(id) = action.form {
-                let form = self.forms.borrow_mut().remove(&id);
-                if let Some(form) = form {
-                    self.save_draft(&form.scope, &form.target, "");
-                    form.form.close();
+                let exact = self
+                    .forms
+                    .borrow()
+                    .get(&id)
+                    .is_some_and(|form| match &action.intent {
+                        ActionIntent::SendMessage { body, .. }
+                        | ActionIntent::Answer { body, .. } => {
+                            common::buffer_text(&form.form.buffer) == *body
+                        }
+                        _ => true,
+                    });
+                if exact {
+                    let form = self.forms.borrow_mut().remove(&id);
+                    if let Some(form) = form {
+                        self.controls.remove(id);
+                        if let ActionIntent::SendMessage { body, .. } = &action.intent {
+                            self.drafts.borrow_mut().retain(|(scope, target, text)| {
+                                scope != &form.scope || target != &form.target || text != body
+                            });
+                        } else {
+                            self.save_draft(&form.scope, &form.target, "");
+                        }
+                        form.form.buffer.set_text("");
+                        form.form
+                            .error
+                            .set_label("Submission acknowledged by the daemon.");
+                        form.form.close();
+                    }
+                } else if let Some(form) = self.forms.borrow().get(&id) {
+                    form.form.pending.set(false);
+                    form.form.retain_receipt("Original submission acknowledged; later edits retained. Restore explicitly before submitting another message.");
                 }
             }
             match action.intent {
@@ -1251,7 +1543,25 @@ impl Controller {
             let message = outcome
                 .reason
                 .map_or_else(|| format!("Action {:?}", outcome.kind), |r| r.message);
-            self.action_failed(&action, &message);
+            if matches!(action.intent, ActionIntent::SendMessage { .. }) {
+                let explanation = if outcome.kind == OperationOutcomeKind::Unknown {
+                    format!(
+                        "Outcome unknown: {message}. Check message history before trying again."
+                    )
+                } else {
+                    format!("Submission {:?}: {message}", outcome.kind)
+                };
+                if let Some(id) = action.form {
+                    self.controls.remove(id);
+                    if let Some(form) = self.forms.borrow().get(&id) {
+                        form.form.pending.set(false);
+                        form.form.retain_receipt(&explanation);
+                    }
+                }
+                self.result.set_label(&explanation);
+            } else {
+                self.action_failed(&action, &message);
+            }
             if outcome.kind == OperationOutcomeKind::Unknown {
                 self.result.set_label(&format!(
                     "Outcome unknown: {message}. Check the current state before trying again."
@@ -1388,11 +1698,23 @@ impl Controller {
         self.evidence.borrow_mut().clear();
         self.queries.borrow_mut().clear();
         self.model_loading.borrow_mut().take();
-        self.plans.borrow_mut().clear();
-        self.operations.borrow_mut().clear();
-        self.early_outcomes.borrow_mut().clear();
+        self.plans.borrow_mut().retain(|_, action| {
+            !purge && matches!(action.intent, ActionIntent::SendMessage { .. })
+        });
+        self.operations.borrow_mut().retain(|_, action| {
+            !purge && matches!(action.intent, ActionIntent::SendMessage { .. })
+        });
+        self.early_outcomes.borrow_mut().retain(|outcome| !purge && self.plans.borrow().values().any(|action| matches!(&action.intent, ActionIntent::SendMessage { scope, .. } if scope.endpoint_id == outcome.scope.endpoint_id && scope.workspace_id == outcome.scope.workspace_id)));
         let forms = self.forms.borrow_mut().split_off(&0);
-        for (_, form) in forms {
+        for (id, form) in forms {
+            self.controls.remove(id);
+            if !purge && form.form.receipt.get() {
+                if form.form.pending.get() {
+                    form.form.retain_receipt("Original submitted message is still pending after reconnect. The client will not submit it again.");
+                }
+                self.forms.borrow_mut().insert(id, form);
+                continue;
+            }
             if !purge {
                 self.save_draft(
                     &form.scope,
@@ -1400,9 +1722,15 @@ impl Controller {
                     &common::buffer_text(&form.form.buffer),
                 );
             }
-            form.form.close();
+            if purge {
+                form.form.purge();
+            } else {
+                form.form.close();
+            }
         }
         if purge {
+            self.connection.borrow_mut().take();
+            self.listing.borrow_mut().take();
             self.drafts.borrow_mut().clear();
             self.questions.borrow_mut().clear();
             self.questions_button.set_label("Questions (0)");
@@ -1485,6 +1813,9 @@ impl Controller {
             .map_or(String::new(), |(_, _, text)| text.clone())
     }
     pub fn compose(&self, recipient: String) {
+        self.compose_with_id(recipient, None, glib::uuid_string_random().to_string());
+    }
+    fn compose_with_id(&self, recipient: String, initial: Option<String>, message_id: String) {
         let Some(scope) = self.scope.borrow().clone() else {
             self.result
                 .set_label("Choose a workspace before composing a message.");
@@ -1499,23 +1830,50 @@ impl Controller {
         entry.update_property(&[gtk::accessible::Property::Label(
             "Recipient; * broadcasts to the team",
         )]);
-        let form = Form::new(self.shell.window(), "New message", &format!("Workspace {} · recipient * broadcasts to the team. Return inserts a newline; Send submits explicitly.", scope.workspace_id), &self.draft(&scope, &target), "Send",
-            Rc::new({ let weak = self.weak.clone(); let scope = scope.clone(); let entry = entry.clone(); move |body| if let Some(c) = weak.upgrade() {
+        let form = Form::new(self.shell.window(), "New message", &format!("Workspace {} · recipient * broadcasts to the team. Return inserts a newline; Send submits explicitly.", scope.workspace_id), &initial.unwrap_or_else(|| self.draft(&scope, &target)), "Send",
+            Rc::new({ let weak = self.weak.clone(); let scope = scope.clone(); let entry = entry.clone(); let message_id = message_id.clone(); move |body| if let Some(c) = weak.upgrade() {
                 let recipient = entry.text().to_string();
-                    if !c.command(&body, &recipient) {
-                    c.plan(ActionIntent::SendMessage { scope: scope.clone(), to: recipient, body, message_id: glib::uuid_string_random().to_string() }, Some(token), None);
-                } else {
-                    let form = c.forms.borrow().get(&token).map(|f| f.form.clone());
-                    if let Some(form) = form { form.failed(c.result.label().as_str()); }
-                }
-            }}), Rc::new({ let weak = self.weak.clone(); let scope = scope.clone(); let target = target.clone(); move |text| if let Some(c) = weak.upgrade() { c.save_draft(&scope, &target, &text); c.forms.borrow_mut().remove(&token); } }));
+                if !c.command(&body, &recipient, &scope) { c.plan(ActionIntent::SendMessage { scope: scope.clone(), to: recipient, body, message_id: message_id.clone() }, Some(token), None); }
+                else { let form = c.forms.borrow().get(&token).map(|f| f.form.clone()); if let Some(form) = form { form.failed(c.result.label().as_str()); } }
+            }}), Rc::new({ let weak = self.weak.clone(); let scope = scope.clone(); let entry = entry.clone(); move |text| if let Some(c) = weak.upgrade() { c.save_draft(&scope, &format!("message:{}", entry.text()), &text); let receipt = c.forms.borrow().get(&token).is_some_and(|open| open.form.receipt.get()); if !receipt { c.forms.borrow_mut().remove(&token); c.controls.remove(token); } } }));
         form.dialog.content_area().prepend(&entry);
+        form.add_editor(&entry);
+        self.bind_form_control(
+            token,
+            &form,
+            Rc::new({
+                let weak = self.weak.clone();
+                let scope = scope.clone();
+                let buffer = form.buffer.clone();
+                let entry = entry.downgrade();
+                move || {
+                    let (Some(c), Some(entry)) = (weak.upgrade(), entry.upgrade()) else {
+                        return ControlInput::Invalid("Editor closed.".into());
+                    };
+                    c.composer_input(
+                        &scope,
+                        &common::buffer_text(&buffer),
+                        entry.text().as_str(),
+                        &message_id,
+                    )
+                }
+            }),
+        );
+        entry.connect_changed({
+            let weak = self.weak.clone();
+            move |_| {
+                if let Some(c) = weak.upgrade() {
+                    c.refresh_control(token);
+                }
+            }
+        });
         self.forms.borrow_mut().insert(
             token,
             OpenForm {
                 form,
                 scope,
                 target,
+                submitted: None,
             },
         );
     }
@@ -1526,14 +1884,31 @@ impl Controller {
         let token = self.token();
         let target = format!("prompt:{id}");
         let form = Form::new(self.shell.window(), "Send prompt", &format!("Prompt {id} in workspace {}. This is host terminal input, separate from a team message.", key.scope.workspace_id), &self.draft(&key.scope, &target), "Submit prompt",
-            Rc::new({ let weak = self.weak.clone(); let scope = key.scope.clone(); move |text| if let Some(c) = weak.upgrade() { c.plan(ActionIntent::AgentInput { scope: scope.clone(), id: id.clone(), text: Some(text), submit: true }, Some(token), None); } }),
-            Rc::new({ let weak = self.weak.clone(); let scope = key.scope.clone(); let target = target.clone(); move |text| if let Some(c) = weak.upgrade() { c.save_draft(&scope, &target, &text); c.forms.borrow_mut().remove(&token); } }));
+            Rc::new({ let weak = self.weak.clone(); let scope = key.scope.clone(); let id = id.clone(); move |text| if let Some(c) = weak.upgrade() { c.plan(ActionIntent::AgentInput { scope: scope.clone(), id: id.clone(), text: Some(text), submit: true }, Some(token), None); } }),
+            Rc::new({ let weak = self.weak.clone(); let scope = key.scope.clone(); let target = target.clone(); move |text| if let Some(c) = weak.upgrade() { c.save_draft(&scope, &target, &text); let receipt = c.forms.borrow().get(&token).is_some_and(|open| open.form.receipt.get()); if !receipt { c.forms.borrow_mut().remove(&token); c.controls.remove(token); } } }));
+        self.bind_form_control(
+            token,
+            &form,
+            Rc::new({
+                let scope = key.scope.clone();
+                let buffer = form.buffer.clone();
+                move || {
+                    ControlInput::Action(ActionIntent::AgentInput {
+                        scope: scope.clone(),
+                        id: id.clone(),
+                        text: Some(common::buffer_text(&buffer)),
+                        submit: true,
+                    })
+                }
+            }),
+        );
         self.forms.borrow_mut().insert(
             token,
             OpenForm {
                 form,
                 scope: key.scope,
                 target,
+                submitted: None,
             },
         );
     }
@@ -1584,7 +1959,24 @@ impl Controller {
                     if let Some(c) = weak.upgrade() {
                         c.save_draft(&scope, &target, &text);
                         c.forms.borrow_mut().remove(&token);
+                        c.controls.remove(token);
                     }
+                }
+            }),
+        );
+        self.bind_form_control(
+            token,
+            &form,
+            Rc::new({
+                let scope = scope.clone();
+                let id = question.id.clone();
+                let buffer = form.buffer.clone();
+                move || {
+                    ControlInput::Action(ActionIntent::Answer {
+                        scope: scope.clone(),
+                        question_id: id.clone(),
+                        body: common::buffer_text(&buffer),
+                    })
                 }
             }),
         );
@@ -1634,92 +2026,276 @@ impl Controller {
                 form,
                 scope,
                 target,
+                submitted: None,
             },
         );
     }
-    fn command(&self, text: &str, recipient: &str) -> bool {
-        let Some((name, rest)) = policy::slash_command(text) else {
-            return false;
-        };
-        let Some(command) = policy::command_policy(name) else {
-            self.result.set_label(&format!(
-                "No command /{name}. Use /help, or start with a space to send this as text."
+    fn receipts(&self) {
+        let dialog = gtk::Dialog::builder()
+            .transient_for(self.shell.window())
+            .modal(true)
+            .title("Message receipts")
+            .default_width(600)
+            .default_height(420)
+            .build();
+        let body = common::column();
+        body.append(&common::text("These are this client's submitted messages. A pending receipt stays read-only; closing it does not cancel the host operation."));
+        for (&id, open) in self
+            .forms
+            .borrow()
+            .iter()
+            .filter(|(_, open)| open.form.receipt.get())
+        {
+            let Some(ActionIntent::SendMessage {
+                scope,
+                to,
+                message_id,
+                body: submitted,
+            }) = &open.submitted
+            else {
+                continue;
+            };
+            body.append(&common::heading(&format!(
+                "{} · to {to}",
+                scope.workspace_id
+            )));
+            body.append(&common::text(&format!(
+                "Message {message_id}\n\n{submitted}"
+            )));
+            let status = common::text("");
+            open.form
+                .error
+                .bind_property("label", &status, "label")
+                .sync_create()
+                .build();
+            body.append(&status);
+            let controls = gtk::Box::new(gtk::Orientation::Horizontal, 8);
+            let show = gtk::Button::with_label("Show read-only receipt");
+            show.connect_clicked({
+                let weak = self.weak.clone();
+                move |_| {
+                    if let Some(c) = weak.upgrade() {
+                        let receipt = c.forms.borrow().get(&id).map(|open| open.form.clone());
+                        if let Some(receipt) = receipt {
+                            receipt.dialog.present();
+                        }
+                    }
+                }
+            });
+            controls.append(&show);
+            let copy = gtk::Button::with_label("Copy submitted text");
+            copy.connect_clicked({
+                let submitted = submitted.clone();
+                move |button| button.clipboard().set_text(&submitted)
+            });
+            controls.append(&copy);
+            let restore = gtk::Button::with_label("Restore for explicit editing");
+            restore.set_sensitive(!open.form.pending.get());
+            restore.connect_clicked({
+                let weak = self.weak.clone();
+                move |_| {
+                    if let Some(c) = weak.upgrade() {
+                        c.restore_receipt(id);
+                    }
+                }
+            });
+            controls.append(&restore);
+            body.append(&controls);
+        }
+        if !self
+            .forms
+            .borrow()
+            .values()
+            .any(|open| open.form.receipt.get())
+        {
+            body.append(&common::text(
+                "No submitted receipts retained by this client.",
             ));
-            return true;
+        }
+        dialog.content_area().append(&common::scroll(&body));
+        dialog.add_button("Close", gtk::ResponseType::Cancel);
+        dialog.connect_response(|dialog, _| dialog.close());
+        dialogs::escape(&dialog);
+        dialog.present();
+        self.auxiliary.borrow_mut().push(dialog);
+    }
+    fn restore_receipt(&self, id: u64) {
+        let captured = self
+            .forms
+            .borrow()
+            .get(&id)
+            .map(|open| (open.form.clone(), open.submitted.clone()));
+        let Some((
+            form,
+            Some(ActionIntent::SendMessage {
+                scope: original,
+                to,
+                message_id,
+                ..
+            }),
+        )) = captured
+        else {
+            return;
         };
-        if command.args.is_empty() && !rest.is_empty() {
-            self.result
-                .set_label(&format!("/{} takes no argument.", command.name));
-            return true;
+        if form.pending.get() {
+            self.result.set_label("The original message is still pending. No second submission is allowed from this receipt.");
+            return;
         }
         let Some(scope) = self.scope.borrow().clone() else {
-            return true;
+            self.result.set_label(
+                "Select and verify the original workspace before restoring this message.",
+            );
+            return;
         };
-        let id = if !rest.is_empty() {
-            Some(rest.to_string())
+        if scope.endpoint_id != original.endpoint_id || scope.workspace_id != original.workspace_id
+        {
+            self.result.set_label(
+                "Select the original endpoint and workspace before restoring this message.",
+            );
+            return;
+        }
+        let intent = ActionIntent::SendMessage {
+            scope,
+            to,
+            message_id,
+            body: common::buffer_text(&form.buffer),
+        };
+        self.query(
+            ViewQuery::Availability {
+                intent: Box::new(intent.clone()),
+            },
+            QueryTarget::RestoreReceipt {
+                form: id,
+                intent: Box::new(intent),
+            },
+        );
+    }
+    fn command_agent(&self, rest: &str, recipient: &str) -> Option<String> {
+        if !rest.is_empty() {
+            Some(rest.to_owned())
         } else if recipient != "*" && !recipient.is_empty() {
-            Some(recipient.into())
+            Some(recipient.to_owned())
         } else {
             self.selected.borrow()[self.shell.destination().index()]
                 .as_ref()
-                .and_then(|k| {
-                    if let Entity::Agent(id) = &k.entity {
-                        Some(id.clone())
-                    } else {
-                        None
-                    }
+                .and_then(|key| match &key.entity {
+                    Entity::Agent(id) => Some(id.clone()),
+                    _ => None,
                 })
+        }
+    }
+    fn composer_input(
+        &self,
+        scope: &ClientScope,
+        text: &str,
+        recipient: &str,
+        message_id: &str,
+    ) -> ControlInput {
+        let Some((name, rest)) = policy::slash_command(text) else {
+            return ControlInput::Action(ActionIntent::SendMessage {
+                scope: scope.clone(),
+                to: recipient.into(),
+                body: text.into(),
+                message_id: message_id.into(),
+            });
         };
-        match command.name {
-            "stop" => self.plan(ActionIntent::StopTeam { scope }, None, None),
-            "resume" => self.plan(
-                ActionIntent::ResumeLimited {
-                    scope,
-                    restart: false,
-                },
-                None,
-                None,
-            ),
-            "answer" => self.question(0),
-            "tasks" => self.shell.navigate(Destination::Tasks),
-            "logs" => self.shell.navigate(Destination::Events),
-            "usage" => self.shell.navigate(Destination::Usage),
-            "graph" => self.shell.navigate(Destination::Team),
-            "help" => {
-                let _ =
-                    gtk::prelude::WidgetExt::activate_action(self.shell.window(), "win.help", None);
-            }
-            "exit" => self.shell.window().close(),
-            "model" => {
-                if let Some(id) = id {
-                    self.model_read(EntityKey {
-                        scope,
-                        entity: Entity::Agent(id),
-                    });
-                } else {
-                    self.result.set_label("Name an agent for /model.");
-                }
-            }
+        let Some(command) = policy::command_policy(name) else {
+            return ControlInput::Invalid(format!(
+                "No command /{name}. Use /help, or start with a space to send this as text."
+            ));
+        };
+        if command.args.is_empty() && !rest.is_empty() {
+            return ControlInput::Invalid(format!("/{} takes no argument.", command.name));
+        }
+        let action = match command.name {
+            "stop" => ActionIntent::StopTeam {
+                scope: scope.clone(),
+            },
+            "resume" => ActionIntent::ResumeLimited {
+                scope: scope.clone(),
+                restart: false,
+            },
             "kill" | "restart" | "restart-fresh" | "pause" | "unpause" | "compact" => {
-                if let Some(id) = id {
-                    let action = match command.name {
-                        "kill" => AgentAction::Kill,
-                        "restart" => AgentAction::Restart,
-                        "restart-fresh" => AgentAction::RestartFresh,
-                        "pause" => AgentAction::Pause,
-                        "unpause" => AgentAction::Resume,
-                        _ => AgentAction::Compact,
-                    };
-                    self.plan(ActionIntent::Agent { scope, id, action }, None, None);
-                } else {
-                    self.result
-                        .set_label(&format!("Name an agent for /{}.", command.name));
+                let Some(id) = self.command_agent(rest, recipient) else {
+                    return ControlInput::Invalid(format!("Name an agent for /{}.", command.name));
+                };
+                let action = match command.name {
+                    "kill" => AgentAction::Kill,
+                    "restart" => AgentAction::Restart,
+                    "restart-fresh" => AgentAction::RestartFresh,
+                    "pause" => AgentAction::Pause,
+                    "unpause" => AgentAction::Resume,
+                    _ => AgentAction::Compact,
+                };
+                ActionIntent::Agent {
+                    scope: scope.clone(),
+                    id,
+                    action,
                 }
             }
-            _ => self.result.set_label(&format!(
-                "/{}: use native keyboard navigation and text selection.",
-                command.name
-            )),
+            "model" => {
+                if self.command_agent(rest, recipient).is_none() {
+                    return ControlInput::Invalid("Name an agent for /model.".into());
+                }
+                ActionIntent::Read {
+                    scope: scope.clone(),
+                    resource: ResourceRequest {
+                        key: ResourceKey {
+                            entity: EntityKey {
+                                scope: scope.clone(),
+                                entity: Entity::Workspace,
+                            },
+                            kind: ResourceKind::Models,
+                            options: ReadOptions::Default,
+                        },
+                    },
+                }
+            }
+            _ => return ControlInput::Local,
+        };
+        ControlInput::Action(action)
+    }
+    fn command(&self, text: &str, recipient: &str, captured_scope: &ClientScope) -> bool {
+        let Some((name, rest)) = policy::slash_command(text) else {
+            return false;
+        };
+        if self.scope.borrow().as_ref() != Some(captured_scope) {
+            self.result
+                .set_label("This command belongs to a workspace that is no longer selected.");
+            return true;
+        }
+        match self.composer_input(captured_scope, text, recipient, "") {
+            ControlInput::Invalid(reason) => self.result.set_label(&reason),
+            ControlInput::Action(intent) => {
+                if policy::command_policy(name).is_some_and(|command| command.name == "model") {
+                    if let Some(id) = self.command_agent(rest, recipient) {
+                        self.model_read(EntityKey {
+                            scope: captured_scope.clone(),
+                            entity: Entity::Agent(id),
+                        });
+                    }
+                } else {
+                    self.plan(intent, None, None);
+                }
+            }
+            ControlInput::Local => match policy::command_policy(name).map(|command| command.name) {
+                Some("answer") => self.question(0),
+                Some("tasks") => self.shell.navigate(Destination::Tasks),
+                Some("logs") => self.shell.navigate(Destination::Events),
+                Some("usage") => self.shell.navigate(Destination::Usage),
+                Some("graph") => self.shell.navigate(Destination::Team),
+                Some("help") => {
+                    let _ = gtk::prelude::WidgetExt::activate_action(
+                        self.shell.window(),
+                        "win.help",
+                        None,
+                    );
+                }
+                Some("exit") => self.shell.window().close(),
+                _ => self.result.set_label(
+                    "Use native keyboard navigation and text selection for this local command.",
+                ),
+            },
         }
         true
     }
@@ -1937,23 +2513,6 @@ impl Controller {
         dialogs::escape(&dialog);
         dialog.present();
         self.auxiliary.borrow_mut().push(dialog);
-    }
-}
-
-fn action_scope(intent: &ActionIntent) -> &ClientScope {
-    match intent {
-        ActionIntent::SendMessage { scope, .. }
-        | ActionIntent::Answer { scope, .. }
-        | ActionIntent::Agent { scope, .. }
-        | ActionIntent::SetModel { scope, .. }
-        | ActionIntent::AgentInput { scope, .. }
-        | ActionIntent::ResumeLimited { scope, .. }
-        | ActionIntent::StopTeam { scope }
-        | ActionIntent::Read { scope, .. }
-        | ActionIntent::Attach { scope, .. }
-        | ActionIntent::AttachInput { scope, .. }
-        | ActionIntent::AttachResize { scope, .. }
-        | ActionIntent::Detach { scope, .. } => scope,
     }
 }
 
