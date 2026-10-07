@@ -7,6 +7,11 @@
 //! agent's program. Any failure in a crew stage exits with
 //! [`EXIT_SETUP_FAILED`] before the program runs; nothing falls back to
 //! running unsandboxed.
+//!
+//! Every stage needs Linux (bubblewrap, Landlock, seccomp). On another
+//! system the [`probe`] refuses, so `workspace.sandbox.mode: required`
+//! refuses to start and `off` runs agents unsandboxed; the stages there
+//! report that they cannot run.
 
 pub mod landlock;
 pub mod pin;
@@ -14,10 +19,28 @@ pub mod probe;
 pub mod profile;
 pub mod run;
 pub mod scan;
+#[cfg(target_os = "linux")]
 pub mod seccomp;
 pub mod shim;
 pub mod spec;
 pub mod validate;
+
+/// The terminal-injection filter is a seccomp program: Linux only.
+#[cfg(not(target_os = "linux"))]
+pub mod seccomp {
+    pub fn install() -> std::io::Result<()> {
+        Err(super::needs_linux())
+    }
+}
+
+/// What a sandbox stage reports on a system that is not Linux.
+#[cfg(not(target_os = "linux"))]
+pub(crate) fn needs_linux() -> std::io::Error {
+    std::io::Error::new(
+        std::io::ErrorKind::Unsupported,
+        "agent sandboxes need Linux (bubblewrap, Landlock, seccomp)",
+    )
+}
 
 /// Exit status of the crew sandbox stages when the sandbox could not be set
 /// up. The requested program never ran.

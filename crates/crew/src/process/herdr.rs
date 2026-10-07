@@ -581,12 +581,11 @@ fn process_runs(pid: u32, program: &Path) -> bool {
         return false;
     };
     let same = |p: &Path| p.canonicalize().is_ok_and(|p| p == want);
-    if same(&PathBuf::from(format!("/proc/{pid}/exe"))) {
+    if crate::os::process_exe(pid).is_some_and(|exe| same(&exe)) {
         return true;
     }
-    std::fs::read(format!("/proc/{pid}/cmdline")).is_ok_and(|raw| {
-        raw.split(|b| *b == 0)
-            .filter(|a| !a.is_empty())
+    crate::os::process_args(pid).is_some_and(|args| {
+        args.iter()
             .any(|a| same(Path::new(&*String::from_utf8_lossy(a))))
     })
 }

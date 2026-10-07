@@ -809,29 +809,12 @@ const MAX_TOKEN_FILE: u64 = 64 * 1024;
 /// the contents.
 fn read_token_file(path: &Path) -> Result<Secret> {
     use std::io::Read;
-    use std::os::fd::FromRawFd;
-    let c_path = std::ffi::CString::new(std::os::unix::ffi::OsStrExt::as_bytes(path.as_os_str()))
-        .map_err(|_| anyhow!("the path contains a NUL byte"))?;
-    // SAFETY: open_how is plain integers; all-zero is its default.
-    let mut how: libc::open_how = unsafe { std::mem::zeroed() };
-    how.flags = (libc::O_RDONLY | libc::O_NONBLOCK | libc::O_NOCTTY | libc::O_CLOEXEC) as u64;
-    how.resolve = libc::RESOLVE_NO_SYMLINKS | libc::RESOLVE_NO_MAGICLINKS;
-    // SAFETY: `c_path` and `how` are valid for the call; the result is checked.
-    let fd = unsafe {
-        libc::syscall(
-            libc::SYS_openat2,
-            libc::AT_FDCWD,
-            c_path.as_ptr(),
-            &how as *const libc::open_how,
-            std::mem::size_of::<libc::open_how>(),
-        )
+    let flags = libc::O_RDONLY | libc::O_NONBLOCK | libc::O_NOCTTY | libc::O_CLOEXEC;
+    let fd = match crate::os::open_no_symlinks(libc::AT_FDCWD, path, flags, 0, false) {
+        Ok(fd) => fd,
+        Err(e) => bail!("{}: {e} (no link may be followed)", path.display()),
     };
-    if fd < 0 {
-        let e = std::io::Error::last_os_error();
-        bail!("{}: {e} (no link may be followed)", path.display());
-    }
-    // SAFETY: openat2 returned a new descriptor that nothing else owns.
-    let file = unsafe { std::fs::File::from_raw_fd(fd as i32) };
+    let file = std::fs::File::from(fd);
     let meta = file.metadata()?;
     if !meta.is_file() {
         bail!("{} is not a regular file", path.display());

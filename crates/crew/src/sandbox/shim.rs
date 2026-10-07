@@ -71,6 +71,7 @@ fn thread_count() -> io::Result<usize> {
     Ok(std::fs::read_dir("/proc/self/task")?.count())
 }
 
+#[cfg(target_os = "linux")]
 fn close_inherited_descriptors() -> io::Result<()> {
     // SAFETY: closes descriptors 3 and up; nothing in this process holds one
     // it still needs (Rust's stdio is 0-2).
@@ -81,6 +82,17 @@ fn close_inherited_descriptors() -> io::Result<()> {
     Ok(())
 }
 
+#[cfg(not(target_os = "linux"))]
+fn close_inherited_descriptors() -> io::Result<()> {
+    Err(super::needs_linux())
+}
+
+#[cfg(not(target_os = "linux"))]
+fn set_no_new_privs() -> io::Result<()> {
+    Err(super::needs_linux())
+}
+
+#[cfg(target_os = "linux")]
 fn set_no_new_privs() -> io::Result<()> {
     // SAFETY: plain prctl with constant arguments.
     let rc = unsafe { libc::prctl(libc::PR_SET_NO_NEW_PRIVS, 1, 0, 0, 0) };

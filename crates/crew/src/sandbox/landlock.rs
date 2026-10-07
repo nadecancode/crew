@@ -2,9 +2,12 @@
 //! but not the structures, so the few that are needed are declared here
 //! (from `include/uapi/linux/landlock.h`).
 
+#[cfg(target_os = "linux")]
 use std::ffi::CString;
 use std::io;
+#[cfg(target_os = "linux")]
 use std::os::fd::{AsRawFd, FromRawFd, OwnedFd};
+#[cfg(target_os = "linux")]
 use std::os::unix::ffi::OsStrExt;
 use std::path::Path;
 
@@ -26,9 +29,12 @@ pub const ACCESS_FS_RESOLVE_UNIX: u64 = 1 << 16;
 /// reachable. So below ABI 9 nothing is sandboxed (design-b3 decision 10).
 pub const MIN_ABI: u32 = 9;
 
+#[cfg(target_os = "linux")]
 const CREATE_RULESET_VERSION: u32 = 1 << 0;
+#[cfg(target_os = "linux")]
 const RULE_PATH_BENEATH: libc::c_int = 1;
 
+#[cfg(target_os = "linux")]
 #[repr(C)]
 struct RulesetAttr {
     handled_access_fs: u64,
@@ -36,6 +42,7 @@ struct RulesetAttr {
     scoped: u64,
 }
 
+#[cfg(target_os = "linux")]
 #[repr(C, packed)]
 struct PathBeneathAttr {
     allowed_access: u64,
@@ -44,6 +51,7 @@ struct PathBeneathAttr {
 
 /// The Landlock ABI the running kernel offers. An error means Landlock is
 /// unavailable (not built in, or not in the `lsm=` list).
+#[cfg(target_os = "linux")]
 pub fn abi() -> io::Result<u32> {
     // SAFETY: with a null attribute and the VERSION flag the kernel only
     // returns the ABI number; no memory is read or written.
@@ -76,6 +84,7 @@ pub fn abi() -> io::Result<u32> {
 ///
 /// Refuses (and changes nothing) when the kernel's ABI is below `min_abi`.
 /// Returns the ABI that was used. `no_new_privs` must already be set.
+#[cfg(target_os = "linux")]
 pub fn restrict_self(min_abi: u32, unix_dirs: &[&Path]) -> Result<u32, String> {
     let abi = abi().map_err(|e| format!("Landlock is not available: {e}"))?;
     if abi < min_abi.max(MIN_ABI) {
@@ -122,7 +131,19 @@ with landlock in the lsm= list)",
     Ok(abi)
 }
 
+/// Landlock is Linux's.
+#[cfg(not(target_os = "linux"))]
+pub fn abi() -> io::Result<u32> {
+    Err(super::needs_linux())
+}
+
+#[cfg(not(target_os = "linux"))]
+pub fn restrict_self(_min_abi: u32, _unix_dirs: &[&Path]) -> Result<u32, String> {
+    Err(format!("Landlock is not available: {}", super::needs_linux()))
+}
+
 /// Allow `access` beneath `dir` (`what`, for the error).
+#[cfg(target_os = "linux")]
 fn allow_beneath(ruleset: &OwnedFd, dir: &Path, access: u64, what: &str) -> Result<(), String> {
     let c_dir = CString::new(dir.as_os_str().as_bytes())
         .map_err(|_| format!("{} contains a NUL byte", dir.display()))?;
@@ -166,7 +187,7 @@ fn allow_beneath(ruleset: &OwnedFd, dir: &Path, access: u64, what: &str) -> Resu
     Ok(())
 }
 
-#[cfg(test)]
+#[cfg(all(test, target_os = "linux"))]
 mod tests {
     use super::*;
     use crate::sandbox::test_support::{host_has, in_child};

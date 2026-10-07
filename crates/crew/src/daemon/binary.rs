@@ -432,24 +432,52 @@ fn copy(source: &mut File, dir: &Path, name: &str) -> io::Result<Made> {
 fn runnable(dir: &Path) -> Result<(), String> {
     let c_dir = CString::new(dir.as_os_str().as_bytes())
         .map_err(|_| format!("{} contains a NUL byte", dir.display()))?;
-    // SAFETY: statvfs is plain integers; all-zero is a valid value.
-    let mut st: libc::statvfs = unsafe { std::mem::zeroed() };
-    // SAFETY: `c_dir` is a valid C string and `st` a valid out-pointer.
-    if unsafe { libc::statvfs(c_dir.as_ptr(), &mut st) } != 0 {
-        return Err(format!("{}: {}", dir.display(), io::Error::last_os_error()));
-    }
-    match refusal(st.f_flag) {
+    let flags = mount_flags(&c_dir).map_err(|e| format!("{}: {e}", dir.display()))?;
+    match refusal(flags) {
         Some(why) => Err(format!("{} {why}", dir.display())),
         None => Ok(()),
     }
 }
 
-/// Why a file system mounted with `flags` (statvfs's) cannot hold a copy
-/// that runs.
-fn refusal(flags: libc::c_ulong) -> Option<&'static str> {
-    if flags & libc::ST_RDONLY != 0 {
+/// How the file system holding `dir` is mounted: statvfs's flags on Linux.
+#[cfg(target_os = "linux")]
+fn mount_flags(dir: &CString) -> io::Result<u64> {
+    // SAFETY: statvfs is plain integers; all-zero is a valid value.
+    let mut st: libc::statvfs = unsafe { std::mem::zeroed() };
+    // SAFETY: `dir` is a valid C string and `st` a valid out-pointer.
+    if unsafe { libc::statvfs(dir.as_ptr(), &mut st) } != 0 {
+        return Err(io::Error::last_os_error());
+    }
+    Ok(st.f_flag)
+}
+
+/// statvfs has no noexec flag on macOS; statfs has.
+#[cfg(not(target_os = "linux"))]
+fn mount_flags(dir: &CString) -> io::Result<u64> {
+    // SAFETY: statfs is plain data; all-zero is a valid value.
+    let mut st: libc::statfs = unsafe { std::mem::zeroed() };
+    // SAFETY: `dir` is a valid C string and `st` a valid out-pointer.
+    if unsafe { libc::statfs(dir.as_ptr(), &mut st) } != 0 {
+        return Err(io::Error::last_os_error());
+    }
+    Ok(u64::from(st.f_flags))
+}
+
+#[cfg(target_os = "linux")]
+const READ_ONLY: u64 = libc::ST_RDONLY;
+#[cfg(target_os = "linux")]
+const NOEXEC: u64 = libc::ST_NOEXEC;
+#[cfg(not(target_os = "linux"))]
+const READ_ONLY: u64 = libc::MNT_RDONLY as u64;
+#[cfg(not(target_os = "linux"))]
+const NOEXEC: u64 = libc::MNT_NOEXEC as u64;
+
+/// Why a file system mounted with `flags` (`mount_flags`) cannot hold a
+/// copy that runs.
+fn refusal(flags: u64) -> Option<&'static str> {
+    if flags & READ_ONLY != 0 {
         Some("is on a read-only file system")
-    } else if flags & libc::ST_NOEXEC != 0 {
+    } else if flags & NOEXEC != 0 {
         Some("is on a file system mounted noexec")
     } else {
         None
@@ -833,14 +861,8 @@ mod tests {
     #[test]
     fn read_only_and_noexec_file_systems_are_refused() {
         assert_eq!(refusal(0), None);
-        assert_eq!(
-            refusal(libc::ST_NOEXEC | libc::ST_NOSUID),
-            Some("is on a file system mounted noexec")
-        );
-        assert_eq!(
-            refusal(libc::ST_RDONLY | libc::ST_NOEXEC),
-            Some("is on a read-only file system")
-        );
+        assert_eq!(refusal(NOEXEC), Some("is on a file system mounted noexec"));
+        assert_eq!(refusal(READ_ONLY | NOEXEC), Some("is on a read-only file system"));
         let temp = tempfile::tempdir().unwrap();
         assert_eq!(runnable(temp.path()), Ok(()));
     }

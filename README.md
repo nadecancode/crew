@@ -75,6 +75,34 @@ cargo install --locked --path crates/crew        # installs `crew`
 ./scripts/build-env cargo install --locked --path crates/crew     # or: just install
 ```
 
+### macOS
+
+crew builds for macOS 11 or newer (Apple silicon and Intel) the same way. On a Mac the C compiler comes with the Xcode command line tools
+(`xcode-select --install`), and Rust with [rustup](https://rustup.rs):
+
+```sh
+cargo install --locked --path crates/crew
+```
+
+What differs from Linux:
+
+- **No agent sandbox.** Sandboxes need Linux (bubblewrap, Landlock, seccomp),
+  so `workspace.sandbox.mode: required` refuses to start and the default,
+  `off`, runs agents unsandboxed, as on a Linux host without them.
+- **Paths are opened the macOS way.** Where Linux uses `openat2` to refuse a
+  symlink anywhere in a path, macOS uses `O_NOFOLLOW_ANY`; process
+  identities come from `proc_pidinfo` and `kern.bootsessionuuid` instead of
+  `/proc`.
+- **The binary pin** (agents run the crew binary their daemon runs) copies
+  the file the daemon was started from, read as it starts. Linux reads the
+  running file itself, so on macOS a rebuild in that first moment is the gap.
+- Sockets and runtime files are in `/tmp/crew-<uid>` (macOS has no
+  `XDG_RUNTIME_DIR`). The web dashboard works in Chrome and Firefox; Safari
+  cannot resolve its `*.localhost` address.
+
+The macOS build is type-checked on Linux (`aarch64-apple-darwin`); its first
+runs are on a Mac.
+
 Working on crew itself? `just link` symlinks `~/.local/bin/crew` to this
 checkout's release build instead, so `just build` is all it takes to update
 the command.

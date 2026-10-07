@@ -63,6 +63,12 @@ kernel.apparmor_restrict_unprivileged_userns=0 or an AppArmor profile for bwrap)
 /// one real run of `crew --version` through bubblewrap (with a
 /// descriptor bind, user and PID namespaces) and the shim.
 pub fn probe(crew_bin: &Path, path: Option<&OsString>) -> Result<Available, Unavailable> {
+    if cfg!(not(target_os = "linux")) {
+        return Err(unavailable(
+            "agent sandboxes need Linux (bubblewrap, Landlock, seccomp)",
+            "set `workspace.sandbox.mode: off` to run agents unsandboxed on this system",
+        ));
+    }
     let landlock_abi = check_landlock(landlock::abi())?;
     let bwrap = path
         .and_then(|p| {

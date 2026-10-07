@@ -862,7 +862,7 @@ fn open_state_root(state_dir: &Path) -> Result<OwnedFd> {
     use std::os::unix::fs::OpenOptionsExt;
     let dir = std::fs::OpenOptions::new()
         .read(true)
-        .custom_flags(libc::O_PATH | libc::O_DIRECTORY | libc::O_NOFOLLOW)
+        .custom_flags(crate::os::PATH_ONLY | libc::O_DIRECTORY | libc::O_NOFOLLOW)
         .open(state_dir)
         .with_context(|| format!("opening {}", state_dir.display()))?;
     Ok(dir.into())

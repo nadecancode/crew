@@ -44,7 +44,7 @@ pub fn run_foreground(workspace: &Path) -> Result<()> {
         crew_bin: std::env::current_exe().context("locating the crew binary")?,
         // Agents get a copy of this very binary, whatever becomes of the
         // file it was started from (daemon::binary).
-        pin: Some("/proc/self/exe".into()),
+        pin: crate::os::running_binary(),
     };
     let runtime = tokio::runtime::Builder::new_multi_thread()
         .enable_all()

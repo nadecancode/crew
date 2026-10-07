@@ -448,7 +448,14 @@ sandbox of this team is left, delete it",
 /// alive after that with its start time, had it then. So the signal,
 /// through the pidfd, reaches the init or (if it has just ended) no one,
 /// never a later process with its number. Anything uncertain sends
-/// nothing. Whether it was sent.
+/// nothing. Whether it was sent. No sandbox runs off Linux, so there is no
+/// init to signal.
+#[cfg(not(target_os = "linux"))]
+fn signal_init(_init: Proc) -> bool {
+    false
+}
+
+#[cfg(target_os = "linux")]
 fn signal_init(init: Proc) -> bool {
     use std::os::fd::{AsRawFd, FromRawFd, OwnedFd};
     // SAFETY: plain syscall; no memory is passed.

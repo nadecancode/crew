@@ -131,15 +131,31 @@ fn verifier(secret: &str) -> String {
         .collect()
 }
 
+/// Fill `buf` from the kernel's random source: how many bytes, or -1.
+#[cfg(target_os = "linux")]
+fn fill_random(buf: &mut [u8]) -> isize {
+    // SAFETY: the pointer and length name `buf`.
+    unsafe { libc::getrandom(buf.as_mut_ptr().cast(), buf.len(), 0) }
+}
+
+/// `getentropy` (at most 256 bytes a call, all or nothing).
+#[cfg(not(target_os = "linux"))]
+fn fill_random(buf: &mut [u8]) -> isize {
+    let len = buf.len().min(256);
+    // SAFETY: the pointer and length name the start of `buf`.
+    if unsafe { libc::getentropy(buf.as_mut_ptr().cast(), len) } == 0 {
+        len as isize
+    } else {
+        -1
+    }
+}
+
 /// 128 random bits as 32 hex digits.
 fn random_label() -> String {
     let mut bytes = [0u8; 16];
     let mut filled = 0;
     while filled < bytes.len() {
-        // SAFETY: the pointer and length name the unfilled rest of `bytes`.
-        let n = unsafe {
-            libc::getrandom(bytes[filled..].as_mut_ptr().cast(), bytes.len() - filled, 0)
-        };
+        let n = fill_random(&mut bytes[filled..]);
         if n > 0 {
             filled += n as usize;
         } else if io::Error::last_os_error().kind() != io::ErrorKind::Interrupted {

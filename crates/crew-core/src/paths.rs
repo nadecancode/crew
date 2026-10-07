@@ -611,13 +611,41 @@ pub fn read_daemon_info(state_dir: &Path) -> Option<DaemonInfo> {
     serde_json::from_str(&text).ok()
 }
 
-/// The start time (clock ticks after boot, `/proc/<pid>/stat` field 22) of
-/// process `pid`, if it can be read. The command name before it may hold
-/// anything, so the fields are counted from the last `)`.
+/// The start time of process `pid`, if it can be read: a number that is
+/// the same for as long as that process lives and is only compared with one
+/// read on the same machine. On Linux, clock ticks after boot
+/// (`/proc/<pid>/stat` field 22; the command name before it may hold
+/// anything, so the fields are counted from the last `)`).
+#[cfg(target_os = "linux")]
 pub fn process_start(pid: u32) -> Option<u64> {
     stat_start(&fs::read_to_string(format!("/proc/{pid}/stat")).ok()?)
 }
 
+/// On macOS, microseconds since the epoch, from `proc_pidinfo`.
+#[cfg(target_os = "macos")]
+pub fn process_start(pid: u32) -> Option<u64> {
+    // SAFETY: proc_bsdinfo is plain data; all-zero is a valid value.
+    let mut info: libc::proc_bsdinfo = unsafe { std::mem::zeroed() };
+    let size = std::mem::size_of::<libc::proc_bsdinfo>() as libc::c_int;
+    // SAFETY: `info` is writable for `size` bytes.
+    let n = unsafe {
+        libc::proc_pidinfo(
+            pid as libc::c_int,
+            libc::PROC_PIDTBSDINFO,
+            0,
+            (&mut info as *mut libc::proc_bsdinfo).cast(),
+            size,
+        )
+    };
+    (n == size).then(|| info.pbi_start_tvsec * 1_000_000 + info.pbi_start_tvusec)
+}
+
+#[cfg(not(any(target_os = "linux", target_os = "macos")))]
+pub fn process_start(_pid: u32) -> Option<u64> {
+    None
+}
+
+#[cfg_attr(not(target_os = "linux"), allow(dead_code))]
 fn stat_start(stat: &str) -> Option<u64> {
     stat[stat.rfind(')')? + 1..]
         .split_whitespace()
@@ -627,11 +655,39 @@ fn stat_start(stat: &str) -> Option<u64> {
 }
 
 /// This boot's identity, if it can be read.
+#[cfg(target_os = "linux")]
 pub fn boot_id() -> Option<String> {
     fs::read_to_string("/proc/sys/kernel/random/boot_id")
         .ok()
         .map(|b| b.trim().to_string())
         .filter(|b| !b.is_empty())
+}
+
+/// macOS: `kern.bootsessionuuid`, made anew at every boot.
+#[cfg(target_os = "macos")]
+pub fn boot_id() -> Option<String> {
+    let mut buf = [0u8; 64];
+    let mut len = buf.len();
+    // SAFETY: the name is NUL-terminated and `buf` is writable for `len`.
+    let rc = unsafe {
+        libc::sysctlbyname(
+            c"kern.bootsessionuuid".as_ptr(),
+            buf.as_mut_ptr().cast(),
+            &mut len,
+            std::ptr::null_mut(),
+            0,
+        )
+    };
+    if rc != 0 {
+        return None;
+    }
+    let id = std::ffi::CStr::from_bytes_until_nul(&buf[..len.min(buf.len())]).ok()?;
+    Some(id.to_str().ok()?.trim().to_string()).filter(|b| !b.is_empty())
+}
+
+#[cfg(not(any(target_os = "linux", target_os = "macos")))]
+pub fn boot_id() -> Option<String> {
+    None
 }
 
 pub fn pid_alive(pid: u32) -> bool {
@@ -868,9 +924,9 @@ mod tests {
         assert_eq!(stat_start("no command name"), None);
     }
 
-    // /proc-specific: elsewhere neither the start time nor the boot can be
+    // Linux and macOS: elsewhere neither the start time nor the boot can be
     // read, and an entry is judged as before.
-    #[cfg(target_os = "linux")]
+    #[cfg(any(target_os = "linux", target_os = "macos"))]
     #[test]
     fn a_registered_daemon_is_live_only_while_its_own_process_runs() {
         let dir = tempfile::tempdir().unwrap();
@@ -888,6 +944,8 @@ mod tests {
             boot_id,
         };
         let (start, boot) = (process_start(me).unwrap(), boot_id());
+        assert!(boot.is_some(), "this boot has an id");
+        assert_eq!(process_start(me), Some(start), "the same while it runs");
         assert!(is_live(&info(Some(start), boot.clone())));
         // Its pid now names a later process: stale.
         assert!(!is_live(&info(Some(start + 1), boot.clone())));

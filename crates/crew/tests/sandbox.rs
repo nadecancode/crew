@@ -7,6 +7,9 @@
 //! run unsandboxed, must reach the target, so "not reached" inside means
 //! the sandbox stopped it and not that the probe is broken.
 
+// Agent sandboxes are Linux only (bubblewrap, Landlock, seccomp).
+#![cfg(target_os = "linux")]
+
 use std::io::Write;
 use std::os::linux::net::SocketAddrExt;
 use std::os::unix::net::{SocketAddr, UnixListener};

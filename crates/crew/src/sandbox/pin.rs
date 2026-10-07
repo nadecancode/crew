@@ -1,15 +1,13 @@
 //! Pinning: what bubblewrap mounts must be the object that was validated.
 //!
-//! A source is opened `O_PATH` with `openat2(RESOLVE_NO_SYMLINKS)`, so no
-//! component of its (canonical) path may be a symlink at the moment of
-//! opening, and its identity (device, inode, type) is compared with the
+//! A source is opened `O_PATH` without following a symlink
+//! (`crate::os::open_no_symlinks`), so no component of its (canonical) path
+//! may be a symlink at the moment of opening, and its identity (device, inode, type) is compared with the
 //! identity recorded when it was validated. The descriptor, not the path,
 //! is then handed to bubblewrap.
 
-use std::ffi::CString;
 use std::io;
-use std::os::fd::{AsRawFd, FromRawFd, OwnedFd};
-use std::os::unix::ffi::OsStrExt;
+use std::os::fd::{AsRawFd, OwnedFd};
 use std::path::Path;
 
 use serde::{Deserialize, Serialize};
@@ -35,33 +33,13 @@ pub struct Identity {
 /// any component. `inheritable` leaves `O_CLOEXEC` off, for descriptors
 /// handed to bubblewrap.
 pub fn open_path(path: &Path, inheritable: bool) -> io::Result<OwnedFd> {
-    let c_path = CString::new(path.as_os_str().as_bytes())
-        .map_err(|_| io::Error::new(io::ErrorKind::InvalidInput, "path contains a NUL byte"))?;
     // No O_NOFOLLOW: with O_PATH it would open a trailing symlink itself,
-    // where RESOLVE_NO_SYMLINKS alone refuses it with ELOOP.
-    let mut flags = libc::O_PATH;
+    // where refusing symlinks alone refuses it with ELOOP.
+    let mut flags = crate::os::PATH_ONLY;
     if !inheritable {
         flags |= libc::O_CLOEXEC;
     }
-    // SAFETY: open_how is plain integers; all-zero is its default.
-    let mut how: libc::open_how = unsafe { std::mem::zeroed() };
-    how.flags = flags as u64;
-    how.resolve = libc::RESOLVE_NO_SYMLINKS | libc::RESOLVE_NO_MAGICLINKS;
-    // SAFETY: `c_path` and `how` are valid for the call; the result is checked.
-    let fd = unsafe {
-        libc::syscall(
-            libc::SYS_openat2,
-            libc::AT_FDCWD,
-            c_path.as_ptr(),
-            &how as *const libc::open_how,
-            std::mem::size_of::<libc::open_how>(),
-        )
-    };
-    if fd < 0 {
-        return Err(io::Error::last_os_error());
-    }
-    // SAFETY: openat2 returned a new descriptor that nothing else owns.
-    Ok(unsafe { OwnedFd::from_raw_fd(fd as i32) })
+    crate::os::open_no_symlinks(libc::AT_FDCWD, path, flags, 0, false)
 }
 
 /// The identity of an open descriptor. Anything but a directory, regular
@@ -83,8 +61,11 @@ pub fn identity(fd: &OwnedFd) -> io::Result<Identity> {
             ))
         }
     };
+    // A signed number on macOS.
+    #[allow(clippy::unnecessary_cast)]
+    let dev = st.st_dev as u64;
     Ok(Identity {
-        dev: st.st_dev,
+        dev,
         ino: st.st_ino,
         kind,
     })

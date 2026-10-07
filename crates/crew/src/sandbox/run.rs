@@ -39,10 +39,13 @@
 //! "not known gone". No exit status is that proof: it cannot tell the
 //! endings above apart, and it is tied to a pid, not to a launch.
 
-use std::ffi::{CString, OsString};
+#[cfg(target_os = "linux")]
+use std::ffi::CString;
+use std::ffi::OsString;
 use std::io;
-use std::os::fd::{AsRawFd, FromRawFd, OwnedFd};
-use std::os::unix::ffi::OsStrExt;
+#[cfg(target_os = "linux")]
+use std::os::fd::FromRawFd;
+use std::os::fd::{AsRawFd, OwnedFd};
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
@@ -129,6 +132,12 @@ fn fail(error: &str) -> ! {
 /// Die with the process that started this one, as bubblewrap did when it
 /// was that process's child, and become a subreaper so that bubblewrap's
 /// PID 1 comes back here when bubblewrap exits first.
+#[cfg(not(target_os = "linux"))]
+fn tie_to_parent() -> Result<(), String> {
+    Err(super::needs_linux().to_string())
+}
+
+#[cfg(target_os = "linux")]
 fn tie_to_parent() -> Result<(), String> {
     // SAFETY: getppid has no failure modes.
     let parent = unsafe { libc::getppid() };
@@ -175,12 +184,8 @@ fn supervise(mut bwrap: Command, pinned: Vec<OwnedFd>) -> Result<Ended, String> 
     // Hold nothing but stdio while waiting: whatever this process inherited
     // was only marked close-on-exec, and it may wait for a long time.
     // bubblewrap runs now, so a failure must not end in an exit code.
-    // SAFETY: nothing in this process still owns a descriptor from 3 up.
-    if unsafe { libc::syscall(libc::SYS_close_range, 3u32, u32::MAX, 0u32) } != 0 {
-        eprintln!(
-            "crew sandbox-run: closing inherited descriptors: {}",
-            io::Error::last_os_error()
-        );
+    if let Err(e) = close_range(0) {
+        eprintln!("crew sandbox-run: closing inherited descriptors: {e}");
         std::process::abort();
     }
     let mut bwrap_status = None;
@@ -271,29 +276,9 @@ fn prepare_spec(spec: Spec, command: &[OsString]) -> Result<Prepared, String> {
 fn write_marker(path: &Path, line: &str) -> Result<(), String> {
     use std::io::Write;
     let fail = |e: io::Error| format!("writing the done marker {}: {e}", path.display());
-    let c_path = CString::new(path.as_os_str().as_bytes())
-        .map_err(|_| format!("{} contains a NUL byte", path.display()))?;
-    // SAFETY: open_how is plain integers; all-zero is its default.
-    let mut how: libc::open_how = unsafe { std::mem::zeroed() };
-    how.flags = (libc::O_WRONLY | libc::O_CREAT | libc::O_EXCL | libc::O_CLOEXEC) as u64;
-    how.mode = 0o600;
-    how.resolve = libc::RESOLVE_NO_SYMLINKS | libc::RESOLVE_NO_MAGICLINKS;
-    // SAFETY: `c_path` and `how` are valid for the call; the result is checked.
-    let fd = unsafe {
-        libc::syscall(
-            libc::SYS_openat2,
-            libc::AT_FDCWD,
-            c_path.as_ptr(),
-            &how as *const libc::open_how,
-            std::mem::size_of::<libc::open_how>(),
-        )
-    };
-    if fd < 0 {
-        return Err(fail(io::Error::last_os_error()));
-    }
-    // SAFETY: openat2 returned a new descriptor that nothing else owns.
-    let mut file = std::fs::File::from(unsafe { OwnedFd::from_raw_fd(fd as i32) });
-    file.write_all(line.as_bytes()).map_err(fail)
+    let flags = libc::O_WRONLY | libc::O_CREAT | libc::O_EXCL | libc::O_CLOEXEC;
+    let fd = crate::os::open_no_symlinks(libc::AT_FDCWD, path, flags, 0o600, false).map_err(fail)?;
+    std::fs::File::from(fd).write_all(line.as_bytes()).map_err(fail)
 }
 
 /// bubblewrap's arguments. Each bind source is pinned here; the returned
@@ -382,15 +367,33 @@ pub fn bwrap_args(
 /// afterwards (opened without it) reach bubblewrap.
 fn mark_inherited_cloexec() -> io::Result<()> {
     const CLOSE_RANGE_CLOEXEC: u32 = 1 << 2;
-    // SAFETY: only changes descriptor flags.
-    let rc = unsafe { libc::syscall(libc::SYS_close_range, 3u32, u32::MAX, CLOSE_RANGE_CLOEXEC) };
+    close_range(CLOSE_RANGE_CLOEXEC)
+}
+
+/// `close_range` over every descriptor from 3 up, with `flags`.
+#[cfg(target_os = "linux")]
+fn close_range(flags: u32) -> io::Result<()> {
+    // SAFETY: closes, or only changes the flags of, descriptors from 3 up,
+    // which nothing in this process still needs.
+    let rc = unsafe { libc::syscall(libc::SYS_close_range, 3u32, u32::MAX, flags) };
     if rc != 0 {
         return Err(io::Error::last_os_error());
     }
     Ok(())
 }
 
+#[cfg(not(target_os = "linux"))]
+fn close_range(_flags: u32) -> io::Result<()> {
+    Err(super::needs_linux())
+}
+
+#[cfg(not(target_os = "linux"))]
+fn empty_file() -> io::Result<OwnedFd> {
+    Err(super::needs_linux())
+}
+
 /// An empty, inheritable memory file for `--ro-bind-data`.
+#[cfg(target_os = "linux")]
 fn empty_file() -> io::Result<OwnedFd> {
     let name = CString::new("crew-mask").expect("no NUL");
     // SAFETY: `name` is a valid C string; the result is checked.

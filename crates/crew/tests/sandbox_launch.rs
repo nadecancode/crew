@@ -5,6 +5,9 @@
 //! skipped with a printed reason when it is missing, and fail instead under
 //! `CREW_TEST_SANDBOX=require`.
 
+// Agent sandboxes are Linux only (bubblewrap, Landlock, seccomp).
+#![cfg(target_os = "linux")]
+
 use std::os::unix::fs::OpenOptionsExt;
 use std::os::unix::process::CommandExt;
 use std::process::{Command, Output};

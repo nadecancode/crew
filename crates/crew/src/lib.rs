@@ -25,6 +25,7 @@ pub mod message_bus;
 pub mod models;
 #[cfg(feature = "native-gateway")]
 pub mod native;
+pub mod os;
 pub mod persistence;
 pub mod process;
 pub mod sandbox;

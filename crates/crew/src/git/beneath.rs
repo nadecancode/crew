@@ -5,15 +5,17 @@
 //! checkout, writable by agents; a path walk from the top could be steered
 //! outside by a symlink swapped in for a component. The common git directory
 //! is opened once, by a path none of whose components is a symlink, and
-//! everything below it is opened *relative to that descriptor* with
-//! `RESOLVE_BENEATH | RESOLVE_NO_SYMLINKS | RESOLVE_NO_MAGICLINKS`.
+//! everything below it is opened *relative to that descriptor*, beneath it
+//! and without following a symlink (`crate::os::open_no_symlinks`).
 
 use std::ffi::CString;
 use std::fs::File;
 use std::io::{self, Read};
-use std::os::fd::{AsRawFd, FromRawFd, OwnedFd, RawFd};
+use std::os::fd::{AsFd, AsRawFd, OwnedFd};
 use std::os::unix::ffi::OsStrExt;
 use std::path::Path;
+
+use crate::os::{list_dir, open_no_symlinks, PATH_ONLY};
 
 /// A directory held open by descriptor.
 pub struct Root(OwnedFd);
@@ -21,24 +23,18 @@ pub struct Root(OwnedFd);
 impl Root {
     /// Open `path` as a directory, refusing a symlink in any component.
     pub fn open(path: &Path) -> io::Result<Self> {
-        open_at(
+        open_no_symlinks(
             libc::AT_FDCWD,
             path,
             libc::O_RDONLY | libc::O_DIRECTORY | libc::O_CLOEXEC,
             0,
-            libc::RESOLVE_NO_SYMLINKS | libc::RESOLVE_NO_MAGICLINKS,
+            false,
         )
         .map(Self)
     }
 
     fn at(&self, rel: &str, flags: i32, mode: u32) -> io::Result<OwnedFd> {
-        open_at(
-            self.0.as_raw_fd(),
-            Path::new(rel),
-            flags | libc::O_CLOEXEC,
-            mode,
-            libc::RESOLVE_BENEATH | libc::RESOLVE_NO_SYMLINKS | libc::RESOLVE_NO_MAGICLINKS,
-        )
+        open_no_symlinks(self.0.as_raw_fd(), Path::new(rel), flags | libc::O_CLOEXEC, mode, true)
     }
 
     /// The text of the regular file at `rel` (at most 64 KiB).
@@ -55,7 +51,7 @@ impl Root {
 
     /// Whether `rel` exists (as anything, a symlink counting as absent).
     pub fn exists(&self, rel: &str) -> bool {
-        self.at(rel, libc::O_PATH, 0).is_ok()
+        self.at(rel, PATH_ONLY, 0).is_ok()
     }
 
     /// Create an empty regular file at `rel` unless there is one.
@@ -93,7 +89,7 @@ impl Root {
         } else {
             dir
         };
-        let Ok(fd) = self.at(&dir.to_string_lossy(), libc::O_PATH | libc::O_DIRECTORY, 0) else {
+        let Ok(fd) = self.at(&dir.to_string_lossy(), PATH_ONLY | libc::O_DIRECTORY, 0) else {
             return;
         };
         let Ok(name) = CString::new(name.as_bytes()) else {
@@ -108,39 +104,8 @@ impl Root {
         let Ok(fd) = self.at(rel, libc::O_RDONLY | libc::O_DIRECTORY, 0) else {
             return Vec::new();
         };
-        // The descriptor is the directory; reading it through /proc/self/fd
-        // lists exactly that directory, whatever the path now names.
-        let Ok(entries) = std::fs::read_dir(format!("/proc/self/fd/{}", fd.as_raw_fd())) else {
-            return Vec::new();
-        };
-        entries
-            .flatten()
-            .filter_map(|e| e.file_name().into_string().ok())
-            .collect()
+        // The descriptor is the directory: it lists exactly that directory,
+        // whatever the path now names.
+        list_dir(fd.as_fd()).unwrap_or_default()
     }
-}
-
-fn open_at(dir: RawFd, path: &Path, flags: i32, mode: u32, resolve: u64) -> io::Result<OwnedFd> {
-    let c_path = CString::new(path.as_os_str().as_bytes())
-        .map_err(|_| io::Error::new(io::ErrorKind::InvalidInput, "path contains a NUL byte"))?;
-    // SAFETY: open_how is plain integers; all-zero is its default.
-    let mut how: libc::open_how = unsafe { std::mem::zeroed() };
-    how.flags = flags as u64;
-    how.mode = u64::from(mode);
-    how.resolve = resolve;
-    // SAFETY: `c_path` and `how` are valid for the call; the result is checked.
-    let fd = unsafe {
-        libc::syscall(
-            libc::SYS_openat2,
-            dir,
-            c_path.as_ptr(),
-            &how as *const libc::open_how,
-            std::mem::size_of::<libc::open_how>(),
-        )
-    };
-    if fd < 0 {
-        return Err(io::Error::last_os_error());
-    }
-    // SAFETY: openat2 returned a new descriptor that nothing else owns.
-    Ok(unsafe { OwnedFd::from_raw_fd(fd as i32) })
 }

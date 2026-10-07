@@ -12,7 +12,6 @@
 use std::fs::File;
 #[cfg(test)]
 use std::os::fd::AsFd;
-use std::os::fd::AsRawFd;
 use std::path::{Path, PathBuf};
 
 use chrono::{Local, TimeZone};
@@ -159,14 +158,8 @@ fn session_file_name(session: &str) -> Option<String> {
 /// The names in a directory held open by descriptor (enumerated through
 /// that descriptor, whatever its path now names).
 fn list(dir: &File) -> Vec<String> {
-    std::fs::read_dir(format!("/proc/self/fd/{}", dir.as_raw_fd()))
-        .map(|entries| {
-            entries
-                .flatten()
-                .filter_map(|e| e.file_name().into_string().ok())
-                .collect()
-        })
-        .unwrap_or_default()
+    use std::os::fd::AsFd;
+    crate::os::list_dir(dir.as_fd()).unwrap_or_default()
 }
 
 #[cfg(test)]
