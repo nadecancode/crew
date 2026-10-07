@@ -862,7 +862,10 @@ mod tests {
     fn read_only_and_noexec_file_systems_are_refused() {
         assert_eq!(refusal(0), None);
         assert_eq!(refusal(NOEXEC), Some("is on a file system mounted noexec"));
-        assert_eq!(refusal(READ_ONLY | NOEXEC), Some("is on a read-only file system"));
+        assert_eq!(
+            refusal(READ_ONLY | NOEXEC),
+            Some("is on a read-only file system")
+        );
         let temp = tempfile::tempdir().unwrap();
         assert_eq!(runnable(temp.path()), Ok(()));
     }

@@ -277,8 +277,11 @@ fn write_marker(path: &Path, line: &str) -> Result<(), String> {
     use std::io::Write;
     let fail = |e: io::Error| format!("writing the done marker {}: {e}", path.display());
     let flags = libc::O_WRONLY | libc::O_CREAT | libc::O_EXCL | libc::O_CLOEXEC;
-    let fd = crate::os::open_no_symlinks(libc::AT_FDCWD, path, flags, 0o600, false).map_err(fail)?;
-    std::fs::File::from(fd).write_all(line.as_bytes()).map_err(fail)
+    let fd =
+        crate::os::open_no_symlinks(libc::AT_FDCWD, path, flags, 0o600, false).map_err(fail)?;
+    std::fs::File::from(fd)
+        .write_all(line.as_bytes())
+        .map_err(fail)
 }
 
 /// bubblewrap's arguments. Each bind source is pinned here; the returned

@@ -34,7 +34,13 @@ impl Root {
     }
 
     fn at(&self, rel: &str, flags: i32, mode: u32) -> io::Result<OwnedFd> {
-        open_no_symlinks(self.0.as_raw_fd(), Path::new(rel), flags | libc::O_CLOEXEC, mode, true)
+        open_no_symlinks(
+            self.0.as_raw_fd(),
+            Path::new(rel),
+            flags | libc::O_CLOEXEC,
+            mode,
+            true,
+        )
     }
 
     /// The text of the regular file at `rel` (at most 64 KiB).

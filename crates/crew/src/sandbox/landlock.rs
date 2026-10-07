@@ -139,7 +139,10 @@ pub fn abi() -> io::Result<u32> {
 
 #[cfg(not(target_os = "linux"))]
 pub fn restrict_self(_min_abi: u32, _unix_dirs: &[&Path]) -> Result<u32, String> {
-    Err(format!("Landlock is not available: {}", super::needs_linux()))
+    Err(format!(
+        "Landlock is not available: {}",
+        super::needs_linux()
+    ))
 }
 
 /// Allow `access` beneath `dir` (`what`, for the error).
