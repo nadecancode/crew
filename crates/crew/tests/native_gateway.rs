@@ -134,6 +134,65 @@ mod enabled {
         }
     }
 
+    #[test]
+    fn status_keeps_json_stdout_and_groups_the_fingerprint_like_the_app() {
+        let host = Host::start();
+        let expected = host.control().call("native_status", json!({}));
+        let output = host.session.crew(&["native", "status"]);
+        assert!(output.status.success(), "{}", stderr(&output));
+        assert_eq!(
+            stdout(&output),
+            format!("{}\n", serde_json::to_string_pretty(&expected).unwrap())
+        );
+
+        // Compile the app's actual pure grouping helpers without pulling GTK
+        // or the desktop's higher compiler floor into the default CLI graph.
+        let app_source = include_str!("../../crew-desktop/src/remote/profile.rs");
+        let start = app_source.find("pub fn group_hex(").unwrap();
+        let end = app_source[start..]
+            .find("pub fn valid_device_name(")
+            .unwrap()
+            + start;
+        let grouping = &app_source[start..end];
+        let probe = tempfile::tempdir().unwrap();
+        let source = probe.path().join("groups.rs");
+        let binary = probe.path().join("groups");
+        std::fs::write(
+            &source,
+            format!(
+                "{grouping}\nfn main() {{ print!(\"{{}}\", group_hex(&std::env::args().nth(1).unwrap(), 4)); }}\n"
+            ),
+        )
+        .unwrap();
+        let compiler = std::env::var_os("RUSTC").unwrap_or_else(|| "rustc".into());
+        let mut command = std::process::Command::new(compiler);
+        git_test_support::clear_repository_environment(&mut command);
+        let compiled = command
+            .arg("--edition=2021")
+            .arg(&source)
+            .arg("-o")
+            .arg(&binary)
+            .output()
+            .unwrap();
+        assert!(compiled.status.success(), "{}", stderr(&compiled));
+        let hex = host.profile.tls_leaf_sha256.to_hex();
+        let grouped = std::process::Command::new(binary)
+            .arg(&hex)
+            .output()
+            .unwrap();
+        assert!(grouped.status.success(), "{}", stderr(&grouped));
+        let groups = stdout(&grouped);
+        assert_eq!(groups.split_whitespace().count(), 16);
+        assert!(groups.split_whitespace().all(|group| {
+            group.len() == 4
+                && group
+                    .bytes()
+                    .all(|byte| byte.is_ascii_hexdigit() && !byte.is_ascii_uppercase())
+        }));
+        assert_eq!(groups.split_whitespace().collect::<String>(), hex);
+        assert_eq!(stderr(&output), format!("Fingerprint: {groups}\n"));
+    }
+
     struct Control {
         reader: std::io::BufReader<std::os::unix::net::UnixStream>,
         writer: std::os::unix::net::UnixStream,

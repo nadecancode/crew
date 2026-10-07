@@ -221,6 +221,22 @@ fn run(command: NativeCommand) -> Result<()> {
                 }
             }
             println!("{}", serde_json::to_string_pretty(&result)?);
+            if method == "native_status" {
+                let fingerprint = result
+                    .pointer("/profile/tls_leaf_sha256")
+                    .and_then(serde_json::Value::as_str)
+                    .and_then(|hex| crew_protocol::native::LeafHash::from_hex(hex).ok());
+                if let Some(fingerprint) = fingerprint {
+                    let hex = fingerprint.to_hex();
+                    let groups = hex
+                        .as_bytes()
+                        .chunks(4)
+                        .map(String::from_utf8_lossy)
+                        .collect::<Vec<_>>()
+                        .join(" ");
+                    eprintln!("Fingerprint: {groups}");
+                }
+            }
             Ok(())
         }
     }
