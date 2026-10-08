@@ -705,6 +705,43 @@ change identity",
                 self.web_attach(conn, url)?;
                 Ok(json!({ "attached": true }))
             }
+            // P1 defines the wire vocabulary without enabling any backend.
+            Call::FeaturesNegotiate(_)
+            | Call::EpicsList(_)
+            | Call::EpicGet(_)
+            | Call::TasksQuery(_)
+            | Call::TaskGetScoped(_)
+            | Call::EpicCreate(_)
+            | Call::EpicEdit(_)
+            | Call::TaskCreateScoped(_)
+            | Call::TaskRevise(_)
+            | Call::EpicComplete(_)
+            | Call::AsideMembers(_)
+            | Call::AsideList(_)
+            | Call::AsideGet(_)
+            | Call::AsideAsk(_)
+            | Call::AsideCancel(_)
+            | Call::AsideRemove(_)
+            | Call::AsideWatch(_)
+            | Call::AsideUnwatch(_)
+            | Call::DocsIndex(_)
+            | Call::DocsRead(_)
+            | Call::DocsAsset(_)
+            | Call::DocsHistory(_)
+            | Call::DocsDiff(_)
+            | Call::DocsWatch(_)
+            | Call::DocsUnwatch(_)
+            | Call::UsageSummary(_)
+            | Call::UsageSeries(_)
+            | Call::UsageBreakdown(_)
+            | Call::UsageObservations(_)
+            | Call::UsageRuns(_)
+            | Call::UsagePrices(_)
+            | Call::UsageWatch(_)
+            | Call::UsageUnwatch(_) => Err(RpcError::new(
+                crew_core::rpc::features::UNSUPPORTED_FEATURE,
+                "feature backend is not enabled",
+            )),
             Call::WebEvent { kind, count } => {
                 operator_only(&who)?;
                 not_on_the_web(conn, "web_event")?;

@@ -148,11 +148,16 @@ impl Session {
             }
             Err(e) => {
                 // Malformed request: answer with the id if one can be salvaged.
-                let id = serde_json::from_str::<Value>(text)
-                    .ok()
+                let value = serde_json::from_str::<Value>(text).ok();
+                let id = value
+                    .as_ref()
                     .and_then(|v| v.get("id").and_then(Value::as_u64))
                     .unwrap_or(0);
-                ServerFrame::err(id, RpcError::invalid(format!("malformed request: {e}")))
+                let error = value
+                    .as_ref()
+                    .and_then(crew_core::rpc::feature_decode_error)
+                    .unwrap_or_else(|| RpcError::invalid(format!("malformed request: {e}")));
+                ServerFrame::err(id, error)
             }
         };
         if self.conn.tx.send(frame).await.is_err() {

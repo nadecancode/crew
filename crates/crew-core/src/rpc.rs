@@ -10,11 +10,47 @@ use crate::config::{AgentSpec, TaskSpec, TeamConfig};
 use crate::types::{AgentStatus, Artifact, RuntimeKind, WebEventKind};
 
 pub use crew_protocol::rpc::*;
+pub use crew_protocol::{asides, docs, epics, features, usage_metrics};
 
 /// Every operation the daemon understands.
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
 #[serde(tag = "method", content = "params", rename_all = "snake_case")]
 pub enum Call {
+    // Feature definitions alone enable nothing. The negotiated backend decides
+    // authorization/readiness; old methods below retain their exact wire shapes.
+    FeaturesNegotiate(features::FeaturesNegotiate),
+    EpicsList(features::RunScope),
+    EpicGet(epics::EpicGet),
+    EpicCreate(epics::EpicCreate),
+    EpicEdit(epics::EpicEdit),
+    TasksQuery(epics::TasksQuery),
+    TaskGetScoped(epics::TaskGetScoped),
+    TaskCreateScoped(TaskCreateScoped),
+    TaskRevise(epics::TaskRevise),
+    EpicComplete(epics::EpicComplete),
+    AsideMembers(asides::AsideList),
+    AsideList(asides::AsideList),
+    AsideGet(asides::AsideGet),
+    AsideAsk(asides::AsideAsk),
+    AsideCancel(asides::AsideCancel),
+    AsideRemove(asides::AsideRemove),
+    AsideWatch(asides::AsideList),
+    AsideUnwatch(features::Unwatch),
+    DocsIndex(features::PageRequest),
+    DocsRead(docs::DocsRead),
+    DocsAsset(docs::DocsAsset),
+    DocsHistory(docs::DocsHistory),
+    DocsDiff(docs::DocsDiff),
+    DocsWatch(docs::DocsWatch),
+    DocsUnwatch(features::Unwatch),
+    UsageSummary(usage_metrics::UsageQuery),
+    UsageSeries(usage_metrics::UsageQuery),
+    UsageBreakdown(usage_metrics::UsageQuery),
+    UsageObservations(usage_metrics::UsageQuery),
+    UsageRuns(features::PageRequest),
+    UsagePrices(usage_metrics::UsagePrices),
+    UsageWatch(usage_metrics::UsageQuery),
+    UsageUnwatch(features::Unwatch),
     #[serde(deserialize_with = "empty_params")]
     Ping,
     Hello(Hello),
@@ -489,6 +525,39 @@ impl Call {
     /// Method name, for logging.
     pub fn method(&self) -> &'static str {
         match self {
+            Call::FeaturesNegotiate(_) => "features_negotiate",
+            Call::EpicsList(_) => "epics_list",
+            Call::EpicGet(_) => "epic_get",
+            Call::EpicCreate(_) => "epic_create",
+            Call::EpicEdit(_) => "epic_edit",
+            Call::TasksQuery(_) => "tasks_query",
+            Call::TaskGetScoped(_) => "task_get_scoped",
+            Call::TaskCreateScoped(_) => "task_create_scoped",
+            Call::TaskRevise(_) => "task_revise",
+            Call::EpicComplete(_) => "epic_complete",
+            Call::AsideMembers(_) => "aside_members",
+            Call::AsideList(_) => "aside_list",
+            Call::AsideGet(_) => "aside_get",
+            Call::AsideAsk(_) => "aside_ask",
+            Call::AsideCancel(_) => "aside_cancel",
+            Call::AsideRemove(_) => "aside_remove",
+            Call::AsideWatch(_) => "aside_watch",
+            Call::AsideUnwatch(_) => "aside_unwatch",
+            Call::DocsIndex(_) => "docs_index",
+            Call::DocsRead(_) => "docs_read",
+            Call::DocsAsset(_) => "docs_asset",
+            Call::DocsHistory(_) => "docs_history",
+            Call::DocsDiff(_) => "docs_diff",
+            Call::DocsWatch(_) => "docs_watch",
+            Call::DocsUnwatch(_) => "docs_unwatch",
+            Call::UsageSummary(_) => "usage_summary",
+            Call::UsageSeries(_) => "usage_series",
+            Call::UsageBreakdown(_) => "usage_breakdown",
+            Call::UsageObservations(_) => "usage_observations",
+            Call::UsageRuns(_) => "usage_runs",
+            Call::UsagePrices(_) => "usage_prices",
+            Call::UsageWatch(_) => "usage_watch",
+            Call::UsageUnwatch(_) => "usage_unwatch",
             Call::Ping => "ping",
             Call::Hello(_) => "hello",
             Call::Snapshot { .. } => "snapshot",
@@ -570,6 +639,55 @@ pub struct Request {
     pub id: u64,
     #[serde(flatten)]
     pub call: Call,
+}
+
+/// Host TaskSpec is deliberately unchanged; scoped intent has its own method.
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
+#[serde(deny_unknown_fields)]
+pub struct TaskCreateScoped {
+    pub workspace_run_id: features::Id,
+    pub spec: Box<TaskSpec>,
+    pub epic: Option<String>,
+}
+
+/// A known feature's malformed payload must not look like an old peer's unknown
+/// method. Text is deliberately omitted from these diagnostics. Call only after
+/// the outer transport frame has passed its byte bound.
+pub fn feature_decode_error(value: &Value) -> Option<RpcError> {
+    let method = value.get("method")?.as_str()?;
+    features::feature_method(method)?;
+    if method == "aside_ask" {
+        let params = value.get("params");
+        let failure = if params
+            .and_then(|p| p.get("question"))
+            .and_then(Value::as_str)
+            .is_some_and(|s| s.len() > asides::MAX_QUESTION_BYTES)
+        {
+            Some(asides::AsideAdmissionFailure::QuestionLimit {
+                max_bytes: asides::MAX_QUESTION_BYTES as u32,
+            })
+        } else if params
+            .and_then(|p| p.get("targets"))
+            .and_then(Value::as_array)
+            .is_some_and(|s| s.len() > asides::MAX_TARGETS)
+        {
+            Some(asides::AsideAdmissionFailure::TargetLimit {
+                max_targets: asides::MAX_TARGETS as u16,
+            })
+        } else {
+            None
+        };
+        if let Some(failure) = failure {
+            return Some(
+                RpcError::too_large("aside admission limit exceeded")
+                    .with_data(serde_json::to_value(failure).expect("finite admission failure")),
+            );
+        }
+    }
+    Some(RpcError::new(
+        features::INVALID_FEATURE_REQUEST,
+        "malformed feature request",
+    ))
 }
 
 /// The answer to [`Call::ToolboxServer`]: one toolbox MCP server, ready to
@@ -871,6 +989,11 @@ mod compatibility_tests {
         // Adding a variant also requires an instance in `pushes` and its kind
         // in the pinned version list below, together with a protocol bump.
         let push_tag = |push: &Push| match push {
+            // Opt-in variants have separate fixtures; legacy v6 stays pinned below.
+            Push::EpicBoardChanged(_) => "epic_board_changed",
+            Push::Aside(_) => "aside",
+            Push::DocsChanged(_) => "docs_changed",
+            Push::UsageChanged(_) => "usage_changed",
             Push::Event(_) => "event",
             Push::Message(_) => "message",
             Push::Agent(_) => "agent",

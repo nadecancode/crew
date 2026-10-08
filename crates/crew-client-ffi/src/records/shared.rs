@@ -376,6 +376,7 @@ pub struct Artifact {
 
 #[uniffi::remote(Record)]
 pub struct Task {
+    pub epic: Option<String>,
     pub id: String,
     pub title: String,
     #[serde(default)]
@@ -420,6 +421,7 @@ pub struct Quota {
 
 #[uniffi::remote(Record)]
 pub struct SessionInfo {
+    pub workspace_run_id: Option<String>,
     #[serde(default)]
     pub project: Option<String>,
     #[serde(default)]

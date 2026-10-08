@@ -1,0 +1,428 @@
+[
+  {
+    "id": 1,
+    "method": "features_negotiate",
+    "params": {
+      "versions": {
+        "epics": 1,
+        "asides": 1,
+        "docs": 1,
+        "usage_metrics": 1
+      }
+    }
+  },
+  {
+    "id": 2,
+    "method": "epics_list",
+    "params": {
+      "workspace_run_id": "run-1"
+    }
+  },
+  {
+    "id": 3,
+    "method": "epic_get",
+    "params": {
+      "workspace_run_id": "run-1",
+      "id": "epic-1"
+    }
+  },
+  {
+    "id": 4,
+    "method": "epic_create",
+    "params": {
+      "workspace_run_id": "run-1",
+      "id": "epic-1",
+      "title": "First epic",
+      "objective": "Synthetic objective",
+      "source_message_id": null
+    }
+  },
+  {
+    "id": 5,
+    "method": "epic_edit",
+    "params": {
+      "workspace_run_id": "run-1",
+      "id": "epic-1",
+      "title": "Revised",
+      "objective": null,
+      "expected_revision": "9007199254740993"
+    }
+  },
+  {
+    "id": 6,
+    "method": "tasks_query",
+    "params": {
+      "workspace_run_id": "run-1",
+      "epic": {
+        "kind": "no_epic"
+      }
+    }
+  },
+  {
+    "id": 7,
+    "method": "task_get_scoped",
+    "params": {
+      "workspace_run_id": "run-1",
+      "id": "task-1"
+    }
+  },
+  {
+    "id": 8,
+    "method": "task_create_scoped",
+    "params": {
+      "workspace_run_id": "run-1",
+      "spec": {
+        "id": "task-1",
+        "title": "Task",
+        "description": "Synthetic task",
+        "agent": null,
+        "depends_on": [],
+        "reviewer": null,
+        "timeout_secs": null
+      },
+      "epic": "epic-1"
+    }
+  },
+  {
+    "id": 9,
+    "method": "task_revise",
+    "params": {
+      "workspace_run_id": "run-1",
+      "id": "task-1",
+      "title": null,
+      "description": null,
+      "epic": {
+        "kind": "clear"
+      },
+      "expected_board_revision": "7"
+    }
+  },
+  {
+    "id": 10,
+    "method": "epic_complete",
+    "params": {
+      "workspace_run_id": "run-1",
+      "id": "epic-1",
+      "summary": "Synthetic report",
+      "decisions": [],
+      "expected_revision": "8"
+    }
+  },
+  {
+    "id": 11,
+    "method": "aside_members",
+    "params": {
+      "workspace_run_id": "run-1",
+      "page": {
+        "cursor": null,
+        "limit": 50
+      }
+    }
+  },
+  {
+    "id": 12,
+    "method": "aside_list",
+    "params": {
+      "workspace_run_id": "run-1",
+      "page": {
+        "cursor": null,
+        "limit": 50
+      }
+    }
+  },
+  {
+    "id": 13,
+    "method": "aside_get",
+    "params": {
+      "workspace_run_id": "run-1",
+      "id": "aside-1",
+      "agent": null
+    }
+  },
+  {
+    "id": 14,
+    "method": "aside_ask",
+    "params": {
+      "workspace_run_id": "run-1",
+      "request_id": "request-1",
+      "question": "Synthetic question λ\n",
+      "targets": [
+        {
+          "agent_id": "worker",
+          "incarnation": "incarnation-1"
+        }
+      ]
+    }
+  },
+  {
+    "id": 15,
+    "method": "aside_cancel",
+    "params": {
+      "workspace_run_id": "run-1",
+      "id": "aside-1",
+      "agent": null
+    }
+  },
+  {
+    "id": 16,
+    "method": "aside_remove",
+    "params": {
+      "workspace_run_id": "run-1",
+      "id": "aside-1"
+    }
+  },
+  {
+    "id": 17,
+    "method": "aside_watch",
+    "params": {
+      "workspace_run_id": "run-1",
+      "page": {
+        "cursor": null,
+        "limit": 50
+      }
+    }
+  },
+  {
+    "id": 18,
+    "method": "aside_unwatch",
+    "params": {
+      "watch_id": "watch-1"
+    }
+  },
+  {
+    "id": 19,
+    "method": "docs_index",
+    "params": {
+      "cursor": null,
+      "limit": 50
+    }
+  },
+  {
+    "id": 20,
+    "method": "docs_read",
+    "params": {
+      "document": {
+        "doc_id": "doc-1",
+        "source_id": "source-1",
+        "source_generation": "1"
+      },
+      "version": {
+        "kind": "current"
+      }
+    }
+  },
+  {
+    "id": 21,
+    "method": "docs_asset",
+    "params": {
+      "snapshot_id": "snapshot-1",
+      "asset_id": "asset-1",
+      "offset": 0,
+      "max_bytes": 196608
+    }
+  },
+  {
+    "id": 22,
+    "method": "docs_history",
+    "params": {
+      "doc_id": "doc-1",
+      "source_ids": [
+        "source-1"
+      ],
+      "page": {
+        "cursor": null,
+        "limit": 50
+      }
+    }
+  },
+  {
+    "id": 23,
+    "method": "docs_diff",
+    "params": {
+      "left": "version-1",
+      "right": "version-2"
+    }
+  },
+  {
+    "id": 24,
+    "method": "docs_watch",
+    "params": {
+      "selected": [
+        {
+          "doc_id": "doc-1",
+          "source_id": "source-1",
+          "source_generation": "1"
+        }
+      ]
+    }
+  },
+  {
+    "id": 25,
+    "method": "docs_unwatch",
+    "params": {
+      "watch_id": "watch-1"
+    }
+  },
+  {
+    "id": 26,
+    "method": "usage_summary",
+    "params": {
+      "scope": {
+        "workspace_run_id": "run-1",
+        "kind": "live",
+        "agent_incarnation": null,
+        "task": {
+          "kind": "all"
+        },
+        "epic": {
+          "kind": "all"
+        },
+        "model": null,
+        "account_id": null
+      },
+      "from_ms": null,
+      "to_ms": null,
+      "group_by": null,
+      "bucket_seconds": null,
+      "price_book_id": null,
+      "page": {
+        "cursor": null,
+        "limit": 50
+      }
+    }
+  },
+  {
+    "id": 27,
+    "method": "usage_series",
+    "params": {
+      "scope": {
+        "workspace_run_id": "run-1",
+        "kind": "live",
+        "agent_incarnation": null,
+        "task": {
+          "kind": "all"
+        },
+        "epic": {
+          "kind": "all"
+        },
+        "model": null,
+        "account_id": null
+      },
+      "from_ms": null,
+      "to_ms": null,
+      "group_by": null,
+      "bucket_seconds": null,
+      "price_book_id": null,
+      "page": {
+        "cursor": null,
+        "limit": 50
+      }
+    }
+  },
+  {
+    "id": 28,
+    "method": "usage_breakdown",
+    "params": {
+      "scope": {
+        "workspace_run_id": "run-1",
+        "kind": "live",
+        "agent_incarnation": null,
+        "task": {
+          "kind": "all"
+        },
+        "epic": {
+          "kind": "all"
+        },
+        "model": null,
+        "account_id": null
+      },
+      "from_ms": null,
+      "to_ms": null,
+      "group_by": null,
+      "bucket_seconds": null,
+      "price_book_id": null,
+      "page": {
+        "cursor": null,
+        "limit": 50
+      }
+    }
+  },
+  {
+    "id": 29,
+    "method": "usage_observations",
+    "params": {
+      "scope": {
+        "workspace_run_id": "run-1",
+        "kind": "live",
+        "agent_incarnation": null,
+        "task": {
+          "kind": "all"
+        },
+        "epic": {
+          "kind": "all"
+        },
+        "model": null,
+        "account_id": null
+      },
+      "from_ms": null,
+      "to_ms": null,
+      "group_by": null,
+      "bucket_seconds": null,
+      "price_book_id": null,
+      "page": {
+        "cursor": null,
+        "limit": 50
+      }
+    }
+  },
+  {
+    "id": 30,
+    "method": "usage_runs",
+    "params": {
+      "cursor": null,
+      "limit": 50
+    }
+  },
+  {
+    "id": 31,
+    "method": "usage_prices",
+    "params": {
+      "price_book_id": null
+    }
+  },
+  {
+    "id": 32,
+    "method": "usage_watch",
+    "params": {
+      "scope": {
+        "workspace_run_id": "run-1",
+        "kind": "live",
+        "agent_incarnation": null,
+        "task": {
+          "kind": "all"
+        },
+        "epic": {
+          "kind": "all"
+        },
+        "model": null,
+        "account_id": null
+      },
+      "from_ms": null,
+      "to_ms": null,
+      "group_by": null,
+      "bucket_seconds": null,
+      "price_book_id": null,
+      "page": {
+        "cursor": null,
+        "limit": 50
+      }
+    }
+  },
+  {
+    "id": 33,
+    "method": "usage_unwatch",
+    "params": {
+      "watch_id": "watch-1"
+    }
+  }
+]
