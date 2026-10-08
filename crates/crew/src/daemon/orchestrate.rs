@@ -602,7 +602,7 @@ until the database takes writes again, tasks wait where they are.",
                     &run,
                     &model.tasks,
                     &after,
-                    &[task.id.clone()],
+                    std::slice::from_ref(&task.id),
                     now_ms(),
                 )?;
                 let task = change

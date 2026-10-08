@@ -22,7 +22,7 @@ use super::Daemon;
 
 mod tasks;
 mod watch;
-pub use tasks::{CommittedTasks, TaskChange, TaskProjection, TaskPublication, TaskView};
+pub use tasks::{CommittedTasks, TaskChange, TaskModel, TaskProjection, TaskPublication, TaskView};
 pub use watch::FeatureWatch;
 pub(crate) use watch::PendingWatch;
 
@@ -46,6 +46,9 @@ pub trait FeatureService: Send + Sync {
     }
     fn connection_closed(&self, _connection: &ConnId) {}
     fn run_archived(&self, _run: &RunCtx) {}
+    /// Cancel and await owned jobs/reaping before daemon teardown. A disconnected
+    /// observer does not use this hook and cannot cancel workspace-owned work.
+    async fn shutdown(&self) {}
 }
 
 #[derive(Default)]
@@ -53,6 +56,8 @@ pub struct FeatureServices {
     services: RwLock<BTreeMap<Feature, Arc<dyn FeatureService>>>,
     connections: Mutex<HashMap<ConnId, ConnCtx>>,
     task_projection: RwLock<Option<Arc<dyn TaskProjection>>>,
+    stopping: AtomicBool,
+    shutdown_complete: tokio::sync::Mutex<bool>,
 }
 
 impl FeatureServices {
@@ -91,8 +96,25 @@ impl FeatureServices {
             .unwrap_or_else(|e| e.into_inner())
             .remove(id)
         {
+            context.connection_closed.cancel();
             context.cancellation.cancel();
         }
+        self.close_connection_resources(id);
+    }
+
+    fn connection_scope_changed(&self, id: &ConnId) {
+        if let Some(context) = self
+            .connections
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .get(id)
+        {
+            context.cancellation.cancel();
+        }
+        self.close_connection_resources(id);
+    }
+
+    fn close_connection_resources(&self, id: &ConnId) {
         let services: Vec<_> = self
             .services
             .read()
@@ -135,6 +157,35 @@ impl FeatureServices {
             .unwrap_or_else(|e| e.into_inner())
             .insert(context.connection_epoch.clone(), context);
     }
+
+    pub(crate) async fn shutdown(&self) {
+        self.stopping.store(true, Ordering::Release);
+        let mut completed = self.shutdown_complete.lock().await;
+        if *completed {
+            return;
+        }
+        let contexts: Vec<_> = self
+            .connections
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .values()
+            .cloned()
+            .collect();
+        for context in contexts {
+            context.cancellation.cancel();
+        }
+        let services: Vec<_> = self
+            .services
+            .read()
+            .unwrap_or_else(|e| e.into_inner())
+            .values()
+            .cloned()
+            .collect();
+        for service in services {
+            service.shutdown().await;
+        }
+        *completed = true;
+    }
 }
 
 #[derive(Clone, Debug)]
@@ -166,6 +217,10 @@ impl Daemon {
             .who
             .as_ref()
             .ok_or_else(|| RpcError::unauthorized("say hello first"))?;
+        if self.feature_services.stopping.load(Ordering::Acquire) {
+            return Err(RpcError::unavailable("feature services are stopping"));
+        }
+        self.check_feature_member(conn)?;
         if let Some(previous) = &conn.negotiated {
             if previous.requested != request.versions {
                 return Err(RpcError::conflict(
@@ -244,6 +299,10 @@ impl Daemon {
             .who
             .as_ref()
             .ok_or_else(|| RpcError::unauthorized("say hello first"))?;
+        if self.feature_services.stopping.load(Ordering::Acquire) {
+            return Err(RpcError::unavailable("feature services are stopping"));
+        }
+        self.check_feature_member(conn)?;
         let allowed = match method.access {
             FeatureAccess::CollaborativeRead => true,
             FeatureAccess::Administration => {
@@ -283,13 +342,18 @@ impl Daemon {
         if context.run != current {
             context.cancellation.cancel();
             self.feature_services
-                .connection_closed(&context.connection_epoch);
-            context = ConnCtx::new(context.connection_epoch, current, context.caller);
+                .connection_scope_changed(&context.connection_epoch);
+            context = context.for_run(current);
             self.feature_services.connection_opened(context.clone());
             conn.feature_context = Some(context.clone());
         }
         if expected_current_run(&call).is_some_and(|run| run != &context.run.workspace_run_id) {
             return Err(RpcError::new("stale_scope", "workspace run changed"));
+        }
+        if let Some(run) = metrics_run(&call) {
+            if !self.feature_db.has_run(run)? {
+                return Err(RpcError::not_found("workspace run unavailable"));
+            }
         }
         let starts_watch = matches!(
             call,
@@ -306,7 +370,10 @@ impl Daemon {
             Feature::UsageMetrics => 4,
             Feature::Epics => 0,
         };
-        if starts_watch && conn.feature_watch_count(feature) >= watch_limit {
+        if starts_watch
+            && feature != Feature::Docs
+            && conn.feature_watch_count(feature) >= watch_limit
+        {
             return Err(RpcError::new("busy", "feature watch limit reached"));
         }
         let result = service.handle(&context, call).await?;
@@ -324,10 +391,18 @@ impl Daemon {
         }
         if starts_watch {
             let pending = PendingWatch::new(feature, &result, context.clone(), service.as_ref())?;
-            if conn.feature_watch_exists(&pending.id) {
+            if conn.feature_watch_exists(&pending.id)
+                && !(feature == Feature::Docs && conn.watch_belongs_to(Feature::Docs, &pending.id))
+            {
                 return Err(RpcError::conflict(
                     "watch id is already registered on this connection",
                 ));
+            }
+            if feature == Feature::Docs {
+                // The domain validates the whole new selection before replacing
+                // it. Failed preparation leaves the existing forwarder alone.
+                // Successful replacement retires it before the new reply barrier.
+                conn.stop_feature_family(Feature::Docs).await;
             }
             conn.feature_after_reply.push(pending);
         }
@@ -336,6 +411,40 @@ impl Daemon {
         }
         Ok(result)
     }
+
+    fn check_feature_member(&self, conn: &Conn) -> Result<(), RpcError> {
+        let context = conn
+            .feature_context
+            .as_ref()
+            .ok_or_else(|| RpcError::unauthorized("say hello first"))?;
+        let model = self.model();
+        self.feature_db
+            .read(|db| check_member_at(db, &model, context))
+    }
+}
+
+pub(crate) fn check_member_at(
+    db: &rusqlite::Connection,
+    model: &super::Model,
+    context: &ConnCtx,
+) -> Result<(), RpcError> {
+    use rusqlite::OptionalExtension;
+    if context.connection_closed.is_cancelled() {
+        return Err(RpcError::unauthorized("connection closed"));
+    }
+    if let Caller::Agent { id } = &context.caller {
+        let current: Option<String> = db.query_row(
+            "SELECT incarnation FROM feature_members WHERE run_id=?1 AND agent_id=?2 AND retired_at IS NULL",
+            rusqlite::params![context.run.workspace_run_id.as_str(), id], |row| row.get(0),
+        ).optional().map_err(crate::persistence::features::storage_error)?;
+        if model.agent(id).is_none()
+            || current.as_deref().is_none()
+            || current.as_deref() != context.member_incarnation.as_ref().map(Id::as_str)
+        {
+            return Err(RpcError::unauthorized("member identity expired; reconnect"));
+        }
+    }
+    Ok(())
 }
 
 fn expected_current_run(call: &Call) -> Option<&Id> {
@@ -356,6 +465,17 @@ fn expected_current_run(call: &Call) -> Option<&Id> {
         Call::AsideAsk(p) => Some(&p.workspace_run_id),
         Call::AsideCancel(p) => Some(&p.workspace_run_id),
         Call::AsideRemove(p) => Some(&p.workspace_run_id),
+        _ => None,
+    }
+}
+
+fn metrics_run(call: &Call) -> Option<&Id> {
+    match call {
+        Call::UsageSummary(query)
+        | Call::UsageSeries(query)
+        | Call::UsageBreakdown(query)
+        | Call::UsageObservations(query)
+        | Call::UsageWatch(query) => Some(&query.scope.workspace_run_id),
         _ => None,
     }
 }
@@ -431,7 +551,13 @@ pub struct ConnCtx {
     pub connection_epoch: ConnId,
     pub run: RunCtx,
     pub caller: Caller,
+    /// Captured at Hello under the member/token fence. Reusing a public id
+    /// cannot promote an old authenticated connection into the new member.
+    pub member_incarnation: Option<Id>,
     pub cancellation: Cancellation,
+    /// Physical connection closure, distinct from expiration of one run's
+    /// jobs. A still-open connection receives a final watch resync on expiry.
+    pub connection_closed: Cancellation,
 }
 
 impl ConnCtx {
@@ -440,7 +566,17 @@ impl ConnCtx {
             connection_epoch,
             run,
             caller,
+            member_incarnation: None,
             cancellation: Cancellation::default(),
+            connection_closed: Cancellation::default(),
+        }
+    }
+
+    fn for_run(&self, run: RunCtx) -> Self {
+        Self {
+            run,
+            cancellation: Cancellation::default(),
+            ..self.clone()
         }
     }
 }
@@ -489,22 +625,307 @@ mod tests {
 
     struct ReadyDocs;
 
-    struct WatchedDocs;
-    struct OneChange(bool);
+    struct MetricsSpy {
+        ready: AtomicBool,
+        runs: Mutex<Vec<Id>>,
+    }
+
+    #[async_trait::async_trait]
+    impl FeatureService for MetricsSpy {
+        fn feature(&self) -> Feature {
+            Feature::UsageMetrics
+        }
+        fn readiness(&self) -> Readiness {
+            if self.ready.load(Ordering::Acquire) {
+                Readiness::Ready
+            } else {
+                Readiness::Unavailable(FeatureUnavailable::NotReady)
+            }
+        }
+        async fn handle(&self, _: &ConnCtx, call: Call) -> Result<Value, RpcError> {
+            if let Some(run) = metrics_run(&call) {
+                self.runs.lock().unwrap().push(run.clone());
+            }
+            Ok(json!({}))
+        }
+    }
+
+    fn metrics_query(run: &Id) -> Value {
+        let fixtures: Vec<Value> = serde_json::from_str(include_str!(
+            "../../../../crew-core/tests/fixtures/features/requests-v1.json"
+        ))
+        .unwrap();
+        let mut query = fixtures
+            .into_iter()
+            .find(|call| call["method"] == "usage_summary")
+            .unwrap()["params"]
+            .clone();
+        query["scope"]["workspace_run_id"] = json!(run);
+        query
+    }
+
+    fn install_member(daemon: &Daemon, orchestrator: bool, token: &str) {
+        let agent: crew_core::Agent=serde_json::from_value(json!({"id":"worker","name":"worker","role":"work","runtime":"shell",
+            "status":"waiting","workdir":"/tmp","backend":"pty","last_activity_at":0,"orchestrator":orchestrator})).unwrap();
+        daemon.store.save_agent(&agent).unwrap();
+        daemon.store.save_token("worker", token).unwrap();
+        let mut model = daemon.model();
+        model.agents.retain(|member| member.id != "worker");
+        model.agents.push(agent);
+        model.tokens.insert("worker".into(), token.into());
+    }
+
+    #[tokio::test]
+    async fn metrics_dispatch_checks_auth_capability_readiness_and_workspace_history_before_handler(
+    ) {
+        let (_temp, running) = fixture().await;
+        let daemon = &running.daemon;
+        let spy = Arc::new(MetricsSpy {
+            ready: AtomicBool::new(true),
+            runs: Mutex::new(Vec::new()),
+        });
+        daemon.feature_services.register(spy.clone());
+        let old = daemon.run_context().unwrap();
+        let (mut session, mut rx) = Session::new(daemon);
+        let unauthorized = request(
+            &mut session,
+            &mut rx,
+            "usage_summary",
+            metrics_query(&old.workspace_run_id),
+        )
+        .await;
+        assert_eq!(unauthorized.error.unwrap().code, "unauthorized");
+        hello(daemon, &mut session, &mut rx).await;
+        let absent = request(
+            &mut session,
+            &mut rx,
+            "usage_summary",
+            metrics_query(&old.workspace_run_id),
+        )
+        .await;
+        assert_eq!(absent.error.unwrap().code, "unsupported_feature");
+        // A separate connection negotiates before its first feature operation.
+        let (mut scoped, mut scoped_rx) = Session::new(daemon);
+        hello(daemon, &mut scoped, &mut scoped_rx).await;
+        let accepted = request(
+            &mut scoped,
+            &mut scoped_rx,
+            "features_negotiate",
+            json!({"versions":{"usage_metrics":1}}),
+        )
+        .await
+        .result
+        .unwrap();
+        assert_eq!(accepted["accepted"], json!({"usage_metrics":1}));
+        spy.ready.store(false, Ordering::Release);
+        let unready = request(
+            &mut scoped,
+            &mut scoped_rx,
+            "usage_summary",
+            metrics_query(&old.workspace_run_id),
+        )
+        .await;
+        assert_eq!(unready.error.unwrap().code, "unsupported_feature");
+        spy.ready.store(true, Ordering::Release);
+        for method in [
+            "usage_summary",
+            "usage_series",
+            "usage_breakdown",
+            "usage_observations",
+        ] {
+            let foreign = request(
+                &mut scoped,
+                &mut scoped_rx,
+                method,
+                metrics_query(&Id::new("another-workspace-run").unwrap()),
+            )
+            .await;
+            assert_eq!(foreign.error.unwrap().code, "not_found", "{method}");
+        }
+        assert!(spy.runs.lock().unwrap().is_empty());
+        daemon
+            .feature_db
+            .clear_session(&old.workspace_run_id, |_| Ok(()))
+            .unwrap();
+        daemon.feature_services.run_archived(&old);
+        let historical = request(
+            &mut scoped,
+            &mut scoped_rx,
+            "usage_summary",
+            metrics_query(&old.workspace_run_id),
+        )
+        .await;
+        assert!(historical.error.is_none(), "{:?}", historical.error);
+        assert_eq!(
+            *spy.runs.lock().unwrap(),
+            vec![old.workspace_run_id.clone()]
+        );
+        let repeated = request(
+            &mut scoped,
+            &mut scoped_rx,
+            "features_negotiate",
+            json!({"versions":{"usage_metrics":1}}),
+        )
+        .await
+        .result
+        .unwrap();
+        assert_eq!(repeated["connection_epoch"], accepted["connection_epoch"]);
+        assert_ne!(repeated["workspace_run_id"], accepted["workspace_run_id"]);
+        daemon.shutdown(false).await;
+    }
+
+    #[tokio::test]
+    async fn removed_reused_member_connections_never_acquire_new_role_or_observer_authority() {
+        let (_temp, running) = fixture().await;
+        let daemon = &running.daemon;
+        install_member(daemon, false, "first-token");
+        let spy = Arc::new(MetricsSpy {
+            ready: AtomicBool::new(true),
+            runs: Mutex::new(Vec::new()),
+        });
+        daemon.feature_services.register(spy.clone());
+        let run = daemon.run_context().unwrap();
+        let (mut session, mut rx) = Session::new(daemon);
+        let hello=request(&mut session,&mut rx,"hello",json!({"role":"agent","agent_id":"worker","token":"first-token","protocol":6,"client":"fixture"})).await;
+        assert!(hello.error.is_none(), "{:?}", hello.error);
+        let negotiated = request(
+            &mut session,
+            &mut rx,
+            "features_negotiate",
+            json!({"versions":{"usage_metrics":1}}),
+        )
+        .await
+        .result
+        .unwrap();
+        assert_eq!(negotiated["unavailable"]["usage_metrics"], "not_authorized");
+        let forbidden = request(
+            &mut session,
+            &mut rx,
+            "usage_summary",
+            metrics_query(&run.workspace_run_id),
+        )
+        .await;
+        assert_eq!(forbidden.error.unwrap().code, "forbidden");
+        let incarnation = daemon
+            .feature_db
+            .incarnation(&run.workspace_run_id, "worker")
+            .unwrap()
+            .unwrap();
+        {
+            let mut model = daemon.model();
+            daemon.store.delete_agent("worker").unwrap();
+            model.agents.clear();
+            model.tokens.clear();
+        }
+        install_member(daemon, true, "new-token");
+        assert_ne!(
+            daemon
+                .feature_db
+                .incarnation(&run.workspace_run_id, "worker")
+                .unwrap(),
+            Some(incarnation)
+        );
+        for (method, params) in [
+            (
+                "features_negotiate",
+                json!({"versions":{"usage_metrics":1}}),
+            ),
+            ("usage_summary", metrics_query(&run.workspace_run_id)),
+        ] {
+            let expired = request(&mut session, &mut rx, method, params).await;
+            assert_eq!(expired.error.unwrap().code, "unauthorized", "{method}");
+        }
+        assert!(spy.runs.lock().unwrap().is_empty());
+        daemon.shutdown(false).await;
+    }
+
+    struct ShutdownSpy {
+        entered: Notify,
+        release: Notify,
+        calls: std::sync::atomic::AtomicUsize,
+    }
+    #[async_trait::async_trait]
+    impl FeatureService for ShutdownSpy {
+        fn feature(&self) -> Feature {
+            Feature::Docs
+        }
+        fn readiness(&self) -> Readiness {
+            Readiness::Ready
+        }
+        async fn handle(&self, _: &ConnCtx, _: Call) -> Result<Value, RpcError> {
+            Ok(json!({}))
+        }
+        async fn shutdown(&self) {
+            self.calls.fetch_add(1, Ordering::AcqRel);
+            self.entered.notify_one();
+            self.release.notified().await;
+        }
+    }
+
+    #[tokio::test]
+    async fn shutdown_refuses_new_features_and_waits_for_owned_retirement_once() {
+        let (_temp, running) = fixture().await;
+        let daemon = &running.daemon;
+        let _shutdown_receiver = daemon.shutdown.subscribe();
+        let spy = Arc::new(ShutdownSpy {
+            entered: Notify::new(),
+            release: Notify::new(),
+            calls: std::sync::atomic::AtomicUsize::new(0),
+        });
+        daemon.feature_services.register(spy.clone());
+        let first = daemon.clone();
+        let first = tokio::spawn(async move { first.shutdown(false).await });
+        tokio::time::timeout(Duration::from_secs(1), spy.entered.notified())
+            .await
+            .unwrap();
+        let second = daemon.clone();
+        let second = tokio::spawn(async move { second.shutdown(false).await });
+        assert!(!*daemon.shutdown.borrow());
+        assert!(!first.is_finished());
+        let (mut session, mut rx) = Session::new(daemon);
+        hello(daemon, &mut session, &mut rx).await;
+        let stopping = request(
+            &mut session,
+            &mut rx,
+            "features_negotiate",
+            json!({"versions":{"docs":1}}),
+        )
+        .await;
+        assert_eq!(stopping.error.unwrap().code, "unavailable");
+        spy.release.notify_one();
+        tokio::time::timeout(Duration::from_secs(1), first)
+            .await
+            .unwrap()
+            .unwrap();
+        tokio::time::timeout(Duration::from_secs(1), second)
+            .await
+            .unwrap()
+            .unwrap();
+        assert!(*daemon.shutdown.borrow());
+        assert_eq!(spy.calls.load(Ordering::Acquire), 1);
+    }
+
+    struct WatchedDocs {
+        wake: Arc<Notify>,
+    }
+    struct OneChange {
+        revision: u128,
+        wake: Arc<Notify>,
+    }
 
     #[async_trait::async_trait]
     impl FeatureWatch for OneChange {
         async fn next(&mut self) -> Result<Option<crew_core::rpc::Push>, RpcError> {
-            if self.0 {
-                std::future::pending::<()>().await;
+            if self.revision > 0 {
+                self.wake.notified().await;
             }
-            self.0 = true;
+            self.revision += 1;
             Ok(Some(crew_core::rpc::Push::DocsChanged(Box::new(
                 crew_core::rpc::docs::DocsChanged {
                     epoch: Id::new("docs-epoch").unwrap(),
                     watch_id: Id::new("watch-1").unwrap(),
-                    from_revision: crew_core::rpc::features::Wide(1),
-                    to_revision: crew_core::rpc::features::Wide(2),
+                    from_revision: crew_core::rpc::features::Wide(self.revision),
+                    to_revision: crew_core::rpc::features::Wide(self.revision + 1),
                     upserts: Default::default(),
                     removed_doc_ids: Default::default(),
                     changed_selected: Default::default(),
@@ -526,6 +947,9 @@ mod tests {
         }
         async fn handle(&self, _: &ConnCtx, call: Call) -> Result<Value, RpcError> {
             match call {
+                Call::DocsWatch(request) if !request.selected.is_empty() => {
+                    Err(RpcError::invalid("fixture invalid selection"))
+                }
                 Call::DocsWatch(_) => {
                     Ok(json!({"watch_id":"watch-1","initial_index_page":{"epoch":"docs-epoch"}}))
                 }
@@ -533,7 +957,10 @@ mod tests {
             }
         }
         fn watch_stream(&self, _: ConnCtx, _: Id) -> Result<Box<dyn FeatureWatch>, RpcError> {
-            Ok(Box::new(OneChange(false)))
+            Ok(Box::new(OneChange {
+                revision: 0,
+                wake: self.wake.clone(),
+            }))
         }
     }
 
@@ -716,7 +1143,10 @@ mod tests {
     async fn observer_initial_reply_precedes_metadata_and_snapshot_does_not_abort_it() {
         let (_temp, running) = fixture().await;
         let daemon = &running.daemon;
-        daemon.feature_services.register(Arc::new(WatchedDocs));
+        let service = Arc::new(WatchedDocs {
+            wake: Arc::new(Notify::new()),
+        });
+        daemon.feature_services.register(service.clone());
         let (mut session, mut rx) = Session::new(daemon);
         hello(daemon, &mut session, &mut rx).await;
         request(
@@ -745,9 +1175,33 @@ mod tests {
             Some(crew_core::rpc::Push::DocsChanged(_))
         ));
         request(&mut session, &mut rx, "snapshot", json!({})).await;
-        // A duplicate watch is still occupied after the ordinary snapshot.
+        assert_eq!(session.feature_watch_count(Feature::Docs), 1);
+        // A Docs watch atomically replaces selection while retaining its bound.
         let duplicate = request(&mut session, &mut rx, "docs_watch", json!({"selected":[]})).await;
-        assert_eq!(duplicate.error.unwrap().code, "busy");
+        assert!(duplicate.error.is_none());
+        assert_eq!(session.feature_watch_count(Feature::Docs), 1);
+        assert!(matches!(
+            rx.recv().await.unwrap().push,
+            Some(crew_core::rpc::Push::DocsChanged(_))
+        ));
+        let invalid = request(
+            &mut session,
+            &mut rx,
+            "docs_watch",
+            json!({"selected":[{"doc_id":"bad","source_id":"bad","source_generation":"0"}]}),
+        )
+        .await;
+        assert_eq!(invalid.error.unwrap().code, "invalid");
+        assert_eq!(session.feature_watch_count(Feature::Docs), 1);
+        service.wake.notify_one();
+        let still_live = tokio::time::timeout(Duration::from_secs(1), rx.recv())
+            .await
+            .unwrap()
+            .unwrap();
+        let Some(crew_core::rpc::Push::DocsChanged(change)) = still_live.push else {
+            panic!("refused replacement stopped the old watch")
+        };
+        assert_eq!(change.to_revision, crew_core::rpc::features::Wide(3));
         drop(session);
         daemon.shutdown(true).await;
     }

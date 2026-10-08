@@ -148,6 +148,19 @@ impl FeatureDb {
                 .map_err(|_| invalid_storage())
         })
     }
+
+    /// Historical metrics may name archived runs, but never a run from another
+    /// workspace's database. Current membership is not query attribution.
+    pub fn has_run(&self, run: &Id) -> std::result::Result<bool, RpcError> {
+        self.read(|conn| {
+            conn.query_row(
+                "SELECT EXISTS(SELECT 1 FROM feature_runs WHERE id=?1)",
+                [run.as_str()],
+                |row| row.get(0),
+            )
+            .map_err(storage_error)
+        })
+    }
 }
 
 struct DurableConnection<'a> {

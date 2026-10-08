@@ -30,9 +30,29 @@ A service registers its observer before capturing the initial watch result.
 queue. The daemon creates the forwarder before replying and starts it only
 after the initial reply is queued. These tasks are independent of Subscribe,
 Listen and terminal forwarding. Metadata must match feature, watch id and
-epoch; oversized or backpressured updates become small resync markers. A
+epoch. Epoch replacement preserves bounded terminal selection metadata;
+oversized or backpressured updates become small resync markers. A
 blocking domain job retains its worker permit until it actually finishes,
 even when connection/scope cancellation has been signalled.
+
+The daemon admits one aside watch, one Docs watch and four metrics watches per
+physical connection. A Docs watch replaces its selection: failed validation
+keeps the previous watch alive, and successful preparation aborts and awaits
+the previous forwarder before queuing the new reply. Physical connection
+closure is separate from run cancellation. A watch on an open connection
+ends with final resync metadata; disconnect sends none.
+
+Hello captures an agent incarnation without extending its wire response.
+Negotiation and feature dispatch refuse a removed/reused member connection.
+Scoped Epic handlers use `commit_tasks_for` and the immutable `TaskModel` view
+to repeat identity/run/cancellation checks under the transaction fence. Metrics
+queries may name archived runs from this workspace's run table; a run from
+another workspace is rejected before the typed service handler.
+
+`FeatureService::shutdown` cancels and awaits owned execution/retirement.
+Daemon shutdown refuses new feature admission and waits for these hooks
+before ordinary member teardown. A dropped observer connection only cancels
+its reads/watches, not a previously admitted workspace-owned execution.
 
 Report/task/message preparation uses the shared preflight validators exported
 from this module. A prepared decision retains the authenticated sender; an
@@ -51,6 +71,9 @@ publication. Failed acknowledgement leaves the domain receipt for replay.
 `TaskProjection::clear_run` runs before legacy session clearing in that same
 transaction, leaving private finalized report history to the domain.
 
-The first port checkpoint was verified with `cargo test --locked -p crew
---lib features::tests` (12 tests). Watch protocol negatives, grouped task
-projection, client discovery and final integrated gates remain separate work.
+The foundation registers no capability. Production service registration,
+source/config/launch adapters, lifecycle collection and composed daemon/client
+proof belong to `features-p6-daemon-wiring` after approved domain services land.
+Test-only ready services exercise the routing ports without advertising a
+partial backend. The final review report records foundation gates separately
+from that integrated proof.
