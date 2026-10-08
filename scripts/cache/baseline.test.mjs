@@ -199,3 +199,11 @@ test('report separates folded-turn correlation, other diagnostics and avoidable 
   assert.equal(report.miss_associations.find(c => c.name === 'native_history_changed').avoidable_miss_tokens, null);
   assert.equal(report.sessions[0].requests[1].native_diagnostic.request_id, 'req-b');
 });
+
+test('team worktree reports may be written while its database and agent homes stay protected', t => {
+  const dir = scratch(t), state = path.join(dir, '.crew'), db = fixtureDb(dir);
+  const workerReport = path.join(state, 'worktrees/runtime/notes/prompt-cache/baseline.json');
+  const report = { sessions: [], coverage: { source_dirs: [path.join(state, 'agents')], source_files: [db, `${db}-wal`, `${db}-shm`] } };
+  assert.doesNotThrow(() => guardOutputs([workerReport], report));
+  for (const out of [db, `${db}-wal`, path.join(state, 'agents/worker/rw/native.json')]) assert.throws(() => guardOutputs([out], report), /Refusing/);
+});

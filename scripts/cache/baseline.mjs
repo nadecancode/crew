@@ -423,7 +423,7 @@ function registeredRuns(home) {
 export async function collect(options) {
   options = { ...options, until: options.until ?? Date.now() };
   const workspace = readWorkspace(options.workspace), homes = options.home ?? os.homedir(), candidates = [], errors = [];
-  const workspaces = [workspace], sourceDirs = new Set([workspace.state_dir]);
+  const workspaces = [workspace], sourceDirs = new Set([path.join(workspace.state_dir, 'agents')]);
   const claude = process.env.CLAUDE_CONFIG_DIR || path.join(homes, '.claude');
   const codex = process.env.CODEX_HOME || path.join(homes, '.codex');
   sourceDirs.add(path.join(claude, 'projects')); sourceDirs.add(path.join(codex, 'sessions'));
@@ -447,7 +447,7 @@ export async function collect(options) {
       if (run) candidates.push({ runtime: 'codex', file, workspace: run });
     }
     for (const run of ordered) {
-      sourceDirs.add(run.state_dir);
+      sourceDirs.add(path.join(run.state_dir, 'agents'));
       const privateAgents = path.join(run.state_dir, 'agents');
       if (!fs.existsSync(privateAgents)) continue;
       for (const a of fs.readdirSync(privateAgents, { withFileTypes: true })) if (a.isDirectory()) {
@@ -473,6 +473,7 @@ export async function collect(options) {
   const report = combineReports(workspaces.map(w => makeRun(sessions.get(w.state_dir), w, { since: options.since ?? null, until: options.until ?? null })), { since: options.since ?? null, until: options.until ?? null });
   report.coverage.discovery_errors = errors; report.coverage.discovered_files = candidates.length;
   report.coverage.excluded_files = excluded; report.coverage.source_dirs = [...sourceDirs];
+  report.coverage.source_files = workspaces.flatMap(w => ['crew.db', 'crew.db-wal', 'crew.db-shm'].map(f => path.join(w.state_dir, f)));
   report.coverage.discovery_scope = options.allRuns ? 'explicit workspace plus local crew registry; historical sessions in their native roots' : 'explicit workspace only';
   report.coverage.native_sources = { claude: 'operator/private home projects JSONL', codex: 'operator/private home rollout JSONL', pi: 'private rw/pi-sessions JSONL' };
   return report;
@@ -486,14 +487,15 @@ function canonical(file) {
 
 /** Validate both outputs before any mkdir/write, including aliases and links. */
 export function guardOutputs(outputs, report) {
-  const sources = report.sessions.map(s => canonical(s.file));
+  const inputFiles = [...report.sessions.map(s => s.file), ...(report.coverage.source_files ?? [])];
+  const sources = inputFiles.map(canonical);
   const dirs = report.coverage.source_dirs.map(canonical);
   const aliases = new Set();
   for (const file of outputs) {
     const out = canonical(file);
     if (aliases.has(out)) throw new Error('Outputs must be distinct');
     aliases.add(out);
-    const sameInode = fs.existsSync(file) && report.sessions.some(s => { const a = fs.statSync(file), b = fs.statSync(s.file); return a.ino === b.ino && a.dev === b.dev; });
+    const sameInode = fs.existsSync(file) && inputFiles.filter(f => fs.existsSync(f)).some(f => { const a = fs.statSync(file), b = fs.statSync(f); return a.ino === b.ino && a.dev === b.dev; });
     if (sources.includes(out) || sameInode || dirs.some(dir => out === dir || out.startsWith(dir + path.sep))) throw new Error('Refusing to overwrite a measurement source or write in its directory');
   }
 }
