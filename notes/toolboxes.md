@@ -1220,8 +1220,23 @@ The JSON output is the protocol structure, which is what QA asserts on.
   the tooltip and accessible description, like workspace paths (R2 in the
   native sign-off).
 
-**TUI.** The detail view shows the summary line and the pending notice. The
-existing detail expansion shows the groups, so there is no new key.
+**TUI.** The info panel shows:
+
+- the summary on two lines (`toolbox   b56e01d7c4a9 · 4 items` and
+  `2 not available`), so it fits a 36-column panel;
+- the pending notice;
+- a dim hint, `T shows its items, sources and digest`.
+
+`T` toggles a toolbox pane in the terminal pane's slot, as `d` does for the
+diff:
+
+- The pane holds the groups, sources and status words as wrapped rows,
+  opening at the top, with the definition digest and tool-definition bytes
+  at the end.
+- `↑↓`, `PgUp`, `PgDn`, `Home` and `End` scroll it.
+- Its title reads `toolbox · rows 1–9 of 35 · ↑↓ scroll · T closes`.
+
+The footer and the `?` help list `T toolbox`.
 
 **Agent graph and team list.** No new chrome. A member with a required item
 that is not Active, or with a pending change, gets the existing attention
