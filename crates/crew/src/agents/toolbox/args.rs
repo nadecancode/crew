@@ -140,6 +140,17 @@ mod tests {
             "extra_args"
         )
         .is_err());
+        for args in [
+            vec!["--system-prompt-snapshot", "on"],
+            vec!["--system-prompt-snapshot=off"],
+        ] {
+            assert!(validate(
+                RuntimeKind::Claude,
+                &args.into_iter().map(str::to_string).collect::<Vec<_>>(),
+                "extra_args"
+            )
+            .is_err());
+        }
         assert!(validate(RuntimeKind::Pi, &["-e/some/extension".into()], "extra_args").is_err());
         validate(
             RuntimeKind::Shell,

@@ -1,0 +1,130 @@
+{
+  "schema": 1,
+  "scope": "Synthetic localhost native requests and exact assistant receipts; no real credentials or provider inference. Not a cache usage measurement.",
+  "cases": {
+    "before": {
+      "crew_sha256": "5bfdffac042c41a8c4252f1cc23fa2404979903853a70fdc94d404d1687c50b1",
+      "native_version": "2.1.291 (Claude Code)",
+      "native_sha256": "078fad28d0297c9a25d306b635b2d8816c6839347520f29eb54ffea5d56142fb",
+      "status": "failed",
+      "T14": {
+        "checks": {
+          "one_changed_event": true,
+          "restart_digest_changed": true,
+          "restart_native_catalog_changed": false,
+          "running_digest_pinned": true,
+          "running_native_catalog_pinned": true,
+          "same_fingerprint": true,
+          "same_session": true
+        },
+        "passed": false
+      },
+      "T18": {
+        "checks": {
+          "fingerprint_changed": true,
+          "historical_call_retained": true,
+          "native_catalog_removed": true,
+          "native_response_completed": true,
+          "same_session": true
+        },
+        "historical_call_id": "toolu_fixture_2",
+        "passed": true
+      },
+      "claude_recovery": {
+        "passed": false,
+        "checks": {
+          "all_tool_bytes_stable": true,
+          "automatic_recovery_keeps_snapshot_disabled": false,
+          "initial_snapshot_policy_unchanged": true,
+          "one_changed_event": true,
+          "original_transcript_prefix_unchanged": true,
+          "refresh_disables_old_snapshot": false,
+          "refreshed_catalog_survives_recovery": false,
+          "same_digest": true,
+          "same_fingerprint": true,
+          "same_session": true,
+          "system_bytes_stable": true,
+          "unchanged_restart_keeps_digest": true,
+          "unchanged_restart_keeps_snapshot": true
+        },
+        "system_sha256": [
+          "5c522eeb744519148dc657ab4603b049983d22417acdebde40b6dcf631bd82e2",
+          "5c522eeb744519148dc657ab4603b049983d22417acdebde40b6dcf631bd82e2",
+          "5c522eeb744519148dc657ab4603b049983d22417acdebde40b6dcf631bd82e2"
+        ],
+        "tools_sha256": [
+          "b8974c27f3c4907d5072c11a89488c2a77943a896ba817341ae66d8d98a2c4d9",
+          "b8974c27f3c4907d5072c11a89488c2a77943a896ba817341ae66d8d98a2c4d9",
+          "b8974c27f3c4907d5072c11a89488c2a77943a896ba817341ae66d8d98a2c4d9"
+        ],
+        "original_transcript_prefix_sha256": "f7d3888c1a84f1430a781407565d95afbb1bd345ceffe65248cc8780f7cad820"
+      },
+      "cleanup": {
+        "remaining_processes": [],
+        "stop_returncode": 0
+      }
+    },
+    "after": {
+      "crew_sha256": "b42a54585a67dc312c3efe0a50ea18ff7ffd057e59655fa67ad183f1d5c5e5d0",
+      "native_version": "2.1.291 (Claude Code)",
+      "native_sha256": "078fad28d0297c9a25d306b635b2d8816c6839347520f29eb54ffea5d56142fb",
+      "status": "passed",
+      "T14": {
+        "checks": {
+          "one_changed_event": true,
+          "restart_digest_changed": true,
+          "restart_native_catalog_changed": true,
+          "running_digest_pinned": true,
+          "running_native_catalog_pinned": true,
+          "same_fingerprint": true,
+          "same_session": true
+        },
+        "passed": true
+      },
+      "T18": {
+        "checks": {
+          "fingerprint_changed": true,
+          "historical_call_retained": true,
+          "native_catalog_removed": true,
+          "native_response_completed": true,
+          "same_session": true
+        },
+        "historical_call_id": "toolu_fixture_2",
+        "passed": true
+      },
+      "claude_recovery": {
+        "passed": true,
+        "checks": {
+          "all_tool_bytes_stable": true,
+          "automatic_recovery_keeps_snapshot_disabled": true,
+          "initial_snapshot_policy_unchanged": true,
+          "one_changed_event": true,
+          "original_transcript_prefix_unchanged": true,
+          "refresh_disables_old_snapshot": true,
+          "refreshed_catalog_survives_recovery": true,
+          "same_digest": true,
+          "same_fingerprint": true,
+          "same_session": true,
+          "system_bytes_stable": true,
+          "unchanged_restart_keeps_digest": true,
+          "unchanged_restart_keeps_snapshot": true
+        },
+        "system_sha256": [
+          "a62b235775fe51d4118c9733301ed6c3e8cb620975d07480379f2560fe2b4320",
+          "a62b235775fe51d4118c9733301ed6c3e8cb620975d07480379f2560fe2b4320",
+          "a62b235775fe51d4118c9733301ed6c3e8cb620975d07480379f2560fe2b4320"
+        ],
+        "tools_sha256": [
+          "69e3125c1d90381ca830419105c9bdec8e4337f2f83781b705b611f38011f668",
+          "69e3125c1d90381ca830419105c9bdec8e4337f2f83781b705b611f38011f668",
+          "69e3125c1d90381ca830419105c9bdec8e4337f2f83781b705b611f38011f668"
+        ],
+        "original_transcript_prefix_sha256": "54398ad6f9b43a0cf90b76e80b0c7101b3ebd8b511d11d24df57370ea3658ab3"
+      },
+      "cleanup": {
+        "remaining_processes": [],
+        "stop_returncode": 0
+      }
+    }
+  }
+}
