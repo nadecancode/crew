@@ -263,6 +263,9 @@ budget, and the long waits do not bypass failure or cost checks. The scripted
 observer never calls a provider and is excluded from token totals. All newly
 observed model session IDs remain in the spend ledger, even if an unexpected
 restart changes identity and makes the scenario fail.
+The shell observer isolates the roster-text change from new model spend. The
+design's acceptance must additionally cover a model-backed member join; that
+case is not established by this scripted observer alone.
 
 The extended before-run series is in progress. It requires three successful
 runs on c8052373; one includes the one-hour interval if the measured cost

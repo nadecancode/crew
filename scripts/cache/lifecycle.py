@@ -159,7 +159,9 @@ class Lifecycle:
     def marker_message(self, agent, marker):
         self.command("send", agent,
                      f"[{marker}] Read SPEC.md, independently recompute the paid-invoice checksum, "
-                     "run one local calculation tool to check it, then reply with one short line. "
+                     "and run one local calculation tool to check it. If a task is in progress, "
+                     "continue it through its required file, git_commit and task_complete before "
+                     "ending your turn. Otherwise reply with one short line. "
                      "Do not create a task or ask a question.", "--type", "message")
 
     def start(self, snapshot, usage):

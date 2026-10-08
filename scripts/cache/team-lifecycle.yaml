@@ -12,7 +12,8 @@ instructions: |-
   cards. Do not interpret an empty board as completion: the harness controls
   completion and will stop the team. The orchestrator should wait quietly and
   never send reminders or request updates. A message tagged cache-control or
-  cache-fold asks for the exact local action in that message, not a new task.
+  cache-fold supplements any card already in progress: finish that card before
+  ending the turn. It does not cancel a card or request a new task.
 workspace:
   path: @WORKSPACE@
   isolation: worktree
