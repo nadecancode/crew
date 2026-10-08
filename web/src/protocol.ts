@@ -40,6 +40,22 @@ export type ContextUsage = { tokens: number; window: number; percent: number; up
 export type ModelFallback = { from: string; note: string; since: number; policy: boolean };
 export type UsageLimit = { kind: string; message: string; since: number; resets_at?: number | null; retry_at?: number | null; attempts: number };
 
+// A member's effective toolbox (notes/toolboxes.md §Display). Status words come from the
+// daemon; codes only steer attention. Unknown kinds and codes stay displayable.
+export const TOOLBOX_ITEM_KIND = ["mcp", "skills", "plugins", "subagents", "hooks"] as const;
+export type ToolboxItemStatus = { code: string; text: string };
+export type ToolboxItem = { kind: string; name: string; origin: string; required: boolean; status: ToolboxItemStatus; detail?: string | null };
+export type ToolboxSource = { origin: string; kind?: string | null; label: string; status: ToolboxItemStatus; names: string[]; detail?: string | null };
+export type AgentToolbox = {
+  fingerprint: string;
+  pending_fingerprint?: string | null;
+  definition_digest?: string | null;
+  tool_count?: number | null;
+  definition_bytes?: number | null;
+  items: ToolboxItem[];
+  sources: ToolboxSource[];
+};
+
 export type Agent = {
   id: string;
   name: string;
@@ -80,6 +96,7 @@ export type Agent = {
   outbox_total: number;
   usage?: Usage | null;
   error?: string | null;
+  toolbox?: AgentToolbox | null;
 };
 
 export type Message = {
@@ -322,7 +339,41 @@ export function decodeAgent(v: unknown, what = "agent"): Agent {
   opt(o, "context", isObj, what);
   opt(o, "limit", isObj, what);
   opt(o, "fallback", isObj, what);
+  if (o.toolbox != null) o.toolbox = decodeToolbox(o.toolbox, `${what}.toolbox`);
   return o as Agent;
+}
+
+function decodeToolboxStatus(o: Obj, what: string): void {
+  const s = obj(o.status, `${what}.status`);
+  str(s, "code", `${what}.status`);
+  str(s, "text", `${what}.status`);
+}
+
+export function decodeToolbox(v: unknown, what = "toolbox"): AgentToolbox {
+  const o = obj(v, what);
+  str(o, "fingerprint", what);
+  for (const k of ["pending_fingerprint", "definition_digest"]) opt(o, k, isStr, what);
+  for (const k of ["tool_count", "definition_bytes"]) opt(o, k, isNum, what);
+  def(o, "items", [], Array.isArray, what);
+  def(o, "sources", [], Array.isArray, what);
+  list(o.items, (x, w) => {
+    const item = obj(x, w);
+    for (const k of ["kind", "name", "origin"]) str(item, k, w);
+    def(item, "required", false, isBool, w);
+    decodeToolboxStatus(item, w);
+    opt(item, "detail", isStr, w);
+    return item;
+  }, `${what}.items`);
+  list(o.sources, (x, w) => {
+    const source = obj(x, w);
+    for (const k of ["origin", "label"]) str(source, k, w);
+    opt(source, "kind", isStr, w);
+    def(source, "names", [], isStrArr, w);
+    decodeToolboxStatus(source, w);
+    opt(source, "detail", isStr, w);
+    return source;
+  }, `${what}.sources`);
+  return o as AgentToolbox;
 }
 
 export function decodeMessage(v: unknown, what = "message"): Message {
