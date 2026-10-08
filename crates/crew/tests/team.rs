@@ -6019,7 +6019,11 @@ fn a_pi_member_is_started_with_crews_extension_and_reports_through_it() {
     );
     let source = std::fs::read_to_string(&extension).unwrap();
     assert!(
-        source.contains("registerMcpServer(\"crew\"") && !source.contains("__IDENTITY__"),
+        source.contains("pi.registerMcpServer(server.name")
+            && source.contains("name: \"crew\"")
+            && source.contains("args: [\"mcp\", \"--identity\", IDENTITY]")
+            && !source.contains("__IDENTITY__")
+            && !source.contains("__TOOLBOX_SERVERS__"),
         "{source}"
     );
     let briefing = std::fs::read_to_string(agent_dir("pi-1").join("briefing.md")).unwrap();

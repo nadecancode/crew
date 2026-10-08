@@ -13,6 +13,7 @@
 use std::collections::BTreeMap;
 use std::io::{BufRead, BufReader, Read, Write};
 use std::net::{TcpListener, TcpStream};
+use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
@@ -59,7 +60,7 @@ log(`start ${server}`);
 readline.createInterface({ input: process.stdin }).on('line', line => {
   let q; try { q = JSON.parse(line); } catch { return; }
   if (q.id === undefined) return;
-  const answer = result => console.log(JSON.stringify({ jsonrpc: '2.0', id: q.id, result }));
+  const answer = (result, then) => process.stdout.write(JSON.stringify({ jsonrpc: '2.0', id: q.id, result }) + '\n', then);
   if (q.method === 'initialize') {
     setTimeout(() => answer({ protocolVersion: '2025-06-18', capabilities: { tools: {} }, serverInfo: { name: server, version: '1' } }), plan.delays[server] ?? 0);
   } else if (q.method === 'tools/list') {
@@ -67,8 +68,9 @@ readline.createInterface({ input: process.stdin }).on('line', line => {
     answer({ tools: tools.map(name => ({ name, description: `${server}: ${name}.`, inputSchema: { type: 'object', properties: {} } })) });
   } else if (q.method === 'tools/call') {
     log(`call ${server} ${q.params?.name}`);
-    answer({ content: [{ type: 'text', text: 'done' }] });
-    if ((plan.exit_after_call ?? []).includes(server)) setTimeout(() => process.exit(0), 50);
+    // Gone as soon as the answer is out: the next call finds it closed.
+    const exit = (plan.exit_after_call ?? []).includes(server);
+    answer({ content: [{ type: 'text', text: 'done' }] }, exit ? () => process.exit(0) : undefined);
   } else answer({});
 });
 "#;
@@ -76,7 +78,11 @@ readline.createInterface({ input: process.stdin }).on('line', line => {
 /// The pi to run: `CREW_TEST_PI`, or None to skip.
 fn pi() -> Option<PathBuf> {
     let path = PathBuf::from(std::env::var_os("CREW_TEST_PI")?);
-    assert!(path.exists(), "CREW_TEST_PI={} does not exist", path.display());
+    assert!(
+        path.exists(),
+        "CREW_TEST_PI={} does not exist",
+        path.display()
+    );
     Some(path)
 }
 
@@ -173,7 +179,9 @@ fn answer(stream: TcpStream, kept: &Mutex<Vec<Value>>, calls: &Mutex<Vec<(String
         reader.read_exact(&mut body).unwrap();
     }
     let mut stream = stream;
-    let path = head.split_whitespace().nth(1).unwrap_or("").to_string();
+    // `/v1/messages?beta=true`: the path before any query.
+    let target = head.split_whitespace().nth(1).unwrap_or("");
+    let path = target.split('?').next().unwrap_or("").to_string();
     if !path.ends_with("/messages") {
         let _ = stream.write_all(
             b"HTTP/1.1 200 OK\r\ncontent-type: application/json\r\ncontent-length: 2\r\nconnection: close\r\n\r\n{}",
@@ -202,15 +210,31 @@ fn answer(stream: TcpStream, kept: &Mutex<Vec<Value>>, calls: &Mutex<Vec<(String
         ),
     };
     let events = [
-        ("message_start", json!({ "type": "message_start", "message": message })),
-        ("content_block_start", json!({ "type": "content_block_start", "index": 0, "content_block": block })),
-        ("content_block_delta", json!({ "type": "content_block_delta", "index": 0, "delta": delta })),
-        ("content_block_stop", json!({ "type": "content_block_stop", "index": 0 })),
-        ("message_delta", json!({ "type": "message_delta", "delta": { "stop_reason": stop, "stop_sequence": null }, "usage": { "output_tokens": 3 } })),
+        (
+            "message_start",
+            json!({ "type": "message_start", "message": message }),
+        ),
+        (
+            "content_block_start",
+            json!({ "type": "content_block_start", "index": 0, "content_block": block }),
+        ),
+        (
+            "content_block_delta",
+            json!({ "type": "content_block_delta", "index": 0, "delta": delta }),
+        ),
+        (
+            "content_block_stop",
+            json!({ "type": "content_block_stop", "index": 0 }),
+        ),
+        (
+            "message_delta",
+            json!({ "type": "message_delta", "delta": { "stop_reason": stop, "stop_sequence": null }, "usage": { "output_tokens": 3 } }),
+        ),
         ("message_stop", json!({ "type": "message_stop" })),
     ];
-    let mut reply =
-        String::from("HTTP/1.1 200 OK\r\ncontent-type: text/event-stream\r\nconnection: close\r\n\r\n");
+    let mut reply = String::from(
+        "HTTP/1.1 200 OK\r\ncontent-type: text/event-stream\r\nconnection: close\r\n\r\n",
+    );
     for (event, data) in events {
         reply.push_str(&format!("event: {event}\ndata: {data}\n\n"));
     }
@@ -249,7 +273,9 @@ impl Member {
         for dir in ["agent", "pi", "work", "home", "bin"] {
             std::fs::create_dir_all(member.path(dir)).unwrap();
         }
-        crew::agents::write_executable(&member.crew_bin(), FAKE_CREW);
+        std::fs::write(member.crew_bin(), FAKE_CREW).unwrap();
+        std::fs::set_permissions(member.crew_bin(), std::fs::Permissions::from_mode(0o755))
+            .unwrap();
         let models = json!({ "providers": { "stub": {
             "baseUrl": member.stub.url, "api": "anthropic-messages", "apiKey": "pi-tool-order-not-a-secret",
             "models": [{ "id": "claude-opus-5-5", "contextWindow": 200000, "maxTokens": 8192 }],
@@ -275,7 +301,7 @@ impl Member {
         self.path("bin/crew.mjs")
     }
 
-    /// What `crew pi`'s stand-ins logged since the last launch.
+    /// What the stand-ins logged since the last launch.
     fn calls(&self) -> Vec<String> {
         std::fs::read_to_string(self.path("bin/calls.log"))
             .unwrap_or_default()
@@ -284,8 +310,9 @@ impl Member {
             .collect()
     }
 
-    /// The launch crew makes, with each server answering after `delays`.
-    fn launch(&self, delays: &[(&str, u64)], plan: Value, resume: bool) -> Session {
+    /// The launch crew makes, with each server answering after `delays`;
+    /// `naive`: crew's extension as it was before it ordered the tools.
+    fn launch(&self, delays: &[(&str, u64)], plan: Value, resume: bool, naive: bool) -> Session {
         let tools: BTreeMap<String, Vec<String>> = self
             .toolbox
             .iter()
@@ -342,6 +369,29 @@ impl Member {
                 private_home: None,
             })
             .unwrap();
+        if naive {
+            // Every server registered at load, nothing awaited or ordered.
+            let extension = self.path("agent/crew-pi.ts");
+            let source = std::fs::read_to_string(&extension).unwrap();
+            let naive = source
+                .replace(
+                    "for (const server of orders(pi) ? SERVERS.slice(0, 1) : SERVERS) register(pi, server)",
+                    "for (const server of SERVERS) register(pi, server)",
+                )
+                .replace(
+                    "pi.on(\"before_agent_start\", (_event: unknown, ctx: any) => settled(pi, ctx))",
+                    "",
+                )
+                .replace("    void settled(pi, ctx)\n", "");
+            assert_eq!(
+                source.len() - naive.len(),
+                "orders(pi) ? SERVERS.slice(0, 1) : ".len()
+                    + "pi.on(\"before_agent_start\", (_event: unknown, ctx: any) => settled(pi, ctx))".len()
+                    + "    void settled(pi, ctx)\n".len(),
+                "the extension changed: update the naive variant"
+            );
+            std::fs::write(&extension, naive).unwrap();
+        }
 
         let (program, mut args) = if self.pi.extension().is_some_and(|e| e == "js") {
             (
@@ -352,7 +402,14 @@ impl Member {
             (self.pi.to_string_lossy().into_owned(), Vec::new())
         };
         args.extend(spec.args.iter().cloned());
-        args.push(if resume { "Second task message." } else { "First task message." }.into());
+        args.push(
+            if resume {
+                "Second task message."
+            } else {
+                "First task message."
+            }
+            .into(),
+        );
         let pty = native_pty_system()
             .openpty(PtySize {
                 rows: 40,
@@ -430,7 +487,7 @@ impl Session {
         String::from_utf8_lossy(&self.screen.lock().unwrap()).into_owned()
     }
 
-    /// Wait for `line` among the stand-ins' calls.
+    /// Wait for a call starting with `prefix` among the stand-ins' calls.
     fn wait_for_call(&self, member: &Member, prefix: &str, within: Duration) {
         let deadline = Instant::now() + within;
         while !member.calls().iter().any(|c| c.starts_with(prefix)) {
@@ -574,7 +631,7 @@ fn the_first_request_declares_the_same_tools_byte_for_byte_whatever_the_timing()
         if !resume {
             let _ = std::fs::remove_dir_all(member.path("agent/pi-sessions"));
         }
-        let session = member.launch(delays, json!({}), resume);
+        let session = member.launch(delays, json!({}), resume, false);
         let first = session.requests(&member, 1, Duration::from_secs(60))[0].clone();
         session.wait_for_call(&member, "hook turn-end", Duration::from_secs(30));
         let calls = member.calls();
@@ -598,7 +655,11 @@ fn the_first_request_declares_the_same_tools_byte_for_byte_whatever_the_timing()
         );
         // Every server listed its tools before the first request, one after
         // another, crew's first.
-        assert_eq!(listed(calls), ["crew", "alpha", "beta-x", "gamma"], "{calls:#?}");
+        assert_eq!(
+            listed(calls),
+            ["crew", "alpha", "beta-x", "gamma"],
+            "{calls:#?}"
+        );
     }
     // The restart's first request repeats the first session's exchange
     // ahead of its new prompt: no tool change was declared in between.
@@ -618,32 +679,24 @@ fn the_first_request_declares_the_same_tools_byte_for_byte_whatever_the_timing()
 fn without_crews_order_the_tools_follow_the_servers_timing() {
     let pi = need_pi!();
     let member = Member::new(pi, SERVERS);
-    // crew's extension as it was before the barrier: every server
-    // registered at once, nothing awaited or ordered.
     let mut orders = Vec::new();
     for delays in &TIMINGS[..2] {
         let _ = std::fs::remove_dir_all(member.path("agent/pi-sessions"));
-        let session = member.launch(delays, json!({}), false);
-        // Replaced after the launch wrote it, before pi reads it: no, pi has
-        // read it already. So write the naive extension and relaunch.
+        let session = member.launch(delays, json!({}), false, true);
+        let first = session.requests(&member, 1, Duration::from_secs(60))[0].clone();
+        let calls = member.calls();
         session.stop();
-        let extension = member.path("agent/crew-pi.ts");
-        let source = std::fs::read_to_string(&extension).unwrap();
-        let naive = source
-            .replace(
-                "for (const server of orders(pi) ? SERVERS.slice(0, 1) : SERVERS) register(pi, server)",
-                "for (const server of SERVERS) register(pi, server)",
-            )
-            .replace(
-                "pi.on(\"before_agent_start\", (_event: unknown, ctx: any) => settled(pi, ctx))",
-                "",
-            )
-            .replace("    void settled(pi, ctx)\n", "");
-        assert_ne!(naive, source);
-        let _ = naive;
-        orders.push(source);
+        // pi waited for every server (each answers within its 10 s), so the
+        // set is complete; only the order differs.
+        let mut sorted = names(&first);
+        sorted.sort();
+        let mut expected: Vec<String> = EXPECTED.iter().map(|s| s.to_string()).collect();
+        expected.sort();
+        assert_eq!(sorted, expected, "{calls:#?}");
+        orders.push((names(&first), listed(&calls)));
     }
-    let _ = orders;
+    assert_ne!(orders[0].0, orders[1].0, "{orders:#?}");
+    assert_ne!(orders[0].1, orders[1].1, "{orders:#?}");
 }
 
 #[test]
@@ -658,6 +711,7 @@ fn a_required_server_that_never_lists_its_tools_ends_the_session_before_any_requ
     let mut session = member.launch(
         &[("crew", 0), ("alpha", 0), ("beta-x", 600_000), ("gamma", 0)],
         json!({}),
+        false,
         false,
     );
     let started = Instant::now();
@@ -677,7 +731,11 @@ fn a_required_server_that_never_lists_its_tools_ends_the_session_before_any_requ
     let screen = session.screen();
     session.stop();
     assert!(status.success(), "{status:?}");
-    assert!(member.stub.requests().is_empty(), "{:#?}", member.stub.requests());
+    assert!(
+        member.stub.requests().is_empty(),
+        "{:#?}",
+        member.stub.requests()
+    );
     let failed = calls
         .iter()
         .find(|c| c.starts_with("hook toolbox-failed"))
@@ -687,7 +745,10 @@ fn a_required_server_that_never_lists_its_tools_ends_the_session_before_any_requ
     assert_eq!(payload["ended"], true);
     // gamma, after it, was never started; the operator is told why.
     assert!(!calls.iter().any(|c| c == "start gamma"), "{calls:#?}");
-    assert!(calls.iter().any(|c| c.starts_with("hook exiting")), "{calls:#?}");
+    assert!(
+        calls.iter().any(|c| c.starts_with("hook exiting")),
+        "{calls:#?}"
+    );
     assert!(screen.contains("beta-x did not list its tools"), "{screen}");
 }
 
@@ -701,6 +762,7 @@ fn an_optional_server_that_answers_late_stays_out_of_the_session() {
     let session = member.launch(
         &[("crew", 0), ("alpha", 0), ("beta-x", 15_000), ("gamma", 0)],
         json!({}),
+        false,
         false,
     );
     let requests = session.requests(&member, 2, Duration::from_secs(60));
@@ -737,6 +799,7 @@ fn a_server_that_reconnects_keeps_the_declared_tools() {
         TIMINGS[1],
         json!({ "exit_after_call": ["alpha"] }),
         false,
+        false,
     );
     let requests = session.requests(&member, 3, Duration::from_secs(60));
     let calls = member.calls();
@@ -748,6 +811,9 @@ fn a_server_that_reconnects_keeps_the_declared_tools() {
     );
     for request in &requests {
         assert_eq!(names(request), EXPECTED, "{calls:#?}");
-        assert_eq!(request["tools"].to_string(), requests[0]["tools"].to_string());
+        assert_eq!(
+            request["tools"].to_string(),
+            requests[0]["tools"].to_string()
+        );
     }
 }

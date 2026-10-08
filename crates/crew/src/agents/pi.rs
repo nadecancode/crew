@@ -976,8 +976,7 @@ mod tests {
             .lines()
             .find(|line| line.starts_with("const TOOLBOX_SERVERS"))
             .unwrap();
-        let servers: Value =
-            serde_json::from_str(line.split_once(" = ").unwrap().1).unwrap();
+        let servers: Value = serde_json::from_str(line.split_once(" = ").unwrap().1).unwrap();
         assert_eq!(
             servers,
             json!([
@@ -1159,7 +1158,9 @@ mod tests {
                 ended: true
             }]
         );
-        assert!(rt.on_hook("toolbox-failed", &json!({ "detail": "x" })).is_empty());
+        assert!(rt
+            .on_hook("toolbox-failed", &json!({ "detail": "x" }))
+            .is_empty());
         assert_eq!(
             rt.compact_command(Some("the plan")).as_deref(),
             Some("/compact")
