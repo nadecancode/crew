@@ -405,7 +405,12 @@ Docs    Workspace ▾                       [Search paths and headings]
     - "Image not shown · animated images are not supported";
     - "Image too large to show (3.4 MiB)", or with its dimensions,
       "Image too large to show (9000 × 400 px)";
-    - "Image not shown · outside the docs folders";
+    - "Image not shown · outside this document's source", for an image
+      outside the registered source root that holds the document (an image
+      may sit outside the Markdown folders, but not outside its source);
+    - "Image not shown · not allowed here", for an image the source's
+      exclusions or safe-open checks refuse (a hidden directory, a link
+      that leaves the source, a file that is not a regular file);
     - "Image not shown · this version's image is no longer kept here", for
       an expired image of a Seen-here version. A current image is never
       shown in its place.
@@ -445,8 +450,8 @@ of entry:
 
 - **Recorded:** each published commit that touched the file, on the
   workspace's history and on members' branches, with author, time,
-  description and change id. A working copy is never recorded as a
-  commit.
+  description and commit id, and the change id when the history provides
+  one. A working copy is never recorded as a commit.
 - **Seen here:** versions this connection received since it opened, which
   cover uncommitted saves between commits. They are kept in memory only.
   The section's footer reads "Seen here: up to 16 versions or 4 MiB of this
@@ -625,9 +630,15 @@ per-agent rows, and gains a metrics section above them.
   - Requests;
   - Turns.
 
-  Rows sort by any column. With Epic, the rows include **No epic** (tasks
-  outside any epic) and **Not attributed** (usage with no task) as two
-  separate rows. Numbers use tabular figures. Below 768px the
+  Rows sort by any column. With Epic, three rows stay apart, as
+  `notes/usage-metrics.md` defines them:
+  - **No epic:** work on a known task that belongs to no epic;
+  - **No task:** work known to have no task, such as orchestration; its
+    detail names the activity, and maintenance such as keepalives carries
+    its own tag. It counts as covered, not as missing;
+  - **Not attributed:** work whose task or epic is unknown. Its detail gives
+    the reason: an ambiguous turn, no turn correlation, or history from
+    before tracking. Only this row counts against attribution coverage. Numbers use tabular figures. Below 768px the
   table becomes stacked rows (web-revamp "At narrow width…").
 - **Big writes.** The requests that wrote at least 10k tokens and more than
   they read (the audit's definition), with agent, time, tokens written per
@@ -820,7 +831,7 @@ Captures are taken in light and dark at 1440×960 and 390×844.
 | F10 | History | The timeline lists the recorded commits and the versions seen since the page opened, with the Seen-here footer. Picking two entries shows the diff between them. After the connection drops, an unselected Seen-here entry is gone, and a selected one shows the expired state with View Workspace; the shown content never switches by itself. |
 | F11 | Links into Docs | Task text, message bodies and `file` artifacts containing `notes/x.md` or `notes/x.md §Heading` link to the document at that heading. Unknown paths are not links. Referenced by lists the linking tasks and messages, with its scope stated. |
 | F12 | Usage figures | Total, Hit rate, Write share, Estimate and Per completed task match a hand computation from the fixture under the §Definitions formulas (the arithmetic examples of `notes/usage-metrics.md`). The model without a price shows No price, and the estimate shows `at least …` with the exclusion, never `≈`. A non-reporting agent shows not reported, not 0. A Codex fixture request with total input and cache read but no write counters counts toward hit rate and not toward write share. A Claude request with an aggregate write and no TTL split makes the estimate and write share ranges with their note. A task reopened and completed again counts once. A period with no first completion shows Per completed task unavailable with the reason; a period whose first-completion history is incomplete shows "Per completed task unavailable · completion history incomplete" and no lower bound. |
-| F13 | Trend and breakdown | The trend draws buckets from the samples, with the latest values as text. A bucket without a full category split is a hatched gap labelled split not reported. Show as table gives the same figures. The breakdown sorts by every column, shows `≥` Requests with its reason for a batch-reporting runtime, lists No epic and Not attributed as separate rows, and the narrow layout stacks without page overflow. |
+| F13 | Trend and breakdown | The trend draws buckets from the samples, with the latest values as text. A bucket without a full category split is a hatched gap labelled split not reported. Show as table gives the same figures. The breakdown sorts by every column, shows `≥` Requests with its reason for a batch-reporting runtime, lists No epic, No task and Not attributed as separate rows with the Not attributed reason, and the narrow layout stacks without page overflow. |
 | F14 | Big writes, history and gaps | Big writes lists exactly the fixture's qualifying requests, and opens the agent at that time. History lists both sessions, and selecting the earlier one scopes the figures read-only. With a session file still being read, the gap line shows and no figure shows 0 for it; a later revision that lowers a figure is drawn as is. The scope line shows the tracking boundary and the price date. |
 | F15 | Aside ask | `/btw` switches the composer to aside mode with the copy line and the `--info` border. The recipient picker lists unavailable members with reasons. Escape keeps the text. Sending opens the Asides tab. |
 | F16 | Aside answers | Answers arrive independently; the slow one shows Answering and the failed one shows its reason. The footer names the source copy and time, and tokens and estimate are shown. Cancel stops pending answers. |
