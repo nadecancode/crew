@@ -38,3 +38,8 @@ pub fn bounded_size(
         .map_err(|_| crew_core::rpc::docs::DocFailureCode::TooLarge)?;
     Ok(count.bytes)
 }
+pub mod diff;
+pub mod render;
+pub mod service;
+pub mod watch;
+pub use service::Service;

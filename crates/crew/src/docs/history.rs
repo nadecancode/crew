@@ -52,6 +52,11 @@ pub struct Record {
     pub bytes: u32,
 }
 
+pub struct Records {
+    pub rows: Vec<Record>,
+    pub examined: usize,
+}
+
 impl Reader {
     pub fn from_store(store: &crate::vcs::Store, tools: Tools) -> Result<Self, DocFailureCode> {
         let git_dir = match store {
@@ -198,7 +203,7 @@ impl Reader {
         skip: usize,
         limit: usize,
         deadline: Instant,
-    ) -> Result<Vec<Record>, DocFailureCode> {
+    ) -> Result<Records, DocFailureCode> {
         oid(head)?;
         if limit == 0 || limit > 51 || skip > 4000 {
             return Err(DocFailureCode::TooLarge);
@@ -250,7 +255,10 @@ impl Reader {
                 bytes: bytes.len() as u32,
             });
         }
-        Ok(result)
+        Ok(Records {
+            rows: result,
+            examined: fields.len() / 4,
+        })
     }
 
     pub fn ancestor(

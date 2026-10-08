@@ -49,6 +49,7 @@ pub struct Source {
     pub root: Arc<Root>,
     pub record: DocSource,
     pub history: Option<Arc<super::history::Reader>>,
+    pub directories: BTreeSet<Relative>,
     scan: Option<Scan>,
     reads: VecDeque<Relative>,
     seen: BTreeSet<Relative>,
@@ -66,6 +67,7 @@ pub struct Index {
     pub phase: DocPhase,
     pub limited: bool,
     pub config_error: bool,
+    pub changed: BTreeSet<Id>,
     next_source: usize,
     metadata_bytes: usize,
     generation: u128,
@@ -86,6 +88,7 @@ impl Index {
             rows: BTreeMap::new(),
             limited: false,
             config_error: false,
+            changed: BTreeSet::new(),
             next_source: 0,
             metadata_bytes: 0,
             generation: 0,
@@ -100,6 +103,9 @@ impl Index {
         let mut opened = Vec::new();
         let mut keys = BTreeSet::new();
         for registration in registrations {
+            if registration.branch.as_ref().is_some_and(|s| s.len() > 1024) {
+                return Err(DocFailureCode::TooLarge);
+            }
             if !keys.insert(registration.key.clone())
                 || registration.member_ids.len() > 64
                 || registration
@@ -158,6 +164,7 @@ impl Index {
                         reason: None,
                     },
                     history: None,
+                    directories: BTreeSet::new(),
                     scan: None,
                     reads: VecDeque::new(),
                     seen: BTreeSet::new(),
@@ -240,18 +247,6 @@ impl Index {
             source.seen.clear();
             source.scan_done = false;
             source.limited = false;
-            match Scan::new(&source.root) {
-                Ok(scan) => {
-                    source.scan = Some(scan);
-                    source.record.state = DocSourceState::Ready;
-                    source.record.reason = None;
-                }
-                Err(reason) => {
-                    source.record.state = DocSourceState::Unavailable;
-                    source.record.reason = Some(reason);
-                    source.scan_done = true;
-                }
-            }
         }
         self.phase = DocPhase::Building;
     }
@@ -269,12 +264,32 @@ impl Index {
         let started = Instant::now();
         let keys: Vec<_> = self.sources.keys().cloned().collect();
         let key = &keys[self.next_source % keys.len()];
-        self.next_source = (self.next_source + 1) % keys.len();
         let source = self.sources.get_mut(key).expect("key captured");
         let mut changed = false;
-        if let Some(scan) = &mut source.scan {
+        if source.scan.is_none() && !source.scan_done {
+            source.directories.clear();
+            match Scan::new(&source.root) {
+                Ok(scan) => {
+                    source.scan = Some(scan);
+                    source.record.state = DocSourceState::Ready;
+                    source.record.reason = None;
+                }
+                Err(reason) => {
+                    source.record.state = DocSourceState::Unavailable;
+                    source.record.reason = Some(reason);
+                    source.scan_done = true;
+                    source.limited = true;
+                    changed = true;
+                }
+            }
+        }
+        if let Some(scan) = source.scan.as_mut().filter(|_| source.reads.is_empty()) {
             match scan.step(&source.root, &self.policy) {
                 Ok(step) => {
+                    let remaining = 64usize.saturating_sub(source.directories.len());
+                    source
+                        .directories
+                        .extend(step.directories.into_iter().take(remaining));
                     source.reads.extend(step.documents);
                     source.limited |= step.limited;
                     if step.done {
@@ -345,9 +360,23 @@ impl Index {
             }
         }
         self.limited |= source.limited;
+        if source.scan_done && source.reads.is_empty() {
+            self.next_source = (self.next_source + 1) % keys.len();
+        }
         for (path, v) in updates {
             changed |= self.upsert(path, v);
         }
+        let source = self.sources.get_mut(key).expect("captured source");
+        source.stamps.retain(|p, _| {
+            self.rows
+                .get(p)
+                .is_some_and(|e| e.variants.iter().any(|v| &v.source_id == key))
+        });
+        source.seen.retain(|p| {
+            self.rows
+                .get(p)
+                .is_some_and(|e| e.variants.iter().any(|v| &v.source_id == key))
+        });
         self.phase = if self
             .sources
             .values()
@@ -374,9 +403,6 @@ impl Index {
                 && previous.reason == value.reason
             {
                 value.observed_at_ms = previous.observed_at_ms;
-            }
-            if previous == &value {
-                return false;
             }
         }
         let total: usize = self.rows.values().map(|e| e.variants.len()).sum();
@@ -419,6 +445,9 @@ impl Index {
             };
         }
         entry.variants = List::new(variants).expect("source bound");
+        if self.rows.get(&path) == Some(&entry) {
+            return false;
+        }
         let new_size = super::bounded_size(&entry, INDEX_BYTES).unwrap_or(INDEX_BYTES);
         let size = self
             .metadata_bytes
@@ -433,6 +462,7 @@ impl Index {
             return false;
         }
         self.metadata_bytes = size;
+        self.changed.insert(entry.id.clone());
         self.rows.insert(path, entry);
         true
     }

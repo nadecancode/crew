@@ -377,6 +377,7 @@ pub struct Scan {
     reading: Option<Reading>,
     visited: usize,
     limited: bool,
+    path_bytes: usize,
 }
 
 struct Reading {
@@ -397,6 +398,7 @@ impl Scan {
             }),
             visited: 0,
             limited: false,
+            path_bytes: 0,
         })
     }
 
@@ -416,7 +418,16 @@ impl Scan {
                 if let Some(name) = next {
                     self.visited += 1;
                     if let Some(name) = name {
-                        reading.names.push(name);
+                        let charge = name.len()
+                            + reading.parent.as_ref().map_or(0, |p| p.as_str().len() + 1)
+                            + 64;
+                        if self.path_bytes + charge > 4 * 1024 * 1024 {
+                            self.limited = true;
+                            self.visited = MAX_SCAN_ENTRIES;
+                        } else {
+                            self.path_bytes += charge;
+                            reading.names.push(name);
+                        }
                     }
                 } else {
                     let mut reading = self.reading.take().expect("present directory");
@@ -439,6 +450,7 @@ impl Scan {
             let Some(path) = self.pending.pop_front() else {
                 break;
             };
+            self.path_bytes = self.path_bytes.saturating_sub(path.as_str().len() + 64);
             if let Ok(meta) = root.metadata(&path, policy) {
                 if meta.is_dir() && policy.descends(&path) && !root.submodule(&path) {
                     directories.push(path.clone());
