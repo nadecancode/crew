@@ -255,6 +255,11 @@ export function analyzeSession(session, events, options = {}) {
   const { window = DEFAULTS.window, shortReplyChars = DEFAULTS.shortReplyChars } = options;
   const span = { since: options.since ?? null, until: options.until ?? null };
   const inSpan = ts => inWindow(ts, span);
+  // Nothing written after the cutoff is known at the cutoff: drop later or
+  // undated events (tool results included) before linking, so appending
+  // records cannot change a result. Earlier context and the request list,
+  // which joins by source line, stay whole.
+  if (span.until != null) events = events.filter(e => Number.isFinite(e.ts) && e.ts <= span.until);
   const runtime = session.runtime, agent = session.agent_id ?? 'unknown', file = session.file;
   const requests = [...(session.requests ?? [])].sort((a, b) => a.source_line - b.source_line);
   const reqIn = r => inSpan(r.timestamp_ms);

@@ -113,7 +113,7 @@ last line: `tools.mcp__crew__agent_inbox({limit: 8})`.
 - Total: 946 calls returned `No new messages.`; 945 of them were Codex calls.
 - Alone: 344 calls were alone, associated with 344 requests and 94.6 M input
   tokens, nearly all cache reads.
-- Bundled: 600 cost 9,600 result bytes; 2 had no later request.
+- Bundled: 599 cost 9,584 result bytes; 3 had no later request by the cutoff.
 
 **After an in-band delivery.** There were 1,123 inbox calls within three
 model responses of a delivery that carried every message's full body. 675

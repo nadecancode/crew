@@ -1,6 +1,6 @@
 # Turn efficiency candidates
 
-Generated 2026-10-08T10:09:35.376Z from native session files (cohort and usage via baseline.mjs). Window N=3 model responses; short reply ≤ 300 chars. Window … to 2026-10-08T09:59:18.000Z (inclusive) on subjects and associated requests. Counts are candidates selected by tool names and message wrappers; associated requests and costs are upper bounds, not avoidable cost.
+Generated 2026-10-08T10:19:52.010Z from native session files (cohort and usage via baseline.mjs). Window N=3 model responses; short reply ≤ 300 chars. Window … to 2026-10-08T09:59:18.000Z (inclusive) on subjects and associated requests. Counts are candidates selected by tool names and message wrappers; associated requests and costs are upper bounds, not avoidable cost.
 
 ## Cohort
 
@@ -22,9 +22,9 @@ candidate agent_inbox calls whose result says no new messages; associated reques
 | total | 946 | 29 | 14 | 344 | 94,639,962 | 94,452,096 | 0 | 187,866 | 39,487 | no price (+344 req no price) | 15,136 |
 | runtime codex | 945 | 28 | 13 | 344 | 94,639,962 | 94,452,096 | 0 | 187,866 | 39,487 | no price (+344 req no price) | 15,120 |
 | runtime claude | 1 | 1 | 1 | 0 | — | — | — | — | — | — | 16 |
-| kind bundled | 600 | 29 | 14 | 0 | — | — | — | — | — | — | 9,600 |
+| kind bundled | 599 | 29 | 14 | 0 | — | — | — | — | — | — | 9,584 |
 | kind alone | 344 | 20 | 11 | 344 | 94,639,962 | 94,452,096 | 0 | 187,866 | 39,487 | no price (+344 req no price) | 5,504 |
-| kind no_consumer | 2 | 2 | 2 | 0 | — | — | — | — | — | — | 32 |
+| kind no_consumer | 3 | 3 | 3 | 0 | — | — | — | — | — | — | 48 |
 
 Cost basis (total row): 344 on models without a listed price (gpt-6-astra, gpt-6.1-sol).
 

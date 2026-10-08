@@ -345,6 +345,27 @@ test('T2: with --until a turn is measured only up to the cutoff; later appends c
   assert.deepEqual([of(full, 'notice_turn')[0].candidate, of(full, 'notice_turn')[0].calls, full.partialTurns], [false, 1, 0]);
 });
 
+test('T2: a tool result written after the cutoff is not linked to an earlier call', () => {
+  const at = minute => `2026-10-08T${minute}:00Z`;
+  const head = [
+    { ...userText('[crew] Message from qa (type answer, id m-abab12345679):\n\nDone.'), timestamp: at('02:00') },
+    { ...call('r1', 'i', 'mcp__crew__agent_inbox'), timestamp: at('02:01') },
+  ];
+  const late = [
+    { ...result('i', 'No new messages.'), timestamp: at('03:00') },
+    { ...say('r2', 'Ok.'), timestamp: at('03:01') },
+  ];
+  const analyse = records => {
+    const requests = requestsAt(records).map(r => ({ ...r, timestamp_ms: Date.parse(records[r.source_line - 1].timestamp) }));
+    return analyzeSession({ runtime: 'claude', file: '/l.jsonl', agent_id: 'a', requests }, extractEvents('claude', rows(records)), { until: Date.parse(at('02:30')) });
+  };
+  const view = o => JSON.stringify({ findings: o.findings, readSizes: o.readSizes, inboxKinds: o.inboxKinds, calls: o.calls });
+  const before = analyse(head), after = analyse([...head, ...late]);
+  assert.equal(view(after), view(before));
+  assert.equal(of(after, 'inbox_empty').length, 0);
+  assert.equal(after.readSizes.length, 0);
+});
+
 test('T4: token sums keep per-metric coverage; unreported metrics are null, never 0', () => {
   const bucket = reqs => ({ count: reqs.length, sessions: new Set(['s']), agents: new Set(['a']), result_bytes: 0, reqs: new Map(reqs.map(r => [r, 1])) });
   const unknown = finalize(bucket([{ model: 'gpt-x' }]), new Map());
