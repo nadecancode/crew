@@ -1735,9 +1735,28 @@ mod ready_start_tests {
         // The usual delivery bookkeeping still records the typed obligation.
         daemon.delivered("owner", std::slice::from_ref(&message.id), "test-session");
         assert_eq!(
-            daemon.model().rt("owner").turn_messages,
-            [message.id.clone()]
+            daemon.model().rt("owner").turn_messages.as_slice(),
+            std::slice::from_ref(&message.id)
         );
+        // Reporting the already parked card does not reclaim the execution
+        // slot or dispatch it again, nor does ending this native turn.
+        let waiting = json!({
+            "id": 3, "method": "status_update", "params": {
+                "status": "waiting", "task_id": "parked", "note": parked.note
+            }
+        });
+        assert!(session.request(&waiting.to_string()).await);
+        assert!(rx.recv().await.unwrap().error.is_none());
+        assert_eq!(daemon.model().task("parked"), Some(&parked));
+        assert_eq!(daemon.agent("owner").unwrap().task.as_deref(), Some("next"));
+        daemon.turn_ended("owner", now_ms());
+        assert_eq!(daemon.model().task("parked"), Some(&parked));
+        assert_eq!(
+            daemon.model().task("next").unwrap().status,
+            TaskStatus::Working
+        );
+        assert_eq!(dispatched(daemon), 1);
+        assert_eq!(daemon.bus.history(Some("owner"), 100).unwrap().len(), 1);
         daemon
             .complete_task(&Who::Agent("owner".into()), None, "finished".into(), vec![])
             .await

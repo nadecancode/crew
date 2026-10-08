@@ -1,0 +1,457 @@
+{
+  "schema": 1,
+  "card": "scheduler-waiting-dispatch",
+  "source_checkpoint": "63b77bb122f20dce5469b83ff0ee5d4bdb76a503",
+  "base": "c958c233",
+  "production_after_checkpoint": "unchanged",
+  "test_followup": "Exact parked card preserved after Waiting report and native turn end; from_ref replaces cloned one-item comparison",
+  "workspace": {
+    "passed": 1360,
+    "failed": 0,
+    "ignored": 4
+  },
+  "catalog_change": "one build-time agent_status description edit; cached tools block invalidated on upgraded catalog",
+  "focused": {
+    "steps": [
+      {
+        "name": "ready",
+        "command": [
+          "cargo",
+          "test",
+          "--locked",
+          "-p",
+          "crew",
+          "--lib",
+          "ready_start_tests",
+          "--",
+          "--nocapture"
+        ],
+        "file": "target/scheduler-waiting-ready.log",
+        "began": "2026-10-08T18:13:09.550Z",
+        "ended": "2026-10-08T18:13:26.274Z",
+        "code": 0,
+        "signal": null,
+        "sha256": "d43a73e32b5afc10436696df96929b9b6740bee93de4418a575e9e64c19590e9"
+      },
+      {
+        "name": "planner",
+        "command": [
+          "cargo",
+          "test",
+          "--locked",
+          "-p",
+          "crew",
+          "--lib",
+          "scheduler::tests::",
+          "--",
+          "--nocapture"
+        ],
+        "file": "target/scheduler-waiting-planner.log",
+        "began": "2026-10-08T18:13:26.275Z",
+        "ended": "2026-10-08T18:13:26.428Z",
+        "code": 0,
+        "signal": null,
+        "sha256": "cafcf0e97a775f4cac4efd6f2be70c6567c06ecccab92dd7158561a1f5a0421c"
+      },
+      {
+        "name": "yield",
+        "command": [
+          "cargo",
+          "test",
+          "--locked",
+          "-p",
+          "crew",
+          "--lib",
+          "daemon::overlap::tests::only_the_turn_that_parked_a_card_holds_the_next_ready_dispatch",
+          "--",
+          "--nocapture"
+        ],
+        "file": "target/scheduler-waiting-yield.log",
+        "began": "2026-10-08T18:13:26.429Z",
+        "ended": "2026-10-08T18:13:26.585Z",
+        "code": 0,
+        "signal": null,
+        "sha256": "9231e89847ffd7fe54713383c1d7f415981621587396fd04aad31f21ca225278"
+      }
+    ]
+  },
+  "before_controls": {
+    "control": "Reinstate previous StatusUpdate and takes_work gates; preserve current regression tests",
+    "steps": [
+      {
+        "name": "planner",
+        "command": [
+          "cargo",
+          "test",
+          "--locked",
+          "-p",
+          "crew",
+          "--lib",
+          "scheduler::tests::an_active_nonparking_turn_with_waiting_cards_can_take_one_ready_card",
+          "--",
+          "--exact",
+          "--nocapture"
+        ],
+        "file": "target/scheduler-waiting-before-planner.log",
+        "began": "2026-10-08T18:14:10.968Z",
+        "ended": "2026-10-08T18:14:27.743Z",
+        "code": 101,
+        "signal": null,
+        "expected_code": 101,
+        "sha256": "fb44a02e05e44bcaa7682a88c5d92cf85f1796e7b65a0df28b2f977024201202"
+      },
+      {
+        "name": "explicit",
+        "command": [
+          "cargo",
+          "test",
+          "--locked",
+          "-p",
+          "crew",
+          "--lib",
+          "daemon::orchestrate::ready_start_tests::explicit_ready_start_uses_normal_dispatch_and_preserves_parked_work",
+          "--",
+          "--exact",
+          "--nocapture"
+        ],
+        "file": "target/scheduler-waiting-before-explicit.log",
+        "began": "2026-10-08T18:14:27.744Z",
+        "ended": "2026-10-08T18:14:28.003Z",
+        "code": 101,
+        "signal": null,
+        "expected_code": 101,
+        "sha256": "bf318d1f4cfe2dbcfeaff0c8da58bac77cb4fc0949c019e428a1b3abce336290"
+      }
+    ],
+    "restored": true
+  },
+  "initial_pipeline": {
+    "source": "63b77bb122f20dce5469b83ff0ee5d4bdb76a503",
+    "base": "c958c233",
+    "started_at": "2026-10-08T18:15:14.173Z",
+    "env": {
+      "CARGO_INCREMENTAL": "0",
+      "CREW_TEST_SANDBOX": "require",
+      "cleared": "GIT_*, HERDR_*, CREW_IDENTITY, CREW_SOCKET, CREW_LAUNCH",
+      "socat": "/nix/store/b6jsx5bi7n3hhfmdlhczl60ssvyphj3g-socat-1.8.1.3/bin/socat"
+    },
+    "steps": [
+      {
+        "name": "fmt",
+        "command": [
+          "cargo",
+          "fmt",
+          "--all",
+          "--check"
+        ],
+        "file": "target/scheduler-waiting-fmt.log",
+        "began": "2026-10-08T18:15:14.176Z",
+        "ended": "2026-10-08T18:15:15.437Z",
+        "available_before": 184182267904,
+        "code": 0,
+        "signal": null,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "results": []
+      },
+      {
+        "name": "workspace",
+        "command": [
+          "cargo",
+          "test",
+          "--locked",
+          "--workspace",
+          "--no-fail-fast",
+          "--",
+          "--test-threads=1"
+        ],
+        "file": "target/scheduler-waiting-workspace.log",
+        "began": "2026-10-08T18:15:15.439Z",
+        "ended": "2026-10-08T18:33:37.224Z",
+        "available_before": 184056561664,
+        "code": 0,
+        "signal": null,
+        "sha256": "1c08a633d9eb510699614d821f8b073583f76cacf236baef08caa29f1f99143a",
+        "results": [
+          "test result: ok. 577 passed; 0 failed; 1 ignored; 0 measured; 0 filtered out; finished in 281.31s",
+          "test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s",
+          "test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 11.78s",
+          "test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 3.10s",
+          "test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.09s",
+          "test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.09s",
+          "test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.41s",
+          "test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.07s",
+          "test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s",
+          "test result: ok. 14 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 11.64s",
+          "test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 7.82s",
+          "test result: ok. 8 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 15.41s",
+          "test result: ok. 8 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s",
+          "test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 10.52s",
+          "test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 1.43s",
+          "test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.53s",
+          "test result: ok. 0 passed; 0 failed; 1 ignored; 0 measured; 0 filtered out; finished in 0.00s",
+          "test result: ok. 29 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 79.45s",
+          "test result: ok. 29 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 7.28s",
+          "test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.92s",
+          "test result: ok. 89 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 517.01s",
+          "test result: ok. 12 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 32.43s",
+          "test result: ok. 15 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 7.89s",
+          "test result: ok. 21 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 46.36s",
+          "test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.66s",
+          "test result: ok. 16 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 18.30s",
+          "test result: ok. 9 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.02s",
+          "test result: ok. 78 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 2.09s",
+          "test result: ok. 35 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.16s",
+          "test result: ok. 7 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.02s",
+          "test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s",
+          "test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s",
+          "test result: ok. 5 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.02s",
+          "test result: ok. 5 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.03s",
+          "test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s",
+          "test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s",
+          "test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s",
+          "test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s",
+          "test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s",
+          "test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s",
+          "test result: ok. 5 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s",
+          "test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s",
+          "test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s",
+          "test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s",
+          "test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s",
+          "test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s",
+          "test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s",
+          "test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s",
+          "test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s",
+          "test result: ok. 19 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.10s",
+          "test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s",
+          "test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s",
+          "test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s",
+          "test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s",
+          "test result: ok. 92 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 2.17s",
+          "test result: ok. 6 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.08s",
+          "test result: ok. 7 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.02s",
+          "test result: ok. 6 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.09s",
+          "test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s",
+          "test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s",
+          "test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s",
+          "test result: ok. 15 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.03s",
+          "test result: ok. 9 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.03s",
+          "test result: ok. 135 passed; 0 failed; 2 ignored; 0 measured; 0 filtered out; finished in 16.12s",
+          "test result: ok. 61 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 1.37s",
+          "test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s",
+          "test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s",
+          "test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s",
+          "test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s",
+          "test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s",
+          "test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s",
+          "test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s",
+          "test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s",
+          "test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s"
+        ]
+      },
+      {
+        "name": "gateway",
+        "command": [
+          "cargo",
+          "test",
+          "--locked",
+          "-p",
+          "crew",
+          "--features",
+          "native-gateway",
+          "--test",
+          "native_gateway",
+          "--",
+          "--test-threads=1"
+        ],
+        "file": "target/scheduler-waiting-gateway.log",
+        "began": "2026-10-08T18:33:37.229Z",
+        "ended": "2026-10-08T18:34:24.239Z",
+        "available_before": 159541878784,
+        "code": 0,
+        "signal": null,
+        "sha256": "48cc02e82ea8b871b0c21db7169af425c552a6885d18ac47edb57ee5887bc322",
+        "results": [
+          "test result: ok. 21 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 32.73s"
+        ]
+      },
+      {
+        "name": "inventory",
+        "command": [
+          "cargo",
+          "test",
+          "--locked",
+          "-p",
+          "crew",
+          "--features",
+          "native-gateway",
+          "--lib",
+          "native::",
+          "--",
+          "--test-threads=1"
+        ],
+        "file": "target/scheduler-waiting-inventory.log",
+        "began": "2026-10-08T18:34:24.242Z",
+        "ended": "2026-10-08T18:34:43.784Z",
+        "available_before": 161574682624,
+        "code": 0,
+        "signal": null,
+        "sha256": "e4fc7cb3efd26cceda7fdd0330faa8731dc1ca88821ed490ffa6465265c80ca5",
+        "results": [
+          "test result: ok. 14 passed; 0 failed; 0 ignored; 0 measured; 576 filtered out; finished in 0.24s"
+        ]
+      },
+      {
+        "name": "clippy",
+        "command": [
+          "cargo",
+          "clippy",
+          "--locked",
+          "--workspace",
+          "--all-targets",
+          "--",
+          "-D",
+          "warnings"
+        ],
+        "file": "target/scheduler-waiting-clippy.log",
+        "began": "2026-10-08T18:34:43.786Z",
+        "ended": "2026-10-08T18:34:53.824Z",
+        "available_before": 161563258880,
+        "code": 101,
+        "signal": null,
+        "sha256": "1f6b80c6e5a6471abdfe94cddc730eeb89c19f596a5e5c1b6ed6ccbd81d130af",
+        "results": []
+      }
+    ],
+    "ended_at": "2026-10-08T18:34:53.824Z"
+  },
+  "followup_pipeline": {
+    "source": "63b77bb1 + test-only positive assertions and from_ref",
+    "steps": [
+      {
+        "name": "ready-final",
+        "command": [
+          "cargo",
+          "test",
+          "--locked",
+          "-p",
+          "crew",
+          "--lib",
+          "ready_start_tests",
+          "--",
+          "--nocapture"
+        ],
+        "file": "target/scheduler-waiting-ready-final.log",
+        "began": "2026-10-08T18:35:42.144Z",
+        "ended": "2026-10-08T18:35:59.892Z",
+        "available_before": 158387896320,
+        "code": 0,
+        "signal": null,
+        "sha256": "6aa42c81f174230c5ddc24bfc55a8574eb25f2ec932373eb0098e29ef5b07c28",
+        "results": [
+          "test result: ok. 5 passed; 0 failed; 0 ignored; 0 measured; 573 filtered out; finished in 1.05s"
+        ]
+      },
+      {
+        "name": "clippy-final",
+        "command": [
+          "cargo",
+          "clippy",
+          "--locked",
+          "--workspace",
+          "--all-targets",
+          "--",
+          "-D",
+          "warnings"
+        ],
+        "file": "target/scheduler-waiting-clippy-final.log",
+        "began": "2026-10-08T18:35:59.895Z",
+        "ended": "2026-10-08T18:36:10.040Z",
+        "available_before": 161539346432,
+        "code": 0,
+        "signal": null,
+        "sha256": "44d3ebb312d22e5699bbe7dd24c8144b79500784f205f4f0a48a3e253a29b94e",
+        "results": []
+      },
+      {
+        "name": "clippy-gateway",
+        "command": [
+          "cargo",
+          "clippy",
+          "--locked",
+          "-p",
+          "crew",
+          "--features",
+          "native-gateway",
+          "--all-targets",
+          "--",
+          "-D",
+          "warnings"
+        ],
+        "file": "target/scheduler-waiting-clippy-gateway.log",
+        "began": "2026-10-08T18:36:10.043Z",
+        "ended": "2026-10-08T18:36:20.528Z",
+        "available_before": 161055870976,
+        "code": 0,
+        "signal": null,
+        "sha256": "636a02a91a66a0688419e98cad107c20569b23d66ca84e9287fc4ca5651a2c62",
+        "results": []
+      },
+      {
+        "name": "msrv",
+        "command": [
+          "./scripts/check-msrv"
+        ],
+        "file": "target/scheduler-waiting-msrv.log",
+        "began": "2026-10-08T18:36:20.531Z",
+        "ended": "2026-10-08T18:36:40.681Z",
+        "available_before": 161550323712,
+        "code": 0,
+        "signal": null,
+        "sha256": "04bbf30510f3f3ef9a3123cb9455540e7a7d7dc5c3d5b750c6246cae442082c5",
+        "results": []
+      },
+      {
+        "name": "fmt-final",
+        "command": [
+          "cargo",
+          "fmt",
+          "--all",
+          "--check"
+        ],
+        "file": "target/scheduler-waiting-fmt-final.log",
+        "began": "2026-10-08T18:36:40.682Z",
+        "ended": "2026-10-08T18:36:41.906Z",
+        "available_before": 161749463040,
+        "code": 0,
+        "signal": null,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "results": []
+      }
+    ],
+    "ended_at": "2026-10-08T18:36:41.906Z"
+  },
+  "source_files": [
+    {
+      "path": "README.md",
+      "sha256": "17c4c8a6dd5273eba322f1a51eba206a1765fa61c7cd46d826328a4355c88ecc"
+    },
+    {
+      "path": "crates/crew/src/mcp/tools.rs",
+      "sha256": "366ef245f782e6eafc00cd0106506f6f3bb782235a0a4dfb9251f9108effc943"
+    },
+    {
+      "path": "crates/crew/src/scheduler/mod.rs",
+      "sha256": "c08dacc2055f6e9a2ca599d8a754464a6c8c5166c3dafe23dcbae65f1a2fb8c8"
+    },
+    {
+      "path": "crates/crew/src/daemon/orchestrate.rs",
+      "sha256": "40fe76d298ee13256c068965450f8f25482fc21864604715b6ea7751d7bcaaa3"
+    },
+    {
+      "path": "crates/crew/src/daemon/handlers.rs",
+      "sha256": "137445a710ab45fc2d4bca21eaf83d7e5262cc95ffcffb76d673e63a2591059a"
+    }
+  ],
+  "provider_calls": 0,
+  "operator_services_changed": false
+}
