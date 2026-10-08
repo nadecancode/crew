@@ -247,6 +247,10 @@ pub(crate) struct AgentRuntimeState {
     pub keepalive_sent_at: Option<i64>,
     /// When the rest's first keep-alive was sent.
     pub keepalive_rest_from: i64,
+    /// When the keep-alive's turn now running started (None: no keep-alive
+    /// turn runs). The member stays Waiting through it, so the health
+    /// check watches this turn on its own.
+    pub keepalive_turn_since: Option<i64>,
 }
 
 #[derive(Default)]

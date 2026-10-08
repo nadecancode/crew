@@ -117,6 +117,15 @@ impl Daemon {
             .is_some_and(|sent| sent > rt.turn_ended_at && rt.delivered_at < sent)
     }
 
+    /// A turn starts at `now`; whether it is a keep-alive's
+    /// ([`Self::keepalive_turn`]). The health check watches a keep-alive
+    /// turn from here, since the member stays Waiting through it.
+    pub(crate) fn keepalive_turn_started(&self, id: &str, now: i64) -> bool {
+        let keepalive = self.keepalive_turn(id);
+        self.model().rt(id).keepalive_turn_since = keepalive.then_some(now);
+        keepalive
+    }
+
     /// The members whose keep-alive is due at `now`, with when their cache
     /// was last read.
     fn keepalives_due(&self, now: i64, limits: &Limits) -> Vec<(String, i64)> {
@@ -530,6 +539,102 @@ mod tests {
                 daemon.model().task("card").unwrap().status,
                 TaskStatus::Waiting
             );
+        }
+    }
+
+    /// A keep-alive turn that never ends is caught like any stuck turn,
+    /// although the member stays Waiting through it: once it has shown no
+    /// activity for `unresponsive_secs`, the member is unresponsive. A turn
+    /// that ends, or that a message joins, is not watched as a keep-alive.
+    #[tokio::test(start_paused = true)]
+    async fn a_keep_alive_turn_that_never_ends_is_unresponsive() {
+        for bridge in [false, true] {
+            let (_temp, running, mut receiver) =
+                fixture("waiting", Some(TaskStatus::Waiting)).await;
+            let daemon = &running.daemon;
+            let limits = limits();
+            let quiet = (limits.unresponsive_secs as i64) * 1000;
+            if bridge {
+                daemon
+                    .model()
+                    .local
+                    .entry("owner".into())
+                    .or_default()
+                    .launch = Some("launch".into());
+                daemon
+                    .native_delivery_hook(
+                        "owner",
+                        Some("launch"),
+                        "native-bridge-ready",
+                        &json!({"session_id":"session"}),
+                    )
+                    .await
+                    .unwrap();
+            }
+            daemon.keepalive_at(2 * HOUR, &limits).await;
+            assert!(sent(&mut receiver), "bridge {bridge}");
+            if bridge {
+                daemon
+                    .native_delivery_hook(
+                        "owner",
+                        Some("launch"),
+                        "native-turn-started",
+                        &json!({"session_id":"session", "turn_id":"keepalive"}),
+                    )
+                    .await
+                    .unwrap();
+            } else {
+                daemon
+                    .on_signal("owner", crate::agents::Signal::TurnStarted)
+                    .await;
+            }
+            let since = daemon.model().rt("owner").keepalive_turn_since.unwrap();
+            daemon.task_health_at(since + quiet, &limits).await;
+            assert_eq!(
+                daemon.agent("owner").unwrap().status,
+                AgentStatus::Waiting,
+                "bridge {bridge}"
+            );
+            // Signs of life put it off.
+            daemon.model().rt("owner").last_output_at = since + quiet;
+            daemon.task_health_at(since + quiet + 1, &limits).await;
+            assert_eq!(
+                daemon.agent("owner").unwrap().status,
+                AgentStatus::Waiting,
+                "bridge {bridge}"
+            );
+            daemon.task_health_at(since + 2 * quiet + 1, &limits).await;
+            let owner = daemon.agent("owner").unwrap();
+            assert_eq!(owner.status, AgentStatus::Blocked, "bridge {bridge}");
+            assert_eq!(owner.block_kind.as_deref(), Some("unresponsive"));
+            let events = daemon.store.recent_events(Some("owner"), 1000).unwrap();
+            assert!(events
+                .iter()
+                .any(|e| e.event_type == "agent.unresponsive"
+                    && e.message.contains("keep-alive turn")));
+        }
+
+        // A keep-alive turn that ended, or that a message joined, is not
+        // watched as one.
+        for joined in [false, true] {
+            let (_temp, running, mut receiver) =
+                fixture("waiting", Some(TaskStatus::Waiting)).await;
+            let daemon = &running.daemon;
+            daemon.keepalive_at(2 * HOUR, &limits()).await;
+            assert!(sent(&mut receiver));
+            daemon
+                .on_signal("owner", crate::agents::Signal::TurnStarted)
+                .await;
+            assert!(daemon.model().rt("owner").keepalive_turn_since.is_some());
+            if joined {
+                daemon.delivered("owner", &[], "socket");
+                assert_eq!(daemon.agent("owner").unwrap().status, AgentStatus::Working);
+            } else {
+                daemon
+                    .on_signal("owner", crate::agents::Signal::TurnEnded)
+                    .await;
+            }
+            assert!(daemon.model().rt("owner").keepalive_turn_since.is_none());
         }
     }
 

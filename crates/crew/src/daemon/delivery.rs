@@ -311,7 +311,7 @@ impl Daemon {
                 return Ok(serde_json::json!({"ok":true}));
             }
             // A keep-alive's turn is not work: the member stays as it was.
-            let keepalive = self.keepalive_turn(id);
+            let keepalive = self.keepalive_turn_started(id, now_ms());
             {
                 let mut model = self.model();
                 let rt = model.rt(id);
@@ -842,7 +842,7 @@ impl Daemon {
 
     /// Bookkeeping once messages are in the session: a turn is (or will be)
     /// running on them.
-    fn delivered(&self, id: &str, ids: &[String], via: &str) {
+    pub(crate) fn delivered(&self, id: &str, ids: &[String], via: &str) {
         if let Err(e) = self.bus.mark_delivered(id, ids) {
             tracing::error!("marking messages delivered for {id}: {e}");
         }
@@ -855,6 +855,8 @@ impl Daemon {
             let rt = model.rt(id);
             rt.nudges = 0;
             rt.idle_since = None;
+            // A turn a message joins is work: Working, watched as such.
+            rt.keepalive_turn_since = None;
             rt.delivered_at = now;
             rt.turn_messages.extend(ids.iter().cloned());
             if interactive {

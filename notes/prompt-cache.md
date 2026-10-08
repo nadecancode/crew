@@ -954,7 +954,12 @@ reminder (`Daemon::inject`), never a message:
     stalled team's stall would end with the turn and be reported to the
     orchestrator again 12 s later: a message and an orchestrator turn
     after every worker keep-alive (found by qa and reviewer on
-    `ef969fb9`; regression `a_keep_alive_turn_does_not_report_a_stall_again`).
+    `ef969fb9`; regression `a_keep_alive_turn_does_not_report_a_stall_again`);
+  - a keep-alive turn is still watched: the health check covers it as it
+    covers a Working turn, from the turn's start, output and activity, and
+    a member whose keep-alive turn shows nothing for `unresponsive_secs` is
+    unresponsive (found by cache-reviewer on `c1566c70`; regression
+    `a_keep_alive_turn_that_never_ends_is_unresponsive`).
 - **Visibility.** Each keep-alive is an `agent.keepalive` event, emitted
   before the line is handed to the session, so it precedes every request
   the keep-alive causes. Its data holds `n`, `max`, `rested_ms`,
