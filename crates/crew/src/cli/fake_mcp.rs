@@ -61,8 +61,9 @@ pub struct FakeMcpArgs {
     #[arg(long)]
     refuse_initialize: bool,
     /// Answer this method with a broken message: over streamable HTTP, JSON
-    /// cut short or an event stream whose only event is not JSON; over SSE,
-    /// an event that is not JSON
+    /// cut short, or an event stream whose only message is not JSON and
+    /// which then stays open with keep-alive comments; over SSE, an event
+    /// that is not JSON
     #[arg(long, value_name = "METHOD")]
     break_answer: Option<String>,
     /// `NAME=<sha256 hex>`: the `env` tool says whether the variable's value
@@ -598,7 +599,17 @@ mod http {
                 if stream_responses {
                     start_stream(stream.as_mut(), &headers)?;
                     event(stream.as_mut(), None, "{broken")?;
-                    end_stream(stream.as_mut())?;
+                    // Then keep the stream alive with comments, never ending
+                    // it: the broken message must be enough.
+                    std::thread::spawn(move || {
+                        let alive = ": keep-alive\n\n";
+                        while write!(stream, "{:x}\r\n{alive}\r\n", alive.len())
+                            .and_then(|()| stream.flush())
+                            .is_ok()
+                        {
+                            std::thread::sleep(std::time::Duration::from_millis(100));
+                        }
+                    });
                 } else {
                     headers.push(("Content-Type", "application/json".to_string()));
                     respond(

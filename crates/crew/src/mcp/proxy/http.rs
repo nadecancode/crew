@@ -758,27 +758,29 @@ impl Connection for Streamable {
                 }
             }
             let unanswered = if response.is_event_stream() {
-                let mut answered = false;
-                let mut problem = None;
-                let why = loop {
+                // The stream is read until it answers the request; then, as
+                // the server should close it anyway, it is let go. A message
+                // that is not JSON may have been the answer: the request is
+                // refused at once rather than left to wait on later events.
+                loop {
                     match next_event(response.body.as_mut()) {
                         Ok(Some((kind, data))) if kind == "message" => {
                             note_protocol(initializing, &data, &protocol);
                             match pass_on(&data, &events, id.as_ref()) {
-                                Ok(yes) => answered |= yes,
-                                Err(e) => problem = Some(format!("{e:#}")),
+                                Ok(true) => break None,
+                                Ok(false) => {}
+                                Err(e) => break Some(format!("{e:#}")),
                             }
                         }
                         Ok(Some(_)) => {}
                         Ok(None) => {
-                            break problem.unwrap_or_else(|| {
-                                "the server's event stream ended without an answer".into()
-                            })
+                            break Some("the server's event stream ended without an answer".into())
                         }
-                        Err(e) => break format!("reading the server's event stream failed: {e:#}"),
+                        Err(e) => {
+                            break Some(format!("reading the server's event stream failed: {e:#}"))
+                        }
                     }
-                };
-                (!answered).then_some(why)
+                }
             } else {
                 let mut text = String::new();
                 let read = (&mut response.body)

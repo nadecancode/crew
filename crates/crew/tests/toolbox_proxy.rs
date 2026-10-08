@@ -839,8 +839,9 @@ fn a_server_that_stalls_is_given_up_on_by_the_deadline() {
     }
 }
 
-// A request the server answers with a broken message (JSON cut short, an
-// event stream with no answer in it) is answered with an error, never left
+// A request the server answers with a broken message (JSON cut short, or an
+// event stream whose message is not JSON and which then stays open with
+// keep-alive comments) is answered with an error at once, never left
 // waiting; the session goes on.
 #[test]
 fn a_broken_answer_is_answered_with_an_error() {
