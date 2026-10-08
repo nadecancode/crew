@@ -1176,6 +1176,15 @@ measured benefit gate fails, deliver a doc-only closure. The earlier D3
 implementation-card row is narrowed by this revision; no manifest or storage
 change is authorized by that row alone.
 
+The [fresh native rendering checkpoint](prompt-cache/standing-rendering.md)
+records seven isolated pairs, exact text positions and the actual cache
+boundaries. Cwd did not precede Crew identity in those captures. String ordering
+alone does not establish a reusable boundary; the Claude shared-section seam is
+endpoint-qualified and the fixture's hook-failure case forbids stripping the
+original append text before load. No product change or cache saving is claimed.
+The checkpoint proposes doc-only closure for ordinary local CLI launches,
+pending review; it does not authorize a remote-ownership flag or a private hint.
+
 ### D4. Reduce wake-ups while keeping work moving
 
 Keep the existing status-message gather policy and 90-second/three-attempt

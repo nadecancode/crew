@@ -1,0 +1,2644 @@
+{
+  "cases": [
+    {
+      "components": [
+        {
+          "equal": true,
+          "kind": "system",
+          "lcp_utf8_bytes": 70,
+          "left_bytes": 70,
+          "pointer": "/system/0/text",
+          "right_bytes": 70
+        },
+        {
+          "equal": true,
+          "kind": "system",
+          "lcp_utf8_bytes": 57,
+          "left_bytes": 57,
+          "pointer": "/system/1/text",
+          "right_bytes": 57
+        },
+        {
+          "equal": false,
+          "kind": "system",
+          "lcp_utf8_bytes": 28523,
+          "left_bytes": 36177,
+          "pointer": "/system/2/text",
+          "right_bytes": 36177
+        },
+        {
+          "equal": false,
+          "kind": "user",
+          "lcp_utf8_bytes": 252,
+          "left_bytes": 1537,
+          "pointer": "/messages/0/content/0/text",
+          "right_bytes": 1537
+        },
+        {
+          "equal": true,
+          "kind": "user",
+          "lcp_utf8_bytes": 176,
+          "left_bytes": 176,
+          "pointer": "/messages/0/content/1/text",
+          "right_bytes": 176
+        },
+        {
+          "equal": true,
+          "kind": "user",
+          "lcp_utf8_bytes": 2949,
+          "left_bytes": 2949,
+          "pointer": "/messages/0/content/2/text",
+          "right_bytes": 2949
+        },
+        {
+          "equal": true,
+          "kind": "user",
+          "lcp_utf8_bytes": 284,
+          "left_bytes": 284,
+          "pointer": "/messages/0/content/3/text",
+          "right_bytes": 284
+        },
+        {
+          "equal": true,
+          "kind": "user",
+          "lcp_utf8_bytes": 6013,
+          "left_bytes": 6013,
+          "pointer": "/messages/0/content/4/text",
+          "right_bytes": 6013
+        },
+        {
+          "equal": true,
+          "kind": "user",
+          "lcp_utf8_bytes": 86,
+          "left_bytes": 86,
+          "pointer": "/messages/0/content/5/text",
+          "right_bytes": 86
+        },
+        {
+          "equal": false,
+          "kind": "user",
+          "lcp_utf8_bytes": 272,
+          "left_bytes": 619,
+          "pointer": "/messages/0/content/6/text",
+          "right_bytes": 619
+        },
+        {
+          "equal": true,
+          "kind": "user",
+          "lcp_utf8_bytes": 64,
+          "left_bytes": 64,
+          "pointer": "/messages/0/content/7/text",
+          "right_bytes": 64
+        },
+        {
+          "equal": true,
+          "kind": "user",
+          "lcp_utf8_bytes": 584,
+          "left_bytes": 584,
+          "pointer": "/messages/0/content/8/text",
+          "right_bytes": 584
+        },
+        {
+          "equal": false,
+          "kind": "user",
+          "lcp_utf8_bytes": 25,
+          "left_bytes": 170,
+          "pointer": "/messages/0/content/9/text",
+          "right_bytes": 170
+        }
+      ],
+      "compose_probe": null,
+      "crew_sha256": "c8ce44acb63a0ab9651ae513600f19dd098d8c9dd5adab19826498c53f6557db",
+      "endpoint_shape": "loopback",
+      "isolation": "worktree",
+      "members": [
+        {
+          "blocks": [
+            {
+              "bytes": 70,
+              "kind": "system",
+              "offsets_utf8": {},
+              "pointer": "/system/0/text",
+              "sha256": "06622cb9757e5d8eb8d3ff189b63f87f556c3bd55f7fc904d4a0436f8af1c7c3"
+            },
+            {
+              "bytes": 57,
+              "kind": "system",
+              "offsets_utf8": {},
+              "pointer": "/system/1/text",
+              "sha256": "2719b7a469d904b3281d8488976f33103944211279bddf04c05bca44d184dae6"
+            },
+            {
+              "bytes": 36177,
+              "kind": "system",
+              "offsets_utf8": {
+                "coordination": 28932,
+                "member_branch": 34411,
+                "member_identity": 28514,
+                "member_tone": 10127
+              },
+              "pointer": "/system/2/text",
+              "sha256": "a3189e38d38f1ac2409e5cff1eedb647d1423456015371e2b31163218779dbf8"
+            },
+            {
+              "bytes": 1537,
+              "kind": "user",
+              "offsets_utf8": {
+                "workdir": 115
+              },
+              "pointer": "/messages/0/content/0/text",
+              "sha256": "bd08f3e0cfa07dfa15493d2fdc6f9736c3f4155016aa17047ed79215257942d8"
+            },
+            {
+              "bytes": 176,
+              "kind": "user",
+              "offsets_utf8": {},
+              "pointer": "/messages/0/content/1/text",
+              "sha256": "97c808babde1e22c53c5672ec87de5288a2e600f531a25aa094c0cb9a471a65d"
+            },
+            {
+              "bytes": 2949,
+              "kind": "user",
+              "offsets_utf8": {},
+              "pointer": "/messages/0/content/2/text",
+              "sha256": "1200d899ebae31f3b06953c0c1d54a5d1b93c61f0de3a1b01b92dfa4a3b47c84"
+            },
+            {
+              "bytes": 284,
+              "kind": "user",
+              "offsets_utf8": {},
+              "pointer": "/messages/0/content/3/text",
+              "sha256": "c69b35dff1cd679a7ca4ba914df2298042c08680cc054b1a15c23a6fac53a145"
+            },
+            {
+              "bytes": 6013,
+              "kind": "user",
+              "offsets_utf8": {},
+              "pointer": "/messages/0/content/4/text",
+              "sha256": "afa947b9f47bd2076a77b400959ca672aae479b39d95b4706ef5c8ff522357c1"
+            },
+            {
+              "bytes": 86,
+              "kind": "user",
+              "offsets_utf8": {},
+              "pointer": "/messages/0/content/5/text",
+              "sha256": "d1b5389a85a66596a261545470fb784c0be377158bbf7e47a9671ee84dfcc533"
+            },
+            {
+              "bytes": 619,
+              "kind": "user",
+              "offsets_utf8": {
+                "member_branch": 265
+              },
+              "pointer": "/messages/0/content/6/text",
+              "sha256": "078b293469334ba61047df75390c3a69f8ed1b4987f39afe342203225877c636"
+            },
+            {
+              "bytes": 64,
+              "kind": "user",
+              "offsets_utf8": {},
+              "pointer": "/messages/0/content/7/text",
+              "sha256": "2cb88daeb5e426c17e4da1d7fe002568590ab5f247411891063c1871ad532eb6"
+            },
+            {
+              "bytes": 584,
+              "kind": "user",
+              "offsets_utf8": {},
+              "pointer": "/messages/0/content/8/text",
+              "sha256": "2f9535d3596882dfa1450421e3901bf64e2342ad952d079467139f465a12f88a"
+            },
+            {
+              "bytes": 170,
+              "kind": "user",
+              "offsets_utf8": {},
+              "pointer": "/messages/0/content/9/text",
+              "sha256": "e3bae99569f9952891932768bfa48f21cfd0a79c9202f059893ddec8b7fc1469"
+            }
+          ],
+          "catalog_sha256": "d831520174b35cb1121ca4f88bf6b1ab014369c2ac4bde0888a10a3dcb309f46",
+          "id": "x",
+          "prompt_cache_key_sha256": null,
+          "request": "claude-worktree-01/request-002.json",
+          "request_sha256": "72872786ea2d0aefbb9fef95cebb553af2a92a3841d5eb3b483a307df7b0de2b",
+          "session_id_sha256": "66ef463a3957843b4b2395a9533b6f5a9a2f1f562237f9ff55809b0eaca33eff",
+          "system_cache_boundaries": [
+            {
+              "bytes": 70,
+              "cache_control": null,
+              "pointer": "/system/0",
+              "sha256": "06622cb9757e5d8eb8d3ff189b63f87f556c3bd55f7fc904d4a0436f8af1c7c3"
+            },
+            {
+              "bytes": 57,
+              "cache_control": {
+                "type": "ephemeral"
+              },
+              "pointer": "/system/1",
+              "sha256": "2719b7a469d904b3281d8488976f33103944211279bddf04c05bca44d184dae6"
+            },
+            {
+              "bytes": 36177,
+              "cache_control": {
+                "type": "ephemeral"
+              },
+              "pointer": "/system/2",
+              "sha256": "a3189e38d38f1ac2409e5cff1eedb647d1423456015371e2b31163218779dbf8"
+            }
+          ],
+          "toolbox_fingerprint": "14791e0ea022bdb7bcdb6d4fadcd718c61a483270a118c02cd4f4b49864e04a2",
+          "workdir": "work/.crew/worktrees/x"
+        },
+        {
+          "blocks": [
+            {
+              "bytes": 70,
+              "kind": "system",
+              "offsets_utf8": {},
+              "pointer": "/system/0/text",
+              "sha256": "06622cb9757e5d8eb8d3ff189b63f87f556c3bd55f7fc904d4a0436f8af1c7c3"
+            },
+            {
+              "bytes": 57,
+              "kind": "system",
+              "offsets_utf8": {},
+              "pointer": "/system/1/text",
+              "sha256": "2719b7a469d904b3281d8488976f33103944211279bddf04c05bca44d184dae6"
+            },
+            {
+              "bytes": 36177,
+              "kind": "system",
+              "offsets_utf8": {
+                "coordination": 28932,
+                "member_branch": 34411,
+                "member_identity": 28514,
+                "member_tone": 10127
+              },
+              "pointer": "/system/2/text",
+              "sha256": "b59fec2d58301d68211f021b973e633e5d76f024f1a774a53a31a307ebe0a8b7"
+            },
+            {
+              "bytes": 1537,
+              "kind": "user",
+              "offsets_utf8": {
+                "workdir": 115
+              },
+              "pointer": "/messages/0/content/0/text",
+              "sha256": "3082533e33bd08dd1f1717954188eaefe3af38e4d6ae2f9471fc4046d2141eb9"
+            },
+            {
+              "bytes": 176,
+              "kind": "user",
+              "offsets_utf8": {},
+              "pointer": "/messages/0/content/1/text",
+              "sha256": "97c808babde1e22c53c5672ec87de5288a2e600f531a25aa094c0cb9a471a65d"
+            },
+            {
+              "bytes": 2949,
+              "kind": "user",
+              "offsets_utf8": {},
+              "pointer": "/messages/0/content/2/text",
+              "sha256": "1200d899ebae31f3b06953c0c1d54a5d1b93c61f0de3a1b01b92dfa4a3b47c84"
+            },
+            {
+              "bytes": 284,
+              "kind": "user",
+              "offsets_utf8": {},
+              "pointer": "/messages/0/content/3/text",
+              "sha256": "c69b35dff1cd679a7ca4ba914df2298042c08680cc054b1a15c23a6fac53a145"
+            },
+            {
+              "bytes": 6013,
+              "kind": "user",
+              "offsets_utf8": {},
+              "pointer": "/messages/0/content/4/text",
+              "sha256": "afa947b9f47bd2076a77b400959ca672aae479b39d95b4706ef5c8ff522357c1"
+            },
+            {
+              "bytes": 86,
+              "kind": "user",
+              "offsets_utf8": {},
+              "pointer": "/messages/0/content/5/text",
+              "sha256": "d1b5389a85a66596a261545470fb784c0be377158bbf7e47a9671ee84dfcc533"
+            },
+            {
+              "bytes": 619,
+              "kind": "user",
+              "offsets_utf8": {
+                "member_branch": 265
+              },
+              "pointer": "/messages/0/content/6/text",
+              "sha256": "e7333cd28efdb75d424d394cbed9284c370e0a070ba42d5057718c63bdf637ef"
+            },
+            {
+              "bytes": 64,
+              "kind": "user",
+              "offsets_utf8": {},
+              "pointer": "/messages/0/content/7/text",
+              "sha256": "2cb88daeb5e426c17e4da1d7fe002568590ab5f247411891063c1871ad532eb6"
+            },
+            {
+              "bytes": 584,
+              "kind": "user",
+              "offsets_utf8": {},
+              "pointer": "/messages/0/content/8/text",
+              "sha256": "2f9535d3596882dfa1450421e3901bf64e2342ad952d079467139f465a12f88a"
+            },
+            {
+              "bytes": 170,
+              "kind": "user",
+              "offsets_utf8": {},
+              "pointer": "/messages/0/content/9/text",
+              "sha256": "0e74673c06233fb1ad068660e51e5ce4682f501cecc8b6140ba38cdcd6ad2586"
+            }
+          ],
+          "catalog_sha256": "d831520174b35cb1121ca4f88bf6b1ab014369c2ac4bde0888a10a3dcb309f46",
+          "id": "y",
+          "prompt_cache_key_sha256": null,
+          "request": "claude-worktree-01/request-001.json",
+          "request_sha256": "773e8f4ff5fc87f3baee50201f2c421a8828dd36f18bd0f733c253a9a5067762",
+          "session_id_sha256": "be744c48deb30a0a52e0783c1224b81a72197e1c7d582bbd17f1955f80822d3f",
+          "system_cache_boundaries": [
+            {
+              "bytes": 70,
+              "cache_control": null,
+              "pointer": "/system/0",
+              "sha256": "06622cb9757e5d8eb8d3ff189b63f87f556c3bd55f7fc904d4a0436f8af1c7c3"
+            },
+            {
+              "bytes": 57,
+              "cache_control": {
+                "type": "ephemeral"
+              },
+              "pointer": "/system/1",
+              "sha256": "2719b7a469d904b3281d8488976f33103944211279bddf04c05bca44d184dae6"
+            },
+            {
+              "bytes": 36177,
+              "cache_control": {
+                "type": "ephemeral"
+              },
+              "pointer": "/system/2",
+              "sha256": "b59fec2d58301d68211f021b973e633e5d76f024f1a774a53a31a307ebe0a8b7"
+            }
+          ],
+          "toolbox_fingerprint": "14791e0ea022bdb7bcdb6d4fadcd718c61a483270a118c02cd4f4b49864e04a2",
+          "workdir": "work/.crew/worktrees/y"
+        }
+      ],
+      "name": "claude-worktree-01",
+      "native_binary": {
+        "path": "/home/nade/.local/share/claude/versions/2.1.291",
+        "sha256": "078fad28d0297c9a25d306b635b2d8816c6839347520f29eb54ffea5d56142fb"
+      },
+      "remaining_processes": 0,
+      "runtime": "claude",
+      "sdk_sha256": "c05419d753bc81d991ddec4b66af17a9172f498e59d28fad07a8e676635c07ce"
+    },
+    {
+      "components": [
+        {
+          "equal": true,
+          "kind": "developer",
+          "lcp_utf8_bytes": 18043,
+          "left_bytes": 18043,
+          "pointer": "/input/1/content/0/text",
+          "right_bytes": 18043
+        },
+        {
+          "equal": false,
+          "kind": "developer",
+          "lcp_utf8_bytes": 9,
+          "left_bytes": 9107,
+          "pointer": "/input/2/content/0/text",
+          "right_bytes": 9107
+        },
+        {
+          "equal": true,
+          "kind": "developer",
+          "lcp_utf8_bytes": 2068,
+          "left_bytes": 2068,
+          "pointer": "/input/2/content/1/text",
+          "right_bytes": 2068
+        },
+        {
+          "equal": false,
+          "kind": "developer",
+          "lcp_utf8_bytes": 579,
+          "left_bytes": 618,
+          "pointer": "/input/2/content/2/text",
+          "right_bytes": 618
+        },
+        {
+          "equal": true,
+          "kind": "developer",
+          "lcp_utf8_bytes": 920,
+          "left_bytes": 920,
+          "pointer": "/input/2/content/3/text",
+          "right_bytes": 920
+        },
+        {
+          "equal": true,
+          "kind": "developer",
+          "lcp_utf8_bytes": 2429,
+          "left_bytes": 2429,
+          "pointer": "/input/3/content/0/text",
+          "right_bytes": 2429
+        },
+        {
+          "equal": true,
+          "kind": "developer",
+          "lcp_utf8_bytes": 271,
+          "left_bytes": 271,
+          "pointer": "/input/4/content/0/text",
+          "right_bytes": 271
+        },
+        {
+          "equal": false,
+          "kind": "user",
+          "lcp_utf8_bytes": 165,
+          "left_bytes": 1700,
+          "pointer": "/input/5/content/0/text",
+          "right_bytes": 1700
+        },
+        {
+          "equal": false,
+          "kind": "user",
+          "lcp_utf8_bytes": 25,
+          "left_bytes": 170,
+          "pointer": "/input/6/content/0/text",
+          "right_bytes": 170
+        }
+      ],
+      "compose_probe": null,
+      "crew_sha256": "c8ce44acb63a0ab9651ae513600f19dd098d8c9dd5adab19826498c53f6557db",
+      "endpoint_shape": "loopback",
+      "isolation": "worktree",
+      "members": [
+        {
+          "blocks": [
+            {
+              "bytes": 18043,
+              "kind": "developer",
+              "offsets_utf8": {},
+              "pointer": "/input/1/content/0/text",
+              "sha256": "b707476816bfe5e571a1bd2179f130fff2b132da5ab8e61063acdb7fd24daf12"
+            },
+            {
+              "bytes": 9107,
+              "kind": "developer",
+              "offsets_utf8": {
+                "coordination": 418,
+                "member_branch": 5897,
+                "member_identity": 0,
+                "member_tone": 7664
+              },
+              "pointer": "/input/2/content/0/text",
+              "sha256": "8a596a6a03d827e0f95c92d5c55b50e47a153fe79e4054f0c571c7d8f4bdc5ce"
+            },
+            {
+              "bytes": 2068,
+              "kind": "developer",
+              "offsets_utf8": {},
+              "pointer": "/input/2/content/1/text",
+              "sha256": "953d9cc50505bed22a219fe5e64d2ef49e7734081208a230e592fbbaeb9164f3"
+            },
+            {
+              "bytes": 618,
+              "kind": "developer",
+              "offsets_utf8": {
+                "workdir": 443
+              },
+              "pointer": "/input/2/content/2/text",
+              "sha256": "929cf8a91ea3b633a1faba0743e6aad04a44d533f03f906239c2770a1ad2fb11"
+            },
+            {
+              "bytes": 920,
+              "kind": "developer",
+              "offsets_utf8": {},
+              "pointer": "/input/2/content/3/text",
+              "sha256": "bec8e7b5358a20b4cd552dae768b3a65ebf4ea9fb2645220085b84d60ee3fe81"
+            },
+            {
+              "bytes": 2429,
+              "kind": "developer",
+              "offsets_utf8": {},
+              "pointer": "/input/3/content/0/text",
+              "sha256": "47091490938505958b0c22ff42db6fd79b272a2af6923166f4c2cc53c4fe0df4"
+            },
+            {
+              "bytes": 271,
+              "kind": "developer",
+              "offsets_utf8": {},
+              "pointer": "/input/4/content/0/text",
+              "sha256": "6ded806e3cdbb35599ecaf8742574bc5274908472b1729090010c404c2151e8e"
+            },
+            {
+              "bytes": 1700,
+              "kind": "user",
+              "offsets_utf8": {
+                "workdir": 29
+              },
+              "pointer": "/input/5/content/0/text",
+              "sha256": "a21f6e78a83c268021f918f6593a0422ae82cd74f49fe1291a51eaaecee2f103"
+            },
+            {
+              "bytes": 170,
+              "kind": "user",
+              "offsets_utf8": {},
+              "pointer": "/input/6/content/0/text",
+              "sha256": "e3bae99569f9952891932768bfa48f21cfd0a79c9202f059893ddec8b7fc1469"
+            }
+          ],
+          "catalog_sha256": "8f34624d68600a77fb41b68933771382c7fcfd558dee0ef3ff986c11eaf1cccf",
+          "id": "x",
+          "prompt_cache_key_sha256": "e72643ec2df759995a9ab2a1d0c3678eca3fa158dd422af245d62759bbe42197",
+          "request": "codex-worktree-01/request-002.json",
+          "request_sha256": "793606f467985306c12582865935a013732a49fdfe359e60092b3430242ba8b0",
+          "session_id_sha256": "e72643ec2df759995a9ab2a1d0c3678eca3fa158dd422af245d62759bbe42197",
+          "system_cache_boundaries": [],
+          "toolbox_fingerprint": "a82b256c283097d15992b2a2b2ea355688b7265df741dab964721679deeefb21",
+          "workdir": "work/.crew/worktrees/x"
+        },
+        {
+          "blocks": [
+            {
+              "bytes": 18043,
+              "kind": "developer",
+              "offsets_utf8": {},
+              "pointer": "/input/1/content/0/text",
+              "sha256": "b707476816bfe5e571a1bd2179f130fff2b132da5ab8e61063acdb7fd24daf12"
+            },
+            {
+              "bytes": 9107,
+              "kind": "developer",
+              "offsets_utf8": {
+                "coordination": 418,
+                "member_branch": 5897,
+                "member_identity": 0,
+                "member_tone": 7664
+              },
+              "pointer": "/input/2/content/0/text",
+              "sha256": "2db1cde1001605fd25a79ef99040bf48805d75d13175e387979570e228e50278"
+            },
+            {
+              "bytes": 2068,
+              "kind": "developer",
+              "offsets_utf8": {},
+              "pointer": "/input/2/content/1/text",
+              "sha256": "953d9cc50505bed22a219fe5e64d2ef49e7734081208a230e592fbbaeb9164f3"
+            },
+            {
+              "bytes": 618,
+              "kind": "developer",
+              "offsets_utf8": {
+                "workdir": 443
+              },
+              "pointer": "/input/2/content/2/text",
+              "sha256": "9cb15ad142ffa5fecf00179a75d8c94ace14919081e35e8ee1a1547f4ff1de1d"
+            },
+            {
+              "bytes": 920,
+              "kind": "developer",
+              "offsets_utf8": {},
+              "pointer": "/input/2/content/3/text",
+              "sha256": "bec8e7b5358a20b4cd552dae768b3a65ebf4ea9fb2645220085b84d60ee3fe81"
+            },
+            {
+              "bytes": 2429,
+              "kind": "developer",
+              "offsets_utf8": {},
+              "pointer": "/input/3/content/0/text",
+              "sha256": "47091490938505958b0c22ff42db6fd79b272a2af6923166f4c2cc53c4fe0df4"
+            },
+            {
+              "bytes": 271,
+              "kind": "developer",
+              "offsets_utf8": {},
+              "pointer": "/input/4/content/0/text",
+              "sha256": "6ded806e3cdbb35599ecaf8742574bc5274908472b1729090010c404c2151e8e"
+            },
+            {
+              "bytes": 1700,
+              "kind": "user",
+              "offsets_utf8": {
+                "workdir": 29
+              },
+              "pointer": "/input/5/content/0/text",
+              "sha256": "875788a8f7cd7345d0e1f172bf6f4dd8435ca004ba7a660e42f8140bdbbcf544"
+            },
+            {
+              "bytes": 170,
+              "kind": "user",
+              "offsets_utf8": {},
+              "pointer": "/input/6/content/0/text",
+              "sha256": "0e74673c06233fb1ad068660e51e5ce4682f501cecc8b6140ba38cdcd6ad2586"
+            }
+          ],
+          "catalog_sha256": "8f34624d68600a77fb41b68933771382c7fcfd558dee0ef3ff986c11eaf1cccf",
+          "id": "y",
+          "prompt_cache_key_sha256": "a92d5dc464eda395447bf028a6eb22f3a6c3c5e2b38c5bb855660175502454ae",
+          "request": "codex-worktree-01/request-001.json",
+          "request_sha256": "38592ef78b9898f28ade05a9f567966436e6f00beb8147367a40099e7296cc29",
+          "session_id_sha256": "a92d5dc464eda395447bf028a6eb22f3a6c3c5e2b38c5bb855660175502454ae",
+          "system_cache_boundaries": [],
+          "toolbox_fingerprint": "a82b256c283097d15992b2a2b2ea355688b7265df741dab964721679deeefb21",
+          "workdir": "work/.crew/worktrees/y"
+        }
+      ],
+      "name": "codex-worktree-01",
+      "native_binary": {
+        "path": "/nix/store/pmh4yzyd0g8rz5l1jv2lnsb2gz33ljhi-codex-0.159.0/libexec/codex",
+        "sha256": "d2752c52353401f7f6efbfcea68796f4f7a3d3e4769f5d1da53fa49d4856b72f"
+      },
+      "remaining_processes": 0,
+      "runtime": "codex"
+    },
+    {
+      "components": [
+        {
+          "equal": true,
+          "kind": "system",
+          "lcp_utf8_bytes": 70,
+          "left_bytes": 70,
+          "pointer": "/system/0/text",
+          "right_bytes": 70
+        },
+        {
+          "equal": true,
+          "kind": "system",
+          "lcp_utf8_bytes": 57,
+          "left_bytes": 57,
+          "pointer": "/system/1/text",
+          "right_bytes": 57
+        },
+        {
+          "equal": false,
+          "kind": "system",
+          "lcp_utf8_bytes": 28519,
+          "left_bytes": 36009,
+          "pointer": "/system/2/text",
+          "right_bytes": 36009
+        },
+        {
+          "equal": true,
+          "kind": "user",
+          "lcp_utf8_bytes": 822,
+          "left_bytes": 822,
+          "pointer": "/messages/0/content/0/text",
+          "right_bytes": 822
+        },
+        {
+          "equal": true,
+          "kind": "user",
+          "lcp_utf8_bytes": 176,
+          "left_bytes": 176,
+          "pointer": "/messages/0/content/1/text",
+          "right_bytes": 176
+        },
+        {
+          "equal": true,
+          "kind": "user",
+          "lcp_utf8_bytes": 2949,
+          "left_bytes": 2949,
+          "pointer": "/messages/0/content/2/text",
+          "right_bytes": 2949
+        },
+        {
+          "equal": true,
+          "kind": "user",
+          "lcp_utf8_bytes": 284,
+          "left_bytes": 284,
+          "pointer": "/messages/0/content/3/text",
+          "right_bytes": 284
+        },
+        {
+          "equal": true,
+          "kind": "user",
+          "lcp_utf8_bytes": 6013,
+          "left_bytes": 6013,
+          "pointer": "/messages/0/content/4/text",
+          "right_bytes": 6013
+        },
+        {
+          "equal": true,
+          "kind": "user",
+          "lcp_utf8_bytes": 86,
+          "left_bytes": 86,
+          "pointer": "/messages/0/content/5/text",
+          "right_bytes": 86
+        },
+        {
+          "equal": true,
+          "kind": "user",
+          "lcp_utf8_bytes": 615,
+          "left_bytes": 615,
+          "pointer": "/messages/0/content/6/text",
+          "right_bytes": 615
+        },
+        {
+          "equal": true,
+          "kind": "user",
+          "lcp_utf8_bytes": 64,
+          "left_bytes": 64,
+          "pointer": "/messages/0/content/7/text",
+          "right_bytes": 64
+        },
+        {
+          "equal": true,
+          "kind": "user",
+          "lcp_utf8_bytes": 584,
+          "left_bytes": 584,
+          "pointer": "/messages/0/content/8/text",
+          "right_bytes": 584
+        },
+        {
+          "equal": false,
+          "kind": "user",
+          "lcp_utf8_bytes": 25,
+          "left_bytes": 170,
+          "pointer": "/messages/0/content/9/text",
+          "right_bytes": 170
+        }
+      ],
+      "compose_probe": null,
+      "crew_sha256": "c8ce44acb63a0ab9651ae513600f19dd098d8c9dd5adab19826498c53f6557db",
+      "endpoint_shape": "loopback",
+      "isolation": "shared",
+      "members": [
+        {
+          "blocks": [
+            {
+              "bytes": 70,
+              "kind": "system",
+              "offsets_utf8": {},
+              "pointer": "/system/0/text",
+              "sha256": "06622cb9757e5d8eb8d3ff189b63f87f556c3bd55f7fc904d4a0436f8af1c7c3"
+            },
+            {
+              "bytes": 57,
+              "kind": "system",
+              "offsets_utf8": {},
+              "pointer": "/system/1/text",
+              "sha256": "2719b7a469d904b3281d8488976f33103944211279bddf04c05bca44d184dae6"
+            },
+            {
+              "bytes": 36009,
+              "kind": "system",
+              "offsets_utf8": {
+                "coordination": 28928,
+                "member_identity": 28510,
+                "member_tone": 10127
+              },
+              "pointer": "/system/2/text",
+              "sha256": "61db0a390fe1d538fba9179dc7814287e91a7c59240f2e8abbb8220dcbb43e65"
+            },
+            {
+              "bytes": 822,
+              "kind": "user",
+              "offsets_utf8": {
+                "workdir": 115
+              },
+              "pointer": "/messages/0/content/0/text",
+              "sha256": "129d44463d8c7bf1a6b623dfebc4b1b3895d72b7b0c0173dcabd02b1dc9f3a81"
+            },
+            {
+              "bytes": 176,
+              "kind": "user",
+              "offsets_utf8": {},
+              "pointer": "/messages/0/content/1/text",
+              "sha256": "97c808babde1e22c53c5672ec87de5288a2e600f531a25aa094c0cb9a471a65d"
+            },
+            {
+              "bytes": 2949,
+              "kind": "user",
+              "offsets_utf8": {},
+              "pointer": "/messages/0/content/2/text",
+              "sha256": "1200d899ebae31f3b06953c0c1d54a5d1b93c61f0de3a1b01b92dfa4a3b47c84"
+            },
+            {
+              "bytes": 284,
+              "kind": "user",
+              "offsets_utf8": {},
+              "pointer": "/messages/0/content/3/text",
+              "sha256": "c69b35dff1cd679a7ca4ba914df2298042c08680cc054b1a15c23a6fac53a145"
+            },
+            {
+              "bytes": 6013,
+              "kind": "user",
+              "offsets_utf8": {},
+              "pointer": "/messages/0/content/4/text",
+              "sha256": "afa947b9f47bd2076a77b400959ca672aae479b39d95b4706ef5c8ff522357c1"
+            },
+            {
+              "bytes": 86,
+              "kind": "user",
+              "offsets_utf8": {},
+              "pointer": "/messages/0/content/5/text",
+              "sha256": "d1b5389a85a66596a261545470fb784c0be377158bbf7e47a9671ee84dfcc533"
+            },
+            {
+              "bytes": 615,
+              "kind": "user",
+              "offsets_utf8": {},
+              "pointer": "/messages/0/content/6/text",
+              "sha256": "f9127dedd2eebf2d2354ed740efeb72aa08cdbc1f691aec37ea4860690223607"
+            },
+            {
+              "bytes": 64,
+              "kind": "user",
+              "offsets_utf8": {},
+              "pointer": "/messages/0/content/7/text",
+              "sha256": "2cb88daeb5e426c17e4da1d7fe002568590ab5f247411891063c1871ad532eb6"
+            },
+            {
+              "bytes": 584,
+              "kind": "user",
+              "offsets_utf8": {},
+              "pointer": "/messages/0/content/8/text",
+              "sha256": "2f9535d3596882dfa1450421e3901bf64e2342ad952d079467139f465a12f88a"
+            },
+            {
+              "bytes": 170,
+              "kind": "user",
+              "offsets_utf8": {},
+              "pointer": "/messages/0/content/9/text",
+              "sha256": "e3bae99569f9952891932768bfa48f21cfd0a79c9202f059893ddec8b7fc1469"
+            }
+          ],
+          "catalog_sha256": "d831520174b35cb1121ca4f88bf6b1ab014369c2ac4bde0888a10a3dcb309f46",
+          "id": "x",
+          "prompt_cache_key_sha256": null,
+          "request": "claude-shared-01/request-001.json",
+          "request_sha256": "92c70bbd06a1af01ccb0578cac2d9a585ac53ca2ef158cb2998d9c0530e54c3e",
+          "session_id_sha256": "3509947c875f98e4f86d04f5fbcb8a85d2a1e9db5f38a2eaa771f3c2a97a497c",
+          "system_cache_boundaries": [
+            {
+              "bytes": 70,
+              "cache_control": null,
+              "pointer": "/system/0",
+              "sha256": "06622cb9757e5d8eb8d3ff189b63f87f556c3bd55f7fc904d4a0436f8af1c7c3"
+            },
+            {
+              "bytes": 57,
+              "cache_control": {
+                "type": "ephemeral"
+              },
+              "pointer": "/system/1",
+              "sha256": "2719b7a469d904b3281d8488976f33103944211279bddf04c05bca44d184dae6"
+            },
+            {
+              "bytes": 36009,
+              "cache_control": {
+                "type": "ephemeral"
+              },
+              "pointer": "/system/2",
+              "sha256": "61db0a390fe1d538fba9179dc7814287e91a7c59240f2e8abbb8220dcbb43e65"
+            }
+          ],
+          "toolbox_fingerprint": "14791e0ea022bdb7bcdb6d4fadcd718c61a483270a118c02cd4f4b49864e04a2",
+          "workdir": "work"
+        },
+        {
+          "blocks": [
+            {
+              "bytes": 70,
+              "kind": "system",
+              "offsets_utf8": {},
+              "pointer": "/system/0/text",
+              "sha256": "06622cb9757e5d8eb8d3ff189b63f87f556c3bd55f7fc904d4a0436f8af1c7c3"
+            },
+            {
+              "bytes": 57,
+              "kind": "system",
+              "offsets_utf8": {},
+              "pointer": "/system/1/text",
+              "sha256": "2719b7a469d904b3281d8488976f33103944211279bddf04c05bca44d184dae6"
+            },
+            {
+              "bytes": 36009,
+              "kind": "system",
+              "offsets_utf8": {
+                "coordination": 28928,
+                "member_identity": 28510,
+                "member_tone": 10127
+              },
+              "pointer": "/system/2/text",
+              "sha256": "d3985f1c275b78d0b653176ab18f4a26748db2487b4e1084c355def302c9041b"
+            },
+            {
+              "bytes": 822,
+              "kind": "user",
+              "offsets_utf8": {
+                "workdir": 115
+              },
+              "pointer": "/messages/0/content/0/text",
+              "sha256": "129d44463d8c7bf1a6b623dfebc4b1b3895d72b7b0c0173dcabd02b1dc9f3a81"
+            },
+            {
+              "bytes": 176,
+              "kind": "user",
+              "offsets_utf8": {},
+              "pointer": "/messages/0/content/1/text",
+              "sha256": "97c808babde1e22c53c5672ec87de5288a2e600f531a25aa094c0cb9a471a65d"
+            },
+            {
+              "bytes": 2949,
+              "kind": "user",
+              "offsets_utf8": {},
+              "pointer": "/messages/0/content/2/text",
+              "sha256": "1200d899ebae31f3b06953c0c1d54a5d1b93c61f0de3a1b01b92dfa4a3b47c84"
+            },
+            {
+              "bytes": 284,
+              "kind": "user",
+              "offsets_utf8": {},
+              "pointer": "/messages/0/content/3/text",
+              "sha256": "c69b35dff1cd679a7ca4ba914df2298042c08680cc054b1a15c23a6fac53a145"
+            },
+            {
+              "bytes": 6013,
+              "kind": "user",
+              "offsets_utf8": {},
+              "pointer": "/messages/0/content/4/text",
+              "sha256": "afa947b9f47bd2076a77b400959ca672aae479b39d95b4706ef5c8ff522357c1"
+            },
+            {
+              "bytes": 86,
+              "kind": "user",
+              "offsets_utf8": {},
+              "pointer": "/messages/0/content/5/text",
+              "sha256": "d1b5389a85a66596a261545470fb784c0be377158bbf7e47a9671ee84dfcc533"
+            },
+            {
+              "bytes": 615,
+              "kind": "user",
+              "offsets_utf8": {},
+              "pointer": "/messages/0/content/6/text",
+              "sha256": "f9127dedd2eebf2d2354ed740efeb72aa08cdbc1f691aec37ea4860690223607"
+            },
+            {
+              "bytes": 64,
+              "kind": "user",
+              "offsets_utf8": {},
+              "pointer": "/messages/0/content/7/text",
+              "sha256": "2cb88daeb5e426c17e4da1d7fe002568590ab5f247411891063c1871ad532eb6"
+            },
+            {
+              "bytes": 584,
+              "kind": "user",
+              "offsets_utf8": {},
+              "pointer": "/messages/0/content/8/text",
+              "sha256": "2f9535d3596882dfa1450421e3901bf64e2342ad952d079467139f465a12f88a"
+            },
+            {
+              "bytes": 170,
+              "kind": "user",
+              "offsets_utf8": {},
+              "pointer": "/messages/0/content/9/text",
+              "sha256": "0e74673c06233fb1ad068660e51e5ce4682f501cecc8b6140ba38cdcd6ad2586"
+            }
+          ],
+          "catalog_sha256": "d831520174b35cb1121ca4f88bf6b1ab014369c2ac4bde0888a10a3dcb309f46",
+          "id": "y",
+          "prompt_cache_key_sha256": null,
+          "request": "claude-shared-01/request-002.json",
+          "request_sha256": "ce12de3dd6e3a5c1d58c3b7f52dcae3ef8a2f3fbd6d3e5957bd3bf61a4831275",
+          "session_id_sha256": "411d7efd53fc46b5b9c54056572ca61f59dbd9d5ee92a6b2a9c52ab77e9833c4",
+          "system_cache_boundaries": [
+            {
+              "bytes": 70,
+              "cache_control": null,
+              "pointer": "/system/0",
+              "sha256": "06622cb9757e5d8eb8d3ff189b63f87f556c3bd55f7fc904d4a0436f8af1c7c3"
+            },
+            {
+              "bytes": 57,
+              "cache_control": {
+                "type": "ephemeral"
+              },
+              "pointer": "/system/1",
+              "sha256": "2719b7a469d904b3281d8488976f33103944211279bddf04c05bca44d184dae6"
+            },
+            {
+              "bytes": 36009,
+              "cache_control": {
+                "type": "ephemeral"
+              },
+              "pointer": "/system/2",
+              "sha256": "d3985f1c275b78d0b653176ab18f4a26748db2487b4e1084c355def302c9041b"
+            }
+          ],
+          "toolbox_fingerprint": "14791e0ea022bdb7bcdb6d4fadcd718c61a483270a118c02cd4f4b49864e04a2",
+          "workdir": "work"
+        }
+      ],
+      "name": "claude-shared-01",
+      "native_binary": {
+        "path": "/home/nade/.local/share/claude/versions/2.1.291",
+        "sha256": "078fad28d0297c9a25d306b635b2d8816c6839347520f29eb54ffea5d56142fb"
+      },
+      "remaining_processes": 0,
+      "runtime": "claude",
+      "sdk_sha256": "c05419d753bc81d991ddec4b66af17a9172f498e59d28fad07a8e676635c07ce"
+    },
+    {
+      "components": [
+        {
+          "equal": true,
+          "kind": "developer",
+          "lcp_utf8_bytes": 18043,
+          "left_bytes": 18043,
+          "pointer": "/input/1/content/0/text",
+          "right_bytes": 18043
+        },
+        {
+          "equal": false,
+          "kind": "developer",
+          "lcp_utf8_bytes": 9,
+          "left_bytes": 8943,
+          "pointer": "/input/2/content/0/text",
+          "right_bytes": 8943
+        },
+        {
+          "equal": true,
+          "kind": "developer",
+          "lcp_utf8_bytes": 2066,
+          "left_bytes": 2066,
+          "pointer": "/input/2/content/1/text",
+          "right_bytes": 2066
+        },
+        {
+          "equal": true,
+          "kind": "developer",
+          "lcp_utf8_bytes": 598,
+          "left_bytes": 598,
+          "pointer": "/input/2/content/2/text",
+          "right_bytes": 598
+        },
+        {
+          "equal": true,
+          "kind": "developer",
+          "lcp_utf8_bytes": 920,
+          "left_bytes": 920,
+          "pointer": "/input/2/content/3/text",
+          "right_bytes": 920
+        },
+        {
+          "equal": true,
+          "kind": "developer",
+          "lcp_utf8_bytes": 2429,
+          "left_bytes": 2429,
+          "pointer": "/input/3/content/0/text",
+          "right_bytes": 2429
+        },
+        {
+          "equal": true,
+          "kind": "developer",
+          "lcp_utf8_bytes": 271,
+          "left_bytes": 271,
+          "pointer": "/input/4/content/0/text",
+          "right_bytes": 271
+        },
+        {
+          "equal": true,
+          "kind": "user",
+          "lcp_utf8_bytes": 1560,
+          "left_bytes": 1560,
+          "pointer": "/input/5/content/0/text",
+          "right_bytes": 1560
+        },
+        {
+          "equal": false,
+          "kind": "user",
+          "lcp_utf8_bytes": 25,
+          "left_bytes": 170,
+          "pointer": "/input/6/content/0/text",
+          "right_bytes": 170
+        }
+      ],
+      "compose_probe": null,
+      "crew_sha256": "c8ce44acb63a0ab9651ae513600f19dd098d8c9dd5adab19826498c53f6557db",
+      "endpoint_shape": "loopback",
+      "isolation": "shared",
+      "members": [
+        {
+          "blocks": [
+            {
+              "bytes": 18043,
+              "kind": "developer",
+              "offsets_utf8": {},
+              "pointer": "/input/1/content/0/text",
+              "sha256": "b707476816bfe5e571a1bd2179f130fff2b132da5ab8e61063acdb7fd24daf12"
+            },
+            {
+              "bytes": 8943,
+              "kind": "developer",
+              "offsets_utf8": {
+                "coordination": 418,
+                "member_identity": 0,
+                "member_tone": 7500
+              },
+              "pointer": "/input/2/content/0/text",
+              "sha256": "2d83d5def4d76a92c334d1d66a9f9ef25b0aebeccab6236260031b6984ffa3cd"
+            },
+            {
+              "bytes": 2066,
+              "kind": "developer",
+              "offsets_utf8": {},
+              "pointer": "/input/2/content/1/text",
+              "sha256": "884b989931aed4ad0dc3bab26d0bdcfbac3d516209ebc7a17542686185ef1bab"
+            },
+            {
+              "bytes": 598,
+              "kind": "developer",
+              "offsets_utf8": {
+                "workdir": 443
+              },
+              "pointer": "/input/2/content/2/text",
+              "sha256": "80befa798471291164a605ed106b58c3e959593d19e7b479d21ebbd2cf053982"
+            },
+            {
+              "bytes": 920,
+              "kind": "developer",
+              "offsets_utf8": {},
+              "pointer": "/input/2/content/3/text",
+              "sha256": "bec8e7b5358a20b4cd552dae768b3a65ebf4ea9fb2645220085b84d60ee3fe81"
+            },
+            {
+              "bytes": 2429,
+              "kind": "developer",
+              "offsets_utf8": {},
+              "pointer": "/input/3/content/0/text",
+              "sha256": "47091490938505958b0c22ff42db6fd79b272a2af6923166f4c2cc53c4fe0df4"
+            },
+            {
+              "bytes": 271,
+              "kind": "developer",
+              "offsets_utf8": {},
+              "pointer": "/input/4/content/0/text",
+              "sha256": "6ded806e3cdbb35599ecaf8742574bc5274908472b1729090010c404c2151e8e"
+            },
+            {
+              "bytes": 1560,
+              "kind": "user",
+              "offsets_utf8": {
+                "workdir": 29
+              },
+              "pointer": "/input/5/content/0/text",
+              "sha256": "2998fd6cc7e4783110fc2d825214cf66da40a79a0a3f9a2edf4fb9a9a94fc27b"
+            },
+            {
+              "bytes": 170,
+              "kind": "user",
+              "offsets_utf8": {},
+              "pointer": "/input/6/content/0/text",
+              "sha256": "e3bae99569f9952891932768bfa48f21cfd0a79c9202f059893ddec8b7fc1469"
+            }
+          ],
+          "catalog_sha256": "8f34624d68600a77fb41b68933771382c7fcfd558dee0ef3ff986c11eaf1cccf",
+          "id": "x",
+          "prompt_cache_key_sha256": "9d20547b85f3edc9cb066dadf8389b5ac1883973d0d3ec8495dba51643cd5a83",
+          "request": "codex-shared-01/request-002.json",
+          "request_sha256": "013d9d06ee3f8410a447e47d2fef9568341a420707679f1648d63a926674bd58",
+          "session_id_sha256": "9d20547b85f3edc9cb066dadf8389b5ac1883973d0d3ec8495dba51643cd5a83",
+          "system_cache_boundaries": [],
+          "toolbox_fingerprint": "a82b256c283097d15992b2a2b2ea355688b7265df741dab964721679deeefb21",
+          "workdir": "work"
+        },
+        {
+          "blocks": [
+            {
+              "bytes": 18043,
+              "kind": "developer",
+              "offsets_utf8": {},
+              "pointer": "/input/1/content/0/text",
+              "sha256": "b707476816bfe5e571a1bd2179f130fff2b132da5ab8e61063acdb7fd24daf12"
+            },
+            {
+              "bytes": 8943,
+              "kind": "developer",
+              "offsets_utf8": {
+                "coordination": 418,
+                "member_identity": 0,
+                "member_tone": 7500
+              },
+              "pointer": "/input/2/content/0/text",
+              "sha256": "e79e6703742c7a593aac73dce74d839a120e90abd8abd84b7422d9bf97358686"
+            },
+            {
+              "bytes": 2066,
+              "kind": "developer",
+              "offsets_utf8": {},
+              "pointer": "/input/2/content/1/text",
+              "sha256": "884b989931aed4ad0dc3bab26d0bdcfbac3d516209ebc7a17542686185ef1bab"
+            },
+            {
+              "bytes": 598,
+              "kind": "developer",
+              "offsets_utf8": {
+                "workdir": 443
+              },
+              "pointer": "/input/2/content/2/text",
+              "sha256": "80befa798471291164a605ed106b58c3e959593d19e7b479d21ebbd2cf053982"
+            },
+            {
+              "bytes": 920,
+              "kind": "developer",
+              "offsets_utf8": {},
+              "pointer": "/input/2/content/3/text",
+              "sha256": "bec8e7b5358a20b4cd552dae768b3a65ebf4ea9fb2645220085b84d60ee3fe81"
+            },
+            {
+              "bytes": 2429,
+              "kind": "developer",
+              "offsets_utf8": {},
+              "pointer": "/input/3/content/0/text",
+              "sha256": "47091490938505958b0c22ff42db6fd79b272a2af6923166f4c2cc53c4fe0df4"
+            },
+            {
+              "bytes": 271,
+              "kind": "developer",
+              "offsets_utf8": {},
+              "pointer": "/input/4/content/0/text",
+              "sha256": "6ded806e3cdbb35599ecaf8742574bc5274908472b1729090010c404c2151e8e"
+            },
+            {
+              "bytes": 1560,
+              "kind": "user",
+              "offsets_utf8": {
+                "workdir": 29
+              },
+              "pointer": "/input/5/content/0/text",
+              "sha256": "2998fd6cc7e4783110fc2d825214cf66da40a79a0a3f9a2edf4fb9a9a94fc27b"
+            },
+            {
+              "bytes": 170,
+              "kind": "user",
+              "offsets_utf8": {},
+              "pointer": "/input/6/content/0/text",
+              "sha256": "0e74673c06233fb1ad068660e51e5ce4682f501cecc8b6140ba38cdcd6ad2586"
+            }
+          ],
+          "catalog_sha256": "8f34624d68600a77fb41b68933771382c7fcfd558dee0ef3ff986c11eaf1cccf",
+          "id": "y",
+          "prompt_cache_key_sha256": "6b3e0d14d0b76ee12a87951c2d61c0d09e469599c6f836755acbc1119b53d62e",
+          "request": "codex-shared-01/request-001.json",
+          "request_sha256": "d2a75c7db39ece98707c0b65e4a46605b0ce7d9e927289ba7c83d091dca636e4",
+          "session_id_sha256": "6b3e0d14d0b76ee12a87951c2d61c0d09e469599c6f836755acbc1119b53d62e",
+          "system_cache_boundaries": [],
+          "toolbox_fingerprint": "a82b256c283097d15992b2a2b2ea355688b7265df741dab964721679deeefb21",
+          "workdir": "work"
+        }
+      ],
+      "name": "codex-shared-01",
+      "native_binary": {
+        "path": "/nix/store/pmh4yzyd0g8rz5l1jv2lnsb2gz33ljhi-codex-0.159.0/libexec/codex",
+        "sha256": "d2752c52353401f7f6efbfcea68796f4f7a3d3e4769f5d1da53fa49d4856b72f"
+      },
+      "remaining_processes": 0,
+      "runtime": "codex"
+    },
+    {
+      "components": [
+        {
+          "equal": true,
+          "kind": "system",
+          "lcp_utf8_bytes": 70,
+          "left_bytes": 70,
+          "pointer": "/system/0/text",
+          "right_bytes": 70
+        },
+        {
+          "equal": true,
+          "kind": "system",
+          "lcp_utf8_bytes": 57,
+          "left_bytes": 57,
+          "pointer": "/system/1/text",
+          "right_bytes": 57
+        },
+        {
+          "equal": false,
+          "kind": "system",
+          "lcp_utf8_bytes": 33944,
+          "left_bytes": 36191,
+          "pointer": "/system/2/text",
+          "right_bytes": 36191
+        },
+        {
+          "equal": false,
+          "kind": "user",
+          "lcp_utf8_bytes": 258,
+          "left_bytes": 1543,
+          "pointer": "/messages/0/content/0/text",
+          "right_bytes": 1543
+        },
+        {
+          "equal": true,
+          "kind": "user",
+          "lcp_utf8_bytes": 176,
+          "left_bytes": 176,
+          "pointer": "/messages/0/content/1/text",
+          "right_bytes": 176
+        },
+        {
+          "equal": true,
+          "kind": "user",
+          "lcp_utf8_bytes": 2949,
+          "left_bytes": 2949,
+          "pointer": "/messages/0/content/2/text",
+          "right_bytes": 2949
+        },
+        {
+          "equal": true,
+          "kind": "user",
+          "lcp_utf8_bytes": 284,
+          "left_bytes": 284,
+          "pointer": "/messages/0/content/3/text",
+          "right_bytes": 284
+        },
+        {
+          "equal": true,
+          "kind": "user",
+          "lcp_utf8_bytes": 6013,
+          "left_bytes": 6013,
+          "pointer": "/messages/0/content/4/text",
+          "right_bytes": 6013
+        },
+        {
+          "equal": true,
+          "kind": "user",
+          "lcp_utf8_bytes": 86,
+          "left_bytes": 86,
+          "pointer": "/messages/0/content/5/text",
+          "right_bytes": 86
+        },
+        {
+          "equal": false,
+          "kind": "user",
+          "lcp_utf8_bytes": 272,
+          "left_bytes": 619,
+          "pointer": "/messages/0/content/6/text",
+          "right_bytes": 619
+        },
+        {
+          "equal": true,
+          "kind": "user",
+          "lcp_utf8_bytes": 64,
+          "left_bytes": 64,
+          "pointer": "/messages/0/content/7/text",
+          "right_bytes": 64
+        },
+        {
+          "equal": true,
+          "kind": "user",
+          "lcp_utf8_bytes": 584,
+          "left_bytes": 584,
+          "pointer": "/messages/0/content/8/text",
+          "right_bytes": 584
+        },
+        {
+          "equal": false,
+          "kind": "user",
+          "lcp_utf8_bytes": 25,
+          "left_bytes": 170,
+          "pointer": "/messages/0/content/9/text",
+          "right_bytes": 170
+        }
+      ],
+      "compose_probe": "shared",
+      "compose_trace_sha256": "1368a529229b821eef2699b407ea8f2e2656215bdb39ed48f7c06409d67dab2d",
+      "composition": {
+        "before_briefing_sha256": "e4062ead926ab5821207a422248eaf7b56db4d5fb924301b35417ee3b19828dc",
+        "common_bytes": 5407,
+        "common_sha256": "203e10a379ad0af9560b0eb7210c40cc97248046fefb33b689465bc644bb5ace",
+        "mode": "shared",
+        "remaining_briefing_sha256": "6daa26f33fcf3dc5a46580ac8a4962e8dbbba0216c883be527b90435162f75ee"
+      },
+      "crew_sha256": "c8ce44acb63a0ab9651ae513600f19dd098d8c9dd5adab19826498c53f6557db",
+      "endpoint_shape": "loopback",
+      "isolation": "worktree",
+      "members": [
+        {
+          "blocks": [
+            {
+              "bytes": 70,
+              "kind": "system",
+              "offsets_utf8": {},
+              "pointer": "/system/0/text",
+              "sha256": "06622cb9757e5d8eb8d3ff189b63f87f556c3bd55f7fc904d4a0436f8af1c7c3"
+            },
+            {
+              "bytes": 57,
+              "kind": "system",
+              "offsets_utf8": {},
+              "pointer": "/system/1/text",
+              "sha256": "2719b7a469d904b3281d8488976f33103944211279bddf04c05bca44d184dae6"
+            },
+            {
+              "bytes": 36191,
+              "kind": "system",
+              "offsets_utf8": {
+                "coordination": 11572,
+                "member_branch": 34425,
+                "member_identity": 33935,
+                "member_tone": 10127
+              },
+              "pointer": "/system/2/text",
+              "sha256": "38433122fbeaf4132a47cb39c0dcfd77f68571d5b83a1bdb82227ec4dec76db4"
+            },
+            {
+              "bytes": 1543,
+              "kind": "user",
+              "offsets_utf8": {
+                "workdir": 115
+              },
+              "pointer": "/messages/0/content/0/text",
+              "sha256": "107ba73a2370916d771c466cff47863b727c8af332f2a1a577dbe014baf8cb7d"
+            },
+            {
+              "bytes": 176,
+              "kind": "user",
+              "offsets_utf8": {},
+              "pointer": "/messages/0/content/1/text",
+              "sha256": "97c808babde1e22c53c5672ec87de5288a2e600f531a25aa094c0cb9a471a65d"
+            },
+            {
+              "bytes": 2949,
+              "kind": "user",
+              "offsets_utf8": {},
+              "pointer": "/messages/0/content/2/text",
+              "sha256": "1200d899ebae31f3b06953c0c1d54a5d1b93c61f0de3a1b01b92dfa4a3b47c84"
+            },
+            {
+              "bytes": 284,
+              "kind": "user",
+              "offsets_utf8": {},
+              "pointer": "/messages/0/content/3/text",
+              "sha256": "c69b35dff1cd679a7ca4ba914df2298042c08680cc054b1a15c23a6fac53a145"
+            },
+            {
+              "bytes": 6013,
+              "kind": "user",
+              "offsets_utf8": {},
+              "pointer": "/messages/0/content/4/text",
+              "sha256": "afa947b9f47bd2076a77b400959ca672aae479b39d95b4706ef5c8ff522357c1"
+            },
+            {
+              "bytes": 86,
+              "kind": "user",
+              "offsets_utf8": {},
+              "pointer": "/messages/0/content/5/text",
+              "sha256": "d1b5389a85a66596a261545470fb784c0be377158bbf7e47a9671ee84dfcc533"
+            },
+            {
+              "bytes": 619,
+              "kind": "user",
+              "offsets_utf8": {
+                "member_branch": 265
+              },
+              "pointer": "/messages/0/content/6/text",
+              "sha256": "3c8e66b6818fdbe4986ba7d2962239e8104492511f97cd4540d5d4bc70c5fab8"
+            },
+            {
+              "bytes": 64,
+              "kind": "user",
+              "offsets_utf8": {},
+              "pointer": "/messages/0/content/7/text",
+              "sha256": "2cb88daeb5e426c17e4da1d7fe002568590ab5f247411891063c1871ad532eb6"
+            },
+            {
+              "bytes": 584,
+              "kind": "user",
+              "offsets_utf8": {},
+              "pointer": "/messages/0/content/8/text",
+              "sha256": "2f9535d3596882dfa1450421e3901bf64e2342ad952d079467139f465a12f88a"
+            },
+            {
+              "bytes": 170,
+              "kind": "user",
+              "offsets_utf8": {},
+              "pointer": "/messages/0/content/9/text",
+              "sha256": "e3bae99569f9952891932768bfa48f21cfd0a79c9202f059893ddec8b7fc1469"
+            }
+          ],
+          "catalog_sha256": "d831520174b35cb1121ca4f88bf6b1ab014369c2ac4bde0888a10a3dcb309f46",
+          "id": "x",
+          "prompt_cache_key_sha256": null,
+          "request": "claude-shared-section-02/request-002.json",
+          "request_sha256": "ac2c52c184e0da332d466f48fdc1e1d061efc24c94256827ee6adadc2e6b4ab5",
+          "session_id_sha256": "56e51ab99eb792398ad0e90e8a60f89bd73bce74a904de828b1a4beec8cb82c2",
+          "system_cache_boundaries": [
+            {
+              "bytes": 70,
+              "cache_control": null,
+              "pointer": "/system/0",
+              "sha256": "06622cb9757e5d8eb8d3ff189b63f87f556c3bd55f7fc904d4a0436f8af1c7c3"
+            },
+            {
+              "bytes": 57,
+              "cache_control": {
+                "type": "ephemeral"
+              },
+              "pointer": "/system/1",
+              "sha256": "2719b7a469d904b3281d8488976f33103944211279bddf04c05bca44d184dae6"
+            },
+            {
+              "bytes": 36191,
+              "cache_control": {
+                "type": "ephemeral"
+              },
+              "pointer": "/system/2",
+              "sha256": "38433122fbeaf4132a47cb39c0dcfd77f68571d5b83a1bdb82227ec4dec76db4"
+            }
+          ],
+          "toolbox_fingerprint": "14791e0ea022bdb7bcdb6d4fadcd718c61a483270a118c02cd4f4b49864e04a2",
+          "workdir": "work/.crew/worktrees/x"
+        },
+        {
+          "blocks": [
+            {
+              "bytes": 70,
+              "kind": "system",
+              "offsets_utf8": {},
+              "pointer": "/system/0/text",
+              "sha256": "06622cb9757e5d8eb8d3ff189b63f87f556c3bd55f7fc904d4a0436f8af1c7c3"
+            },
+            {
+              "bytes": 57,
+              "kind": "system",
+              "offsets_utf8": {},
+              "pointer": "/system/1/text",
+              "sha256": "2719b7a469d904b3281d8488976f33103944211279bddf04c05bca44d184dae6"
+            },
+            {
+              "bytes": 36191,
+              "kind": "system",
+              "offsets_utf8": {
+                "coordination": 11572,
+                "member_branch": 34425,
+                "member_identity": 33935,
+                "member_tone": 10127
+              },
+              "pointer": "/system/2/text",
+              "sha256": "120cae2971641c72d86b3b3ea78e1d86bd4780b8f5f3cb84c4b150e8a99bc4bc"
+            },
+            {
+              "bytes": 1543,
+              "kind": "user",
+              "offsets_utf8": {
+                "workdir": 115
+              },
+              "pointer": "/messages/0/content/0/text",
+              "sha256": "4d5ca7d7f66e120c1e33760e6c3b7c06a0331d155deb82e0bb43c91beee93f6c"
+            },
+            {
+              "bytes": 176,
+              "kind": "user",
+              "offsets_utf8": {},
+              "pointer": "/messages/0/content/1/text",
+              "sha256": "97c808babde1e22c53c5672ec87de5288a2e600f531a25aa094c0cb9a471a65d"
+            },
+            {
+              "bytes": 2949,
+              "kind": "user",
+              "offsets_utf8": {},
+              "pointer": "/messages/0/content/2/text",
+              "sha256": "1200d899ebae31f3b06953c0c1d54a5d1b93c61f0de3a1b01b92dfa4a3b47c84"
+            },
+            {
+              "bytes": 284,
+              "kind": "user",
+              "offsets_utf8": {},
+              "pointer": "/messages/0/content/3/text",
+              "sha256": "c69b35dff1cd679a7ca4ba914df2298042c08680cc054b1a15c23a6fac53a145"
+            },
+            {
+              "bytes": 6013,
+              "kind": "user",
+              "offsets_utf8": {},
+              "pointer": "/messages/0/content/4/text",
+              "sha256": "afa947b9f47bd2076a77b400959ca672aae479b39d95b4706ef5c8ff522357c1"
+            },
+            {
+              "bytes": 86,
+              "kind": "user",
+              "offsets_utf8": {},
+              "pointer": "/messages/0/content/5/text",
+              "sha256": "d1b5389a85a66596a261545470fb784c0be377158bbf7e47a9671ee84dfcc533"
+            },
+            {
+              "bytes": 619,
+              "kind": "user",
+              "offsets_utf8": {
+                "member_branch": 265
+              },
+              "pointer": "/messages/0/content/6/text",
+              "sha256": "59243cb286bb44981bf7e7529b6384a3901a0c9e97debda9aa96ee1263a45876"
+            },
+            {
+              "bytes": 64,
+              "kind": "user",
+              "offsets_utf8": {},
+              "pointer": "/messages/0/content/7/text",
+              "sha256": "2cb88daeb5e426c17e4da1d7fe002568590ab5f247411891063c1871ad532eb6"
+            },
+            {
+              "bytes": 584,
+              "kind": "user",
+              "offsets_utf8": {},
+              "pointer": "/messages/0/content/8/text",
+              "sha256": "2f9535d3596882dfa1450421e3901bf64e2342ad952d079467139f465a12f88a"
+            },
+            {
+              "bytes": 170,
+              "kind": "user",
+              "offsets_utf8": {},
+              "pointer": "/messages/0/content/9/text",
+              "sha256": "0e74673c06233fb1ad068660e51e5ce4682f501cecc8b6140ba38cdcd6ad2586"
+            }
+          ],
+          "catalog_sha256": "d831520174b35cb1121ca4f88bf6b1ab014369c2ac4bde0888a10a3dcb309f46",
+          "id": "y",
+          "prompt_cache_key_sha256": null,
+          "request": "claude-shared-section-02/request-001.json",
+          "request_sha256": "3b8f692b3363de59dfe5651dfd27dcd67c9bc719b7ab7295fcdce29bdf084b8d",
+          "session_id_sha256": "72874714f1e19322d7b3a72e7ca9e087eabe5829295e7f1493e90fb90dc3877d",
+          "system_cache_boundaries": [
+            {
+              "bytes": 70,
+              "cache_control": null,
+              "pointer": "/system/0",
+              "sha256": "06622cb9757e5d8eb8d3ff189b63f87f556c3bd55f7fc904d4a0436f8af1c7c3"
+            },
+            {
+              "bytes": 57,
+              "cache_control": {
+                "type": "ephemeral"
+              },
+              "pointer": "/system/1",
+              "sha256": "2719b7a469d904b3281d8488976f33103944211279bddf04c05bca44d184dae6"
+            },
+            {
+              "bytes": 36191,
+              "cache_control": {
+                "type": "ephemeral"
+              },
+              "pointer": "/system/2",
+              "sha256": "120cae2971641c72d86b3b3ea78e1d86bd4780b8f5f3cb84c4b150e8a99bc4bc"
+            }
+          ],
+          "toolbox_fingerprint": "14791e0ea022bdb7bcdb6d4fadcd718c61a483270a118c02cd4f4b49864e04a2",
+          "workdir": "work/.crew/worktrees/y"
+        }
+      ],
+      "name": "claude-shared-section-02",
+      "native_binary": {
+        "path": "/home/nade/.local/share/claude/versions/2.1.291",
+        "sha256": "078fad28d0297c9a25d306b635b2d8816c6839347520f29eb54ffea5d56142fb"
+      },
+      "remaining_processes": 0,
+      "runtime": "claude",
+      "sdk_sha256": "c05419d753bc81d991ddec4b66af17a9172f498e59d28fad07a8e676635c07ce"
+    },
+    {
+      "components": [
+        {
+          "equal": false,
+          "kind": "system",
+          "lcp_utf8_bytes": 76,
+          "left_bytes": 190,
+          "pointer": "/system/0/text",
+          "right_bytes": 190
+        },
+        {
+          "equal": true,
+          "kind": "system",
+          "lcp_utf8_bytes": 57,
+          "left_bytes": 57,
+          "pointer": "/system/1/text",
+          "right_bytes": 57
+        },
+        {
+          "equal": true,
+          "kind": "system",
+          "lcp_utf8_bytes": 11570,
+          "left_bytes": 11570,
+          "pointer": "/system/2/text",
+          "right_bytes": 11570
+        },
+        {
+          "equal": false,
+          "kind": "system",
+          "lcp_utf8_bytes": 16971,
+          "left_bytes": 24625,
+          "pointer": "/system/3/text",
+          "right_bytes": 24625
+        },
+        {
+          "equal": false,
+          "kind": "user",
+          "lcp_utf8_bytes": 262,
+          "left_bytes": 1547,
+          "pointer": "/messages/0/content/0/text",
+          "right_bytes": 1547
+        },
+        {
+          "equal": true,
+          "kind": "user",
+          "lcp_utf8_bytes": 176,
+          "left_bytes": 176,
+          "pointer": "/messages/0/content/1/text",
+          "right_bytes": 176
+        },
+        {
+          "equal": true,
+          "kind": "user",
+          "lcp_utf8_bytes": 924,
+          "left_bytes": 924,
+          "pointer": "/messages/0/content/2/text",
+          "right_bytes": 924
+        },
+        {
+          "equal": true,
+          "kind": "user",
+          "lcp_utf8_bytes": 2949,
+          "left_bytes": 2949,
+          "pointer": "/messages/0/content/3/text",
+          "right_bytes": 2949
+        },
+        {
+          "equal": true,
+          "kind": "user",
+          "lcp_utf8_bytes": 284,
+          "left_bytes": 284,
+          "pointer": "/messages/0/content/4/text",
+          "right_bytes": 284
+        },
+        {
+          "equal": true,
+          "kind": "user",
+          "lcp_utf8_bytes": 6013,
+          "left_bytes": 6013,
+          "pointer": "/messages/0/content/5/text",
+          "right_bytes": 6013
+        },
+        {
+          "equal": true,
+          "kind": "user",
+          "lcp_utf8_bytes": 86,
+          "left_bytes": 86,
+          "pointer": "/messages/0/content/6/text",
+          "right_bytes": 86
+        },
+        {
+          "equal": false,
+          "kind": "user",
+          "lcp_utf8_bytes": 272,
+          "left_bytes": 619,
+          "pointer": "/messages/0/content/7/text",
+          "right_bytes": 619
+        },
+        {
+          "equal": true,
+          "kind": "user",
+          "lcp_utf8_bytes": 64,
+          "left_bytes": 64,
+          "pointer": "/messages/0/content/8/text",
+          "right_bytes": 64
+        },
+        {
+          "equal": true,
+          "kind": "user",
+          "lcp_utf8_bytes": 584,
+          "left_bytes": 584,
+          "pointer": "/messages/0/content/9/text",
+          "right_bytes": 584
+        },
+        {
+          "equal": false,
+          "kind": "user",
+          "lcp_utf8_bytes": 25,
+          "left_bytes": 170,
+          "pointer": "/messages/0/content/10/text",
+          "right_bytes": 170
+        }
+      ],
+      "compose_probe": "observe",
+      "compose_trace_sha256": "b60f94f625a15d4458de5e139434856d53e38388bbc28fbc5a943f61638af780",
+      "composition": {
+        "before_briefing_sha256": "e4062ead926ab5821207a422248eaf7b56db4d5fb924301b35417ee3b19828dc",
+        "common_bytes": 5407,
+        "common_sha256": "203e10a379ad0af9560b0eb7210c40cc97248046fefb33b689465bc644bb5ace",
+        "mode": "observe",
+        "remaining_briefing_sha256": "e4062ead926ab5821207a422248eaf7b56db4d5fb924301b35417ee3b19828dc"
+      },
+      "crew_sha256": "c8ce44acb63a0ab9651ae513600f19dd098d8c9dd5adab19826498c53f6557db",
+      "endpoint_shape": "anthropic-host",
+      "isolation": "worktree",
+      "members": [
+        {
+          "blocks": [
+            {
+              "bytes": 190,
+              "kind": "system",
+              "offsets_utf8": {},
+              "pointer": "/system/0/text",
+              "sha256": "7113cfd450717989825d74460ecadf12a036cff57d8aaae41f27daab100832f9"
+            },
+            {
+              "bytes": 57,
+              "kind": "system",
+              "offsets_utf8": {},
+              "pointer": "/system/1/text",
+              "sha256": "2719b7a469d904b3281d8488976f33103944211279bddf04c05bca44d184dae6"
+            },
+            {
+              "bytes": 11570,
+              "kind": "system",
+              "offsets_utf8": {
+                "member_tone": 10127
+              },
+              "pointer": "/system/2/text",
+              "sha256": "0652138cf4003ef6a6af4fc8573e46d6dfd309f22f0178a76585572195e249d8"
+            },
+            {
+              "bytes": 24625,
+              "kind": "system",
+              "offsets_utf8": {
+                "coordination": 17380,
+                "member_branch": 22859,
+                "member_identity": 16962
+              },
+              "pointer": "/system/3/text",
+              "sha256": "aeb72046df09ef38c58e109a99154675641fe091414d0ba2ef1e6583c8e7a177"
+            },
+            {
+              "bytes": 1547,
+              "kind": "user",
+              "offsets_utf8": {
+                "workdir": 115
+              },
+              "pointer": "/messages/0/content/0/text",
+              "sha256": "9b636d0ab048adcdaefb53d9d77b765bf37416cee6309aea6e0337529cc5f1f1"
+            },
+            {
+              "bytes": 176,
+              "kind": "user",
+              "offsets_utf8": {},
+              "pointer": "/messages/0/content/1/text",
+              "sha256": "97c808babde1e22c53c5672ec87de5288a2e600f531a25aa094c0cb9a471a65d"
+            },
+            {
+              "bytes": 924,
+              "kind": "user",
+              "offsets_utf8": {},
+              "pointer": "/messages/0/content/2/text",
+              "sha256": "2c3dec9f3dbd8aa6a4b41955c110894cce81c921c825ee5dd974d2a949443caa"
+            },
+            {
+              "bytes": 2949,
+              "kind": "user",
+              "offsets_utf8": {},
+              "pointer": "/messages/0/content/3/text",
+              "sha256": "1200d899ebae31f3b06953c0c1d54a5d1b93c61f0de3a1b01b92dfa4a3b47c84"
+            },
+            {
+              "bytes": 284,
+              "kind": "user",
+              "offsets_utf8": {},
+              "pointer": "/messages/0/content/4/text",
+              "sha256": "c69b35dff1cd679a7ca4ba914df2298042c08680cc054b1a15c23a6fac53a145"
+            },
+            {
+              "bytes": 6013,
+              "kind": "user",
+              "offsets_utf8": {},
+              "pointer": "/messages/0/content/5/text",
+              "sha256": "afa947b9f47bd2076a77b400959ca672aae479b39d95b4706ef5c8ff522357c1"
+            },
+            {
+              "bytes": 86,
+              "kind": "user",
+              "offsets_utf8": {},
+              "pointer": "/messages/0/content/6/text",
+              "sha256": "d1b5389a85a66596a261545470fb784c0be377158bbf7e47a9671ee84dfcc533"
+            },
+            {
+              "bytes": 619,
+              "kind": "user",
+              "offsets_utf8": {
+                "member_branch": 265
+              },
+              "pointer": "/messages/0/content/7/text",
+              "sha256": "130b15ae1a7e173aec937f795fdabc15b77448bf10401764e136d8a07e0f0a43"
+            },
+            {
+              "bytes": 64,
+              "kind": "user",
+              "offsets_utf8": {},
+              "pointer": "/messages/0/content/8/text",
+              "sha256": "2cb88daeb5e426c17e4da1d7fe002568590ab5f247411891063c1871ad532eb6"
+            },
+            {
+              "bytes": 584,
+              "kind": "user",
+              "offsets_utf8": {},
+              "pointer": "/messages/0/content/9/text",
+              "sha256": "2f9535d3596882dfa1450421e3901bf64e2342ad952d079467139f465a12f88a"
+            },
+            {
+              "bytes": 170,
+              "kind": "user",
+              "offsets_utf8": {},
+              "pointer": "/messages/0/content/10/text",
+              "sha256": "e3bae99569f9952891932768bfa48f21cfd0a79c9202f059893ddec8b7fc1469"
+            }
+          ],
+          "catalog_sha256": "6f74efee2a0f9814bb7184adaeb6509dd7abe8f2d3d395cf81cd7c92dd73f444",
+          "id": "x",
+          "prompt_cache_key_sha256": null,
+          "request": "claude-firstparty-observe-02/request-002.json",
+          "request_sha256": "70d7575ab716112d40e69440d6b89ada9f0fc46456a360c7e1e9cb52f95f8cda",
+          "session_id_sha256": "754e6d588ce0f310cd4b31c027551cef9e1a04d87df6fdae5fe97b73a0d24da7",
+          "system_cache_boundaries": [
+            {
+              "bytes": 190,
+              "cache_control": null,
+              "pointer": "/system/0",
+              "sha256": "7113cfd450717989825d74460ecadf12a036cff57d8aaae41f27daab100832f9"
+            },
+            {
+              "bytes": 57,
+              "cache_control": null,
+              "pointer": "/system/1",
+              "sha256": "2719b7a469d904b3281d8488976f33103944211279bddf04c05bca44d184dae6"
+            },
+            {
+              "bytes": 11570,
+              "cache_control": {
+                "scope": "global",
+                "type": "ephemeral"
+              },
+              "pointer": "/system/2",
+              "sha256": "0652138cf4003ef6a6af4fc8573e46d6dfd309f22f0178a76585572195e249d8"
+            },
+            {
+              "bytes": 24625,
+              "cache_control": {
+                "type": "ephemeral"
+              },
+              "pointer": "/system/3",
+              "sha256": "aeb72046df09ef38c58e109a99154675641fe091414d0ba2ef1e6583c8e7a177"
+            }
+          ],
+          "toolbox_fingerprint": "14791e0ea022bdb7bcdb6d4fadcd718c61a483270a118c02cd4f4b49864e04a2",
+          "workdir": "work/.crew/worktrees/x"
+        },
+        {
+          "blocks": [
+            {
+              "bytes": 190,
+              "kind": "system",
+              "offsets_utf8": {},
+              "pointer": "/system/0/text",
+              "sha256": "b55c7e4e279efb3b60ffa558d4271a47aa72e707f25469c26d525776067f2b18"
+            },
+            {
+              "bytes": 57,
+              "kind": "system",
+              "offsets_utf8": {},
+              "pointer": "/system/1/text",
+              "sha256": "2719b7a469d904b3281d8488976f33103944211279bddf04c05bca44d184dae6"
+            },
+            {
+              "bytes": 11570,
+              "kind": "system",
+              "offsets_utf8": {
+                "member_tone": 10127
+              },
+              "pointer": "/system/2/text",
+              "sha256": "0652138cf4003ef6a6af4fc8573e46d6dfd309f22f0178a76585572195e249d8"
+            },
+            {
+              "bytes": 24625,
+              "kind": "system",
+              "offsets_utf8": {
+                "coordination": 17380,
+                "member_branch": 22859,
+                "member_identity": 16962
+              },
+              "pointer": "/system/3/text",
+              "sha256": "97ca7d5d657fe4abe242edf7b7b5686338846ca09d09f223e279e99996815917"
+            },
+            {
+              "bytes": 1547,
+              "kind": "user",
+              "offsets_utf8": {
+                "workdir": 115
+              },
+              "pointer": "/messages/0/content/0/text",
+              "sha256": "a9780620c7b7f0167901ae2f3cc25b0475e1fb838603873ffe2071010cbf10e0"
+            },
+            {
+              "bytes": 176,
+              "kind": "user",
+              "offsets_utf8": {},
+              "pointer": "/messages/0/content/1/text",
+              "sha256": "97c808babde1e22c53c5672ec87de5288a2e600f531a25aa094c0cb9a471a65d"
+            },
+            {
+              "bytes": 924,
+              "kind": "user",
+              "offsets_utf8": {},
+              "pointer": "/messages/0/content/2/text",
+              "sha256": "2c3dec9f3dbd8aa6a4b41955c110894cce81c921c825ee5dd974d2a949443caa"
+            },
+            {
+              "bytes": 2949,
+              "kind": "user",
+              "offsets_utf8": {},
+              "pointer": "/messages/0/content/3/text",
+              "sha256": "1200d899ebae31f3b06953c0c1d54a5d1b93c61f0de3a1b01b92dfa4a3b47c84"
+            },
+            {
+              "bytes": 284,
+              "kind": "user",
+              "offsets_utf8": {},
+              "pointer": "/messages/0/content/4/text",
+              "sha256": "c69b35dff1cd679a7ca4ba914df2298042c08680cc054b1a15c23a6fac53a145"
+            },
+            {
+              "bytes": 6013,
+              "kind": "user",
+              "offsets_utf8": {},
+              "pointer": "/messages/0/content/5/text",
+              "sha256": "afa947b9f47bd2076a77b400959ca672aae479b39d95b4706ef5c8ff522357c1"
+            },
+            {
+              "bytes": 86,
+              "kind": "user",
+              "offsets_utf8": {},
+              "pointer": "/messages/0/content/6/text",
+              "sha256": "d1b5389a85a66596a261545470fb784c0be377158bbf7e47a9671ee84dfcc533"
+            },
+            {
+              "bytes": 619,
+              "kind": "user",
+              "offsets_utf8": {
+                "member_branch": 265
+              },
+              "pointer": "/messages/0/content/7/text",
+              "sha256": "f6c3a8ade2d5ab6d1fe9d58d5a3c88abaca59afd9178002c8f842e38745a5577"
+            },
+            {
+              "bytes": 64,
+              "kind": "user",
+              "offsets_utf8": {},
+              "pointer": "/messages/0/content/8/text",
+              "sha256": "2cb88daeb5e426c17e4da1d7fe002568590ab5f247411891063c1871ad532eb6"
+            },
+            {
+              "bytes": 584,
+              "kind": "user",
+              "offsets_utf8": {},
+              "pointer": "/messages/0/content/9/text",
+              "sha256": "2f9535d3596882dfa1450421e3901bf64e2342ad952d079467139f465a12f88a"
+            },
+            {
+              "bytes": 170,
+              "kind": "user",
+              "offsets_utf8": {},
+              "pointer": "/messages/0/content/10/text",
+              "sha256": "0e74673c06233fb1ad068660e51e5ce4682f501cecc8b6140ba38cdcd6ad2586"
+            }
+          ],
+          "catalog_sha256": "6f74efee2a0f9814bb7184adaeb6509dd7abe8f2d3d395cf81cd7c92dd73f444",
+          "id": "y",
+          "prompt_cache_key_sha256": null,
+          "request": "claude-firstparty-observe-02/request-001.json",
+          "request_sha256": "853bd6a172c2b92176f15d8faef0006f6f031b6132cf13ccb15e449735a27dd0",
+          "session_id_sha256": "06faf8d866a3a105f73f6a38c0d3dd3b7cacbbf73549b682e69bb1ae70378112",
+          "system_cache_boundaries": [
+            {
+              "bytes": 190,
+              "cache_control": null,
+              "pointer": "/system/0",
+              "sha256": "b55c7e4e279efb3b60ffa558d4271a47aa72e707f25469c26d525776067f2b18"
+            },
+            {
+              "bytes": 57,
+              "cache_control": null,
+              "pointer": "/system/1",
+              "sha256": "2719b7a469d904b3281d8488976f33103944211279bddf04c05bca44d184dae6"
+            },
+            {
+              "bytes": 11570,
+              "cache_control": {
+                "scope": "global",
+                "type": "ephemeral"
+              },
+              "pointer": "/system/2",
+              "sha256": "0652138cf4003ef6a6af4fc8573e46d6dfd309f22f0178a76585572195e249d8"
+            },
+            {
+              "bytes": 24625,
+              "cache_control": {
+                "type": "ephemeral"
+              },
+              "pointer": "/system/3",
+              "sha256": "97ca7d5d657fe4abe242edf7b7b5686338846ca09d09f223e279e99996815917"
+            }
+          ],
+          "toolbox_fingerprint": "14791e0ea022bdb7bcdb6d4fadcd718c61a483270a118c02cd4f4b49864e04a2",
+          "workdir": "work/.crew/worktrees/y"
+        }
+      ],
+      "name": "claude-firstparty-observe-02",
+      "native_binary": {
+        "path": "/home/nade/.local/share/claude/versions/2.1.291",
+        "sha256": "078fad28d0297c9a25d306b635b2d8816c6839347520f29eb54ffea5d56142fb"
+      },
+      "remaining_processes": 0,
+      "runtime": "claude",
+      "sdk_sha256": "c05419d753bc81d991ddec4b66af17a9172f498e59d28fad07a8e676635c07ce"
+    },
+    {
+      "components": [
+        {
+          "equal": false,
+          "kind": "system",
+          "lcp_utf8_bytes": 76,
+          "left_bytes": 190,
+          "pointer": "/system/0/text",
+          "right_bytes": 190
+        },
+        {
+          "equal": true,
+          "kind": "system",
+          "lcp_utf8_bytes": 57,
+          "left_bytes": 57,
+          "pointer": "/system/1/text",
+          "right_bytes": 57
+        },
+        {
+          "equal": true,
+          "kind": "system",
+          "lcp_utf8_bytes": 16979,
+          "left_bytes": 16979,
+          "pointer": "/system/2/text",
+          "right_bytes": 16979
+        },
+        {
+          "equal": false,
+          "kind": "system",
+          "lcp_utf8_bytes": 16969,
+          "left_bytes": 19216,
+          "pointer": "/system/3/text",
+          "right_bytes": 19216
+        },
+        {
+          "equal": false,
+          "kind": "user",
+          "lcp_utf8_bytes": 261,
+          "left_bytes": 1546,
+          "pointer": "/messages/0/content/0/text",
+          "right_bytes": 1546
+        },
+        {
+          "equal": true,
+          "kind": "user",
+          "lcp_utf8_bytes": 176,
+          "left_bytes": 176,
+          "pointer": "/messages/0/content/1/text",
+          "right_bytes": 176
+        },
+        {
+          "equal": true,
+          "kind": "user",
+          "lcp_utf8_bytes": 924,
+          "left_bytes": 924,
+          "pointer": "/messages/0/content/2/text",
+          "right_bytes": 924
+        },
+        {
+          "equal": true,
+          "kind": "user",
+          "lcp_utf8_bytes": 2949,
+          "left_bytes": 2949,
+          "pointer": "/messages/0/content/3/text",
+          "right_bytes": 2949
+        },
+        {
+          "equal": true,
+          "kind": "user",
+          "lcp_utf8_bytes": 284,
+          "left_bytes": 284,
+          "pointer": "/messages/0/content/4/text",
+          "right_bytes": 284
+        },
+        {
+          "equal": true,
+          "kind": "user",
+          "lcp_utf8_bytes": 6013,
+          "left_bytes": 6013,
+          "pointer": "/messages/0/content/5/text",
+          "right_bytes": 6013
+        },
+        {
+          "equal": true,
+          "kind": "user",
+          "lcp_utf8_bytes": 86,
+          "left_bytes": 86,
+          "pointer": "/messages/0/content/6/text",
+          "right_bytes": 86
+        },
+        {
+          "equal": false,
+          "kind": "user",
+          "lcp_utf8_bytes": 272,
+          "left_bytes": 619,
+          "pointer": "/messages/0/content/7/text",
+          "right_bytes": 619
+        },
+        {
+          "equal": true,
+          "kind": "user",
+          "lcp_utf8_bytes": 64,
+          "left_bytes": 64,
+          "pointer": "/messages/0/content/8/text",
+          "right_bytes": 64
+        },
+        {
+          "equal": true,
+          "kind": "user",
+          "lcp_utf8_bytes": 584,
+          "left_bytes": 584,
+          "pointer": "/messages/0/content/9/text",
+          "right_bytes": 584
+        },
+        {
+          "equal": false,
+          "kind": "user",
+          "lcp_utf8_bytes": 25,
+          "left_bytes": 170,
+          "pointer": "/messages/0/content/10/text",
+          "right_bytes": 170
+        }
+      ],
+      "compose_probe": "shared",
+      "compose_trace_sha256": "b7b9d4124d24dcfbcdf70f752c4e34f8f64212579c3ab14731aa2f8113ebe656",
+      "composition": {
+        "before_briefing_sha256": "e4062ead926ab5821207a422248eaf7b56db4d5fb924301b35417ee3b19828dc",
+        "common_bytes": 5407,
+        "common_sha256": "203e10a379ad0af9560b0eb7210c40cc97248046fefb33b689465bc644bb5ace",
+        "mode": "shared",
+        "remaining_briefing_sha256": "6daa26f33fcf3dc5a46580ac8a4962e8dbbba0216c883be527b90435162f75ee"
+      },
+      "crew_sha256": "c8ce44acb63a0ab9651ae513600f19dd098d8c9dd5adab19826498c53f6557db",
+      "endpoint_shape": "anthropic-host",
+      "isolation": "worktree",
+      "members": [
+        {
+          "blocks": [
+            {
+              "bytes": 190,
+              "kind": "system",
+              "offsets_utf8": {},
+              "pointer": "/system/0/text",
+              "sha256": "9186c8cfc8cfac32c42fbf2ae7855476ffd6bb7edabf34803a609a8c4e96c3e7"
+            },
+            {
+              "bytes": 57,
+              "kind": "system",
+              "offsets_utf8": {},
+              "pointer": "/system/1/text",
+              "sha256": "2719b7a469d904b3281d8488976f33103944211279bddf04c05bca44d184dae6"
+            },
+            {
+              "bytes": 16979,
+              "kind": "system",
+              "offsets_utf8": {
+                "coordination": 11572,
+                "member_tone": 10127
+              },
+              "pointer": "/system/2/text",
+              "sha256": "1823a031be777580c97677b44edd7517c0243c645329cb9823a37e6cb89739eb"
+            },
+            {
+              "bytes": 19216,
+              "kind": "system",
+              "offsets_utf8": {
+                "member_branch": 17450,
+                "member_identity": 16960
+              },
+              "pointer": "/system/3/text",
+              "sha256": "d7df11c5375689dfa001d4172967d29cc5eb8949a635190ee7934cb715aa6d6a"
+            },
+            {
+              "bytes": 1546,
+              "kind": "user",
+              "offsets_utf8": {
+                "workdir": 115
+              },
+              "pointer": "/messages/0/content/0/text",
+              "sha256": "3daf606e6103d3d90e9a25193c88abe2f694a9785524889d4bd644cb8c07d038"
+            },
+            {
+              "bytes": 176,
+              "kind": "user",
+              "offsets_utf8": {},
+              "pointer": "/messages/0/content/1/text",
+              "sha256": "97c808babde1e22c53c5672ec87de5288a2e600f531a25aa094c0cb9a471a65d"
+            },
+            {
+              "bytes": 924,
+              "kind": "user",
+              "offsets_utf8": {},
+              "pointer": "/messages/0/content/2/text",
+              "sha256": "2c3dec9f3dbd8aa6a4b41955c110894cce81c921c825ee5dd974d2a949443caa"
+            },
+            {
+              "bytes": 2949,
+              "kind": "user",
+              "offsets_utf8": {},
+              "pointer": "/messages/0/content/3/text",
+              "sha256": "1200d899ebae31f3b06953c0c1d54a5d1b93c61f0de3a1b01b92dfa4a3b47c84"
+            },
+            {
+              "bytes": 284,
+              "kind": "user",
+              "offsets_utf8": {},
+              "pointer": "/messages/0/content/4/text",
+              "sha256": "c69b35dff1cd679a7ca4ba914df2298042c08680cc054b1a15c23a6fac53a145"
+            },
+            {
+              "bytes": 6013,
+              "kind": "user",
+              "offsets_utf8": {},
+              "pointer": "/messages/0/content/5/text",
+              "sha256": "afa947b9f47bd2076a77b400959ca672aae479b39d95b4706ef5c8ff522357c1"
+            },
+            {
+              "bytes": 86,
+              "kind": "user",
+              "offsets_utf8": {},
+              "pointer": "/messages/0/content/6/text",
+              "sha256": "d1b5389a85a66596a261545470fb784c0be377158bbf7e47a9671ee84dfcc533"
+            },
+            {
+              "bytes": 619,
+              "kind": "user",
+              "offsets_utf8": {
+                "member_branch": 265
+              },
+              "pointer": "/messages/0/content/7/text",
+              "sha256": "6c285c3fa2d12283f14523eb9ffe4571dbb1a06bc6d89eecb89f94cd205d2fd7"
+            },
+            {
+              "bytes": 64,
+              "kind": "user",
+              "offsets_utf8": {},
+              "pointer": "/messages/0/content/8/text",
+              "sha256": "2cb88daeb5e426c17e4da1d7fe002568590ab5f247411891063c1871ad532eb6"
+            },
+            {
+              "bytes": 584,
+              "kind": "user",
+              "offsets_utf8": {},
+              "pointer": "/messages/0/content/9/text",
+              "sha256": "2f9535d3596882dfa1450421e3901bf64e2342ad952d079467139f465a12f88a"
+            },
+            {
+              "bytes": 170,
+              "kind": "user",
+              "offsets_utf8": {},
+              "pointer": "/messages/0/content/10/text",
+              "sha256": "e3bae99569f9952891932768bfa48f21cfd0a79c9202f059893ddec8b7fc1469"
+            }
+          ],
+          "catalog_sha256": "6f74efee2a0f9814bb7184adaeb6509dd7abe8f2d3d395cf81cd7c92dd73f444",
+          "id": "x",
+          "prompt_cache_key_sha256": null,
+          "request": "claude-firstparty-shared-02/request-002.json",
+          "request_sha256": "f58bb8802e54fba0c51ec596257e0cc0969fc07546d8c5a82452db60529a9f4a",
+          "session_id_sha256": "b369f5922acb5e732a40e7666fa2e905576dd032251c5ea00265f654d11eed59",
+          "system_cache_boundaries": [
+            {
+              "bytes": 190,
+              "cache_control": null,
+              "pointer": "/system/0",
+              "sha256": "9186c8cfc8cfac32c42fbf2ae7855476ffd6bb7edabf34803a609a8c4e96c3e7"
+            },
+            {
+              "bytes": 57,
+              "cache_control": null,
+              "pointer": "/system/1",
+              "sha256": "2719b7a469d904b3281d8488976f33103944211279bddf04c05bca44d184dae6"
+            },
+            {
+              "bytes": 16979,
+              "cache_control": {
+                "scope": "global",
+                "type": "ephemeral"
+              },
+              "pointer": "/system/2",
+              "sha256": "1823a031be777580c97677b44edd7517c0243c645329cb9823a37e6cb89739eb"
+            },
+            {
+              "bytes": 19216,
+              "cache_control": {
+                "type": "ephemeral"
+              },
+              "pointer": "/system/3",
+              "sha256": "d7df11c5375689dfa001d4172967d29cc5eb8949a635190ee7934cb715aa6d6a"
+            }
+          ],
+          "toolbox_fingerprint": "14791e0ea022bdb7bcdb6d4fadcd718c61a483270a118c02cd4f4b49864e04a2",
+          "workdir": "work/.crew/worktrees/x"
+        },
+        {
+          "blocks": [
+            {
+              "bytes": 190,
+              "kind": "system",
+              "offsets_utf8": {},
+              "pointer": "/system/0/text",
+              "sha256": "9519b24df0897f635e06d779f17579ddc361ba7a949e90f3bc3d1039877e13b9"
+            },
+            {
+              "bytes": 57,
+              "kind": "system",
+              "offsets_utf8": {},
+              "pointer": "/system/1/text",
+              "sha256": "2719b7a469d904b3281d8488976f33103944211279bddf04c05bca44d184dae6"
+            },
+            {
+              "bytes": 16979,
+              "kind": "system",
+              "offsets_utf8": {
+                "coordination": 11572,
+                "member_tone": 10127
+              },
+              "pointer": "/system/2/text",
+              "sha256": "1823a031be777580c97677b44edd7517c0243c645329cb9823a37e6cb89739eb"
+            },
+            {
+              "bytes": 19216,
+              "kind": "system",
+              "offsets_utf8": {
+                "member_branch": 17450,
+                "member_identity": 16960
+              },
+              "pointer": "/system/3/text",
+              "sha256": "2e5bae81ee81dae12df63105b78d914d56b7fa57ea4f5c22a618629c428808fe"
+            },
+            {
+              "bytes": 1546,
+              "kind": "user",
+              "offsets_utf8": {
+                "workdir": 115
+              },
+              "pointer": "/messages/0/content/0/text",
+              "sha256": "2dd3cacefec32d222ce16c5a5efff7867f5936b60f71c831342d77493f874b41"
+            },
+            {
+              "bytes": 176,
+              "kind": "user",
+              "offsets_utf8": {},
+              "pointer": "/messages/0/content/1/text",
+              "sha256": "97c808babde1e22c53c5672ec87de5288a2e600f531a25aa094c0cb9a471a65d"
+            },
+            {
+              "bytes": 924,
+              "kind": "user",
+              "offsets_utf8": {},
+              "pointer": "/messages/0/content/2/text",
+              "sha256": "2c3dec9f3dbd8aa6a4b41955c110894cce81c921c825ee5dd974d2a949443caa"
+            },
+            {
+              "bytes": 2949,
+              "kind": "user",
+              "offsets_utf8": {},
+              "pointer": "/messages/0/content/3/text",
+              "sha256": "1200d899ebae31f3b06953c0c1d54a5d1b93c61f0de3a1b01b92dfa4a3b47c84"
+            },
+            {
+              "bytes": 284,
+              "kind": "user",
+              "offsets_utf8": {},
+              "pointer": "/messages/0/content/4/text",
+              "sha256": "c69b35dff1cd679a7ca4ba914df2298042c08680cc054b1a15c23a6fac53a145"
+            },
+            {
+              "bytes": 6013,
+              "kind": "user",
+              "offsets_utf8": {},
+              "pointer": "/messages/0/content/5/text",
+              "sha256": "afa947b9f47bd2076a77b400959ca672aae479b39d95b4706ef5c8ff522357c1"
+            },
+            {
+              "bytes": 86,
+              "kind": "user",
+              "offsets_utf8": {},
+              "pointer": "/messages/0/content/6/text",
+              "sha256": "d1b5389a85a66596a261545470fb784c0be377158bbf7e47a9671ee84dfcc533"
+            },
+            {
+              "bytes": 619,
+              "kind": "user",
+              "offsets_utf8": {
+                "member_branch": 265
+              },
+              "pointer": "/messages/0/content/7/text",
+              "sha256": "ad8c0dc88abfb8c38332a7cf8d17133603acf4f1a5c17106ccc067fbc5f44355"
+            },
+            {
+              "bytes": 64,
+              "kind": "user",
+              "offsets_utf8": {},
+              "pointer": "/messages/0/content/8/text",
+              "sha256": "2cb88daeb5e426c17e4da1d7fe002568590ab5f247411891063c1871ad532eb6"
+            },
+            {
+              "bytes": 584,
+              "kind": "user",
+              "offsets_utf8": {},
+              "pointer": "/messages/0/content/9/text",
+              "sha256": "2f9535d3596882dfa1450421e3901bf64e2342ad952d079467139f465a12f88a"
+            },
+            {
+              "bytes": 170,
+              "kind": "user",
+              "offsets_utf8": {},
+              "pointer": "/messages/0/content/10/text",
+              "sha256": "0e74673c06233fb1ad068660e51e5ce4682f501cecc8b6140ba38cdcd6ad2586"
+            }
+          ],
+          "catalog_sha256": "6f74efee2a0f9814bb7184adaeb6509dd7abe8f2d3d395cf81cd7c92dd73f444",
+          "id": "y",
+          "prompt_cache_key_sha256": null,
+          "request": "claude-firstparty-shared-02/request-001.json",
+          "request_sha256": "df29a4414906b5611d938b579ccc2f004982d67411af48cc2c35525880298cab",
+          "session_id_sha256": "576467ad5bf27db7aabf21d0ac666af1fa2d71b9c49967ee7b4f0e11f8c38331",
+          "system_cache_boundaries": [
+            {
+              "bytes": 190,
+              "cache_control": null,
+              "pointer": "/system/0",
+              "sha256": "9519b24df0897f635e06d779f17579ddc361ba7a949e90f3bc3d1039877e13b9"
+            },
+            {
+              "bytes": 57,
+              "cache_control": null,
+              "pointer": "/system/1",
+              "sha256": "2719b7a469d904b3281d8488976f33103944211279bddf04c05bca44d184dae6"
+            },
+            {
+              "bytes": 16979,
+              "cache_control": {
+                "scope": "global",
+                "type": "ephemeral"
+              },
+              "pointer": "/system/2",
+              "sha256": "1823a031be777580c97677b44edd7517c0243c645329cb9823a37e6cb89739eb"
+            },
+            {
+              "bytes": 19216,
+              "cache_control": {
+                "type": "ephemeral"
+              },
+              "pointer": "/system/3",
+              "sha256": "2e5bae81ee81dae12df63105b78d914d56b7fa57ea4f5c22a618629c428808fe"
+            }
+          ],
+          "toolbox_fingerprint": "14791e0ea022bdb7bcdb6d4fadcd718c61a483270a118c02cd4f4b49864e04a2",
+          "workdir": "work/.crew/worktrees/y"
+        }
+      ],
+      "name": "claude-firstparty-shared-02",
+      "native_binary": {
+        "path": "/home/nade/.local/share/claude/versions/2.1.291",
+        "sha256": "078fad28d0297c9a25d306b635b2d8816c6839347520f29eb54ffea5d56142fb"
+      },
+      "remaining_processes": 0,
+      "runtime": "claude",
+      "sdk_sha256": "c05419d753bc81d991ddec4b66af17a9172f498e59d28fad07a8e676635c07ce"
+    }
+  ],
+  "claude_version": "2.1.291",
+  "codex_version": "0.159.0",
+  "network": "isolated network namespace; loopback server/proxy only",
+  "provider_calls": 0,
+  "rejected": [
+    {
+      "case": "claude-shared-section-01",
+      "reason": "duplicate prompt.compose hook rejected; common policy absent"
+    },
+    {
+      "case": "claude-firstparty-observe-01",
+      "reason": "port 80 denied before native launch"
+    }
+  ],
+  "schema": 1,
+  "source_scope": "fresh synthetic native sessions; no provider cache measurement"
+}
