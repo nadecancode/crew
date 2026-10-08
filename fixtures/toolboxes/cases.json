@@ -1,0 +1,235 @@
+{
+  "schema": 1,
+  "spec": "notes/toolboxes.md#acceptance-cases",
+  "cases": [
+    {
+      "id": "T01",
+      "title": "Default source exclusion",
+      "fixtures": [
+        "teams/legacy.yaml",
+        "operator-home",
+        "project"
+      ],
+      "required_evidence": "Real launch output and runtime-native discovery; stubs prove argument wiring only.",
+      "initial_status": "not_run",
+      "mode": "native-runtime-required"
+    },
+    {
+      "id": "T02",
+      "title": "Example toolbox mapping",
+      "fixtures": [
+        "teams/full.yaml"
+      ],
+      "required_evidence": "Actual toolbox projection and supported app-server versus terminal statuses.",
+      "initial_status": "not_run",
+      "mode": "offline-product-integration"
+    },
+    {
+      "id": "T03",
+      "title": "Ordering and cross-member definitions",
+      "fixtures": [
+        "teams/full.yaml",
+        "same-content-a",
+        "same-content-b",
+        "mcp controls"
+      ],
+      "required_evidence": "Real canonical bytes, generated artifacts, pinned digest and native catalogs.",
+      "initial_status": "not_run",
+      "mode": "native-runtime-required"
+    },
+    {
+      "id": "T04",
+      "title": "Validation and resolution",
+      "fixtures": [
+        "validation.json",
+        "teams/resolution.yaml",
+        "styles/fixture.yaml"
+      ],
+      "required_evidence": "Actual crew-core or launch validation errors; no copied validation logic.",
+      "initial_status": "not_run",
+      "mode": "offline-product-integration"
+    },
+    {
+      "id": "T05",
+      "title": "Secret delivery and scrubbing",
+      "fixtures": [
+        "secret-input",
+        "stub-control.json",
+        "operator-home/.config/crew/config.toml"
+      ],
+      "required_evidence": "Real proxy and PTY/sandbox/app-server isolation with negative secret controls.",
+      "initial_status": "not_run",
+      "mode": "offline-product-integration"
+    },
+    {
+      "id": "T06",
+      "title": "Missing references",
+      "fixtures": [
+        "teams/full.yaml",
+        "secret-input"
+      ],
+      "required_evidence": "Actual readiness result for optional, required and strict members.",
+      "initial_status": "not_run",
+      "mode": "offline-product-integration"
+    },
+    {
+      "id": "T07",
+      "title": "Spawn restart resume stability",
+      "fixtures": [
+        "tree_snapshot",
+        "assert_pinned_tools"
+      ],
+      "required_evidence": "Actual lifecycle transitions; same member prerequisites.",
+      "initial_status": "not_run",
+      "mode": "offline-product-integration"
+    },
+    {
+      "id": "T08",
+      "title": "Reload pending changes",
+      "fixtures": [
+        "teams/full.yaml"
+      ],
+      "required_evidence": "Running daemon reload, unchanged launch artifacts and transition events.",
+      "initial_status": "not_run",
+      "mode": "offline-product-integration"
+    },
+    {
+      "id": "T09",
+      "title": "File snapshots and limits",
+      "fixtures": [
+        "faults",
+        "items/skills/changelog"
+      ],
+      "required_evidence": "Real content store and refusal reason including size.",
+      "initial_status": "not_run",
+      "mode": "offline-product-integration"
+    },
+    {
+      "id": "T10",
+      "title": "Runtime switch",
+      "fixtures": [
+        "teams/full.yaml"
+      ],
+      "required_evidence": "Real model switch policy; required item refusal.",
+      "initial_status": "not_run",
+      "mode": "offline-product-integration"
+    },
+    {
+      "id": "T11",
+      "title": "Member addition and subagents",
+      "fixtures": [
+        "teams/full.yaml"
+      ],
+      "required_evidence": "Real tool schemas, saved roster and active parent snapshot inheritance.",
+      "initial_status": "not_run",
+      "mode": "offline-product-integration"
+    },
+    {
+      "id": "T12",
+      "title": "Operator source selection",
+      "fixtures": [
+        "operator-home",
+        "project"
+      ],
+      "required_evidence": "Runtime-native listings and sandbox run; enumerate exclusion limitations.",
+      "initial_status": "not_run",
+      "mode": "native-runtime-required"
+    },
+    {
+      "id": "T13",
+      "title": "Strict exclusion",
+      "fixtures": [
+        "teams/full.yaml"
+      ],
+      "required_evidence": "Actual unsandboxed launch refusal with source reason.",
+      "initial_status": "not_run",
+      "mode": "offline-product-integration"
+    },
+    {
+      "id": "T14",
+      "title": "Pinned proxy definitions",
+      "fixtures": [
+        "mcp controls",
+        "assert_pinned_tools"
+      ],
+      "required_evidence": "Real forwarding proxy; unsorted mutable stub is a negative control.",
+      "initial_status": "not_run",
+      "mode": "offline-product-integration"
+    },
+    {
+      "id": "T15",
+      "title": "Dashboard parity",
+      "fixtures": [
+        "teams/full.yaml"
+      ],
+      "required_evidence": "Each consumer reads real protocol payload; native UI tests or stated platform limits.",
+      "initial_status": "not_run",
+      "mode": "offline-product-integration"
+    },
+    {
+      "id": "T16",
+      "title": "Per-turn cache attribution",
+      "fixtures": [
+        "tree_snapshot",
+        "scripts/cache/bench"
+      ],
+      "required_evidence": "Provider-authorized paired warm sessions with TTL/model/endpoint and per-turn reads/writes.",
+      "initial_status": "not_run",
+      "mode": "live-provider-required"
+    },
+    {
+      "id": "T17",
+      "title": "Shell applicability",
+      "fixtures": [
+        "teams/full.yaml"
+      ],
+      "required_evidence": "Actual shell mapping under strict.",
+      "initial_status": "not_run",
+      "mode": "offline-product-integration"
+    },
+    {
+      "id": "T18",
+      "title": "Resume after tool removal",
+      "fixtures": [
+        "teams/full.yaml",
+        "mcp controls"
+      ],
+      "required_evidence": "Real runtime resume history or verified fresh-session handoff.",
+      "initial_status": "not_run",
+      "mode": "native-runtime-required"
+    },
+    {
+      "id": "T19",
+      "title": "Sandbox and stale files",
+      "fixtures": [
+        "faults",
+        "member/rw/home"
+      ],
+      "required_evidence": "Actual sandbox mounts and restart cleanup; filesystem fixtures alone do not prove it.",
+      "initial_status": "not_run",
+      "mode": "offline-product-integration"
+    },
+    {
+      "id": "T20",
+      "title": "Readiness failures",
+      "fixtures": [
+        "mcp modes",
+        "faults/missing-skill"
+      ],
+      "required_evidence": "Actual preflight deadline and live session failure reporting.",
+      "initial_status": "not_run",
+      "mode": "offline-product-integration"
+    },
+    {
+      "id": "T21",
+      "title": "Crew role and cache rule gaps",
+      "fixtures": [
+        "mcp controls",
+        "operator-home"
+      ],
+      "required_evidence": "Real crew role identity and proxy plus gateway/alwaysLoad paths.",
+      "initial_status": "not_run",
+      "mode": "offline-product-integration"
+    }
+  ]
+}

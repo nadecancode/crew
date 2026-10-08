@@ -1,0 +1,7 @@
+{
+  "mcpServers": {
+    "bundled-mcp-sentinel": {
+      "command": "toolbox-never-run-bundled-mcp"
+    }
+  }
+}

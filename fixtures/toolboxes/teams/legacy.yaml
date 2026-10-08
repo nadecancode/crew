@@ -1,0 +1,19 @@
+{
+  "project": "toolbox-legacy",
+  "workspace": {
+    "path": "@ROOT@/project",
+    "isolation": "shared"
+  },
+  "defaults": {
+    "runtime": "claude"
+  },
+  "orchestrator": {
+    "agent": false
+  },
+  "agents": [
+    {
+      "id": "legacy",
+      "role": "legacy fixture"
+    }
+  ]
+}

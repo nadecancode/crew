@@ -13,8 +13,8 @@ describe.runIf(existsSync(join(DIST, "manifest.json")))("bundle", () => {
   const js = (p: string) => p.endsWith(".js");
   const terminal = (p: string) => /assets\/(Terminal|xterm)-/.test(p);
 
-  test("P1: script for the dashboard (all but the terminal chunk) ≤ 230.5 KB", () => {
-    expect(sum((p) => js(p) && !terminal(p))).toBeLessThanOrEqual(230.5 * KB);
+  test("P1: script for the dashboard (all but the terminal chunk) ≤ 236.5 KB", () => {
+    expect(sum((p) => js(p) && !terminal(p))).toBeLessThanOrEqual(236.5 * KB);
   });
   test("P2: stylesheet ≤ 34 KB", () => {
     expect(sum((p) => p.endsWith(".css"))).toBeLessThanOrEqual(34 * KB);
@@ -22,8 +22,8 @@ describe.runIf(existsSync(join(DIST, "manifest.json")))("bundle", () => {
   test("P3: terminal chunk ≤ 350 KB", () => {
     expect(sum((p) => js(p) && terminal(p))).toBeLessThanOrEqual(350 * KB);
   });
-  test("P4: the whole of web-dist ≤ 600 KB", () => {
-    expect(sum(() => true)).toBeLessThanOrEqual(600 * KB);
+  test("P4: the whole of web-dist ≤ 604.1 KB", () => {
+    expect(sum(() => true)).toBeLessThanOrEqual(604.1 * KB);
   });
 });
 

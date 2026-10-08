@@ -254,6 +254,10 @@ pub struct WarningFact {
     pub entity: Option<EntityKey>,
 }
 
+/// The warning code for a member whose toolbox needs attention. Inspectors
+/// that show the Toolbox section leave it out of their header warnings.
+pub const TOOLBOX_WARNING: &str = "toolbox";
+
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ActionAvailability {
     pub action: ActionKind,

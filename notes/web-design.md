@@ -57,6 +57,20 @@ usage view or hover cards; the whole app of §ui and §graphs measures 191 KB.
 P1 is now 220 KB. No feature is cut for it, and P4 (the whole bundle, 600 KB)
 is unchanged (§perf "Budgets").
 
+**Budgets P1 and P4 raised for member toolboxes** (designer, m-42430a6280f1;
+review finding D2 of cache-reviewer, m-4638ef2212b4). The web revamp had left
+P1 at 230,500 bytes and P4 at 600,000 (`notes/web-revamp.md`), and its build
+used both to within 3 and 1,996 bytes. Card `toolbox-dashboards` adds each
+member's toolbox to the inspector, the team List and the graph
+(`notes/toolboxes.md` §Display). That adds 5,452 bytes of dashboard script and
+5,545 bytes to the whole bundle. The stylesheet stays within P2 because its
+rules are folded into the inspector's existing list and details rules
+(33,999 of 34,000 bytes). Measured on that card's build: P1 235,949 bytes,
+P2 33,999, P3 332,915, P4 603,549. P1 is now 236,500 bytes and P4 604,100,
+each the measured size plus about 0.5 KB. P2 and P3 are unchanged. As above,
+P1 is a ceiling against growth nobody decided on, and this feature was
+decided.
+
 **Revised by `notes/web-multi.md`** (operator, m-50a884c7d9b1: one server
 for several workspaces). It replaces W1: the server becomes a process of its
 own, shared by every workspace the operator joined, and the page gains a
@@ -1700,10 +1714,10 @@ the charts).
 
 | # | budget | limit | spike **(observed)** |
 |---|---|---|---|
-| P1 | script needed for the dashboard (everything but the terminal chunk), minified | ≤ 220 KB (about 70 KB gzip) | 31.8 KB; the whole app: 191 KB (172 KB app, 19 KB solid-js) |
-| P2 | stylesheet | ≤ 30 KB | 5.0 KB (3.6 KB of it xterm's) |
+| P1 | script needed for the dashboard (everything but the terminal chunk), minified | ≤ 236.5 KB (raised for member toolboxes, above) | 31.8 KB; the whole app: 191 KB (172 KB app, 19 KB solid-js) |
+| P2 | stylesheet | ≤ 34 KB | 5.0 KB (3.6 KB of it xterm's) |
 | P3 | terminal chunk (xterm.js), requested at the start beside the first paint, used when a terminal first opens | ≤ 350 KB | 331 KB |
-| P4 | the whole of `web-dist/` | ≤ 600 KB | 369 KB |
+| P4 | the whole of `web-dist/` | ≤ 604.1 KB | 369 KB |
 | P5 | first contentful paint, cold cache | ≤ 150 ms | 28–40 ms |
 | P6 | live (snapshot of 10 agents, 300 messages, 1000 events applied and drawn), cold cache | ≤ 300 ms | 44–55 ms median, 82 ms worst (6 agents; 300 messages and about 1000 events in the last run) |
 | P7 | daemon emits → the page's handler runs, p95 | ≤ 10 ms | 1 ms median, 2–4 ms p95 (real pushes, through the relay) |
