@@ -31,9 +31,23 @@ pub fn toolbox(
     Ok(())
 }
 
+/// The team `check` and `reload` act on, named explicitly: the file says
+/// nothing of which running team it is meant for, and the nearest one found
+/// from the current directory may be another.
+fn named(target: &Target, command: &str) -> Result<()> {
+    if target.dir.is_none() && target.project.is_none() {
+        bail!(
+            "crew toolbox {command} needs the running team it is for: name it with \
+-C <workspace> or --project <name>"
+        );
+    }
+    Ok(())
+}
+
 /// `crew toolbox check <file>`: exits non-zero when a member's toolbox would
 /// stop its launch.
 pub fn toolbox_check(target: &Target, file: &Path, json: bool) -> Result<()> {
+    named(target, "check")?;
     // Loading validates the file: a bad toolbox fails here, with its path.
     let config = TeamConfig::load(file)?;
     let (mut client, _) = target.connect("cli")?;
@@ -65,6 +79,7 @@ pub fn toolbox_check(target: &Target, file: &Path, json: bool) -> Result<()> {
 
 /// `crew toolbox reload <file>`.
 pub fn toolbox_reload(target: &Target, file: &Path) -> Result<()> {
+    named(target, "reload")?;
     let config = TeamConfig::load(file)?;
     let (mut client, _) = target.connect("cli")?;
     let reload: ToolboxReload = client.call(Call::ToolboxReload {
