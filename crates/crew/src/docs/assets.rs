@@ -326,7 +326,7 @@ fn jpeg(bytes: &[u8]) -> Result<Raster, DocImageReason> {
         }
         let payload = bytes.get(at + 2..at + len).ok_or(DocImageReason::Invalid)?;
         at += len;
-        if matches!(marker, 0xc0 | 0xc1 | 0xc2) {
+        if matches!(marker, 0xc0..=0xc2) {
             if size.is_some()
                 || payload.len() < 6
                 || !matches!(payload[0], 8 | 12)

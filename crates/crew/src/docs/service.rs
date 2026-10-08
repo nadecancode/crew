@@ -12,7 +12,7 @@ use super::{
     watch,
 };
 use crate::daemon::features::{
-    ConnCtx, ConnId, FeatureError, FeatureService, FeatureWatch, Readiness, RunCtx,
+    Caller, ConnCtx, ConnId, FeatureError, FeatureService, FeatureWatch, Readiness, RunCtx,
 };
 use base64::Engine;
 use crew_core::rpc::docs::*;
@@ -29,11 +29,11 @@ use std::time::{Duration, Instant};
 use tokio::sync::Semaphore;
 
 // Conservative retained-memory partitions sum below the design's 128 MiB cap.
-const CACHE_BYTES: usize = 80 * 1024 * 1024;
+const CACHE_BYTES: usize = 64 * 1024 * 1024;
 const CURSOR_BYTES: usize = 16 * 1024 * 1024;
 const MAX_CONNECTIONS: usize = 32;
 const MAX_VERSIONS: usize = 256;
-const MAX_RECORDED: usize = 512;
+const MAX_RECORDED: usize = 128;
 const MAX_CURSORS: usize = 4;
 
 #[derive(Clone)]
@@ -47,6 +47,7 @@ struct Inner {
     worker: AtomicBool,
 }
 struct State {
+    active: bool,
     run: RunCtx,
     index: Index,
     connections: BTreeMap<Id, Connection>,
@@ -61,6 +62,7 @@ struct State {
     image_hashes: BTreeMap<(Id, Relative), Option<Id>>,
     image_cursor: usize,
     image_changed: BTreeSet<(Id, Id)>,
+    status_dirty: bool,
 }
 struct Connection {
     context: ConnCtx,
@@ -111,10 +113,13 @@ struct Head {
 struct HistoryCursor {
     doc_id: Id,
     heads: Vec<Head>,
-    source: usize,
-    skip: usize,
+    positions: Vec<usize>,
+    pending: Vec<Option<history::Record>>,
+    done: Vec<bool>,
     seen: BTreeSet<Id>,
 }
+type ImageDependencies = BTreeMap<(Id, Relative), (Option<Id>, BTreeSet<(Id, Id)>)>;
+
 struct Plan {
     epoch: Id,
     path: Relative,
@@ -129,6 +134,7 @@ impl Service {
         Self {
             inner: Arc::new(Inner {
                 state: Mutex::new(State {
+                    active: true,
                     run,
                     index: Index::new(policy),
                     connections: BTreeMap::new(),
@@ -143,6 +149,7 @@ impl Service {
                     image_hashes: BTreeMap::new(),
                     image_cursor: 0,
                     image_changed: BTreeSet::new(),
+                    status_dirty: false,
                 }),
                 reads: Arc::new(Semaphore::new(2)),
                 history: Arc::new(Semaphore::new(1)),
@@ -158,8 +165,24 @@ impl Service {
     /// Call outside the async executor if registration can touch slow storage.
     pub fn replace_sources(&self, sources: Vec<Registration>) -> Result<(), DocFailureCode> {
         let mut state = self.state();
+        let before: Vec<_> = state
+            .index
+            .sources
+            .values()
+            .map(|s| (s.record.id.clone(), s.record.generation))
+            .collect();
         if state.index.register(sources)? {
-            state.invalidate_leases();
+            let after: Vec<_> = state
+                .index
+                .sources
+                .values()
+                .map(|s| (s.record.id.clone(), s.record.generation))
+                .collect();
+            if before != after {
+                state.invalidate_leases();
+            } else {
+                state.publish(true);
+            }
             state.dirty.store(true, Ordering::Release);
             state.sync_native();
         }
@@ -242,15 +265,16 @@ impl Service {
         } else {
             Duration::from_secs(5)
         };
-        if (state.dirty.load(Ordering::Acquire)
-            && now.duration_since(state.last_scan) >= Duration::from_secs(1))
-            || now.duration_since(state.last_scan) >= period
+        if state.index.phase == DocPhase::Ready
+            && ((state.dirty.load(Ordering::Acquire)
+                && now.duration_since(state.last_scan) >= Duration::from_secs(1))
+                || now.duration_since(state.last_scan) >= period)
         {
             state.dirty.store(false, Ordering::Release);
             state.index.rescan();
             state.last_scan = now;
         }
-        state.index.advance();
+        state.advance();
         state.sync_native();
         state.check_images();
         if now.duration_since(state.last_publish) >= Duration::from_secs(1) {
@@ -272,6 +296,7 @@ impl Service {
         let history_permit = if matches!(
             call,
             Call::DocsHistory(_)
+                | Call::DocsDiff(_)
                 | Call::DocsRead(DocsRead {
                     version: DocVersionSelector::Id(_),
                     ..
@@ -306,7 +331,7 @@ impl Service {
         match call {
             Call::DocsIndex(request) => {
                 let mut state = self.state();
-                state.index.advance();
+                state.advance();
                 if state.last_publish.elapsed() >= Duration::from_secs(1) {
                     state.publish(false);
                     state.last_publish = Instant::now();
@@ -340,15 +365,62 @@ impl Service {
                 Ok(page) => DocHistoryResult::Available(Box::new(page)),
                 Err(code) => DocHistoryResult::Unavailable(failure(None, code)),
             }),
-            Call::DocsDiff(request) => {
-                let state = self.state();
-                encode(&match state.diff(context, request) {
-                    Ok(value) => DocDiffResult::Available(Box::new(value)),
-                    Err(code) => DocDiffResult::Unavailable(failure(None, code)),
-                })
-            }
+            Call::DocsDiff(request) => encode(&match self.diff(context, request) {
+                Ok(value) => DocDiffResult::Available(Box::new(value)),
+                Err(code) => DocDiffResult::Unavailable(failure(None, code)),
+            }),
             _ => Err(RpcError::invalid("not a Docs request")),
         }
+    }
+    fn diff(&self, context: &ConnCtx, request: DocsDiff) -> Result<DocDiff, DocFailureCode> {
+        let documents = {
+            let state = self.state();
+            state.check(context)?;
+            let connection = state
+                .connections
+                .get(&context.connection_epoch)
+                .ok_or(DocFailureCode::SnapshotExpired)?;
+            [&request.left, &request.right]
+                .into_iter()
+                .map(|id| {
+                    connection
+                        .versions
+                        .get(id)
+                        .map(|c| c.value.snapshot.version.document.clone())
+                        .or_else(|| {
+                            connection
+                                .recorded
+                                .get(id)
+                                .map(|c| c.version.document.clone())
+                        })
+                        .ok_or(DocFailureCode::SnapshotExpired)
+                })
+                .collect::<Result<Vec<_>, _>>()?
+        };
+        if documents[0].doc_id != documents[1].doc_id {
+            return Err(DocFailureCode::ForbiddenPath);
+        }
+        let left = self.read(
+            context,
+            DocsRead {
+                document: documents[0].clone(),
+                version: DocVersionSelector::Id(request.left),
+            },
+        )?;
+        let right = self.read(
+            context,
+            DocsRead {
+                document: documents[1].clone(),
+                version: DocVersionSelector::Id(request.right),
+            },
+        )?;
+        self.state().check(context)?;
+        diff::compare(
+            left.version.clone(),
+            &left.markdown,
+            right.version.clone(),
+            &right.markdown,
+        )
     }
     fn read(&self, context: &ConnCtx, request: DocsRead) -> Result<DocSnapshot, DocFailureCode> {
         let plan = {
@@ -480,9 +552,10 @@ impl Service {
                     state.index.epoch.clone(),
                     HistoryCursor {
                         doc_id: request.doc_id.clone(),
+                        positions: vec![0; heads.len()],
+                        pending: vec![None; heads.len()],
+                        done: vec![false; heads.len()],
                         heads,
-                        source: 0,
-                        skip: 0,
                         seen: BTreeSet::new(),
                     },
                 )
@@ -491,23 +564,35 @@ impl Service {
         let deadline = Instant::now() + history::DEADLINE;
         let mut rows = Vec::new();
         let mut recorded = Vec::new();
-        while rows.len() < limit && cursor.source < cursor.heads.len() {
+        while rows.len() < limit {
             if context.cancellation.is_cancelled() {
                 return Err(DocFailureCode::SnapshotExpired);
             }
-            let head = &cursor.heads[cursor.source];
-            // One native record at a time keeps the cursor exact even when a
-            // deletion/symlink entry yields no readable regular blob.
-            let page = head
-                .reader
-                .records(&head.commit, &head.path, cursor.skip, 1, deadline)?;
-            cursor.skip += 1;
-            if page.examined == 0 {
-                cursor.source += 1;
-                cursor.skip = 0;
-                continue;
+            for (i, head) in cursor.heads.iter().enumerate() {
+                while cursor.pending[i].is_none() && !cursor.done[i] {
+                    let page = head.reader.records(
+                        &head.commit,
+                        &head.path,
+                        cursor.positions[i],
+                        1,
+                        deadline,
+                    )?;
+                    cursor.positions[i] += page.examined;
+                    cursor.done[i] = page.examined == 0;
+                    cursor.pending[i] = page.rows.into_iter().next();
+                }
             }
-            for record in page.rows {
+            let next = cursor
+                .pending
+                .iter()
+                .enumerate()
+                .filter_map(|(i, r)| r.as_ref().map(|r| (r.recorded_at, std::cmp::Reverse(i))))
+                .max();
+            let Some((_, std::cmp::Reverse(i))) = next else {
+                break;
+            };
+            let head = &cursor.heads[i];
+            if let Some(record) = cursor.pending[i].take() {
                 if !cursor.seen.insert(record.commit.clone()) {
                     continue;
                 }
@@ -556,15 +641,16 @@ impl Service {
         for head in &cursor.heads {
             state.index.resolve(&head.reference)?;
         }
-        let next_cursor = if cursor.source < cursor.heads.len() {
-            Some(state.put_cursor(
-                context,
-                CursorData::History(cursor.clone()),
-                history_charge(&cursor),
-            )?)
-        } else {
-            None
-        };
+        let next_cursor =
+            if cursor.pending.iter().any(Option::is_some) || cursor.done.iter().any(|done| !done) {
+                Some(state.put_cursor(
+                    context,
+                    CursorData::History(cursor.clone()),
+                    history_charge(&cursor),
+                )?)
+            } else {
+                None
+            };
         let connection = state
             .connections
             .get_mut(&context.connection_epoch)
@@ -603,8 +689,20 @@ impl Service {
 }
 
 impl State {
+    fn advance(&mut self) {
+        let before = self.index.phase;
+        let changed = self.index.advance();
+        if before != self.index.phase || (changed && self.index.changed.is_empty()) {
+            self.status_dirty = true;
+            self.index.revision.0 += 1;
+        }
+    }
     fn admit(&mut self, context: &ConnCtx) -> Result<(), RpcError> {
-        if context.cancellation.is_cancelled() || context.run != self.run {
+        if !self.active
+            || context.caller != Caller::Operator
+            || context.cancellation.is_cancelled()
+            || context.run != self.run
+        {
             return Err(RpcError::forbidden(
                 "Docs connection scope is no longer active",
             ));
@@ -627,10 +725,9 @@ impl State {
         self.check(context).map_err(failure_error)
     }
     fn check(&self, context: &ConnCtx) -> Result<(), DocFailureCode> {
-        if !self.index.policy.enabled {
-            return Err(DocFailureCode::Disabled);
-        }
-        if context.cancellation.is_cancelled()
+        if !self.active
+            || context.caller != Caller::Operator
+            || context.cancellation.is_cancelled()
             || context.run != self.run
             || !self
                 .connections
@@ -870,35 +967,6 @@ impl State {
         })
         .map_err(|_| DocFailureCode::TooLarge)
     }
-    fn diff(&self, context: &ConnCtx, request: DocsDiff) -> Result<DocDiff, DocFailureCode> {
-        self.check(context)?;
-        let connection = self
-            .connections
-            .get(&context.connection_epoch)
-            .ok_or(DocFailureCode::SnapshotExpired)?;
-        let a = connection
-            .versions
-            .get(&request.left)
-            .ok_or(DocFailureCode::SnapshotExpired)?;
-        let b = connection
-            .versions
-            .get(&request.right)
-            .ok_or(DocFailureCode::SnapshotExpired)?;
-        let a = &a.value.snapshot;
-        let b = &b.value.snapshot;
-        if a.version.document.doc_id != b.version.document.doc_id {
-            return Err(DocFailureCode::ForbiddenPath);
-        }
-        self.index.resolve(&a.version.document)?;
-        self.index.resolve(&b.version.document)?;
-        diff::compare(
-            a.version.clone(),
-            &a.markdown,
-            b.version.clone(),
-            &b.markdown,
-        )
-    }
-
     fn index_page(
         &mut self,
         context: &ConnCtx,
@@ -922,19 +990,22 @@ impl State {
             (page, entries, offset, cursor.charge)
         } else {
             let entries: Vec<_> = self.index.rows.values().cloned().collect();
-            let charge = bounded_size(&entries, CURSOR_BYTES / 3)?.saturating_mul(3) + 8192;
+            let sources = List::new(
+                self.index
+                    .sources
+                    .values()
+                    .map(|s| s.record.clone())
+                    .collect(),
+            )
+            .expect("registered sources");
+            let charge = bounded_size(&entries, CURSOR_BYTES / 3)?.saturating_mul(3)
+                + bounded_size(&sources, 128 * 1024)?.saturating_mul(3)
+                + 8192;
             (
                 DocIndexPage {
                     epoch: self.index.epoch.clone(),
                     revision: self.index.revision,
-                    sources: List::new(
-                        self.index
-                            .sources
-                            .values()
-                            .map(|s| s.record.clone())
-                            .collect(),
-                    )
-                    .expect("registered sources"),
+                    sources,
                     entries: List::default(),
                     next_cursor: None,
                     phase: self.index.phase,
@@ -1057,6 +1128,9 @@ impl State {
         context: &ConnCtx,
         request: DocsWatch,
     ) -> Result<DocsWatchResult, RpcError> {
+        if !self.index.policy.enabled {
+            return Err(failure_error(DocFailureCode::Disabled));
+        }
         self.check(context).map_err(failure_error)?;
         for selected in request.selected.iter() {
             self.index.resolve(selected).map_err(failure_error)?;
@@ -1087,7 +1161,7 @@ impl State {
         // Register first. A guaranteed rescan also covers new directories found
         // during capture before their nonrecursive native watch was attached.
         self.sync_native();
-        self.index.advance();
+        self.advance();
         self.sync_native();
         self.dirty.store(true, Ordering::Release);
         let initial_index_page = self
@@ -1136,6 +1210,15 @@ impl State {
         if self.native.is_none() {
             return;
         }
+        if self.index.sources.values().any(|s| s.watch_limited) {
+            self.native = None;
+            self.watch_mode = DocWatchMode::ReconcileOnly;
+            self.status_dirty = true;
+            return;
+        }
+        if self.native.is_none() {
+            return;
+        }
         let mut paths = BTreeSet::new();
         for source in self.index.sources.values() {
             if source.root.check_identity().is_err() {
@@ -1143,9 +1226,7 @@ impl State {
             }
             paths.insert(source.root.path().to_owned());
             for directory in &source.directories {
-                if source.root.metadata(directory, &self.index.policy).is_ok() {
-                    paths.insert(source.root.path().join(directory.as_path()));
-                }
+                paths.insert(source.root.path().join(directory.as_path()));
             }
         }
         if self.native.as_mut().is_some_and(|w| w.sync(paths).is_err()) {
@@ -1155,7 +1236,7 @@ impl State {
         }
     }
     fn check_images(&mut self) {
-        let mut dependencies: BTreeMap<(Id, Relative), (Id, BTreeSet<(Id, Id)>)> = BTreeMap::new();
+        let mut dependencies: ImageDependencies = BTreeMap::new();
         for connection in self.connections.values() {
             let Some(w) = &connection.watch else {
                 continue;
@@ -1173,7 +1254,7 @@ impl State {
                     continue;
                 };
                 for image in latest.value.snapshot.images.iter() {
-                    let (Some(path), Some(hash)) = (&image.relative_path, &image.hash) else {
+                    let Some(path) = &image.relative_path else {
                         continue;
                     };
                     let Ok(path) = Relative::new(path) else {
@@ -1181,7 +1262,7 @@ impl State {
                     };
                     let entry = dependencies
                         .entry((selected.source_id.clone(), path))
-                        .or_insert_with(|| (hash.clone(), BTreeSet::new()));
+                        .or_insert_with(|| (image.hash.clone(), BTreeSet::new()));
                     entry
                         .1
                         .insert((selected.source_id.clone(), selected.doc_id.clone()));
@@ -1205,7 +1286,7 @@ impl State {
             let previous = self
                 .image_hashes
                 .entry(key.clone())
-                .or_insert_with(|| Some(initial.clone()))
+                .or_insert_with(|| initial.clone())
                 .clone();
             let next = self
                 .index
@@ -1227,6 +1308,7 @@ impl State {
         }
     }
     fn publish(&mut self, resync: bool) {
+        let resync = resync || std::mem::take(&mut self.status_dirty);
         if !resync && self.index.changed.is_empty() && self.image_changed.is_empty() {
             return;
         }
@@ -1259,6 +1341,14 @@ impl State {
                 continue;
             }
             let mut change = empty_change(&self.index, w);
+            if w.revision >= self.index.revision {
+                continue;
+            }
+            if resync {
+                change.history_sources_changed =
+                    List::new(self.index.sources.keys().cloned().collect())
+                        .expect("sources bounded");
+            }
             change.upserts = List::new(upserts.clone()).expect("bounded delta");
             change.resync_required = resync;
             change.changed_selected = List::new(
@@ -1304,7 +1394,7 @@ fn empty_change(index: &Index, watch: &Watch) -> DocsChanged {
     }
 }
 fn history_charge(cursor: &HistoryCursor) -> usize {
-    cursor.heads.len() * 4096 + cursor.seen.len() * 512 + 4096
+    cursor.heads.len() * 8192 + cursor.seen.len() * 512 + 4096
 }
 fn failure(document: Option<DocRef>, code: DocFailureCode) -> DocFailure {
     DocFailure {
@@ -1389,6 +1479,7 @@ impl FeatureService for Service {
     fn run_archived(&self, run: &RunCtx) {
         let mut state = self.state();
         if &state.run == run {
+            state.active = false;
             state.close_watches();
             state.invalidate_leases();
             for connection in state.connections.values() {
@@ -1398,3 +1489,7 @@ impl FeatureService for Service {
         }
     }
 }
+
+#[cfg(test)]
+#[path = "service_tests.rs"]
+mod tests;

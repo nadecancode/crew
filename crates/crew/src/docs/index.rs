@@ -50,6 +50,7 @@ pub struct Source {
     pub record: DocSource,
     pub history: Option<Arc<super::history::Reader>>,
     pub directories: BTreeSet<Relative>,
+    pub watch_limited: bool,
     scan: Option<Scan>,
     reads: VecDeque<Relative>,
     seen: BTreeSet<Relative>,
@@ -137,6 +138,23 @@ impl Index {
             }
         }
         let mut next = BTreeMap::new();
+        let mut registry_bytes = 0;
+        for (registration, _) in &shared {
+            // Bound all repeated page metadata before mutating the registry.
+            registry_bytes += super::bounded_size(
+                &(
+                    &registration.member_ids,
+                    label(&registration.display_name),
+                    &registration.branch,
+                    &registration.head_commit,
+                ),
+                128 * 1024,
+            )?
+            .saturating_add(1024);
+        }
+        if registry_bytes > 128 * 1024 {
+            return Err(DocFailureCode::TooLarge);
+        }
         let mut changed = false;
         for (registration, root) in shared {
             let previous = self
@@ -165,6 +183,7 @@ impl Index {
                     },
                     history: None,
                     directories: BTreeSet::new(),
+                    watch_limited: false,
                     scan: None,
                     reads: VecDeque::new(),
                     seen: BTreeSet::new(),
@@ -268,6 +287,7 @@ impl Index {
         let mut changed = false;
         if source.scan.is_none() && !source.scan_done {
             source.directories.clear();
+            source.watch_limited = false;
             match Scan::new(&source.root) {
                 Ok(scan) => {
                     source.scan = Some(scan);
@@ -286,7 +306,8 @@ impl Index {
         if let Some(scan) = source.scan.as_mut().filter(|_| source.reads.is_empty()) {
             match scan.step(&source.root, &self.policy) {
                 Ok(step) => {
-                    let remaining = 64usize.saturating_sub(source.directories.len());
+                    let remaining = 63usize.saturating_sub(source.directories.len());
+                    source.watch_limited |= step.directories.len() > remaining;
                     source
                         .directories
                         .extend(step.directories.into_iter().take(remaining));
@@ -329,7 +350,7 @@ impl Index {
             bytes += variant.bytes.unwrap_or(0).min(MAX_MARKDOWN_BYTES as u32) as usize;
             // Index metadata has its own allocation cap. Long outlines degrade
             // to explicit limited headings, not an unbounded tree of labels.
-            while super::bounded_size(&variant, 8192).is_err() && !variant.headings.is_empty() {
+            while super::bounded_size(&variant, 4096).is_err() && !variant.headings.is_empty() {
                 variant.headings =
                     List::new(variant.headings[..variant.headings.len() / 2].to_vec())
                         .expect("subset");
@@ -417,7 +438,7 @@ impl Index {
             relative_path: Text::new(path.as_str()).expect("relative bound"),
             variants: List::default(),
         });
-        let old_size = super::bounded_size(&entry, INDEX_BYTES).unwrap_or(INDEX_BYTES);
+        let old_size = entry_charge(&entry);
         let mut variants = entry.variants.to_vec();
         variants.retain(|v| v.source_id != value.source_id);
         variants.push(value);
@@ -448,15 +469,15 @@ impl Index {
         if self.rows.get(&path) == Some(&entry) {
             return false;
         }
-        let new_size = super::bounded_size(&entry, INDEX_BYTES).unwrap_or(INDEX_BYTES);
+        let new_size = entry_charge(&entry);
         let size = self
             .metadata_bytes
             .saturating_sub(if self.rows.contains_key(&path) {
-                old_size * 3
+                old_size
             } else {
                 0
             })
-            .saturating_add(new_size * 3);
+            .saturating_add(new_size);
         if size > INDEX_BYTES {
             self.limited = true;
             return false;
@@ -468,11 +489,7 @@ impl Index {
     }
 
     fn recount(&mut self) {
-        self.metadata_bytes = self
-            .rows
-            .values()
-            .map(|e| super::bounded_size(e, INDEX_BYTES).unwrap_or(INDEX_BYTES) * 3)
-            .sum();
+        self.metadata_bytes = self.rows.values().map(entry_charge).sum();
     }
     pub fn known(&self, doc: &Id) -> Option<(&Relative, &DocEntry)> {
         self.rows.iter().find(|(_, e)| &e.id == doc)
@@ -538,4 +555,18 @@ fn variant(source: &Source, path: &Relative, policy: &Policy) -> (DocVariant, Op
         Err(code) => variant.reason = Some(code),
     }
     (variant, Some(read.stamp))
+}
+
+fn entry_charge(entry: &DocEntry) -> usize {
+    // Include the per-source stamp/seen path copies, not only the display DTO.
+    super::bounded_size(entry, INDEX_BYTES)
+        .unwrap_or(INDEX_BYTES)
+        .saturating_mul(3)
+        .saturating_add(
+            entry
+                .variants
+                .len()
+                .saturating_mul(entry.relative_path.len() * 3 + 512),
+        )
+        .saturating_add(512)
 }

@@ -216,7 +216,7 @@ impl Reader {
                 "--full-history",
                 "--no-renames",
                 "--no-show-signature",
-                "--format=%H%x00%at%x00%an%x00%s",
+                "--format=%H%x00%ct%x00%an%x00%s",
                 "-z",
                 &max,
                 &skip,

@@ -27,16 +27,18 @@ pub fn links(index: &Index) -> Links {
         .rows
         .iter()
         .map(|(p, e)| {
+            let mut sources: Vec<_> = e
+                .variants
+                .iter()
+                .filter(|v| v.state == DocState::Present)
+                .map(|v| (v.source_id.clone(), v.headings.to_vec()))
+                .collect();
+            sources.sort_by_key(|(id, _)| index.sources.get(id).map(|s| s.key.clone()));
             (
                 p.clone(),
                 LinkRow {
                     id: e.id.clone(),
-                    sources: e
-                        .variants
-                        .iter()
-                        .filter(|v| v.state == DocState::Present)
-                        .map(|v| (v.source_id.clone(), v.headings.to_vec()))
-                        .collect(),
+                    sources,
                     workspace: index
                         .sources
                         .values()
@@ -110,8 +112,24 @@ pub fn capture(
         asset_bytes: 0,
     };
     let parsed = markdown::parse(&markdown, &mut resolver)?;
+    let image_content: Vec<_> = parsed
+        .images
+        .iter()
+        .map(|image| {
+            (
+                &image.relative_path,
+                &image.hash,
+                image.media_type,
+                image.bytes,
+                image.width,
+                image.height,
+                image.state,
+                image.reason,
+            )
+        })
+        .collect();
     let render_hash = markdown::hash(
-        &serde_json::to_vec(&(&version.markdown_hash, &parsed.images))
+        &serde_json::to_vec(&(&version.markdown_hash, image_content))
             .map_err(|_| DocFailureCode::TooLarge)?,
     );
     let snapshot = DocSnapshot::try_from(DocSnapshotData {
@@ -157,10 +175,13 @@ impl Resolve for Resolver {
             return LinkTarget::External { href };
         }
         if let Some(fragment) = destination.strip_prefix('#') {
-            return anchor(fragment, own_anchors).map_or_else(
-                || inert("Heading is not present in this version"),
-                |anchor| LinkTarget::Anchor { anchor },
-            );
+            return assets::decode(fragment)
+                .ok()
+                .and_then(|fragment| anchor(&fragment, own_anchors))
+                .map_or_else(
+                    || inert("Heading is not present in this version"),
+                    |anchor| LinkTarget::Anchor { anchor },
+                );
         }
         let Ok((path, fragment)) = assets::local_target(&self.path, destination) else {
             return inert("Link is outside the docs folders");
