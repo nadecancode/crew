@@ -482,7 +482,9 @@ impl Daemon {
                 "native-delivery-started" | "native-delivery-appended" => {
                     if event == "native-delivery-appended" {
                         if !immediate_origin {
-                            return Err(RpcError::invalid("native append is not operator steering"));
+                            return Err(RpcError::invalid(
+                                "native append is not operator steering",
+                            ));
                         }
                     } else {
                         let turn = payload
@@ -1420,6 +1422,350 @@ mod tests {
         daemon.load_receipts("m").unwrap();
         assert!(daemon.bus.undelivered("m").unwrap().is_empty());
         assert!(daemon.model().rt("m").native_receipts.receipts.is_empty());
+    }
+
+    fn send_body(daemon: &Daemon, from: &str, body: &str) -> Message {
+        daemon
+            .bus
+            .send(
+                crate::message_bus::NewMessage::new(from, "m", MessageType::Message, body),
+                vec!["m".into()],
+            )
+            .unwrap()
+            .message
+    }
+
+    async fn consume_with_text(daemon: &Daemon, key: &str, ids: &[String], text: &str) {
+        daemon
+            .native_delivery_hook(
+                "m",
+                Some("launch"),
+                "native-turn-started",
+                &serde_json::json!({"session_id":"session","turn_id":"covered"}),
+            )
+            .await
+            .unwrap();
+        hook(
+            daemon,
+            "native-delivery-observed",
+            key,
+            ids,
+            Some("covered"),
+        )
+        .await
+        .unwrap();
+        daemon.native_delivery_hook("m", Some("launch"), "native-delivery-started",
+            &serde_json::json!({"session_id":"session","turn_id":"covered","batch_id":key,"ids":ids,
+                "observed_sha256":[native::rendered_digest(key, text)]})).await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn complete_socket_delivery_marks_read_but_a_clipped_batch_stays_id_addressable() {
+        let (_temp, running) = queued_daemon().await;
+        let daemon = &running.daemon;
+        let short = send_body(
+            daemon,
+            "peer",
+            "Full original body 🙂\nwith trailing whitespace  ",
+        );
+        let long = send_body(daemon, "peer", &"x".repeat(4_001));
+        let (tx, mut rx) = mpsc::channel(16);
+        daemon.listener_joined("m", 1, tx);
+        let Push::Deliver {
+            ids,
+            text,
+            batch_id: Some(batch),
+            ..
+        } = tokio::time::timeout(std::time::Duration::from_secs(4), rx.recv())
+            .await
+            .unwrap()
+            .unwrap()
+            .push
+            .unwrap()
+        else {
+            panic!("expected native delivery")
+        };
+        assert_eq!(ids, [short.id.clone()]);
+        assert!(text.contains(&short.body));
+        assert!(text.contains("marked read only after their unchanged text is confirmed"));
+        consume_with_text(daemon, &batch, &ids, &text).await;
+        assert_eq!(
+            daemon
+                .bus
+                .receive("m", true, 50)
+                .unwrap()
+                .iter()
+                .map(|entry| &entry.message.id)
+                .collect::<Vec<_>>(),
+            [&long.id]
+        );
+        daemon
+            .native_delivery_hook(
+                "m",
+                Some("launch"),
+                "native-turn-ended",
+                &serde_json::json!({"session_id":"session","turn_id":"covered"}),
+            )
+            .await
+            .unwrap();
+        let Push::Deliver {
+            ids,
+            text,
+            batch_id: Some(batch),
+            ..
+        } = tokio::time::timeout(std::time::Duration::from_secs(4), rx.recv())
+            .await
+            .unwrap()
+            .unwrap()
+            .push
+            .unwrap()
+        else {
+            panic!("expected clipped delivery")
+        };
+        assert_eq!(ids, [long.id.clone()]);
+        assert!(text.contains(&format!(
+            "agent_inbox(id: {:?}) reads the full text",
+            long.id
+        )));
+        consume_with_text(daemon, &batch, &ids, &text).await;
+        let unread = daemon.bus.receive("m", true, 50).unwrap();
+        assert_eq!(unread.len(), 1);
+        assert_eq!(unread[0].message.id, long.id);
+        assert!(unread[0].delivered_at.is_some());
+        assert!(unread[0].acked_at.is_none());
+        assert_eq!(daemon.agent("m").unwrap().inbox_unread, 1);
+        assert_eq!(
+            daemon.bus.get(&long.id).unwrap().unwrap().0.body.len(),
+            4_001
+        );
+        let fetched = daemon
+            .read_message_by_id(&super::super::server::Who::Agent("m".into()), &long.id)
+            .unwrap();
+        assert_eq!(fetched.body.len(), 4_001);
+        assert!(daemon.bus.receive("m", true, 50).unwrap().is_empty());
+        assert_eq!(daemon.agent("m").unwrap().inbox_unread, 0);
+    }
+
+    #[tokio::test]
+    async fn rewritten_or_unproved_native_text_consumes_without_marking_read() {
+        for prove_rewritten in [false, true] {
+            let (_temp, running) = queued_daemon().await;
+            let daemon = &running.daemon;
+            let message = send_body(daemon, "peer", "Unchanged original body");
+            let ids = vec![message.id];
+            let key = daemon.register_receipt("m", ids.clone(), now_ms()).unwrap();
+            if prove_rewritten {
+                let changed = crate::agents::prompt::format_nudge(&[Message {
+                    body: "Hook changed the body".into(),
+                    ..message_from_ids(daemon, &ids)
+                }]);
+                consume_with_text(daemon, &key, &ids, &changed).await;
+            } else {
+                daemon
+                    .native_delivery_hook(
+                        "m",
+                        Some("launch"),
+                        "native-turn-started",
+                        &serde_json::json!({"session_id":"session","turn_id":"covered"}),
+                    )
+                    .await
+                    .unwrap();
+                hook(
+                    daemon,
+                    "native-delivery-observed",
+                    &key,
+                    &ids,
+                    Some("covered"),
+                )
+                .await
+                .unwrap();
+                hook(
+                    daemon,
+                    "native-delivery-started",
+                    &key,
+                    &ids,
+                    Some("covered"),
+                )
+                .await
+                .unwrap();
+            }
+            assert!(daemon.bus.undelivered("m").unwrap().is_empty());
+            assert_eq!(daemon.bus.receive("m", true, 50).unwrap().len(), 1);
+            assert_eq!(daemon.agent("m").unwrap().inbox_unread, 1);
+        }
+    }
+
+    fn message_from_ids(daemon: &Daemon, ids: &[String]) -> Message {
+        daemon.bus.get(&ids[0]).unwrap().unwrap().0
+    }
+
+    #[tokio::test]
+    async fn verified_consumption_repairs_read_once_without_persisting_bodies() {
+        let (_temp, running) = queued_daemon().await;
+        let daemon = &running.daemon;
+        let message = send_body(daemon, "peer", "private-read-proof-body-canary");
+        let ids = vec![message.id];
+        let key = daemon.register_receipt("m", ids.clone(), now_ms()).unwrap();
+        {
+            let mut model = daemon.model();
+            let receipt = model
+                .rt("m")
+                .native_receipts
+                .receipts
+                .get_mut(&key)
+                .unwrap();
+            receipt.phase = native::Phase::Consumed;
+            receipt.coverage.as_mut().unwrap().verified = true;
+            receipt.consumed_at = Some(now_ms());
+        }
+        daemon.save_receipts("m").unwrap();
+        let saved = daemon
+            .store
+            .get_meta(&Daemon::receipt_key("m"))
+            .unwrap()
+            .unwrap();
+        assert!(!saved.contains("private-read-proof-body-canary"));
+        assert!(saved.contains("sha256"));
+        assert_eq!(daemon.bus.receive("m", true, 50).unwrap().len(), 1);
+        daemon.model().rt("m").native_receipts_loaded = false;
+        daemon.load_receipts("m").unwrap();
+        assert!(daemon.bus.receive("m", true, 50).unwrap().is_empty());
+        let first = daemon.bus.receive("m", false, 50).unwrap()[0].acked_at;
+        assert!(first.is_some());
+        daemon.load_receipts("m").unwrap();
+        assert_eq!(
+            daemon.bus.receive("m", false, 50).unwrap()[0].acked_at,
+            first
+        );
+        assert!(daemon.model().rt("m").native_receipts.receipts.is_empty());
+    }
+
+    #[tokio::test]
+    async fn append_coverage_requires_operator_origin_and_exact_stored_text() {
+        for (from, rewrite) in [(OPERATOR_ID, false), (OPERATOR_ID, true), ("peer", false)] {
+            let (_temp, running) = queued_daemon().await;
+            let daemon = &running.daemon;
+            let message = send_body(daemon, from, "Operator correction");
+            let ids = vec![message.id.clone()];
+            let key = daemon.register_receipt("m", ids.clone(), now_ms()).unwrap();
+            let render = crate::agents::prompt::format_nudge(&[message]);
+            let observed = if rewrite {
+                render.replace("Operator correction", "Rewritten correction")
+            } else {
+                render
+            };
+            let result = daemon
+                .native_delivery_hook(
+                    "m",
+                    Some("launch"),
+                    "native-delivery-appended",
+                    &serde_json::json!({
+                        "session_id":"session","batch_id":key,"ids":ids,"immediate":true,
+                        "observed_sha256":[native::rendered_digest(&key, &observed)]
+                    }),
+                )
+                .await;
+            assert_eq!(result.is_ok(), from == OPERATOR_ID);
+            assert_eq!(
+                daemon.bus.receive("m", true, 50).unwrap().is_empty(),
+                from == OPERATOR_ID && !rewrite
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn legacy_codex_pi_terminal_and_shell_confirmations_stay_unread() {
+        for kind in [
+            RuntimeKind::Claude,
+            RuntimeKind::Codex,
+            RuntimeKind::Pi,
+            RuntimeKind::Shell,
+        ] {
+            let (_temp, running) = queued_daemon().await;
+            let daemon = &running.daemon;
+            daemon.update_agent("m", |agent| agent.runtime = kind);
+            daemon.model().rt("m").native_queue_bridge = false;
+            let message = send_body(daemon, "peer", "Full text without observed coverage");
+            daemon.confirm_delivery("m", &[message.id]);
+            assert_eq!(daemon.bus.receive("m", true, 50).unwrap().len(), 1);
+        }
+    }
+
+    #[tokio::test]
+    async fn parked_wakeup_persistence_failure_cannot_acknowledge_received_text() {
+        let (_temp, running) = queued_daemon().await;
+        let daemon = &running.daemon;
+        let task: crew_core::Task = serde_json::from_value(serde_json::json!({
+            "id":"parked","title":"Waiting work","status":"waiting","assigned_agent":"m", "created_at":0
+        }))
+        .unwrap();
+        daemon.model().tasks.push(task);
+        let message = send_body(daemon, "peer", "Answer for parked work");
+        let ids = vec![message.id];
+        let db = rusqlite::Connection::open(daemon.state_dir.join("crew.db")).unwrap();
+        db.execute_batch("CREATE TRIGGER fail_wakeup BEFORE INSERT ON meta WHEN NEW.key = 'agent:m' BEGIN SELECT RAISE(FAIL, 'fixture wakeup failure'); END;").unwrap();
+        assert!(daemon.acknowledge_received("m", &ids, true).is_err());
+        let unread = daemon.bus.receive("m", true, 50).unwrap();
+        assert!(unread[0].acked_at.is_none());
+        assert!(unread[0].delivered_at.is_none());
+        db.execute_batch("DROP TRIGGER fail_wakeup;").unwrap();
+        assert_eq!(daemon.acknowledge_received("m", &ids, true).unwrap(), 1);
+        let local: serde_json::Value = serde_json::from_str(
+            &daemon
+                .store
+                .get_meta(&super::super::local_key("m"))
+                .unwrap()
+                .unwrap(),
+        )
+        .unwrap();
+        assert_eq!(local["task_wakeups"]["parked"], serde_json::json!(ids));
+        assert!(daemon.bus.receive("m", true, 50).unwrap().is_empty());
+    }
+
+    #[tokio::test]
+    async fn operator_and_outbox_id_views_do_not_acknowledge_another_inbox() {
+        let (_temp, running) = queued_daemon().await;
+        let daemon = &running.daemon;
+        let incoming = send_body(daemon, "peer", "Still unread while an operator observes");
+        daemon
+            .read_message_by_id(&super::super::server::Who::Operator, &incoming.id)
+            .unwrap();
+        assert_eq!(daemon.bus.receive("m", true, 50).unwrap().len(), 1);
+        let outgoing = daemon
+            .bus
+            .send(
+                crate::message_bus::NewMessage::new(
+                    "m",
+                    "other",
+                    MessageType::Message,
+                    "Outbox observation",
+                ),
+                vec!["other".into()],
+            )
+            .unwrap()
+            .message;
+        daemon
+            .read_message_by_id(&super::super::server::Who::Agent("m".into()), &outgoing.id)
+            .unwrap();
+        assert_eq!(daemon.bus.receive("other", true, 50).unwrap().len(), 1);
+        assert!(daemon
+            .read_message_by_id(
+                &super::super::server::Who::Agent("stranger".into()),
+                &incoming.id
+            )
+            .is_err());
+        assert_eq!(daemon.bus.receive("m", true, 50).unwrap().len(), 1);
+    }
+
+    #[test]
+    fn argv_clipping_names_exact_ids_and_preserves_the_byte_bound() {
+        let ids = vec!["m-one".into(), "m-two".into()];
+        let clipped = clip_for_argv("🙂".repeat(MAX_ARGV_TEXT), &ids).unwrap();
+        assert!(clipped.len() <= MAX_ARGV_TEXT);
+        for id in ids {
+            assert!(clipped.contains(&format!("agent_inbox(id: {id:?}) reads the full text")));
+        }
+        assert_eq!(clip_for_argv("short".into(), &[]), Some("short".into()));
     }
 
     fn agent(id: &str) -> Agent {

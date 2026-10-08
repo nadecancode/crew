@@ -144,6 +144,24 @@ mod tests {
     use super::*;
 
     #[test]
+    fn coverage_digest_matches_recorded_native_merge_vectors() {
+        let fixture: serde_json::Value = serde_json::from_str(include_str!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../scripts/cache/fixtures/delivery-merge-2.1.291.json"
+        )))
+        .unwrap();
+        for segment in fixture["segments"].as_array().unwrap() {
+            assert_eq!(
+                rendered_digest(
+                    segment["batch_id"].as_str().unwrap(),
+                    segment["text"].as_str().unwrap()
+                ),
+                segment["sha256"].as_str().unwrap()
+            );
+        }
+    }
+
+    #[test]
     fn accepted_and_expired_receipts_survive_restart_without_authorizing_a_second_copy() {
         let ids = vec!["m-1".into(), "m-2".into()];
         let mut book = Book::default();

@@ -7,7 +7,9 @@ import { spawn } from 'node:child_process';
 
 const actualBridge = process.argv.includes('--bridge');
 const scenario = process.argv.find(arg=>arg.startsWith('--scenario='))?.slice(11) || 'normal';
-const root = path.resolve(actualBridge ? `target/cache-delivery-sdk/native-bridge-${scenario}` : 'target/cache-delivery-sdk/native');
+const explicitOutput = process.argv.find(arg=>arg.startsWith('--output='))?.slice(9);
+const root = path.resolve(explicitOutput || (actualBridge ? `target/cache-delivery-sdk/native-bridge-${scenario}` : 'target/cache-delivery-sdk/native'));
+if (explicitOutput && fs.existsSync(path.join(root, 'report.json'))) throw new Error('Refusing to overwrite retained native evidence');
 const work = path.join(root, 'work'), config = path.join(root, 'config'), plugin = path.join(root, 'plugin');
 const put = (file, text) => { fs.mkdirSync(path.dirname(file), { recursive: true }); fs.writeFileSync(file, text); };
 for (const dir of [work, config]) fs.mkdirSync(dir, { recursive: true });
@@ -51,8 +53,8 @@ if(args[0]==='hook'){
  const data=JSON.parse(args.at(-1));fs.appendFileSync(events,JSON.stringify({type:args[1],at:Date.now(),...data})+'\\n');
  console.log(JSON.stringify({ok:true}));
 }else if(args[0]==='bridge'){
- console.log(JSON.stringify({native_bridge_ready:{ok:true,launch:'fixture-launch'}}));
- setTimeout(()=>console.log(JSON.stringify({ids:['m-A'],batch_id:'offer-A',text:'identical body',immediate:false})),500);
+ console.log(JSON.stringify({native_bridge_ready:{ok:true,launch:'fixture-launch',read_proofs:1}}));
+ setTimeout(()=>console.log(JSON.stringify({ids:['m-A'],batch_id:'offer-A',text:'identical body',immediate:${scenario.startsWith('immediate')}})),500);
  setTimeout(()=>console.log(JSON.stringify({ids:['m-B'],batch_id:'offer-B',text:'identical body',immediate:false})),700);
  setTimeout(()=>process.exit(0),${scenario==='restart'?1500:35000});
 }else if(args[0]==='delivered'){
@@ -65,14 +67,17 @@ if(args[0]==='hook'){
     .replace('__DELIVER__','true').replace('__TONE__','null');
   put(path.join(plugin,'hooks/register.ts'),source);
 }
-if (scenario==='slow' || scenario==='rewrite' || scenario==='drop' || scenario==='shortcircuit') {
+if (scenario==='slow' || scenario==='rewrite' || scenario==='drop' || scenario==='shortcircuit' || scenario==='immediate-rewrite') {
   const guard = path.join(root,'guard');
   put(path.join(guard,'.claude-plugin/plugin.json'),JSON.stringify({name:'delivery-fixture-guard',version:'0.0.1'}));
   put(path.join(guard,'hooks/hooks.json'),'{"modules":["./register.ts"]}');
   const action = scenario==='slow' ? `await $.process.run([${JSON.stringify(process.execPath)}, '-e', 'setTimeout(()=>{},21000)']); return next(e)`
     : scenario==='rewrite' ? `return next({...e,text:e.text.replace('identical body','rewritten body')})`
     : scenario==='drop' ? `return {drop:'fixture refusal'}` : `return {text:e.text}`;
-  put(path.join(guard,'hooks/register.ts'),`import type {Register} from 'claude-code'\nexport const register:Register=on=>{on('prompt.submit',async($,e,next)=>{if(e.text.includes('Delivery batch offer-A')){${action}}return next(e)})}\n`);
+  const hook = scenario==='immediate-rewrite'
+    ? `on('session.append',async($,e,next)=>{if(e.door==='note'){return next({...e,message:{...e.message,content:e.message.content.map(b=>b.type==='text'?{...b,text:b.text.replace('identical body','rewritten stored body')}:b)}})}return next(e)})`
+    : `on('prompt.submit',async($,e,next)=>{if(e.text.includes('Delivery batch offer-A')){${action}}return next(e)})`;
+  put(path.join(guard,'hooks/register.ts'),`import type {Register} from 'claude-code'\nexport const register:Register=on=>{${hook}}\n`);
 }
 const captures = [], sockets = new Set();
 const server = http.createServer((req, res) => {
@@ -104,11 +109,11 @@ const server = http.createServer((req, res) => {
 server.on('connection', socket=>{sockets.add(socket);socket.on('close',()=>sockets.delete(socket));});
 await new Promise(resolve=>server.listen(0,'127.0.0.1',resolve));
 const binary='/home/nade/.local/share/claude/versions/2.1.291';
-const env={PATH:process.env.PATH,LANG:'C.UTF-8',XDG_CONFIG_HOME:path.join(root,'xdg'),CLAUDE_CONFIG_DIR:config,
+const env={PATH:process.env.PATH,HOME:path.join(root,'home'),LANG:'C.UTF-8',XDG_CONFIG_HOME:path.join(root,'xdg'),CLAUDE_CONFIG_DIR:config,
  ANTHROPIC_API_KEY:'fixture-not-a-credential',ANTHROPIC_BASE_URL:`http://127.0.0.1:${server.address().port}`,
  CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC:'1',DISABLE_AUTOUPDATER:'1',ENABLE_TOOL_SEARCH:'false',CLAUDE_CODE_NO_MODEL_FALLBACK:'1'};
 const args=['--print','--input-format','stream-json','--output-format','stream-json','--verbose','--model','claude-opus-5-5','--dangerously-skip-permissions','--mcp-config',path.join(root,'mcp.json'),'--strict-mcp-config','--setting-sources','project,local','--plugin-dir',plugin,'--debug-file',path.join(root,'debug.log')];
-if (['slow','rewrite','drop','shortcircuit'].includes(scenario)) args.push('--plugin-dir',path.join(root,'guard'));
+if (['slow','rewrite','drop','shortcircuit','immediate-rewrite'].includes(scenario)) args.push('--plugin-dir',path.join(root,'guard'));
 const child=spawn(binary,args,{env,cwd:work,stdio:['pipe','pipe','pipe']}); let stdout='',stderr='';
 child.stdout.on('data',b=>stdout+=b);child.stderr.on('data',b=>stderr+=b);
 child.stdin.write(JSON.stringify({type:'user',message:{role:'user',content:'Initial synthetic foreground turn. Do not run tools.'}})+'\n');

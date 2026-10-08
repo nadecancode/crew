@@ -69,6 +69,26 @@ fn agent_only(who: &Who) -> Result<&str, RpcError> {
 }
 
 impl Daemon {
+    /// An explicit id-scoped inbox read returns the full body. Operator and
+    /// outbox views remain observations of someone else's unread state.
+    pub(crate) fn read_message_by_id(
+        &self,
+        who: &Who,
+        id: &str,
+    ) -> Result<crew_core::Message, RpcError> {
+        let message = self.message_by_id(who, id)?;
+        if let Who::Agent(agent) = who {
+            if self
+                .bus
+                .get(id)?
+                .is_some_and(|(_, recipients)| recipients.contains(agent))
+            {
+                self.acknowledge_received(agent, &[id.to_string()], true)?;
+            }
+        }
+        Ok(message)
+    }
+
     pub(crate) fn is_orchestrator(&self, id: &str) -> bool {
         self.model().agent(id).is_some_and(|a| a.orchestrator)
     }
@@ -502,7 +522,7 @@ change identity",
                 };
                 reply(self.bus.history(scope.as_deref(), limit)?)
             }
-            Call::MessageGet { id } => reply(self.message_by_id(&who, &id)?),
+            Call::MessageGet { id } => reply(self.read_message_by_id(&who, &id)?),
 
             Call::StatusUpdate {
                 status,
