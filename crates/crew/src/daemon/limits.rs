@@ -357,7 +357,10 @@ other model family (task_assign).",
                 }
                 let codex_parent_confirmed = model.local.get(&agent.id).is_some_and(|local| {
                     local.session_confirmed && local.codex_parent_session == agent.session_id
-                });
+                }) && model
+                    .rt
+                    .get(&agent.id)
+                    .is_none_or(|rt| rt.codex_pending_thread.is_none());
                 let rt = model.rt(&agent.id);
                 // A Codex session says how full its context is only in its
                 // session file; while a compaction is awaited, look often.

@@ -711,7 +711,10 @@ impl Daemon {
             };
             let codex_parent_confirmed = model.local.get(id).is_some_and(|local| {
                 local.session_confirmed && local.codex_parent_session == agent.session_id
-            });
+            }) && model
+                .rt
+                .get(id)
+                .is_none_or(|rt| rt.codex_pending_thread.is_none());
             let resting = !model.rt(id).turn_active;
             if agent.runtime == RuntimeKind::Claude {
                 if pending.iter().any(|m| m.from == OPERATOR_ID) {

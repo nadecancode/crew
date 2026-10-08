@@ -89,6 +89,14 @@ impl Daemon {
                 );
                 return;
             }
+            self.update_agent(id, |agent| {
+                if agent
+                    .activity
+                    .starts_with("Codex thread could not be confirmed")
+                {
+                    agent.activity = "Codex user thread confirmed".into();
+                }
+            });
         }
         for signal in runtime_for(agent.runtime).on_hook(event, payload) {
             self.on_signal(id, signal).await;
@@ -109,38 +117,100 @@ impl Daemon {
             .unwrap_or(false)
     }
 
+    async fn codex_header_status(
+        &self,
+        id: &str,
+        thread: &str,
+    ) -> crate::agents::files::CodexHeader {
+        use crate::agents::files::CodexHeader;
+        let Some(agent) = self.agent(id) else {
+            return CodexHeader::Unavailable;
+        };
+        let Ok(files) = self.agent_files(id) else {
+            return CodexHeader::Unavailable;
+        };
+        let thread = thread.to_string();
+        let started = agent.started_at.unwrap_or_else(now_ms);
+        tokio::task::spawn_blocking(move || files.codex_thread_header(&thread, started))
+            .await
+            .unwrap_or(CodexHeader::Unavailable)
+    }
+
     async fn admit_codex_parent_hook(&self, id: &str, thread: &str) -> bool {
+        use crate::agents::files::CodexHeader;
         let bound = self
             .model()
             .local
             .get(id)
             .and_then(|local| local.codex_parent_session.clone());
-        if let Some(bound) = bound {
-            return bound == thread;
+        if bound.as_deref() == Some(thread) {
+            self.model().rt(id).codex_pending_thread = None;
+            return true;
         }
-        if !self.codex_parent_header(id, thread).await {
-            return false;
+        // A complete header proving a child is final. Only incomplete or
+        // unavailable metadata gets a bounded flush-race retry, under the hook lease.
+        let mut status = CodexHeader::Unavailable;
+        for attempt in 0..6 {
+            status = self.codex_header_status(id, thread).await;
+            if status != CodexHeader::Unavailable {
+                break;
+            }
+            if attempt < 5 {
+                tokio::time::sleep(std::time::Duration::from_millis(400)).await;
+            }
         }
-        let mut model = self.model();
-        let local = model.local.entry(id.to_string()).or_default();
-        if let Some(bound) = &local.codex_parent_session {
-            return bound == thread;
+        match status {
+            CodexHeader::Child => return false,
+            CodexHeader::Unavailable => {
+                self.model().rt(id).codex_pending_thread = Some(thread.to_string());
+                self.model()
+                    .local
+                    .entry(id.to_string())
+                    .or_default()
+                    .session_confirmed = false;
+                self.save_local(id);
+                self.update_agent(id, |agent| {
+                    agent.activity =
+                        "Codex thread could not be confirmed; restart fresh to continue".into();
+                });
+                return false;
+            }
+            CodexHeader::Parent => {}
         }
-        local.codex_parent_session = Some(thread.to_string());
-        local.codex_turn = None;
-        // Older builds could leave a cached child rollout even after a
-        // parent notify restored session_id. Resolve this parent's file afresh.
-        model.rt(id).rollout = None;
-        model.rt(id).quota_checked_at = 0;
+        let changed = {
+            let mut model = self.model();
+            let local = model.local.entry(id.to_string()).or_default();
+            let before = local.codex_parent_session.replace(thread.to_string());
+            local.codex_turn = None;
+            model.rt(id).rollout = None;
+            model.rt(id).quota_checked_at = 0;
+            model.rt(id).codex_pending_thread = None;
+            before
+        };
+        if let Some(before) = changed.filter(|before| before != thread) {
+            self.emit(
+                NewEvent::new(
+                    "daemon",
+                    "agent.session_changed",
+                    "Codex switched to a verified user thread",
+                )
+                .agent(id)
+                .data(serde_json::json!({"previous_thread":before,"native_thread":thread})),
+            );
+        }
         // Session's normal persistence writes this pin with session_confirmed.
         true
     }
 
     /// Socket delivery may use only the same header-verified parent as resume.
     pub(crate) fn confirmed_codex_parent(&self, id: &str, thread: &str) -> bool {
-        self.model().local.get(id).is_some_and(|local| {
+        let model = self.model();
+        model.local.get(id).is_some_and(|local| {
             local.session_confirmed && local.codex_parent_session.as_deref() == Some(thread)
-        })
+        }) && model
+            .rt
+            .get(id)
+            .is_none_or(|rt| rt.codex_pending_thread.is_none())
     }
 
     /// Migrate an old confirmation only after proving its saved thread is a
@@ -153,8 +223,13 @@ impl Daemon {
             return;
         };
         let local = self.model().local.get(id).cloned().unwrap_or_default();
+        let pending = self
+            .model()
+            .rt
+            .get(id)
+            .is_some_and(|rt| rt.codex_pending_thread.is_some());
         let parent = match agent.session_id.as_deref() {
-            Some(thread) if resume && local.session_confirmed => {
+            Some(thread) if resume && local.session_confirmed && !pending => {
                 local.codex_parent_session.as_deref() == Some(thread)
                     || self.codex_parent_header(id, thread).await
             }
@@ -403,7 +478,15 @@ impl Daemon {
                 }
                 if let Some(session_id) = session_id {
                     self.save_local(id);
-                    self.update_agent(id, |a| a.session_id = Some(session_id));
+                    self.update_agent(id, |a| {
+                        if a.runtime == RuntimeKind::Codex
+                            && a.session_id.as_deref() != Some(&session_id)
+                        {
+                            a.usage = None;
+                            a.context = None;
+                        }
+                        a.session_id = Some(session_id);
+                    });
                 }
             }
             Signal::Subagents(delta) => {
@@ -995,5 +1078,103 @@ mod codex_parent_tests {
         assert!(f
             .daemon()
             .confirmed_codex_parent("parent", parent["notify"]["thread-id"].as_str().unwrap()));
+    }
+
+    #[tokio::test]
+    async fn a_header_flushed_after_notify_confirms_without_a_second_notification() {
+        let f = fixture().await;
+        let parent = f.case(0, 0);
+        let path = f.path("parent", parent["notify"]["thread-id"].as_str().unwrap());
+        let header = parent["session_meta"].clone();
+        let writer = tokio::spawn(async move {
+            tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+            std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+            std::fs::write(path, format!("{header}\n")).unwrap();
+        });
+        f.hook("parent", &parent).await;
+        writer.await.unwrap();
+        assert!(f
+            .daemon()
+            .confirmed_codex_parent("parent", parent["notify"]["thread-id"].as_str().unwrap()));
+        assert!(!f.daemon().model().rt("parent").turn_active);
+    }
+
+    #[tokio::test]
+    async fn permanently_unprovable_header_has_visible_attention_and_holds_native_work() {
+        let f = fixture().await;
+        let parent = f.case(0, 0);
+        f.hook("parent", &parent).await;
+        let agent = f.daemon().agent("parent").unwrap();
+        assert!(agent.activity.contains("could not be confirmed"));
+        assert_eq!(
+            agent.last_activity_at, 1,
+            "identity observation is not activity"
+        );
+        assert!(f.daemon().model().rt("parent").turn_active);
+        assert!(f
+            .daemon()
+            .model()
+            .rt("parent")
+            .codex_pending_thread
+            .is_some());
+        assert!(!f.daemon().model().local["parent"].session_confirmed);
+        f.daemon().prepare_codex_parent_resume("parent", true).await;
+        assert!(f.daemon().agent("parent").unwrap().session_id.is_none());
+    }
+
+    #[tokio::test]
+    async fn a_new_verified_user_root_rebinds_without_accepting_native_children() {
+        let f = fixture().await;
+        let first = f.case(0, 0);
+        let next = f.case(1, 0);
+        f.header("parent", &first);
+        f.hook("parent", &first).await;
+        f.header("parent", &next);
+        f.daemon().model().rt("parent").turn_active = true;
+        f.hook("parent", &next).await;
+        let thread = next["notify"]["thread-id"].as_str().unwrap();
+        assert!(f.daemon().confirmed_codex_parent("parent", thread));
+        assert_eq!(
+            f.daemon().agent("parent").unwrap().session_id.as_deref(),
+            Some(thread)
+        );
+        assert!(f
+            .daemon()
+            .store
+            .recent_events(None, 100)
+            .unwrap()
+            .iter()
+            .any(|event| event.event_type == "agent.session_changed"));
+        let child = f.case(0, 1);
+        f.header("parent", &child);
+        f.daemon().model().rt("parent").turn_active = true;
+        f.hook("parent", &child).await;
+        assert!(f.daemon().confirmed_codex_parent("parent", thread));
+        assert!(f.daemon().model().rt("parent").turn_active);
+    }
+
+    #[tokio::test]
+    async fn legacy_root_without_thread_source_is_accepted_but_legacy_child_is_not() {
+        let f = fixture().await;
+        let mut root = f.case(0, 0);
+        root["session_meta"]["payload"]
+            .as_object_mut()
+            .unwrap()
+            .remove("thread_source");
+        root["session_meta"]["payload"]["source"] = serde_json::json!("cli");
+        f.header("parent", &root);
+        f.hook("parent", &root).await;
+        let mut child = f.case(0, 1);
+        child["session_meta"]["payload"]
+            .as_object_mut()
+            .unwrap()
+            .remove("thread_source");
+        f.header("parent", &child);
+        f.daemon().model().rt("parent").turn_active = true;
+        f.hook("parent", &child).await;
+        assert!(f
+            .daemon()
+            .confirmed_codex_parent("parent", root["notify"]["thread-id"].as_str().unwrap()));
+        assert!(f.daemon().model().rt("parent").turn_active);
     }
 }

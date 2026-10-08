@@ -162,6 +162,9 @@ pub(crate) struct AgentRuntimeState {
     /// the bus messages it contains.
     pub pending_prompt: Option<(String, Vec<String>)>,
     pub turn_active: bool,
+    /// A notify could name a new root but its header was not provable.
+    /// Hold native queue/reads until a root is proved or a fresh launch starts.
+    pub codex_pending_thread: Option<String>,
     /// The active turn parked its card and must yield before another Ready
     /// card starts. A launch's optimistic turn flag is not this handoff.
     pub parking_turn: bool,

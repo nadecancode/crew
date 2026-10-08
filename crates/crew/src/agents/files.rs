@@ -32,6 +32,13 @@ pub struct Opened {
     pub path: PathBuf,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum CodexHeader {
+    Parent,
+    Child,
+    Unavailable,
+}
+
 /// The sub-path of the private home Claude Code and Codex use.
 const CLAUDE_PROJECTS: &str = "rw/home/claude/projects";
 const CODEX_SESSIONS: &str = "rw/home/codex/sessions";
@@ -151,8 +158,12 @@ impl AgentFiles {
     /// Children inherit session_id, so identity is payload.id, not that alias.
     /// These files remain untrusted; a missing or oversized header proves nothing.
     pub(crate) fn codex_parent_thread(&self, thread: &str, started_ms: i64) -> bool {
+        self.codex_thread_header(thread, started_ms) == CodexHeader::Parent
+    }
+
+    pub(crate) fn codex_thread_header(&self, thread: &str, started_ms: i64) -> CodexHeader {
         if thread.len() > 256 || session_file_name(thread).is_none() {
-            return false;
+            return CodexHeader::Unavailable;
         }
         // UUIDv7 names contain the creation time. A resumed user thread can
         // predate the member's latest launch by weeks; the time is only a
@@ -169,22 +180,38 @@ impl AgentFiles {
             .codex_rollout(thread, started_ms)
             .or_else(|| self.codex_rollout(thread, born?))
         else {
-            return false;
+            return CodexHeader::Unavailable;
         };
         let mut reader = BufReader::new(opened.file.take(CODEX_HEADER_BYTES + 1));
         let mut line = Vec::new();
         if reader.read_until(b'\n', &mut line).is_err() || line.len() as u64 > CODEX_HEADER_BYTES {
-            return false;
+            return CodexHeader::Unavailable;
         }
         let Ok(header) = serde_json::from_slice::<serde_json::Value>(&line) else {
-            return false;
+            return CodexHeader::Unavailable;
         };
-        header["type"] == "session_meta"
-            && header["payload"]["id"].as_str() == Some(thread)
-            && header["payload"]["thread_source"] == "user"
-            && header["payload"]
-                .get("source")
-                .is_some_and(|source| !source.is_null() && source.get("subagent").is_none())
+        if header["type"] != "session_meta" || header["payload"]["id"].as_str() != Some(thread) {
+            return CodexHeader::Unavailable;
+        }
+        let payload = &header["payload"];
+        let source = &payload["source"];
+        if payload["thread_source"] == "subagent"
+            || source.get("subagent").is_some()
+            || source.as_str() == Some("subagent")
+        {
+            return CodexHeader::Child;
+        }
+        // Older rollouts lack thread_source. Their root source is a string;
+        // native descendants use the tagged subagent object, never that form.
+        let root = match payload.get("thread_source") {
+            Some(value) => value == "user" && !source.is_null(),
+            None => source.as_str().is_some_and(|value| !value.is_empty()),
+        };
+        if root {
+            CodexHeader::Parent
+        } else {
+            CodexHeader::Unavailable
+        }
     }
 }
 
