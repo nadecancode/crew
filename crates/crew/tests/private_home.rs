@@ -398,8 +398,7 @@ fn codex_endpoint_home(inherit_memory: bool) {
         vec![],
     );
     if inherit_memory {
-        team.agents[0].toolbox = serde_yaml::from_str("inherit:\n  operator: [memory]\n")
-            .unwrap();
+        team.agents[0].toolbox = serde_yaml::from_str("inherit:\n  operator: [memory]\n").unwrap();
     }
     team.workspace.sandbox = SandboxConfig {
         mode: SandboxMode::Required,
@@ -425,7 +424,11 @@ fn codex_endpoint_home(inherit_memory: bool) {
         .filter_map(Value::as_str)
         .find(|a| a.starts_with("developer_instructions="))
         .expect("the sidecar was given developer instructions");
-    assert_eq!(instructions.contains("endpoint-rules"), inherit_memory, "{instructions}");
+    assert_eq!(
+        instructions.contains("endpoint-rules"),
+        inherit_memory,
+        "{instructions}"
+    );
     assert!(!instructions.contains("global-rules"), "{instructions}");
     // The model settings come from the same home the instructions did.
     let seeded: toml::Table = std::fs::read_to_string(home.join("config.toml"))
