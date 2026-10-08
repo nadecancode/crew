@@ -711,6 +711,19 @@ each can fail on its own, and each reports its own usage.
   "Each answer reads the member's whole context, so an aside to everyone
   costs about one turn per member."
 - **Sending** closes aside mode and opens the Asides tab on the new aside.
+- **Limits** (`notes/protocol-features.md` §Asides). When one stops an
+  ask, Send is disabled and the draft stays. The reason is shown under the
+  field, and the server's refusal for the same reason repeats the same text:
+
+  | Limit | Shown |
+  | --- | --- |
+  | Question over 8 KiB (`question_limit`) | "Question too long · up to 8 KiB" |
+  | More than 64 recipients (`target_limit`) | "Choose up to 64 recipients". With a larger team, Everyone is disabled with "Up to 64 recipients per aside · this team has 70". |
+  | 128 answers pending across the daemon (`pending_limit`) | "Too many asides are being answered (128) · cancel one or wait" |
+  | Aside memory full (`memory_limit`) | "No room for another aside right now · wait for answers to finish or remove an old aside" |
+  | Request receipts for this session used up (`receipt_limit`) | "No more asides can be asked in this session · the request limit is reached". It is not shown as busy, since waiting does not clear it. |
+
+  Never ask a subset of the selected members without saying so.
 
 ### Answers
 
@@ -758,6 +771,14 @@ shows such an aside may keep what it shows, marked with the reason:
 Its one action is **Ask again**, which puts that question into the aside
 composer as a draft; sending it makes a new aside with a new id. A client
 that opens later shows neither, only the list note under "Kept where".
+
+Two other ends never keep text and never offer Ask again:
+- **The session is cleared** (`run_reset`): every client drops that
+  session's asides, and the tab note reads "Asides from the previous session
+  were cleared".
+- **The cause is unknown**, or the client lost read access: an open view
+  clears to "This aside is no longer available", with **Back** only. It never
+  shows the restart wording, which only a confirmed restart may use.
 
 **Send to claude-1 as a message…** is the only way an aside's content
 reaches a live session. It opens the normal composer prefilled with the
@@ -861,8 +882,8 @@ Captures are taken in light and dark at 1440×960 and 390×844.
 | F12 | Usage figures | Total, Hit rate, Write share, Estimate and Per completed task match a hand computation from the fixture under the §Definitions formulas (the arithmetic examples of `notes/usage-metrics.md`). The model without a price shows No price, and the estimate shows `at least …` with the exclusion, never `≈`. A non-reporting agent shows not reported, not 0. A Codex fixture request with total input and cache read but no write counters counts toward hit rate and not toward write share. A Claude request with an aggregate write and no TTL split makes the estimate and write share ranges with their note. A task reopened and completed again counts once. A period with no first completion shows Per completed task unavailable with the reason; a period whose first-completion history is incomplete shows "Per completed task unavailable · completion history incomplete" and no lower bound. |
 | F13 | Trend and breakdown | The trend draws buckets from the samples, with the latest values as text. A bucket without a full category split is a hatched gap labelled split not reported. Show as table gives the same figures. The breakdown sorts by every column, shows `≥` Requests with its reason for a batch-reporting runtime, lists No epic, No task and Not attributed as separate rows with the Not attributed reason, and the narrow layout stacks without page overflow. |
 | F14 | Big writes, history and gaps | Big writes lists exactly the fixture's qualifying requests, and opens the agent at that time. History lists both sessions, and selecting the earlier one scopes the figures read-only. With a session file still being read, the gap line shows and no figure shows 0 for it; a later revision that lowers a figure is drawn as is. The scope line shows the tracking boundary and the price date. |
-| F15 | Aside ask | `/btw` switches the composer to aside mode with the copy line and the `--info` border. The recipient picker lists unavailable members with reasons. Escape keeps the text. Sending opens the Asides tab. |
-| F16 | Aside answers | Answers arrive independently; the slow one shows Answering and the failed one shows its reason. The footer names the source copy and time, and tokens and estimate are shown. Cancel stops pending answers. Remove for everyone, with the aside open in a second client, leaves no question or answer text in either client, only "This aside was removed" with Back in the second; its usage remains. Remove for everyone on an aside with a pending answer cancels it first, and no answer text arrives afterwards. A 51st aside drops the oldest settled one while a client has it open: that client shows it with "dropped to make room" and Ask again, and a newly opened client shows only "Older asides were dropped to make room". After a daemon restart, a client that had an aside open shows it with "the daemon restarted" and Ask again, which fills the composer as a draft; a newly opened client shows only the restart note. |
+| F15 | Aside ask | `/btw` switches the composer to aside mode with the copy line and the `--info` border. The recipient picker lists unavailable members with reasons. Escape keeps the text. Sending opens the Asides tab. Each admission limit (question, recipients, pending, memory, receipts) keeps the draft, disables Send and shows its own text; the server's refusal shows the same text. |
+| F16 | Aside answers | Answers arrive independently; the slow one shows Answering and the failed one shows its reason. The footer names the source copy and time, and tokens and estimate are shown. Cancel stops pending answers. Remove for everyone, with the aside open in a second client, leaves no question or answer text in either client, only "This aside was removed" with Back in the second; its usage remains. Remove for everyone on an aside with a pending answer cancels it first, and no answer text arrives afterwards. A 51st aside drops the oldest settled one while a client has it open: that client shows it with "dropped to make room" and Ask again, and a newly opened client shows only "Older asides were dropped to make room". After a daemon restart, a client that had an aside open shows it with "the daemon restarted" and Ask again, which fills the composer as a draft; a newly opened client shows only the restart note. A cleared session shows "Asides from the previous session were cleared" with no local text, and an open view whose cause is unknown shows "This aside is no longer available" with Back only. |
 | F17 | Aside isolation | During and after an aside: no bus row, inbox entry, transcript line, task change or briefing change. Only `aside.*` events without bodies appear. The fixture's live sessions receive no input. Send as message opens the normal composer prefilled, and only sending it reaches the member. |
 | F18 | Keyboard and screen reader | Every new control is reachable by Tab. The `n`, `b` and `D` keys work and are listed in Help. Tree and treegrid semantics hold, the announcements are polite and bounded, and focus is never stolen. |
 | F19 | Budgets | P1, P2 and P4 hold, or a raise is recorded with its card (as for toolbox-dashboards). The Docs chunk is requested at document start and never later. The idle page requests no animation frames. |
