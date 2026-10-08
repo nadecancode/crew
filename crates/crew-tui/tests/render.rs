@@ -2887,3 +2887,34 @@ mod vcs {
         assert!(screen.contains("workspace claude-7"), "{screen}");
     }
 }
+
+#[test]
+fn detail_view_shows_the_effective_toolbox() {
+    // notes/toolboxes.md §Display, T15: the summary and a pending change next
+    // to the runtime, the groups and sources at the end of the agent panel.
+    let mut app = app();
+    let mut snapshot = fixture::snapshot(NOW);
+    snapshot.agents.extend(fixture::toolbox_agents(NOW));
+    app.apply_snapshot(snapshot, NOW);
+    app.open_detail("release", NOW);
+    let screen = render_to_string(&app, 160, 70, NOW + 1000);
+    for needle in [
+        "toolbox   b56e01d7c4a9 · 4 items · 2 not available",
+        "Toolbox changed: restart to apply (R restart)",
+        "MCP definitions not pinned (proxy pending)",
+        "MCP servers",
+        "github Bundle github Needs $SHOP_GITHUB_TOKEN",
+        "lint-kit Member Not available on Codex",
+        "Sources",
+        "Your Codex MCP servers",
+        "Disabled (ambient, docs-local)",
+        "Cannot be excluded on Codex",
+        "without the sandbox",
+    ] {
+        assert!(screen.contains(needle), "missing {needle:?}\n{screen}");
+    }
+    assert!(
+        !screen.contains("Subagents\n") && !screen.contains(" Hooks"),
+        "{screen}"
+    );
+}

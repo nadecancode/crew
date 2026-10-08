@@ -284,6 +284,28 @@ fn info_lines(app: &App, agent: &Agent, theme: &Theme, now: i64) -> Vec<Line<'st
         }
         lines.push(field("fallback", value, theme.fg(theme.warn), theme));
     }
+    // The effective toolbox: the summary and a pending change here, the
+    // groups at the end of the panel (notes/toolboxes.md §Display).
+    if let Some(toolbox) = &agent.toolbox {
+        let summary = toolbox.summary();
+        let summary = summary
+            .strip_prefix("Toolbox ")
+            .unwrap_or(&summary)
+            .to_string();
+        lines.push(field("toolbox", summary, text, theme));
+        if toolbox.pending_fingerprint.is_some() {
+            lines.push(Line::from(Span::styled(
+                format!(" {} (R restart)", crew_core::types::TOOLBOX_PENDING),
+                theme.fg(theme.warn),
+            )));
+        }
+        if toolbox.definitions_unpinned() {
+            lines.push(Line::from(Span::styled(
+                format!(" {}", crew_core::types::TOOLBOX_UNPINNED),
+                theme.fg(theme.dim),
+            )));
+        }
+    }
     let backend = match &agent.backend_ref {
         Some(reference) => format!("{} · {reference}", agent.backend),
         None => agent.backend.clone(),
@@ -407,6 +429,81 @@ fn info_lines(app: &App, agent: &Agent, theme: &Theme, now: i64) -> Vec<Line<'st
     };
     if let Some(compaction) = compaction {
         lines.push(field("compact", compaction, text, theme));
+    }
+    if let Some(toolbox) = &agent.toolbox {
+        lines.extend(toolbox_lines(toolbox, theme));
+    }
+    lines
+}
+
+/// The toolbox items by kind, then the runtime's sources. Groups without
+/// entries are left out; status is always the daemon's words.
+fn toolbox_lines(toolbox: &crew_core::types::AgentToolbox, theme: &Theme) -> Vec<Line<'static>> {
+    use crew_core::types::{
+        toolbox_origin_label, ToolboxItemCode, ToolboxItemKind, ToolboxSourceCode,
+    };
+    let mut lines = Vec::new();
+    let mut kinds: Vec<ToolboxItemKind> = toolbox.items.iter().map(|item| item.kind).collect();
+    kinds.dedup();
+    kinds.sort();
+    kinds.dedup();
+    for kind in kinds {
+        lines.push(Line::from(Span::styled(
+            format!(" {}", kind.heading()),
+            theme.bold(theme.muted),
+        )));
+        for item in toolbox.items.iter().filter(|item| item.kind == kind) {
+            let style = match item.status.code {
+                ToolboxItemCode::Active | ToolboxItemCode::Planned => theme.fg(theme.text),
+                ToolboxItemCode::NotApplicable => theme.fg(theme.dim),
+                _ => theme.fg(theme.warn),
+            };
+            let required = if item.required { " · required" } else { "" };
+            lines.push(Line::from(vec![
+                Span::styled(format!("  {} ", item.name), theme.fg(theme.text)),
+                Span::styled(
+                    format!("{} ", toolbox_origin_label(&item.origin)),
+                    theme.fg(theme.muted),
+                ),
+                Span::styled(item.status.text.clone(), style),
+                Span::styled(required.to_string(), theme.fg(theme.muted)),
+            ]));
+            if let Some(detail) = &item.detail {
+                lines.push(Line::from(Span::styled(
+                    format!("    {detail}"),
+                    theme.fg(theme.dim),
+                )));
+            }
+        }
+    }
+    if !toolbox.sources.is_empty() {
+        lines.push(Line::from(Span::styled(
+            " Sources",
+            theme.bold(theme.muted),
+        )));
+        for source in &toolbox.sources {
+            let mut status = source.status.text.clone();
+            if !source.names.is_empty() {
+                status.push_str(&format!(" ({})", source.names.join(", ")));
+            }
+            let style = if source.status.code == ToolboxSourceCode::CannotBeExcluded {
+                theme.fg(theme.warn)
+            } else {
+                theme.fg(theme.text)
+            };
+            // Label and status on lines of their own: the panel is narrow.
+            lines.push(Line::from(Span::styled(
+                format!("  {}", source.label),
+                theme.fg(theme.muted),
+            )));
+            lines.push(Line::from(Span::styled(format!("    {status}"), style)));
+            if let Some(detail) = &source.detail {
+                lines.push(Line::from(Span::styled(
+                    format!("    {detail}"),
+                    theme.fg(theme.dim),
+                )));
+            }
+        }
     }
     lines
 }

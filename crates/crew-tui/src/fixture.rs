@@ -693,20 +693,27 @@ pub fn toolbox_agents(now: i64) -> Vec<Agent> {
         ToolboxItemStatus, ToolboxSource, ToolboxSourceCode as SourceCode,
         ToolboxSourceOrigin as Origin, ToolboxSourceStatus,
     };
-    let item = |kind, name: &str, origin: &str, required, code, text: &str, detail: Option<&str>| {
-        ToolboxItem {
-            kind,
-            name: name.to_string(),
-            origin: origin.to_string(),
-            required,
-            status: ToolboxItemStatus {
-                code,
-                text: text.to_string(),
-            },
-            detail: detail.map(str::to_string),
-        }
-    };
-    let source = |origin, kind: Option<&str>, label: &str, code, text: &str, names: &[&str], detail: Option<&str>| {
+    let item =
+        |kind, name: &str, origin: &str, required, code, text: &str, detail: Option<&str>| {
+            ToolboxItem {
+                kind,
+                name: name.to_string(),
+                origin: origin.to_string(),
+                required,
+                status: ToolboxItemStatus {
+                    code,
+                    text: text.to_string(),
+                },
+                detail: detail.map(str::to_string),
+            }
+        };
+    let source = |origin,
+                  kind: Option<&str>,
+                  label: &str,
+                  code,
+                  text: &str,
+                  names: &[&str],
+                  detail: Option<&str>| {
         ToolboxSource {
             origin,
             kind: kind.map(str::to_string),
@@ -724,13 +731,53 @@ pub fn toolbox_agents(now: i64) -> Vec<Agent> {
     qa.toolbox = Some(AgentToolbox {
         fingerprint: "3f9a0c21e7b4d5f6a7b8c9d0e1f2a3b4c5d6e7f8091a2b3c4d5e6f708192a3b4".into(),
         items: vec![
-            item(Kind::Mcp, "context7", "bundle:base", false, Code::Active, "Active", Some("npx -y @upstash/context7-mcp")),
-            item(Kind::Mcp, "playwright", "bundle:web", true, Code::Active, "Active", Some("npx @playwright/mcp --headless")),
-            item(Kind::Skills, "frontend-qa", "bundle:web", false, Code::Active, "Active", None),
+            item(
+                Kind::Mcp,
+                "context7",
+                "bundle:base",
+                false,
+                Code::Active,
+                "Active",
+                Some("npx -y @upstash/context7-mcp"),
+            ),
+            item(
+                Kind::Mcp,
+                "playwright",
+                "bundle:web",
+                true,
+                Code::Active,
+                "Active",
+                Some("npx @playwright/mcp --headless"),
+            ),
+            item(
+                Kind::Skills,
+                "frontend-qa",
+                "bundle:web",
+                false,
+                Code::Active,
+                "Active",
+                None,
+            ),
         ],
         sources: vec![
-            source(Origin::Operator, None, "Your Claude Code configuration", SourceCode::NotUsed, "Not used", &[], None),
-            source(Origin::Project, None, "Project", SourceCode::Used, "Used: skills, hooks, instructions", &[], None),
+            source(
+                Origin::Operator,
+                None,
+                "Your Claude Code configuration",
+                SourceCode::NotUsed,
+                "Not used",
+                &[],
+                None,
+            ),
+            source(
+                Origin::Project,
+                None,
+                "Project",
+                SourceCode::Used,
+                "Used: skills, hooks, instructions",
+                &[],
+                None,
+            ),
         ],
         ..AgentToolbox::default()
     });
