@@ -75,6 +75,7 @@ restart {id} fresh or move it to another CLI."
         self.temporary_housekeeping().await;
 
         self.task_health_at(now, &limits).await;
+        self.keepalive_housekeeping().await;
     }
 
     /// Task health uses the tick's captured time, so the reminder boundary and
