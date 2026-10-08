@@ -91,8 +91,25 @@ impl FeatureServices {
             .unwrap_or_else(|e| e.into_inner())
             .remove(id)
         {
+            context.connection_closed.cancel();
             context.cancellation.cancel();
         }
+        self.close_connection_resources(id);
+    }
+
+    fn connection_scope_changed(&self, id: &ConnId) {
+        if let Some(context) = self
+            .connections
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .get(id)
+        {
+            context.cancellation.cancel();
+        }
+        self.close_connection_resources(id);
+    }
+
+    fn close_connection_resources(&self, id: &ConnId) {
         let services: Vec<_> = self
             .services
             .read()
@@ -283,8 +300,8 @@ impl Daemon {
         if context.run != current {
             context.cancellation.cancel();
             self.feature_services
-                .connection_closed(&context.connection_epoch);
-            context = ConnCtx::new(context.connection_epoch, current, context.caller);
+                .connection_scope_changed(&context.connection_epoch);
+            context = context.for_run(current);
             self.feature_services.connection_opened(context.clone());
             conn.feature_context = Some(context.clone());
         }
@@ -432,6 +449,9 @@ pub struct ConnCtx {
     pub run: RunCtx,
     pub caller: Caller,
     pub cancellation: Cancellation,
+    /// Physical connection closure, distinct from expiration of one run's
+    /// jobs. A still-open connection receives a final watch resync on expiry.
+    pub connection_closed: Cancellation,
 }
 
 impl ConnCtx {
@@ -441,6 +461,15 @@ impl ConnCtx {
             run,
             caller,
             cancellation: Cancellation::default(),
+            connection_closed: Cancellation::default(),
+        }
+    }
+
+    fn for_run(&self, run: RunCtx) -> Self {
+        Self {
+            run,
+            cancellation: Cancellation::default(),
+            ..self.clone()
         }
     }
 }

@@ -80,6 +80,7 @@ impl TransportEnd {
             Self::Stopped => ("stopped", "The connection was stopped."),
         };
         crew_client::api::ClientReason {
+            details: None,
             code: code.into(),
             message: message.into(),
         }

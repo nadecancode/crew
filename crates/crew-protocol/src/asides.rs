@@ -87,7 +87,9 @@ pub struct AsideUsage {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct AsideAnswerMeta {
     pub target: AsideTarget,
-    pub runtime: RuntimeKind,
+    /// Unknown only for an unavailable target whose historical runtime is not known.
+    /// Never substitute the runtime of a replacement member.
+    pub runtime: Option<RuntimeKind>,
     pub model: Option<Label>,
     pub status: AsideStatus,
     pub reason: Option<AsideAnswerReason>,

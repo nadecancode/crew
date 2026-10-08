@@ -20,6 +20,8 @@ pub const CORE_OPERATION_ID_MAX: u64 = DRIVER_OPERATION_ID_START - 1;
 
 /// Borrowed current facts. No selected UI entity or credential lives here.
 pub struct ActionContext<'a> {
+    pub features: Option<&'a crate::features::FeatureAvailability>,
+    pub feature_watches: &'a [crate::features::FeatureWatchState],
     pub connection: Option<&'a ConnectionContext>,
     pub endpoint: EndpointStatus,
     pub workspace: WorkspaceStatus,
@@ -71,6 +73,7 @@ pub struct ActionDecision {
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum Route {
+    State,
     Action,
     Read,
     Attach,
@@ -174,6 +177,7 @@ impl From<ClientError> for PlanFailure {
 
 fn reason(code: &str, message: impl Into<String>) -> ClientReason {
     ClientReason {
+        details: None,
         code: code.into(),
         message: message.into(),
     }
@@ -307,6 +311,7 @@ fn running(agent: &Agent) -> Result<(), PlanFailure> {
 /// intents. A view must retain this identity rather than substitute selection.
 pub fn action_scope(intent: &ActionIntent) -> &ClientScope {
     match intent {
+        ActionIntent::Feature { scope, .. } => scope,
         ActionIntent::SendMessage { scope, .. }
         | ActionIntent::Answer { scope, .. }
         | ActionIntent::Agent { scope, .. }
@@ -324,6 +329,7 @@ pub fn action_scope(intent: &ActionIntent) -> &ClientScope {
 
 fn action_kind(intent: &ActionIntent) -> ActionKind {
     match intent {
+        ActionIntent::Feature { .. } => ActionKind::Feature,
         ActionIntent::SendMessage { .. } => ActionKind::SendMessage,
         ActionIntent::Answer { .. } => ActionKind::Answer,
         ActionIntent::Agent { action, .. } => match action {
@@ -350,8 +356,22 @@ fn action_kind(intent: &ActionIntent) -> ActionKind {
 /// Canonical effective options are shared with resource storage and queries.
 /// Event evidence is local-only and produces no command.
 pub fn canonical_resource_key(key: &ResourceKey) -> Result<ResourceKey, ClientError> {
+    if let ResourceKind::Feature(kind) = key.kind {
+        let ReadOptions::Feature(read) = &key.options else {
+            return Err(invalid("resource.options", "expected typed feature read"));
+        };
+        if !matches!(key.entity.entity, Entity::Workspace) || read.kind() != kind {
+            return Err(invalid(
+                "resource",
+                "feature resource identity differs from its request",
+            ));
+        }
+        read.validate()?;
+        return Ok(key.clone());
+    }
     let mut key = key.clone();
     let valid_entity = match key.kind {
+        ResourceKind::Feature(_) => unreachable!("validated above"),
         ResourceKind::TaskCard => matches!(key.entity.entity, Entity::Task(_)),
         ResourceKind::Message => matches!(key.entity.entity, Entity::Message(_)),
         ResourceKind::Event => matches!(key.entity.entity, Entity::Event(_)),
@@ -430,6 +450,9 @@ pub fn canonical_resource_key(key: &ResourceKey) -> Result<ResourceKey, ClientEr
 /// strings or unsupported filter/ack parameters.
 pub fn resource_command(key: &ResourceKey) -> Result<Option<Command>, ClientError> {
     let key = canonical_resource_key(key)?;
+    if let ReadOptions::Feature(read) = &key.options {
+        return Ok(Some(read.command()));
+    }
     let id = match &key.entity.entity {
         Entity::Agent(id) | Entity::Task(id) | Entity::Message(id) => Some(id.clone()),
         _ => None,
@@ -439,6 +462,7 @@ pub fn resource_command(key: &ResourceKey) -> Result<Option<Command>, ClientErro
         _ => None,
     };
     Ok(Some(match key.kind {
+        ResourceKind::Feature(_) => unreachable!("handled above"),
         ResourceKind::TaskCard => Command::TaskGet { id },
         ResourceKind::Message => Command::MessageGet {
             id: id.expect("validated message entity"),
@@ -500,6 +524,42 @@ impl Actions {
         self.pending.len() + self.confirmations.len() + self.retries.len()
     }
 
+    pub(crate) fn purge_aside(
+        &mut self,
+        run: &crew_protocol::features::Id,
+        id: &crew_protocol::features::Id,
+    ) {
+        fn clear(
+            proposal: &mut Proposal,
+            run: &crew_protocol::features::Id,
+            id: &crew_protocol::features::Id,
+        ) {
+            if let Some(Command::AsideAsk(q)) = &mut proposal.command {
+                if &q.workspace_run_id == run && &q.request_id == id {
+                    q.question = Default::default();
+                }
+            }
+            if let ActionIntent::Feature {
+                action: crate::features::FeatureAction::AskAside(q),
+                ..
+            } = &mut proposal.intent
+            {
+                if &q.workspace_run_id == run && &q.request_id == id {
+                    q.question = Default::default();
+                }
+            }
+        }
+        for pending in self.pending.values_mut() {
+            clear(&mut pending.proposal, run, id);
+        }
+        for proposal in self.confirmations.values_mut() {
+            clear(proposal, run, id);
+        }
+        for retry in self.retries.values_mut() {
+            clear(&mut retry.pending.proposal, run, id);
+        }
+    }
+
     pub fn pending_answer_ids(&self) -> impl Iterator<Item = &str> {
         self.pending
             .values()
@@ -529,6 +589,78 @@ impl Actions {
         let mut resource = None;
         let mut route = Route::Action;
         let command = match &intent {
+            ActionIntent::Feature { action, .. } => {
+                action.validate()?;
+                let command = action.command();
+                let feature = command.required_feature().expect("feature action");
+                if !context.features.is_some_and(|f| f.supports(feature)) {
+                    return Err(unavailable(
+                        "unsupported_feature",
+                        "feature is unavailable on this connection",
+                    ));
+                }
+                if action.current_run().is_some_and(|run| {
+                    context.session.and_then(|s| s.workspace_run_id.as_deref())
+                        != Some(run.as_str())
+                }) {
+                    return Err(unavailable(
+                        "stale_scope",
+                        "feature action belongs to another workspace run",
+                    ));
+                }
+                if let crate::features::FeatureAction::UnwatchAsides(q)
+                | crate::features::FeatureAction::UnwatchDocs(q)
+                | crate::features::FeatureAction::UnwatchUsage(q) = action
+                {
+                    let epoch = context
+                        .features
+                        .and_then(|f| f.session.as_ref())
+                        .map(|s| &s.connection_epoch);
+                    if !context.feature_watches.iter().any(|w| {
+                        w.feature == feature
+                            && w.watch_id == q.watch_id
+                            && Some(&w.connection_epoch) == epoch
+                    }) {
+                        return Err(unavailable(
+                            "stale_scope",
+                            "Watch belongs to another feature or connection.",
+                        ));
+                    }
+                }
+                let watch_limit = match action {
+                    crate::features::FeatureAction::WatchAsides(_)
+                    | crate::features::FeatureAction::WatchDocs(_) => Some(1),
+                    crate::features::FeatureAction::WatchUsage(_) => Some(4),
+                    _ => None,
+                };
+                if let Some(limit) = watch_limit {
+                    let active = context
+                        .feature_watches
+                        .iter()
+                        .filter(|w| w.feature == feature)
+                        .count();
+                    let pending = self
+                        .pending
+                        .values()
+                        .filter(|p| {
+                            p.proposal
+                                .command
+                                .as_ref()
+                                .is_some_and(|c| c.kind() == command.kind())
+                        })
+                        .count();
+                    if active + pending >= limit {
+                        return Err(unavailable(
+                            "watch_limit",
+                            "Close an existing watch before opening another.",
+                        ));
+                    }
+                }
+                if action.observer() {
+                    route = Route::State;
+                }
+                Some(command)
+            }
             ActionIntent::SendMessage {
                 to,
                 body: text,
@@ -693,6 +825,24 @@ impl Actions {
                     ));
                 }
                 let key = canonical_resource_key(&request.key)?;
+                if let ReadOptions::Feature(read) = &key.options {
+                    let feature = read.command().required_feature().expect("feature read");
+                    if !context.features.is_some_and(|f| f.supports(feature)) {
+                        return Err(unavailable(
+                            "unsupported_feature",
+                            "feature is unavailable on this connection",
+                        ));
+                    }
+                    if read.current_run().is_some_and(|run| {
+                        context.session.and_then(|s| s.workspace_run_id.as_deref())
+                            != Some(run.as_str())
+                    }) {
+                        return Err(unavailable(
+                            "stale_scope",
+                            "feature read belongs to another workspace run",
+                        ));
+                    }
+                }
                 match &key.entity.entity {
                     Entity::Agent(id) => {
                         agent(id, context)?;
@@ -980,7 +1130,13 @@ impl Actions {
         let id = allocate(&mut self.next_operation, "operation_id_exhausted")?;
         let mut update = pending_update(matches!(proposal.command, Some(Command::Answer { .. })));
         let lane = match proposal.route {
-            Route::Read => RequestLane::Read,
+            Route::State => RequestLane::State,
+            Route::Read => match proposal.resource.as_ref().map(|r| &r.options) {
+                Some(ReadOptions::Feature(read)) if read.lease.is_some() => RequestLane::Document {
+                    lease: read.lease.clone().expect("checked lease"),
+                },
+                _ => RequestLane::Read,
+            },
             Route::Action => RequestLane::Action,
             Route::Attach => {
                 let Some(Command::Attach { agent, .. }) = &proposal.command else {
@@ -1186,7 +1342,7 @@ impl Actions {
                     };
                 }
             }
-            Route::Action | Route::Read => {
+            Route::Action | Route::Read | Route::State => {
                 if matches!(
                     outcome,
                     OperationOutcome::SentUnacknowledged { .. }
@@ -1485,6 +1641,7 @@ impl Actions {
             return Err(unavailable("not_connected", "not connected to a workspace"));
         };
         let method = match kind {
+            ActionKind::Feature => None,
             ActionKind::SendMessage => Some(CommandKind::Send),
             ActionKind::Answer => Some(CommandKind::Answer),
             ActionKind::Pause => Some(CommandKind::AgentPause),
@@ -1655,10 +1812,18 @@ impl CompletedOperation {
                 result: CommandResult::Attached { .. },
             } => (OperationOutcomeKind::Success, Some(self.operation_id), None),
             OperationOutcome::Succeeded { .. } => (OperationOutcomeKind::Success, None, None),
-            OperationOutcome::Rejected { code, message } => (
+            OperationOutcome::Rejected {
+                code,
+                message,
+                details,
+            } => (
                 OperationOutcomeKind::Rejected,
                 None,
-                Some(reason(code, message)),
+                Some(ClientReason {
+                    code: code.clone(),
+                    message: message.clone(),
+                    details: details.clone(),
+                }),
             ),
             OperationOutcome::NotSent { reason } => {
                 (OperationOutcomeKind::NotSent, None, Some(reason.clone()))
@@ -1700,6 +1865,7 @@ fn same_incarnation(left: &ClientScope, right: &ClientScope) -> bool {
 
 fn replace_scope(intent: &mut ActionIntent, replacement: ClientScope) {
     let scope = match intent {
+        ActionIntent::Feature { scope, .. } => scope,
         ActionIntent::SendMessage { scope, .. }
         | ActionIntent::Answer { scope, .. }
         | ActionIntent::Agent { scope, .. }

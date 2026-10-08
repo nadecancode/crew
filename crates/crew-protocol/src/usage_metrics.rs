@@ -225,6 +225,43 @@ pub struct UsageQuery {
 }
 
 impl UsageQuery {
+    /// Resolve the v1 query shape after the service has selected a price book.
+    /// No ledger lookup or aggregate calculation belongs here. Native clients
+    /// use the same pure rule to validate the effective query in a reply.
+    pub fn resolved_shape(
+        &self,
+        price_book_id: Id,
+        max_rows: u16,
+        series: bool,
+    ) -> Result<Self, &'static str> {
+        self.validate(max_rows)?;
+        if self
+            .price_book_id
+            .as_ref()
+            .is_some_and(|id| id != &price_book_id)
+        {
+            return Err("resolved price book differs from request");
+        }
+        let bucket = if series {
+            let requested = self.bucket_seconds.unwrap_or(3600);
+            Some(
+                [60, 120, 300, 600, 900, 1200, 1800]
+                    .into_iter()
+                    .find(|v| *v >= requested)
+                    .unwrap_or_else(|| (requested.div_ceil(3600) * 3600).min(86400)),
+            )
+        } else {
+            None
+        };
+        let mut result = self.clone();
+        result.bucket_seconds = bucket;
+        result.price_book_id = Some(price_book_id);
+        // Preserve the exact half-open range, including unaligned boundaries.
+        // Missing retained detail is coverage loss, never permission to widen.
+        result.page.limit = Some(self.page.limit.unwrap_or(max_rows));
+        Ok(result)
+    }
+
     pub fn validate(&self, max_rows: u16) -> Result<(), &'static str> {
         self.page.validate(max_rows)?;
         if self.from_ms.zip(self.to_ms).is_some_and(|(a, b)| a >= b) {

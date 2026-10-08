@@ -223,6 +223,9 @@ impl Drop for Session {
     /// The connection ended, or the task that served it was aborted: its
     /// stream task stops, its listener slot is released.
     fn drop(&mut self) {
+        if let Some(context) = &self.conn.feature_context {
+            context.connection_closed.cancel();
+        }
         for (_, (_, task)) in self.conn.feature_tasks.drain() {
             task.abort();
         }

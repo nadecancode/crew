@@ -209,6 +209,7 @@ fn full_intent_reasons_and_malformed_errors_match_planning_and_keep_captured_sco
         ClientInput::Unbind {
             scope: scope(),
             reason: ClientReason {
+                details: None,
                 code: "closed".into(),
                 message: "closed".into(),
             },
