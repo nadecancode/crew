@@ -326,7 +326,8 @@ def run(args):
                 report["status"] = "budget-stop"
                 break
             if lifecycle:
-                if not lifecycle.is_idle() and time.monotonic() - last_usage_change > 90:
+                idle_members = all(a["status"] in ("idle", "done", "waiting") for a in agents)
+                if lifecycle.usage_stalled(last_usage_change, idle_members):
                     raise RuntimeError("no new native usage for 90 seconds; refusing an unmetered run")
                 complete = lifecycle.tick(snapshot, report["agents"], time.monotonic() - last_usage_change)
                 report["lifecycle"] = lifecycle.report()

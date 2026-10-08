@@ -140,9 +140,21 @@ class Lifecycle:
         self.waiting_since = None
         self.last_idle = None
         self.session_ids = {}
+        self.action_at = time.monotonic()
+        self.idle_was_quiet = False
 
     def is_idle(self):
         return self.current is not None and self.plan[self.index][0] == "idle"
+
+    def usage_stalled(self, last_usage_change, quiet):
+        now = time.monotonic()
+        if self.is_idle():
+            if not quiet and self.idle_was_quiet:
+                self.action_at = now
+            self.idle_was_quiet = quiet
+            if quiet:
+                return False
+        return now - max(last_usage_change, self.action_at) > 90
 
     def transient_stop(self, agent):
         if self.index >= len(self.plan):
@@ -171,6 +183,7 @@ class Lifecycle:
         self.current = {"step": label, "kind": kind, "started_at": iso(),
                         "request_offsets": {a["agent"]: a.get("request_count", 0) for a in usage}}
         self.started = time.monotonic()
+        self.action_at = self.started
         if agent:
             self.current["agent"] = agent
             self.current["session_id_before"] = agents[agent].get("session_id")
@@ -272,6 +285,9 @@ class Lifecycle:
             if done:
                 self.current["observed_quiet_seconds"] = elapsed
                 self.last_idle = self.current
+                # The next tick must be allowed to dispatch the post-idle
+                # probe before applying the ordinary unmetered-usage timeout.
+                self.action_at = time.monotonic()
         elif kind == "probes":
             done = all(tasks.get(f"{label}-{worker}") == "done" for worker in WORKERS)
         if not done or not quiet or stable_for < 3:

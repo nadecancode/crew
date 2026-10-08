@@ -4,6 +4,7 @@ import json
 from pathlib import Path
 import tempfile
 import unittest
+from unittest.mock import patch
 
 import lifecycle
 
@@ -66,6 +67,23 @@ class LifecycleTests(unittest.TestCase):
         self.assertGreater(idle[1], 3600)
         self.assertEqual(len([row for row in runner.plan if row[0] == "restart"]), 6)
         self.assertIn("fold", [row[0] for row in runner.plan])
+
+    def test_long_idle_completion_grants_probe_time_without_disabling_stall_guard(self):
+        for gap in (310, 3665):
+            with self.subTest(gap=gap), patch.object(lifecycle.time, "monotonic", return_value=10):
+                runner = lifecycle.Lifecycle(Path("/unused"), lambda *args: None)
+                runner.plan = [("idle", "idle", None, gap), ("probes", "probe", None, 300)]
+                agents = [{"id": name, "runtime": runtime, "status": "idle"}
+                          for name, runtime in [("orchestrator", "claude"), ("claude-worker", "claude"), ("codex-worker", "codex")]]
+                snapshot = {"agents": agents, "tasks": []}
+                runner.tick(snapshot, [], stable_for=5)
+            with patch.object(lifecycle.time, "monotonic", return_value=11 + gap):
+                self.assertFalse(runner.usage_stalled(5, quiet=True))
+                runner.tick(snapshot, [], stable_for=gap + 6)
+                self.assertFalse(runner.usage_stalled(5, quiet=True))
+                self.assertEqual(runner.index, 1)
+            with patch.object(lifecycle.time, "monotonic", return_value=102 + gap):
+                self.assertTrue(runner.usage_stalled(5, quiet=True))
 
 
 if __name__ == "__main__":
