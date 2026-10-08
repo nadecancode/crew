@@ -89,6 +89,16 @@ impl Daemon {
         self.restart(id, notice, Start::Resume).await
     }
 
+    /// Apply an operator-requested MCP refresh while resuming the confirmed
+    /// conversation. A subagent still keeps its inherited frozen catalog.
+    pub(crate) async fn restart_agent_refreshing_toolbox(
+        &self,
+        id: &str,
+        notice: Option<String>,
+    ) -> Result<(), RpcError> {
+        self.restart(id, notice, Start::Refresh).await
+    }
+
     async fn restart(
         &self,
         id: &str,

@@ -26,6 +26,9 @@ pub(crate) enum Start {
     New,
     /// Resumes its session, once that is confirmed.
     Resume,
+    /// Resumes its session and refreshes MCP definitions at the operator's
+    /// explicit request. Ordinary recovery keeps the pinned definitions.
+    Refresh,
     /// Leaves its session for a new one, never resuming it.
     Fresh,
 }
