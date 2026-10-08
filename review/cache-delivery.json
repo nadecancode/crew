@@ -220,5 +220,23 @@
     "native_requests": 3,
     "retained_thinking_signature_bytes_equal": true,
     "report_sha256": "0d5815a3881983c64cc67b08c55b881db053ce429aed96310d4c8de49b56dcb8"
-  }
+  },
+  "raw_sdk_merge": {
+    "exit": {
+      "code": 0,
+      "signal": null
+    },
+    "native_requests": 2,
+    "provider_calls": 0,
+    "submitted_batches": [
+      "A",
+      "B"
+    ],
+    "explicit_result_batches": [
+      "B"
+    ],
+    "merged_native_start": true,
+    "report_sha256": "d98cdf2b82e18b216f6d73ec0a7d2c67229931fa6812fb8a73b842cffdf50cc1"
+  },
+  "stale_attempt_regression": "daemon::delivery::tests::expired_receipt_restores_as_a_tombstone_and_stale_retirement_cannot_bind_a_new_attempt"
 }

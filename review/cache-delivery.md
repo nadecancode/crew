@@ -62,3 +62,14 @@ store restore and unknown tombstones.
 
 No installed
 operator binary, running team, provider credential or listener was changed.
+
+Native scenario counts: normal, relay reconnect, slow hook (21 seconds), body
+rewrite and thinking-stream each make three local fixture requests; drop and
+short-circuit each make two. The raw SDK A+B merge makes two and records an
+explicit result only for B. Every scenario makes zero provider calls. Fixture
+reconnect repeatedly resends the same identities without a second native copy.
+The exact stale-attempt regression is
+`daemon::delivery::tests::expired_receipt_restores_as_a_tombstone_and_stale_retirement_cannot_bind_a_new_attempt`:
+retire A, offer the same message ids as a fresh B, then A's late observation is
+ignored and B stays unbound. Restore, phase expiry, stale launch and crash-before-
+bus-update checks are separate from the native relay test.
