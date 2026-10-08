@@ -80,7 +80,7 @@ impl Fixture {
         let session = Session::new();
         let clis = tempfile::tempdir_in(Path::new(CREW).parent().unwrap()).unwrap();
         let bin = clis.path().canonicalize().unwrap();
-        for name in ["claude", "codex"] {
+        for name in ["claude", "codex", "pi"] {
             let file = bin.join(name);
             // An optional native inventory gate: forward only `mcp list`
             // to the installed Codex. Session and model calls stay in the
@@ -104,10 +104,15 @@ impl Fixture {
             } else {
                 String::new()
             };
+            let discovery = if name == "pi" {
+                "if [ \"$1\" = --help ] || [ \"$1\" = --list-models ]; then exit 0; fi\n"
+            } else {
+                ""
+            };
             write(
                 &file,
                 &format!(
-                    "#!/bin/sh\n{inventory}exec {} fake-cli {name} \"$@\"\n",
+                    "#!/bin/sh\n{inventory}{discovery}exec {} fake-cli {name} \"$@\"\n",
                     session.sandboxed_crew()
                 ),
             );
@@ -150,6 +155,7 @@ impl Fixture {
             .session
             .command()
             .env("PATH", &self.path)
+            .env("CREW_PI", self._clis.path().join("pi"))
             .env("HOME", self.session.root().join("home"))
             .env("TOOLBOX_ALIAS_SOURCE", "alias-secret-sentinel")
             .args(["run", "team.yaml", "--no-attach"])
@@ -481,6 +487,160 @@ fn claude_pins_files_and_credentials_and_reload_waits_for_restart() {
         std::fs::read_to_string(agent.join("local.json")).unwrap_or_default()
     );
     assert!(!exposed.contains("secret-sentinel"));
+}
+
+/// Exercise the operator CLI and the real daemon's launch/preflight path.
+/// Runtime stand-ins confirm session identity; QA's localhost native probes
+/// separately check the definitions that reach each runtime's model requests.
+fn resumed_restart_refreshes_mcp_catalog(runtime: RuntimeKind) {
+    let fixture = Fixture::new();
+    let s = &fixture.session;
+    let state = s.root().join("mcp-listings");
+    let mut team = fixture.team(
+        runtime,
+        json!({"mcp":{"probe":{
+            "command":[CREW,"fake-mcp","--tools","probe","--state",state,
+                       "--change-description-after","1"],
+            "required":true
+        }}}),
+    );
+    team.defaults.max_restarts = 1;
+    fixture.run(&team);
+    let running = s.wait("member with a pinned MCP catalog", |snapshot| {
+        let agent = find_agent(snapshot, "x");
+        agent.pid.is_some()
+            && agent.status != crew_core::AgentStatus::Spawning
+            && agent
+                .toolbox
+                .as_ref()
+                .is_some_and(|toolbox| toolbox.definition_digest.is_some())
+    });
+    // The Codex stand-in does not make a turn; supply the same session
+    // confirmation its native notify hook sends after a completed turn.
+    if runtime == RuntimeKind::Codex {
+        let output = s
+            .command()
+            .args(["hook", "codex-notify", "--identity"])
+            .arg(s.identity_path("x"))
+            .arg(r#"{"type":"agent-turn-complete","thread-id":"toolbox-test-thread"}"#)
+            .output()
+            .unwrap();
+        assert!(output.status.success(), "{}", stderr(&output));
+    }
+    let database = rusqlite::Connection::open_with_flags(
+        s.workspace.join(".crew/crew.db"),
+        rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY,
+    )
+    .unwrap();
+    s.wait_for("confirmed member session", || {
+        database
+            .query_row("SELECT value FROM meta WHERE key = 'agent:x'", [], |row| {
+                row.get::<_, String>(0)
+            })
+            .ok()
+            .and_then(|value| serde_json::from_str::<Value>(&value).ok())
+            .is_some_and(|local| local["session_confirmed"] == true)
+    });
+    let initial = find_agent(&s.snapshot(), "x").clone();
+    let before = initial.toolbox.unwrap();
+    assert!(initial.session_id.is_some());
+    let pin = s.workspace.join(".crew/agents/x/toolbox/mcp/probe.json");
+    let old_pin = std::fs::read(&pin).unwrap();
+    assert!(!String::from_utf8_lossy(&old_pin).contains("Changed."));
+    assert!(!s.has_event("toolbox.changed"));
+
+    // A crash starts another preflight, which now sees the changed upstream
+    // description. Recovery must still serve the old catalog and session.
+    let old_pid = find_agent(&running, "x").pid.unwrap();
+    let killed = std::process::Command::new("kill")
+        .args(["-KILL", &old_pid.to_string()])
+        .status()
+        .unwrap();
+    assert!(killed.success());
+    let recovered = s.wait("crash recovery to preserve the catalog", |snapshot| {
+        let agent = find_agent(snapshot, "x");
+        agent.restarts == 1
+            && agent.pid.is_some_and(|pid| pid != old_pid)
+            && agent.status != crew_core::AgentStatus::Spawning
+    });
+    let recovered = find_agent(&recovered, "x");
+    assert_eq!(recovered.session_id, initial.session_id);
+    assert_eq!(std::fs::read(&pin).unwrap(), old_pin);
+    assert_eq!(
+        recovered.toolbox.as_ref().unwrap().definition_digest,
+        before.definition_digest
+    );
+    s.wait_for("different upstream listing to be logged", || {
+        s.has_event("toolbox.listing")
+    });
+    assert!(!s.has_event("toolbox.changed"));
+
+    // Unlike an automatic recovery, the explicit operator restart refreshes
+    // the definitions while resuming the confirmed conversation.
+    let (record, resume_arg) = match runtime {
+        RuntimeKind::Claude => ("claude-home/fake-claude-x.json", "--resume"),
+        RuntimeKind::Codex => ("codex-home/fake-codex.json", "resume"),
+        RuntimeKind::Pi => ("pi-home/fake-pi.json", "--session-id"),
+        RuntimeKind::Shell => unreachable!(),
+    };
+    let record = s.root().join(record);
+    std::fs::remove_file(&record).unwrap();
+    s.ok(&[
+        "resume",
+        "--restart",
+        "x",
+        "-C",
+        s.workspace.to_str().unwrap(),
+    ]);
+    let refreshed = s.wait("explicit resumed restart to finish", |snapshot| {
+        let agent = find_agent(snapshot, "x");
+        agent.pid.is_some()
+            && agent.pid != recovered.pid
+            && agent.status != crew_core::AgentStatus::Spawning
+    });
+    let refreshed = find_agent(&refreshed, "x");
+    assert_eq!(refreshed.session_id, initial.session_id);
+    let launch = fixture.record(&record);
+    let args = launch["args"].as_array().unwrap();
+    assert!(
+        args.windows(2)
+            .any(|pair| pair[0] == resume_arg && pair[1].as_str() == initial.session_id.as_deref()),
+        "{runtime} did not resume the confirmed session: {args:?}"
+    );
+    let after = refreshed.toolbox.as_ref().unwrap();
+    assert_eq!(after.fingerprint, before.fingerprint);
+    assert_ne!(after.definition_digest, before.definition_digest);
+    assert!(std::fs::read_to_string(&pin).unwrap().contains("Changed."));
+    s.wait_for("catalog refresh to publish toolbox.changed", || {
+        s.events().iter().any(|event| {
+            event.event_type == "toolbox.changed"
+                && event.agent_id.as_deref() == Some("x")
+                && event.data["definition_digest"].as_str() == after.definition_digest.as_deref()
+        })
+    });
+    assert_eq!(
+        s.events()
+            .iter()
+            .filter(|event| event.event_type == "toolbox.changed"
+                && event.agent_id.as_deref() == Some("x"))
+            .count(),
+        1
+    );
+}
+
+#[test]
+fn claude_resumed_restart_refreshes_mcp_catalog() {
+    resumed_restart_refreshes_mcp_catalog(RuntimeKind::Claude);
+}
+
+#[test]
+fn codex_resumed_restart_refreshes_mcp_catalog() {
+    resumed_restart_refreshes_mcp_catalog(RuntimeKind::Codex);
+}
+
+#[test]
+fn pi_resumed_restart_refreshes_mcp_catalog() {
+    resumed_restart_refreshes_mcp_catalog(RuntimeKind::Pi);
 }
 
 #[test]

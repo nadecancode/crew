@@ -711,6 +711,7 @@ impl Daemon {
         let model = self.model();
         let s = &model.session;
         SessionInfo {
+            workspace_run_id: None,
             project: s.team.as_ref().map(|t| t.project.clone()),
             objective: s
                 .team
@@ -754,6 +755,7 @@ impl Daemon {
             (model.agents.clone(), model.tasks.clone())
         };
         Ok(Snapshot {
+            epics: None,
             session,
             agents,
             tasks,

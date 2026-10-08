@@ -478,6 +478,7 @@ mod tests {
     }
     fn task(id: &str, status: TaskStatus, start: Option<i64>) -> Task {
         Task {
+            epic: None,
             id: id.into(),
             title: id.into(),
             description: String::new(),

@@ -767,6 +767,9 @@ pub struct Artifact {
 /// A unit of work in the task graph.
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
 pub struct Task {
+    /// Hydrated from the current run's membership overlay. Legacy wire omits None.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub epic: Option<String>,
     pub id: String,
     pub title: String,
     #[serde(default)]
