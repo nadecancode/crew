@@ -10,6 +10,7 @@
 //! - `claude`, `codex`, `pi`: the runtime adapters (pi is gated)
 //! - `ledger`: durable streams, ownership, observations, coverage and aggregates
 //! - `collect`: one bounded read of a stream into the ledger
+//! - `query`: canonical queries and their answers from the ledger
 
 pub mod claude;
 pub mod codex;
@@ -22,4 +23,5 @@ pub mod metrics;
 mod parity;
 pub mod pi;
 pub mod price;
+pub mod query;
 pub mod source;

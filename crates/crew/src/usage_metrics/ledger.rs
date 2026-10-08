@@ -143,6 +143,7 @@ CREATE TABLE IF NOT EXISTS usage_observations (
     offset          INTEGER NOT NULL,
     task_id         TEXT,
     class           TEXT,
+    binding_seq     INTEGER,
     PRIMARY KEY (stream_id, key)
 ) WITHOUT ROWID;
 CREATE INDEX IF NOT EXISTS usage_observations_age ON usage_observations (observed_at);
@@ -161,12 +162,13 @@ CREATE TABLE IF NOT EXISTS usage_rollups (
     reason          TEXT NOT NULL,
     flags           INTEGER NOT NULL,
     band            INTEGER NOT NULL,
+    has_turn        INTEGER NOT NULL,
     count           INTEGER NOT NULL,
     i INTEGER, n INTEGER, r INTEGER, w INTEGER, w5 INTEGER, w1 INTEGER, o INTEGER,
     min_i           INTEGER,
     max_i           INTEGER,
     PRIMARY KEY (run_id, scope, hour, stream_id, agent_id, incarnation, aside_execution,
-                 work, account, model, unit, reason, flags, band)
+                 work, account, model, unit, reason, flags, band, has_turn)
 ) WITHOUT ROWID;
 CREATE TABLE IF NOT EXISTS usage_turns (
     stream_id   TEXT NOT NULL,
@@ -386,6 +388,8 @@ struct Row {
     /// Live task-bound usage: the task and where the usage stands against
     /// its first completion.
     task: Option<(String, String)>,
+    /// The observation has a native turn (1) or not (0).
+    has_turn: i64,
 }
 
 const HOUR: i64 = 3_600_000;
@@ -624,8 +628,8 @@ impl Ledger {
         Ok(first)
     }
 
-    /// The tasks of a run first completed in `[from, to)` whose completion
-    /// epic `keep` accepts, and their cost per completed task: each one's
+    /// The tasks of a run first completed in `[from, to)` that `keep`
+    /// accepts by task id and completion epic, and their cost per completed task: each one's
     /// task-bound live cost from the run's start through its first
     /// completion. Untimed usage recorded after a completion widens only the
     /// upper bound; unattributed usage or a lost source in the run leaves it
@@ -634,7 +638,7 @@ impl Ledger {
         &self,
         run_id: &str,
         range: Option<(i64, i64)>,
-        keep: impl Fn(&EpicAttribution) -> bool,
+        keep: impl Fn(&str, &EpicAttribution) -> bool,
         book: &Book,
     ) -> Result<CompletionCohort> {
         let run: Option<(Option<i64>, i64)> = self
@@ -662,7 +666,7 @@ impl Ledger {
         let mut members = Vec::new();
         for (task, epic) in completions {
             let epic: EpicAttribution = serde_json::from_str(&epic)?;
-            if !keep(&epic) {
+            if !keep(&task, &epic) {
                 continue;
             }
             let before = self.task_facts(run_id, &task, "before")?;
@@ -1210,9 +1214,27 @@ impl Ledger {
         range: Option<(i64, i64)>,
         keep: impl Fn(&Aggregate) -> bool,
     ) -> Result<Vec<Fact>> {
+        Ok(self
+            .rows(run_id, scope, |a| {
+                range.is_none_or(|(from, to)| a.hour >= from && a.hour < to) && keep(a)
+            })?
+            .into_iter()
+            .map(|(_, f)| f)
+            .collect())
+    }
+
+    /// Retained aggregates of a run and scope that `keep` accepts, with
+    /// their keys.
+    pub fn rows(
+        &self,
+        run_id: &str,
+        scope: &str,
+        keep: impl Fn(&Aggregate) -> bool,
+    ) -> Result<Vec<(Aggregate, Fact)>> {
         let mut stmt = self.conn.prepare(
             "SELECT stream_id, agent_id, incarnation, aside_execution, work, account, model,
-                    unit, reason, flags, count, i, n, r, w, w5, w1, o, min_i, max_i, hour
+                    unit, reason, flags, count, i, n, r, w, w5, w1, o, min_i, max_i, hour,
+                    has_turn
              FROM usage_rollups WHERE run_id = ?1 AND scope = ?2",
         )?;
         let rows = stmt.query_map(params![run_id, scope], |r| {
@@ -1228,50 +1250,297 @@ impl Ledger {
                     unit: r.get(7)?,
                     reason: r.get(8)?,
                     hour: r.get(20)?,
+                    has_turn: r.get::<_, i64>(21)? != 0,
                 },
-                r.get::<_, i64>(9)?,
-                r.get::<_, i64>(10)?,
-                [
-                    r.get::<_, Option<i64>>(11)?,
-                    r.get(12)?,
-                    r.get(13)?,
-                    r.get(14)?,
-                    r.get(15)?,
-                    r.get(16)?,
-                    r.get(17)?,
-                ],
-                (r.get::<_, Option<i64>>(18)?, r.get::<_, Option<i64>>(19)?),
+                Stored {
+                    stream_id: r.get(0)?,
+                    incarnation: r.get(2)?,
+                    model: r.get(6)?,
+                    unit: r.get(7)?,
+                    reason: r.get(8)?,
+                    flags: r.get(9)?,
+                    count: r.get(10)?,
+                    sums: [
+                        r.get(11)?,
+                        r.get(12)?,
+                        r.get(13)?,
+                        r.get(14)?,
+                        r.get(15)?,
+                        r.get(16)?,
+                        r.get(17)?,
+                    ],
+                    input_range: r
+                        .get::<_, Option<i64>>(18)?
+                        .zip(r.get::<_, Option<i64>>(19)?),
+                },
             ))
         })?;
-        let mut facts = Vec::new();
+        let mut out = Vec::new();
         for row in rows {
-            let (agg, flags, count, sums, (min_i, max_i)) = row?;
-            if let Some((from, to)) = range {
-                if agg.hour < from || agg.hour >= to {
-                    continue;
-                }
+            let (agg, stored) = row?;
+            if keep(&agg) {
+                out.push((agg, stored.fact()?));
             }
-            if !keep(&agg) {
-                continue;
+        }
+        Ok(out)
+    }
+
+    /// Detail observations of a run and scope with a native time in
+    /// `[from_ms, to_ms)`, one fact each, for buckets finer than an hour.
+    /// Only retained detail can answer; see [`RunInfo::retained_from`].
+    pub fn detail_rows(
+        &self,
+        run_id: &str,
+        scope: &str,
+        (from_ms, to_ms): (i64, i64),
+        keep: impl Fn(&Aggregate) -> bool,
+    ) -> Result<Vec<(Aggregate, i64, Fact)>> {
+        let mut stmt = self.conn.prepare(
+            "SELECT stream_id, agent_id, incarnation, aside_execution, work, account, model,
+                    unit, reason, flags, i, n, r, w, w5, w1, o, hour, turn, native_ms
+             FROM usage_observations WHERE run_id = ?1 AND scope = ?2
+             AND native_ms >= ?3 AND native_ms < ?4",
+        )?;
+        let rows = stmt.query_map(params![run_id, scope, from_ms, to_ms], |r| {
+            let turn: Option<String> = r.get(18)?;
+            Ok((
+                Aggregate {
+                    stream_id: r.get(0)?,
+                    agent_id: r.get(1)?,
+                    incarnation: r.get(2)?,
+                    aside_execution: r.get(3)?,
+                    work: r.get(4)?,
+                    account: r.get(5)?,
+                    model: r.get(6)?,
+                    unit: r.get(7)?,
+                    reason: r.get(8)?,
+                    hour: r.get(17)?,
+                    has_turn: turn.is_some(),
+                },
+                Stored {
+                    stream_id: r.get(0)?,
+                    incarnation: r.get(2)?,
+                    model: r.get(6)?,
+                    unit: r.get(7)?,
+                    reason: r.get(8)?,
+                    flags: r.get(9)?,
+                    count: 1,
+                    sums: [
+                        r.get(10)?,
+                        r.get(11)?,
+                        r.get(12)?,
+                        r.get(13)?,
+                        r.get(14)?,
+                        r.get(15)?,
+                        r.get(16)?,
+                    ],
+                    input_range: None,
+                },
+                turn,
+                r.get::<_, i64>(19)?,
+            ))
+        })?;
+        let mut out = Vec::new();
+        for row in rows {
+            let (agg, stored, turn, native_ms) = row?;
+            if keep(&agg) {
+                let mut fact = stored.fact()?;
+                fact.turn = turn;
+                out.push((agg, native_ms, fact));
             }
-            let unit: ObservationUnit =
-                serde_json::from_value(serde_json::Value::String(agg.unit.clone()))?;
-            let unusable = (!agg.reason.is_empty())
-                .then(|| serde_json::from_value(serde_json::Value::String(agg.reason.clone())))
-                .transpose()?;
-            facts.push(Fact {
-                unit,
-                normalized: normalized(flags, sums),
-                model: (!agg.model.is_empty()).then(|| agg.model.clone()),
-                agent: agg.incarnation.clone(),
-                source: agg.stream_id.clone(),
-                turn: None,
-                unusable,
-                weight: count as u64,
-                input_range: min_i.zip(max_i).map(|(a, b)| (a as u64, b as u64)),
+        }
+        Ok(out)
+    }
+
+    /// Distinct native turns of a run and scope whose first observation is in
+    /// `[from, to)` hours and whose incarnation and work `keep` accepts.
+    pub fn turns_matching(
+        &self,
+        run_id: &str,
+        scope: &str,
+        range: Option<(i64, i64)>,
+        keep: impl Fn(&str, &str) -> bool,
+    ) -> Result<u64> {
+        let (from, to) = range.unwrap_or((i64::MIN, i64::MAX));
+        let mut stmt = self.conn.prepare(
+            "SELECT incarnation, work FROM usage_turns
+             WHERE run_id = ?1 AND scope = ?2 AND hour >= ?3 AND hour < ?4",
+        )?;
+        let rows = stmt.query_map(params![run_id, scope, from, to], |r| {
+            Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?))
+        })?;
+        let mut n = 0;
+        for row in rows {
+            let (incarnation, work) = row?;
+            n += keep(&incarnation, &work) as u64;
+        }
+        Ok(n)
+    }
+
+    /// A run's tracking facts, if the ledger knows it.
+    pub fn run(&self, run_id: &str) -> Result<Option<RunInfo>> {
+        Ok(self
+            .conn
+            .query_row(
+                "SELECT run_id, started_at, tracking_since, ended_at, retained_from
+                 FROM usage_runs WHERE run_id = ?1",
+                params![run_id],
+                run_info,
+            )
+            .optional()?)
+    }
+
+    /// Known runs, most recently tracked first, from `offset`.
+    pub fn runs(&self, offset: u64, limit: u64) -> Result<Vec<RunInfo>> {
+        let mut stmt = self.conn.prepare(
+            "SELECT run_id, started_at, tracking_since, ended_at, retained_from FROM usage_runs
+             ORDER BY tracking_since DESC, run_id LIMIT ?1 OFFSET ?2",
+        )?;
+        let rows = stmt.query_map(params![limit as i64, offset as i64], run_info)?;
+        Ok(rows.collect::<rusqlite::Result<_>>()?)
+    }
+
+    /// Sources of a run that lost usage: stream, reason, count and when.
+    pub fn gaps(&self, run_id: &str) -> Result<Vec<Gap>> {
+        let mut stmt = self.conn.prepare(
+            "SELECT DISTINCT c.stream_id, c.reason, c.count, c.first_at, c.last_at
+             FROM usage_coverage c JOIN usage_owners o ON c.stream_id = o.stream_id
+             WHERE o.run_id = ?1 ORDER BY c.stream_id, c.reason",
+        )?;
+        let rows = stmt.query_map(params![run_id], |r| {
+            Ok((
+                r.get::<_, String>(0)?,
+                r.get::<_, String>(1)?,
+                r.get::<_, i64>(2)?,
+                r.get::<_, i64>(3)?,
+                r.get::<_, i64>(4)?,
+            ))
+        })?;
+        let mut out = Vec::new();
+        for row in rows {
+            let (stream_id, reason, count, first_at, last_at) = row?;
+            let reason: CoverageReason = serde_json::from_value(serde_json::Value::String(reason))?;
+            out.push(Gap {
+                stream_id,
+                reason,
+                count: count as u64,
+                first_at,
+                last_at,
             });
         }
-        Ok(facts)
+        Ok(out)
+    }
+
+    /// Aggregates of a run that a late correction made uncertain, as
+    /// `(hour, stream)`.
+    pub fn uncertain_scopes(
+        &self,
+        run_id: &str,
+    ) -> Result<std::collections::BTreeSet<(i64, String)>> {
+        let mut stmt = self
+            .conn
+            .prepare("SELECT hour, stream_id FROM usage_uncertain WHERE run_id = ?1")?;
+        let rows = stmt.query_map(params![run_id], |r| Ok((r.get(0)?, r.get(1)?)))?;
+        Ok(rows.collect::<rusqlite::Result<_>>()?)
+    }
+
+    /// Whether any source of a run is still owned (being collected).
+    pub fn collecting(&self, run_id: &str) -> Result<bool> {
+        Ok(self.conn.query_row(
+            "SELECT EXISTS (SELECT 1 FROM usage_owners WHERE run_id = ?1 AND active = 1)",
+            params![run_id],
+            |r| r.get(0),
+        )?)
+    }
+
+    /// Detail observations of a run and scope for listing, oldest native
+    /// time first (untimed last), from `offset`.
+    pub fn observation_rows(
+        &self,
+        run_id: &str,
+        scope: &str,
+        range: Option<(i64, i64)>,
+        keep: impl Fn(&Aggregate) -> bool,
+        offset: u64,
+        limit: u64,
+    ) -> Result<Vec<ObservationRow>> {
+        let (from, to) = range.unwrap_or((i64::MIN, i64::MAX));
+        let mut stmt = self.conn.prepare(
+            "SELECT o.stream_id, o.key, o.revision, o.agent_id, o.incarnation, o.launch_id,
+                    o.aside_execution, o.unit, o.reason, o.turn, o.work, o.account, o.model,
+                    o.native_ms, o.observed_at, o.flags, o.i, o.n, o.r, o.w, o.w5, o.w1, o.o,
+                    o.reasons, o.hour, s.runtime, s.native_session_id, ow.cli_version,
+                    b.board_revision, b.event_seq
+             FROM usage_observations o
+             JOIN usage_streams s ON s.stream_id = o.stream_id
+             LEFT JOIN usage_owners ow ON ow.stream_id = o.stream_id
+                  AND ow.incarnation = o.incarnation AND ow.launch_id = o.launch_id
+                  AND ow.run_id = o.run_id
+             LEFT JOIN usage_bindings b ON b.stream_id = o.stream_id AND b.seq = o.binding_seq
+             WHERE o.run_id = ?1 AND o.scope = ?2
+               AND (?3 = 1 OR (o.native_ms >= ?4 AND o.native_ms < ?5))
+             GROUP BY o.stream_id, o.key
+             ORDER BY o.native_ms IS NULL, o.native_ms, o.stream_id, o.key",
+        )?;
+        let unbounded = range.is_none() as i64;
+        let rows = stmt.query_map(params![run_id, scope, unbounded, from, to], |r| {
+            Ok(ObservationRow {
+                aggregate: Aggregate {
+                    stream_id: r.get(0)?,
+                    agent_id: r.get(3)?,
+                    incarnation: r.get(4)?,
+                    aside_execution: r.get(6)?,
+                    work: r.get(10)?,
+                    account: r.get(11)?,
+                    model: r.get(12)?,
+                    unit: r.get(7)?,
+                    reason: r.get(8)?,
+                    hour: r.get(24)?,
+                    has_turn: r.get::<_, Option<String>>(9)?.is_some(),
+                },
+                key: r.get(1)?,
+                revision: r.get::<_, i64>(2)? as u64,
+                launch_id: r.get(5)?,
+                turn: r.get(9)?,
+                native_ms: r.get(13)?,
+                observed_at: r.get(14)?,
+                normalized: normalized(
+                    r.get(15)?,
+                    [
+                        r.get(16)?,
+                        r.get(17)?,
+                        r.get(18)?,
+                        r.get(19)?,
+                        r.get(20)?,
+                        r.get(21)?,
+                        r.get(22)?,
+                    ],
+                ),
+                reasons: r.get(23)?,
+                runtime: r.get(25)?,
+                native_session_id: r.get(26)?,
+                cli_version: r.get(27)?,
+                board_revision: r.get::<_, Option<i64>>(28)?.map(|v| v as u64),
+                event_seq: r.get::<_, Option<i64>>(29)?.map(|v| v as u64),
+            })
+        })?;
+        let mut out = Vec::new();
+        let mut skipped = 0;
+        for row in rows {
+            let row = row?;
+            if !keep(&row.aggregate) {
+                continue;
+            }
+            if skipped < offset {
+                skipped += 1;
+                continue;
+            }
+            out.push(row);
+            if out.len() as u64 >= limit {
+                break;
+            }
+        }
+        Ok(out)
     }
 
     /// Distinct native turns of a run and scope, optionally within hours.
@@ -1335,14 +1604,16 @@ impl Ledger {
                 tx.query_row("SELECT COUNT(*) FROM usage_observations", [], |r| r.get(0))?;
             let over = (total as u64).saturating_sub(policy.detail_rows);
             let cutoff = now - policy.detail_ms;
-            let victims: Vec<(String, String, i64, String)> = {
+            // Each victim with the native time (or, untimed, the read time)
+            // below which detail can now be missing.
+            let victims: Vec<(String, String, i64, String, i64)> = {
                 let mut stmt = tx.prepare(
-                    "SELECT stream_id, key, observed_at, run_id FROM usage_observations
-                     ORDER BY observed_at LIMIT ?1",
+                    "SELECT stream_id, key, observed_at, run_id, COALESCE(native_ms, observed_at)
+                     FROM usage_observations ORDER BY observed_at LIMIT ?1",
                 )?;
                 let limit = policy.batch as i64;
                 let rows = stmt.query_map(params![limit], |r| {
-                    Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?))
+                    Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?))
                 })?;
                 rows.collect::<rusqlite::Result<Vec<_>>>()?
                     .into_iter()
@@ -1354,7 +1625,7 @@ impl Ledger {
             if victims.is_empty() {
                 break;
             }
-            for (stream_id, key, observed_at, run_id) in &victims {
+            for (stream_id, key, _, run_id, time) in &victims {
                 tx.execute(
                     "DELETE FROM usage_observations WHERE stream_id = ?1 AND key = ?2",
                     params![stream_id, key],
@@ -1366,7 +1637,7 @@ impl Ledger {
                 tx.execute(
                     "UPDATE usage_runs SET retained_from = MAX(COALESCE(retained_from, 0), ?2)
                      WHERE run_id = ?1",
-                    params![run_id, observed_at + 1],
+                    params![run_id, time + 1],
                 )?;
             }
             removed += victims.len() as u64;
@@ -1499,6 +1770,59 @@ pub struct Aggregate {
     pub reason: String,
     /// Hour start in milliseconds; -1 when the time is unknown.
     pub hour: i64,
+    /// Its observations have a native turn.
+    pub has_turn: bool,
+}
+
+/// A run as the ledger tracks it.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct RunInfo {
+    pub run_id: String,
+    pub started_at: Option<i64>,
+    pub tracking_since: i64,
+    pub ended_at: Option<i64>,
+    /// Detail timed before this may have expired; aggregates remain.
+    pub retained_from: Option<i64>,
+}
+
+fn run_info(r: &rusqlite::Row<'_>) -> rusqlite::Result<RunInfo> {
+    Ok(RunInfo {
+        run_id: r.get(0)?,
+        started_at: r.get(1)?,
+        tracking_since: r.get(2)?,
+        ended_at: r.get(3)?,
+        retained_from: r.get(4)?,
+    })
+}
+
+/// Usage a source of a run lost, by reason.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Gap {
+    pub stream_id: String,
+    pub reason: CoverageReason,
+    pub count: u64,
+    pub first_at: i64,
+    pub last_at: i64,
+}
+
+/// One retained observation, with what its public record needs.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ObservationRow {
+    pub aggregate: Aggregate,
+    pub key: String,
+    pub revision: u64,
+    pub launch_id: String,
+    pub turn: Option<String>,
+    pub native_ms: Option<i64>,
+    pub observed_at: i64,
+    pub normalized: Normalized,
+    /// JSON list of coverage reasons.
+    pub reasons: String,
+    pub runtime: String,
+    pub native_session_id: String,
+    pub cli_version: Option<String>,
+    pub board_revision: Option<u64>,
+    pub event_seq: Option<u64>,
 }
 
 impl Aggregate {
@@ -1645,14 +1969,15 @@ fn binding_at(
     owner_seq: i64,
     generation: u64,
     offset: u64,
-) -> Result<Option<(String, String)>> {
+) -> Result<Option<(String, String, i64)>> {
     Ok(tx
         .query_row(
-            "SELECT work, account FROM usage_bindings WHERE stream_id = ?1 AND owner_seq = ?2
+            "SELECT work, account, seq FROM usage_bindings WHERE stream_id = ?1
+             AND owner_seq = ?2
              AND (generation < ?3 OR (generation = ?3 AND from_offset <= ?4))
              ORDER BY generation DESC, from_offset DESC, seq DESC LIMIT 1",
             params![stream_id, owner_seq, generation as i64, offset as i64],
-            |r| Ok((r.get(0)?, r.get(1)?)),
+            |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
         )
         .optional()?)
 }
@@ -1777,8 +2102,11 @@ fn apply(
             let Some(owner) = owner_at(tx, stream_id, o.generation, o.offset)? else {
                 bail!("usage stream {stream_id} has no owner");
             };
-            let (work, account) = binding_at(tx, stream_id, owner.seq, o.generation, o.offset)?
-                .unwrap_or_else(|| (json(&unknown_work()), json(&unknown_account())));
+            let (work, account, binding_seq) =
+                match binding_at(tx, stream_id, owner.seq, o.generation, o.offset)? {
+                    Some((work, account, seq)) => (work, account, Some(seq)),
+                    None => (json(&unknown_work()), json(&unknown_account()), None),
+                };
             let scope = match o.phase {
                 Phase::Seed => "pre_tracking".to_string(),
                 Phase::Charge => tag(&owner.kind),
@@ -1807,6 +2135,7 @@ fn apply(
                 band: band(o, thresholds),
                 counters: counters_of(&o.normalized),
                 task,
+                has_turn: o.turn.is_some() as i64,
             };
             let c = &row.counters;
             tx.execute(
@@ -1814,10 +2143,10 @@ fn apply(
                  (stream_id, key, revision, run_id, scope, agent_id, incarnation, launch_id,
                   aside_execution, unit, reason, turn, work, account, model, request_id,
                   native_ms, hour, observed_at, i, n, r, w, w5, w1, o, flags, band, reasons,
-                  generation, offset, task_id, class)
+                  generation, offset, task_id, class, binding_seq)
                  VALUES (?1, ?2, 1, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15,
                          ?16, ?17, ?18, ?19, ?20, ?21, ?22, ?23, ?24, ?25, ?26, ?27, ?28,
-                         ?29, ?30, ?31, ?32)",
+                         ?29, ?30, ?31, ?32, ?33)",
                 params![
                     stream_id,
                     o.key,
@@ -1850,7 +2179,8 @@ fn apply(
                     o.generation as i64,
                     o.offset as i64,
                     row.task.as_ref().map(|t| &t.0),
-                    row.task.as_ref().map(|t| &t.1)
+                    row.task.as_ref().map(|t| &t.1),
+                    binding_seq
                 ],
             )?;
             tx.execute(
@@ -1888,7 +2218,8 @@ fn apply(
 fn stored_row(tx: &Connection, stream_id: &str, key: &str) -> Result<Row> {
     Ok(tx.query_row(
         "SELECT run_id, scope, hour, agent_id, incarnation, aside_execution, work, account,
-                model, unit, reason, flags, band, i, n, r, w, w5, w1, o, task_id, class
+                model, unit, reason, flags, band, i, n, r, w, w5, w1, o, task_id, class,
+                turn IS NOT NULL
          FROM usage_observations WHERE stream_id = ?1 AND key = ?2",
         params![stream_id, key],
         |r| {
@@ -1919,6 +2250,7 @@ fn stored_row(tx: &Connection, stream_id: &str, key: &str) -> Result<Row> {
                 task: r
                     .get::<_, Option<String>>(20)?
                     .zip(r.get::<_, Option<String>>(21)?),
+                has_turn: r.get(22)?,
             })
         },
     )?)
@@ -2038,6 +2370,7 @@ fn rollup(tx: &Connection, row: &Row, sign: i64) -> Result<()> {
             ("reason", &row.reason),
             ("flags", &row.flags),
             ("band", &row.band),
+            ("has_turn", &row.has_turn),
         ],
         row,
         sign,
@@ -2695,7 +3028,7 @@ mod tests {
         drain(&mut ledger, &stream, &open(&path), NOW).unwrap();
 
         let range = Some((NOW, NOW + 20 * HOUR));
-        let c = ledger.cohort("r1", range, |_| true, &book).unwrap();
+        let c = ledger.cohort("r1", range, |_, _| true, &book).unwrap();
         assert!(c.membership_complete);
         assert_eq!(c.first_completions, Wide(2));
         assert_eq!(c.tasks_with_observed_cost, Wide(2));
@@ -2706,20 +3039,20 @@ mod tests {
         assert!(!c.includes_earlier_spend);
 
         // The completion epic selects the cohort.
-        let only = ledger.cohort("r1", range, |e| e == &e1, &book).unwrap();
+        let only = ledger.cohort("r1", range, |_, e| e == &e1, &book).unwrap();
         assert_eq!(only.first_completions, Wide(1));
         assert_eq!(only.cost_per_completed_task.lower_pico_usd, Some(Wide(a.0)));
 
         // A period starting after the spend includes the earlier spend.
         let late = ledger
-            .cohort("r1", Some((t, t + HOUR)), |_| true, &book)
+            .cohort("r1", Some((t, t + HOUR)), |_, _| true, &book)
             .unwrap();
         assert!(late.includes_earlier_spend);
 
         // Untimed usage recorded after t1's completion may predate it.
         append(&path, &[untimed("d", 7)]);
         drain(&mut ledger, &stream, &open(&path), NOW).unwrap();
-        let wider = ledger.cohort("r1", range, |e| e == &e1, &book).unwrap();
+        let wider = ledger.cohort("r1", range, |_, e| e == &e1, &book).unwrap();
         let d = one_cost(7);
         assert_eq!(
             wider.cost_per_completed_task.lower_pico_usd,
@@ -2733,7 +3066,7 @@ mod tests {
 
         // A task completed with no observed cost: a whole-cohort lower bound.
         ledger.first_completion("r1", "t3", t, None, &e2).unwrap();
-        let c = ledger.cohort("r1", range, |_| true, &book).unwrap();
+        let c = ledger.cohort("r1", range, |_, _| true, &book).unwrap();
         assert_eq!(c.first_completions, Wide(3));
         assert_eq!(c.tasks_with_observed_cost, Wide(2));
         assert_eq!(c.cost_per_completed_task.upper_pico_usd, None);
@@ -2744,12 +3077,12 @@ mod tests {
 
         // A period before tracking began: membership unknown, no figure.
         let early = ledger
-            .cohort("r1", Some((NOW - DAY, NOW + 20 * HOUR)), |_| true, &book)
+            .cohort("r1", Some((NOW - DAY, NOW + 20 * HOUR)), |_, _| true, &book)
             .unwrap();
         assert!(!early.membership_complete);
         assert_eq!(early.cost_per_completed_task.lower_pico_usd, None);
         let empty = ledger
-            .cohort("r1", Some((t + DAY, t + 2 * DAY)), |_| true, &book)
+            .cohort("r1", Some((t + DAY, t + 2 * DAY)), |_, _| true, &book)
             .unwrap();
         assert_eq!(
             empty.cost_per_completed_task.reason,
@@ -2770,7 +3103,7 @@ mod tests {
         ledger
             .first_completion("r1", "t1", NOW + HOUR, None, &EpicAttribution::NoEpic)
             .unwrap();
-        let c = ledger.cohort("r1", None, |_| true, &book).unwrap();
+        let c = ledger.cohort("r1", None, |_, _| true, &book).unwrap();
         let e = &c.cost_per_completed_task;
         assert_eq!(e.reason, Some(CoverageReason::UnknownAttribution));
         assert_eq!(e.lower_pico_usd, Some(Wide(one_cost(10).0)));
