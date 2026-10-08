@@ -182,17 +182,17 @@ impl AgentStore for SqliteStore {
 
 impl TaskStore for SqliteStore {
     fn save_task(&self, task: &Task) -> Result<()> {
-        upsert_doc(
-            &self.conn(),
-            "tasks",
-            &task.id,
-            &serde_json::to_string(task)?,
-        )
+        save_task_in(&self.conn(), task)
     }
 
     fn load_tasks(&self) -> Result<Vec<Task>> {
         load_docs(&self.conn(), "tasks")
     }
+}
+
+/// A task write inside the caller's transaction. Does not lock or commit.
+pub(crate) fn save_task_in(conn: &Connection, task: &Task) -> Result<()> {
+    upsert_doc(conn, "tasks", &task.id, &serde_json::to_string(task)?)
 }
 
 fn event_from_row(row: &Row<'_>) -> rusqlite::Result<Event> {
@@ -213,33 +213,7 @@ fn event_from_row(row: &Row<'_>) -> rusqlite::Result<Event> {
 
 impl EventStore for SqliteStore {
     fn append_event(&self, event: NewEvent) -> Result<Event> {
-        let timestamp = now_ms();
-        let conn = self.conn();
-        conn.execute(
-            "INSERT INTO events (timestamp, source, event_type, agent_id, task_id, message, level, data)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
-            params![
-                timestamp,
-                event.source,
-                event.event_type,
-                event.agent_id,
-                event.task_id,
-                event.message,
-                event.level.as_str(),
-                serde_json::to_string(&event.data)?,
-            ],
-        )?;
-        Ok(Event {
-            seq: conn.last_insert_rowid(),
-            timestamp,
-            source: event.source,
-            event_type: event.event_type,
-            agent_id: event.agent_id,
-            task_id: event.task_id,
-            message: event.message,
-            level: event.level,
-            data: event.data,
-        })
+        append_event_in(&self.conn(), event)
     }
 
     fn recent_events(&self, agent: Option<&str>, limit: usize) -> Result<Vec<Event>> {
@@ -268,6 +242,37 @@ impl EventStore for SqliteStore {
     }
 }
 
+/// Append an event on the caller's connection/transaction, returning the
+/// allocated sequence. The caller publishes only after committing.
+pub(crate) fn append_event_in(conn: &Connection, event: NewEvent) -> Result<Event> {
+    let timestamp = now_ms();
+    conn.execute(
+            "INSERT INTO events (timestamp, source, event_type, agent_id, task_id, message, level, data)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+            params![
+                timestamp,
+                event.source,
+                event.event_type,
+                event.agent_id,
+                event.task_id,
+                event.message,
+                event.level.as_str(),
+                serde_json::to_string(&event.data)?,
+            ],
+        )?;
+    Ok(Event {
+        seq: conn.last_insert_rowid(),
+        timestamp,
+        source: event.source,
+        event_type: event.event_type,
+        agent_id: event.agent_id,
+        task_id: event.task_id,
+        message: event.message,
+        level: event.level,
+        data: event.data,
+    })
+}
+
 const MESSAGE_COLUMNS: &str =
     "m.id, m.sender, m.recipient, m.kind, m.body, m.timestamp, m.correlation_id, m.reply_to, m.metadata";
 
@@ -289,7 +294,7 @@ fn message_from_row(row: &Row<'_>) -> rusqlite::Result<Message> {
 
 /// Insert `message` and its delivery rows within `tx`; `false` (nothing
 /// inserted) when its id is already taken.
-fn insert_message_in(
+pub(crate) fn insert_message_in(
     tx: &rusqlite::Transaction<'_>,
     message: &Message,
     recipients: &[String],
@@ -322,6 +327,21 @@ fn insert_message_in(
     Ok(true)
 }
 
+/// Preserve message idempotency: a duplicate message writes no task. Shares
+/// the legacy insertion/upsert helpers and never takes another writer lock.
+pub(crate) fn insert_message_with_task_in(
+    tx: &rusqlite::Transaction<'_>,
+    message: &Message,
+    recipients: &[String],
+    task: &Task,
+) -> Result<bool> {
+    if !insert_message_in(tx, message, recipients)? {
+        return Ok(false);
+    }
+    save_task_in(tx, task)?;
+    Ok(true)
+}
+
 impl MessageStore for SqliteStore {
     fn insert_message(&self, message: &Message, recipients: &[String]) -> Result<bool> {
         let mut conn = self.conn();
@@ -341,10 +361,9 @@ impl MessageStore for SqliteStore {
     ) -> Result<bool> {
         let mut conn = self.conn();
         let tx = conn.transaction()?;
-        if !insert_message_in(&tx, message, recipients)? {
+        if !insert_message_with_task_in(&tx, message, recipients, task)? {
             return Ok(false);
         }
-        upsert_doc(&tx, "tasks", &task.id, &serde_json::to_string(task)?)?;
         tx.commit()?;
         Ok(true)
     }
