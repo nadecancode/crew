@@ -197,7 +197,10 @@ impl Session {
     }
 
     /// Queue a frame that answers no request (an oversized message).
-    pub fn send(&self, frame: ServerFrame) -> impl std::future::Future<Output = bool> + Send + 'static {
+    pub fn send(
+        &self,
+        frame: ServerFrame,
+    ) -> impl std::future::Future<Output = bool> + Send + 'static {
         // Own the sender rather than borrowing Session across the await.
         // An observer stream has one consumer and need not implement Sync.
         let tx = self.conn.tx.clone();
