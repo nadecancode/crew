@@ -41,6 +41,34 @@ impl Command {
     pub fn encode(&self, request_id: u64) -> Result<String, ClientError> {
         let method = self.kind().method();
         let bytes = match self {
+            Self::FeaturesNegotiate(params) => encode(request_id, method, params),
+            Self::EpicsList(params) => encode(request_id, method, params),
+            Self::EpicGet(params) => encode(request_id, method, params),
+            Self::TasksQuery(params) => encode(request_id, method, params),
+            Self::TaskGetScoped(params) => encode(request_id, method, params),
+            Self::AsideMembers(params) => encode(request_id, method, params),
+            Self::AsideList(params) => encode(request_id, method, params),
+            Self::AsideGet(params) => encode(request_id, method, params),
+            Self::AsideAsk(params) => encode(request_id, method, params),
+            Self::AsideCancel(params) => encode(request_id, method, params),
+            Self::AsideRemove(params) => encode(request_id, method, params),
+            Self::AsideWatch(params) => encode(request_id, method, params),
+            Self::AsideUnwatch(params) => encode(request_id, method, params),
+            Self::DocsIndex(params) => encode(request_id, method, params),
+            Self::DocsRead(params) => encode(request_id, method, params),
+            Self::DocsAsset(params) => encode(request_id, method, params),
+            Self::DocsHistory(params) => encode(request_id, method, params),
+            Self::DocsDiff(params) => encode(request_id, method, params),
+            Self::DocsWatch(params) => encode(request_id, method, params),
+            Self::DocsUnwatch(params) => encode(request_id, method, params),
+            Self::UsageSummary(params) => encode(request_id, method, params),
+            Self::UsageSeries(params) => encode(request_id, method, params),
+            Self::UsageBreakdown(params) => encode(request_id, method, params),
+            Self::UsageObservations(params) => encode(request_id, method, params),
+            Self::UsageRuns(params) => encode(request_id, method, params),
+            Self::UsagePrices(params) => encode(request_id, method, params),
+            Self::UsageWatch(params) => encode(request_id, method, params),
+            Self::UsageUnwatch(params) => encode(request_id, method, params),
             Self::Ping
             | Self::Subscribe
             | Self::Workspaces
@@ -132,6 +160,120 @@ impl Command {
             };
         }
         match self {
+            Self::FeaturesNegotiate(_) => decode(value, method).map(|value| {
+                CommandResult::Feature(crate::features::FeatureResponse::FeatureSession(Box::new(
+                    value,
+                )))
+            }),
+            Self::EpicsList(_) => decode(value, method).map(|value| {
+                CommandResult::Feature(crate::features::FeatureResponse::EpicBoard(Box::new(value)))
+            }),
+            Self::EpicGet(_) => decode(value, method).map(|value| {
+                CommandResult::Feature(crate::features::FeatureResponse::EpicDetail(Box::new(
+                    value,
+                )))
+            }),
+            Self::TasksQuery(_) => decode(value, method).map(|value| {
+                CommandResult::Feature(crate::features::FeatureResponse::Tasks(Box::new(value)))
+            }),
+            Self::TaskGetScoped(_) => decode(value, method).map(|value| {
+                CommandResult::Feature(crate::features::FeatureResponse::TaskCard(Box::new(value)))
+            }),
+            Self::AsideMembers(_) => decode(value, method).map(|value| {
+                CommandResult::Feature(crate::features::FeatureResponse::AsideMembers(Box::new(
+                    value,
+                )))
+            }),
+            Self::AsideList(_) => decode(value, method).map(|value| {
+                CommandResult::Feature(crate::features::FeatureResponse::Asides(Box::new(value)))
+            }),
+            Self::AsideGet(_) => decode(value, method).map(|value| {
+                CommandResult::Feature(crate::features::FeatureResponse::AsideDetail(Box::new(
+                    value,
+                )))
+            }),
+            Self::AsideAsk(_) => decode(value, method).map(|value| {
+                CommandResult::Feature(crate::features::FeatureResponse::AsideAsked(Box::new(
+                    value,
+                )))
+            }),
+            Self::AsideCancel(_) => decode(value, method).map(|value| {
+                CommandResult::Feature(crate::features::FeatureResponse::AsideMutation(Box::new(
+                    value,
+                )))
+            }),
+            Self::AsideRemove(_) => decode(value, method).map(|value| {
+                CommandResult::Feature(crate::features::FeatureResponse::AsideMutation(Box::new(
+                    value,
+                )))
+            }),
+            Self::AsideWatch(_) => decode(value, method).map(|value| {
+                CommandResult::Feature(crate::features::FeatureResponse::AsideWatch(Box::new(
+                    value,
+                )))
+            }),
+            Self::AsideUnwatch(_) => decode(value, method).map(|value| {
+                CommandResult::Feature(crate::features::FeatureResponse::Unwatched(Box::new(value)))
+            }),
+            Self::DocsIndex(_) => decode(value, method).map(|value| {
+                CommandResult::Feature(crate::features::FeatureResponse::DocsIndex(Box::new(value)))
+            }),
+            Self::DocsRead(_) => decode(value, method).map(|value| {
+                CommandResult::Feature(crate::features::FeatureResponse::Document(Box::new(value)))
+            }),
+            Self::DocsAsset(_) => decode(value, method).map(|value| {
+                CommandResult::Feature(crate::features::FeatureResponse::DocAsset(Box::new(value)))
+            }),
+            Self::DocsHistory(_) => decode(value, method).map(|value| {
+                CommandResult::Feature(crate::features::FeatureResponse::DocHistory(Box::new(
+                    value,
+                )))
+            }),
+            Self::DocsDiff(_) => decode(value, method).map(|value| {
+                CommandResult::Feature(crate::features::FeatureResponse::DocDiff(Box::new(value)))
+            }),
+            Self::DocsWatch(_) => decode(value, method).map(|value| {
+                CommandResult::Feature(crate::features::FeatureResponse::DocsWatch(Box::new(value)))
+            }),
+            Self::DocsUnwatch(_) => decode(value, method).map(|value| {
+                CommandResult::Feature(crate::features::FeatureResponse::Unwatched(Box::new(value)))
+            }),
+            Self::UsageSummary(_) => decode(value, method).map(|value| {
+                CommandResult::Feature(crate::features::FeatureResponse::UsageSummary(Box::new(
+                    value,
+                )))
+            }),
+            Self::UsageSeries(_) => decode(value, method).map(|value| {
+                CommandResult::Feature(crate::features::FeatureResponse::UsageSeries(Box::new(
+                    value,
+                )))
+            }),
+            Self::UsageBreakdown(_) => decode(value, method).map(|value| {
+                CommandResult::Feature(crate::features::FeatureResponse::UsageBreakdown(Box::new(
+                    value,
+                )))
+            }),
+            Self::UsageObservations(_) => decode(value, method).map(|value| {
+                CommandResult::Feature(crate::features::FeatureResponse::UsageObservations(
+                    Box::new(value),
+                ))
+            }),
+            Self::UsageRuns(_) => decode(value, method).map(|value| {
+                CommandResult::Feature(crate::features::FeatureResponse::UsageRuns(Box::new(value)))
+            }),
+            Self::UsagePrices(_) => decode(value, method).map(|value| {
+                CommandResult::Feature(crate::features::FeatureResponse::UsagePrices(Box::new(
+                    value,
+                )))
+            }),
+            Self::UsageWatch(_) => decode(value, method).map(|value| {
+                CommandResult::Feature(crate::features::FeatureResponse::UsageWatch(Box::new(
+                    value,
+                )))
+            }),
+            Self::UsageUnwatch(_) => decode(value, method).map(|value| {
+                CommandResult::Feature(crate::features::FeatureResponse::Unwatched(Box::new(value)))
+            }),
             Self::Ping => true_ack(value, method, "pong").map(|()| CommandResult::Pong),
             Self::Subscribe => {
                 true_ack(value, method, "subscribed").map(|()| CommandResult::Subscribed)

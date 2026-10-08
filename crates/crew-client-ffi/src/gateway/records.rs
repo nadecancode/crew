@@ -17,7 +17,11 @@ pub enum GatewayError {
 
 impl From<transport::GatewayError> for GatewayError {
     fn from(error: transport::GatewayError) -> Self {
-        let ClientReason { code, message } = error.reason();
+        let ClientReason {
+            code,
+            message,
+            details: _,
+        } = error.reason();
         Self::Failure { code, message }
     }
 }

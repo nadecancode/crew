@@ -4,9 +4,29 @@
 use std::collections::BTreeMap;
 
 use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};
 
 pub(super) const RECEIPT_MS: i64 = 120_000;
 pub(super) const MAX_RECEIPTS: usize = 64;
+
+pub(super) fn marker(batch: &str) -> String {
+    format!("[crew] Delivery batch {batch}\n")
+}
+
+pub(super) fn rendered_digest(batch: &str, text: &str) -> String {
+    let mut digest = Sha256::new();
+    digest.update(marker(batch).as_bytes());
+    digest.update(text.as_bytes());
+    format!("{:x}", digest.finalize())
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub(super) struct Coverage {
+    pub sha256: String,
+    pub eligible: bool,
+    pub immediate: bool,
+    pub verified: bool,
+}
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
@@ -30,6 +50,8 @@ pub(super) struct Receipt {
     pub consumed_at: Option<i64>,
     pub deadline: i64,
     pub phase: Phase,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub coverage: Option<Coverage>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -82,6 +104,7 @@ impl Book {
                 consumed_at: None,
                 deadline: now.saturating_add(RECEIPT_MS),
                 phase: Phase::Offered,
+                coverage: None,
             },
         );
         Some(key)
@@ -119,6 +142,24 @@ impl Book {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn coverage_digest_matches_recorded_native_merge_vectors() {
+        let fixture: serde_json::Value = serde_json::from_str(include_str!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../scripts/cache/fixtures/delivery-merge-2.1.291.json"
+        )))
+        .unwrap();
+        for segment in fixture["segments"].as_array().unwrap() {
+            assert_eq!(
+                rendered_digest(
+                    segment["batch_id"].as_str().unwrap(),
+                    segment["text"].as_str().unwrap()
+                ),
+                segment["sha256"].as_str().unwrap()
+            );
+        }
+    }
 
     #[test]
     fn accepted_and_expired_receipts_survive_restart_without_authorizing_a_second_copy() {

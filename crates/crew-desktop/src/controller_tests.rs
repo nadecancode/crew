@@ -453,6 +453,7 @@ fn gtk_scoped_views_confirmation_terminal_order_and_live_local_service() {
         scope: scope(),
         result: Ok(ActionPlan::Unavailable {
             reason: ClientReason {
+                details: None,
                 code: "offline".into(),
                 message: "Workspace unavailable".into(),
             },
@@ -991,6 +992,7 @@ fn keyboard_focus(c: &Controller, recorder: &Recording, core: &ClientCore) {
         scope: scope(),
         result: Ok(ActionPlan::Unavailable {
             reason: ClientReason {
+                details: None,
                 code: "test".into(),
                 message: "Not attached in this test".into(),
             },
@@ -1758,6 +1760,7 @@ fn unsent_draft_across_reconnect(c: &Controller, recorder: &Recording) {
         scope: reconnected,
         result: Ok(ActionPlan::Unavailable {
             reason: ClientReason {
+                details: None,
                 code: "offline".into(),
                 message: "Workspace unavailable".into(),
             },
@@ -1958,6 +1961,7 @@ fn reconnected_receipts(c: &Controller, recorder: &Recording) {
         attachment_id: None,
         kind: OperationOutcomeKind::Unknown,
         reason: Some(ClientReason {
+            details: None,
             code: "closed".into(),
             message: "Acknowledgment unavailable".into(),
         }),
@@ -2352,6 +2356,7 @@ fn answer_availability(
                     action,
                     available: reason.is_none(),
                     reason: reason.map(|message| ClientReason {
+                        details: None,
                         code: "already_pending".into(),
                         message: message.into(),
                     }),

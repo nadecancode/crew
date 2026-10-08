@@ -1,0 +1,445 @@
+{
+  "implementation": "6aa5eed6e5d69536320099070666b3af53be34fa",
+  "candidate": "216369ffb9e4a54caf723966f741a13954c85e86",
+  "forward_merge": "646a0b30",
+  "workspace": {
+    "passed": 1333,
+    "failed": 1,
+    "ignored": 4,
+    "source": "6aa5eed6",
+    "original_run_retained": true,
+    "sole_failure": "pi launch exact tail before intentional read wording",
+    "focused_correction": {
+      "name": "pi-oracle",
+      "command": [
+        "cargo",
+        "test",
+        "--locked",
+        "-p",
+        "crew",
+        "--test",
+        "team",
+        "a_pi_member_is_started_with_crews_extension_and_reports_through_it",
+        "--",
+        "--exact"
+      ],
+      "file": "target/delivery-read-pi-oracle-gate.log",
+      "code": 0,
+      "signal": null,
+      "sha256": "8d626378c824e11d9f7aa865cca494d90c55da80764c5e59a2501bc57826d98c"
+    },
+    "remaining_tests_not_repeated": true
+  },
+  "gates": [
+    {
+      "name": "fmt",
+      "command": [
+        "cargo",
+        "fmt",
+        "--all",
+        "--check"
+      ],
+      "file": "target/delivery-read-fmt-gate.log",
+      "started_at": "2026-10-08T16:25:26.070Z",
+      "ended_at": "2026-10-08T16:25:27.300Z",
+      "code": 0,
+      "signal": null,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "name": "node",
+      "command": [
+        "node",
+        "--test",
+        "scripts/cache/test-delivery.mjs"
+      ],
+      "file": "target/delivery-read-node-gate.log",
+      "started_at": "2026-10-08T16:25:27.303Z",
+      "ended_at": "2026-10-08T16:25:27.512Z",
+      "code": 0,
+      "signal": null,
+      "sha256": "ebcdb66dd4291380882d047f50e3954ed1d5f0727cd6098b9ba2cd2c35fa2663"
+    },
+    {
+      "name": "workspace",
+      "command": [
+        "cargo",
+        "test",
+        "--locked",
+        "--workspace",
+        "--no-fail-fast",
+        "--",
+        "--test-threads=1"
+      ],
+      "file": "target/delivery-read-workspace-gate.log",
+      "started_at": "2026-10-08T16:25:27.514Z",
+      "ended_at": "2026-10-08T16:42:46.900Z",
+      "code": 101,
+      "signal": null,
+      "sha256": "886cab3da9ec632d22a0d2547ffced18df15cc04f53b74064c10be482a6c5a92"
+    },
+    {
+      "name": "clippy-final",
+      "command": [
+        "cargo",
+        "clippy",
+        "--locked",
+        "--workspace",
+        "--all-targets",
+        "--",
+        "-D",
+        "warnings"
+      ],
+      "file": "target/delivery-read-clippy-final-gate.log",
+      "code": 0,
+      "signal": null,
+      "sha256": "0f390659eeeae3bc421c1677db910ea54ca73f7299e44d05372fc5f0a52a2549"
+    },
+    {
+      "name": "fmt-final",
+      "command": [
+        "cargo",
+        "fmt",
+        "--all",
+        "--check"
+      ],
+      "file": "target/delivery-read-fmt-final-gate.log",
+      "code": 0,
+      "signal": null,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "name": "msrv",
+      "command": [
+        "./scripts/check-msrv"
+      ],
+      "file": "target/delivery-read-msrv-gate.log",
+      "code": 0,
+      "signal": null,
+      "sha256": "3698623c4c4e4f898f90e01da0aa9f5aea45acdb2f43788badcc2b5945f20390"
+    }
+  ],
+  "native": {
+    "source": "6aa5eed6",
+    "binary_version": "2.1.291",
+    "provider_calls": 0,
+    "cases": [
+      {
+        "name": "normal",
+        "report": "target/delivery-read-native/normal-1/report.json",
+        "report_sha256": "ebcb7aab0def1612893d6b04e8e7b623e0d8b6f53edb59c6c27bf990dcc67403",
+        "requests": 3,
+        "exit": {
+          "code": 0,
+          "signal": null
+        },
+        "provider_calls": 0,
+        "proofs": [
+          {
+            "stage": "native-delivery-started",
+            "batch_id": "offer-A",
+            "observed_sha256": [
+              "1b4670db02df4342a620e09e620b2bfa69fb5bbd75d8853d2249bb3e49c1db85"
+            ],
+            "equals_original": true,
+            "equals_rewritten": false
+          },
+          {
+            "stage": "native-delivery-started",
+            "batch_id": "offer-B",
+            "observed_sha256": [
+              "7c254858020c1e0af5331000f2a5fccaa2e09477c5c89ca69f1bc5f1af610dfe"
+            ],
+            "equals_original": true,
+            "equals_rewritten": false
+          }
+        ],
+        "generated_asset_sha256": "63332be149b794dc0f26fb52063f327d4d0a6ebe8938ad659f943bfc4d0ecb57",
+        "current_asset_equal_after_fixture_substitutions": true
+      },
+      {
+        "name": "immediate",
+        "report": "target/delivery-read-native/immediate-1/report.json",
+        "report_sha256": "a8b9b31a5583dbafe4797b89224bde9298a20d89aec0af26f768ac5cd593bd2a",
+        "requests": 2,
+        "exit": {
+          "code": 0,
+          "signal": null
+        },
+        "provider_calls": 0,
+        "proofs": [
+          {
+            "stage": "native-delivery-appended",
+            "batch_id": "offer-A",
+            "observed_sha256": [
+              "1b4670db02df4342a620e09e620b2bfa69fb5bbd75d8853d2249bb3e49c1db85"
+            ],
+            "equals_original": true,
+            "equals_rewritten": false
+          },
+          {
+            "stage": "native-delivery-started",
+            "batch_id": "offer-B",
+            "observed_sha256": [
+              "7c254858020c1e0af5331000f2a5fccaa2e09477c5c89ca69f1bc5f1af610dfe"
+            ],
+            "equals_original": true,
+            "equals_rewritten": false
+          }
+        ],
+        "generated_asset_sha256": "12a20fe680e49404f88c6db95aa9aefe29defc796de6925dac29a346c02a94e1",
+        "current_asset_equal_after_fixture_substitutions": true
+      },
+      {
+        "name": "immediate-rewrite",
+        "report": "target/delivery-read-native/immediate-rewrite-1/report.json",
+        "report_sha256": "3e40311a4d0f638c3fb4921ebd978c7cb955943c4be45c65128bd56fb2da3089",
+        "requests": 2,
+        "exit": {
+          "code": 0,
+          "signal": null
+        },
+        "provider_calls": 0,
+        "proofs": [
+          {
+            "stage": "native-delivery-appended",
+            "batch_id": "offer-A",
+            "observed_sha256": [
+              "89bfbb6b2521b173c1b956c5ef76b89d21bc87038512e3e703863f71be8c3118"
+            ],
+            "equals_original": false,
+            "equals_rewritten": true
+          },
+          {
+            "stage": "native-delivery-started",
+            "batch_id": "offer-B",
+            "observed_sha256": [
+              "7c254858020c1e0af5331000f2a5fccaa2e09477c5c89ca69f1bc5f1af610dfe"
+            ],
+            "equals_original": true,
+            "equals_rewritten": false
+          }
+        ],
+        "generated_asset_sha256": "1c88e957fc317868fc467f6c2429bc09908b97770480fd6b3e38a13b9ed079de",
+        "current_asset_equal_after_fixture_substitutions": true
+      },
+      {
+        "name": "queued-append-rewrite",
+        "report": "target/delivery-read-native/queued-append-rewrite-1/report.json",
+        "report_sha256": "96b151500341be253d56e9c23d314a4e4e49c76ec249d754d1368eb5e0ad806f",
+        "requests": 3,
+        "exit": {
+          "code": 0,
+          "signal": null
+        },
+        "provider_calls": 0,
+        "proofs": [
+          {
+            "stage": "native-delivery-started",
+            "batch_id": "offer-A",
+            "observed_sha256": [
+              "89bfbb6b2521b173c1b956c5ef76b89d21bc87038512e3e703863f71be8c3118"
+            ],
+            "equals_original": false,
+            "equals_rewritten": true
+          },
+          {
+            "stage": "native-delivery-started",
+            "batch_id": "offer-B",
+            "observed_sha256": [
+              "7c254858020c1e0af5331000f2a5fccaa2e09477c5c89ca69f1bc5f1af610dfe"
+            ],
+            "equals_original": true,
+            "equals_rewritten": false
+          }
+        ],
+        "generated_asset_sha256": "57d1a7dff274eb71382ac0e2938100086387cdfc5b14af5f53667bc120a8fa67",
+        "current_asset_equal_after_fixture_substitutions": true
+      }
+    ],
+    "asset_sha256": "d37d070bc02a0782798406a1e713e81e82f4d1cf966fbde6d0704c95b837f339"
+  },
+  "limits": {
+    "auto_read": "proven complete Claude batch only",
+    "other_routes": "unread unless recipient explicitly reads full stored message",
+    "ack_granularity": "whole batch",
+    "canonical_digest_count": 1,
+    "provider_calls": 0,
+    "cache_savings_claim": false
+  },
+  "storage_pause": {
+    "no_gate_started_below_floor": true,
+    "cleanup": "target/delivery-read-storage-cleanup.json"
+  },
+  "p1_integration": {
+    "source": "76e3c0f3624625548c0d6e53b8052d2a8bdc8ed0",
+    "base": "fbe243af",
+    "steps": [
+      {
+        "name": "delivery",
+        "command": [
+          "cargo",
+          "test",
+          "--locked",
+          "-p",
+          "crew",
+          "--lib",
+          "delivery",
+          "--",
+          "--test-threads=1"
+        ],
+        "file": "target/delivery-read-p1-delivery.log",
+        "code": 0,
+        "signal": null,
+        "sha256": "b3b7b93adcd63a6e6986772da06a1751b2a9f5b9ac6566c7a0859d458000ffc1",
+        "totals": {
+          "passed": 20,
+          "failed": 0,
+          "ignored": 0
+        }
+      },
+      {
+        "name": "lib",
+        "command": [
+          "cargo",
+          "test",
+          "--locked",
+          "-p",
+          "crew",
+          "--lib",
+          "--",
+          "--test-threads=1"
+        ],
+        "file": "target/delivery-read-p1-lib.log",
+        "code": 0,
+        "signal": null,
+        "sha256": "60d997546a11ff70988d0ea8a292b37d6af1d1c3a6b8e2496ba83aa2fa7198b9",
+        "totals": {
+          "passed": 569,
+          "failed": 0,
+          "ignored": 1
+        }
+      },
+      {
+        "name": "team",
+        "command": [
+          "cargo",
+          "test",
+          "--locked",
+          "-p",
+          "crew",
+          "--test",
+          "team",
+          "--",
+          "--test-threads=1"
+        ],
+        "file": "target/delivery-read-p1-team.log",
+        "code": 0,
+        "signal": null,
+        "sha256": "fb01c9e15d3e560d2f5999b2b5a8e7b2d545635a6dc40e1222f90e6a21ec0630",
+        "totals": {
+          "passed": 89,
+          "failed": 0,
+          "ignored": 0
+        }
+      },
+      {
+        "name": "gateway",
+        "command": [
+          "cargo",
+          "test",
+          "--locked",
+          "-p",
+          "crew",
+          "--features",
+          "native-gateway",
+          "--test",
+          "native_gateway",
+          "--",
+          "--test-threads=1"
+        ],
+        "file": "target/delivery-read-p1-gateway.log",
+        "code": 0,
+        "signal": null,
+        "sha256": "fcfc0a929b5bbb6a277a2e9223a5a35c8faaeea16d3d54b921095dbc8ac455e2",
+        "totals": {
+          "passed": 21,
+          "failed": 0,
+          "ignored": 0
+        }
+      },
+      {
+        "name": "inventory",
+        "command": [
+          "cargo",
+          "test",
+          "--locked",
+          "-p",
+          "crew",
+          "--features",
+          "native-gateway",
+          "--lib",
+          "native::",
+          "--",
+          "--test-threads=1"
+        ],
+        "file": "target/delivery-read-p1-inventory.log",
+        "code": 0,
+        "signal": null,
+        "sha256": "420a09bf93d25a97a1d8c779ca382a3554f1b481fd2ff3363e54d6b0a5dab8ae",
+        "totals": {
+          "passed": 14,
+          "failed": 0,
+          "ignored": 0
+        }
+      },
+      {
+        "name": "clippy",
+        "command": [
+          "cargo",
+          "clippy",
+          "--locked",
+          "--workspace",
+          "--all-targets",
+          "--",
+          "-D",
+          "warnings"
+        ],
+        "file": "target/delivery-read-p1-clippy.log",
+        "code": 0,
+        "signal": null,
+        "sha256": "cb17fa9e06cc89bb7b9d92549d5a74e196112434e228d73461679ac8f3b51202",
+        "totals": {
+          "passed": 0,
+          "failed": 0,
+          "ignored": 0
+        }
+      },
+      {
+        "name": "fmt",
+        "command": [
+          "cargo",
+          "fmt",
+          "--all",
+          "--check"
+        ],
+        "file": "target/delivery-read-p1-fmt.log",
+        "code": 0,
+        "signal": null,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "totals": {
+          "passed": 0,
+          "failed": 0,
+          "ignored": 0
+        }
+      }
+    ]
+  },
+  "id_bounds_followup": {
+    "source": "a7b8789f102c58a9333284e1b91c89bd430677a6",
+    "passed": 18,
+    "failed": 0,
+    "file": "target/delivery-read-id-bounds.log",
+    "sha256": "65f7df5e1c34e4f78301562c04195a7f063519878cf233c6febc88939cc102f3"
+  }
+}

@@ -156,6 +156,35 @@ fn apply_endpoint(settings: &mut Value, endpoint: &Endpoint, crew_bin: &Path, id
     }
 }
 
+pub(crate) fn launch_env(
+    settings: &super::AgentSettings,
+    endpoint: &Endpoint,
+    identity: &Path,
+    private_home: Option<&Path>,
+) -> Vec<(String, String)> {
+    let mut env = vec![(
+        IDENTITY_ENV.to_string(),
+        identity.to_string_lossy().into_owned(),
+    )];
+    if !settings.model_fallback {
+        env.push((NO_FALLBACK_ENV.to_string(), "1".to_string()));
+    }
+    // File-backed model credentials stay in process environments.
+    env.extend(
+        endpoint
+            .secret_env
+            .iter()
+            .map(|(name, secret)| (name.clone(), secret.expose().to_string())),
+    );
+    if let Some(home) = private_home {
+        env.push((
+            CONFIG_DIR_ENV.to_string(),
+            home.join("claude").to_string_lossy().into_owned(),
+        ));
+    }
+    env
+}
+
 impl AgentRuntime for ClaudeRuntime {
     fn kind(&self) -> RuntimeKind {
         RuntimeKind::Claude
@@ -199,6 +228,9 @@ impl AgentRuntime for ClaudeRuntime {
         write_private_file(&briefing_path, ctx.briefing.as_bytes())?;
 
         let mut args: Vec<String> = Vec::new();
+        if toolbox.is_some_and(|toolbox| toolbox.claude_rebuild_prompt) {
+            args.extend(["--system-prompt-snapshot".into(), "off".into()]);
+        }
         match (&ctx.agent.session_id, ctx.resume) {
             (Some(id), true) => {
                 args.push("--resume".into());
@@ -277,27 +309,12 @@ impl AgentRuntime for ClaudeRuntime {
         // `--allowedTools` take any number of values and would swallow it
         // (Claude Code 2.1.288 does): the options end here.
         args.push("--".into());
-        let mut env = vec![(
-            IDENTITY_ENV.to_string(),
-            ctx.identity_path.to_string_lossy().into_owned(),
-        )];
-        if !ctx.settings.model_fallback {
-            env.push((NO_FALLBACK_ENV.to_string(), "1".to_string()));
-        }
-        // Tokens the operator keeps in files (`claude setup-token`): this agent's
-        // process environment only, never the settings file or a command line.
-        env.extend(
-            ctx.endpoint
-                .secret_env
-                .iter()
-                .map(|(name, secret)| (name.clone(), secret.expose().to_string())),
+        let env = launch_env(
+            ctx.settings,
+            ctx.endpoint,
+            ctx.identity_path,
+            ctx.private_home,
         );
-        if let Some(home) = ctx.private_home {
-            env.push((
-                CONFIG_DIR_ENV.to_string(),
-                home.join("claude").to_string_lossy().into_owned(),
-            ));
-        }
 
         Ok(LaunchSpec {
             scrub_env: toolbox

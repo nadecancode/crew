@@ -97,6 +97,10 @@ fn stay_up(mut reply: impl FnMut(&str)) {
 }
 
 fn claude(args: &[String]) -> Result<()> {
+    if args.iter().any(|arg| arg == "--version") {
+        println!("2.1.291 (Claude Code fixture)");
+        return Ok(());
+    }
     let dir = home_dir("CLAUDE_CONFIG_DIR", ".claude")?;
     // Print mode (the daemon's own `claude -p /usage`) answers once and
     // exits, like the real one: no session, transcript or hook.

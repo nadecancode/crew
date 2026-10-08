@@ -297,6 +297,49 @@ impl Daemon {
         if self.stops(&agent.id) != since {
             anyhow::bail!("toolbox preparation was superseded by a stop");
         }
+        // Fresh conversations need no native snapshot invalidation. Refuse an
+        // unsupported explicit resumed refresh before changing the old pins,
+        // so ordinary recovery can still use that conversation and its catalog.
+        let check_claude = {
+            let model = self.model();
+            agent.runtime == RuntimeKind::Claude
+                && refresh
+                && inherited.is_none()
+                && plan.stops.is_empty()
+                && model.local.get(&agent.id).is_some_and(|local| {
+                    local.session_confirmed
+                        && (!plan.active.resolved.items.is_empty()
+                            || local
+                                .toolbox_active
+                                .as_ref()
+                                .is_some_and(|active| !active.resolved.items.is_empty())
+                            || local.claude_rebuild_prompt_session.is_some())
+                })
+        };
+        if check_claude {
+            if let Err(error) = self
+                .check_claude_prompt_snapshot(agent, endpoint, &plan.runtime.scrub_env, since)
+                .await
+            {
+                if self.stops(&agent.id) != since {
+                    return Err(error);
+                }
+                for item in &mut plan.view.items {
+                    if matches!(
+                        item.status.code,
+                        ToolboxItemCode::Active | ToolboxItemCode::Planned
+                    ) {
+                        item.status = prepare::status(
+                            ToolboxItemCode::NotAvailable,
+                            "Not available on this Claude Code version",
+                        );
+                        item.detail = Some(error.to_string());
+                    }
+                }
+                self.update_agent(&agent.id, |member| member.toolbox = Some(plan.view));
+                return Err(error);
+            }
+        }
         plan.active.refresh = refresh;
         plan.active.snapshot_owner = Some(agent.id.clone());
         {
@@ -490,7 +533,7 @@ impl Daemon {
     }
 
     /// Bounded, stopped with the launch, and in the member's normal sandbox.
-    async fn toolbox_command(
+    pub(super) async fn toolbox_command(
         &self,
         agent: &crew_core::Agent,
         run: super::sandbox::Run,
@@ -695,11 +738,24 @@ impl Daemon {
         let model = self.model();
         let settings = model.local.get(id).map(|local| &local.settings);
         let defaults = model.session.team.as_ref().map(|team| &team.defaults);
+        let (bypass, native_sandbox) = settings
+            .map(|settings| (settings.bypass_permissions, settings.sandbox.as_str()))
+            .or_else(|| {
+                defaults.map(|defaults| {
+                    (
+                        defaults.permissions == crew_core::config::PermissionPolicy::Bypass,
+                        defaults.sandbox.as_str(),
+                    )
+                })
+            })
+            .unwrap_or((true, "workspace-write"));
         let workdir = model
             .agent(id)
             .map(|agent| PathBuf::from(&agent.workdir))
             .unwrap_or_else(|| self.workspace.clone());
         Context {
+            crew_pin: self.binary.name().map(|_| self.crew_bin.clone()),
+            codex_native_sandbox: !bypass && native_sandbox != "danger-full-access",
             runtime,
             state_dir: self.state_dir.clone(),
             agent_dir: self.agent_dir(id),
@@ -796,6 +852,8 @@ impl Daemon {
             == crew_core::config::SandboxMode::Required)
             .then(|| self.agent_dir(id).join("rw/home"));
         context.socket_delivery = settings.socket_delivery;
+        context.codex_native_sandbox =
+            !settings.bypass_permissions && settings.sandbox != "danger-full-access";
         context.auto_trust = settings.auto_trust;
         let plan = prepare::prepare(&context, resolved.clone(), None, |server| {
             layers.toolbox_references(runtime, id, None, server)

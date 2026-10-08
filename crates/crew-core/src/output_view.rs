@@ -9,6 +9,7 @@ use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
 pub const FORMAT_VERSION: u32 = 1;
+pub const PARSER_ID: &str = "cargo_test_v1";
 pub const MAX_CAPTURE_BYTES: usize = 4 * 1024 * 1024;
 
 /// The original command's outcome, supplied by the caller, never the helper's
@@ -153,7 +154,7 @@ pub fn view(
         },
         view: match parsed {
             Ok(counts) => View::Summary {
-                parser: "cargo_test_v1".into(),
+                parser: PARSER_ID.into(),
                 counts,
                 omitted:
                     "test names, ignored reasons, build paths and timing; recover raw for details"

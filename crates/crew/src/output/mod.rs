@@ -16,6 +16,7 @@ use crew_core::paths::{self, Identity};
 use crew_core::rpc::Role;
 use serde::Serialize;
 
+pub(crate) mod binary;
 mod store;
 
 const PREVIEW_BYTES: usize = 16 * 1024;
@@ -26,6 +27,9 @@ pub struct OutputArgs {
     /// Active member identity (default: $CREW_IDENTITY); never operator access
     #[arg(long, global = true, value_name = "FILE")]
     identity: Option<PathBuf>,
+    /// Require the exact executable selected by an immutable toolbox
+    #[arg(long, global = true, value_name = "SHA256")]
+    expected_helper: Option<String>,
     #[command(subcommand)]
     command: OutputCommand,
 }
@@ -160,6 +164,9 @@ impl Member {
 
 /// Helper success/failure is independent of the original command's status.
 pub fn run(args: OutputArgs) -> Result<()> {
+    if let Some(expected) = &args.expected_helper {
+        binary::verify_running(expected)?;
+    }
     // Authentication precedes reading source bytes or opening the raw store.
     let member = Member::authenticate(args.identity.as_deref())?;
     match args.command {

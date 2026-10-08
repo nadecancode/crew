@@ -751,6 +751,7 @@ pub struct PeerInfo {
 
 #[uniffi::remote(Record)]
 pub struct ClientReason {
+    pub details: Option<crew_client::features::FeatureRejection>,
     pub code: String,
     pub message: String,
 }
@@ -846,6 +847,7 @@ pub struct TeamData {
 pub struct TasksData {
     pub tasks: Vec<TaskPresentation>,
     pub layers: Vec<TaskLayer>,
+    pub epics: Option<crew_protocol::epics::EpicBoard>,
 }
 
 #[uniffi::remote(Enum)]
@@ -930,6 +932,7 @@ pub struct UsagePresentation {
 
 #[uniffi::remote(Enum)]
 pub enum ResourceKind {
+    Feature(crew_client::features::FeatureResourceKind),
     TaskCard,
     Message,
     Event,
@@ -944,6 +947,7 @@ pub enum ResourceKind {
 
 #[uniffi::remote(Enum)]
 pub enum ReadOptions {
+    Feature(super::features::BoxedFeatureRead),
     Default,
     Bounded {
         limit: u32,
@@ -983,6 +987,24 @@ pub struct ResourceRequest {
 
 #[uniffi::remote(Enum)]
 pub enum ViewQuery {
+    Features,
+    FeatureWatches {
+        feature: crew_protocol::features::Feature,
+    },
+    Epic {
+        key: ResourceKey,
+    },
+    Asides {
+        key: ResourceKey,
+    },
+    Docs {
+        key: ResourceKey,
+    },
+    UsageMetrics {
+        key: ResourceKey,
+    },
+    /// Read the planner's immutable preflight for this captured intent. The
+    /// query allocates no operation, confirmation or timer identifiers.
     Availability {
         intent: BoxedIntent,
     },
@@ -1025,6 +1047,7 @@ pub enum AgentAction {
 
 #[uniffi::remote(Enum)]
 pub enum ActionKind {
+    Feature,
     SendMessage,
     Answer,
     Pause,
@@ -1047,6 +1070,10 @@ pub enum ActionKind {
 
 #[uniffi::remote(Enum)]
 pub enum ActionIntent {
+    Feature {
+        scope: ClientScope,
+        action: crew_client::features::FeatureAction,
+    },
     SendMessage {
         scope: ClientScope,
         to: String,
