@@ -39,6 +39,8 @@ const ENDPOINT_WITHIN: Duration = Duration::from_secs(30);
 const ANSWER_IDLE: Duration = Duration::from_secs(300);
 /// How long ending a streamable HTTP session may take.
 const CLOSE_WITHIN: Duration = Duration::from_secs(5);
+/// How long a server may take to accept a notification.
+const NOTIFIED_WITHIN: Duration = Duration::from_secs(30);
 /// The longest status or header line, and how many header lines (malformed
 /// ones included).
 const MAX_LINE: usize = 8 * 1024;
@@ -664,6 +666,7 @@ pub(crate) fn connect(
             events,
             closed: Arc::new(AtomicBool::new(false)),
             overall,
+            sequence: Sequence::default(),
         })),
         McpTransport::Sse => Ok(Box::new(Legacy::start(
             url,
@@ -671,6 +674,62 @@ pub(crate) fn connect(
             events,
             overall,
         )?)),
+    }
+}
+
+/// Keeps each notification ahead of everything sent after it, as the MCP
+/// lifecycle needs (`notifications/initialized` before any other request):
+/// a message waits until every notification sent before it has been
+/// delivered (accepted or refused). Requests do not wait for one another.
+#[derive(Default)]
+struct Sequence {
+    last: Option<Arc<Delivered>>,
+}
+
+#[derive(Default)]
+struct Delivered {
+    done: Mutex<bool>,
+    told: std::sync::Condvar,
+}
+
+impl Delivered {
+    fn wait(&self) {
+        let mut done = self.done.lock().unwrap_or_else(|e| e.into_inner());
+        while !*done {
+            done = self.told.wait(done).unwrap_or_else(|e| e.into_inner());
+        }
+    }
+}
+
+/// Marks a notification delivered when dropped, on every path.
+struct Mark(Option<Arc<Delivered>>);
+
+impl Mark {
+    fn is_notification(&self) -> bool {
+        self.0.is_some()
+    }
+}
+
+impl Drop for Mark {
+    fn drop(&mut self) {
+        if let Some(delivered) = self.0.take() {
+            *delivered.done.lock().unwrap_or_else(|e| e.into_inner()) = true;
+            delivered.told.notify_all();
+        }
+    }
+}
+
+impl Sequence {
+    /// What `message` must wait for, and its own mark.
+    fn next(&mut self, message: &Value) -> (Option<Arc<Delivered>>, Mark) {
+        let before = self.last.clone();
+        if message.get("method").is_some() && message.get("id").is_none() {
+            let delivered = Arc::new(Delivered::default());
+            self.last = Some(delivered.clone());
+            (before, Mark(Some(delivered)))
+        } else {
+            (before, Mark(None))
+        }
     }
 }
 
@@ -685,6 +744,7 @@ struct Streamable {
     events: mpsc::Sender<Event>,
     closed: Arc<AtomicBool>,
     overall: Option<Instant>,
+    sequence: Sequence,
 }
 
 impl Streamable {
@@ -736,12 +796,23 @@ impl Connection for Streamable {
             .get("id")
             .filter(|_| message.get("method").is_some())
             .cloned();
+        let (before, mark) = self.sequence.next(&message);
         std::thread::spawn(move || {
+            if let Some(before) = before {
+                before.wait();
+            }
+            let head_within = if mark.is_notification() {
+                NOTIFIED_WITHIN
+            } else {
+                ANSWER_IDLE
+            };
             let (mut response, _handle) =
-                match request(&url, "POST", &headers, Some(&body), ANSWER_IDLE, overall) {
+                match request(&url, "POST", &headers, Some(&body), head_within, overall) {
                     Ok(response) => response,
                     Err(e) => return unreached(&message, &e, &events),
                 };
+            // Its head is the server's word that it has the message.
+            drop(mark);
             if let Some(id) = response.header("mcp-session-id") {
                 *session.lock().unwrap_or_else(|e| e.into_inner()) = Some(id.to_string());
             }
@@ -854,6 +925,7 @@ struct Legacy {
     events: mpsc::Sender<Event>,
     stream: TcpStream,
     overall: Option<Instant>,
+    sequence: Sequence,
 }
 
 impl Legacy {
@@ -926,6 +998,7 @@ impl Legacy {
             events,
             stream,
             overall,
+            sequence: Sequence::default(),
         })
     }
 }
@@ -939,8 +1012,21 @@ impl Connection for Legacy {
         let message = message.clone();
         let events = self.events.clone();
         let overall = self.overall;
+        let (before, mark) = self.sequence.next(&message);
         std::thread::spawn(move || {
-            match request(&url, "POST", &headers, Some(&body), ANSWER_IDLE, overall) {
+            if let Some(before) = before {
+                before.wait();
+            }
+            // Answers come on the event stream; the POST is only accepted.
+            let _delivered = mark;
+            match request(
+                &url,
+                "POST",
+                &headers,
+                Some(&body),
+                NOTIFIED_WITHIN,
+                overall,
+            ) {
                 Ok((response, _)) if (200..=299).contains(&response.status) => {}
                 Ok((response, _)) => failed(&message, &refusal(response.status), &events),
                 Err(e) => unreached(&message, &e, &events),

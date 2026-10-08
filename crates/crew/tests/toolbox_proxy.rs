@@ -902,3 +902,48 @@ fn a_broken_message_on_an_sse_stream_ends_the_session_but_not_the_view() {
     let (tools, _) = session.request("tools/list", json!({}));
     assert_eq!(names(&tools["result"]["tools"]), ["alpha", "beta", "gamma"]);
 }
+
+// The MCP lifecycle: `notifications/initialized` reaches the server before
+// any other request, even when the server is slow to accept it and the
+// runtime's calls are already waiting. The stand-in refuses a request that
+// comes first.
+#[test]
+fn initialized_reaches_a_remote_server_before_any_request() {
+    use crew_core::toolbox::McpTransport;
+    for (transport, flag) in [(McpTransport::Http, "http"), (McpTransport::Sse, "sse")] {
+        let fx = Fixture::new();
+        let log = fx.path("methods.log");
+        let log_arg = log.to_string_lossy().into_owned();
+        let remote = Remote::start(&[
+            "--http",
+            flag,
+            "--slow-initialized",
+            "0.5",
+            "--log",
+            &log_arg,
+        ]);
+        let launch = fx.remote_launch(&remote.url, transport, &[], &[]);
+        let (ok, printed) = preflight(&launch, None);
+        assert!(ok, "{flag} preflight: {printed}");
+        assert_eq!(
+            names(&printed["listing"]["tools"]),
+            ["alpha", "beta", "gamma"],
+            "{flag}"
+        );
+
+        std::fs::remove_file(&log).unwrap();
+        let mut session = Session::start(&launch, &[]);
+        session.request("initialize", json!({"protocolVersion": "2025-06-18"}));
+        let (call, _) = session.request("tools/call", json!({"name": "alpha", "arguments": {}}));
+        assert!(call.get("result").is_some(), "{flag}: {call}");
+        let methods = log_lines(&log);
+        let at = |m: &str| methods.iter().position(|l| l == m);
+        let initialized = at("notifications/initialized").unwrap_or_else(|| panic!("{methods:?}"));
+        for later in ["tools/list", "tools/call"] {
+            assert!(
+                at(later).is_some_and(|i| i > initialized),
+                "{flag}: {later} before initialized: {methods:?}"
+            );
+        }
+    }
+}

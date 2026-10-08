@@ -2,7 +2,8 @@
 //! (`crew toolbox mcp`). It speaks MCP on stdio and misbehaves on request:
 //! tools in a different order at every listing, a description that changes
 //! after a listing, an exit or a silence at a chosen point, a secret echoed
-//! in an error. It never prints a variable's value except where a test asks
+//! in an error. It is strict about the lifecycle: a request other than
+//! `initialize` or `ping` before `notifications/initialized` is refused. It never prints a variable's value except where a test asks
 //! for exactly that (`--echo-token-in-error`).
 
 use std::collections::BTreeMap;
@@ -66,6 +67,10 @@ pub struct FakeMcpArgs {
     /// that is not JSON
     #[arg(long, value_name = "METHOD")]
     break_answer: Option<String>,
+    /// Take this long to accept `notifications/initialized`, serving other
+    /// connections meanwhile (HTTP transports)
+    #[arg(long, value_name = "SECONDS")]
+    slow_initialized: Option<f64>,
     /// `NAME=<sha256 hex>`: the `env` tool says whether the variable's value
     /// has this digest (never the value)
     #[arg(long, value_name = "NAME=HEX")]
@@ -129,6 +134,9 @@ enum Outcome {
 struct Server {
     args: FakeMcpArgs,
     pages: BTreeMap<String, Vec<Value>>,
+    /// `notifications/initialized` has arrived: before it, only `initialize`
+    /// and `ping` are answered (the MCP lifecycle).
+    initialized: bool,
 }
 
 impl Server {
@@ -153,6 +161,10 @@ impl Server {
         if args.hang.as_deref() == Some(method) {
             return Ok(Outcome::Silent);
         }
+        if method == "notifications/initialized" {
+            self.initialized = true;
+        }
+        let args = &self.args;
         let Some(id) = message.get("id").cloned() else {
             return Ok(Outcome::Silent);
         };
@@ -161,6 +173,12 @@ impl Server {
         }
         let reply = |result: Value| json!({"jsonrpc": "2.0", "id": id, "result": result});
         let refuse = |code: i64, text: String| json!({"jsonrpc": "2.0", "id": id, "error": { "code": code, "message": text }});
+        if !self.initialized && !matches!(method, "initialize" | "ping") {
+            return Ok(Outcome::Reply(vec![refuse(
+                -32002,
+                format!("{method} before notifications/initialized"),
+            )]));
+        }
         let leaked = args
             .leak
             .as_deref()
@@ -308,6 +326,7 @@ pub fn run(args: FakeMcpArgs) -> Result<()> {
     let mut server = Server {
         args,
         pages: BTreeMap::new(),
+        initialized: false,
     };
     if let Some(transport) = http {
         return http::serve(server, &transport);
@@ -467,6 +486,15 @@ mod http {
         ))
     }
 
+    /// How long to take over this message, when it is a slow
+    /// `notifications/initialized`.
+    fn slow_initialized(server: &Mutex<Server>, body: &[u8]) -> Option<std::time::Duration> {
+        let late = server.lock().unwrap().args.slow_initialized?;
+        let message = serde_json::from_slice::<Value>(body).ok()?;
+        (message.get("method").and_then(Value::as_str) == Some("notifications/initialized"))
+            .then(|| std::time::Duration::from_secs_f64(late))
+    }
+
     pub(super) fn serve(server: Server, transport: &str) -> Result<()> {
         let tls = match (&server.args.tls_cert, &server.args.tls_key) {
             (Some(cert), Some(key)) => Some(tls(cert, key)?),
@@ -523,6 +551,16 @@ mod http {
                     continue;
                 }
                 if request.method == "POST" && request.path.starts_with("/messages") {
+                    if let Some(late) = slow_initialized(&server, &request.body) {
+                        let server = server.clone();
+                        std::thread::spawn(move || {
+                            std::thread::sleep(late);
+                            let message = serde_json::from_slice::<Value>(&request.body).unwrap();
+                            let _ = server.lock().unwrap().handle(&message);
+                            let _ = respond(stream.as_mut(), "202 Accepted", &[], b"");
+                        });
+                        continue;
+                    }
                     respond(stream.as_mut(), "202 Accepted", &[], b"")?;
                     let Ok(message) = serde_json::from_slice::<Value>(&request.body) else {
                         continue;
@@ -571,6 +609,15 @@ mod http {
             let initializing = message.get("method").and_then(Value::as_str) == Some("initialize");
             if !initializing && request.header("mcp-session-id") != Some(session) {
                 respond(stream.as_mut(), "400 Bad Request", &[], b"no session")?;
+                continue;
+            }
+            if let Some(late) = slow_initialized(&server, &request.body) {
+                let server = server.clone();
+                std::thread::spawn(move || {
+                    std::thread::sleep(late);
+                    let _ = server.lock().unwrap().handle(&message);
+                    let _ = respond(stream.as_mut(), "202 Accepted", &[], b"");
+                });
                 continue;
             }
             let outcome = server.lock().unwrap().handle(&message)?;
