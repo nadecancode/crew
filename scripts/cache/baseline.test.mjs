@@ -248,3 +248,14 @@ test('an enclosing member exact session id wins over a nested registered workspa
   assert.equal(report.sessions.find(s => s.session_id === 'nested-session').agent_id, 'orchestrator');
   assert.deepEqual(report.coverage.current_members_without_measured_session, []);
 });
+
+test('live append is flagged and cannot extend the initial read prefix', async t => {
+  const dir = scratch(t), file = path.join(dir, 'native/live.jsonl');
+  writeSession(file, [assistant('before')]); const initial = fs.readFileSync(file);
+  const pending = readSession(file, 'claude');
+  fs.appendFileSync(file, JSON.stringify(assistant('after', 1)) + '\n');
+  const s = await pending;
+  assert.equal(s.requests.length, 1); assert.equal(s.requests[0].source_id, 'before');
+  assert.equal(s.source_bytes, initial.length); assert.equal(s.source_sha256, crypto.createHash('sha256').update(initial).digest('hex'));
+  assert.equal(s.snapshot.changed_during_read, true); assert.ok(s.snapshot.size_at_end > s.snapshot.size_at_start);
+});
