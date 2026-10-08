@@ -310,21 +310,27 @@ impl Daemon {
             if self.model().rt(id).native_turn.as_deref() == Some(turn) {
                 return Ok(serde_json::json!({"ok":true}));
             }
+            // A keep-alive's turn is not work: the member stays as it was.
+            let keepalive = self.keepalive_turn(id);
             {
                 let mut model = self.model();
                 let rt = model.rt(id);
                 rt.native_turn = Some(turn.into());
                 rt.turn_active = true;
-                rt.self_status = None;
-                rt.idle_since = None;
-            }
-            self.update_agent(id, |a| {
-                if !a.status.is_terminal() {
-                    a.status = AgentStatus::Working;
-                    a.block_kind = None;
+                if !keepalive {
+                    rt.self_status = None;
+                    rt.idle_since = None;
                 }
-                a.last_activity_at = now_ms();
-            });
+            }
+            if !keepalive {
+                self.update_agent(id, |a| {
+                    if !a.status.is_terminal() {
+                        a.status = AgentStatus::Working;
+                        a.block_kind = None;
+                    }
+                    a.last_activity_at = now_ms();
+                });
+            }
             return Ok(serde_json::json!({"ok":true}));
         }
         if event == "native-turn-ended" {
