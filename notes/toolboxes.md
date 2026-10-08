@@ -310,8 +310,9 @@ the slice that depends on it is accepted.
    exclusions. crew's own coordination and lifecycle components are always
    kept.
 2. Nothing comes from the operator's own runtime configuration unless the team
-   file asks for it. Anything a runtime still loads that crew cannot exclude is
-   listed as inherited, never hidden.
+   file asks for it, wherever the runtime can exclude it. Anything a runtime
+   still loads that crew cannot exclude is listed as Cannot be excluded, never
+   hidden. With `strict`, the exclusion is exact: such a member does not start.
 3. One configuration serves every runtime. An item a runtime cannot load is
    reported per member, and a member that needs the item can refuse to start
    instead.
@@ -320,9 +321,10 @@ the slice that depends on it is accepted.
    environment variables, and values are resolved at launch, in memory.
 5. A toolbox is fixed for the life of a session. Changing it means restarting
    the member.
-6. The same toolbox renders the same bytes on every spawn, restart and resume,
-   in a deterministic order, so it does not break a cached prompt prefix by
-   itself.
+6. The same toolbox renders the same bytes, in a deterministic order, on every
+   spawn, restart and resume of the same member. Its model-visible definitions
+   are the same for every member with the same fingerprint and role. A toolbox
+   therefore does not break a cached prompt prefix by itself.
 
 ### Non-goals
 
@@ -438,7 +440,7 @@ Items per kind:
 | `mcp`, local | `command` (literal argument array), `env` (map of name to reference), `cwd` (optional, relative to the member's worktree) | No secrets in argv or `cwd`; they go in `env`. |
 | `mcp`, remote | `url` (literal), `transport` (`http`, the default, or `sse`), `headers` (map of name to reference) | Secrets go in `headers`. |
 | `skills` | `path` | A directory containing `SKILL.md`. Claude Code, Codex and pi share this format. |
-| `plugins` | `path` | A Claude Code plugin directory (`.claude-plugin/plugin.json`). On Codex and pi it is Not available (Claude Code plugin format), which counts for `required` and `strict`; set `runtimes: [claude]` to make it Not applicable there instead. A plugin's bundled MCP servers and hooks are part of the plugin. Whether they survive strict MCP loading is *verify*. Until confirmed, a plugin with a bundled `.mcp.json` is shown with the detail "bundled MCP servers: declare them under mcp". Codex's own plugin format is not supported in this version. |
+| `plugins` | `path` | A Claude Code plugin directory (`.claude-plugin/plugin.json`). On Codex and pi it is Not available (Claude Code plugin format), which counts for `required` and `strict`; set `runtimes: [claude]` to make it Not applicable there instead. A plugin's skills, subagents and hooks load with it. Its bundled MCP servers never start under strict MCP loading, while its skills stay (capability probe, Claude Code 2.1.291), so a plugin with a bundled `.mcp.json` shows the detail "bundled MCP servers not loaded: declare them under mcp". Codex's own plugin format is not supported in this version. |
 | `subagents` | `path` | A Markdown definition with front matter (`name`, `description`, optional `model`, `tools`) and the instructions as its body. crew renders it for Claude Code unchanged and for Codex as an agent TOML file (`name`, `description`, `developer_instructions`, and `model` when it is a Codex model). A field that does not translate is named in the item's detail. |
 | `hooks` | `event`, `matcher` (optional), `command` (literal argument array) | Runs alongside crew's own hooks for the same event, never instead of them. Runtimes run matching hooks concurrently, so no order relative to crew's hooks is promised. |
 
@@ -572,31 +574,67 @@ the Codex and pi gaps in the current state.
 
 - **The team file holds only references** (`{ env: NAME }`). Literals are
   `{ value: … }` and are treated as public.
-- **Lookup.** References resolve when the member starts. They are looked up
-  first in the member's crew configuration, using the same `env` and
-  `env_files` lookup as endpoint variables in `endpoints.rs`: `[agents.<id>]`,
-  then the parent's section for a subagent, then `[claude]` or `[codex]`.
-  Failing that, they come from the daemon's environment. Values live only in
-  the daemon's memory, as endpoint secrets do today.
-- **Delivery.** Every toolbox MCP server is launched by
-  `crew toolbox mcp <name> --identity <identity file>`. Like
-  `crew credential` for `apiKeyHelper` today, it asks the daemon over the
-  member's identity for that server's resolved environment and headers. A
-  local server is then exec'ed with that environment. A remote server is
-  bridged by crew with those headers (see Prompt cache rules, rule 5). This
-  also satisfies the sandbox, which passes only the variables named in
-  `LaunchSpec.env`. The secrets never need to be among them.
-- **Never written.** A resolved value never appears in:
+- **A separate lookup.** Toolbox references do not use the endpoint
+  variables. Endpoint `env` and `env_files` values are meant for the runtime:
+  they go to the session's `LaunchSpec.env`, and Claude Code's `apply_endpoint`
+  writes `env` into `A/settings.json` (`agents/claude.rs:141`). References
+  resolve when the member starts, from two places, in this order:
+  1. A new `toolbox_env` table in the crew configuration files (same three
+     scopes as `endpoints.rs`): `[toolbox_env]` for every member, and
+     `[agents.<id>.toolbox_env]` for one member, which wins. Each entry is
+     `NAME = { file = "~/.secrets/github" }`, a file only the operator can
+     read with the same ownership and mode checks as `api_key_file`, or
+     `NAME = { env = "DAEMON_VAR" }`, a variable of the daemon's environment.
+     A subagent uses its parent's section before its own.
+  2. A variable of the same name in the daemon's environment.
+
+  Values live only in the daemon's memory, as endpoint secrets do today.
+- **No collision with model credentials.** A reference name that the member's
+  endpoint also uses is a validation error. That covers `ANTHROPIC_API_KEY`,
+  `ANTHROPIC_AUTH_TOKEN`, `ANTHROPIC_BASE_URL`, `OPENAI_API_KEY`,
+  `CREW_CODEX_API_KEY`, `CODEX_HOME`, `CLAUDE_CONFIG_DIR`,
+  `PI_CODING_AGENT_DIR`, `CREW_IDENTITY` and every name in the member's
+  endpoint `env`, `env_files` and `secret_env`. Scrubbing such a name would
+  break the member's login, and passing it would hand the model credential to
+  a third-party server.
+- **Scrubbed from the session.** The member session's process environment has
+  every reference name of the member's effective toolbox removed, on both
+  launch paths:
+  - The PTY launcher (`process/pty.rs`) adds the names to `SCRUBBED_ENV` for
+    this launch.
+  - The sandbox launcher (`daemon/sandbox.rs` and `sandbox::spec::launcher_env`)
+    never passes them by name.
+  - The Codex app-server sidecar follows the same rule.
+
+  An unsandboxed session therefore does not inherit `SHOP_GITHUB_TOKEN` even
+  when the operator started the daemon with it exported.
+- **Delivery.** Every toolbox MCP server, local or remote, is reached through
+  `crew toolbox mcp <name> --identity <identity file>`, the server entry crew
+  renders for the runtime. Like `crew credential` for `apiKeyHelper` today, it
+  asks the daemon over the member's identity for that server's resolved
+  environment and headers. A local server is spawned as its child, with
+  exactly that environment added to the scrubbed one, and every message is
+  forwarded through it. A remote server is bridged with those headers. The
+  launcher is the forwarding proxy of Prompt cache rules, rule 5, in both
+  cases. This also satisfies the sandbox, which passes only the variables
+  named in `LaunchSpec.env`; the secrets never need to be among them.
+- **Never written by crew.** A resolved value never appears in:
   - a generated file (`mcp.json`, settings, plugin directories, Codex `-c`
     arguments, pi registration);
   - a command line;
   - the member session's own environment;
   - the roster, the event log, a prompt or a dashboard.
-- **Not an isolation boundary.** This is not one. Any process holding the
-  member's identity can ask for the same values, and a process of the same
-  user can read another process's environment. What the rule does is keep
-  secrets out of files, argv, transcripts and prompts. Those are the places
-  where agents, logs and caches would otherwise copy them.
+- **Scope of the guarantee.** It covers what crew writes and passes. A server
+  can still put its own credential in an error message or a tool result, and
+  those reach the model. As a best-effort defence, the proxy replaces exact
+  occurrences of that server's resolved values in responses with
+  `[redacted $NAME]`. It does not catch encoded or partial copies, so it is not
+  a guarantee.
+- **Not an isolation boundary.** Any process holding the member's identity can
+  ask for the same values, and a process of the same user can read another
+  process's environment. What the rule does is keep secrets out of files,
+  argv, transcripts and prompts. Those are the places where agents, logs and
+  caches would otherwise copy them.
 - **Missing variables.** A missing variable makes the item unavailable, with
   the status Needs $NAME. A required item, or any item under `strict`, stops
   the launch with the same text.
@@ -623,42 +661,86 @@ on a prompt nobody answers.
 | Kind | Claude Code | Codex | pi | shell |
 | --- | --- | --- | --- | --- |
 | `mcp` | Entries in `A/mcp.json` after `crew`, in name order. Always `--strict-mcp-config`, unless `inherit.operator` includes `mcp`. | `-c mcp_servers.<name>.*` per server, in name order, given to both the TUI and its app-server. | Registered by crew's pi extension after `crew` (the `pi.rs` extension template gains the server list). | Not applicable. |
-| `skills` | `skills/` of the member's generated `crew-toolbox` plugin, passed with `--plugin-dir`. Skills appear as `crew-toolbox:<name>`. | Through crew's app-server: `skills/extraRoots/set` with the store paths of the member's skills, in name order, before the first thread. It adds roots without changing configuration or home (capability probe, Codex 0.159.0 app-server). That the TUI session sees roots set on its app-server is *verify*. Without crew's app-server (terminal delivery): sandboxed, the private home's `.agents/skills/<name>`; unsandboxed, **Not available on Codex without crew's app-server**. | `--no-skills` plus one `--skill <store path>` per item, in name order. | Not applicable. |
+| `skills` | `skills/` of the member's generated `crew-toolbox` plugin, passed with `--plugin-dir`. Skills appear as `crew-toolbox:<name>`. With `--setting-sources project,local`, a selected skill, subagent and `SessionStart` hook loaded through `--plugin-dir` while every operator sentinel stayed absent (capability probe). | Through crew's app-server: `skills/extraRoots/set` with the store paths of the member's skills, in name order, before the first thread. It adds roots without changing configuration or home (capability probe, Codex 0.159.0 app-server). That the TUI session sees roots set on its app-server is *verify*. Without crew's app-server (terminal delivery): sandboxed, the private home's `.agents/skills/<name>`; unsandboxed, **Not available on Codex without crew's app-server**. | `--no-skills` plus one `--skill <store path>` per item, in name order. | Not applicable. |
 | `plugins` | One `--plugin-dir` per plugin, in name order, after crew's own. | **Not available on Codex (Claude Code plugin format).** | **Not available on pi (Claude Code plugin format).** | Not applicable. |
-| `subagents` | `agents/` of the `crew-toolbox` plugin. | Sandboxed: the private `CODEX_HOME/agents/<name>.toml`, translated. Unsandboxed: **Not available on Codex outside the sandbox**. | **Not available on pi.** | Not applicable. |
-| `hooks` | `hooks/hooks.json` of the `crew-toolbox` plugin. | **Not available on Codex**: hooks from every layer accumulate, run concurrently and need hash-based trust. crew's `notify` integration is unaffected. | **Not available on pi** (pi extends through code extensions, which are out of scope). | Not applicable. |
+| `subagents` | `agents/` of the `crew-toolbox` plugin. | Sandboxed: the private `CODEX_HOME/agents/<name>.toml`, translated; a role there appears in `spawn_agent`'s definition (capability probe, captured request). Unsandboxed: **Not available on Codex outside the sandbox**. | **Not available on pi.** | Not applicable. |
+| `hooks` | `hooks/hooks.json` of the `crew-toolbox` plugin. | **Not available on Codex**: hooks from every layer accumulate, run concurrently and need hash-based trust. crew's `notify` integration is not a hook and is unaffected. | **Not available on pi** (pi extends through code extensions, which are out of scope). | Not applicable. |
 
 How `inherit` exclusions are enforced, per runtime:
 
 | Source kind excluded | Claude Code | Codex | pi |
 | --- | --- | --- | --- |
-| Operator MCP | `--strict-mcp-config` (also excludes project `.mcp.json`). | Closing step. Run `codex mcp list --json` with the member's overrides, home and worktree (no model request), then add `-c mcp_servers.<name>.enabled=false` for every listed server that is not in the toolbox, to the TUI and the app-server alike. Listed servers are named in the sources line. A table override is not enough, because it merges (current state, Codex inheritance probe). Plugin-bundled servers: *verify* that `mcp list` reports them; otherwise they are listed as cannot be excluded. | Sandboxed: excluded by the private agent directory. Unsandboxed: **Cannot be excluded on pi**. `--no-mcp` also removes crew's server, and a same-name server from the operator's `mcp.json` wins over crew's registration, so such a name is shown as Shadowed. |
-| Operator skills, subagents, hooks, settings and memory | `--setting-sources project`, dropping `user` and `local`, with preferences passed through crew's `--settings`. On Claude Code 2.1.291, `--setting-sources project,local` removed a user skill, user subagent, user `CLAUDE.md` and user `SessionStart` hook, and kept the project skill (capability probe). Dropping `local` as well is *verify*. All five Claude Code kinds come from the one `user` source, so they are inherited together or not at all: a list naming only some of them loads none and reports the named ones as Not available separately on Claude Code (use all). Sandboxed: also excluded by the private home. | Skills: one `skills.config` entry `{ path = "<…>/SKILL.md", enabled = false }` for each operator skill under `HOME/.agents/skills` and `CODEX_HOME/skills`. Only exact `SKILL.md` paths work; folder paths do nothing (capability probe, Codex 0.159.0). Subagents (`~/.codex/agents`), hooks (`-c hooks={}` removes neither user nor trusted project hooks) and `~/.codex/AGENTS.md`: **Cannot be excluded on Codex** unsandboxed. Bundled system skills always remain and are listed as a system source. Operator `developer_instructions`: crew stops prepending them. Sandboxed: excluded by the private home, except the instructions, which crew reads from the operator's configuration and drops under `none`. | Extensions: `--no-extensions` plus crew's explicit `--extension`. Skills: `--no-skills`, with toolbox and project skills passed explicitly. Instruction files: *verify*. |
-| Operator plugins | Excluded by the same `--setting-sources project`: an enabled user plugin's skill was removed (capability probe, Claude Code 2.1.291). Plugin-bundled MCP servers are covered by `--strict-mcp-config`; that is *verify* only for plugins the toolbox itself loads. | Plugin-bundled MCP servers follow the closing step, if `mcp list` reports them (*verify*). Plugin skills follow the exact-path rule. | Packages: excluded by `--no-extensions` (*verify*). |
-| Project kinds | Default: loaded, except MCP. Excluding them drops `project` from `--setting-sources`; that this also removes project skills, subagents and memory is *verify*. | Excluding project skills uses `skills.config` with exact paths, as for the operator. Project configuration needs trust, which crew does not grant. | `--no-approve` (the existing `auto_trust: false`) excludes project resources. With `--no-skills`, inherited project skills are passed explicitly, in name order. |
+| Operator MCP | `--strict-mcp-config` (also excludes project `.mcp.json`). | Closing step. Run `codex mcp list --json` with the member's overrides, home and worktree (no model request), then add `-c mcp_servers.<name>.enabled=false` for every listed server that is not in the toolbox, to the TUI and the app-server alike. Listed servers are named in the sources line. A table override is not enough, because it merges (current state, Codex inheritance probe). Plugin-bundled servers: *verify* that `mcp list` reports them; otherwise they are listed as cannot be excluded. | Sandboxed: excluded by the private agent directory. Unsandboxed: **Cannot be excluded on pi**. `--no-mcp` removes crew's server too. `--no-extensions` also removes native MCP, and restoring it with `-e builtin:mcp` brings back the operator's and the project's servers with crew's (capability probe, pi 1.1.0). In addition, a same-name server from the operator's `mcp.json` wins over crew's registration, so such a name is shown as Shadowed. |
+| Operator skills, subagents, hooks, settings and memory | `--setting-sources project`, dropping `user` and `local`, with preferences passed through crew's `--settings`. On Claude Code 2.1.291, `--setting-sources project,local` removed a user skill, user subagent, user `CLAUDE.md` and user `SessionStart` hook, and kept the project skill (capability probe). Dropping `local` as well is *verify*. All five Claude Code kinds come from the one `user` source, so they are inherited together or not at all: a list naming only some of them loads none and reports the named ones as Not available separately on Claude Code (use all). Sandboxed: also excluded by the private home. | Skills: one `skills.config` entry `{ path = "<…>/SKILL.md", enabled = false }` for each operator skill under `HOME/.agents/skills` and `CODEX_HOME/skills`. Only exact `SKILL.md` paths work; folder paths do nothing (capability probe, Codex 0.159.0). Hooks: `-c features.hooks=false`, which empties `hooks/list`; `-c hooks={}` removes neither user nor trusted project hooks (capability probe). Subagents: `-c features.multi_agent=false`, which removes `spawn_agent` with every role (capability probe); sandboxed, the private `CODEX_HOME` removes only the user roles. Both switches also drop the project's hooks or roles, which are then reported as Not available separately on Codex. `~/.codex/AGENTS.md`: **Cannot be excluded on Codex** unsandboxed (*verify*). Bundled system skills always remain and are listed as a system source. Operator `developer_instructions`: crew stops prepending them. Sandboxed: excluded by the private home, except the instructions, which crew reads from the operator's configuration and drops under `none`. | Extensions: `--no-extensions -e builtin:mcp -e A/crew-pi.ts`. Native MCP must be re-added, or crew's own server goes with it. Skills: `--no-skills` plus `--skill` for the selected and inherited project skills, which removes every ambient skill (capability probe, pi 1.1.0). Instruction files: *verify*. |
+| Operator plugins | Excluded by the same `--setting-sources project`: an enabled user plugin's skill was removed (capability probe, Claude Code 2.1.291). Plugin-bundled MCP servers never start under `--strict-mcp-config` (capability probe). | Plugin-bundled MCP servers follow the closing step, if `mcp list` reports them (*verify*). Plugin skills follow the exact-path rule. | Packages: excluded by `--no-extensions` (*verify*). Sandboxed: the closed route below. |
+| Project kinds | Default: loaded, except MCP. Excluding them drops `project` from `--setting-sources`; that this also removes project skills, subagents and memory is *verify*. | Excluding project skills uses `skills.config` with exact paths, as for the operator. Project configuration needs trust, which crew does not grant. | `--no-approve` (the existing `auto_trust: false`) removes project MCP servers and skills and leaves the user ones (capability probe). With `--no-skills`, inherited project skills are passed explicitly, in name order. |
+
+**pi, sandboxed.** The closed route on pi 1.1.0 (capability probe, seven
+cases) is:
+
+- the private `PI_CODING_AGENT_DIR`;
+- `--no-approve`;
+- `--no-extensions -e builtin:mcp -e A/crew-pi.ts`;
+- `--no-skills` plus one `--skill` per selected skill.
+
+It loaded only crew's MCP server and the selected skill, with no ambient
+extension. Toolbox MCP servers are added by crew's extension, so the route
+stays closed with them. Unsandboxed, the operator's pi MCP servers are the
+one kind that cannot be excluded.
+
+**Readiness.** Every start runs a preflight before the runtime is launched:
+
+- **MCP servers.** The daemon runs `crew toolbox mcp <name> --preflight` for
+  every MCP item. It resolves the item's references, starts or connects to the
+  server, completes `initialize` and `tools/list` within 30 seconds and stops
+  it. A server is therefore started twice per member start: once by the
+  preflight and once behind the session's proxy.
+- **File items.** Every file item is validated when it is snapshotted:
+  `SKILL.md` and its front matter, `plugin.json`, the subagent front matter.
+
+A preflight failure gives the item the status Failed preflight, with the
+reason. `required` and `strict` promise exactly this: the member does not
+start unless every required item passed preflight. They promise nothing about
+what the runtime does afterwards.
 
 **Item statuses**, shown in the same words everywhere:
 
 | Status | When | Stops launch? |
 | --- | --- | --- |
-| Active | Mapped and loaded. | No |
+| Planned | `crew toolbox check`, or a member not started yet: the item maps onto the runtime, nothing has been run. | Not a launch status |
+| Active | Mapped and passed preflight at the last start. | No |
 | Not available on <Runtime> | The runtime cannot load this item; the detail gives the reason (format, outside the sandbox). | If `required` or `strict` |
 | Not applicable | The item's `runtimes` excludes this runtime, or the member is a shell member. | Never |
 | Needs $NAME | A reference did not resolve. | If `required` or `strict` |
 | Blocked by the sandbox | The program is outside the bound trees, or the server needs a Unix socket the sandbox does not pass (scheduler's survey: `docker.sock`, `ssh-agent`). | If `required` or `strict` |
 | Shadowed by <source> | A runtime source defines the same name and wins (pi). | If `required` or `strict` |
-| Failed to start | Reported by the runtime after launch (server exit, plugin load error), when the runtime surfaces it. | No; shown with the runtime's reason |
+| Failed preflight | The preflight above failed. | If `required` or `strict` |
+| Failed in session | After launch, the proxy saw the server exit, or the runtime reported a load error (when it surfaces one). | No. The session keeps running, the orchestrator is told, and the reason is shown. |
 
 **Source statuses:**
 
 - **Not used**: excluded exactly.
 - **Used: <kinds>**: inherited by choice.
-- **Disabled: <names>**: excluded entry by entry (Codex closing step, skill paths).
-- **Cannot be excluded on <Runtime>**: stops the launch under `strict`.
+- **Disabled: <names>**: excluded entry by entry (Codex closing step, skill
+  paths).
+- **Not available separately on <Runtime>**: the runtime can load the kind
+  only together with others that are excluded, so it is not loaded.
+- **Cannot be excluded on <Runtime>**: the runtime loads it although `inherit`
+  excludes it. It stops the launch under `strict`.
 
-The rule for any mismatch: **never more than configured, and every shortfall
-visible**. If a runtime cannot load exactly the requested subset of a kind,
-crew loads less (never the operator's whole set) and reports the difference.
+**The contract has two parts:**
+
+- **Toolbox items are exact.** crew renders no item that is not in the
+  effective toolbox, and every configured item that is not Active is shown
+  with its status. If a runtime cannot load exactly the requested subset of a
+  kind, crew loads less and reports the difference.
+- **Exclusion of runtime sources is best effort by default and exact under
+  `strict`.** crew excludes every source the runtime lets it exclude. What
+  remains is listed by name as Cannot be excluded, never hidden. With `strict`,
+  a member with any such remainder does not start. The default stays best
+  effort because an exact default would stop unsandboxed Codex and pi members
+  outright today. A team that needs the guarantee sets `strict` or uses the
+  sandbox.
 
 ### Lifecycle
 
@@ -675,6 +757,20 @@ crew loads less (never the operator's whole set) and reports the difference.
   would change show **Toolbox changed: restart to apply**, and
   `toolbox.pending` records both fingerprints. A running session never changes
   toolbox.
+- **Active and configured.** Each member has an **active toolbox** and a
+  **configured toolbox**:
+  - The active toolbox is what its running session was started with: full
+    item definitions, file content hashes, MCP definition snapshots and the
+    fingerprint. It is stored in the member's local state (`AgentLocal`).
+  - The configured toolbox is what the daemon's current definitions resolve
+    to.
+
+  Every process start makes the configured toolbox active. This covers
+  crash restarts and runtime switches too, so after a reload the next start of
+  any kind applies the change. File sources are re-read at each start, and
+  their content is part of the configured definition. MCP definition
+  snapshots are server output, not configuration, so they stay pinned across
+  starts (Prompt cache rules, rule 5).
 - **Events at each start.** Each start records `toolbox.applied`, with the
   fingerprint, the definition digest, the item counts per kind and every
   status that is not Active. A start whose fingerprint or definition digest
@@ -706,26 +802,53 @@ the runtime's final tool order (current state). The benchmark measures that.
    `sha256(canonical form ‖ runtime ‖ mapping version)`. Order is preserved
    only where it means something: argument arrays and the order of crew's own
    components.
-2. **Byte-stable rendering.** For the same fingerprint, every generated
-   artifact is byte-identical across spawn, restart and resume. That covers
-   `A/mcp.json` with servers in name order, the `crew-toolbox` plugin,
-   `--plugin-dir` arguments, Codex `-c` arguments in name order (including
-   the closing step's `enabled=false` entries), pi registration and `--skill`
-   order, and environment lists in name order. Paths are stable (the agent
-   directory and the content store), never temporary. Filesystem enumeration
-   order and server connection order never choose model-visible order.
+2. **Byte-stable rendering, per member.** Generated artifacts are
+   byte-identical across spawn, restart and resume of the same member, given
+   the same fingerprint and the same launch prerequisites (crew binary path,
+   agent directory, identity file path, endpoint). That covers:
+   - `A/mcp.json`, with servers in name order;
+   - the `crew-toolbox` plugin and the `--plugin-dir` arguments;
+   - Codex `-c` arguments in name order, including the closing step's
+     `enabled=false` entries;
+   - pi registration and `--skill` order;
+   - environment lists in name order.
+
+   These files hold member-specific paths (the identity file in every server
+   entry), so they are not compared across members. Paths are stable (the
+   agent directory and the content store), never temporary. Filesystem
+   enumeration order and server connection order never choose model-visible
+   order.
+2a. **Model-visible definitions, across members.** What the model sees from a
+   toolbox must be identical for every member with the same fingerprint and
+   role, so a provider cache shared by those sessions can be reused. That
+   means the proxy's tool definitions, skill and subagent catalogs, and
+   plugin contents, and it contains no member id, identity path, agent
+   directory or worktree path. Store paths are content-addressed, so they are
+   equal by construction. QA compares the proxies' served definitions and the
+   runtimes' native listings, not `A/mcp.json`.
 3. **No secrets in rendered bytes**, so rotating a credential does not
    invalidate a cached prefix (see Secrets).
 4. **crew's own tools first and constant.** This is confirmed by the current
-   state: `mcp/tools.rs::definitions` is a fixed vector, filtered by role
-   without reordering, with no identities or live state in `tools/list`, and
-   `listChanged: false`. Toolbox servers come after `crew` and change nothing
-   in it.
+   state and by scheduler's audit: `mcp/tools.rs::definitions` is a fixed
+   vector, filtered by role without reordering, with no identities or live
+   state in `tools/list`, and `listChanged: false`. Toolbox servers come after
+   `crew` and change nothing in it.
+
+   One gap remains for `cache-prompt-audit` to fix. `mcp/mod.rs:45-64` looks
+   the role up from the daemon at `tools/list` time and falls back to the
+   worker list when the daemon is unreachable, so an orchestrator can get a
+   different list on one launch. The role must come from the launch identity,
+   not a live call.
 5. **Stable MCP tool definitions.** Third-party servers can reorder tools,
    change descriptions or connect late. When tools are declared on every
    request, that changes the definitions mid-session and breaks the cached
+   prefix. Deferral cannot be assumed. Claude Code defers only under
+   conditions: `ENABLE_TOOL_SEARCH`, a first-party base URL, and no server
+   `alwaysLoad` or tool `_meta` `anthropic/alwaysLoad`. A gateway endpoint, or
+   a server that asks for `alwaysLoad`, puts the definitions in the tools
    prefix. crew's MCP launcher (`crew toolbox mcp <name>`) therefore proxies
-   every toolbox server:
+   every toolbox server, local and remote alike. A local server runs as the
+   launcher's child, never in its place. The launcher:
    - It returns `tools/list` sorted by tool name.
    - It never advertises `listChanged` to the runtime.
    - It answers `initialize` and `tools/list` from a snapshot pinned for the
@@ -733,8 +856,10 @@ the runtime's final tool order (current state). The benchmark measures that.
      change what the runtime sees.
 
    The definition digest is the SHA-256 of the pinned snapshots, in server
-   order. A snapshot is refreshed only when the item's definition changes or
-   on `crew resume --restart`. A refresh that changes the digest records
+   order. The first snapshot comes from the preflight. A snapshot is refreshed
+   only when the item's definition changes or on `crew resume --restart`.
+   Otherwise a later preflight listing that differs is logged and does not
+   replace it. A refresh that changes the digest records
    `toolbox.changed` even when the fingerprint is unchanged. Tools that
    appear upstream later are logged and are not exposed until a refresh. A
    call to a tool that disappeared returns the upstream error. Deferred
@@ -744,6 +869,11 @@ the runtime's final tool order (current state). The benchmark measures that.
    decided by `cache-design` after the baseline and audit. The proxy remains
    for secrets and stable ordering either way. The requirement stays: no
    definition changes within a session.
+
+   Operator servers inherited with `inherit.operator: [mcp]` (or the legacy
+   `inherit_mcp`) do not go through the proxy. crew does not control their
+   definitions, and the member's inspector lists them as **outside the
+   cache rules**.
 6. **Size is visible.** Per member, crew reports the number of tools and the
    bytes of tool definitions its toolbox adds (from the pinned snapshots). The
    inspector, `crew toolbox` and the cache benchmark show them, so a large
@@ -765,11 +895,19 @@ programs as the operator.
     team: base, github, web.`
   - The result carries the summary, for example
     `toolbox 3f9a0c21e7b4: mcp context7, playwright; skills frontend-qa; not available on Codex: plugins.lint-kit`.
-- **`agent_spawn`** gains the same optional `toolbox`. By default a subagent
-  gets its parent's member-level selection; today `daemon/subagents.rs`
-  starts from team defaults only. A requested bundle whose items are not all
-  in the parent's effective toolbox is refused: a worker cannot grant more
-  than it has.
+- **`agent_spawn`** gains the same optional `toolbox`. Today
+  `daemon/subagents.rs` starts a subagent from team defaults only.
+  - **Default.** A subagent gets a copy of its parent's **active** toolbox:
+    the full item definitions, the same content-store entries and the same
+    MCP definition snapshots. It does not get the parent's bundle names
+    resolved again. A `toolbox reload` that is pending for the parent
+    therefore does not reach the subagent until the parent restarts.
+  - **Requested bundles.** These resolve against the daemon's current
+    definitions. Every resulting item must equal an item in the parent's
+    active toolbox: the same definition, the same content hash and the same
+    snapshot digest. Otherwise the request is refused, naming the first item
+    that differs. A worker cannot grant more than it has, including a bundle
+    that a reload has since widened.
 - **`agent_set_model`.** A model on the same runtime keeps the toolbox and its
   fingerprint. A model on another runtime maps the toolbox again at the
   switch, and the result lists every item that is not Active there. If a
@@ -863,16 +1001,16 @@ come from the supported pi, not the GSD binary on this host.
 | --- | --- | --- |
 | T01 | Team file without any `toolbox` key, Claude member, unsandboxed | `A/mcp.json` holds only `crew`; `--strict-mcp-config` and `--setting-sources project` are present; `crew toolbox --json` shows no items and lists the operator source as Not used. The sentinel user skill, subagent, enabled plugin, `CLAUDE.md` and hook do not reach the session; a project skill does. |
 | T02 | The example team above | `crew toolbox --json` for `qa` lists `mcp.context7` (bundle base via default), `mcp.playwright` (bundle web, required) and `skills.frontend-qa`. For `release` on Codex, unsandboxed: `mcp.github` and `mcp.docs` are Active; `skills.changelog` is Active through crew's app-server (with `delivery: terminal`, Not available on Codex without crew's app-server); `plugins.lint-kit` is Not available on Codex (Claude Code plugin format); `mcp.context7` is excluded. |
-| T03 | Reorder keys, items and bundles without changing meaning | Same fingerprint, byte-identical generated files. |
-| T04 | Validation | Each of these stops `crew run` and `crew toolbox check` with its field path: bundle cycle, unknown bundle, an exclusion matching nothing, an item defined and excluded at one level, a reserved name, a plain string where a reference belongs, `inherit_mcp` together with `inherit`. |
-| T05 | Secrets | The sentinel value of `SHOP_GITHUB_TOKEN` reaches only the stub server's process. It is absent from `A`, the store, the roster, the event log, `crew toolbox` output, every dashboard payload, every argv (`/proc/*/cmdline`) and the member session's own environment. The same holds for `DOCS_TOKEN` through the remote bridge. |
+| T03 | Reorder keys, items and bundles without changing meaning | Same fingerprint, byte-identical generated files for the same member, and identical model-visible definitions for a second member with the same selection and role (rule 2a). |
+| T04 | Validation | Each of these stops `crew run` and `crew toolbox check` with its field path: a bundle cycle; an unknown bundle; an exclusion matching nothing at its level; the same exclusion listed twice at one level (the second matches nothing); an item defined and excluded at one level; a reserved name; a plain string where a reference belongs; `inherit_mcp` together with `inherit`; a reference name that collides with a model credential or an endpoint variable. Accepted without error: defaults exclude `mcp.context7` from bundle base, and the member includes bundle base again, so `mcp.context7` is back with origin `bundle:base`. Accepted: defaults define `mcp.docs`, and the member defines `mcp.docs` differently, so the member's definition wins whole. Accepted: the member has `reset: true`, and defaults' `exclude`, `inherit` and `strict` do not apply to it. |
+| T05 | Secrets | Three sentinel values are used. `SHOP_GITHUB_TOKEN` comes from `[agents.release.toolbox_env]` as a file. `DOCS_TOKEN` is exported in the daemon's environment. `ENDPOINT_SENTINEL` is in the member's endpoint `env_files`. The first two reach only their stub server's process, through the proxy; `DOCS_TOKEN` goes through the remote bridge. They are absent from: `A`, `A/settings.json`, the store, the roster, the event log, `crew toolbox` output, every dashboard payload, every argv (`/proc/*/cmdline`), and the member session's own environment, both unsandboxed (PTY) and sandboxed, including the Codex app-server. A toolbox reference to `ENDPOINT_SENTINEL` is a validation error. A stub that echoes its token in an error shows `[redacted $SHOP_GITHUB_TOKEN]` to the model. |
 | T06 | Missing variable | For an item that is not required, the member starts and the item shows Needs $SHOP_GITHUB_TOKEN. For a required item, or under `strict`, the member does not start, and the inspector and the orchestrator's result give the same text. |
 | T07 | Stability over the lifecycle | Spawn, crash restart and `crew resume` give the same fingerprint and definition digest, and byte-identical `A/mcp.json`, plugin directory hashes, Codex `-c` arguments, pi arguments and pinned snapshots. |
 | T08 | Reload while running | After the team file is edited, `crew toolbox reload` leaves running sessions untouched. Affected members show the pending notice and `toolbox.pending` appears. A restart applies the change, and `toolbox.changed` carries both fingerprints. An edit to a field other than a toolbox field is reported and not applied. |
 | T09 | Snapshots | A `SKILL.md` edited mid-session changes nothing in the session. After a restart, the new content hash is in the fingerprint. An item over 16 MiB is refused with its size. |
 | T10 | Runtime switch | `agent_set_model` from a Claude Code model to a Codex model lists the items that are not Active on Codex. A `required` one refuses the switch with its reason. A model change within the runtime keeps the fingerprint. |
-| T11 | `agent_add` and `agent_spawn` | A bundle selection is applied and saved to the roster. An unknown bundle is refused with the copy above. A subagent gets its parent's selection by default, and one asking for a bundle outside its parent's toolbox is refused. The input schemas reject item definitions. |
-| T12 | Operator sources, two members | Two members with different selections, with the sentinel operator home. Under `none`, unsandboxed: per runtime, the only sentinels reaching a member are the ones its sources list as cannot be excluded. Codex sentinel servers appear as Disabled, and the native listing shows them disabled. Sandboxed: no operator sentinel reaches either member. With `inherit.operator: [mcp]`, only the operator's MCP sentinel reaches the member, listed as Used. Operator files are byte-unchanged afterwards. |
+| T11 | `agent_add` and `agent_spawn` | A bundle selection is applied and saved to the roster. An unknown bundle is refused with the copy above. The input schemas reject item definitions. A subagent gets a copy of its parent's active toolbox: equal definitions, content hashes and snapshot digest. After a reload that widens bundle `web` while the parent still runs the old one: a default subagent gets the old items, and a request for `web` is refused, naming the first new item. |
+| T12 | Operator sources, two members | Two members with different selections, with the sentinel operator home. Under `none`, unsandboxed, without `strict`: on each runtime, the only sentinels that reach a member are the ones its sources list by name as Cannot be excluded. That is best effort, visible. Codex sentinel servers appear as Disabled, and the native listing shows them disabled. Codex sentinel hooks and roles are absent from `hooks/list` and `spawn_agent`. Sandboxed (pi: the closed route): no operator sentinel reaches either member, and no source is listed as Cannot be excluded. With `inherit.operator: [mcp]`, only the operator's MCP sentinel reaches the member, listed as Used and outside the cache rules. Operator files are byte-unchanged afterwards. |
 | T13 | Strict | With `strict: true` and an unsandboxed source that cannot be excluded, the member does not start, and the reason is shown. |
 | T14 | Proxy stability (rule 5) | The stub upstream returns tools in a random order and changes one description after the first listing. The runtime sees sorted tools and the pinned descriptions for the whole session, and `listChanged` is never advertised. After `crew resume --restart` the new description appears, the definition digest changes and `toolbox.changed` is recorded with the fingerprint unchanged. |
 | T15 | Dashboards | For the T02 fixture, the web inspector, TUI detail, GTK inspector (AT-SPI names) and Apple detail (source or unit level, while Apple execution stays deferred) show the same groups, origins, statuses and sources. Status is text, group headings are headings, and long commands do not widen the pane. |
@@ -880,6 +1018,8 @@ come from the supported pi, not the GSD binary on this host.
 | T17 | Shell members | A toolbox on a shell member shows every item as Not applicable and does not stop the launch, even under `strict`. |
 | T18 | Resume after removal | On each runtime, remove an MCP server that was used earlier in a session, reload and restart. The resumed session continues, and the history's earlier calls to the removed tool cause no error. If one runtime fails, that runtime's change path uses a fresh session that is handed the work, and the case asserts that path instead. |
 | T19 | Sandbox | A server whose program is outside the bound trees shows Blocked by the sandbox. Store items are readable and read-only inside the sandbox. Files left in the private home's toolbox directories by an earlier session are gone after a restart. |
+| T20 | Readiness | `crew toolbox check` shows mapped items as Planned, never Active. Four stub behaviours are checked. A required stub that exits during `initialize` gives Failed preflight, and the member does not start. A required stub that does not answer `tools/list` within 30 seconds gives the same result. The same stub without `required` gives Failed preflight, and the member starts. A stub that passes preflight and exits later in the session gives Failed in session; the session keeps running and the orchestrator is told. A required skill without `SKILL.md` gives Failed preflight, and the member does not start. |
+| T21 | Cache rule gaps | The orchestrator's crew tool list is identical when the daemon is briefly unreachable at `tools/list` time, because the role comes from the launch identity. A server that sets `alwaysLoad`, or a member on a gateway endpoint, still sees pinned, sorted definitions. An operator server inherited with `[mcp]` is listed as outside the cache rules. |
 
 ### Implementation split
 
@@ -919,10 +1059,14 @@ slice they unblock.
      `agent_set_model` result (`mcp/tools.rs`, `daemon/handlers.rs`).
    - The `agents_list` summary.
    - `crew toolbox`, `crew toolbox check` and `crew toolbox reload`.
-   - `crew toolbox mcp <name>`: secret fetch over the identity; exec for
-     local servers; stdio-to-HTTP bridge for remote ones; sorting, pinned
-     snapshots and the definition digest.
-   - Tests for T11, T14 and T18.
+   - `crew toolbox mcp <name>`, covering:
+     - the secret fetch over the identity;
+     - local servers as forwarded children;
+     - a stdio-to-HTTP bridge for remote servers;
+     - sorting, pinned snapshots and the definition digest;
+     - best-effort redaction;
+     - `--preflight`.
+   - Tests for T11, T14, T18, T20 and T21.
 4. **Protocol and dashboards.**
    - `crew-protocol` `Agent.toolbox`.
    - Web `views/Inspector.tsx` and `protocol.ts`.
@@ -941,9 +1085,18 @@ Slice 3's proxy may land after slices 1, 2 and 4. Until it lands:
 
 - Remote servers with `headers` references show **Not available (crew bridge
   pending)**.
-- Local servers get their environment through the exec path of
-  `crew toolbox mcp`, without sorting or pinning.
+- Local servers get their environment through an interim exec path of
+  `crew toolbox mcp`, which replaces itself with the server, without
+  forwarding, sorting, pinning or redaction.
+- Preflight covers file items only, so `required` on an MCP item checks
+  references and the sandbox, not readiness.
 - The definition digest is reported as unavailable.
+
+**The cache guarantee is incomplete in that state.** Rules 1 to 4 hold, but
+rules 2a and 5 do not hold for MCP definitions, and rule 6 has no tool bytes.
+T14, T16 and T20 cannot pass. The inspector and `crew toolbox` say **MCP
+definitions not pinned (proxy pending)** for every member with a toolbox MCP
+server.
 
 ### Open items
 
@@ -953,16 +1106,24 @@ entry. No cell may be implemented as Active or Not used on an unconfirmed
 mechanism.
 
 - Claude Code:
-  - MCP servers bundled in a toolbox plugin, under strict MCP loading;
   - `project` alone (without `local`);
   - project exclusion.
 - Codex:
   - whether `codex mcp list --json` reports plugin-bundled servers;
-  - whether the TUI session sees app-server skill roots.
-- pi:
+  - whether the TUI session sees app-server skill roots;
+  - `~/.codex/AGENTS.md` unsandboxed.
+- pi 1.1.0:
   - instruction files;
-  - packages;
-  - every pi row, on the supported pi.
+  - packages.
+
+Already settled by graph's probes and folded in above:
+
+- Claude Code: user sources, user plugins, plugin MCP under strict loading,
+  selected skill, subagent and hook through `--plugin-dir`.
+- Codex: MCP merge, skill paths, app-server skill roots, `features.hooks`,
+  `features.multi_agent`.
+- pi 1.1.0: skills, extensions and native MCP, `--no-approve`, the closed
+  sandbox route, no native subagents.
 
 **Decided: personal instructions under `none`** (orchestrator, m-dd4748765038).
 `inherit.operator: none` keeps the operator's personal instructions (user
