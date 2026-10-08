@@ -91,7 +91,12 @@ ignores new files under `notes/` while members are authoring them. An ignored
 Markdown file in an allowed scan root remains visible. The explicit Docs
 exclusions and safe-read rules are what constrain the observer.
 
-Hard exclusions apply at every path component, also to linked assets:
+Hard exclusions apply at every content-path component **inside** a registered
+source root, also to linked assets. They do not reject the registered root's
+absolute ancestor chain: a valid member root normally lives under
+`.crew/worktrees/<id>`. Scanning the workspace's `.crew` is still forbidden;
+admitting that separately registered member root is a distinct operation.
+Excluded components are:
 `.crew`, `.git`, `.jj`, hidden files/directories, `node_modules`, `target`,
 `dist`, `build`, `out`, `coverage`, `vendor`, `secrets` and `credentials`.
 Comparison of these exclusion names is ASCII case-insensitive. Runtime
@@ -135,6 +140,10 @@ reload or restart the team. A malformed update keeps the last valid policy
 and reports a metadata-only configuration error. Disabling Docs closes
 watches, drops retained bodies/assets and clears the index.
 
+Older binaries with that strict parser can reject a `[docs]` table. The
+release notes must distinguish configuration compatibility from additive
+wire compatibility; use the new setting only with binaries that recognize it.
+
 Selection rules prevent crew from publishing its private files. They are
 not a secret detector for prose or screenshots deliberately placed in an
 allowed documentation path. Such content is readable by the workspace's
@@ -174,7 +183,6 @@ Initial hard limits, with explicit truncation/unavailability reporting:
 | Logical documents / source variants per workspace | 4,000 / 16,000 |
 | Markdown bytes per version | 256 KiB |
 | AST nodes / nesting depth | 4,096 / 32 |
-| SVG validation nodes / nesting depth | 8,192 / 32 |
 | Headings per indexed document | 128 |
 | Local image bytes / aggregate per rendered document | 2 MiB / 8 MiB |
 | Image dimensions / decoded pixels | 8,192 per axis / 16 million pixels |
@@ -201,8 +209,10 @@ Opaque ids/cursors are at most 256 bytes; relative paths and branch labels
 at most 1,024 bytes; display titles and indexed heading labels at most 512
 bytes. A page stops at its serialized byte budget even before its entry
 count limit. Truncating a display label does not change the underlying id
-or anchor, and a shortened outline is marked limited. Oversized individual
-entries become a bounded unavailable summary, not an endless empty page.
+or anchor, and a shortened outline is marked limited. For a large index
+entry, omit further heading labels first and mark `headings_limited`, while
+retaining its path and source-variant identities. An entry that still cannot
+fit becomes a bounded unavailable summary, not an endless empty page.
 
 Large assets are pulled in chunks over the existing connection. Limit each
 connection to two document reads and two asset requests in flight; clients
@@ -239,6 +249,11 @@ Inline = Text(literal) | Emphasis(inline[]) | Strong(inline[])
        | Link(label[], target: LinkTarget) | Image(alt, asset: ImageRef)
 ```
 
+`ImageRef` is a checked index into that snapshot's image table; it cannot
+name an arbitrary asset. Repeated references can share one image's bytes,
+but all references count toward the reference limit. The aggregate image
+byte budget counts distinct admitted assets in first-reference order.
+
 Raw HTML is literal text/code, not an HTML node. Unsupported syntax stays
 literal. Code fences are never executed: no Mermaid, embedded script,
 math engine, syntax-highlighting service or plugin invocation. Clients map
@@ -272,24 +287,25 @@ backslash variants do not become active links. No URL is fetched by the
 daemon.
 
 An image node contains its relative display path, content hash, media type,
-size and opaque asset id, or a reasoned placeholder. Supported image types
-are PNG, JPEG, GIF, WebP and SVG. Validate the format, dimensions and limits
+size and opaque asset id, or a reasoned placeholder. V1 supports static PNG,
+JPEG, GIF and WebP. Validate the format, dimensions and limits
 with a bounded metadata reader; do not trust the extension alone or decode
-an unbounded raster to discover its size. Animated raster formats are
-unsupported in v1. SVG also has a bounded node/depth validation pass with
-external entities disabled. An image whose safe size/structure cannot be
+an unbounded raster to discover its size. SVG and animated raster formats
+are unsupported in v1. An image whose safe size/structure cannot be
 established remains a placeholder. Embedded image bytes are retained as immutable
 assets when admitted to the cache. The client assembles a `data:` URL only
 after fetching and checking the complete asset's hash and size. It caches
 by hash and preserves alt text during loading. Remote images are not fetched;
 show their alt text and a safe HTTP(S) link when available.
 
-SVG is used only as an image source, never inserted as HTML, a document,
-an object/embed or an interactive WebView. No server XML entity expansion,
-external resource resolution or SVG thumbnail renderer is permitted. The
-web acceptance fixture must prove no script, external resource or extra
-HTTP request occurs. A later native renderer that cannot provide equivalent
-behavior shows an unsupported-image placeholder until it can. Image-only
+SVG is never inserted as HTML, a document, an image source, an object/embed
+or an interactive WebView. No XML entity expansion, external resource
+resolution or SVG thumbnail renderer is permitted. The web acceptance
+fixture must prove no script, external resource or extra HTTP request occurs.
+Use alt text first, followed by a textual reason, such as “Image not shown ·
+SVG is not supported”, “Image not shown · animated images are not supported”,
+or “Image too large to show (9000 × 400 px)”. A later native renderer follows
+the same supported-format contract. Image-only
 changes produce a document invalidation even if the Markdown hash is the
 same. Recorded images come from the same commit tree as the Markdown; seen
 versions use their captured asset bytes, never the current path by accident.
@@ -391,9 +407,17 @@ history, not a database of all filesystem activity. The UI lists only the
 versions it received, labelled by source and observation time. Retain up to
 16 versions and 4 MiB of Markdown per document, subject to the global cache
 budget; bodies and images are never written to the event log or roster.
-Disconnect/restart clears this history. The timeline states its scope and
-limits; eviction is explicit. Old assets can expire separately and must
-show an expired-image placeholder.
+Disconnect/restart clears this history. The timeline footer says “Seen here:
+up to 16 versions or 4 MiB of this file while connected; older versions may
+expire.” Remove unselected expired entries; a selected expired version shows
+a neutral unavailable state rather than silently switching to current
+content. Old assets can expire separately and must show an expired-image
+placeholder.
+
+For a selected expired entry, keep its selection and header path. The body
+says “This version is no longer kept here. Seen-here versions expire when
+the connection drops or space runs low.” Offer View Workspace and, when a
+recorded commit exists, View recorded <short sha>. Never switch implicitly.
 
 Recorded and seen versions produce the same immutable document DTO. Diff
 two authorized versions of the same logical path using a bounded line diff
@@ -421,9 +445,11 @@ DocSource = {
 DocRef = { doc_id, source_id, source_generation }
 DocVariant = {
   source_id, source_generation, markdown_hash?, bytes?,
-  observed_at_ms?, state, reason?, comparison
+  observed_at_ms?, title?, headings[], headings_limited,
+  state, reason?, comparison
 }
-DocEntry = { id, relative_path, title?, headings[], variants[] }
+DocHeading = { anchor, title, level, start_line }
+DocEntry = { id, relative_path, variants[] }
 DocIndexPage = {
   epoch, revision, sources[], entries[], next_cursor?,
   phase: building | ready | disabled | unavailable,
@@ -456,6 +482,10 @@ Missing and unavailable content must not be encoded as an empty successful
 document. `markdown` is source data for copying/diffs, never an HTML sink.
 All numeric byte counts use raw bytes and state their units.
 
+Image media types form a closed static-raster enum. Clients validate node
+counts, nesting, ids, media types and byte bounds while decoding; being
+authenticated does not make an unbounded or malformed response acceptable.
+
 Document/variant states are `present`, `missing`, `removed` or `unavailable`;
 comparison is `same_markdown`, `different`, `only_here` or `unknown`.
 Content failure codes include `disabled`, `forbidden_path`, `source_gone`,
@@ -484,6 +514,15 @@ document exists only in a member worktree. A `§Heading` suffix matches the
 first outline title with that prefix in document order; ambiguity is not
 resolved by inventing an anchor. “Referenced by” remains a client query of
 the tasks/messages/events loaded in that page and says “in loaded history”.
+
+Titles/headings belong to a source variant, never to a fictional merge of
+all members' documents. A document's own relative links prefer its current
+source, then the workspace, then a deterministic available member source.
+Typed file artifacts can prefer their recorded agent's registered source.
+For a generic path mention, prefer the workspace when present. Heading
+resolution uses the version actually opened, not another variant's outline;
+missing/truncated matches open the document without a fabricated anchor.
+Do not match a doc path inside an already-recognized external URL.
 
 One opt-in push family carries **metadata**, not full documents or images:
 
@@ -537,13 +576,13 @@ local/web/gateway connections. No model or provider request is needed.
 
 | ID | Pass condition |
 | --- | --- |
-| K01 Sources | Root/immediate-child Markdown and recursive defaults appear; an untracked member document appears; shared roots deduplicate; stopped/removed sources follow the specified lifecycle. |
+| K01 Sources | Root/immediate-child Markdown and recursive defaults appear; an untracked member document appears; separately registered member roots under `.crew/worktrees` work without scanning the workspace's `.crew`; shared roots deduplicate; stopped/removed sources follow the specified lifecycle. |
 | K02 Configuration | Layer precedence and whole-list replacement hold; extra roots/exclusions work on every source; invalid roots keep the last policy; disabling clears bodies, handles and watches. |
-| K03 Exclusions | Private crew/runtime/git files, hidden paths, build/vendor trees, excluded docs and unreferenced assets cannot be read by guessed ids or link syntax. |
+| K03 Exclusions | Private crew/runtime/git files, hidden paths, build/vendor trees, excluded docs and unreferenced assets cannot be read by guessed ids or link syntax. Exclusions apply relative to each root and cannot be bypassed by a nested `.crew` inside a member root. |
 | K04 Safe filesystem | Symlink swaps in any component, hard links, FIFOs, sockets, devices, traversal, encoded traversal and root replacement never read an outside file or hang. Prove Linux and macOS opener behavior separately. |
 | K05 File stability | Atomic replacement and a file changing during read produce a consistent version or explicit unstable state. Oversized/non-UTF-8 files are not silently truncated into successful documents. |
 | K06 Render safety | Every supported node renders; raw HTML, event handlers, scripts, malicious URL schemes and unknown node variants remain inert. No dynamic tag/style sink or code-fence execution. |
-| K07 Images | Allowed local images load through bounded chunks; hashes/offsets are checked; 2 MiB/8 MiB limits are visible; remote images make no request; SVG scripts/resources are inert; historical images never use current bytes. |
+| K07 Images | Allowed static raster images load through bounded chunks; hashes/offsets are checked; byte/pixel/dimension limits are visible; remote images make no request; SVG/animation stay placeholders; historical images never use current bytes. |
 | K08 Transport limits | Worst-case JSON escaping and base64 at all boundaries stay under the final 1 MiB frame cap. Oversized ASTs and diffs give bounded errors/truncation, not disconnects or excessive allocation. |
 | K09 Watch barrier | An edit between registration, capture and first reply is in the reply or a later revision, never lost. Old reads cannot overwrite a new selection/version. |
 | K10 Save bursts | Twenty saves and continuous saves produce at most one update per file per second, including the trailing stable state. An image-only save invalidates an open preview. |
