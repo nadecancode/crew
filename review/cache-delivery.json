@@ -201,6 +201,17 @@
       "ignored": 0,
       "scope": "node",
       "exit_code": 0
+    },
+    {
+      "name": "web-bundle-after-trim",
+      "source": "d9d763cb",
+      "file": "target/cache-delivery-web-bundle-trim.log",
+      "sha256": "81a2c66df44f9711241f05a2d1b6d96f2659239914c3abd1adeb32993756537a",
+      "passed": 2,
+      "failed": 0,
+      "ignored": 0,
+      "scope": "Focused web_bundle pair after reviewed trim on exact d9d763cb",
+      "exit_code": 0
     }
   ],
   "known_base_failure": {
@@ -209,10 +220,11 @@
     "base_cap": 600000,
     "owner": "ui/web-bundle-trim",
     "approved_fix_pending": false,
-    "replacement_pending": true,
+    "replacement_pending": false,
     "original_cap_unchanged": true,
     "submission_disposition": "m-f24de6e70417",
-    "follow_up": "After reviewed web-bundle-trim lands, run only the focused web_bundle pair on the merged tip and send the result to reviewer."
+    "follow_up": "Focused web_bundle pair passed2/2 on exact d9d763cb; original failing log retained. Controlled lifecycle after-series remains cache-acceptance scope.",
+    "resolved_by": "d9d763cb"
   },
   "cache_improvement_claim": false,
   "thinking_integrity": {

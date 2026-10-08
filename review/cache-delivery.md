@@ -1,6 +1,7 @@
 # Turn-boundary Claude delivery
 
-Source validation complete except the independently owned bundle-trim gate.
+Delivery validation complete. The independently owned bundle trim closes the
+recorded main failure below.
 This is not a controlled cache-savings claim.
 
 Ordinary Claude traffic stays in the durable bus until a native turn carrying
@@ -36,9 +37,11 @@ provider usage or a controlled C3 cost series.
 Source integration includes reviewed main `2c7a1c3f`, including D4. The lead's
 disposition `m-f24de6e70417` permits submission with the known main overage
 recorded below. The raised-cap `web-bundle-budget` replacement was withdrawn;
-`web-bundle-trim` must fit the original ceilings. After its reviewed landing,
-run only the focused `web_bundle` pair on the merged tip and send that result
-to the reviewer. The other workspace suites pass, including all 87 `team`
+`web-bundle-trim` fits the original ceilings. After its reviewed landing,
+the focused `web_bundle` pair passed on exact main `d9d763cb` (2 passed,
+0 failed); no unchanged broad suite was repeated. The original failed log
+remains evidence of the base overage. The other workspace suites pass,
+including all 87 `team`
 tests serially, remaining packages, web-server/wire and doc tests. Whole
 workspace Clippy with `-D warnings`, rustfmt and the real Rust 1.82 default CLI
 build/help checks pass. The default-parallel Codex limit-event assertion raced;
@@ -46,9 +49,10 @@ its exact focused rerun and serial suite pass. Two explicit terminal-mode
 regressions were fixed by preserving that opted-in legacy route; it is outside
 the queued-mod cache guarantee, and their original oracles pass.
 
-The current main bundle is 604,322 bytes against the old Rust P4 check of
+The pre-trim main bundle was 604,322 bytes against the Rust P4 check of
 600,000. D1 changes no web source or bundle. `web-bundle-trim` owns that
-known base failure; no threshold is changed in this card. The retained checks,
+resolved base failure; the original P1 230,500 and P4 600,000 limits stay in
+force. No threshold is changed in this card. The retained checks,
 native binary fingerprint and fixture report hashes are in
 [cache-delivery.json](cache-delivery.json).
 
