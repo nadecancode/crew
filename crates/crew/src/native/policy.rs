@@ -14,6 +14,16 @@ pub(crate) fn authorize(
     if matches!(call, Call::Ping) {
         return Ok(());
     }
+    if matches!(call, Call::FeaturesNegotiate(_)) {
+        let allowed = match purpose {
+            ChannelPurpose::Workspace | ChannelPurpose::Read => {
+                capabilities.contains(&Capability::Read)
+            }
+            ChannelPurpose::Action => capabilities.contains(&Capability::Control),
+            ChannelPurpose::Index | ChannelPurpose::Terminal => false,
+        };
+        return allowed.then_some(()).ok_or_else(denied);
+    }
     if purpose == ChannelPurpose::Index {
         return matches!(call, Call::Workspaces)
             .then_some(())
@@ -23,7 +33,31 @@ pub(crate) fn authorize(
         return Err(denied());
     }
     let need = match call {
-        Call::Snapshot { .. }
+        Call::EpicsList(_)
+        | Call::EpicGet(_)
+        | Call::TasksQuery(_)
+        | Call::TaskGetScoped(_)
+        | Call::AsideMembers(_)
+        | Call::AsideList(_)
+        | Call::AsideGet(_)
+        | Call::AsideWatch(_)
+        | Call::AsideUnwatch(_)
+        | Call::DocsIndex(_)
+        | Call::DocsRead(_)
+        | Call::DocsAsset(_)
+        | Call::DocsHistory(_)
+        | Call::DocsDiff(_)
+        | Call::DocsWatch(_)
+        | Call::DocsUnwatch(_)
+        | Call::UsageSummary(_)
+        | Call::UsageSeries(_)
+        | Call::UsageBreakdown(_)
+        | Call::UsageObservations(_)
+        | Call::UsageRuns(_)
+        | Call::UsagePrices(_)
+        | Call::UsageWatch(_)
+        | Call::UsageUnwatch(_)
+        | Call::Snapshot { .. }
         | Call::Subscribe
         | Call::AgentsList
         | Call::TasksList
@@ -36,7 +70,10 @@ pub(crate) fn authorize(
         | Call::AgentTranscript { .. }
         | Call::GitStatus { .. }
         | Call::GitDiff { .. } => Capability::Read,
-        Call::Send(_)
+        Call::AsideAsk(_)
+        | Call::AsideCancel(_)
+        | Call::AsideRemove(_)
+        | Call::Send(_)
         | Call::Answer { .. }
         | Call::AgentPause { .. }
         | Call::AgentResume { .. }
@@ -60,7 +97,19 @@ pub(crate) fn authorize(
     let lane_ok = match purpose {
         ChannelPurpose::Index => false,
         ChannelPurpose::Workspace => need == Capability::Read,
-        ChannelPurpose::Read => need == Capability::Read && !matches!(call, Call::Subscribe),
+        ChannelPurpose::Read => {
+            need == Capability::Read
+                && !matches!(
+                    call,
+                    Call::Subscribe
+                        | Call::AsideWatch(_)
+                        | Call::AsideUnwatch(_)
+                        | Call::DocsWatch(_)
+                        | Call::DocsUnwatch(_)
+                        | Call::UsageWatch(_)
+                        | Call::UsageUnwatch(_)
+                )
+        }
         ChannelPurpose::Action => {
             need == Capability::Control || matches!(call, Call::AgentInput { .. })
         }
@@ -79,7 +128,8 @@ pub(crate) fn authorize(
         return Err(RpcError::invalid("terminal is not attached"));
     }
     match call {
-        Call::TaskGet { id: None }
+        Call::TaskGetScoped(crew_core::rpc::epics::TaskGetScoped { id: None, .. })
+        | Call::TaskGet { id: None }
         | Call::AgentCompact { id: None, .. }
         | Call::GitStatus { agent: None }
         | Call::GitDiff { agent: None, .. }
@@ -132,6 +182,31 @@ pub(crate) fn allowed_actions(capabilities: &[Capability]) -> Vec<String> {
     let mut actions = Vec::new();
     if capabilities.contains(&Capability::Read) {
         actions.extend([
+            "features_negotiate",
+            "epics_list",
+            "epic_get",
+            "tasks_query",
+            "task_get_scoped",
+            "aside_members",
+            "aside_list",
+            "aside_get",
+            "aside_watch",
+            "aside_unwatch",
+            "docs_index",
+            "docs_read",
+            "docs_asset",
+            "docs_history",
+            "docs_diff",
+            "docs_watch",
+            "docs_unwatch",
+            "usage_summary",
+            "usage_series",
+            "usage_breakdown",
+            "usage_observations",
+            "usage_runs",
+            "usage_prices",
+            "usage_watch",
+            "usage_unwatch",
             "snapshot",
             "subscribe",
             "agents_list",
@@ -149,6 +224,9 @@ pub(crate) fn allowed_actions(capabilities: &[Capability]) -> Vec<String> {
     }
     if capabilities.contains(&Capability::Control) {
         actions.extend([
+            "aside_ask",
+            "aside_cancel",
+            "aside_remove",
             "send",
             "answer",
             "agent_pause",
@@ -198,6 +276,30 @@ mod tests {
             "a new daemon method needs a deliberate gateway policy"
         );
         let reads = [
+            "epics_list",
+            "epic_get",
+            "tasks_query",
+            "task_get_scoped",
+            "aside_members",
+            "aside_list",
+            "aside_get",
+            "aside_watch",
+            "aside_unwatch",
+            "docs_index",
+            "docs_read",
+            "docs_asset",
+            "docs_history",
+            "docs_diff",
+            "docs_watch",
+            "docs_unwatch",
+            "usage_summary",
+            "usage_series",
+            "usage_breakdown",
+            "usage_observations",
+            "usage_runs",
+            "usage_prices",
+            "usage_watch",
+            "usage_unwatch",
             "snapshot",
             "subscribe",
             "agents_list",
@@ -213,6 +315,9 @@ mod tests {
             "git_diff",
         ];
         let controls = [
+            "aside_ask",
+            "aside_cancel",
+            "aside_remove",
             "send",
             "answer",
             "agent_pause",
@@ -228,49 +333,12 @@ mod tests {
         ];
         let terminals = ["agent_input", "attach", "attach_input", "attach_resize"];
         let denied = [
-            // P1 leaves negotiation disabled. P2/P4 may allow Read discovery on
-            // workspace/read and Control discovery on action, never index/terminal.
-            "features_negotiate",
-            // Future Epic reads require Read on workspace/read. Scoped
-            // administration remains denied to every device tier.
-            "epics_list",
-            "epic_get",
-            "tasks_query",
-            "task_get_scoped",
+            // Epic administration stays outside every native device grant.
             "epic_create",
             "epic_edit",
             "task_create_scoped",
             "task_revise",
             "epic_complete",
-            // Future aside reads require Read on workspace/read, actions require
-            // Control on action, and watches require Read on workspace.
-            "aside_members",
-            "aside_list",
-            "aside_get",
-            "aside_ask",
-            "aside_cancel",
-            "aside_remove",
-            "aside_watch",
-            "aside_unwatch",
-            // Future Docs reads require Read on workspace/read;
-            // watch/unwatch belong only on workspace.
-            "docs_index",
-            "docs_read",
-            "docs_asset",
-            "docs_history",
-            "docs_diff",
-            "docs_watch",
-            "docs_unwatch",
-            // Future metrics reads require Read on workspace/read;
-            // watch/unwatch belong only on workspace.
-            "usage_summary",
-            "usage_series",
-            "usage_breakdown",
-            "usage_observations",
-            "usage_runs",
-            "usage_prices",
-            "usage_watch",
-            "usage_unwatch",
             "hello",
             "load_team",
             "agent_add",
@@ -320,7 +388,7 @@ mod tests {
             .chain(terminals.iter())
             .chain(denied.iter())
             .copied()
-            .chain(["ping", "workspaces"])
+            .chain(["ping", "workspaces", "features_negotiate"])
             .collect::<Vec<_>>();
         assert_eq!(assigned.len(), 105);
         assert_eq!(
@@ -387,9 +455,23 @@ mod tests {
                         true
                     } else if name == "workspaces" {
                         purpose == ChannelPurpose::Index
+                    } else if name == "features_negotiate" {
+                        matches!(purpose, ChannelPurpose::Workspace | ChannelPurpose::Read)
+                            || (purpose == ChannelPurpose::Action
+                                && capabilities.contains(&Capability::Control))
                     } else if reads.contains(&name) {
                         matches!(purpose, ChannelPurpose::Workspace | ChannelPurpose::Read)
-                            && (name != "subscribe" || purpose == ChannelPurpose::Workspace)
+                            && (![
+                                "subscribe",
+                                "aside_watch",
+                                "aside_unwatch",
+                                "docs_watch",
+                                "docs_unwatch",
+                                "usage_watch",
+                                "usage_unwatch",
+                            ]
+                            .contains(&name)
+                                || purpose == ChannelPurpose::Workspace)
                     } else if controls.contains(&name) {
                         purpose == ChannelPurpose::Action
                             && capabilities.contains(&Capability::Control)

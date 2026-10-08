@@ -727,6 +727,34 @@ macro_rules! command_catalog {
 }
 
 command_catalog! {
+    FeaturesNegotiate(_params: crew_protocol::features::FeaturesNegotiate) => "features_negotiate",
+    EpicsList(_params: crew_protocol::features::RunScope) => "epics_list",
+    EpicGet(_params: crew_protocol::epics::EpicGet) => "epic_get",
+    TasksQuery(_params: crew_protocol::epics::TasksQuery) => "tasks_query",
+    TaskGetScoped(_params: crew_protocol::epics::TaskGetScoped) => "task_get_scoped",
+    AsideMembers(_params: crew_protocol::asides::AsideList) => "aside_members",
+    AsideList(_params: crew_protocol::asides::AsideList) => "aside_list",
+    AsideGet(_params: crew_protocol::asides::AsideGet) => "aside_get",
+    AsideAsk(_params: crew_protocol::asides::AsideAsk) => "aside_ask",
+    AsideCancel(_params: crew_protocol::asides::AsideCancel) => "aside_cancel",
+    AsideRemove(_params: crew_protocol::asides::AsideRemove) => "aside_remove",
+    AsideWatch(_params: crew_protocol::asides::AsideList) => "aside_watch",
+    AsideUnwatch(_params: crew_protocol::features::Unwatch) => "aside_unwatch",
+    DocsIndex(_params: crew_protocol::features::PageRequest) => "docs_index",
+    DocsRead(_params: crew_protocol::docs::DocsRead) => "docs_read",
+    DocsAsset(_params: crew_protocol::docs::DocsAsset) => "docs_asset",
+    DocsHistory(_params: crew_protocol::docs::DocsHistory) => "docs_history",
+    DocsDiff(_params: crew_protocol::docs::DocsDiff) => "docs_diff",
+    DocsWatch(_params: crew_protocol::docs::DocsWatch) => "docs_watch",
+    DocsUnwatch(_params: crew_protocol::features::Unwatch) => "docs_unwatch",
+    UsageSummary(_params: crew_protocol::usage_metrics::UsageQuery) => "usage_summary",
+    UsageSeries(_params: crew_protocol::usage_metrics::UsageQuery) => "usage_series",
+    UsageBreakdown(_params: crew_protocol::usage_metrics::UsageQuery) => "usage_breakdown",
+    UsageObservations(_params: crew_protocol::usage_metrics::UsageQuery) => "usage_observations",
+    UsageRuns(_params: crew_protocol::features::PageRequest) => "usage_runs",
+    UsagePrices(_params: crew_protocol::usage_metrics::UsagePrices) => "usage_prices",
+    UsageWatch(_params: crew_protocol::usage_metrics::UsageQuery) => "usage_watch",
+    UsageUnwatch(_params: crew_protocol::features::Unwatch) => "usage_unwatch",
     Ping => "ping",
     Snapshot { messages: Option<u32>, events: Option<u32> } => "snapshot",
     Subscribe => "subscribe",
@@ -783,11 +811,19 @@ pub enum ActionPlan {
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "kind", content = "data", rename_all = "snake_case")]
 pub enum CommandResult {
+    Feature(crate::features::FeatureResponse),
+    /// A driver-stamped response from the exact authenticated physical channel.
+    FeatureScoped {
+        context: crew_protocol::features::FeatureSession,
+        response: crate::features::FeatureResponse,
+    },
     Pong,
     Subscribed,
     Stopping,
     Ok,
-    Attached { agent: String },
+    Attached {
+        agent: String,
+    },
     Snapshot(Box<Snapshot>),
     Workspaces(Workspaces),
     Agents(Vec<Agent>),
@@ -803,7 +839,9 @@ pub enum CommandResult {
     Models(ModelsResult),
     Sent(Box<SendResult>),
     Agent(Option<Box<Agent>>),
-    Resumed { agents: Vec<String> },
+    Resumed {
+        agents: Vec<String>,
+    },
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
