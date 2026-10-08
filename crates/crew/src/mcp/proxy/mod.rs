@@ -28,6 +28,7 @@ use crew_core::toolbox::McpServer;
 use serde_json::{json, Value};
 use sha2::{Digest as _, Sha256};
 
+mod http;
 mod stdio;
 
 /// How long a preflight may take: starting or connecting to the server,
@@ -69,9 +70,11 @@ fn connect(launch: &ToolboxServerLaunch, events: mpsc::Sender<Event>) -> Result<
             &launch.scrub,
             events,
         )?)),
-        Upstream::Http { url, .. } => {
-            bail!("remote toolbox servers are not bridged yet (crew bridge pending): {url}")
-        }
+        Upstream::Http {
+            url,
+            transport,
+            headers,
+        } => http::connect(url, *transport, headers, events),
     }
 }
 

@@ -371,3 +371,147 @@ fn secrets_reach_the_server_under_their_destination_name_and_come_back_redacted(
     assert_eq!(message, "bad token [redacted $SHOP_GITHUB_TOKEN]");
     assert!(!echoed.to_string().contains(secret));
 }
+
+/// A stand-in remote server; its URL and the process, stopped on drop.
+struct Remote {
+    child: Child,
+    url: String,
+}
+
+impl Remote {
+    fn start(args: &[&str]) -> Self {
+        let mut child = Command::new(CREW)
+            .args(["fake-mcp"])
+            .args(args)
+            .stdin(Stdio::null())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::null())
+            .spawn()
+            .unwrap();
+        let mut line = String::new();
+        BufReader::new(child.stdout.take().unwrap())
+            .read_line(&mut line)
+            .unwrap();
+        Remote {
+            child,
+            url: line.trim().to_string(),
+        }
+    }
+}
+
+impl Drop for Remote {
+    fn drop(&mut self) {
+        let _ = self.child.kill();
+        let _ = self.child.wait();
+    }
+}
+
+impl Fixture {
+    fn remote_launch(
+        &self,
+        url: &str,
+        transport: crew_core::toolbox::McpTransport,
+        headers: &[(&str, &str)],
+        redact: &[(&str, &str)],
+    ) -> PathBuf {
+        let launch = ToolboxServerLaunch {
+            name: "x".to_string(),
+            upstream: Upstream::Http {
+                url: url.to_string(),
+                transport,
+                headers: headers
+                    .iter()
+                    .map(|(k, v)| (k.to_string(), v.to_string()))
+                    .collect(),
+            },
+            redact: redact
+                .iter()
+                .map(|(name, value)| Redaction {
+                    name: name.to_string(),
+                    value: value.to_string(),
+                })
+                .collect(),
+            scrub: Vec::new(),
+            definition: "a".repeat(64),
+            snapshot: snapshot_path(&self.agent_dir(), "x")
+                .to_string_lossy()
+                .into_owned(),
+            refresh: false,
+        };
+        let path = self.path("x.launch.json");
+        std::fs::write(&path, serde_json::to_vec(&launch).unwrap()).unwrap();
+        path
+    }
+}
+
+fn sha256(text: &str) -> String {
+    use sha2::Digest;
+    sha2::Sha256::digest(text.as_bytes())
+        .iter()
+        .map(|b| format!("{b:02x}"))
+        .collect()
+}
+
+/// Preflight, pin, then a session that lists and calls through the bridge.
+fn remote_session_works(fx: &Fixture, launch: &Path) {
+    assert_eq!(preflight_and_pin(fx, launch, false), PinOutcome::Written);
+    let mut session = Session::start(launch, &[]);
+    let (init, _) = session.request("initialize", json!({"protocolVersion": "2025-06-18"}));
+    assert_eq!(init["result"]["serverInfo"]["name"], "fake-mcp");
+    session.notify("notifications/initialized");
+    let (listed, other) = session.request("tools/list", json!({}));
+    assert_eq!(names(&listed["result"]["tools"]), ["alpha", "beta", "gamma"]);
+    assert!(other.is_empty(), "{other:?}");
+    let (called, _) = session.request("tools/call", json!({"name": "beta", "arguments": {"k": "v"}}));
+    assert_eq!(called["result"]["content"][0]["text"], r#"{"k":"v"}"#, "{called}");
+}
+
+#[test]
+fn a_remote_server_is_bridged_over_streamable_http() {
+    use crew_core::toolbox::McpTransport;
+    let token = "Bearer t0ken-abcdef";
+    let require = format!("Authorization={}", sha256(token));
+    for stream in [false, true] {
+        let fx = Fixture::new();
+        let mut args = vec!["--http", "http", "--list-changed", "--require-header", require.as_str()];
+        if stream {
+            args.push("--stream-responses");
+        }
+        let remote = Remote::start(&args);
+        let launch = fx.remote_launch(
+            &remote.url,
+            McpTransport::Http,
+            &[("Authorization", token)],
+            &[("DOCS_TOKEN", "t0ken-abcdef")],
+        );
+        remote_session_works(&fx, &launch);
+    }
+}
+
+#[test]
+fn a_remote_server_is_bridged_over_the_sse_transport() {
+    use crew_core::toolbox::McpTransport;
+    let fx = Fixture::new();
+    let remote = Remote::start(&["--http", "sse"]);
+    let launch = fx.remote_launch(&remote.url, McpTransport::Sse, &[], &[]);
+    remote_session_works(&fx, &launch);
+}
+
+#[test]
+fn a_remote_server_that_refuses_the_header_fails_preflight_without_the_secret() {
+    use crew_core::toolbox::McpTransport;
+    let fx = Fixture::new();
+    let require = format!("Authorization={}", sha256("Bearer right-one"));
+    let remote = Remote::start(&["--http", "http", "--require-header", &require]);
+    let launch = fx.remote_launch(
+        &remote.url,
+        McpTransport::Http,
+        &[("Authorization", "Bearer wrong-one-1234")],
+        &[("DOCS_TOKEN", "wrong-one-1234")],
+    );
+    let (ok, printed) = preflight(&launch, Some("10"));
+    assert!(!ok);
+    let reason = printed["reason"].as_str().unwrap();
+    assert!(reason.contains("HTTP 401"), "{reason}");
+    assert!(!printed.to_string().contains("wrong-one-1234"));
+}
