@@ -1733,12 +1733,14 @@ mod tests {
         let ids = vec![message.id];
         let db = rusqlite::Connection::open(daemon.state_dir.join("crew.db")).unwrap();
         db.execute_batch("CREATE TRIGGER fail_wakeup BEFORE INSERT ON meta WHEN NEW.key = 'agent:m' BEGIN SELECT RAISE(FAIL, 'fixture wakeup failure'); END;").unwrap();
-        assert!(daemon.acknowledge_received("m", &ids, true).is_err());
+        // Native consumption uses this shared path without the inbox's
+        // automatic card resumption, so its durable parked cue remains.
+        assert!(daemon.acknowledge_received("m", &ids, false).is_err());
         let unread = daemon.bus.receive("m", true, 50).unwrap();
         assert!(unread[0].acked_at.is_none());
         assert!(unread[0].delivered_at.is_none());
         db.execute_batch("DROP TRIGGER fail_wakeup;").unwrap();
-        assert_eq!(daemon.acknowledge_received("m", &ids, true).unwrap(), 1);
+        assert_eq!(daemon.acknowledge_received("m", &ids, false).unwrap(), 1);
         let local: serde_json::Value = serde_json::from_str(
             &daemon
                 .store
