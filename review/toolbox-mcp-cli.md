@@ -163,6 +163,16 @@ On `bd6431d5`: `cargo fmt --all -- --check` clean;
 run inside `nix-shell` with `CREW_IDENTITY`, `CREW_SOCKET` and
 `CREW_LAUNCH` removed.
 
+After the toolbox-launch merge (`2f804454`): fmt and strict Clippy clean;
+`scripts/check-msrv` passed again with Rust 1.82.0 and the locked
+lockfile; `cargo tree -d -p crew` shows the same duplicates as before the
+merge. `cargo test --locked --workspace --no-fail-fast` had two failures
+outside this slice: `private_home.rs`'s Codex endpoint-instructions case,
+whose expectation toolbox-launch changes on purpose (operator memory is
+excluded by default), and `web_bundle.rs`'s 600,000-byte budget, which
+main's bundle already exceeds. The final run is recorded with the review
+request.
+
 ## Integration with toolbox-launch
 
 graph's integration merge `563e871e` (its checkpoint `10702707` with this
