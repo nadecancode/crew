@@ -1391,8 +1391,11 @@ epoch and Docs index epoch. Carry that lease on every continuation, document,
 history, diff and asset request. The driver reuses exactly that physical channel;
 closing it expires the lease, and replacement channels never inherit its ids.
 The index inside a Docs watch belongs to the workspace connection. Its handles
-cannot be used with an auxiliary read connection's lease. Source or permission
-changes invalidate retained content, and a Seen-here expiry never silently
+cannot be used with an auxiliary read connection's lease. Keep watched document
+views on the watch connection's lease: Seen-here expiry notifications cover only
+versions retained on that same physical connection. Unwatched auxiliary read-lane
+snapshots receive no expiry push; a later access can return `snapshot_expired`
+and requires a new capture. Source or permission changes invalidate retained content, and a Seen-here expiry never silently
 selects a newer version.
 
 Use `FeatureAction` for observer registration/unregistration and aside
