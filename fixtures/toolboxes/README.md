@@ -21,7 +21,7 @@ and resolver, without invoking Python:
 cargo fmt --all -- --check
 ```
 
-Initial validation: 16 Python harness checks and 6 Rust fixture tests passed;
+Initial validation: 17 Python harness checks and 6 Rust fixture tests passed;
 strict Clippy and workspace formatting passed. These results validate the
 scaffolding and core fixture contracts, not runtime acceptance T01–T21.
 
@@ -32,7 +32,8 @@ self-tests. Set `TOOLBOX_PYTHON` to a provisioned interpreter for a fully
 offline environment with no Nix resolution. No Python dependency is added
 to the Rust test suites.
 
-`prepare` refuses an existing output path. It creates a private output tree
+`prepare` creates missing parent directories and refuses an existing output
+path. It creates a private output tree
 with fixture runtime wrappers under `bin`, a synthetic operator home, project
 discovery roots, secret input files with mode 0600, an empty member directory
 with earlier-session leftovers, and a manifest. It never starts a daemon or

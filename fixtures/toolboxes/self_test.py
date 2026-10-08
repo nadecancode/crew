@@ -39,6 +39,15 @@ class Fixtures(unittest.TestCase):
         self.assertEqual(list(self.manifest["case_results"]), [f"T{i:02d}" for i in range(1, 22)])
         self.assertEqual(self.manifest["python"], sys.executable)
 
+    def test_preparation_creates_missing_parents_but_still_refuses_existing_output(self):
+        nested = Path(self.temp.name) / "missing" / "parents" / "fixture"
+        manifest = h.prepare(nested)
+        self.assertEqual(manifest["root"], str(nested))
+        self.assertTrue((nested / "manifest.json").is_file())
+        self.assertEqual(nested.stat().st_mode & 0o777, 0o700)
+        with self.assertRaises(FileExistsError):
+            h.prepare(nested)
+
     def test_team_templates_are_fully_materialized_and_cover_all_kinds(self):
         full = (self.root / "teams/full.yaml").read_text()
         for token in ["@ROOT@", "@PYTHON@", "@HTTP_URL@"]:

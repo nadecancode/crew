@@ -227,7 +227,7 @@ def substitute(value, replacements):
 def prepare(root, *, http_url="http://127.0.0.1:9/mcp"):
     """Materialize only beneath a new output directory. Never inspect a real home."""
     root = Path(root).resolve()
-    root.mkdir(mode=0o700)  # Refuse an existing path, even one from an earlier run.
+    root.mkdir(mode=0o700, parents=True)  # Refuse an existing output, including earlier runs.
     for name in ["operator-home", "project", "member", "evidence", "bin", "runtime", "secret-input"]:
         (root / name).mkdir(mode=0o700)
     (root / ".fixture-owned").write_text("toolbox-fixtures-v1\n")
