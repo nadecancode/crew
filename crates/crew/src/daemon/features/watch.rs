@@ -44,6 +44,14 @@ impl PendingWatch {
             }
         };
         let epoch = Id::new(epoch).map_err(RpcError::invalid)?;
+        let run = match feature {
+            Feature::UsageMetrics => result.pointer("/initial/query/scope/workspace_run_id"),
+            Feature::Asides => result.pointer("/initial/workspace_run_id"),
+            _ => None,
+        }
+        .map(|value| Id::new(field(Some(value))?).map_err(RpcError::invalid))
+        .transpose()?
+        .unwrap_or_else(|| context.run.workspace_run_id.clone());
         let revision = match feature {
             Feature::Asides | Feature::UsageMetrics => result.pointer("/initial/revision"),
             Feature::Docs => result.pointer("/initial_index_page/revision"),
@@ -54,13 +62,7 @@ impl PendingWatch {
         .transpose()
         .map_err(|_| RpcError::internal("invalid watch revision"))?
         .unwrap_or_default();
-        let marker = terminal(
-            feature,
-            &id,
-            &epoch,
-            &context.run.workspace_run_id,
-            revision,
-        );
+        let marker = terminal(feature, &id, &epoch, &run, revision);
         let stream = service.watch_stream(context.clone(), id.clone())?;
         Ok(Self {
             feature,
@@ -96,7 +98,15 @@ impl PendingWatch {
                 break;
             }
             if epoch != &self.epoch {
-                self.finish(&tx, resync(push)).await;
+                // Policy/source terminal metadata identifies surviving selected
+                // documents. Preserve it for the client's replacement watch.
+                let frame = ServerFrame::push(push.clone());
+                if crew_core::rpc::features::encode_frame(&frame)
+                    .map_or(true, |bytes| bytes.len() > MAX_PAGE_BYTES)
+                {
+                    push = resync(push);
+                }
+                self.finish(&tx, push).await;
                 break;
             }
             self.marker = resync(push.clone());
@@ -339,6 +349,40 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn docs_terminal_selection_policy_and_availability_survive_epoch_change() {
+        use crew_core::rpc::docs::{DocChangeKind, DocRef, DocSelectedChange};
+        let mut push = terminal(
+            Feature::Docs,
+            &Id::new("watch").unwrap(),
+            &Id::new("new-epoch").unwrap(),
+            &Id::new("run").unwrap(),
+            Wide(9),
+        );
+        let Push::DocsChanged(ref mut metadata) = push else {
+            unreachable!()
+        };
+        metadata.changed_selected = crew_core::rpc::features::List::new(
+            vec![DocChangeKind::Policy, DocChangeKind::Availability]
+                .into_iter()
+                .enumerate()
+                .map(|(index, kind)| DocSelectedChange {
+                    document: DocRef {
+                        doc_id: Id::new(format!("doc-{index}")).unwrap(),
+                        source_id: Id::new("source").unwrap(),
+                        source_generation: Wide(2),
+                    },
+                    kind,
+                })
+                .collect::<Vec<_>>(),
+        )
+        .unwrap();
+        metadata.history_sources_changed =
+            crew_core::rpc::features::List::new(vec![Id::new("source").unwrap()]).unwrap();
+        let (watch, _) = pending(Feature::Docs, vec![Ok(Some(push.clone()))], false);
+        assert_eq!(one_final(watch).await, push);
+    }
+
+    #[tokio::test]
     async fn physical_close_sends_nothing_and_releases_a_backpressured_terminal_send() {
         let (watch, context) = pending(Feature::Docs, vec![Ok(None)], false);
         let (tx, mut rx) = mpsc::channel(1);
@@ -359,25 +403,29 @@ mod tests {
 
     #[tokio::test]
     async fn slow_reader_receives_small_resync_and_keeps_bounded_forwarding() {
-        let push = terminal(
+        let mut push = terminal(
             Feature::Docs,
             &Id::new("watch").unwrap(),
             &Id::new("epoch").unwrap(),
             &Id::new("run").unwrap(),
             Wide(9),
         );
+        if let Push::DocsChanged(metadata) = &mut push {
+            metadata.resync_required = false;
+        }
         let (watch, context) = pending(Feature::Docs, vec![Ok(Some(push.clone()))], true);
         let (tx, mut rx) = mpsc::channel(1);
         tx.send(ServerFrame::ok(1, serde_json::json!({})))
             .await
             .unwrap();
         let task = tokio::spawn(watch.forward(tx));
+        tokio::task::yield_now().await;
         assert_eq!(rx.recv().await.unwrap().id, Some(1));
         let frame = tokio::time::timeout(Duration::from_secs(1), rx.recv())
             .await
             .unwrap()
             .unwrap();
-        assert_eq!(frame.push, Some(push));
+        assert_eq!(frame.push, Some(resync(push)));
         assert!(
             crew_core::rpc::features::encode_frame(&frame)
                 .unwrap()

@@ -35,6 +35,13 @@ pub struct CommittedTasks<T> {
     pub reopen_session: bool,
 }
 
+/// Immutable authoritative inputs for a domain operation. The domain cannot
+/// change scheduling or acquire the private model's locks through this view.
+pub struct TaskModel<'a> {
+    pub tasks: &'a [Task],
+    pub agents: &'a [crew_core::Agent],
+}
+
 /// The Epic store implements this port without locking/committing. All task
 /// states are ordered and borrowed under the caller's authoritative model fence.
 pub trait TaskProjection: Send + Sync {
@@ -68,16 +75,40 @@ pub trait TaskProjection: Send + Sync {
 }
 
 impl Daemon {
+    /// A scoped RPC's identity is checked again under the same model/writer
+    /// fence as its read or mutation, including member removal/reuse races.
+    pub fn commit_tasks_for<T>(
+        &self,
+        context: &super::ConnCtx,
+        write: impl FnOnce(&Transaction<'_>, &TaskModel<'_>) -> Result<CommittedTasks<T>, RpcError>,
+    ) -> Result<T, RpcError> {
+        self.commit_tasks_with(&context.run.workspace_run_id, |tx, model| {
+            if context.cancellation.is_cancelled() {
+                return Err(RpcError::new(
+                    "stale_scope",
+                    "feature operation scope expired",
+                ));
+            }
+            super::check_member_at(tx, model, context)?;
+            write(
+                tx,
+                &TaskModel {
+                    tasks: &model.tasks,
+                    agents: &model.agents,
+                },
+            )
+        })
+    }
+
     pub(crate) fn feature_snapshot(
         &self,
         conn: &Conn,
         messages: usize,
         events: usize,
     ) -> Result<Snapshot, RpcError> {
-        let mut snapshot = self.snapshot(messages, events)?;
         let epics = conn.has_feature(crew_core::rpc::features::Feature::Epics);
         if !epics {
-            return Ok(snapshot.legacy_projection());
+            return Ok(self.snapshot(messages, events)?.legacy_projection());
         }
         let projection = self
             .feature_services
@@ -91,9 +122,29 @@ impl Daemon {
                 projection.snapshot(db, &run.workspace_run_id, &model.tasks)
             })?;
         validate_view(&run.workspace_run_id, &model.tasks, &view)?;
-        snapshot.tasks = view.tasks;
-        snapshot.epics = Some(view.board);
-        snapshot.session.workspace_run_id = Some(run.workspace_run_id.as_str().to_string());
+        let snapshot = Snapshot {
+            session: self.session_info_in(&model),
+            agents: model.agents.clone(),
+            tasks: view.tasks,
+            epics: Some(view.board),
+            messages: self
+                .bus
+                .history(None, messages)
+                .map_err(|_| RpcError::internal("snapshot message read failed"))?,
+            events: self
+                .store
+                .recent_events(None, events)
+                .map_err(|_| RpcError::internal("snapshot event read failed"))?,
+            questions: self.open_questions()?,
+            server_time: crew_core::util::now_ms(),
+        };
+        drop(model);
+        let frame = serde_json::json!({"id":u64::MAX,"result":&snapshot});
+        let bytes = crew_core::rpc::features::encode_frame(&frame)
+            .map_err(|_| RpcError::too_large("feature Snapshot exceeds transport limit"))?;
+        if bytes.len() > crew_core::rpc::features::MAX_PAGE_BYTES {
+            return Err(RpcError::too_large("feature Snapshot exceeds page limit"));
+        }
         Ok(snapshot)
     }
 
@@ -293,15 +344,18 @@ fn project_in(
     after: &[Task],
     changed_ids: &[String],
 ) -> Result<TaskChange, RpcError> {
-    let change = projection.apply_delta(
-        tx,
-        run,
-        before,
-        after,
-        changed_ids,
-        crew_core::util::now_ms(),
-    )?;
-    validate_change(tx, run, after, changed_ids, &change)?;
+    // A new message can accompany an unchanged card. Candidate ids describe
+    // the attempted mutation, not proof that a task actually changed.
+    let changed: Vec<String> = changed_ids
+        .iter()
+        .filter(|id| {
+            before.iter().find(|task| &task.id == *id) != after.iter().find(|task| &task.id == *id)
+        })
+        .cloned()
+        .collect();
+    let change =
+        projection.apply_delta(tx, run, before, after, &changed, crew_core::util::now_ms())?;
+    validate_change(tx, run, after, &changed, &change)?;
     Ok(change)
 }
 
@@ -439,6 +493,12 @@ mod tests {
             assert!(before
                 .iter()
                 .all(|task| after.iter().any(|current| current.id == task.id)));
+            if changed.is_empty() {
+                return Ok(TaskChange {
+                    tasks: Vec::new(),
+                    publication: None,
+                });
+            }
             let revision: i64 = tx
                 .query_row("SELECT revision FROM projection_fixture", [], |row| {
                     row.get(0)
@@ -599,5 +659,93 @@ mod tests {
         assert_eq!(daemon.store.load_tasks().unwrap(), vec![task]);
         assert!(bus.try_recv().is_err());
         daemon.shutdown(true).await;
+    }
+
+    #[tokio::test]
+    async fn a_new_message_with_an_unchanged_task_commits_without_a_board_bump() {
+        let (_temp, running, _) = fixture().await;
+        let daemon = &running.daemon;
+        let task = daemon
+            .create_task(crew_core::config::TaskSpec {
+                id: "task".into(),
+                ..Default::default()
+            })
+            .unwrap();
+        let mut bus = daemon.bus.subscribe();
+        let mut pushes = daemon.push.subscribe();
+        let message = crate::message_bus::NewMessage::new(
+            "operator",
+            "worker",
+            MessageType::Message,
+            "valid unchanged delivery",
+        );
+        let (unchanged, outcome) = daemon
+            .try_update_task_telling("task", |_| Ok(()), message, vec!["worker".into()])
+            .unwrap()
+            .unwrap();
+        assert_eq!(unchanged, task);
+        assert!(!outcome.duplicate);
+        assert_eq!(bus.try_recv().unwrap().message.id, outcome.message.id);
+        assert!(bus.try_recv().is_err());
+        assert!(pushes.try_recv().is_err());
+        let revision = daemon
+            .feature_db
+            .read(|db| {
+                db.query_row("SELECT revision FROM projection_fixture", [], |row| {
+                    row.get::<_, i64>(0)
+                })
+                .map_err(crate::persistence::features::storage_error)
+            })
+            .unwrap();
+        assert_eq!(revision, 1);
+        assert_eq!(daemon.store.load_tasks().unwrap(), vec![task]);
+        daemon.shutdown(false).await;
+    }
+
+    #[tokio::test]
+    async fn scoped_noop_reads_and_stale_scope_never_mutate_or_enter_a_new_run() {
+        let (_temp, running, _) = fixture().await;
+        let daemon = &running.daemon;
+        let run = daemon.run_context().unwrap();
+        let context = super::super::ConnCtx::new(
+            Id::new("connection").unwrap(),
+            run.clone(),
+            super::super::Caller::Operator,
+        );
+        let value = daemon
+            .commit_tasks_for(&context, |_, model| {
+                assert!(model.tasks.is_empty());
+                Ok(CommittedTasks {
+                    result: 42,
+                    change: TaskChange {
+                        tasks: Vec::new(),
+                        publication: None,
+                    },
+                    reopen_session: false,
+                })
+            })
+            .unwrap();
+        assert_eq!(value, 42);
+        daemon
+            .feature_db
+            .clear_session(&run.workspace_run_id, |_| Ok(()))
+            .unwrap();
+        let entered = AtomicBool::new(false);
+        let error = daemon
+            .commit_tasks_for(&context, |_, _| {
+                entered.store(true, Ordering::Release);
+                Ok(CommittedTasks {
+                    result: (),
+                    change: TaskChange {
+                        tasks: Vec::new(),
+                        publication: None,
+                    },
+                    reopen_session: false,
+                })
+            })
+            .unwrap_err();
+        assert_eq!(error.code, "stale_scope");
+        assert!(!entered.load(Ordering::Acquire));
+        daemon.shutdown(false).await;
     }
 }

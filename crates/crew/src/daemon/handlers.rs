@@ -206,8 +206,8 @@ change identity",
                     "workspace": self.workspace.to_string_lossy(),
                 })));
             }
-            let who = self.authenticate(hello.role, hello.agent_id, hello.token)?;
-            let feature_context = super::features::ConnCtx::new(
+            let who = self.authenticate(hello.role, hello.agent_id, hello.token.clone())?;
+            let mut feature_context = super::features::ConnCtx::new(
                 crew_core::rpc::features::Id::new(uuid::Uuid::new_v4().to_string())
                     .map_err(RpcError::invalid)?,
                 self.run_context()?,
@@ -216,6 +216,22 @@ change identity",
                     Who::Agent(id) => super::features::Caller::Agent { id: id.clone() },
                 },
             );
+            if let Who::Agent(id) = &who {
+                let model = self.model();
+                if model.agent(id).is_none()
+                    || !model.tokens.get(id).is_some_and(|token| {
+                        hello
+                            .token
+                            .as_ref()
+                            .is_some_and(|given| crew_core::util::ct_eq(token, given))
+                    })
+                {
+                    return Err(RpcError::unauthorized("unknown agent or bad token"));
+                }
+                feature_context.member_incarnation = self
+                    .feature_db
+                    .incarnation(&feature_context.run.workspace_run_id, id)?;
+            }
             // The dashboard server's mark on a browser's connection: it only
             // takes away (W7).
             conn.web = hello.web;
@@ -1088,6 +1104,7 @@ change identity",
     }
 
     pub(crate) async fn shutdown(&self, stop_agents: bool) {
+        self.feature_services.shutdown().await;
         if stop_agents {
             // Not halfway through a load: its agents would be missed.
             let _lifecycle = self.team_lock.lock().await;

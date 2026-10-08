@@ -217,6 +217,11 @@ impl Session {
     pub fn delay_after_capture(&mut self, wait: std::time::Duration) {
         self.conn.after_capture = Some(wait);
     }
+
+    #[cfg(test)]
+    pub(crate) fn feature_watch_count(&mut self, feature: Feature) -> usize {
+        self.conn.feature_watch_count(feature)
+    }
 }
 
 impl Drop for Session {
@@ -272,6 +277,37 @@ impl Conn {
 
     pub(crate) fn feature_watch_exists(&self, id: &Id) -> bool {
         self.feature_tasks.contains_key(id) || self.feature_after_reply.iter().any(|p| &p.id == id)
+    }
+
+    pub(crate) fn watch_belongs_to(&self, feature: Feature, id: &Id) -> bool {
+        self.feature_tasks
+            .get(id)
+            .is_some_and(|(kind, _)| *kind == feature)
+            || self
+                .feature_after_reply
+                .iter()
+                .any(|watch| watch.feature == feature && &watch.id == id)
+    }
+
+    pub(crate) async fn stop_feature_family(&mut self, feature: Feature) {
+        let ids: Vec<_> = self
+            .feature_tasks
+            .iter()
+            .filter(|(_, (kind, _))| *kind == feature)
+            .map(|(id, _)| id.clone())
+            .collect();
+        let mut retired = Vec::new();
+        for id in ids {
+            if let Some((_, task)) = self.feature_tasks.remove(&id) {
+                task.abort();
+                retired.push(task);
+            }
+        }
+        self.feature_after_reply
+            .retain(|watch| watch.feature != feature);
+        for task in retired {
+            let _ = task.await;
+        }
     }
 
     pub(crate) fn stop_feature_watch(&mut self, feature: Feature, id: &Id) {
@@ -464,6 +500,11 @@ fn legacy_task_result(method: &str, mut value: Value) -> Value {
         }
     }
     match method {
+        "load_team" => {
+            if let Some(object) = value.as_object_mut() {
+                object.remove("workspace_run_id");
+            }
+        }
         "tasks_list" => {
             if let Some(tasks) = value.as_array_mut() {
                 for item in tasks {

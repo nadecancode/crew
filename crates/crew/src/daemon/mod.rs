@@ -669,7 +669,13 @@ impl Daemon {
         if let Some(agent) = pause_changed {
             self.save_local(&agent);
         }
-        self.push(Push::Task(Box::new(after.clone())));
+        if let Some(change) = &publication {
+            for task in &change.tasks {
+                self.push(Push::Task(Box::new(task.clone())));
+            }
+        } else {
+            self.push(Push::Task(Box::new(after.clone())));
+        }
         if let Some(publication) = publication.and_then(|change| change.publication) {
             self.publish_task_publication(publication);
         }
@@ -742,7 +748,13 @@ impl Daemon {
         if let Some(agent) = pause_changed {
             self.save_local(&agent);
         }
-        self.push(Push::Task(Box::new(after.clone())));
+        if let Some(change) = &publication {
+            for task in &change.tasks {
+                self.push(Push::Task(Box::new(task.clone())));
+            }
+        } else {
+            self.push(Push::Task(Box::new(after.clone())));
+        }
         if let Some(change) = publication {
             self.bus.publish_committed(&outcome);
             if let Some(publication) = change.publication {
@@ -768,9 +780,16 @@ impl Daemon {
 
     pub(crate) fn session_info(&self) -> SessionInfo {
         let model = self.model();
+        self.session_info_in(&model)
+    }
+
+    pub(crate) fn session_info_in(&self, model: &Model) -> SessionInfo {
         let s = &model.session;
         SessionInfo {
-            workspace_run_id: None,
+            workspace_run_id: self
+                .run_context()
+                .ok()
+                .map(|run| run.workspace_run_id.as_str().to_string()),
             project: s.team.as_ref().map(|t| t.project.clone()),
             objective: s
                 .team
@@ -808,10 +827,13 @@ impl Daemon {
     }
 
     pub(crate) fn snapshot(&self, messages: usize, events: usize) -> Result<Snapshot, RpcError> {
-        let session = self.session_info();
-        let (agents, tasks) = {
+        let (session, agents, tasks) = {
             let model = self.model();
-            (model.agents.clone(), model.tasks.clone())
+            (
+                self.session_info_in(&model),
+                model.agents.clone(),
+                model.tasks.clone(),
+            )
         };
         Ok(Snapshot {
             epics: None,
