@@ -713,9 +713,7 @@ pub fn run(cli: Cli) -> Result<()> {
         Command::Credential(identity) => agent_side::credential(identity.identity.as_deref()),
         Command::Toolbox(args) => match args.command {
             Some(ToolboxCommand::Mcp(args)) => agent_side::toolbox_mcp(args),
-            Some(ToolboxCommand::Check { file, json }) => {
-                ops::toolbox_check(&target, &file, json)
-            }
+            Some(ToolboxCommand::Check { file, json }) => ops::toolbox_check(&target, &file, json),
             Some(ToolboxCommand::Reload { file }) => ops::toolbox_reload(&target, &file),
             None => ops::toolbox(&target, args.agent, args.runtime, args.json),
         },

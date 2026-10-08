@@ -58,6 +58,8 @@ pub struct AgentSettings {
     /// Runtime-neutral selection, resolved from the daemon's team catalog.
     #[serde(default)]
     pub toolbox: crew_core::toolbox::Resolved,
+    #[serde(skip)]
+    pub toolbox_launch: Option<toolbox::RuntimeToolbox>,
 }
 
 fn default_true() -> bool {
@@ -93,6 +95,7 @@ impl AgentSettings {
             model_fallback: defaults.model_fallback,
             voice: defaults.voice,
             toolbox: crew_core::toolbox::Resolved::default(),
+            toolbox_launch: None,
         }
     }
 }
@@ -130,6 +133,8 @@ pub struct LaunchSpec {
     pub program: String,
     pub args: Vec<String>,
     pub env: Vec<(String, String)>,
+    /// Names that must not be inherited or reintroduced by launch overrides.
+    pub scrub_env: Vec<String>,
     pub cwd: PathBuf,
     /// The first prompt, if there is one.
     pub prompt: Option<String>,
@@ -151,6 +156,7 @@ pub struct Sidecar {
     pub args: Vec<String>,
     pub cwd: PathBuf,
     pub env: Vec<(String, String)>,
+    pub scrub_env: Vec<String>,
     /// Unix socket the sidecar listens on; it is ready once this exists.
     pub socket: PathBuf,
 }

@@ -557,6 +557,9 @@ impl Daemon {
             sandbox
         });
         let mut cmd = super::super::sandbox::command(marked.as_ref(), &argv, &sidecar.env)?;
+        for name in &sidecar.scrub_env {
+            cmd.env_remove(name);
+        }
         cmd.current_dir(&sidecar.cwd)
             .stdin(std::process::Stdio::null())
             .stdout(log.try_clone()?)

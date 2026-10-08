@@ -689,7 +689,6 @@ pub struct ToolboxReload {
     pub ignored: Vec<String>,
 }
 
-
 /// One member's toolbox, as [`Call::Toolbox`] and [`Call::ToolboxCheck`]
 /// answer it.
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]

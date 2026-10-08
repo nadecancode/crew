@@ -166,16 +166,26 @@ impl AgentRuntime for ClaudeRuntime {
         let settings_path = ctx.agent_dir.join("settings.json");
         let briefing_path = ctx.agent_dir.join("briefing.md");
 
-        let mcp = json!({
-            "mcpServers": {
-                "crew": {
-                    "command": ctx.crew_bin.to_string_lossy(),
-                    "args": ["mcp", "--identity", ctx.identity_path.to_string_lossy()],
-                }
-            }
+        let crew = json!({
+            "command": ctx.crew_bin.to_string_lossy(),
+            "args": ["mcp", "--identity", ctx.identity_path.to_string_lossy()],
         });
-        write_private_file(&mcp_path, &serde_json::to_vec_pretty(&mcp)?)?;
+        let toolbox = ctx.settings.toolbox_launch.as_ref();
+        let servers = toolbox.into_iter().flat_map(|toolbox| toolbox.servers.iter()).map(|name| {
+            (name.clone(), json!({"command":ctx.crew_bin.to_string_lossy(),"args":["toolbox","mcp",name,"--identity",ctx.identity_path.to_string_lossy()]}))
+        }).collect();
+        write_private_file(
+            &mcp_path,
+            &super::toolbox::claude_mcp_bytes(&crew, &servers)?,
+        )?;
         let mut settings = hooks_settings(ctx.crew_bin, ctx.identity_path);
+        if let Some(preferences) =
+            toolbox.and_then(|toolbox| toolbox.claude_preferences.as_object())
+        {
+            for (name, value) in preferences {
+                settings[name] = value.clone();
+            }
+        }
         // Nobody sits at this terminal: a built-in question dialog would hold
         // the agent until someone attached to it. Questions go over the bus
         // (the orchestrator, then `operator_ask`), where the operator sees them.
@@ -204,8 +214,14 @@ impl AgentRuntime for ClaudeRuntime {
         args.push(ctx.agent.id.clone());
         args.push("--mcp-config".into());
         args.push(mcp_path.to_string_lossy().into_owned());
-        if !ctx.settings.inherit_mcp {
+        let inherit_mcp = toolbox.map_or(ctx.settings.inherit_mcp, |toolbox| {
+            toolbox.claude_inherit_mcp
+        });
+        if !inherit_mcp {
             args.push("--strict-mcp-config".into());
+        }
+        if let Some(toolbox) = toolbox {
+            args.extend(["--setting-sources".into(), toolbox.claude_sources.clone()]);
         }
         args.push("--settings".into());
         args.push(settings_path.to_string_lossy().into_owned());
@@ -226,6 +242,11 @@ impl AgentRuntime for ClaudeRuntime {
             args.push("--plugin-dir".into());
             args.push(mod_dir.to_string_lossy().into_owned());
         }
+        if let Some(toolbox) = toolbox {
+            for plugin in &toolbox.claude_plugins {
+                args.extend(["--plugin-dir".into(), plugin.to_string_lossy().into_owned()]);
+            }
+        }
         if ctx.settings.bypass_permissions {
             args.push("--dangerously-skip-permissions".into());
         } else if !ctx.settings.permission_mode.is_empty() {
@@ -234,6 +255,9 @@ impl AgentRuntime for ClaudeRuntime {
         }
         // The crew tools must never raise a permission prompt.
         let mut allowed = vec!["mcp__crew".to_string()];
+        if let Some(toolbox) = toolbox {
+            allowed.extend(toolbox.servers.iter().map(|name| format!("mcp__{name}")));
+        }
         allowed.extend(ctx.settings.allowed_tools.iter().cloned());
         args.push("--allowedTools".into());
         args.push(allowed.join(","));
@@ -276,6 +300,9 @@ impl AgentRuntime for ClaudeRuntime {
         }
 
         Ok(LaunchSpec {
+            scrub_env: toolbox
+                .map(|toolbox| toolbox.scrub_env.clone())
+                .unwrap_or_default(),
             agent_id: ctx.agent.id.clone(),
             kind: RuntimeKind::Claude,
             program: "claude".into(),

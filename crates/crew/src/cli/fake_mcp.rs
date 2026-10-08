@@ -110,8 +110,15 @@ pub fn run(args: FakeMcpArgs) -> Result<()> {
         };
         let method = message.get("method").and_then(Value::as_str).unwrap_or("");
         if let Some(log) = &args.log {
-            let mut file = std::fs::OpenOptions::new().create(true).append(true).open(log)?;
-            let entry = if method.is_empty() { "response" } else { method };
+            let mut file = std::fs::OpenOptions::new()
+                .create(true)
+                .append(true)
+                .open(log)?;
+            let entry = if method.is_empty() {
+                "response"
+            } else {
+                method
+            };
             writeln!(file, "{entry}")?;
         }
         if args.exit_during.as_deref() == Some(method) {
@@ -187,7 +194,10 @@ pub fn run(args: FakeMcpArgs) -> Result<()> {
                 }
             }
             "tools/call" => {
-                let name = message.pointer("/params/name").and_then(Value::as_str).unwrap_or("");
+                let name = message
+                    .pointer("/params/name")
+                    .and_then(Value::as_str)
+                    .unwrap_or("");
                 match name {
                     "echo_token" => {
                         let var = args.echo_token_in_error.as_deref().unwrap_or("");

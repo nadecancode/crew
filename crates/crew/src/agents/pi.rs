@@ -367,6 +367,31 @@ impl AgentRuntime for PiRuntime {
             "--session-dir".into(),
             sessions.to_string_lossy().into_owned(),
         ];
+        let toolbox = ctx.settings.toolbox_launch.as_ref();
+        if let Some(toolbox) = toolbox {
+            args.extend(["--system-prompt".into(), toolbox.pi_system_prompt.clone()]);
+            if !toolbox.pi_inherit_extensions {
+                args.extend([
+                    "--no-extensions".into(),
+                    "--extension".into(),
+                    "builtin:mcp".into(),
+                ]);
+            }
+            args.push("--no-skills".into());
+            args.push("--no-prompt-templates".into());
+            if !toolbox.pi_context_files {
+                args.push("--no-context-files".into());
+            }
+            for skill in &toolbox.pi_skills {
+                args.extend(["--skill".into(), skill.to_string_lossy().into_owned()]);
+            }
+            for extension in &toolbox.pi_extensions {
+                args.extend([
+                    "--extension".into(),
+                    extension.to_string_lossy().into_owned(),
+                ]);
+            }
+        }
         // Created the first time, opened on every restart.
         if let Some(id) = &ctx.agent.session_id {
             args.push("--session-id".into());
@@ -377,7 +402,7 @@ impl AgentRuntime for PiRuntime {
         // Project-local pi files (`.pi/`) in the workspace: trusted or ignored,
         // never asked about.
         args.push(
-            if ctx.settings.auto_trust {
+            if toolbox.map_or(ctx.settings.auto_trust, |toolbox| toolbox.pi_approve) {
                 "--approve"
             } else {
                 "--no-approve"
@@ -424,6 +449,9 @@ impl AgentRuntime for PiRuntime {
         );
 
         Ok(LaunchSpec {
+            scrub_env: toolbox
+                .map(|toolbox| toolbox.scrub_env.clone())
+                .unwrap_or_default(),
             agent_id: ctx.agent.id.clone(),
             kind: RuntimeKind::Pi,
             program: "pi".into(),

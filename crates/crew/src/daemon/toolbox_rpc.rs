@@ -38,7 +38,10 @@ fn member_level<'a>(team: &'a TeamConfig, agent: &Agent) -> (&'a Toolbox, String
     let id = agent.parent.as_deref().unwrap_or(&agent.id);
     match team.agents.iter().position(|a| a.id == id) {
         Some(i) => (&team.agents[i].toolbox, format!("agents[{i}].toolbox")),
-        None => (EMPTY.get_or_init(Toolbox::default), format!("agent '{id}'.toolbox")),
+        None => (
+            EMPTY.get_or_init(Toolbox::default),
+            format!("agent '{id}'.toolbox"),
+        ),
     }
 }
 
@@ -114,21 +117,22 @@ impl Daemon {
             )));
         };
         let mut redact = Vec::new();
-        let mut resolve_map = |map: &BTreeMap<String, Reference>| -> Result<BTreeMap<String, String>, RpcError> {
-            let mut out = BTreeMap::new();
-            for (key, reference) in map {
-                let value = resolve_reference(reference)
-                    .map_err(|missing| RpcError::invalid(format!("Needs ${missing}")))?;
-                if let Reference::Env { name, .. } = reference {
-                    redact.push(Redaction {
-                        name: name.clone(),
-                        value: value.clone(),
-                    });
+        let mut resolve_map =
+            |map: &BTreeMap<String, Reference>| -> Result<BTreeMap<String, String>, RpcError> {
+                let mut out = BTreeMap::new();
+                for (key, reference) in map {
+                    let value = resolve_reference(reference)
+                        .map_err(|missing| RpcError::invalid(format!("Needs ${missing}")))?;
+                    if let Reference::Env { name, .. } = reference {
+                        redact.push(Redaction {
+                            name: name.clone(),
+                            value: value.clone(),
+                        });
+                    }
+                    out.insert(key.clone(), value);
                 }
-                out.insert(key.clone(), value);
-            }
-            Ok(out)
-        };
+                Ok(out)
+            };
         let upstream = match &server.url {
             Some(url) => Upstream::Http {
                 url: url.clone(),
@@ -294,7 +298,11 @@ fn planned(id: &str, runtime: RuntimeKind, resolved: &Resolved) -> MemberToolbox
         .collect();
     let fingerprint = resolved
         .canonical(&content)
-        .map(|canonical| Fingerprint::of(&canonical, runtime, MAPPING_VERSION).as_str().to_string())
+        .map(|canonical| {
+            Fingerprint::of(&canonical, runtime, MAPPING_VERSION)
+                .as_str()
+                .to_string()
+        })
         .unwrap_or_default();
     MemberToolbox {
         agent: id.to_string(),

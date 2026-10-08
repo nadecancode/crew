@@ -49,7 +49,11 @@ pub fn toolbox_check(target: &Target, file: &Path, json: bool) -> Result<()> {
     if !stops.is_empty() {
         bail!(
             "{} would not start:\n  {}",
-            if stops.len() == 1 { "a member" } else { "members" },
+            if stops.len() == 1 {
+                "a member"
+            } else {
+                "members"
+            },
             stops.join("\n  ")
         );
     }

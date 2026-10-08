@@ -42,9 +42,7 @@ impl Child {
         if let Some(cwd) = cwd {
             cmd.current_dir(cwd);
         }
-        let mut child = cmd
-            .spawn()
-            .with_context(|| format!("starting {program}"))?;
+        let mut child = cmd.spawn().with_context(|| format!("starting {program}"))?;
         let stdout = child.stdout.take().expect("stdout is piped");
         let stdin = child.stdin.take();
         std::thread::spawn(move || {

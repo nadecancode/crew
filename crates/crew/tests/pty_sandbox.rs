@@ -116,6 +116,7 @@ fn launch(l: &Layout, available: &probe::Available, script: &str) -> LaunchSpec 
     )
     .unwrap_or_else(|e| panic!("building the sandbox: {e}"));
     LaunchSpec {
+        scrub_env: Vec::new(),
         agent_id: "a".into(),
         kind: RuntimeKind::Shell,
         program: "sh".into(),

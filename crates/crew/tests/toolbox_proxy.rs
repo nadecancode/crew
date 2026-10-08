@@ -38,7 +38,13 @@ impl Fixture {
 
     /// A launch of `crew fake-mcp` with `args`, written where the proxy reads
     /// it.
-    fn launch(&self, name: &str, args: &[&str], env: &[(&str, &str)], redact: &[(&str, &str)]) -> PathBuf {
+    fn launch(
+        &self,
+        name: &str,
+        args: &[&str],
+        env: &[(&str, &str)],
+        redact: &[(&str, &str)],
+    ) -> PathBuf {
         let mut command = vec![CREW.to_string(), "fake-mcp".to_string()];
         command.extend(args.iter().map(|a| a.to_string()));
         let launch = ToolboxServerLaunch {
@@ -90,9 +96,15 @@ fn preflight(launch: &Path, within: Option<&str>) -> (bool, Value) {
 fn preflight_and_pin(fx: &Fixture, launch: &Path, refresh: bool) -> PinOutcome {
     let (ok, printed) = preflight(launch, None);
     assert!(ok, "{printed}");
-    pin(&fx.agent_dir(), "x", &"a".repeat(64), &printed["listing"], refresh)
-        .unwrap()
-        .outcome
+    pin(
+        &fx.agent_dir(),
+        "x",
+        &"a".repeat(64),
+        &printed["listing"],
+        refresh,
+    )
+    .unwrap()
+    .outcome
 }
 
 /// A session proxy, spoken to as the runtime would.
@@ -201,13 +213,18 @@ fn the_runtime_sees_the_pinned_sorted_tools_whatever_the_server_does() {
     let launch = fx.launch(
         "x",
         &[
-            "--tools", "delta,alpha,charlie,bravo",
+            "--tools",
+            "delta,alpha,charlie,bravo",
             "--shuffle",
-            "--state", &state_arg,
-            "--change-description-after", "1",
+            "--state",
+            &state_arg,
+            "--change-description-after",
+            "1",
             "--list-changed",
-            "--page", "3",
-            "--log", &log_arg,
+            "--page",
+            "3",
+            "--log",
+            &log_arg,
         ],
         &[],
         &[],
@@ -220,11 +237,17 @@ fn the_runtime_sees_the_pinned_sorted_tools_whatever_the_server_does() {
     let mut session = Session::start(&launch, &[]);
     let (init, _) = session.request("initialize", json!({"protocolVersion": "2025-03-26"}));
     assert_eq!(init["result"]["protocolVersion"], "2025-03-26");
-    assert_eq!(init["result"]["capabilities"]["tools"]["listChanged"], false);
+    assert_eq!(
+        init["result"]["capabilities"]["tools"]["listChanged"],
+        false
+    );
     session.notify("notifications/initialized");
     for _ in 0..3 {
         let (listed, other) = session.request("tools/list", json!({}));
-        assert_eq!(names(&listed["result"]["tools"]), ["alpha", "bravo", "charlie", "delta"]);
+        assert_eq!(
+            names(&listed["result"]["tools"]),
+            ["alpha", "bravo", "charlie", "delta"]
+        );
         assert!(listed["result"].get("nextCursor").is_none());
         let descriptions: Vec<&str> = listed["result"]["tools"]
             .as_array()
@@ -232,14 +255,22 @@ fn the_runtime_sees_the_pinned_sorted_tools_whatever_the_server_does() {
             .iter()
             .map(|t| t["description"].as_str().unwrap())
             .collect();
-        assert!(descriptions.iter().all(|d| !d.contains("Changed")), "{descriptions:?}");
         assert!(
-            other.iter().all(|m| m["method"] != "notifications/tools/list_changed"),
+            descriptions.iter().all(|d| !d.contains("Changed")),
+            "{descriptions:?}"
+        );
+        assert!(
+            other
+                .iter()
+                .all(|m| m["method"] != "notifications/tools/list_changed"),
             "{other:?}"
         );
     }
     // A call goes through to the server and back.
-    let (called, _) = session.request("tools/call", json!({"name": "alpha", "arguments": {"n": 1}}));
+    let (called, _) = session.request(
+        "tools/call",
+        json!({"name": "alpha", "arguments": {"n": 1}}),
+    );
     assert_eq!(called["result"]["content"][0]["text"], r#"{"n":1}"#);
     drop(session);
     // The runtime's own initialize and tools/list never reached the server:
@@ -248,11 +279,26 @@ fn the_runtime_sees_the_pinned_sorted_tools_whatever_the_server_does() {
     let mut seen = log_lines(&log);
     assert_eq!(seen[..2], ["initialize", "notifications/initialized"]);
     seen.sort();
-    assert_eq!(seen, ["initialize", "notifications/initialized", "tools/call", "tools/list", "tools/list"]);
+    assert_eq!(
+        seen,
+        [
+            "initialize",
+            "notifications/initialized",
+            "tools/call",
+            "tools/list",
+            "tools/list"
+        ]
+    );
 
     // A later preflight sees the changed description: logged, not pinned.
-    assert_eq!(preflight_and_pin(&fx, &launch, false), PinOutcome::KeptDiffers);
-    assert_eq!(definition_digest(&fx.agent_dir(), &["x".to_string()]).unwrap(), pinned);
+    assert_eq!(
+        preflight_and_pin(&fx, &launch, false),
+        PinOutcome::KeptDiffers
+    );
+    assert_eq!(
+        definition_digest(&fx.agent_dir(), &["x".to_string()]).unwrap(),
+        pinned
+    );
     // `crew resume --restart` refreshes it.
     assert_eq!(preflight_and_pin(&fx, &launch, true), PinOutcome::Written);
     let refreshed = definition_digest(&fx.agent_dir(), &["x".to_string()]).unwrap();
@@ -276,15 +322,21 @@ fn a_snapshot_taken_for_another_definition_is_replaced() {
     assert!(ok);
     let dir = fx.agent_dir();
     assert_eq!(
-        pin(&dir, "x", &"a".repeat(64), &printed["listing"], false).unwrap().outcome,
+        pin(&dir, "x", &"a".repeat(64), &printed["listing"], false)
+            .unwrap()
+            .outcome,
         PinOutcome::Written
     );
     assert_eq!(
-        pin(&dir, "x", &"a".repeat(64), &printed["listing"], false).unwrap().outcome,
+        pin(&dir, "x", &"a".repeat(64), &printed["listing"], false)
+            .unwrap()
+            .outcome,
         PinOutcome::Kept
     );
     assert_eq!(
-        pin(&dir, "x", &"b".repeat(64), &printed["listing"], false).unwrap().outcome,
+        pin(&dir, "x", &"b".repeat(64), &printed["listing"], false)
+            .unwrap()
+            .outcome,
         PinOutcome::Written
     );
 }
@@ -298,13 +350,19 @@ fn a_preflight_fails_with_the_reason() {
     let (ok, printed) = preflight(&exits, None);
     assert!(!ok);
     assert_eq!(printed["ok"], false);
-    assert!(printed["reason"].as_str().unwrap().contains("initialize"), "{printed}");
+    assert!(
+        printed["reason"].as_str().unwrap().contains("initialize"),
+        "{printed}"
+    );
 
     let hangs = fx.launch("x", &["--hang", "tools/list"], &[], &[]);
     let (ok, printed) = preflight(&hangs, Some("1"));
     assert!(!ok);
     assert!(
-        printed["reason"].as_str().unwrap().contains("did not answer tools/list in time"),
+        printed["reason"]
+            .as_str()
+            .unwrap()
+            .contains("did not answer tools/list in time"),
         "{printed}"
     );
 }
@@ -320,10 +378,16 @@ fn a_server_that_stops_in_session_leaves_the_pinned_view_in_place() {
     session.request("initialize", json!({"protocolVersion": "2025-06-18"}));
     std::thread::sleep(Duration::from_millis(2500));
     let (listed, _) = session.request("tools/list", json!({}));
-    assert_eq!(names(&listed["result"]["tools"]), ["alpha", "beta", "gamma"]);
+    assert_eq!(
+        names(&listed["result"]["tools"]),
+        ["alpha", "beta", "gamma"]
+    );
     let (called, _) = session.request("tools/call", json!({"name": "alpha", "arguments": {}}));
     assert!(
-        called["error"]["message"].as_str().unwrap().contains("is not running"),
+        called["error"]["message"]
+            .as_str()
+            .unwrap()
+            .contains("is not running"),
         "{called}"
     );
 }
@@ -345,7 +409,12 @@ fn secrets_reach_the_server_under_their_destination_name_and_come_back_redacted(
     let expect = format!("GITHUB_TOKEN={digest}");
     let launch = fx.launch(
         "x",
-        &["--echo-token-in-error", "GITHUB_TOKEN", "--expect-sha256", &expect],
+        &[
+            "--echo-token-in-error",
+            "GITHUB_TOKEN",
+            "--expect-sha256",
+            &expect,
+        ],
         &[("GITHUB_TOKEN", secret)],
         &[("SHOP_GITHUB_TOKEN", secret)],
     );
