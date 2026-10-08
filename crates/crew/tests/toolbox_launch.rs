@@ -151,6 +151,9 @@ impl Fixture {
             &team.to_yaml().unwrap(),
         );
         std::fs::create_dir_all(self.session.root().join("home")).unwrap();
+        // Unlike the stand-in, native Codex requires an explicitly selected
+        // CODEX_HOME to exist before even `mcp list --json` can run.
+        std::fs::create_dir_all(self.session.root().join("codex-home")).unwrap();
         let output = self
             .session
             .command()
