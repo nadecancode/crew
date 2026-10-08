@@ -1,0 +1,137 @@
+{
+  "project": "toolbox-fixtures",
+  "objective": "Offline toolbox acceptance; use only fixture runtimes.",
+  "workspace": {
+    "path": "@ROOT@/project",
+    "isolation": "shared"
+  },
+  "backend": "pty",
+  "toolboxes": {
+    "base": {
+      "mcp": {
+        "context7": {
+          "command": [
+            "@PYTHON@",
+            "@ROOT@/mcp_stub.py"
+          ],
+          "cwd": ".",
+          "env": {
+            "FIXTURE_PUBLIC": {
+              "value": "public-fixture-value"
+            }
+          }
+        }
+      }
+    },
+    "web": {
+      "include": [
+        "base"
+      ],
+      "mcp": {
+        "playwright": {
+          "command": [
+            "@PYTHON@",
+            "@ROOT@/mcp_stub.py"
+          ],
+          "required": true,
+          "runtimes": [
+            "claude",
+            "codex",
+            "pi"
+          ]
+        }
+      },
+      "skills": {
+        "frontend-qa": {
+          "path": "../items/skills/frontend-qa",
+          "required": true
+        }
+      }
+    },
+    "github": {
+      "mcp": {
+        "github": {
+          "command": [
+            "@PYTHON@",
+            "@ROOT@/mcp_stub.py"
+          ],
+          "env": {
+            "GITHUB_TOKEN": {
+              "env": "SHOP_GITHUB_TOKEN"
+            },
+            "ALIAS_TOKEN": {
+              "env": "SHOP_TOKEN"
+            },
+            "GITHUB_TOOLSETS": {
+              "value": "repos,issues"
+            }
+          },
+          "required": false
+        },
+        "docs": {
+          "url": "@HTTP_URL@",
+          "transport": "http",
+          "headers": {
+            "Authorization": {
+              "env": "DOCS_TOKEN",
+              "format": "Bearer {}"
+            },
+            "X-Fixture": {
+              "value": "public-header"
+            }
+          }
+        }
+      }
+    }
+  },
+  "defaults": {
+    "runtime": "claude",
+    "toolbox": {
+      "include": [
+        "base"
+      ],
+      "inherit": {
+        "operator": "none"
+      }
+    }
+  },
+  "orchestrator": {
+    "toolbox": {
+      "reset": true
+    }
+  },
+  "agents": [
+    {
+      "id": "qa",
+      "role": "frontend QA",
+      "toolbox": {
+        "include": [
+          "web"
+        ]
+      }
+    },
+    {
+      "id": "release",
+      "role": "release notes",
+      "runtime": "codex",
+      "toolbox": {
+        "include": [
+          "github"
+        ],
+        "exclude": [
+          "mcp.context7"
+        ],
+        "skills": {
+          "changelog": {
+            "path": "../items/skills/changelog"
+          }
+        },
+        "plugins": {
+          "lint-kit": {
+            "path": "../items/plugins/lint-kit"
+          }
+        }
+      }
+    }
+  ]
+}
