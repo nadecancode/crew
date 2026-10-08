@@ -108,6 +108,7 @@ impl Session {
             },
             backend: BackendChoice::Pty,
             herdr: Default::default(),
+            toolboxes: Default::default(),
             defaults: AgentDefaults {
                 runtime: RuntimeKind::Shell,
                 ..AgentDefaults::default()

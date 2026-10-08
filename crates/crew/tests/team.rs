@@ -2448,10 +2448,10 @@ fn two_agents_added_at_once_under_one_id_are_one_agent() {
                 ready.wait();
                 client
                     .call::<crew_core::Agent>(crew_core::rpc::Call::AgentAdd {
-                        spec: AgentSpec {
+                        spec: Box::new(AgentSpec {
                             id: "dup".into(),
                             ..AgentSpec::default()
-                        },
+                        }),
                     })
                     .map_err(|e| e.to_string())
             })

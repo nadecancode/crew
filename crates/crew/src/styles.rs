@@ -136,11 +136,20 @@ impl Styles {
                     .map_err(anyhow::Error::from)
                     .and_then(|text| Style::parse(&name, &text, toml));
                 match parsed {
-                    Ok(style) => styles.put(Entry {
-                        style,
-                        origin: Origin::File(scope),
-                        path: Some(path),
-                    }),
+                    Ok(mut style) => {
+                        // Toolbox paths are relative to the style file; a
+                        // team launched from it carries them absolute.
+                        let base = path.parent().unwrap_or(&dir);
+                        let home = std::env::var_os("HOME")
+                            .filter(|h| !h.is_empty())
+                            .map(PathBuf::from);
+                        style.absolutize_toolbox_paths(base, home.as_deref());
+                        styles.put(Entry {
+                            style,
+                            origin: Origin::File(scope),
+                            path: Some(path),
+                        })
+                    }
                     Err(e) => styles.problems.push(format!("{}: {e:#}", path.display())),
                 }
             }

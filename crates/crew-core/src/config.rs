@@ -6,6 +6,7 @@ use std::path::{Path, PathBuf};
 use anyhow::{anyhow, bail, Context, Result};
 use serde::{Deserialize, Serialize};
 
+use crate::toolbox::{self, Toolbox};
 use crate::types::{RuntimeKind, MAX_MESSAGE_BYTES, ORCHESTRATOR_ID};
 use crate::util::is_valid_id;
 
@@ -56,6 +57,9 @@ pub struct Style {
     pub backend: BackendChoice,
     #[serde(default)]
     pub herdr: HerdrConfig,
+    /// Toolbox bundles, by name (see [`crate::toolbox`]).
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub toolboxes: BTreeMap<String, Toolbox>,
     #[serde(default)]
     pub defaults: AgentDefaults,
     #[serde(default)]
@@ -93,6 +97,19 @@ impl Style {
         Ok(serde_yaml::to_string(self)?)
     }
 
+    /// Make the style's toolbox file paths absolute against `base`, the
+    /// directory of the style file.
+    pub fn absolutize_toolbox_paths(&mut self, base: &Path, home: Option<&Path>) {
+        absolutize_toolboxes(
+            &mut self.toolboxes,
+            &mut self.defaults,
+            &mut self.orchestrator,
+            &mut self.agents,
+            base,
+            home,
+        );
+    }
+
     /// The team this style launches on `workspace` for `objective`.
     pub fn team(&self, project: &str, workspace: &str, objective: &str) -> TeamConfig {
         TeamConfig {
@@ -107,6 +124,7 @@ impl Style {
             },
             backend: self.backend,
             herdr: self.herdr.clone(),
+            toolboxes: self.toolboxes.clone(),
             defaults: self.defaults.clone(),
             orchestrator: self.orchestrator.clone(),
             agents: self.agents.clone(),
@@ -136,6 +154,9 @@ pub struct TeamConfig {
     pub backend: BackendChoice,
     #[serde(default)]
     pub herdr: HerdrConfig,
+    /// Toolbox bundles, by name (see [`crate::toolbox`]).
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub toolboxes: BTreeMap<String, Toolbox>,
     #[serde(default)]
     pub defaults: AgentDefaults,
     #[serde(default)]
@@ -342,6 +363,7 @@ pub struct AgentDefaults {
     #[serde(default)]
     pub command: Vec<String>,
     /// Let agents load the user's own MCP servers in addition to crew's.
+    /// The same as `toolbox.inherit.operator: [mcp]`, which replaces it.
     #[serde(default)]
     pub inherit_mcp: bool,
     /// Answer the runtime's workspace-trust dialog automatically.
@@ -385,6 +407,9 @@ pub struct AgentDefaults {
     /// or `plain`.
     #[serde(default, skip_serializing_if = "Voice::is_default")]
     pub voice: Voice,
+    /// What every member's toolbox starts from (see [`crate::toolbox`]).
+    #[serde(default, skip_serializing_if = "Toolbox::is_empty")]
+    pub toolbox: Toolbox,
 }
 
 /// Whether agents run with their runtime's permission checks.
@@ -472,6 +497,7 @@ impl Default for AgentDefaults {
             model_fallbacks: BTreeMap::new(),
             refusal_fallbacks: Vec::new(),
             voice: Voice::default(),
+            toolbox: Toolbox::default(),
         }
     }
 }
@@ -493,6 +519,9 @@ pub struct OrchestratorConfig {
     /// Tell the orchestrator (metadata only, never the body) when workers talk directly.
     #[serde(default)]
     pub notify_p2p: bool,
+    /// The orchestrator's own toolbox level (see [`crate::toolbox`]).
+    #[serde(default, skip_serializing_if = "Toolbox::is_empty")]
+    pub toolbox: Toolbox,
 }
 
 fn default_true() -> bool {
@@ -507,6 +536,7 @@ impl Default for OrchestratorConfig {
             model: None,
             command: Vec::new(),
             notify_p2p: false,
+            toolbox: Toolbox::default(),
         }
     }
 }
@@ -539,6 +569,9 @@ pub struct AgentSpec {
     pub allowed_tools: Vec<String>,
     #[serde(default)]
     pub extra_args: Vec<String>,
+    /// This member's toolbox level (see [`crate::toolbox`]).
+    #[serde(default, skip_serializing_if = "Toolbox::is_empty")]
+    pub toolbox: Toolbox,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Default)]
@@ -641,13 +674,77 @@ impl TeamConfig {
             .extension()
             .and_then(|e| e.to_str())
             .is_some_and(|e| e.eq_ignore_ascii_case("toml"));
-        let cfg = if is_toml {
+        let mut cfg = if is_toml {
             Self::from_toml(&text)
         } else {
             Self::from_yaml(&text)
         }
         .with_context(|| format!("parsing team config {}", path.display()))?;
+        // Toolbox paths are relative to the file that names them; from here
+        // on (the daemon's copy, a roster) they are absolute.
+        let dir = path.parent().unwrap_or_else(|| Path::new(""));
+        let base = if dir.is_absolute() {
+            dir.to_path_buf()
+        } else {
+            std::env::current_dir()
+                .context("finding the current directory")?
+                .join(dir)
+        };
+        let home = std::env::var_os("HOME")
+            .filter(|h| !h.is_empty())
+            .map(PathBuf::from);
+        cfg.absolutize_toolbox_paths(&base, home.as_deref());
         Ok(cfg)
+    }
+
+    /// Make the team's toolbox file paths absolute against `base`, the
+    /// directory of the team file.
+    pub fn absolutize_toolbox_paths(&mut self, base: &Path, home: Option<&Path>) {
+        absolutize_toolboxes(
+            &mut self.toolboxes,
+            &mut self.defaults,
+            &mut self.orchestrator,
+            &mut self.agents,
+            base,
+            home,
+        );
+    }
+
+    /// The declarations every member's toolbox resolves against.
+    pub fn toolbox_catalog(&self) -> toolbox::Catalog<'_> {
+        toolbox::Catalog {
+            bundles: &self.toolboxes,
+            defaults: &self.defaults.toolbox,
+            inherit_mcp: self.defaults.inherit_mcp,
+        }
+    }
+
+    /// Resolve a member's toolbox level (found at `path`) against this team.
+    pub fn resolve_toolbox(&self, member: &Toolbox, path: &str) -> Result<toolbox::Resolved> {
+        toolbox::resolve(self.toolbox_catalog(), member, path)
+    }
+
+    fn validate_toolboxes(&self) -> Result<()> {
+        let catalog = self.toolbox_catalog();
+        toolbox::validate_catalog(catalog)?;
+        let mut members: Vec<(&Toolbox, String)> = Vec::new();
+        if self.orchestrator.agent {
+            members.push((
+                &self.orchestrator.toolbox,
+                "orchestrator.toolbox".to_string(),
+            ));
+        } else if !self.orchestrator.toolbox.is_empty() {
+            bail!("orchestrator.toolbox is set, but orchestrator.agent is false");
+        }
+        for (i, agent) in self.agents.iter().enumerate() {
+            members.push((&agent.toolbox, format!("agents[{i}].toolbox")));
+        }
+        for (body, path) in members {
+            toolbox::validate_body(body, toolbox::Level::Member, &path)?;
+            toolbox::check_includes(body, &self.toolboxes, &path)?;
+            toolbox::resolve(catalog, body, &path)?;
+        }
+        Ok(())
     }
 
     pub fn from_yaml(text: &str) -> Result<Self> {
@@ -809,7 +906,26 @@ impl TeamConfig {
         if self.limits.context_warn_percent > 100 {
             bail!("limits.context_warn_percent must be between 0 and 100 (0 disables warnings)");
         }
+        self.validate_toolboxes()?;
         Ok(())
+    }
+}
+
+fn absolutize_toolboxes(
+    bundles: &mut BTreeMap<String, Toolbox>,
+    defaults: &mut AgentDefaults,
+    orchestrator: &mut OrchestratorConfig,
+    agents: &mut [AgentSpec],
+    base: &Path,
+    home: Option<&Path>,
+) {
+    for bundle in bundles.values_mut() {
+        bundle.absolutize(base, home);
+    }
+    defaults.toolbox.absolutize(base, home);
+    orchestrator.toolbox.absolutize(base, home);
+    for agent in agents {
+        agent.toolbox.absolutize(base, home);
     }
 }
 

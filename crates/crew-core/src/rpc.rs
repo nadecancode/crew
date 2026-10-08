@@ -43,7 +43,7 @@ pub enum Call {
     #[serde(deserialize_with = "empty_params")]
     AgentsList,
     AgentAdd {
-        spec: AgentSpec,
+        spec: Box<AgentSpec>,
     },
     AgentKill {
         id: String,

@@ -80,14 +80,14 @@ pub fn agent(target: &Target, cmd: AgentCommand) -> Result<()> {
                 None => None,
             };
             let agent: Agent = client.call(Call::AgentAdd {
-                spec: AgentSpec {
+                spec: Box::new(AgentSpec {
                     id,
                     role,
                     runtime,
                     model,
                     task,
                     ..AgentSpec::default()
-                },
+                }),
             })?;
             println!("added {} ({})", agent.id, agent.runtime);
         }

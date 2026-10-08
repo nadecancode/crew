@@ -1057,14 +1057,14 @@ reach it with agent_send(to=\"{}\").",
             let (agent, raw): (Agent, _) = rpc(
                 client,
                 Call::AgentAdd {
-                    spec: crew_core::config::AgentSpec {
+                    spec: Box::new(crew_core::config::AgentSpec {
                         id: arg_str(args, "id")?,
                         role: opt_str(args, "role").unwrap_or_default(),
                         runtime,
                         model: opt_str(args, "model"),
                         task: opt_str(args, "task"),
                         ..Default::default()
-                    },
+                    }),
                 },
             )?;
             // Started on the work style's fallback: say why, and for how long.

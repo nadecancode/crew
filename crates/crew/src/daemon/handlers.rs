@@ -260,7 +260,7 @@ change identity",
                 // temporary; the operator's are the operator's to remove.
                 let temporary =
                     matches!(&who, Who::Agent(_)) && self.model().session.founded_at.is_some();
-                reply(self.add_agent(spec, temporary).await?)
+                reply(self.add_agent(*spec, temporary).await?)
             }
             Call::AgentKill { id } => {
                 operator_only(&who)?;

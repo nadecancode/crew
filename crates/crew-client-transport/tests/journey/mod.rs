@@ -67,6 +67,7 @@ async fn team() -> Host {
         },
         backend: BackendChoice::Pty,
         herdr: Default::default(),
+        toolboxes: Default::default(),
         defaults: AgentDefaults {
             runtime: RuntimeKind::Shell,
             ..Default::default()
