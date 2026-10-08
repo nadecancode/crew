@@ -269,13 +269,11 @@ change identity",
                     conn.subscribe_after_reply = Some(marker);
                 }
                 // No feature is negotiated in P1. P2 chooses the connection's view.
-                reply(
-                    self.snapshot(
-                        messages.unwrap_or(200).min(2000),
-                        events.unwrap_or(300).min(5000),
-                    )?
-                    .legacy_projection(),
-                )
+                reply(self.feature_snapshot(
+                    conn,
+                    messages.unwrap_or(200).min(2000),
+                    events.unwrap_or(300).min(5000),
+                )?)
             }
             Call::Subscribe => {
                 conn.representation_started = true;

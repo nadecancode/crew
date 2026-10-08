@@ -137,13 +137,17 @@ impl Daemon {
             .map_err(internal)?;
 
         // Start from a clean slate; the event log is kept.
-        let previous_run = self.run_context().map_err(internal)?;
-        self.store.clear_session().map_err(internal)?;
-        self.feature_services.run_archived(&previous_run);
-        // The usage windows are the accounts', not the old team's.
-        self.save_quotas();
-        {
+        let previous_run = {
             let mut model = self.model();
+            let previous_run = self.run_context().map_err(internal)?;
+            self.feature_db
+                .clear_session(&previous_run.workspace_run_id, |tx| {
+                    if let Some(projection) = self.feature_services.task_projection() {
+                        projection.clear_run(tx, &previous_run.workspace_run_id)?;
+                    }
+                    Ok(())
+                })
+                .map_err(internal)?;
             let quotas = std::mem::take(&mut model.quotas);
             *model = Model {
                 quotas,
@@ -166,7 +170,11 @@ impl Daemon {
                 },
                 ..Model::default()
             };
-        }
+            previous_run
+        };
+        self.feature_services.run_archived(&previous_run);
+        // The usage windows are the accounts', not the old team's.
+        self.save_quotas();
         self.set_vcs(match &selection {
             Some(selection) => selection.vcs.clone(),
             None => Arc::new(vcs::Git::new(&self.workspace)),

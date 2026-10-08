@@ -137,6 +137,7 @@ impl Session {
         let frame = match serde_json::from_str::<Request>(text) {
             Ok(request) => {
                 let id = request.id;
+                let method = request.call.method();
                 // Input for an attached terminal is not acknowledged.
                 let silent = matches!(
                     request.call,
@@ -154,7 +155,7 @@ impl Session {
                         self.after_reply();
                         return true;
                     }
-                    Ok(result) => ServerFrame::ok(id, result),
+                    Ok(result) => ServerFrame::ok(id, legacy_task_result(method, result)),
                     Err(error) => ServerFrame::err(id, error),
                 }
             }
@@ -247,6 +248,11 @@ impl Drop for Session {
 }
 
 impl Conn {
+    pub(crate) fn has_feature(&self, feature: Feature) -> bool {
+        self.negotiated
+            .as_ref()
+            .is_some_and(|state| state.accepted(feature))
+    }
     pub(crate) fn feature_watch_count(&mut self, feature: Feature) -> usize {
         self.feature_tasks
             .retain(|_, (_, task)| !task.is_finished());
@@ -415,13 +421,14 @@ impl Daemon {
             task.abort();
         }
         conn.subscribed = true;
+        let epics = conn.has_feature(Feature::Epics);
         let tx = conn.tx.clone();
         conn.stream_task = Some(conn.spawn(async move {
             loop {
                 let frame = match rx.recv().await {
                     // P1 enables no features. P2 selects this projection or the
                     // negotiated stream per connection; never leak new variants.
-                    Ok(push) => match push.legacy_projection() {
+                    Ok(push) => match project_push(push, epics) {
                         Some(push) => ServerFrame::push(push),
                         None => continue,
                     },
@@ -435,6 +442,48 @@ impl Daemon {
             }
         }));
     }
+}
+
+fn project_push(push: Push, epics: bool) -> Option<Push> {
+    if !epics {
+        return push.legacy_projection();
+    }
+    match push {
+        Push::Task(_) | Push::Aside(_) | Push::DocsChanged(_) | Push::UsageChanged(_) => None,
+        other => Some(other),
+    }
+}
+
+fn legacy_task_result(method: &str, mut value: Value) -> Value {
+    fn task(value: &mut Value) {
+        if let Some(object) = value.as_object_mut() {
+            object.remove("epic");
+        }
+    }
+    match method {
+        "tasks_list" => {
+            if let Some(tasks) = value.as_array_mut() {
+                for item in tasks {
+                    task(item);
+                }
+            }
+        }
+        "task_get" => {
+            if let Some(item) = value.get_mut("task") {
+                task(item);
+            }
+            if let Some(dependencies) = value.get_mut("dependencies").and_then(Value::as_array_mut)
+            {
+                for item in dependencies {
+                    task(item);
+                }
+            }
+        }
+        "task_create" | "task_edit" | "task_assign" | "task_complete" | "task_fail"
+        | "task_retry" | "review_submit" => task(&mut value),
+        _ => {}
+    }
+    value
 }
 
 #[cfg(test)]
@@ -541,7 +590,16 @@ mod tests {
         for call in calls {
             assert!(session.request(&call.to_string()).await);
             let frame = rx.recv().await.unwrap();
-            assert_eq!(frame.error.unwrap().code, "unsupported_feature");
+            if call["method"] == "features_negotiate" {
+                let result = frame
+                    .result
+                    .expect("discovery is supported without backends");
+                assert_eq!(result["accepted"], serde_json::json!({}));
+                assert_eq!(result["unavailable"].as_object().unwrap().len(), 4);
+                assert!(result["connection_epoch"].is_string());
+            } else {
+                assert_eq!(frame.error.unwrap().code, "unsupported_feature");
+            }
         }
         assert!(running.daemon.model().tasks.is_empty());
         assert!(

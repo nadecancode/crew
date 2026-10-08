@@ -38,6 +38,19 @@ Report/task/message preparation uses the shared preflight validators exported
 from this module. A prepared decision retains the authenticated sender; an
 operator cannot manufacture a question from an agent.
 
+`TaskProjection` hydrates the board and task membership under the model fence.
+Its `apply_delta` saves hydrated upserts inside the supplied transaction and
+returns `TaskChange { tasks, publication }`; a no-op need not bump the board.
+`Daemon::commit_tasks_with` gives a scoped domain handler the same model and
+transaction, validates its committed upserts, and updates memory only after
+commit. Existing task order is preserved, with new cards appended. Grouped
+and legacy task publication share that result; persisted decisions use
+`MessageBus::publish_committed`, not another insertion. A durable outbox
+sequence is acknowledged through `TaskProjection::acknowledge` after
+publication. Failed acknowledgement leaves the domain receipt for replay.
+`TaskProjection::clear_run` runs before legacy session clearing in that same
+transaction, leaving private finalized report history to the domain.
+
 The first port checkpoint was verified with `cargo test --locked -p crew
 --lib features::tests` (12 tests). Watch protocol negatives, grouped task
 projection, client discovery and final integrated gates remain separate work.

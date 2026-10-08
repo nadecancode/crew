@@ -20,7 +20,9 @@ use tokio::sync::Notify;
 use super::server::{Conn, Who};
 use super::Daemon;
 
+mod tasks;
 mod watch;
+pub use tasks::{CommittedTasks, TaskChange, TaskProjection, TaskPublication, TaskView};
 pub use watch::FeatureWatch;
 pub(crate) use watch::PendingWatch;
 
@@ -50,9 +52,23 @@ pub trait FeatureService: Send + Sync {
 pub struct FeatureServices {
     services: RwLock<BTreeMap<Feature, Arc<dyn FeatureService>>>,
     connections: Mutex<HashMap<ConnId, ConnCtx>>,
+    task_projection: RwLock<Option<Arc<dyn TaskProjection>>>,
 }
 
 impl FeatureServices {
+    pub fn register_task_projection(&self, projection: Arc<dyn TaskProjection>) {
+        *self
+            .task_projection
+            .write()
+            .unwrap_or_else(|e| e.into_inner()) = Some(projection);
+    }
+
+    pub(crate) fn task_projection(&self) -> Option<Arc<dyn TaskProjection>> {
+        self.task_projection
+            .read()
+            .unwrap_or_else(|e| e.into_inner())
+            .clone()
+    }
     pub fn register(&self, service: Arc<dyn FeatureService>) {
         self.services
             .write()
@@ -128,6 +144,12 @@ pub(crate) struct Negotiated {
     unavailable: UnavailableFeatures,
 }
 
+impl Negotiated {
+    pub(crate) fn accepted(&self, feature: Feature) -> bool {
+        self.accepted.get(feature.name()) == Some(&FEATURE_VERSION)
+    }
+}
+
 impl Daemon {
     pub(crate) fn run_context(&self) -> Result<RunCtx, RpcError> {
         Ok(RunCtx {
@@ -169,6 +191,9 @@ impl Daemon {
                     }
                     Some(feature) if matches!(who, Who::Agent(_)) && feature != Feature::Epics => {
                         Some(FeatureUnavailable::NotAuthorized)
+                    }
+                    Some(Feature::Epics) if self.feature_services.task_projection().is_none() => {
+                        Some(FeatureUnavailable::NotReady)
                     }
                     Some(feature) => match self.feature_services.get(feature) {
                         None => Some(FeatureUnavailable::Unsupported),
@@ -242,11 +267,7 @@ impl Daemon {
                 "feature is unavailable on this connection",
             )
         };
-        if !conn
-            .negotiated
-            .as_ref()
-            .is_some_and(|state| state.accepted.get(feature.name()) == Some(&FEATURE_VERSION))
-        {
+        if !conn.has_feature(feature) {
             return Err(unsupported());
         }
         let service = self.feature_services.get(feature).ok_or_else(unsupported)?;
@@ -280,7 +301,12 @@ impl Daemon {
             }
             _ => None,
         };
-        if starts_watch && conn.feature_watch_count(feature) >= 4 {
+        let watch_limit = match feature {
+            Feature::Asides | Feature::Docs => 1,
+            Feature::UsageMetrics => 4,
+            Feature::Epics => 0,
+        };
+        if starts_watch && conn.feature_watch_count(feature) >= watch_limit {
             return Err(RpcError::new("busy", "feature watch limit reached"));
         }
         let result = service.handle(&context, call).await?;
@@ -463,6 +489,54 @@ mod tests {
 
     struct ReadyDocs;
 
+    struct WatchedDocs;
+    struct OneChange(bool);
+
+    #[async_trait::async_trait]
+    impl FeatureWatch for OneChange {
+        async fn next(&mut self) -> Result<Option<crew_core::rpc::Push>, RpcError> {
+            if self.0 {
+                std::future::pending::<()>().await;
+            }
+            self.0 = true;
+            Ok(Some(crew_core::rpc::Push::DocsChanged(Box::new(
+                crew_core::rpc::docs::DocsChanged {
+                    epoch: Id::new("docs-epoch").unwrap(),
+                    watch_id: Id::new("watch-1").unwrap(),
+                    from_revision: crew_core::rpc::features::Wide(1),
+                    to_revision: crew_core::rpc::features::Wide(2),
+                    upserts: Default::default(),
+                    removed_doc_ids: Default::default(),
+                    changed_selected: Default::default(),
+                    history_sources_changed: Default::default(),
+                    expired_seen_versions: Default::default(),
+                    resync_required: false,
+                },
+            ))))
+        }
+    }
+
+    #[async_trait::async_trait]
+    impl FeatureService for WatchedDocs {
+        fn feature(&self) -> Feature {
+            Feature::Docs
+        }
+        fn readiness(&self) -> Readiness {
+            Readiness::Ready
+        }
+        async fn handle(&self, _: &ConnCtx, call: Call) -> Result<Value, RpcError> {
+            match call {
+                Call::DocsWatch(_) => {
+                    Ok(json!({"watch_id":"watch-1","initial_index_page":{"epoch":"docs-epoch"}}))
+                }
+                _ => Ok(json!({})),
+            }
+        }
+        fn watch_stream(&self, _: ConnCtx, _: Id) -> Result<Box<dyn FeatureWatch>, RpcError> {
+            Ok(Box::new(OneChange(false)))
+        }
+    }
+
     #[test]
     fn report_preflight_uses_actual_caller_and_shared_byte_limit() {
         let agent = Caller::Agent {
@@ -635,6 +709,46 @@ mod tests {
         assert_eq!(result["unavailable"]["docs"], "unsupported");
         assert_eq!(result["unavailable"]["future"], "unsupported");
         assert_eq!(result["unavailable"]["epics"], "unsupported_version");
+        daemon.shutdown(true).await;
+    }
+
+    #[tokio::test]
+    async fn observer_initial_reply_precedes_metadata_and_snapshot_does_not_abort_it() {
+        let (_temp, running) = fixture().await;
+        let daemon = &running.daemon;
+        daemon.feature_services.register(Arc::new(WatchedDocs));
+        let (mut session, mut rx) = Session::new(daemon);
+        hello(daemon, &mut session, &mut rx).await;
+        request(
+            &mut session,
+            &mut rx,
+            "features_negotiate",
+            json!({"versions":{"docs":1}}),
+        )
+        .await;
+        assert!(
+            session
+                .request(
+                    &json!({"id":2,"method":"docs_watch","params":{"selected":[]}}).to_string()
+                )
+                .await
+        );
+        let reply = rx.recv().await.unwrap();
+        assert_eq!(reply.id, Some(2));
+        assert!(reply.error.is_none(), "{:?}", reply.error);
+        let metadata = tokio::time::timeout(Duration::from_secs(1), rx.recv())
+            .await
+            .unwrap()
+            .unwrap();
+        assert!(matches!(
+            metadata.push,
+            Some(crew_core::rpc::Push::DocsChanged(_))
+        ));
+        request(&mut session, &mut rx, "snapshot", json!({})).await;
+        // A duplicate watch is still occupied after the ordinary snapshot.
+        let duplicate = request(&mut session, &mut rx, "docs_watch", json!({"selected":[]})).await;
+        assert_eq!(duplicate.error.unwrap().code, "busy");
+        drop(session);
         daemon.shutdown(true).await;
     }
 
