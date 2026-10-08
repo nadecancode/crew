@@ -521,6 +521,12 @@ pub fn attach(driver: &mut Driver, scope: &ClientScope, agent: &str) -> (u64, u6
 }
 
 pub fn legacy_discovery(driver: &mut Driver, opened: HostUpdate) -> HostUpdate {
-    let (channel_id,id,_)=send(&opened,"features_negotiate");
-    driver.handle(HostEvent::Frame{channel_id,text:json!({"id":id,"error":{"code":"invalid","message":"old fixture daemon"}}).to_string()}).unwrap()
+    let (channel_id, id, _) = send(&opened, "features_negotiate");
+    driver
+        .handle(HostEvent::Frame {
+            channel_id,
+            text: json!({"id":id,"error":{"code":"invalid","message":"old fixture daemon"}})
+                .to_string(),
+        })
+        .unwrap()
 }

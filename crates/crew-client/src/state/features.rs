@@ -81,7 +81,7 @@ impl ClientState {
                     r.watch_id.clone(),
                     r.epoch.clone(),
                     r.initial.revision,
-                    FeatureAction::WatchUsage(q.clone()),
+                    FeatureAction::WatchUsage(*q.clone()),
                 ))
             }
             _ => None,
@@ -173,6 +173,18 @@ impl ClientState {
             {
                 self.invalidate_feature(Feature::Asides);
                 update.changes.availability = true;
+            }
+            (
+                Command::AsideCancel(_)
+                | Command::AsideRemove(_)
+                | Command::AsideUnwatch(_)
+                | Command::DocsUnwatch(_)
+                | Command::UsageUnwatch(_),
+                _,
+            ) => {
+                return Err(ClientError::DecodeFailure {
+                    message: "feature mutation reply identity differs".into(),
+                });
             }
             _ => {}
         }
@@ -335,12 +347,17 @@ impl ClientState {
         if watch.epoch == change.epoch && change.to_revision <= watch.revision {
             return Ok(());
         }
-        if watch.epoch != change.epoch
+        let lost_authority = watch.epoch != change.epoch
             || change.from_revision != watch.revision
             || change.resync_required
-        {
-            watch.stale = true;
-        }
+            || !change.removed_doc_ids.is_empty()
+            || change.changed_selected.iter().any(|s| {
+                matches!(
+                    s.kind,
+                    crew_protocol::docs::DocChangeKind::Policy
+                        | crew_protocol::docs::DocChangeKind::Removed
+                )
+            });
         watch.revision = change.to_revision;
         watch.stale = true;
         watch.change = Some(FeatureChange::Docs(change.clone()));
@@ -351,6 +368,17 @@ impl ClientState {
         // Expiry includes unselected retained views. Never silently select a
         // newer version. A selected expired snapshot can remain visibly stale.
         for resource in self.resources.values_mut() {
+            if lost_authority
+                && matches!(&resource.key.options,ReadOptions::Feature(q) if q.command().required_feature()==Some(Feature::Docs))
+            {
+                resource.value = None;
+                resource.error = Some(ClientReason {
+                    details: None,
+                    code: "snapshot_expired".into(),
+                    message: "Document authority changed; capture a new snapshot.".into(),
+                });
+                continue;
+            }
             if let Some(ResourceValue::Feature(v)) = &resource.value {
                 if let FeatureResponse::Document(r) = &v.response {
                     if let crew_protocol::docs::DocReadResult::Available(doc) = r.as_ref() {

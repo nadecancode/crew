@@ -436,6 +436,34 @@ fn resource_rank(kind: ResourceKind) -> u8 {
     }
 }
 
+fn feature_view(
+    state: &ClientState,
+    key: ResourceKey,
+    feature: crew_protocol::features::Feature,
+    wrap: fn(Box<ResourceState>) -> ViewPayload,
+) -> Result<ViewPayload, ClientError> {
+    if &key.entity.scope != selected_scope(state)? {
+        return Err(ClientError::InvalidInput {
+            field: "resource.scope".into(),
+            reason: "feature belongs to another workspace or attempt".into(),
+        });
+    }
+    let key = canonical_resource_key(&key)?;
+    let ReadOptions::Feature(read) = &key.options else {
+        return Err(ClientError::InvalidInput {
+            field: "resource.options".into(),
+            reason: "expected feature read".into(),
+        });
+    };
+    if read.command().required_feature() != Some(feature) {
+        return Err(ClientError::InvalidInput {
+            field: "resource.kind".into(),
+            reason: "feature view differs from resource".into(),
+        });
+    }
+    Ok(wrap(Box::new(state.current_resource(&key))))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1123,32 +1151,4 @@ mod tests {
             ["Required playwright: Needs $PLAYWRIGHT_TOKEN"]
         );
     }
-}
-
-fn feature_view(
-    state: &ClientState,
-    key: ResourceKey,
-    feature: crew_protocol::features::Feature,
-    wrap: fn(Box<ResourceState>) -> ViewPayload,
-) -> Result<ViewPayload, ClientError> {
-    if &key.entity.scope != selected_scope(state)? {
-        return Err(ClientError::InvalidInput {
-            field: "resource.scope".into(),
-            reason: "feature belongs to another workspace or attempt".into(),
-        });
-    }
-    let key = canonical_resource_key(&key)?;
-    let ReadOptions::Feature(read) = &key.options else {
-        return Err(ClientError::InvalidInput {
-            field: "resource.options".into(),
-            reason: "expected feature read".into(),
-        });
-    };
-    if read.command().required_feature() != Some(feature) {
-        return Err(ClientError::InvalidInput {
-            field: "resource.kind".into(),
-            reason: "feature view differs from resource".into(),
-        });
-    }
-    Ok(wrap(Box::new(state.current_resource(&key))))
 }

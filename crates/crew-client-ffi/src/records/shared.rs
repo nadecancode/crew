@@ -947,7 +947,7 @@ pub enum ResourceKind {
 
 #[uniffi::remote(Enum)]
 pub enum ReadOptions {
-    Feature(crew_client::features::FeatureRead),
+    Feature(super::features::BoxedFeatureRead),
     Default,
     Bounded {
         limit: u32,

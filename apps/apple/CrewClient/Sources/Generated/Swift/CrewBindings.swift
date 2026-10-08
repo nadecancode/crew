@@ -2767,7 +2767,7 @@ public func FfiConverterTypeArtifact_lower(_ value: Artifact) -> RustBuffer {
 
 public struct AsideAnswerMeta: Equatable, Hashable {
     public let target: AsideTarget
-    public let runtime: RuntimeKind
+    public let runtime: RuntimeKind?
     public let model: Text512?
     public let status: AsideStatus
     public let reason: AsideAnswerReason?
@@ -2783,7 +2783,7 @@ public struct AsideAnswerMeta: Equatable, Hashable {
 
     // Default memberwise initializers are never public by default, so we
     // declare one manually.
-    public init(target: AsideTarget, runtime: RuntimeKind, model: Text512?, status: AsideStatus, reason: AsideAnswerReason?, resetsAt: Timestamp?, contextAt: Timestamp?, contextApproximate: Bool, lastTurnAt: Timestamp?, startedAt: Timestamp?, finishedAt: Timestamp?, prefixReproduced: Bool, truncated: Bool, usage: AsideUsage?) {
+    public init(target: AsideTarget, runtime: RuntimeKind?, model: Text512?, status: AsideStatus, reason: AsideAnswerReason?, resetsAt: Timestamp?, contextAt: Timestamp?, contextApproximate: Bool, lastTurnAt: Timestamp?, startedAt: Timestamp?, finishedAt: Timestamp?, prefixReproduced: Bool, truncated: Bool, usage: AsideUsage?) {
         self.target = target
         self.runtime = runtime
         self.model = model
@@ -2817,7 +2817,7 @@ public struct FfiConverterTypeAsideAnswerMeta: FfiConverterRustBuffer {
         return
             try AsideAnswerMeta(
                 target: FfiConverterTypeAsideTarget.read(from: &buf), 
-                runtime: FfiConverterTypeRuntimeKind.read(from: &buf), 
+                runtime: FfiConverterOptionTypeRuntimeKind.read(from: &buf), 
                 model: FfiConverterOptionTypeText512.read(from: &buf), 
                 status: FfiConverterTypeAsideStatus.read(from: &buf), 
                 reason: FfiConverterOptionTypeAsideAnswerReason.read(from: &buf), 
@@ -2835,7 +2835,7 @@ public struct FfiConverterTypeAsideAnswerMeta: FfiConverterRustBuffer {
 
     public static func write(_ value: AsideAnswerMeta, into buf: inout [UInt8]) {
         FfiConverterTypeAsideTarget.write(value.target, into: &buf)
-        FfiConverterTypeRuntimeKind.write(value.runtime, into: &buf)
+        FfiConverterOptionTypeRuntimeKind.write(value.runtime, into: &buf)
         FfiConverterOptionTypeText512.write(value.model, into: &buf)
         FfiConverterTypeAsideStatus.write(value.status, into: &buf)
         FfiConverterOptionTypeAsideAnswerReason.write(value.reason, into: &buf)
@@ -20865,7 +20865,7 @@ public func FfiConverterTypeRasterType_lower(_ value: RasterType) -> RustBuffer 
 
 public enum ReadOptions: Equatable, Hashable {
     
-    case feature(FeatureRead
+    case feature(BoxedFeatureRead
     )
     case `default`
     case bounded(limit: UInt32
@@ -20895,7 +20895,7 @@ public struct FfiConverterTypeReadOptions: FfiConverterRustBuffer {
         let variant: Int32 = try readInt(&buf)
         switch variant {
         
-        case 1: return .feature(try FfiConverterTypeFeatureRead.read(from: &buf)
+        case 1: return .feature(try FfiConverterTypeBoxedFeatureRead.read(from: &buf)
         )
         
         case 2: return .`default`
@@ -20919,7 +20919,7 @@ public struct FfiConverterTypeReadOptions: FfiConverterRustBuffer {
         
         case let .feature(v1):
             writeInt(&buf, Int32(1))
-            FfiConverterTypeFeatureRead.write(v1, into: &buf)
+            FfiConverterTypeBoxedFeatureRead.write(v1, into: &buf)
             
         
         case .`default`:
@@ -30491,6 +30491,50 @@ public func FfiConverterTypeBoxedEvidence_lift(_ value: RustBuffer) throws -> Bo
 #endif
 public func FfiConverterTypeBoxedEvidence_lower(_ value: BoxedEvidence) -> RustBuffer {
     return FfiConverterTypeBoxedEvidence.lower(value)
+}
+
+
+
+/**
+ * Typealias from the type name used in the UDL file to the builtin type.  This
+ * is needed because the UDL type name is used in function/method signatures.
+ */
+public typealias BoxedFeatureRead = FeatureRead
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeBoxedFeatureRead: FfiConverter {
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> BoxedFeatureRead {
+        return try FfiConverterTypeFeatureRead.read(from: &buf)
+    }
+
+    public static func write(_ value: BoxedFeatureRead, into buf: inout [UInt8]) {
+        return FfiConverterTypeFeatureRead.write(value, into: &buf)
+    }
+
+    public static func lift(_ value: RustBuffer) throws -> BoxedFeatureRead {
+        return try FfiConverterTypeFeatureRead_lift(value)
+    }
+
+    public static func lower(_ value: BoxedFeatureRead) -> RustBuffer {
+        return FfiConverterTypeFeatureRead_lower(value)
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeBoxedFeatureRead_lift(_ value: RustBuffer) throws -> BoxedFeatureRead {
+    return try FfiConverterTypeBoxedFeatureRead.lift(value)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeBoxedFeatureRead_lower(_ value: BoxedFeatureRead) -> RustBuffer {
+    return FfiConverterTypeBoxedFeatureRead.lower(value)
 }
 
 

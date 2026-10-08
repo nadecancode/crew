@@ -907,7 +907,7 @@ pub struct SourceGap {
 #[uniffi::remote(Record)]
 pub struct AsideAnswerMeta {
     pub target: AsideTarget,
-    pub runtime: RuntimeKind,
+    pub runtime: Option<RuntimeKind>,
     pub model: Option<Text512>,
     pub status: AsideStatus,
     pub reason: Option<AsideAnswerReason>,
@@ -1923,3 +1923,6 @@ pub struct FeatureResourceValue {
     pub lease: Option<DocLease>,
     pub response: FeatureResponse,
 }
+
+pub type BoxedFeatureRead = Box<FeatureRead>;
+uniffi::custom_type!(BoxedFeatureRead, FeatureRead, { remote, lower: |value| *value, try_lift: |value| Ok(Box::new(value)), });

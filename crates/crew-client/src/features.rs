@@ -37,7 +37,7 @@ impl FeatureAction {
             Self::RemoveAside(p) => crate::Command::AsideRemove(p.clone()),
             Self::WatchAsides(p) => crate::Command::AsideWatch(p.clone()),
             Self::WatchDocs(p) => crate::Command::DocsWatch(p.clone()),
-            Self::WatchUsage(p) => crate::Command::UsageWatch(p.clone()),
+            Self::WatchUsage(p) => crate::Command::UsageWatch(Box::new(p.clone())),
             Self::UnwatchAsides(p) => crate::Command::AsideUnwatch(p.clone()),
             Self::UnwatchDocs(p) => crate::Command::DocsUnwatch(p.clone()),
             Self::UnwatchUsage(p) => crate::Command::UsageUnwatch(p.clone()),
@@ -299,11 +299,15 @@ impl FeatureRead {
             FeatureReadRequest::DocAsset(p) => crate::Command::DocsAsset(p.clone()),
             FeatureReadRequest::DocHistory(p) => crate::Command::DocsHistory(p.clone()),
             FeatureReadRequest::DocDiff(p) => crate::Command::DocsDiff(p.clone()),
-            FeatureReadRequest::UsageSummary(p) => crate::Command::UsageSummary(p.clone()),
-            FeatureReadRequest::UsageSeries(p) => crate::Command::UsageSeries(p.clone()),
-            FeatureReadRequest::UsageBreakdown(p) => crate::Command::UsageBreakdown(p.clone()),
+            FeatureReadRequest::UsageSummary(p) => {
+                crate::Command::UsageSummary(Box::new(p.clone()))
+            }
+            FeatureReadRequest::UsageSeries(p) => crate::Command::UsageSeries(Box::new(p.clone())),
+            FeatureReadRequest::UsageBreakdown(p) => {
+                crate::Command::UsageBreakdown(Box::new(p.clone()))
+            }
             FeatureReadRequest::UsageObservations(p) => {
-                crate::Command::UsageObservations(p.clone())
+                crate::Command::UsageObservations(Box::new(p.clone()))
             }
             FeatureReadRequest::UsageRuns(p) => crate::Command::UsageRuns(p.clone()),
             FeatureReadRequest::UsagePrices(p) => crate::Command::UsagePrices(p.clone()),

@@ -398,17 +398,43 @@ fn every_core_view_query_and_payload_keeps_its_variant_across_the_binding() {
         options: ReadOptions::Default,
     };
     let feature_key = |request| {
-        let read=FeatureRead {request,lease:None};
-        ResourceKey {entity:EntityKey{scope:captured.clone(),entity:Entity::Workspace},
-            kind:ResourceKind::Feature(read.kind()),options:ReadOptions::Feature(read)}
+        let read = FeatureRead {
+            request,
+            lease: None,
+        };
+        ResourceKey {
+            entity: EntityKey {
+                scope: captured.clone(),
+                entity: Entity::Workspace,
+            },
+            kind: ResourceKind::Feature(read.kind()),
+            options: ReadOptions::Feature(Box::new(read)),
+        }
     };
     let queries = [
         ViewQuery::Features,
-        ViewQuery::FeatureWatches {feature:Feature::Docs},
-        ViewQuery::Epic {key:feature_key(FeatureReadRequest::EpicBoard(RunScope{workspace_run_id:Id::new("run-1").unwrap()}))},
-        ViewQuery::Asides {key:feature_key(FeatureReadRequest::Asides(AsideList{workspace_run_id:Id::new("run-1").unwrap(),page:PageRequest::default()}))},
-        ViewQuery::Docs {key:feature_key(FeatureReadRequest::DocsIndex(PageRequest::default()))},
-        ViewQuery::UsageMetrics {key:feature_key(FeatureReadRequest::UsagePrices(UsagePrices{price_book_id:None}))},
+        ViewQuery::FeatureWatches {
+            feature: Feature::Docs,
+        },
+        ViewQuery::Epic {
+            key: feature_key(FeatureReadRequest::EpicBoard(RunScope {
+                workspace_run_id: Id::new("run-1").unwrap(),
+            })),
+        },
+        ViewQuery::Asides {
+            key: feature_key(FeatureReadRequest::Asides(AsideList {
+                workspace_run_id: Id::new("run-1").unwrap(),
+                page: PageRequest::default(),
+            })),
+        },
+        ViewQuery::Docs {
+            key: feature_key(FeatureReadRequest::DocsIndex(PageRequest::default())),
+        },
+        ViewQuery::UsageMetrics {
+            key: feature_key(FeatureReadRequest::UsagePrices(UsagePrices {
+                price_book_id: None,
+            })),
+        },
         ViewQuery::Availability {
             intent: Box::new(ActionIntent::StopTeam {
                 scope: captured.clone(),
@@ -448,11 +474,11 @@ fn every_core_view_query_and_payload_keeps_its_variant_across_the_binding() {
     for query in queries {
         let kind = match &query {
             ViewQuery::Features => "features",
-            ViewQuery::FeatureWatches {..} => "feature_watches",
-            ViewQuery::Epic {..} => "epic",
-            ViewQuery::Asides {..} => "asides",
-            ViewQuery::Docs {..} => "docs",
-            ViewQuery::UsageMetrics {..} => "usage_metrics",
+            ViewQuery::FeatureWatches { .. } => "feature_watches",
+            ViewQuery::Epic { .. } => "epic",
+            ViewQuery::Asides { .. } => "asides",
+            ViewQuery::Docs { .. } => "docs",
+            ViewQuery::UsageMetrics { .. } => "usage_metrics",
             ViewQuery::Availability { .. } => "availability",
             ViewQuery::Overview => "overview",
             ViewQuery::Team => "team",
@@ -559,7 +585,9 @@ fn native_feature_lifts_enforce_exact_numbers_bounds_and_safe_links() {
     rejects_native::<ExternalHref, _>("javascript:alert(1)".to_owned());
     let mut bytes = Vec::new();
     <i32 as FfiConverter<UniFfiTag>>::write(65, &mut bytes);
-    for n in 0..65 { <String as FfiConverter<UniFfiTag>>::write(n.to_string(), &mut bytes); }
+    for n in 0..65 {
+        <String as FfiConverter<UniFfiTag>>::write(n.to_string(), &mut bytes);
+    }
     assert!(<BoundedId64 as FfiConverter<UniFfiTag>>::try_read(&mut bytes.as_slice()).is_err());
 }
 

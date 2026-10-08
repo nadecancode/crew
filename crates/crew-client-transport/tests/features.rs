@@ -230,10 +230,10 @@ fn docs_sequence_uses_issuing_read_connection_and_cannot_reopen_its_lease() {
             entity: Entity::Workspace,
         },
         kind: ResourceKind::Feature(FeatureResourceKind::DocsIndex),
-        options: ReadOptions::Feature(FeatureRead {
+        options: ReadOptions::Feature(Box::new(FeatureRead {
             request: FeatureReadRequest::DocsIndex(PageRequest::default()),
             lease: None,
-        }),
+        })),
     };
     let plan = driver
         .plan(ActionIntent::Read {
@@ -311,13 +311,13 @@ fn docs_sequence_uses_issuing_read_connection_and_cannot_reopen_its_lease() {
     let lease = value.lease.unwrap();
     assert_eq!(lease.connection_epoch.as_str(), "read-1");
     let mut page = key.clone();
-    page.options = ReadOptions::Feature(FeatureRead {
+    page.options = ReadOptions::Feature(Box::new(FeatureRead {
         request: FeatureReadRequest::DocsIndex(PageRequest {
             cursor: Some(Id::new("page-2").unwrap()),
             limit: None,
         }),
         lease: Some(lease.clone()),
-    });
+    }));
     let continuation = driver
         .plan(ActionIntent::Read {
             scope: scope.clone(),
@@ -448,7 +448,7 @@ fn aside_key(driver: &Driver) -> ResourceKey {
             entity: Entity::Workspace,
         },
         kind: ResourceKind::Feature(FeatureResourceKind::AsideDetail),
-        options: ReadOptions::Feature(FeatureRead {
+        options: ReadOptions::Feature(Box::new(FeatureRead {
             request: FeatureReadRequest::AsideDetail(
                 serde_json::from_value(
                     json!({"workspace_run_id":"run-1","id":"aside-1","agent":null}),
@@ -456,7 +456,7 @@ fn aside_key(driver: &Driver) -> ResourceKey {
                 .unwrap(),
             ),
             lease: None,
-        }),
+        })),
     }
 }
 
@@ -601,4 +601,151 @@ fn typed_admission_failure_survives_transport_without_replaying_paid_ask() {
         .effects
         .iter()
         .any(|e| matches!(e, HostEffect::Send { .. })));
+}
+
+#[test]
+fn docs_expiry_invalidates_unselected_retained_version_and_watch_survives_snapshot() {
+    use crew_client::features::*;
+    use crew_protocol::features::{Id, List, Wide};
+    let (mut driver, root) = start_feature("docs");
+    let watched = feature_action(
+        &mut driver,
+        FeatureAction::WatchDocs(crew_protocol::docs::DocsWatch {
+            selected: List::default(),
+        }),
+    );
+    let (_, id, _) = common::send(&watched, "docs_watch");
+    frame(
+        &mut driver,
+        root,
+        id,
+        json!({"watch_id":"docs-watch","initial_index_page":{
+        "epoch":"docs-epoch","revision":"0","sources":[],"entries":[],"next_cursor":null,
+        "phase":"ready","watch_mode":"events","limited":false,"omitted_entries":null,"reason":null}}),
+    );
+    let request=FeatureRead {lease:Some(DocLease{connection_epoch:Id::new("root-1").unwrap(),docs_epoch:Id::new("docs-epoch").unwrap()}),
+        request:FeatureReadRequest::Document(serde_json::from_value(json!({"document":{"doc_id":"d","source_id":"s","source_generation":"1"},"version":{"kind":"id","id":"v"}})).unwrap())};
+    let key = ResourceKey {
+        entity: EntityKey {
+            scope: driver.notice().scope.unwrap(),
+            entity: Entity::Workspace,
+        },
+        kind: ResourceKind::Feature(request.kind()),
+        options: ReadOptions::Feature(Box::new(request)),
+    };
+    let reading = read_feature(&mut driver, key.clone());
+    let (_, id, _) = common::send(&reading, "docs_read");
+    frame(
+        &mut driver,
+        root,
+        id,
+        json!({"state":"available","data":{"epoch":"docs-epoch","snapshot_id":"snapshot-1",
+        "version":{"id":"v","document":{"doc_id":"d","source_id":"s","source_generation":"1"},"kind":"seen","markdown_hash":"h","bytes":1,"observed_at_ms":10,"recorded_at_ms":null,"commit_id":null,"change_id":null,"author":null,"subject":null},
+        "markdown":"x","blocks":[],"outline":[],"images":[],"render_hash":"r","notices":[]}}),
+    );
+    let ViewPayload::Docs(before) = driver
+        .query(ViewQuery::Docs { key: key.clone() })
+        .unwrap()
+        .payload
+    else {
+        panic!("docs")
+    };
+    assert!(before.value.is_some());
+    // A normal legacy stream resync starts a Snapshot; the Docs stream remains
+    // independently subscribed and must still consume expiry during that barrier.
+    driver
+        .handle(HostEvent::Frame {
+            channel_id: root,
+            text: json!({"push":{"kind":"resync"}}).to_string(),
+        })
+        .unwrap();
+    driver
+        .handle(HostEvent::Frame {
+            channel_id: root,
+            text: json!({"push":{"kind":"docs_changed","data":{
+        "watch_id":"docs-watch","epoch":"docs-epoch","from_revision":"0","to_revision":"1",
+        "upserts":[],"removed_doc_ids":[],"changed_selected":[],"history_sources_changed":[],
+        "expired_seen_versions":["v"],"resync_required":false}}})
+            .to_string(),
+        })
+        .unwrap();
+    let ViewPayload::Docs(after) = driver.query(ViewQuery::Docs { key }).unwrap().payload else {
+        panic!("docs")
+    };
+    assert!(after.value.is_none());
+    assert_eq!(after.error.unwrap().code, "version_expired");
+    let ViewPayload::FeatureWatches(w) = driver
+        .query(ViewQuery::FeatureWatches {
+            feature: crew_protocol::features::Feature::Docs,
+        })
+        .unwrap()
+        .payload
+    else {
+        panic!("watch")
+    };
+    assert_eq!(w[0].revision, Wide(1));
+}
+
+#[test]
+fn metrics_keep_explicit_historical_query_and_reject_cross_workspace_resources() {
+    use crew_client::features::*;
+    let (mut driver, _) = start_feature("usage_metrics");
+    let fixtures: Vec<Value> = serde_json::from_str(include_str!(
+        "../../crew-core/tests/fixtures/features/requests-v1.json"
+    ))
+    .unwrap();
+    let mut query: crew_protocol::usage_metrics::UsageQuery = serde_json::from_value(
+        fixtures
+            .iter()
+            .find(|v| v["method"] == "usage_observations")
+            .unwrap()["params"]
+            .clone(),
+    )
+    .unwrap();
+    query.scope.workspace_run_id = crew_protocol::features::Id::new("historical-run").unwrap();
+    query.from_ms = Some(crew_protocol::features::Timestamp::new(100).unwrap());
+    query.to_ms = Some(crew_protocol::features::Timestamp::new(200).unwrap());
+    let read = FeatureRead {
+        request: FeatureReadRequest::UsageObservations(query.clone()),
+        lease: None,
+    };
+    let key = ResourceKey {
+        entity: EntityKey {
+            scope: driver.notice().scope.unwrap(),
+            entity: Entity::Workspace,
+        },
+        kind: ResourceKind::Feature(read.kind()),
+        options: ReadOptions::Feature(Box::new(read.clone())),
+    };
+    let mut wrong = key.clone();
+    wrong.entity.scope.workspace_id = "other-workspace".into();
+    let denied = read_feature(&mut driver, wrong);
+    assert!(!denied
+        .effects
+        .iter()
+        .any(|e| matches!(e, HostEffect::Open { .. } | HostEffect::Send { .. })));
+    let opening = read_feature(&mut driver, key.clone());
+    let request = ready_feature_lane(&mut driver, &opening, "usage_metrics", "metrics-read");
+    let (channel, id, wire) = common::send(&request, "usage_observations");
+    assert_eq!(
+        wire["params"]["scope"]["workspace_run_id"],
+        "historical-run"
+    );
+    let mut changed = query;
+    changed.from_ms = Some(crew_protocol::features::Timestamp::new(101).unwrap());
+    frame(
+        &mut driver,
+        channel,
+        id,
+        json!({"revision":"1","query":changed,"rows":[],"next_cursor":null}),
+    );
+    let ViewPayload::UsageMetrics(value) = driver
+        .query(ViewQuery::UsageMetrics { key })
+        .unwrap()
+        .payload
+    else {
+        panic!("metrics")
+    };
+    assert!(value.value.is_none());
+    assert_eq!(value.error.unwrap().code, "decode");
 }

@@ -471,7 +471,7 @@ pub enum ResourceKind {
 #[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(tag = "kind", content = "data", rename_all = "snake_case")]
 pub enum ReadOptions {
-    Feature(crate::features::FeatureRead),
+    Feature(Box<crate::features::FeatureRead>),
     Default,
     Bounded {
         limit: u32,
@@ -789,13 +789,13 @@ command_catalog! {
     DocsDiff(_params: crew_protocol::docs::DocsDiff) => "docs_diff",
     DocsWatch(_params: crew_protocol::docs::DocsWatch) => "docs_watch",
     DocsUnwatch(_params: crew_protocol::features::Unwatch) => "docs_unwatch",
-    UsageSummary(_params: crew_protocol::usage_metrics::UsageQuery) => "usage_summary",
-    UsageSeries(_params: crew_protocol::usage_metrics::UsageQuery) => "usage_series",
-    UsageBreakdown(_params: crew_protocol::usage_metrics::UsageQuery) => "usage_breakdown",
-    UsageObservations(_params: crew_protocol::usage_metrics::UsageQuery) => "usage_observations",
+    UsageSummary(_params: Box<crew_protocol::usage_metrics::UsageQuery>) => "usage_summary",
+    UsageSeries(_params: Box<crew_protocol::usage_metrics::UsageQuery>) => "usage_series",
+    UsageBreakdown(_params: Box<crew_protocol::usage_metrics::UsageQuery>) => "usage_breakdown",
+    UsageObservations(_params: Box<crew_protocol::usage_metrics::UsageQuery>) => "usage_observations",
     UsageRuns(_params: crew_protocol::features::PageRequest) => "usage_runs",
     UsagePrices(_params: crew_protocol::usage_metrics::UsagePrices) => "usage_prices",
-    UsageWatch(_params: crew_protocol::usage_metrics::UsageQuery) => "usage_watch",
+    UsageWatch(_params: Box<crew_protocol::usage_metrics::UsageQuery>) => "usage_watch",
     UsageUnwatch(_params: crew_protocol::features::Unwatch) => "usage_unwatch",
     Ping => "ping",
     Snapshot { messages: Option<u32>, events: Option<u32> } => "snapshot",

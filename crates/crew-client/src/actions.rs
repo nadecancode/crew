@@ -608,6 +608,25 @@ impl Actions {
                         "feature action belongs to another workspace run",
                     ));
                 }
+                if let crate::features::FeatureAction::UnwatchAsides(q)
+                | crate::features::FeatureAction::UnwatchDocs(q)
+                | crate::features::FeatureAction::UnwatchUsage(q) = action
+                {
+                    let epoch = context
+                        .features
+                        .and_then(|f| f.session.as_ref())
+                        .map(|s| &s.connection_epoch);
+                    if !context.feature_watches.iter().any(|w| {
+                        w.feature == feature
+                            && w.watch_id == q.watch_id
+                            && Some(&w.connection_epoch) == epoch
+                    }) {
+                        return Err(unavailable(
+                            "stale_scope",
+                            "Watch belongs to another feature or connection.",
+                        ));
+                    }
+                }
                 let watch_limit = match action {
                     crate::features::FeatureAction::WatchAsides(_)
                     | crate::features::FeatureAction::WatchDocs(_) => Some(1),
