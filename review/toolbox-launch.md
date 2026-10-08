@@ -8,8 +8,9 @@ and reload stages a new selection without changing a running session.
 
 ## Composition
 
-The tested source commit is `bb3b57be`. This report is the only later change.
-That merge contains main `cb95b650` and all three coordinated slices:
+The full-matrix source commit is `bb3b57be`, approved with this report at
+`12dd7b9c`. The later landing composition is recorded below. The baseline merge
+contains main `cb95b650` and all three coordinated slices:
 
 - Toolbox launch: graph's implementation through `65a3d0f2` and the integration
   merges. I1 is fixed by immutable MCP snapshot references captured before
@@ -92,3 +93,24 @@ homes are isolated. Custom fake Codex sessions delegate inventory-only commands
 to the shared CLI stand-in, so an inventory no longer increments session counts
 or emits simulated lifecycle hooks. No product discovery bypass was added for
 tests.
+
+## Approved landing update
+
+`44eef93b` composes the approved launch with main `c2f690cb` and scheduler's
+approved K1 fix `acd945fe`. The only merge conflict was the Operator MCP row in
+`notes/toolboxes.md`; main's complete two-pass Discovery/Verification wording
+was retained. No toolbox adapter, snapshot-store or reference-resolution code
+changed. The product delta is the bounded keep-alive health fix and main's
+reviewed MCP tool wording changes.
+
+The full keep-alive code through `acd945fe` has a code-only approval; the default
+remains off and the D2 policy and priced experiment remain separate. Per the
+orchestrator's scoped integration gate, the merged source passes:
+
+- Crew library `keepalive::tests`: 8 passed (`final-k1-tests.log`).
+- Crew library `mcp::tools`: 6 passed (`final-tools-tests.log`).
+- `team`: 89 passed; `web_bundle`: 2 passed (`final-merge-tests.log`).
+
+Those logs are under `target/toolbox-launch/`. The integration commands use the
+same absolute short target and sandbox-capable environment as the matrix above.
+This update changes only the review report after the tested merge.
