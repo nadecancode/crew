@@ -99,6 +99,10 @@ impl Daemon {
     /// was last read.
     fn keepalives_due(&self, now: i64, limits: &Limits) -> Vec<(String, i64)> {
         let mut model = self.model();
+        // A finished team gives no more work.
+        if model.session.summary.is_some() {
+            return Vec::new();
+        }
         let quota_full = model
             .quotas
             .iter()
@@ -120,9 +124,11 @@ impl Daemon {
             {
                 continue;
             }
-            // At rest only. A member with a card to do is reminded instead.
+            // At rest only: waiting on someone, or between cards (Done is a
+            // member whose cards are all finished, until it is given the
+            // next). A member with a card to do is reminded instead.
             let resting = match agent.status {
-                AgentStatus::Waiting => true,
+                AgentStatus::Waiting | AgentStatus::Done => true,
                 AgentStatus::Idle => {
                     crate::tasks::executing_task(&model.tasks, &agent.id).is_none()
                 }
@@ -346,6 +352,15 @@ mod tests {
 
     #[tokio::test(start_paused = true)]
     async fn members_with_work_or_without_a_claude_session_are_left_alone() {
+        // A member between cards is kept warm; once the team is done, no one.
+        let (_temp, running, mut receiver) = fixture("done", Some(TaskStatus::Done)).await;
+        running.daemon.keepalive_at(2 * HOUR, &limits()).await;
+        assert!(sent(&mut receiver));
+        let (_temp, running, mut receiver) = fixture("done", Some(TaskStatus::Done)).await;
+        running.daemon.model().session.summary = Some("all done".into());
+        running.daemon.keepalive_at(2 * HOUR, &limits()).await;
+        assert!(!sent(&mut receiver));
+
         // An executing card: the member is reminded, not kept warm.
         let (_temp, running, mut receiver) = fixture("idle", Some(TaskStatus::Working)).await;
         running.daemon.keepalive_at(2 * HOUR, &limits()).await;

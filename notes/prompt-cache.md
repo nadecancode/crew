@@ -921,19 +921,23 @@ reminder (`Daemon::inject`), never a message:
 > Reply with just "ok", call no tools, and end your turn.
 
 - **Who gets one.** A Claude Code member is eligible when all of these hold:
-  - it is at rest (Waiting, or Idle without an executing card; the
-    orchestrator while the team works);
+  - it is at rest: Waiting, Done (between cards, until given the next), or
+    Idle without an executing card; the orchestrator rests as Waiting;
+  - the team has not finished;
   - it is ready and no turn is running;
   - it is not paused and not at a usage limit;
   - no compaction is queued, and no waking delivery is pending;
   - its last reported context is at least the threshold.
 - **Who does not.** Not a member with executing work: nudges cover it. Not
-  one that is Blocked, Done, retiring or temporary.
+  one that is Blocked, retiring or temporary.
 - **Usage limits.** It is skipped while any Claude Code usage window is 80%
   used or more, so keep-alives never spend the last of a window.
 - **D1.** It is queued at a turn boundary like any own-text line. If a
   delivery joins the keep-alive's turn, that turn is ordinary work from
-  then on.
+  then on. Matching a turn to its keep-alive needs D1's own-text marker,
+  surfaced on the native turn that consumed it. Until then, crew restores
+  a status only for a turn that ends within 10 minutes with no message; the
+  experiment does not rely on that.
 - **D4.** It is not a message:
   - nothing goes to an inbox, and it raises no obligation or follow-up;
   - it neither counts as nor resets a reminder or nudge;
@@ -963,8 +967,15 @@ sandbox off.
   - `keep_cache_warm_secs: 3000`, `keep_cache_warm_max: 6`,
     `keep_cache_warm_min_tokens: 0` (bench contexts are ~45k);
   - this sends one keep-alive to each Claude member at about 50 minutes;
-  - the runner's quiet check ignores requests in turns that an
-    `agent.keepalive` event started;
+  - a keep-alive turn is the member's first native turn after its
+    `agent.keepalive` event; the runner's quiet check ignores its requests
+    only if no `message.delivered` or `agent.reminded` event for that member
+    falls between the keep-alive event and that turn's last request;
+  - a keep-alive turn that a delivery joined is work: the pair is retained
+    and marked invalid, never excluded;
+  - both arms run the existing lifecycle as is: workers rest as Done after
+    the probes and the orchestrator as Waiting, both eligible;
+  - both arms run one daemon build, with only the setting changed;
   - gaps are measured from the last other request;
   - Codex gets none in either arm; its read share is reported in both as a
     control.
