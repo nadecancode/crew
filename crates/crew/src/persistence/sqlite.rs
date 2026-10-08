@@ -88,18 +88,19 @@ impl SqliteStore {
         Self::init(Connection::open_in_memory()?)
     }
 
-    fn init(conn: Connection) -> Result<Self> {
+    fn init(mut conn: Connection) -> Result<Self> {
         conn.busy_timeout(std::time::Duration::from_secs(5))?;
         // WAL keeps readers (e.g. `sqlite3` inspection) from blocking the daemon.
         conn.pragma_update(None, "journal_mode", "WAL").ok();
         conn.pragma_update(None, "synchronous", "NORMAL").ok();
         conn.execute_batch(SCHEMA).context("creating schema")?;
+        super::features::initialize(&mut conn)?;
         Ok(Self {
             conn: Mutex::new(conn),
         })
     }
 
-    fn conn(&self) -> MutexGuard<'_, Connection> {
+    pub(super) fn conn(&self) -> MutexGuard<'_, Connection> {
         self.conn.lock().unwrap_or_else(|e| e.into_inner())
     }
 }
@@ -129,12 +130,13 @@ fn load_docs<T: serde::de::DeserializeOwned>(conn: &Connection, table: &str) -> 
 
 impl AgentStore for SqliteStore {
     fn save_agent(&self, agent: &Agent) -> Result<()> {
-        upsert_doc(
-            &self.conn(),
-            "agents",
-            &agent.id,
-            &serde_json::to_string(agent)?,
-        )
+        let mut conn = self.conn();
+        let tx = conn.transaction()?;
+        let run = super::features::ensure_current(&tx, now_ms())?;
+        super::features::ensure_member(&tx, &run.id, &agent.id, now_ms())?;
+        upsert_doc(&tx, "agents", &agent.id, &serde_json::to_string(agent)?)?;
+        tx.commit()?;
+        Ok(())
     }
 
     fn load_agents(&self) -> Result<Vec<Agent>> {
@@ -142,9 +144,17 @@ impl AgentStore for SqliteStore {
     }
 
     fn delete_agent(&self, id: &str) -> Result<()> {
-        let conn = self.conn();
-        conn.execute("DELETE FROM agents WHERE id = ?1", params![id])?;
-        conn.execute("DELETE FROM tokens WHERE agent_id = ?1", params![id])?;
+        let mut conn = self.conn();
+        let tx = conn.transaction()?;
+        let run = super::features::ensure_current(&tx, now_ms())?;
+        tx.execute(
+            "UPDATE feature_members SET retired_at = ?1
+             WHERE run_id = ?2 AND agent_id = ?3 AND retired_at IS NULL",
+            params![now_ms(), run.id.as_str(), id],
+        )?;
+        tx.execute("DELETE FROM agents WHERE id = ?1", params![id])?;
+        tx.execute("DELETE FROM tokens WHERE agent_id = ?1", params![id])?;
+        tx.commit()?;
         Ok(())
     }
 
@@ -512,17 +522,7 @@ impl MetaStore for SqliteStore {
 
 impl SessionStore for SqliteStore {
     fn clear_session(&self) -> Result<()> {
-        self.conn().execute_batch(
-            "BEGIN;
-             DELETE FROM agents;
-             DELETE FROM tokens;
-             DELETE FROM tasks;
-             DELETE FROM messages;
-             DELETE FROM deliveries;
-             DELETE FROM meta;
-             COMMIT;",
-        )?;
-        Ok(())
+        super::features::clear_session(&mut self.conn())
     }
 }
 

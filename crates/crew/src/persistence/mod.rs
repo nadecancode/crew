@@ -7,6 +7,7 @@ use anyhow::Result;
 use crew_core::{Agent, Event, EventLevel, InboxEntry, Message, Task};
 use serde_json::Value;
 
+pub mod features;
 pub mod sqlite;
 
 pub use sqlite::SqliteStore;

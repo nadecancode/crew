@@ -31,6 +31,7 @@ mod dashboard;
 mod delivery;
 pub(crate) use delivery::native_hook;
 mod fallback;
+pub mod features;
 mod gitops;
 mod handlers;
 mod keepalive;
