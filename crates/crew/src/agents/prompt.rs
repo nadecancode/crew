@@ -75,7 +75,8 @@ const TOOLS_COMMON: &str = "\
 sent or received).
 - agent_compact(keep?) — compact your own conversation when your context window is filling up; \
 it happens when the current turn ends, and you are pointed back to your task afterwards.
-- tasks_list() — the board: every task with status, dependencies and artifacts.
+- tasks_list(done?) — the board: open tasks in full, done ones one line each; done: true shows \
+them in full too.
 - task_get(id?) — one task's card: what is to be done, the results and commits it builds on, its \
 reviewer, where it stands. Without an id, your task in progress.";
 
