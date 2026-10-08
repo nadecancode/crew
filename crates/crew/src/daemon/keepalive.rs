@@ -12,7 +12,9 @@
 //! A keep-alive is not work and is not a message. It goes through the same
 //! path as crew's reminders, so nothing reaches an inbox and nothing is
 //! asked of anyone. It neither counts as nor resets a reminder or a nudge.
-//! A status the member set for itself before it is kept (signals.rs).
+//! Its turn needs no telling apart from others: only a member Waiting on
+//! open work gets one, and such a member rests as Waiting again when any
+//! turn ends (its parked card, or the team's open cards, say so).
 
 use crew_core::config::Limits;
 use crew_core::util::now_ms;
@@ -29,25 +31,6 @@ of you. Reply with just \"ok\", call no tools, and end your turn.";
 /// No keep-alive while any Claude Code usage window is this full: the last
 /// of a window is for work.
 const QUOTA_CEILING: f32 = 80.0;
-
-/// A keep-alive not followed by a turn's end within this long was not
-/// taken up by the session; the next turn to end is not its.
-const ANSWER_WITHIN_MS: i64 = 10 * 60_000;
-
-/// A keep-alive sent and not yet answered.
-#[derive(Debug, Clone)]
-pub(crate) struct Sent {
-    pub at: i64,
-    /// The status the member had set for itself when it was sent.
-    pub self_status: Option<AgentStatus>,
-}
-
-impl Sent {
-    /// Whether the turn ending at `now` is the keep-alive's.
-    pub(crate) fn answered_by_turn_ending_at(&self, now: i64) -> bool {
-        now - self.at <= ANSWER_WITHIN_MS
-    }
-}
 
 impl Daemon {
     pub(crate) async fn keepalive_housekeeping(&self) {
@@ -67,17 +50,17 @@ impl Daemon {
                 let mut model = self.model();
                 let rt = model.rt(&id);
                 rt.keepalives += 1;
-                rt.keepalive = Some(Sent {
-                    at: now,
-                    self_status: rt.self_status,
-                });
+                rt.keepalive_sent_at = Some(now);
+                if rt.keepalives == 1 {
+                    rt.keepalive_rest_from = now;
+                }
                 rt.keepalives
             };
             if !self.inject(&id, TEXT).await {
                 let mut model = self.model();
                 let rt = model.rt(&id);
                 rt.keepalives -= 1;
-                rt.keepalive = None;
+                rt.keepalive_sent_at = None;
                 continue;
             }
             self.emit(
@@ -144,43 +127,33 @@ impl Daemon {
                 continue;
             }
             let rt = model.rt(&agent.id);
+            // A message put into its session since the rest's first
+            // keep-alive was work: the rest starts again.
+            if rt.keepalives > 0 && rt.delivered_at > rt.keepalive_rest_from {
+                rt.keepalives = 0;
+            }
             if !rt.ready
                 || rt.turn_active
                 || rt.pending_prompt.is_some()
                 || !rt.in_flight.is_empty()
-                || rt.keepalive.is_some()
                 || rt.keepalives >= limits.keep_cache_warm_max
             {
                 continue;
             }
             // Its cache was last read at its last request: the end of its
-            // last turn, or the context reading that came with it.
-            let last = rt.turn_ended_at.max(context.updated_at);
+            // last turn, or the context reading that came with it. A
+            // keep-alive the session has not run yet counts from when it
+            // was sent, so none piles up behind it.
+            let last = rt
+                .turn_ended_at
+                .max(context.updated_at)
+                .max(rt.keepalive_sent_at.unwrap_or(0));
             if last == 0 || now - last < (limits.keep_cache_warm_secs as i64) * 1000 {
                 continue;
             }
             due.push((agent.id.clone(), last));
         }
         due
-    }
-
-    /// A turn of `id` ended. If it was a keep-alive's, the status the member
-    /// set for itself before it is put back. A turn that was given a
-    /// message, or in which the member set a status, is work: the count of
-    /// keep-alives starts again, as after any other turn.
-    pub(crate) fn keepalive_turn_ended(&self, id: &str, now: i64) {
-        let mut model = self.model();
-        let rt = model.rt(id);
-        match rt.keepalive.take() {
-            Some(sent)
-                if sent.answered_by_turn_ending_at(now)
-                    && rt.turn_messages.is_empty()
-                    && rt.self_status.is_none() =>
-            {
-                rt.self_status = sent.self_status;
-            }
-            _ => rt.keepalives = 0,
-        }
     }
 }
 
@@ -259,7 +232,6 @@ mod tests {
 
     /// The turn a keep-alive starts, as the session would run it.
     fn answer(daemon: &Daemon, at: i64) {
-        daemon.keepalive_turn_ended("owner", at);
         daemon.model().rt("owner").turn_ended_at = at;
     }
 
@@ -286,8 +258,8 @@ mod tests {
             assert!(!sent(&mut receiver), "keep-alive {n} early");
             daemon.keepalive_at(at + every, &limits).await;
             assert!(sent(&mut receiver), "keep-alive {n} due");
-            // Not again before the session has answered.
-            daemon.keepalive_at(at + 2 * every, &limits).await;
+            // One at a time: the next counts from this one.
+            daemon.keepalive_at(at + 2 * every - 1, &limits).await;
             assert!(!sent(&mut receiver), "keep-alive {n} repeated");
             at += every + 5_000;
             answer(daemon, at);
@@ -319,18 +291,17 @@ mod tests {
         answer(daemon, 2 * HOUR + 5_000);
         daemon.keepalive_at(4 * HOUR, &limits).await;
         assert!(!sent(&mut receiver));
-        // A turn that was given a message is work.
-        daemon.model().rt("owner").turn_messages = vec!["m-1".into()];
-        daemon.keepalive_turn_ended("owner", 5 * HOUR);
-        daemon.model().rt("owner").turn_messages.clear();
+        // A message put into its session is work.
+        daemon.model().rt("owner").delivered_at = 5 * HOUR - 60_000;
         daemon.model().rt("owner").turn_ended_at = 5 * HOUR;
-        assert_eq!(daemon.model().rt("owner").keepalives, 0);
         daemon.keepalive_at(6 * HOUR, &limits).await;
         assert!(sent(&mut receiver));
+        assert_eq!(daemon.model().rt("owner").keepalives, 1);
     }
 
     #[tokio::test(start_paused = true)]
-    async fn the_status_a_member_set_survives_its_keep_alive() {
+    async fn a_keep_alive_turn_leaves_the_member_waiting() {
+        use crate::agents::Signal;
         let (_temp, running, mut receiver) = fixture("blocked", Some(TaskStatus::Waiting)).await;
         let daemon = &running.daemon;
         // A blocked member is not woken.
@@ -340,14 +311,19 @@ mod tests {
         daemon.model().rt("owner").self_status = Some(AgentStatus::Waiting);
         daemon.keepalive_at(2 * HOUR, &limits()).await;
         assert!(sent(&mut receiver));
-        // The keep-alive's turn started (which clears it) and ended.
-        daemon.model().rt("owner").self_status = None;
-        daemon.keepalive_turn_ended("owner", 2 * HOUR + 5_000);
+        // The session runs it as a turn: working while it lasts, then at
+        // rest as before, with its card still parked.
+        daemon.on_signal("owner", Signal::TurnStarted).await;
+        assert_eq!(daemon.agent("owner").unwrap().status, AgentStatus::Working);
+        daemon.on_signal("owner", Signal::TurnEnded).await;
+        assert_eq!(daemon.agent("owner").unwrap().status, AgentStatus::Waiting);
         assert_eq!(
-            daemon.model().rt("owner").self_status,
-            Some(AgentStatus::Waiting)
+            daemon.model().task("card").unwrap().status,
+            TaskStatus::Waiting
         );
         assert_eq!(daemon.model().rt("owner").keepalives, 1);
+        // It counted as no reminder.
+        assert_eq!(daemon.model().rt("owner").nudges, 0);
     }
 
     #[tokio::test(start_paused = true)]

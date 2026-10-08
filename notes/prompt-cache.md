@@ -939,16 +939,15 @@ reminder (`Daemon::inject`), never a message:
   used or more, so keep-alives never spend the last of a window.
 - **D1.** It is queued at a turn boundary like any own-text line. If a
   delivery joins the keep-alive's turn, that turn is ordinary work from
-  then on. Matching a turn to its keep-alive needs D1's own-text marker,
-  surfaced on the native turn that consumed it. Until then, crew restores
-  a status only for a turn that ends within 10 minutes with no message; the
-  experiment does not rely on that.
+  then on. Crew never needs to tell which turn was the keep-alive's: only
+  a member Waiting on open work gets one, and it rests as Waiting again when
+  any turn ends. A message put into its session (D1 delivery) restarts the
+  count of keep-alives for that rest. No change to `turn_ended` or `inject`.
 - **D4.** It is not a message:
   - nothing goes to an inbox, and it raises no obligation or follow-up;
   - it neither counts as nor resets a reminder or nudge;
-  - the member's status is kept: a Waiting or Blocked self-status set before
-    the keep-alive is restored when its turn ends, unless the member changed
-    it or was given a message in that turn.
+  - the member's status is kept: its parked card (or the team's open
+    cards, for the orchestrator) puts it back to Waiting when the turn ends.
 - **Visibility.** Each keep-alive is an `agent.keepalive` event, so
   collectors and dashboards can tell its requests from work.
 - **History.** Each keep-alive adds `Δin + Δout` to the session. The cap

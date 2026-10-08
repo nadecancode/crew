@@ -291,8 +291,6 @@ impl Daemon {
 
     /// A turn is over (it completed, or it failed): the agent is at rest.
     fn turn_ended(&self, id: &str, now: i64) {
-        // A keep-alive's turn keeps the status the member set before it.
-        self.keepalive_turn_ended(id, now);
         let (transcript, asked) = {
             let mut model = self.model();
             let rt = model.rt(id);

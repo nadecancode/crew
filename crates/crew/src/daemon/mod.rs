@@ -233,8 +233,10 @@ pub(crate) struct AgentRuntimeState {
     pub protocol_warned_at: i64,
     /// Cache keep-alives sent since it last worked (keepalive.rs).
     pub keepalives: u32,
-    /// The keep-alive sent and not yet answered by a turn's end.
-    pub keepalive: Option<keepalive::Sent>,
+    /// When the keep-alive not yet followed by a turn's end was sent.
+    pub keepalive_sent_at: Option<i64>,
+    /// When the rest's first keep-alive was sent.
+    pub keepalive_rest_from: i64,
 }
 
 #[derive(Default)]
