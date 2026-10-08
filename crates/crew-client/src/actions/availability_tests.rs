@@ -70,6 +70,8 @@ impl Facts {
 
     fn context(&self) -> ActionContext<'_> {
         ActionContext {
+            features: None,
+            feature_watches: &[],
             connection: self.connection.as_ref(),
             endpoint: self.endpoint,
             workspace: self.workspace,

@@ -149,6 +149,8 @@ impl Daemon {
         }
         // A complete header proving a child is final. Only incomplete or
         // unavailable metadata gets a bounded flush-race retry, under the hook lease.
+        // Other hooks may run concurrently; a replacement launch waits for
+        // this hook's bounded retry window before it changes the launch mark.
         let mut status = CodexHeader::Unavailable;
         for attempt in 0..6 {
             status = self.codex_header_status(id, thread).await;
@@ -162,12 +164,17 @@ impl Daemon {
         match status {
             CodexHeader::Child => return false,
             CodexHeader::Unavailable => {
-                self.model().rt(id).codex_pending_thread = Some(thread.to_string());
-                self.model()
-                    .local
-                    .entry(id.to_string())
-                    .or_default()
-                    .session_confirmed = false;
+                {
+                    let mut model = self.model();
+                    let local = model.local.entry(id.to_string()).or_default();
+                    // An absent child rollout is not evidence that the known
+                    // parent stopped being current. Preserve its whole binding.
+                    if local.codex_parent_session.is_some() {
+                        return false;
+                    }
+                    local.session_confirmed = false;
+                    model.rt(id).codex_pending_thread = Some(thread.to_string());
+                }
                 self.save_local(id);
                 self.update_agent(id, |agent| {
                     agent.activity =
@@ -1176,5 +1183,36 @@ mod codex_parent_tests {
             .daemon()
             .confirmed_codex_parent("parent", root["notify"]["thread-id"].as_str().unwrap()));
         assert!(f.daemon().model().rt("parent").turn_active);
+    }
+
+    #[tokio::test]
+    async fn a_missing_child_rollout_never_revokes_the_known_parent_binding() {
+        let f = fixture().await;
+        let parent = f.case(0, 0);
+        f.header("parent", &parent);
+        f.hook("parent", &parent).await;
+        let thread = parent["notify"]["thread-id"].as_str().unwrap();
+        let before = serde_json::to_value(f.daemon().agent("parent")).unwrap();
+        f.daemon().model().rt("parent").turn_active = true;
+        let child = f.case(0, 1);
+        f.hook("parent", &child).await;
+        assert_eq!(
+            serde_json::to_value(f.daemon().agent("parent")).unwrap(),
+            before
+        );
+        assert!(f.daemon().confirmed_codex_parent("parent", thread));
+        assert!(f.daemon().model().rt("parent").turn_active);
+        assert!(f
+            .daemon()
+            .model()
+            .rt("parent")
+            .codex_pending_thread
+            .is_none());
+        f.daemon().prepare_codex_parent_resume("parent", true).await;
+        assert_eq!(
+            f.daemon().agent("parent").unwrap().session_id.as_deref(),
+            Some(thread)
+        );
+        assert!(f.daemon().confirmed_codex_parent("parent", thread));
     }
 }

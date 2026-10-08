@@ -581,6 +581,7 @@ fn known_route_startup_time_cannot_be_replaced_during_first_snapshot() {
             },
         })
         .unwrap();
+    let loading = legacy_discovery(&mut driver, loading);
     let (_, request, _) = send(&loading, "subscribe");
     let loading = reply(&mut driver, channel, request, json!({"subscribed":true}));
     let (_, request, _) = send(&loading, "snapshot");
@@ -689,6 +690,7 @@ fn workspace_reconnect_keeps_authenticated_index_attempt_and_filtered_listing() 
             },
         })
         .unwrap();
+    let open = legacy_discovery(&mut driver, open);
     let (_, request, _) = send(&open, "subscribe");
     let loading = reply(&mut driver, root, request, json!({"subscribed":true}));
     let (_, request, _) = send(&loading, "snapshot");
@@ -1031,6 +1033,7 @@ fn gateway_opened(driver: &mut Driver, update: &HostUpdate) -> u64 {
             },
         })
         .unwrap();
+    let open = legacy_discovery(driver, open);
     let (_, request, _) = send(&open, "subscribe");
     let loading = reply(driver, root, request, json!({"subscribed":true}));
     let (_, request, _) = send(&loading, "snapshot");

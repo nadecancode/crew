@@ -99,6 +99,7 @@ pub struct ServiceHandle {
 
 fn busy() -> ClientReason {
     ClientReason {
+        details: None,
         code: "busy".into(),
         message: "The client is busy. Try again.".into(),
     }
@@ -106,6 +107,7 @@ fn busy() -> ClientReason {
 
 fn closed() -> ClientReason {
     ClientReason {
+        details: None,
         code: "closed".into(),
         message: "The client has closed.".into(),
     }

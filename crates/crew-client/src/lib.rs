@@ -14,6 +14,7 @@ pub mod usage;
 pub mod work;
 
 pub mod engine;
+pub mod features;
 
 mod history;
 mod presentation;

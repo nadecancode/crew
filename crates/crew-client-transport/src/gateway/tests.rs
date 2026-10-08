@@ -99,9 +99,13 @@ fn live_shared_policy_and_gateway_purposes_gate_every_app_method() {
     all.capabilities = vec![Capability::Read, Capability::Control, Capability::Terminal];
     all.allowed_actions = CommandKind::ALL
         .iter()
-        .filter(|kind| method_policy(**kind).gateway != GatewayPermission::Denied)
+        .filter(|kind| {
+            method_policy(**kind).gateway != GatewayPermission::Denied
+                && crew_protocol::features::feature_method(kind.method()).is_none()
+        })
         .map(|kind| kind.method().to_string())
         .collect();
+    super::authority::validate_grant(&all).unwrap();
     for kind in CommandKind::ALL {
         let text = serde_json::json!({"id":7,"method":kind.method(),"params":{}}).to_string();
         for purpose in [
@@ -113,23 +117,45 @@ fn live_shared_policy_and_gateway_purposes_gate_every_app_method() {
         ] {
             let permission = method_policy(*kind).gateway;
             let allowed = *kind == CommandKind::Ping
-                || match purpose {
-                    native::ChannelPurpose::Index => *kind == CommandKind::Workspaces,
-                    native::ChannelPurpose::Workspace => {
-                        permission == GatewayPermission::Read && *kind != CommandKind::Workspaces
-                    }
-                    native::ChannelPurpose::Read => {
-                        permission == GatewayPermission::Read
-                            && !matches!(kind, CommandKind::Workspaces | CommandKind::Subscribe)
-                    }
-                    native::ChannelPurpose::Action => {
-                        permission == GatewayPermission::Control || *kind == CommandKind::AgentInput
-                    }
-                    native::ChannelPurpose::Terminal => matches!(
-                        kind,
-                        CommandKind::Attach | CommandKind::AttachInput | CommandKind::AttachResize
-                    ),
-                };
+                || (*kind == CommandKind::FeaturesNegotiate
+                    && matches!(
+                        purpose,
+                        native::ChannelPurpose::Workspace
+                            | native::ChannelPurpose::Read
+                            | native::ChannelPurpose::Action
+                    ))
+                || (*kind != CommandKind::FeaturesNegotiate
+                    && match purpose {
+                        native::ChannelPurpose::Index => *kind == CommandKind::Workspaces,
+                        native::ChannelPurpose::Workspace => {
+                            permission == GatewayPermission::Read
+                                && *kind != CommandKind::Workspaces
+                        }
+                        native::ChannelPurpose::Read => {
+                            permission == GatewayPermission::Read
+                                && !matches!(
+                                    kind,
+                                    CommandKind::Workspaces
+                                        | CommandKind::Subscribe
+                                        | CommandKind::AsideWatch
+                                        | CommandKind::AsideUnwatch
+                                        | CommandKind::DocsWatch
+                                        | CommandKind::DocsUnwatch
+                                        | CommandKind::UsageWatch
+                                        | CommandKind::UsageUnwatch
+                                )
+                        }
+                        native::ChannelPurpose::Action => {
+                            permission == GatewayPermission::Control
+                                || *kind == CommandKind::AgentInput
+                        }
+                        native::ChannelPurpose::Terminal => matches!(
+                            kind,
+                            CommandKind::Attach
+                                | CommandKind::AttachInput
+                                | CommandKind::AttachResize
+                        ),
+                    });
             assert_eq!(
                 super::connector::request_kind(7, &text, purpose, Some(&all)).is_ok(),
                 allowed,

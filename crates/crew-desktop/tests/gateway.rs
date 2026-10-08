@@ -372,6 +372,7 @@ fn notice(
         endpoint,
         workspace,
         reason: reason.map(|code| ClientReason {
+            details: None,
             code: code.into(),
             message: "connector detail".into(),
         }),
@@ -616,6 +617,7 @@ fn presentation(app: &gtk::Application) {
     remote.respond(RemoteResponse::ConnectFailed {
         profile_id: profile_id.clone(),
         reason: ClientReason {
+            details: None,
             code: "authentication".into(),
             message: "connector detail".into(),
         },

@@ -12,8 +12,8 @@ mod commands;
 use commands::construct;
 
 #[test]
-fn all_31_command_records_have_compatible_protocol_6_parameter_shapes() {
-    assert_eq!(CommandKind::ALL.len(), 31);
+fn all_59_command_records_have_compatible_protocol_6_parameter_shapes() {
+    assert_eq!(CommandKind::ALL.len(), 59);
     for kind in CommandKind::ALL {
         for boundary in [false, true] {
             let command = construct(*kind, boundary);
