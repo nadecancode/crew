@@ -365,6 +365,12 @@ Asides are kept in the daemon's memory: the last 50, with each answer cut to
 
 ## Protocol and entry points
 
+These records are this design's proposal. The final wire shape, the v6
+capability flag and the shared `rpc.rs`, client and FFI ownership are settled
+by `feature-protocol-plan` (native-architect, m-58efd3a1449f): additive, with
+the aside calls as distinct scoped RPC methods and no unscoped fallback for an
+older daemon. A client that does not see the capability offers no aside.
+
 Wire types in `crew-protocol` (operator calls only; no agent tool, so members'
 tool catalogs and prefixes are unchanged):
 
@@ -455,7 +461,8 @@ one live run (B10).
    - the TUI `/btw` command and panel;
    - `crew btw` in the CLI.
 
-   Protocol types land first, so 1 and 2 build on them.
+   Protocol types land first, in the shape `feature-protocol-plan` fixes,
+   so 1 and 2 build on them.
 4. **`aside-acceptance` (qa):** B01–B12 with the btw probes as fixtures; B10
    in one live run with the operator's agreement on credentials and cost.
 
