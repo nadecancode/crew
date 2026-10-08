@@ -104,7 +104,7 @@ adapter must not stand in for the cargo adapter in a comparison. Likewise,
 `tokf apply --exit-code` selects a filter branch; it does not measure the
 status of `tokf run`, which has the masking behavior described above.
 
-Scratch evidence is in the reviewer's `target/token-savers-research/`:
+Scratch evidence is in cache-reviewer's worktree, under `target/token-savers-research/`:
 `results.json`, `results.tsv`, `rtk-cargo-results.json`, `exit-probe.json`,
 `native/report.json`, `native-read/report.json`, the pinned inputs and filter
 outputs. Native request captures remain ignored and are not publication

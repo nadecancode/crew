@@ -41,6 +41,9 @@ a general-purpose hostile-code sandbox. Use only the hash-checked binaries.
 Each process has a 10-second timeout and an 8 MiB output cap.
 
 Add `--native` only with the examined Claude Code 2.1.291 installed. The
+reproducer tree must not live under `/tmp`: the native step mounts its own
+private directory there, hiding an artifact tree placed under that path.
+Use a worktree under its normal workspace path instead. The
 runner creates fresh homes, empty MCP config and a private `/tmp`, supplies
 only a dummy key, and isolates the stub and native child from external
 network access. It deliberately demonstrates the upstream hook's permission
