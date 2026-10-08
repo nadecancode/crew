@@ -186,6 +186,7 @@ test('automatic discovery separates registered runs and excludes operator and ne
   assert.equal(report.coverage.excluded_files[0].reason, 'root_session_not_identified_as_crew');
   assert.equal(report.coverage.discovered_files, 3); assert.deepEqual(report.coverage.current_members_without_measured_session, ['missing']);
   assert.equal(report.by_runtime.find(r => r.name === 'codex').hit_rate, .9);
+  assert.throws(() => guardOutputs([path.join(registry, 'other.json')], report), /Refusing/);
 });
 
 test('report separates folded-turn correlation, other diagnostics and avoidable loss', async t => {

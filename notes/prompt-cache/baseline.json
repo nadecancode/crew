@@ -10356,7 +10356,10 @@
       "test": "test_fake_runner_hands_exact_sessions_to_real_node_collector",
       "result": "1 passed",
       "provider_calls": 0
-    }
+    },
+    "measurement_collector_revision": "ec5de823124ceba7e7649e5af00c71682a502108",
+    "current_collector_sha256": "a5f12d7ba7e0ff7555db57961d1e2af1c3440d41a0f4da22dbfa06e2890c7a8f",
+    "current_tool_delta": "Registry directory added to output protection; measurement parsing unchanged. No unchanged baseline rescan."
   },
   "cost": {
     "unit": "tokens",

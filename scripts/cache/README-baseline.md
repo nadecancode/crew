@@ -76,6 +76,6 @@ The exported JSON contains no prompt, tool-result, message-body or credential
 fields. It contains local paths, public session/request ids and roster roles;
 review these before sharing outside the team. Prices, subscription invoices and
 avoidable loss are not inferred; `avoidable_miss_tokens` remains `null`.
-Outputs cannot replace native inputs, database/WAL/SHM files or aliases of them,
+Outputs cannot replace native inputs, database/WAL/SHM files, registry records or aliases of them,
 nor be placed in native session or agent-home directories. Reports inside Crew
 worktrees are allowed. Keep outputs outside native sources.

@@ -416,8 +416,9 @@ function workerCwd(cwd, run) {
   return typeof cwd === 'string' && ((cwd.startsWith(root) && !cwd.slice(root.length).includes(path.sep)) || run.agents.some(a => a.workdir === cwd && cwd !== run.workspace));
 }
 
+const registryDir = home => path.join(process.env.XDG_STATE_HOME || path.join(home, '.local/state'), 'crew/sessions');
 function registeredRuns(home) {
-  const dir = path.join(process.env.XDG_STATE_HOME || path.join(home, '.local/state'), 'crew/sessions');
+  const dir = registryDir(home);
   const found = [];
   if (fs.existsSync(dir)) for (const file of fs.readdirSync(dir)) if (file.endsWith('.json')) {
     try { const v = JSON.parse(fs.readFileSync(path.join(dir, file), 'utf8')); if (typeof v.workspace === 'string' && typeof v.state_dir === 'string') found.push(readWorkspace(v.workspace, v.state_dir)); } catch {}
@@ -432,7 +433,10 @@ export async function collect(options) {
   const claude = process.env.CLAUDE_CONFIG_DIR || path.join(homes, '.claude');
   const codex = process.env.CODEX_HOME || path.join(homes, '.codex');
   sourceDirs.add(path.join(claude, 'projects')); sourceDirs.add(path.join(codex, 'sessions'));
-  if (options.allRuns) for (const run of registeredRuns(homes)) if (!workspaces.some(w => w.state_dir === run.state_dir)) workspaces.push(run);
+  if (options.allRuns) {
+    sourceDirs.add(registryDir(homes));
+    for (const run of registeredRuns(homes)) if (!workspaces.some(w => w.state_dir === run.state_dir)) workspaces.push(run);
+  }
   const explicit = options.sessionFiles ?? [];
   for (const item of explicit) { const at = item.indexOf('='); if (at < 1 || !item.slice(at + 1) || !['claude', 'codex', 'pi'].includes(item.slice(0, at))) throw new Error('--session-file expects claude|codex|pi=PATH'); const file = path.resolve(item.slice(at + 1)); candidates.push({ runtime: item.slice(0, at), file, explicit: true, workspace }); sourceDirs.add(path.dirname(file)); }
   if (!explicit.length) {

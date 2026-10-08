@@ -125,7 +125,10 @@ controlled lifecycle experiments test that mechanism separately.
 The collector is [scripts/cache/baseline.mjs](../../scripts/cache/baseline.mjs),
 with [its contract](../../scripts/cache/README-baseline.md) and 23 focused Node
 regressions. Source starts from `cdcbb595`; the append-only source replay is
-`34ab90ad`, `9015e0dc`, `a2398529`, then `ec5de823`. The original source objects
+`34ab90ad`, `9015e0dc`, `a2398529`, then measurement source `ec5de823`.
+The final tool also protects registry records against output replacement;
+that guard does not change measurement parsing. Both collector hashes are in
+the JSON verification metadata. The original source objects
 remain at `agents/runtime-cache-initial` (`ac93f892`) and
 `agents/runtime-cache-identity` (`e3e9d29f`). There was no history rewrite.
 
