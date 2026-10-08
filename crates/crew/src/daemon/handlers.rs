@@ -207,6 +207,11 @@ change identity",
                 })));
             }
             let who = self.authenticate(hello.role, hello.agent_id, hello.token)?;
+            let feature_context = super::features::ConnCtx::new(
+                crew_core::rpc::features::Id::new(uuid::Uuid::new_v4().to_string())
+                    .map_err(RpcError::invalid)?,
+                self.run_context()?,
+            );
             // The dashboard server's mark on a browser's connection: it only
             // takes away (W7).
             conn.web = hello.web;
@@ -227,6 +232,9 @@ change identity",
                 (Who::Operator, Role::Operator) | (Who::Agent(_), Role::Agent)
             ));
             conn.who = Some(who);
+            self.feature_services
+                .connection_opened(feature_context.clone());
+            conn.feature_context = Some(feature_context);
             return reply(info);
         }
         let who = conn
@@ -234,10 +242,18 @@ change identity",
             .clone()
             .ok_or_else(|| RpcError::unauthorized("say hello first"))?;
 
+        if let Call::FeaturesNegotiate(request) = call {
+            return self.negotiate_features(conn, request);
+        }
+        if crew_core::rpc::features::feature_method(call.method()).is_some() {
+            return self.dispatch_feature(conn, call).await;
+        }
+
         match call {
             Call::Ping | Call::Hello(_) => unreachable!("handled above"),
 
             Call::Snapshot { messages, events } => {
+                conn.representation_started = true;
                 operator_only(&who)?;
                 if conn.subscribed {
                     // A barrier in this connection's push stream: the
@@ -258,6 +274,7 @@ change identity",
                 )
             }
             Call::Subscribe => {
+                conn.representation_started = true;
                 operator_only(&who)?;
                 conn.subscribe_after_reply = Some(self.push.subscribe());
                 Ok(json!({ "subscribed": true }))

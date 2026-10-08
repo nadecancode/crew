@@ -137,7 +137,9 @@ impl Daemon {
             .map_err(internal)?;
 
         // Start from a clean slate; the event log is kept.
+        let previous_run = self.run_context().map_err(internal)?;
         self.store.clear_session().map_err(internal)?;
+        self.feature_services.run_archived(&previous_run);
         // The usage windows are the accounts', not the old team's.
         self.save_quotas();
         {

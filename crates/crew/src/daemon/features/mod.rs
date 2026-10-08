@@ -4,12 +4,335 @@
 //! the daemon checks authentication, feature readiness and scope before calling
 //! a service. Defining this interface does not advertise any feature version.
 
+use std::collections::{BTreeMap, HashMap};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
+use std::sync::{Mutex, RwLock};
 
-use crew_core::rpc::features::{FeatureUnavailable, Id};
-use crew_core::rpc::RpcError;
+use crew_core::rpc::features::{
+    Feature, FeatureAccess, FeatureSession, FeatureUnavailable, FeatureVersions, FeaturesNegotiate,
+    Id, UnavailableFeatures, FEATURE_VERSION,
+};
+use crew_core::rpc::{Call, RpcError};
+use serde_json::Value;
 use tokio::sync::Notify;
+
+use super::server::{Conn, Who};
+use super::Daemon;
+
+mod watch;
+pub use watch::FeatureWatch;
+pub(crate) use watch::PendingWatch;
+
+/// A complete domain implementation. Registration alone grants no access;
+/// readiness, authenticated role, negotiated version and scope are checked by
+/// the central dispatcher before this port is invoked.
+#[async_trait::async_trait]
+pub trait FeatureService: Send + Sync {
+    fn feature(&self) -> Feature;
+    fn readiness(&self) -> Readiness;
+    async fn handle(&self, context: &ConnCtx, call: Call) -> Result<Value, FeatureError>;
+    fn watch_stream(
+        &self,
+        _context: ConnCtx,
+        _watch_id: Id,
+    ) -> Result<Box<dyn FeatureWatch>, FeatureError> {
+        Err(RpcError::new(
+            "unsupported_feature",
+            "observer watches are unavailable",
+        ))
+    }
+    fn connection_closed(&self, _connection: &ConnId) {}
+    fn run_archived(&self, _run: &RunCtx) {}
+}
+
+#[derive(Default)]
+pub struct FeatureServices {
+    services: RwLock<BTreeMap<Feature, Arc<dyn FeatureService>>>,
+    connections: Mutex<HashMap<ConnId, ConnCtx>>,
+}
+
+impl FeatureServices {
+    pub fn register(&self, service: Arc<dyn FeatureService>) {
+        self.services
+            .write()
+            .unwrap_or_else(|e| e.into_inner())
+            .insert(service.feature(), service);
+    }
+
+    fn get(&self, feature: Feature) -> Option<Arc<dyn FeatureService>> {
+        self.services
+            .read()
+            .unwrap_or_else(|e| e.into_inner())
+            .get(&feature)
+            .cloned()
+    }
+
+    pub(crate) fn connection_closed(&self, id: &ConnId) {
+        if let Some(context) = self
+            .connections
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .remove(id)
+        {
+            context.cancellation.cancel();
+        }
+        let services: Vec<_> = self
+            .services
+            .read()
+            .unwrap_or_else(|e| e.into_inner())
+            .values()
+            .cloned()
+            .collect();
+        for service in services {
+            service.connection_closed(id);
+        }
+    }
+
+    pub(crate) fn run_archived(&self, run: &RunCtx) {
+        let contexts: Vec<_> = self
+            .connections
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .values()
+            .filter(|context| &context.run == run)
+            .cloned()
+            .collect();
+        for context in contexts {
+            context.cancellation.cancel();
+        }
+        let services: Vec<_> = self
+            .services
+            .read()
+            .unwrap_or_else(|e| e.into_inner())
+            .values()
+            .cloned()
+            .collect();
+        for service in services {
+            service.run_archived(run);
+        }
+    }
+
+    pub(crate) fn connection_opened(&self, context: ConnCtx) {
+        self.connections
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .insert(context.connection_epoch.clone(), context);
+    }
+}
+
+#[derive(Clone, Debug)]
+pub(crate) struct Negotiated {
+    requested: FeatureVersions,
+    accepted: FeatureVersions,
+    unavailable: UnavailableFeatures,
+}
+
+impl Daemon {
+    pub(crate) fn run_context(&self) -> Result<RunCtx, RpcError> {
+        Ok(RunCtx {
+            workspace_run_id: self.feature_db.current_run()?.id,
+        })
+    }
+
+    pub(crate) fn negotiate_features(
+        &self,
+        conn: &mut Conn,
+        request: FeaturesNegotiate,
+    ) -> Result<Value, RpcError> {
+        let who = conn
+            .who
+            .as_ref()
+            .ok_or_else(|| RpcError::unauthorized("say hello first"))?;
+        if let Some(previous) = &conn.negotiated {
+            if previous.requested != request.versions {
+                return Err(RpcError::conflict(
+                    "feature versions are fixed on this connection",
+                ));
+            }
+        } else {
+            if conn.representation_started {
+                return Err(RpcError::conflict(
+                    "negotiate before Snapshot, Subscribe or feature operations",
+                ));
+            }
+            let mut accepted = BTreeMap::new();
+            let mut unavailable = BTreeMap::new();
+            for (name, version) in request.versions.iter() {
+                let feature = Feature::ALL
+                    .into_iter()
+                    .find(|feature| feature.name() == name);
+                let reason = match feature {
+                    None => Some(FeatureUnavailable::Unsupported),
+                    Some(_) if *version != FEATURE_VERSION => {
+                        Some(FeatureUnavailable::UnsupportedVersion)
+                    }
+                    Some(feature) if matches!(who, Who::Agent(_)) && feature != Feature::Epics => {
+                        Some(FeatureUnavailable::NotAuthorized)
+                    }
+                    Some(feature) => match self.feature_services.get(feature) {
+                        None => Some(FeatureUnavailable::Unsupported),
+                        Some(service) => match service.readiness() {
+                            Readiness::Ready => None,
+                            Readiness::Unavailable(reason) => Some(reason),
+                        },
+                    },
+                };
+                if let Some(reason) = reason {
+                    unavailable.insert(name.clone(), reason);
+                } else {
+                    accepted.insert(name.clone(), *version);
+                }
+            }
+            conn.negotiated = Some(Negotiated {
+                requested: request.versions,
+                accepted: FeatureVersions::try_from(accepted).map_err(RpcError::invalid)?,
+                unavailable: UnavailableFeatures::try_from(unavailable)
+                    .map_err(RpcError::invalid)?,
+            });
+        }
+        let negotiated = conn.negotiated.as_ref().expect("negotiation stored");
+        let epoch = conn
+            .feature_context
+            .as_ref()
+            .ok_or_else(|| RpcError::unauthorized("say hello first"))?
+            .connection_epoch
+            .clone();
+        serde_json::to_value(FeatureSession {
+            accepted: negotiated.accepted.clone(),
+            connection_epoch: epoch,
+            workspace_run_id: Some(self.run_context()?.workspace_run_id),
+            unavailable: negotiated.unavailable.clone(),
+        })
+        .map_err(|_| RpcError::new("internal", "feature response encoding failed"))
+    }
+
+    pub(crate) async fn dispatch_feature(
+        &self,
+        conn: &mut Conn,
+        call: Call,
+    ) -> Result<Value, RpcError> {
+        conn.representation_started = true;
+        let method =
+            crew_core::rpc::features::feature_method(call.method()).expect("known feature method");
+        let who = conn
+            .who
+            .as_ref()
+            .ok_or_else(|| RpcError::unauthorized("say hello first"))?;
+        let allowed = match method.access {
+            FeatureAccess::CollaborativeRead => true,
+            FeatureAccess::Administration => {
+                matches!(who, Who::Operator)
+                    || matches!(who, Who::Agent(id) if self.is_orchestrator(id))
+            }
+            FeatureAccess::ObserverRead
+            | FeatureAccess::ObserverAction
+            | FeatureAccess::ObserverWatch => matches!(who, Who::Operator),
+            FeatureAccess::Discovery => false,
+        };
+        if !allowed {
+            return Err(RpcError::forbidden(
+                "feature operation is not available to this caller",
+            ));
+        }
+        let feature = method.feature.expect("domain feature method");
+        let unsupported = || {
+            RpcError::new(
+                "unsupported_feature",
+                "feature is unavailable on this connection",
+            )
+        };
+        if !conn
+            .negotiated
+            .as_ref()
+            .is_some_and(|state| state.accepted.get(feature.name()) == Some(&FEATURE_VERSION))
+        {
+            return Err(unsupported());
+        }
+        let service = self.feature_services.get(feature).ok_or_else(unsupported)?;
+        if service.readiness() != Readiness::Ready {
+            return Err(unsupported());
+        }
+        let mut context = conn
+            .feature_context
+            .as_ref()
+            .ok_or_else(|| RpcError::unauthorized("say hello first"))?
+            .clone();
+        let current = self.run_context()?;
+        if context.run != current {
+            context.cancellation.cancel();
+            self.feature_services
+                .connection_closed(&context.connection_epoch);
+            context = ConnCtx::new(context.connection_epoch, current);
+            self.feature_services.connection_opened(context.clone());
+            conn.feature_context = Some(context.clone());
+        }
+        if expected_current_run(&call).is_some_and(|run| run != &context.run.workspace_run_id) {
+            return Err(RpcError::new("stale_scope", "workspace run changed"));
+        }
+        let starts_watch = matches!(
+            call,
+            Call::AsideWatch(_) | Call::DocsWatch(_) | Call::UsageWatch(_)
+        );
+        let stops_watch = match &call {
+            Call::AsideUnwatch(p) | Call::DocsUnwatch(p) | Call::UsageUnwatch(p) => {
+                Some(p.watch_id.clone())
+            }
+            _ => None,
+        };
+        if starts_watch && conn.feature_watch_count(feature) >= 4 {
+            return Err(RpcError::new("busy", "feature watch limit reached"));
+        }
+        let result = service.handle(&context, call).await?;
+        if context.cancellation.is_cancelled() || self.run_context()? != context.run {
+            return Err(RpcError::new(
+                "stale_scope",
+                "feature operation scope expired",
+            ));
+        }
+        let envelope = serde_json::json!({"id":u64::MAX,"result":&result});
+        let encoded = crew_core::rpc::features::encode_frame(&envelope)
+            .map_err(|_| RpcError::too_large("feature response exceeds transport limit"))?;
+        if encoded.len() > crew_core::rpc::features::MAX_PAGE_BYTES {
+            return Err(RpcError::too_large("feature response exceeds page limit"));
+        }
+        if starts_watch {
+            let pending = PendingWatch::new(feature, &result, context.clone(), service.as_ref())?;
+            if conn.feature_watch_exists(&pending.id) {
+                return Err(RpcError::conflict(
+                    "watch id is already registered on this connection",
+                ));
+            }
+            conn.feature_after_reply.push(pending);
+        }
+        if let Some(id) = stops_watch {
+            conn.stop_feature_watch(feature, &id);
+        }
+        Ok(result)
+    }
+}
+
+fn expected_current_run(call: &Call) -> Option<&Id> {
+    match call {
+        Call::EpicsList(scope) => Some(&scope.workspace_run_id),
+        Call::EpicGet(p) => Some(&p.workspace_run_id),
+        Call::EpicCreate(p) => Some(&p.workspace_run_id),
+        Call::EpicEdit(p) => Some(&p.workspace_run_id),
+        Call::TasksQuery(p) => Some(&p.workspace_run_id),
+        Call::TaskGetScoped(p) => Some(&p.workspace_run_id),
+        Call::TaskCreateScoped(p) => Some(&p.workspace_run_id),
+        Call::TaskRevise(p) => Some(&p.workspace_run_id),
+        Call::EpicComplete(p) => Some(&p.workspace_run_id),
+        Call::AsideMembers(p) | Call::AsideList(p) | Call::AsideWatch(p) => {
+            Some(&p.workspace_run_id)
+        }
+        Call::AsideGet(p) => Some(&p.workspace_run_id),
+        Call::AsideAsk(p) => Some(&p.workspace_run_id),
+        Call::AsideCancel(p) => Some(&p.workspace_run_id),
+        Call::AsideRemove(p) => Some(&p.workspace_run_id),
+        _ => None,
+    }
+}
 
 /// The physical authenticated connection's epoch, not its reusable principal.
 pub type ConnId = Id;
@@ -87,8 +410,168 @@ impl Cancellation {
 
 #[cfg(test)]
 mod tests {
+    use super::super::server::Session;
     use super::*;
+    use crew_core::rpc::ServerFrame;
+    use serde_json::json;
     use std::time::Duration;
+
+    struct ReadyDocs;
+
+    #[async_trait::async_trait]
+    impl FeatureService for ReadyDocs {
+        fn feature(&self) -> Feature {
+            Feature::Docs
+        }
+        fn readiness(&self) -> Readiness {
+            Readiness::Ready
+        }
+        async fn handle(&self, _: &ConnCtx, _: Call) -> Result<Value, RpcError> {
+            Ok(json!({}))
+        }
+    }
+
+    async fn request(
+        session: &mut Session,
+        rx: &mut tokio::sync::mpsc::Receiver<ServerFrame>,
+        method: &str,
+        params: Value,
+    ) -> ServerFrame {
+        assert!(
+            session
+                .request(&json!({"id":1,"method":method,"params":params}).to_string())
+                .await
+        );
+        tokio::time::timeout(Duration::from_secs(1), rx.recv())
+            .await
+            .unwrap()
+            .unwrap()
+    }
+
+    async fn fixture() -> (tempfile::TempDir, super::super::Running) {
+        let temp = tempfile::tempdir().unwrap();
+        let running = super::super::start(super::super::DaemonOptions {
+            workspace: temp.path().to_path_buf(),
+            crew_bin: std::env::current_exe().unwrap(),
+            pin: None,
+        })
+        .await
+        .unwrap();
+        (temp, running)
+    }
+
+    async fn hello(
+        daemon: &Daemon,
+        session: &mut Session,
+        rx: &mut tokio::sync::mpsc::Receiver<ServerFrame>,
+    ) {
+        let frame = request(session, rx, "hello", json!({"role":"operator","token":daemon.operator_token,"protocol":6,"client":"feature-fixture"})).await;
+        assert!(frame.error.is_none(), "{:?}", frame.error);
+    }
+
+    #[tokio::test]
+    async fn negotiation_is_authenticated_frozen_and_exactly_connection_scoped() {
+        let (_temp, running) = fixture().await;
+        let daemon = &running.daemon;
+        daemon.feature_services.register(Arc::new(ReadyDocs));
+        let (mut first, mut rx) = Session::new(daemon);
+        let frame = request(
+            &mut first,
+            &mut rx,
+            "features_negotiate",
+            json!({"versions":{"docs":1}}),
+        )
+        .await;
+        assert_eq!(frame.error.unwrap().code, "unauthorized");
+        hello(daemon, &mut first, &mut rx).await;
+        let initial = request(
+            &mut first,
+            &mut rx,
+            "features_negotiate",
+            json!({"versions":{"docs":1,"future":7}}),
+        )
+        .await
+        .result
+        .unwrap();
+        assert_eq!(initial["accepted"], json!({"docs":1}));
+        assert_eq!(initial["unavailable"]["future"], "unsupported");
+        let repeated = request(
+            &mut first,
+            &mut rx,
+            "features_negotiate",
+            json!({"versions":{"docs":1,"future":7}}),
+        )
+        .await
+        .result
+        .unwrap();
+        assert_eq!(initial, repeated);
+        let changed = request(
+            &mut first,
+            &mut rx,
+            "features_negotiate",
+            json!({"versions":{"docs":1}}),
+        )
+        .await;
+        assert_eq!(changed.error.unwrap().code, "conflict");
+        let (mut second, mut rx) = Session::new(daemon);
+        hello(daemon, &mut second, &mut rx).await;
+        let replacement = request(
+            &mut second,
+            &mut rx,
+            "features_negotiate",
+            json!({"versions":{"docs":1,"future":7}}),
+        )
+        .await
+        .result
+        .unwrap();
+        assert_ne!(initial["connection_epoch"], replacement["connection_epoch"]);
+        daemon.shutdown(true).await;
+    }
+
+    #[tokio::test]
+    async fn snapshot_or_feature_operation_prevents_first_late_negotiation() {
+        let (_temp, running) = fixture().await;
+        let daemon = &running.daemon;
+        for (method, params) in [
+            ("snapshot", json!({})),
+            ("docs_index", json!({"cursor":null,"limit":10})),
+        ] {
+            let (mut session, mut rx) = Session::new(daemon);
+            hello(daemon, &mut session, &mut rx).await;
+            request(&mut session, &mut rx, method, params).await;
+            let late = request(
+                &mut session,
+                &mut rx,
+                "features_negotiate",
+                json!({"versions":{"docs":1}}),
+            )
+            .await;
+            assert_eq!(late.error.unwrap().code, "conflict", "{method}");
+        }
+        daemon.shutdown(true).await;
+    }
+
+    #[tokio::test]
+    async fn known_unready_and_unknown_features_never_gain_capabilities() {
+        let (_temp, running) = fixture().await;
+        let daemon = &running.daemon;
+        let (mut session, mut rx) = Session::new(daemon);
+        hello(daemon, &mut session, &mut rx).await;
+        let result = request(
+            &mut session,
+            &mut rx,
+            "features_negotiate",
+            json!({"versions":{"docs":1,"future":1,"epics":99}}),
+        )
+        .await
+        .result
+        .unwrap();
+        assert_eq!(result["accepted"], json!({}));
+        assert_eq!(result["unavailable"]["docs"], "unsupported");
+        assert_eq!(result["unavailable"]["future"], "unsupported");
+        assert_eq!(result["unavailable"]["epics"], "unsupported_version");
+        daemon.shutdown(true).await;
+    }
 
     #[tokio::test]
     async fn cancellation_is_sticky_and_wakes_all_job_clones() {
