@@ -6,148 +6,246 @@ numbers in `notes/prompt-cache/`. `cache-design` builds on this audit.
 
 ## Audit
 
-Task `cache-prompt-audit`. This is a read-only audit; nothing was changed.
-Source is `main` at `c8052373`. `crates/crew` is identical at `e3ba08ba`.
+Task `cache-prompt-audit`. This is a read-only audit: nothing in crew was
+changed.
 
-Every line reference is to a file in that tree. The CLIs are the local
-installs:
+### Sources
 
-- Claude Code 2.1.291
-- Codex CLI 0.159.0
-- pi from the `gsd-pi` 2.70.1 bundle, which contains `pi-ai` and
-  `pi-coding-agent`
+**crew.** Every `crates/crew` line reference is to `main` at `c8052373`.
+
+`main` at `e3ba08ba` differs from it in seven `crates/crew` files:
+
+- `cli/ops/native.rs`
+- `daemon/binary.rs`
+- `git/beneath.rs`
+- `os.rs`
+- `sandbox/landlock.rs`
+- `sandbox/run.rs`
+- `tests/native_gateway.rs`
+
+None of the prompt, delivery or lifecycle paths cited here is among them.
+
+**CLIs.** Their mechanics were read from the local installs. None is a
+source checkout.
+
+| CLI | Path read | How |
+| --- | --- | --- |
+| Claude Code 2.1.291 | `~/.local/share/claude/versions/2.1.291` | Strings in the binary: settings descriptions, the statusline schema, environment names |
+| Codex CLI 0.159.0 | `/nix/store/pmh4yzyd0g8rz5l1jv2lnsb2gz33ljhi-codex-0.159.0/libexec/codex` | Strings in the binary only. No Codex source or upstream revision was available here. |
+| pi | not installed here | crew supports `@earendil-works/pi-coding-agent` 1.0 and later (`agents/pi.rs:1-2,92`). The only pi here is GSD's, `/nix/store/v0rin235k416809iv79f4iayi7907n8l-gsd-pi-2.70.1`, which crew refuses (`agents/pi.rs:130`, `check_binary`). |
+
+The sessions measured below ran Claude Code 2.1.287 to 2.1.290.
+
+Each claim below is marked **measured** (the sample below), **code** (read in
+crew or a CLI) or **unmeasured** (stated by a CLI's documentation or
+inferred, not observed here).
 
 ### How each CLI caches
 
-**Claude Code.** The cached prefix is ordered tools, then system, then
-messages. A change at any point invalidates everything after it.
+#### Claude Code
 
-- **TTL.** Settings key `promptCacheTtl`, or `CLAUDE_CODE_PROMPT_CACHE_TTL`,
-  which takes precedence. Values are `"5m"` or `"1h"`.
-  - When unset, the binary's settings description says: 1 hour on a Claude
-    subscription within its usage limits, and 5 minutes on an API key,
-    Bedrock, Vertex or Foundry.
-  - Subagents use `subagentPromptCacheTtl` or
-    `CLAUDE_CODE_SUBAGENT_PROMPT_CACHE_TTL`. Their default is 5 minutes unless
-    `ENABLE_PROMPT_CACHING_1H=1` is set.
-  - Caching can be switched off with `DISABLE_PROMPT_CACHING` and its
-    per-model variants.
-  - crew sets none of these. Every member write in the sample below is 1 h.
-- **Prefix sharing across sessions.** The first request of every member
-  session reads about 23.4k tokens from cache. That is Claude Code's own
-  system prompt and tools, shared across sessions.
-  - A miss that keeps the session's own system prompt reads about 28.8k
-    instead.
-  - So crew's per-session system part is about 5.4k tokens: the briefing, the
-    member tone and the environment.
-- **MCP tools are deferred** behind ToolSearch. Their names arrive as
-  `deferred_tools_record` and `deferred_tools_delta` attachments, and a schema
-  enters the conversation as a tool result once loaded. MCP server
-  instructions arrive as an `mcp_instructions_delta` attachment. So a change
-  to crew's tool set or instructions appends to messages; it does not break
-  the tools or system prefix.
-- **Thinking blocks are bound to the prefix.** When the client finds its
-  message history changed, it records a `thinking_drop` attachment with
-  `clientChange.kinds: messagesHistoryChanged` and `firstChangedMessageIndex`.
-  It then drops every later thinking block (`reason: prefix_mismatch`), and
-  the request writes everything from that index on to cache again.
-- **The statusline JSON has a `prompt_cache` object.** It gives `warm`,
-  `ttl`, `expires_at`, `hit_ratio`, `misses`, `miss_recache_tokens` and
-  `last_miss_cause`.
-  - Causes come from a closed set: `system_prompt_changed`, `tools_changed`,
-    `model_changed`, `messages_rewritten`, `ttl_expired_5m`,
-    `ttl_expired_1h`, `likely_server_side`, `unknown`.
-  - It is a client-side classifier available per session. crew writes each
-    member's `settings.json` (`agents/claude.rs:178`), so a `statusLine`
-    command could log it.
+The prefix is tools, then system, then messages. A change invalidates
+everything after it.
 
-**Codex.** It uses the Responses API, which caches automatically from 1024
-tokens.
+- **TTL (code, measured).**
+  - Set with the settings key `promptCacheTtl` or the environment variable
+    `CLAUDE_CODE_PROMPT_CACHE_TTL`, which wins. Values are `"5m"` or `"1h"`.
+  - When unset, the binary's settings description gives: 1 hour on a Claude
+    subscription within its usage limits; 5 minutes on an API key, Bedrock,
+    Vertex or Foundry.
+  - Subagents: `subagentPromptCacheTtl` or
+    `CLAUDE_CODE_SUBAGENT_PROMPT_CACHE_TTL`. Their default is 5 minutes
+    unless `ENABLE_PROMPT_CACHING_1H=1`.
+  - `DISABLE_PROMPT_CACHING` and its per-model variants turn caching off.
+  - crew sets none of these.
+  - Measured: every cache write in the sample is a 1 h write
+    (`cache_creation.ephemeral_1h_input_tokens`).
+- **Prefix shared across sessions (measured).** The first request of 27 of
+  the 29 sessions starting in the sample read 23,368 to 23,881 tokens from
+  cache. That is Claude Code's own system prompt and tools, cached across
+  sessions.
+  - A request that also read the session's own system prompt read 27,697 to
+    31,351.
+  - So crew's per-session system part (briefing, member tone, environment) is
+    about 5k to 7k tokens.
+- **Deferred MCP tools (code, measured, conditional).** When tool search is
+  on, MCP tools are deferred. Their names arrive as `deferred_tools_record`
+  and `deferred_tools_delta` attachments. A schema enters the conversation as
+  a tool result once loaded, and server instructions arrive as an
+  `mcp_instructions_delta` attachment. A changed tool set then only appends.
+  - Tool search depends on:
+    - `ENABLE_TOOL_SEARCH`: `true`, `false`, `auto` or `auto:N`;
+    - the endpoint: a base URL that is not a first-party Anthropic host turns
+      it off unless that variable is set;
+    - a server's `alwaysLoad` option, and per tool the `_meta`
+      `anthropic/alwaysLoad`. These put the definitions in the tools prefix.
+  - Documentation: <https://code.claude.com/docs/en/mcp#configure-tool-search>.
+  - Measured: all 37 worktree sessions in the sample have deferred-tool
+    records.
+  - A member on a gateway endpoint, or with `ENABLE_TOOL_SEARCH=false` in
+    its endpoint `env`, would carry crew's tools in its prefix.
+- **History changes (code, measured).** When the client finds the message
+  history differs from what it sent before, it records a `thinking_drop`
+  attachment:
+  - `clientChange.kinds: messagesHistoryChanged`;
+  - `clientChange.firstChangedMessageIndex`;
+  - `newlyDropped.reason: prefix_mismatch`, with block and turn counts.
+
+  The request then drops every thinking block after that index and writes the
+  conversation from there to cache again.
+- **Per-session cache report (code, unmeasured).** The statusline JSON carries
+  a `prompt_cache` object:
+  - `warm`, `ttl`, `expires_at`, `hit_ratio`, `misses`,
+    `miss_recache_tokens`;
+  - `last_miss_cause` and `miss_causes`, from a closed set:
+    `system_prompt_changed`, `tools_changed`, `model_changed`,
+    `messages_rewritten`, `ttl_expired_5m`, `ttl_expired_1h`,
+    `likely_server_side`, `unknown`.
+
+  It is a client-side heuristic. crew writes each member's `settings.json`
+  (`agents/claude.rs:178`), so a `statusLine` command could record it.
+
+#### Codex
+
+It uses the Responses API, which caches automatically from 1024 tokens.
 
 - crew's standing instructions go into `developer_instructions`
-  (`agents/codex.rs:103-125`). Codex places them in a developer message at the
+  (`agents/codex.rs:103-125`). Codex puts them in a developer message at the
   head of the conversation, so they are part of the prefix.
-- Codex keys requests by thread with `prompt_cache_key`. This comes from the
-  upstream source, not the local binary: only the field names
-  `prompt_cache_retention` and `prompt_cache_options` appear in it, and only in
-  bundled docs.
-- No retention setting was found in 0.159's configuration. The bundled
-  OpenAI docs mention `prompt_cache_options.ttl` (`"30m"`) for the GPT-6
-  family.
-- Changing the request-level reasoning effort mid-thread changes the prefix,
-  per the same docs.
-- Not verified: whether `codex resume` with different `developer_instructions`
-  replaces the recorded ones or adds new ones. To be measured.
+- Unmeasured, not found in the local binary:
+  - which cache key Codex sends;
+  - its retention.
+- The binary bundles OpenAI docs that name `prompt_cache_options.ttl` (`"30m"`)
+  for the GPT-6 family.
+- `runtime` reports that the current official docs give 30 minutes as the
+  minimum for GPT-5.6 and later (m-95a95daed241).
+- The same bundled docs say that changing the request-level reasoning effort
+  mid-thread changes the prefix.
+- Unmeasured: whether `codex resume` with different `developer_instructions`
+  replaces the recorded ones or adds new ones.
 
-**pi.** It uses `pi-ai`.
+#### pi
 
-- **Anthropic.** The provider puts `cache_control` on the system block and the
-  last user message (`providers/anthropic-shared.js:295-366`).
-  - The TTL is 5 minutes unless `PI_CACHE_RETENTION=long`, which gives 1 h,
-    and only for `api.anthropic.com` (`:36-53`).
-- **OpenAI Responses.** `prompt_cache_key` is the session id.
+**Unknown for crew's supported pi.**
+
+- crew supports `@earendil-works/pi-coding-agent` 1.0 and later. It is not
+  installed here, so its caching was not read or measured.
+- What crew itself sends to pi is code read in crew:
+  - the briefing by `--append-system-prompt` (`agents/pi.rs:363-366`);
+  - the tools through `registerMcpServer` when pi has it, else `crew ctl
+    tools` at extension load (`assets/crew-pi.ts:186-217`);
+  - deliveries as follow-ups (`:145`);
+  - compaction through `ctx.compact` (`:111-128`).
+- No pi member is on the team now.
+
+The only pi here is GSD's, `gsd-pi` 2.70.1, which crew refuses. Read as an
+exploratory observation only, not crew's runtime, its bundled `pi-ai` and
+`pi-coding-agent` show the following. Nothing in `cache-design` should rest on
+them until the supported pi is checked.
+
+- **Anthropic.** `cache_control` goes on the system block or blocks and on the
+  last user message (`pi-ai/dist/providers/anthropic-shared.js:295-366`).
+  - With an OAuth token, the system prompt is two blocks, each with a
+    breakpoint (`:344-359`).
+  - The TTL is 5 minutes unless `PI_CACHE_RETENTION=long`, which gives 1 h on
+    `api.anthropic.com` only (`:36-53`).
+- **OpenAI.** `prompt_cache_key` is the session id.
   - `PI_CACHE_RETENTION=long` asks for 24 h retention on `api.openai.com`
-    (`providers/openai-responses.js:25-33,82-88`).
+    (`pi-ai/dist/providers/openai-responses.js:25-33,82-88`).
 - **The system prompt ends with the current date and time, to the second, and
   the working directory** (`pi-coding-agent/dist/core/system-prompt.js:55-56,
   179-180`).
-  - It is rebuilt at every session start and whenever the active tool set
-    changes (`agent-session.js:545,1498`).
-  - So every pi launch, a resume included, misses its whole prefix whatever
-    crew sends.
-  - crew registers its tools once, at extension load
-    (`assets/crew-pi.ts:186-217`). gsd-pi 2.70.1 has no `registerMcpServer`,
-    so the `crew ctl tools` path is the one taken, and it does not rebuild the
-    prompt mid-session.
+  - It is rebuilt at each session start and when the tool set changes
+    (`agent-session.js:545,1498`).
+  - Everything from that suffix on would therefore change at each launch.
+  - How much of the prefix before it still hits depends on the provider and
+    the breakpoints, and is unmeasured.
 
 ### Measured sample
 
-This is an interim sample, to be replaced by `cache-baseline`. It reads the
-Claude Code session files of this workspace's crew members and orchestrators
-(`~/.claude/projects/-home-nade-workspaces-personal-crew*`), 2026-10-02 to
-2026-10-07, read-only.
+This is an interim sample of Claude Code sessions only; `cache-baseline`
+replaces it and adds Codex and pi. The data was read read-only.
 
-It takes every main-thread assistant response once (by message id, not
-sidechains) with its `usage`. Codex rollouts and pi sessions are not in it;
-`runtime` measures them in `cache-baseline`.
+**Reproduce.** `notes/prompt-cache-audit/run.sh` reproduces it. It writes
+`sessions.tsv` (one row per session), `signatures.tsv` (class, cache read,
+cache write and gap of every big write) and `totals.tsv`. Those are kept as
+they were for this note. No message text leaves the scripts.
+
+**Cohort.**
+
+- Every session file under
+  `~/.claude/projects/-home-nade-workspaces-personal-crew--crew-worktrees-*/`.
+- Every file in `~/.claude/projects/-home-nade-workspaces-personal-crew/`
+  whose first plain-text user prompt starts with `[crew]` (the orchestrator
+  and members launched in the workspace itself).
+- Records stamped after 2026-10-08T04:00:00Z (`CUTOFF=1791432000`) are
+  ignored.
+
+**Requests.** A request is one main-thread assistant response, counted once
+per `message.id`. Sidechain and `<synthetic>` lines are left out.
+
+**Cost weights.** Shares of input-side cost use Anthropic's ratios to each
+request's own base input price: uncached input 1, 1 h cache write 2, cache
+read 0.1. Models are not weighted against each other; most requests are on
+Opus 5.5, some on Fable 5.1. Output tokens are not counted.
 
 | Measure | Value |
 | --- | --- |
-| Sessions | 45 |
-| Requests | 15,474 |
-| Uncached input | 33,914 tokens |
-| Cache read | 5,377,091,737 tokens |
-| Cache write (all 1 h TTL) | 114,612,219 tokens |
+| Sessions | 49 |
+| Requests | 15,589 |
+| Uncached input | 34,178 tokens |
+| Cache read | 5,393,044,647 tokens |
+| Cache write (all 1 h) | 115,056,954 tokens |
 | Hit rate by tokens (read / all input) | 97.9% |
-| Writes as share of input-side cost (write 2x, read 0.1x base input) | 29.9% |
+| Cache writes as share of input-side cost | 29.9% |
 
-The hit rate by tokens looks high, but writes are 2.1% of input tokens and
-about 30% of input-side cost. The metric worth moving is write volume.
+Writes are 2.1% of input tokens and about 30% of input-side cost. The number
+worth moving is write volume, not the token hit rate.
 
-Classification of each request that wrote at least 10k tokens and more than it
-read:
+**Big writes.** A big write is a request that wrote at least 10k tokens and
+more than it read. Each is classed by the first test it passes; the cache
+read ranges are the evidence for each class.
 
-| Class | Events | Tokens written | Share of all writes |
-| --- | --- | --- | --- |
-| History rewrite, idle gap under 5 min (reads about 28.8k: system intact, messages rewritten) | 151 | 54,025,202 | 47.1% |
-| History rewrite, idle gap 5 to 60 min (same 28.8k signature, so not a TTL expiry under 1 h) | 21 | 7,147,416 | 6.2% |
-| Idle gap over 1 h (TTL expired; reads only the shared 23.4k) | 57 | 24,393,821 | 21.3% |
-| Model change | 2 | 846,025 | 0.7% |
-| Session start | 26 | 651,089 | 0.6% |
-| After a compaction boundary | 4 | 135,831 | 0.1% |
-| Ordinary growth (the rest) | | 27,412,835 | 23.9% |
+| Class | Test | Cache read (min / median / max) | Events | Tokens written | Share of writes |
+| --- | --- | --- | --- | --- | --- |
+| First request | first in the session file | 0 / 23,372 / 23,881 | 29 | 726,680 | 0.6% |
+| After compaction | a `compact_boundary` since the previous request | 0 / 28,434 / 29,835 | 4 | 135,831 | 0.1% |
+| Model change | another model than the previous request | 0 / 0 / 0 | 2 | 846,025 | 0.7% |
+| TTL expired | over 3600 s since the previous request and read below 26,000 | 0 / 23,368 / 23,881 | 58 | 24,474,046 | 21.3% |
+| History change, declared by the client | a `thinking_drop` with this request id | 23,484 / 28,786 / 30,696 | 122 | 41,374,107 | 36.0% |
+| History change, undeclared | read at least 26,000 (system read, messages written again), no `thinking_drop` | 27,697 / 30,368 / 31,351 | 48 | 18,635,030 | 16.2% |
+| Unexplained | the rest: within the TTL, system prompt not read | 0 / 23,368 / 23,368 | 3 | 1,217,767 | 1.1% |
+| Not classed | writes below the threshold (ordinary growth and small rewrites) | | | 27,647,468 | 24.0% |
 
-The history rewrites follow folded deliveries (rank 1 below):
+Notes on the classes:
 
-- 16 sessions record `thinking_drop`.
-- Of their 297 turns that contained a folded delivery, 157 (53%) were followed
-  by a history change at the next turn's first request.
-- Of their 939 turns without one, 1 (0.1%) was.
-- Turns with Claude Code's silent-turn reminder but no fold were followed by
-  none.
+- The 26,000 bound sits between the shared Claude Code prefix (23,368 to
+  23,881) and the lowest read that included a session's own system prompt
+  (27,697).
+- One declared history change read 23,484. It is kept in its class because
+  the client declared it.
+- Only 23 of the 49 sessions record `thinking_drop` at all, so some
+  undeclared changes may have the same cause. The two history classes are
+  kept apart for that reason.
 
-Lifecycle frequencies from crew's event log (`.crew/crew.db`, read-only,
-2026-10-02 14:08 to 2026-10-07 22:53):
+**Fold association, with controls.** In the 23 sessions that record
+`thinking_drop`:
+
+| Turn before the history change | Turns | Followed by a declared history change |
+| --- | --- | --- |
+| Contained a folded delivery | 330 | 175 (53.0%) |
+| Contained none | 1,118 | 2 (0.18%) |
+| Contained none, but had a silent-turn reminder (control) | 100 | 0 |
+
+A folded delivery is an `isMeta` user row whose array content starts with
+`[crew]`: crew-bridge's `session.append`. Turns end at
+`system/turn_duration`.
+
+This is an association, not proof of cause. `cache-bench` will compare the
+same workload before and after a delivery change (m-2176088183a2).
+
+**Lifecycle frequencies** from crew's event log (`.crew/crew.db`, read-only,
+2026-10-02 14:08 to 2026-10-07 22:53 local time):
 
 | Event | Count |
 | --- | --- |
@@ -159,294 +257,328 @@ Lifecycle frequencies from crew's event log (`.crew/crew.db`, read-only,
 | Members added / removed | 40 / 25 |
 | Compactions (51 queued, 3 by the runtime) | 54 |
 | Reminders | 75 |
+| "Asked again" notices | 185 |
 | Usage-limit parks / lifts | 150 / 149 |
 | Daemon recoveries (all adopted, none restarted) | 18 |
 
-Of the usage-limit parks, 51 are `runtime` on "out of credits", which is
-resumed every 30 min.
+Of the usage-limit parks, 51 are `runtime` on "out of credits", resumed every
+30 min.
 
 ### Ranked cache-breaking points
 
-The ranking goes by measured tokens. Where no number is separable yet, it goes
-by what one event costs.
+The ranking goes by measured write volume. Where no number is separable, it
+goes by what one event costs. Write volumes are the tokens associated with a
+class. They are not avoidable loss: even a fixed event writes some tokens.
 
-1. **A delivery folded into a running turn is rewritten at the next turn.**
-   - **Code:** `assets/crew-bridge.register.ts:76-98`. `deliver` calls
-     `$.session.append` while a turn runs; Claude Code records those rows with
-     `isMeta: true`. The `WAKE` prompt at `:154-166` starts a turn when the
-     appended rows went unread. The daemon pushes over the socket while a turn
-     is active (`daemon/delivery.rs`, `Route::Socket`).
-   - **Position:** messages, from the first folded row on.
-   - **What varies:** every delivery that lands mid-turn. 24% of turns in the
-     sample had one.
-   - **Invalidates:** at the first request of the next turn, Claude Code
-     reports `messagesHistoryChanged` and drops all later thinking blocks.
-     Everything after the fold is written again.
-   - **Measured:** 172 events and 61.2M tokens written, 53.3% of all writes
-     (about 16% of input-side cost). That is 356k tokens per event on
-     average.
-   - **Avoidable:** yes. Candidates for `cache-design`:
-     - submit every delivery as a queued prompt for the turn boundary (the
-       mod's `prompt.submit` path at `:97`, which never showed the effect),
-       accepting the added latency;
-     - or find an in-turn form Claude Code keeps byte-stable.
-     - Either needs a controlled A/B run in `cache-bench`.
-   - **Other runtimes:** Codex queues through its app-server
-     (`agents/codex.rs:293`) and pi uses `sendUserMessage(..., { deliverAs:
-     "followUp" })` (`assets/crew-pi.ts:145`). Neither is measured yet.
+1. **A delivery folded into a running turn, followed by a history change at
+   the next turn.**
+   - **Code:**
+     - `assets/crew-bridge.register.ts:76-98`: `deliver` calls
+       `$.session.append` while a turn runs. Claude Code records those rows
+       with `isMeta: true`.
+     - `WAKE` (`:154-166`) starts a turn when appended rows went unread.
+     - The daemon pushes over the socket while a turn is active
+       (`daemon/delivery.rs`, `Route::Socket`).
+   - **Position:** messages, from the changed index on.
+   - **What varies:** every delivery that lands mid-turn. 376 of 1,632 turns
+     in the sample had one.
+   - **Invalidates (measured):** the next turn's first request declares
+     `messagesHistoryChanged` and drops later thinking blocks. Everything
+     after the changed index is written again.
+   - **Write volume:** 122 declared events and 41.4M tokens (36.0% of
+     writes), plus possibly part of the 48 undeclared ones (18.6M, 16.2%).
+     About 340k tokens per declared event.
+   - **Candidates for `cache-design`:**
+     - submit each delivery as a queued prompt for the turn boundary (the
+       mod's `prompt.submit` path at `:97`, which shows no association),
+       accepting the latency;
+     - or an in-turn form Claude Code keeps byte-stable.
+   - **Other runtimes (unmeasured):** Codex queues through its app-server
+     (`agents/codex.rs:293`); pi uses `sendUserMessage(..., { deliverAs:
+     "followUp" })` (`assets/crew-pi.ts:145`).
 
 2. **Idle beyond the TTL.**
-   - **Code:** crew sets no TTL anywhere (`agents/claude.rs:178-188`,
+   - **Code:** crew sets no TTL (`agents/claude.rs:178-188`,
      `agents/pi.rs:398-420`). Anything that starts a turn after the gap
-     re-writes the whole session:
+     writes the session again:
      - a delivery (`daemon/delivery.rs`);
      - a reminder (`daemon/supervisor/health.rs:104-128,176`);
-     - an orchestrator notice (`notify_orchestrator`, `daemon/handlers.rs:810-819`,
-       `daemon/context.rs:122-180`);
+     - an "asked again" notice (`daemon/turns.rs:263-299`);
+     - an orchestrator notice (`notify_orchestrator`,
+       `daemon/handlers.rs:810-819`; `daemon/context.rs:122-180`);
      - `RESUME_PROMPT` after a usage limit (`daemon/limits.rs:311`).
-   - **Position:** all of it. Only Claude Code's shared 23.4k survives.
-   - **What varies:** per member, with how long it waits (review, dependencies,
-     overnight).
-   - **Measured:** 57 events and 24.4M tokens, 21.3% of writes, 428k per event.
-   - **Avoidable:** partly.
-     - Claude members on a subscription already get 1 h. A member on an API
-       key, Bedrock or Vertex gets 5 min unless `promptCacheTtl` is set; the
+   - **Position:** everything after Claude Code's shared prefix.
+   - **What varies:** per member, with how long it waits (review,
+     dependencies, overnight).
+   - **Write volume (measured):** 58 events and 24.5M tokens (21.3% of
+     writes), 422k per event.
+   - **Levers:**
+     - Claude members on a subscription already get 1 h. One on an API key,
+       Bedrock or Vertex gets 5 min unless `promptCacheTtl` is set. The
        endpoint config can already pass `CLAUDE_CODE_PROMPT_CACHE_TTL` per
        agent through `apply_endpoint` (`agents/claude.rs:128-146`).
-     - pi members get 5 min unless `PI_CACHE_RETENTION=long`.
+     - The TTL of the supported pi is unknown (see §How each CLI caches).
      - Compacting before a long park shrinks what is written on waking.
-     - A keep-alive turn costs one read (0.1x the context) and adds a little to
-       the history. At a 1 h TTL, about 19 of them cost as much as one re-write
-       (2x), so they pay only for a member expected to wake within hours.
-     - Batching wake-ups for the same member helps too.
+     - A keep-alive turn reads the context once (0.1x) and adds a little to
+       the history. About 19 of them cost one re-write at 2x, so they pay only
+       for a member expected to wake within hours.
+     - Batching wake-ups for the same member.
 
 3. **The briefing is rebuilt at every launch, a resume included.**
    - **Code:**
      - `daemon/supervisor/launch.rs:175-204` builds `TeamView` from the live
-       `model.agents` and, for the orchestrator, the model catalog with
+       `model.agents`. For the orchestrator it adds the model catalog with
        `Availability::detect()` and the work style's fallbacks.
      - `agents/prompt.rs:45-68` (roster), `:222` (`worker_briefing`), `:364`
        (`orchestrator_briefing`).
      - Delivered by `--append-system-prompt-file` (`agents/claude.rs:212`),
        `developer_instructions` (`agents/codex.rs:103-125`) and
        `--append-system-prompt` (`agents/pi.rs:363-366`).
-   - **Position:** system for Claude Code and pi; the head developer message for
-     Codex.
+   - **Position:** system for Claude Code and pi; the head developer message
+     for Codex.
    - **What varies:**
-     - per member, in the first line (id, role) and the workspace branch;
+     - per member: its id and role in the first line, its branch;
      - per team change: the roster (`agent_add`, `agent_remove`,
        `agent_spawn`, temporary members leaving, role edits), the objective,
        the style instructions and the orchestrator's id;
-     - for the orchestrator only, also CLI availability.
-     - It never changes inside a running session. There are no timestamps or
-       ids in it.
-   - **Invalidates:** on a resume, the system prompt and every message (the
-     23.4k-only read signature), even inside the TTL.
+     - for the orchestrator, also CLI availability.
+     - It never changes inside a running session. It holds no timestamps,
+       session ids or launch ids; agent ids and branch names are in it.
+   - **Invalidates:** on a resume, the system prompt and every message, even
+     inside the TTL. Code-based for Claude Code; the 23.4k-only read is what a
+     miss would look like there.
    - **Frequency:** 65 roster changes in 5 days.
    - **Evidence:** `scheduler`'s `briefing.md` is from 2026-10-05 22:14. The
      roster now differs from it by two lines (`linux` left, `cache-reviewer`
-     joined), so its next resume would write its whole context again.
-   - **Measured:** not separable in the sample, because resumes there came
-     after gaps over 1 h. One event costs the whole context: 400k to 650k
-     tokens for the long-lived members above.
-   - **Avoidable:** yes. Keep the briefing byte-identical across a session's
-     launches:
+     joined).
+   - **Write volume:** not separable in the sample, because resumes there came
+     after gaps over 1 h. One event writes the whole context: 400k to 650k
+     tokens for the long-lived members here.
+   - **Lever:** keep the briefing byte-identical across a session's launches:
      - reuse the stored `briefing.md` on resume;
-     - or take the volatile parts (roster, objective) out of it into
-       `agents_list` or a delivered message.
+     - or move the volatile parts (roster, objective) into `agents_list` or a
+       delivered message.
 
-4. **Relaunches.** These are the paths that resume a session:
+4. **Relaunches.** These paths resume a session:
    - a crash restart, up to `max_restarts` (default 1; `daemon/supervisor/
-     exits.rs`);
+     exits.rs:127-190`);
    - daemon recovery stopping and resuming a process of another build
-     (`daemon/supervisor/recovery.rs:158-199`). This workspace's 18
-     recoveries all adopted the running process instead;
+     (`daemon/supervisor/recovery.rs:158-199`). The 18 recoveries here all
+     adopted the running process instead;
    - a usage limit with `--restart` or a dead process
      (`daemon/limits.rs:302`). A live session is prompted in place instead
      (`:311`), which keeps its cache;
-   - a refused 1M window, which restarts on the standard window
+   - a refused 1M window, which restarts on the standard one
      (`daemon/context.rs:57-95`).
 
-   With a stable briefing and inside the TTL, a Claude Code resume should read
-   its prefix. Still unmeasured: whether Claude Code adds anything that is not
-   appended at the end on resume (environment, date, skills listing). Ask
-   `cache-bench` to restart a member inside the TTL with an unchanged briefing.
+   With a stable briefing and inside the TTL, a resume should read its prefix.
+   Unmeasured: whether Claude Code adds anything at resume that is not
+   appended at the end.
 
 5. **Model and CLI changes.** The cache is per model, so each one writes the
    whole context.
    - **Code:**
      - `daemon/fallback.rs:291` (`agent_set_model`) and `:434`
-       (`move_to_runtime`, a fresh session plus handoff,
+       (`move_to_runtime`: a fresh session plus handoff,
        `agents/prompt.rs:551`);
      - `daemon/policy.rs`: the work-style fallback, and the move back after
        the reset or `RETRY_HOME_MS` (1 h);
-     - `daemon/turns.rs`: the refusal fallback;
+     - `daemon/turns.rs:733`: the refusal fallback;
      - `agents/claude.rs:186` (`switchModelsOnFlag`) and `:258-262`
-       (`CLAUDE_CODE_NO_MODEL_FALLBACK` is only set when `model_fallback` is
+       (`CLAUDE_CODE_NO_MODEL_FALLBACK` is set only when `model_fallback` is
        off, so Claude Code may switch on its own).
-   - **Measured:** 2 events and 0.85M tokens in the Claude sessions. The
-     20 moves to Codex this week each started a fresh session, which is
-     inherent.
+   - **Write volume (measured):** 2 events and 0.85M tokens in the Claude
+     sessions. The 20 moves to Codex this week each began a fresh session.
    - **Timing:** a move back home, or any optional move, can wait until the
-     member has been idle past its TTL or is at a compaction point. Then it
-     costs no more than waking would.
+     member has idled past its TTL or reaches a compaction point.
 
 6. **Compaction.**
-   - **Code:**
+   - **Code, Claude Code:** crew-bridge runs a queued compaction at turn end,
+     or at once when idle (`assets/crew-bridge.register.ts:62-81,154-160`).
+   - **Code, pi:** crew's extension runs it from the same socket order with
+     `ctx.compact` and the keep text as `customInstructions`
+     (`assets/crew-pi.ts:111-128`).
+   - **Code, Codex (and the others without a socket):** `/compact` is typed
+     while the member rests (`agents/codex.rs:333`, `agents/pi.rs:499`;
+     `daemon/context.rs:250-302`). Codex's command takes no keep text.
+   - **Code, both:**
      - the orchestrator is warned at `context_warn_percent`, default 75
        (`daemon/context.rs:122-180`);
-     - queued at `:184-302` and run by the mod at turn end, or at once when
-       idle (`assets/crew-bridge.register.ts:62-81,154-160`);
-     - reorientation at `daemon/context.rs:380-428`, keeping at most 1000
-       characters.
+     - after any compaction the member gets a reorientation keeping at most
+       1000 characters (`daemon/context.rs:364-368,380-428`).
    - **Position:** messages. The summary replaces the history; system and
      tools stay.
-   - **Measured:** the rebuild is cheap, 4 events and 0.14M tokens (30k to
-     47k each).
-   - **Hidden cost:** the compaction request itself reads the whole context.
-     That is 0.1x when warm, but a member compacted after idling past its TTL
-     writes its whole context first.
-   - **Timing:** compact at turn end, as the mod already does. Never compact a
-     cold idle member unless it is about to wake. Since every later request
-     reads the whole context, an earlier compaction can save more than the
-     miss costs.
+   - **Write volume (measured):** 4 events and 0.14M tokens. The rebuild is
+     small.
+   - **Hidden cost:** the compaction request reads the whole context, at 0.1x
+     when warm. A member compacted after idling past its TTL writes its whole
+     context first.
+   - **Timing:** compact at turn end, as crew-bridge already does. Never
+     compact a cold idle member unless it is about to wake.
 
 7. **Session start.**
-   - **Measured:** 26 events and 0.65M tokens.
-   - Claude Code's own 23.4k comes from the shared cache. crew's part (about
-     5.4k) is written per start.
-   - The per-member first line (`agents/prompt.rs:222-232`) prevents sharing
-     the rest of the 9.5 KB briefing across members. At most about 5k tokens
-     per launch could be saved, so this is low priority.
+   - **Write volume (measured):** 29 events and 0.73M tokens.
+   - Claude Code's own prefix comes from the shared cache; crew's part, 5k to
+     7k tokens, is written per start.
+   - The per-member first line (`agents/prompt.rs:222-232`) keeps the rest of
+     the 9.5 KB briefing from being shared across members. That saves a few
+     thousand tokens per launch at most, so this is low priority.
 
-8. **Turn count times context size.** This is cost, not hit rate. Every
-   injection that starts a turn reads the whole context once at 0.1x:
-   - deliveries;
-   - reminders, after 90 s idle with a `Working` card, at most 3
-     (`daemon/supervisor/health.rs:104-128`);
-   - `WAKE`;
-   - orchestrator notices;
-   - the compaction reorientation (`daemon/context.rs:364-368`);
-   - `RESUME_PROMPT` every 30 min while a limit persists
-     (`daemon/limits.rs:311`);
-   - the first prompt (`agents/prompt.rs:448,465`;
-     `daemon/supervisor/launch.rs:350-384`).
+8. **Turns crew starts.** This is cost, not hit rate: each turn reads the
+   whole context once at 0.1x.
+   - **Deliveries.** A 1.5 to 5 s gather (`daemon/delivery.rs:46-50`), and
+     status news waiting for company (`:52-63`), already merge some.
+   - **Reminder** (`daemon/supervisor/health.rs:104-128`).
+     - Fires only when the member is idle and ready, and its active card
+       (`tasks::active_task`) is `Working`.
+     - The first comes after 90 s idle, then one per 90 s, at most 3, then
+       the member is reported unresponsive.
+     - In the event log, all 75 reminders came while the card's latest state
+       event was a dispatch (74) or `changes_requested` (1). None came while
+       the card was in Review.
+   - **"Asked again"** (`daemon/turns.rs:263-299`, `agent.unanswered`).
+     - After a turn that called no tool and forwarded no reply, following a
+       task, question, review request or message (`asked_of`, `:451-469`),
+       crew sends one notice. If the next turn again does nothing, it is taken
+       as idle (`agent.idle_turn`).
+     - It is not gated by the card's state. `graph` got one at 22:57:53 with
+       `toolbox-audit` in Review, after a designer message
+       (m-76515cb7968a).
+     - It fired 185 times, more than reminders.
+   - **A refused waiting report.** `agent_status("waiting")` for a card that
+     is not `Working`, `Waiting` or started `Blocked` is refused ("no started
+     work", `daemon/orchestrate.rs:798-807`). A member whose card is in Review
+     has no accepted way to say it waits, which leads to more turns.
+   - **The rest:**
+     - `WAKE`;
+     - orchestrator notices;
+     - the compaction reorientation;
+     - `RESUME_PROMPT`, every 30 min while a limit lasts;
+     - the first prompt (`agents/prompt.rs:448,465`;
+       `daemon/supervisor/launch.rs:350-384`).
+   - **Tool output** stays in the context until a compaction. `tasks_list` on
+     this board returns 90 KB (about 22k tokens), read again by every later
+     request.
 
-   Mitigations already exist: a 1.5 to 5 s gather (`daemon/delivery.rs:46-50`)
-   and status news that waits for company (`:52-63`). Tool output also stays
-   in the context until a compaction: `tasks_list` on this board returns
-   90 KB, about 22k tokens, read again by every later request.
-
-9. **Claude Code's silent-turn reminders.** There are over 1,000 in the
-   sample ("The user hasn't heard from you in a while ..."), controlled by
-   `CLAUDE_CODE_SILENT_TURN_REMINDER*`. They work against crew's member tone,
-   "Work silently between tool calls" (`agents/prompt.rs:152-169`). They only
-   append and caused no history change on their own. The cost is a little text
-   per long turn; low priority.
+9. **Claude Code's silent-turn reminders.** "The user hasn't heard from you in
+   a while ..." is controlled by `CLAUDE_CODE_SILENT_TURN_REMINDER*`.
+   - It works against crew's member tone, "Work silently between tool calls"
+     (`agents/prompt.rs:152-169`).
+   - Measured: it only appends. 136 turns without a fold had one; none was
+     followed by a history change.
+   - Low priority.
 
 10. **Tool definitions.**
-    - crew's tools are static per build and role: `&'static str`
-      descriptions, sorted schema keys (`mcp/tools.rs:44`), `listChanged:
-      false` and a fixed `instructions` string (`mcp/mod.rs:131-134`).
-    - Claude Code defers them, so a change only appends a delta. Codex and pi
-      send them with each request, so there they are prefix.
-    - Edge: if the daemon cannot be reached at `tools/list`, the
-      orchestrator is given the worker list (`mcp/mod.rs:45-64`). On Codex or
-      pi its next launch would then see a different tool list.
+    - **Code:** crew's tools are static per build and role. Descriptions are
+      `&'static str` with sorted schema keys (`mcp/tools.rs:44`).
+      `listChanged` is `false` and `instructions` a fixed string
+      (`mcp/mod.rs:131-134`).
+    - On Claude Code with tool search they are deferred, so a change only
+      appends. Otherwise, and on Codex, they are prefix (pi presumably too, unverified).
+    - **Edge:** if the daemon cannot be reached at `tools/list`, the
+      orchestrator is given the worker list (`mcp/mod.rs:45-64`). Its next
+      launch would then see another list wherever the tools are prefix.
     - `inherit_mcp` adds the operator's servers to Claude
       (`agents/claude.rs:207`); crew does not control their stability.
-    - A crew upgrade that edits a description breaks only the next launch.
-    - No measured cost.
+    - **Write volume:** none measured.
 
 ### What crew sends, by runtime
 
 | Item | Runtimes | Position | Varies with | Breaks on change |
 | --- | --- | --- | --- | --- |
-| crew tool list and schemas (`mcp/tools.rs:44`, filtered at `mcp/mod.rs:98`; pi via `crew ctl tools`, `cli/agent_side.rs:77-88`) | all | Claude: messages (deferred); Codex, pi: tools | role, crew build | Codex, pi: everything; Claude: nothing (appends a delta) |
+| crew tool list and schemas (`mcp/tools.rs:44`, filtered at `mcp/mod.rs:98`; pi via `registerMcpServer` or `crew ctl tools`, `cli/agent_side.rs:77-88`) | all | Claude with tool search: messages (deferred). Otherwise, and on Codex: tools; pi: presumably tools (unverified) | role, crew build | where prefix: everything; deferred: nothing (appends a delta) |
 | MCP `instructions` (`mcp/mod.rs:133`) | Claude, Codex | Claude: attachment; Codex: context | crew build | as above |
 | Briefing (`agents/prompt.rs:222`, `:364`) | all | system (Claude, pi); developer message (Codex) | member, roster, objective, style, branch; orchestrator: catalog | system and messages, at the next launch |
-| Member tone (`agents/prompt.rs:152`) | Claude (replaces the `tone` section, `assets/crew-bridge.register.ts:186-199`), Codex (in `developer_instructions`) | system | voice only | no (constant) |
+| Member tone (`agents/prompt.rs:152`) | Claude (replaces the `tone` section, `assets/crew-bridge.register.ts:186-199`), Codex (in `developer_instructions`); not pi | system | voice only | no (constant) |
 | `model_verbosity = "low"` for members (`agents/codex.rs:117`) | Codex | request parameter | constant | no |
 | Operator's own `developer_instructions` (`agents/codex.rs:36-43`) | Codex | developer message | the operator's config | messages, at the next launch |
 | `settings.json` (`agents/claude.rs:178-188`) | Claude | none directly; no TTL set | endpoint | no |
-| Hooks (`cli/agent_side.rs:107-137`) | Claude, Codex `notify`, pi extension | nothing: they never print | | no |
+| Hooks (`cli/agent_side.rs:107-137`) | Claude hooks, Codex `notify`, pi extension | nothing: they never print | | no |
 | First prompt: standby, kickoff with live usage, handoff, `RESUME_NOTICE`, pending messages (`daemon/supervisor/launch.rs:350-384`) | all | messages (appended) | per launch | no |
-| Delivered messages, `[crew] Message from ...` (`agents/prompt.rs:724`, 4000 chars each) | all | messages (appended); Claude fold mid-turn | per message | Claude fold: rank 1 |
+| Delivered messages, `[crew] Message from ...` (`agents/prompt.rs:724`, 4000 characters each) | all | messages (appended); Claude: folded mid-turn | per message | Claude fold: rank 1 |
 | `WAKE` (`assets/crew-bridge.register.ts:18`) | Claude | messages | | no (one more turn) |
 | Reminder (`daemon/supervisor/health.rs:176`) | all | messages | | no (one more turn) |
-| `RESUME_PROMPT`, `RESTART_NOTICE` (`daemon/limits.rs:24-30`); recovery notice (`daemon/supervisor/recovery.rs:192`) | all | messages | | no; the restart path is rank 3 and 4 |
-| Compaction keep text and reorientation (`daemon/context.rs:380-428`) | Claude, Codex | messages after the summary | per compaction | (the compaction itself is rank 6) |
-| `agent_set_model` note, handoff (`daemon/fallback.rs`, `agents/prompt.rs:551`) | all | first message of the new session | per move | the move: rank 5 |
+| "Asked again" notice (`daemon/turns.rs:270-276`) | all | messages | | no (one more turn) |
+| `RESUME_PROMPT`, `RESTART_NOTICE` (`daemon/limits.rs:24-30`); recovery notice (`daemon/supervisor/recovery.rs:192`) | all | messages | | no; the restart path is ranks 3 and 4 |
+| Compaction keep text and reorientation (`daemon/context.rs:380-428`) | Claude and pi (keep text as instructions), Codex (reorientation only) | messages after the summary | per compaction | the compaction itself is rank 6 |
+| `agent_set_model` note, handoff (`daemon/fallback.rs`, `agents/prompt.rs:551`) | all | first message of the new session | per move | the move is rank 5 |
 | Task dispatch (`agents/prompt.rs:701`) | all | messages | per card | no |
-| Tool results (`mcp/tools.rs` renderers) | all | messages | per call | no; they grow the context |
-| `--model` with `[1m]` (`agents/claude.rs:241-249`), Codex `model_context_window` / `model_auto_compact_token_limit` (`agents/codex.rs:126-131`) | Claude, Codex | model | 1M refusal | everything (rank 5) |
+| Tool results (renderers in `mcp/tools.rs`) | all | messages | per call | no; they grow the context |
+| `--model` with `[1m]` (`agents/claude.rs:241-249`); Codex `model_context_window` and `model_auto_compact_token_limit` (`agents/codex.rs:126-131`) | Claude, Codex | model | a refused 1M window | everything (rank 5) |
 
 ### Session lifecycle
 
 A launch is one of three kinds:
 
-- **New:** a chosen session id, `--session-id`.
+- **New:** a chosen session id, passed as `--session-id`.
 - **Resume:** `--resume <id>`, `codex resume <thread>`, or pi `--session-id`.
   A launch counts as a resume only once the session id was confirmed
   (`daemon/supervisor/launch.rs:205`).
-- **Fresh:** a new id and a handoff prompt, used for a move to another CLI and
-  for an operator "fresh" restart.
+- **Fresh:** a new id and a handoff prompt. Used for a move to another CLI and
+  for an operator's "fresh" restart.
 
 | Trigger | Kind | Code | Avoidable, or when to do it |
 | --- | --- | --- | --- |
-| Team start or member added | New | `daemon/supervisor/creation.rs` | Inherent. About 5.4k tokens of crew system per start. |
-| Crash | Resume (up to `max_restarts`, default 1) | `daemon/supervisor/exits.rs` | Inherent. Costs no write if the briefing is stable and the TTL holds (unmeasured). |
+| Team start or member added | New | `daemon/supervisor/creation.rs` | Inherent. About 5k to 7k tokens of crew system per start. |
+| Crash | Resume, up to `max_restarts` (default 1) | `daemon/supervisor/exits.rs:127-190` | Inherent. No write if the briefing is stable and the TTL holds (unmeasured). |
 | Daemon restart, same build | none (adopted) | `daemon/supervisor/recovery.rs:48-110` | Already avoided. |
 | Daemon restart, other build | Resume | `daemon/supervisor/recovery.rs:158-199` | Restart the daemon while members are idle and warm; keep the briefing stable. |
 | Usage limit lifted, process alive | prompt in place | `daemon/limits.rs:311` | Keeps the cache if lifted within the TTL. A 30 min retry against an unchanged limit (`runtime`, 51 times) is a turn each time. |
 | Usage limit, `--restart` or process gone | Resume | `daemon/limits.rs:302` | As for a crash. |
 | 1M window refused | Resume on another model variant | `daemon/context.rs:57-95` | Inherent, once per member. |
 | Work-style fallback and the move back home | Resume on another model | `daemon/policy.rs` | Move back only once the member is idle past its TTL. |
-| `agent_set_model` | Resume on another model | `daemon/fallback.rs:291` | The orchestrator's choice. Best at a compaction point. |
+| `agent_set_model` | Resume on another model | `daemon/fallback.rs:291` | The orchestrator's choice; best at a compaction point. |
 | Move to another CLI | Fresh plus handoff | `daemon/fallback.rs:434` | Inherent. The handoff carries no history. |
-| Compaction | in place | `daemon/context.rs:184-302`, `assets/crew-bridge.register.ts:62-81` | At turn end, while warm. |
+| Compaction | in place | `daemon/context.rs:184-302`; `assets/crew-bridge.register.ts:62-81`; `assets/crew-pi.ts:111-128`; `/compact` typed for Codex | At turn end, while warm. |
 
 ### Open for the next cards
 
 - `cache-baseline` (runtime):
   - Codex `cached_input_tokens` per event class, including a resume with
     changed `developer_instructions`.
-  - Confirm the fold signature with its own tool. The `thinking_drop` record
-    and the `isMeta` rows are a clean join key.
-- `cache-bench` (qa): controlled A/B runs on the same workload:
-  - fold on and off;
-  - a restart inside the TTL with an unchanged briefing, and with a roster
+  - Its own reading of the fold association. The keys are in §Method.
+- `cache-bench` (qa): the same workload before and after a delivery change.
+  Later:
+  - a restart inside the TTL with an unchanged briefing, and with one roster
     line changed;
   - compaction while warm and while cold.
 - `cache-design`:
-  - a delivery that never rewrites history (rank 1);
+  - a delivery that never changes history (rank 1);
   - a briefing stable across launches (rank 3);
-  - TTL per member and keep-alive policy (rank 2);
-  - timing of optional model moves (rank 5).
+  - TTL per member, and the keep-alive policy (rank 2);
+  - the timing of optional model moves (rank 5);
+  - fewer turns started by crew (rank 8): a waiting state for a card in
+    Review, and an "asked again" that skips news.
 - `toolbox-spec`: per-member MCP servers and skills add tool definitions.
-  - On Codex and pi those are prefix: they must be byte-stable and
-    deterministically ordered, and set only at launch.
-  - On Claude Code they are deferred, so a change appends.
+  Wherever these are prefix (Codex, pi, Claude without tool search or with
+  `alwaysLoad`), they must be byte-stable, deterministically ordered and set
+  only at launch.
 
 ### Method
 
-The figures can be reproduced read-only. In each session file, take the
-`assistant` lines that are not sidechains and have `.message.usage`, once per
-`.message.id`. From each, read `cache_creation_input_tokens`,
-`cache_read_input_tokens`, `input_tokens` and
-`cache_creation.ephemeral_{1h,5m}_input_tokens`.
+The scripts are in `notes/prompt-cache-audit/`: `run.sh` builds the cohort,
+and `session.sh` classifies one session. The class tests are in the comment at
+the top of `session.sh`.
 
-A big write is a request that writes at least 10k tokens and more than it
-reads. Classify each by these tests, in order:
+Keys read from each Claude Code session file:
 
-1. a `system/compact_boundary` before it;
-2. a model different from the previous request;
-3. the gap since the previous request: over 3600 s, or 300 to 3600 s;
-4. otherwise, a history rewrite.
+- **Requests:** `type == "assistant"`, not `isSidechain`, with
+  `.message.usage`. Counted once per `.message.id`, because one response is
+  written as one line per content block, each carrying the same usage. From
+  each, `.requestId` and the usage fields `input_tokens`,
+  `cache_creation_input_tokens`, `cache_read_input_tokens` and
+  `cache_creation.ephemeral_{1h,5m}_input_tokens`.
+- **History changes:** `type == "attachment"` with `.attachment.type ==
+  "thinking_drop"`. Joined to the request by `.attachment.requestId`. It also
+  carries `.attachment.clientChange` and `.attachment.newlyDropped`.
+- **Folds:** `type == "user"` with `isMeta == true`, array content, and
+  `.message.content[0].text` starting with `[crew]`. A delivery submitted
+  while the member rests, and `WAKE`, are plain string content and not
+  `isMeta`.
+- **Turn ends:** `type == "system"`, `subtype == "turn_duration"`.
+- **Compactions:** `subtype == "compact_boundary"`.
+- **Silent-turn reminders:** `.attachment.type == "silent_turn_reminder"`.
 
-For the fold correlation:
-
-- A turn ends at a `system/turn_duration` line.
-- A fold is a `user` line whose array content starts with `[crew]`; Claude
-  Code also marks these `isMeta`.
-- A history change is an `attachment` of type `thinking_drop`.
+Records are taken in file order, because attachment timestamps can sit a
+millisecond before the line that precedes them. A resumed session appends to
+the same file.
