@@ -682,3 +682,117 @@ pub fn vcs_script() -> Vec<(i64, String, VcsEvent)> {
     );
     script
 }
+
+/// The two members of the toolbox example team (`notes/toolboxes.md`
+/// §Team file, case T02) with their effective toolboxes as a dashboard
+/// receives them: `qa` on Claude Code, and `release` on Codex with a change
+/// waiting for a restart. No value of a reference is here, only its name.
+pub fn toolbox_agents(now: i64) -> Vec<Agent> {
+    use crew_core::types::{
+        AgentToolbox, ToolboxItem, ToolboxItemCode as Code, ToolboxItemKind as Kind,
+        ToolboxItemStatus, ToolboxSource, ToolboxSourceCode as SourceCode,
+        ToolboxSourceOrigin as Origin, ToolboxSourceStatus,
+    };
+    let item = |kind, name: &str, origin: &str, required, code, text: &str, detail: Option<&str>| {
+        ToolboxItem {
+            kind,
+            name: name.to_string(),
+            origin: origin.to_string(),
+            required,
+            status: ToolboxItemStatus {
+                code,
+                text: text.to_string(),
+            },
+            detail: detail.map(str::to_string),
+        }
+    };
+    let source = |origin, kind: Option<&str>, label: &str, code, text: &str, names: &[&str], detail: Option<&str>| {
+        ToolboxSource {
+            origin,
+            kind: kind.map(str::to_string),
+            label: label.to_string(),
+            status: ToolboxSourceStatus {
+                code,
+                text: text.to_string(),
+            },
+            names: names.iter().map(|n| n.to_string()).collect(),
+            detail: detail.map(str::to_string),
+        }
+    };
+    let mut qa = agent("qa", "frontend QA", AgentStatus::Working, Some(40), now);
+    qa.runtime = RuntimeKind::Claude;
+    qa.toolbox = Some(AgentToolbox {
+        fingerprint: "3f9a0c21e7b4d5f6a7b8c9d0e1f2a3b4c5d6e7f8091a2b3c4d5e6f708192a3b4".into(),
+        items: vec![
+            item(Kind::Mcp, "context7", "bundle:base", false, Code::Active, "Active", Some("npx -y @upstash/context7-mcp")),
+            item(Kind::Mcp, "playwright", "bundle:web", true, Code::Active, "Active", Some("npx @playwright/mcp --headless")),
+            item(Kind::Skills, "frontend-qa", "bundle:web", false, Code::Active, "Active", None),
+        ],
+        sources: vec![
+            source(Origin::Operator, None, "Your Claude Code configuration", SourceCode::NotUsed, "Not used", &[], None),
+            source(Origin::Project, None, "Project", SourceCode::Used, "Used: skills, hooks, instructions", &[], None),
+        ],
+        ..AgentToolbox::default()
+    });
+    let mut release = agent("release", "release notes", AgentStatus::Idle, None, now);
+    release.runtime = RuntimeKind::Codex;
+    release.model = Some("gpt-6-astra".to_string());
+    release.toolbox = Some(AgentToolbox {
+        fingerprint: "b56e01d7c4a98f3e2d1c0b9a8f7e6d5c4b3a29180f7e6d5c4b3a2918f0e1d2c3".into(),
+        pending_fingerprint: Some(
+            "c0ffee12ab34cd56ef7890ab12cd34ef567890ab12cd34ef567890ab12cd34ef".into(),
+        ),
+        items: vec![
+            item(
+                Kind::Mcp,
+                "docs",
+                "bundle:github",
+                false,
+                Code::Active,
+                "Active",
+                Some("https://docs.example.com/mcp · Authorization: Bearer $DOCS_TOKEN"),
+            ),
+            item(
+                Kind::Mcp,
+                "github",
+                "bundle:github",
+                false,
+                Code::Needs,
+                "Needs $SHOP_GITHUB_TOKEN",
+                Some("github-mcp-server stdio · GITHUB_TOKEN: $SHOP_GITHUB_TOKEN (not set) · GITHUB_TOOLSETS: repos,issues,pull_requests"),
+            ),
+            item(Kind::Skills, "changelog", "member", false, Code::Active, "Active", None),
+            item(
+                Kind::Plugins,
+                "lint-kit",
+                "member",
+                false,
+                Code::NotAvailable,
+                "Not available on Codex",
+                Some("Claude Code plugin format"),
+            ),
+        ],
+        sources: vec![
+            source(
+                Origin::Operator,
+                Some("mcp"),
+                "Your Codex MCP servers",
+                SourceCode::Disabled,
+                "Disabled",
+                &["ambient", "docs-local"],
+                None,
+            ),
+            source(
+                Origin::Operator,
+                Some("subagents"),
+                "Your subagents",
+                SourceCode::CannotBeExcluded,
+                "Cannot be excluded on Codex",
+                &[],
+                Some("without the sandbox"),
+            ),
+        ],
+        ..AgentToolbox::default()
+    });
+    vec![qa, release]
+}

@@ -66,6 +66,7 @@ fn snapshots() {
     check("snapshot.json", pretty(&fixture::snapshot(NOW)));
     check("subagents.json", pretty(&fixture::with_subagents(NOW)));
     check("team10.json", pretty(&fixture::team(10, NOW)));
+    check("toolbox.json", pretty(&fixture::toolbox_agents(NOW)));
 }
 
 // ---- pushes ------------------------------------------------------------------
@@ -1387,6 +1388,7 @@ fn every_fixture_file_is_generated() {
         "snapshot.json",
         "subagents.json",
         "team10.json",
+        "toolbox.json",
     ];
     if std::env::var("CREW_UPDATE_FIXTURES").as_deref() == Ok("1") {
         return;

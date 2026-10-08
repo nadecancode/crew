@@ -1,0 +1,225 @@
+[
+  {
+    "id": "qa",
+    "name": "qa",
+    "role": "frontend QA",
+    "task": "implement frontend QA",
+    "status": "working",
+    "activity": "Edit src/lib.rs",
+    "runtime": "claude",
+    "model": "sonnet",
+    "workdir": "/work/demo/.crew/worktrees/qa",
+    "branch": "agents/qa",
+    "backend": "herdr",
+    "backend_ref": "w2:p4",
+    "pid": 4242,
+    "session_id": "0d73aa0a-bdaf-4916-8421-d1917fc3bf2a",
+    "orchestrator": false,
+    "parent": null,
+    "temporary": false,
+    "subagents": 0,
+    "delivery": "socket",
+    "started_at": 1759999246000,
+    "last_activity_at": 1759999998000,
+    "progress": 40,
+    "paused": false,
+    "block_kind": null,
+    "limit": null,
+    "context": null,
+    "compact_pending": false,
+    "compactions": 0,
+    "running_model": "claude-sonnet-5-5",
+    "model_name": "Sonnet 5.5",
+    "effort": "high",
+    "fallback": null,
+    "exit_code": null,
+    "restarts": 0,
+    "inbox_unread": 0,
+    "inbox_total": 3,
+    "outbox_total": 2,
+    "usage": {
+      "input_tokens": 18230,
+      "output_tokens": 4112,
+      "cache_read_tokens": 220448,
+      "cache_creation_tokens": 31004,
+      "turns": 9
+    },
+    "error": null,
+    "toolbox": {
+      "fingerprint": "3f9a0c21e7b4d5f6a7b8c9d0e1f2a3b4c5d6e7f8091a2b3c4d5e6f708192a3b4",
+      "items": [
+        {
+          "kind": "mcp",
+          "name": "context7",
+          "origin": "bundle:base",
+          "required": false,
+          "status": {
+            "code": "active",
+            "text": "Active"
+          },
+          "detail": "npx -y @upstash/context7-mcp"
+        },
+        {
+          "kind": "mcp",
+          "name": "playwright",
+          "origin": "bundle:web",
+          "required": true,
+          "status": {
+            "code": "active",
+            "text": "Active"
+          },
+          "detail": "npx @playwright/mcp --headless"
+        },
+        {
+          "kind": "skills",
+          "name": "frontend-qa",
+          "origin": "bundle:web",
+          "required": false,
+          "status": {
+            "code": "active",
+            "text": "Active"
+          }
+        }
+      ],
+      "sources": [
+        {
+          "origin": "operator",
+          "label": "Your Claude Code configuration",
+          "status": {
+            "code": "not_used",
+            "text": "Not used"
+          }
+        },
+        {
+          "origin": "project",
+          "label": "Project",
+          "status": {
+            "code": "used",
+            "text": "Used: skills, hooks, instructions"
+          }
+        }
+      ]
+    }
+  },
+  {
+    "id": "release",
+    "name": "release",
+    "role": "release notes",
+    "task": "implement release notes",
+    "status": "idle",
+    "activity": "",
+    "runtime": "codex",
+    "model": "gpt-6-astra",
+    "workdir": "/work/demo/.crew/worktrees/release",
+    "branch": "agents/release",
+    "backend": "herdr",
+    "backend_ref": "w2:p4",
+    "pid": 4242,
+    "session_id": "0d73aa0a-bdaf-4916-8421-d1917fc3bf2a",
+    "orchestrator": false,
+    "parent": null,
+    "temporary": false,
+    "subagents": 0,
+    "delivery": "socket",
+    "started_at": 1759999246000,
+    "last_activity_at": 1759999998000,
+    "progress": null,
+    "paused": false,
+    "block_kind": null,
+    "limit": null,
+    "context": null,
+    "compact_pending": false,
+    "compactions": 0,
+    "running_model": "claude-sonnet-5-5",
+    "model_name": "Sonnet 5.5",
+    "effort": "high",
+    "fallback": null,
+    "exit_code": null,
+    "restarts": 0,
+    "inbox_unread": 0,
+    "inbox_total": 3,
+    "outbox_total": 2,
+    "usage": {
+      "input_tokens": 18230,
+      "output_tokens": 4112,
+      "cache_read_tokens": 220448,
+      "cache_creation_tokens": 31004,
+      "turns": 9
+    },
+    "error": null,
+    "toolbox": {
+      "fingerprint": "b56e01d7c4a98f3e2d1c0b9a8f7e6d5c4b3a29180f7e6d5c4b3a2918f0e1d2c3",
+      "pending_fingerprint": "c0ffee12ab34cd56ef7890ab12cd34ef567890ab12cd34ef567890ab12cd34ef",
+      "items": [
+        {
+          "kind": "mcp",
+          "name": "docs",
+          "origin": "bundle:github",
+          "required": false,
+          "status": {
+            "code": "active",
+            "text": "Active"
+          },
+          "detail": "https://docs.example.com/mcp · Authorization: Bearer $DOCS_TOKEN"
+        },
+        {
+          "kind": "mcp",
+          "name": "github",
+          "origin": "bundle:github",
+          "required": false,
+          "status": {
+            "code": "needs",
+            "text": "Needs $SHOP_GITHUB_TOKEN"
+          },
+          "detail": "github-mcp-server stdio · GITHUB_TOKEN: $SHOP_GITHUB_TOKEN (not set) · GITHUB_TOOLSETS: repos,issues,pull_requests"
+        },
+        {
+          "kind": "skills",
+          "name": "changelog",
+          "origin": "member",
+          "required": false,
+          "status": {
+            "code": "active",
+            "text": "Active"
+          }
+        },
+        {
+          "kind": "plugins",
+          "name": "lint-kit",
+          "origin": "member",
+          "required": false,
+          "status": {
+            "code": "not_available",
+            "text": "Not available on Codex"
+          },
+          "detail": "Claude Code plugin format"
+        }
+      ],
+      "sources": [
+        {
+          "origin": "operator",
+          "kind": "mcp",
+          "label": "Your Codex MCP servers",
+          "status": {
+            "code": "disabled",
+            "text": "Disabled"
+          },
+          "names": [
+            "ambient",
+            "docs-local"
+          ]
+        },
+        {
+          "origin": "operator",
+          "kind": "subagents",
+          "label": "Your subagents",
+          "status": {
+            "code": "cannot_be_excluded",
+            "text": "Cannot be excluded on Codex"
+          },
+          "detail": "without the sandbox"
+        }
+      ]
+    }
+  }
+]
