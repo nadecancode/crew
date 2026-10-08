@@ -2093,6 +2093,10 @@ public struct Agent: Equatable, Hashable {
     public let outboxTotal: UInt32
     public let usage: Usage?
     public let error: String?
+    /**
+     * The member's effective toolbox, when it has one.
+     */
+    public let toolbox: AgentToolbox?
 
     // Default memberwise initializers are never public by default, so we
     // declare one manually.
@@ -2156,7 +2160,10 @@ public struct Agent: Equatable, Hashable {
         /**
          * Set while the session runs on a model other than the one the member
          * was given.
-         */fallback: ModelFallback?, exitCode: Int32?, restarts: UInt32, inboxUnread: UInt32, inboxTotal: UInt32, outboxTotal: UInt32, usage: Usage?, error: String?) {
+         */fallback: ModelFallback?, exitCode: Int32?, restarts: UInt32, inboxUnread: UInt32, inboxTotal: UInt32, outboxTotal: UInt32, usage: Usage?, error: String?, 
+        /**
+         * The member's effective toolbox, when it has one.
+         */toolbox: AgentToolbox?) {
         self.id = id
         self.name = name
         self.role = role
@@ -2196,6 +2203,7 @@ public struct Agent: Equatable, Hashable {
         self.outboxTotal = outboxTotal
         self.usage = usage
         self.error = error
+        self.toolbox = toolbox
     }
 
     
@@ -2252,7 +2260,8 @@ public struct FfiConverterTypeAgent: FfiConverterRustBuffer {
                 inboxTotal: FfiConverterUInt32.read(from: &buf), 
                 outboxTotal: FfiConverterUInt32.read(from: &buf), 
                 usage: FfiConverterOptionTypeUsage.read(from: &buf), 
-                error: FfiConverterOptionString.read(from: &buf)
+                error: FfiConverterOptionString.read(from: &buf), 
+                toolbox: FfiConverterOptionTypeAgentToolbox.read(from: &buf)
         )
     }
 
@@ -2296,6 +2305,7 @@ public struct FfiConverterTypeAgent: FfiConverterRustBuffer {
         FfiConverterUInt32.write(value.outboxTotal, into: &buf)
         FfiConverterOptionTypeUsage.write(value.usage, into: &buf)
         FfiConverterOptionString.write(value.error, into: &buf)
+        FfiConverterOptionTypeAgentToolbox.write(value.toolbox, into: &buf)
     }
 }
 
@@ -2514,6 +2524,84 @@ public func FfiConverterTypeAgentRelation_lift(_ buf: RustBuffer) throws -> Agen
 #endif
 public func FfiConverterTypeAgentRelation_lower(_ value: AgentRelation) -> RustBuffer {
     return FfiConverterTypeAgentRelation.lower(value)
+}
+
+
+/**
+ * A member's effective toolbox as every dashboard shows it. Secret values
+ * are never in it.
+ */
+public struct AgentToolbox: Equatable, Hashable {
+    public let fingerprint: String
+    public let pendingFingerprint: String?
+    public let definitionDigest: String?
+    public let toolCount: UInt32?
+    public let definitionBytes: UInt64?
+    public let items: [ToolboxItem]
+    public let sources: [ToolboxSource]
+
+    // Default memberwise initializers are never public by default, so we
+    // declare one manually.
+    public init(fingerprint: String, pendingFingerprint: String?, definitionDigest: String?, toolCount: UInt32?, definitionBytes: UInt64?, items: [ToolboxItem], sources: [ToolboxSource]) {
+        self.fingerprint = fingerprint
+        self.pendingFingerprint = pendingFingerprint
+        self.definitionDigest = definitionDigest
+        self.toolCount = toolCount
+        self.definitionBytes = definitionBytes
+        self.items = items
+        self.sources = sources
+    }
+
+    
+
+    
+}
+
+#if compiler(>=6)
+extension AgentToolbox: Sendable {}
+#endif
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeAgentToolbox: FfiConverterRustBuffer {
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> AgentToolbox {
+        return
+            try AgentToolbox(
+                fingerprint: FfiConverterString.read(from: &buf), 
+                pendingFingerprint: FfiConverterOptionString.read(from: &buf), 
+                definitionDigest: FfiConverterOptionString.read(from: &buf), 
+                toolCount: FfiConverterOptionUInt32.read(from: &buf), 
+                definitionBytes: FfiConverterOptionUInt64.read(from: &buf), 
+                items: FfiConverterSequenceTypeToolboxItem.read(from: &buf), 
+                sources: FfiConverterSequenceTypeToolboxSource.read(from: &buf)
+        )
+    }
+
+    public static func write(_ value: AgentToolbox, into buf: inout [UInt8]) {
+        FfiConverterString.write(value.fingerprint, into: &buf)
+        FfiConverterOptionString.write(value.pendingFingerprint, into: &buf)
+        FfiConverterOptionString.write(value.definitionDigest, into: &buf)
+        FfiConverterOptionUInt32.write(value.toolCount, into: &buf)
+        FfiConverterOptionUInt64.write(value.definitionBytes, into: &buf)
+        FfiConverterSequenceTypeToolboxItem.write(value.items, into: &buf)
+        FfiConverterSequenceTypeToolboxSource.write(value.sources, into: &buf)
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeAgentToolbox_lift(_ buf: RustBuffer) throws -> AgentToolbox {
+    return try FfiConverterTypeAgentToolbox.lift(buf)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeAgentToolbox_lower(_ value: AgentToolbox) -> RustBuffer {
+    return FfiConverterTypeAgentToolbox.lower(value)
 }
 
 
@@ -6520,6 +6608,254 @@ public func FfiConverterTypeTerminalChunk_lower(_ value: TerminalChunk) -> RustB
 }
 
 
+public struct ToolboxItem: Equatable, Hashable {
+    public let kind: ToolboxItemKind
+    public let name: String
+    public let origin: String
+    public let required: Bool
+    public let status: ToolboxItemStatus
+    public let detail: String?
+
+    // Default memberwise initializers are never public by default, so we
+    // declare one manually.
+    public init(kind: ToolboxItemKind, name: String, origin: String, required: Bool, status: ToolboxItemStatus, detail: String?) {
+        self.kind = kind
+        self.name = name
+        self.origin = origin
+        self.required = required
+        self.status = status
+        self.detail = detail
+    }
+
+    
+
+    
+}
+
+#if compiler(>=6)
+extension ToolboxItem: Sendable {}
+#endif
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeToolboxItem: FfiConverterRustBuffer {
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> ToolboxItem {
+        return
+            try ToolboxItem(
+                kind: FfiConverterTypeToolboxItemKind.read(from: &buf), 
+                name: FfiConverterString.read(from: &buf), 
+                origin: FfiConverterString.read(from: &buf), 
+                required: FfiConverterBool.read(from: &buf), 
+                status: FfiConverterTypeToolboxItemStatus.read(from: &buf), 
+                detail: FfiConverterOptionString.read(from: &buf)
+        )
+    }
+
+    public static func write(_ value: ToolboxItem, into buf: inout [UInt8]) {
+        FfiConverterTypeToolboxItemKind.write(value.kind, into: &buf)
+        FfiConverterString.write(value.name, into: &buf)
+        FfiConverterString.write(value.origin, into: &buf)
+        FfiConverterBool.write(value.required, into: &buf)
+        FfiConverterTypeToolboxItemStatus.write(value.status, into: &buf)
+        FfiConverterOptionString.write(value.detail, into: &buf)
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeToolboxItem_lift(_ buf: RustBuffer) throws -> ToolboxItem {
+    return try FfiConverterTypeToolboxItem.lift(buf)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeToolboxItem_lower(_ value: ToolboxItem) -> RustBuffer {
+    return FfiConverterTypeToolboxItem.lower(value)
+}
+
+
+public struct ToolboxItemStatus: Equatable, Hashable {
+    public let code: ToolboxItemCode
+    public let text: String
+
+    // Default memberwise initializers are never public by default, so we
+    // declare one manually.
+    public init(code: ToolboxItemCode, text: String) {
+        self.code = code
+        self.text = text
+    }
+
+    
+
+    
+}
+
+#if compiler(>=6)
+extension ToolboxItemStatus: Sendable {}
+#endif
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeToolboxItemStatus: FfiConverterRustBuffer {
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> ToolboxItemStatus {
+        return
+            try ToolboxItemStatus(
+                code: FfiConverterTypeToolboxItemCode.read(from: &buf), 
+                text: FfiConverterString.read(from: &buf)
+        )
+    }
+
+    public static func write(_ value: ToolboxItemStatus, into buf: inout [UInt8]) {
+        FfiConverterTypeToolboxItemCode.write(value.code, into: &buf)
+        FfiConverterString.write(value.text, into: &buf)
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeToolboxItemStatus_lift(_ buf: RustBuffer) throws -> ToolboxItemStatus {
+    return try FfiConverterTypeToolboxItemStatus.lift(buf)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeToolboxItemStatus_lower(_ value: ToolboxItemStatus) -> RustBuffer {
+    return FfiConverterTypeToolboxItemStatus.lower(value)
+}
+
+
+public struct ToolboxSource: Equatable, Hashable {
+    public let origin: ToolboxSourceOrigin
+    public let kind: String?
+    public let label: String
+    public let status: ToolboxSourceStatus
+    public let names: [String]
+    public let detail: String?
+
+    // Default memberwise initializers are never public by default, so we
+    // declare one manually.
+    public init(origin: ToolboxSourceOrigin, kind: String?, label: String, status: ToolboxSourceStatus, names: [String], detail: String?) {
+        self.origin = origin
+        self.kind = kind
+        self.label = label
+        self.status = status
+        self.names = names
+        self.detail = detail
+    }
+
+    
+
+    
+}
+
+#if compiler(>=6)
+extension ToolboxSource: Sendable {}
+#endif
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeToolboxSource: FfiConverterRustBuffer {
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> ToolboxSource {
+        return
+            try ToolboxSource(
+                origin: FfiConverterTypeToolboxSourceOrigin.read(from: &buf), 
+                kind: FfiConverterOptionString.read(from: &buf), 
+                label: FfiConverterString.read(from: &buf), 
+                status: FfiConverterTypeToolboxSourceStatus.read(from: &buf), 
+                names: FfiConverterSequenceString.read(from: &buf), 
+                detail: FfiConverterOptionString.read(from: &buf)
+        )
+    }
+
+    public static func write(_ value: ToolboxSource, into buf: inout [UInt8]) {
+        FfiConverterTypeToolboxSourceOrigin.write(value.origin, into: &buf)
+        FfiConverterOptionString.write(value.kind, into: &buf)
+        FfiConverterString.write(value.label, into: &buf)
+        FfiConverterTypeToolboxSourceStatus.write(value.status, into: &buf)
+        FfiConverterSequenceString.write(value.names, into: &buf)
+        FfiConverterOptionString.write(value.detail, into: &buf)
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeToolboxSource_lift(_ buf: RustBuffer) throws -> ToolboxSource {
+    return try FfiConverterTypeToolboxSource.lift(buf)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeToolboxSource_lower(_ value: ToolboxSource) -> RustBuffer {
+    return FfiConverterTypeToolboxSource.lower(value)
+}
+
+
+public struct ToolboxSourceStatus: Equatable, Hashable {
+    public let code: ToolboxSourceCode
+    public let text: String
+
+    // Default memberwise initializers are never public by default, so we
+    // declare one manually.
+    public init(code: ToolboxSourceCode, text: String) {
+        self.code = code
+        self.text = text
+    }
+
+    
+
+    
+}
+
+#if compiler(>=6)
+extension ToolboxSourceStatus: Sendable {}
+#endif
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeToolboxSourceStatus: FfiConverterRustBuffer {
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> ToolboxSourceStatus {
+        return
+            try ToolboxSourceStatus(
+                code: FfiConverterTypeToolboxSourceCode.read(from: &buf), 
+                text: FfiConverterString.read(from: &buf)
+        )
+    }
+
+    public static func write(_ value: ToolboxSourceStatus, into buf: inout [UInt8]) {
+        FfiConverterTypeToolboxSourceCode.write(value.code, into: &buf)
+        FfiConverterString.write(value.text, into: &buf)
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeToolboxSourceStatus_lift(_ buf: RustBuffer) throws -> ToolboxSourceStatus {
+    return try FfiConverterTypeToolboxSourceStatus.lift(buf)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeToolboxSourceStatus_lower(_ value: ToolboxSourceStatus) -> RustBuffer {
+    return FfiConverterTypeToolboxSourceStatus.lower(value)
+}
+
+
 public struct TranscriptEntry: Equatable, Hashable {
     public let kind: TranscriptKind
     public let at: Int64?
@@ -10426,6 +10762,407 @@ public func FfiConverterTypeTone_lower(_ value: Tone) -> RustBuffer {
 // Note that we don't yet support `indirect` for enums.
 // See https://github.com/mozilla/uniffi-rs/issues/396 for further discussion.
 
+public enum ToolboxItemCode: Equatable, Hashable {
+    
+    case planned
+    case active
+    case notAvailable
+    case notApplicable
+    case needs
+    case blocked
+    case shadowed
+    case failedPreflight
+    case failedInSession
+    case unknown
+
+
+
+
+
+}
+
+#if compiler(>=6)
+extension ToolboxItemCode: Sendable {}
+#endif
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeToolboxItemCode: FfiConverterRustBuffer {
+    typealias SwiftType = ToolboxItemCode
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> ToolboxItemCode {
+        let variant: Int32 = try readInt(&buf)
+        switch variant {
+        
+        case 1: return .planned
+        
+        case 2: return .active
+        
+        case 3: return .notAvailable
+        
+        case 4: return .notApplicable
+        
+        case 5: return .needs
+        
+        case 6: return .blocked
+        
+        case 7: return .shadowed
+        
+        case 8: return .failedPreflight
+        
+        case 9: return .failedInSession
+        
+        case 10: return .unknown
+        
+        default: throw UniffiInternalError.unexpectedEnumCase
+        }
+    }
+
+    public static func write(_ value: ToolboxItemCode, into buf: inout [UInt8]) {
+        switch value {
+        
+        
+        case .planned:
+            writeInt(&buf, Int32(1))
+        
+        
+        case .active:
+            writeInt(&buf, Int32(2))
+        
+        
+        case .notAvailable:
+            writeInt(&buf, Int32(3))
+        
+        
+        case .notApplicable:
+            writeInt(&buf, Int32(4))
+        
+        
+        case .needs:
+            writeInt(&buf, Int32(5))
+        
+        
+        case .blocked:
+            writeInt(&buf, Int32(6))
+        
+        
+        case .shadowed:
+            writeInt(&buf, Int32(7))
+        
+        
+        case .failedPreflight:
+            writeInt(&buf, Int32(8))
+        
+        
+        case .failedInSession:
+            writeInt(&buf, Int32(9))
+        
+        
+        case .unknown:
+            writeInt(&buf, Int32(10))
+        
+        }
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeToolboxItemCode_lift(_ buf: RustBuffer) throws -> ToolboxItemCode {
+    return try FfiConverterTypeToolboxItemCode.lift(buf)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeToolboxItemCode_lower(_ value: ToolboxItemCode) -> RustBuffer {
+    return FfiConverterTypeToolboxItemCode.lower(value)
+}
+
+
+// Note that we don't yet support `indirect` for enums.
+// See https://github.com/mozilla/uniffi-rs/issues/396 for further discussion.
+
+public enum ToolboxItemKind: Equatable, Hashable {
+    
+    case mcp
+    case skills
+    case plugins
+    case subagents
+    case hooks
+    case unknown
+
+
+
+
+
+}
+
+#if compiler(>=6)
+extension ToolboxItemKind: Sendable {}
+#endif
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeToolboxItemKind: FfiConverterRustBuffer {
+    typealias SwiftType = ToolboxItemKind
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> ToolboxItemKind {
+        let variant: Int32 = try readInt(&buf)
+        switch variant {
+        
+        case 1: return .mcp
+        
+        case 2: return .skills
+        
+        case 3: return .plugins
+        
+        case 4: return .subagents
+        
+        case 5: return .hooks
+        
+        case 6: return .unknown
+        
+        default: throw UniffiInternalError.unexpectedEnumCase
+        }
+    }
+
+    public static func write(_ value: ToolboxItemKind, into buf: inout [UInt8]) {
+        switch value {
+        
+        
+        case .mcp:
+            writeInt(&buf, Int32(1))
+        
+        
+        case .skills:
+            writeInt(&buf, Int32(2))
+        
+        
+        case .plugins:
+            writeInt(&buf, Int32(3))
+        
+        
+        case .subagents:
+            writeInt(&buf, Int32(4))
+        
+        
+        case .hooks:
+            writeInt(&buf, Int32(5))
+        
+        
+        case .unknown:
+            writeInt(&buf, Int32(6))
+        
+        }
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeToolboxItemKind_lift(_ buf: RustBuffer) throws -> ToolboxItemKind {
+    return try FfiConverterTypeToolboxItemKind.lift(buf)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeToolboxItemKind_lower(_ value: ToolboxItemKind) -> RustBuffer {
+    return FfiConverterTypeToolboxItemKind.lower(value)
+}
+
+
+// Note that we don't yet support `indirect` for enums.
+// See https://github.com/mozilla/uniffi-rs/issues/396 for further discussion.
+
+public enum ToolboxSourceCode: Equatable, Hashable {
+    
+    case notUsed
+    case used
+    case disabled
+    case notAvailableSeparately
+    case cannotBeExcluded
+    case unknown
+
+
+
+
+
+}
+
+#if compiler(>=6)
+extension ToolboxSourceCode: Sendable {}
+#endif
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeToolboxSourceCode: FfiConverterRustBuffer {
+    typealias SwiftType = ToolboxSourceCode
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> ToolboxSourceCode {
+        let variant: Int32 = try readInt(&buf)
+        switch variant {
+        
+        case 1: return .notUsed
+        
+        case 2: return .used
+        
+        case 3: return .disabled
+        
+        case 4: return .notAvailableSeparately
+        
+        case 5: return .cannotBeExcluded
+        
+        case 6: return .unknown
+        
+        default: throw UniffiInternalError.unexpectedEnumCase
+        }
+    }
+
+    public static func write(_ value: ToolboxSourceCode, into buf: inout [UInt8]) {
+        switch value {
+        
+        
+        case .notUsed:
+            writeInt(&buf, Int32(1))
+        
+        
+        case .used:
+            writeInt(&buf, Int32(2))
+        
+        
+        case .disabled:
+            writeInt(&buf, Int32(3))
+        
+        
+        case .notAvailableSeparately:
+            writeInt(&buf, Int32(4))
+        
+        
+        case .cannotBeExcluded:
+            writeInt(&buf, Int32(5))
+        
+        
+        case .unknown:
+            writeInt(&buf, Int32(6))
+        
+        }
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeToolboxSourceCode_lift(_ buf: RustBuffer) throws -> ToolboxSourceCode {
+    return try FfiConverterTypeToolboxSourceCode.lift(buf)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeToolboxSourceCode_lower(_ value: ToolboxSourceCode) -> RustBuffer {
+    return FfiConverterTypeToolboxSourceCode.lower(value)
+}
+
+
+// Note that we don't yet support `indirect` for enums.
+// See https://github.com/mozilla/uniffi-rs/issues/396 for further discussion.
+
+public enum ToolboxSourceOrigin: Equatable, Hashable {
+    
+    case `operator`
+    case project
+    case system
+    case managed
+    case unknown
+
+
+
+
+
+}
+
+#if compiler(>=6)
+extension ToolboxSourceOrigin: Sendable {}
+#endif
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeToolboxSourceOrigin: FfiConverterRustBuffer {
+    typealias SwiftType = ToolboxSourceOrigin
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> ToolboxSourceOrigin {
+        let variant: Int32 = try readInt(&buf)
+        switch variant {
+        
+        case 1: return .`operator`
+        
+        case 2: return .project
+        
+        case 3: return .system
+        
+        case 4: return .managed
+        
+        case 5: return .unknown
+        
+        default: throw UniffiInternalError.unexpectedEnumCase
+        }
+    }
+
+    public static func write(_ value: ToolboxSourceOrigin, into buf: inout [UInt8]) {
+        switch value {
+        
+        
+        case .`operator`:
+            writeInt(&buf, Int32(1))
+        
+        
+        case .project:
+            writeInt(&buf, Int32(2))
+        
+        
+        case .system:
+            writeInt(&buf, Int32(3))
+        
+        
+        case .managed:
+            writeInt(&buf, Int32(4))
+        
+        
+        case .unknown:
+            writeInt(&buf, Int32(5))
+        
+        }
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeToolboxSourceOrigin_lift(_ buf: RustBuffer) throws -> ToolboxSourceOrigin {
+    return try FfiConverterTypeToolboxSourceOrigin.lift(buf)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeToolboxSourceOrigin_lower(_ value: ToolboxSourceOrigin) -> RustBuffer {
+    return FfiConverterTypeToolboxSourceOrigin.lower(value)
+}
+
+
+// Note that we don't yet support `indirect` for enums.
+// See https://github.com/mozilla/uniffi-rs/issues/396 for further discussion.
+
 public enum TranscriptKind: Equatable, Hashable {
     
     case prompt
@@ -11750,6 +12487,30 @@ fileprivate struct FfiConverterOptionTypeAgentPresentation: FfiConverterRustBuff
 #if swift(>=5.8)
 @_documentation(visibility: private)
 #endif
+fileprivate struct FfiConverterOptionTypeAgentToolbox: FfiConverterRustBuffer {
+    typealias SwiftType = AgentToolbox?
+
+    public static func write(_ value: SwiftType, into buf: inout [UInt8]) {
+        guard let value = value else {
+            writeInt(&buf, Int8(0))
+            return
+        }
+        writeInt(&buf, Int8(1))
+        FfiConverterTypeAgentToolbox.write(value, into: &buf)
+    }
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> SwiftType {
+        switch try readInt(&buf) as Int8 {
+        case 0: return nil
+        case 1: return try FfiConverterTypeAgentToolbox.read(from: &buf)
+        default: throw UniffiInternalError.unexpectedOptionalTag
+        }
+    }
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
 fileprivate struct FfiConverterOptionTypeClientReason: FfiConverterRustBuffer {
     typealias SwiftType = ClientReason?
 
@@ -12917,6 +13678,56 @@ fileprivate struct FfiConverterSequenceTypeTaskPresentation: FfiConverterRustBuf
         seq.reserveCapacity(Int(len))
         for _ in 0 ..< len {
             seq.append(try FfiConverterTypeTaskPresentation.read(from: &buf))
+        }
+        return seq
+    }
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+fileprivate struct FfiConverterSequenceTypeToolboxItem: FfiConverterRustBuffer {
+    typealias SwiftType = [ToolboxItem]
+
+    public static func write(_ value: [ToolboxItem], into buf: inout [UInt8]) {
+        let len = Int32(value.count)
+        writeInt(&buf, len)
+        for item in value {
+            FfiConverterTypeToolboxItem.write(item, into: &buf)
+        }
+    }
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> [ToolboxItem] {
+        let len: Int32 = try readInt(&buf)
+        var seq = [ToolboxItem]()
+        seq.reserveCapacity(Int(len))
+        for _ in 0 ..< len {
+            seq.append(try FfiConverterTypeToolboxItem.read(from: &buf))
+        }
+        return seq
+    }
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+fileprivate struct FfiConverterSequenceTypeToolboxSource: FfiConverterRustBuffer {
+    typealias SwiftType = [ToolboxSource]
+
+    public static func write(_ value: [ToolboxSource], into buf: inout [UInt8]) {
+        let len = Int32(value.count)
+        writeInt(&buf, len)
+        for item in value {
+            FfiConverterTypeToolboxSource.write(item, into: &buf)
+        }
+    }
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> [ToolboxSource] {
+        let len: Int32 = try readInt(&buf)
+        var seq = [ToolboxSource]()
+        seq.reserveCapacity(Int(len))
+        for _ in 0 ..< len {
+            seq.append(try FfiConverterTypeToolboxSource.read(from: &buf))
         }
         return seq
     }

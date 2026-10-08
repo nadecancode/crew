@@ -23,9 +23,10 @@ pub use crew_protocol::rpc::{
     SessionInfo, TaskCard, TranscriptResult, WorkspaceEntry, WorkspaceSummary, Workspaces,
 };
 pub use crew_protocol::{
-    Agent, AgentStatus, Artifact, ContextUsage, EventLevel, MessageType, ModelFallback,
-    RuntimeKind, Task, TaskStatus, TranscriptEntry, TranscriptKind, Usage, UsageLimit,
-    WorkspaceState,
+    Agent, AgentStatus, AgentToolbox, Artifact, ContextUsage, EventLevel, MessageType,
+    ModelFallback, RuntimeKind, Task, TaskStatus, ToolboxItem, ToolboxItemCode, ToolboxItemKind,
+    ToolboxItemStatus, ToolboxSource, ToolboxSourceCode, ToolboxSourceOrigin, ToolboxSourceStatus,
+    TranscriptEntry, TranscriptKind, Usage, UsageLimit, WorkspaceState,
 };
 
 #[uniffi::remote(Enum)]
@@ -247,6 +248,108 @@ pub struct Agent {
     pub usage: Option<Usage>,
     #[serde(default)]
     pub error: Option<String>,
+    /// The member's effective toolbox, when it has one.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub toolbox: Option<AgentToolbox>,
+}
+
+/// A member's effective toolbox as every dashboard shows it. Secret values
+/// are never in it.
+#[uniffi::remote(Record)]
+pub struct AgentToolbox {
+    pub fingerprint: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pending_fingerprint: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub definition_digest: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tool_count: Option<u32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub definition_bytes: Option<u64>,
+    #[serde(default)]
+    pub items: Vec<ToolboxItem>,
+    #[serde(default)]
+    pub sources: Vec<ToolboxSource>,
+}
+
+#[uniffi::remote(Record)]
+pub struct ToolboxItem {
+    pub kind: ToolboxItemKind,
+    pub name: String,
+    pub origin: String,
+    #[serde(default)]
+    pub required: bool,
+    pub status: ToolboxItemStatus,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub detail: Option<String>,
+}
+
+#[uniffi::remote(Enum)]
+pub enum ToolboxItemKind {
+    Mcp,
+    Skills,
+    Plugins,
+    Subagents,
+    Hooks,
+    Unknown,
+}
+
+#[uniffi::remote(Record)]
+pub struct ToolboxItemStatus {
+    pub code: ToolboxItemCode,
+    pub text: String,
+}
+
+#[uniffi::remote(Enum)]
+pub enum ToolboxItemCode {
+    Planned,
+    Active,
+    NotAvailable,
+    NotApplicable,
+    Needs,
+    Blocked,
+    Shadowed,
+    FailedPreflight,
+    FailedInSession,
+    Unknown,
+}
+
+#[uniffi::remote(Record)]
+pub struct ToolboxSource {
+    pub origin: ToolboxSourceOrigin,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub kind: Option<String>,
+    pub label: String,
+    pub status: ToolboxSourceStatus,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub names: Vec<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub detail: Option<String>,
+}
+
+#[uniffi::remote(Enum)]
+pub enum ToolboxSourceOrigin {
+    Operator,
+    Project,
+    System,
+    Managed,
+    Unknown,
+}
+
+#[uniffi::remote(Record)]
+pub struct ToolboxSourceStatus {
+    pub code: ToolboxSourceCode,
+    pub text: String,
+}
+
+#[uniffi::remote(Enum)]
+pub enum ToolboxSourceCode {
+    NotUsed,
+    Used,
+    Disabled,
+    NotAvailableSeparately,
+    CannotBeExcluded,
+    Unknown,
 }
 
 #[uniffi::remote(Record)]

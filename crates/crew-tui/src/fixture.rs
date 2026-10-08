@@ -63,6 +63,7 @@ pub fn agent(id: &str, role: &str, status: AgentStatus, progress: Option<u8>, no
             turns: 9,
         }),
         error: None,
+        toolbox: None,
     }
 }
 

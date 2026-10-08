@@ -1170,6 +1170,7 @@ mod tests {
             outbox_total: 0,
             usage: None,
             error: None,
+            toolbox: None,
         }
     }
 }
