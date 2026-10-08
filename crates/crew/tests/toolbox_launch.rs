@@ -281,10 +281,12 @@ fn codex_closes_ambient_servers_on_both_processes_and_sets_roots_before_tui() {
             "---\nname: selected\ndescription: Selected.\n---\nBODY\n",
         );
         let native_home = s.root().join("codex-home");
-        write(
-            &native_home.join("config.toml"),
-            "[mcp_servers.ambient]\ncommand='/bin/false'\n",
-        );
+        let ambient = ["ambient", "dot.name", "two words", "quote\"name"];
+        let operator_config = ambient
+            .iter()
+            .map(|name| format!("[mcp_servers.{}]\ncommand='/bin/false'\n", json!(name)))
+            .collect::<String>();
+        write(&native_home.join("config.toml"), &operator_config);
         write(
             &s.workspace.join(".crew/config.toml"),
             "[agents.x.toolbox_env]\nTOOLBOX_ALIAS = {env=\"TOOLBOX_ALIAS_SOURCE\"}\n",
@@ -338,12 +340,36 @@ fn codex_closes_ambient_servers_on_both_processes_and_sets_roots_before_tui() {
             let args = record["args"].as_array().unwrap();
             assert!(args.contains(&json!("mcp_servers.crew.enabled=true")));
             if !sandboxed {
-                assert!(args.contains(&json!("mcp_servers={\"ambient\"={\"enabled\"=false}}")));
+                let patch = args
+                    .iter()
+                    .filter_map(Value::as_str)
+                    .find(|arg| arg.starts_with("mcp_servers={"))
+                    .unwrap();
+                let parsed: toml::Value = patch.parse().unwrap();
+                for name in ambient {
+                    assert_eq!(
+                        parsed["mcp_servers"][name]["enabled"].as_bool(),
+                        Some(false),
+                        "{name} not excluded"
+                    );
+                }
             }
         }
-        assert!(std::fs::read_to_string(native_home.join("config.toml"))
-            .unwrap()
-            .contains("command='/bin/false'"));
+        assert_eq!(
+            std::fs::read_to_string(native_home.join("config.toml")).unwrap(),
+            operator_config
+        );
+        if !sandboxed {
+            let view = fixture.toolbox();
+            for name in ambient {
+                assert!(
+                    view.sources.iter().any(|source| source.status.code
+                        == crew_core::ToolboxSourceCode::Disabled
+                        && source.names.iter().any(|entry| entry == name)),
+                    "{name} not reported disabled"
+                );
+            }
+        }
         assert!(fixture
             .toolbox()
             .items
