@@ -441,6 +441,42 @@ change identity",
                 self.confirm_delivery(&agent, &ids);
                 Ok(json!({ "ok": true }))
             }
+            Call::ToolboxServer { name, preflight } => {
+                // An agent reaches its own servers and nobody else's: the
+                // caller is the authenticated agent, never a parameter.
+                let agent = agent_only(&who)?.to_string();
+                reply(self.toolbox_server_launch(&agent, &name, preflight)?)
+            }
+            Call::ToolboxReport { name, kind, detail } => {
+                let agent = agent_only(&who)?.to_string();
+                self.toolbox_report(&agent, &name, kind, &detail).await;
+                Ok(json!({ "ok": true }))
+            }
+            Call::Toolbox { agent, runtime } => {
+                self.privileged(&who)?;
+                let agents: Vec<crew_core::Agent> = match &agent {
+                    Some(id) => vec![self
+                        .agent(id)
+                        .ok_or_else(|| RpcError::not_found(format!("no agent '{id}'")))?],
+                    None => self.model().agents.clone(),
+                };
+                let views: Result<Vec<_>, RpcError> = agents
+                    .iter()
+                    .map(|a| self.toolbox_view(a, runtime))
+                    .collect();
+                reply(views?)
+            }
+            Call::ToolboxCheck { config } => {
+                operator_only(&who)?;
+                reply(self.toolbox_check(&config)?)
+            }
+            Call::ToolboxReload { config } => {
+                operator_only(&who)?;
+                let _ = config;
+                Err(RpcError::invalid(
+                    "crew toolbox reload is not available in this build yet (it comes with toolbox-launch)",
+                ))
+            }
             Call::Credential => {
                 // An agent may fetch its own key and nobody else's: the
                 // caller is the authenticated agent, never a parameter.

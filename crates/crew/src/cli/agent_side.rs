@@ -229,7 +229,10 @@ pub fn toolbox_mcp(args: super::ToolboxMcpArgs) -> Result<()> {
         }
     };
     if args.preflight {
-        match proxy::preflight(&launch, proxy::PREFLIGHT_WITHIN) {
+        let within = args
+            .preflight_within
+            .map_or(proxy::PREFLIGHT_WITHIN, std::time::Duration::from_secs_f64);
+        match proxy::preflight(&launch, within) {
             Ok(listing) => println!("{}", json!({ "ok": true, "listing": listing.to_json() })),
             Err(e) => {
                 let reason = proxy::redacted(&launch, &format!("{e:#}"));

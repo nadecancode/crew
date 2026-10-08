@@ -222,18 +222,18 @@ pub enum Call {
         #[serde(default)]
         runtime: Option<RuntimeKind>,
     },
-    /// Operator: validate the team file's toolboxes and resolve every
-    /// reference and source without starting anything. `file` is the team
-    /// file to check; the running team's own when left out.
+    /// Operator: resolve every member's toolbox in `config` (a team file the
+    /// CLI loaded and validated) against the daemon's environment and
+    /// configuration, without starting anything. Answered with the members'
+    /// toolboxes, every item Planned or why it would not load.
     ToolboxCheck {
-        #[serde(default)]
-        file: Option<String>,
+        config: Box<TeamConfig>,
     },
-    /// Operator: reread the team file's `toolboxes` and `toolbox` fields into
-    /// the running team. Running sessions keep theirs until a restart.
+    /// Operator: take the `toolboxes` and `toolbox` fields of `config` into the
+    /// running team. Running sessions keep theirs until a restart. Answered
+    /// with a [`ToolboxReload`].
     ToolboxReload {
-        #[serde(default)]
-        file: Option<String>,
+        config: Box<TeamConfig>,
     },
     History {
         #[serde(default)]
@@ -687,6 +687,21 @@ pub struct ToolboxReload {
     /// team: reported, not applied.
     #[serde(default)]
     pub ignored: Vec<String>,
+}
+
+
+/// One member's toolbox, as [`Call::Toolbox`] and [`Call::ToolboxCheck`]
+/// answer it.
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
+pub struct MemberToolbox {
+    pub agent: String,
+    /// The runtime the toolbox is mapped onto.
+    pub runtime: RuntimeKind,
+    pub toolbox: crate::types::AgentToolbox,
+    /// Why a launch with this toolbox would be refused (`crew toolbox check`
+    /// exits non-zero when any member has one).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub stops: Vec<String>,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]

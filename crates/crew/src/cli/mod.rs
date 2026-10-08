@@ -9,6 +9,7 @@ mod agent_side;
 mod attach;
 pub mod daemonize;
 mod fake_cli;
+mod fake_mcp;
 mod ops;
 mod scripted;
 
@@ -267,6 +268,9 @@ answers: `crew answer 2`.")]
     /// A stand-in for an agent CLI (claude, codex, pi), for tests
     #[command(hide = true)]
     FakeCli(fake_cli::FakeArgs),
+    /// A stand-in MCP server, for tests of the toolbox proxy
+    #[command(hide = true)]
+    FakeMcp(fake_mcp::FakeMcpArgs),
     /// Start a program in an agent sandbox (the daemon puts this in front of it)
     #[command(hide = true)]
     SandboxRun(crate::sandbox::run::RunArgs),
@@ -347,18 +351,16 @@ pub enum ToolboxCommand {
     /// source, without starting anything; exits non-zero on an error or on a
     /// status that would stop a launch
     Check {
-        /// The team file (default: the running team's)
-        #[arg(long, value_name = "FILE")]
-        file: Option<PathBuf>,
+        /// The team file
+        file: PathBuf,
         #[arg(long)]
         json: bool,
     },
     /// Reread the team file's toolboxes into the running team; members pick
     /// the change up at their next restart
     Reload {
-        /// The team file (default: the running team's)
-        #[arg(long, value_name = "FILE")]
-        file: Option<PathBuf>,
+        /// The team file
+        file: PathBuf,
     },
     /// Run one toolbox MCP server for an agent's session (stdio); the runtime
     /// starts this
@@ -380,6 +382,9 @@ pub struct ToolboxMcpArgs {
     /// daemon (tests)
     #[arg(long, value_name = "FILE", hide = true)]
     pub launch_file: Option<PathBuf>,
+    /// How long a preflight may take, in seconds (tests)
+    #[arg(long, value_name = "SECONDS", hide = true)]
+    pub preflight_within: Option<f64>,
 }
 
 #[derive(Subcommand)]
@@ -709,9 +714,9 @@ pub fn run(cli: Cli) -> Result<()> {
         Command::Toolbox(args) => match args.command {
             Some(ToolboxCommand::Mcp(args)) => agent_side::toolbox_mcp(args),
             Some(ToolboxCommand::Check { file, json }) => {
-                ops::toolbox_check(&target, file.as_deref(), json)
+                ops::toolbox_check(&target, &file, json)
             }
-            Some(ToolboxCommand::Reload { file }) => ops::toolbox_reload(&target, file.as_deref()),
+            Some(ToolboxCommand::Reload { file }) => ops::toolbox_reload(&target, &file),
             None => ops::toolbox(&target, args.agent, args.runtime, args.json),
         },
         Command::Config { command } => ops::config(&target, command.unwrap_or(ConfigCommand::Show)),
@@ -719,6 +724,7 @@ pub fn run(cli: Cli) -> Result<()> {
         Command::Models { command } => ops::models(command.unwrap_or(ModelsCommand::List)),
         Command::ScriptedAgent(args) => scripted::run(args),
         Command::FakeCli(args) => fake_cli::run(args),
+        Command::FakeMcp(args) => fake_mcp::run(args),
         Command::SandboxRun(args) => crate::sandbox::run::run(args),
         Command::SandboxExec(args) => crate::sandbox::shim::run(args),
         Command::Daemon { workspace } => daemonize::run_foreground(&workspace),
