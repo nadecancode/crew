@@ -466,8 +466,6 @@ fn opt_str(args: &Value, key: &str) -> Option<String> {
         .filter(|s| !s.is_empty())
 }
 
-/// A list of names: an array of strings, or one string (a model may send
-/// either); None when left out.
 /// `tasks_list`'s `done` argument: whether done cards are shown in full.
 /// Anything but true, false or nothing is refused rather than read as false.
 fn done_in_full(args: &Value) -> Result<bool, String> {
