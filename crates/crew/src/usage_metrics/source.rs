@@ -375,6 +375,9 @@ pub struct Observation {
     /// A key that may not be revised (a cumulative increment) seen again
     /// with other values is a conflicting replay, never a correction.
     pub revisable: bool,
+    /// For a native batch, the offset in the same generation of the record
+    /// its increment starts from: usage it sums can lie anywhere between.
+    pub span_start: Option<u64>,
 }
 
 /// Native evidence that is not usage.

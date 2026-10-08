@@ -2266,11 +2266,34 @@ fn apply(
             let Some(owner) = owner_at(tx, stream_id, o.generation, o.offset)? else {
                 bail!("usage stream {stream_id} has no owner");
             };
-            let (work, account, binding_seq) =
+            let (mut work, mut account, binding_seq) =
                 match binding_at(tx, stream_id, owner.seq, o.generation, o.offset)? {
                     Some((work, account, seq)) => (work, account, Some(seq)),
                     None => (json(&unknown_work()), json(&unknown_account()), None),
                 };
+            // A native batch sums usage anywhere since its start record. When
+            // a work or account binding changed in between, its tokens stay
+            // as evidence but are not given to either side; when the owner
+            // changed, not even to a run or member.
+            let mut span_owner_changed = false;
+            if let Some(start) = o.span_start {
+                match owner_at(tx, stream_id, o.generation, start)? {
+                    Some(first) if first.seq == owner.seq => {
+                        let (w, a) = binding_at(tx, stream_id, owner.seq, o.generation, start)?
+                            .map(|(w, a, _)| (w, a))
+                            .unwrap_or_else(|| (json(&unknown_work()), json(&unknown_account())));
+                        if w != work {
+                            work = json(&WorkAttribution::Unknown {
+                                reason: CoverageReason::MultipleTasks,
+                            });
+                        }
+                        if a != account {
+                            account = json(&unknown_account());
+                        }
+                    }
+                    _ => span_owner_changed = true,
+                }
+            }
             let scope = match o.phase {
                 Phase::Seed => "pre_tracking".to_string(),
                 Phase::Charge => tag(&owner.kind),
@@ -2293,8 +2316,16 @@ fn apply(
                 work,
                 account,
                 model: o.model.clone().unwrap_or_default(),
-                unit: tag(&o.unit),
-                reason: unusable_reason(o),
+                unit: if span_owner_changed {
+                    tag(&ObservationUnit::Unusable)
+                } else {
+                    tag(&o.unit)
+                },
+                reason: if span_owner_changed {
+                    tag(&CoverageReason::AmbiguousBoundary)
+                } else {
+                    unusable_reason(o)
+                },
                 flags: flags(&o.normalized),
                 band: band(o, thresholds),
                 counters: counters_of(&o.normalized),
@@ -3625,5 +3656,114 @@ mod tests {
         let total = ledger.aside_total_cost("r1", "q1", &book).unwrap().unwrap();
         assert_eq!(total.state, EstimateState::Unavailable);
         assert_eq!(total.reason, Some(CoverageReason::CorrectionOutsideHorizon));
+    }
+
+    fn codex_tc(total: (u64, u64, u64), last: Option<(u64, u64, u64)>) -> Value {
+        let v = |(i, r, o): (u64, u64, u64)| json!({"input_tokens": i, "cached_input_tokens": r, "output_tokens": o});
+        let mut info = json!({"total_token_usage": v(total)});
+        if let Some(last) = last {
+            info["last_token_usage"] = v(last);
+        }
+        json!({"type": "event_msg", "timestamp": "2026-10-08T00:00:00Z",
+            "payload": {"type": "token_count", "info": info}})
+    }
+
+    fn codex_setup(values: &[Value]) -> (tempfile::TempDir, PathBuf, Ledger, String) {
+        use crate::usage_metrics::source::Start;
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("rollout.jsonl");
+        std::fs::write(&path, text(values)).unwrap();
+        let mut ledger = Ledger::open(&dir.path().join("crew.db")).unwrap();
+        ledger.begin_run("r1", Some(NOW), NOW).unwrap();
+        let mut r = reg("r1", "i1", Start::Fresh);
+        r.runtime = RuntimeKind::Codex;
+        r.native_session_id = "th-1".into();
+        let stream = ledger.register(&r, &open(&path), NOW).unwrap().unwrap();
+        (dir, path, ledger, stream)
+    }
+
+    #[test]
+    fn a_rewrite_holding_part_of_the_history_charges_nothing_already_charged() {
+        let ctx =
+            json!({"type": "turn_context", "payload": {"model": "gpt-6-luna", "turn_id": "t1"}});
+        let a = codex_tc((100, 80, 10), Some((100, 80, 10)));
+        let b = codex_tc((150, 120, 15), Some((50, 40, 5)));
+        let c = codex_tc((200, 160, 20), Some((50, 40, 5)));
+        let (dir, path, mut ledger, stream) = codex_setup(&[ctx.clone(), a.clone(), b, c.clone()]);
+        drain(&mut ledger, &stream, &open(&path), NOW).unwrap();
+        let input = |l: &Ledger| sum(l, "r1", "live").input_total.known_sum;
+        assert_eq!(input(&ledger), Some(Wide(200)));
+        // Replaced by the old first record alone, then a restart, then the
+        // old last record appended: no genuine request in between.
+        replace(&path, &[ctx, a]);
+        drain(&mut ledger, &stream, &open(&path), NOW).unwrap();
+        drop(ledger);
+        let mut ledger = Ledger::open(&dir.path().join("crew.db")).unwrap();
+        append(&path, &[c]);
+        drain(&mut ledger, &stream, &open(&path), NOW).unwrap();
+        assert_eq!(input(&ledger), Some(Wide(200)));
+        // Usage beyond everything charged is new.
+        append(&path, &[codex_tc((260, 200, 25), Some((60, 40, 5)))]);
+        drain(&mut ledger, &stream, &open(&path), NOW).unwrap();
+        assert_eq!(input(&ledger), Some(Wide(260)));
+    }
+
+    #[test]
+    fn a_batch_spanning_a_work_binding_change_belongs_to_neither_side() {
+        let ctx =
+            json!({"type": "turn_context", "payload": {"model": "gpt-6-luna", "turn_id": "t1"}});
+        let (_dir, path, mut ledger, stream) =
+            codex_setup(&[ctx, codex_tc((100, 80, 10), Some((100, 80, 10)))]);
+        drain(&mut ledger, &stream, &open(&path), NOW).unwrap();
+        ledger
+            .bind_work(&stream, &open(&path), &task("ta"), NOW)
+            .unwrap();
+        // Task A's usage is never reported on its own.
+        ledger
+            .bind_work(&stream, &open(&path), &task("tb"), NOW)
+            .unwrap();
+        append(&path, &[codex_tc((300, 200, 30), Some((100, 60, 10)))]);
+        drain(&mut ledger, &stream, &open(&path), NOW).unwrap();
+        let by_task =
+            |ledger: &Ledger, id: &str| {
+                let facts = ledger
+                .facts("r1", "live", None, |a| {
+                    matches!(a.work(), Some(WorkAttribution::Task { id: t, .. }) if t == id)
+                })
+                .unwrap();
+                totals(&facts, &Book::standard_2026_10_08(), None)
+                    .input_total
+                    .known_sum
+            };
+        assert_eq!(by_task(&ledger, "ta"), None);
+        assert_eq!(
+            by_task(&ledger, "tb"),
+            None,
+            "not all 200 given to the later binding"
+        );
+        let multiple = ledger
+            .facts("r1", "live", None, |a| {
+                matches!(
+                    a.work(),
+                    Some(WorkAttribution::Unknown {
+                        reason: CoverageReason::MultipleTasks
+                    })
+                )
+            })
+            .unwrap();
+        let t = totals(&multiple, &Book::standard_2026_10_08(), None);
+        assert_eq!(
+            t.input_total.known_sum,
+            Some(Wide(200)),
+            "tokens kept as evidence"
+        );
+        assert_eq!(
+            sum(&ledger, "r1", "live").input_total.known_sum,
+            Some(Wide(300))
+        );
+        // A single proven request after the boundary is the later binding's.
+        append(&path, &[codex_tc((350, 240, 35), Some((50, 40, 5)))]);
+        drain(&mut ledger, &stream, &open(&path), NOW).unwrap();
+        assert_eq!(by_task(&ledger, "tb"), Some(Wide(50)));
     }
 }

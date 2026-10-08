@@ -279,6 +279,7 @@ impl Decoder for Claude {
             phase: line.phase,
             reasons,
             revisable: true,
+            span_start: None,
         })));
     }
 
