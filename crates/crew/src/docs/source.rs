@@ -445,6 +445,11 @@ impl Scan {
                     let mut reading = self.reading.take().expect("present directory");
                     reading.names.sort();
                     for name in reading.names.into_iter().rev() {
+                        if reading.parent.as_ref().map_or(0, |p| p.as_str().len() + 1) + name.len()
+                            > super::config::MAX_PATH_BYTES
+                        {
+                            self.limited = true;
+                        }
                         let path = reading
                             .parent
                             .as_ref()
@@ -464,7 +469,9 @@ impl Scan {
             };
             self.path_bytes = self.path_bytes.saturating_sub(path.as_str().len() + 64);
             if let Ok(meta) = root.metadata(&path, policy) {
-                if meta.is_dir() && policy.descends(&path) && !root.submodule(&path) {
+                if meta.is_dir() && path.depth() > super::config::MAX_DEPTH {
+                    self.limited = true;
+                } else if meta.is_dir() && policy.descends(&path) && !root.submodule(&path) {
                     directories.push(path.clone());
                     if self.visited < MAX_SCAN_ENTRIES {
                         self.reading = Some(Reading {
@@ -537,5 +544,35 @@ mod save_tests {
             .bytes,
             b
         );
+    }
+}
+
+#[cfg(test)]
+mod limit_tests {
+    use super::*;
+    #[test]
+    fn k13_depth_and_path_cutoffs_report_partial_index_instead_of_complete() {
+        for (depth, width) in [(17, 1), (14, 80)] {
+            let dir = tempfile::tempdir().unwrap();
+            let mut path = dir.path().join("notes");
+            for _ in 1..depth {
+                path.push("a".repeat(width));
+            }
+            std::fs::create_dir_all(&path).unwrap();
+            std::fs::write(path.join("hidden-by-limit.md"), "# Too deep or long\n").unwrap();
+            std::fs::write(dir.path().join("README.md"), "# Visible\n").unwrap();
+            let root = Root::open(&dir.path().canonicalize().unwrap()).unwrap();
+            let mut scan = Scan::new(&root).unwrap();
+            let mut documents = Vec::new();
+            let limited = loop {
+                let step = scan.step(&root, &Policy::default()).unwrap();
+                documents.extend(step.documents);
+                if step.done {
+                    break step.limited;
+                }
+            };
+            assert!(limited);
+            assert_eq!(documents, vec![Relative::new("README.md").unwrap()]);
+        }
     }
 }

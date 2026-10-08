@@ -142,7 +142,7 @@ selections are marked `Availability`. Logical document ids remain stable within
 the service/run across policy epochs; captures and page cursors still expire.
 Physical disconnect discards queued frames immediately.
 
-The shared client drops selections marked `Policy`/`Removed` before re-watching
+The required P4 recovery follow-up drops selections marked `Policy`/`Removed` before re-watching
 with the rest. If that request still fails because a selection became invalid,
 it may retry once with an empty selection and keep the dropped view visibly
 unavailable. This is at most two attempts per terminal frame. `disabled` or
@@ -151,3 +151,8 @@ connection/negotiation starts another attempt. The service rejects an unresolved
 selection atomically and preserves an existing valid watch on that failure.
 P2's forwarder must carry the final frame even when its epoch differs from the
 registered watch; it must not convert a live-connection watch end into silence.
+
+P4 at `201e7fdc` already invalidates cached values and fences pending reads, but
+does not yet automatically re-watch. The bounded recovery rule above belongs to
+its separately assigned client follow-up; service tests here exercise the final
+frame and explicit re-registration, not automatic end-to-end recovery.
