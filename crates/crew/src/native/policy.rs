@@ -194,7 +194,7 @@ mod tests {
             .collect::<std::collections::BTreeSet<_>>();
         assert_eq!(
             names.len(),
-            67,
+            72,
             "a new daemon method needs a deliberate gateway policy"
         );
         let reads = [
@@ -264,6 +264,12 @@ mod tests {
             "summary",
             "web_attach",
             "web_event",
+            // Device grants do not include toolbox administration or proxy credentials.
+            "toolbox",
+            "toolbox_check",
+            "toolbox_reload",
+            "toolbox_report",
+            "toolbox_server",
         ];
         let assigned = reads
             .iter()
@@ -273,7 +279,7 @@ mod tests {
             .copied()
             .chain(["ping", "workspaces"])
             .collect::<Vec<_>>();
-        assert_eq!(assigned.len(), 67);
+        assert_eq!(assigned.len(), 72);
         assert_eq!(
             assigned
                 .iter()
@@ -297,6 +303,10 @@ mod tests {
         for name in names {
             let params = if unit.contains(&name) {
                 serde_json::json!({})
+            } else if name == "toolbox_server" {
+                serde_json::json!({"name":"fixture","preflight":true})
+            } else if name == "toolbox_report" {
+                serde_json::json!({"name":"fixture","kind":"listing_differs","detail":"upstream changed"})
             } else {
                 serde_json::json!({
                     "id":"a","agent":"a","agent_id":"a","role":"operator","protocol":6,"client":"fixture","config":{"project":"native-policy"},"spec":{"id":"a"},"status":"working","percent":10,"body":"x","to":"a","type":"message","task":"work","task_id":"t","reason":"x","artifact":"x","comments":"","approve":true,"summary":"","decisions":[],"message":"m","commit":"abc123","from_agent":"a","event":"x","ids":["m"],"code":"a","kind":"paired","count":1,"url":"http://localhost:1","ack":false,"data":"","rows":24,"cols":80,"model":"","note":null,"text":"x","submit":true,"stop_agents":true

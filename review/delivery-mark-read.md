@@ -39,5 +39,36 @@ before the live row update. The unread badge remains acknowledgement-based:
 clipped or unproved messages stay unread despite a delivery timestamp.
 
 The forwarded source preserves the reviewed toolbox pause implementation on
-ff9c9d28. Validation and source checkpoints will be recorded after the native
-and daemon regression checks.
+ff9c9d28 and native policy inventory fix on 646a0b30. The latter touches only
+README and optional native/policy.rs, outside this delivery implementation.
+
+Required workspace run: 1,333 passed, one failed pi launch wording oracle,
+four ignored. All 18 delivery cases passed. The pi test's exact final task
+body assertion now includes the intentionally appended fixed notice; its
+focused rerun passed. Two cloned test-id slices were replaced with from_ref
+for Clippy. These changes affect tests only; no unchanged broad suite was
+repeated. Strict workspace Clippy/all-targets, whole-tree rustfmt, and the
+real Rust 1.82.0 default CLI build/help gate passed. Node tests passed 12/12.
+Original failure logs remain recorded rather than relabelled green.
+
+Four isolated native Claude Code 2.1.291 cases completed with zero provider
+calls: ordinary queued delivery (three local requests), immediate stored-row
+append (two), immediate stored-row rewrite (two), and queued session.append
+rewrite (three). Both rewrite cases report the changed stored text's digest,
+not the original body's digest. The later queued append hook changes the
+actual API row as well, matching turn.start's observed segment. Native
+probes use a fixture relay, not a real daemon; the separate daemon/socket
+tests exercise digest validation, clipping, read counts and crash repair.
+All four generated bridge assets equal the committed asset after fixture
+substitution. The merged A+LF+B known-answer fixture comes from the retained
+D1 native capture, and both Rust and Node assert its hashes.
+
+The required pipeline paused before starting when storage dropped below
+100 GiB. Cleanup removed only authorized disposable caches in this
+worktree, preserving executable pins, logs and native captures; validation
+resumed above the floor with CARGO_INCREMENTAL=0 and repository overrides
+removed from child environments. No operator service, provider credential
+or installed binary was changed.
+
+Exact commands, log/native hashes, scope and retained failures are recorded
+in delivery-mark-read.json. This card does not claim cache savings.
