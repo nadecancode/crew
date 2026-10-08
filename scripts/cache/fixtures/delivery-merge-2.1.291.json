@@ -1,0 +1,20 @@
+{
+  "source": "D1 raw SDK probe, local synthetic endpoint",
+  "version": "2.1.291",
+  "binary_sha256": "078fad28d0297c9a25d306b635b2d8816c6839347520f29eb54ffea5d56142fb",
+  "report_sha256": "d98cdf2b82e18b216f6d73ec0a7d2c67229931fa6812fb8a73b842cffdf50cc1",
+  "provider_calls": 0,
+  "native_text": "[crew] Delivery batch fixture-A\nidentical body\n[crew] Delivery batch fixture-B\nidentical body",
+  "segments": [
+    {
+      "batch_id": "fixture-A",
+      "text": "identical body",
+      "sha256": "5971a24f6bb93c81949ab5187d7e84849fede404aa02e71868e7c51d20035328"
+    },
+    {
+      "batch_id": "fixture-B",
+      "text": "identical body",
+      "sha256": "47efdfa4adb858c5e48cc9a7e3f93218729035b29519599a7bc839eafd3814e8"
+    }
+  ]
+}

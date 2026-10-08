@@ -1,0 +1,232 @@
+   Compiling crew-tui v0.1.0 (/home/nade/workspaces/personal/crew/.crew/worktrees/cache-reviewer/crates/crew-tui)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 2.89s
+     Running unittests src/lib.rs (target/toolbox-schema-review/debug/deps/crew_tui-042e344448bd32ec)
+
+running 137 tests
+test anim::tests::a_commit_marks_its_agent_with_the_short_id ... ok
+test anim::tests::a_conflict_is_a_distinct_tone_with_its_file_count ... ok
+test anim::tests::a_running_mark_without_an_end_is_dropped_at_the_cap ... ok
+test anim::tests::a_vcs_link_replaces_a_live_link_between_the_same_pair ... ok
+test anim::tests::a_pick_or_merge_pulses_from_the_peer_and_marks_on_arrival ... ok
+test anim::tests::animating_is_only_a_pulse_a_sweep_or_a_glance ... ok
+test anim::tests::a_terminal_event_alone_renders_like_one_after_a_start ... ok
+test anim::tests::a_running_operation_holds_its_link_until_the_end_then_pulses_it ... ok
+test anim::tests::a_workspace_links_parent_to_member_and_marks_the_member ... ok
+test anim::tests::integration_and_operator_map_to_the_hub_and_self_links_are_skipped ... ok
+test anim::tests::broadcasts_fan_out_to_every_other_worker ... ok
+test anim::tests::integration_branches_run_to_the_hub_and_the_tally_marks_it ... ok
+test anim::tests::orchestrator_and_operator_traffic_uses_the_hub ... ok
+test anim::tests::p2p_links_are_direct_and_expire ... ok
+test anim::tests::pulse_is_monotonic_and_bounded ... ok
+test anim::tests::read_errors_glance_in_warn_and_other_errors_mark_done ... ok
+test anim::tests::reads_glance_and_never_hide_a_write ... ok
+test anim::tests::started_shows_a_mark_for_each_action_that_has_one ... ok
+test anim::tests::resume_restores_only_what_still_runs ... ok
+test anim::tests::marks_are_bounded ... ok
+test anim::tests::repeat_messages_restart_the_same_link ... ok
+test app::tests::a_team_can_start_empty_and_grow_one_member_at_a_time ... ok
+test app::tests::a_live_commit_wakes_at_frame_rate_then_settles ... ok
+test app::tests::a_late_terminal_event_still_ends_the_running_mark ... ok
+test app::tests::a_running_merge_wakes_at_the_spinner_rate_until_it_ends ... ok
+test app::tests::idle_app_wakes_about_once_a_second ... ok
+test app::tests::events_are_ordered_capped_and_keep_scroll_anchor ... ok
+test app::tests::replies_update_only_the_open_detail_view ... ok
+test app::tests::a_removed_agent_takes_its_running_operation_with_it ... ok
+test app::tests::selection_cycles_and_wraps ... ok
+test app::tests::daemon_shutdown_push_finishes_the_dashboard ... ok
+test input::tests::a_click_into_the_terminal_pane_types_straight_into_it ... ok
+test app::tests::agent_pushes_upsert_in_order ... ok
+test input::tests::compose_sends_as_typed_and_esc_cancels ... ok
+test app::tests::removing_a_parent_or_a_child_keeps_the_state_consistent ... ok
+test input::tests::compose_editing_and_recipient_cycling ... ok
+test input::tests::help_opens_and_any_key_closes_it ... ok
+test input::tests::herdr_focus_only_with_the_herdr_backend ... ok
+test input::tests::kill_requires_confirmation ... ok
+test app::tests::a_snapshot_restores_what_still_runs_and_nothing_else ... ok
+test app::tests::old_and_unknown_vcs_events_start_nothing ... ok
+test input::tests::another_cli_is_a_tab_away_and_a_model_that_cannot_start_is_not_chosen ... ok
+test input::tests::pause_toggles_and_restart_targets_the_selection ... ok
+test input::tests::a_question_from_the_team_opens_its_answer_box_by_itself_once ... ok
+test input::tests::quit_never_asks_the_daemon_for_anything_else ... ok
+test input::tests::a_question_is_answered_by_picking_an_option_or_in_the_operators_words ... ok
+test input::tests::s_is_for_the_selected_or_inspected_agent_and_a_shell_has_no_model ... ok
+test app::tests::scrolling_the_inspector_up_reads_the_transcript_once ... ok
+test app::tests::snapshot_orders_agents_and_selects_the_first_worker ... ok
+test app::tests::selection_survives_agents_coming_and_going ... ok
+test app::tests::subagents_attach_to_their_parent ... ok
+test app::tests::task_pushes_upsert_and_count ... ok
+test app::tests::p2p_message_starts_a_direct_animation ... ok
+test app::tests::natural_ordering ... ok
+test app::tests::layers_follow_dependencies_and_tolerate_cycles ... ok
+test app::tests::provider_error_events_are_visible_errors_without_an_unresponsive_diagnosis ... ok
+test app::tests::agents_without_a_model_name_get_one_from_the_known_models ... ok
+test input::tests::tab_cycles_and_enter_inspects ... ok
+test input::tests::a_slash_line_is_a_command_and_is_never_sent ... ok
+test app::tests::shared_work_query_preserves_titles_and_applies_clock_offset_once ... ok
+test input::tests::terminal_paste_cannot_inject_bracketed_paste_markers ... ok
+test input::tests::tab_completes_a_command_instead_of_changing_the_recipient ... ok
+test input::tests::slash_commands_act_on_agents_and_views ... ok
+test app::tests::replayed_provider_events_do_not_raise_a_new_error_notice ... ok
+test input::tests::the_operator_chooses_the_orchestrators_model_in_a_picker ... ok
+test layout::tests::lines_connect_their_endpoints ... ok
+test layout::tests::opposite_agents_route_around_the_orchestrator ... ok
+test layout::tests::six_agents_match_the_reference_arrangement ... ok
+test layout::tests::unobstructed_routes_are_straight ... ok
+test app::tests::questions_for_the_operator_stay_open_until_answered ... ok
+test input::tests::the_team_is_stopped_from_the_dashboard_after_a_confirmation ... ok
+test input::tests::views_switch_and_logs_scroll_and_filter ... ok
+test net::live_tests::shared_terminal_adapter_against_a_real_daemon ... ignored, requires an explicitly built CLI in CREW_TUI_TEST_BINARY
+test launcher::tests::a_click_picks_a_style_and_the_wheel_scrolls ... ok
+test app::tests::stopping_the_team_closes_the_dashboard ... ok
+test input::tests::the_inspector_types_into_the_agents_terminal ... ok
+test input::tests::scrolling_short_bodies_keeps_zero_offset_and_long_bodies_work_before_draw ... ok
+test layout::tests::small_areas_fall_back_to_badges ... ok
+test layout::tests::the_ring_does_not_move_when_subagents_appear ... ok
+test net::tests::live_dashboard_against_a_scripted_daemon ... ignored, needs an interactive terminal
+test net::tests::fresh_restart_has_a_lifecycle_timeout ... ok
+test net::tests::failed_terminal_scope_discards_its_unsent_bytes_and_preserves_other_targets ... ok
+test net::tests::keys_that_piled_up_go_together_and_another_terminals_wait_their_turn ... ok
+test layout::tests::tiny_areas_yield_no_layout_instead_of_panicking ... ok
+test layout::tests::boxes_never_overlap_and_stay_inside ... ok
+test input::tests::the_wheel_scrolls_and_the_right_button_goes_back ... ok
+test launcher::tests::the_chooser_shows_the_styles_and_the_selected_one_in_full ... ok
+test net::tests::scoped_coalescing_preserves_utf8_order_and_never_crosses_a_scope_or_target ... ok
+test net::tests::worker_queue_full_is_visible_and_nonblocking ... ok
+test net::tests::connection_registration_cannot_escape_a_stop_that_wins_first_or_races_it ... ok
+test launcher::tests::enter_launches_the_selected_style_with_the_typed_objective ... ok
+test input::tests::the_answer_box_moves_between_questions_and_keeps_typing_apart_from_keys ... ok
+test shared::tests::four_confirmations_capture_scope_and_agent_facts_before_the_dialog_answer ... ok
+test slash::tests::commands_are_found_by_name_or_alias ... ok
+test slash::tests::dashboard_membership_and_order_remain_the_terminal_contract ... ok
+test paging_tests::logs_detail_and_tasks_page_from_the_space_below_both_bands ... ok
+test shared::tests::a_held_send_has_one_final_notice_and_expires_on_monotonic_time ... ok
+test slash::tests::usages_pack_into_rows ... ok
+test slash::tests::tab_completes_and_the_hint_follows_the_typing ... ok
+test launcher::tests::style_preview_never_renders_terminal_controls ... ok
+test shared::tests::stale_input_epochs_and_old_replies_cannot_change_the_reconnected_projection ... ok
+test views::usage::tests::nothing_known_takes_no_room ... ok
+test shared::tests::raw_bursts_and_prompts_coexist_in_both_orders_without_replaying_unknown_input ... ok
+test launcher::tests::long_objective_renders_within_a_frame_budget ... ok
+test views::compose::tests::long_compose_line_renders_within_a_frame_budget ... ok
+test app::tests::server_clock_wrapper_preserves_extreme_wire_samples_without_overflow ... ok
+test transcript::tests::a_transcript_is_laid_out_turn_by_turn ... ok
+test views::question::tests::text_wraps_at_spaces_and_keeps_line_breaks ... ok
+test views::usage::tests::gauges_show_each_window_of_each_account ... ok
+test widgets::ansi::tests::colours_and_attributes_become_spans ... ok
+test widgets::text::tests::fits_and_pads_by_display_width ... ok
+test widgets::ansi::tests::other_sequences_and_control_characters_are_dropped ... ok
+test launcher::tests::a_slash_line_is_a_command_and_never_the_objective ... ok
+test views::usage::tests::windows_that_do_not_fit_beside_the_others_wrap_onto_a_further_row ... ok
+test views::usage::tests::paused_agents_lead_their_runtimes_row ... ok
+test input::tests::fresh_restart_requires_a_no_resume_confirmation_and_targets_one_agent ... ok
+test input::tests::a_click_on_a_bus_row_opens_the_message_in_full ... ok
+test launcher::tests::small_and_empty_screens_do_not_panic ... ok
+test input::tests::a_click_on_an_agent_opens_its_inspector ... ok
+test shared::tests::reviewed_state_vectors_use_the_real_terminal_adapter_and_keep_native_work_semantics ... ok
+test app::tests::message_log_is_capped_and_deduplicated ... ok
+test paging_tests::warning_and_questions_do_not_hide_oldest_logs_or_skip_a_page_line ... ok
+test net::tests::retirement_between_key_planning_and_dispatch_is_visible_and_never_reaches_the_socket ... ok
+test net::tests::shutdown_push_is_forwarded_as_a_terminal_event ... ok
+test net::tests::shutdown_joins_held_hellos_and_a_key_worker_waiting_for_the_ui ... ok
+test net::tests::shutdown_after_a_written_input_is_unknown_and_never_replayed ... ok
+test net::tests::requester_runs_commands_and_reports_errors ... ok
+test net::tests::slow_model_listing_does_not_block_screen_requests ... ok
+test layout::tests::satellites_fit_beside_their_parents_without_overlap ... ok
+test launcher::tests::the_objective_is_an_editable_line ... ok
+test net::tests::scope_retirement_during_a_proof_read_prevents_the_following_mutation ... ok
+test net::tests::subscriber_delivers_snapshot_pushes_resync_and_reconnects ... ok
+test net::tests::real_core_and_scoped_workers_keep_raw_input_prompts_and_screen_reads_independent ... ok
+test net::tests::subscriber_stops_after_a_protocol_mismatch_on_reconnect ... ok
+test net::tests::slow_lifecycle_actions_do_not_hit_the_fast_read_timeout ... ok
+test net::tests::fresh_restart_uses_its_own_rpc_without_blocking_screen_reads ... ok
+test net::tests::subscriber_reports_operator_token_errors_and_stops_reconnecting ... ok
+
+test result: ok. 135 passed; 0 failed; 2 ignored; 0 measured; 0 filtered out; finished in 3.37s
+
+     Running tests/render.rs (target/toolbox-schema-review/debug/deps/render-6c3a01d7243af41b)
+
+running 61 tests
+test run_refuses_to_start_without_a_daemon ... ok
+test parked_work_never_replaces_the_executing_task_in_the_dashboard ... ok
+test sandbox_header_keeps_mouse_hits_on_the_rows_that_are_drawn ... ok
+test small_terminal_falls_back_to_a_compact_list ... ok
+test parked_cards_remain_separate_and_inspectable_in_the_task_view ... ok
+test disconnect_shows_a_banner_and_keeps_the_last_state ... ok
+test dashboard_shows_every_agent_and_the_bus ... ok
+test orchestrator_traffic_is_not_reported_as_p2p ... ok
+test logs_view_follows_and_filters ... ok
+test in_session_subagents_show_as_a_badge ... ok
+test small_terminals_badge_the_parent_instead_of_drawing_satellites ... ok
+test selected_box_is_highlighted ... ok
+test a_temporary_member_is_marked_on_its_box ... ok
+test dashboard_handles_control_bearing_model_labels ... ok
+test task_graph_view_lists_layers_and_dependencies ... ok
+test subagent_and_parent_talk_over_their_tether ... ok
+test subagents_orbit_their_parent ... ok
+test a_message_in_classical_chinese_keeps_the_dashboard_in_shape ... ok
+test detail_view_shows_the_agent_and_its_terminal ... ok
+test status_changes_show_up ... ok
+test p2p_message_opens_the_private_channel_banner ... ok
+test an_empty_roster_explains_itself ... ok
+test sandbox_header_and_modal_scroll_limits_share_the_reduced_area ... ok
+test overlays_render_on_top ... ok
+test a_session_off_its_model_is_marked_on_its_box_and_explained_in_the_inspector ... ok
+test vcs::the_compact_layout_replaces_the_activity_with_the_label ... ok
+test a_team_that_waits_for_the_operator_shows_it_on_the_overview ... ok
+test each_box_says_which_task_its_member_is_on_and_what_it_is_doing_now ... ok
+test vcs::the_compact_layout_shows_the_hub_marks_too ... ok
+test waiting_projection_uses_the_same_stable_selection_as_default_task_operations ... ok
+test vcs::a_workspace_for_a_subagent_runs_from_its_parent ... ok
+test vcs::marks_for_agents_without_a_box_draw_nothing_and_do_not_panic ... ok
+test vcs::the_log_view_shows_the_vcs_messages ... ok
+test the_hub_says_its_cli_and_the_picker_chooses_the_orchestrators_model_and_cli ... ok
+test vcs::a_read_glances_quietly_and_briefly ... ok
+test the_live_terminal_keeps_its_colours_and_the_type_box_is_drawn ... ok
+test vcs::the_hub_shows_an_integration_running_and_its_tally ... ok
+test the_message_box_turns_into_a_command_line_on_a_slash ... ok
+test provider_errors_override_stale_activity_and_stay_visible_without_event_history ... ok
+test the_boxes_show_how_full_each_context_window_is ... ok
+test the_terminal_pane_takes_the_inspector_with_f_and_shows_when_it_is_typed_into ... ok
+test inspector_text_never_renders_terminal_controls ... ok
+test vcs::a_conflict_looks_different_from_a_merge ... ok
+test detail_and_task_views_name_parents_and_subagents ... ok
+test the_inspector_shows_how_full_the_context_window_is ... ok
+test message_end_then_up_moves_from_the_rendered_last_page ... ok
+test vcs::a_running_merge_spins_and_lights_its_link_until_it_ends ... ok
+test vcs::a_commit_labels_the_box_and_sweeps_its_border ... ok
+test the_inspector_scrolled_up_shows_the_session_transcript ... ok
+test a_bus_message_opens_in_full ... ok
+test a_question_for_the_operator_is_announced_and_shown_in_full ... ok
+test every_team_size_renders_all_boxes ... ok
+test each_box_names_its_model_and_effort_on_its_bottom_border ... ok
+test tiny_terminals_never_panic_with_subagents ... ok
+test socket_fallback_warning_stays_above_views_and_modals_and_preserves_hits ... ok
+test each_runtime_has_its_own_glyph_and_colour ... ok
+test dashboard_handles_unicode_presentation_labels ... ok
+test tiny_terminals_never_panic ... ok
+test detail_view_shows_the_effective_toolbox ... ok
+test question_page_up_moves_after_paging_to_the_bottom ... ok
+test sandbox_warning_is_persistent_and_only_the_snapshot_can_confirm_it ... ok
+
+test result: ok. 61 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.54s
+
+     Running tests/review_toolbox_click.rs (target/toolbox-schema-review/debug/deps/review_toolbox_click-3535197a94f7b79c)
+
+running 1 test
+test clicking_toolbox_does_not_enable_terminal_typing ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s
+
+     Running tests/slash_const.rs (target/toolbox-schema-review/debug/deps/slash_const-7b133bbf0a11dac9)
+
+running 1 test
+test dashboard_remains_available_to_a_downstream_const_consumer ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+   Doc-tests crew_tui
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+

@@ -1831,6 +1831,11 @@ just lint
 just dry-run
 ```
 
+Changes to `crates/crew-core/src/rpc.rs` also require
+`./scripts/build-env cargo test --locked -p crew --features native-gateway`.
+Every daemon method must have an explicit tier and lane expectation in
+`native::policy`, including methods unavailable to device grants.
+
 The integration tests (`crates/crew/tests/team.rs`) start a real daemon and
 drive real agent processes on PTYs; the agents are `crew scripted-agent`, a
 deterministic stand-in that uses the same bus, task and git calls as a real

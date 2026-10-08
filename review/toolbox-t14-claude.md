@@ -122,3 +122,22 @@ For the negative control, substitute `target/toolbox-t14/crew-4adfa536` and its
 SHA-256 `5bfdffac042c41a8c4252f1cc23fa2404979903853a70fdc94d404d1687c50b1`, using a
 different new output directory. The runner refuses an existing output directory
 or a mismatched binary hash.
+
+## Landing integration
+
+The approved `f81141f6` source was merged without conflicts with main
+`96320c18` (P1 contracts and delivery read handling). This integration changes
+no source beyond that clean merge. Per the orchestrator's scoped gate request,
+the composed source passes `toolbox_launch` 12/0 and `team` 89/0 with real
+sandbox support required. The native Claude runner also passes T14, T18 and
+every recovery check, with stop 0 and no remaining owned processes.
+
+Evidence is under `target/toolbox-t14-claude/integration/`: `scoped.log`,
+`native.log` and `native/report.json`. The composed binary `crew-merged` has
+SHA-256 `b9662800a8b4a6df91913253a49a6a33d4f4c1b38ef45020213fcf94b4c5e21b`.
+QA independently confirmed basic native T14/T18 on all three runtimes against
+the prior production candidate (`m-6a06d1f05a41`).
+
+The optional combined Codex inventory gate with `CREW_TEST_CODEX_BINARY` has
+a separately reported fixture failure, tracked by `codex-t14-native`. Neither
+the basic native replay nor this default scoped run claims that gate is green.
