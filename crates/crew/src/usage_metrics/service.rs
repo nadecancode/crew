@@ -31,7 +31,7 @@ use tokio::sync::{watch, Semaphore};
 
 use super::collect::{pump, Access};
 use super::ledger::{ExecutionStatus, Ledger, Locator, Registration, Retention, WorkBinding};
-use super::query::{self, Context};
+use super::query::{self, Backlog, Context};
 use crate::agents::files::{AgentFiles, CliHome};
 
 /// At most this many registered streams are collected at once.
@@ -302,11 +302,17 @@ impl UsageMetrics {
                 .unwrap_or_else(|e| e.into_inner())
                 .get(run)
                 .copied(),
-            backlog_files: Some(
+            backlog: Some(
                 streams
                     .values()
                     .filter(|s| s.run_id == run && !s.caught_up && !s.missing)
-                    .count() as u64,
+                    .fold(Backlog::default(), |mut b, s| {
+                        match s.kind {
+                            UsageKind::Live => b.live += 1,
+                            UsageKind::Aside => b.aside += 1,
+                        }
+                        b
+                    }),
             ),
         }
     }

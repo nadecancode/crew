@@ -49,7 +49,28 @@ pub struct Context {
     /// not known (historical runs without evidence).
     pub expected_agents: Option<u64>,
     /// Source files with unread data, when the collector knows.
-    pub backlog_files: Option<u64>,
+    pub backlog: Option<Backlog>,
+}
+
+/// Source files with unread data, by kind. What they hold has not been
+/// read, so it may be spend of any scope and time of that kind.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct Backlog {
+    pub live: u64,
+    pub aside: u64,
+}
+
+impl Backlog {
+    pub fn files(self) -> u64 {
+        self.live.saturating_add(self.aside)
+    }
+
+    pub fn of(self, kind: UsageKind) -> u64 {
+        match kind {
+            UsageKind::Live => self.live,
+            UsageKind::Aside => self.aside,
+        }
+    }
 }
 
 /// The price books this build knows, newest first.
@@ -210,7 +231,7 @@ struct Extras {
     gaps_total: u64,
     /// Each lost source's kind (live or aside, when known) and reason.
     losses: Vec<(Option<UsageKind>, CoverageReason)>,
-    backlog: Option<u64>,
+    backlog: Option<Backlog>,
     retained_from: Option<i64>,
     uncertain: BTreeSet<(i64, String)>,
     reasons: BTreeSet<CoverageReasonKey>,
@@ -291,7 +312,7 @@ fn extras(ledger: &Ledger, run: &RunInfo, ctx: &Context) -> Result<Extras, RpcEr
         losses: gaps.iter().map(|g| (g.kind, g.reason)).collect(),
         gaps: listed,
         unseen_spend: None,
-        backlog: ctx.backlog_files,
+        backlog: ctx.backlog,
         retained_from: run.retained_from,
         uncertain: ledger.uncertain_scopes(&run.run_id).map_err(internal)?,
         reasons,
@@ -299,8 +320,8 @@ fn extras(ledger: &Ledger, run: &RunInfo, ctx: &Context) -> Result<Extras, RpcEr
 }
 
 /// Why spend the ledger could not see may belong to `q` over `range`: a lost
-/// source of the same kind (or of unknown kind), or, for asides, an
-/// execution without a usage source.
+/// source of the same kind (or of unknown kind), a source of that kind with
+/// unread data, or, for asides, an execution without a usage source.
 fn unseen_spend(
     ledger: &Ledger,
     x: &Extras,
@@ -310,6 +331,9 @@ fn unseen_spend(
     let kind = q.scope.kind;
     if let Some((_, reason)) = x.losses.iter().find(|(k, _)| k.is_none_or(|k| k == kind)) {
         return Ok(Some(*reason));
+    }
+    if x.backlog.is_some_and(|b| b.of(kind) > 0) {
+        return Ok(Some(CoverageReason::SourceBacklog));
     }
     if kind == UsageKind::Aside
         && ledger
@@ -347,7 +371,7 @@ fn open_spend(e: &mut CostEstimate, reason: CoverageReason) {
 fn decorate(c: &mut MetricCoverage, x: &Extras) {
     c.source_gaps = List::new(x.gaps.clone()).expect("gaps truncated to their limit");
     c.source_gaps_total = Some(Wide(x.gaps_total as u128));
-    c.source_backlog_files = x.backlog.map(|n| Wide(n as u128));
+    c.source_backlog_files = x.backlog.map(|b| Wide(b.files() as u128));
     c.retained_from = x.retained_from.and_then(|t| Timestamp::new(t).ok());
 }
 
@@ -676,7 +700,7 @@ fn tracking_state(ledger: &Ledger, run: &RunInfo, x: &Extras) -> Result<Tracking
         TrackingState::Closed
     } else if !ledger.collecting(&run.run_id).map_err(internal)? {
         TrackingState::Paused
-    } else if x.backlog.is_some_and(|n| n > 0) {
+    } else if x.backlog.is_some_and(|b| b.files() > 0) {
         TrackingState::CatchingUp
     } else if x.gaps_total > 0 {
         TrackingState::Partial
@@ -690,6 +714,7 @@ fn cohort(
     ledger: &Ledger,
     q: &UsageQuery,
     book: &Book,
+    x: &Extras,
 ) -> Result<Option<CompletionCohort>, RpcError> {
     // The completed-task cohort is defined over tasks, by task and
     // completion epic; a member, model or account selection has no cohort.
@@ -709,7 +734,7 @@ fn cohort(
         return Ok(None);
     }
     let epic = q.scope.epic.clone();
-    let c = ledger
+    let mut c = ledger
         .cohort(
             q.scope.workspace_run_id.as_str(),
             range_of(q),
@@ -730,6 +755,14 @@ fn cohort(
             book,
         )
         .map_err(internal)?;
+    // Unread live data may be a member's spend: the average has no upper
+    // bound until it is read.
+    let e = &mut c.cost_per_completed_task;
+    if x.backlog.is_some_and(|b| b.live > 0) && e.state != EstimateState::Unavailable {
+        e.upper_pico_usd = None;
+        e.state = EstimateState::Partial;
+        e.reason.get_or_insert(CoverageReason::SourceBacklog);
+    }
     Ok(Some(c))
 }
 
@@ -750,6 +783,12 @@ pub fn summary(
         limitations.insert(CoverageReasonKey(
             0,
             CoverageReasonOrd(CoverageReason::CorrectionOutsideHorizon),
+        ));
+    }
+    if x.backlog.is_some_and(|b| b.of(q.scope.kind) > 0) {
+        limitations.insert(CoverageReasonKey(
+            0,
+            CoverageReasonOrd(CoverageReason::SourceBacklog),
         ));
     }
     let pre_tracking = ledger
@@ -785,7 +824,7 @@ pub fn summary(
         tracking_since: Timestamp::new(run.tracking_since).ok(),
         tracking_state: tracking_state(ledger, &run, &x)?,
         attribution_coverage: attribution_coverage(&rows, &x),
-        completion_cohort: cohort(ledger, &q, &book)?,
+        completion_cohort: cohort(ledger, &q, &book, &x)?,
         executions_observed,
         execution_statuses,
         limitations: List::new(limitations.into_iter().take(32).map(|k| k.1 .0).collect())
@@ -1357,7 +1396,7 @@ mod tests {
         Context {
             now: NOW + 3 * 3_600_000,
             expected_agents: Some(1),
-            backlog_files: Some(0),
+            backlog: Some(Backlog::default()),
         }
     }
 
@@ -2056,5 +2095,120 @@ mod tests {
             .rows
             .iter()
             .all(|r| r.totals.estimate.upper_pico_usd.is_none()));
+    }
+
+    #[test]
+    fn unread_sources_leave_their_kinds_estimates_open() {
+        let (_dir, _path, ledger, _) = fixture();
+        let mut q = all();
+        q.to_ms = Some(Timestamp::new(NOW + 3_600_000).unwrap());
+        let reading = |live, aside| Context {
+            backlog: Some(Backlog { live, aside }),
+            ..ctx()
+        };
+        let caught_up = summary(&ledger, &q, &reading(0, 0)).unwrap();
+        assert_eq!(caught_up.totals.estimate.state, EstimateState::Finite);
+        assert!(!caught_up
+            .limitations
+            .contains(&CoverageReason::SourceBacklog));
+        // An aside's unread file holds no live spend.
+        let aside = summary(&ledger, &q, &reading(0, 1)).unwrap();
+        assert_eq!(aside.totals.estimate.state, EstimateState::Finite);
+        assert_eq!(
+            aside.totals.estimate.upper_pico_usd,
+            caught_up.totals.estimate.upper_pico_usd
+        );
+        // A live one may hold spend of any live scope and range.
+        let s = summary(&ledger, &q, &reading(2, 0)).unwrap();
+        let e = &s.totals.estimate;
+        assert_eq!(e.upper_pico_usd, None);
+        assert_eq!(e.state, EstimateState::Partial);
+        assert_eq!(e.reason, Some(CoverageReason::SourceBacklog));
+        assert_eq!(e.lower_pico_usd, caught_up.totals.estimate.lower_pico_usd);
+        assert_eq!(
+            e.coverage.source_backlog_files,
+            Some(Wide(2)),
+            "the files are counted as before"
+        );
+        assert!(s.limitations.contains(&CoverageReason::SourceBacklog));
+        assert_eq!(output(&s.totals), output(&caught_up.totals));
+        assert_eq!(
+            s.totals.output.state, caught_up.totals.output.state,
+            "counters keep their own coverage"
+        );
+        let mut grouped = all();
+        grouped.group_by = Some(UsageDimension::Agent);
+        let b = breakdown(&ledger, &grouped, &reading(1, 0)).unwrap();
+        assert!(b
+            .rows
+            .iter()
+            .all(|r| r.totals.estimate.upper_pico_usd.is_none()));
+        let mut buckets = all();
+        buckets.bucket_seconds = Some(3600);
+        let sr = series(&ledger, &buckets, &reading(1, 0)).unwrap();
+        assert!(sr
+            .rows
+            .iter()
+            .all(|r| r.totals.estimate.upper_pico_usd.is_none()));
+    }
+
+    #[test]
+    fn unread_live_sources_leave_the_cost_per_task_open() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("s-1.jsonl");
+        std::fs::write(&path, "").unwrap();
+        let mut ledger = Ledger::in_memory().unwrap();
+        ledger.begin_run("r1", Some(NOW), NOW).unwrap();
+        let reg = Registration {
+            run_id: "r1".into(),
+            kind: UsageKind::Live,
+            runtime: RuntimeKind::Claude,
+            native_session_id: "s-1".into(),
+            agent_id: "worker".into(),
+            incarnation: "i1".into(),
+            launch_id: "l1".into(),
+            aside: None,
+            locator: Locator::Private {
+                agent_id: "worker".into(),
+            },
+            started_ms: NOW,
+            start: Start::Fresh,
+            cli_version: None,
+        };
+        let stream = ledger
+            .register(&reg, &File::open(&path).unwrap(), NOW)
+            .unwrap()
+            .unwrap();
+        ledger
+            .bind_work(
+                &stream,
+                &File::open(&path).unwrap(),
+                &bind(task("t1", None)),
+                NOW,
+            )
+            .unwrap();
+        append(&path, &[msg("a", NOW + 1_000, 2)]);
+        drain(&mut ledger, &stream, &File::open(&path).unwrap(), NOW).unwrap();
+        ledger
+            .first_completion("r1", "t1", NOW + 2_000, None, &EpicAttribution::NoEpic)
+            .unwrap();
+        let cost = |live| {
+            let c = Context {
+                backlog: Some(Backlog { live, aside: 0 }),
+                ..ctx()
+            };
+            summary(&ledger, &all(), &c)
+                .unwrap()
+                .completion_cohort
+                .unwrap()
+                .cost_per_completed_task
+        };
+        let finite = cost(0);
+        assert_eq!(finite.state, EstimateState::Finite);
+        let open = cost(1);
+        assert_eq!(open.upper_pico_usd, None);
+        assert_eq!(open.state, EstimateState::Partial);
+        assert_eq!(open.reason, Some(CoverageReason::SourceBacklog));
+        assert_eq!(open.lower_pico_usd, finite.lower_pico_usd);
     }
 }

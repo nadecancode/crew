@@ -775,7 +775,8 @@ impl Ledger {
                               'unsupported_sidechain', 'ambiguous_boundary', 'retention_limit',
                               'identity_lost', 'correction_outside_horizon',
                               'source_backlog', 'unsupported_runtime', 'not_tracked'))
-             OR EXISTS (SELECT 1 FROM usage_source_gaps WHERE run_id = ?1)",
+             OR EXISTS (SELECT 1 FROM usage_source_gaps WHERE run_id = ?1
+                        AND (kind IS NULL OR kind = 'live'))",
             params![run_id],
             |r| r.get(0),
         )?;
@@ -956,8 +957,12 @@ impl Ledger {
     }
 
     /// Executions of a run without a usage source whose spend may belong to a
-    /// query: those started in `range` (all of them without one), or every
-    /// one when the query `narrowed` by member, model, account or work.
+    /// query: those that may have run during `range` (all of them without
+    /// one), or every one when the query `narrowed` by member, model, account
+    /// or work. An execution runs from its start to its finish; an unknown
+    /// start may be any time before its finish, and an unknown finish any
+    /// time after its start, so only one known to have ended before the
+    /// range or started after it is left out.
     pub fn unsourced_executions(
         &self,
         run_id: &str,
@@ -968,8 +973,8 @@ impl Ledger {
         let n: i64 = self.conn.query_row(
             "SELECT COUNT(*) FROM usage_executions e WHERE e.run_id = ?1 AND NOT EXISTS
              (SELECT 1 FROM usage_owners o WHERE o.aside_execution = e.execution_id)
-             AND (?2 = 1 OR ?3 = 1 OR (e.started_at IS NOT NULL
-                  AND e.started_at >= ?4 AND e.started_at < ?5))",
+             AND (?2 = 1 OR ?3 = 1 OR ((e.started_at IS NULL OR e.started_at < ?5)
+                  AND (e.finished_at IS NULL OR e.finished_at >= ?4)))",
             params![run_id, narrowed as i64, range.is_none() as i64, from, to],
             |r| r.get(0),
         )?;
@@ -979,7 +984,7 @@ impl Ledger {
     /// The executions in `observed` (those with newly observed usage in the
     /// query's cohort) and the status partition of that cohort. An execution
     /// of the run without a source has unknown usage, never zero: when the
-    /// query narrows only by time, one started in `range` (any, unbounded)
+    /// query narrows only by time, one that may have run during `range`
     /// makes the count partial; when it narrows by member, model, account or
     /// work, whether such an execution belongs is unknown, so any makes it
     /// partial. When `lost` gives why the cohort itself is not known (detail
@@ -1217,7 +1222,9 @@ impl Ledger {
     }
 
     /// A source of a run that could not be collected (refused registration,
-    /// a file that cannot be opened or read): a visible gap of that run.
+    /// a file that cannot be opened or read): a visible gap of that run. A
+    /// gap recorded again under another kind, or none, keeps no kind: its
+    /// lost spend may then be of either.
     pub fn record_source_gap(
         &mut self,
         run_id: &str,
@@ -1231,7 +1238,8 @@ impl Ledger {
             "INSERT INTO usage_source_gaps
              (run_id, stream_id, reason, count, first_at, last_at, kind)
              VALUES (?1, ?2, ?3, 1, ?4, ?4, ?5)
-             ON CONFLICT DO UPDATE SET count = count + 1, last_at = excluded.last_at",
+             ON CONFLICT DO UPDATE SET count = count + 1, last_at = excluded.last_at,
+             kind = CASE WHEN kind IS excluded.kind THEN kind ELSE NULL END",
             params![run_id, stream_id, tag(&reason), now, kind.map(|k| tag(&k))],
         )?;
         bump(&tx)?;
@@ -4224,6 +4232,106 @@ mod tests {
                 "{case}"
             );
         }
+    }
+
+    #[test]
+    fn a_gap_recorded_under_both_kinds_keeps_no_kind() {
+        let book = Book::standard_2026_10_08();
+        let (_dir, path, mut ledger, stream) = setup(&[]);
+        ledger
+            .bind_work(&stream, &open(&path), &epic_task("t1", "e1"), NOW)
+            .unwrap();
+        append(&path, &[at("a", NOW, 10)]);
+        drain(&mut ledger, &stream, &open(&path), NOW).unwrap();
+        ledger
+            .first_completion("r1", "t1", NOW + HOUR, None, &EpicAttribution::NoEpic)
+            .unwrap();
+        let gap = |l: &mut Ledger, kind: Option<UsageKind>| {
+            l.record_source_gap("r1", "claude:s-9", kind, CoverageReason::SourceGap, NOW)
+                .unwrap()
+        };
+        let kinds = |l: &Ledger| {
+            l.gaps("r1")
+                .unwrap()
+                .into_iter()
+                .map(|g| g.kind)
+                .collect::<Vec<_>>()
+        };
+        let upper = |l: &Ledger| {
+            l.cohort("r1", None, |_, _| true, &book)
+                .unwrap()
+                .cost_per_completed_task
+                .upper_pico_usd
+        };
+        gap(&mut ledger, Some(UsageKind::Aside));
+        gap(&mut ledger, Some(UsageKind::Aside));
+        assert_eq!(kinds(&ledger), [Some(UsageKind::Aside)]);
+        assert!(
+            upper(&ledger).is_some(),
+            "an aside's lost spend is no task's"
+        );
+        gap(&mut ledger, Some(UsageKind::Live));
+        assert_eq!(kinds(&ledger), [None], "either kind's spend may be lost");
+        assert_eq!(upper(&ledger), None);
+        gap(&mut ledger, Some(UsageKind::Aside));
+        assert_eq!(kinds(&ledger), [None], "an unknown kind stays unknown");
+    }
+
+    #[test]
+    fn unsourced_executions_count_wherever_they_may_have_run() {
+        let (_dir, _path, mut ledger, _stream) = setup(&[]);
+        const MIN: i64 = 60_000;
+        let count = |l: &Ledger, from: i64, to: i64| {
+            l.unsourced_executions("r1", Some((NOW + from * MIN, NOW + to * MIN)), false)
+                .unwrap()
+        };
+        ledger
+            .execution_status(
+                "r1",
+                "q1",
+                "x1",
+                ExecutionStatus::Failed,
+                Some(NOW + 10 * MIN),
+                Some(NOW + 50 * MIN),
+            )
+            .unwrap();
+        assert_eq!(count(&ledger, 20, 30), 1, "running through the whole range");
+        assert_eq!(count(&ledger, 0, 11), 1);
+        assert_eq!(count(&ledger, 50, 60), 1, "finished as the range starts");
+        assert_eq!(count(&ledger, 0, 10), 0, "started as the range ends");
+        assert_eq!(count(&ledger, 51, 60), 0, "finished before the range");
+        // Without a start, any time before its finish; without a finish,
+        // any time after its start.
+        ledger
+            .execution_status(
+                "r1",
+                "q1",
+                "x2",
+                ExecutionStatus::Failed,
+                None,
+                Some(NOW + 50 * MIN),
+            )
+            .unwrap();
+        assert_eq!(count(&ledger, -600, -590), 1);
+        assert_eq!(count(&ledger, 51, 60), 0);
+        ledger
+            .execution_status(
+                "r1",
+                "q1",
+                "x3",
+                ExecutionStatus::StillAnswering,
+                Some(NOW + 10 * MIN),
+                None,
+            )
+            .unwrap();
+        assert_eq!(count(&ledger, 600, 610), 1);
+        assert_eq!(count(&ledger, -600, -590), 1, "x2 only");
+        ledger
+            .execution_status("r1", "q1", "x4", ExecutionStatus::Cancelled, None, None)
+            .unwrap();
+        assert_eq!(count(&ledger, 600, 610), 2);
+        assert_eq!(count(&ledger, -600, -590), 2);
+        assert_eq!(ledger.unsourced_executions("r1", None, false).unwrap(), 4);
     }
 
     #[test]

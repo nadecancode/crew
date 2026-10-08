@@ -19,7 +19,7 @@ use crew::usage_metrics::collect::drain;
 use crew::usage_metrics::ledger::{
     AsideIds, ExecutionStatus, Ledger, Locator, Registration, WorkBinding,
 };
-use crew::usage_metrics::query::{self, Context};
+use crew::usage_metrics::query::{self, Backlog, Context};
 use crew::usage_metrics::source::Start;
 use crew_core::rpc::features::{
     FeatureSession, FeatureVersions, Id, PageRequest, UnavailableFeatures,
@@ -384,11 +384,12 @@ fn world() -> World {
     w
 }
 
+/// Every source read to its end.
 fn ctx() -> Context {
     Context {
         now: NOW,
         expected_agents: Some(6),
-        backlog_files: Some(2),
+        backlog: Some(Backlog::default()),
     }
 }
 
@@ -444,8 +445,12 @@ fn usage_json() {
         "watch": v(UsageWatchResult { epoch: id("ep-1"), watch_id: id("w-1"), initial: summary.clone() }),
         "summary_epic": v(query::summary(&w.ledger, &epic, &c).unwrap()),
         "summary_no_completions": v(query::summary(&w.ledger, &no_completions, &c).unwrap()),
+        // The epic while two live session files are not read to their end:
+        // what they hold may be its spend, so its estimate has no finite
+        // upper bound until they are.
+        "summary_epic_reading": v(query::summary(&w.ledger, &epic, &Context { backlog: Some(Backlog { live: 2, aside: 0 }), ..ctx() }).unwrap()),
         "summary_asides": v(query::summary(&w.ledger, &query(scope(RUN, UsageKind::Aside)), &c).unwrap()),
-        "summary_earlier": v(query::summary(&w.ledger, &query(scope(EARLIER, UsageKind::Live)), &Context { now: NOW, expected_agents: None, backlog_files: None }).unwrap()),
+        "summary_earlier": v(query::summary(&w.ledger, &query(scope(EARLIER, UsageKind::Live)), &Context { now: NOW, expected_agents: None, backlog: None }).unwrap()),
         "series": v(query::series(&w.ledger, &series, &c).unwrap()),
         "breakdown_agent": v(query::breakdown(&w.ledger, &grouped(UsageDimension::Agent), &c).unwrap()),
         "breakdown_epic": v(query::breakdown(&w.ledger, &grouped(UsageDimension::Epic), &c).unwrap()),
