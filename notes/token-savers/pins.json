@@ -1,0 +1,166 @@
+{
+  "schema": 1,
+  "observed_on": "2026-10-08",
+  "source": [
+    {
+      "repo": "hansipie/ecotokens",
+      "sha": "62679e627fe9c527851ee59093d839c0b6f019b3",
+      "commit_date": "2026-10-06T11:27:13Z",
+      "archived": false,
+      "license_metadata": "MIT"
+    },
+    {
+      "repo": "mksglu/context-mode",
+      "sha": "2a7a92ab00496a4848decdd7b651daf9ccd90d96",
+      "commit_date": "2026-10-07T12:07:50Z",
+      "archived": false,
+      "license_metadata": "NOASSERTION"
+    },
+    {
+      "repo": "mpecan/tokf",
+      "sha": "87c93d9ff3340bdbb0503b2addd0e7e8e8753cad",
+      "commit_date": "2026-09-06T22:02:44Z",
+      "archived": false,
+      "license_metadata": "MIT"
+    },
+    {
+      "repo": "rtk-ai/rtk",
+      "sha": "8533612180c60efbcb5827c7db4e910aba096705",
+      "commit_date": "2026-10-07T16:04:17Z",
+      "archived": false,
+      "license_metadata": "Apache-2.0"
+    },
+    {
+      "repo": "sliday/tamp",
+      "sha": "a50aeb7cb5599f92cba333b9ee10b1fbb1d6f5fa",
+      "commit_date": "2026-09-01T07:43:12Z",
+      "archived": false,
+      "license_metadata": null
+    },
+    {
+      "repo": "xelektron/token-enhancer",
+      "sha": "7291cfe4cbd36d61eb0ae7736cb793686a692a3f",
+      "commit_date": "2026-04-03T09:33:29Z",
+      "archived": false,
+      "license_metadata": "MIT"
+    },
+    {
+      "repo": "yvgude/lean-ctx",
+      "sha": "32d72de1f503646deefdb009227333c8c97bba5d",
+      "commit_date": "2026-10-08T04:42:54Z",
+      "archived": false,
+      "license_metadata": "Apache-2.0"
+    },
+    {
+      "repo": "zdk/lowfat",
+      "sha": "660bc936cad22a3e71be40da269213640548bcc5",
+      "commit_date": "2026-10-05T15:28:24Z",
+      "archived": false,
+      "license_metadata": "Apache-2.0"
+    }
+  ],
+  "binaries": {
+    "lowfat": {
+      "sha256": "77a5693d0ab87a1a3a9e43bb74a47f9e927e504b415d57758e5eb7709fa71e69",
+      "version": "v0.8.1",
+      "archive_url": "https://github.com/zdk/lowfat/releases/download/v0.8.1/lowfat-x86_64-unknown-linux-gnu.tar.gz",
+      "archive_digest": "sha256:78f8e715646db15e41e807dccad0676f2826ab6ddecc85e6930c7b98e317ecad"
+    },
+    "rtk": {
+      "sha256": "b947215511bfd8f5f6eb12c6b6d4a9f70b72e9ce37442cfa4df2352b033cd0ea",
+      "version": "v0.51.0",
+      "archive_url": "https://github.com/rtk-ai/rtk/releases/download/v0.51.0/rtk-x86_64-unknown-linux-musl.tar.gz",
+      "archive_digest": "sha256:5028d3b19a8f0990d30fec9fbb07e32782bc5698e618fb1861aad8a9ccba4eb5"
+    },
+    "tokf": {
+      "sha256": "3c26eb33f87d388a1099c6db361df8d6b2ed7a59fafad585b605cd9416420d89",
+      "version": "tokf-v0.2.54",
+      "archive_url": "https://github.com/mpecan/tokf/releases/download/tokf-v0.2.54/tokf-v0.2.54-x86_64-unknown-linux-gnu.tar.gz",
+      "archive_digest": "sha256:50484ad571ef4a7b36386469bb2d07b7f019db1cc22e3895cc9ae8410f8c01f4"
+    }
+  },
+  "filters": {
+    "lowfat/git.lf": {
+      "sha256": "c06aca9771abd3b693f9af42fcdada8ce157407dda74cf30599b012193482011",
+      "url": "https://raw.githubusercontent.com/zdk/lowfat/a17b3e0602c954a8160abc9086085083ad2405d5/crates/lowfat-plugin/embedded/git/git-compact/filter.lf"
+    },
+    "lowfat/ls.lf": {
+      "sha256": "aeb5c9e1a54ee9f77e3d7fb771e4122f09d7a1417d86a65c56299f9db7466dd0",
+      "url": "https://raw.githubusercontent.com/zdk/lowfat/a17b3e0602c954a8160abc9086085083ad2405d5/crates/lowfat-plugin/embedded/ls/ls-compact/filter.lf"
+    },
+    "lowfat/find.lf": {
+      "sha256": "0df995a37530dfdd3771c910aed0f601d692d3080b8126a0612536d4fd7d073a",
+      "url": "https://raw.githubusercontent.com/zdk/lowfat/a17b3e0602c954a8160abc9086085083ad2405d5/crates/lowfat-plugin/embedded/find/find-compact/filter.lf"
+    },
+    "tokf/cargo-test.toml": {
+      "sha256": "733558976707620092dc4c85d29972c07808f0a0cb36bfe6a55d389ec2c84fbf",
+      "url": "https://raw.githubusercontent.com/mpecan/tokf/87c93d9ff3340bdbb0503b2addd0e7e8e8753cad/crates/tokf-cli/filters/cargo/test.toml"
+    },
+    "tokf/git-diff.toml": {
+      "sha256": "a0a5c1f5ef2fb8f337ed40551ed0050e84bb8598d722f9eac17aa541fc74c590",
+      "url": "https://raw.githubusercontent.com/mpecan/tokf/87c93d9ff3340bdbb0503b2addd0e7e8e8753cad/crates/tokf-cli/filters/git/diff.toml"
+    }
+  },
+  "inputs": {
+    "Cargo.lock": {
+      "bytes": 74140,
+      "sha256": "5f2f70497c975cd298d3c780d03c7aa1ba1bcd7a98d87995814967e4c51c05ae"
+    },
+    "cargo-failure.txt": {
+      "bytes": 1025,
+      "sha256": "9ce3bf2ab065f9b14ffb1f68611a0b04d6d0245c8579b923b6c087f5712e0e7a"
+    },
+    "cargo-json.txt": {
+      "bytes": 43,
+      "sha256": "bc75ed2b68b4d808428f42c83642b8f577bb9897ab55ccd7e21f11820738b29d"
+    },
+    "cargo-success.txt": {
+      "bytes": 15627,
+      "sha256": "2cdc945ccee2ddf127911941fd632e012a160f457a81682b642751abb8a9b1a9"
+    },
+    "cargo-unknown.txt": {
+      "bytes": 68,
+      "sha256": "72caeab04b69f15e696ecded7d1e7598c5217f792f0f7ef0e636c0477cf986ca"
+    },
+    "cargo-warning.txt": {
+      "bytes": 15699,
+      "sha256": "5113eaa9aa4226cf34d5c2b1492b6234f0ae886397ce8676c7800e6042fd8405"
+    },
+    "cargo-zero.txt": {
+      "bytes": 113,
+      "sha256": "4432340a47af682d6cd96ee3554ff0f0a11af8c7a4da23192d65af1d514d7d14"
+    },
+    "find-probes.txt": {
+      "bytes": 536,
+      "sha256": "1b1a51bf4b387d9dd8a44b88ebcedb8615e1f249e648b49c8801a4fc2f0741a6"
+    },
+    "index.html": {
+      "bytes": 512,
+      "sha256": "334206ec40b29d15b859db43a13f51746ad7ddd81744fb82bfa7ff8d2b274daa"
+    },
+    "ls-long.txt": {
+      "bytes": 174,
+      "sha256": "a257c4b57d0eaa3f3c3f6d3ffdba6545d68cb4604d22e1cb11a394788678cefd"
+    },
+    "mode-only.diff": {
+      "bytes": 83,
+      "sha256": "a90ba13cd9ee95080cd2e66956f5add27b98f2af70f78c42a7fbae383621a8f4"
+    },
+    "rename-only.diff": {
+      "bytes": 151,
+      "sha256": "4d09f8e727722db99b4f424ad35b240c7189d5d249778d5e65bfa2f719488b3f"
+    },
+    "toolbox.rs": {
+      "bytes": 71203,
+      "sha256": "31a15b031d8bf2624210094f8a98084d89b9b4cd91297c6cb2ad084be428bdde"
+    },
+    "toolboxes.md": {
+      "bytes": 86064,
+      "sha256": "b66427f8a66f458a3227fae8115f8d294f48617b6f0c0c58be5db3880a2b18a6"
+    },
+    "tui-fix.diff": {
+      "bytes": 3792,
+      "sha256": "ec74233d38869211a2178fb38c234f9d329703a6732a5cd5cff8e9a32e7db117"
+    }
+  }
+}

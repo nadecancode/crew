@@ -1024,6 +1024,7 @@ mod tests {
         /// `CREW_IDENTITY`).
         fn profile(&self, id: &str, orchestrator: bool, worktrees: bool) -> Result<Spec> {
             let launch = LaunchSpec {
+                scrub_env: Vec::new(),
                 agent_id: id.into(),
                 kind: RuntimeKind::Shell,
                 program: "sh".into(),

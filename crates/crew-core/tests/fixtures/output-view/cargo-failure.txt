@@ -1,0 +1,22 @@
+   Compiling crew-tui v0.1.0 (/home/nade/workspaces/personal/crew/.crew/worktrees/cache-reviewer/crates/crew-tui)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.25s
+     Running tests/review_toolbox_click.rs (target/toolbox-schema-review/debug/deps/review_toolbox_click-3535197a94f7b79c)
+
+running 1 test
+test clicking_toolbox_does_not_enable_terminal_typing ... FAILED
+
+failures:
+
+---- clicking_toolbox_does_not_enable_terminal_typing stdout ----
+
+thread 'clicking_toolbox_does_not_enable_terminal_typing' (1165880) panicked at crates/crew-tui/tests/review_toolbox_click.rs:23:5:
+Toolbox click enabled typing; next T returned [Keys { id: "release", text: "T" }]; toolbox visible=true
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+
+failures:
+    clicking_toolbox_does_not_enable_terminal_typing
+
+test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s
+
+error: test failed, to rerun pass `-p crew-tui --test review_toolbox_click`

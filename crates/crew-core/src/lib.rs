@@ -4,6 +4,7 @@
 
 pub mod client;
 pub mod config;
+pub mod output_view;
 pub mod paths;
 pub mod rpc;
 pub mod signals;

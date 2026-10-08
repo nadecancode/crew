@@ -240,6 +240,12 @@ pub enum Push {
     Deliver {
         ids: Vec<String>,
         text: String,
+        /// Authenticated operator steering. Ordinary traffic waits for a turn
+        /// boundary and is submitted through the native prompt queue.
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        immediate: bool,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        batch_id: Option<String>,
     },
     /// For a listening agent: compact the session at the next turn boundary.
     Compact {
@@ -618,4 +624,39 @@ pub struct TranscriptResult {
     /// The session is longer than what is returned.
     #[serde(default)]
     pub truncated: bool,
+}
+
+#[cfg(test)]
+mod delivery_tests {
+    use super::Push;
+    use serde_json::json;
+
+    #[test]
+    fn ordinary_delivery_keeps_the_existing_wire_shape() {
+        let old = json!({ "kind": "deliver", "data": { "ids": ["m-1"], "text": "hello" } });
+        let push: Push = serde_json::from_value(old.clone()).unwrap();
+        assert_eq!(
+            push,
+            Push::Deliver {
+                ids: vec!["m-1".into()],
+                text: "hello".into(),
+                immediate: false,
+                batch_id: None,
+            }
+        );
+        assert_eq!(serde_json::to_value(push).unwrap(), old);
+    }
+
+    #[test]
+    fn operator_steering_round_trips_as_explicit_metadata() {
+        let push = Push::Deliver {
+            ids: vec!["m-2".into()],
+            text: "correction".into(),
+            immediate: true,
+            batch_id: None,
+        };
+        let wire = serde_json::to_value(&push).unwrap();
+        assert_eq!(wire["data"]["immediate"], true);
+        assert_eq!(serde_json::from_value::<Push>(wire).unwrap(), push);
+    }
 }

@@ -1,0 +1,47 @@
+{
+  "runtime": "Claude Code 2.1.291",
+  "provider_requests": 0,
+  "transport": "localhost model stub",
+  "cases": [
+    {
+      "label": "raw",
+      "exit": 0,
+      "permission_canary": false,
+      "tools": [
+        {
+          "error": true,
+          "json_content_bytes": 729
+        },
+        {
+          "error": false,
+          "json_content_bytes": 4713
+        }
+      ]
+    },
+    {
+      "label": "hooked",
+      "exit": 0,
+      "permission_canary": true,
+      "tools": [
+        {
+          "error": false,
+          "json_content_bytes": 12
+        },
+        {
+          "error": false,
+          "json_content_bytes": 272
+        }
+      ]
+    }
+  ],
+  "read_metadata": {
+    "before": {
+      "numLines": 150,
+      "totalLines": 3025
+    },
+    "after": {
+      "numLines": 3,
+      "totalLines": 3
+    }
+  }
+}

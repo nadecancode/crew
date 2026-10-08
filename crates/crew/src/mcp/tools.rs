@@ -8,6 +8,7 @@
 use crew_core::client::{Client, ClientError};
 use crew_core::config::TaskSpec;
 use crew_core::rpc::{Call, CommitInfo, GitOutcome, InboxResult, SendParams, SendResult, TaskCard};
+use crew_core::types::{AgentToolbox, ToolboxItem, ToolboxItemCode};
 use crew_core::util::{fmt_clock, one_line, truncate_chars};
 use crew_core::{Agent, AgentStatus, Artifact, Message, MessageType, Task, BROADCAST, OPERATOR_ID};
 use serde_json::{json, Value};
@@ -67,7 +68,8 @@ pub fn definitions() -> Vec<ToolDef> {
             "agent_send",
             "Send a message directly to one teammate. It is delivered straight into that agent's \
 session; the orchestrator is not involved. Use type \"question\" when you need an answer, \
-\"answer\" to reply, \"artifact\" to hand over a commit id or file.",
+\"answer\" to reply, \"artifact\" to hand over a commit id or file, \"status\" for news that needs \
+nothing back (it does not wake a resting teammate unless that teammate is waiting).",
             object(
                 json!({
                     "to": { "type": "string", "description": "Recipient agent id, e.g. claude-5; several separated by commas (claude-5,db), each getting its own copy" },
@@ -81,7 +83,8 @@ session; the orchestrator is not involved. Use type \"question\" when you need a
         ),
         tool(
             "agent_broadcast",
-            "Send one message to every other agent on the team.",
+            "Send one message to every other agent on the team. News that needs nothing back goes as \
+type \"status\": it does not wake a resting teammate unless that teammate is waiting.",
             object(
                 json!({
                     "body": { "type": "string" },
@@ -110,7 +113,9 @@ agent is pointed back to its task and carries on.",
         tool(
             "agent_inbox",
             "Read your messages in full. By default returns unread messages and marks them read; \
-with an id, that one message (one you sent or received), e.g. one a card or a teammate points to.",
+with an id, that one message (one you sent or received), e.g. one a card or a teammate points to. \
+New messages are delivered to you without asking (lines starting with \"[crew]\"), so do not \
+call this to wait for one.",
             object(
                 json!({
                     "id": { "type": "string", "description": "A message id (m-…)" },
@@ -289,6 +294,7 @@ when done. Use it to parallelise your task, not to hand off all of it.",
                     "id": { "type": "string", "description": "Optional id; generated when omitted" },
                     "runtime": { "type": "string", "enum": ["claude", "codex", "pi"] },
                     "model": { "type": "string" },
+                    "toolbox": { "type": "array", "items": { "type": "string" }, "description": "Bundles by name, for a subagent that needs less than your own toolbox; default: a copy of yours. It cannot get anything you do not have" },
                 }),
                 &["task"],
             ),
@@ -307,6 +313,7 @@ added after are temporary: not saved, and taken off the team once their tasks ar
                     "model": { "type": "string", "description": "The model this member runs on, chosen for its role from the Models section of your briefing (e.g. opus, gpt-6-astra). It also decides which CLI runs the member. Default: the team default" },
                     "runtime": { "type": "string", "enum": ["claude", "codex", "pi"], "description": "Only needed for a model that is not in the catalog (pi: always, with the model as pi names it)" },
                     "task": { "type": "string", "description": "Optional first task for the new member" },
+                    "toolbox": { "type": "array", "items": { "type": "string" }, "description": "Bundles from the team's toolboxes this member gets on top of the team default, by name (e.g. [\"web\"]). The team file defines what each bundle holds" },
                 }),
                 &["id", "role"],
             ),
@@ -453,6 +460,34 @@ fn opt_str(args: &Value, key: &str) -> Option<String> {
         .filter(|s| !s.is_empty())
 }
 
+/// A list of names: an array of strings, or one string (a model may send
+/// either); None when left out.
+/// The `toolbox` argument: bundle names, as a list or one comma-separated
+/// string. Anything else is refused rather than dropped, so an attempt to
+/// define items never passes as "no choice".
+fn bundle_names(args: &Value) -> Result<Option<Vec<String>>, String> {
+    const ONLY_NAMES: &str =
+        "toolbox takes bundle names from the team's toolboxes, e.g. [\"web\"]; \
+the team file defines what each bundle holds";
+    let names: Vec<&str> = match args.get("toolbox") {
+        None | Some(Value::Null) => return Ok(None),
+        Some(Value::String(one)) => one.split(',').collect(),
+        Some(Value::Array(items)) => items
+            .iter()
+            .map(|item| item.as_str().ok_or(ONLY_NAMES))
+            .collect::<Result<_, _>>()?,
+        Some(_) => return Err(ONLY_NAMES.into()),
+    };
+    Ok(Some(
+        names
+            .into_iter()
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+            .map(str::to_string)
+            .collect(),
+    ))
+}
+
 fn message_type(args: &Value) -> Result<MessageType, String> {
     match opt_str(args, "type") {
         Some(t) => t.parse(),
@@ -532,6 +567,74 @@ fn status_cell(agent: &Agent) -> String {
     s
 }
 
+/// Whether an item counts as a problem in a summary: not Active, and not
+/// merely planned or not applicable.
+fn not_active(item: &ToolboxItem) -> bool {
+    !matches!(
+        item.status.code,
+        ToolboxItemCode::Active | ToolboxItemCode::Planned | ToolboxItemCode::NotApplicable
+    )
+}
+
+/// A member's toolbox in a list line: `toolbox 3f9a0c21e7b4 (1 not available)`.
+fn toolbox_cell(toolbox: &AgentToolbox) -> String {
+    let mut cell = format!("toolbox {}", toolbox.short_fingerprint());
+    let problems = toolbox.items.iter().filter(|i| not_active(i)).count();
+    if problems > 0 {
+        cell.push_str(&format!(" ({problems} not available)"));
+    }
+    if toolbox.pending_fingerprint.is_some() {
+        cell.push_str(" (restart to apply a change)");
+    }
+    cell
+}
+
+/// What a member's toolbox holds, by kind, and what will not load:
+/// `toolbox 3f9a0c21e7b4: mcp context7, playwright; skills frontend-qa;
+/// not available on Codex: plugins.lint-kit`.
+fn toolbox_summary(toolbox: &AgentToolbox) -> String {
+    let mut parts: Vec<String> = Vec::new();
+    let mut kinds: Vec<(String, Vec<&str>)> = Vec::new();
+    for item in toolbox.items.iter().filter(|i| !not_active(i)) {
+        let kind = serde_json::to_value(item.kind)
+            .ok()
+            .and_then(|v| v.as_str().map(str::to_string))
+            .unwrap_or_default();
+        match kinds.iter_mut().find(|(k, _)| *k == kind) {
+            Some((_, names)) => names.push(&item.name),
+            None => kinds.push((kind, vec![&item.name])),
+        }
+    }
+    for (kind, names) in kinds {
+        parts.push(format!("{kind} {}", names.join(", ")));
+    }
+    let mut problems: Vec<(String, Vec<String>)> = Vec::new();
+    for item in toolbox.items.iter().filter(|i| not_active(i)) {
+        let kind = serde_json::to_value(item.kind)
+            .ok()
+            .and_then(|v| v.as_str().map(str::to_string))
+            .unwrap_or_default();
+        let label = format!("{kind}.{}", item.name);
+        let status = item.status.text.to_lowercase();
+        match problems.iter_mut().find(|(s, _)| *s == status) {
+            Some((_, items)) => items.push(label),
+            None => problems.push((status, vec![label])),
+        }
+    }
+    for (status, items) in problems {
+        parts.push(format!("{status}: {}", items.join(", ")));
+    }
+    if parts.is_empty() {
+        format!("toolbox {}: no items", toolbox.short_fingerprint())
+    } else {
+        format!(
+            "toolbox {}: {}",
+            toolbox.short_fingerprint(),
+            parts.join("; ")
+        )
+    }
+}
+
 pub fn render_agents(agents: &[Agent]) -> String {
     let mut out = String::new();
     for a in agents {
@@ -542,6 +645,9 @@ pub fn render_agents(agents: &[Agent]) -> String {
         };
         let temporary = if a.temporary { " (temporary)" } else { "" };
         out.push_str(&format!("{} [{}] {role}{temporary}", a.id, status_cell(a)));
+        if let Some(toolbox) = &a.toolbox {
+            out.push_str(&format!(" · {}", toolbox_cell(toolbox)));
+        }
         if let Some(task) = &a.task {
             out.push_str(&format!(" — task: {task}"));
         }
@@ -662,6 +768,32 @@ fn render_message(m: &Message) -> String {
         m.body.trim_end()
     )
 }
+
+/// What `agent_inbox` shows. An empty inbox says so in a way that ends the
+/// lookup: crew delivers a message that arrives later into the session.
+fn render_inbox(inbox: &InboxResult) -> String {
+    if inbox.messages.is_empty() {
+        return NO_NEW_MESSAGES.to_string();
+    }
+    let mut text = format!("{} message(s):\n", inbox.messages.len());
+    for entry in &inbox.messages {
+        let m = &entry.message;
+        text.push_str(&format!(
+            "\n--- {} from {} · type {} · id {}\n{}\n",
+            fmt_clock(m.timestamp),
+            m.from,
+            m.kind,
+            m.id,
+            m.body.trim_end()
+        ));
+    }
+    text
+}
+
+const NO_NEW_MESSAGES: &str =
+    "No new messages. One that arrives later is delivered to you: if you \
+are waiting for it, end your turn, or park your card with agent_status(\"waiting\", …), instead \
+of checking again.";
 
 fn render_commit(commit: &CommitInfo) -> String {
     let mut text = format!(
@@ -795,22 +927,7 @@ pub fn call(client: &mut Client, name: &str, args: &Value) -> Result<ToolOutput,
                     limit,
                 },
             )?;
-            if inbox.messages.is_empty() {
-                return out("No new messages.".into(), raw);
-            }
-            let mut text = format!("{} message(s):\n", inbox.messages.len());
-            for entry in &inbox.messages {
-                let m = &entry.message;
-                text.push_str(&format!(
-                    "\n--- {} from {} · type {} · id {}\n{}\n",
-                    fmt_clock(m.timestamp),
-                    m.from,
-                    m.kind,
-                    m.id,
-                    m.body.trim_end()
-                ));
-            }
-            out(text, raw)
+            out(render_inbox(&inbox), raw)
         }
         "agent_compact" => {
             let keep = opt_str(args, "keep");
@@ -1038,6 +1155,7 @@ pub fn call(client: &mut Client, name: &str, args: &Value) -> Result<ToolOutput,
                     task: arg_str(args, "task")?,
                     runtime,
                     model: opt_str(args, "model"),
+                    toolbox: bundle_names(args)?,
                 },
             )?;
             out(
@@ -1063,6 +1181,10 @@ reach it with agent_send(to=\"{}\").",
                         runtime,
                         model: opt_str(args, "model"),
                         task: opt_str(args, "task"),
+                        toolbox: crew_core::toolbox::Toolbox {
+                            include: bundle_names(args)?.unwrap_or_default(),
+                            ..Default::default()
+                        },
                         ..Default::default()
                     }),
                 },
@@ -1085,9 +1207,22 @@ done and you have been told so."
             } else {
                 ""
             };
+            // What it was given beyond the team default, mapped onto its CLI.
+            let toolbox = rpc::<Vec<crew_core::rpc::MemberToolbox>>(
+                client,
+                Call::Toolbox {
+                    agent: Some(agent.id.clone()),
+                    runtime: None,
+                },
+            )
+            .ok()
+            .and_then(|(members, _)| members.into_iter().next())
+            .filter(|m| !m.toolbox.items.is_empty())
+            .map(|m| format!(" Its {}.", toolbox_summary(&m.toolbox)))
+            .unwrap_or_default();
             out(
                 format!(
-                    "{} joined the team as {} ({}{}).{instead}{temporary}",
+                    "{} joined the team as {} ({}{}).{toolbox}{instead}{temporary}",
                     agent.id,
                     agent.role,
                     agent.runtime,
@@ -1338,6 +1473,56 @@ mod tests {
     }
 
     #[test]
+    fn empty_inbox_says_to_stop_checking() {
+        let empty: InboxResult = serde_json::from_value(json!({ "messages": [] })).unwrap();
+        let text = render_inbox(&empty);
+        assert!(text.starts_with("No new messages."), "{text}");
+        assert!(text.contains("instead of checking again"), "{text}");
+
+        let one: InboxResult = serde_json::from_value(json!({ "messages": [{
+            "id": "m-1", "from": "runtime", "to": "designer", "type": "answer",
+            "body": "D1 keeps acknowledgement as it is.\n", "timestamp": 0,
+        }] }))
+        .unwrap();
+        let text = render_inbox(&one);
+        assert!(text.starts_with("1 message(s):\n"), "{text}");
+        assert!(
+            text.contains(
+                "from runtime · type answer · id m-1\nD1 keeps acknowledgement as it is.\n"
+            ),
+            "{text}"
+        );
+    }
+
+    #[test]
+    fn inbox_description_says_messages_arrive_unasked() {
+        let defs = definitions();
+        let inbox = defs.iter().find(|d| d.name == "agent_inbox").unwrap();
+        assert!(
+            inbox
+                .description
+                .contains("do not call this to wait for one"),
+            "{}",
+            inbox.description
+        );
+    }
+
+    #[test]
+    fn send_descriptions_say_status_news_does_not_wake_resting_teammates() {
+        // Backed by delivery::tests::news_waits_for_company_unless_it_is_what_a_member_waits_for.
+        let defs = definitions();
+        for name in ["agent_send", "agent_broadcast"] {
+            let def = defs.iter().find(|d| d.name == name).unwrap();
+            assert!(
+                def.description
+                    .contains("does not wake a resting teammate unless that teammate is waiting"),
+                "{name}: {}",
+                def.description
+            );
+        }
+    }
+
+    #[test]
     fn argument_helpers() {
         let args = json!({ "to": "a", "empty": "", "type": "question" });
         assert_eq!(arg_str(&args, "to").unwrap(), "a");
@@ -1346,5 +1531,38 @@ mod tests {
         assert_eq!(message_type(&args).unwrap(), MessageType::Question);
         assert_eq!(message_type(&json!({})).unwrap(), MessageType::Message);
         assert!(message_type(&json!({ "type": "nope" })).is_err());
+    }
+
+    /// The orchestrator chooses bundles by name and cannot define items
+    /// (notes/toolboxes.md, Orchestrator tools): the schemas take strings
+    /// only, and anything else is refused, never dropped.
+    #[test]
+    fn toolbox_arguments_are_bundle_names_only() {
+        let defs = definitions();
+        for tool in ["agent_add", "agent_spawn"] {
+            let def = defs.iter().find(|d| d.name == tool).unwrap();
+            let toolbox = &def.schema["properties"]["toolbox"];
+            assert_eq!(toolbox["type"], "array", "{tool}");
+            assert_eq!(toolbox["items"], json!({ "type": "string" }), "{tool}");
+        }
+        assert_eq!(bundle_names(&json!({})), Ok(None));
+        assert_eq!(bundle_names(&json!({ "toolbox": null })), Ok(None));
+        assert_eq!(
+            bundle_names(&json!({ "toolbox": [" web ", "", "docs"] })),
+            Ok(Some(vec!["web".to_string(), "docs".to_string()]))
+        );
+        assert_eq!(
+            bundle_names(&json!({ "toolbox": "web, docs" })),
+            Ok(Some(vec!["web".to_string(), "docs".to_string()]))
+        );
+        assert_eq!(bundle_names(&json!({ "toolbox": [] })), Ok(Some(vec![])));
+        for defining in [
+            json!({ "toolbox": { "mcp": { "x": { "command": ["x"] } } } }),
+            json!({ "toolbox": ["web", { "mcp": { "x": { "command": ["x"] } } }] }),
+            json!({ "toolbox": 1 }),
+        ] {
+            let refused = bundle_names(&defining).unwrap_err();
+            assert!(refused.contains("bundle names"), "{defining}: {refused}");
+        }
     }
 }

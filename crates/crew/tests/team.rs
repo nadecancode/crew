@@ -2548,6 +2548,192 @@ fn an_added_agent_s_toolbox_is_checked_against_the_team() {
     assert!(roster.toolboxes.contains_key("web"));
 }
 
+/// T20, first clause: `crew toolbox check` maps a team file's toolboxes
+/// before anything runs, so its items are Planned (or why they would not
+/// load), never Active; a required item that would not load stops the
+/// check, naming the reference, and an optional one does not.
+#[test]
+fn toolbox_check_shows_planned_items_and_stops_on_a_required_one() {
+    if common::test_support::isolate_operator_test(
+        "toolbox_check_shows_planned_items_and_stops_on_a_required_one",
+    ) {
+        return;
+    }
+    let s = Session::new();
+    let mut team = s.team("toolbox-check", vec![agent("a", "", &[])], vec![]);
+    team.defaults.command = scripted(&[]);
+    team.workspace.isolation = crew_core::config::Isolation::Shared;
+    team.workspace.init = false;
+    std::fs::create_dir_all(&s.workspace).unwrap();
+    s.run(&team);
+    let ws = s.workspace.to_string_lossy().into_owned();
+
+    let check = |name: &str, required: bool| {
+        let mut checked = team.clone();
+        checked.toolboxes = serde_json::from_value(json!({
+            "web": { "mcp": { "context7": { "command": ["ctx", "--stdio"] } } },
+            "shop": { "mcp": { "shop": {
+                "command": ["shop-mcp"],
+                "env": { "SHOP_TOKEN": { "env": "CREW_T20_NEVER_SET_TOKEN" } },
+                "required": required,
+            } } },
+        }))
+        .unwrap();
+        // Mapped onto Claude Code, where MCP servers load (a scripted agent
+        // runs as a shell, where nothing does).
+        checked.agents[0].runtime = Some(crew_core::RuntimeKind::Claude);
+        checked.agents[0].toolbox.include = vec!["web".into(), "shop".into()];
+        let file = s.root().join(name);
+        std::fs::write(&file, checked.to_yaml().unwrap()).unwrap();
+        let out = s.crew(&[
+            "toolbox",
+            "check",
+            &file.to_string_lossy(),
+            "--json",
+            "-C",
+            &ws,
+        ]);
+        let members: Vec<crew_core::rpc::MemberToolbox> = serde_json::from_slice(&out.stdout)
+            .unwrap_or_else(|e| {
+                panic!(
+                    "{e}: {}{}",
+                    String::from_utf8_lossy(&out.stdout),
+                    String::from_utf8_lossy(&out.stderr)
+                )
+            });
+        (out, members)
+    };
+
+    let (out, members) = check("required.yaml", true);
+    let a = members.iter().find(|m| m.agent == "a").unwrap();
+    let status = |name: &str| {
+        let item = a.toolbox.items.iter().find(|i| i.name == name).unwrap();
+        (item.status.code, item.status.text.clone())
+    };
+    use crew_core::types::ToolboxItemCode;
+    assert_eq!(
+        status("context7"),
+        (ToolboxItemCode::Planned, "Planned".into())
+    );
+    assert_eq!(
+        status("shop"),
+        (
+            ToolboxItemCode::Needs,
+            "Needs $CREW_T20_NEVER_SET_TOKEN".into()
+        )
+    );
+    assert!(members
+        .iter()
+        .flat_map(|m| &m.toolbox.items)
+        .all(|i| i.status.code != ToolboxItemCode::Active));
+    assert!(!out.status.success());
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(
+        stderr.contains("a: mcp.shop: Needs $CREW_T20_NEVER_SET_TOKEN"),
+        "{stderr}"
+    );
+
+    let (out, members) = check("optional.yaml", false);
+    assert!(
+        out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    assert!(members.iter().all(|m| m.stops.is_empty()));
+
+    // Without a named team it refuses before reaching any daemon, even from
+    // inside a workspace whose daemon is running: a file says nothing of
+    // which team it is for.
+    let file = s.root().join("optional.yaml");
+    for command in ["check", "reload"] {
+        let out = s
+            .command()
+            .current_dir(&s.workspace)
+            .args(["toolbox", command, &file.to_string_lossy()])
+            .output()
+            .unwrap();
+        let stderr = String::from_utf8_lossy(&out.stderr);
+        assert!(!out.status.success(), "{command}: {stderr}");
+        assert!(
+            stderr.contains(&format!("crew toolbox {command} needs the running team")),
+            "{command}: {stderr}"
+        );
+    }
+}
+
+/// T11: the orchestrator chooses bundles by name for a member it adds; it
+/// cannot define items, and an unknown name is refused with the team's
+/// bundles listed. What it chose is applied and saved.
+#[test]
+fn the_orchestrator_adds_members_with_bundles_by_name_only() {
+    if common::test_support::isolate_operator_test(
+        "the_orchestrator_adds_members_with_bundles_by_name_only",
+    ) {
+        return;
+    }
+    let s = Session::new();
+    let mut team = s.team("toolbox-choose", vec![agent("a", "", &[])], vec![]);
+    team.defaults.command = scripted(&[]);
+    team.orchestrator.agent = true;
+    team.orchestrator.command = scripted(&[]);
+    team.workspace.isolation = crew_core::config::Isolation::Shared;
+    team.workspace.init = false;
+    team.toolboxes = serde_json::from_value(json!({
+        "docs": { "mcp": { "manual": { "command": ["manual", "--stdio"] } } },
+        "web": { "mcp": { "context7": { "command": ["ctx", "--stdio"] } } }
+    }))
+    .unwrap();
+    std::fs::create_dir_all(&s.workspace).unwrap();
+    s.run(&team);
+    let path = s.identity_path(crew_core::ORCHESTRATOR_ID);
+    s.wait_for("the orchestrator's identity", || path.exists());
+    let identity: crew_core::paths::Identity =
+        serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
+    assert!(identity.orchestrator);
+    let (mut client, _) = crew_core::client::Client::agent(&identity, "test").unwrap();
+    let mut add = |toolbox: Value| {
+        client
+            .call::<crew_core::Agent>(crew_core::rpc::Call::AgentAdd {
+                spec: Box::new(AgentSpec {
+                    id: "b".into(),
+                    toolbox: serde_json::from_value(toolbox).unwrap(),
+                    ..AgentSpec::default()
+                }),
+            })
+            .map_err(|e| e.to_string())
+    };
+
+    for (toolbox, expected) in [
+        (
+            json!({ "mcp": { "mine": { "command": ["x"] } } }),
+            "an agent chooses bundles by name; toolbox items are defined in the team file",
+        ),
+        (
+            json!({ "include": ["web"], "exclude": ["mcp.context7"] }),
+            "an agent chooses bundles by name",
+        ),
+        (
+            json!({ "include": ["webb"] }),
+            "Unknown toolbox \"webb\". Toolboxes in this team: docs, web.",
+        ),
+    ] {
+        let refused = add(toolbox.clone()).expect_err(&toolbox.to_string());
+        assert!(refused.contains(expected), "{toolbox}: {refused}");
+    }
+    assert!(!s.snapshot().agents.iter().any(|a| a.id == "b"));
+
+    add(json!({ "include": ["web"] })).unwrap();
+    s.wait_for("the roster to name b", || {
+        std::fs::read_to_string(s.workspace.join(".crew/roster.yaml"))
+            .is_ok_and(|roster| roster.contains("id: b"))
+    });
+    let roster =
+        crew_core::config::TeamConfig::load(&s.workspace.join(".crew/roster.yaml")).unwrap();
+    let b = roster.agents.iter().find(|a| a.id == "b").unwrap();
+    assert_eq!(b.toolbox.include, ["web"]);
+    assert!(b.toolbox.mcp.is_empty());
+}
+
 #[test]
 fn a_daemon_started_while_another_is_still_starting_is_refused() {
     // A daemon binds its socket before it registers in daemon.json, so two
@@ -3449,6 +3635,22 @@ env > "$dir/fake-env"
 while read -r _; do :; done
 "#;
 
+/// A fake Codex session must also answer the launcher's configuration-only
+/// inventory calls, without recording a session, emitting hooks or showing
+/// a simulated model error. The shared CLI stand-in implements that protocol.
+fn runtime_script(name: &str, contents: &str) -> String {
+    if name != "codex" {
+        return contents.to_string();
+    }
+    let body = contents
+        .strip_prefix("#!/bin/sh\n")
+        .expect("shell runtime fixture");
+    format!(
+        "#!/bin/sh\ncrew_inventory_stage=0\nfor crew_inventory_arg in \"$@\"; do\n  case \"$crew_inventory_stage:$crew_inventory_arg\" in\n    0:mcp) crew_inventory_stage=1 ;;\n    1:list) crew_inventory_stage=2 ;;\n    2:--json) exec {} fake-cli codex \"$@\" ;;\n    *) crew_inventory_stage=0 ;;\n  esac\ndone\n{body}",
+        crew::agents::shell_quote(CREW)
+    )
+}
+
 #[test]
 fn team_members_get_their_endpoints_and_keys_from_the_layered_config() {
     use std::os::unix::fs::PermissionsExt;
@@ -3461,7 +3663,11 @@ fn team_members_get_their_endpoints_and_keys_from_the_layered_config() {
     let root = s.root().to_path_buf();
     let write = |path: &Path, text: &str, mode: u32| {
         std::fs::create_dir_all(path.parent().unwrap()).unwrap();
-        std::fs::write(path, text).unwrap();
+        std::fs::write(
+            path,
+            runtime_script(path.file_name().unwrap().to_str().unwrap(), text),
+        )
+        .unwrap();
         std::fs::set_permissions(path, std::fs::Permissions::from_mode(mode)).unwrap();
     };
     for name in ["claude", "codex"] {
@@ -3918,7 +4124,11 @@ fn the_model_catalog_reaches_the_orchestrator_and_a_model_decides_the_runtime() 
     let root = s.root().to_path_buf();
     std::fs::create_dir_all(root.join("bin")).unwrap();
     for name in ["claude", "codex"] {
-        std::fs::write(root.join("bin").join(name), FAKE_RUNTIME).unwrap();
+        std::fs::write(
+            root.join("bin").join(name),
+            runtime_script(name, FAKE_RUNTIME),
+        )
+        .unwrap();
         std::fs::set_permissions(
             root.join("bin").join(name),
             std::fs::Permissions::from_mode(0o755),
@@ -4183,7 +4393,7 @@ fn a_usage_limit_parks_the_agent_until_it_is_resumed() {
     let ws = s.workspace.to_string_lossy().into_owned();
     let write_bin = |name: &str, text: &str| {
         std::fs::create_dir_all(root.join("bin")).unwrap();
-        std::fs::write(root.join("bin").join(name), text).unwrap();
+        std::fs::write(root.join("bin").join(name), runtime_script(name, text)).unwrap();
         std::fs::set_permissions(
             root.join("bin").join(name),
             std::fs::Permissions::from_mode(0o755),
@@ -4889,7 +5099,11 @@ fn the_orchestrator_sees_full_context_windows_and_queues_compactions() {
     // Stand-ins for both CLIs that record what is typed at them.
     for name in ["codex", "claude"] {
         std::fs::create_dir_all(root.join("bin")).unwrap();
-        std::fs::write(root.join("bin").join(name), FAKE_LIMITED_CODEX).unwrap();
+        std::fs::write(
+            root.join("bin").join(name),
+            runtime_script(name, FAKE_LIMITED_CODEX),
+        )
+        .unwrap();
         std::fs::set_permissions(
             root.join("bin").join(name),
             std::fs::Permissions::from_mode(0o755),
@@ -5852,7 +6066,11 @@ fn a_pi_member_is_started_with_crews_extension_and_reports_through_it() {
     );
     let source = std::fs::read_to_string(&extension).unwrap();
     assert!(
-        source.contains("registerMcpServer(\"crew\"") && !source.contains("__IDENTITY__"),
+        source.contains("pi.registerMcpServer(server.name")
+            && source.contains("name: \"crew\"")
+            && source.contains("args: [\"mcp\", \"--identity\", IDENTITY]")
+            && !source.contains("__IDENTITY__")
+            && !source.contains("__TOOLBOX_SERVERS__"),
         "{source}"
     );
     let briefing = std::fs::read_to_string(agent_dir("pi-1").join("briefing.md")).unwrap();
@@ -6051,7 +6269,11 @@ fn only_the_operator_moves_the_orchestrator_to_another_cli_and_its_new_session_i
     let ws = s.workspace.to_string_lossy().into_owned();
     std::fs::create_dir_all(root.join("bin")).unwrap();
     for name in ["claude", "codex"] {
-        std::fs::write(root.join("bin").join(name), FAKE_RUNTIME).unwrap();
+        std::fs::write(
+            root.join("bin").join(name),
+            runtime_script(name, FAKE_RUNTIME),
+        )
+        .unwrap();
         std::fs::set_permissions(
             root.join("bin").join(name),
             std::fs::Permissions::from_mode(0o755),
@@ -6581,7 +6803,7 @@ fn a_member_the_work_style_moves_to_another_cli_keeps_getting_its_tasks_and_come
     std::fs::create_dir_all(root.join("bin")).unwrap();
     std::fs::create_dir_all(root.join("claude-home")).unwrap();
     for (name, script) in [("claude", FAKE_CLAUDE_WITH_LIMITS), ("codex", FAKE_RUNTIME)] {
-        std::fs::write(root.join("bin").join(name), script).unwrap();
+        std::fs::write(root.join("bin").join(name), runtime_script(name, script)).unwrap();
         std::fs::set_permissions(
             root.join("bin").join(name),
             std::fs::Permissions::from_mode(0o755),
@@ -6731,7 +6953,11 @@ fn the_orchestrator_staffs_the_team_around_the_models_whose_window_is_used_up() 
     std::fs::create_dir_all(root.join("bin")).unwrap();
     std::fs::create_dir_all(root.join("claude-home")).unwrap();
     std::fs::write(root.join("bin/claude"), FAKE_CLAUDE_WITH_LIMITS).unwrap();
-    std::fs::write(root.join("bin/codex"), FAKE_RUNTIME).unwrap();
+    std::fs::write(
+        root.join("bin/codex"),
+        runtime_script("codex", FAKE_RUNTIME),
+    )
+    .unwrap();
     for name in ["claude", "codex"] {
         std::fs::set_permissions(
             root.join("bin").join(name),
@@ -6871,7 +7097,11 @@ fn codexs_extra_thought_menu_is_dismissed_without_interrupting_the_turn() {
     let s = Session::new();
     let root = s.root().to_path_buf();
     std::fs::create_dir_all(root.join("bin")).unwrap();
-    std::fs::write(root.join("bin/codex"), FAKE_CODEX_THINKING).unwrap();
+    std::fs::write(
+        root.join("bin/codex"),
+        runtime_script("codex", FAKE_CODEX_THINKING),
+    )
+    .unwrap();
     std::fs::set_permissions(
         root.join("bin/codex"),
         std::fs::Permissions::from_mode(0o755),
@@ -7288,7 +7518,11 @@ fn a_turn_codexs_model_refuses_is_noticed_and_whoever_waits_on_it_is_told() {
     let s = Session::new();
     let root = s.root().to_path_buf();
     std::fs::create_dir_all(root.join("bin")).unwrap();
-    std::fs::write(root.join("bin/codex"), FAKE_LIMITED_CODEX).unwrap();
+    std::fs::write(
+        root.join("bin/codex"),
+        runtime_script("codex", FAKE_LIMITED_CODEX),
+    )
+    .unwrap();
     std::fs::set_permissions(
         root.join("bin/codex"),
         std::fs::Permissions::from_mode(0o755),
@@ -7491,7 +7725,7 @@ fn a_turn_codex_refuses_goes_to_the_work_styles_pi_model_and_the_member_comes_ba
     let root = s.root().to_path_buf();
     std::fs::create_dir_all(root.join("bin")).unwrap();
     for (name, script) in [("codex", FAKE_LIMITED_CODEX), ("pi", FAKE_PI)] {
-        std::fs::write(root.join("bin").join(name), script).unwrap();
+        std::fs::write(root.join("bin").join(name), runtime_script(name, script)).unwrap();
         std::fs::set_permissions(
             root.join("bin").join(name),
             std::fs::Permissions::from_mode(0o755),
@@ -7694,7 +7928,7 @@ fn a_member_that_took_over_a_refused_turn_goes_back_before_its_next_task() {
     let root = s.root().to_path_buf();
     std::fs::create_dir_all(root.join("bin")).unwrap();
     for (name, script) in [("codex", FAKE_LIMITED_CODEX), ("pi", FAKE_PI)] {
-        std::fs::write(root.join("bin").join(name), script).unwrap();
+        std::fs::write(root.join("bin").join(name), runtime_script(name, script)).unwrap();
         std::fs::set_permissions(
             root.join("bin").join(name),
             std::fs::Permissions::from_mode(0o755),
@@ -8521,6 +8755,7 @@ fn a_task_is_handed_over_by_its_id_and_read_off_its_card() {
 /// process writes may be held open by a child another test is forking, and
 /// running it then fails with "Text file busy").
 fn write_program(path: &Path, contents: &str) {
+    let contents = runtime_script(path.file_name().unwrap().to_str().unwrap(), contents);
     let mut child = std::process::Command::new("sh")
         .args(["-c", "cat > \"$1\" && chmod 755 \"$1\"", "sh"])
         .arg(path)

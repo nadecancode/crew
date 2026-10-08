@@ -25,6 +25,18 @@ fn identity(path: Option<&Path>) -> Result<Identity> {
 
 pub fn ctl(cmd: CtlCommand) -> Result<()> {
     let identity = identity(None)?;
+    // What a runtime without an MCP client registers as its own tools: by
+    // the role its launch recorded, without asking the daemon, so the list
+    // is the same whether or not the daemon answers.
+    if let CtlCommand::Tools = cmd {
+        let listed: Vec<Value> = tools::definitions()
+            .into_iter()
+            .filter(|t| identity.orchestrator || !t.orchestrator_only)
+            .map(|t| json!({ "name": t.name, "description": t.description, "inputSchema": t.schema }))
+            .collect();
+        println!("{}", serde_json::to_string(&listed)?);
+        return Ok(());
+    }
     let (mut client, _) = Client::agent(&identity, "ctl")?;
     client.set_timeout(Some(Duration::from_secs(120)))?;
     let (name, args): (&str, Value) = match cmd {
@@ -73,19 +85,7 @@ pub fn ctl(cmd: CtlCommand) -> Result<()> {
                 json!({ "task_id": task, "approve": approve, "comments": comments }),
             )
         }
-        // What a runtime without an MCP client registers as its own tools.
-        CtlCommand::Tools => {
-            let me = identity.agent_id.clone();
-            let agents: Vec<crew_core::Agent> = client.call(Call::AgentsList)?;
-            let orchestrator = agents.iter().any(|a| a.id == me && a.orchestrator);
-            let listed: Vec<Value> = tools::definitions()
-                .into_iter()
-                .filter(|t| orchestrator || !t.orchestrator_only)
-                .map(|t| json!({ "name": t.name, "description": t.description, "inputSchema": t.schema }))
-                .collect();
-            println!("{}", serde_json::to_string(&listed)?);
-            return Ok(());
-        }
+        CtlCommand::Tools => unreachable!("answered before connecting"),
         CtlCommand::Tool { name, args } => {
             let args: Value = serde_json::from_str(&args).context("tool arguments must be JSON")?;
             let output = tools::call(&mut client, &name, &args).map_err(|e| anyhow!(e))?;
@@ -105,8 +105,11 @@ pub fn ctl(cmd: CtlCommand) -> Result<()> {
 /// (Claude Code blocks on 2), so the operator sees why the team's tools
 /// fail (notes/binary-pinning.md B8).
 pub fn hook(event: &str, identity_path: Option<&Path>, payload: Option<String>) -> Result<()> {
-    let Ok(identity) = identity(identity_path) else {
-        return Ok(());
+    let strict = crate::daemon::native_hook(event);
+    let identity = match identity(identity_path) {
+        Ok(identity) => identity,
+        Err(error) if strict => return Err(error),
+        Err(_) => return Ok(()),
     };
     let payload = match payload {
         Some(text) => text,
@@ -123,24 +126,43 @@ pub fn hook(event: &str, identity_path: Option<&Path>, payload: Option<String>) 
     let mut client = match Client::agent(&identity, "hook") {
         Ok((client, _)) => client,
         Err(error) if error.is_protocol_mismatch() => return Err(error.into()),
+        Err(error) if strict => return Err(error.into()),
         Err(_) => return Ok(()),
     };
     let _ = client.set_timeout(Some(Duration::from_secs(5)));
-    let _ = client.call_value(Call::Hook {
+    let result = client.call_value(Call::Hook {
         event: event.to_string(),
         payload,
         // The launch whose process ran the hook, from its environment: a
         // late hook of a replaced launch is then told apart.
         launch: std::env::var("CREW_LAUNCH").ok().filter(|l| !l.is_empty()),
     });
+    if strict {
+        println!("{}", result?);
+    }
     Ok(())
 }
 
 /// Hold the agent's delivery channel open. Each delivery is printed as one
 /// JSON line (`{"ids":[..],"text":".."}`) for the runtime-side mod to inject.
-pub fn bridge(identity_path: Option<&Path>) -> Result<()> {
+pub fn bridge(
+    identity_path: Option<&Path>,
+    queue_delivery: bool,
+    native_session: Option<&str>,
+) -> Result<()> {
     let identity = identity(identity_path)?;
     let (mut client, _) = Client::agent(&identity, "bridge")?;
+    if queue_delivery {
+        let session = native_session
+            .filter(|s| !s.is_empty())
+            .ok_or_else(|| anyhow!("queued delivery requires a native session id"))?;
+        let ready = client.call_value(Call::Hook {
+            event: "native-bridge-ready".into(),
+            payload: json!({ "session_id": session }),
+            launch: std::env::var("CREW_LAUNCH").ok().filter(|s| !s.is_empty()),
+        })?;
+        println!("{}", json!({ "native_bridge_ready": ready }));
+    }
     client.call_value(Call::Listen)?;
     let stdout = std::io::stdout();
     loop {
@@ -150,10 +172,20 @@ pub fn bridge(identity_path: Option<&Path>) -> Result<()> {
             Err(e) => return Err(e.into()),
         };
         match frame.push {
-            Some(Push::Deliver { ids, text }) => {
+            Some(Push::Deliver {
+                ids,
+                text,
+                immediate,
+                batch_id,
+            }) => {
                 let mut out = stdout.lock();
                 // A closed pipe means the session is gone; so are we.
-                if writeln!(out, "{}", json!({ "ids": ids, "text": text })).is_err()
+                if writeln!(
+                    out,
+                    "{}",
+                    json!({ "ids": ids, "text": text, "immediate": immediate, "batch_id": batch_id })
+                )
+                .is_err()
                     || out.flush().is_err()
                 {
                     return Ok(());
@@ -193,4 +225,75 @@ pub fn delivered(identity_path: Option<&Path>, ids: Vec<String>) -> Result<()> {
     client.set_timeout(Some(Duration::from_secs(10)))?;
     client.call_value(Call::Delivered { ids })?;
     Ok(())
+}
+
+/// `crew toolbox mcp <name>`: one toolbox MCP server for the agent's
+/// session, through crew's proxy (`crate::mcp::proxy`); with `--preflight`,
+/// its listing for the daemon to pin. Nothing it prints or reports carries a
+/// resolved secret.
+pub fn toolbox_mcp(args: super::ToolboxMcpArgs) -> Result<()> {
+    use crate::mcp::proxy;
+    use crew_core::rpc::{ToolboxReportKind, ToolboxServerLaunch};
+
+    let mut client: Option<Client> = None;
+    let launch: ToolboxServerLaunch = match &args.launch_file {
+        Some(path) => serde_json::from_slice(
+            &std::fs::read(path).with_context(|| format!("reading {}", path.display()))?,
+        )
+        .with_context(|| format!("parsing {}", path.display()))?,
+        None => {
+            let identity = identity(args.identity.identity.as_deref())?;
+            let (mut c, _) = Client::agent(&identity, "toolbox")?;
+            c.set_timeout(Some(Duration::from_secs(30)))?;
+            let launch = c.call(Call::ToolboxServer {
+                name: args.name.clone(),
+                preflight: args.preflight,
+            });
+            client = Some(c);
+            match launch {
+                Ok(launch) => launch,
+                Err(e) if args.preflight => {
+                    println!("{}", json!({ "ok": false, "reason": e.to_string() }));
+                    std::process::exit(1);
+                }
+                Err(e) => return Err(e.into()),
+            }
+        }
+    };
+    if args.preflight {
+        let within = args
+            .preflight_within
+            .map_or(proxy::PREFLIGHT_WITHIN, std::time::Duration::from_secs_f64);
+        match proxy::preflight(&launch, within) {
+            Ok(listing) => println!("{}", json!({ "ok": true, "listing": listing.to_json() })),
+            Err(e) => {
+                let reason = proxy::redacted(&launch, &format!("{e:#}"));
+                println!("{}", json!({ "ok": false, "reason": reason }));
+                std::process::exit(1);
+            }
+        }
+        return Ok(());
+    }
+    let snapshot = proxy::Snapshot::load(std::path::Path::new(&launch.snapshot))?;
+    let name = launch.name.clone();
+    let mut report = |kind: ToolboxReportKind, detail: String| match client.as_mut() {
+        Some(c) => {
+            let _ = c.call_value(Call::ToolboxReport {
+                name: name.clone(),
+                kind,
+                detail: proxy::redacted(&launch, &detail),
+            });
+        }
+        None => eprintln!(
+            "crew toolbox mcp {name}: {kind:?}: {}",
+            proxy::redacted(&launch, &detail)
+        ),
+    };
+    proxy::serve(
+        &launch,
+        snapshot,
+        std::io::BufReader::new(std::io::stdin()),
+        std::io::stdout().lock(),
+        &mut report,
+    )
 }

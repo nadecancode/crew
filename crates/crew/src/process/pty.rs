@@ -235,19 +235,24 @@ fn command_for(spec: &LaunchSpec) -> Result<(CommandBuilder, bool)> {
         ("COLORTERM".into(), "truecolor".into()),
     ];
     launch_env.extend(spec.env.iter().cloned());
+    launch_env.retain(|(name, _)| !spec.scrub_env.contains(name));
     match &spec.sandbox {
         Some(sandbox) => {
             // Exactly the launcher environment: the allow-listed names of the
             // daemon's own plus the variables the spec passes by name.
             cmd.env_clear();
-            for (name, value) in
-                crate::sandbox::spec::launcher_env(sandbox, std::env::vars_os(), &launch_env)
+            let inherited = std::env::vars_os()
+                .filter(|(name, _)| !spec.scrub_env.iter().any(|scrub| name == scrub.as_str()));
+            for (name, value) in crate::sandbox::spec::launcher_env(sandbox, inherited, &launch_env)
             {
                 cmd.env(name, value);
             }
         }
         None => {
             for key in SCRUBBED_ENV {
+                cmd.env_remove(key);
+            }
+            for key in &spec.scrub_env {
                 cmd.env_remove(key);
             }
             for (key, value) in &launch_env {
@@ -607,6 +612,7 @@ mod tests {
 
     fn spec(id: &str, program: &str, args: &[&str]) -> LaunchSpec {
         LaunchSpec {
+            scrub_env: Vec::new(),
             agent_id: id.into(),
             kind: RuntimeKind::Shell,
             program: program.into(),
