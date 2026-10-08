@@ -88,6 +88,13 @@ P4 counts the files of `web-dist/` that its manifest lists, which is every
 file except `manifest.json`. `web/test/budget.test.ts` and
 `crates/crew/tests/web_bundle.rs` both count it this way.
 
+It fits (card `web-bundle-trim`): terser replaces esbuild as the minifier
+(§build), and the toolbox code shares one decoder for items and sources and
+renders its conditions without `<Show>` wrappers. Measured on that card's
+build: P1 230,387 bytes, P2 33,999, P3 330,812, P4 595,884 (with esbuild:
+235,949, 33,999, 332,915 and 603,549). `vite build` takes 2.35 s instead
+of 1.1 s.
+
 **Revised by `notes/web-multi.md`** (operator, m-50a884c7d9b1: one server
 for several workspaces). It replaces W1: the server becomes a process of its
 own, shared by every workspace the operator joined, and the page gains a
@@ -1190,7 +1197,7 @@ What a committed bundle costs, and the answers:
 - **Minified with terser** (card `web-bundle-budget`, designer m-1226659f7b94
   answer): `build.minify: "terser"` with `compress.passes: 3` and
   otherwise default, safe options. Unsafe compressions (`unsafe*`,
-  `pure_getters`, property mangling) stay off: `pure_getters` broke Solid's
+  `pure_getters`, property mangling) stay off: `pure_getters` would drop Solid's
   store reads. terser is an exactly pinned dev dependency in `bun.lock`; the
   runtime dependencies stay the three above. It replaces esbuild's minifier
   because it gives the same code a smaller bundle, which keeps the toolbox
@@ -1199,7 +1206,7 @@ What a committed bundle costs, and the answers:
   terser build.
 
 Rule: **every commit that changes `web/` sources carries the rebuilt bundle**
-(`bun run build` takes about half a second). There is never a commit on the
+(`bun run build` takes a few seconds). There is never a commit on the
 branch whose bundle does not match its sources.
 
 Vite: `build.outDir = "../crates/crew/web-dist"`, `emptyOutDir: true`,
