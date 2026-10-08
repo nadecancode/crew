@@ -76,6 +76,7 @@ class Fixtures(unittest.TestCase):
         self.assertEqual(h.tree_snapshot(faults / "same-content-a"), h.tree_snapshot(faults / "same-content-b"))
         self.assertGreater((faults / "oversize/too-large.bin").stat().st_size, 16 * 1024 * 1024)
         self.assertFalse((faults / "missing-skill/SKILL.md").exists())
+        self.assertEqual((faults / "readonly-skill/references/nested.txt").stat().st_mode & 0o777, 0o444)
         snapshot = h.tree_snapshot(faults / "directory-link")
         self.assertEqual(snapshot["escape"], {"link": "../../secret-input"})
         self.assertFalse(any(key.startswith("escape/") for key in snapshot))
@@ -198,6 +199,26 @@ class Fixtures(unittest.TestCase):
         self.assertEqual(result["cases"]["T16"]["status"], "deferred")
         self.assertEqual(next(case for case in h.load_cases() if case["id"] == "T16")["mode"],
                          "live-provider-required")
+
+    def test_explicit_codex_discovery_response_and_extra_root_acknowledgement(self):
+        log = self.root / "evidence/codex.jsonl"
+        argv = [sys.executable, str(h.HERE / "runtime_stub.py"), "--fixture-runtime", "codex",
+                "--fixture-log", str(log)]
+        env = h.isolated_environment(self.root)
+        listed = subprocess.run(argv + ["--fixture-mcp-catalog", str(self.root / "codex-mcp-list.json"),
+                                       "mcp", "list", "--json"],
+                                env=env, cwd=self.root, capture_output=True, text=True, timeout=3, check=True)
+        self.assertEqual(json.loads(listed.stdout)[0]["name"], "operator-sentinel")
+        with h.RpcProcess(argv + ["--fixture-app-server"], env=env, cwd=self.root) as client:
+            client.request("initialize")
+            client.send({"jsonrpc": "2.0", "method": "initialized"})
+            reply = client.request("skills/extraRoots/set", {"extraRoots": [str(self.root / "items/skills")]})
+            self.assertEqual(reply["result"], {})
+            self.assertIn("error", client.request("skills/extraRoots/set", {"extraRoots": ["relative"]}))
+            self.assertIn("error", client.request("skills/list"))
+        with h.RpcProcess(argv + ["--fixture-app-server", "--fixture-reject-roots"],
+                          env=env, cwd=self.root) as client:
+            self.assertIn("error", client.request("skills/extraRoots/set", {"extraRoots": ["/valid"]}))
 
 
 if __name__ == "__main__":

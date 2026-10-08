@@ -12,6 +12,19 @@ fixtures/toolboxes/run prepare --out "$PWD/target/toolbox-fixture"
 fixtures/toolboxes/run cases
 ```
 
+The fixture contract is also checked directly through the real Rust loader
+and resolver, without invoking Python:
+
+```sh
+./scripts/build-env cargo test --locked -p crew-core --test toolbox_fixtures
+./scripts/build-env cargo clippy --locked -p crew-core --test toolbox_fixtures -- -D warnings
+cargo fmt --all -- --check
+```
+
+Initial validation: 16 Python harness checks and 6 Rust fixture tests passed;
+strict Clippy and workspace formatting passed. These results validate the
+scaffolding and core fixture contracts, not runtime acceptance T01–T21.
+
 Python 3.11 or newer, standard library only. The runner uses `TOOLBOX_PYTHON`
 when set, otherwise `python3` on PATH, otherwise `nix shell nixpkgs#python3`.
 On the development host Python is not on PATH; the Nix fallback runs the
@@ -59,6 +72,8 @@ item, a missing `SKILL.md`, malformed front matter, a sparse file of
 targets remain inside the owned fixture tree. `member/rw/home/<runtime>`
 contains a stale generated toolbox file and a separate ambient skill from
 an earlier session, to distinguish cleanup from source enumeration.
+`faults/readonly-skill` has nested files with mode 0444; testing the mounted
+store's read-only behavior still requires the real sandbox.
 
 `sentinel_home.py` generates operator and project MCP, skills, plugins,
 subagents, hooks, settings and memory sentinels for Claude Code, Codex and
@@ -159,7 +174,18 @@ This independent Python server does not cover legacy SSE, HTTP session
 negotiation, streaming notifications or every upstream protocol error.
 Scheduler's Rust `crew fake-mcp` supplies those proxy integration seams.
 `runtime_stub.py` only records arguments, cwd and environment names, then
-exits. It never fabricates runtime-native discovery or a successful resume.
+exits unless one of its explicit test modes is selected:
+
+- `--fixture-mcp-catalog PATH` returns the supplied JSON for `mcp list
+  --json`; preparation writes `codex-mcp-list.json` in the observed native
+  response shape. This response does not interpret or enforce `-c` overrides.
+- `--fixture-app-server` accepts JSON-lines `initialize`, `initialized`, and
+  `skills/extraRoots/set` with absolute `extraRoots`; the last returns
+  `{ "result": {} }`. `--fixture-reject-roots` injects an error. Other
+  methods, including `skills/list`, fail explicitly.
+
+Both modes record requests for assertion by the adapter tests. Neither proves
+runtime-native discovery, TUI propagation, or a successful resume.
 
 T16 requires separately authorized provider measurements; no model is called
 by this harness. T01/T03/T12/T18 still need native evidence, T19 needs a real

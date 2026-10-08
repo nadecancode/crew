@@ -16,7 +16,7 @@ import tempfile
 import time
 import unittest
 from urllib.parse import urlparse
-from urllib.request import build_opener, ProxyHandler, Request
+from urllib.request import build_opener, HTTPRedirectHandler, ProxyHandler, Request
 
 HERE = Path(__file__).resolve().parent
 SECRET_VALUES = {
@@ -130,6 +130,8 @@ class RpcProcess:
         self.send({"jsonrpc": "2.0", "id": identity, "method": method, "params": params or {}})
         deadline = time.monotonic() + (self.timeout if timeout is None else timeout)
         while True:
+            if time.monotonic() >= deadline:
+                raise TimeoutError("fixture RPC timed out: " + method)
             if b"\n" in self.pending:
                 line, _, remaining = self.pending.partition(b"\n")
                 self.pending = bytearray(remaining)
@@ -174,7 +176,11 @@ def http_request(url, method, *, identity="fixture-http", params=None, headers=N
                                       "method": method, "params": params or {}}).encode(),
                       headers={"Content-Type": "application/json", **(headers or {})})
     # Ignore HTTP_PROXY, HTTPS_PROXY and the operator's proxy configuration.
-    with build_opener(ProxyHandler({})).open(request, timeout=timeout) as response:
+    class NoRedirect(HTTPRedirectHandler):
+        def redirect_request(self, *_args, **_kwargs):
+            return None
+
+    with build_opener(ProxyHandler({}), NoRedirect()).open(request, timeout=timeout) as response:
         return json.load(response)
 
 
@@ -240,6 +246,13 @@ def prepare(root, *, http_url="http://127.0.0.1:9/mcp"):
         wrapper = root / "bin" / runtime
         wrapper.write_text("#!/bin/sh\nexec " + shlex.join(argv) + ' "$@"\n')
         wrapper.chmod(0o700)
+    write_json(root / "codex-mcp-list.json", [{
+        "name": "operator-sentinel", "enabled": True, "disabled_reason": None,
+        "transport": {"type": "stdio", "command": sys.executable,
+                      "args": [str(root / "mcp_stub.py")], "env": None,
+                      "env_vars": [], "cwd": None},
+        "startup_timeout_sec": None, "tool_timeout_sec": None, "auth_status": "unsupported",
+    }])
     # Import has no side effects; all native home shapes are synthetic inputs.
     from sentinel_home import populate
     sentinels = populate(root, sys.executable)
@@ -269,6 +282,10 @@ def prepare(root, *, http_url="http://127.0.0.1:9/mcp"):
         file.truncate(16 * 1024 * 1024 + 1)
     shutil.copytree(root / "items/skills/changelog", faults / "same-content-a")
     shutil.copytree(root / "items/skills/changelog", faults / "same-content-b")
+    shutil.copytree(root / "items/skills/changelog", faults / "readonly-skill")
+    for path in (faults / "readonly-skill").rglob("*"):
+        if path.is_file():
+            path.chmod(0o444)
     private = root / "member/rw/home"
     for runtime in ["claude", "codex", "pi"]:
         leftover = private / runtime / "crew-toolbox/earlier-session.txt"
