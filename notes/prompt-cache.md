@@ -1138,7 +1138,7 @@ these versions from freezing those files.
 
 There is first-session exposure. The sample's first observed Claude worker
 request reads 23,940/39,055 tokens (61.298%); the orchestrator reads
-23,715/40,282 (58.873%). These are first-request values, not the warm step's
+23,715/40,282 (58.872%). These are first-request values, not the warm step's
 aggregate rates. Codex starts at 20,224/20,717 (97.620%). The Claude non-read
 amounts, 15,115 and 16,567 tokens, include runtime context, catalogs and initial
 work; they are not an estimate of avoidable crew briefing cost. The historical
