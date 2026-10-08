@@ -438,7 +438,7 @@ Items per kind:
 | `mcp`, local | `command` (literal argument array), `env` (map of name to reference), `cwd` (optional, relative to the member's worktree) | No secrets in argv or `cwd`; they go in `env`. |
 | `mcp`, remote | `url` (literal), `transport` (`http`, the default, or `sse`), `headers` (map of name to reference) | Secrets go in `headers`. |
 | `skills` | `path` | A directory containing `SKILL.md`. Claude Code, Codex and pi share this format. |
-| `plugins` | `path` | A Claude Code plugin directory (`.claude-plugin/plugin.json`). It is implicitly `runtimes: [claude]`. A plugin's bundled MCP servers and hooks are part of the plugin. Whether they survive strict MCP loading is *verify*. Until confirmed, a plugin with a bundled `.mcp.json` is shown with the detail "bundled MCP servers: declare them under mcp". Codex's own plugin format is not supported in this version. |
+| `plugins` | `path` | A Claude Code plugin directory (`.claude-plugin/plugin.json`). On Codex and pi it is Not available (Claude Code plugin format), which counts for `required` and `strict`; set `runtimes: [claude]` to make it Not applicable there instead. A plugin's bundled MCP servers and hooks are part of the plugin. Whether they survive strict MCP loading is *verify*. Until confirmed, a plugin with a bundled `.mcp.json` is shown with the detail "bundled MCP servers: declare them under mcp". Codex's own plugin format is not supported in this version. |
 | `subagents` | `path` | A Markdown definition with front matter (`name`, `description`, optional `model`, `tools`) and the instructions as its body. crew renders it for Claude Code unchanged and for Codex as an agent TOML file (`name`, `description`, `developer_instructions`, and `model` when it is a Codex model). A field that does not translate is named in the item's detail. |
 | `hooks` | `event`, `matcher` (optional), `command` (literal argument array) | Runs alongside crew's own hooks for the same event, never instead of them. Runtimes run matching hooks concurrently, so no order relative to crew's hooks is promised. |
 
@@ -460,28 +460,40 @@ styles define no file items.
 
 ### Resolution
 
-One pure function in `crew-core` computes a member's effective toolbox, in
-this order:
+One pure function in `crew-core` computes a member's effective toolbox. It
+processes levels one at a time, each level completely before the next:
 
-1. **Base.** Start from `defaults.toolbox`, or from nothing when the member's
-   `toolbox.reset` is true. The orchestrator is a member like the others: its
-   level is `orchestrator.toolbox`. The conversion of `OrchestratorConfig`
-   into a spec (`daemon/team.rs:231`) must carry that level.
-2. **Expand.** Expand a level's `include` list depth-first, in the order
-   listed: a bundle's own includes come before its own items. Then add the
-   level's own items. A later definition with the same `<kind>.<name>`
-   replaces the earlier one whole. There is no field-by-field merge.
-3. **Levels.** Apply `defaults.toolbox` (unless reset), then the member's
-   level, each expanded as above.
-4. **Exclude.** Apply the member level's `exclude`, then `defaults.toolbox`'s
-   `exclude`, which removes items from bundles that defaults included. An
-   exclusion that matches nothing is a validation error (it catches typos), and
-   so is an item defined and excluded at the same level.
-5. **Inherit.** `inherit` is taken whole from the most specific level that sets
-   it (the member's, then the defaults'), never merged key by key.
-6. **Strict.** `strict` is true if any applied level sets it.
-7. **Map.** Map every item onto the member's runtime (see Runtime mapping) and
+1. **Levels.** The applied levels are `defaults.toolbox`, then the member's
+   own level. With `reset: true` on the member's level, `defaults.toolbox` is
+   not applied at all: none of its items, its `exclude`, its `inherit` or its
+   `strict`. The member then states its own policy, or gets the built-in
+   defaults. The orchestrator is a member like the others; its level is
+   `orchestrator.toolbox`. The conversion of `OrchestratorConfig` into a spec
+   (`daemon/team.rs:231`) must carry that level.
+2. **Processing one level.** Start from the result of the previous level, or
+   from nothing for the first. Then:
+   1. Expand the level's `include` list depth-first, in the order listed: a
+      bundle's own includes come before its own items.
+   2. Add the level's own items. A later definition with the same
+      `<kind>.<name>` replaces the earlier one whole. There is no
+      field-by-field merge.
+   3. Apply the level's `exclude` to the result so far. Defaults' exclusions
+      therefore act on defaults' bundles, and a member's exclusions act on
+      everything from defaults and from its own bundles. Each exclusion must
+      match at least one item at that point. Otherwise it is a validation
+      error (it catches typos and duplicates). An exclusion naming an item the
+      same level defines is also an error.
+3. **Inherit.** `inherit` is taken whole from the most specific applied level
+   that sets it: the member's, then defaults' (unless reset), then the
+   built-in default (`operator: none`, `project` all except `mcp`). It is
+   never merged key by key.
+4. **Strict.** `strict` is true if any applied level sets it.
+5. **Map.** Map every item onto the member's runtime (see Runtime mapping) and
    give it a status.
+
+A member's later level can always re-add an item that defaults excluded, by
+including a bundle with it or defining it. A defaults exclusion never removes
+a member's own item.
 
 Origins are recorded per item:
 
