@@ -126,11 +126,14 @@ def still_owned(owned):
             if (current := process_identity(pid)) and current[1] == started]
 
 
-def fixture(output, env, sandbox_mode="required"):
+def fixture(output, env, sandbox_mode="required", scenario="short"):
     workspace = output / "workspace"
     workspace.mkdir()
     (workspace / "SPEC.md").write_text(SPEC)
     (workspace / "invoices.csv").write_text(CSV)
+    if scenario == "lifecycle":
+        from lifecycle import seed
+        seed(workspace)
     git_env = dict(env, GIT_AUTHOR_NAME="Cache benchmark",
                    GIT_AUTHOR_EMAIL="cache-bench@example.invalid",
                    GIT_COMMITTER_NAME="Cache benchmark",
@@ -140,12 +143,12 @@ def fixture(output, env, sandbox_mode="required"):
     for args in (["init", "--initial-branch=main"],
                  ["config", "user.name", "Cache benchmark"],
                  ["config", "user.email", "cache-bench@example.invalid"],
-                 ["add", "SPEC.md", "invoices.csv"],
+                 ["add", "."],
                  ["commit", "-m", "Seed the fixed invoice workload"]):
         command = invoke(["git", *args], git_env, workspace)
         if command.returncode:
             raise RuntimeError(f"fixture git {args[0]} failed: {command.stderr.strip()}")
-    template = (HERE / "team.yaml").read_text()
+    template = (HERE / ("team-lifecycle.yaml" if scenario == "lifecycle" else "team.yaml")).read_text()
     (output / "team.yaml").write_text(template.replace(
         "@WORKSPACE@", json.dumps(str(workspace))).replace("@SANDBOX@", sandbox_mode))
     return workspace
@@ -208,6 +211,7 @@ def validate_evidence(result):
 
 
 def run(args):
+    scenario = getattr(args, "scenario", "short")
     if not sys.platform.startswith("linux"):
         raise ValueError("the process-identity watchdog currently requires Linux /proc")
     if not 0 < args.stop_usd < args.budget_usd <= 3:
@@ -228,6 +232,10 @@ def run(args):
         (output / name).mkdir(mode=0o700)
     runtime = Path(tempfile.mkdtemp(prefix="cb.", dir="/tmp"))
     env = isolated_environment(output, runtime)
+    if scenario == "lifecycle":
+        # Request bounded thinking for the native fold/rewrite probe. Actual
+        # thinking-block presence is recorded, never inferred from this setting.
+        env["MAX_THINKING_TOKENS"] = "2048"
     operator_homes = None
     if args.sandbox == "off":
         home = Path(env["HOME"])
@@ -238,11 +246,14 @@ def run(args):
     owned = {}
     workspace = output / "workspace"
     snapshot = {}
+    lifecycle = None
+    known_sessions = {}
     started = time.monotonic()
     report = {"schema": 1, "label": args.label, "started_at": utc(),
               "source_revision": args.source_revision,
               "source_revision_provenance": "caller-supplied; binary hash independently verified",
-              "crew_sha256": actual_sha, "team_template_sha256": digest(HERE / "team.yaml"),
+              "crew_sha256": actual_sha, "scenario": scenario,
+              "team_template_sha256": digest(HERE / ("team-lifecycle.yaml" if scenario == "lifecycle" else "team.yaml")),
               "runner_files_sha256": {name: digest(HERE / name) for name in ("bench", "bench.py", "usage.py")},
               "sandbox_mode": args.sandbox,
               "native_session_storage": "operator-cli-homes" if operator_homes else "private-member-homes",
@@ -253,7 +264,18 @@ def run(args):
               "idle_gap": {"requested_seconds": args.idle_seconds, "observed_seconds": 0}}
     write_json(output / "manifest.json", report)
     try:
-        workspace = fixture(output, env, args.sandbox)
+        workspace = fixture(output, env, args.sandbox, scenario)
+        if scenario == "lifecycle":
+            from lifecycle import Lifecycle
+            def lifecycle_command(*parts):
+                result = invoke([crew, *parts, "-C", workspace], env, output, 30)
+                if result.returncode:
+                    raise RuntimeError(f"lifecycle command failed: {' '.join(parts[:3])}: {result.stderr.strip()}")
+                return result
+            lifecycle = Lifecycle(workspace, lifecycle_command, getattr(args, "long_idle", False))
+            report["runner_files_sha256"]["lifecycle.py"] = digest(HERE / "lifecycle.py")
+            report["requested_thinking_tokens"] = 2048
+            write_json(output / "manifest.json", report)
         if args.prepare_only:
             report["status"] = "prepared"
             return 0
@@ -282,9 +304,18 @@ def run(args):
             snapshot = json.loads(response.stdout)
             write_json(output / "snapshot.json", snapshot)
             agents = snapshot.get("agents", [])
-            if any(a["status"] in ("failed", "stopped", "blocked") for a in agents):
+            if any(a["status"] in ("failed", "stopped", "blocked") and not (
+                    lifecycle and lifecycle.transient_stop(a)) for a in agents):
                 raise RuntimeError("an agent failed, stopped or blocked; see private snapshot.json")
-            report["agents"] = collect(workspace, agents, operator_homes)
+            model_agents = [a for a in agents if a["runtime"] != "shell"]
+            if {a["id"] for a in model_agents} != {"orchestrator", "claude-worker", "codex-worker"}:
+                raise RuntimeError("unexpected model roster; refusing an unpriced team")
+            for agent in model_agents:
+                if agent.get("session_id"):
+                    known_sessions[(agent["id"], agent["session_id"])] = dict(agent)
+            observed = list(known_sessions.values())
+            observed += [a for a in model_agents if not a.get("session_id")]
+            report["agents"] = collect(workspace, observed, operator_homes)
             report.update(totals(report["agents"]))
             upper = report["observed_cost_usd_upper"]
             current_usage = tuple(sum(a.get(key, 0) for a in report["agents"])
@@ -294,6 +325,17 @@ def run(args):
             if upper >= args.stop_usd:
                 report["status"] = "budget-stop"
                 break
+            if lifecycle:
+                if not lifecycle.is_idle() and time.monotonic() - last_usage_change > 90:
+                    raise RuntimeError("no new native usage for 90 seconds; refusing an unmetered run")
+                complete = lifecycle.tick(snapshot, report["agents"], time.monotonic() - last_usage_change)
+                report["lifecycle"] = lifecycle.report()
+                write_json(output / "progress.json", report)
+                if complete:
+                    report["status"] = "complete"
+                    break
+                time.sleep(1)
+                continue
             tasks = {t["id"]: t["status"] for t in snapshot.get("tasks", [])}
             quiet = len(agents) == 3 and all(a["status"] in ("idle", "done", "waiting") for a in agents)
             initial_done = all(tasks.get(t) == "done" for t in ("summarize", "audit"))
@@ -382,10 +424,14 @@ def run(args):
         report["duration_seconds"] = time.monotonic() - started
         if snapshot:
             try:
-                report["agents"] = collect(workspace, snapshot.get("agents", []), operator_homes)
+                report["agents"] = collect(workspace, list(known_sessions.values()) or [
+                    a for a in snapshot.get("agents", []) if a["runtime"] != "shell"], operator_homes)
                 report.update(totals(report["agents"]))
                 report["evidence"] = evidence(snapshot, workspace)
-                if report["status"] == "complete" and not validate_evidence(report["evidence"]):
+                if lifecycle:
+                    report["lifecycle"] = lifecycle.report()
+                valid = lifecycle.report()["complete"] if lifecycle else validate_evidence(report["evidence"])
+                if report["status"] == "complete" and (not valid or report["usage_coverage"] != "observed"):
                     report["status"] = "incomplete-evidence"
             except Exception as error:
                 report["collection_error"] = str(error)
@@ -430,6 +476,9 @@ def main():
     parser.add_argument("--idle-seconds", type=float, default=20)
     parser.add_argument("--timeout-seconds", type=float, default=600)
     parser.add_argument("--prepare-only", action="store_true")
+    parser.add_argument("--scenario", choices=("short", "lifecycle"), default="short")
+    parser.add_argument("--long-idle", action="store_true",
+                        help="lifecycle: add a 3665-second quiet gap and native >3600-second checks")
     parser.add_argument("--sandbox", choices=("required", "off"), default="required",
                         help="off uses fresh sessions with the operator's normal CLI logins")
     args = parser.parse_args()

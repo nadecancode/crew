@@ -62,6 +62,7 @@ def claude_requests(path):
         one_hour = count(breakdown, "ephemeral_1h_input_tokens")
         five_minute = count(breakdown, "ephemeral_5m_input_tokens")
         messages[identity] = {
+            "request_id": value.get("requestId"), "message_id": identity,
             "timestamp": value.get("timestamp"), "model": message.get("model"),
             "input_tokens": fresh + read + write, "cached_tokens": read,
             "write_tokens": write, "uncached_tokens": fresh,

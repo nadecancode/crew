@@ -215,3 +215,56 @@ The native session files remain untouched in their original CLI homes. The
 runtime's broader `baseline.mjs` collector was not yet present, which the
 report records explicitly; all reported measurements came directly from the
 fresh sessions through the watchdog's native parsers.
+
+## Extended lifecycle workload
+
+`--scenario lifecycle` selects `scripts/cache/team-lifecycle.yaml`; the short
+control above stays unchanged. The fixed sequence warms both workers, resumes
+each with an unchanged roster, adds a token-free scripted observer and resumes
+both workers, removes the observer and resumes them again. Every resume must
+preserve the session ID. The Crew briefing's byte length, SHA-256 and longest
+common byte prefix are recorded before and after each restart; this measures
+Crew's own file, not the provider's full effective system prompt.
+
+The Claude worker then runs two 30-second shell windows. The control message is
+sent after its turn ends. The fold message is sent only when the exact session
+JSONL contains the marked pending `tool_use` without its matching `tool_result`.
+The injected marker differs from the card's command marker, so the card itself
+cannot pass the fold evidence check. The report records native `isMeta` rows,
+post-fold thinking-block counts (never thinking text), and `thinking_drop`
+metadata joined to the following probe's request IDs. Bounded thinking is
+requested with `MAX_THINKING_TOKENS=2048`; actual presence is measured separately.
+
+Next, Claude reads six deterministic synthetic context files. Forced compaction
+requires at least 65,000 input tokens in the preceding native request and a
+subsequent increment in Crew's compaction counter. A post-compaction message
+then exercises the retained session. Finally the team remains quiet for more
+than 310 seconds before both workers receive fixed checksum probes. Their
+actual last-request-to-next-request intervals must each exceed 300 seconds.
+`--long-idle` adds 3,665 quiet seconds and strict native intervals over 3,600
+seconds. A five-minute gap is not claimed to expire a one-hour Claude cache or
+Codex's longer cache; these are measured gaps, with TTL interpretation kept
+separate from the observations.
+
+Example, using the same verified binary and arguments shown above:
+
+```sh
+scripts/cache/bench ... --scenario lifecycle --sandbox off \
+  --label lifecycle-before-1 --out target/cache-bench/lifecycle-before-1 \
+  --timeout-seconds 7200 --long-idle
+```
+
+Every step records its action boundary, request offsets, first subsequent
+request, input/cache-read/uncached tokens and estimated cost. This is temporal
+attribution to a controlled step, not proof of a provider-internal cause.
+Native declarations such as `prefix_mismatch` are preserved as declarations.
+Runs still stop at the $2 observed upper estimate under the approximately $3
+budget, and the long waits do not bypass failure or cost checks. The scripted
+observer never calls a provider and is excluded from token totals. All newly
+observed model session IDs remain in the spend ledger, even if an unexpected
+restart changes identity and makes the scenario fail.
+
+The extended before-run series is in progress. It requires three successful
+runs on c8052373; one includes the one-hour interval if the measured cost
+allows it. The corresponding after series must use the same mode, versions,
+models and per-run scenario. There is no lifecycle before/after result yet.

@@ -1,0 +1,70 @@
+project: cache-bench-lifecycle
+objective: >-
+  Execute only the fixed benchmark cards supplied by the harness. It controls
+  roster changes, restarts, compaction and idle gaps. Do not create other work.
+instructions: |-
+  This disposable benchmark repository is the whole task. No network requests,
+  dependencies, pushes, credentials, other workspaces or subagents. Use crew
+  tools for commits and task completion. Keep replies short. The harness may
+  add/remove a scripted observer, restart members, compact context and leave
+  the team idle for more than one hour. These actions are intentional. Never
+  replace the observer, change models, restart or compact yourself, or create
+  cards. Do not interpret an empty board as completion: the harness controls
+  completion and will stop the team. The orchestrator should wait quietly and
+  never send reminders or request updates. A message tagged cache-control or
+  cache-fold asks for the exact local action in that message, not a new task.
+workspace:
+  path: @WORKSPACE@
+  isolation: worktree
+  vcs: git
+  sandbox:
+    mode: @SANDBOX@
+backend: pty
+defaults:
+  runtime: claude
+  model: claude-haiku-4-5
+  permissions: guarded
+  permission_mode: acceptEdits
+  allowed_tools: [Bash, Read, Write, Edit]
+  auto_trust: true
+  inherit_mcp: false
+  long_context: false
+  model_fallback: false
+  max_restarts: 0
+  voice: ultracave
+  command: ["{crew}", scripted-agent]
+orchestrator:
+  runtime: claude
+  model: claude-haiku-4-5
+limits:
+  max_subagents: 0
+  auto_resume: false
+  idle_nudge_secs: 600
+  max_nudges: 0
+  context_warn_percent: 0
+agents:
+  - id: claude-worker
+    runtime: claude
+    model: claude-haiku-4-5
+    role: Execute only the harness's Claude lifecycle probes.
+  - id: codex-worker
+    runtime: codex
+    model: gpt-6-luna
+    permissions: bypass
+    role: Execute only the harness's Codex lifecycle probes.
+    extra_args: ["-c", "model_reasoning_effort=\"low\""]
+tasks:
+  - id: warm-claude
+    title: Warm the Claude session
+    agent: claude-worker
+    description: >-
+      Read SPEC.md and invoices.csv. Calculate paid invoice count and checksum
+      in integer cents. Write warm-claude.txt containing exactly "4 10206" plus
+      newline. Commit and task_complete. Do not read context/ yet. Then wait.
+  - id: warm-codex
+    title: Warm the Codex session
+    agent: codex-worker
+    description: >-
+      Read SPEC.md and invoices.csv. Calculate paid invoice count and checksum
+      in integer cents. Write warm-codex.txt containing exactly "4 10206" plus
+      newline. Commit and task_complete. Do not read context/ yet. Then wait.
