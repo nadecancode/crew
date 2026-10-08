@@ -198,23 +198,22 @@ running without it; a restart starts it again."
         }
     }
 
-    /// A member's toolbox as it shows: the one its session runs with when it
-    /// has run (`Agent.toolbox`), else how its configuration would map onto
-    /// `runtime` (its own when left out).
+    /// A member's toolbox as it shows. Without `runtime`, the one its session
+    /// runs with when it has run (`Agent.toolbox`). With `runtime`, or before
+    /// it has run, how its configuration would map onto that runtime (its own
+    /// when left out) at the next launch.
     pub(crate) fn toolbox_view(
         &self,
         agent: &Agent,
         runtime: Option<RuntimeKind>,
     ) -> Result<MemberToolbox, RpcError> {
-        if runtime.is_none_or(|r| r == agent.runtime) {
-            if let Some(toolbox) = &agent.toolbox {
-                return Ok(MemberToolbox {
-                    agent: agent.id.clone(),
-                    runtime: agent.runtime,
-                    toolbox: toolbox.clone(),
-                    stops: Vec::new(),
-                });
-            }
+        if let (None, Some(toolbox)) = (runtime, &agent.toolbox) {
+            return Ok(MemberToolbox {
+                agent: agent.id.clone(),
+                runtime: agent.runtime,
+                toolbox: toolbox.clone(),
+                stops: Vec::new(),
+            });
         }
         let runtime = runtime.unwrap_or(agent.runtime);
         let resolved = self.member_toolbox(agent)?;

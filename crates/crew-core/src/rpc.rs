@@ -219,8 +219,9 @@ pub enum Call {
         detail: String,
     },
     /// Members' toolboxes as they show them (operator or orchestrator):
-    /// every member when `agent` is left out; `runtime` maps the toolbox
-    /// onto another runtime instead of the member's own.
+    /// every member when `agent` is left out. With `runtime`, how each
+    /// member's configuration would map onto that runtime at its next
+    /// launch, never the toolbox its session runs with.
     Toolbox {
         #[serde(default)]
         agent: Option<String>,

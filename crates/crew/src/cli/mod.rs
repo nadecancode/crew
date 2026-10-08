@@ -338,7 +338,8 @@ pub struct ToolboxArgs {
     pub command: Option<ToolboxCommand>,
     /// Only this member (default: every member)
     pub agent: Option<String>,
-    /// Show how the toolbox maps onto another runtime: claude, codex, pi or shell
+    /// Show how the toolbox would map onto a runtime at the next launch:
+    /// claude, codex, pi or shell
     #[arg(long)]
     pub runtime: Option<crew_core::RuntimeKind>,
     #[arg(long)]
