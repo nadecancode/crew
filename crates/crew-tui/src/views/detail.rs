@@ -25,11 +25,14 @@ const TYPING_HINTS: &str =
     "ctrl-] stop typing (right-click too) · every other key goes to the agent";
 
 /// What a click at column `x`, row `y` lands on: the terminal pane, or
-/// nothing of interest.
+/// nothing of interest. The toolbox pane in its place is read-only: a click
+/// there types into nothing.
 pub fn hit(app: &App, x: u16, y: u16) -> Option<super::dashboard::Hit> {
     let pane = app.detail.terminal_rect.get();
-    (app.agent(&app.detail.agent).is_some() && pane.contains(ratatui::layout::Position { x, y }))
-        .then_some(super::dashboard::Hit::Terminal)
+    (!app.detail.show_toolbox
+        && app.agent(&app.detail.agent).is_some()
+        && pane.contains(ratatui::layout::Position { x, y }))
+    .then_some(super::dashboard::Hit::Terminal)
 }
 
 pub fn render(buf: &mut Buffer, area: Rect, app: &App, theme: &Theme, now: i64) {

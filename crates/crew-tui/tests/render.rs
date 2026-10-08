@@ -2919,6 +2919,45 @@ fn detail_view_shows_the_effective_toolbox() {
             first.contains("MCP servers"),
             "{size}: opens at the top\n{first}"
         );
+        // The pane is read-only: a click in it types into nothing, and the
+        // keys after it still scroll the pane instead of reaching the agent.
+        {
+            use ratatui::crossterm::event::{MouseButton, MouseEvent, MouseEventKind};
+            let pane = app.detail.terminal_rect.get();
+            let (column, row) = (pane.x + pane.width / 2, pane.y + pane.height / 2);
+            let area = ratatui::layout::Rect::new(0, 0, width, height);
+            assert!(views::hit(&app, area, column, row).is_none());
+            let click = MouseEvent {
+                kind: MouseEventKind::Down(MouseButton::Left),
+                column,
+                row,
+                modifiers: KeyModifiers::NONE,
+            };
+            crew_tui::input::handle_mouse(&mut app, click, area, NOW, 10);
+            assert!(!app.detail.typing && app.detail.show_toolbox, "{size}");
+            let down = KeyEvent::new(KeyCode::Down, KeyModifiers::NONE);
+            assert!(crew_tui::input::handle_key(&mut app, down, NOW, 10).is_empty());
+            let moved = render_to_string(&app, width, height, NOW + 1000);
+            assert!(
+                moved.contains("toolbox ·")
+                    && (moved != first || !first.contains("toolbox · rows")),
+                "{size}\n{moved}"
+            );
+            let up = KeyEvent::new(KeyCode::Up, KeyModifiers::NONE);
+            assert!(crew_tui::input::handle_key(&mut app, up, NOW, 10).is_empty());
+            assert!(crew_tui::input::handle_paste(&mut app, "pasted", NOW).is_empty());
+            // T after the click still closes the pane; nothing reaches the agent.
+            let toggle = KeyEvent::new(KeyCode::Char('T'), KeyModifiers::NONE);
+            assert!(crew_tui::input::handle_key(&mut app, toggle, NOW, 10).is_empty());
+            assert!(!app.detail.show_toolbox && !app.detail.typing, "{size}");
+            render_to_string(&app, width, height, NOW + 1000);
+            assert!(crew_tui::input::handle_key(&mut app, toggle, NOW, 10).is_empty());
+            assert_eq!(
+                render_to_string(&app, width, height, NOW + 1000),
+                first,
+                "{size}"
+            );
+        }
         // Every row is reachable a page at a time, and nothing is cut off.
         let mut seen = first.clone();
         let mut last = first.clone();
