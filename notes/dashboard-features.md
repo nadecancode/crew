@@ -463,20 +463,39 @@ every view and benchmark uses the same words:
 | --- | --- | --- |
 | Input | uncached input tokens | tokens |
 | Cache read | tokens read from the prompt cache | tokens |
-| Cache write (5 min), Cache write (1 h) | tokens written to the prompt cache, per TTL | tokens; the two are summed only where a total is shown, and are priced separately |
+| Cache write | tokens written to the prompt cache, split into 5-minute and 1-hour writes where the runtime reports the split; an aggregate without the split is kept as **TTL not reported** | tokens |
 | Output | output tokens | tokens |
-| Total input | input + cache read + both cache writes, counted only over requests where all four are reported | tokens |
-| Hit rate | cache read ÷ total input, over the same requests | percent, one decimal |
-| Write share | list cost of both cache writes ÷ input-side list cost, over the same requests | percent |
-| Estimate | each category's tokens × that model's list price for the category (5-minute and 1-hour writes at their own prices) | `≈ $12.40`, labelled "list-price estimate" |
+| Total input | the runtime's own normalized input total when it reports one (Codex reports total input with cached tokens inside it); otherwise input + cache read + cache write, when all three are reported | tokens |
+| Hit rate | cache read ÷ total input | percent, one decimal |
+| Write share | list cost of cache writes ÷ input-side list cost | percent |
+| Estimate | each category's tokens × that model's list price for the category; 5-minute and 1-hour writes at their own prices | `≈ $12.40`, labelled "list-price estimate" |
 | Cost per done task | estimate ÷ tasks done in the scope | `≈ $0.84` |
 
-**Coverage.** Rates are computed only over requests that report every field
-they need. A request missing one is counted separately, never with that
-field as zero. Each figure states its coverage when it is incomplete, for
-example "Hit rate 97.9% · over 9,412 of 9,801 requests". A runtime that never
-reports a field shows **not reported** for it, and the scope shows "N of M
-agents reporting".
+**Coverage, metric by metric.** Each metric uses every request that reports
+what that metric needs, and states its own coverage when that is not every
+request, for example "Hit rate 97.9% · over 9,412 of 9,801 requests". A
+missing field is never counted as zero.
+
+- **Hit rate** needs cache read and a total input. So a Codex request
+  reporting total input 100 and cache read 80, with no write counters, gives
+  a hit rate of 80%.
+- **Write share** needs the write tokens and the input-side cost, so that
+  same Codex request is outside its coverage: unknown, not 0%.
+- **Estimate.** A Claude request reporting an aggregate cache write without
+  the TTL split has a known hit rate, but an unknown exact write price. The
+  estimate prices that portion as a range:
+  - from the 5-minute price, the lower bound;
+  - to the 1-hour price, the upper bound.
+
+  It then reads `≈ $12.40–$13.10` with "includes 1.2 M write tokens with no
+  TTL reported".
+- **Unavailable.** A rate whose denominator is zero, or a scope with no
+  covered requests, shows **unavailable** with the reason. For example,
+  "Hit rate unavailable · no input reported" or "Cost per done task
+  unavailable · no tasks done".
+- **Not reported.** A runtime that never reports a field shows **not
+  reported** for it, and the scope shows "N of M agents reporting".
+
 
 **Why both rates.** Hit rate and Write share always appear together. In the
 prompt-cache audit's cohort (49 sessions, Oct 6–8, list prices read Oct 8),
@@ -719,7 +738,7 @@ Captures are taken in light and dark at 1440×960 and 390×844.
 | F09 | Workspace and member versions | View switches between Workspace and the member's version. Compare with Workspace shows a diff in the existing Diff component. |
 | F10 | History | The timeline lists the recorded changes and those seen since the page opened. Picking two entries shows the diff between them. |
 | F11 | Links into Docs | Task text, message bodies and `file` artifacts containing `notes/x.md` or `notes/x.md §Heading` link to the document at that heading. Unknown paths are not links. Referenced by lists the linking tasks and messages, with its scope stated. |
-| F12 | Usage figures | Total, Hit rate, Write share, Estimate and Cost per done task match a hand computation from the fixture under the §Definitions formulas. The model without a price shows No price, and the total states the exclusion. A non-reporting agent shows not reported, not 0. |
+| F12 | Usage figures | Total, Hit rate, Write share, Estimate and Cost per done task match a hand computation from the fixture under the §Definitions formulas. The model without a price shows No price, and the total states the exclusion. A non-reporting agent shows not reported, not 0. A Codex fixture request with total input and cache read but no write counters counts toward hit rate and not toward write share. A Claude request with an aggregate write and no TTL split makes the estimate a range with its note. A scope with no done tasks shows Cost per done task unavailable with the reason. |
 | F13 | Trend and breakdown | The trend draws buckets from the samples, with the latest values as text. Show as table gives the same figures. The breakdown sorts by every column, and the narrow layout stacks without page overflow. |
 | F14 | Big writes and history | Big writes lists exactly the fixture's qualifying requests, and opens the agent at that time. History lists both sessions, and selecting the earlier one scopes the figures read-only. |
 | F15 | Aside ask | `/btw` switches the composer to aside mode with the copy line and the `--info` border. The recipient picker lists unavailable members with reasons. Escape keeps the text. Sending opens the Asides tab. |
@@ -799,9 +818,10 @@ or push back:
   - Per-request samples or buckets with agent, model, task (for epic
     attribution) and time. They are kept for the workspace's sessions, so
     History and trends survive restarts.
-  - Input, cache read, cache write split by TTL (5 minutes and 1 hour), and
-    output, each per request with "not reported" distinct from zero, so
-    coverage can be stated.
+  - Per request: input, cache read, cache write (with its TTL split when the
+    runtime reports one), output, and the runtime's own normalized total
+    input when it has one. Each field is "not reported" when absent,
+    distinct from zero, so each metric can state its own coverage.
   - A versioned, dated price table with separate write prices per TTL.
   - Big writes with the events observed next to them, for the Context
     field.
