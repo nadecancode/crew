@@ -947,3 +947,45 @@ fn initialized_reaches_a_remote_server_before_any_request() {
         }
     }
 }
+
+// T21: a server that asks Claude Code to load its tools up front
+// (`_meta` `anthropic/alwaysLoad`) puts its definitions in the cached
+// prefix, so they must be pinned and sorted like any other: the marker is
+// kept, the order and descriptions are the pinned ones, whatever the
+// server does later.
+#[test]
+fn always_loaded_tools_are_pinned_and_sorted_too() {
+    let fx = Fixture::new();
+    let state = fx.path("listings");
+    let state_arg = state.to_string_lossy().into_owned();
+    let launch = fx.launch(
+        "x",
+        &[
+            "--tools",
+            "zulu,alpha,mike",
+            "--shuffle",
+            "--always-load",
+            "--state",
+            &state_arg,
+            "--change-description-after",
+            "1",
+        ],
+        &[],
+        &[],
+    );
+    assert_eq!(preflight_and_pin(&fx, &launch, false), PinOutcome::Written);
+    for _ in 0..2 {
+        let mut session = Session::start(&launch, &[]);
+        session.request("initialize", json!({"protocolVersion": "2025-06-18"}));
+        let (listed, _) = session.request("tools/list", json!({}));
+        let tools = &listed["result"]["tools"];
+        assert_eq!(names(tools), ["alpha", "mike", "zulu"]);
+        for tool in tools.as_array().unwrap() {
+            assert_eq!(tool["_meta"]["anthropic/alwaysLoad"], true, "{tool}");
+            assert!(
+                !tool["description"].as_str().unwrap().contains("Changed"),
+                "{tool}"
+            );
+        }
+    }
+}

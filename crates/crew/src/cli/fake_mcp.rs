@@ -24,6 +24,10 @@ pub struct FakeMcpArgs {
     /// List the tools in a different order every time
     #[arg(long)]
     shuffle: bool,
+    /// Mark every tool `_meta` `anthropic/alwaysLoad` (Claude Code then loads
+    /// it up front instead of deferring it)
+    #[arg(long)]
+    always_load: bool,
     /// Count listings in this file, across processes (a preflight and the
     /// session are two processes)
     #[arg(long, value_name = "FILE")]
@@ -231,7 +235,7 @@ impl Server {
                                 if changed && i == 0 {
                                     description.push_str(" Changed.");
                                 }
-                                json!({
+                                let mut tool = json!({
                                     "name": name,
                                     "description": description,
                                     "inputSchema": {
@@ -242,7 +246,11 @@ impl Server {
                                             json!({ leaked.clone(): { "type": "string" } })
                                         },
                                     },
-                                })
+                                });
+                                if args.always_load {
+                                    tool["_meta"] = json!({ "anthropic/alwaysLoad": true });
+                                }
+                                tool
                             })
                             .collect();
                         if args.shuffle {

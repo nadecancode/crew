@@ -133,6 +133,13 @@ cache for this toolchain, at the locked versions.
   part): over the orchestrator's own identity, item definitions and
   exclusions are refused, an unknown bundle is refused with the team's
   bundles listed, and a chosen bundle is saved to the roster.
+- `tests/team.rs::toolbox_check_shows_planned_items_and_stops_on_a_required_one`
+  (T20, first clause): `crew toolbox check` against a running daemon shows
+  Planned or Needs, never Active, exits non-zero naming a required item
+  that would not load, and passes when the same item is optional.
+- `tests/toolbox_proxy.rs::always_loaded_tools_are_pinned_and_sorted_too`
+  (T21, alwaysLoad part): tools marked `anthropic/alwaysLoad` keep the
+  marker and are served pinned and sorted across sessions.
 - `mcp/tools.rs::toolbox_arguments_are_bundle_names_only` (T11, part): both
   schemas take strings only, and a `toolbox` argument that is not names is
   refused rather than dropped.
