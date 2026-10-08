@@ -69,6 +69,7 @@ pub fn agent(id: &str, role: &str, status: AgentStatus, progress: Option<u8>, no
 
 pub fn task(id: &str, agent: &str, status: TaskStatus, deps: &[&str], now: i64) -> Task {
     Task {
+        epic: None,
         id: id.to_string(),
         title: format!("implement {id}"),
         description: format!("Build the {id} module and commit it."),
@@ -385,8 +386,10 @@ pub fn snapshot(now: i64) -> Snapshot {
     ];
 
     Snapshot {
+        epics: None,
         questions: Vec::new(),
         session: SessionInfo {
+            workspace_run_id: None,
             project: Some("checkout-rewrite".to_string()),
             objective: "Rewrite the checkout service while preserving API compatibility."
                 .to_string(),

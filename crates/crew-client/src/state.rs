@@ -920,6 +920,11 @@ impl ClientState {
                 self.workspace = WorkspaceStatus::Stopped;
             }
             Push::Unknown
+            // This client does not negotiate feature streams until P4 lands.
+            | Push::EpicBoardChanged(_)
+            | Push::Aside(_)
+            | Push::DocsChanged(_)
+            | Push::UsageChanged(_)
             | Push::Deliver { .. }
             | Push::Compact { .. }
             | Push::Pty { .. }

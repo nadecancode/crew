@@ -17,6 +17,7 @@
 pub mod agents;
 pub mod cli;
 pub mod daemon;
+pub mod docs;
 pub mod endpoints;
 pub mod git;
 pub mod limits;

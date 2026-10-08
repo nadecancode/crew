@@ -1143,6 +1143,7 @@ mod tests {
     #[test]
     fn a_dispatch_names_the_card_and_leaves_its_contents_on_the_board() {
         let mut dep = Task {
+            epic: None,
             id: "db".into(),
             title: "schema".into(),
             description: String::new(),
@@ -1193,6 +1194,7 @@ mod tests {
     fn a_session_on_another_cli_is_told_where_the_work_stands_and_what_was_said_last() {
         use crew_core::types::{TranscriptEntry, TranscriptKind};
         let task = |id: &str, who: &str, status: TaskStatus| Task {
+            epic: None,
             id: id.into(),
             title: format!("{id} the thing"),
             description: String::new(),

@@ -298,7 +298,10 @@ other model family (task_assign).",
                 }
                 rt.limit_grace_until = now + SCREEN_GRACE_MS;
             }
-            if restart || !procs.is_alive(id) {
+            if restart && !automatic {
+                self.restart_agent_refreshing_toolbox(id, Some(RESTART_NOTICE.to_string()))
+                    .await?;
+            } else if restart || !procs.is_alive(id) {
                 self.restart_agent_with(id, Some(RESTART_NOTICE.to_string()))
                     .await?;
             } else {

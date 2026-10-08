@@ -19,6 +19,7 @@ pub fn task_from_spec(spec: &TaskSpec, now: i64) -> Task {
         }
     };
     Task {
+        epic: None,
         id: spec.id.clone(),
         title,
         description: spec.description.trim().to_string(),
