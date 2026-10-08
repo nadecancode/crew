@@ -1,0 +1,24 @@
+{
+  "node": "24.19.0",
+  "claude": "2.1.291",
+  "observations": 57,
+  "all_counts_and_statuses_match": true,
+  "rtk_raw_recall_exact": true,
+  "lowfat_stderr_varies": true,
+  "native": [
+    {
+      "label": "raw",
+      "exit": 0,
+      "permission_canary": false,
+      "read_json_content_bytes": 4713
+    },
+    {
+      "label": "hooked",
+      "exit": 0,
+      "permission_canary": true,
+      "read_json_content_bytes": 272
+    }
+  ],
+  "network": "disabled; native stub and child share private network namespace",
+  "writes": "private scratch only"
+}
