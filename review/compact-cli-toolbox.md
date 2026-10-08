@@ -121,3 +121,9 @@ with `CARGO_INCREMENTAL=0`, four build jobs and `target/cw`. Logs are
 `target/compact-integrated-{launch,toolbox-unit,output-unit,core-unit,core-fixtures,clippy,fmt}.log`.
 This is a focused integration rerun, not a second full-workspace or native
 model replay. The original native pin and evidence remain retained separately.
+
+The subsequent clean merge `8168ef5e` brings delivery main `96320c18` into
+`e90fa68c`. The two changes to `tests/team.rs` resolve automatically. The
+requested serial rerun passed all 89 team tests and all 13 toolbox-launch
+tests with `CREW_TEST_SANDBOX=require`; evidence is
+`target/compact-integrated-delivery.log`. No P3 source changes are included.
