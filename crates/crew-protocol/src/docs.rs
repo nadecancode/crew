@@ -671,8 +671,17 @@ pub struct DocHistoryPage {
     pub epoch: Id,
     pub doc_id: Id,
     pub captured_heads: List<DocCapturedHead, 64>,
-    pub recorded_versions: List<DocVersion, 50>,
+    pub recorded_versions: List<DocHistoryRow, 50>,
     pub next_cursor: Option<Id>,
+}
+
+/// A deduplicated recorded version and the permitted captured sources that reach
+/// it. Whole-page captured_heads cannot establish this per-version relationship.
+/// The version's canonical document remains its read authority.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct DocHistoryRow {
+    pub version: DocVersion,
+    pub sources: List<DocRef, 64>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
