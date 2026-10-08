@@ -222,6 +222,7 @@ fn gtk_scoped_views_confirmation_terminal_order_and_live_local_service() {
     recorder.queries(&c, &core);
     let inspector = c.agent.borrow().as_ref().unwrap().1.clone();
     assert!(text(shell.window()).contains("Current work\ncurrent"));
+    toolbox_section(&core, &recorder, &inspector);
     c.select(key(Entity::Task("parked-old".into())));
     recorder.queries(&c, &core);
     assert!(text(shell.window()).contains("Waiting"));
@@ -1049,6 +1050,136 @@ fn signoff_items(c: &Controller) {
     c.header.set_live(true);
     assert!(answer.has_css_class("suggested-action"));
     c.header.set_live(c.live.get());
+}
+
+/// notes/toolboxes.md §Display: the Toolbox section after the facts, with
+/// headings assistive technology reads as headings, only the groups that have
+/// entries, statuses in words and the plain Restart. The attention warning
+/// stays out of the header, where the section would repeat it.
+fn toolbox_section(
+    core: &ClientCore,
+    recorder: &Recording,
+    inspector: &views::agent::AgentInspector,
+) {
+    let ViewPayload::AgentDetail(original) = core
+        .view(
+            ViewQuery::AgentDetail {
+                id: "claude-1".into(),
+            },
+            clock(),
+        )
+        .unwrap()
+        .payload
+    else {
+        panic!("agent detail projection");
+    };
+    let agents: Vec<crew_protocol::Agent> =
+        serde_json::from_str(include_str!("../../crew/tests/fixtures/web/toolbox.json")).unwrap();
+    let mut detail = original.clone();
+    let member = detail.agent.as_mut().unwrap();
+    member.agent.toolbox = agents
+        .iter()
+        .find(|agent| agent.id == "release")
+        .unwrap()
+        .toolbox
+        .clone();
+    member.warnings.push(WarningFact {
+        code: TOOLBOX_WARNING.into(),
+        text: crew_protocol::TOOLBOX_PENDING.into(),
+        entity: None,
+    });
+    let restart_available = member
+        .actions
+        .iter()
+        .any(|a| a.action == ActionKind::Restart && a.available);
+    assert!(restart_available, "the fixture agent can restart");
+    inspector.update(&detail, true);
+    let labels: Vec<gtk::Label> = descendants(inspector.root.upcast_ref())
+        .into_iter()
+        .filter_map(|w| w.downcast::<gtk::Label>().ok())
+        .collect();
+    let headings: Vec<String> = labels
+        .iter()
+        .filter(|l| l.accessible_role() == gtk::AccessibleRole::Heading)
+        .map(|l| l.label().to_string())
+        .collect();
+    assert_eq!(
+        headings,
+        ["Toolbox", "MCP servers", "Skills", "Plugins", "Sources"],
+        "no Subagents or Hooks group without entries"
+    );
+    let toolbox_heading = labels.iter().find(|l| l.label() == "Toolbox").unwrap();
+    assert!(toolbox_heading.is_mapped());
+    let summary = labels
+        .iter()
+        .find(|l| l.text().starts_with("Toolbox b56e01d7c4a9"))
+        .expect("summary line");
+    assert_eq!(
+        summary.text(),
+        "Toolbox b56e01d7c4a9 · 4 items · 2 not available"
+    );
+    assert!(summary.is_selectable());
+    assert_eq!(
+        summary.tooltip_text().as_deref(),
+        Some("b56e01d7c4a98f3e2d1c0b9a8f7e6d5c4b3a29180f7e6d5c4b3a2918f0e1d2c3")
+    );
+    assert_eq!(
+        labels
+            .iter()
+            .filter(|l| l.label() == crew_protocol::TOOLBOX_PENDING)
+            .count(),
+        1,
+        "the pending notice is in the section, not repeated in the header"
+    );
+    assert!(labels
+        .iter()
+        .any(|l| l.label() == crew_protocol::TOOLBOX_UNPINNED && l.is_mapped()));
+    // The digest and byte counts sit in the collapsed detail.
+    let definitions = descendants(inspector.root.upcast_ref())
+        .into_iter()
+        .filter_map(|w| w.downcast::<gtk::Expander>().ok())
+        .find(|e| e.label().as_deref() == Some("Definitions"))
+        .expect("Definitions detail");
+    assert!(!definitions.is_expanded());
+    definitions.set_expanded(true);
+    let shown = text(&inspector.root);
+    for needle in [
+        "docs\nBundle github · Active",
+        "github\nBundle github · Needs $SHOP_GITHUB_TOKEN",
+        "github-mcp-server stdio · GITHUB_TOKEN: $SHOP_GITHUB_TOKEN (not set)",
+        "changelog\nMember · Active",
+        "lint-kit\nMember · Not available on Codex",
+        "Your Codex MCP servers: Disabled (ambient, docs-local)",
+        "Your subagents: Cannot be excluded on Codex\nwithout the sandbox",
+        "Definition digest\nunavailable",
+        "Tools\nunknown",
+    ] {
+        assert!(shown.contains(needle), "{needle:?} in {shown}");
+    }
+    // The section's Restart is the Actions menu's: same action, availability.
+    let restart = descendants(inspector.root.upcast_ref())
+        .into_iter()
+        .filter_map(|w| w.downcast::<gtk::Button>().ok())
+        .find(|b| b.label().as_deref() == Some("Restart") && !b.has_css_class("flat"))
+        .expect("toolbox Restart");
+    assert!(restart.is_mapped() && restart.is_sensitive());
+    capture("fixture-agent-toolbox");
+    restart.emit_clicked();
+    let planned = recorder.0.borrow().iter().rev().find_map(|r| match r {
+        Request::Plan { intent, .. } => Some(intent.clone()),
+        _ => None,
+    });
+    assert_eq!(
+        planned,
+        Some(ActionIntent::Agent {
+            scope: scope(),
+            id: "claude-1".into(),
+            action: AgentAction::Restart,
+        }),
+        "the plain restart: no dialog, never fresh"
+    );
+    inspector.update(&original, true);
+    assert!(!toolbox_heading.is_mapped(), "no toolbox, no section");
 }
 
 /// Designer follow-ups V2–V5: the sidebar status measure and blank result

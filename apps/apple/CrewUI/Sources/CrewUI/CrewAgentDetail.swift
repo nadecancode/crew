@@ -51,7 +51,8 @@ public struct CrewAgentDetail: View {
                     Text(verbatim: agent.role).textSelection(.enabled)
                     Text(verbatim: agent.activity).textSelection(.enabled)
                     if let error = agent.error { Text(verbatim: error).foregroundStyle(CrewPalette.danger) }
-                    ForEach(Array(presentation.warnings.enumerated()), id: \.offset) { _, warning in
+                    // The Toolbox section below says the same with its Restart.
+                    ForEach(Array(presentation.warnings.filter { $0.code != CrewToolboxWords.warningCode }.enumerated()), id: \.offset) { _, warning in
                         Label(warning.text, systemImage: "exclamationmark.triangle")
                     }
                 }
@@ -62,6 +63,15 @@ public struct CrewAgentDetail: View {
                     Section("Subagents") {
                         ForEach(presentation.subagentIds, id: \.self) { id in
                             Button(id) { select(EntityKey(scope: scope, entity: .agent(id))) }
+                        }
+                    }
+                }
+                if let toolbox = agent.toolbox {
+                    // The plain restart, which resumes the session: the same
+                    // availability and reason as the Actions section's.
+                    CrewAgentToolbox(toolbox: toolbox) {
+                        action(presentation, .restart, title: "Restart") {
+                            perform(.agent(scope: scope, id: agent.id, action: .restart))
                         }
                     }
                 }

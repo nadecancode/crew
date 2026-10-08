@@ -4,6 +4,10 @@ use super::{
 };
 use crate::terminal::TerminalView;
 use crew_client::api::*;
+use crew_protocol::{
+    toolbox_origin_label, AgentToolbox, ToolboxItem, ToolboxItemCode, ToolboxSource,
+    ToolboxSourceCode, TOOLBOX_PENDING, TOOLBOX_UNPINNED,
+};
 use gtk::prelude::*;
 use std::{
     cell::{Cell, RefCell},
@@ -53,6 +57,174 @@ impl Section {
     }
 }
 
+/// The member's effective toolbox (notes/toolboxes.md §Display): the summary,
+/// a pending change with Restart, the items by kind, then the runtime's
+/// sources. Hidden for a member without one. Groups are rebuilt only when the
+/// toolbox changes, so a pushed update does not move a reader's selection.
+#[derive(Clone)]
+struct ToolboxView {
+    root: gtk::Box,
+    summary: gtk::Label,
+    pending: gtk::Box,
+    unpinned: gtk::Label,
+    groups: gtk::Box,
+    definitions: Facts,
+    shown: Rc<RefCell<Option<AgentToolbox>>>,
+}
+
+impl ToolboxView {
+    fn new(restart: &gtk::Button, reason: &gtk::Label) -> Self {
+        let root = gtk::Box::new(gtk::Orientation::Vertical, 12);
+        root.append(&common::heading_level("Toolbox", 2));
+        let summary = common::selectable("");
+        root.append(&summary);
+        let pending = gtk::Box::new(gtk::Orientation::Vertical, 8);
+        pending.append(&common::warning(TOOLBOX_PENDING));
+        restart.set_halign(gtk::Align::Start);
+        pending.append(restart);
+        pending.append(reason);
+        root.append(&pending);
+        let unpinned = common::muted(TOOLBOX_UNPINNED);
+        root.append(&unpinned);
+        let groups = gtk::Box::new(gtk::Orientation::Vertical, 12);
+        root.append(&groups);
+        let definitions = Facts::new();
+        root.append(
+            &gtk::Expander::builder()
+                .label("Definitions")
+                .child(&definitions.root)
+                .build(),
+        );
+        root.set_visible(false);
+        Self {
+            root,
+            summary,
+            pending,
+            unpinned,
+            groups,
+            definitions,
+            shown: Rc::default(),
+        }
+    }
+
+    fn update(&self, toolbox: Option<&AgentToolbox>) {
+        if self.shown.borrow().as_ref() == toolbox {
+            return;
+        }
+        *self.shown.borrow_mut() = toolbox.cloned();
+        self.root.set_visible(toolbox.is_some());
+        let Some(toolbox) = toolbox else {
+            return;
+        };
+        // `Toolbox 3f9a0c21e7b4 · 4 items · 1 not available`, the fingerprint
+        // monospaced, the whole of it in the tooltip.
+        let short = toolbox.short_fingerprint();
+        let summary = toolbox.summary();
+        let rest = summary
+            .strip_prefix(&format!("Toolbox {short}"))
+            .unwrap_or_default();
+        self.summary.set_markup(&format!(
+            "Toolbox <span font_family=\"monospace\">{}</span>{}",
+            gtk::glib::markup_escape_text(short),
+            gtk::glib::markup_escape_text(rest)
+        ));
+        self.summary.set_tooltip_text(Some(&toolbox.fingerprint));
+        self.pending
+            .set_visible(toolbox.pending_fingerprint.is_some());
+        self.unpinned.set_visible(toolbox.definitions_unpinned());
+        common::clear(&self.groups);
+        let mut kinds: Vec<_> = toolbox.items.iter().map(|item| item.kind).collect();
+        kinds.sort();
+        kinds.dedup();
+        for kind in kinds {
+            self.groups
+                .append(&common::heading_level(kind.heading(), 3));
+            for item in toolbox.items.iter().filter(|item| item.kind == kind) {
+                self.groups.append(&toolbox_item(item));
+            }
+        }
+        if !toolbox.sources.is_empty() {
+            self.groups.append(&common::heading_level("Sources", 3));
+            for source in &toolbox.sources {
+                self.groups.append(&toolbox_source(source));
+            }
+        }
+        let or_unknown = |value: Option<String>| value.unwrap_or_else(|| "unknown".into());
+        self.definitions.set(&[
+            ("Fingerprint", Some(toolbox.fingerprint.clone())),
+            ("After restart", toolbox.pending_fingerprint.clone()),
+            (
+                "Definition digest",
+                Some(
+                    toolbox
+                        .definition_digest
+                        .clone()
+                        .unwrap_or_else(|| "unavailable".into()),
+                ),
+            ),
+            (
+                "Tools",
+                Some(or_unknown(toolbox.tool_count.map(|n| n.to_string()))),
+            ),
+            (
+                "Definition bytes",
+                Some(or_unknown(
+                    toolbox.definition_bytes.map(|n| format!("{n} bytes")),
+                )),
+            ),
+        ]);
+    }
+}
+
+/// One item: its name, then origin and status in words (a warning when it is
+/// not usable), then its command, URL and references, wrapped and copyable.
+fn toolbox_item(item: &ToolboxItem) -> gtk::Box {
+    let row = gtk::Box::new(gtk::Orientation::Vertical, 4);
+    row.set_margin_start(12);
+    row.append(&common::text(&item.name));
+    let mut facts = format!(
+        "{} · {}",
+        toolbox_origin_label(&item.origin),
+        item.status.text
+    );
+    if item.required {
+        facts.push_str(" · required");
+    }
+    match item.status.code {
+        ToolboxItemCode::Active | ToolboxItemCode::Planned | ToolboxItemCode::NotApplicable => {
+            row.append(&common::muted(&facts))
+        }
+        _ => row.append(&common::warning(&facts)),
+    }
+    if let Some(detail) = &item.detail {
+        let detail = common::selectable(detail);
+        detail.add_css_class("crew-muted");
+        detail.add_css_class("monospace");
+        row.append(&detail);
+    }
+    row
+}
+
+/// One runtime source: `Your Codex MCP servers: Disabled (ambient, docs-local)`
+/// and its reason below.
+fn toolbox_source(source: &ToolboxSource) -> gtk::Box {
+    let row = gtk::Box::new(gtk::Orientation::Vertical, 4);
+    row.set_margin_start(12);
+    let mut line = format!("{}: {}", source.label, source.status.text);
+    if !source.names.is_empty() {
+        line.push_str(&format!(" ({})", source.names.join(", ")));
+    }
+    if source.status.code == ToolboxSourceCode::CannotBeExcluded {
+        row.append(&common::warning(&line));
+    } else {
+        row.append(&common::text(&line));
+    }
+    if let Some(detail) = &source.detail {
+        row.append(&common::muted(detail));
+    }
+    row
+}
+
 #[derive(Clone)]
 pub struct AgentInspector {
     pub root: gtk::Box,
@@ -63,6 +235,7 @@ pub struct AgentInspector {
     subtitle: gtk::Label,
     warnings: gtk::Box,
     facts: Facts,
+    toolbox: ToolboxView,
     process: Facts,
     work: Section,
     tasks: Section,
@@ -225,6 +398,31 @@ impl AgentInspector {
         overview.set_spacing(24);
         let facts = Facts::new();
         overview.append(&facts.root);
+        // A pending toolbox change offers the plain restart: the same action,
+        // availability and reason as the Actions menu's Restart.
+        let restart = gtk::Button::with_label("Restart");
+        restart.connect_clicked({
+            let callback = callbacks.action.clone();
+            let key = key.clone();
+            move |_| {
+                let Entity::Agent(id) = &key.entity else {
+                    return;
+                };
+                callback(ActionIntent::Agent {
+                    scope: key.scope.clone(),
+                    id: id.clone(),
+                    action: AgentAction::Restart,
+                })
+            }
+        });
+        let restart_reason = common::reason();
+        let toolbox = ToolboxView::new(&restart, &restart_reason);
+        controls.push(Control {
+            kind: ActionKind::Restart,
+            button: restart,
+            reason: Some(restart_reason),
+        });
+        overview.append(&toolbox.root);
         let work = Section::new(
             "Current and waiting work",
             "Current and waiting task links",
@@ -393,6 +591,7 @@ impl AgentInspector {
             subtitle,
             warnings,
             facts,
+            toolbox,
             process,
             work,
             tasks,
@@ -428,10 +627,16 @@ impl AgentInspector {
         self.subtitle.set_label(&subtitle.join(" · "));
         self.subtitle.set_visible(true);
         common::clear(&self.warnings);
-        for warning in &member.warnings {
+        // The Toolbox section below says the same with its Restart.
+        let warnings: Vec<_> = member
+            .warnings
+            .iter()
+            .filter(|warning| warning.code != TOOLBOX_WARNING)
+            .collect();
+        for warning in &warnings {
             self.warnings.append(&common::warning(&warning.text));
         }
-        self.warnings.set_visible(!member.warnings.is_empty());
+        self.warnings.set_visible(!warnings.is_empty());
         let current = member.current_work.as_ref().map(|work| {
             format!(
                 "{}{}{}",
@@ -469,6 +674,7 @@ impl AgentInspector {
                 (!member.subagent_ids.is_empty()).then(|| member.subagent_ids.join(", ")),
             ),
         ]);
+        self.toolbox.update(a.toolbox.as_ref());
         self.process.set(&[
             ("Workspace", Some(a.workdir.clone())),
             ("Session", a.session_id.clone()),

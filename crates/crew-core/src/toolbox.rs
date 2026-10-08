@@ -1264,6 +1264,18 @@ impl fmt::Display for Fingerprint {
     }
 }
 
+impl From<ItemKind> for crate::types::ToolboxItemKind {
+    fn from(kind: ItemKind) -> Self {
+        match kind {
+            ItemKind::Mcp => Self::Mcp,
+            ItemKind::Skills => Self::Skills,
+            ItemKind::Plugins => Self::Plugins,
+            ItemKind::Subagents => Self::Subagents,
+            ItemKind::Hooks => Self::Hooks,
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1976,17 +1988,5 @@ defaults:\n  toolbox: { include: [web] }\n",
         let err =
             Style::parse("bad", "defaults:\n  toolbox: { include: [nope] }\n", false).unwrap_err();
         assert!(err.to_string().contains("unknown toolbox 'nope'"), "{err}");
-    }
-}
-
-impl From<ItemKind> for crate::types::ToolboxItemKind {
-    fn from(kind: ItemKind) -> Self {
-        match kind {
-            ItemKind::Mcp => Self::Mcp,
-            ItemKind::Skills => Self::Skills,
-            ItemKind::Plugins => Self::Plugins,
-            ItemKind::Subagents => Self::Subagents,
-            ItemKind::Hooks => Self::Hooks,
-        }
     }
 }
