@@ -355,6 +355,9 @@ other model family (task_assign).",
                 if agent.paused || agent.runtime == RuntimeKind::Shell {
                     continue;
                 }
+                let codex_parent_confirmed = model.local.get(&agent.id).is_some_and(|local| {
+                    local.session_confirmed && local.codex_parent_session == agent.session_id
+                });
                 let rt = model.rt(&agent.id);
                 // A Codex session says how full its context is only in its
                 // session file; while a compaction is awaited, look often.
@@ -365,7 +368,10 @@ other model family (task_assign).",
                 } else {
                     QUOTA_EVERY_MS
                 };
-                if agent.runtime == RuntimeKind::Codex && now - rt.quota_checked_at >= every {
+                if agent.runtime == RuntimeKind::Codex
+                    && codex_parent_confirmed
+                    && now - rt.quota_checked_at >= every
+                {
                     if let Some(thread) = &agent.session_id {
                         rt.quota_checked_at = now;
                         // A compaction that was asked for and typed is looked for.

@@ -127,6 +127,11 @@ impl Daemon {
             return bound == thread;
         }
         local.codex_parent_session = Some(thread.to_string());
+        local.codex_turn = None;
+        // Older builds could leave a cached child rollout even after a
+        // parent notify restored session_id. Resolve this parent's file afresh.
+        model.rt(id).rollout = None;
+        model.rt(id).quota_checked_at = 0;
         // Session's normal persistence writes this pin with session_confirmed.
         true
     }
@@ -811,9 +816,19 @@ mod codex_parent_tests {
         let child = f.case(0, 1);
         f.header("parent", &parent);
         f.header("parent", &child);
+        f.daemon().model().rt("parent").rollout =
+            Some(f.path("parent", child["notify"]["thread-id"].as_str().unwrap()));
+        f.daemon()
+            .model()
+            .local
+            .get_mut("parent")
+            .unwrap()
+            .codex_turn = Some("old-child-turn".into());
         f.hook("parent", &parent).await;
         let thread = parent["notify"]["thread-id"].as_str().unwrap();
         assert!(f.daemon().confirmed_codex_parent("parent", thread));
+        assert!(f.daemon().model().rt("parent").rollout.is_none());
+        assert!(f.daemon().model().local["parent"].codex_turn.is_none());
         f.daemon().model().rt("parent").turn_active = true;
         f.daemon().model().rt("parent").turn_openers = vec!["m-current".into()];
         let before = serde_json::to_value(f.daemon().agent("parent")).unwrap();
