@@ -20,6 +20,8 @@ use crate::types::{
 
 /// Bump for new/renamed enum values, removed/renamed fields or changed meanings.
 /// New optional fields with `serde(default)` do not require a bump.
+/// Negotiated feature variants are additive only when connection projections
+/// prevent legacy peers from receiving them. See notes/protocol-features.md.
 /// Peers require an exact match; restart running teams after upgrading.
 pub const PROTOCOL_VERSION: u32 = 6;
 
@@ -226,6 +228,12 @@ impl ServerFrame {
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
 #[serde(tag = "kind", content = "data", rename_all = "snake_case")]
 pub enum Push {
+    /// Negotiated epics stream only; replaces legacy Task pushes on that connection.
+    EpicBoardChanged(Box<crate::epics::EpicBoardChanged>),
+    /// Dedicated operator watch metadata, never member-facing Subscribe/Listen.
+    Aside(Box<crate::asides::AsideChanged>),
+    DocsChanged(Box<crate::docs::DocsChanged>),
+    UsageChanged(Box<crate::usage_metrics::UsageChanged>),
     Event(Event),
     Message(Message),
     Agent(Box<Agent>),
@@ -271,6 +279,30 @@ pub enum Push {
     Unknown,
 }
 
+impl Push {
+    /// The representation for a peer that negotiated no features. Authorization
+    /// and operator-only event filtering are separate, mandatory caller checks.
+    pub fn legacy_projection(&self) -> Option<Self> {
+        match self {
+            Self::EpicBoardChanged(_)
+            | Self::Aside(_)
+            | Self::DocsChanged(_)
+            | Self::UsageChanged(_) => None,
+            Self::Task(task) => {
+                let mut task = task.clone();
+                task.epic = None;
+                Some(Self::Task(task))
+            }
+            Self::Session(session) => {
+                let mut session = session.clone();
+                session.workspace_run_id = None;
+                Some(Self::Session(session))
+            }
+            _ => Some(self.clone()),
+        }
+    }
+}
+
 /// How much of one of an account's usage windows is spent, as the runtime
 /// last reported it.
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
@@ -287,6 +319,8 @@ pub struct Quota {
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Default)]
 pub struct SessionInfo {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub workspace_run_id: Option<String>,
     #[serde(default)]
     pub project: Option<String>,
     #[serde(default)]
@@ -347,6 +381,8 @@ pub struct SessionInfo {
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Default)]
 pub struct Snapshot {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub epics: Option<crate::epics::EpicBoard>,
     pub session: SessionInfo,
     pub agents: Vec<Agent>,
     pub tasks: Vec<Task>,
@@ -359,6 +395,19 @@ pub struct Snapshot {
     #[serde(default)]
     pub questions: Vec<Message>,
     pub server_time: i64,
+}
+
+impl Snapshot {
+    /// Strip feature-only fields without modifying the stored/current model.
+    pub fn legacy_projection(&self) -> Self {
+        let mut snapshot = self.clone();
+        snapshot.epics = None;
+        snapshot.session.workspace_run_id = None;
+        for task in &mut snapshot.tasks {
+            task.epic = None;
+        }
+        snapshot
+    }
 }
 
 #[derive(Serialize, Deserialize, Clone, PartialEq)]

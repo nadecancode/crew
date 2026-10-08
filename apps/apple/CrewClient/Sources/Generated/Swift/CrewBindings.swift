@@ -5823,6 +5823,7 @@ public func FfiConverterTypeRuntimeQuotaGroup_lower(_ value: RuntimeQuotaGroup) 
 
 
 public struct SessionInfo: Equatable, Hashable {
+    public let workspaceRunId: String?
     public let project: String?
     public let objective: String
     /**
@@ -5890,7 +5891,7 @@ public struct SessionInfo: Equatable, Hashable {
 
     // Default memberwise initializers are never public by default, so we
     // declare one manually.
-    public init(project: String?, objective: String, 
+    public init(workspaceRunId: String?, project: String?, objective: String, 
         /**
          * The work style the team was launched from, if any.
          */style: String?, 
@@ -5934,6 +5935,7 @@ public struct SessionInfo: Equatable, Hashable {
         /**
          * The orchestrator's final summary.
          */summary: String?, herdrWorkspace: String?, daemonPid: UInt32, version: String) {
+        self.workspaceRunId = workspaceRunId
         self.project = project
         self.objective = objective
         self.style = style
@@ -5973,6 +5975,7 @@ public struct FfiConverterTypeSessionInfo: FfiConverterRustBuffer {
     public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> SessionInfo {
         return
             try SessionInfo(
+                workspaceRunId: FfiConverterOptionString.read(from: &buf), 
                 project: FfiConverterOptionString.read(from: &buf), 
                 objective: FfiConverterString.read(from: &buf), 
                 style: FfiConverterOptionString.read(from: &buf), 
@@ -5998,6 +6001,7 @@ public struct FfiConverterTypeSessionInfo: FfiConverterRustBuffer {
     }
 
     public static func write(_ value: SessionInfo, into buf: inout [UInt8]) {
+        FfiConverterOptionString.write(value.workspaceRunId, into: &buf)
         FfiConverterOptionString.write(value.project, into: &buf)
         FfiConverterString.write(value.objective, into: &buf)
         FfiConverterOptionString.write(value.style, into: &buf)
@@ -6097,6 +6101,7 @@ public func FfiConverterTypeSetupContext_lower(_ value: SetupContext) -> RustBuf
 
 
 public struct Task: Equatable, Hashable {
+    public let epic: String?
     public let id: String
     public let title: String
     public let description: String
@@ -6121,13 +6126,14 @@ public struct Task: Equatable, Hashable {
 
     // Default memberwise initializers are never public by default, so we
     // declare one manually.
-    public init(id: String, title: String, description: String, assignedAgent: String?, status: TaskStatus, dependencies: [String], createdAt: Int64, startedAt: Int64?, completedAt: Int64?, artifacts: [Artifact], 
+    public init(epic: String?, id: String, title: String, description: String, assignedAgent: String?, status: TaskStatus, dependencies: [String], createdAt: Int64, startedAt: Int64?, completedAt: Int64?, artifacts: [Artifact], 
         /**
          * Agent asked to review the result before the task counts as done.
          */reviewer: String?, result: String?, progress: UInt8?, 
         /**
          * Latest progress note or the reason the task is blocked/failed.
          */note: String?, timeoutSecs: UInt64?) {
+        self.epic = epic
         self.id = id
         self.title = title
         self.description = description
@@ -6161,6 +6167,7 @@ public struct FfiConverterTypeTask: FfiConverterRustBuffer {
     public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> Task {
         return
             try Task(
+                epic: FfiConverterOptionString.read(from: &buf), 
                 id: FfiConverterString.read(from: &buf), 
                 title: FfiConverterString.read(from: &buf), 
                 description: FfiConverterString.read(from: &buf), 
@@ -6180,6 +6187,7 @@ public struct FfiConverterTypeTask: FfiConverterRustBuffer {
     }
 
     public static func write(_ value: Task, into buf: inout [UInt8]) {
+        FfiConverterOptionString.write(value.epic, into: &buf)
         FfiConverterString.write(value.id, into: &buf)
         FfiConverterString.write(value.title, into: &buf)
         FfiConverterString.write(value.description, into: &buf)

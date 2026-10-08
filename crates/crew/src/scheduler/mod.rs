@@ -262,6 +262,7 @@ mod tests {
 
     fn task(id: &str, agent: Option<&str>, deps: &[&str], status: TaskStatus) -> Task {
         Task {
+            epic: None,
             id: id.into(),
             title: id.into(),
             description: String::new(),

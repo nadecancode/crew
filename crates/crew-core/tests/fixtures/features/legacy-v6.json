@@ -1,0 +1,144 @@
+{
+  "source_commit": "b4f9a4424c53ddf54a6db1d0d82164015221faaa",
+  "source_sha256": {
+    "crates/crew-core/Cargo.toml": "df80edc5c89349fe2203be7a46656f36ea37acc284ee2219361b0209a547f535",
+    "crates/crew-core/src/client.rs": "10f7dadbee4f2900ba8316c2d60cbdfb1875180d5e7a3223f40c220dbe724d5e",
+    "crates/crew-core/src/config.rs": "0de1e9950c5909a372760193fa051af84b5478b5aeb14bfd14b62f9d5235ffc4",
+    "crates/crew-core/src/lib.rs": "3bb506ff5b46d05538c85aac89aab46f5bb24c543ad7433881b4838c42e3a07d",
+    "crates/crew-core/src/paths.rs": "deae1d88549ed33b32e693607a93261ec07437d1b457ee8ec05046037e675c35",
+    "crates/crew-core/src/rpc.rs": "b957d0835e4a3478104bb26043a4728e1920f7bc99d5a37084319a42629ff319",
+    "crates/crew-core/src/signals.rs": "5b0927a16778a5830e34675b91641bf22ed8b10b0bffafeafcf96d915031be91",
+    "crates/crew-core/src/test_support.rs": "cfcb505ef326021f4cb1ab115a99807157a69643d53c88a9f5937d295020dbfa",
+    "crates/crew-core/src/toolbox.rs": "31a15b031d8bf2624210094f8a98084d89b9b4cd91297c6cb2ad084be428bdde",
+    "crates/crew-core/src/util.rs": "709e71477cfbb976542043aabcf465dcbcd38363d7d47dadd71c7fc81c0e6d14",
+    "crates/crew-core/tests/toolbox_fixtures.rs": "3b1d1427ee0cc82af3385fe938c5f0d2aa8dd86a0f0cc75647ac469f86375e81",
+    "crates/crew-protocol/Cargo.toml": "decb9cdfab4354b904ad353d535784413a10ebd55be97548ef7015952b8be93f",
+    "crates/crew-protocol/src/lib.rs": "de5530296cddc79aad4bc02e48b628bc532d6813b171a1086676ea2c130b8b24",
+    "crates/crew-protocol/src/native.rs": "9c60c8fd79bc54d04dbb1b1f2535bc96031b39c48350224bf223f1e80ad4bf52",
+    "crates/crew-protocol/src/rpc.rs": "8e669ca51ff4190010410c1b90eb6f2c975926f256807bd5d7428b2f69f03e05",
+    "crates/crew-protocol/src/types.rs": "a46e2429ad5e6bdfee82977a54842b7edab45dda37ca72cf9706153b9453a5f6",
+    "crates/crew-protocol/src/vcs.rs": "56d817dcb94d8125f87b60d4832cffce2a784c5f7db0d4eec301c464046c681c",
+    "Cargo.lock": "5f2f70497c975cd298d3c780d03c7aa1ba1bcd7a98d87995814967e4c51c05ae",
+    "Cargo.toml": "72e0808c37ee070992f3fca95560532a50e0d45aa6e099284fbe1fc3bb7a7865"
+  },
+  "oracle_sha256": "e180e5b98f4d01eb4529e6975b6c90635c2b981143216925ada0bb9919924855",
+  "pushes": [
+    "{\"kind\":\"task\",\"data\":{\"id\":\"fixture\",\"title\":\"Fixture\",\"description\":\"\",\"assigned_agent\":null,\"status\":\"waiting\",\"dependencies\":[],\"created_at\":12,\"started_at\":13,\"completed_at\":null,\"artifacts\":[],\"reviewer\":null,\"result\":null,\"progress\":null,\"note\":null,\"timeout_secs\":null}}",
+    "{\"kind\":\"session\",\"data\":{\"project\":null,\"objective\":\"\",\"style\":null,\"quotas\":[],\"workspace\":\"\",\"state_dir\":\"\",\"backend\":\"\",\"isolation\":\"\",\"sandbox\":\"\",\"vcs\":\"\",\"vcs_note\":\"\",\"web\":\"\",\"socket_warning\":\"\",\"binary_warning\":\"\",\"daemon_started_at\":0,\"team_started_at\":null,\"completed_at\":null,\"summary\":null,\"herdr_workspace\":null,\"daemon_pid\":0,\"version\":\"\"}}",
+    "{\"kind\":\"deliver\",\"data\":{\"ids\":[\"m-fixture\"],\"text\":\"synthetic body\"}}"
+  ],
+  "requests": [
+    {
+      "canonical": "{\"id\":1,\"method\":\"hello\",\"params\":{\"role\":\"operator\",\"agent_id\":null,\"token\":\"synthetic-only\",\"client\":\"fixture\",\"protocol\":6}}",
+      "input": {
+        "id": 1,
+        "method": "hello",
+        "params": {
+          "client": "fixture",
+          "protocol": 6,
+          "role": "operator",
+          "token": "synthetic-only"
+        }
+      }
+    },
+    {
+      "canonical": "{\"id\":2,\"method\":\"tasks_list\"}",
+      "input": {
+        "id": 2,
+        "method": "tasks_list",
+        "params": {}
+      }
+    },
+    {
+      "canonical": "{\"id\":3,\"method\":\"task_get\",\"params\":{\"id\":\"fixture\"}}",
+      "input": {
+        "id": 3,
+        "method": "task_get",
+        "params": {
+          "id": "fixture"
+        }
+      }
+    },
+    {
+      "canonical": "{\"id\":4,\"method\":\"task_create\",\"params\":{\"spec\":{\"id\":\"fixture\",\"title\":\"Fixture\",\"description\":\"legacy body\",\"agent\":null,\"depends_on\":[],\"reviewer\":null,\"timeout_secs\":null}}}",
+      "input": {
+        "id": 4,
+        "method": "task_create",
+        "params": {
+          "spec": {
+            "description": "legacy body",
+            "id": "fixture",
+            "title": "Fixture"
+          }
+        }
+      }
+    },
+    {
+      "canonical": "{\"id\":5,\"method\":\"task_edit\",\"params\":{\"id\":\"fixture\",\"title\":\"Edited\",\"description\":null}}",
+      "input": {
+        "id": 5,
+        "method": "task_edit",
+        "params": {
+          "description": null,
+          "id": "fixture",
+          "title": "Edited"
+        }
+      }
+    },
+    {
+      "canonical": "{\"id\":6,\"method\":\"session_complete\",\"params\":{\"summary\":\"Legacy report\",\"decisions\":[]}}",
+      "input": {
+        "id": 6,
+        "method": "session_complete",
+        "params": {
+          "decisions": [],
+          "summary": "Legacy report"
+        }
+      }
+    },
+    {
+      "canonical": "{\"id\":7,\"method\":\"snapshot\",\"params\":{\"messages\":20,\"events\":30}}",
+      "input": {
+        "id": 7,
+        "method": "snapshot",
+        "params": {
+          "events": 30,
+          "messages": 20
+        }
+      }
+    },
+    {
+      "canonical": "{\"id\":8,\"method\":\"subscribe\"}",
+      "input": {
+        "id": 8,
+        "method": "subscribe",
+        "params": {}
+      }
+    }
+  ],
+  "scoped_methods_rejected": [
+    {
+      "method": "features_negotiate",
+      "unknown_variant": true
+    },
+    {
+      "method": "task_create_scoped",
+      "unknown_variant": true
+    },
+    {
+      "method": "task_revise",
+      "unknown_variant": true
+    },
+    {
+      "method": "epic_complete",
+      "unknown_variant": true
+    },
+    {
+      "method": "aside_ask",
+      "unknown_variant": true
+    }
+  ],
+  "session": "{\"project\":null,\"objective\":\"\",\"style\":null,\"quotas\":[],\"workspace\":\"\",\"state_dir\":\"\",\"backend\":\"\",\"isolation\":\"\",\"sandbox\":\"\",\"vcs\":\"\",\"vcs_note\":\"\",\"web\":\"\",\"socket_warning\":\"\",\"binary_warning\":\"\",\"daemon_started_at\":0,\"team_started_at\":null,\"completed_at\":null,\"summary\":null,\"herdr_workspace\":null,\"daemon_pid\":0,\"version\":\"\"}",
+  "snapshot": "{\"session\":{\"project\":null,\"objective\":\"\",\"style\":null,\"quotas\":[],\"workspace\":\"\",\"state_dir\":\"\",\"backend\":\"\",\"isolation\":\"\",\"sandbox\":\"\",\"vcs\":\"\",\"vcs_note\":\"\",\"web\":\"\",\"socket_warning\":\"\",\"binary_warning\":\"\",\"daemon_started_at\":0,\"team_started_at\":null,\"completed_at\":null,\"summary\":null,\"herdr_workspace\":null,\"daemon_pid\":0,\"version\":\"\"},\"agents\":[],\"tasks\":[{\"id\":\"fixture\",\"title\":\"Fixture\",\"description\":\"\",\"assigned_agent\":null,\"status\":\"waiting\",\"dependencies\":[],\"created_at\":12,\"started_at\":13,\"completed_at\":null,\"artifacts\":[],\"reviewer\":null,\"result\":null,\"progress\":null,\"note\":null,\"timeout_secs\":null}],\"messages\":[],\"events\":[],\"questions\":[],\"server_time\":0}",
+  "task": "{\"id\":\"fixture\",\"title\":\"Fixture\",\"description\":\"\",\"assigned_agent\":null,\"status\":\"waiting\",\"dependencies\":[],\"created_at\":12,\"started_at\":13,\"completed_at\":null,\"artifacts\":[],\"reviewer\":null,\"result\":null,\"progress\":null,\"note\":null,\"timeout_secs\":null}"
+}

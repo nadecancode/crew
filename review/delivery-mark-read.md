@@ -72,3 +72,8 @@ or installed binary was changed.
 
 Exact commands, log/native hashes, scope and retained failures are recorded
 in delivery-mark-read.json. This card does not claim cache savings.
+
+After approval at 6bbb2a43, the two id-read assertions were strengthened to
+compare the exact full stored body and complete unchanged observer rows;
+all 18 delivery tests passed again. Main fbe243af's reviewed P1 feature
+contract was forward-merged before the required integration checks.

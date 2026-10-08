@@ -212,6 +212,7 @@ mod tests {
 
     fn task(id: &str, deps: &[&str]) -> Task {
         Task {
+            epic: None,
             id: id.into(),
             title: id.into(),
             description: String::new(),
