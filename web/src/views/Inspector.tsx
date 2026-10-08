@@ -366,9 +366,12 @@ export function ToolboxSection(props: { agent: Agent; toolbox: AgentToolbox }) {
               <For each={group.items}>
                 {(item) => (
                   <li>
-                    <span class="name">{item.name}</span> <span class="muted">{originLabel(item.origin)}</span>{" "}
-                    <span class={tone(item.status.code)}>{item.status.text}</span>
-                    <Show when={item.required}><span class="muted"> · required</span></Show>
+                    {/* The name, then origin · status, as in the native inspectors. */}
+                    <div class="name">{item.name}</div>
+                    <div>
+                      <span class="muted">{originLabel(item.origin)} · </span><span class={tone(item.status.code)}>{item.status.text}</span>
+                      <Show when={item.required}><span class="muted"> · required</span></Show>
+                    </div>
                     <Show when={item.detail}><div class="detail mono muted" title={item.detail!}>{item.detail}</div></Show>
                   </li>
                 )}

@@ -62,11 +62,11 @@ review finding D2 of cache-reviewer, m-4638ef2212b4). The web revamp had left
 P1 at 230,500 bytes and P4 at 600,000 (`notes/web-revamp.md`), and its build
 used both to within 3 and 1,996 bytes. Card `toolbox-dashboards` adds each
 member's toolbox to the inspector, the team List and the graph
-(`notes/toolboxes.md` §Display). That adds 5,447 bytes of dashboard script and
-5,540 bytes to the whole bundle. The stylesheet stays within P2 because its
+(`notes/toolboxes.md` §Display). That adds 5,452 bytes of dashboard script and
+5,545 bytes to the whole bundle. The stylesheet stays within P2 because its
 rules are folded into the inspector's existing list and details rules
-(33,999 of 34,000 bytes). Measured on that card's build: P1 235,944 bytes,
-P2 33,999, P3 332,915, P4 603,544. P1 is now 236,500 bytes and P4 604,100,
+(33,999 of 34,000 bytes). Measured on that card's build: P1 235,949 bytes,
+P2 33,999, P3 332,915, P4 603,549. P1 is now 236,500 bytes and P4 604,100,
 each the measured size plus about 0.5 KB. P2 and P3 are unchanged. As above,
 P1 is a ceiling against growth nobody decided on, and this feature was
 decided.

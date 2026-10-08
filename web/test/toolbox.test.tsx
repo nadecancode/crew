@@ -77,6 +77,9 @@ describe("toolbox", () => {
     expect(text).toContain("Needs $SHOP_GITHUB_TOKEN");
     expect(text).toContain("Not available on Codex");
     expect(text).toContain("Bundle github");
+    // Name on its own line, then origin · status, as in the native inspectors.
+    const github = [...container.querySelectorAll(".toolbox li")].find((li) => li.querySelector(".name")?.textContent === "github")!;
+    expect(github.children[1].textContent).toBe("Bundle github · Needs $SHOP_GITHUB_TOKEN");
     expect(text).toContain("Your Codex MCP servers: Disabled (ambient, docs-local)");
     expect(text).toContain("Your subagents: Cannot be excluded on Codex · without the sandbox");
     expect(text).toContain(TOOLBOX_UNPINNED);
