@@ -3,4 +3,5 @@
 //! This service never sends agent messages or invokes snapshotting VCS commands.
 
 pub mod config;
+pub mod markdown;
 pub mod source;
