@@ -246,8 +246,80 @@ pub fn prepare(
     }
     plan.runtime.scrub_env.sort();
     plan.runtime.scrub_env.dedup();
+    if context.runtime == RuntimeKind::Claude
+        && std::env::var_os("CLAUDE_CODE_PLUGIN_DIRS").is_some()
+    {
+        // Native plugin discovery through this inherited environment variable
+        // would bypass both setting sources and our selected plugin list.
+        plan.runtime
+            .scrub_env
+            .push("CLAUDE_CODE_PLUGIN_DIRS".into());
+        plan.runtime.scrub_env.sort();
+        plan.runtime.scrub_env.dedup();
+    }
     plan.active.scrub_env = plan.runtime.scrub_env.iter().cloned().collect();
     plan.view.sources = super::sources::prepare(context, &plan.active.resolved, &mut plan.runtime)?;
+    if context.runtime == RuntimeKind::Pi {
+        let ambient: BTreeSet<_> = plan
+            .view
+            .sources
+            .iter()
+            .filter(|source| {
+                source.origin == crew_core::ToolboxSourceOrigin::Operator
+                    && source.kind.as_deref() == Some("mcp")
+            })
+            .flat_map(|source| source.names.iter().cloned())
+            .collect();
+        if ambient.contains("crew") {
+            plan.stops.push("pi's ambient MCP server 'crew' shadows coordination; rename that server before launching".into());
+        }
+        for item in &mut plan.view.items {
+            if item.kind == crew_core::ToolboxItemKind::Mcp
+                && plan.active.servers.contains(&item.name)
+                && ambient.contains(&item.name)
+            {
+                plan.active.servers.remove(&item.name);
+                plan.runtime.servers.retain(|name| name != &item.name);
+                item.status = status(ToolboxItemCode::Shadowed, "Shadowed");
+                let reason = format!(
+                    "Rename this item or the server {} in the operator's pi MCP configuration",
+                    item.name
+                );
+                item.detail = Some(reason.clone());
+                if item.required {
+                    plan.stops.push(format!("mcp.{}: {reason}", item.name));
+                }
+            }
+        }
+    }
+    if context.runtime == RuntimeKind::Claude && plan.runtime.claude_inherit_mcp {
+        for item in &mut plan.view.items {
+            if item.kind != crew_core::ToolboxItemKind::Plugins {
+                continue;
+            }
+            let key = ItemRef::new(ItemKind::Plugins, &item.name);
+            let Some(snapshot) = plan.active.files.get(&key) else {
+                continue;
+            };
+            let files = store.files(snapshot)?;
+            let manifest: Value =
+                serde_json::from_slice(&files[Path::new(".claude-plugin/plugin.json")].0)?;
+            if files.contains_key(Path::new(".mcp.json")) || manifest.get("mcpServers").is_some() {
+                // Open MCP discovery would start this selected plugin's
+                // unconfigured servers. Do not silently load them.
+                plan.active.files.remove(&key);
+                item.status = status(
+                    ToolboxItemCode::NotAvailable,
+                    "Not available with inherited MCP servers",
+                );
+                let reason = "Plugin bundles MCP servers; exclude operator MCP inheritance or use a plugin without bundled servers";
+                item.detail = Some(reason.into());
+                if item.required {
+                    plan.stops.push(format!("plugins.{}: {reason}", item.name));
+                }
+            }
+        }
+    }
     if plan.active.resolved.strict {
         for source in &plan.view.sources {
             if source.status.code == crew_core::ToolboxSourceCode::CannotBeExcluded {

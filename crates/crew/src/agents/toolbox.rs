@@ -38,6 +38,7 @@ pub fn claude_mcp_bytes(
     })?)
 }
 
+pub(crate) mod args;
 pub mod prepare;
 mod sources;
 pub mod store;

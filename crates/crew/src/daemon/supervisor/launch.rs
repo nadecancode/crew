@@ -219,6 +219,20 @@ impl Daemon {
             )
         })
         .await??;
+        crate::agents::toolbox::args::validate(
+            agent.runtime,
+            &local.settings.extra_args,
+            &format!("agent '{id}'.extra_args"),
+        )?;
+        if agent.runtime == RuntimeKind::Claude
+            && (endpoint.env.contains_key("CLAUDE_CODE_PLUGIN_DIRS")
+                || endpoint
+                    .secret_env
+                    .iter()
+                    .any(|(name, _)| name == "CLAUDE_CODE_PLUGIN_DIRS"))
+        {
+            anyhow::bail!("agents.{id}.env.CLAUDE_CODE_PLUGIN_DIRS overrides toolbox discovery; use toolbox.plugins");
+        }
         // The 1M-token context window, for a model the catalog says has one
         // (and that the account did not refuse before). A model set by the
         // endpoint config is somebody else's: it is passed as written.
@@ -284,6 +298,7 @@ impl Daemon {
                 &format!("agent '{id}'.toolbox"),
             )?
         };
+        let previous_toolbox = self.active_toolbox(id);
         local.settings.toolbox_launch = Some(
             self.prepare_toolbox_launch(
                 &agent,
@@ -298,18 +313,44 @@ impl Daemon {
         if stopped() {
             return Ok(());
         }
-        let mut spec = runtime.launch(&LaunchContext {
-            agent: &agent,
-            settings: &local.settings,
-            crew_bin: &self.crew_bin,
-            agent_dir: &agent_dir,
-            identity_path: &identity_path,
-            briefing: &briefing,
-            resume,
-            endpoint: &endpoint,
-            long_context,
-            private_home: private_home.as_deref(),
-        })?;
+        let make_spec = |settings: &crate::agents::AgentSettings| {
+            runtime.launch(&LaunchContext {
+                agent: &agent,
+                settings,
+                crew_bin: &self.crew_bin,
+                agent_dir: &agent_dir,
+                identity_path: &identity_path,
+                briefing: &briefing,
+                resume,
+                endpoint: &endpoint,
+                long_context,
+                private_home: private_home.as_deref(),
+            })
+        };
+        let mut spec = make_spec(&local.settings)?;
+        if agent.runtime == RuntimeKind::Codex {
+            let toolbox = local
+                .settings
+                .toolbox_launch
+                .take()
+                .expect("prepared toolbox");
+            local.settings.toolbox_launch = Some(
+                self.close_codex_toolbox(&agent, &spec, toolbox, since)
+                    .await?,
+            );
+            spec = make_spec(&local.settings)?;
+            self.verify_codex_toolbox(
+                &agent,
+                &spec,
+                local
+                    .settings
+                    .toolbox_launch
+                    .as_ref()
+                    .expect("closed toolbox"),
+                since,
+            )
+            .await?;
+        }
         if let Some(program) = pi_program {
             spec.program = program.to_string_lossy().into_owned();
         }
@@ -370,6 +411,42 @@ impl Daemon {
                 self.stop_sidecar(id);
                 return Ok(());
             }
+            if let Some(toolbox) = &local.settings.toolbox_launch {
+                if let Err(error) = crate::agents::codex::toolbox::set_skill_roots(
+                    &sidecar.socket,
+                    &toolbox.codex_skill_roots,
+                )
+                .await
+                {
+                    let removed = self
+                        .sidecars
+                        .lock()
+                        .unwrap_or_else(|error| error.into_inner())
+                        .remove(id);
+                    if let Some(mut process) = removed {
+                        let _ = process.child.kill().await;
+                        let _ = process.child.wait().await;
+                    }
+                    if sidecar_sandbox.is_some() {
+                        self.ledger.end_orphans(id);
+                        self.ledger.retire(id, RETIRE_WITHIN).await?;
+                    }
+                    if self.toolbox_skill_setup_failed(id, &format!("{error:#}")) {
+                        return Err(error);
+                    }
+                    match std::fs::remove_file(&sidecar.socket) {
+                        Ok(()) => {}
+                        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+                        Err(error) => return Err(error.into()),
+                    }
+                    self.start_sidecar(id, sidecar, sidecar_sandbox.as_ref())
+                        .await?;
+                }
+            }
+            if stopped() {
+                self.stop_sidecar(id);
+                return Ok(());
+            }
         }
 
         // First prompt: whatever is already waiting for the agent, so it
@@ -411,10 +488,12 @@ impl Daemon {
         let now = now_ms();
         {
             let mut model = self.model();
+            let toolbox_references = std::mem::take(&mut model.rt(id).toolbox_references);
             model.rt.insert(
                 id.to_string(),
                 AgentRuntimeState {
                     spawned_at: now,
+                    toolbox_references,
                     ..AgentRuntimeState::default()
                 },
             );
@@ -494,6 +573,7 @@ impl Daemon {
                 a.backend_ref = spawned.backend_ref.clone();
             }
         });
+        self.toolbox_applied(id, previous_toolbox);
         self.emit(
             NewEvent::new(
                 "daemon",

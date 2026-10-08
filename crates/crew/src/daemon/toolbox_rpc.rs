@@ -209,7 +209,13 @@ running without it; a restart starts it again."
                 let resolved = team
                     .resolve_toolbox(level, &path)
                     .map_err(|e| RpcError::invalid(format!("{e:#}")))?;
-                self.toolbox_preview(&id, None, runtime, &resolved)
+                self.toolbox_check_preview(
+                    team,
+                    &id,
+                    team.agents.iter().find(|spec| spec.id == id),
+                    runtime,
+                    &resolved,
+                )
             })
             .collect()
     }
