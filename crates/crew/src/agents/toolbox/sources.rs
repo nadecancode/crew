@@ -243,12 +243,20 @@ fn codex(
         .clone()
         .unwrap_or_else(|| context.operator_home.clone());
     let settings = read_toml(&directory.join("config.toml"))?;
-    let mut disabled = Vec::new();
+    // CLI array overrides replace arrays. Preserve existing native exclusions
+    // while adding ours, including project-layer entries.
+    let mut disabled = settings
+        .pointer("/skills/config")
+        .and_then(Value::as_array)
+        .cloned()
+        .unwrap_or_default();
     let mut project_servers = BTreeSet::new();
     for root in project_roots(&context.workdir) {
-        project_servers.extend(object_keys(
-            read_toml(&root.join(".codex/config.toml"))?.get("mcp_servers"),
-        ));
+        let project = read_toml(&root.join(".codex/config.toml"))?;
+        if let Some(entries) = project.pointer("/skills/config").and_then(Value::as_array) {
+            disabled.extend(entries.iter().cloned());
+        }
+        project_servers.extend(object_keys(project.get("mcp_servers")));
     }
     let operator_servers = object_keys(settings.get("mcp_servers"));
     if resolved.sources.operator.contains(&SourceKind::Mcp) {
@@ -339,9 +347,22 @@ fn codex(
         ));
     }
     if !disabled.is_empty() {
-        launch
-            .codex_overrides
-            .push(("skills.config".into(), Value::Array(disabled)));
+        // Path order is stable; for duplicate entries an exclusion wins.
+        let mut entries = std::collections::BTreeMap::new();
+        for entry in disabled {
+            if let Some(path) = entry.get("path").and_then(Value::as_str) {
+                let previous = entries
+                    .entry(path.to_string())
+                    .or_insert_with(|| entry.clone());
+                if entry.get("enabled") == Some(&Value::Bool(false)) {
+                    *previous = entry;
+                }
+            }
+        }
+        launch.codex_overrides.push((
+            "skills.config".into(),
+            Value::Array(entries.into_values().collect()),
+        ));
     }
     for (kind, feature, relative) in [
         (SourceKind::Hooks, "features.hooks", "hooks.json"),
@@ -361,6 +382,8 @@ fn codex(
             || (context.private_home.is_some() && allow_project && kind != SourceKind::Plugins);
         if !enabled {
             launch.codex_overrides.push((feature.into(), json!(false)));
+        } else if selected_roles {
+            launch.codex_overrides.push((feature.into(), json!(true)));
         }
         let operator_names = match kind {
             SourceKind::Subagents => {

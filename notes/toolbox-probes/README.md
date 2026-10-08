@@ -40,3 +40,21 @@ expected observations and limitations. `codex-memory.mjs` uses `codex debug
 prompt-input`, which renders the model-visible input without a request.
 These fixtures do not test real account login, managed policies, provider
 caching, or the Crew OS sandbox.
+
+The launch integration has two additional gates. After `install-pi.mjs`
+supplies the isolated `ws` dependency, run
+`node notes/toolbox-probes/codex-root-propagation.mjs` in a PTY. It sets roots
+through a setup WebSocket, closes it, checks a second connection, then attaches
+the real Codex TUI and asserts that its localhost provider request contains the
+selected skill. It deliberately kills the TUI and app-server after capturing
+the request; success is the assertion, not a model response or an exit code
+from either child. It retains evidence under
+`target/toolbox-audit/codex-root-propagation`.
+
+`CREW_TEST_CODEX_BINARY=/absolute/path/to/codex ./scripts/build-env cargo test
+-p crew --test toolbox_launch` sends only MCP inventory commands to native
+Codex. The session and app-server remain stand-ins. This exercises Crew's
+closing overrides and effective-configuration verification, both outside and
+inside its real sandbox. Other tests cover secret scrubbing, immutable skills,
+reloads, required failures, runtime switches and sandbox exclusions. No model
+request is made by that Rust suite.

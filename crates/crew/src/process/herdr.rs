@@ -604,7 +604,14 @@ impl ProcessManager for Herdr {
         // herdr's pane API has no verified environment-removal operation.
         // Refuse before creating the pane rather than inherit toolbox tokens.
         if !spec.scrub_env.is_empty() {
-            bail!("toolbox credentials require the PTY backend; herdr cannot remove inherited variables");
+            bail!(
+                "Toolbox secrets need the pty backend: herdr panes cannot drop {} from the session",
+                spec.scrub_env
+                    .iter()
+                    .map(|name| format!("${name}"))
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            );
         }
         let mgr = &self.0;
         let pinned = pinned_to_selected_pi(spec);

@@ -484,6 +484,11 @@ impl Daemon {
         // Unsandboxed it keeps running with the daemon's own environment.
         let env = if marked.is_some() { env } else { Vec::new() };
         let mut cmd = command(marked.as_ref(), &argv, &env).map_err(|e| format!("{e:#}"))?;
+        if let Some(toolbox) = self.active_toolbox(id) {
+            for name in toolbox.scrub_env {
+                cmd.env_remove(name);
+            }
+        }
         cmd.stdin(std::process::Stdio::null())
             .stdout(std::process::Stdio::null())
             .stderr(std::process::Stdio::piped());

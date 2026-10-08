@@ -45,6 +45,11 @@ pub(crate) fn agent_settings(
     orchestrator: bool,
 ) -> anyhow::Result<AgentSettings> {
     let mut settings = AgentSettings::resolve(&team.defaults, spec);
+    crate::agents::toolbox::args::validate(
+        spec.runtime.unwrap_or(team.defaults.runtime),
+        &settings.extra_args,
+        &format!("agent '{}'.extra_args", spec.id),
+    )?;
     settings.toolbox =
         team.resolve_toolbox(&spec.toolbox, &format!("agent '{}'.toolbox", spec.id))?;
     if orchestrator && spec.permission_mode.is_none() {
