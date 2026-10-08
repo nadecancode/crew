@@ -345,7 +345,8 @@ async function settle(pi: any, ctx: any): Promise<void> {
     if (index > 0) {
       report("toolbox-failed", {
         server: server.name,
-        detail: server.required ? `${why}; it is required, so the session ended before its first request` : `${why}; the session runs without it`,
+        detail: server.required ? `${why}; it is required, so the session ended before its first request` : why,
+        ended: server.required,
       })
     }
     if (server.required) return stop(ctx, `${why}, and the session cannot run without it`)

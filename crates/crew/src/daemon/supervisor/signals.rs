@@ -157,7 +157,13 @@ impl Daemon {
             }
             Signal::Compacted => self.context_compacted(id).await,
             Signal::CompactSkipped(why) => self.compact_skipped(id, &why),
-            Signal::ToolboxFailed { server, detail } => {
+            // The session's end is reported as any exit is.
+            Signal::ToolboxFailed {
+                server,
+                detail,
+                ended: true,
+            } => self.toolbox_failed_in_session(id, &server, &detail),
+            Signal::ToolboxFailed { server, detail, .. } => {
                 self.toolbox_report(
                     id,
                     &server,

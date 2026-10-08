@@ -562,13 +562,15 @@ impl AgentRuntime for PiRuntime {
                 vec![Signal::CompactSkipped(why)]
             }
             "exiting" => vec![Signal::Exiting],
-            // A toolbox server the extension went on without, or ended the
-            // session over, before the first request.
+            // A toolbox server that did not list its tools before the first
+            // request: the session went on without it, or (a required one)
+            // ended.
             "toolbox-failed" => match str_field(payload, "server") {
                 Some(server) => vec![Signal::ToolboxFailed {
                     server,
                     detail: str_field(payload, "detail")
                         .unwrap_or_else(|| "no reason given".to_string()),
+                    ended: payload.get("ended").and_then(Value::as_bool) == Some(true),
                 }],
                 None => Vec::new(),
             },
