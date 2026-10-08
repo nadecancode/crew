@@ -536,7 +536,7 @@ pub fn model(s: &str) -> Option<String> {
 /// Time since the previous usage record, updating it.
 pub(super) fn gap(last: &mut Option<i64>, now: Option<i64>) -> Option<u64> {
     let gap = match (*last, now) {
-        (Some(a), Some(b)) if b >= a => Some((b - a) as u64),
+        (Some(a), Some(b)) if b >= a => b.checked_sub(a).map(|d| d as u64),
         _ => None,
     };
     *last = now;
@@ -633,22 +633,30 @@ lenient!(Flag, "a boolean", {
     }
 });
 
+/// A native time is valid from the epoch up to the largest exact JSON
+/// integer; anything else is unknown.
+fn valid_time(ms: i64) -> Option<i64> {
+    (0..=crew_core::rpc::features::Timestamp::MAX)
+        .contains(&ms)
+        .then_some(ms)
+}
+
 lenient!(Stamp, "a timestamp", {
     fn visit_str<E: de::Error>(self, v: &str) -> Result<Stamp, E> {
         Ok(Stamp(
             chrono::DateTime::parse_from_rfc3339(v)
                 .ok()
-                .map(|t| t.timestamp_millis()),
+                .and_then(|t| valid_time(t.timestamp_millis())),
         ))
     }
     fn visit_bool<E: de::Error>(self, _: bool) -> Result<Stamp, E> {
         Ok(Stamp(None))
     }
     fn visit_i64<E: de::Error>(self, v: i64) -> Result<Stamp, E> {
-        Ok(Stamp((v >= 0).then_some(v)))
+        Ok(Stamp(valid_time(v)))
     }
     fn visit_u64<E: de::Error>(self, v: u64) -> Result<Stamp, E> {
-        Ok(Stamp(i64::try_from(v).ok()))
+        Ok(Stamp(i64::try_from(v).ok().and_then(valid_time)))
     }
     fn visit_f64<E: de::Error>(self, _: f64) -> Result<Stamp, E> {
         Ok(Stamp(None))
@@ -696,6 +704,7 @@ pub(super) fn mentions(text: &[u8], needles: &[&[u8]]) -> bool {
 #[cfg(test)]
 pub(super) mod tests {
     use super::*;
+    use serde_json::json;
     use std::io::Write;
 
     pub fn file(dir: &tempfile::TempDir, name: &str, text: &[u8]) -> std::path::PathBuf {
@@ -965,5 +974,29 @@ pub(super) mod tests {
         assert_eq!(gap(&mut last, Some(2_500)), Some(500));
         assert_eq!(gap(&mut last, None), None);
         assert_eq!(gap(&mut last, Some(9_000)), None);
+        // Extremes never overflow.
+        let mut last = Some(i64::MIN);
+        assert_eq!(gap(&mut last, Some(i64::MAX)), None);
+    }
+
+    #[test]
+    fn times_outside_the_exact_range_are_unknown() {
+        #[derive(Deserialize)]
+        struct R {
+            t: Stamp,
+        }
+        let t = |v: serde_json::Value| serde_json::from_value::<R>(json!({ "t": v })).unwrap().t;
+        assert_eq!(t(json!("1800-01-01T00:00:00Z")), Stamp(None));
+        assert_eq!(t(json!(i64::MAX)), Stamp(None));
+        assert_eq!(t(json!(u64::MAX)), Stamp(None));
+        assert_eq!(t(json!(-5)), Stamp(None));
+        assert_eq!(
+            t(json!(9_007_199_254_740_991u64)),
+            Stamp(Some(9_007_199_254_740_991))
+        );
+        assert_eq!(
+            t(json!("2026-10-08T00:00:00Z")),
+            Stamp(Some(1_791_417_600_000))
+        );
     }
 }

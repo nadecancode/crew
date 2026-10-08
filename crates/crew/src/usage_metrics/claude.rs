@@ -173,6 +173,30 @@ impl Decoder for Claude {
             }
         };
         let native_ms = record.timestamp.0;
+        // Ownership first: a sidechain's or another session's records change
+        // no state, control records included.
+        let usage = record.kind.as_deref() == Some("assistant")
+            && record.message.as_ref().is_some_and(|m| m.usage.is_some());
+        let foreign = if record.is_sidechain.0 == Some(true) {
+            Some(Skip::Sidechain)
+        } else if record
+            .session_id
+            .as_deref()
+            .is_some_and(|s| self.session.as_deref() != Some(s))
+        {
+            Some(Skip::ForeignSession)
+        } else {
+            None
+        };
+        if let Some(skip) = foreign {
+            if usage {
+                out.push(Item::Skipped {
+                    skip,
+                    offset: line.offset,
+                });
+            }
+            return;
+        }
         match (record.kind.as_deref(), record.subtype.as_deref()) {
             (Some("system"), Some("turn_duration")) => {
                 out.push(Item::Signal {
@@ -210,22 +234,9 @@ impl Decoder for Claude {
         let Some(usage) = message.usage else {
             return;
         };
-        let skip = if record.is_sidechain.0 == Some(true) {
-            Some(Skip::Sidechain)
-        } else if message.model.as_deref() == Some("<synthetic>") {
-            Some(Skip::Synthetic)
-        } else if record
-            .session_id
-            .as_deref()
-            .is_some_and(|s| self.session.as_deref() != Some(s))
-        {
-            Some(Skip::ForeignSession)
-        } else {
-            None
-        };
-        if let Some(skip) = skip {
+        if message.model.as_deref() == Some("<synthetic>") {
             out.push(Item::Skipped {
-                skip,
+                skip: Skip::Synthetic,
                 offset: line.offset,
             });
             return;
@@ -490,5 +501,28 @@ pub(super) mod tests {
             String::from_utf8(adapter.state().unwrap()).unwrap()
         );
         assert!(!kept.contains("PRIVATE"), "{kept}");
+    }
+
+    #[test]
+    fn other_sessions_and_sidechains_change_no_state() {
+        let end = |session: &str, sidechain: bool| json!({"type": "system", "subtype": "turn_duration", "sessionId": session, "isSidechain": sidechain});
+        let drop = json!({"type": "attachment", "sessionId": "parent",
+            "attachment": {"type": "thinking_drop", "requestId": "req_x",
+                "clientChange": {"kinds": "messagesHistoryChanged"}, "newlyDropped": {"reason": "prefix_mismatch"}}});
+        let items = decode_all(
+            RuntimeKind::Claude,
+            "s-1",
+            &[
+                end("parent", false),
+                end("s-1", true),
+                drop,
+                assistant("a", 1, usage(1, 1, 1, 1)),
+            ],
+        );
+        assert!(
+            items.iter().all(|i| !matches!(i, Item::Signal { .. })),
+            "{items:?}"
+        );
+        assert_eq!(latest(&items)["m:a"].turn.as_deref(), Some("0"));
     }
 }

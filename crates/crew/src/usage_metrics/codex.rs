@@ -401,10 +401,14 @@ impl Decoder for Codex {
         };
         match (record.kind.as_deref(), payload.kind.as_deref()) {
             (Some("session_meta"), _) => {
-                let id = payload.id.as_deref().and_then(source::ident);
-                self.foreign = id.is_some() && self.session.is_some() && id != self.session;
+                // Only a valid id decides ownership; a header without one
+                // never clears a rejection.
+                if let Some(id) = payload.id.as_deref().and_then(source::ident) {
+                    self.foreign = self.session.as_ref().is_some_and(|own| *own != id);
+                }
             }
-            (Some("turn_context"), _) => self.context(&payload),
+            // Another session's context changes nothing of ours.
+            (Some("turn_context"), _) if !self.foreign => self.context(&payload),
             (Some("event_msg"), Some("token_count")) => {
                 if let Some(info) = &payload.info {
                     self.token_count(line, info, native_ms, out);
@@ -785,5 +789,41 @@ mod tests {
         assert_eq!(obs.len(), 1);
         assert_eq!(obs[0].key, "m:a");
         assert_eq!(obs[0].phase, Phase::Seed);
+    }
+
+    #[test]
+    fn another_sessions_headers_and_context_change_nothing() {
+        let items = decode_all(
+            RuntimeKind::Codex,
+            "th-1",
+            &[
+                meta("th-1"),
+                turn("gpt-6-luna", "t1"),
+                tc(0, v(100, 80, 10), Some(v(100, 80, 10))),
+                meta("other"),
+                turn("gpt-6.1-sol", "t-other"),
+                // A header without a valid id keeps the rejection.
+                json!({"type": "session_meta", "payload": {"id": "has space"}}),
+                json!({"type": "session_meta", "payload": {}}),
+                tc(1, v(10, 5, 1), Some(v(10, 5, 1))),
+                meta("th-1"),
+                tc(2, v(150, 120, 17), Some(v(50, 40, 7))),
+            ],
+        );
+        let obs = observations(&items);
+        assert_eq!(obs.len(), 2);
+        assert_eq!(
+            obs[1].model.as_deref(),
+            Some("gpt-6-luna"),
+            "not the foreign model"
+        );
+        assert_eq!(obs[1].turn.as_deref(), Some("t1"));
+        assert!(items.iter().any(|i| matches!(
+            i,
+            Item::Skipped {
+                skip: Skip::ForeignSession,
+                ..
+            }
+        )));
     }
 }

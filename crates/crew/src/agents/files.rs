@@ -141,7 +141,14 @@ impl CliHome {
     /// link naming the home itself is followed once, here; nothing beneath
     /// it is.
     pub fn capture(path: &Path) -> Option<Self> {
-        let root = File::open(path).ok()?;
+        use std::os::unix::fs::OpenOptionsExt;
+        // Directory-only and nonblocking: a FIFO or device named as the home
+        // fails at once instead of blocking the open.
+        let root = std::fs::OpenOptions::new()
+            .read(true)
+            .custom_flags(libc::O_DIRECTORY | libc::O_NONBLOCK | libc::O_CLOEXEC)
+            .open(path)
+            .ok()?;
         root.metadata().ok()?.is_dir().then(|| Self {
             root,
             path: path.to_path_buf(),
@@ -409,6 +416,15 @@ mod tests {
             assert!(captured.claude_transcript(refused).is_none(), "{refused}");
         }
         assert!(CliHome::capture(&home.join("projects/-w/s-1.jsonl")).is_none());
+        // A FIFO named as the home is refused without blocking.
+        let pipe = dir.path().join("home-fifo");
+        let c = std::ffi::CString::new(pipe.as_os_str().as_encoded_bytes()).unwrap();
+        assert_eq!(unsafe { libc::mkfifo(c.as_ptr(), 0o600) }, 0);
+        assert!(CliHome::capture(&pipe).is_none());
+        // A link naming the home is the operator's own configuration.
+        let linked = dir.path().join("claude-link");
+        symlink(&home, &linked).unwrap();
+        assert!(CliHome::capture(&linked).is_some());
 
         // The home captured at launch stays the one read after a change of
         // configuration: a new directory under the old name is not followed.
