@@ -13,17 +13,18 @@ describe.runIf(existsSync(join(DIST, "manifest.json")))("bundle", () => {
   const js = (p: string) => p.endsWith(".js");
   const terminal = (p: string) => /assets\/(Terminal|xterm)-/.test(p);
 
-  test("P1: script for the dashboard (all but the terminal chunk) ≤ 230.5 KB", () => {
-    expect(sum((p) => js(p) && !terminal(p))).toBeLessThanOrEqual(230.5 * KB);
+  // Operator m-9a6de4b0d5cc: one allowance shared by all four feature slices.
+  test("P1: script for the dashboard (all but the terminal chunk) ≤ 310.5 KB", () => {
+    expect(sum((p) => js(p) && !terminal(p))).toBeLessThanOrEqual(310.5 * KB);
   });
-  test("P2: stylesheet ≤ 34 KB", () => {
-    expect(sum((p) => p.endsWith(".css"))).toBeLessThanOrEqual(34 * KB);
+  test("P2: stylesheet ≤ 42 KB", () => {
+    expect(sum((p) => p.endsWith(".css"))).toBeLessThanOrEqual(42 * KB);
   });
   test("P3: terminal chunk ≤ 350 KB", () => {
     expect(sum((p) => js(p) && terminal(p))).toBeLessThanOrEqual(350 * KB);
   });
-  test("P4: every file of web-dist the manifest lists ≤ 600 KB", () => {
-    expect(sum(() => true)).toBeLessThanOrEqual(600 * KB);
+  test("P4: every file of web-dist the manifest lists ≤ 688 KB", () => {
+    expect(sum(() => true)).toBeLessThanOrEqual(688 * KB);
   });
 });
 

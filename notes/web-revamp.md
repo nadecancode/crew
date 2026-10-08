@@ -333,7 +333,19 @@ Meaningful new tests: theme preference validation/restoration; derived counts do
 <a id="budget"></a>
 ## §budget — delivery tiers and byte allocation
 
-Budget decisions: orchestrator `m-3e4be3cb6e90` first raised P1 to 228,000 bytes and P2 to 34,000. The subsequent decision `m-362e9ff64bfe` (confirmed for integration in `m-e37211103ae0`) raises **P1 to 230,500 bytes** to retain both List modes. **P2 remains 34,000; P3 350,000; P4 600,000; P5–P20 unchanged.** No further raise is authorized. If the integrated build exceeds P1, the fixed fallback is to cut **Team List only**, including its follow-ups; preserve Task List and T0. Team List remains a separate reversible commit stack.
+Historical revamp budget decisions: orchestrator `m-3e4be3cb6e90` first raised P1 to 228,000 bytes and P2 to 34,000. The subsequent decision `m-362e9ff64bfe` (confirmed for integration in `m-e37211103ae0`) raised **P1 to 230,500 bytes** to retain both List modes. **P2 remained 34,000; P3 350,000; P4 600,000; P5–P20 unchanged.** No further raise was authorized for that revamp. Its fallback above P1 was to cut **Team List only**, including its follow-ups; preserve Task List and T0. Team List remained a separate reversible commit stack.
+
+Current feature budget approval: operator `m-9a6de4b0d5cc`, recorded in
+`features-acceptance-prep` and `features-p6-integration` (2026-10-08), grants
+Epics, Docs, Usage and Asides **one shared allowance**: P1 nonterminal JS
+310,500 bytes; P2 all CSS 42,000 bytes; P4 all manifest-listed files except
+`manifest.json` 688,000 bytes. The increases are 80,000 / 8,000 / 88,000 bytes
+against the previous ceilings, not per slice. Baseline manifest source
+`fnv1a64:fa14dc56661a2b82` measures 230,387 / 33,999 / 595,884 bytes. Record each
+slice's measured delta against its named base; final combined measurement wins.
+P3 and all other security, startup, frame, heap, accessibility and dependency
+gates are unchanged. All code chunks must be requested at document start.
+The historical result tables below retain their original ceilings and results.
 
 This supersedes the earlier allocation totals at `8675c845`. T1 work remains conditional on measured bytes; no assumed deduplication credit. Static mockup CSS is a visual reference, not code to paste into the product. The reviewer records grants and proven shared-byte credits in `review/web-revamp-budget-ledger.md`; its combined-build records supersede estimates made by summing standalone slices.
 
@@ -373,7 +385,7 @@ Any other new §views behaviour not named in T0 follows the same optional T1 mea
 
 T2 remains outside committed implementation scope: additional Task List search/status/assignee filtering; full 390px/coarse-pointer specialization beyond the List default; explicit Follow/Jump counters; bus search/type filter; usage-series isolation; raw Event.data/message metadata; session details disclosure; icons beyond six. Build none speculatively while required T0 and funded T1 work remains.
 
-During slice development, optional work was trimmed in this order (first removed first): (1) extra icon paths and raw data/metadata; (2) session details and usage isolation; (3) bus search/type and explicit-follow counters; (4) full sub-640px/coarse-pointer specialization and extra task filters; (5) optional summary/usage aggregates and attention count; (6) extra lifecycle/fallback/artifact facts beyond today's display; (7) new retry/toggle controls; (8) Team List; (9) Task List. Existing functionality is never a cut candidate. The later orchestrator decision overrides that development order at final integration: if P1 exceeds 230,500, cut Team List only; do not remove Task List or unrelated T0/T1 work instead. Report the measured result. No further budget increase is authorized.
+During the original revamp, optional work was trimmed in this order (first removed first): (1) extra icon paths and raw data/metadata; (2) session details and usage isolation; (3) bus search/type and explicit-follow counters; (4) full sub-640px/coarse-pointer specialization and extra task filters; (5) optional summary/usage aggregates and attention count; (6) extra lifecycle/fallback/artifact facts beyond today's display; (7) new retry/toggle controls; (8) Team List; (9) Task List. Existing functionality was never a cut candidate. The later revamp decision overrode that development order: above P1 230,500, cut Team List only, preserving Task List and unrelated T0/T1 work. That historical decision authorized no further increase; the shared four-feature approval above governs the new tranche.
 
 Mockup scope labels matter: Team/Task List and extra aggregates are funded T1 references; new filters/follow controls remain T2. DAG, attention shell, inspector, bus rows, themes, and panel replacement are T0 references. Omit an unapproved optional control entirely. Final QA report lists actual tiers delivered and any deferred references.
 
