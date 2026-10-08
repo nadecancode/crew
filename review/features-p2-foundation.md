@@ -5,9 +5,11 @@ domain service or capability is registered by this change. The production
 composition is tracked separately by `features-p6-daemon-wiring`; its closure
 is required before the integrated feature release can complete.
 
-The source checkpoint is `57110710880506a12c71483520bb5e605d15fe45`, on the
-reviewed main `201e7fdc`. The later review/report commit does not enable a
-service. This foundation changes neither protocol v6 nor native authentication,
+The source checkpoints are `57110710880506a12c71483520bb5e605d15fe45` and the
+explicit host-readiness accessor in `3c0f84b1`. The review candidate also merges
+reviewed main `4f24f9c6`; that upstream interval contains docs/probes and the
+shared bundle-budget test adjustment, with no production Rust changes. This
+foundation changes neither protocol v6 nor native authentication,
 grant catalogs, task ordering, execution eligibility or the member MCP catalog.
 
 ## Run and connection ownership
@@ -106,8 +108,7 @@ failed during `native start`, before the tested route opened
 (`workspace-native-01.log`). The unchanged gateway suite passed all 21 cases
 with one test thread (`native-gateway-replay-01.log`). The final broad run uses
 four test threads and `--no-fail-fast`, preserving the original failure log.
-Final workspace, strict Clippy, format and Rust 1.82 results are recorded below
-after completion.
+Final workspace, strict Clippy, format and Rust 1.82 results follow.
 
 On the source checkpoint, the final broad run passed 1,440 tests with four
 ignored (`workspace-native-02.log`, required sandbox mode, four test threads).
@@ -120,6 +121,14 @@ Stable native CLI, native library-test and Rust 1.82 CLI executables are tagged
 with source `57110710` in `target/features-p2/binaries.json`; that file records
 their SHA-256 values and byte counts. The first port checkpoint's separately
 cited artifact remains intact.
+
+After the reviewed main merge and readiness-accessor addition, the final
+feature suite passed all 22 cases (`final-main-focused.log`) and the changed
+bundle-budget suite passed both cases (`final-main-budget.log`). Strict
+workspace/all-target native Clippy, format and the Rust 1.82 default CLI gate
+passed again (`clippy-final-main.log`, `fmt-final-main.log`,
+`msrv-final-main.log`). The unchanged production source needs no additional
+broad rerun for the upstream doc/probe and test-budget merge.
 
 ## Deferred integration ledger
 
