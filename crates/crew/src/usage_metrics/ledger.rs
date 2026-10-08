@@ -963,7 +963,6 @@ impl Ledger {
     /// partial. When `lost` gives why the cohort itself is not known (detail
     /// the range needs has expired), the count is unavailable and the
     /// statuses incomplete.
-    /// partial.
     pub fn executions(
         &self,
         run_id: &str,
