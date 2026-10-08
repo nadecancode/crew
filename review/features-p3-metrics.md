@@ -13,8 +13,11 @@ Every checkpoint is approved by cache-reviewer: C1 at `9da15100`, C2 and C3a
 through `cf6bf147` (m-ed9123828341), C3b, C4a and C4b through `1b09215f`
 (m-2f030badb193). The final review found Q4 (m-8150704141a0): an estimate
 kept a finite upper bound while spend it could not see (a lost source, an
-aside answer without a usage source) might belong to its scope. That is
-fixed in `b5306d03`; the final tree is `5caaf539`.
+aside answer without a usage source) might belong to its scope, fixed in
+`b5306d03`. Its remainder (m-5b2d8f56a506) is fixed in `1fd0041b`, the final
+tree: an aside execution without a source counted only when it started inside
+the range, a source gap recorded again under another kind kept its first
+kind, and session files with unread data left every estimate finite.
 
 ## Commits
 
@@ -23,10 +26,10 @@ fixed in `b5306d03`; the final tree is `5caaf539`.
 | C1 pure accounting | `b763bb44`, `4df0a141`, `9da15100` | Counter validation and normalization, price book and exact cost intervals, per-metric coverage, completed-task cohort. |
 | C2 native adapters | `dfb0308b`, `ac5d0a86`, `acf92c4f`, `c49f1bfa`, `a1991ca1`, `d5d9c40b`, `ff699482`, `82d5c082`, `cf6bf147` | Bounded read-only reader, continuity, Claude and Codex adapters, pi gated, captured CLI homes, lifecycle fixtures and parity. Codex increments identified by their vectors, never revised, with a high-water mark of every vector the stream has shown, across rewrites and restarts; native batches carry their start position. |
 | C3a ledger core | `2c74dca8`, `78fca059`, `82d5c082`, `cf6bf147` | Durable streams, owners, work bindings, observations, seen ids, coverage, aggregates in wide integers, retention, resumed owners; a batch is attributed only when no owner, work or account binding changed anywhere inside it. |
-| C3b cohort and asides | `d5152626`, `b0b41688`, `1b09215f` | First completions, task costs, cohort query, aside execution read-back; late corrections make them unavailable; refused and drained sources leave cohort cost open; earlier spend inside a period's first hour. |
-| C4a queries | `4e78669c`, `3c3dcf37`, `8ba7da72`, `4536c488`, `a41a0504`, `1b09215f`, `b5306d03` | Canonical queries over exact half-open ranges (the shared `UsageQuery::resolved_shape`), scoped secondary metrics, bounded cursors, summary, series, breakdown, observations, runs, prices; refused sources as gaps; aside counts unavailable when their range lost detail; estimates open (no finite upper bound) while a lost source of the same kind, or an unsourced aside answer, may hold spend of the scope. |
+| C3b cohort and asides | `d5152626`, `b0b41688`, `1b09215f`, `1fd0041b` | First completions, task costs, cohort query, aside execution read-back; late corrections make them unavailable; refused and drained sources leave cohort cost open; earlier spend inside a period's first hour. Only live or unknown-kind gaps, and unread live files, leave the cost per completed task open. |
+| C4a queries | `4e78669c`, `3c3dcf37`, `8ba7da72`, `4536c488`, `a41a0504`, `1b09215f`, `b5306d03`, `1fd0041b` | Canonical queries over exact half-open ranges (the shared `UsageQuery::resolved_shape`), scoped secondary metrics, bounded cursors, summary, series, breakdown, observations, runs, prices; refused sources as gaps; aside counts unavailable when their range lost detail; estimates open (no finite upper bound) while a lost source of the same kind (or of unknown kind), a source of that kind with unread data, or an unsourced aside answer that may have run during the range may hold spend of the scope. |
 | C4b service | `18995664`, `1e1d66e3`, `1b09215f` | Collection scheduling, captured homes per registration, monotonic revisions, ready watches, durable source gaps, and every ledger commit and retirement fenced by the stream's persisted registration. |
-| U18 fixtures | `8156e7d5`, `8245c0d0`, `b5306d03`, `5caaf539` | `crates/crew/tests/web_usage.rs` generates the web dashboard's `usage.json` from native records through the ledger and queries: six model-backed members across both runtimes, two with no usage yet, and a separate reply after one's session file goes missing. |
+| U18 fixtures | `8156e7d5`, `8245c0d0`, `b5306d03`, `5caaf539`, `1fd0041b` | `crates/crew/tests/web_usage.rs` generates the web dashboard's `usage.json` from native records through the ledger and queries: six model-backed members across both runtimes, two with no usage yet, and a separate reply after one's session file goes missing. The replies are taken with every source read, and one more shows the epic while two live session files are still being read. |
 | Not this card | `d5cf05f9`, reverted by `5caaf539` | The web feature negotiation hook of `features-p5-web-usage`, committed on this branch by mistake; it lands with that card and its rebuilt bundle. `web/` is unchanged by this card. |
 | Main merges | `36d38a27`, `a5960fc4`, `e8399539` | `b591744b`, then `201e7fdc`, no conflicts. |
 
@@ -100,10 +103,10 @@ opened; the same launch registered again keeps its owner), `bind_work`,
 | U07 | Missing versus explicit zero, invalid and overflowing counters, invalid relations, zero denominators, overflow without numeric bounds. |
 | U08 | Hit rate, ordinary input, output, cost and complete-category splits each on their own rows; aggregates equal per-observation totals on the lifecycle fixtures. |
 | U09 | Reference book rows, 272k boundary, TTL mixtures, flat writes, missing writes, unpriced models, batch tiering. |
-| U10 | First completions, recompletion, completion epic, earlier spend (also inside a period's first hour, conservatively once its detail expired), untimed spend after completion widening only the upper bound, missing task cost, refused or drained sources, incomplete membership before tracking, no completions. |
+| U10 | First completions, recompletion, completion epic, earlier spend (also inside a period's first hour, conservatively once its detail expired), untimed spend after completion widening only the upper bound, missing task cost, refused or drained sources, unread live files, incomplete membership before tracking, no completions. |
 | U11 | Owners and work bindings captured at file positions; late copies keep their binding; a backlog written before re-registration keeps its old owner; a batch across any binding change (A, B, A included), any account change or another owner is attributed to neither side; a batch without a known start goes to no one. |
 | U12 | Runs tracked by id with their tracking start; pre-tracking history kept in its own scope, including its later corrections. Durable run pointer and clear-session archiving belong to P2. |
-| U13 | Copied fork context only seeds; new answer usage only in aside scope; failed spend kept; an execution without a source leaves totals partial and the aside scope's estimate without an upper bound, as the aside's own total does; aside counts are unavailable when their range needs expired detail. |
+| U13 | Copied fork context only seeds; new answer usage only in aside scope; failed spend kept; an execution without a source leaves totals partial and the aside scope's estimate without an upper bound, as the aside's own total does, for every range it may have run in (an unknown start or finish reaching as far as it can); aside counts are unavailable when their range needs expired detail. |
 | U14 | Detail expiry keeps aggregates and seen ids; an identical old copy is a no-op; a changed old id is outside the horizon (also after restart and rewrite) and makes affected aggregates, cohort and aside figures unavailable; closed admission refuses with a gap. |
 | U15 | Request-id history diagnostics, file order under regressing timestamps, unknown gaps, foreign diagnostics ignored. |
 | U16 | No body, prompt or tool output in any table. The only path text is a stream's locator, the configured CLI home it is opened from, kept for recovery and never exported. No Activity, scheduling or prompt effect. |
@@ -116,22 +119,22 @@ Aside sources that run without native session files (Claude
 
 ## Gates
 
-On `5caaf539` (the final tree), slot D, `CARGO_INCREMENTAL=0`,
+On `1fd0041b` (the final tree), slot D, `CARGO_INCREMENTAL=0`,
 `CARGO_TARGET_DIR=target/p3-metrics`, logs in the designer worktree under
-`target/p3-metrics/logs/5caaf539-*`:
+`target/p3-metrics/logs/1fd0041b-*`:
 
-- `cargo test --locked --workspace --no-fail-fast`: 1,499 passed, 1 failed,
+- `cargo test --locked --workspace --no-fail-fast`: 1,503 passed, 1 failed,
   4 ignored. The failure is
   `output::store::tests::public_reference_never_selects_another_credential_scope_or_path`
   with "output store is busy", the intermittent failure of the output store
   tests from main (`a9979a4e`, reported to the orchestrator); run alone the
-  output store tests pass, 7 of 7 (`5caaf539-output-store-rerun.log`).
+  output store tests pass, 7 of 7 (`1fd0041b-output-store-rerun.log`).
 - `cargo test -p crew --lib usage_metrics` from the pinned binary
-  `target/p3-metrics/pinned/5caaf539-crew-lib-tests` (sha256
-  5314924012918daec778d90593a189cc0af9bc771aec75955c361ee21357d4a5):
-  122 passed.
+  `target/p3-metrics/pinned/1fd0041b-crew-lib-tests` (sha256
+  ee20096d0c969b68329d2a757d3a4c271a37c604f7ab806a48810b14eb7f9593):
+  126 passed.
 - `cargo test -p crew --test web_usage`: `usage.json` matches (sha256
-  prefix 09f47743f082c3f7).
+  prefix fb5572010efc1275).
 - `cargo clippy --locked --workspace --all-targets -- -D warnings`: clean.
 - `cargo fmt --all --check`: clean.
 - `scripts/check-msrv` (Rust 1.82.0, committed lockfile, target
@@ -141,6 +144,7 @@ On `5caaf539` (the final tree), slot D, `CARGO_INCREMENTAL=0`,
   match.
 
 Earlier full runs are kept beside them: `8245c0d0` (1,498 passed),
+`5caaf539` (1,499 passed, the same output store failure),
 `55bd4da9` (the same output store failure, and `web_wire`'s fixture list,
 fixed in `8245c0d0`) and `b5306d03` (`web_bundle` failed: the web hook
 changed `web/` without its bundle; `5caaf539` reverts it).
