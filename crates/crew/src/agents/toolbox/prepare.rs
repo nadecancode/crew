@@ -18,6 +18,10 @@ use crate::endpoints::ToolboxReferences;
 
 #[derive(Clone, Debug)]
 pub struct Context {
+    /// Only the daemon's checked immutable pin, never an installed PATH binary.
+    pub crew_pin: Option<PathBuf>,
+    /// Codex's native shell sandbox denies the helper's daemon authentication.
+    pub codex_native_sandbox: bool,
     pub runtime: RuntimeKind,
     pub state_dir: PathBuf,
     pub agent_dir: PathBuf,
@@ -211,6 +215,39 @@ pub fn prepare(
                         }
                     }
                 }
+                Item::Builtin(_) => {
+                    if context.runtime == RuntimeKind::Codex && context.codex_native_sandbox {
+                        item.status = status(ToolboxItemCode::NotAvailable, "Not available");
+                        item.detail = Some("Codex's native sandbox cannot authenticate the output helper; use the original captured file".into());
+                    } else {
+                        match super::builtin::snapshot(
+                            &store,
+                            context.crew_pin.as_deref(),
+                            inherited.and_then(|active| active.files.get(key)),
+                        ) {
+                            Ok((snapshot, pin)) => {
+                                validate_file(context.runtime, key, &snapshot, &store)?;
+                                plan.active
+                                    .content
+                                    .insert(key.clone(), Content::Sha256(snapshot.hash.clone()));
+                                plan.active.files.insert(key.clone(), snapshot);
+                                plan.runtime.compact_helper = Some(pin);
+                                item.detail = Some(
+                                    "Built-in captured-output view; exact raw recovery, no hooks"
+                                        .into(),
+                                );
+                                if !context.preview {
+                                    item.status = status(ToolboxItemCode::Active, "Active");
+                                }
+                            }
+                            Err(error) => {
+                                item.status =
+                                    status(ToolboxItemCode::NotAvailable, "Not available");
+                                item.detail = Some(format!("{error:#}"));
+                            }
+                        }
+                    }
+                }
                 Item::Hook(hook) => {
                     if !HOOK_EVENTS.contains(&hook.event.as_str()) {
                         item.status = status(
@@ -398,6 +435,7 @@ pub fn detail(item: &Item) -> Option<String> {
             Some(text)
         }
         Item::File(file) => Some(file.path.clone()),
+        Item::Builtin(_) => Some("Built-in compact-cli skill".into()),
         Item::Hook(hook) => Some(format!("{}: {}", hook.event, hook.command.join(" "))),
     }
 }
@@ -537,7 +575,7 @@ fn render(context: &Context, store: &Store, plan: &mut Plan) -> Result<()> {
                     &item.name,
                 );
                 match &plan.active.resolved.items[&key].item {
-                    Item::File(_) => {
+                    Item::File(_) | Item::Builtin(_) => {
                         let snapshot = &plan.active.files[&key];
                         let files = store.files(snapshot)?;
                         let base = if key.kind == ItemKind::Skills {
@@ -678,6 +716,8 @@ mod tests {
         std::fs::create_dir_all(&agent_dir).unwrap();
         std::fs::create_dir_all(root.join("work/.git")).unwrap();
         Context {
+            crew_pin: None,
+            codex_native_sandbox: false,
             runtime,
             state_dir: root.join("state"),
             agent_dir,
@@ -937,5 +977,135 @@ mod tests {
             }
         }
         writable(root);
+    }
+
+    fn compact_selection() -> Resolved {
+        crew_core::toolbox::resolve(
+            crew_core::toolbox::Catalog {
+                bundles: &BTreeMap::new(),
+                defaults: &Default::default(),
+                inherit_mcp: false,
+            },
+            &crew_core::toolbox::Toolbox {
+                include: vec!["compact-cli".into()],
+                ..Default::default()
+            },
+            "member",
+        )
+        .unwrap()
+    }
+
+    fn pin(path: &Path, bytes: &[u8]) {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::write(path, bytes).unwrap();
+        std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o500)).unwrap();
+    }
+
+    #[test]
+    fn builtin_skill_is_materialized_for_each_runtime_without_hooks_or_member_paths() {
+        let temp = tempfile::tempdir().unwrap();
+        let binary = temp.path().join("crew-one");
+        let other = temp.path().join("crew-two");
+        pin(&binary, b"same executable bytes");
+        pin(&other, b"same executable bytes");
+        for runtime in [RuntimeKind::Claude, RuntimeKind::Codex, RuntimeKind::Pi] {
+            let mut ctx = context(temp.path(), runtime, runtime.as_str());
+            ctx.crew_pin = Some(binary.clone());
+            let first = prepare(&ctx, compact_selection(), None, |_| unreachable!()).unwrap();
+            assert!(first.stops.is_empty());
+            assert_eq!(first.view.items[0].status.code, ToolboxItemCode::Active);
+            let snapshot = first.active.files.values().next().unwrap();
+            let store = Store::open(&ctx.state_dir).unwrap();
+            let files = store.files(snapshot).unwrap();
+            assert_eq!(files.len(), 3);
+            assert!(files[Path::new("scripts/output")].1);
+            assert!(!files
+                .values()
+                .any(|(bytes, _)| String::from_utf8_lossy(bytes)
+                    .contains(temp.path().to_str().unwrap())));
+            match runtime {
+                RuntimeKind::Claude => {
+                    assert_eq!(
+                        std::fs::read(
+                            ctx.agent_dir
+                                .join("crew-toolbox/skills/compact-cli/SKILL.md")
+                        )
+                        .unwrap(),
+                        files[Path::new("SKILL.md")].0
+                    );
+                    assert!(!ctx.agent_dir.join("crew-toolbox/hooks").exists());
+                }
+                RuntimeKind::Codex => {
+                    assert_eq!(
+                        first.runtime.codex_skill_roots,
+                        std::slice::from_ref(&snapshot.path)
+                    )
+                }
+                RuntimeKind::Pi => assert_eq!(
+                    first.runtime.pi_skills,
+                    std::slice::from_ref(&snapshot.path)
+                ),
+                _ => unreachable!(),
+            }
+            ctx.crew_pin = Some(other.clone());
+            let second = prepare(
+                &ctx,
+                compact_selection(),
+                Some(&first.active),
+                |_| unreachable!(),
+            )
+            .unwrap();
+            assert_eq!(first.active.fingerprint, second.active.fingerprint);
+            assert_eq!(second.runtime.compact_helper.as_ref(), Some(&other));
+        }
+        cleanup(temp.path());
+    }
+
+    #[test]
+    fn builtin_helper_failure_is_visible_and_an_inherited_build_is_never_substituted() {
+        let temp = tempfile::tempdir().unwrap();
+        let binary = temp.path().join("crew");
+        pin(&binary, b"original helper");
+        let mut ctx = context(temp.path(), RuntimeKind::Claude, "a");
+        let absent = prepare(&ctx, compact_selection(), None, |_| unreachable!()).unwrap();
+        assert_eq!(
+            absent.view.items[0].status.code,
+            ToolboxItemCode::NotAvailable
+        );
+        assert!(absent.runtime.compact_helper.is_none());
+        ctx.crew_pin = Some(binary.clone());
+        let one = prepare(&ctx, compact_selection(), None, |_| unreachable!()).unwrap();
+        std::fs::remove_file(&binary).unwrap();
+        pin(&binary, b"changed helper");
+        let mut strict = compact_selection();
+        strict.strict = true;
+        let inherited = prepare(&ctx, strict, Some(&one.active), |_| unreachable!()).unwrap();
+        assert_eq!(
+            inherited.view.items[0].status.code,
+            ToolboxItemCode::NotAvailable
+        );
+        assert_eq!(inherited.stops.len(), 1);
+        assert!(inherited.active.files.is_empty());
+        assert!(inherited.runtime.compact_helper.is_none());
+        let refreshed = prepare(&ctx, compact_selection(), None, |_| unreachable!()).unwrap();
+        assert_ne!(one.active.fingerprint, refreshed.active.fingerprint);
+        ctx.runtime = RuntimeKind::Codex;
+        ctx.codex_native_sandbox = true;
+        let guarded = prepare(&ctx, compact_selection(), None, |_| unreachable!()).unwrap();
+        assert_eq!(
+            guarded.view.items[0].status.code,
+            ToolboxItemCode::NotAvailable
+        );
+        assert!(guarded.active.files.is_empty());
+        assert!(guarded.runtime.compact_helper.is_none());
+        ctx.runtime = RuntimeKind::Shell;
+        ctx.crew_pin = None;
+        let shell = prepare(&ctx, compact_selection(), None, |_| unreachable!()).unwrap();
+        assert_eq!(
+            shell.view.items[0].status.code,
+            ToolboxItemCode::NotApplicable
+        );
+        assert!(shell.stops.is_empty());
+        cleanup(temp.path());
     }
 }

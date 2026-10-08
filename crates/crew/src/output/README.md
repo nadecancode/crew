@@ -5,6 +5,51 @@ result. It never runs the command, changes its approval, installs a hook,
 rewrites history or replaces a file read. Toolbox packaging is a separate
 step; nothing is enabled automatically.
 
+## Opt-in toolbox skill
+
+Select the built-in `compact-cli` bundle for a member, or in
+`defaults.toolbox` for a team that wants it:
+
+```yaml
+agents:
+  - id: tests
+    role: Run and inspect tests
+    toolbox:
+      include: [compact-cli]
+```
+
+This adds one skill, with no hooks, MCP server, tool declarations or permission
+grants. It explains when to request a summary and when exact source evidence
+is needed. Its `scripts/output` delegates only `crew output` arguments to the
+daemon's checked executable; it never executes the command that produced the
+log. The generated `helper.json` records that executable's SHA-256, output
+format version and parser id. Those bytes, the script and the fixed skill text
+are snapshotted and included in the normal toolbox fingerprint. Runtime paths
+are supplied separately, so the same executable and skill have the same
+fingerprint in different member directories.
+
+`crew toolbox` reports the skill's origin and availability. A missing pin or a
+Codex native shell sandbox makes it **Not available**; a required/strict
+selection then prevents launch. Codex's native sandbox cannot authenticate
+this helper against the daemon. The bundle never relaxes that sandbox, adds
+writable paths or grants network access. Existing unrestricted Codex settings
+and the supported Crew OS sandbox path can use the helper. Shell members show
+**Not applicable**. Other native permission rules still govern each explicit
+helper invocation.
+
+Normal toolbox reset, exclusion, pending reload and restart rules apply. An
+explicit `toolboxes.compact-cli` definition replaces the built-in bundle
+whole; a user skill named `compact-cli` stays an ordinary file skill. No
+filesystem path is treated as a built-in identifier. Subagents inherit the
+frozen bytes. If an inherited skill names another executable after a daemon
+upgrade, it becomes unavailable; recreate that subagent from its restarted
+parent to select the new build. A running skill never silently switches to
+another binary on PATH. `--expected-helper SHA256` verifies the executing
+binary before authentication, source reading or store access, for both view
+and recovery.
+
+## Explicit views
+
 The rules are compiled into crew (`format_version: 1`, `cargo_test_v1`),
 with no project-local rule discovery or separate mutable rules file. A
 toolbox must fingerprint its pinned crew binary, these format/parser ids and

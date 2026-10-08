@@ -310,6 +310,17 @@ impl Daemon {
             )
             .await?,
         );
+        let rebuild_prompt = self.claude_toolbox_prompt_policy(
+            &agent,
+            previous_toolbox.as_ref(),
+            start == Start::Refresh && resume && local.session_confirmed,
+        );
+        local
+            .settings
+            .toolbox_launch
+            .as_mut()
+            .expect("prepared toolbox")
+            .claude_rebuild_prompt = rebuild_prompt;
         if stopped() {
             return Ok(());
         }
@@ -353,6 +364,9 @@ impl Daemon {
         }
         if let Some(program) = pi_program {
             spec.program = program.to_string_lossy().into_owned();
+        }
+        if let Some(toolbox) = &local.settings.toolbox_launch {
+            toolbox.bind_helpers(&mut spec);
         }
         // Before the sandboxes are made: they pass on what the launch's
         // environment names.

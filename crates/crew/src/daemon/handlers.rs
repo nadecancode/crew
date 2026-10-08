@@ -69,6 +69,26 @@ fn agent_only(who: &Who) -> Result<&str, RpcError> {
 }
 
 impl Daemon {
+    /// An explicit id-scoped inbox read returns the full body. Operator and
+    /// outbox views remain observations of someone else's unread state.
+    pub(crate) fn read_message_by_id(
+        &self,
+        who: &Who,
+        id: &str,
+    ) -> Result<crew_core::Message, RpcError> {
+        let message = self.message_by_id(who, id)?;
+        if let Who::Agent(agent) = who {
+            if self
+                .bus
+                .get(id)?
+                .is_some_and(|(_, recipients)| recipients.contains(agent))
+            {
+                self.acknowledge_received(agent, &[id.to_string()], true)?;
+            }
+        }
+        Ok(message)
+    }
+
     pub(crate) fn is_orchestrator(&self, id: &str) -> bool {
         self.model().agent(id).is_some_and(|a| a.orchestrator)
     }
@@ -424,21 +444,14 @@ change identity",
                         .receive(&agent, unread_only, limit.unwrap_or(50).clamp(1, 500))?;
                 // Only the agent itself consumes its inbox; the operator just looks.
                 if ack && matches!(who, Who::Agent(_)) && !messages.is_empty() {
-                    let received: Vec<_> =
-                        messages.iter().map(|entry| entry.message.clone()).collect();
-                    self.record_task_wakeups(&agent, &received)?;
                     let ids: Vec<String> = messages.iter().map(|m| m.message.id.clone()).collect();
-                    self.bus.mark_delivered(&agent, &ids)?;
-                    self.resume_waiting_from_delivery(&agent, &ids);
-                    self.bus.acknowledge(&agent, Some(&ids))?;
-                    self.refresh_counts(std::slice::from_ref(&agent));
+                    self.acknowledge_received(&agent, &ids, true)?;
                 }
                 reply(InboxResult { messages })
             }
             Call::Ack { ids } => {
                 let agent = agent_only(&who)?.to_string();
-                let n = self.bus.acknowledge(&agent, Some(&ids))?;
-                self.refresh_counts(std::slice::from_ref(&agent));
+                let n = self.acknowledge_received(&agent, &ids, false)?;
                 Ok(json!({ "acknowledged": n }))
             }
             Call::Listen => {
@@ -513,7 +526,7 @@ change identity",
                 };
                 reply(self.bus.history(scope.as_deref(), limit)?)
             }
-            Call::MessageGet { id } => reply(self.message_by_id(&who, &id)?),
+            Call::MessageGet { id } => reply(self.read_message_by_id(&who, &id)?),
 
             Call::StatusUpdate {
                 status,

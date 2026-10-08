@@ -216,6 +216,32 @@ impl Daemon {
         Ok(())
     }
 
+    /// Persist parked-card cues before acknowledging a body known to have
+    /// reached its recipient. Inbox reads also keep their delivery bookkeeping.
+    pub(crate) fn acknowledge_received(
+        &self,
+        agent: &str,
+        ids: &[String],
+        mark_delivered: bool,
+    ) -> Result<usize, RpcError> {
+        let mut received = Vec::new();
+        for id in ids {
+            if let Some((message, recipients)) = self.bus.get(id)? {
+                if recipients.iter().any(|recipient| recipient == agent) {
+                    received.push(message);
+                }
+            }
+        }
+        self.record_task_wakeups(agent, &received)?;
+        if mark_delivered {
+            self.bus.mark_delivered(agent, ids)?;
+            self.resume_waiting_from_delivery(agent, ids);
+        }
+        let acknowledged = self.bus.acknowledge(agent, Some(ids))?;
+        self.refresh_counts(&[agent.to_string()]);
+        Ok(acknowledged)
+    }
+
     pub(crate) fn clear_task_wakeups(&self, agent: &str, task: &str) {
         let changed = self.model().local.get_mut(agent).is_some_and(|local| {
             if let Some(ids) = local.task_wakeups.remove(task) {
