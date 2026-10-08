@@ -80,6 +80,7 @@ impl Session {
             .tempdir_in("/tmp")
             .expect("creating a temp dir");
         let workspace = tmp.path().join("ws");
+        std::fs::create_dir_all(tmp.path().join("home")).expect("creating isolated operator home");
         Self { tmp, workspace }
     }
 
@@ -133,6 +134,7 @@ impl Session {
         let mut cmd = Command::new(program);
         git_test_support::clear_repository_environment(&mut cmd);
         cmd.current_dir(self.root())
+            .env("HOME", self.root().join("home"))
             .env("XDG_RUNTIME_DIR", self.root().join("run"))
             .env("XDG_STATE_HOME", self.root().join("state"))
             // Nor on this machine's crew config, model catalog or Codex
@@ -141,6 +143,7 @@ impl Session {
             .env("CREW_GLOBAL_CONFIG", self.root().join("etc/config.toml"))
             .env("CODEX_HOME", self.root().join("codex-home"))
             .env("CLAUDE_CONFIG_DIR", self.root().join("claude-home"))
+            .env("PI_CODING_AGENT_DIR", self.root().join("pi-home"))
             // The tests must not depend on (or disturb) the terminal
             // multiplexer or agent session they happen to be run from.
             .env_remove("HERDR_ENV")

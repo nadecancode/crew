@@ -3635,6 +3635,22 @@ env > "$dir/fake-env"
 while read -r _; do :; done
 "#;
 
+/// A fake Codex session must also answer the launcher's configuration-only
+/// inventory calls, without recording a session, emitting hooks or showing
+/// a simulated model error. The shared CLI stand-in implements that protocol.
+fn runtime_script(name: &str, contents: &str) -> String {
+    if name != "codex" {
+        return contents.to_string();
+    }
+    let body = contents
+        .strip_prefix("#!/bin/sh\n")
+        .expect("shell runtime fixture");
+    format!(
+        "#!/bin/sh\ncrew_inventory_stage=0\nfor crew_inventory_arg in \"$@\"; do\n  case \"$crew_inventory_stage:$crew_inventory_arg\" in\n    0:mcp) crew_inventory_stage=1 ;;\n    1:list) crew_inventory_stage=2 ;;\n    2:--json) exec {} fake-cli codex \"$@\" ;;\n    *) crew_inventory_stage=0 ;;\n  esac\ndone\n{body}",
+        crew::agents::shell_quote(CREW)
+    )
+}
+
 #[test]
 fn team_members_get_their_endpoints_and_keys_from_the_layered_config() {
     use std::os::unix::fs::PermissionsExt;
@@ -3647,7 +3663,11 @@ fn team_members_get_their_endpoints_and_keys_from_the_layered_config() {
     let root = s.root().to_path_buf();
     let write = |path: &Path, text: &str, mode: u32| {
         std::fs::create_dir_all(path.parent().unwrap()).unwrap();
-        std::fs::write(path, text).unwrap();
+        std::fs::write(
+            path,
+            runtime_script(path.file_name().unwrap().to_str().unwrap(), text),
+        )
+        .unwrap();
         std::fs::set_permissions(path, std::fs::Permissions::from_mode(mode)).unwrap();
     };
     for name in ["claude", "codex"] {
@@ -4104,7 +4124,11 @@ fn the_model_catalog_reaches_the_orchestrator_and_a_model_decides_the_runtime() 
     let root = s.root().to_path_buf();
     std::fs::create_dir_all(root.join("bin")).unwrap();
     for name in ["claude", "codex"] {
-        std::fs::write(root.join("bin").join(name), FAKE_RUNTIME).unwrap();
+        std::fs::write(
+            root.join("bin").join(name),
+            runtime_script(name, FAKE_RUNTIME),
+        )
+        .unwrap();
         std::fs::set_permissions(
             root.join("bin").join(name),
             std::fs::Permissions::from_mode(0o755),
@@ -4369,7 +4393,7 @@ fn a_usage_limit_parks_the_agent_until_it_is_resumed() {
     let ws = s.workspace.to_string_lossy().into_owned();
     let write_bin = |name: &str, text: &str| {
         std::fs::create_dir_all(root.join("bin")).unwrap();
-        std::fs::write(root.join("bin").join(name), text).unwrap();
+        std::fs::write(root.join("bin").join(name), runtime_script(name, text)).unwrap();
         std::fs::set_permissions(
             root.join("bin").join(name),
             std::fs::Permissions::from_mode(0o755),
@@ -5075,7 +5099,11 @@ fn the_orchestrator_sees_full_context_windows_and_queues_compactions() {
     // Stand-ins for both CLIs that record what is typed at them.
     for name in ["codex", "claude"] {
         std::fs::create_dir_all(root.join("bin")).unwrap();
-        std::fs::write(root.join("bin").join(name), FAKE_LIMITED_CODEX).unwrap();
+        std::fs::write(
+            root.join("bin").join(name),
+            runtime_script(name, FAKE_LIMITED_CODEX),
+        )
+        .unwrap();
         std::fs::set_permissions(
             root.join("bin").join(name),
             std::fs::Permissions::from_mode(0o755),
@@ -6038,7 +6066,11 @@ fn a_pi_member_is_started_with_crews_extension_and_reports_through_it() {
     );
     let source = std::fs::read_to_string(&extension).unwrap();
     assert!(
-        source.contains("registerMcpServer(\"crew\"") && !source.contains("__IDENTITY__"),
+        source.contains("pi.registerMcpServer(server.name")
+            && source.contains("name: \"crew\"")
+            && source.contains("args: [\"mcp\", \"--identity\", IDENTITY]")
+            && !source.contains("__IDENTITY__")
+            && !source.contains("__TOOLBOX_SERVERS__"),
         "{source}"
     );
     let briefing = std::fs::read_to_string(agent_dir("pi-1").join("briefing.md")).unwrap();
@@ -6237,7 +6269,11 @@ fn only_the_operator_moves_the_orchestrator_to_another_cli_and_its_new_session_i
     let ws = s.workspace.to_string_lossy().into_owned();
     std::fs::create_dir_all(root.join("bin")).unwrap();
     for name in ["claude", "codex"] {
-        std::fs::write(root.join("bin").join(name), FAKE_RUNTIME).unwrap();
+        std::fs::write(
+            root.join("bin").join(name),
+            runtime_script(name, FAKE_RUNTIME),
+        )
+        .unwrap();
         std::fs::set_permissions(
             root.join("bin").join(name),
             std::fs::Permissions::from_mode(0o755),
@@ -6767,7 +6803,7 @@ fn a_member_the_work_style_moves_to_another_cli_keeps_getting_its_tasks_and_come
     std::fs::create_dir_all(root.join("bin")).unwrap();
     std::fs::create_dir_all(root.join("claude-home")).unwrap();
     for (name, script) in [("claude", FAKE_CLAUDE_WITH_LIMITS), ("codex", FAKE_RUNTIME)] {
-        std::fs::write(root.join("bin").join(name), script).unwrap();
+        std::fs::write(root.join("bin").join(name), runtime_script(name, script)).unwrap();
         std::fs::set_permissions(
             root.join("bin").join(name),
             std::fs::Permissions::from_mode(0o755),
@@ -6917,7 +6953,11 @@ fn the_orchestrator_staffs_the_team_around_the_models_whose_window_is_used_up() 
     std::fs::create_dir_all(root.join("bin")).unwrap();
     std::fs::create_dir_all(root.join("claude-home")).unwrap();
     std::fs::write(root.join("bin/claude"), FAKE_CLAUDE_WITH_LIMITS).unwrap();
-    std::fs::write(root.join("bin/codex"), FAKE_RUNTIME).unwrap();
+    std::fs::write(
+        root.join("bin/codex"),
+        runtime_script("codex", FAKE_RUNTIME),
+    )
+    .unwrap();
     for name in ["claude", "codex"] {
         std::fs::set_permissions(
             root.join("bin").join(name),
@@ -7057,7 +7097,11 @@ fn codexs_extra_thought_menu_is_dismissed_without_interrupting_the_turn() {
     let s = Session::new();
     let root = s.root().to_path_buf();
     std::fs::create_dir_all(root.join("bin")).unwrap();
-    std::fs::write(root.join("bin/codex"), FAKE_CODEX_THINKING).unwrap();
+    std::fs::write(
+        root.join("bin/codex"),
+        runtime_script("codex", FAKE_CODEX_THINKING),
+    )
+    .unwrap();
     std::fs::set_permissions(
         root.join("bin/codex"),
         std::fs::Permissions::from_mode(0o755),
@@ -7474,7 +7518,11 @@ fn a_turn_codexs_model_refuses_is_noticed_and_whoever_waits_on_it_is_told() {
     let s = Session::new();
     let root = s.root().to_path_buf();
     std::fs::create_dir_all(root.join("bin")).unwrap();
-    std::fs::write(root.join("bin/codex"), FAKE_LIMITED_CODEX).unwrap();
+    std::fs::write(
+        root.join("bin/codex"),
+        runtime_script("codex", FAKE_LIMITED_CODEX),
+    )
+    .unwrap();
     std::fs::set_permissions(
         root.join("bin/codex"),
         std::fs::Permissions::from_mode(0o755),
@@ -7677,7 +7725,7 @@ fn a_turn_codex_refuses_goes_to_the_work_styles_pi_model_and_the_member_comes_ba
     let root = s.root().to_path_buf();
     std::fs::create_dir_all(root.join("bin")).unwrap();
     for (name, script) in [("codex", FAKE_LIMITED_CODEX), ("pi", FAKE_PI)] {
-        std::fs::write(root.join("bin").join(name), script).unwrap();
+        std::fs::write(root.join("bin").join(name), runtime_script(name, script)).unwrap();
         std::fs::set_permissions(
             root.join("bin").join(name),
             std::fs::Permissions::from_mode(0o755),
@@ -7880,7 +7928,7 @@ fn a_member_that_took_over_a_refused_turn_goes_back_before_its_next_task() {
     let root = s.root().to_path_buf();
     std::fs::create_dir_all(root.join("bin")).unwrap();
     for (name, script) in [("codex", FAKE_LIMITED_CODEX), ("pi", FAKE_PI)] {
-        std::fs::write(root.join("bin").join(name), script).unwrap();
+        std::fs::write(root.join("bin").join(name), runtime_script(name, script)).unwrap();
         std::fs::set_permissions(
             root.join("bin").join(name),
             std::fs::Permissions::from_mode(0o755),
@@ -8707,6 +8755,7 @@ fn a_task_is_handed_over_by_its_id_and_read_off_its_card() {
 /// process writes may be held open by a child another test is forking, and
 /// running it then fails with "Text file busy").
 fn write_program(path: &Path, contents: &str) {
+    let contents = runtime_script(path.file_name().unwrap().to_str().unwrap(), contents);
     let mut child = std::process::Command::new("sh")
         .args(["-c", "cat > \"$1\" && chmod 755 \"$1\"", "sh"])
         .arg(path)
