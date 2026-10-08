@@ -118,6 +118,19 @@ impl FeatureDb {
         })
     }
 
+    /// Archive/reset legacy state and active domain rows in one run-fenced
+    /// transaction. Historical domain records remain the callback's choice.
+    pub fn clear_session(
+        &self,
+        expected_run: &Id,
+        clear_domain: impl FnOnce(&Transaction<'_>) -> std::result::Result<(), RpcError>,
+    ) -> std::result::Result<(), RpcError> {
+        self.transaction(Some(expected_run), |tx| {
+            clear_domain(tx)?;
+            clear_session_in(tx).map_err(|_| RpcError::internal("session clear failed"))
+        })
+    }
+
     pub fn incarnation(&self, run: &Id, agent: &str) -> std::result::Result<Option<Id>, RpcError> {
         self.read(|conn| {
             let value: Option<String> = conn
@@ -261,9 +274,14 @@ pub(super) fn initialize(conn: &mut Connection) -> Result<()> {
 
 pub(super) fn clear_session(conn: &mut Connection) -> Result<()> {
     let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
-    tx.execute_batch("DELETE FROM agents; DELETE FROM tokens; DELETE FROM tasks; DELETE FROM messages; DELETE FROM deliveries; DELETE FROM meta;")?;
-    ensure_current(&tx, now_ms())?;
+    clear_session_in(&tx)?;
     tx.commit()?;
+    Ok(())
+}
+
+fn clear_session_in(tx: &Transaction<'_>) -> Result<()> {
+    tx.execute_batch("DELETE FROM agents; DELETE FROM tokens; DELETE FROM tasks; DELETE FROM messages; DELETE FROM deliveries; DELETE FROM meta;")?;
+    ensure_current(tx, now_ms())?;
     Ok(())
 }
 

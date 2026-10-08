@@ -632,7 +632,7 @@ impl Daemon {
         id: &str,
         f: impl FnOnce(&Model, &mut Task) -> Result<(), RpcError>,
     ) -> Result<Option<Task>, RpcError> {
-        let (after, pause_changed) = {
+        let (after, pause_changed, publication) = {
             let mut model = self.model();
             let Some(task) = model.task(id) else {
                 return Ok(None);
@@ -643,17 +643,36 @@ impl Daemon {
             if after == *task {
                 return Ok(Some(after));
             }
-            self.store
-                .save_task(&after)
-                .map_err(|e| RpcError::internal(format!("persisting task {id} failed: {e:#}")))?;
+            let before_tasks = model.tasks.clone();
+            let mut after_tasks = before_tasks.clone();
+            *after_tasks.iter_mut().find(|task| task.id == id).unwrap() = after.clone();
+            let publication =
+                self.persist_task_projection(&before_tasks, &after_tasks, &[id.to_string()])?;
+            if let Some(projected) = &publication {
+                for task in &projected.tasks {
+                    *model
+                        .tasks
+                        .iter_mut()
+                        .find(|item| item.id == task.id)
+                        .unwrap() = task.clone();
+                }
+                after = model.task(id).unwrap().clone();
+            } else {
+                self.store.save_task(&after).map_err(|e| {
+                    RpcError::internal(format!("persisting task {id} failed: {e:#}"))
+                })?;
+            }
             *model.tasks.iter_mut().find(|t| t.id == id).unwrap() = after.clone();
             let pause_changed = overlap::track_pause(&mut model, &before, &after);
-            (after, pause_changed)
+            (after, pause_changed, publication)
         };
         if let Some(agent) = pause_changed {
             self.save_local(&agent);
         }
         self.push(Push::Task(Box::new(after.clone())));
+        if let Some(publication) = publication.and_then(|change| change.publication) {
+            self.publish_task_publication(publication);
+        }
         Ok(Some(after))
     }
 
@@ -681,7 +700,7 @@ impl Daemon {
         message: NewMessage,
         recipients: Vec<String>,
     ) -> Result<Option<(Task, SendOutcome)>, RpcError> {
-        let (after, outcome, pause_changed) = {
+        let (after, outcome, pause_changed, publication) = {
             let mut model = self.model();
             let Some(task) = model.task(id) else {
                 return Ok(None);
@@ -689,15 +708,47 @@ impl Daemon {
             let mut after = task.clone();
             let before = task.clone();
             f(&model, &mut after)?;
-            let outcome = self.bus.send_with_task(message, recipients, &after)?;
+            let (publication, outcome) = if self.feature_services.task_projection().is_some() {
+                let before_tasks = model.tasks.clone();
+                let mut after_tasks = before_tasks.clone();
+                *after_tasks.iter_mut().find(|task| task.id == id).unwrap() = after.clone();
+                self.persist_task_telling_projection(
+                    &before_tasks,
+                    &after_tasks,
+                    id,
+                    message,
+                    recipients,
+                )?
+            } else {
+                (None, self.bus.send_with_task(message, recipients, &after)?)
+            };
+            if outcome.duplicate {
+                return Ok(Some((before, outcome)));
+            }
+            if let Some(projected) = &publication {
+                for task in &projected.tasks {
+                    *model
+                        .tasks
+                        .iter_mut()
+                        .find(|item| item.id == task.id)
+                        .unwrap() = task.clone();
+                }
+                after = model.task(id).unwrap().clone();
+            }
             *model.tasks.iter_mut().find(|t| t.id == id).unwrap() = after.clone();
             let pause_changed = overlap::track_pause(&mut model, &before, &after);
-            (after, outcome, pause_changed)
+            (after, outcome, pause_changed, publication)
         };
         if let Some(agent) = pause_changed {
             self.save_local(&agent);
         }
         self.push(Push::Task(Box::new(after.clone())));
+        if let Some(change) = publication {
+            self.bus.publish_committed(&outcome);
+            if let Some(publication) = change.publication {
+                self.publish_task_publication(publication);
+            }
+        }
         Ok(Some((after, outcome)))
     }
 

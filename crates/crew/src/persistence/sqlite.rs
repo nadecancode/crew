@@ -292,6 +292,18 @@ fn message_from_row(row: &Row<'_>) -> rusqlite::Result<Message> {
     })
 }
 
+pub(crate) fn message_by_id_in(conn: &Connection, id: &str) -> Result<Option<Message>> {
+    let sql = format!("SELECT {MESSAGE_COLUMNS} FROM messages m WHERE m.id = ?1");
+    Ok(conn.query_row(&sql, [id], message_from_row).optional()?)
+}
+
+pub(crate) fn recipients_in(conn: &Connection, id: &str) -> Result<Vec<String>> {
+    let mut stmt =
+        conn.prepare("SELECT recipient FROM deliveries WHERE message_id = ?1 ORDER BY rowid")?;
+    let rows = stmt.query_map([id], |row| row.get(0))?;
+    Ok(rows.collect::<rusqlite::Result<_>>()?)
+}
+
 /// Insert `message` and its delivery rows within `tx`; `false` (nothing
 /// inserted) when its id is already taken.
 pub(crate) fn insert_message_in(
@@ -369,19 +381,11 @@ impl MessageStore for SqliteStore {
     }
 
     fn get_message(&self, id: &str) -> Result<Option<Message>> {
-        let conn = self.conn();
-        let sql = format!("SELECT {MESSAGE_COLUMNS} FROM messages m WHERE m.id = ?1");
-        Ok(conn
-            .query_row(&sql, params![id], message_from_row)
-            .optional()?)
+        message_by_id_in(&self.conn(), id)
     }
 
     fn recipients(&self, message_id: &str) -> Result<Vec<String>> {
-        let conn = self.conn();
-        let mut stmt =
-            conn.prepare("SELECT recipient FROM deliveries WHERE message_id = ?1 ORDER BY rowid")?;
-        let rows = stmt.query_map(params![message_id], |row| row.get(0))?;
-        Ok(rows.collect::<rusqlite::Result<_>>()?)
+        recipients_in(&self.conn(), message_id)
     }
 
     fn inbox(&self, agent: &str, unread_only: bool, limit: usize) -> Result<Vec<InboxEntry>> {

@@ -580,8 +580,7 @@ until the database takes writes again, tasks wait where they are.",
     // ---- task graph edits ----------------------------------------------
 
     pub(crate) fn create_task(&self, spec: TaskSpec) -> Result<Task, RpcError> {
-        let task = {
-            let mut model = self.model();
+        let prepare = |model: &super::Model| {
             tasks::validate_new(&model.tasks, &spec).map_err(RpcError::invalid)?;
             for who in [&spec.agent, &spec.reviewer].into_iter().flatten() {
                 if model.agent(who).is_none() {
@@ -590,16 +589,48 @@ until the database takes writes again, tasks wait where they are.",
             }
             let task = tasks::task_from_spec(&spec, now_ms());
             check_task_message_size(&task, self.bus.max_bytes())?;
-            // Stored first: a task the database refused does not exist.
-            self.store
-                .save_task(&task)
-                .map_err(|e| RpcError::internal(e.to_string()))?;
-            model.tasks.push(task.clone());
-            // New work reopens a session that had finished.
-            model.session.completed_at = None;
+            Ok::<_, RpcError>(task)
+        };
+        let task = if let Some(projection) = self.feature_services.task_projection() {
+            let run = self.run_context()?.workspace_run_id;
+            self.commit_tasks_with(&run, |tx, model| {
+                let task = prepare(model)?;
+                let mut after = model.tasks.clone();
+                after.push(task.clone());
+                let change = projection.apply_delta(
+                    tx,
+                    &run,
+                    &model.tasks,
+                    &after,
+                    &[task.id.clone()],
+                    now_ms(),
+                )?;
+                let task = change
+                    .tasks
+                    .iter()
+                    .find(|item| item.id == task.id)
+                    .cloned()
+                    .ok_or_else(|| RpcError::internal("created task omitted from projection"))?;
+                Ok(super::features::CommittedTasks {
+                    result: task,
+                    change,
+                    reopen_session: true,
+                })
+            })?
+        } else {
+            let task = {
+                let mut model = self.model();
+                let task = prepare(&model)?;
+                self.store
+                    .save_task(&task)
+                    .map_err(|e| RpcError::internal(e.to_string()))?;
+                model.tasks.push(task.clone());
+                model.session.completed_at = None;
+                task
+            };
+            self.push(crew_core::rpc::Push::Task(Box::new(task.clone())));
             task
         };
-        self.push(crew_core::rpc::Push::Task(Box::new(task.clone())));
         self.emit(
             NewEvent::new(
                 "scheduler",
