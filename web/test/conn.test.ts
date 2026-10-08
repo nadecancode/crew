@@ -23,7 +23,7 @@ afterEach(() => {
 });
 
 describe("handshake", () => {
-  test("index: hello, proof, then the listing and the operator's preferences; workspace: hello with its id, proof, feature negotiation, subscribe, snapshot", async () => {
+  test("index: hello, proof, then the listing and the operator's preferences; workspace: hello with its id, proof, subscribe, snapshot", async () => {
     const p = page(A);
     const index = indexSocket();
     index.open();
@@ -42,18 +42,16 @@ describe("handshake", () => {
     expect(s.last("hello").params).toEqual({ role: "operator", token: "t0ken", client: "web", protocol: 6, workspace: A });
     s.reply(s.last("hello").id, helloReply());
     await settle();
-    expect(s.methods()).toEqual(["hello", "features_negotiate", "subscribe"]);
-    expect(s.last("features_negotiate").params).toEqual({ versions: { usage_metrics: 1 } });
+    expect(s.methods()).toEqual(["hello", "subscribe"]);
     s.reply(s.last("subscribe").id, { subscribed: true });
     await settle();
-    expect(s.methods()).toEqual(["hello", "features_negotiate", "subscribe", "snapshot"]);
+    expect(s.methods()).toEqual(["hello", "subscribe", "snapshot"]);
     expect(s.last("snapshot").params).toEqual({ messages: 300, events: 1000 });
     s.reply(s.last("snapshot").id, fixture("snapshot.json"));
     await settle();
     expect(p.applied.snapshots.length).toBe(1);
     expect(p.link.shown()).toBe("live");
     expect(p.link.live()).toBe(true);
-    expect(p.link.features()).toEqual({ state: "legacy" });
   });
 
   for (const [name, proof] of [

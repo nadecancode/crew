@@ -322,8 +322,14 @@ fn world() -> World {
         )],
     );
 
-    // epsilon: a member whose session has no usage yet.
+    // epsilon (Claude) and zeta (Codex): members whose sessions have
+    // reported no usage yet.
     w.source(RUN, "epsilon", RuntimeKind::Claude, "s-epsilon", None);
+    let zeta = w.source(RUN, "zeta", RuntimeKind::Codex, "th-zeta", None);
+    w.write(
+        &zeta,
+        &[json!({"type": "session_meta", "payload": {"id": "th-zeta"}})],
+    );
 
     // One aside answer with usage, one that failed before any.
     let aside = w.source(
@@ -381,7 +387,7 @@ fn world() -> World {
 fn ctx() -> Context {
     Context {
         now: NOW,
-        expected_agents: Some(5),
+        expected_agents: Some(6),
         backlog_files: Some(2),
     }
 }
@@ -480,21 +486,17 @@ fn usage_json() {
     })}});
     out["summary_corrected"] = v(query::summary(&w.ledger, &live(), &c).unwrap());
 
-    // zeta: a member whose session file is missing. What it spent is not
-    // known, so no estimate has a finite upper bound any more.
+    // Then zeta's rollout goes missing. What it spent is not known, so no
+    // estimate has a finite upper bound any more.
     w.ledger
         .record_source_gap(
             RUN,
-            "claude:s-zeta",
+            "codex:th-zeta",
             Some(UsageKind::Live),
             CoverageReason::SourceGap,
             T0 + 5 * MIN,
         )
         .unwrap();
-    let c = Context {
-        expected_agents: Some(6),
-        ..ctx()
-    };
     out["summary_missing_source"] = v(query::summary(&w.ledger, &live(), &c).unwrap());
     check("usage.json", pretty(&out));
 }
