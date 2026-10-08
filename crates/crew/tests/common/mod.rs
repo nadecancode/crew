@@ -345,6 +345,16 @@ impl Session {
 impl Drop for Session {
     fn drop(&mut self) {
         self.stop();
+        // File snapshots and now MCP catalog snapshots are immutable. Remove
+        // this session's store through its directory descriptor after stop,
+        // so TempDir can clean up without following any links left by agents.
+        if let Ok(root) = std::fs::File::open(self.root()) {
+            if let Ok(parent) =
+                crew_core::paths::list_dir_beneath(&root, Path::new("ws/.crew/toolbox"))
+            {
+                let _ = crew::agents::toolbox::store::remove(&parent, Path::new("store"));
+            }
+        }
         // A dashboard server the test started stops with it.
         if self.root().join("run/crew/web.sock").exists() {
             let _ = self.crew(&["web", "--stop"]);

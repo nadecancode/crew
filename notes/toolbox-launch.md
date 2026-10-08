@@ -7,6 +7,13 @@ unsupported or failed items through `Agent.toolbox`. Reload changes the next
 launch's selection and leaves the running member's files and definitions alone.
 `toolbox.applied` and `toolbox.changed` are emitted after the process starts.
 
+MCP catalogs are also copied into the immutable store when the parent pins
+them. `ActiveToolbox.mcp_snapshots` carries those references through default and
+selected-bundle subagent inheritance, before agent creation can await. A child
+restores its catalog from those immutable bytes and reuses its own identical
+pin on resume. Refreshing or removing the parent's mutable pin cannot replace
+the child's catalog or invalidate it when the parent's definition changes.
+
 ## Codex closing and selected skills
 
 The launcher inventories the effective native MCP configuration in the member's
@@ -34,6 +41,12 @@ so this gate cannot make a model request. Same-name selection collisions are
 covered separately: the optional item is Shadowed and both definitions are
 disabled; a required item refuses the launch. An ambient `crew` name always
 refuses the launch because merged fields could alter the coordination server.
+
+That gate creates operator skill directories to force `skills.config`, then
+passes every captured TUI and app-server `-c` pair to the real Codex parser.
+It covers arrays of TOML inline tables as well as MCP patches, feature flags,
+standing instructions, notifier arguments and sidecar permission overrides.
+JSON arrays containing objects are not valid substitutes for those TOML arrays.
 
 Selected skills reach the app-server through `skills/extraRoots/set`, acknowledged
 over its Unix WebSocket before the TUI starts. The separate native runner
