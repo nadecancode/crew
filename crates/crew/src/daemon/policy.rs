@@ -319,6 +319,45 @@ impl Daemon {
             // About to resume its session: that cannot happen on another CLI.
             return false;
         }
+        if let Err(error) = self.toolbox_runtime_check(&agent, target.runtime) {
+            self.notify_orchestrator(&format!(
+                "{id} stays on its current runtime: {}",
+                error.message
+            ))
+            .await;
+            return false;
+        }
+        let target_settings = if other_cli {
+            let resolved = {
+                let model = self.model();
+                match (model.session.team.as_ref(), model.local.get(id)) {
+                    (Some(team), Some(local)) => {
+                        let mut spec = local.spec.clone();
+                        spec.permission_mode = None;
+                        spec.allowed_tools.clear();
+                        spec.extra_args.clear();
+                        spec.runtime = Some(target.runtime);
+                        Some(super::supervisor::agent_settings(
+                            team,
+                            &spec,
+                            agent.orchestrator,
+                        ))
+                    }
+                    _ => None,
+                }
+            };
+            match resolved {
+                Some(Ok(settings)) => Some(settings),
+                Some(Err(error)) => {
+                    self.notify_orchestrator(&format!("{id} cannot change runtime: {error:#}"))
+                        .await;
+                    return false;
+                }
+                None => None,
+            }
+        } else {
+            None
+        };
         let now = now_ms();
         let home_name = Self::proper_name(&home_model);
         let resets = out
@@ -397,18 +436,11 @@ impl Daemon {
             });
             {
                 let mut m = self.model();
-                let team = m.session.team.clone();
                 if let Some(local) = m.local.get_mut(id) {
                     local.no_long_context = false;
                     if other_cli {
-                        let mut spec = local.spec.clone();
-                        spec.permission_mode = None;
-                        spec.allowed_tools.clear();
-                        spec.extra_args.clear();
-                        spec.runtime = Some(target.runtime);
-                        if let Some(team) = &team {
-                            local.settings =
-                                super::supervisor::agent_settings(team, &spec, agent.orchestrator);
+                        if let Some(settings) = &target_settings {
+                            local.settings = settings.clone();
                         }
                         local.session_confirmed = false;
                     }

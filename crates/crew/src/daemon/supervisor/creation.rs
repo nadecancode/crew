@@ -62,7 +62,7 @@ impl Daemon {
         } else {
             (self.workspace.clone(), None)
         };
-        let settings = agent_settings(team, spec, orchestrator);
+        let settings = agent_settings(team, spec, orchestrator)?;
         let now = now_ms();
         let agent = Agent {
             id: spec.id.clone(),

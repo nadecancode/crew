@@ -344,7 +344,16 @@ fn sandboxed_clis_keep_their_files_in_private_homes_seeded_without_the_operators
 }
 
 #[test]
-fn a_codex_endpoint_home_gives_both_the_instructions_and_the_seeded_model_settings() {
+fn a_codex_endpoint_home_seeds_model_settings_without_inheriting_instructions() {
+    codex_endpoint_home(false);
+}
+
+#[test]
+fn a_codex_endpoint_home_inherits_instructions_when_memory_is_selected() {
+    codex_endpoint_home(true);
+}
+
+fn codex_endpoint_home(inherit_memory: bool) {
     if !sandboxes_available() {
         return;
     }
@@ -388,6 +397,9 @@ fn a_codex_endpoint_home_gives_both_the_instructions_and_the_seeded_model_settin
         vec![runtime_agent("x", RuntimeKind::Codex)],
         vec![],
     );
+    if inherit_memory {
+        team.agents[0].toolbox = serde_yaml::from_str("inherit:\n  operator: [memory]\n").unwrap();
+    }
     team.workspace.sandbox = SandboxConfig {
         mode: SandboxMode::Required,
         ..SandboxConfig::default()
@@ -412,7 +424,11 @@ fn a_codex_endpoint_home_gives_both_the_instructions_and_the_seeded_model_settin
         .filter_map(Value::as_str)
         .find(|a| a.starts_with("developer_instructions="))
         .expect("the sidecar was given developer instructions");
-    assert!(instructions.contains("endpoint-rules"), "{instructions}");
+    assert_eq!(
+        instructions.contains("endpoint-rules"),
+        inherit_memory,
+        "{instructions}"
+    );
     assert!(!instructions.contains("global-rules"), "{instructions}");
     // The model settings come from the same home the instructions did.
     let seeded: toml::Table = std::fs::read_to_string(home.join("config.toml"))

@@ -33,6 +33,7 @@ pub(crate) use delivery::native_hook;
 mod fallback;
 mod gitops;
 mod handlers;
+mod keepalive;
 mod limits;
 mod orchestrate;
 mod overlap;
@@ -45,6 +46,8 @@ pub(crate) mod server;
 mod subagents;
 mod supervisor;
 mod team;
+mod toolbox;
+mod toolbox_rpc;
 mod turns;
 
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");
@@ -81,6 +84,13 @@ pub(crate) struct AgentLocal {
     /// written back out.
     #[serde(default)]
     pub spec: crew_core::config::AgentSpec,
+    /// The definitions and immutable files the current process was started with.
+    #[serde(default)]
+    pub toolbox_active: Option<crate::agents::toolbox::ActiveToolbox>,
+    /// A subagent keeps the parent's active selection, even if the team's
+    /// named bundles were reloaded while its parent was still running.
+    #[serde(default)]
+    pub toolbox_inherited: Option<crate::agents::toolbox::ActiveToolbox>,
     /// The runtime reported its session id, so the session can be resumed.
     pub session_confirmed: bool,
     /// The agent's current launch (`CREW_LAUNCH` of the processes it
@@ -134,6 +144,9 @@ pub(crate) struct TaskPause {
 /// Per-agent state that only matters while the daemon is running.
 #[derive(Debug, Default)]
 pub(crate) struct AgentRuntimeState {
+    /// Launch-time toolbox credentials; deliberately absent from AgentLocal
+    /// and all persisted or public records.
+    pub toolbox_references: HashMap<String, crate::endpoints::ToolboxReferences>,
     /// The session accepts input.
     pub ready: bool,
     /// First prompt, waiting for the session to become ready, with the ids of
@@ -228,6 +241,16 @@ pub(crate) struct AgentRuntimeState {
     /// When its crew tools were last said to speak another protocol (0:
     /// not since the daemon started).
     pub protocol_warned_at: i64,
+    /// Cache keep-alives sent since it last worked (keepalive.rs).
+    pub keepalives: u32,
+    /// When the keep-alive not yet followed by a turn's end was sent.
+    pub keepalive_sent_at: Option<i64>,
+    /// When the rest's first keep-alive was sent.
+    pub keepalive_rest_from: i64,
+    /// When the keep-alive's turn now running started (None: no keep-alive
+    /// turn runs). The member stays Waiting through it, so the health
+    /// check watches this turn on its own.
+    pub keepalive_turn_since: Option<i64>,
 }
 
 #[derive(Default)]

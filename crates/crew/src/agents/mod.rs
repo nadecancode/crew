@@ -24,6 +24,7 @@ pub mod home;
 pub mod pi;
 pub mod prompt;
 pub mod shell;
+pub mod toolbox;
 
 /// Per-agent launch settings, resolved from the team defaults and the agent's
 /// own overrides. Persisted so an agent can be restarted after a daemon restart.
@@ -54,6 +55,11 @@ pub struct AgentSettings {
     /// How members write to one another.
     #[serde(default)]
     pub voice: crew_core::config::Voice,
+    /// Runtime-neutral selection, resolved from the daemon's team catalog.
+    #[serde(default)]
+    pub toolbox: crew_core::toolbox::Resolved,
+    #[serde(skip)]
+    pub toolbox_launch: Option<toolbox::RuntimeToolbox>,
 }
 
 fn default_true() -> bool {
@@ -88,6 +94,8 @@ impl AgentSettings {
             long_context: defaults.long_context,
             model_fallback: defaults.model_fallback,
             voice: defaults.voice,
+            toolbox: crew_core::toolbox::Resolved::default(),
+            toolbox_launch: None,
         }
     }
 }
@@ -125,6 +133,8 @@ pub struct LaunchSpec {
     pub program: String,
     pub args: Vec<String>,
     pub env: Vec<(String, String)>,
+    /// Names that must not be inherited or reintroduced by launch overrides.
+    pub scrub_env: Vec<String>,
     pub cwd: PathBuf,
     /// The first prompt, if there is one.
     pub prompt: Option<String>,
@@ -146,6 +156,7 @@ pub struct Sidecar {
     pub args: Vec<String>,
     pub cwd: PathBuf,
     pub env: Vec<(String, String)>,
+    pub scrub_env: Vec<String>,
     /// Unix socket the sidecar listens on; it is ready once this exists.
     pub socket: PathBuf,
 }
@@ -191,6 +202,13 @@ pub enum Signal {
     Compacted,
     /// A compaction crew asked for was not carried out, and why.
     CompactSkipped(String),
+    /// A toolbox MCP server failed in the session, and how; `ended` when
+    /// the session ends over it (a required server).
+    ToolboxFailed {
+        server: String,
+        detail: String,
+        ended: bool,
+    },
     Exiting,
 }
 

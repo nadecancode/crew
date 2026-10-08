@@ -87,6 +87,15 @@ const PI_SETTINGS: &[&str] = &[
     "theme",
 ];
 
+/// The same model/display allowlist used for a private home, supplied through
+/// explicit settings when user source discovery is disabled without a sandbox.
+pub fn claude_preferences(operator: &Operator) -> Value {
+    only(
+        read_json(&operator.claude.join("settings.json")).unwrap_or_else(|| json!({})),
+        CLAUDE_SETTINGS,
+    )
+}
+
 /// Make `<A>/rw/home/<cli>` (and, for pi, `<A>/rw/pi-sessions`) and put the
 /// filtered operator settings in it. `agent_root` is `<A>`. Call it only while
 /// none of the agent's sandboxes is running.

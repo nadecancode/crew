@@ -8,6 +8,7 @@
 use crew_core::client::{Client, ClientError};
 use crew_core::config::TaskSpec;
 use crew_core::rpc::{Call, CommitInfo, GitOutcome, InboxResult, SendParams, SendResult, TaskCard};
+use crew_core::types::{AgentToolbox, ToolboxItem, ToolboxItemCode};
 use crew_core::util::{fmt_clock, one_line, truncate_chars};
 use crew_core::{Agent, AgentStatus, Artifact, Message, MessageType, Task, BROADCAST, OPERATOR_ID};
 use serde_json::{json, Value};
@@ -67,7 +68,8 @@ pub fn definitions() -> Vec<ToolDef> {
             "agent_send",
             "Send a message directly to one teammate. It is delivered straight into that agent's \
 session; the orchestrator is not involved. Use type \"question\" when you need an answer, \
-\"answer\" to reply, \"artifact\" to hand over a commit id or file.",
+\"answer\" to reply, \"artifact\" to hand over a commit id or file, \"status\" for news that needs \
+nothing back (it does not wake a resting teammate unless that teammate is waiting).",
             object(
                 json!({
                     "to": { "type": "string", "description": "Recipient agent id, e.g. claude-5; several separated by commas (claude-5,db), each getting its own copy" },
@@ -81,7 +83,8 @@ session; the orchestrator is not involved. Use type \"question\" when you need a
         ),
         tool(
             "agent_broadcast",
-            "Send one message to every other agent on the team.",
+            "Send one message to every other agent on the team. News that needs nothing back goes as \
+type \"status\": it does not wake a resting teammate unless that teammate is waiting.",
             object(
                 json!({
                     "body": { "type": "string" },
@@ -110,7 +113,9 @@ agent is pointed back to its task and carries on.",
         tool(
             "agent_inbox",
             "Read your messages in full. By default returns unread messages and marks them read; \
-with an id, that one message (one you sent or received), e.g. one a card or a teammate points to.",
+with an id, that one message (one you sent or received), e.g. one a card or a teammate points to. \
+New messages are delivered to you without asking (lines starting with \"[crew]\"), so do not \
+call this to wait for one.",
             object(
                 json!({
                     "id": { "type": "string", "description": "A message id (m-…)" },
@@ -138,8 +143,14 @@ card executes. Defaults to the executing card, otherwise the latest started wait
         ),
         tool(
             "tasks_list",
-            "Show the board: every task with status, assignee, dependencies and artifacts.",
-            object(json!({}), &[]),
+            "Show the board: every task that is not done in full, with status, assignee, \
+dependencies and artifacts; then each done task on one line (id, assignee, title, latest commit).",
+            object(
+                json!({
+                    "done": { "type": "boolean", "description": "Show done tasks in full too", "default": false },
+                }),
+                &[],
+            ),
             true,
         ),
         tool(
@@ -289,6 +300,7 @@ when done. Use it to parallelise your task, not to hand off all of it.",
                     "id": { "type": "string", "description": "Optional id; generated when omitted" },
                     "runtime": { "type": "string", "enum": ["claude", "codex", "pi"] },
                     "model": { "type": "string" },
+                    "toolbox": { "type": "array", "items": { "type": "string" }, "description": "Bundles by name, for a subagent that needs less than your own toolbox; default: a copy of yours. It cannot get anything you do not have" },
                 }),
                 &["task"],
             ),
@@ -307,6 +319,7 @@ added after are temporary: not saved, and taken off the team once their tasks ar
                     "model": { "type": "string", "description": "The model this member runs on, chosen for its role from the Models section of your briefing (e.g. opus, gpt-6-astra). It also decides which CLI runs the member. Default: the team default" },
                     "runtime": { "type": "string", "enum": ["claude", "codex", "pi"], "description": "Only needed for a model that is not in the catalog (pi: always, with the model as pi names it)" },
                     "task": { "type": "string", "description": "Optional first task for the new member" },
+                    "toolbox": { "type": "array", "items": { "type": "string" }, "description": "Bundles from the team's toolboxes this member gets on top of the team default, by name (e.g. [\"web\"]). The team file defines what each bundle holds" },
                 }),
                 &["id", "role"],
             ),
@@ -453,6 +466,44 @@ fn opt_str(args: &Value, key: &str) -> Option<String> {
         .filter(|s| !s.is_empty())
 }
 
+/// A list of names: an array of strings, or one string (a model may send
+/// either); None when left out.
+/// `tasks_list`'s `done` argument: whether done cards are shown in full.
+/// Anything but true, false or nothing is refused rather than read as false.
+fn done_in_full(args: &Value) -> Result<bool, String> {
+    match args.get("done") {
+        None | Some(Value::Null) => Ok(false),
+        Some(Value::Bool(done)) => Ok(*done),
+        Some(_) => Err("done must be true or false".into()),
+    }
+}
+
+/// The `toolbox` argument: bundle names, as a list or one comma-separated
+/// string. Anything else is refused rather than dropped, so an attempt to
+/// define items never passes as "no choice".
+fn bundle_names(args: &Value) -> Result<Option<Vec<String>>, String> {
+    const ONLY_NAMES: &str =
+        "toolbox takes bundle names from the team's toolboxes, e.g. [\"web\"]; \
+the team file defines what each bundle holds";
+    let names: Vec<&str> = match args.get("toolbox") {
+        None | Some(Value::Null) => return Ok(None),
+        Some(Value::String(one)) => one.split(',').collect(),
+        Some(Value::Array(items)) => items
+            .iter()
+            .map(|item| item.as_str().ok_or(ONLY_NAMES))
+            .collect::<Result<_, _>>()?,
+        Some(_) => return Err(ONLY_NAMES.into()),
+    };
+    Ok(Some(
+        names
+            .into_iter()
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+            .map(str::to_string)
+            .collect(),
+    ))
+}
+
 fn message_type(args: &Value) -> Result<MessageType, String> {
     match opt_str(args, "type") {
         Some(t) => t.parse(),
@@ -532,6 +583,74 @@ fn status_cell(agent: &Agent) -> String {
     s
 }
 
+/// Whether an item counts as a problem in a summary: not Active, and not
+/// merely planned or not applicable.
+fn not_active(item: &ToolboxItem) -> bool {
+    !matches!(
+        item.status.code,
+        ToolboxItemCode::Active | ToolboxItemCode::Planned | ToolboxItemCode::NotApplicable
+    )
+}
+
+/// A member's toolbox in a list line: `toolbox 3f9a0c21e7b4 (1 not available)`.
+fn toolbox_cell(toolbox: &AgentToolbox) -> String {
+    let mut cell = format!("toolbox {}", toolbox.short_fingerprint());
+    let problems = toolbox.items.iter().filter(|i| not_active(i)).count();
+    if problems > 0 {
+        cell.push_str(&format!(" ({problems} not available)"));
+    }
+    if toolbox.pending_fingerprint.is_some() {
+        cell.push_str(" (restart to apply a change)");
+    }
+    cell
+}
+
+/// What a member's toolbox holds, by kind, and what will not load:
+/// `toolbox 3f9a0c21e7b4: mcp context7, playwright; skills frontend-qa;
+/// not available on Codex: plugins.lint-kit`.
+fn toolbox_summary(toolbox: &AgentToolbox) -> String {
+    let mut parts: Vec<String> = Vec::new();
+    let mut kinds: Vec<(String, Vec<&str>)> = Vec::new();
+    for item in toolbox.items.iter().filter(|i| !not_active(i)) {
+        let kind = serde_json::to_value(item.kind)
+            .ok()
+            .and_then(|v| v.as_str().map(str::to_string))
+            .unwrap_or_default();
+        match kinds.iter_mut().find(|(k, _)| *k == kind) {
+            Some((_, names)) => names.push(&item.name),
+            None => kinds.push((kind, vec![&item.name])),
+        }
+    }
+    for (kind, names) in kinds {
+        parts.push(format!("{kind} {}", names.join(", ")));
+    }
+    let mut problems: Vec<(String, Vec<String>)> = Vec::new();
+    for item in toolbox.items.iter().filter(|i| not_active(i)) {
+        let kind = serde_json::to_value(item.kind)
+            .ok()
+            .and_then(|v| v.as_str().map(str::to_string))
+            .unwrap_or_default();
+        let label = format!("{kind}.{}", item.name);
+        let status = item.status.text.to_lowercase();
+        match problems.iter_mut().find(|(s, _)| *s == status) {
+            Some((_, items)) => items.push(label),
+            None => problems.push((status, vec![label])),
+        }
+    }
+    for (status, items) in problems {
+        parts.push(format!("{status}: {}", items.join(", ")));
+    }
+    if parts.is_empty() {
+        format!("toolbox {}: no items", toolbox.short_fingerprint())
+    } else {
+        format!(
+            "toolbox {}: {}",
+            toolbox.short_fingerprint(),
+            parts.join("; ")
+        )
+    }
+}
+
 pub fn render_agents(agents: &[Agent]) -> String {
     let mut out = String::new();
     for a in agents {
@@ -542,6 +661,9 @@ pub fn render_agents(agents: &[Agent]) -> String {
         };
         let temporary = if a.temporary { " (temporary)" } else { "" };
         out.push_str(&format!("{} [{}] {role}{temporary}", a.id, status_cell(a)));
+        if let Some(toolbox) = &a.toolbox {
+            out.push_str(&format!(" · {}", toolbox_cell(toolbox)));
+        }
         if let Some(task) = &a.task {
             out.push_str(&format!(" — task: {task}"));
         }
@@ -565,44 +687,113 @@ pub fn render_agents(agents: &[Agent]) -> String {
     out
 }
 
+/// Every card in full: status, assignee, dependencies, reviewer, note,
+/// result and artifacts.
 pub fn render_tasks(tasks: &[Task]) -> String {
     let mut out = String::new();
     for t in tasks {
-        out.push_str(&format!(
-            "{} [{}] {} — {}",
-            t.id,
-            t.status,
-            t.assigned_agent.as_deref().unwrap_or("unassigned"),
-            t.title
-        ));
-        if !t.dependencies.is_empty() {
-            out.push_str(&format!(" (after {})", t.dependencies.join(", ")));
-        }
-        if let Some(reviewer) = &t.reviewer {
-            out.push_str(&format!(" (reviewer {reviewer})"));
-        }
-        if let Some(note) = &t.note {
-            out.push_str(&format!(" — {}", truncate_chars(&one_line(note), 100)));
-        }
-        out.push('\n');
-        if let Some(result) = &t.result {
-            out.push_str(&format!(
-                "    result: {}\n",
-                truncate_chars(&one_line(result), 200)
-            ));
-        }
-        for a in &t.artifacts {
-            out.push_str(&format!("    {} {}", a.kind, a.value));
-            if !a.description.is_empty() {
-                out.push_str(&format!(" — {}", a.description));
-            }
-            out.push('\n');
-        }
+        render_task(&mut out, t);
     }
     if out.is_empty() {
         out.push_str("(no tasks)\n");
     }
     out
+}
+
+/// What `tasks_list` shows. Every card that is not done is printed in full,
+/// as [`render_tasks`] prints it; then each done card on one line: id,
+/// assignee, title and its latest commit. A done card is shortened, never
+/// left out, and `done_in_full` prints the whole board in full. Done cards
+/// are most of a long session's board, and each one's result and commits
+/// made it tens of kilobytes (notes/turn-efficiency.md, 2a).
+pub fn render_board(tasks: &[Task], done_in_full: bool) -> String {
+    let (done, open): (Vec<&Task>, Vec<&Task>) = tasks
+        .iter()
+        .partition(|t| t.status == crew_core::TaskStatus::Done);
+    if done_in_full || done.is_empty() {
+        return render_tasks(tasks);
+    }
+    let mut out = String::new();
+    for t in open {
+        render_task(&mut out, t);
+    }
+    if !out.is_empty() {
+        out.push('\n');
+    }
+    out.push_str(&format!(
+        "{} done task(s), one line each; task_get(id) reads one, tasks_list(done: true) shows \
+them in full:\n",
+        done.len()
+    ));
+    for t in done {
+        out.push_str(&format!(
+            "{} {} — {}",
+            t.id,
+            t.assigned_agent.as_deref().unwrap_or("unassigned"),
+            truncate_chars(&one_line(&t.title), 120)
+        ));
+        let commits: Vec<&str> = t
+            .artifacts
+            .iter()
+            .filter(|a| a.kind == "commit")
+            .map(|a| a.value.as_str())
+            .collect();
+        match commits.as_slice() {
+            [] => {}
+            [one] => out.push_str(&format!(" · commit {}", short_commit(one))),
+            [.., last] => out.push_str(&format!(
+                " · {} commits, last {}",
+                commits.len(),
+                short_commit(last)
+            )),
+        }
+        out.push('\n');
+    }
+    out
+}
+
+/// A commit id as a done card's line shows it: its first 8 characters.
+fn short_commit(value: &str) -> String {
+    let id = value.split_whitespace().next().unwrap_or_default();
+    if id.chars().all(|c| c.is_ascii_hexdigit()) {
+        id.chars().take(8).collect()
+    } else {
+        truncate_chars(&one_line(value), 40)
+    }
+}
+
+/// One card in full, as `render_tasks` prints it.
+fn render_task(out: &mut String, t: &Task) {
+    out.push_str(&format!(
+        "{} [{}] {} — {}",
+        t.id,
+        t.status,
+        t.assigned_agent.as_deref().unwrap_or("unassigned"),
+        t.title
+    ));
+    if !t.dependencies.is_empty() {
+        out.push_str(&format!(" (after {})", t.dependencies.join(", ")));
+    }
+    if let Some(reviewer) = &t.reviewer {
+        out.push_str(&format!(" (reviewer {reviewer})"));
+    }
+    if let Some(note) = &t.note {
+        out.push_str(&format!(" — {}", truncate_chars(&one_line(note), 100)));
+    }
+    out.push('\n');
+    if let Some(result) = &t.result {
+        out.push_str(&format!(
+            "    result: {}\n",
+            truncate_chars(&one_line(result), 200)
+        ));
+    }
+    for a in &t.artifacts {
+        out.push_str(&format!("    {} {}", a.kind, a.value));
+        if !a.description.is_empty() {
+            out.push_str(&format!(" — {}", a.description));
+        }
+        out.push('\n');
+    }
 }
 
 /// A task's card in full, for whoever works on it or refers to it.
@@ -662,6 +853,32 @@ fn render_message(m: &Message) -> String {
         m.body.trim_end()
     )
 }
+
+/// What `agent_inbox` shows. An empty inbox says so in a way that ends the
+/// lookup: crew delivers a message that arrives later into the session.
+fn render_inbox(inbox: &InboxResult) -> String {
+    if inbox.messages.is_empty() {
+        return NO_NEW_MESSAGES.to_string();
+    }
+    let mut text = format!("{} message(s):\n", inbox.messages.len());
+    for entry in &inbox.messages {
+        let m = &entry.message;
+        text.push_str(&format!(
+            "\n--- {} from {} · type {} · id {}\n{}\n",
+            fmt_clock(m.timestamp),
+            m.from,
+            m.kind,
+            m.id,
+            m.body.trim_end()
+        ));
+    }
+    text
+}
+
+const NO_NEW_MESSAGES: &str =
+    "No new messages. One that arrives later is delivered to you: if you \
+are waiting for it, end your turn, or park your card with agent_status(\"waiting\", …), instead \
+of checking again.";
 
 fn render_commit(commit: &CommitInfo) -> String {
     let mut text = format!(
@@ -795,22 +1012,7 @@ pub fn call(client: &mut Client, name: &str, args: &Value) -> Result<ToolOutput,
                     limit,
                 },
             )?;
-            if inbox.messages.is_empty() {
-                return out("No new messages.".into(), raw);
-            }
-            let mut text = format!("{} message(s):\n", inbox.messages.len());
-            for entry in &inbox.messages {
-                let m = &entry.message;
-                text.push_str(&format!(
-                    "\n--- {} from {} · type {} · id {}\n{}\n",
-                    fmt_clock(m.timestamp),
-                    m.from,
-                    m.kind,
-                    m.id,
-                    m.body.trim_end()
-                ));
-            }
-            out(text, raw)
+            out(render_inbox(&inbox), raw)
         }
         "agent_compact" => {
             let keep = opt_str(args, "keep");
@@ -847,8 +1049,9 @@ pub fn call(client: &mut Client, name: &str, args: &Value) -> Result<ToolOutput,
             out(format!("Status set to {}.", agent.status), raw)
         }
         "tasks_list" => {
+            let done = done_in_full(args)?;
             let (tasks, raw): (Vec<Task>, _) = rpc(client, Call::TasksList)?;
-            out(render_tasks(&tasks), raw)
+            out(render_board(&tasks, done), raw)
         }
         "task_get" => {
             let (card, raw): (TaskCard, _) = rpc(
@@ -1038,6 +1241,7 @@ pub fn call(client: &mut Client, name: &str, args: &Value) -> Result<ToolOutput,
                     task: arg_str(args, "task")?,
                     runtime,
                     model: opt_str(args, "model"),
+                    toolbox: bundle_names(args)?,
                 },
             )?;
             out(
@@ -1063,6 +1267,10 @@ reach it with agent_send(to=\"{}\").",
                         runtime,
                         model: opt_str(args, "model"),
                         task: opt_str(args, "task"),
+                        toolbox: crew_core::toolbox::Toolbox {
+                            include: bundle_names(args)?.unwrap_or_default(),
+                            ..Default::default()
+                        },
                         ..Default::default()
                     }),
                 },
@@ -1085,9 +1293,22 @@ done and you have been told so."
             } else {
                 ""
             };
+            // What it was given beyond the team default, mapped onto its CLI.
+            let toolbox = rpc::<Vec<crew_core::rpc::MemberToolbox>>(
+                client,
+                Call::Toolbox {
+                    agent: Some(agent.id.clone()),
+                    runtime: None,
+                },
+            )
+            .ok()
+            .and_then(|(members, _)| members.into_iter().next())
+            .filter(|m| !m.toolbox.items.is_empty())
+            .map(|m| format!(" Its {}.", toolbox_summary(&m.toolbox)))
+            .unwrap_or_default();
             out(
                 format!(
-                    "{} joined the team as {} ({}{}).{instead}{temporary}",
+                    "{} joined the team as {} ({}{}).{toolbox}{instead}{temporary}",
                     agent.id,
                     agent.role,
                     agent.runtime,
@@ -1337,6 +1558,197 @@ mod tests {
             .any(|d| d.orchestrator_only && d.name == "operator_ask"));
     }
 
+    fn board_card(id: &str, status: &str, result: Option<&str>, commits: usize) -> Task {
+        let artifacts: Vec<Value> = (0..commits)
+            .map(|n| {
+                json!({ "kind": "commit", "value": format!("{n:x}{}", "a".repeat(39)),
+                        "description": "Commit message ".repeat(8) })
+            })
+            .chain([json!({ "kind": "file", "value": "notes/plan.md" })])
+            .collect();
+        serde_json::from_value(json!({
+            "id": id, "title": format!("Card {id}"), "status": status,
+            "assigned_agent": "builder", "dependencies": ["base"], "reviewer": "checker",
+            "note": "on schema", "result": result, "artifacts": artifacts,
+            "created_at": 0,
+        }))
+        .unwrap()
+    }
+
+    /// The full board is what it was before the compact view: every card
+    /// with its dependencies, reviewer, note, result and artifacts.
+    #[test]
+    fn the_full_board_is_unchanged() {
+        let tasks = [
+            board_card("open", "working", None, 0),
+            board_card("shipped", "done", Some("Landed\nwith tests."), 1),
+        ];
+        let commit = format!("0{}", "a".repeat(39));
+        let message = "Commit message ".repeat(8);
+        let expected = format!(
+            "open [working] builder — Card open (after base) (reviewer checker) — on schema
+    file notes/plan.md
+shipped [done] builder — Card shipped (after base) (reviewer checker) — on schema
+    result: Landed with tests.
+    commit {commit} — {message}
+    file notes/plan.md
+"
+        );
+        assert_eq!(render_tasks(&tasks), expected);
+        assert_eq!(render_board(&tasks, true), expected);
+        assert_eq!(render_tasks(&[]), "(no tasks)\n");
+        assert_eq!(render_board(&[], false), "(no tasks)\n");
+    }
+
+    #[test]
+    fn done_cards_are_one_line_each_unless_asked_for_in_full() {
+        let tasks = [
+            board_card("first", "done", Some("Merged."), 3),
+            board_card("open-a", "working", None, 1),
+            board_card("second", "done", None, 0),
+            board_card("open-b", "waiting", None, 0),
+            board_card("failed", "failed", Some("Could not build."), 0),
+            board_card("third", "done", Some("Merged too."), 1),
+            board_card("open-c", "review", None, 0),
+        ];
+        let compact = render_board(&tasks, false);
+        let open: Vec<Task> = tasks
+            .iter()
+            .filter(|t| t.status != crew_core::TaskStatus::Done)
+            .cloned()
+            .collect();
+        // Every card that is not done (failed included), in full and in
+        // board order, then each done card on one line.
+        let expected = format!(
+            "{}\n3 done task(s), one line each; task_get(id) reads one, tasks_list(done: true) \
+shows them in full:
+first builder — Card first · 3 commits, last 2aaaaaaa
+second builder — Card second
+third builder — Card third · commit 0aaaaaaa
+",
+            render_tasks(&open)
+        );
+        assert_eq!(compact, expected);
+        // Without done cards there is nothing to shorten.
+        assert_eq!(render_board(&open, false), render_tasks(&open));
+        // Only done cards: no open section.
+        let done = [board_card("only", "done", Some("Merged."), 1)];
+        assert_eq!(
+            render_board(&done, false),
+            "1 done task(s), one line each; task_get(id) reads one, tasks_list(done: true) \
+shows them in full:\nonly builder — Card only · commit 0aaaaaaa\n"
+        );
+    }
+
+    /// On a 100-card board, 90 of them done with long results and many
+    /// commits, the done cards cost one short line each.
+    #[test]
+    fn a_long_board_stays_small() {
+        let result = "A long result that goes on. ".repeat(80);
+        let mut tasks: Vec<Task> = (0..90)
+            .map(|n| board_card(&format!("done-{n:02}"), "done", Some(&result), 12))
+            .collect();
+        tasks.extend((0..10).map(|n| board_card(&format!("open-{n:02}"), "working", None, 1)));
+        let full = render_board(&tasks, true);
+        let compact = render_board(&tasks, false);
+        let open = render_tasks(&tasks[90..]);
+        assert!(compact.starts_with(&open));
+        let done_lines: Vec<&str> = compact[open.len()..].lines().skip(2).collect();
+        assert_eq!(done_lines.len(), 90);
+        for (n, line) in done_lines.iter().enumerate() {
+            assert!(
+                line.starts_with(&format!("done-{n:02} builder — ")),
+                "{line}"
+            );
+            assert!(line.len() <= 80, "{line}");
+        }
+        assert!(
+            compact.len() < open.len() + 90 * 80 + 200,
+            "{}",
+            compact.len()
+        );
+        assert!(
+            full.len() > 20 * compact.len(),
+            "{} vs {}",
+            full.len(),
+            compact.len()
+        );
+        // A long title is cut, still on one line.
+        let mut long = board_card("long", "done", None, 0);
+        long.title = "word ".repeat(100);
+        let line = render_board(&[long], false);
+        assert_eq!(line.lines().count(), 2);
+        assert!(line.lines().nth(1).unwrap().chars().count() <= 140);
+    }
+
+    #[test]
+    fn tasks_list_takes_only_a_true_or_false_done() {
+        let defs = definitions();
+        let tasks = defs.iter().find(|d| d.name == "tasks_list").unwrap();
+        assert_eq!(tasks.schema["properties"]["done"]["type"], "boolean");
+        assert!(tasks.schema["required"].as_array().unwrap().is_empty());
+        assert_eq!(done_in_full(&json!({})), Ok(false));
+        assert_eq!(done_in_full(&json!({ "done": null })), Ok(false));
+        assert_eq!(done_in_full(&json!({ "done": false })), Ok(false));
+        assert_eq!(done_in_full(&json!({ "done": true })), Ok(true));
+        for wrong in [json!("true"), json!(1), json!(["all"])] {
+            assert_eq!(
+                done_in_full(&json!({ "done": wrong })),
+                Err("done must be true or false".to_string())
+            );
+        }
+    }
+
+    #[test]
+    fn empty_inbox_says_to_stop_checking() {
+        let empty: InboxResult = serde_json::from_value(json!({ "messages": [] })).unwrap();
+        let text = render_inbox(&empty);
+        assert!(text.starts_with("No new messages."), "{text}");
+        assert!(text.contains("instead of checking again"), "{text}");
+
+        let one: InboxResult = serde_json::from_value(json!({ "messages": [{
+            "id": "m-1", "from": "runtime", "to": "designer", "type": "answer",
+            "body": "D1 keeps acknowledgement as it is.\n", "timestamp": 0,
+        }] }))
+        .unwrap();
+        let text = render_inbox(&one);
+        assert!(text.starts_with("1 message(s):\n"), "{text}");
+        assert!(
+            text.contains(
+                "from runtime · type answer · id m-1\nD1 keeps acknowledgement as it is.\n"
+            ),
+            "{text}"
+        );
+    }
+
+    #[test]
+    fn inbox_description_says_messages_arrive_unasked() {
+        let defs = definitions();
+        let inbox = defs.iter().find(|d| d.name == "agent_inbox").unwrap();
+        assert!(
+            inbox
+                .description
+                .contains("do not call this to wait for one"),
+            "{}",
+            inbox.description
+        );
+    }
+
+    #[test]
+    fn send_descriptions_say_status_news_does_not_wake_resting_teammates() {
+        // Backed by delivery::tests::news_waits_for_company_unless_it_is_what_a_member_waits_for.
+        let defs = definitions();
+        for name in ["agent_send", "agent_broadcast"] {
+            let def = defs.iter().find(|d| d.name == name).unwrap();
+            assert!(
+                def.description
+                    .contains("does not wake a resting teammate unless that teammate is waiting"),
+                "{name}: {}",
+                def.description
+            );
+        }
+    }
+
     #[test]
     fn argument_helpers() {
         let args = json!({ "to": "a", "empty": "", "type": "question" });
@@ -1346,5 +1758,38 @@ mod tests {
         assert_eq!(message_type(&args).unwrap(), MessageType::Question);
         assert_eq!(message_type(&json!({})).unwrap(), MessageType::Message);
         assert!(message_type(&json!({ "type": "nope" })).is_err());
+    }
+
+    /// The orchestrator chooses bundles by name and cannot define items
+    /// (notes/toolboxes.md, Orchestrator tools): the schemas take strings
+    /// only, and anything else is refused, never dropped.
+    #[test]
+    fn toolbox_arguments_are_bundle_names_only() {
+        let defs = definitions();
+        for tool in ["agent_add", "agent_spawn"] {
+            let def = defs.iter().find(|d| d.name == tool).unwrap();
+            let toolbox = &def.schema["properties"]["toolbox"];
+            assert_eq!(toolbox["type"], "array", "{tool}");
+            assert_eq!(toolbox["items"], json!({ "type": "string" }), "{tool}");
+        }
+        assert_eq!(bundle_names(&json!({})), Ok(None));
+        assert_eq!(bundle_names(&json!({ "toolbox": null })), Ok(None));
+        assert_eq!(
+            bundle_names(&json!({ "toolbox": [" web ", "", "docs"] })),
+            Ok(Some(vec!["web".to_string(), "docs".to_string()]))
+        );
+        assert_eq!(
+            bundle_names(&json!({ "toolbox": "web, docs" })),
+            Ok(Some(vec!["web".to_string(), "docs".to_string()]))
+        );
+        assert_eq!(bundle_names(&json!({ "toolbox": [] })), Ok(Some(vec![])));
+        for defining in [
+            json!({ "toolbox": { "mcp": { "x": { "command": ["x"] } } } }),
+            json!({ "toolbox": ["web", { "mcp": { "x": { "command": ["x"] } } }] }),
+            json!({ "toolbox": 1 }),
+        ] {
+            let refused = bundle_names(&defining).unwrap_err();
+            assert!(refused.contains("bundle names"), "{defining}: {refused}");
+        }
     }
 }

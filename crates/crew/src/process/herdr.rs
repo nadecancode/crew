@@ -601,6 +601,18 @@ impl ProcessManager for Herdr {
     }
 
     async fn spawn(&self, spec: &LaunchSpec) -> Result<Spawned> {
+        // herdr's pane API has no verified environment-removal operation.
+        // Refuse before creating the pane rather than inherit toolbox tokens.
+        if !spec.scrub_env.is_empty() {
+            bail!(
+                "Toolbox secrets need the pty backend: herdr panes cannot drop {} from the session",
+                spec.scrub_env
+                    .iter()
+                    .map(|name| format!("${name}"))
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            );
+        }
         let mgr = &self.0;
         let pinned = pinned_to_selected_pi(spec);
         let spec = &pinned;
@@ -1090,6 +1102,7 @@ mod tests {
 
     fn pi_spec(program: &str) -> LaunchSpec {
         LaunchSpec {
+            scrub_env: Vec::new(),
             agent_id: "a".into(),
             kind: RuntimeKind::Pi,
             program: program.into(),
