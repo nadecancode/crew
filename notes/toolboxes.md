@@ -507,16 +507,16 @@ canary of every kind in each scope:
 - **Project:** a skill, a subagent, `CLAUDE.md`, a hook, and an approved
   `.mcp.json` server.
 
-Each variant runs with and without `--strict-mcp-config`. MCP columns are
-from the open (non-strict) runs: under strict loading no MCP server started
-in any variant.
+Each of the six source settings runs twice, with and without
+`--strict-mcp-config` (12 variants). The MCP columns are from the open runs;
+under strict loading, no MCP server started in any variant.
 
 | `--setting-sources` | User kinds | User MCP | Local hook, memory | Local MCP | Project kinds | Project MCP |
 | --- | --- | --- | --- | --- | --- | --- |
 | left out | present | started | present | started | present | started |
 | `project,local` | absent | — | present | started | present | started |
 | `project` | absent | — | absent | — | present | started |
-| `local` | absent | — | present | — | absent | — |
+| `local` | absent | — | present | started | absent | — |
 | `user` | present | started | absent | — | absent | — |
 | `""` | absent | — | absent | — | absent | — |
 
@@ -539,8 +539,12 @@ Resulting cells:
 
 - Operator `none`: **Not used** (closed).
 - Project `none`: **Not used** (closed).
-- Partial operator or project lists, `[mcp]` and the legacy `inherit_mcp`
-  among them: **Not available separately on Claude Code**.
+- Project `all`, the default (every project kind except MCP, which is
+  never inherited): `--setting-sources project` with `--strict-mcp-config`,
+  exact (closed).
+- A list naming only some operator kinds, `[mcp]` and the legacy
+  `inherit_mcp` among them, or only some project kinds: **Not available
+  separately on Claude Code**.
 
 #### Codex 0.159.0: the user AGENTS.md cannot be excluded unsandboxed
 
@@ -1039,7 +1043,7 @@ How `inherit` exclusions are enforced, per runtime:
 | Operator MCP | `--strict-mcp-config` (also excludes project `.mcp.json`). Each setting source also carries its own scope's MCP servers: without strict loading, `--setting-sources project` still leaves out the user servers in `~/.claude.json` and the local-scope servers (exclusion probes). | Closing step. Run `codex mcp list --json` with the member's overrides, home and worktree (no model request), then add `-c mcp_servers.<name>.enabled=false` for every listed server that is not in the toolbox, to the TUI and the app-server alike. Listed servers are named in the sources line. A table override is not enough, because it merges (current state, Codex inheritance probe). Plugin-bundled servers: *verify* that `mcp list` reports them; otherwise they are listed as cannot be excluded. | Sandboxed: excluded by the private agent directory. Unsandboxed: **Cannot be excluded on pi**. `--no-mcp` removes crew's server too. `--no-extensions` also removes native MCP, and restoring it with `-e builtin:mcp` brings back the operator's and the project's servers with crew's (capability probe, pi 1.1.0). In addition, a same-name server from the operator's `mcp.json` wins over crew's registration, so such a name is shown as Shadowed. |
 | Operator skills, subagents, hooks, settings and memory | `--setting-sources project`, dropping `user` and `local`, with preferences passed through crew's `--settings`. On Claude Code 2.1.291, `--setting-sources project,local` removed a user skill, user subagent, user `CLAUDE.md` and user `SessionStart` hook, and kept the project skill (capability probe). `--setting-sources project` alone also removes the local hook, `CLAUDE.local.md` and the local-scope MCP servers (exclusion probes). All six Claude Code kinds, MCP servers included, come from the one `user` source (and `local` for the operator's local settings), so they are inherited together or not at all: a list naming only some of them loads none and reports the named ones as Not available separately on Claude Code (use all). Sandboxed: also excluded by the private home. | Skills: one `skills.config` entry `{ path = "<…>/SKILL.md", enabled = false }` for each operator skill under `HOME/.agents/skills` and `CODEX_HOME/skills`. Only exact `SKILL.md` paths work; folder paths do nothing (capability probe, Codex 0.159.0). Hooks: `-c features.hooks=false`, which empties `hooks/list`; `-c hooks={}` removes neither user nor trusted project hooks (capability probe). Subagents: `-c features.multi_agent=false`, which removes `spawn_agent` with every role (capability probe); sandboxed, the private `CODEX_HOME` removes only the user roles. Both switches also drop the project's hooks or roles, which are then reported as Not available separately on Codex. `$CODEX_HOME/AGENTS.md`: **Cannot be excluded on Codex** unsandboxed: `project_doc_max_bytes=0`, `project_doc_fallback_filenames=[]` and `instructions` leave it in place (exclusion probes). Bundled system skills always remain and are listed as a system source. Operator `developer_instructions`: crew's own `-c developer_instructions` replaces them (exclusion probes), so under `none` crew stops prepending them. Sandboxed: excluded by the private home, except the instructions, which crew reads from the operator's configuration and drops under `none`. | Extensions: `--no-extensions -e builtin:mcp -e A/crew-pi.ts`. Native MCP must be re-added, or crew's own server goes with it. Skills: `--no-skills` plus `--skill` for the selected and inherited project skills, which removes every ambient skill (capability probe, pi 1.1.0). Instruction files: `--no-context-files` removes the agent directory's and the project's `AGENTS.md` together, so operator memory is **Cannot be excluded on pi** unsandboxed while project memory is kept. `SYSTEM.md` and `APPEND_SYSTEM.md`: see pi system prompt files below (exclusion probes). |
 | Operator plugins | Excluded by the same `--setting-sources project`: an enabled user plugin's skill was removed (capability probe, Claude Code 2.1.291). Plugin-bundled MCP servers never start under `--strict-mcp-config` (capability probe). | Plugin-bundled MCP servers follow the closing step, if `mcp list` reports them (*verify*). Plugin skills follow the exact-path rule. | Packages: excluded by `--no-extensions` (*verify*). Sandboxed: the closed route below. |
-| Project kinds | Default: loaded, except MCP. `--setting-sources ""` (or no `project`) removes project skills, subagents, memory and hooks; all of them come from the one `project` source, so a partial project list is Not available separately on Claude Code (exclusion probes). | Excluding project skills uses `skills.config` with exact paths, as for the operator. Project memory: `-c project_doc_max_bytes=0` removes the repository's and nested `AGENTS.md` and keeps the user one (exclusion probes). Project configuration needs trust, which crew does not grant. | `--no-approve` (the existing `auto_trust: false`) removes project MCP servers and skills and leaves the user ones (capability probe), and removes project `SYSTEM.md` and `APPEND_SYSTEM.md`, not project `AGENTS.md`. Project memory none: `--no-context-files`, which also removes the operator's (exclusion probes). With `--no-skills`, inherited project skills are passed explicitly, in name order. |
+| Project kinds | Default: loaded, except MCP. `--setting-sources ""` (or no `project`) removes project skills, subagents, memory and hooks; all of them come from the one `project` source. Project `all` (every kind but MCP, the default) is exact with `--setting-sources project` and `--strict-mcp-config`. A list naming only some project kinds is Not available separately on Claude Code (exclusion probes). | Excluding project skills uses `skills.config` with exact paths, as for the operator. Project memory: `-c project_doc_max_bytes=0` removes the repository's and nested `AGENTS.md` and keeps the user one (exclusion probes). Project configuration needs trust, which crew does not grant. | `--no-approve` (the existing `auto_trust: false`) removes project MCP servers and skills and leaves the user ones (capability probe), and removes project `SYSTEM.md` and `APPEND_SYSTEM.md`, not project `AGENTS.md`. Project memory none: `--no-context-files`, which also removes the operator's (exclusion probes). With `--no-skills`, inherited project skills are passed explicitly, in name order. |
 
 **pi system prompt files.** pi replaces its own system prompt with a
 `SYSTEM.md`: the project's `.pi/SYSTEM.md` when the project is trusted,

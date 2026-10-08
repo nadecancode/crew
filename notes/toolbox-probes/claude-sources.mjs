@@ -28,6 +28,7 @@ const variants = [
   ['project-strict', 'project', true],
   ['project-open', 'project', false],
   ['local-strict', 'local', true],
+  ['local-open', 'local', false],
   ['user-strict', 'user', true],
   ['user-open', 'user', false],
   ['empty-strict', '', true],
