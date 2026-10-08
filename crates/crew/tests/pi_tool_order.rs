@@ -38,8 +38,9 @@ const SERVERS: &[(&str, bool, &[&str])] = &[
 const CREW_TOOLS: &[&str] = &["task_update", "agents_list", "task_complete", "agent_send"];
 
 /// The stand-in for the crew binary: `crew mcp` and `crew toolbox mcp <name>`
-/// answer `initialize` after the delay `delays.json` gives the server, then
-/// list its tools; a server named in `exit_after_call` exits after its first
+/// answer `initialize` (with instructions) after the delay `delays.json`
+/// gives the server, then list its tools; one named in `resources` also
+/// offers a resource; one named in `exit_after_call` exits after its first
 /// `tools/call`. `crew hook` and every server start, listing and call are
 /// appended to `calls.log`; anything else exits at once.
 const FAKE_CREW: &str = r#"#!/usr/bin/env node
@@ -62,7 +63,12 @@ readline.createInterface({ input: process.stdin }).on('line', line => {
   if (q.id === undefined) return;
   const answer = (result, then) => process.stdout.write(JSON.stringify({ jsonrpc: '2.0', id: q.id, result }) + '\n', then);
   if (q.method === 'initialize') {
-    setTimeout(() => answer({ protocolVersion: '2025-06-18', capabilities: { tools: {} }, serverInfo: { name: server, version: '1' } }), plan.delays[server] ?? 0);
+    const capabilities = (plan.resources ?? []).includes(server) ? { tools: {}, resources: {} } : { tools: {} };
+    setTimeout(() => { log(`up ${server}`); answer({ protocolVersion: '2025-06-18', capabilities, serverInfo: { name: server, version: '1' }, instructions: `${server}: instructions for the model.` }); }, plan.delays[server] ?? 0);
+  } else if (q.method === 'resources/list') {
+    answer({ resources: [{ uri: `file:///${server}/readme`, name: 'readme' }] });
+  } else if (q.method === 'resources/templates/list') {
+    answer({ resourceTemplates: [] });
   } else if (q.method === 'tools/list') {
     log(`listed ${server}`);
     answer({ tools: tools.map(name => ({ name, description: `${server}: ${name}.`, inputSchema: { type: 'object', properties: {} } })) });
@@ -248,10 +254,23 @@ struct Member {
     stub: Stub,
     pi: PathBuf,
     toolbox: Vec<(String, bool, Vec<String>)>,
+    /// Servers that offer resources.
+    resources: Vec<String>,
+    /// Every item required.
+    strict: bool,
 }
 
 impl Member {
     fn new(pi: PathBuf, servers: &[(&str, bool, &[&str])]) -> Member {
+        Member::with(pi, servers, &[], false)
+    }
+
+    fn with(
+        pi: PathBuf,
+        servers: &[(&str, bool, &[&str])],
+        resources: &[&str],
+        strict: bool,
+    ) -> Member {
         let root = tempfile::tempdir().unwrap();
         let stub = Stub::start();
         let toolbox: Vec<(String, bool, Vec<String>)> = servers
@@ -269,6 +288,8 @@ impl Member {
             stub,
             pi,
             toolbox,
+            resources: resources.iter().map(|r| r.to_string()).collect(),
+            strict,
         };
         for dir in ["agent", "pi", "work", "home", "bin"] {
             std::fs::create_dir_all(member.path(dir)).unwrap();
@@ -283,8 +304,13 @@ impl Member {
         std::fs::write(member.path("pi/models.json"), models.to_string()).unwrap();
         // Pinned as the daemon pins them, from what each server lists.
         for (name, _, tools) in &member.toolbox {
+            let capabilities = if member.resources.contains(name) {
+                json!({ "tools": {}, "resources": {} })
+            } else {
+                json!({ "tools": {} })
+            };
             let listing = json!({
-                "initialize": { "protocolVersion": "2025-06-18", "capabilities": { "tools": {} }, "serverInfo": { "name": name, "version": "1" } },
+                "initialize": { "protocolVersion": "2025-06-18", "capabilities": capabilities, "serverInfo": { "name": name, "version": "1" }, "instructions": format!("{name}: instructions for the model.") },
                 "tools": tools.iter().map(|tool| json!({ "name": tool, "description": format!("{name}: {tool}."), "inputSchema": { "type": "object", "properties": {} } })).collect::<Vec<_>>(),
             });
             crew::mcp::proxy::pin(&member.path("agent"), name, "definition", &listing, false)
@@ -324,6 +350,7 @@ impl Member {
             .collect();
         let mut plan = plan;
         plan["tools"] = json!(tools);
+        plan["resources"] = json!(self.resources);
         plan["delays"] = json!(delays
             .iter()
             .map(|(name, ms)| (name.to_string(), *ms))
@@ -331,7 +358,10 @@ impl Member {
         std::fs::write(self.path("bin/delays.json"), plan.to_string()).unwrap();
         let _ = std::fs::remove_file(self.path("bin/calls.log"));
 
-        let mut resolved = Resolved::default();
+        let mut resolved = Resolved {
+            strict: self.strict,
+            ..Resolved::default()
+        };
         for (name, required, _) in &self.toolbox {
             resolved.items.insert(
                 ItemRef::new(ItemKind::Mcp, name),
@@ -501,6 +531,23 @@ impl Session {
         }
     }
 
+    /// Wait for pi to end by itself, within `within`.
+    fn exit(&mut self, within: Duration, member: &Member) -> portable_pty::ExitStatus {
+        let started = Instant::now();
+        loop {
+            if let Some(status) = self.child.try_wait().unwrap() {
+                return status;
+            }
+            assert!(
+                started.elapsed() < within,
+                "pi still runs; calls {:#?}; screen:\n{}",
+                member.calls(),
+                self.screen()
+            );
+            std::thread::sleep(Duration::from_millis(100));
+        }
+    }
+
     /// pi and everything it started.
     fn stop(mut self) {
         if let Some(pid) = self.child.process_id() {
@@ -586,6 +633,15 @@ fn without_markers(value: &Value) -> Value {
     }
 }
 
+/// What the extension reported of a failed server (`crew hook toolbox-failed`).
+fn failed(calls: &[String]) -> Value {
+    let failed = calls
+        .iter()
+        .find(|c| c.starts_with("hook toolbox-failed"))
+        .unwrap_or_else(|| panic!("{calls:#?}"));
+    serde_json::from_str(failed.splitn(3, ' ').nth(2).unwrap()).unwrap()
+}
+
 /// The order the servers listed their tools in, from the stand-ins' log.
 fn listed(calls: &[String]) -> Vec<String> {
     calls
@@ -637,6 +693,10 @@ fn the_first_request_declares_the_same_tools_byte_for_byte_whatever_the_timing()
         let calls = member.calls();
         session.stop();
         assert_eq!(names(&first), EXPECTED, "launch {index}: {calls:#?}");
+        // pi 1.1 sends no server's instructions for direct tools (its
+        // mcp_servers section lists only codemode and deferred servers), so
+        // no server's timing can reach the prompt through them either.
+        assert!(!first.to_string().contains("instructions for the model"));
         firsts.push((first, calls));
     }
     let (reference, _) = &firsts[0];
@@ -749,7 +809,7 @@ fn a_required_server_that_never_lists_its_tools_ends_the_session_before_any_requ
         calls.iter().any(|c| c.starts_with("hook exiting")),
         "{calls:#?}"
     );
-    assert!(screen.contains("beta-x did not list its tools"), "{screen}");
+    assert!(screen.contains("beta-x did not answer in time"), "{screen}");
 }
 
 #[test]
@@ -774,10 +834,16 @@ fn an_optional_server_that_answers_late_stays_out_of_the_session() {
         .filter(|name| !name.starts_with("mcp__beta_x"))
         .collect();
     assert_eq!(names(&requests[0]), without, "{calls:#?}");
+    // Neither its tools nor its instructions reach a later request.
     assert_eq!(
         requests[1]["tools"].to_string(),
         requests[0]["tools"].to_string()
     );
+    assert_eq!(
+        requests[1]["system"].to_string(),
+        requests[0]["system"].to_string()
+    );
+    assert!(!requests[1].to_string().contains("beta-x: instructions"));
     let failed = calls
         .iter()
         .find(|c| c.starts_with("hook toolbox-failed"))
@@ -812,8 +878,129 @@ fn a_server_that_reconnects_keeps_the_declared_tools() {
     for request in &requests {
         assert_eq!(names(request), EXPECTED, "{calls:#?}");
         assert_eq!(
+            request["system"].to_string(),
+            requests[0]["system"].to_string()
+        );
+        assert_eq!(
             request["tools"].to_string(),
             requests[0]["tools"].to_string()
         );
     }
+}
+
+/// A strict toolbox requires every server: one that does not answer ends the
+/// session before any request, like a required one.
+#[test]
+fn a_strict_toolbox_ends_the_session_when_any_server_does_not_answer() {
+    let pi = need_pi!();
+    let member = Member::with(pi, SERVERS, &[], true);
+    let mut session = member.launch(
+        &[("crew", 0), ("alpha", 0), ("beta-x", 0), ("gamma", 600_000)],
+        json!({}),
+        false,
+        false,
+    );
+    let status = session.exit(Duration::from_secs(40), &member);
+    let calls = member.calls();
+    session.stop();
+    assert!(status.success(), "{status:?}");
+    assert!(
+        member.stub.requests().is_empty(),
+        "{:#?}",
+        member.stub.requests()
+    );
+    let payload = failed(&calls);
+    assert_eq!(payload["server"], "gamma");
+    assert_eq!(payload["ended"], true);
+}
+
+/// pi counts names that differ only in `-` and `_` as one server, so the
+/// second is not registered: refused as a late server would be, here ending
+/// the session because it is required, and never replacing the first.
+#[test]
+fn a_server_pi_would_take_for_another_is_refused() {
+    let pi = need_pi!();
+    let servers: &[(&str, bool, &[&str])] = &[
+        ("beta-x", false, &["two", "one"]),
+        ("beta_x", true, &["three"]),
+    ];
+    let member = Member::new(pi, servers);
+    let mut session = member.launch(&[], json!({}), false, false);
+    let status = session.exit(Duration::from_secs(40), &member);
+    let calls = member.calls();
+    session.stop();
+    assert!(status.success(), "{status:?}");
+    assert!(
+        member.stub.requests().is_empty(),
+        "{:#?}",
+        member.stub.requests()
+    );
+    let payload = failed(&calls);
+    assert_eq!(payload["server"], "beta_x");
+    assert_eq!(payload["ended"], true);
+    assert!(!calls.iter().any(|c| c == "start beta_x"), "{calls:#?}");
+}
+
+/// A server without tools adds to the session only pi's resource tools, and
+/// only when it offers resources: those are waited for like tools, so they
+/// are in place from the first request on. One with neither is not waited
+/// for by crew and says nothing about whether it connected; pi itself holds
+/// a first prompt up to 10 s for any server it has not heard from.
+#[test]
+fn servers_without_tools_add_only_resource_tools_and_crew_waits_for_nothing_else() {
+    let pi = need_pi!();
+    let servers: &[(&str, bool, &[&str])] = &[
+        ("alpha", false, &["zeta", "beta", "alpha"]),
+        ("docs", false, &[]),
+        ("empty", false, &[]),
+    ];
+    let member = Member::with(pi, servers, &["docs"], false);
+    let mut firsts = Vec::new();
+    for delays in [
+        &[("crew", 0), ("alpha", 400), ("docs", 0), ("empty", 600_000)][..],
+        &[
+            ("crew", 400),
+            ("alpha", 0),
+            ("docs", 400),
+            ("empty", 600_000),
+        ][..],
+    ] {
+        let _ = std::fs::remove_dir_all(member.path("agent/pi-sessions"));
+        let started = Instant::now();
+        let session = member.launch(delays, json!({}), false, false);
+        let first = session.requests(&member, 1, Duration::from_secs(30))[0].clone();
+        let waited = started.elapsed();
+        let calls = member.calls();
+        session.stop();
+        // empty never answered: only pi's own 10 s waited for it.
+        assert!(waited < Duration::from_secs(20), "{waited:?}");
+        assert!(
+            !calls.iter().any(|c| c.starts_with("hook toolbox-failed")),
+            "{calls:#?}"
+        );
+        assert!(calls.iter().any(|c| c == "up docs"), "{calls:#?}");
+        let names = names(&first);
+        for tool in [
+            "list_mcp_resources",
+            "list_mcp_resource_templates",
+            "read_mcp_resource",
+        ] {
+            assert!(names.iter().any(|n| n == tool), "{names:?}");
+        }
+        assert!(
+            !names
+                .iter()
+                .any(|n| n.contains("docs") || n.contains("empty")),
+            "{names:?}"
+        );
+        firsts.push(first);
+    }
+    assert_eq!(
+        firsts[0]["tools"].to_string(),
+        firsts[1]["tools"].to_string()
+    );
+    assert_eq!(
+        firsts[0]["system"].to_string(),
+        firsts[1]["system"].to_string()
+    );
 }

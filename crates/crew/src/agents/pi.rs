@@ -327,30 +327,33 @@ fn write_extension(
     servers: &[String],
 ) -> Result<std::path::PathBuf> {
     let path = agent_dir.join(EXTENSION_FILE);
-    // Each server with whether the member may start without it and the
-    // names of the tools its pinned snapshot serves: the extension waits for
-    // those before the first request. A server without a snapshot serves
-    // none.
+    // Each server with whether the member may start without it (a strict
+    // toolbox requires every item), the names of the tools its pinned
+    // snapshot serves and whether it offers resources: the extension waits
+    // for those before the first request. A server without a snapshot serves
+    // nothing.
     let toolbox: Vec<Value> = servers
         .iter()
         .map(|name| {
-            let required = matches!(
-                toolbox.items.get(&ItemRef::new(ItemKind::Mcp, name)).map(|entry| &entry.item),
-                Some(Item::Mcp(server)) if server.required
-            );
+            let required = toolbox.strict
+                || matches!(
+                    toolbox.items.get(&ItemRef::new(ItemKind::Mcp, name)).map(|entry| &entry.item),
+                    Some(Item::Mcp(server)) if server.required
+                );
             let snapshot = crate::mcp::proxy::snapshot_path(agent_dir, name);
-            let tools: Vec<Value> = crate::mcp::proxy::Snapshot::load(&snapshot)
-                .ok()
-                .flatten()
-                .map(|snapshot| {
-                    snapshot
-                        .tools
-                        .iter()
-                        .filter_map(|tool| tool.get("name").cloned())
-                        .collect()
-                })
-                .unwrap_or_default();
-            json!({ "name": name, "required": required, "tools": tools })
+            let snapshot = crate::mcp::proxy::Snapshot::load(&snapshot).ok().flatten();
+            let tools: Vec<Value> = snapshot
+                .iter()
+                .flat_map(|snapshot| &snapshot.tools)
+                .filter_map(|tool| tool.get("name").cloned())
+                .collect();
+            let resources = snapshot.is_some_and(|snapshot| {
+                snapshot
+                    .initialize
+                    .pointer("/capabilities/resources")
+                    .is_some()
+            });
+            json!({ "name": name, "required": required, "tools": tools, "resources": resources })
         })
         .collect();
     // The two paths and the servers are embedded as JSON literals, which are
@@ -923,8 +926,14 @@ mod tests {
         let endpoint = Endpoint::default();
         // Pinned as the daemon pins them: tools sorted by name.
         let pin = |name: &str, tools: &[&str]| {
+            // A server without tools here offers resources instead.
+            let capabilities = if tools.is_empty() {
+                json!({ "resources": {} })
+            } else {
+                json!({ "tools": {} })
+            };
             let listing = json!({
-                "initialize": { "protocolVersion": "2025-06-18", "capabilities": { "tools": {} } },
+                "initialize": { "protocolVersion": "2025-06-18", "capabilities": capabilities },
                 "tools": tools.iter().map(|tool| json!({ "name": tool, "inputSchema": { "type": "object" } })).collect::<Vec<_>>(),
             });
             crate::mcp::proxy::pin(dir.path(), name, "definition", &listing, false).unwrap();
@@ -980,12 +989,29 @@ mod tests {
         assert_eq!(
             servers,
             json!([
-                { "name": "alpha", "required": false, "tools": ["beta", "zeta"] },
-                { "name": "beta-x", "required": true, "tools": [] },
-                { "name": "gamma", "required": false, "tools": [] },
+                { "name": "alpha", "required": false, "tools": ["beta", "zeta"], "resources": false },
+                { "name": "beta-x", "required": true, "tools": [], "resources": true },
+                { "name": "gamma", "required": false, "tools": [], "resources": false },
             ])
         );
         assert!(!source.contains("__TOOLBOX_SERVERS__"));
+        // A strict toolbox requires every server.
+        let mut strict = settings.clone();
+        strict.toolbox.strict = true;
+        let source = launch(&strict);
+        let line = source
+            .lines()
+            .find(|line| line.starts_with("const TOOLBOX_SERVERS"))
+            .unwrap();
+        let servers: Value = serde_json::from_str(line.split_once(" = ").unwrap().1).unwrap();
+        assert!(
+            servers
+                .as_array()
+                .unwrap()
+                .iter()
+                .all(|server| server["required"] == true),
+            "{servers}"
+        );
         // Without a toolbox, crew's own server alone.
         let source = launch(&AgentSettings::default());
         assert!(

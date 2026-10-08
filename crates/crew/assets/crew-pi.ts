@@ -19,15 +19,15 @@ import { execFile, spawn } from "node:child_process"
 const CREW_BIN: string = __CREW_BIN__
 const IDENTITY: string = __IDENTITY__
 // The member's toolbox MCP servers in name order: whether the member may
-// not start without it, and the names of the tools its pinned snapshot
-// serves.
+// not start without it, the names of the tools its pinned snapshot serves,
+// and whether it offers resources.
 const TOOLBOX_SERVERS: ToolboxServer[] = __TOOLBOX_SERVERS__
 
 type Delivery = { ids: string[]; text: string }
 type CompactOrder = { instructions?: string }
 type ToolSpec = { name: string; description: string; inputSchema: unknown }
 type Run = { code: number; stdout: string; stderr: string }
-type ToolboxServer = { name: string; required: boolean; tools: string[] }
+type ToolboxServer = { name: string; required: boolean; tools: string[]; resources: boolean }
 type ToolInfo = { name: string; exposure?: string; namespace?: { name?: string } }
 
 const env = { ...process.env, CREW_IDENTITY: IDENTITY }
@@ -198,7 +198,7 @@ function pump(pi: any, ctx: any): void {
 // The MCP servers crew registers: its own, then the toolbox's in name order.
 // A toolbox server says which tools to wait for; crew's own lists them all
 // at once (pi registers each listing in one go), so any of them will do.
-type Server = { name: string; required: boolean; config: object; tools?: string[] }
+type Server = { name: string; required: boolean; config: object; tools?: string[]; resources?: boolean }
 const SERVERS: Server[] = [
   {
     name: "crew",
@@ -214,12 +214,18 @@ const SERVERS: Server[] = [
     required: server.required,
     config: { command: CREW_BIN, args: ["toolbox", "mcp", server.name, "--identity", IDENTITY] },
     tools: server.tools,
+    resources: server.resources,
   })),
 ]
+// The tools pi adds for MCP resources once a server that offers them
+// connects.
+const RESOURCE_TOOLS = ["list_mcp_resources", "list_mcp_resource_templates", "read_mcp_resource"]
 // How long the first request waits for each server to list its tools.
 // crew's proxy answers from the pinned snapshot, so only a server that
 // cannot start at all takes this long.
 const SERVER_WAIT_MS = 10_000
+// And for all of them together: one past it is not waited for.
+const SETTLE_WAIT_MS = 30_000
 // Started once per process; the first request, and every one after it,
 // waits for it.
 let settling: Promise<void> | undefined
@@ -288,10 +294,17 @@ function toolsOf(pi: any, server: Server): string[] {
     .map(tool => tool.name)
 }
 
-// Whether every tool the server is expected to list is registered. A name
-// pi has to change (too long, or the same as another tool's) is counted
-// rather than looked for: pi gives it a suffix of its own.
+// Whether everything the server adds to the session is registered: every
+// tool it is expected to list, and pi's resource tools when it offers
+// resources. A name pi has to change (too long, or the same as another
+// tool's) is counted rather than looked for: pi gives it a suffix of its
+// own. A server with neither tools nor resources adds nothing, so nothing
+// is waited for, and nothing is concluded about it.
 function listed(pi: any, server: Server, taken: Set<string>): boolean {
+  if (server.resources) {
+    const all = pi.getAllTools() as ToolInfo[]
+    if (!RESOURCE_TOOLS.every(name => all.some(tool => tool.name === name && tool.exposure !== "hidden"))) return false
+  }
   const present = toolsOf(pi, server)
   if (server.tools === undefined) return present.length > 0
   if (present.length < server.tools.length) return false
@@ -301,8 +314,8 @@ function listed(pi: any, server: Server, taken: Set<string>): boolean {
   )
 }
 
-async function arrived(pi: any, server: Server, taken: Set<string>): Promise<boolean> {
-  const deadline = Date.now() + SERVER_WAIT_MS
+async function arrived(pi: any, server: Server, taken: Set<string>, until: number): Promise<boolean> {
+  const deadline = Math.min(Date.now() + SERVER_WAIT_MS, until)
   while (!listed(pi, server, taken)) {
     if (Date.now() >= deadline) return false
     await new Promise(resolve => setTimeout(resolve, 20))
@@ -321,27 +334,29 @@ async function arrived(pi: any, server: Server, taken: Set<string>): Promise<boo
 // any other server's, each server's tools by name. The same toolbox gives
 // the same tool list, byte for byte, on every start and restart.
 //
-// A required server (crew's own, or one the toolbox requires) that does not
-// list its tools in time ends the session before its first request; another
-// is left out of the session, and the daemon told.
+// A required server (crew's own, or one the toolbox requires, which a
+// strict toolbox does of every server) that does not answer in time, or
+// that pi will not take, ends the session before its first request; another
+// is left out of the session. The daemon is told either way.
 async function settle(pi: any, ctx: any): Promise<void> {
   const ready: Server[] = []
   const taken = new Set<string>()
+  const until = Date.now() + SETTLE_WAIT_MS
+  // pi counts names that differ only in `-` and `_` as one server: a second
+  // would replace the first.
+  const groups = new Set<string>()
   for (const [index, server] of SERVERS.entries()) {
-    if (index > 0 && server.tools?.length === 0) {
-      // Nothing to declare and nothing to wait for.
-      register(pi, server)
-      continue
-    }
-    const registered = index === 0 || register(pi, server)
-    if (registered && (await arrived(pi, server, taken))) {
+    const own = !groups.has(namespaceOf(server.name))
+    groups.add(namespaceOf(server.name))
+    const registered = index === 0 || (own && register(pi, server))
+    if (registered && (await arrived(pi, server, taken, until))) {
       ready.push(server)
       for (const name of toolsOf(pi, server)) taken.add(name)
       continue
     }
     const why = registered
-      ? `${server.name} did not list its tools within ${SERVER_WAIT_MS / 1000} s`
-      : `pi did not take ${server.name} as an MCP server`
+      ? `${server.name} did not answer in time (${SERVER_WAIT_MS / 1000} s each, ${SETTLE_WAIT_MS / 1000} s for all)`
+      : `pi cannot take ${server.name} as a server of its own`
     if (index > 0) {
       report("toolbox-failed", {
         server: server.name,
@@ -350,21 +365,24 @@ async function settle(pi: any, ctx: any): Promise<void> {
       })
     }
     if (server.required) return stop(ctx, `${why}, and the session cannot run without it`)
-    // Its tools must not join the session later.
-    try {
-      pi.unregisterMcpServer?.(server.name)
-    } catch {
-      // never registered
+    // Its tools must not join the session later. One never registered is
+    // left alone: unregistering its name would remove the other server.
+    if (registered) {
+      try {
+        pi.unregisterMcpServer?.(server.name)
+      } catch {
+        // already gone
+      }
     }
     notify(ctx, `${why}: the session runs without it.`, "warning")
   }
   const rank = new Map(ready.map((server, index) => [namespaceOf(server.name), index]))
-  const groups = new Map<string, string>()
+  const groupOf = new Map<string, string>()
   for (const tool of pi.getAllTools() as ToolInfo[]) {
-    if (tool.namespace?.name !== undefined) groups.set(tool.name, tool.namespace.name)
+    if (tool.namespace?.name !== undefined) groupOf.set(tool.name, tool.namespace.name)
   }
   const key = (name: string): [number, string, string] => {
-    const group = groups.get(name) ?? ""
+    const group = groupOf.get(name) ?? ""
     return [rank.get(group) ?? ready.length, group, name]
   }
   const active: string[] = pi.getActiveTools()
