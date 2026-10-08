@@ -6,8 +6,16 @@
 //! - `price`: immutable price books and exact cost intervals
 //! - `metrics`: metric computation with per-metric coverage
 //! - `cohort`: cost per completed task over first completions
+//! - `source`: bounded, read-only tailing of a native file, with continuity
+//! - `claude`, `codex`, `pi`: the runtime adapters (pi is gated)
 
+pub mod claude;
+pub mod codex;
 pub mod cohort;
 pub mod counters;
 pub mod metrics;
+#[cfg(test)]
+mod parity;
+pub mod pi;
 pub mod price;
+pub mod source;

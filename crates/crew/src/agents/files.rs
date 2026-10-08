@@ -98,15 +98,10 @@ impl AgentFiles {
                 self.open_reported(&path)
             }
             Self::Private { agent_dir, root } => {
-                let name = session_file_name(session)?;
-                let projects = paths::list_dir_beneath(root, Path::new(CLAUDE_PROJECTS)).ok()?;
-                list(&projects).into_iter().find_map(|project| {
-                    let rel = Path::new(CLAUDE_PROJECTS).join(&project).join(&name);
-                    let file = paths::open_beneath(root, &rel).ok()?;
-                    Some(Opened {
-                        file,
-                        path: agent_dir.join(rel),
-                    })
+                let (file, rel) = claude_beneath(root, Path::new(CLAUDE_PROJECTS), session)?;
+                Some(Opened {
+                    file,
+                    path: agent_dir.join(rel),
                 })
             }
         }
@@ -121,29 +116,93 @@ impl AgentFiles {
                 self.open_reported(&path)
             }
             Self::Private { agent_dir, root } => {
-                session_file_name(thread)?;
-                let suffix = format!("-{thread}.jsonl");
-                [0i64, -1, 1].iter().find_map(|day| {
-                    let date = Local
-                        .timestamp_millis_opt(started_ms + day * 86_400_000)
-                        .single()?;
-                    let dir = Path::new(CODEX_SESSIONS).join(date.format("%Y/%m/%d").to_string());
-                    let listing = paths::list_dir_beneath(root, &dir).ok()?;
-                    list(&listing).into_iter().find_map(|name| {
-                        if !(name.starts_with("rollout-") && name.ends_with(&suffix)) {
-                            return None;
-                        }
-                        let rel = dir.join(&name);
-                        let file = paths::open_beneath(root, &rel).ok()?;
-                        Some(Opened {
-                            file,
-                            path: agent_dir.join(rel),
-                        })
-                    })
+                let (file, rel) =
+                    codex_beneath(root, Path::new(CODEX_SESSIONS), thread, started_ms)?;
+                Some(Opened {
+                    file,
+                    path: agent_dir.join(rel),
                 })
             }
         }
     }
+}
+
+/// A CLI home outside the sandbox (the operator's own, or an account's),
+/// captured when a member launched and held open by descriptor. Usage
+/// metrics open only the exact session file of a confirmed session beneath
+/// it, never a path a hook reported, and follow no link below the home.
+pub struct CliHome {
+    root: File,
+    path: PathBuf,
+}
+
+impl CliHome {
+    /// Opens the home directory. It is the operator's configuration, so a
+    /// link naming the home itself is followed once, here; nothing beneath
+    /// it is.
+    pub fn capture(path: &Path) -> Option<Self> {
+        let root = File::open(path).ok()?;
+        root.metadata().ok()?.is_dir().then(|| Self {
+            root,
+            path: path.to_path_buf(),
+        })
+    }
+
+    /// Claude Code's transcript of `session` beneath this home.
+    pub fn claude_transcript(&self, session: &str) -> Option<Opened> {
+        let (file, rel) = claude_beneath(&self.root, Path::new("projects"), session)?;
+        Some(Opened {
+            file,
+            path: self.path.join(rel),
+        })
+    }
+
+    /// Codex's rollout of `thread`, started around `started_ms`, beneath this home.
+    pub fn codex_rollout(&self, thread: &str, started_ms: i64) -> Option<Opened> {
+        let (file, rel) = codex_beneath(&self.root, Path::new("sessions"), thread, started_ms)?;
+        Some(Opened {
+            file,
+            path: self.path.join(rel),
+        })
+    }
+}
+
+/// `<projects>/<project>/<session>.jsonl` beneath `root`, and its relative path.
+fn claude_beneath(root: &File, projects: &Path, session: &str) -> Option<(File, PathBuf)> {
+    let name = session_file_name(session)?;
+    let listing = paths::list_dir_beneath(root, projects).ok()?;
+    list(&listing).into_iter().find_map(|project| {
+        let rel = projects.join(&project).join(&name);
+        let file = paths::open_beneath(root, &rel).ok()?;
+        Some((file, rel))
+    })
+}
+
+/// `<sessions>/YYYY/MM/DD/rollout-<time>-<thread>.jsonl` beneath `root`,
+/// named after the local day the session started (or the day either side).
+fn codex_beneath(
+    root: &File,
+    sessions: &Path,
+    thread: &str,
+    started_ms: i64,
+) -> Option<(File, PathBuf)> {
+    session_file_name(thread)?;
+    let suffix = format!("-{thread}.jsonl");
+    [0i64, -1, 1].iter().find_map(|day| {
+        let date = Local
+            .timestamp_millis_opt(started_ms + day * 86_400_000)
+            .single()?;
+        let dir = sessions.join(date.format("%Y/%m/%d").to_string());
+        let listing = paths::list_dir_beneath(root, &dir).ok()?;
+        list(&listing).into_iter().find_map(|name| {
+            if !(name.starts_with("rollout-") && name.ends_with(&suffix)) {
+                return None;
+            }
+            let rel = dir.join(&name);
+            let file = paths::open_beneath(root, &rel).ok()?;
+            Some((file, rel))
+        })
+    })
 }
 
 /// `<session>.jsonl` for an id that is a plain name, never a path.
@@ -325,5 +384,57 @@ mod tests {
                 .open_reported(&f.agent.join("rw/home/claude/projects/-w/linked.jsonl"))
         )
         .is_none());
+    }
+
+    #[test]
+    fn a_captured_cli_home_opens_only_exact_regular_session_files_beneath_it() {
+        let dir = tempfile::tempdir().unwrap();
+        let home = dir.path().canonicalize().unwrap().join("claude-home");
+        write(&home.join("projects/-w/s-1.jsonl"), "own");
+        let secret = dir.path().join("secret.jsonl");
+        write(&secret, "operator secret");
+        symlink(&secret, home.join("projects/-w/linked.jsonl")).unwrap();
+        let elsewhere = dir.path().join("elsewhere");
+        write(&elsewhere.join("hidden.jsonl"), "operator secret");
+        symlink(&elsewhere, home.join("projects/-link")).unwrap();
+        let fifo = home.join("projects/-w/fifo.jsonl");
+        let c = std::ffi::CString::new(fifo.as_os_str().as_encoded_bytes()).unwrap();
+        assert_eq!(unsafe { libc::mkfifo(c.as_ptr(), 0o600) }, 0);
+
+        let captured = CliHome::capture(&home).unwrap();
+        let found = captured.claude_transcript("s-1").unwrap();
+        assert_eq!(found.path, home.join("projects/-w/s-1.jsonl"));
+        assert_eq!(text(Some(found)).as_deref(), Some("own"));
+        for refused in ["linked", "hidden", "fifo", "../../secret", "s-2", ""] {
+            assert!(captured.claude_transcript(refused).is_none(), "{refused}");
+        }
+        assert!(CliHome::capture(&home.join("projects/-w/s-1.jsonl")).is_none());
+
+        // The home captured at launch stays the one read after a change of
+        // configuration: a new directory under the old name is not followed.
+        let moved = dir.path().join("claude-home-old");
+        std::fs::rename(&home, &moved).unwrap();
+        write(&home.join("projects/-w/s-1.jsonl"), "replacement");
+        assert_eq!(
+            text(captured.claude_transcript("s-1")).as_deref(),
+            Some("own")
+        );
+
+        let codex = dir.path().join("codex-home");
+        let started = chrono::Local
+            .with_ymd_and_hms(2026, 10, 8, 0, 22, 1)
+            .unwrap()
+            .timestamp_millis();
+        write(
+            &codex.join("sessions/2026/10/08/rollout-2026-10-08T00-22-01-th-1.jsonl"),
+            "rollout",
+        );
+        let codex = CliHome::capture(&codex).unwrap();
+        assert_eq!(
+            text(codex.codex_rollout("th-1", started)).as_deref(),
+            Some("rollout")
+        );
+        assert!(codex.codex_rollout("th-2", started).is_none());
+        assert!(codex.codex_rollout("../th-1", started).is_none());
     }
 }
