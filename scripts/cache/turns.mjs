@@ -164,6 +164,8 @@ export function extractEvents(runtime, records) {
         if (raw.includes('<task-notification>')) for (const x of raw.matchAll(/<tool-use-id>([\w-]+)<\/tool-use-id>/g)) events.push({ ts, kind: 'bg_done', line, ref: x[1] });
         if (v.type === 'attachment') continue;
       }
+      // A completed turn (Claude Code writes one per finished turn).
+      if (v.type === 'system' && v.subtype === 'turn_duration') { events.push({ ts, kind: 'turn_end', line }); continue; }
       if (role === 'user') {
         if (Array.isArray(c) && c.some(b => b?.type === 'tool_result')) {
           for (const b of c) if (b?.type === 'tool_result') events.push({ ts, kind: 'result', line, ref: b.tool_use_id, text: blockText(b.content), error: b.is_error === true });
@@ -198,7 +200,7 @@ export function extractEvents(runtime, records) {
     const p = v.payload ?? {};
     const ts = Date.parse(v.timestamp); // every event carries its record time (window filtering)
     if (v.type === 'event_msg' && p.type === 'task_started') { events.push({ ts, kind: 'turn_start', line, ref: p.turn_id ?? null }); lastModel = false; continue; }
-    if (v.type === 'event_msg' && p.type === 'task_complete') { if (p.error) events.push({ ts, kind: 'turn_error', line, text: String(p.error.message ?? p.error) }); continue; }
+    if (v.type === 'event_msg' && p.type === 'task_complete') { if (p.error) events.push({ ts, kind: 'turn_error', line, text: String(p.error.message ?? p.error) }); events.push({ ts, kind: 'turn_end', line }); continue; }
     if (v.type === 'response_item') {
       if (p.type === 'message' && p.role === 'user') {
         const text = blockText(p.content);
@@ -272,7 +274,7 @@ export function analyzeSession(session, events, options = {}) {
   // Turns: Claude starts one per non-meta user input; Codex per task_started.
   const turns = [];
   let cur = null;
-  const newTurn = (e, input) => { cur = { index: turns.length, startLine: e.line, ts: e.ts, input, folds: [], calls: [], wrappers: 0, wrappersIn: 0, models: 0, textChars: 0, texts: [], requests: [] }; turns.push(cur); };
+  const newTurn = (e, input) => { cur = { index: turns.length, startLine: e.line, ts: e.ts, input, folds: [], calls: [], wrappers: 0, wrappersIn: 0, models: 0, textChars: 0, texts: [], requests: [], evs: [] }; turns.push(cur); };
   for (const e of events) {
     if (e.kind === 'turn_start') newTurn(e, null);
     else if (e.kind === 'input') {
@@ -285,6 +287,7 @@ export function analyzeSession(session, events, options = {}) {
       e.turn = cur.index;
     } else {
       if (!cur) newTurn(e, null);
+      if (['model', 'call', 'wrapper', 'text', 'turn_error', 'turn_end'].includes(e.kind)) cur.evs.push(e);
       if (e.kind === 'model') { cur.models++; e.turn = cur.index; }
       else if (e.kind === 'call') { cur.calls.push(e); e.turn = cur.index; }
       else if (e.kind === 'wrapper') { cur.wrappers++; if (inSpan(e.ts)) cur.wrappersIn++; }
@@ -295,6 +298,22 @@ export function analyzeSession(session, events, options = {}) {
   // A turn's subject time is its start (Codex task_started) or its input.
   for (const t of turns) { t.inSpan = inSpan(t.input?.ts ?? t.ts); }
   for (const r of requests) { const i = firstIndexAtLeast(turns, t => t.startLine, r.source_line + 1) - 1; if (i >= 0) turns[i].requests.push(r); }
+  // With --until set, a measured turn is seen only up to the cutoff: its
+  // events from the first one not provably at or before `until` (later or
+  // undated) are dropped, earlier context is kept, so appending records after
+  // the cutoff never changes the result. A turn with no end marker (Claude
+  // turn_duration, Codex task_complete) and no next turn start by the cutoff
+  // is `partial`.
+  const startTs = t => t.input?.ts ?? t.ts;
+  for (const t of turns) {
+    if (span.until == null) { t.v = { calls: t.calls, texts: t.texts, models: t.models, wrappers: t.wrappers, textChars: t.textChars, requests: t.requests, error: t.error, partial: false }; continue; }
+    const cut = t.evs.findIndex(e => !(Number.isFinite(e.ts) && e.ts <= span.until));
+    const evs = cut === -1 ? t.evs : t.evs.slice(0, cut), cutLine = cut === -1 ? Infinity : t.evs[cut].line;
+    const texts = evs.filter(e => e.kind === 'text'), next = turns[t.index + 1];
+    const ended = evs.some(e => e.kind === 'turn_end') || (next !== undefined && Number.isFinite(startTs(next)) && startTs(next) <= span.until);
+    t.v = { calls: evs.filter(e => e.kind === 'call'), texts, models: evs.filter(e => e.kind === 'model').length, wrappers: evs.filter(e => e.kind === 'wrapper').length,
+      textChars: texts.reduce((a, e) => a + e.text.length, 0), requests: t.requests.filter(r => r.source_line < cutLine), error: evs.find(e => e.kind === 'turn_error')?.text, partial: !ended };
+  }
   // Issuing model response, and the exact consuming request: the request
   // recorded between the next model response after the result and the model
   // response after that (by source line); otherwise none.
@@ -397,8 +416,10 @@ export function analyzeSession(session, events, options = {}) {
 
   // Turn-level patterns (subject: the turn's start/input inside the window).
   const turnStats = [];
-  for (const t of turns) {
-    if (!t.inSpan) continue;
+  for (const turn of turns) {
+    if (!turn.inSpan) continue;
+    // Measure the turn as seen up to the cutoff (identical to the full turn without --until).
+    const t = { ...turn, ...turn.v };
     const info = t.input?.info ?? { crew: false, cls: t.input ? 'non_crew' : 'no_input', opening: null };
     const textOnly = t.models > 0 && t.calls.length === 0 && t.wrappers === 0;
     // A turn with no model response (e.g. still usage limited) is not a status-only reply.
@@ -408,8 +429,8 @@ export function analyzeSession(session, events, options = {}) {
     const reqs = turnReqs.map(r => [r, 1]);
     const cats = { crew_read: 0, crew_status: 0, crew_other: 0, non_crew: 0 };
     for (const c of t.calls) cats[callCategory(c)]++;
-    turnStats.push({ runtime, agent, cls: info.cls, crew: info.crew, input: Boolean(t.input), error: t.error ? normalizeOpening(t.error).slice(0, 70) : null, calls: t.calls.length, requests: turnReqs.length, models: t.models, textOnly, statusOnly, reqs: turnReqs });
-    const f = { line: t.input?.line ?? t.startLine, input_class: info.cls, opening: info.opening, input: t.input?.text?.slice(0, 200) ?? '',
+    turnStats.push({ runtime, agent, cls: info.cls, crew: info.crew, input: Boolean(t.input), error: t.error ? normalizeOpening(t.error).slice(0, 70) : null, calls: t.calls.length, requests: turnReqs.length, models: t.models, textOnly, statusOnly, partial: t.partial, reqs: turnReqs });
+    const f = { line: t.input?.line ?? t.startLine, partial: t.partial, input_class: info.cls, opening: info.opening, input: t.input?.text?.slice(0, 200) ?? '',
       calls: t.calls.length, tools: t.calls.map(c => c.name), requests: reqs, text_chars: t.textChars, model_tool_calls: runtime === 'codex' ? t.wrappers + t.calls.filter(c => !c.inner).length : t.calls.length };
     if (t.input && statusOnly) push('status_only_turn', { ...f, sub: info.crew ? info.cls.split(':')[0] : 'non_crew', result: '' });
     if (t.input && !statusOnly && statusOrRead) push('status_or_read_only_turn', { ...f, sub: info.crew ? info.cls.split(':')[0] : 'non_crew', result: '' });
@@ -428,7 +449,7 @@ export function analyzeSession(session, events, options = {}) {
       const wroteTo = new Set(t.calls.filter(c => c.crew && c.name === 'agent_send').map(c => c.args?.to));
       const askers = openers.filter(e => !wroteTo.has(e.from));
       const sub = hasExplicitMention(finalReply) ? 'explicit_mention' : askers.length ? 'message_or_question_from_member_or_orchestrator' : 'not_forwarded';
-      if (sub !== 'not_forwarded' || textOnly) push('forward_candidate_reply', { ...f, sub, candidate: sub !== 'not_forwarded', requests: keep(t.requests.slice(-1).map(r => [r, 1])),
+      if (sub !== 'not_forwarded' || textOnly) push('forward_candidate_reply', { ...f, sub, candidate: sub !== 'not_forwarded', requests: turnReqs.slice(-1).map(r => [r, 1]),
         result: finalReply.slice(0, 200), reply_chars: finalReply.length, text_only: textOnly, opener_senders: askers.map(e => e.from) });
     }
     if (t.input && info.cls === 'notice:task_reminder') {
@@ -451,7 +472,7 @@ export function analyzeSession(session, events, options = {}) {
   const callsIn = calls.filter(c => inSpan(c.ts));
   const readSizes = callsIn.filter(c => c.crew && (REPEAT_READ_TOOLS.has(c.name) || CREW_READ_TOOLS.has(c.name)) && c.text !== undefined).map(c => ({ runtime, tool: c.name, bytes: bytes(c.text), file, line: c.line }));
   const inboxKinds = callsIn.filter(c => c.inbox).map(c => ({ runtime, kind: c.inbox.kind, first: (c.text ?? '').trim().split('\n', 1)[0].slice(0, 80) }));
-  return { findings, turnStats, openings, inboxKinds, readSizes, inboxNovelty, calls: callsIn.length, crewCalls: callsIn.filter(c => c.crew).length, turns: turns.filter(t => t.inSpan).length,
+  return { findings, turnStats, openings, inboxKinds, readSizes, inboxNovelty, calls: callsIn.length, crewCalls: callsIn.filter(c => c.crew).length, turns: turns.filter(t => t.inSpan).length, partialTurns: turns.filter(t => t.inSpan && t.v.partial).length,
     wrappers: turns.reduce((s, t) => s + t.wrappersIn, 0), requests: requests.filter(reqIn).length };
 }
 
@@ -500,12 +521,17 @@ function addTo(b, f, reqs) {
   for (const [r, share] of reqs) b.reqs.set(r, Math.min(1, (b.reqs.get(r) ?? 0) + share));
 }
 export function finalize(b, prices) {
+  // Per metric: the known sum and how many associated requests report it.
+  // A metric no associated request reports is null, never 0.
   const tokens = Object.fromEntries(TOKEN_KEYS.map(([k]) => [k, 0]));
+  const coverage = Object.fromEntries(TOKEN_KEYS.map(([k]) => [k, { known: 0, unknown: 0 }]));
   let lower = 0, upper = 0, unbounded = false, priced = 0, unpriced = 0, unknownUsage = 0, ttlUnknown = 0, partial = 0, associated = 0;
   const unpricedModels = new Set();
   for (const [r, share] of b.reqs) {
     associated += share;
-    for (const [k, src] of TOKEN_KEYS) tokens[k] += (r[src] ?? 0) * share;
+    for (const [k, src] of TOKEN_KEYS) {
+      if (Number.isFinite(r[src])) { tokens[k] += r[src] * share; coverage[k].known++; } else coverage[k].unknown++;
+    }
     const c = requestCost(r, prices);
     if (c.status === 'no_price') { unpriced += share; unpricedModels.add(r.model ?? 'unknown'); }
     else if (c.status === 'unknown_usage') unknownUsage += share;
@@ -515,10 +541,10 @@ export function finalize(b, prices) {
       if (c.ttl_unknown) ttlUnknown += share;
     }
   }
-  for (const k of Object.keys(tokens)) tokens[k] = Math.round(tokens[k]);
+  for (const k of Object.keys(tokens)) tokens[k] = coverage[k].known ? Math.round(tokens[k]) : null;
   const r2 = v => +v.toFixed(2), r4 = v => +v.toFixed(4);
   return { count: b.count, sessions: b.sessions.size, agents: [...b.agents].sort(), associated_requests: r2(associated), distinct_requests: b.reqs.size,
-    tokens, list_cost_lower_usd: priced ? r4(lower) : null, list_cost_upper_usd: priced && !unbounded ? r4(upper) : null,
+    tokens, token_coverage: coverage, list_cost_lower_usd: priced ? r4(lower) : null, list_cost_upper_usd: priced && !unbounded ? r4(upper) : null,
     priced_requests: r2(priced), unpriced_requests: r2(unpriced), unknown_usage_requests: r2(unknownUsage), ttl_unknown_requests: r2(ttlUnknown), partial_usage_requests: r2(partial),
     unpriced_models: [...unpricedModels].sort(), result_bytes: b.result_bytes };
 }
@@ -551,7 +577,7 @@ function aggregate(results, prices, sessions) {
       if (f.sub) addTo(get(bySub, f.sub), f, f.requests);
     }
     const fin = m => Object.fromEntries([...m].sort((a, b) => b[1].count - a[1].count).map(([k, b]) => [k, finalize(b, prices)]));
-    out[pattern] = { description: PATTERNS[pattern], ...finalize(total, prices), by_runtime: fin(byRuntime), by_agent: fin(byAgent), by_sub: fin(bySub) };
+    out[pattern] = { description: PATTERNS[pattern], ...finalize(total, prices), partial_turns: selected.filter(f => f.partial).length, by_runtime: fin(byRuntime), by_agent: fin(byAgent), by_sub: fin(bySub) };
     if (pattern === 'inbox_after_delivery') {
       const allB = newBucket(); for (const f of fs_) addTo(allB, f, f.requests);
       out[pattern].all_post_delivery_inbox_calls = finalize(allB, prices);
@@ -650,10 +676,10 @@ function aggregate(results, prices, sessions) {
   };
   const cohort = {};
   for (const s of sessions) {
-    cohort[s.runtime] ??= { sessions: 0, requests: 0, turns: 0, tool_calls: 0, crew_tool_calls: 0, codex_exec_wrappers: 0, agents: new Set() };
+    cohort[s.runtime] ??= { sessions: 0, requests: 0, turns: 0, partial_turns: 0, tool_calls: 0, crew_tool_calls: 0, codex_exec_wrappers: 0, agents: new Set() };
     const c = cohort[s.runtime], r = results.find(x => x.file === s.file);
     c.sessions++; c.agents.add(s.agent_id ?? 'unknown');
-    if (r) { c.requests += r.requests; c.turns += r.turns; c.tool_calls += r.calls; c.crew_tool_calls += r.crewCalls; c.codex_exec_wrappers += r.wrappers; }
+    if (r) { c.requests += r.requests; c.turns += r.turns; c.partial_turns += r.partialTurns; c.tool_calls += r.calls; c.crew_tool_calls += r.crewCalls; c.codex_exec_wrappers += r.wrappers; }
   }
   for (const c of Object.values(cohort)) c.agents = [...c.agents].sort();
   return { patterns: out, notice_openings: openingList.slice(0, 40), notice_only_openings: openingList.filter(o => o.cls.startsWith('notice:') || o.cls === 'message:status' || o.cls === 'batch:status').slice(0, 20),
@@ -708,20 +734,27 @@ function costBasis(rows) {
   if (sum('unpriced_requests')) parts.push(`${n(sum('unpriced_requests'))} on models without a listed price (${[...new Set(rows.flatMap(s => s.unpriced_models ?? []))].join(', ')})`);
   return `\nCost basis (total row): ${parts.length ? parts.join('; ') : 'all associated requests priced exactly'}.\n`;
 }
+/** Token cell: the known sum, " (K of N)" when only K of N associated requests report the metric, "not reported" when none does. */
+export function tokenCell(s, key) {
+  const c = s.token_coverage?.[key], v = s.tokens?.[key];
+  if (!c || c.known + c.unknown === 0) return '—';
+  if (!c.known || v === null || v === undefined) return 'not reported';
+  return c.unknown ? `${n(v)} (${n(c.known)} of ${n(c.known + c.unknown)})` : n(v);
+}
 function row(label, s) {
-  const t = s.tokens;
-  return `| ${esc(label)} | ${n(s.count)} | ${n(s.sessions)} | ${n(s.agents.length)} | ${n(s.associated_requests)} | ${n(t.input_total)} | ${n(t.cache_read)} | ${n(t.cache_write)} | ${n(t.uncached_tail)} | ${n(t.output)} | ${costText(s)} | ${n(s.result_bytes)} |\n`;
+  const t = k => tokenCell(s, k);
+  return `| ${esc(label)} | ${n(s.count)} | ${n(s.sessions)} | ${n(s.agents.length)} | ${n(s.associated_requests)} | ${t('input_total')} | ${t('cache_read')} | ${t('cache_write')} | ${t('uncached_tail')} | ${t('output')} | ${costText(s)} | ${n(s.result_bytes)} |\n`;
 }
 const HEAD = '| Slice | Count | Sessions | Agents | Associated requests (upper bound) | Input total | Cache read | Cache write | Uncached tail | Output | Associated list cost (input side, upper bound) | Result bytes |\n|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|\n';
 
 export function markdown(summary) {
   const p = summary.patterns, o = summary.options;
   const span = o.since != null || o.until != null ? ` Window ${o.since != null ? new Date(o.since).toISOString() : '…'} to ${o.until != null ? new Date(o.until).toISOString() : '…'} (inclusive) on subjects and associated requests.` : '';
-  let out = `# Turn efficiency candidates\n\nGenerated ${summary.generated_at} from native session files (cohort and usage via baseline.mjs). Window N=${o.window} model responses; short reply ≤ ${o.short_reply_chars} chars.${span} Counts are candidates selected by tool names and message wrappers; associated requests and costs are upper bounds, not avoidable cost.\n\n## Cohort\n\n| Runtime | Sessions | Requests | Turns | Tool calls | Crew tool calls | Codex exec wrappers | Agents |\n|---|---:|---:|---:|---:|---:|---:|---|\n`;
-  for (const [rt, c] of Object.entries(summary.cohort)) out += `| ${rt} | ${n(c.sessions)} | ${n(c.requests)} | ${n(c.turns)} | ${n(c.tool_calls)} | ${n(c.crew_tool_calls)} | ${n(c.codex_exec_wrappers)} | ${c.agents.join(', ')} |\n`;
+  let out = `# Turn efficiency candidates\n\nGenerated ${summary.generated_at} from native session files (cohort and usage via baseline.mjs). Window N=${o.window} model responses; short reply ≤ ${o.short_reply_chars} chars.${span} Counts are candidates selected by tool names and message wrappers; associated requests and costs are upper bounds, not avoidable cost.\n\n## Cohort\n\n| Runtime | Sessions | Requests | Turns | Partial turns at cutoff | Tool calls | Crew tool calls | Codex exec wrappers | Agents |\n|---|---:|---:|---:|---:|---:|---:|---:|---|\n`;
+  for (const [rt, c] of Object.entries(summary.cohort)) out += `| ${rt} | ${n(c.sessions)} | ${n(c.requests)} | ${n(c.turns)} | ${n(c.partial_turns)} | ${n(c.tool_calls)} | ${n(c.crew_tool_calls)} | ${n(c.codex_exec_wrappers)} | ${c.agents.join(', ')} |\n`;
   out += `\nagent_inbox result kinds: ${Object.entries(summary.inbox_result_kinds).map(([rt, k]) => `${rt} ${Object.entries(k).map(([a, b]) => `${a}=${b}`).join(', ')}`).join('; ')}.\n\nNon-message inbox result strings (normalized): ${Object.entries(summary.inbox_non_message_strings).map(([k, v]) => `\`${k}\` ×${v}`).join(', ')}.\n`;
   for (const [name, s] of Object.entries(p)) {
-    out += `\n## ${name}\n\n${s.description}.\n\n${HEAD}${row('total', s)}`;
+    out += `\n## ${name}\n\n${s.description}.${s.partial_turns ? ` ${s.partial_turns} of these turns were still open at the cutoff (partial).` : ''}\n\n${HEAD}${row('total', s)}`;
     for (const [k, v] of Object.entries(s.by_runtime)) out += row(`runtime ${k}`, v);
     for (const [k, v] of Object.entries(s.by_sub).slice(0, 12)) out += row(`kind ${k}`, v);
     out += costBasis([s]);
@@ -734,16 +767,16 @@ export function markdown(summary) {
     }
     if (s.all_by_class) {
       out += `\nAll notice/status-started turns: ${s.all_notice_turns.count}.\n\n| Input class | Turns | Candidates (status/read only) | Status-only | Associated requests (upper bound) | Input total | Cache read | Associated list cost (input side, upper bound) |\n|---|---:|---:|---:|---:|---:|---:|---:|\n`;
-      for (const [k, v] of Object.entries(s.all_by_class)) out += `| ${esc(k)} | ${n(v.count)} | ${n(v.candidate_turns)} | ${n(v.status_only_turns)} | ${n(v.associated_requests)} | ${n(v.tokens.input_total)} | ${n(v.tokens.cache_read)} | ${costText(v)} |\n`;
+      for (const [k, v] of Object.entries(s.all_by_class)) out += `| ${esc(k)} | ${n(v.count)} | ${n(v.candidate_turns)} | ${n(v.status_only_turns)} | ${n(v.associated_requests)} | ${tokenCell(v, 'input_total')} | ${tokenCell(v, 'cache_read')} | ${costText(v)} |\n`;
     }
     if (s.status_message_turns_by_sender) {
       out += '\nTurn-starting status messages by sender (scheduler = daemon notices and the scheduler member; a teammate status starts a turn only when the recipient was waiting):\n\n| Sender | Turns | Candidates (status/read only) | Status-only | Associated requests (all) | Input total (all) | Associated list cost (all) | Associated requests (candidates) | Associated list cost (candidates) |\n|---|---:|---:|---:|---:|---:|---:|---:|---:|\n';
-      for (const [k, v] of Object.entries(s.status_message_turns_by_sender)) out += `| ${esc(k)} | ${n(v.turns)} | ${n(v.candidate_turns)} | ${n(v.status_only_turns)} | ${n(v.all.associated_requests)} | ${n(v.all.tokens.input_total)} | ${costText(v.all)} | ${n(v.candidate.associated_requests)} | ${costText(v.candidate)} |\n`;
+      for (const [k, v] of Object.entries(s.status_message_turns_by_sender)) out += `| ${esc(k)} | ${n(v.turns)} | ${n(v.candidate_turns)} | ${n(v.status_only_turns)} | ${n(v.all.associated_requests)} | ${tokenCell(v.all, 'input_total')} | ${costText(v.all)} | ${n(v.candidate.associated_requests)} | ${costText(v.candidate)} |\n`;
     }
     if (s.flags) {
       out += '\n| Runtime | Reminder turns | Ended with no tool call | Only agent_status | Status-only | No model response | Background launch un-notified | …launched within 2h |\n|---|---:|---:|---:|---:|---:|---:|---:|\n';
       for (const [k, v] of Object.entries(s.flags)) out += `| ${k} | ${v.turns} | ${v.ended_no_tool_call} | ${v.only_agent_status} | ${v.status_only} | ${v.no_model_response} | ${k === 'codex' ? 'not detectable' : v.background_running} | ${k === 'codex' ? '—' : v.background_running_2h} |\n`;
-      out += `\nCandidate reminder turns (no tool call or only agent_status): ${s.candidates.count}, ${n(s.candidates.associated_requests)} associated requests, ${n(s.candidates.tokens.input_total)} input tokens, ${costText(s.candidates)}.\n`;
+      out += `\nCandidate reminder turns (no tool call or only agent_status): ${s.candidates.count}, ${n(s.candidates.associated_requests)} associated requests, ${tokenCell(s.candidates, 'input_total')} input tokens, ${costText(s.candidates)}.\n`;
     }
     if (s.distribution) {
       out += '\n| Runtime | Delivered turns | Tool calls | Mean | Median | p90 | Crew reads | Crew status | Other crew | Non-crew | Turns with a read | First call is a read | Requests in turns | Mean requests |\n|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|\n';
@@ -760,7 +793,7 @@ export function markdown(summary) {
   for (const [k, v] of Object.entries(summary.read_result_sizes)) out += `| ${k} | ${n(v.calls)} | ${n(v.total_bytes)} | ${n(v.min)} | ${n(v.p50)} | ${n(v.p90)} | ${n(v.max)} | ${n(v.mean)} | ${v.over_50kb} | ${v.over_100kb} |\n`;
   out += `\nLargest tasks_list results: ${summary.largest_tasks_list_results.map(r => `${r.file}:${r.line} ${n(r.bytes)} B`).join('; ') || 'none'}.\n`;
   out += '\n## Turns by input class (text-only = a model response without any tool call)\n\n| Runtime + input class | Turns | Text-only | Status-only | No model response | Text-only associated requests | Text-only input tokens | Text-only associated list cost |\n|---|---:|---:|---:|---:|---:|---:|---:|\n';
-  for (const v of summary.turn_classes.slice(0, 30)) out += `| ${esc(v.class)} | ${v.turns} | ${v.text_only} | ${v.status_only} | ${v.no_model_response} | ${n(v.text_only_associated.associated_requests)} | ${n(v.text_only_associated.tokens.input_total)} | ${costText(v.text_only_associated)} |\n`;
+  for (const v of summary.turn_classes.slice(0, 30)) out += `| ${esc(v.class)} | ${v.turns} | ${v.text_only} | ${v.status_only} | ${v.no_model_response} | ${n(v.text_only_associated.associated_requests)} | ${tokenCell(v.text_only_associated, 'input_total')} | ${costText(v.text_only_associated)} |\n`;
   out += `\nFailed turns (native turn error, usually no model response): ${Object.entries(summary.turn_errors).slice(0, 6).map(([k, v]) => `${esc(k)} ×${v}`).join('; ') || 'none'}.\n`;
   out += '\n## Crew input openings (top 20, all [crew] inputs)\n\n| Opening | Class | Count | Turn start | Folded | Claude | Codex |\n|---|---|---:|---:|---:|---:|---:|\n';
   for (const x of summary.notice_openings.slice(0, 20)) out += `| ${esc(x.opening)} | ${x.cls} | ${x.count} | ${x.turn_start} | ${x.folded} | ${x.claude} | ${x.codex} |\n`;
@@ -784,6 +817,8 @@ const LIMITS = [
   'Status-only is inferred from tool names and agent_send type only. Short reply = total assistant text in the turn ≤ the threshold, with no tool calls.',
   'Repeated-read detection resets on any own crew mutating call (task_*, review_*, git_commit/merge/cherry_pick, agent_status, agent lifecycle) and, for git_status/git_diff, on any own file-modifying tool call. Other agents may have changed state invisibly; identical bytes mean the read returned nothing new.',
   'Mid-turn folded crew messages (Claude isMeta, Codex inputs after model output in the same task) count as deliveries for the inbox window and openings, but are not turns and carry no turn requests.',
+  'With --until set, each measured turn is seen only up to the cutoff (its later or undated events and requests are dropped); a turn with no end marker (Claude turn_duration, Codex task_complete) and no next turn by the cutoff is counted as partial. Appending records after the cutoff does not change the result.',
+  'Token columns show the sum over associated requests that report the metric; "(K of N)" means only K of N associated requests report it and "not reported" that none does (e.g. Codex has no native 5m/1h write split, and a missing native write counter stays unknown, never 0). Cost coverage is reported separately and does not qualify token columns.',
   'Sessions are read up to the byte size baseline.mjs read; later appends are excluded.',
 ];
 
@@ -802,7 +837,7 @@ export async function readEvents(session) {
       const head = text.slice(0, 600);
       if (/^\{[^{]*"type":"(compacted|token_usage_record|world_state|turn_context|session_meta)"/.test(head)) continue;
       if (head.includes('"type":"event_msg"') && !/"type":"task_(started|complete)"|"item":\{"type":"(McpToolCall|CommandExecution|FileChange|ImageView|WebSearch|Extension)"/.test(head)) continue;
-    } else if (!text.includes('"type":"user"') && !text.includes('"type":"assistant"') && !text.includes('"type":"message"') && !text.includes('<task-notification>')) continue;
+    } else if (!text.includes('"type":"user"') && !text.includes('"type":"assistant"') && !text.includes('"type":"message"') && !text.includes('<task-notification>') && !text.includes('"subtype":"turn_duration"')) continue;
     let value;
     try { value = JSON.parse(text); } catch { continue; }
     if (value && typeof value === 'object') records.push({ value, line });

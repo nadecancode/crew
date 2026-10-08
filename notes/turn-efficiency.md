@@ -17,9 +17,11 @@ proposed cards, because they touch files that other cards own.
 
 ## Summary
 
-Measured 2026-10-08T09:59Z over 49 Claude Code sessions (18,588 requests,
-2,030 turns) and 45 Codex sessions (10,451 requests, 3,692 turns). There were
-no pi sessions in the cohort.
+Measured over the records up to 2026-10-08T09:59:18Z (`--until`, so the run
+can be repeated with the same result): 49 Claude Code sessions (18,591
+requests, 2,030 turns) and 45 Codex sessions (10,452 requests, 3,692 turns).
+18 turns were still open at that cutoff and are counted as partial. There
+were no pi sessions in the cohort.
 
 Token counts are input tokens of the requests associated with each pattern,
 nearly all of them cache reads; see Method for how requests are associated.
@@ -86,7 +88,12 @@ How a candidate is associated with requests:
 - **Window.** `--since` and `--until` select the calls and turns measured
   and the requests associated with them. Earlier records still count as
   context: a message delivered before the window makes a read inside it a
-  duplicate.
+  duplicate. A turn is seen only up to `--until`, so records written later
+  do not change a result; a turn with no end marker by then is counted as
+  partial.
+- **Tokens.** Each token column sums the requests that report that counter.
+  When only some do, the cell adds "(K of N)"; when none do, it says "not
+  reported". A missing counter is never added as 0.
 
 These selections come from tool names and message types only. A candidate
 turn can still have done useful work (an analysis, a review, a move to
@@ -106,7 +113,7 @@ last line: `tools.mcp__crew__agent_inbox({limit: 8})`.
 - Total: 946 calls returned `No new messages.`; 945 of them were Codex calls.
 - Alone: 344 calls were alone, associated with 344 requests and 94.6 M input
   tokens, nearly all cache reads.
-- Bundled: 599 cost 9,584 result bytes; 3 had no later request.
+- Bundled: 600 cost 9,600 result bytes; 2 had no later request.
 
 **After an in-band delivery.** There were 1,123 inbox calls within three
 model responses of a delivery that carried every message's full body. 675
@@ -535,7 +542,8 @@ Most of the extra round trips come from pattern 1: `agent_inbox` calls are
 
 ```sh
 node --test scripts/cache/turns.test.mjs
-node scripts/cache/turns.mjs --out target/turn-efficiency
+# the figures in this note:
+node scripts/cache/turns.mjs --out target/turn-efficiency --until 2026-10-08T09:59:18Z
 # after a fix lands:
 node scripts/cache/turns.mjs --out target/turn-efficiency-after --since 2026-10-08T07:20:00Z
 ```

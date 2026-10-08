@@ -1,13 +1,13 @@
 # Turn efficiency candidates
 
-Generated 2026-10-08T09:59:18.506Z from native session files (cohort and usage via baseline.mjs). Window N=3 model responses; short reply ≤ 300 chars. Counts are candidates selected by tool names and message wrappers; associated requests and costs are upper bounds, not avoidable cost.
+Generated 2026-10-08T10:09:35.376Z from native session files (cohort and usage via baseline.mjs). Window N=3 model responses; short reply ≤ 300 chars. Window … to 2026-10-08T09:59:18.000Z (inclusive) on subjects and associated requests. Counts are candidates selected by tool names and message wrappers; associated requests and costs are upper bounds, not avoidable cost.
 
 ## Cohort
 
-| Runtime | Sessions | Requests | Turns | Tool calls | Crew tool calls | Codex exec wrappers | Agents |
-|---|---:|---:|---:|---:|---:|---:|---|
-| claude | 49 | 18,588 | 2,030 | 19,007 | 3,842 | 0 | architect, auditor, baseline, content, designer, fix-core, fix-runtime, graph, integrator, lead, linux, native-architect, orchestrator, qa, rev-tui, reviewer, sandbox, scheduler, tui, ui, unknown, vcs, vcs-batchtests, vcs-fallback, vcs-hubtests, vcs-mismatch, vcs-pin, vcs-pinfix, vcs-pinfix2, vcs-wakeups, web |
-| codex | 45 | 10,451 | 3,692 | 19,581 | 10,358 | 8,225 | architect, cache-reviewer, content, designer, graph, native-architect, native-transport, qa, reviewer, runtime, sandbox, scheduler, ui, vcs-pinfix2, web |
+| Runtime | Sessions | Requests | Turns | Partial turns at cutoff | Tool calls | Crew tool calls | Codex exec wrappers | Agents |
+|---|---:|---:|---:|---:|---:|---:|---:|---|
+| claude | 49 | 18,591 | 2,030 | 11 | 19,009 | 3,842 | 0 | architect, auditor, baseline, content, designer, fix-core, fix-runtime, graph, integrator, lead, linux, native-architect, orchestrator, qa, rev-tui, reviewer, sandbox, scheduler, tui, ui, unknown, vcs, vcs-batchtests, vcs-fallback, vcs-hubtests, vcs-mismatch, vcs-pin, vcs-pinfix, vcs-pinfix2, vcs-wakeups, web |
+| codex | 45 | 10,452 | 3,692 | 7 | 19,581 | 10,358 | 8,225 | architect, cache-reviewer, content, designer, graph, native-architect, native-transport, qa, reviewer, runtime, sandbox, scheduler, ui, vcs-pinfix2, web |
 
 agent_inbox result kinds: claude messages=108, id_not_found=28, messages_persisted=1, empty=1, error=9; codex messages=1552, id_not_found=22, empty=945, error=5.
 
@@ -21,10 +21,10 @@ candidate agent_inbox calls whose result says no new messages; associated reques
 |---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|
 | total | 946 | 29 | 14 | 344 | 94,639,962 | 94,452,096 | 0 | 187,866 | 39,487 | no price (+344 req no price) | 15,136 |
 | runtime codex | 945 | 28 | 13 | 344 | 94,639,962 | 94,452,096 | 0 | 187,866 | 39,487 | no price (+344 req no price) | 15,120 |
-| runtime claude | 1 | 1 | 1 | 0 | 0 | 0 | 0 | 0 | 0 | — | 16 |
-| kind bundled | 599 | 29 | 14 | 0 | 0 | 0 | 0 | 0 | 0 | — | 9,584 |
+| runtime claude | 1 | 1 | 1 | 0 | — | — | — | — | — | — | 16 |
+| kind bundled | 600 | 29 | 14 | 0 | — | — | — | — | — | — | 9,600 |
 | kind alone | 344 | 20 | 11 | 344 | 94,639,962 | 94,452,096 | 0 | 187,866 | 39,487 | no price (+344 req no price) | 5,504 |
-| kind no_consumer | 3 | 3 | 3 | 0 | 0 | 0 | 0 | 0 | 0 | — | 48 |
+| kind no_consumer | 2 | 2 | 2 | 0 | — | — | — | — | — | — | 32 |
 
 Cost basis (total row): 344 on models without a listed price (gpt-6-astra, gpt-6.1-sol).
 
@@ -40,10 +40,10 @@ agent_inbox calls within N model responses after an in-band delivery whose messa
 | runtime codex | 647 | 25 | 11 | 377 | 100,612,739 | 100,427,392 | 0 | 185,347 | 8,957 | no price (+377 req no price) | 208,608 |
 | runtime claude | 28 | 12 | 10 | 10 | 2,741,256 | 2,662,374 | 78,860 | 22 | 3,740 | $1.75 | 430,142 |
 | kind empty alone | 317 | 14 | 9 | 317 | 87,064,000 | 86,915,584 | 0 | 148,416 | 4,755 | no price (+317 req no price) | 5,072 |
-| kind empty bundled | 168 | 19 | 10 | 0 | 0 | 0 | 0 | 0 | 0 | — | 2,688 |
-| kind duplicate_only bundled | 118 | 30 | 14 | 0 | 0 | 0 | 0 | 0 | 0 | — | 377,593 |
+| kind empty bundled | 168 | 19 | 10 | 0 | — | — | — | — | — | — | 2,688 |
+| kind duplicate_only bundled | 118 | 30 | 14 | 0 | — | — | — | — | — | — | 377,593 |
 | kind duplicate_only alone | 71 | 16 | 12 | 70 | 16,289,995 | 16,174,182 | 78,860 | 36,953 | 7,942 | $1.75 (+60 req no price) | 253,381 |
-| kind empty no_consumer | 1 | 1 | 1 | 0 | 0 | 0 | 0 | 0 | 0 | — | 16 |
+| kind empty no_consumer | 1 | 1 | 1 | 0 | — | — | — | — | — | — | 16 |
 
 Cost basis (total row): 377 on models without a listed price (gpt-6-astra, gpt-6.1-sol).
 
@@ -60,7 +60,7 @@ candidate agent_inbox calls whose returned message ids were all delivered in ful
 | total | 231 | 40 | 20 | 81 | 18,643,322 | 18,490,671 | 113,920 | 38,731 | 11,291 | $2.61 (+61 req no price) | 859,372 |
 | runtime codex | 185 | 22 | 11 | 61 | 13,663,649 | 13,624,960 | 0 | 38,689 | 4,399 | no price (+61 req no price) | 270,973 |
 | runtime claude | 46 | 18 | 16 | 20 | 4,979,673 | 4,865,711 | 113,920 | 42 | 6,892 | $2.61 | 588,399 |
-| kind bundled | 149 | 37 | 18 | 0 | 0 | 0 | 0 | 0 | 0 | — | 518,044 |
+| kind bundled | 149 | 37 | 18 | 0 | — | — | — | — | — | — | 518,044 |
 | kind alone | 82 | 22 | 16 | 81 | 18,643,322 | 18,490,671 | 113,920 | 38,731 | 11,291 | $2.61 (+61 req no price) | 341,328 |
 
 Cost basis (total row): 61 on models without a listed price (gpt-6-astra, gpt-6.1-sol).
@@ -73,12 +73,12 @@ candidate read tool calls (tasks_list, task_get, agents_list, git_status, git_di
 
 | Slice | Count | Sessions | Agents | Associated requests (upper bound) | Input total | Cache read | Cache write | Uncached tail | Output | Associated list cost (input side, upper bound) | Result bytes |
 |---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|
-| total | 9 | 7 | 6 | 0 | 0 | 0 | 0 | 0 | 0 | — | 196,237 |
-| runtime codex | 7 | 5 | 4 | 0 | 0 | 0 | 0 | 0 | 0 | — | 188,708 |
-| runtime claude | 2 | 2 | 2 | 0 | 0 | 0 | 0 | 0 | 0 | — | 7,529 |
-| kind task_get bundled | 6 | 6 | 5 | 0 | 0 | 0 | 0 | 0 | 0 | — | 16,874 |
-| kind tasks_list bundled | 2 | 2 | 2 | 0 | 0 | 0 | 0 | 0 | 0 | — | 179,243 |
-| kind git_status bundled | 1 | 1 | 1 | 0 | 0 | 0 | 0 | 0 | 0 | — | 120 |
+| total | 9 | 7 | 6 | 0 | — | — | — | — | — | — | 196,237 |
+| runtime codex | 7 | 5 | 4 | 0 | — | — | — | — | — | — | 188,708 |
+| runtime claude | 2 | 2 | 2 | 0 | — | — | — | — | — | — | 7,529 |
+| kind task_get bundled | 6 | 6 | 5 | 0 | — | — | — | — | — | — | 16,874 |
+| kind tasks_list bundled | 2 | 2 | 2 | 0 | — | — | — | — | — | — | 179,243 |
+| kind git_status bundled | 1 | 1 | 1 | 0 | — | — | — | — | — | — | 120 |
 
 Cost basis (total row): all associated requests priced exactly.
 
@@ -193,7 +193,7 @@ Top agents: codex:content 75, codex:qa 57, claude:unknown 53, codex:designer 49,
 
 ## delivery_round_trips
 
-turns started by a delivered crew message: tool calls by category; associated = requests that consumed the crew read calls (split among sibling calls).
+turns started by a delivered crew message: tool calls by category; associated = requests that consumed the crew read calls (split among sibling calls). 13 of these turns were still open at the cutoff (partial).
 
 | Slice | Count | Sessions | Agents | Associated requests (upper bound) | Input total | Cache read | Cache write | Uncached tail | Output | Associated list cost (input side, upper bound) | Result bytes |
 |---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|
@@ -217,9 +217,9 @@ Cost basis (total row): 1,113.72 on models without a listed price (gpt-6-astra, 
 
 | Runtime | Delivered turns | Tool calls | Mean | Median | p90 | Crew reads | Crew status | Other crew | Non-crew | Turns with a read | First call is a read | Requests in turns | Mean requests |
 |---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|
-| total | 4,773 | 28,935 | 6.06 | 1 | 9 | 3,126 | 3,385 | 5,041 | 17,383 | 1,332 | 862 | 21,460 | 4.5 |
-| claude | 1,354 | 12,543 | 9.26 | 1 | 16 | 442 | 623 | 1,602 | 9,876 | 248 | 147 | 12,401 | 9.16 |
-| codex | 3,419 | 16,392 | 4.79 | 1 | 6 | 2,684 | 2,762 | 3,439 | 7,507 | 1,084 | 715 | 9,059 | 2.65 |
+| total | 4,773 | 28,937 | 6.06 | 1 | 9 | 3,126 | 3,385 | 5,041 | 17,385 | 1,332 | 862 | 21,464 | 4.5 |
+| claude | 1,354 | 12,545 | 9.27 | 1 | 16 | 442 | 623 | 1,602 | 9,878 | 248 | 147 | 12,404 | 9.16 |
+| codex | 3,419 | 16,392 | 4.79 | 1 | 6 | 2,684 | 2,762 | 3,439 | 7,507 | 1,084 | 715 | 9,060 | 2.65 |
 
 Read tools after deliveries: agents_list 83, tasks_list 88, agent_inbox 2191, task_get 764.
 
@@ -372,8 +372,8 @@ Largest tasks_list results: ~/.codex/sessions/2026/10/05/rollout-2026-10-05T12-2
 | codex message:question | 249 | 12 | 20 | 102 | 12 | 2,676,957 | no price (+12 req no price) |
 | codex message:review_result | 207 | 11 | 51 | 72 | 10 | 1,856,794 | no price (+10 req no price) |
 | claude batch | 193 | 51 | 42 | 1 | 51 | 21,036,450 | $21.98 |
-| codex notice:no_tool_call | 161 | 0 | 60 | 55 | 0 | 0 | — |
-| codex notice:usage_lifted | 142 | 0 | 0 | 113 | 0 | 0 | — |
+| codex notice:no_tool_call | 161 | 0 | 60 | 55 | 0 | — | — |
+| codex notice:usage_lifted | 142 | 0 | 0 | 113 | 0 | — | — |
 | claude message:answer | 141 | 85 | 82 | 0 | 85 | 33,479,375 | $75.34 |
 | claude message:message | 134 | 37 | 37 | 7 | 38 | 16,565,401 | $25.34 |
 | claude message:artifact | 121 | 42 | 39 | 4 | 42 | 16,323,076 | $11.41 |
@@ -382,12 +382,12 @@ Largest tasks_list results: ~/.codex/sessions/2026/10/05/rollout-2026-10-05T12-2
 | claude message:review_result | 93 | 22 | 30 | 0 | 22 | 8,685,329 | $23.74 |
 | codex batch | 93 | 6 | 15 | 17 | 6 | 416,882 | no price (+6 req no price) |
 | claude message:review_request | 83 | 2 | 3 | 0 | 2 | 902,852 | $0.21 |
-| codex message:task | 77 | 0 | 0 | 19 | 0 | 0 | — |
-| codex message:review_request | 65 | 0 | 3 | 0 | 0 | 0 | — |
+| codex message:task | 77 | 0 | 0 | 19 | 0 | — | — |
+| codex message:review_request | 65 | 0 | 3 | 0 | 0 | — | — |
 | claude notice:team_messages_came | 60 | 9 | 13 | 0 | 9 | 4,477,646 | $14.47 |
 | claude message:status | 57 | 16 | 21 | 1 | 16 | 8,411,738 | $21.41 |
 | claude notice:unresponsive | 57 | 31 | 30 | 0 | 31 | 8,310,727 | $1.71 |
-| claude message:task | 55 | 0 | 0 | 0 | 0 | 0 | — |
+| claude message:task | 55 | 0 | 0 | 0 | 0 | — | — |
 | claude notice:task_event | 51 | 21 | 8 | 0 | 21 | 4,809,357 | $1.79 |
 | codex notice:fast_forward | 39 | 6 | 14 | 12 | 6 | 2,015,883 | no price (+6 req no price) |
 | claude notice:task_reminder | 36 | 2 | 7 | 0 | 2 | 780,167 | $0.16 |
@@ -462,4 +462,6 @@ Failed turns (native turn error, usually no model response): codex Your workspac
 - Status-only is inferred from tool names and agent_send type only. Short reply = total assistant text in the turn ≤ the threshold, with no tool calls.
 - Repeated-read detection resets on any own crew mutating call (task_*, review_*, git_commit/merge/cherry_pick, agent_status, agent lifecycle) and, for git_status/git_diff, on any own file-modifying tool call. Other agents may have changed state invisibly; identical bytes mean the read returned nothing new.
 - Mid-turn folded crew messages (Claude isMeta, Codex inputs after model output in the same task) count as deliveries for the inbox window and openings, but are not turns and carry no turn requests.
+- With --until set, each measured turn is seen only up to the cutoff (its later or undated events and requests are dropped); a turn with no end marker (Claude turn_duration, Codex task_complete) and no next turn by the cutoff is counted as partial. Appending records after the cutoff does not change the result.
+- Token columns show the sum over associated requests that report the metric; "(K of N)" means only K of N associated requests report it and "not reported" that none does (e.g. Codex has no native 5m/1h write split, and a missing native write counter stays unknown, never 0). Cost coverage is reported separately and does not qualify token columns.
 - Sessions are read up to the byte size baseline.mjs read; later appends are excluded.

@@ -3,7 +3,7 @@ import { test } from 'node:test';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { inboxResultKind, inboxEntries, messageIds, classifyInput, isNoActionNotice, extractEvents, analyzeSession, requestCost, normalizeOpening, finalize, costText, run } from './turns.mjs';
+import { inboxResultKind, inboxEntries, messageIds, classifyInput, isNoActionNotice, extractEvents, analyzeSession, requestCost, normalizeOpening, finalize, costText, tokenCell, run } from './turns.mjs';
 
 const rows = values => values.map((value, i) => ({ value, line: i + 1 }));
 const usage = { input_tokens: 10, cache_creation_input_tokens: 20, cache_read_input_tokens: 70, output_tokens: 5 };
@@ -314,4 +314,49 @@ test('T6: forward candidates follow crew forwarding rules: status opener, messag
     ['notice:unresponsive', 'explicit_mention', true],
   ]); // the question turn wrote to qa itself, so its reply is not forwarded and not listed
   assert.equal(of(out, 'text_only_turn').length, 3);
+});
+
+// ---- second review round
+
+test('T2: with --until a turn is measured only up to the cutoff; later appends change nothing', () => {
+  const at = minute => `2026-10-08T${minute}:00Z`;
+  const head = [
+    { ...userText('[crew] Message from qa (type status, id m-abab12345678):\n\nGreen.'), timestamp: at('02:00') },
+    { ...say('r1', 'Noted.'), timestamp: at('02:01') },
+  ];
+  const later = [
+    { ...call('r2', 'b', 'Bash', { command: 'make' }), timestamp: at('03:00') },
+    { ...result('b', 'ok'), timestamp: at('03:00') },
+    { ...say('r3', 'Built.'), timestamp: at('03:01') },
+  ];
+  const analyse = (records, until) => {
+    const requests = requestsAt(records).map(r => ({ ...r, timestamp_ms: Date.parse(records[r.source_line - 1].timestamp) }));
+    return analyzeSession({ runtime: 'claude', file: '/p.jsonl', agent_id: 'a', requests }, extractEvents('claude', rows(records)), { until: until && Date.parse(until) });
+  };
+  const view = o => JSON.stringify({ findings: o.findings, turnStats: o.turnStats, calls: o.calls, turns: o.turns, partial: o.partialTurns, requests: o.requests });
+  const before = analyse(head, at('02:30')), after = analyse([...head, ...later], at('02:30'));
+  assert.equal(view(after), view(before));
+  const notice = of(after, 'notice_turn')[0];
+  assert.deepEqual([notice.candidate, notice.calls, notice.partial, after.calls, after.partialTurns], [true, 0, true, 0, 1]);
+  // An end marker before the cutoff closes the turn; without --until the whole turn counts.
+  const ended = analyse([...head, { type: 'system', subtype: 'turn_duration', timestamp: at('02:02') }, ...later], at('02:30'));
+  assert.equal(of(ended, 'notice_turn')[0].partial, false);
+  const full = analyse([...head, ...later]);
+  assert.deepEqual([of(full, 'notice_turn')[0].candidate, of(full, 'notice_turn')[0].calls, full.partialTurns], [false, 1, 0]);
+});
+
+test('T4: token sums keep per-metric coverage; unreported metrics are null, never 0', () => {
+  const bucket = reqs => ({ count: reqs.length, sessions: new Set(['s']), agents: new Set(['a']), result_bytes: 0, reqs: new Map(reqs.map(r => [r, 1])) });
+  const unknown = finalize(bucket([{ model: 'gpt-x' }]), new Map());
+  assert.deepEqual(Object.values(unknown.tokens), [null, null, null, null, null, null, null]);
+  for (const k of ['input_total', 'cache_read', 'cache_write', 'cache_write_5m', 'cache_write_1h', 'uncached_tail', 'output']) assert.equal(tokenCell(unknown, k), 'not reported');
+  // Codex-like: no native write counter or TTL split; Claude-like: everything reported.
+  const codex = { model: 'gpt-x', input_total_tokens: 100, cache_read_tokens: 80, cache_creation_tokens: null, cache_write_5m_tokens: null, cache_write_1h_tokens: null, uncached_tail_tokens: null, output_tokens: 7 };
+  const claude = { model: 'gpt-x', input_total_tokens: 50, cache_read_tokens: 40, cache_creation_tokens: 10, cache_write_5m_tokens: 0, cache_write_1h_tokens: 10, uncached_tail_tokens: 0, output_tokens: null };
+  const mixed = finalize(bucket([codex, claude]), new Map());
+  assert.deepEqual(mixed.tokens, { input_total: 150, cache_read: 120, cache_write: 10, cache_write_5m: 0, cache_write_1h: 10, uncached_tail: 0, output: 7 });
+  assert.deepEqual(mixed.token_coverage.cache_write, { known: 1, unknown: 1 });
+  assert.deepEqual([tokenCell(mixed, 'input_total'), tokenCell(mixed, 'cache_write'), tokenCell(mixed, 'output')], ['150', '10 (1 of 2)', '7 (1 of 2)']);
+  assert.equal(tokenCell(finalize(bucket([codex]), new Map()), 'cache_write'), 'not reported');
+  assert.equal(tokenCell(finalize(bucket([]), new Map()), 'output'), '—');
 });
