@@ -69,6 +69,27 @@ class CacheBenchTests(unittest.TestCase):
         self.assertIsNone(total["cost_usd_upper"])
         self.assertEqual(total["observed_cost_usd_upper"], 0)
 
+    def test_normal_home_collection_reads_only_the_selected_new_session(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            home = Path(temporary)
+            projects = home / "projects/fixture"
+            projects.mkdir(parents=True)
+            older = projects / "operator-old-session.jsonl"
+            older.write_text('{"never": "read this unrelated session"}\n')
+            (projects / "new-session.jsonl").write_text(json.dumps({
+                "type": "assistant", "message": {"id": "request", "model": "claude-haiku-4-5",
+                    "usage": {"input_tokens": 10, "cache_read_input_tokens": 90, "output_tokens": 2}}}) + "\n")
+            before = bench.digest(older)
+            result = usage.collect(Path("/unused"), [{"id": "claude-worker", "runtime": "claude",
+                                                     "session_id": "new-session"}], {"claude": home})
+            self.assertEqual(result[0]["input_tokens"], 100)
+            self.assertEqual(result[0]["source"], "projects/fixture/new-session.jsonl")
+            self.assertEqual(result[0]["source_root"], "operator-cli-home")
+            self.assertEqual(bench.digest(older), before)
+            with self.assertRaisesRegex(ValueError, "invalid session id"):
+                usage.collect(Path("/unused"), [{"id": "worker", "runtime": "claude",
+                                                 "session_id": "*"}], {"claude": home})
+
     def test_environment_cannot_select_parent_daemon_or_git_repository(self):
         with patch.dict(os.environ, {"CREW_SOCKET": "/operator/daemon.sock",
                                      "CREW_IDENTITY": "/operator/identity.json",
@@ -117,7 +138,7 @@ class CacheBenchTests(unittest.TestCase):
         args = argparse.Namespace(crew=binary, expected_sha256=bench.digest(binary),
                                   out=output, source_revision="fake", label="test",
                                   stop_usd=2, budget_usd=3, idle_seconds=1,
-                                  timeout_seconds=30, prepare_only=False)
+                                  timeout_seconds=30, prepare_only=False, sandbox="required")
         real_invoke = bench.invoke
         state = {"messages": [], "agents": [], "tasks": []}
         child = None
@@ -160,7 +181,7 @@ class CacheBenchTests(unittest.TestCase):
                             "usage": {"input_tokens": 100, "cache_read_input_tokens": 100,
                                       "output_tokens": 500_000 if expensive and number == 0 else 10}}}]
                     else:
-                        path = home / "sessions/2026/10/07" / f"rollout-{identity}.jsonl"
+                        path = home / "sessions/2026/10/07" / f"rollout-fixture-{identity}.jsonl"
                         records = [{"type": "turn_context", "payload": {"model": "gpt-6-luna"}},
                                    {"type": "event_msg", "payload": {"type": "token_count", "info": {
                                        "total_token_usage": {"input_tokens": 200,

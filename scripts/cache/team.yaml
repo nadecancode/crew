@@ -1,4 +1,4 @@
-# The harness substitutes only the workspace path. Everything else stays fixed.
+# The harness substitutes the workspace path and the explicit sandbox mode.
 project: cache-bench
 objective: >-
   Complete the three prescribed invoice-summary tasks in this disposable
@@ -20,7 +20,7 @@ workspace:
   isolation: worktree
   vcs: git
   sandbox:
-    mode: required
+    mode: @SANDBOX@
 backend: pty
 defaults:
   runtime: claude

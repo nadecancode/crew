@@ -126,7 +126,7 @@ def still_owned(owned):
             if (current := process_identity(pid)) and current[1] == started]
 
 
-def fixture(output, env):
+def fixture(output, env, sandbox_mode="required"):
     workspace = output / "workspace"
     workspace.mkdir()
     (workspace / "SPEC.md").write_text(SPEC)
@@ -146,7 +146,8 @@ def fixture(output, env):
         if command.returncode:
             raise RuntimeError(f"fixture git {args[0]} failed: {command.stderr.strip()}")
     template = (HERE / "team.yaml").read_text()
-    (output / "team.yaml").write_text(template.replace("@WORKSPACE@", json.dumps(str(workspace))))
+    (output / "team.yaml").write_text(template.replace(
+        "@WORKSPACE@", json.dumps(str(workspace))).replace("@SANDBOX@", sandbox_mode))
     return workspace
 
 
@@ -227,6 +228,13 @@ def run(args):
         (output / name).mkdir(mode=0o700)
     runtime = Path(tempfile.mkdtemp(prefix="cb.", dir="/tmp"))
     env = isolated_environment(output, runtime)
+    operator_homes = None
+    if args.sandbox == "off":
+        home = Path(env["HOME"])
+        operator_homes = {
+            "claude": Path(env.get("CLAUDE_CONFIG_DIR") or home / ".claude"),
+            "codex": Path(env.get("CODEX_HOME") or home / ".codex"),
+        }
     owned = {}
     workspace = output / "workspace"
     snapshot = {}
@@ -235,6 +243,9 @@ def run(args):
               "source_revision": args.source_revision,
               "source_revision_provenance": "caller-supplied; binary hash independently verified",
               "crew_sha256": actual_sha, "team_template_sha256": digest(HERE / "team.yaml"),
+              "runner_files_sha256": {name: digest(HERE / name) for name in ("bench", "bench.py", "usage.py")},
+              "sandbox_mode": args.sandbox,
+              "native_session_storage": "operator-cli-homes" if operator_homes else "private-member-homes",
               "budget_usd": args.budget_usd, "stop_usd": args.stop_usd,
               "cost_basis": "API-equivalent estimate; not a subscription invoice",
               "rates_checked": "2026-10-07", "rates": RATES,
@@ -242,11 +253,12 @@ def run(args):
               "idle_gap": {"requested_seconds": args.idle_seconds, "observed_seconds": 0}}
     write_json(output / "manifest.json", report)
     try:
-        workspace = fixture(output, env)
+        workspace = fixture(output, env, args.sandbox)
         if args.prepare_only:
             report["status"] = "prepared"
             return 0
-        for program in ("claude", "codex", "bwrap", "socat"):
+        programs = ["claude", "codex"] + (["bwrap", "socat"] if args.sandbox == "required" else [])
+        for program in programs:
             if not shutil.which(program, path=env["PATH"]):
                 raise RuntimeError(f"missing prerequisite: {program}")
         report["versions"] = runtime_versions(env, output)
@@ -272,7 +284,7 @@ def run(args):
             agents = snapshot.get("agents", [])
             if any(a["status"] in ("failed", "stopped", "blocked") for a in agents):
                 raise RuntimeError("an agent failed, stopped or blocked; see private snapshot.json")
-            report["agents"] = collect(workspace, agents)
+            report["agents"] = collect(workspace, agents, operator_homes)
             report.update(totals(report["agents"]))
             upper = report["observed_cost_usd_upper"]
             current_usage = tuple(sum(a.get(key, 0) for a in report["agents"])
@@ -370,7 +382,7 @@ def run(args):
         report["duration_seconds"] = time.monotonic() - started
         if snapshot:
             try:
-                report["agents"] = collect(workspace, snapshot.get("agents", []))
+                report["agents"] = collect(workspace, snapshot.get("agents", []), operator_homes)
                 report.update(totals(report["agents"]))
                 report["evidence"] = evidence(snapshot, workspace)
                 if report["status"] == "complete" and not validate_evidence(report["evidence"]):
@@ -418,6 +430,8 @@ def main():
     parser.add_argument("--idle-seconds", type=float, default=20)
     parser.add_argument("--timeout-seconds", type=float, default=600)
     parser.add_argument("--prepare-only", action="store_true")
+    parser.add_argument("--sandbox", choices=("required", "off"), default="required",
+                        help="off uses fresh sessions with the operator's normal CLI logins")
     args = parser.parse_args()
     os.umask(0o077)
     def interrupted(_signum, _frame):

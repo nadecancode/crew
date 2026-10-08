@@ -5,6 +5,7 @@ owns event attribution; this parser lets the watchdog work on the old binary.
 """
 
 import json
+import re
 
 
 RATES = {
@@ -136,20 +137,23 @@ def cost(request, runtime):
     raise ValueError(f"unpriced or unobserved model for {runtime}: {model!r}")
 
 
-def collect(workspace, agents):
+def collect(workspace, agents, operator_homes=None):
     result = []
     for agent in agents:
         identity = agent["id"]
         runtime = agent["runtime"]
         session = agent.get("session_id")
-        home = workspace / ".crew" / "agents" / identity / "rw" / "home"
+        home = (operator_homes[runtime] if operator_homes else
+                workspace / ".crew" / "agents" / identity / "rw" / "home" / runtime)
         if not session:
             result.append({"agent": identity, "runtime": runtime, "coverage": "no-session"})
             continue
+        if not isinstance(session, str) or not re.fullmatch(r"[A-Za-z0-9_-]+", session):
+            raise ValueError("invalid session id; refusing broad transcript discovery")
         if runtime == "claude":
-            paths = list((home / "claude" / "projects").glob(f"*/{session}.jsonl"))
+            paths = list((home / "projects").glob(f"*/{session}.jsonl"))
         elif runtime == "codex":
-            paths = list((home / "codex" / "sessions").glob(f"**/*{session}.jsonl"))
+            paths = list((home / "sessions").glob(f"**/rollout-*-{session}.jsonl"))
         else:
             raise ValueError(f"unexpected benchmark runtime: {runtime}")
         if not paths:
@@ -159,7 +163,7 @@ def collect(workspace, agents):
             raise ValueError(f"ambiguous transcript for {identity}")
         path = paths[0]
         if path.is_symlink() or not path.resolve().is_relative_to(home.resolve()):
-            raise ValueError("transcript escaped private home")
+            raise ValueError("transcript escaped its selected CLI home")
         requests = claude_requests(path) if runtime == "claude" else codex_requests(path)
         lower = upper = 0.0
         for request in requests:
@@ -172,7 +176,8 @@ def collect(workspace, agents):
         result.append({
             "agent": identity, "runtime": runtime, "session_id": session,
             "coverage": "observed" if requests else "no-usage",
-            "source": str(path.relative_to(workspace)),
+            "source": str(path.relative_to(home if operator_homes else workspace)),
+            "source_root": "operator-cli-home" if operator_homes else "fixture-workspace",
             "requests": requests, "request_count": len(requests),
             "models": sorted({r["model"] for r in requests}),
             "input_tokens": total, "cached_tokens": cached,

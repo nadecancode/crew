@@ -11,26 +11,33 @@ binary started the isolated team, but Claude's private home could not
 authenticate. No billable usage record was produced. Missing measurements are
 unknown, not a 0% hit rate or a measured zero-dollar total. See
 [`bench-baseline-attempt.json`](bench-baseline-attempt.json).
+The operator subsequently authorized `--sandbox off` with normal CLI logins
+(`m-ff8aa3691883`). The daemon, repository and session identities remain separate;
+the native session logs then live in the normal CLI homes.
 
 ## Running it
 
-Run from the operator's normal shell with the authentication already configured
-for sandboxed Crew members. This script never logs in, refreshes tokens, reads
+Run with the operator's authorized authentication route. This script never logs in, refreshes tokens, reads
 credential files, or copies them. It keeps the real `HOME` for Crew's normal
-configuration discovery. Crew itself creates each member's private home. A
+configuration discovery. By default, Crew creates each member's private home. A
 run started inside another sandboxed member may have no usable credentials;
 the authentication failure is reported and the private team is stopped.
+`--sandbox off` explicitly permits fresh sessions using the normal CLI homes
+and logins, as authorized for this baseline. It never resumes an existing
+session. The watchdog reads only the session IDs created by this fixture.
 
-Requirements: Linux `/proc`, Python 3.11+, Git, both provider CLIs, bubblewrap,
-and socat. The wrapper uses Nix for Python when necessary. On this Nix host:
+Requirements: Linux `/proc`, Python 3.11+, Git and both provider CLIs. Required
+OS sandboxes also need bubblewrap and socat. The wrapper uses Nix for Python
+when necessary. The authorized normal-login run on this Nix host:
 
 ```sh
-nix shell nixpkgs#python3 nixpkgs#bubblewrap nixpkgs#socat --command \
+nix shell nixpkgs#python3 --command \
   scripts/cache/bench \
   --crew /home/nade/workspaces/personal/crew/target/release/crew \
   --expected-sha256 ea4e6f127328cd9d679c62c9a1cc7bd6f72c6cdecd2703892962c5a7ea95ed19 \
   --source-revision c8052373c0d2f8b7a993773e5cda3a79e1b834d6 \
   --label baseline-c8052373 \
+  --sandbox off \
   --out target/cache-bench/operator-baseline-c8052373
 ```
 
@@ -40,7 +47,7 @@ does not rebuild it. The runner verifies the supplied SHA-256 before launch.
 does not infer a source revision from the executable. For a candidate run,
 change the executable, its verified hash, revision, label and output directory.
 Use the same template, models, CLI versions, idle gap, timeout and authentication
-route for before/after comparisons. Every output directory must be new.
+route and sandbox mode for before/after comparisons. Every output directory must be new.
 The runner refuses to launch when either CLI fails to report a nonempty version.
 Every observed request must name a priced model; a missing model name also stops
 the run. `report.json` records both CLI versions, each request's model and each
@@ -64,10 +71,11 @@ watchdog stops on an unknown model. Automatic fallback/restart and subagents
 are disabled. The initial two tasks and the later `followup` task are fixed.
 
 The fixture is a fresh Git repository beneath the selected output directory.
-Crew uses worktrees, the PTY backend and required OS sandboxes. Claude uses
+Crew uses worktrees and the PTY backend. OS sandboxes are required by default;
+the operator-authorized baseline selects off explicitly. Claude uses
 `acceptEdits` plus explicit local-tool permissions to avoid the first-use
-Bypass Permissions dialog. Codex's permission policy is bypass within the
-outer Crew sandbox. These settings are part of the versioned workload.
+Bypass Permissions dialog. Codex's permission policy is bypass. These settings
+and the selected sandbox mode are recorded as part of the workload.
 
 Inherited `CREW_*` and `GIT_*` variables and parent CLI session identifiers are
 removed. Git system/global configuration is disabled for the fixture. A private,
@@ -81,7 +89,10 @@ is selected. SIGINT, SIGTERM, timeouts and budget stops run the same cleanup.
 ## Usage and cost accounting
 
 `scripts/cache/usage.py` is the old-binary-compatible spend watchdog. It reads
-only this run's native session files beneath the private member homes:
+only this run's native session files. They are beneath the private member homes
+by default; with `--sandbox off`, the exact newly created session IDs are found
+under `CLAUDE_CONFIG_DIR` / `CODEX_HOME` or the usual `~/.claude` / `~/.codex`.
+It does not read other sessions' contents or write any native session file.
 
 - Claude assistant messages are deduplicated by message ID, retaining the last
   usage. Total input is uncached input plus cache reads plus cache writes.
@@ -129,9 +140,10 @@ the run budget is reported as `budget-exceeded`.
 ## Outputs and acceptance
 
 The output directory is private. It contains the reproducible fixture and
-YAML, manifest and binary/template hashes, snapshots, event JSONL, native
-session files, Crew's database, cleanup results, and `report.json`. It may also
-contain `baseline.json`. Native sessions and the database remain private;
+YAML, manifest and binary/template/runner hashes, snapshots, event JSONL,
+Crew's database, cleanup results, and `report.json`. It may also
+contain `baseline.json`. Native sessions are retained where the runtime wrote
+them (private homes or normal CLI homes). Native sessions and the database remain private;
 share the numeric report rather than copying the whole directory into source
 control. Cleanup removes the runtime socket directory, retaining the evidence.
 
@@ -173,5 +185,5 @@ exit code 0 and left no tracked process behind.
 The final native error at `2026-10-08T04:00:47.095Z` was
 `authentication_failed`, with text `Not logged in · Please run /login`.
 Crew activity was `sign-in needed · waiting for \`crew resume\``. The
-orchestrator was notified and is arranging an operator-run baseline. No
-credential workaround or further live launch is attempted by this agent.
+orchestrator was notified. The operator then authorized an unsandboxed run with
+normal logins; no credential extraction, copy or login command is used.
