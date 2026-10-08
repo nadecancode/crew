@@ -83,6 +83,48 @@ impl Store {
         })
     }
 
+    /// Read a snapshot through the store descriptor. Persisted paths are
+    /// checked against the content address before they are used again.
+    pub fn files(&self, snapshot: &Snapshot) -> Result<BTreeFiles> {
+        let entries = self.snapshot_entries(snapshot)?;
+        Ok(entries
+            .into_iter()
+            .filter_map(|entry| {
+                entry
+                    .bytes
+                    .map(|bytes| (entry.path, (bytes, entry.executable)))
+            })
+            .collect())
+    }
+
+    pub fn copy_snapshot(&self, snapshot: &Snapshot, target: &File, path: &Path) -> Result<()> {
+        write_entries(target, path, &self.snapshot_entries(snapshot)?)
+    }
+
+    fn snapshot_entries(&self, snapshot: &Snapshot) -> Result<Vec<Entry>> {
+        if snapshot.hash.len() != 64
+            || !snapshot
+                .hash
+                .bytes()
+                .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
+            || snapshot.path != self.path.join(&snapshot.hash).join("payload")
+        {
+            bail!("toolbox snapshot has an invalid content address");
+        }
+        let directory = paths::list_dir_beneath(&self.directory, Path::new(&snapshot.hash))?;
+        let payload = open(&directory, Path::new("payload"))?;
+        let mut entries = Vec::new();
+        let mut bytes = 0;
+        capture(&payload, Path::new(""), &mut entries, &mut bytes, 0)?;
+        if digest(&entries) != snapshot.hash
+            || entries[0].bytes.is_none() != snapshot.directory
+            || bytes != snapshot.bytes
+        {
+            bail!("toolbox snapshot content no longer matches its record");
+        }
+        Ok(entries)
+    }
+
     fn capture(&self, source: &Path) -> Result<Snapshot> {
         if !source.is_absolute() {
             bail!("file item path must be absolute");
@@ -466,9 +508,34 @@ mod tests {
     use super::*;
     use std::os::unix::fs::symlink;
 
+    struct Scratch(tempfile::TempDir);
+    impl Scratch {
+        fn new() -> Self {
+            Self(tempfile::tempdir().unwrap())
+        }
+        fn path(&self) -> &Path {
+            self.0.path()
+        }
+    }
+    impl Drop for Scratch {
+        fn drop(&mut self) {
+            fn writable(path: &Path) {
+                if fs::symlink_metadata(path).is_ok_and(|metadata| metadata.is_dir()) {
+                    let _ = fs::set_permissions(path, fs::Permissions::from_mode(0o700));
+                    if let Ok(entries) = fs::read_dir(path) {
+                        for entry in entries.flatten() {
+                            writable(&entry.path());
+                        }
+                    }
+                }
+            }
+            writable(self.path());
+        }
+    }
+
     #[test]
     fn equal_trees_share_read_only_snapshots_and_source_changes_leave_the_old_one() {
-        let temp = tempfile::tempdir().unwrap();
+        let temp = Scratch::new();
         let a = temp.path().join("a");
         let b = temp.path().join("b");
         for source in [&a, &b] {
@@ -504,7 +571,7 @@ mod tests {
 
     #[test]
     fn links_nonregular_files_size_limits_and_existing_snapshot_tampering_fail() {
-        let temp = tempfile::tempdir().unwrap();
+        let temp = Scratch::new();
         let store = Store::open(&temp.path().join("state")).unwrap();
         let source = temp.path().join("skill");
         fs::create_dir(&source).unwrap();
@@ -536,7 +603,7 @@ mod tests {
 
     #[test]
     fn generated_tree_replacement_unlinks_prior_links_without_touching_the_target() {
-        let temp = tempfile::tempdir().unwrap();
+        let temp = Scratch::new();
         let outside = temp.path().join("outside");
         fs::create_dir(&outside).unwrap();
         fs::write(outside.join("sentinel"), "keep").unwrap();

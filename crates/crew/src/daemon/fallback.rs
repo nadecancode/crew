@@ -445,6 +445,28 @@ left off; if you were in the middle of a step, check its state before repeating 
         persist: bool,
     ) -> Result<(), RpcError> {
         let id = agent.id.as_str();
+        self.toolbox_runtime_check(agent, runtime)?;
+        let settings = {
+            let model_guard = self.model();
+            match (model_guard.session.team.as_ref(), model_guard.local.get(id)) {
+                (Some(team), Some(local)) => {
+                    let declared = local.spec.runtime.unwrap_or(agent.runtime);
+                    let mut spec = local.spec.clone();
+                    if runtime != declared || persist {
+                        spec.permission_mode = None;
+                        spec.allowed_tools.clear();
+                        spec.extra_args.clear();
+                    }
+                    spec.runtime = Some(runtime);
+                    spec.model = model.clone();
+                    Some(
+                        super::supervisor::agent_settings(team, &spec, agent.orchestrator)
+                            .map_err(|error| RpcError::invalid(format!("{error:#}")))?,
+                    )
+                }
+                _ => None,
+            }
+        };
         // Refused here, not as a failed agent after the old session is gone.
         tokio::task::spawn_blocking(move || crate::models::Availability::runtime(runtime))
             .await
@@ -506,7 +528,6 @@ left off; if you were in the middle of a step, check its state before repeating 
         });
         {
             let mut m = self.model();
-            let team = m.session.team.clone();
             if let Some(local) = m.local.get_mut(id) {
                 // Permission modes, tool names and flags are one CLI's own:
                 // they stay with the declaration, on the CLI it names.
@@ -519,9 +540,8 @@ left off; if you were in the middle of a step, check its state before repeating 
                 }
                 spec.runtime = Some(runtime);
                 spec.model = model.clone();
-                if let Some(team) = &team {
-                    local.settings =
-                        super::supervisor::agent_settings(team, &spec, agent.orchestrator);
+                if let Some(settings) = &settings {
+                    local.settings = settings.clone();
                 }
                 if persist {
                     local.spec = spec;

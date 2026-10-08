@@ -143,6 +143,9 @@ pub(crate) struct TaskPause {
 /// Per-agent state that only matters while the daemon is running.
 #[derive(Debug, Default)]
 pub(crate) struct AgentRuntimeState {
+    /// Launch-time toolbox credentials; deliberately absent from AgentLocal
+    /// and all persisted or public records.
+    pub toolbox_references: HashMap<String, crate::endpoints::ToolboxReferences>,
     /// The session accepts input.
     pub ready: bool,
     /// First prompt, waiting for the session to become ready, with the ids of

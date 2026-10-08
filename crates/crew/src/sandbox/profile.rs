@@ -747,6 +747,12 @@ impl<'a> Builder<'a> {
                 writable: true,
             });
         }
+        // File toolboxes are daemon-produced, content-addressed snapshots.
+        // They are shared between members but never writable from a session.
+        let toolbox_store = session.workspace.join(".crew/toolbox/store");
+        if std::fs::symlink_metadata(&toolbox_store).is_ok() {
+            self.generated(&toolbox_store, false)?;
+        }
         Ok(rw.join("home"))
     }
 

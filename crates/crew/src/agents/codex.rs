@@ -84,6 +84,7 @@ impl AgentRuntime for CodexRuntime {
             overrides.push(format!("{key}={}", toml_value(&value)));
         };
         set("mcp_servers.crew.command", json!(crew_bin));
+        set("mcp_servers.crew.enabled", json!(true));
         set(
             "mcp_servers.crew.args",
             json!(["mcp", "--identity", identity]),
@@ -95,6 +96,25 @@ impl AgentRuntime for CodexRuntime {
             "mcp_servers.crew.default_tools_approval_mode",
             json!("approve"),
         );
+        let toolbox = ctx.settings.toolbox_launch.as_ref();
+        if let Some(toolbox) = toolbox {
+            for name in &toolbox.servers {
+                let key = format!("mcp_servers.{}", serde_json::to_string(name)?);
+                set(&format!("{key}.command"), json!(crew_bin));
+                set(
+                    &format!("{key}.args"),
+                    json!(["toolbox", "mcp", name, "--identity", identity]),
+                );
+                set(&format!("{key}.enabled"), json!(true));
+                set(
+                    &format!("{key}.default_tools_approval_mode"),
+                    json!("approve"),
+                );
+            }
+            for (key, value) in &toolbox.codex_overrides {
+                set(key, value.clone());
+            }
+        }
         // Codex appends the event JSON as the final argument.
         set(
             "notify",
@@ -103,10 +123,14 @@ impl AgentRuntime for CodexRuntime {
         // The standing instructions (who the agent is, its role, the team,
         // the tools) go into the system prompt, after whatever the user's own
         // config puts there, rather than into a prompt of their own.
-        let mut instructions: Vec<String> =
+        let mut instructions: Vec<String> = if toolbox.is_none_or(|toolbox| toolbox.inherit_memory)
+        {
             own_developer_instructions(&super::home::Operator::detect(ctx.endpoint).codex)
                 .into_iter()
-                .collect();
+                .collect()
+        } else {
+            Vec::new()
+        };
         if !ctx.briefing.trim().is_empty() {
             instructions.push(ctx.briefing.trim_end().to_string());
         }
@@ -221,6 +245,7 @@ impl AgentRuntime for CodexRuntime {
             args.extend(server_permissions.iter().cloned());
             args.extend(ctx.settings.extra_args.iter().cloned());
             Ok(Sidecar {
+                scrub_env: toolbox.map(|toolbox| toolbox.scrub_env.clone()).unwrap_or_default(),
                 program: "codex".into(),
                 args,
                 cwd: cwd.clone().into(),
@@ -274,6 +299,9 @@ impl AgentRuntime for CodexRuntime {
         }
 
         Ok(LaunchSpec {
+            scrub_env: toolbox
+                .map(|toolbox| toolbox.scrub_env.clone())
+                .unwrap_or_default(),
             agent_id: ctx.agent.id.clone(),
             kind: RuntimeKind::Codex,
             program: "codex".into(),
