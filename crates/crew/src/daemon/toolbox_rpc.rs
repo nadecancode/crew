@@ -44,20 +44,6 @@ fn member_level<'a>(team: &'a TeamConfig, agent: &Agent) -> (&'a Toolbox, String
     }
 }
 
-/// What a reference resolves to, or the name of the variable it needs.
-fn resolve_reference(reference: &Reference) -> Result<String, String> {
-    match reference {
-        Reference::Value(value) => Ok(value.clone()),
-        Reference::Env { name, format } => {
-            let value = std::env::var(name).map_err(|_| name.clone())?;
-            Ok(match format {
-                Some(format) => format.replacen("{}", &value, 1),
-                None => value,
-            })
-        }
-    }
-}
-
 fn env_names(server: &crew_core::toolbox::McpServer) -> impl Iterator<Item = &str> {
     server
         .env
@@ -79,21 +65,6 @@ impl Daemon {
         let (level, path) = member_level(team, agent);
         team.resolve_toolbox(level, &path)
             .map_err(|e| RpcError::invalid(format!("{e:#}")))
-    }
-
-    /// The member's secret names: every variable its toolbox references
-    /// (removed from what its servers inherit).
-    fn secret_names(&self, resolved: &Resolved) -> Vec<String> {
-        let names: BTreeSet<&str> = resolved
-            .items
-            .values()
-            .filter_map(|r| match &r.item {
-                Item::Mcp(server) => Some(env_names(server)),
-                _ => None,
-            })
-            .flatten()
-            .collect();
-        names.into_iter().map(str::to_string).collect()
     }
 
     /// `Call::ToolboxServer`: how agent `id`'s `crew toolbox mcp <name>`
@@ -128,27 +99,45 @@ impl Daemon {
             }
         };
         let server = &server;
-        let mut redact = Vec::new();
-        let mut resolve_map = |map: &BTreeMap<String, Reference>| -> Result<BTreeMap<String, String>, RpcError> {
-            let mut out = BTreeMap::new();
-            for (key, reference) in map {
-                let value = resolve_reference(reference)
-                    .map_err(|missing| RpcError::invalid(format!("Needs ${missing}")))?;
-                if let Reference::Env { name, .. } = reference {
-                    redact.push(Redaction {
-                        name: name.clone(),
-                        value: value.clone(),
-                    });
-                }
-                out.insert(key.clone(), value);
-            }
-            Ok(out)
+        // References resolve from the crew config's toolbox_env and the
+        // daemon's environment (endpoints::toolbox), never from the
+        // member's own model credentials.
+        let layers = crate::endpoints::Layers::load(&self.workspace);
+        let parent = agent.parent.as_deref();
+        let references = layers
+            .toolbox_references(agent.runtime, id, parent, server)
+            .map_err(|e| RpcError::invalid(format!("{e:#}")))?;
+        if let Some(missing) = references.missing.iter().next() {
+            return Err(RpcError::invalid(format!("Needs ${missing}")));
+        }
+        let expose = |map: &BTreeMap<String, crate::endpoints::Secret>| -> BTreeMap<String, String> {
+            map.iter()
+                .map(|(k, v)| (k.clone(), v.expose().to_string()))
+                .collect()
         };
+        let redact = references
+            .redactions
+            .iter()
+            .map(|(name, value)| Redaction {
+                name: name.clone(),
+                value: value.expose().to_string(),
+            })
+            .collect();
+        // Every secret name of the member, not only this server's: no server
+        // inherits another's credential from the session.
+        let mut scrub: BTreeSet<String> = references.scrub.clone();
+        for entry in resolved.items.values() {
+            if let Item::Mcp(other) = &entry.item {
+                if let Ok(theirs) = layers.toolbox_references(agent.runtime, id, parent, other) {
+                    scrub.extend(theirs.scrub);
+                }
+            }
+        }
         let upstream = match &server.url {
             Some(url) => Upstream::Http {
                 url: url.clone(),
                 transport: server.transport.unwrap_or_default(),
-                headers: resolve_map(&server.headers)?,
+                headers: expose(&references.headers),
             },
             None => Upstream::Stdio {
                 command: server.command.clone(),
@@ -158,14 +147,14 @@ impl Daemon {
                         .to_string_lossy()
                         .into_owned()
                 }),
-                env: resolve_map(&server.env)?,
+                env: expose(&references.env),
             },
         };
         Ok(ToolboxServerLaunch {
             name: name.to_string(),
             upstream,
             redact,
-            scrub: self.secret_names(&resolved),
+            scrub: scrub.into_iter().collect(),
             definition: proxy::definition_hash(server),
             snapshot: proxy::snapshot_path(&self.agent_dir(id), name)
                 .to_string_lossy()
