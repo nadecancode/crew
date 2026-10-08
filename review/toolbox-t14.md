@@ -63,9 +63,9 @@ Evidence is retained under `target/toolbox-t14/` in graph's worktree.
 | Formatting | Passed | `fmt.log` |
 | Rust 1.82 default CLI build and help | Passed | `msrv.log` |
 
-The workspace invocation's sole failure was web P16's round-trip p95 of
+The workspace invocation hit a web P16 timing flake: round-trip p95 was
 3.840222 milliseconds. The isolated rerun passed without changing its threshold
-or source. Included workspace checks passed: toolbox launch 11, proxy 15,
+or source. Both results are retained. Included workspace checks passed: toolbox launch 11, proxy 15,
 team 89 (including T20), keep-alive 8, and the immutable subagent inheritance
 regressions. The four ignored cases are the existing explicit benchmark,
 paid/native or interactive gates; no new ignore was added.
