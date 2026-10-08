@@ -68,7 +68,7 @@ pub fn definitions() -> Vec<ToolDef> {
             "Send a message directly to one teammate. It is delivered straight into that agent's \
 session; the orchestrator is not involved. Use type \"question\" when you need an answer, \
 \"answer\" to reply, \"artifact\" to hand over a commit id or file, \"status\" for news that needs \
-nothing back (it starts no turn of its own unless the teammate is waiting).",
+nothing back (it does not wake a resting teammate unless that teammate is waiting).",
             object(
                 json!({
                     "to": { "type": "string", "description": "Recipient agent id, e.g. claude-5; several separated by commas (claude-5,db), each getting its own copy" },
@@ -83,7 +83,7 @@ nothing back (it starts no turn of its own unless the teammate is waiting).",
         tool(
             "agent_broadcast",
             "Send one message to every other agent on the team. News that needs nothing back goes as \
-type \"status\": it starts no turn of its own unless a teammate is waiting.",
+type \"status\": it does not wake a resting teammate unless that teammate is waiting.",
             object(
                 json!({
                     "body": { "type": "string" },
@@ -1388,13 +1388,14 @@ mod tests {
     }
 
     #[test]
-    fn send_descriptions_say_status_news_starts_no_turn() {
+    fn send_descriptions_say_status_news_does_not_wake_resting_teammates() {
         // Backed by delivery::tests::news_waits_for_company_unless_it_is_what_a_member_waits_for.
         let defs = definitions();
         for name in ["agent_send", "agent_broadcast"] {
             let def = defs.iter().find(|d| d.name == name).unwrap();
             assert!(
-                def.description.contains("starts no turn of its own unless"),
+                def.description
+                    .contains("does not wake a resting teammate unless that teammate is waiting"),
                 "{name}: {}",
                 def.description
             );

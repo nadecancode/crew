@@ -7,36 +7,40 @@ then calls `crew.agent_inbox` twice and gets `No new messages` both times.
 
 This note measures four patterns across this team's sessions. For each one
 it traces the crew text or mechanism that causes it and gives a fix, an owner
-and a regression test. Three fixes are made here: the wording of the
+and a regression test. The measurements select candidates by tool names and
+message wrappers; they show where turns and calls are likely to be spent for
+nothing, not proven waste, and the requests and costs they associate are
+upper bounds, not savings. Three fixes are made here: the wording of the
 `agent_inbox`, `agent_send` and `agent_broadcast` tools. One more, sending
 landing news as status, is already applied by the orchestrator. The rest are
 proposed cards, because they touch files that other cards own.
 
 ## Summary
 
-Measured 2026-10-08T07:13Z over 49 Claude Code sessions (17,604 requests,
-1,876 turns) and 45 Codex sessions (9,621 requests, 3,486 turns). There were
+Measured 2026-10-08T09:59Z over 49 Claude Code sessions (18,588 requests,
+2,030 turns) and 45 Codex sessions (10,451 requests, 3,692 turns). There were
 no pi sessions in the cohort.
 
-Token counts are input tokens of the requests charged to each pattern, nearly
-all of them cache reads; see Method for how requests are charged. Dollar
-figures are list prices for the input side of Claude requests only, since
-Codex models have no listed price. The patterns overlap, so their rows must
-not be added together.
+Token counts are input tokens of the requests associated with each pattern,
+nearly all of them cache reads; see Method for how requests are associated.
+Dollar figures are list prices for the input side of Claude requests only,
+since Codex models have no listed price. Every Claude request in this cohort
+reported its cache-write TTL split, so these figures are exact rather than
+ranges. The patterns overlap, so their rows must not be added together.
 
-| Pattern | Count | Requests charged | Input tokens | Claude list cost | Fix | State |
+| Pattern | Candidates | Associated requests (upper bound) | Input tokens | Claude list cost (upper bound) | Fix | State |
 | --- | ---: | ---: | ---: | ---: | --- | --- |
-| 1. `agent_inbox` that returns nothing, or only messages already delivered, within 3 responses of a delivery | 623 of 1,049 | 358 | 99.5 M | $1.76 | 1a wording; 1b mark read on delivery; 1c notice wording | 1a made here; 1b, 1c proposed |
-| 1. All empty `agent_inbox` calls | 868 (867 Codex) | 315 | 90.1 M | none (Codex) | as above | |
-| 1. `agent_inbox` returning only messages already delivered | 226 | 78 | 18.8 M, plus 780,759 result bytes | $2.37 | 1b | proposed |
-| 2. Byte-identical repeated reads | 7 | 0 (bundled) | 188,740 result bytes | — | none needed | |
-| 2. `tasks_list` result size | 133 calls, 1.65 MB | — | p90 90,522 B on Codex; 112,377 B on the current board | — | 2a explicit compact board view | proposed |
-| 3. Turns started by a notice or status message that did only status calls or crew reads | 486 of 1,296 | 789 | 212.0 M (7.9 M cache write) | $103.62 | 3a–3f | 3a applied; rest proposed |
-| 3. Text-only replies to an orchestrator message or status message | 186 | 186 | 60.6 M (4.5 M cache write) | $57.55 | 3a covers the 85 replies to orchestrator messages | applied |
-| 4. Crew reads in turns started by a delivered message | 2,892 reads in 4,424 turns | 1,320 | 330.9 M | $27.45 | follows from 1 | |
+| 1. `agent_inbox` that returns nothing, or only messages already delivered in full, within 3 responses of a delivery | 675 of 1,123 | 387 | 103.4 M | $1.75 | 1a wording; 1b mark read on delivery; 1c notice wording | 1a made here; 1b, 1c proposed |
+| 1. All empty `agent_inbox` calls | 946 (945 Codex) | 344 | 94.6 M | none (Codex) | as above | |
+| 1. `agent_inbox` returning only messages already delivered in full | 231 | 81 | 18.6 M, plus 859,372 result bytes | $2.61 | 1b | proposed |
+| 2. Byte-identical repeated reads | 9 | 0 (all bundled) | 196,237 result bytes | — | none needed | |
+| 2. `tasks_list` result size | 137 calls, 1.78 MB | — | p90 90,522 B on Codex, largest 118,535 B | — | 2a explicit compact board view | proposed |
+| 3. Turns started by a notice or status message that made only status calls or crew reads | 530 of 1,380 | 872 | 239.8 M (8.6 M cache write) | $111.14 | 3a–3f | 3a applied; rest proposed |
+| 3. Replies crew may forward to the sender as an answer or message | 492 | 492 | 159.4 M | $114.73 | 3a | applied for landing news |
+| 4. Crew reads in turns started by a delivered message | 3,126 reads in 4,773 turns | 1,434 | 362.0 M | $30.16 | follows from 1 | |
 
-Status-only turns of every origin come to 1,178 turns, 1,736 requests, 484.3 M
-input tokens and $284.04 for the Claude share. Many of these are legitimate:
+Status-only turns of every origin come to 1,329 turns, 1,998 requests, 572.8 M
+input tokens and $304.64 for the Claude share. Many of these are legitimate:
 a member parks a card, or reports a result as status. The rows above count
 only the turns whose cause is traced in this note.
 
@@ -51,27 +55,44 @@ results and delivered inputs. It writes `summary.json`, `summary.md` and
 `scripts/cache/turns.test.mjs` pins its classifiers. The full report from
 this run is in `notes/turn-efficiency/summary.md`.
 
-How a call or turn is charged:
+How a candidate is associated with requests:
 
-- **Alone.** A wasted call is "alone" when every tool call answered by the
-  next model response is `agent_inbox`, `agent_status` or `task_update`. It
-  is then charged that whole next request, since the request exists only
-  because of the call.
+- **Alone.** A candidate call is "alone" when every tool call answered by
+  the next model response is `agent_inbox`, `agent_status` or
+  `task_update`. It is then associated with that whole next request, the
+  one the native session records between that response and the one after
+  it. This is an upper bound: the same request may also carry useful
+  reasoning.
 - **Bundled.** A call that ran beside other real work, for example inside a
-  Codex `exec` script with `exec_command`, is charged only its result bytes.
-- **Turns.** A wasted turn is charged every request in it.
+  Codex `exec` script with `exec_command`, is associated only with its
+  result bytes.
+- **Turns.** A candidate turn is associated with every request in it.
 - **Folded messages.** A message folded into a turn that is already running
   counts as a delivery but starts no turn.
+- **Delivered in full.** A message counts as already delivered only when its
+  whole body reached the session: the id in a `[crew] Message from …`
+  header with a body, or an entry of a `[crew] N new messages:` batch,
+  without crew's `… (truncated` suffix. An id that a notice only mentions
+  is a reference, not a delivery.
 - **Status-only.** "Status-only" means the turn's only tool calls were
   `agent_status`, `task_update` or `agent_send` with type `status`. A turn with
   no tool calls also counts when its reply is 300 characters or shorter.
 - **Read-only.** "Read-only" adds crew reads (`agent_inbox`, `tasks_list`,
   `task_get`, `agents_list`) to the status calls.
+- **Cost.** Input-side list price per request. A write with no TTL split is
+  priced as a range between the 5-minute and 1-hour write prices; a request
+  without usage is "usage unknown", never $0; a model without a price is
+  "no price".
+- **Window.** `--since` and `--until` select the calls and turns measured
+  and the requests associated with them. Earlier records still count as
+  context: a message delivered before the window makes a read inside it a
+  duplicate.
 
-Both labels come from tool names and message types only, so a status message
-can still have carried something the team needed. Codex usage comes from
-cumulative `token_count` deltas, so the calls inside one `exec` share one
-request.
+These selections come from tool names and message types only. A candidate
+turn can still have done useful work (an analysis, a review, a move to
+waiting, a continuation), and a status message can still have carried
+something the team needed. Codex usage comes from cumulative `token_count`
+deltas, so the calls inside one `exec` share one request.
 
 ## 1. `agent_inbox` after the message was already delivered
 
@@ -82,22 +103,27 @@ last line: `tools.mcp__crew__agent_inbox({limit: 8})`.
 
 **Empty results.**
 
-- Total: 868 calls returned `No new messages.`; 867 of them were Codex calls.
-- Alone: 315 calls were alone. They cost 315 requests and 90.1 M input
+- Total: 946 calls returned `No new messages.`; 945 of them were Codex calls.
+- Alone: 344 calls were alone, associated with 344 requests and 94.6 M input
   tokens, nearly all cache reads.
-- Bundled: the other 550 cost 8,800 result bytes.
+- Bundled: 599 cost 9,584 result bytes; 3 had no later request.
 
-**After an in-band delivery.** There were 1,049 inbox calls within three
-model responses of a delivery that already carried the message bodies. 623
-of them were wasted:
+**After an in-band delivery.** There were 1,123 inbox calls within three
+model responses of a delivery that carried every message's full body. 675
+of them are candidates:
 
-- 437 returned nothing: 290 alone, 147 bundled.
-- 184 returned only messages that had been delivered: 69 alone, 115 bundled.
+- 486 returned nothing: 317 alone, 168 bundled, 1 with no later request.
+- 189 returned only messages already delivered in full: 71 alone, 118
+  bundled.
 
-**Duplicate-only results across the session.** 226 calls returned only
-messages already delivered in-band. Together they put 780,759 bytes of
+They are associated with 387 requests and 103.4 M input tokens; the Claude
+share lists at $1.75.
+
+**Duplicate-only results across the session.** 231 calls returned only
+messages already delivered in full. Together they put 859,372 bytes of
 repeated message text into context, and that text is read again by every
-later request in those sessions.
+later request in those sessions. The 82 alone calls are associated with 81
+requests and 18.6 M input tokens ($2.61 for the Claude share).
 
 Example: `~/.codex/sessions/2026/10/05/rollout-2026-10-05T12-26-02-01a10d19-e2c7-7430-bc06-6f4ac616dbd6.jsonl:5773`
 (qa). An orchestrator answer arrives in-band. Lines 5781 and 5791 each end an
@@ -107,9 +133,9 @@ Same pattern in this session (designer, Claude Code). After a compaction, one
 `agent_inbox()` returned 50 messages as unread, all of which had been
 delivered in-band hours earlier: about 8,000 tokens of repeated text.
 
-**Inbox reads that did find new messages.** These are not all waste. Of
-1,474 Codex `agent_inbox` calls that returned messages, 1,289 returned at
-least one id not yet delivered in-band. By type, the new ids were mostly
+**Inbox reads that did find new messages.** These are not candidates. Of
+1,552 Codex `agent_inbox` calls that returned messages, 1,364 returned at
+least one id whose full body had not been delivered in-band. By type, the new ids were mostly
 answers, held teammate status, artifacts and messages. So a read made while
 doing other work does pick some messages up before delivery would. Fix 1a
 targets only calls made to wait for a message.
@@ -237,25 +263,28 @@ under "Owners and cards".
 - **1c:** string tests on the restart, recovery and compaction notices.
   - No `agent_inbox` without `id:`.
   - No `tasks_list` in a member's compaction notice.
-- **Measurement:** rerun `turns.mjs --since <landing time>`. Expected: alone
-  empty `agent_inbox` calls near 0, and `inbox_duplicate_only` near 0 once 1b
-  lands.
+- **Measurement:** `scripts/cache/turns.test.mjs` classifies both the old
+  and the new empty result as empty, so a rerun after the wording lands
+  still counts empty calls. Rerun `turns.mjs --since <landing time>` and
+  compare candidates per session hour with a run of the same length before
+  it. That shows whether the candidates went down; it is not a saving until
+  a paired before-and-after run on comparable work shows one.
 
 ## 2. Repeated board and card reads
 
 ### Evidence
 
-Only 7 reads in the whole cohort returned exactly the same bytes as the same
-call made earlier, with no change of the caller's own state in between: 4
-`task_get`, 2 `tasks_list` and 1 `git_status`. All 7 were bundled with other
-work, so no request is charged to them, only 188,740 result bytes. Members do
+Only 9 reads in the whole cohort returned exactly the same bytes as the same
+call made earlier, with no change of the caller's own state in between: 6
+`task_get`, 2 `tasks_list` and 1 `git_status`. All 9 were bundled with other
+work, so no request is associated with them, only 196,237 result bytes. Members do
 not re-read unchanged state often.
 
 The cost is in the size of `tasks_list`:
 
-- Calls: 133, returning 1.65 MB in all.
-- Size: median 5,267 B. On Codex the p90 is 90,522 B, and 9 calls exceeded
-  50 KB.
+- Calls: 137, returning 1.78 MB in all.
+- Size: median 5,238 B, p90 25,171 B. On Codex the p90 is 90,522 B; 10
+  calls exceeded 50 KB and the largest was 118,535 B.
 - The current board: on 2026-10-08 it holds 122 cards, 109 of them done. One
   `tasks_list` from this session returned 112,377 B, which Claude Code would
   not keep inline.
@@ -301,56 +330,64 @@ removes `tasks_list` from their compaction notice.
 
 ### Evidence
 
-Turns started by a crew notice or a status message: 1,296. Of these, 486
-ended with only status calls or crew reads, at a cost of 789 requests, 212.0
-M input tokens and 7.9 M cache-write tokens. The Claude share lists at
-$103.62.
+Turns started by a crew notice or a status message: 1,380. Of these, 530
+made only status calls or crew reads (candidates). They are associated with
+872 requests, 239.8 M input tokens and 8.6 M cache-write tokens; the Claude
+share lists at $111.14.
 
-| Started by | Turns | Status or read only | Requests in all such turns | Claude list cost of all such turns |
+| Started by | Turns | Candidates (status or read only) | Requests in all such turns | Claude list cost of all such turns |
 | --- | ---: | ---: | ---: | ---: |
-| Teammate or crew status message | 437 | 173 | 1,016 | $53.48 |
-| "Your last turn ended without a tool call" | 154 | 81 | 223 | $1.70 |
-| Orchestrator "main fast-forwarded to …" (type `message`) | 153 | 73 | 445 | $86.01 |
+| Teammate or crew status message | 480 | 200 | 1,156 | $72.05 |
+| "Your last turn ended without a tool call" | 162 | 89 | 240 | $1.70 |
+| Orchestrator "main fast-forwarded to …" (type `message`) | 159 | 74 | 568 | $86.01 |
 | "The usage limit that stopped you has lifted" | 142 | 0 (113 failed with no model response) | 916 | Codex only |
-| Idle reminder "Reminder: task … is still open" | 61 | 9 | 865 | $68.45 |
+| Idle reminder "Reminder: task … is still open" | 72 | 14 | 919 | $73.40 |
+| Claude bridge "Team messages came as your last turn ended" | 60 | 17 | 473 | $104.84 |
 | "You are online as … Nothing is assigned to you yet" | 57 | 57 | 57 | $7.10 |
 | "Agent … is unresponsive" (to the orchestrator) | 57 | 37 | 106 | $6.06 |
-| Claude bridge "Team messages came as your last turn ended" | 55 | 17 | 338 | $91.65 |
-| "Task … was completed by …" | 49 | 12 | 101 | $6.76 |
-| "Your conversation was just compacted" | 37 | 7 | 994 | $61.64 |
+| "Task … was completed by …" | 51 | 13 | 105 | $7.11 |
+| "Your conversation was just compacted" | 43 | 9 | 1,163 | $72.61 |
 
-Text-only replies: 186 turns opened by an orchestrator message or a status
-message ended with text and no tool call. They cost 186 requests, 60.6 M input
-tokens and 4.5 M cache-write tokens; the Claude share is $57.55. Among them:
+**Replies crew may forward.** crew forwards a member's end-of-turn text in
+two cases only (`daemon/turns.rs:305-372`): to the sender of a `message` or
+`question` addressed directly to that member by a teammate (not the
+scheduler, not a broadcast), as an answer; and to each teammate named on a
+line starting `@<id>:`, as a message. A reply to a status message, an answer
+or a crew notice goes nowhere. A forwarded answer or message starts a turn in
+a resting recipient, because only status news waits for company.
 
-- 52 were replies to "main fast-forwarded" ($25.85);
-- 33 were replies to other orchestrator messages.
-
-crew forwards a text reply to a `message` or `question` as an answer
-(`daemon/turns.rs:331-362`). Each of these replies therefore started a turn in
-the orchestrator as well.
+492 replies fall in those two cases: 451 after a `message` or `question`
+opener and 41 with an explicit `@<id>:` line. 85 of the 451 followed an
+orchestrator "main fast-forwarded" message. Native session files do not show
+whether such a message was sent directly or as a broadcast, so 451 is an
+upper bound on forwarded replies. Another 533 replies were not forwardable.
 
 Turns started by teammate status are mostly to waiting members, by design:
 
-- by sender: qa 107 turns (47 wasted), orchestrator 71 (19), graph 40 (18),
-  runtime 24 (14);
+- by sender: qa 107 turns (47 candidates), orchestrator 77 (24), scheduler
+  60 (23), graph 45 (21), runtime 28 (18);
 - a teammate's status starts a turn only in a member that is waiting
   (`daemon/delivery.rs:60-64`).
 
-Idle reminders mostly lead to work: 52 of 61 did more than status calls. In
-13 of the 29 Claude reminders, though, the member had launched a background
-Bash, Agent or Monitor task that had not reported back yet. This session had
-three such reminders while its own measurement subagent was running.
+Idle reminders mostly lead to work: 58 of 72 did more than status calls or
+reads. In 19 of the 36 Claude reminders, though, the member had launched a
+background Bash, Agent or Monitor task that had not reported back yet (12
+of them within the previous two hours). This session had several such
+reminders while its own measurement subagent was running, and one more after
+an unrelated question was delivered while its card was parked: delivery
+resumes a parked card (`resume_waiting_from_delivery`), and the reminder
+followed once the answer turn ended.
 
 ### Cause and fix
 
 **3a. Landing news sent as type `message`.**
 
-- *Cause.* The orchestrator announced each fast-forward of main to every
-  member as a `message`. Every resting member took a turn: 153 turns, 73 of
-  them status or read only. Claude members woken this way had a cold cache:
-  4.19 M cache-write tokens in the wasted turns alone. 52 members then
-  replied with text, which crew forwarded to the orchestrator as an answer.
+- *Cause.* The orchestrator announced each fast-forward of main to members
+  as a `message`, which starts a turn in every resting recipient: 159 turns,
+  74 of them candidates. Those candidate turns include 4.19 M cache-write
+  tokens; writes alone do not show why the cache was written. 85 replies
+  followed such a message; crew forwards them to the orchestrator as answers
+  only if the message was addressed directly.
 - *Fix, orchestrator behaviour (applied 2026-10-08, m-3b7c9bfbdd38).*
   Landing news goes out as an `agent_broadcast` of type `status`. A status
   from a teammate is held for a resting member until its next message, and
@@ -358,11 +395,11 @@ three such reminders while its own measurement subagent was running.
   `message` only to the members who must act.
 - *Fix, tool wording (made in this card).* The descriptions of `agent_send`
   and `agent_broadcast` now say that `status` is for news that needs nothing
-  back and starts no turn of its own unless the teammate is waiting. That
-  claim is pinned by
+  back and does not wake a resting teammate unless that teammate is waiting.
+  That claim is pinned by
   `delivery::tests::news_waits_for_company_unless_it_is_what_a_member_waits_for`.
-  One exception: pi queues a status that arrives mid-turn as a follow-up,
-  which runs after the turn. No pi member was in this cohort.
+  It says nothing about a member in the middle of a turn: pi, for one, queues
+  a status that arrives mid-turn as a follow-up that runs after the turn.
 - *Fix, briefing (proposed for `cache-standing-prompts`, `agents/prompt.rs`,
   orchestrator step 3, Supervise).* One fixed sentence: "Tell the team news
   that needs nothing back, such as main moving, with agent_broadcast type
@@ -381,7 +418,7 @@ three such reminders while its own measurement subagent was running.
   needs, or nothing" (`agents/prompt.rs:155-161`). The follow-up in
   `daemon/turns.rs:269-276` then tells a member whose turn ended without a
   tool call that "nothing came of it", and asks for `agent_status("idle",
-  …)`. 81 of its 154 turns did only that.
+  …)`. 89 of its 162 turns were candidates.
 - *Fix.* `cache-obligation-wakes` (D4, landed in 66eadf2f) already suppresses
   the follow-up for settled obligations and identified replies. Most of this
   sample predates it. Rerun `turns.mjs` over a window that starts when the
@@ -395,8 +432,8 @@ three such reminders while its own measurement subagent was running.
 
 - *Cause.* Claude's bridge submits "Team messages came as your last turn
   ended (above). Act on them." (`assets/crew-bridge.register.ts:18`) when a
-  message was appended to a turn that ended before the model saw it. 55
-  turns, 17 of them wasted, $18.87.
+  message was appended to a turn that ended before the model saw it. 60
+  turns, 17 of them candidates ($18.87 associated).
 - *Fix.* `cache-delivery` (D1) moves ordinary Claude delivery to turn
   boundaries, which removes the case. `cache-acceptance` checks that this
   opening no longer occurs for ordinary traffic.
@@ -424,8 +461,9 @@ three such reminders while its own measurement subagent was running.
   `idle_since` does not start. That needs a real, bounded activity signal
   from the runtime (a task that never reports back must not suppress
   reminders forever). The 90 s, three-reminder policy stays until such a
-  signal exists and evidence supports the change. Only 21 reminder turns in
-  the sample were wasted ($0.83).
+  signal exists and evidence supports the change. Only 23 reminder turns in
+  the sample ended with no tool call or only `agent_status` (15 associated
+  requests, $1.06).
 
 **3f. Launch prompt for a member with nothing assigned.**
 
@@ -436,11 +474,11 @@ three such reminders while its own measurement subagent was running.
 
 ### Regression tests
 
-- **3a:** `mcp::tools::tests::send_descriptions_say_status_news_starts_no_turn`
+- **3a:** `mcp::tools::tests::send_descriptions_say_status_news_does_not_wake_resting_teammates`
   (in this card), together with the existing delivery test. The briefing
   sentence goes in `cache-standing-prompts`' byte snapshot. Measurement:
-  after 2026-10-08T07:20Z, "main fast-forwarded" no longer appears as a
-  turn-starting `message` opening.
+  in a run with `--since 2026-10-08T07:20:00Z`, "main fast-forwarded" no
+  longer appears as a turn-starting `message` opening.
 - **3b:** rerun of `turns.mjs` with `--since` set to the time the running
   daemon was confirmed on a D4 build, with session and build coverage in the
   report.
@@ -453,27 +491,28 @@ three such reminders while its own measurement subagent was running.
 
 ## 4. Tool round trips per delivered message
 
-There were 4,424 turns started by a delivered message. The median turn makes
-1 tool call; the mean is 6.05 and the p90 is 9.
+There were 4,773 turns started by a delivered message. The median turn makes
+1 tool call; the mean is 6.06 and the p90 is 9.
 
 | Runtime | Turns | Tool calls | Crew reads | Turns whose first call is a crew read | Requests per turn |
 | --- | ---: | ---: | ---: | ---: | ---: |
-| Claude Code | 1,207 | 11,619 | 406 | 143 | 9.5 |
-| Codex | 3,217 | 15,142 | 2,486 | 656 | 2.56 |
+| Claude Code | 1,354 | 12,543 | 442 | 147 | 9.16 |
+| Codex | 3,419 | 16,392 | 2,684 | 715 | 2.65 |
 
-The crew reads made in these turns were 2,029 `agent_inbox`, 696 `task_get`,
-85 `tasks_list` and 82 `agents_list`. The requests that consumed them total
-1,320, with 330.9 M input tokens; the Claude share lists at $27.45.
+The crew reads made in these turns were 2,191 `agent_inbox`, 764 `task_get`,
+88 `tasks_list` and 83 `agents_list`. The requests that consumed them, each
+shared among the calls it answered, total 1,434, with 362.0 M input tokens;
+the Claude share lists at $30.16.
 
 Most of the extra round trips come from pattern 1: `agent_inbox` calls are
 70% of all crew reads after a delivery, almost all of them from Codex members. Of the rest:
 
 - The `task_get` after a task dispatch is needed, since the dispatch names
-  the card rather than including it (`agents/prompt.rs:706`). That is 128
+  the card rather than including it (`agents/prompt.rs:706`). That is 132
   dispatch turns in this sample. Putting the card in the dispatch would save
   one request each, but card text can be long and changes as dependencies
   finish. Not proposed.
-- Bursts are already gathered: 253 turns opened with "[crew] N new
+- Bursts are already gathered: 286 turns opened with "[crew] N new
   messages", using the existing 1.5 s quiet window and 5 s maximum
   (`daemon/delivery.rs:46-50`). Not proposed.
 

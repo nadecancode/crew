@@ -1,7 +1,8 @@
 #!/usr/bin/env node
 /**
- * Wasted turns and tool calls in crew member sessions, from native session
- * files only. Read-only sibling of baseline.mjs: the cohort, session discovery,
+ * Candidate low-value turns and tool calls in crew member sessions, with the
+ * requests associated with them (an upper bound, not avoidable cost), from
+ * native session files only. Read-only sibling of baseline.mjs: the cohort, session discovery,
  * agent identity and per-request usage come from baseline.mjs's collect(); this
  * script then re-reads each cohort file (bounded to the byte size baseline
  * read) for tool calls, tool results and delivered inputs.
@@ -31,7 +32,8 @@ const CODEX_INNER_ITEMS = new Set(['McpToolCall', 'CommandExecution', 'FileChang
 /** Result text of the crew `agent_inbox` tool. */
 export function inboxResultKind(text) {
   const t = (text ?? '').trim();
-  if (/^(No new messages\.?|No unread messages\.?|0 message\(s\):?)$/i.test(t)) return 'empty';
+  // crew may append guidance after the sentence ("No new messages. One that arrives later…").
+  if (/^(No new messages\.|No unread messages|0 message\(s\))/i.test(t)) return 'empty';
   if (/^\d+ message\(s\):/.test(t) || /^--- .* from \S+ (to \S+ )?· type \w+ · id /.test(t)) return 'messages';
   if (/^no message '[^']*' sent or received by you/.test(t)) return 'id_not_found';
   if (/incompatible crew protocol|^Error:|^error:/.test(t)) return 'error';
@@ -78,30 +80,46 @@ export function normalizeOpening(s) {
     .replace(/\d+(\.\d+)?/g, 'N').trim().slice(0, 90);
 }
 
+// crew's clip()/clip_for_argv suffix: the full text is only in agent_inbox.
+const TRUNCATED = '… (truncated';
+const mentionedIds = text => [...new Set([...(text ?? '').matchAll(/\bm-[0-9a-f]{6,}\b/g)].map(m => m[0]))];
+
 /**
  * Classify a delivered input (user turn or mid-turn fold) by its wrapper and
- * first line only. `body` is true when the input already carries message
- * bodies (so the inbox cannot hold them any more).
+ * first line only. `ids` are message ids whose full body this input
+ * delivered (header id of a non-empty, untruncated "Message from" body; each
+ * untruncated block of a "N new messages" batch). Ids merely mentioned
+ * (notices, truncated blocks, quoted references) are `refs`, never
+ * deliveries. `body` is true when every delivered message arrived in full
+ * (so the inbox cannot hold anything more from this input).
  */
 export function classifyInput(text) {
-  if (typeof text !== 'string' || !text.startsWith('[crew]')) return { crew: false, cls: 'non_crew', opening: null, ids: [], body: false, delivery: false };
+  if (typeof text !== 'string' || !text.startsWith('[crew]')) return { crew: false, cls: 'non_crew', opening: null, ids: [], refs: [], body: false, delivery: false };
   const first = text.split('\n', 1)[0];
   const wrap = text.match(/^\[crew\] Message from (\S+) \(type (\w+), id ([\w-]+)\):[ \t]*\n*([\s\S]*)$/);
   if (wrap) {
     const [, sender, type, id, body] = wrap;
     const bodyFirst = body.split('\n', 1)[0];
     const notice = noticeClass(bodyFirst) ?? (bodyFirst.startsWith('[crew]') ? 'notice:other' : null);
-    return { crew: true, cls: notice ?? `message:${type}`, type, sender, ids: [id], body: body.trim().length > 0, delivery: true,
+    const full = body.trim().length > 0 && !body.includes(TRUNCATED);
+    return { crew: true, cls: notice ?? `message:${type}`, type, sender, entries: [{ from: sender, type, id }], ids: full ? [id] : [],
+      refs: mentionedIds(body).filter(x => x !== id).concat(full ? [] : [id]), body: full, truncated: body.includes(TRUNCATED), delivery: true,
       opening: notice ? `[crew] Message from <agent> (type ${type}): ${noticeHead(bodyFirst)}` : `[crew] Message from <agent> (type ${type})` };
   }
   const batch = first.match(/^\[crew\] (\d+) new messages:/);
   if (batch) {
-    const entries = [...text.matchAll(/^\(\d+\) from (\S+) · type (\w+) · id ([\w-]+)/gm)];
-    const types = [...new Set(entries.map(e => e[2]))].sort();
-    return { crew: true, cls: types.length && types.every(t => t === 'status') ? 'batch:status' : 'batch', types, ids: entries.map(e => e[3]),
-      body: true, delivery: true, opening: '[crew] N new messages:' };
+    const heads = [...text.matchAll(/^\(\d+\) from (\S+) · type (\w+) · id ([\w-]+)/gm)];
+    const entries = heads.map((h, i) => {
+      const block = text.slice(h.index, heads[i + 1]?.index ?? text.length);
+      return { from: h[1], type: h[2], id: h[3], full: !block.includes(TRUNCATED) };
+    });
+    const types = [...new Set(entries.map(e => e.type))].sort();
+    const ids = entries.filter(e => e.full).map(e => e.id);
+    return { crew: true, cls: types.length && types.every(t => t === 'status') ? 'batch:status' : 'batch', types, entries, ids,
+      refs: mentionedIds(text).filter(x => !ids.includes(x)), body: entries.length > 0 && ids.length === entries.length, truncated: ids.length < entries.length,
+      delivery: true, opening: '[crew] N new messages:' };
   }
-  return { crew: true, cls: noticeClass(first) ?? 'notice:other', ids: messageIds(text), body: false, delivery: false, opening: normalizeOpening(first) };
+  return { crew: true, cls: noticeClass(first) ?? 'notice:other', ids: [], refs: mentionedIds(text), body: false, delivery: false, opening: normalizeOpening(first) };
 }
 
 /** Inputs that need no action unless the agent has something new to say. */
@@ -143,32 +161,32 @@ export function extractEvents(runtime, records) {
       // Background task completion: <task-notification> names the launching tool_use id.
       if (role === 'user' || v.type === 'attachment') {
         const raw = role === 'user' ? (typeof c === 'string' ? c : Array.isArray(c) && !c.some(b => b?.type === 'tool_result') ? blockText(c) : '') : JSON.stringify(v.attachment ?? '');
-        if (raw.includes('<task-notification>')) for (const x of raw.matchAll(/<tool-use-id>([\w-]+)<\/tool-use-id>/g)) events.push({ kind: 'bg_done', line, ref: x[1] });
+        if (raw.includes('<task-notification>')) for (const x of raw.matchAll(/<tool-use-id>([\w-]+)<\/tool-use-id>/g)) events.push({ ts, kind: 'bg_done', line, ref: x[1] });
         if (v.type === 'attachment') continue;
       }
       if (role === 'user') {
         if (Array.isArray(c) && c.some(b => b?.type === 'tool_result')) {
-          for (const b of c) if (b?.type === 'tool_result') events.push({ kind: 'result', line, ref: b.tool_use_id, text: blockText(b.content), error: b.is_error === true });
+          for (const b of c) if (b?.type === 'tool_result') events.push({ ts, kind: 'result', line, ref: b.tool_use_id, text: blockText(b.content), error: b.is_error === true });
           continue;
         }
         if (v.isCompactSummary) continue;
         const text = typeof c === 'string' ? c : Array.isArray(c) ? c.filter(b => b?.type === 'text').map(b => b.text).join('\n') : null;
         if (!text) continue;
-        if (v.isMeta) { if (text.startsWith('[crew]')) events.push({ kind: 'input', line, ts, text, fold: true }); continue; }
-        events.push({ kind: 'input', line, ts, text, fold: false });
+        if (v.isMeta) { if (text.startsWith('[crew]')) events.push({ ts, kind: 'input', line, text, fold: true }); continue; }
+        events.push({ ts, kind: 'input', line, text, fold: false });
       } else if (role === 'toolResult') {
-        events.push({ kind: 'result', line, ref: m.toolCallId, text: blockText(c), error: m.isError === true });
+        events.push({ ts, kind: 'result', line, ref: m.toolCallId, text: blockText(c), error: m.isError === true });
       } else if (role === 'assistant') {
         if (m?.model === '<synthetic>') continue;
         const id = m?.id ?? v.id ?? `line:${line}`;
-        if (!seen.has(id)) { seen.add(id); events.push({ kind: 'model', line, ref: id }); }
+        if (!seen.has(id)) { seen.add(id); events.push({ ts, kind: 'model', line, ref: id }); }
         if (Array.isArray(c)) for (const b of c) {
           if (b?.type === 'tool_use' || b?.type === 'toolCall') {
             const args = b.input ?? b.arguments ?? {};
             const bg = ['Bash', 'Agent', 'Monitor'].includes(b.name) ? b.name : null; // confirmed by its result text
-            events.push({ kind: 'call', line, ts, id: b.id, ...toolName(b.name), args, bg });
+            events.push({ ts, kind: 'call', line, id: b.id, ...toolName(b.name), args, bg });
           }
-          else if (b?.type === 'text' && b.text) events.push({ kind: 'text', line, text: b.text });
+          else if (b?.type === 'text' && b.text) events.push({ ts, kind: 'text', line, text: b.text });
         }
       }
     }
@@ -178,25 +196,26 @@ export function extractEvents(runtime, records) {
   let lastModel = false;
   for (const { value: v, line } of records) {
     const p = v.payload ?? {};
-    if (v.type === 'event_msg' && p.type === 'task_started') { events.push({ kind: 'turn_start', line, ref: p.turn_id ?? null }); lastModel = false; continue; }
-    if (v.type === 'event_msg' && p.type === 'task_complete') { if (p.error) events.push({ kind: 'turn_error', line, text: String(p.error.message ?? p.error) }); continue; }
+    const ts = Date.parse(v.timestamp); // every event carries its record time (window filtering)
+    if (v.type === 'event_msg' && p.type === 'task_started') { events.push({ ts, kind: 'turn_start', line, ref: p.turn_id ?? null }); lastModel = false; continue; }
+    if (v.type === 'event_msg' && p.type === 'task_complete') { if (p.error) events.push({ ts, kind: 'turn_error', line, text: String(p.error.message ?? p.error) }); continue; }
     if (v.type === 'response_item') {
       if (p.type === 'message' && p.role === 'user') {
         const text = blockText(p.content);
-        if (text && !text.startsWith('<')) { events.push({ kind: 'input', line, ts: Date.parse(v.timestamp), text, fold: null }); lastModel = false; }
+        if (text && !text.startsWith('<')) { events.push({ ts, kind: 'input', line, ts: Date.parse(v.timestamp), text, fold: null }); lastModel = false; }
         continue;
       }
       const isModel = ['reasoning', 'custom_tool_call', 'function_call', 'local_shell_call', 'web_search_call'].includes(p.type) || (p.type === 'message' && p.role === 'assistant');
       if (isModel) {
-        if (!lastModel) events.push({ kind: 'model', line, ref: `line:${line}` });
+        if (!lastModel) events.push({ ts, kind: 'model', line, ref: `line:${line}` });
         lastModel = true;
-        if (p.type === 'message') { const t = blockText(p.content); if (t) events.push({ kind: 'text', line, text: t }); }
-        else if (p.type === 'function_call') events.push({ kind: 'call', line, id: p.call_id, ...toolName(p.namespace ? `${p.namespace}.${p.name}` : p.name), args: parseJson(p.arguments) });
-        else if (p.type === 'custom_tool_call') events.push({ kind: 'wrapper', line, id: p.call_id, name: p.name });
+        if (p.type === 'message') { const t = blockText(p.content); if (t) events.push({ ts, kind: 'text', line, text: t }); }
+        else if (p.type === 'function_call') events.push({ ts, kind: 'call', line, id: p.call_id, ...toolName(p.namespace ? `${p.namespace}.${p.name}` : p.name), args: parseJson(p.arguments) });
+        else if (p.type === 'custom_tool_call') events.push({ ts, kind: 'wrapper', line, id: p.call_id, name: p.name });
         continue;
       }
-      if (p.type === 'function_call_output') { events.push({ kind: 'result', line, ref: p.call_id, text: blockText(p.output?.content ?? p.output) }); lastModel = false; }
-      else if (p.type === 'custom_tool_call_output') { events.push({ kind: 'output', line, ref: p.call_id }); lastModel = false; }
+      if (p.type === 'function_call_output') { events.push({ ts, kind: 'result', line, ref: p.call_id, text: blockText(p.output?.content ?? p.output) }); lastModel = false; }
+      else if (p.type === 'custom_tool_call_output') { events.push({ ts, kind: 'output', line, ref: p.call_id }); lastModel = false; }
       continue;
     }
     if (v.type === 'event_msg' && p.type === 'item_completed' && CODEX_INNER_ITEMS.has(p.item?.type)) {
@@ -204,9 +223,9 @@ export function extractEvents(runtime, records) {
       if (it.id) { if (items.has(it.id)) continue; items.add(it.id); }
       if (it.type === 'McpToolCall') {
         const text = it.result ? blockText(it.result.content) : typeof it.error === 'string' ? it.error : it.error?.message ?? '';
-        events.push({ kind: 'call', line, id: it.id, inner: true, crew: it.server === 'crew', name: it.server === 'crew' ? it.tool : `${it.server}.${it.tool}`,
+        events.push({ ts, kind: 'call', line, id: it.id, inner: true, crew: it.server === 'crew', name: it.server === 'crew' ? it.tool : `${it.server}.${it.tool}`,
           args: parseJson(it.arguments), text, error: it.status !== 'completed' || it.result?.isError === true });
-      } else events.push({ kind: 'call', line, id: it.id, inner: true, crew: false, name: it.type, args: {} });
+      } else events.push({ ts, kind: 'call', line, id: it.id, inner: true, crew: false, name: it.type, args: {} });
     }
   }
   return events;
@@ -216,15 +235,28 @@ export function extractEvents(runtime, records) {
 
 const firstIndexAtLeast = (sorted, key, value) => { let lo = 0, hi = sorted.length; while (lo < hi) { const mid = (lo + hi) >> 1; if (key(sorted[mid]) < value) lo = mid + 1; else hi = mid; } return lo; };
 
+/** Subject time filter: inclusive [since, until] like baseline; unknown time is outside a set window. */
+export const inWindow = (ts, { since = null, until = null } = {}) => (since == null && until == null) || (Number.isFinite(ts) && ts >= (since ?? -Infinity) && ts <= (until ?? Infinity));
+/** A line opening with one or more @names and a colon: crew forwards that part as a message. */
+export const hasExplicitMention = text => /^[ \t]*@[\w-]+(?:[ \t,]+@[\w-]+)*[ \t]*:/m.test(text ?? '');
+
 /**
  * Pure per-session analysis. session: { runtime, file, agent_id, requests }
- * where requests are baseline.mjs request observations (source_line + usage).
- * Returns findings (one per wasted call / turn) with request attributions.
+ * where requests are ALL baseline.mjs request observations of the session
+ * (source_line + usage + timestamp_ms), unfiltered, so that calls join their
+ * exact native consuming request before any window applies. options.since /
+ * options.until select subjects (calls, turns, inputs) and associated
+ * requests; state before the window still feeds delivered ids and windows.
+ * Returns findings (one per candidate call / turn) with associated requests.
  */
 export function analyzeSession(session, events, options = {}) {
   const { window = DEFAULTS.window, shortReplyChars = DEFAULTS.shortReplyChars } = options;
+  const span = { since: options.since ?? null, until: options.until ?? null };
+  const inSpan = ts => inWindow(ts, span);
   const runtime = session.runtime, agent = session.agent_id ?? 'unknown', file = session.file;
   const requests = [...(session.requests ?? [])].sort((a, b) => a.source_line - b.source_line);
+  const reqIn = r => inSpan(r.timestamp_ms);
+  const keep = pairs => pairs.filter(([r]) => reqIn(r));
   const calls = events.filter(e => e.kind === 'call');
   const byId = new Map(calls.filter(c => c.id).map(c => [c.id, c]));
   // Link results: Claude tool_result ids; Codex function outputs; Codex inner
@@ -240,48 +272,52 @@ export function analyzeSession(session, events, options = {}) {
   // Turns: Claude starts one per non-meta user input; Codex per task_started.
   const turns = [];
   let cur = null;
-  const newTurn = (line, input) => { cur = { index: turns.length, startLine: line, input, folds: [], calls: [], wrappers: 0, models: 0, textChars: 0, requests: [] }; turns.push(cur); };
+  const newTurn = (e, input) => { cur = { index: turns.length, startLine: e.line, ts: e.ts, input, folds: [], calls: [], wrappers: 0, wrappersIn: 0, models: 0, textChars: 0, texts: [], requests: [] }; turns.push(cur); };
   for (const e of events) {
-    if (e.kind === 'turn_start') newTurn(e.line, null);
+    if (e.kind === 'turn_start') newTurn(e, null);
     else if (e.kind === 'input') {
       if (runtime === 'codex') {
-        if (cur && !cur.input && !cur.models) { cur.input = e; e.fold = false; }
-        else if (!cur) { newTurn(e.line, e); e.fold = false; }
+        if (cur && !cur.input && !cur.models) { cur.input = e; e.fold = false; if (!Number.isFinite(cur.ts)) cur.ts = e.ts; }
+        else if (!cur) { newTurn(e, e); e.fold = false; }
         else { e.fold = true; cur.folds.push(e); }
-      } else if (e.fold) { if (!cur) newTurn(e.line, null); cur.folds.push(e); }
-      else newTurn(e.line, e);
+      } else if (e.fold) { if (!cur) newTurn(e, null); cur.folds.push(e); }
+      else newTurn(e, e);
       e.turn = cur.index;
     } else {
-      if (!cur) newTurn(e.line, null);
+      if (!cur) newTurn(e, null);
       if (e.kind === 'model') { cur.models++; e.turn = cur.index; }
       else if (e.kind === 'call') { cur.calls.push(e); e.turn = cur.index; }
-      else if (e.kind === 'wrapper') cur.wrappers++;
-      else if (e.kind === 'text') cur.textChars += e.text.length;
+      else if (e.kind === 'wrapper') { cur.wrappers++; if (inSpan(e.ts)) cur.wrappersIn++; }
+      else if (e.kind === 'text') { cur.textChars += e.text.length; cur.texts.push(e); }
       else if (e.kind === 'turn_error') cur.error = e.text;
     }
   }
+  // A turn's subject time is its start (Codex task_started) or its input.
+  for (const t of turns) { t.inSpan = inSpan(t.input?.ts ?? t.ts); }
   for (const r of requests) { const i = firstIndexAtLeast(turns, t => t.startLine, r.source_line + 1) - 1; if (i >= 0) turns[i].requests.push(r); }
-  // Issuing model response and consuming request for every call.
+  // Issuing model response, and the exact consuming request: the request
+  // recorded between the next model response after the result and the model
+  // response after that (by source line); otherwise none.
   const modelLines = models.map(m => m.line);
   for (const c of calls) {
-    const mi = firstIndexAtLeast(modelLines, x => x, c.line + 1) - 1;
-    c.modelIndex = mi;
-    const after = c.resultLine ?? c.line;
-    const nextModel = models[firstIndexAtLeast(modelLines, x => x, after + 1)];
-    c.consumer = nextModel ? requests[firstIndexAtLeast(requests, r => r.source_line, nextModel.line)] ?? null : null;
+    c.modelIndex = firstIndexAtLeast(modelLines, x => x, c.line + 1) - 1;
+    const k = firstIndexAtLeast(modelLines, x => x, (c.resultLine ?? c.line) + 1);
+    const next = models[k], after = models[k + 1];
+    const r = next ? requests[firstIndexAtLeast(requests, x => x.source_line, next.line)] : null;
+    c.consumer = r && (!after || r.source_line < after.line) ? r : null;
   }
   const siblings = new Map();
   for (const c of calls) if (c.consumer) siblings.set(c.consumer, (siblings.get(c.consumer) ?? 0) + 1);
-  const callReqs = c => c.consumer ? [[c.consumer, 1 / siblings.get(c.consumer)]] : [];
-  // Wasted-call charging: a call whose consuming request consumed only light
-  // crew calls (agent_inbox / agent_status / task_update) caused that request
-  // ("alone", full request). A call bundled with other real tool work only
-  // added its result bytes ("bundled", no request charged).
+  const callReqs = c => c.consumer ? keep([[c.consumer, 1 / siblings.get(c.consumer)]]) : [];
+  // Candidate-call association: a call whose consuming request consumed only
+  // light crew calls (agent_inbox / agent_status / task_update) is associated
+  // with that whole request ("alone"; an upper bound). A call bundled with
+  // other real tool work only added its result bytes ("bundled").
   const group = new Map();
   for (const c of calls) if (c.consumer) { if (!group.has(c.consumer)) group.set(c.consumer, []); group.get(c.consumer).push(c); }
-  const wasteCharge = c => {
+  const association = c => {
     if (!c.consumer) return { bundle: 'no_consumer', requests: [] };
-    return group.get(c.consumer).every(x => x.crew && LIGHT_TOOLS.has(x.name)) ? { bundle: 'alone', requests: [[c.consumer, 1]] } : { bundle: 'bundled', requests: [] };
+    return group.get(c.consumer).every(x => x.crew && LIGHT_TOOLS.has(x.name)) ? { bundle: 'alone', requests: keep([[c.consumer, 1]]) } : { bundle: 'bundled', requests: [] };
   };
 
   const findings = [];
@@ -289,8 +325,8 @@ export function analyzeSession(session, events, options = {}) {
   const push = (pattern, f) => findings.push({ pattern, ...base, ...f });
   for (const t of turns) for (const e of [t.input, ...t.folds]) if (e) e.info = classifyInput(e.text);
 
-  // Delivered-in-band ids, and inbox calls within N model responses after a
-  // delivery that already carried message bodies.
+  // Delivered-in-band ids (full bodies only), and inbox calls within N model
+  // responses after a delivery whose messages all arrived in full.
   const inputs = turns.flatMap(t => [t.input, ...t.folds]).filter(Boolean).sort((a, b) => a.line - b.line);
   const windowOf = new Map();
   for (const d of inputs) {
@@ -310,22 +346,24 @@ export function analyzeSession(session, events, options = {}) {
     const kind = inboxResultKind(c.text);
     const ids = messageIds(c.text);
     const duplicateOnly = ids.length > 0 && ids.every(id => delivered.has(id));
-    c.inbox = { kind, ids: ids.length, duplicateOnly };
+    const subject = inSpan(c.ts);
+    c.inbox = { kind, ids: ids.length, duplicateOnly, inSpan: subject };
     if (kind === 'messages') {
       const entries = inboxEntries(c.text);
       const newInband = entries.filter(e => !delivered.has(e.id)), newAny = newInband.filter(e => !inboxSeen.has(e.id));
-      inboxNovelty.push({ runtime, agent, entries: entries.length, new_inband: newInband.map(e => ({ type: e.type, from: e.from })), new_any: newAny.length, by_id: Boolean(c.args?.id) });
+      if (subject) inboxNovelty.push({ runtime, agent, entries: entries.length, new_inband: newInband.map(e => ({ type: e.type, from: e.from })), new_any: newAny.length, by_id: Boolean(c.args?.id) });
       for (const e of entries) inboxSeen.add(e.id);
     }
-    const charge = wasteCharge(c);
-    const f = { line: c.line, tool: 'agent_inbox', args: c.args, result: c.text ?? '', result_bytes: bytes(c.text), requests: charge.requests, bundle: charge.bundle, inbox_kind: kind };
-    if (kind === 'empty') push('inbox_empty', { ...f, sub: charge.bundle });
-    if (duplicateOnly) push('inbox_duplicate_only', { ...f, sub: charge.bundle });
+    if (!subject) continue;
+    const assoc = association(c);
+    const f = { line: c.line, tool: 'agent_inbox', args: c.args, result: c.text ?? '', result_bytes: bytes(c.text), requests: assoc.requests, bundle: assoc.bundle, inbox_kind: kind };
+    if (kind === 'empty') push('inbox_empty', { ...f, sub: assoc.bundle });
+    if (duplicateOnly) push('inbox_duplicate_only', { ...f, sub: assoc.bundle });
     const w = windowOf.get(c.modelIndex), d = w?.d;
     if (d) {
       const sub = kind === 'empty' ? 'empty' : duplicateOnly ? 'duplicate_only' : kind === 'messages' || kind === 'messages_persisted' ? 'new_messages' : kind;
       const key = d.line; windowCounts.set(key, (windowCounts.get(key) ?? 0) + (sub === 'empty' || sub === 'duplicate_only' ? 1 : 0));
-      push('inbox_after_delivery', { ...f, sub: `${sub} ${charge.bundle}`, wasted: sub === 'empty' || sub === 'duplicate_only', delivery_line: d.line, delivery_opening: d.info.opening, delivery_snippet: d.text.slice(0, 200), round: w.round });
+      push('inbox_after_delivery', { ...f, sub: `${sub} ${assoc.bundle}`, candidate: sub === 'empty' || sub === 'duplicate_only', delivery_line: d.line, delivery_opening: d.info.opening, delivery_snippet: d.text.slice(0, 200), round: w.round });
     }
   }
   for (const f of findings) if (f.pattern === 'inbox_after_delivery') f.score = windowCounts.get(f.delivery_line) ?? 0;
@@ -342,8 +380,8 @@ export function analyzeSession(session, events, options = {}) {
     const key = `${c.name}:${stable(c.args)}`;
     const epoch = /^git_/.test(c.name) ? `${crewEpoch}/${fileEpoch}` : `${crewEpoch}`;
     const prev = last.get(key);
-    if (prev && prev.text === c.text && prev.epoch === epoch) {
-      push('repeated_read', { line: c.line, previous_line: prev.line, tool: c.name, args: c.args, result: c.text, result_bytes: bytes(c.text), ...(({ requests, bundle }) => ({ requests, bundle, sub: `${c.name} ${bundle}` }))(wasteCharge(c)) });
+    if (prev && prev.text === c.text && prev.epoch === epoch && inSpan(c.ts)) {
+      push('repeated_read', { line: c.line, previous_line: prev.line, tool: c.name, args: c.args, result: c.text, result_bytes: bytes(c.text), ...(({ requests, bundle }) => ({ requests, bundle, sub: `${c.name} ${bundle}` }))(association(c)) });
     }
     last.set(key, { text: c.text, epoch, line: c.line });
   }
@@ -357,28 +395,41 @@ export function analyzeSession(session, events, options = {}) {
     return { any: open.length, recent: open.filter(c => Number.isFinite(ts) && Number.isFinite(c.ts) && ts - c.ts <= 2 * 3600_000).length, kinds: [...new Set(open.map(c => c.bg))] };
   };
 
-  // Turn-level patterns.
+  // Turn-level patterns (subject: the turn's start/input inside the window).
   const turnStats = [];
   for (const t of turns) {
+    if (!t.inSpan) continue;
     const info = t.input?.info ?? { crew: false, cls: t.input ? 'non_crew' : 'no_input', opening: null };
     const textOnly = t.models > 0 && t.calls.length === 0 && t.wrappers === 0;
     // A turn with no model response (e.g. still usage limited) is not a status-only reply.
     const statusOnly = t.models > 0 && (t.calls.length > 0 ? t.calls.every(isStatusCall) : t.textChars <= shortReplyChars && t.wrappers === 0);
     const statusOrRead = t.calls.length > 0 && t.calls.every(c => isStatusCall(c) || (c.crew && CREW_READ_TOOLS.has(c.name)));
-    const reqs = t.requests.map(r => [r, 1]);
+    const turnReqs = t.requests.filter(reqIn);
+    const reqs = turnReqs.map(r => [r, 1]);
     const cats = { crew_read: 0, crew_status: 0, crew_other: 0, non_crew: 0 };
     for (const c of t.calls) cats[callCategory(c)]++;
-    turnStats.push({ runtime, agent, cls: info.cls, crew: info.crew, input: Boolean(t.input), error: t.error ? normalizeOpening(t.error).slice(0, 70) : null, calls: t.calls.length, requests: t.requests.length, models: t.models, textOnly, statusOnly, reqs: t.requests });
+    turnStats.push({ runtime, agent, cls: info.cls, crew: info.crew, input: Boolean(t.input), error: t.error ? normalizeOpening(t.error).slice(0, 70) : null, calls: t.calls.length, requests: turnReqs.length, models: t.models, textOnly, statusOnly, reqs: turnReqs });
     const f = { line: t.input?.line ?? t.startLine, input_class: info.cls, opening: info.opening, input: t.input?.text?.slice(0, 200) ?? '',
       calls: t.calls.length, tools: t.calls.map(c => c.name), requests: reqs, text_chars: t.textChars, model_tool_calls: runtime === 'codex' ? t.wrappers + t.calls.filter(c => !c.inner).length : t.calls.length };
     if (t.input && statusOnly) push('status_only_turn', { ...f, sub: info.crew ? info.cls.split(':')[0] : 'non_crew', result: '' });
     if (t.input && !statusOnly && statusOrRead) push('status_or_read_only_turn', { ...f, sub: info.crew ? info.cls.split(':')[0] : 'non_crew', result: '' });
-    if (t.input && isNoActionNotice(info)) push('notice_turn', { ...f, sub: info.cls, sender: info.sender ?? null, status_only: statusOnly, wasted: statusOnly || statusOrRead, result: '' });
-    // Replies with text only to orchestrator messages or status messages: crew
-    // forwards such a reply as an answer, which wakes the sender.
-    if (t.input && textOnly && info.delivery && (info.type === 'status' || (info.type === 'message' && info.sender === 'orchestrator'))) {
-      const from = info.sender === 'orchestrator' ? 'orchestrator' : info.sender === 'scheduler' ? 'scheduler' : 'member';
-      push('text_only_reply_turn', { ...f, sub: `from ${from} type ${info.type} (${info.cls})`, result: '', reply_chars: t.textChars });
+    if (t.input && isNoActionNotice(info)) push('notice_turn', { ...f, sub: info.cls, sender: info.sender ?? null, status_only: statusOnly, candidate: statusOnly || statusOrRead, result: '' });
+    if (t.input && textOnly) push('text_only_turn', { ...f, sub: info.cls, result: '', reply_chars: t.textChars });
+    // End-of-turn reply forwarding (crew daemon/turns.rs forward_reply): an
+    // explicit "@id:" line goes to those ids as a message; otherwise the reply
+    // goes, as an answer, to the non-scheduler senders of the Message/Question
+    // openers addressed to this member, unless it wrote to them in the turn.
+    // Broadcast (to "*") openers are not forwarded; native files do not show
+    // whether an opener was direct or broadcast.
+    const lastCall = t.calls.at(-1)?.line ?? -1;
+    const finalReply = t.texts.filter(x => x.line > lastCall).map(x => x.text).join('\n').trim();
+    if (t.input && finalReply) {
+      const openers = (info.entries ?? []).filter(e => (e.type === 'message' || e.type === 'question') && e.from !== 'scheduler');
+      const wroteTo = new Set(t.calls.filter(c => c.crew && c.name === 'agent_send').map(c => c.args?.to));
+      const askers = openers.filter(e => !wroteTo.has(e.from));
+      const sub = hasExplicitMention(finalReply) ? 'explicit_mention' : askers.length ? 'message_or_question_from_member_or_orchestrator' : 'not_forwarded';
+      if (sub !== 'not_forwarded' || textOnly) push('forward_candidate_reply', { ...f, sub, candidate: sub !== 'not_forwarded', requests: keep(t.requests.slice(-1).map(r => [r, 1])),
+        result: finalReply.slice(0, 200), reply_chars: finalReply.length, text_only: textOnly, opener_senders: askers.map(e => e.from) });
     }
     if (t.input && info.cls === 'notice:task_reminder') {
       const bg = runtime === 'claude' ? runningAt(t.input.line, t.input.ts) : null;
@@ -386,21 +437,22 @@ export function analyzeSession(session, events, options = {}) {
       const onlyStatus = t.calls.length > 0 && t.calls.every(c => c.crew && c.name === 'agent_status');
       push('reminder_turn', { ...f, sub: bg === null ? 'background_undetectable_codex' : bg.any ? 'background_running' : 'no_background_running', result: '',
         ended_no_tool_call: noTool, only_agent_status: onlyStatus, status_only: statusOnly, background_running: bg?.any ?? null, background_running_2h: bg?.recent ?? null,
-        background_kinds: bg?.kinds ?? null, no_model_response: t.models === 0, wasted: noTool || onlyStatus });
+        background_kinds: bg?.kinds ?? null, no_model_response: t.models === 0, candidate: noTool || onlyStatus });
     }
     if (t.input && info.crew && (info.delivery || info.cls === 'notice:team_messages_came')) {
       const reads = t.calls.filter(c => c.crew && CREW_READ_TOOLS.has(c.name));
       push('delivery_round_trips', { ...f, sub: info.cls, categories: cats, first_call: t.calls[0] ? callCategory(t.calls[0]) : 'none',
-        read_calls: reads.length, read_tools: reads.map(c => c.name), requests: reads.flatMap(callReqs), turn_requests: t.requests.length,
+        read_calls: reads.length, read_tools: reads.map(c => c.name), requests: reads.flatMap(callReqs), turn_requests: turnReqs.length,
         turn_tokens_requests: reqs, result: reads.map(c => c.text ?? '').join('\n').slice(0, 200), result_bytes: reads.reduce((s, c) => s + bytes(c.text), 0) });
     }
   }
   const openings = [];
-  for (const e of inputs) if (e.info.crew) openings.push({ opening: e.info.opening, cls: e.info.cls, fold: Boolean(e.fold), sender: e.info.sender ?? null, runtime });
-  const readSizes = calls.filter(c => c.crew && (REPEAT_READ_TOOLS.has(c.name) || CREW_READ_TOOLS.has(c.name)) && c.text !== undefined).map(c => ({ runtime, tool: c.name, bytes: bytes(c.text), file, line: c.line }));
-  const inboxKinds = calls.filter(c => c.inbox).map(c => ({ runtime, kind: c.inbox.kind, first: (c.text ?? '').trim().split('\n', 1)[0].slice(0, 80) }));
-  return { findings, turnStats, openings, inboxKinds, readSizes, inboxNovelty, calls: calls.length, crewCalls: calls.filter(c => c.crew).length, turns: turns.length,
-    wrappers: turns.reduce((s, t) => s + t.wrappers, 0) };
+  for (const e of inputs) if (e.info.crew && inSpan(e.ts)) openings.push({ opening: e.info.opening, cls: e.info.cls, fold: Boolean(e.fold), sender: e.info.sender ?? null, runtime });
+  const callsIn = calls.filter(c => inSpan(c.ts));
+  const readSizes = callsIn.filter(c => c.crew && (REPEAT_READ_TOOLS.has(c.name) || CREW_READ_TOOLS.has(c.name)) && c.text !== undefined).map(c => ({ runtime, tool: c.name, bytes: bytes(c.text), file, line: c.line }));
+  const inboxKinds = callsIn.filter(c => c.inbox).map(c => ({ runtime, kind: c.inbox.kind, first: (c.text ?? '').trim().split('\n', 1)[0].slice(0, 80) }));
+  return { findings, turnStats, openings, inboxKinds, readSizes, inboxNovelty, calls: callsIn.length, crewCalls: callsIn.filter(c => c.crew).length, turns: turns.filter(t => t.inSpan).length,
+    wrappers: turns.reduce((s, t) => s + t.wrappersIn, 0), requests: requests.filter(reqIn).length };
 }
 
 // ------------------------------------------------------------- aggregation
@@ -413,14 +465,31 @@ export function loadPrices(file = path.join(REPO, 'notes/prompt-cache-audit/pric
   return prices;
 }
 
-/** Input-side list cost in USD; null when the model has no listed price. */
+/**
+ * Input-side list cost in USD as a range. status: 'no_price' (model not in the
+ * price table), 'unknown_usage' (no input-side usage field at all), 'priced'
+ * (lower/upper finite; a write without a known 5m/1h split is a range from the
+ * cheaper to the dearer write price, ttl_unknown) or 'partial' (some input
+ * field missing: the known part is a lower bound, upper unknown = null).
+ */
 export function requestCost(r, prices) {
   const p = prices.get(r.model);
-  if (!p) return null;
-  const write = r.cache_creation_tokens ?? 0;
-  const w1h = r.cache_write_1h_tokens ?? 0;
-  const w5m = r.cache_write_5m_tokens ?? (r.cache_write_1h_tokens == null ? write : 0);
-  return ((r.uncached_tail_tokens ?? 0) * p.base + w5m * p.w5m + w1h * p.w1h + (r.cache_read_tokens ?? 0) * p.read) / 1e6;
+  if (!p) return { status: 'no_price', lower: null, upper: null, ttl_unknown: false };
+  const tail = r.uncached_tail_tokens, read = r.cache_read_tokens, write = r.cache_creation_tokens;
+  const w5 = r.cache_write_5m_tokens, w1 = r.cache_write_1h_tokens;
+  if ([tail, read, write, w5, w1].every(v => v == null)) return { status: 'unknown_usage', lower: null, upper: null, ttl_unknown: false };
+  let lower = 0, upper = 0, bounded = true, ttlUnknown = false;
+  const exact = (tokens, price) => { if (tokens == null) { bounded = false; return; } lower += tokens * price; upper += tokens * price; };
+  exact(tail, p.base); exact(read, p.read);
+  const known = (w5 ?? 0) * p.w5m + (w1 ?? 0) * p.w1h;
+  lower += known; upper += known;
+  if (w5 == null || w1 == null) {
+    // Remaining write tokens whose TTL bucket is not recorded.
+    const rest = write == null ? null : write - (w5 ?? 0) - (w1 ?? 0);
+    if (rest == null) { if (w5 == null && w1 == null) bounded = false; else if (write == null) bounded = false; }
+    else if (rest > 0) { lower += rest * Math.min(p.w5m, p.w1h); upper += rest * Math.max(p.w5m, p.w1h); ttlUnknown = true; }
+  }
+  return { status: bounded ? 'priced' : 'partial', lower: lower / 1e6, upper: bounded ? upper / 1e6 : null, ttl_unknown: ttlUnknown };
 }
 
 const TOKEN_KEYS = [['input_total', 'input_total_tokens'], ['cache_read', 'cache_read_tokens'], ['cache_write', 'cache_creation_tokens'], ['cache_write_5m', 'cache_write_5m_tokens'], ['cache_write_1h', 'cache_write_1h_tokens'], ['uncached_tail', 'uncached_tail_tokens'], ['output', 'output_tokens']];
@@ -430,34 +499,42 @@ function addTo(b, f, reqs) {
   b.count++; b.sessions.add(f.file); b.agents.add(f.agent); b.result_bytes += f.result_bytes ?? 0;
   for (const [r, share] of reqs) b.reqs.set(r, Math.min(1, (b.reqs.get(r) ?? 0) + share));
 }
-function finalize(b, prices) {
+export function finalize(b, prices) {
   const tokens = Object.fromEntries(TOKEN_KEYS.map(([k]) => [k, 0]));
-  let cost = 0, priced = 0, unpriced = 0, attributed = 0, write5mAssumed = 0;
+  let lower = 0, upper = 0, unbounded = false, priced = 0, unpriced = 0, unknownUsage = 0, ttlUnknown = 0, partial = 0, associated = 0;
   const unpricedModels = new Set();
   for (const [r, share] of b.reqs) {
-    attributed += share;
+    associated += share;
     for (const [k, src] of TOKEN_KEYS) tokens[k] += (r[src] ?? 0) * share;
     const c = requestCost(r, prices);
-    if (c === null) { unpriced += share; unpricedModels.add(r.model ?? 'unknown'); }
-    else { cost += c * share; priced += share; if (r.cache_write_5m_tokens == null && r.cache_write_1h_tokens == null && r.cache_creation_tokens) write5mAssumed++; }
+    if (c.status === 'no_price') { unpriced += share; unpricedModels.add(r.model ?? 'unknown'); }
+    else if (c.status === 'unknown_usage') unknownUsage += share;
+    else {
+      priced += share; lower += c.lower * share;
+      if (c.upper === null) { unbounded = true; partial += share; } else upper += c.upper * share;
+      if (c.ttl_unknown) ttlUnknown += share;
+    }
   }
   for (const k of Object.keys(tokens)) tokens[k] = Math.round(tokens[k]);
-  return { count: b.count, sessions: b.sessions.size, agents: [...b.agents].sort(), attributed_requests: +attributed.toFixed(2), distinct_requests: b.reqs.size,
-    tokens, list_cost_usd: priced ? +cost.toFixed(4) : null, priced_requests: +priced.toFixed(2), unpriced_requests: +unpriced.toFixed(2),
-    unpriced_models: [...unpricedModels].sort(), write_priced_as_5m: write5mAssumed, result_bytes: b.result_bytes };
+  const r2 = v => +v.toFixed(2), r4 = v => +v.toFixed(4);
+  return { count: b.count, sessions: b.sessions.size, agents: [...b.agents].sort(), associated_requests: r2(associated), distinct_requests: b.reqs.size,
+    tokens, list_cost_lower_usd: priced ? r4(lower) : null, list_cost_upper_usd: priced && !unbounded ? r4(upper) : null,
+    priced_requests: r2(priced), unpriced_requests: r2(unpriced), unknown_usage_requests: r2(unknownUsage), ttl_unknown_requests: r2(ttlUnknown), partial_usage_requests: r2(partial),
+    unpriced_models: [...unpricedModels].sort(), result_bytes: b.result_bytes };
 }
 
 const PATTERNS = {
-  inbox_empty: 'agent_inbox calls whose result says no new messages',
-  inbox_after_delivery: 'agent_inbox calls within N model responses after an in-band delivery that already carried the message bodies (wasted = empty or duplicate-only result)',
-  inbox_duplicate_only: 'agent_inbox calls whose returned message ids were all already delivered in-band earlier in the session',
-  repeated_read: 'read tool calls (tasks_list, task_get, agents_list, git_status, git_diff, usage_status, agent_inbox by id) byte-identical to the previous same tool+args call with no own state change between',
-  status_only_turn: 'turns whose only tool calls are agent_status / task_update / agent_send type=status, or with no tool calls and a short reply',
-  status_or_read_only_turn: 'turns (not already status-only) whose tool calls are only status calls plus crew reads (agent_inbox, tasks_list, task_get, agents_list)',
-  notice_turn: 'turns started by crew notices or status messages (no-action candidates); wasted = the turn was status-only or status/read-only',
-  delivery_round_trips: 'turns started by a delivered crew message: tool calls by category; tokens = requests that consumed the crew read calls',
-  text_only_reply_turn: 'turns opened by a delivered orchestrator message (type message) or any status-type message that ended with text only (model replied, no tool call); crew forwards such replies as answers',
-  reminder_turn: 'turns opened by "[crew] Reminder: task" (idle reminder); wasted = ended with no tool call or only agent_status; Claude sub-kinds say whether a background Bash/Agent/Monitor launch was still un-notified at that moment',
+  inbox_empty: 'candidate agent_inbox calls whose result says no new messages; associated request = the next request when the call was alone (upper bound), else result bytes only',
+  inbox_after_delivery: 'agent_inbox calls within N model responses after an in-band delivery whose messages all arrived in full; candidate = empty or duplicate-only result',
+  inbox_duplicate_only: 'candidate agent_inbox calls whose returned message ids were all delivered in full in-band earlier in the session',
+  repeated_read: 'candidate read tool calls (tasks_list, task_get, agents_list, git_status, git_diff, usage_status, agent_inbox by id) byte-identical to the previous same tool+args call with no own state change between',
+  status_only_turn: 'candidate turns whose only tool calls are agent_status / task_update / agent_send type=status, or with no tool calls and a short reply; associated = every request in the turn',
+  status_or_read_only_turn: 'candidate turns (not already status-only) whose tool calls are only status calls plus crew reads (agent_inbox, tasks_list, task_get, agents_list)',
+  notice_turn: 'turns started by crew notices or status messages; candidate = the turn was status-only or status/read-only',
+  delivery_round_trips: 'turns started by a delivered crew message: tool calls by category; associated = requests that consumed the crew read calls (split among sibling calls)',
+  text_only_turn: 'descriptive: turns with an input that ended with text only (a model response, no tool call), any opener class; associated = every request in the turn',
+  forward_candidate_reply: 'end-of-turn replies crew may forward (daemon forward_reply): explicit_mention = a reply line opens with @id:, forwarded as a message; message_or_question_from_member_or_orchestrator = opener of type message/question from a non-scheduler sender the turn did not write to, forwarded as an answer only if the opener was addressed directly (not a broadcast; not visible natively); not_forwarded = text-only turns with any other opener (status, scheduler, answer, artifact, notices); associated = the last request of the turn',
+  reminder_turn: 'turns opened by "[crew] Reminder: task" (idle reminder); candidate = ended with no tool call or only agent_status; Claude sub-kinds say whether a background Bash/Agent/Monitor launch was still un-notified at that moment',
 };
 
 function aggregate(results, prices, sessions) {
@@ -465,7 +542,7 @@ function aggregate(results, prices, sessions) {
   const out = {};
   for (const pattern of Object.keys(PATTERNS)) {
     const fs_ = all.filter(f => f.pattern === pattern);
-    const selected = pattern === 'inbox_after_delivery' || pattern === 'notice_turn' ? fs_.filter(f => f.wasted) : fs_;
+    const selected = ['inbox_after_delivery', 'notice_turn', 'forward_candidate_reply'].includes(pattern) ? fs_.filter(f => f.candidate) : fs_;
     const total = newBucket(), byRuntime = new Map(), byAgent = new Map(), bySub = new Map();
     const get = (m, k) => { if (!m.has(k)) m.set(k, newBucket()); return m.get(k); };
     for (const f of selected) {
@@ -482,27 +559,34 @@ function aggregate(results, prices, sessions) {
     }
     if (pattern === 'notice_turn') {
       const allB = newBucket(), byCls = new Map();
-      for (const f of fs_) { addTo(allB, f, f.requests); const b = get(byCls, f.sub); addTo(b, f, f.requests); b.wasted = (b.wasted ?? 0) + (f.wasted ? 1 : 0); b.statusOnly = (b.statusOnly ?? 0) + (f.status_only ? 1 : 0); }
+      for (const f of fs_) { addTo(allB, f, f.requests); const b = get(byCls, f.sub); addTo(b, f, f.requests); b.candidate = (b.candidate ?? 0) + (f.candidate ? 1 : 0); b.statusOnly = (b.statusOnly ?? 0) + (f.status_only ? 1 : 0); }
       out[pattern].all_notice_turns = finalize(allB, prices);
       // Turn-starting status messages by sender (teammate status only starts a
       // turn when the recipient was waiting; scheduler = daemon notices).
       const bySender = new Map();
       for (const f of fs_.filter(f => f.sub === 'message:status')) {
         const k = f.sender ?? 'unknown';
-        if (!bySender.has(k)) bySender.set(k, { all: newBucket(), wasted: newBucket(), status_only: 0 });
-        const e = bySender.get(k); addTo(e.all, f, f.requests); if (f.wasted) addTo(e.wasted, f, f.requests); if (f.status_only) e.status_only++;
+        if (!bySender.has(k)) bySender.set(k, { all: newBucket(), candidate: newBucket(), status_only: 0 });
+        const e = bySender.get(k); addTo(e.all, f, f.requests); if (f.candidate) addTo(e.candidate, f, f.requests); if (f.status_only) e.status_only++;
       }
-      out[pattern].status_message_turns_by_sender = Object.fromEntries([...bySender].sort((a, b) => b[1].all.count - a[1].all.count).map(([k, e]) => [k, { turns: e.all.count, wasted_turns: e.wasted.count, status_only_turns: e.status_only,
-        all: finalize(e.all, prices), wasted: finalize(e.wasted, prices) }]));
-      out[pattern].all_by_class = Object.fromEntries([...byCls].sort((a, b) => b[1].count - a[1].count).map(([k, b]) => [k, { ...finalize(b, prices), wasted_turns: b.wasted, status_only_turns: b.statusOnly }]));
+      out[pattern].status_message_turns_by_sender = Object.fromEntries([...bySender].sort((a, b) => b[1].all.count - a[1].all.count).map(([k, e]) => [k, { turns: e.all.count, candidate_turns: e.candidate.count, status_only_turns: e.status_only,
+        all: finalize(e.all, prices), candidate: finalize(e.candidate, prices) }]));
+      out[pattern].all_by_class = Object.fromEntries([...byCls].sort((a, b) => b[1].count - a[1].count).map(([k, b]) => [k, { ...finalize(b, prices), candidate_turns: b.candidate, status_only_turns: b.statusOnly }]));
     }
     if (pattern === 'reminder_turn') {
       const flags = rows => ({ turns: rows.length, ended_no_tool_call: rows.filter(f => f.ended_no_tool_call && !f.no_model_response).length, only_agent_status: rows.filter(f => f.only_agent_status).length,
         status_only: rows.filter(f => f.status_only).length, no_model_response: rows.filter(f => f.no_model_response).length,
         background_running: rows.filter(f => f.background_running > 0).length, background_running_2h: rows.filter(f => f.background_running_2h > 0).length });
       out[pattern].flags = { total: flags(fs_), claude: flags(fs_.filter(f => f.runtime === 'claude')), codex: flags(fs_.filter(f => f.runtime === 'codex')) };
-      const w = newBucket(); for (const f of fs_.filter(f => f.wasted)) addTo(w, f, f.requests);
-      out[pattern].wasted = finalize(w, prices);
+      const w = newBucket(); for (const f of fs_.filter(f => f.candidate)) addTo(w, f, f.requests);
+      out[pattern].candidates = finalize(w, prices);
+    }
+    if (pattern === 'forward_candidate_reply') {
+      const all = new Map(), byOpener = new Map();
+      for (const f of fs_) { addTo(get(all, f.sub), f, f.requests); addTo(get(byOpener, `${f.sub} | ${f.input_class}`), f, f.requests); }
+      out[pattern].all_by_sub = fin(all);
+      out[pattern].by_sub_and_opener = fin(byOpener);
+      out[pattern].text_only_share = { candidates_text_only: selected.filter(f => f.text_only).length, candidates_with_tool_calls: selected.filter(f => !f.text_only).length };
     }
     if (pattern === 'delivery_round_trips') {
       const stats = rt => {
@@ -547,7 +631,7 @@ function aggregate(results, prices, sessions) {
   const turnErrors = {};
   for (const t of results.flatMap(r => r.turnStats)) if (t.error) { const k = `${t.runtime} ${t.error}`; turnErrors[k] = (turnErrors[k] ?? 0) + 1; }
   const turnClasses = [...byCls].sort((a, b) => b[1].turns - a[1].turns).map(([k, e]) => { const f = finalize(e.text_only_bucket, prices);
-    return { class: k, turns: e.turns, text_only: e.text_only, status_only: e.status_only, no_model_response: e.no_model_response, text_only_requests: f.attributed_requests, text_only_tokens: f.tokens, text_only_list_cost_usd: f.list_cost_usd }; });
+    return { class: k, turns: e.turns, text_only: e.text_only, status_only: e.status_only, no_model_response: e.no_model_response, text_only_associated: f }; });
   // Read result sizes.
   const sizes = {};
   for (const r of results.flatMap(x => x.readSizes)) for (const k of [`${r.tool} ${r.runtime}`, `${r.tool} all`]) (sizes[k] ??= []).push(r.bytes);
@@ -568,8 +652,8 @@ function aggregate(results, prices, sessions) {
   for (const s of sessions) {
     cohort[s.runtime] ??= { sessions: 0, requests: 0, turns: 0, tool_calls: 0, crew_tool_calls: 0, codex_exec_wrappers: 0, agents: new Set() };
     const c = cohort[s.runtime], r = results.find(x => x.file === s.file);
-    c.sessions++; c.requests += s.requests.length; c.agents.add(s.agent_id ?? 'unknown');
-    if (r) { c.turns += r.turns; c.tool_calls += r.calls; c.crew_tool_calls += r.crewCalls; c.codex_exec_wrappers += r.wrappers; }
+    c.sessions++; c.agents.add(s.agent_id ?? 'unknown');
+    if (r) { c.requests += r.requests; c.turns += r.turns; c.tool_calls += r.calls; c.crew_tool_calls += r.crewCalls; c.codex_exec_wrappers += r.wrappers; }
   }
   for (const c of Object.values(cohort)) c.agents = [...c.agents].sort();
   return { patterns: out, notice_openings: openingList.slice(0, 40), notice_only_openings: openingList.filter(o => o.cls.startsWith('notice:') || o.cls === 'message:status' || o.cls === 'batch:status').slice(0, 20),
@@ -586,14 +670,14 @@ function examples(results) {
   const out = {};
   const all = results.flatMap(r => r.findings);
   for (const pattern of Object.keys(PATTERNS)) {
-    let rows = all.filter(f => f.pattern === pattern && (f.wasted ?? true));
+    let rows = all.filter(f => f.pattern === pattern && (f.candidate ?? true));
     rows = rows.sort((a, b) => (b.score ?? 0) - (a.score ?? 0) || (b.bundle === 'alone') - (a.bundle === 'alone') || (b.result_bytes ?? 0) - (a.result_bytes ?? 0) || (b.calls ?? 0) - (a.calls ?? 0));
     const picked = [], files = new Set();
     for (const f of rows) { if (picked.length >= 5) break; if (files.has(f.file)) continue; files.add(f.file); picked.push(f); }
     for (const f of rows) { if (picked.length >= 5) break; if (!picked.includes(f)) picked.push(f); }
     out[pattern] = picked.map(f => ({ file: tilde(f.file), line: f.line, runtime: f.runtime, agent: f.agent, tool: f.tool ?? null,
       sub: f.sub ?? null, bundle: f.bundle, round: f.round, args: f.args ? short(f.args, 120) : undefined, previous_line: f.previous_line, delivery_line: f.delivery_line, delivery_opening: f.delivery_opening,
-      delivery_snippet: f.delivery_snippet ? short(f.delivery_snippet) : undefined, wasted_in_same_window: f.score,
+      delivery_snippet: f.delivery_snippet ? short(f.delivery_snippet) : undefined, candidates_in_same_window: f.score,
       input_class: f.input_class, tools: f.tools?.slice(0, 12), snippet: short(f.result || f.input || ''), result_bytes: f.result_bytes }));
   }
   return out;
@@ -602,36 +686,64 @@ function examples(results) {
 // ------------------------------------------------------------------- output
 
 const n = v => v === null || v === undefined ? '—' : typeof v === 'number' ? v.toLocaleString('en-US') : String(v);
-const usd = v => v === null || v === undefined ? 'no price' : `$${v.toFixed(2)}`;
 const esc = s => String(s ?? '').replaceAll('|', '\\|').replace(/\n/g, ' ');
+/** "$a–$b", "$a", "at least $a", "no price"; plus counts of excluded requests. */
+export function costText(s) {
+  const d = v => `$${v.toFixed(2)}`;
+  let c;
+  if (!s.priced_requests) c = s.unpriced_requests ? 'no price' : s.unknown_usage_requests ? 'usage unknown' : '—';
+  else if (s.list_cost_upper_usd === null) c = `at least ${d(s.list_cost_lower_usd)}`;
+  else c = d(s.list_cost_lower_usd) === d(s.list_cost_upper_usd) ? d(s.list_cost_lower_usd) : `${d(s.list_cost_lower_usd)}–${d(s.list_cost_upper_usd)}`;
+  if (s.unpriced_requests) c += ` (+${n(s.unpriced_requests)} req no price)`;
+  if (s.unknown_usage_requests) c += ` (+${n(s.unknown_usage_requests)} req usage unknown)`;
+  return c;
+}
+/** Visible pricing assumptions for one table. */
+function costBasis(rows) {
+  const sum = k => +rows.reduce((a, s) => a + (s[k] ?? 0), 0).toFixed(2);
+  const parts = [];
+  if (sum('ttl_unknown_requests')) parts.push(`${n(sum('ttl_unknown_requests'))} associated requests with write TTL unknown priced as a range (cheaper to dearer write price)`);
+  if (sum('partial_usage_requests')) parts.push(`${n(sum('partial_usage_requests'))} with a missing input field (known part only, lower bound)`);
+  if (sum('unknown_usage_requests')) parts.push(`${n(sum('unknown_usage_requests'))} with no usage (cost unknown)`);
+  if (sum('unpriced_requests')) parts.push(`${n(sum('unpriced_requests'))} on models without a listed price (${[...new Set(rows.flatMap(s => s.unpriced_models ?? []))].join(', ')})`);
+  return `\nCost basis (total row): ${parts.length ? parts.join('; ') : 'all associated requests priced exactly'}.\n`;
+}
 function row(label, s) {
   const t = s.tokens;
-  return `| ${esc(label)} | ${n(s.count)} | ${n(s.sessions)} | ${n(s.agents.length)} | ${n(s.attributed_requests)} | ${n(t.input_total)} | ${n(t.cache_read)} | ${n(t.cache_write)} | ${n(t.uncached_tail)} | ${n(t.output)} | ${usd(s.list_cost_usd)}${s.unpriced_requests ? ` (+${n(s.unpriced_requests)} req no price)` : ''} | ${n(s.result_bytes)} |\n`;
+  return `| ${esc(label)} | ${n(s.count)} | ${n(s.sessions)} | ${n(s.agents.length)} | ${n(s.associated_requests)} | ${n(t.input_total)} | ${n(t.cache_read)} | ${n(t.cache_write)} | ${n(t.uncached_tail)} | ${n(t.output)} | ${costText(s)} | ${n(s.result_bytes)} |\n`;
 }
-const HEAD = '| Slice | Count | Sessions | Agents | Attributed requests | Input total | Cache read | Cache write | Uncached tail | Output | List cost (input side) | Result bytes |\n|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|\n';
+const HEAD = '| Slice | Count | Sessions | Agents | Associated requests (upper bound) | Input total | Cache read | Cache write | Uncached tail | Output | Associated list cost (input side, upper bound) | Result bytes |\n|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|\n';
 
 export function markdown(summary) {
-  const p = summary.patterns;
-  let out = `# Turn efficiency\n\nGenerated ${summary.generated_at} from native session files (cohort and usage via baseline.mjs). Window N=${summary.options.window} model responses; short reply ≤ ${summary.options.short_reply_chars} chars.\n\n## Cohort\n\n| Runtime | Sessions | Requests | Turns | Tool calls | Crew tool calls | Codex exec wrappers | Agents |\n|---|---:|---:|---:|---:|---:|---:|---|\n`;
+  const p = summary.patterns, o = summary.options;
+  const span = o.since != null || o.until != null ? ` Window ${o.since != null ? new Date(o.since).toISOString() : '…'} to ${o.until != null ? new Date(o.until).toISOString() : '…'} (inclusive) on subjects and associated requests.` : '';
+  let out = `# Turn efficiency candidates\n\nGenerated ${summary.generated_at} from native session files (cohort and usage via baseline.mjs). Window N=${o.window} model responses; short reply ≤ ${o.short_reply_chars} chars.${span} Counts are candidates selected by tool names and message wrappers; associated requests and costs are upper bounds, not avoidable cost.\n\n## Cohort\n\n| Runtime | Sessions | Requests | Turns | Tool calls | Crew tool calls | Codex exec wrappers | Agents |\n|---|---:|---:|---:|---:|---:|---:|---|\n`;
   for (const [rt, c] of Object.entries(summary.cohort)) out += `| ${rt} | ${n(c.sessions)} | ${n(c.requests)} | ${n(c.turns)} | ${n(c.tool_calls)} | ${n(c.crew_tool_calls)} | ${n(c.codex_exec_wrappers)} | ${c.agents.join(', ')} |\n`;
   out += `\nagent_inbox result kinds: ${Object.entries(summary.inbox_result_kinds).map(([rt, k]) => `${rt} ${Object.entries(k).map(([a, b]) => `${a}=${b}`).join(', ')}`).join('; ')}.\n\nNon-message inbox result strings (normalized): ${Object.entries(summary.inbox_non_message_strings).map(([k, v]) => `\`${k}\` ×${v}`).join(', ')}.\n`;
   for (const [name, s] of Object.entries(p)) {
     out += `\n## ${name}\n\n${s.description}.\n\n${HEAD}${row('total', s)}`;
     for (const [k, v] of Object.entries(s.by_runtime)) out += row(`runtime ${k}`, v);
     for (const [k, v] of Object.entries(s.by_sub).slice(0, 12)) out += row(`kind ${k}`, v);
+    out += costBasis([s]);
     if (s.all_post_delivery_inbox_calls) out += `\nAll inbox calls inside a post-delivery window: ${s.all_post_delivery_inbox_calls.count} (${Object.entries(s.all_post_delivery_by_result).map(([a, b]) => `${a} ${b}`).join(', ')}).\n`;
+    if (s.all_by_sub) {
+      out += `\nAll replies by forwarding class (candidates exclude not_forwarded; ${s.text_only_share.candidates_text_only} candidates were text-only turns, ${s.text_only_share.candidates_with_tool_calls} had tool calls):\n\n${HEAD}`;
+      for (const [k, v] of Object.entries(s.all_by_sub)) out += row(k, v);
+      out += '\n| Forwarding class | Opener class | Replies |\n|---|---|---:|\n';
+      for (const [k, v] of Object.entries(s.by_sub_and_opener).slice(0, 20)) { const [a, b] = k.split(' | '); out += `| ${esc(a)} | ${esc(b)} | ${n(v.count)} |\n`; }
+    }
     if (s.all_by_class) {
-      out += `\nAll notice/status-started turns: ${s.all_notice_turns.count}.\n\n| Input class | Turns | Wasted (status/read-only) | Status-only | Requests | Input total | Cache read | List cost |\n|---|---:|---:|---:|---:|---:|---:|---:|\n`;
-      for (const [k, v] of Object.entries(s.all_by_class)) out += `| ${esc(k)} | ${n(v.count)} | ${n(v.wasted_turns)} | ${n(v.status_only_turns)} | ${n(v.attributed_requests)} | ${n(v.tokens.input_total)} | ${n(v.tokens.cache_read)} | ${usd(v.list_cost_usd)} |\n`;
+      out += `\nAll notice/status-started turns: ${s.all_notice_turns.count}.\n\n| Input class | Turns | Candidates (status/read only) | Status-only | Associated requests (upper bound) | Input total | Cache read | Associated list cost (input side, upper bound) |\n|---|---:|---:|---:|---:|---:|---:|---:|\n`;
+      for (const [k, v] of Object.entries(s.all_by_class)) out += `| ${esc(k)} | ${n(v.count)} | ${n(v.candidate_turns)} | ${n(v.status_only_turns)} | ${n(v.associated_requests)} | ${n(v.tokens.input_total)} | ${n(v.tokens.cache_read)} | ${costText(v)} |\n`;
     }
     if (s.status_message_turns_by_sender) {
-      out += '\nTurn-starting status messages by sender (scheduler = daemon notices; a teammate status starts a turn only when the recipient was waiting):\n\n| Sender | Turns | Wasted (status/read-only) | Status-only | Requests (all) | Input total (all) | List cost (all) | Requests (wasted) | List cost (wasted) |\n|---|---:|---:|---:|---:|---:|---:|---:|---:|\n';
-      for (const [k, v] of Object.entries(s.status_message_turns_by_sender)) out += `| ${esc(k)} | ${n(v.turns)} | ${n(v.wasted_turns)} | ${n(v.status_only_turns)} | ${n(v.all.attributed_requests)} | ${n(v.all.tokens.input_total)} | ${usd(v.all.list_cost_usd)} | ${n(v.wasted.attributed_requests)} | ${usd(v.wasted.list_cost_usd)} |\n`;
+      out += '\nTurn-starting status messages by sender (scheduler = daemon notices and the scheduler member; a teammate status starts a turn only when the recipient was waiting):\n\n| Sender | Turns | Candidates (status/read only) | Status-only | Associated requests (all) | Input total (all) | Associated list cost (all) | Associated requests (candidates) | Associated list cost (candidates) |\n|---|---:|---:|---:|---:|---:|---:|---:|---:|\n';
+      for (const [k, v] of Object.entries(s.status_message_turns_by_sender)) out += `| ${esc(k)} | ${n(v.turns)} | ${n(v.candidate_turns)} | ${n(v.status_only_turns)} | ${n(v.all.associated_requests)} | ${n(v.all.tokens.input_total)} | ${costText(v.all)} | ${n(v.candidate.associated_requests)} | ${costText(v.candidate)} |\n`;
     }
     if (s.flags) {
       out += '\n| Runtime | Reminder turns | Ended with no tool call | Only agent_status | Status-only | No model response | Background launch un-notified | …launched within 2h |\n|---|---:|---:|---:|---:|---:|---:|---:|\n';
       for (const [k, v] of Object.entries(s.flags)) out += `| ${k} | ${v.turns} | ${v.ended_no_tool_call} | ${v.only_agent_status} | ${v.status_only} | ${v.no_model_response} | ${k === 'codex' ? 'not detectable' : v.background_running} | ${k === 'codex' ? '—' : v.background_running_2h} |\n`;
-      out += `\nWasted reminder turns (no tool call or only agent_status): ${s.wasted.count}, ${n(s.wasted.attributed_requests)} requests, ${n(s.wasted.tokens.input_total)} input tokens, ${usd(s.wasted.list_cost_usd)}.\n`;
+      out += `\nCandidate reminder turns (no tool call or only agent_status): ${s.candidates.count}, ${n(s.candidates.associated_requests)} associated requests, ${n(s.candidates.tokens.input_total)} input tokens, ${costText(s.candidates)}.\n`;
     }
     if (s.distribution) {
       out += '\n| Runtime | Delivered turns | Tool calls | Mean | Median | p90 | Crew reads | Crew status | Other crew | Non-crew | Turns with a read | First call is a read | Requests in turns | Mean requests |\n|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|\n';
@@ -641,34 +753,37 @@ export function markdown(summary) {
     out += `\nTop agents: ${Object.entries(s.by_agent).slice(0, 8).map(([k, v]) => `${k} ${v.count}`).join(', ') || 'none'}.\n`;
   }
   const nv = summary.inbox_message_novelty;
-  out += '\n## agent_inbox calls that returned messages: genuinely new?\n\n| Runtime | Calls with messages | By-id lookups | ≥1 id not delivered in-band | ≥1 id not seen anywhere before | All ids already delivered | Ids returned | New in-band ids |\n|---|---:|---:|---:|---:|---:|---:|---:|\n';
+  out += '\n## agent_inbox calls that returned messages: genuinely new?\n\n| Runtime | Calls with messages | By-id lookups | ≥1 id not delivered in full in-band | ≥1 id not seen anywhere before | All ids already delivered in full | Ids returned | New in-band ids |\n|---|---:|---:|---:|---:|---:|---:|---:|\n';
   for (const [k, v] of Object.entries(nv)) out += `| ${k} | ${v.calls_with_messages} | ${v.by_id_lookups} | ${v.calls_with_new_inband_id} | ${v.calls_with_new_id_not_seen_anywhere_before} | ${v.calls_all_ids_already_delivered} | ${v.ids_returned} | ${v.new_inband_ids} |\n`;
   out += `\nTypes of new ids: ${Object.entries(nv.total.new_inband_types).map(([a, b]) => `${a} ${b}`).join(', ')}. Senders: ${Object.entries(nv.total.new_inband_senders).slice(0, 10).map(([a, b]) => `${a} ${b}`).join(', ')}.\n`;
   out += '\n## Read result sizes (bytes)\n\n| Tool / runtime | Calls | Total | Min | p50 | p90 | Max | Mean | >50 KB | >100 KB |\n|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|\n';
   for (const [k, v] of Object.entries(summary.read_result_sizes)) out += `| ${k} | ${n(v.calls)} | ${n(v.total_bytes)} | ${n(v.min)} | ${n(v.p50)} | ${n(v.p90)} | ${n(v.max)} | ${n(v.mean)} | ${v.over_50kb} | ${v.over_100kb} |\n`;
-  out += `\nLargest tasks_list results: ${summary.largest_tasks_list_results.map(r => `${r.file}:${r.line} ${n(r.bytes)} B`).join('; ')}.\n`;
-  out += '\n## Turns by input class (text-only = model replied without any tool call)\n\n| Runtime + input class | Turns | Text-only | Status-only | No model response | Text-only requests | Text-only input tokens | Text-only list cost |\n|---|---:|---:|---:|---:|---:|---:|---:|\n';
-  for (const v of summary.turn_classes.slice(0, 30)) out += `| ${esc(v.class)} | ${v.turns} | ${v.text_only} | ${v.status_only} | ${v.no_model_response} | ${n(v.text_only_requests)} | ${n(v.text_only_tokens.input_total)} | ${usd(v.text_only_list_cost_usd)} |\n`;
+  out += `\nLargest tasks_list results: ${summary.largest_tasks_list_results.map(r => `${r.file}:${r.line} ${n(r.bytes)} B`).join('; ') || 'none'}.\n`;
+  out += '\n## Turns by input class (text-only = a model response without any tool call)\n\n| Runtime + input class | Turns | Text-only | Status-only | No model response | Text-only associated requests | Text-only input tokens | Text-only associated list cost |\n|---|---:|---:|---:|---:|---:|---:|---:|\n';
+  for (const v of summary.turn_classes.slice(0, 30)) out += `| ${esc(v.class)} | ${v.turns} | ${v.text_only} | ${v.status_only} | ${v.no_model_response} | ${n(v.text_only_associated.associated_requests)} | ${n(v.text_only_associated.tokens.input_total)} | ${costText(v.text_only_associated)} |\n`;
   out += `\nFailed turns (native turn error, usually no model response): ${Object.entries(summary.turn_errors).slice(0, 6).map(([k, v]) => `${esc(k)} ×${v}`).join('; ') || 'none'}.\n`;
   out += '\n## Crew input openings (top 20, all [crew] inputs)\n\n| Opening | Class | Count | Turn start | Folded | Claude | Codex |\n|---|---|---:|---:|---:|---:|---:|\n';
-  for (const o of summary.notice_openings.slice(0, 20)) out += `| ${esc(o.opening)} | ${o.cls} | ${o.count} | ${o.turn_start} | ${o.folded} | ${o.claude} | ${o.codex} |\n`;
-  out += '\n## No-action notice openings (top 20)\n\n| Opening | Class | Count | Turn start | Folded | Top senders |\n|---|---|---:|---:|---:|---|\n';
-  for (const o of summary.notice_only_openings) out += `| ${esc(o.opening)} | ${o.cls} | ${o.count} | ${o.turn_start} | ${o.folded} | ${Object.entries(o.senders).sort((a, b) => b[1] - a[1]).slice(0, 3).map(([a, b]) => `${a} ${b}`).join(', ')} |\n`;
+  for (const x of summary.notice_openings.slice(0, 20)) out += `| ${esc(x.opening)} | ${x.cls} | ${x.count} | ${x.turn_start} | ${x.folded} | ${x.claude} | ${x.codex} |\n`;
+  out += '\n## Notice and status openings (top 20)\n\n| Opening | Class | Count | Turn start | Folded | Top senders |\n|---|---|---:|---:|---:|---|\n';
+  for (const x of summary.notice_only_openings) out += `| ${esc(x.opening)} | ${x.cls} | ${x.count} | ${x.turn_start} | ${x.folded} | ${Object.entries(x.senders).sort((a, b) => b[1] - a[1]).slice(0, 3).map(([a, b]) => `${a} ${b}`).join(', ')} |\n`;
   out += `\n## Limits\n\n${summary.limits.map(l => `- ${l}`).join('\n')}\n`;
   return out;
 }
 
 const LIMITS = [
-  'Attribution is heuristic. A wasted call (inbox_empty, inbox_duplicate_only, inbox_after_delivery, repeated_read) is "alone" when every tool call consumed by the same next model response is agent_inbox/agent_status/task_update; it is then charged that whole consuming request (deduplicated per pattern). A call bundled with other real tool work (Codex exec with exec_command etc., Claude parallel tool_use) is charged its result bytes only. The issuing response is never charged. delivery_round_trips charges consuming requests split equally among sibling calls. Turn patterns are charged every request in the turn.',
+  'These are candidates, not findings of avoidable cost or savings. Cohorts are selected by tool names, result strings and message wrappers only; a candidate call or turn may be useful work (analysis written as text, reviews, waiting/parking transitions, continuations, a status the team needed).',
+  'Association is an upper bound, not avoidable cost. A candidate call (inbox_empty, inbox_duplicate_only, inbox_after_delivery, repeated_read) is "alone" when every tool call consumed by the same next model response is agent_inbox/agent_status/task_update; it is then associated with that whole consuming request (deduplicated per pattern), which may also have done other reasoning. A call bundled with other real tool work (Codex exec with exec_command etc., Claude parallel tool_use) is associated with its result bytes only. The issuing response is never associated. delivery_round_trips splits consuming requests among sibling calls. Turn patterns associate every request in the turn; forward_candidate_reply associates the turn\'s last request.',
+  'A call joins its exact native consuming request: the request recorded after the next model response and before the model response after that (by source line); otherwise it has none. Joins use all requests of the session; --since/--until (inclusive, like baseline) then select subjects (the call, or the turn\'s start/input) and associated requests. A subject with an unknown timestamp is outside a set window. State before the window still feeds delivered ids and post-delivery windows.',
+  'List cost is input side only (uncached tail × base, cache writes × 5m/1h write price, cache reads × read price) from notes/prompt-cache-audit/prices.tsv; output tokens are not priced. A write without a recorded 5m/1h split is priced as a range from the cheaper to the dearer write price; a missing input-side field leaves only a lower bound ("at least"); a request with no usage fields is "usage unknown"; models without a listed price (Codex gpt-*) are "no price". Cache writes are reported as writes; nothing here infers a cold cache.',
+  'Delivered ids are only those whose full body reached the member in-band: the header id of a non-empty "[crew] Message from" input and each block of a "[crew] N new messages" batch, unless the block was clipped ("… (truncated"). Ids merely mentioned in notices or bodies are references and never count as delivered.',
+  'forward_candidate_reply follows crew\'s forward_reply rules as far as native files show them: the opener\'s recipient (direct vs broadcast "*") is not recorded natively, so message_or_question_from_member_or_orchestrator is an upper bound; explicit_mention matches a reply line opening with @name(s): without checking the names against the roster.',
   'Background work at reminder time is Claude-only: Bash run_in_background, async Agent or Monitor launches confirmed by their tool result and not yet named by a <task-notification>. A process restart can orphan a launch, so the un-notified count is an upper bound; the 2h column limits it to recent launches. Codex background terminals are not detectable from the rollout.',
-  'Inbox novelty compares returned message ids with ids delivered in-band earlier in the same session file; a session that began after an earlier delivery (restart, takeover) can make an old id look new.',
-  'Claude requests are deduplicated by message id with the last streamed usage winning (baseline.mjs). Codex requests are token_count cumulative deltas per sampling; a Codex inner tool call (crew MCP call inside an `exec` code-mode wrapper) returns with its wrapper output, so all inner calls of one wrapper share the consuming request.',
-  'Codex model responses are delimited by output items following an input or tool output; when two exec wrappers run in one sampling, inner calls are linked to the first wrapper output after them.',
-  'List cost is input side only (uncached tail × base, cache writes × 5m/1h write price, cache reads × read price) from notes/prompt-cache-audit/prices.tsv; output tokens are not priced. Codex models (gpt-*) have no listed price and are reported as "no price".',
+  'Inbox novelty compares returned message ids with ids delivered in full in-band earlier in the same session file; a session that began after an earlier delivery (restart, takeover) can make an old id look new.',
+  'Claude requests are deduplicated by message id with the last streamed usage winning (baseline.mjs). Codex requests are token_count cumulative deltas per sampling; a Codex inner tool call (crew MCP call inside an `exec` code-mode wrapper) returns with its wrapper output, so all inner calls of one wrapper share the consuming request. When two exec wrappers run in one sampling, inner calls are linked to the first wrapper output after them.',
   'Patterns overlap (an empty inbox call after a delivery appears in inbox_empty and inbox_after_delivery; a notice turn may also be a status-only turn). Do not add pattern totals.',
-  'Status-only/no-action is inferred from tool names and agent_send type only; a status message can still carry information the team needed. Short reply = total assistant text in the turn ≤ the threshold, with no tool calls.',
+  'Status-only is inferred from tool names and agent_send type only. Short reply = total assistant text in the turn ≤ the threshold, with no tool calls.',
   'Repeated-read detection resets on any own crew mutating call (task_*, review_*, git_commit/merge/cherry_pick, agent_status, agent lifecycle) and, for git_status/git_diff, on any own file-modifying tool call. Other agents may have changed state invisibly; identical bytes mean the read returned nothing new.',
-  'Mid-turn folded crew messages (Claude isMeta, Codex inputs after model output in the same task) count as deliveries for the inbox window and openings, but are not turns and are not charged turn tokens.',
+  'Mid-turn folded crew messages (Claude isMeta, Codex inputs after model output in the same task) count as deliveries for the inbox window and openings, but are not turns and carry no turn requests.',
   'Sessions are read up to the byte size baseline.mjs read; later appends are excluded.',
 ];
 
@@ -701,7 +816,9 @@ function defaultWorkspace(cwd) {
 }
 
 export async function run(options) {
-  const report = await collect({ workspace: options.workspace, sessionFiles: options.sessionFiles ?? [], since: options.since, until: options.until, allRuns: options.allRuns });
+  // The cohort is collected without since/until so every call can join its
+  // exact consuming request; the window applies to subjects afterwards.
+  const report = await collect({ workspace: options.workspace, sessionFiles: options.sessionFiles ?? [], allRuns: options.allRuns });
   const outputs = ['summary.json', 'summary.md', 'examples.json'].map(f => path.join(options.out, f));
   guardOutputs(outputs, report);
   const prices = loadPrices(options.prices);
@@ -746,7 +863,7 @@ export async function main(argv = process.argv.slice(2)) {
   const s = await run(options);
   const p = s.patterns;
   process.stdout.write(`${Object.entries(s.cohort).map(([rt, c]) => `${rt}: ${c.sessions} sessions, ${c.requests} requests`).join('; ')}\n`);
-  for (const [k, v] of Object.entries(p)) process.stdout.write(`${k}: ${v.count} in ${v.sessions} sessions, ${v.attributed_requests} requests, cost ${usd(v.list_cost_usd)}\n`);
+  for (const [k, v] of Object.entries(p)) process.stdout.write(`${k}: ${v.count} in ${v.sessions} sessions, ${v.associated_requests} associated requests, ${costText(v)}\n`);
   process.stdout.write(`wrote ${path.join(options.out, 'summary.md')}\n`);
 }
 

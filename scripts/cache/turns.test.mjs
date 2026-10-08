@@ -1,6 +1,9 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { inboxResultKind, inboxEntries, messageIds, classifyInput, isNoActionNotice, extractEvents, analyzeSession, requestCost, normalizeOpening } from './turns.mjs';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+import { inboxResultKind, inboxEntries, messageIds, classifyInput, isNoActionNotice, extractEvents, analyzeSession, requestCost, normalizeOpening, finalize, costText, run } from './turns.mjs';
 
 const rows = values => values.map((value, i) => ({ value, line: i + 1 }));
 const usage = { input_tokens: 10, cache_creation_input_tokens: 20, cache_read_input_tokens: 70, output_tokens: 5 };
@@ -41,7 +44,7 @@ test('input classifier: wrapped notices by body, messages by type, batches and d
   assert.equal(normalizeOpening('[crew] You are online as qa. Nothing is assigned to you yet. 3 tasks'), '[crew] You are online as <agent>. Nothing is assigned to you yet. N tasks');
 });
 
-test('Claude: empty inbox calls after an in-band delivery are wasted and charged their consuming request', () => {
+test('Claude: empty inbox calls after an in-band delivery are candidates associated with their consuming request', () => {
   const records = [
     userText('[crew] Message from orchestrator (type task, id m-aaaaaa111111):\n\nDo the thing'),
     call('r1', 't1', 'mcp__crew__agent_inbox'), result('t1', 'No new messages.'),
@@ -91,7 +94,7 @@ test('Codex: a bundled inbox call is charged bytes only; an inbox-only exec is c
   assert.deepEqual(of(out, 'inbox_empty').map(f => f.sub), ['bundled', 'alone']);
   const trips = of(out, 'delivery_round_trips')[0];
   assert.equal(trips.requests[0][0].source_line, 13); assert.equal(trips.requests[0][1], 0.5); // round trips split among siblings
-  assert.equal(requestCost(requests[0], new Map()), null);
+  assert.equal(requestCost(requests[0], new Map()).status, 'no_price');
 });
 
 test('repeated reads: identical results count unless an own mutating call intervenes', () => {
@@ -133,7 +136,7 @@ test('status-only turns, notice turns and openings', () => {
   assert.deepEqual(status.map(f => f.input_class), ['notice:no_tool_call', 'message:status']);
   assert.equal(status[0].requests.length, 3);
   const notices = of(out, 'notice_turn');
-  assert.deepEqual(notices.map(f => [f.sub, f.wasted]), [['notice:no_tool_call', true], ['message:status', true]]);
+  assert.deepEqual(notices.map(f => [f.sub, f.candidate]), [['notice:no_tool_call', true], ['message:status', true]]);
   assert.deepEqual(out.openings.map(o => [o.cls, o.fold]), [['notice:no_tool_call', false], ['message:status', false], ['message:task', false], ['message:status', true], ['message:question', false]]);
   const trips = of(out, 'delivery_round_trips').find(f => f.input_class === 'message:task');
   assert.deepEqual(trips.categories, { crew_read: 0, crew_status: 0, crew_other: 1, non_crew: 1 });
@@ -142,8 +145,9 @@ test('status-only turns, notice turns and openings', () => {
 test('input-side list cost uses explicit write buckets', () => {
   const prices = new Map([['claude-opus-5-5', { base: 4, w5m: 5, w1h: 8, read: 0.2 }]]);
   // 10 tail × 4 + 20 1h writes × 8 + 70 reads × 0.2 = 214 per million
-  assert.equal(requestCost(req(1), prices), 214 / 1e6);
-  assert.equal(requestCost(req(1, { cache_write_1h_tokens: null }), prices), (40 + 100 + 14) / 1e6);
+  assert.deepEqual(requestCost(req(1), prices), { status: 'priced', lower: 214 / 1e6, upper: 214 / 1e6, ttl_unknown: false });
+  // No TTL split recorded: 20 writes priced from 5 (5m) to 8 (1h).
+  assert.deepEqual(requestCost(req(1, { cache_write_1h_tokens: null }), prices), { status: 'priced', lower: (40 + 100 + 14) / 1e6, upper: (40 + 160 + 14) / 1e6, ttl_unknown: true });
 });
 
 test('inbox novelty: entries never delivered in-band are new, with their types', () => {
@@ -160,7 +164,7 @@ test('inbox novelty: entries never delivered in-band are new, with their types',
   assert.equal(of(out, 'inbox_duplicate_only').length, 0);
 });
 
-test('text-only replies to orchestrator/status messages, reminder turns with background work, read sizes', () => {
+test('text-only turns, reminder turns with background work, read sizes', () => {
   const notify = id => ({ type: 'user', origin: { kind: 'task-notification' }, message: { role: 'user', content: `<task-notification>\n<task-id>b1</task-id>\n<tool-use-id>${id}</tool-use-id>\n<status>completed</status>\n</task-notification>` } });
   const records = [
     userText('go'),
@@ -179,7 +183,135 @@ test('text-only replies to orchestrator/status messages, reminder turns with bac
   const out = claudeSession(records, requestsAt(records));
   const rem = of(out, 'reminder_turn');
   assert.deepEqual(rem.map(f => [f.sub, f.only_agent_status, f.ended_no_tool_call]), [['background_running', true, false], ['no_background_running', false, true]]);
-  const text = of(out, 'text_only_reply_turn');
-  assert.equal(text.length, 1); assert.match(text[0].sub, /^from orchestrator type message/); assert.equal(text[0].requests.length, 1);
+  // The <task-notification> input opens its own (non-crew) turn.
+  assert.deepEqual(of(out, 'text_only_turn').map(f => [f.sub, f.requests.length]), [['non_crew', 1], ['notice:task_reminder', 1], ['notice:fast_forward', 1]]);
+  assert.deepEqual(of(out, 'forward_candidate_reply').map(f => [f.sub, f.candidate]), [['not_forwarded', false], ['not_forwarded', false], ['message_or_question_from_member_or_orchestrator', true]]);
   assert.deepEqual(out.readSizes.map(r => [r.tool, r.bytes]), [['tasks_list', 1000]]);
+});
+
+// ---- review fixes
+
+test('T1: crew\'s empty inbox result with appended guidance is empty (prefix match)', () => {
+  assert.equal(inboxResultKind('No new messages. One that arrives later is delivered to you: if you are waiting for it, end your turn, or park your card with agent_status("waiting", …), instead of checking again.'), 'empty');
+  assert.equal(inboxResultKind('No unread messages for you.'), 'empty');
+  assert.equal(inboxResultKind('0 message(s):'), 'empty');
+  assert.equal(inboxResultKind('10 message(s):\n\n--- 1 from qa · type status · id m-aaaaaa111111'), 'messages');
+});
+
+// The reviewer's window fixture: three turns at 01:00, 02:00 and 03:00.
+const stampAt = hour => `2026-10-08T${hour}:00:00Z`;
+function windowRecords() {
+  const records = [];
+  for (const [hour, i] of [['01', 1], ['02', 2], ['03', 3]]) {
+    records.push({ type: 'user', timestamp: stampAt(hour), message: { role: 'user', content: `[crew] Message from qa (type status, id m-aaaaaa00000${i}):\n\nFixture ready.` } });
+    records.push({ type: 'assistant', timestamp: stampAt(hour), message: { id: `r${i}`, model: 'claude-fixture', usage, content: [{ type: 'tool_use', id: `c${i}`, name: 'mcp__crew__agent_inbox', input: {} }] } });
+    records.push({ type: 'user', timestamp: stampAt(hour), message: { role: 'user', content: [{ type: 'tool_result', tool_use_id: `c${i}`, content: [{ type: 'text', text: 'No new messages.' }] }] } });
+    records.push({ type: 'assistant', timestamp: stampAt(hour), message: { id: `s${i}`, model: 'claude-fixture', usage, content: [{ type: 'text', text: 'Ready.' }] } });
+  }
+  return records;
+}
+const windowAnalysis = (since, until) => {
+  const records = windowRecords();
+  const requests = requestsAt(records).map(r => ({ ...r, timestamp_ms: Date.parse(records[r.source_line - 1].timestamp) }));
+  return analyzeSession({ runtime: 'claude', file: '/w.jsonl', agent_id: 'a', requests }, extractEvents('claude', rows(records)), { since: since && Date.parse(since), until: until && Date.parse(until) });
+};
+
+test('T2: the window selects subjects; calls join their exact consuming request first', async t => {
+  const out = windowAnalysis('2026-10-08T01:30:00Z', '2026-10-08T02:30:00Z');
+  const empty = of(out, 'inbox_empty');
+  assert.equal(empty.length, 1); assert.equal(empty[0].line, 6);
+  assert.deepEqual(empty[0].requests.map(([r, share]) => [r.source_line, share]), [[8, 1]]); // the 02:00 reply, not the 01:00 call's
+  assert.equal(out.turns, 1); assert.equal(out.calls, 1); assert.equal(out.requests, 2);
+  assert.equal(out.turnStats.length, 1); assert.equal(out.openings.length, 1); assert.equal(out.inboxKinds.length, 1);
+  // Unwindowed: each call joins the response right after its own result.
+  const all = windowAnalysis();
+  assert.deepEqual(of(all, 'inbox_empty').map(f => f.requests[0][0].source_line), [4, 8, 12]);
+  // End to end through run(): cohort collected unwindowed, window applied after joins; labels never claim waste.
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'crew-turns-window-')); t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  const file = path.join(dir, 'input', 'session.jsonl'); fs.mkdirSync(path.dirname(file), { recursive: true });
+  fs.writeFileSync(file, windowRecords().map(x => JSON.stringify(x)).join('\n') + '\n');
+  const report = await run({ workspace: path.join(dir, 'ws'), sessionFiles: [`claude=${file}`], since: Date.parse('2026-10-08T01:30:00Z'), until: Date.parse('2026-10-08T02:30:00Z'),
+    out: path.join(dir, 'report'), prices: path.join(dir, 'absent-prices'), window: 3, shortReplyChars: 300 });
+  assert.equal(report.cohort.claude.turns, 1); assert.equal(report.patterns.inbox_empty.count, 1); assert.equal(report.patterns.inbox_empty.associated_requests, 1);
+  const md = fs.readFileSync(path.join(dir, 'report', 'summary.md'), 'utf8');
+  assert.doesNotMatch(md, /wast/i); assert.match(md, /Associated requests \(upper bound\)/); assert.match(md, /Associated list cost \(input side, upper bound\)/);
+});
+
+test('T2: until is inclusive at both boundaries; a window without usage associates nothing', () => {
+  const exact = windowAnalysis('2026-10-08T02:00:00Z', '2026-10-08T02:00:00Z');
+  assert.equal(of(exact, 'inbox_empty').length, 1); assert.equal(exact.turns, 1);
+  const empty = windowAnalysis('2026-10-08T01:10:00Z', '2026-10-08T01:20:00Z');
+  assert.equal(empty.findings.length, 0); assert.equal(empty.turns, 0); assert.equal(empty.requests, 0); assert.equal(empty.calls, 0);
+  // A subject without a timestamp is outside a set window.
+  const undated = analyzeSession({ runtime: 'claude', file: '/u', requests: [] }, extractEvents('claude', rows([userText('go'), call('r1', 'x', 'mcp__crew__agent_inbox'), result('x', 'No new messages.')])), { since: 0 });
+  assert.equal(undated.findings.length, 0);
+});
+
+test('T3: write TTL unknown is a range, missing usage is unknown, missing fields give a lower bound', () => {
+  const prices = new Map([['fixture', { base: 4, w5m: 5, w1h: 8, read: 0.2 }]]);
+  assert.deepEqual(requestCost({ model: 'fixture', cache_creation_tokens: 1e6, cache_read_tokens: 0, uncached_tail_tokens: 0 }, prices), { status: 'priced', lower: 5, upper: 8, ttl_unknown: true });
+  assert.equal(requestCost({ model: 'fixture' }, prices).status, 'unknown_usage');
+  assert.deepEqual(requestCost({ model: 'fixture', uncached_tail_tokens: 1e6, cache_creation_tokens: 0, cache_write_5m_tokens: 0, cache_write_1h_tokens: 0 }, prices), { status: 'partial', lower: 4, upper: null, ttl_unknown: false });
+  const bucket = reqs => ({ count: reqs.length, sessions: new Set(['s']), agents: new Set(['a']), result_bytes: 0, reqs: new Map(reqs.map(r => [r, 1])) });
+  const split = { model: 'fixture', uncached_tail_tokens: 0, cache_read_tokens: 0, cache_creation_tokens: 1e6, cache_write_5m_tokens: 0, cache_write_1h_tokens: 1e6 };
+  const noSplit = { model: 'fixture', uncached_tail_tokens: 0, cache_read_tokens: 0, cache_creation_tokens: 1e6, cache_write_5m_tokens: null, cache_write_1h_tokens: null };
+  const mixed = finalize(bucket([split, noSplit, { model: 'fixture' }, { model: 'gpt-x', input_total_tokens: 5 }]), prices);
+  assert.deepEqual([mixed.list_cost_lower_usd, mixed.list_cost_upper_usd, mixed.priced_requests, mixed.ttl_unknown_requests, mixed.unknown_usage_requests, mixed.unpriced_requests], [13, 16, 2, 1, 1, 1]);
+  assert.equal(costText(mixed), '$13.00–$16.00 (+1 req no price) (+1 req usage unknown)');
+  const partial = finalize(bucket([split, { model: 'fixture', uncached_tail_tokens: 1e6 }]), prices);
+  assert.equal(partial.list_cost_upper_usd, null); assert.equal(costText(partial), 'at least $12.00');
+  assert.equal(costText(finalize(bucket([split]), prices)), '$8.00');
+  assert.equal(costText(finalize(bucket([{ model: 'gpt-x', input_total_tokens: 5 }]), prices)), 'no price (+1 req no price)');
+});
+
+test('T4: only fully delivered bodies count as delivered; mentioned ids are references', () => {
+  const notice = classifyInput('[crew] Your last turn ended without a tool call. You were given review_request from qa (id m-abcdef123456).');
+  assert.deepEqual([notice.ids, notice.refs], [[], ['m-abcdef123456']]);
+  const records = [
+    userText('[crew] Your last turn ended without a tool call. You were given review_request from qa (id m-abcdef123456).'),
+    call('r1', 'a', 'mcp__crew__agent_inbox', { id: 'm-abcdef123456' }),
+    result('a', '1 message(s):\n\n--- 12:00:00 from qa · type review_request · id m-abcdef123456\nFull source not previously supplied.'),
+    say('r2', 'Received.'),
+  ];
+  assert.equal(of(claudeSession(records, []), 'inbox_duplicate_only').length, 0);
+  // A wrapped notice mentions other ids; only its own header id was delivered.
+  const wrapped = classifyInput('[crew] Message from scheduler (type status, id m-111111111111):\n\n[crew] Your last turn ended without a tool call. You were given task from orchestrator (m-222222222222).');
+  assert.deepEqual([wrapped.ids, wrapped.refs], [['m-111111111111'], ['m-222222222222']]);
+  // Clipped bodies are not deliveries; the batch's other block still is.
+  const clipped = classifyInput('[crew] Message from qa (type message, id m-333333333333):\n\nLong text\n… (truncated — call agent_inbox for the full text)');
+  assert.deepEqual([clipped.ids, clipped.body], [[], false]);
+  const batch = classifyInput('[crew] 2 new messages:\n\n(1) from ui · type status · id m-444444444444\nShort.\n\n(2) from qa · type message · id m-555555555555\nLong\n… (truncated — call agent_inbox for the full text)');
+  assert.deepEqual([batch.ids, batch.refs, batch.body], [['m-444444444444'], ['m-555555555555'], false]);
+  const batched = [
+    userText('[crew] 2 new messages:\n\n(1) from ui · type status · id m-444444444444\nShort.\n\n(2) from qa · type message · id m-555555555555\nLong\n… (truncated — call agent_inbox for the full text)'),
+    call('r1', 'b', 'mcp__crew__agent_inbox', { id: 'm-555555555555' }),
+    result('b', '--- 12:00:00 from qa to a · type message · id m-555555555555\nLong text in full'),
+    call('r2', 'c', 'mcp__crew__agent_inbox', { id: 'm-444444444444' }),
+    result('c', '--- 12:00:00 from ui to a · type status · id m-444444444444\nShort.'),
+    say('r3', 'ok'),
+  ];
+  const out = claudeSession(batched, requestsAt(batched));
+  assert.deepEqual(of(out, 'inbox_duplicate_only').map(f => f.line), [4]);
+  assert.equal(of(out, 'inbox_after_delivery').length, 0); // a clipped block makes the inbox call legitimate
+});
+
+test('T6: forward candidates follow crew forwarding rules: status opener, message opener, explicit mention', () => {
+  const records = [
+    userText('[crew] Message from qa (type status, id m-666666666666):\n\nGreen.'),
+    say('r1', 'Noted.'),
+    userText('[crew] Message from qa (type message, id m-777777777777):\n\nCan you check the build?'),
+    say('r2', 'Build is fine.'),
+    userText('[crew] Message from scheduler (type status, id m-888888888888):\n\nAgent qa is unresponsive: no activity for 600s.'),
+    say('r3', 'Checking.\n@qa: are you stuck?'),
+    userText('[crew] Message from qa (type question, id m-999999999999):\n\nWhich port?'),
+    call('r4', 's', 'mcp__crew__agent_send', { to: 'qa', type: 'answer', body: '8080' }), result('s', 'ok'),
+    say('r5', 'Answered qa.'),
+  ];
+  const out = claudeSession(records, requestsAt(records));
+  assert.deepEqual(of(out, 'forward_candidate_reply').map(f => [f.input_class, f.sub, f.candidate]), [
+    ['message:status', 'not_forwarded', false],
+    ['message:message', 'message_or_question_from_member_or_orchestrator', true],
+    ['notice:unresponsive', 'explicit_mention', true],
+  ]); // the question turn wrote to qa itself, so its reply is not forwarded and not listed
+  assert.equal(of(out, 'text_only_turn').length, 3);
 });
