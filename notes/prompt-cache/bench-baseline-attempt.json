@@ -1,0 +1,118 @@
+{
+  "schema": 1,
+  "record_type": "authentication-preflight",
+  "live_baseline_available": false,
+  "note": "No successful live workload yet. Missing usage is not a measured zero cost or zero hit rate.",
+  "attempts": [
+    {
+      "attempt": "03",
+      "started_at": "2026-10-08T03:59:04.429011+00:00",
+      "finished_at": "2026-10-08T03:59:09.456711+00:00",
+      "source_revision": "c8052373c0d2f8b7a993773e5cda3a79e1b834d6",
+      "crew_sha256": "ea4e6f127328cd9d679c62c9a1cc7bd6f72c6cdecd2703892962c5a7ea95ed19",
+      "versions": {
+        "claude": "2.1.291 (Claude Code)",
+        "codex": "codex-cli 0.159.0"
+      },
+      "normal_home_retained": true,
+      "isolated_xdg_fields": [
+        "RUNTIME_DIR",
+        "STATE_HOME",
+        "CONFIG_HOME",
+        "CACHE_HOME",
+        "DATA_HOME"
+      ],
+      "status": "authentication-failed",
+      "activity": "sign-in needed \u00b7 waiting for `crew resume`",
+      "native_error": "authentication_failed",
+      "native_error_text": "Not logged in \u00b7 Please run /login",
+      "hit_rate": null,
+      "cost_usd": null,
+      "billed_usage_records_observed": 0,
+      "cleanup": {
+        "remaining_processes": [],
+        "stop_returncode": 0
+      },
+      "agents": [
+        {
+          "id": "orchestrator",
+          "runtime": "claude",
+          "requested_model": "haiku",
+          "observed_model": null,
+          "native_home": "workspace/.crew/agents/orchestrator/rw/home/claude",
+          "usage_coverage": "no-transcript"
+        },
+        {
+          "id": "claude-worker",
+          "runtime": "claude",
+          "requested_model": "haiku",
+          "observed_model": "claude-haiku-4-5-20251001",
+          "native_home": "workspace/.crew/agents/claude-worker/rw/home/claude",
+          "usage_coverage": "no-usage"
+        },
+        {
+          "id": "codex-worker",
+          "runtime": "codex",
+          "requested_model": "gpt-6-luna",
+          "observed_model": null,
+          "native_home": "workspace/.crew/agents/codex-worker/rw/home/codex",
+          "usage_coverage": "no-session"
+        }
+      ],
+      "private_evidence": "target/cache-bench/baseline-c8052373-03"
+    },
+    {
+      "attempt": "04",
+      "started_at": "2026-10-08T04:00:43.804561+00:00",
+      "finished_at": "2026-10-08T04:00:48.848699+00:00",
+      "source_revision": "c8052373c0d2f8b7a993773e5cda3a79e1b834d6",
+      "crew_sha256": "ea4e6f127328cd9d679c62c9a1cc7bd6f72c6cdecd2703892962c5a7ea95ed19",
+      "versions": {
+        "claude": "2.1.291 (Claude Code)",
+        "codex": "codex-cli 0.159.0"
+      },
+      "normal_home_retained": true,
+      "isolated_xdg_fields": [
+        "RUNTIME_DIR"
+      ],
+      "status": "authentication-failed",
+      "activity": "sign-in needed \u00b7 waiting for `crew resume`",
+      "native_error": "authentication_failed",
+      "native_error_text": "Not logged in \u00b7 Please run /login",
+      "hit_rate": null,
+      "cost_usd": null,
+      "billed_usage_records_observed": 0,
+      "cleanup": {
+        "remaining_processes": [],
+        "stop_returncode": 0
+      },
+      "agents": [
+        {
+          "id": "orchestrator",
+          "runtime": "claude",
+          "requested_model": "haiku",
+          "observed_model": null,
+          "native_home": "workspace/.crew/agents/orchestrator/rw/home/claude",
+          "usage_coverage": "no-transcript"
+        },
+        {
+          "id": "claude-worker",
+          "runtime": "claude",
+          "requested_model": "haiku",
+          "observed_model": "claude-haiku-4-5-20251001",
+          "native_home": "workspace/.crew/agents/claude-worker/rw/home/claude",
+          "usage_coverage": "no-usage"
+        },
+        {
+          "id": "codex-worker",
+          "runtime": "codex",
+          "requested_model": "gpt-6-luna",
+          "observed_model": null,
+          "native_home": "workspace/.crew/agents/codex-worker/rw/home/codex",
+          "usage_coverage": "no-session"
+        }
+      ],
+      "private_evidence": "target/cache-bench/baseline-c8052373-04"
+    }
+  ]
+}

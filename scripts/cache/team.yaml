@@ -1,0 +1,79 @@
+# The harness substitutes only the workspace path. Everything else stays fixed.
+project: cache-bench
+objective: >-
+  Complete the three prescribed invoice-summary tasks in this disposable
+  repository. Read SPEC.md. Do not add members, tasks, dependencies or models.
+  The harness adds the third task after an idle gap. Stop after that task.
+instructions: |-
+  This is a small repeatable benchmark, not an open-ended project. Work only in
+  this repository. Use the crew tools for messages, commits, reviews and task
+  completion. Keep tool output and messages short. Never access credentials,
+  logins, external services or other workspaces. Do not install dependencies,
+  run research, spawn subagents, change models, or compact manually.
+  The orchestrator must leave the seeded tasks and fixed roster alone. Do not
+  create follow-up work. Wait quietly when nothing is assigned. Do not call
+  session_complete before followup is done. A status message needs no reply.
+  When asked the rounding question, codex-worker should read SPEC.md, answer
+  once, and return to its task or wait. Reviews use the real review_submit tool.
+workspace:
+  path: @WORKSPACE@
+  isolation: worktree
+  vcs: git
+  sandbox:
+    mode: required
+backend: pty
+defaults:
+  runtime: claude
+  model: claude-haiku-4-5
+  permissions: guarded
+  permission_mode: acceptEdits
+  allowed_tools: [Bash, Read, Write, Edit]
+  auto_trust: true
+  inherit_mcp: false
+  long_context: false
+  model_fallback: false
+  max_restarts: 0
+  voice: ultracave
+orchestrator:
+  runtime: claude
+  model: claude-haiku-4-5
+limits:
+  max_subagents: 0
+  auto_resume: false
+  idle_nudge_secs: 120
+  max_nudges: 1
+  context_warn_percent: 0
+agents:
+  - id: claude-worker
+    runtime: claude
+    model: claude-haiku-4-5
+    role: Produce the invoice summary and the post-idle follow-up.
+  - id: codex-worker
+    runtime: codex
+    model: gpt-6-luna
+    permissions: bypass
+    role: Answer the rounding question, review the summary, and audit it.
+    extra_args: ["-c", "model_reasoning_effort=\"low\""]
+tasks:
+  - id: summarize
+    title: Summarize the fixed invoice fixture
+    agent: claude-worker
+    reviewer: codex-worker
+    description: >-
+      Read SPEC.md and invoices.csv. Before writing, ask codex-worker via
+      agent_send(type="question") whether void invoices count toward totals
+      and how rounding works. Apply the answer and write summary.json with
+      exactly the fields required by SPEC.md. Verify with a small local
+      calculation, git_commit, then task_complete with the commit id.
+      The assigned reviewer handles the review; do not repeatedly request it.
+  - id: audit
+    title: Audit the summary against the fixture
+    agent: codex-worker
+    depends_on: [summarize]
+    description: >-
+      Read task_get("summarize") for its accepted commit; cherry-pick that
+      commit into your worktree. Independently calculate totals from
+      invoices.csv and compare summary.json. Write audit.md containing the
+      sentence "Summary verified against invoices.csv." and a short account
+      of the void and rounding checks. Commit and task_complete with the
+      commit id. Then wait: the harness will add one followup task later.
