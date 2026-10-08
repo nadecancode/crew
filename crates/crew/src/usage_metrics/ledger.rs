@@ -171,14 +171,19 @@ CREATE TABLE IF NOT EXISTS usage_rollups (
                  work, account, model, unit, reason, flags, band, has_turn)
 ) WITHOUT ROWID;
 CREATE TABLE IF NOT EXISTS usage_turns (
-    stream_id   TEXT NOT NULL,
-    turn        TEXT NOT NULL,
-    run_id      TEXT NOT NULL,
-    scope       TEXT NOT NULL,
-    hour        INTEGER NOT NULL,
-    incarnation TEXT NOT NULL,
-    work        TEXT NOT NULL,
-    PRIMARY KEY (stream_id, turn)
+    stream_id       TEXT NOT NULL,
+    turn            TEXT NOT NULL,
+    run_id          TEXT NOT NULL,
+    scope           TEXT NOT NULL,
+    agent_id        TEXT NOT NULL,
+    incarnation     TEXT NOT NULL,
+    aside_execution TEXT NOT NULL,
+    work            TEXT NOT NULL,
+    account         TEXT NOT NULL,
+    model           TEXT NOT NULL,
+    first_ms        INTEGER,
+    PRIMARY KEY (stream_id, turn, run_id, scope, incarnation, aside_execution, work, account,
+                 model)
 ) WITHOUT ROWID;
 CREATE TABLE IF NOT EXISTS usage_coverage (
     stream_id TEXT NOT NULL,
@@ -882,22 +887,36 @@ impl Ledger {
         Ok(Some(estimate))
     }
 
-    /// Distinct aside executions with newly observed usage in a run, and the
-    /// status partition of that cohort. Executions without a source make the
-    /// count partial: their usage is unknown, never zero.
-    pub fn executions(&self, run_id: &str) -> Result<(CounterMetric, ExecutionStatusCounts)> {
-        let mut stmt = self.conn.prepare(
-            "SELECT DISTINCT r.aside_execution, e.status FROM usage_rollups r
-             LEFT JOIN usage_executions e ON e.execution_id = r.aside_execution
-             WHERE r.run_id = ?1 AND r.scope = 'aside' AND r.aside_execution != ''",
-        )?;
-        let observed: Vec<(String, Option<String>)> = stmt
-            .query_map(params![run_id], |r| Ok((r.get(0)?, r.get(1)?)))?
-            .collect::<rusqlite::Result<_>>()?;
+    /// The executions in `observed` (those with newly observed usage in the
+    /// query's cohort) and the status partition of that cohort. An execution
+    /// of the run without a source has unknown usage, never zero: when the
+    /// query narrows only by time, one started in `range` (any, unbounded)
+    /// makes the count partial; when it narrows by member, model, account or
+    /// work, whether such an execution belongs is unknown, so any makes it
+    /// partial.
+    pub fn executions(
+        &self,
+        run_id: &str,
+        observed: &std::collections::BTreeSet<String>,
+        range: Option<(i64, i64)>,
+        narrowed: bool,
+    ) -> Result<(CounterMetric, ExecutionStatusCounts)> {
+        let mut status = self
+            .conn
+            .prepare("SELECT status FROM usage_executions WHERE execution_id = ?1")?;
+        let mut observed_status = Vec::new();
+        for id in observed {
+            let s: Option<String> = status.query_row(params![id], |r| r.get(0)).optional()?;
+            observed_status.push((id.clone(), s));
+        }
+        let observed = observed_status;
+        let (from, to) = range.unwrap_or((i64::MIN, i64::MAX));
         let unsourced: i64 = self.conn.query_row(
             "SELECT COUNT(*) FROM usage_executions e WHERE e.run_id = ?1 AND NOT EXISTS
-             (SELECT 1 FROM usage_owners o WHERE o.aside_execution = e.execution_id)",
-            params![run_id],
+             (SELECT 1 FROM usage_owners o WHERE o.aside_execution = e.execution_id)
+             AND (?2 = 1 OR ?3 = 1 OR (e.started_at IS NOT NULL
+                  AND e.started_at >= ?4 AND e.started_at < ?5))",
+            params![run_id, narrowed as i64, range.is_none() as i64, from, to],
             |r| r.get(0),
         )?;
         let mut counts = ExecutionStatusCounts {
@@ -1410,29 +1429,37 @@ impl Ledger {
         Ok(out)
     }
 
-    /// Distinct native turns of a run and scope whose first observation is in
-    /// `[from, to)` hours and whose incarnation and work `keep` accepts.
-    pub fn turns_matching(
-        &self,
-        run_id: &str,
-        scope: &str,
-        range: Option<(i64, i64)>,
-        keep: impl Fn(&str, &str) -> bool,
-    ) -> Result<u64> {
-        let (from, to) = range.unwrap_or((i64::MIN, i64::MAX));
+    /// Native turns of a run and scope, one per attribution each has
+    /// observations in, as `(stream, turn, attribution, first native time)`.
+    /// The aggregate key of each carries the turn's attribution, with its
+    /// hour from the first native time (-1 when unknown).
+    pub fn turn_rows(&self, run_id: &str, scope: &str) -> Result<Vec<TurnRow>> {
         let mut stmt = self.conn.prepare(
-            "SELECT incarnation, work FROM usage_turns
-             WHERE run_id = ?1 AND scope = ?2 AND hour >= ?3 AND hour < ?4",
+            "SELECT stream_id, turn, agent_id, incarnation, aside_execution, work, account,
+                    model, first_ms
+             FROM usage_turns WHERE run_id = ?1 AND scope = ?2",
         )?;
-        let rows = stmt.query_map(params![run_id, scope, from, to], |r| {
-            Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?))
+        let rows = stmt.query_map(params![run_id, scope], |r| {
+            let first_ms: Option<i64> = r.get(8)?;
+            Ok(TurnRow {
+                turn: r.get(1)?,
+                first_ms,
+                aggregate: Aggregate {
+                    stream_id: r.get(0)?,
+                    agent_id: r.get(2)?,
+                    incarnation: r.get(3)?,
+                    aside_execution: r.get(4)?,
+                    work: r.get(5)?,
+                    account: r.get(6)?,
+                    model: r.get(7)?,
+                    unit: String::new(),
+                    reason: String::new(),
+                    hour: hour_of(first_ms),
+                    has_turn: true,
+                },
+            })
         })?;
-        let mut n = 0;
-        for row in rows {
-            let (incarnation, work) = row?;
-            n += keep(&incarnation, &work) as u64;
-        }
-        Ok(n)
+        Ok(rows.collect::<rusqlite::Result<_>>()?)
     }
 
     /// A run's tracking facts, if the ledger knows it.
@@ -1601,13 +1628,12 @@ impl Ledger {
         Ok(out)
     }
 
-    /// Distinct native turns of a run and scope, optionally within hours.
-    pub fn turns(&self, run_id: &str, scope: &str, range: Option<(i64, i64)>) -> Result<u64> {
-        let (from, to) = range.unwrap_or((i64::MIN, i64::MAX));
+    /// Distinct native turns of a run and scope.
+    pub fn turns(&self, run_id: &str, scope: &str) -> Result<u64> {
         let n: i64 = self.conn.query_row(
-            "SELECT COUNT(*) FROM usage_turns
-             WHERE run_id = ?1 AND scope = ?2 AND hour >= ?3 AND hour < ?4",
-            params![run_id, scope, from, to],
+            "SELECT COUNT(*) FROM (SELECT DISTINCT stream_id, turn FROM usage_turns
+             WHERE run_id = ?1 AND scope = ?2)",
+            params![run_id, scope],
             |r| r.get(0),
         )?;
         Ok(n as u64)
@@ -1840,6 +1866,14 @@ pub struct Aggregate {
     pub hour: i64,
     /// Its observations have a native turn.
     pub has_turn: bool,
+}
+
+/// A native turn with one attribution it has observations in.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct TurnRow {
+    pub turn: String,
+    pub first_ms: Option<i64>,
+    pub aggregate: Aggregate,
 }
 
 /// A run as the ledger tracks it.
@@ -2260,18 +2294,29 @@ fn apply(
                 params![stream_id, o.key, digest, row.run_id, row.hour],
             )?;
             if let Some(turn) = &o.turn {
+                // One row per turn and attribution it has observations in,
+                // with its first native time there.
                 tx.execute(
-                    "INSERT OR IGNORE INTO usage_turns
-                     (stream_id, turn, run_id, scope, hour, incarnation, work)
-                     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+                    "INSERT INTO usage_turns
+                     (stream_id, turn, run_id, scope, agent_id, incarnation, aside_execution,
+                      work, account, model, first_ms)
+                     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)
+                     ON CONFLICT DO UPDATE SET first_ms = CASE
+                         WHEN first_ms IS NULL THEN excluded.first_ms
+                         WHEN excluded.first_ms IS NULL THEN first_ms
+                         ELSE MIN(first_ms, excluded.first_ms) END",
                     params![
                         stream_id,
                         format!("{}:{turn}", o.generation),
                         row.run_id,
                         row.scope,
-                        row.hour,
+                        row.agent_id,
                         row.incarnation,
-                        row.work
+                        row.aside_execution,
+                        row.work,
+                        row.account,
+                        row.model,
+                        o.native_ms
                     ],
                 )?;
             }
@@ -3005,7 +3050,7 @@ mod tests {
             aggregate.turns_observed = each.turns_observed.clone();
             each.turns_observed = aggregate.turns_observed.clone();
             assert_eq!(aggregate, each, "{name}");
-            assert!(ledger.turns("r1", "live", None).unwrap() > 0);
+            assert!(ledger.turns("r1", "live").unwrap() > 0);
         }
     }
 
@@ -3253,7 +3298,13 @@ mod tests {
         assert_eq!(total.reason, Some(CoverageReason::NotTracked));
         assert_eq!(total.upper_pico_usd, None);
         assert!(total.lower_pico_usd.is_some());
-        let (observed, statuses) = ledger.executions("r1").unwrap();
+        let ids = ledger
+            .rows("r1", "aside", |_| true)
+            .unwrap()
+            .into_iter()
+            .map(|(a, _)| a.aside_execution)
+            .collect();
+        let (observed, statuses) = ledger.executions("r1", &ids, None, false).unwrap();
         assert_eq!(observed.known_sum, Some(Wide(1)));
         assert_eq!(observed.state, MetricState::Partial);
         assert_eq!(statuses.failed, Wide(1));

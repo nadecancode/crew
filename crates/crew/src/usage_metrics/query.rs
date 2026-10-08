@@ -1,10 +1,11 @@
 //! Answers to usage queries from the ledger.
 //!
 //! A query resolves to a canonical one first: its run, live or aside scope,
-//! a range aligned to the buckets the ledger keeps, its bucket and price
-//! book, all stated in the reply. Totals come from retained aggregates, so a
-//! figure does not change when detail expires; buckets finer than an hour
-//! come from retained detail and say so when it has expired. Every metric
+//! its exact half-open range, its bucket and price book, all stated in the
+//! reply. Whole hours inside a range come from retained aggregates, so their
+//! figures do not change when detail expires; partial hours at a range or
+//! bucket edge come from retained detail, and a figure that needs expired
+//! detail is unavailable rather than widened or truncated. Every metric
 //! keeps its own coverage, and the source gaps, backlog and retention floor
 //! of the run are repeated on each. Pages stop at their row limit and the
 //! 512 KiB page budget; a cursor pins its query and the ledger revision.
@@ -28,7 +29,7 @@ use serde::Serialize;
 use sha2::{Digest, Sha256};
 
 use super::counters::Normalized;
-use super::ledger::{Aggregate, Gap, Ledger, ObservationRow, RunInfo};
+use super::ledger::{Aggregate, Gap, Ledger, ObservationRow, RunInfo, TurnRow};
 use super::metrics::{category_split_complete, count, totals, Fact};
 use super::price::Book;
 
@@ -97,8 +98,9 @@ fn timestamp(ms: i64) -> Result<Timestamp, RpcError> {
     Timestamp::new(ms).map_err(|_| invalid("time out of range"))
 }
 
-/// The canonical form of `query`: run checked, price book, bucket and range
-/// resolved, page limit defaulted. `series` resolves a bucket.
+/// The canonical form of `query`: run checked, price book and bucket
+/// resolved, page limit defaulted; its range is kept exactly. `series`
+/// resolves a bucket.
 pub fn canonical(
     ledger: &Ledger,
     query: &UsageQuery,
@@ -120,18 +122,9 @@ pub fn canonical(
     } else {
         None
     };
-    let unit = bucket.map_or(HOUR_MS, |b| (b as i64 * 1_000).min(HOUR_MS));
     let mut canonical = query.clone();
     canonical.bucket_seconds = bucket;
     canonical.price_book_id = Some(Id::new(book.id.clone()).expect("price book id is valid"));
-    canonical.from_ms = query
-        .from_ms
-        .map(|t| timestamp(floor(t.get(), unit)))
-        .transpose()?;
-    canonical.to_ms = query
-        .to_ms
-        .map(|t| timestamp(ceil(t.get(), unit)))
-        .transpose()?;
     // The page this reply answers: the request's cursor as sent, its limit
     // resolved. Cursors and their digest ignore the page itself.
     canonical.page = PageRequest {
@@ -210,10 +203,6 @@ fn keep(scope: &UsageScope, a: &Aggregate) -> bool {
             .as_ref()
             .is_none_or(|id| account_of(a).as_deref() == Some(id.as_str()))
         && keep_work(scope, &work_of(a))
-}
-
-fn in_hours(range: Option<(i64, i64)>, hour: i64) -> bool {
-    range.is_none_or(|(from, to)| hour >= 0 && hour >= floor(from, HOUR_MS) && hour < to)
 }
 
 fn range_of(q: &UsageQuery) -> Option<(i64, i64)> {
@@ -470,31 +459,165 @@ fn attribution_coverage(rows: &[(Aggregate, Fact)], x: &Extras) -> MetricCoverag
     c
 }
 
-/// The scope rows and turn count of a canonical query.
-fn scoped(ledger: &Ledger, q: &UsageQuery) -> Result<(Vec<(Aggregate, Fact)>, u64), RpcError> {
-    let range = range_of(q);
-    let scope = scope_name(q.scope.kind);
-    let rows = ledger
-        .rows(q.scope.workspace_run_id.as_str(), scope, |a| {
-            in_hours(range, a.hour) && keep(&q.scope, a)
+/// The scope's usage over a range, fetched once and cut into exact
+/// half-open intervals: whole hours from retained aggregates, partial hours
+/// from retained detail.
+struct Window {
+    /// Aggregates in scope; untimed ones only when the query is unbounded.
+    hours: Vec<(Aggregate, Fact)>,
+    /// Retained detail in scope, for partial hours.
+    detail: Vec<(Aggregate, i64, Fact)>,
+    /// Native turns in scope, one per attribution.
+    turns: Vec<TurnRow>,
+    retained_from: Option<i64>,
+}
+
+fn whole_hour(h: i64, (a, b): (i64, i64)) -> bool {
+    h >= 0 && h >= a && h.checked_add(HOUR_MS).is_some_and(|end| end <= b)
+}
+
+/// The parts of `[a, b)` that are not whole hours: at most one at each end.
+/// An unbounded end (`i64::MIN` or `i64::MAX`) has none.
+fn partial_parts((a, b): (i64, i64)) -> Vec<(i64, i64)> {
+    let mut parts = Vec::new();
+    if a >= b {
+        return parts;
+    }
+    let left_end = if a == i64::MIN || a.rem_euclid(HOUR_MS) == 0 {
+        a
+    } else {
+        ceil(a, HOUR_MS).min(b)
+    };
+    if left_end > a {
+        parts.push((a, left_end));
+    }
+    if b != i64::MAX && b.rem_euclid(HOUR_MS) != 0 {
+        let start = floor(b, HOUR_MS).max(left_end);
+        if start < b {
+            parts.push((start, b));
+        }
+    }
+    parts
+}
+
+impl Window {
+    /// Loads the scope's usage for `range` (`None`: unbounded). `fine`
+    /// loads detail for the whole range, for buckets finer than its hours.
+    fn load(
+        ledger: &Ledger,
+        q: &UsageQuery,
+        range: Option<(i64, i64)>,
+        fine: bool,
+    ) -> Result<Self, RpcError> {
+        let run = q.scope.workspace_run_id.as_str();
+        let scope = scope_name(q.scope.kind);
+        let hours = ledger
+            .rows(run, scope, |a| {
+                range.is_none_or(|(from, to)| {
+                    a.hour >= 0 && a.hour >= floor(from, HOUR_MS) && a.hour < to
+                }) && keep(&q.scope, a)
+            })
+            .map_err(internal)?;
+        let mut detail = Vec::new();
+        if let Some(range) = range {
+            let spans = if fine {
+                vec![range]
+            } else {
+                partial_parts(range)
+            };
+            for span in spans {
+                detail.extend(
+                    ledger
+                        .detail_rows(run, scope, span, |a| keep(&q.scope, a))
+                        .map_err(internal)?,
+                );
+            }
+        }
+        let turns = ledger
+            .turn_rows(run, scope)
+            .map_err(internal)?
+            .into_iter()
+            .filter(|t| keep(&q.scope, &t.aggregate))
+            .collect();
+        let retained_from = ledger
+            .run(run)
+            .map_err(internal)?
+            .and_then(|r| r.retained_from);
+        Ok(Self {
+            hours,
+            detail,
+            turns,
+            retained_from,
         })
-        .map_err(internal)?;
-    let turns = ledger
-        .turns_matching(
-            q.scope.workspace_run_id.as_str(),
-            scope,
-            range.map(|(from, to)| (floor(from.max(0), HOUR_MS), to)),
-            |incarnation, work| {
-                q.scope
-                    .agent_incarnation
-                    .as_ref()
-                    .is_none_or(|i| i.as_str() == incarnation)
-                    && serde_json::from_str::<WorkAttribution>(work)
-                        .is_ok_and(|w| keep_work(&q.scope, &w))
-            },
-        )
-        .map_err(internal)?;
-    Ok((rows, turns))
+    }
+
+    /// The usage of `span` (`None`: unbounded), and whether a partial hour
+    /// of it needs detail that has expired.
+    fn cut(&self, span: Option<(i64, i64)>) -> (Vec<(Aggregate, Fact)>, bool) {
+        let Some((a, b)) = span else {
+            return (self.hours.clone(), false);
+        };
+        let mut rows: Vec<(Aggregate, Fact)> = self
+            .hours
+            .iter()
+            .filter(|(agg, _)| whole_hour(agg.hour, (a, b)))
+            .cloned()
+            .collect();
+        rows.extend(
+            self.detail
+                .iter()
+                .filter(|(_, ms, _)| {
+                    *ms >= a && *ms < b && !whole_hour(floor(*ms, HOUR_MS), (a, b))
+                })
+                .map(|(agg, _, f)| (agg.clone(), f.clone())),
+        );
+        let expired = self
+            .retained_from
+            .is_some_and(|r| partial_parts((a, b)).iter().any(|(start, _)| *start < r));
+        (rows, expired)
+    }
+
+    /// Distinct native turns first observed in `span` (`None`: all) whose
+    /// attribution `keep` accepts.
+    fn turns(&self, span: Option<(i64, i64)>, keep: impl Fn(&Aggregate) -> bool) -> u64 {
+        let ids: BTreeSet<(&str, &str)> = self
+            .turns
+            .iter()
+            .filter(|t| {
+                span.is_none_or(|(a, b)| t.first_ms.is_some_and(|ms| ms >= a && ms < b))
+                    && keep(&t.aggregate)
+            })
+            .map(|t| (t.aggregate.stream_id.as_str(), t.turn.as_str()))
+            .collect();
+        ids.len() as u64
+    }
+}
+
+/// Totals of one interval of a window.
+fn window_totals(
+    w: &Window,
+    span: Option<(i64, i64)>,
+    keep: impl Fn(&Aggregate) -> bool,
+    book: &Book,
+    ctx: &Context,
+    x: &Extras,
+) -> (Vec<(Aggregate, Fact)>, UsageTotals) {
+    let (rows, expired) = w.cut(span);
+    let rows: Vec<(Aggregate, Fact)> = rows.into_iter().filter(|(a, _)| keep(a)).collect();
+    let mut t = totals_of(&rows, w.turns(span, keep), book, ctx, x);
+    if expired {
+        poison(&mut t, CoverageReason::RetentionLimit);
+    }
+    (rows, t)
+}
+
+/// Whether a scope narrows usage by more than run, kind and time.
+fn narrowed(scope: &UsageScope) -> bool {
+    scope.agent_incarnation.is_some()
+        || scope.model.is_some()
+        || scope.account_id.is_some()
+        || scope.task != UsageTaskFilter::All
+        || scope.epic != UsageEpicFilter::All
 }
 
 fn tracking_state(ledger: &Ledger, run: &RunInfo, x: &Extras) -> Result<TrackingState, RpcError> {
@@ -517,7 +640,13 @@ fn cohort(
     q: &UsageQuery,
     book: &Book,
 ) -> Result<Option<CompletionCohort>, RpcError> {
-    if q.scope.kind != UsageKind::Live {
+    // The completed-task cohort is defined over tasks, by task and
+    // completion epic; a member, model or account selection has no cohort.
+    if q.scope.kind != UsageKind::Live
+        || q.scope.agent_incarnation.is_some()
+        || q.scope.model.is_some()
+        || q.scope.account_id.is_some()
+    {
         return Ok(None);
     }
     let task = match &q.scope.task {
@@ -561,8 +690,9 @@ pub fn summary(
 ) -> Result<UsageSummary, RpcError> {
     let (q, run, book) = canonical(ledger, query, MAX_METADATA_ROWS as u16, false)?;
     let x = extras(ledger, &run, ctx)?;
-    let (rows, turns) = scoped(ledger, &q)?;
-    let t = totals_of(&rows, turns, &book, ctx, &x);
+    let range = range_of(&q);
+    let window = Window::load(ledger, &q, range, false)?;
+    let (rows, t) = window_totals(&window, range, |_| true, &book, ctx, &x);
     let mut limitations: BTreeSet<CoverageReasonKey> = x.reasons.clone();
     if !x.uncertain.is_empty() {
         limitations.insert(CoverageReasonKey(
@@ -580,7 +710,14 @@ pub fn summary(
         ));
     }
     let (executions_observed, execution_statuses) = if q.scope.kind == UsageKind::Aside {
-        let (m, s) = ledger.executions(&run.run_id).map_err(internal)?;
+        let observed = rows
+            .iter()
+            .filter(|(a, _)| !a.aside_execution.is_empty())
+            .map(|(a, _)| a.aside_execution.clone())
+            .collect();
+        let (m, s) = ledger
+            .executions(&run.run_id, &observed, range, narrowed(&q.scope))
+            .map_err(internal)?;
         (Some(m), Some(s))
     } else {
         (None, None)
@@ -680,67 +817,18 @@ pub fn series(ledger: &Ledger, query: &UsageQuery, ctx: &Context) -> Result<Usag
     let end = q
         .to_ms
         .map(|t| t.get())
-        .unwrap_or_else(|| ceil(ctx.now, bucket.min(HOUR_MS)));
+        .unwrap_or_else(|| start + ceil(ctx.now - start, bucket));
     let count = ((end - start).max(0) + bucket - 1) / bucket;
-    let scope = scope_name(q.scope.kind);
     let limit = q.page.limit.unwrap_or(MAX_BUCKETS as u16) as u64;
     let first = start + offset as i64 * bucket;
     let last = (start + (offset + limit) as i64 * bucket).min(end);
-    // Hour buckets from aggregates; finer ones from retained detail.
-    let fine = bucket < HOUR_MS;
-    let mut grouped: BTreeMap<i64, Vec<(Aggregate, Fact)>> = BTreeMap::new();
-    if fine {
-        for (a, ms, f) in ledger
-            .detail_rows(&run.run_id, scope, (first, last), |a| keep(&q.scope, a))
-            .map_err(internal)?
-        {
-            grouped
-                .entry(floor(ms - start, bucket) + start)
-                .or_default()
-                .push((a, f));
-        }
-    } else {
-        for (a, f) in ledger
-            .rows(&run.run_id, scope, |a| {
-                a.hour >= first && a.hour < last && keep(&q.scope, a)
-            })
-            .map_err(internal)?
-        {
-            grouped
-                .entry(floor(a.hour - start, bucket) + start)
-                .or_default()
-                .push((a, f));
-        }
-    }
-    let empty = Vec::new();
+    // Buckets finer than an hour, or not on the hour grid, need detail.
+    let fine = bucket < HOUR_MS || start.rem_euclid(HOUR_MS) != 0;
+    let window = Window::load(ledger, &q, Some((first, last)), fine)?;
     let buckets = (offset..(offset + limit).min(count as u64)).map(|i| {
         let from = start + i as i64 * bucket;
         let to = (from + bucket).min(end);
-        let rows = grouped.get(&from).unwrap_or(&empty);
-        let turns = if fine {
-            let mut ids: BTreeSet<(&str, &str)> = BTreeSet::new();
-            for (a, f) in rows {
-                if let Some(t) = &f.turn {
-                    ids.insert((&a.stream_id, t));
-                }
-            }
-            ids.len() as u64
-        } else {
-            ledger
-                .turns_matching(&run.run_id, scope, Some((from, to)), |incarnation, work| {
-                    q.scope
-                        .agent_incarnation
-                        .as_ref()
-                        .is_none_or(|i| i.as_str() == incarnation)
-                        && serde_json::from_str::<WorkAttribution>(work)
-                            .is_ok_and(|w| keep_work(&q.scope, &w))
-                })
-                .map_err(internal)?
-        };
-        let mut totals = totals_of(rows, turns, &book, ctx, &x);
-        if fine && x.retained_from.is_some_and(|r| from < r) {
-            poison(&mut totals, CoverageReason::RetentionLimit);
-        }
+        let (rows, totals) = window_totals(&window, Some((from, to)), |_| true, &book, ctx, &x);
         let facts: Vec<Fact> = rows.iter().map(|(_, f)| f.clone()).collect();
         Ok(UsageBucket {
             from_ms: timestamp(from)?,
@@ -822,7 +910,9 @@ pub fn breakdown(
     let revision = ledger.revision().map_err(internal)?;
     let offset = resume("breakdown", query.page.cursor.as_ref(), revision, &q)?;
     let x = extras(ledger, &run, ctx)?;
-    let (rows, _) = scoped(ledger, &q)?;
+    let range = range_of(&q);
+    let window = Window::load(ledger, &q, range, false)?;
+    let (rows, expired) = window.cut(range);
     let mut groups: BTreeMap<String, (UsageGroupKey, Vec<(Aggregate, Fact)>)> = BTreeMap::new();
     for (a, f) in rows {
         let key = group_key(dimension, &a);
@@ -835,23 +925,11 @@ pub fn breakdown(
     }
     let total = groups.len() as u64;
     let limit = q.page.limit.unwrap_or(MAX_METADATA_ROWS as u16) as usize;
-    let range = range_of(&q);
-    let scope = scope_name(q.scope.kind);
     let page = groups
         .into_values()
         .skip(offset as usize)
         .map(|(key, rows)| {
-            let incarnations: BTreeSet<&str> =
-                rows.iter().map(|(a, _)| a.incarnation.as_str()).collect();
-            let works: BTreeSet<&str> = rows.iter().map(|(a, _)| a.work.as_str()).collect();
-            let turns = ledger
-                .turns_matching(
-                    &run.run_id,
-                    scope,
-                    range.map(|(from, to)| (floor(from.max(0), HOUR_MS), to)),
-                    |incarnation, work| incarnations.contains(incarnation) && works.contains(work),
-                )
-                .map_err(internal)?;
+            let turns = window.turns(range, |a| group_key(dimension, a) == key);
             let mut activities: BTreeSet<String> = BTreeSet::new();
             let mut reasons: BTreeMap<String, (CoverageReason, u128)> = BTreeMap::new();
             for (a, f) in &rows {
@@ -868,7 +946,13 @@ pub fn breakdown(
             }
             Ok(UsageBreakdownRow {
                 key,
-                totals: totals_of(&rows, turns, &book, ctx, &x),
+                totals: {
+                    let mut t = totals_of(&rows, turns, &book, ctx, &x);
+                    if expired {
+                        poison(&mut t, CoverageReason::RetentionLimit);
+                    }
+                    t
+                },
                 activities: List::new(
                     activities
                         .iter()
@@ -1207,15 +1291,8 @@ mod tests {
         q.from_ms = Some(Timestamp::new(NOW + 5).unwrap());
         q.to_ms = Some(Timestamp::new(NOW + 3 * 3_600_000 - 5).unwrap());
         let s = summary(&ledger, &q, &ctx()).unwrap();
-        assert_eq!(
-            s.query.from_ms,
-            Some(Timestamp::new(NOW).unwrap()),
-            "hour aligned"
-        );
-        assert_eq!(
-            s.query.to_ms,
-            Some(Timestamp::new(NOW + 3 * 3_600_000).unwrap())
-        );
+        assert_eq!(s.query.from_ms, q.from_ms, "the exact range");
+        assert_eq!(s.query.to_ms, q.to_ms);
         assert_eq!(
             s.query.price_book_id.as_ref().map(|i| i.as_str()),
             Some("standard-2026-10-08")
@@ -1481,5 +1558,78 @@ mod tests {
             .code,
             "not_found"
         );
+    }
+
+    #[test]
+    fn partial_hours_use_detail_and_unavailable_once_it_expires() {
+        let (_dir, _path, mut ledger, _) = fixture();
+        let at = |from: i64, to: i64| {
+            let mut q = all();
+            q.from_ms = Some(Timestamp::new(from).unwrap());
+            q.to_ms = Some(Timestamp::new(to).unwrap());
+            summary(&ledger, &q, &ctx()).unwrap()
+        };
+        // [NOW+1.5s, NOW+1h+7ms) holds a (2) and b (3), not u (1) or k (4).
+        let s = at(NOW + 1_500, NOW + 3_600_000 + 7);
+        assert_eq!(output(&s.totals), Some(5));
+        assert_eq!(s.totals.requests_observed.known_sum, Some(Wide(2)));
+        // Within one hour.
+        assert_eq!(output(&at(NOW + 1_500, NOW + 2_500).totals), Some(2));
+        // Whole hours alone need no detail.
+        assert_eq!(output(&at(NOW, NOW + 2 * 3_600_000).totals), Some(10));
+        assert_eq!(partial_parts((NOW, NOW + 2 * 3_600_000)), vec![]);
+        assert_eq!(
+            partial_parts((NOW + 5, NOW + 3 * 3_600_000 - 5)),
+            vec![
+                (NOW + 5, NOW + 3_600_000),
+                (NOW + 2 * 3_600_000, NOW + 3 * 3_600_000 - 5)
+            ]
+        );
+        assert_eq!(partial_parts((NOW + 5, NOW + 9)), vec![(NOW + 5, NOW + 9)]);
+        assert_eq!(partial_parts((i64::MIN, i64::MAX)), vec![]);
+
+        ledger.expire(NOW + 40 * DAY, Retention::default()).unwrap();
+        let at = |from: i64, to: i64| {
+            let mut q = all();
+            q.from_ms = Some(Timestamp::new(from).unwrap());
+            q.to_ms = Some(Timestamp::new(to).unwrap());
+            summary(&ledger, &q, &ctx()).unwrap()
+        };
+        let s = at(NOW + 1_500, NOW + 3_600_000 + 7);
+        assert_eq!(
+            s.totals.output.known_sum, None,
+            "never widened or truncated"
+        );
+        assert_eq!(s.totals.output.reason, Some(CoverageReason::RetentionLimit));
+        assert_eq!(output(&at(NOW, NOW + 2 * 3_600_000).totals), Some(10));
+    }
+
+    #[test]
+    fn every_metric_uses_the_requested_cohort() {
+        let (_dir, path, mut ledger, stream) = fixture();
+        // A second model in the same turn as c.
+        let mut other = msg("d", NOW + 2 * 3_600_000 + 9, 6);
+        other["message"]["model"] = json!("claude-opus-5-5");
+        append(&path, &[other]);
+        drain(&mut ledger, &stream, &File::open(&path).unwrap(), NOW).unwrap();
+        let mut q = all();
+        q.group_by = Some(UsageDimension::Model);
+        let b = breakdown(&ledger, &q, &ctx()).unwrap();
+        for row in b.rows.iter() {
+            let turns = row.totals.turns_observed.known_sum;
+            match &row.key {
+                UsageGroupKey::Model { model, .. } if &**model == "claude-opus-5-5" => {
+                    assert_eq!(turns, Some(Wide(1)), "only the turn it was in")
+                }
+                _ => assert_eq!(turns, Some(Wide(1))),
+            }
+        }
+        // A model selection has no completed-task cohort.
+        let mut opus = all();
+        opus.scope.model = Some(Text::new("claude-opus-5-5".to_string()).unwrap());
+        let s = summary(&ledger, &opus, &ctx()).unwrap();
+        assert!(s.completion_cohort.is_none());
+        assert_eq!(output(&s.totals), Some(6));
+        assert_eq!(s.totals.turns_observed.known_sum, Some(Wide(1)));
     }
 }
