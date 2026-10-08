@@ -772,6 +772,22 @@ until the database takes writes again, tasks wait where they are.",
             .map(|_| ())
     }
 
+    /// Waiting for a submitted review acknowledges the board as it stands.
+    /// It does not reclaim the author's execution slot or change the reviewer's
+    /// work. Explicit acknowledgements also leave another executing card alone.
+    pub(crate) fn acknowledges_review_waiting(&self, agent: &str, task_id: Option<&str>) -> bool {
+        let model = self.model();
+        let owned_review = |task: &Task| {
+            task.assigned_agent.as_deref() == Some(agent) && task.status == TaskStatus::Review
+        };
+        match task_id {
+            Some(id) => model.task(id).is_some_and(owned_review),
+            None => {
+                active_task(&model.tasks, agent).is_none() && model.tasks.iter().any(owned_review)
+            }
+        }
+    }
+
     pub(crate) fn mirror_status_to_task_id(
         &self,
         agent: &str,

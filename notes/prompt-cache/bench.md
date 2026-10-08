@@ -215,3 +215,138 @@ The native session files remain untouched in their original CLI homes. The
 runtime's broader `baseline.mjs` collector was not yet present, which the
 report records explicitly; all reported measurements came directly from the
 fresh sessions through the watchdog's native parsers.
+
+## Extended lifecycle workload
+
+`--scenario lifecycle` selects `scripts/cache/team-lifecycle.yaml`; the short
+control above stays unchanged. The fixed sequence warms both workers, resumes
+each with an unchanged roster, adds a token-free scripted observer and resumes
+both workers, removes the observer and resumes them again. Every resume must
+preserve the session ID. The Crew briefing's byte length, SHA-256 and longest
+common byte prefix are recorded before and after each restart; this measures
+Crew's own file, not the provider's full effective system prompt.
+
+The Claude worker then runs two 8-second foreground shell windows, with explicit
+`run_in_background=false` and a 15-second tool timeout. The control message is
+sent after its turn ends. The fold message is sent only when the exact session
+JSONL contains the marked pending `tool_use` without its matching `tool_result`.
+The injected marker differs from the card's command marker, so the card itself
+cannot pass the fold evidence check. The report records native `isMeta` rows,
+post-fold thinking-block counts (never thinking text), and `thinking_drop`
+metadata joined to the following probe's request IDs. Bounded thinking is
+requested with `MAX_THINKING_TOKENS=2048`; actual presence is measured separately.
+
+Next, Claude reads six deterministic synthetic context files. Forced compaction
+requires at least 65,000 input tokens in the preceding native request and a
+subsequent increment in Crew's compaction counter. A post-compaction message
+then exercises the retained session. Finally the team remains quiet for more
+than 310 seconds before both workers receive fixed checksum probes. Their
+actual last-request-to-next-request intervals must each exceed 300 seconds.
+`--long-idle` adds 3,665 quiet seconds and strict native intervals over 3,600
+seconds. A five-minute gap is not claimed to expire a one-hour Claude cache or
+Codex's longer cache; these are measured gaps, with TTL interpretation kept
+separate from the observations.
+
+Example, using the same verified binary and arguments shown above:
+
+```sh
+scripts/cache/bench ... --scenario lifecycle --sandbox off \
+  --label lifecycle-before-1 --out target/cache-bench/lifecycle-before-1 \
+  --timeout-seconds 7200 --long-idle
+```
+
+Every step records its action boundary, request offsets, first subsequent
+request, input/cache-read/uncached tokens and estimated cost. This is temporal
+attribution to a controlled step, not proof of a provider-internal cause.
+Native declarations such as `prefix_mismatch` are preserved as declarations.
+After a run completes, `python3 -B scripts/cache/prompt_metadata.py RUN/report.json`
+prints a separate numeric artifact for the exact selected native sessions. It
+hashes Codex's persisted base instructions, dynamic-tools array and
+system/developer message content without exporting any body or account ID.
+The artifact distinguishes three layers: generated Crew briefing evidence in
+the run report; persisted native surfaces; and separate synthetic rendering
+probes, which are not captured by a paid run. Claude's full effective prefix
+remains unknown. Neither a file digest nor a persisted-message digest proves
+provider wire-prefix equality or fingerprints the full MCP/skills catalog.
+Runs still stop at the $2 observed upper estimate under the approximately $3
+budget, and the long waits do not bypass failure or cost checks. The scripted
+observer never calls a provider and is excluded from token totals. All newly
+observed model session IDs remain in the spend ledger, even if an unexpected
+restart changes identity and makes the scenario fail.
+The shell observer isolates the roster-text change from new model spend. The
+design's acceptance must additionally cover a model-backed member join; that
+case is not established by this scripted observer alone.
+
+The extended before series is complete: three successful runs on c8052373,
+including one with the one-hour interval. The frozen workload behavior is
+ffbeb0be; all three reports have identical runner hashes, template hash, CLI
+versions, models and sandbox mode. The corresponding after series must match
+these controls and the per-run scenario. There is no before/after result yet.
+
+### Completed lifecycle samples
+
+[`lifecycle-before-series.json`](lifecycle-before-series.json) records run order,
+every request boundary, both first-request and whole-step rates, all attempts,
+and the exact individual report hashes. Runs overlapped in wall time; this is
+recorded, and shared provider cache state is not assumed cold or isolated.
+
+| Run, in start order | UTC start | Steps | Requests | Token-weighted hit rate | API-equivalent USD |
+| --- | --- | ---: | ---: | ---: | ---: |
+| [01](lifecycle-before-01.json), with long idle | 05:21:59 | 20 | 113 | 94.7202% | 0.893699–0.908629 |
+| [03](lifecycle-before-03.json) | 05:28:31 | 18 | 113 | 96.6608% | 0.864127–0.871615 |
+| [02](lifecycle-before-02.json), run `02r` | 05:36:07 | 18 | 112 | 96.1009% | 0.835953–0.846869 |
+
+All starts were on 2026-10-08. The completed samples cost an estimated
+$2.593779–$2.627113 in total. Each daemon stopped with exit code 0, every tracked
+process exited, and the private runtime directories were removed. Native
+session files remain untouched at their recorded paths.
+
+All three runs completed the unchanged/add/remove roster resumes, a proven
+folded row and subsequent thinking, a large-context forced compaction, and the
+five-minute probe. Inputs before compaction were 143,821, 146,658 and 145,151
+tokens respectively. Actual last-request-to-next-request gaps exceeded 300
+seconds in both workers in every run. The long run measured 3,677.788 seconds
+for Claude and 3,684.093 seconds for Codex; it did not infer expiry from a
+planned sleep duration alone.
+
+The following values are **first native requests in the named probe**, not
+whole-step averages. A step can contain several subsequent cache hits, so its
+aggregate can hide the first request's miss.
+
+| Probe / worker | Run 01 | Run 03 | Run 02r |
+| --- | ---: | ---: | ---: |
+| After fold / Claude | 94.921% | 95.217% | 94.792% |
+| Post-compaction probe / Claude | 99.714% | 80.324% | 99.716% |
+| After five minutes / Claude | 99.812% | 99.807% | 99.806% |
+| After five minutes / Codex | 97.879% | 97.218% | 98.014% |
+| After one hour / Claude | 55.928% | Not run | Not run |
+| After one hour / Codex | 26.855% | Not run | Not run |
+
+For example, run 01's first post-hour requests read 23,940 of 42,805 tokens
+(Claude) and 6,912 of 25,738 (Codex); whole-step rates subsequently rose to
+88.233% and 73.421%. In sample 03, the first worker startup request read 23,940
+of 39,055 tokens (61.298%), while the complete warm step reached 96.569%.
+The report's `usage.first_request` and `usage.hit_rate` are separate quantities.
+
+Changed-roster resumes retained high native cache-read fractions despite
+shorter common prefixes in the generated briefing files. This experiment
+therefore does not establish a broad resumed-session cache loss from those
+file changes. Haiku also emitted no `thinking_drop` diagnostic in these fold
+probes. That result cannot demonstrate savings for the affected Opus cohort;
+the design requires a separate matched-model fold comparison. The native
+surface artifacts ([01](lifecycle-before-01-native.json),
+[03](lifecycle-before-03-native.json), [02](lifecycle-before-02-native.json))
+keep generated, persisted and unavailable surfaces distinct.
+
+Six other lifecycle attempts did not complete and are retained in the series
+ledger. One early injection ended a worker turn before its card completed;
+another worker backgrounded the intended foreground call, so the fold gate
+rejected it. A watchdog transition bug stopped a pilot after its intentional
+idle; two concurrent runs were then stopped to avoid repeating that known
+bug. A later warm-up wrote its file in the fixture root instead of the assigned
+worktree and failed the output oracle. That file was not relocated to force a
+pass. Fixes and a regression for both 310- and 3,665-second transitions are
+committed. All nine lifecycle attempts together cost an estimated
+$5.856129–$5.937233; no individual attempt reached the $2 watchdog stop or the
+approximately $3 per-run budget. Failed attempts are not counted as successful
+samples, and no gain claim is selected from this before-only data.

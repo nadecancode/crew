@@ -10,8 +10,11 @@ node notes/toolbox-probes/codex-config.mjs
 node notes/toolbox-probes/codex-server.mjs
 node notes/toolbox-probes/codex-request.mjs
 node notes/toolbox-probes/claude.mjs
+node notes/toolbox-probes/claude-sources.mjs
+node notes/toolbox-probes/codex-memory.mjs
 node notes/toolbox-probes/install-pi.mjs
 node notes/toolbox-probes/pi.mjs
+node notes/toolbox-probes/pi-context.mjs
 ```
 
 The install step fetches the pinned upstream pi package under
@@ -32,6 +35,8 @@ Each runner prints its observations and retains JSON/text evidence. Pi's
 observation extension reads the native system prompt and tool registry after
 server startup; closing stdin shuts the RPC process down. The subagent fixture
 only tests discovery and available tool definitions; it never delegates work.
-See the capability addendum in [toolboxes.md](../toolboxes.md) for expected
-observations and limitations. These fixtures do not test real account login,
-managed policies, provider caching, or the Crew OS sandbox.
+See the capability and exclusion addenda in [toolboxes.md](../toolboxes.md) for
+expected observations and limitations. `codex-memory.mjs` uses `codex debug
+prompt-input`, which renders the model-visible input without a request.
+These fixtures do not test real account login, managed policies, provider
+caching, or the Crew OS sandbox.

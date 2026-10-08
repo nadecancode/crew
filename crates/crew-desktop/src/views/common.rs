@@ -266,6 +266,21 @@ pub fn heading(value: &str) -> gtk::Label {
     label
 }
 
+/// A section title that assistive technology announces as a heading at
+/// `level`, for sections a reader navigates by heading.
+pub fn heading_level(value: &str, level: i32) -> gtk::Label {
+    let label = gtk::Label::builder()
+        .label(value)
+        .xalign(0.0)
+        .wrap(true)
+        .wrap_mode(gtk::pango::WrapMode::WordChar)
+        .accessible_role(gtk::AccessibleRole::Heading)
+        .build();
+    label.add_css_class("heading");
+    label.update_property(&[gtk::accessible::Property::Level(level)]);
+    label
+}
+
 /// One fact as a muted name above its copyable value, for forms and setup
 /// pages that read top to bottom.
 pub fn fact(container: &gtk::Box, name: &str, value: &str) {

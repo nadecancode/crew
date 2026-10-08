@@ -641,3 +641,36 @@ Linux evidence: all 47 Swift files parse, the portable worker/test typecheck
 passes, the project graph reports 612 checks and the `CrewUI` manifest
 evaluates. These are SwiftUI changes, so VoiceOver speech, focus movement and
 the dialog's default button are **Apple verification deferred by operator**.
+
+## Member toolbox
+
+Card `toolbox-dashboards` (`notes/toolboxes.md` §Display). `Agent.toolbox`
+reaches Swift through the generated `AgentToolbox`, `ToolboxItem` and
+`ToolboxSource` records. `CrewAgentToolbox` shows it in the agent detail after
+the relationship sections and before Actions:
+
+- A **Toolbox** section with the summary line under its header, without
+  repeating the word Toolbox: `b56e01d7c4a9 · 4 items · 2 not available`, the
+  fingerprint monospaced and selectable. VoiceOver reads "Toolbox
+  fingerprint" and spells the fingerprint out. When a change is pending it
+  shows **Toolbox changed: restart to apply** and a **Restart** control.
+  That control is the plain
+  `AgentAction.restart` with the shared availability and reason, and it has
+  no dialog. The section also shows the unpinned-definitions notice, and a
+  Definitions disclosure with the fingerprints, digest, tool count and bytes.
+- One section per item kind (**MCP servers**, **Skills**, **Plugins**,
+  **Subagents**, **Hooks**), each shown only when it has entries, then
+  **Sources**. Each row shows the name, the origin and status in words, and
+  the wrapped detail. Section headers carry the header trait.
+- `CrewToolboxWords` keeps the same words as the Rust `AgentToolbox` helpers.
+  It is presentation only and makes no FFI call. The shared `toolbox` warning
+  is the team list's attention marker. The detail leaves it out of Activity
+  and problems because the section says the same thing. `CrewTeamGraph` has
+  no attention marker, so it gets none: the warnings end each node's
+  accessibility label (`notes/toolboxes.md` §Display).
+
+Linux evidence: all 48 Swift files parse, the portable worker typecheck
+passes, `CrewToolboxWords` typechecks against the generated bindings in a
+scratch module, and the project graph reports 612 checks. VoiceOver header
+navigation and the layout at accessibility sizes are **Apple verification
+deferred by operator**.

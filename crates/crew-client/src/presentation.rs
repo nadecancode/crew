@@ -337,6 +337,19 @@ fn agent_data(
         warnings.push(WarningFact {
             code: "compact_pending".into(),
             text: "context compaction queued for the turn boundary".into(),
+            entity: entity.clone(),
+        });
+    }
+    // The existing attention marker carries the toolbox's reason: a pending
+    // change, or a required item that is not active (notes/toolboxes.md).
+    if let Some(text) = agent
+        .toolbox
+        .as_ref()
+        .and_then(|toolbox| toolbox.attention())
+    {
+        warnings.push(WarningFact {
+            code: TOOLBOX_WARNING.into(),
+            text,
             entity,
         });
     }
@@ -1028,5 +1041,44 @@ mod tests {
         assert_eq!(missing.status, ResourceStatus::Empty);
         assert_eq!(missing.value, Some(ResourceValue::Event(None)));
         assert_eq!(missing.request_sequence, 0);
+    }
+
+    #[test]
+    fn toolbox_attention_is_an_agent_warning_with_its_reason() {
+        let mut core = new_core();
+        let mut snapshot = fixture();
+        let mut agents: Vec<Agent> =
+            serde_json::from_str(include_str!("../../crew/tests/fixtures/web/toolbox.json"))
+                .unwrap();
+        // A required item that is not active needs attention too.
+        let mut blocked = agents[0].clone();
+        blocked.id = "qa-2".into();
+        let item = &mut blocked.toolbox.as_mut().unwrap().items[1];
+        assert!(item.required);
+        item.status.code = crew_protocol::ToolboxItemCode::Needs;
+        item.status.text = "Needs $PLAYWRIGHT_TOKEN".into();
+        agents.push(blocked);
+        snapshot.agents = agents;
+        load(&mut core, snapshot, 1);
+        let ViewPayload::Team(team) = project(&core, ViewQuery::Team).unwrap().payload else {
+            panic!("team payload")
+        };
+        let toolbox = |id: &str| {
+            team.agents
+                .iter()
+                .find(|member| member.agent.id == id)
+                .unwrap()
+                .warnings
+                .iter()
+                .filter(|warning| warning.code == TOOLBOX_WARNING)
+                .map(|warning| warning.text.as_str())
+                .collect::<Vec<_>>()
+        };
+        assert!(toolbox("qa").is_empty(), "all required items are active");
+        assert_eq!(toolbox("release"), [crew_protocol::TOOLBOX_PENDING]);
+        assert_eq!(
+            toolbox("qa-2"),
+            ["Required playwright: Needs $PLAYWRIGHT_TOKEN"]
+        );
     }
 }

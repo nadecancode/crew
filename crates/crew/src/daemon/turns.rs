@@ -446,25 +446,74 @@ guidelines or usage policies, call decline(reason), and crew hands it to another
         }
     }
 
-    /// Of the messages a turn was given, those that ask something of the
-    /// agent: a task, a question, a review, or a message to it alone.
+    /// Of the messages a turn was given, those that still ask something of
+    /// this agent. Task state and identified replies can settle an obligation;
+    /// free-text wording cannot. Informational batches never need an idle ACK.
     fn asked_of(&self, id: &str, given: &[String]) -> Vec<crew_core::Message> {
         if given.is_empty() {
             return Vec::new();
         }
         let history = self.bus.history(Some(id), 500).unwrap_or_default();
+        let model = self.model();
         history
-            .into_iter()
+            .iter()
             .filter(|m| given.contains(&m.id) && m.to == id && m.from != id)
             .filter(|m| {
-                matches!(
-                    m.kind,
-                    MessageType::Task
-                        | MessageType::Question
-                        | MessageType::ReviewRequest
-                        | MessageType::Message
-                )
+                let task = m
+                    .metadata
+                    .get("task_id")
+                    .and_then(serde_json::Value::as_str)
+                    .and_then(|task_id| model.task(task_id));
+                match m.kind {
+                    MessageType::Task => task.is_none_or(|task| {
+                        task.assigned_agent.as_deref() == Some(id)
+                            && task.status == crew_core::TaskStatus::Working
+                    }),
+                    MessageType::ReviewResult => {
+                        m.metadata
+                            .get("approved")
+                            .and_then(serde_json::Value::as_bool)
+                            == Some(false)
+                            && task.is_none_or(|task| {
+                                task.assigned_agent.as_deref() == Some(id)
+                                    && task.status == crew_core::TaskStatus::Working
+                            })
+                    }
+                    MessageType::Question | MessageType::Message | MessageType::ReviewRequest => {
+                        // An explicit artifact review is independent of a card's
+                        // formal review lifecycle. Only a formal request carries
+                        // the review correlation and can be settled by its state.
+                        let formal_review = m.kind == MessageType::ReviewRequest
+                            && task.is_some_and(|task| {
+                                m.correlation_id
+                                    .as_deref()
+                                    .and_then(|id| id.strip_prefix("review-"))
+                                    == Some(task.id.as_str())
+                            });
+                        if formal_review
+                            && task.is_some_and(|task| {
+                                task.status != crew_core::TaskStatus::Review
+                                    || task.reviewer.as_deref() != Some(id)
+                            })
+                        {
+                            return false;
+                        }
+                        !history.iter().any(|reply| {
+                            reply.from == id
+                                && reply.to == m.from
+                                && reply.reply_to.as_deref() == Some(m.id.as_str())
+                                && matches!(
+                                    reply.kind,
+                                    MessageType::Answer
+                                        | MessageType::Message
+                                        | MessageType::ReviewResult
+                                )
+                        })
+                    }
+                    _ => false,
+                }
             })
+            .cloned()
             .collect()
     }
 
@@ -1302,5 +1351,275 @@ mod empty_turn_tests {
             )
             .await;
         refused(&daemon, RuntimeKind::Codex, "cyber_policy");
+    }
+
+    fn task_message(daemon: &Daemon, kind: MessageType, metadata: Value) -> String {
+        daemon
+            .bus
+            .send(
+                NewMessage::new("lead", "x", kind, "Read the task card.").metadata(metadata),
+                vec!["x".into()],
+            )
+            .unwrap()
+            .message
+            .id
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn settled_task_dispatches_do_not_buy_acknowledgement_turns() {
+        for runtime in RUNTIMES {
+            for status in [
+                TaskStatus::Working,
+                TaskStatus::Waiting,
+                TaskStatus::Review,
+                TaskStatus::Done,
+                TaskStatus::Ready,
+                TaskStatus::Blocked,
+            ] {
+                let (_temp, running, session) = member_on(runtime).await;
+                let daemon = &running.daemon;
+                daemon
+                    .try_update_task("t", |task| {
+                        task.status = status;
+                        task.started_at = Some(1);
+                    })
+                    .unwrap();
+                let asked = task_message(daemon, MessageType::Task, json!({"task_id": "t"}));
+                record(runtime, &session, &given(&asked), "");
+                let before = std::fs::read(&session).unwrap();
+                daemon.check_turn("x", vec![asked], vec![]).await;
+                assert_eq!(
+                    events(daemon, "agent.unanswered"),
+                    usize::from(status == TaskStatus::Working),
+                    "{runtime}: {status}"
+                );
+                assert_eq!(daemon.model().task("t").unwrap().status, status);
+                assert_eq!(std::fs::read(&session).unwrap(), before);
+                let follow_up = daemon.model().rt("x").follow_up.clone();
+                if let Some((again, _)) = follow_up {
+                    record(runtime, &session, "The one bounded follow-up", "");
+                    daemon.check_turn("x", vec![again], vec![]).await;
+                    assert_eq!(events(daemon, "agent.unanswered"), 1);
+                    assert_eq!(events(daemon, "agent.idle_turn"), 1);
+                }
+            }
+        }
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn informational_batches_do_not_ack_but_unanswered_questions_and_messages_do() {
+        for runtime in RUNTIMES {
+            for kind in [
+                MessageType::Status,
+                MessageType::Answer,
+                MessageType::Question,
+                MessageType::Message,
+            ] {
+                let (_temp, running, session) = member_on(runtime).await;
+                let daemon = &running.daemon;
+                // A review does not exempt an unrelated question or message.
+                daemon
+                    .try_update_task("t", |task| task.status = TaskStatus::Review)
+                    .unwrap();
+                let asked = ask(daemon, kind, "FYI: please verify the parser.");
+                record(runtime, &session, &given(&asked), "");
+                daemon.check_turn("x", vec![asked], vec![]).await;
+                assert_eq!(
+                    events(daemon, "agent.unanswered"),
+                    usize::from(matches!(kind, MessageType::Question | MessageType::Message)),
+                    "{runtime}: {kind}"
+                );
+            }
+        }
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn only_identified_answers_settle_replayed_question_obligations() {
+        for linked in [false, true] {
+            let (_temp, running, session) = member_on(RuntimeKind::Codex).await;
+            let daemon = &running.daemon;
+            let asked = ask(daemon, MessageType::Question, "Which file?");
+            let mut reply = NewMessage::new("x", "lead", MessageType::Answer, "src/parser.rs");
+            reply.reply_to = linked.then(|| asked.clone());
+            daemon.bus.send(reply, vec!["lead".into()]).unwrap();
+            record(RuntimeKind::Codex, &session, &given(&asked), "");
+            daemon.check_turn("x", vec![asked], vec![]).await;
+            assert_eq!(events(daemon, "agent.unanswered"), usize::from(!linked));
+        }
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn settling_an_old_card_does_not_hide_another_executing_card() {
+        let (_temp, running, session) = member_on(RuntimeKind::Claude).await;
+        let daemon = &running.daemon;
+        daemon
+            .try_update_task("t", |task| task.status = TaskStatus::Waiting)
+            .unwrap();
+        let mut current = daemon.model().task("t").cloned().unwrap();
+        current.id = "current".into();
+        current.status = TaskStatus::Working;
+        daemon.model().tasks.push(current);
+        let old = task_message(daemon, MessageType::Task, json!({"task_id": "t"}));
+        let new = task_message(daemon, MessageType::Task, json!({"task_id": "current"}));
+        record(RuntimeKind::Claude, &session, "Both task dispatches", "");
+        daemon.check_turn("x", vec![old, new], vec![]).await;
+        assert_eq!(events(daemon, "agent.unanswered"), 1);
+        assert_eq!(
+            daemon.model().task("t").unwrap().status,
+            TaskStatus::Waiting
+        );
+        assert_eq!(
+            daemon.model().task("current").unwrap().status,
+            TaskStatus::Working
+        );
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn changes_requested_on_executing_work_still_require_action() {
+        for status in [
+            TaskStatus::Working,
+            TaskStatus::Ready,
+            TaskStatus::Review,
+            TaskStatus::Done,
+        ] {
+            let (_temp, running, session) = member_on(RuntimeKind::Claude).await;
+            let daemon = &running.daemon;
+            daemon
+                .try_update_task("t", |task| task.status = status)
+                .unwrap();
+            let message = task_message(
+                daemon,
+                MessageType::ReviewResult,
+                json!({"task_id": "t", "approved": false}),
+            );
+            record(RuntimeKind::Claude, &session, &given(&message), "");
+            daemon.check_turn("x", vec![message], vec![]).await;
+            assert_eq!(
+                events(daemon, "agent.unanswered"),
+                usize::from(status == TaskStatus::Working)
+            );
+        }
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn a_formal_review_is_settled_by_verdict_but_an_artifact_review_is_independent() {
+        for formal in [false, true] {
+            for status in [TaskStatus::Review, TaskStatus::Done] {
+                let (_temp, running, session) = member_on(RuntimeKind::Pi).await;
+                let daemon = &running.daemon;
+                daemon
+                    .try_update_task("t", |task| {
+                        task.status = status;
+                        task.assigned_agent = Some("lead".into());
+                        task.reviewer = Some("x".into());
+                    })
+                    .unwrap();
+                let request =
+                    NewMessage::new("lead", "x", MessageType::ReviewRequest, "Review work")
+                        .metadata(json!({"task_id": "t"}))
+                        .correlation(formal.then(|| "review-t".into()));
+                let message = daemon
+                    .bus
+                    .send(request, vec!["x".into()])
+                    .unwrap()
+                    .message
+                    .id;
+                record(RuntimeKind::Pi, &session, &given(&message), "");
+                daemon.check_turn("x", vec![message], vec![]).await;
+                assert_eq!(
+                    events(daemon, "agent.unanswered"),
+                    usize::from(!formal || status == TaskStatus::Review)
+                );
+            }
+        }
+    }
+
+    /// An offline measurement fixture, run unchanged on both implementations.
+    /// It counts daemon-generated follow-up prompts, not provider API requests.
+    #[tokio::test(start_paused = true)]
+    #[ignore = "explicit before/after obligation measurement; no provider calls"]
+    async fn scripted_obligation_request_counts() {
+        for runtime in RUNTIMES {
+            for scenario in [
+                "working-task",
+                "parked-task",
+                "review-task",
+                "done-task",
+                "status",
+                "answer",
+                "question",
+                "message",
+                "answered-question",
+                "settled-review-request",
+                "changes-requested",
+            ] {
+                let (_temp, running, session) = member_on(runtime).await;
+                let daemon = &running.daemon;
+                let (kind, status) = match scenario {
+                    "parked-task" => (MessageType::Task, TaskStatus::Waiting),
+                    "review-task" => (MessageType::Task, TaskStatus::Review),
+                    "done-task" => (MessageType::Task, TaskStatus::Done),
+                    "status" => (MessageType::Status, TaskStatus::Working),
+                    "answer" => (MessageType::Answer, TaskStatus::Working),
+                    "question" | "answered-question" => {
+                        (MessageType::Question, TaskStatus::Working)
+                    }
+                    "message" => (MessageType::Message, TaskStatus::Working),
+                    "settled-review-request" => (MessageType::ReviewRequest, TaskStatus::Done),
+                    "changes-requested" => (MessageType::ReviewResult, TaskStatus::Working),
+                    _ => (MessageType::Task, TaskStatus::Working),
+                };
+                daemon
+                    .try_update_task("t", |task| {
+                        task.status = status;
+                        task.started_at = Some(1);
+                        if kind == MessageType::ReviewRequest {
+                            task.assigned_agent = Some("lead".into());
+                            task.reviewer = Some("x".into());
+                        }
+                    })
+                    .unwrap();
+                let mut request =
+                    NewMessage::new("lead", "x", kind, "The fixed obligation fixture.")
+                        .metadata(json!({"task_id":"t", "approved":false}));
+                if kind == MessageType::ReviewRequest {
+                    request = request.correlation(Some("review-t".into()));
+                }
+                let asked = daemon
+                    .bus
+                    .send(request, vec!["x".into()])
+                    .unwrap()
+                    .message
+                    .id;
+                if scenario == "answered-question" {
+                    let mut reply =
+                        NewMessage::new("x", "lead", MessageType::Answer, "Already answered.");
+                    reply.reply_to = Some(asked.clone());
+                    daemon.bus.send(reply, vec!["lead".into()]).unwrap();
+                }
+                record(runtime, &session, &given(&asked), "");
+                let original = std::fs::read(&session).unwrap();
+                daemon.check_turn("x", vec![asked], vec![]).await;
+                assert_eq!(std::fs::read(&session).unwrap(), original);
+                let notices: Vec<_> = daemon
+                    .bus
+                    .history(Some("x"), 100)
+                    .unwrap()
+                    .into_iter()
+                    .filter(|message| {
+                        message.from == "scheduler" && message.kind == MessageType::Status
+                    })
+                    .collect();
+                println!(
+                    "OBLIGATION_COUNT {}",
+                    json!({
+                        "runtime":runtime.to_string(), "scenario":scenario,
+                        "follow_up_prompts":notices.len(),
+                        "prompt_body_bytes":notices.iter().map(|m| m.body.len()).sum::<usize>(),
+                        "native_requests":null, "cost_usd":null
+                    })
+                );
+            }
+        }
     }
 }

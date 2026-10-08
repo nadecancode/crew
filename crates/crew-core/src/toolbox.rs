@@ -1264,6 +1264,18 @@ impl fmt::Display for Fingerprint {
     }
 }
 
+impl From<ItemKind> for crate::types::ToolboxItemKind {
+    fn from(kind: ItemKind) -> Self {
+        match kind {
+            ItemKind::Mcp => Self::Mcp,
+            ItemKind::Skills => Self::Skills,
+            ItemKind::Plugins => Self::Plugins,
+            ItemKind::Subagents => Self::Subagents,
+            ItemKind::Hooks => Self::Hooks,
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

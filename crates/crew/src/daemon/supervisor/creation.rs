@@ -108,6 +108,7 @@ impl Daemon {
             outbox_total: 0,
             usage: None,
             error: None,
+            toolbox: None,
         };
         let token = new_token();
         self.store.save_token(&agent.id, &token)?;

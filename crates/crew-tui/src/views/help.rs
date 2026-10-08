@@ -62,7 +62,7 @@ const NOTES: &[(&str, &str)] = &[
     ),
     (
         "inspector",
-        "i type into the terminal · r refresh · d diff · ↑ transcript",
+        "i type into the terminal · r refresh · d diff · T toolbox · ↑ transcript",
     ),
     (
         "? on a box",

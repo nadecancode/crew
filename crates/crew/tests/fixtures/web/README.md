@@ -11,6 +11,7 @@ Every timestamp is built from one fixed moment, so the files are stable.
 | file | content |
 |---|---|
 | `snapshot.json`, `subagents.json`, `team10.json` | `Snapshot`s: the TUI's reference session, the same with subagents, ten workers |
+| `toolbox.json` | two `Agent`s of the toolbox example team (notes/toolboxes.md T02) with effective toolboxes: every item and source shape, a reference that is not set, a pending change |
 | `pushes.jsonl` | one `ServerFrame` per line: every push kind the page handles, a `vcs.*` event for every row of jj-design §events, `agent.error` and `agent.refused`, an operator question and its answer, `pty`/`pty_closed`, `resync`, `shutdown`, and a push of a kind that does not exist (to be ignored) |
 | `results.json` | `{ "<method>": [result, …] }`: example results of every call of §transport's table, plus `tasks_list`, `git_merge` (clean and conflicted), `web_open`, `web_close`, `workspaces`, `summary` |
 | `errors.json` | one error `ServerFrame` per `RpcError` code the daemon uses |
