@@ -19,6 +19,7 @@ use crate::persistence::NewEvent;
 const MAX_TASK_CHARS: usize = 8000;
 
 impl Daemon {
+    #[allow(clippy::too_many_arguments)]
     pub(crate) async fn spawn_subagent(
         &self,
         parent_id: &str,

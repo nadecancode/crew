@@ -570,8 +570,8 @@ pub fn serve(
     for event in rx.iter() {
         match event {
             Event::RuntimeClosed => break,
-            Event::Runtime(message) => session.from_runtime(message)?,
-            Event::Upstream(message) => session.from_server(message, report)?,
+            Event::Runtime(message) => session.on_runtime(message)?,
+            Event::Upstream(message) => session.on_server(message, report)?,
             Event::UpstreamClosed(why) => session.fail(why, report)?,
         }
     }
@@ -658,7 +658,7 @@ impl<W: Write> Session<'_, W> {
         }))
     }
 
-    fn from_runtime(&mut self, message: Value) -> Result<()> {
+    fn on_runtime(&mut self, message: Value) -> Result<()> {
         if !message.is_object() {
             return self.write(&json!({
                 "jsonrpc": "2.0", "id": Value::Null,
@@ -724,7 +724,7 @@ impl<W: Write> Session<'_, W> {
         Ok(())
     }
 
-    fn from_server(
+    fn on_server(
         &mut self,
         mut message: Value,
         report: &mut dyn FnMut(ToolboxReportKind, String),
@@ -783,7 +783,7 @@ impl<W: Write> Session<'_, W> {
         // the listing when there is no pinned one.
         let waiting: Vec<Value> = self.queued.drain(..).collect();
         for message in waiting {
-            self.from_runtime(message)?;
+            self.on_runtime(message)?;
         }
         Ok(())
     }
@@ -834,7 +834,7 @@ impl<W: Write> Session<'_, W> {
             self.listed = true;
             let waiting: Vec<Value> = self.queued.drain(..).collect();
             for message in waiting {
-                self.from_runtime(message)?;
+                self.on_runtime(message)?;
             }
         }
         Ok(())
@@ -858,7 +858,7 @@ impl<W: Write> Session<'_, W> {
         self.down = Some(why);
         let waiting: Vec<Value> = self.queued.drain(..).collect();
         for message in waiting {
-            self.from_runtime(message)?;
+            self.on_runtime(message)?;
         }
         let open: Vec<String> = self.open.drain().collect();
         for id in open {
