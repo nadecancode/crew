@@ -29,7 +29,7 @@ use crew_core::rpc::RpcError;
 use crew_core::RuntimeKind;
 use tokio::sync::{watch, Semaphore};
 
-use super::collect::pump;
+use super::collect::{pump, Access};
 use super::ledger::{ExecutionStatus, Ledger, Locator, Registration, Retention, WorkBinding};
 use super::query::{self, Context};
 use crate::agents::files::{AgentFiles, CliHome};
@@ -196,7 +196,26 @@ pub struct UsageMetrics {
     revision: watch::Sender<u64>,
     permits: Arc<Semaphore>,
     retained_at: Mutex<i64>,
-    generations: std::sync::atomic::AtomicU64,
+    /// Called at the points where collection meets registration (`"commit"`
+    /// before each ledger step of a read, `"retire"` between a finished
+    /// stream leaving the map and its retirement in the ledger), so tests
+    /// can register again exactly there.
+    #[cfg(test)]
+    hook: Mutex<Option<Hook>>,
+}
+
+#[cfg(test)]
+type Hook = Arc<dyn Fn(&UsageMetrics, &str) + Send + Sync>;
+
+/// The ledger as a read reaches it: only around each database step.
+struct Collecting<'a>(&'a UsageMetrics);
+
+impl Access for Collecting<'_> {
+    fn with<T>(&mut self, f: impl FnOnce(&mut Ledger) -> Result<T>) -> Result<T> {
+        self.0.at("commit");
+        let mut ledger = self.0.ledger.lock().unwrap_or_else(|e| e.into_inner());
+        f(&mut ledger)
+    }
 }
 
 fn internal(e: anyhow::Error) -> RpcError {
@@ -217,9 +236,21 @@ impl UsageMetrics {
             revision: watch::channel(revision).0,
             permits: Arc::new(Semaphore::new(READERS)),
             retained_at: Mutex::new(0),
-            generations: std::sync::atomic::AtomicU64::new(0),
+            #[cfg(test)]
+            hook: Mutex::new(None),
         })
     }
+
+    #[cfg(test)]
+    fn at(&self, point: &str) {
+        let hook = self.hook.lock().unwrap().clone();
+        if let Some(hook) = hook {
+            hook(self, point);
+        }
+    }
+
+    #[cfg(not(test))]
+    fn at(&self, _point: &str) {}
 
     pub fn readiness(&self) -> Readiness {
         match self.ledger.try_lock() {
@@ -325,7 +356,16 @@ impl UsageMetrics {
         reg: &Registration,
         now: i64,
     ) -> Result<Result<String, CoverageReason>, RpcError> {
-        let id = super::ledger::stream_id(reg.runtime, &reg.native_session_id);
+        // A session id that cannot be one is recorded under a fixed name.
+        let session = super::source::ident(&reg.native_session_id);
+        let id =
+            super::ledger::stream_id(reg.runtime, session.as_deref().unwrap_or("unidentified"));
+        // Identity and runtime first: an unsupported runtime is refused as
+        // such, before any home is captured or file opened.
+        if let Err(reason) = super::ledger::admits(reg) {
+            self.refuse(&reg.run_id, &id, reason, now);
+            return Ok(Err(reason));
+        }
         // Held across the check and the insert: capacity is atomic.
         let mut streams = self.streams.lock().unwrap_or_else(|e| e.into_inner());
         if !streams.contains_key(&id) && streams.len() >= MAX_STREAMS {
@@ -351,13 +391,20 @@ impl UsageMetrics {
             self.refuse(&reg.run_id, &id, CoverageReason::SourceGap, now);
             return Ok(Err(CoverageReason::SourceGap));
         };
-        let registered = self.with(|l| l.register(reg, &file, now))?;
+        // The ledger counts registrations: its count is the generation that
+        // fences reads and retirements under an earlier one.
+        let registered = self.with(|l| {
+            Ok(match l.register(reg, &file, now)? {
+                Ok(stream) => {
+                    let generation = l.registration(&stream)?.unwrap_or(0);
+                    Ok((stream, generation))
+                }
+                Err(reason) => Err(reason),
+            })
+        })?;
         match &registered {
-            Ok(stream) => {
-                let generation = self
-                    .generations
-                    .fetch_add(1, std::sync::atomic::Ordering::Relaxed)
-                    + 1;
+            Ok((stream, generation)) => {
+                let generation = *generation;
                 let busy = streams.get(stream).is_some_and(|s| s.busy);
                 if let Some(old) = streams.insert(
                     stream.clone(),
@@ -383,7 +430,7 @@ impl UsageMetrics {
                 self.refuse(&reg.run_id, &id, *reason, now);
             }
         }
-        Ok(registered)
+        Ok(registered.map(|(stream, _)| stream))
     }
 
     /// Resumes collecting every stream the ledger still has an owner for,
@@ -409,10 +456,13 @@ impl UsageMetrics {
                 self.refuse(&a.run_id, &a.stream_id, CoverageReason::SourceGap, now);
                 continue;
             };
-            let generation = self
-                .generations
-                .fetch_add(1, std::sync::atomic::Ordering::Relaxed)
-                + 1;
+            let generation = match self.with(|l| l.registration(&a.stream_id)) {
+                Ok(Some(generation)) => generation,
+                _ => {
+                    self.opener.release(lease);
+                    continue;
+                }
+            };
             streams.insert(
                 a.stream_id,
                 Stream {
@@ -526,9 +576,8 @@ impl UsageMetrics {
     fn read(&self, stream: &str, source: &Source, generation: u64, now: i64) {
         let outcome = match self.opener.open(source) {
             None => Err(CoverageReason::SourceGap),
-            Some(file) => {
-                pump(&*self.ledger, stream, &file, now, None).map_err(|_| CoverageReason::SourceGap)
-            }
+            Some(file) => pump(Collecting(self), stream, &file, now, None, Some(generation))
+                .map_err(|_| CoverageReason::SourceGap),
         };
         if let Ok(revision) = self
             .ledger
@@ -575,13 +624,10 @@ impl UsageMetrics {
             self.refuse(&run, stream, CoverageReason::SourceGap, now);
         }
         if finished {
-            let _ = self.with(|l| {
-                l.release(stream)?;
-                if !caught_up {
-                    l.close_admission(stream, CoverageReason::SourceBacklog, now)?;
-                }
-                Ok(())
-            });
+            // A registration that came in since the stream left the map
+            // keeps its owner and admission.
+            self.at("retire");
+            let _ = self.with(|l| l.retire(stream, generation, (!caught_up).then_some(now)));
         }
     }
 
@@ -799,6 +845,7 @@ mod tests {
     use serde_json::{json, Value};
     use std::io::Write;
     use std::path::Path;
+    use std::sync::atomic::{AtomicBool, Ordering};
 
     const NOW: i64 = 1_791_417_600_000;
 
@@ -1278,5 +1325,127 @@ mod tests {
                 lease: first,
             })
             .is_none());
+    }
+
+    /// Registers `session` again, once, when collection reaches `at`.
+    fn reregister_at(
+        service: &UsageMetrics,
+        at: &'static str,
+        session: &'static str,
+    ) -> Arc<AtomicBool> {
+        let fired = Arc::new(AtomicBool::new(false));
+        let seen = fired.clone();
+        *service.hook.lock().unwrap() = Some(Arc::new(move |s: &UsageMetrics, point: &str| {
+            if point == at && !seen.swap(true, Ordering::SeqCst) {
+                s.register(&reg(session), NOW).unwrap().unwrap();
+            }
+        }));
+        fired
+    }
+
+    #[test]
+    fn a_read_under_an_earlier_registration_commits_nothing() {
+        let (dir, files, service) = setup();
+        let path = add(&dir, &files, "s-1");
+        service.register(&reg("s-1"), NOW).unwrap().unwrap();
+        append(&path, &[msg("a", 5)]);
+        let (id, source, generation) = service.due(NOW).into_iter().next().unwrap();
+        // Registered again after the read began, before its first commit.
+        let fired = reregister_at(&service, "commit", "s-1");
+        service.read(&id, &source, generation, NOW);
+        assert!(fired.load(Ordering::SeqCst));
+        assert_eq!(
+            output(&service, NOW),
+            None,
+            "the stale read committed nothing"
+        );
+        let s = service.streams.lock().unwrap()[&id].clone();
+        assert!(!s.busy && !s.missing && s.generation > generation);
+        // The new registration reads it, once.
+        *service.hook.lock().unwrap() = None;
+        service.tick(NOW);
+        assert_eq!(output(&service, NOW), Some(5));
+        let gaps = service
+            .summary(&query(), NOW)
+            .unwrap()
+            .totals
+            .output
+            .coverage;
+        assert_eq!(
+            gaps.source_gaps_total,
+            Some(Wide(0)),
+            "a fenced read is no gap"
+        );
+    }
+
+    #[test]
+    fn a_registration_between_drain_and_retirement_keeps_its_owner() {
+        let (dir, files, service) = setup();
+        let path = add(&dir, &files, "s-1");
+        let stream = service.register(&reg("s-1"), NOW).unwrap().unwrap();
+        append(&path, &[msg("a", 5)]);
+        service.stop(&stream, NOW);
+        // The drained stream leaves the map; it is registered again before
+        // the ledger retires it.
+        let fired = reregister_at(&service, "retire", "s-1");
+        service.tick(NOW);
+        assert!(fired.load(Ordering::SeqCst));
+        assert!(service.streams.lock().unwrap().contains_key(&stream));
+        let active = service.with(|l| l.active_streams()).unwrap();
+        assert!(
+            active.iter().any(|a| a.stream_id == stream),
+            "owner still active"
+        );
+        assert!(!service
+            .with(|l| l.coverage(&stream))
+            .unwrap()
+            .contains_key("source_backlog"));
+        // Later usage is still collected under the new registration.
+        *service.hook.lock().unwrap() = None;
+        append(&path, &[msg("b", 7)]);
+        service.tick(NOW + IDLE_MS);
+        assert_eq!(output(&service, NOW), Some(12));
+    }
+
+    #[test]
+    fn unsupported_runtimes_are_refused_as_such_before_any_source_io() {
+        let dir = tempfile::tempdir().unwrap();
+        let service = UsageMetrics::new(
+            Ledger::in_memory().unwrap(),
+            Arc::new(NativeOpener::new(dir.path().join("state"))),
+            Id::new("epoch-1").unwrap(),
+        );
+        service.begin_run("r1", Some(NOW), NOW).unwrap();
+        let mut pi = reg("p-1");
+        pi.runtime = RuntimeKind::Pi;
+        assert_eq!(
+            service.register(&pi, NOW).unwrap(),
+            Err(CoverageReason::UnsupportedRuntime)
+        );
+        let mut bad = reg("s-1");
+        bad.native_session_id = "../\u{7}".repeat(100);
+        assert_eq!(
+            service.register(&bad, NOW).unwrap(),
+            Err(CoverageReason::IdentityLost)
+        );
+        let s = service.summary(&query(), NOW).unwrap();
+        let gaps: Vec<(String, CoverageReason)> = s
+            .totals
+            .output
+            .coverage
+            .source_gaps
+            .iter()
+            .map(|g| (g.source_id.as_str().to_string(), g.reason))
+            .collect();
+        assert_eq!(
+            gaps,
+            vec![
+                (
+                    "claude:unidentified".to_string(),
+                    CoverageReason::IdentityLost
+                ),
+                ("pi:p-1".to_string(), CoverageReason::UnsupportedRuntime),
+            ]
+        );
     }
 }

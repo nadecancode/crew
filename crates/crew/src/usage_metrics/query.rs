@@ -251,6 +251,9 @@ fn loses_usage(r: CoverageReason) -> bool {
             | CoverageReason::RetentionLimit
             | CoverageReason::IdentityLost
             | CoverageReason::CorrectionOutsideHorizon
+            | CoverageReason::SourceBacklog
+            | CoverageReason::UnsupportedRuntime
+            | CoverageReason::NotTracked
     )
 }
 
@@ -267,13 +270,15 @@ fn extras(ledger: &Ledger, run: &RunInfo, ctx: &Context) -> Result<Extras, RpcEr
         .collect();
     let listed = gaps
         .iter()
-        .take(MAX_GAPS)
-        .map(|g| SourceGap {
-            source_id: Id::new(g.stream_id.clone()).expect("stream ids are short"),
-            reason: g.reason,
-            from: Timestamp::new(g.first_at).ok(),
-            to: Timestamp::new(g.last_at).ok(),
+        .filter_map(|g| {
+            Some(SourceGap {
+                source_id: Id::new(g.stream_id.clone()).ok()?,
+                reason: g.reason,
+                from: Timestamp::new(g.first_at).ok(),
+                to: Timestamp::new(g.last_at).ok(),
+            })
         })
+        .take(MAX_GAPS)
         .collect();
     Ok(Extras {
         gaps_total: gaps.len() as u64,
@@ -581,7 +586,8 @@ impl Window {
     }
 }
 
-/// Totals of one interval of a window.
+/// Totals of one interval of a window, and whether part of it needed
+/// detail that expired.
 fn window_totals(
     w: &Window,
     span: Option<(i64, i64)>,
@@ -589,14 +595,14 @@ fn window_totals(
     book: &Book,
     ctx: &Context,
     x: &Extras,
-) -> (Vec<(Aggregate, Fact)>, UsageTotals) {
+) -> (Vec<(Aggregate, Fact)>, UsageTotals, bool) {
     let (rows, expired) = w.cut(span);
     let rows: Vec<(Aggregate, Fact)> = rows.into_iter().filter(|(a, _)| keep(a)).collect();
     let mut t = totals_of(&rows, w.turns(span, keep), book, ctx, x);
     if expired {
         poison(&mut t, CoverageReason::RetentionLimit);
     }
-    (rows, t)
+    (rows, t, expired)
 }
 
 /// Whether a scope narrows usage by more than run, kind and time.
@@ -680,7 +686,7 @@ pub fn summary(
     let x = extras(ledger, &run, ctx)?;
     let range = range_of(&q);
     let window = Window::load(ledger, &q, range, false)?;
-    let (rows, t) = window_totals(&window, range, |_| true, &book, ctx, &x);
+    let (rows, t, expired) = window_totals(&window, range, |_| true, &book, ctx, &x);
     let mut limitations: BTreeSet<CoverageReasonKey> = x.reasons.clone();
     if !x.uncertain.is_empty() {
         limitations.insert(CoverageReasonKey(
@@ -704,7 +710,13 @@ pub fn summary(
             .map(|(a, _)| a.aside_execution.clone())
             .collect();
         let (m, s) = ledger
-            .executions(&run.run_id, &observed, range, narrowed(&q.scope))
+            .executions(
+                &run.run_id,
+                &observed,
+                range,
+                narrowed(&q.scope),
+                expired.then_some(CoverageReason::RetentionLimit),
+            )
             .map_err(internal)?;
         (Some(m), Some(s))
     } else {
@@ -832,7 +844,7 @@ pub fn series(ledger: &Ledger, query: &UsageQuery, ctx: &Context) -> Result<Usag
     let buckets = (offset..(offset + limit).min(count as u64)).map(|i| {
         let from = start + i as i64 * bucket;
         let to = (from + bucket).min(end);
-        let (rows, totals) = window_totals(&window, Some((from, to)), |_| true, &book, ctx, &x);
+        let (rows, totals, _) = window_totals(&window, Some((from, to)), |_| true, &book, ctx, &x);
         let facts: Vec<Fact> = rows.iter().map(|(_, f)| f.clone()).collect();
         Ok(UsageBucket {
             from_ms: timestamp(from)?,
@@ -1726,5 +1738,110 @@ mod tests {
             runs(&ledger, &bad, &ctx()).unwrap_err().code,
             "stale_cursor"
         );
+    }
+
+    #[test]
+    fn refused_and_drained_sources_are_gaps_of_the_run() {
+        let (_dir, _path, mut ledger, stream) = fixture();
+        ledger
+            .record_source_gap("r1", "pi:s-9", CoverageReason::UnsupportedRuntime, NOW)
+            .unwrap();
+        ledger
+            .record_source_gap("r1", "claude:s-8", CoverageReason::NotTracked, NOW)
+            .unwrap();
+        let registration = ledger.registration(&stream).unwrap().unwrap();
+        assert!(ledger.retire(&stream, registration, Some(NOW)).unwrap());
+        let s = summary(&ledger, &all(), &ctx()).unwrap();
+        let reasons: BTreeSet<_> = s
+            .totals
+            .output
+            .coverage
+            .source_gaps
+            .iter()
+            .map(|g| (g.source_id.as_str().to_string(), reason_text(g.reason)))
+            .collect();
+        for (source, reason) in [
+            ("pi:s-9", "unsupported_runtime"),
+            ("claude:s-8", "not_tracked"),
+            (stream.as_str(), "source_backlog"),
+        ] {
+            assert!(
+                reasons.contains(&(source.to_string(), reason.to_string())),
+                "{reasons:?}"
+            );
+        }
+        assert_eq!(s.tracking_state, TrackingState::Paused);
+        assert_eq!(s.totals.output.coverage.source_gaps_total, Some(Wide(3)));
+    }
+
+    #[test]
+    fn aside_counts_are_unavailable_when_their_range_lost_detail() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("fork.jsonl");
+        std::fs::write(&path, "").unwrap();
+        let mut ledger = Ledger::in_memory().unwrap();
+        ledger.begin_run("r1", Some(NOW), NOW).unwrap();
+        let reg = Registration {
+            run_id: "r1".into(),
+            kind: UsageKind::Aside,
+            runtime: RuntimeKind::Claude,
+            native_session_id: "s-1".into(),
+            agent_id: "worker".into(),
+            incarnation: "i1".into(),
+            launch_id: "l1".into(),
+            aside: Some(crate::usage_metrics::ledger::AsideIds {
+                execution_id: "x1".into(),
+                aside_id: "q1".into(),
+            }),
+            locator: Locator::Private {
+                agent_id: "worker".into(),
+            },
+            started_ms: NOW,
+            start: Start::Fresh,
+            cli_version: None,
+        };
+        let stream = ledger
+            .register(&reg, &File::open(&path).unwrap(), NOW)
+            .unwrap()
+            .unwrap();
+        append(&path, &[msg("ans", NOW + 1_000, 7)]);
+        drain(&mut ledger, &stream, &File::open(&path).unwrap(), NOW).unwrap();
+        ledger
+            .execution_status(
+                "r1",
+                "q1",
+                "x1",
+                crate::usage_metrics::ledger::ExecutionStatus::Answered,
+                Some(NOW),
+                Some(NOW + 2_000),
+            )
+            .unwrap();
+        let partial_hour = || {
+            let mut q = all();
+            q.scope.kind = UsageKind::Aside;
+            q.from_ms = Some(Timestamp::new(NOW + 500).unwrap());
+            q.to_ms = Some(Timestamp::new(NOW + 1_500).unwrap());
+            q
+        };
+        let before = summary(&ledger, &partial_hour(), &ctx()).unwrap();
+        assert_eq!(
+            before.executions_observed.as_ref().unwrap().known_sum,
+            Some(Wide(1))
+        );
+        assert!(before.execution_statuses.as_ref().unwrap().complete);
+
+        ledger.expire(NOW + 40 * DAY, Retention::default()).unwrap();
+        let after = summary(&ledger, &partial_hour(), &ctx()).unwrap();
+        let observed = after.executions_observed.unwrap();
+        assert_eq!(observed.known_sum, None, "not a complete count of 0");
+        assert_eq!(observed.state, MetricState::Unavailable);
+        assert_eq!(observed.reason, Some(CoverageReason::RetentionLimit));
+        assert!(!after.execution_statuses.unwrap().complete);
+        // Whole hours need no detail and still count it.
+        let mut whole = partial_hour();
+        whole.from_ms = Some(Timestamp::new(NOW).unwrap());
+        whole.to_ms = Some(Timestamp::new(NOW + 3_600_000).unwrap());
+        let s = summary(&ledger, &whole, &ctx()).unwrap();
+        assert_eq!(s.executions_observed.unwrap().known_sum, Some(Wide(1)));
     }
 }

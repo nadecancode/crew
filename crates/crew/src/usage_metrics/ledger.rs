@@ -69,7 +69,8 @@ CREATE TABLE IF NOT EXISTS usage_streams (
     locator           TEXT NOT NULL,
     started_ms        INTEGER NOT NULL,
     admission         TEXT,
-    registered_at     INTEGER NOT NULL
+    registered_at     INTEGER NOT NULL,
+    registration      INTEGER NOT NULL DEFAULT 1
 );
 CREATE TABLE IF NOT EXISTS usage_owners (
     stream_id       TEXT NOT NULL,
@@ -336,6 +337,10 @@ pub struct Commit<'a> {
     pub decoder: &'a Adapter,
     pub items: &'a [Item],
     pub observed_at: i64,
+    /// The registration the batch was read under (see
+    /// [`Ledger::registration`]); the commit is refused once the stream was
+    /// registered again. `None` reads whatever registration is current.
+    pub registration: Option<u64>,
 }
 
 /// Retention limits (`notes/usage-metrics.md`, storage).
@@ -708,11 +713,21 @@ impl Ledger {
                     (None, false) => None,
                 }
             };
+            // Spend timed before the period: whole hours before it from the
+            // aggregates, its partial first hour from retained detail, or,
+            // where that detail may have expired, any spend in that hour.
+            let floor = from.saturating_sub(from.rem_euclid(HOUR));
             let earlier_spend = range.is_some()
                 && self.conn.query_row(
                     "SELECT EXISTS (SELECT 1 FROM usage_task_costs WHERE run_id = ?1
-                     AND task_id = ?2 AND class = 'before' AND hour >= 0 AND hour < ?3)",
-                    params![run_id, task, from.saturating_sub(from.rem_euclid(HOUR))],
+                     AND task_id = ?2 AND class = 'before' AND hour >= 0 AND hour < ?3)
+                     OR EXISTS (SELECT 1 FROM usage_observations WHERE run_id = ?1
+                     AND task_id = ?2 AND class = 'before' AND native_ms < ?4)
+                     OR (?4 > ?3 AND COALESCE((SELECT retained_from FROM usage_runs
+                         WHERE run_id = ?1), ?3) > ?3
+                         AND EXISTS (SELECT 1 FROM usage_task_costs WHERE run_id = ?1
+                         AND task_id = ?2 AND class = 'before' AND hour = ?3))",
+                    params![run_id, task, floor, from],
                     |r| r.get(0),
                 )?;
             uncertain |= self.conn.query_row(
@@ -750,12 +765,16 @@ impl Ledger {
         if unattributed {
             return Ok(Some(CoverageReason::UnknownAttribution));
         }
+        // Usage lost by a collected stream, or by a source of the run that
+        // was refused or could not be read.
         let lost: bool = self.conn.query_row(
             "SELECT EXISTS (SELECT 1 FROM usage_coverage c JOIN usage_owners o
              ON c.stream_id = o.stream_id WHERE o.run_id = ?1 AND o.kind = 'live'
              AND c.reason IN ('source_gap', 'parser_limit', 'not_reported',
                               'unsupported_sidechain', 'ambiguous_boundary', 'retention_limit',
-                              'identity_lost', 'correction_outside_horizon'))",
+                              'identity_lost', 'correction_outside_horizon',
+                              'source_backlog', 'unsupported_runtime', 'not_tracked'))
+             OR EXISTS (SELECT 1 FROM usage_source_gaps WHERE run_id = ?1)",
             params![run_id],
             |r| r.get(0),
         )?;
@@ -941,6 +960,9 @@ impl Ledger {
     /// query narrows only by time, one started in `range` (any, unbounded)
     /// makes the count partial; when it narrows by member, model, account or
     /// work, whether such an execution belongs is unknown, so any makes it
+    /// partial. When `lost` gives why the cohort itself is not known (detail
+    /// the range needs has expired), the count is unavailable and the
+    /// statuses incomplete.
     /// partial.
     pub fn executions(
         &self,
@@ -948,6 +970,7 @@ impl Ledger {
         observed: &std::collections::BTreeSet<String>,
         range: Option<(i64, i64)>,
         narrowed: bool,
+        lost: Option<CoverageReason>,
     ) -> Result<(CounterMetric, ExecutionStatusCounts)> {
         let mut status = self
             .conn
@@ -985,8 +1008,21 @@ impl Ledger {
             };
             slot.0 += 1;
         }
-        counts.complete = counts.unknown.0 == 0 && unsourced == 0;
+        counts.complete = counts.unknown.0 == 0 && unsourced == 0 && lost.is_none();
         let n = observed.len() as u128;
+        if let Some(reason) = lost {
+            let metric = CounterMetric {
+                known_sum: None,
+                state: MetricState::Unavailable,
+                reason: Some(reason),
+                coverage: MetricCoverage {
+                    eligible_observations: Wide(n),
+                    observations_seen: Wide(n + unsourced as u128),
+                    ..MetricCoverage::default()
+                },
+            };
+            return Ok((metric, counts));
+        }
         let metric = CounterMetric {
             known_sum: Some(Wide(n)),
             state: if unsourced == 0 {
@@ -1070,7 +1106,8 @@ impl Ledger {
                 // stream; cursor and seen ids stay. A file in another place
                 // is a new generation for the reader, reconciled by id.
                 tx.execute(
-                    "UPDATE usage_streams SET locator = ?2, started_ms = ?3 WHERE stream_id = ?1",
+                    "UPDATE usage_streams SET locator = ?2, started_ms = ?3, registration = registration + 1
+                     WHERE stream_id = ?1",
                     params![stream_id, json(&reg.locator), reg.started_ms],
                 )?;
                 // The same launch registered again (a daemon restart): its
@@ -1185,6 +1222,44 @@ impl Ledger {
         Ok(())
     }
 
+    /// How many times a stream was registered: every registration, a
+    /// daemon restart's included, makes reads and retirements under an
+    /// earlier one stale.
+    pub fn registration(&self, stream_id: &str) -> Result<Option<u64>> {
+        registration(&self.conn, stream_id)
+    }
+
+    /// Retires a stream that finished draining under `registration`: its
+    /// owner stops, and when `backlog` holds the time, its admission closes
+    /// with what was left unread as a gap. Nothing happens, and false is
+    /// returned, once the stream was registered again.
+    pub fn retire(
+        &mut self,
+        stream_id: &str,
+        registration_seen: u64,
+        backlog: Option<i64>,
+    ) -> Result<bool> {
+        let tx = self.conn.transaction()?;
+        if registration(&tx, stream_id)? != Some(registration_seen) {
+            return Ok(false);
+        }
+        tx.execute(
+            "UPDATE usage_owners SET active = 0 WHERE stream_id = ?1",
+            params![stream_id],
+        )?;
+        if let Some(now) = backlog {
+            let reason = tag(&CoverageReason::SourceBacklog);
+            tx.execute(
+                "UPDATE usage_streams SET admission = ?2 WHERE stream_id = ?1",
+                params![stream_id, reason],
+            )?;
+            cover(&tx, stream_id, &reason, 1, now)?;
+        }
+        bump(&tx)?;
+        tx.commit()?;
+        Ok(true)
+    }
+
     /// The owner stopped: its stream drains but takes no new owner's work.
     pub fn release(&mut self, stream_id: &str) -> Result<()> {
         self.conn.execute(
@@ -1292,6 +1367,11 @@ impl Ledger {
         };
         if &stored != c.from {
             bail!("stale usage cursor for {}", c.stream_id);
+        }
+        if let Some(expected) = c.registration {
+            if registration(&tx, c.stream_id)? != Some(expected) {
+                bail!("usage stream {} was registered again", c.stream_id);
+            }
         }
         let admission: Option<String> = tx.query_row(
             "SELECT admission FROM usage_streams WHERE stream_id = ?1",
@@ -2010,6 +2090,15 @@ impl Aggregate {
     }
 }
 
+/// Whether a registration can be collected at all, decided from its
+/// identity and runtime alone, before any source is opened: a session id
+/// that cannot be one, or a runtime without a supported adapter, is refused
+/// with its reason.
+pub fn admits(reg: &Registration) -> std::result::Result<(), CoverageReason> {
+    let session = source::ident(&reg.native_session_id).ok_or(CoverageReason::IdentityLost)?;
+    Adapter::new(reg.runtime, &session, reg.start).map(|_| ())
+}
+
 /// The logical stream of a runtime's native session.
 pub fn stream_id(runtime: RuntimeKind, session: &str) -> String {
     format!("{}:{session}", runtime_tag(runtime))
@@ -2063,6 +2152,17 @@ fn bump(tx: &Transaction<'_>) -> Result<()> {
         [],
     )?;
     Ok(())
+}
+
+fn registration(tx: &Connection, stream_id: &str) -> Result<Option<u64>> {
+    Ok(tx
+        .query_row(
+            "SELECT registration FROM usage_streams WHERE stream_id = ?1",
+            params![stream_id],
+            |r| r.get::<_, i64>(0),
+        )
+        .optional()?
+        .map(|n| n as u64))
 }
 
 fn load_cursor(tx: &Connection, stream_id: &str) -> Result<Option<(Checkpoint, Vec<u8>)>> {
@@ -2950,7 +3050,7 @@ mod tests {
         for _ in 0..20 {
             // A crash after each transaction: reopen and go on.
             let mut ledger = Ledger::open(&crashed).unwrap();
-            let pumped = pump(&mut ledger, &stream, &open(&path), NOW, Some(1)).unwrap();
+            let pumped = pump(&mut ledger, &stream, &open(&path), NOW, Some(1), None).unwrap();
             // A crash before a transaction: work decoded and dropped.
             let (from, mut adapter) = ledger.cursor(&stream).unwrap().unwrap();
             let _ = adapter.decode(&source::read(&open(&path), &from).unwrap());
@@ -2972,6 +3072,7 @@ mod tests {
             decoder: &adapter,
             items: &[],
             observed_at: NOW,
+            registration: None,
         });
         assert!(stale.is_err());
         assert_eq!(dump(&ledger), expected);
@@ -3507,7 +3608,7 @@ mod tests {
             .into_iter()
             .map(|(a, _)| a.aside_execution)
             .collect();
-        let (observed, statuses) = ledger.executions("r1", &ids, None, false).unwrap();
+        let (observed, statuses) = ledger.executions("r1", &ids, None, false, None).unwrap();
         assert_eq!(observed.known_sum, Some(Wide(1)));
         assert_eq!(observed.state, MetricState::Partial);
         assert_eq!(statuses.failed, Wide(1));
@@ -4055,5 +4156,108 @@ mod tests {
         let unusable = ledger.rows("r1", "live", |a| a.unit == "unusable").unwrap();
         assert_eq!(unusable.len(), 1);
         assert_eq!(unusable[0].0.reason, "ambiguous_boundary");
+    }
+
+    #[test]
+    fn refused_and_drained_sources_leave_cohort_cost_open() {
+        let book = Book::standard_2026_10_08();
+        type Lose = fn(&mut Ledger, &str);
+        let cases: [(&str, Lose); 2] = [
+            ("refused", |l, _| {
+                l.record_source_gap("r1", "pi:s-9", CoverageReason::UnsupportedRuntime, NOW)
+                    .unwrap()
+            }),
+            ("drained with backlog", |l, stream| {
+                let registration = l.registration(stream).unwrap().unwrap();
+                assert!(l.retire(stream, registration, Some(NOW)).unwrap());
+            }),
+        ];
+        for (case, lose) in cases {
+            let (_dir, path, mut ledger, stream) = setup(&[]);
+            ledger
+                .bind_work(&stream, &open(&path), &epic_task("t1", "e1"), NOW)
+                .unwrap();
+            append(&path, &[at("a", NOW, 10)]);
+            drain(&mut ledger, &stream, &open(&path), NOW).unwrap();
+            ledger
+                .first_completion("r1", "t1", NOW + HOUR, None, &EpicAttribution::NoEpic)
+                .unwrap();
+            let finite = ledger.cohort("r1", None, |_, _| true, &book).unwrap();
+            assert!(
+                finite.cost_per_completed_task.upper_pico_usd.is_some(),
+                "{case}"
+            );
+            lose(&mut ledger, &stream);
+            let open = ledger.cohort("r1", None, |_, _| true, &book).unwrap();
+            let e = &open.cost_per_completed_task;
+            assert_eq!(e.upper_pico_usd, None, "{case}");
+            assert_eq!(
+                e.lower_pico_usd, finite.cost_per_completed_task.lower_pico_usd,
+                "{case}"
+            );
+        }
+    }
+
+    #[test]
+    fn commits_and_retirement_under_an_earlier_registration_are_refused() {
+        let (_dir, path, mut ledger, stream) = setup(&[]);
+        let first = ledger.registration(&stream).unwrap().unwrap();
+        append(&path, &[at("a", NOW, 10)]);
+        // Registered again (a restart of the same launch) after the read
+        // under `first` began.
+        ledger
+            .register(&reg("r1", "i1", Start::Fresh), &open(&path), NOW)
+            .unwrap()
+            .unwrap();
+        let second = ledger.registration(&stream).unwrap().unwrap();
+        assert!(second > first);
+        assert!(pump(&mut ledger, &stream, &open(&path), NOW, None, Some(first)).is_err());
+        assert!(ledger.detail(&stream).unwrap().is_empty());
+        assert!(!ledger.retire(&stream, first, Some(NOW)).unwrap());
+        assert_eq!(ledger.active_streams().unwrap().len(), 1);
+        assert!(!ledger
+            .coverage(&stream)
+            .unwrap()
+            .contains_key("source_backlog"));
+        pump(&mut ledger, &stream, &open(&path), NOW, None, Some(second)).unwrap();
+        assert_eq!(ledger.detail(&stream).unwrap().len(), 1);
+        assert!(ledger.retire(&stream, second, None).unwrap());
+        assert!(ledger.active_streams().unwrap().is_empty());
+    }
+
+    #[test]
+    fn spend_inside_the_first_hour_before_a_period_is_earlier_spend() {
+        const MIN: i64 = 60_000;
+        let book = Book::standard_2026_10_08();
+        let (_dir, path, mut ledger, stream) = setup(&[]);
+        ledger
+            .bind_work(&stream, &open(&path), &epic_task("t1", "e1"), NOW)
+            .unwrap();
+        append(&path, &[at("a", NOW + 5 * MIN, 10)]);
+        drain(&mut ledger, &stream, &open(&path), NOW).unwrap();
+        ledger
+            .first_completion("r1", "t1", NOW + 20 * MIN, None, &EpicAttribution::NoEpic)
+            .unwrap();
+        let earlier = |ledger: &Ledger, from: i64| {
+            ledger
+                .cohort("r1", Some((from, NOW + HOUR)), |_, _| true, &book)
+                .unwrap()
+                .includes_earlier_spend
+        };
+        assert!(
+            earlier(&ledger, NOW + 10 * MIN),
+            "spent at 00:05, period from 00:10"
+        );
+        assert!(!earlier(&ledger, NOW + 3 * MIN), "spent inside the period");
+        assert!(!earlier(&ledger, NOW));
+        // Once the detail expired only the hour's aggregate remains: any
+        // spend in the first hour may predate the period.
+        ledger.expire(NOW + 40 * DAY, Retention::default()).unwrap();
+        assert!(earlier(&ledger, NOW + 10 * MIN));
+        assert!(
+            earlier(&ledger, NOW + 3 * MIN),
+            "conservative without detail"
+        );
+        assert!(!earlier(&ledger, NOW), "a whole hour needs no detail");
     }
 }

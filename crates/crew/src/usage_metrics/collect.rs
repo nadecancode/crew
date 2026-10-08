@@ -50,13 +50,15 @@ fn changes(items: &[Item]) -> usize {
 
 /// Reads the next batch of `stream_id` from `file`, a fresh open of its
 /// source, and commits it. `max_commits` stops early (for tests of
-/// interrupted reading); the service passes `None`.
+/// interrupted reading); the service passes `None`. With `registration`,
+/// every commit is refused once the stream was registered again.
 pub fn pump(
     mut ledger: impl Access,
     stream_id: &str,
     file: &File,
     now: i64,
     max_commits: Option<usize>,
+    registration: Option<u64>,
 ) -> Result<Pumped> {
     let (mut from, mut adapter) = ledger
         .with(|l| l.cursor(stream_id))?
@@ -77,6 +79,7 @@ pub fn pump(
                     decoder: &adapter,
                     items: &items,
                     observed_at: now,
+                    registration,
                 })
             })?);
             from = to;
@@ -94,6 +97,7 @@ pub fn pump(
             decoder: &adapter,
             items: &items,
             observed_at: now,
+            registration,
         })
     })?);
     pumped.caught_up = batch.caught_up();
@@ -109,7 +113,7 @@ pub fn drain(
 ) -> Result<Vec<Committed>> {
     let mut commits = Vec::new();
     loop {
-        let pumped = pump(&mut ledger, stream_id, file, now, None)?;
+        let pumped = pump(&mut ledger, stream_id, file, now, None, None)?;
         commits.extend(pumped.commits);
         if pumped.caught_up {
             return Ok(commits);
