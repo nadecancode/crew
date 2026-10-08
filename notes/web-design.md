@@ -1187,6 +1187,16 @@ What a committed bundle costs, and the answers:
 - **It must be reproducible**, or two members building the same sources would
   commit different bytes. **(observed)** two builds from the same lock file
   give identical files (`run.sh` checks it).
+- **Minified with terser** (card `web-bundle-budget`, designer m-1226659f7b94
+  answer): `build.minify: "terser"` with `compress.passes: 3` and
+  otherwise default, safe options. Unsafe compressions (`unsafe*`,
+  `pure_getters`, property mangling) stay off: `pure_getters` broke Solid's
+  store reads. terser is an exactly pinned dev dependency in `bun.lock`; the
+  runtime dependencies stay the three above. It replaces esbuild's minifier
+  because it gives the same code a smaller bundle, which keeps the toolbox
+  display within P1 and P4 without a raise. Two clean builds must still be
+  byte-identical, and the whole mock and perf e2e suites run against the
+  terser build.
 
 Rule: **every commit that changes `web/` sources carries the rebuilt bundle**
 (`bun run build` takes about half a second). There is never a commit on the
