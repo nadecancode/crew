@@ -207,8 +207,12 @@
     "test": "web_bundle::the_bundle_is_what_its_manifest_and_sources_say",
     "observed_bytes": 604322,
     "base_cap": 600000,
-    "owner": "ui/web-bundle-budget",
-    "approved_fix_pending": true
+    "owner": "ui/web-bundle-trim",
+    "approved_fix_pending": false,
+    "replacement_pending": true,
+    "original_cap_unchanged": true,
+    "submission_disposition": "m-f24de6e70417",
+    "follow_up": "After reviewed web-bundle-trim lands, run only the focused web_bundle pair on the merged tip and send the result to reviewer."
   },
   "cache_improvement_claim": false,
   "thinking_integrity": {
@@ -238,5 +242,11 @@
     "merged_native_start": true,
     "report_sha256": "d98cdf2b82e18b216f6d73ec0a7d2c67229931fa6812fb8a73b842cffdf50cc1"
   },
-  "stale_attempt_regression": "daemon::delivery::tests::expired_receipt_restores_as_a_tombstone_and_stale_retirement_cannot_bind_a_new_attempt"
+  "stale_attempt_regression": "daemon::delivery::tests::expired_receipt_restores_as_a_tombstone_and_stale_retirement_cannot_bind_a_new_attempt",
+  "transcript_check_limitation": {
+    "custom_tool_call_already_recognized": true,
+    "latest_prompt_can_hide_prior_turn_tools_during_500_ms_read_delay": true,
+    "codex_delivery_and_check_turn_unchanged": true,
+    "d1_does_not_claim_to_fix_transcript_read_race": true
+  }
 }

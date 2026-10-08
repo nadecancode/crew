@@ -1,6 +1,6 @@
 # Turn-boundary Claude delivery
 
-Source validation complete except the independently owned bundle-budget gate.
+Source validation complete except the independently owned bundle-trim gate.
 This is not a controlled cache-savings claim.
 
 Ordinary Claude traffic stays in the durable bus until a native turn carrying
@@ -33,9 +33,12 @@ asset against a fake host; Rust regressions use the real durable bus and
 receipt store. Native endpoint captures are fixture data and are not actual
 provider usage or a controlled C3 cost series.
 
-Source integration includes reviewed main `2c7a1c3f`, including D4. Remaining
-gate: the approved UI bundle-budget fix and focused `web_bundle` rerun, then
-reviewer verdict. The other workspace suites pass, including all 87 `team`
+Source integration includes reviewed main `2c7a1c3f`, including D4. The lead's
+disposition `m-f24de6e70417` permits submission with the known main overage
+recorded below. The raised-cap `web-bundle-budget` replacement was withdrawn;
+`web-bundle-trim` must fit the original ceilings. After its reviewed landing,
+run only the focused `web_bundle` pair on the merged tip and send that result
+to the reviewer. The other workspace suites pass, including all 87 `team`
 tests serially, remaining packages, web-server/wire and doc tests. Whole
 workspace Clippy with `-D warnings`, rustfmt and the real Rust 1.82 default CLI
 build/help checks pass. The default-parallel Codex limit-event assertion raced;
@@ -44,7 +47,7 @@ regressions were fixed by preserving that opted-in legacy route; it is outside
 the queued-mod cache guarantee, and their original oracles pass.
 
 The current main bundle is 604,322 bytes against the old Rust P4 check of
-600,000. D1 changes no web source or bundle. `web-bundle-budget` owns that
+600,000. D1 changes no web source or bundle. `web-bundle-trim` owns that
 known base failure; no threshold is changed in this card. The retained checks,
 native binary fingerprint and fixture report hashes are in
 [cache-delivery.json](cache-delivery.json).
@@ -73,3 +76,11 @@ The exact stale-attempt regression is
 retire A, offer the same message ids as a fresh B, then A's late observation is
 ignored and B stays unbound. Restore, phase expiry, stale launch and crash-before-
 bus-update checks are separate from the native relay test.
+
+This change does not fix the existing latest-transcript race in `check_turn`.
+Codex `custom_tool_call` records already count as tools. That check sleeps
+500 ms before reading `last_turn`, so a newer prompt can hide an earlier
+turn's tools. D1 leaves Codex delivery and this transcript check unchanged.
+Native Claude receipt tests prove recipient binding to actual native turn ids;
+they do not prove that the later transcript read is fenced to the completed
+turn. This limitation is separate from code-mode tool visibility.
