@@ -67,15 +67,16 @@ if(args[0]==='hook'){
     .replace('__DELIVER__','true').replace('__TONE__','null');
   put(path.join(plugin,'hooks/register.ts'),source);
 }
-if (scenario==='slow' || scenario==='rewrite' || scenario==='drop' || scenario==='shortcircuit' || scenario==='immediate-rewrite') {
+if (scenario==='slow' || scenario==='rewrite' || scenario==='drop' || scenario==='shortcircuit' || scenario==='immediate-rewrite' || scenario==='queued-append-rewrite') {
   const guard = path.join(root,'guard');
   put(path.join(guard,'.claude-plugin/plugin.json'),JSON.stringify({name:'delivery-fixture-guard',version:'0.0.1'}));
   put(path.join(guard,'hooks/hooks.json'),'{"modules":["./register.ts"]}');
   const action = scenario==='slow' ? `await $.process.run([${JSON.stringify(process.execPath)}, '-e', 'setTimeout(()=>{},21000)']); return next(e)`
     : scenario==='rewrite' ? `return next({...e,text:e.text.replace('identical body','rewritten body')})`
     : scenario==='drop' ? `return {drop:'fixture refusal'}` : `return {text:e.text}`;
-  const hook = scenario==='immediate-rewrite'
-    ? `on('session.append',async($,e,next)=>{if(e.door==='note'){return next({...e,message:{...e.message,content:e.message.content.map(b=>b.type==='text'?{...b,text:b.text.replace('identical body','rewritten stored body')}:b)}})}return next(e)})`
+  const appendCondition = scenario==='immediate-rewrite' ? "e.door==='note'" : "e.message.content.some(b=>b.type==='text'&&b.text.includes('Delivery batch offer-A'))";
+  const hook = scenario==='immediate-rewrite' || scenario==='queued-append-rewrite'
+    ? `on('session.append',async($,e,next)=>{if(${appendCondition}){return next({...e,message:{...e.message,content:e.message.content.map(b=>b.type==='text'?{...b,text:b.text.replace('identical body','rewritten stored body')}:b)}})}return next(e)})`
     : `on('prompt.submit',async($,e,next)=>{if(e.text.includes('Delivery batch offer-A')){${action}}return next(e)})`;
   put(path.join(guard,'hooks/register.ts'),`import type {Register} from 'claude-code'\nexport const register:Register=on=>{${hook}}\n`);
 }
@@ -113,7 +114,7 @@ const env={PATH:process.env.PATH,HOME:path.join(root,'home'),LANG:'C.UTF-8',XDG_
  ANTHROPIC_API_KEY:'fixture-not-a-credential',ANTHROPIC_BASE_URL:`http://127.0.0.1:${server.address().port}`,
  CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC:'1',DISABLE_AUTOUPDATER:'1',ENABLE_TOOL_SEARCH:'false',CLAUDE_CODE_NO_MODEL_FALLBACK:'1'};
 const args=['--print','--input-format','stream-json','--output-format','stream-json','--verbose','--model','claude-opus-5-5','--dangerously-skip-permissions','--mcp-config',path.join(root,'mcp.json'),'--strict-mcp-config','--setting-sources','project,local','--plugin-dir',plugin,'--debug-file',path.join(root,'debug.log')];
-if (['slow','rewrite','drop','shortcircuit','immediate-rewrite'].includes(scenario)) args.push('--plugin-dir',path.join(root,'guard'));
+if (['slow','rewrite','drop','shortcircuit','immediate-rewrite','queued-append-rewrite'].includes(scenario)) args.push('--plugin-dir',path.join(root,'guard'));
 const child=spawn(binary,args,{env,cwd:work,stdio:['pipe','pipe','pipe']}); let stdout='',stderr='';
 child.stdout.on('data',b=>stdout+=b);child.stderr.on('data',b=>stderr+=b);
 child.stdin.write(JSON.stringify({type:'user',message:{role:'user',content:'Initial synthetic foreground turn. Do not run tools.'}})+'\n');

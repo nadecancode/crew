@@ -1,6 +1,7 @@
 # Read acknowledgements after full-body delivery
 
-Implementation card: delivery-mark-read. Base: cdbd2303. The separate D1
+Implementation card: delivery-mark-read. Base: cdbd2303, forward-merged with
+reviewed main a9979a4e before final validation. The separate D1
 focused bundle follow-up is recorded in abb1c3d6; no D1 cache-benefit claim
 is added here.
 
