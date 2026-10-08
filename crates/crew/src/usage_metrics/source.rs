@@ -351,7 +351,7 @@ fn drain(file: &File, cp: &mut Checkpoint, size: u64) -> io::Result<()> {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Observation {
     /// Stable within the logical stream: `m:<message id>` for an identified
-    /// message, `c:<epoch>:<cumulative vector>` for a Codex increment,
+    /// message, `c:<from vector>><to vector>` for a Codex increment,
     /// `l:<generation>:<offset>` for a record without identity.
     pub key: String,
     pub unit: ObservationUnit,

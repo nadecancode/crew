@@ -7,9 +7,17 @@
 //! counts as one request only when it equals the direct `last_token_usage`
 //! on every field, unknown fields included, with input and output known;
 //! anything else is a native batch of unknown cardinality. A decrease starts
-//! a new counter epoch: only a direct last-request vector equal to the new
-//! cumulative proves its usage, otherwise a gap. Output already includes
+//! a new counter epoch with a gap and a new baseline: a direct last-request
+//! vector equal to the new cumulative does not prove a new occurrence, since
+//! an old record appended again looks the same. Output already includes
 //! reasoning, which is never added again.
+//!
+//! An increment is identified by the vector it starts from and the one it
+//! reaches, not by its epoch, so the same increment read again (appended
+//! again, after a reset, after a rewrite or a restart) is the same
+//! observation and is never charged twice. Two genuinely distinct increments
+//! with the same start and end would be counted once: the error is an
+//! undercount, never a double charge.
 
 use crew_core::rpc::usage_metrics::{CoverageReason, ObservationUnit};
 use serde::{Deserialize, Serialize};
@@ -270,22 +278,7 @@ impl Codex {
             }
             Some(p) if now.decreased_from(p) => {
                 self.epoch += 1;
-                // Only a direct vector equal to the new cumulative proves the
-                // usage of the new epoch so far is that one request.
-                match last {
-                    Some((l, true)) if now_valid && l.is_single(now) => {
-                        self.emit(
-                            line,
-                            now,
-                            now,
-                            ObservationUnit::Request,
-                            Vec::new(),
-                            native_ms,
-                            out,
-                        );
-                    }
-                    _ => gap(out),
-                }
+                gap(out);
                 self.settle(now);
                 return;
             }
@@ -312,7 +305,7 @@ impl Codex {
             reasons.push(CoverageReason::NativeBatch);
             ObservationUnit::CounterDelta
         };
-        self.emit(line, now, delta, unit, reasons, native_ms, out);
+        self.emit(line, previous, now, delta, unit, reasons, native_ms, out);
         self.settle(now);
     }
 
@@ -320,6 +313,7 @@ impl Codex {
     fn emit(
         &mut self,
         line: &Line,
+        previous: Option<Vector>,
         now: Vector,
         usage: Vector,
         unit: ObservationUnit,
@@ -344,7 +338,11 @@ impl Codex {
         };
         let gap_ms = source::gap(&mut self.last_ms, native_ms);
         out.push(Item::Observation(Box::new(Observation {
-            key: format!("c:{}:{}", self.epoch, now.key()),
+            key: format!(
+                "c:{}>{}",
+                previous.map_or_else(|| "-".to_string(), Vector::key),
+                now.key()
+            ),
             unit,
             normalized: counters::codex(
                 Ok(usage.input),
@@ -504,7 +502,7 @@ mod tests {
         assert_eq!(c.input_uncached, None);
         assert_eq!(obs[1].model.as_deref(), Some("gpt-6-luna"));
         assert_eq!(obs[1].turn.as_deref(), Some("t1"));
-        assert_eq!(obs[1].key, "c:0:150/120/-/17");
+        assert_eq!(obs[1].key, "c:100/80/-/10>150/120/-/17");
         assert!(items.contains(&Item::Skipped {
             skip: Skip::Duplicate,
             offset: obs[0].offset
@@ -589,25 +587,27 @@ mod tests {
     }
 
     #[test]
-    fn decreases_use_only_direct_evidence_of_the_new_epoch() {
+    fn decreases_reset_the_baseline_without_charging() {
         let items = decode_all(
             RuntimeKind::Codex,
             "th-1",
             &[
                 turn("gpt-6-luna", "t1"),
                 tc(0, v(1_000, 800, 50), Some(v(1_000, 800, 50))),
-                // Reset; the new cumulative is exactly the direct vector.
+                // A reset whose cumulative equals the direct vector is not
+                // proof of a new request: an old record appended again looks
+                // the same.
                 tc(1, v(120, 100, 6), Some(v(120, 100, 6))),
-                // Reset again, with more in the new epoch than the direct vector.
-                tc(2, v(90, 10, 4), Some(v(30, 10, 2))),
-                // The same direct vector again proves nothing new.
+                // Usage after the new baseline is charged.
+                tc(2, v(150, 120, 9), Some(v(30, 20, 3))),
+                // Reset again, with more than the direct vector.
                 tc(3, v(90, 10, 4), Some(v(30, 10, 2))),
             ],
         );
         let obs = observations(&items);
         assert_eq!(obs.len(), 2);
-        assert_eq!(obs[1].key, "c:1:120/100/-/6");
-        assert_eq!(obs[1].normalized.counters.input_total, Some(120));
+        assert_eq!(obs[1].key, "c:120/100/-/6>150/120/-/9");
+        assert_eq!(obs[1].normalized.counters.input_total, Some(30));
         let gaps = items
             .iter()
             .filter(|i| {
@@ -620,12 +620,25 @@ mod tests {
                 )
             })
             .count();
-        assert_eq!(gaps, 1);
-        assert!(observations(&items).iter().all(|o| o
-            .normalized
-            .counters
-            .input_total
-            .is_some_and(|i| i < 1_001)));
+        assert_eq!(gaps, 2);
+    }
+
+    #[test]
+    fn an_old_token_count_appended_again_is_not_charged_again() {
+        let a = tc(0, v(100, 100, 10), Some(v(100, 100, 10)));
+        let b = tc(1, v(150, 140, 15), Some(v(50, 40, 5)));
+        let items = decode_all(
+            RuntimeKind::Codex,
+            "th-1",
+            &[turn("gpt-6-luna", "t1"), a.clone(), b.clone(), a, b],
+        );
+        let rows = latest(&items);
+        assert_eq!(rows.len(), 2, "{rows:?}");
+        let total: u64 = rows
+            .values()
+            .filter_map(|o| o.normalized.counters.input_total)
+            .sum();
+        assert_eq!(total, 150);
     }
 
     #[test]

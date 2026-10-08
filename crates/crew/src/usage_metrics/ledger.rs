@@ -3340,4 +3340,57 @@ mod tests {
         assert_eq!(active.len(), 1);
         assert_eq!(active[0].locator, relocated.locator);
     }
+
+    #[test]
+    fn old_codex_token_counts_appended_again_never_charge_twice() {
+        use crate::usage_metrics::source::Start;
+        let tc = |ms: i64, total: (u64, u64, u64), last: (u64, u64, u64)| {
+            let v = |(i, r, o): (u64, u64, u64)| json!({"input_tokens": i, "cached_input_tokens": r, "output_tokens": o});
+            json!({"type": "event_msg",
+                "timestamp": chrono::DateTime::from_timestamp_millis(ms).unwrap().to_rfc3339(),
+                "payload": {"type": "token_count", "info": {"total_token_usage": v(total), "last_token_usage": v(last)}}})
+        };
+        let meta = json!({"type": "session_meta", "payload": {"id": "th-1"}});
+        let ctx =
+            json!({"type": "turn_context", "payload": {"model": "gpt-6-luna", "turn_id": "t1"}});
+        let a = tc(NOW, (100, 80, 10), (100, 80, 10));
+        let b = tc(NOW + 1, (150, 120, 15), (50, 40, 5));
+        let dir = tempfile::tempdir().unwrap();
+        let db = dir.path().join("crew.db");
+        let path = dir.path().join("rollout.jsonl");
+        std::fs::write(
+            &path,
+            text(&[meta.clone(), ctx.clone(), a.clone(), b.clone()]),
+        )
+        .unwrap();
+        let mut ledger = Ledger::open(&db).unwrap();
+        ledger.begin_run("r1", Some(NOW), NOW).unwrap();
+        let mut r = reg("r1", "i1", Start::Fresh);
+        r.runtime = RuntimeKind::Codex;
+        r.native_session_id = "th-1".into();
+        let stream = ledger.register(&r, &open(&path), NOW).unwrap().unwrap();
+        drain(&mut ledger, &stream, &open(&path), NOW).unwrap();
+        let input = |l: &Ledger| sum(l, "r1", "live").input_total.known_sum;
+        assert_eq!(input(&ledger), Some(Wide(150)));
+
+        // The exact old records appended again.
+        append(&path, &[a.clone(), b.clone()]);
+        drain(&mut ledger, &stream, &open(&path), NOW).unwrap();
+        assert_eq!(input(&ledger), Some(Wide(150)));
+
+        // After detail expiry, a restart and a rewrite holding the same history.
+        ledger.expire(NOW + 31 * DAY, Retention::default()).unwrap();
+        drop(ledger);
+        let mut ledger = Ledger::open(&db).unwrap();
+        append(&path, &[a.clone(), b.clone()]);
+        drain(&mut ledger, &stream, &open(&path), NOW).unwrap();
+        assert_eq!(input(&ledger), Some(Wide(150)));
+        replace(&path, &[meta, ctx, a.clone(), b.clone(), a, b]);
+        drain(&mut ledger, &stream, &open(&path), NOW).unwrap();
+        assert_eq!(input(&ledger), Some(Wide(150)));
+        assert!(
+            !ledger.uncertain("r1").unwrap(),
+            "identical replays are not corrections"
+        );
+    }
 }
