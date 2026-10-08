@@ -194,7 +194,7 @@ mod tests {
             .collect::<std::collections::BTreeSet<_>>();
         assert_eq!(
             names.len(),
-            72,
+            105,
             "a new daemon method needs a deliberate gateway policy"
         );
         let reads = [
@@ -228,6 +228,49 @@ mod tests {
         ];
         let terminals = ["agent_input", "attach", "attach_input", "attach_resize"];
         let denied = [
+            // P1 leaves negotiation disabled. P2/P4 may allow Read discovery on
+            // workspace/read and Control discovery on action, never index/terminal.
+            "features_negotiate",
+            // Future Epic reads require Read on workspace/read. Scoped
+            // administration remains denied to every device tier.
+            "epics_list",
+            "epic_get",
+            "tasks_query",
+            "task_get_scoped",
+            "epic_create",
+            "epic_edit",
+            "task_create_scoped",
+            "task_revise",
+            "epic_complete",
+            // Future aside reads require Read on workspace/read, actions require
+            // Control on action, and watches require Read on workspace.
+            "aside_members",
+            "aside_list",
+            "aside_get",
+            "aside_ask",
+            "aside_cancel",
+            "aside_remove",
+            "aside_watch",
+            "aside_unwatch",
+            // Future Docs reads require Read on workspace/read;
+            // watch/unwatch belong only on workspace.
+            "docs_index",
+            "docs_read",
+            "docs_asset",
+            "docs_history",
+            "docs_diff",
+            "docs_watch",
+            "docs_unwatch",
+            // Future metrics reads require Read on workspace/read;
+            // watch/unwatch belong only on workspace.
+            "usage_summary",
+            "usage_series",
+            "usage_breakdown",
+            "usage_observations",
+            "usage_runs",
+            "usage_prices",
+            "usage_watch",
+            "usage_unwatch",
             "hello",
             "load_team",
             "agent_add",
@@ -279,7 +322,7 @@ mod tests {
             .copied()
             .chain(["ping", "workspaces"])
             .collect::<Vec<_>>();
-        assert_eq!(assigned.len(), 72);
+        assert_eq!(assigned.len(), 105);
         assert_eq!(
             assigned
                 .iter()
@@ -300,6 +343,10 @@ mod tests {
             "workspaces",
             "web_rescan",
         ];
+        let feature_requests: Vec<serde_json::Value> = serde_json::from_str(include_str!(
+            "../../../crew-core/tests/fixtures/features/requests-v1.json"
+        ))
+        .unwrap();
         for name in names {
             let params = if unit.contains(&name) {
                 serde_json::json!({})
@@ -312,6 +359,12 @@ mod tests {
                     "id":"a","agent":"a","agent_id":"a","role":"operator","protocol":6,"client":"fixture","config":{"project":"native-policy"},"spec":{"id":"a"},"status":"working","percent":10,"body":"x","to":"a","type":"message","task":"work","task_id":"t","reason":"x","artifact":"x","comments":"","approve":true,"summary":"","decisions":[],"message":"m","commit":"abc123","from_agent":"a","event":"x","ids":["m"],"code":"a","kind":"paired","count":1,"url":"http://localhost:1","ack":false,"data":"","rows":24,"cols":80,"model":"","note":null,"text":"x","submit":true,"stop_agents":true
                 })
             };
+            // Strict feature params cannot use the legacy catch-all object.
+            let params = feature_requests
+                .iter()
+                .find(|r| r["method"].as_str() == Some(name))
+                .map(|r| r["params"].clone())
+                .unwrap_or(params);
             let request = serde_json::from_value::<crew_core::rpc::Request>(
                 serde_json::json!({"id":1,"method":name,"params":params}),
             )

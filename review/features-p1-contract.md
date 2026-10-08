@@ -99,7 +99,9 @@ pico-USD per million: multiply tokens by that wire rate and divide by
 `scripts/features/legacy-goldens.mjs` extracts and compiles the actual
 `b4f9a4424c53ddf54a6db1d0d82164015221faaa` protocol/core crates. It records
 source hashes and the old encoder's result hash in `legacy-v6.json`.
-Tests compare canonical bytes for legacy requests, Task/Session/Snapshot
+Run this script from the repository checkout (a jj workspace); a plain
+source extraction cannot resolve the frozen revision. Tests compare canonical
+bytes for legacy requests, Task/Session/Snapshot
 and pushes, and retain the old decoder's scoped-method refusal evidence.
 The reproduction uses only scratch files and compilation, not a daemon or
 provider request.
@@ -144,3 +146,30 @@ generation; no native feature screen or paid cache gain is claimed here.
 Disposable Cargo caches were removed after verification under the team's disk
 budget instruction. Cited logs, the extracted old sources, generator output
 and top-level binaries/libraries were retained.
+
+## Native policy review follow-up
+
+The reviewed P1 commits were replayed onto main `646a0b30`, which contains
+the scheduler's five-method toolbox inventory repair `59ed91d2`:
+
+| Original | Replay | Stable patch id |
+| --- | --- | --- |
+| `664d71a2` | `ffd45fd7` | `ebac6848b1cfb279d2be31c626f60c492d8fc989` |
+| `99bab9bd` | `6c974de0` | `d3afd890dbda4f4e517df17b22275a19eb715390` |
+
+The P1 follow-up lists all 33 feature methods explicitly as denied in the
+native tier/lane test, bringing its pinned method count to 105. Comments
+record the intended later lanes; they grant nothing in P1. The test selects
+the exact feature request fixtures because their strict parameter records
+must not accept the legacy catch-all object. Production policy is unchanged.
+
+On the replayed tip, with bubblewrap and socat available,
+`cargo test --locked -p crew --features native-gateway` passed **866 tests,
+0 failed, 2 ignored** across 28 suites. The ignored cases are the explicit
+obligation-measurement experiment and the paid real-Claude test. The native
+method inventory test passes; the library portion passed 570 tests. Evidence:
+`target/features-policy/native-gateway.log`.
+
+`cargo clippy --locked -p crew --features native-gateway --all-targets -- -D warnings`
+and `cargo fmt --all --check` also passed. Clippy log:
+`target/features-policy/native-gateway-clippy.log`.
