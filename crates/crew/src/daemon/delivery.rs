@@ -972,6 +972,8 @@ impl Daemon {
             Err(_) => false,
         }
     }
+
+
 }
 
 /// Run a queue command to its end, with its ledger entry and the agent's
@@ -1243,6 +1245,51 @@ mod tests {
         );
         assert!(daemon.model().rt("m").turn_openers.is_empty());
         assert_eq!(daemon.bus.undelivered("m").unwrap().len(), 1);
+    }
+
+    #[tokio::test]
+    async fn consumption_repairs_a_crash_before_bus_update_and_rejects_stale_launches() {
+        use crate::message_bus::NewMessage;
+        let (_temp, running) = queued_daemon().await;
+        let daemon = &running.daemon;
+        let message = daemon
+            .bus
+            .send(
+                NewMessage::new("peer", "m", MessageType::Message, "body-not-metadata"),
+                vec!["m".into()],
+            )
+            .unwrap()
+            .message;
+        let ids = vec![message.id];
+        let key = daemon.register_receipt("m", ids.clone(), now_ms()).unwrap();
+        assert!(daemon
+            .native_delivery_hook(
+                "m",
+                Some("stale-launch"),
+                "native-delivery-accepted",
+                &serde_json::json!({"session_id":"session","batch_id":key,"ids":ids})
+            )
+            .await
+            .is_err());
+        {
+            let mut model = daemon.model();
+            let receipt = model
+                .rt("m")
+                .native_receipts
+                .receipts
+                .get_mut(&key)
+                .unwrap();
+            receipt.phase = native::Phase::Consumed;
+            receipt.observed_turn = Some("actual".into());
+            receipt.observed_at = Some(now_ms());
+            receipt.consumed_at = Some(now_ms());
+        }
+        daemon.save_receipts("m").unwrap();
+        assert_eq!(daemon.bus.undelivered("m").unwrap().len(), 1);
+        daemon.model().rt("m").native_receipts_loaded = false;
+        daemon.load_receipts("m").unwrap();
+        assert!(daemon.bus.undelivered("m").unwrap().is_empty());
+        assert!(daemon.model().rt("m").native_receipts.receipts.is_empty());
     }
 
     fn agent(id: &str) -> Agent {

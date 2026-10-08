@@ -5,7 +5,9 @@ import path from 'node:path';
 import http from 'node:http';
 import { spawn } from 'node:child_process';
 
-const root = path.resolve('target/cache-delivery-sdk/native');
+const actualBridge = process.argv.includes('--bridge');
+const scenario = process.argv.find(arg=>arg.startsWith('--scenario='))?.slice(11) || 'normal';
+const root = path.resolve(actualBridge ? `target/cache-delivery-sdk/native-bridge-${scenario}` : 'target/cache-delivery-sdk/native');
 const work = path.join(root, 'work'), config = path.join(root, 'config'), plugin = path.join(root, 'plugin');
 const put = (file, text) => { fs.mkdirSync(path.dirname(file), { recursive: true }); fs.writeFileSync(file, text); };
 for (const dir of [work, config]) fs.mkdirSync(dir, { recursive: true });
@@ -40,6 +42,38 @@ export const register: Register = on => {
   on('turn.complete', async ($, e, next) => { const result=await next(e); await record($,'end',{turn:e.turnId}); return result })
 }
 `);
+if (actualBridge) {
+  const relay = path.join(root, 'fixture-crew');
+  put(relay, `#!/usr/bin/env node
+import fs from 'node:fs';
+const args=process.argv.slice(2),events=${JSON.stringify(events)};
+if(args[0]==='hook'){
+ const data=JSON.parse(args.at(-1));fs.appendFileSync(events,JSON.stringify({type:args[1],at:Date.now(),...data})+'\\n');
+ console.log(JSON.stringify({ok:true}));
+}else if(args[0]==='bridge'){
+ console.log(JSON.stringify({native_bridge_ready:{ok:true,launch:'fixture-launch'}}));
+ setTimeout(()=>console.log(JSON.stringify({ids:['m-A'],batch_id:'offer-A',text:'identical body',immediate:false})),500);
+ setTimeout(()=>console.log(JSON.stringify({ids:['m-B'],batch_id:'offer-B',text:'identical body',immediate:false})),700);
+ setTimeout(()=>process.exit(0),${scenario==='restart'?1500:35000});
+}else if(args[0]==='delivered'){
+ fs.appendFileSync(events,JSON.stringify({type:'immediate-delivered',ids:args.slice(3),at:Date.now()})+'\\n');
+}
+`);
+  fs.chmodSync(relay, 0o700);
+  const source=fs.readFileSync('crates/crew/assets/crew-bridge.register.ts','utf8')
+    .replace('__CREW_BIN__',JSON.stringify(relay)).replace('__IDENTITY__','"fixture-identity"')
+    .replace('__DELIVER__','true').replace('__TONE__','null');
+  put(path.join(plugin,'hooks/register.ts'),source);
+}
+if (scenario==='slow' || scenario==='rewrite' || scenario==='drop' || scenario==='shortcircuit') {
+  const guard = path.join(root,'guard');
+  put(path.join(guard,'.claude-plugin/plugin.json'),JSON.stringify({name:'delivery-fixture-guard',version:'0.0.1'}));
+  put(path.join(guard,'hooks/hooks.json'),'{"modules":["./register.ts"]}');
+  const action = scenario==='slow' ? `await $.process.run([${JSON.stringify(process.execPath)}, '-e', 'setTimeout(()=>{},21000)']); return next(e)`
+    : scenario==='rewrite' ? `return next({...e,text:e.text.replace('identical body','rewritten body')})`
+    : scenario==='drop' ? `return {drop:'fixture refusal'}` : `return {text:e.text}`;
+  put(path.join(guard,'hooks/register.ts'),`import type {Register} from 'claude-code'\nexport const register:Register=on=>{on('prompt.submit',async($,e,next)=>{if(e.text.includes('Delivery batch offer-A')){${action}}return next(e)})}\n`);
+}
 const captures = [], sockets = new Set();
 const server = http.createServer((req, res) => {
   let text = ''; req.on('data', b => text += b);
@@ -67,14 +101,15 @@ const env={PATH:process.env.PATH,LANG:'C.UTF-8',XDG_CONFIG_HOME:path.join(root,'
  ANTHROPIC_API_KEY:'fixture-not-a-credential',ANTHROPIC_BASE_URL:`http://127.0.0.1:${server.address().port}`,
  CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC:'1',DISABLE_AUTOUPDATER:'1',ENABLE_TOOL_SEARCH:'false',CLAUDE_CODE_NO_MODEL_FALLBACK:'1'};
 const args=['--print','--input-format','stream-json','--output-format','stream-json','--verbose','--model','claude-opus-5-5','--dangerously-skip-permissions','--mcp-config',path.join(root,'mcp.json'),'--strict-mcp-config','--setting-sources','project,local','--plugin-dir',plugin,'--debug-file',path.join(root,'debug.log')];
+if (['slow','rewrite','drop','shortcircuit'].includes(scenario)) args.push('--plugin-dir',path.join(root,'guard'));
 const child=spawn(binary,args,{env,cwd:work,stdio:['pipe','pipe','pipe']}); let stdout='',stderr='';
 child.stdout.on('data',b=>stdout+=b);child.stderr.on('data',b=>stderr+=b);
 child.stdin.write(JSON.stringify({type:'user',message:{role:'user',content:'Initial synthetic foreground turn. Do not run tools.'}})+'\n');
-const closeInput=setTimeout(()=>child.stdin.end(),10000);
-const deadline=setTimeout(()=>child.kill('SIGKILL'),15000);
+const closeInput=setTimeout(()=>child.stdin.end(),scenario==='slow'?30000:10000);
+const deadline=setTimeout(()=>child.kill('SIGKILL'),scenario==='slow'?40000:15000);
 const exit=await new Promise(resolve=>child.on('close',(code,signal)=>resolve({code,signal})));
 clearTimeout(closeInput);clearTimeout(deadline);for(const socket of sockets)socket.destroy();await new Promise(resolve=>server.close(resolve));
 put(path.join(root,'stdout.jsonl'),stdout);put(path.join(root,'stderr.log'),stderr);
 put(path.join(root,'requests.json'),JSON.stringify(captures,null,2));
 const records=fs.existsSync(events)?fs.readFileSync(events,'utf8').trim().split('\n').filter(Boolean).map(JSON.parse):[];
-const report={binary,exit,requests:captures.length,provider_calls:0,events:records};put(path.join(root,'report.json'),JSON.stringify(report,null,2));console.log(JSON.stringify(report));
+const report={binary,actual_bridge:actualBridge,scenario,exit,requests:captures.length,provider_calls:0,events:records};put(path.join(root,'report.json'),JSON.stringify(report,null,2));console.log(JSON.stringify(report));

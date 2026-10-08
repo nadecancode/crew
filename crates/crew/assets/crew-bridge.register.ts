@@ -76,11 +76,11 @@ async function compact($: EngineInterface, order: CompactOrder): Promise<void> {
 const RECEIPT_MS = 120_000
 const MAX_RECEIPTS = 64
 type Receipt = {
-  batch_id: string; ids: string[]; phase: 'submitted' | 'accepted' | 'consumed' | 'unknown';
+  batch_id: string; ids: string[]; phase: 'submitted' | 'accepted' | 'observed' | 'consumed' | 'unknown';
   queued_at: number; accepted_at?: number; observed_at?: number; turn_id?: string;
   deadline: number; launch?: string; retired?: boolean; ended?: boolean;
 }
-type Pending = Receipt & { text?: string; acceptedText?: string; startText?: string; submission?: Promise<void>; completion?: () => void }
+type Pending = Receipt & { text?: string; acceptedText?: string; startText?: string; submission?: Promise<void>; completion?: () => void; observation?: Promise<boolean>; consumption?: Promise<void> }
 const receipts = new Map<string, Pending>()
 let nativeSession = ''
 let launch: string | undefined
@@ -93,7 +93,7 @@ function hasMarker(text: string, id: string): boolean { return text.startsWith(m
 
 async function save($: EngineInterface): Promise<void> {
   // Persist correlation and disposition only. No message or accepted text.
-  const rows = [...receipts.values()].map(({ text, acceptedText, startText, submission, completion, ...row }) => row)
+  const rows = [...receipts.values()].map(({ text, acceptedText, startText, submission, completion, observation, consumption, ...row }) => row)
   stored = stored.catch(() => {}).then(() => $.store.set('delivery:' + nativeSession, rows))
   await stored
 }
@@ -116,17 +116,18 @@ async function unknown($: EngineInterface, row: Pending, reason: string): Promis
 }
 
 async function consumed($: EngineInterface, row: Pending): Promise<void> {
-  if (!row.turn_id) return
-  // A generated identity is mandatory. Rewriting a body is fine; removing or
-  // changing the identity is not proof that this queue entry started.
-  if (row.acceptedText !== undefined && row.startText !== undefined && row.acceptedText !== row.startText) {
-    await unknown($, row, 'accepted text differs from observed native turn')
-    return
-  }
-  row.phase = 'consumed'
-  await save($)
-  await notice($, 'native-delivery-started', row)
-  row.completion?.()
+  if (!row.turn_id || row.phase === 'consumed') return
+  if (row.consumption) return row.consumption
+  const finishing = (async () => {
+    if (row.observation && !await row.observation) return
+    const confirmed = await notice($, 'native-delivery-started', row)
+    if (confirmed) { row.phase = 'consumed'; await save($) }
+    else { await unknown($, row, 'native consumption report is not confirmed') }
+    row.completion?.()
+  })()
+  row.consumption = finishing
+  await finishing
+  row.consumption = undefined
 }
 
 async function submit($: EngineInterface, delivery: Delivery): Promise<void> {
@@ -183,7 +184,7 @@ async function submit($: EngineInterface, delivery: Delivery): Promise<void> {
       }
       current.acceptedText = result.text
       current.accepted_at = await $.clock.now()
-      if (current.phase !== 'unknown' && current.phase !== 'consumed') current.phase = 'accepted'
+      if (current.phase === 'submitted') current.phase = 'accepted'
       await save($)
       await notice($, 'native-delivery-accepted', current)
       if (current.turn_id) await consumed($, current)
@@ -283,9 +284,10 @@ export const register: Register = on => {
     await notice($, 'native-turn-started', undefined, { turn_id: e.turnId })
     const matches = [...receipts.values()].filter(r => !r.retired && r.phase !== 'consumed' && hasMarker(e.text, r.batch_id))
     for (const row of matches) {
-      row.startText = e.text; row.turn_id = e.turnId; row.observed_at = await $.clock.now()
-      await save($)
-      await notice($, 'native-delivery-observed', row)
+      const at = await $.clock.now()
+      row.startText = e.text; row.turn_id = e.turnId; row.observed_at = at; row.phase = 'observed'
+      row.observation = save($).then(() => notice($, 'native-delivery-observed', row))
+      await row.observation
       await consumed($, row)
     }
     return next(e)

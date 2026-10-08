@@ -102,7 +102,11 @@ impl Book {
     pub(super) fn expire(&mut self, now: i64) -> Vec<Receipt> {
         let mut unknown = Vec::new();
         for r in self.receipts.values_mut() {
-            if r.deadline <= now && !matches!(r.phase, Phase::Unknown | Phase::Consumed) {
+            let admission_timed_out =
+                r.phase == Phase::Offered && now.saturating_sub(r.queued_at) >= 20_000;
+            if (r.deadline <= now || admission_timed_out)
+                && !matches!(r.phase, Phase::Unknown | Phase::Consumed)
+            {
                 r.phase = Phase::Unknown;
                 unknown.push(r.clone());
             }

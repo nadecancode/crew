@@ -106,12 +106,10 @@ pub fn ctl(cmd: CtlCommand) -> Result<()> {
 /// fail (notes/binary-pinning.md B8).
 pub fn hook(event: &str, identity_path: Option<&Path>, payload: Option<String>) -> Result<()> {
     let strict = crate::daemon::native_hook(event);
-    let loaded = identity(identity_path);
-    if strict && loaded.is_err() {
-        return Err(loaded.unwrap_err());
-    }
-    let Ok(identity) = loaded else {
-        return Ok(());
+    let identity = match identity(identity_path) {
+        Ok(identity) => identity,
+        Err(error) if strict => return Err(error),
+        Err(_) => return Ok(()),
     };
     let payload = match payload {
         Some(text) => text,
