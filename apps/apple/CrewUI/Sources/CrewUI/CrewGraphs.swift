@@ -46,7 +46,9 @@ public struct CrewTeamGraph: View {
                     .buttonStyle(.plain)
                     .modifier(CrewEntityFocus(key: EntityKey(scope: scope, entity: .agent(presentation.agent.id)), selected: selected, coordinator: focus, active: active))
                     .position(point(offset))
-                    .accessibilityLabel("\(presentation.agent.id), \(presentation.statusLabel), current task \(presentation.currentWork?.taskId ?? "none")")
+                    // No attention marker here: the reasons (a pending toolbox change
+                    // among them) end the label, and the List view shows them.
+                    .accessibilityLabel("\(presentation.agent.id), \(presentation.statusLabel), current task \(presentation.currentWork?.taskId ?? "none")" + presentation.warnings.map { ", \($0.text)" }.joined())
                     .accessibilityIdentifier("crew.graph.agent.\(presentation.agent.id)")
                 }
             }

@@ -649,9 +649,12 @@ reaches Swift through the generated `AgentToolbox`, `ToolboxItem` and
 `ToolboxSource` records. `CrewAgentToolbox` shows it in the agent detail after
 the relationship sections and before Actions:
 
-- A **Toolbox** section with the summary line, its fingerprint monospaced and
-  selectable. When a change is pending it shows **Toolbox changed: restart to
-  apply** and a **Restart** control. That control is the plain
+- A **Toolbox** section with the summary line under its header, without
+  repeating the word Toolbox: `b56e01d7c4a9 · 4 items · 2 not available`, the
+  fingerprint monospaced and selectable. VoiceOver reads "Toolbox
+  fingerprint" and spells the fingerprint out. When a change is pending it
+  shows **Toolbox changed: restart to apply** and a **Restart** control.
+  That control is the plain
   `AgentAction.restart` with the shared availability and reason, and it has
   no dialog. The section also shows the unpinned-definitions notice, and a
   Definitions disclosure with the fingerprints, digest, tool count and bytes.
@@ -662,7 +665,9 @@ the relationship sections and before Actions:
 - `CrewToolboxWords` keeps the same words as the Rust `AgentToolbox` helpers.
   It is presentation only and makes no FFI call. The shared `toolbox` warning
   is the team list's attention marker. The detail leaves it out of Activity
-  and problems because the section says the same thing.
+  and problems because the section says the same thing. `CrewTeamGraph` has
+  no attention marker, so it gets none: the warnings end each node's
+  accessibility label (`notes/toolboxes.md` §Display).
 
 Linux evidence: all 48 Swift files parse, the portable worker typecheck
 passes, `CrewToolboxWords` typechecks against the generated bindings in a

@@ -8,6 +8,8 @@ import type { App } from "../src/app";
 import { AppContext } from "../src/app";
 import { DecodeError, decodeAgent, type Agent } from "../src/protocol";
 import { TOOLBOX_PENDING, TOOLBOX_UNPINNED, definitionsUnpinned, originLabel, toolboxAttention, toolboxGroups, toolboxSummary } from "../src/toolbox";
+import { EntityList } from "../src/graph/EntityList";
+import { agentSummary } from "../src/graph/Summary";
 import { ToolboxSection } from "../src/views/Inspector";
 import { fixture } from "./fixtures";
 
@@ -67,7 +69,11 @@ describe("toolbox", () => {
     const headings = [...container.querySelectorAll("h3, h4")].map((h) => h.textContent);
     expect(headings).toEqual(["Toolbox", "MCP servers", "Skills", "Plugins", "Sources"]);
     const text = container.textContent!;
-    expect(text).toContain("Toolbox b56e01d7c4a9 · 4 items · 2 not available");
+    // The summary under the heading does not repeat it to sight; the
+    // fingerprint is named for a screen reader.
+    const summary = container.querySelector(".toolbox-summary")!;
+    expect(summary.textContent).toBe("Toolbox fingerprint b56e01d7c4a9 · 4 items · 2 not available");
+    expect(summary.querySelector(".vh")!.textContent).toBe("Toolbox fingerprint ");
     expect(text).toContain("Needs $SHOP_GITHUB_TOKEN");
     expect(text).toContain("Not available on Codex");
     expect(text).toContain("Bundle github");
@@ -91,5 +97,33 @@ describe("toolbox", () => {
     expect(queryByRole("button", { name: "Restart" })).toBeNull();
     expect(container.textContent).not.toContain(TOOLBOX_UNPINNED);
     expect([...container.querySelectorAll("h4")].map((h) => h.textContent)).toEqual(["Skills", "Sources"]);
+  });
+
+  test("the team List carries the reason in its summary line and the row's description, and only while it applies", () => {
+    const [qa, release] = agents();
+    const settled = { ...release, toolbox: { ...release.toolbox!, pending_fingerprint: null } };
+    const required = structuredClone(qa);
+    required.toolbox!.items[1].status = { code: "needs", text: "Needs $PLAYWRIGHT_TOKEN" };
+    expect(agentSummary(release, [], 0).detail).toContain(TOOLBOX_PENDING);
+    expect(agentSummary(required, [], 0).attention).toBe("Required playwright: Needs $PLAYWRIGHT_TOKEN");
+    for (const a of [qa, settled]) {
+      expect(agentSummary(a, [], 0).attention).toBeUndefined();
+      expect(agentSummary(a, [], 0).detail).not.toContain("Toolbox");
+    }
+    // jsdom lays nothing out: the list pane is 800 px tall, so both rows render.
+    globalThis.ResizeObserver ??= class { observe() {} unobserve() {} disconnect() {} } as unknown as typeof ResizeObserver;
+    const height = Object.getOwnPropertyDescriptor(HTMLElement.prototype, "clientHeight");
+    Object.defineProperty(HTMLElement.prototype, "clientHeight", { configurable: true, get() { return this.classList.contains("vlist") ? 800 : 0; } });
+    const { container } = render(() => (
+      <EntityList kind="agent" items={[qa, release]} selected={null} select={() => {}} open={() => {}}
+        summary={(a) => agentSummary(a, [], 0)} />
+    ));
+    const row = (id: string) => container.querySelector(`[data-agent="${id}"]`)!;
+    expect(row("release").getAttribute("aria-description")).toBe(TOOLBOX_PENDING);
+    expect(row("release").getAttribute("title")).toBe(TOOLBOX_PENDING);
+    expect(row("release").querySelector(".summary-detail")!.textContent).toContain(TOOLBOX_PENDING);
+    expect(row("qa").hasAttribute("aria-description")).toBe(false);
+    if (height) Object.defineProperty(HTMLElement.prototype, "clientHeight", height);
+    else delete (HTMLElement.prototype as { clientHeight?: number }).clientHeight;
   });
 });

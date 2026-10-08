@@ -2891,30 +2891,97 @@ mod vcs {
 #[test]
 fn detail_view_shows_the_effective_toolbox() {
     // notes/toolboxes.md §Display, T15: the summary and a pending change next
-    // to the runtime, the groups and sources at the end of the agent panel.
-    let mut app = app();
-    let mut snapshot = fixture::snapshot(NOW);
-    snapshot.agents.extend(fixture::toolbox_agents(NOW));
-    app.apply_snapshot(snapshot, NOW);
-    app.open_detail("release", NOW);
-    let screen = render_to_string(&app, 160, 70, NOW + 1000);
-    for needle in [
-        "toolbox   b56e01d7c4a9 · 4 items · 2 not available",
-        "Toolbox changed: restart to apply (R restart)",
-        "MCP definitions not pinned (proxy pending)",
-        "MCP servers",
-        "github Bundle github Needs $SHOP_GITHUB_TOKEN",
-        "lint-kit Member Not available on Codex",
-        "Sources",
-        "Your Codex MCP servers",
-        "Disabled (ambient, docs-local)",
-        "Cannot be excluded on Codex",
-        "without the sandbox",
-    ] {
-        assert!(screen.contains(needle), "missing {needle:?}\n{screen}");
+    // to the runtime; `T` shows the groups, sources and definition facts in
+    // the terminal pane, wrapped and scrolled like the diff, at the sizes
+    // terminals have.
+    for (width, height) in [(80, 24), (120, 30), (160, 70)] {
+        let mut app = app();
+        let mut snapshot = fixture::snapshot(NOW);
+        snapshot.agents.extend(fixture::toolbox_agents(NOW));
+        app.apply_snapshot(snapshot, NOW);
+        app.open_detail("release", NOW);
+        let size = format!("{width}x{height}");
+        let screen = render_to_string(&app, width, height, NOW + 1000);
+        for needle in [
+            "toolbox   b56e01d7c4a9 · 4 items",
+            "          2 not available",
+            "Toolbox changed: restart to apply (R restart)",
+            "T shows its items, sources and digest",
+        ] {
+            assert!(
+                screen.contains(needle),
+                "{size}: missing {needle:?}\n{screen}"
+            );
+        }
+        press(&mut app, KeyCode::Char('T'));
+        let first = render_to_string(&app, width, height, NOW + 1000);
+        assert!(
+            first.contains("MCP servers"),
+            "{size}: opens at the top\n{first}"
+        );
+        // Every row is reachable a page at a time, and nothing is cut off.
+        let mut seen = first.clone();
+        let mut last = first.clone();
+        for _ in 0..20 {
+            press(&mut app, KeyCode::PageDown);
+            let page = render_to_string(&app, width, height, NOW + 1000);
+            if page == last {
+                break;
+            }
+            seen.push_str(&page);
+            last = page;
+        }
+        for needle in [
+            "docs",
+            "https://docs.example.com/mcp",
+            "Bundle github · Needs $SHOP_GITHUB_TOKEN",
+            "github-mcp-server",
+            "repos,issues,pull_requests",
+            "Member · Not available on Codex",
+            "Claude Code plugin format",
+            "Sources",
+            "Disabled (ambient, docs-local)",
+            "Cannot be excluded on Codex",
+            "without the sandbox",
+            "Definitions",
+            "definition digest: unavailable",
+            "tools: unknown",
+            "definition bytes: unknown",
+        ] {
+            assert!(
+                seen.contains(needle),
+                "{size}: unreachable {needle:?}\n{seen}"
+            );
+        }
+        assert!(
+            last.contains("definition bytes: unknown"),
+            "{size}: the last page ends with the definitions\n{last}"
+        );
+        assert!(
+            !seen.contains("Subagents\n") && !seen.contains(" Hooks"),
+            "{size}"
+        );
+        // Home goes back to the top; T gives the terminal back.
+        press(&mut app, KeyCode::Home);
+        assert_eq!(
+            render_to_string(&app, width, height, NOW + 1000),
+            first,
+            "{size}"
+        );
+        press(&mut app, KeyCode::Char('T'));
+        let screen = render_to_string(&app, width, height, NOW + 1000);
+        assert!(
+            screen.contains("terminal ·") && !screen.contains("Definitions"),
+            "{size}\n{screen}"
+        );
     }
-    assert!(
-        !screen.contains("Subagents\n") && !screen.contains(" Hooks"),
-        "{screen}"
-    );
+    // A member without a toolbox says so.
+    let mut app = app();
+    app.apply_snapshot(fixture::snapshot(NOW), NOW);
+    let id = app.agents[0].id.clone();
+    app.open_detail(&id, NOW);
+    render_to_string(&app, 120, 30, NOW + 1000);
+    press(&mut app, KeyCode::Char('T'));
+    let screen = render_to_string(&app, 120, 30, NOW + 1000);
+    assert!(screen.contains("this member has no toolbox"), "{screen}");
 }

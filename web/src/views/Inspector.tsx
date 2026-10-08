@@ -345,8 +345,10 @@ export function ToolboxSection(props: { agent: Agent; toolbox: AgentToolbox }) {
   return (
     <section class="toolbox" aria-labelledby={`toolbox-${id()}`}>
       <h3 id={`toolbox-${id()}`}>Toolbox</h3>
+      {/* The heading says Toolbox; a screen reader hears what the fingerprint is. */}
       <p class="toolbox-summary">
-        Toolbox <code class="mono fingerprint" title={t().fingerprint}>{shortFingerprint(t())}</code>
+        <span class="vh">Toolbox fingerprint </span>
+        <code class="mono fingerprint" title={t().fingerprint}>{shortFingerprint(t())}</code>
         {toolboxSummary(t()).slice(`Toolbox ${shortFingerprint(t())}`.length)}
       </p>
       <Show when={t().pending_fingerprint}>
@@ -389,7 +391,7 @@ export function ToolboxSection(props: { agent: Agent; toolbox: AgentToolbox }) {
           </For>
         </ul>
       </Show>
-      <details class="toolbox-definitions">
+      <details class="process-details toolbox-definitions">
         <summary>Definitions</summary>
         <Facts rows={[
           ["fingerprint", t().fingerprint],

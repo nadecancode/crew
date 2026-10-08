@@ -64,7 +64,8 @@ impl Section {
 #[derive(Clone)]
 struct ToolboxView {
     root: gtk::Box,
-    summary: gtk::Label,
+    fingerprint: gtk::Label,
+    counts: gtk::Label,
     pending: gtk::Box,
     unpinned: gtk::Label,
     groups: gtk::Box,
@@ -76,7 +77,17 @@ impl ToolboxView {
     fn new(restart: &gtk::Button, reason: &gtk::Label) -> Self {
         let root = gtk::Box::new(gtk::Orientation::Vertical, 12);
         root.append(&common::heading_level("Toolbox", 2));
-        let summary = common::selectable("");
+        // The summary under its heading: `3f9a0c21e7b4 · 4 items · 1 not
+        // available`, the fingerprint monospaced and selectable.
+        let summary = gtk::Box::new(gtk::Orientation::Horizontal, 0);
+        let fingerprint = common::selectable("");
+        fingerprint.add_css_class("monospace");
+        fingerprint.set_valign(gtk::Align::Start);
+        summary.append(&fingerprint);
+        let counts = common::text("");
+        counts.set_valign(gtk::Align::Start);
+        counts.set_hexpand(true);
+        summary.append(&counts);
         root.append(&summary);
         let pending = gtk::Box::new(gtk::Orientation::Vertical, 8);
         pending.append(&common::warning(TOOLBOX_PENDING));
@@ -98,7 +109,8 @@ impl ToolboxView {
         root.set_visible(false);
         Self {
             root,
-            summary,
+            fingerprint,
+            counts,
             pending,
             unpinned,
             groups,
@@ -116,19 +128,22 @@ impl ToolboxView {
         let Some(toolbox) = toolbox else {
             return;
         };
-        // `Toolbox 3f9a0c21e7b4 · 4 items · 1 not available`, the fingerprint
-        // monospaced, the whole of it in the tooltip.
+        // The heading already says Toolbox; the whole fingerprint is in the
+        // tooltip.
         let short = toolbox.short_fingerprint();
         let summary = toolbox.summary();
-        let rest = summary
-            .strip_prefix(&format!("Toolbox {short}"))
-            .unwrap_or_default();
-        self.summary.set_markup(&format!(
-            "Toolbox <span font_family=\"monospace\">{}</span>{}",
-            gtk::glib::markup_escape_text(short),
-            gtk::glib::markup_escape_text(rest)
-        ));
-        self.summary.set_tooltip_text(Some(&toolbox.fingerprint));
+        self.fingerprint.set_label(short);
+        self.fingerprint
+            .set_tooltip_text(Some(&toolbox.fingerprint));
+        self.fingerprint
+            .update_property(&[gtk::accessible::Property::Label(&format!(
+                "Toolbox fingerprint {short}"
+            ))]);
+        self.counts.set_label(
+            summary
+                .strip_prefix(&format!("Toolbox {short}"))
+                .unwrap_or_default(),
+        );
         self.pending
             .set_visible(toolbox.pending_fingerprint.is_some());
         self.unpinned.set_visible(toolbox.definitions_unpinned());

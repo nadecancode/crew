@@ -38,7 +38,7 @@ export function EntityList<T extends { id: string; status: string }>(props: {
       render={(item) => {
         const summary = createMemo(() => props.summary(item));
         return <div class={`${props.kind === "agent" ? "team" : "task"}-row`} data-entity={item.id}
-        ref={(el) => el.setAttribute(`data-${props.kind}`, item.id)} role="button" tabindex="-1" aria-label={`${item.id}, ${item.status}`}
+        ref={(el) => el.setAttribute(`data-${props.kind}`, item.id)} role="button" tabindex="-1" aria-label={`${item.id}, ${item.status}`} aria-description={summary().attention} title={summary().attention}
         classList={{ selected: props.selected === item.id, satellite: props.satellite?.(item) }} onClick={() => props.open(item.id)}
         onContextMenu={(e) => props.menu?.(e, item.id)}>
           <div class="entity-summary">

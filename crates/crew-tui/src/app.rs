@@ -272,6 +272,9 @@ pub struct DetailState {
     pub pending: bool,
     pub requested_at: i64,
     pub show_diff: bool,
+    /// The pane shows the agent's effective toolbox (`T`), a document read
+    /// from the top and scrolled like the diff.
+    pub show_toolbox: bool,
     pub diff: Option<String>,
     /// Delivery state of the agent's inbox, by message id: (delivered, acked).
     pub delivery: HashMap<String, (bool, bool)>,
@@ -668,7 +671,7 @@ impl App {
         // Scrolled up, the pane shows the session transcript. It is read
         // when the scrolling starts and then left alone, so the text does
         // not move under the reader (`r` reads it again).
-        let scrolled = detail.scroll > 0 && !detail.show_diff;
+        let scrolled = detail.scroll > 0 && !detail.show_diff && !detail.show_toolbox;
         match (scrolled, detail.scrolled_at) {
             (true, None) => detail.scrolled_at = Some(now),
             (false, Some(_)) => {

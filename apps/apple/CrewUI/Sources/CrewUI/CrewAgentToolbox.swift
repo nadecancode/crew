@@ -11,10 +11,14 @@ struct CrewAgentToolbox<Restart: View>: View {
 
     var body: some View {
         Section {
-            (Text(verbatim: "Toolbox ")
-                + Text(verbatim: CrewToolboxWords.shortFingerprint(toolbox)).font(.body.monospaced())
+            // The header says Toolbox; VoiceOver hears what the fingerprint is.
+            (Text(verbatim: CrewToolboxWords.shortFingerprint(toolbox)).font(.body.monospaced())
                 + Text(verbatim: CrewToolboxWords.counts(toolbox)))
                 .textSelection(.enabled)
+                .accessibilityLabel(
+                    crewSpelledLabel("Toolbox fingerprint", CrewToolboxWords.shortFingerprint(toolbox))
+                        + Text(verbatim: CrewToolboxWords.counts(toolbox))
+                )
             if toolbox.pendingFingerprint != nil {
                 Label(CrewToolboxWords.pending, systemImage: "exclamationmark.triangle")
                 restart()

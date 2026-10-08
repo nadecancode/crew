@@ -5,7 +5,8 @@
 //! cargo run -p crew-tui --example preview -- 80 24       # another size
 //! cargo run -p crew-tui --example preview -- 120 40 p2p  # with a live P2P link
 //! ```
-//! Views: `dashboard` (default), `p2p`, `sub`, `empty`, `detail`, `tasks`, `logs`, `help`,
+//! Views: `dashboard` (default), `p2p`, `sub`, `empty`, `detail`, `toolbox` (an inspector with
+//! a toolbox), `toolbox-pane` (its `T` pane), `tasks`, `logs`, `help`,
 //! `compose`, `usage` (the dashboard with the usage strip), `model` (the model picker), and
 //! `launcher` (the work-style chooser).
 
@@ -13,6 +14,7 @@ use crew_core::rpc::{OutputResult, Push};
 use crew_core::types::MessageType;
 use crew_tui::app::{Compose, Modal, Reply, View};
 use crew_tui::{fixture, render_to_string, App};
+use ratatui::crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 
 fn main() {
     let args: Vec<String> = std::env::args().skip(1).collect();
@@ -96,6 +98,18 @@ fn main() {
                 },
                 now,
             );
+        }
+        "toolbox" | "toolbox-pane" => {
+            // The T02 `release` member: its summary, then (`T`) the pane.
+            let mut snapshot = fixture::snapshot(now);
+            snapshot.agents.extend(fixture::toolbox_agents(now));
+            app.apply_snapshot(snapshot, now);
+            app.open_detail("release", now);
+            if view == "toolbox-pane" {
+                render_to_string(&app, width, height, now);
+                let key = KeyEvent::new(KeyCode::Char('T'), KeyModifiers::NONE);
+                crew_tui::input::handle_key(&mut app, key, now, 10);
+            }
         }
         "tasks" => app.view = View::Tasks,
         "logs" => app.view = View::Logs,

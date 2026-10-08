@@ -42,7 +42,6 @@ export type UsageLimit = { kind: string; message: string; since: number; resets_
 
 // A member's effective toolbox (notes/toolboxes.md §Display). Status words come from the
 // daemon; codes only steer attention. Unknown kinds and codes stay displayable.
-export const TOOLBOX_ITEM_KIND = ["mcp", "skills", "plugins", "subagents", "hooks"] as const;
 export type ToolboxItemStatus = { code: string; text: string };
 export type ToolboxItem = { kind: string; name: string; origin: string; required: boolean; status: ToolboxItemStatus; detail?: string | null };
 export type ToolboxSource = { origin: string; kind?: string | null; label: string; status: ToolboxItemStatus; names: string[]; detail?: string | null };

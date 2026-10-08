@@ -97,17 +97,12 @@
 .current-work { background:var(--surface-raised); padding:12px; border-radius:var(--radius); }
 .current-work h3 { margin-top:0; color:var(--muted); font-size:12px; }
 .current-title { font-size:16px; font-weight:600; }
-.insp-tasks,.insp-messages,.insp-problems { list-style:none; padding:0; font-size:13px; }
-.insp-tasks li,.insp-messages li,.insp-problems li { padding:8px 0; overflow-wrap:anywhere; }
+.insp-tasks,.insp-messages,.insp-problems,.toolbox ul { list-style:none; padding:0; font-size:13px; }
+.insp-tasks li,.insp-messages li,.insp-problems li,.toolbox li { padding:8px 0; overflow-wrap:anywhere; }
 .insp-messages .msg-line { display:block; width:100%; }
 .process-details { padding:16px 0; } .process-details summary { cursor:pointer; font-weight:600; margin-bottom:8px; }
-.toolbox h4 { margin:12px 0 4px; font-size:13px; font-weight:600; }
-.toolbox-items,.toolbox-sources { list-style:none; padding:0; margin:0; font-size:13px; }
-.toolbox-items li,.toolbox-sources li { padding:4px 0; overflow-wrap:anywhere; min-width:0; }
-.toolbox .detail { overflow-wrap:anywhere; }
-.toolbox-summary .fingerprint { user-select:all; }
-.toolbox-definitions { padding:8px 0; } .toolbox-definitions summary { cursor:pointer; }
-.toolbox-definitions dd { overflow-wrap:anywhere; }
+/* Read by a screen reader, not shown. */
+.vh { position:absolute; width:1px; height:1px; overflow:hidden; opacity:0; }
 .transcript { display:flex; flex-direction:column; flex:1; min-height:0; }
 .tr-detail { max-height:40%; overflow:auto; border-top:1px solid var(--line); padding:8px 16px; }
 .diff { padding:0; } .diff-text { font-size:12px; padding:12px 16px; white-space:pre; }

@@ -94,12 +94,40 @@ fn core() -> ClientCore {
     )
 }
 fn core_with_mode(mode: ConnectionMode, tiers: Vec<GrantTier>) -> ClientCore {
+    core_with_snapshot(mode, tiers, |_| ())
+}
+/// The fixture core with claude-1 given the T02 `release` toolbox, whose
+/// change is pending: the shared projection adds its attention warning.
+fn core_with_toolbox() -> ClientCore {
+    core_with_snapshot(
+        ConnectionMode::LocalOperator,
+        vec![GrantTier::Read, GrantTier::Control, GrantTier::Terminal],
+        |snapshot| {
+            let agents: Vec<crew_protocol::Agent> =
+                serde_json::from_str(include_str!("../../crew/tests/fixtures/web/toolbox.json"))
+                    .unwrap();
+            let release = agents.into_iter().find(|a| a.id == "release").unwrap();
+            let member = snapshot
+                .agents
+                .iter_mut()
+                .find(|a| a.id == "claude-1")
+                .unwrap();
+            member.toolbox = release.toolbox;
+        },
+    )
+}
+fn core_with_snapshot(
+    mode: ConnectionMode,
+    tiers: Vec<GrantTier>,
+    edit: impl FnOnce(&mut crew_protocol::rpc::Snapshot),
+) -> ClientCore {
     let fixture: serde_json::Value = serde_json::from_str(include_str!(
         "../../../fixtures/native/state/parked-resumption.case.json"
     ))
     .unwrap();
-    let snapshot: crew_protocol::rpc::Snapshot =
+    let mut snapshot: crew_protocol::rpc::Snapshot =
         serde_json::from_value(fixture["steps"][0]["snapshot"].clone()).unwrap();
+    edit(&mut snapshot);
     let mut core = ClientCore::new(ClientConfig {
         limits: policy::NATIVE_LIMITS,
         snapshot_mode: SnapshotMode::OrderedConnection,
@@ -222,7 +250,7 @@ fn gtk_scoped_views_confirmation_terminal_order_and_live_local_service() {
     recorder.queries(&c, &core);
     let inspector = c.agent.borrow().as_ref().unwrap().1.clone();
     assert!(text(shell.window()).contains("Current work\ncurrent"));
-    toolbox_section(&core, &recorder, &inspector);
+    toolbox_section(&c, &shell, &core, &recorder);
     c.select(key(Entity::Task("parked-old".into())));
     recorder.queries(&c, &core);
     assert!(text(shell.window()).contains("Waiting"));
@@ -1052,48 +1080,34 @@ fn signoff_items(c: &Controller) {
     c.header.set_live(c.live.get());
 }
 
-/// notes/toolboxes.md §Display: the Toolbox section after the facts, with
-/// headings assistive technology reads as headings, only the groups that have
-/// entries, statuses in words and the plain Restart. The attention warning
-/// stays out of the header, where the section would repeat it.
-fn toolbox_section(
-    core: &ClientCore,
-    recorder: &Recording,
-    inspector: &views::agent::AgentInspector,
-) {
-    let ViewPayload::AgentDetail(original) = core
-        .view(
-            ViewQuery::AgentDetail {
-                id: "claude-1".into(),
-            },
-            clock(),
-        )
-        .unwrap()
-        .payload
-    else {
-        panic!("agent detail projection");
-    };
-    let agents: Vec<crew_protocol::Agent> =
-        serde_json::from_str(include_str!("../../crew/tests/fixtures/web/toolbox.json")).unwrap();
-    let mut detail = original.clone();
-    let member = detail.agent.as_mut().unwrap();
-    member.agent.toolbox = agents
-        .iter()
-        .find(|agent| agent.id == "release")
-        .unwrap()
-        .toolbox
-        .clone();
-    member.warnings.push(WarningFact {
-        code: TOOLBOX_WARNING.into(),
-        text: crew_protocol::TOOLBOX_PENDING.into(),
-        entity: None,
-    });
-    let restart_available = member
-        .actions
-        .iter()
-        .any(|a| a.action == ActionKind::Restart && a.available);
-    assert!(restart_available, "the fixture agent can restart");
-    inspector.update(&detail, true);
+/// notes/toolboxes.md §Display, fed through the shared projection: the
+/// Toolbox section after the facts, with headings assistive technology reads
+/// as headings, only the groups that have entries, statuses in words and the
+/// plain Restart. A pending change is the team list's attention marker, with
+/// the reason in the tooltip; the graph, which has no marker, adds no chrome;
+/// the inspector header leaves it to the section.
+fn toolbox_section(c: &Controller, shell: &Shell, core: &ClientCore, recorder: &Recording) {
+    let agent = || key(Entity::Agent("claude-1".into()));
+    let toolbox = core_with_toolbox();
+    c.refresh(Destination::Team);
+    c.select(agent());
+    recorder.queries(c, &toolbox);
+    let inspector = c.agent.borrow().as_ref().unwrap().1.clone();
+    let rows: Vec<gtk::ListBoxRow> = descendants(shell.window().upcast_ref())
+        .into_iter()
+        .filter_map(|w| w.downcast::<gtk::ListBoxRow>().ok())
+        .filter(|r| r.tooltip_text().as_deref() == Some(crew_protocol::TOOLBOX_PENDING))
+        .collect();
+    assert_eq!(rows.len(), 1, "claude-1's team row has the reason");
+    assert!(text(&rows[0]).contains(crew_protocol::TOOLBOX_PENDING));
+    assert!(
+        !descendants(shell.window().upcast_ref())
+            .into_iter()
+            .filter(|w| w.has_css_class("crew-graph-node"))
+            .any(|node| text(&node).contains(crew_protocol::TOOLBOX_PENDING)
+                || node.tooltip_text().is_some()),
+        "no new chrome on the graph"
+    );
     let labels: Vec<gtk::Label> = descendants(inspector.root.upcast_ref())
         .into_iter()
         .filter_map(|w| w.downcast::<gtk::Label>().ok())
@@ -1110,19 +1124,22 @@ fn toolbox_section(
     );
     let toolbox_heading = labels.iter().find(|l| l.label() == "Toolbox").unwrap();
     assert!(toolbox_heading.is_mapped());
-    let summary = labels
+    // The heading says Toolbox; the summary does not repeat it.
+    let fingerprint = labels
         .iter()
-        .find(|l| l.text().starts_with("Toolbox b56e01d7c4a9"))
-        .expect("summary line");
+        .find(|l| l.label() == "b56e01d7c4a9")
+        .expect("fingerprint");
+    assert!(fingerprint.is_selectable() && fingerprint.has_css_class("monospace"));
     assert_eq!(
-        summary.text(),
-        "Toolbox b56e01d7c4a9 · 4 items · 2 not available"
-    );
-    assert!(summary.is_selectable());
-    assert_eq!(
-        summary.tooltip_text().as_deref(),
+        fingerprint.tooltip_text().as_deref(),
         Some("b56e01d7c4a98f3e2d1c0b9a8f7e6d5c4b3a29180f7e6d5c4b3a2918f0e1d2c3")
     );
+    let summary = fingerprint.parent().unwrap();
+    assert_eq!(
+        text(&summary).replace('\n', ""),
+        "b56e01d7c4a9 · 4 items · 2 not available"
+    );
+    assert!(!text(&inspector.root).contains("Toolbox b56e01d7c4a9"));
     assert_eq!(
         labels
             .iter()
@@ -1134,7 +1151,15 @@ fn toolbox_section(
     assert!(labels
         .iter()
         .any(|l| l.label() == crew_protocol::TOOLBOX_UNPINNED && l.is_mapped()));
-    // The digest and byte counts sit in the collapsed detail.
+    // The section's Restart is the Actions menu's: same action, availability.
+    let restart = descendants(inspector.root.upcast_ref())
+        .into_iter()
+        .filter_map(|w| w.downcast::<gtk::Button>().ok())
+        .find(|b| b.label().as_deref() == Some("Restart") && !b.has_css_class("flat"))
+        .expect("toolbox Restart");
+    assert!(restart.is_mapped() && restart.is_sensitive());
+    capture("fixture-agent-toolbox");
+    // Scrolled to the groups, the Sources and the detail.
     let definitions = descendants(inspector.root.upcast_ref())
         .into_iter()
         .filter_map(|w| w.downcast::<gtk::Expander>().ok())
@@ -1142,6 +1167,17 @@ fn toolbox_section(
         .expect("Definitions detail");
     assert!(!definitions.is_expanded());
     definitions.set_expanded(true);
+    let skills = labels.iter().find(|l| l.label() == "Skills").unwrap();
+    let scroll = skills
+        .ancestor(gtk::ScrolledWindow::static_type())
+        .and_downcast::<gtk::ScrolledWindow>()
+        .unwrap();
+    settle();
+    let (_, y) = skills
+        .translate_coordinates(&scroll.child().unwrap(), 0.0, 0.0)
+        .unwrap();
+    scroll.vadjustment().set_value(y - 24.0);
+    capture("fixture-agent-toolbox-groups");
     let shown = text(&inspector.root);
     for needle in [
         "docs\nBundle github · Active",
@@ -1156,14 +1192,7 @@ fn toolbox_section(
     ] {
         assert!(shown.contains(needle), "{needle:?} in {shown}");
     }
-    // The section's Restart is the Actions menu's: same action, availability.
-    let restart = descendants(inspector.root.upcast_ref())
-        .into_iter()
-        .filter_map(|w| w.downcast::<gtk::Button>().ok())
-        .find(|b| b.label().as_deref() == Some("Restart") && !b.has_css_class("flat"))
-        .expect("toolbox Restart");
-    assert!(restart.is_mapped() && restart.is_sensitive());
-    capture("fixture-agent-toolbox");
+    scroll.vadjustment().set_value(0.0);
     restart.emit_clicked();
     let planned = recorder.0.borrow().iter().rev().find_map(|r| match r {
         Request::Plan { intent, .. } => Some(intent.clone()),
@@ -1178,8 +1207,16 @@ fn toolbox_section(
         }),
         "the plain restart: no dialog, never fresh"
     );
-    inspector.update(&original, true);
+    c.refresh(Destination::Team);
+    c.select(agent());
+    recorder.queries(c, core);
     assert!(!toolbox_heading.is_mapped(), "no toolbox, no section");
+    assert!(
+        !descendants(shell.window().upcast_ref())
+            .into_iter()
+            .any(|w| w.tooltip_text().as_deref() == Some(crew_protocol::TOOLBOX_PENDING)),
+        "no marker once the change is gone"
+    );
 }
 
 /// Designer follow-ups V2–V5: the sidebar status measure and blank result
