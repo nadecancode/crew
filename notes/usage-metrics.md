@@ -485,6 +485,8 @@ plausible total.
 
 The same wide-integer rule applies to aggregate token counters and counts,
 not only money. Do not round a counter through a JSON floating-point value.
+Round displayed lower bounds down and upper bounds up at the chosen display
+precision; “at least” must not round above its supported lower bound.
 
 ### Arithmetic examples for implementation fixtures
 
@@ -648,6 +650,26 @@ designer's unavailable/not-reported/no-price labels, show estimate ranges
 and their price-book date, and keep quota pressure separate from efficiency.
 Full new records/converters and old/new capability fixtures land together;
 none of these live values enters standing instructions.
+
+Agreed display states for the frontend implementation:
+
+| State | Copy / behavior |
+| --- | --- |
+| Finite cost interval | `≈ $2,540–$2,610`. |
+| Partial cost with no finite upper bound | `at least $2,556 · 1 model has no price`, or `· cost observed for 104 of 112` for the completion cohort. No approximation sign or range dash on this state. |
+| No eligible cost | `Estimate unavailable · <reason>`. |
+| Price basis | Scope line: `list-price estimate, prices checked Oct 8`; detailed help states the standard API-equivalent basis. |
+| Unknown request cardinality | `≥ 9,612` plus the actual reason, for example `Codex reports some usage in batches; those are not counted as requests`. Turns use their own correlation-coverage reason. |
+| Per-metric coverage | Scope line can name `hit rate from 11 of 12 agents`; each incomplete tile keeps its own coverage suffix. There is no universal all-metrics reporting count. |
+| Source backlog | `Still reading 2 session files · figures may change`; source gaps appear below the tiles and are never zeros. Corrections can lower figures as well as raise them. |
+| Write-share interval or absence | `38–44%`, or `Write share unavailable · write counts not reported`. |
+| Incomplete category bucket | Hatched gap labelled `split not reported`; no zero-height substitute. |
+| Tracking boundary | `Tracking since Oct 7, 22:40`; `Earlier usage not tracked` for the preceding history. |
+| Work attribution | Separate `No epic` and `Not attributed` breakdown rows. |
+
+The designer folds this copy and the first-completion/Requests/Turns rules
+into `dashboard-features.md` after design approval. Existing examples there
+which divide by the current done count are superseded by this cohort contract.
 
 ## Acceptance and implementation split
 
