@@ -168,18 +168,27 @@ the wording holds for them too, since they are woken by a line naming the
 command.
 
 **1b. Mark a message read once its full text is in the session.** Proposed
-card for runtime, after `cache-delivery`.
+card for runtime, after `cache-delivery` (D1) lands. Runtime confirmed
+(m-eb6097657782) that D1 keeps today's read semantics, so 1b is a separate
+change on top of it.
 
-In `delivered()`, acknowledge the ids whose full body went into the session.
-That is the point where `cache-delivery` already records delivery, which
-differs by route:
+In `delivered()`, acknowledge an id only when there is proof that its full,
+unchanged body entered the session. The point where delivery is recorded is
+not enough on its own:
 
-- queued Claude delivery: the native turn is observed;
-- socket routes: `crew delivered` runs;
-- Codex: the queue replies;
-- terminal: the prompt is submitted.
+- queued Claude delivery: D1's observed native turn marker proves the message
+  was routed and consumed, but not that its body arrived unchanged, since a
+  native hook can rewrite the prompt. Acknowledge only when the observed
+  prompt carries the full text of that id, for example by matching a digest
+  of the delivered block.
+- socket routes: `crew delivered` runs; the same full-body proof applies.
+- Codex: the queue replies with the text crew sent, which `clip_for_argv`
+  may have cut.
+- terminal: the prompt is submitted after flattening, and herdr panes may
+  reflow it.
 
-Two exceptions keep a message unread:
+Without that proof the message stays unread, as today. Two cases always keep
+a message unread:
 
 - Shell members receive only the wake-up line (`agents/shell.rs:61-66`), so
   their messages stay unread until `crew ctl inbox`.
@@ -193,9 +202,10 @@ Two effects to carry along in the card:
   `web/src/views/Inspector.tsx:149`) then counts the messages that have not
   reached the session yet, which is what an operator wants to see.
 - Parked-card wakeups (`record_task_wakeups`, `daemon/overlap.rs:130`) run
-  today only on the inbox path. The card moves that call into the shared
-  acknowledgement, so a parked card still learns of messages delivered
-  in-band.
+  today only on the inbox path. The card records the wakeup before it
+  acknowledges, in the same order as the inbox path
+  (`daemon/handlers.rs:415-424`), so a parked card still learns of messages
+  delivered in-band.
 
 **1c. Restart and compaction notices.** Proposed card; owners are listed
 under "Owners and cards".
@@ -218,8 +228,12 @@ under "Owners and cards".
   - Deliver one short message and one of 4,001 characters.
   - `inbox(unread_only)` returns only the long one, and the short one has
     `acked_at` set.
+  - A delivery whose observed prompt differs from the sent block (a hook
+    rewrote it) stays unread.
+  - A Codex delivery cut by `clip_for_argv` stays unread, and its suffix
+    names the id.
   - A shell member's message stays unread.
-  - A parked card still records the wakeup.
+  - A parked card records the wakeup before the acknowledgement.
 - **1c:** string tests on the restart, recovery and compaction notices.
   - No `agent_inbox` without `id:`.
   - No `tasks_list` in a member's compaction notice.
@@ -364,9 +378,12 @@ three such reminders while its own measurement subagent was running.
   …)`. 81 of its 154 turns did only that.
 - *Fix.* `cache-obligation-wakes` (D4, landed in 66eadf2f) already suppresses
   the follow-up for settled obligations and identified replies. Most of this
-  sample predates it. Rerun `turns.mjs --since 2026-10-08T06:29Z` once there
-  are a few hours of sessions after D4 before changing anything more.
-  Owner: content.
+  sample predates it. Rerun `turns.mjs` over a window that starts when the
+  running daemon was confirmed to be a build containing D4, not at the merge
+  time (2026-10-08T06:29Z), and report the native sessions and builds the
+  window covers. Change nothing more until that rerun shows a need. Genuine
+  `message` and `question` obligations stay; no wording heuristic decides
+  that a message needed nothing (`notes/prompt-cache.md` D4). Owner: content.
 
 **3c. The Claude bridge's wake-up prompt.**
 
@@ -398,8 +415,11 @@ three such reminders while its own measurement subagent was running.
   Bash task is in that state.
 - *Fix (proposed, runtime with the Claude bridge, low priority).* Report
   background tasks the bridge sees as running as activity, so that
-  `idle_since` does not start. Only 21 reminder turns in the sample were
-  wasted ($0.83), so this waits until the bridge has a cheap signal for it.
+  `idle_since` does not start. That needs a real, bounded activity signal
+  from the runtime (a task that never reports back must not suppress
+  reminders forever). The 90 s, three-reminder policy stays until such a
+  signal exists and evidence supports the change. Only 21 reminder turns in
+  the sample were wasted ($0.83).
 
 **3f. Launch prompt for a member with nothing assigned.**
 
@@ -415,7 +435,9 @@ three such reminders while its own measurement subagent was running.
   sentence goes in `cache-standing-prompts`' byte snapshot. Measurement:
   after 2026-10-08T07:20Z, "main fast-forwarded" no longer appears as a
   turn-starting `message` opening.
-- **3b:** rerun of `turns.mjs` with `--since` set to D4's landing time.
+- **3b:** rerun of `turns.mjs` with `--since` set to the time the running
+  daemon was confirmed on a D4 build, with session and build coverage in the
+  report.
 - **3c:** `cache-acceptance`: the bridge's wake-up opening count is 0 for
   ordinary traffic.
 - **3d:** limits test: successive `Credits` retries are spaced 30 min, 1 h,
@@ -457,12 +479,12 @@ Most of the extra round trips come from pattern 1: `agent_inbox` calls are
 | 3a landing news as status broadcast | orchestrator behaviour | orchestrator | applied 2026-10-08 |
 | 3a briefing sentence | `agents/prompt.rs` | native-architect, inside `cache-standing-prompts` | proposed |
 | 1b mark read on delivery, id in the truncation suffix | `daemon/delivery.rs`, `daemon/handlers.rs`, `daemon/overlap.rs`, `agents/prompt.rs` `clip` | runtime, new card after `cache-delivery`; the one-line `clip` change agreed with native-architect | proposed |
-| 1c restart and compaction notices | `daemon/supervisor/launch.rs`, `daemon/supervisor/recovery.rs`, `daemon/context.rs` | runtime for the restart notices; `launch.rs` serialised with `cache-standing-prompts` | proposed |
+| 1c restart and compaction notices | `daemon/supervisor/launch.rs`, `daemon/supervisor/recovery.rs`, `daemon/context.rs` | runtime, after D1's final source; `launch.rs` serialised with `cache-standing-prompts` | proposed |
 | 2a compact board view | `crates/crew/src/mcp/tools.rs` `render_tasks`, `Call::Tasks` | orchestrator to assign; the tool-shape change lands once per build | proposed |
 | 3b re-measure the no-tool-call follow-up after D4 | `daemon/turns.rs` only if the rerun shows a need | content | proposed |
 | 3c bridge wake-up prompt | `assets/crew-bridge.register.ts` | runtime, `cache-delivery`; verified by `cache-acceptance` | in progress |
-| 3d backoff for `Credits` | `daemon/limits.rs` | runtime | proposed, low priority |
-| 3e background work counts as activity | `assets/crew-bridge.register.ts`, `supervisor/health.rs` | runtime with content | proposed, low priority |
+| 3d backoff for `Credits` | `daemon/limits.rs` | runtime, its own card | proposed, low priority |
+| 3e background work counts as activity | `assets/crew-bridge.register.ts`, `supervisor/health.rs` | runtime with content, its own card, once a bounded activity signal exists | proposed, low priority |
 
 ## Reproducing
 
