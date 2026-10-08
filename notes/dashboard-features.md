@@ -140,7 +140,7 @@ order:
 - the status word;
 - `N of M done`, plus `· K failed` when there are failures;
 - the agents with unfinished tasks in it (at most three ids, then `+N`);
-- the age since the last change.
+- the age since the last change (the epic's `updated_at`).
 
 A thin progress bar under the title uses `--ok` for done and `--err` for
 failed. It is decorative: the text carries the figures. Selecting the header
@@ -202,11 +202,14 @@ The side panel's detail for an epic shows, in this order:
 
 - the title and status;
 - the source ask: the operator message's first lines, with a link that opens
-  it in the Message bus;
+  it in the Message bus. The epic carries only the message id. The text is
+  read through the authorized message read when the panel opens, and is
+  never copied into the epic data. A viewer who cannot read the message
+  sees only its id;
 - the objective;
 - the counts, as figures and a bar;
 - the timeline: created, first task started, closed;
-- the agents with their task counts;
+- the agents with their task counts (from the epic summary's agent counts);
 - the epic's usage when the metrics provide it (§Usage metrics);
 - its tasks, as a compact list with the same fold;
 - the docs its tasks link to (§Docs, "Links into Docs").
