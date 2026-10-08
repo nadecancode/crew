@@ -1036,9 +1036,15 @@ mod tests {
                     assert!(!ctx.agent_dir.join("crew-toolbox/hooks").exists());
                 }
                 RuntimeKind::Codex => {
-                    assert_eq!(first.runtime.codex_skill_roots, [snapshot.path.clone()])
+                    assert_eq!(
+                        first.runtime.codex_skill_roots,
+                        std::slice::from_ref(&snapshot.path)
+                    )
                 }
-                RuntimeKind::Pi => assert_eq!(first.runtime.pi_skills, [snapshot.path.clone()]),
+                RuntimeKind::Pi => assert_eq!(
+                    first.runtime.pi_skills,
+                    std::slice::from_ref(&snapshot.path)
+                ),
                 _ => unreachable!(),
             }
             ctx.crew_pin = Some(other.clone());

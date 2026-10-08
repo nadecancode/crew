@@ -233,6 +233,28 @@ fn compact_cli_is_opt_in_pinned_and_recovers_through_the_member_binding() {
             if sandboxed {
                 team.workspace.sandbox.mode = SandboxMode::Required;
             }
+            if sandboxed && runtime == RuntimeKind::Claude {
+                // Execute the selected script inside the real member sandbox,
+                // before the recorded CLI reports ready. No extra mounts/rights.
+                write(
+                    &fixture._clis.path().join("claude"),
+                    &format!(
+                        r#"#!/bin/sh
+set -eu
+if [ -n "${{CREW_COMPACT_CLI_HELPER:-}}" ]; then
+  compact_script="$(dirname "$CREW_IDENTITY")/crew-toolbox/skills/compact-cli/scripts/output"
+  printf 'running 1 test\ntest fixture ... ok\ntest result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s\n' > compact-capture.log
+  "$compact_script" view compact-capture.log --exit-code 0 > compact-view.json
+  compact_ref=$(sed -n 's/.*"reference":"\([^"]*\)".*/\1/p' compact-view.json)
+  "$compact_script" raw "$compact_ref" > compact-recovered.log 2> compact-range.json
+  cmp compact-capture.log compact-recovered.log
+fi
+exec {} fake-cli claude "$@"
+"#,
+                        s.sandboxed_crew()
+                    ),
+                );
+            }
             fixture.run(&team);
             let home = if sandboxed {
                 s.workspace
@@ -247,6 +269,17 @@ fn compact_cli_is_opt_in_pinned_and_recovers_through_the_member_binding() {
                 "fake-codex-server.json"
             };
             let record = fixture.record(&home.join(record_name));
+            if sandboxed && runtime == RuntimeKind::Claude {
+                let workdir = Path::new(record["cwd"].as_str().unwrap());
+                assert_eq!(
+                    read_json(&workdir.join("compact-view.json")).unwrap()["kind"],
+                    "summary"
+                );
+                assert_eq!(
+                    std::fs::read(workdir.join("compact-capture.log")).unwrap(),
+                    std::fs::read(workdir.join("compact-recovered.log")).unwrap()
+                );
+            }
             let pin = s.crew_copy();
             assert_eq!(record["env"]["CREW_COMPACT_CLI_HELPER"], json!(pin));
             let skill = if runtime == RuntimeKind::Claude {
@@ -348,8 +381,10 @@ fn guarded_codex_reports_compact_cli_unavailable_without_changing_permissions() 
         .as_deref()
         .unwrap()
         .contains("native sandbox"));
-    let roots = fixture.record(&s.root().join("codex-home/fake-codex-skill-roots.json"));
-    assert_eq!(roots["extraRoots"], json!([]));
+    assert!(!s
+        .root()
+        .join("codex-home/fake-codex-skill-roots.json")
+        .exists());
 }
 
 #[test]

@@ -46,7 +46,7 @@ json(`${root}/versions.json`, { ...versions, node: process.version, executable_s
 // a recorded stand-in; native loading/permission/history are exercised below.
 const work = `${root}/workspace`;
 const fixtureEnv = { ...env(`${root}/daemon-home`), CLAUDE_CONFIG_DIR: `${root}/fake-home`, CREW_GLOBAL_CONFIG: `${root}/no-global.toml`, PATH: `${root}/bin:${process.env.PATH}` };
-put(`${root}/bin/claude`, `#!/bin/sh\nexec ${quote(crew)} fake-cli claude "$@"\n`);
+put(`${root}/bin/claude`, `#!/bin/sh\nif [ -n "\${CREW_LAUNCH:-}" ]; then printf 'compact-probe-launch:%s\\n' "$CREW_LAUNCH"; fi\nexec ${quote(crew)} fake-cli claude "$@"\n`);
 fs.chmodSync(`${root}/bin/claude`, 0o700);
 json(`${root}/team.json`, { project: 'compact-probe', objective: 'Offline toolbox fixture', workspace: { path: work, init: true, isolation: 'shared', vcs: 'git', sandbox: { mode: 'off' } }, backend: 'pty', orchestrator: { agent: false }, defaults: { max_restarts: 0 }, agents: [{ id: 'probe', role: 'Offline fixture', runtime: 'claude', toolbox: { include: ['compact-cli'] } }] });
 const stub = await startStub();
@@ -62,6 +62,7 @@ try {
   const pin = `${work}/.crew/bin/${pinNames[0]}`;
   const manifest = JSON.parse(fs.readFileSync(`${skill}/helper.json`));
   assert.equal(manifest.helper_sha256, sha(fs.readFileSync(pin)));
+  const description = fs.readFileSync(`${skill}/SKILL.md`, 'utf8').match(/^description: (.+)$/m)[1];
   const identity = `${work}/.crew/agents/probe/identity.json`;
   const capture = `${root}/capture.txt`;
   const raw = fs.readFileSync(new URL('../../crates/crew-core/tests/fixtures/output-view/cargo-success.txt', import.meta.url), 'utf8');
@@ -159,6 +160,10 @@ try {
         ? [...new Map(requests().flatMap(r => r.body.input).filter(item => item.type === 'function_call_output').map(item => [item.call_id, item.output])).values()]
         : [...new Map(requests().flatMap(r => r.body.messages).flatMap(m => Array.isArray(m.content) ? m.content.filter(c => c.type === 'tool_result') : []).map(c => [c.tool_use_id, c.content])).values()];
       assert.equal(outputs.length, enabled ? 4 : 2, `${label}: every scripted tool result observed`);
+      const initial = JSON.stringify(requests()[0].body);
+      const catalogName = runtime === 'claude' ? '- crew-toolbox:compact-cli: ' : runtime === 'codex' ? '- compact-cli: ' : '<name>compact-cli</name>';
+      assert.equal(initial.includes(catalogName), enabled, `${label}: selected catalog name, absent from baseline`);
+      assert.equal(initial.includes(description), enabled, `${label}: exact selected description, absent from baseline`);
       const read = JSON.stringify(outputs[1]);
       assert.ok(read.includes('source line 1: exact version=1.0 checksum=00000000'), `${label}: native read starts exactly`);
       assert.ok(read.includes('source line 150: exact version=1.149 checksum=00000095'), `${label}: native read preserves selected line`);
@@ -178,7 +183,6 @@ try {
         assert.ok(JSON.stringify(outputs[3]).includes('test result: ok.'), `${label}: raw recovery reached native model`);
         assert.equal(await run(`${label}-exact-raw`, `${skill}/scripts/output`, recovery, { env: nativeEnv }), raw);
         }
-        assert.ok(JSON.stringify(requests()[0].body).includes('compact-cli'), `${label}: skill discoverable`);
       }
       stub.setLabel(`${label}-resume`);
       const follow = runtime === 'claude' ? [...args, ...resume, '--', 'Follow-up fixture.'] : runtime === 'codex' ? [...args.slice(0, -2), ...resume] : [...args, ...resume];
@@ -194,7 +198,7 @@ try {
       // already emitted to the model must remain present byte-for-byte.
       for (const result of outputs) assert.ok(JSON.stringify(clean(later)).includes(JSON.stringify(clean(result))), `${label}: old result remains in resumed history`);
       assert.ok(later.length > earlier.length);
-      arms.push({ enabled, denied: true, native_read: read, transcript_prefix_sha256: sha(before), history_stable: true, requests: requests().length });
+      arms.push({ enabled, denied: true, catalog_selection_verified: true, native_read: read, transcript_prefix_sha256: sha(before), history_stable: true, requests: requests().length });
     }
     // Timings in Codex's shell envelope are native metadata, not Read bytes.
     if (runtime !== 'codex') assert.equal(arms[0].native_read, arms[1].native_read, `${runtime}: enabling skill leaves native Read output/metadata unchanged`);
@@ -203,11 +207,33 @@ try {
     }
   }
   const skillBefore = Object.fromEntries(walk(skill).map(file => [path.relative(skill, file), sha(fs.readFileSync(file))]));
+  const memberStatus = async label => JSON.parse(await run(label, crew, ['status', '--json', '-C', work], { env: fixtureEnv })).agents.find(agent => agent.id === 'probe');
+  const beforeRestart = await memberStatus('status-before-restart');
+  const launchRecord = `${root}/fake-home/fake-claude-probe.json`;
+  const launchBefore = JSON.parse(fs.readFileSync(launchRecord)).env.CREW_LAUNCH;
+  assert.ok(beforeRestart.pid && launchBefore, 'original launch identity captured');
   await run('member-restart', crew, ['agent', 'restart', 'probe', '-C', work], { env: fixtureEnv });
-  for (let i = 0; i < 300 && !fs.existsSync(`${skill}/scripts/output`); i++) await pause(50);
+  let afterRestart, launchAfter, terminalReady = false;
+  for (let i = 0; i < 150; i++) {
+    afterRestart = await memberStatus(`status-after-restart-${i}`);
+    try { launchAfter = JSON.parse(fs.readFileSync(launchRecord)).env.CREW_LAUNCH; } catch { launchAfter = undefined; }
+    if (afterRestart?.pid && afterRestart.pid !== beforeRestart.pid && launchAfter && launchAfter !== launchBefore
+        && afterRestart.toolbox?.items[0]?.status.code === 'active') {
+      const terminal = await run(`ready-after-restart-${i}`, crew, ['agent', 'output', 'probe', '-n', '2000', '-C', work], { env: fixtureEnv });
+      const marker = terminal.indexOf(`compact-probe-launch:${launchAfter}`);
+      terminalReady = marker >= 0 && terminal.indexOf('fake claude ready', marker) > marker;
+      if (terminalReady) break;
+    }
+    await pause(100);
+  }
+  assert.ok(afterRestart?.pid && afterRestart.pid !== beforeRestart.pid, 'restart produced a new process');
+  assert.ok(launchAfter && launchAfter !== launchBefore, 'new process recorded its new launch identity');
+  assert.equal(terminalReady, true, 'new CLI printed readiness after its current launch marker and session-start hook');
+  assert.equal(afterRestart.toolbox.items[0].status.code, 'active');
+  assert.equal(afterRestart.toolbox.fingerprint, beforeRestart.toolbox.fingerprint);
   assert.deepEqual(Object.fromEntries(walk(skill).map(file => [path.relative(skill, file), sha(fs.readFileSync(file))])), skillBefore);
   assert.equal(await run('helper-after-restart', `${skill}/scripts/output`, viewArgs, { env: { ...fixtureEnv, ...binding } }), once);
-  json(`${root}/report.json`, { versions, helper: manifest, runtime_probes: reports, stable_after_clock_and_restart: true, provider_calls: 0, network: 'unshared namespace; localhost stub only', runs });
+  json(`${root}/report.json`, { versions, helper: manifest, runtime_probes: reports, stable_after_clock_and_restart: true, restart_new_pid_and_launch_ready: true, provider_calls: 0, network: 'unshared namespace; localhost stub only', runs });
 } finally {
   json(`${root}/requests.json`, stub.requests);
   await stub.close();
