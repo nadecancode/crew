@@ -90,7 +90,7 @@ impl Daemon {
         since: u64,
     ) -> Result<()> {
         let stopped = || self.stops(id) != since;
-        let resume = start == Start::Resume;
+        let resume = matches!(start, Start::Resume | Start::Refresh);
         // One launch of an agent at a time, and none beside its git jobs or
         // queue commands: two restarts close together must not both find
         // nothing running and seed its home while the other's sandboxes
@@ -305,7 +305,7 @@ impl Daemon {
                 local.settings.toolbox.clone(),
                 local.toolbox_inherited.clone(),
                 &endpoint,
-                start == Start::Fresh,
+                matches!(start, Start::Fresh | Start::Refresh),
                 since,
             )
             .await?,
