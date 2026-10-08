@@ -18,11 +18,13 @@ not selected by a Crew member specification.
 Repository paths and line numbers below refer to `c8052373`. CLI help was checked
 locally for Claude Code `2.1.291` and Codex `0.159.0`. The `pi` on this shell's
 PATH is GSD `2.70.1`, not the pi supported by Crew; `agents/pi.rs::check_binary`
-explicitly rejects it. Pi capability statements below come from current
-upstream documentation, not an installed-pi execution. Documentation was read
+explicitly rejects it. The initial audit used upstream pi documentation; the
+capability addendum below subsequently verifies a disposable pi installation.
+Documentation was read
 on the audit date and can describe capabilities newer than an eventual user's
-CLI. No model requests, package installs, or changes to operator configuration
-were needed. No operator configuration values were inspected or recorded.
+CLI. The initial audit needed no model requests, package installs, or changes
+to operator configuration. No operator configuration values were inspected or
+recorded.
 
 `A` below means `<workspace>/.crew/agents/<member-id>`; the worktree the member
 edits is a separate directory. A private generated file in `A` does **not** mean
@@ -58,7 +60,7 @@ Implementation: [Claude adapter](../crates/crew/src/agents/claude.rs),
 ### Discovery and inheritance paths
 
 **Claude Code.** Crew writes `A/mcp.json`, `A/settings.json`, and
-`A/briefing.md` on every launch (`agents/claude.rs:162`). Its generated bridge
+`A/briefing.md` on every launch (`agents/claude.rs:164`). Its generated bridge
 plugin contains `.claude-plugin/plugin.json`, `hooks/hooks.json`, and
 `hooks/register.ts`. It is loaded for socket delivery, or for member tone even
 when delivery uses the terminal. Extra arguments follow Crew's arguments.
@@ -95,7 +97,7 @@ server survives strict MCP loading. That combination was not exercised here.
 **Codex.** Crew overrides only the `crew` MCP entry; it does not replace the
 MCP catalog, disable plugins/apps, filter skills, or set project trust. The
 adapter's `own_developer_instructions` deliberately reads the operator's
-`config.toml` even for a sandboxed member (`agents/codex.rs:32,106`). This is
+`config.toml` even for a sandboxed member (`agents/codex.rs:38,106`). This is
 standing-instruction inheritance, separate from toolbox inheritance. Each
 app-server receives the same overrides and environment as its TUI; a toolbox
 implemented only on TUI arguments would miss the process that runs tools.
@@ -275,11 +277,208 @@ Design consequences, not yet implemented:
    cache reads from runtime-native usage after repeated equivalent turns;
    configuration-byte equality alone is not a cache benchmark.
 
-Open verification items for implementation: native pi availability; Claude
-plugin-bundled MCP under strict mode; Codex's full skill/plugin discovery
-boundary on the supported release; managed or account-provided components;
-and actual wire-level ordering under deferred discovery. The current audit
-does not claim those are solved by a flag, by an empty map, or by home seeding.
+The follow-up below resolves native pi availability, Claude plugin MCP under
+strict mode, and several discovery controls. Managed/account-provided
+components, native login continuity under a changed configuration home, and
+actual wire-level ordering under deferred discovery remain implementation
+checks. An empty map or home seeding is not proof of those properties.
+
+### Capability probes addendum
+
+`toolbox-capability-probes`, 2026-10-07 America/Chicago. Source baseline remains
+`c8052373`; no Crew implementation changed. The native observations here
+supersede the earlier unverified capability cells and the corresponding
+assumptions in the first `toolbox-spec` draft (`efd169eb`).
+
+Versions: Claude Code `2.1.291`, Codex `0.159.0`, upstream
+`@earendil-works/pi-coding-agent` `1.1.0`. No supported pi was installed on this
+host, so the probe installed that exact package only under the ignored
+`target/toolbox-audit/pi-runtime`, using a separate npm home/config/cache and
+`--ignore-scripts`. No global install or login was used.
+
+The [retained probe runners](toolbox-probes/README.md) create private homes,
+bound fixture repositories, and an allowlisted environment. They use no real
+credential and do not read or change operator configuration. Codex's discovery
+APIs and pi run without a turn. Where discovery needed inspection of the
+model-visible request, Claude and Codex sent it to a **localhost stub** that
+recorded its body and returned HTTP 400. Nothing was forwarded to a provider;
+there was no inference, account login, token refresh, or subagent execution.
+For those request probes, CLI exit 1 is expected; it records the deliberate
+stub rejection, not a successful model turn.
+
+#### Claude: source selection also controls skills, agents, and memory
+
+Command: `node notes/toolbox-probes/claude.mjs`.
+The runner uses `claude --print --model claude-opus-5-5
+--dangerously-skip-permissions --mcp-config <fixture.json>`, normally with
+`--strict-mcp-config`. Each case sends one `/v1/messages?beta=true` request to
+the stub and exits 1. A valid local marketplace contains an enabled user plugin
+with a skill and an MCP server. User skill, native-agent, memory, and
+`SessionStart` hook sentinels are separate fixtures; a project skill is the
+positive control.
+
+| Case | User skill / native agent / memory / plugin skill | User hook ran | Project skill | Explicit selected skill / agent / hook |
+| --- | --- | --- | --- | --- |
+| Default sources, strict MCP | All present | Yes | Present | Not supplied |
+| `--setting-sources project,local` | All absent | No | Present | Not supplied |
+| Empty private `CLAUDE_CONFIG_DIR` | All absent | No | Present | Not supplied |
+| `--setting-sources project,local --plugin-dir <selected>` | All absent | No | Present | All present; hook ran |
+| Private `CLAUDE_CONFIG_DIR --plugin-dir <selected>` | All absent | No | Present | All present; hook ran |
+
+Output excerpt for the selected plugin with project/local settings:
+
+```json
+{"hook":false,"selectedHook":true,"user_skill_canary":false,
+ "user_agent_canary":false,"USER_MEMORY_CANARY":false,
+ "plugin_skill_canary":false,"project_skill_canary":true,
+ "selected_skill_canary":true,"selected_agent_canary":true}
+```
+
+The same installed plugin's MCP process **does not start under strict MCP**,
+although its skill loads. Removing `--strict-mcp-config` starts it. This closes
+the plugin-MCP question for this release and this plugin format.
+
+The two selected-plugin cases use different absolute plugin directories. Their
+selected skill and agent catalog lines are byte-identical; neither request
+body contains the plugin root path. The containing context block does include
+the working directory separately, so this proves equality of those catalog
+entries, not of the whole input. It also does not inspect paths returned when
+a skill is invoked later.
+
+Consequently the draft statement that user skills, agents, and memory cannot
+be excluded with `--setting-sources` is false for the tested CLI. Ordinary user
+sources can be excluded while explicit Crew plugin components remain. This
+does not prove that enterprise-managed, account-synced, or built-in components
+are excluded, nor that multiple hook handlers execute in a requested order.
+Evidence: `target/toolbox-audit/claude-discovery/*/result.json`, `requests.json`,
+and `debug.log`.
+
+#### Codex: exact skill paths, additive roots, hooks, and native agents
+
+Commands:
+
+```sh
+node notes/toolbox-probes/codex-config.mjs
+node notes/toolbox-probes/codex-server.mjs
+node notes/toolbox-probes/codex-request.mjs
+```
+
+The first runner repeats the MCP merge probe and invokes `codex debug
+prompt-input` with synthetic skills. Observed skill catalogs:
+
+| Configuration | `$HOME/.agents/skills` sentinel | `$CODEX_HOME/skills` sentinel | Repository `.agents/skills` sentinel | Unrelated external folder |
+| --- | --- | --- | --- | --- |
+| Baseline | Present | Present | Present | Absent |
+| `skills.config` disables the two **folders** | Present | Present | Present | Absent |
+| `skills.config` disables their exact **`SKILL.md` files** | Absent | Absent | Present | Absent |
+| `skills.config` enables the external folder | Present | Present | Present | Absent |
+
+This release matches disablement against the `SKILL.md` path. A folder-level
+override silently failed to suppress either sentinel. An enablement entry did
+not add a new discovery root. The older documentation-derived uncertainty
+about `$CODEX_HOME/skills` is now closed: it is scanned by `0.159.0`.
+
+The second runner starts `codex app-server --stdio`, negotiates
+`experimentalApi`, and calls `skills/list`, `hooks/list`, and `config/read`.
+`skills/extraRoots/set {"extraRoots":["<external-root>"]}` followed by
+`skills/list` adds an external skill while retaining the other roots. This is
+a verified app-server discovery API, **not** a verified CLI root-selection
+flag or an exclusion policy. Bundled system skills stay present. The
+under-development `skip_host_skill_discovery` feature did not change these
+`skills/list` results and is not used as an exclusion mechanism here.
+
+Hook fixture output:
+
+```text
+baseline       user SessionStart enabled/untrusted; project SessionStart enabled/untrusted
+-c hooks={}    user SessionStart enabled/untrusted; project SessionStart enabled/untrusted
+private home   project SessionStart enabled/untrusted
+-c features.hooks=false   []
+```
+
+User hooks came from `$CODEX_HOME/hooks.json`; project hooks from the trusted
+repository's `.codex/hooks.json`. An empty hooks table does not remove those
+sources. `features.hooks=false` suppresses the entire hook inventory; it is not
+selective loading. This probe enumerates hooks and trust state, without running
+them. Codex documents cumulative hook sources, concurrent matching handlers,
+and trust of the exact definition; native support therefore does not establish
+the spec's proposed sequential execution after Crew hooks.
+[Native hook semantics](https://learn.chatgpt.com/docs/hooks).
+
+For native subagents the third runner uses `codex --no-daemon exec
+--skip-git-repo-check --json` with a custom provider pointing to the stub. It
+captures the `/v1/responses` tool definitions. Standalone TOML files under
+`$CODEX_HOME/agents/` and trusted `.codex/agents/`, with `name`, `description`,
+and `developer_instructions`, both appear in the `spawn_agent` definition:
+
+```text
+baseline                 userRole=true  projectRole=true  spawnTool=true
+private CODEX_HOME       userRole=false projectRole=true  spawnTool=true
+features.multi_agent=false  userRole=false projectRole=false spawnTool=false
+```
+
+Codex can load native agents, but a Claude Markdown definition is not that
+format. Translation or an explicit runtime-specific format would be needed.
+Disabling multi-agent functionality removes the whole native spawn surface.
+
+The private-home control changes only `CODEX_HOME`, retaining the synthetic
+`HOME`: old Codex-home skills/hooks/agents disappear, while
+`HOME/.agents/skills` and trusted project sources remain. Repointing
+`CODEX_HOME` also changes native auth/session storage. These results do not
+prove an unsandboxed `operator: none` route that preserves an existing login.
+Explicit per-server disablement, exact per-skill disablement, and whole-feature
+toggles are observed controls, not a complete policy for future discoveries.
+Evidence: `target/toolbox-audit/codex-config`, `codex-server/*-summary.json`,
+and `codex-request/*/result.json` plus request captures.
+
+#### pi: explicit skills work; MCP and extension controls interact
+
+Commands: `node notes/toolbox-probes/install-pi.mjs`, then
+`node notes/toolbox-probes/pi.mjs`. The actual pi process uses
+`--mode rpc --offline --no-session` and an explicit observation extension.
+That extension registers a Crew-shaped MCP server and reads the native system
+prompt, commands, and tool registry after startup. No user turn is submitted;
+all seven cases exit 0. Fixture MCP processes expose one canary tool each.
+
+| Added controls | Native MCP tools | Skills | Ambient user extension |
+| --- | --- | --- | --- |
+| Baseline `--approve` | User, project, Crew | User, `HOME/.agents`, project | Loaded |
+| `--no-skills --skill <selected>` | User, project, Crew | Selected only | Loaded |
+| `--no-extensions`, retaining explicit observation extension | None | User, `HOME/.agents`, project | Excluded |
+| `--no-extensions --extension builtin:mcp`, retaining observation extension | User, project, Crew | User, `HOME/.agents`, project | Excluded |
+| `--no-mcp` | None, including Crew | User, `HOME/.agents`, project | Loaded |
+| `--no-approve` | User, Crew | User, `HOME/.agents` | Loaded |
+| Private `PI_CODING_AGENT_DIR`, `--no-approve`, `--no-extensions -e builtin:mcp -e <selected-extension>`, `--no-skills --skill <selected>` | Crew only | Selected only | Excluded |
+
+The last case's native registry contains `mcp__crew__canary` and neither
+ambient MCP canary. This is a demonstrated closed **fixture** selection route.
+It also suppresses project discovery and changes pi's auth/provider directory;
+it does not satisfy independent per-kind inheritance or unchanged login by
+itself. Re-enabling `builtin:mcp` without controlling its config sources simply
+restores ambient servers. `--no-mcp` cannot retain Crew's native registration.
+
+User `<agent-dir>/agents/*.md` and project `.pi/agents/*.md` sentinel definitions
+do not enter the prompt or command catalog, and no native subagent tool appears
+in the baseline registry. Loading those Claude-style definitions would require
+an extension or adapter; this probe does not claim that third-party pi
+extensions cannot implement delegation.
+
+Pi's observed MCP tool order differs between cases with the same three
+servers: `ambient, crew, project` versus `ambient, project, crew`. The installed
+`dist/extensions/mcp/index.js` registers definitions from each connection's
+`onTools` callback. Therefore stable config/registration order is insufficient
+to prove final model tool-array order. Evidence:
+`target/toolbox-audit/pi-discovery/*/{result,observed}.json`.
+
+#### Boundaries for the spec
+
+These probes establish native discovery and launch controls on the named
+versions. They do not validate the Crew sandbox, real login continuity,
+enterprise/account policies, hook ordering, resumed model state, or provider
+cache hits. In particular, keep separate: a runtime supports a component; Crew
+has an adapter for its format; unwanted sources are excluded; the session
+actually loaded it; and its model-visible bytes remain stable. The spec must
+not mark all five as established by a configuration flag.
 
 ## Spec
 
