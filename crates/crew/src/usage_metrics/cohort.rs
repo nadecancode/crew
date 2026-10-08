@@ -61,6 +61,18 @@ fn coverage(members: u64, costed: u64) -> MetricCoverage {
 /// The completed-task cohort and its cost per task. `membership_complete` is
 /// false when some first completions in the period are not recorded.
 pub fn cohort(book: &Book, members: &[Member], membership_complete: bool) -> CompletionCohort {
+    cohort_with(book, members, membership_complete, None)
+}
+
+/// [`cohort`], where `spend_gap` says why some of the members' spend may be
+/// missing even when each has observed cost (unattributed work or a source
+/// gap in the run): the upper bound is then unknown.
+pub fn cohort_with(
+    book: &Book,
+    members: &[Member],
+    membership_complete: bool,
+    spend_gap: Option<CoverageReason>,
+) -> CompletionCohort {
     let n = members.len() as u64;
     let costed = members.iter().filter(|m| m.cost.is_some()).count() as u64;
     // How many first completions are missing is unknown; `membership_complete`
@@ -90,7 +102,7 @@ pub fn cohort(book: &Book, members: &[Member], membership_complete: bool) -> Com
                 None => Some(Bounds { lo: t.lo, hi: None }),
             });
         }
-        let Some(Bounds { lo, hi }) = total else {
+        let Some(Bounds { lo, mut hi }) = total else {
             return CompletionCohort {
                 first_completions: Wide(n as u128),
                 membership_complete,
@@ -104,13 +116,19 @@ pub fn cohort(book: &Book, members: &[Member], membership_complete: bool) -> Com
                 includes_earlier_spend: members.iter().any(|m| m.earlier_spend && m.cost.is_some()),
             };
         };
+        if spend_gap.is_some() {
+            hi = None;
+        }
         let n = n as u128;
         let (state, reason) = match hi {
             Some(_) => (EstimateState::Finite, None),
             None if costed < n as u64 => {
                 (EstimateState::Partial, Some(CoverageReason::NoEligibleCost))
             }
-            None => (EstimateState::Partial, Some(CoverageReason::NotReported)),
+            None => (
+                EstimateState::Partial,
+                spend_gap.or(Some(CoverageReason::NotReported)),
+            ),
         };
         CostEstimate {
             price_book_id: Id::new(book.id.clone()).ok(),
@@ -254,5 +272,22 @@ mod tests {
             Some(CoverageReason::InvalidCounter)
         );
         assert_eq!(c.cost_per_completed_task.lower_pico_usd, None);
+    }
+
+    #[test]
+    fn possibly_missing_spend_leaves_the_upper_bound_open() {
+        let book = Book::standard_2026_10_08();
+        let members = [member("a", Some((10, Some(10))))];
+        let c = cohort_with(
+            &book,
+            &members,
+            true,
+            Some(CoverageReason::UnknownAttribution),
+        );
+        let e = &c.cost_per_completed_task;
+        assert_eq!(e.state, EstimateState::Partial);
+        assert_eq!(e.reason, Some(CoverageReason::UnknownAttribution));
+        assert_eq!(e.lower_pico_usd, Some(Wide(10)));
+        assert_eq!(e.upper_pico_usd, None);
     }
 }

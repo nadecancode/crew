@@ -23,17 +23,22 @@ use std::os::unix::fs::MetadataExt;
 use std::path::PathBuf;
 
 use anyhow::{bail, Context, Result};
+use crew_core::rpc::asides::AsideUsage;
+use crew_core::rpc::features::Wide;
 use crew_core::rpc::usage_metrics::{
-    AccountAttribution, CoverageReason, ObservationUnit, UsageKind, WorkAttribution,
+    AccountAttribution, CompletionCohort, CostEstimate, CounterMetric, CoverageReason,
+    EpicAttribution, EstimateState, ExecutionStatusCounts, MetricCoverage, MetricState,
+    ObservationUnit, UsageCounters, UsageKind, WorkAttribution,
 };
 use crew_core::RuntimeKind;
-use rusqlite::{params, Connection, OptionalExtension, Transaction};
+use rusqlite::{params, Connection, OptionalExtension, ToSql, Transaction};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
+use super::cohort::{cohort_with, Member};
 use super::counters::{Counters, Derived, Normalized, WriteKind};
-use super::metrics::Fact;
-use super::price::Book;
+use super::metrics::{totals, Fact};
+use super::price::{Book, Bounds};
 use super::source::{self, Adapter, Checkpoint, Item, Observation, Phase, Signal, Start};
 
 /// At most this many observation changes per transaction.
@@ -136,6 +141,8 @@ CREATE TABLE IF NOT EXISTS usage_observations (
     reasons         TEXT NOT NULL,
     generation      INTEGER NOT NULL,
     offset          INTEGER NOT NULL,
+    task_id         TEXT,
+    class           TEXT,
     PRIMARY KEY (stream_id, key)
 ) WITHOUT ROWID;
 CREATE INDEX IF NOT EXISTS usage_observations_age ON usage_observations (observed_at);
@@ -184,6 +191,41 @@ CREATE TABLE IF NOT EXISTS usage_uncertain (
     hour      INTEGER NOT NULL,
     stream_id TEXT NOT NULL,
     PRIMARY KEY (run_id, hour, stream_id)
+);
+CREATE TABLE IF NOT EXISTS usage_first_completions (
+    run_id       TEXT NOT NULL,
+    task_id      TEXT NOT NULL,
+    completed_at INTEGER NOT NULL,
+    event_seq    INTEGER,
+    epic         TEXT NOT NULL,
+    PRIMARY KEY (run_id, task_id)
+);
+CREATE TABLE IF NOT EXISTS usage_task_costs (
+    run_id      TEXT NOT NULL,
+    task_id     TEXT NOT NULL,
+    class       TEXT NOT NULL,
+    hour        INTEGER NOT NULL,
+    stream_id   TEXT NOT NULL,
+    incarnation TEXT NOT NULL,
+    model       TEXT NOT NULL,
+    unit        TEXT NOT NULL,
+    reason      TEXT NOT NULL,
+    flags       INTEGER NOT NULL,
+    band        INTEGER NOT NULL,
+    count       INTEGER NOT NULL,
+    i INTEGER, n INTEGER, r INTEGER, w INTEGER, w5 INTEGER, w1 INTEGER, o INTEGER,
+    min_i       INTEGER,
+    max_i       INTEGER,
+    PRIMARY KEY (run_id, task_id, class, hour, stream_id, incarnation, model, unit, reason,
+                 flags, band)
+) WITHOUT ROWID;
+CREATE TABLE IF NOT EXISTS usage_executions (
+    execution_id TEXT PRIMARY KEY,
+    aside_id     TEXT NOT NULL,
+    run_id       TEXT NOT NULL,
+    status       TEXT NOT NULL,
+    started_at   INTEGER,
+    finished_at  INTEGER
 );
 CREATE TABLE IF NOT EXISTS usage_diagnostics (
     stream_id  TEXT NOT NULL,
@@ -341,6 +383,9 @@ struct Row {
     flags: i64,
     band: i64,
     counters: [Option<i64>; 7],
+    /// Live task-bound usage: the task and where the usage stands against
+    /// its first completion.
+    task: Option<(String, String)>,
 }
 
 const HOUR: i64 = 3_600_000;
@@ -525,15 +570,367 @@ impl Ledger {
         revision(&self.conn)
     }
 
-    /// Starts tracking a workspace run. Idempotent: a known run keeps its
-    /// recorded start.
-    pub fn begin_run(&mut self, run_id: &str, started_at: Option<i64>, now: i64) -> Result<()> {
+    /// Starts tracking a workspace run. `tracking_since` is when the
+    /// ledger began recording the run's sources and first completions: a
+    /// run created now passes its own start; a run found on upgrade passes
+    /// the present. Idempotent: a known run keeps what it recorded.
+    pub fn begin_run(
+        &mut self,
+        run_id: &str,
+        started_at: Option<i64>,
+        tracking_since: i64,
+    ) -> Result<()> {
         self.conn.execute(
             "INSERT INTO usage_runs (run_id, started_at, tracking_since, build)
              VALUES (?1, ?2, ?3, ?4) ON CONFLICT(run_id) DO NOTHING",
-            params![run_id, started_at, now, env!("CARGO_PKG_VERSION")],
+            params![
+                run_id,
+                started_at,
+                tracking_since,
+                env!("CARGO_PKG_VERSION")
+            ],
         )?;
         Ok(())
+    }
+
+    /// Records a task's first valid transition to Done in a run (after its
+    /// review approval, when one is required), with its epic membership at
+    /// that moment. A later completion of the same task changes nothing.
+    /// Returns whether this was the first.
+    pub fn first_completion(
+        &mut self,
+        run_id: &str,
+        task_id: &str,
+        completed_at: i64,
+        event_seq: Option<u64>,
+        epic: &EpicAttribution,
+    ) -> Result<bool> {
+        let tx = self.conn.transaction()?;
+        let first = tx.execute(
+            "INSERT OR IGNORE INTO usage_first_completions
+             (run_id, task_id, completed_at, event_seq, epic) VALUES (?1, ?2, ?3, ?4, ?5)",
+            params![
+                run_id,
+                task_id,
+                completed_at,
+                event_seq.map(|v| v as i64),
+                json(epic)
+            ],
+        )? == 1;
+        if first {
+            bump(&tx)?;
+        }
+        tx.commit()?;
+        Ok(first)
+    }
+
+    /// The tasks of a run first completed in `[from, to)` whose completion
+    /// epic `keep` accepts, and their cost per completed task: each one's
+    /// task-bound live cost from the run's start through its first
+    /// completion. Untimed usage recorded after a completion widens only the
+    /// upper bound; unattributed usage or a lost source in the run leaves it
+    /// open.
+    pub fn cohort(
+        &self,
+        run_id: &str,
+        range: Option<(i64, i64)>,
+        keep: impl Fn(&EpicAttribution) -> bool,
+        book: &Book,
+    ) -> Result<CompletionCohort> {
+        let run: Option<(Option<i64>, i64)> = self
+            .conn
+            .query_row(
+                "SELECT started_at, tracking_since FROM usage_runs WHERE run_id = ?1",
+                params![run_id],
+                |r| Ok((r.get(0)?, r.get(1)?)),
+            )
+            .optional()?;
+        let complete = run.is_some_and(|(started, since)| {
+            range
+                .map(|r| r.0)
+                .or(started)
+                .is_some_and(|from| from >= since)
+        });
+        let (from, to) = range.unwrap_or((i64::MIN, i64::MAX));
+        let mut stmt = self.conn.prepare(
+            "SELECT task_id, epic FROM usage_first_completions
+             WHERE run_id = ?1 AND completed_at >= ?2 AND completed_at < ?3 ORDER BY task_id",
+        )?;
+        let completions: Vec<(String, String)> = stmt
+            .query_map(params![run_id, from, to], |r| Ok((r.get(0)?, r.get(1)?)))?
+            .collect::<rusqlite::Result<_>>()?;
+        let mut members = Vec::new();
+        for (task, epic) in completions {
+            let epic: EpicAttribution = serde_json::from_str(&epic)?;
+            if !keep(&epic) {
+                continue;
+            }
+            let before = self.task_facts(run_id, &task, "before")?;
+            let ambiguous = self.task_facts(run_id, &task, "ambiguous")?;
+            let estimate = |facts: &[Fact]| totals(facts, book, None).estimate;
+            let cost = if before.is_empty() && ambiguous.is_empty() {
+                None
+            } else {
+                let b = estimate(&before);
+                let lo = b.lower_pico_usd.map(|w| w.0);
+                let hi = if ambiguous.is_empty() {
+                    b.upper_pico_usd.map(|w| w.0)
+                } else {
+                    let a = estimate(&ambiguous);
+                    b.upper_pico_usd
+                        .zip(a.upper_pico_usd)
+                        .and_then(|(x, y)| x.0.checked_add(y.0))
+                };
+                match (lo, before.is_empty()) {
+                    (Some(lo), _) => Some(Bounds { lo, hi }),
+                    // Only untimed spend that may predate the completion.
+                    (None, true) => Some(Bounds { lo: 0, hi }),
+                    (None, false) => None,
+                }
+            };
+            let earlier_spend = range.is_some()
+                && self.conn.query_row(
+                    "SELECT EXISTS (SELECT 1 FROM usage_task_costs WHERE run_id = ?1
+                     AND task_id = ?2 AND class = 'before' AND hour >= 0 AND hour < ?3)",
+                    params![run_id, task, from - from.rem_euclid(HOUR)],
+                    |r| r.get(0),
+                )?;
+            members.push(Member {
+                task_id: task,
+                cost,
+                earlier_spend,
+            });
+        }
+        Ok(cohort_with(
+            book,
+            &members,
+            complete,
+            self.spend_gap(run_id)?,
+        ))
+    }
+
+    /// Why some live spend of a run may be missing from task costs:
+    /// unattributed usage, a lost or unreadable source, or a correction that
+    /// arrived after its detail expired.
+    fn spend_gap(&self, run_id: &str) -> Result<Option<CoverageReason>> {
+        let unattributed: bool = self.conn.query_row(
+            "SELECT EXISTS (SELECT 1 FROM usage_rollups WHERE run_id = ?1 AND scope = 'live'
+             AND work LIKE '{\"kind\":\"unknown\"%')",
+            params![run_id],
+            |r| r.get(0),
+        )?;
+        if unattributed {
+            return Ok(Some(CoverageReason::UnknownAttribution));
+        }
+        let lost: bool = self.conn.query_row(
+            "SELECT EXISTS (SELECT 1 FROM usage_coverage c JOIN usage_owners o
+             ON c.stream_id = o.stream_id WHERE o.run_id = ?1 AND o.kind = 'live'
+             AND c.reason IN ('source_gap', 'parser_limit', 'not_reported',
+                              'unsupported_sidechain', 'ambiguous_boundary', 'retention_limit',
+                              'identity_lost', 'correction_outside_horizon'))",
+            params![run_id],
+            |r| r.get(0),
+        )?;
+        Ok(lost.then_some(CoverageReason::SourceGap))
+    }
+
+    fn task_facts(&self, run_id: &str, task_id: &str, class: &str) -> Result<Vec<Fact>> {
+        let mut stmt = self.conn.prepare(
+            "SELECT stream_id, incarnation, model, unit, reason, flags, count,
+                    i, n, r, w, w5, w1, o, min_i, max_i
+             FROM usage_task_costs WHERE run_id = ?1 AND task_id = ?2 AND class = ?3",
+        )?;
+        let rows = stmt.query_map(params![run_id, task_id, class], |r| {
+            Ok(Stored {
+                stream_id: r.get(0)?,
+                incarnation: r.get(1)?,
+                model: r.get(2)?,
+                unit: r.get(3)?,
+                reason: r.get(4)?,
+                flags: r.get(5)?,
+                count: r.get(6)?,
+                sums: [
+                    r.get(7)?,
+                    r.get(8)?,
+                    r.get(9)?,
+                    r.get(10)?,
+                    r.get(11)?,
+                    r.get(12)?,
+                    r.get(13)?,
+                ],
+                input_range: r
+                    .get::<_, Option<i64>>(14)?
+                    .zip(r.get::<_, Option<i64>>(15)?),
+            })
+        })?;
+        rows.map(|row| row?.fact()).collect()
+    }
+
+    /// An aside execution's state, for its status counts.
+    pub fn execution_status(
+        &mut self,
+        run_id: &str,
+        aside_id: &str,
+        execution_id: &str,
+        status: ExecutionStatus,
+        started_at: Option<i64>,
+        finished_at: Option<i64>,
+    ) -> Result<()> {
+        let tx = self.conn.transaction()?;
+        tx.execute(
+            "INSERT INTO usage_executions
+             (execution_id, aside_id, run_id, status, started_at, finished_at)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6)
+             ON CONFLICT(execution_id) DO UPDATE SET status = excluded.status,
+               started_at = COALESCE(excluded.started_at, started_at),
+               finished_at = COALESCE(excluded.finished_at, finished_at)",
+            params![
+                execution_id,
+                aside_id,
+                run_id,
+                tag(&status),
+                started_at,
+                finished_at
+            ],
+        )?;
+        bump(&tx)?;
+        tx.commit()?;
+        Ok(())
+    }
+
+    fn sourced(&self, run_id: &str, execution_id: &str) -> Result<bool> {
+        Ok(self.conn.query_row(
+            "SELECT EXISTS (SELECT 1 FROM usage_owners WHERE run_id = ?1 AND aside_execution = ?2)",
+            params![run_id, execution_id],
+            |r| r.get(0),
+        )?)
+    }
+
+    /// The new usage of one aside execution: counters that every one of its
+    /// observations reported (`None` otherwise, never 0) and its cost.
+    /// `None` when it has no registered source, as when its boundary
+    /// between copied context and new usage is unknown.
+    pub fn aside_usage(
+        &self,
+        run_id: &str,
+        execution_id: &str,
+        book: &Book,
+    ) -> Result<Option<AsideUsage>> {
+        if !self.sourced(run_id, execution_id)? {
+            return Ok(None);
+        }
+        let facts = self.facts(run_id, "aside", None, |a| a.aside_execution == execution_id)?;
+        let t = totals(&facts, book, None);
+        let whole = |m: &CounterMetric| {
+            (m.state == MetricState::Complete)
+                .then_some(m.known_sum)
+                .flatten()
+        };
+        Ok(Some(AsideUsage {
+            counters: UsageCounters {
+                input_total: whole(&t.input_total),
+                input_uncached: whole(&t.input_uncached),
+                cache_read: whole(&t.cache_read),
+                cache_write: whole(&t.cache_write),
+                cache_write_5m: whole(&t.cache_write_5m),
+                cache_write_1h: whole(&t.cache_write_1h),
+                output: whole(&t.output),
+                total_tokens: whole(&t.total_tokens),
+            },
+            cost: Some(t.estimate),
+        }))
+    }
+
+    /// The cost of every execution of an aside, failed and cancelled spend
+    /// included. An execution without a source leaves the upper bound open.
+    pub fn aside_total_cost(
+        &self,
+        run_id: &str,
+        aside_id: &str,
+        book: &Book,
+    ) -> Result<Option<CostEstimate>> {
+        let mut stmt = self.conn.prepare(
+            "SELECT execution_id FROM usage_executions WHERE run_id = ?1 AND aside_id = ?2
+             UNION SELECT aside_execution FROM usage_owners
+             WHERE run_id = ?1 AND aside_id = ?2 AND aside_execution IS NOT NULL",
+        )?;
+        let executions: Vec<String> = stmt
+            .query_map(params![run_id, aside_id], |r| r.get(0))?
+            .collect::<rusqlite::Result<_>>()?;
+        if executions.is_empty() {
+            return Ok(None);
+        }
+        let mut sourced = std::collections::BTreeSet::new();
+        for e in &executions {
+            if self.sourced(run_id, e)? {
+                sourced.insert(e.clone());
+            }
+        }
+        let facts = self.facts(run_id, "aside", None, |a| {
+            sourced.contains(&a.aside_execution)
+        })?;
+        let mut estimate = totals(&facts, book, None).estimate;
+        if sourced.len() < executions.len() && estimate.state != EstimateState::Unavailable {
+            estimate.upper_pico_usd = None;
+            estimate.state = EstimateState::Partial;
+            estimate.reason = Some(CoverageReason::NotTracked);
+        }
+        Ok(Some(estimate))
+    }
+
+    /// Distinct aside executions with newly observed usage in a run, and the
+    /// status partition of that cohort. Executions without a source make the
+    /// count partial: their usage is unknown, never zero.
+    pub fn executions(&self, run_id: &str) -> Result<(CounterMetric, ExecutionStatusCounts)> {
+        let mut stmt = self.conn.prepare(
+            "SELECT DISTINCT r.aside_execution, e.status FROM usage_rollups r
+             LEFT JOIN usage_executions e ON e.execution_id = r.aside_execution
+             WHERE r.run_id = ?1 AND r.scope = 'aside' AND r.aside_execution != ''",
+        )?;
+        let observed: Vec<(String, Option<String>)> = stmt
+            .query_map(params![run_id], |r| Ok((r.get(0)?, r.get(1)?)))?
+            .collect::<rusqlite::Result<_>>()?;
+        let unsourced: i64 = self.conn.query_row(
+            "SELECT COUNT(*) FROM usage_executions e WHERE e.run_id = ?1 AND NOT EXISTS
+             (SELECT 1 FROM usage_owners o WHERE o.aside_execution = e.execution_id)",
+            params![run_id],
+            |r| r.get(0),
+        )?;
+        let mut counts = ExecutionStatusCounts {
+            answered: Wide(0),
+            failed: Wide(0),
+            cancelled: Wide(0),
+            still_answering: Wide(0),
+            unknown: Wide(0),
+            complete: false,
+        };
+        for (_, status) in &observed {
+            let slot = match status.as_deref() {
+                Some("answered") => &mut counts.answered,
+                Some("failed") => &mut counts.failed,
+                Some("cancelled") => &mut counts.cancelled,
+                Some("still_answering") => &mut counts.still_answering,
+                _ => &mut counts.unknown,
+            };
+            slot.0 += 1;
+        }
+        counts.complete = counts.unknown.0 == 0 && unsourced == 0;
+        let n = observed.len() as u128;
+        let metric = CounterMetric {
+            known_sum: Some(Wide(n)),
+            state: if unsourced == 0 {
+                MetricState::Complete
+            } else {
+                MetricState::Partial
+            },
+            reason: (unsourced > 0).then_some(CoverageReason::NotTracked),
+            coverage: MetricCoverage {
+                eligible_observations: Wide(n),
+                observations_seen: Wide(n + unsourced as u128),
+                ..MetricCoverage::default()
+            },
+        };
+        Ok((metric, counts))
     }
 
     /// Ends a run: its streams stop, its history stays.
@@ -1006,6 +1403,9 @@ impl Ledger {
                 "usage_turns",
                 "usage_uncertain",
                 "usage_observations",
+                "usage_task_costs",
+                "usage_first_completions",
+                "usage_executions",
             ] {
                 tx.execute(
                     &format!("DELETE FROM {table} WHERE run_id = ?1"),
@@ -1038,6 +1438,49 @@ pub struct Detail {
     pub run_id: String,
     /// The captured work binding, as JSON of `WorkAttribution`.
     pub work: String,
+}
+
+/// An aggregate row as stored, before it becomes a fact.
+struct Stored {
+    stream_id: String,
+    incarnation: String,
+    model: String,
+    unit: String,
+    reason: String,
+    flags: i64,
+    count: i64,
+    sums: [Option<i64>; 7],
+    input_range: Option<(i64, i64)>,
+}
+
+impl Stored {
+    fn fact(self) -> Result<Fact> {
+        let unit: ObservationUnit = serde_json::from_value(serde_json::Value::String(self.unit))?;
+        let unusable = (!self.reason.is_empty())
+            .then(|| serde_json::from_value(serde_json::Value::String(self.reason)))
+            .transpose()?;
+        Ok(Fact {
+            unit,
+            normalized: normalized(self.flags, self.sums),
+            model: (!self.model.is_empty()).then_some(self.model),
+            agent: self.incarnation,
+            source: self.stream_id,
+            turn: None,
+            unusable,
+            weight: self.count as u64,
+            input_range: self.input_range.map(|(a, b)| (a as u64, b as u64)),
+        })
+    }
+}
+
+/// How an aside execution ended, or that it has not.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ExecutionStatus {
+    Answered,
+    Failed,
+    Cancelled,
+    StillAnswering,
 }
 
 /// The key of a retained aggregate, for narrowing facts.
@@ -1340,6 +1783,13 @@ fn apply(
                 Phase::Seed => "pre_tracking".to_string(),
                 Phase::Charge => tag(&owner.kind),
             };
+            let task = match serde_json::from_str::<WorkAttribution>(&work) {
+                Ok(WorkAttribution::Task { id, .. }) if scope == "live" => {
+                    let class = classify(tx, &owner.run_id, &id, o.native_ms)?;
+                    Some((id, class))
+                }
+                _ => None,
+            };
             let row = Row {
                 run_id: owner.run_id.clone(),
                 scope,
@@ -1356,6 +1806,7 @@ fn apply(
                 flags: flags(&o.normalized),
                 band: band(o, thresholds),
                 counters: counters_of(&o.normalized),
+                task,
             };
             let c = &row.counters;
             tx.execute(
@@ -1363,10 +1814,10 @@ fn apply(
                  (stream_id, key, revision, run_id, scope, agent_id, incarnation, launch_id,
                   aside_execution, unit, reason, turn, work, account, model, request_id,
                   native_ms, hour, observed_at, i, n, r, w, w5, w1, o, flags, band, reasons,
-                  generation, offset)
+                  generation, offset, task_id, class)
                  VALUES (?1, ?2, 1, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15,
                          ?16, ?17, ?18, ?19, ?20, ?21, ?22, ?23, ?24, ?25, ?26, ?27, ?28,
-                         ?29, ?30)",
+                         ?29, ?30, ?31, ?32)",
                 params![
                     stream_id,
                     o.key,
@@ -1397,7 +1848,9 @@ fn apply(
                     row.band,
                     json(&o.reasons),
                     o.generation as i64,
-                    o.offset as i64
+                    o.offset as i64,
+                    row.task.as_ref().map(|t| &t.0),
+                    row.task.as_ref().map(|t| &t.1)
                 ],
             )?;
             tx.execute(
@@ -1435,7 +1888,7 @@ fn apply(
 fn stored_row(tx: &Connection, stream_id: &str, key: &str) -> Result<Row> {
     Ok(tx.query_row(
         "SELECT run_id, scope, hour, agent_id, incarnation, aside_execution, work, account,
-                model, unit, reason, flags, band, i, n, r, w, w5, w1, o
+                model, unit, reason, flags, band, i, n, r, w, w5, w1, o, task_id, class
          FROM usage_observations WHERE stream_id = ?1 AND key = ?2",
         params![stream_id, key],
         |r| {
@@ -1463,41 +1916,37 @@ fn stored_row(tx: &Connection, stream_id: &str, key: &str) -> Result<Row> {
                     r.get(18)?,
                     r.get(19)?,
                 ],
+                task: r
+                    .get::<_, Option<String>>(20)?
+                    .zip(r.get::<_, Option<String>>(21)?),
             })
         },
     )?)
 }
 
-/// Adds (`sign` 1) or removes (-1) one observation's contribution to its
-/// aggregate, with checked arithmetic.
-fn rollup(tx: &Connection, row: &Row, sign: i64) -> Result<()> {
-    const KEY: &str = "run_id = ?1 AND scope = ?2 AND hour = ?3 AND stream_id = ?4
-        AND agent_id = ?5 AND incarnation = ?6 AND aside_execution = ?7 AND work = ?8
-        AND account = ?9 AND model = ?10 AND unit = ?11 AND reason = ?12 AND flags = ?13
-        AND band = ?14";
-    let key = params![
-        row.run_id,
-        row.scope,
-        row.hour,
-        row.stream_id,
-        row.agent_id,
-        row.incarnation,
-        row.aside_execution,
-        row.work,
-        row.account,
-        row.model,
-        row.unit,
-        row.reason,
-        row.flags,
-        row.band
-    ];
+/// Adds (`sign` 1) or removes (-1) one observation's contribution to the
+/// aggregate row of `table` keyed by `key`, with checked arithmetic.
+fn fold(
+    tx: &Connection,
+    table: &str,
+    key: &[(&str, &dyn ToSql)],
+    row: &Row,
+    sign: i64,
+) -> Result<()> {
+    let filter = key
+        .iter()
+        .enumerate()
+        .map(|(n, (column, _))| format!("{column} = ?{}", n + 1))
+        .collect::<Vec<_>>()
+        .join(" AND ");
+    let values: Vec<&dyn ToSql> = key.iter().map(|(_, v)| *v).collect();
     type Stored = (i64, [Option<i64>; 7], Option<i64>, Option<i64>);
     let existing: Option<Stored> = tx
         .query_row(
             &format!(
-                "SELECT count, i, n, r, w, w5, w1, o, min_i, max_i FROM usage_rollups WHERE {KEY}"
+                "SELECT count, i, n, r, w, w5, w1, o, min_i, max_i FROM {table} WHERE {filter}"
             ),
-            key,
+            values.as_slice(),
             |r| {
                 Ok((
                     r.get(0)?,
@@ -1522,63 +1971,125 @@ fn rollup(tx: &Connection, row: &Row, sign: i64) -> Result<()> {
         bail!("usage aggregate count below zero");
     }
     if count == 0 {
-        tx.execute(&format!("DELETE FROM usage_rollups WHERE {KEY}"), key)?;
+        tx.execute(
+            &format!("DELETE FROM {table} WHERE {filter}"),
+            values.as_slice(),
+        )?;
         return Ok(());
     }
     let mut next = [None; 7];
-    for (i, slot) in next.iter_mut().enumerate() {
-        *slot = add(sums[i], row.counters[i], sign)?;
+    for (n, slot) in next.iter_mut().enumerate() {
+        *slot = add(sums[n], row.counters[n], sign)?;
     }
     // The input range only widens: a removed request leaves it conservative.
     let request = row.unit == "request";
-    let i = row.counters[0].filter(|_| request);
-    let min_i = match (min_i, i) {
-        (Some(a), Some(b)) if sign > 0 => Some(a.min(b)),
+    let input = row.counters[0].filter(|_| request);
+    let widen = |bound: Option<i64>, pick: fn(i64, i64) -> i64| match (bound, input) {
+        (Some(a), Some(b)) if sign > 0 => Some(pick(a, b)),
         (None, Some(b)) if sign > 0 => Some(b),
         (a, _) => a,
     };
-    let max_i = match (max_i, i) {
-        (Some(a), Some(b)) if sign > 0 => Some(a.max(b)),
-        (None, Some(b)) if sign > 0 => Some(b),
-        (a, _) => a,
-    };
+    let (min_i, max_i) = (widen(min_i, i64::min), widen(max_i, i64::max));
+    let mut columns: Vec<&str> = key.iter().map(|(c, _)| *c).collect();
+    columns.extend([
+        "count", "i", "n", "r", "w", "w5", "w1", "o", "min_i", "max_i",
+    ]);
+    let mut all = values;
+    all.push(&count);
+    for v in &next {
+        all.push(v);
+    }
+    all.push(&min_i);
+    all.push(&max_i);
+    let marks = (1..=all.len())
+        .map(|n| format!("?{n}"))
+        .collect::<Vec<_>>()
+        .join(", ");
     tx.execute(
-        "INSERT INTO usage_rollups
-         (run_id, scope, hour, stream_id, agent_id, incarnation, aside_execution, work, account,
-          model, unit, reason, flags, band, count, i, n, r, w, w5, w1, o, min_i, max_i)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17,
-                 ?18, ?19, ?20, ?21, ?22, ?23, ?24)
-         ON CONFLICT DO UPDATE SET count = excluded.count, i = excluded.i, n = excluded.n,
-           r = excluded.r, w = excluded.w, w5 = excluded.w5, w1 = excluded.w1, o = excluded.o,
-           min_i = excluded.min_i, max_i = excluded.max_i",
-        params![
-            row.run_id,
-            row.scope,
-            row.hour,
-            row.stream_id,
-            row.agent_id,
-            row.incarnation,
-            row.aside_execution,
-            row.work,
-            row.account,
-            row.model,
-            row.unit,
-            row.reason,
-            row.flags,
-            row.band,
-            count,
-            next[0],
-            next[1],
-            next[2],
-            next[3],
-            next[4],
-            next[5],
-            next[6],
-            min_i,
-            max_i
-        ],
+        &format!(
+            "INSERT INTO {table} ({}) VALUES ({marks})
+             ON CONFLICT DO UPDATE SET count = excluded.count, i = excluded.i, n = excluded.n,
+               r = excluded.r, w = excluded.w, w5 = excluded.w5, w1 = excluded.w1,
+               o = excluded.o, min_i = excluded.min_i, max_i = excluded.max_i",
+            columns.join(", ")
+        ),
+        all.as_slice(),
     )?;
     Ok(())
+}
+
+/// Moves one observation's contribution in the run aggregates.
+fn rollup(tx: &Connection, row: &Row, sign: i64) -> Result<()> {
+    fold(
+        tx,
+        "usage_rollups",
+        &[
+            ("run_id", &row.run_id),
+            ("scope", &row.scope),
+            ("hour", &row.hour),
+            ("stream_id", &row.stream_id),
+            ("agent_id", &row.agent_id),
+            ("incarnation", &row.incarnation),
+            ("aside_execution", &row.aside_execution),
+            ("work", &row.work),
+            ("account", &row.account),
+            ("model", &row.model),
+            ("unit", &row.unit),
+            ("reason", &row.reason),
+            ("flags", &row.flags),
+            ("band", &row.band),
+        ],
+        row,
+        sign,
+    )?;
+    if let Some((task, class)) = &row.task {
+        fold(
+            tx,
+            "usage_task_costs",
+            &[
+                ("run_id", &row.run_id),
+                ("task_id", task),
+                ("class", class),
+                ("hour", &row.hour),
+                ("stream_id", &row.stream_id),
+                ("incarnation", &row.incarnation),
+                ("model", &row.model),
+                ("unit", &row.unit),
+                ("reason", &row.reason),
+                ("flags", &row.flags),
+                ("band", &row.band),
+            ],
+            row,
+            sign,
+        )?;
+    }
+    Ok(())
+}
+
+/// Where task-bound live usage stands against the task's first completion:
+/// read before it was recorded, or timed at or before it, is `before`;
+/// timed after it is `after`; untimed after it is `ambiguous`. Usage read
+/// before a completion is recorded was written before it.
+fn classify(
+    tx: &Connection,
+    run_id: &str,
+    task_id: &str,
+    native_ms: Option<i64>,
+) -> Result<String> {
+    let completed: Option<i64> = tx
+        .query_row(
+            "SELECT completed_at FROM usage_first_completions WHERE run_id = ?1 AND task_id = ?2",
+            params![run_id, task_id],
+            |r| r.get(0),
+        )
+        .optional()?;
+    Ok(match (completed, native_ms) {
+        (None, _) => "before",
+        (Some(t), Some(ms)) if ms <= t => "before",
+        (Some(_), Some(_)) => "after",
+        (Some(_), None) => "ambiguous",
+    }
+    .into())
 }
 
 #[cfg(test)]
@@ -2092,5 +2603,261 @@ mod tests {
             assert_eq!(aggregate, each, "{name}");
             assert!(ledger.turns("r1", "live", None).unwrap() > 0);
         }
+    }
+
+    fn epic_task(id: &str, epic: &str) -> WorkBinding {
+        WorkBinding {
+            work: WorkAttribution::Task {
+                id: id.into(),
+                epic: EpicAttribution::Epic { id: epic.into() },
+            },
+            account: AccountAttribution::Known {
+                id: crew_core::rpc::features::Id::new("acct-1".to_string()).unwrap(),
+                assignment_generation: Wide(1),
+                interval_id: crew_core::rpc::features::Id::new("iv-1".to_string()).unwrap(),
+            },
+            board_revision: Some(1),
+            event_seq: Some(1),
+        }
+    }
+
+    fn at(id: &str, ms: i64, o: u64) -> Value {
+        assistant(id, ms, usage(10, 80, 10, o))
+    }
+
+    fn untimed(id: &str, o: u64) -> Value {
+        let mut v = at(id, NOW, o);
+        v.as_object_mut().unwrap().remove("timestamp");
+        v
+    }
+
+    /// The exact cost of one Haiku request of 10/80/10 tokens and `o` output
+    /// (no TTL split: a range), via the metrics of a single observation.
+    fn one_cost(o: u64) -> (u128, u128) {
+        let n = crate::usage_metrics::counters::claude(
+            Ok(Some(10)),
+            Ok(Some(80)),
+            Ok(Some(10)),
+            Ok(None),
+            Ok(None),
+            Ok(Some(o)),
+        );
+        let fact = Fact {
+            unit: ObservationUnit::Request,
+            normalized: n,
+            model: Some("claude-haiku-4-5-20251001".into()),
+            agent: "i1".into(),
+            source: "s".into(),
+            turn: None,
+            unusable: None,
+            weight: 1,
+            input_range: None,
+        };
+        let e = totals(&[fact], &Book::standard_2026_10_08(), None).estimate;
+        (e.lower_pico_usd.unwrap().0, e.upper_pico_usd.unwrap().0)
+    }
+
+    #[test]
+    fn the_completed_task_cohort_uses_first_completions_and_spend_up_to_them() {
+        let book = Book::standard_2026_10_08();
+        let (_dir, path, mut ledger, stream) = setup(&[]);
+        let t = NOW + 10 * HOUR;
+        ledger
+            .bind_work(&stream, &open(&path), &epic_task("t1", "e1"), NOW)
+            .unwrap();
+        append(&path, &[at("a", t - HOUR, 10)]);
+        drain(&mut ledger, &stream, &open(&path), NOW).unwrap();
+        ledger
+            .bind_work(&stream, &open(&path), &epic_task("t2", "e2"), NOW)
+            .unwrap();
+        append(&path, &[at("b", t - HOUR, 20)]);
+        drain(&mut ledger, &stream, &open(&path), NOW).unwrap();
+
+        let e1 = EpicAttribution::Epic { id: "e1".into() };
+        let e2 = EpicAttribution::Epic { id: "e2".into() };
+        assert!(ledger
+            .first_completion("r1", "t1", t, Some(5), &e1)
+            .unwrap());
+        assert!(
+            !ledger
+                .first_completion("r1", "t1", t + HOUR, Some(9), &e1)
+                .unwrap(),
+            "recompletion"
+        );
+        assert!(ledger
+            .first_completion("r1", "t2", t, Some(6), &e2)
+            .unwrap());
+        // t1 gets more work after its completion: not part of its cost.
+        ledger
+            .bind_work(&stream, &open(&path), &epic_task("t1", "e1"), NOW)
+            .unwrap();
+        append(&path, &[at("c", t + HOUR, 1000)]);
+        drain(&mut ledger, &stream, &open(&path), NOW).unwrap();
+
+        let range = Some((NOW, NOW + 20 * HOUR));
+        let c = ledger.cohort("r1", range, |_| true, &book).unwrap();
+        assert!(c.membership_complete);
+        assert_eq!(c.first_completions, Wide(2));
+        assert_eq!(c.tasks_with_observed_cost, Wide(2));
+        let e = &c.cost_per_completed_task;
+        let (a, b) = (one_cost(10), one_cost(20));
+        assert_eq!(e.lower_pico_usd, Some(Wide((a.0 + b.0) / 2)));
+        assert_eq!(e.upper_pico_usd, Some(Wide((a.1 + b.1).div_ceil(2))));
+        assert!(!c.includes_earlier_spend);
+
+        // The completion epic selects the cohort.
+        let only = ledger.cohort("r1", range, |e| e == &e1, &book).unwrap();
+        assert_eq!(only.first_completions, Wide(1));
+        assert_eq!(only.cost_per_completed_task.lower_pico_usd, Some(Wide(a.0)));
+
+        // A period starting after the spend includes the earlier spend.
+        let late = ledger
+            .cohort("r1", Some((t, t + HOUR)), |_| true, &book)
+            .unwrap();
+        assert!(late.includes_earlier_spend);
+
+        // Untimed usage recorded after t1's completion may predate it.
+        append(&path, &[untimed("d", 7)]);
+        drain(&mut ledger, &stream, &open(&path), NOW).unwrap();
+        let wider = ledger.cohort("r1", range, |e| e == &e1, &book).unwrap();
+        let d = one_cost(7);
+        assert_eq!(
+            wider.cost_per_completed_task.lower_pico_usd,
+            Some(Wide(a.0))
+        );
+        assert_eq!(
+            wider.cost_per_completed_task.upper_pico_usd,
+            Some(Wide(a.1 + d.1)),
+            "ambiguous spend widens only the upper bound"
+        );
+
+        // A task completed with no observed cost: a whole-cohort lower bound.
+        ledger.first_completion("r1", "t3", t, None, &e2).unwrap();
+        let c = ledger.cohort("r1", range, |_| true, &book).unwrap();
+        assert_eq!(c.first_completions, Wide(3));
+        assert_eq!(c.tasks_with_observed_cost, Wide(2));
+        assert_eq!(c.cost_per_completed_task.upper_pico_usd, None);
+        assert_eq!(
+            c.cost_per_completed_task.reason,
+            Some(CoverageReason::NoEligibleCost)
+        );
+
+        // A period before tracking began: membership unknown, no figure.
+        let early = ledger
+            .cohort("r1", Some((NOW - DAY, NOW + 20 * HOUR)), |_| true, &book)
+            .unwrap();
+        assert!(!early.membership_complete);
+        assert_eq!(early.cost_per_completed_task.lower_pico_usd, None);
+        let empty = ledger
+            .cohort("r1", Some((t + DAY, t + 2 * DAY)), |_| true, &book)
+            .unwrap();
+        assert_eq!(
+            empty.cost_per_completed_task.reason,
+            Some(CoverageReason::NoCompletions)
+        );
+    }
+
+    #[test]
+    fn unattributed_live_usage_leaves_cohort_cost_open() {
+        let book = Book::standard_2026_10_08();
+        let (_dir, path, mut ledger, stream) = setup(&[]);
+        append(&path, &[at("unbound", NOW, 5)]);
+        ledger
+            .bind_work(&stream, &open(&path), &epic_task("t1", "e1"), NOW)
+            .unwrap();
+        append(&path, &[at("a", NOW, 10)]);
+        drain(&mut ledger, &stream, &open(&path), NOW).unwrap();
+        ledger
+            .first_completion("r1", "t1", NOW + HOUR, None, &EpicAttribution::NoEpic)
+            .unwrap();
+        let c = ledger.cohort("r1", None, |_| true, &book).unwrap();
+        let e = &c.cost_per_completed_task;
+        assert_eq!(e.reason, Some(CoverageReason::UnknownAttribution));
+        assert_eq!(e.lower_pico_usd, Some(Wide(one_cost(10).0)));
+        assert_eq!(e.upper_pico_usd, None);
+        // Account captured with the binding narrows facts too.
+        let facts = ledger
+            .facts("r1", "live", None, |a| a.account.contains("acct-1"))
+            .unwrap();
+        assert_eq!(facts.iter().map(|f| f.weight).sum::<u64>(), 1);
+    }
+
+    #[test]
+    fn aside_executions_charge_only_new_usage_in_their_own_scope() {
+        let book = Book::standard_2026_10_08();
+        let dir = tempfile::tempdir().unwrap();
+        let mut ledger = Ledger::in_memory().unwrap();
+        ledger.begin_run("r1", Some(NOW), NOW).unwrap();
+        // The fork's file already holds the copied parent context.
+        let path = dir.path().join("fork.jsonl");
+        std::fs::write(&path, text(&[msg("parent-1", 100), msg("parent-2", 200)])).unwrap();
+        let mut r = reg("r1", "i1", Start::Existing);
+        r.kind = UsageKind::Aside;
+        r.native_session_id = "fork-1".into();
+        r.aside = Some(AsideIds {
+            execution_id: "x1".into(),
+            aside_id: "q1".into(),
+        });
+        let mut answer = msg("answer", 7);
+        answer["sessionId"] = json!("fork-1");
+        let mut copied = msg("parent-1", 100);
+        copied["sessionId"] = json!("fork-1");
+        std::fs::write(&path, text(&[copied.clone()])).unwrap();
+        let stream = ledger.register(&r, &open(&path), NOW).unwrap().unwrap();
+        append(&path, &[answer]);
+        drain(&mut ledger, &stream, &open(&path), NOW).unwrap();
+
+        let usage = ledger.aside_usage("r1", "x1", &book).unwrap().unwrap();
+        assert_eq!(usage.counters.output, Some(Wide(7)), "only the new answer");
+        assert_eq!(usage.counters.input_total, Some(Wide(100)));
+        assert!(usage.cost.unwrap().lower_pico_usd.is_some());
+        assert_eq!(
+            sum(&ledger, "r1", "live").requests_observed.known_sum,
+            None,
+            "aside usage never enters live totals"
+        );
+        assert_eq!(
+            sum(&ledger, "r1", "pre_tracking").output.known_sum,
+            Some(Wide(100)),
+            "copied context only seeds"
+        );
+
+        // A failed execution keeps its spend; one without a source is unknown.
+        ledger
+            .execution_status(
+                "r1",
+                "q1",
+                "x1",
+                ExecutionStatus::Failed,
+                Some(NOW),
+                Some(NOW),
+            )
+            .unwrap();
+        ledger
+            .execution_status(
+                "r1",
+                "q1",
+                "x2",
+                ExecutionStatus::Answered,
+                Some(NOW),
+                Some(NOW),
+            )
+            .unwrap();
+        assert_eq!(ledger.aside_usage("r1", "x2", &book).unwrap(), None);
+        let total = ledger.aside_total_cost("r1", "q1", &book).unwrap().unwrap();
+        assert_eq!(total.state, EstimateState::Partial);
+        assert_eq!(total.reason, Some(CoverageReason::NotTracked));
+        assert_eq!(total.upper_pico_usd, None);
+        assert!(total.lower_pico_usd.is_some());
+        let (observed, statuses) = ledger.executions("r1").unwrap();
+        assert_eq!(observed.known_sum, Some(Wide(1)));
+        assert_eq!(observed.state, MetricState::Partial);
+        assert_eq!(statuses.failed, Wide(1));
+        assert_eq!(statuses.answered, Wide(0), "x2 has no observed usage");
+        assert!(!statuses.complete);
+        assert_eq!(
+            ledger.aside_total_cost("r1", "q-none", &book).unwrap(),
+            None
+        );
     }
 }
