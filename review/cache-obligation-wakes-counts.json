@@ -1,0 +1,291 @@
+{
+  "schema": 1,
+  "measurement": "daemon follow-up prompts from identical synthetic transcript/obligation fixtures; not native API requests",
+  "before_revision": "77ed2a238d0689101557a5f9b5bea7b043d7c5f0",
+  "after_revision": "4717606243894c2c033b5b7c77a10e625b523c40",
+  "baseline_instrumentation": {
+    "base": "77ed2a238d0689101557a5f9b5bea7b043d7c5f0",
+    "changed_path": "crates/crew/src/daemon/turns.rs",
+    "change": "only cfg(test) additions; production prefix exactly base",
+    "production_sha256": "b342f672513291b55e9986e18d7eb2d7e824e575ded4e66fab2caf1fd15653e7",
+    "measurement_source_sha256": "79809c33229366fcd7479d82bf4906815cdf8b4e3fcd1881c75c41d795856af2"
+  },
+  "cells": [
+    {
+      "runtime": "claude",
+      "scenario": "working-task",
+      "before_prompts": 1,
+      "after_prompts": 1,
+      "before_body_bytes": 508,
+      "after_body_bytes": 508
+    },
+    {
+      "runtime": "claude",
+      "scenario": "parked-task",
+      "before_prompts": 1,
+      "after_prompts": 0,
+      "before_body_bytes": 508,
+      "after_body_bytes": 0
+    },
+    {
+      "runtime": "claude",
+      "scenario": "review-task",
+      "before_prompts": 1,
+      "after_prompts": 0,
+      "before_body_bytes": 508,
+      "after_body_bytes": 0
+    },
+    {
+      "runtime": "claude",
+      "scenario": "done-task",
+      "before_prompts": 1,
+      "after_prompts": 0,
+      "before_body_bytes": 508,
+      "after_body_bytes": 0
+    },
+    {
+      "runtime": "claude",
+      "scenario": "status",
+      "before_prompts": 0,
+      "after_prompts": 0,
+      "before_body_bytes": 0,
+      "after_body_bytes": 0
+    },
+    {
+      "runtime": "claude",
+      "scenario": "answer",
+      "before_prompts": 0,
+      "after_prompts": 0,
+      "before_body_bytes": 0,
+      "after_body_bytes": 0
+    },
+    {
+      "runtime": "claude",
+      "scenario": "question",
+      "before_prompts": 1,
+      "after_prompts": 1,
+      "before_body_bytes": 512,
+      "after_body_bytes": 512
+    },
+    {
+      "runtime": "claude",
+      "scenario": "message",
+      "before_prompts": 1,
+      "after_prompts": 1,
+      "before_body_bytes": 511,
+      "after_body_bytes": 511
+    },
+    {
+      "runtime": "claude",
+      "scenario": "answered-question",
+      "before_prompts": 1,
+      "after_prompts": 0,
+      "before_body_bytes": 512,
+      "after_body_bytes": 0
+    },
+    {
+      "runtime": "claude",
+      "scenario": "settled-review-request",
+      "before_prompts": 1,
+      "after_prompts": 0,
+      "before_body_bytes": 518,
+      "after_body_bytes": 0
+    },
+    {
+      "runtime": "claude",
+      "scenario": "changes-requested",
+      "before_prompts": 0,
+      "after_prompts": 1,
+      "before_body_bytes": 0,
+      "after_body_bytes": 517
+    },
+    {
+      "runtime": "codex",
+      "scenario": "working-task",
+      "before_prompts": 1,
+      "after_prompts": 1,
+      "before_body_bytes": 508,
+      "after_body_bytes": 508
+    },
+    {
+      "runtime": "codex",
+      "scenario": "parked-task",
+      "before_prompts": 1,
+      "after_prompts": 0,
+      "before_body_bytes": 508,
+      "after_body_bytes": 0
+    },
+    {
+      "runtime": "codex",
+      "scenario": "review-task",
+      "before_prompts": 1,
+      "after_prompts": 0,
+      "before_body_bytes": 508,
+      "after_body_bytes": 0
+    },
+    {
+      "runtime": "codex",
+      "scenario": "done-task",
+      "before_prompts": 1,
+      "after_prompts": 0,
+      "before_body_bytes": 508,
+      "after_body_bytes": 0
+    },
+    {
+      "runtime": "codex",
+      "scenario": "status",
+      "before_prompts": 0,
+      "after_prompts": 0,
+      "before_body_bytes": 0,
+      "after_body_bytes": 0
+    },
+    {
+      "runtime": "codex",
+      "scenario": "answer",
+      "before_prompts": 0,
+      "after_prompts": 0,
+      "before_body_bytes": 0,
+      "after_body_bytes": 0
+    },
+    {
+      "runtime": "codex",
+      "scenario": "question",
+      "before_prompts": 1,
+      "after_prompts": 1,
+      "before_body_bytes": 512,
+      "after_body_bytes": 512
+    },
+    {
+      "runtime": "codex",
+      "scenario": "message",
+      "before_prompts": 1,
+      "after_prompts": 1,
+      "before_body_bytes": 511,
+      "after_body_bytes": 511
+    },
+    {
+      "runtime": "codex",
+      "scenario": "answered-question",
+      "before_prompts": 1,
+      "after_prompts": 0,
+      "before_body_bytes": 512,
+      "after_body_bytes": 0
+    },
+    {
+      "runtime": "codex",
+      "scenario": "settled-review-request",
+      "before_prompts": 1,
+      "after_prompts": 0,
+      "before_body_bytes": 518,
+      "after_body_bytes": 0
+    },
+    {
+      "runtime": "codex",
+      "scenario": "changes-requested",
+      "before_prompts": 0,
+      "after_prompts": 1,
+      "before_body_bytes": 0,
+      "after_body_bytes": 517
+    },
+    {
+      "runtime": "pi",
+      "scenario": "working-task",
+      "before_prompts": 1,
+      "after_prompts": 1,
+      "before_body_bytes": 508,
+      "after_body_bytes": 508
+    },
+    {
+      "runtime": "pi",
+      "scenario": "parked-task",
+      "before_prompts": 1,
+      "after_prompts": 0,
+      "before_body_bytes": 508,
+      "after_body_bytes": 0
+    },
+    {
+      "runtime": "pi",
+      "scenario": "review-task",
+      "before_prompts": 1,
+      "after_prompts": 0,
+      "before_body_bytes": 508,
+      "after_body_bytes": 0
+    },
+    {
+      "runtime": "pi",
+      "scenario": "done-task",
+      "before_prompts": 1,
+      "after_prompts": 0,
+      "before_body_bytes": 508,
+      "after_body_bytes": 0
+    },
+    {
+      "runtime": "pi",
+      "scenario": "status",
+      "before_prompts": 0,
+      "after_prompts": 0,
+      "before_body_bytes": 0,
+      "after_body_bytes": 0
+    },
+    {
+      "runtime": "pi",
+      "scenario": "answer",
+      "before_prompts": 0,
+      "after_prompts": 0,
+      "before_body_bytes": 0,
+      "after_body_bytes": 0
+    },
+    {
+      "runtime": "pi",
+      "scenario": "question",
+      "before_prompts": 1,
+      "after_prompts": 1,
+      "before_body_bytes": 512,
+      "after_body_bytes": 512
+    },
+    {
+      "runtime": "pi",
+      "scenario": "message",
+      "before_prompts": 1,
+      "after_prompts": 1,
+      "before_body_bytes": 511,
+      "after_body_bytes": 511
+    },
+    {
+      "runtime": "pi",
+      "scenario": "answered-question",
+      "before_prompts": 1,
+      "after_prompts": 0,
+      "before_body_bytes": 512,
+      "after_body_bytes": 0
+    },
+    {
+      "runtime": "pi",
+      "scenario": "settled-review-request",
+      "before_prompts": 1,
+      "after_prompts": 0,
+      "before_body_bytes": 518,
+      "after_body_bytes": 0
+    },
+    {
+      "runtime": "pi",
+      "scenario": "changes-requested",
+      "before_prompts": 0,
+      "after_prompts": 1,
+      "before_body_bytes": 0,
+      "after_body_bytes": 517
+    }
+  ],
+  "totals": {
+    "before_prompts": 24,
+    "after_prompts": 12,
+    "targeted_before_prompts": 15,
+    "targeted_after_prompts": 0,
+    "before_body_bytes": 12255,
+    "after_body_bytes": 6144
+  },
+  "native_requests": null,
+  "cost_usd": null,
+  "cache_hit_rate": null,
+  "cost_evidence_owner": "qa/cache-acceptance (orchestrator m-562daefe90d1)"
+}

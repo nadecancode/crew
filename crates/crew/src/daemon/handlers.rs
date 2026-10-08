@@ -898,6 +898,13 @@ change identity",
             ));
         }
         let note = note.map(|n| crew_core::util::truncate_chars(n.trim(), 300));
+        if status == AgentStatus::Waiting
+            && self.acknowledges_review_waiting(agent, task_id.as_deref())
+        {
+            // Acknowledgement only. In particular, do not retain a Waiting
+            // self-status that could hide changes requested after this check.
+            return Ok(());
+        }
         // The task first: a refused save is the caller's error, and nothing
         // else has changed then.
         let selected = self.mirror_status_to_task_id(agent, status, note.clone(), task_id)?;
@@ -1054,5 +1061,169 @@ impl Daemon {
             .filter(Value::is_object)
             .unwrap_or_else(|| json!({}));
         Ok(json!({ "prefs": prefs }))
+    }
+}
+
+#[cfg(test)]
+mod review_waiting_tests {
+    use super::*;
+    use crew_core::{Agent, Task, TaskStatus};
+
+    async fn fixture() -> (tempfile::TempDir, crate::daemon::Running) {
+        let temp = tempfile::tempdir().unwrap();
+        let running = crate::daemon::start(crate::daemon::DaemonOptions {
+            workspace: temp.path().into(),
+            crew_bin: std::env::current_exe().unwrap(),
+            pin: None,
+        })
+        .await
+        .unwrap();
+        let daemon = &running.daemon;
+        for id in ["owner", "reviewer"] {
+            let agent: Agent = serde_json::from_value(json!({
+                "id": id, "name": id, "role": id, "runtime": "claude", "status": "idle",
+                "workdir": temp.path(), "backend": "pty", "last_activity_at": 0
+            }))
+            .unwrap();
+            daemon.store.save_agent(&agent).unwrap();
+            daemon.model().agents.push(agent);
+        }
+        let card: Task = serde_json::from_value(json!({
+            "id": "review", "title": "Review card", "assigned_agent": "owner",
+            "reviewer": "reviewer", "status": "review", "created_at": 0, "started_at": 1,
+            "progress": 100, "result": "implementation ready", "note": "awaiting reviewer"
+        }))
+        .unwrap();
+        daemon.store.save_task(&card).unwrap();
+        daemon.model().tasks.push(card);
+        (temp, running)
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn repeated_review_waiting_acknowledgements_change_no_state_or_prompts() {
+        let (_temp, running) = fixture().await;
+        let daemon = &running.daemon;
+        let tasks = daemon.model().tasks.clone();
+        let owner = serde_json::to_value(daemon.agent("owner")).unwrap();
+        let reviewer = serde_json::to_value(daemon.agent("reviewer")).unwrap();
+        let before = daemon.bus.history(None, 100).unwrap();
+        for task_id in [None, Some("review".into()), Some("review".into()), None] {
+            daemon
+                .self_status(
+                    "owner",
+                    AgentStatus::Waiting,
+                    Some("awaiting review".into()),
+                    task_id,
+                )
+                .unwrap();
+        }
+        assert_eq!(daemon.model().tasks, tasks);
+        assert_eq!(serde_json::to_value(daemon.agent("owner")).unwrap(), owner);
+        assert_eq!(
+            serde_json::to_value(daemon.agent("reviewer")).unwrap(),
+            reviewer
+        );
+        assert_eq!(
+            serde_json::to_value(daemon.bus.history(None, 100).unwrap()).unwrap(),
+            serde_json::to_value(before).unwrap()
+        );
+        assert!(crate::tasks::executing_task(&daemon.model().tasks, "owner").is_none());
+        assert_eq!(daemon.model().rt("owner").self_status, None);
+        assert!(!daemon.model().rt("owner").parking_turn);
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn explicit_review_waiting_preserves_another_card_and_idless_waiting_parks_it() {
+        let (_temp, running) = fixture().await;
+        let daemon = &running.daemon;
+        let mut current = daemon.model().task("review").cloned().unwrap();
+        current.id = "current".into();
+        current.title = "Current card".into();
+        current.status = TaskStatus::Working;
+        daemon.store.save_task(&current).unwrap();
+        daemon.model().tasks.push(current.clone());
+        daemon.project_task("owner");
+        daemon.update_agent("owner", |a| a.status = AgentStatus::Working);
+        daemon.model().rt("owner").turn_active = true;
+        let owner = serde_json::to_value(daemon.agent("owner")).unwrap();
+        daemon
+            .self_status("owner", AgentStatus::Waiting, None, Some("review".into()))
+            .unwrap();
+        assert_eq!(daemon.model().task("current"), Some(&current));
+        assert_eq!(serde_json::to_value(daemon.agent("owner")).unwrap(), owner);
+        assert_eq!(daemon.model().rt("owner").self_status, None);
+        assert!(!daemon.model().rt("owner").parking_turn);
+        daemon
+            .self_status(
+                "owner",
+                AgentStatus::Waiting,
+                Some("needs schema".into()),
+                None,
+            )
+            .unwrap();
+        assert_eq!(
+            daemon.model().task("current").unwrap().status,
+            TaskStatus::Waiting
+        );
+        assert_eq!(
+            daemon.model().task("review").unwrap().status,
+            TaskStatus::Review
+        );
+        assert!(daemon.model().rt("owner").parking_turn);
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn acknowledgement_does_not_reclaim_review_or_suppress_requested_changes() {
+        let (_temp, running) = fixture().await;
+        let daemon = &running.daemon;
+        daemon
+            .self_status("owner", AgentStatus::Waiting, None, Some("review".into()))
+            .unwrap();
+        for status in [
+            AgentStatus::Working,
+            AgentStatus::Blocked,
+            AgentStatus::Idle,
+        ] {
+            assert!(daemon
+                .self_status("owner", status, None, Some("review".into()))
+                .is_err());
+        }
+        assert!(daemon
+            .self_status(
+                "reviewer",
+                AgentStatus::Waiting,
+                None,
+                Some("review".into())
+            )
+            .is_err());
+        assert!(daemon
+            .self_status("owner", AgentStatus::Waiting, None, Some("missing".into()))
+            .is_err());
+        daemon
+            .submit_review(
+                &Who::Agent("reviewer".into()),
+                "review",
+                false,
+                "Fix the missing check".into(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(
+            daemon.model().task("review").unwrap().status,
+            TaskStatus::Working
+        );
+        assert_eq!(daemon.model().rt("owner").self_status, None);
+        assert_eq!(
+            crate::tasks::executing_task(&daemon.model().tasks, "owner")
+                .unwrap()
+                .id,
+            "review"
+        );
+        assert!(daemon
+            .bus
+            .history(Some("owner"), 100)
+            .unwrap()
+            .iter()
+            .any(|m| m.kind == MessageType::ReviewResult && m.metadata["approved"] == false));
     }
 }
