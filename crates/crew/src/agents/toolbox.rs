@@ -39,6 +39,7 @@ pub fn claude_mcp_bytes(
 }
 
 pub(crate) mod args;
+pub(crate) mod builtin;
 pub mod prepare;
 mod sources;
 pub mod store;
@@ -47,6 +48,8 @@ pub mod store;
 /// launch. Never recovered from disk in place of resolving current settings.
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct RuntimeToolbox {
+    /// Verified executable for the opt-in output skill; not part of skill bytes.
+    pub compact_helper: Option<PathBuf>,
     pub servers: Vec<String>,
     pub scrub_env: Vec<String>,
     pub inherit_memory: bool,
@@ -54,6 +57,7 @@ pub struct RuntimeToolbox {
     pub claude_inherit_mcp: bool,
     pub claude_preferences: Value,
     pub claude_plugins: Vec<PathBuf>,
+    pub claude_rebuild_prompt: bool,
     pub codex_overrides: Vec<(String, Value)>,
     pub codex_skill_roots: Vec<PathBuf>,
     pub codex_inherit_servers: BTreeSet<String>,
@@ -64,6 +68,26 @@ pub struct RuntimeToolbox {
     pub pi_context_files: bool,
     /// Empty retains pi's built-in prompt while disabling SYSTEM.md discovery.
     pub pi_system_prompt: String,
+}
+
+impl RuntimeToolbox {
+    pub(crate) fn bind_helpers(&self, spec: &mut crate::agents::LaunchSpec) {
+        let bind = |env: &mut Vec<(String, String)>| {
+            env.retain(|(name, _)| name != builtin::HELPER_ENV);
+            // Empty also masks an inherited binding when the skill is unavailable.
+            env.push((
+                builtin::HELPER_ENV.into(),
+                self.compact_helper
+                    .as_deref()
+                    .map(|path| path.to_string_lossy().into_owned())
+                    .unwrap_or_default(),
+            ));
+        };
+        bind(&mut spec.env);
+        if let Some(sidecar) = &mut spec.sidecar {
+            bind(&mut sidecar.env);
+        }
+    }
 }
 
 /// Increment when a runtime mapping changes the generated toolbox semantics.

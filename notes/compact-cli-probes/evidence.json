@@ -1,0 +1,145 @@
+{
+  "product_commit": "a4fc069c707c535541bcb06bf1b4696090cbbec1",
+  "platform": "Linux x86_64",
+  "scratch": "target/cpg",
+  "pins": {
+    "claude": "2.1.291 (Claude Code)",
+    "codex": "codex-cli 0.159.0",
+    "pi": "1.1.0",
+    "node": "v24.19.0",
+    "executable_sha256": {
+      "crew": "690bd3b0b4b8e3923c8ea97ff870a53e8876c67453891f295d919c86f2553d9b",
+      "claude": "078fad28d0297c9a25d306b635b2d8816c6839347520f29eb54ffea5d56142fb",
+      "codex": "050b3a798038a9c80066b89fc380b307b2598f7caaf432f3311e482c0840ad53",
+      "pi": "e79626f2dd6f94aa45d30f3fa63cd84319a6eefcd150b353cfaf274366926774"
+    }
+  },
+  "versions": {
+    "claude": "2.1.291 (Claude Code)",
+    "codex": "codex-cli 0.159.0",
+    "pi": "1.1.0"
+  },
+  "helper": {
+    "helper_sha256": "690bd3b0b4b8e3923c8ea97ff870a53e8876c67453891f295d919c86f2553d9b",
+    "format_version": 1,
+    "parser": "cargo_test_v1"
+  },
+  "runtime_probes": [
+    {
+      "runtime": "claude",
+      "policy": "runtime-default",
+      "helper_available": true,
+      "arms": [
+        {
+          "enabled": false,
+          "denied": true,
+          "catalog_selection_verified": true,
+          "transcript_prefix_sha256": "da144f05524d0451f0a8f09697ba65b463da44635937533c5f82ea901b764e74",
+          "history_stable": true,
+          "requests": 3,
+          "native_read_sha256": "ff294ab793516a895186bd9b8d038fb16c806835491978232e25302eb730c179"
+        },
+        {
+          "enabled": true,
+          "denied": true,
+          "catalog_selection_verified": true,
+          "transcript_prefix_sha256": "ca999603eb44be4926b37a7b26ef5abb71a456b478684264fd7c29e3689426e4",
+          "history_stable": true,
+          "requests": 5,
+          "native_read_sha256": "ff294ab793516a895186bd9b8d038fb16c806835491978232e25302eb730c179"
+        }
+      ]
+    },
+    {
+      "runtime": "codex",
+      "policy": "workspace-write",
+      "helper_available": false,
+      "arms": [
+        {
+          "enabled": false,
+          "denied": true,
+          "catalog_selection_verified": true,
+          "transcript_prefix_sha256": "2ac408d9ac53a9e0de4f1db4396d848f51697cea05102081ad85c68bb8736a98",
+          "history_stable": true,
+          "requests": 3,
+          "native_read_sha256": "3074f68f208f462c0028ba12c2472ef8deaa3c06faafdb057d8c8f0c3366037e"
+        },
+        {
+          "enabled": true,
+          "denied": true,
+          "catalog_selection_verified": true,
+          "transcript_prefix_sha256": "34fb448cc434379420542548706f2fd307db8693565186de2e7467a560b8568c",
+          "history_stable": true,
+          "requests": 5,
+          "native_read_sha256": "dc827122a08d245c7af4c990f1cf771c7bd357b62f177f9b84197bd52dfc9e02"
+        }
+      ]
+    },
+    {
+      "runtime": "codex",
+      "policy": "danger-full-access",
+      "helper_available": true,
+      "arms": [
+        {
+          "enabled": false,
+          "denied": true,
+          "catalog_selection_verified": true,
+          "transcript_prefix_sha256": "ab9e26ac644599e5c5ee13c56bd7a68f61bb319418cda8dabd14381e0b179712",
+          "history_stable": true,
+          "requests": 3,
+          "native_read_sha256": "afdf0c4c6d4b175dbd848df7e1d38ab44c84085eacdbeb5df963abdab2e84ffe"
+        },
+        {
+          "enabled": true,
+          "denied": true,
+          "catalog_selection_verified": true,
+          "transcript_prefix_sha256": "7b206d85065fd6e69e637d5133870ad3cd570a916bcab016c8e93432fe9911a8",
+          "history_stable": true,
+          "requests": 5,
+          "native_read_sha256": "5e53038a26120d9df2d3ad15eacbe5d2362811d815ee24e0775765d7eba3b8ce"
+        }
+      ]
+    },
+    {
+      "runtime": "pi",
+      "policy": "runtime-default",
+      "helper_available": true,
+      "arms": [
+        {
+          "enabled": false,
+          "denied": true,
+          "catalog_selection_verified": true,
+          "transcript_prefix_sha256": "8472b7f7fb9541852425340d807b92a87917f9b64d7d60470e9d58656c857ce6",
+          "history_stable": true,
+          "requests": 3,
+          "native_read_sha256": "ef689c0aa90f7a7fda208a163887a571d4f7f8f1b12890604e6d815741622515"
+        },
+        {
+          "enabled": true,
+          "denied": true,
+          "catalog_selection_verified": true,
+          "transcript_prefix_sha256": "f78ea8dc47268ca11b91a2ae0877ed4e3d08026990c6026b3d3462b4efedc220",
+          "history_stable": true,
+          "requests": 5,
+          "native_read_sha256": "ef689c0aa90f7a7fda208a163887a571d4f7f8f1b12890604e6d815741622515"
+        }
+      ]
+    }
+  ],
+  "stable_after_clock_and_restart": true,
+  "restart_new_pid_and_launch_ready": true,
+  "provider_calls": 0,
+  "network": "unshared namespace; localhost stub only",
+  "completed_commands": 62,
+  "all_commands_exited_zero": true,
+  "previous_attempts": [
+    {
+      "scratch": "target/cp2",
+      "result": "Codex guarded sandbox refused daemon socket; exposed unsupported configuration and led to explicit unavailable status."
+    },
+    {
+      "scratch": "target/cpf",
+      "result": "All native arms passed; restart assertion incorrectly expected idle from a working fake CLI. Final runner requires new PID, launch marker, readiness output and active unchanged fingerprint."
+    }
+  ]
+}

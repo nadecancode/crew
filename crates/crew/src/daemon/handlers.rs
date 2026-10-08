@@ -555,6 +555,11 @@ change identity",
                 task_id,
             } => {
                 let agent = agent_only(&who)?.to_string();
+                if status == AgentStatus::Working {
+                    if let Some(task) = &task_id {
+                        self.start_ready_task(task, &agent).await?;
+                    }
+                }
                 self.self_status(&agent, status, note, task_id)?;
                 reply(self.agent(&agent))
             }

@@ -56,6 +56,45 @@ That request is captured by a localhost HTTP 400 stub; no provider inference is
 performed. These checks establish discovery and launch behavior, not cache hits
 or account login.
 
+## Claude prompt snapshots after an explicit refresh
+
+Claude Code 2.1.291 records tool schemas inside a `prompt_snapshot` transcript
+attachment. Replacing Crew's MCP pin does not replace that recorded native
+catalog. An ordinary resumed process can therefore keep sending the original
+descriptions even while Crew serves the refreshed definitions.
+
+For `crew resume --restart <member>`, Crew checks that a resumed Claude member
+with managed toolbox items supports `--system-prompt-snapshot off` before
+replacing its MCP pins. Old or unrecognized versions report the refresh as
+unavailable. Update Claude Code or use `crew agent restart --fresh <member>` to
+start a new conversation. Ordinary recovery does not depend on this capability
+probe, and a refused explicit refresh leaves the old catalog available to it.
+The switch is documented for Claude Code 2.1.257 and newer. See the
+[native CLI reference](https://code.claude.com/docs/en/cli-reference#system-prompt-flags-in-resumed-conversations).
+
+If the explicit resumed refresh actually changes the managed fingerprint or
+definition digest, Crew marks that native session id in daemon-private member
+state and passes the switch on that launch and every later launch of the same
+conversation, including crash recovery. A new native session id clears the
+marker. An unchanged refresh leaves the snapshot policy alone. Inherited
+subagent catalogs remain frozen. The flag is managed by Crew and cannot be
+overridden through `extra_args`.
+
+The conversation id and native history are retained; Crew does not rewrite
+transcript records. Disabling the native snapshot rebuilds the system prompt
+on each request for that conversation. It does not disable provider prompt
+caching, but regenerated prompt bytes can affect cache reuse. The localhost
+fixture observes stable system and tool bytes after refresh and recovery;
+it does not establish cache hits, priced savings or stability for other
+workloads. Resume-prefix and usage comparisons remain `cache-acceptance` work.
+
+The native regression is `scripts/toolboxes/claude_refresh.py`. It covers an
+unchanged explicit restart, a changed upstream description, resumed refresh,
+automatic crash recovery, a later unchanged request and tool removal. Each
+phase requires an actual native assistant reply, and the original transcript
+prefix must remain byte-identical. Evidence and commands are in
+[the Claude follow-up report](../review/toolbox-t14-claude.md).
+
 ## Experimental cache keep-alive mechanism
 
 This integration chain also contains scheduler's `cache-retention-policy`

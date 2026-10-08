@@ -129,8 +129,9 @@ call this to wait for one.",
         tool(
             "agent_status",
             "Set your status: working, waiting (park this card), blocked or idle. Add a note \
-saying on whom or what. task_id addresses a parked card explicitly; working refuses if another \
-card executes. Defaults to the executing card, otherwise the latest started waiting card.",
+saying on whom or what. task_id names a parked card, or an assigned Ready card to start with \
+working. Starting requires no executing card and all dependencies done. Defaults to the \
+executing card, otherwise the latest started waiting card.",
             object(
                 json!({
                     "status": { "type": "string", "enum": ["working", "waiting", "blocked", "idle"] },
