@@ -46,9 +46,12 @@ pub const PROTECTED_ENV: &[&str] = &[
     "CLAUDE_CONFIG_DIR",
     "PI_CODING_AGENT_DIR",
     "CREW_IDENTITY",
+    "CREW_COMPACT_CLI_HELPER",
 ];
 /// Version of the canonical form; part of every fingerprint.
 pub const CANONICAL_VERSION: u32 = 1;
+/// Available by explicit inclusion; a team-defined bundle of this name wins.
+pub const COMPACT_CLI: &str = "compact-cli";
 
 const MAX_ARGS: usize = 256;
 const MAX_TEXT_BYTES: usize = 4096;
@@ -514,6 +517,14 @@ pub enum Item {
     Mcp(McpServer),
     File(FileItem),
     Hook(Hook),
+    /// Internal resolved identity, never inferred from a user skill's name/path.
+    Builtin(BuiltinSkill),
+}
+
+#[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq)]
+#[serde(rename_all = "kebab-case")]
+pub enum BuiltinSkill {
+    CompactCli,
 }
 
 impl Item {
@@ -522,6 +533,7 @@ impl Item {
             Item::Mcp(m) => m.required,
             Item::File(f) => f.required,
             Item::Hook(h) => h.required,
+            Item::Builtin(_) => false,
         }
     }
 
@@ -531,6 +543,7 @@ impl Item {
             Item::Mcp(m) => &m.runtimes,
             Item::File(f) => &f.runtimes,
             Item::Hook(h) => &h.runtimes,
+            Item::Builtin(_) => &[],
         }
     }
 }
@@ -864,6 +877,19 @@ fn flatten<'c>(
     cache: &'c mut HashMap<String, Flat>,
 ) -> Result<&'c Flat> {
     if !cache.contains_key(name) {
+        if name == COMPACT_CLI && !bundles.contains_key(name) {
+            cache.insert(
+                name.to_string(),
+                BTreeMap::from([(
+                    ItemRef::new(ItemKind::Skills, COMPACT_CLI),
+                    ResolvedItem {
+                        item: Item::Builtin(BuiltinSkill::CompactCli),
+                        origin: Origin::Bundle(COMPACT_CLI.to_string()),
+                    },
+                )]),
+            );
+            return Ok(&cache[name]);
+        }
         if stack.iter().any(|n| n == name) {
             stack.push(name.to_string());
             bail!("{at}: bundles include each other: {}", stack.join(" -> "));
@@ -993,6 +1019,7 @@ under mcp"
             Item::Mcp(server) => validate_mcp(server, &at)?,
             Item::File(file) => validate_text(&file.path, &format!("{at}.path"), MAX_TEXT_BYTES)?,
             Item::Hook(hook) => validate_hook(hook, &at)?,
+            Item::Builtin(_) => {}
         }
     }
     Ok(())
@@ -1148,7 +1175,7 @@ pub fn check_includes(
     path: &str,
 ) -> Result<()> {
     for (i, name) in body.include.iter().enumerate() {
-        if !bundles.contains_key(name) {
+        if !bundles.contains_key(name) && name != COMPACT_CLI {
             bail!(
                 "{path}.include[{i}]: unknown toolbox '{name}'{}",
                 suggestion(name, bundles.keys().cloned())
@@ -1223,6 +1250,18 @@ impl Resolved {
                         ("runtimes", runtimes_value(&file.runtimes)),
                     ])
                 }
+                Item::Builtin(skill) => object(vec![
+                    ("builtin", serde_json::to_value(skill)?),
+                    (
+                        "content",
+                        Value::from(
+                            content
+                                .get(item)
+                                .ok_or_else(|| anyhow!("no content entry for {item}"))?
+                                .canonical()?,
+                        ),
+                    ),
+                ]),
                 Item::Hook(hook) => {
                     let mut fields = vec![
                         ("command", Value::from(hook.command.clone())),

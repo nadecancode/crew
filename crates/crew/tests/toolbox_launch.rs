@@ -214,6 +214,139 @@ fn sandbox_available() -> bool {
 }
 
 #[test]
+fn compact_cli_is_opt_in_pinned_and_recovers_through_the_member_binding() {
+    use sha2::{Digest, Sha256};
+    for runtime in [RuntimeKind::Claude, RuntimeKind::Codex] {
+        for sandboxed in [false, true] {
+            if sandboxed && !sandbox_available() {
+                continue;
+            }
+            let fixture = Fixture::new();
+            let s = &fixture.session;
+            let mut team = fixture.team(runtime, json!({"include":["compact-cli"]}));
+            if sandboxed {
+                team.workspace.sandbox.mode = SandboxMode::Required;
+            }
+            fixture.run(&team);
+            let home = if sandboxed {
+                s.workspace
+                    .join(".crew/agents/x/rw/home")
+                    .join(runtime.as_str())
+            } else {
+                s.root().join(format!("{}-home", runtime.as_str()))
+            };
+            let record_name = if runtime == RuntimeKind::Claude {
+                "fake-claude-x.json"
+            } else {
+                "fake-codex-server.json"
+            };
+            let record = fixture.record(&home.join(record_name));
+            let pin = s.crew_copy();
+            assert_eq!(record["env"]["CREW_COMPACT_CLI_HELPER"], json!(pin));
+            let skill = if runtime == RuntimeKind::Claude {
+                s.workspace
+                    .join(".crew/agents/x/crew-toolbox/skills/compact-cli")
+            } else {
+                let roots = fixture.record(&home.join("fake-codex-skill-roots.json"));
+                Path::new(roots["extraRoots"][0].as_str().unwrap()).to_path_buf()
+            };
+            let manifest = read_json(&skill.join("helper.json")).unwrap();
+            let digest = format!("{:x}", Sha256::digest(std::fs::read(&pin).unwrap()));
+            assert_eq!(manifest["helper_sha256"], digest);
+            let before = fixture.toolbox();
+            assert_eq!(before.items.len(), 1);
+            assert_eq!(before.items[0].status.code, ToolboxItemCode::Active);
+            assert_eq!(before.items[0].origin, "bundle:compact-cli");
+            let input = s.root().join("captured.txt");
+            let source =
+                include_bytes!("../../crew-core/tests/fixtures/output-view/cargo-success.txt");
+            std::fs::write(&input, source).unwrap();
+            let invoke = |args: &[&str]| {
+                std::process::Command::new(skill.join("scripts/output"))
+                    .env("CREW_COMPACT_CLI_HELPER", &pin)
+                    .env("CREW_IDENTITY", s.identity_path("x"))
+                    .args(args)
+                    .output()
+                    .unwrap()
+            };
+            let viewed = invoke(&["view", input.to_str().unwrap(), "--exit-code", "0"]);
+            assert!(viewed.status.success(), "{}", stderr(&viewed));
+            let view: Value = serde_json::from_slice(&viewed.stdout).unwrap();
+            assert_eq!(view["kind"], "summary");
+            let raw = invoke(&["raw", view["source"]["reference"].as_str().unwrap()]);
+            assert!(raw.status.success(), "{}", stderr(&raw));
+            assert_eq!(raw.stdout, source);
+            // The executable check precedes identity and source access.
+            let refused = std::process::Command::new(&pin)
+                .env_remove("CREW_IDENTITY")
+                .args([
+                    "output",
+                    "--expected-helper",
+                    &"0".repeat(64),
+                    "view",
+                    "/missing",
+                    "--exit-code",
+                    "0",
+                ])
+                .output()
+                .unwrap();
+            assert!(!refused.status.success());
+            assert!(stderr(&refused).contains("helper changed"));
+            assert!(refused.stdout.is_empty());
+            // Exclusion stays pending; a live skill is not mutated by reload.
+            team.agents[0].toolbox = serde_json::from_value(
+                json!({"include":["compact-cli"],"exclude":["skills.compact-cli"]}),
+            )
+            .unwrap();
+            write(&s.root().join("team.yaml"), &team.to_yaml().unwrap());
+            s.ok(&[
+                "toolbox",
+                "reload",
+                "team.yaml",
+                "-C",
+                s.workspace.to_str().unwrap(),
+            ]);
+            assert_eq!(fixture.toolbox().fingerprint, before.fingerprint);
+            assert!(skill.join("SKILL.md").exists());
+            s.agent_cmd(&["restart", "x"]);
+            s.wait("excluded compact skill", |snapshot| {
+                snapshot.agents.iter().any(|agent| {
+                    agent.id == "x"
+                        && agent
+                            .toolbox
+                            .as_ref()
+                            .is_some_and(|toolbox| toolbox.items.is_empty())
+                })
+            });
+        }
+    }
+}
+
+#[test]
+fn guarded_codex_reports_compact_cli_unavailable_without_changing_permissions() {
+    let fixture = Fixture::new();
+    let s = &fixture.session;
+    let mut team = fixture.team(RuntimeKind::Codex, json!({"include":["compact-cli"]}));
+    team.defaults.permissions = crew_core::config::PermissionPolicy::Guarded;
+    fixture.run(&team);
+    let record = fixture.record(&s.root().join("codex-home/fake-codex-server.json"));
+    assert!(record["args"]
+        .as_array()
+        .unwrap()
+        .contains(&json!("sandbox_mode=\"workspace-write\"")));
+    assert_eq!(record["env"]["CREW_COMPACT_CLI_HELPER"], "");
+    let view = fixture.toolbox();
+    assert_eq!(view.items[0].status.code, ToolboxItemCode::NotAvailable);
+    assert!(view.items[0]
+        .detail
+        .as_deref()
+        .unwrap()
+        .contains("native sandbox"));
+    let roots = fixture.record(&s.root().join("codex-home/fake-codex-skill-roots.json"));
+    assert_eq!(roots["extraRoots"], json!([]));
+}
+
+#[test]
 fn claude_pins_files_and_credentials_and_reload_waits_for_restart() {
     let fixture = Fixture::new();
     let s = &fixture.session;
