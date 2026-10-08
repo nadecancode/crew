@@ -202,6 +202,13 @@ pub enum Signal {
     Compacted,
     /// A compaction crew asked for was not carried out, and why.
     CompactSkipped(String),
+    /// A toolbox MCP server failed in the session, and how; `ended` when
+    /// the session ends over it (a required server).
+    ToolboxFailed {
+        server: String,
+        detail: String,
+        ended: bool,
+    },
     Exiting,
 }
 

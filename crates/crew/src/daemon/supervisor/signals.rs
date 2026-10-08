@@ -157,6 +157,21 @@ impl Daemon {
             }
             Signal::Compacted => self.context_compacted(id).await,
             Signal::CompactSkipped(why) => self.compact_skipped(id, &why),
+            // The session's end is reported as any exit is.
+            Signal::ToolboxFailed {
+                server,
+                detail,
+                ended: true,
+            } => self.toolbox_failed_in_session(id, &server, &detail),
+            Signal::ToolboxFailed { server, detail, .. } => {
+                self.toolbox_report(
+                    id,
+                    &server,
+                    crew_core::rpc::ToolboxReportKind::Failed,
+                    &detail,
+                )
+                .await
+            }
             Signal::TurnFailed(what) => {
                 {
                     let mut model = self.model();
