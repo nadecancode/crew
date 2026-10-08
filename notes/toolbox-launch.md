@@ -77,10 +77,17 @@ mechanism in this code chain is not
 evidence that warming saves money and does not authorize switching it on. The
 toolbox launch card makes no cache-hit or priced-saving claim.
 
-## Validation status
+## Composition and validation
 
-Source/store tests, native Codex inventory integration, private-home tests,
-strict crew Clippy and the standalone root-propagation runner pass on the launch
-checkpoints. Final workspace, sandbox, formatting and Rust 1.82 CLI gates follow
-the reviewed pi registration-barrier and toolbox proxy merges. Their final
-results are recorded with the task's review artifact.
+The composed branch includes main `cb95b650`, toolbox MCP controls approved at
+`aaea82f4` (with the review-note correction in `99956858`), and pi's registration
+barrier approved at `89650283` (with comment clarification `476879df`). Scheduler's
+keep-alive stall fix `c1566c70` is also included; its code review is separate from
+the D2 policy decision described above.
+
+Final validation uses an absolute, short `CARGO_TARGET_DIR` under the workspace:
+the sandbox library tests locate the built binary through that variable, and
+Unix socket fixtures need room below the platform path-length limit. The
+require-mode workspace run includes `socat` on PATH. The explicit native pi and
+Codex suites supplement the workspace tests; neither performs provider inference.
+Final gate results and exact commands are recorded with the task's review artifact.
