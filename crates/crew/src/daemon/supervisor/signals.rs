@@ -374,6 +374,7 @@ impl Daemon {
                 let frame = crew_core::rpc::ServerFrame::push(crew_core::rpc::Push::Deliver {
                     ids: ids.clone(),
                     text: prompt,
+                    immediate: false,
                 });
                 if tx.send(frame).await.is_ok() {
                     pending = None;

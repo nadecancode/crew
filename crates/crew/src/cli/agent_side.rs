@@ -150,10 +150,19 @@ pub fn bridge(identity_path: Option<&Path>) -> Result<()> {
             Err(e) => return Err(e.into()),
         };
         match frame.push {
-            Some(Push::Deliver { ids, text }) => {
+            Some(Push::Deliver {
+                ids,
+                text,
+                immediate,
+            }) => {
                 let mut out = stdout.lock();
                 // A closed pipe means the session is gone; so are we.
-                if writeln!(out, "{}", json!({ "ids": ids, "text": text })).is_err()
+                if writeln!(
+                    out,
+                    "{}",
+                    json!({ "ids": ids, "text": text, "immediate": immediate })
+                )
+                .is_err()
                     || out.flush().is_err()
                 {
                     return Ok(());

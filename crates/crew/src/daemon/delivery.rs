@@ -286,7 +286,11 @@ impl Daemon {
                 // The channel carries the messages themselves, whatever the
                 // runtime's terminal phrasing would be.
                 let text = crate::agents::prompt::format_nudge(&fresh);
-                let frame = ServerFrame::push(Push::Deliver { ids, text });
+                let frame = ServerFrame::push(Push::Deliver {
+                    ids,
+                    text,
+                    immediate: false,
+                });
                 if tx.send(frame).await.is_err() {
                     drop(_guard);
                     self.listener_gone(id, conn);
@@ -517,6 +521,7 @@ impl Daemon {
             let frame = ServerFrame::push(Push::Deliver {
                 ids: Vec::new(),
                 text: text.to_string(),
+                immediate: false,
             });
             return tx.send(frame).await.is_ok();
         }
