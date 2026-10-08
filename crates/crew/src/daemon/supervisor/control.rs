@@ -73,6 +73,7 @@ impl Daemon {
             let mut model = self.model();
             let local = model.local.entry(id.to_string()).or_default();
             local.session_confirmed = false;
+            local.codex_parent_session = None;
         }
         self.save_local(id);
         self.update_agent(id, |a| a.session_id = None);

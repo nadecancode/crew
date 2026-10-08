@@ -98,6 +98,10 @@ pub(crate) struct AgentLocal {
     pub claude_rebuild_prompt_session: Option<String>,
     /// The runtime reported its session id, so the session can be resumed.
     pub session_confirmed: bool,
+    /// Codex's own user thread, checked against its rollout header. Native
+    /// children reuse our notify command but never acquire this binding.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub codex_parent_session: Option<String>,
     /// The agent's current launch (`CREW_LAUNCH` of the processes it
     /// started): kept across daemon restarts, so processes adopted then are
     /// still its own.

@@ -443,6 +443,7 @@ impl Daemon {
                             local.settings = settings.clone();
                         }
                         local.session_confirmed = false;
+                        local.codex_parent_session = None;
                     }
                 }
                 if !already_there {

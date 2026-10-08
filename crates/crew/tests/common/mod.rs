@@ -29,6 +29,44 @@ use crew_core::{Agent, Event, Message, RuntimeKind, Task};
 pub const CREW: &str = env!("CARGO_BIN_EXE_crew");
 pub const TIMEOUT: Duration = Duration::from_secs(40);
 
+/// Seed a known parent for stand-in runtimes that do not create native
+/// session metadata. Existing transcript/counter rows are preserved.
+pub fn codex_parent_rollout(codex_home: &Path, thread: &str) {
+    let directory = codex_home
+        .join("sessions")
+        .join(chrono::Local::now().format("%Y/%m/%d").to_string());
+    std::fs::create_dir_all(&directory).unwrap();
+    let suffix = format!("-{thread}.jsonl");
+    let file = std::fs::read_dir(&directory)
+        .unwrap()
+        .flatten()
+        .map(|entry| entry.path())
+        .find(|path| {
+            path.file_name()
+                .and_then(|name| name.to_str())
+                .is_some_and(|name| name.ends_with(&suffix))
+        })
+        .unwrap_or_else(|| directory.join(format!("rollout-parent-{thread}.jsonl")));
+    let existing = std::fs::read_to_string(&file).unwrap_or_default();
+    let first = existing
+        .lines()
+        .next()
+        .and_then(|line| serde_json::from_str::<serde_json::Value>(line).ok());
+    if let Some(first) = first.filter(|value| value["type"] == "session_meta") {
+        assert_eq!(first["payload"]["id"], thread);
+        assert_eq!(first["payload"]["thread_source"], "user");
+        assert!(first["payload"]["source"].get("subagent").is_none());
+        return;
+    }
+    let capture: serde_json::Value =
+        serde_json::from_str(include_str!("../fixtures/codex-child/native-0.159.json")).unwrap();
+    let mut header = capture["pairs"][0]["cases"][0]["session_meta"].clone();
+    header["payload"]["id"] = serde_json::json!(thread);
+    header["payload"]["session_id"] = serde_json::json!(thread);
+    header["timestamp"] = serde_json::json!(chrono::Local::now().to_rfc3339());
+    std::fs::write(file, format!("{header}\n{existing}")).unwrap();
+}
+
 /// The argv of a scripted agent; `steps` are `--on-task=…`-style flags.
 pub fn scripted(steps: &[&str]) -> Vec<String> {
     let mut argv = vec!["{crew}".to_string(), "scripted-agent".to_string()];

@@ -101,7 +101,16 @@ fn the_fake_codex_server_binds_its_socket_and_keeps_its_rollout_in_codex_home() 
     });
     let rollout = files.codex_rollout("fake-thread", started).unwrap();
     assert!(rollout.path.starts_with(&codex_home));
-    let row: serde_json::Value = serde_json::from_reader(rollout.file).unwrap();
+    let row: serde_json::Value = serde_json::from_str(
+        std::io::BufRead::lines(std::io::BufReader::new(rollout.file))
+            .next()
+            .unwrap()
+            .unwrap()
+            .as_str(),
+    )
+    .unwrap();
+    assert_eq!(row["type"], "session_meta");
+    assert_eq!(row["payload"]["thread_source"], "user");
     let timestamp = chrono::DateTime::parse_from_rfc3339(row["timestamp"].as_str().unwrap())
         .unwrap()
         .timestamp_millis();

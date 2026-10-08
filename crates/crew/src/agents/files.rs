@@ -10,6 +10,7 @@
 //! `<A>/identity.json` or `/etc/passwd` named there is not read.
 
 use std::fs::File;
+use std::io::{BufRead, BufReader, Read};
 #[cfg(test)]
 use std::os::fd::AsFd;
 use std::path::{Path, PathBuf};
@@ -34,6 +35,7 @@ pub struct Opened {
 /// The sub-path of the private home Claude Code and Codex use.
 const CLAUDE_PROJECTS: &str = "rw/home/claude/projects";
 const CODEX_SESSIONS: &str = "rw/home/codex/sessions";
+const CODEX_HEADER_BYTES: u64 = 256 * 1024;
 
 impl AgentFiles {
     /// The files of an agent whose directories exist: opened beneath the state
@@ -143,6 +145,46 @@ impl AgentFiles {
                 })
             }
         }
+    }
+
+    /// Validate only the first record of this exact thread's own rollout.
+    /// Children inherit session_id, so identity is payload.id, not that alias.
+    /// These files remain untrusted; a missing or oversized header proves nothing.
+    pub(crate) fn codex_parent_thread(&self, thread: &str, started_ms: i64) -> bool {
+        if thread.len() > 256 || session_file_name(thread).is_none() {
+            return false;
+        }
+        // UUIDv7 names contain the creation time. A resumed user thread can
+        // predate the member's latest launch by weeks; the time is only a
+        // bounded lookup hint, never identity or parenthood proof.
+        let born = uuid::Uuid::parse_str(thread).ok().and_then(|uuid| {
+            let bytes = uuid.as_bytes();
+            (bytes[6] >> 4 == 7).then(|| {
+                bytes[..6]
+                    .iter()
+                    .fold(0_i64, |millis, byte| (millis << 8) | i64::from(*byte))
+            })
+        });
+        let Some(opened) = self
+            .codex_rollout(thread, started_ms)
+            .or_else(|| self.codex_rollout(thread, born?))
+        else {
+            return false;
+        };
+        let mut reader = BufReader::new(opened.file.take(CODEX_HEADER_BYTES + 1));
+        let mut line = Vec::new();
+        if reader.read_until(b'\n', &mut line).is_err() || line.len() as u64 > CODEX_HEADER_BYTES {
+            return false;
+        }
+        let Ok(header) = serde_json::from_slice::<serde_json::Value>(&line) else {
+            return false;
+        };
+        header["type"] == "session_meta"
+            && header["payload"]["id"].as_str() == Some(thread)
+            && header["payload"]["thread_source"] == "user"
+            && header["payload"]
+                .get("source")
+                .is_some_and(|source| !source.is_null() && source.get("subagent").is_none())
     }
 }
 

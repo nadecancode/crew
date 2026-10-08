@@ -709,6 +709,9 @@ impl Daemon {
             let Some(agent) = model.agent(id).cloned() else {
                 return;
             };
+            let codex_parent_confirmed = model.local.get(id).is_some_and(|local| {
+                local.session_confirmed && local.codex_parent_session == agent.session_id
+            });
             let resting = !model.rt(id).turn_active;
             if agent.runtime == RuntimeKind::Claude {
                 if pending.iter().any(|m| m.from == OPERATOR_ID) {
@@ -794,6 +797,9 @@ impl Daemon {
                 }
             } else if let (Some(socket), false) = (sidecar, rt.queue_failed) {
                 match &agent.session_id {
+                    Some(_) if agent.runtime == RuntimeKind::Codex && !codex_parent_confirmed => {
+                        Route::Hold(0)
+                    }
                     Some(thread) => Route::Queue(socket, thread.clone()),
                     // The thread id arrives with the first turn-complete
                     // notification; give it time, then use the terminal.
@@ -1062,6 +1068,15 @@ impl Daemon {
         // launch of the agent waits until the command and its sandbox are
         // done, whoever stops waiting for it.
         let lease = self.launch_lease(id).read_owned().await;
+        if kind == RuntimeKind::Codex
+            && (!self.confirmed_codex_parent(id, session)
+                || self.agent(id).is_none_or(|agent| {
+                    agent.runtime != RuntimeKind::Codex
+                        || agent.session_id.as_deref() != Some(session)
+                }))
+        {
+            return Err("Codex parent thread is not confirmed for this member".into());
+        }
         let sandbox = self
             .agent_sandbox(&agent, Run::helper(id, &argv[0], &env, socket))
             .await
@@ -1112,6 +1127,9 @@ impl Daemon {
         let _guard = lock.lock().await;
         if let (Some(socket), Some(agent)) = (self.sidecar_socket(id), self.agent(id)) {
             if let Some(thread) = &agent.session_id {
+                if agent.runtime == RuntimeKind::Codex && !self.confirmed_codex_parent(id, thread) {
+                    return false;
+                }
                 if self
                     .queue(id, agent.runtime, &socket, thread, text)
                     .await
