@@ -521,9 +521,11 @@ the slice that depends on it is accepted.
 5. A toolbox is fixed for the life of a session. Changing it means restarting
    the member.
 6. The same toolbox renders the same bytes, in a deterministic order, on every
-   spawn, restart and resume of the same member. Its model-visible definitions
-   are the same for every member with the same fingerprint and role. A toolbox
-   therefore does not break a cached prompt prefix by itself.
+   spawn, restart and resume of the same member, so it does not break a cached
+   prompt prefix by itself. crew adds nothing member-specific to its
+   model-visible definitions. Members whose definitions are shown to match
+   (rule 2a: same fingerprint, role, definition digest and native catalog) can
+   share a cached prefix.
 
 ### Non-goals
 
@@ -819,8 +821,10 @@ the Codex and pi gaps in the current state.
 
   An unsandboxed session therefore inherits neither `SHOP_GITHUB_TOKEN` nor
   the `DAEMON_TOKEN` it aliases, even when the operator started the daemon
-  with both exported. A server process gets the resolved value under its
-  reference name only, never under the source name.
+  with both exported. A server receives the resolved value only under its
+  destination name: the `env` map key (`GITHUB_TOKEN` in the example) or the
+  header name. Neither the reference name nor the source name is passed to
+  it. Both are scrubbed from the session.
 - **Delivery.** Every toolbox MCP server, local or remote, is reached through
   `crew toolbox mcp <name> --identity <identity file>`, the server entry crew
   renders for the runtime. Like `crew credential` for `apiKeyHelper` today, it
@@ -1231,9 +1235,9 @@ come from the supported pi, not the GSD binary on this host.
 | --- | --- | --- |
 | T01 | Team file without any `toolbox` key, Claude member, unsandboxed | `A/mcp.json` holds only `crew`; `--strict-mcp-config` and `--setting-sources project` are present; `crew toolbox --json` shows no items and lists the operator source as Not used. The sentinel user skill, subagent, enabled plugin, `CLAUDE.md` and hook do not reach the session; a project skill does. |
 | T02 | The example team above | `crew toolbox --json` for `qa` lists `mcp.context7` (bundle base via default), `mcp.playwright` (bundle web, required) and `skills.frontend-qa`. For `release` on Codex, unsandboxed: `mcp.github` and `mcp.docs` are Active; `skills.changelog` is Active through crew's app-server (with `delivery: terminal`, Not available on Codex without crew's app-server); `plugins.lint-kit` is Not available on Codex (Claude Code plugin format); `mcp.context7` is excluded. |
-| T03 | Reorder keys, items and bundles without changing meaning | Same fingerprint, byte-identical generated files for the same member,. A second member with the same selection, role and stub account has the same definition digest and an equal native catalog listing (rule 2a). A stub that serves member-specific tools gives a different digest, and the two definitions stay distinct. Until the Claude catalog probe passes, the `crew-toolbox` plugin path is excluded from this comparison and listed as the open gap. |
+| T03 | Reorder keys, items and bundles without changing meaning | Same fingerprint, byte-identical generated files for the same member. A second member with the same selection, role and stub account has the same definition digest and an equal native catalog listing (rule 2a). A stub that serves member-specific tools gives a different digest, and the two definitions stay distinct. Until the Claude catalog probe passes, the `crew-toolbox` plugin path is excluded from this comparison and listed as the open gap. |
 | T04 | Validation | Each of these stops `crew run` and `crew toolbox check` with its field path: a bundle cycle; an unknown bundle; an exclusion matching nothing at its level; the same exclusion listed twice at one level (the second matches nothing); an item defined and excluded at one level; a reserved name; a plain string where a reference belongs; `inherit_mcp` together with `inherit`; a reference or source (alias) name that collides with a model credential or an endpoint variable. Accepted without error: defaults exclude `mcp.context7` from bundle base, and the member includes bundle base again, so `mcp.context7` is back with origin `bundle:base`. Accepted: defaults define `mcp.docs`, and the member defines `mcp.docs` differently, so the member's definition wins whole. Accepted: the member has `reset: true`, and defaults' `exclude`, `inherit` and `strict` do not apply to it. |
-| T05 | Secrets | Four sentinels are used. `SHOP_GITHUB_TOKEN` comes from `[agents.release.toolbox_env]` as a file. `DOCS_TOKEN` is exported in the daemon's environment. `SHOP_TOKEN = { env = "DAEMON_TOKEN" }` aliases a daemon variable, with `DAEMON_TOKEN` exported. `ENDPOINT_SENTINEL` is in the member's endpoint `env_files`. The first three values reach only their stub server's process, through the proxy (`DOCS_TOKEN` through the remote bridge). The aliased value arrives there as `SHOP_TOKEN`, and neither `SHOP_TOKEN` nor `DAEMON_TOKEN` is in the member session's environment. They are absent from: `A`, `A/settings.json`, the store, the roster, the event log, `crew toolbox` output, every dashboard payload, every argv (`/proc/*/cmdline`), and the member session's own environment, both unsandboxed (PTY) and sandboxed, including the Codex app-server. A toolbox reference to `ENDPOINT_SENTINEL`, and an alias whose source is `ENDPOINT_SENTINEL` or `OPENAI_API_KEY`, are validation errors. A stub that echoes its token in an error shows `[redacted $SHOP_GITHUB_TOKEN]` to the model. |
+| T05 | Secrets | Four sentinels are used. `SHOP_GITHUB_TOKEN` comes from `[agents.release.toolbox_env]` as a file. `DOCS_TOKEN` is exported in the daemon's environment. `SHOP_TOKEN = { env = "DAEMON_TOKEN" }` aliases a daemon variable, with `DAEMON_TOKEN` exported. `ENDPOINT_SENTINEL` is in the member's endpoint `env_files`. The first three values reach only their stub server's process, through the proxy (`DOCS_TOKEN` through the remote bridge). Each value arrives under its destination key (`GITHUB_TOKEN` for `SHOP_GITHUB_TOKEN`; the `env` key that references `SHOP_TOKEN` for the alias). No reference or source name (`SHOP_GITHUB_TOKEN`, `DOCS_TOKEN`, `SHOP_TOKEN`, `DAEMON_TOKEN`) is in the member session's environment. They are absent from: `A`, `A/settings.json`, the store, the roster, the event log, `crew toolbox` output, every dashboard payload, every argv (`/proc/*/cmdline`), and the member session's own environment, both unsandboxed (PTY) and sandboxed, including the Codex app-server. A toolbox reference to `ENDPOINT_SENTINEL`, and an alias whose source is `ENDPOINT_SENTINEL` or `OPENAI_API_KEY`, are validation errors. A stub that echoes its token in an error shows `[redacted $SHOP_GITHUB_TOKEN]` to the model. |
 | T06 | Missing variable | For an item that is not required, the member starts and the item shows Needs $SHOP_GITHUB_TOKEN. For a required item, or under `strict`, the member does not start, and the inspector and the orchestrator's result give the same text. |
 | T07 | Stability over the lifecycle | Spawn, crash restart and `crew resume` give the same fingerprint and definition digest, and byte-identical `A/mcp.json`, plugin directory hashes, Codex `-c` arguments, pi arguments and pinned snapshots. |
 | T08 | Reload while running | After the team file is edited, `crew toolbox reload` leaves running sessions untouched. Affected members show the pending notice and `toolbox.pending` appears. A restart applies the change, and `toolbox.changed` carries both fingerprints. An edit to a field other than a toolbox field is reported and not applied. |
