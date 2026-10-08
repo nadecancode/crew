@@ -1571,6 +1571,7 @@ mod tests {
             .read_message_by_id(&super::super::server::Who::Agent("m".into()), &long.id)
             .unwrap();
         assert_eq!(fetched.body.len(), 4_001);
+        assert_eq!(fetched.body, long.body);
         assert!(daemon.bus.receive("m", true, 50).unwrap().is_empty());
         assert_eq!(daemon.agent("m").unwrap().inbox_unread, 0);
     }
@@ -1768,10 +1769,16 @@ mod tests {
         let (_temp, running) = queued_daemon().await;
         let daemon = &running.daemon;
         let incoming = send_body(daemon, "peer", "Still unread while an operator observes");
+        let incoming_before =
+            serde_json::to_value(daemon.bus.receive("m", false, 50).unwrap()).unwrap();
         daemon
             .read_message_by_id(&super::super::server::Who::Operator, &incoming.id)
             .unwrap();
         assert_eq!(daemon.bus.receive("m", true, 50).unwrap().len(), 1);
+        assert_eq!(
+            serde_json::to_value(daemon.bus.receive("m", false, 50).unwrap()).unwrap(),
+            incoming_before
+        );
         let outgoing = daemon
             .bus
             .send(
@@ -1785,10 +1792,16 @@ mod tests {
             )
             .unwrap()
             .message;
+        let outgoing_before =
+            serde_json::to_value(daemon.bus.receive("other", false, 50).unwrap()).unwrap();
         daemon
             .read_message_by_id(&super::super::server::Who::Agent("m".into()), &outgoing.id)
             .unwrap();
         assert_eq!(daemon.bus.receive("other", true, 50).unwrap().len(), 1);
+        assert_eq!(
+            serde_json::to_value(daemon.bus.receive("other", false, 50).unwrap()).unwrap(),
+            outgoing_before
+        );
         assert!(daemon
             .read_message_by_id(
                 &super::super::server::Who::Agent("stranger".into()),
