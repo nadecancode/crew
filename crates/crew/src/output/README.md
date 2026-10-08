@@ -5,6 +5,11 @@ result. It never runs the command, changes its approval, installs a hook,
 rewrites history or replaces a file read. Toolbox packaging is a separate
 step; nothing is enabled automatically.
 
+The rules are compiled into crew (`format_version: 1`, `cargo_test_v1`),
+with no project-local rule discovery or separate mutable rules file. A
+toolbox must fingerprint its pinned crew binary, these format/parser ids and
+the exact frozen skill bytes; the binary digest covers parser and store code.
+
 Pass the outcome recorded by the original caller:
 
 ```sh

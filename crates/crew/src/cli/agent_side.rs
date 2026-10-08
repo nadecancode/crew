@@ -54,7 +54,7 @@ pub fn ctl(cmd: CtlCommand) -> Result<()> {
             "task_update",
             json!({ "percent": percent, "message": message }),
         ),
-        CtlCommand::Tasks => ("tasks_list", json!({})),
+        CtlCommand::Tasks { done } => ("tasks_list", json!({ "done": done })),
         CtlCommand::Task { id } => ("task_get", json!({ "id": id })),
         CtlCommand::Done { result } => ("task_complete", json!({ "result": result })),
         CtlCommand::Fail { reason } => ("task_fail", json!({ "reason": reason })),

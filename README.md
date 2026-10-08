@@ -568,7 +568,7 @@ The orchestrator keeps each runtime's own guidance, since you read it.
 | `agent_send(to, body, type?)` | message a teammate directly; `to` may list several (`db,lead`), each getting its own copy, and nothing is sent if one is unknown |
 | `agent_broadcast(body)` | message everyone |
 | `agent_inbox(id?)` | read (and acknowledge) messages; with an id, that one message, if you sent or received it |
-| `tasks_list` / `task_get(id?)` | the board; one task's card (default: your task in progress) |
+| `tasks_list(done?)` / `task_get(id?)` | the board, with done tasks one line each (`done: true` shows them in full); one task's card (default: your task in progress) |
 | `agent_status(status, note, task_id?)` | working / waiting / blocked / idle; name a parked card explicitly |
 | `task_update(percent, message)` | report progress |
 | `task_complete(result)` / `task_fail(reason)` | finish the current task |

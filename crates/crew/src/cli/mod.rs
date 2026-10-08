@@ -576,8 +576,12 @@ pub enum CtlCommand {
         percent: u8,
         message: Option<String>,
     },
-    /// Show the board
-    Tasks,
+    /// Show the board (done tasks one line each)
+    Tasks {
+        /// Show done tasks in full too
+        #[arg(long)]
+        done: bool,
+    },
     /// Show a task's card (default: your task in progress)
     Task { id: Option<String> },
     /// Complete your current task
