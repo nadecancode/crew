@@ -46,6 +46,7 @@ pub(crate) mod server;
 mod subagents;
 mod supervisor;
 mod team;
+mod toolbox_rpc;
 mod turns;
 
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");

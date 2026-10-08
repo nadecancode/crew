@@ -14,7 +14,6 @@ use std::time::Duration;
 use anyhow::{Context, Result};
 use crew_core::client::Client;
 use crew_core::paths::Identity;
-use crew_core::rpc::Call;
 use serde_json::{json, Value};
 
 pub mod proxy;
