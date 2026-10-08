@@ -1298,6 +1298,18 @@ impl<C: ClientApi, W: CommandCodec> SessionDriver<C, W> {
                     }
                     other => other,
                 };
+                if let (
+                    Command::AsideRemove(q),
+                    CommandResult::FeatureScoped {
+                        response: crew_client::features::FeatureResponse::AsideMutation(r),
+                        ..
+                    },
+                ) = (&pending.command, &result)
+                {
+                    if q.id == r.id && q.workspace_run_id == r.workspace_run_id {
+                        self.purge_aside_bytes(&r.workspace_run_id, &r.id);
+                    }
+                }
                 self.complete(
                     scope.clone(),
                     operation_id,
@@ -1533,6 +1545,28 @@ impl<C: ClientApi, W: CommandCodec> SessionDriver<C, W> {
             .as_ref()
             .map(|context| context.scope.clone())
             .ok_or(ClientError::ClosedClient)?;
+        let feature = match &push {
+            Push::EpicBoardChanged(_) => Some(crew_protocol::features::Feature::Epics),
+            Push::Aside(_) => Some(crew_protocol::features::Feature::Asides),
+            Push::DocsChanged(_) => Some(crew_protocol::features::Feature::Docs),
+            Push::UsageChanged(_) => Some(crew_protocol::features::Feature::UsageMetrics),
+            _ => None,
+        };
+        if feature.is_some_and(|f| !channel.features.supports(f)) {
+            return self.end_channel(id, TransportEnd::Malformed, true, batch, clock);
+        }
+        if let Push::Aside(change) = &push {
+            let known = matches!(self.core.view(ViewQuery::FeatureWatches {feature:crew_protocol::features::Feature::Asides},clock),Ok(ViewData{payload:ViewPayload::FeatureWatches(ref watches),..}) if watches.iter().any(|w|w.watch_id==change.watch_id&&w.epoch==change.aside_epoch));
+            if known {
+                for gone in change
+                    .gone
+                    .iter()
+                    .filter(|g| g.cause == crew_protocol::asides::AsideGoneCause::Removed)
+                {
+                    self.purge_aside_bytes(&change.workspace_run_id, &gone.id);
+                }
+            }
+        }
         let shutdown = push == Push::Shutdown;
         self.input(ClientInput::Push { scope, push }, clock, batch)?;
         if shutdown {
@@ -1540,6 +1574,21 @@ impl<C: ClientApi, W: CommandCodec> SessionDriver<C, W> {
             self.workspace = WorkspaceStatus::Stopped;
         }
         Ok(())
+    }
+
+    fn purge_aside_bytes(
+        &mut self,
+        run: &crew_protocol::features::Id,
+        id: &crew_protocol::features::Id,
+    ) {
+        for pending in self.pending.values_mut() {
+            if let Command::AsideAsk(q) = &mut pending.command {
+                if &q.workspace_run_id == run && &q.request_id == id {
+                    q.question = Default::default();
+                    pending.text = None;
+                }
+            }
+        }
     }
 
     fn sent(

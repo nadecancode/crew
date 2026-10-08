@@ -34,6 +34,14 @@ pub(crate) fn view(
 ) -> Result<ViewData, ClientError> {
     let payload = match query {
         ViewQuery::Features => ViewPayload::Features(state.features.clone()),
+        ViewQuery::FeatureWatches { feature } => ViewPayload::FeatureWatches(
+            state
+                .feature_watches
+                .iter()
+                .filter(|w| w.feature == feature)
+                .cloned()
+                .collect(),
+        ),
         ViewQuery::Epic { key } => feature_view(
             state,
             key,

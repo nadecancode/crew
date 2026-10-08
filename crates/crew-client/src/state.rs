@@ -10,6 +10,8 @@ use crate::history::{EventHistory, MessageHistory};
 use crate::questions::Questions;
 use crate::sort_agents;
 
+mod features;
+
 #[derive(Clone, Debug)]
 struct SnapshotFlight {
     operation_id: OperationId,
@@ -35,6 +37,9 @@ pub(crate) struct StateUpdate {
 pub(crate) struct ClientState {
     pub features: crate::features::FeatureAvailability,
     pub epics: Option<crew_protocol::epics::EpicBoard>,
+    pub feature_watches: Vec<crate::features::FeatureWatchState>,
+    removed_asides:
+        std::collections::BTreeSet<(crew_protocol::features::Id, crew_protocol::features::Id)>,
     pub config: ClientConfig,
     pub revision: u64,
     pub connection: Option<ConnectionContext>,
@@ -77,6 +82,8 @@ impl ClientState {
         Ok(Self {
             features: Default::default(),
             epics: None,
+            feature_watches: Vec::new(),
+            removed_asides: Default::default(),
             config,
             revision: 0,
             connection: None,
@@ -283,6 +290,8 @@ impl ClientState {
     fn clear_domain(&mut self, revision: u64) -> Result<(), ClientError> {
         self.features = Default::default();
         self.epics = None;
+        self.feature_watches.clear();
+        self.removed_asides.clear();
         self.messages.reset(Vec::new(), revision)?;
         self.events.reset(Vec::new(), revision)?;
         self.session = None;
@@ -450,6 +459,16 @@ impl ClientState {
                 if self.scope.as_ref() != Some(&scope) {
                     return Ok(update);
                 }
+                if self
+                    .features
+                    .session
+                    .as_ref()
+                    .is_some_and(|f| f.connection_epoch == connection_epoch)
+                {
+                    self.clear_aside_values();
+                }
+                self.feature_watches
+                    .retain(|w| w.connection_epoch != connection_epoch);
                 for resource in self.resources.values_mut() {
                     if matches!(&resource.value,Some(ResourceValue::Feature(v)) if v.lease.is_some() && v.connection_epoch==connection_epoch)
                     {
@@ -764,6 +783,15 @@ impl ClientState {
                     return Ok(update);
                 }
                 validate_push(&push)?;
+                // Observer streams have independent barriers. A normal Snapshot
+                // must not discard their removals, expirations or corrections.
+                if matches!(
+                    push,
+                    Push::Aside(_) | Push::DocsChanged(_) | Push::UsageChanged(_)
+                ) {
+                    self.apply_push(push, clock, &mut update)?;
+                    return Ok(update);
+                }
                 if matches!(push, Push::Shutdown) {
                     self.apply_push(push, clock, &mut update)?;
                     return Ok(update);
@@ -1028,6 +1056,7 @@ impl ClientState {
                         .is_some_and(|old| old.workspace_run_id != session.workspace_run_id)
                 {
                     self.epics = None;
+                    self.feature_watches.clear();
                     self.resources.clear();
                     self.pending_reads.clear();
                     self.session = Some(*session);
@@ -1057,15 +1086,15 @@ impl ClientState {
                 self.workspace = WorkspaceStatus::Stopped;
             }
             Push::Unknown
-            | Push::Aside(_)
-            | Push::DocsChanged(_)
-            | Push::UsageChanged(_)
             | Push::Deliver { .. }
             | Push::Compact { .. }
             | Push::Pty { .. }
             | Push::PtyClosed
             | Push::Summary(_)
             | Push::Workspaces(_) => {}
+            Push::Aside(change) => self.aside_changed(*change, update)?,
+            Push::DocsChanged(change) => self.docs_changed(*change, update)?,
+            Push::UsageChanged(change) => self.usage_changed(*change, update)?,
         }
         Ok(())
     }
@@ -1150,9 +1179,21 @@ impl ClientState {
         }
         let (status, value, error) = match outcome {
             OperationOutcome::Succeeded { result } => match resource_value(&pending.key, result) {
-                Some(value) => {
-                    let status = resource_status(&value);
-                    (status, Some(value), None)
+                Some(mut value) => {
+                    if !self.filter_removed_asides(&mut value) {
+                        (
+                            ResourceStatus::Stale,
+                            None,
+                            Some(ClientReason {
+                                details: None,
+                                code: "removed".into(),
+                                message: "This aside was removed.".into(),
+                            }),
+                        )
+                    } else {
+                        let status = resource_status(&value);
+                        (status, Some(value), None)
+                    }
                 }
                 None => (
                     ResourceStatus::Failed,

@@ -158,6 +158,27 @@ impl ClientCore {
                     .apply_data(ClientInput::Unbind { scope, reason }, clock)?;
             }
             other => {
+                if let ClientInput::Push {
+                    scope,
+                    push: crew_protocol::rpc::Push::Aside(change),
+                } = &other
+                {
+                    if self.state.matches(scope)
+                        && self
+                            .state
+                            .feature_watches
+                            .iter()
+                            .any(|w| w.watch_id == change.watch_id && w.epoch == change.aside_epoch)
+                    {
+                        for gone in change
+                            .gone
+                            .iter()
+                            .filter(|g| g.cause == crew_protocol::asides::AsideGoneCause::Removed)
+                        {
+                            self.actions.purge_aside(&change.workspace_run_id, &gone.id);
+                        }
+                    }
+                }
                 let abandonment = match &other {
                     ClientInput::EndpointChanged {
                         endpoint_id,
@@ -286,6 +307,36 @@ impl ClientCore {
         }
         let mut outcomes = Vec::with_capacity(action.completions.len());
         for completed in action.completions {
+            if let (
+                Some(Command::AsideRemove(q)),
+                OperationOutcome::Succeeded {
+                    result:
+                        CommandResult::FeatureScoped {
+                            response: crate::features::FeatureResponse::AsideMutation(r),
+                            ..
+                        },
+                },
+            ) = (&completed.command, &completed.outcome)
+            {
+                if self.state.matches(&completed.scope)
+                    && q.id == r.id
+                    && q.workspace_run_id == r.workspace_run_id
+                {
+                    self.actions.purge_aside(&r.workspace_run_id, &r.id);
+                }
+            }
+            if let (
+                Some(command),
+                OperationOutcome::Succeeded {
+                    result: CommandResult::FeatureScoped { context, response },
+                },
+            ) = (&completed.command, &completed.outcome)
+            {
+                if self.state.matches(&completed.scope) {
+                    self.state
+                        .feature_completed(command, context, response, &mut data)?;
+                }
+            }
             if let (
                 Some(Command::Answer { id, .. }),
                 OperationOutcome::Succeeded {
@@ -421,6 +472,7 @@ impl ClientApi for ClientCore {
 pub(crate) fn context(state: &ClientState) -> ActionContext<'_> {
     ActionContext {
         features: Some(&state.features),
+        feature_watches: &state.feature_watches,
         connection: state.connection.as_ref(),
         endpoint: state.endpoint,
         workspace: state.workspace,

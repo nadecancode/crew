@@ -281,6 +281,7 @@ fn every_query_and_payload_constructs_with_the_actual_protocol_records() {
             }],
         })),
         ViewPayload::Tasks(Box::new(TasksData {
+            epics: None,
             tasks: vec![task()],
             layers: vec![TaskLayer {
                 index: 0,

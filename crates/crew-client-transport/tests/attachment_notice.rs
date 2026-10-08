@@ -191,6 +191,14 @@ impl ChannelHandle for Channel {
         }
         let request: Value = serde_json::from_str(&text).unwrap();
         match request["method"].as_str().unwrap() {
+            "features_negotiate" => self.frame(ServerFrame::err(
+                id,
+                crew_protocol::rpc::RpcError {
+                    code: "invalid".into(),
+                    message: "old fixture daemon".into(),
+                    data: None,
+                },
+            )),
             "subscribe" => self.frame(ServerFrame::ok(id, json!({"subscribed":true}))),
             "snapshot" => self.frame(ServerFrame::ok(
                 id,

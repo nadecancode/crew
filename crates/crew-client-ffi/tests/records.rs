@@ -397,7 +397,18 @@ fn every_core_view_query_and_payload_keeps_its_variant_across_the_binding() {
         kind: ResourceKind::Output,
         options: ReadOptions::Default,
     };
+    let feature_key = |request| {
+        let read=FeatureRead {request,lease:None};
+        ResourceKey {entity:EntityKey{scope:captured.clone(),entity:Entity::Workspace},
+            kind:ResourceKind::Feature(read.kind()),options:ReadOptions::Feature(read)}
+    };
     let queries = [
+        ViewQuery::Features,
+        ViewQuery::FeatureWatches {feature:Feature::Docs},
+        ViewQuery::Epic {key:feature_key(FeatureReadRequest::EpicBoard(RunScope{workspace_run_id:Id::new("run-1").unwrap()}))},
+        ViewQuery::Asides {key:feature_key(FeatureReadRequest::Asides(AsideList{workspace_run_id:Id::new("run-1").unwrap(),page:PageRequest::default()}))},
+        ViewQuery::Docs {key:feature_key(FeatureReadRequest::DocsIndex(PageRequest::default()))},
+        ViewQuery::UsageMetrics {key:feature_key(FeatureReadRequest::UsagePrices(UsagePrices{price_book_id:None}))},
         ViewQuery::Availability {
             intent: Box::new(ActionIntent::StopTeam {
                 scope: captured.clone(),
@@ -436,6 +447,12 @@ fn every_core_view_query_and_payload_keeps_its_variant_across_the_binding() {
     let mut kinds = std::collections::BTreeSet::new();
     for query in queries {
         let kind = match &query {
+            ViewQuery::Features => "features",
+            ViewQuery::FeatureWatches {..} => "feature_watches",
+            ViewQuery::Epic {..} => "epic",
+            ViewQuery::Asides {..} => "asides",
+            ViewQuery::Docs {..} => "docs",
+            ViewQuery::UsageMetrics {..} => "usage_metrics",
             ViewQuery::Availability { .. } => "availability",
             ViewQuery::Overview => "overview",
             ViewQuery::Team => "team",
@@ -456,6 +473,12 @@ fn every_core_view_query_and_payload_keeps_its_variant_across_the_binding() {
         assert_eq!(serde_json::to_value(&source.payload).unwrap()["kind"], kind);
         let native = roundtrip(ViewData::from(source.clone()));
         let native_kind = match &native.payload {
+            ViewPayload::Features(_) => "features",
+            ViewPayload::FeatureWatches(_) => "feature_watches",
+            ViewPayload::Epic(_) => "epic",
+            ViewPayload::Asides(_) => "asides",
+            ViewPayload::Docs(_) => "docs",
+            ViewPayload::UsageMetrics(_) => "usage_metrics",
             ViewPayload::Availability(value) => {
                 let client::ViewPayload::Availability(expected) = &source.payload else {
                     unreachable!("kind checked above")
@@ -480,5 +503,86 @@ fn every_core_view_query_and_payload_keeps_its_variant_across_the_binding() {
         assert_eq!(native.synchronized_at_ms, source.synchronized_at_ms);
         assert_eq!(native.freshness, source.freshness);
     }
-    assert_eq!(kinds.len(), 11, "one sample per Core view");
+    assert_eq!(kinds.len(), 17, "one sample per Core view");
+}
+
+#[test]
+fn feature_counters_errors_and_leases_cross_real_native_converters() {
+    let counters = UsageCounters {
+        input_total: Some(crew_protocol::features::Wide(u128::MAX)),
+        cache_read: Some(crew_protocol::features::Wide(0)),
+        ..Default::default()
+    };
+    assert_eq!(roundtrip(counters.clone()), counters);
+    let lease = DocLease {
+        connection_epoch: Id::new("physical-connection-1").unwrap(),
+        docs_epoch: Id::new("source-index-1").unwrap(),
+    };
+    assert_eq!(roundtrip(lease.clone()), lease);
+    let reason = ClientReason {
+        code: "too_large".into(),
+        message: "Question too long".into(),
+        details: Some(FeatureRejection::AsideAdmission(
+            AsideAdmissionFailure::QuestionLimit { max_bytes: 8192 },
+        )),
+    };
+    assert_eq!(roundtrip(reason.clone()), reason);
+    let request = ActionIntent::Feature {
+        scope: scope(5),
+        action: FeatureAction::WatchDocs(DocsWatch {
+            selected: crew_protocol::features::List::new(vec![DocRef {
+                doc_id: Id::new("doc").unwrap(),
+                source_id: Id::new("source").unwrap(),
+                source_generation: crew_protocol::features::Wide(u128::MAX),
+            }])
+            .unwrap(),
+        }),
+    };
+    assert_eq!(roundtrip(request.clone()), request);
+}
+
+fn rejects_native<T: FfiConverter<UniFfiTag>, U: FfiConverter<UniFfiTag>>(untrusted: U) {
+    let mut bytes = Vec::new();
+    U::write(untrusted, &mut bytes);
+    assert!(T::try_read(&mut bytes.as_slice()).is_err());
+}
+
+#[test]
+fn native_feature_lifts_enforce_exact_numbers_bounds_and_safe_links() {
+    for invalid in ["01", "+1", "-1", "340282366920938463463374607431768211456"] {
+        rejects_native::<Wide, _>(invalid.to_owned());
+    }
+    rejects_native::<Id, _>("line\nbreak".to_owned());
+    rejects_native::<Text8192, _>("λ".repeat(4097));
+    rejects_native::<Fraction, _>(f64::NAN);
+    rejects_native::<Timestamp, _>(i64::MAX);
+    rejects_native::<ExternalHref, _>("javascript:alert(1)".to_owned());
+    let mut bytes = Vec::new();
+    <i32 as FfiConverter<UniFfiTag>>::write(65, &mut bytes);
+    for n in 0..65 { <String as FfiConverter<UniFfiTag>>::write(n.to_string(), &mut bytes); }
+    assert!(<BoundedId64 as FfiConverter<UniFfiTag>>::try_read(&mut bytes.as_slice()).is_err());
+}
+
+#[test]
+fn native_doc_records_validate_recursive_ast_and_keep_history_source_labels() {
+    let raw = json!({"epoch":"docs-1","snapshot_id":"snapshot-1",
+        "version":{"id":"version-1","document":{"doc_id":"doc-1","source_id":"source-1","source_generation":"1"},
+            "kind":"working","markdown_hash":"hash-1","bytes":1,"observed_at_ms":10,"recorded_at_ms":null,
+            "commit_id":null,"change_id":null,"author":null,"subject":null},
+        "markdown":"x","blocks":[{"block_key":"block-1","start_line":1,"end_line":1,
+            "block":{"kind":"paragraph","children":[{"kind":"strong","children":[{"kind":"text","text":"x"}]}]}}],
+        "outline":[],"images":[],"render_hash":"hash-2","notices":[]});
+    let doc: DocSnapshot = serde_json::from_value(raw.clone()).unwrap();
+    assert_eq!(roundtrip(doc.clone()), doc);
+    let version = doc.version.clone();
+    let history = DocHistoryRow {
+        version: version.clone(),
+        sources: crew_protocol::features::List::new(vec![version.document.clone()]).unwrap(),
+    };
+    assert_eq!(roundtrip(history.clone()), history);
+    let mut invalid = raw;
+    invalid["blocks"][0]["block"] =
+        json!({"kind":"heading","level":9,"anchor":"bad","children":[]});
+    let data: DocSnapshotData = serde_json::from_value(invalid).unwrap();
+    rejects_native::<DocSnapshot, _>(data);
 }

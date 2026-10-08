@@ -539,6 +539,9 @@ pub struct ResourceRequest {
 #[serde(tag = "kind", content = "data", rename_all = "snake_case")]
 pub enum ViewQuery {
     Features,
+    FeatureWatches {
+        feature: crew_protocol::features::Feature,
+    },
     Epic {
         key: ResourceKey,
     },
@@ -586,6 +589,7 @@ pub enum ViewQuery {
 #[serde(tag = "kind", content = "data", rename_all = "snake_case")]
 pub enum ViewPayload {
     Features(crate::features::FeatureAvailability),
+    FeatureWatches(Vec<crate::features::FeatureWatchState>),
     Epic(Box<ResourceState>),
     Asides(Box<ResourceState>),
     Docs(Box<ResourceState>),
@@ -628,6 +632,7 @@ pub enum AgentAction {
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum ActionKind {
+    Feature,
     SendMessage,
     Answer,
     Pause,
@@ -651,6 +656,10 @@ pub enum ActionKind {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "kind", content = "data", rename_all = "snake_case")]
 pub enum ActionIntent {
+    Feature {
+        scope: ClientScope,
+        action: crate::features::FeatureAction,
+    },
     SendMessage {
         scope: ClientScope,
         to: String,

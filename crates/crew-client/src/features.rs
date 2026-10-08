@@ -15,6 +15,115 @@ pub enum FeatureRejection {
     AsideAdmission(crew_protocol::asides::AsideAdmissionFailure),
 }
 
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "kind", content = "params", rename_all = "snake_case")]
+pub enum FeatureAction {
+    AskAside(crew_protocol::asides::AsideAsk),
+    CancelAside(crew_protocol::asides::AsideCancel),
+    RemoveAside(crew_protocol::asides::AsideRemove),
+    WatchAsides(crew_protocol::asides::AsideList),
+    WatchDocs(crew_protocol::docs::DocsWatch),
+    WatchUsage(crew_protocol::usage_metrics::UsageQuery),
+    UnwatchAsides(crew_protocol::features::Unwatch),
+    UnwatchDocs(crew_protocol::features::Unwatch),
+    UnwatchUsage(crew_protocol::features::Unwatch),
+}
+
+impl FeatureAction {
+    pub fn command(&self) -> crate::Command {
+        match self {
+            Self::AskAside(p) => crate::Command::AsideAsk(p.clone()),
+            Self::CancelAside(p) => crate::Command::AsideCancel(p.clone()),
+            Self::RemoveAside(p) => crate::Command::AsideRemove(p.clone()),
+            Self::WatchAsides(p) => crate::Command::AsideWatch(p.clone()),
+            Self::WatchDocs(p) => crate::Command::DocsWatch(p.clone()),
+            Self::WatchUsage(p) => crate::Command::UsageWatch(p.clone()),
+            Self::UnwatchAsides(p) => crate::Command::AsideUnwatch(p.clone()),
+            Self::UnwatchDocs(p) => crate::Command::DocsUnwatch(p.clone()),
+            Self::UnwatchUsage(p) => crate::Command::UsageUnwatch(p.clone()),
+        }
+    }
+    pub fn observer(&self) -> bool {
+        !matches!(
+            self,
+            Self::AskAside(_) | Self::CancelAside(_) | Self::RemoveAside(_)
+        )
+    }
+    pub fn current_run(&self) -> Option<&Id> {
+        match self {
+            Self::AskAside(p) => Some(&p.workspace_run_id),
+            Self::CancelAside(p) => Some(&p.workspace_run_id),
+            Self::RemoveAside(p) => Some(&p.workspace_run_id),
+            Self::WatchAsides(p) => Some(&p.workspace_run_id),
+            _ => None,
+        }
+    }
+    pub fn validate(&self) -> Result<(), crate::ClientError> {
+        let invalid = |message: &str| crate::ClientError::InvalidInput {
+            field: "feature_action".into(),
+            reason: message.into(),
+        };
+        match self {
+            Self::AskAside(p) => p
+                .validate()
+                .map_err(|_| invalid("invalid aside question or targets")),
+            Self::WatchAsides(p) => p.page.validate(50).map_err(invalid),
+            Self::WatchUsage(p) => p.validate(200).map_err(invalid),
+            _ => Ok(()),
+        }
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct FeatureWatchState {
+    pub feature: Feature,
+    pub watch_id: Id,
+    pub connection_epoch: Id,
+    pub epoch: Id,
+    pub revision: crew_protocol::features::Wide,
+    pub query: FeatureAction,
+    pub initial: FeatureResponse,
+    pub stale: bool,
+    /// Latest bounded invalidation; resources are invalidated in the core even
+    /// when a renderer has not read this notification yet.
+    pub change: Option<FeatureChange>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "kind", content = "data", rename_all = "snake_case")]
+pub enum FeatureChange {
+    Asides(crew_protocol::asides::AsideChanged),
+    Docs(crew_protocol::docs::DocsChanged),
+    Usage(crew_protocol::usage_metrics::UsageChanged),
+}
+
+/// A server may resolve omitted defaults, never replace an explicit filter.
+pub fn usage_query_matches(
+    requested: &crew_protocol::usage_metrics::UsageQuery,
+    resolved: &crew_protocol::usage_metrics::UsageQuery,
+) -> bool {
+    requested.scope == resolved.scope
+        && requested
+            .from_ms
+            .is_none_or(|v| resolved.from_ms == Some(v))
+        && requested.to_ms.is_none_or(|v| resolved.to_ms == Some(v))
+        && requested
+            .group_by
+            .is_none_or(|v| resolved.group_by == Some(v))
+        && requested
+            .bucket_seconds
+            .is_none_or(|v| resolved.bucket_seconds == Some(v))
+        && requested
+            .price_book_id
+            .as_ref()
+            .is_none_or(|v| resolved.price_book_id.as_ref() == Some(v))
+        && requested
+            .page
+            .limit
+            .is_none_or(|v| resolved.page.limit == Some(v))
+        && requested.page.cursor == resolved.page.cursor
+}
+
 impl FeatureAvailability {
     pub fn supports(&self, feature: Feature) -> bool {
         self.session
@@ -315,18 +424,33 @@ impl FeatureRead {
                             crew_protocol::docs::DocVersionSelector::Id(id) => id == &s.version.id,
                         }
                 }
-                crew_protocol::docs::DocReadResult::Unavailable(_) => true,
+                crew_protocol::docs::DocReadResult::Unavailable(f) => {
+                    f.document.as_ref().is_none_or(|d| d == &q.document)
+                }
             },
             (Q::DocAsset(q), R::DocAsset(r)) => match r.as_ref() {
                 crew_protocol::docs::DocAssetResult::Available(c) => {
                     q.snapshot_id == c.snapshot_id
                         && q.asset_id == c.asset_id
                         && q.offset == c.offset
+                        && (c.data_base64.len() / 4 * 3
+                            - c.data_base64
+                                .as_bytes()
+                                .iter()
+                                .rev()
+                                .take_while(|b| **b == b'=')
+                                .count())
+                            <= q.max_bytes as usize
                 }
                 crew_protocol::docs::DocAssetResult::Unavailable(_) => true,
             },
             (Q::DocHistory(q), R::DocHistory(r)) => match r.as_ref() {
-                crew_protocol::docs::DocHistoryResult::Available(p) => q.doc_id == p.doc_id,
+                crew_protocol::docs::DocHistoryResult::Available(p) => {
+                    q.doc_id == p.doc_id
+                        && q.source_ids.as_ref().is_none_or(|ids| {
+                            p.captured_heads.iter().all(|h| ids.contains(&h.source_id))
+                        })
+                }
                 _ => true,
             },
             (Q::DocDiff(q), R::DocDiff(r)) => match r.as_ref() {
@@ -335,10 +459,10 @@ impl FeatureRead {
                 }
                 _ => true,
             },
-            (Q::UsageSummary(q), R::UsageSummary(r)) => q.scope == r.query.scope,
-            (Q::UsageSeries(q), R::UsageSeries(r)) => q.scope == r.query.scope,
-            (Q::UsageBreakdown(q), R::UsageBreakdown(r)) => q.scope == r.query.scope,
-            (Q::UsageObservations(q), R::UsageObservations(r)) => q.scope == r.query.scope,
+            (Q::UsageSummary(q), R::UsageSummary(r)) => usage_query_matches(q, &r.query),
+            (Q::UsageSeries(q), R::UsageSeries(r)) => usage_query_matches(q, &r.query),
+            (Q::UsageBreakdown(q), R::UsageBreakdown(r)) => usage_query_matches(q, &r.query),
+            (Q::UsageObservations(q), R::UsageObservations(r)) => usage_query_matches(q, &r.query),
             (Q::UsagePrices(q), R::UsagePrices(r)) => {
                 q.price_book_id.as_ref().is_none_or(|id| id == &r.id)
             }

@@ -69,10 +69,19 @@ fn frame(driver: &mut Driver, channel: u64, id: u64, result: Value) -> HostUpdat
 }
 
 fn finish(driver: &mut Driver, subscribing: HostUpdate, epics: bool) -> u64 {
+    finish_with_run(driver, subscribing, epics, epics.then_some("run-1"))
+}
+fn finish_with_run(
+    driver: &mut Driver,
+    subscribing: HostUpdate,
+    epics: bool,
+    run: Option<&str>,
+) -> u64 {
     let (channel, id, _) = common::send(&subscribing, "subscribe");
     let requested = frame(driver, channel, id, json!({"subscribed":true}));
     let (_, id, _) = common::send(&requested, "snapshot");
     let mut snapshot = common::snapshot();
+    snapshot.session.workspace_run_id = run.map(str::to_owned);
     if epics {
         snapshot.session.workspace_run_id = Some("run-1".into());
         snapshot.epics = Some(serde_json::from_value(board(0, 0)).unwrap());
@@ -346,4 +355,250 @@ fn docs_sequence_uses_issuing_read_connection_and_cannot_reopen_its_lease() {
         .reason
         .as_ref()
         .is_some_and(|r| r.code == "snapshot_expired")));
+}
+
+fn start_feature(name: &str) -> (Driver, u64) {
+    let mut driver = driver();
+    let opened = open(&mut driver);
+    let (channel, id, _) = common::send(&opened, "features_negotiate");
+    let subscribing = frame(
+        &mut driver,
+        channel,
+        id,
+        json!({"accepted":{name:1},"connection_epoch":"root-1","workspace_run_id":"run-1","unavailable":{}}),
+    );
+    finish_with_run(&mut driver, subscribing, false, Some("run-1"));
+    (driver, channel)
+}
+
+fn feature_action(driver: &mut Driver, action: crew_client::features::FeatureAction) -> HostUpdate {
+    let planned = driver
+        .plan(ActionIntent::Feature {
+            scope: driver.notice().scope.unwrap(),
+            action,
+        })
+        .unwrap();
+    assert!(
+        matches!(planned.plan, ActionPlan::Dispatch { .. }),
+        "{:?}; feature {:?}",
+        planned.plan,
+        availability(driver)
+    );
+    planned.update
+}
+
+fn ready_feature_lane(
+    driver: &mut Driver,
+    opening: &HostUpdate,
+    feature: &str,
+    epoch: &str,
+) -> HostUpdate {
+    let HostEffect::Open {
+        channel_id,
+        attempt,
+        expected_scope,
+        ..
+    } = opening
+        .effects
+        .iter()
+        .find(|e| matches!(e, HostEffect::Open { .. }))
+        .unwrap()
+    else {
+        unreachable!()
+    };
+    let mut context = common::context(*attempt);
+    context.scope = expected_scope.clone().unwrap();
+    context.scope.daemon_started_at_ms = None;
+    context.grant.workspace_ids = vec![context.scope.workspace_id.clone()];
+    let opened = driver
+        .handle(HostEvent::WorkspaceOpened {
+            channel_id: *channel_id,
+            context,
+            peer: PeerInfo {
+                version: "fixture".into(),
+                protocol: 6,
+                pid: common::PID,
+                project: None,
+            },
+        })
+        .unwrap();
+    let (_, id, _) = common::send(&opened, "features_negotiate");
+    let verifying = frame(
+        driver,
+        *channel_id,
+        id,
+        json!({"accepted":{feature:1},"connection_epoch":epoch,"workspace_run_id":"run-1","unavailable":{}}),
+    );
+    let (_, id, _) = common::send(&verifying, "snapshot");
+    let mut snapshot = common::snapshot();
+    snapshot.session.workspace_run_id = Some("run-1".into());
+    frame(
+        driver,
+        *channel_id,
+        id,
+        serde_json::to_value(snapshot).unwrap(),
+    )
+}
+
+fn aside_key(driver: &Driver) -> ResourceKey {
+    use crew_client::features::*;
+    ResourceKey {
+        entity: EntityKey {
+            scope: driver.notice().scope.unwrap(),
+            entity: Entity::Workspace,
+        },
+        kind: ResourceKind::Feature(FeatureResourceKind::AsideDetail),
+        options: ReadOptions::Feature(FeatureRead {
+            request: FeatureReadRequest::AsideDetail(
+                serde_json::from_value(
+                    json!({"workspace_run_id":"run-1","id":"aside-1","agent":null}),
+                )
+                .unwrap(),
+            ),
+            lease: None,
+        }),
+    }
+}
+
+fn read_feature(driver: &mut Driver, key: ResourceKey) -> HostUpdate {
+    driver
+        .plan(ActionIntent::Read {
+            scope: driver.notice().scope.unwrap(),
+            resource: ResourceRequest { key },
+        })
+        .unwrap()
+        .update
+}
+
+fn observe_asides(driver: &mut Driver) {
+    let request = feature_action(
+        driver,
+        crew_client::features::FeatureAction::WatchAsides(
+            serde_json::from_value(json!({"workspace_run_id":"run-1","page":{}})).unwrap(),
+        ),
+    );
+    let (channel, id, _) = common::send(&request, "aside_watch");
+    frame(
+        driver,
+        channel,
+        id,
+        json!({"watch_id":"watch-1","initial":{"workspace_run_id":"run-1","aside_epoch":"aside-epoch","revision":"0","rows":[],"next_cursor":null,"evicted":false}}),
+    );
+}
+
+fn aside_changed(driver: &mut Driver, channel: u64, from: u64, to: u64, gone: Value) {
+    driver
+        .handle(HostEvent::Frame {
+            channel_id: channel,
+            text: json!({"push":{"kind":"aside","data":{
+        "watch_id":"watch-1","workspace_run_id":"run-1","aside_epoch":"aside-epoch",
+        "from_revision":from.to_string(),"to_revision":to.to_string(),"changed_ids":[],"gone":gone,
+        "availability_changed":false,"resync_required":false}}})
+            .to_string(),
+        })
+        .unwrap();
+}
+
+#[test]
+fn explicit_removal_purges_cached_and_late_detail_and_fences_an_unsent_ask() {
+    use crew_client::features::FeatureAction;
+    let (mut driver, root) = start_feature("asides");
+    observe_asides(&mut driver);
+    let key = aside_key(&driver);
+    let reading = read_feature(&mut driver, key.clone());
+    let request = ready_feature_lane(&mut driver, &reading, "asides", "reader-1");
+    let (read_channel, id, _) = common::send(&request, "aside_get");
+    let detail = json!({"state":"available","detail":{"workspace_run_id":"run-1","summary_id":"aside-1",
+        "aside_epoch":"aside-epoch","revision":"0","question":"private question", "answer_meta":null,"answer_text":null}});
+    frame(&mut driver, read_channel, id, detail.clone());
+    let late = read_feature(&mut driver, key.clone());
+    let (_, late_id, _) = common::send(&late, "aside_get");
+    let queued = feature_action(
+        &mut driver,
+        FeatureAction::AskAside(
+            serde_json::from_value(json!({
+        "workspace_run_id":"run-1","request_id":"aside-1","question":"private question",
+        "targets":[{"agent_id":"agent-1","incarnation":"inc-1"}]}))
+            .unwrap(),
+        ),
+    );
+    aside_changed(
+        &mut driver,
+        root,
+        0,
+        1,
+        json!([{"id":"aside-1","cause":"removed"}]),
+    );
+    frame(&mut driver, read_channel, late_id, detail);
+    let ViewPayload::Asides(value) = driver.query(ViewQuery::Asides { key }).unwrap().payload
+    else {
+        panic!("aside view")
+    };
+    assert!(value.value.is_none());
+    assert_eq!(value.error.unwrap().code, "removed");
+    let released = ready_feature_lane(&mut driver, &queued, "asides", "writer-1");
+    assert!(!released.effects.iter().any(|e| matches!(e,HostEffect::Send{text,..} if text.contains("aside_ask") || text.contains("private question"))));
+}
+
+#[test]
+fn observer_gap_hides_local_aside_text_until_authoritative_reconciliation() {
+    let (mut driver, root) = start_feature("asides");
+    observe_asides(&mut driver);
+    let key = aside_key(&driver);
+    let reading = read_feature(&mut driver, key.clone());
+    let request = ready_feature_lane(&mut driver, &reading, "asides", "reader-1");
+    let (channel, id, _) = common::send(&request, "aside_get");
+    frame(
+        &mut driver,
+        channel,
+        id,
+        json!({"state":"available","detail":{"workspace_run_id":"run-1","summary_id":"aside-1",
+        "aside_epoch":"aside-epoch","revision":"0","question":"private question","answer_meta":null,"answer_text":null}}),
+    );
+    aside_changed(&mut driver, root, 5, 6, json!([]));
+    let ViewPayload::Asides(value) = driver.query(ViewQuery::Asides { key }).unwrap().payload
+    else {
+        panic!("aside view")
+    };
+    assert!(value.value.is_none());
+    let ViewPayload::FeatureWatches(watches) = driver
+        .query(ViewQuery::FeatureWatches {
+            feature: crew_protocol::features::Feature::Asides,
+        })
+        .unwrap()
+        .payload
+    else {
+        panic!("watch")
+    };
+    assert!(watches[0].stale);
+    assert!(watches[0].change.is_some());
+}
+
+#[test]
+fn typed_admission_failure_survives_transport_without_replaying_paid_ask() {
+    use crew_client::features::{FeatureAction, FeatureRejection};
+    let (mut driver, _) = start_feature("asides");
+    let action = feature_action(
+        &mut driver,
+        FeatureAction::AskAside(
+            serde_json::from_value(json!({
+        "workspace_run_id":"run-1","request_id":"aside-1","question":"question",
+        "targets":[{"agent_id":"agent-1","incarnation":"inc-1"}]}))
+            .unwrap(),
+        ),
+    );
+    let request = ready_feature_lane(&mut driver, &action, "asides", "writer-1");
+    let (channel, id, _) = common::send(&request, "aside_ask");
+    let update=driver.handle(HostEvent::Frame{channel_id:channel,text:json!({"id":id,"error":{
+        "code":"too_large","message":"Question too long", "data":{"reason":"question_limit","max_bytes":8192}}}).to_string()}).unwrap();
+    assert!(matches!(
+        update.notice.outcomes[0].reason.as_ref().unwrap().details,
+        Some(FeatureRejection::AsideAdmission(
+            crew_protocol::asides::AsideAdmissionFailure::QuestionLimit { max_bytes: 8192 }
+        ))
+    ));
+    assert!(!update
+        .effects
+        .iter()
+        .any(|e| matches!(e, HostEffect::Send { .. })));
 }

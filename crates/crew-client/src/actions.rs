@@ -21,6 +21,7 @@ pub const CORE_OPERATION_ID_MAX: u64 = DRIVER_OPERATION_ID_START - 1;
 /// Borrowed current facts. No selected UI entity or credential lives here.
 pub struct ActionContext<'a> {
     pub features: Option<&'a crate::features::FeatureAvailability>,
+    pub feature_watches: &'a [crate::features::FeatureWatchState],
     pub connection: Option<&'a ConnectionContext>,
     pub endpoint: EndpointStatus,
     pub workspace: WorkspaceStatus,
@@ -72,6 +73,7 @@ pub struct ActionDecision {
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum Route {
+    State,
     Action,
     Read,
     Attach,
@@ -309,6 +311,7 @@ fn running(agent: &Agent) -> Result<(), PlanFailure> {
 /// intents. A view must retain this identity rather than substitute selection.
 pub fn action_scope(intent: &ActionIntent) -> &ClientScope {
     match intent {
+        ActionIntent::Feature { scope, .. } => scope,
         ActionIntent::SendMessage { scope, .. }
         | ActionIntent::Answer { scope, .. }
         | ActionIntent::Agent { scope, .. }
@@ -326,6 +329,7 @@ pub fn action_scope(intent: &ActionIntent) -> &ClientScope {
 
 fn action_kind(intent: &ActionIntent) -> ActionKind {
     match intent {
+        ActionIntent::Feature { .. } => ActionKind::Feature,
         ActionIntent::SendMessage { .. } => ActionKind::SendMessage,
         ActionIntent::Answer { .. } => ActionKind::Answer,
         ActionIntent::Agent { action, .. } => match action {
@@ -520,6 +524,42 @@ impl Actions {
         self.pending.len() + self.confirmations.len() + self.retries.len()
     }
 
+    pub(crate) fn purge_aside(
+        &mut self,
+        run: &crew_protocol::features::Id,
+        id: &crew_protocol::features::Id,
+    ) {
+        fn clear(
+            proposal: &mut Proposal,
+            run: &crew_protocol::features::Id,
+            id: &crew_protocol::features::Id,
+        ) {
+            if let Some(Command::AsideAsk(q)) = &mut proposal.command {
+                if &q.workspace_run_id == run && &q.request_id == id {
+                    q.question = Default::default();
+                }
+            }
+            if let ActionIntent::Feature {
+                action: crate::features::FeatureAction::AskAside(q),
+                ..
+            } = &mut proposal.intent
+            {
+                if &q.workspace_run_id == run && &q.request_id == id {
+                    q.question = Default::default();
+                }
+            }
+        }
+        for pending in self.pending.values_mut() {
+            clear(&mut pending.proposal, run, id);
+        }
+        for proposal in self.confirmations.values_mut() {
+            clear(proposal, run, id);
+        }
+        for retry in self.retries.values_mut() {
+            clear(&mut retry.pending.proposal, run, id);
+        }
+    }
+
     pub fn pending_answer_ids(&self) -> impl Iterator<Item = &str> {
         self.pending
             .values()
@@ -549,6 +589,59 @@ impl Actions {
         let mut resource = None;
         let mut route = Route::Action;
         let command = match &intent {
+            ActionIntent::Feature { action, .. } => {
+                action.validate()?;
+                let command = action.command();
+                let feature = command.required_feature().expect("feature action");
+                if !context.features.is_some_and(|f| f.supports(feature)) {
+                    return Err(unavailable(
+                        "unsupported_feature",
+                        "feature is unavailable on this connection",
+                    ));
+                }
+                if action.current_run().is_some_and(|run| {
+                    context.session.and_then(|s| s.workspace_run_id.as_deref())
+                        != Some(run.as_str())
+                }) {
+                    return Err(unavailable(
+                        "stale_scope",
+                        "feature action belongs to another workspace run",
+                    ));
+                }
+                let watch_limit = match action {
+                    crate::features::FeatureAction::WatchAsides(_)
+                    | crate::features::FeatureAction::WatchDocs(_) => Some(1),
+                    crate::features::FeatureAction::WatchUsage(_) => Some(4),
+                    _ => None,
+                };
+                if let Some(limit) = watch_limit {
+                    let active = context
+                        .feature_watches
+                        .iter()
+                        .filter(|w| w.feature == feature)
+                        .count();
+                    let pending = self
+                        .pending
+                        .values()
+                        .filter(|p| {
+                            p.proposal
+                                .command
+                                .as_ref()
+                                .is_some_and(|c| c.kind() == command.kind())
+                        })
+                        .count();
+                    if active + pending >= limit {
+                        return Err(unavailable(
+                            "watch_limit",
+                            "Close an existing watch before opening another.",
+                        ));
+                    }
+                }
+                if action.observer() {
+                    route = Route::State;
+                }
+                Some(command)
+            }
             ActionIntent::SendMessage {
                 to,
                 body: text,
@@ -1018,6 +1111,7 @@ impl Actions {
         let id = allocate(&mut self.next_operation, "operation_id_exhausted")?;
         let mut update = pending_update(matches!(proposal.command, Some(Command::Answer { .. })));
         let lane = match proposal.route {
+            Route::State => RequestLane::State,
             Route::Read => match proposal.resource.as_ref().map(|r| &r.options) {
                 Some(ReadOptions::Feature(read)) if read.lease.is_some() => RequestLane::Document {
                     lease: read.lease.clone().expect("checked lease"),
@@ -1229,7 +1323,7 @@ impl Actions {
                     };
                 }
             }
-            Route::Action | Route::Read => {
+            Route::Action | Route::Read | Route::State => {
                 if matches!(
                     outcome,
                     OperationOutcome::SentUnacknowledged { .. }
@@ -1528,6 +1622,7 @@ impl Actions {
             return Err(unavailable("not_connected", "not connected to a workspace"));
         };
         let method = match kind {
+            ActionKind::Feature => None,
             ActionKind::SendMessage => Some(CommandKind::Send),
             ActionKind::Answer => Some(CommandKind::Answer),
             ActionKind::Pause => Some(CommandKind::AgentPause),
@@ -1751,6 +1846,7 @@ fn same_incarnation(left: &ClientScope, right: &ClientScope) -> bool {
 
 fn replace_scope(intent: &mut ActionIntent, replacement: ClientScope) {
     let scope = match intent {
+        ActionIntent::Feature { scope, .. } => scope,
         ActionIntent::SendMessage { scope, .. }
         | ActionIntent::Answer { scope, .. }
         | ActionIntent::Agent { scope, .. }

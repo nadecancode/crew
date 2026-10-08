@@ -78,6 +78,8 @@ impl Facts {
 
     fn context(&self) -> ActionContext<'_> {
         ActionContext {
+            features: None,
+            feature_watches: &[],
             connection: Some(&self.connection),
             endpoint: self.endpoint,
             workspace: self.workspace,
@@ -165,13 +167,13 @@ fn request(decision: &ActionDecision) -> (OperationId, &ClientScope, RequestLane
                 operation_id: id,
                 lane,
                 command,
-            } => Some((*id, scope, *lane, command)),
+            } => Some((*id, scope, lane.clone(), command)),
             _ => None,
         })
         .collect();
     assert_eq!(requests.len(), 1);
     assert_eq!(requests[0].0, operation_id);
-    requests[0]
+    requests[0].clone()
 }
 fn confirmation(decision: &ActionDecision) -> (ConfirmationId, ConfirmationKind) {
     let ActionPlan::Confirm {
