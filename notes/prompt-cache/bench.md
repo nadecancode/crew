@@ -277,7 +277,76 @@ The shell observer isolates the roster-text change from new model spend. The
 design's acceptance must additionally cover a model-backed member join; that
 case is not established by this scripted observer alone.
 
-The extended before-run series is in progress. It requires three successful
-runs on c8052373; one includes the one-hour interval if the measured cost
-allows it. The corresponding after series must use the same mode, versions,
-models and per-run scenario. There is no lifecycle before/after result yet.
+The extended before series is complete: three successful runs on c8052373,
+including one with the one-hour interval. The frozen workload behavior is
+ffbeb0be; all three reports have identical runner hashes, template hash, CLI
+versions, models and sandbox mode. The corresponding after series must match
+these controls and the per-run scenario. There is no before/after result yet.
+
+### Completed lifecycle samples
+
+[`lifecycle-before-series.json`](lifecycle-before-series.json) records run order,
+every request boundary, both first-request and whole-step rates, all attempts,
+and the exact individual report hashes. Runs overlapped in wall time; this is
+recorded, and shared provider cache state is not assumed cold or isolated.
+
+| Run, in start order | UTC start | Steps | Requests | Token-weighted hit rate | API-equivalent USD |
+| --- | --- | ---: | ---: | ---: | ---: |
+| [01](lifecycle-before-01.json), with long idle | 05:21:59 | 20 | 113 | 94.7202% | 0.893699–0.908629 |
+| [03](lifecycle-before-03.json) | 05:28:31 | 18 | 113 | 96.6608% | 0.864127–0.871615 |
+| [02](lifecycle-before-02.json), run `02r` | 05:36:07 | 18 | 112 | 96.1009% | 0.835953–0.846869 |
+
+All starts were on 2026-10-08. The completed samples cost an estimated
+$2.593779–$2.627113 in total. Each daemon stopped with exit code 0, every tracked
+process exited, and the private runtime directories were removed. Native
+session files remain untouched at their recorded paths.
+
+All three runs completed the unchanged/add/remove roster resumes, a proven
+folded row and subsequent thinking, a large-context forced compaction, and the
+five-minute probe. Inputs before compaction were 143,821, 146,658 and 145,151
+tokens respectively. Actual last-request-to-next-request gaps exceeded 300
+seconds in both workers in every run. The long run measured 3,677.788 seconds
+for Claude and 3,684.093 seconds for Codex; it did not infer expiry from a
+planned sleep duration alone.
+
+The following values are **first native requests in the named probe**, not
+whole-step averages. A step can contain several subsequent cache hits, so its
+aggregate can hide the first request's miss.
+
+| Probe / worker | Run 01 | Run 03 | Run 02r |
+| --- | ---: | ---: | ---: |
+| After fold / Claude | 94.921% | 95.217% | 94.792% |
+| Post-compaction probe / Claude | 99.714% | 80.324% | 99.716% |
+| After five minutes / Claude | 99.812% | 99.807% | 99.806% |
+| After five minutes / Codex | 97.879% | 97.218% | 98.014% |
+| After one hour / Claude | 55.928% | Not run | Not run |
+| After one hour / Codex | 26.855% | Not run | Not run |
+
+For example, run 01's first post-hour requests read 23,940 of 42,805 tokens
+(Claude) and 6,912 of 25,738 (Codex); whole-step rates subsequently rose to
+88.233% and 73.421%. In sample 03, the first worker startup request read 23,940
+of 39,055 tokens (61.298%), while the complete warm step reached 96.569%.
+The report's `usage.first_request` and `usage.hit_rate` are separate quantities.
+
+Changed-roster resumes retained high native cache-read fractions despite
+shorter common prefixes in the generated briefing files. This experiment
+therefore does not establish a broad resumed-session cache loss from those
+file changes. Haiku also emitted no `thinking_drop` diagnostic in these fold
+probes. That result cannot demonstrate savings for the affected Opus cohort;
+the design requires a separate matched-model fold comparison. The native
+surface artifacts ([01](lifecycle-before-01-native.json),
+[03](lifecycle-before-03-native.json), [02](lifecycle-before-02-native.json))
+keep generated, persisted and unavailable surfaces distinct.
+
+Six other lifecycle attempts did not complete and are retained in the series
+ledger. One early injection ended a worker turn before its card completed;
+another worker backgrounded the intended foreground call, so the fold gate
+rejected it. A watchdog transition bug stopped a pilot after its intentional
+idle; two concurrent runs were then stopped to avoid repeating that known
+bug. A later warm-up wrote its file in the fixture root instead of the assigned
+worktree and failed the output oracle. That file was not relocated to force a
+pass. Fixes and a regression for both 310- and 3,665-second transitions are
+committed. All nine lifecycle attempts together cost an estimated
+$5.856129–$5.937233; no individual attempt reached the $2 watchdog stop or the
+approximately $3 per-run budget. Failed attempts are not counted as successful
+samples, and no gain claim is selected from this before-only data.
