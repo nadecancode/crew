@@ -548,10 +548,15 @@ incomplete carries its own "K of N".
   the note then adds "· includes their earlier spend". With an epic scope,
   the cohort is the tasks first completed in that epic. All-period spend ÷
   the current done count is a different ratio and is not shown in v1.
+  The cohort itself must be complete: when the first completions of the
+  period are not all recorded, the figure reads "Per completed task
+  unavailable · completion history incomplete", and no "at least" value is
+  shown, since a lower bound needs the whole cohort.
 - **Unavailable.** A rate whose denominator is zero, or a scope with no
   covered requests, shows **unavailable** with the reason, which tells
   apart "no covered input", "zero input", "no task first completed in this
-  period" and "no cost observed for these tasks". For example: "Hit rate
+  period", "no cost observed for these tasks" and "completion history
+  incomplete". For example: "Hit rate
   unavailable · no input reported", "Write share unavailable · write counts
   not reported", "Per completed task unavailable · no task first completed
   in this period".
@@ -814,7 +819,7 @@ Captures are taken in light and dark at 1440×960 and 390×844.
 | F09 | Workspace and member versions | View switches between Workspace and the member's version. Compare with Workspace shows a diff in the existing Diff component. |
 | F10 | History | The timeline lists the recorded commits and the versions seen since the page opened, with the Seen-here footer. Picking two entries shows the diff between them. After the connection drops, an unselected Seen-here entry is gone, and a selected one shows the expired state with View Workspace; the shown content never switches by itself. |
 | F11 | Links into Docs | Task text, message bodies and `file` artifacts containing `notes/x.md` or `notes/x.md §Heading` link to the document at that heading. Unknown paths are not links. Referenced by lists the linking tasks and messages, with its scope stated. |
-| F12 | Usage figures | Total, Hit rate, Write share, Estimate and Per completed task match a hand computation from the fixture under the §Definitions formulas (the arithmetic examples of `notes/usage-metrics.md`). The model without a price shows No price, and the estimate shows `at least …` with the exclusion, never `≈`. A non-reporting agent shows not reported, not 0. A Codex fixture request with total input and cache read but no write counters counts toward hit rate and not toward write share. A Claude request with an aggregate write and no TTL split makes the estimate and write share ranges with their note. A task reopened and completed again counts once. A period with no first completion shows Per completed task unavailable with the reason. |
+| F12 | Usage figures | Total, Hit rate, Write share, Estimate and Per completed task match a hand computation from the fixture under the §Definitions formulas (the arithmetic examples of `notes/usage-metrics.md`). The model without a price shows No price, and the estimate shows `at least …` with the exclusion, never `≈`. A non-reporting agent shows not reported, not 0. A Codex fixture request with total input and cache read but no write counters counts toward hit rate and not toward write share. A Claude request with an aggregate write and no TTL split makes the estimate and write share ranges with their note. A task reopened and completed again counts once. A period with no first completion shows Per completed task unavailable with the reason; a period whose first-completion history is incomplete shows "Per completed task unavailable · completion history incomplete" and no lower bound. |
 | F13 | Trend and breakdown | The trend draws buckets from the samples, with the latest values as text. A bucket without a full category split is a hatched gap labelled split not reported. Show as table gives the same figures. The breakdown sorts by every column, shows `≥` Requests with its reason for a batch-reporting runtime, lists No epic and Not attributed as separate rows, and the narrow layout stacks without page overflow. |
 | F14 | Big writes, history and gaps | Big writes lists exactly the fixture's qualifying requests, and opens the agent at that time. History lists both sessions, and selecting the earlier one scopes the figures read-only. With a session file still being read, the gap line shows and no figure shows 0 for it; a later revision that lowers a figure is drawn as is. The scope line shows the tracking boundary and the price date. |
 | F15 | Aside ask | `/btw` switches the composer to aside mode with the copy line and the `--info` border. The recipient picker lists unavailable members with reasons. Escape keeps the text. Sending opens the Asides tab. |
