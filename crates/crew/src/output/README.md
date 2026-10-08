@@ -41,6 +41,10 @@ unknown line. Warnings, failures, partial/unknown output, zero executed tests,
 machine formats, binary data and terminal controls stay raw. Empty suites
 within an otherwise exercised run remain in the suite count. ANSI stripping
 and quiet/nextest grammars are deliberately unsupported in format 1.
+LF and CRLF line endings are recognized; a bare carriage return stays raw.
+The retained bytes and content digest preserve the original line endings.
+Release-profile cargo output and `Blocking waiting for file lock` lines also
+stay raw; neither belongs to this initial recognized grammar.
 
 A raw view includes at most 16 KiB from each stream, with exact byte ranges,
 an explicit `truncated` flag and UTF-8 or base64 encoding. Those previews
@@ -88,6 +92,9 @@ not run a background timer. Oversized source files are refused unchanged,
 not silently truncated or deleted; use the original file through its normal
 authorized read. A source must be a regular captured file, not stdin, a pipe
 or a device. Store eviction deletes only this helper's managed artifacts.
+Every component of an input path must be free of symlinks, including its
+parent directories; a regular capture reached through a directory symlink
+is refused too.
 
 Supply the bytes **after the original tool's redaction policy**. The helper
 preserves them exactly, including existing redaction placeholders. It does

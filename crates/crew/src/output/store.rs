@@ -323,9 +323,9 @@ fn private_dir(parent: &File, name: &str) -> Result<File> {
     let dir = match open_at(parent, name, libc::O_RDONLY | libc::O_DIRECTORY, 0) {
         Ok(dir) => dir,
         Err(error) => {
-            if !error
+            if error
                 .downcast_ref::<std::io::Error>()
-                .is_some_and(|e| e.kind() == std::io::ErrorKind::NotFound)
+                .is_none_or(|e| e.kind() != std::io::ErrorKind::NotFound)
             {
                 return Err(error);
             }
