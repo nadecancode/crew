@@ -22,7 +22,7 @@ use crew_core::rpc::asides::AsideUsage;
 use crew_core::rpc::features::{FeatureUnavailable, Id, PageRequest, Unwatch, Wide};
 use crew_core::rpc::usage_metrics::{
     CostEstimate, CoverageReason, EpicAttribution, PriceBook, UsageBreakdown, UsageChanged,
-    UsageObservations, UsagePrices, UsageQuery, UsageRuns, UsageSeries, UsageSummary,
+    UsageKind, UsageObservations, UsagePrices, UsageQuery, UsageRuns, UsageSeries, UsageSummary,
     UsageWatchResult,
 };
 use crew_core::rpc::RpcError;
@@ -160,6 +160,7 @@ impl Opener for NativeOpener {
 #[derive(Clone, Debug)]
 struct Stream {
     run_id: String,
+    kind: UsageKind,
     source: Source,
     /// Bumped by every registration of the stream id: a read started under
     /// an older registration only clears `busy` when it ends.
@@ -341,8 +342,8 @@ impl UsageMetrics {
             .insert(run.to_string(), n);
     }
 
-    fn refuse(&self, run: &str, stream: &str, reason: CoverageReason, now: i64) {
-        let _ = self.with(|l| l.record_source_gap(run, stream, reason, now));
+    fn refuse(&self, run: &str, stream: &str, kind: UsageKind, reason: CoverageReason, now: i64) {
+        let _ = self.with(|l| l.record_source_gap(run, stream, Some(kind), reason, now));
     }
 
     /// A member launched with a confirmed native session: start collecting
@@ -363,19 +364,19 @@ impl UsageMetrics {
         // Identity and runtime first: an unsupported runtime is refused as
         // such, before any home is captured or file opened.
         if let Err(reason) = super::ledger::admits(reg) {
-            self.refuse(&reg.run_id, &id, reason, now);
+            self.refuse(&reg.run_id, &id, reg.kind, reason, now);
             return Ok(Err(reason));
         }
         // Held across the check and the insert: capacity is atomic.
         let mut streams = self.streams.lock().unwrap_or_else(|e| e.into_inner());
         if !streams.contains_key(&id) && streams.len() >= MAX_STREAMS {
             drop(streams);
-            self.refuse(&reg.run_id, &id, CoverageReason::NotTracked, now);
+            self.refuse(&reg.run_id, &id, reg.kind, CoverageReason::NotTracked, now);
             return Ok(Err(CoverageReason::NotTracked));
         }
         let Some(lease) = self.opener.lease(&reg.locator) else {
             drop(streams);
-            self.refuse(&reg.run_id, &id, CoverageReason::SourceGap, now);
+            self.refuse(&reg.run_id, &id, reg.kind, CoverageReason::SourceGap, now);
             return Ok(Err(CoverageReason::SourceGap));
         };
         let source = Source {
@@ -388,7 +389,7 @@ impl UsageMetrics {
         let Some(file) = self.opener.open(&source) else {
             self.opener.release(lease);
             drop(streams);
-            self.refuse(&reg.run_id, &id, CoverageReason::SourceGap, now);
+            self.refuse(&reg.run_id, &id, reg.kind, CoverageReason::SourceGap, now);
             return Ok(Err(CoverageReason::SourceGap));
         };
         // The ledger counts registrations: its count is the generation that
@@ -410,6 +411,7 @@ impl UsageMetrics {
                     stream.clone(),
                     Stream {
                         run_id: reg.run_id.clone(),
+                        kind: reg.kind,
                         source,
                         generation,
                         due: now,
@@ -427,7 +429,7 @@ impl UsageMetrics {
             Err(reason) => {
                 self.opener.release(lease);
                 drop(streams);
-                self.refuse(&reg.run_id, &id, *reason, now);
+                self.refuse(&reg.run_id, &id, reg.kind, *reason, now);
             }
         }
         Ok(registered.map(|(stream, _)| stream))
@@ -448,12 +450,24 @@ impl UsageMetrics {
             }
             if streams.len() >= MAX_STREAMS {
                 drop(streams);
-                self.refuse(&a.run_id, &a.stream_id, CoverageReason::NotTracked, now);
+                self.refuse(
+                    &a.run_id,
+                    &a.stream_id,
+                    a.kind,
+                    CoverageReason::NotTracked,
+                    now,
+                );
                 continue;
             }
             let Some(lease) = self.opener.lease(&a.locator) else {
                 drop(streams);
-                self.refuse(&a.run_id, &a.stream_id, CoverageReason::SourceGap, now);
+                self.refuse(
+                    &a.run_id,
+                    &a.stream_id,
+                    a.kind,
+                    CoverageReason::SourceGap,
+                    now,
+                );
                 continue;
             };
             let generation = match self.with(|l| l.registration(&a.stream_id)) {
@@ -467,6 +481,7 @@ impl UsageMetrics {
                 a.stream_id,
                 Stream {
                     run_id: a.run_id,
+                    kind: a.kind,
                     source: Source {
                         runtime: a.runtime,
                         session: a.session,
@@ -599,7 +614,7 @@ impl UsageMetrics {
             return;
         }
         let failed_now = outcome.is_err() && !s.missing;
-        let run = s.run_id.clone();
+        let (run, kind) = (s.run_id.clone(), s.kind);
         let (caught_up, grew) = match &outcome {
             Ok(p) => (p.caught_up, p.commits.iter().any(|c| c.visible())),
             Err(_) => (false, false),
@@ -621,7 +636,7 @@ impl UsageMetrics {
         }
         drop(streams);
         if failed_now {
-            self.refuse(&run, stream, CoverageReason::SourceGap, now);
+            self.refuse(&run, stream, kind, CoverageReason::SourceGap, now);
         }
         if finished {
             // A registration that came in since the stream left the map

@@ -16,12 +16,13 @@ use crew_core::rpc::features::{
     Id, List, PageRequest, Text, Timestamp, Wide, MAX_METADATA_ROWS, MAX_PAGE_BYTES,
 };
 use crew_core::rpc::usage_metrics::{
-    AccountAttribution, ActivityKind, CompletionCohort, CounterMetric, CoverageExclusion,
-    CoverageReason, EpicAttribution, MetricCoverage, MetricState, ObservationUnit, PriceBook,
-    SourceGap, TimeBasis, TrackingState, UsageBinding, UsageBreakdown, UsageBreakdownRow,
-    UsageBucket, UsageCounters, UsageDimension, UsageEpicFilter, UsageGroupKey, UsageKind,
-    UsageObservation, UsageObservations, UsagePage, UsagePrices, UsageQuery, UsageRun, UsageRuns,
-    UsageScope, UsageSeries, UsageSummary, UsageTaskFilter, UsageTotals, WorkAttribution,
+    AccountAttribution, ActivityKind, CompletionCohort, CostEstimate, CounterMetric,
+    CoverageExclusion, CoverageReason, EpicAttribution, EstimateState, MetricCoverage, MetricState,
+    ObservationUnit, PriceBook, SourceGap, TimeBasis, TrackingState, UsageBinding, UsageBreakdown,
+    UsageBreakdownRow, UsageBucket, UsageCounters, UsageDimension, UsageEpicFilter, UsageGroupKey,
+    UsageKind, UsageObservation, UsageObservations, UsagePage, UsagePrices, UsageQuery, UsageRun,
+    UsageRuns, UsageScope, UsageSeries, UsageSummary, UsageTaskFilter, UsageTotals,
+    WorkAttribution,
 };
 use crew_core::rpc::RpcError;
 use crew_core::RuntimeKind;
@@ -207,10 +208,15 @@ fn range_of(q: &UsageQuery) -> Option<(i64, i64)> {
 struct Extras {
     gaps: Vec<SourceGap>,
     gaps_total: u64,
+    /// Each lost source's kind (live or aside, when known) and reason.
+    losses: Vec<(Option<UsageKind>, CoverageReason)>,
     backlog: Option<u64>,
     retained_from: Option<i64>,
     uncertain: BTreeSet<(i64, String)>,
     reasons: BTreeSet<CoverageReasonKey>,
+    /// Why spend the ledger could not see may belong to the query: its
+    /// estimates then have no finite upper bound.
+    unseen_spend: Option<CoverageReason>,
 }
 
 /// `CoverageReason` ordered for deduplication.
@@ -282,12 +288,60 @@ fn extras(ledger: &Ledger, run: &RunInfo, ctx: &Context) -> Result<Extras, RpcEr
         .collect();
     Ok(Extras {
         gaps_total: gaps.len() as u64,
+        losses: gaps.iter().map(|g| (g.kind, g.reason)).collect(),
         gaps: listed,
+        unseen_spend: None,
         backlog: ctx.backlog_files,
         retained_from: run.retained_from,
         uncertain: ledger.uncertain_scopes(&run.run_id).map_err(internal)?,
         reasons,
     })
+}
+
+/// Why spend the ledger could not see may belong to `q` over `range`: a lost
+/// source of the same kind (or of unknown kind), or, for asides, an
+/// execution without a usage source.
+fn unseen_spend(
+    ledger: &Ledger,
+    x: &Extras,
+    q: &UsageQuery,
+    range: Option<(i64, i64)>,
+) -> Result<Option<CoverageReason>, RpcError> {
+    let kind = q.scope.kind;
+    if let Some((_, reason)) = x.losses.iter().find(|(k, _)| k.is_none_or(|k| k == kind)) {
+        return Ok(Some(*reason));
+    }
+    if kind == UsageKind::Aside
+        && ledger
+            .unsourced_executions(q.scope.workspace_run_id.as_str(), range, narrowed(&q.scope))
+            .map_err(internal)?
+            > 0
+    {
+        return Ok(Some(CoverageReason::NotTracked));
+    }
+    Ok(None)
+}
+
+/// Spend the ledger could not see may belong here: no finite upper bound,
+/// and no estimate at all without observed cost.
+fn open_spend(e: &mut CostEstimate, reason: CoverageReason) {
+    let none_seen = e.coverage.eligible_observations == Wide(0);
+    if e.state == EstimateState::Unavailable {
+        // Nothing observed: the unseen spend is why, not a lack of cost.
+        if none_seen {
+            e.reason = Some(reason);
+        }
+        return;
+    }
+    e.upper_pico_usd = None;
+    if e.lower_pico_usd.is_none() || none_seen {
+        e.lower_pico_usd = None;
+        e.state = EstimateState::Unavailable;
+        e.reason = Some(reason);
+    } else {
+        e.state = EstimateState::Partial;
+        e.reason.get_or_insert(reason);
+    }
 }
 
 fn decorate(c: &mut MetricCoverage, x: &Extras) {
@@ -414,6 +468,9 @@ fn totals_of(
         .any(|(a, _)| x.uncertain.contains(&(a.hour, a.stream_id.clone())))
     {
         poison(&mut t, CoverageReason::CorrectionOutsideHorizon);
+    }
+    if let Some(reason) = x.unseen_spend {
+        open_spend(&mut t.estimate, reason);
     }
     t
 }
@@ -683,8 +740,9 @@ pub fn summary(
     ctx: &Context,
 ) -> Result<UsageSummary, RpcError> {
     let (q, run, book) = canonical(ledger, query, MAX_METADATA_ROWS as u16, false)?;
-    let x = extras(ledger, &run, ctx)?;
     let range = range_of(&q);
+    let mut x = extras(ledger, &run, ctx)?;
+    x.unseen_spend = unseen_spend(ledger, &x, &q, range)?;
     let window = Window::load(ledger, &q, range, false)?;
     let (rows, t, expired) = window_totals(&window, range, |_| true, &book, ctx, &x);
     let mut limitations: BTreeSet<CoverageReasonKey> = x.reasons.clone();
@@ -820,7 +878,8 @@ pub fn series(ledger: &Ledger, query: &UsageQuery, ctx: &Context) -> Result<Usag
     let (q, run, book) = canonical(ledger, query, MAX_BUCKETS as u16, true)?;
     let revision = ledger.revision().map_err(internal)?;
     let offset = resume("series", query.page.cursor.as_ref(), revision, &q)?;
-    let x = extras(ledger, &run, ctx)?;
+    let mut x = extras(ledger, &run, ctx)?;
+    x.unseen_spend = unseen_spend(ledger, &x, &q, range_of(&q))?;
     let bucket = q.bucket_seconds.expect("series resolve a bucket") as i64 * 1_000;
     let start = q
         .from_ms
@@ -925,8 +984,9 @@ pub fn breakdown(
         .ok_or_else(|| invalid("a breakdown needs group_by"))?;
     let revision = ledger.revision().map_err(internal)?;
     let offset = resume("breakdown", query.page.cursor.as_ref(), revision, &q)?;
-    let x = extras(ledger, &run, ctx)?;
     let range = range_of(&q);
+    let mut x = extras(ledger, &run, ctx)?;
+    x.unseen_spend = unseen_spend(ledger, &x, &q, range)?;
     let window = Window::load(ledger, &q, range, false)?;
     let (rows, expired) = window.cut(range);
     let mut groups: BTreeMap<String, (UsageGroupKey, Vec<(Aggregate, Fact)>)> = BTreeMap::new();
@@ -1744,10 +1804,16 @@ mod tests {
     fn refused_and_drained_sources_are_gaps_of_the_run() {
         let (_dir, _path, mut ledger, stream) = fixture();
         ledger
-            .record_source_gap("r1", "pi:s-9", CoverageReason::UnsupportedRuntime, NOW)
+            .record_source_gap(
+                "r1",
+                "pi:s-9",
+                Some(UsageKind::Live),
+                CoverageReason::UnsupportedRuntime,
+                NOW,
+            )
             .unwrap();
         ledger
-            .record_source_gap("r1", "claude:s-8", CoverageReason::NotTracked, NOW)
+            .record_source_gap("r1", "claude:s-8", None, CoverageReason::NotTracked, NOW)
             .unwrap();
         let registration = ledger.registration(&stream).unwrap().unwrap();
         assert!(ledger.retire(&stream, registration, Some(NOW)).unwrap());
@@ -1843,5 +1909,152 @@ mod tests {
         whole.to_ms = Some(Timestamp::new(NOW + 3_600_000).unwrap());
         let s = summary(&ledger, &whole, &ctx()).unwrap();
         assert_eq!(s.executions_observed.unwrap().known_sum, Some(Wide(1)));
+    }
+
+    fn aside_ledger() -> (tempfile::TempDir, Ledger) {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("fork.jsonl");
+        std::fs::write(&path, "").unwrap();
+        let mut ledger = Ledger::in_memory().unwrap();
+        ledger.begin_run("r1", Some(NOW), NOW).unwrap();
+        let reg = Registration {
+            run_id: "r1".into(),
+            kind: UsageKind::Aside,
+            runtime: RuntimeKind::Claude,
+            native_session_id: "s-1".into(),
+            agent_id: "worker".into(),
+            incarnation: "i1".into(),
+            launch_id: "l1".into(),
+            aside: Some(crate::usage_metrics::ledger::AsideIds {
+                execution_id: "x1".into(),
+                aside_id: "q1".into(),
+            }),
+            locator: Locator::Private {
+                agent_id: "worker".into(),
+            },
+            started_ms: NOW,
+            start: Start::Fresh,
+            cli_version: None,
+        };
+        let stream = ledger
+            .register(&reg, &File::open(&path).unwrap(), NOW)
+            .unwrap()
+            .unwrap();
+        append(&path, &[msg("ans", NOW + 1_000, 7)]);
+        drain(&mut ledger, &stream, &File::open(&path).unwrap(), NOW).unwrap();
+        (dir, ledger)
+    }
+
+    #[test]
+    fn aside_estimates_stay_open_for_answers_without_a_source() {
+        use crate::usage_metrics::ledger::ExecutionStatus;
+        let (_dir, mut ledger) = aside_ledger();
+        let book = Book::standard_2026_10_08();
+        let aside = |from: Option<i64>, to: Option<i64>| {
+            let mut q = all();
+            q.scope.kind = UsageKind::Aside;
+            q.from_ms = from.map(|t| Timestamp::new(t).unwrap());
+            q.to_ms = to.map(|t| Timestamp::new(t).unwrap());
+            q
+        };
+        let closed = summary(&ledger, &aside(None, None), &ctx()).unwrap();
+        assert_eq!(closed.totals.estimate.state, EstimateState::Finite);
+        // A second answer of the same aside failed, its spend never read.
+        for (x, status) in [
+            ("x1", ExecutionStatus::Answered),
+            ("x2", ExecutionStatus::Failed),
+        ] {
+            ledger
+                .execution_status("r1", "q1", x, status, Some(NOW + 2 * 3_600_000), None)
+                .unwrap();
+        }
+        let header = ledger.aside_total_cost("r1", "q1", &book).unwrap().unwrap();
+        let s = summary(&ledger, &aside(None, None), &ctx()).unwrap();
+        let e = &s.totals.estimate;
+        assert_eq!(header.upper_pico_usd, None);
+        assert_eq!(
+            e.upper_pico_usd, None,
+            "the summary agrees with the aside's total"
+        );
+        assert_eq!(e.state, EstimateState::Partial);
+        assert_eq!(e.lower_pico_usd, closed.totals.estimate.lower_pico_usd);
+        assert_eq!(e.reason, Some(CoverageReason::NotTracked));
+        assert_eq!(
+            s.totals.output.known_sum, closed.totals.output.known_sum,
+            "counters keep their own coverage"
+        );
+        // A period before the failed answer started cannot hold its spend.
+        let early = summary(&ledger, &aside(Some(NOW), Some(NOW + 3_600_000)), &ctx()).unwrap();
+        assert_eq!(early.totals.estimate.state, EstimateState::Finite);
+        // One that holds it, with no observed cost, has no estimate.
+        let late = summary(
+            &ledger,
+            &aside(Some(NOW + 2 * 3_600_000), Some(NOW + 3 * 3_600_000)),
+            &ctx(),
+        )
+        .unwrap();
+        assert_eq!(late.totals.estimate.state, EstimateState::Unavailable);
+        assert_eq!(
+            late.totals.estimate.reason,
+            Some(CoverageReason::NotTracked)
+        );
+        // A narrowed scope cannot rule the unsourced answer out.
+        let mut model = aside(Some(NOW), Some(NOW + 3_600_000));
+        model.scope.model =
+            Some(crew_core::rpc::features::Label::new("claude-haiku-4-5-20251001").unwrap());
+        let m = summary(&ledger, &model, &ctx()).unwrap();
+        assert_eq!(m.totals.estimate.upper_pico_usd, None);
+    }
+
+    #[test]
+    fn live_estimates_stay_open_while_a_source_is_lost() {
+        let (_dir, _path, mut ledger, _) = fixture();
+        let mut q = all();
+        q.to_ms = Some(Timestamp::new(NOW + 3_600_000).unwrap());
+        let before = summary(&ledger, &q, &ctx()).unwrap();
+        assert!(before.totals.estimate.upper_pico_usd.is_some());
+        // An aside source lost changes no live estimate.
+        ledger
+            .record_source_gap(
+                "r1",
+                "claude:s-x",
+                Some(UsageKind::Aside),
+                CoverageReason::SourceGap,
+                NOW,
+            )
+            .unwrap();
+        assert!(summary(&ledger, &q, &ctx())
+            .unwrap()
+            .totals
+            .estimate
+            .upper_pico_usd
+            .is_some());
+        // A live one, or one of unknown kind, leaves every live estimate open,
+        // whatever its range or group.
+        ledger
+            .record_source_gap("r1", "claude:s-9", None, CoverageReason::SourceGap, NOW)
+            .unwrap();
+        let s = summary(&ledger, &q, &ctx()).unwrap();
+        assert_eq!(s.totals.estimate.upper_pico_usd, None);
+        assert_eq!(s.totals.estimate.state, EstimateState::Partial);
+        assert_eq!(
+            s.totals.estimate.lower_pico_usd,
+            before.totals.estimate.lower_pico_usd
+        );
+        assert_eq!(output(&s.totals), output(&before.totals));
+        let mut grouped = all();
+        grouped.group_by = Some(UsageDimension::Agent);
+        let b = breakdown(&ledger, &grouped, &ctx()).unwrap();
+        assert!(b
+            .rows
+            .iter()
+            .all(|r| r.totals.estimate.upper_pico_usd.is_none()));
+        let mut buckets = all();
+        buckets.bucket_seconds = Some(3600);
+        let sr = series(&ledger, &buckets, &ctx()).unwrap();
+        assert!(sr
+            .rows
+            .iter()
+            .all(|r| r.totals.estimate.upper_pico_usd.is_none()));
     }
 }

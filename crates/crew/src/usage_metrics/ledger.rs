@@ -242,6 +242,7 @@ CREATE TABLE IF NOT EXISTS usage_source_gaps (
     count     INTEGER NOT NULL,
     first_at  INTEGER NOT NULL,
     last_at   INTEGER NOT NULL,
+    kind      TEXT,
     PRIMARY KEY (run_id, stream_id, reason)
 );
 CREATE TABLE IF NOT EXISTS usage_diagnostics (
@@ -954,6 +955,27 @@ impl Ledger {
         Ok(Some(estimate))
     }
 
+    /// Executions of a run without a usage source whose spend may belong to a
+    /// query: those started in `range` (all of them without one), or every
+    /// one when the query `narrowed` by member, model, account or work.
+    pub fn unsourced_executions(
+        &self,
+        run_id: &str,
+        range: Option<(i64, i64)>,
+        narrowed: bool,
+    ) -> Result<u64> {
+        let (from, to) = range.unwrap_or((i64::MIN, i64::MAX));
+        let n: i64 = self.conn.query_row(
+            "SELECT COUNT(*) FROM usage_executions e WHERE e.run_id = ?1 AND NOT EXISTS
+             (SELECT 1 FROM usage_owners o WHERE o.aside_execution = e.execution_id)
+             AND (?2 = 1 OR ?3 = 1 OR (e.started_at IS NOT NULL
+                  AND e.started_at >= ?4 AND e.started_at < ?5))",
+            params![run_id, narrowed as i64, range.is_none() as i64, from, to],
+            |r| r.get(0),
+        )?;
+        Ok(n as u64)
+    }
+
     /// The executions in `observed` (those with newly observed usage in the
     /// query's cohort) and the status partition of that cohort. An execution
     /// of the run without a source has unknown usage, never zero: when the
@@ -980,15 +1002,7 @@ impl Ledger {
             observed_status.push((id.clone(), s));
         }
         let observed = observed_status;
-        let (from, to) = range.unwrap_or((i64::MIN, i64::MAX));
-        let unsourced: i64 = self.conn.query_row(
-            "SELECT COUNT(*) FROM usage_executions e WHERE e.run_id = ?1 AND NOT EXISTS
-             (SELECT 1 FROM usage_owners o WHERE o.aside_execution = e.execution_id)
-             AND (?2 = 1 OR ?3 = 1 OR (e.started_at IS NOT NULL
-                  AND e.started_at >= ?4 AND e.started_at < ?5))",
-            params![run_id, narrowed as i64, range.is_none() as i64, from, to],
-            |r| r.get(0),
-        )?;
+        let unsourced = self.unsourced_executions(run_id, range, narrowed)?;
         let mut counts = ExecutionStatusCounts {
             answered: Wide(0),
             failed: Wide(0),
@@ -1171,7 +1185,7 @@ impl Ledger {
     pub fn active_streams(&self) -> Result<Vec<ActiveStream>> {
         let mut stmt = self.conn.prepare(
             "SELECT DISTINCT s.stream_id, s.runtime, s.native_session_id, s.started_ms, s.locator,
-                    o.run_id
+                    o.run_id, o.kind
              FROM usage_streams s JOIN usage_owners o ON o.stream_id = s.stream_id
              WHERE o.active = 1 AND s.admission IS NULL ORDER BY s.stream_id",
         )?;
@@ -1183,13 +1197,15 @@ impl Ledger {
                 r.get::<_, i64>(3)?,
                 r.get::<_, String>(4)?,
                 r.get::<_, String>(5)?,
+                r.get::<_, String>(6)?,
             ))
         })?;
         let mut out = Vec::new();
         for row in rows {
-            let (id, runtime, session, started, locator, run_id) = row?;
+            let (id, runtime, session, started, locator, run_id, kind) = row?;
             out.push(ActiveStream {
                 run_id,
+                kind: kind_of(&kind)?,
                 stream_id: id,
                 runtime: serde_json::from_value(serde_json::Value::String(runtime))?,
                 session,
@@ -1206,15 +1222,17 @@ impl Ledger {
         &mut self,
         run_id: &str,
         stream_id: &str,
+        kind: Option<UsageKind>,
         reason: CoverageReason,
         now: i64,
     ) -> Result<()> {
         let tx = self.conn.transaction()?;
         tx.execute(
-            "INSERT INTO usage_source_gaps (run_id, stream_id, reason, count, first_at, last_at)
-             VALUES (?1, ?2, ?3, 1, ?4, ?4)
+            "INSERT INTO usage_source_gaps
+             (run_id, stream_id, reason, count, first_at, last_at, kind)
+             VALUES (?1, ?2, ?3, 1, ?4, ?4, ?5)
              ON CONFLICT DO UPDATE SET count = count + 1, last_at = excluded.last_at",
-            params![run_id, stream_id, tag(&reason), now],
+            params![run_id, stream_id, tag(&reason), now, kind.map(|k| tag(&k))],
         )?;
         bump(&tx)?;
         tx.commit()?;
@@ -1639,10 +1657,10 @@ impl Ledger {
     /// Sources of a run that lost usage: stream, reason, count and when.
     pub fn gaps(&self, run_id: &str) -> Result<Vec<Gap>> {
         let mut stmt = self.conn.prepare(
-            "SELECT DISTINCT c.stream_id, c.reason, c.count, c.first_at, c.last_at
+            "SELECT DISTINCT c.stream_id, c.reason, c.count, c.first_at, c.last_at, o.kind
              FROM usage_coverage c JOIN usage_owners o ON c.stream_id = o.stream_id
              WHERE o.run_id = ?1
-             UNION SELECT stream_id, reason, count, first_at, last_at
+             UNION SELECT stream_id, reason, count, first_at, last_at, kind
              FROM usage_source_gaps WHERE run_id = ?1
              ORDER BY 1, 2",
         )?;
@@ -1653,11 +1671,12 @@ impl Ledger {
                 r.get::<_, i64>(2)?,
                 r.get::<_, i64>(3)?,
                 r.get::<_, i64>(4)?,
+                r.get::<_, Option<String>>(5)?,
             ))
         })?;
         let mut out = Vec::new();
         for row in rows {
-            let (stream_id, reason, count, first_at, last_at) = row?;
+            let (stream_id, reason, count, first_at, last_at, kind) = row?;
             let reason: CoverageReason = serde_json::from_value(serde_json::Value::String(reason))?;
             out.push(Gap {
                 stream_id,
@@ -1665,6 +1684,7 @@ impl Ledger {
                 count: count as u64,
                 first_at,
                 last_at,
+                kind: kind.as_deref().map(kind_of).transpose()?,
             });
         }
         Ok(out)
@@ -1943,6 +1963,7 @@ impl Ledger {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ActiveStream {
     pub run_id: String,
+    pub kind: UsageKind,
     pub stream_id: String,
     pub runtime: RuntimeKind,
     pub session: String,
@@ -2061,6 +2082,8 @@ pub struct Gap {
     pub count: u64,
     pub first_at: i64,
     pub last_at: i64,
+    /// Whether the source was live or an aside, when known.
+    pub kind: Option<UsageKind>,
 }
 
 /// One retained observation, with what its public record needs.
@@ -4163,8 +4186,14 @@ mod tests {
         type Lose = fn(&mut Ledger, &str);
         let cases: [(&str, Lose); 2] = [
             ("refused", |l, _| {
-                l.record_source_gap("r1", "pi:s-9", CoverageReason::UnsupportedRuntime, NOW)
-                    .unwrap()
+                l.record_source_gap(
+                    "r1",
+                    "pi:s-9",
+                    Some(UsageKind::Live),
+                    CoverageReason::UnsupportedRuntime,
+                    NOW,
+                )
+                .unwrap()
             }),
             ("drained with backlog", |l, stream| {
                 let registration = l.registration(stream).unwrap().unwrap();

@@ -4,13 +4,17 @@ This implements the metrics backend of `notes/protocol-features.md` stage P3
 and `notes/usage-metrics.md` with addendum `f6e13265`, on P1 main `fbe243af`,
 merged with main `201e7fdc`. Native session files are read only; no terminal
 is scraped, no runtime started, no prompt sent, no credential read. No
-feature version is advertised and no daemon method is wired: the scheduler's
-P2 card wires dispatch, authorization and connection state once, through the
-service interface below.
+feature version is advertised and no daemon method is wired: card
+`features-p6-daemon-wiring` wires dispatch and host seams once, on the P2
+foundation's authorization and connection state, through the service
+interface below.
 
 Every checkpoint is approved by cache-reviewer: C1 at `9da15100`, C2 and C3a
 through `cf6bf147` (m-ed9123828341), C3b, C4a and C4b through `1b09215f`
-(m-2f030badb193). The final tree is `8245c0d0`.
+(m-2f030badb193). The final review found Q4 (m-8150704141a0): an estimate
+kept a finite upper bound while spend it could not see (a lost source, an
+aside answer without a usage source) might belong to its scope. That is
+fixed in the final tree, named under Gates.
 
 ## Commits
 
@@ -20,7 +24,7 @@ through `cf6bf147` (m-ed9123828341), C3b, C4a and C4b through `1b09215f`
 | C2 native adapters | `dfb0308b`, `ac5d0a86`, `acf92c4f`, `c49f1bfa`, `a1991ca1`, `d5d9c40b`, `ff699482`, `82d5c082`, `cf6bf147` | Bounded read-only reader, continuity, Claude and Codex adapters, pi gated, captured CLI homes, lifecycle fixtures and parity. Codex increments identified by their vectors, never revised, with a high-water mark of every vector the stream has shown, across rewrites and restarts; native batches carry their start position. |
 | C3a ledger core | `2c74dca8`, `78fca059`, `82d5c082`, `cf6bf147` | Durable streams, owners, work bindings, observations, seen ids, coverage, aggregates in wide integers, retention, resumed owners; a batch is attributed only when no owner, work or account binding changed anywhere inside it. |
 | C3b cohort and asides | `d5152626`, `b0b41688`, `1b09215f` | First completions, task costs, cohort query, aside execution read-back; late corrections make them unavailable; refused and drained sources leave cohort cost open; earlier spend inside a period's first hour. |
-| C4a queries | `4e78669c`, `3c3dcf37`, `8ba7da72`, `4536c488`, `a41a0504`, `1b09215f` | Canonical queries over exact half-open ranges (the shared `UsageQuery::resolved_shape`), scoped secondary metrics, bounded cursors, summary, series, breakdown, observations, runs, prices; refused sources as gaps; aside counts unavailable when their range lost detail. |
+| C4a queries | `4e78669c`, `3c3dcf37`, `8ba7da72`, `4536c488`, `a41a0504`, `1b09215f`, Q4 fix | Canonical queries over exact half-open ranges (the shared `UsageQuery::resolved_shape`), scoped secondary metrics, bounded cursors, summary, series, breakdown, observations, runs, prices; refused sources as gaps; aside counts unavailable when their range lost detail; estimates open (no finite upper bound) while a lost source of the same kind, or an unsourced aside answer, may hold spend of the scope. |
 | C4b service | `18995664`, `1e1d66e3`, `1b09215f` | Collection scheduling, captured homes per registration, monotonic revisions, ready watches, durable source gaps, and every ledger commit and retirement fenced by the stream's persisted registration. |
 | U18 fixtures | `8156e7d5`, `8245c0d0` | `crates/crew/tests/web_usage.rs` generates the web dashboard's `usage.json` from native records through the ledger and queries. |
 | Main merges | `36d38a27`, `a5960fc4`, `e8399539` | `b591744b`, then `201e7fdc`, no conflicts. |
@@ -65,7 +69,7 @@ All under `crates/crew/src/usage_metrics/`.
 directory-only and nonblocking; transcripts and rollouts open beneath it
 without following links, as private homes already did.
 
-## Service interface for P2
+## Service interface for the daemon wiring
 
 `UsageMetrics::new(Ledger, Arc<dyn Opener>, epoch)`; `recover(now)` at start
 resumes every stream with an active owner; `spawn(clock)` runs collection
@@ -98,10 +102,10 @@ opened; the same launch registered again keeps its owner), `bind_work`,
 | U10 | First completions, recompletion, completion epic, earlier spend (also inside a period's first hour, conservatively once its detail expired), untimed spend after completion widening only the upper bound, missing task cost, refused or drained sources, incomplete membership before tracking, no completions. |
 | U11 | Owners and work bindings captured at file positions; late copies keep their binding; a backlog written before re-registration keeps its old owner; a batch across any binding change (A, B, A included), any account change or another owner is attributed to neither side; a batch without a known start goes to no one. |
 | U12 | Runs tracked by id with their tracking start; pre-tracking history kept in its own scope, including its later corrections. Durable run pointer and clear-session archiving belong to P2. |
-| U13 | Copied fork context only seeds; new answer usage only in aside scope; failed spend kept; an execution without a source leaves totals partial; aside counts are unavailable when their range needs expired detail. |
+| U13 | Copied fork context only seeds; new answer usage only in aside scope; failed spend kept; an execution without a source leaves totals partial and the aside scope's estimate without an upper bound, as the aside's own total does; aside counts are unavailable when their range needs expired detail. |
 | U14 | Detail expiry keeps aggregates and seen ids; an identical old copy is a no-op; a changed old id is outside the horizon (also after restart and rewrite) and makes affected aggregates, cohort and aside figures unavailable; closed admission refuses with a gap. |
 | U15 | Request-id history diagnostics, file order under regressing timestamps, unknown gaps, foreign diagnostics ignored. |
-| U16 | No body, prompt, tool output or path text in any table; no Activity, scheduling or prompt effect. |
+| U16 | No body, prompt or tool output in any table. The only path text is a stream's locator, the configured CLI home it is opened from, kept for recovery and never exported. No Activity, scheduling or prompt effect. |
 | U17 (backend) | Page byte budget with working cursors, `too_large` for a single oversized row, revision- and query-pinned cursors with bounded offsets, at most four coalesced watches per connection with monotonic revisions, reads and retirements fenced by registration (barrier tests at a read's first ledger step and between drain and retirement), no capability advertised. Dispatch, gateway lanes and cross-workspace negatives belong to P2 and P4. |
 | U18 (backend) | Server-computed figures, ranges and coverage; exact wire round-trip of the summary; `crates/crew/tests/fixtures/web/usage.json` holds the replies for the F12-F14 scenario as the ledger computes them. Cross-client parity belongs to the P5 view cards. |
 

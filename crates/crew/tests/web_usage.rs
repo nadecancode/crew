@@ -322,15 +322,8 @@ fn world() -> World {
         )],
     );
 
-    // epsilon: a member whose session file is missing.
-    w.ledger
-        .record_source_gap(
-            RUN,
-            "claude:s-epsilon",
-            CoverageReason::SourceGap,
-            T0 + 5 * MIN,
-        )
-        .unwrap();
+    // epsilon: a member whose session has no usage yet.
+    w.source(RUN, "epsilon", RuntimeKind::Claude, "s-epsilon", None);
 
     // One aside answer with usage, one that failed before any.
     let aside = w.source(
@@ -486,6 +479,23 @@ fn usage_json() {
         resync_required: false,
     })}});
     out["summary_corrected"] = v(query::summary(&w.ledger, &live(), &c).unwrap());
+
+    // zeta: a member whose session file is missing. What it spent is not
+    // known, so no estimate has a finite upper bound any more.
+    w.ledger
+        .record_source_gap(
+            RUN,
+            "claude:s-zeta",
+            Some(UsageKind::Live),
+            CoverageReason::SourceGap,
+            T0 + 5 * MIN,
+        )
+        .unwrap();
+    let c = Context {
+        expected_agents: Some(6),
+        ..ctx()
+    };
+    out["summary_missing_source"] = v(query::summary(&w.ledger, &live(), &c).unwrap());
     check("usage.json", pretty(&out));
 }
 
