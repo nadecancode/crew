@@ -61,6 +61,7 @@ pub struct Source {
 
 pub struct Index {
     pub epoch: Id,
+    namespace: Id,
     pub revision: Wide,
     pub policy: Policy,
     pub sources: BTreeMap<Id, Source>,
@@ -78,6 +79,7 @@ impl Index {
     pub fn new(policy: Policy) -> Self {
         Self {
             epoch: id(),
+            namespace: id(),
             revision: Wide(0),
             phase: if policy.enabled {
                 DocPhase::Building
@@ -237,14 +239,16 @@ impl Index {
         self.policy = policy;
         self.epoch = id();
         self.revision.0 += 1;
-        self.rows.clear();
-        self.metadata_bytes = 0;
+        self.rows.retain(|path, _| self.policy.selects(path));
+        self.recount();
         self.limited = false;
         for source in self.sources.values_mut() {
             source.stamps.clear();
             source.reads.clear();
             source.scan = None;
             source.seen.clear();
+            source.directories.clear();
+            source.watch_limited = false;
         }
         self.phase = if self.policy.enabled {
             DocPhase::Building
@@ -434,7 +438,7 @@ impl Index {
             return false;
         }
         let mut entry = self.rows.get(&path).cloned().unwrap_or_else(|| DocEntry {
-            id: hash(format!("{}:{}", self.epoch.as_str(), path.as_str()).as_bytes()),
+            id: hash(format!("{}:{}", self.namespace.as_str(), path.as_str()).as_bytes()),
             relative_path: Text::new(path.as_str()).expect("relative bound"),
             variants: List::default(),
         });

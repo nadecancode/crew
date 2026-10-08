@@ -25,7 +25,7 @@ fn fixture() -> (TempDir, Service, ConnCtx) {
 fn registration(key: &str, root: std::path::PathBuf, kind: DocSourceKind) -> Registration {
     Registration {
         key: Id::new(key).unwrap(),
-        root,
+        root: root.canonicalize().unwrap(),
         kind,
         member_ids: vec![key.into()],
         display_name: key.into(),
@@ -308,6 +308,10 @@ async fn k12_p08_agent_wrong_run_reconnect_revoke_and_removal_fail_closed() {
     );
     assert!(!dir.path().join("crew.db").exists());
     service.run_archived(&next.run);
+    assert_eq!(
+        service.readiness(),
+        Readiness::Unavailable(FeatureUnavailable::NotReady)
+    );
     let new = ConnCtx::new(index::id(), next.run.clone(), Caller::Operator);
     assert!(service
         .handle(&new, Call::DocsIndex(PageRequest::default()))
@@ -775,32 +779,34 @@ async fn p08_cancelled_awaiter_does_not_release_a_blocking_job_permit_early() {
     let doc = reference(&page, "notes/a.md");
     let owned = service.clone();
     let caller = ctx.clone();
-    let guard = service.state();
-    let task = tokio::spawn(async move {
-        owned
-            .handle(
-                &caller,
-                Call::DocsRead(DocsRead {
-                    document: doc,
-                    version: DocVersionSelector::Current,
-                }),
-            )
-            .await
-    });
-    // The queued blocking worker cannot enter admit while this guard is held.
-    // The other Tokio worker can still cancel its awaiter independently.
-    let deadline = Instant::now() + Duration::from_secs(1);
-    while service.inner.reads.available_permits() != 1 && Instant::now() < deadline {
-        std::thread::sleep(Duration::from_millis(1));
-    }
-    assert_eq!(service.inner.reads.available_permits(), 1);
-    ctx.cancellation.cancel();
-    while !task.is_finished() && Instant::now() < deadline {
-        std::thread::sleep(Duration::from_millis(1));
-    }
-    assert!(task.is_finished());
-    assert_eq!(service.inner.reads.available_permits(), 1);
-    drop(guard);
+    let task = {
+        let _guard = service.state();
+        let task = tokio::spawn(async move {
+            owned
+                .handle(
+                    &caller,
+                    Call::DocsRead(DocsRead {
+                        document: doc,
+                        version: DocVersionSelector::Current,
+                    }),
+                )
+                .await
+        });
+        // The queued blocking worker cannot enter admit while this guard is held.
+        // The other Tokio worker can still cancel its awaiter independently.
+        let deadline = Instant::now() + Duration::from_secs(1);
+        while service.inner.reads.available_permits() != 1 && Instant::now() < deadline {
+            std::thread::sleep(Duration::from_millis(1));
+        }
+        assert_eq!(service.inner.reads.available_permits(), 1);
+        ctx.cancellation.cancel();
+        while !task.is_finished() && Instant::now() < deadline {
+            std::thread::sleep(Duration::from_millis(1));
+        }
+        assert!(task.is_finished());
+        assert_eq!(service.inner.reads.available_permits(), 1);
+        task
+    };
     assert!(task.await.unwrap().is_err());
     let deadline = tokio::time::Instant::now() + Duration::from_secs(1);
     while service.inner.reads.available_permits() != 2 && tokio::time::Instant::now() < deadline {
@@ -808,4 +814,181 @@ async fn p08_cancelled_awaiter_does_not_release_a_blocking_job_permit_early() {
     }
     assert_eq!(service.inner.reads.available_permits(), 2);
     assert_eq!(service.state().cache_bytes, 0);
+}
+
+#[tokio::test]
+async fn w1_policy_terminal_frame_allows_exactly_one_rewatch_of_surviving_selection() {
+    let (dir, service, ctx) = fixture();
+    fs::write(dir.path().join("notes/b.md"), "# Beta\n").unwrap();
+    let page = complete(&service, &ctx).await;
+    let a = reference(&page, "notes/a.md");
+    let b = reference(&page, "notes/b.md");
+    let old = read(&service, &ctx, b.clone()).await;
+    let started = service
+        .state()
+        .watch(
+            &ctx,
+            DocsWatch {
+                selected: List::new(vec![a.clone(), b.clone()]).unwrap(),
+            },
+        )
+        .unwrap();
+    let mut stream = service
+        .watch_stream(ctx.clone(), started.watch_id.clone())
+        .unwrap();
+    service
+        .configure(["[docs]\nexclude=['notes/a.md']"])
+        .unwrap();
+    let push = stream.next().await.unwrap().unwrap();
+    let crew_core::rpc::Push::DocsChanged(change) = push else {
+        panic!("wrong push");
+    };
+    assert_ne!(change.epoch, started.initial_index_page.epoch);
+    assert!(change.resync_required);
+    assert!(change
+        .changed_selected
+        .iter()
+        .any(|s| s.document == a && s.kind == DocChangeKind::Policy));
+    assert!(change
+        .changed_selected
+        .iter()
+        .any(|s| s.document == b && s.kind == DocChangeKind::Availability));
+    assert!(stream.next().await.unwrap().is_none());
+    let surviving: Vec<_> = [a.clone(), b.clone()]
+        .into_iter()
+        .filter(|r| {
+            !change.changed_selected.iter().any(|s| {
+                &s.document == r && matches!(s.kind, DocChangeKind::Policy | DocChangeKind::Removed)
+            })
+        })
+        .collect();
+    assert_eq!(surviving, vec![b.clone()]);
+    let watched: DocsWatchResult = serde_json::from_value(
+        service
+            .handle(
+                &ctx,
+                Call::DocsWatch(DocsWatch {
+                    selected: List::new(surviving).unwrap(),
+                }),
+            )
+            .await
+            .unwrap(),
+    )
+    .unwrap();
+    assert_ne!(watched.watch_id, started.watch_id);
+    assert_eq!(watched.initial_index_page.epoch, change.epoch);
+    assert_eq!(reference(&watched.initial_index_page, "notes/b.md"), b);
+    let expired: DocReadResult = serde_json::from_value(
+        service
+            .handle(
+                &ctx,
+                Call::DocsRead(DocsRead {
+                    document: b,
+                    version: DocVersionSelector::Id(old.version.id.clone()),
+                }),
+            )
+            .await
+            .unwrap(),
+    )
+    .unwrap();
+    assert!(
+        matches!(expired,DocReadResult::Unavailable(f) if f.code==DocFailureCode::SnapshotExpired)
+    );
+    assert!(service
+        .handle(
+            &ctx,
+            Call::DocsWatch(DocsWatch {
+                selected: List::new(vec![a]).unwrap()
+            })
+        )
+        .await
+        .is_err());
+    assert_eq!(
+        service.state().connections[&ctx.connection_epoch]
+            .watch
+            .as_ref()
+            .unwrap()
+            .id,
+        watched.watch_id
+    );
+    service.connection_closed(&ctx.connection_epoch);
+}
+
+#[tokio::test]
+async fn w1_source_replacement_and_disable_emit_terminal_frames_but_disconnect_does_not() {
+    let (_dir, service, ctx) = fixture();
+    let page = complete(&service, &ctx).await;
+    let a = reference(&page, "notes/a.md");
+    let started = service
+        .state()
+        .watch(
+            &ctx,
+            DocsWatch {
+                selected: List::new(vec![a.clone()]).unwrap(),
+            },
+        )
+        .unwrap();
+    let mut stream = service.watch_stream(ctx.clone(), started.watch_id).unwrap();
+    let replacement = tempfile::tempdir().unwrap();
+    fs::create_dir(replacement.path().join("notes")).unwrap();
+    fs::write(replacement.path().join("notes/a.md"), "# Replacement\n").unwrap();
+    service
+        .replace_sources(vec![registration(
+            "workspace",
+            replacement.path().into(),
+            DocSourceKind::Workspace,
+        )])
+        .unwrap();
+    let push = stream.next().await.unwrap().unwrap();
+    let crew_core::rpc::Push::DocsChanged(change) = push else {
+        panic!("wrong push");
+    };
+    assert_ne!(change.epoch, started.initial_index_page.epoch);
+    assert!(change
+        .changed_selected
+        .iter()
+        .any(|s| s.document == a && s.kind == DocChangeKind::Removed));
+    assert!(stream.next().await.unwrap().is_none());
+    let page = complete(&service, &ctx).await;
+    let b = reference(&page, "notes/a.md");
+    assert_eq!(a.doc_id, b.doc_id);
+    assert_ne!(a.source_id, b.source_id);
+    let started = service
+        .state()
+        .watch(
+            &ctx,
+            DocsWatch {
+                selected: List::new(vec![b]).unwrap(),
+            },
+        )
+        .unwrap();
+    let mut stream = service.watch_stream(ctx.clone(), started.watch_id).unwrap();
+    service.configure(["[docs]\nenabled=false"]).unwrap();
+    assert!(
+        matches!(stream.next().await.unwrap(),Some(crew_core::rpc::Push::DocsChanged(c)) if c.resync_required)
+    );
+    assert!(stream.next().await.unwrap().is_none());
+    let error = service
+        .handle(
+            &ctx,
+            Call::DocsWatch(DocsWatch {
+                selected: List::default(),
+            }),
+        )
+        .await
+        .unwrap_err();
+    assert_eq!(error.code, "disabled");
+    service.configure(["[docs]\nenabled=true"]).unwrap();
+    let started = service
+        .state()
+        .watch(
+            &ctx,
+            DocsWatch {
+                selected: List::default(),
+            },
+        )
+        .unwrap();
+    let mut stream = service.watch_stream(ctx.clone(), started.watch_id).unwrap();
+    service.connection_closed(&ctx.connection_epoch);
+    assert!(stream.next().await.unwrap().is_none());
 }

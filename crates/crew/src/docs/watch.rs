@@ -110,6 +110,13 @@ impl Queue {
         drop(pending);
         self.notify.notify_waiters();
     }
+    /// Deliver one final metadata invalidation, then EOF. Physical disconnect
+    /// uses close() instead, which discards queued data immediately.
+    pub fn finish(&self, change: DocsChanged) {
+        self.push(change);
+        self.inner.lock().unwrap_or_else(|e| e.into_inner()).closed = true;
+        self.notify.notify_waiters();
+    }
 }
 
 pub struct Stream {
@@ -128,11 +135,11 @@ impl FeatureWatch for Stream {
             }
             {
                 let mut pending = self.queue.inner.lock().unwrap_or_else(|e| e.into_inner());
-                if pending.closed {
-                    return Ok(None);
-                }
                 if let Some(change) = pending.value.take() {
                     return Ok(Some(Push::DocsChanged(Box::new(change))));
+                }
+                if pending.closed {
+                    return Ok(None);
                 }
             }
             tokio::select! {_ = self.context.cancellation.cancelled()=>return Ok(None),_ = notified=>{}}

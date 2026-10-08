@@ -180,6 +180,8 @@ impl Service {
                 .map(|s| (s.record.id.clone(), s.record.generation))
                 .collect();
             if before != after {
+                state.index.epoch = index::id();
+                state.finish_watches(DocChangeKind::Availability);
                 state.invalidate_leases();
             } else {
                 state.publish(true);
@@ -207,8 +209,8 @@ impl Service {
     pub fn replace_policy(&self, policy: Policy) {
         let mut state = self.state();
         if state.index.set_policy(policy) {
+            state.finish_watches(DocChangeKind::Policy);
             state.invalidate_leases();
-            state.close_watches();
             state.image_hashes.clear();
         }
         state.index.config_error = false;
@@ -813,10 +815,10 @@ impl State {
         self.cursor_bytes = 0;
         self.publish(true);
     }
-    fn close_watches(&mut self) {
+    fn finish_watches(&mut self, cause: DocChangeKind) {
         for connection in self.connections.values_mut() {
             if let Some(w) = connection.watch.take() {
-                w.queue.close();
+                w.queue.finish(terminal_change(&self.index, &w, cause));
             }
         }
         self.native = None;
@@ -1377,13 +1379,22 @@ impl State {
             if connection.context.cancellation.is_cancelled() {
                 continue;
             }
+            if connection
+                .watch
+                .as_ref()
+                .is_some_and(|watch| watch.epoch != self.index.epoch)
+            {
+                let watch = connection.watch.take().expect("present watch");
+                watch.queue.finish(terminal_change(
+                    &self.index,
+                    &watch,
+                    DocChangeKind::Availability,
+                ));
+                continue;
+            }
             let Some(w) = &mut connection.watch else {
                 continue;
             };
-            if w.epoch != self.index.epoch {
-                w.queue.close();
-                continue;
-            }
             let mut change = empty_change(&self.index, w);
             if w.revision >= self.index.revision {
                 continue;
@@ -1421,6 +1432,34 @@ impl State {
             w.queue.push(change);
         }
     }
+}
+
+fn terminal_change(index: &Index, watch: &Watch, cause: DocChangeKind) -> DocsChanged {
+    let mut change = empty_change(index, watch);
+    change.epoch = index.epoch.clone();
+    change.resync_required = true;
+    change.changed_selected = List::new(
+        watch
+            .selected
+            .iter()
+            .map(|document| DocSelectedChange {
+                document: document.clone(),
+                kind: if index.resolve(document).is_err() {
+                    if cause == DocChangeKind::Policy {
+                        DocChangeKind::Policy
+                    } else {
+                        DocChangeKind::Removed
+                    }
+                } else {
+                    DocChangeKind::Availability
+                },
+            })
+            .collect(),
+    )
+    .expect("two selections");
+    change.history_sources_changed =
+        List::new(index.sources.keys().cloned().collect()).expect("registered sources");
+    change
 }
 
 fn empty_change(index: &Index, watch: &Watch) -> DocsChanged {
@@ -1493,6 +1532,9 @@ impl FeatureService for Service {
         Feature::Docs
     }
     fn readiness(&self) -> Readiness {
+        if !self.state().active {
+            return Readiness::Unavailable(FeatureUnavailable::NotReady);
+        }
         if cfg!(any(target_os = "linux", target_os = "macos")) {
             Readiness::Ready
         } else {
@@ -1532,7 +1574,7 @@ impl FeatureService for Service {
         let mut state = self.state();
         if &state.run == run {
             state.active = false;
-            state.close_watches();
+            state.finish_watches(DocChangeKind::Availability);
             state.invalidate_leases();
             for connection in state.connections.values() {
                 connection.context.cancellation.cancel();

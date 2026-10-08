@@ -91,3 +91,63 @@ bounded fallback when more than 200 expiry ids would be needed. The physical
 connection remains open, but an expired opaque version still fails on the server
 even if its individual expiry id was omitted. History-source ids are merged
 independently when pending metadata is coalesced.
+
+The page reachability walk is bounded by graph divergence, not just the number
+of displayed rows. A very stale or unrelated captured head can exceed the
+2 MiB output bound (roughly 51,000 SHA-1 commit lines) or the five-second deadline.
+That history request returns a bounded failure; it never guesses source labels
+or claims an incomplete page is complete. The single-pair `ancestor` helper is
+kept as an independent native positive/negative control in integration fixtures;
+normal history pages use batched `reachable` checks.
+
+## Host wiring contract
+
+P2 owns daemon registration, lifecycle and config refresh, or carries those
+hooks into its P6 integration follow-up. This P3 card supplies the tested service
+and these ports; it does not add a second central adapter.
+
+- Construct one service for the current durable `RunCtx`, before team load if
+  an authorized human requests Docs. Register the workspace working copy even
+  when no member exists. Never advertise a source that could not be safely
+  registered. Registering roots only opens directory metadata; it does not
+  start a content scan or watcher.
+- Build `Registration` only from the daemon's validated workspace/worktree
+  lifecycle. Validate stored member workdirs and protected-path rules before
+  calling `replace_sources`; do not adopt roots from strings in messages or
+  artifacts. Include stopped members whose worktrees remain registered, remove
+  retired roots when the daemon removes them, and keep a stable key for a root.
+- Supply published tips and an optional `history::Reader` from the daemon's known
+  VCS store and resolved/probed binaries. Do not reopen a member `.git` file to
+  discover authority. Unavailable safe history leaves working Docs available.
+  Refreshing a head on the same source preserves frozen history cursors.
+- Supply `configure` layers in global, user, workspace precedence, each bounded
+  to 1 MiB. Reuse the configuration scopes' authorized reads; do not disclose the
+  complete files. Call it on config refresh without reloading the team. A bad
+  update keeps the last policy; disabling clears retained data and watches.
+- Forward every disconnect/revocation to `connection_closed` and every archived
+  run to `run_archived`; cancellation must be set before awaiting worker cleanup.
+  An archived service reports not ready. A new run gets a new service/Docs epoch.
+- Register/capture through `DocsWatch`, acquire its `FeatureWatch`, queue the
+  initial reply, then forward metadata. Preserve P4's exact physical-channel
+  affinity. Ordinary Subscribe/Snapshot must not replace the Docs forwarder.
+
+This division follows the orchestrator's P3 scope decisions
+`m-c0079c86f228` and `m-425d1997213b`.
+
+Policy changes and source replacement terminate existing watches with one final
+metadata frame carrying the new Docs epoch and `resync_required`, before EOF.
+Only selections made unreadable by a policy change are marked `Policy`;
+selections whose source disappeared are marked `Removed`. Still-admitted
+selections are marked `Availability`. Logical document ids remain stable within
+the service/run across policy epochs; captures and page cursors still expire.
+Physical disconnect discards queued frames immediately.
+
+The shared client drops selections marked `Policy`/`Removed` before re-watching
+with the rest. If that request still fails because a selection became invalid,
+it may retry once with an empty selection and keep the dropped view visibly
+unavailable. This is at most two attempts per terminal frame. `disabled` or
+`unsupported_feature` stops automatic retries; only user action or a new
+connection/negotiation starts another attempt. The service rejects an unresolved
+selection atomically and preserves an existing valid watch on that failure.
+P2's forwarder must carry the final frame even when its epoch differs from the
+registered watch; it must not convert a live-connection watch end into silence.

@@ -231,7 +231,7 @@ mod tests {
         for n in 0..600 {
             fs::write(dir.path().join(format!("ignored-{n}")), "").unwrap();
         }
-        let root = Root::open(dir.path()).unwrap();
+        let root = Root::open(&dir.path().canonicalize().unwrap()).unwrap();
         let policy = Policy::default();
         let mut scan = Scan::new(&root).unwrap();
         assert!(!scan.step(&root, &policy).unwrap().done);
@@ -253,7 +253,7 @@ mod tests {
     #[test]
     fn k04_descriptor_reads_refuse_symlinks_hardlinks_pipes_and_replaced_roots() {
         let dir = tempfile::tempdir().unwrap();
-        let base = dir.path().join("root");
+        let base = dir.path().canonicalize().unwrap().join("root");
         fs::create_dir(&base).unwrap();
         fs::write(dir.path().join("outside"), "outside-secret").unwrap();
         fs::write(base.join("good.md"), "# Good").unwrap();
@@ -265,7 +265,14 @@ mod tests {
         assert_eq!(unsafe { libc::mkfifo(fifo.as_ptr(), 0o600) }, 0);
         let root = Root::open(&base).unwrap();
         let policy = Policy::default();
-        for name in ["link.md", "linked-dir/outside", "hard.md", "pipe.md"] {
+        let _socket = std::os::unix::net::UnixListener::bind(base.join("socket.md")).unwrap();
+        for name in [
+            "link.md",
+            "linked-dir/outside",
+            "hard.md",
+            "pipe.md",
+            "socket.md",
+        ] {
             assert!(
                 root.read(&Relative::new(name).unwrap(), &policy, 256)
                     .is_err(),
@@ -281,6 +288,11 @@ mod tests {
         assert!(matches!(
             root.read(&Relative::new("good.md").unwrap(), &policy, 2),
             Err(DocFailureCode::TooLarge)
+        ));
+        let devices = Root::open(&std::path::Path::new("/dev").canonicalize().unwrap()).unwrap();
+        assert!(matches!(
+            devices.read(&Relative::new("null").unwrap(), &policy, 256),
+            Err(DocFailureCode::ForbiddenPath)
         ));
         fs::rename(&base, dir.path().join("old")).unwrap();
         fs::create_dir(&base).unwrap();
@@ -489,7 +501,7 @@ mod save_tests {
         let a = vec![b'a'; 64 * 1024];
         let b = vec![b'b'; 64 * 1024];
         std::fs::write(dir.path().join("doc.md"), &a).unwrap();
-        let root = Root::open(dir.path()).unwrap();
+        let root = Root::open(&dir.path().canonicalize().unwrap()).unwrap();
         let path = dir.path().to_owned();
         let aa = a.clone();
         let bb = b.clone();
