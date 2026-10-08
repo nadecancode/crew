@@ -259,6 +259,15 @@ Every step records its action boundary, request offsets, first subsequent
 request, input/cache-read/uncached tokens and estimated cost. This is temporal
 attribution to a controlled step, not proof of a provider-internal cause.
 Native declarations such as `prefix_mismatch` are preserved as declarations.
+After a run completes, `python3 -B scripts/cache/prompt_metadata.py RUN/report.json`
+prints a separate numeric artifact for the exact selected native sessions. It
+hashes Codex's persisted base instructions, dynamic-tools array and
+system/developer message content without exporting any body or account ID.
+The artifact distinguishes three layers: generated Crew briefing evidence in
+the run report; persisted native surfaces; and separate synthetic rendering
+probes, which are not captured by a paid run. Claude's full effective prefix
+remains unknown. Neither a file digest nor a persisted-message digest proves
+provider wire-prefix equality or fingerprints the full MCP/skills catalog.
 Runs still stop at the $2 observed upper estimate under the approximately $3
 budget, and the long waits do not bypass failure or cost checks. The scripted
 observer never calls a provider and is excluded from token totals. All newly
