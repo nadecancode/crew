@@ -64,7 +64,11 @@ fn trusted(port: u16) -> Arc<GatewayProfile> {
 }
 
 fn failure(error: transport::GatewayError) -> GatewayError {
-    let ClientReason { code, message } = error.reason();
+    let ClientReason {
+        code,
+        message,
+        details: _,
+    } = error.reason();
     GatewayError::Failure { code, message }
 }
 

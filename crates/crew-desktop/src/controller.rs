@@ -567,6 +567,7 @@ impl Controller {
         let result = self.service.borrow().as_ref().map_or_else(
             || {
                 Err(ClientReason {
+                    details: None,
                     code: "closed".into(),
                     message: "The client service is closed.".into(),
                 })

@@ -1,0 +1,111 @@
+{
+  "base": "394a189ece5e5b6f8e7a3818b725741121121824",
+  "source_checkpoint": "d3b8dc728029a68bf7a397e323130a55726db554",
+  "validated_worktree": true,
+  "replay": [
+    {
+      "source": "5cae9dfb",
+      "replay": "f20bc7f4",
+      "patch_id": "692160244a065f5648bc5ce643b891363f835d4c"
+    },
+    {
+      "source": "724d9b95",
+      "replay": "dbecb051",
+      "patch_id": "44643102b4ead158545420da0f6599f245a31f94"
+    },
+    {
+      "source": "6845aea6",
+      "replay": "29cc8565",
+      "patch_id": "8b3dc079bb8b76ad598284a6ef1e377969a51ae4"
+    },
+    {
+      "source": "0c07f932",
+      "replay": "5de29f6a",
+      "patch_id": "05c5629e9f29fffdfa30a8336ebb45e3456798eb"
+    },
+    {
+      "source": "e9fb6ec7",
+      "replay": "604c3b3d",
+      "patch_id": "9f8ea82c696d0d173b84e8e0df296c422349988e"
+    },
+    {
+      "source": "6e39262d",
+      "replay": "b4cf0db0",
+      "patch_id": "5c3a6c006a3dcbd469c31df1a91054ede5b015b5"
+    }
+  ],
+  "toolchain": "rustc 1.93.1 (01f6ddf75 2026-02-11)",
+  "msrv": "1.82.0",
+  "native_binary": {
+    "path": "target/features-p4/crew",
+    "sha256": "c8ce44acb63a0ab9651ae513600f19dd098d8c9dd5adab19826498c53f6557db"
+  },
+  "apple_execution": "deferred",
+  "gates": [
+    {
+      "name": "final-build",
+      "path": "target/features-p4/final-build.log",
+      "sha256": "f406b6249677aa697c38ca81d13331322903a53dbf6ac6fc19203ff8f2399e0e",
+      "passed": 0,
+      "failed": 0,
+      "ignored": 0
+    },
+    {
+      "name": "final-native",
+      "path": "target/features-p4/final-native.log",
+      "sha256": "e8ba630f39242121774d2e09bd77bc07304ee658cd0162d8445299f1f9f790fb",
+      "passed": 891,
+      "failed": 0,
+      "ignored": 2
+    },
+    {
+      "name": "final-clients",
+      "path": "target/features-p4/final-clients.log",
+      "sha256": "0613ff4bf86532aebd269dcf4951fc99097f8a4441c15ba2a72f5239f5323ba9",
+      "passed": 294,
+      "failed": 0,
+      "ignored": 0
+    },
+    {
+      "name": "final-clippy",
+      "path": "target/features-p4/final-clippy.log",
+      "sha256": "c7d78a4699e99945d30693d3ca021c2150cff34ce496459318824db9fc65f7b5",
+      "passed": 0,
+      "failed": 0,
+      "ignored": 0
+    },
+    {
+      "name": "final-fmt",
+      "path": "target/features-p4/final-fmt.log",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "passed": 0,
+      "failed": 0,
+      "ignored": 0
+    },
+    {
+      "name": "final-wasm",
+      "path": "target/features-p4/final-wasm.log",
+      "sha256": "03804b36ede45a70a0599129b2b1d5037c11dabe063ca9720d407c92a4fcbe65",
+      "passed": 0,
+      "failed": 0,
+      "ignored": 0
+    },
+    {
+      "name": "final-msrv",
+      "path": "target/features-p4/final-msrv.log",
+      "sha256": "49aef62f6c57e31ef086b7eafcd9e719f4f094d9c13172e8f22d541fa9ddfd0c",
+      "passed": 0,
+      "failed": 0,
+      "ignored": 0
+    },
+    {
+      "name": "final-default",
+      "path": "target/features-p4/final-default.log",
+      "sha256": "ca45a40cc354e8f5ac02296de7c3a0e46d2f183f31d32f8f8eb467d631a8903f",
+      "passed": 0,
+      "failed": 0,
+      "ignored": 0
+    }
+  ],
+  "patch_id_command": "git show --pretty=format: --no-ext-diff <commit> | git patch-id --stable"
+}

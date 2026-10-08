@@ -184,6 +184,7 @@ fn device_names_use_the_connector_label_bounds() {
 #[test]
 fn failure_copy_uses_safe_codes_and_generic_remote_refusals() {
     let reason = |code: &str| ClientReason {
+        details: None,
         code: code.into(),
         message: "raw detail must not be shown".into(),
     };

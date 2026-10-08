@@ -40,7 +40,7 @@ fn open(driver: &mut Driver, effect: &HostEffect) -> HostUpdate {
         context.scope.workspace_id = expected.workspace_id.clone();
         context.grant.workspace_ids = vec![expected.workspace_id.clone()];
     }
-    driver
+    let opened = driver
         .handle(HostEvent::WorkspaceOpened {
             channel_id: *channel_id,
             context,
@@ -51,7 +51,26 @@ fn open(driver: &mut Driver, effect: &HostEffect) -> HostUpdate {
                 project: None,
             },
         })
-        .unwrap()
+        .unwrap();
+    let discovery = opened.effects.iter().find_map(|effect| match effect {
+        HostEffect::Send {
+            channel_id,
+            request_id,
+            text,
+        } if text.contains("features_negotiate") => Some((*channel_id, *request_id)),
+        _ => None,
+    });
+    if let Some((channel_id, id)) = discovery {
+        driver
+            .handle(HostEvent::Frame {
+                channel_id,
+                text: json!({"id":id,"error":{"code":"invalid","message":"old fixture daemon"}})
+                    .to_string(),
+            })
+            .unwrap()
+    } else {
+        opened
+    }
 }
 
 fn state_barrier(driver: &mut Driver, connecting: &HostUpdate) -> HostUpdate {

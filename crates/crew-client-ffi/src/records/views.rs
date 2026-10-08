@@ -4,6 +4,7 @@ use crew_client::api as client;
 use crew_protocol::{rpc, types};
 use serde_json::Value;
 
+use super::features::{FeatureAvailability, FeatureResourceValue, FeatureWatchState};
 use super::shared::*;
 
 /// JSON null is absence; other metadata is retained as deterministic JSON text.
@@ -306,6 +307,7 @@ impl From<client::EventPage> for EventPage {
 
 #[derive(Clone, Debug, PartialEq, uniffi::Enum)]
 pub enum ResourceValue {
+    Feature(FeatureResourceValue),
     TaskCard(TaskCard),
     Message(Option<Message>),
     Event(Option<Event>),
@@ -321,6 +323,7 @@ pub enum ResourceValue {
 impl From<client::ResourceValue> for ResourceValue {
     fn from(value: client::ResourceValue) -> Self {
         match value {
+            client::ResourceValue::Feature(value) => Self::Feature(value),
             client::ResourceValue::TaskCard(value) => Self::TaskCard(value),
             client::ResourceValue::Message(value) => Self::Message(value.map(Into::into)),
             client::ResourceValue::Event(value) => Self::Event(value.map(Into::into)),
@@ -439,6 +442,12 @@ boxed_value!(BoxedIntent, ActionIntent);
 
 #[derive(Clone, Debug, PartialEq, uniffi::Enum)]
 pub enum ViewPayload {
+    Features(FeatureAvailability),
+    FeatureWatches(Vec<FeatureWatchState>),
+    Epic(BoxedEvidence),
+    Asides(BoxedEvidence),
+    Docs(BoxedEvidence),
+    UsageMetrics(BoxedEvidence),
     Availability(ActionAvailability),
     Overview(BoxedOverview),
     Team(BoxedTeam),
@@ -455,6 +464,14 @@ pub enum ViewPayload {
 impl From<client::ViewPayload> for ViewPayload {
     fn from(value: client::ViewPayload) -> Self {
         match value {
+            client::ViewPayload::Features(value) => Self::Features(value),
+            client::ViewPayload::FeatureWatches(value) => Self::FeatureWatches(value),
+            client::ViewPayload::Epic(value) => Self::Epic(Box::new((*value).into())),
+            client::ViewPayload::Asides(value) => Self::Asides(Box::new((*value).into())),
+            client::ViewPayload::Docs(value) => Self::Docs(Box::new((*value).into())),
+            client::ViewPayload::UsageMetrics(value) => {
+                Self::UsageMetrics(Box::new((*value).into()))
+            }
             client::ViewPayload::Availability(value) => Self::Availability(value),
             client::ViewPayload::Overview(value) => Self::Overview(value),
             client::ViewPayload::Team(value) => Self::Team(value),

@@ -281,9 +281,14 @@ fn operation_notice(
 ) -> OperationNotice {
     let (kind, reason, attachment_id) = match outcome {
         OperationOutcome::Succeeded { .. } => (OperationOutcomeKind::Success, None, None),
-        OperationOutcome::Rejected { code, message } => (
+        OperationOutcome::Rejected {
+            code,
+            message,
+            details,
+        } => (
             OperationOutcomeKind::Rejected,
             Some(ClientReason {
+                details: details.clone(),
                 code: code.clone(),
                 message: message.clone(),
             }),
@@ -394,7 +399,7 @@ pub fn opened(driver: &mut Driver, open: &HostEffect) -> HostUpdate {
         context.scope.daemon_started_at_ms = None;
         context.grant.workspace_ids = vec![scope.workspace_id.clone()];
     }
-    driver
+    let opened = driver
         .handle(HostEvent::WorkspaceOpened {
             channel_id: *channel_id,
             context,
@@ -405,7 +410,26 @@ pub fn opened(driver: &mut Driver, open: &HostEffect) -> HostUpdate {
                 project: None,
             },
         })
-        .unwrap()
+        .unwrap();
+    let discovery = opened.effects.iter().find_map(|effect| match effect {
+        HostEffect::Send {
+            channel_id,
+            request_id,
+            text,
+        } if text.contains("features_negotiate") => Some((*channel_id, *request_id)),
+        _ => None,
+    });
+    if let Some((channel_id, id)) = discovery {
+        driver
+            .handle(HostEvent::Frame {
+                channel_id,
+                text: json!({"id":id,"error":{"code":"invalid","message":"old fixture daemon"}})
+                    .to_string(),
+            })
+            .unwrap()
+    } else {
+        opened
+    }
 }
 
 pub fn send(update: &HostUpdate, method: &str) -> (u64, u64, Value) {
@@ -494,4 +518,15 @@ pub fn attach(driver: &mut Driver, scope: &ClientScope, agent: &str) -> (u64, u6
     let update = reply(driver, channel, id, json!({"attached":agent}));
     assert_eq!(update.notice.outcomes[0].operation_id, operation_id);
     (operation_id, channel)
+}
+
+pub fn legacy_discovery(driver: &mut Driver, opened: HostUpdate) -> HostUpdate {
+    let (channel_id, id, _) = send(&opened, "features_negotiate");
+    driver
+        .handle(HostEvent::Frame {
+            channel_id,
+            text: json!({"id":id,"error":{"code":"invalid","message":"old fixture daemon"}})
+                .to_string(),
+        })
+        .unwrap()
 }

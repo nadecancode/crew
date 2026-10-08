@@ -1,0 +1,1 @@
+["snapshot","subscribe","agents_list","tasks_list","task_get","history","message_get","inbox","events","agent_output","agent_transcript","git_status","git_diff","send","answer","agent_pause","agent_resume","agent_compact","agent_restart","agent_restart_fresh","agent_kill","agent_set_model","resume","shutdown","models_list","agent_input","attach","attach_input","attach_resize"]
