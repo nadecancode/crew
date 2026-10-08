@@ -324,6 +324,232 @@ pub struct Agent {
     pub usage: Option<Usage>,
     #[serde(default)]
     pub error: Option<String>,
+    /// The member's effective toolbox, when it has one. Absent for an older
+    /// daemon, and left out of the wire form when there is none.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub toolbox: Option<AgentToolbox>,
+}
+
+/// A member's effective toolbox as every dashboard shows it
+/// (`notes/toolboxes.md` §Display). Secret values are never in it: a
+/// reference reads `$NAME`, or `$NAME (not set)`, in an item's `detail`.
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq, Default)]
+pub struct AgentToolbox {
+    /// SHA-256 of the canonical effective toolbox, lowercase hex. Shown
+    /// shortened to 12 characters.
+    pub fingerprint: String,
+    /// The configured toolbox's fingerprint, when a restart would change the
+    /// active one.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pending_fingerprint: Option<String>,
+    /// SHA-256 of the MCP tool definitions served to the session. Absent
+    /// while they are not pinned (crew's MCP proxy pending).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub definition_digest: Option<String>,
+    /// Tools those definitions describe, when known.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tool_count: Option<u32>,
+    /// Size of those definitions in bytes, when known.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub definition_bytes: Option<u64>,
+    /// Configured items in canonical order: kind, then name.
+    #[serde(default)]
+    pub items: Vec<ToolboxItem>,
+    /// The runtime's own configuration sources and what each contributes.
+    #[serde(default)]
+    pub sources: Vec<ToolboxSource>,
+}
+
+/// One configured toolbox item and its state on the member's runtime.
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
+pub struct ToolboxItem {
+    pub kind: ToolboxItemKind,
+    pub name: String,
+    /// `default`, `bundle:<name>` or `member`.
+    pub origin: String,
+    /// The member does not start unless this item is Active.
+    #[serde(default)]
+    pub required: bool,
+    pub status: ToolboxItemStatus,
+    /// The command or URL, the references (`$NAME`, `$NAME (not set)`), the
+    /// tool count, or why the item is not active.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub detail: Option<String>,
+}
+
+#[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[serde(rename_all = "snake_case")]
+pub enum ToolboxItemKind {
+    Mcp,
+    Skills,
+    Plugins,
+    Subagents,
+    Hooks,
+    /// A kind this client does not know yet.
+    #[serde(other)]
+    Unknown,
+}
+
+impl ToolboxItemKind {
+    /// The heading of the group this kind is shown under.
+    pub fn heading(self) -> &'static str {
+        match self {
+            ToolboxItemKind::Mcp => "MCP servers",
+            ToolboxItemKind::Skills => "Skills",
+            ToolboxItemKind::Plugins => "Plugins",
+            ToolboxItemKind::Subagents => "Subagents",
+            ToolboxItemKind::Hooks => "Hooks",
+            ToolboxItemKind::Unknown => "Other",
+        }
+    }
+}
+
+/// An item's state: a code for clients to act on and the exact words every
+/// dashboard shows (`Not available on Codex`, `Needs $GITHUB_TOKEN`).
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
+pub struct ToolboxItemStatus {
+    pub code: ToolboxItemCode,
+    pub text: String,
+}
+
+#[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq, Hash)]
+#[serde(rename_all = "snake_case")]
+pub enum ToolboxItemCode {
+    Planned,
+    Active,
+    NotAvailable,
+    NotApplicable,
+    Needs,
+    Blocked,
+    Shadowed,
+    FailedPreflight,
+    FailedInSession,
+    #[serde(other)]
+    Unknown,
+}
+
+/// One runtime source of configuration for the member, and what it adds.
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
+pub struct ToolboxSource {
+    pub origin: ToolboxSourceOrigin,
+    /// The kind of configuration this row is about, as the team file names
+    /// it (`mcp`, `skills`, `plugins`, `subagents`, `hooks`, `settings`,
+    /// `memory`); absent when the row covers the whole source.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub kind: Option<String>,
+    /// What the source is, in words: `Your Claude Code configuration`.
+    pub label: String,
+    pub status: ToolboxSourceStatus,
+    /// The entries concerned (the servers disabled, the files that cannot be
+    /// excluded), when the status names them.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub names: Vec<String>,
+    /// Why, for a source that cannot be excluded or loaded separately.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub detail: Option<String>,
+}
+
+#[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq, Hash)]
+#[serde(rename_all = "snake_case")]
+pub enum ToolboxSourceOrigin {
+    Operator,
+    Project,
+    System,
+    Managed,
+    #[serde(other)]
+    Unknown,
+}
+
+/// A source's state: a code and the exact words shown (`Not used`,
+/// `Used: MCP servers`, `Cannot be excluded on Codex`).
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
+pub struct ToolboxSourceStatus {
+    pub code: ToolboxSourceCode,
+    pub text: String,
+}
+
+#[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq, Hash)]
+#[serde(rename_all = "snake_case")]
+pub enum ToolboxSourceCode {
+    NotUsed,
+    Used,
+    Disabled,
+    NotAvailableSeparately,
+    CannotBeExcluded,
+    #[serde(other)]
+    Unknown,
+}
+
+impl AgentToolbox {
+    /// The fingerprint as shown: its first 12 characters.
+    pub fn short_fingerprint(&self) -> &str {
+        short_hex(&self.fingerprint)
+    }
+
+    /// The summary line: `Toolbox 3f9a0c21e7b4 · 4 items · 1 not available`.
+    /// Items that are not applicable count as items but not as a problem.
+    pub fn summary(&self) -> String {
+        let count = self.items.len();
+        let mut out = format!(
+            "Toolbox {} · {count} item{}",
+            self.short_fingerprint(),
+            if count == 1 { "" } else { "s" }
+        );
+        let inactive = self
+            .items
+            .iter()
+            .filter(|item| {
+                !matches!(
+                    item.status.code,
+                    ToolboxItemCode::Active | ToolboxItemCode::Planned | ToolboxItemCode::NotApplicable
+                )
+            })
+            .count();
+        if inactive > 0 {
+            out.push_str(&format!(" · {inactive} not available"));
+        }
+        out
+    }
+
+    /// The MCP definitions are not pinned yet: some item is an MCP server
+    /// and no definition digest is known.
+    pub fn definitions_unpinned(&self) -> bool {
+        self.definition_digest.is_none()
+            && self.items.iter().any(|item| item.kind == ToolboxItemKind::Mcp)
+    }
+
+    /// Why the member needs attention, if it does: a pending change, or a
+    /// required item that is not active.
+    pub fn attention(&self) -> Option<String> {
+        if self.pending_fingerprint.is_some() {
+            return Some(TOOLBOX_PENDING.to_string());
+        }
+        self.items
+            .iter()
+            .find(|item| item.required && item.status.code != ToolboxItemCode::Active)
+            .map(|item| format!("Required {}: {}", item.name, item.status.text))
+    }
+}
+
+/// The notice shown when a restart would change a member's toolbox.
+pub const TOOLBOX_PENDING: &str = "Toolbox changed: restart to apply";
+/// Shown while crew's MCP proxy has not pinned a member's MCP definitions.
+pub const TOOLBOX_UNPINNED: &str = "MCP definitions not pinned (proxy pending)";
+
+/// An item's origin in words: `Team default`, `Bundle web`, `Member`.
+pub fn toolbox_origin_label(origin: &str) -> String {
+    match origin {
+        "default" => "Team default".to_string(),
+        "member" => "Member".to_string(),
+        other => match other.strip_prefix("bundle:") {
+            Some(name) => format!("Bundle {name}"),
+            None => other.to_string(),
+        },
+    }
+}
+
+fn short_hex(hex: &str) -> &str {
+    hex.get(..12).unwrap_or(hex)
 }
 
 impl Agent {
@@ -641,5 +867,76 @@ mod tests {
         let m = msg("a", "b");
         let v: Value = serde_json::to_value(&m).unwrap();
         assert_eq!(v["type"], "message");
+    }
+
+    fn toolbox_item(name: &str, required: bool, code: ToolboxItemCode, text: &str) -> ToolboxItem {
+        ToolboxItem {
+            kind: ToolboxItemKind::Mcp,
+            name: name.into(),
+            origin: "bundle:web".into(),
+            required,
+            status: ToolboxItemStatus { code, text: text.into() },
+            detail: None,
+        }
+    }
+
+    #[test]
+    fn a_toolbox_is_left_out_of_the_wire_form_until_a_member_has_one() {
+        let value = serde_json::json!({
+            "id": "qa", "name": "qa", "role": "", "status": "idle", "runtime": "claude",
+            "workdir": "", "backend": "pty", "last_activity_at": 0
+        });
+        let agent: Agent = serde_json::from_value(value).unwrap();
+        assert_eq!(agent.toolbox, None);
+        assert!(serde_json::to_value(&agent).unwrap().get("toolbox").is_none());
+    }
+
+    #[test]
+    fn unknown_toolbox_codes_from_a_newer_daemon_still_decode() {
+        let item: ToolboxItem = serde_json::from_value(serde_json::json!({
+            "kind": "widgets", "name": "x", "origin": "member",
+            "status": { "code": "quarantined", "text": "Quarantined" }
+        }))
+        .unwrap();
+        assert_eq!(item.kind, ToolboxItemKind::Unknown);
+        assert_eq!(item.status.code, ToolboxItemCode::Unknown);
+        assert!(!item.required);
+        let source: ToolboxSource = serde_json::from_value(serde_json::json!({
+            "origin": "cloud", "label": "Your Codex configuration",
+            "status": { "code": "vanished", "text": "Gone" }
+        }))
+        .unwrap();
+        assert_eq!(source.origin, ToolboxSourceOrigin::Unknown);
+        assert_eq!(source.status.code, ToolboxSourceCode::Unknown);
+        assert!(source.names.is_empty());
+    }
+
+    #[test]
+    fn the_toolbox_summary_counts_items_that_are_not_available() {
+        let mut toolbox = AgentToolbox {
+            fingerprint: "3f9a0c21e7b4d5f6a7b8c9d0e1f2a3b4c5d6e7f8091a2b3c4d5e6f708192a3b4".into(),
+            items: vec![
+                toolbox_item("context7", false, ToolboxItemCode::Active, "Active"),
+                toolbox_item("playwright", true, ToolboxItemCode::Active, "Active"),
+                toolbox_item("lint", false, ToolboxItemCode::NotApplicable, "Not applicable"),
+                toolbox_item("github", false, ToolboxItemCode::Needs, "Needs "),
+            ],
+            ..AgentToolbox::default()
+        };
+        assert_eq!(toolbox.summary(), "Toolbox 3f9a0c21e7b4 · 4 items · 1 not available");
+        assert!(toolbox.definitions_unpinned());
+        assert_eq!(toolbox.attention(), None);
+        toolbox.items[1].status = ToolboxItemStatus {
+            code: ToolboxItemCode::FailedPreflight,
+            text: "Failed preflight".into(),
+        };
+        assert_eq!(toolbox.attention().as_deref(), Some("Required playwright: Failed preflight"));
+        toolbox.pending_fingerprint = Some("ab".into());
+        assert_eq!(toolbox.attention().as_deref(), Some(TOOLBOX_PENDING));
+        toolbox.definition_digest = Some("cd".into());
+        assert!(!toolbox.definitions_unpinned());
+        assert_eq!(toolbox_origin_label("bundle:web"), "Bundle web");
+        assert_eq!(toolbox_origin_label("default"), "Team default");
+        assert_eq!(toolbox_origin_label("member"), "Member");
     }
 }
