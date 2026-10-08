@@ -1,0 +1,79 @@
+{
+  "project": "toolbox-resolution",
+  "toolboxes": {
+    "base": {
+      "mcp": {
+        "context7": {
+          "command": [
+            "@PYTHON@",
+            "@ROOT@/mcp_stub.py"
+          ],
+          "cwd": ".",
+          "env": {
+            "FIXTURE_PUBLIC": {
+              "value": "public-fixture-value"
+            }
+          }
+        }
+      }
+    }
+  },
+  "defaults": {
+    "toolbox": {
+      "include": [
+        "base"
+      ],
+      "exclude": [
+        "mcp.context7"
+      ],
+      "mcp": {
+        "docs": {
+          "command": [
+            "@PYTHON@",
+            "@ROOT@/mcp_stub.py"
+          ],
+          "env": {
+            "ORIGINAL": {
+              "value": "not inherited"
+            }
+          },
+          "required": true
+        }
+      },
+      "inherit": {
+        "operator": "all",
+        "project": "none"
+      },
+      "strict": true
+    }
+  },
+  "orchestrator": {
+    "agent": false
+  },
+  "agents": [
+    {
+      "id": "readd",
+      "toolbox": {
+        "include": [
+          "base"
+        ]
+      }
+    },
+    {
+      "id": "replace",
+      "toolbox": {
+        "mcp": {
+          "docs": {
+            "url": "http://127.0.0.1:9/mcp"
+          }
+        }
+      }
+    },
+    {
+      "id": "reset",
+      "toolbox": {
+        "reset": true
+      }
+    }
+  ]
+}

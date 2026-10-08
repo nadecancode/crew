@@ -74,6 +74,12 @@ restart {id} fresh or move it to another CLI."
         self.transcript_housekeeping().await;
         self.temporary_housekeeping().await;
 
+        self.task_health_at(now, &limits).await;
+    }
+
+    /// Task health uses the tick's captured time, so the reminder boundary and
+    /// retry budget can be tested without sleeping or changing their defaults.
+    async fn task_health_at(&self, now: i64, limits: &crew_core::config::Limits) {
         enum Todo {
             Remind {
                 agent: String,
@@ -197,6 +203,96 @@ waiting on a teammate."
                         .await;
                 }
             }
+        }
+    }
+}
+
+#[cfg(test)]
+mod obligation_clock_tests {
+    use super::*;
+    use crew_core::{Agent, Task};
+    use serde_json::json;
+
+    async fn fixture(
+        status: TaskStatus,
+    ) -> (
+        tempfile::TempDir,
+        crate::daemon::Running,
+        tokio::sync::mpsc::Receiver<crew_core::rpc::ServerFrame>,
+    ) {
+        let temp = tempfile::tempdir().unwrap();
+        let running = crate::daemon::start(crate::daemon::DaemonOptions {
+            workspace: temp.path().into(),
+            crew_bin: std::env::current_exe().unwrap(),
+            pin: None,
+        })
+        .await
+        .unwrap();
+        let daemon = &running.daemon;
+        let agent: Agent = serde_json::from_value(json!({
+            "id":"owner", "name":"owner", "role":"worker", "status":"idle",
+            "runtime":"claude", "workdir":temp.path(), "backend":"pty", "last_activity_at":0
+        }))
+        .unwrap();
+        let task: Task = serde_json::from_value(json!({
+            "id":"card", "title":"Card", "assigned_agent":"owner", "status":status,
+            "created_at":0, "started_at":1
+        }))
+        .unwrap();
+        daemon.model().agents.push(agent);
+        daemon.model().tasks.push(task);
+        daemon.model().rt("owner").ready = true;
+        daemon.model().rt("owner").idle_since = Some(0);
+        let (tx, rx) = tokio::sync::mpsc::channel(16);
+        daemon
+            .listeners
+            .lock()
+            .unwrap()
+            .insert("owner".into(), crate::daemon::Listener { conn: 1, tx });
+        (temp, running, rx)
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn abandoned_work_keeps_the_ninety_second_three_attempt_reminder_policy() {
+        let (_temp, running, mut receiver) = fixture(TaskStatus::Working).await;
+        let daemon = &running.daemon;
+        let limits = crew_core::config::Limits::default();
+        assert_eq!((limits.idle_nudge_secs, limits.max_nudges), (90, 3));
+        for attempt in 1..=3 {
+            let due = attempt * 90_000;
+            daemon.task_health_at(due - 1, &limits).await;
+            assert!(receiver.try_recv().is_err());
+            daemon.task_health_at(due, &limits).await;
+            let frame = serde_json::to_string(&receiver.try_recv().unwrap()).unwrap();
+            assert!(frame.contains("Reminder: task"));
+            assert!(frame.contains("card"));
+            daemon.task_health_at(due, &limits).await;
+            assert!(receiver.try_recv().is_err());
+        }
+        daemon.task_health_at(360_000, &limits).await;
+        assert!(receiver.try_recv().is_err());
+        let owner = daemon.agent("owner").unwrap();
+        assert_eq!(owner.status, AgentStatus::Blocked);
+        assert_eq!(owner.block_kind.as_deref(), Some("unresponsive"));
+        assert_eq!(
+            daemon.model().task("card").unwrap().status,
+            TaskStatus::Working
+        );
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn parked_and_review_cards_never_earn_idle_reminders() {
+        for status in [TaskStatus::Waiting, TaskStatus::Review] {
+            let (_temp, running, mut receiver) = fixture(status).await;
+            let daemon = &running.daemon;
+            for now in [89_999, 90_000, 180_000, 270_000, 360_000] {
+                daemon
+                    .task_health_at(now, &crew_core::config::Limits::default())
+                    .await;
+                assert!(receiver.try_recv().is_err());
+                assert_eq!(daemon.model().task("card").unwrap().status, status);
+            }
+            assert_eq!(daemon.model().rt("owner").nudges, 0);
         }
     }
 }

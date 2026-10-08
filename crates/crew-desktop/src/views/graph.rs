@@ -29,6 +29,10 @@ pub struct Node {
     pub title: String,
     pub status: Option<(String, Tone)>,
     pub lines: Vec<String>,
+    /// Why the entity needs attention. The graph has no attention marker, so
+    /// it adds none: the reasons lead the accessible description, and the
+    /// list row shows them (notes/toolboxes.md §Display).
+    pub warnings: Vec<String>,
     pub layer: u32,
     /// Accessible name, matching the list row for the same entity.
     pub label: String,
@@ -373,9 +377,14 @@ fn node_widget(node: &Node, inner: &Weak<Inner>) -> gtk::Widget {
         }
     };
     widget.add_css_class("crew-graph-node");
+    let description = if node.warnings.is_empty() {
+        node.relations.clone()
+    } else {
+        format!("{}. {}", node.warnings.join(". "), node.relations)
+    };
     widget.update_property(&[
         gtk::accessible::Property::Label(&node.label),
-        gtk::accessible::Property::Description(&node.relations),
+        gtk::accessible::Property::Description(&description),
     ]);
     widget
 }

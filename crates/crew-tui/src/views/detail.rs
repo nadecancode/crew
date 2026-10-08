@@ -2,7 +2,7 @@
 //! live capture of its terminal (scrolled up: the transcript of its
 //! session), and anything that went wrong.
 
-use crew_core::types::{Agent, Message, MessageType, RuntimeKind, Task};
+use crew_core::types::{Agent, AgentToolbox, Message, MessageType, RuntimeKind, Task};
 use crew_core::util::{fmt_clock, fmt_datetime, fmt_elapsed, one_line, printable};
 use ratatui::buffer::Buffer;
 use ratatui::layout::{Constraint, Layout, Rect};
@@ -19,17 +19,20 @@ use crate::widgets::canvas::{fill_row, put_str};
 use crate::widgets::text::{fit, printable_lines, width};
 
 const HINTS: &str =
-    "esc back · tab next agent · click terminal to type · f full · i type · m message · r refresh · d diff · p pause · R restart · k kill";
+    "esc back · tab next agent · click terminal to type · f full · i type · m message · r refresh · d diff · T toolbox · p pause · R restart · k kill";
 /// While keys go to the agent's terminal.
 const TYPING_HINTS: &str =
     "ctrl-] stop typing (right-click too) · every other key goes to the agent";
 
 /// What a click at column `x`, row `y` lands on: the terminal pane, or
-/// nothing of interest.
+/// nothing of interest. The toolbox pane in its place is read-only: a click
+/// there types into nothing.
 pub fn hit(app: &App, x: u16, y: u16) -> Option<super::dashboard::Hit> {
     let pane = app.detail.terminal_rect.get();
-    (app.agent(&app.detail.agent).is_some() && pane.contains(ratatui::layout::Position { x, y }))
-        .then_some(super::dashboard::Hit::Terminal)
+    (!app.detail.show_toolbox
+        && app.agent(&app.detail.agent).is_some()
+        && pane.contains(ratatui::layout::Position { x, y }))
+    .then_some(super::dashboard::Hit::Terminal)
 }
 
 pub fn render(buf: &mut Buffer, area: Rect, app: &App, theme: &Theme, now: i64) {
@@ -284,6 +287,34 @@ fn info_lines(app: &App, agent: &Agent, theme: &Theme, now: i64) -> Vec<Line<'st
         }
         lines.push(field("fallback", value, theme.fg(theme.warn), theme));
     }
+    // The effective toolbox: the summary and a pending change here; `T`
+    // shows the rest in the terminal pane (notes/toolboxes.md §Display).
+    if let Some(toolbox) = &agent.toolbox {
+        // `3f9a0c21e7b4 · 4 items`, then what is not available below it: the
+        // panel can be 36 columns wide.
+        let summary = toolbox_summary(toolbox);
+        let mut parts = summary.splitn(3, " · ");
+        let head = [parts.next(), parts.next()].into_iter().flatten();
+        lines.push(field(
+            "toolbox",
+            head.collect::<Vec<_>>().join(" · "),
+            text,
+            theme,
+        ));
+        if let Some(rest) = parts.next() {
+            lines.push(field("", rest, theme.fg(theme.warn), theme));
+        }
+        if toolbox.pending_fingerprint.is_some() {
+            lines.push(Line::from(Span::styled(
+                format!(" {} (R restart)", crew_core::types::TOOLBOX_PENDING),
+                theme.fg(theme.warn),
+            )));
+        }
+        lines.push(Line::from(Span::styled(
+            " T shows its items, sources and digest",
+            theme.fg(theme.dim),
+        )));
+    }
     let backend = match &agent.backend_ref {
         Some(reference) => format!("{} · {reference}", agent.backend),
         None => agent.backend.clone(),
@@ -409,6 +440,187 @@ fn info_lines(app: &App, agent: &Agent, theme: &Theme, now: i64) -> Vec<Line<'st
         lines.push(field("compact", compaction, text, theme));
     }
     lines
+}
+
+/// `3f9a0c21e7b4 · 4 items · 1 not available`: the summary after its label.
+fn toolbox_summary(toolbox: &AgentToolbox) -> String {
+    let summary = toolbox.summary();
+    summary
+        .strip_prefix("Toolbox ")
+        .unwrap_or(&summary)
+        .to_string()
+}
+
+/// How a toolbox pane row is drawn.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum ToolboxTone {
+    Heading,
+    Text,
+    Muted,
+    Dim,
+    Warn,
+}
+
+/// The toolbox pane (`T`): the summary, a pending change, the items by kind,
+/// the runtime's sources and the definition facts, wrapped to `cols` so long
+/// commands and URLs stay whole. Groups without entries are left out; status
+/// is always the daemon's words (notes/toolboxes.md §Display).
+pub(crate) fn toolbox_rows(toolbox: &AgentToolbox, cols: usize) -> Vec<(String, ToolboxTone)> {
+    use crew_core::types::{
+        toolbox_origin_label, ToolboxItemCode, ToolboxItemKind, ToolboxSourceCode, TOOLBOX_PENDING,
+        TOOLBOX_UNPINNED,
+    };
+    use ToolboxTone::*;
+    let mut rows = Vec::new();
+    let mut add = |text: String, tone| wrap_into(&mut rows, &text, cols, tone);
+    add(format!(" {}", toolbox_summary(toolbox)), Text);
+    if toolbox.pending_fingerprint.is_some() {
+        add(format!(" {TOOLBOX_PENDING} (R restart)"), Warn);
+    }
+    if toolbox.definitions_unpinned() {
+        add(format!(" {TOOLBOX_UNPINNED}"), Dim);
+    }
+    let mut kinds: Vec<ToolboxItemKind> = toolbox.items.iter().map(|item| item.kind).collect();
+    kinds.sort();
+    kinds.dedup();
+    for kind in kinds {
+        add(String::new(), Text);
+        add(format!(" {}", kind.heading()), Heading);
+        for item in toolbox.items.iter().filter(|item| item.kind == kind) {
+            add(format!("  {}", item.name), Text);
+            let tone = match item.status.code {
+                ToolboxItemCode::Active | ToolboxItemCode::Planned => Muted,
+                ToolboxItemCode::NotApplicable => Dim,
+                _ => Warn,
+            };
+            let required = if item.required { " · required" } else { "" };
+            add(
+                format!(
+                    "    {} · {}{required}",
+                    toolbox_origin_label(&item.origin),
+                    item.status.text
+                ),
+                tone,
+            );
+            if let Some(detail) = &item.detail {
+                add(format!("    {detail}"), Dim);
+            }
+        }
+    }
+    if !toolbox.sources.is_empty() {
+        add(String::new(), Text);
+        add(" Sources".into(), Heading);
+        for source in &toolbox.sources {
+            let mut line = format!("  {}: {}", source.label, source.status.text);
+            if !source.names.is_empty() {
+                line.push_str(&format!(" ({})", source.names.join(", ")));
+            }
+            let tone = if source.status.code == ToolboxSourceCode::CannotBeExcluded {
+                Warn
+            } else {
+                Text
+            };
+            add(line, tone);
+            if let Some(detail) = &source.detail {
+                add(format!("    {detail}"), Dim);
+            }
+        }
+    }
+    add(String::new(), Text);
+    add(" Definitions".into(), Heading);
+    let unknown = |value: Option<String>| value.unwrap_or_else(|| "unknown".into());
+    for (label, value) in [
+        ("fingerprint", toolbox.fingerprint.clone()),
+        (
+            "after restart",
+            toolbox.pending_fingerprint.clone().unwrap_or_default(),
+        ),
+        (
+            "definition digest",
+            toolbox
+                .definition_digest
+                .clone()
+                .unwrap_or_else(|| "unavailable".into()),
+        ),
+        ("tools", unknown(toolbox.tool_count.map(|n| n.to_string()))),
+        (
+            "definition bytes",
+            unknown(toolbox.definition_bytes.map(|n| format!("{n} bytes"))),
+        ),
+    ] {
+        if !value.is_empty() {
+            add(format!("  {label}: {value}"), Text);
+        }
+    }
+    rows
+}
+
+/// `text` as rows of at most `cols` columns, broken at spaces, and inside a
+/// word only when the word alone is wider than a row. Continuation rows keep
+/// the text's indent.
+fn wrap_into(rows: &mut Vec<(String, ToolboxTone)>, text: &str, cols: usize, tone: ToolboxTone) {
+    let cols = cols.max(16);
+    let body = text.trim_start_matches(' ');
+    let indent = " ".repeat(text.len() - body.len());
+    let mut line = indent.clone();
+    for word in body.split(' ') {
+        let started = line.len() > indent.len();
+        if started && width(&line) + 1 + width(word) > cols {
+            rows.push((std::mem::replace(&mut line, indent.clone()), tone));
+        } else if started {
+            line.push(' ');
+        }
+        for ch in word.chars() {
+            let mut buf = [0; 4];
+            if line.len() > indent.len() && width(&line) + width(ch.encode_utf8(&mut buf)) > cols {
+                rows.push((std::mem::replace(&mut line, indent.clone()), tone));
+            }
+            line.push(ch);
+        }
+    }
+    rows.push((line, tone));
+}
+
+/// The pane showing the toolbox, scrolled like the diff: ↑ and PgUp go
+/// toward the top, where it opens.
+fn render_toolbox(buf: &mut Buffer, area: Rect, app: &App, theme: &Theme) {
+    let detail = &app.detail;
+    let Some(toolbox) = app.agent(&detail.agent).and_then(|a| a.toolbox.as_ref()) else {
+        let none = Line::from(Span::styled(
+            " this member has no toolbox",
+            theme.fg(theme.dim),
+        ));
+        panel(buf, area, "toolbox · T closes", vec![none], theme);
+        return;
+    };
+    let rows = toolbox_rows(toolbox, detail.cols.get());
+    let visible = usize::from(area.height.saturating_sub(2));
+    let scroll = detail.scroll.min(rows.len().saturating_sub(visible));
+    let end = rows.len() - scroll;
+    let start = end.saturating_sub(visible);
+    let lines = rows[start..end]
+        .iter()
+        .map(|(text, tone)| {
+            let style = match tone {
+                ToolboxTone::Heading => theme.bold(theme.muted),
+                ToolboxTone::Text => theme.fg(theme.text),
+                ToolboxTone::Muted => theme.fg(theme.muted),
+                ToolboxTone::Dim => theme.fg(theme.dim),
+                ToolboxTone::Warn => theme.fg(theme.warn),
+            };
+            Line::from(Span::styled(text.clone(), style))
+        })
+        .collect();
+    let title = if rows.len() > visible {
+        format!(
+            "toolbox · rows {}–{end} of {} · ↑↓ scroll · T closes",
+            start + 1,
+            rows.len()
+        )
+    } else {
+        "toolbox · T closes".to_string()
+    };
+    panel(buf, area, &title, lines, theme);
 }
 
 fn task_lines(app: &App, agent: &Agent, theme: &Theme, now: i64) -> Vec<Line<'static>> {
@@ -594,6 +806,10 @@ fn render_output(buf: &mut Buffer, area: Rect, app: &App, theme: &Theme, now: i6
         .cols
         .set(usize::from(area.width.saturating_sub(4)).max(8));
     detail.terminal_rect.set(area);
+    if detail.show_toolbox {
+        render_toolbox(buf, area, app, theme);
+        return;
+    }
     if !detail.show_diff && detail.scroll > 0 && render_transcript(buf, area, app, theme, now) {
         return;
     }

@@ -110,6 +110,8 @@ fn preflight_and_pin(fx: &Fixture, launch: &Path, refresh: bool) -> PinOutcome {
 /// A session proxy, spoken to as the runtime would.
 struct Session {
     child: Child,
+    /// Where its stderr goes.
+    log: PathBuf,
     stdin: ChildStdin,
     lines: mpsc::Receiver<Value>,
     next: u64,
@@ -117,13 +119,14 @@ struct Session {
 
 impl Session {
     fn start(launch: &Path, env: &[(&str, &str)]) -> Self {
+        let log = launch.with_extension("stderr");
         let mut cmd = Command::new(CREW);
         cmd.args(["toolbox", "mcp", "x", "--launch-file"])
             .arg(launch)
             .env_remove("CREW_IDENTITY")
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
-            .stderr(Stdio::null());
+            .stderr(std::fs::File::create(&log).unwrap());
         for (k, v) in env {
             cmd.env(k, v);
         }
@@ -143,10 +146,18 @@ impl Session {
         });
         Session {
             child,
+            log,
             stdin,
             lines,
             next: 0,
         }
+    }
+
+    /// What it wrote to stderr, once it has stopped.
+    fn stop(mut self) -> String {
+        let _ = self.child.kill();
+        let _ = self.child.wait();
+        std::fs::read_to_string(&self.log).unwrap()
     }
 
     fn notify(&mut self, method: &str) {
@@ -439,4 +450,542 @@ fn secrets_reach_the_server_under_their_destination_name_and_come_back_redacted(
     let message = echoed["error"]["message"].as_str().unwrap();
     assert_eq!(message, "bad token [redacted $SHOP_GITHUB_TOKEN]");
     assert!(!echoed.to_string().contains(secret));
+}
+
+/// Everything that leaves the proxy is redacted, not only tool results: the
+/// listing a preflight prints (which the daemon pins), the pinned and the
+/// live view the runtime is served, failure reasons and refusals, and the
+/// server's own log.
+#[test]
+fn a_server_that_echoes_its_secret_everywhere_is_redacted_everywhere() {
+    let fx = Fixture::new();
+    let secret = "canary-7f3e9a1b5c";
+    let shown = "[redacted $SHOP_TOKEN]";
+    let env = [("TOKEN", secret)];
+    let redact = [("SHOP_TOKEN", secret)];
+    let clean = |what: &str, text: &str| {
+        assert!(!text.contains(secret), "{what} leaks the secret: {text}");
+    };
+    let launch = fx.launch("x", &["--leak", "TOKEN"], &env, &redact);
+    let preflight = |launch: &Path| {
+        Command::new(CREW)
+            .args(["toolbox", "mcp", "x", "--preflight", "--launch-file"])
+            .arg(launch)
+            .env_remove("CREW_IDENTITY")
+            .output()
+            .unwrap()
+    };
+
+    let out = preflight(&launch);
+    let (stdout, stderr) = (
+        String::from_utf8_lossy(&out.stdout),
+        String::from_utf8_lossy(&out.stderr),
+    );
+    assert!(out.status.success(), "{stdout}{stderr}");
+    clean("the preflight listing", &stdout);
+    clean("the preflight log", &stderr);
+    assert!(stdout.contains(shown), "{stdout}");
+    assert!(stderr.contains(&format!("with token {shown}")), "{stderr}");
+    let printed: Value = serde_json::from_str(&stdout).unwrap();
+    pin(
+        &fx.agent_dir(),
+        "x",
+        &"a".repeat(64),
+        &printed["listing"],
+        false,
+    )
+    .unwrap();
+    let snapshot = snapshot_path(&fx.agent_dir(), "x");
+    clean(
+        "the pinned snapshot",
+        &std::fs::read_to_string(&snapshot).unwrap(),
+    );
+
+    for pinned in [true, false] {
+        if !pinned {
+            std::fs::remove_file(&snapshot).unwrap();
+        }
+        let mut session = Session::start(&launch, &[]);
+        let mut said = Vec::new();
+        for (method, params) in [
+            ("initialize", json!({"protocolVersion": "2025-06-18"})),
+            ("tools/list", json!({})),
+            ("tools/call", json!({"name": "alpha", "arguments": {}})),
+        ] {
+            let (answer, other) = session.request(method, params);
+            said.push(answer);
+            said.extend(other);
+        }
+        let said = serde_json::to_string(&said).unwrap();
+        clean(&format!("the session (pinned: {pinned})"), &said);
+        assert!(said.contains(shown), "{said}");
+        let log = session.stop();
+        clean(&format!("the session log (pinned: {pinned})"), &log);
+        assert!(log.contains(&format!("with token {shown}")), "{log}");
+    }
+
+    let refusing = fx.launch(
+        "x",
+        &["--leak", "TOKEN", "--refuse-initialize"],
+        &env,
+        &redact,
+    );
+    let out = preflight(&refusing);
+    let (stdout, stderr) = (
+        String::from_utf8_lossy(&out.stdout),
+        String::from_utf8_lossy(&out.stderr),
+    );
+    assert!(!out.status.success());
+    clean("a failed preflight", &stdout);
+    clean("a failed preflight's log", &stderr);
+    assert!(stdout.contains(shown), "{stdout}");
+    let mut session = Session::start(&refusing, &[]);
+    let (init, _) = session.request("initialize", json!({"protocolVersion": "2025-06-18"}));
+    let (call, _) = session.request("tools/call", json!({"name": "alpha", "arguments": {}}));
+    let said = format!("{init}{call}");
+    clean("refusals after a failed initialize", &said);
+    assert!(said.contains(shown), "{said}");
+    clean("the failed session's log and report", &session.stop());
+}
+
+/// A stand-in remote server; its URL and the process, stopped on drop.
+struct Remote {
+    child: Child,
+    url: String,
+}
+
+impl Remote {
+    fn start(args: &[&str]) -> Self {
+        let mut child = Command::new(CREW)
+            .args(["fake-mcp"])
+            .args(args)
+            .stdin(Stdio::null())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::null())
+            .spawn()
+            .unwrap();
+        let mut line = String::new();
+        BufReader::new(child.stdout.take().unwrap())
+            .read_line(&mut line)
+            .unwrap();
+        Remote {
+            child,
+            url: line.trim().to_string(),
+        }
+    }
+}
+
+impl Drop for Remote {
+    fn drop(&mut self) {
+        let _ = self.child.kill();
+        let _ = self.child.wait();
+    }
+}
+
+impl Fixture {
+    fn remote_launch(
+        &self,
+        url: &str,
+        transport: crew_core::toolbox::McpTransport,
+        headers: &[(&str, &str)],
+        redact: &[(&str, &str)],
+    ) -> PathBuf {
+        let launch = ToolboxServerLaunch {
+            name: "x".to_string(),
+            upstream: Upstream::Http {
+                url: url.to_string(),
+                transport,
+                headers: headers
+                    .iter()
+                    .map(|(k, v)| (k.to_string(), v.to_string()))
+                    .collect(),
+            },
+            redact: redact
+                .iter()
+                .map(|(name, value)| Redaction {
+                    name: name.to_string(),
+                    value: value.to_string(),
+                })
+                .collect(),
+            scrub: Vec::new(),
+            definition: "a".repeat(64),
+            snapshot: snapshot_path(&self.agent_dir(), "x")
+                .to_string_lossy()
+                .into_owned(),
+            refresh: false,
+        };
+        let path = self.path("x.launch.json");
+        std::fs::write(&path, serde_json::to_vec(&launch).unwrap()).unwrap();
+        path
+    }
+}
+
+fn sha256(text: &str) -> String {
+    use sha2::Digest;
+    sha2::Sha256::digest(text.as_bytes())
+        .iter()
+        .map(|b| format!("{b:02x}"))
+        .collect()
+}
+
+/// Preflight, pin, then a session that lists and calls through the bridge.
+fn remote_session_works(fx: &Fixture, launch: &Path) {
+    assert_eq!(preflight_and_pin(fx, launch, false), PinOutcome::Written);
+    let mut session = Session::start(launch, &[]);
+    let (init, _) = session.request("initialize", json!({"protocolVersion": "2025-06-18"}));
+    assert_eq!(init["result"]["serverInfo"]["name"], "fake-mcp");
+    session.notify("notifications/initialized");
+    let (listed, other) = session.request("tools/list", json!({}));
+    assert_eq!(
+        names(&listed["result"]["tools"]),
+        ["alpha", "beta", "gamma"]
+    );
+    assert!(other.is_empty(), "{other:?}");
+    let (called, _) = session.request(
+        "tools/call",
+        json!({"name": "beta", "arguments": {"k": "v"}}),
+    );
+    assert_eq!(
+        called["result"]["content"][0]["text"], r#"{"k":"v"}"#,
+        "{called}"
+    );
+}
+
+#[test]
+fn a_remote_server_is_bridged_over_streamable_http() {
+    use crew_core::toolbox::McpTransport;
+    let token = "Bearer t0ken-abcdef";
+    let require = format!("Authorization={}", sha256(token));
+    for stream in [false, true] {
+        let fx = Fixture::new();
+        let mut args = vec![
+            "--http",
+            "http",
+            "--list-changed",
+            "--require-header",
+            require.as_str(),
+        ];
+        if stream {
+            args.push("--stream-responses");
+        }
+        let remote = Remote::start(&args);
+        let launch = fx.remote_launch(
+            &remote.url,
+            McpTransport::Http,
+            &[("Authorization", token)],
+            &[("DOCS_TOKEN", "t0ken-abcdef")],
+        );
+        remote_session_works(&fx, &launch);
+    }
+}
+
+#[test]
+fn a_remote_server_is_bridged_over_the_sse_transport() {
+    use crew_core::toolbox::McpTransport;
+    let fx = Fixture::new();
+    let remote = Remote::start(&["--http", "sse"]);
+    let launch = fx.remote_launch(&remote.url, McpTransport::Sse, &[], &[]);
+    remote_session_works(&fx, &launch);
+}
+
+#[test]
+fn a_remote_server_that_refuses_the_header_fails_preflight_without_the_secret() {
+    use crew_core::toolbox::McpTransport;
+    let fx = Fixture::new();
+    let require = format!("Authorization={}", sha256("Bearer right-one"));
+    let remote = Remote::start(&["--http", "http", "--require-header", &require]);
+    let launch = fx.remote_launch(
+        &remote.url,
+        McpTransport::Http,
+        &[("Authorization", "Bearer wrong-one-1234")],
+        &[("DOCS_TOKEN", "wrong-one-1234")],
+    );
+    let (ok, printed) = preflight(&launch, Some("10"));
+    assert!(!ok);
+    let reason = printed["reason"].as_str().unwrap();
+    assert!(reason.contains("HTTP 401"), "{reason}");
+    assert!(!printed.to_string().contains("wrong-one-1234"));
+}
+
+/// Preflight with `SSL_CERT_FILE` set to `ca`, or unset.
+fn preflight_with_roots(launch: &Path, ca: Option<&Path>) -> (bool, Value) {
+    let mut cmd = Command::new(CREW);
+    cmd.args([
+        "toolbox",
+        "mcp",
+        "x",
+        "--preflight",
+        "--preflight-within",
+        "10",
+        "--launch-file",
+    ])
+    .arg(launch)
+    .env_remove("CREW_IDENTITY")
+    .env_remove("SSL_CERT_FILE")
+    .env_remove("SSL_CERT_DIR");
+    if let Some(ca) = ca {
+        cmd.env("SSL_CERT_FILE", ca);
+    }
+    let out = cmd.output().unwrap();
+    (
+        out.status.success(),
+        serde_json::from_slice(&out.stdout).unwrap(),
+    )
+}
+
+// An https server is reached only through a chain crew can verify: with the
+// operator's CA added through SSL_CERT_FILE it works; without it the
+// preflight fails, and nothing turns verification off.
+#[test]
+fn an_https_server_is_reached_only_through_a_verified_chain() {
+    use crew_core::toolbox::McpTransport;
+    let tls = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/toolbox-tls");
+    let cert = tls.join("server.pem").to_string_lossy().into_owned();
+    let key = tls.join("server.key").to_string_lossy().into_owned();
+    let fx = Fixture::new();
+    let remote = Remote::start(&["--http", "http", "--tls-cert", &cert, "--tls-key", &key]);
+    assert!(
+        remote.url.starts_with("https://localhost:"),
+        "{}",
+        remote.url
+    );
+    let launch = fx.remote_launch(&remote.url, McpTransport::Http, &[], &[]);
+
+    let (ok, printed) = preflight_with_roots(&launch, None);
+    assert!(!ok, "{printed}");
+    assert!(
+        printed["reason"]
+            .as_str()
+            .unwrap()
+            .to_lowercase()
+            .contains("certificate"),
+        "{printed}"
+    );
+
+    let (ok, printed) = preflight_with_roots(&launch, Some(&tls.join("ca.pem")));
+    assert!(ok, "{printed}");
+    assert_eq!(
+        names(&printed["listing"]["tools"]),
+        ["alpha", "beta", "gamma"]
+    );
+}
+
+/// A server that accepts the connection and then says nothing, ever: no
+/// TLS handshake, no HTTP answer, no endpoint.
+fn silent_server() -> (std::net::TcpListener, u16) {
+    let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    let port = listener.local_addr().unwrap().port();
+    let accepting = listener.try_clone().unwrap();
+    std::thread::spawn(move || {
+        let mut held = Vec::new();
+        for stream in accepting.incoming() {
+            match stream {
+                Ok(stream) => held.push(stream),
+                Err(_) => return,
+            }
+        }
+    });
+    (listener, port)
+}
+
+// A preflight's deadline covers everything: connecting, the TLS handshake,
+// sending, the answer and an SSE endpoint. A server that accepts and then
+// stalls fails the preflight on time, and a session meanwhile serves the
+// pinned view.
+#[test]
+fn a_server_that_stalls_is_given_up_on_by_the_deadline() {
+    use crew_core::toolbox::McpTransport;
+    let (_listener, port) = silent_server();
+    for (url, transport) in [
+        (format!("https://localhost:{port}/mcp"), McpTransport::Http),
+        (format!("https://localhost:{port}/sse"), McpTransport::Sse),
+        (format!("http://127.0.0.1:{port}/mcp"), McpTransport::Http),
+        (format!("http://127.0.0.1:{port}/sse"), McpTransport::Sse),
+    ] {
+        let fx = Fixture::new();
+        let launch = fx.remote_launch(&url, transport, &[], &[]);
+        let started = std::time::Instant::now();
+        let (ok, printed) = preflight(&launch, Some("0.5"));
+        let took = started.elapsed();
+        assert!(!ok, "{url}: {printed}");
+        assert!(
+            took < Duration::from_secs(5),
+            "{url}: the preflight took {took:?}"
+        );
+        assert!(
+            printed["reason"].as_str().unwrap().contains("in time"),
+            "{url}: {printed}"
+        );
+
+        // With a pinned view the runtime is answered at once, however long
+        // the server takes.
+        pin(
+            &fx.agent_dir(),
+            "x",
+            &"a".repeat(64),
+            &json!({
+                "initialize": { "protocolVersion": "2025-06-18", "capabilities": { "tools": {} } },
+                "tools": [{ "name": "pinned", "inputSchema": { "type": "object" } }],
+            }),
+            false,
+        )
+        .unwrap();
+        let mut session = Session::start(&launch, &[]);
+        let started = std::time::Instant::now();
+        session.request("initialize", json!({"protocolVersion": "2025-06-18"}));
+        let (tools, _) = session.request("tools/list", json!({}));
+        assert!(started.elapsed() < Duration::from_secs(5), "{url}");
+        assert_eq!(names(&tools["result"]["tools"]), ["pinned"]);
+    }
+}
+
+// A request the server answers with a broken message (JSON cut short, or an
+// event stream whose message is not JSON and which then stays open with
+// keep-alive comments) is answered with an error at once, never left
+// waiting; the session goes on.
+#[test]
+fn a_broken_answer_is_answered_with_an_error() {
+    use crew_core::toolbox::McpTransport;
+    for stream in [false, true] {
+        let fx = Fixture::new();
+        let mut args = vec!["--http", "http", "--break-answer", "tools/call"];
+        if stream {
+            args.push("--stream-responses");
+        }
+        let remote = Remote::start(&args);
+        let launch = fx.remote_launch(&remote.url, McpTransport::Http, &[], &[]);
+        let mut session = Session::start(&launch, &[]);
+        session.request("initialize", json!({"protocolVersion": "2025-06-18"}));
+        let (call, _) = session.request("tools/call", json!({"name": "alpha", "arguments": {}}));
+        let error = call["error"]["message"].as_str().unwrap_or_else(|| {
+            panic!("stream {stream}: {call}");
+        });
+        assert!(
+            error.contains("not JSON") || error.contains("without an answer"),
+            "stream {stream}: {error}"
+        );
+        let (tools, _) = session.request("tools/list", json!({}));
+        assert_eq!(
+            names(&tools["result"]["tools"]),
+            ["alpha", "beta", "gamma"],
+            "stream {stream}"
+        );
+    }
+}
+
+// Over the SSE transport a message that is not JSON cannot be matched to a
+// request: the server is taken as broken, what waits is refused, and the
+// pinned view stays.
+#[test]
+fn a_broken_message_on_an_sse_stream_ends_the_session_but_not_the_view() {
+    use crew_core::toolbox::McpTransport;
+    let fx = Fixture::new();
+    let remote = Remote::start(&["--http", "sse", "--break-answer", "tools/call"]);
+    let launch = fx.remote_launch(&remote.url, McpTransport::Sse, &[], &[]);
+    let (ok, printed) = preflight(&launch, None);
+    assert!(ok, "{printed}");
+    pin(
+        &fx.agent_dir(),
+        "x",
+        &"a".repeat(64),
+        &printed["listing"],
+        false,
+    )
+    .unwrap();
+    let mut session = Session::start(&launch, &[]);
+    session.request("initialize", json!({"protocolVersion": "2025-06-18"}));
+    let (call, _) = session.request("tools/call", json!({"name": "alpha", "arguments": {}}));
+    let error = call["error"]["message"]
+        .as_str()
+        .unwrap_or_else(|| panic!("{call}"));
+    assert!(error.contains("not JSON"), "{error}");
+    let (tools, _) = session.request("tools/list", json!({}));
+    assert_eq!(names(&tools["result"]["tools"]), ["alpha", "beta", "gamma"]);
+}
+
+// The MCP lifecycle: `notifications/initialized` reaches the server before
+// any other request, even when the server is slow to accept it and the
+// runtime's calls are already waiting. The stand-in refuses a request that
+// comes first.
+#[test]
+fn initialized_reaches_a_remote_server_before_any_request() {
+    use crew_core::toolbox::McpTransport;
+    for (transport, flag) in [(McpTransport::Http, "http"), (McpTransport::Sse, "sse")] {
+        let fx = Fixture::new();
+        let log = fx.path("methods.log");
+        let log_arg = log.to_string_lossy().into_owned();
+        let remote = Remote::start(&[
+            "--http",
+            flag,
+            "--slow-initialized",
+            "0.5",
+            "--log",
+            &log_arg,
+        ]);
+        let launch = fx.remote_launch(&remote.url, transport, &[], &[]);
+        let (ok, printed) = preflight(&launch, None);
+        assert!(ok, "{flag} preflight: {printed}");
+        assert_eq!(
+            names(&printed["listing"]["tools"]),
+            ["alpha", "beta", "gamma"],
+            "{flag}"
+        );
+
+        std::fs::remove_file(&log).unwrap();
+        let mut session = Session::start(&launch, &[]);
+        session.request("initialize", json!({"protocolVersion": "2025-06-18"}));
+        let (call, _) = session.request("tools/call", json!({"name": "alpha", "arguments": {}}));
+        assert!(call.get("result").is_some(), "{flag}: {call}");
+        let methods = log_lines(&log);
+        let at = |m: &str| methods.iter().position(|l| l == m);
+        let initialized = at("notifications/initialized").unwrap_or_else(|| panic!("{methods:?}"));
+        for later in ["tools/list", "tools/call"] {
+            assert!(
+                at(later).is_some_and(|i| i > initialized),
+                "{flag}: {later} before initialized: {methods:?}"
+            );
+        }
+    }
+}
+
+// T21: a server that asks Claude Code to load its tools up front
+// (`_meta` `anthropic/alwaysLoad`) puts its definitions in the cached
+// prefix, so they must be pinned and sorted like any other: the marker is
+// kept, the order and descriptions are the pinned ones, whatever the
+// server does later.
+#[test]
+fn always_loaded_tools_are_pinned_and_sorted_too() {
+    let fx = Fixture::new();
+    let state = fx.path("listings");
+    let state_arg = state.to_string_lossy().into_owned();
+    let launch = fx.launch(
+        "x",
+        &[
+            "--tools",
+            "zulu,alpha,mike",
+            "--shuffle",
+            "--always-load",
+            "--state",
+            &state_arg,
+            "--change-description-after",
+            "1",
+        ],
+        &[],
+        &[],
+    );
+    assert_eq!(preflight_and_pin(&fx, &launch, false), PinOutcome::Written);
+    for _ in 0..2 {
+        let mut session = Session::start(&launch, &[]);
+        session.request("initialize", json!({"protocolVersion": "2025-06-18"}));
+        let (listed, _) = session.request("tools/list", json!({}));
+        let tools = &listed["result"]["tools"];
+        assert_eq!(names(tools), ["alpha", "mike", "zulu"]);
+        for tool in tools.as_array().unwrap() {
+            assert_eq!(tool["_meta"]["anthropic/alwaysLoad"], true, "{tool}");
+            assert!(
+                !tool["description"].as_str().unwrap().contains("Changed"),
+                "{tool}"
+            );
+        }
+    }
 }

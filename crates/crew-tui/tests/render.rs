@@ -2887,3 +2887,140 @@ mod vcs {
         assert!(screen.contains("workspace claude-7"), "{screen}");
     }
 }
+
+#[test]
+fn detail_view_shows_the_effective_toolbox() {
+    // notes/toolboxes.md §Display, T15: the summary and a pending change next
+    // to the runtime; `T` shows the groups, sources and definition facts in
+    // the terminal pane, wrapped and scrolled like the diff, at the sizes
+    // terminals have.
+    for (width, height) in [(80, 24), (120, 30), (160, 70)] {
+        let mut app = app();
+        let mut snapshot = fixture::snapshot(NOW);
+        snapshot.agents.extend(fixture::toolbox_agents(NOW));
+        app.apply_snapshot(snapshot, NOW);
+        app.open_detail("release", NOW);
+        let size = format!("{width}x{height}");
+        let screen = render_to_string(&app, width, height, NOW + 1000);
+        for needle in [
+            "toolbox   b56e01d7c4a9 · 4 items",
+            "          2 not available",
+            "Toolbox changed: restart to apply (R restart)",
+            "T shows its items, sources and digest",
+        ] {
+            assert!(
+                screen.contains(needle),
+                "{size}: missing {needle:?}\n{screen}"
+            );
+        }
+        press(&mut app, KeyCode::Char('T'));
+        let first = render_to_string(&app, width, height, NOW + 1000);
+        assert!(
+            first.contains("MCP servers"),
+            "{size}: opens at the top\n{first}"
+        );
+        // The pane is read-only: a click in it types into nothing, and the
+        // keys after it still scroll the pane instead of reaching the agent.
+        {
+            use ratatui::crossterm::event::{MouseButton, MouseEvent, MouseEventKind};
+            let pane = app.detail.terminal_rect.get();
+            let (column, row) = (pane.x + pane.width / 2, pane.y + pane.height / 2);
+            let area = ratatui::layout::Rect::new(0, 0, width, height);
+            assert!(views::hit(&app, area, column, row).is_none());
+            let click = MouseEvent {
+                kind: MouseEventKind::Down(MouseButton::Left),
+                column,
+                row,
+                modifiers: KeyModifiers::NONE,
+            };
+            crew_tui::input::handle_mouse(&mut app, click, area, NOW, 10);
+            assert!(!app.detail.typing && app.detail.show_toolbox, "{size}");
+            let down = KeyEvent::new(KeyCode::Down, KeyModifiers::NONE);
+            assert!(crew_tui::input::handle_key(&mut app, down, NOW, 10).is_empty());
+            let moved = render_to_string(&app, width, height, NOW + 1000);
+            assert!(
+                moved.contains("toolbox ·")
+                    && (moved != first || !first.contains("toolbox · rows")),
+                "{size}\n{moved}"
+            );
+            let up = KeyEvent::new(KeyCode::Up, KeyModifiers::NONE);
+            assert!(crew_tui::input::handle_key(&mut app, up, NOW, 10).is_empty());
+            assert!(crew_tui::input::handle_paste(&mut app, "pasted", NOW).is_empty());
+            // T after the click still closes the pane; nothing reaches the agent.
+            let toggle = KeyEvent::new(KeyCode::Char('T'), KeyModifiers::NONE);
+            assert!(crew_tui::input::handle_key(&mut app, toggle, NOW, 10).is_empty());
+            assert!(!app.detail.show_toolbox && !app.detail.typing, "{size}");
+            render_to_string(&app, width, height, NOW + 1000);
+            assert!(crew_tui::input::handle_key(&mut app, toggle, NOW, 10).is_empty());
+            assert_eq!(
+                render_to_string(&app, width, height, NOW + 1000),
+                first,
+                "{size}"
+            );
+        }
+        // Every row is reachable a page at a time, and nothing is cut off.
+        let mut seen = first.clone();
+        let mut last = first.clone();
+        for _ in 0..20 {
+            press(&mut app, KeyCode::PageDown);
+            let page = render_to_string(&app, width, height, NOW + 1000);
+            if page == last {
+                break;
+            }
+            seen.push_str(&page);
+            last = page;
+        }
+        for needle in [
+            "docs",
+            "https://docs.example.com/mcp",
+            "Bundle github · Needs $SHOP_GITHUB_TOKEN",
+            "github-mcp-server",
+            "repos,issues,pull_requests",
+            "Member · Not available on Codex",
+            "Claude Code plugin format",
+            "Sources",
+            "Disabled (ambient, docs-local)",
+            "Cannot be excluded on Codex",
+            "without the sandbox",
+            "Definitions",
+            "definition digest: unavailable",
+            "tools: unknown",
+            "definition bytes: unknown",
+        ] {
+            assert!(
+                seen.contains(needle),
+                "{size}: unreachable {needle:?}\n{seen}"
+            );
+        }
+        assert!(
+            last.contains("definition bytes: unknown"),
+            "{size}: the last page ends with the definitions\n{last}"
+        );
+        assert!(
+            !seen.contains("Subagents\n") && !seen.contains(" Hooks"),
+            "{size}"
+        );
+        // Home goes back to the top; T gives the terminal back.
+        press(&mut app, KeyCode::Home);
+        assert_eq!(
+            render_to_string(&app, width, height, NOW + 1000),
+            first,
+            "{size}"
+        );
+        press(&mut app, KeyCode::Char('T'));
+        let screen = render_to_string(&app, width, height, NOW + 1000);
+        assert!(
+            screen.contains("terminal ·") && !screen.contains("Definitions"),
+            "{size}\n{screen}"
+        );
+    }
+    // A member without a toolbox says so.
+    let mut app = app();
+    app.apply_snapshot(fixture::snapshot(NOW), NOW);
+    let id = app.agents[0].id.clone();
+    app.open_detail(&id, NOW);
+    render_to_string(&app, 120, 30, NOW + 1000);
+    press(&mut app, KeyCode::Char('T'));
+    let screen = render_to_string(&app, 120, 30, NOW + 1000);
+    assert!(screen.contains("this member has no toolbox"), "{screen}");
+}

@@ -170,6 +170,18 @@ impl TeamView {
                 })
                 .collect(),
         );
+        // The attention reasons, as the graph node gives them: tooltip and
+        // accessible description of the row.
+        for (index, member) in data.agents.iter().enumerate() {
+            let Some(row) = self.list.list().row_at_index(index as i32) else {
+                continue;
+            };
+            let reasons: Vec<&str> = member.warnings.iter().map(|w| w.text.as_str()).collect();
+            row.set_tooltip_text((!reasons.is_empty()).then(|| reasons.join("\n")).as_deref());
+            if !reasons.is_empty() {
+                row.update_property(&[gtk::accessible::Property::Description(&reasons.join(". "))]);
+            }
+        }
     }
 }
 
@@ -209,6 +221,7 @@ fn topology(scope: &ClientScope, data: &TeamData) -> (Vec<Node>, Vec<Edge>) {
             title: "Scheduler".into(),
             status: None,
             lines: vec![format!("Coordinates {}", plural(members.len(), "agent"))],
+            warnings: Vec::new(),
             layer: 0,
             label: format!("Scheduler, coordinates {}", plural(members.len(), "agent")),
             relations: format!("Coordinates {}", members.join(", ")),
@@ -247,6 +260,7 @@ fn topology(scope: &ClientScope, data: &TeamData) -> (Vec<Node>, Vec<Edge>) {
             title: format!("{} · {}", agent.id, agent.role),
             status: Some((member.status_label.clone(), member.tone)),
             lines,
+            warnings: member.warnings.iter().map(|w| w.text.clone()).collect(),
             layer: if agent.orchestrator {
                 0
             } else if member.satellite_parent_id.is_some() {

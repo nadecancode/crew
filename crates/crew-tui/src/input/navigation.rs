@@ -194,6 +194,13 @@ pub(super) fn dashboard_key(app: &mut App, key: KeyEvent, now: i64) -> Vec<Comma
 }
 
 pub(super) fn detail_key(app: &mut App, key: KeyEvent, now: i64, page: usize) -> Vec<Command> {
+    // The toolbox pane pages by its own height, so a page skips no row.
+    let pane = usize::from(app.detail.terminal_rect.get().height.saturating_sub(2));
+    let page = if app.detail.show_toolbox && pane > 0 {
+        pane
+    } else {
+        page
+    };
     match key.code {
         KeyCode::Esc => app.view = View::Dashboard,
         KeyCode::Tab | KeyCode::BackTab => {
@@ -233,8 +240,19 @@ pub(super) fn detail_key(app: &mut App, key: KeyEvent, now: i64, page: usize) ->
                 ..Compose::default()
             }));
         }
+        KeyCode::Char('T') => {
+            app.detail.show_toolbox = !app.detail.show_toolbox;
+            app.detail.show_diff = false;
+            // A document: it opens at its top (clamped below).
+            app.detail.scroll = if app.detail.show_toolbox {
+                usize::MAX
+            } else {
+                0
+            };
+        }
         KeyCode::Char('d') => {
             app.detail.show_diff = !app.detail.show_diff;
+            app.detail.show_toolbox = false;
             app.detail.scroll = 0;
             if app.detail.show_diff {
                 app.detail.diff = None;
@@ -258,6 +276,19 @@ pub(super) fn detail_key(app: &mut App, key: KeyEvent, now: i64, page: usize) ->
 
 fn output_lines(app: &App) -> usize {
     let detail = &app.detail;
+    if detail.show_toolbox {
+        // Scrolled to the top is the last page's distance from the end, so
+        // the first key down moves the text.
+        let rows = usize::from(detail.terminal_rect.get().height.saturating_sub(2));
+        return app
+            .agent(&detail.agent)
+            .and_then(|agent| agent.toolbox.as_ref())
+            .map_or(0, |toolbox| {
+                crate::views::detail::toolbox_rows(toolbox, detail.cols.get())
+                    .len()
+                    .saturating_sub(rows)
+            });
+    }
     if detail.show_diff {
         return detail.diff.as_deref().unwrap_or("").lines().count();
     }

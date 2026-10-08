@@ -157,6 +157,11 @@ pub enum Call {
         runtime: Option<RuntimeKind>,
         #[serde(default)]
         model: Option<String>,
+        /// Bundles by name: the subagent gets only these, each item equal to
+        /// one in the parent's active toolbox. Left out: a copy of the
+        /// parent's active toolbox.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        toolbox: Option<Vec<String>>,
     },
 
     Send(SendParams),
@@ -214,8 +219,9 @@ pub enum Call {
         detail: String,
     },
     /// Members' toolboxes as they show them (operator or orchestrator):
-    /// every member when `agent` is left out; `runtime` maps the toolbox
-    /// onto another runtime instead of the member's own.
+    /// every member when `agent` is left out. With `runtime`, how each
+    /// member's configuration would map onto that runtime at its next
+    /// launch, never the toolbox its session runs with.
     Toolbox {
         #[serde(default)]
         agent: Option<String>,

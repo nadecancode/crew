@@ -247,10 +247,11 @@ read ranges are the evidence for each class.
 | Unexplained | the rest: within the TTL, system prompt not read | 0 / 23,368 / 23,484 | 4 | 1,546,944 | 1.3% | $15.79 (0.6%) |
 | Not classed | writes below the threshold (ordinary growth and small rewrites) | | | 27,647,468 | 24.0% | |
 
-The cost column is what the class's writes cost. Had the same tokens been read
-from cache instead, each would cost about 2% less (`costs.tsv`, last column).
-That bounds what removing a class could save; it is not an avoidable-loss
-estimate.
+The cost column is what the class's writes cost. Reading the same tokens from
+cache would cost 1.25% to 2.5% of that (read rate over 1 h write rate). So the
+most that removing a class could save is its write cost minus that read cost,
+about 2% below its write cost (`costs.tsv`, last column). That is an upper
+bound, not an avoidable-loss estimate.
 
 Notes on the classes:
 
@@ -639,3 +640,453 @@ Keys read from each Claude Code session file:
 Records are taken in file order, because attachment timestamps can sit a
 millisecond before the line that precedes them. A resumed session appends to
 the same file.
+
+## Design
+
+Task `cache-design`; proposed implementation contract, not a claim that the
+changes or their savings have shipped. Product source inspected at `df4575cf`;
+the prompt and delivery paths still match the audit's `c8052373`. The measured
+input is `cache-baseline` at `d14b7e50`, [baseline.md](prompt-cache/baseline.md)
+and its sanitized timeline, now landed on main `b5bdcc86`. Toolbox requirements are
+[Spec](toolboxes.md#spec), including the approved capability probes. The
+implementation acceptance workload is `cache-bench-lifecycle`, not the short
+invoice workload alone.
+
+### Evidence and priorities
+
+Optimize the input that must be processed again and the cost of completing the
+work, while preserving delivery and task correctness. A high hit rate alone
+can reward unnecessary requests or a needlessly large context.
+
+The final baseline covers 24,129 native observations. Claude read
+5,506,578,462 of 5,623,886,457 input tokens (97.9141%), with 117,271,674 explicit
+writes. Codex read 1,799,755,520 of 1,839,395,631 (97.8449%); all 8,057 Codex
+observations contain a native write counter, and all those counters are zero.
+There is no measured supported-pi workload. Do not carry forward the audit's
+interim statement that Codex has no write field, or add its earlier cohort to
+this one.
+
+| Priority | Change or decision | Measured exposure, not recoverable tokens | Runtime scope |
+| --- | --- | --- | --- |
+| 1 | D1: queue ordinary Claude deliveries at turn boundaries; preserve immediate operator steering | 183 strict history-change diagnostics, 44,113,859 writes (37.6% of Claude writes). In diagnostic-emitting sessions, 183/340 requests after folded turns versus 0/1,135 controls declared a history change. Another 19,776,027 writes are fold-associated without that diagnostic and remain unproved. | Claude first. Codex and pi already use queued delivery paths; test for regressions, do not ascribe Claude's savings to them. |
+| 2 | D2: measure effective retention; use an existing supported TTL override only where beneficial; no automatic keep-alive | Gaps over an hour precede 26,349,326 non-read input tokens, including 23,253,702 writes, across runtimes. Ordinary new input and retention/routing uncertainty are included. | Claude has explicit one-hour write buckets in this baseline. Codex retention is unobserved per request. Supported pi remains unmeasured. |
+| 3 | D3: stable standing instructions and resume artifacts; live team data at the tail | Restart overlaps contain 2,462,046 non-read tokens and 1,018,900 writes, not a causal estimate. Only two observations have primary resume association. No observed baseline separates the briefing's cost. | All three adapters; validate each runtime's actual treatment of resume arguments. |
+| 4 | D4: reduce redundant wake-ups without suppressing obligations | Reminder and nudge primary classes contain 3,368,136 and 3,869,786 non-read tokens respectively. Neither number measures the cost of redundant reminders alone. Every extra request also rereads cached history. | Shared daemon; measure request count and completion cost separately by runtime. |
+| 5 | D5: keep necessary lifecycle changes at safe boundaries | Compaction association: 1,426,278 non-read tokens, 420,175 writes. Crew model/runtime-change association: 1,616,017 non-read tokens. These classes do not justify a new automatic compaction or model-switch policy. | Shared daemon plus each runtime's native compaction. |
+| 6 | D6: pin definitions and prove final tool order; put common prompt text first | No measured tool-change loss attributable to crew. Startup primary class: 1,629,184 non-read tokens across runtimes. Audit's separate Claude sample estimates 5k–7k tokens of crew/session prefix per start. | Toolbox work is required for predictable scoping regardless of cache savings. Cross-member prefix reuse is secondary. |
+
+These primary classes partition the collector's observations; overlapping
+restart/delivery events do not. `avoidable_miss_tokens` remains null. The
+older audit's 56.3% cache-write share is an API list-price calculation for its
+own Claude cohort, not this team's invoice. Ranking beyond the first two rows
+is based on mechanism and implementation risk, because controlled per-event
+loss is not yet established.
+
+QA's completed short control (`5275807e`, runner `a1cd0cf5`) measured 66
+requests, 94.1114% weighted hits, and $0.425565–$0.437488 API-equivalent cost.
+Its per-member hit rates were 89.6120% / 95.0204% / 95.1831% for orchestrator /
+Claude worker / Codex worker. It has only a 20.4535-second idle gap. It remains
+a control, not the acceptance baseline for lifecycle changes.
+
+The lifecycle pilot is also not the final series: its successful resume steps
+read almost all their input despite a changed briefing file, before another
+step invalidated the run. The corrected Haiku fold probe observes a folded row
+and subsequent thinking blocks without a `thinking_drop`. Thus neither a file
+delta nor an injected row proves a provider miss. Review the final three-run
+series before attributing a benefit to either D1 or D3. At this design's
+2026-10-08 checkpoint, QA's series uses runner `0d7f506d` and is still running;
+its final numeric report is not an input claimed here.
+
+### D1. Preserve message history during ordinary delivery
+
+Choose turn-boundary delivery for ordinary teammate traffic to Claude Code.
+Keep the daemon's durable bus as the queue while `turn_active` is true; do not
+acknowledge a message merely because it entered a plugin's in-memory buffer.
+At turn completion, gather pending messages with the existing 1.5-second quiet
+window and five-second maximum, then submit one user prompt through the
+runtime's supported queue. Old message and thinking blocks must remain
+unchanged. A race in which a turn starts after the daemon's check uses the
+runtime queue, never a fallback to `session.append` for ordinary traffic.
+
+This changes the automatic delivery latency of teammate questions, answers,
+reviews and status. They remain visible immediately through `agent_inbox`.
+A worker awaiting an answer must end its turn or park its card, as the standing
+instructions already require; the daemon must not rely on a polling turn to
+flush the queue. No additional delay is introduced once a member can consume a
+prompt beyond the existing gather window. Record time queued, runtime-accepted
+and first observed model consumption separately; a transport acknowledgement
+is not evidence of consumption.
+
+Operator-origin messages keep the existing immediate steering path, selected
+by authenticated sender identity, not by parsing the message body. Stop,
+pause, permission and compaction control paths retain their own semantics.
+Split a mixed pending batch by delivery policy: an operator message can
+overtake ordinary queued traffic, but must not carry that traffic into an
+immediate append. Preserve message order within each policy and retain every
+id. A body claiming to be from the operator does not change its policy.
+If immediate steering still needs a history-mutating native operation, label
+that delivery as such in diagnostic metadata and exclude it from the ordinary
+queued-delivery performance claim. Do not delay an operator correction to
+improve the cache metric.
+
+The implementation must preserve the existing at-least-once contract and its
+20-second in-flight fallback. A message held in the durable queue is not
+in-flight; the fallback timer starts only when a runtime submission is
+attempted. Confirm only runtime acceptance of the identified message batch,
+not an unawaited `prompt.submit` call. Verify the native API's acceptance
+boundary before implementing the acknowledgement: a promise which resolves
+only after the model finishes is not a submission receipt and cannot hold the
+20-second transport timer open. If no accepted-queue receipt exists, use an
+identified native turn-start acknowledgement and keep the durable copy until
+then; test the busy-turn race without converting waiting to terminal fallback.
+A failed submission leaves its ids pending. Deduplicate an already accepted
+batch on same-session retry; a crash
+between native acceptance and acknowledgement may still replay under the
+existing at-least-once contract, and must be reported as such. Never claim
+exactly-once delivery from an in-memory deduplication set.
+
+Keep the existing reply-routing meaning: the batch that opens the next turn
+belongs to that turn's `turn_openers` and `turn_messages`. A later review or
+answer must not be forwarded as an answer to the previous turn's sender. The
+`WAKE` workaround is unnecessary for the ordinary queue; retain it only where
+the immediate path can leave an unseen appended row.
+
+**Regression contract D1:** a fake runtime holds a foreground tool call while
+several identified messages arrive. Assert zero ordinary `session.append`
+calls, no acknowledgement or terminal fallback while durably held, one ordered
+batch at the next boundary, correct reply recipients, and unchanged serialized
+prior messages. Race turn start/end, failed submission, reconnect, duplicate
+acknowledgement and process death. Test immediate operator steering separately.
+Include mixed-policy batches and a forged operator label in an ordinary body.
+Run the same correctness workload through Codex's app-server and pi follow-up
+paths. The live fold scenario must still deliver and act on the same messages;
+removing the work from the benchmark is not an optimization.
+
+### D2. Retention and idle policy
+
+Keep provider and CLI defaults unless a supported, measured override is
+explicitly configured. For Claude, the existing endpoint environment can carry
+`CLAUDE_CODE_PROMPT_CACHE_TTL=1h`; it takes precedence over `promptCacheTtl` in
+the audited CLI. This is useful to test for a five-minute writer that often
+resumes between five minutes and an hour. The production baseline already has
+one-hour writes, so enabling it there cannot recover the over-hour cohort.
+A longer TTL has a different write price: compare all input and output cost,
+not hit rate alone. Validate the native TTL bucket rather than inferring it
+from subscription type. See [Anthropic's cache lifetime and usage
+contract](https://platform.claude.com/docs/en/build-with-claude/prompt-caching).
+
+For GPT-5.6 and later, current [OpenAI caching
+documentation](https://developers.openai.com/api/docs/guides/prompt-caching)
+specifies `prompt_cache_options.ttl: "30m"` as a minimum lifetime, with
+automatic routing; a shared `prompt_cache_key` is not needed for routing
+optimization on these models. Earlier models use different controls. These
+are API options, not evidence that Codex 0.159.0 accepts matching `-c` keys.
+The inspected [Codex configuration
+reference](https://learn.chatgpt.com/docs/config-file/config-reference) exposes
+no `prompt_cache` setting. Crew will not invent a CLI setting, rewrite runtime
+requests, or force one cache key across members. Preserve native thread IDs on
+resume. Measure the actual model, endpoint, region when known, and usage.
+
+For supported pi 1.1.0, capability probes establish toolbox behavior, not
+provider caching or TTL. Do not configure it from the rejected GSD binary's
+`PI_CACHE_RETENTION` strings. A provider-specific source/native-request probe
+and a real workload are prerequisites to a pi retention recommendation.
+
+Do not introduce periodic keep-alive prompts, dummy tool calls, or early
+compactions to manufacture hits. They consume paid requests, append context,
+can wake useful work, and cannot guarantee a future cache entry. For a future
+opt-in experiment, preregister the expected idle duration, native TTL, token
+cost of each wake and output, and the probability of useful reuse. Its total
+cost must beat the no-wake control; the audit's simplified write/read ratio is
+not that experiment. Do not increase the frequency of usage-limit retries to
+keep caches warm.
+
+**Regression contract D2:** identical endpoint settings produce identical
+launch arguments and nonsecret prompt bytes; credential rotation leaves them
+unchanged. Explicit supported TTL values pass through unchanged, including
+operator precedence. With no override, no new TTL/key argument or wake timer
+appears. Model, endpoint and effective TTL changes are comparison boundaries,
+not silently mixed samples.
+
+### D3. Separate standing policy from live team context
+
+Generate standing text in this order: common coordination/work rules, selected
+voice and role-class rules (worker/orchestrator/subagent), team standing
+instructions, then fixed member identity and workspace details. In Codex,
+place crew's common member tone before crew's identity suffix; preserve the
+operator-instruction inheritance rule from the toolbox spec. Do not replace
+provider instructions, change a real working directory, omit identity, or pad
+text merely to meet a cache threshold. Cross-member equality applies only up
+to the first genuine difference; runtime-injected environment text may stop
+reuse before crew's text does.
+
+Remove the live roster, model availability catalog and current objective from
+the standing prefix. Put a canonical team-context message immediately before
+the initial task/standby message. Sort roster entries by id; include identity,
+role and relationship, not progress, timestamps or current status. The task
+board remains authoritative through `task_get`; the current roster remains
+available through `agents_list`. A model catalog belongs to the orchestrator's
+context message only, and is validated again at the action that uses it.
+
+Persist the applied standing artifacts for the confirmed native session,
+including the fully composed Codex developer instructions and Claude tone
+replacement, not just `briefing.md`. A small versioned manifest records the
+native session/runtime, prompt-format version, input-policy digests, artifact
+hashes and last delivered team-context digest. Keep the manifest in the
+member's private launch state. It contains no credential values and is never
+injected into the prompt.
+
+On crash restart, ordinary resume or daemon recovery of the same session with
+unchanged standing policy, reuse the exact bytes. A roster/catalog/objective
+change appends one context update with the next dispatch; it never replaces
+an earlier context message. Put context and dispatch in the same prompt batch,
+with context first, so a roster edit alone does not buy an extra model turn.
+Persist that update through the bus with a stable
+id so a crash cannot silently lose it or regenerate a new update on every
+launch. Coalesce intermediate roster changes to the latest revision, preserving
+an explicit removal notice where a previously named recipient disappeared.
+A model-backed joining member must see the current context, and an existing
+member must learn of the join without a standing-prefix rewrite.
+
+This is not permission to keep obsolete instructions. Changes to explicit team
+instructions, voice, role, workspace authority, crew prompt format, or the
+configured toolbox apply through the existing lifecycle that adopts them and
+are recorded as deliberate prompt/definition changes. Toolbox refresh and
+removal follow T07/T08/T14/T18, including a fresh-session handoff where a native
+resume cannot tolerate removed tools. Operator commands are never deferred for
+cache retention. If no trustworthy matching manifest exists for a legacy
+session, record `legacy_missing` and generate one current snapshot on resume;
+do not claim preserved bytes or copy another member's snapshot. A corrupted
+snapshot is rejected and explicitly recovered, not silently treated as a hit.
+
+**Regression contract D3:** across fresh start, confirmed resume, crash and
+recovery, compare full standing artifacts byte for byte. Reorder the roster
+and simulate clock/CLI-availability changes; assert a stable prefix and only
+necessary appended context. Mutate instructions/role/toolbox and assert an
+intentional digest transition. Test legacy/missing/corrupt manifests, restart
+between context enqueue and acknowledgement, and compaction reorientation.
+Native probes must also show what the runtime actually sends: changed files
+or CLI arguments alone do not establish replacement of resumed instructions.
+
+### D4. Reduce wake-ups while keeping work moving
+
+Keep the existing status-message gather policy and 90-second/three-attempt
+idle reminder defaults in the first implementation. The audit found no idle
+reminders on Review cards; do not fix that nonexistent condition by muting all
+reminders. Preserve questions, assignments, review requests, changes requested
+and failure/limit notices as actionable. Do not infer that a free-text
+`message` is informational by its wording.
+
+Use typed state to avoid duplicate obligations: a status-only batch, an answer
+with no open obligation, or an acknowledged parked/review state must not earn
+an `agent.unanswered` turn solely to demand an idle acknowledgement. A real
+unanswered question/message still receives the existing bounded retry. Where a
+member tries to report waiting while its only card is in Review, allow a
+non-mutating acknowledgement of that state; do not move the review card back
+to Working/Waiting, occupy the worker slot, or steal review ownership. A member
+with another executing card keeps its own task identity.
+
+Measure how many turns this removes before changing timer cadence. Retain
+existing per-message truncation and the full `agent_inbox` retrieval path.
+Prefer `task_get(id)` in standing instructions. Do not silently truncate
+`tasks_list` results as a cache fix; a separate paginated/read-view contract is
+needed if the large-board output is later optimized.
+
+**Regression contract D4:** deterministic-clock tests cover an abandoned
+Working task, Waiting, Review, a second executing card, a status-only turn,
+one genuine unanswered question and a changes-requested transition. Required
+wakes still occur once under their normal retry policy. Repeated no-change
+state acknowledgements add neither new model prompts nor mutated old prompt
+bytes. Report request-count savings separately from cache-hit changes.
+
+### D5. Lifecycle timing
+
+Keep the current turn-boundary compaction mechanism and native context
+thresholds. An explicit compaction still runs as requested. It replaces
+conversation history with a summary; it need not invalidate unchanged tools
+and system text. The audit's post-compaction requests retained roughly 28k
+cached prefix tokens, so acceptance must not assume a full-prefix miss.
+Include the compaction request's own input/output cost and the first resumed
+work, not just the smaller context afterwards.
+
+No automatic compaction merely because a member waits for review or a cache
+TTL approaches. If compaction is already needed for context capacity, prefer
+the existing warm, safe task boundary rather than a new wake of a cold idle
+member. Keep pending keep-text and task identity intact. Do not delay needed
+recovery, a user-selected model switch, or a fallback needed to do work for a
+hypothetical cache benefit. Optional model-return/compaction scheduling remains
+deferred until a controlled series establishes net benefit; do not alter
+`policy.rs` on the evidence in this note alone.
+
+**Regression contract D5:** one queued compaction at the safe boundary; no
+new compaction on parking/TTL expiry; reorientation preserves the selected and
+parked cards; model/endpoint/effort changes are visible comparison boundaries.
+Standing-artifact and tool-definition hashes stay stable when those inputs
+did not change. Summary/history hashes are expected to change.
+
+### D6. Toolboxes and the final native tool catalog
+
+Keep the approved toolbox proxy/pinning contract for every scoped local or
+remote MCP server. Deferred loading does not replace it. Leave Claude tool
+search at the runtime/operator's setting: forcing it on custom endpoints or
+changing `alwaysLoad` semantics can make tools unavailable. The feature's
+conditional behavior is documented by [Claude Code's MCP
+reference](https://code.claude.com/docs/en/mcp#configure-tool-search). Keep pi's
+current direct exposure until a separately measured supported-runtime deferred
+route preserves tool discovery and task completion. Smaller per-role toolboxes
+are the first way to reduce irrelevant definitions on all endpoints.
+
+Use the existing planned per-server interfaces, `crew toolbox mcp <name>`,
+`mcp::proxy::pin` and `definition_digest`; no cross-runtime aggregate server is
+required. Definitions and instructions stay in their pinned per-member
+snapshots. The fingerprint describes configuration; the definition digest
+identifies what the proxy actually serves. Preserve source/account differences
+rather than forcing two members' schemas to match. Secret rotation alone is
+not a cache epoch; a legitimate new schema after a refresh is.
+
+For pi, add a verified readiness barrier in crew's extension: register crew
+first, then configured servers in name order, completing each actual native
+registration before the first model request. Awaiting a function which returns
+before discovery is not a barrier. Reverse and randomize server response
+delays in native probes and compare the final `getAllTools` catalog. If pi
+exposes no usable completion/barrier, this route fails T03/T16: a follow-up
+must provide one pi-facing aggregate of the same pinned snapshots, with an
+explicit stable tool-name/routing map and preserved per-server errors. It
+must not quietly claim deterministic order from sorted configuration.
+
+Crew's own role-filtered catalog must come from launch identity, not a live
+`agents_list` lookup with worker fallback. This is an implementation change in
+the toolbox MCP slice, not in the read-only audit. The daemon remains the
+authority for tool-call permissions; a role hint must not grant privileges.
+Missing legacy role metadata requires validated resolution or an explicit
+unavailable result, never a guessed successful catalog.
+
+**Regression contract D6:** toolbox T03/T07/T11/T14/T16/T18/T20/T21 remain
+required. Add randomized native connection-order tests, daemon-offline
+orchestrator catalog equality, direct/always-loaded and deferred exposure,
+late/upstream-schema-change cases, and exact account-dependent digest
+inequality. Compare the actual ordered native catalog and loaded schema
+bytes, not merely `mcp.json`. Claude's captured selected skill/subagent lines
+are path-stable; that limited result says nothing about equality of the whole
+request or provider cache reuse across working directories. Inherited servers
+stay explicitly outside crew's cache guarantees.
+
+### Acceptance targets and measurement protocol
+
+These are preregistered implementation targets. No numerical after-result is
+claimed by this design. QA owns the runner and evidence; runtime owns native
+counter parsing. The design card can finish before the product patches and
+their after-series, but the cache improvement cannot be called demonstrated
+until these gates pass.
+
+**Comparable series.** Run at least three successful lifecycle samples per
+side, `c8052373` versus the integrated candidate, with one final runner/template
+revision used on both. Repeat an earlier baseline if its template changed.
+Keep sandbox `off`, authorized login route, CLI versions, requested and actual
+models, effort, toolbox selection, relevant ambient catalog, gap policy and
+fixture output identical. Record run order, timestamps, binary/runner/template
+hashes and provider/region information available without secrets. Failed runs
+are retained with their reason and never substituted into the successful
+sample set. Changed CLI/account/tool conditions require a new comparison set.
+
+Toolbox defaults are an intentional exception to an otherwise matched
+environment: old `c8052373` can inherit operator skills that the new scoped
+default excludes. Keep that integrated before/after result, but report the
+changed catalog and do not attribute all its gain to delivery or resume. For
+C3, either use an explicit compatibility configuration with equal native
+catalogs, or make a three-pair ablation on the same integrated toolbox build
+with only the cache change absent/present. Record both binary/config revisions;
+never describe that additional control as unmodified `c8052373`. Scoped-default
+cost and matched-prefix cost are separate results.
+
+Include unchanged-roster resume, added/removed-roster resume, a model-backed
+join (the inexpensive shell observer alone is insufficient), ordinary
+mid-turn delivery plus its next turn, large-context compaction, and an actual
+last-observed-request gap over 300 seconds. A one-hour case requires a measured
+gap strictly over 3,600 seconds. One long-gap pair is coverage only; a claimed
+one-hour benefit needs three pairs. Measure the native TTL bucket where it
+exists: a five-minute gap is not expiry of a one-hour Claude entry or Codex's
+30-minute minimum; even a longer gap does not prove eviction. Never fabricate
+an expiry outcome when the provider retains the entry.
+
+**Metrics.** For every runtime, role, model and step, publish the first request
+and all requests through that step's completion, plus the preceding matched
+control. Let `I` be total input, `R` cache reads, `W` explicit writes, and
+`U = I - R`. Preserve missing `W` as null and observed zero as zero. Report
+`sum(R)/sum(I)`, `sum(U)`, `sum(W)` where known, output tokens, request count,
+priced cost bounds, elapsed time and message queue/consumption latency. Include
+collector source ids, timestamps, direct diagnostic markers and coverage.
+Temporal joins alone are labeled associations.
+
+Keep three evidence layers separate: (1) generated standing artifacts and
+appended context, (2) native persisted context such as Codex's
+`session_meta.base_instructions`, developer messages and `dynamic_tools`, and
+(3) ordered catalog/request rendering from an isolated synthetic probe using
+fixture MCP servers and a fake endpoint, as in the toolbox capability probes.
+The paid lifecycle workload requires no provider-request interception or
+credential copying. Compare pinned MCP snapshots separately. Record byte
+counts, hashes and longest common prefixes where available. Raw content stays
+in private fixture evidence; committed reports contain sanitized numbers and
+hashes. Native persisted context is not the complete provider wire payload.
+Claude's unavailable full request prefix stays unknown. Byte tests, scoped
+native evidence and paired usage may demonstrate a narrower result; neither
+launch-file equality nor an absent diagnostic proves whole-request equality.
+Never infer token positions from byte counts. Use
+`baseline.mjs --session-file` for only the fixture's new sessions,
+as documented in [the collector contract](../scripts/cache/README-baseline.md).
+
+| Gate | Claude Code target | Codex target | Supported pi target |
+| --- | --- | --- | --- |
+| C1: delivery and prefix integrity | D1 ordinary traffic makes zero historical-message edits and reaches the correct next turn; immediate operator path preserved. D3 standing artifacts identical on unchanged-policy resume; roster updates appended once. | Existing queued path and reply recipients preserved; full composed developer bytes stable, native application of resume changes recorded. | Follow-up delivery and preserved identity verified natively; no inference from GSD. |
+| C2: warm control | Three-pair median token hit rate no more than 0.5 percentage points below that runtime's lifecycle-before median. | Same 0.5-point non-regression margin, relative to the new lifecycle series, not a demand to exceed the historical 97.8449%. | No numerical threshold claimed without a before-series; require three pairs on one named provider/model first. |
+| C3: avoidable event cost | For an affected-model fold/resume scenario with positive excess in at least two of three before-runs, target at least 50% reduction in median excess `U`, improvement in at least two pairs, and no ordinary queued-delivery history-change diagnostic in the after-series. | If resume has measurable excess, same reduction target. If it does not, require C1/C2 and report stability, not invented savings. | After a provider baseline, same event/control comparison; until then only catalog/correctness results are accepted. |
+| C4: retention/compaction controls | Report unavoidable new summary/expired-context writes separately. No added keep-alive or compaction request; one requested compaction still completes and the next work is correct. A TTL experiment must lower total priced step cost, not only improve hits. | Same no-extra-wake and completion gates; do not classify a five-minute gap as expired by assumption. | No TTL setting or benefit claim without supported provider evidence. |
+| C5: toolbox stability | Exact pinned definitions and native catalog/order checks pass T03/T16 with tool search enabled and disabled/alwaysLoad. | Exact native catalog/loaded-schema evidence and deterministic generated overrides. | Randomized connection delays produce an identical final native catalog before the first request, or the cache guarantee remains incomplete. |
+
+For C3, define the event's excess as `U_event - U_control` over equally bounded
+first-post-step requests, then publish the full step totals as a check. Pair
+successful runs by preregistered ordinal (before 1 with after 1, and so on),
+and require the control and event's immediately preceding input sizes to be
+within 10% for the normalized event comparison. Outside that range, retain
+the full totals but mark that comparison unmatched; do not select a better
+pair after seeing the outcome. Freeze this rule with the runner before the
+candidate series. Use a materiality floor of the larger of 4,096 tokens or 10% of the
+pre-step input to avoid calling small normal tail growth a history rewrite.
+If the before excess is below that floor, report no measured opportunity for
+that model. Haiku's absence of fold diagnostics cannot validate the production
+Opus claim: add three same-model fold pairs from a model that reproduces the
+mechanism before claiming that benefit. This is a separate priced QA subcase,
+subject to the same per-run budget; it is not permission for unbounded runs.
+
+Across the complete comparable workload, median upper API-equivalent cost must
+not rise more than 5%, and every fixed task/review/output oracle must pass.
+Report all paired values and their range; three pairs are an engineering gate,
+not a statistical significance claim. More cached reads bought by extra
+requests do not pass. D4 must reduce targeted duplicate wake requests to zero
+in the deterministic obligation fixtures, while required wakes remain intact.
+Ordinary D1 latency may include the remaining running turn plus the existing
+five-second gather cap and measured transport overhead; publish that tradeoff.
+Idle delivery and immediate operator/control handling must not gain a new
+wait. Any stuck queue, lost message or incorrect reply recipient fails the gate
+regardless of token savings.
+
+### Implementation cards and ownership
+
+Orchestrator creates the cards. These are file ownership suggestions, not
+permission for concurrent edits in another slice's files. Toolbox work already
+underway keeps its current owners.
+
+| Proposed card | Owner | Files and boundary | Acceptance |
+| --- | --- | --- | --- |
+| `cache-delivery` | runtime | `daemon/delivery.rs`, delivery/turn accounting hooks, `assets/crew-bridge.register.ts`, related daemon/native-bridge tests. One owner covers durable queue, native submit/ack and turn recipients together. | D1; C1/C3 and message-latency/correctness gates. |
+| `cache-standing-prompts` | native-architect | `agents/prompt.rs`, new prompt snapshot module, `AgentLocal` manifest field and `supervisor/launch.rs` assembly; narrow adapter changes for full standing-artifact reuse. Starts after graph's `toolbox-launch` changes to these files land, or uses an explicitly agreed merge checkpoint. | D3; byte regressions, changed-roster native resume and model-backed join, C1/C2/C3. |
+| `cache-obligation-wakes` | content | `daemon/turns.rs` obligation checks, `orchestrate.rs` non-mutating review-state acknowledgement, `supervisor/health.rs` only as required; tests. Serialize any shared turn-accounting edits with `cache-delivery`. | D4; no masked unfinished work or occupied review slots; request-count/cost evidence. |
+| Existing `toolbox-launch` / `toolbox-mcp-cli` plus a pi-order follow-up if required | graph / scheduler | Existing per-server proxy/pin APIs, role in launch identity, native registration barrier in `assets/crew-pi.ts`. Do not duplicate snapshot ownership in the prompt module. | D6; toolbox T03/T07/T11/T14/T16/T18/T20/T21 and C5. |
+| `cache-acceptance` | qa, with runtime for collector changes | `scripts/cache/`, lifecycle template and sanitized reports under `notes/prompt-cache/`; no product adapters. Include effective TTL configuration evidence and the affected-model fold subcase. | Three matched lifecycle runs per side, native and byte evidence, C1–C5, documented no-op/unknown outcomes. |
+
+D2's existing endpoint override needs documentation and measurement, not a new
+configuration family. D5 changes no automatic policy in this phase. A future
+keep-alive, pi TTL/deferred-exposure, paginated tool-output or optional
+model-return policy needs its own measured proposal. First land correctness
+and deterministic bytes; then judge cache and completion cost on the stated
+workload, without changing the workload to manufacture the result.

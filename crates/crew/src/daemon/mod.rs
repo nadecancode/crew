@@ -25,8 +25,6 @@ use crate::message_bus::{LocalBus, MessageBus, NewMessage, SendOutcome};
 use crate::persistence::{NewEvent, SqliteStore, Store};
 use crate::process::{PaneMeta, ProcEvent, ProcessManager};
 
-mod toolbox;
-
 pub(crate) mod binary;
 mod context;
 mod dashboard;
@@ -46,6 +44,7 @@ pub(crate) mod server;
 mod subagents;
 mod supervisor;
 mod team;
+mod toolbox;
 mod toolbox_rpc;
 mod turns;
 

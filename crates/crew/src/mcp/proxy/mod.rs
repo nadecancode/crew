@@ -28,6 +28,7 @@ use crew_core::toolbox::McpServer;
 use serde_json::{json, Value};
 use sha2::{Digest as _, Sha256};
 
+mod http;
 mod stdio;
 
 /// How long a preflight may take: starting or connecting to the server,
@@ -50,6 +51,9 @@ pub(crate) enum Event {
     Upstream(Value),
     /// The server went away, with what is known of why.
     UpstreamClosed(String),
+    /// The proxy's connection to the server, made off the main loop, or
+    /// why there is none.
+    Connected(Result<Box<dyn Connection>, String>),
 }
 
 /// A connection to the server: messages go out with `send`; what comes back
@@ -60,9 +64,12 @@ pub(crate) trait Connection: Send {
     fn close(&mut self);
 }
 
+/// Start or reach the server. `overall`, when given, bounds every wait on
+/// a remote one (a preflight's deadline).
 fn connect(
     launch: &ToolboxServerLaunch,
     events: mpsc::Sender<Event>,
+    overall: Option<Instant>,
 ) -> Result<Box<dyn Connection>> {
     match &launch.upstream {
         Upstream::Stdio { command, cwd, env } => Ok(Box::new(stdio::Child::start(
@@ -70,11 +77,14 @@ fn connect(
             cwd.as_deref(),
             env,
             &launch.scrub,
+            Redactor::new(launch),
             events,
         )?)),
-        Upstream::Http { url, .. } => {
-            bail!("remote toolbox servers are not bridged yet (crew bridge pending): {url}")
-        }
+        Upstream::Http {
+            url,
+            transport,
+            headers,
+        } => http::connect(url, *transport, headers, events, overall),
     }
 }
 
@@ -313,13 +323,16 @@ pub fn definition_digest(agent_dir: &Path, names: &[String]) -> Option<Definitio
     })
 }
 
-/// Replaces exact occurrences of secret values in what the server says.
-struct Redactor {
+/// Replaces exact occurrences of secret values in what the server says:
+/// every message, listing, snapshot, failure reason and log line that
+/// leaves the proxy.
+#[derive(Clone)]
+pub(crate) struct Redactor {
     values: Vec<(String, String)>,
 }
 
 impl Redactor {
-    fn new(launch: &ToolboxServerLaunch) -> Self {
+    pub(crate) fn new(launch: &ToolboxServerLaunch) -> Self {
         let mut values: Vec<(String, String)> = launch
             .redact
             .iter()
@@ -331,20 +344,34 @@ impl Redactor {
         Redactor { values }
     }
 
-    fn apply(&self, value: &mut Value) {
+    /// `text` with every secret value replaced.
+    pub(crate) fn text(&self, text: &str) -> String {
+        let mut text = text.to_string();
+        for (secret, shown) in &self.values {
+            if text.contains(secret.as_str()) {
+                text = text.replace(secret.as_str(), shown);
+            }
+        }
+        text
+    }
+
+    /// `value` with every secret value replaced, in strings and in keys.
+    pub(crate) fn apply(&self, value: &mut Value) {
         if self.values.is_empty() {
             return;
         }
         match value {
-            Value::String(text) => {
-                for (secret, shown) in &self.values {
-                    if text.contains(secret.as_str()) {
-                        *text = text.replace(secret.as_str(), shown);
-                    }
-                }
-            }
+            Value::String(text) => *text = self.text(text),
             Value::Array(items) => items.iter_mut().for_each(|v| self.apply(v)),
-            Value::Object(map) => map.values_mut().for_each(|v| self.apply(v)),
+            Value::Object(map) => {
+                if map.keys().any(|k| self.text(k) != *k) {
+                    *map = std::mem::take(map)
+                        .into_iter()
+                        .map(|(k, v)| (self.text(&k), v))
+                        .collect();
+                }
+                map.values_mut().for_each(|v| self.apply(v));
+            }
             _ => {}
         }
     }
@@ -353,20 +380,28 @@ impl Redactor {
 /// `text` with the server's secret values replaced, for what goes to the
 /// daemon (a preflight's reason, a report).
 pub fn redacted(launch: &ToolboxServerLaunch, text: &str) -> String {
-    let mut value = Value::String(text.to_string());
-    Redactor::new(launch).apply(&mut value);
-    match value {
-        Value::String(text) => text,
-        _ => unreachable!("a string stays a string"),
-    }
+    Redactor::new(launch).text(text)
 }
 
 /// Ask the server for its `initialize` result and every page of its tools
-/// within `within`, then stop it.
+/// within `within`, then stop it. The listing, which the daemon pins, and
+/// the reason for a failure come back redacted.
 pub fn preflight(launch: &ToolboxServerLaunch, within: Duration) -> Result<Listing> {
+    let redactor = Redactor::new(launch);
+    match live_listing(launch, within) {
+        Ok(mut listing) => {
+            redactor.apply(&mut listing.initialize);
+            listing.tools.iter_mut().for_each(|t| redactor.apply(t));
+            Ok(listing)
+        }
+        Err(e) => Err(anyhow!(redactor.text(&format!("{e:#}")))),
+    }
+}
+
+fn live_listing(launch: &ToolboxServerLaunch, within: Duration) -> Result<Listing> {
     let deadline = Instant::now() + within;
     let (tx, rx) = mpsc::channel();
-    let mut connection = connect(launch, tx)?;
+    let mut connection = connect(launch, tx, Some(deadline))?;
     let result = (|| {
         let mut session = Handshake::default();
         let initialize = session.request(
@@ -423,7 +458,10 @@ impl Handshake {
                 Ok(Event::Upstream(message)) if message.get("id") == Some(&id) => {
                     return answer(message, method);
                 }
-                Ok(Event::Upstream(_)) | Ok(Event::Runtime(_)) | Ok(Event::RuntimeClosed) => {}
+                Ok(Event::Upstream(_))
+                | Ok(Event::Runtime(_))
+                | Ok(Event::RuntimeClosed)
+                | Ok(Event::Connected(_)) => {}
                 Ok(Event::UpstreamClosed(why)) => {
                     bail!("the server stopped during {method}: {why}")
                 }
@@ -533,9 +571,20 @@ pub fn serve(
         }
         let _ = reader.send(Event::RuntimeClosed);
     });
+    let redactor = Redactor::new(launch);
+    // Served redacted too, whenever and however it was pinned.
+    let snapshot = snapshot.map(|pinned| {
+        let mut listing = Listing {
+            initialize: pinned.initialize,
+            tools: pinned.tools,
+        };
+        redactor.apply(&mut listing.initialize);
+        listing.tools.iter_mut().for_each(|t| redactor.apply(t));
+        Snapshot::of(&pinned.definition, &listing)
+    });
     let mut session = Session {
         launch,
-        redactor: Redactor::new(launch),
+        redactor,
         output,
         connection: None,
         down: None,
@@ -549,26 +598,31 @@ pub fn serve(
         listed: false,
         open: HashSet::new(),
     };
-    match connect(launch, tx) {
-        Ok(connection) => {
-            session.connection = Some(connection);
-            let protocol = session
-                .snapshot
-                .as_ref()
-                .and_then(|s| s.initialize.get("protocolVersion"))
-                .and_then(Value::as_str)
-                .filter(|v| PROTOCOLS.contains(v))
-                .unwrap_or(PROTOCOLS[0])
-                .to_string();
-            session.ask("initialize", initialize_params(&protocol), report)?;
-        }
-        Err(e) => session.fail(format!("{e:#}"), report)?,
-    }
+    // Reaching a remote server can take until its deadlines; meanwhile the
+    // runtime is answered from the pinned snapshot.
+    let connecting = launch.clone();
+    std::thread::spawn(move || {
+        let connection = connect(&connecting, tx.clone(), None).map_err(|e| format!("{e:#}"));
+        let _ = tx.send(Event::Connected(connection));
+    });
     for event in rx.iter() {
         match event {
             Event::RuntimeClosed => break,
-            Event::Runtime(message) => session.from_runtime(message)?,
-            Event::Upstream(message) => session.from_server(message, report)?,
+            Event::Connected(Ok(connection)) => {
+                session.connection = Some(connection);
+                let protocol = session
+                    .snapshot
+                    .as_ref()
+                    .and_then(|s| s.initialize.get("protocolVersion"))
+                    .and_then(Value::as_str)
+                    .filter(|v| PROTOCOLS.contains(v))
+                    .unwrap_or(PROTOCOLS[0])
+                    .to_string();
+                session.ask("initialize", initialize_params(&protocol), report)?;
+            }
+            Event::Connected(Err(why)) => session.fail(why, report)?,
+            Event::Runtime(message) => session.on_runtime(message)?,
+            Event::Upstream(message) => session.on_server(message, report)?,
             Event::UpstreamClosed(why) => session.fail(why, report)?,
         }
     }
@@ -655,7 +709,7 @@ impl<W: Write> Session<'_, W> {
         }))
     }
 
-    fn from_runtime(&mut self, message: Value) -> Result<()> {
+    fn on_runtime(&mut self, message: Value) -> Result<()> {
         if !message.is_object() {
             return self.write(&json!({
                 "jsonrpc": "2.0", "id": Value::Null,
@@ -721,11 +775,14 @@ impl<W: Write> Session<'_, W> {
         Ok(())
     }
 
-    fn from_server(
+    fn on_server(
         &mut self,
         mut message: Value,
         report: &mut dyn FnMut(ToolboxReportKind, String),
     ) -> Result<()> {
+        // Before anything reads it: answers to the proxy's own requests
+        // become the snapshot and reports, errors become failure reasons.
+        self.redactor.apply(&mut message);
         let own = message
             .get("id")
             .and_then(Value::as_str)
@@ -754,7 +811,6 @@ impl<W: Write> Session<'_, W> {
                 self.open.remove(&id.to_string());
             }
         }
-        self.redactor.apply(&mut message);
         self.write(&message)
     }
 
@@ -780,7 +836,7 @@ impl<W: Write> Session<'_, W> {
         // the listing when there is no pinned one.
         let waiting: Vec<Value> = self.queued.drain(..).collect();
         for message in waiting {
-            self.from_runtime(message)?;
+            self.on_runtime(message)?;
         }
         Ok(())
     }
@@ -831,7 +887,7 @@ impl<W: Write> Session<'_, W> {
             self.listed = true;
             let waiting: Vec<Value> = self.queued.drain(..).collect();
             for message in waiting {
-                self.from_runtime(message)?;
+                self.on_runtime(message)?;
             }
         }
         Ok(())
@@ -848,6 +904,7 @@ impl<W: Write> Session<'_, W> {
         if self.down.is_some() {
             return Ok(());
         }
+        let why = self.redactor.text(&why);
         report(ToolboxReportKind::Failed, why.clone());
         if let Some(mut connection) = self.connection.take() {
             connection.close();
@@ -855,7 +912,7 @@ impl<W: Write> Session<'_, W> {
         self.down = Some(why);
         let waiting: Vec<Value> = self.queued.drain(..).collect();
         for message in waiting {
-            self.from_runtime(message)?;
+            self.on_runtime(message)?;
         }
         let open: Vec<String> = self.open.drain().collect();
         for id in open {
@@ -866,4 +923,24 @@ impl<W: Write> Session<'_, W> {
         }
         Ok(())
     }
+}
+
+/// Copy the pinned snapshots of servers `names` from one agent directory to
+/// another (a subagent serves its parent's definitions). A server without
+/// a snapshot is left without one.
+pub fn copy_snapshots(from: &Path, to: &Path, names: &[String]) -> Result<()> {
+    for name in names {
+        let source = snapshot_path(from, name);
+        let bytes = match std::fs::read(&source) {
+            Ok(bytes) => bytes,
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => continue,
+            Err(e) => return Err(e).with_context(|| format!("reading {}", source.display())),
+        };
+        let target = snapshot_path(to, name);
+        crew_core::paths::ensure_private_dir(
+            target.parent().expect("a snapshot path has a parent"),
+        )?;
+        crew_core::paths::write_private_file(&target, &bytes)?;
+    }
+    Ok(())
 }

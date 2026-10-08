@@ -15,6 +15,8 @@ use crew_core::rpc::{
     MemberToolbox, Redaction, RpcError, ToolboxReportKind, ToolboxServerLaunch, Upstream,
 };
 use crew_core::toolbox::{Content, Fingerprint, Item, ItemKind, Reference, Resolved, Toolbox};
+
+use crate::agents::toolbox::ActiveToolbox;
 use crew_core::types::{
     AgentToolbox, ToolboxItem, ToolboxItemCode, ToolboxItemKind, ToolboxItemStatus,
 };
@@ -45,20 +47,6 @@ fn member_level<'a>(team: &'a TeamConfig, agent: &Agent) -> (&'a Toolbox, String
     }
 }
 
-/// What a reference resolves to, or the name of the variable it needs.
-fn resolve_reference(reference: &Reference) -> Result<String, String> {
-    match reference {
-        Reference::Value(value) => Ok(value.clone()),
-        Reference::Env { name, format } => {
-            let value = std::env::var(name).map_err(|_| name.clone())?;
-            Ok(match format {
-                Some(format) => format.replacen("{}", &value, 1),
-                None => value,
-            })
-        }
-    }
-}
-
 fn env_names(server: &crew_core::toolbox::McpServer) -> impl Iterator<Item = &str> {
     server
         .env
@@ -82,21 +70,6 @@ impl Daemon {
             .map_err(|e| RpcError::invalid(format!("{e:#}")))
     }
 
-    /// The member's secret names: every variable its toolbox references
-    /// (removed from what its servers inherit).
-    fn secret_names(&self, resolved: &Resolved) -> Vec<String> {
-        let names: BTreeSet<&str> = resolved
-            .items
-            .values()
-            .filter_map(|r| match &r.item {
-                Item::Mcp(server) => Some(env_names(server)),
-                _ => None,
-            })
-            .flatten()
-            .collect();
-        names.into_iter().map(str::to_string).collect()
-    }
-
     /// `Call::ToolboxServer`: how agent `id`'s `crew toolbox mcp <name>`
     /// reaches the server, references resolved. Only for the caller's own
     /// toolbox; nothing of it is logged.
@@ -109,35 +82,66 @@ impl Daemon {
         let agent = self
             .agent(id)
             .ok_or_else(|| RpcError::not_found(format!("no agent '{id}'")))?;
-        let resolved = self.member_toolbox(&agent)?;
-        let item = crew_core::toolbox::ItemRef::new(ItemKind::Mcp, name);
-        let Some(Item::Mcp(server)) = resolved.items.get(&item).map(|r| &r.item) else {
-            return Err(RpcError::not_found(format!(
-                "{id}'s toolbox has no MCP server '{name}'"
-            )));
+        // The toolbox its session was started with; before toolbox-launch
+        // records one, its configuration.
+        let (resolved, server, refresh) = match self.active_toolbox(id) {
+            Some(active) => {
+                let (server, refresh) = self.toolbox_item(id, name)?;
+                (active.resolved, server, refresh)
+            }
+            None => {
+                let resolved = self.member_toolbox(&agent)?;
+                let item = crew_core::toolbox::ItemRef::new(ItemKind::Mcp, name);
+                let Some(Item::Mcp(server)) = resolved.items.get(&item).map(|r| r.item.clone())
+                else {
+                    return Err(RpcError::not_found(format!(
+                        "{id}'s toolbox has no MCP server '{name}'"
+                    )));
+                };
+                (resolved, server, false)
+            }
         };
-        let mut redact = Vec::new();
-        let mut resolve_map =
-            |map: &BTreeMap<String, Reference>| -> Result<BTreeMap<String, String>, RpcError> {
-                let mut out = BTreeMap::new();
-                for (key, reference) in map {
-                    let value = resolve_reference(reference)
-                        .map_err(|missing| RpcError::invalid(format!("Needs ${missing}")))?;
-                    if let Reference::Env { name, .. } = reference {
-                        redact.push(Redaction {
-                            name: name.clone(),
-                            value: value.clone(),
-                        });
-                    }
-                    out.insert(key.clone(), value);
-                }
-                Ok(out)
+        let server = &server;
+        // References resolve from the crew config's toolbox_env and the
+        // daemon's environment (endpoints::toolbox), never from the
+        // member's own model credentials.
+        let layers = crate::endpoints::Layers::load(&self.workspace);
+        let parent = agent.parent.as_deref();
+        let references = layers
+            .toolbox_references(agent.runtime, id, parent, server)
+            .map_err(|e| RpcError::invalid(format!("{e:#}")))?;
+        if let Some(missing) = references.missing.iter().next() {
+            return Err(RpcError::invalid(format!("Needs ${missing}")));
+        }
+        let expose =
+            |map: &BTreeMap<String, crate::endpoints::Secret>| -> BTreeMap<String, String> {
+                map.iter()
+                    .map(|(k, v)| (k.clone(), v.expose().to_string()))
+                    .collect()
             };
+        let redact = references
+            .redactions
+            .iter()
+            .map(|(name, value)| Redaction {
+                name: name.clone(),
+                value: value.expose().to_string(),
+            })
+            .collect();
+        // Every secret name of the member, not only this server's: no server
+        // inherits another's credential from the session.
+        let mut scrub: BTreeSet<String> = references.scrub.clone();
+        for entry in resolved.items.values() {
+            if let Item::Mcp(other) = &entry.item {
+                if let Ok(theirs) = layers.toolbox_references(agent.runtime, id, parent, other) {
+                    scrub.extend(theirs.scrub);
+                }
+            }
+        }
         let upstream = match &server.url {
             Some(url) => Upstream::Http {
                 url: url.clone(),
                 transport: server.transport.unwrap_or_default(),
-                headers: resolve_map(&server.headers)?,
+                headers: expose(&references.headers),
             },
             None => Upstream::Stdio {
                 command: server.command.clone(),
@@ -147,19 +151,19 @@ impl Daemon {
                         .to_string_lossy()
                         .into_owned()
                 }),
-                env: resolve_map(&server.env)?,
+                env: expose(&references.env),
             },
         };
         Ok(ToolboxServerLaunch {
             name: name.to_string(),
             upstream,
             redact,
-            scrub: self.secret_names(&resolved),
+            scrub: scrub.into_iter().collect(),
             definition: proxy::definition_hash(server),
             snapshot: proxy::snapshot_path(&self.agent_dir(id), name)
                 .to_string_lossy()
                 .into_owned(),
-            refresh: false,
+            refresh,
         })
     }
 
@@ -174,15 +178,7 @@ impl Daemon {
         let detail = crew_core::util::truncate_chars(&crew_core::util::one_line(detail), 400);
         match kind {
             ToolboxReportKind::Failed => {
-                self.emit(
-                    NewEvent::new(
-                        "daemon",
-                        "toolbox.failed",
-                        format!("{id}'s toolbox server {name} failed in session: {detail}"),
-                    )
-                    .agent(id)
-                    .warn(),
-                );
+                self.toolbox_failed_in_session(id, name, &detail);
                 self.notify_orchestrator(&format!(
                     "{id}'s toolbox server {name} failed in session ({detail}). Its session keeps \
 running without it; a restart starts it again."
@@ -202,23 +198,22 @@ running without it; a restart starts it again."
         }
     }
 
-    /// A member's toolbox as it shows: the one its session runs with when it
-    /// has run (`Agent.toolbox`), else how its configuration would map onto
-    /// `runtime` (its own when left out).
+    /// A member's toolbox as it shows. Without `runtime`, the one its session
+    /// runs with when it has run (`Agent.toolbox`). With `runtime`, or before
+    /// it has run, how its configuration would map onto that runtime (its own
+    /// when left out) at the next launch.
     pub(crate) fn toolbox_view(
         &self,
         agent: &Agent,
         runtime: Option<RuntimeKind>,
     ) -> Result<MemberToolbox, RpcError> {
-        if runtime.is_none_or(|r| r == agent.runtime) {
-            if let Some(toolbox) = &agent.toolbox {
-                return Ok(MemberToolbox {
-                    agent: agent.id.clone(),
-                    runtime: agent.runtime,
-                    toolbox: toolbox.clone(),
-                    stops: Vec::new(),
-                });
-            }
+        if let (None, Some(toolbox)) = (runtime, &agent.toolbox) {
+            return Ok(MemberToolbox {
+                agent: agent.id.clone(),
+                runtime: agent.runtime,
+                toolbox: toolbox.clone(),
+                stops: Vec::new(),
+            });
         }
         let runtime = runtime.unwrap_or(agent.runtime);
         let resolved = self.member_toolbox(agent)?;
@@ -337,4 +332,180 @@ fn detail(item: &Item) -> Option<String> {
         out.push_str(&refs.join(", "));
     }
     Some(out)
+}
+
+impl Daemon {
+    /// Whether `agent` may move to `runtime`: refused when its toolbox maps
+    /// there with a required item that would not load, with that item's
+    /// reason.
+    pub(crate) fn toolbox_switch_check(
+        &self,
+        agent: &Agent,
+        runtime: RuntimeKind,
+    ) -> Result<(), RpcError> {
+        let view = self.toolbox_view(agent, Some(runtime))?;
+        match view.stops.first() {
+            Some(stop) => Err(RpcError::invalid(format!(
+                "{} cannot move to {}: {stop}",
+                agent.id,
+                crate::models::runtime_label(runtime)
+            ))),
+            None => Ok(()),
+        }
+    }
+
+    /// The bundles an agent may name for a new member (`agent_add`): names
+    /// of the team's `toolboxes`, nothing else.
+    pub(crate) fn check_bundle_selection(&self, toolbox: &Toolbox) -> Result<(), RpcError> {
+        let selection_only = Toolbox {
+            include: toolbox.include.clone(),
+            ..Toolbox::default()
+        };
+        if *toolbox != selection_only {
+            return Err(RpcError::forbidden(
+                "an agent chooses bundles by name; toolbox items are defined in the team file",
+            ));
+        }
+        let model = self.model();
+        let bundles: Vec<&str> = model
+            .session
+            .team
+            .as_ref()
+            .map(|t| t.toolboxes.keys().map(String::as_str).collect())
+            .unwrap_or_default();
+        for name in &toolbox.include {
+            if !bundles.contains(&name.as_str()) {
+                return Err(RpcError::invalid(if bundles.is_empty() {
+                    format!("Unknown toolbox \"{name}\". This team defines no toolboxes.")
+                } else {
+                    format!(
+                        "Unknown toolbox \"{name}\". Toolboxes in this team: {}.",
+                        bundles.join(", ")
+                    )
+                }));
+            }
+        }
+        Ok(())
+    }
+}
+
+impl Daemon {
+    /// What a new subagent of `parent` gets (notes/toolboxes.md, Orchestrator
+    /// tools, `agent_spawn`): by default a copy of the parent's active
+    /// toolbox; with `selection`, only those bundles, resolved against the
+    /// team's current definitions, each item equal to the parent's (the same
+    /// definition and, for a file, the same content). A worker cannot grant
+    /// more than it has. Checked before the subagent is created.
+    pub(crate) fn subagent_toolbox(
+        &self,
+        parent: &str,
+        selection: Option<Vec<String>>,
+    ) -> Result<Option<ActiveToolbox>, RpcError> {
+        let Some(active) = self.active_toolbox(parent) else {
+            return match selection {
+                Some(names) if !names.is_empty() => Err(RpcError::invalid(
+                    "you run without a toolbox: there is nothing to give a subagent",
+                )),
+                _ => Ok(None),
+            };
+        };
+        let Some(names) = selection else {
+            return Ok(Some(ActiveToolbox {
+                // The child's own launch fingerprints and pins what it gets.
+                fingerprint: None,
+                definition_digest: None,
+                refresh: false,
+                ..active
+            }));
+        };
+        let requested = {
+            let model = self.model();
+            let team = model
+                .session
+                .team
+                .as_ref()
+                .ok_or_else(|| RpcError::unavailable("no team is loaded"))?;
+            team.resolve_toolbox(
+                &Toolbox {
+                    include: names,
+                    reset: true,
+                    ..Toolbox::default()
+                },
+                "agent_spawn.toolbox",
+            )
+            .map_err(|e| RpcError::invalid(format!("{e:#}")))?
+        };
+        let store = std::cell::OnceCell::new();
+        let mut out = ActiveToolbox {
+            resolved: Resolved {
+                items: BTreeMap::new(),
+                sources: active.resolved.sources.clone(),
+                strict: active.resolved.strict,
+            },
+            ..ActiveToolbox::default()
+        };
+        for (item, entry) in &requested.items {
+            let Some(own) = active.resolved.items.get(item) else {
+                return Err(RpcError::invalid(format!(
+                    "{item} is not in your toolbox, so you cannot give it to a subagent"
+                )));
+            };
+            if own.item != entry.item {
+                return Err(RpcError::invalid(format!(
+                    "{item} is defined differently now than in the toolbox you were started with; \
+a subagent can only get what you have"
+                )));
+            }
+            if let (Item::File(file), Some(Content::Sha256(had))) =
+                (&entry.item, active.content.get(item))
+            {
+                let store = match store.get() {
+                    Some(store) => store,
+                    None => {
+                        let opened = crate::agents::toolbox::store::Store::open(&self.state_dir)
+                            .map_err(|e| RpcError::internal(format!("{e:#}")))?;
+                        store.get_or_init(|| opened)
+                    }
+                };
+                let now = store
+                    .snapshot(std::path::Path::new(&file.path))
+                    .map(|s| s.hash)
+                    .unwrap_or_default();
+                if now != *had {
+                    return Err(RpcError::invalid(format!(
+                        "{item}'s files changed since you were started; a subagent can only get \
+what you have"
+                    )));
+                }
+            }
+            out.resolved.items.insert(item.clone(), own.clone());
+            if let Some(content) = active.content.get(item) {
+                out.content.insert(item.clone(), content.clone());
+            }
+            if let Some(file) = active.files.get(item) {
+                out.files.insert(item.clone(), file.clone());
+            }
+            if item.kind == ItemKind::Mcp && active.servers.contains(&item.name) {
+                out.servers.insert(item.name.clone());
+            }
+        }
+        Ok(Some(out))
+    }
+
+    /// Hand a new subagent what `subagent_toolbox` chose, with the pinned
+    /// MCP snapshots of its servers copied from the parent.
+    pub(crate) fn give_subagent_toolbox(
+        &self,
+        parent: &str,
+        child: &str,
+        toolbox: Option<ActiveToolbox>,
+    ) -> Result<(), RpcError> {
+        let Some(toolbox) = toolbox else {
+            return Ok(());
+        };
+        let servers: Vec<String> = toolbox.servers.iter().cloned().collect();
+        self.inherit_toolbox(child, toolbox)?;
+        proxy::copy_snapshots(&self.agent_dir(parent), &self.agent_dir(child), &servers)
+            .map_err(|e| RpcError::internal(format!("{e:#}")))
+    }
 }

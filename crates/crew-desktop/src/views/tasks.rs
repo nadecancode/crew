@@ -230,6 +230,7 @@ fn topology(scope: &ClientScope, data: &TasksData) -> (Vec<Node>, Vec<Edge>) {
                     common::task_tone(task.status),
                 )),
                 lines,
+                warnings: Vec::new(),
                 layer: item.layer,
                 label: task_label(task),
                 relations: if relations.is_empty() {

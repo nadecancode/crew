@@ -6,7 +6,10 @@ use std::path::Path;
 use anyhow::{bail, Result};
 use crew_core::config::TeamConfig;
 use crew_core::rpc::{Call, MemberToolbox, ToolboxReload};
-use crew_core::types::{toolbox_origin_label, ToolboxItemKind, TOOLBOX_PENDING, TOOLBOX_UNPINNED};
+use crew_core::types::{
+    toolbox_origin_label, AgentToolbox, ToolboxItemCode, ToolboxItemKind, TOOLBOX_PENDING,
+    TOOLBOX_UNPINNED,
+};
 use crew_core::RuntimeKind;
 
 use super::Target;
@@ -170,4 +173,80 @@ fn render(members: &[MemberToolbox]) -> String {
         }
     }
     out
+}
+
+/// After a move to another runtime: each item that will not be active there,
+/// `plugins.lint-kit: Not applicable`.
+pub(super) fn not_loading(toolbox: &AgentToolbox) -> Vec<String> {
+    toolbox
+        .items
+        .iter()
+        .filter(|item| {
+            !matches!(
+                item.status.code,
+                ToolboxItemCode::Active | ToolboxItemCode::Planned
+            )
+        })
+        .map(|item| {
+            let kind = serde_json::to_value(item.kind)
+                .ok()
+                .and_then(|v| v.as_str().map(str::to_string))
+                .unwrap_or_default();
+            format!("{kind}.{}: {}", item.name, item.status.text)
+        })
+        .collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crew_core::types::{ToolboxItem, ToolboxItemStatus};
+
+    fn item(kind: ToolboxItemKind, name: &str, code: ToolboxItemCode, text: &str) -> ToolboxItem {
+        ToolboxItem {
+            kind,
+            name: name.into(),
+            origin: "default".into(),
+            required: false,
+            status: ToolboxItemStatus {
+                code,
+                text: text.into(),
+            },
+            detail: None,
+        }
+    }
+
+    #[test]
+    fn a_move_names_the_items_that_will_not_load() {
+        let toolbox = AgentToolbox {
+            items: vec![
+                item(
+                    ToolboxItemKind::Mcp,
+                    "context7",
+                    ToolboxItemCode::Planned,
+                    "Planned",
+                ),
+                item(
+                    ToolboxItemKind::Plugins,
+                    "lint-kit",
+                    ToolboxItemCode::NotApplicable,
+                    "Not applicable",
+                ),
+                item(
+                    ToolboxItemKind::Mcp,
+                    "shop",
+                    ToolboxItemCode::Needs,
+                    "Needs $SHOP_TOKEN",
+                ),
+            ],
+            ..AgentToolbox::default()
+        };
+        assert_eq!(
+            not_loading(&toolbox),
+            [
+                "plugins.lint-kit: Not applicable",
+                "mcp.shop: Needs $SHOP_TOKEN"
+            ]
+        );
+    }
 }

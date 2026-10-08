@@ -1,0 +1,273 @@
+{
+  "core": [
+    {
+      "name": "cycle",
+      "stage": "core",
+      "field": "toolboxes",
+      "team": {
+        "project": "invalid-toolbox",
+        "agents": [
+          {
+            "id": "member",
+            "toolbox": {
+              "include": [
+                "a"
+              ]
+            }
+          }
+        ],
+        "toolboxes": {
+          "a": {
+            "include": [
+              "b"
+            ]
+          },
+          "b": {
+            "include": [
+              "a"
+            ]
+          }
+        }
+      }
+    },
+    {
+      "name": "unknown-bundle",
+      "stage": "core",
+      "field": "agents[0].toolbox.include[0]",
+      "team": {
+        "project": "invalid-toolbox",
+        "agents": [
+          {
+            "id": "member",
+            "toolbox": {
+              "include": [
+                "missing"
+              ]
+            }
+          }
+        ]
+      }
+    },
+    {
+      "name": "unmatched-exclusion",
+      "stage": "core",
+      "field": "agents[0].toolbox.exclude[0]",
+      "team": {
+        "project": "invalid-toolbox",
+        "agents": [
+          {
+            "id": "member",
+            "toolbox": {
+              "exclude": [
+                "mcp.missing"
+              ]
+            }
+          }
+        ]
+      }
+    },
+    {
+      "name": "duplicate-exclusion",
+      "stage": "core",
+      "field": "agents[0].toolbox.exclude[1]",
+      "team": {
+        "project": "invalid-toolbox",
+        "agents": [
+          {
+            "id": "member",
+            "toolbox": {
+              "include": [
+                "base"
+              ],
+              "exclude": [
+                "mcp.context7",
+                "mcp.context7"
+              ]
+            }
+          }
+        ],
+        "toolboxes": {
+          "base": {
+            "mcp": {
+              "context7": {
+                "command": [
+                  "@PYTHON@",
+                  "@ROOT@/mcp_stub.py"
+                ],
+                "cwd": ".",
+                "env": {
+                  "FIXTURE_PUBLIC": {
+                    "value": "public-fixture-value"
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "name": "own-excluded-item",
+      "stage": "core",
+      "field": "agents[0].toolbox.exclude[0]",
+      "team": {
+        "project": "invalid-toolbox",
+        "agents": [
+          {
+            "id": "member",
+            "toolbox": {
+              "mcp": {
+                "example": {
+                  "command": [
+                    "@PYTHON@",
+                    "@ROOT@/mcp_stub.py"
+                  ]
+                }
+              },
+              "exclude": [
+                "mcp.example"
+              ]
+            }
+          }
+        ]
+      }
+    },
+    {
+      "name": "reserved-mcp",
+      "stage": "core",
+      "field": "agents[0].toolbox.mcp.crew",
+      "team": {
+        "project": "invalid-toolbox",
+        "agents": [
+          {
+            "id": "member",
+            "toolbox": {
+              "mcp": {
+                "crew": {
+                  "command": [
+                    "@PYTHON@",
+                    "@ROOT@/mcp_stub.py"
+                  ]
+                }
+              }
+            }
+          }
+        ]
+      }
+    },
+    {
+      "name": "reserved-item",
+      "stage": "core",
+      "field": "agents[0].toolbox.skills.crew-toolbox",
+      "team": {
+        "project": "invalid-toolbox",
+        "agents": [
+          {
+            "id": "member",
+            "toolbox": {
+              "skills": {
+                "crew-toolbox": {
+                  "path": "../items/skills/shared"
+                }
+              }
+            }
+          }
+        ]
+      }
+    },
+    {
+      "name": "plain-reference",
+      "stage": "core",
+      "field": "toolbox.mcp",
+      "team": {
+        "project": "invalid-toolbox",
+        "agents": [
+          {
+            "id": "member",
+            "toolbox": {
+              "mcp": {
+                "example": {
+                  "command": [
+                    "@PYTHON@",
+                    "@ROOT@/mcp_stub.py"
+                  ],
+                  "env": {
+                    "TOKEN": "not-a-reference"
+                  }
+                }
+              }
+            }
+          }
+        ]
+      }
+    },
+    {
+      "name": "legacy-inherit-conflict",
+      "stage": "core",
+      "field": "defaults",
+      "team": {
+        "project": "invalid-toolbox",
+        "agents": [
+          {
+            "id": "member"
+          }
+        ],
+        "defaults": {
+          "inherit_mcp": true,
+          "toolbox": {
+            "inherit": {
+              "operator": "none"
+            }
+          }
+        }
+      }
+    },
+    {
+      "name": "protected-reference",
+      "stage": "core",
+      "field": "agents[0].toolbox.mcp.example.env.TOKEN",
+      "team": {
+        "project": "invalid-toolbox",
+        "agents": [
+          {
+            "id": "member",
+            "toolbox": {
+              "mcp": {
+                "example": {
+                  "command": [
+                    "@PYTHON@",
+                    "@ROOT@/mcp_stub.py"
+                  ],
+                  "env": {
+                    "TOKEN": {
+                      "env": "OPENAI_API_KEY"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        ]
+      }
+    }
+  ],
+  "launch": [
+    {
+      "name": "endpoint-reference",
+      "reference": "ENDPOINT_SENTINEL",
+      "expected_field": "ENDPOINT_SENTINEL"
+    },
+    {
+      "name": "model-alias",
+      "reference": "SHOP_TOKEN",
+      "source": "OPENAI_API_KEY",
+      "expected_field": "OPENAI_API_KEY"
+    },
+    {
+      "name": "endpoint-alias",
+      "reference": "SHOP_TOKEN",
+      "source": "ENDPOINT_SENTINEL",
+      "expected_field": "ENDPOINT_SENTINEL"
+    }
+  ]
+}

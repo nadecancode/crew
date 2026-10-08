@@ -2548,6 +2548,173 @@ fn an_added_agent_s_toolbox_is_checked_against_the_team() {
     assert!(roster.toolboxes.contains_key("web"));
 }
 
+/// T20, first clause: `crew toolbox check` maps a team file's toolboxes
+/// before anything runs, so its items are Planned (or why they would not
+/// load), never Active; a required item that would not load stops the
+/// check, naming the reference, and an optional one does not.
+#[test]
+fn toolbox_check_shows_planned_items_and_stops_on_a_required_one() {
+    if common::test_support::isolate_operator_test(
+        "toolbox_check_shows_planned_items_and_stops_on_a_required_one",
+    ) {
+        return;
+    }
+    let s = Session::new();
+    let mut team = s.team("toolbox-check", vec![agent("a", "", &[])], vec![]);
+    team.defaults.command = scripted(&[]);
+    team.workspace.isolation = crew_core::config::Isolation::Shared;
+    team.workspace.init = false;
+    std::fs::create_dir_all(&s.workspace).unwrap();
+    s.run(&team);
+    let ws = s.workspace.to_string_lossy().into_owned();
+
+    let check = |name: &str, required: bool| {
+        let mut checked = team.clone();
+        checked.toolboxes = serde_json::from_value(json!({
+            "web": { "mcp": { "context7": { "command": ["ctx", "--stdio"] } } },
+            "shop": { "mcp": { "shop": {
+                "command": ["shop-mcp"],
+                "env": { "SHOP_TOKEN": { "env": "CREW_T20_NEVER_SET_TOKEN" } },
+                "required": required,
+            } } },
+        }))
+        .unwrap();
+        // Mapped onto Claude Code, where MCP servers load (a scripted agent
+        // runs as a shell, where nothing does).
+        checked.agents[0].runtime = Some(crew_core::RuntimeKind::Claude);
+        checked.agents[0].toolbox.include = vec!["web".into(), "shop".into()];
+        let file = s.root().join(name);
+        std::fs::write(&file, checked.to_yaml().unwrap()).unwrap();
+        let out = s.crew(&[
+            "toolbox",
+            "check",
+            &file.to_string_lossy(),
+            "--json",
+            "-C",
+            &ws,
+        ]);
+        let members: Vec<crew_core::rpc::MemberToolbox> = serde_json::from_slice(&out.stdout)
+            .unwrap_or_else(|e| {
+                panic!(
+                    "{e}: {}{}",
+                    String::from_utf8_lossy(&out.stdout),
+                    String::from_utf8_lossy(&out.stderr)
+                )
+            });
+        (out, members)
+    };
+
+    let (out, members) = check("required.yaml", true);
+    let a = members.iter().find(|m| m.agent == "a").unwrap();
+    let status = |name: &str| {
+        let item = a.toolbox.items.iter().find(|i| i.name == name).unwrap();
+        (item.status.code, item.status.text.clone())
+    };
+    use crew_core::types::ToolboxItemCode;
+    assert_eq!(
+        status("context7"),
+        (ToolboxItemCode::Planned, "Planned".into())
+    );
+    assert_eq!(
+        status("shop"),
+        (
+            ToolboxItemCode::Needs,
+            "Needs $CREW_T20_NEVER_SET_TOKEN".into()
+        )
+    );
+    assert!(members
+        .iter()
+        .flat_map(|m| &m.toolbox.items)
+        .all(|i| i.status.code != ToolboxItemCode::Active));
+    assert!(!out.status.success());
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(
+        stderr.contains("a: mcp.shop: Needs $CREW_T20_NEVER_SET_TOKEN"),
+        "{stderr}"
+    );
+
+    let (out, members) = check("optional.yaml", false);
+    assert!(
+        out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    assert!(members.iter().all(|m| m.stops.is_empty()));
+}
+
+/// T11: the orchestrator chooses bundles by name for a member it adds; it
+/// cannot define items, and an unknown name is refused with the team's
+/// bundles listed. What it chose is applied and saved.
+#[test]
+fn the_orchestrator_adds_members_with_bundles_by_name_only() {
+    if common::test_support::isolate_operator_test(
+        "the_orchestrator_adds_members_with_bundles_by_name_only",
+    ) {
+        return;
+    }
+    let s = Session::new();
+    let mut team = s.team("toolbox-choose", vec![agent("a", "", &[])], vec![]);
+    team.defaults.command = scripted(&[]);
+    team.orchestrator.agent = true;
+    team.orchestrator.command = scripted(&[]);
+    team.workspace.isolation = crew_core::config::Isolation::Shared;
+    team.workspace.init = false;
+    team.toolboxes = serde_json::from_value(json!({
+        "docs": { "mcp": { "manual": { "command": ["manual", "--stdio"] } } },
+        "web": { "mcp": { "context7": { "command": ["ctx", "--stdio"] } } }
+    }))
+    .unwrap();
+    std::fs::create_dir_all(&s.workspace).unwrap();
+    s.run(&team);
+    let path = s.identity_path(crew_core::ORCHESTRATOR_ID);
+    s.wait_for("the orchestrator's identity", || path.exists());
+    let identity: crew_core::paths::Identity =
+        serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
+    assert!(identity.orchestrator);
+    let (mut client, _) = crew_core::client::Client::agent(&identity, "test").unwrap();
+    let mut add = |toolbox: Value| {
+        client
+            .call::<crew_core::Agent>(crew_core::rpc::Call::AgentAdd {
+                spec: Box::new(AgentSpec {
+                    id: "b".into(),
+                    toolbox: serde_json::from_value(toolbox).unwrap(),
+                    ..AgentSpec::default()
+                }),
+            })
+            .map_err(|e| e.to_string())
+    };
+
+    for (toolbox, expected) in [
+        (
+            json!({ "mcp": { "mine": { "command": ["x"] } } }),
+            "an agent chooses bundles by name; toolbox items are defined in the team file",
+        ),
+        (
+            json!({ "include": ["web"], "exclude": ["mcp.context7"] }),
+            "an agent chooses bundles by name",
+        ),
+        (
+            json!({ "include": ["webb"] }),
+            "Unknown toolbox \"webb\". Toolboxes in this team: docs, web.",
+        ),
+    ] {
+        let refused = add(toolbox.clone()).expect_err(&toolbox.to_string());
+        assert!(refused.contains(expected), "{toolbox}: {refused}");
+    }
+    assert!(!s.snapshot().agents.iter().any(|a| a.id == "b"));
+
+    add(json!({ "include": ["web"] })).unwrap();
+    s.wait_for("the roster to name b", || {
+        std::fs::read_to_string(s.workspace.join(".crew/roster.yaml"))
+            .is_ok_and(|roster| roster.contains("id: b"))
+    });
+    let roster =
+        crew_core::config::TeamConfig::load(&s.workspace.join(".crew/roster.yaml")).unwrap();
+    let b = roster.agents.iter().find(|a| a.id == "b").unwrap();
+    assert_eq!(b.toolbox.include, ["web"]);
+    assert!(b.toolbox.mcp.is_empty());
+}
+
 #[test]
 fn a_daemon_started_while_another_is_still_starting_is_refused() {
     // A daemon binds its socket before it registers in daemon.json, so two

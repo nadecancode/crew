@@ -1,0 +1,1 @@
+Selected nested content must remain readable from the read-only store.
