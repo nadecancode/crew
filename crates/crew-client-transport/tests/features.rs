@@ -731,7 +731,28 @@ fn metrics_keep_explicit_historical_query_and_reject_cross_workspace_resources()
         wire["params"]["scope"]["workspace_run_id"],
         "historical-run"
     );
-    let mut changed = query;
+    let book = query
+        .price_book_id
+        .clone()
+        .unwrap_or_else(|| crew_protocol::features::Id::new("book-1").unwrap());
+    let canonical = query.resolved_shape(book, 200, false).unwrap();
+    frame(
+        &mut driver,
+        channel,
+        id,
+        json!({"revision":"1","query":canonical,"rows":[],"next_cursor":null}),
+    );
+    let ViewPayload::UsageMetrics(ready) = driver
+        .query(ViewQuery::UsageMetrics { key: key.clone() })
+        .unwrap()
+        .payload
+    else {
+        panic!("metrics")
+    };
+    assert!(ready.value.is_some());
+    let again = read_feature(&mut driver, key.clone());
+    let (_, id, _) = common::send(&again, "usage_observations");
+    let mut changed = canonical;
     changed.from_ms = Some(crew_protocol::features::Timestamp::new(101).unwrap());
     frame(
         &mut driver,

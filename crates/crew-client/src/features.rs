@@ -97,31 +97,18 @@ pub enum FeatureChange {
     Usage(crew_protocol::usage_metrics::UsageChanged),
 }
 
-/// A server may resolve omitted defaults, never replace an explicit filter.
+/// Validate the v1 effective query without deriving or repricing its results.
 pub fn usage_query_matches(
     requested: &crew_protocol::usage_metrics::UsageQuery,
     resolved: &crew_protocol::usage_metrics::UsageQuery,
+    series: bool,
 ) -> bool {
-    requested.scope == resolved.scope
-        && requested
-            .from_ms
-            .is_none_or(|v| resolved.from_ms == Some(v))
-        && requested.to_ms.is_none_or(|v| resolved.to_ms == Some(v))
-        && requested
-            .group_by
-            .is_none_or(|v| resolved.group_by == Some(v))
-        && requested
-            .bucket_seconds
-            .is_none_or(|v| resolved.bucket_seconds == Some(v))
-        && requested
-            .price_book_id
-            .as_ref()
-            .is_none_or(|v| resolved.price_book_id.as_ref() == Some(v))
-        && requested
-            .page
-            .limit
-            .is_none_or(|v| resolved.page.limit == Some(v))
-        && requested.page.cursor == resolved.page.cursor
+    let Some(book) = &resolved.price_book_id else {
+        return false;
+    };
+    requested
+        .resolved_shape(book.clone(), if series { 720 } else { 200 }, series)
+        .is_ok_and(|expected| &expected == resolved)
 }
 
 impl FeatureAvailability {
@@ -463,10 +450,12 @@ impl FeatureRead {
                 }
                 _ => true,
             },
-            (Q::UsageSummary(q), R::UsageSummary(r)) => usage_query_matches(q, &r.query),
-            (Q::UsageSeries(q), R::UsageSeries(r)) => usage_query_matches(q, &r.query),
-            (Q::UsageBreakdown(q), R::UsageBreakdown(r)) => usage_query_matches(q, &r.query),
-            (Q::UsageObservations(q), R::UsageObservations(r)) => usage_query_matches(q, &r.query),
+            (Q::UsageSummary(q), R::UsageSummary(r)) => usage_query_matches(q, &r.query, false),
+            (Q::UsageSeries(q), R::UsageSeries(r)) => usage_query_matches(q, &r.query, true),
+            (Q::UsageBreakdown(q), R::UsageBreakdown(r)) => usage_query_matches(q, &r.query, false),
+            (Q::UsageObservations(q), R::UsageObservations(r)) => {
+                usage_query_matches(q, &r.query, false)
+            }
             (Q::UsagePrices(q), R::UsagePrices(r)) => {
                 q.price_book_id.as_ref().is_none_or(|id| id == &r.id)
             }

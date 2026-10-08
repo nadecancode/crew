@@ -33,18 +33,57 @@ the closed recursive document AST. Feature data never crosses the FFI as JSON.
 Generated Swift is committed without formatting. New Docs/aside screens and Apple
 execution remain outside P4.
 
-## Validation checkpoint
+## Validation
 
-Source chain starts at landed P1 fbe243af. Commits 5cae9dfb, 724d9b95 and 6845aea6
-cover policy/catalog, per-history-row source references, and negotiated reads.
-The current checkpoint adds observers, aside actions/privacy and typed bindings.
+The six P4 checkpoints were replayed without conflicts onto main
+394a189ece5e5b6f8e7a3818b725741121121824. Stable patch ids match each original;
+`review/features-p4-validation.json` records the pairs, toolchain, evidence hashes
+and pinned native binary. Subsequent commits preserve the legacy native grant
+catalog and share exact usage query default resolution with P3.
 
-Focused driver cases cover legacy discovery, authentication/version rejection,
-atomic epic updates, same-connection Docs continuation, late aside removal,
-observer gaps and typed admission failures. Converter cases exercise nullable
-large counters, scope/lease identity, bounded input, safe links and AST validation.
+All required author gates passed on the submitted source:
 
-Final integration and gates are pending at this checkpoint. In particular, merge
-current main, run the native-gateway policy suite, strict Clippy, portable/WASM and
-Rust 1.82 checks. Logs under `target/features-p4/` are author evidence, not a claim
-that services or Apple applications have been exercised end to end.
+- Native-gateway suite: 891 passed, 0 failed, 2 pre-existing ignored tests.
+  Bubblewrap and socat were available; sandbox tests ran in require mode.
+- Protocol/client/transport/FFI suites: 294 passed, 0 failed. This includes nine
+  feature driver cases, 14 real binding converter cases, two exact generated
+  Swift freshness checks, real gateway enrollment/revocation and three native
+  journeys using the pinned feature-built CLI.
+- Strict workspace Clippy with all targets and native transport/FFI features,
+  `cargo fmt --all --check`, portable WASM, Rust 1.82 CLI/core compilation and
+  default native-package compilation all passed.
+
+Reproduce from the repository checkout (with a C compiler, pkg-config,
+bubblewrap and socat available):
+
+```sh
+cargo build --locked -p crew --features native-gateway --bin crew
+export CREW_NATIVE_VALIDATION_BIN="$PWD/target/debug/crew"
+export CREW_TEST_SANDBOX=require
+cargo test --locked -p crew --features native-gateway
+cargo test --locked -p crew-protocol -p crew-client -p crew-client-transport -p crew-client-ffi --features crew-client-transport/journey-tests,crew-client-ffi/gateway-tests,crew-client-ffi/bindgen
+cargo clippy --locked --workspace --all-targets --features crew/native-gateway,crew-client-transport/journey-tests,crew-client-ffi/gateway-tests,crew-client-ffi/bindgen -- -D warnings
+cargo fmt --all --check
+cargo check --locked --target wasm32-unknown-unknown -p crew-protocol -p crew-client
+cargo +1.82.0 check --locked -p crew --bin crew
+cargo check --locked -p crew-client-transport -p crew-client-ffi --no-default-features
+```
+
+Clear inherited Crew/Git/Herdr fixture context as
+`scripts/native/common.sh` does. Raw logs remain under `target/features-p4/`;
+the tracked validation manifest hashes the completed gate logs. The fixtures use
+isolated daemons, synthetic agents and local gateway credentials, with no provider
+calls and no interaction with the live team's runtime.
+
+The live gateway gate found a compatibility failure in the first implementation:
+adding feature names to signed grant metadata exceeded an old native decoder's
+31-entry bound. The final implementation preserves the original 29-entry catalog
+byte for byte and uses negotiated feature capability checks under the existing
+tiers. A pinned legacy catalog fixture and exhaustive connector/daemon lane tests
+prevent that regression. An initial journey invocation lacked its explicitly
+required CLI binary; final runs supplied the pinned build and passed.
+
+P2/P3 own daemon readiness, source services and their integration. These tests
+establish the shared client/transport contract and legacy fallback, not complete
+feature-service or native-screen acceptance. Apple execution remains deferred;
+Linux generation and converter tests do not establish an Apple build.

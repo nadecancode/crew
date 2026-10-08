@@ -74,7 +74,7 @@ impl ClientState {
             }
             (Command::UsageWatch(q), FeatureResponse::UsageWatch(r))
                 if root == Some(&context.connection_epoch)
-                    && usage_query_matches(q, &r.initial.query) =>
+                    && usage_query_matches(q, &r.initial.query, false) =>
             {
                 Some((
                     Feature::UsageMetrics,

@@ -1360,3 +1360,66 @@ sign-off; do not invent a passing benchmark. Web numerical budgets remain
 unchanged. Final app acceptance additionally satisfies N01–N20 in the reviewed
 experience contract, with only the operator's explicit Apple execution deferment
 and the separately tracked gateway integration gate remaining distinguishable.
+
+## Negotiated feature resources (P4)
+
+`notes/protocol-features.md` defines the protocol 6 feature contract. The shared
+client negotiates its fixed supported versions after authentication on every
+workspace, read and action channel, before ordinary bootstrap traffic. Terminal
+and index channels never negotiate. Discovery failures from old daemons or
+intermediaries leave legacy views usable; malformed current-peer replies and
+loss of authentication are distinct failures.
+
+The gateway's existing `allowed_actions` list remains byte-identical to the
+legacy catalog. Old native libraries cap that list at 31 entries. The closed
+feature method catalog uses the existing Read and Control tiers, the negotiated
+physical connection, and the daemon's final feature guard; it does not change a
+Hello record, signed authentication transcript or device grant. Observers are
+workspace-only, feature reads use workspace/read lanes, and aside mutations use
+Control on the action lane. Native devices still cannot administer epic tasks.
+
+Rust and Swift callers read `ViewQuery::Features` before offering a feature.
+Feature reads use `ResourceKind::Feature`, `ReadOptions::Feature` and the typed
+`FeatureReadRequest`. Their resource keys include the captured workspace attempt
+and complete query. `TasksData.epics` carries the daemon's board projection;
+clients do not derive another epic status or count. Grouped task/board pushes
+apply atomically; gaps require a fresh snapshot.
+
+A Docs sequence starts with `DocsIndex` without a cursor or lease. Its typed
+resource value returns a `DocLease`, containing the authenticated connection
+epoch and Docs index epoch. Carry that lease on every continuation, document,
+history, diff and asset request. The driver reuses exactly that physical channel;
+closing it expires the lease, and replacement channels never inherit its ids.
+The index inside a Docs watch belongs to the workspace connection. Its handles
+cannot be used with an auxiliary read connection's lease. Source or permission
+changes invalidate retained content, and a Seen-here expiry never silently
+selects a newer version.
+
+Use `FeatureAction` for observer registration/unregistration and aside
+ask/cancel/remove. `ViewQuery::FeatureWatches` exposes bounded initial replies
+and invalidations separately from task/agent activity. Watch limits are one
+aside, one Docs and four usage subscriptions per workspace channel. Ordinary
+Snapshot/Subscribe barriers do not close these subscriptions. A stale watch
+requires authoritative reads or explicit unwatch/registration; a caller must
+not present its initial reply as current after an invalidation.
+
+The caller allocates an aside request id once on submission and retains it if
+the outcome is unknown. The transport never retries a paid ask automatically.
+Explicit removal clears cached question/answer text and queued ask bytes, fences
+late reads, and requires every renderer to discard its own copies. A missed
+watch revision hides retained aside text until a new read supplies an
+authoritative gone cause. A connection restart alone does not authorize a
+text-bearing ghost or an automatic new ask. Admission-limit details remain typed
+through `ClientReason.details` to the composer.
+
+Usage responses preserve an exact half-open range. The portable
+`UsageQuery::resolved_shape` resolves only price-book, page and bucket defaults;
+server and client share that rule. Counters cross Swift as exact decimal strings,
+with missing values distinct from explicit zero. No client reprices usage or
+joins historical records to current tasks, members or accounts.
+
+Feature data crosses UniFFI as typed records and enums. Checked converters retain
+string/list limits, safe external links, document AST validation and exact numeric
+bounds. The generated Swift aliases for bounded values and boxes are value types,
+not socket handles or authority. Native Docs/aside screens and Apple execution
+remain separately deferred; generated-source freshness is not an Apple build.
