@@ -30,11 +30,6 @@ impl PendingWatch {
         context: ConnCtx,
         service: &dyn FeatureService,
     ) -> Result<Self, RpcError> {
-        let field = |value: Option<&Value>| {
-            value
-                .and_then(Value::as_str)
-                .ok_or_else(|| RpcError::new("internal", "invalid feature watch result"))
-        };
         let id = Id::new(field(result.get("watch_id"))?).map_err(RpcError::invalid)?;
         let epoch = match feature {
             Feature::Asides => field(result.pointer("/initial/aside_epoch"))?,
@@ -93,6 +88,12 @@ impl PendingWatch {
             }
         }
     }
+}
+
+fn field(value: Option<&Value>) -> Result<&str, RpcError> {
+    value
+        .and_then(Value::as_str)
+        .ok_or_else(|| RpcError::new("internal", "invalid feature watch result"))
 }
 
 fn identity(push: &Push) -> Option<(Feature, &Id, &Id)> {
