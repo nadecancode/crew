@@ -29,7 +29,7 @@ use sha2::{Digest, Sha256};
 
 use super::counters::Normalized;
 use super::ledger::{Aggregate, Gap, Ledger, ObservationRow, RunInfo};
-use super::metrics::{category_split_complete, totals, Fact};
+use super::metrics::{category_split_complete, count, totals, Fact};
 use super::price::Book;
 
 const HOUR_MS: i64 = 3_600_000;
@@ -375,12 +375,11 @@ fn turn_metric(
     rows: &[(Aggregate, Fact)],
     template: &MetricCoverage,
 ) -> CounterMetric {
-    let seen: u64 = rows.iter().map(|(_, f)| f.weight).sum();
-    let with: u64 = rows
+    let seen = rows.iter().fold(0, |n, (_, f)| count(n, f.weight));
+    let with = rows
         .iter()
         .filter(|(a, _)| a.has_turn)
-        .map(|(_, f)| f.weight)
-        .sum();
+        .fold(0, |n, (_, f)| count(n, f.weight));
     let missing = seen - with;
     let state = if with == 0 {
         MetricState::Unavailable
@@ -398,12 +397,12 @@ fn turn_metric(
             _ => Some(CoverageReason::MissingTurnIdentity),
         },
         coverage: MetricCoverage {
-            eligible_observations: Wide(with as u128),
-            observations_seen: Wide(seen as u128),
+            eligible_observations: Wide(with),
+            observations_seen: Wide(seen),
             exclusions: List::new(if missing > 0 {
                 vec![CoverageExclusion {
                     reason: CoverageReason::MissingTurnIdentity,
-                    observations: Wide(missing as u128),
+                    observations: Wide(missing),
                 }]
             } else {
                 Vec::new()
@@ -436,28 +435,29 @@ fn totals_of(
 }
 
 fn attribution_coverage(rows: &[(Aggregate, Fact)], x: &Extras) -> MetricCoverage {
-    let mut seen = 0u64;
-    let mut eligible = 0u64;
-    let mut excluded: BTreeMap<String, (CoverageReason, u64)> = BTreeMap::new();
+    let mut seen = 0u128;
+    let mut eligible = 0u128;
+    let mut excluded: BTreeMap<String, (CoverageReason, u128)> = BTreeMap::new();
     for (a, f) in rows {
-        seen += f.weight;
+        seen = count(seen, f.weight);
         match work_of(a) {
             WorkAttribution::Unknown { reason } => {
-                excluded.entry(reason_text(reason)).or_insert((reason, 0)).1 += f.weight;
+                let n = &mut excluded.entry(reason_text(reason)).or_insert((reason, 0)).1;
+                *n = count(*n, f.weight);
             }
-            _ => eligible += f.weight,
+            _ => eligible = count(eligible, f.weight),
         }
     }
     let mut c = MetricCoverage {
-        eligible_observations: Wide(eligible as u128),
-        observations_seen: Wide(seen as u128),
+        eligible_observations: Wide(eligible),
+        observations_seen: Wide(seen),
         exclusions: List::new(
             excluded
                 .into_values()
                 .take(32)
                 .map(|(reason, n)| CoverageExclusion {
                     reason,
-                    observations: Wide(n as u128),
+                    observations: Wide(n),
                 })
                 .collect(),
         )
@@ -851,14 +851,15 @@ pub fn breakdown(
                 )
                 .map_err(internal)?;
             let mut activities: BTreeSet<String> = BTreeSet::new();
-            let mut reasons: BTreeMap<String, (CoverageReason, u64)> = BTreeMap::new();
+            let mut reasons: BTreeMap<String, (CoverageReason, u128)> = BTreeMap::new();
             for (a, f) in &rows {
                 match work_of(a) {
                     WorkAttribution::NoTask { activity } => {
                         activities.insert(serde_json::to_string(&activity).expect("activity"));
                     }
                     WorkAttribution::Unknown { reason } => {
-                        reasons.entry(reason_text(reason)).or_insert((reason, 0)).1 += f.weight;
+                        let n = &mut reasons.entry(reason_text(reason)).or_insert((reason, 0)).1;
+                        *n = count(*n, f.weight);
                     }
                     WorkAttribution::Task { .. } => {}
                 }
@@ -880,7 +881,7 @@ pub fn breakdown(
                         .take(32)
                         .map(|(reason, n)| CoverageExclusion {
                             reason,
-                            observations: Wide(n as u128),
+                            observations: Wide(n),
                         })
                         .collect(),
                 )

@@ -993,10 +993,37 @@ impl Ledger {
                 (0, 0)
             }
             Some((cp, _)) => {
-                if let Some(owner) = current_owner(&tx, &stream_id)? {
+                let owner = current_owner(&tx, &stream_id)?;
+                if let Some(owner) = &owner {
                     if owner.active && owner.incarnation != reg.incarnation {
                         return Ok(Err(CoverageReason::AmbiguousBoundary));
                     }
+                }
+                // The home the session is opened from now, kept with the
+                // stream; cursor and seen ids stay. A file in another place
+                // is a new generation for the reader, reconciled by id.
+                tx.execute(
+                    "UPDATE usage_streams SET locator = ?2, started_ms = ?3 WHERE stream_id = ?1",
+                    params![stream_id, json(&reg.locator), reg.started_ms],
+                )?;
+                // The same launch registered again (a daemon restart): its
+                // owner and work binding continue.
+                let same = owner.as_ref().is_some_and(|o| {
+                    o.run_id == reg.run_id
+                        && o.kind == reg.kind
+                        && o.incarnation == reg.incarnation
+                        && o.launch_id == reg.launch_id
+                        && o.aside_execution.as_deref()
+                            == reg.aside.as_ref().map(|a| a.execution_id.as_str())
+                });
+                if let (true, Some(owner)) = (same, owner) {
+                    tx.execute(
+                        "UPDATE usage_owners SET active = 1 WHERE stream_id = ?1 AND seq = ?2",
+                        params![stream_id, owner.seq],
+                    )?;
+                    bump(&tx)?;
+                    tx.commit()?;
+                    return Ok(Ok(stream_id));
                 }
                 tx.execute(
                     "UPDATE usage_owners SET active = 0 WHERE stream_id = ?1",
@@ -1034,6 +1061,37 @@ impl Ledger {
         bump(&tx)?;
         tx.commit()?;
         Ok(Ok(stream_id))
+    }
+
+    /// Streams with an active owner, for the service to resume after a
+    /// restart.
+    pub fn active_streams(&self) -> Result<Vec<ActiveStream>> {
+        let mut stmt = self.conn.prepare(
+            "SELECT DISTINCT s.stream_id, s.runtime, s.native_session_id, s.started_ms, s.locator
+             FROM usage_streams s JOIN usage_owners o ON o.stream_id = s.stream_id
+             WHERE o.active = 1 AND s.admission IS NULL ORDER BY s.stream_id",
+        )?;
+        let rows = stmt.query_map([], |r| {
+            Ok((
+                r.get::<_, String>(0)?,
+                r.get::<_, String>(1)?,
+                r.get::<_, String>(2)?,
+                r.get::<_, i64>(3)?,
+                r.get::<_, String>(4)?,
+            ))
+        })?;
+        let mut out = Vec::new();
+        for row in rows {
+            let (id, runtime, session, started, locator) = row?;
+            out.push(ActiveStream {
+                stream_id: id,
+                runtime: serde_json::from_value(serde_json::Value::String(runtime))?,
+                session,
+                started_ms: started,
+                locator: serde_json::from_str(&locator)?,
+            });
+        }
+        Ok(out)
     }
 
     /// The owner stopped: its stream drains but takes no new owner's work.
@@ -1700,6 +1758,16 @@ impl Ledger {
     }
 }
 
+/// A stream with an active owner, as persisted.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ActiveStream {
+    pub stream_id: String,
+    pub runtime: RuntimeKind,
+    pub session: String,
+    pub started_ms: i64,
+    pub locator: Locator,
+}
+
 /// One retained detail row of a stream.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Detail {
@@ -2030,8 +2098,9 @@ fn apply(
         Some((old, _, _, _)) if old == digest => {
             done.unchanged += 1;
         }
-        Some((_, _, _, _)) if o.phase == Phase::Seed => {
-            // A replayed prefix whose values differ: not evidence enough.
+        Some((_, true, _, _)) if o.phase == Phase::Seed => {
+            // A replayed prefix whose values differ from retained detail:
+            // not evidence enough to replace it.
             cover(
                 tx,
                 stream_id,
@@ -2043,7 +2112,9 @@ fn apply(
         }
         Some((_, false, run_id, hour)) => {
             // The original's detail expired: its retained contribution can no
-            // longer be corrected, so the aggregates it is in become uncertain.
+            // longer be corrected, so the aggregates it is in become uncertain,
+            // whether the changed value came as an append or in a rewritten
+            // prefix.
             cover(
                 tx,
                 stream_id,
@@ -3192,5 +3263,81 @@ mod tests {
             ledger.aside_total_cost("r1", "q-none", &book).unwrap(),
             None
         );
+    }
+
+    #[test]
+    fn a_changed_expired_id_in_a_rewritten_prefix_is_outside_the_horizon() {
+        let (_dir, path, mut ledger, stream) = setup(&[msg("a", 5), msg("b", 6)]);
+        drain(&mut ledger, &stream, &open(&path), NOW).unwrap();
+        let before = sum(&ledger, "r1", "live");
+        ledger.expire(NOW + 31 * DAY, Retention::default()).unwrap();
+        // No append in between: the rewrite alone carries the lower value.
+        replace(&path, &[msg("a", 1), msg("b", 6)]);
+        let done = drain(&mut ledger, &stream, &open(&path), NOW).unwrap();
+        assert_eq!(done.iter().map(|c| c.outside_horizon).sum::<u64>(), 1);
+        assert_eq!(done.iter().map(|c| c.quarantined).sum::<u64>(), 0);
+        assert!(ledger.uncertain("r1").unwrap());
+        assert_eq!(
+            sum(&ledger, "r1", "live"),
+            before,
+            "aggregates untouched, marked uncertain"
+        );
+    }
+
+    #[test]
+    fn registering_again_keeps_membership_and_records_the_current_home() {
+        let (dir, path, mut ledger, stream) = setup(&[msg("a", 5)]);
+        drain(&mut ledger, &stream, &open(&path), NOW).unwrap();
+        // The same launch again: no new owner.
+        assert_eq!(
+            ledger
+                .register(&reg("r1", "i1", Start::Fresh), &open(&path), NOW)
+                .unwrap(),
+            Ok(stream.clone())
+        );
+        let owners: i64 = ledger
+            .conn
+            .query_row("SELECT COUNT(*) FROM usage_owners", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(owners, 1);
+        // Relocated: the same session now in another home.
+        let moved = dir.path().join("elsewhere.jsonl");
+        std::fs::copy(&path, &moved).unwrap();
+        let mut relocated = reg("r1", "i1", Start::Fresh);
+        relocated.launch_id = "launch-2".into();
+        relocated.locator = Locator::CliHome {
+            path: dir.path().join("home"),
+        };
+        relocated.started_ms = NOW + 5;
+        ledger
+            .register(&relocated, &open(&moved), NOW)
+            .unwrap()
+            .unwrap();
+        let (locator, started): (String, i64) = ledger
+            .conn
+            .query_row(
+                "SELECT locator, started_ms FROM usage_streams WHERE stream_id = ?1",
+                params![stream],
+                |r| Ok((r.get(0)?, r.get(1)?)),
+            )
+            .unwrap();
+        assert_eq!(
+            serde_json::from_str::<Locator>(&locator).unwrap(),
+            relocated.locator
+        );
+        assert_eq!(started, NOW + 5);
+        // Seen ids survive: the copied history is not charged again, and
+        // what is appended after the move is.
+        let done = drain(&mut ledger, &stream, &open(&moved), NOW).unwrap();
+        assert_eq!(done.iter().map(|c| c.unchanged).sum::<u64>(), 1);
+        append(&moved, &[msg("b", 6)]);
+        drain(&mut ledger, &stream, &open(&moved), NOW).unwrap();
+        assert_eq!(
+            sum(&ledger, "r1", "live").requests_observed.known_sum,
+            Some(Wide(2))
+        );
+        let active = ledger.active_streams().unwrap();
+        assert_eq!(active.len(), 1);
+        assert_eq!(active[0].locator, relocated.locator);
     }
 }

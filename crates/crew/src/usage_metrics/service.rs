@@ -57,6 +57,9 @@ pub enum Readiness {
 /// Opens a stream's native file, fresh, for one read.
 pub trait Opener: Send + Sync {
     fn open(&self, source: &Source) -> Option<File>;
+    /// After a daemon restart, reach a recorded home again. A CLI home is
+    /// the one captured when its member launched, persisted with the stream.
+    fn restore(&self, _locator: &Locator) {}
 }
 
 /// What the service needs to reopen a stream's native file.
@@ -100,6 +103,19 @@ impl NativeOpener {
 }
 
 impl Opener for NativeOpener {
+    fn restore(&self, locator: &Locator) {
+        if let Locator::CliHome { path } = locator {
+            let known = self
+                .homes
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .contains_key(path);
+            if !known {
+                self.capture(path);
+            }
+        }
+    }
+
     fn open(&self, source: &Source) -> Option<File> {
         let opened = match &source.locator {
             Locator::Private { agent_id } => {
@@ -300,6 +316,38 @@ impl UsageMetrics {
                 );
         }
         Ok(registered)
+    }
+
+    /// Resumes collecting every stream the ledger still has an owner for,
+    /// after a daemon restart. Each continues from its committed cursor; a
+    /// member registered again with the same launch keeps its owner and
+    /// work binding. Returns how many streams resumed.
+    pub fn recover(&self, now: i64) -> Result<usize, RpcError> {
+        let active = self.with(|l| l.active_streams())?;
+        let mut streams = self.streams.lock().unwrap_or_else(|e| e.into_inner());
+        let mut resumed = 0;
+        for a in active {
+            if streams.len() >= MAX_STREAMS {
+                break;
+            }
+            self.opener.restore(&a.locator);
+            streams.entry(a.stream_id).or_insert_with(|| {
+                resumed += 1;
+                Stream {
+                    source: Source {
+                        runtime: a.runtime,
+                        session: a.session,
+                        started_ms: a.started_ms,
+                        locator: a.locator,
+                    },
+                    due: now,
+                    busy: false,
+                    caught_up: false,
+                    stopping: None,
+                }
+            });
+        }
+        Ok(resumed)
     }
 
     /// A turn boundary: usage read from here on is `binding`'s.
@@ -920,5 +968,56 @@ mod tests {
             .unwrap();
         task.abort();
         assert_eq!(output(&service, now_ms()), Some(5));
+    }
+
+    #[test]
+    fn a_restarted_service_resumes_owned_streams_and_their_binding() {
+        let dir = tempfile::tempdir().unwrap();
+        let db = dir.path().join("crew.db");
+        let files = Arc::new(Files::default());
+        let path = add(&dir, &files, "s-1");
+        let first = UsageMetrics::new(
+            Ledger::open(&db).unwrap(),
+            files.clone(),
+            Id::new("e1").unwrap(),
+        );
+        first.begin_run("r1", Some(NOW), NOW).unwrap();
+        let stream = first.register(&reg("s-1"), NOW).unwrap().unwrap();
+        let task = WorkBinding {
+            work: WorkAttribution::Task {
+                id: "t1".into(),
+                epic: EpicAttribution::NoEpic,
+            },
+            account: crew_core::rpc::usage_metrics::AccountAttribution::Unknown {
+                reason: CoverageReason::UnknownAccount,
+            },
+            board_revision: None,
+            event_seq: None,
+        };
+        first.bind_work(&stream, &task, NOW).unwrap();
+        append(&path, &[msg("a", 5)]);
+        first.tick(NOW);
+        drop(first);
+
+        // Written while the daemon was down.
+        append(&path, &[msg("b", 6)]);
+        let second = UsageMetrics::new(
+            Ledger::open(&db).unwrap(),
+            files.clone(),
+            Id::new("e2").unwrap(),
+        );
+        assert_eq!(second.recover(NOW).unwrap(), 1);
+        // The same launch registers again on resume: owner and binding continue.
+        assert_eq!(
+            second.register(&reg("s-1"), NOW).unwrap(),
+            Ok(stream.clone())
+        );
+        append(&path, &[msg("c", 7)]);
+        second.tick(NOW + 10_000);
+        let mut t1 = query();
+        t1.scope.task = UsageTaskFilter::Id("t1".into());
+        let s = second.summary(&t1, NOW).unwrap();
+        assert_eq!(s.totals.output.known_sum, Some(Wide(18)));
+        assert_eq!(s.totals.requests_observed.known_sum, Some(Wide(3)));
     }
 }

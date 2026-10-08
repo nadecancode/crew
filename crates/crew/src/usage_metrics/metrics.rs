@@ -41,27 +41,35 @@ pub struct Fact {
 }
 
 /// Counts of seen and eligible observations for one metric, with the reasons
-/// the others were left out.
+/// the others were left out. Counts are observation weights summed in
+/// `u128`; see [`count`].
 #[derive(Default)]
 struct Tally {
-    seen: u64,
-    eligible: u64,
-    exclusions: Vec<(CoverageReason, u64)>,
+    seen: u128,
+    eligible: u128,
+    exclusions: Vec<(CoverageReason, u128)>,
     agents: BTreeSet<String>,
+}
+
+/// Adds a fact's weight to a count. A `u128` count of `u64` weights can
+/// overflow only after 2^64 facts, more than memory holds, so the
+/// saturation here is unreachable rather than a clamp of real data.
+pub(super) fn count(total: u128, weight: u64) -> u128 {
+    total.saturating_add(weight as u128)
 }
 
 impl Tally {
     fn include(&mut self, fact: &Fact) {
-        self.seen += fact.weight;
-        self.eligible += fact.weight;
+        self.seen = count(self.seen, fact.weight);
+        self.eligible = count(self.eligible, fact.weight);
         self.agents.insert(fact.agent.clone());
     }
 
     fn exclude(&mut self, fact: &Fact, reason: CoverageReason) {
-        self.seen += fact.weight;
+        self.seen = count(self.seen, fact.weight);
         match self.exclusions.iter_mut().find(|(r, _)| *r == reason) {
-            Some((_, n)) => *n += fact.weight,
-            None => self.exclusions.push((reason, fact.weight)),
+            Some((_, n)) => *n = count(*n, fact.weight),
+            None => self.exclusions.push((reason, fact.weight as u128)),
         }
     }
 
@@ -88,19 +96,19 @@ impl Tally {
         exclusions.sort_by(|a, b| b.1.cmp(&a.1));
         exclusions.truncate(32);
         MetricCoverage {
-            eligible_observations: Wide(self.eligible as u128),
-            observations_seen: Wide(self.seen as u128),
+            eligible_observations: Wide(self.eligible),
+            observations_seen: Wide(self.seen),
             exclusions: List::new(
                 exclusions
                     .into_iter()
                     .map(|(reason, n)| CoverageExclusion {
                         reason,
-                        observations: Wide(n as u128),
+                        observations: Wide(n),
                     })
                     .collect(),
             )
             .expect("exclusions truncated to their limit"),
-            known_requests: Wide(common.requests as u128),
+            known_requests: Wide(common.requests),
             request_cardinality_complete: common.cardinality_complete,
             reporting_agents: Wide(self.agents.len() as u128),
             expected_agents: common.expected_agents.map(|n| Wide(n as u128)),
@@ -114,7 +122,7 @@ impl Tally {
 
 /// What every metric's coverage repeats.
 struct Common {
-    requests: u64,
+    requests: u128,
     cardinality_complete: bool,
     expected_agents: Option<u64>,
 }
@@ -399,7 +407,7 @@ fn estimate(
     let mut total = Bounds { lo: 0, hi: Some(0) };
     let mut overflow = false;
     let mut excluded: BTreeSet<String> = BTreeSet::new();
-    let (mut ttl_unknown, mut residual, mut tier_unknown) = (0u128, 0u128, 0u64);
+    let (mut ttl_unknown, mut residual, mut tier_unknown) = (0u128, 0u128, 0u128);
     for (fact, cost) in facts.iter().zip(costs) {
         if let Some(reason) = unusable(fact) {
             tally.exclude(fact, reason);
@@ -433,7 +441,9 @@ fn estimate(
                     (Some(t), Some(r)) => (ttl_unknown, residual) = (t, r),
                     _ => overflow = true,
                 }
-                tier_unknown += cost.tier_unknown as u64;
+                if cost.tier_unknown {
+                    tier_unknown = count(tier_unknown, fact.weight);
+                }
                 tally.include(fact);
             }
         }
@@ -508,7 +518,7 @@ fn requests(facts: &[Fact], common: &Common) -> CounterMetric {
     }
     let state = tally.state();
     CounterMetric {
-        known_sum: (tally.eligible > 0).then_some(Wide(tally.eligible as u128)),
+        known_sum: (tally.eligible > 0).then_some(Wide(tally.eligible)),
         state,
         reason: match state {
             MetricState::Complete => None,
@@ -566,8 +576,7 @@ pub fn totals(facts: &[Fact], book: &Book, expected_agents: Option<u64>) -> Usag
         requests: facts
             .iter()
             .filter(|f| f.unit == ObservationUnit::Request)
-            .map(|f| f.weight)
-            .sum(),
+            .fold(0, |n, f| count(n, f.weight)),
         cardinality_complete: facts.iter().all(|f| f.unit == ObservationUnit::Request),
         expected_agents,
     };
@@ -981,5 +990,27 @@ mod tests {
         let e = totals(&[gap], &book, None).estimate;
         assert_eq!(e.state, EstimateState::Unavailable);
         assert_eq!(e.reason, Some(CoverageReason::SourceGap));
+    }
+
+    #[test]
+    fn weighted_counts_are_wide() {
+        let book = Book::standard_2026_10_08();
+        let mut big = fact("a", "gpt-6-luna", codex(Some(1), Some(1)));
+        big.weight = u64::MAX;
+        let mut batch = big.clone();
+        batch.unit = ObservationUnit::CounterDelta;
+        let t = totals(&[big.clone(), big, batch], &book, None);
+        let twice = Wide(2 * u64::MAX as u128);
+        assert_eq!(t.requests_observed.known_sum, Some(twice));
+        assert_eq!(t.requests_observed.coverage.known_requests, twice);
+        assert_eq!(
+            t.input_total.coverage.observations_seen,
+            Wide(3 * u64::MAX as u128)
+        );
+        assert_eq!(
+            t.requests_observed.coverage.exclusions[0].observations,
+            Wide(u64::MAX as u128)
+        );
+        assert_eq!(count(u128::MAX, 1), u128::MAX);
     }
 }
