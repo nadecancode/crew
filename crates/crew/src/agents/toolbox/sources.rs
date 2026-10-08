@@ -258,6 +258,7 @@ fn codex(
         }
         project_servers.extend(object_keys(project.get("mcp_servers")));
     }
+    launch.codex_project_servers = project_servers.clone();
     let operator_servers = object_keys(settings.get("mcp_servers"));
     if resolved.sources.operator.contains(&SourceKind::Mcp) {
         launch.codex_inherit_servers.extend(
@@ -286,6 +287,9 @@ fn codex(
             .then(|| "Inherited servers are outside the cache rules".into()),
         context.private_home.is_some(),
     ));
+    let project_mcp_detail = (!project_servers.is_empty()).then(|| {
+        "Codex can load project MCP servers after its trust prompt, after crew's launch inventory; their exclusion is not guaranteed".into()
+    });
     sources.push(row(
         Origin::Project,
         SourceKind::Mcp,
@@ -293,10 +297,10 @@ fn codex(
         if project_servers.is_empty() {
             Code::NotUsed
         } else {
-            Code::Disabled
+            Code::CannotBeExcluded
         },
         project_servers.into_iter().collect(),
-        None,
+        project_mcp_detail,
         false,
     ));
     for (origin, roots, allowed) in [
@@ -390,7 +394,7 @@ fn codex(
                 if context.private_home.is_some() {
                     Vec::new()
                 } else {
-                    files_in(&directory.join(relative), "toml")?
+                    codex_roles(&directory, &settings)?
                 }
             }
             SourceKind::Plugins => object_keys(settings.get("plugins")),
@@ -400,28 +404,42 @@ fn codex(
                 names
             }
         };
+        let operator_code = if allow_operator {
+            Code::Used
+        } else if (enabled || kind == SourceKind::Subagents) && !operator_names.is_empty() {
+            Code::CannotBeExcluded
+        } else {
+            Code::NotUsed
+        };
         sources.push(row(
             Origin::Operator,
             kind,
             context.runtime,
-            if allow_operator {
-                Code::Used
-            } else if enabled && !operator_names.is_empty() {
-                Code::CannotBeExcluded
-            } else {
-                Code::NotUsed
-            },
+            operator_code,
             operator_names,
-            None,
+            (kind == SourceKind::Subagents && operator_code == Code::CannotBeExcluded).then(|| {
+                "features.multi_agent=false does not exclude roles from Codex code-mode children".into()
+            }),
             context.private_home.is_some(),
         ));
         let mut project_names = Vec::new();
         for root in project_roots(&context.workdir) {
-            project_names.extend(existing(&[root.join(".codex").join(relative)]));
+            let directory = root.join(".codex");
+            if kind == SourceKind::Subagents {
+                project_names.extend(codex_roles(
+                    &directory,
+                    &read_toml(&directory.join("config.toml"))?,
+                )?);
+            } else {
+                project_names.extend(existing(&[directory.join(relative)]));
+            }
         }
-        let project_code = if allow_project && enabled {
+        let project_code = if allow_project && (enabled || kind == SourceKind::Subagents) {
             Code::Used
-        } else if !allow_project && enabled && !project_names.is_empty() {
+        } else if !allow_project
+            && (enabled || kind == SourceKind::Subagents)
+            && !project_names.is_empty()
+        {
             Code::CannotBeExcluded
         } else if allow_project && !enabled {
             Code::NotAvailableSeparately
@@ -434,8 +452,13 @@ fn codex(
             context.runtime,
             project_code,
             project_names,
-            (project_code == Code::NotAvailableSeparately)
-                .then(|| "The runtime switch applies to user and project sources together".into()),
+            if kind == SourceKind::Subagents && project_code == Code::CannotBeExcluded {
+                Some("features.multi_agent=false does not exclude roles from Codex code-mode children".into())
+            } else {
+                (project_code == Code::NotAvailableSeparately).then(|| {
+                    "The runtime switch applies to user and project sources together".into()
+                })
+            },
             false,
         ));
     }
@@ -850,6 +873,23 @@ fn files_in(directory: &Path, extension: &str) -> Result<Vec<String>> {
         }
     }
     names.sort();
+    Ok(names)
+}
+
+/// Native roles may come from a directory or an `agents.<name>` table whose
+/// config_file lives elsewhere. Scalar scheduler settings are not roles.
+fn codex_roles(directory: &Path, settings: &Value) -> Result<Vec<String>> {
+    let mut names = files_in(&directory.join("agents"), "toml")?;
+    if let Some(roles) = settings.get("agents").and_then(Value::as_object) {
+        names.extend(
+            roles
+                .iter()
+                .filter(|(_, v)| v.is_object())
+                .map(|(name, _)| {
+                    format!("{}: agents.{name}", directory.join("config.toml").display())
+                }),
+        );
+    }
     Ok(names)
 }
 

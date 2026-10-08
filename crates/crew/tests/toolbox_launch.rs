@@ -27,6 +27,23 @@ fn read_json(path: &Path) -> Option<Value> {
     serde_json::from_slice(&std::fs::read(path).ok()?).ok()
 }
 
+fn seed_codex_project(session: &Session, config: &str) {
+    write(&session.workspace.join(".codex/config.toml"), config);
+    for args in [
+        vec!["init", "-q"],
+        vec!["add", ".codex"],
+        vec!["commit", "-qm", "Seed native project configuration"],
+    ] {
+        let output = git_test_support::git(&session.workspace)
+            .env("HOME", session.root().join("home"))
+            .env("GIT_CONFIG_NOSYSTEM", "1")
+            .args(args)
+            .output()
+            .unwrap();
+        assert!(output.status.success(), "{}", stderr(&output));
+    }
+}
+
 /// Parse every -c value from an actual captured member launch, including
 /// app-server-only permission overrides. `mcp list` loads native configuration
 /// without opening a model session or making an inference request.
@@ -1107,6 +1124,97 @@ fn codex_name_collisions_disable_both_definitions_or_refuse_a_required_item() {
         assert!(!toolbox.sources.iter().any(|source| source.status.code
             == crew_core::ToolboxSourceCode::Used
             && source.names.contains(&"ambient".into())));
+    }
+}
+
+#[test]
+fn codex_project_sources_stay_visible_and_strict_refuses_before_launch() {
+    use crew_core::{ToolboxSourceCode, ToolboxSourceOrigin};
+    for (kind, config) in [
+        ("mcp", "[mcp_servers.project]\ncommand='/bin/false'\n"),
+        (
+            "subagents",
+            "[agents.project]\ndescription='Project role'\nconfig_file='/fixture/role.toml'\n",
+        ),
+    ] {
+        for strict in [false, true] {
+            let fixture = Fixture::new();
+            let s = &fixture.session;
+            seed_codex_project(s, config);
+            fixture.run(&fixture.team(
+                RuntimeKind::Codex,
+                json!({"strict":strict,"inherit":{"project":"none"}}),
+            ));
+            if strict {
+                s.wait("source exclusion refusal", |snapshot| {
+                    snapshot.agents.iter().any(|a| {
+                        a.id == "x"
+                            && a.error
+                                .as_ref()
+                                .is_some_and(|e| e.contains("toolbox prevents launch"))
+                    })
+                });
+                assert!(!s.root().join("codex-home/fake-codex-server.json").exists());
+            } else {
+                fixture.record(&s.root().join("codex-home/fake-codex.json"));
+            }
+            let view = fixture.toolbox();
+            assert!(view
+                .sources
+                .iter()
+                .any(|row| row.origin == ToolboxSourceOrigin::Project
+                    && row.kind.as_deref() == Some(kind)
+                    && row.status.code == ToolboxSourceCode::CannotBeExcluded));
+            assert!(!view
+                .sources
+                .iter()
+                .any(|row| row.origin == ToolboxSourceOrigin::Project
+                    && row.kind.as_deref() == Some(kind)
+                    && row.status.code == ToolboxSourceCode::Disabled));
+        }
+    }
+}
+
+#[test]
+fn codex_untrusted_project_names_cannot_merge_into_managed_servers() {
+    for name in ["crew", "selected"] {
+        let fixture = Fixture::new();
+        let s = &fixture.session;
+        // Both the stand-in inventory and real Codex's untrusted-project
+        // inventory omit this table. It must still reserve its name.
+        seed_codex_project(
+            s,
+            &format!("[mcp_servers.{name}]\nurl='http://127.0.0.1:1/mcp'\n"),
+        );
+        fixture.run(&fixture.team(
+            RuntimeKind::Codex,
+            json!({
+                "mcp":{"selected":{"command":[CREW,"fake-mcp"]}}
+            }),
+        ));
+        if name == "crew" {
+            s.wait("reserved crew name refusal", |snapshot| {
+                snapshot.agents.iter().any(|a| {
+                    a.id == "x"
+                        && a.error
+                            .as_ref()
+                            .is_some_and(|e| e.contains("MCP server 'crew'"))
+                })
+            });
+            assert!(!s.root().join("codex-home/fake-codex-server.json").exists());
+        } else {
+            let record = fixture.record(&s.root().join("codex-home/fake-codex.json"));
+            assert!(!record["args"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .filter_map(Value::as_str)
+                .any(|arg| arg.starts_with("mcp_servers.selected.")));
+            assert_eq!(
+                fixture.toolbox().items[0].status.code,
+                ToolboxItemCode::Shadowed
+            );
+        }
     }
 }
 
