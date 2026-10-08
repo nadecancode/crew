@@ -613,7 +613,8 @@ function of the graph and agent availability, re-run on every change:
 - a task becomes `ready` when all dependencies are `done`, and is dispatched
   to its agent; unassigned tasks go to the least-loaded free worker;
 - an agent executes one task at a time; Waiting cards stay parked with their
-  owner while independent Ready work can start after the current turn ends;
+  owner; only the turn that parked them must yield before automatic Ready
+  dispatch, and later active turns do not hold independent work;
 - a failed dependency blocks its dependents; `crew task retry <id>` requeues;
 - a task with a `reviewer` is `done` only after `review_submit(approve=true)`;
 - if nothing can make progress for a while, a `scheduler.stall` event is
@@ -628,6 +629,10 @@ Blocked card). If none executes, they select the Waiting card with the latest
 its execution slot. Use an explicit task id to inspect, update or finish a
 parked card during other work. To resume it with `agent_status("working",
 task_id: "…")`, finish or park the executing card first.
+The same call can explicitly start an assigned Ready card, including during
+the parking turn, when no card executes and all dependencies are done. It
+creates the same task dispatch message and event as an automatic start;
+the status reply keeps its usual agent record.
 
 Before parking source changes, checkpoint them or record which card owns
 the pending edits. `git_commit` commits the whole worktree; preserve that

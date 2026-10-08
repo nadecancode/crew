@@ -126,12 +126,9 @@ impl Daemon {
                                     .get(&a.id)
                                     .is_some_and(|rt| rt.parking_turn && rt.turn_active))),
                     homeward: homeward.contains(&a.id),
-                    turn_active: model
-                        .rt
-                        .get(&a.id)
-                        .is_some_and(|rt| rt.parking_turn && rt.turn_active)
-                        || a.limit.is_some()
-                        || a.status == AgentStatus::Blocked,
+                    turn_active: model.rt.get(&a.id).is_some_and(|rt| rt.turn_active),
+                    parking_turn: model.rt.get(&a.id).is_some_and(|rt| rt.parking_turn),
+                    waiting_hold: a.limit.is_some() || a.status == AgentStatus::Blocked,
                 })
                 .collect();
             (model.tasks.clone(), agents)
@@ -142,7 +139,7 @@ impl Daemon {
             .map(|mut a| {
                 if a.runnable {
                     let pending = self.bus.undelivered(&a.id).unwrap_or_default();
-                    a.turn_active |= self.pending_task_wakeup(&a.id, &pending);
+                    a.waiting_hold |= self.pending_task_wakeup(&a.id, &pending);
                     if !a.active && !a.orchestrator {
                         a.active = !pending.is_empty();
                     }
@@ -323,15 +320,45 @@ until the database takes writes again, tasks wait where they are.",
 
     /// Hand a ready task to its agent with a `task` message.
     async fn dispatch_task(&self, task_id: &str, agent_id: &str) {
+        // A planner action can become stale before it is applied. The
+        // explicit-start path returns the same checked refusal to its caller.
+        let _ = self.dispatch_ready_task(task_id, agent_id, false).await;
+    }
+
+    /// An explicit start releases the caller's parking-turn hold, but uses
+    /// the same execution-slot claim and dispatch as an automatic start.
+    pub(crate) async fn start_ready_task(
+        &self,
+        task_id: &str,
+        agent_id: &str,
+    ) -> Result<(), RpcError> {
+        self.dispatch_ready_task(task_id, agent_id, true).await
+    }
+
+    async fn dispatch_ready_task(
+        &self,
+        task_id: &str,
+        agent_id: &str,
+        explicit: bool,
+    ) -> Result<(), RpcError> {
         let now = now_ms();
         // Check-and-set: only a task that is still ready, and is this agent's,
         // is handed out, so a task is never dispatched twice, nor without its
         // owner (an assignment the database refused).
         let mut claimed = false;
-        let Ok(Some(task)) = self.try_update_task_checked(task_id, |model, t| {
-            if t.status == TaskStatus::Ready && t.assigned_agent.as_deref() == Some(agent_id) {
-                if tasks::executing_task(&model.tasks, agent_id).is_some()
-                    || (model
+        let task = self.try_update_task_checked(task_id, |model, t| {
+            if t.status == TaskStatus::Ready {
+                if t.assigned_agent.as_deref() != Some(agent_id) {
+                    return Err(RpcError::forbidden(format!("task {} is not yours", t.id)));
+                }
+                if let Some(current) = tasks::executing_task(&model.tasks, agent_id) {
+                    return Err(RpcError::conflict(format!(
+                        "another task is executing: {}. Finish or park it first to start {}",
+                        current.id, t.id
+                    )));
+                }
+                if !explicit
+                    && (model
                         .rt
                         .get(agent_id)
                         .is_some_and(|rt| rt.parking_turn && rt.turn_active)
@@ -339,13 +366,18 @@ until the database takes writes again, tasks wait where they are.",
                             task.assigned_agent.as_deref() == Some(agent_id)
                                 && task.status == TaskStatus::Waiting
                         }))
-                    || !t.dependencies.iter().all(|id| {
-                        model
-                            .task(id)
-                            .is_some_and(|dep| dep.status == TaskStatus::Done)
-                    })
                 {
                     return Ok(());
+                }
+                if let Some(dep) = t.dependencies.iter().find(|id| {
+                    !model
+                        .task(id)
+                        .is_some_and(|dep| dep.status == TaskStatus::Done)
+                }) {
+                    return Err(RpcError::conflict(format!(
+                        "task {} cannot start: dependency '{dep}' is not done",
+                        t.id
+                    )));
                 }
                 t.status = TaskStatus::Working;
                 t.started_at = Some(now);
@@ -354,11 +386,12 @@ until the database takes writes again, tasks wait where they are.",
                 claimed = true;
             }
             Ok(())
-        }) else {
-            return;
+        })?;
+        let Some(task) = task else {
+            return Err(RpcError::not_found(format!("no task '{task_id}'")));
         };
         if !claimed {
-            return;
+            return Ok(());
         }
         let body = prompt::task_dispatch(&task);
         self.project_task(agent_id);
@@ -400,7 +433,9 @@ until the database takes writes again, tasks wait where they are.",
                 format!("could not be dispatched to {agent_id}: {}", e.message),
             )
             .await;
+            return Err(e);
         }
+        Ok(())
     }
 
     // ---- the board -------------------------------------------------------
@@ -1550,6 +1585,336 @@ it with review_submit(task_id=\"{}\", approve=true|false).",
                 task.id
             ),
         )
+    }
+}
+
+#[cfg(test)]
+mod ready_start_tests {
+    use super::*;
+    use crate::daemon::server::Session;
+    use crew_core::rpc::ServerFrame;
+    use crew_core::Agent;
+    use serde_json::Value;
+    use tokio::sync::mpsc;
+
+    fn card(id: &str, status: TaskStatus) -> Task {
+        serde_json::from_value(json!({
+            "id": id, "title": id, "description": "independent work",
+            "assigned_agent": "owner", "status": status, "created_at": 1,
+            "started_at": (status != TaskStatus::Ready).then_some(10),
+            "progress": (status != TaskStatus::Ready).then_some(41),
+            "note": (status != TaskStatus::Ready).then_some("waiting on schema")
+        }))
+        .unwrap()
+    }
+
+    async fn fixture(cards: Vec<Task>) -> (tempfile::TempDir, crate::daemon::Running) {
+        let temp = tempfile::tempdir().unwrap();
+        let running = crate::daemon::start(crate::daemon::DaemonOptions {
+            workspace: temp.path().into(),
+            crew_bin: std::env::current_exe().unwrap(),
+            pin: None,
+        })
+        .await
+        .unwrap();
+        let daemon = &running.daemon;
+        for id in ["owner", "other"] {
+            let agent: Agent = serde_json::from_value(json!({
+                "id": id, "name": id, "role": "worker", "runtime": "shell",
+                "status": "waiting", "backend": "pty", "workdir": temp.path(),
+                "last_activity_at": 0
+            }))
+            .unwrap();
+            daemon.store.save_agent(&agent).unwrap();
+            daemon.model().agents.push(agent);
+            let token = format!("synthetic-{id}");
+            daemon.store.save_token(id, &token).unwrap();
+            daemon.model().tokens.insert(id.into(), token);
+        }
+        for task in cards {
+            daemon.store.save_task(&task).unwrap();
+            daemon.model().tasks.push(task);
+        }
+        daemon.project_task("owner");
+        let mut model = daemon.model();
+        let rt = model.rt("owner");
+        rt.turn_active = true;
+        rt.parking_turn = true;
+        rt.self_status = Some(AgentStatus::Waiting);
+        drop(model);
+        (temp, running)
+    }
+
+    async fn connection(daemon: &Daemon) -> (Session, mpsc::Receiver<ServerFrame>) {
+        let (mut session, mut rx) = Session::new(daemon);
+        let hello = json!({
+            "id": 1, "method": "hello", "params": {
+                "role": "agent", "agent_id": "owner", "token": "synthetic-owner",
+                "client": "ready-start-test", "protocol": crew_core::rpc::PROTOCOL_VERSION
+            }
+        });
+        assert!(session.request(&hello.to_string()).await);
+        assert!(rx.recv().await.unwrap().error.is_none());
+        (session, rx)
+    }
+
+    async fn start(session: &mut Session, rx: &mut mpsc::Receiver<ServerFrame>) -> ServerFrame {
+        let request = json!({
+            "id": 2, "method": "status_update",
+            "params": {"status": "working", "task_id": "next"}
+        });
+        assert!(session.request(&request.to_string()).await);
+        rx.recv().await.unwrap()
+    }
+
+    fn state(daemon: &Daemon) -> Value {
+        let model = daemon.model();
+        json!({
+            "tasks": model.tasks, "agents": model.agents, "local": model.local,
+            "parking_turn": model.rt["owner"].parking_turn,
+            "turn_active": model.rt["owner"].turn_active,
+            "self_status": model.rt["owner"].self_status,
+            "stored_tasks": daemon.store.load_tasks().unwrap(),
+            "stored_agents": daemon.store.load_agents().unwrap(),
+            "events": daemon.store.recent_events(None, 100).unwrap(),
+            "messages": daemon.bus.history(None, 100).unwrap()
+        })
+    }
+
+    fn dispatched(daemon: &Daemon) -> usize {
+        daemon
+            .store
+            .recent_events(None, 100)
+            .unwrap()
+            .iter()
+            .filter(|event| event.event_type == "task.dispatched")
+            .count()
+    }
+
+    #[tokio::test]
+    async fn explicit_ready_start_uses_normal_dispatch_and_preserves_parked_work() {
+        let parked = card("parked", TaskStatus::Waiting);
+        let (_temp, running) = fixture(vec![parked.clone(), card("next", TaskStatus::Ready)]).await;
+        let daemon = &running.daemon;
+        let (mut session, mut rx) = connection(daemon).await;
+
+        // The automatic path must still yield this particular parking turn.
+        daemon.dispatch_task("next", "owner").await;
+        assert_eq!(
+            daemon.model().task("next").unwrap().status,
+            TaskStatus::Ready
+        );
+        assert_eq!(dispatched(daemon), 0);
+
+        let frame = start(&mut session, &mut rx).await;
+        assert!(frame.error.is_none(), "{frame:?}");
+        let agent: Agent = serde_json::from_value(frame.result.unwrap()).unwrap();
+        assert_eq!(agent.task.as_deref(), Some("next"));
+        assert_eq!(agent.status, AgentStatus::Working);
+        let task = daemon.model().task("next").cloned().unwrap();
+        assert_eq!(task.status, TaskStatus::Working);
+        assert!(task.started_at.is_some());
+        assert_eq!(task.progress, Some(0));
+        assert_eq!(daemon.model().task("parked"), Some(&parked));
+        assert_eq!(daemon.store.load_tasks().unwrap(), daemon.model().tasks);
+        assert!(!daemon.model().rt("owner").parking_turn);
+        assert!(daemon.model().rt("owner").turn_active);
+
+        // An explicit retry and a stale planner action cannot dispatch twice.
+        assert!(start(&mut session, &mut rx).await.error.is_none());
+        daemon.dispatch_task("next", "owner").await;
+        let messages = daemon.bus.history(Some("owner"), 100).unwrap();
+        assert_eq!(messages.len(), 1);
+        let message = &messages[0];
+        assert_eq!(message.kind, MessageType::Task);
+        assert_eq!(message.body, prompt::task_dispatch(&task));
+        assert_eq!(message.metadata["task_id"], "next");
+        assert_eq!(dispatched(daemon), 1);
+        assert_eq!(daemon.bus.undelivered("owner").unwrap().len(), 1);
+
+        // The usual delivery bookkeeping still records the typed obligation.
+        daemon.delivered("owner", std::slice::from_ref(&message.id), "test-session");
+        assert_eq!(
+            daemon.model().rt("owner").turn_messages,
+            [message.id.clone()]
+        );
+        daemon
+            .complete_task(&Who::Agent("owner".into()), None, "finished".into(), vec![])
+            .await
+            .unwrap();
+        assert_eq!(daemon.model().task("parked"), Some(&parked));
+        daemon
+            .mirror_status_to_task_id("owner", AgentStatus::Working, None, Some("parked".into()))
+            .unwrap();
+        let resumed = daemon.model().task("parked").cloned().unwrap();
+        assert_eq!(resumed.status, TaskStatus::Working);
+        assert_eq!(resumed.started_at, parked.started_at);
+        assert_eq!(resumed.progress, parked.progress);
+    }
+
+    #[tokio::test]
+    async fn explicit_ready_start_refuses_an_occupied_execution_slot_without_changes() {
+        for status in [TaskStatus::Working, TaskStatus::Blocked] {
+            let (_temp, running) = fixture(vec![
+                card("current", status),
+                card("next", TaskStatus::Ready),
+            ])
+            .await;
+            let daemon = &running.daemon;
+            let (mut session, mut rx) = connection(daemon).await;
+            let before = state(daemon);
+            let error = start(&mut session, &mut rx).await.error.unwrap();
+            assert_eq!(error.code, "conflict");
+            assert!(error.message.contains("another task is executing: current"));
+            assert_eq!(state(daemon), before);
+        }
+    }
+
+    #[tokio::test]
+    async fn explicit_ready_start_checks_dependencies_and_owner_before_any_change() {
+        for status in [
+            None,
+            Some(TaskStatus::Queued),
+            Some(TaskStatus::Ready),
+            Some(TaskStatus::Working),
+            Some(TaskStatus::Waiting),
+            Some(TaskStatus::Blocked),
+            Some(TaskStatus::Review),
+            Some(TaskStatus::Failed),
+            Some(TaskStatus::Done),
+        ] {
+            let mut next = card("next", TaskStatus::Ready);
+            next.dependencies.push("dependency".into());
+            let mut cards = vec![card("parked", TaskStatus::Waiting), next];
+            if let Some(status) = status {
+                let mut dependency = card("dependency", status);
+                dependency.assigned_agent = Some("other".into());
+                cards.push(dependency);
+            }
+            let (_temp, running) = fixture(cards).await;
+            let daemon = &running.daemon;
+            let (mut session, mut rx) = connection(daemon).await;
+            let before = state(daemon);
+            let frame = start(&mut session, &mut rx).await;
+            if status == Some(TaskStatus::Done) {
+                assert!(frame.error.is_none(), "{frame:?}");
+                assert_eq!(
+                    daemon.model().task("next").unwrap().status,
+                    TaskStatus::Working
+                );
+                assert_eq!(dispatched(daemon), 1);
+            } else {
+                let error = frame.error.unwrap();
+                assert_eq!(error.code, "conflict");
+                assert!(error
+                    .message
+                    .contains("dependency 'dependency' is not done"));
+                assert_eq!(state(daemon), before, "{status:?}");
+            }
+        }
+        for owner in [None, Some("other")] {
+            let mut foreign = card("next", TaskStatus::Ready);
+            foreign.assigned_agent = owner.map(str::to_string);
+            let (_temp, running) =
+                fixture(vec![card("parked", TaskStatus::Waiting), foreign]).await;
+            let daemon = &running.daemon;
+            let (mut session, mut rx) = connection(daemon).await;
+            let before = state(daemon);
+            assert_eq!(
+                start(&mut session, &mut rx).await.error.unwrap().code,
+                "forbidden"
+            );
+            assert_eq!(state(daemon), before);
+        }
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn explicit_and_planner_claims_dispatch_once_and_keep_one_execution_slot() {
+        for auto_task in ["next", "other-ready"] {
+            let (_temp, running) = fixture(vec![
+                card("parked", TaskStatus::Waiting),
+                card("next", TaskStatus::Ready),
+                card("other-ready", TaskStatus::Ready),
+            ])
+            .await;
+            let daemon = &running.daemon;
+            daemon.model().rt("owner").parking_turn = false;
+            let (mut session, mut rx) = connection(daemon).await;
+            let barrier = std::sync::Arc::new(tokio::sync::Barrier::new(2));
+            let automatic = {
+                let daemon = daemon.clone();
+                let barrier = barrier.clone();
+                tokio::spawn(async move {
+                    barrier.wait().await;
+                    daemon.dispatch_task(auto_task, "owner").await;
+                })
+            };
+            let explicit = tokio::spawn(async move {
+                barrier.wait().await;
+                start(&mut session, &mut rx).await
+            });
+            automatic.await.unwrap();
+            let frame = explicit.await.unwrap();
+            if auto_task == "next" {
+                assert!(frame.error.is_none(), "{frame:?}");
+            } else if let Some(error) = frame.error {
+                assert_eq!(error.code, "conflict");
+                assert_eq!(
+                    daemon.model().task(auto_task).unwrap().status,
+                    TaskStatus::Working
+                );
+            } else {
+                assert_eq!(
+                    daemon.model().task("next").unwrap().status,
+                    TaskStatus::Working
+                );
+            }
+            assert_eq!(
+                daemon
+                    .model()
+                    .tasks
+                    .iter()
+                    .filter(|t| tasks::occupies_agent(t))
+                    .count(),
+                1
+            );
+            assert_eq!(dispatched(daemon), 1);
+            assert_eq!(daemon.bus.history(Some("owner"), 100).unwrap().len(), 1);
+            assert_eq!(
+                daemon.model().task("parked").unwrap().status,
+                TaskStatus::Waiting
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn actual_agent_view_dispatches_waiting_owners_during_nonparking_turns() {
+        let (_temp, running) = fixture(vec![
+            card("parked", TaskStatus::Waiting),
+            card("next", TaskStatus::Ready),
+            card("other-ready", TaskStatus::Ready),
+        ])
+        .await;
+        let daemon = &running.daemon;
+        daemon.model().session.team =
+            Some(crew_core::config::TeamConfig::from_yaml("project: waiting-dispatch\n").unwrap());
+        // A spawning process is eligible without an installed process manager.
+        daemon.update_agent("owner", |agent| agent.status = AgentStatus::Spawning);
+        daemon.model().rt("owner").parking_turn = false;
+        daemon.apply_plan().await;
+        assert_eq!(
+            daemon.model().task("next").unwrap().status,
+            TaskStatus::Working
+        );
+        assert_eq!(
+            daemon.model().task("other-ready").unwrap().status,
+            TaskStatus::Ready
+        );
+        assert_eq!(
+            daemon.model().task("parked").unwrap().status,
+            TaskStatus::Waiting
+        );
+        assert_eq!(dispatched(daemon), 1);
     }
 }
 
