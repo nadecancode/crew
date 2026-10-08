@@ -211,6 +211,10 @@ change identity",
                 crew_core::rpc::features::Id::new(uuid::Uuid::new_v4().to_string())
                     .map_err(RpcError::invalid)?,
                 self.run_context()?,
+                match &who {
+                    Who::Operator => super::features::Caller::Operator,
+                    Who::Agent(id) => super::features::Caller::Agent { id: id.clone() },
+                },
             );
             // The dashboard server's mark on a browser's connection: it only
             // takes away (W7).

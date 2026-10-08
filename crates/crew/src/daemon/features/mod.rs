@@ -263,7 +263,7 @@ impl Daemon {
             context.cancellation.cancel();
             self.feature_services
                 .connection_closed(&context.connection_epoch);
-            context = ConnCtx::new(context.connection_epoch, current);
+            context = ConnCtx::new(context.connection_epoch, current, context.caller);
             self.feature_services.connection_opened(context.clone());
             conn.feature_context = Some(context.clone());
         }
@@ -340,6 +340,49 @@ pub type ConnId = Id;
 /// Services use the existing finite RPC error envelope.
 pub type FeatureError = RpcError;
 
+/// The principal authenticated by the dispatcher. Request bodies cannot
+/// choose a sender or turn an agent into the operator.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum Caller {
+    Operator,
+    Agent { id: String },
+}
+
+impl Caller {
+    pub fn sender(&self) -> &str {
+        match self {
+            Self::Operator => crew_core::OPERATOR_ID,
+            Self::Agent { id } => id,
+        }
+    }
+}
+
+pub fn check_task_message_size(task: &crew_core::Task, limit: usize) -> Result<(), FeatureError> {
+    super::orchestrate::check_task_message_size(task, limit)
+}
+
+pub fn check_message_body(body: &str, limit: usize) -> Result<(), FeatureError> {
+    crate::message_bus::check_message_body(body, limit)
+        .map_err(|error| RpcError::invalid(error.to_string()))
+}
+
+pub fn check_report_decisions(
+    caller: &Caller,
+    decisions: Vec<String>,
+    max_decisions: usize,
+    message_limit: usize,
+) -> Result<Vec<String>, FeatureError> {
+    let who = match caller {
+        Caller::Operator => Who::Operator,
+        Caller::Agent { id } => Who::Agent(id.clone()),
+    };
+    let decisions = super::questions::check_report_decisions(&who, decisions, max_decisions)?;
+    for body in &decisions {
+        check_message_body(body, message_limit)?;
+    }
+    Ok(decisions)
+}
+
 /// Whether the complete service contract can be negotiated on a connection.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Readiness {
@@ -361,14 +404,16 @@ pub struct RunCtx {
 pub struct ConnCtx {
     pub connection_epoch: ConnId,
     pub run: RunCtx,
+    pub caller: Caller,
     pub cancellation: Cancellation,
 }
 
 impl ConnCtx {
-    pub fn new(connection_epoch: ConnId, run: RunCtx) -> Self {
+    pub fn new(connection_epoch: ConnId, run: RunCtx, caller: Caller) -> Self {
         Self {
             connection_epoch,
             run,
+            caller,
             cancellation: Cancellation::default(),
         }
     }
@@ -417,6 +462,26 @@ mod tests {
     use std::time::Duration;
 
     struct ReadyDocs;
+
+    #[test]
+    fn report_preflight_uses_actual_caller_and_shared_byte_limit() {
+        let agent = Caller::Agent {
+            id: "orchestrator".into(),
+        };
+        assert_eq!(agent.sender(), "orchestrator");
+        assert!(check_report_decisions(&Caller::Operator, vec!["choose".into()], 64, 100).is_err());
+        assert_eq!(
+            check_report_decisions(
+                &agent,
+                vec![" choose ".into(), "choose".into(), "".into()],
+                64,
+                100
+            )
+            .unwrap(),
+            vec!["choose"]
+        );
+        assert!(check_report_decisions(&agent, vec!["éé".into()], 64, 3).is_err());
+    }
 
     #[async_trait::async_trait]
     impl FeatureService for ReadyDocs {
@@ -600,8 +665,12 @@ mod tests {
         let run = RunCtx {
             workspace_run_id: Id::new("run-1").unwrap(),
         };
-        let first = ConnCtx::new(Id::new("connection-1").unwrap(), run.clone());
-        let second = ConnCtx::new(Id::new("connection-2").unwrap(), run);
+        let first = ConnCtx::new(
+            Id::new("connection-1").unwrap(),
+            run.clone(),
+            Caller::Operator,
+        );
+        let second = ConnCtx::new(Id::new("connection-2").unwrap(), run, Caller::Operator);
         drop(first.clone());
         assert!(!first.cancellation.is_cancelled());
         first.cancellation.cancel();
