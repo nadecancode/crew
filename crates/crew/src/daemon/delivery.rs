@@ -1514,7 +1514,7 @@ mod tests {
         else {
             panic!("expected native delivery")
         };
-        assert_eq!(ids, [short.id.clone()]);
+        assert_eq!(ids.as_slice(), std::slice::from_ref(&short.id));
         assert!(text.contains(&short.body));
         assert!(text.contains("Messages delivered here in full may be marked read"));
         consume_with_text(daemon, &batch, &ids, &text).await;
@@ -1551,7 +1551,7 @@ mod tests {
         else {
             panic!("expected clipped delivery")
         };
-        assert_eq!(ids, [long.id.clone()]);
+        assert_eq!(ids.as_slice(), std::slice::from_ref(&long.id));
         assert!(text.contains(&format!(
             "agent_inbox(id: {:?}) reads the full text",
             long.id
