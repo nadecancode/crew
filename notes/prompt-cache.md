@@ -912,7 +912,11 @@ Codex loses at every cap, even assuming 30-minute retention:
 Codex members get no keep-alive.
 
 This is a replay of what happened, not a controlled result. Keep-alive cost
-and coverage are modelled, not observed. The pairs below test the model.
+and coverage are modelled, not observed. The timeline does not record a
+member's status, so the replay counts every rest. The policy below is
+narrower: only members Waiting on open work. The replay is therefore an
+upper bound on both its keep-alives and its savings. The pairs below test
+the model.
 
 **Mechanism.** The keep-alive is crew's own line, through the same path as a
 reminder (`Daemon::inject`), never a message:
@@ -921,15 +925,16 @@ reminder (`Daemon::inject`), never a message:
 > Reply with just "ok", call no tools, and end your turn.
 
 - **Who gets one.** A Claude Code member is eligible when all of these hold:
-  - it is at rest: Waiting, Done (between cards, until given the next), or
-    Idle without an executing card; the orchestrator rests as Waiting;
+  - it is Waiting on open work: a member with a parked card and none
+    executing, or the orchestrator while the team has any card open;
   - the team has not finished;
   - it is ready and no turn is running;
   - it is not paused and not at a usage limit;
   - no compaction is queued, and no waking delivery is pending;
   - its last reported context is at least the threshold.
 - **Who does not.** Not a member with executing work: nudges cover it. Not
-  one that is Blocked, retiring or temporary.
+  one without open work (Done or Idle between cards), which may never be
+  given another. Not one that is Blocked, retiring or temporary.
 - **Usage limits.** It is skipped while any Claude Code usage window is 80%
   used or more, so keep-alives never spend the last of a window.
 - **D1.** It is queued at a turn boundary like any own-text line. If a
@@ -961,6 +966,14 @@ Settings, all in `limits`:
 authorization; template and models as `ffbeb0be` (Haiku 4.5, `gpt-6-luna`),
 sandbox off.
 
+The lifecycle baseline stays as it is. In it the team finishes before the
+long gap (the orchestrator is Done with a summary), so no member would be
+eligible. Both arms therefore add the same D2 setup before the long idle:
+each worker is given a sentinel card and parks it
+(`agent_status("waiting", …)`). The team stays unfinished and the
+orchestrator rests as Waiting. QA's `cache-retention-bench` card fixes its
+exact steps. Same models, catalog and build in both arms.
+
 - **Control arm.** The existing long idle: a measured gap over 3,600 s since
   each member's last work request, then the probes.
 - **Treatment arm.** The same, plus:
@@ -973,9 +986,10 @@ sandbox off.
     falls between the keep-alive event and that turn's last request;
   - a keep-alive turn that a delivery joined is work: the pair is retained
     and marked invalid, never excluded;
-  - both arms run the existing lifecycle as is: workers rest as Done after
-    the probes and the orchestrator as Waiting, both eligible;
-  - both arms run one daemon build, with only the setting changed;
+  - the matching rule is provisional until a native turn marker exists;
+    a mixed or ambiguous turn is retained and marked invalid;
+  - both arms run one daemon build, models and catalog, with only the
+    setting changed;
   - gaps are measured from the last other request;
   - Codex gets none in either arm; its read share is reported in both as a
     control.

@@ -124,17 +124,17 @@ impl Daemon {
             {
                 continue;
             }
-            // At rest only: waiting on someone, or between cards (Done is a
-            // member whose cards are all finished, until it is given the
-            // next). A member with a card to do is reminded instead.
-            let resting = match agent.status {
-                AgentStatus::Waiting | AgentStatus::Done => true,
-                AgentStatus::Idle => {
-                    crate::tasks::executing_task(&model.tasks, &agent.id).is_none()
-                }
-                _ => false,
+            // Waiting on open work only: a member with a parked card, or the
+            // orchestrator while the team has cards open. A member with a
+            // card to do is reminded instead; one with no open card (Done,
+            // Idle) may never be given another.
+            let open_work = if agent.orchestrator {
+                model.tasks.iter().any(|t| !t.status.is_terminal())
+            } else {
+                crate::tasks::active_task(&model.tasks, &agent.id).is_some()
+                    && crate::tasks::executing_task(&model.tasks, &agent.id).is_none()
             };
-            if !resting {
+            if agent.status != AgentStatus::Waiting || !open_work {
                 continue;
             }
             let Some(context) = agent.context.clone() else {
@@ -331,7 +331,7 @@ mod tests {
 
     #[tokio::test(start_paused = true)]
     async fn the_status_a_member_set_survives_its_keep_alive() {
-        let (_temp, running, mut receiver) = fixture("blocked", None).await;
+        let (_temp, running, mut receiver) = fixture("blocked", Some(TaskStatus::Waiting)).await;
         let daemon = &running.daemon;
         // A blocked member is not woken.
         daemon.keepalive_at(2 * HOUR, &limits()).await;
@@ -351,12 +351,38 @@ mod tests {
     }
 
     #[tokio::test(start_paused = true)]
-    async fn members_with_work_or_without_a_claude_session_are_left_alone() {
-        // A member between cards is kept warm; once the team is done, no one.
-        let (_temp, running, mut receiver) = fixture("done", Some(TaskStatus::Done)).await;
-        running.daemon.keepalive_at(2 * HOUR, &limits()).await;
+    async fn the_orchestrator_is_kept_warm_while_the_team_has_open_cards() {
+        let (_temp, running, mut receiver) = fixture("waiting", Some(TaskStatus::Done)).await;
+        let daemon = &running.daemon;
+        daemon.update_agent("owner", |a| a.orchestrator = true);
+        daemon.keepalive_at(2 * HOUR, &limits()).await;
+        assert!(!sent(&mut receiver));
+        let task: Task = serde_json::from_value(json!({
+            "id":"other", "title":"Other", "assigned_agent":"worker", "status":"working",
+            "created_at":0, "started_at":1
+        }))
+        .unwrap();
+        daemon.model().tasks.push(task);
+        daemon.keepalive_at(2 * HOUR, &limits()).await;
         assert!(sent(&mut receiver));
-        let (_temp, running, mut receiver) = fixture("done", Some(TaskStatus::Done)).await;
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn members_with_work_or_without_a_claude_session_are_left_alone() {
+        // Without open work there is nothing to keep warm for: a member
+        // between cards (Done or Idle), one that says it waits on no card,
+        // and anyone once the team is done.
+        for (status, task) in [
+            ("done", Some(TaskStatus::Done)),
+            ("idle", None),
+            ("waiting", None),
+            ("waiting", Some(TaskStatus::Done)),
+        ] {
+            let (_temp, running, mut receiver) = fixture(status, task).await;
+            running.daemon.keepalive_at(2 * HOUR, &limits()).await;
+            assert!(!sent(&mut receiver), "{status} {task:?}");
+        }
+        let (_temp, running, mut receiver) = fixture("waiting", Some(TaskStatus::Waiting)).await;
         running.daemon.model().session.summary = Some("all done".into());
         running.daemon.keepalive_at(2 * HOUR, &limits()).await;
         assert!(!sent(&mut receiver));
