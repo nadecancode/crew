@@ -1,0 +1,41 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><title>Mockup: Tasks grouped by epic</title>
+<link rel="stylesheet" href="mockup.css">
+<script>document.documentElement.dataset.theme = location.hash === "#dark" ? "dark" : "light";</script>
+</head><body>
+<div class="app">
+  <header class="top"><span class="brand">crew</span><span class="pill">crew · ~/workspaces/personal/crew ▾</span><span class="muted sm">Live</span><span class="spacer"></span><span class="pill">Commands <kbd>Ctrl K</kbd></span><span class="pill">Appearance</span><span class="pill">Help</span><span class="pill">Workspace ▾</span></header>
+  <div class="summary"><span class="obj">revamp the crew website to be as elegant and content rich…</span><span class="focus">Epic: <b>Toolboxes for team members</b> · 9 of 14 done</span><span class="muted sm num">12 agents · 7 working · 2 questions</span></div>
+  <nav class="views"><a>Team<kbd>g</kbd></a><a class="on">Tasks<kbd>t</kbd></a><a>Docs<kbd>n</kbd></a><a>Events<kbd>l</kbd></a><a>Usage<kbd>v</kbd></a></nav>
+  <div class="body">
+    <main>
+      <div class="toolbar"><span class="title">Tasks</span><span class="muted sm num">148 tasks · 112 done</span><span class="field">Search tasks…</span><span class="sel">Group: Epic ▾</span><span class="sel">Status ▾</span><span class="sel">Agent ▾</span><span class="chk"><i></i>Show done <kbd>h</kbd></span><span class="sel">Density: Comfortable ▾</span><span class="sel">List ▾</span></div>
+      <div class="list">
+        <div class="epic"><span>▾</span><span><span class="t">Toolboxes for team members</span><div class="bar"><span class="ok" style="width:64%"></span></div></span><span class="st"><span class="tag act">Active</span> <span class="num">9 of 14 done</span></span><span class="sm muted mono">graph, ui, scheduler</span><span class="sm quiet">2 min</span></div>
+        <div class="task sel"><span>●</span><span class="mono">toolbox-launch</span><span class="tag act">Working</span><span class="mono">graph</span><span>Launch members with their resolved toolbox</span><span class="num">62%</span></div>
+        <div class="task"><span>●</span><span class="mono">toolbox-dashboards</span><span class="tag rev">Review</span><span class="mono">ui</span><span>Show the effective toolbox · cache-reviewer</span><span></span></div>
+        <div class="task"><span>○</span><span class="mono">toolbox-mcp-cli</span><span class="tag">Queued</span><span class="mono">scheduler</span><span class="muted">← toolbox-launch</span><span></span></div>
+        <div class="task"><span>○</span><span class="mono">toolbox-qa</span><span class="tag">Queued</span><span class="mono">qa</span><span class="muted">← toolbox-launch, toolbox-dashboards</span><span></span></div>
+        <div class="fold">▸ <b>9 done</b> · last 14 min ago</div>
+        <div class="epic"><span>▾</span><span><span class="t">Prompt cache hit rate</span><div class="bar"><span class="ok" style="width:55%"></span><span class="er" style="width:9%"></span></div></span><span class="st"><span class="tag act">Active</span> <span class="num">6 of 11 done · 1 failed</span></span><span class="sm muted mono">runtime, content</span><span class="sm quiet">6 min</span></div>
+        <div class="task"><span>✕</span><span class="mono">cache-bench-v1</span><span class="tag blk">Failed</span><span class="mono">qa</span><span>Live workload did not reach steady state</span><span></span></div>
+        <div class="task"><span>●</span><span class="mono">cache-delivery</span><span class="tag act">Working</span><span class="mono">runtime</span><span>Deliver ordinary messages at turn boundaries</span><span class="num">40%</span></div>
+        <div class="task"><span>●</span><span class="mono">cache-obligation-wakes</span><span class="tag act">Working</span><span class="mono">content</span><span>Cut redundant reminders and nudges</span><span class="num">70%</span></div>
+        <div class="fold">▸ <b>6 done</b> · last 1 h ago</div>
+        <div class="epic"><span>▸</span><span><span class="t">Dashboard features</span><div class="bar"></div></span><span class="st"><span class="tag">Planned</span> <span class="num">0 of 9 done</span></span><span class="sm muted mono">designer</span><span class="sm quiet">20 min</span></div>
+        <div class="epic"><span>▸</span><span><span class="t">No epic</span></span><span class="st muted num">3 tasks</span><span></span><span></span></div>
+        <div class="groupsep">Done epics (1)</div>
+        <div class="epic"><span>▸</span><span><span class="t">Native apps</span><div class="bar"><span class="ok" style="width:100%"></span></div></span><span class="st"><span class="tag done">Done</span> <span class="num">41 tasks</span></span><span class="sm muted"></span><span class="sm quiet">6 h</span></div>
+      </div>
+    </main>
+    <div class="sep"></div>
+    <aside class="panel">
+      <div class="ph"><div class="xs muted">Epic</div><h2>Toolboxes for team members</h2><div class="sm"><span class="tag act">Active</span> <span class="num">9 of 14 done</span></div></div>
+      <div class="sect"><h3>Asked by the operator</h3><div class="muted">“also add team member scoped toolboxes (i.e. mcp, skills, etc.)”</div><div class="xs"><a>Open message w-9599bbf059d8f7a6</a></div></div>
+      <dl class="facts"><dt>Created</dt><dd class="num">Oct 7, 22:48</dd><dt>First started</dt><dd class="num">Oct 7, 22:49</dd><dt>Closed</dt><dd class="muted">not yet</dd><dt>Agents</dt><dd class="mono">graph 4 · ui 3 · scheduler 2 · designer 4 · qa 1</dd><dt>Usage</dt><dd class="num">Hit rate 98.1% · Write share 41% · ≈ $46.20</dd></dl>
+      <div class="sect"><h3>Docs linked from its tasks</h3><div class="mono">notes/toolboxes.md</div><div class="mono">notes/toolbox-probes/README.md</div></div>
+      <div class="composer"><div class="xs muted">Message to: claude-1 ▾</div><div class="box muted">Write a message…</div></div>
+    </aside>
+  </div>
+</div>
+</body></html>

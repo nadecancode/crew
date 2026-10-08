@@ -1,0 +1,57 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><title>Mockup: Docs</title>
+<link rel="stylesheet" href="mockup.css">
+<script>document.documentElement.dataset.theme = location.hash === "#dark" ? "dark" : "light";</script>
+</head><body>
+<div class="app">
+  <header class="top"><span class="brand">crew</span><span class="pill">crew · ~/workspaces/personal/crew ▾</span><span class="muted sm">Live</span><span class="spacer"></span><span class="pill">Commands <kbd>Ctrl K</kbd></span><span class="pill">Appearance</span><span class="pill">Help</span><span class="pill">Workspace ▾</span></header>
+  <div class="summary"><span class="obj">revamp the crew website to be as elegant and content rich…</span><span class="focus">Epic: <b>Toolboxes for team members</b> · 9 of 14 done</span></div>
+  <nav class="views"><a>Team<kbd>g</kbd></a><a>Tasks<kbd>t</kbd></a><a class="on">Docs<kbd>n</kbd></a><a>Events<kbd>l</kbd></a><a>Usage<kbd>v</kbd></a></nav>
+  <div class="body">
+    <main>
+      <div class="toolbar"><span class="title">Docs</span><span class="sel">Workspace ▾</span><span class="field" style="min-width:180px">Filter files…</span><span class="sel">Sort: Recently changed ▾</span><span class="muted sm num">212 docs · 3 changing now</span></div>
+      <div style="display:grid;grid-template-columns:250px 1fr;min-height:0;flex:1">
+        <div class="tree">
+          <div>README.md</div>
+          <div>▾ notes</div>
+          <div style="padding-left:28px">dashboard-features.md<span class="dot"></span></div><div class="who">designer</div>
+          <div class="sel" style="padding-left:28px">toolboxes.md<span class="dot"></span></div><div class="who">designer, graph</div>
+          <div style="padding-left:28px">prompt-cache.md</div>
+          <div style="padding-left:28px">▸ toolbox-probes</div>
+          <div style="padding-left:28px">web-revamp.md</div>
+          <div style="padding-left:28px">native-apps.md</div>
+          <div>▸ review</div>
+          <div>▸ docs</div>
+        </div>
+        <div class="doc">
+          <div style="display:flex;gap:12px;align-items:baseline;padding:12px 0 6px;border-bottom:1px solid var(--line);flex-wrap:wrap">
+            <span class="mono">notes/toolboxes.md</span><span class="sm muted">Workspace · changed 2 min ago</span><span class="spacer"></span><span class="sel">View: Workspace ▾</span><span class="btn">History</span><span class="btn">Copy path</span><span class="btn">Outline ▾</span>
+          </div>
+          <div class="notice">Updated just now in graph's worktree (not landed) · <a>Show changes</a> · <a>View graph's version</a></div>
+          <article>
+            <h1>Member toolboxes</h1>
+            <p>Operator request (w-9599bbf059d8f7a6): “team member scoped toolboxes (i.e. mcp, skills, etc.)”. A toolbox is the set of extensions a member's runtime loads beside crew's own.</p>
+            <h2>Spec</h2>
+            <p class="chg">Every capability below is taken from the current state above and from the capability and exclusion probes. <span class="xs quiet">changed</span></p>
+            <table><tr><th>Kind</th><th>Claude Code</th><th>Codex</th><th>pi</th></tr><tr><td class="mono">mcp</td><td>A/mcp.json after crew</td><td>-c mcp_servers.*</td><td>crew extension</td></tr><tr><td class="mono">skills</td><td>crew-toolbox plugin</td><td>app-server roots</td><td>--skill</td></tr></table>
+            <pre class="mono">crew toolbox [&lt;agent&gt;] [--runtime &lt;kind&gt;] [--json]</pre>
+          </article>
+        </div>
+      </div>
+    </main>
+    <div class="sep"></div>
+    <aside class="panel">
+      <div class="ph"><div class="xs muted">History</div><h2 class="mono" style="font-size:14px">notes/toolboxes.md</h2></div>
+      <div class="sect"><h3>Seen here</h3>
+        <div class="card"><div class="h"><b>graph's worktree</b><span class="quiet xs num">just now</span></div><div class="f">uncommitted save · 4 blocks changed</div></div>
+      </div>
+      <div class="sect"><h3>Recorded</h3>
+        <div class="card"><div class="h"><b>designer</b><span class="quiet xs num">Oct 8, 01:02</span><span class="mono xs">478f54f1</span></div><div>Add the local-open Claude probe and narrow partial-list wording</div></div>
+        <div class="card"><div class="h"><b>designer</b><span class="quiet xs num">Oct 8, 00:41</span><span class="mono xs">182591e5</span></div><div>Probe the remaining toolbox exclusion controls</div></div>
+        <div class="card"><div class="h"><b>graph</b><span class="quiet xs num">Oct 7, 23:50</span><span class="mono xs">ae1c88d2</span></div><div>Verify native toolbox scoping with isolated CLI capability probes</div></div>
+      </div>
+      <div class="sect"><span class="btn">Compare selected</span> <span class="btn">Compare with Workspace</span></div>
+    </aside>
+  </div>
+</div>
+</body></html>
