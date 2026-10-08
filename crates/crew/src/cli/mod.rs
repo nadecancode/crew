@@ -256,6 +256,8 @@ answers: `crew answer 2`.")]
     /// Members' toolboxes: the MCP servers, skills, plugins, subagents and hooks
     /// each one runs with
     Toolbox(ToolboxArgs),
+    /// View captured tool output with member-scoped exact raw recovery
+    Output(crate::output::OutputArgs),
     /// Show the endpoints and keys team members are launched with
     Config {
         #[command(subcommand)]
@@ -741,6 +743,7 @@ pub fn run(cli: Cli) -> Result<()> {
             Some(ToolboxCommand::Reload { file }) => ops::toolbox_reload(&target, &file),
             None => ops::toolbox(&target, args.agent, args.runtime, args.json),
         },
+        Command::Output(args) => crate::output::run(args),
         Command::Config { command } => ops::config(&target, command.unwrap_or(ConfigCommand::Show)),
         Command::Style { command } => ops::style(&target, command.unwrap_or(StyleCommand::List)),
         Command::Models { command } => ops::models(command.unwrap_or(ModelsCommand::List)),
