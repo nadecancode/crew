@@ -2714,7 +2714,7 @@ fn the_orchestrator_adds_members_with_bundles_by_name_only() {
         ),
         (
             json!({ "include": ["webb"] }),
-            "Unknown toolbox \"webb\". Toolboxes in this team: docs, web.",
+            "Unknown toolbox \"webb\". Toolboxes in this team: compact-cli, docs, web.",
         ),
     ] {
         let refused = add(toolbox.clone()).expect_err(&toolbox.to_string());
@@ -2722,7 +2722,7 @@ fn the_orchestrator_adds_members_with_bundles_by_name_only() {
     }
     assert!(!s.snapshot().agents.iter().any(|a| a.id == "b"));
 
-    add(json!({ "include": ["web"] })).unwrap();
+    add(json!({ "include": ["web", "compact-cli"] })).unwrap();
     s.wait_for("the roster to name b", || {
         std::fs::read_to_string(s.workspace.join(".crew/roster.yaml"))
             .is_ok_and(|roster| roster.contains("id: b"))
@@ -2730,7 +2730,7 @@ fn the_orchestrator_adds_members_with_bundles_by_name_only() {
     let roster =
         crew_core::config::TeamConfig::load(&s.workspace.join(".crew/roster.yaml")).unwrap();
     let b = roster.agents.iter().find(|a| a.id == "b").unwrap();
-    assert_eq!(b.toolbox.include, ["web"]);
+    assert_eq!(b.toolbox.include, ["web", "compact-cli"]);
     assert!(b.toolbox.mcp.is_empty());
 }
 

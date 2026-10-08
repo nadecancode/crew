@@ -66,3 +66,11 @@ Validation uses isolated synthetic workspaces, repository overrides and Crew
 identity/socket/launch variables removed from child environments,
 `CARGO_INCREMENTAL=0`, and sandbox require mode with bubblewrap and socat.
 No operator team, service, installed binary or provider session is changed.
+
+Reviewed main b591744b was forward-merged with b541a0f2 using an append-only
+merge. No owned path overlapped or changed. On that merged tree, daemon
+Ready-start tests 5/5, planner 19/19, existing parking-turn-yield 1/1,
+toolbox unit tests 11/11, real gateway 21/21, and policy/inventory 14/14
+passed. Strict workspace and native-gateway Clippy, fmt, and the actual
+Rust 1.82.0 CLI gate also passed. The earlier full workspace result is
+retained; no unchanged broad suite was repeated.

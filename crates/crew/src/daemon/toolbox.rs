@@ -738,11 +738,24 @@ impl Daemon {
         let model = self.model();
         let settings = model.local.get(id).map(|local| &local.settings);
         let defaults = model.session.team.as_ref().map(|team| &team.defaults);
+        let (bypass, native_sandbox) = settings
+            .map(|settings| (settings.bypass_permissions, settings.sandbox.as_str()))
+            .or_else(|| {
+                defaults.map(|defaults| {
+                    (
+                        defaults.permissions == crew_core::config::PermissionPolicy::Bypass,
+                        defaults.sandbox.as_str(),
+                    )
+                })
+            })
+            .unwrap_or((true, "workspace-write"));
         let workdir = model
             .agent(id)
             .map(|agent| PathBuf::from(&agent.workdir))
             .unwrap_or_else(|| self.workspace.clone());
         Context {
+            crew_pin: self.binary.name().map(|_| self.crew_bin.clone()),
+            codex_native_sandbox: !bypass && native_sandbox != "danger-full-access",
             runtime,
             state_dir: self.state_dir.clone(),
             agent_dir: self.agent_dir(id),
@@ -839,6 +852,8 @@ impl Daemon {
             == crew_core::config::SandboxMode::Required)
             .then(|| self.agent_dir(id).join("rw/home"));
         context.socket_delivery = settings.socket_delivery;
+        context.codex_native_sandbox =
+            !settings.bypass_permissions && settings.sandbox != "danger-full-access";
         context.auto_trust = settings.auto_trust;
         let plan = prepare::prepare(&context, resolved.clone(), None, |server| {
             layers.toolbox_references(runtime, id, None, server)

@@ -83,6 +83,27 @@ impl Store {
         })
     }
 
+    /// Publish built-in bytes through the same bounded, verified snapshot path
+    /// as filesystem skills. The temporary tree is never a runtime resource.
+    pub fn snapshot_files(&self, files: &BTreeFiles) -> Result<Snapshot> {
+        if files.len() > MAX_ENTRIES
+            || files
+                .values()
+                .map(|(bytes, _)| bytes.len() as u64)
+                .sum::<u64>()
+                > MAX_BYTES
+        {
+            bail!("built-in toolbox item exceeds snapshot limits");
+        }
+        let temporary = PathBuf::from(format!(".builtin-{}", uuid::Uuid::new_v4()));
+        let result = replace_tree(&self.directory, &temporary, files)
+            .and_then(|()| self.capture(&self.path.join(&temporary)));
+        let cleanup = remove(&self.directory, &temporary);
+        let snapshot = result?;
+        cleanup?;
+        Ok(snapshot)
+    }
+
     /// Read a snapshot through the store descriptor. Persisted paths are
     /// checked against the content address before they are used again.
     pub fn files(&self, snapshot: &Snapshot) -> Result<BTreeFiles> {

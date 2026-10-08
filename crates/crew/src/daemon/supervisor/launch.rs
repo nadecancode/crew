@@ -365,6 +365,9 @@ impl Daemon {
         if let Some(program) = pi_program {
             spec.program = program.to_string_lossy().into_owned();
         }
+        if let Some(toolbox) = &local.settings.toolbox_launch {
+            toolbox.bind_helpers(&mut spec);
+        }
         // Before the sandboxes are made: they pass on what the launch's
         // environment names.
         spec.env.push(("CREW_LAUNCH".into(), launch_id.clone()));

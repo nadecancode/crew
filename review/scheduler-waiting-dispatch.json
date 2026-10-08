@@ -453,5 +453,242 @@
     }
   ],
   "provider_calls": 0,
-  "operator_services_changed": false
+  "operator_services_changed": false,
+  "forward_merge": {
+    "parents": [
+      "b541a0f2e224b0610cf9e614bc86760f5e31c0ee",
+      "b591744b37b28f1508de9eba0ff747191c3516a8"
+    ],
+    "owned_paths_unchanged": true,
+    "pipeline": {
+      "parents": [
+        "b541a0f2",
+        "b591744b"
+      ],
+      "merge": "clean append-only; no owned-path overlap",
+      "steps": [
+        {
+          "name": "ready",
+          "command": [
+            "cargo",
+            "test",
+            "--locked",
+            "-p",
+            "crew",
+            "--lib",
+            "ready_start_tests",
+            "--",
+            "--nocapture"
+          ],
+          "file": "target/scheduler-waiting-merged-ready.log",
+          "began": "2026-10-08T18:41:03.536Z",
+          "ended": "2026-10-08T18:41:23.686Z",
+          "available_before": 161110659072,
+          "code": 0,
+          "signal": null,
+          "sha256": "f2b3a4dde0c0cd8f470e3bb800269c76d4077b37ecc982669fcb3d05ce15b0fc",
+          "results": [
+            "test result: ok. 5 passed; 0 failed; 0 ignored; 0 measured; 575 filtered out; finished in 0.96s"
+          ]
+        },
+        {
+          "name": "planner",
+          "command": [
+            "cargo",
+            "test",
+            "--locked",
+            "-p",
+            "crew",
+            "--lib",
+            "scheduler::tests::"
+          ],
+          "file": "target/scheduler-waiting-merged-planner.log",
+          "began": "2026-10-08T18:41:23.689Z",
+          "ended": "2026-10-08T18:41:23.853Z",
+          "available_before": 161108430848,
+          "code": 0,
+          "signal": null,
+          "sha256": "ca74693db1d80e5c14e2c75588874fcd55c2a561928c4bc1dbcaff37d095265f",
+          "results": [
+            "test result: ok. 19 passed; 0 failed; 0 ignored; 0 measured; 561 filtered out; finished in 0.00s"
+          ]
+        },
+        {
+          "name": "yield",
+          "command": [
+            "cargo",
+            "test",
+            "--locked",
+            "-p",
+            "crew",
+            "--lib",
+            "daemon::overlap::tests::only_the_turn_that_parked_a_card_holds_the_next_ready_dispatch",
+            "--",
+            "--exact"
+          ],
+          "file": "target/scheduler-waiting-merged-yield.log",
+          "began": "2026-10-08T18:41:23.854Z",
+          "ended": "2026-10-08T18:41:24.025Z",
+          "available_before": 161108422656,
+          "code": 0,
+          "signal": null,
+          "sha256": "612722085805e02b8bf7e65e7b74c062c7ee5daaa5373f4dc8344ce42c6d86cb",
+          "results": [
+            "test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 579 filtered out; finished in 0.06s"
+          ]
+        },
+        {
+          "name": "toolbox",
+          "command": [
+            "cargo",
+            "test",
+            "--locked",
+            "-p",
+            "crew",
+            "--lib",
+            "agents::toolbox::"
+          ],
+          "file": "target/scheduler-waiting-merged-toolbox.log",
+          "began": "2026-10-08T18:41:24.030Z",
+          "ended": "2026-10-08T18:41:24.551Z",
+          "available_before": 161108414464,
+          "code": 0,
+          "signal": null,
+          "sha256": "ca6e7741ae23062242940ed3084a03bf6497b7aab89f99892c3c38bb4ffddb9a",
+          "results": [
+            "test result: ok. 11 passed; 0 failed; 0 ignored; 0 measured; 569 filtered out; finished in 0.41s"
+          ]
+        },
+        {
+          "name": "gateway",
+          "command": [
+            "cargo",
+            "test",
+            "--locked",
+            "-p",
+            "crew",
+            "--features",
+            "native-gateway",
+            "--test",
+            "native_gateway",
+            "--",
+            "--test-threads=1"
+          ],
+          "file": "target/scheduler-waiting-merged-gateway.log",
+          "began": "2026-10-08T18:41:24.553Z",
+          "ended": "2026-10-08T18:42:05.635Z",
+          "available_before": 161108406272,
+          "code": 0,
+          "signal": null,
+          "sha256": "bf00cbe1a470188c96fd66716542f49682932e1e99f7e2462d9be23178dcd0c5",
+          "results": [
+            "test result: ok. 21 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 27.77s"
+          ]
+        },
+        {
+          "name": "inventory",
+          "command": [
+            "cargo",
+            "test",
+            "--locked",
+            "-p",
+            "crew",
+            "--features",
+            "native-gateway",
+            "--lib",
+            "native::",
+            "--",
+            "--test-threads=1"
+          ],
+          "file": "target/scheduler-waiting-merged-inventory.log",
+          "began": "2026-10-08T18:42:05.637Z",
+          "ended": "2026-10-08T18:42:23.264Z",
+          "available_before": 159735472128,
+          "code": 0,
+          "signal": null,
+          "sha256": "155b5205a83156e54f2a5681d106635963d4540d276059dd3f1f2756012c1005",
+          "results": [
+            "test result: ok. 14 passed; 0 failed; 0 ignored; 0 measured; 578 filtered out; finished in 0.12s"
+          ]
+        },
+        {
+          "name": "clippy",
+          "command": [
+            "cargo",
+            "clippy",
+            "--locked",
+            "--workspace",
+            "--all-targets",
+            "--",
+            "-D",
+            "warnings"
+          ],
+          "file": "target/scheduler-waiting-merged-clippy.log",
+          "began": "2026-10-08T18:42:23.266Z",
+          "ended": "2026-10-08T18:42:34.927Z",
+          "available_before": 159733334016,
+          "code": 0,
+          "signal": null,
+          "sha256": "4588df65d9e92f78e6204095f81de15f46ebfc54e587d0b6d07ecff3d810739a",
+          "results": []
+        },
+        {
+          "name": "clippy-gateway",
+          "command": [
+            "cargo",
+            "clippy",
+            "--locked",
+            "-p",
+            "crew",
+            "--features",
+            "native-gateway",
+            "--all-targets",
+            "--",
+            "-D",
+            "warnings"
+          ],
+          "file": "target/scheduler-waiting-merged-clippy-gateway.log",
+          "began": "2026-10-08T18:42:34.929Z",
+          "ended": "2026-10-08T18:42:44.814Z",
+          "available_before": 159732441088,
+          "code": 0,
+          "signal": null,
+          "sha256": "dd45699bd4ae741897fd918b54f62f7b5ccef662993a14d7ce0c32d55b628c1f",
+          "results": []
+        },
+        {
+          "name": "msrv",
+          "command": [
+            "./scripts/check-msrv"
+          ],
+          "file": "target/scheduler-waiting-merged-msrv.log",
+          "began": "2026-10-08T18:42:44.816Z",
+          "ended": "2026-10-08T18:43:01.358Z",
+          "available_before": 159732367360,
+          "code": 0,
+          "signal": null,
+          "sha256": "2fe12cfba2d392fe43ebe5b97d9254d4f805d9c0d5ed9df70dd2c434cf91ca5a",
+          "results": []
+        },
+        {
+          "name": "fmt",
+          "command": [
+            "cargo",
+            "fmt",
+            "--all",
+            "--check"
+          ],
+          "file": "target/scheduler-waiting-merged-fmt.log",
+          "began": "2026-10-08T18:43:01.360Z",
+          "ended": "2026-10-08T18:43:02.540Z",
+          "available_before": 159429992448,
+          "code": 0,
+          "signal": null,
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "results": []
+        }
+      ],
+      "ended_at": "2026-10-08T18:43:02.540Z"
+    }
+  }
 }
