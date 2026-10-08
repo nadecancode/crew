@@ -1227,6 +1227,13 @@ existing detail expansion shows the groups, so there is no new key.
 that is not Active, or with a pending change, gets the existing attention
 marker, with the reason in its tooltip and accessible description.
 
+A view without an attention marker (Apple `CrewTeamGraph`, the TUI graph)
+gets none for this. Where the node has an accessible label or description,
+the reason is appended there; otherwise the view shows nothing. The team
+list of the same client always carries it. A list that shows a summary line
+but no marker (web List) adds the reason to that line, for example
+`Toolbox changed: restart to apply`.
+
 ### Acceptance cases
 
 QA runs these against a fixture team. The fixture's stub MCP servers report
