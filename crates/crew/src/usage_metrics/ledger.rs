@@ -234,6 +234,15 @@ CREATE TABLE IF NOT EXISTS usage_executions (
     started_at   INTEGER,
     finished_at  INTEGER
 );
+CREATE TABLE IF NOT EXISTS usage_source_gaps (
+    run_id    TEXT NOT NULL,
+    stream_id TEXT NOT NULL,
+    reason    TEXT NOT NULL,
+    count     INTEGER NOT NULL,
+    first_at  INTEGER NOT NULL,
+    last_at   INTEGER NOT NULL,
+    PRIMARY KEY (run_id, stream_id, reason)
+);
 CREATE TABLE IF NOT EXISTS usage_diagnostics (
     stream_id  TEXT NOT NULL,
     kind       TEXT NOT NULL,
@@ -1028,7 +1037,7 @@ impl Ledger {
             Ok(a) => a,
             Err(reason) => return Ok(Err(reason)),
         };
-        let stream_id = format!("{}:{session}", runtime_tag(reg.runtime));
+        let stream_id = stream_id(reg.runtime, &session);
         let tx = self.conn.transaction()?;
         let cursor = load_cursor(&tx, &stream_id)?;
         let position = match &cursor {
@@ -1125,7 +1134,8 @@ impl Ledger {
     /// restart.
     pub fn active_streams(&self) -> Result<Vec<ActiveStream>> {
         let mut stmt = self.conn.prepare(
-            "SELECT DISTINCT s.stream_id, s.runtime, s.native_session_id, s.started_ms, s.locator
+            "SELECT DISTINCT s.stream_id, s.runtime, s.native_session_id, s.started_ms, s.locator,
+                    o.run_id
              FROM usage_streams s JOIN usage_owners o ON o.stream_id = s.stream_id
              WHERE o.active = 1 AND s.admission IS NULL ORDER BY s.stream_id",
         )?;
@@ -1136,12 +1146,14 @@ impl Ledger {
                 r.get::<_, String>(2)?,
                 r.get::<_, i64>(3)?,
                 r.get::<_, String>(4)?,
+                r.get::<_, String>(5)?,
             ))
         })?;
         let mut out = Vec::new();
         for row in rows {
-            let (id, runtime, session, started, locator) = row?;
+            let (id, runtime, session, started, locator, run_id) = row?;
             out.push(ActiveStream {
+                run_id,
                 stream_id: id,
                 runtime: serde_json::from_value(serde_json::Value::String(runtime))?,
                 session,
@@ -1150,6 +1162,27 @@ impl Ledger {
             });
         }
         Ok(out)
+    }
+
+    /// A source of a run that could not be collected (refused registration,
+    /// a file that cannot be opened or read): a visible gap of that run.
+    pub fn record_source_gap(
+        &mut self,
+        run_id: &str,
+        stream_id: &str,
+        reason: CoverageReason,
+        now: i64,
+    ) -> Result<()> {
+        let tx = self.conn.transaction()?;
+        tx.execute(
+            "INSERT INTO usage_source_gaps (run_id, stream_id, reason, count, first_at, last_at)
+             VALUES (?1, ?2, ?3, 1, ?4, ?4)
+             ON CONFLICT DO UPDATE SET count = count + 1, last_at = excluded.last_at",
+            params![run_id, stream_id, tag(&reason), now],
+        )?;
+        bump(&tx)?;
+        tx.commit()?;
+        Ok(())
     }
 
     /// The owner stopped: its stream drains but takes no new owner's work.
@@ -1529,7 +1562,10 @@ impl Ledger {
         let mut stmt = self.conn.prepare(
             "SELECT DISTINCT c.stream_id, c.reason, c.count, c.first_at, c.last_at
              FROM usage_coverage c JOIN usage_owners o ON c.stream_id = o.stream_id
-             WHERE o.run_id = ?1 ORDER BY c.stream_id, c.reason",
+             WHERE o.run_id = ?1
+             UNION SELECT stream_id, reason, count, first_at, last_at
+             FROM usage_source_gaps WHERE run_id = ?1
+             ORDER BY 1, 2",
         )?;
         let rows = stmt.query_map(params![run_id], |r| {
             Ok((
@@ -1800,6 +1836,7 @@ impl Ledger {
                 "usage_task_costs",
                 "usage_first_completions",
                 "usage_executions",
+                "usage_source_gaps",
             ] {
                 tx.execute(
                     &format!("DELETE FROM {table} WHERE run_id = ?1"),
@@ -1826,6 +1863,7 @@ impl Ledger {
 /// A stream with an active owner, as persisted.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ActiveStream {
+    pub run_id: String,
     pub stream_id: String,
     pub runtime: RuntimeKind,
     pub session: String,
@@ -1970,6 +2008,11 @@ impl Aggregate {
     pub fn work(&self) -> Option<WorkAttribution> {
         serde_json::from_str(&self.work).ok()
     }
+}
+
+/// The logical stream of a runtime's native session.
+pub fn stream_id(runtime: RuntimeKind, session: &str) -> String {
+    format!("{}:{session}", runtime_tag(runtime))
 }
 
 /// An estimate over an aggregate a late correction made uncertain.

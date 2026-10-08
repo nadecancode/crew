@@ -57,9 +57,15 @@ pub enum Readiness {
 /// Opens a stream's native file, fresh, for one read.
 pub trait Opener: Send + Sync {
     fn open(&self, source: &Source) -> Option<File>;
-    /// After a daemon restart, reach a recorded home again. A CLI home is
-    /// the one captured when its member launched, persisted with the stream.
-    fn restore(&self, _locator: &Locator) {}
+    /// Captures the home of a source being registered (or resumed after a
+    /// restart) and returns its lease: the source keeps reading through
+    /// that capture, whatever is captured later under the same path.
+    /// `None` when the home cannot be captured.
+    fn lease(&self, _locator: &Locator) -> Option<u64> {
+        Some(0)
+    }
+    /// A lease no source uses any more.
+    fn release(&self, _lease: u64) {}
 }
 
 /// What the service needs to reopen a stream's native file.
@@ -69,51 +75,49 @@ pub struct Source {
     pub session: String,
     pub started_ms: i64,
     pub locator: Locator,
+    /// The captured home this source reads through.
+    pub lease: u64,
 }
 
 /// Opens native files the way the daemon reaches each home: a private home
 /// beneath the agent's directory, a CLI home through its captured root.
 pub struct NativeOpener {
     pub state_dir: PathBuf,
-    homes: Mutex<HashMap<PathBuf, Arc<CliHome>>>,
+    /// Captured CLI homes by lease: one capture per registration, never
+    /// replaced by a later capture of the same path.
+    homes: Mutex<(u64, HashMap<u64, Arc<CliHome>>)>,
 }
 
 impl NativeOpener {
     pub fn new(state_dir: PathBuf) -> Self {
         Self {
             state_dir,
-            homes: Mutex::new(HashMap::new()),
-        }
-    }
-
-    /// Captures a CLI home when its member launches, so later reads go
-    /// through that root.
-    pub fn capture(&self, path: &std::path::Path) -> bool {
-        match CliHome::capture(path) {
-            Some(home) => {
-                self.homes
-                    .lock()
-                    .unwrap_or_else(|e| e.into_inner())
-                    .insert(path.to_path_buf(), Arc::new(home));
-                true
-            }
-            None => false,
+            homes: Mutex::new((0, HashMap::new())),
         }
     }
 }
 
 impl Opener for NativeOpener {
-    fn restore(&self, locator: &Locator) {
-        if let Locator::CliHome { path } = locator {
-            let known = self
-                .homes
-                .lock()
-                .unwrap_or_else(|e| e.into_inner())
-                .contains_key(path);
-            if !known {
-                self.capture(path);
+    fn lease(&self, locator: &Locator) -> Option<u64> {
+        match locator {
+            Locator::Private { .. } => Some(0),
+            Locator::CliHome { path } => {
+                let home = CliHome::capture(path)?;
+                let mut homes = self.homes.lock().unwrap_or_else(|e| e.into_inner());
+                homes.0 += 1;
+                let lease = homes.0;
+                homes.1.insert(lease, Arc::new(home));
+                Some(lease)
             }
         }
+    }
+
+    fn release(&self, lease: u64) {
+        self.homes
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .1
+            .remove(&lease);
     }
 
     fn open(&self, source: &Source) -> Option<File> {
@@ -133,12 +137,13 @@ impl Opener for NativeOpener {
                     _ => None,
                 }
             }
-            Locator::CliHome { path } => {
+            Locator::CliHome { .. } => {
                 let home = self
                     .homes
                     .lock()
                     .unwrap_or_else(|e| e.into_inner())
-                    .get(path)
+                    .1
+                    .get(&source.lease)
                     .cloned()?;
                 match source.runtime {
                     RuntimeKind::Claude => home.claude_transcript(&source.session),
@@ -154,10 +159,16 @@ impl Opener for NativeOpener {
 /// A registered stream's collection state.
 #[derive(Clone, Debug)]
 struct Stream {
+    run_id: String,
     source: Source,
+    /// Bumped by every registration of the stream id: a read started under
+    /// an older registration only clears `busy` when it ends.
+    generation: u64,
     due: i64,
     busy: bool,
     caught_up: bool,
+    /// The source could not be opened or read at the last attempt.
+    missing: bool,
     /// Draining after its owner stopped, until this time.
     stopping: Option<i64>,
 }
@@ -169,6 +180,8 @@ struct Watch {
     run: Id,
     revision: u64,
     sent_at: i64,
+    /// Its initial summary was captured; no notice goes out before.
+    ready: bool,
 }
 
 /// The service, shared by the daemon's handlers and its collector task.
@@ -183,6 +196,7 @@ pub struct UsageMetrics {
     revision: watch::Sender<u64>,
     permits: Arc<Semaphore>,
     retained_at: Mutex<i64>,
+    generations: std::sync::atomic::AtomicU64,
 }
 
 fn internal(e: anyhow::Error) -> RpcError {
@@ -203,6 +217,7 @@ impl UsageMetrics {
             revision: watch::channel(revision).0,
             permits: Arc::new(Semaphore::new(READERS)),
             retained_at: Mutex::new(0),
+            generations: std::sync::atomic::AtomicU64::new(0),
         })
     }
 
@@ -215,17 +230,29 @@ impl UsageMetrics {
         }
     }
 
+    /// Runs `f` on the ledger and publishes the revision it reached, also
+    /// when `f` fails after committing part of its work.
     fn with<T>(&self, f: impl FnOnce(&mut Ledger) -> Result<T>) -> Result<T, RpcError> {
         let mut ledger = self.ledger.lock().unwrap_or_else(|e| e.into_inner());
-        let out = f(&mut ledger).map_err(internal)?;
-        let revision = ledger.revision().map_err(internal)?;
+        let out = f(&mut ledger);
+        let revision = ledger.revision();
         drop(ledger);
+        if let Ok(revision) = revision {
+            self.publish(revision);
+        }
+        out.map_err(internal)
+    }
+
+    /// Publishes a committed revision. Revisions only move forward: one read
+    /// before a later one but published after it is ignored.
+    fn publish(&self, revision: u64) {
         self.revision.send_if_modified(|r| {
-            let changed = *r != revision;
-            *r = revision;
-            changed
+            let newer = revision > *r;
+            if newer {
+                *r = revision;
+            }
+            newer
         });
-        Ok(out)
     }
 
     /// Wakes when the metrics revision changes.
@@ -243,7 +270,12 @@ impl UsageMetrics {
                 .unwrap_or_else(|e| e.into_inner())
                 .get(run)
                 .copied(),
-            backlog_files: Some(streams.values().filter(|s| !s.caught_up).count() as u64),
+            backlog_files: Some(
+                streams
+                    .values()
+                    .filter(|s| s.run_id == run && !s.caught_up && !s.missing)
+                    .count() as u64,
+            ),
         }
     }
 
@@ -259,11 +291,11 @@ impl UsageMetrics {
         self.with(|l| l.begin_run(run, started_at, tracking_since))
     }
 
-    /// A run ended (session cleared): its streams stop.
+    /// A run ended (session cleared): its streams, and only its, stop.
     pub fn end_run(&self, run: &str, now: i64) -> Result<(), RpcError> {
         self.with(|l| l.end_run(run, now))?;
         let mut streams = self.streams.lock().unwrap_or_else(|e| e.into_inner());
-        for s in streams.values_mut() {
+        for s in streams.values_mut().filter(|s| s.run_id == run) {
             s.stopping.get_or_insert(now + GRACE_MS);
         }
         Ok(())
@@ -278,42 +310,78 @@ impl UsageMetrics {
             .insert(run.to_string(), n);
     }
 
+    fn refuse(&self, run: &str, stream: &str, reason: CoverageReason, now: i64) {
+        let _ = self.with(|l| l.record_source_gap(run, stream, reason, now));
+    }
+
     /// A member launched with a confirmed native session: start collecting
-    /// it. Refused (with the coverage reason) for an unsupported runtime, a
-    /// missing session, a session another incarnation owns, a source that
-    /// cannot be opened, or beyond [`MAX_STREAMS`].
+    /// it. Refused, with the reason recorded as a gap of the run, for an
+    /// unsupported runtime, a session another incarnation owns, a home that
+    /// cannot be captured, a file that cannot be opened, or a new stream
+    /// beyond [`MAX_STREAMS`]. Registering an existing stream again keeps
+    /// its slot and fences any read still running under the old one.
     pub fn register(
         &self,
         reg: &Registration,
         now: i64,
     ) -> Result<Result<String, CoverageReason>, RpcError> {
+        let id = super::ledger::stream_id(reg.runtime, &reg.native_session_id);
+        // Held across the check and the insert: capacity is atomic.
+        let mut streams = self.streams.lock().unwrap_or_else(|e| e.into_inner());
+        if !streams.contains_key(&id) && streams.len() >= MAX_STREAMS {
+            drop(streams);
+            self.refuse(&reg.run_id, &id, CoverageReason::NotTracked, now);
+            return Ok(Err(CoverageReason::NotTracked));
+        }
+        let Some(lease) = self.opener.lease(&reg.locator) else {
+            drop(streams);
+            self.refuse(&reg.run_id, &id, CoverageReason::SourceGap, now);
+            return Ok(Err(CoverageReason::SourceGap));
+        };
         let source = Source {
             runtime: reg.runtime,
             session: reg.native_session_id.clone(),
             started_ms: reg.started_ms,
             locator: reg.locator.clone(),
+            lease,
         };
-        if self.streams.lock().unwrap_or_else(|e| e.into_inner()).len() >= MAX_STREAMS {
-            return Ok(Err(CoverageReason::NotTracked));
-        }
         let Some(file) = self.opener.open(&source) else {
+            self.opener.release(lease);
+            drop(streams);
+            self.refuse(&reg.run_id, &id, CoverageReason::SourceGap, now);
             return Ok(Err(CoverageReason::SourceGap));
         };
         let registered = self.with(|l| l.register(reg, &file, now))?;
-        if let Ok(stream) = &registered {
-            self.streams
-                .lock()
-                .unwrap_or_else(|e| e.into_inner())
-                .insert(
+        match &registered {
+            Ok(stream) => {
+                let generation = self
+                    .generations
+                    .fetch_add(1, std::sync::atomic::Ordering::Relaxed)
+                    + 1;
+                let busy = streams.get(stream).is_some_and(|s| s.busy);
+                if let Some(old) = streams.insert(
                     stream.clone(),
                     Stream {
+                        run_id: reg.run_id.clone(),
                         source,
+                        generation,
                         due: now,
-                        busy: false,
+                        busy,
                         caught_up: false,
+                        missing: false,
                         stopping: None,
                     },
-                );
+                ) {
+                    if old.source.lease != lease {
+                        self.opener.release(old.source.lease);
+                    }
+                }
+            }
+            Err(reason) => {
+                self.opener.release(lease);
+                drop(streams);
+                self.refuse(&reg.run_id, &id, *reason, now);
+            }
         }
         Ok(registered)
     }
@@ -321,31 +389,50 @@ impl UsageMetrics {
     /// Resumes collecting every stream the ledger still has an owner for,
     /// after a daemon restart. Each continues from its committed cursor; a
     /// member registered again with the same launch keeps its owner and
-    /// work binding. Returns how many streams resumed.
+    /// work binding. A home that cannot be captured again is a recorded gap.
+    /// Returns how many streams resumed.
     pub fn recover(&self, now: i64) -> Result<usize, RpcError> {
         let active = self.with(|l| l.active_streams())?;
-        let mut streams = self.streams.lock().unwrap_or_else(|e| e.into_inner());
         let mut resumed = 0;
         for a in active {
-            if streams.len() >= MAX_STREAMS {
-                break;
+            let mut streams = self.streams.lock().unwrap_or_else(|e| e.into_inner());
+            if streams.contains_key(&a.stream_id) {
+                continue;
             }
-            self.opener.restore(&a.locator);
-            streams.entry(a.stream_id).or_insert_with(|| {
-                resumed += 1;
+            if streams.len() >= MAX_STREAMS {
+                drop(streams);
+                self.refuse(&a.run_id, &a.stream_id, CoverageReason::NotTracked, now);
+                continue;
+            }
+            let Some(lease) = self.opener.lease(&a.locator) else {
+                drop(streams);
+                self.refuse(&a.run_id, &a.stream_id, CoverageReason::SourceGap, now);
+                continue;
+            };
+            let generation = self
+                .generations
+                .fetch_add(1, std::sync::atomic::Ordering::Relaxed)
+                + 1;
+            streams.insert(
+                a.stream_id,
                 Stream {
+                    run_id: a.run_id,
                     source: Source {
                         runtime: a.runtime,
                         session: a.session,
                         started_ms: a.started_ms,
                         locator: a.locator,
+                        lease,
                     },
+                    generation,
                     due: now,
                     busy: false,
                     caught_up: false,
+                    missing: false,
                     stopping: None,
-                }
-            });
+                },
+            );
+            resumed += 1;
         }
         Ok(resumed)
     }
@@ -420,71 +507,89 @@ impl UsageMetrics {
 
     // Collection.
 
-    /// Streams due for a read now, marked busy.
-    fn due(&self, now: i64) -> Vec<(String, Source)> {
+    /// Streams due for a read now, marked busy, with their registration.
+    fn due(&self, now: i64) -> Vec<(String, Source, u64)> {
         let mut streams = self.streams.lock().unwrap_or_else(|e| e.into_inner());
         streams
             .iter_mut()
             .filter(|(_, s)| !s.busy && s.due <= now)
             .map(|(id, s)| {
                 s.busy = true;
-                (id.clone(), s.source.clone())
+                (id.clone(), s.source.clone(), s.generation)
             })
             .collect()
     }
 
     /// Reads one batch of a stream and schedules its next read. Runs on a
-    /// blocking worker.
-    fn read(&self, stream: &str, source: &Source, now: i64) {
-        let outcome = self
-            .opener
-            .open(source)
-            .map(|file| pump(&*self.ledger, stream, &file, now, None));
-        let (caught_up, grew) = match &outcome {
-            Some(Ok(p)) => (p.caught_up, p.commits.iter().any(|c| c.visible())),
-            _ => (false, false),
+    /// blocking worker. A source that cannot be opened or read is a gap of
+    /// its run, recorded when it starts failing, not a backlog.
+    fn read(&self, stream: &str, source: &Source, generation: u64, now: i64) {
+        let outcome = match self.opener.open(source) {
+            None => Err(CoverageReason::SourceGap),
+            Some(file) => {
+                pump(&*self.ledger, stream, &file, now, None).map_err(|_| CoverageReason::SourceGap)
+            }
         };
-        let revision = self
+        if let Ok(revision) = self
             .ledger
             .lock()
             .unwrap_or_else(|e| e.into_inner())
             .revision()
-            .unwrap_or(0);
-        self.revision.send_if_modified(|r| {
-            let changed = *r != revision;
-            *r = revision;
-            changed
-        });
+        {
+            self.publish(revision);
+        }
         let mut streams = self.streams.lock().unwrap_or_else(|e| e.into_inner());
         let Some(s) = streams.get_mut(stream) else {
             return;
         };
         s.busy = false;
+        if s.generation != generation {
+            // Registered again while this read ran: the new registration
+            // reads next.
+            s.due = now;
+            return;
+        }
+        let failed_now = outcome.is_err() && !s.missing;
+        let run = s.run_id.clone();
+        let (caught_up, grew) = match &outcome {
+            Ok(p) => (p.caught_up, p.commits.iter().any(|c| c.visible())),
+            Err(_) => (false, false),
+        };
+        s.missing = outcome.is_err();
         s.caught_up = caught_up;
-        s.due = if !caught_up && outcome.as_ref().is_some_and(|o| o.is_ok()) {
+        s.due = if outcome.is_ok() && !caught_up {
             now
         } else if grew {
             now + ACTIVE_MS
         } else {
             now + IDLE_MS
         };
-        if let Some(until) = s.stopping {
-            if caught_up || now >= until {
-                streams.remove(stream);
-                let mut ledger = self.ledger.lock().unwrap_or_else(|e| e.into_inner());
-                let _ = ledger.release(stream);
+        let finished = s.stopping.is_some_and(|until| caught_up || now >= until);
+        let lease = s.source.lease;
+        if finished {
+            streams.remove(stream);
+            self.opener.release(lease);
+        }
+        drop(streams);
+        if failed_now {
+            self.refuse(&run, stream, CoverageReason::SourceGap, now);
+        }
+        if finished {
+            let _ = self.with(|l| {
+                l.release(stream)?;
                 if !caught_up {
-                    let _ = ledger.close_admission(stream, CoverageReason::SourceBacklog, now);
+                    l.close_admission(stream, CoverageReason::SourceBacklog, now)?;
                 }
-            }
+                Ok(())
+            });
         }
     }
 
     /// One pass of collection: every due stream, in this thread. Tests and
     /// a synchronous shutdown drain use it; the daemon runs [`Self::spawn`].
     pub fn tick(&self, now: i64) {
-        for (stream, source) in self.due(now) {
-            self.read(&stream, &source, now);
+        for (stream, source, generation) in self.due(now) {
+            self.read(&stream, &source, generation, now);
         }
         self.retain(now);
     }
@@ -510,13 +615,13 @@ impl UsageMetrics {
             loop {
                 tick.tick().await;
                 let now = clock();
-                for (stream, source) in service.due(now) {
+                for (stream, source, generation) in service.due(now) {
                     let Ok(permit) = Arc::clone(&service.permits).acquire_owned().await else {
                         return;
                     };
                     let worker = Arc::clone(&service);
                     tokio::task::spawn_blocking(move || {
-                        worker.read(&stream, &source, clock());
+                        worker.read(&stream, &source, generation, clock());
                         drop(permit);
                     });
                 }
@@ -588,6 +693,7 @@ impl UsageMetrics {
                 run: q.scope.workspace_run_id.clone(),
                 revision: *self.revision.borrow(),
                 sent_at: now,
+                ready: false,
             });
             id
         };
@@ -601,7 +707,9 @@ impl UsageMetrics {
                     .get_mut(conn)
                     .and_then(|l| l.iter_mut().find(|w| w.id == id))
                 {
-                    w.revision = captured;
+                    // Its first notice starts from what the reply showed.
+                    w.revision = w.revision.max(captured);
+                    w.ready = true;
                 }
                 Ok(UsageWatchResult {
                     epoch: self.epoch.clone(),
@@ -658,7 +766,7 @@ impl UsageMetrics {
         };
         let mut out = Vec::new();
         for w in list.iter_mut() {
-            if w.revision != current && now - w.sent_at >= ACTIVE_MS {
+            if w.ready && w.revision < current && now - w.sent_at >= ACTIVE_MS {
                 out.push(UsageChanged {
                     workspace_run_id: w.run.clone(),
                     epoch: self.epoch.clone(),
@@ -1019,5 +1127,156 @@ mod tests {
         let s = second.summary(&t1, NOW).unwrap();
         assert_eq!(s.totals.output.known_sum, Some(Wide(18)));
         assert_eq!(s.totals.requests_observed.known_sum, Some(Wide(3)));
+    }
+
+    #[test]
+    fn registration_generations_fence_reads_and_runs_stop_alone() {
+        let (dir, files, service) = setup();
+        add(&dir, &files, "s-1");
+        let stream = service.register(&reg("s-1"), NOW).unwrap().unwrap();
+        // A read starts, then the stream is registered again before it ends.
+        let due = service.due(NOW);
+        assert_eq!(due.len(), 1);
+        service.register(&reg("s-1"), NOW).unwrap().unwrap();
+        assert!(service.due(NOW).is_empty(), "no second read while one runs");
+        let (id, source, generation) = due.into_iter().next().unwrap();
+        service.read(&id, &source, generation, NOW);
+        let s = service.streams.lock().unwrap()[&stream].clone();
+        assert!(!s.busy && s.generation > generation);
+        assert!(
+            !s.caught_up,
+            "the stale read did not update the new registration"
+        );
+        // At capacity an existing stream can still register again.
+        for n in 1..MAX_STREAMS {
+            add(&dir, &files, &format!("t{n}"));
+            service
+                .register(&reg(&format!("t{n}")), NOW)
+                .unwrap()
+                .unwrap();
+        }
+        assert!(service.register(&reg("s-1"), NOW).unwrap().is_ok());
+        // end_run stops only that run's streams.
+        let mut other = reg("x-1");
+        other.run_id = "r2".into();
+        service.begin_run("r2", Some(NOW), NOW).unwrap();
+        add(&dir, &files, "x-1");
+        assert_eq!(
+            service.register(&other, NOW).unwrap(),
+            Err(CoverageReason::NotTracked)
+        );
+        service.end_run("r2", NOW).unwrap();
+        assert!(service
+            .streams
+            .lock()
+            .unwrap()
+            .values()
+            .all(|s| s.stopping.is_none()));
+    }
+
+    #[test]
+    fn missing_sources_are_recorded_gaps_not_backlog() {
+        let (dir, files, service) = setup();
+        assert_eq!(
+            service.register(&reg("absent"), NOW).unwrap(),
+            Err(CoverageReason::SourceGap)
+        );
+        let path = add(&dir, &files, "s-1");
+        service.register(&reg("s-1"), NOW).unwrap().unwrap();
+        files.0.lock().unwrap().remove("s-1");
+        service.tick(NOW);
+        service.tick(NOW + IDLE_MS);
+        let s = service.summary(&query(), NOW).unwrap();
+        let gaps: Vec<_> = s
+            .totals
+            .output
+            .coverage
+            .source_gaps
+            .iter()
+            .map(|g| (g.source_id.as_str().to_string(), g.reason))
+            .collect();
+        assert!(gaps.contains(&("claude:absent".to_string(), CoverageReason::SourceGap)));
+        assert!(gaps.contains(&("claude:s-1".to_string(), CoverageReason::SourceGap)));
+        assert_eq!(s.totals.output.coverage.source_backlog_files, Some(Wide(0)));
+        assert_eq!(
+            s.tracking_state,
+            crew_core::rpc::usage_metrics::TrackingState::Partial
+        );
+        // It comes back: collection resumes.
+        files.0.lock().unwrap().insert("s-1".into(), path.clone());
+        append(&path, &[msg("a", 5)]);
+        service.tick(NOW + 3 * IDLE_MS);
+        assert_eq!(output(&service, NOW), Some(5));
+    }
+
+    #[test]
+    fn published_revisions_only_move_forward_and_watches_wait_for_their_reply() {
+        let (_dir, _files, service) = setup();
+        let current = *service.revision.borrow();
+        service.publish(current + 5);
+        service.publish(current + 2);
+        assert_eq!(*service.revision.borrow(), current + 5);
+        // A watch registered but not yet answered gets no notice.
+        service.watches.lock().unwrap().insert(
+            "c".into(),
+            vec![Watch {
+                id: Id::new("w").unwrap(),
+                run: Id::new("r1").unwrap(),
+                revision: current,
+                sent_at: NOW,
+                ready: false,
+            }],
+        );
+        assert!(service.pending("c", NOW + 5_000).is_empty());
+        service.watches.lock().unwrap().get_mut("c").unwrap()[0].ready = true;
+        let notice = service.pending("c", NOW + 5_000);
+        assert_eq!(notice.len(), 1);
+        assert!(notice[0].to_revision.0 > notice[0].from_revision.0);
+    }
+
+    #[test]
+    fn each_registration_keeps_the_home_it_captured() {
+        use std::io::Read;
+        let dir = tempfile::tempdir().unwrap();
+        let home = dir.path().join("claude-home");
+        let write = |root: &Path, text: &str| {
+            std::fs::create_dir_all(root.join("projects/-w")).unwrap();
+            std::fs::write(root.join("projects/-w/s-1.jsonl"), text).unwrap();
+        };
+        write(&home, "first");
+        let opener = NativeOpener::new(dir.path().join("state"));
+        let locator = Locator::CliHome { path: home.clone() };
+        let first = opener.lease(&locator).unwrap();
+        // The directory is replaced; a later capture of the path sees the new one.
+        std::fs::rename(&home, dir.path().join("old-home")).unwrap();
+        write(&home, "second");
+        let second = opener.lease(&locator).unwrap();
+        let read = |lease| {
+            let mut text = String::new();
+            opener
+                .open(&Source {
+                    runtime: RuntimeKind::Claude,
+                    session: "s-1".into(),
+                    started_ms: NOW,
+                    locator: locator.clone(),
+                    lease,
+                })
+                .unwrap()
+                .read_to_string(&mut text)
+                .unwrap();
+            text
+        };
+        assert_eq!(read(first), "first", "an earlier source keeps its capture");
+        assert_eq!(read(second), "second");
+        opener.release(first);
+        assert!(opener
+            .open(&Source {
+                runtime: RuntimeKind::Claude,
+                session: "s-1".into(),
+                started_ms: NOW,
+                locator,
+                lease: first,
+            })
+            .is_none());
     }
 }
