@@ -371,17 +371,71 @@ what you have"
         Ok(Some(out))
     }
 
-    /// Hand a new subagent what `subagent_toolbox` chose. Its launch pins its
-    /// MCP servers from the parent's snapshots (`snapshot_owner`).
+    /// Hand a new subagent what `subagent_toolbox` chose, with the parent's
+    /// pinned MCP snapshots copied into the subagent's own directory now.
+    /// From then on the subagent serves its own copies: a later restart or
+    /// reload of the parent rewrites the parent's pins, never these, and the
+    /// subagent's own restarts keep them.
     pub(crate) fn give_subagent_toolbox(
         &self,
         child: &str,
         toolbox: Option<ActiveToolbox>,
     ) -> Result<(), RpcError> {
-        match toolbox {
-            Some(toolbox) => self.inherit_toolbox(child, toolbox),
-            None => Ok(()),
+        let Some(mut toolbox) = toolbox else {
+            return Ok(());
+        };
+        if let Some(owner) = toolbox.snapshot_owner.take() {
+            self.freeze_snapshots(&owner, child, &toolbox)
+                .map_err(|e| RpcError::internal(format!("{e:#}")))?;
         }
+        self.inherit_toolbox(child, toolbox)
+    }
+
+    /// Copy `owner`'s pin of each of `toolbox`'s servers to `child`, read
+    /// beneath the owner's directory and only for the definition the
+    /// subagent gets. A server the owner never pinned is left for the
+    /// subagent's launch to pin.
+    fn freeze_snapshots(
+        &self,
+        owner: &str,
+        child: &str,
+        toolbox: &ActiveToolbox,
+    ) -> anyhow::Result<()> {
+        use std::os::fd::AsFd;
+        let source = self.agent_root(owner)?;
+        for name in &toolbox.servers {
+            let Some(Item::Mcp(server)) = toolbox
+                .resolved
+                .items
+                .get(&crew_core::toolbox::ItemRef::new(ItemKind::Mcp, name))
+                .map(|entry| &entry.item)
+            else {
+                continue;
+            };
+            let relative = std::path::PathBuf::from("toolbox/mcp").join(format!("{name}.json"));
+            let file = match crew_core::paths::open_beneath(source.as_fd(), &relative) {
+                Ok(file) => file,
+                Err(e)
+                    if e.downcast_ref::<std::io::Error>()
+                        .is_some_and(|e| e.kind() == std::io::ErrorKind::NotFound) =>
+                {
+                    continue;
+                }
+                Err(e) => return Err(e),
+            };
+            let snapshot: serde_json::Value =
+                serde_json::from_reader(std::io::Read::take(file, 16 * 1024 * 1024))?;
+            let definition = crate::mcp::proxy::definition_hash(server);
+            if snapshot
+                .get("definition")
+                .and_then(serde_json::Value::as_str)
+                != Some(definition.as_str())
+            {
+                anyhow::bail!("{owner}'s MCP snapshot of {name} is not for the definition given");
+            }
+            crate::mcp::proxy::pin(&self.agent_dir(child), name, &definition, &snapshot, true)?;
+        }
+        Ok(())
     }
 }
 
@@ -393,7 +447,7 @@ mod tests {
     use super::*;
     use crate::daemon::AgentLocal;
 
-    const TEAM: &str = r#"
+    pub(super) const TEAM: &str = r#"
 project: t
 objective: t
 toolboxes:
@@ -408,7 +462,7 @@ agents:
     role: worker
 "#;
 
-    async fn daemon() -> (tempfile::TempDir, crate::daemon::Running) {
+    pub(super) async fn daemon() -> (tempfile::TempDir, crate::daemon::Running) {
         let temp = tempfile::tempdir().unwrap();
         let running = crate::daemon::start(crate::daemon::DaemonOptions {
             workspace: temp.path().into(),
@@ -422,7 +476,7 @@ agents:
 
     /// The parent runs with bundles `web` and `docs` as the team defined
     /// them when it started.
-    fn parent_runs_with(daemon: &Daemon, team: TeamConfig) -> ActiveToolbox {
+    pub(super) fn parent_runs_with(daemon: &Daemon, team: TeamConfig) -> ActiveToolbox {
         let resolved = team
             .resolve_toolbox(
                 &Toolbox {
@@ -453,7 +507,7 @@ agents:
         active
     }
 
-    fn team(yaml: &str) -> TeamConfig {
+    pub(super) fn team(yaml: &str) -> TeamConfig {
         TeamConfig::from_yaml(yaml).unwrap()
     }
 
@@ -539,6 +593,99 @@ agents:
             .unwrap_err();
         assert!(
             refused.message.contains("nothing to give"),
+            "{}",
+            refused.message
+        );
+    }
+}
+
+#[cfg(test)]
+mod frozen_snapshot_tests {
+    use super::tests::*;
+    use super::*;
+    use serde_json::json;
+
+    fn listing(description: &str) -> serde_json::Value {
+        json!({
+            "initialize": { "protocolVersion": "2025-06-18", "capabilities": { "tools": {} } },
+            "tools": [{ "name": "search", "description": description, "inputSchema": { "type": "object" } }],
+        })
+    }
+
+    /// T11 / T07: a subagent's catalog is the one its parent had when it was
+    /// spawned. The parent pinning another (a restart, a reload) changes
+    /// nothing the subagent serves, now or at its own restarts.
+    #[tokio::test]
+    async fn a_subagent_keeps_the_catalog_its_parent_had_at_spawn() {
+        let (_temp, running) = daemon().await;
+        let daemon = &running.daemon;
+        let active = parent_runs_with(daemon, team(TEAM));
+        let server = |name: &str| match &active.resolved.items
+            [&crew_core::toolbox::ItemRef::new(ItemKind::Mcp, name)]
+            .item
+        {
+            Item::Mcp(server) => crate::mcp::proxy::definition_hash(server),
+            _ => unreachable!(),
+        };
+        let parent_dir = daemon.agent_dir("parent");
+        daemon.agent_root("parent").unwrap();
+        daemon.agent_root("child").unwrap();
+        crate::mcp::proxy::pin(
+            &parent_dir,
+            "context7",
+            &server("context7"),
+            &listing("Old."),
+            true,
+        )
+        .unwrap();
+
+        let copy = daemon.subagent_toolbox("parent", None).unwrap().unwrap();
+        daemon.give_subagent_toolbox("child", Some(copy)).unwrap();
+        let inherited = daemon.model().local["child"]
+            .toolbox_inherited
+            .clone()
+            .unwrap();
+        // The subagent's launches pin from its own directory, not the parent's.
+        assert_eq!(inherited.snapshot_owner, None);
+        let child_pin = crate::mcp::proxy::snapshot_path(&daemon.agent_dir("child"), "context7");
+        let frozen = std::fs::read_to_string(&child_pin).unwrap();
+        assert!(frozen.contains("Old."), "{frozen}");
+        // `manual` was never pinned by the parent: left for the child's launch.
+        assert!(!crate::mcp::proxy::snapshot_path(&daemon.agent_dir("child"), "manual").exists());
+
+        // The parent restarts and pins a new catalog: the child's is untouched.
+        crate::mcp::proxy::pin(
+            &parent_dir,
+            "context7",
+            &server("context7"),
+            &listing("New."),
+            true,
+        )
+        .unwrap();
+        assert_eq!(std::fs::read_to_string(&child_pin).unwrap(), frozen);
+    }
+
+    #[tokio::test]
+    async fn a_parent_pin_for_another_definition_is_not_given() {
+        let (_temp, running) = daemon().await;
+        let daemon = &running.daemon;
+        parent_runs_with(daemon, team(TEAM));
+        daemon.agent_root("parent").unwrap();
+        daemon.agent_root("child").unwrap();
+        crate::mcp::proxy::pin(
+            &daemon.agent_dir("parent"),
+            "context7",
+            &"f".repeat(64),
+            &listing("Other."),
+            true,
+        )
+        .unwrap();
+        let copy = daemon.subagent_toolbox("parent", None).unwrap().unwrap();
+        let refused = daemon
+            .give_subagent_toolbox("child", Some(copy))
+            .unwrap_err();
+        assert!(
+            refused.message.contains("not for the definition given"),
             "{}",
             refused.message
         );

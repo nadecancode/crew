@@ -2640,6 +2640,25 @@ fn toolbox_check_shows_planned_items_and_stops_on_a_required_one() {
         String::from_utf8_lossy(&out.stderr)
     );
     assert!(members.iter().all(|m| m.stops.is_empty()));
+
+    // Without a named team it refuses before reaching any daemon, even from
+    // inside a workspace whose daemon is running: a file says nothing of
+    // which team it is for.
+    let file = s.root().join("optional.yaml");
+    for command in ["check", "reload"] {
+        let out = s
+            .command()
+            .current_dir(&s.workspace)
+            .args(["toolbox", command, &file.to_string_lossy()])
+            .output()
+            .unwrap();
+        let stderr = String::from_utf8_lossy(&out.stderr);
+        assert!(!out.status.success(), "{command}: {stderr}");
+        assert!(
+            stderr.contains(&format!("crew toolbox {command} needs the running team")),
+            "{command}: {stderr}"
+        );
+    }
 }
 
 /// T11: the orchestrator chooses bundles by name for a member it adds; it

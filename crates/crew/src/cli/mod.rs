@@ -348,17 +348,20 @@ pub struct ToolboxArgs {
 
 #[derive(Subcommand)]
 pub enum ToolboxCommand {
-    /// Validate the team file's toolboxes and resolve every reference and
-    /// source, without starting anything; exits non-zero on an error or on a
-    /// status that would stop a launch
+    /// Map the team file's toolboxes as a running team's daemon would launch
+    /// them (references resolve in that daemon's environment), without
+    /// starting anything. Needs that team named with -C <workspace> or
+    /// --project <name>. Exits non-zero on an error or on a status that would
+    /// stop a launch
     Check {
         /// The team file
         file: PathBuf,
         #[arg(long)]
         json: bool,
     },
-    /// Reread the team file's toolboxes into the running team; members pick
-    /// the change up at their next restart
+    /// Reread the team file's toolboxes into a running team, named with -C
+    /// <workspace> or --project <name>; members pick the change up at their
+    /// next restart
     Reload {
         /// The team file
         file: PathBuf,
