@@ -494,8 +494,10 @@ file and heading.
 
 ### Definitions
 
-These are shared with `usage-metrics-design` and `notes/prompt-cache.md`, so
-every view and benchmark uses the same words:
+These are shared with `notes/usage-metrics.md` (approved b1fcceca) and
+`notes/prompt-cache.md`, so every view and benchmark uses the same words.
+The server computes every figure and its coverage; clients display them and
+never recompute from a filtered list.
 
 | Measure | Definition | Shown as |
 | --- | --- | --- |
@@ -505,14 +507,19 @@ every view and benchmark uses the same words:
 | Output | output tokens | tokens |
 | Total input | the runtime's own normalized input total when it reports one (Codex reports total input with cached tokens inside it); otherwise input + cache read + cache write, when all three are reported | tokens |
 | Hit rate | cache read ÷ total input | percent, one decimal |
-| Write share | list cost of cache writes ÷ input-side list cost | percent |
-| Estimate | each category's tokens × that model's list price for the category; 5-minute and 1-hour writes at their own prices | `≈ $12.40`, labelled "list-price estimate" |
-| Cost per done task | estimate ÷ tasks done in the scope | `≈ $0.84` |
+| Write share | list cost of cache writes ÷ input-side list cost, on the same requests | percent, or a range `38–44%` when write TTLs are unknown |
+| Estimate | each category's tokens × that model's list price for the category; 5-minute and 1-hour writes at their own prices | `≈ $12.40`, a range `≈ $2,540–$2,610`, or a partial `at least $2,556` (below) |
+| Per completed task | for the tasks first completed in the period: their observed cost from the start of the run up to each first completion, ÷ the number of those tasks | `≈ $22.80`, with "112 tasks first completed in this period" |
+| Requests | distinct requests the runtime reports | a number, or `≥ 9,612` with the reason when some usage arrives in batches |
+| Turns | turns correlated between the runtime and the daemon | a number, or `≥ N` with its own reason |
 
 **Coverage, metric by metric.** Each metric uses every request that reports
 what that metric needs, and states its own coverage when that is not every
 request, for example "Hit rate 97.9% · over 9,412 of 9,801 requests". A
-missing field is never counted as zero.
+missing field is never counted as zero. There is no single "agents
+reporting" count for all metrics: the scope line names the hit rate's
+("hit rate from 11 of 12 agents"), and each figure whose coverage is
+incomplete carries its own "K of N".
 
 - **Hit rate** needs cache read and a total input. So a Codex request
   reporting total input 100 and cache read 80, with no write counters, gives
@@ -527,12 +534,38 @@ missing field is never counted as zero.
 
   It then reads `≈ $12.40–$13.10` with "includes 1.2 M write tokens with no
   TTL reported".
+- **Three estimate states**, which never look alike:
+  - a finite range: `≈ $2,540–$2,610`;
+  - a partial subtotal, when some cost has no upper bound (a model without a
+    price, tasks without observed cost): `at least $2,556 · 1 model has no
+    price`, or for Per completed task `at least $22.80 · cost observed for
+    104 of 112`. No "≈" and no range dash;
+  - none: `Estimate unavailable · <reason>`.
+
+  An "at least" value rounds down. Both ends of a range round outward.
+- **Per completed task.** A task counts once, at its first completion, even
+  if it is reopened and completed again. Its cost can predate the period;
+  the note then adds "· includes their earlier spend". With an epic scope,
+  the cohort is the tasks first completed in that epic. All-period spend ÷
+  the current done count is a different ratio and is not shown in v1.
 - **Unavailable.** A rate whose denominator is zero, or a scope with no
-  covered requests, shows **unavailable** with the reason. For example,
-  "Hit rate unavailable · no input reported" or "Cost per done task
-  unavailable · no tasks done".
+  covered requests, shows **unavailable** with the reason, which tells
+  apart "no covered input", "zero input", "no task first completed in this
+  period" and "no cost observed for these tasks". For example: "Hit rate
+  unavailable · no input reported", "Write share unavailable · write counts
+  not reported", "Per completed task unavailable · no task first completed
+  in this period".
 - **Not reported.** A runtime that never reports a field shows **not
-  reported** for it, and the scope shows "N of M agents reporting".
+  reported** for it.
+- **Source gaps.** While session files are still being read, or one is
+  missing or in a schema crew does not support, one line under the figures
+  says so: "Still reading 2 session files · figures may change". Figures can
+  go down as well as up while that line shows. A gap is never shown as 0.
+- **Tracking boundary.** The scope line says "Tracking since Oct 7, 22:40".
+  The period before it shows "Earlier usage not tracked".
+- **Price basis.** The scope line says "list-price estimate, prices checked
+  Oct 8". Help states that this is the standard API price for the same
+  tokens, not a bill, a subscription charge or a quota.
 
 
 **Why both rates.** Hit rate and Write share always appear together. In the
@@ -566,11 +599,13 @@ per-agent rows, and gains a metrics section above them.
   - Hit rate;
   - Write share;
   - Estimate;
-  - Cost per done task.
+  - Per completed task.
 - **Trend.** A small chart over the session, with one point per bucket (5
   minutes up to 6 hours, then hourly). It shows either hit rate and write
   share as lines, or the four token categories as stacked bars (using the
-  `--token-*` colours), through a two-way toggle. The latest values are
+  `--token-*` colours), through a two-way toggle. A bucket whose requests do
+  not all report the four categories is drawn as a hatched gap labelled
+  "split not reported", never as a zero-height bar. The latest values are
   printed beside it as text. History comes from stored samples
   (`usage-metrics-design`). Before any sample exists, the chart says "No
   samples yet" and draws nothing.
@@ -582,9 +617,12 @@ per-agent rows, and gains a metrics section above them.
   - Hit rate;
   - Write share;
   - Estimate;
+  - Requests;
   - Turns.
 
-  Rows sort by any column. Numbers use tabular figures. Below 768px the
+  Rows sort by any column. With Epic, the rows include **No epic** (tasks
+  outside any epic) and **Not attributed** (usage with no task) as two
+  separate rows. Numbers use tabular figures. Below 768px the
   table becomes stacked rows (web-revamp "At narrow width…").
 - **Big writes.** The requests that wrote at least 10k tokens and more than
   they read (the audit's definition), with agent, time, tokens written per
@@ -601,7 +639,7 @@ per-agent rows, and gains a metrics section above them.
   - start, duration;
   - tasks done;
   - hit rate, write share;
-  - estimate, cost per done task.
+  - estimate, per completed task.
 
   The current session is marked. Selecting a row scopes the figures to that
   session read-only; this is the benchmark comparison the operator asked for.
@@ -612,8 +650,8 @@ per-agent rows, and gains a metrics section above them.
   and estimate.
 - **Epic detail.** It shows the epic's totals, hit rate, write share and
   estimate. Usage is attributed to an epic through the task each turn worked
-  on, as `usage-metrics-design` defines it. Turns without a task show as
-  "Not attributed".
+  on, as `notes/usage-metrics.md` defines it. Its Per completed task uses
+  the tasks first completed in this epic.
 - **Summary row.** It shows nothing new; the existing UsageStrip keeps quota
   pressure visible. Metrics are a Usage-view concern.
 
@@ -776,9 +814,9 @@ Captures are taken in light and dark at 1440×960 and 390×844.
 | F09 | Workspace and member versions | View switches between Workspace and the member's version. Compare with Workspace shows a diff in the existing Diff component. |
 | F10 | History | The timeline lists the recorded commits and the versions seen since the page opened, with the Seen-here footer. Picking two entries shows the diff between them. After the connection drops, an unselected Seen-here entry is gone, and a selected one shows the expired state with View Workspace; the shown content never switches by itself. |
 | F11 | Links into Docs | Task text, message bodies and `file` artifacts containing `notes/x.md` or `notes/x.md §Heading` link to the document at that heading. Unknown paths are not links. Referenced by lists the linking tasks and messages, with its scope stated. |
-| F12 | Usage figures | Total, Hit rate, Write share, Estimate and Cost per done task match a hand computation from the fixture under the §Definitions formulas. The model without a price shows No price, and the total states the exclusion. A non-reporting agent shows not reported, not 0. A Codex fixture request with total input and cache read but no write counters counts toward hit rate and not toward write share. A Claude request with an aggregate write and no TTL split makes the estimate a range with its note. A scope with no done tasks shows Cost per done task unavailable with the reason. |
-| F13 | Trend and breakdown | The trend draws buckets from the samples, with the latest values as text. Show as table gives the same figures. The breakdown sorts by every column, and the narrow layout stacks without page overflow. |
-| F14 | Big writes and history | Big writes lists exactly the fixture's qualifying requests, and opens the agent at that time. History lists both sessions, and selecting the earlier one scopes the figures read-only. |
+| F12 | Usage figures | Total, Hit rate, Write share, Estimate and Per completed task match a hand computation from the fixture under the §Definitions formulas (the arithmetic examples of `notes/usage-metrics.md`). The model without a price shows No price, and the estimate shows `at least …` with the exclusion, never `≈`. A non-reporting agent shows not reported, not 0. A Codex fixture request with total input and cache read but no write counters counts toward hit rate and not toward write share. A Claude request with an aggregate write and no TTL split makes the estimate and write share ranges with their note. A task reopened and completed again counts once. A period with no first completion shows Per completed task unavailable with the reason. |
+| F13 | Trend and breakdown | The trend draws buckets from the samples, with the latest values as text. A bucket without a full category split is a hatched gap labelled split not reported. Show as table gives the same figures. The breakdown sorts by every column, shows `≥` Requests with its reason for a batch-reporting runtime, lists No epic and Not attributed as separate rows, and the narrow layout stacks without page overflow. |
+| F14 | Big writes, history and gaps | Big writes lists exactly the fixture's qualifying requests, and opens the agent at that time. History lists both sessions, and selecting the earlier one scopes the figures read-only. With a session file still being read, the gap line shows and no figure shows 0 for it; a later revision that lowers a figure is drawn as is. The scope line shows the tracking boundary and the price date. |
 | F15 | Aside ask | `/btw` switches the composer to aside mode with the copy line and the `--info` border. The recipient picker lists unavailable members with reasons. Escape keeps the text. Sending opens the Asides tab. |
 | F16 | Aside answers | Answers arrive independently; the slow one shows Answering and the failed one shows its reason. The footer names the source copy and time, and tokens and estimate are shown. Cancel stops pending answers. |
 | F17 | Aside isolation | During and after an aside: no bus row, inbox entry, transcript line, task change or briefing change. Only `aside.*` events without bodies appear. The fixture's live sessions receive no input. Send as message opens the normal composer prefilled, and only sending it reaches the member. |
