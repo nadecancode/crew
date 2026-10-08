@@ -571,34 +571,47 @@ impl Toolbox {
     }
 
     /// Make every file item's path absolute: `~/` against `home`, anything
-    /// relative against `base` (the directory of the file that defines it).
-    /// Nothing is read, and links are not resolved.
-    pub fn absolutize(&mut self, base: &Path, home: Option<&Path>) {
-        for item in self
-            .skills
-            .values_mut()
-            .chain(self.plugins.values_mut())
-            .chain(self.subagents.values_mut())
-        {
-            item.path = absolute(&item.path, base, home);
+    /// relative against `base` (the directory of the file that defines it,
+    /// itself absolute). `at` is this body's field path, for errors. Nothing
+    /// is read, and links are not resolved.
+    pub fn absolutize(&mut self, base: &Path, home: Option<&Path>, at: &str) -> Result<()> {
+        if !base.is_absolute() {
+            bail!(
+                "{at}: file paths need an absolute base, not {}",
+                base.display()
+            );
         }
+        for (kind, map) in [
+            (ItemKind::Skills, &mut self.skills),
+            (ItemKind::Plugins, &mut self.plugins),
+            (ItemKind::Subagents, &mut self.subagents),
+        ] {
+            for (name, item) in map.iter_mut() {
+                item.path = absolute(&item.path, base, home)
+                    .map_err(|e| anyhow!("{at}.{kind}.{name}.path: {e}"))?;
+            }
+        }
+        Ok(())
     }
 }
 
-fn absolute(path: &str, base: &Path, home: Option<&Path>) -> String {
-    let joined = if path == "~" {
-        home.map(Path::to_path_buf)
-    } else if let Some(rest) = path.strip_prefix("~/") {
-        home.map(|home| home.join(rest))
+fn absolute(path: &str, base: &Path, home: Option<&Path>) -> Result<String> {
+    let joined = if path == "~" || path.starts_with("~/") {
+        let home = home.filter(|home| home.is_absolute()).ok_or_else(|| {
+            anyhow!("{path} starts with ~, but HOME is not set to an absolute path")
+        })?;
+        match path.strip_prefix("~/") {
+            Some(rest) => home.join(rest),
+            None => home.to_path_buf(),
+        }
+    } else if path.starts_with('~') {
+        bail!("{path}: only ~/ (your own home) is expanded; write the path in full");
     } else if Path::new(path).is_absolute() {
-        None
+        return Ok(path.to_string());
     } else {
-        Some(base.join(path))
+        base.join(path)
     };
-    match joined {
-        Some(joined) => joined.to_string_lossy().into_owned(),
-        None => path.to_string(),
-    }
+    Ok(joined.to_string_lossy().into_owned())
 }
 
 /// A pattern of `exclude`: one item, or every item of a kind.
@@ -668,6 +681,7 @@ impl Catalog<'_> {
 /// then its exclusions, applied to the result so far.
 pub fn resolve(catalog: Catalog<'_>, member: &Toolbox, path: &str) -> Result<Resolved> {
     let mut items = BTreeMap::new();
+    let mut cache = HashMap::new();
     let mut levels: Vec<(&Toolbox, Origin, &str)> = Vec::new();
     if !member.reset {
         levels.push((catalog.defaults, Origin::Default, "defaults.toolbox"));
@@ -675,12 +689,11 @@ pub fn resolve(catalog: Catalog<'_>, member: &Toolbox, path: &str) -> Result<Res
     levels.push((member, Origin::Member, path));
     for (level, origin, at) in &levels {
         for (i, name) in level.include.iter().enumerate() {
-            let mut stack = Vec::new();
             include(
                 catalog.bundles,
                 name,
                 &format!("{at}.include[{i}]"),
-                &mut stack,
+                &mut cache,
                 &mut items,
             )?;
         }
@@ -727,44 +740,66 @@ pub fn resolve(catalog: Catalog<'_>, member: &Toolbox, path: &str) -> Result<Res
     })
 }
 
+/// A bundle's items once its includes are expanded: what including it adds,
+/// each item with the origin of its last definition.
+type Flat = BTreeMap<ItemRef, ResolvedItem>;
+
+/// Add bundle `name`, fully expanded, to `items`. Expanding a bundle gives
+/// the same map wherever it is included, so each bundle is expanded once per
+/// resolution (`cache`) and a shared include graph costs no more than its
+/// size. Inserting the expanded map over `items` keeps last-wins: an item the
+/// bundle defines anywhere in its expansion replaces the earlier one, and
+/// every other item stays.
 fn include(
     bundles: &BTreeMap<String, Toolbox>,
     name: &str,
     at: &str,
-    stack: &mut Vec<String>,
+    cache: &mut HashMap<String, Flat>,
     items: &mut BTreeMap<ItemRef, ResolvedItem>,
 ) -> Result<()> {
-    if stack.iter().any(|n| n == name) {
-        stack.push(name.to_string());
-        bail!("{at}: bundles include each other: {}", stack.join(" -> "));
-    }
-    let Some(bundle) = bundles.get(name) else {
-        bail!(
-            "{at}: unknown toolbox '{name}'{}",
-            suggestion(name, bundles.keys().cloned())
-        );
-    };
-    stack.push(name.to_string());
-    for (i, inner) in bundle.include.iter().enumerate() {
-        include(
-            bundles,
-            inner,
-            &format!("toolboxes.{name}.include[{i}]"),
-            stack,
-            items,
-        )?;
-    }
-    for (item, def) in bundle.items() {
-        items.insert(
-            item,
-            ResolvedItem {
-                item: def,
-                origin: Origin::Bundle(name.to_string()),
-            },
-        );
-    }
-    stack.pop();
+    let flat = flatten(bundles, name, at, &mut Vec::new(), cache)?;
+    items.extend(flat.iter().map(|(k, v)| (k.clone(), v.clone())));
     Ok(())
+}
+
+fn flatten<'c>(
+    bundles: &BTreeMap<String, Toolbox>,
+    name: &str,
+    at: &str,
+    stack: &mut Vec<String>,
+    cache: &'c mut HashMap<String, Flat>,
+) -> Result<&'c Flat> {
+    if !cache.contains_key(name) {
+        if stack.iter().any(|n| n == name) {
+            stack.push(name.to_string());
+            bail!("{at}: bundles include each other: {}", stack.join(" -> "));
+        }
+        let Some(bundle) = bundles.get(name) else {
+            bail!(
+                "{at}: unknown toolbox '{name}'{}",
+                suggestion(name, bundles.keys().cloned())
+            );
+        };
+        stack.push(name.to_string());
+        let mut flat = Flat::new();
+        for (i, inner) in bundle.include.iter().enumerate() {
+            let at = format!("toolboxes.{name}.include[{i}]");
+            let inner = flatten(bundles, inner, &at, stack, cache)?;
+            flat.extend(inner.iter().map(|(k, v)| (k.clone(), v.clone())));
+        }
+        for (item, def) in bundle.items() {
+            flat.insert(
+                item,
+                ResolvedItem {
+                    item: def,
+                    origin: Origin::Bundle(name.to_string()),
+                },
+            );
+        }
+        stack.pop();
+        cache.insert(name.to_string(), flat);
+    }
+    Ok(&cache[name])
 }
 
 /// " (did you mean X?)" for the closest candidate within two edits.
@@ -1721,7 +1756,8 @@ agents:\n  - id: a\n    toolbox: { include: [base], exclude: [mcp.c, mcp.c] }\n"
     #[test]
     fn file_paths_become_absolute_against_their_file() {
         let mut team = TeamConfig::from_yaml(EXAMPLE).unwrap();
-        team.absolutize_toolbox_paths(Path::new("/work/shop"), Some(Path::new("/home/op")));
+        team.absolutize_toolbox_paths(Path::new("/work/shop"), Some(Path::new("/home/op")))
+            .unwrap();
         assert_eq!(
             team.toolboxes["web"].skills["frontend-qa"].path,
             "/work/shop/toolbox/skills/frontend-qa"
@@ -1743,30 +1779,180 @@ agents:\n  - id: a\n    toolbox: { include: [base], exclude: [mcp.c, mcp.c] }\n"
                 ..FileItem::default()
             },
         );
-        absolute.skills.insert(
-            "t".into(),
+        absolute.absolutize(Path::new("/base"), None, "t").unwrap();
+        assert_eq!(absolute.skills["s"].path, "/already/there");
+    }
+
+    #[test]
+    fn a_home_path_without_a_home_is_refused_with_its_field() {
+        let mut team = TeamConfig::from_yaml(EXAMPLE).unwrap();
+        let err = team
+            .absolutize_toolbox_paths(Path::new("/work/shop"), None)
+            .unwrap_err();
+        assert_eq!(
+            err.to_string(),
+            "agents[1].toolbox.plugins.lint-kit.path: ~/plugins/lint-kit starts with ~, \
+but HOME is not set to an absolute path"
+        );
+        let mut team = TeamConfig::from_yaml(EXAMPLE).unwrap();
+        let err = team
+            .absolutize_toolbox_paths(Path::new("/work/shop"), Some(Path::new("relative")))
+            .unwrap_err();
+        assert!(
+            err.to_string()
+                .contains("HOME is not set to an absolute path"),
+            "{err}"
+        );
+        let mut other = Toolbox::default();
+        other.skills.insert(
+            "s".into(),
             FileItem {
-                path: "~/x".into(),
+                path: "~bob/skills/s".into(),
                 ..FileItem::default()
             },
         );
-        absolute.absolutize(Path::new("/base"), None);
-        assert_eq!(absolute.skills["s"].path, "/already/there");
-        assert_eq!(absolute.skills["t"].path, "~/x");
+        let err = other
+            .absolutize(
+                Path::new("/base"),
+                Some(Path::new("/home/op")),
+                "defaults.toolbox",
+            )
+            .unwrap_err();
+        assert_eq!(
+            err.to_string(),
+            "defaults.toolbox.skills.s.path: ~bob/skills/s: only ~/ (your own home) is \
+expanded; write the path in full"
+        );
+        let err = other
+            .absolutize(Path::new("base"), None, "defaults.toolbox")
+            .unwrap_err();
+        assert!(err.to_string().contains("need an absolute base"), "{err}");
     }
 
     #[test]
     fn a_team_file_on_disk_gets_absolute_paths() {
         let dir = tempfile::tempdir().unwrap();
         let file = dir.path().join("crew.yaml");
-        std::fs::write(&file, EXAMPLE).unwrap();
+        std::fs::write(&file, EXAMPLE.replace("~/plugins", "plugins")).unwrap();
         let team = TeamConfig::load(&file).unwrap();
         assert_eq!(
             Path::new(&team.toolboxes["web"].skills["frontend-qa"].path),
             dir.path().join("toolbox/skills/frontend-qa")
         );
+        // A relative base, as a relative team file path or style folder
+        // gives, is taken from the current directory.
+        let cwd = std::env::current_dir().unwrap();
+        let mut team = TeamConfig::from_yaml(EXAMPLE).unwrap();
+        team.absolutize_toolbox_paths(Path::new("teams/shop"), Some(Path::new("/home/op")))
+            .unwrap();
+        assert_eq!(
+            Path::new(&team.toolboxes["web"].skills["frontend-qa"].path),
+            cwd.join("teams/shop/toolbox/skills/frontend-qa")
+        );
+        let mut style = Style::parse(
+            "qa",
+            "toolboxes:\n  web: { skills: { s: { path: skills/s } } }\n",
+            false,
+        )
+        .unwrap();
+        style
+            .absolutize_toolbox_paths(Path::new("styles"), None)
+            .unwrap();
+        assert_eq!(
+            Path::new(&style.toolboxes["web"].skills["s"].path),
+            cwd.join("styles/skills/s")
+        );
     }
 
+    #[test]
+    fn a_shared_include_graph_is_expanded_once_per_bundle() {
+        // b00 defines mcp.x; every later bundle includes its predecessor twice
+        // and redefines mcp.x at every eighth step. Expanding each path anew
+        // would take about 2^64 steps; each bundle is expanded once instead,
+        // and last-wins still decides mcp.x and its origin.
+        let mut yaml =
+            String::from("project: deep\ntoolboxes:\n  b00:\n    mcp: { x: { command: [b00] } }\n");
+        for n in 1..MAX_BUNDLES {
+            yaml.push_str(&format!(
+                "  b{n:02}:\n    include: [b{p:02}, b{p:02}]\n",
+                p = n - 1
+            ));
+            if n % 8 == 0 {
+                yaml.push_str(&format!(
+                    "    mcp: {{ x: {{ command: [b{n:02}] }}, y{n:02}: {{ command: [y] }} }}\n"
+                ));
+            }
+        }
+        yaml.push_str("defaults:\n  toolbox: { include: [b63] }\nagents:\n  - id: a\n");
+        let started = std::time::Instant::now();
+        let team = TeamConfig::from_yaml(&yaml).unwrap();
+        let resolved = member(&team, "a");
+        assert!(started.elapsed() < std::time::Duration::from_secs(5));
+        let x = &resolved.items[&ItemRef::new(ItemKind::Mcp, "x")];
+        assert_eq!(x.origin, Origin::Bundle("b56".into()));
+        assert_eq!(
+            x.item,
+            Item::Mcp(McpServer {
+                command: vec!["b56".into()],
+                ..McpServer::default()
+            })
+        );
+        assert_eq!(resolved.items.len(), 1 + 7);
+    }
+
+    #[test]
+    fn a_member_added_later_is_checked_like_a_team_file_member() {
+        use crate::config::{validate_agent_spec, AgentSpec};
+        let spec = |toolbox: &str| AgentSpec {
+            id: "b".into(),
+            toolbox: serde_yaml::from_str(toolbox).unwrap(),
+            ..AgentSpec::default()
+        };
+        // Without the team: the body's own fields.
+        for (toolbox, expected) in [
+            (
+                "mcp: { crew: { command: [x] } }",
+                "agent 'b'.toolbox.mcp.crew: the name 'crew' is reserved for crew",
+            ),
+            (
+                "mcp: { s: { command: [x], url: \"https://x\" } }",
+                "agent 'b'.toolbox.mcp.s: give either command or url, not both",
+            ),
+            (
+                "mcp: { s: { command: [x], env: { K: { env: ANTHROPIC_API_KEY } } } }",
+                "agent 'b'.toolbox.mcp.s.env.K.env: ANTHROPIC_API_KEY carries",
+            ),
+        ] {
+            let err = validate_agent_spec(&spec(toolbox)).unwrap_err();
+            assert!(err.to_string().contains(expected), "{toolbox}: {err}");
+        }
+        validate_agent_spec(&spec("include: [anything]")).unwrap();
+        // With the team: includes and exclusions as well.
+        let team = TeamConfig::from_yaml(EXAMPLE).unwrap();
+        for (toolbox, expected) in [
+            (
+                "include: [webb]",
+                "agent 'b'.toolbox.include[0]: unknown toolbox 'webb' (did you mean web?)",
+            ),
+            (
+                "include: [web]\nexclude: [mcp.contex7]",
+                "agent 'b'.toolbox.exclude[0]: mcp.contex7 matches no item (did you mean mcp.context7?)",
+            ),
+            (
+                "mcp: { crew: { command: [x] } }",
+                "agent 'b'.toolbox.mcp.crew: the name 'crew' is reserved for crew",
+            ),
+        ] {
+            let err = team.validate_member_toolbox(&spec(toolbox)).unwrap_err();
+            assert!(err.to_string().contains(expected), "{toolbox}: {err}");
+        }
+        team.validate_member_toolbox(&spec("include: [web]\nexclude: [mcp.context7]"))
+            .unwrap();
+        // What was accepted is accepted again when the roster is loaded.
+        let mut roster = team.clone();
+        roster.agents.push(spec("include: [web]"));
+        TeamConfig::from_yaml(&roster.to_yaml().unwrap()).unwrap();
+    }
     #[test]
     fn styles_carry_and_check_their_toolboxes() {
         let style = Style::parse(
@@ -1777,7 +1963,9 @@ defaults:\n  toolbox: { include: [web] }\n",
         )
         .unwrap();
         let mut style = style;
-        style.absolutize_toolbox_paths(Path::new("/etc/crew/styles"), None);
+        style
+            .absolutize_toolbox_paths(Path::new("/etc/crew/styles"), None)
+            .unwrap();
         let team = style.team("p", ".", "");
         assert_eq!(
             team.toolboxes["web"].skills["s"].path,

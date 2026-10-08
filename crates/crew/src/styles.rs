@@ -15,7 +15,7 @@
 use std::path::{Path, PathBuf};
 
 use anyhow::{anyhow, bail, Context, Result};
-use crew_core::config::{Style, TeamConfig, ROSTERS_DIR, STYLES_DIR};
+use crew_core::config::{home_dir, Style, TeamConfig, ROSTERS_DIR, STYLES_DIR};
 use crew_core::paths;
 use crew_core::util::is_valid_id;
 
@@ -132,24 +132,22 @@ impl Styles {
                     .unwrap_or_default()
                     .to_string_lossy()
                     .into_owned();
+                // Toolbox paths are relative to the style file; a team launched
+                // from it carries them absolute.
                 let parsed = std::fs::read_to_string(&path)
                     .map_err(anyhow::Error::from)
-                    .and_then(|text| Style::parse(&name, &text, toml));
-                match parsed {
-                    Ok(mut style) => {
-                        // Toolbox paths are relative to the style file; a
-                        // team launched from it carries them absolute.
+                    .and_then(|text| Style::parse(&name, &text, toml))
+                    .and_then(|mut style| {
                         let base = path.parent().unwrap_or(&dir);
-                        let home = std::env::var_os("HOME")
-                            .filter(|h| !h.is_empty())
-                            .map(PathBuf::from);
-                        style.absolutize_toolbox_paths(base, home.as_deref());
-                        styles.put(Entry {
-                            style,
-                            origin: Origin::File(scope),
-                            path: Some(path),
-                        })
-                    }
+                        style.absolutize_toolbox_paths(base, home_dir().as_deref())?;
+                        Ok(style)
+                    });
+                match parsed {
+                    Ok(style) => styles.put(Entry {
+                        style,
+                        origin: Origin::File(scope),
+                        path: Some(path),
+                    }),
                     Err(e) => styles.problems.push(format!("{}: {e:#}", path.display())),
                 }
             }
@@ -378,5 +376,42 @@ mod tests {
             .contains("hypothesis"));
         let styles = Styles::load(ws);
         assert!(styles.get("mine").is_some() && styles.get("my-experiment").is_some());
+    }
+
+    #[test]
+    fn a_style_file_s_toolbox_paths_are_absolute_against_its_folder() {
+        let tmp = tempfile::tempdir().unwrap();
+        let ws = tmp.path();
+        let folder = dir(Scope::Project, ws).unwrap();
+        std::fs::create_dir_all(&folder).unwrap();
+        std::fs::write(
+            folder.join("qa.yaml"),
+            "toolboxes:\n  web:\n    skills: { s: { path: skills/s } }\n\
+defaults:\n  toolbox: { include: [web] }\n",
+        )
+        .unwrap();
+        // `~bob` is not expanded: the style is set aside with its field.
+        std::fs::write(
+            folder.join("odd.yaml"),
+            "defaults:\n  toolbox: { skills: { s: { path: \"~bob/s\" } } }\n",
+        )
+        .unwrap();
+        let styles = Styles::load(ws);
+        let qa = &styles.get("qa").unwrap().style;
+        assert_eq!(
+            Path::new(&qa.toolboxes["web"].skills["s"].path),
+            folder.join("skills/s")
+        );
+        let team = qa.team("p", &ws.to_string_lossy(), "");
+        assert_eq!(team.toolboxes, qa.toolboxes);
+        assert!(styles.get("odd").is_none());
+        assert!(
+            styles
+                .problems
+                .iter()
+                .any(|p| p.contains("odd.yaml") && p.contains("defaults.toolbox.skills.s.path")),
+            "{:?}",
+            styles.problems
+        );
     }
 }

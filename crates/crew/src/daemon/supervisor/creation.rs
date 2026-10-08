@@ -186,6 +186,8 @@ impl Daemon {
                 .team
                 .clone()
                 .ok_or_else(|| RpcError::unavailable("no team is loaded"))?;
+            team.validate_member_toolbox(&spec)
+                .map_err(|e| RpcError::invalid(format!("{e:#}")))?;
             if model.id_taken(&spec.id) {
                 return Err(RpcError::conflict(format!(
                     "agent '{}' already exists",

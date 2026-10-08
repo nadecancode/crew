@@ -2477,6 +2477,78 @@ fn two_agents_added_at_once_under_one_id_are_one_agent() {
 }
 
 #[test]
+fn an_added_agent_s_toolbox_is_checked_against_the_team() {
+    if common::test_support::isolate_operator_test(
+        "an_added_agent_s_toolbox_is_checked_against_the_team",
+    ) {
+        return;
+    }
+    let s = Session::new();
+    let mut team = s.team("toolbox-add", vec![agent("a", "", &[])], vec![]);
+    team.defaults.command = scripted(&[]);
+    team.workspace.isolation = crew_core::config::Isolation::Shared;
+    team.workspace.init = false;
+    team.toolboxes = serde_json::from_value(json!({
+        "web": { "mcp": { "context7": { "command": ["ctx", "--stdio"] } } }
+    }))
+    .unwrap();
+    std::fs::create_dir_all(&s.workspace).unwrap();
+    s.run(&team);
+    let info: Value = serde_json::from_str(
+        &std::fs::read_to_string(s.workspace.join(".crew/daemon.json")).unwrap(),
+    )
+    .unwrap();
+    let socket = std::path::PathBuf::from(info["socket"].as_str().unwrap());
+    let (mut client, _) = crew_core::client::Client::operator(&socket, "test").unwrap();
+    let mut add = |id: &str, toolbox: Value| {
+        client
+            .call::<crew_core::Agent>(crew_core::rpc::Call::AgentAdd {
+                spec: Box::new(AgentSpec {
+                    id: id.into(),
+                    toolbox: serde_json::from_value(toolbox).unwrap(),
+                    ..AgentSpec::default()
+                }),
+            })
+            .map_err(|e| e.to_string())
+    };
+
+    for (toolbox, expected) in [
+        (
+            json!({ "mcp": { "crew": { "command": ["x"] } } }),
+            "agent 'b'.toolbox.mcp.crew: the name 'crew' is reserved for crew",
+        ),
+        (
+            json!({ "mcp": { "srv": { "command": ["x"], "url": "https://x" } } }),
+            "agent 'b'.toolbox.mcp.srv: give either command or url, not both",
+        ),
+        (
+            json!({ "include": ["webb"] }),
+            "agent 'b'.toolbox.include[0]: unknown toolbox 'webb' (did you mean web?)",
+        ),
+        (
+            json!({ "include": ["web"], "exclude": ["mcp.contex7"] }),
+            "agent 'b'.toolbox.exclude[0]: mcp.contex7 matches no item (did you mean mcp.context7?)",
+        ),
+    ] {
+        let refused = add("b", toolbox.clone()).expect_err(&toolbox.to_string());
+        assert!(refused.contains(expected), "{toolbox}: {refused}");
+    }
+    assert!(!s.snapshot().agents.iter().any(|a| a.id == "b"));
+
+    add("b", json!({ "include": ["web"] })).unwrap();
+    s.wait_for("the roster to name b", || {
+        std::fs::read_to_string(s.workspace.join(".crew/roster.yaml"))
+            .is_ok_and(|roster| roster.contains("id: b"))
+    });
+    // What agent_add accepted, the saved roster accepts too.
+    let roster =
+        crew_core::config::TeamConfig::load(&s.workspace.join(".crew/roster.yaml")).unwrap();
+    let b = roster.agents.iter().find(|a| a.id == "b").unwrap();
+    assert_eq!(b.toolbox.include, ["web"]);
+    assert!(roster.toolboxes.contains_key("web"));
+}
+
+#[test]
 fn a_daemon_started_while_another_is_still_starting_is_refused() {
     // A daemon binds its socket before it registers in daemon.json, so two
     // starts close together can both miss each other's registration. Put a

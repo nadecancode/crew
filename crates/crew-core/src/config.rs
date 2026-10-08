@@ -98,8 +98,9 @@ impl Style {
     }
 
     /// Make the style's toolbox file paths absolute against `base`, the
-    /// directory of the style file.
-    pub fn absolutize_toolbox_paths(&mut self, base: &Path, home: Option<&Path>) {
+    /// directory of the style file (a relative one is taken from the current
+    /// directory). A `~/` path needs `home`.
+    pub fn absolutize_toolbox_paths(&mut self, base: &Path, home: Option<&Path>) -> Result<()> {
         absolutize_toolboxes(
             &mut self.toolboxes,
             &mut self.defaults,
@@ -107,7 +108,7 @@ impl Style {
             &mut self.agents,
             base,
             home,
-        );
+        )
     }
 
     /// The team this style launches on `workspace` for `objective`.
@@ -683,23 +684,15 @@ impl TeamConfig {
         // Toolbox paths are relative to the file that names them; from here
         // on (the daemon's copy, a roster) they are absolute.
         let dir = path.parent().unwrap_or_else(|| Path::new(""));
-        let base = if dir.is_absolute() {
-            dir.to_path_buf()
-        } else {
-            std::env::current_dir()
-                .context("finding the current directory")?
-                .join(dir)
-        };
-        let home = std::env::var_os("HOME")
-            .filter(|h| !h.is_empty())
-            .map(PathBuf::from);
-        cfg.absolutize_toolbox_paths(&base, home.as_deref());
+        cfg.absolutize_toolbox_paths(dir, home_dir().as_deref())
+            .with_context(|| format!("in team config {}", path.display()))?;
         Ok(cfg)
     }
 
     /// Make the team's toolbox file paths absolute against `base`, the
-    /// directory of the team file.
-    pub fn absolutize_toolbox_paths(&mut self, base: &Path, home: Option<&Path>) {
+    /// directory of the team file (a relative one is taken from the current
+    /// directory). A `~/` path needs `home`.
+    pub fn absolutize_toolbox_paths(&mut self, base: &Path, home: Option<&Path>) -> Result<()> {
         absolutize_toolboxes(
             &mut self.toolboxes,
             &mut self.defaults,
@@ -707,7 +700,7 @@ impl TeamConfig {
             &mut self.agents,
             base,
             home,
-        );
+        )
     }
 
     /// The declarations every member's toolbox resolves against.
@@ -722,6 +715,18 @@ impl TeamConfig {
     /// Resolve a member's toolbox level (found at `path`) against this team.
     pub fn resolve_toolbox(&self, member: &Toolbox, path: &str) -> Result<toolbox::Resolved> {
         toolbox::resolve(self.toolbox_catalog(), member, path)
+    }
+
+    /// Check a member added after the team was loaded (`agent_add`, a
+    /// subagent) the way a team file's members are checked: its toolbox
+    /// body, its includes against this team's bundles, and its resolution.
+    /// What this accepts, a saved roster accepts too.
+    pub fn validate_member_toolbox(&self, agent: &AgentSpec) -> Result<()> {
+        let path = format!("agent '{}'.toolbox", agent.id);
+        toolbox::validate_body(&agent.toolbox, toolbox::Level::Member, &path)?;
+        toolbox::check_includes(&agent.toolbox, &self.toolboxes, &path)?;
+        self.resolve_toolbox(&agent.toolbox, &path)?;
+        Ok(())
     }
 
     fn validate_toolboxes(&self) -> Result<()> {
@@ -824,7 +829,13 @@ impl TeamConfig {
             );
         }
         let mut ids = HashSet::new();
-        for agent in &self.agents {
+        for (i, agent) in self.agents.iter().enumerate() {
+            // The toolbox body first, so a file's errors name `agents[i]`.
+            toolbox::validate_body(
+                &agent.toolbox,
+                toolbox::Level::Member,
+                &format!("agents[{i}].toolbox"),
+            )?;
             validate_agent_spec(agent)?;
             if !ids.insert(agent.id.as_str()) {
                 bail!("duplicate agent id '{}'", agent.id);
@@ -911,6 +922,14 @@ impl TeamConfig {
     }
 }
 
+/// The operator's home for `~/` in toolbox paths: `HOME`, when it is set to
+/// an absolute path.
+pub fn home_dir() -> Option<PathBuf> {
+    std::env::var_os("HOME")
+        .map(PathBuf::from)
+        .filter(|h| h.is_absolute())
+}
+
 fn absolutize_toolboxes(
     bundles: &mut BTreeMap<String, Toolbox>,
     defaults: &mut AgentDefaults,
@@ -918,15 +937,32 @@ fn absolutize_toolboxes(
     agents: &mut [AgentSpec],
     base: &Path,
     home: Option<&Path>,
-) {
-    for bundle in bundles.values_mut() {
-        bundle.absolutize(base, home);
+) -> Result<()> {
+    // A relative base (a relative workspace or config path) is taken from
+    // the current directory now, so no file path is left relative to a
+    // member's working directory later.
+    let base = if base.is_absolute() {
+        base.to_path_buf()
+    } else {
+        std::env::current_dir()
+            .context("finding the current directory")?
+            .join(base)
+    };
+    for (name, bundle) in bundles.iter_mut() {
+        bundle.absolutize(&base, home, &format!("toolboxes.{name}"))?;
     }
-    defaults.toolbox.absolutize(base, home);
-    orchestrator.toolbox.absolutize(base, home);
-    for agent in agents {
-        agent.toolbox.absolutize(base, home);
+    defaults
+        .toolbox
+        .absolutize(&base, home, "defaults.toolbox")?;
+    orchestrator
+        .toolbox
+        .absolutize(&base, home, "orchestrator.toolbox")?;
+    for (i, agent) in agents.iter_mut().enumerate() {
+        agent
+            .toolbox
+            .absolutize(&base, home, &format!("agents[{i}].toolbox"))?;
     }
+    Ok(())
 }
 
 /// Most models `model_fallbacks` names a fallback for, and most fallbacks
@@ -1005,6 +1041,14 @@ pub fn validate_agent_spec(agent: &AgentSpec) -> Result<()> {
     {
         bail!("agent '{}'.model is not a model name", agent.id);
     }
+    // What can be checked without the team: the body's own fields. Includes
+    // and exclusions need the team's bundles (see
+    // [`TeamConfig::validate_member_toolbox`]).
+    toolbox::validate_body(
+        &agent.toolbox,
+        toolbox::Level::Member,
+        &format!("agent '{}'.toolbox", agent.id),
+    )?;
     Ok(())
 }
 
