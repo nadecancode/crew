@@ -148,6 +148,11 @@ struct FileConfig {
     #[serde(default)]
     #[allow(dead_code)]
     web: Option<toml::Value>,
+    /// The Docs service validates this table independently. A bad Docs update
+    /// must not prevent an agent from loading its unchanged endpoint settings.
+    #[serde(default)]
+    #[allow(dead_code)]
+    docs: Option<toml::Value>,
 }
 
 /// How a credential is sent.

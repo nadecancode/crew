@@ -1,0 +1,17 @@
+[package]
+name = "crew-docs-openers-check"
+version = "0.0.0"
+edition = "2021"
+rust-version = "1.82"
+publish = false
+
+[workspace]
+
+[dependencies]
+crew-core = { path = "../../crates/crew-core" }
+libc = "0.2"
+serde = { version = "1", features = ["derive"] }
+toml = "0.8"
+
+[dev-dependencies]
+tempfile = "3"

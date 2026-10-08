@@ -57,6 +57,16 @@ pub(super) struct Store {
     scope: String,
 }
 
+impl Drop for Store {
+    fn drop(&mut self) {
+        // A concurrent fork elsewhere in the process can inherit this open
+        // file description until exec closes CLOEXEC descriptors. Closing only
+        // our fd would then leave the completed operation's flock held briefly.
+        // SAFETY: _lock is still open and belongs to this successful Store.
+        unsafe { libc::flock(self._lock.as_raw_fd(), libc::LOCK_UN) };
+    }
+}
+
 impl Store {
     pub fn open(member: &File, scope: String) -> Result<Self> {
         if !hex(&scope) {

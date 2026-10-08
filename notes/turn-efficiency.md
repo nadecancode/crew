@@ -523,6 +523,136 @@ Most of the extra round trips come from pattern 1: `agent_inbox` calls are
   messages", using the existing 1.5 s quiet window and 5 s maximum
   (`daemon/delivery.rs:46-50`). Not proposed.
 
+## After
+
+### 2026-10-08: deployment gate is still pending
+
+The live team has **not run the D4/D1 build yet**. The follow-up-fix verdict
+therefore remains pending. No further `daemon/turns.rs` change is justified
+by this rerun.
+
+Checks at 16:12:31Z and 16:30:21Z found the same daemon, PID 2658115, started
+at **2026-10-05T17:26:01.609Z**. Its process start ticks and boot id match
+`daemon.json`. The executable actually mapped by `/proc/2658115/exe` is the
+deleted Oct 5 release, 15,632,944 bytes, modified at 17:24:53.185Z, SHA-256
+`d40f215508b87e3d5cbf7a9e86336d5c63b93ee3059f3eb7dbc7eba70fdbb310`.
+The image predates the Oct 8 D4/D1 changes; it also lacks D1's
+`native-delivery:` marker. Both reads had stable inode/size/mtime. A source
+merge or a newer binary elsewhere on disk is not evidence that this process
+is running it. The exact source commit of the old image is unknown.
+
+The [rerun evidence](turn-efficiency/after-2026-10-08.json) retains the build
+checks, read-only database horizons, collector hashes, window totals and
+native source ids/paths/hashes/initial-byte bounds. No prompts, tool-result
+bodies or credentials are included. Native CLI build versions were not
+collected; current PATH versions must not stand in for historical versions.
+
+### Reproduced cut and legacy continuation
+
+The original `--until 2026-10-08T09:59:18Z` cut reproduces the reported
+18,591 Claude and 10,452 Codex usage observations, 2,030 and 3,692 turns,
+162 no-tool-call follow-up turn openings (89 status/read-only candidates),
+946 empty inbox calls, 1,329 status-only turns and 530 notice/status
+candidates. Discovery now sees two additional Codex files with no activity
+before that cut: 47 discovered files, but the same 45 active files. Claude
+remains 49. The collector's cohort `sessions` field counts discovered files,
+including ones outside the chosen window; it is not an exposure denominator.
+
+Two equal six-hour windows describe what the **same old daemon** did next:
+
+- **A:** `(2026-10-08T03:59:18Z, 2026-10-08T09:59:18Z]`.
+- **B:** `(2026-10-08T09:59:18Z, 2026-10-08T15:59:18Z]`.
+
+The CLI uses inclusive bounds, so each `--since` is one millisecond after
+the open left endpoint. Neither window is a post-fix sample.
+
+| Measure | A: before the cut | B: legacy continuation |
+| --- | ---: | ---: |
+| Active native files, Claude / Codex | 5 / 6 | 5 / 8 |
+| Usage observations, Claude / Codex | 3,007 / 2,010 | 645 / 649 |
+| Turns, Claude / Codex | 372 / 494 | 152 / 306 |
+| Partial turns at cutoff, Claude / Codex | 2 / 4 | 1 / 5 |
+| Turns without a model response, Claude / Codex | 5 / 48 | 0 / 195 |
+| No-tool-call follow-up turn openings | 24 | 9 |
+| Of those, status/read-only candidates | 19 | 2 |
+| Associated requests for all those follow-up turns, upper bound | 43 | 12 |
+| Empty inbox calls | 148 | 43 |
+| Status-only turns, Claude / Codex | 100 / 219 | 61 / 20 |
+| Notice/status turns that were status/read-only candidates | 93 | 21 |
+
+All no-tool-call openings and empty inbox calls in these two windows are
+Codex observations. Codex's empty-inbox share barely changes: 148 of 381
+inbox calls (38.85%) in A, and 43 of 117 (36.75%) in B. Claude made 17 inbox
+calls in A and none in B. The lower absolute counts accompany much less
+observed work and a large increase in Codex turns without a model response;
+they do not establish a reduction caused by D4, D1, the wording changes or
+any other landed code. Candidate status turns can still be legitimate work.
+
+The published manifest identifies every session active in A or B; the full
+96-file provenance manifest stays with the local outputs. Both windows use the
+same five Claude sessions (orchestrator, designer, reviewer, scheduler, ui).
+B retains the six Codex sessions in A and adds Codex ui and scheduler. Models
+observed in these files are `claude-opus-5-5`, `claude-fable-5-1`,
+`gpt-6-astra` and `gpt-6.1-sol`; there is no pi sample. No admitted source
+changed during the provenance read and no malformed source lines were
+reported. Discovery excluded 17 files. A separate provenance pass reused
+`readEvents`/`analyzeSession` on bounded prefixes and asserted equality with
+all three CLI reports for requests, turns, partial turns, calls and the three
+target patterns.
+
+Read-only daemon event counts are a separate measure: A has 34
+`agent.unanswered`, 26 `agent.reminded` and 27 `agent.idle_turn` events; B has
+8, 3 and 8. No `daemon.started` event lies in either window. Generation
+events, delivered inputs and turn openings are not one-to-one: for example,
+A has 29 matching native inputs, five folded into an existing turn, leaving
+24 openings. These counts are not proofs that a particular obligation was
+settled or that a follow-up was unnecessary.
+
+No cost, cache-hit or savings verdict is made. The unchanged collector keeps
+its audit price book, where Codex observations are unpriced; that is a
+limitation of this book, not a claim that the provider has no list price.
+
+### Resuming the actual after measurement
+
+After the operator rebuilds and restarts crew, capture the live PID, start
+time and executable hash again. The deployment boundary is that verified PID
+start for an image whose hash matches the recorded fixed build. Verify its
+source revision contains D4 and D1 and that both D1 image markers,
+`native-delivery:` and `native-delivery-started`, are present; the markers
+alone do not establish D4's source provenance. Record member native sessions
+and delivery modes too; D1's queued
+Claude route must be distinguished from legacy terminal/Codex/pi paths.
+Start the after window at that verified deployment boundary, not the merge
+time. The after window must be at least as long as the pre-deployment window
+and contain comparable responding-turn counts per runtime before any rates
+are compared. Otherwise collect more exposure or leave that comparison
+inconclusive. Retain an equal-duration pre-deployment window where possible,
+with runtime/model and responding-turn coverage stated. Separate old prompts
+queued before the restart from prompts generated by the new daemon.
+
+Join any remaining candidate follow-up to message ids and typed task/reply
+history before proposing another fix. Genuine unanswered questions,
+messages, executing work and requested rework must still be reminded; the
+target is redundant prompts, not a zero count of all follow-ups. Until that
+exposure exists, `turn-efficiency-rerun` stays pending deployment.
+
+Reproduction commands (Node 24.19.0; collector tests passed 18/18):
+
+```sh
+node --test scripts/cache/turns.test.mjs
+node scripts/cache/turns.mjs --out target/turn-efficiency-rerun/original-cut \
+  --until 2026-10-08T09:59:18Z
+node scripts/cache/turns.mjs --out target/turn-efficiency-rerun/pre-cut-6h \
+  --since 2026-10-08T03:59:18.001Z --until 2026-10-08T09:59:18Z
+node scripts/cache/turns.mjs --out target/turn-efficiency-rerun/continuation-6h \
+  --since 2026-10-08T09:59:18.001Z --until 2026-10-08T15:59:18Z
+```
+
+The outputs and provenance sidecars remain under that target directory in
+content's worktree. The commands use the same workspace discovery as the
+original run; when run elsewhere, pass
+`--workspace /home/nade/workspaces/personal/crew` explicitly.
+
 ## Owners and cards
 
 | Fix | Files | Owner | State |
@@ -533,7 +663,7 @@ Most of the extra round trips come from pattern 1: `agent_inbox` calls are
 | 1b mark read on delivery, id in the truncation suffix | `daemon/delivery.rs`, `daemon/handlers.rs`, `daemon/overlap.rs`, `agents/prompt.rs` `clip` | runtime, new card after `cache-delivery`; the one-line `clip` change agreed with native-architect | proposed |
 | 1c restart and compaction notices | `daemon/supervisor/launch.rs`, `daemon/supervisor/recovery.rs`, `daemon/context.rs` | runtime, after D1's final source; `launch.rs` serialised with `cache-standing-prompts` | proposed |
 | 2a compact board view | `crates/crew/src/mcp/tools.rs` `render_tasks`, `Call::Tasks` | orchestrator to assign; the tool-shape change lands once per build | proposed |
-| 3b re-measure the no-tool-call follow-up after D4 | `daemon/turns.rs` only if the rerun shows a need | content | proposed |
+| 3b re-measure the no-tool-call follow-up after D4 | `daemon/turns.rs` only if the rerun shows a need | content | legacy continuation measured; post-fix verdict pending deployment (After) |
 | 3c bridge wake-up prompt | `assets/crew-bridge.register.ts` | runtime, `cache-delivery`; verified by `cache-acceptance` | in progress |
 | 3d backoff for `Credits` | `daemon/limits.rs` | runtime, its own card | proposed, low priority |
 | 3e background work counts as activity | `assets/crew-bridge.register.ts`, `supervisor/health.rs` | runtime with content, its own card, once a bounded activity signal exists | proposed, low priority |

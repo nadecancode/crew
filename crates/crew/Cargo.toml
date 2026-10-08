@@ -52,6 +52,11 @@ tokio-tungstenite.workspace = true
 futures-util.workspace = true
 httparse.workspace = true
 sha2.workspace = true
+pulldown-cmark = { version = "=0.13.4", default-features = false }
+notify = { version = "=8.2.0", default-features = false, features = ["macos_kqueue"] }
+# notify-types 2.1 raised its MSRV; keep the shared default CLI on Rust 1.82.
+notify-types = "=2.0.0"
+tempfile.workspace = true
 
 [dev-dependencies]
 tempfile.workspace = true

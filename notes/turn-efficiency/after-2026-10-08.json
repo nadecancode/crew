@@ -1,0 +1,1232 @@
+{
+  "schema_version": 1,
+  "card": "turn-efficiency-rerun",
+  "verdict": "pending_deployment_of_D4_and_D1",
+  "treated_window": null,
+  "causal_savings": null,
+  "node": "v24.19.0",
+  "scripts": {
+    "scripts/cache/turns.mjs": "16e2d8d216a585bd433b26e2925d47c70c2459fa7c4462caf07a593c4ffbce82",
+    "scripts/cache/baseline.mjs": "a5f12d7ba7e0ff7555db57961d1e2af1c3440d41a0f4da22dbfa06e2890c7a8f",
+    "notes/prompt-cache-audit/prices.tsv": "eb0addbdb419e4b03b0bb271ba35d32f5610fb7e6821b45de281a89687690c95"
+  },
+  "live_before": {
+    "observed_at": "2026-10-08T16:12:31.902Z",
+    "daemon": {
+      "pid": 2658115,
+      "started_at": "2026-10-05T17:26:01.609Z",
+      "pid_start_matches": true,
+      "boot_id_matches": true
+    },
+    "executable": {
+      "path": "/home/nade/workspaces/personal/crew/target/release/crew (deleted)",
+      "bytes": 15632944,
+      "mtime": "2026-10-05T17:24:53.185Z",
+      "sha256": "d40f215508b87e3d5cbf7a9e86336d5c63b93ee3059f3eb7dbc7eba70fdbb310",
+      "native_delivery_marker": false,
+      "stable_read": true
+    },
+    "database": {
+      "max_seq": 35457,
+      "last_event_ms": 1791475951329
+    },
+    "starts": [
+      {
+        "seq": 14932,
+        "timestamp": 1791221161689,
+        "event_type": "session.started"
+      },
+      {
+        "seq": 14929,
+        "timestamp": 1791221161619,
+        "event_type": "daemon.started"
+      },
+      {
+        "seq": 14878,
+        "timestamp": 1791221024725,
+        "event_type": "session.started"
+      },
+      {
+        "seq": 14875,
+        "timestamp": 1791221024635,
+        "event_type": "daemon.started"
+      },
+      {
+        "seq": 12932,
+        "timestamp": 1791213482151,
+        "event_type": "session.started"
+      },
+      {
+        "seq": 12929,
+        "timestamp": 1791213481832,
+        "event_type": "daemon.started"
+      },
+      {
+        "seq": 9051,
+        "timestamp": 1791169246697,
+        "event_type": "session.started"
+      },
+      {
+        "seq": 9045,
+        "timestamp": 1791169246610,
+        "event_type": "daemon.started"
+      }
+    ],
+    "script_sha256": "16e2d8d216a585bd433b26e2925d47c70c2459fa7c4462caf07a593c4ffbce82"
+  },
+  "live_after": {
+    "observed_at": "2026-10-08T16:30:21.572Z",
+    "pid": 2658115,
+    "started_at": "2026-10-05T17:26:01.609Z",
+    "image_path": "/home/nade/workspaces/personal/crew/target/release/crew (deleted)",
+    "bytes": 15632944,
+    "mtime": "2026-10-05T17:24:53.185Z",
+    "sha256": "d40f215508b87e3d5cbf7a9e86336d5c63b93ee3059f3eb7dbc7eba70fdbb310",
+    "native_delivery_marker": false,
+    "stable_read": true
+  },
+  "daemon_events": {
+    "read_at": "2026-10-08T16:27:19.805Z",
+    "horizon": {
+      "max_seq": 35615,
+      "last_event_ms": 1791476813799
+    },
+    "windows": {
+      "original_cut": {
+        "since": null,
+        "until": 1791453558000,
+        "events": [
+          {
+            "event_type": "agent.idle_turn",
+            "count": 159
+          },
+          {
+            "event_type": "agent.reminded",
+            "count": 101
+          },
+          {
+            "event_type": "agent.unanswered",
+            "count": 220
+          },
+          {
+            "event_type": "daemon.started",
+            "count": 19
+          }
+        ]
+      },
+      "pre_cut_6h": {
+        "since": 1791431958000,
+        "until": 1791453558000,
+        "events": [
+          {
+            "event_type": "agent.idle_turn",
+            "count": 27
+          },
+          {
+            "event_type": "agent.reminded",
+            "count": 26
+          },
+          {
+            "event_type": "agent.unanswered",
+            "count": 34
+          }
+        ]
+      },
+      "continuation_6h": {
+        "since": 1791453558000,
+        "until": 1791475158000,
+        "events": [
+          {
+            "event_type": "agent.idle_turn",
+            "count": 8
+          },
+          {
+            "event_type": "agent.reminded",
+            "count": 3
+          },
+          {
+            "event_type": "agent.unanswered",
+            "count": 8
+          }
+        ]
+      }
+    }
+  },
+  "windows": {
+    "original-cut": {
+      "since": null,
+      "until": "2026-10-08T09:59:18.000Z",
+      "collector_generated_at": "2026-10-08T16:16:36.726Z",
+      "cohort": {
+        "claude": {
+          "discovered_files": 49,
+          "active_files": 49,
+          "agents": [
+            "architect",
+            "auditor",
+            "baseline",
+            "content",
+            "designer",
+            "fix-core",
+            "fix-runtime",
+            "graph",
+            "integrator",
+            "lead",
+            "linux",
+            "native-architect",
+            null,
+            "orchestrator",
+            "qa",
+            "rev-tui",
+            "reviewer",
+            "sandbox",
+            "scheduler",
+            "tui",
+            "ui",
+            "vcs",
+            "vcs-batchtests",
+            "vcs-fallback",
+            "vcs-hubtests",
+            "vcs-mismatch",
+            "vcs-pin",
+            "vcs-pinfix",
+            "vcs-pinfix2",
+            "vcs-wakeups",
+            "web"
+          ],
+          "requests": 18591,
+          "turns": 2030,
+          "partial_turns": 11,
+          "turns_with_no_model_response": 24,
+          "tool_calls": 19009,
+          "crew_tool_calls": 3842,
+          "inbox_calls": 147,
+          "empty_inbox_calls": 1,
+          "empty_inbox_share": 0.006802721088435374,
+          "status_only_turns": 510,
+          "status_only_turn_share": 0.2512315270935961
+        },
+        "codex": {
+          "discovered_files": 47,
+          "active_files": 45,
+          "agents": [
+            "architect",
+            "cache-reviewer",
+            "content",
+            "designer",
+            "graph",
+            "native-architect",
+            "native-transport",
+            "qa",
+            "reviewer",
+            "runtime",
+            "sandbox",
+            "scheduler",
+            "ui",
+            "vcs-pinfix2",
+            "web"
+          ],
+          "requests": 10452,
+          "turns": 3692,
+          "partial_turns": 7,
+          "turns_with_no_model_response": 1399,
+          "tool_calls": 19581,
+          "crew_tool_calls": 10358,
+          "inbox_calls": 2524,
+          "empty_inbox_calls": 945,
+          "empty_inbox_share": 0.374405705229794,
+          "status_only_turns": 819,
+          "status_only_turn_share": 0.22183098591549297
+        }
+      },
+      "counts": {
+        "no_tool_call_turns": 162,
+        "no_tool_call_status_or_read_candidates": 89,
+        "no_tool_call_status_only_turns": 60,
+        "no_tool_call_associated_requests": 240,
+        "empty_inbox_calls": 946,
+        "status_only_turns": 1329,
+        "notice_status_or_read_candidates": 530
+      },
+      "notice_openings": [
+        {
+          "count": 199,
+          "turn_start": 162,
+          "folded": 37
+        }
+      ],
+      "artifact_sha256": {
+        "summary.json": "34e2dcb94abdb7e9a32a9436d15839f4de936844f5d90aecb19d47d665a85774",
+        "summary.md": "e2992e9f5830e3a1a0a62fafc8f0729399ab81deab0fa2630d56d69065f314fb",
+        "examples.json": "6c97c7d316af0e6f2175ef9ebe20fcaa90bd9ad172d1dc36a14ec6431cc0d9a5"
+      }
+    },
+    "pre-cut-6h": {
+      "since": "2026-10-08T03:59:18.001Z",
+      "until": "2026-10-08T09:59:18.000Z",
+      "collector_generated_at": "2026-10-08T16:19:11.623Z",
+      "cohort": {
+        "claude": {
+          "discovered_files": 49,
+          "active_files": 5,
+          "agents": [
+            "designer",
+            "orchestrator",
+            "reviewer",
+            "scheduler",
+            "ui"
+          ],
+          "requests": 3007,
+          "turns": 372,
+          "partial_turns": 2,
+          "turns_with_no_model_response": 5,
+          "tool_calls": 3139,
+          "crew_tool_calls": 707,
+          "inbox_calls": 17,
+          "empty_inbox_calls": 0,
+          "empty_inbox_share": 0,
+          "status_only_turns": 100,
+          "status_only_turn_share": 0.26881720430107525
+        },
+        "codex": {
+          "discovered_files": 47,
+          "active_files": 6,
+          "agents": [
+            "cache-reviewer",
+            "content",
+            "graph",
+            "native-architect",
+            "qa",
+            "runtime"
+          ],
+          "requests": 2010,
+          "turns": 494,
+          "partial_turns": 4,
+          "turns_with_no_model_response": 48,
+          "tool_calls": 3561,
+          "crew_tool_calls": 1768,
+          "inbox_calls": 381,
+          "empty_inbox_calls": 148,
+          "empty_inbox_share": 0.3884514435695538,
+          "status_only_turns": 219,
+          "status_only_turn_share": 0.4433198380566802
+        }
+      },
+      "counts": {
+        "no_tool_call_turns": 24,
+        "no_tool_call_status_or_read_candidates": 19,
+        "no_tool_call_status_only_turns": 15,
+        "no_tool_call_associated_requests": 43,
+        "empty_inbox_calls": 148,
+        "status_only_turns": 319,
+        "notice_status_or_read_candidates": 93
+      },
+      "notice_openings": [
+        {
+          "count": 29,
+          "turn_start": 24,
+          "folded": 5
+        }
+      ],
+      "artifact_sha256": {
+        "summary.json": "f1ed9be19cc0664fdb7420fdbb98ab3705c9604ace6efc3e21759d99924b65c4",
+        "summary.md": "b9eef1d0a3bf6d700668e6e0f019be805e4889540e1dab7d4fb9c1c5224ff2c3",
+        "examples.json": "0eea2814ddd23f24205ea293e73b833c5cab1a5f96bdd86ccd3d84113df100b0"
+      }
+    },
+    "continuation-6h": {
+      "since": "2026-10-08T09:59:18.001Z",
+      "until": "2026-10-08T15:59:18.000Z",
+      "collector_generated_at": "2026-10-08T16:21:08.363Z",
+      "cohort": {
+        "claude": {
+          "discovered_files": 49,
+          "active_files": 5,
+          "agents": [
+            "designer",
+            "orchestrator",
+            "reviewer",
+            "scheduler",
+            "ui"
+          ],
+          "requests": 645,
+          "turns": 152,
+          "partial_turns": 1,
+          "turns_with_no_model_response": 0,
+          "tool_calls": 552,
+          "crew_tool_calls": 168,
+          "inbox_calls": 0,
+          "empty_inbox_calls": 0,
+          "empty_inbox_share": null,
+          "status_only_turns": 61,
+          "status_only_turn_share": 0.40131578947368424
+        },
+        "codex": {
+          "discovered_files": 47,
+          "active_files": 8,
+          "agents": [
+            "cache-reviewer",
+            "content",
+            "graph",
+            "native-architect",
+            "qa",
+            "runtime",
+            "scheduler",
+            "ui"
+          ],
+          "requests": 649,
+          "turns": 306,
+          "partial_turns": 5,
+          "turns_with_no_model_response": 195,
+          "tool_calls": 1235,
+          "crew_tool_calls": 530,
+          "inbox_calls": 117,
+          "empty_inbox_calls": 43,
+          "empty_inbox_share": 0.36752136752136755,
+          "status_only_turns": 20,
+          "status_only_turn_share": 0.06535947712418301
+        }
+      },
+      "counts": {
+        "no_tool_call_turns": 9,
+        "no_tool_call_status_or_read_candidates": 2,
+        "no_tool_call_status_only_turns": 2,
+        "no_tool_call_associated_requests": 12,
+        "empty_inbox_calls": 43,
+        "status_only_turns": 81,
+        "notice_status_or_read_candidates": 21
+      },
+      "notice_openings": [
+        {
+          "count": 9,
+          "turn_start": 9,
+          "folded": 0
+        }
+      ],
+      "artifact_sha256": {
+        "summary.json": "741ceedbc5d65adace1eeb142d59428cbf4f0d65dafa8b5a2eb2240020a27825",
+        "summary.md": "87ea28b18e95fc5117e6a2a5fd4bd336dadaebc62bda258d77d5b509b23b9d4c",
+        "examples.json": "69042fca68333e9dc12323bc29beff82b68ff2ac315bcf2d14c21a6fa8c07fed"
+      }
+    }
+  },
+  "source_provenance": {
+    "observed_at": "2026-10-08T16:25:49.135Z",
+    "note": "Separate read-only provenance pass. Fresh per-window analysis of these bounded source prefixes exactly matches the three CLI reports for requests, turns, partial turns, calls and the three target patterns. No native CLI build is inferred from current PATH.",
+    "discovered_files": 96,
+    "excluded_files": 17,
+    "changed_during_read": 0,
+    "malformed_source_lines": 0,
+    "native_cli_build_versions": "not collected; do not infer historical versions from current PATH",
+    "published_sources": "Union of native files active in the two six-hour windows; all discovered files remain in target/turn-efficiency-rerun/source-cohort.json.",
+    "full_manifest_sha256": "e6830145df6286e044bacf1b0047c172ee2a44b34e9e1734e12ffa22d59d7774"
+  },
+  "sources": [
+    {
+      "file": "~/.claude/projects/-home-nade-workspaces-personal-crew/33430311-defb-4030-9c59-db43bcf477fd.jsonl",
+      "native_session_id": "33430311-defb-4030-9c59-db43bcf477fd",
+      "agent_id": "orchestrator",
+      "runtime": "claude",
+      "source_sha256": "ee4e220d7710eb0bb7a849c05ce45905d9e8dd5cc6fd12a245c7137569bf157b",
+      "source_bytes": 7211141,
+      "source_lines": 5280,
+      "malformed_lines": 0,
+      "snapshot": {
+        "size_at_start": 7211141,
+        "size_at_end": 7211141,
+        "changed_during_read": false
+      },
+      "windows": {
+        "original-cut": {
+          "requests": 520,
+          "turns": 236,
+          "partial_turns": 0,
+          "tool_calls": 371,
+          "crew_tool_calls": 230,
+          "active": true,
+          "no_tool_call_turns": 0,
+          "no_tool_call_candidates": 0,
+          "empty_inbox": 0,
+          "status_only_turns": 71,
+          "models": [
+            "claude-opus-5-5"
+          ]
+        },
+        "pre-cut-6h": {
+          "requests": 242,
+          "turns": 131,
+          "partial_turns": 0,
+          "tool_calls": 145,
+          "crew_tool_calls": 93,
+          "active": true,
+          "no_tool_call_turns": 0,
+          "no_tool_call_candidates": 0,
+          "empty_inbox": 0,
+          "status_only_turns": 46,
+          "models": [
+            "claude-opus-5-5"
+          ]
+        },
+        "continuation-6h": {
+          "requests": 112,
+          "turns": 65,
+          "partial_turns": 0,
+          "tool_calls": 66,
+          "crew_tool_calls": 44,
+          "active": true,
+          "no_tool_call_turns": 0,
+          "no_tool_call_candidates": 0,
+          "empty_inbox": 0,
+          "status_only_turns": 35,
+          "models": [
+            "claude-opus-5-5"
+          ]
+        }
+      }
+    },
+    {
+      "file": "~/.claude/projects/-home-nade-workspaces-personal-crew--crew-worktrees-designer/9aa00d71-df53-4450-b026-756579f45902.jsonl",
+      "native_session_id": "9aa00d71-df53-4450-b026-756579f45902",
+      "agent_id": "designer",
+      "runtime": "claude",
+      "source_sha256": "98215efc3b8cb4d5f66fb66feeb726dac7a209db3d4f828ffd19a337328ef960",
+      "source_bytes": 58468920,
+      "source_lines": 9609,
+      "malformed_lines": 0,
+      "snapshot": {
+        "size_at_start": 58468920,
+        "size_at_end": 58468920,
+        "changed_during_read": false
+      },
+      "windows": {
+        "original-cut": {
+          "requests": 1149,
+          "turns": 119,
+          "partial_turns": 0,
+          "tool_calls": 1276,
+          "crew_tool_calls": 274,
+          "active": true,
+          "no_tool_call_turns": 0,
+          "no_tool_call_candidates": 0,
+          "empty_inbox": 0,
+          "status_only_turns": 19,
+          "models": [
+            "claude-opus-5-5"
+          ]
+        },
+        "pre-cut-6h": {
+          "requests": 679,
+          "turns": 70,
+          "partial_turns": 0,
+          "tool_calls": 743,
+          "crew_tool_calls": 187,
+          "active": true,
+          "no_tool_call_turns": 0,
+          "no_tool_call_candidates": 0,
+          "empty_inbox": 0,
+          "status_only_turns": 10,
+          "models": [
+            "claude-opus-5-5"
+          ]
+        },
+        "continuation-6h": {
+          "requests": 103,
+          "turns": 23,
+          "partial_turns": 0,
+          "tool_calls": 84,
+          "crew_tool_calls": 22,
+          "active": true,
+          "no_tool_call_turns": 0,
+          "no_tool_call_candidates": 0,
+          "empty_inbox": 0,
+          "status_only_turns": 3,
+          "models": [
+            "claude-opus-5-5"
+          ]
+        }
+      }
+    },
+    {
+      "file": "~/.claude/projects/-home-nade-workspaces-personal-crew--crew-worktrees-reviewer/1426380e-429c-4f95-a931-4ce46dc428c0.jsonl",
+      "native_session_id": "1426380e-429c-4f95-a931-4ce46dc428c0",
+      "agent_id": "reviewer",
+      "runtime": "claude",
+      "source_sha256": "17a44cc52bb5236a5c4bea4cc7ba2413f298f678d1311bcf37d1db4a4071b8e4",
+      "source_bytes": 30466116,
+      "source_lines": 13128,
+      "malformed_lines": 0,
+      "snapshot": {
+        "size_at_start": 30466116,
+        "size_at_end": 30466116,
+        "changed_during_read": false
+      },
+      "windows": {
+        "original-cut": {
+          "requests": 1865,
+          "turns": 301,
+          "partial_turns": 1,
+          "tool_calls": 1656,
+          "crew_tool_calls": 548,
+          "active": true,
+          "no_tool_call_turns": 1,
+          "no_tool_call_candidates": 0,
+          "empty_inbox": 0,
+          "status_only_turns": 91,
+          "models": [
+            "claude-fable-5-1"
+          ]
+        },
+        "pre-cut-6h": {
+          "requests": 277,
+          "turns": 66,
+          "partial_turns": 1,
+          "tool_calls": 212,
+          "crew_tool_calls": 54,
+          "active": true,
+          "no_tool_call_turns": 0,
+          "no_tool_call_candidates": 0,
+          "empty_inbox": 0,
+          "status_only_turns": 20,
+          "models": [
+            "claude-fable-5-1"
+          ]
+        },
+        "continuation-6h": {
+          "requests": 203,
+          "turns": 25,
+          "partial_turns": 1,
+          "tool_calls": 177,
+          "crew_tool_calls": 31,
+          "active": true,
+          "no_tool_call_turns": 0,
+          "no_tool_call_candidates": 0,
+          "empty_inbox": 0,
+          "status_only_turns": 3,
+          "models": [
+            "claude-fable-5-1"
+          ]
+        }
+      }
+    },
+    {
+      "file": "~/.claude/projects/-home-nade-workspaces-personal-crew--crew-worktrees-scheduler/31601523-4af5-4a2a-8e73-22e26d90c817.jsonl",
+      "native_session_id": "31601523-4af5-4a2a-8e73-22e26d90c817",
+      "agent_id": "scheduler",
+      "runtime": "claude",
+      "source_sha256": "eb5709cdf78594998e1ee85ebfa963616f04046d9757e6bb17e54cda0c8faf3f",
+      "source_bytes": 25174216,
+      "source_lines": 12972,
+      "malformed_lines": 0,
+      "snapshot": {
+        "size_at_start": 25174216,
+        "size_at_end": 25174216,
+        "changed_during_read": false
+      },
+      "windows": {
+        "original-cut": {
+          "requests": 1577,
+          "turns": 120,
+          "partial_turns": 1,
+          "tool_calls": 1747,
+          "crew_tool_calls": 354,
+          "active": true,
+          "no_tool_call_turns": 0,
+          "no_tool_call_candidates": 0,
+          "empty_inbox": 0,
+          "status_only_turns": 34,
+          "models": [
+            "claude-opus-5-5"
+          ]
+        },
+        "pre-cut-6h": {
+          "requests": 887,
+          "turns": 76,
+          "partial_turns": 1,
+          "tool_calls": 1027,
+          "crew_tool_calls": 266,
+          "active": true,
+          "no_tool_call_turns": 0,
+          "no_tool_call_candidates": 0,
+          "empty_inbox": 0,
+          "status_only_turns": 19,
+          "models": [
+            "claude-opus-5-5"
+          ]
+        },
+        "continuation-6h": {
+          "requests": 188,
+          "turns": 23,
+          "partial_turns": 0,
+          "tool_calls": 202,
+          "crew_tool_calls": 55,
+          "active": true,
+          "no_tool_call_turns": 0,
+          "no_tool_call_candidates": 0,
+          "empty_inbox": 0,
+          "status_only_turns": 8,
+          "models": [
+            "claude-opus-5-5"
+          ]
+        }
+      }
+    },
+    {
+      "file": "~/.claude/projects/-home-nade-workspaces-personal-crew--crew-worktrees-ui/c441bfb7-9d84-4d5b-a926-32f5ca76aba6.jsonl",
+      "native_session_id": "c441bfb7-9d84-4d5b-a926-32f5ca76aba6",
+      "agent_id": "ui",
+      "runtime": "claude",
+      "source_sha256": "921115c695afdc83be801c46b06fd2ff6d8431ffde3a4825fe83f2fd93e89039",
+      "source_bytes": 23431271,
+      "source_lines": 9356,
+      "malformed_lines": 0,
+      "snapshot": {
+        "size_at_start": 23431271,
+        "size_at_end": 23431271,
+        "changed_during_read": false
+      },
+      "windows": {
+        "original-cut": {
+          "requests": 1251,
+          "turns": 59,
+          "partial_turns": 0,
+          "tool_calls": 1330,
+          "crew_tool_calls": 175,
+          "active": true,
+          "no_tool_call_turns": 0,
+          "no_tool_call_candidates": 0,
+          "empty_inbox": 0,
+          "status_only_turns": 21,
+          "models": [
+            "claude-opus-5-5"
+          ]
+        },
+        "pre-cut-6h": {
+          "requests": 922,
+          "turns": 29,
+          "partial_turns": 0,
+          "tool_calls": 1012,
+          "crew_tool_calls": 107,
+          "active": true,
+          "no_tool_call_turns": 0,
+          "no_tool_call_candidates": 0,
+          "empty_inbox": 0,
+          "status_only_turns": 5,
+          "models": [
+            "claude-opus-5-5"
+          ]
+        },
+        "continuation-6h": {
+          "requests": 39,
+          "turns": 16,
+          "partial_turns": 0,
+          "tool_calls": 23,
+          "crew_tool_calls": 16,
+          "active": true,
+          "no_tool_call_turns": 0,
+          "no_tool_call_candidates": 0,
+          "empty_inbox": 0,
+          "status_only_turns": 12,
+          "models": [
+            "claude-opus-5-5"
+          ]
+        }
+      }
+    },
+    {
+      "file": "~/.codex/sessions/2026/10/05/rollout-2026-10-05T12-26-03-01a10d19-e317-76e2-bced-9de15184919c.jsonl",
+      "native_session_id": "01a10d19-e317-76e2-bced-9de15184919c",
+      "agent_id": "runtime",
+      "runtime": "codex",
+      "source_sha256": "e28d5a116bb10f284e12430fd7b32b4af45f969ea602c567cc73f6f9afb9a229",
+      "source_bytes": 36786960,
+      "source_lines": 11333,
+      "malformed_lines": 0,
+      "snapshot": {
+        "size_at_start": 36786960,
+        "size_at_end": 36786960,
+        "changed_during_read": false
+      },
+      "windows": {
+        "original-cut": {
+          "requests": 943,
+          "turns": 388,
+          "partial_turns": 0,
+          "tool_calls": 1620,
+          "crew_tool_calls": 829,
+          "active": true,
+          "no_tool_call_turns": 11,
+          "no_tool_call_candidates": 9,
+          "empty_inbox": 90,
+          "status_only_turns": 77,
+          "models": [
+            "gpt-6.1-sol"
+          ]
+        },
+        "pre-cut-6h": {
+          "requests": 374,
+          "turns": 106,
+          "partial_turns": 0,
+          "tool_calls": 576,
+          "crew_tool_calls": 291,
+          "active": true,
+          "no_tool_call_turns": 0,
+          "no_tool_call_candidates": 0,
+          "empty_inbox": 42,
+          "status_only_turns": 22,
+          "models": [
+            "gpt-6.1-sol"
+          ]
+        },
+        "continuation-6h": {
+          "requests": 35,
+          "turns": 5,
+          "partial_turns": 1,
+          "tool_calls": 105,
+          "crew_tool_calls": 36,
+          "active": true,
+          "no_tool_call_turns": 0,
+          "no_tool_call_candidates": 0,
+          "empty_inbox": 5,
+          "status_only_turns": 0,
+          "models": [
+            "gpt-6.1-sol"
+          ]
+        }
+      }
+    },
+    {
+      "file": "~/.codex/sessions/2026/10/07/rollout-2026-10-07T22-47-00-01a1199f-1c2c-7c40-a73f-8fd5256ebdf1.jsonl",
+      "native_session_id": "01a1199f-1c2c-7c40-a73f-8fd5256ebdf1",
+      "agent_id": "content",
+      "runtime": "codex",
+      "source_sha256": "3977ecf9709914bbb4493c084076a1c93aeaf4a82e096820836c39150acd0353",
+      "source_bytes": 14209592,
+      "source_lines": 4389,
+      "malformed_lines": 0,
+      "snapshot": {
+        "size_at_start": 14209592,
+        "size_at_end": 14209592,
+        "changed_during_read": false
+      },
+      "windows": {
+        "original-cut": {
+          "requests": 333,
+          "turns": 92,
+          "partial_turns": 0,
+          "tool_calls": 699,
+          "crew_tool_calls": 290,
+          "active": true,
+          "no_tool_call_turns": 7,
+          "no_tool_call_candidates": 7,
+          "empty_inbox": 12,
+          "status_only_turns": 55,
+          "models": [
+            "gpt-6-astra"
+          ]
+        },
+        "pre-cut-6h": {
+          "requests": 321,
+          "turns": 90,
+          "partial_turns": 0,
+          "tool_calls": 669,
+          "crew_tool_calls": 280,
+          "active": true,
+          "no_tool_call_turns": 7,
+          "no_tool_call_candidates": 7,
+          "empty_inbox": 12,
+          "status_only_turns": 54,
+          "models": [
+            "gpt-6-astra"
+          ]
+        },
+        "continuation-6h": {
+          "requests": 64,
+          "turns": 7,
+          "partial_turns": 1,
+          "tool_calls": 164,
+          "crew_tool_calls": 40,
+          "active": true,
+          "no_tool_call_turns": 0,
+          "no_tool_call_candidates": 0,
+          "empty_inbox": 8,
+          "status_only_turns": 0,
+          "models": [
+            "gpt-6-astra"
+          ]
+        }
+      }
+    },
+    {
+      "file": "~/.codex/sessions/2026/10/07/rollout-2026-10-07T22-47-02-01a1199f-2456-71d2-998c-d6c1de01b676.jsonl",
+      "native_session_id": "01a1199f-2456-71d2-998c-d6c1de01b676",
+      "agent_id": "graph",
+      "runtime": "codex",
+      "source_sha256": "f729414d044cd5ee9eed38edf929655ffeea3ceb1605973d326f507827b08cb0",
+      "source_bytes": 19366467,
+      "source_lines": 6049,
+      "malformed_lines": 0,
+      "snapshot": {
+        "size_at_start": 19366467,
+        "size_at_end": 19366467,
+        "changed_during_read": false
+      },
+      "windows": {
+        "original-cut": {
+          "requests": 367,
+          "turns": 42,
+          "partial_turns": 1,
+          "tool_calls": 692,
+          "crew_tool_calls": 307,
+          "active": true,
+          "no_tool_call_turns": 2,
+          "no_tool_call_candidates": 2,
+          "empty_inbox": 35,
+          "status_only_turns": 3,
+          "models": [
+            "gpt-6-astra"
+          ]
+        },
+        "pre-cut-6h": {
+          "requests": 316,
+          "turns": 34,
+          "partial_turns": 1,
+          "tool_calls": 598,
+          "crew_tool_calls": 264,
+          "active": true,
+          "no_tool_call_turns": 1,
+          "no_tool_call_candidates": 1,
+          "empty_inbox": 32,
+          "status_only_turns": 1,
+          "models": [
+            "gpt-6-astra"
+          ]
+        },
+        "continuation-6h": {
+          "requests": 136,
+          "turns": 119,
+          "partial_turns": 1,
+          "tool_calls": 237,
+          "crew_tool_calls": 131,
+          "active": true,
+          "no_tool_call_turns": 3,
+          "no_tool_call_candidates": 1,
+          "empty_inbox": 18,
+          "status_only_turns": 2,
+          "models": [
+            "gpt-6-astra"
+          ]
+        }
+      }
+    },
+    {
+      "file": "~/.codex/sessions/2026/10/07/rollout-2026-10-07T22-47-05-01a1199f-2f0e-74a2-8767-5e2183b1230c.jsonl",
+      "native_session_id": "01a1199f-2f0e-74a2-8767-5e2183b1230c",
+      "agent_id": "native-architect",
+      "runtime": "codex",
+      "source_sha256": "85b1fb669a3fb55381965856a6031eea6bc1492d6ec8126434e55a99708a71d6",
+      "source_bytes": 14112460,
+      "source_lines": 4043,
+      "malformed_lines": 0,
+      "snapshot": {
+        "size_at_start": 14112460,
+        "size_at_end": 14112460,
+        "changed_during_read": false
+      },
+      "windows": {
+        "original-cut": {
+          "requests": 314,
+          "turns": 104,
+          "partial_turns": 1,
+          "tool_calls": 512,
+          "crew_tool_calls": 254,
+          "active": true,
+          "no_tool_call_turns": 6,
+          "no_tool_call_candidates": 4,
+          "empty_inbox": 3,
+          "status_only_turns": 70,
+          "models": [
+            "gpt-6-astra"
+          ]
+        },
+        "pre-cut-6h": {
+          "requests": 299,
+          "turns": 101,
+          "partial_turns": 1,
+          "tool_calls": 480,
+          "crew_tool_calls": 238,
+          "active": true,
+          "no_tool_call_turns": 6,
+          "no_tool_call_candidates": 4,
+          "empty_inbox": 3,
+          "status_only_turns": 70,
+          "models": [
+            "gpt-6-astra"
+          ]
+        },
+        "continuation-6h": {
+          "requests": 71,
+          "turns": 41,
+          "partial_turns": 1,
+          "tool_calls": 120,
+          "crew_tool_calls": 43,
+          "active": true,
+          "no_tool_call_turns": 0,
+          "no_tool_call_candidates": 0,
+          "empty_inbox": 2,
+          "status_only_turns": 0,
+          "models": [
+            "gpt-6-astra"
+          ]
+        }
+      }
+    },
+    {
+      "file": "~/.codex/sessions/2026/10/07/rollout-2026-10-07T22-47-08-01a1199f-3c6e-71c0-9f89-e68b3f9006bf.jsonl",
+      "native_session_id": "01a1199f-3c6e-71c0-9f89-e68b3f9006bf",
+      "agent_id": "qa",
+      "runtime": "codex",
+      "source_sha256": "9c47966ac094796f2e0dd7d2b1b3859f5660447542283d17c0d79d881354c9f4",
+      "source_bytes": 14775022,
+      "source_lines": 5092,
+      "malformed_lines": 0,
+      "snapshot": {
+        "size_at_start": 14775022,
+        "size_at_end": 14775022,
+        "changed_during_read": false
+      },
+      "windows": {
+        "original-cut": {
+          "requests": 362,
+          "turns": 102,
+          "partial_turns": 1,
+          "tool_calls": 614,
+          "crew_tool_calls": 313,
+          "active": true,
+          "no_tool_call_turns": 4,
+          "no_tool_call_candidates": 1,
+          "empty_inbox": 30,
+          "status_only_turns": 54,
+          "models": [
+            "gpt-6-astra"
+          ]
+        },
+        "pre-cut-6h": {
+          "requests": 328,
+          "turns": 100,
+          "partial_turns": 1,
+          "tool_calls": 545,
+          "crew_tool_calls": 284,
+          "active": true,
+          "no_tool_call_turns": 4,
+          "no_tool_call_candidates": 1,
+          "empty_inbox": 23,
+          "status_only_turns": 54,
+          "models": [
+            "gpt-6-astra"
+          ]
+        },
+        "continuation-6h": {
+          "requests": 119,
+          "turns": 27,
+          "partial_turns": 1,
+          "tool_calls": 281,
+          "crew_tool_calls": 84,
+          "active": true,
+          "no_tool_call_turns": 0,
+          "no_tool_call_candidates": 0,
+          "empty_inbox": 5,
+          "status_only_turns": 4,
+          "models": [
+            "gpt-6-astra"
+          ]
+        }
+      }
+    },
+    {
+      "file": "~/.codex/sessions/2026/10/07/rollout-2026-10-07T22-47-41-01a1199f-bc21-7341-a91a-46ff3c346772.jsonl",
+      "native_session_id": "01a1199f-bc21-7341-a91a-46ff3c346772",
+      "agent_id": "cache-reviewer",
+      "runtime": "codex",
+      "source_sha256": "64759468d9b8951adef2be4ce48971f66abe6cf249992eb79798f7083af8dd94",
+      "source_bytes": 23048492,
+      "source_lines": 5415,
+      "malformed_lines": 0,
+      "snapshot": {
+        "size_at_start": 23048492,
+        "size_at_end": 23048492,
+        "changed_during_read": false
+      },
+      "windows": {
+        "original-cut": {
+          "requests": 384,
+          "turns": 67,
+          "partial_turns": 1,
+          "tool_calls": 705,
+          "crew_tool_calls": 419,
+          "active": true,
+          "no_tool_call_turns": 6,
+          "no_tool_call_candidates": 6,
+          "empty_inbox": 36,
+          "status_only_turns": 20,
+          "models": [
+            "gpt-6-astra"
+          ]
+        },
+        "pre-cut-6h": {
+          "requests": 372,
+          "turns": 63,
+          "partial_turns": 1,
+          "tool_calls": 693,
+          "crew_tool_calls": 411,
+          "active": true,
+          "no_tool_call_turns": 6,
+          "no_tool_call_candidates": 6,
+          "empty_inbox": 36,
+          "status_only_turns": 18,
+          "models": [
+            "gpt-6-astra"
+          ]
+        },
+        "continuation-6h": {
+          "requests": 152,
+          "turns": 92,
+          "partial_turns": 0,
+          "tool_calls": 192,
+          "crew_tool_calls": 138,
+          "active": true,
+          "no_tool_call_turns": 5,
+          "no_tool_call_candidates": 1,
+          "empty_inbox": 3,
+          "status_only_turns": 11,
+          "models": [
+            "gpt-6-astra"
+          ]
+        }
+      }
+    },
+    {
+      "file": "~/.codex/sessions/2026/10/08/rollout-2026-10-08T10-19-26-01a11c19-1009-76b0-8d7b-509a77f2f77a.jsonl",
+      "native_session_id": "01a11c19-1009-76b0-8d7b-509a77f2f77a",
+      "agent_id": "ui",
+      "runtime": "codex",
+      "source_sha256": "d2821efd163e509a9dce5acdc935921aea8dc937236ef4080af161112c57eae9",
+      "source_bytes": 4007099,
+      "source_lines": 676,
+      "malformed_lines": 0,
+      "snapshot": {
+        "size_at_start": 4007099,
+        "size_at_end": 4007099,
+        "changed_during_read": false
+      },
+      "windows": {
+        "original-cut": {
+          "requests": 0,
+          "turns": 0,
+          "partial_turns": 0,
+          "tool_calls": 0,
+          "crew_tool_calls": 0,
+          "active": false,
+          "no_tool_call_turns": 0,
+          "no_tool_call_candidates": 0,
+          "empty_inbox": 0,
+          "status_only_turns": 0,
+          "models": []
+        },
+        "pre-cut-6h": {
+          "requests": 0,
+          "turns": 0,
+          "partial_turns": 0,
+          "tool_calls": 0,
+          "crew_tool_calls": 0,
+          "active": false,
+          "no_tool_call_turns": 0,
+          "no_tool_call_candidates": 0,
+          "empty_inbox": 0,
+          "status_only_turns": 0,
+          "models": []
+        },
+        "continuation-6h": {
+          "requests": 37,
+          "turns": 6,
+          "partial_turns": 0,
+          "tool_calls": 61,
+          "crew_tool_calls": 31,
+          "active": true,
+          "no_tool_call_turns": 0,
+          "no_tool_call_candidates": 0,
+          "empty_inbox": 2,
+          "status_only_turns": 2,
+          "models": [
+            "gpt-6-astra"
+          ]
+        }
+      }
+    },
+    {
+      "file": "~/.codex/sessions/2026/10/08/rollout-2026-10-08T10-19-28-01a11c19-17aa-7872-ad51-b4342e634e8f.jsonl",
+      "native_session_id": "01a11c19-17aa-7872-ad51-b4342e634e8f",
+      "agent_id": "scheduler",
+      "runtime": "codex",
+      "source_sha256": "61eada47ccedfc6267fbc62ba70d4d02b4ac8245996224f6fcf4e85ed210f148",
+      "source_bytes": 2531614,
+      "source_lines": 466,
+      "malformed_lines": 0,
+      "snapshot": {
+        "size_at_start": 2531614,
+        "size_at_end": 2531614,
+        "changed_during_read": false
+      },
+      "windows": {
+        "original-cut": {
+          "requests": 0,
+          "turns": 0,
+          "partial_turns": 0,
+          "tool_calls": 0,
+          "crew_tool_calls": 0,
+          "active": false,
+          "no_tool_call_turns": 0,
+          "no_tool_call_candidates": 0,
+          "empty_inbox": 0,
+          "status_only_turns": 0,
+          "models": []
+        },
+        "pre-cut-6h": {
+          "requests": 0,
+          "turns": 0,
+          "partial_turns": 0,
+          "tool_calls": 0,
+          "crew_tool_calls": 0,
+          "active": false,
+          "no_tool_call_turns": 0,
+          "no_tool_call_candidates": 0,
+          "empty_inbox": 0,
+          "status_only_turns": 0,
+          "models": []
+        },
+        "continuation-6h": {
+          "requests": 35,
+          "turns": 9,
+          "partial_turns": 0,
+          "tool_calls": 75,
+          "crew_tool_calls": 27,
+          "active": true,
+          "no_tool_call_turns": 1,
+          "no_tool_call_candidates": 0,
+          "empty_inbox": 0,
+          "status_only_turns": 1,
+          "models": [
+            "gpt-6.1-sol"
+          ]
+        }
+      }
+    }
+  ],
+  "limits": [
+    "Both six-hour windows used the same pre-D4/pre-D1 live daemon; this is not a before/after fix comparison.",
+    "Cohort session counts in turns.mjs include all discovered files; active_files requires at least one selected turn, call or usage request.",
+    "Candidates selected by tool names and message wrappers may be legitimate work. Patterns overlap; do not sum their counts.",
+    "Daemon generation events, native inputs and native turn openings measure different stages and are not one-to-one.",
+    "No-model-response and partial turns stay visible; runtime/model/workload mix differs.",
+    "The source-provenance pass is separate from the three CLI runs; recomputed per-window counters were asserted equal."
+  ]
+}

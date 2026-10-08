@@ -192,3 +192,17 @@ fn busy_store_is_bounded_and_interrupted_publication_recovers() {
     assert_eq!(store.get(&reference).unwrap().stdout, capture().stdout);
     assert!(!pending.exists());
 }
+
+#[test]
+fn completed_operation_unlocks_even_if_an_inherited_description_still_exists() {
+    let (_dir, root, scope) = fixture();
+    let store = Store::open(&root, scope.clone()).unwrap();
+    let reference = store.put(&capture()).unwrap();
+    // try_clone and fork both retain the same open file description. This
+    // exercises its lifetime deterministically without forking a test process.
+    let inherited = store._lock.try_clone().unwrap();
+    drop(store);
+    let next = Store::open(&root, scope).unwrap();
+    assert_eq!(next.get(&reference).unwrap().stdout, capture().stdout);
+    drop(inherited);
+}
