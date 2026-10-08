@@ -31,6 +31,20 @@ pub enum BusError {
     Storage(#[from] anyhow::Error),
 }
 
+/// Shared preflight for messages prepared inside a feature transaction.
+pub(crate) fn check_message_body(body: &str, limit: usize) -> Result<(), BusError> {
+    if body.trim().is_empty() {
+        return Err(BusError::Empty);
+    }
+    if body.len() > limit {
+        return Err(BusError::TooLarge {
+            size: body.len(),
+            limit,
+        });
+    }
+    Ok(())
+}
+
 /// A message as submitted, before the bus assigns id and timestamp.
 #[derive(Clone, Debug)]
 pub struct NewMessage {
@@ -221,16 +235,8 @@ impl LocalBus {
         recipients: Vec<String>,
         task: Option<&Task>,
     ) -> Result<SendOutcome, BusError> {
-        if new.body.trim().is_empty() {
-            return Err(BusError::Empty);
-        }
         let limit = self.max_bytes.load(Ordering::Relaxed);
-        if new.body.len() > limit {
-            return Err(BusError::TooLarge {
-                size: new.body.len(),
-                limit,
-            });
-        }
+        check_message_body(&new.body, limit)?;
         if recipients.is_empty() && new.to != BROADCAST {
             return Err(BusError::NoRecipients);
         }
