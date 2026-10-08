@@ -143,8 +143,14 @@ card executes. Defaults to the executing card, otherwise the latest started wait
         ),
         tool(
             "tasks_list",
-            "Show the board: every task with status, assignee, dependencies and artifacts.",
-            object(json!({}), &[]),
+            "Show the board: every task that is not done in full, with status, assignee, \
+dependencies and artifacts; then each done task on one line (id, assignee, title, latest commit).",
+            object(
+                json!({
+                    "done": { "type": "boolean", "description": "Show done tasks in full too", "default": false },
+                }),
+                &[],
+            ),
             true,
         ),
         tool(
@@ -462,6 +468,16 @@ fn opt_str(args: &Value, key: &str) -> Option<String> {
 
 /// A list of names: an array of strings, or one string (a model may send
 /// either); None when left out.
+/// `tasks_list`'s `done` argument: whether done cards are shown in full.
+/// Anything but true, false or nothing is refused rather than read as false.
+fn done_in_full(args: &Value) -> Result<bool, String> {
+    match args.get("done") {
+        None | Some(Value::Null) => Ok(false),
+        Some(Value::Bool(done)) => Ok(*done),
+        Some(_) => Err("done must be true or false".into()),
+    }
+}
+
 /// The `toolbox` argument: bundle names, as a list or one comma-separated
 /// string. Anything else is refused rather than dropped, so an attempt to
 /// define items never passes as "no choice".
@@ -671,44 +687,113 @@ pub fn render_agents(agents: &[Agent]) -> String {
     out
 }
 
+/// Every card in full: status, assignee, dependencies, reviewer, note,
+/// result and artifacts.
 pub fn render_tasks(tasks: &[Task]) -> String {
     let mut out = String::new();
     for t in tasks {
-        out.push_str(&format!(
-            "{} [{}] {} — {}",
-            t.id,
-            t.status,
-            t.assigned_agent.as_deref().unwrap_or("unassigned"),
-            t.title
-        ));
-        if !t.dependencies.is_empty() {
-            out.push_str(&format!(" (after {})", t.dependencies.join(", ")));
-        }
-        if let Some(reviewer) = &t.reviewer {
-            out.push_str(&format!(" (reviewer {reviewer})"));
-        }
-        if let Some(note) = &t.note {
-            out.push_str(&format!(" — {}", truncate_chars(&one_line(note), 100)));
-        }
-        out.push('\n');
-        if let Some(result) = &t.result {
-            out.push_str(&format!(
-                "    result: {}\n",
-                truncate_chars(&one_line(result), 200)
-            ));
-        }
-        for a in &t.artifacts {
-            out.push_str(&format!("    {} {}", a.kind, a.value));
-            if !a.description.is_empty() {
-                out.push_str(&format!(" — {}", a.description));
-            }
-            out.push('\n');
-        }
+        render_task(&mut out, t);
     }
     if out.is_empty() {
         out.push_str("(no tasks)\n");
     }
     out
+}
+
+/// What `tasks_list` shows. Every card that is not done is printed in full,
+/// as [`render_tasks`] prints it; then each done card on one line: id,
+/// assignee, title and its latest commit. A done card is shortened, never
+/// left out, and `done_in_full` prints the whole board in full. Done cards
+/// are most of a long session's board, and each one's result and commits
+/// made it tens of kilobytes (notes/turn-efficiency.md, 2a).
+pub fn render_board(tasks: &[Task], done_in_full: bool) -> String {
+    let (done, open): (Vec<&Task>, Vec<&Task>) = tasks
+        .iter()
+        .partition(|t| t.status == crew_core::TaskStatus::Done);
+    if done_in_full || done.is_empty() {
+        return render_tasks(tasks);
+    }
+    let mut out = String::new();
+    for t in open {
+        render_task(&mut out, t);
+    }
+    if !out.is_empty() {
+        out.push('\n');
+    }
+    out.push_str(&format!(
+        "{} done task(s), one line each; task_get(id) reads one, tasks_list(done: true) shows \
+them in full:\n",
+        done.len()
+    ));
+    for t in done {
+        out.push_str(&format!(
+            "{} {} — {}",
+            t.id,
+            t.assigned_agent.as_deref().unwrap_or("unassigned"),
+            truncate_chars(&one_line(&t.title), 120)
+        ));
+        let commits: Vec<&str> = t
+            .artifacts
+            .iter()
+            .filter(|a| a.kind == "commit")
+            .map(|a| a.value.as_str())
+            .collect();
+        match commits.as_slice() {
+            [] => {}
+            [one] => out.push_str(&format!(" · commit {}", short_commit(one))),
+            [.., last] => out.push_str(&format!(
+                " · {} commits, last {}",
+                commits.len(),
+                short_commit(last)
+            )),
+        }
+        out.push('\n');
+    }
+    out
+}
+
+/// A commit id as a done card's line shows it: its first 8 characters.
+fn short_commit(value: &str) -> String {
+    let id = value.split_whitespace().next().unwrap_or_default();
+    if id.chars().all(|c| c.is_ascii_hexdigit()) {
+        id.chars().take(8).collect()
+    } else {
+        truncate_chars(&one_line(value), 40)
+    }
+}
+
+/// One card in full, as `render_tasks` prints it.
+fn render_task(out: &mut String, t: &Task) {
+    out.push_str(&format!(
+        "{} [{}] {} — {}",
+        t.id,
+        t.status,
+        t.assigned_agent.as_deref().unwrap_or("unassigned"),
+        t.title
+    ));
+    if !t.dependencies.is_empty() {
+        out.push_str(&format!(" (after {})", t.dependencies.join(", ")));
+    }
+    if let Some(reviewer) = &t.reviewer {
+        out.push_str(&format!(" (reviewer {reviewer})"));
+    }
+    if let Some(note) = &t.note {
+        out.push_str(&format!(" — {}", truncate_chars(&one_line(note), 100)));
+    }
+    out.push('\n');
+    if let Some(result) = &t.result {
+        out.push_str(&format!(
+            "    result: {}\n",
+            truncate_chars(&one_line(result), 200)
+        ));
+    }
+    for a in &t.artifacts {
+        out.push_str(&format!("    {} {}", a.kind, a.value));
+        if !a.description.is_empty() {
+            out.push_str(&format!(" — {}", a.description));
+        }
+        out.push('\n');
+    }
 }
 
 /// A task's card in full, for whoever works on it or refers to it.
@@ -964,8 +1049,9 @@ pub fn call(client: &mut Client, name: &str, args: &Value) -> Result<ToolOutput,
             out(format!("Status set to {}.", agent.status), raw)
         }
         "tasks_list" => {
+            let done = done_in_full(args)?;
             let (tasks, raw): (Vec<Task>, _) = rpc(client, Call::TasksList)?;
-            out(render_tasks(&tasks), raw)
+            out(render_board(&tasks, done), raw)
         }
         "task_get" => {
             let (card, raw): (TaskCard, _) = rpc(
@@ -1470,6 +1556,147 @@ mod tests {
         assert!(defs
             .iter()
             .any(|d| d.orchestrator_only && d.name == "operator_ask"));
+    }
+
+    fn board_card(id: &str, status: &str, result: Option<&str>, commits: usize) -> Task {
+        let artifacts: Vec<Value> = (0..commits)
+            .map(|n| {
+                json!({ "kind": "commit", "value": format!("{n:x}{}", "a".repeat(39)),
+                        "description": "Commit message ".repeat(8) })
+            })
+            .chain([json!({ "kind": "file", "value": "notes/plan.md" })])
+            .collect();
+        serde_json::from_value(json!({
+            "id": id, "title": format!("Card {id}"), "status": status,
+            "assigned_agent": "builder", "dependencies": ["base"], "reviewer": "checker",
+            "note": "on schema", "result": result, "artifacts": artifacts,
+            "created_at": 0,
+        }))
+        .unwrap()
+    }
+
+    /// The full board is what it was before the compact view: every card
+    /// with its dependencies, reviewer, note, result and artifacts.
+    #[test]
+    fn the_full_board_is_unchanged() {
+        let tasks = [
+            board_card("open", "working", None, 0),
+            board_card("shipped", "done", Some("Landed\nwith tests."), 1),
+        ];
+        let commit = format!("0{}", "a".repeat(39));
+        let message = "Commit message ".repeat(8);
+        let expected = format!(
+            "open [working] builder — Card open (after base) (reviewer checker) — on schema
+    file notes/plan.md
+shipped [done] builder — Card shipped (after base) (reviewer checker) — on schema
+    result: Landed with tests.
+    commit {commit} — {message}
+    file notes/plan.md
+"
+        );
+        assert_eq!(render_tasks(&tasks), expected);
+        assert_eq!(render_board(&tasks, true), expected);
+        assert_eq!(render_tasks(&[]), "(no tasks)\n");
+        assert_eq!(render_board(&[], false), "(no tasks)\n");
+    }
+
+    #[test]
+    fn done_cards_are_one_line_each_unless_asked_for_in_full() {
+        let tasks = [
+            board_card("first", "done", Some("Merged."), 3),
+            board_card("open-a", "working", None, 1),
+            board_card("second", "done", None, 0),
+            board_card("open-b", "waiting", None, 0),
+            board_card("failed", "failed", Some("Could not build."), 0),
+            board_card("third", "done", Some("Merged too."), 1),
+            board_card("open-c", "review", None, 0),
+        ];
+        let compact = render_board(&tasks, false);
+        let open: Vec<Task> = tasks
+            .iter()
+            .filter(|t| t.status != crew_core::TaskStatus::Done)
+            .cloned()
+            .collect();
+        // Every card that is not done (failed included), in full and in
+        // board order, then each done card on one line.
+        let expected = format!(
+            "{}\n3 done task(s), one line each; task_get(id) reads one, tasks_list(done: true) \
+shows them in full:
+first builder — Card first · 3 commits, last 2aaaaaaa
+second builder — Card second
+third builder — Card third · commit 0aaaaaaa
+",
+            render_tasks(&open)
+        );
+        assert_eq!(compact, expected);
+        // Without done cards there is nothing to shorten.
+        assert_eq!(render_board(&open, false), render_tasks(&open));
+        // Only done cards: no open section.
+        let done = [board_card("only", "done", Some("Merged."), 1)];
+        assert_eq!(
+            render_board(&done, false),
+            "1 done task(s), one line each; task_get(id) reads one, tasks_list(done: true) \
+shows them in full:\nonly builder — Card only · commit 0aaaaaaa\n"
+        );
+    }
+
+    /// On a 100-card board, 90 of them done with long results and many
+    /// commits, the done cards cost one short line each.
+    #[test]
+    fn a_long_board_stays_small() {
+        let result = "A long result that goes on. ".repeat(80);
+        let mut tasks: Vec<Task> = (0..90)
+            .map(|n| board_card(&format!("done-{n:02}"), "done", Some(&result), 12))
+            .collect();
+        tasks.extend((0..10).map(|n| board_card(&format!("open-{n:02}"), "working", None, 1)));
+        let full = render_board(&tasks, true);
+        let compact = render_board(&tasks, false);
+        let open = render_tasks(&tasks[90..]);
+        assert!(compact.starts_with(&open));
+        let done_lines: Vec<&str> = compact[open.len()..].lines().skip(2).collect();
+        assert_eq!(done_lines.len(), 90);
+        for (n, line) in done_lines.iter().enumerate() {
+            assert!(
+                line.starts_with(&format!("done-{n:02} builder — ")),
+                "{line}"
+            );
+            assert!(line.len() <= 80, "{line}");
+        }
+        assert!(
+            compact.len() < open.len() + 90 * 80 + 200,
+            "{}",
+            compact.len()
+        );
+        assert!(
+            full.len() > 20 * compact.len(),
+            "{} vs {}",
+            full.len(),
+            compact.len()
+        );
+        // A long title is cut, still on one line.
+        let mut long = board_card("long", "done", None, 0);
+        long.title = "word ".repeat(100);
+        let line = render_board(&[long], false);
+        assert_eq!(line.lines().count(), 2);
+        assert!(line.lines().nth(1).unwrap().chars().count() <= 140);
+    }
+
+    #[test]
+    fn tasks_list_takes_only_a_true_or_false_done() {
+        let defs = definitions();
+        let tasks = defs.iter().find(|d| d.name == "tasks_list").unwrap();
+        assert_eq!(tasks.schema["properties"]["done"]["type"], "boolean");
+        assert!(tasks.schema["required"].as_array().unwrap().is_empty());
+        assert_eq!(done_in_full(&json!({})), Ok(false));
+        assert_eq!(done_in_full(&json!({ "done": null })), Ok(false));
+        assert_eq!(done_in_full(&json!({ "done": false })), Ok(false));
+        assert_eq!(done_in_full(&json!({ "done": true })), Ok(true));
+        for wrong in [json!("true"), json!(1), json!(["all"])] {
+            assert_eq!(
+                done_in_full(&json!({ "done": wrong })),
+                Err("done must be true or false".to_string())
+            );
+        }
     }
 
     #[test]
