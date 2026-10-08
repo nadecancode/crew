@@ -2,6 +2,7 @@
 //! to the daemon; public RPC records are the frozen crew-protocol Docs types.
 //! This service never sends agent messages or invokes snapshotting VCS commands.
 
+pub mod assets;
 pub mod config;
 pub mod markdown;
 pub mod source;
