@@ -913,6 +913,89 @@ mod tests {
     }
 
     #[test]
+    fn the_extension_names_each_toolbox_servers_pinned_tools_in_name_order() {
+        use crate::agents::toolbox::RuntimeToolbox;
+        use crew_core::toolbox::{McpServer, Origin, ResolvedItem};
+
+        let dir = tempfile::tempdir().unwrap();
+        let agent = agent(dir.path());
+        let identity = dir.path().join("identity.json");
+        let endpoint = Endpoint::default();
+        // Pinned as the daemon pins them: tools sorted by name.
+        let pin = |name: &str, tools: &[&str]| {
+            let listing = json!({
+                "initialize": { "protocolVersion": "2025-06-18", "capabilities": { "tools": {} } },
+                "tools": tools.iter().map(|tool| json!({ "name": tool, "inputSchema": { "type": "object" } })).collect::<Vec<_>>(),
+            });
+            crate::mcp::proxy::pin(dir.path(), name, "definition", &listing, false).unwrap();
+        };
+        pin("alpha", &["zeta", "beta"]);
+        pin("beta-x", &[]);
+        let mut toolbox = Resolved::default();
+        for (name, required) in [("alpha", false), ("beta-x", true), ("gamma", false)] {
+            toolbox.items.insert(
+                ItemRef::new(ItemKind::Mcp, name),
+                ResolvedItem {
+                    item: Item::Mcp(McpServer {
+                        command: vec!["server".into()],
+                        required,
+                        ..McpServer::default()
+                    }),
+                    origin: Origin::Member,
+                },
+            );
+        }
+        let settings = AgentSettings {
+            toolbox,
+            toolbox_launch: Some(RuntimeToolbox {
+                // gamma has no snapshot: it lists nothing to wait for.
+                servers: vec!["alpha".into(), "beta-x".into(), "gamma".into()],
+                ..RuntimeToolbox::default()
+            }),
+            ..AgentSettings::default()
+        };
+        let launch = |settings: &AgentSettings| {
+            PiRuntime
+                .launch(&LaunchContext {
+                    agent: &agent,
+                    settings,
+                    crew_bin: Path::new("/opt/crew"),
+                    agent_dir: dir.path(),
+                    identity_path: &identity,
+                    briefing: "be helpful",
+                    resume: false,
+                    endpoint: &endpoint,
+                    long_context: false,
+                    private_home: None,
+                })
+                .unwrap();
+            std::fs::read_to_string(dir.path().join(EXTENSION_FILE)).unwrap()
+        };
+        let source = launch(&settings);
+        let line = source
+            .lines()
+            .find(|line| line.starts_with("const TOOLBOX_SERVERS"))
+            .unwrap();
+        let servers: Value =
+            serde_json::from_str(line.split_once(" = ").unwrap().1).unwrap();
+        assert_eq!(
+            servers,
+            json!([
+                { "name": "alpha", "required": false, "tools": ["beta", "zeta"] },
+                { "name": "beta-x", "required": true, "tools": [] },
+                { "name": "gamma", "required": false, "tools": [] },
+            ])
+        );
+        assert!(!source.contains("__TOOLBOX_SERVERS__"));
+        // Without a toolbox, crew's own server alone.
+        let source = launch(&AgentSettings::default());
+        assert!(
+            source.contains("const TOOLBOX_SERVERS: ToolboxServer[] = []\n"),
+            "{source}"
+        );
+    }
+
+    #[test]
     fn another_agents_pi_is_told_apart_from_pi() {
         let dir = tempfile::tempdir().unwrap();
         let script = |name: &str, help: &str| {
@@ -1053,6 +1136,30 @@ mod tests {
         );
         assert_eq!(rt.on_hook("compacted", &json!({})), vec![Signal::Compacted]);
         assert_eq!(rt.on_hook("exiting", &json!({})), vec![Signal::Exiting]);
+        // A toolbox server the session went on without, or ended over.
+        assert_eq!(
+            rt.on_hook(
+                "toolbox-failed",
+                &json!({ "server": "docs", "detail": "docs did not list its tools within 10 s" })
+            ),
+            vec![Signal::ToolboxFailed {
+                server: "docs".into(),
+                detail: "docs did not list its tools within 10 s".into(),
+                ended: false
+            }]
+        );
+        assert_eq!(
+            rt.on_hook(
+                "toolbox-failed",
+                &json!({ "server": "github", "detail": "gone", "ended": true })
+            ),
+            vec![Signal::ToolboxFailed {
+                server: "github".into(),
+                detail: "gone".into(),
+                ended: true
+            }]
+        );
+        assert!(rt.on_hook("toolbox-failed", &json!({ "detail": "x" })).is_empty());
         assert_eq!(
             rt.compact_command(Some("the plan")).as_deref(),
             Some("/compact")
