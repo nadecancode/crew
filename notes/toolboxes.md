@@ -1338,31 +1338,73 @@ server.
 
 ### Open items
 
-**Probes to run** (graph's `capability-probes` card). Each probe either
-confirms its cell or turns it into a Cannot be excluded or Not available
-entry. No cell may be implemented as Active or Not used on an unconfirmed
-mechanism.
+**Settled by the capability probes** (§Current state, Capability probes
+addendum, approved m-1389ffcc2a3f). They cover Claude Code 2.1.291, Codex
+0.159.0 and pi 1.1.0, and every result below was observed natively:
 
-- Claude Code:
-  - `project` alone (without `local`);
-  - project exclusion.
+- **Claude Code.**
+  - `--setting-sources project,local` excludes user skills, subagents,
+    memory, hooks and user-enabled plugins.
+  - A selected `--plugin-dir` keeps its skill, subagent and hook; an empty
+    private `CLAUDE_CONFIG_DIR` gives the same result.
+  - A plugin's bundled MCP server does not start under `--strict-mcp-config`.
+  - The selected catalog lines are byte-identical across plugin directories,
+    and no request body contains the plugin root path.
+- **Codex.**
+  - MCP tables merge; only `enabled=false` disables a server.
+  - Skills are disabled by exact `SKILL.md` path. `$CODEX_HOME/skills` is
+    scanned.
+  - The app-server's `skills/extraRoots/set` adds roots without removing any.
+  - `features.hooks=false` removes all hooks; `hooks={}` removes none.
+  - Native agent TOML files appear in `spawn_agent`;
+    `features.multi_agent=false` removes the whole spawn surface.
+  - A private `CODEX_HOME` removes Codex-home sources but keeps
+    `HOME/.agents/skills` and trusted project sources.
+- **pi 1.1.0.**
+  - `--no-skills --skill` loads only the selected skills.
+  - `--no-extensions` removes native MCP; `-e builtin:mcp` restores it with
+    the ambient servers. `--no-mcp` also removes crew's server, and
+    `--no-approve` removes project MCP and skills.
+  - Combined with a private `PI_CODING_AGENT_DIR`, those flags give the
+    closed fixture route.
+  - Neither user nor project Markdown agents load, and pi has no native
+    subagent tool.
+
+**Findings the slices must carry.** The probes confirm the mapping above with
+these qualifications; the spec cells stand.
+
+- **pi tool order.** The order of tools across MCP servers varies between
+  launches with the same servers (`ambient, crew, project` versus
+  `ambient, project, crew`), because each connection registers its tools from
+  its own callback. The proxy's sorting and pinning (rule 5) fix the order and
+  content within each server. They do not fix the order across servers. Slice
+  2 and `cache-design` must either register toolbox servers through one crew
+  connection, or measure the cross-server order on pi before claiming rule 2a
+  there.
+- **Login continuity.** The closed routes for Codex (private `CODEX_HOME`)
+  and pi (private `PI_CODING_AGENT_DIR`) also move authentication and session
+  storage. They are the sandboxed mappings. They are not an unsandboxed
+  `operator: none` route that keeps an existing login, which is why those
+  cells say Cannot be excluded.
+- **No ordering of hooks.** Neither Claude Code nor Codex promises an order
+  between crew's hooks and a toolbox hook. The spec already says alongside,
+  not after.
+- **Not covered.** The crew sandbox, enterprise, managed and account-synced
+  components, resumed model state and provider cache hits are not covered by
+  the probes. They stay with the implementation slices and `cache-bench`
+  (T12, T16, T19).
+
+**Probes still to run.** Each one confirms its cell or turns it into a Cannot
+be excluded or Not available entry. No cell may be implemented as Active or
+Not used on an unconfirmed mechanism.
+
+- Claude Code: `--setting-sources project` alone (without `local`), and
+  project exclusion (dropping `project`).
 - Codex:
   - whether `codex mcp list --json` reports plugin-bundled servers;
-  - whether the TUI session sees app-server skill roots;
+  - whether the TUI session sees skill roots set on its app-server;
   - `~/.codex/AGENTS.md` unsandboxed.
-- pi 1.1.0:
-  - instruction files;
-  - packages.
-
-Already settled by graph's probes and folded in above:
-
-- Claude Code: user sources, user plugins, plugin MCP under strict loading,
-  selected skill, subagent and hook through `--plugin-dir`, catalog lines
-  free of the plugin directory path.
-- Codex: MCP merge, skill paths, app-server skill roots, `features.hooks`,
-  `features.multi_agent`.
-- pi 1.1.0: skills, extensions and native MCP, `--no-approve`, the closed
-  sandbox route, no native subagents.
+- pi 1.1.0: instruction files, and packages under `--no-extensions`.
 
 **Decided: personal instructions under `none`** (orchestrator, m-dd4748765038).
 `inherit.operator: none` keeps the operator's personal instructions (user
