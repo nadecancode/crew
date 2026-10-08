@@ -178,35 +178,12 @@ pub(crate) fn authorize(
     Ok(())
 }
 
+// Keep the v6 grant catalog stable: old native libraries cap it at 31 entries.
+// Feature support is negotiated after authentication, under these same tiers.
 pub(crate) fn allowed_actions(capabilities: &[Capability]) -> Vec<String> {
     let mut actions = Vec::new();
     if capabilities.contains(&Capability::Read) {
         actions.extend([
-            "features_negotiate",
-            "epics_list",
-            "epic_get",
-            "tasks_query",
-            "task_get_scoped",
-            "aside_members",
-            "aside_list",
-            "aside_get",
-            "aside_watch",
-            "aside_unwatch",
-            "docs_index",
-            "docs_read",
-            "docs_asset",
-            "docs_history",
-            "docs_diff",
-            "docs_watch",
-            "docs_unwatch",
-            "usage_summary",
-            "usage_series",
-            "usage_breakdown",
-            "usage_observations",
-            "usage_runs",
-            "usage_prices",
-            "usage_watch",
-            "usage_unwatch",
             "snapshot",
             "subscribe",
             "agents_list",
@@ -224,9 +201,6 @@ pub(crate) fn allowed_actions(capabilities: &[Capability]) -> Vec<String> {
     }
     if capabilities.contains(&Capability::Control) {
         actions.extend([
-            "aside_ask",
-            "aside_cancel",
-            "aside_remove",
             "send",
             "answer",
             "agent_pause",
@@ -249,6 +223,17 @@ pub(crate) fn allowed_actions(capabilities: &[Capability]) -> Vec<String> {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn legacy_grant_catalog_remains_byte_identical_for_old_native_libraries() {
+        // Captured from landed P1 fbe243af. Old native decoders cap this legacy
+        // list at 31; negotiated features never grow the signed base metadata.
+        let expected = include_str!("../../tests/fixtures/native/legacy-actions-v6.json").trim();
+        let actions =
+            super::allowed_actions(&[Capability::Read, Capability::Control, Capability::Terminal]);
+        assert_eq!(serde_json::to_string(&actions).unwrap(), expected);
+        assert!(actions.len() <= 31);
+    }
+
     use super::*;
     use crew_core::rpc::SendParams;
 
