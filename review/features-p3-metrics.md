@@ -14,7 +14,7 @@ through `cf6bf147` (m-ed9123828341), C3b, C4a and C4b through `1b09215f`
 (m-2f030badb193). The final review found Q4 (m-8150704141a0): an estimate
 kept a finite upper bound while spend it could not see (a lost source, an
 aside answer without a usage source) might belong to its scope. That is
-fixed in the final tree, named under Gates.
+fixed in `b5306d03`; the final tree is `5caaf539`.
 
 ## Commits
 
@@ -24,9 +24,10 @@ fixed in the final tree, named under Gates.
 | C2 native adapters | `dfb0308b`, `ac5d0a86`, `acf92c4f`, `c49f1bfa`, `a1991ca1`, `d5d9c40b`, `ff699482`, `82d5c082`, `cf6bf147` | Bounded read-only reader, continuity, Claude and Codex adapters, pi gated, captured CLI homes, lifecycle fixtures and parity. Codex increments identified by their vectors, never revised, with a high-water mark of every vector the stream has shown, across rewrites and restarts; native batches carry their start position. |
 | C3a ledger core | `2c74dca8`, `78fca059`, `82d5c082`, `cf6bf147` | Durable streams, owners, work bindings, observations, seen ids, coverage, aggregates in wide integers, retention, resumed owners; a batch is attributed only when no owner, work or account binding changed anywhere inside it. |
 | C3b cohort and asides | `d5152626`, `b0b41688`, `1b09215f` | First completions, task costs, cohort query, aside execution read-back; late corrections make them unavailable; refused and drained sources leave cohort cost open; earlier spend inside a period's first hour. |
-| C4a queries | `4e78669c`, `3c3dcf37`, `8ba7da72`, `4536c488`, `a41a0504`, `1b09215f`, Q4 fix | Canonical queries over exact half-open ranges (the shared `UsageQuery::resolved_shape`), scoped secondary metrics, bounded cursors, summary, series, breakdown, observations, runs, prices; refused sources as gaps; aside counts unavailable when their range lost detail; estimates open (no finite upper bound) while a lost source of the same kind, or an unsourced aside answer, may hold spend of the scope. |
+| C4a queries | `4e78669c`, `3c3dcf37`, `8ba7da72`, `4536c488`, `a41a0504`, `1b09215f`, `b5306d03` | Canonical queries over exact half-open ranges (the shared `UsageQuery::resolved_shape`), scoped secondary metrics, bounded cursors, summary, series, breakdown, observations, runs, prices; refused sources as gaps; aside counts unavailable when their range lost detail; estimates open (no finite upper bound) while a lost source of the same kind, or an unsourced aside answer, may hold spend of the scope. |
 | C4b service | `18995664`, `1e1d66e3`, `1b09215f` | Collection scheduling, captured homes per registration, monotonic revisions, ready watches, durable source gaps, and every ledger commit and retirement fenced by the stream's persisted registration. |
-| U18 fixtures | `8156e7d5`, `8245c0d0` | `crates/crew/tests/web_usage.rs` generates the web dashboard's `usage.json` from native records through the ledger and queries. |
+| U18 fixtures | `8156e7d5`, `8245c0d0`, `b5306d03`, `5caaf539` | `crates/crew/tests/web_usage.rs` generates the web dashboard's `usage.json` from native records through the ledger and queries: six model-backed members across both runtimes, two with no usage yet, and a separate reply after one's session file goes missing. |
+| Not this card | `d5cf05f9`, reverted by `5caaf539` | The web feature negotiation hook of `features-p5-web-usage`, committed on this branch by mistake; it lands with that card and its rebuilt bundle. `web/` is unchanged by this card. |
 | Main merges | `36d38a27`, `a5960fc4`, `e8399539` | `b591744b`, then `201e7fdc`, no conflicts. |
 
 ## Modules
@@ -115,16 +116,22 @@ Aside sources that run without native session files (Claude
 
 ## Gates
 
-On `8245c0d0` (the final tree), slot D, `CARGO_INCREMENTAL=0`,
+On `5caaf539` (the final tree), slot D, `CARGO_INCREMENTAL=0`,
 `CARGO_TARGET_DIR=target/p3-metrics`, logs in the designer worktree under
-`target/p3-metrics/logs/8245c0d0-*`:
+`target/p3-metrics/logs/5caaf539-*`:
 
-- `cargo test --locked --workspace --no-fail-fast`: 1,498 passed, 0 failed,
-  4 ignored. The crew library: 700 passed, 1 ignored.
+- `cargo test --locked --workspace --no-fail-fast`: 1,499 passed, 1 failed,
+  4 ignored. The failure is
+  `output::store::tests::public_reference_never_selects_another_credential_scope_or_path`
+  with "output store is busy", the intermittent failure of the output store
+  tests from main (`a9979a4e`, reported to the orchestrator); run alone the
+  output store tests pass, 7 of 7 (`5caaf539-output-store-rerun.log`).
 - `cargo test -p crew --lib usage_metrics` from the pinned binary
-  `target/p3-metrics/pinned/8245c0d0-crew-lib-tests` (sha256
-  1f4a800735c6ac1102835cf497c58d26d4bfcc758a8dea16f0a17668cdc9486e):
-  120 passed.
+  `target/p3-metrics/pinned/5caaf539-crew-lib-tests` (sha256
+  5314924012918daec778d90593a189cc0af9bc771aec75955c361ee21357d4a5):
+  122 passed.
+- `cargo test -p crew --test web_usage`: `usage.json` matches (sha256
+  prefix 09f47743f082c3f7).
 - `cargo clippy --locked --workspace --all-targets -- -D warnings`: clean.
 - `cargo fmt --all --check`: clean.
 - `scripts/check-msrv` (Rust 1.82.0, committed lockfile, target
@@ -133,14 +140,10 @@ On `8245c0d0` (the final tree), slot D, `CARGO_INCREMENTAL=0`,
   24 passed; `node scripts/cache/usage-fixtures.mjs --check`: 9 fixtures
   match.
 
-The workspace run on `55bd4da9`, the tree before `8245c0d0`, is kept as
-`target/p3-metrics/logs/55bd4da9-workspace.log`: 1,496 passed, 2 failed.
-`web_wire::every_fixture_file_is_generated` failed because the new
-`usage.json` was not in its list; `8245c0d0` adds it.
-`output::store::tests::busy_store_is_bounded_and_interrupted_publication_recovers`
-failed with "output store is busy", the intermittent failure from main
-(`a9979a4e`) reported to the orchestrator; it passed in the `8245c0d0` run
-and alone (`55bd4da9-output-store-rerun.log`, 7 passed).
+Earlier full runs are kept beside them: `8245c0d0` (1,498 passed),
+`55bd4da9` (the same output store failure, and `web_wire`'s fixture list,
+fixed in `8245c0d0`) and `b5306d03` (`web_bundle` failed: the web hook
+changed `web/` without its bundle; `5caaf539` reverts it).
 
 No `rpc.rs` method was added, so the native-gateway suite is not affected
 by this card.
