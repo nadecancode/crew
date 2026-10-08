@@ -80,6 +80,11 @@ pub struct ActiveToolbox {
     pub servers: BTreeSet<String>,
     pub fingerprint: Option<Fingerprint>,
     pub definition_digest: Option<String>,
+    #[serde(default)]
+    pub scrub_env: BTreeSet<String>,
+    /// The member whose daemon-owned MCP snapshots this record refers to.
+    #[serde(default)]
+    pub snapshot_owner: Option<String>,
     /// A fresh-session restart refreshes the upstream definition snapshots.
     #[serde(default)]
     pub refresh: bool,

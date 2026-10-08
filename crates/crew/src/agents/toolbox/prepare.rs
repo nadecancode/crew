@@ -36,6 +36,7 @@ pub struct Plan {
     pub view: AgentToolbox,
     pub runtime: RuntimeToolbox,
     pub stops: Vec<String>,
+    pub references: BTreeMap<String, ToolboxReferences>,
 }
 
 impl Plan {
@@ -112,6 +113,7 @@ pub fn prepare(
         view: AgentToolbox::default(),
         runtime: RuntimeToolbox::default(),
         stops: Vec::new(),
+        references: BTreeMap::new(),
     };
     plan.runtime.inherit_memory = plan
         .active
@@ -149,7 +151,7 @@ pub fn prepare(
             match &entry.item {
                 Item::Mcp(server) => {
                     let values = references(server)?;
-                    plan.runtime.scrub_env.extend(values.scrub);
+                    plan.runtime.scrub_env.extend(values.scrub.iter().cloned());
                     if values.missing.is_empty() {
                         // Readiness is not claimed until the daemon finishes preflight.
                         plan.active.servers.insert(key.name.clone());
@@ -164,6 +166,7 @@ pub fn prepare(
                         item.status = status(ToolboxItemCode::Needs, &format!("Needs {missing}"));
                         item.detail = Some(format!("{missing} (not set)"));
                     }
+                    plan.references.insert(key.name.clone(), values);
                 }
                 Item::File(file) => {
                     let snapshot =
@@ -243,6 +246,7 @@ pub fn prepare(
     }
     plan.runtime.scrub_env.sort();
     plan.runtime.scrub_env.dedup();
+    plan.active.scrub_env = plan.runtime.scrub_env.iter().cloned().collect();
     plan.view.sources = super::sources::prepare(context, &plan.active.resolved, &mut plan.runtime)?;
     if plan.active.resolved.strict {
         for source in &plan.view.sources {

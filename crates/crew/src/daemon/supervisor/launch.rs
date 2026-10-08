@@ -263,6 +263,41 @@ impl Daemon {
         } else {
             None
         };
+        if private_home.is_some() {
+            crate::agents::home::prepare(
+                agent.runtime,
+                std::os::fd::AsFd::as_fd(&agent_root),
+                &crate::agents::home::Operator::detect(&endpoint),
+            )?;
+        } else {
+            self.stop_sidecar(id);
+        }
+        local.settings.toolbox = if let Some(inherited) = &local.toolbox_inherited {
+            inherited.resolved.clone()
+        } else {
+            team.resolve_toolbox(
+                if agent.orchestrator {
+                    &team.orchestrator.toolbox
+                } else {
+                    &local.spec.toolbox
+                },
+                &format!("agent '{id}'.toolbox"),
+            )?
+        };
+        local.settings.toolbox_launch = Some(
+            self.prepare_toolbox_launch(
+                &agent,
+                local.settings.toolbox.clone(),
+                local.toolbox_inherited.clone(),
+                &endpoint,
+                start == Start::Fresh,
+                since,
+            )
+            .await?,
+        );
+        if stopped() {
+            return Ok(());
+        }
         let mut spec = runtime.launch(&LaunchContext {
             agent: &agent,
             settings: &local.settings,
@@ -324,17 +359,6 @@ impl Daemon {
             }
             None => None,
         };
-        if private_home.is_some() {
-            // D2: written through the agent root descriptor, after the previous
-            // sandboxes were retired (at the start of this launch, under its lock).
-            crate::agents::home::prepare(
-                agent.runtime,
-                std::os::fd::AsFd::as_fd(&agent_root),
-                &crate::agents::home::Operator::detect(&endpoint),
-            )?;
-        } else {
-            self.stop_sidecar(id);
-        }
         if stopped() {
             return Ok(());
         }

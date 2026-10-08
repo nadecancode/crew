@@ -43,14 +43,16 @@ pub(crate) fn agent_settings(
     team: &TeamConfig,
     spec: &AgentSpec,
     orchestrator: bool,
-) -> AgentSettings {
+) -> anyhow::Result<AgentSettings> {
     let mut settings = AgentSettings::resolve(&team.defaults, spec);
+    settings.toolbox =
+        team.resolve_toolbox(&spec.toolbox, &format!("agent '{}'.toolbox", spec.id))?;
     if orchestrator && spec.permission_mode.is_none() {
         // Guarded mode: the orchestrator coordinates and never needs to
         // edit files, and it must never stall on a permission prompt.
         settings.permission_mode = "dontAsk".to_string();
     }
-    settings
+    Ok(settings)
 }
 
 impl Daemon {
