@@ -127,3 +127,10 @@ The subsequent clean merge `8168ef5e` brings delivery main `96320c18` into
 requested serial rerun passed all 89 team tests and all 13 toolbox-launch
 tests with `CREW_TEST_SANDBOX=require`; evidence is
 `target/compact-integrated-delivery.log`. No P3 source changes are included.
+
+The final requested integration is clean merge `1384ef58`, combining
+`9bfdc1f5` with Claude snapshot-refresh main `c958c233`. Required-sandbox
+serial tests passed again: 89 team tests and 14 toolbox-launch tests, including
+the new Claude refresh coverage. Log:
+`target/compact-integrated-claude-final.log`. There are no manual source
+resolutions or P3 changes in this merge.
