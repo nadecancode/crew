@@ -170,8 +170,12 @@ merge. `cargo test --locked --workspace --no-fail-fast` had two failures
 outside this slice: `private_home.rs`'s Codex endpoint-instructions case,
 whose expectation toolbox-launch changes on purpose (operator memory is
 excluded by default), and `web_bundle.rs`'s 600,000-byte budget, which
-main's bundle already exceeds. The final run is recorded with the review
-request.
+main's bundle already exceeds. 
+Final run on `2140276c` (graph's private home correction merged) plus its
+formatting: fmt and strict Clippy clean; `cargo test --locked --workspace
+--no-fail-fast` passed every test binary except `web_bundle.rs`, whose
+failure is main's bundle size (604,322 bytes against 600,000), unchanged
+by this branch.
 
 ## Integration with toolbox-launch
 
