@@ -3,7 +3,7 @@
 //! metadata clear removes that marker; reopening then archives the old run
 //! rather than attaching its feature rows to reused legacy ids.
 
-use std::sync::Arc;
+use std::sync::{Arc, MutexGuard};
 
 use anyhow::{Context, Result};
 use crew_core::rpc::features::{Id, Timestamp};
@@ -71,19 +71,25 @@ impl FeatureDb {
         write: impl FnOnce(&Transaction<'_>) -> std::result::Result<T, RpcError>,
     ) -> std::result::Result<T, RpcError> {
         let mut conn = self.store.conn();
-        let tx = conn
-            .transaction_with_behavior(TransactionBehavior::Immediate)
+        transact(&mut conn, expected_run, write)
+    }
+
+    /// Receipt admissions/removals commit with synchronous=FULL before the
+    /// caller forks paid work or acknowledges the mutation. The previous
+    /// setting is restored under the same writer mutex, including on unwind.
+    pub fn durable_transaction<T>(
+        &self,
+        expected_run: Option<&Id>,
+        write: impl FnOnce(&Transaction<'_>) -> std::result::Result<T, RpcError>,
+    ) -> std::result::Result<T, RpcError> {
+        let conn = self.store.conn();
+        let previous = conn
+            .pragma_query_value(None, "synchronous", |row| row.get::<_, i64>(0))
             .map_err(storage_error)?;
-        if let Some(expected) = expected_run {
-            let actual = current_id(&tx).map_err(storage_error)?;
-            let marker = marker(&tx).map_err(storage_error)?;
-            if actual.as_deref() != Some(expected.as_str()) || marker != actual {
-                return Err(RpcError::new("stale_scope", "workspace run changed"));
-            }
-        }
-        let result = write(&tx)?;
-        tx.commit().map_err(storage_error)?;
-        Ok(result)
+        conn.pragma_update(None, "synchronous", "FULL")
+            .map_err(storage_error)?;
+        let mut durable = DurableConnection { conn, previous };
+        transact(&mut durable.conn, expected_run, write)
     }
 
     pub fn current_run(&self) -> std::result::Result<RunRecord, RpcError> {
@@ -129,6 +135,39 @@ impl FeatureDb {
                 .map_err(|_| invalid_storage())
         })
     }
+}
+
+struct DurableConnection<'a> {
+    conn: MutexGuard<'a, Connection>,
+    previous: i64,
+}
+
+impl Drop for DurableConnection<'_> {
+    fn drop(&mut self) {
+        // Restore failure leaves FULL in place, which preserves durability.
+        // A successful committed receipt must not be reported as rolled back.
+        let _ = self.conn.pragma_update(None, "synchronous", self.previous);
+    }
+}
+
+fn transact<T>(
+    conn: &mut Connection,
+    expected_run: Option<&Id>,
+    write: impl FnOnce(&Transaction<'_>) -> std::result::Result<T, RpcError>,
+) -> std::result::Result<T, RpcError> {
+    let tx = conn
+        .transaction_with_behavior(TransactionBehavior::Immediate)
+        .map_err(storage_error)?;
+    if let Some(expected) = expected_run {
+        let actual = current_id(&tx).map_err(storage_error)?;
+        let marker = marker(&tx).map_err(storage_error)?;
+        if actual.as_deref() != Some(expected.as_str()) || marker != actual {
+            return Err(RpcError::new("stale_scope", "workspace run changed"));
+        }
+    }
+    let result = write(&tx)?;
+    tx.commit().map_err(storage_error)?;
+    Ok(result)
 }
 
 pub fn storage_error(_: rusqlite::Error) -> RpcError {
@@ -372,5 +411,40 @@ mod tests {
                 .unwrap(),
             0
         );
+    }
+
+    #[test]
+    fn durable_receipts_restore_sync_setting_after_commit_error_and_unwind() {
+        let store = Arc::new(SqliteStore::in_memory().unwrap());
+        let db = FeatureDb::new(store);
+        let run = db.current_run().unwrap();
+        let setting = || {
+            db.read(|conn| {
+                conn.pragma_query_value(None, "synchronous", |row| row.get::<_, i64>(0))
+                    .map_err(storage_error)
+            })
+            .unwrap()
+        };
+        let before = setting();
+        db.durable_transaction(Some(&run.id), |tx| {
+            assert_eq!(
+                tx.pragma_query_value(None, "synchronous", |row| row.get::<_, i64>(0))
+                    .map_err(storage_error)?,
+                2
+            );
+            Ok(())
+        })
+        .unwrap();
+        assert_eq!(setting(), before);
+        let failure: Result<(), RpcError> =
+            db.durable_transaction(Some(&run.id), |_| Err(RpcError::conflict("rollback")));
+        assert_eq!(failure.unwrap_err().code, "conflict");
+        assert_eq!(setting(), before);
+        let panic = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            let _: Result<(), RpcError> =
+                db.durable_transaction(Some(&run.id), |_| panic!("fixture unwind"));
+        }));
+        assert!(panic.is_err());
+        assert_eq!(setting(), before);
     }
 }
