@@ -244,6 +244,8 @@ pub enum Push {
         /// boundary and is submitted through the native prompt queue.
         #[serde(default, skip_serializing_if = "std::ops::Not::not")]
         immediate: bool,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        batch_id: Option<String>,
     },
     /// For a listening agent: compact the session at the next turn boundary.
     Compact {
@@ -639,6 +641,7 @@ mod delivery_tests {
                 ids: vec!["m-1".into()],
                 text: "hello".into(),
                 immediate: false,
+                batch_id: None,
             }
         );
         assert_eq!(serde_json::to_value(push).unwrap(), old);
@@ -650,6 +653,7 @@ mod delivery_tests {
             ids: vec!["m-2".into()],
             text: "correction".into(),
             immediate: true,
+            batch_id: None,
         };
         let wire = serde_json::to_value(&push).unwrap();
         assert_eq!(wire["data"]["immediate"], true);

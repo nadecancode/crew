@@ -3,8 +3,8 @@
 // This mod pushes team messages from the crew daemon into this session over
 // the daemon's Unix socket, so nothing has to be typed into the terminal.
 // `crew bridge` holds the socket open and prints one JSON line per delivery;
-// a message that arrives during a turn is folded into that turn, and one that
-// arrives while the session is idle starts a new turn.
+// ordinary traffic waits for a turn boundary; authenticated operator steering
+// alone may be appended to a running turn.
 import type { EngineInterface, Register } from 'claude-code'
 
 const CREW_BIN: string = __CREW_BIN__
@@ -17,7 +17,7 @@ const DELIVER: boolean = __DELIVER__
 const TONE: string | null = __TONE__
 const WAKE = '[crew] Team messages came as your last turn ended (above). Act on them.'
 
-type Delivery = { ids: string[]; text: string }
+type Delivery = { ids: string[]; text: string; immediate: boolean; batch_id?: string }
 type CompactOrder = { instructions?: string }
 
 // The main conversation's running turn, if any.
@@ -33,7 +33,7 @@ let lastStep = ''
 function parse(line: string): Delivery | undefined {
   try {
     const value = JSON.parse(line)
-    if (typeof value.text === 'string' && Array.isArray(value.ids)) return value
+    if (typeof value.text === 'string' && Array.isArray(value.ids) && value.ids.every((id: unknown) => typeof id === 'string')) return { ...value, immediate: value.immediate === true }
   } catch {
     // not a delivery line
   }
@@ -73,7 +73,144 @@ async function compact($: EngineInterface, order: CompactOrder): Promise<void> {
   }
 }
 
+const RECEIPT_MS = 120_000
+const MAX_RECEIPTS = 64
+type Receipt = {
+  batch_id: string; ids: string[]; phase: 'submitted' | 'accepted' | 'consumed' | 'unknown';
+  queued_at: number; accepted_at?: number; observed_at?: number; turn_id?: string;
+  deadline: number; launch?: string; retired?: boolean; ended?: boolean;
+}
+type Pending = Receipt & { text?: string; acceptedText?: string; startText?: string; submission?: Promise<void>; completion?: () => void }
+const receipts = new Map<string, Pending>()
+let nativeSession = ''
+let launch: string | undefined
+let stopped = false
+let ordinary = Promise.resolve()
+let stored = Promise.resolve()
+
+function marker(id: string): string { return '[crew] Delivery batch ' + id + '\n' }
+function hasMarker(text: string, id: string): boolean { return text.startsWith(marker(id)) || text.includes('\n' + marker(id)) }
+
+async function save($: EngineInterface): Promise<void> {
+  // Persist correlation and disposition only. No message or accepted text.
+  const rows = [...receipts.values()].map(({ text, acceptedText, startText, submission, completion, ...row }) => row)
+  stored = stored.catch(() => {}).then(() => $.store.set('delivery:' + nativeSession, rows))
+  await stored
+}
+
+async function notice($: EngineInterface, event: string, row?: Receipt, extra: object = {}): Promise<boolean> {
+  try {
+    const done = await $.process.run([CREW_BIN, 'hook', event, '--identity', IDENTITY,
+      JSON.stringify({ session_id: nativeSession,
+        ...(row === undefined ? {} : { batch_id: row.batch_id, ids: row.ids, phase: row.phase,
+          queued_at: row.queued_at, accepted_at: row.accepted_at, observed_at: row.observed_at,
+          deadline: row.deadline, turn_id: row.turn_id, ended: row.ended, launch: row.launch }), ...extra })])
+    return done.exitCode === 0 && JSON.parse(done.stdout).ok === true
+  } catch { return false }
+}
+
+async function unknown($: EngineInterface, row: Pending, reason: string): Promise<void> {
+  row.phase = 'unknown'
+  await save($)
+  await notice($, 'native-delivery-unknown', row, { reason })
+}
+
+async function consumed($: EngineInterface, row: Pending): Promise<void> {
+  if (!row.turn_id) return
+  // A generated identity is mandatory. Rewriting a body is fine; removing or
+  // changing the identity is not proof that this queue entry started.
+  if (row.acceptedText !== undefined && row.startText !== undefined && row.acceptedText !== row.startText) {
+    await unknown($, row, 'accepted text differs from observed native turn')
+    return
+  }
+  row.phase = 'consumed'
+  await save($)
+  await notice($, 'native-delivery-started', row)
+  row.completion?.()
+}
+
+async function submit($: EngineInterface, delivery: Delivery): Promise<void> {
+  if (delivery.ids.length === 0) {
+    const done = await $.prompt.submit({ text: delivery.text, asUser: true })
+    if (done.drop !== undefined) return
+    return
+  }
+  if (!delivery.batch_id) {
+    // Legacy frames have no offered-attempt identity. They cannot participate
+    // in the upgraded receipt protocol or authenticate steering intent.
+    const done = await $.prompt.submit({ text: delivery.text, asUser: true })
+    if (done.drop === undefined) await $.process.run([CREW_BIN, 'delivered', '--identity', IDENTITY, ...delivery.ids])
+    return
+  }
+  const id = delivery.batch_id
+  let row = receipts.get(id)
+  if (row) {
+    if (row.phase === 'consumed') await notice($, 'native-delivery-started', row)
+    else if (row.accepted_at !== undefined) await notice($, 'native-delivery-accepted', row)
+    else if (row.phase === 'unknown') await notice($, 'native-delivery-unknown', row, { reason: 'submission disposition is unknown' })
+    return // Never create a second native entry for a retained identity.
+  }
+  if ([...receipts.values()].some(r => r.ids.some(x => delivery.ids.includes(x)))) return
+  // Drop consumed bookkeeping first. Unknown admissions remain tombstones.
+  for (const [k, r] of receipts) if (receipts.size >= MAX_RECEIPTS && r.phase === 'consumed') receipts.delete(k)
+  if (receipts.size >= MAX_RECEIPTS) return
+  const now = await $.clock.now()
+  row = { batch_id: id, ids: delivery.ids, phase: 'submitted', queued_at: now,
+    deadline: now + RECEIPT_MS, launch, text: marker(id) + delivery.text }
+  receipts.set(id, row)
+  await save($) // Admission is fenced before invoking the native queue.
+  const current = row
+  const observed = new Promise<void>(resolve => { current.completion = resolve })
+  $.clock.after(RECEIPT_MS, () => {
+    if (current.phase !== 'consumed' && !current.retired) void unknown($, current, 'native receipt deadline elapsed; no withdrawal proof')
+  })
+  const job = (async () => {
+    try {
+      const result = await $.prompt.submit({ text: current.text!, asUser: true })
+      if (current.phase === 'consumed') {
+        current.accepted_at = await $.clock.now()
+        await save($)
+        await notice($, 'native-delivery-accepted', current)
+        return
+      }
+      if (result.drop !== undefined) {
+        current.retired = true
+        await notice($, 'native-delivery-retired', current, { reason: 'native submission refused' })
+        receipts.delete(id); await save($); return
+      }
+      if (!hasMarker(result.text, id)) {
+        await unknown($, current, 'native hook removed delivery identity'); return
+      }
+      current.acceptedText = result.text
+      current.accepted_at = await $.clock.now()
+      if (current.phase !== 'unknown' && current.phase !== 'consumed') current.phase = 'accepted'
+      await save($)
+      await notice($, 'native-delivery-accepted', current)
+      if (current.turn_id) await consumed($, current)
+    } catch {
+      // A throw may follow admission. It is not withdrawal evidence.
+      await unknown($, current, 'native submission rejected with unknown admission')
+    }
+  })()
+  current.submission = job
+  await Promise.race([job, observed])
+}
+
 async function deliver($: EngineInterface, line: string): Promise<void> {
+  try {
+    const control = JSON.parse(line).native_bridge_ready
+    if (control?.ok === true) {
+      launch = typeof control.launch === 'string' ? control.launch : undefined
+      for (const [id, row] of receipts) {
+        if (row.launch !== launch || row.retired) { receipts.delete(id); continue }
+        if (row.accepted_at !== undefined) await notice($, 'native-delivery-accepted', row)
+        if (row.phase === 'unknown') await notice($, 'native-delivery-unknown', row, { reason: 'retained unknown admission' })
+      }
+      await save($)
+      if (turnId) await notice($, 'native-turn-started', undefined, { turn_id: turnId })
+      return
+    }
+  } catch { /* A delivery or compaction line follows. */ }
   const order = parseCompact(line)
   if (order !== undefined) {
     if (turnId !== undefined) compactWhenIdle = order
@@ -81,22 +218,26 @@ async function deliver($: EngineInterface, line: string): Promise<void> {
     return
   }
   const delivery = parse(line)
-  if (delivery === undefined) return
-  let folded = false
-  if (turnId !== undefined) {
-    const appended = await $.session.append({
-      message: { type: 'user', content: [{ type: 'text', text: delivery.text }] },
-    })
-    folded = appended.deny === undefined
-    if (folded) unseen += 1
+  if (!delivery) return
+  if (delivery.immediate && turnId !== undefined) {
+    try {
+      const appended = await $.session.append({ message: { type: 'user', content: [{ type: 'text', text: delivery.text }] } })
+      if (appended.deny === undefined) {
+        unseen++
+        if (delivery.ids.length) {
+          const ack = await $.process.run([CREW_BIN, 'delivered', '--identity', IDENTITY, ...delivery.ids])
+          if (ack.exitCode !== 0) throw new Error('immediate acknowledgement failed')
+        }
+        return
+      }
+    } catch { return }
   }
-  // Idle (or the append was refused): a prompt of its own, queued by the
-  // engine until the session is free. Bare: the "[crew] Message from …"
-  // header says where it is from; Claude Code's frame around a plugin's
-  // prompt would only add its own lines to every message.
-  if (!folded) void $.prompt.submit({ text: delivery.text, asUser: true })
-  if (delivery.ids.length > 0) {
-    await $.process.run([CREW_BIN, 'delivered', '--identity', IDENTITY, ...delivery.ids])
+  if (delivery.immediate) await submit($, delivery)
+  else {
+    // The pump keeps reading while a hook stalls; operator steering can pass.
+    const run = ordinary.then(() => submit($, delivery))
+    ordinary = run.catch(() => {})
+    await run
   }
 }
 
@@ -116,24 +257,37 @@ async function reportUsage(
 }
 
 async function pump($: EngineInterface): Promise<void> {
-  const bridge = $.process.spawn({ argv: [CREW_BIN, 'bridge', '--identity', IDENTITY] })
-  let buffer = ''
-  for await (const chunk of bridge) {
-    if (chunk.stream !== 'stdout') continue
-    buffer += chunk.text
-    let newline = buffer.indexOf('\n')
-    while (newline >= 0) {
-      const line = buffer.slice(0, newline)
-      buffer = buffer.slice(newline + 1)
-      newline = buffer.indexOf('\n')
-      if (line.trim() !== '') await deliver($, line)
-    }
+  while (!stopped) {
+    try {
+      const bridge = $.process.spawn({ argv: [CREW_BIN, 'bridge', '--queue-delivery', '--native-session', nativeSession, '--identity', IDENTITY] })
+      let buffer = ''
+      for await (const chunk of bridge) {
+        if (chunk.stream !== 'stdout') continue
+        buffer += chunk.text
+        let newline = buffer.indexOf('\n')
+        while (newline >= 0) {
+          const line = buffer.slice(0, newline)
+          buffer = buffer.slice(newline + 1)
+          newline = buffer.indexOf('\n')
+          if (line.trim() !== '') void deliver($, line).catch(() => {})
+        }
+      }
+    } catch { /* Durable rows and receipts survive a disconnected bridge. */ }
+    if (!stopped) await $.clock.sleep(500)
   }
 }
 
 export const register: Register = on => {
-  on('turn.start', ($, e, next) => {
+  on('turn.start', async ($, e, next) => {
     turnId = e.turnId
+    await notice($, 'native-turn-started', undefined, { turn_id: e.turnId })
+    const matches = [...receipts.values()].filter(r => !r.retired && r.phase !== 'consumed' && hasMarker(e.text, r.batch_id))
+    for (const row of matches) {
+      row.startText = e.text; row.turn_id = e.turnId; row.observed_at = await $.clock.now()
+      await save($)
+      await notice($, 'native-delivery-observed', row)
+      await consumed($, row)
+    }
     return next(e)
   })
 
@@ -153,6 +307,9 @@ export const register: Register = on => {
 
   on('turn.complete', async ($, e, next) => {
     const done = await next(e)
+    await notice($, 'native-turn-ended', undefined, { turn_id: e.turnId })
+    for (const row of receipts.values()) if (row.turn_id === e.turnId) row.ended = true
+    await save($)
     turnId = undefined
     if (compactWhenIdle !== undefined) {
       const order = compactWhenIdle
@@ -179,8 +336,23 @@ export const register: Register = on => {
     const started = await next(e)
     // A child for the session's life: the loop runs on after this hook
     // returns and ends with the child or with the module.
+    nativeSession = await $.session.id()
+    const saved = await $.store.get('delivery:' + nativeSession)
+    if (Array.isArray(saved)) for (const row of saved.slice(-MAX_RECEIPTS)) {
+      if (typeof row.batch_id === 'string' && Array.isArray(row.ids)) receipts.set(row.batch_id, row)
+    }
     if (DELIVER) void pump($)
     return started
+  })
+
+  on('session.end', async ($, e, next) => {
+    stopped = true
+    for (const row of receipts.values()) if (row.phase !== 'consumed') {
+      row.retired = true
+      await notice($, 'native-delivery-retired', row, { reason: 'native session ended' })
+    }
+    await save($)
+    return next(e)
   })
 
   if (TONE !== null) {

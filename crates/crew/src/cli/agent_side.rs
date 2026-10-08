@@ -105,7 +105,12 @@ pub fn ctl(cmd: CtlCommand) -> Result<()> {
 /// (Claude Code blocks on 2), so the operator sees why the team's tools
 /// fail (notes/binary-pinning.md B8).
 pub fn hook(event: &str, identity_path: Option<&Path>, payload: Option<String>) -> Result<()> {
-    let Ok(identity) = identity(identity_path) else {
+    let strict = crate::daemon::native_hook(event);
+    let loaded = identity(identity_path);
+    if strict && loaded.is_err() {
+        return Err(loaded.unwrap_err());
+    }
+    let Ok(identity) = loaded else {
         return Ok(());
     };
     let payload = match payload {
@@ -123,24 +128,43 @@ pub fn hook(event: &str, identity_path: Option<&Path>, payload: Option<String>) 
     let mut client = match Client::agent(&identity, "hook") {
         Ok((client, _)) => client,
         Err(error) if error.is_protocol_mismatch() => return Err(error.into()),
+        Err(error) if strict => return Err(error.into()),
         Err(_) => return Ok(()),
     };
     let _ = client.set_timeout(Some(Duration::from_secs(5)));
-    let _ = client.call_value(Call::Hook {
+    let result = client.call_value(Call::Hook {
         event: event.to_string(),
         payload,
         // The launch whose process ran the hook, from its environment: a
         // late hook of a replaced launch is then told apart.
         launch: std::env::var("CREW_LAUNCH").ok().filter(|l| !l.is_empty()),
     });
+    if strict {
+        println!("{}", result?);
+    }
     Ok(())
 }
 
 /// Hold the agent's delivery channel open. Each delivery is printed as one
 /// JSON line (`{"ids":[..],"text":".."}`) for the runtime-side mod to inject.
-pub fn bridge(identity_path: Option<&Path>) -> Result<()> {
+pub fn bridge(
+    identity_path: Option<&Path>,
+    queue_delivery: bool,
+    native_session: Option<&str>,
+) -> Result<()> {
     let identity = identity(identity_path)?;
     let (mut client, _) = Client::agent(&identity, "bridge")?;
+    if queue_delivery {
+        let session = native_session
+            .filter(|s| !s.is_empty())
+            .ok_or_else(|| anyhow!("queued delivery requires a native session id"))?;
+        let ready = client.call_value(Call::Hook {
+            event: "native-bridge-ready".into(),
+            payload: json!({ "session_id": session }),
+            launch: std::env::var("CREW_LAUNCH").ok().filter(|s| !s.is_empty()),
+        })?;
+        println!("{}", json!({ "native_bridge_ready": ready }));
+    }
     client.call_value(Call::Listen)?;
     let stdout = std::io::stdout();
     loop {
@@ -154,13 +178,14 @@ pub fn bridge(identity_path: Option<&Path>) -> Result<()> {
                 ids,
                 text,
                 immediate,
+                batch_id,
             }) => {
                 let mut out = stdout.lock();
                 // A closed pipe means the session is gone; so are we.
                 if writeln!(
                     out,
                     "{}",
-                    json!({ "ids": ids, "text": text, "immediate": immediate })
+                    json!({ "ids": ids, "text": text, "immediate": immediate, "batch_id": batch_id })
                 )
                 .is_err()
                     || out.flush().is_err()

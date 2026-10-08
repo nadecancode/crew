@@ -584,6 +584,11 @@ change identity",
                 launch,
             } => {
                 let agent = agent_only(&who)?.to_string();
+                if super::delivery::native_hook(&event) {
+                    return self
+                        .native_delivery_hook(&agent, launch.as_deref(), &event, &payload)
+                        .await;
+                }
                 self.on_hook(&agent, launch.as_deref(), &event, &payload)
                     .await;
                 Ok(json!({ "ok": true }))

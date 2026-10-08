@@ -29,6 +29,7 @@ pub(crate) mod binary;
 mod context;
 mod dashboard;
 mod delivery;
+pub(crate) use delivery::native_hook;
 mod fallback;
 mod gitops;
 mod handlers;
@@ -184,6 +185,12 @@ pub(crate) struct AgentRuntimeState {
     pub spawned_at: i64,
     /// Messages pushed to the agent's listener and not yet confirmed.
     pub in_flight: HashMap<String, i64>,
+    /// The upgraded Claude bridge identifies native turn boundaries itself.
+    pub native_queue_bridge: bool,
+    pub native_session: Option<String>,
+    pub native_turn: Option<String>,
+    pub native_receipts: delivery::native::Book,
+    pub native_receipts_loaded: bool,
     pub last_output_at: i64,
     pub last_activity_push: i64,
     pub dialog_reported: bool,

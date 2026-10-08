@@ -1118,6 +1118,7 @@ mod tests {
             ids: vec![text.into()],
             text: text.into(),
             immediate: false,
+            batch_id: None,
         }
     }
 

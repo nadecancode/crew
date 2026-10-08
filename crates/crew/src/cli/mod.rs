@@ -233,7 +233,15 @@ answers: `crew answer 2`.")]
     },
     /// Hold an agent's delivery channel open and print deliveries as JSON lines
     #[command(hide = true)]
-    Bridge(IdentityArg),
+    Bridge {
+        #[command(flatten)]
+        identity: IdentityArg,
+        /// Native queue receipts and turn identity are available.
+        #[arg(long)]
+        queue_delivery: bool,
+        #[arg(long)]
+        native_session: Option<String>,
+    },
     /// Confirm that messages were injected into the session
     #[command(hide = true)]
     Delivered {
@@ -643,7 +651,15 @@ pub fn run(cli: Cli) -> Result<()> {
             identity,
             payload,
         } => agent_side::hook(&event, identity.identity.as_deref(), payload),
-        Command::Bridge(identity) => agent_side::bridge(identity.identity.as_deref()),
+        Command::Bridge {
+            identity,
+            queue_delivery,
+            native_session,
+        } => agent_side::bridge(
+            identity.identity.as_deref(),
+            queue_delivery,
+            native_session.as_deref(),
+        ),
         Command::Delivered { identity, ids } => {
             agent_side::delivered(identity.identity.as_deref(), ids)
         }

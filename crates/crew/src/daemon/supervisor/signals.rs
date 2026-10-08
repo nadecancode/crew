@@ -30,7 +30,7 @@ impl Daemon {
     /// begin_launch alone for the moment it changes the launch. Neither
     /// waits for the launch lease while holding it, nor does a hook's
     /// handling wait for a launch, so the two cannot wait on each other.
-    fn hook_lease(&self, id: &str) -> std::sync::Arc<tokio::sync::RwLock<()>> {
+    pub(crate) fn hook_lease(&self, id: &str) -> std::sync::Arc<tokio::sync::RwLock<()>> {
         self.hooks
             .lock()
             .unwrap_or_else(|e| e.into_inner())
@@ -178,6 +178,9 @@ impl Daemon {
             }
             Signal::Ready => self.on_ready(id).await,
             Signal::TurnStarted => {
+                if self.model().rt(id).native_queue_bridge {
+                    return;
+                }
                 {
                     let mut model = self.model();
                     let rt = model.rt(id);
@@ -194,6 +197,9 @@ impl Daemon {
                 });
             }
             Signal::TurnEnded => {
+                if self.model().rt(id).native_queue_bridge {
+                    return;
+                }
                 self.model().rt(id).provider_error = None;
                 self.turn_ended(id, now);
             }
@@ -290,7 +296,7 @@ impl Daemon {
     }
 
     /// A turn is over (it completed, or it failed): the agent is at rest.
-    fn turn_ended(&self, id: &str, now: i64) {
+    pub(crate) fn turn_ended(&self, id: &str, now: i64) {
         let (transcript, asked) = {
             let mut model = self.model();
             let rt = model.rt(id);
@@ -371,10 +377,27 @@ impl Daemon {
                 tokio::time::sleep(std::time::Duration::from_millis(250)).await;
             }
             if let Some((_, tx)) = self.listener(id) {
+                let native_queue = self.model().rt(id).native_queue_bridge;
+                let batch_id = if native_queue && !ids.is_empty() {
+                    match self.register_receipt(id, ids.clone(), now_ms()) {
+                        Ok(key) => Some(key),
+                        Err(error) => {
+                            self.emit(
+                                NewEvent::new("daemon", "agent.prompt_failed", error.message)
+                                    .agent(id)
+                                    .warn(),
+                            );
+                            return;
+                        }
+                    }
+                } else {
+                    None
+                };
                 let frame = crew_core::rpc::ServerFrame::push(crew_core::rpc::Push::Deliver {
                     ids: ids.clone(),
                     text: prompt,
                     immediate: false,
+                    batch_id,
                 });
                 if tx.send(frame).await.is_ok() {
                     pending = None;
@@ -382,8 +405,10 @@ impl Daemon {
                     {
                         let mut model = self.model();
                         let rt = model.rt(id);
-                        rt.turn_active = true;
-                        rt.turn_openers.extend(ids.iter().cloned());
+                        if !native_queue {
+                            rt.turn_active = true;
+                            rt.turn_openers.extend(ids.iter().cloned());
+                        }
                         for message in &ids {
                             rt.in_flight.insert(message.clone(), now);
                         }

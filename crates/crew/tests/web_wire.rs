@@ -835,6 +835,7 @@ fn enums_json() {
                     ids: vec![],
                     text: String::new(),
                     immediate: false,
+                    batch_id: None,
                 })),
                 value(ServerFrame::push(Push::Compact { instructions: None })),
                 value(ServerFrame::push(Push::Summary(summary(1)))),
