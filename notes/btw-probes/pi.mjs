@@ -66,11 +66,14 @@ function compare(live, fork) {
   const a = systemText(live), c = systemText(fork);
   let at = 0; while (at < a.length && a[at] === c[at]) at += 1;
   return {
-    tools_identical: same(live.tools, fork.tools),
+    tools_identical: JSON.stringify(live.tools) === JSON.stringify(fork.tools),
     tool_names: (live.tools || []).map(t => t.name),
-    system_identical: same(live.system, fork.system),
+    system_identical: JSON.stringify(live.system) === JSON.stringify(fork.system),
     system_first_difference: a === c ? null : { at, live: a.slice(Math.max(0, at - 60), at + 80), fork: c.slice(Math.max(0, at - 60), at + 80) },
+    // Messages equal once cache markers, which move to the newest message, are
+    // set aside; and equal byte for byte.
     live_messages_repeated: `${common} of ${live.messages.length}`,
+    live_messages_repeated_exact: `${(() => { let n = 0; while (n < live.messages.length && JSON.stringify(live.messages[n]) === JSON.stringify(fork.messages[n])) n += 1; return n; })()} of ${live.messages.length}`,
     params_differing: Object.keys({ ...live, ...fork }).filter(k => !['messages', 'tools', 'system'].includes(k) && !same(live[k], fork[k])),
     fork_tail: fork.messages.slice(common).map(m => `${m.role}: ${JSON.stringify(m.content).slice(0, 160)}`),
   };

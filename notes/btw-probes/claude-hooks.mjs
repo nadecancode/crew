@@ -47,7 +47,7 @@ await run('aside', ['--resume', session, '--fork-session', '--no-session-persist
 const live = last('live-2'), aside = last('aside');
 let common = 0;
 while (common < live.messages.length && plain(live.messages[common]) === plain(aside.messages[common])) common += 1;
-report.aside = { hooks_fired: read(), tools_identical: plain(live.tools) === plain(aside.tools), system_identical: plain(live.system) === plain(aside.system), live_messages_repeated: `${common} of ${live.messages.length}` };
+report.aside = { hooks_fired: read(), tools_identical: JSON.stringify(live.tools) === JSON.stringify(aside.tools), system_identical: JSON.stringify(live.system) === JSON.stringify(aside.system), live_messages_repeated: `${common} of ${live.messages.length}` };
 await stub.close();
 json(path.join(base, 'report.json'), report);
 console.log(JSON.stringify(report, null, 2));

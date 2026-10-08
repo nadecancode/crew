@@ -69,7 +69,34 @@ const report = {
   outputs: outputs.map(o => JSON.stringify(o.output).slice(0, 300)),
   events: aside.out.split('\n').filter(Boolean).map(l => l.slice(0, 220)),
 };
-await stub.close();
 fs.writeFileSync(path.join(base, 'requests.json'), JSON.stringify(stub.requests, null, 2));
 json(path.join(base, 'report.json'), report);
 console.log(JSON.stringify(report, null, 2));
+
+// Review m-8848a6dcb2b3: inherited grants. The member's home allows `touch`
+// by an exec-policy rule and the project trusts everything; with and without
+// `--ignore-rules`, is the write still refused?
+put(path.join(observer, 'rules', 'default.rules'), 'prefix_rule(pattern = ["touch"], decision = "allow")\n');
+const granted = {};
+for (const [name, extra] of [['rules', []], ['ignore-rules', ['--ignore-rules']]]) {
+  const label = `granted-${name}`;
+  fs.rmSync(path.join(work, 'aside-wrote.txt'), { force: true });
+  stub.script(label, [{ name: 'exec_command', input: { cmd: `touch '${path.join(work, 'aside-wrote.txt')}'` } }]);
+  const r = await run(label, observer, ['exec', '--skip-git-repo-check', '--json', '--sandbox', 'read-only', '-c', 'approval_policy="never"', '-c', 'web_search="live"', ...extra, 'fork', '--ephemeral', thread, 'BTW side question.']);
+  const out = stub.requests.filter(q => q.label === label && q.path.includes('/responses')).flatMap(q => q.body.input).filter(i => i.type === 'function_call_output').map(i => JSON.stringify(i.output).slice(0, 160));
+  granted[name] = { exit: r.code, wrote: fs.existsSync(path.join(work, 'aside-wrote.txt')), outputs: [...new Set(out)] };
+}
+json(path.join(base, 'granted.json'), granted);
+console.log(JSON.stringify({ granted }, null, 2));
+const liveBody = stub.requests.filter(q => q.label === 'live' && q.path.includes('/responses')).at(-1).body;
+// An input item without its own top-level id; tools are compared whole.
+const strip = v => JSON.stringify(v && typeof v === 'object' && !Array.isArray(v) ? (({ id, ...rest }) => rest)(v) : v ?? null);
+for (const name of ['rules', 'ignore-rules']) {
+  const body = stub.requests.filter(q => q.label === `granted-${name}` && q.path.includes('/responses'))[0].body;
+  let n = 0; while (n < liveBody.input.length && strip(liveBody.input[n]) === strip(body.input[n])) n += 1;
+  granted[name].vs_live = { tools_identical: JSON.stringify(liveBody.tools) === JSON.stringify(body.tools), instructions_identical: liveBody.instructions === body.instructions, live_items_repeated: `${n} of ${liveBody.input.length}` };
+}
+json(path.join(base, 'granted.json'), granted);
+fs.writeFileSync(path.join(base, 'requests.json'), JSON.stringify(stub.requests, null, 2));
+console.log(JSON.stringify({ granted_vs_live: Object.fromEntries(Object.entries(granted).map(([k, v]) => [k, v.vs_live])) }, null, 2));
+await stub.close();

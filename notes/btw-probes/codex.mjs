@@ -59,7 +59,8 @@ const changed = (a, b) => [...new Set([...Object.keys(a), ...Object.keys(b)])].f
 const events = stdout => stdout.trim().split('\n').map(l => { try { return JSON.parse(l); } catch { return null; } }).filter(Boolean);
 const turns = label => stub.requests.filter(r => r.label === label && r.path.includes('/responses'));
 const last = label => turns(label).at(-1)?.body;
-const strip = v => JSON.parse(JSON.stringify(v ?? null, (k, x) => (['id', 'prompt_cache_key'].includes(k) ? undefined : x)));
+// An input item without its own top-level id; tools and schemas are compared whole.
+const strip = v => (v && typeof v === 'object' && !Array.isArray(v) ? (({ id, ...rest }) => rest)(v) : v);
 const same = (a, b) => JSON.stringify(strip(a)) === JSON.stringify(strip(b));
 function compare(live, fork) {
   if (!live || !fork) return { missing: !live ? 'live' : 'fork' };
@@ -68,7 +69,7 @@ function compare(live, fork) {
   const names = b => (b.tools || []).map(t => t.name || t.type);
   return {
     instructions_identical: live.instructions === fork.instructions,
-    tools_identical: same(live.tools, fork.tools),
+    tools_identical: JSON.stringify(live.tools) === JSON.stringify(fork.tools),
     tool_names: { live: names(live), removed: names(live).filter(n => !names(fork).includes(n)), added: names(fork).filter(n => !names(live).includes(n)) },
     live_items_repeated: `${common} of ${live.input.length}`,
     first_differing_item: common < live.input.length ? JSON.stringify(live.input[common]).slice(0, 400) + '\n  vs ' + JSON.stringify(fork.input[common]).slice(0, 400) : null,

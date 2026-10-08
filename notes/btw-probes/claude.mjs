@@ -99,13 +99,16 @@ function compare(live, fork) {
   const params = Object.keys({ ...live, ...fork }).filter(k => !['messages', 'tools', 'system'].includes(k) && !same(live[k], fork[k]));
   const systemDiff = (live.system || []).map((block, i) => same(block, fork.system?.[i]) ? null : i).filter(i => i !== null);
   return {
-    tools_identical: same(live.tools, fork.tools),
+    tools_identical: JSON.stringify(live.tools) === JSON.stringify(fork.tools),
     tool_names: { live: (live.tools || []).length, fork: (fork.tools || []).length, removed: (live.tools || []).map(t => t.name).filter(n => !(fork.tools || []).some(t => t.name === n)) },
-    system_identical: same(live.system, fork.system),
+    system_identical: JSON.stringify(live.system) === JSON.stringify(fork.system),
     system_blocks_differing: systemDiff,
     live_messages: live.messages.length,
     fork_messages: fork.messages.length,
+    // Messages equal once cache markers, which move to the newest message, are
+    // set aside; and equal byte for byte.
     leading_messages_identical: common,
+    leading_messages_identical_exact: (() => { let n = 0; while (n < live.messages.length && JSON.stringify(live.messages[n]) === JSON.stringify(fork.messages[n])) n += 1; return n; })(),
     params_differing: params,
     fork_last_user: JSON.stringify(fork.messages.at(-1)).slice(0, 300),
   };

@@ -88,13 +88,16 @@ function compare(live, fork) {
   let common = 0;
   while (common < live.messages.length && same(live.messages[common], fork.messages[common])) common += 1;
   return {
-    tools_identical: same(live.tools, fork.tools),
+    tools_identical: JSON.stringify(live.tools) === JSON.stringify(fork.tools),
     tool_names_removed: (live.tools || []).map(t => t.name).filter(n => !(fork.tools || []).some(t => t.name === n)),
     tool_names_added: (fork.tools || []).map(t => t.name).filter(n => !(live.tools || []).some(t => t.name === n)),
-    system_identical: same(live.system, fork.system),
+    system_identical: JSON.stringify(live.system) === JSON.stringify(fork.system),
     // The live request's messages that the fork repeats unchanged; the last
     // live message is the per-request token note, rewritten each turn.
+    // Messages equal once cache markers, which move to the newest message, are
+    // set aside; and equal byte for byte.
     live_messages_repeated: `${common} of ${live.messages.length}`,
+    live_messages_repeated_exact: `${(() => { let n = 0; while (n < live.messages.length && JSON.stringify(live.messages[n]) === JSON.stringify(fork.messages[n])) n += 1; return n; })()} of ${live.messages.length}`,
     params_differing: Object.keys({ ...live, ...fork }).filter(k => !['messages', 'tools', 'system', 'metadata'].includes(k) && !same(live[k], fork[k])),
     fork_tail: fork.messages.slice(common).map(m => `${m.role}: ${JSON.stringify(m.content).slice(0, 160)}`),
   };
