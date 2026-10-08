@@ -463,6 +463,7 @@ fn spawn_commands(
                         operation_id: planned.operation_id,
                         outcome: crew_client::OperationOutcome::NotSent {
                             reason: crew_client::ClientReason {
+                                details: None,
                                 code: "scope_changed".into(),
                                 message: "queued request discarded: scope retired".into(),
                             },
@@ -610,6 +611,7 @@ fn discarded(planned: crate::shared::Planned) -> Reply {
         operation_id: planned.operation_id,
         outcome: crew_client::OperationOutcome::NotSent {
             reason: crew_client::ClientReason {
+                details: None,
                 code: "scope_changed".into(),
                 message: "queued terminal input discarded: scope retired".into(),
             },
@@ -960,6 +962,7 @@ impl Requester {
     fn planned(&mut self, planned: crate::shared::Planned) -> Reply {
         use crew_client::{ClientReason, OperationOutcome};
         let reason = |code: &str, message: String| ClientReason {
+            details: None,
             code: code.into(),
             message,
         };
@@ -1031,6 +1034,7 @@ impl Requester {
                     },
                 },
                 Err(ClientError::Rpc(error)) => OperationOutcome::Rejected {
+                    details: None,
                     code: error.code,
                     message: error.message,
                 },

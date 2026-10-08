@@ -78,6 +78,8 @@ impl Facts {
 
     fn context(&self) -> ActionContext<'_> {
         ActionContext {
+            features: None,
+            feature_watches: &[],
             connection: Some(&self.connection),
             endpoint: self.endpoint,
             workspace: self.workspace,
@@ -109,6 +111,7 @@ fn planner() -> Actions {
 }
 fn why(code: &str) -> ClientReason {
     ClientReason {
+        details: None,
         code: code.into(),
         message: code.into(),
     }
@@ -164,13 +167,13 @@ fn request(decision: &ActionDecision) -> (OperationId, &ClientScope, RequestLane
                 operation_id: id,
                 lane,
                 command,
-            } => Some((*id, scope, *lane, command)),
+            } => Some((*id, scope, lane.clone(), command)),
             _ => None,
         })
         .collect();
     assert_eq!(requests.len(), 1);
     assert_eq!(requests[0].0, operation_id);
-    requests[0]
+    requests[0].clone()
 }
 fn confirmation(decision: &ActionDecision) -> (ConfirmationId, ConfirmationKind) {
     let ActionPlan::Confirm {
@@ -735,6 +738,7 @@ fn send_retries_once_same_logical_id_and_payload_only_after_verified_same_incarn
                 &original,
                 id,
                 OperationOutcome::Rejected {
+                    details: None,
                     code: "invalid".into(),
                     message: "old reply".into()
                 },
@@ -926,6 +930,7 @@ fn timeout_refusal_cancel_and_auth_loss_finish_without_replay() {
             reason: why("not_sent"),
         },
         OperationOutcome::Rejected {
+            details: None,
             code: "forbidden".into(),
             message: "not permitted".into(),
         },
@@ -1465,6 +1470,7 @@ fn native_terminal_input_error_ends_only_captured_attachment_and_never_emits_sec
         ActionUpdate::default()
     );
     let late_error = OperationOutcome::Rejected {
+        details: None,
         code: "unavailable".into(),
         message: "terminal attachment ended".into(),
     };
@@ -1678,6 +1684,7 @@ fn availability_reasons_follow_planner_scope_and_grants_without_synthetic_model_
             &facts.scope(),
             request(&first).0,
             OperationOutcome::Rejected {
+                details: None,
                 code: "invalid".into(),
                 message: "compaction refused".into(),
             },
@@ -2254,6 +2261,7 @@ fn stale_failed_or_ended_attach_cannot_publish_an_identified_success_notice() {
     };
     for outcome in [
         OperationOutcome::Rejected {
+            details: None,
             code: "unavailable".into(),
             message: "terminal unavailable".into(),
         },

@@ -234,6 +234,7 @@ impl Shared {
             ClientInput::Unbind {
                 scope,
                 reason: ClientReason {
+                    details: None,
                     code: "closed".into(),
                     message: "daemon connection closed".into(),
                 },
@@ -375,6 +376,7 @@ impl Shared {
                     operation_id.map_or_else(
                         || ActionPlan::Unavailable {
                             reason: ClientReason {
+                                details: None,
                                 code: "stale_confirmation".into(),
                                 message: "confirmation no longer applies".into(),
                             },
@@ -622,6 +624,7 @@ fn notice_outcome(notice: &OperationNotice) -> OperationOutcome {
         OperationOutcomeKind::Canceled => OperationOutcome::Canceled,
         _ => OperationOutcome::OutcomeUnknown {
             reason: notice.reason.clone().unwrap_or_else(|| ClientReason {
+                details: None,
                 code: "closed".into(),
                 message: "operation retired".into(),
             }),
@@ -797,6 +800,7 @@ mod tests {
                         operation_id: planned.operation_id,
                         outcome: OperationOutcome::OutcomeUnknown {
                             reason: ClientReason {
+                                details: None,
                                 code: "closed".into(),
                                 message: "closed".into(),
                             },
@@ -882,6 +886,7 @@ mod tests {
                 operation_id: planned.operation_id,
                 outcome: OperationOutcome::OutcomeUnknown {
                     reason: ClientReason {
+                        details: None,
                         code: "closed".into(),
                         message: "closed".into(),
                     },

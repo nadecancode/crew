@@ -21,9 +21,13 @@ pub struct AgentView {
     /// A turn is running or a message is on its way to the agent: something
     /// may still happen even if no task is formally "working".
     pub active: bool,
-    /// A runtime turn or input hold (permission, usage limit) still owns
-    /// the session. Parking a card frees its slot only after the turn yields.
+    /// A native turn is active. A turn alone does not occupy a task slot.
     pub turn_active: bool,
+    /// This turn parked a card and must yield before automatic dispatch.
+    pub parking_turn: bool,
+    /// An input hold or a pending parked-card cue takes precedence over new
+    /// work, even when no native turn is active.
+    pub waiting_hold: bool,
     /// About to go back to its own model from a fallback, between tasks: it
     /// is handed no new task until it is back.
     pub homeward: bool,
@@ -120,7 +124,7 @@ pub fn plan(tasks: &[Task], agents: &[AgentView]) -> Vec<Action> {
         .iter()
         .filter(|a| a.runnable && !a.homeward)
         .filter(|a| {
-            !a.turn_active
+            !(a.parking_turn && a.turn_active || a.waiting_hold)
                 || !tasks.iter().any(|t| {
                     t.assigned_agent.as_deref() == Some(&a.id) && t.status == TaskStatus::Waiting
                 })
@@ -262,6 +266,7 @@ mod tests {
 
     fn task(id: &str, agent: Option<&str>, deps: &[&str], status: TaskStatus) -> Task {
         Task {
+            epic: None,
             id: id.into(),
             title: id.into(),
             description: String::new(),
@@ -288,6 +293,8 @@ mod tests {
                 runnable: true,
                 active: false,
                 turn_active: false,
+                parking_turn: false,
+                waiting_hold: false,
                 homeward: false,
             })
             .collect()
@@ -478,6 +485,37 @@ mod tests {
     }
 
     #[test]
+    fn an_active_nonparking_turn_with_waiting_cards_can_take_one_ready_card() {
+        let mut parked = task("parked", Some("x"), &[], TaskStatus::Waiting);
+        parked.started_at = Some(1);
+        let cards = vec![
+            parked,
+            task("next", Some("x"), &[], TaskStatus::Ready),
+            task("later", Some("x"), &[], TaskStatus::Ready),
+        ];
+        let mut views = agents(&["x"]);
+        views[0].turn_active = true;
+        views[0].active = true;
+        assert_eq!(plan(&cards, &views), vec![dispatch("next", "x")]);
+    }
+
+    #[test]
+    fn a_parked_work_input_or_wakeup_hold_still_precedes_ready_work() {
+        let mut parked = task("parked", Some("x"), &[], TaskStatus::Waiting);
+        parked.started_at = Some(1);
+        let cards = vec![parked, task("next", Some("x"), &[], TaskStatus::Ready)];
+        let mut views = agents(&["x"]);
+        views[0].active = true;
+        views[0].waiting_hold = true;
+        for active in [false, true] {
+            views[0].turn_active = active;
+            assert_eq!(plan(&cards, &views), vec![]);
+        }
+        views[0].waiting_hold = false;
+        assert_eq!(plan(&cards, &views), vec![dispatch("next", "x")]);
+    }
+
+    #[test]
     fn parking_waits_for_a_turn_boundary_and_keeps_started_blocked_occupied() {
         let mut parked = task("parked", Some("x"), &[], TaskStatus::Waiting);
         parked.started_at = Some(1);
@@ -487,6 +525,7 @@ mod tests {
         ];
         let mut views = agents(&["x"]);
         views[0].turn_active = true;
+        views[0].parking_turn = true;
         views[0].active = true;
         assert_eq!(plan(&cards, &views), vec![]);
         views[0].turn_active = false;

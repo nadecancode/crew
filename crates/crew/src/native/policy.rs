@@ -14,6 +14,16 @@ pub(crate) fn authorize(
     if matches!(call, Call::Ping) {
         return Ok(());
     }
+    if matches!(call, Call::FeaturesNegotiate(_)) {
+        let allowed = match purpose {
+            ChannelPurpose::Workspace | ChannelPurpose::Read => {
+                capabilities.contains(&Capability::Read)
+            }
+            ChannelPurpose::Action => capabilities.contains(&Capability::Control),
+            ChannelPurpose::Index | ChannelPurpose::Terminal => false,
+        };
+        return allowed.then_some(()).ok_or_else(denied);
+    }
     if purpose == ChannelPurpose::Index {
         return matches!(call, Call::Workspaces)
             .then_some(())
@@ -23,7 +33,31 @@ pub(crate) fn authorize(
         return Err(denied());
     }
     let need = match call {
-        Call::Snapshot { .. }
+        Call::EpicsList(_)
+        | Call::EpicGet(_)
+        | Call::TasksQuery(_)
+        | Call::TaskGetScoped(_)
+        | Call::AsideMembers(_)
+        | Call::AsideList(_)
+        | Call::AsideGet(_)
+        | Call::AsideWatch(_)
+        | Call::AsideUnwatch(_)
+        | Call::DocsIndex(_)
+        | Call::DocsRead(_)
+        | Call::DocsAsset(_)
+        | Call::DocsHistory(_)
+        | Call::DocsDiff(_)
+        | Call::DocsWatch(_)
+        | Call::DocsUnwatch(_)
+        | Call::UsageSummary(_)
+        | Call::UsageSeries(_)
+        | Call::UsageBreakdown(_)
+        | Call::UsageObservations(_)
+        | Call::UsageRuns(_)
+        | Call::UsagePrices(_)
+        | Call::UsageWatch(_)
+        | Call::UsageUnwatch(_)
+        | Call::Snapshot { .. }
         | Call::Subscribe
         | Call::AgentsList
         | Call::TasksList
@@ -36,7 +70,10 @@ pub(crate) fn authorize(
         | Call::AgentTranscript { .. }
         | Call::GitStatus { .. }
         | Call::GitDiff { .. } => Capability::Read,
-        Call::Send(_)
+        Call::AsideAsk(_)
+        | Call::AsideCancel(_)
+        | Call::AsideRemove(_)
+        | Call::Send(_)
         | Call::Answer { .. }
         | Call::AgentPause { .. }
         | Call::AgentResume { .. }
@@ -60,7 +97,19 @@ pub(crate) fn authorize(
     let lane_ok = match purpose {
         ChannelPurpose::Index => false,
         ChannelPurpose::Workspace => need == Capability::Read,
-        ChannelPurpose::Read => need == Capability::Read && !matches!(call, Call::Subscribe),
+        ChannelPurpose::Read => {
+            need == Capability::Read
+                && !matches!(
+                    call,
+                    Call::Subscribe
+                        | Call::AsideWatch(_)
+                        | Call::AsideUnwatch(_)
+                        | Call::DocsWatch(_)
+                        | Call::DocsUnwatch(_)
+                        | Call::UsageWatch(_)
+                        | Call::UsageUnwatch(_)
+                )
+        }
         ChannelPurpose::Action => {
             need == Capability::Control || matches!(call, Call::AgentInput { .. })
         }
@@ -79,7 +128,8 @@ pub(crate) fn authorize(
         return Err(RpcError::invalid("terminal is not attached"));
     }
     match call {
-        Call::TaskGet { id: None }
+        Call::TaskGetScoped(crew_core::rpc::epics::TaskGetScoped { id: None, .. })
+        | Call::TaskGet { id: None }
         | Call::AgentCompact { id: None, .. }
         | Call::GitStatus { agent: None }
         | Call::GitDiff { agent: None, .. }
@@ -128,6 +178,8 @@ pub(crate) fn authorize(
     Ok(())
 }
 
+// Keep the v6 grant catalog stable: old native libraries cap it at 31 entries.
+// Feature support is negotiated after authentication, under these same tiers.
 pub(crate) fn allowed_actions(capabilities: &[Capability]) -> Vec<String> {
     let mut actions = Vec::new();
     if capabilities.contains(&Capability::Read) {
@@ -171,6 +223,17 @@ pub(crate) fn allowed_actions(capabilities: &[Capability]) -> Vec<String> {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn legacy_grant_catalog_remains_byte_identical_for_old_native_libraries() {
+        // Captured from landed P1 fbe243af. Old native decoders cap this legacy
+        // list at 31; negotiated features never grow the signed base metadata.
+        let expected = include_str!("../../tests/fixtures/native/legacy-actions-v6.json").trim();
+        let actions =
+            super::allowed_actions(&[Capability::Read, Capability::Control, Capability::Terminal]);
+        assert_eq!(serde_json::to_string(&actions).unwrap(), expected);
+        assert!(actions.len() <= 31);
+    }
+
     use super::*;
     use crew_core::rpc::SendParams;
 
@@ -194,10 +257,34 @@ mod tests {
             .collect::<std::collections::BTreeSet<_>>();
         assert_eq!(
             names.len(),
-            72,
+            105,
             "a new daemon method needs a deliberate gateway policy"
         );
         let reads = [
+            "epics_list",
+            "epic_get",
+            "tasks_query",
+            "task_get_scoped",
+            "aside_members",
+            "aside_list",
+            "aside_get",
+            "aside_watch",
+            "aside_unwatch",
+            "docs_index",
+            "docs_read",
+            "docs_asset",
+            "docs_history",
+            "docs_diff",
+            "docs_watch",
+            "docs_unwatch",
+            "usage_summary",
+            "usage_series",
+            "usage_breakdown",
+            "usage_observations",
+            "usage_runs",
+            "usage_prices",
+            "usage_watch",
+            "usage_unwatch",
             "snapshot",
             "subscribe",
             "agents_list",
@@ -213,6 +300,9 @@ mod tests {
             "git_diff",
         ];
         let controls = [
+            "aside_ask",
+            "aside_cancel",
+            "aside_remove",
             "send",
             "answer",
             "agent_pause",
@@ -228,6 +318,12 @@ mod tests {
         ];
         let terminals = ["agent_input", "attach", "attach_input", "attach_resize"];
         let denied = [
+            // Epic administration stays outside every native device grant.
+            "epic_create",
+            "epic_edit",
+            "task_create_scoped",
+            "task_revise",
+            "epic_complete",
             "hello",
             "load_team",
             "agent_add",
@@ -277,9 +373,9 @@ mod tests {
             .chain(terminals.iter())
             .chain(denied.iter())
             .copied()
-            .chain(["ping", "workspaces"])
+            .chain(["ping", "workspaces", "features_negotiate"])
             .collect::<Vec<_>>();
-        assert_eq!(assigned.len(), 72);
+        assert_eq!(assigned.len(), 105);
         assert_eq!(
             assigned
                 .iter()
@@ -300,6 +396,10 @@ mod tests {
             "workspaces",
             "web_rescan",
         ];
+        let feature_requests: Vec<serde_json::Value> = serde_json::from_str(include_str!(
+            "../../../crew-core/tests/fixtures/features/requests-v1.json"
+        ))
+        .unwrap();
         for name in names {
             let params = if unit.contains(&name) {
                 serde_json::json!({})
@@ -312,6 +412,12 @@ mod tests {
                     "id":"a","agent":"a","agent_id":"a","role":"operator","protocol":6,"client":"fixture","config":{"project":"native-policy"},"spec":{"id":"a"},"status":"working","percent":10,"body":"x","to":"a","type":"message","task":"work","task_id":"t","reason":"x","artifact":"x","comments":"","approve":true,"summary":"","decisions":[],"message":"m","commit":"abc123","from_agent":"a","event":"x","ids":["m"],"code":"a","kind":"paired","count":1,"url":"http://localhost:1","ack":false,"data":"","rows":24,"cols":80,"model":"","note":null,"text":"x","submit":true,"stop_agents":true
                 })
             };
+            // Strict feature params cannot use the legacy catch-all object.
+            let params = feature_requests
+                .iter()
+                .find(|r| r["method"].as_str() == Some(name))
+                .map(|r| r["params"].clone())
+                .unwrap_or(params);
             let request = serde_json::from_value::<crew_core::rpc::Request>(
                 serde_json::json!({"id":1,"method":name,"params":params}),
             )
@@ -334,9 +440,23 @@ mod tests {
                         true
                     } else if name == "workspaces" {
                         purpose == ChannelPurpose::Index
+                    } else if name == "features_negotiate" {
+                        matches!(purpose, ChannelPurpose::Workspace | ChannelPurpose::Read)
+                            || (purpose == ChannelPurpose::Action
+                                && capabilities.contains(&Capability::Control))
                     } else if reads.contains(&name) {
                         matches!(purpose, ChannelPurpose::Workspace | ChannelPurpose::Read)
-                            && (name != "subscribe" || purpose == ChannelPurpose::Workspace)
+                            && (![
+                                "subscribe",
+                                "aside_watch",
+                                "aside_unwatch",
+                                "docs_watch",
+                                "docs_unwatch",
+                                "usage_watch",
+                                "usage_unwatch",
+                            ]
+                            .contains(&name)
+                                || purpose == ChannelPurpose::Workspace)
                     } else if controls.contains(&name) {
                         purpose == ChannelPurpose::Action
                             && capabilities.contains(&Capability::Control)

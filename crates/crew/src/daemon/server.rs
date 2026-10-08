@@ -148,11 +148,16 @@ impl Session {
             }
             Err(e) => {
                 // Malformed request: answer with the id if one can be salvaged.
-                let id = serde_json::from_str::<Value>(text)
-                    .ok()
+                let value = serde_json::from_str::<Value>(text).ok();
+                let id = value
+                    .as_ref()
                     .and_then(|v| v.get("id").and_then(Value::as_u64))
                     .unwrap_or(0);
-                ServerFrame::err(id, RpcError::invalid(format!("malformed request: {e}")))
+                let error = value
+                    .as_ref()
+                    .and_then(crew_core::rpc::feature_decode_error)
+                    .unwrap_or_else(|| RpcError::invalid(format!("malformed request: {e}")));
+                ServerFrame::err(id, error)
             }
         };
         if self.conn.tx.send(frame).await.is_err() {
@@ -349,7 +354,12 @@ impl Daemon {
         conn.stream_task = Some(conn.spawn(async move {
             loop {
                 let frame = match rx.recv().await {
-                    Ok(push) => ServerFrame::push(push),
+                    // P1 enables no features. P2 selects this projection or the
+                    // negotiated stream per connection; never leak new variants.
+                    Ok(push) => match push.legacy_projection() {
+                        Some(push) => ServerFrame::push(push),
+                        None => continue,
+                    },
                     // The subscriber fell behind; tell it to refetch.
                     Err(broadcast::error::RecvError::Lagged(_)) => ServerFrame::push(Push::Resync),
                     Err(broadcast::error::RecvError::Closed) => break,
@@ -400,6 +410,94 @@ mod tests {
         let reply = rx.recv().await.unwrap();
         assert!(reply.result.is_some(), "{reply:?}");
         (session, rx)
+    }
+
+    #[tokio::test]
+    async fn feature_contract_legacy_subscription_strips_populated_fields() {
+        let (_temp, running) = daemon().await;
+        let fixture: Value = serde_json::from_str(include_str!(
+            "../../../crew-core/tests/fixtures/features/legacy-v6.json"
+        ))
+        .unwrap();
+        let mut task: crew_core::Task =
+            serde_json::from_str(fixture["task"].as_str().unwrap()).unwrap();
+        task.epic = Some("epic-1".into());
+        running.daemon.model().tasks.push(task.clone());
+        let (mut session, mut rx) = operator(&running.daemon).await;
+        assert!(
+            session
+                .request(&request(2, "subscribe", serde_json::json!({})))
+                .await
+        );
+        assert!(rx.recv().await.unwrap().result.is_some());
+        running.daemon.push(Push::Task(Box::new(task)));
+        let frame = rx.recv().await.unwrap();
+        assert_eq!(
+            serde_json::to_string(&frame.push.unwrap()).unwrap(),
+            fixture["pushes"][0]
+        );
+        let info = crew_core::rpc::SessionInfo {
+            workspace_run_id: Some("run-1".into()),
+            ..Default::default()
+        };
+        running.daemon.push(Push::Session(Box::new(info)));
+        let frame = rx.recv().await.unwrap();
+        assert_eq!(
+            serde_json::to_string(&frame.push.unwrap()).unwrap(),
+            fixture["pushes"][1]
+        );
+        assert!(
+            session
+                .request(&request(
+                    3,
+                    "snapshot",
+                    serde_json::json!({"messages":0,"events":0})
+                ))
+                .await
+        );
+        let result = rx.recv().await.unwrap().result.unwrap();
+        assert!(result.get("epics").is_none());
+        assert!(result["session"].get("workspace_run_id").is_none());
+        assert!(result["tasks"][0].get("epic").is_none());
+        assert_eq!(
+            running.daemon.model().tasks[0].epic.as_deref(),
+            Some("epic-1")
+        );
+    }
+
+    #[tokio::test]
+    async fn feature_contract_definitions_do_not_enable_backends() {
+        let (_temp, running) = daemon().await;
+        let (mut session, mut rx) = operator(&running.daemon).await;
+        let calls: Vec<Value> = serde_json::from_str(include_str!(
+            "../../../crew-core/tests/fixtures/features/requests-v1.json"
+        ))
+        .unwrap();
+        for call in calls {
+            assert!(session.request(&call.to_string()).await);
+            let frame = rx.recv().await.unwrap();
+            assert_eq!(frame.error.unwrap().code, "unsupported_feature");
+        }
+        assert!(running.daemon.model().tasks.is_empty());
+        assert!(
+            session
+                .request(&request(
+                    90,
+                    "features_negotiate",
+                    serde_json::json!({"versions":false})
+                ))
+                .await
+        );
+        assert_eq!(
+            rx.recv().await.unwrap().error.unwrap().code,
+            "invalid_feature_request"
+        );
+        assert!(
+            session
+                .request(&request(91, "not_a_method", serde_json::json!({})))
+                .await
+        );
+        assert_eq!(rx.recv().await.unwrap().error.unwrap().code, "invalid");
     }
 
     /// `n` of an agent's activity `n=<n>`.

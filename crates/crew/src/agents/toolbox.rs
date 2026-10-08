@@ -57,6 +57,7 @@ pub struct RuntimeToolbox {
     pub claude_inherit_mcp: bool,
     pub claude_preferences: Value,
     pub claude_plugins: Vec<PathBuf>,
+    pub claude_rebuild_prompt: bool,
     pub codex_overrides: Vec<(String, Value)>,
     pub codex_skill_roots: Vec<PathBuf>,
     pub codex_inherit_servers: BTreeSet<String>,

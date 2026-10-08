@@ -202,6 +202,7 @@ pub fn task_data(tasks: &[Task]) -> Result<TasksData, ClientError> {
     Ok(TasksData {
         tasks: presentations,
         layers,
+        epics: None,
     })
 }
 
@@ -212,6 +213,7 @@ mod tests {
 
     fn task(id: &str, deps: &[&str]) -> Task {
         Task {
+            epic: None,
             id: id.into(),
             title: id.into(),
             description: String::new(),

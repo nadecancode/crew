@@ -363,6 +363,7 @@ fn undelivered(app: &mut App, planned: shared::Planned, code: &str, message: &st
             operation_id: planned.operation_id,
             outcome: crew_client::OperationOutcome::NotSent {
                 reason: crew_client::ClientReason {
+                    details: None,
                     code: code.into(),
                     message: message.into(),
                 },

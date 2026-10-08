@@ -10,6 +10,8 @@ use crate::history::{EventHistory, MessageHistory};
 use crate::questions::Questions;
 use crate::sort_agents;
 
+mod features;
+
 #[derive(Clone, Debug)]
 struct SnapshotFlight {
     operation_id: OperationId,
@@ -33,6 +35,11 @@ pub(crate) struct StateUpdate {
 /// never a second presentation model.
 #[derive(Debug)]
 pub(crate) struct ClientState {
+    pub features: crate::features::FeatureAvailability,
+    pub epics: Option<crew_protocol::epics::EpicBoard>,
+    pub feature_watches: Vec<crate::features::FeatureWatchState>,
+    removed_asides:
+        std::collections::BTreeSet<(crew_protocol::features::Id, crew_protocol::features::Id)>,
     pub config: ClientConfig,
     pub revision: u64,
     pub connection: Option<ConnectionContext>,
@@ -73,6 +80,10 @@ impl ClientState {
     pub(crate) fn new(config: ClientConfig) -> Result<Self, ClientError> {
         crate::policy::validate_limits(config.limits)?;
         Ok(Self {
+            features: Default::default(),
+            epics: None,
+            feature_watches: Vec::new(),
+            removed_asides: Default::default(),
             config,
             revision: 0,
             connection: None,
@@ -277,6 +288,10 @@ impl ClientState {
     }
 
     fn clear_domain(&mut self, revision: u64) -> Result<(), ClientError> {
+        self.features = Default::default();
+        self.epics = None;
+        self.feature_watches.clear();
+        self.removed_asides.clear();
         self.messages.reset(Vec::new(), revision)?;
         self.events.reset(Vec::new(), revision)?;
         self.session = None;
@@ -372,6 +387,7 @@ impl ClientState {
                             }
                         }
                         self.reason = (!entry.detail.is_empty()).then(|| ClientReason {
+                            details: None,
                             code: entry.state.as_str().into(),
                             message: entry.detail.clone(),
                         });
@@ -436,6 +452,59 @@ impl ClientState {
     ) -> Result<StateUpdate, ClientError> {
         let mut update = StateUpdate::default();
         match input {
+            ClientInput::FeatureChannelClosed {
+                scope,
+                connection_epoch,
+            } => {
+                if self.scope.as_ref() != Some(&scope) {
+                    return Ok(update);
+                }
+                if self
+                    .features
+                    .session
+                    .as_ref()
+                    .is_some_and(|f| f.connection_epoch == connection_epoch)
+                {
+                    self.clear_aside_values();
+                }
+                self.feature_watches
+                    .retain(|w| w.connection_epoch != connection_epoch);
+                for resource in self.resources.values_mut() {
+                    if matches!(&resource.value,Some(ResourceValue::Feature(v)) if v.lease.is_some() && v.connection_epoch==connection_epoch)
+                    {
+                        resource.status = ResourceStatus::Stale;
+                        resource.error = Some(ClientReason {
+                            details: None,
+                            code: "snapshot_expired".into(),
+                            message: "The issuing connection ended; capture a new document lease."
+                                .into(),
+                        });
+                        update.changes.availability = true;
+                    }
+                }
+            }
+            ClientInput::Features {
+                scope,
+                availability,
+            } => {
+                if self.scope.as_ref() != Some(&scope) {
+                    return Ok(update);
+                }
+                if availability
+                    .session
+                    .as_ref()
+                    .is_some_and(|s| !crate::features::valid_negotiation(s))
+                {
+                    return Err(ClientError::DecodeFailure {
+                        message: "invalid feature negotiation".into(),
+                    });
+                }
+                if self.features != availability {
+                    self.next_revision()?;
+                    self.features = availability;
+                    update.changes.availability = true;
+                }
+            }
             ClientInput::Bind {
                 scope,
                 mode,
@@ -644,6 +713,26 @@ impl ClientState {
                     return Ok(update);
                 }
                 validate_snapshot(&snapshot)?;
+                if self
+                    .features
+                    .supports(crew_protocol::features::Feature::Epics)
+                {
+                    match (&snapshot.session.workspace_run_id, &snapshot.epics) {
+                        (Some(run), Some(board)) if board.generation.as_str() == run => {
+                            validate_epic_board(board, &snapshot.tasks)?;
+                        }
+                        (None, None) => {}
+                        _ => {
+                            return Err(ClientError::DecodeFailure {
+                                message: "incoherent epic snapshot".into(),
+                            })
+                        }
+                    }
+                } else if snapshot.epics.is_some() {
+                    return Err(ClientError::DecodeFailure {
+                        message: "unnegotiated epic snapshot".into(),
+                    });
+                }
                 let revision = self.next_revision()?;
                 let mut messages = self.messages.clone();
                 messages.reset(snapshot.messages, revision)?;
@@ -654,6 +743,7 @@ impl ClientState {
                 self.events = events;
                 self.clock_offset_ms = i128::from(snapshot.server_time) - i128::from(clock.wall_ms);
                 self.session = Some(snapshot.session);
+                self.epics = snapshot.epics;
                 self.agents = snapshot.agents;
                 self.tasks = snapshot.tasks;
                 sort_agents(&mut self.agents);
@@ -693,6 +783,15 @@ impl ClientState {
                     return Ok(update);
                 }
                 validate_push(&push)?;
+                // Observer streams have independent barriers. A normal Snapshot
+                // must not discard their removals, expirations or corrections.
+                if matches!(
+                    push,
+                    Push::Aside(_) | Push::DocsChanged(_) | Push::UsageChanged(_)
+                ) {
+                    self.apply_push(push, clock, &mut update)?;
+                    return Ok(update);
+                }
                 if matches!(push, Push::Shutdown) {
                     self.apply_push(push, clock, &mut update)?;
                     return Ok(update);
@@ -789,6 +888,54 @@ impl ClientState {
         update: &mut StateUpdate,
     ) -> Result<(), ClientError> {
         match push {
+            Push::EpicBoardChanged(change) => {
+                if !self
+                    .features
+                    .supports(crew_protocol::features::Feature::Epics)
+                {
+                    return Err(ClientError::DecodeFailure {
+                        message: "unnegotiated epic update".into(),
+                    });
+                }
+                let Some(board) = &self.epics else {
+                    return self.feature_resync(update);
+                };
+                if change.workspace_run_id != board.generation {
+                    return self.feature_resync(update);
+                }
+                if change.to_revision <= board.revision {
+                    return Ok(());
+                }
+                if change.from_revision != board.revision
+                    || change.board.generation != change.workspace_run_id
+                    || change.board.revision != change.to_revision
+                {
+                    return self.feature_resync(update);
+                }
+                let mut tasks = self.tasks.clone();
+                let mut ids = std::collections::BTreeSet::new();
+                for task in &change.tasks {
+                    if !ids.insert(&task.id) {
+                        return Err(ClientError::DecodeFailure {
+                            message: "duplicate epic task upsert".into(),
+                        });
+                    }
+                    if let Some(existing) = tasks.iter_mut().find(|t| t.id == task.id) {
+                        *existing = task.clone();
+                    } else {
+                        tasks.push(task.clone());
+                    }
+                }
+                validate_epic_board(&change.board, &tasks)?;
+                self.next_revision()?;
+                update
+                    .changes
+                    .tasks
+                    .extend(change.tasks.iter().map(|t| t.id.clone()));
+                update.changes.session = true;
+                self.tasks = tasks;
+                self.epics = Some(change.board);
+            }
             Push::Agent(agent) => {
                 let agent = *agent;
                 let index = self.agents.iter().position(|old| old.id == agent.id);
@@ -836,6 +983,12 @@ impl ClientState {
                 update.changes.pending = true;
             }
             Push::Task(task) => {
+                if self
+                    .features
+                    .supports(crew_protocol::features::Feature::Epics)
+                {
+                    return self.feature_resync(update);
+                }
                 let task = *task;
                 let index = self.tasks.iter().position(|old| old.id == task.id);
                 if index.is_some_and(|index| self.tasks[index] == task) {
@@ -896,6 +1049,19 @@ impl ClientState {
                 }
             }
             Push::Session(session) => {
+                if self.features.session.is_some()
+                    && self
+                        .session
+                        .as_ref()
+                        .is_some_and(|old| old.workspace_run_id != session.workspace_run_id)
+                {
+                    self.epics = None;
+                    self.feature_watches.clear();
+                    self.resources.clear();
+                    self.pending_reads.clear();
+                    self.session = Some(*session);
+                    return self.feature_resync(update);
+                }
                 if self.session.as_ref() != Some(session.as_ref()) {
                     self.next_revision()?;
                     self.session = Some(*session);
@@ -926,6 +1092,23 @@ impl ClientState {
             | Push::PtyClosed
             | Push::Summary(_)
             | Push::Workspaces(_) => {}
+            Push::Aside(change) => self.aside_changed(*change, update)?,
+            Push::DocsChanged(change) => self.docs_changed(*change, update)?,
+            Push::UsageChanged(change) => self.usage_changed(*change, update)?,
+        }
+        Ok(())
+    }
+
+    fn feature_resync(&mut self, update: &mut StateUpdate) -> Result<(), ClientError> {
+        self.next_revision()?;
+        self.synchronized = false;
+        self.snapshot = None;
+        self.evaluate_workspace();
+        update.changes.availability = true;
+        if let Some(scope) = &self.scope {
+            update.effects.push(ClientEffect::Resynchronize {
+                scope: scope.clone(),
+            });
         }
         Ok(())
     }
@@ -996,20 +1179,37 @@ impl ClientState {
         }
         let (status, value, error) = match outcome {
             OperationOutcome::Succeeded { result } => match resource_value(&pending.key, result) {
-                Some(value) => {
-                    let status = resource_status(&value);
-                    (status, Some(value), None)
+                Some(mut value) => {
+                    if !self.filter_removed_asides(&mut value) {
+                        (
+                            ResourceStatus::Stale,
+                            None,
+                            Some(ClientReason {
+                                details: None,
+                                code: "removed".into(),
+                                message: "This aside was removed.".into(),
+                            }),
+                        )
+                    } else {
+                        let status = resource_status(&value);
+                        (status, Some(value), None)
+                    }
                 }
                 None => (
                     ResourceStatus::Failed,
                     None,
                     Some(ClientReason {
+                        details: None,
                         code: "decode".into(),
                         message: "reply does not match requested resource".into(),
                     }),
                 ),
             },
-            OperationOutcome::Rejected { code, message } => (
+            OperationOutcome::Rejected {
+                code,
+                message,
+                details,
+            } => (
                 if code == "unsupported" {
                     ResourceStatus::Unsupported
                 } else {
@@ -1017,6 +1217,7 @@ impl ClientState {
                 },
                 None,
                 Some(ClientReason {
+                    details: details.clone(),
                     code: code.clone(),
                     message: message.clone(),
                 }),
@@ -1030,6 +1231,7 @@ impl ClientState {
                 ResourceStatus::Failed,
                 None,
                 Some(ClientReason {
+                    details: None,
                     code: "invalid_read_outcome".into(),
                     message: "attachment closure is not a read result".into(),
                 }),
@@ -1131,6 +1333,51 @@ impl ClientState {
     }
 }
 
+fn validate_epic_board(
+    board: &crew_protocol::epics::EpicBoard,
+    tasks: &[Task],
+) -> Result<(), ClientError> {
+    let invalid = || ClientError::DecodeFailure {
+        message: "invalid epic board projection".into(),
+    };
+    let mut ids = std::collections::BTreeSet::new();
+    for epic in &board.epics {
+        if crew_protocol::epics::validate_id(&epic.id).is_err() || !ids.insert(epic.id.as_str()) {
+            return Err(invalid());
+        }
+    }
+    if board
+        .focus_epic
+        .as_ref()
+        .is_some_and(|id| !ids.contains(id.as_str()))
+        || tasks.iter().any(|task| {
+            task.epic
+                .as_ref()
+                .is_some_and(|id| !ids.contains(id.as_str()))
+        })
+    {
+        return Err(invalid());
+    }
+    for counts in std::iter::once(&board.no_epic).chain(board.epics.iter().map(|e| &e.counts)) {
+        let sum = [
+            counts.queued,
+            counts.ready,
+            counts.working,
+            counts.waiting,
+            counts.blocked,
+            counts.review,
+            counts.done,
+            counts.failed,
+        ]
+        .into_iter()
+        .try_fold(0u128, |sum, n| sum.checked_add(n.0));
+        if sum != Some(counts.total.0) {
+            return Err(invalid());
+        }
+    }
+    Ok(())
+}
+
 fn validate_snapshot(snapshot: &Snapshot) -> Result<(), ClientError> {
     let mut ids = std::collections::HashSet::new();
     if snapshot.agents.iter().any(|agent| !ids.insert(&agent.id)) {
@@ -1190,6 +1437,11 @@ fn validate_event(event: &crew_protocol::Event) -> Result<(), ClientError> {
 }
 
 fn resource_value(key: &ResourceKey, result: &CommandResult) -> Option<ResourceValue> {
+    if let (ReadOptions::Feature(read), CommandResult::FeatureScoped { context, response }) =
+        (&key.options, result)
+    {
+        return read.value(context, response).map(ResourceValue::Feature);
+    }
     match (key.kind, result) {
         (ResourceKind::TaskCard, CommandResult::TaskCard(card)) if matches!(&key.entity.entity, Entity::Task(id) if id == &card.task.id) => {
             Some(ResourceValue::TaskCard(*card.clone()))
@@ -1246,6 +1498,7 @@ fn resource_status(value: &ResourceValue) -> ResourceStatus {
             value.text.is_empty()
         }
         ResourceValue::TaskCard(_) => false,
+        ResourceValue::Feature(_) => false,
     };
     if empty {
         ResourceStatus::Empty
@@ -1483,6 +1736,7 @@ mod tests {
             ClientInput::Unbind {
                 scope: scope(),
                 reason: ClientReason {
+                    details: None,
                     code: "closed".into(),
                     message: "connection closed".into(),
                 },
@@ -1502,6 +1756,7 @@ mod tests {
             ClientInput::Unbind {
                 scope: new,
                 reason: ClientReason {
+                    details: None,
                     code: "revoked".into(),
                     message: "access revoked".into(),
                 },

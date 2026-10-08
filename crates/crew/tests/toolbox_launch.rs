@@ -151,6 +151,9 @@ impl Fixture {
             &team.to_yaml().unwrap(),
         );
         std::fs::create_dir_all(self.session.root().join("home")).unwrap();
+        // Unlike the stand-in, native Codex requires an explicitly selected
+        // CODEX_HOME to exist before even `mcp list --json` can run.
+        std::fs::create_dir_all(self.session.root().join("codex-home")).unwrap();
         let output = self
             .session
             .command()
@@ -504,7 +507,7 @@ fn resumed_restart_refreshes_mcp_catalog(runtime: RuntimeKind) {
             "required":true
         }}}),
     );
-    team.defaults.max_restarts = 1;
+    team.defaults.max_restarts = 2;
     fixture.run(&team);
     let running = s.wait("member with a pinned MCP catalog", |snapshot| {
         let agent = find_agent(snapshot, "x");
@@ -584,6 +587,10 @@ fn resumed_restart_refreshes_mcp_catalog(runtime: RuntimeKind) {
         RuntimeKind::Shell => unreachable!(),
     };
     let record = s.root().join(record);
+    assert!(!fixture.record(&record)["args"]
+        .as_array()
+        .unwrap()
+        .contains(&json!("--system-prompt-snapshot")));
     std::fs::remove_file(&record).unwrap();
     s.ok(&[
         "resume",
@@ -607,6 +614,11 @@ fn resumed_restart_refreshes_mcp_catalog(runtime: RuntimeKind) {
             .any(|pair| pair[0] == resume_arg && pair[1].as_str() == initial.session_id.as_deref()),
         "{runtime} did not resume the confirmed session: {args:?}"
     );
+    if runtime == RuntimeKind::Claude {
+        assert!(args
+            .windows(2)
+            .any(|pair| pair == [json!("--system-prompt-snapshot"), json!("off")]));
+    }
     let after = refreshed.toolbox.as_ref().unwrap();
     assert_eq!(after.fingerprint, before.fingerprint);
     assert_ne!(after.definition_digest, before.definition_digest);
@@ -626,6 +638,72 @@ fn resumed_restart_refreshes_mcp_catalog(runtime: RuntimeKind) {
             .count(),
         1
     );
+    if runtime == RuntimeKind::Claude {
+        // A one-shot flag would let the native runtime restore its original
+        // schema snapshot on this automatic recovery. Retain the SID marker.
+        // Recovery also must not depend on another capability probe succeeding.
+        write(&fixture._clis.path().join("claude"), &format!(
+            "#!/bin/sh\nif [ \"$1\" = --version ]; then echo unknown; exit 0; fi\nexec {} fake-cli claude \"$@\"\n",
+            s.sandboxed_crew()
+        ));
+        std::fs::remove_file(&record).unwrap();
+        assert!(std::process::Command::new("kill")
+            .args(["-KILL", &refreshed.pid.unwrap().to_string()])
+            .status()
+            .unwrap()
+            .success());
+        let recovered_again = s.wait("refreshed Claude conversation to recover", |snapshot| {
+            let agent = find_agent(snapshot, "x");
+            agent.restarts == 2
+                && agent.pid.is_some()
+                && agent.pid != refreshed.pid
+                && agent.status != crew_core::AgentStatus::Spawning
+        });
+        let recovered_again = find_agent(&recovered_again, "x");
+        assert_eq!(recovered_again.session_id, initial.session_id);
+        assert_eq!(
+            recovered_again.toolbox.as_ref().unwrap().definition_digest,
+            after.definition_digest
+        );
+        let launch = fixture.record(&record);
+        assert!(launch["args"]
+            .as_array()
+            .unwrap()
+            .windows(2)
+            .any(|pair| { pair == [json!("--system-prompt-snapshot"), json!("off")] }));
+        let local: String = database
+            .query_row("SELECT value FROM meta WHERE key = 'agent:x'", [], |row| {
+                row.get(0)
+            })
+            .unwrap();
+        assert_eq!(
+            serde_json::from_str::<Value>(&local).unwrap()["claude_rebuild_prompt_session"]
+                .as_str(),
+            initial.session_id.as_deref()
+        );
+        std::fs::remove_file(&record).unwrap();
+        s.agent_cmd(&["restart", "--fresh", "x"]);
+        s.wait("fresh Claude session", |snapshot| {
+            let agent = find_agent(snapshot, "x");
+            agent.session_id.is_some()
+                && agent.session_id != initial.session_id
+                && agent.pid.is_some()
+                && agent.status != crew_core::AgentStatus::Spawning
+        });
+        assert!(!fixture.record(&record)["args"]
+            .as_array()
+            .unwrap()
+            .contains(&json!("--system-prompt-snapshot")));
+        let local: String = database
+            .query_row("SELECT value FROM meta WHERE key = 'agent:x'", [], |row| {
+                row.get(0)
+            })
+            .unwrap();
+        assert!(
+            serde_json::from_str::<Value>(&local).unwrap()["claude_rebuild_prompt_session"]
+                .is_null()
+        );
+    }
 }
 
 #[test]
@@ -641,6 +719,94 @@ fn codex_resumed_restart_refreshes_mcp_catalog() {
 #[test]
 fn pi_resumed_restart_refreshes_mcp_catalog() {
     resumed_restart_refreshes_mcp_catalog(RuntimeKind::Pi);
+}
+
+#[test]
+fn an_old_claude_cannot_claim_a_refreshed_resumed_toolbox() {
+    let fixture = Fixture::new();
+    let s = &fixture.session;
+    let team = fixture.team(
+        RuntimeKind::Claude,
+        json!({"mcp":{"probe":{
+            "command":[CREW,"fake-mcp","--tools","probe","--state",s.root().join("listings"),
+                       "--change-description-after","1"],
+            "required":true
+        }}}),
+    );
+    let cli = fixture._clis.path().join("claude");
+    write(&cli, &format!(
+        "#!/bin/sh\nif [ \"$1\" = --version ]; then echo '2.1.256 (Claude Code fixture)'; exit 0; fi\nexec {} fake-cli claude \"$@\"\n",
+        s.sandboxed_crew()
+    ));
+    fixture.run(&team);
+    let record = s.root().join("claude-home/fake-claude-x.json");
+    fixture.record(&record);
+    s.wait("old Claude session to be ready", |snapshot| {
+        let agent = find_agent(snapshot, "x");
+        agent.pid.is_some() && agent.status != crew_core::AgentStatus::Spawning
+    });
+    let database = rusqlite::Connection::open_with_flags(
+        s.workspace.join(".crew/crew.db"),
+        rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY,
+    )
+    .unwrap();
+    s.wait_for("old Claude session to be confirmed", || {
+        let local: String = database
+            .query_row("SELECT value FROM meta WHERE key = 'agent:x'", [], |row| {
+                row.get(0)
+            })
+            .unwrap();
+        serde_json::from_str::<Value>(&local).unwrap()["session_confirmed"] == true
+    });
+    std::fs::remove_file(&record).unwrap();
+    s.ok(&[
+        "resume",
+        "--restart",
+        "x",
+        "-C",
+        s.workspace.to_str().unwrap(),
+    ]);
+    s.wait("unavailable resumed refresh to be reported", |snapshot| {
+        let agent = find_agent(snapshot, "x");
+        agent.status == crew_core::AgentStatus::Failed
+            && agent
+                .error
+                .as_deref()
+                .is_some_and(|error| error.contains("2.1.257"))
+    });
+    assert!(
+        !record.exists(),
+        "the unsupported native session was started"
+    );
+    let view = fixture.toolbox();
+    assert_eq!(view.items[0].status.code, ToolboxItemCode::NotAvailable);
+    assert!(view.items[0]
+        .detail
+        .as_deref()
+        .unwrap()
+        .contains("--fresh x"));
+    // The refused refresh did not replace the old pin or latch an unsupported
+    // flag. An ordinary resumed restart still works with the old CLI.
+    s.agent_cmd(&["restart", "x"]);
+    let recovered = fixture.record(&record);
+    assert!(!recovered["args"]
+        .as_array()
+        .unwrap()
+        .contains(&json!("--system-prompt-snapshot")));
+    assert!(
+        !std::fs::read_to_string(s.workspace.join(".crew/agents/x/toolbox/mcp/probe.json"))
+            .unwrap()
+            .contains("Changed.")
+    );
+    std::fs::remove_file(&record).unwrap();
+    // The documented escape starts a new native snapshot, so an old CLI
+    // can still start fresh without being passed the unsupported flag.
+    s.agent_cmd(&["restart", "--fresh", "x"]);
+    let launch = fixture.record(&record);
+    assert!(!launch["args"]
+        .as_array()
+        .unwrap()
+        .contains(&json!("--system-prompt-snapshot")));
 }
 
 #[test]

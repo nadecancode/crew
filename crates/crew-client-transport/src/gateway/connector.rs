@@ -459,12 +459,30 @@ pub(super) fn request_kind(
         };
     }
     let grant = grant.ok_or(TransportEnd::Permission)?;
-    if !grant
-        .allowed_actions
-        .iter()
-        .any(|action| action == kind.method())
+    let feature_method = crew_protocol::features::feature_method(kind.method()).is_some();
+    if !feature_method
+        && !grant
+            .allowed_actions
+            .iter()
+            .any(|action| action == kind.method())
     {
         return Err(TransportEnd::Permission);
+    }
+    if kind == CommandKind::FeaturesNegotiate {
+        let needed = match purpose {
+            native::ChannelPurpose::Workspace | native::ChannelPurpose::Read => {
+                native::Capability::Read
+            }
+            native::ChannelPurpose::Action => native::Capability::Control,
+            native::ChannelPurpose::Index | native::ChannelPurpose::Terminal => {
+                return Err(TransportEnd::Permission)
+            }
+        };
+        return if grant.capabilities.contains(&needed) {
+            Ok(kind)
+        } else {
+            Err(TransportEnd::Permission)
+        };
     }
     let permission = method_policy(kind).gateway;
     let capability = match permission {
@@ -483,7 +501,17 @@ pub(super) fn request_kind(
         }
         native::ChannelPurpose::Read => {
             permission == GatewayPermission::Read
-                && !matches!(kind, CommandKind::Workspaces | CommandKind::Subscribe)
+                && !matches!(
+                    kind,
+                    CommandKind::Workspaces
+                        | CommandKind::Subscribe
+                        | CommandKind::AsideWatch
+                        | CommandKind::AsideUnwatch
+                        | CommandKind::DocsWatch
+                        | CommandKind::DocsUnwatch
+                        | CommandKind::UsageWatch
+                        | CommandKind::UsageUnwatch
+                )
         }
         native::ChannelPurpose::Action => {
             permission == GatewayPermission::Control || kind == CommandKind::AgentInput

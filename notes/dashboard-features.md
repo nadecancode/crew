@@ -593,8 +593,18 @@ says list price.
 **Asides are a separate scope.** The usage of `/btw` answers is recorded
 apart from the live sessions' usage. Session, epic and agent figures,
 history and benchmarks exclude it. The Usage view shows it as its own
-**Asides** line ("Asides: ≈ $1.12 · 6 answers"), and the scope selector
-offers **Asides** to see it alone.
+**Asides** line, and the scope selector offers **Asides** to see it alone.
+The line counts the answers whose usage was observed (`executions_observed`,
+`notes/protocol-features.md`), failed and cancelled ones included, so it
+never reads as a count of successful replies:
+- "Asides: ≈ $1.12 · usage from 6 answers";
+- "Asides: ≈ $1.12 · usage from 6 answers (1 failed, 1 cancelled)" when
+  some did not succeed, and "· 1 still answering" while any run;
+- "Asides: ≈ $1.12 · answer count unavailable" when the server cannot tell
+  which answers ran.
+
+The estimate keeps its own state ("at least …", "K of N"), so the count
+never implies that all of the spend is covered.
 
 ### Usage view
 
@@ -740,7 +750,9 @@ The **Asides** side panel tab lists asides newest first. Each aside shows:
   - **footer:** "From a copy of claude-1's context at 14:02", the answer's
     tokens and estimate, and **Copy**.
 
-The aside header shows the total cost of all its answers.
+The aside header shows the total cost of all its answers, as the server
+computes it, and how many answered, for example "4 of 6 answered · ≈ $1.12".
+The client never adds up the answers' costs itself.
 
 Each aside offers **Cancel** while answers are pending, and **Remove for
 everyone**.

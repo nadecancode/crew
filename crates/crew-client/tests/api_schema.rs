@@ -32,6 +32,7 @@ fn scope() -> ClientScope {
 
 fn reason() -> ClientReason {
     ClientReason {
+        details: None,
         code: "closed".into(),
         message: "connection closed".into(),
     }
@@ -280,6 +281,7 @@ fn every_query_and_payload_constructs_with_the_actual_protocol_records() {
             }],
         })),
         ViewPayload::Tasks(Box::new(TasksData {
+            epics: None,
             tasks: vec![task()],
             layers: vec![TaskLayer {
                 index: 0,
@@ -563,6 +565,7 @@ fn input_outcome_notice_and_terminal_records_construct_without_an_engine() {
             result: CommandResult::Pong,
         },
         OperationOutcome::Rejected {
+            details: None,
             code: "forbidden".into(),
             message: "Denied".into(),
         },

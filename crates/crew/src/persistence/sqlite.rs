@@ -687,6 +687,7 @@ mod tests {
             assert_eq!(e.seq, 2);
             store
                 .save_task(&Task {
+                    epic: None,
                     id: "t1".into(),
                     title: "T".into(),
                     description: String::new(),

@@ -33,6 +33,39 @@ pub(crate) fn view(
     clock: ClockSample,
 ) -> Result<ViewData, ClientError> {
     let payload = match query {
+        ViewQuery::Features => ViewPayload::Features(state.features.clone()),
+        ViewQuery::FeatureWatches { feature } => ViewPayload::FeatureWatches(
+            state
+                .feature_watches
+                .iter()
+                .filter(|w| w.feature == feature)
+                .cloned()
+                .collect(),
+        ),
+        ViewQuery::Epic { key } => feature_view(
+            state,
+            key,
+            crew_protocol::features::Feature::Epics,
+            ViewPayload::Epic,
+        )?,
+        ViewQuery::Asides { key } => feature_view(
+            state,
+            key,
+            crew_protocol::features::Feature::Asides,
+            ViewPayload::Asides,
+        )?,
+        ViewQuery::Docs { key } => feature_view(
+            state,
+            key,
+            crew_protocol::features::Feature::Docs,
+            ViewPayload::Docs,
+        )?,
+        ViewQuery::UsageMetrics { key } => feature_view(
+            state,
+            key,
+            crew_protocol::features::Feature::UsageMetrics,
+            ViewPayload::UsageMetrics,
+        )?,
         ViewQuery::Availability { intent } => {
             return crate::engine::availability_view(state, actions, &intent, clock)
         }
@@ -45,7 +78,11 @@ pub(crate) fn view(
                 .collect(),
             relations: topology::parent_relations(&state.agents),
         })),
-        ViewQuery::Tasks => ViewPayload::Tasks(Box::new(topology::task_data(&state.tasks)?)),
+        ViewQuery::Tasks => {
+            let mut tasks = topology::task_data(&state.tasks)?;
+            tasks.epics = state.epics.clone();
+            ViewPayload::Tasks(Box::new(tasks))
+        }
         ViewQuery::AgentDetail { id } => {
             let scope = selected_scope(state)?;
             let tasks = topology::task_data(&state.tasks)?;
@@ -385,6 +422,7 @@ fn agent_data(
 
 fn resource_rank(kind: ResourceKind) -> u8 {
     match kind {
+        ResourceKind::Feature(_) => 10,
         ResourceKind::TaskCard => 0,
         ResourceKind::Message => 1,
         ResourceKind::Event => 2,
@@ -396,6 +434,34 @@ fn resource_rank(kind: ResourceKind) -> u8 {
         ResourceKind::History => 8,
         ResourceKind::Events => 9,
     }
+}
+
+fn feature_view(
+    state: &ClientState,
+    key: ResourceKey,
+    feature: crew_protocol::features::Feature,
+    wrap: fn(Box<ResourceState>) -> ViewPayload,
+) -> Result<ViewPayload, ClientError> {
+    if &key.entity.scope != selected_scope(state)? {
+        return Err(ClientError::InvalidInput {
+            field: "resource.scope".into(),
+            reason: "feature belongs to another workspace or attempt".into(),
+        });
+    }
+    let key = canonical_resource_key(&key)?;
+    let ReadOptions::Feature(read) = &key.options else {
+        return Err(ClientError::InvalidInput {
+            field: "resource.options".into(),
+            reason: "expected feature read".into(),
+        });
+    };
+    if read.command().required_feature() != Some(feature) {
+        return Err(ClientError::InvalidInput {
+            field: "resource.kind".into(),
+            reason: "feature view differs from resource".into(),
+        });
+    }
+    Ok(wrap(Box::new(state.current_resource(&key))))
 }
 
 #[cfg(test)]
@@ -478,6 +544,7 @@ mod tests {
     }
     fn task(id: &str, status: TaskStatus, start: Option<i64>) -> Task {
         Task {
+            epic: None,
             id: id.into(),
             title: id.into(),
             description: String::new(),
@@ -625,6 +692,7 @@ mod tests {
             status: ResourceStatus::Failed,
             request_sequence: 9,
             error: Some(ClientReason {
+                details: None,
                 code: "read_failed".into(),
                 message: "unavailable evidence".into(),
             }),
@@ -660,6 +728,7 @@ mod tests {
             ClientInput::Unbind {
                 scope: scope(),
                 reason: ClientReason {
+                    details: None,
                     code: "closed".into(),
                     message: "connection closed".into(),
                 },
@@ -766,6 +835,7 @@ mod tests {
             ClientInput::Unbind {
                 scope: scope(),
                 reason: ClientReason {
+                    details: None,
                     code: "closed".into(),
                     message: "closed".into(),
                 },

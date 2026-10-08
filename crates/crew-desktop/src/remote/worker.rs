@@ -263,6 +263,7 @@ impl Worker {
             RemoteRequest::Connect { profile } => {
                 let result = self.client(&profile).and_then(|client| {
                     let core = crate::service::core().map_err(|error| ClientReason {
+                        details: None,
                         code: "internal".into(),
                         message: error.to_string(),
                     })?;
