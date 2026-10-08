@@ -11,6 +11,7 @@
 //! - `ledger`: durable streams, ownership, observations, coverage and aggregates
 //! - `collect`: one bounded read of a stream into the ledger
 //! - `query`: canonical queries and their answers from the ledger
+//! - `service`: collection scheduling, watches and the daemon's handlers
 
 pub mod claude;
 pub mod codex;
@@ -24,4 +25,5 @@ mod parity;
 pub mod pi;
 pub mod price;
 pub mod query;
+pub mod service;
 pub mod source;

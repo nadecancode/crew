@@ -7,11 +7,31 @@
 //! covers.
 
 use std::fs::File;
+use std::sync::Mutex;
 
 use anyhow::{Context, Result};
 
 use super::ledger::{Commit, Committed, Ledger, MAX_CHANGES};
 use super::source::{self, Item};
+
+/// Access to the ledger for one pump, taken only around each database step
+/// so that reading and decoding never hold it.
+pub trait Access {
+    fn with<T>(&mut self, f: impl FnOnce(&mut Ledger) -> Result<T>) -> Result<T>;
+}
+
+impl Access for &mut Ledger {
+    fn with<T>(&mut self, f: impl FnOnce(&mut Ledger) -> Result<T>) -> Result<T> {
+        f(self)
+    }
+}
+
+impl Access for &Mutex<Ledger> {
+    fn with<T>(&mut self, f: impl FnOnce(&mut Ledger) -> Result<T>) -> Result<T> {
+        let mut ledger = self.lock().unwrap_or_else(|e| e.into_inner());
+        f(&mut ledger)
+    }
+}
 
 /// What one pump did.
 #[derive(Debug, Default)]
@@ -32,14 +52,14 @@ fn changes(items: &[Item]) -> usize {
 /// source, and commits it. `max_commits` stops early (for tests of
 /// interrupted reading); the service passes `None`.
 pub fn pump(
-    ledger: &mut Ledger,
+    mut ledger: impl Access,
     stream_id: &str,
     file: &File,
     now: i64,
     max_commits: Option<usize>,
 ) -> Result<Pumped> {
     let (mut from, mut adapter) = ledger
-        .cursor(stream_id)?
+        .with(|l| l.cursor(stream_id))?
         .with_context(|| format!("unknown usage stream {stream_id}"))?;
     let batch = source::read(file, &from)?;
     let mut items = adapter.begin(&batch);
@@ -49,13 +69,15 @@ pub fn pump(
         let last = index + 1 == batch.lines.len();
         if changes(&items) >= MAX_CHANGES && !last {
             let to = batch.checkpoint_after(file, index)?;
-            pumped.commits.push(ledger.commit(Commit {
-                stream_id,
-                from: &from,
-                to: &to,
-                decoder: &adapter,
-                items: &items,
-                observed_at: now,
+            pumped.commits.push(ledger.with(|l| {
+                l.commit(Commit {
+                    stream_id,
+                    from: &from,
+                    to: &to,
+                    decoder: &adapter,
+                    items: &items,
+                    observed_at: now,
+                })
             })?);
             from = to;
             items.clear();
@@ -64,13 +86,15 @@ pub fn pump(
             }
         }
     }
-    pumped.commits.push(ledger.commit(Commit {
-        stream_id,
-        from: &from,
-        to: &batch.checkpoint,
-        decoder: &adapter,
-        items: &items,
-        observed_at: now,
+    pumped.commits.push(ledger.with(|l| {
+        l.commit(Commit {
+            stream_id,
+            from: &from,
+            to: &batch.checkpoint,
+            decoder: &adapter,
+            items: &items,
+            observed_at: now,
+        })
     })?);
     pumped.caught_up = batch.caught_up();
     Ok(pumped)
@@ -78,17 +102,23 @@ pub fn pump(
 
 /// Pumps until everything present is in the ledger.
 pub fn drain(
-    ledger: &mut Ledger,
+    mut ledger: impl Access,
     stream_id: &str,
     file: &File,
     now: i64,
 ) -> Result<Vec<Committed>> {
     let mut commits = Vec::new();
     loop {
-        let pumped = pump(ledger, stream_id, file, now, None)?;
+        let pumped = pump(&mut ledger, stream_id, file, now, None)?;
         commits.extend(pumped.commits);
         if pumped.caught_up {
             return Ok(commits);
         }
+    }
+}
+
+impl<A: Access> Access for &mut A {
+    fn with<T>(&mut self, f: impl FnOnce(&mut Ledger) -> Result<T>) -> Result<T> {
+        (**self).with(f)
     }
 }
