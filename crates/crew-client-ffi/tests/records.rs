@@ -176,6 +176,7 @@ fn terminal_intent_and_notice_retain_attachment_separate_from_operation() {
         data: vec![0, 27, 255],
         ended: Some(TerminalEnd::Failed {
             reason: ClientReason {
+                details: None,
                 code: "closed".into(),
                 message: "channel ended".into(),
             },
@@ -354,6 +355,7 @@ fn availability_query_and_reasons_cross_the_real_converters() {
     for reason in [
         None,
         Some(ClientReason {
+            details: None,
             code: "stale_scope".into(),
             message: "測定 connection changed".into(),
         }),

@@ -71,6 +71,7 @@ impl GatewayError {
             Self::Busy => ("setup_busy", "Device setup is already in progress."),
         };
         crew_client::api::ClientReason {
+            details: None,
             code: code.into(),
             message: message.into(),
         }

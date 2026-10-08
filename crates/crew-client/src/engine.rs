@@ -420,6 +420,7 @@ impl ClientApi for ClientCore {
 
 pub(crate) fn context(state: &ClientState) -> ActionContext<'_> {
     ActionContext {
+        features: Some(&state.features),
         connection: state.connection.as_ref(),
         endpoint: state.endpoint,
         workspace: state.workspace,
@@ -450,6 +451,7 @@ pub(crate) fn availability_view(
 
 fn why(code: &str, message: &str) -> ClientReason {
     ClientReason {
+        details: None,
         code: code.into(),
         message: message.into(),
     }
@@ -1534,6 +1536,7 @@ mod tests {
                 }
             } else {
                 OperationOutcome::Rejected {
+                    details: None,
                     code: "closed".into(),
                     message: "not delivered".into(),
                 }

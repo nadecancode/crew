@@ -32,6 +32,7 @@ fn scope() -> ClientScope {
 
 fn reason() -> ClientReason {
     ClientReason {
+        details: None,
         code: "closed".into(),
         message: "connection closed".into(),
     }
@@ -563,6 +564,7 @@ fn input_outcome_notice_and_terminal_records_construct_without_an_engine() {
             result: CommandResult::Pong,
         },
         OperationOutcome::Rejected {
+            details: None,
             code: "forbidden".into(),
             message: "Denied".into(),
         },

@@ -281,9 +281,14 @@ fn operation_notice(
 ) -> OperationNotice {
     let (kind, reason, attachment_id) = match outcome {
         OperationOutcome::Succeeded { .. } => (OperationOutcomeKind::Success, None, None),
-        OperationOutcome::Rejected { code, message } => (
+        OperationOutcome::Rejected {
+            code,
+            message,
+            details,
+        } => (
             OperationOutcomeKind::Rejected,
             Some(ClientReason {
+                details: details.clone(),
                 code: code.clone(),
                 message: message.clone(),
             }),

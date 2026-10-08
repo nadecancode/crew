@@ -202,6 +202,7 @@ pub fn task_data(tasks: &[Task]) -> Result<TasksData, ClientError> {
     Ok(TasksData {
         tasks: presentations,
         layers,
+        epics: None,
     })
 }
 

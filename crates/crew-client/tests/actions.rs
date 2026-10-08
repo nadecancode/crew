@@ -109,6 +109,7 @@ fn planner() -> Actions {
 }
 fn why(code: &str) -> ClientReason {
     ClientReason {
+        details: None,
         code: code.into(),
         message: code.into(),
     }
@@ -735,6 +736,7 @@ fn send_retries_once_same_logical_id_and_payload_only_after_verified_same_incarn
                 &original,
                 id,
                 OperationOutcome::Rejected {
+                    details: None,
                     code: "invalid".into(),
                     message: "old reply".into()
                 },
@@ -926,6 +928,7 @@ fn timeout_refusal_cancel_and_auth_loss_finish_without_replay() {
             reason: why("not_sent"),
         },
         OperationOutcome::Rejected {
+            details: None,
             code: "forbidden".into(),
             message: "not permitted".into(),
         },
@@ -1465,6 +1468,7 @@ fn native_terminal_input_error_ends_only_captured_attachment_and_never_emits_sec
         ActionUpdate::default()
     );
     let late_error = OperationOutcome::Rejected {
+        details: None,
         code: "unavailable".into(),
         message: "terminal attachment ended".into(),
     };
@@ -1678,6 +1682,7 @@ fn availability_reasons_follow_planner_scope_and_grants_without_synthetic_model_
             &facts.scope(),
             request(&first).0,
             OperationOutcome::Rejected {
+                details: None,
                 code: "invalid".into(),
                 message: "compaction refused".into(),
             },
@@ -2254,6 +2259,7 @@ fn stale_failed_or_ended_attach_cannot_publish_an_identified_success_notice() {
     };
     for outcome in [
         OperationOutcome::Rejected {
+            details: None,
             code: "unavailable".into(),
             message: "terminal unavailable".into(),
         },

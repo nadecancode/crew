@@ -20,6 +20,7 @@ pub const CORE_OPERATION_ID_MAX: u64 = DRIVER_OPERATION_ID_START - 1;
 
 /// Borrowed current facts. No selected UI entity or credential lives here.
 pub struct ActionContext<'a> {
+    pub features: Option<&'a crate::features::FeatureAvailability>,
     pub connection: Option<&'a ConnectionContext>,
     pub endpoint: EndpointStatus,
     pub workspace: WorkspaceStatus,
@@ -174,6 +175,7 @@ impl From<ClientError> for PlanFailure {
 
 fn reason(code: &str, message: impl Into<String>) -> ClientReason {
     ClientReason {
+        details: None,
         code: code.into(),
         message: message.into(),
     }
@@ -350,8 +352,22 @@ fn action_kind(intent: &ActionIntent) -> ActionKind {
 /// Canonical effective options are shared with resource storage and queries.
 /// Event evidence is local-only and produces no command.
 pub fn canonical_resource_key(key: &ResourceKey) -> Result<ResourceKey, ClientError> {
+    if let ResourceKind::Feature(kind) = key.kind {
+        let ReadOptions::Feature(read) = &key.options else {
+            return Err(invalid("resource.options", "expected typed feature read"));
+        };
+        if !matches!(key.entity.entity, Entity::Workspace) || read.kind() != kind {
+            return Err(invalid(
+                "resource",
+                "feature resource identity differs from its request",
+            ));
+        }
+        read.validate()?;
+        return Ok(key.clone());
+    }
     let mut key = key.clone();
     let valid_entity = match key.kind {
+        ResourceKind::Feature(_) => unreachable!("validated above"),
         ResourceKind::TaskCard => matches!(key.entity.entity, Entity::Task(_)),
         ResourceKind::Message => matches!(key.entity.entity, Entity::Message(_)),
         ResourceKind::Event => matches!(key.entity.entity, Entity::Event(_)),
@@ -430,6 +446,9 @@ pub fn canonical_resource_key(key: &ResourceKey) -> Result<ResourceKey, ClientEr
 /// strings or unsupported filter/ack parameters.
 pub fn resource_command(key: &ResourceKey) -> Result<Option<Command>, ClientError> {
     let key = canonical_resource_key(key)?;
+    if let ReadOptions::Feature(read) = &key.options {
+        return Ok(Some(read.command()));
+    }
     let id = match &key.entity.entity {
         Entity::Agent(id) | Entity::Task(id) | Entity::Message(id) => Some(id.clone()),
         _ => None,
@@ -439,6 +458,7 @@ pub fn resource_command(key: &ResourceKey) -> Result<Option<Command>, ClientErro
         _ => None,
     };
     Ok(Some(match key.kind {
+        ResourceKind::Feature(_) => unreachable!("handled above"),
         ResourceKind::TaskCard => Command::TaskGet { id },
         ResourceKind::Message => Command::MessageGet {
             id: id.expect("validated message entity"),
@@ -693,6 +713,24 @@ impl Actions {
                     ));
                 }
                 let key = canonical_resource_key(&request.key)?;
+                if let ReadOptions::Feature(read) = &key.options {
+                    let feature = read.command().required_feature().expect("feature read");
+                    if !context.features.is_some_and(|f| f.supports(feature)) {
+                        return Err(unavailable(
+                            "unsupported_feature",
+                            "feature is unavailable on this connection",
+                        ));
+                    }
+                    if read.current_run().is_some_and(|run| {
+                        context.session.and_then(|s| s.workspace_run_id.as_deref())
+                            != Some(run.as_str())
+                    }) {
+                        return Err(unavailable(
+                            "stale_scope",
+                            "feature read belongs to another workspace run",
+                        ));
+                    }
+                }
                 match &key.entity.entity {
                     Entity::Agent(id) => {
                         agent(id, context)?;
@@ -980,7 +1018,12 @@ impl Actions {
         let id = allocate(&mut self.next_operation, "operation_id_exhausted")?;
         let mut update = pending_update(matches!(proposal.command, Some(Command::Answer { .. })));
         let lane = match proposal.route {
-            Route::Read => RequestLane::Read,
+            Route::Read => match proposal.resource.as_ref().map(|r| &r.options) {
+                Some(ReadOptions::Feature(read)) if read.lease.is_some() => RequestLane::Document {
+                    lease: read.lease.clone().expect("checked lease"),
+                },
+                _ => RequestLane::Read,
+            },
             Route::Action => RequestLane::Action,
             Route::Attach => {
                 let Some(Command::Attach { agent, .. }) = &proposal.command else {
@@ -1655,10 +1698,18 @@ impl CompletedOperation {
                 result: CommandResult::Attached { .. },
             } => (OperationOutcomeKind::Success, Some(self.operation_id), None),
             OperationOutcome::Succeeded { .. } => (OperationOutcomeKind::Success, None, None),
-            OperationOutcome::Rejected { code, message } => (
+            OperationOutcome::Rejected {
+                code,
+                message,
+                details,
+            } => (
                 OperationOutcomeKind::Rejected,
                 None,
-                Some(reason(code, message)),
+                Some(ClientReason {
+                    code: code.clone(),
+                    message: message.clone(),
+                    details: details.clone(),
+                }),
             ),
             OperationOutcome::NotSent { reason } => {
                 (OperationOutcomeKind::NotSent, None, Some(reason.clone()))

@@ -169,6 +169,8 @@ pub struct PeerInfo {
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ClientReason {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub details: Option<crate::features::FeatureRejection>,
     pub code: String,
     pub message: String,
 }
@@ -176,6 +178,15 @@ pub struct ClientReason {
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "kind", content = "data", rename_all = "snake_case")]
 pub enum ClientInput {
+    FeatureChannelClosed {
+        scope: ClientScope,
+        connection_epoch: crew_protocol::features::Id,
+    },
+    /// Driver-verified negotiation for this exact workspace connection.
+    Features {
+        scope: ClientScope,
+        availability: crate::features::FeatureAvailability,
+    },
     Bind {
         scope: ClientScope,
         mode: ConnectionMode,
@@ -325,6 +336,7 @@ pub struct TeamData {
 pub struct TasksData {
     pub tasks: Vec<TaskPresentation>,
     pub layers: Vec<TaskLayer>,
+    pub epics: Option<crew_protocol::epics::EpicBoard>,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -443,6 +455,7 @@ pub struct UsagePresentation {
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum ResourceKind {
+    Feature(crate::features::FeatureResourceKind),
     TaskCard,
     Message,
     Event,
@@ -458,6 +471,7 @@ pub enum ResourceKind {
 #[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(tag = "kind", content = "data", rename_all = "snake_case")]
 pub enum ReadOptions {
+    Feature(crate::features::FeatureRead),
     Default,
     Bounded {
         limit: u32,
@@ -494,6 +508,7 @@ pub enum ResourceStatus {
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "kind", content = "data", rename_all = "snake_case")]
 pub enum ResourceValue {
+    Feature(crate::features::FeatureResourceValue),
     TaskCard(TaskCard),
     Message(Option<Message>),
     Event(Option<Event>),
@@ -523,6 +538,19 @@ pub struct ResourceRequest {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "kind", content = "data", rename_all = "snake_case")]
 pub enum ViewQuery {
+    Features,
+    Epic {
+        key: ResourceKey,
+    },
+    Asides {
+        key: ResourceKey,
+    },
+    Docs {
+        key: ResourceKey,
+    },
+    UsageMetrics {
+        key: ResourceKey,
+    },
     /// Read the planner's immutable preflight for this captured intent. The
     /// query allocates no operation, confirmation or timer identifiers.
     Availability {
@@ -557,6 +585,11 @@ pub enum ViewQuery {
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "kind", content = "data", rename_all = "snake_case")]
 pub enum ViewPayload {
+    Features(crate::features::FeatureAvailability),
+    Epic(Box<ResourceState>),
+    Asides(Box<ResourceState>),
+    Docs(Box<ResourceState>),
+    UsageMetrics(Box<ResourceState>),
     /// The availability reason belongs to the query's captured intent scope.
     Availability(ActionAvailability),
     Overview(Box<OverviewData>),
@@ -847,20 +880,36 @@ pub enum CommandResult {
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "kind", content = "data", rename_all = "snake_case")]
 pub enum OperationOutcome {
-    Succeeded { result: CommandResult },
-    Rejected { code: String, message: String },
-    NotSent { reason: ClientReason },
+    Succeeded {
+        result: CommandResult,
+    },
+    Rejected {
+        code: String,
+        message: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        details: Option<crate::features::FeatureRejection>,
+    },
+    NotSent {
+        reason: ClientReason,
+    },
     Canceled,
-    OutcomeUnknown { reason: ClientReason },
-    ClosedLocally { attachment_id: AttachmentId },
-    SentUnacknowledged { attachment_id: AttachmentId },
+    OutcomeUnknown {
+        reason: ClientReason,
+    },
+    ClosedLocally {
+        attachment_id: AttachmentId,
+    },
+    SentUnacknowledged {
+        attachment_id: AttachmentId,
+    },
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum RequestLane {
     State,
     Read,
+    Document { lease: crate::features::DocLease },
     Action,
     Terminal { attachment_id: AttachmentId },
 }

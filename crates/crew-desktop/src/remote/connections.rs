@@ -1450,6 +1450,7 @@ impl Remote {
         // Without a usable store, only the explicit memory choice continues.
         if !memory && self.store_state.get() == Some(StoreState::Unavailable) {
             draft.store_error = Some(ClientReason {
+                details: None,
                 code: "key_unavailable".into(),
                 message: String::new(),
             });

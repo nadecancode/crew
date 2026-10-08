@@ -115,6 +115,7 @@ struct Channel {
     expected: Option<ClientScope>,
     context: Option<ConnectionContext>,
     ready: bool,
+    features: crew_client::features::FeatureAvailability,
     next_request: u64,
     waiting: VecDeque<u64>,
     open_timer: Option<u64>,
@@ -129,6 +130,9 @@ struct Channel {
 }
 
 enum PendingKind {
+    Discover {
+        expected: Option<ClientScope>,
+    },
     Subscribe {
         snapshot_id: u64,
     },
@@ -572,6 +576,7 @@ impl<C: ClientApi, W: CommandCodec> SessionDriver<C, W> {
         update.notice.changes.reset = true;
         update.notice.changes.availability = true;
         update.notice.reason = Some(ClientReason {
+            details: None,
             code: "client_state".into(),
             message: "The client could not update its state. Reconnect with a new client.".into(),
         });
@@ -670,6 +675,7 @@ impl<C: ClientApi, W: CommandCodec> SessionDriver<C, W> {
                 expected: expected.clone(),
                 context: None,
                 ready: false,
+                features: Default::default(),
                 next_request: 1,
                 waiting: VecDeque::new(),
                 open_timer: Some(timer),
@@ -759,23 +765,7 @@ impl<C: ClientApi, W: CommandCodec> SessionDriver<C, W> {
             self.workspace = WorkspaceStatus::Connecting;
             self.live = false;
             self.bind(&context, batch, clock)?;
-            let snapshot_id = allocate(&mut self.next_snapshot)?;
-            self.input(
-                ClientInput::SnapshotStarted {
-                    scope: context.scope,
-                    operation_id: snapshot_id,
-                },
-                clock,
-                batch,
-            )?;
-            self.request(
-                id,
-                Command::Subscribe,
-                PendingKind::Subscribe { snapshot_id },
-                false,
-                batch,
-                clock,
-            )?;
+            self.discover(id, None, batch, clock)?;
         } else if let Some(expected) = expected {
             let Some(binding) = &self.binding else {
                 return self.end_channel(id, TransportEnd::Closed, false, batch, clock);
@@ -788,27 +778,118 @@ impl<C: ClientApi, W: CommandCodec> SessionDriver<C, W> {
             {
                 return self.end_channel(id, TransportEnd::GrantChanged, false, batch, clock);
             }
-            // A local hello supplies PID but no startup time. Verify on that
-            // exact new socket before any read, action or terminal attachment.
-            if context.mode == ConnectionMode::LocalOperator {
-                self.request(
-                    id,
-                    Command::Snapshot {
-                        messages: Some(0),
-                        events: Some(0),
-                    },
-                    PendingKind::VerifyLane { expected },
-                    false,
-                    batch,
-                    clock,
-                )?;
-            } else if context.scope == expected {
-                self.lane_ready(id, expected, batch)?;
+            if matches!(purpose, ChannelPurpose::Terminal { .. }) {
+                self.verify_lane(id, expected, batch, clock)?;
             } else {
-                return self.end_channel(id, TransportEnd::GrantChanged, false, batch, clock);
+                self.discover(id, Some(expected), batch, clock)?;
             }
         } else {
             return self.end_channel(id, TransportEnd::Malformed, false, batch, clock);
+        }
+        Ok(())
+    }
+
+    fn discover(
+        &mut self,
+        id: ChannelId,
+        expected: Option<ClientScope>,
+        batch: &mut Batch,
+        clock: ClockSample,
+    ) -> Result<(), ClientError> {
+        self.request(
+            id,
+            Command::FeaturesNegotiate(crew_protocol::features::FeaturesNegotiate {
+                versions: crew_client::features::requested_versions(),
+            }),
+            PendingKind::Discover { expected },
+            false,
+            batch,
+            clock,
+        )?;
+        Ok(())
+    }
+
+    fn discovered(
+        &mut self,
+        id: ChannelId,
+        expected: Option<ClientScope>,
+        availability: crew_client::features::FeatureAvailability,
+        batch: &mut Batch,
+        clock: ClockSample,
+    ) -> Result<(), ClientError> {
+        if availability.session.as_ref().is_some_and(|session| {
+            self.channels.iter().any(|(other, c)| {
+                *other != id
+                    && c.features
+                        .session
+                        .as_ref()
+                        .is_some_and(|s| s.connection_epoch == session.connection_epoch)
+            })
+        }) {
+            return self.end_channel(id, TransportEnd::Malformed, true, batch, clock);
+        }
+        self.channels
+            .get_mut(&id)
+            .ok_or(ClientError::ClosedClient)?
+            .features = availability;
+        if let Some(expected) = expected {
+            return self.verify_lane(id, expected, batch, clock);
+        }
+        let context = self
+            .channels
+            .get(&id)
+            .and_then(|c| c.context.clone())
+            .ok_or(ClientError::ClosedClient)?;
+        let snapshot_id = allocate(&mut self.next_snapshot)?;
+        self.input(
+            ClientInput::SnapshotStarted {
+                scope: context.scope,
+                operation_id: snapshot_id,
+            },
+            clock,
+            batch,
+        )?;
+        self.request(
+            id,
+            Command::Subscribe,
+            PendingKind::Subscribe { snapshot_id },
+            false,
+            batch,
+            clock,
+        )?;
+        Ok(())
+    }
+
+    fn verify_lane(
+        &mut self,
+        id: ChannelId,
+        expected: ClientScope,
+        batch: &mut Batch,
+        clock: ClockSample,
+    ) -> Result<(), ClientError> {
+        let context = self
+            .channels
+            .get(&id)
+            .and_then(|c| c.context.clone())
+            .ok_or(ClientError::ClosedClient)?;
+        // Discovery precedes Snapshot, but no operation leaves until this existing
+        // full local identity check (including startup time) has succeeded.
+        if context.mode == ConnectionMode::LocalOperator {
+            self.request(
+                id,
+                Command::Snapshot {
+                    messages: Some(0),
+                    events: Some(0),
+                },
+                PendingKind::VerifyLane { expected },
+                false,
+                batch,
+                clock,
+            )?;
+        } else if context.scope == expected {
+            self.lane_ready(id, expected, batch, clock)?;
+        } else {
+            self.end_channel(id, TransportEnd::GrantChanged, false, batch, clock)?;
         }
         Ok(())
     }
@@ -836,6 +917,7 @@ impl<C: ClientApi, W: CommandCodec> SessionDriver<C, W> {
         id: ChannelId,
         scope: ClientScope,
         batch: &mut Batch,
+        clock: ClockSample,
     ) -> Result<(), ClientError> {
         let Some(channel) = self.channels.get_mut(&id) else {
             return Ok(());
@@ -846,6 +928,24 @@ impl<C: ClientApi, W: CommandCodec> SessionDriver<C, W> {
         }
         let waiting = std::mem::take(&mut channel.waiting);
         for request in waiting {
+            let supported = self
+                .pending
+                .get(&(id, request))
+                .and_then(|p| p.command.required_feature())
+                .is_none_or(|f| self.channels[&id].features.supports(f));
+            if !supported {
+                if let Some(pending) = self.take_pending(id, request, batch) {
+                    if let PendingKind::Operation {
+                        scope,
+                        operation_id,
+                        ..
+                    } = pending.kind
+                    {
+                        self.not_sent(scope, operation_id, "unsupported_feature", batch, clock)?;
+                    }
+                }
+                continue;
+            }
             if let Some(pending) = self.pending.get_mut(&(id, request)) {
                 if let Some(text) = pending.text.take() {
                     batch.effects.push(HostEffect::Send {
@@ -1003,7 +1103,49 @@ impl<C: ClientApi, W: CommandCodec> SessionDriver<C, W> {
             return Ok(());
         };
         if let Some(error) = frame.error {
-            let reason = safe_error(error.code, error.message);
+            if let PendingKind::Discover { expected } = pending.kind {
+                if matches!(
+                    error.code.as_str(),
+                    "unauthorized" | "authentication" | "revoked"
+                ) {
+                    return self.end_channel(id, TransportEnd::Authentication, true, batch, clock);
+                }
+                if error.code == "protocol" {
+                    return self.end_channel(
+                        id,
+                        TransportEnd::ProtocolMismatch,
+                        false,
+                        batch,
+                        clock,
+                    );
+                }
+                // Old decoders and old native intermediaries use invalid/forbidden.
+                // No mutation is retried or translated; only legacy views remain.
+                return self.discovered(
+                    id,
+                    expected,
+                    crew_client::features::FeatureAvailability {
+                        session: None,
+                        reason: Some(ClientReason {
+                            details: None,
+                            code: error.code,
+                            message: "Feature discovery is unavailable on this connection.".into(),
+                        }),
+                    },
+                    batch,
+                    clock,
+                );
+            }
+            let details = if matches!(pending.command, Command::AsideAsk(_)) {
+                error
+                    .data
+                    .and_then(|data| serde_json::from_value(data).ok())
+                    .map(crew_client::features::FeatureRejection::AsideAdmission)
+            } else {
+                None
+            };
+            let mut reason = safe_error(error.code, error.message);
+            reason.details = details;
             if let PendingKind::Operation {
                 scope,
                 operation_id,
@@ -1016,6 +1158,7 @@ impl<C: ClientApi, W: CommandCodec> SessionDriver<C, W> {
                     OperationOutcome::Rejected {
                         code: reason.code.clone(),
                         message: reason.message.clone(),
+                        details: reason.details.clone(),
                     },
                     batch,
                     clock,
@@ -1046,6 +1189,27 @@ impl<C: ClientApi, W: CommandCodec> SessionDriver<C, W> {
             }
         };
         match pending.kind {
+            PendingKind::Discover { expected } => {
+                let CommandResult::Feature(crew_client::features::FeatureResponse::FeatureSession(
+                    session,
+                )) = result
+                else {
+                    return self.end_channel(id, TransportEnd::Malformed, true, batch, clock);
+                };
+                if !crew_client::features::valid_negotiation(&session) {
+                    return self.end_channel(id, TransportEnd::Malformed, true, batch, clock);
+                }
+                self.discovered(
+                    id,
+                    expected,
+                    crew_client::features::FeatureAvailability {
+                        session: Some(*session),
+                        reason: None,
+                    },
+                    batch,
+                    clock,
+                )?;
+            }
             PendingKind::Subscribe { snapshot_id } => {
                 if result != CommandResult::Subscribed {
                     return self.end_channel(id, TransportEnd::Malformed, true, batch, clock);
@@ -1079,7 +1243,7 @@ impl<C: ClientApi, W: CommandCodec> SessionDriver<C, W> {
                     self.end_channel(id, TransportEnd::GrantChanged, false, batch, clock)?;
                     self.resynchronize(batch, clock)?;
                 } else {
-                    self.lane_ready(id, expected, batch)?;
+                    self.lane_ready(id, expected, batch, clock)?;
                 }
             }
             PendingKind::Listing => {
@@ -1119,6 +1283,21 @@ impl<C: ClientApi, W: CommandCodec> SessionDriver<C, W> {
                         channel.terminal_live = true;
                     }
                 }
+                let result = match result {
+                    CommandResult::Feature(response) => {
+                        let Some(context) = self.channels[&id].features.session.clone() else {
+                            return self.end_channel(
+                                id,
+                                TransportEnd::Malformed,
+                                true,
+                                batch,
+                                clock,
+                            );
+                        };
+                        CommandResult::FeatureScoped { context, response }
+                    }
+                    other => other,
+                };
                 self.complete(
                     scope.clone(),
                     operation_id,
@@ -1197,6 +1376,7 @@ impl<C: ClientApi, W: CommandCodec> SessionDriver<C, W> {
                 ClientInput::Unbind {
                     scope: previous,
                     reason: ClientReason {
+                        details: None,
                         code: "canonical_scope".into(),
                         message: "Verified workspace identity established.".into(),
                     },
@@ -1226,6 +1406,30 @@ impl<C: ClientApi, W: CommandCodec> SessionDriver<C, W> {
         }
         self.binding = Some(context.clone());
         self.visible_scope = Some(context.scope.clone());
+        let mut availability = self.channels[&id].features.clone();
+        if let Some(session) = &mut availability.session {
+            session.workspace_run_id = match snapshot.session.workspace_run_id.as_ref() {
+                Some(run) => match crew_protocol::features::Id::new(run.clone()) {
+                    Ok(run) => Some(run),
+                    Err(_) => {
+                        return self.end_channel(id, TransportEnd::Malformed, true, batch, clock)
+                    }
+                },
+                None => None,
+            };
+        }
+        self.channels
+            .get_mut(&id)
+            .ok_or(ClientError::ClosedClient)?
+            .features = availability.clone();
+        self.input(
+            ClientInput::Features {
+                scope: context.scope.clone(),
+                availability,
+            },
+            clock,
+            batch,
+        )?;
         self.input(
             ClientInput::Snapshot {
                 scope: context.scope,
@@ -1458,6 +1662,7 @@ impl<C: ClientApi, W: CommandCodec> SessionDriver<C, W> {
                 operation_id,
                 OperationOutcome::NotSent {
                     reason: ClientReason {
+                        details: None,
                         code: "not_live".into(),
                         message: "A fresh authenticated snapshot is required.".into(),
                     },
@@ -1466,7 +1671,24 @@ impl<C: ClientApi, W: CommandCodec> SessionDriver<C, W> {
                 clock,
             );
         }
-        let chosen = match lane {
+        let chosen = match lane.clone() {
+            RequestLane::Document { lease } => {
+                let exact = self.channels.iter().find_map(|(id, c)| {
+                    (c.ready
+                        && matches!(c.purpose, ChannelPurpose::Workspace | ChannelPurpose::Read)
+                        && c.context.as_ref().is_some_and(|ctx| ctx.scope == scope)
+                        && c.features
+                            .session
+                            .as_ref()
+                            .is_some_and(|f| f.connection_epoch == lease.connection_epoch)
+                        && c.features.supports(crew_protocol::features::Feature::Docs))
+                    .then_some(*id)
+                });
+                if exact.is_none() {
+                    return self.not_sent(scope, operation_id, "snapshot_expired", batch, clock);
+                }
+                exact
+            }
             RequestLane::State => self.root,
             RequestLane::Read => self.channels.iter().find_map(|(id, channel)| {
                 (channel.purpose == ChannelPurpose::Read
@@ -1507,11 +1729,16 @@ impl<C: ClientApi, W: CommandCodec> SessionDriver<C, W> {
                 }
             }
         };
-        let purpose = match lane {
+        let purpose = match &lane {
             RequestLane::State => ChannelPurpose::Workspace,
             RequestLane::Read => ChannelPurpose::Read,
+            RequestLane::Document { .. } => {
+                self.channels[&chosen.expect("exact lease channel")].purpose
+            }
             RequestLane::Action => ChannelPurpose::Action,
-            RequestLane::Terminal { attachment_id } => ChannelPurpose::Terminal { attachment_id },
+            RequestLane::Terminal { attachment_id } => ChannelPurpose::Terminal {
+                attachment_id: *attachment_id,
+            },
         };
         let channel_id = match chosen {
             Some(id) => id,
@@ -1530,6 +1757,13 @@ impl<C: ClientApi, W: CommandCodec> SessionDriver<C, W> {
                 }
             }
         };
+        if self.channels[&channel_id].ready
+            && command
+                .required_feature()
+                .is_some_and(|f| !self.channels[&channel_id].features.supports(f))
+        {
+            return self.not_sent(scope, operation_id, "unsupported_feature", batch, clock);
+        }
         let kind = PendingKind::Operation {
             scope: scope.clone(),
             operation_id,
@@ -1563,6 +1797,7 @@ impl<C: ClientApi, W: CommandCodec> SessionDriver<C, W> {
             operation_id,
             OperationOutcome::NotSent {
                 reason: ClientReason {
+                    details: None,
                     code: code.into(),
                     message: "The request was not sent.".into(),
                 },
@@ -1716,6 +1951,11 @@ impl<C: ClientApi, W: CommandCodec> SessionDriver<C, W> {
         let failed_action = channel.purpose == ChannelPurpose::Action
             && reason == TransportEnd::Closed
             && self.pending.keys().any(|(channel, _)| *channel == id);
+        let feature_connection = channel
+            .context
+            .as_ref()
+            .zip(channel.features.session.as_ref())
+            .map(|(context, features)| (context.scope.clone(), features.connection_epoch.clone()));
         let requests: Vec<_> = self
             .pending
             .keys()
@@ -1730,6 +1970,16 @@ impl<C: ClientApi, W: CommandCodec> SessionDriver<C, W> {
         self.cancel_open_timer(id, batch);
         self.channels.remove(&id);
         batch.effects.push(HostEffect::Close { channel_id: id });
+        if let Some((scope, connection_epoch)) = feature_connection {
+            self.input(
+                ClientInput::FeatureChannelClosed {
+                    scope,
+                    connection_epoch,
+                },
+                clock,
+                batch,
+            )?;
+        }
         if failed_action {
             // The state lane can still be connected when a mutation lane
             // dies. A fresh state attempt/barrier establishes the only context
@@ -2150,6 +2400,7 @@ impl<C: ClientApi, W: CommandCodec> SessionDriver<C, W> {
                 }
                 ClientEffect::Notice { code, .. } => {
                     batch.reason = Some(ClientReason {
+                        details: None,
                         code,
                         message: "Client state changed.".into(),
                     });
@@ -2291,7 +2542,11 @@ fn safe_error(code: String, message: String) -> ClientReason {
     } else {
         "The host refused the request.".into()
     };
-    ClientReason { code, message }
+    ClientReason {
+        details: None,
+        code,
+        message,
+    }
 }
 
 fn merge_changes(target: &mut ChangeSet, source: ChangeSet) {
