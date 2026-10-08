@@ -212,7 +212,21 @@ The side panel's detail for an epic shows, in this order:
 - the agents with their task counts (from the epic summary's agent counts);
 - the epic's usage when the metrics provide it (§Usage metrics);
 - its tasks, as a compact list with the same fold;
-- the docs its tasks link to (§Docs, "Links into Docs").
+- the docs its tasks link to (§Docs, "Links into Docs");
+- the **Report**, when the epic has one (`notes/epics.md`, "Per-epic
+  reports and session completion").
+
+**Report.** The section shows the report's summary, its time, and links to
+its decisions, which open the operator questions in the Message bus. Under
+the heading, a line states what the report covers: "Covers revision 14 ·
+current". When the epic changed afterwards, the line reads "Covers revision
+14 · 3 changes since" and the summary is shown muted, with the text "This
+report is older than the epic's current work." A stale report is never
+presented as the current verdict. An epic that was reopened keeps showing
+its last report this way. The epic's header row in Tasks marks a report as
+"Report" or "Report · outdated" from the summary row alone, without loading
+the body. The body is read when the detail opens. An epic without a report
+shows no Report section.
 
 There are no epic mutation actions in v1. Creating, renaming and closing
 epics belong to the orchestrator's tools, as `epics-model` defines them.
@@ -317,7 +331,7 @@ for more.
   A file present or different in a worktree is marked with that member's id.
 
 ```
-Docs    Workspace ▾                                   [Filter files…]
+Docs    Workspace ▾                       [Search paths and headings]
 ┌───────────────────────────┬──────────────────────────────────────────────────┐
 │ README.md                 │ notes/toolboxes.md            Workspace · 2 min ago │
 │ ▾ notes                   │ Edited by designer (not committed) · View ▾  History  │
@@ -341,8 +355,10 @@ Docs    Workspace ▾                                   [Filter files…]
 - **Tree.** It shows directories and files by name. A changed file has a
   marker dot, followed in the row by the ids of the members whose worktree
   differs (as text, not just a dot). Arrows navigate it, Enter opens a file,
-  and Right/Left expand and collapse directories. A filter field narrows it
-  by path. Files the team changed in the last hour can be listed first with
+  and Right/Left expand and collapse directories. A search field
+  (placeholder "Search paths and headings") narrows it by path and heading
+  text; a heading match opens the file at that heading. Full-text search is
+  not in v1 (`notes/knowledge-base.md`). Files the team changed in the last hour can be listed first with
   **Sort: Recently changed**.
 - **Document header.** It shows:
   - the path in monospace;
@@ -372,20 +388,31 @@ Docs    Workspace ▾                                   [Filter files…]
   - `http:`/`https:` links open in a new tab with `rel="noopener noreferrer"`.
   - Every other scheme is shown as text (web-design `text.test.ts` rules).
 - **Images:**
+  - Only static PNG, JPEG, GIF and WebP images are shown, within the
+    limits of `notes/knowledge-base.md`: 2 MiB per image, 8 MiB per
+    document, 8,192 pixels per axis and 16 million pixels.
   - The syntax tree carries an image reference (path and content hash),
     not the bytes. The client fetches the image in chunks over the existing
     authenticated WebSocket (each chunk well under the 1 MiB frame limit),
     assembles it, and shows it as a `data:` URL. Images are fetched as they
     come into view, a few at a time, and are cached by content hash, so a
     new version of a document does not fetch an unchanged image again. No
-    HTTP request is made. The size limits stay at 2 MiB per image and 8 MiB
-    per document. While an image is loading, its alt text holds its place.
-  - An oversized image shows its alt text and "Image too large to show
-    (3.4 MiB)".
+    HTTP request is made. While an image is loading, its alt text holds its
+    place.
+  - An image that is not shown keeps its alt text, followed by the reason as
+    text:
+    - "Image not shown · SVG is not supported";
+    - "Image not shown · animated images are not supported";
+    - "Image too large to show (3.4 MiB)", or with its dimensions,
+      "Image too large to show (9000 × 400 px)";
+    - "Image not shown · outside the docs folders";
+    - "Image not shown · this version's image is no longer kept here", for
+      an expired image of a Seen-here version. A current image is never
+      shown in its place.
   - Remote images are never fetched; their alt text and URL are shown as a
     link.
-  - SVG is shown only through `img` (`data:image/svg+xml`), which runs no
-    script.
+  - SVG is never shown in any form: not as an image source, document,
+    object or embed.
 - **Budget.** The renderer and the Docs view load as a second chunk requested
   when the document starts, as the terminal chunk is (web-design §security
   allows no later request). Their bytes count against P1/P4 like everything
@@ -416,11 +443,21 @@ Docs    Workspace ▾                                   [Filter files…]
 **History** opens a timeline for the file in the side panel, with two kinds
 of entry:
 
-- **Recorded:** each version-control change that touched the file, on the
+- **Recorded:** each published commit that touched the file, on the
   workspace's history and on members' branches, with author, time,
-  description and change id.
-- **Seen here:** versions the page observed since it opened, which cover
-  uncommitted saves between commits.
+  description and change id. A working copy is never recorded as a
+  commit.
+- **Seen here:** versions this connection received since it opened, which
+  cover uncommitted saves between commits. They are kept in memory only.
+  The section's footer reads "Seen here: up to 16 versions or 4 MiB of this
+  file while connected; older versions may expire." Expired entries drop
+  from the list, unless one is selected.
+
+A **selected Seen-here version that has expired** keeps its selection and
+header path. Its body reads "This version is no longer kept here. Seen-here
+versions expire when the connection drops or space runs low.", with
+**View Workspace** and, when a recorded commit exists, **View recorded
+<short sha>**. The view never switches by itself.
 
 Selecting one entry shows it. Selecting two shows a diff between them, using
 the existing Diff component (file and hunk structure, line-based on the
@@ -447,9 +484,10 @@ history").
 
 ### Search
 
-v1 searches file paths and headings, among the documents loaded in the page.
-Full-text search is conditional on `knowledge-base-design` providing a server
-index; the field then says "Search all docs" and shows matched lines with the
+v1 searches file paths and headings from the server's index; the field's
+placeholder is "Search paths and headings". Full-text search is not in v1
+(`notes/knowledge-base.md`). If a later version adds a server full-text
+index, the field then says "Search all docs" and shows matched lines with the
 file and heading.
 
 ## Usage metrics
@@ -728,15 +766,15 @@ Captures are taken in light and dark at 1440×960 and 390×844.
 | ID | Case | Pass when |
 | --- | --- | --- |
 | F01 | Tasks opens on a large session | List, grouped by Epic. The focus epic and active epics are expanded, done epics are collapsed under "Done epics (1)", and done tasks are folded per epic. Failed tasks of open epics are visible above their fold; the archived done epic with a failure says "Done · 1 failed" in its header. The first render is at most 50 ms. |
-| F02 | Epic header | It shows the title, status word, `N of M done · K failed`, the agents and the age. Progress reads correctly with colour removed (forced colours). Enter, Left and Right expand and collapse. The screen reader reads the level, the expanded state and the counts. |
+| F02 | Epic header | It shows the title, status word, `N of M done · K failed`, the agents and the age. Progress reads correctly with colour removed (forced colours). Enter, Left and Right expand and collapse. The screen reader reads the level, the expanded state and the counts. An epic with a report shows "Report"; after one more change to the epic, "Report · outdated", and its detail reads "Covers revision R · 1 change since" with the summary muted. |
 | F03 | Status derivation | Fixtures for planned (an empty epic, and one with only queued and ready tasks), active (one working; one waiting on a teammate), blocked (all unfinished tasks blocked) and done with one failure show the specified words. A client never computes them itself; the DTO supplies them. |
 | F04 | Search and filters | Typing narrows to the matching tasks with the count `x of 480`. Needs attention shows exactly the blocked, failed and review tasks. A selected task that is filtered out keeps its detail and offers Show it. A failed task in an archived done epic appears, its epic expanded, under Needs attention. Clear filters restores everything, including the earlier expansion. No request is sent while typing. |
 | F05 | Finishing work | A task push to done moves it into the fold, updates the header counts, announces once and does not scroll the list. A selected finishing task stays selected and shown. |
 | F06 | DAG by epic | It draws the focus epic. A cross-epic dependency appears as a labelled, subdued context node. All tasks above 150 shows the notice. A status filter subdues nodes and keeps edges. |
-| F07 | Docs tree and rendering | The tree lists every doc. Changed files show markers with the member ids. A document renders headings, lists, tables, code and images. Raw HTML shows as text, `javascript:` links stay text, an oversized image shows the size notice, and no CSP violation is logged. |
+| F07 | Docs tree and rendering | The tree lists every doc. Changed files show markers with the member ids. A document renders headings, lists, tables, code and images. Raw HTML shows as text and `javascript:` links stay text. An oversized image, an SVG and an animated GIF each show their alt text and the matching reason; no request is made for any of them and no CSP violation is logged. Searching for a heading's text lists that heading and opens the file there. |
 | F08 | Live document update | While a member's version is viewed, a change to it updates the document in place, with scroll anchored at the top heading and the notice "Updated just now". Show changes marks the changed blocks with text. A burst of 20 saves gives one update per second. While the Workspace is viewed, a member's change only shows the newer-version notice and never replaces the content. |
 | F09 | Workspace and member versions | View switches between Workspace and the member's version. Compare with Workspace shows a diff in the existing Diff component. |
-| F10 | History | The timeline lists the recorded changes and those seen since the page opened. Picking two entries shows the diff between them. |
+| F10 | History | The timeline lists the recorded commits and the versions seen since the page opened, with the Seen-here footer. Picking two entries shows the diff between them. After the connection drops, an unselected Seen-here entry is gone, and a selected one shows the expired state with View Workspace; the shown content never switches by itself. |
 | F11 | Links into Docs | Task text, message bodies and `file` artifacts containing `notes/x.md` or `notes/x.md §Heading` link to the document at that heading. Unknown paths are not links. Referenced by lists the linking tasks and messages, with its scope stated. |
 | F12 | Usage figures | Total, Hit rate, Write share, Estimate and Cost per done task match a hand computation from the fixture under the §Definitions formulas. The model without a price shows No price, and the total states the exclusion. A non-reporting agent shows not reported, not 0. A Codex fixture request with total input and cache read but no write counters counts toward hit rate and not toward write share. A Claude request with an aggregate write and no TTL split makes the estimate a range with its note. A scope with no done tasks shows Cost per done task unavailable with the reason. |
 | F13 | Trend and breakdown | The trend draws buckets from the samples, with the latest values as text. Show as table gives the same figures. The breakdown sorts by every column, and the narrow layout stacks without page overflow. |
