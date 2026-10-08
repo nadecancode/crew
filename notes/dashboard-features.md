@@ -131,7 +131,8 @@ Tasks   148 tasks · 112 done        [Search tasks…]  Group: Epic ▾  Status 
   No epic                                             3 tasks
 ```
 
-**Epic header row.** One row of 44px, or 32px when Compact. It shows, in
+**Epic header row.** One row of 44px, or 32px when Compact, the same height as a task row
+(§Performance). It shows, in
 order:
 
 - a disclosure triangle;
@@ -179,7 +180,7 @@ which defaults to the focus epic, plus an **All tasks** choice:
 - A dependency on a task in another epic is drawn as a subdued context node
   labelled with that epic, not dropped. This follows the existing rule that a
   filter must never suggest independence.
-- **All tasks** above 150 nodes shows a notice: "148 tasks are too many to
+- **All tasks** above 150 nodes shows a notice: "212 tasks are too many to
   read as one graph. Showing the focus epic; choose All tasks to draw
   everything (slower)." The layout itself is unchanged.
 - In the DAG, done tasks keep their place, at the same quiet weight as today.
@@ -266,12 +267,24 @@ can: a status filter subdues non-matching nodes and does not remove them.
   selected, it stays selected and expanded until the selection changes.
 - The **Needs attention** shortcut, and the summary row's counts, make every
   blocked, failed or in-review task reachable in one action.
+- **Filters reach folded and archived work.** Search and every filter cover
+  all tasks, including those folded into a done row and those in a collapsed
+  or archived epic. While a filter is set, each epic and fold holding a
+  match is shown expanded, so a failed task in a done epic appears with
+  Needs attention. This expansion lasts only while the filter does: Clear
+  filters restores the operator's own expansion.
 
 ### Performance
 
-- **Rendering.** The task list uses the existing `VirtualList` with
-  variable-height group rows. Its row heights are recomputed when density
-  changes.
+- **Rendering.** The task list flattens groups into one list of rows of a
+  single height per density: epic headers, task rows, done-fold rows and the
+  `Done epics (N)` separator are all 44px in Comfortable and 32px in
+  Compact. The epic header fits its title, status and progress bar in that
+  height. This keeps `VirtualList`'s fixed row height. Slice 2 extends
+  `VirtualList` with a role option (`treegrid` here, `listbox` as today)
+  and per-row `aria-level`, `aria-expanded` and `aria-setsize`/`aria-posinset`.
+  This is a shared change that the other lists keep working with. The list
+  remounts when density changes, preserving selection and scroll anchor.
 - **Budgets for 500 tasks in 20 epics**, at P5/P6 hardware:
   - first render of the Tasks list: at most 50 ms;
   - one search keystroke: at most 16 ms of work after the debounce;
@@ -292,7 +305,10 @@ for more.
   files in the workspace root and its top-level directories.
 - **Images:** files referenced by those docs.
 - **Two trees:**
-  - the **Workspace**: the operator's checkout, which is what landed;
+  - the **Workspace**: the operator's checkout as it is on disk. It may
+    be on any revision and carry uncommitted edits, so it is labelled
+    **Workspace (working copy)**, and the header names its revision. What
+    landed is in the recorded history (§History and diff);
   - every **member's worktree**: what is being written now.
 
   A file present or different in a worktree is marked with that member's id.
@@ -301,7 +317,7 @@ for more.
 Docs    Workspace ▾                                   [Filter files…]
 ┌───────────────────────────┬──────────────────────────────────────────────────┐
 │ README.md                 │ notes/toolboxes.md            Workspace · 2 min ago │
-│ ▾ notes                   │ Edited by designer (not landed) · View ▾  History  │
+│ ▾ notes                   │ Edited by designer (not committed) · View ▾  History  │
 │   dashboard-features.md • │ ─────────────────────────────────────────────────── │
 │     designer              │ # Member toolboxes                                 │
 │   toolboxes.md •          │ Operator request (w-9599bbf059d8f7a6): …           │
@@ -353,8 +369,14 @@ Docs    Workspace ▾                                   [Filter files…]
   - `http:`/`https:` links open in a new tab with `rel="noopener noreferrer"`.
   - Every other scheme is shown as text (web-design `text.test.ts` rules).
 - **Images:**
-  - A workspace image arrives as a `data:` URL inside the tree, within a
-    size limit (2 MiB per image, 8 MiB per document).
+  - The syntax tree carries an image reference (path and content hash),
+    not the bytes. The client fetches the image in chunks over the existing
+    authenticated WebSocket (each chunk well under the 1 MiB frame limit),
+    assembles it, and shows it as a `data:` URL. Images are fetched as they
+    come into view, a few at a time, and are cached by content hash, so a
+    new version of a document does not fetch an unchanged image again. No
+    HTTP request is made. The size limits stay at 2 MiB per image and 8 MiB
+    per document. While an image is loading, its alt text holds its place.
   - An oversized image shows its alt text and "Image too large to show
     (3.4 MiB)".
   - Remote images are never fetched; their alt text and URL are shown as a
@@ -369,10 +391,15 @@ Docs    Workspace ▾                                   [Filter files…]
 
 ### Live updates
 
-- **The open document updates in place** when its file changes, with no
-  flash. The scroll position is anchored to the heading at the top of the
-  viewport, so reading is not interrupted. A one-line notice under the header
-  reads "Updated just now by graph's worktree · Show changes".
+- **The open document updates in place** when the version being viewed
+  changes, with no flash: the Workspace working copy, or the one member's
+  worktree chosen in View. The scroll position is anchored to the heading at
+  the top of the viewport, so reading is not interrupted. A one-line notice
+  under the header reads "Updated just now · Show changes".
+- **A change in another version** never replaces what is shown. While the
+  Workspace is viewed and graph's worktree changes the same file, the
+  notice reads "graph's worktree has a newer version · View it · Compare",
+  and the View menu marks that member.
 - **Show changes** marks the blocks changed since the page opened the file:
   a 3px `--info` bar on the left plus the text "changed" for assistive
   technology. It stays until the operator turns it off.
@@ -395,7 +422,8 @@ of entry:
 Selecting one entry shows it. Selecting two shows a diff between them, using
 the existing Diff component (file and hunk structure, line-based on the
 markdown source). **Compare with Workspace** diffs a member's version against
-the landed one. The history is read once when it opens and then grows from
+the Workspace working copy. To compare with a recorded revision, pick it in
+the history. The history is read once when it opens and then grows from
 pushes.
 
 ### Links into Docs
@@ -432,25 +460,38 @@ every view and benchmark uses the same words:
 | --- | --- | --- |
 | Input | uncached input tokens | tokens |
 | Cache read | tokens read from the prompt cache | tokens |
-| Cache write | tokens written to the prompt cache (all TTLs) | tokens |
+| Cache write (5 min), Cache write (1 h) | tokens written to the prompt cache, per TTL | tokens; the two are summed only where a total is shown, and are priced separately |
 | Output | output tokens | tokens |
-| Hit rate | cache read ÷ (input + cache read + cache write) | percent, one decimal |
-| Write share | cache write list cost ÷ input-side list cost | percent |
-| Estimate | tokens × the model's list price per category | `≈ $12.40`, labelled "list-price estimate" |
+| Total input | input + cache read + both cache writes, counted only over requests where all four are reported | tokens |
+| Hit rate | cache read ÷ total input, over the same requests | percent, one decimal |
+| Write share | list cost of both cache writes ÷ input-side list cost, over the same requests | percent |
+| Estimate | each category's tokens × that model's list price for the category (5-minute and 1-hour writes at their own prices) | `≈ $12.40`, labelled "list-price estimate" |
 | Cost per done task | estimate ÷ tasks done in the scope | `≈ $0.84` |
 
-The prompt-cache audit showed that write volume, not hit rate, drives cost
-(97.9% hit rate with writes at 56.3% of input-side cost). So every summary
-shows Hit rate and Write share together, never Hit rate alone.
+**Coverage.** Rates are computed only over requests that report every field
+they need. A request missing one is counted separately, never with that
+field as zero. Each figure states its coverage when it is incomplete, for
+example "Hit rate 97.9% · over 9,412 of 9,801 requests". A runtime that never
+reports a field shows **not reported** for it, and the scope shows "N of M
+agents reporting".
+
+**Why both rates.** Hit rate and Write share always appear together. In the
+prompt-cache audit's cohort (49 sessions, Oct 6–8, list prices read Oct 8),
+the hit rate was 97.9% while cache writes were 56.3% of input-side list cost.
+That is an observation of one cohort, not a general law; showing both lets
+each session be judged on its own figures.
 
 Estimates use a price table that names its source and date (the audit's
-`prices.tsv` format). A model without a price shows **No price**, and the
-total then says "excludes 2 models without a price". Subscription billing is
-not modelled; the label says list price.
+`prices.tsv` format), with separate 5-minute and 1-hour write prices. A
+model without a price shows **No price**, and the total then says "excludes
+2 models without a price". Subscription billing is not modelled; the label
+says list price.
 
-Not every runtime reports every field. A missing category is **not
-reported**, never zero. A scope where only some agents report shows "N of M
-agents reporting".
+**Asides are a separate scope.** The usage of `/btw` answers is recorded
+apart from the live sessions' usage. Session, epic and agent figures,
+history and benchmarks exclude it. The Usage view shows it as its own
+**Asides** line ("Asides: ≈ $1.12 · 6 answers"), and the scope selector
+offers **Asides** to see it alone.
 
 ### Usage view
 
@@ -486,10 +527,16 @@ per-agent rows, and gains a metrics section above them.
   Rows sort by any column. Numbers use tabular figures. Below 768px the
   table becomes stacked rows (web-revamp "At narrow width…").
 - **Big writes.** The requests that wrote at least 10k tokens and more than
-  they read (the audit's definition), with agent, time, tokens written,
-  estimate and cause class when known. A row opens the agent's inspector at
-  that time in the transcript when it is available. This list is what makes
-  the metric actionable.
+  they read (the audit's definition), with agent, time, tokens written per
+  TTL and estimate. A row opens the agent's inspector at that time in the
+  transcript when it is available. Each row also has a **Context** field:
+  - an event recorded next to the request, named as observed with its
+    time, for example "Compaction at 00:40 (1 min before)" or "Session
+    resumed at 00:12";
+  - or **Unknown** when no such event is recorded.
+
+  The dashboard never calls a write avoidable, and never names a cause it
+  did not observe.
 - **History.** The workspace's sessions, one row each:
   - start, duration;
   - tasks done;
@@ -599,7 +646,7 @@ v1 means the same release as the web feature; later means a follow-up card.
 
 | Feature | TUI | GTK (Linux) | Apple |
 | --- | --- | --- | --- |
-| Epic grouping in task list, fold of done tasks | v1: grouped list, Enter/arrows fold, `h` toggles done | v1 | v1 |
+| Epic grouping in task list, fold of done tasks | v1: grouped list, Enter/arrows fold, `D` toggles done | v1 | v1 |
 | Focus epic in summary | v1, status line | v1, Team header | v1 |
 | Epic detail | v1, detail pane | v1, inspector | v1 |
 | Task search, filters, density | v1 search and status filter; no density | v1 search, status, agent | v1 search, status |
@@ -634,7 +681,8 @@ words are identical to this note.
 - **New keys:**
   - `n`: the Docs view;
   - `b`: the Asides tab;
-  - `h`: in Tasks, show or hide done tasks.
+  - `D`: in Tasks, show or hide done tasks. (`h` already moves left in the
+    DAG and to the previous row in lists, so it is not reused.)
 
   Each is listed once in `KEYS`, and Help reads that table.
 - **Contrast.** Contrast and focus rules are web-revamp §system's, and the
@@ -657,14 +705,14 @@ Captures are taken in light and dark at 1440×960 and 390×844.
 
 | ID | Case | Pass when |
 | --- | --- | --- |
-| F01 | Tasks opens on a large session | List, grouped by Epic. The focus epic and active epics are expanded, done epics are collapsed under "Done epics (1)", and done tasks are folded per epic. Failed tasks are visible. The first render is at most 50 ms. |
+| F01 | Tasks opens on a large session | List, grouped by Epic. The focus epic and active epics are expanded, done epics are collapsed under "Done epics (1)", and done tasks are folded per epic. Failed tasks of open epics are visible above their fold; the archived done epic with a failure says "Done · 1 failed" in its header. The first render is at most 50 ms. |
 | F02 | Epic header | It shows the title, status word, `N of M done · K failed`, the agents and the age. Progress reads correctly with colour removed (forced colours). Enter, Left and Right expand and collapse. The screen reader reads the level, the expanded state and the counts. |
 | F03 | Status derivation | Fixtures for planned (an empty epic, and one with only queued and ready tasks), active (one working; one waiting on a teammate), blocked (all unfinished tasks blocked) and done with one failure show the specified words. A client never computes them itself; the DTO supplies them. |
-| F04 | Search and filters | Typing narrows to the matching tasks with the count `x of 480`. Needs attention shows exactly the blocked, failed and review tasks. A selected task that is filtered out keeps its detail and offers Show it. Clear filters restores everything. No request is sent while typing. |
+| F04 | Search and filters | Typing narrows to the matching tasks with the count `x of 480`. Needs attention shows exactly the blocked, failed and review tasks. A selected task that is filtered out keeps its detail and offers Show it. A failed task in an archived done epic appears, its epic expanded, under Needs attention. Clear filters restores everything, including the earlier expansion. No request is sent while typing. |
 | F05 | Finishing work | A task push to done moves it into the fold, updates the header counts, announces once and does not scroll the list. A selected finishing task stays selected and shown. |
 | F06 | DAG by epic | It draws the focus epic. A cross-epic dependency appears as a labelled, subdued context node. All tasks above 150 shows the notice. A status filter subdues nodes and keeps edges. |
 | F07 | Docs tree and rendering | The tree lists every doc. Changed files show markers with the member ids. A document renders headings, lists, tables, code and images. Raw HTML shows as text, `javascript:` links stay text, an oversized image shows the size notice, and no CSP violation is logged. |
-| F08 | Live document update | While a doc is open, a member's worktree change updates it in place. Scroll stays anchored at the top heading, and the notice names the member. Show changes marks the changed blocks with text. A burst of 20 saves gives one update per second. |
+| F08 | Live document update | While a member's version is viewed, a change to it updates the document in place, with scroll anchored at the top heading and the notice "Updated just now". Show changes marks the changed blocks with text. A burst of 20 saves gives one update per second. While the Workspace is viewed, a member's change only shows the newer-version notice and never replaces the content. |
 | F09 | Workspace and member versions | View switches between Workspace and the member's version. Compare with Workspace shows a diff in the existing Diff component. |
 | F10 | History | The timeline lists the recorded changes and those seen since the page opened. Picking two entries shows the diff between them. |
 | F11 | Links into Docs | Task text, message bodies and `file` artifacts containing `notes/x.md` or `notes/x.md §Heading` link to the document at that heading. Unknown paths are not links. Referenced by lists the linking tasks and messages, with its scope stated. |
@@ -674,7 +722,7 @@ Captures are taken in light and dark at 1440×960 and 390×844.
 | F15 | Aside ask | `/btw` switches the composer to aside mode with the copy line and the `--info` border. The recipient picker lists unavailable members with reasons. Escape keeps the text. Sending opens the Asides tab. |
 | F16 | Aside answers | Answers arrive independently; the slow one shows Answering and the failed one shows its reason. The footer names the source copy and time, and tokens and estimate are shown. Cancel stops pending answers. |
 | F17 | Aside isolation | During and after an aside: no bus row, inbox entry, transcript line, task change or briefing change. Only `aside.*` events without bodies appear. The fixture's live sessions receive no input. Send as message opens the normal composer prefilled, and only sending it reaches the member. |
-| F18 | Keyboard and screen reader | Every new control is reachable by Tab. The `n`, `b` and `h` keys work and are listed in Help. Tree and treegrid semantics hold, the announcements are polite and bounded, and focus is never stolen. |
+| F18 | Keyboard and screen reader | Every new control is reachable by Tab. The `n`, `b` and `D` keys work and are listed in Help. Tree and treegrid semantics hold, the announcements are polite and bounded, and focus is never stolen. |
 | F19 | Budgets | P1, P2 and P4 hold, or a raise is recorded with its card (as for toolbox-dashboards). The Docs chunk is requested at document start and never later. The idle page requests no animation frames. |
 | F20 | Parity | The TUI and native clients show epic grouping, the done fold, the focus epic and usage summary figures with the same words for the same fixture. The TUI also has `/btw`. |
 
@@ -718,9 +766,18 @@ Each slice is one card. The protocol pieces depend on the design cards.
 8. **QA:** the fixture workspace, captures in light and dark at both sizes,
    F18 and F19.
 
-Slices 2 and 6–7 need only `epics-model`. Slice 3 needs
-`knowledge-base-design`, slice 4 `usage-metrics-design`, and slice 5
-`btw-mechanism`.
+Dependencies:
+
+- Slice 2 needs `epics-model`.
+- Slice 3 needs `knowledge-base-design`.
+- Slice 4 needs `usage-metrics-design`.
+- Slice 5 needs `btw-mechanism`.
+- Slice 6 (TUI) needs `epics-model`, `usage-metrics-design` and
+  `btw-mechanism`.
+- Slice 7 (native) needs `epics-model` and `usage-metrics-design`.
+
+Each slice's epic part can land as soon as `epics-model` does, ahead of its
+usage and aside parts.
 
 ## Requirements on the design cards
 
@@ -739,8 +796,13 @@ or push back:
   - Per-request samples or buckets with agent, model, task (for epic
     attribution) and time. They are kept for the workspace's sessions, so
     History and trends survive restarts.
-  - The four token categories, with "not reported" distinct from zero.
-  - A versioned, dated price table, and the big-write classification.
+  - Input, cache read, cache write split by TTL (5 minutes and 1 hour), and
+    output, each per request with "not reported" distinct from zero, so
+    coverage can be stated.
+  - A versioned, dated price table with separate write prices per TTL.
+  - Big writes with the events observed next to them, for the Context
+    field.
+  - Aside usage recorded apart from live sessions.
   - The same definitions as §Definitions and `notes/prompt-cache.md`.
 - **`knowledge-base-design`** (content):
   - The roots and a setting to extend them.
