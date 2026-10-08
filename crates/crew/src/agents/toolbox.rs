@@ -92,7 +92,8 @@ pub struct ActiveToolbox {
     /// reopening this member's mutable pin during a child's launch.
     #[serde(default)]
     pub snapshot_owner: Option<String>,
-    /// A fresh-session restart refreshes the upstream definition snapshots.
+    /// An explicit `resume --restart` or fresh-session restart refreshes
+    /// upstream definition snapshots, except for inherited frozen catalogs.
     #[serde(default)]
     pub refresh: bool,
 }

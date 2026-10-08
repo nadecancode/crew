@@ -38,5 +38,6 @@ receipt repairs delivery and its proved read acknowledgement after a crash
 before the live row update. The unread badge remains acknowledgement-based:
 clipped or unproved messages stay unread despite a delivery timestamp.
 
-Validation and source checkpoints will be recorded after the native and
-daemon regression checks.
+The forwarded source preserves the reviewed toolbox pause implementation on
+ff9c9d28. Validation and source checkpoints will be recorded after the native
+and daemon regression checks.
