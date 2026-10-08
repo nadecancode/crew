@@ -6056,7 +6056,7 @@ fn a_pi_member_is_started_with_crews_extension_and_reports_through_it() {
         "{args}"
     );
     assert!(
-        args.ends_with("Task pi-1-task is yours: \"try things\".\n"),
+        args.ends_with("Task pi-1-task is yours: \"try things\".\n\n[crew] Messages delivered here in full may be marked read; truncated messages stay unread; fetch only the id named above.\n"),
         "{args}"
     );
     assert!(

@@ -79,17 +79,35 @@ type Receipt = {
   batch_id: string; ids: string[]; phase: 'submitted' | 'accepted' | 'observed' | 'consumed' | 'unknown';
   queued_at: number; accepted_at?: number; observed_at?: number; turn_id?: string;
   deadline: number; launch?: string; retired?: boolean; ended?: boolean;
+  observed_sha256?: string[];
 }
 type Pending = Receipt & { text?: string; acceptedText?: string; startText?: string; submission?: Promise<void>; completion?: () => void; observation?: Promise<boolean>; consumption?: Promise<void> }
 const receipts = new Map<string, Pending>()
 let nativeSession = ''
 let launch: string | undefined
+let readProofs = false
 let stopped = false
 let ordinary = Promise.resolve()
 let stored = Promise.resolve()
 
 function marker(id: string): string { return '[crew] Delivery batch ' + id + '\n' }
 function hasMarker(text: string, id: string): boolean { return text.startsWith(marker(id)) || text.includes('\n' + marker(id)) }
+
+// The SDK joins queued prompts with one LF. Strip that separator only when
+// another marker follows; every byte of the rendered batch is otherwise kept.
+function observedSegment(text: string, id: string): string | undefined {
+  const marks = [...text.matchAll(/^\[crew\] Delivery batch [^\n]+\n/gm)]
+  const own = marks.filter(match => match[0] === marker(id))
+  if (own.length !== 1) return undefined
+  const start = own[0].index!
+  const next = marks.find(match => match.index! > start)?.index
+  return next === undefined ? text.slice(start) : text.slice(start, next - 1)
+}
+
+async function digest(text: string): Promise<string> {
+  const bytes = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(text))
+  return [...new Uint8Array(bytes)].map(byte => byte.toString(16).padStart(2, '0')).join('')
+}
 
 async function save($: EngineInterface): Promise<void> {
   // Persist correlation and disposition only. No message or accepted text.
@@ -104,7 +122,8 @@ async function notice($: EngineInterface, event: string, row?: Receipt, extra: o
       JSON.stringify({ session_id: nativeSession,
         ...(row === undefined ? {} : { batch_id: row.batch_id, ids: row.ids, phase: row.phase,
           queued_at: row.queued_at, accepted_at: row.accepted_at, observed_at: row.observed_at,
-          deadline: row.deadline, turn_id: row.turn_id, ended: row.ended, launch: row.launch }), ...extra })])
+          deadline: row.deadline, turn_id: row.turn_id, ended: row.ended, launch: row.launch,
+          observed_sha256: row.observed_sha256 }), ...extra })])
     return done.exitCode === 0 && JSON.parse(done.stdout).ok === true
   } catch { return false }
 }
@@ -120,6 +139,13 @@ async function consumed($: EngineInterface, row: Pending): Promise<void> {
   if (row.consumption) return row.consumption
   const finishing = (async () => {
     if (row.observation && !await row.observation) return
+    if (row.observed_sha256 === undefined && row.startText !== undefined) {
+      const segment = observedSegment(row.startText, row.batch_id)
+      if (segment !== undefined) {
+        try { row.observed_sha256 = [await digest(segment)]; await save($) }
+        catch { /* Consumption still holds; no coverage proof means no read ack. */ }
+      }
+    }
     const confirmed = await notice($, 'native-delivery-started', row)
     if (confirmed) { row.phase = 'consumed'; await save($) }
     else { await unknown($, row, 'native consumption report is not confirmed') }
@@ -202,6 +228,7 @@ async function deliver($: EngineInterface, line: string): Promise<void> {
     const control = JSON.parse(line).native_bridge_ready
     if (control?.ok === true) {
       launch = typeof control.launch === 'string' ? control.launch : undefined
+      readProofs = control.read_proofs === 1
       for (const [id, row] of receipts) {
         if (row.launch !== launch || row.retired) { receipts.delete(id); continue }
         if (row.accepted_at !== undefined) await notice($, 'native-delivery-accepted', row)
@@ -226,8 +253,23 @@ async function deliver($: EngineInterface, line: string): Promise<void> {
       if (appended.deny === undefined) {
         unseen++
         if (delivery.ids.length) {
-          const ack = await $.process.run([CREW_BIN, 'delivered', '--identity', IDENTITY, ...delivery.ids])
-          if (ack.exitCode !== 0) throw new Error('immediate acknowledgement failed')
+          if (readProofs && delivery.batch_id) {
+            let observed_sha256: string[] = []
+            const row = appended.message
+            if (row?.type === 'user' && row.role === 'user' && row.content.length === 1) {
+              const block = row.content[0]
+              if (block.type === 'text' && typeof block.text === 'string') {
+                try { observed_sha256 = [await digest(marker(delivery.batch_id) + block.text)] }
+                catch { /* No proof: acknowledge consumption only. */ }
+              }
+            }
+            if (!await notice($, 'native-delivery-appended', undefined, {
+              batch_id: delivery.batch_id, ids: delivery.ids, launch, turn_id: turnId, observed_sha256,
+            })) throw new Error('immediate acknowledgement failed')
+          } else {
+            const ack = await $.process.run([CREW_BIN, 'delivered', '--identity', IDENTITY, ...delivery.ids])
+            if (ack.exitCode !== 0) throw new Error('immediate acknowledgement failed')
+          }
         }
         return
       }
