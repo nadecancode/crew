@@ -80,7 +80,7 @@ restart {id} fresh or move it to another CLI."
 
     /// Task health uses the tick's captured time, so the reminder boundary and
     /// retry budget can be tested without sleeping or changing their defaults.
-    async fn task_health_at(&self, now: i64, limits: &crew_core::config::Limits) {
+    pub(crate) async fn task_health_at(&self, now: i64, limits: &crew_core::config::Limits) {
         enum Todo {
             Remind {
                 agent: String,
@@ -140,6 +140,25 @@ restart {id} fresh or move it to another CLI."
                             todo.push(Todo::Unresponsive {
                                 agent: agent.id.clone(),
                                 why: format!("no activity for {}s", (now - last) / 1000),
+                            });
+                        }
+                    }
+                    // A cache keep-alive's turn leaves the member Waiting
+                    // (keepalive.rs), but one that never ends is as stuck as
+                    // any other turn, and what is queued for the member waits
+                    // behind it.
+                    AgentStatus::Waiting if rt.turn_active => {
+                        let Some(since) = rt.keepalive_turn_since else {
+                            continue;
+                        };
+                        let last = since.max(agent.last_activity_at).max(rt.last_output_at);
+                        if now - last > (limits.unresponsive_secs as i64) * 1000 {
+                            todo.push(Todo::Unresponsive {
+                                agent: agent.id.clone(),
+                                why: format!(
+                                    "its cache keep-alive turn shows no activity for {}s",
+                                    (now - last) / 1000
+                                ),
                             });
                         }
                     }
