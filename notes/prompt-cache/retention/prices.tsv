@@ -1,0 +1,8 @@
+model	input	write_1h	read	output	source
+claude-opus-5-5	4	8	0.20	20	https://platform.claude.com/docs/en/about-claude/pricing (read 2026-10-08)
+claude-fable-5-1	10	20	0.25	50	same
+claude-sonnet-5-5	2	4	0.10	10	same
+claude-haiku-4-5	1	2	0.10	5	same
+gpt-6-astra	10		1.00	50	https://developers.openai.com/api/docs/pricing (read 2026-10-08); no explicit write price
+gpt-6.1-sol	2		0.10	10	same
+gpt-6-luna	0.10		0.01	0.50	same

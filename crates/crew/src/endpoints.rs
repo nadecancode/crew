@@ -28,6 +28,9 @@ use crew_core::util::is_valid_id;
 use crew_core::RuntimeKind;
 use serde::Deserialize;
 
+mod toolbox;
+pub use toolbox::ToolboxReferences;
+
 /// Overrides the location of the global file (packaging, tests).
 pub const GLOBAL_CONFIG_ENV: &str = "CREW_GLOBAL_CONFIG";
 const GLOBAL_CONFIG: &str = "/etc/crew/config.toml";
@@ -128,6 +131,8 @@ struct Section {
     env: BTreeMap<String, String>,
     #[serde(default)]
     env_files: BTreeMap<String, String>,
+    #[serde(default)]
+    toolbox_env: BTreeMap<String, toolbox::SecretSource>,
 }
 
 #[derive(Deserialize, Clone, Default, PartialEq)]
@@ -137,6 +142,8 @@ struct FileConfig {
     codex: Option<Section>,
     #[serde(default)]
     agents: BTreeMap<String, Section>,
+    #[serde(default)]
+    toolbox_env: BTreeMap<String, toolbox::SecretSource>,
     /// The dashboard server's (`crate::web::process::Settings`), read there.
     #[serde(default)]
     #[allow(dead_code)]
@@ -220,6 +227,7 @@ auth_token, auth_token_env, auth_token_file"
     }
 
     fn validate(&self, dir: &Path) -> Result<()> {
+        toolbox::validate_sources(&self.toolbox_env)?;
         if let Some(url) = self
             .base_url
             .as_deref()
@@ -303,13 +311,20 @@ fn expand_path(path: &str, dir: &Path) -> PathBuf {
 
 impl FileConfig {
     fn validate(&self, dir: &Path) -> Result<()> {
+        toolbox::validate_sources(&self.toolbox_env).context("[toolbox_env]")?;
         if let Some(claude) = &self.claude {
+            if !claude.toolbox_env.is_empty() {
+                bail!("toolbox_env belongs at the top level or under [agents.<id>]");
+            }
             claude.validate(dir).context("[claude]")?;
             if claude.wire_api.is_some() {
                 bail!("[claude]: wire_api is a Codex setting");
             }
         }
         if let Some(codex) = &self.codex {
+            if !codex.toolbox_env.is_empty() {
+                bail!("toolbox_env belongs at the top level or under [agents.<id>]");
+            }
             codex.validate(dir).context("[codex]")?;
             if matches!(
                 codex.credential(dir)?,
@@ -925,7 +940,7 @@ mod tests {
         }
     }
 
-    fn layers(global: &str, user: &str, project: &str) -> Layers {
+    pub(super) fn layers(global: &str, user: &str, project: &str) -> Layers {
         Layers {
             layers: vec![
                 layer(Scope::Global, global),

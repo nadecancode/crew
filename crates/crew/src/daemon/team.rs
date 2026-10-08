@@ -234,6 +234,7 @@ them",
                     runtime: config.orchestrator.runtime,
                     model: config.orchestrator.model.clone(),
                     command: config.orchestrator.command.clone(),
+                    toolbox: config.orchestrator.toolbox.clone(),
                     ..AgentSpec::default()
                 },
                 true,

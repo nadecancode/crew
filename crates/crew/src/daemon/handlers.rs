@@ -256,6 +256,12 @@ change identity",
             Call::AgentsList => reply(self.model().agents.clone()),
             Call::AgentAdd { spec } => {
                 self.privileged(&who)?;
+                // The orchestrator chooses bundles by name; only the team file
+                // defines what they hold (notes/toolboxes.md, Orchestrator
+                // tools). The operator's are checked against the team in add_agent.
+                if matches!(&who, Who::Agent(_)) {
+                    self.check_bundle_selection(&spec.toolbox)?;
+                }
                 // The orchestrator's additions once the team is founded are
                 // temporary; the operator's are the operator's to remove.
                 let temporary =
@@ -388,10 +394,11 @@ change identity",
                 task,
                 runtime,
                 model,
+                toolbox,
             } => {
                 let parent = agent_only(&who)?.to_string();
                 reply(
-                    self.spawn_subagent(&parent, id, role, task, runtime, model)
+                    self.spawn_subagent(&parent, id, role, task, runtime, model, toolbox)
                         .await?,
                 )
             }
@@ -440,6 +447,39 @@ change identity",
                 let agent = agent_only(&who)?.to_string();
                 self.confirm_delivery(&agent, &ids);
                 Ok(json!({ "ok": true }))
+            }
+            Call::ToolboxServer { name, preflight } => {
+                // An agent reaches its own servers and nobody else's: the
+                // caller is the authenticated agent, never a parameter.
+                let agent = agent_only(&who)?.to_string();
+                reply(self.toolbox_server_launch(&agent, &name, preflight)?)
+            }
+            Call::ToolboxReport { name, kind, detail } => {
+                let agent = agent_only(&who)?.to_string();
+                self.toolbox_report(&agent, &name, kind, &detail).await;
+                Ok(json!({ "ok": true }))
+            }
+            Call::Toolbox { agent, runtime } => {
+                self.privileged(&who)?;
+                let agents: Vec<crew_core::Agent> = match &agent {
+                    Some(id) => vec![self
+                        .agent(id)
+                        .ok_or_else(|| RpcError::not_found(format!("no agent '{id}'")))?],
+                    None => self.model().agents.clone(),
+                };
+                let views: Result<Vec<_>, RpcError> = agents
+                    .iter()
+                    .map(|a| self.toolbox_view(a, runtime))
+                    .collect();
+                reply(views?)
+            }
+            Call::ToolboxCheck { config } => {
+                operator_only(&who)?;
+                reply(self.toolbox_check(&config)?)
+            }
+            Call::ToolboxReload { config } => {
+                operator_only(&who)?;
+                reply(self.toolbox_reload_call(&config)?)
             }
             Call::Credential => {
                 // An agent may fetch its own key and nobody else's: the

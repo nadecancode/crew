@@ -621,6 +621,46 @@ pub struct Limits {
     /// in percent, so it can queue a compaction at a good moment (0 never).
     #[serde(default = "default_context_warn_percent")]
     pub context_warn_percent: u8,
+    /// Keep an idle Claude Code member's prompt cache warm: this many seconds
+    /// after its last turn, crew asks it for a one-word reply, so the cached
+    /// context is read (and its one-hour lifetime renewed) instead of being
+    /// written again when work comes. 0 never (the default); below 3600 to
+    /// matter, 3300 suggested. See notes/prompt-cache.md, D2 revision.
+    #[serde(default, skip_serializing_if = "is_zero")]
+    pub keep_cache_warm_secs: u64,
+    /// Keep-alives per rest, after which the cache is let go.
+    #[serde(
+        default = "default_keep_cache_warm_max",
+        skip_serializing_if = "is_default_keep_cache_warm_max"
+    )]
+    pub keep_cache_warm_max: u32,
+    /// The smallest context, in tokens, worth keeping warm.
+    #[serde(
+        default = "default_keep_cache_warm_min_tokens",
+        skip_serializing_if = "is_default_keep_cache_warm_min_tokens"
+    )]
+    pub keep_cache_warm_min_tokens: u64,
+}
+
+fn default_keep_cache_warm_max() -> u32 {
+    6
+}
+
+fn default_keep_cache_warm_min_tokens() -> u64 {
+    50_000
+}
+
+// Left out when unset, so a team file saved without them reads the same.
+fn is_zero(n: &u64) -> bool {
+    *n == 0
+}
+
+fn is_default_keep_cache_warm_max(n: &u32) -> bool {
+    *n == default_keep_cache_warm_max()
+}
+
+fn is_default_keep_cache_warm_min_tokens(n: &u64) -> bool {
+    *n == default_keep_cache_warm_min_tokens()
 }
 
 fn default_context_warn_percent() -> u8 {
@@ -662,6 +702,9 @@ impl Default for Limits {
             auto_resume: true,
             limit_retry_secs: default_limit_retry_secs(),
             context_warn_percent: default_context_warn_percent(),
+            keep_cache_warm_secs: 0,
+            keep_cache_warm_max: default_keep_cache_warm_max(),
+            keep_cache_warm_min_tokens: default_keep_cache_warm_min_tokens(),
         }
     }
 }

@@ -13,6 +13,7 @@ mod native;
 mod plain;
 mod session;
 mod team;
+mod toolbox;
 mod web;
 #[cfg(test)]
 pub(super) use agents::restart_call;
@@ -23,6 +24,7 @@ pub use native::{native, NativeCommand};
 pub use plain::{quick, refuse_command};
 pub use session::{attach, frame, resume, sessions, start, status, stop};
 pub use team::run_team;
+pub use toolbox::{toolbox, toolbox_check, toolbox_reload};
 pub use web::{web, web_list, web_remove, web_stop, WebJoin};
 
 /// Which session a command addresses.

@@ -28,6 +28,7 @@ impl AgentRuntime for ShellRuntime {
         let crew = ctx.crew_bin.to_string_lossy();
         let expand = |s: &String| s.replace("{crew}", &crew);
         Ok(LaunchSpec {
+            scrub_env: Vec::new(),
             agent_id: ctx.agent.id.clone(),
             kind: RuntimeKind::Shell,
             program: expand(program),

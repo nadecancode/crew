@@ -14,10 +14,9 @@ use std::time::Duration;
 use anyhow::{Context, Result};
 use crew_core::client::Client;
 use crew_core::paths::Identity;
-use crew_core::rpc::Call;
-use crew_core::Agent;
 use serde_json::{json, Value};
 
+pub mod proxy;
 pub mod tools;
 
 const LATEST_PROTOCOL: &str = "2025-06-18";
@@ -26,7 +25,6 @@ const SUPPORTED_PROTOCOLS: &[&str] = &["2025-06-18", "2025-03-26", "2024-11-05"]
 struct Bridge {
     identity: Identity,
     client: Option<Client>,
-    orchestrator: Option<bool>,
 }
 
 impl Bridge {
@@ -41,27 +39,11 @@ impl Bridge {
         Ok(self.client.as_mut().expect("client was just set"))
     }
 
-    /// Whether this agent is the orchestrator (decides which tools it sees).
-    fn is_orchestrator(&mut self) -> bool {
-        if let Some(known) = self.orchestrator {
-            return known;
-        }
-        let me = self.identity.agent_id.clone();
-        let answer = self
-            .client()
-            .ok()
-            .and_then(|c| c.call::<Vec<Agent>>(Call::AgentsList).ok())
-            .map(|agents| agents.iter().any(|a| a.id == me && a.orchestrator));
-        match answer {
-            Some(value) => {
-                self.orchestrator = Some(value);
-                value
-            }
-            None => {
-                self.client = None;
-                false
-            }
-        }
+    /// Whether this agent is the orchestrator (decides which tools it sees),
+    /// as its launch recorded it: the list must not depend on whether the
+    /// daemon answers at the moment it is asked for.
+    fn is_orchestrator(&self) -> bool {
+        self.identity.orchestrator
     }
 
     fn call_tool(&mut self, name: &str, args: &Value) -> Result<String, String> {
@@ -182,7 +164,6 @@ pub fn serve(identity_path: Option<&Path>) -> Result<()> {
     let mut bridge = Bridge {
         identity,
         client: None,
-        orchestrator: None,
     };
     let stdin = std::io::stdin();
     let mut stdout = std::io::stdout().lock();
@@ -218,9 +199,9 @@ mod tests {
                 socket: "/nonexistent/crew.sock".into(),
                 agent_id: "claude-1".into(),
                 token: "t".into(),
+                orchestrator: false,
             },
             client: None,
-            orchestrator: Some(false),
         }
     }
 
@@ -272,13 +253,35 @@ mod tests {
             .collect();
         assert!(names.contains(&"agent_send"));
         assert!(!names.contains(&"task_create"));
-        b.orchestrator = Some(true);
+        b.identity.orchestrator = true;
         let r = handle(
             &mut b,
             &json!({"jsonrpc":"2.0","id":6,"method":"tools/list"}),
         )
         .unwrap();
         assert!(r["result"]["tools"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|t| t["name"] == "task_create"));
+    }
+
+    // T21 (notes/toolboxes.md): the role comes from the launch identity, so
+    // an orchestrator whose daemon does not answer at `tools/list` time
+    // still gets its own list, byte for byte the same each time.
+    #[test]
+    fn the_tool_list_does_not_depend_on_the_daemon_answering() {
+        let mut b = bridge();
+        b.identity.orchestrator = true;
+        let list = |b: &mut Bridge| {
+            let r = handle(b, &json!({"jsonrpc":"2.0","id":7,"method":"tools/list"})).unwrap();
+            serde_json::to_vec(&r["result"]).unwrap()
+        };
+        let first = list(&mut b);
+        assert!(b.client.is_none(), "listing tools asks the daemon nothing");
+        assert_eq!(list(&mut b), first);
+        let tools: Value = serde_json::from_slice(&first).unwrap();
+        assert!(tools["tools"]
             .as_array()
             .unwrap()
             .iter()
@@ -330,9 +333,9 @@ mod tests {
                 socket: socket.to_string_lossy().into_owned(),
                 agent_id: "claude-1".into(),
                 token: "t".into(),
+                orchestrator: false,
             },
             client: None,
-            orchestrator: Some(false),
         };
         (dir, bridge, taken)
     }
@@ -421,9 +424,9 @@ mod tests {
                 socket: socket.to_string_lossy().into_owned(),
                 agent_id: "claude-1".into(),
                 token: "t".into(),
+                orchestrator: false,
             },
             client: None,
-            orchestrator: None,
         };
         let sentence = format!(
             "crew {} (protocol {}) cannot talk to the daemon of /w/payments, which is crew 9.9.9 \

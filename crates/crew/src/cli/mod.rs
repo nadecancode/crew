@@ -9,6 +9,7 @@ mod agent_side;
 mod attach;
 pub mod daemonize;
 mod fake_cli;
+mod fake_mcp;
 mod ops;
 mod scripted;
 
@@ -252,6 +253,9 @@ answers: `crew answer 2`.")]
     /// Print the API key the crew config assigns to an agent (Claude Code's apiKeyHelper)
     #[command(hide = true)]
     Credential(IdentityArg),
+    /// Members' toolboxes: the MCP servers, skills, plugins, subagents and hooks
+    /// each one runs with
+    Toolbox(ToolboxArgs),
     /// Show the endpoints and keys team members are launched with
     Config {
         #[command(subcommand)]
@@ -272,6 +276,9 @@ answers: `crew answer 2`.")]
     /// A stand-in for an agent CLI (claude, codex, pi), for tests
     #[command(hide = true)]
     FakeCli(fake_cli::FakeArgs),
+    /// A stand-in MCP server, for tests of the toolbox proxy
+    #[command(hide = true)]
+    FakeMcp(Box<fake_mcp::FakeMcpArgs>),
     /// Start a program in an agent sandbox (the daemon puts this in front of it)
     #[command(hide = true)]
     SandboxRun(crate::sandbox::run::RunArgs),
@@ -330,6 +337,66 @@ pub enum StyleCommand {
         #[arg(long, value_name = "STYLE")]
         from: Option<String>,
     },
+}
+
+#[derive(Args)]
+#[command(args_conflicts_with_subcommands = true)]
+pub struct ToolboxArgs {
+    #[command(subcommand)]
+    pub command: Option<ToolboxCommand>,
+    /// Only this member (default: every member)
+    pub agent: Option<String>,
+    /// Show how the toolbox would map onto a runtime at the next launch:
+    /// claude, codex, pi or shell
+    #[arg(long)]
+    pub runtime: Option<crew_core::RuntimeKind>,
+    #[arg(long)]
+    pub json: bool,
+}
+
+#[derive(Subcommand)]
+pub enum ToolboxCommand {
+    /// Map the team file's toolboxes as a running team's daemon would launch
+    /// them (references resolve in that daemon's environment), without
+    /// starting anything. Needs that team named with -C <workspace> or
+    /// --project <name>. Exits non-zero on an error or on a status that would
+    /// stop a launch
+    Check {
+        /// The team file
+        file: PathBuf,
+        #[arg(long)]
+        json: bool,
+    },
+    /// Reread the team file's toolboxes into a running team, named with -C
+    /// <workspace> or --project <name>; members pick the change up at their
+    /// next restart
+    Reload {
+        /// The team file
+        file: PathBuf,
+    },
+    /// Run one toolbox MCP server for an agent's session (stdio); the runtime
+    /// starts this
+    #[command(hide = true)]
+    Mcp(ToolboxMcpArgs),
+}
+
+#[derive(Args)]
+pub struct ToolboxMcpArgs {
+    /// The server's name in the toolbox
+    pub name: String,
+    #[command(flatten)]
+    pub identity: IdentityArg,
+    /// Start or connect to the server, list its tools, stop it and print the
+    /// listing as JSON (the daemon runs this before a launch)
+    #[arg(long)]
+    pub preflight: bool,
+    /// Read how to reach the server from this file instead of asking the
+    /// daemon (tests)
+    #[arg(long, value_name = "FILE", hide = true)]
+    pub launch_file: Option<PathBuf>,
+    /// How long a preflight may take, in seconds (tests)
+    #[arg(long, value_name = "SECONDS", hide = true)]
+    pub preflight_within: Option<f64>,
 }
 
 #[derive(Subcommand)]
@@ -664,11 +731,18 @@ pub fn run(cli: Cli) -> Result<()> {
             agent_side::delivered(identity.identity.as_deref(), ids)
         }
         Command::Credential(identity) => agent_side::credential(identity.identity.as_deref()),
+        Command::Toolbox(args) => match args.command {
+            Some(ToolboxCommand::Mcp(args)) => agent_side::toolbox_mcp(args),
+            Some(ToolboxCommand::Check { file, json }) => ops::toolbox_check(&target, &file, json),
+            Some(ToolboxCommand::Reload { file }) => ops::toolbox_reload(&target, &file),
+            None => ops::toolbox(&target, args.agent, args.runtime, args.json),
+        },
         Command::Config { command } => ops::config(&target, command.unwrap_or(ConfigCommand::Show)),
         Command::Style { command } => ops::style(&target, command.unwrap_or(StyleCommand::List)),
         Command::Models { command } => ops::models(command.unwrap_or(ModelsCommand::List)),
         Command::ScriptedAgent(args) => scripted::run(args),
         Command::FakeCli(args) => fake_cli::run(args),
+        Command::FakeMcp(args) => fake_mcp::run(*args),
         Command::SandboxRun(args) => crate::sandbox::run::run(args),
         Command::SandboxExec(args) => crate::sandbox::shim::run(args),
         Command::Daemon { workspace } => daemonize::run_foreground(&workspace),

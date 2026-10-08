@@ -382,7 +382,8 @@ impl SourceKind {
 }
 
 /// The runtime sources one member may load, kind by kind.
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
 pub struct Sources {
     pub operator: BTreeSet<SourceKind>,
     pub project: BTreeSet<SourceKind>,
@@ -460,6 +461,7 @@ impl fmt::Display for ItemKind {
 }
 
 /// `<kind>.<name>`, ordered by kind (canonical order), then name (bytes).
+/// It serializes as that string, so it can key a JSON map.
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct ItemRef {
     pub kind: ItemKind,
@@ -481,8 +483,33 @@ impl fmt::Display for ItemRef {
     }
 }
 
+impl std::str::FromStr for ItemRef {
+    type Err = anyhow::Error;
+
+    fn from_str(text: &str) -> Result<Self> {
+        match Pattern::parse(text)? {
+            Pattern::One(item) => Ok(item),
+            Pattern::Kind(_) => bail!("'{text}' names a kind, not one item"),
+        }
+    }
+}
+
+impl Serialize for ItemRef {
+    fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        serializer.collect_str(self)
+    }
+}
+
+impl<'de> Deserialize<'de> for ItemRef {
+    fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let text = String::deserialize(deserializer)?;
+        text.parse().map_err(de::Error::custom)
+    }
+}
+
 /// One item's definition.
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
 pub enum Item {
     Mcp(McpServer),
     File(FileItem),
@@ -508,7 +535,8 @@ impl Item {
     }
 }
 
-/// Where a resolved item came from.
+/// Where a resolved item came from. It serializes as `default`,
+/// `bundle:<name>` or `member`.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Origin {
     /// Defined in `defaults.toolbox` itself.
@@ -529,14 +557,80 @@ impl fmt::Display for Origin {
     }
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+impl Serialize for Origin {
+    fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        serializer.collect_str(self)
+    }
+}
+
+impl<'de> Deserialize<'de> for Origin {
+    fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let text = String::deserialize(deserializer)?;
+        match text.as_str() {
+            "default" => Ok(Origin::Default),
+            "member" => Ok(Origin::Member),
+            other => match other.strip_prefix("bundle:") {
+                Some(name) if is_valid_id(name) => Ok(Origin::Bundle(name.to_string())),
+                _ => Err(de::Error::custom(format!(
+                    "'{other}' is not default, member or bundle:<name>"
+                ))),
+            },
+        }
+    }
+}
+
+/// What a file item's entry in the canonical form records: the content hash
+/// of its snapshot, or a fixed word for why there is none. The word never
+/// carries error text, so the fingerprint stays stable while the item stays
+/// in that state, and moves once the file appears or changes.
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum Content {
+    /// SHA-256 of the snapshot, 64 lowercase hex characters.
+    Sha256(String),
+    /// Never read: the item does not load on this runtime (Not applicable,
+    /// Not available on <Runtime>). Edits to its files do not move the
+    /// fingerprint.
+    NotLoaded,
+    /// The path does not exist (Failed preflight).
+    Missing,
+    /// The path is not the expected format (Failed preflight).
+    Invalid,
+    /// Larger than the snapshot limit (Failed preflight).
+    TooLarge,
+}
+
+impl Content {
+    fn canonical(&self) -> Result<String> {
+        Ok(match self {
+            Content::Sha256(hex) => {
+                if hex.len() != 64
+                    || !hex
+                        .bytes()
+                        .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
+                {
+                    bail!("'{hex}' is not 64 lowercase hex characters");
+                }
+                format!("sha256:{hex}")
+            }
+            Content::NotLoaded => "not-loaded".to_string(),
+            Content::Missing => "unavailable:missing".to_string(),
+            Content::Invalid => "unavailable:invalid".to_string(),
+            Content::TooLarge => "unavailable:too-large".to_string(),
+        })
+    }
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
 pub struct ResolvedItem {
     pub item: Item,
     pub origin: Origin,
 }
 
 /// One member's effective toolbox before it is mapped onto a runtime.
-#[derive(Clone, Debug, PartialEq, Eq, Default)]
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq, Default)]
+#[serde(deny_unknown_fields)]
 pub struct Resolved {
     /// In canonical order.
     pub items: BTreeMap<ItemRef, ResolvedItem>,
@@ -1109,20 +1203,22 @@ inherit_mcp: true with defaults.toolbox.inherit.operator: [mcp]"
 
 impl Resolved {
     /// The canonical form: kinds in canonical order, items by name, keys
-    /// sorted, file items by their content hash (`content`, from the
-    /// snapshot) instead of their path, no origin, nothing that varies
-    /// between launches. Byte-identical for the same meaning.
-    pub fn canonical(&self, content: &BTreeMap<ItemRef, String>) -> Result<Vec<u8>> {
+    /// sorted, file items by their [`Content`] (every file item needs an
+    /// entry) instead of their path, no origin and no status, nothing that
+    /// varies between launches. Byte-identical for the same meaning.
+    pub fn canonical(&self, content: &BTreeMap<ItemRef, Content>) -> Result<Vec<u8>> {
         let mut items = Vec::new();
         for (item, resolved) in &self.items {
             let def = match &resolved.item {
                 Item::Mcp(server) => mcp_value(server),
                 Item::File(file) => {
-                    let hash = content
+                    let entry = content
                         .get(item)
-                        .ok_or_else(|| anyhow!("no content hash for {item}"))?;
+                        .ok_or_else(|| anyhow!("no content entry for {item}"))?
+                        .canonical()
+                        .map_err(|e| anyhow!("{item}: {e}"))?;
                     object(vec![
-                        ("content", Value::from(hash.as_str())),
+                        ("content", Value::from(entry)),
                         ("required", Value::from(file.required)),
                         ("runtimes", runtimes_value(&file.runtimes)),
                     ])
@@ -1353,12 +1449,18 @@ agents:
             .collect()
     }
 
-    fn hashes(resolved: &Resolved) -> BTreeMap<ItemRef, String> {
+    /// A stand-in snapshot hash per file item, derived from its reference.
+    fn hash_of(item: &ItemRef) -> String {
+        let digest = Sha256::digest(item.to_string().as_bytes());
+        digest.iter().map(|b| format!("{b:02x}")).collect()
+    }
+
+    fn hashes(resolved: &Resolved) -> BTreeMap<ItemRef, Content> {
         resolved
             .items
             .keys()
             .filter(|item| item.kind.is_file())
-            .map(|item| (item.clone(), format!("sha256:{item}")))
+            .map(|item| (item.clone(), Content::Sha256(hash_of(item))))
             .collect()
     }
 
@@ -1539,19 +1641,20 @@ agents:
         let canonical = String::from_utf8(resolved.canonical(&hashes(&resolved)).unwrap()).unwrap();
         assert_eq!(
             canonical,
-            concat!(
+            [
                 r#"{"inherit":{"operator":["mcp"],"project":["skills","plugins","subagents","hooks","settings","memory"]},"#,
                 r#""items":["#,
                 r#"{"def":{"headers":{"Authorization":{"env":"DOCS_TOKEN","format":"Bearer {}"}},"required":false,"runtimes":[],"transport":"http","url":"https://docs.example.com/mcp"},"kind":"mcp","name":"docs"},"#,
                 r#"{"def":{"command":["srv","--stdio"],"cwd":"tools","env":{"MODE":{"value":"ro"}},"required":false,"runtimes":[]},"kind":"mcp","name":"local"},"#,
-                r#"{"def":{"content":"sha256:skills.notes","required":true,"runtimes":["claude","pi"]},"kind":"skills","name":"notes"},"#,
+                &format!(r#"{{"def":{{"content":"sha256:{}","required":true,"runtimes":["claude","pi"]}},"kind":"skills","name":"notes"}},"#, hash_of(&ItemRef::new(ItemKind::Skills, "notes"))),
                 r#"{"def":{"command":["audit","--json"],"event":"PreToolUse","matcher":"Bash","required":false,"runtimes":[]},"kind":"hooks","name":"audit"}"#,
-                r#"],"strict":true,"version":1}"#
-            )
+                r#"],"strict":true,"version":1}"#,
+            ]
+            .concat()
         );
         assert!(!canonical.contains("/srv/skills"));
         let err = resolved.canonical(&BTreeMap::new()).unwrap_err();
-        assert_eq!(err.to_string(), "no content hash for skills.notes");
+        assert_eq!(err.to_string(), "no content entry for skills.notes");
     }
 
     #[test]
@@ -1964,6 +2067,90 @@ expanded; write the path in full"
         let mut roster = team.clone();
         roster.agents.push(spec("include: [web]"));
         TeamConfig::from_yaml(&roster.to_yaml().unwrap()).unwrap();
+    }
+
+    #[test]
+    fn content_markers_keep_the_fingerprint_until_the_file_changes() {
+        let team = TeamConfig::from_yaml(EXAMPLE).unwrap();
+        let release = member(&team, "release");
+        let changelog = ItemRef::new(ItemKind::Skills, "changelog");
+        let lint = ItemRef::new(ItemKind::Plugins, "lint-kit");
+        let with = |changelog_content: Content| {
+            let content: BTreeMap<ItemRef, Content> = [
+                (changelog.clone(), changelog_content),
+                (lint.clone(), Content::NotLoaded),
+            ]
+            .into_iter()
+            .collect();
+            Fingerprint::of(&release.canonical(&content).unwrap(), RuntimeKind::Codex, 1)
+        };
+        // A missing file fingerprints the same until it appears, and its
+        // content then moves the fingerprint.
+        assert_eq!(with(Content::Missing), with(Content::Missing));
+        for other in [
+            Content::Invalid,
+            Content::TooLarge,
+            Content::NotLoaded,
+            Content::Sha256(hash_of(&changelog)),
+        ] {
+            assert_ne!(with(Content::Missing), with(other));
+        }
+        assert_ne!(
+            with(Content::Sha256(hash_of(&changelog))),
+            with(Content::Sha256(hash_of(&lint)))
+        );
+        let content: BTreeMap<ItemRef, Content> = [
+            (changelog.clone(), Content::Sha256("ABC".into())),
+            (lint.clone(), Content::NotLoaded),
+        ]
+        .into_iter()
+        .collect();
+        let err = release.canonical(&content).unwrap_err();
+        assert_eq!(
+            err.to_string(),
+            "skills.changelog: 'ABC' is not 64 lowercase hex characters"
+        );
+    }
+
+    #[test]
+    fn a_resolved_toolbox_round_trips_with_string_keys_and_origins() {
+        let team = TeamConfig::from_yaml(EXAMPLE).unwrap();
+        let release = member(&team, "release");
+        let json = serde_json::to_value(&release).unwrap();
+        assert_eq!(json["items"]["mcp.github"]["origin"], "bundle:github");
+        assert_eq!(json["items"]["skills.changelog"]["origin"], "member");
+        assert_eq!(
+            json["items"]["skills.changelog"]["item"]["file"]["path"],
+            "toolbox/skills/changelog"
+        );
+        assert_eq!(json["sources"]["operator"], serde_json::json!([]));
+        assert_eq!(serde_json::from_value::<Resolved>(json).unwrap(), release);
+        let qa = member(&team, "qa");
+        let yaml = serde_yaml::to_string(&qa).unwrap();
+        assert_eq!(serde_yaml::from_str::<Resolved>(&yaml).unwrap(), qa);
+        let content: BTreeMap<ItemRef, Content> =
+            [(ItemRef::new(ItemKind::Skills, "s"), Content::NotLoaded)]
+                .into_iter()
+                .collect();
+        assert_eq!(
+            serde_json::to_string(&content).unwrap(),
+            r#"{"skills.s":"not_loaded"}"#
+        );
+        for (bad, expected) in [
+            (r#""mcp""#, "is not <kind>.<name>"),
+            (r#""mcp.*""#, "names a kind, not one item"),
+            (r#""tools.x""#, "is not a kind"),
+        ] {
+            let err = serde_json::from_str::<ItemRef>(bad).unwrap_err();
+            assert!(err.to_string().contains(expected), "{bad}: {err}");
+        }
+        for (bad, expected) in [
+            (r#""bundle:""#, "is not default, member or bundle:<name>"),
+            (r#""team""#, "is not default, member or bundle:<name>"),
+        ] {
+            let err = serde_json::from_str::<Origin>(bad).unwrap_err();
+            assert!(err.to_string().contains(expected), "{bad}: {err}");
+        }
     }
     #[test]
     fn styles_carry_and_check_their_toolboxes() {

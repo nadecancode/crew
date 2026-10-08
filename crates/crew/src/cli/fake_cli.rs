@@ -147,6 +147,27 @@ fn claude(args: &[String]) -> Result<()> {
 
 fn codex(args: &[String]) -> Result<()> {
     let dir = home_dir("CODEX_HOME", ".codex")?;
+    if args
+        .windows(3)
+        .any(|args| args == ["mcp", "list", "--json"])
+    {
+        record(&dir, "fake-codex-inventory.json", args)?;
+        let mut config: toml::Value = std::fs::read_to_string(dir.join("config.toml"))
+            .unwrap_or_default()
+            .parse()
+            .unwrap_or_else(|_| toml::Value::Table(toml::Table::new()));
+        for pair in args.windows(2).filter(|pair| pair[0] == "-c") {
+            if let Ok(value) = pair[1].parse::<toml::Value>() {
+                merge_config(&mut config, value);
+            }
+        }
+        let servers = config.get("mcp_servers").and_then(toml::Value::as_table)
+            .into_iter().flat_map(|table| table.iter())
+            .map(|(name, server)| json!({"name":name,"enabled":server.get("enabled").and_then(toml::Value::as_bool).unwrap_or(true),"transport":{"type":"stdio","command":server.get("command"),"args":server.get("args").cloned().unwrap_or(toml::Value::Array(Vec::new()))}}))
+            .collect::<Vec<_>>();
+        println!("{}", serde_json::to_string(&servers)?);
+        return Ok(());
+    }
     if args.first().map(String::as_str) == Some("app-server") {
         record(&dir, "fake-codex-server.json", args)?;
         let Some(listen) = flag(args, "--listen").and_then(|l| l.strip_prefix("unix://")) else {
@@ -172,8 +193,43 @@ fn codex(args: &[String]) -> Result<()> {
                                      "content": [{ "type": "output_text", "text": "hello from the fake" }] } })
             ),
         )?;
-        for stream in listener.incoming() {
-            drop(stream);
+        for stream in listener.incoming().flatten() {
+            use tokio_tungstenite::tungstenite::{accept, Message};
+            let Ok(mut connection) = accept(stream) else {
+                continue;
+            };
+            while let Ok(message) = connection.read() {
+                let Message::Text(text) = message else {
+                    continue;
+                };
+                let Ok(value) = serde_json::from_str::<Value>(&text) else {
+                    continue;
+                };
+                let Some(id) = value.get("id") else { continue };
+                if value["method"] == "skills/extraRoots/set" {
+                    let observations: Vec<_> = value["params"]["extraRoots"].as_array().into_iter().flatten()
+                        .filter_map(Value::as_str).map(|root| {
+                            let file = Path::new(root).join("SKILL.md");
+                            json!({"readable":std::fs::read(&file).is_ok(),"read_only":std::fs::OpenOptions::new().write(true).open(&file).is_err()})
+                        }).collect();
+                    write(
+                        &dir.join("fake-codex-skill-files.json"),
+                        &serde_json::to_string(&observations)?,
+                    )?;
+                    write(
+                        &dir.join("fake-codex-skill-roots.json"),
+                        &value["params"].to_string(),
+                    )?;
+                }
+                if connection
+                    .send(Message::Text(
+                        json!({"id":id,"result":{}}).to_string().into(),
+                    ))
+                    .is_err()
+                {
+                    break;
+                }
+            }
         }
         return Ok(());
     }
@@ -182,6 +238,21 @@ fn codex(args: &[String]) -> Result<()> {
     let _ = std::io::stdout().flush();
     stay_up(|typed| println!("fake codex got: {typed}"));
     Ok(())
+}
+
+fn merge_config(target: &mut toml::Value, source: toml::Value) {
+    if let (toml::Value::Table(target), toml::Value::Table(source)) = (&mut *target, &source) {
+        for (key, value) in source {
+            match target.get_mut(key) {
+                Some(target) => merge_config(target, value.clone()),
+                None => {
+                    target.insert(key.clone(), value.clone());
+                }
+            }
+        }
+    } else {
+        *target = source;
+    }
 }
 
 fn pi(args: &[String]) -> Result<()> {
