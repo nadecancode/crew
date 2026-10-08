@@ -67,7 +67,8 @@ pub fn definitions() -> Vec<ToolDef> {
             "agent_send",
             "Send a message directly to one teammate. It is delivered straight into that agent's \
 session; the orchestrator is not involved. Use type \"question\" when you need an answer, \
-\"answer\" to reply, \"artifact\" to hand over a commit id or file.",
+\"answer\" to reply, \"artifact\" to hand over a commit id or file, \"status\" for news that needs \
+nothing back (it starts no turn of its own unless the teammate is waiting).",
             object(
                 json!({
                     "to": { "type": "string", "description": "Recipient agent id, e.g. claude-5; several separated by commas (claude-5,db), each getting its own copy" },
@@ -81,7 +82,8 @@ session; the orchestrator is not involved. Use type \"question\" when you need a
         ),
         tool(
             "agent_broadcast",
-            "Send one message to every other agent on the team.",
+            "Send one message to every other agent on the team. News that needs nothing back goes as \
+type \"status\": it starts no turn of its own unless a teammate is waiting.",
             object(
                 json!({
                     "body": { "type": "string" },
@@ -110,7 +112,9 @@ agent is pointed back to its task and carries on.",
         tool(
             "agent_inbox",
             "Read your messages in full. By default returns unread messages and marks them read; \
-with an id, that one message (one you sent or received), e.g. one a card or a teammate points to.",
+with an id, that one message (one you sent or received), e.g. one a card or a teammate points to. \
+New messages are delivered to you without asking (lines starting with \"[crew]\"), so do not \
+call this to wait for one.",
             object(
                 json!({
                     "id": { "type": "string", "description": "A message id (m-…)" },
@@ -663,6 +667,31 @@ fn render_message(m: &Message) -> String {
     )
 }
 
+/// What `agent_inbox` shows. An empty inbox says so in a way that ends the
+/// lookup: crew delivers a message that arrives later into the session.
+fn render_inbox(inbox: &InboxResult) -> String {
+    if inbox.messages.is_empty() {
+        return NO_NEW_MESSAGES.to_string();
+    }
+    let mut text = format!("{} message(s):\n", inbox.messages.len());
+    for entry in &inbox.messages {
+        let m = &entry.message;
+        text.push_str(&format!(
+            "\n--- {} from {} · type {} · id {}\n{}\n",
+            fmt_clock(m.timestamp),
+            m.from,
+            m.kind,
+            m.id,
+            m.body.trim_end()
+        ));
+    }
+    text
+}
+
+const NO_NEW_MESSAGES: &str = "No new messages. One that arrives later is delivered to you: if you \
+are waiting for it, end your turn, or park your card with agent_status(\"waiting\", …), instead \
+of checking again.";
+
 fn render_commit(commit: &CommitInfo) -> String {
     let mut text = format!(
         "Committed {} on {} ({} file(s)): {}\nFull id: {}",
@@ -795,22 +824,7 @@ pub fn call(client: &mut Client, name: &str, args: &Value) -> Result<ToolOutput,
                     limit,
                 },
             )?;
-            if inbox.messages.is_empty() {
-                return out("No new messages.".into(), raw);
-            }
-            let mut text = format!("{} message(s):\n", inbox.messages.len());
-            for entry in &inbox.messages {
-                let m = &entry.message;
-                text.push_str(&format!(
-                    "\n--- {} from {} · type {} · id {}\n{}\n",
-                    fmt_clock(m.timestamp),
-                    m.from,
-                    m.kind,
-                    m.id,
-                    m.body.trim_end()
-                ));
-            }
-            out(text, raw)
+            out(render_inbox(&inbox), raw)
         }
         "agent_compact" => {
             let keep = opt_str(args, "keep");
@@ -1335,6 +1349,53 @@ mod tests {
         assert!(defs
             .iter()
             .any(|d| d.orchestrator_only && d.name == "operator_ask"));
+    }
+
+    #[test]
+    fn empty_inbox_says_to_stop_checking() {
+        let empty: InboxResult = serde_json::from_value(json!({ "messages": [] })).unwrap();
+        let text = render_inbox(&empty);
+        assert!(text.starts_with("No new messages."), "{text}");
+        assert!(text.contains("instead of checking again"), "{text}");
+
+        let one: InboxResult = serde_json::from_value(json!({ "messages": [{
+            "id": "m-1", "from": "runtime", "to": "designer", "type": "answer",
+            "body": "D1 keeps acknowledgement as it is.\n", "timestamp": 0,
+        }] }))
+        .unwrap();
+        let text = render_inbox(&one);
+        assert!(text.starts_with("1 message(s):\n"), "{text}");
+        assert!(
+            text.contains(
+                "from runtime · type answer · id m-1\nD1 keeps acknowledgement as it is.\n"
+            ),
+            "{text}"
+        );
+    }
+
+    #[test]
+    fn inbox_description_says_messages_arrive_unasked() {
+        let defs = definitions();
+        let inbox = defs.iter().find(|d| d.name == "agent_inbox").unwrap();
+        assert!(
+            inbox.description.contains("do not call this to wait for one"),
+            "{}",
+            inbox.description
+        );
+    }
+
+    #[test]
+    fn send_descriptions_say_status_news_starts_no_turn() {
+        // Backed by delivery::tests::news_waits_for_company_unless_it_is_what_a_member_waits_for.
+        let defs = definitions();
+        for name in ["agent_send", "agent_broadcast"] {
+            let def = defs.iter().find(|d| d.name == name).unwrap();
+            assert!(
+                def.description.contains("starts no turn of its own unless"),
+                "{name}: {}",
+                def.description
+            );
+        }
     }
 
     #[test]
