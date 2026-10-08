@@ -808,6 +808,191 @@ operator precedence. With no override, no new TTL/key argument or wake timer
 appears. Model, endpoint and effective TTL changes are comparison boundaries,
 not silently mixed samples.
 
+#### D2 revision: keeping idle Claude members warm
+
+Task `cache-retention-policy`. This is a measured proposal and a
+preregistered experiment. Nothing changes by default until the three pairs
+below pass. It replaces the blanket "no keep-alive" above for one case only:
+Claude Code members at rest, opt-in, through crew's own text path.
+
+**What a long gap costs.** QA's lifecycle run `lifecycle-final-01` (runner
+series `ffbeb0be`, Haiku 4.5 and `gpt-6-luna`) measured the first request
+after each idle step:
+
+| Member | After ~5 min (native gap) | After > 1 h (native gap) | Written after > 1 h |
+| --- | --- | --- | --- |
+| Claude worker | 99.8% read (320 s) | 55.9% read: 23,940 of 42,805 (3,678 s) | 18,855 tokens at the 1 h price |
+| Orchestrator | 99.7% read | 51.6% read: 23,715 of 45,955 | 22,231 tokens at the 1 h price |
+| Codex worker | 97.9% read (515 s) | 26.9% read: 6,912 of 25,738 (3,684 s) | not reported (18,826 uncached) |
+
+The part read after an hour (~23.4k tokens) is Claude Code's shared prefix,
+which other sessions keep warm. Everything after it was written again.
+
+In the production baseline (24,129 requests, 2026-10-02 15:14Z to 10-08
+04:43Z), 62 Claude requests that opened a turn after more than an hour wrote
+24.5M tokens again: 33 on Opus 5.5, 22 on Fable 5.1, 7 on Sonnet 5.5. Priced
+as write minus read, that is $317 at list price. The whole window's Claude
+traffic is $2,957 API-equivalent (Codex: $813). These gaps are long: median
+1.6–2.9 h by model, 90th percentile up to 43 h. Contexts are 200k–700k
+tokens.
+
+**Retention each runtime supports.**
+
+- Claude Code writes in 5-minute or 1-hour buckets. This team's writes are all
+  1 h (subscription). `CLAUDE_CODE_PROMPT_CACHE_TTL=1h` gives an API-key
+  member the same. Nothing longer exists. A read refreshes an entry for its
+  TTL, so the only supported way to carry a session's cache across more than
+  an hour of rest is a request within each hour.
+- Codex 0.159 exposes no cache setting (D2 above). Measured retention lies
+  between 515 s (97.9%) and 3,684 s (26.9%). The OpenAI API's retention
+  options are not reachable through the CLI, and crew will not rewrite its
+  requests.
+- Supported pi: unmeasured. No policy.
+
+**Cost of a keep-alive turn and the rewrite it avoids.** For a context of
+`C` tokens, of which `C'` would be written again after expiry (all but the
+shared prefix):
+
+- keep-alive turn `k = C·r + Δin·w + Δout·o`, with read price `r`, 1 h write
+  price `w`, output price `o`; `Δin` (crew's line, the CLI's attachments, the
+  reply) is taken as 200–2,000 tokens and `Δout` as 20–400;
+- avoided rewrite `S = (C' − t)·(w − r)`, where `t` (0–10,000) is the new
+  message the next turn brings anyway.
+
+For a 300k context: Opus 5.5 `k` = $0.062–0.084, `S` up to $2.34; Fable 5.1
+`k` = $0.080–0.135, `S` up to $5.93; Sonnet 5.5 `k` = $0.031–0.042, `S` up to
+$1.17. The ratio `(w − r)/r` bounds how many keep-alives one avoided rewrite
+pays for: 39 on Opus 5.5 and Sonnet 5.5, 79 on Fable 5.1, 19 on Haiku 4.5
+(prices in [retention/prices.tsv](prompt-cache/retention/prices.tsv), read
+2026-10-08). For reference on Codex, `(input − cached)/cached` is 19 on
+`gpt-6.1-sol` and 9 on `gpt-6-astra` and `gpt-6-luna`.
+
+**Break-even rule.** Send the `n`-th keep-alive to an idle member only while
+`n · k < p · S`, where `p` is the chance the member works again before the
+policy stops. Since `k ≈ C·r` and `S ≈ C·(w − r)` for large contexts, this is
+`n < p · (w − r)/r`. A member that never works again makes every keep-alive a
+loss, so `p` falls with the length of the rest, and a cap stands in for it.
+The cap is chosen from the team's own history, next.
+
+**Retrospective simulation.**
+[retention/simulate.mjs](prompt-cache/retention/simulate.mjs) replays every
+idle stretch in the baseline timeline. A policy sends the first keep-alive 55
+minutes after a member's last request, then every 55 minutes, up to a cap.
+It only fills gaps between turns, never inside one. It skips gaps that end in
+a limit lift, a pause, a restart, or with the member unresponsive.
+
+For each policy the script counts:
+
+- what the keep-alives cost, including those wasted on a session's last rest
+  or on gaps the cache would have survived;
+- which rewrites they would have avoided.
+
+[retention/results.json](prompt-cache/retention/results.json) has every
+policy. Ranges pair costly keep-alives and a large new tail (conservative)
+with cheap ones and none (optimistic):
+
+| Claude, cap | Keep-alives | Their cost | Gaps kept warm | Rewrites avoided | Net |
+| --- | --- | --- | --- | --- | --- |
+| 1 | 99 | $7.6–10.4 | 23 | $135.9–138.8 | +$125.5–131.2 |
+| 4 | 290 | $20.9–28.4 | 39 | $212.3–217.1 | +$184.0–196.2 |
+| 6 | 396 | $27.7–37.7 | 46 | $228.0–233.5 | +$190.3–205.7 |
+| 8 | 490 | $33.8–46.1 | 46 | $228.0–233.5 | +$182.0–199.7 |
+| 24 | 1,183 | $77.2–108.1 | 53 | $263.5–269.7 | +$155.5–192.5 |
+
+A cap of 6 (warm for about 5.5 h after the last turn) is best. That is about
+6.4–7.0% of the window's Claude cost. Most keep-alives (291 of 396) buy
+nothing; the rewrites they avoid are large enough to carry them. A minimum
+context of 50k or 150k tokens moves the net by $1.3 at most.
+
+Codex loses at every cap, even assuming 30-minute retention:
+
+- 30-minute retention: −$1.6 to −$2.8 at cap 1, −$5.2 to −$8.4 at cap 6;
+- 10-minute retention: −$9.9 to −$12.5 at cap 1.
+
+Codex members get no keep-alive.
+
+This is a replay of what happened, not a controlled result. Keep-alive cost
+and coverage are modelled, not observed. The pairs below test the model.
+
+**Mechanism.** The keep-alive is crew's own line, through the same path as a
+reminder (`Daemon::inject`), never a message:
+
+> [crew] Cache keep-alive: nothing has changed and nothing is asked of you.
+> Reply with just "ok", call no tools, and end your turn.
+
+- **Who gets one.** A Claude Code member is eligible when all of these hold:
+  - it is at rest (Waiting, or Idle without an executing card; the
+    orchestrator while the team works);
+  - it is ready and no turn is running;
+  - it is not paused and not at a usage limit;
+  - no compaction is queued, and no waking delivery is pending;
+  - its last reported context is at least the threshold.
+- **Who does not.** Not a member with executing work: nudges cover it. Not
+  one that is Blocked, Done, retiring or temporary.
+- **Usage limits.** It is skipped while any Claude Code usage window is 80%
+  used or more, so keep-alives never spend the last of a window.
+- **D1.** It is queued at a turn boundary like any own-text line. If a
+  delivery joins the keep-alive's turn, that turn is ordinary work from
+  then on.
+- **D4.** It is not a message:
+  - nothing goes to an inbox, and it raises no obligation or follow-up;
+  - it neither counts as nor resets a reminder or nudge;
+  - the member's status is kept: a Waiting or Blocked self-status set before
+    the keep-alive is restored when its turn ends, unless the member changed
+    it or was given a message in that turn.
+- **Visibility.** Each keep-alive is an `agent.keepalive` event, so
+  collectors and dashboards can tell its requests from work.
+- **History.** Each keep-alive adds `Δin + Δout` to the session. The cap
+  bounds it.
+
+Settings, all in `limits`:
+
+| Setting | Meaning | Default |
+| --- | --- | --- |
+| `keep_cache_warm_secs` | Seconds after a member's last turn before a keep-alive. Below the 1 h TTL; 3300 recommended. | 0 (off) |
+| `keep_cache_warm_max` | Keep-alives per rest. | 6 |
+| `keep_cache_warm_min_tokens` | Smallest context worth keeping warm. | 50,000 |
+
+**Preregistered experiment: three long-gap pairs.** QA's lifecycle runner and
+authorization; template and models as `ffbeb0be` (Haiku 4.5, `gpt-6-luna`),
+sandbox off.
+
+- **Control arm.** The existing long idle: a measured gap over 3,600 s since
+  each member's last work request, then the probes.
+- **Treatment arm.** The same, plus:
+  - `keep_cache_warm_secs: 3000`, `keep_cache_warm_max: 6`,
+    `keep_cache_warm_min_tokens: 0` (bench contexts are ~45k);
+  - this sends one keep-alive to each Claude member at about 50 minutes;
+  - the runner's quiet check ignores requests in turns that an
+    `agent.keepalive` event started;
+  - gaps are measured from the last other request;
+  - Codex gets none in either arm; its read share is reported in both as a
+    control.
+- **Pairing.** Arms run side by side in the same window. Pairs are matched by
+  ordinal, decided before the runs, as in §Acceptance.
+- **Measure, per Claude member and pair:**
+  - the priced upper cost of the keep-alive turn(s) plus the post-gap probe
+    step, against the control's probe step;
+  - the first post-gap request's read share;
+  - requests, output tokens and elapsed time.
+- **Expected.** From `lifecycle-final-01`:
+  - control: first request about $0.04–0.05;
+  - treatment: keep-alive about $0.005–0.010 plus a warm first request
+    about $0.005–0.006.
+- **Pass.** All of these:
+  - in at least two of three pairs and at the median, the treatment total is
+    below the control for each Claude member;
+  - the treatment's first-request read share is at least 95%;
+  - every fixture oracle passes;
+  - the keep-alive causes no message, obligation notice, reminder or nudge;
+  - the member's status before and after its keep-alive is the same.
+- **Fail.** If the pairs fail, close as a documented no-op and remove the
+  setting.
+- **If it passes.** The setting stays opt-in. Making it the default (3300, 6,
+  50,000) needs production evidence: the `agent.keepalive` association in
+  the baseline collector, compared with the over-one-hour class above.
+
+
 ### D3. Separate standing policy from live team context
 
 Generate standing text in this order: common coordination/work rules, selected

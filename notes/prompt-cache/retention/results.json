@@ -1,0 +1,2314 @@
+{
+  "source": {
+    "timeline": "notes/prompt-cache/baseline.timeline.json.gz",
+    "generated_at": "2026-10-08T04:51:21.792Z",
+    "window": {
+      "since": null,
+      "until": 1791434633093
+    }
+  },
+  "assumptions": {
+    "keepalive": {
+      "low": {
+        "newInput": 200,
+        "output": 20
+      },
+      "high": {
+        "newInput": 2000,
+        "output": 400
+      }
+    },
+    "newTail": {
+      "low": 0,
+      "high": 10000
+    },
+    "runtimes": {
+      "claude": [
+        {
+          "label": "1h TTL",
+          "ttl": 3600000,
+          "start": 3300000,
+          "every": 3300000
+        }
+      ],
+      "codex": [
+        {
+          "label": "30 min retention (assumed)",
+          "ttl": 1800000,
+          "start": 1500000,
+          "every": 1500000
+        },
+        {
+          "label": "10 min retention (assumed)",
+          "ttl": 600000,
+          "start": 480000,
+          "every": 480000
+        }
+      ]
+    },
+    "prices": {
+      "claude-opus-5-5": {
+        "input": 4,
+        "write1h": 8,
+        "read": 0.2,
+        "output": 20
+      },
+      "claude-fable-5-1": {
+        "input": 10,
+        "write1h": 20,
+        "read": 0.25,
+        "output": 50
+      },
+      "claude-sonnet-5-5": {
+        "input": 2,
+        "write1h": 4,
+        "read": 0.1,
+        "output": 10
+      },
+      "claude-haiku-4-5": {
+        "input": 1,
+        "write1h": 2,
+        "read": 0.1,
+        "output": 5
+      },
+      "gpt-6-astra": {
+        "input": 10,
+        "write1h": 0,
+        "read": 1,
+        "output": 50
+      },
+      "gpt-6.1-sol": {
+        "input": 2,
+        "write1h": 0,
+        "read": 0.1,
+        "output": 10
+      },
+      "gpt-6-luna": {
+        "input": 0.1,
+        "write1h": 0,
+        "read": 0.01,
+        "output": 0.5
+      }
+    }
+  },
+  "exposure": {
+    "claude|1h TTL|claude-opus-5-5": {
+      "events": 33,
+      "rewriteTokens": 12402647,
+      "rewriteUsdAtWrite": 96.74064660000002,
+      "gapSecondsMedian": 10587,
+      "gapSecondsP90": 155399,
+      "gapSecondsMax": 155412
+    },
+    "claude|1h TTL|claude-fable-5-1": {
+      "events": 22,
+      "rewriteTokens": 10934180,
+      "rewriteUsdAtWrite": 215.95005499999996,
+      "gapSecondsMedian": 5877,
+      "gapSecondsP90": 22889,
+      "gapSecondsMax": 82621
+    },
+    "claude|1h TTL|claude-sonnet-5-5": {
+      "events": 7,
+      "rewriteTokens": 1206796,
+      "rewriteUsdAtWrite": 4.7065044,
+      "gapSecondsMedian": 9359,
+      "gapSecondsP90": 55456,
+      "gapSecondsMax": 55456
+    },
+    "codex|10 min retention (assumed)|gpt-6.1-sol": {
+      "events": 47,
+      "rewriteTokens": 4457029,
+      "rewriteUsdAtWrite": 8.4683551,
+      "gapSecondsMedian": 1194,
+      "gapSecondsP90": 24287,
+      "gapSecondsMax": 91890
+    },
+    "codex|30 min retention (assumed)|gpt-6.1-sol": {
+      "events": 17,
+      "rewriteTokens": 3658621,
+      "rewriteUsdAtWrite": 6.9513799,
+      "gapSecondsMedian": 3114,
+      "gapSecondsP90": 82231,
+      "gapSecondsMax": 91890
+    },
+    "codex|30 min retention (assumed)|gpt-6-astra": {
+      "events": 14,
+      "rewriteTokens": 1011042,
+      "rewriteUsdAtWrite": 9.099378,
+      "gapSecondsMedian": 3300,
+      "gapSecondsP90": 11165,
+      "gapSecondsMax": 24397
+    },
+    "codex|10 min retention (assumed)|gpt-6-astra": {
+      "events": 38,
+      "rewriteTokens": 1175365,
+      "rewriteUsdAtWrite": 10.578285000000001,
+      "gapSecondsMedian": 1199,
+      "gapSecondsP90": 6021,
+      "gapSecondsMax": 24397
+    }
+  },
+  "results": [
+    {
+      "runtime": "claude",
+      "retention": "1h TTL",
+      "cap": 1,
+      "minContext": 0,
+      "conservative": {
+        "keepalives": 99,
+        "keepaliveUsd": 10.395429950000004,
+        "covered": 23,
+        "coveredTokens": 8358361,
+        "savedUsd": 135.85144965,
+        "missedAfterCap": 35,
+        "wastedKeepalives": 76,
+        "wastedUsd": 7.3358608999999975,
+        "ineligible": 4,
+        "netUsd": 125.4560197
+      },
+      "optimistic": {
+        "keepalives": 99,
+        "keepaliveUsd": 7.639929950000001,
+        "covered": 23,
+        "coveredTokens": 8578601,
+        "savedUsd": 138.80582165000004,
+        "missedAfterCap": 35,
+        "wastedKeepalives": 76,
+        "wastedUsd": 5.4273609,
+        "ineligible": 4,
+        "netUsd": 131.16589170000003
+      }
+    },
+    {
+      "runtime": "claude",
+      "retention": "1h TTL",
+      "cap": 1,
+      "minContext": 50000,
+      "conservative": {
+        "keepalives": 84,
+        "keepaliveUsd": 10.123832650000002,
+        "covered": 18,
+        "coveredTokens": 8291775,
+        "savedUsd": 135.43417305,
+        "missedAfterCap": 35,
+        "wastedKeepalives": 66,
+        "wastedUsd": 7.197485699999998,
+        "ineligible": 3,
+        "netUsd": 125.3103404
+      },
+      "optimistic": {
+        "keepalives": 84,
+        "keepaliveUsd": 7.538832650000002,
+        "covered": 18,
+        "coveredTokens": 8462015,
+        "savedUsd": 138.07654505000002,
+        "missedAfterCap": 35,
+        "wastedKeepalives": 66,
+        "wastedUsd": 5.3714857,
+        "ineligible": 3,
+        "netUsd": 130.53771240000003
+      }
+    },
+    {
+      "runtime": "claude",
+      "retention": "1h TTL",
+      "cap": 1,
+      "minContext": 150000,
+      "conservative": {
+        "keepalives": 74,
+        "keepaliveUsd": 9.7283207,
+        "covered": 17,
+        "coveredTokens": 8217610,
+        "savedUsd": 134.85568605,
+        "missedAfterCap": 32,
+        "wastedKeepalives": 57,
+        "wastedUsd": 6.847363749999998,
+        "ineligible": 3,
+        "netUsd": 125.12736535
+      },
+      "optimistic": {
+        "keepalives": 74,
+        "keepaliveUsd": 7.363320700000001,
+        "covered": 17,
+        "coveredTokens": 8377850,
+        "savedUsd": 137.42005805000002,
+        "missedAfterCap": 32,
+        "wastedKeepalives": 57,
+        "wastedUsd": 5.21936375,
+        "ineligible": 3,
+        "netUsd": 130.05673735000002
+      }
+    },
+    {
+      "runtime": "claude",
+      "retention": "1h TTL",
+      "cap": 2,
+      "minContext": 0,
+      "conservative": {
+        "keepalives": 171,
+        "keepaliveUsd": 17.234794850000004,
+        "covered": 32,
+        "coveredTokens": 11293530,
+        "savedUsd": 159.70863779999996,
+        "missedAfterCap": 26,
+        "wastedKeepalives": 130,
+        "wastedUsd": 12.546903000000002,
+        "ineligible": 4,
+        "netUsd": 142.47384294999995
+      },
+      "optimistic": {
+        "keepalives": 171,
+        "keepaliveUsd": 12.689674849999994,
+        "covered": 32,
+        "coveredTokens": 11603770,
+        "savedUsd": 163.4870098,
+        "missedAfterCap": 26,
+        "wastedKeepalives": 130,
+        "wastedUsd": 9.313663,
+        "ineligible": 4,
+        "netUsd": 150.79733495000002
+      }
+    },
+    {
+      "runtime": "claude",
+      "retention": "1h TTL",
+      "cap": 2,
+      "minContext": 50000,
+      "conservative": {
+        "keepalives": 147,
+        "keepaliveUsd": 16.839488950000003,
+        "covered": 27,
+        "coveredTokens": 11226944,
+        "savedUsd": 159.29136119999995,
+        "missedAfterCap": 26,
+        "wastedKeepalives": 111,
+        "wastedUsd": 12.284819200000003,
+        "ineligible": 3,
+        "netUsd": 142.45187224999995
+      },
+      "optimistic": {
+        "keepalives": 147,
+        "keepaliveUsd": 12.538168949999998,
+        "covered": 27,
+        "coveredTokens": 11487184,
+        "savedUsd": 162.7577332,
+        "missedAfterCap": 26,
+        "wastedKeepalives": 111,
+        "wastedUsd": 9.2073792,
+        "ineligible": 3,
+        "netUsd": 150.21956425
+      }
+    },
+    {
+      "runtime": "claude",
+      "retention": "1h TTL",
+      "cap": 2,
+      "minContext": 150000,
+      "conservative": {
+        "keepalives": 128,
+        "keepaliveUsd": 16.090755050000006,
+        "covered": 26,
+        "coveredTokens": 11152779,
+        "savedUsd": 158.71287419999996,
+        "missedAfterCap": 23,
+        "wastedKeepalives": 93,
+        "wastedUsd": 11.581475300000003,
+        "ineligible": 3,
+        "netUsd": 142.62211914999995
+      },
+      "optimistic": {
+        "keepalives": 128,
+        "keepaliveUsd": 12.21022505,
+        "covered": 26,
+        "coveredTokens": 11403019,
+        "savedUsd": 162.1012462,
+        "missedAfterCap": 23,
+        "wastedKeepalives": 93,
+        "wastedUsd": 8.902825299999998,
+        "ineligible": 3,
+        "netUsd": 149.89102115
+      }
+    },
+    {
+      "runtime": "claude",
+      "retention": "1h TTL",
+      "cap": 3,
+      "minContext": 0,
+      "conservative": {
+        "keepalives": 233,
+        "keepaliveUsd": 23.199519749999993,
+        "covered": 37,
+        "coveredTokens": 13691744,
+        "savedUsd": 198.52897090000002,
+        "missedAfterCap": 21,
+        "wastedKeepalives": 177,
+        "wastedUsd": 16.049718549999998,
+        "ineligible": 4,
+        "netUsd": 175.32945115
+      },
+      "optimistic": {
+        "keepalives": 233,
+        "keepaliveUsd": 17.100139749999997,
+        "covered": 37,
+        "coveredTokens": 14051984,
+        "savedUsd": 203.05584290000004,
+        "missedAfterCap": 21,
+        "wastedKeepalives": 177,
+        "wastedUsd": 11.895428549999997,
+        "ineligible": 4,
+        "netUsd": 185.95570315000003
+      }
+    },
+    {
+      "runtime": "claude",
+      "retention": "1h TTL",
+      "cap": 3,
+      "minContext": 50000,
+      "conservative": {
+        "keepalives": 200,
+        "keepaliveUsd": 22.678505249999994,
+        "covered": 32,
+        "coveredTokens": 13625158,
+        "savedUsd": 198.1116943,
+        "missedAfterCap": 21,
+        "wastedKeepalives": 149,
+        "wastedUsd": 15.661926150000001,
+        "ineligible": 3,
+        "netUsd": 175.43318905
+      },
+      "optimistic": {
+        "keepalives": 200,
+        "keepaliveUsd": 16.89802525,
+        "covered": 32,
+        "coveredTokens": 13935398,
+        "savedUsd": 202.32656630000002,
+        "missedAfterCap": 21,
+        "wastedKeepalives": 149,
+        "wastedUsd": 11.738536149999998,
+        "ineligible": 3,
+        "netUsd": 185.42854105000004
+      }
+    },
+    {
+      "runtime": "claude",
+      "retention": "1h TTL",
+      "cap": 3,
+      "minContext": 150000,
+      "conservative": {
+        "keepalives": 172,
+        "keepaliveUsd": 21.573449399999994,
+        "covered": 31,
+        "coveredTokens": 13550993,
+        "savedUsd": 197.53320730000002,
+        "missedAfterCap": 18,
+        "wastedKeepalives": 122,
+        "wastedUsd": 14.6022603,
+        "ineligible": 3,
+        "netUsd": 175.95975790000003
+      },
+      "optimistic": {
+        "keepalives": 172,
+        "keepaliveUsd": 16.417339399999996,
+        "covered": 31,
+        "coveredTokens": 13851233,
+        "savedUsd": 201.6700793,
+        "missedAfterCap": 18,
+        "wastedKeepalives": 122,
+        "wastedUsd": 11.281240299999999,
+        "ineligible": 3,
+        "netUsd": 185.2527399
+      }
+    },
+    {
+      "runtime": "claude",
+      "retention": "1h TTL",
+      "cap": 4,
+      "minContext": 0,
+      "conservative": {
+        "keepalives": 290,
+        "keepaliveUsd": 28.352467400000002,
+        "covered": 39,
+        "coveredTokens": 14694274,
+        "savedUsd": 212.33815245,
+        "missedAfterCap": 19,
+        "wastedKeepalives": 225,
+        "wastedUsd": 19.779305800000007,
+        "ineligible": 4,
+        "netUsd": 183.98568505
+      },
+      "optimistic": {
+        "keepalives": 290,
+        "keepaliveUsd": 20.8931574,
+        "covered": 39,
+        "coveredTokens": 15074514,
+        "savedUsd": 217.14052445000002,
+        "missedAfterCap": 19,
+        "wastedKeepalives": 225,
+        "wastedUsd": 14.601025799999999,
+        "ineligible": 4,
+        "netUsd": 196.24736705
+      }
+    },
+    {
+      "runtime": "claude",
+      "retention": "1h TTL",
+      "cap": 4,
+      "minContext": 50000,
+      "conservative": {
+        "keepalives": 248,
+        "keepaliveUsd": 27.703744300000004,
+        "covered": 34,
+        "coveredTokens": 14627688,
+        "savedUsd": 211.92087585,
+        "missedAfterCap": 19,
+        "wastedKeepalives": 188,
+        "wastedUsd": 19.263804800000006,
+        "ineligible": 3,
+        "netUsd": 184.21713154999998
+      },
+      "optimistic": {
+        "keepalives": 248,
+        "keepaliveUsd": 20.6402343,
+        "covered": 34,
+        "coveredTokens": 14957928,
+        "savedUsd": 216.41124785,
+        "missedAfterCap": 19,
+        "wastedKeepalives": 188,
+        "wastedUsd": 14.3933248,
+        "ineligible": 3,
+        "netUsd": 195.77101355
+      }
+    },
+    {
+      "runtime": "claude",
+      "retention": "1h TTL",
+      "cap": 4,
+      "minContext": 150000,
+      "conservative": {
+        "keepalives": 211,
+        "keepaliveUsd": 26.239266500000003,
+        "covered": 33,
+        "coveredTokens": 14553523,
+        "savedUsd": 211.34238885,
+        "missedAfterCap": 16,
+        "wastedKeepalives": 152,
+        "wastedUsd": 17.844717000000003,
+        "ineligible": 3,
+        "netUsd": 185.10312234999998
+      },
+      "optimistic": {
+        "keepalives": 211,
+        "keepaliveUsd": 20.0064965,
+        "covered": 33,
+        "coveredTokens": 14873763,
+        "savedUsd": 215.75476084999997,
+        "missedAfterCap": 16,
+        "wastedKeepalives": 152,
+        "wastedUsd": 13.782976999999999,
+        "ineligible": 3,
+        "netUsd": 195.74826434999997
+      }
+    },
+    {
+      "runtime": "claude",
+      "retention": "1h TTL",
+      "cap": 6,
+      "minContext": 0,
+      "conservative": {
+        "keepalives": 396,
+        "keepaliveUsd": 37.72196569999999,
+        "covered": 46,
+        "coveredTokens": 16495538,
+        "savedUsd": 228.03193280000002,
+        "missedAfterCap": 12,
+        "wastedKeepalives": 291,
+        "wastedUsd": 25.641104199999994,
+        "ineligible": 4,
+        "netUsd": 190.30996710000002
+      },
+      "optimistic": {
+        "keepalives": 396,
+        "keepaliveUsd": 27.730595700000002,
+        "covered": 46,
+        "coveredTokens": 16945778,
+        "savedUsd": 233.46080480000003,
+        "missedAfterCap": 12,
+        "wastedKeepalives": 291,
+        "wastedUsd": 18.987514200000003,
+        "ineligible": 4,
+        "netUsd": 205.73020910000002
+      }
+    },
+    {
+      "runtime": "claude",
+      "retention": "1h TTL",
+      "cap": 6,
+      "minContext": 50000,
+      "conservative": {
+        "keepalives": 336,
+        "keepaliveUsd": 36.8118254,
+        "covered": 41,
+        "coveredTokens": 16428952,
+        "savedUsd": 227.6146562,
+        "missedAfterCap": 12,
+        "wastedKeepalives": 236,
+        "wastedUsd": 24.864186,
+        "ineligible": 3,
+        "netUsd": 190.8028308
+      },
+      "optimistic": {
+        "keepalives": 336,
+        "keepaliveUsd": 27.375455400000003,
+        "covered": 41,
+        "coveredTokens": 16829192,
+        "savedUsd": 232.7315282,
+        "missedAfterCap": 12,
+        "wastedKeepalives": 236,
+        "wastedUsd": 18.677596000000005,
+        "ineligible": 3,
+        "netUsd": 205.35607280000002
+      }
+    },
+    {
+      "runtime": "claude",
+      "retention": "1h TTL",
+      "cap": 6,
+      "minContext": 150000,
+      "conservative": {
+        "keepalives": 282,
+        "keepaliveUsd": 34.6464636,
+        "covered": 38,
+        "coveredTokens": 16161372,
+        "savedUsd": 225.95981600000002,
+        "missedAfterCap": 11,
+        "wastedKeepalives": 194,
+        "wastedUsd": 23.1661245,
+        "ineligible": 3,
+        "netUsd": 191.3133524
+      },
+      "optimistic": {
+        "keepalives": 282,
+        "keepaliveUsd": 26.450043600000004,
+        "covered": 38,
+        "coveredTokens": 16531612,
+        "savedUsd": 230.881688,
+        "missedAfterCap": 11,
+        "wastedKeepalives": 194,
+        "wastedUsd": 18.003284500000003,
+        "ineligible": 3,
+        "netUsd": 204.43164439999998
+      }
+    },
+    {
+      "runtime": "claude",
+      "retention": "1h TTL",
+      "cap": 8,
+      "minContext": 0,
+      "conservative": {
+        "keepalives": 490,
+        "keepaliveUsd": 46.046138500000026,
+        "covered": 46,
+        "coveredTokens": 16495538,
+        "savedUsd": 228.03193280000002,
+        "missedAfterCap": 12,
+        "wastedKeepalives": 385,
+        "wastedUsd": 33.965277,
+        "ineligible": 4,
+        "netUsd": 181.9857943
+      },
+      "optimistic": {
+        "keepalives": 490,
+        "keepaliveUsd": 33.800038500000014,
+        "covered": 46,
+        "coveredTokens": 16945778,
+        "savedUsd": 233.46080480000003,
+        "missedAfterCap": 12,
+        "wastedKeepalives": 385,
+        "wastedUsd": 25.056956999999997,
+        "ineligible": 4,
+        "netUsd": 199.66076630000003
+      }
+    },
+    {
+      "runtime": "claude",
+      "retention": "1h TTL",
+      "cap": 8,
+      "minContext": 50000,
+      "conservative": {
+        "keepalives": 412,
+        "keepaliveUsd": 44.866581000000025,
+        "covered": 41,
+        "coveredTokens": 16428952,
+        "savedUsd": 227.6146562,
+        "missedAfterCap": 12,
+        "wastedKeepalives": 312,
+        "wastedUsd": 32.9189416,
+        "ineligible": 3,
+        "netUsd": 182.7480752
+      },
+      "optimistic": {
+        "keepalives": 412,
+        "keepaliveUsd": 33.341881,
+        "covered": 41,
+        "coveredTokens": 16829192,
+        "savedUsd": 232.7315282,
+        "missedAfterCap": 12,
+        "wastedKeepalives": 312,
+        "wastedUsd": 24.644021600000002,
+        "ineligible": 3,
+        "netUsd": 199.3896472
+      }
+    },
+    {
+      "runtime": "claude",
+      "retention": "1h TTL",
+      "cap": 8,
+      "minContext": 150000,
+      "conservative": {
+        "keepalives": 344,
+        "keepaliveUsd": 42.11519870000001,
+        "covered": 38,
+        "coveredTokens": 16161372,
+        "savedUsd": 225.95981600000002,
+        "missedAfterCap": 11,
+        "wastedKeepalives": 256,
+        "wastedUsd": 30.634859599999995,
+        "ineligible": 3,
+        "netUsd": 183.8446173
+      },
+      "optimistic": {
+        "keepalives": 344,
+        "keepaliveUsd": 32.18969870000001,
+        "covered": 38,
+        "coveredTokens": 16531612,
+        "savedUsd": 230.881688,
+        "missedAfterCap": 11,
+        "wastedKeepalives": 256,
+        "wastedUsd": 23.7429396,
+        "ineligible": 3,
+        "netUsd": 198.6919893
+      }
+    },
+    {
+      "runtime": "claude",
+      "retention": "1h TTL",
+      "cap": 12,
+      "minContext": 0,
+      "conservative": {
+        "keepalives": 678,
+        "keepaliveUsd": 62.897284100000036,
+        "covered": 46,
+        "coveredTokens": 16495538,
+        "savedUsd": 228.03193280000002,
+        "missedAfterCap": 12,
+        "wastedKeepalives": 573,
+        "wastedUsd": 50.81642260000002,
+        "ineligible": 4,
+        "netUsd": 165.13464869999999
+      },
+      "optimistic": {
+        "keepalives": 678,
+        "keepaliveUsd": 45.95920410000001,
+        "covered": 46,
+        "coveredTokens": 16945778,
+        "savedUsd": 233.46080480000003,
+        "missedAfterCap": 12,
+        "wastedKeepalives": 573,
+        "wastedUsd": 37.21612260000001,
+        "ineligible": 4,
+        "netUsd": 187.50160070000004
+      }
+    },
+    {
+      "runtime": "claude",
+      "retention": "1h TTL",
+      "cap": 12,
+      "minContext": 50000,
+      "conservative": {
+        "keepalives": 564,
+        "keepaliveUsd": 61.15489220000003,
+        "covered": 41,
+        "coveredTokens": 16428952,
+        "savedUsd": 227.6146562,
+        "missedAfterCap": 12,
+        "wastedKeepalives": 464,
+        "wastedUsd": 49.207252800000006,
+        "ineligible": 3,
+        "netUsd": 166.45976399999998
+      },
+      "optimistic": {
+        "keepalives": 564,
+        "keepaliveUsd": 45.29261220000001,
+        "covered": 41,
+        "coveredTokens": 16829192,
+        "savedUsd": 232.7315282,
+        "missedAfterCap": 12,
+        "wastedKeepalives": 464,
+        "wastedUsd": 36.59475280000001,
+        "ineligible": 3,
+        "netUsd": 187.438916
+      }
+    },
+    {
+      "runtime": "claude",
+      "retention": "1h TTL",
+      "cap": 12,
+      "minContext": 150000,
+      "conservative": {
+        "keepalives": 468,
+        "keepaliveUsd": 57.201468900000016,
+        "covered": 38,
+        "coveredTokens": 16161372,
+        "savedUsd": 225.95981600000002,
+        "missedAfterCap": 11,
+        "wastedKeepalives": 380,
+        "wastedUsd": 45.7211298,
+        "ineligible": 3,
+        "netUsd": 168.7583471
+      },
+      "optimistic": {
+        "keepalives": 468,
+        "keepaliveUsd": 43.6838889,
+        "covered": 38,
+        "coveredTokens": 16531612,
+        "savedUsd": 230.881688,
+        "missedAfterCap": 11,
+        "wastedKeepalives": 380,
+        "wastedUsd": 35.2371298,
+        "ineligible": 3,
+        "netUsd": 187.1977991
+      }
+    },
+    {
+      "runtime": "claude",
+      "retention": "1h TTL",
+      "cap": 24,
+      "minContext": 0,
+      "conservative": {
+        "keepalives": 1183,
+        "keepaliveUsd": 108.08791465000003,
+        "covered": 53,
+        "coveredTokens": 19450825,
+        "savedUsd": 263.54168430000004,
+        "missedAfterCap": 5,
+        "wastedKeepalives": 943,
+        "wastedUsd": 77.08909739999999,
+        "ineligible": 4,
+        "netUsd": 155.45376965000003
+      },
+      "optimistic": {
+        "keepalives": 1183,
+        "keepaliveUsd": 77.24611465000002,
+        "covered": 53,
+        "coveredTokens": 19971065,
+        "savedUsd": 269.71655630000004,
+        "missedAfterCap": 5,
+        "wastedKeepalives": 943,
+        "wastedUsd": 54.34989740000003,
+        "ineligible": 4,
+        "netUsd": 192.47044165
+      }
+    },
+    {
+      "runtime": "claude",
+      "retention": "1h TTL",
+      "cap": 24,
+      "minContext": 50000,
+      "conservative": {
+        "keepalives": 961,
+        "keepaliveUsd": 104.46501955000001,
+        "covered": 48,
+        "coveredTokens": 19384239,
+        "savedUsd": 263.1244077,
+        "missedAfterCap": 5,
+        "wastedKeepalives": 726,
+        "wastedUsd": 73.59942439999999,
+        "ineligible": 3,
+        "netUsd": 158.65938814999998
+      },
+      "optimistic": {
+        "keepalives": 961,
+        "keepaliveUsd": 75.93501955000002,
+        "covered": 48,
+        "coveredTokens": 19854479,
+        "savedUsd": 268.98727970000004,
+        "missedAfterCap": 5,
+        "wastedKeepalives": 726,
+        "wastedUsd": 53.084024400000004,
+        "ineligible": 3,
+        "netUsd": 193.05226015000002
+      }
+    },
+    {
+      "runtime": "claude",
+      "retention": "1h TTL",
+      "cap": 24,
+      "minContext": 150000,
+      "conservative": {
+        "keepalives": 789,
+        "keepaliveUsd": 96.87634605,
+        "covered": 44,
+        "coveredTokens": 19046434,
+        "savedUsd": 261.19569,
+        "missedAfterCap": 5,
+        "wastedKeepalives": 582,
+        "wastedUsd": 66.8613968,
+        "ineligible": 3,
+        "netUsd": 164.31934395000002
+      },
+      "optimistic": {
+        "keepalives": 789,
+        "keepaliveUsd": 73.02746605000002,
+        "covered": 44,
+        "coveredTokens": 19476674,
+        "savedUsd": 266.824562,
+        "missedAfterCap": 5,
+        "wastedKeepalives": 582,
+        "wastedUsd": 50.61331680000001,
+        "ineligible": 3,
+        "netUsd": 193.79709595
+      }
+    },
+    {
+      "runtime": "codex",
+      "retention": "30 min retention (assumed)",
+      "cap": 1,
+      "minContext": 0,
+      "conservative": {
+        "keepalives": 46,
+        "keepaliveUsd": 4.8219211,
+        "covered": 12,
+        "coveredTokens": 556077,
+        "savedUsd": 2.0120074999999997,
+        "missedAfterCap": 8,
+        "wastedKeepalives": 34,
+        "wastedUsd": 3.0083415999999996,
+        "ineligible": 11,
+        "netUsd": -2.8099136000000002
+      },
+      "optimistic": {
+        "keepalives": 46,
+        "keepaliveUsd": 3.8599211,
+        "covered": 12,
+        "coveredTokens": 601337,
+        "savedUsd": 2.2575527,
+        "missedAfterCap": 8,
+        "wastedKeepalives": 34,
+        "wastedUsd": 2.3719416,
+        "ineligible": 11,
+        "netUsd": -1.6023684
+      }
+    },
+    {
+      "runtime": "codex",
+      "retention": "30 min retention (assumed)",
+      "cap": 1,
+      "minContext": 50000,
+      "conservative": {
+        "keepalives": 40,
+        "keepaliveUsd": 4.4962225,
+        "covered": 11,
+        "coveredTokens": 556077,
+        "savedUsd": 2.0120074999999997,
+        "missedAfterCap": 7,
+        "wastedKeepalives": 29,
+        "wastedUsd": 2.747564,
+        "ineligible": 11,
+        "netUsd": -2.4842150000000003
+      },
+      "optimistic": {
+        "keepalives": 40,
+        "keepaliveUsd": 3.697022499999999,
+        "covered": 11,
+        "coveredTokens": 601022,
+        "savedUsd": 2.2547177,
+        "missedAfterCap": 7,
+        "wastedKeepalives": 29,
+        "wastedUsd": 2.236964,
+        "ineligible": 11,
+        "netUsd": -1.4423047999999992
+      }
+    },
+    {
+      "runtime": "codex",
+      "retention": "30 min retention (assumed)",
+      "cap": 1,
+      "minContext": 150000,
+      "conservative": {
+        "keepalives": 24,
+        "keepaliveUsd": 3.2641673,
+        "covered": 8,
+        "coveredTokens": 556077,
+        "savedUsd": 2.0120074999999997,
+        "missedAfterCap": 5,
+        "wastedKeepalives": 16,
+        "wastedUsd": 1.8388588000000001,
+        "ineligible": 10,
+        "netUsd": -1.2521598000000003
+      },
+      "optimistic": {
+        "keepalives": 24,
+        "keepaliveUsd": 2.849767300000001,
+        "covered": 8,
+        "coveredTokens": 599940,
+        "savedUsd": 2.2449797,
+        "missedAfterCap": 5,
+        "wastedKeepalives": 16,
+        "wastedUsd": 1.6020588000000002,
+        "ineligible": 10,
+        "netUsd": -0.6047876000000008
+      }
+    },
+    {
+      "runtime": "codex",
+      "retention": "30 min retention (assumed)",
+      "cap": 2,
+      "minContext": 0,
+      "conservative": {
+        "keepalives": 71,
+        "keepaliveUsd": 7.3797162,
+        "covered": 15,
+        "coveredTokens": 647555,
+        "savedUsd": 2.6110133999999996,
+        "missedAfterCap": 5,
+        "wastedKeepalives": 51,
+        "wastedUsd": 4.625402599999999,
+        "ineligible": 11,
+        "netUsd": -4.7687028
+      },
+      "optimistic": {
+        "keepalives": 71,
+        "keepaliveUsd": 5.8847962,
+        "covered": 15,
+        "coveredTokens": 713365,
+        "savedUsd": 2.9666035999999996,
+        "missedAfterCap": 5,
+        "wastedKeepalives": 51,
+        "wastedUsd": 3.6082226,
+        "ineligible": 11,
+        "netUsd": -2.9181926000000007
+      }
+    },
+    {
+      "runtime": "codex",
+      "retention": "30 min retention (assumed)",
+      "cap": 2,
+      "minContext": 50000,
+      "conservative": {
+        "keepalives": 61,
+        "keepaliveUsd": 6.7975542,
+        "covered": 14,
+        "coveredTokens": 647555,
+        "savedUsd": 2.6110133999999996,
+        "missedAfterCap": 4,
+        "wastedKeepalives": 42,
+        "wastedUsd": 4.1081616,
+        "ineligible": 11,
+        "netUsd": -4.186540800000001
+      },
+      "optimistic": {
+        "keepalives": 61,
+        "keepaliveUsd": 5.589414199999999,
+        "covered": 14,
+        "coveredTokens": 713050,
+        "savedUsd": 2.9637685999999994,
+        "missedAfterCap": 4,
+        "wastedKeepalives": 42,
+        "wastedUsd": 3.340761599999999,
+        "ineligible": 11,
+        "netUsd": -2.6256456
+      }
+    },
+    {
+      "runtime": "codex",
+      "retention": "30 min retention (assumed)",
+      "cap": 2,
+      "minContext": 150000,
+      "conservative": {
+        "keepalives": 37,
+        "keepaliveUsd": 4.956730599999999,
+        "covered": 10,
+        "coveredTokens": 587668,
+        "savedUsd": 2.0720303999999996,
+        "missedAfterCap": 3,
+        "wastedKeepalives": 23,
+        "wastedUsd": 2.9054,
+        "ineligible": 10,
+        "netUsd": -2.8847001999999997
+      },
+      "optimistic": {
+        "keepalives": 37,
+        "keepaliveUsd": 4.318910600000001,
+        "covered": 10,
+        "coveredTokens": 642081,
+        "savedUsd": 2.3250476,
+        "missedAfterCap": 3,
+        "wastedKeepalives": 23,
+        "wastedUsd": 2.52152,
+        "ineligible": 10,
+        "netUsd": -1.9938630000000006
+      }
+    },
+    {
+      "runtime": "codex",
+      "retention": "30 min retention (assumed)",
+      "cap": 3,
+      "minContext": 0,
+      "conservative": {
+        "keepalives": 85,
+        "keepaliveUsd": 8.958765900000003,
+        "covered": 17,
+        "coveredTokens": 656493,
+        "savedUsd": 2.6914553999999997,
+        "missedAfterCap": 3,
+        "wastedKeepalives": 59,
+        "wastedUsd": 5.535083299999999,
+        "ineligible": 11,
+        "netUsd": -6.267310500000003
+      },
+      "optimistic": {
+        "keepalives": 85,
+        "keepaliveUsd": 7.092485900000002,
+        "covered": 17,
+        "coveredTokens": 733113,
+        "savedUsd": 3.1443356,
+        "missedAfterCap": 3,
+        "wastedKeepalives": 59,
+        "wastedUsd": 4.379343299999999,
+        "ineligible": 11,
+        "netUsd": -3.9481503000000018
+      }
+    },
+    {
+      "runtime": "codex",
+      "retention": "30 min retention (assumed)",
+      "cap": 3,
+      "minContext": 50000,
+      "conservative": {
+        "keepalives": 71,
+        "keepaliveUsd": 8.1139405,
+        "covered": 15,
+        "coveredTokens": 656493,
+        "savedUsd": 2.6914553999999997,
+        "missedAfterCap": 3,
+        "wastedKeepalives": 49,
+        "wastedUsd": 5.0244319,
+        "ineligible": 11,
+        "netUsd": -5.4224851
+      },
+      "optimistic": {
+        "keepalives": 71,
+        "keepaliveUsd": 6.6640005,
+        "covered": 15,
+        "coveredTokens": 731988,
+        "savedUsd": 3.1342105999999994,
+        "missedAfterCap": 3,
+        "wastedKeepalives": 49,
+        "wastedUsd": 4.131631899999999,
+        "ineligible": 11,
+        "netUsd": -3.529789900000001
+      }
+    },
+    {
+      "runtime": "codex",
+      "retention": "30 min retention (assumed)",
+      "cap": 3,
+      "minContext": 150000,
+      "conservative": {
+        "keepalives": 43,
+        "keepaliveUsd": 5.9486564999999985,
+        "covered": 10,
+        "coveredTokens": 587668,
+        "savedUsd": 2.0720303999999996,
+        "missedAfterCap": 3,
+        "wastedKeepalives": 29,
+        "wastedUsd": 3.8973259000000002,
+        "ineligible": 10,
+        "netUsd": -3.876626099999999
+      },
+      "optimistic": {
+        "keepalives": 43,
+        "keepaliveUsd": 5.1657565,
+        "covered": 10,
+        "coveredTokens": 642081,
+        "savedUsd": 2.3250476,
+        "missedAfterCap": 3,
+        "wastedKeepalives": 29,
+        "wastedUsd": 3.3683658999999997,
+        "ineligible": 10,
+        "netUsd": -2.8407088999999996
+      }
+    },
+    {
+      "runtime": "codex",
+      "retention": "30 min retention (assumed)",
+      "cap": 4,
+      "minContext": 0,
+      "conservative": {
+        "keepalives": 97,
+        "keepaliveUsd": 10.150668600000001,
+        "covered": 17,
+        "coveredTokens": 656493,
+        "savedUsd": 2.6914553999999997,
+        "missedAfterCap": 3,
+        "wastedKeepalives": 70,
+        "wastedUsd": 6.633234999999999,
+        "ineligible": 11,
+        "netUsd": -7.4592132000000015
+      },
+      "optimistic": {
+        "keepalives": 97,
+        "keepaliveUsd": 7.9823486,
+        "covered": 17,
+        "coveredTokens": 733113,
+        "savedUsd": 3.1443356,
+        "missedAfterCap": 3,
+        "wastedKeepalives": 70,
+        "wastedUsd": 5.217854999999999,
+        "ineligible": 11,
+        "netUsd": -4.838013
+      }
+    },
+    {
+      "runtime": "codex",
+      "retention": "30 min retention (assumed)",
+      "cap": 4,
+      "minContext": 50000,
+      "conservative": {
+        "keepalives": 79,
+        "keepaliveUsd": 9.036979800000001,
+        "covered": 15,
+        "coveredTokens": 656493,
+        "savedUsd": 2.6914553999999997,
+        "missedAfterCap": 3,
+        "wastedKeepalives": 57,
+        "wastedUsd": 5.947471200000001,
+        "ineligible": 11,
+        "netUsd": -6.345524400000001
+      },
+      "optimistic": {
+        "keepalives": 79,
+        "keepaliveUsd": 7.420139800000001,
+        "covered": 15,
+        "coveredTokens": 731988,
+        "savedUsd": 3.1342105999999994,
+        "missedAfterCap": 3,
+        "wastedKeepalives": 57,
+        "wastedUsd": 4.8877711999999995,
+        "ineligible": 11,
+        "netUsd": -4.285929200000002
+      }
+    },
+    {
+      "runtime": "codex",
+      "retention": "30 min retention (assumed)",
+      "cap": 4,
+      "minContext": 150000,
+      "conservative": {
+        "keepalives": 48,
+        "keepaliveUsd": 6.6802074,
+        "covered": 10,
+        "coveredTokens": 587668,
+        "savedUsd": 2.0720303999999996,
+        "missedAfterCap": 3,
+        "wastedKeepalives": 34,
+        "wastedUsd": 4.6288768,
+        "ineligible": 10,
+        "netUsd": -4.6081769999999995
+      },
+      "optimistic": {
+        "keepalives": 48,
+        "keepaliveUsd": 5.7886874,
+        "covered": 10,
+        "coveredTokens": 642081,
+        "savedUsd": 2.3250476,
+        "missedAfterCap": 3,
+        "wastedKeepalives": 34,
+        "wastedUsd": 3.9912968,
+        "ineligible": 10,
+        "netUsd": -3.4636397999999997
+      }
+    },
+    {
+      "runtime": "codex",
+      "retention": "30 min retention (assumed)",
+      "cap": 6,
+      "minContext": 0,
+      "conservative": {
+        "keepalives": 117,
+        "keepaliveUsd": 12.335976400000002,
+        "covered": 18,
+        "coveredTokens": 792930,
+        "savedUsd": 3.9193884,
+        "missedAfterCap": 2,
+        "wastedKeepalives": 84,
+        "wastedUsd": 7.327860800000001,
+        "ineligible": 11,
+        "netUsd": -8.416588
+      },
+      "optimistic": {
+        "keepalives": 117,
+        "keepaliveUsd": 9.6345564,
+        "covered": 18,
+        "coveredTokens": 879550,
+        "savedUsd": 4.462268600000001,
+        "missedAfterCap": 2,
+        "wastedKeepalives": 84,
+        "wastedUsd": 5.628380799999999,
+        "ineligible": 11,
+        "netUsd": -5.1722877999999985
+      }
+    },
+    {
+      "runtime": "codex",
+      "retention": "30 min retention (assumed)",
+      "cap": 6,
+      "minContext": 50000,
+      "conservative": {
+        "keepalives": 93,
+        "keepaliveUsd": 10.859462800000001,
+        "covered": 16,
+        "coveredTokens": 792930,
+        "savedUsd": 3.9193884,
+        "missedAfterCap": 2,
+        "wastedKeepalives": 65,
+        "wastedUsd": 6.279272200000001,
+        "ineligible": 11,
+        "netUsd": -6.940074400000001
+      },
+      "optimistic": {
+        "keepalives": 93,
+        "keepaliveUsd": 8.906342800000001,
+        "covered": 16,
+        "coveredTokens": 878425,
+        "savedUsd": 4.4521436,
+        "missedAfterCap": 2,
+        "wastedKeepalives": 65,
+        "wastedUsd": 5.132292199999999,
+        "ineligible": 11,
+        "netUsd": -4.454199200000001
+      }
+    },
+    {
+      "runtime": "codex",
+      "retention": "30 min retention (assumed)",
+      "cap": 6,
+      "minContext": 150000,
+      "conservative": {
+        "keepalives": 58,
+        "keepaliveUsd": 8.157109199999999,
+        "covered": 11,
+        "coveredTokens": 724105,
+        "savedUsd": 3.2999633999999998,
+        "missedAfterCap": 2,
+        "wastedKeepalives": 38,
+        "wastedUsd": 4.6150966,
+        "ineligible": 10,
+        "netUsd": -4.8571458
+      },
+      "optimistic": {
+        "keepalives": 58,
+        "keepaliveUsd": 7.035929199999999,
+        "covered": 11,
+        "coveredTokens": 788518,
+        "savedUsd": 3.6429806000000005,
+        "missedAfterCap": 2,
+        "wastedKeepalives": 38,
+        "wastedUsd": 3.9968566,
+        "ineligible": 10,
+        "netUsd": -3.3929485999999986
+      }
+    },
+    {
+      "runtime": "codex",
+      "retention": "30 min retention (assumed)",
+      "cap": 8,
+      "minContext": 0,
+      "conservative": {
+        "keepalives": 134,
+        "keepaliveUsd": 13.718626200000005,
+        "covered": 19,
+        "coveredTokens": 1051164,
+        "savedUsd": 6.2434944,
+        "missedAfterCap": 1,
+        "wastedKeepalives": 94,
+        "wastedUsd": 6.4301626,
+        "ineligible": 11,
+        "netUsd": -7.475131800000004
+      },
+      "optimistic": {
+        "keepalives": 134,
+        "keepaliveUsd": 10.5915062,
+        "covered": 19,
+        "coveredTokens": 1147784,
+        "savedUsd": 6.8763746,
+        "missedAfterCap": 1,
+        "wastedKeepalives": 94,
+        "wastedUsd": 4.6017826,
+        "ineligible": 11,
+        "netUsd": -3.7151315999999994
+      }
+    },
+    {
+      "runtime": "codex",
+      "retention": "30 min retention (assumed)",
+      "cap": 8,
+      "minContext": 50000,
+      "conservative": {
+        "keepalives": 104,
+        "keepaliveUsd": 11.862487800000002,
+        "covered": 17,
+        "coveredTokens": 1051164,
+        "savedUsd": 6.2434944,
+        "missedAfterCap": 1,
+        "wastedKeepalives": 69,
+        "wastedUsd": 5.0019492,
+        "ineligible": 11,
+        "netUsd": -5.618993400000002
+      },
+      "optimistic": {
+        "keepalives": 104,
+        "keepaliveUsd": 9.695607800000001,
+        "covered": 17,
+        "coveredTokens": 1146659,
+        "savedUsd": 6.8662496,
+        "missedAfterCap": 1,
+        "wastedKeepalives": 69,
+        "wastedUsd": 3.9380091999999998,
+        "ineligible": 11,
+        "netUsd": -2.8293582000000015
+      }
+    },
+    {
+      "runtime": "codex",
+      "retention": "30 min retention (assumed)",
+      "cap": 8,
+      "minContext": 150000,
+      "conservative": {
+        "keepalives": 65,
+        "keepaliveUsd": 8.805753000000001,
+        "covered": 12,
+        "coveredTokens": 982339,
+        "savedUsd": 5.6240694,
+        "missedAfterCap": 1,
+        "wastedKeepalives": 38,
+        "wastedUsd": 2.9833924000000005,
+        "ineligible": 10,
+        "netUsd": -3.1816836000000013
+      },
+      "optimistic": {
+        "keepalives": 65,
+        "keepaliveUsd": 7.585352999999999,
+        "covered": 12,
+        "coveredTokens": 1056752,
+        "savedUsd": 6.057086600000002,
+        "missedAfterCap": 1,
+        "wastedKeepalives": 38,
+        "wastedUsd": 2.5627324,
+        "ineligible": 10,
+        "netUsd": -1.528266399999997
+      }
+    },
+    {
+      "runtime": "codex",
+      "retention": "30 min retention (assumed)",
+      "cap": 12,
+      "minContext": 0,
+      "conservative": {
+        "keepalives": 166,
+        "keepaliveUsd": 15.9043978,
+        "covered": 19,
+        "coveredTokens": 1051164,
+        "savedUsd": 6.2434944,
+        "missedAfterCap": 1,
+        "wastedKeepalives": 126,
+        "wastedUsd": 8.6159342,
+        "ineligible": 11,
+        "netUsd": -9.660903399999999
+      },
+      "optimistic": {
+        "keepalives": 166,
+        "keepaliveUsd": 11.9458778,
+        "covered": 19,
+        "coveredTokens": 1147784,
+        "savedUsd": 6.8763746,
+        "missedAfterCap": 1,
+        "wastedKeepalives": 126,
+        "wastedUsd": 5.9561542,
+        "ineligible": 11,
+        "netUsd": -5.0695032
+      }
+    },
+    {
+      "runtime": "codex",
+      "retention": "30 min retention (assumed)",
+      "cap": 12,
+      "minContext": 50000,
+      "conservative": {
+        "keepalives": 124,
+        "keepaliveUsd": 13.238609800000003,
+        "covered": 17,
+        "coveredTokens": 1051164,
+        "savedUsd": 6.2434944,
+        "missedAfterCap": 1,
+        "wastedKeepalives": 89,
+        "wastedUsd": 6.378071200000001,
+        "ineligible": 11,
+        "netUsd": -6.995115400000002
+      },
+      "optimistic": {
+        "keepalives": 124,
+        "keepaliveUsd": 10.709569799999999,
+        "covered": 17,
+        "coveredTokens": 1146659,
+        "savedUsd": 6.8662496,
+        "missedAfterCap": 1,
+        "wastedKeepalives": 89,
+        "wastedUsd": 4.9519712,
+        "ineligible": 11,
+        "netUsd": -3.843320199999999
+      }
+    },
+    {
+      "runtime": "codex",
+      "retention": "30 min retention (assumed)",
+      "cap": 12,
+      "minContext": 150000,
+      "conservative": {
+        "keepalives": 77,
+        "keepaliveUsd": 9.4467126,
+        "covered": 12,
+        "coveredTokens": 982339,
+        "savedUsd": 5.6240694,
+        "missedAfterCap": 1,
+        "wastedKeepalives": 50,
+        "wastedUsd": 3.624352,
+        "ineligible": 10,
+        "netUsd": -3.8226432
+      },
+      "optimistic": {
+        "keepalives": 77,
+        "keepaliveUsd": 8.1169926,
+        "covered": 12,
+        "coveredTokens": 1056752,
+        "savedUsd": 6.057086600000002,
+        "missedAfterCap": 1,
+        "wastedKeepalives": 50,
+        "wastedUsd": 3.094372,
+        "ineligible": 10,
+        "netUsd": -2.059905999999998
+      }
+    },
+    {
+      "runtime": "codex",
+      "retention": "30 min retention (assumed)",
+      "cap": 24,
+      "minContext": 0,
+      "conservative": {
+        "keepalives": 247,
+        "keepaliveUsd": 22.7684644,
+        "covered": 19,
+        "coveredTokens": 1051164,
+        "savedUsd": 6.2434944,
+        "missedAfterCap": 1,
+        "wastedKeepalives": 207,
+        "wastedUsd": 15.480000800000001,
+        "ineligible": 11,
+        "netUsd": -16.52497
+      },
+      "optimistic": {
+        "keepalives": 247,
+        "keepaliveUsd": 15.8730644,
+        "covered": 19,
+        "coveredTokens": 1147784,
+        "savedUsd": 6.8763746,
+        "missedAfterCap": 1,
+        "wastedKeepalives": 207,
+        "wastedUsd": 9.8833408,
+        "ineligible": 11,
+        "netUsd": -8.9966898
+      }
+    },
+    {
+      "runtime": "codex",
+      "retention": "30 min retention (assumed)",
+      "cap": 24,
+      "minContext": 50000,
+      "conservative": {
+        "keepalives": 169,
+        "keepaliveUsd": 17.270527600000005,
+        "covered": 17,
+        "coveredTokens": 1051164,
+        "savedUsd": 6.2434944,
+        "missedAfterCap": 1,
+        "wastedKeepalives": 134,
+        "wastedUsd": 10.409989,
+        "ineligible": 11,
+        "netUsd": -11.027033200000005
+      },
+      "optimistic": {
+        "keepalives": 169,
+        "keepaliveUsd": 13.575207600000002,
+        "covered": 17,
+        "coveredTokens": 1146659,
+        "savedUsd": 6.8662496,
+        "missedAfterCap": 1,
+        "wastedKeepalives": 134,
+        "wastedUsd": 7.817609,
+        "ineligible": 11,
+        "netUsd": -6.708958000000003
+      }
+    },
+    {
+      "runtime": "codex",
+      "retention": "30 min retention (assumed)",
+      "cap": 24,
+      "minContext": 150000,
+      "conservative": {
+        "keepalives": 109,
+        "keepaliveUsd": 11.2513698,
+        "covered": 12,
+        "coveredTokens": 982339,
+        "savedUsd": 5.6240694,
+        "missedAfterCap": 1,
+        "wastedKeepalives": 82,
+        "wastedUsd": 5.4290092,
+        "ineligible": 10,
+        "netUsd": -5.627300400000001
+      },
+      "optimistic": {
+        "keepalives": 109,
+        "keepaliveUsd": 9.586929800000002,
+        "covered": 12,
+        "coveredTokens": 1056752,
+        "savedUsd": 6.057086600000002,
+        "missedAfterCap": 1,
+        "wastedKeepalives": 82,
+        "wastedUsd": 4.5643092,
+        "ineligible": 10,
+        "netUsd": -3.5298432
+      }
+    },
+    {
+      "runtime": "codex",
+      "retention": "10 min retention (assumed)",
+      "cap": 1,
+      "minContext": 0,
+      "conservative": {
+        "keepalives": 99,
+        "keepaliveUsd": 13.1168425,
+        "covered": 26,
+        "coveredTokens": 86637,
+        "savedUsd": 0.6077213,
+        "missedAfterCap": 31,
+        "wastedKeepalives": 73,
+        "wastedUsd": 9.1588888,
+        "ineligible": 28,
+        "netUsd": -12.509121200000001
+      },
+      "optimistic": {
+        "keepalives": 99,
+        "keepaliveUsd": 10.785842500000001,
+        "covered": 26,
+        "coveredTokens": 134506,
+        "savedUsd": 0.8754482000000001,
+        "missedAfterCap": 31,
+        "wastedKeepalives": 73,
+        "wastedUsd": 7.4642887999999985,
+        "ineligible": 28,
+        "netUsd": -9.9103943
+      }
+    },
+    {
+      "runtime": "codex",
+      "retention": "10 min retention (assumed)",
+      "cap": 1,
+      "minContext": 50000,
+      "conservative": {
+        "keepalives": 86,
+        "keepaliveUsd": 12.6336474,
+        "covered": 20,
+        "coveredTokens": 77246,
+        "savedUsd": 0.5898784,
+        "missedAfterCap": 28,
+        "wastedKeepalives": 66,
+        "wastedUsd": 8.8207134,
+        "ineligible": 28,
+        "netUsd": -12.043769
+      },
+      "optimistic": {
+        "keepalives": 86,
+        "keepaliveUsd": 10.546847400000003,
+        "covered": 20,
+        "coveredTokens": 113490,
+        "savedUsd": 0.8330186000000002,
+        "missedAfterCap": 28,
+        "wastedKeepalives": 66,
+        "wastedUsd": 7.296313399999999,
+        "ineligible": 28,
+        "netUsd": -9.713828800000002
+      }
+    },
+    {
+      "runtime": "codex",
+      "retention": "10 min retention (assumed)",
+      "cap": 1,
+      "minContext": 150000,
+      "conservative": {
+        "keepalives": 47,
+        "keepaliveUsd": 9.467664300000001,
+        "covered": 12,
+        "coveredTokens": 77246,
+        "savedUsd": 0.5898784,
+        "missedAfterCap": 16,
+        "wastedKeepalives": 35,
+        "wastedUsd": 6.297584400000001,
+        "ineligible": 24,
+        "netUsd": -8.877785900000001
+      },
+      "optimistic": {
+        "keepalives": 47,
+        "keepaliveUsd": 8.320664299999999,
+        "covered": 12,
+        "coveredTokens": 110655,
+        "savedUsd": 0.8174578000000001,
+        "missedAfterCap": 16,
+        "wastedKeepalives": 35,
+        "wastedUsd": 5.535384399999998,
+        "ineligible": 24,
+        "netUsd": -7.503206499999999
+      }
+    },
+    {
+      "runtime": "codex",
+      "retention": "10 min retention (assumed)",
+      "cap": 2,
+      "minContext": 0,
+      "conservative": {
+        "keepalives": 157,
+        "keepaliveUsd": 19.785649600000013,
+        "covered": 35,
+        "coveredTokens": 86637,
+        "savedUsd": 0.6077213,
+        "missedAfterCap": 22,
+        "wastedKeepalives": 111,
+        "wastedUsd": 12.916630899999996,
+        "ineligible": 28,
+        "netUsd": -19.177928300000012
+      },
+      "optimistic": {
+        "keepalives": 157,
+        "keepaliveUsd": 16.1096296,
+        "covered": 35,
+        "coveredTokens": 140377,
+        "savedUsd": 0.9175307000000001,
+        "missedAfterCap": 22,
+        "wastedKeepalives": 111,
+        "wastedUsd": 10.4231309,
+        "ineligible": 28,
+        "netUsd": -15.192098900000001
+      }
+    },
+    {
+      "runtime": "codex",
+      "retention": "10 min retention (assumed)",
+      "cap": 2,
+      "minContext": 50000,
+      "conservative": {
+        "keepalives": 138,
+        "keepaliveUsd": 18.968355900000006,
+        "covered": 29,
+        "coveredTokens": 77246,
+        "savedUsd": 0.5898784,
+        "missedAfterCap": 19,
+        "wastedKeepalives": 98,
+        "wastedUsd": 12.244356899999996,
+        "ineligible": 28,
+        "netUsd": -18.378477500000006
+      },
+      "optimistic": {
+        "keepalives": 138,
+        "keepaliveUsd": 15.706895900000003,
+        "covered": 29,
+        "coveredTokens": 119361,
+        "savedUsd": 0.8751011000000002,
+        "missedAfterCap": 19,
+        "wastedKeepalives": 98,
+        "wastedUsd": 10.091416900000002,
+        "ineligible": 28,
+        "netUsd": -14.831794800000003
+      }
+    },
+    {
+      "runtime": "codex",
+      "retention": "10 min retention (assumed)",
+      "cap": 2,
+      "minContext": 150000,
+      "conservative": {
+        "keepalives": 76,
+        "keepaliveUsd": 13.886566599999998,
+        "covered": 15,
+        "coveredTokens": 77246,
+        "savedUsd": 0.5898784,
+        "missedAfterCap": 13,
+        "wastedKeepalives": 56,
+        "wastedUsd": 8.765175699999999,
+        "ineligible": 24,
+        "netUsd": -13.296688199999998
+      },
+      "optimistic": {
+        "keepalives": 76,
+        "keepaliveUsd": 12.145106600000002,
+        "covered": 15,
+        "coveredTokens": 112466,
+        "savedUsd": 0.8337568000000001,
+        "missedAfterCap": 13,
+        "wastedKeepalives": 56,
+        "wastedUsd": 7.6822957,
+        "ineligible": 24,
+        "netUsd": -11.311349800000002
+      }
+    },
+    {
+      "runtime": "codex",
+      "retention": "10 min retention (assumed)",
+      "cap": 3,
+      "minContext": 0,
+      "conservative": {
+        "keepalives": 203,
+        "keepaliveUsd": 24.70157070000001,
+        "covered": 38,
+        "coveredTokens": 86637,
+        "savedUsd": 0.6077213,
+        "missedAfterCap": 19,
+        "wastedKeepalives": 148,
+        "wastedUsd": 17.4426834,
+        "ineligible": 28,
+        "netUsd": -24.093849400000007
+      },
+      "optimistic": {
+        "keepalives": 203,
+        "keepaliveUsd": 19.978950699999995,
+        "covered": 38,
+        "coveredTokens": 141253,
+        "savedUsd": 0.9206506000000001,
+        "missedAfterCap": 19,
+        "wastedKeepalives": 148,
+        "wastedUsd": 14.0644634,
+        "ineligible": 28,
+        "netUsd": -19.058300099999997
+      }
+    },
+    {
+      "runtime": "codex",
+      "retention": "10 min retention (assumed)",
+      "cap": 3,
+      "minContext": 50000,
+      "conservative": {
+        "keepalives": 178,
+        "keepaliveUsd": 23.54177840000001,
+        "covered": 31,
+        "coveredTokens": 77246,
+        "savedUsd": 0.5898784,
+        "missedAfterCap": 17,
+        "wastedKeepalives": 132,
+        "wastedUsd": 16.4600534,
+        "ineligible": 28,
+        "netUsd": -22.95190000000001
+      },
+      "optimistic": {
+        "keepalives": 178,
+        "keepaliveUsd": 19.411638399999994,
+        "covered": 31,
+        "coveredTokens": 119962,
+        "savedUsd": 0.8776985000000002,
+        "missedAfterCap": 17,
+        "wastedKeepalives": 132,
+        "wastedUsd": 13.577573399999999,
+        "ineligible": 28,
+        "netUsd": -18.533939899999993
+      }
+    },
+    {
+      "runtime": "codex",
+      "retention": "10 min retention (assumed)",
+      "cap": 3,
+      "minContext": 150000,
+      "conservative": {
+        "keepalives": 100,
+        "keepaliveUsd": 17.189133899999998,
+        "covered": 15,
+        "coveredTokens": 77246,
+        "savedUsd": 0.5898784,
+        "missedAfterCap": 13,
+        "wastedKeepalives": 80,
+        "wastedUsd": 12.067743,
+        "ineligible": 24,
+        "netUsd": -16.599255499999998
+      },
+      "optimistic": {
+        "keepalives": 100,
+        "keepaliveUsd": 14.998713899999998,
+        "covered": 15,
+        "coveredTokens": 112466,
+        "savedUsd": 0.8337568000000001,
+        "missedAfterCap": 13,
+        "wastedKeepalives": 80,
+        "wastedUsd": 10.535903,
+        "ineligible": 24,
+        "netUsd": -14.164957099999999
+      }
+    },
+    {
+      "runtime": "codex",
+      "retention": "10 min retention (assumed)",
+      "cap": 4,
+      "minContext": 0,
+      "conservative": {
+        "keepalives": 244,
+        "keepaliveUsd": 29.544193100000008,
+        "covered": 43,
+        "coveredTokens": 196973,
+        "savedUsd": 0.8173597,
+        "missedAfterCap": 14,
+        "wastedKeepalives": 168,
+        "wastedUsd": 19.579727000000005,
+        "ineligible": 28,
+        "netUsd": -28.726833400000007
+      },
+      "optimistic": {
+        "keepalives": 244,
+        "keepaliveUsd": 23.772373099999992,
+        "covered": 43,
+        "coveredTokens": 263092,
+        "savedUsd": 1.1589038999999997,
+        "missedAfterCap": 14,
+        "wastedKeepalives": 168,
+        "wastedUsd": 15.732466999999998,
+        "ineligible": 28,
+        "netUsd": -22.613469199999994
+      }
+    },
+    {
+      "runtime": "codex",
+      "retention": "10 min retention (assumed)",
+      "cap": 4,
+      "minContext": 50000,
+      "conservative": {
+        "keepalives": 214,
+        "keepaliveUsd": 28.044616400000013,
+        "covered": 35,
+        "coveredTokens": 187582,
+        "savedUsd": 0.7995168,
+        "missedAfterCap": 13,
+        "wastedKeepalives": 151,
+        "wastedUsd": 18.528996600000003,
+        "ineligible": 28,
+        "netUsd": -27.245099600000014
+      },
+      "optimistic": {
+        "keepalives": 214,
+        "keepaliveUsd": 23.042816399999996,
+        "covered": 35,
+        "coveredTokens": 241486,
+        "savedUsd": 1.1131167999999998,
+        "missedAfterCap": 13,
+        "wastedKeepalives": 151,
+        "wastedUsd": 15.196216599999998,
+        "ineligible": 28,
+        "netUsd": -21.929699599999996
+      }
+    },
+    {
+      "runtime": "codex",
+      "retention": "10 min retention (assumed)",
+      "cap": 4,
+      "minContext": 150000,
+      "conservative": {
+        "keepalives": 121,
+        "keepaliveUsd": 20.416882700000002,
+        "covered": 18,
+        "coveredTokens": 187582,
+        "savedUsd": 0.7995168,
+        "missedAfterCap": 10,
+        "wastedKeepalives": 89,
+        "wastedUsd": 13.504376999999998,
+        "ineligible": 24,
+        "netUsd": -19.617365900000003
+      },
+      "optimistic": {
+        "keepalives": 121,
+        "keepaliveUsd": 17.784042700000004,
+        "covered": 18,
+        "coveredTokens": 233725,
+        "savedUsd": 1.0667900999999997,
+        "missedAfterCap": 10,
+        "wastedKeepalives": 89,
+        "wastedUsd": 11.750276999999997,
+        "ineligible": 24,
+        "netUsd": -16.717252600000005
+      }
+    },
+    {
+      "runtime": "codex",
+      "retention": "10 min retention (assumed)",
+      "cap": 6,
+      "minContext": 0,
+      "conservative": {
+        "keepalives": 307,
+        "keepaliveUsd": 36.13581140000001,
+        "covered": 50,
+        "coveredTokens": 642714,
+        "savedUsd": 2.6197288,
+        "missedAfterCap": 7,
+        "wastedKeepalives": 189,
+        "wastedUsd": 19.787229800000002,
+        "ineligible": 28,
+        "netUsd": -33.51608260000001
+      },
+      "optimistic": {
+        "keepalives": 307,
+        "keepaliveUsd": 28.74393139999999,
+        "covered": 50,
+        "coveredTokens": 742935,
+        "savedUsd": 3.1774033000000004,
+        "missedAfterCap": 7,
+        "wastedKeepalives": 189,
+        "wastedUsd": 15.4175298,
+        "ineligible": 28,
+        "netUsd": -25.56652809999999
+      }
+    },
+    {
+      "runtime": "codex",
+      "retention": "10 min retention (assumed)",
+      "cap": 6,
+      "minContext": 50000,
+      "conservative": {
+        "keepalives": 268,
+        "keepaliveUsd": 34.0069869,
+        "covered": 42,
+        "coveredTokens": 633323,
+        "savedUsd": 2.6018858999999996,
+        "missedAfterCap": 6,
+        "wastedKeepalives": 164,
+        "wastedUsd": 18.1801726,
+        "ineligible": 28,
+        "netUsd": -31.405101000000002
+      },
+      "optimistic": {
+        "keepalives": 268,
+        "keepaliveUsd": 27.716346899999987,
+        "covered": 42,
+        "coveredTokens": 721329,
+        "savedUsd": 3.1316162000000003,
+        "missedAfterCap": 6,
+        "wastedKeepalives": 164,
+        "wastedUsd": 14.6119726,
+        "ineligible": 28,
+        "netUsd": -24.584730699999987
+      }
+    },
+    {
+      "runtime": "codex",
+      "retention": "10 min retention (assumed)",
+      "cap": 6,
+      "minContext": 150000,
+      "conservative": {
+        "keepalives": 152,
+        "keepaliveUsd": 24.4350616,
+        "covered": 24,
+        "coveredTokens": 633323,
+        "savedUsd": 2.6018858999999996,
+        "missedAfterCap": 4,
+        "wastedKeepalives": 85,
+        "wastedUsd": 11.7831494,
+        "ineligible": 24,
+        "netUsd": -21.8331757
+      },
+      "optimistic": {
+        "keepalives": 152,
+        "keepaliveUsd": 21.180701600000003,
+        "covered": 24,
+        "coveredTokens": 712956,
+        "savedUsd": 3.0797814999999997,
+        "missedAfterCap": 4,
+        "wastedKeepalives": 85,
+        "wastedUsd": 10.211949400000002,
+        "ineligible": 24,
+        "netUsd": -18.100920100000003
+      }
+    },
+    {
+      "runtime": "codex",
+      "retention": "10 min retention (assumed)",
+      "cap": 8,
+      "minContext": 0,
+      "conservative": {
+        "keepalives": 346,
+        "keepaliveUsd": 40.125832700000004,
+        "covered": 52,
+        "coveredTokens": 734192,
+        "savedUsd": 3.2187346999999997,
+        "missedAfterCap": 5,
+        "wastedKeepalives": 211,
+        "wastedUsd": 22.204266699999998,
+        "ineligible": 28,
+        "netUsd": -36.907098000000005
+      },
+      "optimistic": {
+        "keepalives": 346,
+        "keepaliveUsd": 31.677652699999985,
+        "covered": 52,
+        "coveredTokens": 854413,
+        "savedUsd": 3.8854092,
+        "missedAfterCap": 5,
+        "wastedKeepalives": 211,
+        "wastedUsd": 17.197386700000006,
+        "ineligible": 28,
+        "netUsd": -27.792243499999984
+      }
+    },
+    {
+      "runtime": "codex",
+      "retention": "10 min retention (assumed)",
+      "cap": 8,
+      "minContext": 50000,
+      "conservative": {
+        "keepalives": 299,
+        "keepaliveUsd": 37.41588140000001,
+        "covered": 44,
+        "coveredTokens": 724801,
+        "savedUsd": 3.2008918,
+        "missedAfterCap": 4,
+        "wastedKeepalives": 178,
+        "wastedUsd": 20.016082700000002,
+        "ineligible": 28,
+        "netUsd": -34.21498960000001
+      },
+      "optimistic": {
+        "keepalives": 299,
+        "keepaliveUsd": 30.378281399999985,
+        "covered": 44,
+        "coveredTokens": 832807,
+        "savedUsd": 3.8396221,
+        "missedAfterCap": 4,
+        "wastedKeepalives": 178,
+        "wastedUsd": 16.120042700000003,
+        "ineligible": 28,
+        "netUsd": -26.538659299999985
+      }
+    },
+    {
+      "runtime": "codex",
+      "retention": "10 min retention (assumed)",
+      "cap": 8,
+      "minContext": 150000,
+      "conservative": {
+        "keepalives": 172,
+        "keepaliveUsd": 26.7957868,
+        "covered": 25,
+        "coveredTokens": 664914,
+        "savedUsd": 2.6619088,
+        "missedAfterCap": 3,
+        "wastedKeepalives": 96,
+        "wastedUsd": 13.8777382,
+        "ineligible": 24,
+        "netUsd": -24.133878
+      },
+      "optimistic": {
+        "keepalives": 172,
+        "keepaliveUsd": 23.1294268,
+        "covered": 25,
+        "coveredTokens": 754547,
+        "savedUsd": 3.1588043999999997,
+        "missedAfterCap": 3,
+        "wastedKeepalives": 96,
+        "wastedUsd": 11.9672582,
+        "ineligible": 24,
+        "netUsd": -19.9706224
+      }
+    },
+    {
+      "runtime": "codex",
+      "retention": "10 min retention (assumed)",
+      "cap": 12,
+      "minContext": 0,
+      "conservative": {
+        "keepalives": 400,
+        "keepaliveUsd": 46.3940815,
+        "covered": 54,
+        "coveredTokens": 743130,
+        "savedUsd": 3.2991767,
+        "missedAfterCap": 3,
+        "wastedKeepalives": 241,
+        "wastedUsd": 25.5790395,
+        "ineligible": 28,
+        "netUsd": -43.0949048
+      },
+      "optimistic": {
+        "keepalives": 400,
+        "keepaliveUsd": 36.10786149999999,
+        "covered": 54,
+        "coveredTokens": 874161,
+        "savedUsd": 4.0631412000000005,
+        "missedAfterCap": 3,
+        "wastedKeepalives": 241,
+        "wastedUsd": 19.8597195,
+        "ineligible": 28,
+        "netUsd": -32.044720299999994
+      }
+    },
+    {
+      "runtime": "codex",
+      "retention": "10 min retention (assumed)",
+      "cap": 12,
+      "minContext": 50000,
+      "conservative": {
+        "keepalives": 337,
+        "keepaliveUsd": 42.44747660000001,
+        "covered": 45,
+        "coveredTokens": 733739,
+        "savedUsd": 3.2813337999999996,
+        "missedAfterCap": 3,
+        "wastedKeepalives": 204,
+        "wastedUsd": 23.339213899999997,
+        "ineligible": 28,
+        "netUsd": -39.16614280000001
+      },
+      "optimistic": {
+        "keepalives": 337,
+        "keepaliveUsd": 34.2574766,
+        "covered": 45,
+        "coveredTokens": 851745,
+        "savedUsd": 4.0100641,
+        "missedAfterCap": 3,
+        "wastedKeepalives": 204,
+        "wastedUsd": 18.853573900000004,
+        "ineligible": 28,
+        "netUsd": -30.247412499999996
+      }
+    },
+    {
+      "runtime": "codex",
+      "retention": "10 min retention (assumed)",
+      "cap": 12,
+      "minContext": 150000,
+      "conservative": {
+        "keepalives": 194,
+        "keepaliveUsd": 30.3975404,
+        "covered": 25,
+        "coveredTokens": 664914,
+        "savedUsd": 2.6619088,
+        "missedAfterCap": 3,
+        "wastedKeepalives": 118,
+        "wastedUsd": 17.479491799999998,
+        "ineligible": 24,
+        "netUsd": -27.7356316
+      },
+      "optimistic": {
+        "keepalives": 194,
+        "keepaliveUsd": 26.084460400000005,
+        "covered": 25,
+        "coveredTokens": 754547,
+        "savedUsd": 3.1588043999999997,
+        "missedAfterCap": 3,
+        "wastedKeepalives": 118,
+        "wastedUsd": 14.9222918,
+        "ineligible": 24,
+        "netUsd": -22.925656000000004
+      }
+    },
+    {
+      "runtime": "codex",
+      "retention": "10 min retention (assumed)",
+      "cap": 24,
+      "minContext": 0,
+      "conservative": {
+        "keepalives": 516,
+        "keepaliveUsd": 59.73417409999998,
+        "covered": 56,
+        "coveredTokens": 1137801,
+        "savedUsd": 6.8512157,
+        "missedAfterCap": 1,
+        "wastedKeepalives": 314,
+        "wastedUsd": 25.809620100000004,
+        "ineligible": 28,
+        "netUsd": -52.882958399999985
+      },
+      "optimistic": {
+        "keepalives": 516,
+        "keepaliveUsd": 45.0765941,
+        "covered": 56,
+        "coveredTokens": 1288832,
+        "savedUsd": 7.795180199999999,
+        "missedAfterCap": 1,
+        "wastedKeepalives": 314,
+        "wastedUsd": 18.1073401,
+        "ineligible": 28,
+        "netUsd": -37.281413900000004
+      }
+    },
+    {
+      "runtime": "codex",
+      "retention": "10 min retention (assumed)",
+      "cap": 24,
+      "minContext": 50000,
+      "conservative": {
+        "keepalives": 417,
+        "keepaliveUsd": 52.9554204,
+        "covered": 47,
+        "coveredTokens": 1128410,
+        "savedUsd": 6.8333728,
+        "missedAfterCap": 1,
+        "wastedKeepalives": 241,
+        "wastedUsd": 20.7376457,
+        "ineligible": 28,
+        "netUsd": -46.1220476
+      },
+      "optimistic": {
+        "keepalives": 417,
+        "keepaliveUsd": 42.16466040000001,
+        "covered": 47,
+        "coveredTokens": 1266416,
+        "savedUsd": 7.7421031000000005,
+        "missedAfterCap": 1,
+        "wastedKeepalives": 241,
+        "wastedUsd": 16.0396457,
+        "ineligible": 28,
+        "netUsd": -34.42255730000001
+      }
+    },
+    {
+      "runtime": "codex",
+      "retention": "10 min retention (assumed)",
+      "cap": 24,
+      "minContext": 150000,
+      "conservative": {
+        "keepalives": 249,
+        "keepaliveUsd": 38.46499920000001,
+        "covered": 27,
+        "coveredTokens": 1059585,
+        "savedUsd": 6.2139478,
+        "missedAfterCap": 1,
+        "wastedKeepalives": 130,
+        "wastedUsd": 12.4374386,
+        "ineligible": 24,
+        "netUsd": -32.25105140000001
+      },
+      "optimistic": {
+        "keepalives": 249,
+        "keepaliveUsd": 32.5093192,
+        "covered": 27,
+        "coveredTokens": 1169218,
+        "savedUsd": 6.8908434,
+        "missedAfterCap": 1,
+        "wastedKeepalives": 130,
+        "wastedUsd": 10.6260386,
+        "ineligible": 24,
+        "netUsd": -25.6184758
+      }
+    }
+  ]
+}
