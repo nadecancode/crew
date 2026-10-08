@@ -63,6 +63,17 @@ pub struct FeatureServices {
 }
 
 impl FeatureServices {
+    /// Host configuration must not accept a feature intent while dropping its
+    /// semantics. This is readiness only; RPC authorization/negotiation remain
+    /// separate checks in the dispatcher.
+    pub fn is_ready(&self, feature: Feature) -> bool {
+        !self.stopping.load(Ordering::Acquire)
+            && (feature != Feature::Epics || self.task_projection().is_some())
+            && self
+                .get(feature)
+                .is_some_and(|service| service.readiness() == Readiness::Ready)
+    }
+
     pub fn register_task_projection(&self, projection: Arc<dyn TaskProjection>) {
         *self
             .task_projection
@@ -1078,6 +1089,7 @@ mod tests {
         let second = tokio::spawn(async move { second.shutdown(false).await });
         assert!(!*daemon.shutdown.borrow());
         assert!(!first.is_finished());
+        assert!(!daemon.feature_services.is_ready(Feature::Docs));
         let (mut session, mut rx) = Session::new(daemon);
         hello(daemon, &mut session, &mut rx).await;
         let stopping = request(
@@ -1236,6 +1248,8 @@ mod tests {
         let (_temp, running) = fixture().await;
         let daemon = &running.daemon;
         daemon.feature_services.register(Arc::new(ReadyDocs));
+        assert!(daemon.feature_services.is_ready(Feature::Docs));
+        assert!(!daemon.feature_services.is_ready(Feature::Epics));
         let (mut first, mut rx) = Session::new(daemon);
         let frame = request(
             &mut first,
