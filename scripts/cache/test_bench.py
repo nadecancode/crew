@@ -86,6 +86,14 @@ class CacheBenchTests(unittest.TestCase):
         with patch.object(bench, "process_identity", side_effect=lambda pid: (1, 101)):
             self.assertEqual(bench.still_owned({10: 100, 20: 101}), [20])
 
+    def test_absent_or_failed_runtime_version_refuses_comparison(self):
+        for returncode, stdout in ((0, ""), (1, "codex-cli ignored failure")):
+            with self.subTest(returncode=returncode), patch.object(
+                    bench, "invoke", return_value=subprocess.CompletedProcess(
+                        ["claude", "--version"], returncode, stdout=stdout, stderr="")):
+                with self.assertRaisesRegex(RuntimeError, "did not report its CLI version"):
+                    bench.runtime_versions({}, Path("."))
+
     def test_done_tasks_without_review_or_correct_output_fail(self):
         result = {"tasks": dict.fromkeys(("summarize", "audit", "followup"), "done"),
                   "message_kinds": {"question": 1}, "outputs": {}}
@@ -190,6 +198,9 @@ class CacheBenchTests(unittest.TestCase):
         self.assertTrue(sent)
         self.assertGreaterEqual(report["idle_gap"]["observed_seconds"], 1)
         self.assertEqual([a["hit_rate"] for a in report["agents"]], [0.5, 0.5, 0.5])
+        self.assertEqual([a["models"] for a in report["agents"]],
+                         [["claude-haiku-4-5"], ["claude-haiku-4-5"], ["gpt-6-luna"]])
+        self.assertEqual(report["versions"], {"claude": "fake runtime 1", "codex": "fake runtime 1"})
 
     def test_cost_watchdog_stops_owned_team_before_followup(self):
         rc, report, sent = self.run_fake_team(expensive=True)

@@ -82,6 +82,16 @@ def invoke(argv, env, cwd, timeout=20):
                           timeout=timeout, check=False)
 
 
+def runtime_versions(env, cwd):
+    versions = {}
+    for program in ("claude", "codex"):
+        result = invoke([program, "--version"], env, cwd)
+        if result.returncode or not result.stdout.strip():
+            raise RuntimeError(f"{program} did not report its CLI version; cannot compare runs")
+        versions[program] = result.stdout.strip()
+    return versions
+
+
 def process_identity(pid):
     try:
         fields = Path(f"/proc/{pid}/stat").read_text().rsplit(")", 1)[1].split()
@@ -239,8 +249,7 @@ def run(args):
         for program in ("claude", "codex", "bwrap", "socat"):
             if not shutil.which(program, path=env["PATH"]):
                 raise RuntimeError(f"missing prerequisite: {program}")
-        report["versions"] = {program: invoke([program, "--version"], env, output).stdout.strip()
-                              for program in ("claude", "codex")}
+        report["versions"] = runtime_versions(env, output)
         command = invoke([crew, "run", output / "team.yaml", "--no-attach"], env, output, 45)
         (output / "logs" / "launch.txt").write_text(command.stdout + command.stderr)
         if command.returncode:

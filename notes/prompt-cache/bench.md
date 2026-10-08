@@ -41,6 +41,10 @@ does not infer a source revision from the executable. For a candidate run,
 change the executable, its verified hash, revision, label and output directory.
 Use the same template, models, CLI versions, idle gap, timeout and authentication
 route for before/after comparisons. Every output directory must be new.
+The runner refuses to launch when either CLI fails to report a nonempty version.
+Every observed request must name a priced model; a missing model name also stops
+the run. `report.json` records both CLI versions, each request's model and each
+member's distinct observed model names.
 
 Add `--prepare-only` to create the fixture and team YAML without a daemon or
 provider call. Defaults are a 20-second idle gap and a 600-second total deadline.
@@ -136,7 +140,13 @@ result and question/answer exchange, the expected fixture outputs, a measured id
 three members with real usage records, and successful owned-process cleanup.
 Both per-agent rates and request counts matter: a smaller workload is not an
 equivalent improvement. One run is a baseline sample, not a statistically
-established change in cache performance. No before/after claim is made yet.
+established change in cache performance. Before claiming a hit-rate delta,
+collect at least three successful runs per side with the same 20-second idle
+gap, template, versions, model identities and authentication route. Record run
+order and timing because provider cache state can carry across runs. Compare
+all samples, with their request counts and token-weighted rates; do not select
+only the best run. This card's first baseline does not satisfy that comparison
+plan, and no before/after claim is made yet.
 
 ## Checks and current live boundary
 

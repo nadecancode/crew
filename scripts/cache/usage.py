@@ -174,6 +174,7 @@ def collect(workspace, agents):
             "coverage": "observed" if requests else "no-usage",
             "source": str(path.relative_to(workspace)),
             "requests": requests, "request_count": len(requests),
+            "models": sorted({r["model"] for r in requests}),
             "input_tokens": total, "cached_tokens": cached,
             "hit_rate": cached / total if total else None,
             "output_tokens": sum(r["output_tokens"] for r in requests),
