@@ -1,0 +1,144 @@
+# Toolbox MCP proxy and CLI (slice 3)
+
+Task: `toolbox-mcp-cli`. Base: main `df4575cf`. Branch: `agents/scheduler`.
+Specification: `notes/toolboxes.md`, slice 3 of Implementation split.
+
+This note is a review aid. It records what the slice does, where the
+security-relevant code is, and the evidence the orchestrator asked for when
+it approved TLS for remote servers.
+
+## What the slice adds
+
+- `crew toolbox mcp <name> --identity <file>` (hidden; it is what runtimes
+  launch). One process per server. It fetches the server's launch over the
+  member's identity (`Call::ToolboxServer`) and then:
+  - runs a local server as its child, with the resolved environment added
+    to a scrubbed one, or bridges a remote server over streamable HTTP or
+    the older SSE transport;
+  - answers `initialize`, `tools/list` and `ping` from the pinned snapshot,
+    sorted by tool name, with `listChanged` never advertised and upstream
+    `notifications/*/list_changed` dropped;
+  - replaces exact copies of resolved values in everything it passes on
+    with `[redacted $NAME]` (best effort, as the specification says);
+  - reports a server that fails, or whose live listing differs from the
+    pin, with `Call::ToolboxReport`, and keeps the pinned view in place.
+- `--preflight`: the daemon's readiness check. It prints the live listing as
+  JSON on success, or the redacted reason. The daemon pins the snapshot
+  (`agent_dir/toolbox/mcp/<name>.json`), since the session cannot write
+  there under the sandbox.
+- `crew toolbox [agent] [--runtime R] [--json]`, `crew toolbox check <file>`
+  and `crew toolbox reload <file>`.
+- `toolbox` on `agent_add` and `agent_spawn`: bundle names only, checked
+  against the team's toolboxes. A subagent gets a copy of its parent's
+  active toolbox by default, or the named bundles when each item equals the
+  parent's. `agents_list` shows each member's toolbox fingerprint and how
+  many items are not active.
+- The orchestrator's tool list is chosen from the launch identity
+  (`Identity.orchestrator`), never by asking the daemon (T21).
+
+## Secrets
+
+Resolved values come from `Layers::toolbox_references` (graph, `c8db97f9`)
+in the daemon and reach only the proxy process, in the `toolbox_server`
+answer. They are not in any file, command line, roster entry, event or
+prompt that crew writes. `ToolboxServerLaunch` and `Upstream` have
+hand-written `Debug` implementations that print names only; `Redaction`
+has no `Debug` at all. A child
+server receives values only under destination names; every reference and
+source name for the member's servers is removed from its environment first.
+
+## Remote servers and TLS
+
+The orchestrator approved rustls with bundled web roots on these conditions.
+Each is listed with where it is met.
+
+| Condition | Where |
+| --- | --- |
+| Verification always on; no insecure flag or environment override | `mcp/proxy/http.rs`, `tls()`: one `ClientConfig` with the default verifier. No code path skips it. |
+| `SSL_CERT_FILE` / `SSL_CERT_DIR` only add roots | `tls()` adds their certificates to `webpki_roots::TLS_SERVER_ROOTS`. |
+| Exact pins | `rustls =0.23.45` (std, ring), `rustls-pemfile =2.2.0`, `webpki-roots =1.0.9`, all in `Cargo.lock`. |
+| Builds on Rust 1.82 | `scripts/check-msrv` passed (below). |
+| `cargo tree -d` | One new duplicate (below). |
+| Response and event size limits | `MAX_BODY` and `MAX_EVENT` 16 MiB; status and header lines 8 KiB; 100 headers at most. |
+| Connect and read timeouts | `CONNECT_WITHIN` 30 s; `ANSWER_IDLE` 300 s between reads; `ENDPOINT_WITHIN` 30 s for the SSE endpoint. |
+| No redirects | A 3xx answer fails the request: "the server answered HTTP 307, a redirect, which crew does not follow". |
+| Chunked encoding | `Chunked` reader, unit-tested. |
+| No proxy support | `HTTP_PROXY` / `HTTPS_PROXY` are not read. Documented in the module header. A server reachable only through a proxy cannot be used. |
+
+Two more rules keep a server's headers, which carry its credentials, on
+that server:
+
+- The SSE transport's `endpoint` event must name the server's own origin
+  (scheme, host and port). Otherwise the connection fails before anything
+  is sent there.
+- A URL path with spaces or control characters is refused, so a named
+  endpoint cannot write into the request head. Header values with line
+  breaks were already refused.
+
+`tests/toolbox_proxy.rs::an_https_server_is_reached_only_through_a_verified_chain`
+serves the fake server over TLS with a certificate from a test CA
+(`tests/fixtures/toolbox-tls`, CA key deleted). It checks that preflight
+fails without the CA and passes with it in `SSL_CERT_FILE`.
+
+### Default release binary size
+
+`cargo build --locked --release -p crew --bin crew`, rustc 1.93.1, the
+workspace release profile (thin LTO, stripped). Each tree was a `git
+archive` of the commit; all three shared one target directory, with source
+mtimes refreshed so every workspace crate was rebuilt.
+
+| Commit | Bytes | Change |
+| --- | --- | --- |
+| `df4575cf` (main, before the slice) | 18,306,192 | |
+| `4d0c6231` (slice before TLS) | 19,458,992 | +1,152,800 from main |
+| `561d0e64` (TLS) | 21,053,328 | +1,594,336 from `4d0c6231`; +2,747,136 from main |
+
+The commits after `561d0e64` change no dependency.
+
+### Duplicate dependencies
+
+`cargo tree -d -p crew -e normal --locked --depth 0`, compared with main:
+one new pair, `getrandom v0.2.17` (from `ring v0.17.14`) beside the
+existing `getrandom v0.3.4`. The other eleven entries are unchanged from
+main.
+
+### Rust 1.82 gate
+
+`env -u CREW_IDENTITY -u CREW_SOCKET -u CREW_LAUNCH ./scripts/check-msrv`
+inside `nix-shell`, 2026-10-08 05:36:55–05:37:19 UTC: `rustc 1.82.0
+(f6e511eec 2024-10-15)`, `cargo 1.82.0 (8f40fc59f 2024-08-21)`, locked
+build passed, help parsed. Cargo downloaded the pinned TLS crates into its
+cache for this toolchain, at the locked versions.
+
+## Tests
+
+- `tests/toolbox_proxy.rs`: T14 (sorted pinned view whatever the server
+  does), T20 (preflight reason; a server that stops mid-session), secrets
+  under destination names and redacted on the way back, streamable HTTP
+  (JSON and event-stream answers), SSE, a refused header, verified TLS.
+- `mcp/mod.rs::the_tool_list_does_not_depend_on_the_daemon_answering` (T21).
+- `tests/team.rs::the_orchestrator_adds_members_with_bundles_by_name_only` (T11,
+  part): over the orchestrator's own identity, item definitions and
+  exclusions are refused, an unknown bundle is refused with the team's
+  bundles listed, and a chosen bundle is saved to the roster.
+- `mcp/tools.rs::toolbox_arguments_are_bundle_names_only` (T11, part): both
+  schemas take strings only, and a `toolbox` argument that is not names is
+  refused rather than dropped.
+- `mcp/proxy/http.rs` unit tests: URL parsing and joining, same-origin
+  endpoints, event reading, chunked bodies, redirect wording.
+
+## Gates
+
+On `bd6431d5`: `cargo fmt --all -- --check` clean;
+`cargo clippy --locked --workspace --all-targets -- -D warnings` clean;
+`cargo test --locked --workspace` passed (67 test binaries, no failures),
+run inside `nix-shell` with `CREW_IDENTITY`, `CREW_SOCKET` and
+`CREW_LAUNCH` removed.
+
+## Not yet in this slice
+
+- `crew toolbox reload` answers that it is not available until graph's
+  reload service lands.
+- `crew toolbox` and `crew toolbox check` show Planned or Needs per item
+  until graph's per-runtime preview lands.
+- T11 daemon tests wait for graph's launch wiring; T18 needs real runtimes.

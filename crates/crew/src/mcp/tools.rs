@@ -458,26 +458,30 @@ fn opt_str(args: &Value, key: &str) -> Option<String> {
 
 /// A list of names: an array of strings, or one string (a model may send
 /// either); None when left out.
-fn opt_str_list(args: &Value, key: &str) -> Option<Vec<String>> {
-    match args.get(key)? {
-        Value::Array(items) => Some(
-            items
-                .iter()
-                .filter_map(Value::as_str)
-                .map(str::trim)
-                .filter(|s| !s.is_empty())
-                .map(str::to_string)
-                .collect(),
-        ),
-        Value::String(one) => Some(
-            one.split(',')
-                .map(str::trim)
-                .filter(|s| !s.is_empty())
-                .map(str::to_string)
-                .collect(),
-        ),
-        _ => None,
-    }
+/// The `toolbox` argument: bundle names, as a list or one comma-separated
+/// string. Anything else is refused rather than dropped, so an attempt to
+/// define items never passes as "no choice".
+fn bundle_names(args: &Value) -> Result<Option<Vec<String>>, String> {
+    const ONLY_NAMES: &str =
+        "toolbox takes bundle names from the team's toolboxes, e.g. [\"web\"]; \
+the team file defines what each bundle holds";
+    let names: Vec<&str> = match args.get("toolbox") {
+        None | Some(Value::Null) => return Ok(None),
+        Some(Value::String(one)) => one.split(',').collect(),
+        Some(Value::Array(items)) => items
+            .iter()
+            .map(|item| item.as_str().ok_or(ONLY_NAMES))
+            .collect::<Result<_, _>>()?,
+        Some(_) => return Err(ONLY_NAMES.into()),
+    };
+    Ok(Some(
+        names
+            .into_iter()
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+            .map(str::to_string)
+            .collect(),
+    ))
 }
 
 fn message_type(args: &Value) -> Result<MessageType, String> {
@@ -1136,7 +1140,7 @@ pub fn call(client: &mut Client, name: &str, args: &Value) -> Result<ToolOutput,
                     task: arg_str(args, "task")?,
                     runtime,
                     model: opt_str(args, "model"),
-                    toolbox: opt_str_list(args, "toolbox"),
+                    toolbox: bundle_names(args)?,
                 },
             )?;
             out(
@@ -1163,7 +1167,7 @@ reach it with agent_send(to=\"{}\").",
                         model: opt_str(args, "model"),
                         task: opt_str(args, "task"),
                         toolbox: crew_core::toolbox::Toolbox {
-                            include: opt_str_list(args, "toolbox").unwrap_or_default(),
+                            include: bundle_names(args)?.unwrap_or_default(),
                             ..Default::default()
                         },
                         ..Default::default()
@@ -1462,5 +1466,38 @@ mod tests {
         assert_eq!(message_type(&args).unwrap(), MessageType::Question);
         assert_eq!(message_type(&json!({})).unwrap(), MessageType::Message);
         assert!(message_type(&json!({ "type": "nope" })).is_err());
+    }
+
+    /// The orchestrator chooses bundles by name and cannot define items
+    /// (notes/toolboxes.md, Orchestrator tools): the schemas take strings
+    /// only, and anything else is refused, never dropped.
+    #[test]
+    fn toolbox_arguments_are_bundle_names_only() {
+        let defs = definitions();
+        for tool in ["agent_add", "agent_spawn"] {
+            let def = defs.iter().find(|d| d.name == tool).unwrap();
+            let toolbox = &def.schema["properties"]["toolbox"];
+            assert_eq!(toolbox["type"], "array", "{tool}");
+            assert_eq!(toolbox["items"], json!({ "type": "string" }), "{tool}");
+        }
+        assert_eq!(bundle_names(&json!({})), Ok(None));
+        assert_eq!(bundle_names(&json!({ "toolbox": null })), Ok(None));
+        assert_eq!(
+            bundle_names(&json!({ "toolbox": [" web ", "", "docs"] })),
+            Ok(Some(vec!["web".to_string(), "docs".to_string()]))
+        );
+        assert_eq!(
+            bundle_names(&json!({ "toolbox": "web, docs" })),
+            Ok(Some(vec!["web".to_string(), "docs".to_string()]))
+        );
+        assert_eq!(bundle_names(&json!({ "toolbox": [] })), Ok(Some(vec![])));
+        for defining in [
+            json!({ "toolbox": { "mcp": { "x": { "command": ["x"] } } } }),
+            json!({ "toolbox": ["web", { "mcp": { "x": { "command": ["x"] } } }] }),
+            json!({ "toolbox": 1 }),
+        ] {
+            let refused = bundle_names(&defining).unwrap_err();
+            assert!(refused.contains("bundle names"), "{defining}: {refused}");
+        }
     }
 }

@@ -2548,6 +2548,79 @@ fn an_added_agent_s_toolbox_is_checked_against_the_team() {
     assert!(roster.toolboxes.contains_key("web"));
 }
 
+/// T11: the orchestrator chooses bundles by name for a member it adds; it
+/// cannot define items, and an unknown name is refused with the team's
+/// bundles listed. What it chose is applied and saved.
+#[test]
+fn the_orchestrator_adds_members_with_bundles_by_name_only() {
+    if common::test_support::isolate_operator_test(
+        "the_orchestrator_adds_members_with_bundles_by_name_only",
+    ) {
+        return;
+    }
+    let s = Session::new();
+    let mut team = s.team("toolbox-choose", vec![agent("a", "", &[])], vec![]);
+    team.defaults.command = scripted(&[]);
+    team.orchestrator.agent = true;
+    team.orchestrator.command = scripted(&[]);
+    team.workspace.isolation = crew_core::config::Isolation::Shared;
+    team.workspace.init = false;
+    team.toolboxes = serde_json::from_value(json!({
+        "docs": { "mcp": { "manual": { "command": ["manual", "--stdio"] } } },
+        "web": { "mcp": { "context7": { "command": ["ctx", "--stdio"] } } }
+    }))
+    .unwrap();
+    std::fs::create_dir_all(&s.workspace).unwrap();
+    s.run(&team);
+    let path = s.identity_path(crew_core::ORCHESTRATOR_ID);
+    s.wait_for("the orchestrator's identity", || path.exists());
+    let identity: crew_core::paths::Identity =
+        serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
+    assert!(identity.orchestrator);
+    let (mut client, _) = crew_core::client::Client::agent(&identity, "test").unwrap();
+    let mut add = |toolbox: Value| {
+        client
+            .call::<crew_core::Agent>(crew_core::rpc::Call::AgentAdd {
+                spec: Box::new(AgentSpec {
+                    id: "b".into(),
+                    toolbox: serde_json::from_value(toolbox).unwrap(),
+                    ..AgentSpec::default()
+                }),
+            })
+            .map_err(|e| e.to_string())
+    };
+
+    for (toolbox, expected) in [
+        (
+            json!({ "mcp": { "mine": { "command": ["x"] } } }),
+            "an agent chooses bundles by name; toolbox items are defined in the team file",
+        ),
+        (
+            json!({ "include": ["web"], "exclude": ["mcp.context7"] }),
+            "an agent chooses bundles by name",
+        ),
+        (
+            json!({ "include": ["webb"] }),
+            "Unknown toolbox \"webb\". Toolboxes in this team: docs, web.",
+        ),
+    ] {
+        let refused = add(toolbox.clone()).expect_err(&toolbox.to_string());
+        assert!(refused.contains(expected), "{toolbox}: {refused}");
+    }
+    assert!(!s.snapshot().agents.iter().any(|a| a.id == "b"));
+
+    add(json!({ "include": ["web"] })).unwrap();
+    s.wait_for("the roster to name b", || {
+        std::fs::read_to_string(s.workspace.join(".crew/roster.yaml"))
+            .is_ok_and(|roster| roster.contains("id: b"))
+    });
+    let roster =
+        crew_core::config::TeamConfig::load(&s.workspace.join(".crew/roster.yaml")).unwrap();
+    let b = roster.agents.iter().find(|a| a.id == "b").unwrap();
+    assert_eq!(b.toolbox.include, ["web"]);
+    assert!(b.toolbox.mcp.is_empty());
+}
+
 #[test]
 fn a_daemon_started_while_another_is_still_starting_is_refused() {
     // A daemon binds its socket before it registers in daemon.json, so two
