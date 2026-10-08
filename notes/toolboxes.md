@@ -1191,7 +1191,10 @@ The JSON output is the protocol structure, which is what QA asserts on.
 - A summary line: `Toolbox 3f9a0c21e7b4 · 4 items · 1 not available`. The
   fingerprint is monospaced and selectable.
 - When a change is pending, the notice **Toolbox changed: restart to apply**,
-  offering **Restart…** through the existing restart confirmation.
+  with a **Restart** button. It is the existing restart action (`agent_restart`,
+  which resumes the conversation), with the same availability and unavailable
+  reason as everywhere else. It has no dialog, as that action has none, and
+  never restarts fresh.
 - Groups headed **MCP servers**, **Skills**, **Plugins**, **Subagents** and
   **Hooks**, each shown only when it has entries. Each row shows:
   - the name;
