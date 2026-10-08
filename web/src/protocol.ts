@@ -342,36 +342,26 @@ export function decodeAgent(v: unknown, what = "agent"): Agent {
   return o as Agent;
 }
 
-function decodeToolboxStatus(o: Obj, what: string): void {
-  const s = obj(o.status, `${what}.status`);
-  str(s, "code", `${what}.status`);
-  str(s, "text", `${what}.status`);
-}
-
 export function decodeToolbox(v: unknown, what = "toolbox"): AgentToolbox {
   const o = obj(v, what);
   str(o, "fingerprint", what);
   for (const k of ["pending_fingerprint", "definition_digest"]) opt(o, k, isStr, what);
   for (const k of ["tool_count", "definition_bytes"]) opt(o, k, isNum, what);
-  def(o, "items", [], Array.isArray, what);
-  def(o, "sources", [], Array.isArray, what);
-  list(o.items, (x, w) => {
-    const item = obj(x, w);
-    for (const k of ["kind", "name", "origin"]) str(item, k, w);
-    def(item, "required", false, isBool, w);
-    decodeToolboxStatus(item, w);
-    opt(item, "detail", isStr, w);
-    return item;
-  }, `${what}.items`);
-  list(o.sources, (x, w) => {
-    const source = obj(x, w);
-    for (const k of ["origin", "label"]) str(source, k, w);
-    opt(source, "kind", isStr, w);
-    def(source, "names", [], isStrArr, w);
-    decodeToolboxStatus(source, w);
-    opt(source, "detail", isStr, w);
-    return source;
-  }, `${what}.sources`);
+  // An item and a source: their strings, a status in the daemon's words, an
+  // optional detail, and what else each has.
+  const entry = (key: string, strs: string[], more: (e: Obj, w: string) => void) => {
+    def(o, key, [], Array.isArray, what);
+    list(o[key], (x, w) => {
+      const e = obj(x, w), s = obj(e.status, `${w}.status`);
+      for (const k of strs) str(e, k, w);
+      str(s, "code", `${w}.status`);
+      str(s, "text", `${w}.status`);
+      opt(e, "detail", isStr, w);
+      more(e, w);
+    }, `${what}.${key}`);
+  };
+  entry("items", ["kind", "name", "origin"], (e, w) => def(e, "required", false, isBool, w));
+  entry("sources", ["origin", "label"], (e, w) => (opt(e, "kind", isStr, w), def(e, "names", [], isStrArr, w)));
   return o as AgentToolbox;
 }
 
