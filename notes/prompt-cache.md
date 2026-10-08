@@ -247,10 +247,11 @@ read ranges are the evidence for each class.
 | Unexplained | the rest: within the TTL, system prompt not read | 0 / 23,368 / 23,484 | 4 | 1,546,944 | 1.3% | $15.79 (0.6%) |
 | Not classed | writes below the threshold (ordinary growth and small rewrites) | | | 27,647,468 | 24.0% | |
 
-The cost column is what the class's writes cost. Had the same tokens been read
-from cache instead, each would cost about 2% less (`costs.tsv`, last column).
-That bounds what removing a class could save; it is not an avoidable-loss
-estimate.
+The cost column is what the class's writes cost. Reading the same tokens from
+cache would cost 1.25% to 2.5% of that (read rate over 1 h write rate). So the
+most that removing a class could save is its write cost minus that read cost,
+about 2% below its write cost (`costs.tsv`, last column). That is an upper
+bound, not an avoidable-loss estimate.
 
 Notes on the classes:
 
