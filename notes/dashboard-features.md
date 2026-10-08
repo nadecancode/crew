@@ -212,7 +212,21 @@ The side panel's detail for an epic shows, in this order:
 - the agents with their task counts (from the epic summary's agent counts);
 - the epic's usage when the metrics provide it (§Usage metrics);
 - its tasks, as a compact list with the same fold;
-- the docs its tasks link to (§Docs, "Links into Docs").
+- the docs its tasks link to (§Docs, "Links into Docs");
+- the **Report**, when the epic has one (`notes/epics.md`, "Per-epic
+  reports and session completion").
+
+**Report.** The section shows the report's summary, its time, and links to
+its decisions, which open the operator questions in the Message bus. Under
+the heading, a line states what the report covers: "Covers revision 14 ·
+current". When the epic changed afterwards, the line reads "Covers revision
+14 · 3 changes since" and the summary is shown muted, with the text "This
+report is older than the epic's current work." A stale report is never
+presented as the current verdict. An epic that was reopened keeps showing
+its last report this way. The epic's header row in Tasks marks a report as
+"Report" or "Report · outdated" from the summary row alone, without loading
+the body. The body is read when the detail opens. An epic without a report
+shows no Report section.
 
 There are no epic mutation actions in v1. Creating, renaming and closing
 epics belong to the orchestrator's tools, as `epics-model` defines them.
@@ -317,7 +331,7 @@ for more.
   A file present or different in a worktree is marked with that member's id.
 
 ```
-Docs    Workspace ▾                                   [Filter files…]
+Docs    Workspace ▾                       [Search paths and headings]
 ┌───────────────────────────┬──────────────────────────────────────────────────┐
 │ README.md                 │ notes/toolboxes.md            Workspace · 2 min ago │
 │ ▾ notes                   │ Edited by designer (not committed) · View ▾  History  │
@@ -341,8 +355,10 @@ Docs    Workspace ▾                                   [Filter files…]
 - **Tree.** It shows directories and files by name. A changed file has a
   marker dot, followed in the row by the ids of the members whose worktree
   differs (as text, not just a dot). Arrows navigate it, Enter opens a file,
-  and Right/Left expand and collapse directories. A filter field narrows it
-  by path. Files the team changed in the last hour can be listed first with
+  and Right/Left expand and collapse directories. A search field
+  (placeholder "Search paths and headings") narrows it by path and heading
+  text; a heading match opens the file at that heading. Full-text search is
+  not in v1 (`notes/knowledge-base.md`). Files the team changed in the last hour can be listed first with
   **Sort: Recently changed**.
 - **Document header.** It shows:
   - the path in monospace;
@@ -372,20 +388,36 @@ Docs    Workspace ▾                                   [Filter files…]
   - `http:`/`https:` links open in a new tab with `rel="noopener noreferrer"`.
   - Every other scheme is shown as text (web-design `text.test.ts` rules).
 - **Images:**
+  - Only static PNG, JPEG, GIF and WebP images are shown, within the
+    limits of `notes/knowledge-base.md`: 2 MiB per image, 8 MiB per
+    document, 8,192 pixels per axis and 16 million pixels.
   - The syntax tree carries an image reference (path and content hash),
     not the bytes. The client fetches the image in chunks over the existing
     authenticated WebSocket (each chunk well under the 1 MiB frame limit),
     assembles it, and shows it as a `data:` URL. Images are fetched as they
     come into view, a few at a time, and are cached by content hash, so a
     new version of a document does not fetch an unchanged image again. No
-    HTTP request is made. The size limits stay at 2 MiB per image and 8 MiB
-    per document. While an image is loading, its alt text holds its place.
-  - An oversized image shows its alt text and "Image too large to show
-    (3.4 MiB)".
+    HTTP request is made. While an image is loading, its alt text holds its
+    place.
+  - An image that is not shown keeps its alt text, followed by the reason as
+    text:
+    - "Image not shown · SVG is not supported";
+    - "Image not shown · animated images are not supported";
+    - "Image too large to show (3.4 MiB)", or with its dimensions,
+      "Image too large to show (9000 × 400 px)";
+    - "Image not shown · outside this document's source", for an image
+      outside the registered source root that holds the document (an image
+      may sit outside the Markdown folders, but not outside its source);
+    - "Image not shown · not allowed here", for an image the source's
+      exclusions or safe-open checks refuse (a hidden directory, a link
+      that leaves the source, a file that is not a regular file);
+    - "Image not shown · this version's image is no longer kept here", for
+      an expired image of a Seen-here version. A current image is never
+      shown in its place.
   - Remote images are never fetched; their alt text and URL are shown as a
     link.
-  - SVG is shown only through `img` (`data:image/svg+xml`), which runs no
-    script.
+  - SVG is never shown in any form: not as an image source, document,
+    object or embed.
 - **Budget.** The renderer and the Docs view load as a second chunk requested
   when the document starts, as the terminal chunk is (web-design §security
   allows no later request). Their bytes count against P1/P4 like everything
@@ -416,11 +448,21 @@ Docs    Workspace ▾                                   [Filter files…]
 **History** opens a timeline for the file in the side panel, with two kinds
 of entry:
 
-- **Recorded:** each version-control change that touched the file, on the
+- **Recorded:** each published commit that touched the file, on the
   workspace's history and on members' branches, with author, time,
-  description and change id.
-- **Seen here:** versions the page observed since it opened, which cover
-  uncommitted saves between commits.
+  description and commit id, and the change id when the history provides
+  one. A working copy is never recorded as a commit.
+- **Seen here:** versions this connection received since it opened, which
+  cover uncommitted saves between commits. They are kept in memory only.
+  The section's footer reads "Seen here: up to 16 versions or 4 MiB of this
+  file while connected; older versions may expire." Expired entries drop
+  from the list, unless one is selected.
+
+A **selected Seen-here version that has expired** keeps its selection and
+header path. Its body reads "This version is no longer kept here. Seen-here
+versions expire when the connection drops or space runs low.", with
+**View Workspace** and, when a recorded commit exists, **View recorded
+<short sha>**. The view never switches by itself.
 
 Selecting one entry shows it. Selecting two shows a diff between them, using
 the existing Diff component (file and hunk structure, line-based on the
@@ -447,17 +489,20 @@ history").
 
 ### Search
 
-v1 searches file paths and headings, among the documents loaded in the page.
-Full-text search is conditional on `knowledge-base-design` providing a server
-index; the field then says "Search all docs" and shows matched lines with the
+v1 searches file paths and headings from the server's index; the field's
+placeholder is "Search paths and headings". Full-text search is not in v1
+(`notes/knowledge-base.md`). If a later version adds a server full-text
+index, the field then says "Search all docs" and shows matched lines with the
 file and heading.
 
 ## Usage metrics
 
 ### Definitions
 
-These are shared with `usage-metrics-design` and `notes/prompt-cache.md`, so
-every view and benchmark uses the same words:
+These are shared with `notes/usage-metrics.md` (approved b1fcceca) and
+`notes/prompt-cache.md`, so every view and benchmark uses the same words.
+The server computes every figure and its coverage; clients display them and
+never recompute from a filtered list.
 
 | Measure | Definition | Shown as |
 | --- | --- | --- |
@@ -467,14 +512,19 @@ every view and benchmark uses the same words:
 | Output | output tokens | tokens |
 | Total input | the runtime's own normalized input total when it reports one (Codex reports total input with cached tokens inside it); otherwise input + cache read + cache write, when all three are reported | tokens |
 | Hit rate | cache read ÷ total input | percent, one decimal |
-| Write share | list cost of cache writes ÷ input-side list cost | percent |
-| Estimate | each category's tokens × that model's list price for the category; 5-minute and 1-hour writes at their own prices | `≈ $12.40`, labelled "list-price estimate" |
-| Cost per done task | estimate ÷ tasks done in the scope | `≈ $0.84` |
+| Write share | list cost of cache writes ÷ input-side list cost, on the same requests | percent, or a range `38–44%` when write TTLs are unknown |
+| Estimate | each category's tokens × that model's list price for the category; 5-minute and 1-hour writes at their own prices | `≈ $12.40`, a range `≈ $2,540–$2,610`, or a partial `at least $2,556` (below) |
+| Per completed task | for the tasks first completed in the period: their observed cost from the start of the run up to each first completion, ÷ the number of those tasks | `≈ $22.80`, with "112 tasks first completed in this period" |
+| Requests | distinct requests the runtime reports | a number, or `≥ 9,612` with the reason when some usage arrives in batches |
+| Turns | turns correlated between the runtime and the daemon | a number, or `≥ N` with its own reason |
 
 **Coverage, metric by metric.** Each metric uses every request that reports
 what that metric needs, and states its own coverage when that is not every
 request, for example "Hit rate 97.9% · over 9,412 of 9,801 requests". A
-missing field is never counted as zero.
+missing field is never counted as zero. There is no single "agents
+reporting" count for all metrics: the scope line names the hit rate's
+("hit rate from 11 of 12 agents"), and each figure whose coverage is
+incomplete carries its own "K of N".
 
 - **Hit rate** needs cache read and a total input. So a Codex request
   reporting total input 100 and cache read 80, with no write counters, gives
@@ -489,12 +539,43 @@ missing field is never counted as zero.
 
   It then reads `≈ $12.40–$13.10` with "includes 1.2 M write tokens with no
   TTL reported".
+- **Three estimate states**, which never look alike:
+  - a finite range: `≈ $2,540–$2,610`;
+  - a partial subtotal, when some cost has no upper bound (a model without a
+    price, tasks without observed cost): `at least $2,556 · 1 model has no
+    price`, or for Per completed task `at least $22.80 · cost observed for
+    104 of 112`. No "≈" and no range dash;
+  - none: `Estimate unavailable · <reason>`.
+
+  An "at least" value rounds down. Both ends of a range round outward.
+- **Per completed task.** A task counts once, at its first completion, even
+  if it is reopened and completed again. Its cost can predate the period;
+  the note then adds "· includes their earlier spend". With an epic scope,
+  the cohort is the tasks first completed in that epic. All-period spend ÷
+  the current done count is a different ratio and is not shown in v1.
+  The cohort itself must be complete: when the first completions of the
+  period are not all recorded, the figure reads "Per completed task
+  unavailable · completion history incomplete", and no "at least" value is
+  shown, since a lower bound needs the whole cohort.
 - **Unavailable.** A rate whose denominator is zero, or a scope with no
-  covered requests, shows **unavailable** with the reason. For example,
-  "Hit rate unavailable · no input reported" or "Cost per done task
-  unavailable · no tasks done".
+  covered requests, shows **unavailable** with the reason, which tells
+  apart "no covered input", "zero input", "no task first completed in this
+  period", "no cost observed for these tasks" and "completion history
+  incomplete". For example: "Hit rate
+  unavailable · no input reported", "Write share unavailable · write counts
+  not reported", "Per completed task unavailable · no task first completed
+  in this period".
 - **Not reported.** A runtime that never reports a field shows **not
-  reported** for it, and the scope shows "N of M agents reporting".
+  reported** for it.
+- **Source gaps.** While session files are still being read, or one is
+  missing or in a schema crew does not support, one line under the figures
+  says so: "Still reading 2 session files · figures may change". Figures can
+  go down as well as up while that line shows. A gap is never shown as 0.
+- **Tracking boundary.** The scope line says "Tracking since Oct 7, 22:40".
+  The period before it shows "Earlier usage not tracked".
+- **Price basis.** The scope line says "list-price estimate, prices checked
+  Oct 8". Help states that this is the standard API price for the same
+  tokens, not a bill, a subscription charge or a quota.
 
 
 **Why both rates.** Hit rate and Write share always appear together. In the
@@ -528,11 +609,13 @@ per-agent rows, and gains a metrics section above them.
   - Hit rate;
   - Write share;
   - Estimate;
-  - Cost per done task.
+  - Per completed task.
 - **Trend.** A small chart over the session, with one point per bucket (5
   minutes up to 6 hours, then hourly). It shows either hit rate and write
   share as lines, or the four token categories as stacked bars (using the
-  `--token-*` colours), through a two-way toggle. The latest values are
+  `--token-*` colours), through a two-way toggle. A bucket whose requests do
+  not all report the four categories is drawn as a hatched gap labelled
+  "split not reported", never as a zero-height bar. The latest values are
   printed beside it as text. History comes from stored samples
   (`usage-metrics-design`). Before any sample exists, the chart says "No
   samples yet" and draws nothing.
@@ -544,9 +627,18 @@ per-agent rows, and gains a metrics section above them.
   - Hit rate;
   - Write share;
   - Estimate;
+  - Requests;
   - Turns.
 
-  Rows sort by any column. Numbers use tabular figures. Below 768px the
+  Rows sort by any column. With Epic, three rows stay apart, as
+  `notes/usage-metrics.md` defines them:
+  - **No epic:** work on a known task that belongs to no epic;
+  - **No task:** work known to have no task, such as orchestration; its
+    detail names the activity, and maintenance such as keepalives carries
+    its own tag. It counts as covered, not as missing;
+  - **Not attributed:** work whose task or epic is unknown. Its detail gives
+    the reason: an ambiguous turn, no turn correlation, or history from
+    before tracking. Only this row counts against attribution coverage. Numbers use tabular figures. Below 768px the
   table becomes stacked rows (web-revamp "At narrow width…").
 - **Big writes.** The requests that wrote at least 10k tokens and more than
   they read (the audit's definition), with agent, time, tokens written per
@@ -563,7 +655,7 @@ per-agent rows, and gains a metrics section above them.
   - start, duration;
   - tasks done;
   - hit rate, write share;
-  - estimate, cost per done task.
+  - estimate, per completed task.
 
   The current session is marked. Selecting a row scopes the figures to that
   session read-only; this is the benchmark comparison the operator asked for.
@@ -574,8 +666,8 @@ per-agent rows, and gains a metrics section above them.
   and estimate.
 - **Epic detail.** It shows the epic's totals, hit rate, write share and
   estimate. Usage is attributed to an epic through the task each turn worked
-  on, as `usage-metrics-design` defines it. Turns without a task show as
-  "Not attributed".
+  on, as `notes/usage-metrics.md` defines it. Its Per completed task uses
+  the tasks first completed in this epic.
 - **Summary row.** It shows nothing new; the existing UsageStrip keeps quota
   pressure visible. Metrics are a Usage-view concern.
 
@@ -728,19 +820,19 @@ Captures are taken in light and dark at 1440×960 and 390×844.
 | ID | Case | Pass when |
 | --- | --- | --- |
 | F01 | Tasks opens on a large session | List, grouped by Epic. The focus epic and active epics are expanded, done epics are collapsed under "Done epics (1)", and done tasks are folded per epic. Failed tasks of open epics are visible above their fold; the archived done epic with a failure says "Done · 1 failed" in its header. The first render is at most 50 ms. |
-| F02 | Epic header | It shows the title, status word, `N of M done · K failed`, the agents and the age. Progress reads correctly with colour removed (forced colours). Enter, Left and Right expand and collapse. The screen reader reads the level, the expanded state and the counts. |
+| F02 | Epic header | It shows the title, status word, `N of M done · K failed`, the agents and the age. Progress reads correctly with colour removed (forced colours). Enter, Left and Right expand and collapse. The screen reader reads the level, the expanded state and the counts. An epic with a report shows "Report"; after one more change to the epic, "Report · outdated", and its detail reads "Covers revision R · 1 change since" with the summary muted. |
 | F03 | Status derivation | Fixtures for planned (an empty epic, and one with only queued and ready tasks), active (one working; one waiting on a teammate), blocked (all unfinished tasks blocked) and done with one failure show the specified words. A client never computes them itself; the DTO supplies them. |
 | F04 | Search and filters | Typing narrows to the matching tasks with the count `x of 480`. Needs attention shows exactly the blocked, failed and review tasks. A selected task that is filtered out keeps its detail and offers Show it. A failed task in an archived done epic appears, its epic expanded, under Needs attention. Clear filters restores everything, including the earlier expansion. No request is sent while typing. |
 | F05 | Finishing work | A task push to done moves it into the fold, updates the header counts, announces once and does not scroll the list. A selected finishing task stays selected and shown. |
 | F06 | DAG by epic | It draws the focus epic. A cross-epic dependency appears as a labelled, subdued context node. All tasks above 150 shows the notice. A status filter subdues nodes and keeps edges. |
-| F07 | Docs tree and rendering | The tree lists every doc. Changed files show markers with the member ids. A document renders headings, lists, tables, code and images. Raw HTML shows as text, `javascript:` links stay text, an oversized image shows the size notice, and no CSP violation is logged. |
+| F07 | Docs tree and rendering | The tree lists every doc. Changed files show markers with the member ids. A document renders headings, lists, tables, code and images. Raw HTML shows as text and `javascript:` links stay text. An oversized image, an SVG and an animated GIF each show their alt text and the matching reason; no request is made for any of them and no CSP violation is logged. Searching for a heading's text lists that heading and opens the file there. |
 | F08 | Live document update | While a member's version is viewed, a change to it updates the document in place, with scroll anchored at the top heading and the notice "Updated just now". Show changes marks the changed blocks with text. A burst of 20 saves gives one update per second. While the Workspace is viewed, a member's change only shows the newer-version notice and never replaces the content. |
 | F09 | Workspace and member versions | View switches between Workspace and the member's version. Compare with Workspace shows a diff in the existing Diff component. |
-| F10 | History | The timeline lists the recorded changes and those seen since the page opened. Picking two entries shows the diff between them. |
+| F10 | History | The timeline lists the recorded commits and the versions seen since the page opened, with the Seen-here footer. Picking two entries shows the diff between them. After the connection drops, an unselected Seen-here entry is gone, and a selected one shows the expired state with View Workspace; the shown content never switches by itself. |
 | F11 | Links into Docs | Task text, message bodies and `file` artifacts containing `notes/x.md` or `notes/x.md §Heading` link to the document at that heading. Unknown paths are not links. Referenced by lists the linking tasks and messages, with its scope stated. |
-| F12 | Usage figures | Total, Hit rate, Write share, Estimate and Cost per done task match a hand computation from the fixture under the §Definitions formulas. The model without a price shows No price, and the total states the exclusion. A non-reporting agent shows not reported, not 0. A Codex fixture request with total input and cache read but no write counters counts toward hit rate and not toward write share. A Claude request with an aggregate write and no TTL split makes the estimate a range with its note. A scope with no done tasks shows Cost per done task unavailable with the reason. |
-| F13 | Trend and breakdown | The trend draws buckets from the samples, with the latest values as text. Show as table gives the same figures. The breakdown sorts by every column, and the narrow layout stacks without page overflow. |
-| F14 | Big writes and history | Big writes lists exactly the fixture's qualifying requests, and opens the agent at that time. History lists both sessions, and selecting the earlier one scopes the figures read-only. |
+| F12 | Usage figures | Total, Hit rate, Write share, Estimate and Per completed task match a hand computation from the fixture under the §Definitions formulas (the arithmetic examples of `notes/usage-metrics.md`). The model without a price shows No price, and the estimate shows `at least …` with the exclusion, never `≈`. A non-reporting agent shows not reported, not 0. A Codex fixture request with total input and cache read but no write counters counts toward hit rate and not toward write share. A Claude request with an aggregate write and no TTL split makes the estimate and write share ranges with their note. A task reopened and completed again counts once. A period with no first completion shows Per completed task unavailable with the reason; a period whose first-completion history is incomplete shows "Per completed task unavailable · completion history incomplete" and no lower bound. |
+| F13 | Trend and breakdown | The trend draws buckets from the samples, with the latest values as text. A bucket without a full category split is a hatched gap labelled split not reported. Show as table gives the same figures. The breakdown sorts by every column, shows `≥` Requests with its reason for a batch-reporting runtime, lists No epic, No task and Not attributed as separate rows with the Not attributed reason, and the narrow layout stacks without page overflow. |
+| F14 | Big writes, history and gaps | Big writes lists exactly the fixture's qualifying requests, and opens the agent at that time. History lists both sessions, and selecting the earlier one scopes the figures read-only. With a session file still being read, the gap line shows and no figure shows 0 for it; a later revision that lowers a figure is drawn as is. The scope line shows the tracking boundary and the price date. |
 | F15 | Aside ask | `/btw` switches the composer to aside mode with the copy line and the `--info` border. The recipient picker lists unavailable members with reasons. Escape keeps the text. Sending opens the Asides tab. |
 | F16 | Aside answers | Answers arrive independently; the slow one shows Answering and the failed one shows its reason. The footer names the source copy and time, and tokens and estimate are shown. Cancel stops pending answers. |
 | F17 | Aside isolation | During and after an aside: no bus row, inbox entry, transcript line, task change or briefing change. Only `aside.*` events without bodies appear. The fixture's live sessions receive no input. Send as message opens the normal composer prefilled, and only sending it reaches the member. |
