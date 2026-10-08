@@ -1,0 +1,58 @@
+{
+  "epoch_before": "docs-before",
+  "selected_after": [
+    {
+      "doc_id": "doc-b",
+      "source_generation": "1",
+      "source_id": "source-workspace"
+    }
+  ],
+  "selected_before": [
+    {
+      "doc_id": "doc-a",
+      "source_generation": "1",
+      "source_id": "source-workspace"
+    },
+    {
+      "doc_id": "doc-b",
+      "source_generation": "1",
+      "source_id": "source-workspace"
+    }
+  ],
+  "terminal": {
+    "changed_selected": [
+      {
+        "document": {
+          "doc_id": "doc-a",
+          "source_generation": "1",
+          "source_id": "source-workspace"
+        },
+        "kind": "policy"
+      },
+      {
+        "document": {
+          "doc_id": "doc-b",
+          "source_generation": "1",
+          "source_id": "source-workspace"
+        },
+        "kind": "availability"
+      }
+    ],
+    "epoch": "docs-after",
+    "expired_seen_versions": [],
+    "from_revision": "10",
+    "history_sources_changed": [
+      "source-workspace"
+    ],
+    "removed_doc_ids": [],
+    "resync_required": true,
+    "to_revision": "11",
+    "upserts": [],
+    "watch_id": "watch-before"
+  },
+  "watch_error_codes": {
+    "disabled": "disabled",
+    "invalid_selection": "forbidden_path",
+    "replaced_source": "source_gone"
+  }
+}

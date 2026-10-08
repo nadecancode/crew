@@ -156,3 +156,11 @@ P4 at `201e7fdc` already invalidates cached values and fences pending reads, but
 does not yet automatically re-watch. The bounded recovery rule above belongs to
 its separately assigned client follow-up; service tests here exercise the final
 frame and explicit re-registration, not automatic end-to-end recovery.
+
+A failed `DocsWatch` capture restores the old registration and leaves its queue
+open, including when page/cursor capacity fails after selection validation. A
+successful replacement drops the old registration without closing its queue;
+P2 aborts and awaits its old forwarder after preparing the new one. Closing the
+queue earlier could race a spurious old-id terminal frame ahead of the new
+reply. A direct service user must likewise drop its old stream after a successful
+replacement reply. No later publication targets that old queue.

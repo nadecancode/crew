@@ -1195,24 +1195,41 @@ impl State {
             .connections
             .get_mut(&context.connection_epoch)
             .expect("admitted");
-        if let Some(old) = connection.watch.replace(Watch {
+        let old = connection.watch.replace(Watch {
             id: watch_id.clone(),
             epoch: self.index.epoch.clone(),
             revision: self.index.revision,
             selected: request.selected.to_vec(),
             queue,
-        }) {
-            old.queue.close();
-        }
+        });
         // Register first. A guaranteed rescan also covers new directories found
         // during capture before their nonrecursive native watch was attached.
         self.sync_native();
         self.advance();
         self.sync_native();
         self.dirty.store(true, Ordering::Release);
-        let initial_index_page = self
-            .index_page(context, &PageRequest::default())
-            .map_err(failure_error)?;
+        let initial_index_page = match self.index_page(context, &PageRequest::default()) {
+            Ok(page) => page,
+            Err(reason) => {
+                let connection = self
+                    .connections
+                    .get_mut(&context.connection_epoch)
+                    .expect("admitted");
+                if let Some(tentative) = connection.watch.take() {
+                    tentative.queue.close();
+                }
+                connection.watch = old;
+                if !self.connections.values().any(|c| c.watch.is_some()) {
+                    self.native = None;
+                    self.watch_mode = DocWatchMode::None;
+                }
+                return Err(failure_error(reason));
+            }
+        };
+        // P2 aborts and awaits the old forwarder after preparing the new one.
+        // Closing here could race its EOF handler into sending a spurious
+        // terminal frame before the successful replacement reply is queued.
+        drop(old);
         if let Some(w) = self
             .connections
             .get_mut(&context.connection_epoch)
@@ -1513,6 +1530,9 @@ fn failure_error(code: DocFailureCode) -> RpcError {
     RpcError::new(
         match code {
             DocFailureCode::Busy => "busy",
+            DocFailureCode::ForbiddenPath => "forbidden_path",
+            DocFailureCode::SourceGone => "source_gone",
+            DocFailureCode::TooLarge => "too_large",
             DocFailureCode::StaleCursor => "stale_cursor",
             DocFailureCode::Disabled => "disabled",
             DocFailureCode::SnapshotExpired => "snapshot_expired",

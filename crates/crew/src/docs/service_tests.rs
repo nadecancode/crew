@@ -863,6 +863,7 @@ async fn w1_policy_terminal_frame_allows_exactly_one_rewatch_of_surviving_select
         })
         .collect();
     assert_eq!(surviving, vec![b.clone()]);
+    terminal_fixture(&started, &change, &a, &b, &surviving);
     let watched: DocsWatchResult = serde_json::from_value(
         service
             .handle(
@@ -894,15 +895,16 @@ async fn w1_policy_terminal_frame_allows_exactly_one_rewatch_of_surviving_select
     assert!(
         matches!(expired,DocReadResult::Unavailable(f) if f.code==DocFailureCode::SnapshotExpired)
     );
-    assert!(service
+    let error = service
         .handle(
             &ctx,
             Call::DocsWatch(DocsWatch {
-                selected: List::new(vec![a]).unwrap()
-            })
+                selected: List::new(vec![a]).unwrap(),
+            }),
         )
         .await
-        .is_err());
+        .unwrap_err();
+    assert_eq!(error.code, "forbidden_path");
     assert_eq!(
         service.state().connections[&ctx.connection_epoch]
             .watch
@@ -991,4 +993,184 @@ async fn w1_source_replacement_and_disable_emit_terminal_frames_but_disconnect_d
     let mut stream = service.watch_stream(ctx.clone(), started.watch_id).unwrap();
     service.connection_closed(&ctx.connection_epoch);
     assert!(stream.next().await.unwrap().is_none());
+}
+
+fn terminal_fixture(
+    started: &DocsWatchResult,
+    change: &DocsChanged,
+    a: &DocRef,
+    b: &DocRef,
+    surviving: &[DocRef],
+) {
+    assert_eq!(change.to_revision.0, change.from_revision.0 + 1);
+    let mut value = serde_json::json!({"epoch_before":started.initial_index_page.epoch,"selected_before":[a,b],"terminal":change,"selected_after":surviving,"watch_error_codes":{"invalid_selection":failure_error(DocFailureCode::ForbiddenPath).code,"replaced_source":failure_error(DocFailureCode::SourceGone).code,"disabled":failure_error(DocFailureCode::Disabled).code}});
+    let labels = [
+        (started.initial_index_page.epoch.as_str(), "docs-before"),
+        (change.epoch.as_str(), "docs-after"),
+        (started.watch_id.as_str(), "watch-before"),
+        (a.doc_id.as_str(), "doc-a"),
+        (b.doc_id.as_str(), "doc-b"),
+        (a.source_id.as_str(), "source-workspace"),
+    ];
+    fn normalize(value: &mut serde_json::Value, labels: &[(&str, &str)]) {
+        match value {
+            serde_json::Value::String(s) => {
+                if let Some((_, label)) = labels.iter().find(|(id, _)| *id == s) {
+                    *s = (*label).to_owned();
+                }
+            }
+            serde_json::Value::Array(a) => a.iter_mut().for_each(|v| normalize(v, labels)),
+            serde_json::Value::Object(o) => o.values_mut().for_each(|v| normalize(v, labels)),
+            _ => {}
+        }
+    }
+    normalize(&mut value, &labels);
+    value["terminal"]["from_revision"] = serde_json::json!("10");
+    value["terminal"]["to_revision"] = serde_json::json!("11");
+    let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../../fixtures/docs-service/terminal-v1.json");
+    if std::env::var("CREW_UPDATE_DOCS_FIXTURES").as_deref() == Ok("1") {
+        fs::write(path, serde_json::to_string_pretty(&value).unwrap() + "\n").unwrap();
+    } else {
+        let expected: serde_json::Value = serde_json::from_str(include_str!(
+            "../../../../fixtures/docs-service/terminal-v1.json"
+        ))
+        .unwrap();
+        assert_eq!(
+            value, expected,
+            "Docs terminal fixture drift; regenerate explicitly"
+        );
+    }
+}
+
+#[tokio::test]
+async fn w1_late_capture_failure_preserves_the_old_watch_and_its_updates() {
+    let (dir, service, ctx) = fixture();
+    for n in 0..201 {
+        fs::write(dir.path().join(format!("notes/n{n:03}.md")), "# Extra\n").unwrap();
+    }
+    let page = complete(&service, &ctx).await;
+    let a = reference(&page, "notes/a.md");
+    let started = service
+        .state()
+        .watch(
+            &ctx,
+            DocsWatch {
+                selected: List::new(vec![a.clone()]).unwrap(),
+            },
+        )
+        .unwrap();
+    let mut stream = service
+        .watch_stream(ctx.clone(), started.watch_id.clone())
+        .unwrap();
+    let previous_bytes = {
+        let mut state = service.state();
+        let before = state.cursor_bytes;
+        state.cursor_bytes = CURSOR_BYTES;
+        before
+    };
+    let error = service
+        .handle(
+            &ctx,
+            Call::DocsWatch(DocsWatch {
+                selected: List::new(vec![a]).unwrap(),
+            }),
+        )
+        .await
+        .unwrap_err();
+    assert_eq!(error.code, "busy");
+    {
+        let mut state = service.state();
+        state.cursor_bytes = previous_bytes;
+        assert_eq!(
+            state.connections[&ctx.connection_epoch]
+                .watch
+                .as_ref()
+                .unwrap()
+                .id,
+            started.watch_id
+        );
+    }
+    fs::write(dir.path().join("notes/a.md"), "# Still watched\n").unwrap();
+    {
+        let mut state = service.state();
+        state.index.rescan();
+        for _ in 0..30 {
+            state.advance();
+        }
+        state.publish(false);
+    }
+    let push = tokio::time::timeout(Duration::from_secs(1), stream.next())
+        .await
+        .unwrap()
+        .unwrap()
+        .unwrap();
+    assert!(matches!(push,crew_core::rpc::Push::DocsChanged(c) if c.watch_id==started.watch_id));
+    service.connection_closed(&ctx.connection_epoch);
+}
+
+#[tokio::test]
+async fn w1_successful_replacement_leaves_old_stream_quiet_until_host_retires_it() {
+    let (dir, service, ctx) = fixture();
+    fs::write(dir.path().join("notes/b.md"), "# Beta\n").unwrap();
+    let page = complete(&service, &ctx).await;
+    let a = reference(&page, "notes/a.md");
+    let b = reference(&page, "notes/b.md");
+    let first = service
+        .state()
+        .watch(
+            &ctx,
+            DocsWatch {
+                selected: List::new(vec![a]).unwrap(),
+            },
+        )
+        .unwrap();
+    let mut old_stream = service
+        .watch_stream(ctx.clone(), first.watch_id.clone())
+        .unwrap();
+    let old_queue = Arc::downgrade(
+        &service.state().connections[&ctx.connection_epoch]
+            .watch
+            .as_ref()
+            .unwrap()
+            .queue,
+    );
+    let second = service
+        .state()
+        .watch(
+            &ctx,
+            DocsWatch {
+                selected: List::new(vec![b]).unwrap(),
+            },
+        )
+        .unwrap();
+    let mut new_stream = service
+        .watch_stream(ctx.clone(), second.watch_id.clone())
+        .unwrap();
+    assert!(old_queue.upgrade().is_some());
+    assert!(
+        tokio::time::timeout(Duration::from_millis(10), old_stream.next())
+            .await
+            .is_err()
+    );
+    fs::write(dir.path().join("notes/b.md"), "# New selection\n").unwrap();
+    {
+        let mut state = service.state();
+        state.index.rescan();
+        for _ in 0..20 {
+            state.advance();
+        }
+        state.publish(false);
+    }
+    assert!(
+        matches!(new_stream.next().await.unwrap(),Some(crew_core::rpc::Push::DocsChanged(c)) if c.watch_id==second.watch_id)
+    );
+    assert!(
+        tokio::time::timeout(Duration::from_millis(10), old_stream.next())
+            .await
+            .is_err()
+    );
+    drop(old_stream);
+    assert!(old_queue.upgrade().is_none());
+    service.connection_closed(&ctx.connection_epoch);
 }
