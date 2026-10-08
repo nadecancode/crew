@@ -1,0 +1,720 @@
+{
+  "tokenizer": "js-tiktoken@1.0.21 cl100k_base (proxy, not runtime billing)",
+  "rows": [
+    {
+      "file": "Cargo.lock",
+      "tool": "lowfat",
+      "mode": "post-read-lite",
+      "inputBytes": 74140,
+      "outputBytes": 257,
+      "rawTokens": 28061,
+      "filteredTokens": 67,
+      "savedPercent": 99.76,
+      "deterministic": true,
+      "processExit": 0,
+      "inputSha256": "5f2f70497c975cd298d3c780d03c7aa1ba1bcd7a98d87995814967e4c51c05ae",
+      "outputSha256": "bc5e4705b0a7437b76f2df52fa8602974ad79ea31985d4771551eeca254e0848",
+      "facts": [
+        {
+          "name": "locked versions",
+          "raw": true,
+          "filtered": false
+        },
+        {
+          "name": "checksums",
+          "raw": true,
+          "filtered": false
+        }
+      ]
+    },
+    {
+      "file": "Cargo.lock",
+      "tool": "lowfat",
+      "mode": "post-read-full",
+      "inputBytes": 74140,
+      "outputBytes": 257,
+      "rawTokens": 28061,
+      "filteredTokens": 67,
+      "savedPercent": 99.76,
+      "deterministic": true,
+      "processExit": 0,
+      "inputSha256": "5f2f70497c975cd298d3c780d03c7aa1ba1bcd7a98d87995814967e4c51c05ae",
+      "outputSha256": "bc5e4705b0a7437b76f2df52fa8602974ad79ea31985d4771551eeca254e0848",
+      "facts": [
+        {
+          "name": "locked versions",
+          "raw": true,
+          "filtered": false
+        },
+        {
+          "name": "checksums",
+          "raw": true,
+          "filtered": false
+        }
+      ]
+    },
+    {
+      "file": "Cargo.lock",
+      "tool": "lowfat",
+      "mode": "post-read-ultra",
+      "inputBytes": 74140,
+      "outputBytes": 257,
+      "rawTokens": 28061,
+      "filteredTokens": 67,
+      "savedPercent": 99.76,
+      "deterministic": true,
+      "processExit": 0,
+      "inputSha256": "5f2f70497c975cd298d3c780d03c7aa1ba1bcd7a98d87995814967e4c51c05ae",
+      "outputSha256": "bc5e4705b0a7437b76f2df52fa8602974ad79ea31985d4771551eeca254e0848",
+      "facts": [
+        {
+          "name": "locked versions",
+          "raw": true,
+          "filtered": false
+        },
+        {
+          "name": "checksums",
+          "raw": true,
+          "filtered": false
+        }
+      ]
+    },
+    {
+      "file": "Cargo.lock",
+      "tool": "rtk",
+      "mode": "read-none",
+      "inputBytes": 74140,
+      "outputBytes": 74140,
+      "rawTokens": 28061,
+      "filteredTokens": 28061,
+      "savedPercent": 0,
+      "deterministic": true,
+      "processExit": 0,
+      "inputSha256": "5f2f70497c975cd298d3c780d03c7aa1ba1bcd7a98d87995814967e4c51c05ae",
+      "outputSha256": "5f2f70497c975cd298d3c780d03c7aa1ba1bcd7a98d87995814967e4c51c05ae",
+      "facts": []
+    },
+    {
+      "file": "Cargo.lock",
+      "tool": "rtk",
+      "mode": "read-minimal",
+      "inputBytes": 74140,
+      "outputBytes": 74139,
+      "rawTokens": 28061,
+      "filteredTokens": 28061,
+      "savedPercent": 0,
+      "deterministic": true,
+      "processExit": 0,
+      "inputSha256": "5f2f70497c975cd298d3c780d03c7aa1ba1bcd7a98d87995814967e4c51c05ae",
+      "outputSha256": "745e8e725d4248061fbfe58404de0e4944ecd2f4b5394a6aba5e2a47279e8a68",
+      "facts": []
+    },
+    {
+      "file": "Cargo.lock",
+      "tool": "rtk",
+      "mode": "read-aggressive",
+      "inputBytes": 74140,
+      "outputBytes": 74139,
+      "rawTokens": 28061,
+      "filteredTokens": 28061,
+      "savedPercent": 0,
+      "deterministic": true,
+      "processExit": 0,
+      "inputSha256": "5f2f70497c975cd298d3c780d03c7aa1ba1bcd7a98d87995814967e4c51c05ae",
+      "outputSha256": "745e8e725d4248061fbfe58404de0e4944ecd2f4b5394a6aba5e2a47279e8a68",
+      "facts": []
+    },
+    {
+      "file": "toolbox.rs",
+      "tool": "lowfat",
+      "mode": "post-read-lite",
+      "inputBytes": 71203,
+      "outputBytes": 71203,
+      "rawTokens": 17193,
+      "filteredTokens": 17193,
+      "savedPercent": 0,
+      "deterministic": true,
+      "processExit": 0,
+      "inputSha256": "31a15b031d8bf2624210094f8a98084d89b9b4cd91297c6cb2ad084be428bdde",
+      "outputSha256": "31a15b031d8bf2624210094f8a98084d89b9b4cd91297c6cb2ad084be428bdde",
+      "facts": []
+    },
+    {
+      "file": "toolbox.rs",
+      "tool": "lowfat",
+      "mode": "post-read-full",
+      "inputBytes": 71203,
+      "outputBytes": 71203,
+      "rawTokens": 17193,
+      "filteredTokens": 17193,
+      "savedPercent": 0,
+      "deterministic": true,
+      "processExit": 0,
+      "inputSha256": "31a15b031d8bf2624210094f8a98084d89b9b4cd91297c6cb2ad084be428bdde",
+      "outputSha256": "31a15b031d8bf2624210094f8a98084d89b9b4cd91297c6cb2ad084be428bdde",
+      "facts": []
+    },
+    {
+      "file": "toolbox.rs",
+      "tool": "lowfat",
+      "mode": "post-read-ultra",
+      "inputBytes": 71203,
+      "outputBytes": 11406,
+      "rawTokens": 17193,
+      "filteredTokens": 2849,
+      "savedPercent": 83.43,
+      "deterministic": true,
+      "processExit": 0,
+      "inputSha256": "31a15b031d8bf2624210094f8a98084d89b9b4cd91297c6cb2ad084be428bdde",
+      "outputSha256": "36449c7bd493d13e1e2a9695949f2050d375976fd2c631ec49dc0164d2acd8a3",
+      "facts": []
+    },
+    {
+      "file": "toolbox.rs",
+      "tool": "rtk",
+      "mode": "read-none",
+      "inputBytes": 71203,
+      "outputBytes": 71203,
+      "rawTokens": 17193,
+      "filteredTokens": 17193,
+      "savedPercent": 0,
+      "deterministic": true,
+      "processExit": 0,
+      "inputSha256": "31a15b031d8bf2624210094f8a98084d89b9b4cd91297c6cb2ad084be428bdde",
+      "outputSha256": "31a15b031d8bf2624210094f8a98084d89b9b4cd91297c6cb2ad084be428bdde",
+      "facts": []
+    },
+    {
+      "file": "toolbox.rs",
+      "tool": "rtk",
+      "mode": "read-minimal",
+      "inputBytes": 71203,
+      "outputBytes": 69672,
+      "rawTokens": 17193,
+      "filteredTokens": 16858,
+      "savedPercent": 1.95,
+      "deterministic": true,
+      "processExit": 0,
+      "inputSha256": "31a15b031d8bf2624210094f8a98084d89b9b4cd91297c6cb2ad084be428bdde",
+      "outputSha256": "8d2ad98d25f0b5f06820dc2928f1dfff44e6f789a6d1c9d5d77cea731b4ef71c",
+      "facts": []
+    },
+    {
+      "file": "toolbox.rs",
+      "tool": "rtk",
+      "mode": "read-aggressive",
+      "inputBytes": 71203,
+      "outputBytes": 13811,
+      "rawTokens": 17193,
+      "filteredTokens": 3467,
+      "savedPercent": 79.83,
+      "deterministic": true,
+      "processExit": 0,
+      "inputSha256": "31a15b031d8bf2624210094f8a98084d89b9b4cd91297c6cb2ad084be428bdde",
+      "outputSha256": "b1d743b0713b9ddd628696455f442efc86906c8236b9f926ec1ef4da283a731e",
+      "facts": []
+    },
+    {
+      "file": "toolboxes.md",
+      "tool": "lowfat",
+      "mode": "post-read-lite",
+      "inputBytes": 86064,
+      "outputBytes": 86064,
+      "rawTokens": 20395,
+      "filteredTokens": 20395,
+      "savedPercent": 0,
+      "deterministic": true,
+      "processExit": 0,
+      "inputSha256": "b66427f8a66f458a3227fae8115f8d294f48617b6f0c0c58be5db3880a2b18a6",
+      "outputSha256": "b66427f8a66f458a3227fae8115f8d294f48617b6f0c0c58be5db3880a2b18a6",
+      "facts": []
+    },
+    {
+      "file": "toolboxes.md",
+      "tool": "lowfat",
+      "mode": "post-read-full",
+      "inputBytes": 86064,
+      "outputBytes": 86064,
+      "rawTokens": 20395,
+      "filteredTokens": 20395,
+      "savedPercent": 0,
+      "deterministic": true,
+      "processExit": 0,
+      "inputSha256": "b66427f8a66f458a3227fae8115f8d294f48617b6f0c0c58be5db3880a2b18a6",
+      "outputSha256": "b66427f8a66f458a3227fae8115f8d294f48617b6f0c0c58be5db3880a2b18a6",
+      "facts": []
+    },
+    {
+      "file": "toolboxes.md",
+      "tool": "lowfat",
+      "mode": "post-read-ultra",
+      "inputBytes": 86064,
+      "outputBytes": 18141,
+      "rawTokens": 20395,
+      "filteredTokens": 4233,
+      "savedPercent": 79.24,
+      "deterministic": true,
+      "processExit": 0,
+      "inputSha256": "b66427f8a66f458a3227fae8115f8d294f48617b6f0c0c58be5db3880a2b18a6",
+      "outputSha256": "0d1d7e8f312eea9d510e34bacd0e3818493d63696622f43d6d913062e7df67c3",
+      "facts": []
+    },
+    {
+      "file": "toolboxes.md",
+      "tool": "rtk",
+      "mode": "read-none",
+      "inputBytes": 86064,
+      "outputBytes": 86064,
+      "rawTokens": 20395,
+      "filteredTokens": 20395,
+      "savedPercent": 0,
+      "deterministic": true,
+      "processExit": 0,
+      "inputSha256": "b66427f8a66f458a3227fae8115f8d294f48617b6f0c0c58be5db3880a2b18a6",
+      "outputSha256": "b66427f8a66f458a3227fae8115f8d294f48617b6f0c0c58be5db3880a2b18a6",
+      "facts": []
+    },
+    {
+      "file": "toolboxes.md",
+      "tool": "rtk",
+      "mode": "read-minimal",
+      "inputBytes": 86064,
+      "outputBytes": 86063,
+      "rawTokens": 20395,
+      "filteredTokens": 20395,
+      "savedPercent": 0,
+      "deterministic": true,
+      "processExit": 0,
+      "inputSha256": "b66427f8a66f458a3227fae8115f8d294f48617b6f0c0c58be5db3880a2b18a6",
+      "outputSha256": "a5a17351d4e7d1d7fdd2f9de19d4fa53ae03da7a780e07d7cbe4fe7ce51376c0",
+      "facts": []
+    },
+    {
+      "file": "toolboxes.md",
+      "tool": "rtk",
+      "mode": "read-aggressive",
+      "inputBytes": 86064,
+      "outputBytes": 86063,
+      "rawTokens": 20395,
+      "filteredTokens": 20395,
+      "savedPercent": 0,
+      "deterministic": true,
+      "processExit": 0,
+      "inputSha256": "b66427f8a66f458a3227fae8115f8d294f48617b6f0c0c58be5db3880a2b18a6",
+      "outputSha256": "a5a17351d4e7d1d7fdd2f9de19d4fa53ae03da7a780e07d7cbe4fe7ce51376c0",
+      "facts": []
+    },
+    {
+      "file": "index.html",
+      "tool": "lowfat",
+      "mode": "post-read-lite",
+      "inputBytes": 512,
+      "outputBytes": 512,
+      "rawTokens": 189,
+      "filteredTokens": 189,
+      "savedPercent": 0,
+      "deterministic": true,
+      "processExit": 0,
+      "inputSha256": "334206ec40b29d15b859db43a13f51746ad7ddd81744fb82bfa7ff8d2b274daa",
+      "outputSha256": "334206ec40b29d15b859db43a13f51746ad7ddd81744fb82bfa7ff8d2b274daa",
+      "facts": []
+    },
+    {
+      "file": "index.html",
+      "tool": "lowfat",
+      "mode": "post-read-full",
+      "inputBytes": 512,
+      "outputBytes": 452,
+      "rawTokens": 189,
+      "filteredTokens": 171,
+      "savedPercent": 9.52,
+      "deterministic": true,
+      "processExit": 0,
+      "inputSha256": "334206ec40b29d15b859db43a13f51746ad7ddd81744fb82bfa7ff8d2b274daa",
+      "outputSha256": "91bc6d974091fa66ac14bdc0d6674de2ceb863a4eab10ed9983d65f07c82374f",
+      "facts": []
+    },
+    {
+      "file": "index.html",
+      "tool": "lowfat",
+      "mode": "post-read-ultra",
+      "inputBytes": 512,
+      "outputBytes": 4,
+      "rawTokens": 189,
+      "filteredTokens": 1,
+      "savedPercent": 99.47,
+      "deterministic": true,
+      "processExit": 0,
+      "inputSha256": "334206ec40b29d15b859db43a13f51746ad7ddd81744fb82bfa7ff8d2b274daa",
+      "outputSha256": "9cae07a2e9ceea5b88602d99f1bb35f228663649628b7a3281ac9c8203e6043a",
+      "facts": []
+    },
+    {
+      "file": "index.html",
+      "tool": "rtk",
+      "mode": "read-none",
+      "inputBytes": 512,
+      "outputBytes": 512,
+      "rawTokens": 189,
+      "filteredTokens": 189,
+      "savedPercent": 0,
+      "deterministic": true,
+      "processExit": 0,
+      "inputSha256": "334206ec40b29d15b859db43a13f51746ad7ddd81744fb82bfa7ff8d2b274daa",
+      "outputSha256": "334206ec40b29d15b859db43a13f51746ad7ddd81744fb82bfa7ff8d2b274daa",
+      "facts": []
+    },
+    {
+      "file": "index.html",
+      "tool": "rtk",
+      "mode": "read-minimal",
+      "inputBytes": 512,
+      "outputBytes": 511,
+      "rawTokens": 189,
+      "filteredTokens": 189,
+      "savedPercent": 0,
+      "deterministic": true,
+      "processExit": 0,
+      "inputSha256": "334206ec40b29d15b859db43a13f51746ad7ddd81744fb82bfa7ff8d2b274daa",
+      "outputSha256": "a3ff6c74d76e59bceeaad3e77422db67c9b567e7f7a2504605587e1bd08a9015",
+      "facts": []
+    },
+    {
+      "file": "index.html",
+      "tool": "rtk",
+      "mode": "read-aggressive",
+      "inputBytes": 512,
+      "outputBytes": 512,
+      "rawTokens": 189,
+      "filteredTokens": 189,
+      "savedPercent": 0,
+      "deterministic": true,
+      "processExit": 0,
+      "inputSha256": "334206ec40b29d15b859db43a13f51746ad7ddd81744fb82bfa7ff8d2b274daa",
+      "outputSha256": "334206ec40b29d15b859db43a13f51746ad7ddd81744fb82bfa7ff8d2b274daa",
+      "facts": []
+    },
+    {
+      "file": "tui-fix.diff",
+      "tool": "lowfat",
+      "mode": "git-lite",
+      "inputBytes": 3792,
+      "outputBytes": 3556,
+      "rawTokens": 1017,
+      "filteredTokens": 927,
+      "savedPercent": 8.85,
+      "deterministic": true,
+      "processExit": 0,
+      "inputSha256": "ec74233d38869211a2178fb38c234f9d329703a6732a5cd5cff8e9a32e7db117",
+      "outputSha256": "1db2f63e5042aaf8b56e15f3b5cb78381959ac1bcddcda9e2f2a7ae2274d8105",
+      "facts": [
+        {
+          "name": "guard code",
+          "raw": true,
+          "filtered": true
+        },
+        {
+          "name": "mouse/paste regression",
+          "raw": true,
+          "filtered": true
+        }
+      ]
+    },
+    {
+      "file": "tui-fix.diff",
+      "tool": "lowfat",
+      "mode": "git-full",
+      "inputBytes": 3792,
+      "outputBytes": 2933,
+      "rawTokens": 1017,
+      "filteredTokens": 759,
+      "savedPercent": 25.37,
+      "deterministic": true,
+      "processExit": 0,
+      "inputSha256": "ec74233d38869211a2178fb38c234f9d329703a6732a5cd5cff8e9a32e7db117",
+      "outputSha256": "dedafd5f8f2520ae4ca11910f2559e7246f2ee0a2150407b0a07f7231d19d0cc",
+      "facts": [
+        {
+          "name": "guard code",
+          "raw": true,
+          "filtered": true
+        },
+        {
+          "name": "mouse/paste regression",
+          "raw": true,
+          "filtered": true
+        }
+      ]
+    },
+    {
+      "file": "tui-fix.diff",
+      "tool": "lowfat",
+      "mode": "git-ultra",
+      "inputBytes": 3792,
+      "outputBytes": 209,
+      "rawTokens": 1017,
+      "filteredTokens": 72,
+      "savedPercent": 92.92,
+      "deterministic": true,
+      "processExit": 0,
+      "inputSha256": "ec74233d38869211a2178fb38c234f9d329703a6732a5cd5cff8e9a32e7db117",
+      "outputSha256": "1ff1d5088758932c7f467c944b2ce400ad3312609319c9880d2c1fca0ec3af81",
+      "facts": [
+        {
+          "name": "guard code",
+          "raw": true,
+          "filtered": false
+        },
+        {
+          "name": "mouse/paste regression",
+          "raw": true,
+          "filtered": false
+        }
+      ]
+    },
+    {
+      "file": "ls-long.txt",
+      "tool": "lowfat",
+      "mode": "ls-lite",
+      "inputBytes": 174,
+      "outputBytes": 174,
+      "rawTokens": 79,
+      "filteredTokens": 79,
+      "savedPercent": 0,
+      "deterministic": true,
+      "processExit": 0,
+      "inputSha256": "a257c4b57d0eaa3f3c3f6d3ffdba6545d68cb4604d22e1cb11a394788678cefd",
+      "outputSha256": "a257c4b57d0eaa3f3c3f6d3ffdba6545d68cb4604d22e1cb11a394788678cefd",
+      "facts": [
+        {
+          "name": "executable permission",
+          "raw": true,
+          "filtered": true
+        }
+      ]
+    },
+    {
+      "file": "ls-long.txt",
+      "tool": "lowfat",
+      "mode": "ls-full",
+      "inputBytes": 174,
+      "outputBytes": 68,
+      "rawTokens": 79,
+      "filteredTokens": 24,
+      "savedPercent": 69.62,
+      "deterministic": true,
+      "processExit": 0,
+      "inputSha256": "a257c4b57d0eaa3f3c3f6d3ffdba6545d68cb4604d22e1cb11a394788678cefd",
+      "outputSha256": "7174674db4bddaf80566061c15b87e56bfa666cccf7e6de889cd8b335b2140bc",
+      "facts": [
+        {
+          "name": "executable permission",
+          "raw": true,
+          "filtered": false
+        }
+      ]
+    },
+    {
+      "file": "ls-long.txt",
+      "tool": "lowfat",
+      "mode": "ls-ultra",
+      "inputBytes": 174,
+      "outputBytes": 48,
+      "rawTokens": 79,
+      "filteredTokens": 13,
+      "savedPercent": 83.54,
+      "deterministic": true,
+      "processExit": 0,
+      "inputSha256": "a257c4b57d0eaa3f3c3f6d3ffdba6545d68cb4604d22e1cb11a394788678cefd",
+      "outputSha256": "e440927c202c31efc6ac94e29d51741d6879e0d6561ca5cfdbf8bc548a06c8a4",
+      "facts": [
+        {
+          "name": "executable permission",
+          "raw": true,
+          "filtered": false
+        }
+      ]
+    },
+    {
+      "file": "find-probes.txt",
+      "tool": "lowfat",
+      "mode": "find-lite",
+      "inputBytes": 536,
+      "outputBytes": 536,
+      "rawTokens": 197,
+      "filteredTokens": 197,
+      "savedPercent": 0,
+      "deterministic": true,
+      "processExit": 0,
+      "inputSha256": "1b1a51bf4b387d9dd8a44b88ebcedb8615e1f249e648b49c8801a4fc2f0741a6",
+      "outputSha256": "1b1a51bf4b387d9dd8a44b88ebcedb8615e1f249e648b49c8801a4fc2f0741a6",
+      "facts": []
+    },
+    {
+      "file": "find-probes.txt",
+      "tool": "lowfat",
+      "mode": "find-full",
+      "inputBytes": 536,
+      "outputBytes": 536,
+      "rawTokens": 197,
+      "filteredTokens": 197,
+      "savedPercent": 0,
+      "deterministic": true,
+      "processExit": 0,
+      "inputSha256": "1b1a51bf4b387d9dd8a44b88ebcedb8615e1f249e648b49c8801a4fc2f0741a6",
+      "outputSha256": "1b1a51bf4b387d9dd8a44b88ebcedb8615e1f249e648b49c8801a4fc2f0741a6",
+      "facts": []
+    },
+    {
+      "file": "find-probes.txt",
+      "tool": "lowfat",
+      "mode": "find-ultra",
+      "inputBytes": 536,
+      "outputBytes": 536,
+      "rawTokens": 197,
+      "filteredTokens": 197,
+      "savedPercent": 0,
+      "deterministic": true,
+      "processExit": 0,
+      "inputSha256": "1b1a51bf4b387d9dd8a44b88ebcedb8615e1f249e648b49c8801a4fc2f0741a6",
+      "outputSha256": "1b1a51bf4b387d9dd8a44b88ebcedb8615e1f249e648b49c8801a4fc2f0741a6",
+      "facts": []
+    },
+    {
+      "file": "tui-fix.diff",
+      "tool": "rtk",
+      "mode": "diff",
+      "inputBytes": 3792,
+      "outputBytes": 2823,
+      "rawTokens": 1017,
+      "filteredTokens": 718,
+      "savedPercent": 29.4,
+      "deterministic": true,
+      "processExit": 0,
+      "inputSha256": "ec74233d38869211a2178fb38c234f9d329703a6732a5cd5cff8e9a32e7db117",
+      "outputSha256": "d18e19c9029b7f2208c95127006728b2607197c85e0f1342a1a3279139be92a6",
+      "facts": [
+        {
+          "name": "guard code",
+          "raw": true,
+          "filtered": true
+        },
+        {
+          "name": "mouse/paste regression",
+          "raw": true,
+          "filtered": true
+        }
+      ]
+    },
+    {
+      "file": "tui-fix.diff",
+      "tool": "tokf",
+      "mode": "git-diff",
+      "inputBytes": 3792,
+      "outputBytes": 135,
+      "rawTokens": 1017,
+      "filteredTokens": 47,
+      "savedPercent": 95.38,
+      "deterministic": true,
+      "processExit": 0,
+      "inputSha256": "ec74233d38869211a2178fb38c234f9d329703a6732a5cd5cff8e9a32e7db117",
+      "outputSha256": "d7669e46a6bdc86a03b441d4d4c74540888665b940ca2d61d4fa56501c3a0e79",
+      "facts": [
+        {
+          "name": "guard code",
+          "raw": true,
+          "filtered": false
+        }
+      ]
+    },
+    {
+      "file": "cargo-success.txt",
+      "tool": "tokf",
+      "mode": "cargo-test",
+      "inputBytes": 15627,
+      "outputBytes": 240,
+      "rawTokens": 3955,
+      "filteredTokens": 76,
+      "savedPercent": 98.08,
+      "deterministic": true,
+      "processExit": 0,
+      "inputSha256": "2cdc945ccee2ddf127911941fd632e012a160f457a81682b642751abb8a9b1a9",
+      "outputSha256": "5ec8e827b74b3b831a948673c80e6e55c933672d068d6bf700f9bcca2b2effe4",
+      "facts": [
+        {
+          "name": "specific test executed",
+          "raw": true,
+          "filtered": false
+        }
+      ]
+    },
+    {
+      "file": "cargo-failure.txt",
+      "tool": "tokf",
+      "mode": "cargo-test",
+      "inputBytes": 1025,
+      "outputBytes": 576,
+      "rawTokens": 282,
+      "filteredTokens": 169,
+      "savedPercent": 40.07,
+      "deterministic": true,
+      "processExit": 0,
+      "inputSha256": "9ce3bf2ab065f9b14ffb1f68611a0b04d6d0245c8579b923b6c087f5712e0e7a",
+      "outputSha256": "a5b94a7bf237b025d3508e033bf50e52fe17e7344716db21d2bc1fb0e580f814",
+      "facts": [
+        {
+          "name": "panic cause",
+          "raw": true,
+          "filtered": true
+        },
+        {
+          "name": "failed test name",
+          "raw": true,
+          "filtered": true
+        }
+      ]
+    },
+    {
+      "file": "cargo-success.txt",
+      "tool": "rtk",
+      "mode": "test",
+      "inputBytes": 15627,
+      "outputBytes": 138,
+      "rawTokens": 3955,
+      "filteredTokens": 48,
+      "savedPercent": 98.79,
+      "deterministic": true,
+      "processExit": 0,
+      "inputSha256": "2cdc945ccee2ddf127911941fd632e012a160f457a81682b642751abb8a9b1a9",
+      "outputSha256": "0674cb97fa3dc98da328de5d8c90580165b23f24facaa4d21b300349226ce0d8",
+      "facts": [
+        {
+          "name": "specific test executed",
+          "raw": true,
+          "filtered": false
+        }
+      ]
+    },
+    {
+      "file": "cargo-failure.txt",
+      "tool": "rtk",
+      "mode": "test",
+      "inputBytes": 1025,
+      "outputBytes": 296,
+      "rawTokens": 282,
+      "filteredTokens": 91,
+      "savedPercent": 67.73,
+      "deterministic": true,
+      "processExit": 101,
+      "inputSha256": "9ce3bf2ab065f9b14ffb1f68611a0b04d6d0245c8579b923b6c087f5712e0e7a",
+      "outputSha256": "1397faeb521a7aa96a4fdc45b43a2160d3860c05a9b546c957a36a60ebcc888f",
+      "facts": [
+        {
+          "name": "panic cause",
+          "raw": true,
+          "filtered": false
+        }
+      ]
+    }
+  ]
+}

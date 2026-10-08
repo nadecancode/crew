@@ -1,0 +1,28 @@
+[
+  {
+    "file": "cargo-success.txt",
+    "tool": "rtk cargo test",
+    "status": 0,
+    "rawTokens": 3955,
+    "filteredTokens": 20,
+    "savedPercent": 99.49,
+    "stable": true,
+    "panicPreserved": false,
+    "testNamePreserved": false,
+    "output": "cargo test: 198 passed, 2 ignored (5 suites, 3.92s)\n",
+    "stderr": ""
+  },
+  {
+    "file": "cargo-failure.txt",
+    "tool": "rtk cargo test",
+    "status": 101,
+    "rawTokens": 282,
+    "filteredTokens": 149,
+    "savedPercent": 47.16,
+    "stable": true,
+    "panicPreserved": true,
+    "testNamePreserved": false,
+    "output": "---- clicking_toolbox_does_not_enable_terminal_typing stdout ----\n\nthread 'clicking_toolbox_does_not_enable_terminal_typing' (1165880) panicked at crates/crew-tui/tests/review_toolbox_click.rs:23:5:\nToolbox click enabled typing; next T returned [Keys { id: \"release\", text: \"T\" }]; toolbox visible=true\nnote: run with `RUST_BACKTRACE=1` environment variable to display a backtrace\n\n\ntest result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s\n[full output: rtk recall 50589a23e2f2]\n",
+    "stderr": ""
+  }
+]
