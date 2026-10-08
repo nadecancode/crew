@@ -70,7 +70,19 @@ team 89 (including T20), keep-alive 8, and the immutable subagent inheritance
 regressions. The four ignored cases are the existing explicit benchmark,
 paid/native or interactive gates; no new ignore was added.
 
-Native T14/T18 evidence will be recorded before submission.
+QA's receipt-aware native replay uses harness `9cb66ef0` on `3d31804b` and the
+verified candidate binary below. Codex 0.159.0 and pi 1.1.0 pass T14 and T18.
+Claude Code 2.1.291 passes T18, but T14 still fails its model-visible catalog
+check: Crew refreshes the pin and digest and emits exactly one changed event,
+while the resumed Claude session sends the old tool descriptions. QA reported
+these results in `m-859ff5fb0ca1`; native reports remain under
+`target/toolboxes/fix-native-*/` in QA's worktree.
+
+The dispatch fix is approved (`m-24f77d1c3eda`, `m-9fb99cb1b70c`) and landed.
+The orchestrator split the remaining Claude cache/discovery issue into
+`toolbox-t14-claude` (`m-0387e7257fee`). This report does not claim full Claude
+T14 acceptance. That follow-up must establish a supported refresh mechanism
+and report any conversation-continuity or cache cost.
 
 ## Reproduction
 
