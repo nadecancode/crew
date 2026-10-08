@@ -145,8 +145,11 @@ cache for this toolchain, at the locked versions.
   refused rather than dropped.
 - `daemon/toolbox_rpc.rs` unit tests (T11, subagents): a default subagent
   gets a copy of the parent's active toolbox (same definitions, content and
-  servers, pinned from the parent's snapshots at its own launch); a
-  selection gives only those bundles; after a reload widens a bundle while
+  servers, with the parent's frozen MCP catalogs); a selection gives only
+  those bundles and their servers' frozen catalogs; re-pinning the parent
+  between choosing the toolbox and installing it, or changing its
+  definition before the child resumes, leaves the child's catalog as it was
+  (graph's frozen-snapshot tests); after a reload widens a bundle while
   the parent runs the old one, a default subagent still gets the old items
   and asking for the bundle is refused naming the first new item; a bundle
   whose definition changed is refused; a parent without a toolbox has
@@ -188,14 +191,23 @@ launch prepares:
   (`toolbox_item`), with the credentials captured for that launch
   (`toolbox_references`), and scrubs every source name the launch
   recorded (`ActiveToolbox.scrub_env`);
-- `crew toolbox` (with `--runtime`, or before a member has run) and `crew
-  toolbox check` map a configuration with `toolbox_preview`;
+- `crew toolbox` (with `--runtime`, or before a member has run) maps a
+  configuration with `toolbox_preview`; `crew toolbox check` maps the
+  candidate team file with `toolbox_check_preview` (graph's `0a12a01b`), so
+  its sandbox, delivery and working directory are the file's, not the
+  running daemon's;
 - `crew toolbox reload` stages the team file's toolboxes with
   `toolbox_reload`;
 - a move to another CLI is checked once, in `move_to_runtime`
   (`toolbox_runtime_check`);
-- a subagent's launch pins its servers from its parent's snapshots
-  (`snapshot_owner`), so nothing is copied at spawn.
+- a subagent's MCP catalogs are frozen when its toolbox is chosen
+  (`subagent_toolbox`, before `create_agent` is awaited): the parent's
+  `ActiveToolbox.mcp_snapshots`, immutable content-store references, are
+  cloned into the child's, for the whole toolbox or only the selected
+  bundles' servers. The child's launch and every restart check each
+  snapshot's hash and definition and pin the child's own copy, so a later
+  refresh or restart of the parent cannot change it (I1, closed on
+  `038f8bc1`). `snapshot_owner` only records where the catalogs came from.
 
 ## Left to end-to-end QA
 
@@ -219,3 +231,15 @@ regression test in `tests/toolbox_proxy.rs` or the unit tests.
 
 One limit stays: a host name lookup cannot be cancelled. The caller gives up
 on it at the deadline; the lookup thread is left to finish on its own.
+
+## Final integrated gates
+
+On `ef969fb9`: this branch with graph's `7244d90f` (toolbox-launch through
+`65a3d0f2`, its team-test isolation fix) and main `d9d763cb` merged.
+`cargo fmt --all -- --check` clean; `cargo clippy --locked --workspace
+--all-targets -- -D warnings` clean; `cargo test --locked --workspace
+--no-fail-fast` passed with every test binary green (70 result lines, no
+failures), inside `nix-shell` with `CREW_IDENTITY`, `CREW_SOCKET` and
+`CREW_LAUNCH` removed; `scripts/check-msrv` passed with Rust 1.82.0 and the
+locked lockfile. cache-reviewer closed I1 on `038f8bc1` with its own runs
+of that commit's test binaries.

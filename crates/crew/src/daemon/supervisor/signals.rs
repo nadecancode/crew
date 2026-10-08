@@ -196,10 +196,15 @@ impl Daemon {
                 if self.model().rt(id).native_queue_bridge {
                     return;
                 }
+                // A keep-alive's turn is not work: the member stays as it was.
+                let keepalive = self.keepalive_turn(id);
                 {
                     let mut model = self.model();
                     let rt = model.rt(id);
                     rt.turn_active = true;
+                    if keepalive {
+                        return;
+                    }
                     rt.self_status = None;
                     rt.idle_since = None;
                 }

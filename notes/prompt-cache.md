@@ -937,17 +937,24 @@ reminder (`Daemon::inject`), never a message:
   given another. Not one that is Blocked, retiring or temporary.
 - **Usage limits.** It is skipped while any Claude Code usage window is 80%
   used or more, so keep-alives never spend the last of a window.
-- **D1.** It is queued at a turn boundary like any own-text line. If a
-  delivery joins the keep-alive's turn, that turn is ordinary work from
-  then on. Crew never needs to tell which turn was the keep-alive's: only
-  a member Waiting on open work gets one, and it rests as Waiting again when
-  any turn ends. A message put into its session (D1 delivery) restarts the
+- **D1.** It is queued at a turn boundary like any own-text line. A turn
+  that starts after a keep-alive was handed over, with nothing put into
+  the session since, is the keep-alive's (`Daemon::keepalive_turn`, for
+  both hook-reported and native-bridge turns). If a delivery joins that
+  turn, `delivered` makes the member Working and the turn is ordinary work
+  from then on. A message put into its session (D1 delivery) restarts the
   count of keep-alives for that rest. No change to `turn_ended` or `inject`.
-- **D4.** It is not a message:
+- **D4.** It is not a message and its turn is not work:
   - nothing goes to an inbox, and it raises no obligation or follow-up;
   - it neither counts as nor resets a reminder or nudge;
-  - the member's status is kept: its parked card (or the team's open
-    cards, for the orchestrator) puts it back to Waiting when the turn ends.
+  - the member stays Waiting while its turn runs and after: the turn's
+    start does not make it Working, and its parked card (or the team's
+    open cards, for the orchestrator) keeps it Waiting when the turn ends;
+  - so the planner sees no progress. Were the member shown Working, a
+    stalled team's stall would end with the turn and be reported to the
+    orchestrator again 12 s later: a message and an orchestrator turn
+    after every worker keep-alive (found by qa and reviewer on
+    `ef969fb9`; regression `a_keep_alive_turn_does_not_report_a_stall_again`).
 - **Visibility.** Each keep-alive is an `agent.keepalive` event, emitted
   before the line is handed to the session, so it precedes every request
   the keep-alive causes. Its data holds `n`, `max`, `rested_ms`,
@@ -984,10 +991,21 @@ lifecycle template is not changed:
 - **Never finished.** The sentinels stay open through the measurement, so
   the team never gets an all-done summary and the orchestrator rests as
   Waiting.
+- **Stall notice drained.** Once every worker has parked, the team has
+  stalled, and 12 s later crew tells the orchestrator once
+  (`scheduler.stall`). That notice is part of crew's lifecycle in both arms
+  and is not suppressed. The runner waits for it, and for the
+  orchestrator's turn on it to end, before the measured idle starts. The
+  same stall is not reported again while the team stays stalled, and a
+  keep-alive turn does not end it. A second `scheduler.stall`, or any other
+  message to a member, during the idle makes the pair invalid.
 - **Orchestrator probe.** After the gap, both arms send the orchestrator
   the same explicit work probe. With sentinels open, no all-done notice
   arrives to make it act, so without the probe there might be no
   orchestrator request to measure.
+- **D2 steps only.** The lifecycle's idle-delivery, fold and after-fold
+  probes are left out of both arms: they test D1, whose own acceptance
+  covers them. One frozen retention plan serves both arms.
 
 QA's `cache-retention-bench` card fixes the exact steps. Same models,
 catalog and build in both arms.
@@ -1031,7 +1049,8 @@ catalog and build in both arms.
   - the treatment's first-request read share is at least 95%;
   - every fixture oracle passes;
   - the keep-alive causes no message, obligation notice, reminder or nudge;
-  - the member's status before and after its keep-alive is the same.
+  - the member's status before, during and after its keep-alive is the
+    same (Waiting).
 - **Fail.** If the pairs fail, close as a documented no-op and remove the
   setting.
 - **If it passes.** The setting stays opt-in. Making it the default (3300, 6,

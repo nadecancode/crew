@@ -12,9 +12,13 @@
 //! A keep-alive is not work and is not a message. It goes through the same
 //! path as crew's reminders, so nothing reaches an inbox and nothing is
 //! asked of anyone. It neither counts as nor resets a reminder or a nudge.
-//! Its turn needs no telling apart from others: only a member Waiting on
-//! open work gets one, and such a member rests as Waiting again when any
-//! turn ends (its parked card, or the team's open cards, say so).
+//! Nor does its turn look like work: the member stays Waiting while it runs
+//! ([`Daemon::keepalive_turn`]). Were it shown Working, the planner would
+//! count the turn as progress, and a stall already reported to the
+//! orchestrator would be reported again once the turn ended: a message and
+//! a turn for the orchestrator after every keep-alive. Only a member
+//! Waiting on open work gets one, and such a member rests as Waiting again
+//! when any turn ends (its parked card, or the team's open cards, say so).
 
 use crew_core::config::Limits;
 use crew_core::util::now_ms;
@@ -99,6 +103,18 @@ impl Daemon {
                 .data(json!({ "n": sent, "dispatched_at_ms": dispatched_at })),
             );
         }
+    }
+
+    /// Whether the turn the member's session starts now is a keep-alive's:
+    /// one was handed over after its last turn ended, and nothing has been
+    /// put into its session since. Such a turn leaves the member as it was.
+    /// A message put into the session, before the turn or during it, makes
+    /// the member Working as usual (`delivered`).
+    pub(crate) fn keepalive_turn(&self, id: &str) -> bool {
+        let mut model = self.model();
+        let rt = model.rt(id);
+        rt.keepalive_sent_at
+            .is_some_and(|sent| sent > rt.turn_ended_at && rt.delivered_at < sent)
     }
 
     /// The members whose keep-alive is due at `now`, with when their cache
@@ -345,10 +361,11 @@ mod tests {
         daemon.model().rt("owner").self_status = Some(AgentStatus::Waiting);
         daemon.keepalive_at(2 * HOUR, &limits()).await;
         assert!(sent(&mut receiver));
-        // The session runs it as a turn: working while it lasts, then at
-        // rest as before, with its card still parked.
+        // The session runs it as a turn: the member stays Waiting while it
+        // lasts and after, with its card still parked.
         daemon.on_signal("owner", Signal::TurnStarted).await;
-        assert_eq!(daemon.agent("owner").unwrap().status, AgentStatus::Working);
+        assert!(daemon.model().rt("owner").turn_active);
+        assert_eq!(daemon.agent("owner").unwrap().status, AgentStatus::Waiting);
         daemon.on_signal("owner", Signal::TurnEnded).await;
         assert_eq!(daemon.agent("owner").unwrap().status, AgentStatus::Waiting);
         assert_eq!(
@@ -358,6 +375,162 @@ mod tests {
         assert_eq!(daemon.model().rt("owner").keepalives, 1);
         // It counted as no reminder.
         assert_eq!(daemon.model().rt("owner").nudges, 0);
+        // The next turn is not a keep-alive's: it is work as usual.
+        daemon.on_signal("owner", Signal::TurnStarted).await;
+        assert_eq!(daemon.agent("owner").unwrap().status, AgentStatus::Working);
+        daemon.on_signal("owner", Signal::TurnEnded).await;
+
+        // A message put into the session after a keep-alive was handed over
+        // makes the turn work too.
+        let later = now_ms() + 2 * HOUR;
+        daemon.keepalive_at(later, &limits()).await;
+        assert!(sent(&mut receiver));
+        daemon.model().rt("owner").delivered_at = later + 1;
+        daemon.on_signal("owner", Signal::TurnStarted).await;
+        assert_eq!(daemon.agent("owner").unwrap().status, AgentStatus::Working);
+    }
+
+    /// Every member's process is running, as far as a plan can tell.
+    struct AllRunning;
+    #[async_trait::async_trait]
+    impl crate::process::ProcessManager for AllRunning {
+        fn name(&self) -> &'static str {
+            "pty"
+        }
+        async fn spawn(
+            &self,
+            _: &crate::agents::LaunchSpec,
+        ) -> anyhow::Result<crate::process::Spawned> {
+            unreachable!()
+        }
+        async fn submit_prompt(&self, _: &str, _: &str) -> anyhow::Result<()> {
+            Ok(())
+        }
+        async fn write_raw(&self, _: &str, _: &[u8]) -> anyhow::Result<()> {
+            Ok(())
+        }
+        async fn screen(&self, _: &str, _: usize) -> anyhow::Result<String> {
+            Ok(String::new())
+        }
+        async fn pause(&self, _: &str) -> anyhow::Result<()> {
+            Ok(())
+        }
+        async fn resume(&self, _: &str) -> anyhow::Result<()> {
+            Ok(())
+        }
+        async fn kill(&self, _: &str) -> anyhow::Result<()> {
+            Ok(())
+        }
+        fn is_alive(&self, _: &str) -> bool {
+            true
+        }
+        async fn adopt(&self, _: &Agent) -> anyhow::Result<bool> {
+            Ok(true)
+        }
+    }
+
+    /// A team whose only card is parked has stalled, and its orchestrator
+    /// is told once. A worker's keep-alive turn is not progress: when it
+    /// ends, the same stall is not reported again (each report is a message
+    /// and a turn for the orchestrator). Both ways a Claude Code session
+    /// reports its turns are covered: hooks, and the native queue bridge.
+    #[tokio::test]
+    async fn a_keep_alive_turn_does_not_report_a_stall_again() {
+        for bridge in [false, true] {
+            let (temp, running, mut receiver) = fixture("waiting", Some(TaskStatus::Waiting)).await;
+            let daemon = &running.daemon;
+            let lead: Agent = serde_json::from_value(json!({
+                "id":"lead", "name":"lead", "role":"orchestrator", "orchestrator":true,
+                "status":"waiting", "runtime":"claude", "workdir":temp.path(), "backend":"pty",
+                "last_activity_at":0,
+            }))
+            .unwrap();
+            {
+                let mut model = daemon.model();
+                model.agents.push(lead);
+                model.session.team = Some(
+                    crew_core::config::TeamConfig::from_yaml("project: keepalive-stall\n").unwrap(),
+                );
+            }
+            *daemon.procs.write().unwrap() = Some(std::sync::Arc::new(AllRunning));
+            if bridge {
+                daemon
+                    .model()
+                    .local
+                    .entry("owner".into())
+                    .or_default()
+                    .launch = Some("launch".into());
+                daemon
+                    .native_delivery_hook(
+                        "owner",
+                        Some("launch"),
+                        "native-bridge-ready",
+                        &json!({"session_id":"session"}),
+                    )
+                    .await
+                    .unwrap();
+            }
+            let stalls = || {
+                daemon
+                    .store
+                    .recent_events(None, 1000)
+                    .unwrap()
+                    .iter()
+                    .filter(|e| e.event_type == "scheduler.stall")
+                    .count()
+            };
+            let notices = || daemon.store.inbox("lead", false, 100).unwrap().len();
+            // A stall counts once it has lasted.
+            let lasted = || {
+                if let Some((_, since, _)) = daemon.model().stall.as_mut() {
+                    *since -= 60_000;
+                }
+            };
+            daemon.apply_plan().await;
+            lasted();
+            daemon.apply_plan().await;
+            assert_eq!((stalls(), notices()), (1, 1), "bridge {bridge}");
+
+            daemon.keepalive_at(2 * HOUR, &limits()).await;
+            assert!(sent(&mut receiver), "bridge {bridge}");
+            let keepalive_turn = json!({"session_id":"session", "turn_id":"keepalive"});
+            let turn = |event: &'static str| {
+                daemon.native_delivery_hook("owner", Some("launch"), event, &keepalive_turn)
+            };
+            if bridge {
+                turn("native-turn-started").await.unwrap();
+            } else {
+                daemon
+                    .on_signal("owner", crate::agents::Signal::TurnStarted)
+                    .await;
+            }
+            assert_eq!(
+                daemon.agent("owner").unwrap().status,
+                AgentStatus::Waiting,
+                "bridge {bridge}"
+            );
+            daemon.apply_plan().await;
+            if bridge {
+                turn("native-turn-ended").await.unwrap();
+            } else {
+                daemon
+                    .on_signal("owner", crate::agents::Signal::TurnEnded)
+                    .await;
+            }
+            assert_eq!(
+                daemon.agent("owner").unwrap().status,
+                AgentStatus::Waiting,
+                "bridge {bridge}"
+            );
+            daemon.apply_plan().await;
+            lasted();
+            daemon.apply_plan().await;
+            assert_eq!((stalls(), notices()), (1, 1), "bridge {bridge}");
+            assert_eq!(
+                daemon.model().task("card").unwrap().status,
+                TaskStatus::Waiting
+            );
+        }
     }
 
     #[tokio::test(start_paused = true)]
