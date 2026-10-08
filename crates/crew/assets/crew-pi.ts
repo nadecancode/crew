@@ -4,6 +4,9 @@
 // - the crew tools: crew's MCP server, registered with the session and
 //   declared to the model like built-in tools (pi 1.0); on a pi without
 //   MCP, each tool is registered as a pi tool that runs `crew ctl tool`;
+// - the member's toolbox MCP servers, each reached through crew's proxy
+//   (`crew toolbox mcp <name>`); the tools of all of them are in place, in
+//   an order of crew's, before the first request (see `settle`);
 // - team messages, pushed into the session over the daemon's Unix socket
 //   (`crew bridge` holds it open and prints one JSON line per delivery);
 // - the session's life, reported to the daemon (`crew hook …`): when it is
@@ -15,11 +18,17 @@ import { execFile, spawn } from "node:child_process"
 
 const CREW_BIN: string = __CREW_BIN__
 const IDENTITY: string = __IDENTITY__
+// The member's toolbox MCP servers in name order: whether the member may
+// not start without it, and the names of the tools its pinned snapshot
+// serves.
+const TOOLBOX_SERVERS: ToolboxServer[] = __TOOLBOX_SERVERS__
 
 type Delivery = { ids: string[]; text: string }
 type CompactOrder = { instructions?: string }
 type ToolSpec = { name: string; description: string; inputSchema: unknown }
 type Run = { code: number; stdout: string; stderr: string }
+type ToolboxServer = { name: string; required: boolean; tools: string[] }
+type ToolInfo = { name: string; exposure?: string; namespace?: { name?: string } }
 
 const env = { ...process.env, CREW_IDENTITY: IDENTITY }
 
@@ -156,8 +165,9 @@ function release(pi: any, ctx: any): void {
 }
 
 function pump(pi: any, ctx: any): void {
-  // Should pi never start the first turn, messages are not held forever.
-  setTimeout(() => release(pi, ctx), FIRST_TURN_WAIT_MS).unref?.()
+  // Should pi never start the first turn once its tools are in place,
+  // messages are not held forever.
+  void settled(pi, ctx).then(() => setTimeout(() => release(pi, ctx), FIRST_TURN_WAIT_MS).unref?.())
   const bridge = spawn(CREW_BIN, ["bridge", "--identity", IDENTITY], { env, stdio: ["ignore", "pipe", "ignore"] })
   let buffer = ""
   bridge.stdout.setEncoding("utf8")
@@ -185,14 +195,55 @@ function pump(pi: any, ctx: any): void {
   })
 }
 
-async function registerTools(pi: any): Promise<void> {
-  if (typeof pi.registerMcpServer === "function") {
-    pi.registerMcpServer("crew", {
+// The MCP servers crew registers: its own, then the toolbox's in name order.
+// A toolbox server says which tools to wait for; crew's own lists them all
+// at once (pi registers each listing in one go), so any of them will do.
+type Server = { name: string; required: boolean; config: object; tools?: string[] }
+const SERVERS: Server[] = [
+  {
+    name: "crew",
+    required: true,
+    config: {
       command: CREW_BIN,
       args: ["mcp", "--identity", IDENTITY],
-      exposure: "direct",
       description: "Your crew team: messages, tasks, reviews and git, as the briefing describes",
-    })
+    },
+  },
+  ...TOOLBOX_SERVERS.map(server => ({
+    name: server.name,
+    required: server.required,
+    config: { command: CREW_BIN, args: ["toolbox", "mcp", server.name, "--identity", IDENTITY] },
+    tools: server.tools,
+  })),
+]
+// How long the first request waits for each server to list its tools.
+// crew's proxy answers from the pinned snapshot, so only a server that
+// cannot start at all takes this long.
+const SERVER_WAIT_MS = 10_000
+// Started once per process; the first request, and every one after it,
+// waits for it.
+let settling: Promise<void> | undefined
+
+// Whether this pi lets crew put the tools in place before the first request.
+function orders(pi: any): boolean {
+  return typeof pi.getAllTools === "function" && typeof pi.setActiveTools === "function"
+}
+
+function register(pi: any, server: Server): boolean {
+  try {
+    pi.registerMcpServer(server.name, { ...server.config, exposure: "direct" })
+    return true
+  } catch {
+    // An invalid name, or one another server already has: pi says so.
+    return false
+  }
+}
+
+async function registerTools(pi: any): Promise<void> {
+  if (typeof pi.registerMcpServer === "function") {
+    // The toolbox's servers follow crew's one at a time (`settle`), unless
+    // this pi cannot be waited on.
+    for (const server of orders(pi) ? SERVERS.slice(0, 1) : SERVERS) register(pi, server)
     return
   }
   const listed = await run(["ctl", "tools"])
@@ -219,9 +270,149 @@ async function registerTools(pi: any): Promise<void> {
   }
 }
 
+// pi's group of a server's tools, and the name it gives a tool: both as its
+// MCP documentation says.
+function namespaceOf(server: string): string {
+  return `mcp__${server.replace(/-/g, "_")}`
+}
+
+function toolName(server: string, tool: string): string {
+  return `mcp__${server}__${tool}`.replace(/[^A-Za-z0-9_]/g, "_")
+}
+
+// The tools pi has registered for the server, not withdrawn.
+function toolsOf(pi: any, server: Server): string[] {
+  const namespace = namespaceOf(server.name)
+  return (pi.getAllTools() as ToolInfo[])
+    .filter(tool => tool.namespace?.name === namespace && tool.exposure !== "hidden")
+    .map(tool => tool.name)
+}
+
+// Whether every tool the server is expected to list is registered. A name
+// pi has to change (too long, or the same as another tool's) is counted
+// rather than looked for: pi gives it a suffix of its own.
+function listed(pi: any, server: Server, taken: Set<string>): boolean {
+  const present = toolsOf(pi, server)
+  if (server.tools === undefined) return present.length > 0
+  if (present.length < server.tools.length) return false
+  const names = server.tools.map(tool => toolName(server.name, tool))
+  return names.every(
+    name => name.length > 64 || taken.has(name) || names.indexOf(name) !== names.lastIndexOf(name) || present.includes(name),
+  )
+}
+
+async function arrived(pi: any, server: Server, taken: Set<string>): Promise<boolean> {
+  const deadline = Date.now() + SERVER_WAIT_MS
+  while (!listed(pi, server, taken)) {
+    if (Date.now() >= deadline) return false
+    await new Promise(resolve => setTimeout(resolve, 20))
+  }
+  return true
+}
+
+// pi connects MCP servers in the background and declares each one's tools
+// to the model as it connects: left alone, the tools follow the order in
+// which the servers happened to answer, a name two servers' tools share
+// goes to whichever answered first, and a server that answers late joins
+// after the first request. So crew registers its servers one at a time,
+// each once the one before has listed its tools, waits for all of them,
+// then declares the tools in its own order: pi's own and other extensions'
+// as they are, then crew's, then each toolbox server's in name order, then
+// any other server's, each server's tools by name. The same toolbox gives
+// the same tool list, byte for byte, on every start and restart.
+//
+// A required server (crew's own, or one the toolbox requires) that does not
+// list its tools in time ends the session before its first request; another
+// is left out of the session, and the daemon told.
+async function settle(pi: any, ctx: any): Promise<void> {
+  const ready: Server[] = []
+  const taken = new Set<string>()
+  for (const [index, server] of SERVERS.entries()) {
+    if (index > 0 && server.tools?.length === 0) {
+      // Nothing to declare and nothing to wait for.
+      register(pi, server)
+      continue
+    }
+    const registered = index === 0 || register(pi, server)
+    if (registered && (await arrived(pi, server, taken))) {
+      ready.push(server)
+      for (const name of toolsOf(pi, server)) taken.add(name)
+      continue
+    }
+    const why = registered
+      ? `${server.name} did not list its tools within ${SERVER_WAIT_MS / 1000} s`
+      : `pi did not take ${server.name} as an MCP server`
+    if (index > 0) {
+      report("toolbox-failed", {
+        server: server.name,
+        detail: server.required ? `${why}; it is required, so the session ended before its first request` : `${why}; the session runs without it`,
+      })
+    }
+    if (server.required) return stop(ctx, `${why}, and the session cannot run without it`)
+    // Its tools must not join the session later.
+    try {
+      pi.unregisterMcpServer?.(server.name)
+    } catch {
+      // never registered
+    }
+    notify(ctx, `${why}: the session runs without it.`, "warning")
+  }
+  const rank = new Map(ready.map((server, index) => [namespaceOf(server.name), index]))
+  const groups = new Map<string, string>()
+  for (const tool of pi.getAllTools() as ToolInfo[]) {
+    if (tool.namespace?.name !== undefined) groups.set(tool.name, tool.namespace.name)
+  }
+  const key = (name: string): [number, string, string] => {
+    const group = groups.get(name) ?? ""
+    return [rank.get(group) ?? ready.length, group, name]
+  }
+  const active: string[] = pi.getActiveTools()
+  const servers = active.filter(name => name.startsWith("mcp__"))
+  servers.sort((a, b) => {
+    const [x, y] = [key(a), key(b)]
+    return x[0] - y[0] || compare(x[1], y[1]) || compare(x[2], y[2])
+  })
+  const order = [...active.filter(name => !name.startsWith("mcp__")), ...servers]
+  if (order.some((name, index) => name !== active[index])) pi.setActiveTools(order)
+}
+
+// By code unit, the same in every locale.
+function compare(a: string, b: string): number {
+  return a < b ? -1 : a > b ? 1 : 0
+}
+
+function notify(ctx: any, text: string, kind: string): void {
+  try {
+    ctx.ui?.notify?.(`crew: ${text}`, kind)
+  } catch {
+    // no screen to say it on
+  }
+}
+
+// End the session without a request: nothing that waits for the tools is
+// let through, and pi exits (the daemon sees the member stop).
+function stop(ctx: any, why: string): Promise<void> {
+  notify(ctx, `${why}; ending the session before its first request.`, "error")
+  try {
+    ctx.shutdown()
+  } catch {
+    // the session is already going
+  }
+  return new Promise(() => {})
+}
+
+// The tools are in place (immediately on a pi that cannot be waited on).
+function settled(pi: any, ctx: any): Promise<void> {
+  settling ??= orders(pi) ? settle(pi, ctx) : Promise.resolve()
+  return settling
+}
+
 export default async function (pi: any): Promise<void> {
   await registerTools(pi)
   let pumping = false
+
+  // Every request waits until the tools are in place.
+  pi.on("before_agent_start", (_event: unknown, ctx: any) => settled(pi, ctx))
 
   pi.on("session_start", (_event: unknown, ctx: any) => {
     const manager = ctx.sessionManager
@@ -231,6 +422,7 @@ export default async function (pi: any): Promise<void> {
       ...modelOf(ctx),
     })
     lastModel = ""
+    void settled(pi, ctx)
     if (!pumping) {
       pumping = true
       pump(pi, ctx)

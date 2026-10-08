@@ -157,6 +157,15 @@ impl Daemon {
             }
             Signal::Compacted => self.context_compacted(id).await,
             Signal::CompactSkipped(why) => self.compact_skipped(id, &why),
+            Signal::ToolboxFailed { server, detail } => {
+                self.toolbox_report(
+                    id,
+                    &server,
+                    crew_core::rpc::ToolboxReportKind::Failed,
+                    &detail,
+                )
+                .await
+            }
             Signal::TurnFailed(what) => {
                 {
                     let mut model = self.model();

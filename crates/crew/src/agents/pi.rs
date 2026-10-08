@@ -20,6 +20,7 @@ use std::path::Path;
 
 use anyhow::Result;
 use crew_core::paths::{write_private_file, IDENTITY_ENV};
+use crew_core::toolbox::{Item, ItemKind, ItemRef, Resolved};
 use crew_core::util::{one_line, truncate_chars};
 use crew_core::RuntimeKind;
 use serde_json::{json, Value};
@@ -315,15 +316,45 @@ pub fn check_installed() -> Result<(), String> {
     program().map(|_| ())
 }
 
-/// Write the crew extension for an agent and return its path.
+/// Write the crew extension for an agent and return its path. `toolbox` is
+/// the member's resolved toolbox and `servers` its MCP servers to start, in
+/// name order, each pinned in `agent_dir`.
 fn write_extension(
     agent_dir: &Path,
     crew_bin: &Path,
     identity: &Path,
+    toolbox: &Resolved,
+    servers: &[String],
 ) -> Result<std::path::PathBuf> {
     let path = agent_dir.join(EXTENSION_FILE);
-    // The two paths are embedded as JSON string literals, which are valid
-    // TypeScript string literals.
+    // Each server with whether the member may start without it and the
+    // names of the tools its pinned snapshot serves: the extension waits for
+    // those before the first request. A server without a snapshot serves
+    // none.
+    let toolbox: Vec<Value> = servers
+        .iter()
+        .map(|name| {
+            let required = matches!(
+                toolbox.items.get(&ItemRef::new(ItemKind::Mcp, name)).map(|entry| &entry.item),
+                Some(Item::Mcp(server)) if server.required
+            );
+            let snapshot = crate::mcp::proxy::snapshot_path(agent_dir, name);
+            let tools: Vec<Value> = crate::mcp::proxy::Snapshot::load(&snapshot)
+                .ok()
+                .flatten()
+                .map(|snapshot| {
+                    snapshot
+                        .tools
+                        .iter()
+                        .filter_map(|tool| tool.get("name").cloned())
+                        .collect()
+                })
+                .unwrap_or_default();
+            json!({ "name": name, "required": required, "tools": tools })
+        })
+        .collect();
+    // The two paths and the servers are embedded as JSON literals, which are
+    // valid TypeScript literals.
     let source = EXTENSION
         .replace(
             "__CREW_BIN__",
@@ -332,7 +363,8 @@ fn write_extension(
         .replace(
             "__IDENTITY__",
             &json!(identity.to_string_lossy()).to_string(),
-        );
+        )
+        .replace("__TOOLBOX_SERVERS__", &Value::Array(toolbox).to_string());
     write_private_file(&path, source.as_bytes())?;
     Ok(path)
 }
@@ -345,7 +377,18 @@ impl AgentRuntime for PiRuntime {
     fn launch(&self, ctx: &LaunchContext<'_>) -> Result<LaunchSpec> {
         let briefing_path = ctx.agent_dir.join("briefing.md");
         write_private_file(&briefing_path, ctx.briefing.as_bytes())?;
-        let extension = write_extension(ctx.agent_dir, ctx.crew_bin, ctx.identity_path)?;
+        let servers = ctx
+            .settings
+            .toolbox_launch
+            .as_ref()
+            .map_or(&[][..], |toolbox| &toolbox.servers[..]);
+        let extension = write_extension(
+            ctx.agent_dir,
+            ctx.crew_bin,
+            ctx.identity_path,
+            &ctx.settings.toolbox,
+            servers,
+        )?;
         // In a sandbox pi's own directory and its sessions live in the agent's
         // writable tree (`<A>/rw`); the daemon makes that directory through the
         // agent root descriptor, never by walking the path here.
@@ -519,6 +562,16 @@ impl AgentRuntime for PiRuntime {
                 vec![Signal::CompactSkipped(why)]
             }
             "exiting" => vec![Signal::Exiting],
+            // A toolbox server the extension went on without, or ended the
+            // session over, before the first request.
+            "toolbox-failed" => match str_field(payload, "server") {
+                Some(server) => vec![Signal::ToolboxFailed {
+                    server,
+                    detail: str_field(payload, "detail")
+                        .unwrap_or_else(|| "no reason given".to_string()),
+                }],
+                None => Vec::new(),
+            },
             _ => Vec::new(),
         }
     }
