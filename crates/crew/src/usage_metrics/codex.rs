@@ -888,4 +888,34 @@ mod tests {
             "a compaction while foreign is not ours"
         );
     }
+
+    #[test]
+    fn a_child_rollout_is_identified_by_its_own_thread_id_not_the_inherited_session_id() {
+        // Codex 0.159 child rollouts (crates/crew/tests/fixtures/codex-child):
+        // session_meta.id names the child, session_id is the parent's.
+        let child_meta = |id: &str, session: &str| json!({"type": "session_meta", "payload": {"id": id, "session_id": session}});
+        let own = decode_all(
+            RuntimeKind::Codex,
+            "child-1",
+            &[
+                child_meta("child-1", "parent-1"),
+                turn("gpt-6-luna", "t1"),
+                tc(0, v(100, 80, 10), Some(v(100, 80, 10))),
+            ],
+        );
+        assert_eq!(observations(&own).len(), 1);
+        let as_parent = decode_all(
+            RuntimeKind::Codex,
+            "parent-1",
+            &[
+                child_meta("child-1", "parent-1"),
+                turn("gpt-6-luna", "t1"),
+                tc(0, v(100, 80, 10), Some(v(100, 80, 10))),
+            ],
+        );
+        assert!(
+            observations(&as_parent).is_empty(),
+            "the parent is not charged the child's usage"
+        );
+    }
 }
