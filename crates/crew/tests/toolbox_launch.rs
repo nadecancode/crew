@@ -27,6 +27,54 @@ fn read_json(path: &Path) -> Option<Value> {
     serde_json::from_slice(&std::fs::read(path).ok()?).ok()
 }
 
+/// Parse every -c value from an actual captured member launch, including
+/// app-server-only permission overrides. `mcp list` loads native configuration
+/// without opening a model session or making an inference request.
+fn native_codex_parses_all_overrides(record: &Value, process: &str) {
+    let Ok(binary) = std::env::var("CREW_TEST_CODEX_BINARY") else {
+        return;
+    };
+    let args: Vec<_> = record["args"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|arg| arg.as_str().unwrap())
+        .collect();
+    let overrides: Vec<_> = args
+        .windows(2)
+        .filter(|pair| pair[0] == "-c" || pair[0] == "--config")
+        .flat_map(|pair| pair.iter().copied())
+        .collect();
+    assert!(!overrides.is_empty());
+    let mut command = std::process::Command::new(binary);
+    command
+        .env_clear()
+        .env("PATH", std::env::var_os("PATH").unwrap_or_default());
+    for name in ["HOME", "CODEX_HOME"] {
+        if let Some(value) = record["env"][name].as_str() {
+            command.env(name, value);
+        }
+    }
+    let output = command
+        .current_dir(record["cwd"].as_str().unwrap())
+        .args(&overrides)
+        .args(["mcp", "list", "--json"])
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "Codex rejected {process} -c values: {}",
+        stderr(&output)
+    );
+    assert!(serde_json::from_slice::<Value>(&output.stdout)
+        .unwrap()
+        .is_array());
+    eprintln!(
+        "native Codex accepted all {} {process} overrides",
+        overrides.len() / 2
+    );
+}
+
 impl Fixture {
     fn new() -> Self {
         let session = Session::new();
@@ -281,6 +329,12 @@ fn codex_closes_ambient_servers_on_both_processes_and_sets_roots_before_tui() {
             "---\nname: selected\ndescription: Selected.\n---\nBODY\n",
         );
         let native_home = s.root().join("codex-home");
+        for path in [
+            s.root().join("home/.agents/skills/operator/SKILL.md"),
+            native_home.join("skills/home/SKILL.md"),
+        ] {
+            write(&path, "---\nname: operator_fixture\ndescription: Excluded operator skill.\n---\nPRIVATE_FIXTURE\n");
+        }
         let ambient = ["ambient", "dot.name", "two words", "quote\"name"];
         let operator_config = ambient
             .iter()
@@ -330,7 +384,8 @@ fn codex_closes_ambient_servers_on_both_processes_and_sets_roots_before_tui() {
         assert!(std::fs::read_to_string(Path::new(root).join("SKILL.md"))
             .unwrap()
             .contains("BODY"));
-        for record in [tui, server] {
+        for (process, record) in [("TUI", tui), ("app-server", server)] {
+            native_codex_parses_all_overrides(&record, process);
             for name in ["TOOLBOX_ALIAS", "TOOLBOX_ALIAS_SOURCE", "DEST"] {
                 assert!(
                     record["env"].get(name).is_none(),
@@ -340,6 +395,12 @@ fn codex_closes_ambient_servers_on_both_processes_and_sets_roots_before_tui() {
             let args = record["args"].as_array().unwrap();
             assert!(args.contains(&json!("mcp_servers.crew.enabled=true")));
             if !sandboxed {
+                assert!(
+                    args.iter()
+                        .filter_map(Value::as_str)
+                        .any(|arg| arg.starts_with("skills.config=[")),
+                    "fixture must exercise the array-of-tables override"
+                );
                 let patch = args
                     .iter()
                     .filter_map(Value::as_str)

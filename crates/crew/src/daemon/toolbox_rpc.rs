@@ -371,10 +371,9 @@ what you have"
         Ok(Some(out))
     }
 
-    /// Hand a new subagent what `subagent_toolbox` chose. Its MCP catalog is
-    /// the frozen copies that came with that choice (`mcp_snapshots`, taken
-    /// when the parent launched); each of its launches restores its pins
-    /// from them, never from the parent's own files.
+    /// Hand a new subagent the immutable snapshot references captured by
+    /// subagent_toolbox, before agent creation or any await. The launch uses
+    /// those bytes; it never consults the parent's mutable pin files.
     pub(crate) fn give_subagent_toolbox(
         &self,
         child: &str,
@@ -553,6 +552,35 @@ mod frozen_snapshot_tests {
     use super::*;
     use serde_json::json;
 
+    struct Cleanup(std::path::PathBuf);
+    impl Drop for Cleanup {
+        fn drop(&mut self) {
+            if let Ok(parent) = std::fs::File::open(self.0.join("toolbox")) {
+                let _ =
+                    crate::agents::toolbox::store::remove(&parent, std::path::Path::new("store"));
+            }
+        }
+    }
+
+    fn freeze(daemon: &Daemon, store: &crate::agents::toolbox::store::Store, name: &str) {
+        let snapshot = store
+            .snapshot(&crate::mcp::proxy::snapshot_path(
+                &daemon.agent_dir("parent"),
+                name,
+            ))
+            .unwrap();
+        daemon
+            .model()
+            .local
+            .get_mut("parent")
+            .unwrap()
+            .toolbox_active
+            .as_mut()
+            .unwrap()
+            .mcp_snapshots
+            .insert(name.into(), snapshot);
+    }
+
     fn listing(description: &str) -> serde_json::Value {
         json!({
             "initialize": { "protocolVersion": "2025-06-18", "capabilities": { "tools": {} } },
@@ -560,66 +588,151 @@ mod frozen_snapshot_tests {
         })
     }
 
-    /// T11 / T07: a subagent's catalog is the frozen copy its parent had
-    /// when the parent launched, carried with the choice itself. The parent
-    /// pinning another catalog afterwards (a restart, a reload), even between
-    /// the choice and the hand-over, changes nothing the subagent gets.
+    /// T11 / T07: a subagent's catalog is the one its parent had when it was
+    /// spawned. The parent pinning another (a restart, a reload) changes
+    /// nothing the subagent serves, now or at its own restarts.
     #[tokio::test]
-    async fn a_subagent_keeps_the_catalog_its_parent_had_whatever_the_parent_pins_later() {
+    async fn a_subagent_keeps_the_catalog_its_parent_had_at_spawn() {
+        for selection in [None, Some(vec!["web".to_string()])] {
+            let (_temp, running) = daemon().await;
+            let daemon = &running.daemon;
+            let _cleanup = Cleanup(daemon.state_dir.clone());
+            let store = crate::agents::toolbox::store::Store::open(&daemon.state_dir).unwrap();
+            let active = parent_runs_with(daemon, team(TEAM));
+            let server = |name: &str| match &active.resolved.items
+                [&crew_core::toolbox::ItemRef::new(ItemKind::Mcp, name)]
+                .item
+            {
+                Item::Mcp(server) => crate::mcp::proxy::definition_hash(server),
+                _ => unreachable!(),
+            };
+            let parent_dir = daemon.agent_dir("parent");
+            daemon.agent_root("parent").unwrap();
+            daemon.agent_root("child").unwrap();
+            crate::mcp::proxy::pin(
+                &parent_dir,
+                "context7",
+                &server("context7"),
+                &listing("Old."),
+                true,
+            )
+            .unwrap();
+            freeze(daemon, &store, "context7");
+            crate::mcp::proxy::pin(
+                &parent_dir,
+                "manual",
+                &server("manual"),
+                &listing("Manual."),
+                true,
+            )
+            .unwrap();
+            freeze(daemon, &store, "manual");
+            // Both the default and selected-bundle paths capture immutable refs
+            // before create_agent can await. Replace the parent's live pin in
+            // that precise gap, before give_subagent_toolbox.
+            let subset = selection.is_some();
+            let copy = daemon
+                .subagent_toolbox("parent", selection)
+                .unwrap()
+                .unwrap();
+            assert_eq!(copy.mcp_snapshots.len(), if subset { 1 } else { 2 });
+            assert_eq!(copy.mcp_snapshots.contains_key("manual"), !subset);
+            crate::mcp::proxy::pin(
+                &parent_dir,
+                "context7",
+                &server("context7"),
+                &listing("New."),
+                true,
+            )
+            .unwrap();
+            freeze(daemon, &store, "context7");
+            daemon.give_subagent_toolbox("child", Some(copy)).unwrap();
+            let inherited = daemon.model().local["child"]
+                .toolbox_inherited
+                .clone()
+                .unwrap();
+            crate::agents::toolbox::restore_inherited_mcp(
+                &store,
+                &daemon.agent_dir("child"),
+                "context7",
+                &server("context7"),
+                &inherited,
+            )
+            .unwrap();
+            let child_pin =
+                crate::mcp::proxy::snapshot_path(&daemon.agent_dir("child"), "context7");
+            let frozen = std::fs::read_to_string(&child_pin).unwrap();
+            assert!(frozen.contains("Old."), "{frozen}");
+            // Restoring one server never copies another server implicitly.
+            assert!(
+                !crate::mcp::proxy::snapshot_path(&daemon.agent_dir("child"), "manual").exists()
+            );
+
+            // A different parent definition cannot break the child's valid pin
+            // or change what a later child crash/resume serves.
+            crate::mcp::proxy::pin(
+                &parent_dir,
+                "context7",
+                &"f".repeat(64),
+                &listing("Different server."),
+                true,
+            )
+            .unwrap();
+            let resumed: ActiveToolbox =
+                serde_json::from_slice(&serde_json::to_vec(&inherited).unwrap()).unwrap();
+            assert_eq!(
+                crate::agents::toolbox::restore_inherited_mcp(
+                    &store,
+                    &daemon.agent_dir("child"),
+                    "context7",
+                    &server("context7"),
+                    &resumed
+                )
+                .unwrap(),
+                crate::mcp::proxy::PinOutcome::Kept
+            );
+            assert_eq!(std::fs::read_to_string(&child_pin).unwrap(), frozen);
+        }
+    }
+
+    #[tokio::test]
+    async fn an_inherited_snapshot_for_another_definition_is_refused() {
         let (_temp, running) = daemon().await;
         let daemon = &running.daemon;
-        let mut active = parent_runs_with(daemon, team(TEAM));
-        let definition = match &active.resolved.items
+        let _cleanup = Cleanup(daemon.state_dir.clone());
+        let store = crate::agents::toolbox::store::Store::open(&daemon.state_dir).unwrap();
+        let active = parent_runs_with(daemon, team(TEAM));
+        let expected = match &active.resolved.items
             [&crew_core::toolbox::ItemRef::new(ItemKind::Mcp, "context7")]
             .item
         {
             Item::Mcp(server) => crate::mcp::proxy::definition_hash(server),
             _ => unreachable!(),
         };
-        // The parent's launch pinned `context7` and froze that pin.
         daemon.agent_root("parent").unwrap();
-        let parent_dir = daemon.agent_dir("parent");
-        crate::mcp::proxy::pin(&parent_dir, "context7", &definition, &listing("Old."), true)
-            .unwrap();
-        let store = crate::agents::toolbox::store::Store::open(&daemon.state_dir).unwrap();
-        let frozen = store
-            .snapshot(&crate::mcp::proxy::snapshot_path(&parent_dir, "context7"))
-            .unwrap();
-        active
-            .mcp_snapshots
-            .insert("context7".into(), frozen.clone());
-        daemon
-            .model()
-            .local
-            .get_mut("parent")
-            .unwrap()
-            .toolbox_active = Some(active);
-
-        for selection in [None, Some(vec!["web".to_string()])] {
-            let chosen = daemon
-                .subagent_toolbox("parent", selection.clone())
-                .unwrap()
-                .unwrap();
-            // The parent restarts between the choice and the hand-over.
-            crate::mcp::proxy::pin(&parent_dir, "context7", &definition, &listing("New."), true)
-                .unwrap();
-            daemon.give_subagent_toolbox("child", Some(chosen)).unwrap();
-            let inherited = daemon.model().local["child"]
-                .toolbox_inherited
-                .clone()
-                .unwrap();
-            assert_eq!(
-                inherited.mcp_snapshots.get("context7"),
-                Some(&frozen),
-                "{selection:?}"
-            );
-            // Only the chosen bundles' servers come along.
-            assert!(
-                !inherited.mcp_snapshots.contains_key("manual"),
-                "{selection:?}"
-            );
-            crate::mcp::proxy::pin(&parent_dir, "context7", &definition, &listing("Old."), true)
-                .unwrap();
-        }
+        daemon.agent_root("child").unwrap();
+        crate::mcp::proxy::pin(
+            &daemon.agent_dir("parent"),
+            "context7",
+            &"f".repeat(64),
+            &listing("Other."),
+            true,
+        )
+        .unwrap();
+        freeze(daemon, &store, "context7");
+        let copy = daemon.subagent_toolbox("parent", None).unwrap().unwrap();
+        let refused = crate::agents::toolbox::restore_inherited_mcp(
+            &store,
+            &daemon.agent_dir("child"),
+            "context7",
+            &expected,
+            &copy,
+        )
+        .unwrap_err()
+        .to_string();
+        assert!(
+            refused.contains("does not match context7's definition"),
+            "{refused}"
+        );
     }
 }

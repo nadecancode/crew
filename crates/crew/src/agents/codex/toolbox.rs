@@ -108,7 +108,9 @@ pub(crate) async fn set_skill_roots(socket: &Path, roots: &[PathBuf]) -> Result<
                 connection.send(Message::Text(json!({"method":"initialized"}).to_string().into())).await?;
             }
         }
-        connection.close(None).await?;
+        // Configuration is committed once acknowledged. A peer closing the
+        // setup connection immediately afterwards does not undo that result.
+        let _ = connection.close(None).await;
         Ok(())
     })
     .await

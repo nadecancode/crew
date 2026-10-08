@@ -169,8 +169,10 @@ mod tests {
         let definition = "a".repeat(64);
         let listing = |name| json!({"initialize":{"capabilities":{"tools":{}},"instructions":"Frozen instructions"},"tools":[{"name":name,"inputSchema":{"type":"object"}}]});
         pin(&parent, "docs", &definition, &listing("old_tool"), true).unwrap();
-        let mut active = ActiveToolbox::default();
-        active.snapshot_owner = Some("parent".into());
+        let mut active = ActiveToolbox {
+            snapshot_owner: Some("parent".into()),
+            ..ActiveToolbox::default()
+        };
         active.mcp_snapshots.insert(
             "docs".into(),
             store.snapshot(&snapshot_path(&parent, "docs")).unwrap(),
