@@ -53,6 +53,7 @@ export function AgentNode(props: NodeEvents & {
   const model = () => runningLabel(a());
   const ctx = () => a().context;
   const unread = () => a().inbox_unread;
+  const attention = () => toolboxAttention(a().toolbox);
 
   return (
     <g
@@ -60,7 +61,7 @@ export function AgentNode(props: NodeEvents & {
       classList={{ selected: props.selected, paused: a().paused, provider: !!providerError(a()), limited: !!a().limit, asking: props.asking }}
       data-agent={a().id}
       role="button"
-      aria-label={`${a().id}, ${a().status}${toolboxAttention(a().toolbox) ? `, ${toolboxAttention(a().toolbox)}` : ""}`}
+      aria-label={[a().id, a().status, attention()].filter(Boolean).join(", ")}
       tabindex={props.tabStop ? 0 : -1}
       transform={`translate(${props.box.x} ${props.box.y})`}
       onPointerDown={props.onDown}
@@ -96,7 +97,7 @@ export function AgentNode(props: NodeEvents & {
             <Show when={a().compact_pending}><span class="badge" title="compaction queued" aria-label="compaction queued">C</span></Show>
             <Show when={badge(a())}><span class="badge">{badge(a())}</span></Show>
             <Show when={pending()}><span class="badge pending" title="waiting for the daemon">…</span></Show>
-            <Show when={toolboxAttention(a().toolbox)}>{(why) => <span class="badge att" title={why()} aria-label={why()}>!</span>}</Show>
+            {attention() && <span class="badge att" title={attention()!} aria-label={attention()!}>!</span>}
           </div>
           <Show when={!props.satellite}>
             <div class="node-row">

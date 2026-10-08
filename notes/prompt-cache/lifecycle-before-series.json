@@ -1,0 +1,3353 @@
+{
+  "all_attempt_cost_usd_lower": 5.8561288000000005,
+  "all_attempt_cost_usd_upper": 5.9372331,
+  "attempts": [
+    {
+      "cleanup": {
+        "remaining_processes": [],
+        "stop_returncode": 0
+      },
+      "cost_usd_lower": 0.40448504,
+      "cost_usd_upper": 0.41223908000000004,
+      "error": "no new native usage for 90 seconds; refusing an unmetered run",
+      "finished_at": "2026-10-08T04:50:36.996451+00:00",
+      "included": false,
+      "label": "lifecycle-before-1",
+      "path": "target/cache-bench/lifecycle-before-1",
+      "report_sha256": "d638d9cdf11afbc29c75bf96c00a51340f2c4fe9bb26ee72547acfb230540cc6",
+      "started_at": "2026-10-08T04:45:01.731786+00:00",
+      "status": "error"
+    },
+    {
+      "cleanup": {
+        "remaining_processes": [],
+        "stop_returncode": 0
+      },
+      "cost_usd_lower": 0.45290424,
+      "cost_usd_upper": 0.46124088,
+      "error": "mid-turn delivery was not observed as a native folded row",
+      "finished_at": "2026-10-08T05:00:04.897649+00:00",
+      "included": false,
+      "label": "lifecycle-baseline-01",
+      "path": "target/cache-bench/lifecycle-baseline-01",
+      "report_sha256": "ab9cd081c002a8a0f6bcea4bc643e232f5faa8f39c1b78c1a956e0b4421d70c9",
+      "started_at": "2026-10-08T04:56:12.936105+00:00",
+      "status": "error"
+    },
+    {
+      "cleanup": {
+        "remaining_processes": [],
+        "stop_returncode": 0
+      },
+      "cost_usd_lower": 0.69576996,
+      "cost_usd_upper": 0.70623242,
+      "error": "no new native usage for 90 seconds; refusing an unmetered run",
+      "finished_at": "2026-10-08T05:15:11.769452+00:00",
+      "included": false,
+      "label": "lifecycle-baseline-a",
+      "path": "target/cache-bench/lifecycle-baseline-a",
+      "report_sha256": "49fb17cf6f2df0942473a90f521997d244ed2973d5e3bed76fa6e451b974f0de",
+      "started_at": "2026-10-08T05:04:49.355693+00:00",
+      "status": "error"
+    },
+    {
+      "cleanup": {
+        "remaining_processes": [],
+        "stop_returncode": 0
+      },
+      "cost_usd_lower": 0.7940538800000001,
+      "cost_usd_upper": 0.8037389100000001,
+      "error": "interrupted",
+      "finished_at": "2026-10-08T05:20:16.122737+00:00",
+      "included": false,
+      "label": "lifecycle-baseline-b",
+      "path": "target/cache-bench/lifecycle-baseline-b",
+      "report_sha256": "0ed111f716379d37058d46c2cc23a787b9c8bd3b07b7964d6cb13f3ac880c539",
+      "started_at": "2026-10-08T05:12:36.369444+00:00",
+      "status": "error"
+    },
+    {
+      "cleanup": {
+        "remaining_processes": [],
+        "stop_returncode": 0
+      },
+      "cost_usd_lower": 0.7548860000000001,
+      "cost_usd_upper": 0.7629767000000001,
+      "error": "interrupted",
+      "finished_at": "2026-10-08T05:20:16.029875+00:00",
+      "included": false,
+      "label": "lifecycle-baseline-c",
+      "path": "target/cache-bench/lifecycle-baseline-c",
+      "report_sha256": "616b6dc07ab0d6cc93ebf3b4ab3f80adb0179510e1a40c416f156d68ef0acad9",
+      "started_at": "2026-10-08T05:12:58.442359+00:00",
+      "status": "error"
+    },
+    {
+      "cleanup": {
+        "remaining_processes": [],
+        "stop_returncode": 0
+      },
+      "cost_usd_lower": 0.8936985999999999,
+      "cost_usd_upper": 0.9086294499999998,
+      "error": null,
+      "finished_at": "2026-10-08T06:34:28.905404+00:00",
+      "included": true,
+      "label": "lifecycle-final-01",
+      "path": "target/cache-bench/lifecycle-final-01",
+      "report_sha256": "eac96bdc06a80e957db1f186baa26755e1b8b9cd7d56941b33fa23c6056384ab",
+      "started_at": "2026-10-08T05:21:59.751643+00:00",
+      "status": "complete"
+    },
+    {
+      "cleanup": {
+        "remaining_processes": [],
+        "stop_returncode": 0
+      },
+      "cost_usd_lower": 0.16025084,
+      "cost_usd_upper": 0.16369218,
+      "error": "[Errno 2] No such file or directory: '/home/nade/workspaces/personal/crew/.crew/worktrees/qa/target/cache-bench/lifecycle-final-02/workspace/.crew/worktrees/claude-worker/warm-claude.txt'",
+      "finished_at": "2026-10-08T05:29:30.845454+00:00",
+      "included": false,
+      "label": "lifecycle-final-02",
+      "path": "target/cache-bench/lifecycle-final-02",
+      "report_sha256": "ab313a45689b165f9b457e5a30a736fb3c8ec40f97b720247f8ee9ea82238fd8",
+      "started_at": "2026-10-08T05:28:30.233572+00:00",
+      "status": "error"
+    },
+    {
+      "cleanup": {
+        "remaining_processes": [],
+        "stop_returncode": 0
+      },
+      "cost_usd_lower": 0.8641269400000001,
+      "cost_usd_upper": 0.8716149800000002,
+      "error": null,
+      "finished_at": "2026-10-08T05:39:20.509233+00:00",
+      "included": true,
+      "label": "lifecycle-final-03",
+      "path": "target/cache-bench/lifecycle-final-03",
+      "report_sha256": "5a28ee2a011a46dd08d8805375806ce734fddcbe3019190b31be3bcacabb174e",
+      "started_at": "2026-10-08T05:28:31.387583+00:00",
+      "status": "complete"
+    },
+    {
+      "cleanup": {
+        "remaining_processes": [],
+        "stop_returncode": 0
+      },
+      "cost_usd_lower": 0.8359533000000002,
+      "cost_usd_upper": 0.8468685000000002,
+      "error": null,
+      "finished_at": "2026-10-08T05:46:47.519849+00:00",
+      "included": true,
+      "label": "lifecycle-final-02r",
+      "path": "target/cache-bench/lifecycle-final-02r",
+      "report_sha256": "ee78bf90e47cf0d0e1f573aa151e3aedccae68c34ff6999556a7d238a1d02ab2",
+      "started_at": "2026-10-08T05:36:07.585354+00:00",
+      "status": "complete"
+    }
+  ],
+  "attribution": "Step-aligned native usage; generated and persisted-native hashes are not provider wire-prefix proof",
+  "behavior_checkpoint": "ffbeb0be67314ff589284b8f8397517301fbfa56",
+  "comparison": "Three completed before samples only; no after sample or improvement claim",
+  "completed_cost_usd_lower": 2.59377884,
+  "completed_cost_usd_upper": 2.62711293,
+  "crew_sha256": "ea4e6f127328cd9d679c62c9a1cc7bd6f72c6cdecd2703892962c5a7ea95ed19",
+  "native_session_storage": "operator-cli-homes",
+  "runner_files_sha256": {
+    "bench": "022914a8cd17ca403c75c605a35b5941bb329b1b5d17fe2d23507a38b498c7ea",
+    "bench.py": "82f399327d6b28eb21f7dc9847002e8011cf6432b2b62a6af68bb497eaf85e29",
+    "lifecycle.py": "a2324463c46a5145243fdf2bf1efcb16843db18818d23c3b2ea676f22fb9326b",
+    "usage.py": "9a67ad4ceb5c4673887a7319c4c7d7e3cd5e9431aeeef989ebc86811e638a234"
+  },
+  "samples": [
+    {
+      "agents": [
+        {
+          "agent": "orchestrator",
+          "cached_tokens": 826474,
+          "cost_usd_lower": 0.1927044,
+          "cost_usd_upper": 0.1927044,
+          "hit_rate": 0.9473252264654201,
+          "input_tokens": 872429,
+          "models": [
+            "claude-haiku-4-5-20251001"
+          ],
+          "request_count": 20,
+          "runtime": "claude",
+          "session_id": "8bea5d11-2222-402a-bd28-21c907f279de",
+          "source_path": "/home/nade/.claude/projects/-home-nade-workspaces-personal-crew--crew-worktrees-qa-target-cache-bench-lifecycle-final-01-workspace/8bea5d11-2222-402a-bd28-21c907f279de.jsonl"
+        },
+        {
+          "agent": "claude-worker",
+          "cached_tokens": 3225075,
+          "cost_usd_lower": 0.6889414999999999,
+          "cost_usd_upper": 0.6889414999999999,
+          "hit_rate": 0.9541444407956048,
+          "input_tokens": 3380070,
+          "models": [
+            "claude-haiku-4-5-20251001"
+          ],
+          "request_count": 67,
+          "runtime": "claude",
+          "session_id": "6ba7c9c9-43e5-4ccb-ab55-8b6fa4c18128",
+          "source_path": "/home/nade/.claude/projects/-home-nade-workspaces-personal-crew--crew-worktrees-qa-target-cache-bench-lifecycle-final-01-workspace--crew-worktrees-claude-worker/6ba7c9c9-43e5-4ccb-ab55-8b6fa4c18128.jsonl"
+        },
+        {
+          "agent": "codex-worker",
+          "cached_tokens": 586240,
+          "cost_usd_lower": 0.012052700000000001,
+          "cost_usd_upper": 0.026983549999999995,
+          "hit_rate": 0.9105891087801703,
+          "input_tokens": 643803,
+          "models": [
+            "gpt-6-luna"
+          ],
+          "request_count": 26,
+          "runtime": "codex",
+          "session_id": "01a119f6-1996-7a21-91c6-45a47fae3617",
+          "source_path": "/home/nade/.codex/sessions/2026/10/08/rollout-2026-10-08T00-22-01-01a119f6-1996-7a21-91c6-45a47fae3617.jsonl"
+        }
+      ],
+      "cached_tokens": 4637789,
+      "cleanup": {
+        "remaining_processes": [],
+        "stop_returncode": 0
+      },
+      "cost_usd_lower": 0.8936985999999999,
+      "cost_usd_upper": 0.9086294499999998,
+      "duration_seconds": 4349.153778625652,
+      "finished_at": "2026-10-08T06:34:28.905404+00:00",
+      "hit_rate": 0.9472023988716383,
+      "input_tokens": 4896302,
+      "label": "lifecycle-final-01",
+      "report": "notes/prompt-cache/lifecycle-before-01.json",
+      "report_sha256": "eac96bdc06a80e957db1f186baa26755e1b8b9cd7d56941b33fa23c6056384ab",
+      "requests": 113,
+      "started_at": "2026-10-08T05:21:59.751643+00:00",
+      "step_observations": [
+        {
+          "agents": {
+            "claude-worker": {
+              "cache_read_tokens": 349024,
+              "cost_usd_lower": 0.0787064,
+              "cost_usd_upper": 0.0787064,
+              "first_request": {
+                "cached_tokens": 23940,
+                "hit_rate": 0.6129032258064516,
+                "input_tokens": 39060,
+                "request_id": "req_011CfpD6ubg42hAHbCdTeQ7s",
+                "timestamp": "2026-10-08T05:22:05.919Z",
+                "uncached_tokens": 10,
+                "write_tokens": 15110
+              },
+              "hit_rate": 0.9511331058764538,
+              "input_tokens": 366956,
+              "requests": 9,
+              "uncached_input_tokens": 17932
+            },
+            "codex-worker": {
+              "cache_read_tokens": 156928,
+              "cost_usd_lower": 0.00236148,
+              "cost_usd_upper": 0.00505956,
+              "first_request": {
+                "cached_tokens": 20224,
+                "hit_rate": 0.9762973690562394,
+                "input_tokens": 20715,
+                "request_id": null,
+                "timestamp": "2026-10-08T05:22:03.343Z",
+                "uncached_tokens": 491,
+                "write_tokens": null
+              },
+              "hit_rate": 0.9588659415862153,
+              "input_tokens": 163660,
+              "requests": 7,
+              "uncached_input_tokens": 6732
+            },
+            "orchestrator": {
+              "cache_read_tokens": 271353,
+              "cost_usd_lower": 0.0699213,
+              "cost_usd_upper": 0.0699213,
+              "first_request": {
+                "cached_tokens": 23715,
+                "hit_rate": 0.5887537239324727,
+                "input_tokens": 40280,
+                "request_id": "req_011CfpD6uCsLH25x98785aJL",
+                "timestamp": "2026-10-08T05:22:05.365Z",
+                "uncached_tokens": 10,
+                "write_tokens": 16555
+              },
+              "hit_rate": 0.9349552597758337,
+              "input_tokens": 290231,
+              "requests": 7,
+              "uncached_input_tokens": 18878
+            }
+          },
+          "ended_at": "2026-10-08T05:22:50.147415+00:00",
+          "kind": "warm",
+          "started_at": "2026-10-08T05:22:00.093466+00:00",
+          "step": "warm"
+        },
+        {
+          "agents": {
+            "claude-worker": {
+              "cache_read_tokens": 214783,
+              "cost_usd_lower": 0.0281123,
+              "cost_usd_upper": 0.0281123,
+              "first_request": {
+                "cached_tokens": 42036,
+                "hit_rate": 0.9888729445529182,
+                "input_tokens": 42509,
+                "request_id": "req_011CfpDAa6XJBfMRGXcJoE1v",
+                "timestamp": "2026-10-08T05:22:54.288Z",
+                "uncached_tokens": 10,
+                "write_tokens": 463
+              },
+              "hit_rate": 0.9909341724029749,
+              "input_tokens": 216748,
+              "requests": 5,
+              "uncached_input_tokens": 1965
+            },
+            "codex-worker": {
+              "cache_read_tokens": 0,
+              "cost_usd_lower": 0,
+              "cost_usd_upper": 0,
+              "first_request": null,
+              "hit_rate": null,
+              "input_tokens": 0,
+              "requests": 0,
+              "uncached_input_tokens": 0
+            },
+            "orchestrator": {
+              "cache_read_tokens": 0,
+              "cost_usd_lower": 0,
+              "cost_usd_upper": 0,
+              "first_request": null,
+              "hit_rate": null,
+              "input_tokens": 0,
+              "requests": 0,
+              "uncached_input_tokens": 0
+            }
+          },
+          "briefing": {
+            "after": {
+              "bytes": 8783,
+              "sha256": "8f47b279faccf0cfe1fb9434fc45293b5dd2161f2fc0b0ab2fe8bb1e95b1fc42"
+            },
+            "before": {
+              "bytes": 8783,
+              "sha256": "8f47b279faccf0cfe1fb9434fc45293b5dd2161f2fc0b0ab2fe8bb1e95b1fc42"
+            },
+            "changed": false,
+            "common_prefix_bytes": 8783,
+            "scope": "Crew briefing file only; not the provider's full effective prompt"
+          },
+          "ended_at": "2026-10-08T05:23:07.818044+00:00",
+          "kind": "restart",
+          "started_at": "2026-10-08T05:22:51.171397+00:00",
+          "step": "same-briefing-claude-worker"
+        },
+        {
+          "agents": {
+            "claude-worker": {
+              "cache_read_tokens": 0,
+              "cost_usd_lower": 0,
+              "cost_usd_upper": 0,
+              "first_request": null,
+              "hit_rate": null,
+              "input_tokens": 0,
+              "requests": 0,
+              "uncached_input_tokens": 0
+            },
+            "codex-worker": {
+              "cache_read_tokens": 69888,
+              "cost_usd_lower": 0.00105178,
+              "cost_usd_upper": 0.00225901,
+              "first_request": {
+                "cached_tokens": 23296,
+                "hit_rate": 0.9634408602150538,
+                "input_tokens": 24180,
+                "request_id": null,
+                "timestamp": "2026-10-08T05:23:13.925Z",
+                "uncached_tokens": 884,
+                "write_tokens": null
+              },
+              "hit_rate": 0.9574092085976136,
+              "input_tokens": 72997,
+              "requests": 3,
+              "uncached_input_tokens": 3109
+            },
+            "orchestrator": {
+              "cache_read_tokens": 0,
+              "cost_usd_lower": 0,
+              "cost_usd_upper": 0,
+              "first_request": null,
+              "hit_rate": null,
+              "input_tokens": 0,
+              "requests": 0,
+              "uncached_input_tokens": 0
+            }
+          },
+          "briefing": {
+            "after": {
+              "bytes": 8780,
+              "sha256": "21f32d3d124059fe437b4243a907401fa09a383fea78d9bb4a5ed23ce3020290"
+            },
+            "before": {
+              "bytes": 8780,
+              "sha256": "21f32d3d124059fe437b4243a907401fa09a383fea78d9bb4a5ed23ce3020290"
+            },
+            "changed": false,
+            "common_prefix_bytes": 8780,
+            "scope": "Crew briefing file only; not the provider's full effective prompt"
+          },
+          "ended_at": "2026-10-08T05:23:20.177460+00:00",
+          "kind": "restart",
+          "started_at": "2026-10-08T05:23:08.839447+00:00",
+          "step": "same-briefing-codex-worker"
+        },
+        {
+          "agents": {
+            "claude-worker": {
+              "cache_read_tokens": 0,
+              "cost_usd_lower": 0,
+              "cost_usd_upper": 0,
+              "first_request": null,
+              "hit_rate": null,
+              "input_tokens": 0,
+              "requests": 0,
+              "uncached_input_tokens": 0
+            },
+            "codex-worker": {
+              "cache_read_tokens": 0,
+              "cost_usd_lower": 0,
+              "cost_usd_upper": 0,
+              "first_request": null,
+              "hit_rate": null,
+              "input_tokens": 0,
+              "requests": 0,
+              "uncached_input_tokens": 0
+            },
+            "orchestrator": {
+              "cache_read_tokens": 0,
+              "cost_usd_lower": 0,
+              "cost_usd_upper": 0,
+              "first_request": null,
+              "hit_rate": null,
+              "input_tokens": 0,
+              "requests": 0,
+              "uncached_input_tokens": 0
+            }
+          },
+          "ended_at": "2026-10-08T05:23:22.295632+00:00",
+          "kind": "add",
+          "started_at": "2026-10-08T05:23:21.198670+00:00",
+          "step": "roster-added"
+        },
+        {
+          "agents": {
+            "claude-worker": {
+              "cache_read_tokens": 178858,
+              "cost_usd_lower": 0.0225828,
+              "cost_usd_upper": 0.0225828,
+              "first_request": {
+                "cached_tokens": 44070,
+                "hit_rate": 0.9893810475271086,
+                "input_tokens": 44543,
+                "request_id": "req_011CfpDCw2Adr94uLDJdTvjr",
+                "timestamp": "2026-10-08T05:23:26.321Z",
+                "uncached_tokens": 10,
+                "write_tokens": 463
+              },
+              "hit_rate": 0.9919912147397145,
+              "input_tokens": 180302,
+              "requests": 4,
+              "uncached_input_tokens": 1444
+            },
+            "codex-worker": {
+              "cache_read_tokens": 0,
+              "cost_usd_lower": 0,
+              "cost_usd_upper": 0,
+              "first_request": null,
+              "hit_rate": null,
+              "input_tokens": 0,
+              "requests": 0,
+              "uncached_input_tokens": 0
+            },
+            "orchestrator": {
+              "cache_read_tokens": 0,
+              "cost_usd_lower": 0,
+              "cost_usd_upper": 0,
+              "first_request": null,
+              "hit_rate": null,
+              "input_tokens": 0,
+              "requests": 0,
+              "uncached_input_tokens": 0
+            }
+          },
+          "briefing": {
+            "after": {
+              "bytes": 8861,
+              "sha256": "9d4b66ca421c3180c7e00e9a320e162f88e24fa64ac7269ca2c965b509020aea"
+            },
+            "before": {
+              "bytes": 8783,
+              "sha256": "8f47b279faccf0cfe1fb9434fc45293b5dd2161f2fc0b0ab2fe8bb1e95b1fc42"
+            },
+            "changed": true,
+            "common_prefix_bytes": 575,
+            "scope": "Crew briefing file only; not the provider's full effective prompt"
+          },
+          "ended_at": "2026-10-08T05:23:34.772613+00:00",
+          "kind": "restart",
+          "started_at": "2026-10-08T05:23:23.317347+00:00",
+          "step": "added-briefing-claude-worker"
+        },
+        {
+          "agents": {
+            "claude-worker": {
+              "cache_read_tokens": 0,
+              "cost_usd_lower": 0,
+              "cost_usd_upper": 0,
+              "first_request": null,
+              "hit_rate": null,
+              "input_tokens": 0,
+              "requests": 0,
+              "uncached_input_tokens": 0
+            },
+            "codex-worker": {
+              "cache_read_tokens": 48640,
+              "cost_usd_lower": 0.0005653000000000001,
+              "cost_usd_upper": 0.0011590500000000002,
+              "first_request": {
+                "cached_tokens": 24320,
+                "hit_rate": 0.9898652773820669,
+                "input_tokens": 24569,
+                "request_id": null,
+                "timestamp": "2026-10-08T05:23:40.780Z",
+                "uncached_tokens": 249,
+                "write_tokens": null
+              },
+              "hit_rate": 0.9884370745188888,
+              "input_tokens": 49209,
+              "requests": 2,
+              "uncached_input_tokens": 569
+            },
+            "orchestrator": {
+              "cache_read_tokens": 0,
+              "cost_usd_lower": 0,
+              "cost_usd_upper": 0,
+              "first_request": null,
+              "hit_rate": null,
+              "input_tokens": 0,
+              "requests": 0,
+              "uncached_input_tokens": 0
+            }
+          },
+          "briefing": {
+            "after": {
+              "bytes": 8858,
+              "sha256": "3377293ef3f4eee94267c5b81c15183c7baa1f4d9725fa60ea63f2c2a2b4d7d0"
+            },
+            "before": {
+              "bytes": 8780,
+              "sha256": "21f32d3d124059fe437b4243a907401fa09a383fea78d9bb4a5ed23ce3020290"
+            },
+            "changed": true,
+            "common_prefix_bytes": 573,
+            "scope": "Crew briefing file only; not the provider's full effective prompt"
+          },
+          "ended_at": "2026-10-08T05:23:46.122751+00:00",
+          "kind": "restart",
+          "started_at": "2026-10-08T05:23:35.794475+00:00",
+          "step": "added-briefing-codex-worker"
+        },
+        {
+          "agents": {
+            "claude-worker": {
+              "cache_read_tokens": 0,
+              "cost_usd_lower": 0,
+              "cost_usd_upper": 0,
+              "first_request": null,
+              "hit_rate": null,
+              "input_tokens": 0,
+              "requests": 0,
+              "uncached_input_tokens": 0
+            },
+            "codex-worker": {
+              "cache_read_tokens": 0,
+              "cost_usd_lower": 0,
+              "cost_usd_upper": 0,
+              "first_request": null,
+              "hit_rate": null,
+              "input_tokens": 0,
+              "requests": 0,
+              "uncached_input_tokens": 0
+            },
+            "orchestrator": {
+              "cache_read_tokens": 0,
+              "cost_usd_lower": 0,
+              "cost_usd_upper": 0,
+              "first_request": null,
+              "hit_rate": null,
+              "input_tokens": 0,
+              "requests": 0,
+              "uncached_input_tokens": 0
+            }
+          },
+          "ended_at": "2026-10-08T05:23:48.271542+00:00",
+          "kind": "remove",
+          "started_at": "2026-10-08T05:23:47.146371+00:00",
+          "step": "roster-removed"
+        },
+        {
+          "agents": {
+            "claude-worker": {
+              "cache_read_tokens": 138129,
+              "cost_usd_lower": 0.0172499,
+              "cost_usd_upper": 0.0172499,
+              "first_request": {
+                "cached_tokens": 45582,
+                "hit_rate": 0.989729671045489,
+                "input_tokens": 46055,
+                "request_id": "req_011CfpDErEkBxQXHj8YaUSAd",
+                "timestamp": "2026-10-08T05:23:52.296Z",
+                "uncached_tokens": 10,
+                "write_tokens": 463
+              },
+              "hit_rate": 0.9916363949631715,
+              "input_tokens": 139294,
+              "requests": 3,
+              "uncached_input_tokens": 1165
+            },
+            "codex-worker": {
+              "cache_read_tokens": 0,
+              "cost_usd_lower": 0,
+              "cost_usd_upper": 0,
+              "first_request": null,
+              "hit_rate": null,
+              "input_tokens": 0,
+              "requests": 0,
+              "uncached_input_tokens": 0
+            },
+            "orchestrator": {
+              "cache_read_tokens": 0,
+              "cost_usd_lower": 0,
+              "cost_usd_upper": 0,
+              "first_request": null,
+              "hit_rate": null,
+              "input_tokens": 0,
+              "requests": 0,
+              "uncached_input_tokens": 0
+            }
+          },
+          "briefing": {
+            "after": {
+              "bytes": 8783,
+              "sha256": "8f47b279faccf0cfe1fb9434fc45293b5dd2161f2fc0b0ab2fe8bb1e95b1fc42"
+            },
+            "before": {
+              "bytes": 8861,
+              "sha256": "9d4b66ca421c3180c7e00e9a320e162f88e24fa64ac7269ca2c965b509020aea"
+            },
+            "changed": true,
+            "common_prefix_bytes": 575,
+            "scope": "Crew briefing file only; not the provider's full effective prompt"
+          },
+          "ended_at": "2026-10-08T05:23:59.822279+00:00",
+          "kind": "restart",
+          "started_at": "2026-10-08T05:23:49.292535+00:00",
+          "step": "removed-briefing-claude-worker"
+        },
+        {
+          "agents": {
+            "claude-worker": {
+              "cache_read_tokens": 0,
+              "cost_usd_lower": 0,
+              "cost_usd_upper": 0,
+              "first_request": null,
+              "hit_rate": null,
+              "input_tokens": 0,
+              "requests": 0,
+              "uncached_input_tokens": 0
+            },
+            "codex-worker": {
+              "cache_read_tokens": 48640,
+              "cost_usd_lower": 0.0005903000000000001,
+              "cost_usd_upper": 0.00122155,
+              "first_request": {
+                "cached_tokens": 24320,
+                "hit_rate": 0.9848546205556006,
+                "input_tokens": 24694,
+                "request_id": null,
+                "timestamp": "2026-10-08T05:24:05.749Z",
+                "uncached_tokens": 374,
+                "write_tokens": null
+              },
+              "hit_rate": 0.9834408297782001,
+              "input_tokens": 49459,
+              "requests": 2,
+              "uncached_input_tokens": 819
+            },
+            "orchestrator": {
+              "cache_read_tokens": 0,
+              "cost_usd_lower": 0,
+              "cost_usd_upper": 0,
+              "first_request": null,
+              "hit_rate": null,
+              "input_tokens": 0,
+              "requests": 0,
+              "uncached_input_tokens": 0
+            }
+          },
+          "briefing": {
+            "after": {
+              "bytes": 8780,
+              "sha256": "21f32d3d124059fe437b4243a907401fa09a383fea78d9bb4a5ed23ce3020290"
+            },
+            "before": {
+              "bytes": 8858,
+              "sha256": "3377293ef3f4eee94267c5b81c15183c7baa1f4d9725fa60ea63f2c2a2b4d7d0"
+            },
+            "changed": true,
+            "common_prefix_bytes": 573,
+            "scope": "Crew briefing file only; not the provider's full effective prompt"
+          },
+          "ended_at": "2026-10-08T05:24:10.155785+00:00",
+          "kind": "restart",
+          "started_at": "2026-10-08T05:24:00.844056+00:00",
+          "step": "removed-briefing-codex-worker"
+        },
+        {
+          "agents": {
+            "claude-worker": {
+              "cache_read_tokens": 381440,
+              "cost_usd_lower": 0.051333000000000004,
+              "cost_usd_upper": 0.051333000000000004,
+              "first_request": {
+                "cached_tokens": 46764,
+                "hit_rate": 0.9986759492589588,
+                "input_tokens": 46826,
+                "request_id": "req_011CfpDGVaL4wz1hpv7dx1bw",
+                "timestamp": "2026-10-08T05:24:14.477Z",
+                "uncached_tokens": 10,
+                "write_tokens": 52
+              },
+              "hit_rate": 0.9929402944667736,
+              "input_tokens": 384152,
+              "requests": 8,
+              "uncached_input_tokens": 2712
+            },
+            "codex-worker": {
+              "cache_read_tokens": 0,
+              "cost_usd_lower": 0,
+              "cost_usd_upper": 0,
+              "first_request": null,
+              "hit_rate": null,
+              "input_tokens": 0,
+              "requests": 0,
+              "uncached_input_tokens": 0
+            },
+            "orchestrator": {
+              "cache_read_tokens": 128723,
+              "cost_usd_lower": 0.0165503,
+              "cost_usd_upper": 0.0165503,
+              "first_request": {
+                "cached_tokens": 42706,
+                "hit_rate": 0.9955938920620119,
+                "input_tokens": 42895,
+                "request_id": "req_011CfpDJUUAVgXo7RUZZF2Wu",
+                "timestamp": "2026-10-08T05:24:42.064Z",
+                "uncached_tokens": 9,
+                "write_tokens": 180
+              },
+              "hit_rate": 0.9945606403609757,
+              "input_tokens": 129427,
+              "requests": 3,
+              "uncached_input_tokens": 704
+            }
+          },
+          "ended_at": "2026-10-08T05:24:50.043968+00:00",
+          "kind": "task",
+          "started_at": "2026-10-08T05:24:11.179864+00:00",
+          "step": "control-window"
+        },
+        {
+          "agents": {
+            "claude-worker": {
+              "cache_read_tokens": 149692,
+              "cost_usd_lower": 0.022383200000000002,
+              "cost_usd_upper": 0.022383200000000002,
+              "first_request": {
+                "cached_tokens": 49545,
+                "hit_rate": 0.9977646205896569,
+                "input_tokens": 49656,
+                "request_id": "req_011CfpDKRuA8dnCy8XDTEjX4",
+                "timestamp": "2026-10-08T05:24:56.928Z",
+                "uncached_tokens": 10,
+                "write_tokens": 101
+              },
+              "hit_rate": 0.9903080902637655,
+              "input_tokens": 151157,
+              "requests": 3,
+              "uncached_input_tokens": 1465
+            },
+            "codex-worker": {
+              "cache_read_tokens": 0,
+              "cost_usd_lower": 0,
+              "cost_usd_upper": 0,
+              "first_request": null,
+              "hit_rate": null,
+              "input_tokens": 0,
+              "requests": 0,
+              "uncached_input_tokens": 0
+            },
+            "orchestrator": {
+              "cache_read_tokens": 0,
+              "cost_usd_lower": 0,
+              "cost_usd_upper": 0,
+              "first_request": null,
+              "hit_rate": null,
+              "input_tokens": 0,
+              "requests": 0,
+              "uncached_input_tokens": 0
+            }
+          },
+          "ended_at": "2026-10-08T05:25:09.487593+00:00",
+          "kind": "message",
+          "started_at": "2026-10-08T05:24:51.067671+00:00",
+          "step": "idle-delivery-control"
+        },
+        {
+          "agents": {
+            "claude-worker": {
+              "cache_read_tokens": 416945,
+              "cost_usd_lower": 0.0557725,
+              "cost_usd_upper": 0.0557725,
+              "first_request": {
+                "cached_tokens": 51063,
+                "hit_rate": 0.9987677502640535,
+                "input_tokens": 51126,
+                "request_id": "req_011CfpDLs6Vx2kVG8tf8Ypnh",
+                "timestamp": "2026-10-08T05:25:14.013Z",
+                "uncached_tokens": 10,
+                "write_tokens": 53
+              },
+              "hit_rate": 0.9922536887196574,
+              "input_tokens": 420200,
+              "requests": 8,
+              "uncached_input_tokens": 3255
+            },
+            "codex-worker": {
+              "cache_read_tokens": 0,
+              "cost_usd_lower": 0,
+              "cost_usd_upper": 0,
+              "first_request": null,
+              "hit_rate": null,
+              "input_tokens": 0,
+              "requests": 0,
+              "uncached_input_tokens": 0
+            },
+            "orchestrator": {
+              "cache_read_tokens": 87073,
+              "cost_usd_lower": 0.0117973,
+              "cost_usd_upper": 0.0117973,
+              "first_request": {
+                "cached_tokens": 43452,
+                "hit_rate": 0.9959202383680954,
+                "input_tokens": 43630,
+                "request_id": "req_011CfpDNscorZYbLTCk9Enu7",
+                "timestamp": "2026-10-08T05:25:41.760Z",
+                "uncached_tokens": 9,
+                "write_tokens": 169
+              },
+              "hit_rate": 0.992805345252212,
+              "input_tokens": 87704,
+              "requests": 2,
+              "uncached_input_tokens": 631
+            }
+          },
+          "ended_at": "2026-10-08T05:25:47.350148+00:00",
+          "kind": "fold",
+          "native_evidence": {
+            "folded_rows": 1,
+            "idle_rows": 0,
+            "pending_tool_ids": [],
+            "post_fold_thinking_blocks": 5,
+            "thinking_drops": [],
+            "turn_ends": 7
+          },
+          "started_at": "2026-10-08T05:25:10.510823+00:00",
+          "step": "folded-delivery"
+        },
+        {
+          "agents": {
+            "claude-worker": {
+              "cache_read_tokens": 161278,
+              "cost_usd_lower": 0.0256508,
+              "cost_usd_upper": 0.0256508,
+              "first_request": {
+                "cached_tokens": 51709,
+                "hit_rate": 0.9492069902342316,
+                "input_tokens": 54476,
+                "request_id": "req_011CfpDPf2oX9QXSZxQennNB",
+                "timestamp": "2026-10-08T05:25:52.978Z",
+                "uncached_tokens": 10,
+                "write_tokens": 2757
+              },
+              "hit_rate": 0.9781538088306647,
+              "input_tokens": 164880,
+              "requests": 3,
+              "uncached_input_tokens": 3602
+            },
+            "codex-worker": {
+              "cache_read_tokens": 0,
+              "cost_usd_lower": 0,
+              "cost_usd_upper": 0,
+              "first_request": null,
+              "hit_rate": null,
+              "input_tokens": 0,
+              "requests": 0,
+              "uncached_input_tokens": 0
+            },
+            "orchestrator": {
+              "cache_read_tokens": 0,
+              "cost_usd_lower": 0,
+              "cost_usd_upper": 0,
+              "first_request": null,
+              "hit_rate": null,
+              "input_tokens": 0,
+              "requests": 0,
+              "uncached_input_tokens": 0
+            }
+          },
+          "ended_at": "2026-10-08T05:25:59.620391+00:00",
+          "kind": "message",
+          "matched_thinking_drops": [],
+          "native_evidence": {
+            "folded_rows": 1,
+            "idle_rows": 0,
+            "pending_tool_ids": [],
+            "post_fold_thinking_blocks": 8,
+            "thinking_drops": [],
+            "turn_ends": 8
+          },
+          "started_at": "2026-10-08T05:25:48.375685+00:00",
+          "step": "after-fold-probe",
+          "thinking_observed_after_fold": true
+        },
+        {
+          "agents": {
+            "claude-worker": {
+              "cache_read_tokens": 564497,
+              "cost_usd_lower": 0.24148070000000002,
+              "cost_usd_upper": 0.24148070000000002,
+              "first_request": {
+                "cached_tokens": 55351,
+                "hit_rate": 0.9988991554175991,
+                "input_tokens": 55412,
+                "request_id": "req_011CfpDQZYvGauhnF1NwpLvZ",
+                "timestamp": "2026-10-08T05:26:04.274Z",
+                "uncached_tokens": 10,
+                "write_tokens": 51
+              },
+              "hit_rate": 0.8644392753066135,
+              "input_tokens": 653021,
+              "requests": 7,
+              "uncached_input_tokens": 88524
+            },
+            "codex-worker": {
+              "cache_read_tokens": 0,
+              "cost_usd_lower": 0,
+              "cost_usd_upper": 0,
+              "first_request": null,
+              "hit_rate": null,
+              "input_tokens": 0,
+              "requests": 0,
+              "uncached_input_tokens": 0
+            },
+            "orchestrator": {
+              "cache_read_tokens": 88449,
+              "cost_usd_lower": 0.0116909,
+              "cost_usd_upper": 0.0116909,
+              "first_request": {
+                "cached_tokens": 44146,
+                "hit_rate": 0.996253836432569,
+                "input_tokens": 44312,
+                "request_id": "req_011CfpDSBPivS4QDJ3jrG75L",
+                "timestamp": "2026-10-08T05:26:26.599Z",
+                "uncached_tokens": 9,
+                "write_tokens": 157
+              },
+              "hit_rate": 0.9939988537136307,
+              "input_tokens": 88983,
+              "requests": 2,
+              "uncached_input_tokens": 534
+            }
+          },
+          "ended_at": "2026-10-08T05:26:31.481912+00:00",
+          "kind": "load",
+          "started_at": "2026-10-08T05:26:00.645982+00:00",
+          "step": "large-context"
+        },
+        {
+          "agents": {
+            "claude-worker": {
+              "cache_read_tokens": 0,
+              "cost_usd_lower": 0,
+              "cost_usd_upper": 0,
+              "first_request": null,
+              "hit_rate": null,
+              "input_tokens": 0,
+              "requests": 0,
+              "uncached_input_tokens": 0
+            },
+            "codex-worker": {
+              "cache_read_tokens": 0,
+              "cost_usd_lower": 0,
+              "cost_usd_upper": 0,
+              "first_request": null,
+              "hit_rate": null,
+              "input_tokens": 0,
+              "requests": 0,
+              "uncached_input_tokens": 0
+            },
+            "orchestrator": {
+              "cache_read_tokens": 0,
+              "cost_usd_lower": 0,
+              "cost_usd_upper": 0,
+              "first_request": null,
+              "hit_rate": null,
+              "input_tokens": 0,
+              "requests": 0,
+              "uncached_input_tokens": 0
+            }
+          },
+          "ended_at": "2026-10-08T05:26:59.167055+00:00",
+          "input_tokens_before": 143821,
+          "kind": "compact",
+          "started_at": "2026-10-08T05:26:32.507276+00:00",
+          "step": "forced-compaction"
+        },
+        {
+          "agents": {
+            "claude-worker": {
+              "cache_read_tokens": 119198,
+              "cost_usd_lower": 0.0185008,
+              "cost_usd_upper": 0.0185008,
+              "first_request": {
+                "cached_tokens": 39422,
+                "hit_rate": 0.997141773112432,
+                "input_tokens": 39535,
+                "request_id": "req_011CfpDVnKX7gXdCvrgPLXLK",
+                "timestamp": "2026-10-08T05:27:16.623Z",
+                "uncached_tokens": 10,
+                "write_tokens": 103
+              },
+              "hit_rate": 0.9891211444788356,
+              "input_tokens": 120509,
+              "requests": 3,
+              "uncached_input_tokens": 1311
+            },
+            "codex-worker": {
+              "cache_read_tokens": 0,
+              "cost_usd_lower": 0,
+              "cost_usd_upper": 0,
+              "first_request": null,
+              "hit_rate": null,
+              "input_tokens": 0,
+              "requests": 0,
+              "uncached_input_tokens": 0
+            },
+            "orchestrator": {
+              "cache_read_tokens": 0,
+              "cost_usd_lower": 0,
+              "cost_usd_upper": 0,
+              "first_request": null,
+              "hit_rate": null,
+              "input_tokens": 0,
+              "requests": 0,
+              "uncached_input_tokens": 0
+            }
+          },
+          "ended_at": "2026-10-08T05:27:25.852234+00:00",
+          "kind": "message",
+          "started_at": "2026-10-08T05:27:11.469490+00:00",
+          "step": "post-compaction"
+        },
+        {
+          "agents": {
+            "claude-worker": {
+              "cache_read_tokens": 0,
+              "cost_usd_lower": 0,
+              "cost_usd_upper": 0,
+              "first_request": null,
+              "hit_rate": null,
+              "input_tokens": 0,
+              "requests": 0,
+              "uncached_input_tokens": 0
+            },
+            "codex-worker": {
+              "cache_read_tokens": 0,
+              "cost_usd_lower": 0,
+              "cost_usd_upper": 0,
+              "first_request": null,
+              "hit_rate": null,
+              "input_tokens": 0,
+              "requests": 0,
+              "uncached_input_tokens": 0
+            },
+            "orchestrator": {
+              "cache_read_tokens": 0,
+              "cost_usd_lower": 0,
+              "cost_usd_upper": 0,
+              "first_request": null,
+              "hit_rate": null,
+              "input_tokens": 0,
+              "requests": 0,
+              "uncached_input_tokens": 0
+            }
+          },
+          "ended_at": "2026-10-08T05:32:37.650741+00:00",
+          "kind": "idle",
+          "observed_quiet_seconds": 310.7697588521987,
+          "started_at": "2026-10-08T05:27:26.880966+00:00",
+          "step": "over-five-minutes"
+        },
+        {
+          "agents": {
+            "claude-worker": {
+              "cache_read_tokens": 291049,
+              "cost_usd_lower": 0.0369859,
+              "cost_usd_upper": 0.0369859,
+              "first_request": {
+                "cached_tokens": 40790,
+                "hit_rate": 0.998115839185651,
+                "input_tokens": 40867,
+                "request_id": "req_011CfpDuuuLeLo7U8LyCZUeE",
+                "timestamp": "2026-10-08T05:32:42.209Z",
+                "uncached_tokens": 10,
+                "write_tokens": 67
+              },
+              "hit_rate": 0.9933311263024611,
+              "input_tokens": 293003,
+              "requests": 7,
+              "uncached_input_tokens": 1954
+            },
+            "codex-worker": {
+              "cache_read_tokens": 146944,
+              "cost_usd_lower": 0.00204854,
+              "cost_usd_upper": 0.00432863,
+              "first_request": {
+                "cached_tokens": 24320,
+                "hit_rate": 0.978790195999517,
+                "input_tokens": 24847,
+                "request_id": null,
+                "timestamp": "2026-10-08T05:32:41.941Z",
+                "uncached_tokens": 527,
+                "write_tokens": null
+              },
+              "hit_rate": 0.9694474682500412,
+              "input_tokens": 151575,
+              "requests": 6,
+              "uncached_input_tokens": 4631
+            },
+            "orchestrator": {
+              "cache_read_tokens": 134738,
+              "cost_usd_lower": 0.019521800000000002,
+              "cost_usd_upper": 0.019521800000000002,
+              "first_request": {
+                "cached_tokens": 44719,
+                "hit_rate": 0.9973682449762473,
+                "input_tokens": 44837,
+                "request_id": "req_011CfpDvVRTrzXKB5X7R92ov",
+                "timestamp": "2026-10-08T05:32:52.982Z",
+                "uncached_tokens": 10,
+                "write_tokens": 108
+              },
+              "hit_rate": 0.991259950267057,
+              "input_tokens": 135926,
+              "requests": 3,
+              "uncached_input_tokens": 1188
+            }
+          },
+          "ended_at": "2026-10-08T05:33:01.243258+00:00",
+          "kind": "probes",
+          "native_request_gap_seconds": {
+            "claude-worker": 320.38100004196167,
+            "codex-worker": 515.1549999713898
+          },
+          "started_at": "2026-10-08T05:32:38.675815+00:00",
+          "step": "after-five-minutes"
+        },
+        {
+          "agents": {
+            "claude-worker": {
+              "cache_read_tokens": 0,
+              "cost_usd_lower": 0,
+              "cost_usd_upper": 0,
+              "first_request": null,
+              "hit_rate": null,
+              "input_tokens": 0,
+              "requests": 0,
+              "uncached_input_tokens": 0
+            },
+            "codex-worker": {
+              "cache_read_tokens": 0,
+              "cost_usd_lower": 0,
+              "cost_usd_upper": 0,
+              "first_request": null,
+              "hit_rate": null,
+              "input_tokens": 0,
+              "requests": 0,
+              "uncached_input_tokens": 0
+            },
+            "orchestrator": {
+              "cache_read_tokens": 0,
+              "cost_usd_lower": 0,
+              "cost_usd_upper": 0,
+              "first_request": null,
+              "hit_rate": null,
+              "input_tokens": 0,
+              "requests": 0,
+              "uncached_input_tokens": 0
+            }
+          },
+          "ended_at": "2026-10-08T06:34:07.440522+00:00",
+          "kind": "idle",
+          "observed_quiet_seconds": 3665.164379945025,
+          "started_at": "2026-10-08T05:33:02.276123+00:00",
+          "step": "over-one-hour"
+        },
+        {
+          "agents": {
+            "claude-worker": {
+              "cache_read_tokens": 154796,
+              "cost_usd_lower": 0.0591656,
+              "cost_usd_upper": 0.0591656,
+              "first_request": {
+                "cached_tokens": 23940,
+                "hit_rate": 0.5592804578904333,
+                "input_tokens": 42805,
+                "request_id": "req_011CfpJbucJtDv6qukdrtibC",
+                "timestamp": "2026-10-08T06:34:11.614Z",
+                "uncached_tokens": 10,
+                "write_tokens": 18855
+              },
+              "hit_rate": 0.8823251121459637,
+              "input_tokens": 175441,
+              "requests": 4,
+              "uncached_input_tokens": 20645
+            },
+            "codex-worker": {
+              "cache_read_tokens": 115200,
+              "cost_usd_lower": 0.0054353000000000005,
+              "cost_usd_upper": 0.012955749999999999,
+              "first_request": {
+                "cached_tokens": 6912,
+                "hit_rate": 0.2685523350687699,
+                "input_tokens": 25738,
+                "request_id": null,
+                "timestamp": "2026-10-08T06:34:11.708Z",
+                "uncached_tokens": 18826,
+                "write_tokens": null
+              },
+              "hit_rate": 0.7342115829525248,
+              "input_tokens": 156903,
+              "requests": 6,
+              "uncached_input_tokens": 41703
+            },
+            "orchestrator": {
+              "cache_read_tokens": 116138,
+              "cost_usd_lower": 0.0632228,
+              "cost_usd_upper": 0.0632228,
+              "first_request": {
+                "cached_tokens": 23715,
+                "hit_rate": 0.516048308127516,
+                "input_tokens": 45955,
+                "request_id": "req_011CfpJc1PpfVL9GNUjkd52T",
+                "timestamp": "2026-10-08T06:34:14.822Z",
+                "uncached_tokens": 9,
+                "write_tokens": 22231
+              },
+              "hit_rate": 0.8286219837611838,
+              "input_tokens": 140158,
+              "requests": 3,
+              "uncached_input_tokens": 24020
+            }
+          },
+          "ended_at": "2026-10-08T06:34:27.972971+00:00",
+          "kind": "probes",
+          "native_request_gap_seconds": {
+            "claude-worker": 3677.7880001068115,
+            "codex-worker": 3684.09299993515
+          },
+          "started_at": "2026-10-08T06:34:08.470162+00:00",
+          "step": "after-one-hour"
+        }
+      ],
+      "steps": 20
+    },
+    {
+      "agents": [
+        {
+          "agent": "orchestrator",
+          "cached_tokens": 864511,
+          "cost_usd_lower": 0.15055110000000002,
+          "cost_usd_upper": 0.15055110000000002,
+          "hit_rate": 0.9734881285505965,
+          "input_tokens": 888055,
+          "models": [
+            "claude-haiku-4-5-20251001"
+          ],
+          "request_count": 20,
+          "runtime": "claude",
+          "session_id": "1f5c362d-8327-4076-90c9-8433a01b5638",
+          "source_path": "/home/nade/.claude/projects/-home-nade-workspaces-personal-crew--crew-worktrees-qa-target-cache-bench-lifecycle-final-03-workspace/1f5c362d-8327-4076-90c9-8433a01b5638.jsonl"
+        },
+        {
+          "agent": "claude-worker",
+          "cached_tokens": 3772206,
+          "cost_usd_lower": 0.7068936000000001,
+          "cost_usd_upper": 0.7068936000000001,
+          "hit_rate": 0.9649972256565754,
+          "input_tokens": 3909033,
+          "models": [
+            "claude-haiku-4-5-20251001"
+          ],
+          "request_count": 73,
+          "runtime": "claude",
+          "session_id": "1f833e65-a656-4cdf-b6cd-8cf215eca5c8",
+          "source_path": "/home/nade/.claude/projects/-home-nade-workspaces-personal-crew--crew-worktrees-qa-target-cache-bench-lifecycle-final-03-workspace--crew-worktrees-claude-worker/1f833e65-a656-4cdf-b6cd-8cf215eca5c8.jsonl"
+        },
+        {
+          "agent": "codex-worker",
+          "cached_tokens": 472064,
+          "cost_usd_lower": 0.006682240000000002,
+          "cost_usd_upper": 0.014170280000000002,
+          "hit_rate": 0.9669875865459462,
+          "input_tokens": 488180,
+          "models": [
+            "gpt-6-luna"
+          ],
+          "request_count": 20,
+          "runtime": "codex",
+          "session_id": "01a119fc-136d-7503-a759-e6f1f5a59083",
+          "source_path": "/home/nade/.codex/sessions/2026/10/08/rollout-2026-10-08T00-28-32-01a119fc-136d-7503-a759-e6f1f5a59083.jsonl"
+        }
+      ],
+      "cached_tokens": 5108781,
+      "cleanup": {
+        "remaining_processes": [],
+        "stop_returncode": 0
+      },
+      "cost_usd_lower": 0.8641269400000001,
+      "cost_usd_upper": 0.8716149800000002,
+      "duration_seconds": 649.1216667452827,
+      "finished_at": "2026-10-08T05:39:20.509233+00:00",
+      "hit_rate": 0.9666077481785219,
+      "input_tokens": 5285268,
+      "label": "lifecycle-final-03",
+      "report": "notes/prompt-cache/lifecycle-before-03.json",
+      "report_sha256": "5a28ee2a011a46dd08d8805375806ce734fddcbe3019190b31be3bcacabb174e",
+      "requests": 113,
+      "started_at": "2026-10-08T05:28:31.387583+00:00",
+      "step_observations": [
+        {
+          "agents": {
+            "claude-worker": {
+              "cache_read_tokens": 563569,
+              "cost_usd_lower": 0.1067099,
+              "cost_usd_upper": 0.1067099,
+              "first_request": {
+                "cached_tokens": 23940,
+                "hit_rate": 0.6129816924849572,
+                "input_tokens": 39055,
+                "request_id": "req_011CfpDbn7H5YRAGCTBZWDv7",
+                "timestamp": "2026-10-08T05:28:36.726Z",
+                "uncached_tokens": 10,
+                "write_tokens": 15105
+              },
+              "hit_rate": 0.9656884164134937,
+              "input_tokens": 583593,
+              "requests": 14,
+              "uncached_input_tokens": 20024
+            },
+            "codex-worker": {
+              "cache_read_tokens": 156928,
+              "cost_usd_lower": 0.00238198,
+              "cost_usd_upper": 0.0051058100000000006,
+              "first_request": {
+                "cached_tokens": 20224,
+                "hit_rate": 0.9762031182120964,
+                "input_tokens": 20717,
+                "request_id": null,
+                "timestamp": "2026-10-08T05:28:35.227Z",
+                "uncached_tokens": 493,
+                "write_tokens": null
+              },
+              "hit_rate": 0.9582511525661771,
+              "input_tokens": 163765,
+              "requests": 7,
+              "uncached_input_tokens": 6837
+            },
+            "orchestrator": {
+              "cache_read_tokens": 357867,
+              "cost_usd_lower": 0.08144370000000001,
+              "cost_usd_upper": 0.08144370000000001,
+              "first_request": {
+                "cached_tokens": 23715,
+                "hit_rate": 0.58872449232908,
+                "input_tokens": 40282,
+                "request_id": "req_011CfpDbmqexUSCezVqgisTw",
+                "timestamp": "2026-10-08T05:28:37.087Z",
+                "uncached_tokens": 10,
+                "write_tokens": 16557
+              },
+              "hit_rate": 0.9472292511460969,
+              "input_tokens": 377804,
+              "requests": 9,
+              "uncached_input_tokens": 19937
+            }
+          },
+          "ended_at": "2026-10-08T05:29:14.609696+00:00",
+          "kind": "warm",
+          "started_at": "2026-10-08T05:28:31.733073+00:00",
+          "step": "warm"
+        },
+        {
+          "agents": {
+            "claude-worker": {
+              "cache_read_tokens": 178693,
+              "cost_usd_lower": 0.0235223,
+              "cost_usd_upper": 0.0235223,
+              "first_request": {
+                "cached_tokens": 43939,
+                "hit_rate": 0.9893497252994686,
+                "input_tokens": 44412,
+                "request_id": "req_011CfpDeudJyVtmbzPLJDn2b",
+                "timestamp": "2026-10-08T05:29:18.929Z",
+                "uncached_tokens": 10,
+                "write_tokens": 463
+              },
+              "hit_rate": 0.990784841008012,
+              "input_tokens": 180355,
+              "requests": 4,
+              "uncached_input_tokens": 1662
+            },
+            "codex-worker": {
+              "cache_read_tokens": 0,
+              "cost_usd_lower": 0,
+              "cost_usd_upper": 0,
+              "first_request": null,
+              "hit_rate": null,
+              "input_tokens": 0,
+              "requests": 0,
+              "uncached_input_tokens": 0
+            },
+            "orchestrator": {
+              "cache_read_tokens": 223664,
+              "cost_usd_lower": 0.0308804,
+              "cost_usd_upper": 0.0308804,
+              "first_request": {
+                "cached_tokens": 43745,
+                "hit_rate": 0.9877170403486193,
+                "input_tokens": 44289,
+                "request_id": "req_011CfpDf4kERiJkCJh7bnKUk",
+                "timestamp": "2026-10-08T05:29:21.293Z",
+                "uncached_tokens": 10,
+                "write_tokens": 534
+              },
+              "hit_rate": 0.9897907253585637,
+              "input_tokens": 225971,
+              "requests": 5,
+              "uncached_input_tokens": 2307
+            }
+          },
+          "briefing": {
+            "after": {
+              "bytes": 8783,
+              "sha256": "8f47b279faccf0cfe1fb9434fc45293b5dd2161f2fc0b0ab2fe8bb1e95b1fc42"
+            },
+            "before": {
+              "bytes": 8783,
+              "sha256": "8f47b279faccf0cfe1fb9434fc45293b5dd2161f2fc0b0ab2fe8bb1e95b1fc42"
+            },
+            "changed": false,
+            "common_prefix_bytes": 8783,
+            "scope": "Crew briefing file only; not the provider's full effective prompt"
+          },
+          "ended_at": "2026-10-08T05:29:34.439054+00:00",
+          "kind": "restart",
+          "started_at": "2026-10-08T05:29:15.629349+00:00",
+          "step": "same-briefing-claude-worker"
+        },
+        {
+          "agents": {
+            "claude-worker": {
+              "cache_read_tokens": 0,
+              "cost_usd_lower": 0,
+              "cost_usd_upper": 0,
+              "first_request": null,
+              "hit_rate": null,
+              "input_tokens": 0,
+              "requests": 0,
+              "uncached_input_tokens": 0
+            },
+            "codex-worker": {
+              "cache_read_tokens": 69888,
+              "cost_usd_lower": 0.00107488,
+              "cost_usd_upper": 0.00231101,
+              "first_request": {
+                "cached_tokens": 23296,
+                "hit_rate": 0.9627241920819902,
+                "input_tokens": 24198,
+                "request_id": null,
+                "timestamp": "2026-10-08T05:29:40.225Z",
+                "uncached_tokens": 902,
+                "write_tokens": null
+              },
+              "hit_rate": 0.9558901973657216,
+              "input_tokens": 73113,
+              "requests": 3,
+              "uncached_input_tokens": 3225
+            },
+            "orchestrator": {
+              "cache_read_tokens": 0,
+              "cost_usd_lower": 0,
+              "cost_usd_upper": 0,
+              "first_request": null,
+              "hit_rate": null,
+              "input_tokens": 0,
+              "requests": 0,
+              "uncached_input_tokens": 0
+            }
+          },
+          "briefing": {
+            "after": {
+              "bytes": 8780,
+              "sha256": "21f32d3d124059fe437b4243a907401fa09a383fea78d9bb4a5ed23ce3020290"
+            },
+            "before": {
+              "bytes": 8780,
+              "sha256": "21f32d3d124059fe437b4243a907401fa09a383fea78d9bb4a5ed23ce3020290"
+            },
+            "changed": false,
+            "common_prefix_bytes": 8780,
+            "scope": "Crew briefing file only; not the provider's full effective prompt"
+          },
+          "ended_at": "2026-10-08T05:29:45.796719+00:00",
+          "kind": "restart",
+          "started_at": "2026-10-08T05:29:35.460072+00:00",
+          "step": "same-briefing-codex-worker"
+        },
+        {
+          "agents": {
+            "claude-worker": {
+              "cache_read_tokens": 0,
+              "cost_usd_lower": 0,
+              "cost_usd_upper": 0,
+              "first_request": null,
+              "hit_rate": null,
+              "input_tokens": 0,
+              "requests": 0,
+              "uncached_input_tokens": 0
+            },
+            "codex-worker": {
+              "cache_read_tokens": 0,
+              "cost_usd_lower": 0,
+              "cost_usd_upper": 0,
+              "first_request": null,
+              "hit_rate": null,
+              "input_tokens": 0,
+              "requests": 0,
+              "uncached_input_tokens": 0
+            },
+            "orchestrator": {
+              "cache_read_tokens": 0,
+              "cost_usd_lower": 0,
+              "cost_usd_upper": 0,
+              "first_request": null,
+              "hit_rate": null,
+              "input_tokens": 0,
+              "requests": 0,
+              "uncached_input_tokens": 0
+            }
+          },
+          "ended_at": "2026-10-08T05:29:47.928608+00:00",
+          "kind": "add",
+          "started_at": "2026-10-08T05:29:46.825544+00:00",
+          "step": "roster-added"
+        },
+        {
+          "agents": {
+            "claude-worker": {
+              "cache_read_tokens": 138636,
+              "cost_usd_lower": 0.0182456,
+              "cost_usd_upper": 0.0182456,
+              "first_request": {
+                "cached_tokens": 45727,
+                "hit_rate": 0.9897619047619047,
+                "input_tokens": 46200,
+                "request_id": "req_011CfpDhMeHQGBzMVD1WoJbW",
+                "timestamp": "2026-10-08T05:29:52.053Z",
+                "uncached_tokens": 10,
+                "write_tokens": 463
+              },
+              "hit_rate": 0.9892608158925653,
+              "input_tokens": 140141,
+              "requests": 3,
+              "uncached_input_tokens": 1505
+            },
+            "codex-worker": {
+              "cache_read_tokens": 0,
+              "cost_usd_lower": 0,
+              "cost_usd_upper": 0,
+              "first_request": null,
+              "hit_rate": null,
+              "input_tokens": 0,
+              "requests": 0,
+              "uncached_input_tokens": 0
+            },
+            "orchestrator": {
+              "cache_read_tokens": 0,
+              "cost_usd_lower": 0,
+              "cost_usd_upper": 0,
+              "first_request": null,
+              "hit_rate": null,
+              "input_tokens": 0,
+              "requests": 0,
+              "uncached_input_tokens": 0
+            }
+          },
+          "briefing": {
+            "after": {
+              "bytes": 8861,
+              "sha256": "9d4b66ca421c3180c7e00e9a320e162f88e24fa64ac7269ca2c965b509020aea"
+            },
+            "before": {
+              "bytes": 8783,
+              "sha256": "8f47b279faccf0cfe1fb9434fc45293b5dd2161f2fc0b0ab2fe8bb1e95b1fc42"
+            },
+            "changed": true,
+            "common_prefix_bytes": 575,
+            "scope": "Crew briefing file only; not the provider's full effective prompt"
+          },
+          "ended_at": "2026-10-08T05:29:59.484920+00:00",
+          "kind": "restart",
+          "started_at": "2026-10-08T05:29:48.950640+00:00",
+          "step": "added-briefing-claude-worker"
+        },
+        {
+          "agents": {
+            "claude-worker": {
+              "cache_read_tokens": 0,
+              "cost_usd_lower": 0,
+              "cost_usd_upper": 0,
+              "first_request": null,
+              "hit_rate": null,
+              "input_tokens": 0,
+              "requests": 0,
+              "uncached_input_tokens": 0
+            },
+            "codex-worker": {
+              "cache_read_tokens": 72960,
+              "cost_usd_lower": 0.0008902000000000001,
+              "cost_usd_upper": 0.0018409500000000003,
+              "first_request": {
+                "cached_tokens": 24320,
+                "hit_rate": 0.9866526025396568,
+                "input_tokens": 24649,
+                "request_id": null,
+                "timestamp": "2026-10-08T05:30:05.303Z",
+                "uncached_tokens": 329,
+                "write_tokens": null
+              },
+              "hit_rate": 0.983672864057381,
+              "input_tokens": 74171,
+              "requests": 3,
+              "uncached_input_tokens": 1211
+            },
+            "orchestrator": {
+              "cache_read_tokens": 0,
+              "cost_usd_lower": 0,
+              "cost_usd_upper": 0,
+              "first_request": null,
+              "hit_rate": null,
+              "input_tokens": 0,
+              "requests": 0,
+              "uncached_input_tokens": 0
+            }
+          },
+          "briefing": {
+            "after": {
+              "bytes": 8858,
+              "sha256": "3377293ef3f4eee94267c5b81c15183c7baa1f4d9725fa60ea63f2c2a2b4d7d0"
+            },
+            "before": {
+              "bytes": 8780,
+              "sha256": "21f32d3d124059fe437b4243a907401fa09a383fea78d9bb4a5ed23ce3020290"
+            },
+            "changed": true,
+            "common_prefix_bytes": 573,
+            "scope": "Crew briefing file only; not the provider's full effective prompt"
+          },
+          "ended_at": "2026-10-08T05:30:10.851622+00:00",
+          "kind": "restart",
+          "started_at": "2026-10-08T05:30:00.507041+00:00",
+          "step": "added-briefing-codex-worker"
+        },
+        {
+          "agents": {
+            "claude-worker": {
+              "cache_read_tokens": 0,
+              "cost_usd_lower": 0,
+              "cost_usd_upper": 0,
+              "first_request": null,
+              "hit_rate": null,
+              "input_tokens": 0,
+              "requests": 0,
+              "uncached_input_tokens": 0
+            },
+            "codex-worker": {
+              "cache_read_tokens": 0,
+              "cost_usd_lower": 0,
+              "cost_usd_upper": 0,
+              "first_request": null,
+              "hit_rate": null,
+              "input_tokens": 0,
+              "requests": 0,
+              "uncached_input_tokens": 0
+            },
+            "orchestrator": {
+              "cache_read_tokens": 0,
+              "cost_usd_lower": 0,
+              "cost_usd_upper": 0,
+              "first_request": null,
+              "hit_rate": null,
+              "input_tokens": 0,
+              "requests": 0,
+              "uncached_input_tokens": 0
+            }
+          },
+          "ended_at": "2026-10-08T05:30:12.999615+00:00",
+          "kind": "remove",
+          "started_at": "2026-10-08T05:30:11.873430+00:00",
+          "step": "roster-removed"
+        },
+        {
+          "agents": {
+            "claude-worker": {
+              "cache_read_tokens": 143256,
+              "cost_usd_lower": 0.0183906,
+              "cost_usd_upper": 0.0183906,
+              "first_request": {
+                "cached_tokens": 47268,
+                "hit_rate": 0.9900923734316416,
+                "input_tokens": 47741,
+                "request_id": "req_011CfpDjD5PxUjq5KHexHvTK",
+                "timestamp": "2026-10-08T05:30:17.115Z",
+                "uncached_tokens": 10,
+                "write_tokens": 463
+              },
+              "hit_rate": 0.9903629450397511,
+              "input_tokens": 144650,
+              "requests": 3,
+              "uncached_input_tokens": 1394
+            },
+            "codex-worker": {
+              "cache_read_tokens": 0,
+              "cost_usd_lower": 0,
+              "cost_usd_upper": 0,
+              "first_request": null,
+              "hit_rate": null,
+              "input_tokens": 0,
+              "requests": 0,
+              "uncached_input_tokens": 0
+            },
+            "orchestrator": {
+              "cache_read_tokens": 0,
+              "cost_usd_lower": 0,
+              "cost_usd_upper": 0,
+              "first_request": null,
+              "hit_rate": null,
+              "input_tokens": 0,
+              "requests": 0,
+              "uncached_input_tokens": 0
+            }
+          },
+          "briefing": {
+            "after": {
+              "bytes": 8783,
+              "sha256": "8f47b279faccf0cfe1fb9434fc45293b5dd2161f2fc0b0ab2fe8bb1e95b1fc42"
+            },
+            "before": {
+              "bytes": 8861,
+              "sha256": "9d4b66ca421c3180c7e00e9a320e162f88e24fa64ac7269ca2c965b509020aea"
+            },
+            "changed": true,
+            "common_prefix_bytes": 575,
+            "scope": "Crew briefing file only; not the provider's full effective prompt"
+          },
+          "ended_at": "2026-10-08T05:30:23.530216+00:00",
+          "kind": "restart",
+          "started_at": "2026-10-08T05:30:14.022386+00:00",
+          "step": "removed-briefing-claude-worker"
+        },
+        {
+          "agents": {
+            "claude-worker": {
+              "cache_read_tokens": 0,
+              "cost_usd_lower": 0,
+              "cost_usd_upper": 0,
+              "first_request": null,
+              "hit_rate": null,
+              "input_tokens": 0,
+              "requests": 0,
+              "uncached_input_tokens": 0
+            },
+            "codex-worker": {
+              "cache_read_tokens": 48640,
+              "cost_usd_lower": 0.0006245000000000001,
+              "cost_usd_upper": 0.0013068000000000003,
+              "first_request": {
+                "cached_tokens": 24320,
+                "hit_rate": 0.9781996621349851,
+                "input_tokens": 24862,
+                "request_id": null,
+                "timestamp": "2026-10-08T05:30:29.463Z",
+                "uncached_tokens": 542,
+                "write_tokens": null
+              },
+              "hit_rate": 0.9767852839585509,
+              "input_tokens": 49796,
+              "requests": 2,
+              "uncached_input_tokens": 1156
+            },
+            "orchestrator": {
+              "cache_read_tokens": 0,
+              "cost_usd_lower": 0,
+              "cost_usd_upper": 0,
+              "first_request": null,
+              "hit_rate": null,
+              "input_tokens": 0,
+              "requests": 0,
+              "uncached_input_tokens": 0
+            }
+          },
+          "briefing": {
+            "after": {
+              "bytes": 8780,
+              "sha256": "21f32d3d124059fe437b4243a907401fa09a383fea78d9bb4a5ed23ce3020290"
+            },
+            "before": {
+              "bytes": 8858,
+              "sha256": "3377293ef3f4eee94267c5b81c15183c7baa1f4d9725fa60ea63f2c2a2b4d7d0"
+            },
+            "changed": true,
+            "common_prefix_bytes": 573,
+            "scope": "Crew briefing file only; not the provider's full effective prompt"
+          },
+          "ended_at": "2026-10-08T05:30:33.855351+00:00",
+          "kind": "restart",
+          "started_at": "2026-10-08T05:30:24.552997+00:00",
+          "step": "removed-briefing-codex-worker"
+        },
+        {
+          "agents": {
+            "claude-worker": {
+              "cache_read_tokens": 499778,
+              "cost_usd_lower": 0.0629278,
+              "cost_usd_upper": 0.0629278,
+              "first_request": {
+                "cached_tokens": 48685,
+                "hit_rate": 0.9987486152709966,
+                "input_tokens": 48746,
+                "request_id": "req_011CfpDkmxMFrryYtbkxDNhi",
+                "timestamp": "2026-10-08T05:30:38.144Z",
+                "uncached_tokens": 10,
+                "write_tokens": 51
+              },
+              "hit_rate": 0.9940054734363315,
+              "input_tokens": 502792,
+              "requests": 10,
+              "uncached_input_tokens": 3014
+            },
+            "codex-worker": {
+              "cache_read_tokens": 0,
+              "cost_usd_lower": 0,
+              "cost_usd_upper": 0,
+              "first_request": null,
+              "hit_rate": null,
+              "input_tokens": 0,
+              "requests": 0,
+              "uncached_input_tokens": 0
+            },
+            "orchestrator": {
+              "cache_read_tokens": 92487,
+              "cost_usd_lower": 0.0126107,
+              "cost_usd_upper": 0.0126107,
+              "first_request": {
+                "cached_tokens": 46161,
+                "hit_rate": 0.9962447393978634,
+                "input_tokens": 46335,
+                "request_id": "req_011CfpDner2zoU3D4Z7N9kS4",
+                "timestamp": "2026-10-08T05:31:04.419Z",
+                "uncached_tokens": 9,
+                "write_tokens": 165
+              },
+              "hit_rate": 0.9928824476650564,
+              "input_tokens": 93150,
+              "requests": 2,
+              "uncached_input_tokens": 663
+            }
+          },
+          "ended_at": "2026-10-08T05:31:10.700325+00:00",
+          "kind": "task",
+          "started_at": "2026-10-08T05:30:34.877322+00:00",
+          "step": "control-window"
+        },
+        {
+          "agents": {
+            "claude-worker": {
+              "cache_read_tokens": 315470,
+              "cost_usd_lower": 0.043357,
+              "cost_usd_upper": 0.043357,
+              "first_request": {
+                "cached_tokens": 51670,
+                "hit_rate": 0.9977985478139966,
+                "input_tokens": 51784,
+                "request_id": "req_011CfpDoVUk4kk7Q86xCv3y2",
+                "timestamp": "2026-10-08T05:31:16.731Z",
+                "uncached_tokens": 10,
+                "write_tokens": 104
+              },
+              "hit_rate": 0.9919941135037231,
+              "input_tokens": 318016,
+              "requests": 6,
+              "uncached_input_tokens": 2546
+            },
+            "codex-worker": {
+              "cache_read_tokens": 0,
+              "cost_usd_lower": 0,
+              "cost_usd_upper": 0,
+              "first_request": null,
+              "hit_rate": null,
+              "input_tokens": 0,
+              "requests": 0,
+              "uncached_input_tokens": 0
+            },
+            "orchestrator": {
+              "cache_read_tokens": 0,
+              "cost_usd_lower": 0,
+              "cost_usd_upper": 0,
+              "first_request": null,
+              "hit_rate": null,
+              "input_tokens": 0,
+              "requests": 0,
+              "uncached_input_tokens": 0
+            }
+          },
+          "ended_at": "2026-10-08T05:31:34.240655+00:00",
+          "kind": "message",
+          "started_at": "2026-10-08T05:31:11.722952+00:00",
+          "step": "idle-delivery-control"
+        },
+        {
+          "agents": {
+            "claude-worker": {
+              "cache_read_tokens": 556618,
+              "cost_usd_lower": 0.06985480000000001,
+              "cost_usd_upper": 0.06985480000000001,
+              "first_request": {
+                "cached_tokens": 54259,
+                "hit_rate": 0.9988586366230371,
+                "input_tokens": 54321,
+                "request_id": "req_011CfpDqE5bTXHPU5Ca23ZYc",
+                "timestamp": "2026-10-08T05:31:38.741Z",
+                "uncached_tokens": 10,
+                "write_tokens": 52
+              },
+              "hit_rate": 0.994047693458892,
+              "input_tokens": 559951,
+              "requests": 10,
+              "uncached_input_tokens": 3333
+            },
+            "codex-worker": {
+              "cache_read_tokens": 0,
+              "cost_usd_lower": 0,
+              "cost_usd_upper": 0,
+              "first_request": null,
+              "hit_rate": null,
+              "input_tokens": 0,
+              "requests": 0,
+              "uncached_input_tokens": 0
+            },
+            "orchestrator": {
+              "cache_read_tokens": 46990,
+              "cost_usd_lower": 0.006432,
+              "cost_usd_upper": 0.006432,
+              "first_request": {
+                "cached_tokens": 46990,
+                "hit_rate": 0.9963741226861178,
+                "input_tokens": 47161,
+                "request_id": "req_011CfpDsUAyPHv8uvnsPGDCU",
+                "timestamp": "2026-10-08T05:32:10.667Z",
+                "uncached_tokens": 9,
+                "write_tokens": 162
+              },
+              "hit_rate": 0.9963741226861178,
+              "input_tokens": 47161,
+              "requests": 1,
+              "uncached_input_tokens": 171
+            }
+          },
+          "ended_at": "2026-10-08T05:32:14.176874+00:00",
+          "kind": "fold",
+          "native_evidence": {
+            "folded_rows": 1,
+            "idle_rows": 0,
+            "pending_tool_ids": [],
+            "post_fold_thinking_blocks": 7,
+            "thinking_drops": [],
+            "turn_ends": 7
+          },
+          "started_at": "2026-10-08T05:31:35.265625+00:00",
+          "step": "folded-delivery"
+        },
+        {
+          "agents": {
+            "claude-worker": {
+              "cache_read_tokens": 170843,
+              "cost_usd_lower": 0.0278523,
+              "cost_usd_upper": 0.0278523,
+              "first_request": {
+                "cached_tokens": 54905,
+                "hit_rate": 0.9521703692142275,
+                "input_tokens": 57663,
+                "request_id": "req_011CfpDtAvfoJP3GE1FnpZsE",
+                "timestamp": "2026-10-08T05:32:20.003Z",
+                "uncached_tokens": 10,
+                "write_tokens": 2748
+              },
+              "hit_rate": 0.9783981903043839,
+              "input_tokens": 174615,
+              "requests": 3,
+              "uncached_input_tokens": 3772
+            },
+            "codex-worker": {
+              "cache_read_tokens": 0,
+              "cost_usd_lower": 0,
+              "cost_usd_upper": 0,
+              "first_request": null,
+              "hit_rate": null,
+              "input_tokens": 0,
+              "requests": 0,
+              "uncached_input_tokens": 0
+            },
+            "orchestrator": {
+              "cache_read_tokens": 0,
+              "cost_usd_lower": 0,
+              "cost_usd_upper": 0,
+              "first_request": null,
+              "hit_rate": null,
+              "input_tokens": 0,
+              "requests": 0,
+              "uncached_input_tokens": 0
+            }
+          },
+          "ended_at": "2026-10-08T05:32:28.544056+00:00",
+          "kind": "message",
+          "matched_thinking_drops": [],
+          "native_evidence": {
+            "folded_rows": 1,
+            "idle_rows": 0,
+            "pending_tool_ids": [],
+            "post_fold_thinking_blocks": 10,
+            "thinking_drops": [],
+            "turn_ends": 8
+          },
+          "started_at": "2026-10-08T05:32:15.200948+00:00",
+          "step": "after-fold-probe",
+          "thinking_observed_after_fold": true
+        },
+        {
+          "agents": {
+            "claude-worker": {
+              "cache_read_tokens": 734084,
+              "cost_usd_lower": 0.2565234,
+              "cost_usd_upper": 0.2565234,
+              "first_request": {
+                "cached_tokens": 58719,
+                "hit_rate": 0.9989792272750472,
+                "input_tokens": 58779,
+                "request_id": "req_011CfpDuEMaU1fmKZJKhDqKX",
+                "timestamp": "2026-10-08T05:32:33.010Z",
+                "uncached_tokens": 10,
+                "write_tokens": 50
+              },
+              "hit_rate": 0.892956064047061,
+              "input_tokens": 822083,
+              "requests": 8,
+              "uncached_input_tokens": 87999
+            },
+            "codex-worker": {
+              "cache_read_tokens": 0,
+              "cost_usd_lower": 0,
+              "cost_usd_upper": 0,
+              "first_request": null,
+              "hit_rate": null,
+              "input_tokens": 0,
+              "requests": 0,
+              "uncached_input_tokens": 0
+            },
+            "orchestrator": {
+              "cache_read_tokens": 47438,
+              "cost_usd_lower": 0.0063878,
+              "cost_usd_upper": 0.0063878,
+              "first_request": {
+                "cached_tokens": 47438,
+                "hit_rate": 0.9964501018757745,
+                "input_tokens": 47607,
+                "request_id": "req_011CfpDvf2fGyKpCCgW8bgT9",
+                "timestamp": "2026-10-08T05:32:53.163Z",
+                "uncached_tokens": 9,
+                "write_tokens": 160
+              },
+              "hit_rate": 0.9964501018757745,
+              "input_tokens": 47607,
+              "requests": 1,
+              "uncached_input_tokens": 169
+            }
+          },
+          "ended_at": "2026-10-08T05:32:57.226175+00:00",
+          "kind": "load",
+          "started_at": "2026-10-08T05:32:29.569310+00:00",
+          "step": "large-context"
+        },
+        {
+          "agents": {
+            "claude-worker": {
+              "cache_read_tokens": 0,
+              "cost_usd_lower": 0,
+              "cost_usd_upper": 0,
+              "first_request": null,
+              "hit_rate": null,
+              "input_tokens": 0,
+              "requests": 0,
+              "uncached_input_tokens": 0
+            },
+            "codex-worker": {
+              "cache_read_tokens": 0,
+              "cost_usd_lower": 0,
+              "cost_usd_upper": 0,
+              "first_request": null,
+              "hit_rate": null,
+              "input_tokens": 0,
+              "requests": 0,
+              "uncached_input_tokens": 0
+            },
+            "orchestrator": {
+              "cache_read_tokens": 0,
+              "cost_usd_lower": 0,
+              "cost_usd_upper": 0,
+              "first_request": null,
+              "hit_rate": null,
+              "input_tokens": 0,
+              "requests": 0,
+              "uncached_input_tokens": 0
+            }
+          },
+          "ended_at": "2026-10-08T05:33:21.827293+00:00",
+          "input_tokens_before": 146658,
+          "kind": "compact",
+          "started_at": "2026-10-08T05:32:58.250001+00:00",
+          "step": "forced-compaction"
+        },
+        {
+          "agents": {
+            "claude-worker": {
+              "cache_read_tokens": 145020,
+              "cost_usd_lower": 0.039082,
+              "cost_usd_upper": 0.039082,
+              "first_request": {
+                "cached_tokens": 30201,
+                "hit_rate": 0.8032394478576558,
+                "input_tokens": 37599,
+                "request_id": "req_011CfpDyAAv2a8wBp5rN3qxB",
+                "timestamp": "2026-10-08T05:33:31.420Z",
+                "uncached_tokens": 9,
+                "write_tokens": 7389
+              },
+              "hit_rate": 0.9377909984480083,
+              "input_tokens": 154640,
+              "requests": 4,
+              "uncached_input_tokens": 9620
+            },
+            "codex-worker": {
+              "cache_read_tokens": 0,
+              "cost_usd_lower": 0,
+              "cost_usd_upper": 0,
+              "first_request": null,
+              "hit_rate": null,
+              "input_tokens": 0,
+              "requests": 0,
+              "uncached_input_tokens": 0
+            },
+            "orchestrator": {
+              "cache_read_tokens": 0,
+              "cost_usd_lower": 0,
+              "cost_usd_upper": 0,
+              "first_request": null,
+              "hit_rate": null,
+              "input_tokens": 0,
+              "requests": 0,
+              "uncached_input_tokens": 0
+            }
+          },
+          "ended_at": "2026-10-08T05:33:45.465702+00:00",
+          "kind": "message",
+          "started_at": "2026-10-08T05:33:22.850898+00:00",
+          "step": "post-compaction"
+        },
+        {
+          "agents": {
+            "claude-worker": {
+              "cache_read_tokens": 0,
+              "cost_usd_lower": 0,
+              "cost_usd_upper": 0,
+              "first_request": null,
+              "hit_rate": null,
+              "input_tokens": 0,
+              "requests": 0,
+              "uncached_input_tokens": 0
+            },
+            "codex-worker": {
+              "cache_read_tokens": 0,
+              "cost_usd_lower": 0,
+              "cost_usd_upper": 0,
+              "first_request": null,
+              "hit_rate": null,
+              "input_tokens": 0,
+              "requests": 0,
+              "uncached_input_tokens": 0
+            },
+            "orchestrator": {
+              "cache_read_tokens": 0,
+              "cost_usd_lower": 0,
+              "cost_usd_upper": 0,
+              "first_request": null,
+              "hit_rate": null,
+              "input_tokens": 0,
+              "requests": 0,
+              "uncached_input_tokens": 0
+            }
+          },
+          "ended_at": "2026-10-08T05:38:56.777732+00:00",
+          "kind": "idle",
+          "observed_quiet_seconds": 310.2877213181928,
+          "started_at": "2026-10-08T05:33:46.489995+00:00",
+          "step": "over-five-minutes"
+        },
+        {
+          "agents": {
+            "claude-worker": {
+              "cache_read_tokens": 326239,
+              "cost_usd_lower": 0.0404279,
+              "cost_usd_upper": 0.0404279,
+              "first_request": {
+                "cached_tokens": 39864,
+                "hit_rate": 0.9980721564307353,
+                "input_tokens": 39941,
+                "request_id": "req_011CfpEPs7SJEBWKyz29ejQu",
+                "timestamp": "2026-10-08T05:39:01.906Z",
+                "uncached_tokens": 10,
+                "write_tokens": 67
+              },
+              "hit_rate": 0.9940340710000396,
+              "input_tokens": 328197,
+              "requests": 8,
+              "uncached_input_tokens": 1958
+            },
+            "codex-worker": {
+              "cache_read_tokens": 123648,
+              "cost_usd_lower": 0.00171068,
+              "cost_usd_upper": 0.0036057100000000003,
+              "first_request": {
+                "cached_tokens": 24320,
+                "hit_rate": 0.9721778062040294,
+                "input_tokens": 25016,
+                "request_id": null,
+                "timestamp": "2026-10-08T05:39:01.007Z",
+                "uncached_tokens": 696,
+                "write_tokens": null
+              },
+              "hit_rate": 0.9710448816114973,
+              "input_tokens": 127335,
+              "requests": 5,
+              "uncached_input_tokens": 3687
+            },
+            "orchestrator": {
+              "cache_read_tokens": 96065,
+              "cost_usd_lower": 0.0127965,
+              "cost_usd_upper": 0.0127965,
+              "first_request": {
+                "cached_tokens": 47867,
+                "hit_rate": 0.9973953992332055,
+                "input_tokens": 47992,
+                "request_id": "req_011CfpEQMpqYrQZQXLb9P5HU",
+                "timestamp": "2026-10-08T05:39:08.854Z",
+                "uncached_tokens": 10,
+                "write_tokens": 115
+              },
+              "hit_rate": 0.9969178721902825,
+              "input_tokens": 96362,
+              "requests": 2,
+              "uncached_input_tokens": 297
+            }
+          },
+          "ended_at": "2026-10-08T05:39:19.375355+00:00",
+          "kind": "probes",
+          "native_request_gap_seconds": {
+            "claude-worker": 319.875,
+            "codex-worker": 510.470999956131
+          },
+          "started_at": "2026-10-08T05:38:57.805353+00:00",
+          "step": "after-five-minutes"
+        }
+      ],
+      "steps": 18
+    },
+    {
+      "agents": [
+        {
+          "agent": "orchestrator",
+          "cached_tokens": 846917,
+          "cost_usd_lower": 0.14284470000000005,
+          "cost_usd_upper": 0.14284470000000005,
+          "hit_rate": 0.974611584399623,
+          "input_tokens": 868979,
+          "models": [
+            "claude-haiku-4-5-20251001"
+          ],
+          "request_count": 20,
+          "runtime": "claude",
+          "session_id": "e60e27f1-d188-44a5-bd4d-9709f62a5ebd",
+          "source_path": "/home/nade/.claude/projects/-home-nade-workspaces-personal-crew--crew-worktrees-qa-target-cache-bench-lifecycle-final-02r-workspace/e60e27f1-d188-44a5-bd4d-9709f62a5ebd.jsonl"
+        },
+        {
+          "agent": "claude-worker",
+          "cached_tokens": 3542763,
+          "cost_usd_lower": 0.6841203000000002,
+          "cost_usd_upper": 0.6841203000000002,
+          "hit_rate": 0.9628426058769669,
+          "input_tokens": 3679483,
+          "models": [
+            "claude-haiku-4-5-20251001"
+          ],
+          "request_count": 70,
+          "runtime": "claude",
+          "session_id": "7862663a-3539-4543-be61-4a311528c7a1",
+          "source_path": "/home/nade/.claude/projects/-home-nade-workspaces-personal-crew--crew-worktrees-qa-target-cache-bench-lifecycle-final-02r-workspace--crew-worktrees-claude-worker/7862663a-3539-4543-be61-4a311528c7a1.jsonl"
+        },
+        {
+          "agent": "codex-worker",
+          "cached_tokens": 473600,
+          "cost_usd_lower": 0.008988300000000001,
+          "cost_usd_upper": 0.019903499999999998,
+          "hit_rate": 0.9247507507742054,
+          "input_tokens": 512138,
+          "models": [
+            "gpt-6-luna"
+          ],
+          "request_count": 22,
+          "runtime": "codex",
+          "session_id": "01a11a03-0976-7552-ba20-5d3b2788d32e",
+          "source_path": "/home/nade/.codex/sessions/2026/10/08/rollout-2026-10-08T00-36-09-01a11a03-0976-7552-ba20-5d3b2788d32e.jsonl"
+        }
+      ],
+      "cached_tokens": 4863280,
+      "cleanup": {
+        "remaining_processes": [],
+        "stop_returncode": 0
+      },
+      "cost_usd_lower": 0.8359533000000002,
+      "cost_usd_upper": 0.8468685000000002,
+      "duration_seconds": 639.93451092951,
+      "finished_at": "2026-10-08T05:46:47.519849+00:00",
+      "hit_rate": 0.9610085760581749,
+      "input_tokens": 5060600,
+      "label": "lifecycle-final-02r",
+      "report": "notes/prompt-cache/lifecycle-before-02.json",
+      "report_sha256": "ee78bf90e47cf0d0e1f573aa151e3aedccae68c34ff6999556a7d238a1d02ab2",
+      "requests": 112,
+      "started_at": "2026-10-08T05:36:07.585354+00:00",
+      "step_observations": [
+        {
+          "agents": {
+            "claude-worker": {
+              "cache_read_tokens": 432887,
+              "cost_usd_lower": 0.09024170000000001,
+              "cost_usd_upper": 0.09024170000000001,
+              "first_request": {
+                "cached_tokens": 23940,
+                "hit_rate": 0.612965997541991,
+                "input_tokens": 39056,
+                "request_id": "req_011CfpEBQbRYfuNNjYz7SXGj",
+                "timestamp": "2026-10-08T05:36:12.884Z",
+                "uncached_tokens": 10,
+                "write_tokens": 15106
+              },
+              "hit_rate": 0.9577548613769162,
+              "input_tokens": 451981,
+              "requests": 11,
+              "uncached_input_tokens": 19094
+            },
+            "codex-worker": {
+              "cache_read_tokens": 145408,
+              "cost_usd_lower": 0.004586580000000001,
+              "cost_usd_upper": 0.01065991,
+              "first_request": {
+                "cached_tokens": 11008,
+                "hit_rate": 0.531376713651284,
+                "input_tokens": 20716,
+                "request_id": null,
+                "timestamp": "2026-10-08T05:36:11.445Z",
+                "uncached_tokens": 9708,
+                "write_tokens": null
+              },
+              "hit_rate": 0.830224445167663,
+              "input_tokens": 175143,
+              "requests": 8,
+              "uncached_input_tokens": 29735
+            },
+            "orchestrator": {
+              "cache_read_tokens": 272396,
+              "cost_usd_lower": 0.0707296,
+              "cost_usd_upper": 0.0707296,
+              "first_request": {
+                "cached_tokens": 23715,
+                "hit_rate": 0.5886514260183185,
+                "input_tokens": 40287,
+                "request_id": "req_011CfpEBQNmZbZAnNeCmwuzf",
+                "timestamp": "2026-10-08T05:36:14.337Z",
+                "uncached_tokens": 10,
+                "write_tokens": 16562
+              },
+              "hit_rate": 0.9348768408661122,
+              "input_tokens": 291371,
+              "requests": 7,
+              "uncached_input_tokens": 18975
+            }
+          },
+          "ended_at": "2026-10-08T05:36:43.745672+00:00",
+          "kind": "warm",
+          "started_at": "2026-10-08T05:36:07.928962+00:00",
+          "step": "warm"
+        },
+        {
+          "agents": {
+            "claude-worker": {
+              "cache_read_tokens": 219221,
+              "cost_usd_lower": 0.0278161,
+              "cost_usd_upper": 0.0278161,
+              "first_request": {
+                "cached_tokens": 43004,
+                "hit_rate": 0.9891206844998505,
+                "input_tokens": 43477,
+                "request_id": "req_011CfpEDzgL63tJp6sM93Nqy",
+                "timestamp": "2026-10-08T05:36:47.315Z",
+                "uncached_tokens": 10,
+                "write_tokens": 463
+              },
+              "hit_rate": 0.9917437999330456,
+              "input_tokens": 221046,
+              "requests": 5,
+              "uncached_input_tokens": 1825
+            },
+            "codex-worker": {
+              "cache_read_tokens": 0,
+              "cost_usd_lower": 0,
+              "cost_usd_upper": 0,
+              "first_request": null,
+              "hit_rate": null,
+              "input_tokens": 0,
+              "requests": 0,
+              "uncached_input_tokens": 0
+            },
+            "orchestrator": {
+              "cache_read_tokens": 0,
+              "cost_usd_lower": 0,
+              "cost_usd_upper": 0,
+              "first_request": null,
+              "hit_rate": null,
+              "input_tokens": 0,
+              "requests": 0,
+              "uncached_input_tokens": 0
+            }
+          },
+          "briefing": {
+            "after": {
+              "bytes": 8783,
+              "sha256": "8f47b279faccf0cfe1fb9434fc45293b5dd2161f2fc0b0ab2fe8bb1e95b1fc42"
+            },
+            "before": {
+              "bytes": 8783,
+              "sha256": "8f47b279faccf0cfe1fb9434fc45293b5dd2161f2fc0b0ab2fe8bb1e95b1fc42"
+            },
+            "changed": false,
+            "common_prefix_bytes": 8783,
+            "scope": "Crew briefing file only; not the provider's full effective prompt"
+          },
+          "ended_at": "2026-10-08T05:36:55.187559+00:00",
+          "kind": "restart",
+          "started_at": "2026-10-08T05:36:44.766708+00:00",
+          "step": "same-briefing-claude-worker"
+        },
+        {
+          "agents": {
+            "claude-worker": {
+              "cache_read_tokens": 0,
+              "cost_usd_lower": 0,
+              "cost_usd_upper": 0,
+              "first_request": null,
+              "hit_rate": null,
+              "input_tokens": 0,
+              "requests": 0,
+              "uncached_input_tokens": 0
+            },
+            "codex-worker": {
+              "cache_read_tokens": 66816,
+              "cost_usd_lower": 0.00096166,
+              "cost_usd_upper": 0.00203782,
+              "first_request": {
+                "cached_tokens": 22272,
+                "hit_rate": 0.9860975825732755,
+                "input_tokens": 22586,
+                "request_id": null,
+                "timestamp": "2026-10-08T05:37:01.268Z",
+                "uncached_tokens": 314,
+                "write_tokens": null
+              },
+              "hit_rate": 0.9668625010852893,
+              "input_tokens": 69106,
+              "requests": 3,
+              "uncached_input_tokens": 2290
+            },
+            "orchestrator": {
+              "cache_read_tokens": 0,
+              "cost_usd_lower": 0,
+              "cost_usd_upper": 0,
+              "first_request": null,
+              "hit_rate": null,
+              "input_tokens": 0,
+              "requests": 0,
+              "uncached_input_tokens": 0
+            }
+          },
+          "briefing": {
+            "after": {
+              "bytes": 8780,
+              "sha256": "21f32d3d124059fe437b4243a907401fa09a383fea78d9bb4a5ed23ce3020290"
+            },
+            "before": {
+              "bytes": 8780,
+              "sha256": "21f32d3d124059fe437b4243a907401fa09a383fea78d9bb4a5ed23ce3020290"
+            },
+            "changed": false,
+            "common_prefix_bytes": 8780,
+            "scope": "Crew briefing file only; not the provider's full effective prompt"
+          },
+          "ended_at": "2026-10-08T05:37:06.595594+00:00",
+          "kind": "restart",
+          "started_at": "2026-10-08T05:36:56.215180+00:00",
+          "step": "same-briefing-codex-worker"
+        },
+        {
+          "agents": {
+            "claude-worker": {
+              "cache_read_tokens": 0,
+              "cost_usd_lower": 0,
+              "cost_usd_upper": 0,
+              "first_request": null,
+              "hit_rate": null,
+              "input_tokens": 0,
+              "requests": 0,
+              "uncached_input_tokens": 0
+            },
+            "codex-worker": {
+              "cache_read_tokens": 0,
+              "cost_usd_lower": 0,
+              "cost_usd_upper": 0,
+              "first_request": null,
+              "hit_rate": null,
+              "input_tokens": 0,
+              "requests": 0,
+              "uncached_input_tokens": 0
+            },
+            "orchestrator": {
+              "cache_read_tokens": 0,
+              "cost_usd_lower": 0,
+              "cost_usd_upper": 0,
+              "first_request": null,
+              "hit_rate": null,
+              "input_tokens": 0,
+              "requests": 0,
+              "uncached_input_tokens": 0
+            }
+          },
+          "ended_at": "2026-10-08T05:37:08.714655+00:00",
+          "kind": "add",
+          "started_at": "2026-10-08T05:37:07.617725+00:00",
+          "step": "roster-added"
+        },
+        {
+          "agents": {
+            "claude-worker": {
+              "cache_read_tokens": 136182,
+              "cost_usd_lower": 0.0181322,
+              "cost_usd_upper": 0.0181322,
+              "first_request": {
+                "cached_tokens": 44871,
+                "hit_rate": 0.9895686309103741,
+                "input_tokens": 45344,
+                "request_id": "req_011CfpEFrgBP6as4Utgfqw9D",
+                "timestamp": "2026-10-08T05:37:12.888Z",
+                "uncached_tokens": 10,
+                "write_tokens": 463
+              },
+              "hit_rate": 0.9888108740007115,
+              "input_tokens": 137723,
+              "requests": 3,
+              "uncached_input_tokens": 1541
+            },
+            "codex-worker": {
+              "cache_read_tokens": 0,
+              "cost_usd_lower": 0,
+              "cost_usd_upper": 0,
+              "first_request": null,
+              "hit_rate": null,
+              "input_tokens": 0,
+              "requests": 0,
+              "uncached_input_tokens": 0
+            },
+            "orchestrator": {
+              "cache_read_tokens": 0,
+              "cost_usd_lower": 0,
+              "cost_usd_upper": 0,
+              "first_request": null,
+              "hit_rate": null,
+              "input_tokens": 0,
+              "requests": 0,
+              "uncached_input_tokens": 0
+            }
+          },
+          "briefing": {
+            "after": {
+              "bytes": 8861,
+              "sha256": "9d4b66ca421c3180c7e00e9a320e162f88e24fa64ac7269ca2c965b509020aea"
+            },
+            "before": {
+              "bytes": 8783,
+              "sha256": "8f47b279faccf0cfe1fb9434fc45293b5dd2161f2fc0b0ab2fe8bb1e95b1fc42"
+            },
+            "changed": true,
+            "common_prefix_bytes": 575,
+            "scope": "Crew briefing file only; not the provider's full effective prompt"
+          },
+          "ended_at": "2026-10-08T05:37:19.261247+00:00",
+          "kind": "restart",
+          "started_at": "2026-10-08T05:37:09.737331+00:00",
+          "step": "added-briefing-claude-worker"
+        },
+        {
+          "agents": {
+            "claude-worker": {
+              "cache_read_tokens": 0,
+              "cost_usd_lower": 0,
+              "cost_usd_upper": 0,
+              "first_request": null,
+              "hit_rate": null,
+              "input_tokens": 0,
+              "requests": 0,
+              "uncached_input_tokens": 0
+            },
+            "codex-worker": {
+              "cache_read_tokens": 46592,
+              "cost_usd_lower": 0.0005334199999999999,
+              "cost_usd_upper": 0.00108959,
+              "first_request": {
+                "cached_tokens": 23296,
+                "hit_rate": 0.9918256130790191,
+                "input_tokens": 23488,
+                "request_id": null,
+                "timestamp": "2026-10-08T05:37:26.501Z",
+                "uncached_tokens": 192,
+                "write_tokens": null
+              },
+              "hit_rate": 0.9903288201160542,
+              "input_tokens": 47047,
+              "requests": 2,
+              "uncached_input_tokens": 455
+            },
+            "orchestrator": {
+              "cache_read_tokens": 0,
+              "cost_usd_lower": 0,
+              "cost_usd_upper": 0,
+              "first_request": null,
+              "hit_rate": null,
+              "input_tokens": 0,
+              "requests": 0,
+              "uncached_input_tokens": 0
+            }
+          },
+          "briefing": {
+            "after": {
+              "bytes": 8858,
+              "sha256": "3377293ef3f4eee94267c5b81c15183c7baa1f4d9725fa60ea63f2c2a2b4d7d0"
+            },
+            "before": {
+              "bytes": 8780,
+              "sha256": "21f32d3d124059fe437b4243a907401fa09a383fea78d9bb4a5ed23ce3020290"
+            },
+            "changed": true,
+            "common_prefix_bytes": 573,
+            "scope": "Crew briefing file only; not the provider's full effective prompt"
+          },
+          "ended_at": "2026-10-08T05:37:31.633662+00:00",
+          "kind": "restart",
+          "started_at": "2026-10-08T05:37:20.282131+00:00",
+          "step": "added-briefing-codex-worker"
+        },
+        {
+          "agents": {
+            "claude-worker": {
+              "cache_read_tokens": 0,
+              "cost_usd_lower": 0,
+              "cost_usd_upper": 0,
+              "first_request": null,
+              "hit_rate": null,
+              "input_tokens": 0,
+              "requests": 0,
+              "uncached_input_tokens": 0
+            },
+            "codex-worker": {
+              "cache_read_tokens": 0,
+              "cost_usd_lower": 0,
+              "cost_usd_upper": 0,
+              "first_request": null,
+              "hit_rate": null,
+              "input_tokens": 0,
+              "requests": 0,
+              "uncached_input_tokens": 0
+            },
+            "orchestrator": {
+              "cache_read_tokens": 0,
+              "cost_usd_lower": 0,
+              "cost_usd_upper": 0,
+              "first_request": null,
+              "hit_rate": null,
+              "input_tokens": 0,
+              "requests": 0,
+              "uncached_input_tokens": 0
+            }
+          },
+          "ended_at": "2026-10-08T05:37:33.782905+00:00",
+          "kind": "remove",
+          "started_at": "2026-10-08T05:37:32.656874+00:00",
+          "step": "roster-removed"
+        },
+        {
+          "agents": {
+            "claude-worker": {
+              "cache_read_tokens": 140700,
+              "cost_usd_lower": 0.017124,
+              "cost_usd_upper": 0.017124,
+              "first_request": {
+                "cached_tokens": 46446,
+                "hit_rate": 0.9899187962232784,
+                "input_tokens": 46919,
+                "request_id": "req_011CfpEHgsdQiKY3srX4PXAH",
+                "timestamp": "2026-10-08T05:37:37.103Z",
+                "uncached_tokens": 10,
+                "write_tokens": 463
+              },
+              "hit_rate": 0.9926556183461384,
+              "input_tokens": 141741,
+              "requests": 3,
+              "uncached_input_tokens": 1041
+            },
+            "codex-worker": {
+              "cache_read_tokens": 0,
+              "cost_usd_lower": 0,
+              "cost_usd_upper": 0,
+              "first_request": null,
+              "hit_rate": null,
+              "input_tokens": 0,
+              "requests": 0,
+              "uncached_input_tokens": 0
+            },
+            "orchestrator": {
+              "cache_read_tokens": 0,
+              "cost_usd_lower": 0,
+              "cost_usd_upper": 0,
+              "first_request": null,
+              "hit_rate": null,
+              "input_tokens": 0,
+              "requests": 0,
+              "uncached_input_tokens": 0
+            }
+          },
+          "briefing": {
+            "after": {
+              "bytes": 8783,
+              "sha256": "8f47b279faccf0cfe1fb9434fc45293b5dd2161f2fc0b0ab2fe8bb1e95b1fc42"
+            },
+            "before": {
+              "bytes": 8861,
+              "sha256": "9d4b66ca421c3180c7e00e9a320e162f88e24fa64ac7269ca2c965b509020aea"
+            },
+            "changed": true,
+            "common_prefix_bytes": 575,
+            "scope": "Crew briefing file only; not the provider's full effective prompt"
+          },
+          "ended_at": "2026-10-08T05:37:42.163784+00:00",
+          "kind": "restart",
+          "started_at": "2026-10-08T05:37:34.805188+00:00",
+          "step": "removed-briefing-claude-worker"
+        },
+        {
+          "agents": {
+            "claude-worker": {
+              "cache_read_tokens": 0,
+              "cost_usd_lower": 0,
+              "cost_usd_upper": 0,
+              "first_request": null,
+              "hit_rate": null,
+              "input_tokens": 0,
+              "requests": 0,
+              "uncached_input_tokens": 0
+            },
+            "codex-worker": {
+              "cache_read_tokens": 46592,
+              "cost_usd_lower": 0.00055842,
+              "cost_usd_upper": 0.0011520900000000001,
+              "first_request": {
+                "cached_tokens": 23296,
+                "hit_rate": 0.9865751916317282,
+                "input_tokens": 23613,
+                "request_id": null,
+                "timestamp": "2026-10-08T05:37:47.889Z",
+                "uncached_tokens": 317,
+                "write_tokens": null
+              },
+              "hit_rate": 0.9850941920206355,
+              "input_tokens": 47297,
+              "requests": 2,
+              "uncached_input_tokens": 705
+            },
+            "orchestrator": {
+              "cache_read_tokens": 0,
+              "cost_usd_lower": 0,
+              "cost_usd_upper": 0,
+              "first_request": null,
+              "hit_rate": null,
+              "input_tokens": 0,
+              "requests": 0,
+              "uncached_input_tokens": 0
+            }
+          },
+          "briefing": {
+            "after": {
+              "bytes": 8780,
+              "sha256": "21f32d3d124059fe437b4243a907401fa09a383fea78d9bb4a5ed23ce3020290"
+            },
+            "before": {
+              "bytes": 8858,
+              "sha256": "3377293ef3f4eee94267c5b81c15183c7baa1f4d9725fa60ea63f2c2a2b4d7d0"
+            },
+            "changed": true,
+            "common_prefix_bytes": 573,
+            "scope": "Crew briefing file only; not the provider's full effective prompt"
+          },
+          "ended_at": "2026-10-08T05:37:52.582765+00:00",
+          "kind": "restart",
+          "started_at": "2026-10-08T05:37:43.188175+00:00",
+          "step": "removed-briefing-codex-worker"
+        },
+        {
+          "agents": {
+            "claude-worker": {
+              "cache_read_tokens": 487892,
+              "cost_usd_lower": 0.0628052,
+              "cost_usd_upper": 0.0628052,
+              "first_request": {
+                "cached_tokens": 47502,
+                "hit_rate": 0.9987174904863024,
+                "input_tokens": 47563,
+                "request_id": "req_011CfpEK7nr94RhtgMqctM9X",
+                "timestamp": "2026-10-08T05:37:56.938Z",
+                "uncached_tokens": 10,
+                "write_tokens": 51
+              },
+              "hit_rate": 0.9937226818528069,
+              "input_tokens": 490974,
+              "requests": 10,
+              "uncached_input_tokens": 3082
+            },
+            "codex-worker": {
+              "cache_read_tokens": 0,
+              "cost_usd_lower": 0,
+              "cost_usd_upper": 0,
+              "first_request": null,
+              "hit_rate": null,
+              "input_tokens": 0,
+              "requests": 0,
+              "uncached_input_tokens": 0
+            },
+            "orchestrator": {
+              "cache_read_tokens": 129115,
+              "cost_usd_lower": 0.0165555,
+              "cost_usd_upper": 0.0165555,
+              "first_request": {
+                "cached_tokens": 42844,
+                "hit_rate": 0.995862581934824,
+                "input_tokens": 43022,
+                "request_id": "req_011CfpEM7kRT6oB3g1c87mNp",
+                "timestamp": "2026-10-08T05:38:24.907Z",
+                "uncached_tokens": 9,
+                "write_tokens": 169
+              },
+              "hit_rate": 0.9946306966998428,
+              "input_tokens": 129812,
+              "requests": 3,
+              "uncached_input_tokens": 697
+            }
+          },
+          "ended_at": "2026-10-08T05:38:31.475983+00:00",
+          "kind": "task",
+          "started_at": "2026-10-08T05:37:53.609221+00:00",
+          "step": "control-window"
+        },
+        {
+          "agents": {
+            "claude-worker": {
+              "cache_read_tokens": 152488,
+              "cost_usd_lower": 0.0235278,
+              "cost_usd_upper": 0.0235278,
+              "first_request": {
+                "cached_tokens": 50533,
+                "hit_rate": 0.9977688267582829,
+                "input_tokens": 50646,
+                "request_id": "req_011CfpEMz3rKTkrqoykuK8Hg",
+                "timestamp": "2026-10-08T05:38:37.378Z",
+                "uncached_tokens": 10,
+                "write_tokens": 103
+              },
+              "hit_rate": 0.9917402671730902,
+              "input_tokens": 153758,
+              "requests": 3,
+              "uncached_input_tokens": 1270
+            },
+            "codex-worker": {
+              "cache_read_tokens": 0,
+              "cost_usd_lower": 0,
+              "cost_usd_upper": 0,
+              "first_request": null,
+              "hit_rate": null,
+              "input_tokens": 0,
+              "requests": 0,
+              "uncached_input_tokens": 0
+            },
+            "orchestrator": {
+              "cache_read_tokens": 0,
+              "cost_usd_lower": 0,
+              "cost_usd_upper": 0,
+              "first_request": null,
+              "hit_rate": null,
+              "input_tokens": 0,
+              "requests": 0,
+              "uncached_input_tokens": 0
+            }
+          },
+          "ended_at": "2026-10-08T05:38:48.909194+00:00",
+          "kind": "message",
+          "started_at": "2026-10-08T05:38:32.498832+00:00",
+          "step": "idle-delivery-control"
+        },
+        {
+          "agents": {
+            "claude-worker": {
+              "cache_read_tokens": 481577,
+              "cost_usd_lower": 0.0635167,
+              "cost_usd_upper": 0.0635167,
+              "first_request": {
+                "cached_tokens": 52205,
+                "hit_rate": 0.9987755648663644,
+                "input_tokens": 52269,
+                "request_id": "req_011CfpEPHx9u2RtP4A3L54bF",
+                "timestamp": "2026-10-08T05:38:53.282Z",
+                "uncached_tokens": 10,
+                "write_tokens": 54
+              },
+              "hit_rate": 0.9926168534439225,
+              "input_tokens": 485159,
+              "requests": 9,
+              "uncached_input_tokens": 3582
+            },
+            "codex-worker": {
+              "cache_read_tokens": 0,
+              "cost_usd_lower": 0,
+              "cost_usd_upper": 0,
+              "first_request": null,
+              "hit_rate": null,
+              "input_tokens": 0,
+              "requests": 0,
+              "uncached_input_tokens": 0
+            },
+            "orchestrator": {
+              "cache_read_tokens": 131318,
+              "cost_usd_lower": 0.016249800000000002,
+              "cost_usd_upper": 0.016249800000000002,
+              "first_request": {
+                "cached_tokens": 43575,
+                "hit_rate": 0.9958861844360645,
+                "input_tokens": 43755,
+                "request_id": "req_011CfpERLTX3iAYKVgbVjtkk",
+                "timestamp": "2026-10-08T05:39:20.865Z",
+                "uncached_tokens": 9,
+                "write_tokens": 171
+              },
+              "hit_rate": 0.9946675554074321,
+              "input_tokens": 132022,
+              "requests": 3,
+              "uncached_input_tokens": 704
+            }
+          },
+          "ended_at": "2026-10-08T05:39:28.020000+00:00",
+          "kind": "fold",
+          "native_evidence": {
+            "folded_rows": 1,
+            "idle_rows": 0,
+            "pending_tool_ids": [],
+            "post_fold_thinking_blocks": 6,
+            "thinking_drops": [],
+            "turn_ends": 7
+          },
+          "started_at": "2026-10-08T05:38:49.934157+00:00",
+          "step": "folded-delivery"
+        },
+        {
+          "agents": {
+            "claude-worker": {
+              "cache_read_tokens": 165257,
+              "cost_usd_lower": 0.0270877,
+              "cost_usd_upper": 0.0270877,
+              "first_request": {
+                "cached_tokens": 52946,
+                "hit_rate": 0.9479187181093904,
+                "input_tokens": 55855,
+                "request_id": "req_011CfpES9xXVjiyT6DMFPHCX",
+                "timestamp": "2026-10-08T05:39:33.547Z",
+                "uncached_tokens": 10,
+                "write_tokens": 2899
+              },
+              "hit_rate": 0.977152452977454,
+              "input_tokens": 169121,
+              "requests": 3,
+              "uncached_input_tokens": 3864
+            },
+            "codex-worker": {
+              "cache_read_tokens": 0,
+              "cost_usd_lower": 0,
+              "cost_usd_upper": 0,
+              "first_request": null,
+              "hit_rate": null,
+              "input_tokens": 0,
+              "requests": 0,
+              "uncached_input_tokens": 0
+            },
+            "orchestrator": {
+              "cache_read_tokens": 0,
+              "cost_usd_lower": 0,
+              "cost_usd_upper": 0,
+              "first_request": null,
+              "hit_rate": null,
+              "input_tokens": 0,
+              "requests": 0,
+              "uncached_input_tokens": 0
+            }
+          },
+          "ended_at": "2026-10-08T05:39:40.330556+00:00",
+          "kind": "message",
+          "matched_thinking_drops": [],
+          "native_evidence": {
+            "folded_rows": 1,
+            "idle_rows": 0,
+            "pending_tool_ids": [],
+            "post_fold_thinking_blocks": 9,
+            "thinking_drops": [],
+            "turn_ends": 8
+          },
+          "started_at": "2026-10-08T05:39:29.046694+00:00",
+          "step": "after-fold-probe",
+          "thinking_observed_after_fold": true
+        },
+        {
+          "agents": {
+            "claude-worker": {
+              "cache_read_tokens": 718974,
+              "cost_usd_lower": 0.2566024,
+              "cost_usd_upper": 0.2566024,
+              "first_request": {
+                "cached_tokens": 56833,
+                "hit_rate": 0.9989453887121439,
+                "input_tokens": 56893,
+                "request_id": "req_011CfpET4SALr1UDCm1ryMbk",
+                "timestamp": "2026-10-08T05:39:44.446Z",
+                "uncached_tokens": 10,
+                "write_tokens": 50
+              },
+              "hit_rate": 0.8905312911065034,
+              "input_tokens": 807354,
+              "requests": 8,
+              "uncached_input_tokens": 88380
+            },
+            "codex-worker": {
+              "cache_read_tokens": 0,
+              "cost_usd_lower": 0,
+              "cost_usd_upper": 0,
+              "first_request": null,
+              "hit_rate": null,
+              "input_tokens": 0,
+              "requests": 0,
+              "uncached_input_tokens": 0
+            },
+            "orchestrator": {
+              "cache_read_tokens": 133362,
+              "cost_usd_lower": 0.0162762,
+              "cost_usd_upper": 0.0162762,
+              "first_request": {
+                "cached_tokens": 44299,
+                "hit_rate": 0.9962443215040705,
+                "input_tokens": 44466,
+                "request_id": "req_011CfpEURbuvTi8EQWBTmn2w",
+                "timestamp": "2026-10-08T05:40:02.761Z",
+                "uncached_tokens": 9,
+                "write_tokens": 158
+              },
+              "hit_rate": 0.9955211179289649,
+              "input_tokens": 133962,
+              "requests": 3,
+              "uncached_input_tokens": 600
+            }
+          },
+          "ended_at": "2026-10-08T05:40:11.195904+00:00",
+          "kind": "load",
+          "started_at": "2026-10-08T05:39:41.357661+00:00",
+          "step": "large-context"
+        },
+        {
+          "agents": {
+            "claude-worker": {
+              "cache_read_tokens": 0,
+              "cost_usd_lower": 0,
+              "cost_usd_upper": 0,
+              "first_request": null,
+              "hit_rate": null,
+              "input_tokens": 0,
+              "requests": 0,
+              "uncached_input_tokens": 0
+            },
+            "codex-worker": {
+              "cache_read_tokens": 0,
+              "cost_usd_lower": 0,
+              "cost_usd_upper": 0,
+              "first_request": null,
+              "hit_rate": null,
+              "input_tokens": 0,
+              "requests": 0,
+              "uncached_input_tokens": 0
+            },
+            "orchestrator": {
+              "cache_read_tokens": 0,
+              "cost_usd_lower": 0,
+              "cost_usd_upper": 0,
+              "first_request": null,
+              "hit_rate": null,
+              "input_tokens": 0,
+              "requests": 0,
+              "uncached_input_tokens": 0
+            }
+          },
+          "ended_at": "2026-10-08T05:40:43.086215+00:00",
+          "input_tokens_before": 145151,
+          "kind": "compact",
+          "started_at": "2026-10-08T05:40:12.232769+00:00",
+          "step": "forced-compaction"
+        },
+        {
+          "agents": {
+            "claude-worker": {
+              "cache_read_tokens": 120794,
+              "cost_usd_lower": 0.0181264,
+              "cost_usd_upper": 0.0181264,
+              "first_request": {
+                "cached_tokens": 39995,
+                "hit_rate": 0.9971577451444813,
+                "input_tokens": 40109,
+                "request_id": "req_011CfpEYN8vZYi4Ps77NCYQA",
+                "timestamp": "2026-10-08T05:40:57.474Z",
+                "uncached_tokens": 10,
+                "write_tokens": 104
+              },
+              "hit_rate": 0.9900092613082212,
+              "input_tokens": 122013,
+              "requests": 3,
+              "uncached_input_tokens": 1219
+            },
+            "codex-worker": {
+              "cache_read_tokens": 0,
+              "cost_usd_lower": 0,
+              "cost_usd_upper": 0,
+              "first_request": null,
+              "hit_rate": null,
+              "input_tokens": 0,
+              "requests": 0,
+              "uncached_input_tokens": 0
+            },
+            "orchestrator": {
+              "cache_read_tokens": 0,
+              "cost_usd_lower": 0,
+              "cost_usd_upper": 0,
+              "first_request": null,
+              "hit_rate": null,
+              "input_tokens": 0,
+              "requests": 0,
+              "uncached_input_tokens": 0
+            }
+          },
+          "ended_at": "2026-10-08T05:41:05.667259+00:00",
+          "kind": "message",
+          "started_at": "2026-10-08T05:40:53.349516+00:00",
+          "step": "post-compaction"
+        },
+        {
+          "agents": {
+            "claude-worker": {
+              "cache_read_tokens": 0,
+              "cost_usd_lower": 0,
+              "cost_usd_upper": 0,
+              "first_request": null,
+              "hit_rate": null,
+              "input_tokens": 0,
+              "requests": 0,
+              "uncached_input_tokens": 0
+            },
+            "codex-worker": {
+              "cache_read_tokens": 0,
+              "cost_usd_lower": 0,
+              "cost_usd_upper": 0,
+              "first_request": null,
+              "hit_rate": null,
+              "input_tokens": 0,
+              "requests": 0,
+              "uncached_input_tokens": 0
+            },
+            "orchestrator": {
+              "cache_read_tokens": 0,
+              "cost_usd_lower": 0,
+              "cost_usd_upper": 0,
+              "first_request": null,
+              "hit_rate": null,
+              "input_tokens": 0,
+              "requests": 0,
+              "uncached_input_tokens": 0
+            }
+          },
+          "ended_at": "2026-10-08T05:46:16.844474+00:00",
+          "kind": "idle",
+          "observed_quiet_seconds": 310.15127437002957,
+          "started_at": "2026-10-08T05:41:06.693184+00:00",
+          "step": "over-five-minutes"
+        },
+        {
+          "agents": {
+            "claude-worker": {
+              "cache_read_tokens": 380115,
+              "cost_usd_lower": 0.0469985,
+              "cost_usd_upper": 0.0469985,
+              "first_request": {
+                "cached_tokens": 41242,
+                "hit_rate": 0.9980639852862881,
+                "input_tokens": 41322,
+                "request_id": "req_011CfpExJu82x4eZUSYbtyjn",
+                "timestamp": "2026-10-08T05:46:21.189Z",
+                "uncached_tokens": 10,
+                "write_tokens": 70
+              },
+              "hit_rate": 0.9943470162918938,
+              "input_tokens": 382276,
+              "requests": 9,
+              "uncached_input_tokens": 2161
+            },
+            "codex-worker": {
+              "cache_read_tokens": 168192,
+              "cost_usd_lower": 0.0023482200000000003,
+              "cost_usd_upper": 0.004964090000000001,
+              "first_request": {
+                "cached_tokens": 23296,
+                "hit_rate": 0.9801413665432515,
+                "input_tokens": 23768,
+                "request_id": null,
+                "timestamp": "2026-10-08T05:46:22.275Z",
+                "uncached_tokens": 472,
+                "write_tokens": null
+              },
+              "hit_rate": 0.9691549742141807,
+              "input_tokens": 173545,
+              "requests": 7,
+              "uncached_input_tokens": 5353
+            },
+            "orchestrator": {
+              "cache_read_tokens": 180726,
+              "cost_usd_lower": 0.0230336,
+              "cost_usd_upper": 0.0230336,
+              "first_request": {
+                "cached_tokens": 44917,
+                "hit_rate": 0.9971141252469643,
+                "input_tokens": 45047,
+                "request_id": "req_011CfpEy53xRaoG33z15ww4R",
+                "timestamp": "2026-10-08T05:46:33.376Z",
+                "uncached_tokens": 10,
+                "write_tokens": 120
+              },
+              "hit_rate": 0.994026796911095,
+              "input_tokens": 181812,
+              "requests": 4,
+              "uncached_input_tokens": 1086
+            }
+          },
+          "ended_at": "2026-10-08T05:46:46.691543+00:00",
+          "kind": "probes",
+          "native_request_gap_seconds": {
+            "claude-worker": 318.80599999427795,
+            "codex-worker": 513.4670000076294
+          },
+          "started_at": "2026-10-08T05:46:17.868771+00:00",
+          "step": "after-five-minutes"
+        }
+      ],
+      "steps": 18
+    }
+  ],
+  "sandbox_mode": "off",
+  "schema": 1,
+  "series": "before",
+  "source_revision": "c8052373c0d2f8b7a993773e5cda3a79e1b834d6",
+  "team_template_sha256": "fcf0376aecca83cbfc6c994e1ebe62c82e45d914c4bd571f5337663fc405e21f",
+  "versions": {
+    "claude": "2.1.291 (Claude Code)",
+    "codex": "codex-cli 0.159.0"
+  }
+}

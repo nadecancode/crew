@@ -894,7 +894,7 @@ mod compatibility_tests {
             Push::AgentRemoved { id: "a".into() },
             Push::Task(Box::new(serde_json::from_value(json!({"id":"t","title":"","description":"","status":"queued","created_at":0})).unwrap())),
             Push::Session(Box::default()), Push::Resync,
-            Push::Deliver { ids: vec![], text: String::new() },
+            Push::Deliver { ids: vec![], text: String::new(), immediate: false, batch_id: None },
             Push::Compact { instructions: None }, Push::Pty { data: String::new() },
             Push::PtyClosed, Push::Shutdown,
             Push::Summary(WorkspaceSummary::default()), Push::Workspaces(Workspaces::default()),

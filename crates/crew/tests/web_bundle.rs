@@ -14,7 +14,8 @@ use crew_core::rpc::WebInfo;
 use crew_core::util::fnv1a64;
 use serde_json::Value;
 
-/// P4: the whole of `web-dist/`.
+/// P4: every file of `web-dist/` its manifest lists (all but `manifest.json`),
+/// as `web/test/budget.test.ts` counts them (notes/web-design.md §Budgets).
 const MAX_BUNDLE_BYTES: u64 = 600_000;
 
 fn dist() -> PathBuf {
@@ -152,7 +153,7 @@ fn the_bundle_is_what_its_manifest_and_sources_say() {
     // Every listed file, with its size and hash; nothing unlisted.
     let listed: Vec<&Value> = manifest["files"].as_array().unwrap().iter().collect();
     let mut paths = Vec::new();
-    let mut total = std::fs::metadata(dist.join("manifest.json")).unwrap().len();
+    let mut total = 0;
     for file in &listed {
         let path = file["path"].as_str().unwrap();
         let bytes = std::fs::read(dist.join(path))
