@@ -871,3 +871,33 @@ fn a_broken_answer_is_answered_with_an_error() {
         );
     }
 }
+
+// Over the SSE transport a message that is not JSON cannot be matched to a
+// request: the server is taken as broken, what waits is refused, and the
+// pinned view stays.
+#[test]
+fn a_broken_message_on_an_sse_stream_ends_the_session_but_not_the_view() {
+    use crew_core::toolbox::McpTransport;
+    let fx = Fixture::new();
+    let remote = Remote::start(&["--http", "sse", "--break-answer", "tools/call"]);
+    let launch = fx.remote_launch(&remote.url, McpTransport::Sse, &[], &[]);
+    let (ok, printed) = preflight(&launch, None);
+    assert!(ok, "{printed}");
+    pin(
+        &fx.agent_dir(),
+        "x",
+        &"a".repeat(64),
+        &printed["listing"],
+        false,
+    )
+    .unwrap();
+    let mut session = Session::start(&launch, &[]);
+    session.request("initialize", json!({"protocolVersion": "2025-06-18"}));
+    let (call, _) = session.request("tools/call", json!({"name": "alpha", "arguments": {}}));
+    let error = call["error"]["message"]
+        .as_str()
+        .unwrap_or_else(|| panic!("{call}"));
+    assert!(error.contains("not JSON"), "{error}");
+    let (tools, _) = session.request("tools/list", json!({}));
+    assert_eq!(names(&tools["result"]["tools"]), ["alpha", "beta", "gamma"]);
+}

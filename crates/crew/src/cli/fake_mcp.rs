@@ -60,8 +60,9 @@ pub struct FakeMcpArgs {
     /// Answer initialize with an error
     #[arg(long)]
     refuse_initialize: bool,
-    /// Over streamable HTTP, answer this method with a broken message: JSON
-    /// cut short, or an event stream whose only event is not JSON
+    /// Answer this method with a broken message: over streamable HTTP, JSON
+    /// cut short or an event stream whose only event is not JSON; over SSE,
+    /// an event that is not JSON
     #[arg(long, value_name = "METHOD")]
     break_answer: Option<String>,
     /// `NAME=<sha256 hex>`: the `env` tool says whether the variable's value
@@ -525,10 +526,18 @@ mod http {
                     let Ok(message) = serde_json::from_slice::<Value>(&request.body) else {
                         continue;
                     };
+                    let method = message.get("method").and_then(Value::as_str);
+                    let broken = method.is_some()
+                        && server.lock().unwrap().args.break_answer.as_deref() == method;
                     let outcome = server.lock().unwrap().handle(&message)?;
                     match outcome {
                         Outcome::Exit => std::process::exit(3),
                         Outcome::Silent => {}
+                        Outcome::Reply(_) if broken => {
+                            if let Some(out) = sse.lock().unwrap().as_mut() {
+                                event(out.as_mut(), Some("message"), "{broken")?;
+                            }
+                        }
                         Outcome::Reply(messages) => {
                             if let Some(out) = sse.lock().unwrap().as_mut() {
                                 for message in messages {

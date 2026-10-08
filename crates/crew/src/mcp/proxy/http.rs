@@ -903,12 +903,15 @@ impl Legacy {
             let _bounded = response.watchdog;
             let why = loop {
                 match next_event(body.as_mut()) {
-                    Ok(Some((kind, data))) => {
-                        // Not JSON: no request can be told; dropped.
-                        if kind == "message" {
-                            let _ = pass_on(&data, &reader, None);
+                    // A message that is not JSON cannot be told apart from
+                    // the answer some request waits for: the server is
+                    // broken, and every request still open is refused.
+                    Ok(Some((kind, data))) if kind == "message" => {
+                        if let Err(e) = pass_on(&data, &reader, None) {
+                            break format!("{e:#}");
                         }
                     }
+                    Ok(Some(_)) => {}
                     Ok(None) => break "the server's event stream ended".to_string(),
                     Err(e) => break format!("reading the server's event stream failed: {e}"),
                 }

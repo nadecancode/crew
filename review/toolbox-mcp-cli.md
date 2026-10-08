@@ -1,4 +1,4 @@
-# Toolbox MCP proxy and CLI (slice 3)
+| Response and event size limits | `MAX_BODY` and `MAX_EVENT` 16 MiB, an event counting every byte read for it (data, names, comments, line breaks); status and header lines 8 KiB; 100 header lines at most, parsed or not; a local server's messages 16 MiB. || Connect and read timeouts | Resolving, connecting, the TLS handshake and sending share one 30 s deadline (`CONNECT_WITHIN`), enforced by a watchdog that shuts the socket down, so no blocked read or write outlives it. The answer head and the SSE endpoint have their own deadlines; a body may pause `ANSWER_IDLE` (300 s) between reads, since a tool may run long. Ending a session (`DELETE`) is bounded by 5 s. A preflight's `within` bounds all of it. |# Toolbox MCP proxy and CLI (slice 3)
 
 Task: `toolbox-mcp-cli`. Base: main `df4575cf`. Branch: `agents/scheduler`.
 Specification: `notes/toolboxes.md`, slice 3 of Implementation split.
@@ -18,8 +18,11 @@ it approved TLS for remote servers.
   - answers `initialize`, `tools/list` and `ping` from the pinned snapshot,
     sorted by tool name, with `listChanged` never advertised and upstream
     `notifications/*/list_changed` dropped;
-  - replaces exact copies of resolved values in everything it passes on
-    with `[redacted $NAME]` (best effort, as the specification says);
+  - replaces exact copies of resolved values, in strings and object keys,
+    with `[redacted $NAME]` in everything that leaves it: messages to the
+    runtime, the preflight listing (and so the pinned snapshot), the pinned
+    view when served, failure reasons, refusals, reports and the local
+    server's stderr (best effort, as the specification says);
   - reports a server that fails, or whose live listing differs from the
     pin, with `Call::ToolboxReport`, and keeps the pinned view in place.
 - `--preflight`: the daemon's readiness check. It prints the live listing as
@@ -46,6 +49,9 @@ hand-written `Debug` implementations that print names only; `Redaction`
 has no `Debug` at all. A child
 server receives values only under destination names; every reference and
 source name for the member's servers is removed from its environment first.
+
+A local server's stderr is piped through the proxy, one bounded line at a
+time, and redacted; an overlong line is dropped whole rather than split.
 
 ## Remote servers and TLS
 
@@ -115,7 +121,13 @@ cache for this toolchain, at the locked versions.
 - `tests/toolbox_proxy.rs`: T14 (sorted pinned view whatever the server
   does), T20 (preflight reason; a server that stops mid-session), secrets
   under destination names and redacted on the way back, streamable HTTP
-  (JSON and event-stream answers), SSE, a refused header, verified TLS.
+  (JSON and event-stream answers), SSE, a refused header, verified TLS;
+  a server that echoes its secret into instructions, descriptions, schema
+  keys, stderr and an initialize error (nothing leaves unredacted); a
+  server that accepts and stalls, over https and http, streamable and SSE
+  (a 0.5 s preflight gives up in time, and a session serves the pinned
+  view meanwhile); broken answers (JSON cut short, an event stream with no
+  answer, a non-JSON SSE message), each answered with an error.
 - `mcp/mod.rs::the_tool_list_does_not_depend_on_the_daemon_answering` (T21).
 - `tests/team.rs::the_orchestrator_adds_members_with_bundles_by_name_only` (T11,
   part): over the orchestrator's own identity, item definitions and
@@ -125,7 +137,8 @@ cache for this toolchain, at the locked versions.
   schemas take strings only, and a `toolbox` argument that is not names is
   refused rather than dropped.
 - `mcp/proxy/http.rs` unit tests: URL parsing and joining, same-origin
-  endpoints, event reading, chunked bodies, redirect wording.
+  endpoints, event reading and its byte bound, header line count, chunked
+  bodies, redirect wording; `mcp/proxy/stdio.rs` bounded lines.
 
 ## Gates
 
@@ -142,3 +155,18 @@ run inside `nix-shell` with `CREW_IDENTITY`, `CREW_SOCKET` and
 - `crew toolbox` and `crew toolbox check` show Planned or Needs per item
   until graph's per-runtime preview lands.
 - T11 daemon tests wait for graph's launch wiring; T18 needs real runtimes.
+
+## Early security review
+
+cache-reviewer looked at `6c4e9369` before the card was complete and
+reproduced four findings with a canary server. Each is fixed and has a
+regression test in `tests/toolbox_proxy.rs` or the unit tests.
+
+- P1, redaction covered only tool results: `d1a00993`.
+- P2, a stalled TLS or SSE server outlived the preflight deadline: `2f175928`.
+- P3, SSE events and header lines were not fully counted: `2f175928`.
+- P4, a broken answer left a request waiting forever: `2f175928`, plus the
+  non-JSON SSE message case in the commit after it.
+
+One limit stays: a host name lookup cannot be cancelled. The caller gives up
+on it at the deadline; the lookup thread is left to finish on its own.
