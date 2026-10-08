@@ -40,7 +40,7 @@ pub(crate) fn validate(runtime: RuntimeKind, args: &[String], path: &str) -> Res
                 };
                 if config.is_some_and(reserved_config) {
                     Some("toolbox")
-                } else if flag == "--profile" || flag == "-p" {
+                } else if flag == "--profile" || (arg.starts_with("-p") && !arg.starts_with("--")) {
                     Some("toolbox.inherit (profiles combine discovery sources)")
                 } else if matches!(flag, "--enable" | "--disable") {
                     let value = arg

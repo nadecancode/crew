@@ -292,7 +292,7 @@ pub fn prepare(
             }
         }
     }
-    if context.runtime == RuntimeKind::Claude && plan.runtime.claude_inherit_mcp {
+    if context.runtime == RuntimeKind::Claude {
         for item in &mut plan.view.items {
             if item.kind != crew_core::ToolboxItemKind::Plugins {
                 continue;
@@ -305,6 +305,13 @@ pub fn prepare(
             let manifest: Value =
                 serde_json::from_slice(&files[Path::new(".claude-plugin/plugin.json")].0)?;
             if files.contains_key(Path::new(".mcp.json")) || manifest.get("mcpServers").is_some() {
+                if !plan.runtime.claude_inherit_mcp {
+                    item.detail = Some(format!(
+                        "{} · bundled MCP servers not loaded: declare them under mcp",
+                        item.detail.as_deref().unwrap_or("Plugin")
+                    ));
+                    continue;
+                }
                 // Open MCP discovery would start this selected plugin's
                 // unconfigured servers. Do not silently load them.
                 plan.active.files.remove(&key);
@@ -421,13 +428,34 @@ fn validate_file(
                 .ok_or_else(|| anyhow!("subagent file is missing"))?
                 .0;
             let (metadata, _) = frontmatter(bytes)?;
-            if runtime == RuntimeKind::Codex
-                && (metadata.contains_key("tools")
-                    || metadata.contains_key("disallowedTools")
-                    || metadata.contains_key("permissionMode")
-                    || metadata.contains_key("mcpServers"))
-            {
-                bail!("the Markdown subagent's tool or permission restrictions cannot be translated to Codex");
+            if runtime == RuntimeKind::Codex {
+                let unmapped: Vec<_> = metadata
+                    .keys()
+                    .filter(|key| !["name", "description", "model"].contains(&key.as_str()))
+                    .cloned()
+                    .collect();
+                if !unmapped.is_empty() {
+                    bail!(
+                        "subagent fields cannot be translated to Codex: {}",
+                        unmapped.join(", ")
+                    );
+                }
+                if let Some(model) = metadata.get("model") {
+                    let model = model
+                        .as_str()
+                        .ok_or_else(|| anyhow!("subagent model must be a string"))?;
+                    if model != "inherit"
+                        && crate::models::Catalog::load()
+                            .find(model)
+                            .is_some_and(|model| {
+                                model
+                                    .runtime
+                                    .is_some_and(|runtime| runtime != RuntimeKind::Codex)
+                            })
+                    {
+                        bail!("subagent model {model} is not a Codex model; use inherit or a Codex model");
+                    }
+                }
             }
         }
         ItemKind::Plugins => {
@@ -628,8 +656,12 @@ fn render(context: &Context, store: &Store, plan: &mut Plan) -> Result<()> {
                     .filter(|(key, _)| key.kind == ItemKind::Skills)
                     .map(|(_, snapshot)| snapshot.path.clone()),
             );
-            plan.runtime.pi_skills.sort();
-            plan.runtime.pi_skills.dedup();
+            // Selected entries were appended in item-name order. Sorting the
+            // content-addressed paths here would reorder them by their hashes.
+            let mut seen = BTreeSet::new();
+            plan.runtime
+                .pi_skills
+                .retain(|path| seen.insert(path.clone()));
         }
         RuntimeKind::Shell => {}
     }
@@ -816,6 +848,79 @@ mod tests {
             Some(&Content::NotLoaded)
         );
         assert_eq!(unsupported.stops.len(), 1);
+        cleanup(temp.path());
+    }
+
+    #[test]
+    fn subagent_restrictions_are_not_discarded_and_plugin_servers_are_explicit() {
+        let temp = tempfile::tempdir().unwrap();
+        let role = temp.path().join("role.md");
+        std::fs::write(
+            &role,
+            "---\nname: role\ndescription: fixture\nhooks: {}\n---\nBody.",
+        )
+        .unwrap();
+        let mut ctx = context(temp.path(), RuntimeKind::Codex, "codex");
+        ctx.private_home = Some(temp.path().join("private"));
+        ctx.preview = true;
+        let selection = |kind, path: &Path| Resolved {
+            items: BTreeMap::from([(
+                ItemRef::new(kind, "selected"),
+                ResolvedItem {
+                    item: Item::File(FileItem {
+                        path: path.display().to_string(),
+                        required: true,
+                        ..FileItem::default()
+                    }),
+                    origin: Origin::Member,
+                },
+            )]),
+            ..Resolved::default()
+        };
+        let refused = prepare(&ctx, selection(ItemKind::Subagents, &role), None, |_| {
+            Ok(ToolboxReferences::default())
+        })
+        .unwrap();
+        assert!(refused.stops[0].contains("hooks"));
+        assert!(refused.active.files.is_empty());
+        let plugin = temp.path().join("plugin");
+        std::fs::create_dir_all(plugin.join(".claude-plugin")).unwrap();
+        std::fs::write(
+            plugin.join(".claude-plugin/plugin.json"),
+            r#"{"name":"fixture"}"#,
+        )
+        .unwrap();
+        std::fs::write(
+            plugin.join(".mcp.json"),
+            r#"{"mcpServers":{"bundled":{"command":"fixture"}}}"#,
+        )
+        .unwrap();
+        ctx.runtime = RuntimeKind::Claude;
+        let closed = prepare(&ctx, selection(ItemKind::Plugins, &plugin), None, |_| {
+            Ok(ToolboxReferences::default())
+        })
+        .unwrap();
+        assert!(closed.view.items[0]
+            .detail
+            .as_ref()
+            .unwrap()
+            .contains("bundled MCP servers not loaded"));
+        assert!(closed.stops.is_empty());
+        let mut selected = selection(ItemKind::Plugins, &plugin);
+        selected.sources.operator = [
+            SourceKind::Mcp,
+            SourceKind::Skills,
+            SourceKind::Plugins,
+            SourceKind::Subagents,
+            SourceKind::Hooks,
+            SourceKind::Settings,
+            SourceKind::Memory,
+        ]
+        .into_iter()
+        .collect();
+        let open = prepare(&ctx, selected, None, |_| Ok(ToolboxReferences::default())).unwrap();
+        assert!(!open.stops.is_empty());
+        assert!(open.active.files.is_empty());
         cleanup(temp.path());
     }
 

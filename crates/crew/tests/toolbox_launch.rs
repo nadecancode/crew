@@ -480,3 +480,100 @@ fn an_unbound_mcp_program_is_blocked_without_extending_the_sandbox() {
     let config = read_json(&s.workspace.join(".crew/agents/x/mcp.json")).unwrap();
     assert!(config["mcpServers"].get("outside").is_none());
 }
+
+#[test]
+fn codex_name_collisions_disable_both_definitions_or_refuse_a_required_item() {
+    for required in [false, true] {
+        let fixture = Fixture::new();
+        let s = &fixture.session;
+        write(
+            &s.root().join("codex-home/config.toml"),
+            "[mcp_servers.ambient]\nurl='http://127.0.0.1:1/mcp'\n",
+        );
+        let team = fixture.team(
+            RuntimeKind::Codex,
+            json!({
+                "inherit":{"operator":["mcp"]},
+                "mcp":{"ambient":{"command":[CREW,"fake-mcp"],"required":required}}
+            }),
+        );
+        fixture.run(&team);
+        if required {
+            s.wait("collision refusal", |snapshot| {
+                snapshot.agents.iter().any(|agent| {
+                    agent.id == "x"
+                        && agent
+                            .error
+                            .as_ref()
+                            .is_some_and(|error| error.contains("Rename this item"))
+                })
+            });
+            assert!(!s.root().join("codex-home/fake-codex-server.json").exists());
+        } else {
+            let record = fixture.record(&s.root().join("codex-home/fake-codex.json"));
+            assert!(!record["args"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .filter_map(Value::as_str)
+                .any(|arg| arg.starts_with("mcp_servers.ambient.command=")));
+        }
+        let toolbox = fixture.toolbox();
+        assert_eq!(toolbox.items[0].status.code, ToolboxItemCode::Shadowed);
+        assert!(toolbox.sources.iter().any(|source| source.status.code
+            == crew_core::ToolboxSourceCode::Disabled
+            && source.names.contains(&"ambient".into())));
+        assert!(!toolbox.sources.iter().any(|source| source.status.code
+            == crew_core::ToolboxSourceCode::Used
+            && source.names.contains(&"ambient".into())));
+    }
+}
+
+#[test]
+fn checking_another_file_uses_its_sandbox_and_delivery_without_changing_the_member() {
+    let fixture = Fixture::new();
+    let s = &fixture.session;
+    let mut live = fixture.team(RuntimeKind::Shell, json!({}));
+    live.defaults.delivery = crew_core::config::DeliveryChoice::Terminal;
+    live.agents[0].command = scripted(&[]);
+    fixture.run(&live);
+    s.wait("live shell", |snapshot| {
+        snapshot
+            .agents
+            .iter()
+            .any(|agent| agent.id == "x" && agent.toolbox.is_some())
+    });
+    let role = s.root().join("role.md");
+    write(
+        &role,
+        "---\nname: role\ndescription: Role fixture.\n---\nInstructions.\n",
+    );
+    let mut candidate = fixture.team(
+        RuntimeKind::Codex,
+        json!({"subagents":{"role":{"path":role,"required":true}}}),
+    );
+    candidate.workspace.sandbox.mode = SandboxMode::Required;
+    write(
+        &s.root().join("candidate.yaml"),
+        &candidate.to_yaml().unwrap(),
+    );
+    let before = fixture.toolbox();
+    let checked: Value = serde_json::from_str(&s.ok(&[
+        "toolbox",
+        "check",
+        "candidate.yaml",
+        "--json",
+        "-C",
+        s.workspace.to_str().unwrap(),
+    ]))
+    .unwrap();
+    assert_eq!(
+        checked[0]["toolbox"]["items"][0]["status"]["code"],
+        "planned"
+    );
+    assert_eq!(fixture.toolbox().fingerprint, before.fingerprint);
+    assert!(!s
+        .workspace
+        .join(".crew/agents/x/rw/home/codex/agents/role.toml")
+        .exists());
+}

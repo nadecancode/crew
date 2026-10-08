@@ -74,19 +74,39 @@ impl Daemon {
                 .push(("mcp_servers".into(), Value::Object(patch)));
         }
         toolbox.servers.retain(|name| !collisions.contains(name));
-        let reason = "An ambient Codex server has the same name; rename it or the toolbox item (Codex merges transport, environment and filter fields)";
+        toolbox
+            .codex_inherit_servers
+            .retain(|name| !collisions.contains(name));
         let mut stops = Vec::new();
         self.update_agent(&agent.id, |member| {
             if let Some(view) = &mut member.toolbox {
                 for item in &mut view.items {
                     if item.kind == ToolboxItemKind::Mcp && collisions.contains(&item.name) {
+                        let source = view.sources.iter().find(|source| source.kind.as_deref() == Some("mcp") && source.names.contains(&item.name)).map(|source| source.label.as_str()).unwrap_or("the native Codex configuration");
+                        let reason = format!("Rename this item or the server {} in {source}; Codex merges transport, environment and filter fields", item.name);
                         item.status = prepare::status(ToolboxItemCode::Shadowed, "Shadowed");
-                        item.detail = Some(reason.into());
+                        item.detail = Some(reason.clone());
                         if item.required {
                             stops.push(format!("mcp.{}: {reason}", item.name));
                         }
                     }
                 }
+                let mut excluded = Vec::new();
+                for source in &mut view.sources {
+                    if source.kind.as_deref() == Some("mcp") && source.status.code == ToolboxSourceCode::Used {
+                        let names: Vec<_> = source.names.iter().filter(|name| collisions.contains(*name)).cloned().collect();
+                        if !names.is_empty() {
+                            let mut row = source.clone();
+                            row.status = ToolboxSourceStatus { code: ToolboxSourceCode::Disabled, text: format!("Disabled: {}", names.join(", ")) };
+                            row.names = names;
+                            row.detail = Some("Disabled to avoid a same-name toolbox collision".into());
+                            excluded.push(row);
+                            source.names.retain(|name| !collisions.contains(name));
+                            if source.names.is_empty() { source.status = ToolboxSourceStatus { code: ToolboxSourceCode::NotUsed, text:"Not used".into() }; }
+                        }
+                    }
+                }
+                view.sources.extend(excluded);
                 let known: std::collections::BTreeSet<_> = view
                     .sources
                     .iter()
