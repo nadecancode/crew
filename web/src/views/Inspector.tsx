@@ -15,7 +15,7 @@ import { useSecond } from "../clock";
 import { agentIcon, clockTime, fmtElapsed, modelLabel, oneLine, runningLabel, runtimeGlyph, stateTone, statusTail, taskIcon, taskTone, tokens, workOf } from "../format";
 import { decodeEvents, decodeGitOutcome, decodeInbox, decodeTranscript, isP2p, type Agent, type AgentToolbox, type Event, type GitOutcome, type InboxEntry, type TranscriptEntry, type TranscriptResult } from "../protocol";
 import { Linked } from "../text";
-import { TOOLBOX_PENDING, TOOLBOX_UNPINNED, definitionsUnpinned, originLabel, shortFingerprint, toolboxGroups, toolboxSummary } from "../toolbox";
+import { TOOLBOX_PENDING, TOOLBOX_UNPINNED, definitionsUnpinned, originLabel, shortFingerprint, toolboxCounts, toolboxGroups } from "../toolbox";
 import type { InspectorTab } from "../ui";
 import { useOps } from "./ops";
 import { PanelHead } from "./SidePanel";
@@ -343,21 +343,22 @@ export function ToolboxSection(props: { agent: Agent; toolbox: AgentToolbox }) {
   const id = () => props.agent.id;
   const tone = (code: string) => (code === "active" || code === "planned" ? "" : code === "not_applicable" ? "dim" : "warn");
   return (
-    <section class="toolbox" aria-labelledby={`toolbox-${id()}`}>
-      <h3 id={`toolbox-${id()}`}>Toolbox</h3>
+    <section class="toolbox" aria-label="Toolbox">
+      <h3>Toolbox</h3>
       {/* The heading says Toolbox; a screen reader hears what the fingerprint is. */}
       <p class="toolbox-summary">
         <span class="vh">Toolbox fingerprint </span>
         <code class="mono fingerprint" title={t().fingerprint}>{shortFingerprint(t())}</code>
-        {toolboxSummary(t()).slice(`Toolbox ${shortFingerprint(t())}`.length)}
+        {toolboxCounts(t())}
       </p>
-      <Show when={t().pending_fingerprint}>
+      {/* Conditions as `&&`, not <Show>: the same behaviour in fewer bytes (P1). */}
+      {t().pending_fingerprint && (
         <p class="warn toolbox-pending" role="status">
           {TOOLBOX_PENDING}{" "}
           <button disabled={!app.link.live() || app.isPending("agent_restart", id())} onClick={() => void app.actions.restart(id())}>Restart</button>
         </p>
-      </Show>
-      <Show when={definitionsUnpinned(t())}><p class="dim">{TOOLBOX_UNPINNED}</p></Show>
+      )}
+      {definitionsUnpinned(t()) && <p class="dim">{TOOLBOX_UNPINNED}</p>}
       <For each={toolboxGroups(t())}>
         {(group) => (
           <>
@@ -370,9 +371,9 @@ export function ToolboxSection(props: { agent: Agent; toolbox: AgentToolbox }) {
                     <div class="name">{item.name}</div>
                     <div>
                       <span class="muted">{originLabel(item.origin)} · </span><span class={tone(item.status.code)}>{item.status.text}</span>
-                      <Show when={item.required}><span class="muted"> · required</span></Show>
+                      {item.required && <span class="muted"> · required</span>}
                     </div>
-                    <Show when={item.detail}><div class="detail mono muted" title={item.detail!}>{item.detail}</div></Show>
+                    {item.detail && <div class="detail mono muted" title={item.detail}>{item.detail}</div>}
                   </li>
                 )}
               </For>
@@ -380,29 +381,29 @@ export function ToolboxSection(props: { agent: Agent; toolbox: AgentToolbox }) {
           </>
         )}
       </For>
-      <Show when={t().sources.length}>
+      {t().sources.length > 0 && <>
         <h4>Sources</h4>
         <ul class="toolbox-sources">
           <For each={t().sources}>
             {(s) => (
               <li>
                 {s.label}: <span class={s.status.code === "cannot_be_excluded" ? "warn" : ""}>{s.status.text}</span>
-                <Show when={s.names.length}><span class="muted"> ({s.names.join(", ")})</span></Show>
-                <Show when={s.detail}><span class="muted"> · {s.detail}</span></Show>
+                {s.names.length > 0 && <span class="muted"> ({s.names.join(", ")})</span>}
+                {s.detail && <span class="muted"> · {s.detail}</span>}
               </li>
             )}
           </For>
         </ul>
-      </Show>
+      </>}
       <details class="process-details toolbox-definitions">
         <summary>Definitions</summary>
-        <Facts rows={[
+        <Facts rows={([
           ["fingerprint", t().fingerprint],
-          ...(t().pending_fingerprint ? [["after restart", t().pending_fingerprint!] as [string, string]] : []),
+          ["after restart", t().pending_fingerprint],
           ["definition digest", t().definition_digest ?? "unavailable"],
-          ["tools", t().tool_count != null ? String(t().tool_count) : "unknown"],
+          ["tools", String(t().tool_count ?? "unknown")],
           ["definition bytes", t().definition_bytes != null ? `${t().definition_bytes} bytes` : "unknown"],
-        ]} />
+        ] as [string, string][]).filter(([, value]) => value)} />
       </details>
     </section>
   );
