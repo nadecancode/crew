@@ -226,8 +226,13 @@ are diagnosed instead of silently merging different work.
 
 **Codex.** Deduplicate unchanged cumulative vectors. For a continuous source,
 subtract the previous known cumulative counters, preserving missing fields.
+When a cumulative field first becomes known, seed that field's baseline and
+mark a coverage gap; do not charge its lifetime catch-up to the current turn.
 Compare the increment with direct `last_token_usage`. Only a validated
-single-request increment earns a request count. A mismatching/batch increment
+single-request increment earns a request count. The baseline's
+`delta_matches_last_usage` flag compares known intersections and can be true
+for an empty intersection; that flag alone is never single-request proof.
+A mismatching/batch increment
 retains token evidence as `counter_delta`, with unknown cardinality and
 possibly unknown model/context band. Do not price its aggregate input as if
 it were one long-context request. Counter decreases start a new counter
@@ -235,6 +240,8 @@ epoch: use only direct last-request evidence where its new occurrence is
 established, never a negative delta or a re-added lifetime total. Without
 that evidence, mark a gap and establish a new baseline. Preserve explicit
 write zero versus absent write fields. Output already includes reasoning.
+An identical direct-last vector appearing again does not prove a new request
+occurrence without a verified native boundary or identity.
 
 **pi.** Support is gated by a native offline capture from supported pi,
 including streaming identity, provider normalization, request count and
@@ -374,6 +381,9 @@ cohort size, but leave the upper bound unknown when unobserved task cost is
 unbounded. Present that result as a partial/lower estimate, never as if the
 missing tasks cost zero. Keep the cohort count, tasks with observed cost and
 cost-coverage state together in the response.
+Even `K=N` does not prove complete cost: source gaps or unattributed work can
+still leave some of those tasks' spend unknown. The cost-coverage state, not
+the task-count fraction, controls whether a finite upper estimate is justified.
 
 Use the designer's labels: “Per completed task”, “N tasks first completed in
 this period · includes their earlier spend” when applicable, and “cost
@@ -681,7 +691,7 @@ CLIs against local stubs. Paid comparative work remains QA's
 | --- | --- |
 | U01 Native parity | Fresh-source fixture replay matches `baseline.mjs` normalized token totals for Claude/Codex, with explicit documented request-cardinality differences; supported pi requires native evidence. |
 | U02 Streaming | Repeated Claude/Pi identities replace counters; late/missing fields and downward corrections update sums and coverage once; synthetic/unsupported sidechain rows do not inflate totals. |
-| U03 Codex | Unchanged cumulative events deduplicate; resets use only valid direct evidence or gaps; batches/corrections are not fabricated requests; reasoning is not double-counted. |
+| U03 Codex | Unchanged cumulative events deduplicate; missing-to-known fields reseed without lifetime catch-up; empty/intersection-only delta matches and repeated direct-last vectors are not new-request proof; resets use valid direct evidence or gaps; batches/corrections are not fabricated requests; reasoning is not double-counted. |
 | U04 Restart atomicity | Crash before/after every ingest transaction boundary produces the same rows/rollups/cursor as uninterrupted reading; no lost or duplicated increment. |
 | U05 File integrity | Partial lines, oversized/malformed records, inode replacement, truncate/rewrite, missing files and ambiguous replay stay bounded and report source coverage. No source file changes. |
 | U06 Safe ownership | Exact session/binding wins; null/shared-cwd ambiguity, reused agent ids, changed CLI homes and symlink/special-file escapes cannot read or assign another source. |
