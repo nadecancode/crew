@@ -232,18 +232,21 @@ impl Codex {
         };
         let (now, now_valid) = Vector::read(total);
         let last = info.last_token_usage.as_ref().map(Vector::read);
+        // Another session's vectors neither charge nor seed our baseline.
+        if self.foreign {
+            if line.phase == Phase::Charge {
+                out.push(Item::Skipped {
+                    skip: Skip::ForeignSession,
+                    offset: line.offset,
+                });
+            }
+            return;
+        }
         if line.phase == Phase::Seed {
             if self.previous.is_some_and(|p| now.decreased_from(p)) {
                 self.epoch += 1;
             }
             self.settle(now);
-            return;
-        }
-        if self.foreign {
-            out.push(Item::Skipped {
-                skip: Skip::ForeignSession,
-                offset: line.offset,
-            });
             return;
         }
         let gap = |out: &mut Vec<Item>| {
@@ -391,7 +394,7 @@ impl Decoder for Codex {
         };
         let native_ms = record.timestamp.0;
         let Some(payload) = record.payload else {
-            if record.kind.as_deref() == Some("compacted") {
+            if record.kind.as_deref() == Some("compacted") && !self.foreign {
                 out.push(Item::Signal {
                     signal: Signal::Compaction { native_ms },
                     offset: line.offset,
@@ -414,7 +417,9 @@ impl Decoder for Codex {
                     self.token_count(line, info, native_ms, out);
                 }
             }
-            (Some("compacted"), _) | (Some("event_msg"), Some("context_compacted")) => {
+            (Some("compacted"), _) | (Some("event_msg"), Some("context_compacted"))
+                if !self.foreign =>
+            {
                 out.push(Item::Signal {
                     signal: Signal::Compaction { native_ms },
                     offset: line.offset,
@@ -825,5 +830,62 @@ mod tests {
                 ..
             }
         )));
+    }
+
+    #[test]
+    fn a_foreign_seed_prefix_does_not_move_the_baseline_and_foreign_compactions_are_silent() {
+        use crate::usage_metrics::source::{read, Adapter, Checkpoint};
+        use std::fs::File;
+        use std::io::Write;
+
+        let lines =
+            |values: &[Value]| -> String { values.iter().map(|v| format!("{v}\n")).collect() };
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("rollout.jsonl");
+        // Existing prefix: own total 100, then another session's total 0.
+        std::fs::write(
+            &path,
+            lines(&[
+                meta("th-1"),
+                turn("gpt-6-luna", "t1"),
+                tc(0, v(100, 80, 10), Some(v(100, 80, 10))),
+                meta("other"),
+                tc(1, v(0, 0, 0), Some(v(0, 0, 0))),
+                json!({"type": "compacted", "payload": null}),
+                json!({"type": "event_msg", "payload": {"type": "context_compacted"}}),
+            ]),
+        )
+        .unwrap();
+        let f = File::open(&path).unwrap();
+        let mut adapter = Adapter::new(RuntimeKind::Codex, "th-1", Start::Existing).unwrap();
+        let cp = Checkpoint::new(&f, Start::Existing).unwrap();
+        let seeded = adapter.decode(&read(&f, &cp).unwrap());
+        assert!(
+            seeded.iter().all(|i| !matches!(i, Item::Signal { .. })),
+            "{seeded:?}"
+        );
+        let next_cp = read(&f, &cp).unwrap().checkpoint;
+        std::fs::OpenOptions::new()
+            .append(true)
+            .open(&path)
+            .unwrap()
+            .write_all(
+                lines(&[
+                    json!({"type": "compacted", "payload": null}),
+                    meta("th-1"),
+                    tc(2, v(150, 120, 17), Some(v(50, 40, 7))),
+                ])
+                .as_bytes(),
+            )
+            .unwrap();
+        let items = adapter.decode(&read(&File::open(&path).unwrap(), &next_cp).unwrap());
+        let obs = observations(&items);
+        assert_eq!(obs.len(), 1);
+        assert_eq!(obs[0].normalized.counters.input_total, Some(50), "not 150");
+        assert_eq!(obs[0].unit, ObservationUnit::Request);
+        assert!(
+            items.iter().all(|i| !matches!(i, Item::Signal { .. })),
+            "a compaction while foreign is not ours"
+        );
     }
 }
