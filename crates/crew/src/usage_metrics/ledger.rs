@@ -657,6 +657,7 @@ impl Ledger {
         let complete = run.is_some_and(|(started, since)| {
             range
                 .map(|r| r.0)
+                .filter(|from| *from != i64::MIN)
                 .or(started)
                 .is_some_and(|from| from >= since)
         });
@@ -701,7 +702,7 @@ impl Ledger {
                 && self.conn.query_row(
                     "SELECT EXISTS (SELECT 1 FROM usage_task_costs WHERE run_id = ?1
                      AND task_id = ?2 AND class = 'before' AND hour >= 0 AND hour < ?3)",
-                    params![run_id, task, from - from.rem_euclid(HOUR)],
+                    params![run_id, task, from.saturating_sub(from.rem_euclid(HOUR))],
                     |r| r.get(0),
                 )?;
             members.push(Member {

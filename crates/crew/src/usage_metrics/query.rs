@@ -34,12 +34,6 @@ use super::metrics::{category_split_complete, count, totals, Fact};
 use super::price::Book;
 
 const HOUR_MS: i64 = 3_600_000;
-/// Buckets finer than an hour that nest in hours, in seconds.
-const SUB_HOUR: [u32; 7] = [60, 120, 300, 600, 900, 1200, 1800];
-/// The longest bucket a series accepts, in seconds.
-const MAX_BUCKET: u32 = 86_400;
-/// The default series bucket, in seconds.
-const DEFAULT_BUCKET: u32 = 3_600;
 /// At most this many buckets per series page.
 pub const MAX_BUCKETS: usize = 720;
 /// At most this many source gaps listed on a metric's coverage.
@@ -81,16 +75,19 @@ fn invalid(message: &str) -> RpcError {
     )
 }
 
+/// The grid point at or below `ms`; saturating, so an unbounded end
+/// (`i64::MIN`) stays unbounded.
 fn floor(ms: i64, unit: i64) -> i64 {
-    ms - ms.rem_euclid(unit)
+    ms.saturating_sub(ms.rem_euclid(unit))
 }
 
+/// The grid point at or above `ms`; saturating at `i64::MAX`.
 fn ceil(ms: i64, unit: i64) -> i64 {
     let f = floor(ms, unit);
     if f == ms {
         ms
     } else {
-        f + unit
+        f.saturating_add(unit)
     }
 }
 
@@ -113,24 +110,15 @@ pub fn canonical(
         .map_err(internal)?
         .ok_or_else(|| RpcError::not_found("no usage is tracked for that run"))?;
     let book = book(query.price_book_id.as_ref())?;
-    let bucket = if series {
-        let asked = query.bucket_seconds.unwrap_or(DEFAULT_BUCKET);
-        Some(match SUB_HOUR.iter().find(|b| **b >= asked) {
-            Some(b) if asked < 3_600 => *b,
-            _ => (asked.div_ceil(3_600) * 3_600).min(MAX_BUCKET),
-        })
-    } else {
-        None
-    };
-    let mut canonical = query.clone();
-    canonical.bucket_seconds = bucket;
-    canonical.price_book_id = Some(Id::new(book.id.clone()).expect("price book id is valid"));
-    // The page this reply answers: the request's cursor as sent, its limit
-    // resolved. Cursors and their digest ignore the page itself.
-    canonical.page = PageRequest {
-        cursor: query.page.cursor.clone(),
-        limit: Some(query.page.limit.unwrap_or(max_rows)),
-    };
+    // One owner for the shape: the protocol's rule, shared with clients that
+    // check a reply against their request.
+    let canonical = query
+        .resolved_shape(
+            Id::new(book.id.clone()).expect("price book id is valid"),
+            max_rows,
+            series,
+        )
+        .map_err(invalid)?;
     Ok((canonical, run, book))
 }
 
@@ -772,6 +760,18 @@ fn resume(kind: &str, cursor: Option<&Id>, revision: u64, q: &UsageQuery) -> Res
     }
 }
 
+/// A resumed offset that lies within `total` items, or `stale_cursor`.
+fn within(offset: u64, total: u64) -> Result<u64, RpcError> {
+    if offset <= total && offset <= i64::MAX as u64 {
+        Ok(offset)
+    } else {
+        Err(RpcError::new(
+            "stale_cursor",
+            "the usage page cursor is out of range",
+        ))
+    }
+}
+
 /// Fills a page up to `max` rows and the page budget. A row that alone
 /// exceeds the budget is `too_large`.
 fn fill<T: Serialize>(
@@ -819,9 +819,13 @@ pub fn series(ledger: &Ledger, query: &UsageQuery, ctx: &Context) -> Result<Usag
         .map(|t| t.get())
         .unwrap_or_else(|| start + ceil(ctx.now - start, bucket));
     let count = ((end - start).max(0) + bucket - 1) / bucket;
+    let offset = within(offset, count as u64)?;
     let limit = q.page.limit.unwrap_or(MAX_BUCKETS as u16) as u64;
+    // Bounded: offset <= count, and every bucket edge lies in [start, end].
     let first = start + offset as i64 * bucket;
-    let last = (start + (offset + limit) as i64 * bucket).min(end);
+    let last = start
+        .saturating_add(((offset + limit).min(count as u64) as i64).saturating_mul(bucket))
+        .min(end);
     // Buckets finer than an hour, or not on the hour grid, need detail.
     let fine = bucket < HOUR_MS || start.rem_euclid(HOUR_MS) != 0;
     let window = Window::load(ledger, &q, Some((first, last)), fine)?;
@@ -924,6 +928,7 @@ pub fn breakdown(
             .push((a, f));
     }
     let total = groups.len() as u64;
+    let offset = within(offset, total)?;
     let limit = q.page.limit.unwrap_or(MAX_METADATA_ROWS as u16) as usize;
     let page = groups
         .into_values()
@@ -1066,7 +1071,10 @@ fn observation(
 pub fn observations(ledger: &Ledger, query: &UsageQuery) -> Result<UsageObservations, RpcError> {
     let (q, run, _) = canonical(ledger, query, MAX_METADATA_ROWS as u16, false)?;
     let revision = ledger.revision().map_err(internal)?;
-    let offset = resume("observations", query.page.cursor.as_ref(), revision, &q)?;
+    let offset = within(
+        resume("observations", query.page.cursor.as_ref(), revision, &q)?,
+        i64::MAX as u64,
+    )?;
     let limit = q.page.limit.unwrap_or(MAX_METADATA_ROWS as u16) as u64;
     let rows = ledger
         .observation_rows(
@@ -1107,6 +1115,7 @@ pub fn runs(ledger: &Ledger, page: &PageRequest, ctx: &Context) -> Result<UsageR
                 RpcError::new("stale_cursor", "the usage run cursor no longer applies")
             })?,
     };
+    let offset = within(offset, i64::MAX as u64)?;
     let found = ledger.runs(offset, limit + 1).map_err(internal)?;
     let more = found.len() as u64 > limit;
     let mut rows = Vec::new();
@@ -1631,5 +1640,91 @@ mod tests {
         assert!(s.completion_cohort.is_none());
         assert_eq!(output(&s.totals), Some(6));
         assert_eq!(s.totals.turns_observed.known_sum, Some(Wide(1)));
+    }
+
+    #[test]
+    fn series_buckets_resolve_by_the_shared_rule() {
+        let (_dir, _path, ledger, _) = fixture();
+        for (asked, resolved) in [
+            (None, 3_600),
+            (Some(1), 60),
+            (Some(250), 300),
+            (Some(1_800), 1_800),
+            (Some(2_000), 3_600),
+            (Some(3_601), 7_200),
+            (Some(86_400), 86_400),
+        ] {
+            let mut q = all();
+            q.from_ms = Some(Timestamp::new(NOW).unwrap());
+            q.to_ms = Some(Timestamp::new(NOW + 3_600_000).unwrap());
+            q.bucket_seconds = asked;
+            let s = series(&ledger, &q, &ctx()).unwrap();
+            assert_eq!(s.query.bucket_seconds, Some(resolved), "{asked:?}");
+        }
+        let mut q = all();
+        q.bucket_seconds = Some(90_000);
+        assert!(
+            series(&ledger, &q, &ctx()).is_err(),
+            "beyond a day is invalid"
+        );
+    }
+
+    #[test]
+    fn missing_bounds_stay_unbounded_and_bad_offsets_fail() {
+        let (_dir, _path, ledger, _) = fixture();
+        let mut to_only = all();
+        to_only.to_ms = Some(Timestamp::new(NOW + 3_600_000 + 7).unwrap());
+        let s = summary(&ledger, &to_only, &ctx()).unwrap();
+        assert_eq!(output(&s.totals), Some(6), "u, a and b");
+        let mut from_only = all();
+        from_only.from_ms = Some(Timestamp::new(NOW + 3_600_000 + 7).unwrap());
+        assert_eq!(
+            output(&summary(&ledger, &from_only, &ctx()).unwrap().totals),
+            Some(9)
+        );
+        let mut by = to_only.clone();
+        by.group_by = Some(UsageDimension::Task);
+        assert!(breakdown(&ledger, &by, &ctx()).is_ok());
+        assert!(series(&ledger, &to_only, &ctx()).is_ok());
+        assert!(observations(&ledger, &to_only).is_ok());
+        assert_eq!(floor(i64::MIN, HOUR_MS), i64::MIN);
+        assert_eq!(ceil(i64::MAX, HOUR_MS), i64::MAX);
+
+        // A cursor with the right kind, revision and digest but an altered
+        // offset fails instead of wrapping.
+        let mut q = all();
+        q.from_ms = Some(Timestamp::new(NOW).unwrap());
+        q.to_ms = Some(Timestamp::new(NOW + 3 * 3_600_000).unwrap());
+        let revision = ledger.revision().unwrap();
+        for (kind, offset) in [("series", u64::MAX), ("series", 4), ("breakdown", 99)] {
+            let mut page = q.clone();
+            if kind == "breakdown" {
+                page.group_by = Some(UsageDimension::Task);
+            }
+            let canonical = canonical(&ledger, &page, MAX_BUCKETS as u16, kind == "series")
+                .unwrap()
+                .0;
+            page.page.cursor = Some(cursor(kind, revision, offset, &canonical));
+            let err = match kind {
+                "series" => series(&ledger, &page, &ctx()).unwrap_err(),
+                _ => breakdown(&ledger, &page, &ctx()).unwrap_err(),
+            };
+            assert_eq!(err.code, "stale_cursor", "{kind} {offset}");
+        }
+        let mut page = q.clone();
+        page.page.cursor =
+            Some(Id::new(format!("observations.{revision}.{}.x", u64::MAX)).unwrap());
+        assert_eq!(
+            observations(&ledger, &page).unwrap_err().code,
+            "stale_cursor"
+        );
+        let bad = PageRequest {
+            cursor: Some(Id::new(format!("runs.{}", u64::MAX)).unwrap()),
+            limit: None,
+        };
+        assert_eq!(
+            runs(&ledger, &bad, &ctx()).unwrap_err().code,
+            "stale_cursor"
+        );
     }
 }
