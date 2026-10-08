@@ -77,3 +77,9 @@ After approval at 6bbb2a43, the two id-read assertions were strengthened to
 compare the exact full stored body and complete unchanged observer rows;
 all 18 delivery tests passed again. Main fbe243af's reviewed P1 feature
 contract was forward-merged before the required integration checks.
+
+P1 integration checks on 76e3c0f3 passed: delivery filter 20/20; crew lib
+569/0/1 ignored; team 89/89; real native gateway 21/21; native inventory/auth
+filter 14/14; strict workspace Clippy/all-targets and whole-tree fmt. The
+policy test covers the complete 105-method P1 inventory. No production
+change was needed after this merge.

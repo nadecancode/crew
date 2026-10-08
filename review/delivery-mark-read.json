@@ -270,5 +270,176 @@
   "storage_pause": {
     "no_gate_started_below_floor": true,
     "cleanup": "target/delivery-read-storage-cleanup.json"
+  },
+  "p1_integration": {
+    "source": "76e3c0f3624625548c0d6e53b8052d2a8bdc8ed0",
+    "base": "fbe243af",
+    "steps": [
+      {
+        "name": "delivery",
+        "command": [
+          "cargo",
+          "test",
+          "--locked",
+          "-p",
+          "crew",
+          "--lib",
+          "delivery",
+          "--",
+          "--test-threads=1"
+        ],
+        "file": "target/delivery-read-p1-delivery.log",
+        "code": 0,
+        "signal": null,
+        "sha256": "b3b7b93adcd63a6e6986772da06a1751b2a9f5b9ac6566c7a0859d458000ffc1",
+        "totals": {
+          "passed": 20,
+          "failed": 0,
+          "ignored": 0
+        }
+      },
+      {
+        "name": "lib",
+        "command": [
+          "cargo",
+          "test",
+          "--locked",
+          "-p",
+          "crew",
+          "--lib",
+          "--",
+          "--test-threads=1"
+        ],
+        "file": "target/delivery-read-p1-lib.log",
+        "code": 0,
+        "signal": null,
+        "sha256": "60d997546a11ff70988d0ea8a292b37d6af1d1c3a6b8e2496ba83aa2fa7198b9",
+        "totals": {
+          "passed": 569,
+          "failed": 0,
+          "ignored": 1
+        }
+      },
+      {
+        "name": "team",
+        "command": [
+          "cargo",
+          "test",
+          "--locked",
+          "-p",
+          "crew",
+          "--test",
+          "team",
+          "--",
+          "--test-threads=1"
+        ],
+        "file": "target/delivery-read-p1-team.log",
+        "code": 0,
+        "signal": null,
+        "sha256": "fb01c9e15d3e560d2f5999b2b5a8e7b2d545635a6dc40e1222f90e6a21ec0630",
+        "totals": {
+          "passed": 89,
+          "failed": 0,
+          "ignored": 0
+        }
+      },
+      {
+        "name": "gateway",
+        "command": [
+          "cargo",
+          "test",
+          "--locked",
+          "-p",
+          "crew",
+          "--features",
+          "native-gateway",
+          "--test",
+          "native_gateway",
+          "--",
+          "--test-threads=1"
+        ],
+        "file": "target/delivery-read-p1-gateway.log",
+        "code": 0,
+        "signal": null,
+        "sha256": "fcfc0a929b5bbb6a277a2e9223a5a35c8faaeea16d3d54b921095dbc8ac455e2",
+        "totals": {
+          "passed": 21,
+          "failed": 0,
+          "ignored": 0
+        }
+      },
+      {
+        "name": "inventory",
+        "command": [
+          "cargo",
+          "test",
+          "--locked",
+          "-p",
+          "crew",
+          "--features",
+          "native-gateway",
+          "--lib",
+          "native::",
+          "--",
+          "--test-threads=1"
+        ],
+        "file": "target/delivery-read-p1-inventory.log",
+        "code": 0,
+        "signal": null,
+        "sha256": "420a09bf93d25a97a1d8c779ca382a3554f1b481fd2ff3363e54d6b0a5dab8ae",
+        "totals": {
+          "passed": 14,
+          "failed": 0,
+          "ignored": 0
+        }
+      },
+      {
+        "name": "clippy",
+        "command": [
+          "cargo",
+          "clippy",
+          "--locked",
+          "--workspace",
+          "--all-targets",
+          "--",
+          "-D",
+          "warnings"
+        ],
+        "file": "target/delivery-read-p1-clippy.log",
+        "code": 0,
+        "signal": null,
+        "sha256": "cb17fa9e06cc89bb7b9d92549d5a74e196112434e228d73461679ac8f3b51202",
+        "totals": {
+          "passed": 0,
+          "failed": 0,
+          "ignored": 0
+        }
+      },
+      {
+        "name": "fmt",
+        "command": [
+          "cargo",
+          "fmt",
+          "--all",
+          "--check"
+        ],
+        "file": "target/delivery-read-p1-fmt.log",
+        "code": 0,
+        "signal": null,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "totals": {
+          "passed": 0,
+          "failed": 0,
+          "ignored": 0
+        }
+      }
+    ]
+  },
+  "id_bounds_followup": {
+    "source": "a7b8789f102c58a9333284e1b91c89bd430677a6",
+    "passed": 18,
+    "failed": 0,
+    "file": "target/delivery-read-id-bounds.log",
+    "sha256": "65f7df5e1c34e4f78301562c04195a7f063519878cf233c6febc88939cc102f3"
   }
 }
