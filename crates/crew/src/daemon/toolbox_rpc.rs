@@ -15,6 +15,8 @@ use crew_core::rpc::{
     MemberToolbox, Redaction, RpcError, ToolboxReportKind, ToolboxServerLaunch, Upstream,
 };
 use crew_core::toolbox::{Content, Fingerprint, Item, ItemKind, Reference, Resolved, Toolbox};
+
+use crate::agents::toolbox::ActiveToolbox;
 use crew_core::types::{
     AgentToolbox, ToolboxItem, ToolboxItemCode, ToolboxItemKind, ToolboxItemStatus,
 };
@@ -106,13 +108,26 @@ impl Daemon {
         let agent = self
             .agent(id)
             .ok_or_else(|| RpcError::not_found(format!("no agent '{id}'")))?;
-        let resolved = self.member_toolbox(&agent)?;
-        let item = crew_core::toolbox::ItemRef::new(ItemKind::Mcp, name);
-        let Some(Item::Mcp(server)) = resolved.items.get(&item).map(|r| &r.item) else {
-            return Err(RpcError::not_found(format!(
-                "{id}'s toolbox has no MCP server '{name}'"
-            )));
+        // The toolbox its session was started with; before toolbox-launch
+        // records one, its configuration.
+        let (resolved, server, refresh) = match self.active_toolbox(id) {
+            Some(active) => {
+                let (server, refresh) = self.toolbox_item(id, name)?;
+                (active.resolved, server, refresh)
+            }
+            None => {
+                let resolved = self.member_toolbox(&agent)?;
+                let item = crew_core::toolbox::ItemRef::new(ItemKind::Mcp, name);
+                let Some(Item::Mcp(server)) = resolved.items.get(&item).map(|r| r.item.clone())
+                else {
+                    return Err(RpcError::not_found(format!(
+                        "{id}'s toolbox has no MCP server '{name}'"
+                    )));
+                };
+                (resolved, server, false)
+            }
         };
+        let server = &server;
         let mut redact = Vec::new();
         let mut resolve_map = |map: &BTreeMap<String, Reference>| -> Result<BTreeMap<String, String>, RpcError> {
             let mut out = BTreeMap::new();
@@ -155,7 +170,7 @@ impl Daemon {
             snapshot: proxy::snapshot_path(&self.agent_dir(id), name)
                 .to_string_lossy()
                 .into_owned(),
-            refresh: false,
+            refresh,
         })
     }
 
@@ -170,15 +185,7 @@ impl Daemon {
         let detail = crew_core::util::truncate_chars(&crew_core::util::one_line(detail), 400);
         match kind {
             ToolboxReportKind::Failed => {
-                self.emit(
-                    NewEvent::new(
-                        "daemon",
-                        "toolbox.failed",
-                        format!("{id}'s toolbox server {name} failed in session: {detail}"),
-                    )
-                    .agent(id)
-                    .warn(),
-                );
+                self.toolbox_failed_in_session(id, name, &detail);
                 self.notify_orchestrator(&format!(
                     "{id}'s toolbox server {name} failed in session ({detail}). Its session keeps \
 running without it; a restart starts it again."
@@ -383,5 +390,126 @@ impl Daemon {
             }
         }
         Ok(())
+    }
+}
+
+impl Daemon {
+    /// What a new subagent of `parent` gets (notes/toolboxes.md, Orchestrator
+    /// tools, `agent_spawn`): by default a copy of the parent's active
+    /// toolbox; with `selection`, only those bundles, resolved against the
+    /// team's current definitions, each item equal to the parent's (the same
+    /// definition and, for a file, the same content). A worker cannot grant
+    /// more than it has. Checked before the subagent is created.
+    pub(crate) fn subagent_toolbox(
+        &self,
+        parent: &str,
+        selection: Option<Vec<String>>,
+    ) -> Result<Option<ActiveToolbox>, RpcError> {
+        let Some(active) = self.active_toolbox(parent) else {
+            return match selection {
+                Some(names) if !names.is_empty() => Err(RpcError::invalid(
+                    "you run without a toolbox: there is nothing to give a subagent",
+                )),
+                _ => Ok(None),
+            };
+        };
+        let Some(names) = selection else {
+            return Ok(Some(ActiveToolbox {
+                // The child's own launch fingerprints and pins what it gets.
+                fingerprint: None,
+                definition_digest: None,
+                refresh: false,
+                ..active
+            }));
+        };
+        let requested = {
+            let model = self.model();
+            let team = model
+                .session
+                .team
+                .as_ref()
+                .ok_or_else(|| RpcError::unavailable("no team is loaded"))?;
+            team.resolve_toolbox(
+                &Toolbox {
+                    include: names,
+                    reset: true,
+                    ..Toolbox::default()
+                },
+                "agent_spawn.toolbox",
+            )
+            .map_err(|e| RpcError::invalid(format!("{e:#}")))?
+        };
+        let store = std::cell::OnceCell::new();
+        let mut out = ActiveToolbox {
+            resolved: Resolved {
+                items: BTreeMap::new(),
+                sources: active.resolved.sources.clone(),
+                strict: active.resolved.strict,
+            },
+            ..ActiveToolbox::default()
+        };
+        for (item, entry) in &requested.items {
+            let Some(own) = active.resolved.items.get(item) else {
+                return Err(RpcError::invalid(format!(
+                    "{item} is not in your toolbox, so you cannot give it to a subagent"
+                )));
+            };
+            if own.item != entry.item {
+                return Err(RpcError::invalid(format!(
+                    "{item} is defined differently now than in the toolbox you were started with; \
+a subagent can only get what you have"
+                )));
+            }
+            if let (Item::File(file), Some(Content::Sha256(had))) =
+                (&entry.item, active.content.get(item))
+            {
+                let store = match store.get() {
+                    Some(store) => store,
+                    None => {
+                        let opened = crate::agents::toolbox::store::Store::open(&self.state_dir)
+                            .map_err(|e| RpcError::internal(format!("{e:#}")))?;
+                        store.get_or_init(|| opened)
+                    }
+                };
+                let now = store
+                    .snapshot(std::path::Path::new(&file.path))
+                    .map(|s| s.hash)
+                    .unwrap_or_default();
+                if now != *had {
+                    return Err(RpcError::invalid(format!(
+                        "{item}'s files changed since you were started; a subagent can only get \
+what you have"
+                    )));
+                }
+            }
+            out.resolved.items.insert(item.clone(), own.clone());
+            if let Some(content) = active.content.get(item) {
+                out.content.insert(item.clone(), content.clone());
+            }
+            if let Some(file) = active.files.get(item) {
+                out.files.insert(item.clone(), file.clone());
+            }
+            if item.kind == ItemKind::Mcp && active.servers.contains(&item.name) {
+                out.servers.insert(item.name.clone());
+            }
+        }
+        Ok(Some(out))
+    }
+
+    /// Hand a new subagent what `subagent_toolbox` chose, with the pinned
+    /// MCP snapshots of its servers copied from the parent.
+    pub(crate) fn give_subagent_toolbox(
+        &self,
+        parent: &str,
+        child: &str,
+        toolbox: Option<ActiveToolbox>,
+    ) -> Result<(), RpcError> {
+        let Some(toolbox) = toolbox else {
+            return Ok(());
+        };
+        let servers: Vec<String> = toolbox.servers.iter().cloned().collect();
+        self.inherit_toolbox(child, toolbox)?;
+        proxy::copy_snapshots(&self.agent_dir(parent), &self.agent_dir(child), &servers)
+            .map_err(|e| RpcError::internal(format!("{e:#}")))
     }
 }

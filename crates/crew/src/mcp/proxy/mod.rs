@@ -846,3 +846,21 @@ impl<W: Write> Session<'_, W> {
         Ok(())
     }
 }
+
+/// Copy the pinned snapshots of servers `names` from one agent directory to
+/// another (a subagent serves its parent's definitions). A server without
+/// a snapshot is left without one.
+pub fn copy_snapshots(from: &Path, to: &Path, names: &[String]) -> Result<()> {
+    for name in names {
+        let source = snapshot_path(from, name);
+        let bytes = match std::fs::read(&source) {
+            Ok(bytes) => bytes,
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => continue,
+            Err(e) => return Err(e).with_context(|| format!("reading {}", source.display())),
+        };
+        let target = snapshot_path(to, name);
+        crew_core::paths::ensure_private_dir(target.parent().expect("a snapshot path has a parent"))?;
+        crew_core::paths::write_private_file(&target, &bytes)?;
+    }
+    Ok(())
+}

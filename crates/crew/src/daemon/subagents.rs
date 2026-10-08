@@ -33,14 +33,15 @@ impl Daemon {
         if task.is_empty() {
             return Err(RpcError::invalid("a subagent needs a task"));
         }
-        // Bundles are named, never defined, by an agent; each is checked
-        // against the parent's active toolbox once the subagent exists.
+        // Bundles are named, never defined, by an agent, and each item must
+        // be one the parent has: checked before anything is created.
         if let Some(names) = &toolbox {
             self.check_bundle_selection(&crew_core::toolbox::Toolbox {
                 include: names.clone(),
                 ..Default::default()
             })?;
         }
+        let toolbox = self.subagent_toolbox(parent_id, toolbox)?;
         if task.chars().count() > MAX_TASK_CHARS {
             return Err(RpcError::too_large(format!(
                 "the task description is limited to {MAX_TASK_CHARS} characters"
@@ -171,6 +172,7 @@ to finish",
             .agent(&id)
             .data(json!({ "parent": parent_id })),
         );
+        self.give_subagent_toolbox(parent_id, &id, toolbox)?;
         self.create_task(own_task)?;
         // Dispatch first so the subagent's first prompt is its task.
         self.apply_plan().await;
