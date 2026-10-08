@@ -8,6 +8,12 @@
 // 2. The reply replaces agents, tasks, session, questions and both rings.
 // 3. From then on every push is applied in the order received.
 //
+// Before all of it, the connection negotiates features (net/features.ts).
+// Pushes of an observer feature (metrics, docs, asides) go to their views
+// as they come, outside the barrier; each view fences them by its own watch
+// and epoch. Epics replace the task stream and need the barrier: they are not
+// routed here.
+//
 // What the workspace *is* comes from the listing, never from a connection.
 // Its state is computed from the newest listing and from whether the page has
 // a live connection to it:
@@ -38,6 +44,7 @@
 import { createSignal } from "solid-js";
 import { decodeSnapshot, type DaemonRef, type Push, type Snapshot, type WorkspaceEntry } from "../protocol";
 import { CLOSE_TAKEN_OUT, CallError, Conn, backoff, type Ending, type StopReason } from "./conn";
+import { negotiate, type Features } from "./features";
 import type { Hub } from "./hub";
 
 export const SNAPSHOT_PARAMS = { messages: 300, events: 1000 };
@@ -64,6 +71,8 @@ type Attempt = {
   live: boolean;
   /** The page's half of the barrier: a snapshot is in flight. */
   inFlight: boolean;
+  /** What this connection negotiated, before `subscribe`. */
+  features: Features;
 };
 
 const sameDaemon = (a: DaemonRef | null, b: DaemonRef | null) => a === b || (!!a && !!b && a.pid === b.pid && a.started_at === b.started_at);
@@ -83,6 +92,8 @@ export function createWorkspaceLink(hub: Hub, id: string | null, sink: Sink) {
   /** Whether a listing ever had this workspace: `removed` or never joined. */
   const [seen, setSeen] = createSignal(false);
   const [detail, setDetail] = createSignal("");
+  const [features, setFeatures] = createSignal<Features>({ state: "pending" });
+  const featureListeners = new Set<(name: string, data: unknown) => void>();
   let attempt: Attempt | null = null;
   let attempts = 0;
   /** The backoff's step. */
@@ -108,6 +119,7 @@ export function createWorkspaceLink(hub: Hub, id: string | null, sink: Sink) {
   function closeAttempt(): void {
     const a = attempt;
     attempt = null;
+    setFeatures({ state: "pending" });
     a?.conn.close();
   }
 
@@ -180,6 +192,7 @@ export function createWorkspaceLink(hub: Hub, id: string | null, sink: Sink) {
   function ended(a: Attempt, reason: StopReason | undefined, ending: Ending | null): void {
     if (a !== attempt) return;
     attempt = null;
+    setFeatures({ state: "pending" });
     a.conn.close();
     if (reason === "proof" || reason === "unauthorized") return hub.stop(reason);
     if (shown() === "live") setShown("reconnecting");
@@ -192,7 +205,7 @@ export function createWorkspaceLink(hub: Hub, id: string | null, sink: Sink) {
   }
 
   function begin(e: WorkspaceEntry): void {
-    const a: Attempt = { n: ++attempts, conn: null as unknown as Conn, generation: e.generation, daemon: e.daemon ?? null, live: false, inFlight: false };
+    const a: Attempt = { n: ++attempts, conn: null as unknown as Conn, generation: e.generation, daemon: e.daemon ?? null, live: false, inFlight: false, features: { state: "pending" } };
     recorded = { generation: a.generation, daemon: a.daemon };
     a.conn = new Conn({
       env,
@@ -200,7 +213,9 @@ export function createWorkspaceLink(hub: Hub, id: string | null, sink: Sink) {
       reconnect: false,
       workspace: id!,
       async ready(c) {
-        // Subscribe first, then the snapshot; pushes in between are discarded.
+        // Features first, before any ordinary call; then subscribe, then the
+        // snapshot, with the pushes in between discarded.
+        a.features = await negotiate(c);
         a.inFlight = true;
         try {
           await c.call("subscribe");
@@ -210,7 +225,13 @@ export function createWorkspaceLink(hub: Hub, id: string | null, sink: Sink) {
         await snapshot(a);
       },
       push(push, t0) {
-        if (a !== attempt || a.inFlight) return;
+        if (a !== attempt) return;
+        // Observer features keep their own fences, not the snapshot barrier.
+        if (push.kind === "feature") {
+          for (const f of [...featureListeners]) f(push.name, push.data);
+          return;
+        }
+        if (a.inFlight) return;
         if (push.kind === "resync") {
           void snapshot(a).catch((err) => {
             // Lost with the connection: its end is reported on its own.
@@ -234,6 +255,7 @@ export function createWorkspaceLink(hub: Hub, id: string | null, sink: Sink) {
           a.live = true;
           everLive = true;
           tries = 0;
+          setFeatures(a.features);
           setShown("live");
           for (const f of [...liveListeners]) f();
         } else if (s === "stopped" || s === "signed-out") ended(a, reason, a.conn.ending);
@@ -280,6 +302,14 @@ export function createWorkspaceLink(hub: Hub, id: string | null, sink: Sink) {
       if (!a?.live) return Promise.reject(new CallError("closed", "not connected"));
       return a.conn.call<T>(method, params, decode);
     },
+    /** What the live connection negotiated; `pending` without one. A new
+     * connection negotiates again, so watches and ids of the last are gone. */
+    features,
+    /** `f(name, data)` for each observer feature push of the live connection. */
+    onFeature(f: (name: string, data: unknown) => void): () => void {
+      featureListeners.add(f);
+      return () => featureListeners.delete(f);
+    },
     /** Run `f` each time a connection to the workspace goes live (terminals re-attach). */
     onLive(f: () => void): () => void {
       liveListeners.add(f);
@@ -292,6 +322,7 @@ export function createWorkspaceLink(hub: Hub, id: string | null, sink: Sink) {
       for (const off of offs) off();
       halt();
       liveListeners.clear();
+      featureListeners.clear();
     },
     /** For tests: the page's view of the barrier, and the attempts made. */
     get snapshotInFlight() {

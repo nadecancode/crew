@@ -7,6 +7,10 @@ export const sha256 = (s: string) => createHash("sha256").update(s).digest("hex"
 
 export class FakeSocket {
   static all: FakeSocket[] = [];
+  /** How the daemon behind answers `features_negotiate` by itself; null leaves
+   * it to the test. By default as a v6 daemon: the method is unknown. */
+  static negotiation: ((s: FakeSocket, id: number) => void) | null = (s, id) =>
+    s.fail(id, "invalid", "malformed request: unknown variant `features_negotiate`, expected one of `hello`");
   readyState = 0;
   sent: any[] = [];
   onopen: ((e: unknown) => void) | null = null;
@@ -18,7 +22,10 @@ export class FakeSocket {
   }
   send(text: string) {
     if (this.readyState !== 1) throw new Error("send on a socket that is not open");
-    this.sent.push(JSON.parse(text));
+    const req = JSON.parse(text);
+    this.sent.push(req);
+    const answer = FakeSocket.negotiation;
+    if (req.method === "features_negotiate" && answer) queueMicrotask(() => this.readyState === 1 && answer(this, req.id));
   }
   close() {
     if (this.readyState === 3) return;

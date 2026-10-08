@@ -183,6 +183,8 @@ export type SessionInfo = {
   version: string;
   /** The dashboard's address while it is served, else empty. */
   web: string;
+  /** The workspace run, on a connection that negotiated features. */
+  workspace_run_id?: string | null;
 };
 
 export type Snapshot = {
@@ -261,7 +263,10 @@ export type Push =
   | { kind: "pty_closed" }
   | { kind: "shutdown" }
   /** On the index connection only. */
-  | { kind: "workspaces"; data: Workspaces };
+  | { kind: "workspaces"; data: Workspaces }
+  /** A negotiated observer feature's push (`usage_changed`, `docs_changed`,
+   * `aside`), outside the snapshot barrier; its view decodes `data`. */
+  | { kind: "feature"; name: string; data: unknown };
 
 export type Frame =
   | { kind: "result"; id: number; result: unknown }
@@ -418,7 +423,7 @@ export function decodeSession(v: unknown, what = "session"): SessionInfo {
   def(o, "quotas", [], Array.isArray, what);
   def(o, "daemon_started_at", 0, isNum, what);
   def(o, "daemon_pid", 0, isNum, what);
-  for (const k of ["project", "style", "summary", "herdr_workspace"]) opt(o, k, isStr, what);
+  for (const k of ["project", "style", "summary", "herdr_workspace", "workspace_run_id"]) opt(o, k, isStr, what);
   for (const k of ["team_started_at", "completed_at"]) opt(o, k, isNum, what);
   (o.quotas as unknown[]).forEach((q, i) => {
     const w = `${what}.quotas[${i}]`, x = obj(q, w);
@@ -473,6 +478,10 @@ export function decodePush(v: unknown): Push | null {
     case "pty_closed":
     case "shutdown":
       return { kind };
+    case "usage_changed":
+    case "docs_changed":
+    case "aside":
+      return { kind: "feature", name: kind, data: o.data };
     // `deliver` and `compact` are for agents, `summary` for the dashboard
     // server's watch; anything else is a kind this page does not know. All
     // are ignored.
