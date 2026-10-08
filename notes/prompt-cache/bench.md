@@ -6,14 +6,29 @@ hands it to the other runtime for an independent audit, waits, and reviews a
 follow-up after the idle gap. The fixture has an exact output oracle. Its money
 amounts are synthetic integer-cent test data; no financial service is involved.
 
-The first live baseline is **not available yet**. On 2026-10-07, the baseline
-binary started the isolated team, but Claude's private home could not
-authenticate. No billable usage record was produced. Missing measurements are
-unknown, not a 0% hit rate or a measured zero-dollar total. See
-[`bench-baseline-attempt.json`](bench-baseline-attempt.json).
-The operator subsequently authorized `--sandbox off` with normal CLI logins
-(`m-ff8aa3691883`). The daemon, repository and session identities remain separate;
-the native session logs then live in the normal CLI homes.
+The first live baseline completed on 2026-10-07 using the c8052373 release
+binary and runner a1cd0cf5. The operator authorized `--sandbox off` with normal
+CLI logins (`m-ff8aa3691883`, `m-de66f70cfa51`). The daemon, repository and session
+identities remained separate; native session logs live in the normal CLI homes.
+The full numeric report is [`bench-baseline.json`](bench-baseline.json).
+
+| Member | Observed model | Requests | Input tokens | Cache-read tokens | Token hit rate | API-equivalent USD |
+| --- | --- | ---: | ---: | ---: | ---: | ---: |
+| orchestrator | claude-haiku-4-5-20251001 | 10 | 423,132 | 379,177 | 89.6120% | 0.135763 |
+| claude-worker | claude-haiku-4-5-20251001 | 29 | 1,295,160 | 1,230,666 | 95.0204% | 0.279513 |
+| codex-worker | gpt-6-luna | 27 | 678,036 | 645,376 | 95.1831% | 0.010290–0.022213 |
+
+Across 66 requests, 2,255,219 of 2,396,328 input tokens were cache reads
+(94.1114%). The cost estimate was $0.425565–$0.437488. Claude Code was 2.1.291;
+Codex CLI was 0.159.0. The run took 149.46 seconds and measured a 20.4535-second
+idle gap. All three cards finished, one question/answer exchange and two
+reviews were observed, and all fixture output checks passed. The private
+daemon stopped with exit code 0 and no tracked process remained.
+
+Earlier required-sandbox attempts could not authenticate; their missing usage
+remains unknown, not a measured zero hit rate or cost. Their separate record is
+[`bench-baseline-attempt.json`](bench-baseline-attempt.json). This single
+normal-home sample is not a before/after result or a sandboxed-production result.
 
 ## Running it
 
@@ -129,9 +144,12 @@ and [official OpenAI documentation for GPT-6 Luna](https://developers.openai.com
 These are API-equivalent estimates, not subscription invoices. Recheck the
 versioned rates before a future benchmark campaign. Claude's reported 5-minute
 and 1-hour write buckets determine its write cost when present; otherwise the
-two prices bound the estimate. Codex does not expose the write/miss split here,
-so its estimate spans input to cache-write pricing and allows Fast processing
-in the upper estimate. The long-context multipliers apply above 272,000 input
+two prices bound the estimate. The watchdog conservatively leaves Codex's
+write/miss split out of its cost calculation, so its estimate spans input to
+cache-write pricing and allows Fast processing in the upper estimate. This
+run's native Codex records do contain `cache_write_input_tokens`, consistently
+zero; the conservative interval is retained to describe the runner as executed.
+The long-context multipliers apply above 272,000 input
 tokens. Account-specific discounts or routing are not measured.
 
 The runner polls native counters each second and stops at an observed upper
@@ -173,7 +191,7 @@ nix shell nixpkgs#python3 --command \
   python3 -B -m unittest discover -s scripts/cache -p 'test_*.py' -v
 ```
 
-The tests cover Claude streaming deduplication and write TTL accounting, Codex
+The 11 passing tests cover Claude streaming deduplication and write TTL accounting, Codex
 cumulative updates and reasoning output, missing metrics, parent-environment
 isolation, PID reuse, rejection of incomplete completion evidence, and the
 full runner's idle/review/cost-stop paths using a fake CLI and a real disposable
@@ -191,5 +209,9 @@ exit code 0 and left no tracked process behind.
 The final native error at `2026-10-08T04:00:47.095Z` was
 `authentication_failed`, with text `Not logged in · Please run /login`.
 Crew activity was `sign-in needed · waiting for \`crew resume\``. The
-orchestrator was notified. The operator then authorized an unsandboxed run with
-normal logins; no credential extraction, copy or login command is used.
+orchestrator was notified. The operator then authorized the successful
+unsandboxed run above; no credential extraction, copy or login command was used.
+The native session files remain untouched in their original CLI homes. The
+runtime's broader `baseline.mjs` collector was not yet present, which the
+report records explicitly; all reported measurements came directly from the
+fresh sessions through the watchdog's native parsers.

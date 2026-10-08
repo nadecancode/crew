@@ -128,7 +128,8 @@ def cost(request, runtime):
         output_factor = 1.5 if context_factor == 2 else 1
         base = (request["cached_tokens"] * rates["read"] * context_factor
                 + request["output_tokens"] * rates["output"] * output_factor)
-        # The native rollout does not split new cache writes from other misses.
+        # Conservatively leave native cache_write_input_tokens out of this
+        # watchdog: all misses are possible writes in the upper estimate.
         lower = base + request["uncached_tokens"] * rates["input"] * context_factor
         upper = base + request["uncached_tokens"] * rates["write"] * context_factor
         # Upper bound allows Fast processing; the standard lower bound is the
