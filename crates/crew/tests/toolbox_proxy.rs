@@ -110,6 +110,8 @@ fn preflight_and_pin(fx: &Fixture, launch: &Path, refresh: bool) -> PinOutcome {
 /// A session proxy, spoken to as the runtime would.
 struct Session {
     child: Child,
+    /// Where its stderr goes.
+    log: PathBuf,
     stdin: ChildStdin,
     lines: mpsc::Receiver<Value>,
     next: u64,
@@ -117,13 +119,14 @@ struct Session {
 
 impl Session {
     fn start(launch: &Path, env: &[(&str, &str)]) -> Self {
+        let log = launch.with_extension("stderr");
         let mut cmd = Command::new(CREW);
         cmd.args(["toolbox", "mcp", "x", "--launch-file"])
             .arg(launch)
             .env_remove("CREW_IDENTITY")
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
-            .stderr(Stdio::null());
+            .stderr(std::fs::File::create(&log).unwrap());
         for (k, v) in env {
             cmd.env(k, v);
         }
@@ -143,10 +146,18 @@ impl Session {
         });
         Session {
             child,
+            log,
             stdin,
             lines,
             next: 0,
         }
+    }
+
+    /// What it wrote to stderr, once it has stopped.
+    fn stop(mut self) -> String {
+        let _ = self.child.kill();
+        let _ = self.child.wait();
+        std::fs::read_to_string(&self.log).unwrap()
     }
 
     fn notify(&mut self, method: &str) {
@@ -439,6 +450,102 @@ fn secrets_reach_the_server_under_their_destination_name_and_come_back_redacted(
     let message = echoed["error"]["message"].as_str().unwrap();
     assert_eq!(message, "bad token [redacted $SHOP_GITHUB_TOKEN]");
     assert!(!echoed.to_string().contains(secret));
+}
+
+/// Everything that leaves the proxy is redacted, not only tool results: the
+/// listing a preflight prints (which the daemon pins), the pinned and the
+/// live view the runtime is served, failure reasons and refusals, and the
+/// server's own log.
+#[test]
+fn a_server_that_echoes_its_secret_everywhere_is_redacted_everywhere() {
+    let fx = Fixture::new();
+    let secret = "canary-7f3e9a1b5c";
+    let shown = "[redacted $SHOP_TOKEN]";
+    let env = [("TOKEN", secret)];
+    let redact = [("SHOP_TOKEN", secret)];
+    let clean = |what: &str, text: &str| {
+        assert!(!text.contains(secret), "{what} leaks the secret: {text}");
+    };
+    let launch = fx.launch("x", &["--leak", "TOKEN"], &env, &redact);
+    let preflight = |launch: &Path| {
+        Command::new(CREW)
+            .args(["toolbox", "mcp", "x", "--preflight", "--launch-file"])
+            .arg(launch)
+            .env_remove("CREW_IDENTITY")
+            .output()
+            .unwrap()
+    };
+
+    let out = preflight(&launch);
+    let (stdout, stderr) = (
+        String::from_utf8_lossy(&out.stdout),
+        String::from_utf8_lossy(&out.stderr),
+    );
+    assert!(out.status.success(), "{stdout}{stderr}");
+    clean("the preflight listing", &stdout);
+    clean("the preflight log", &stderr);
+    assert!(stdout.contains(shown), "{stdout}");
+    assert!(stderr.contains(&format!("with token {shown}")), "{stderr}");
+    let printed: Value = serde_json::from_str(&stdout).unwrap();
+    pin(
+        &fx.agent_dir(),
+        "x",
+        &"a".repeat(64),
+        &printed["listing"],
+        false,
+    )
+    .unwrap();
+    let snapshot = snapshot_path(&fx.agent_dir(), "x");
+    clean(
+        "the pinned snapshot",
+        &std::fs::read_to_string(&snapshot).unwrap(),
+    );
+
+    for pinned in [true, false] {
+        if !pinned {
+            std::fs::remove_file(&snapshot).unwrap();
+        }
+        let mut session = Session::start(&launch, &[]);
+        let mut said = Vec::new();
+        for (method, params) in [
+            ("initialize", json!({"protocolVersion": "2025-06-18"})),
+            ("tools/list", json!({})),
+            ("tools/call", json!({"name": "alpha", "arguments": {}})),
+        ] {
+            let (answer, other) = session.request(method, params);
+            said.push(answer);
+            said.extend(other);
+        }
+        let said = serde_json::to_string(&said).unwrap();
+        clean(&format!("the session (pinned: {pinned})"), &said);
+        assert!(said.contains(shown), "{said}");
+        let log = session.stop();
+        clean(&format!("the session log (pinned: {pinned})"), &log);
+        assert!(log.contains(&format!("with token {shown}")), "{log}");
+    }
+
+    let refusing = fx.launch(
+        "x",
+        &["--leak", "TOKEN", "--refuse-initialize"],
+        &env,
+        &redact,
+    );
+    let out = preflight(&refusing);
+    let (stdout, stderr) = (
+        String::from_utf8_lossy(&out.stdout),
+        String::from_utf8_lossy(&out.stderr),
+    );
+    assert!(!out.status.success());
+    clean("a failed preflight", &stdout);
+    clean("a failed preflight's log", &stderr);
+    assert!(stdout.contains(shown), "{stdout}");
+    let mut session = Session::start(&refusing, &[]);
+    let (init, _) = session.request("initialize", json!({"protocolVersion": "2025-06-18"}));
+    let (call, _) = session.request("tools/call", json!({"name": "alpha", "arguments": {}}));
+    let said = format!("{init}{call}");
+    clean("refusals after a failed initialize", &said);
+    assert!(said.contains(shown), "{said}");
+    clean("the failed session's log and report", &session.stop());
 }
 
 /// A stand-in remote server; its URL and the process, stopped on drop.

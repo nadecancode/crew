@@ -71,6 +71,7 @@ fn connect(
             cwd.as_deref(),
             env,
             &launch.scrub,
+            Redactor::new(launch),
             events,
         )?)),
         Upstream::Http {
@@ -316,13 +317,16 @@ pub fn definition_digest(agent_dir: &Path, names: &[String]) -> Option<Definitio
     })
 }
 
-/// Replaces exact occurrences of secret values in what the server says.
-struct Redactor {
+/// Replaces exact occurrences of secret values in what the server says:
+/// every message, listing, snapshot, failure reason and log line that
+/// leaves the proxy.
+#[derive(Clone)]
+pub(crate) struct Redactor {
     values: Vec<(String, String)>,
 }
 
 impl Redactor {
-    fn new(launch: &ToolboxServerLaunch) -> Self {
+    pub(crate) fn new(launch: &ToolboxServerLaunch) -> Self {
         let mut values: Vec<(String, String)> = launch
             .redact
             .iter()
@@ -334,20 +338,34 @@ impl Redactor {
         Redactor { values }
     }
 
-    fn apply(&self, value: &mut Value) {
+    /// `text` with every secret value replaced.
+    pub(crate) fn text(&self, text: &str) -> String {
+        let mut text = text.to_string();
+        for (secret, shown) in &self.values {
+            if text.contains(secret.as_str()) {
+                text = text.replace(secret.as_str(), shown);
+            }
+        }
+        text
+    }
+
+    /// `value` with every secret value replaced, in strings and in keys.
+    pub(crate) fn apply(&self, value: &mut Value) {
         if self.values.is_empty() {
             return;
         }
         match value {
-            Value::String(text) => {
-                for (secret, shown) in &self.values {
-                    if text.contains(secret.as_str()) {
-                        *text = text.replace(secret.as_str(), shown);
-                    }
-                }
-            }
+            Value::String(text) => *text = self.text(text),
             Value::Array(items) => items.iter_mut().for_each(|v| self.apply(v)),
-            Value::Object(map) => map.values_mut().for_each(|v| self.apply(v)),
+            Value::Object(map) => {
+                if map.keys().any(|k| self.text(k) != *k) {
+                    *map = std::mem::take(map)
+                        .into_iter()
+                        .map(|(k, v)| (self.text(&k), v))
+                        .collect();
+                }
+                map.values_mut().for_each(|v| self.apply(v));
+            }
             _ => {}
         }
     }
@@ -356,17 +374,25 @@ impl Redactor {
 /// `text` with the server's secret values replaced, for what goes to the
 /// daemon (a preflight's reason, a report).
 pub fn redacted(launch: &ToolboxServerLaunch, text: &str) -> String {
-    let mut value = Value::String(text.to_string());
-    Redactor::new(launch).apply(&mut value);
-    match value {
-        Value::String(text) => text,
-        _ => unreachable!("a string stays a string"),
-    }
+    Redactor::new(launch).text(text)
 }
 
 /// Ask the server for its `initialize` result and every page of its tools
-/// within `within`, then stop it.
+/// within `within`, then stop it. The listing, which the daemon pins, and
+/// the reason for a failure come back redacted.
 pub fn preflight(launch: &ToolboxServerLaunch, within: Duration) -> Result<Listing> {
+    let redactor = Redactor::new(launch);
+    match live_listing(launch, within) {
+        Ok(mut listing) => {
+            redactor.apply(&mut listing.initialize);
+            listing.tools.iter_mut().for_each(|t| redactor.apply(t));
+            Ok(listing)
+        }
+        Err(e) => Err(anyhow!(redactor.text(&format!("{e:#}")))),
+    }
+}
+
+fn live_listing(launch: &ToolboxServerLaunch, within: Duration) -> Result<Listing> {
     let deadline = Instant::now() + within;
     let (tx, rx) = mpsc::channel();
     let mut connection = connect(launch, tx)?;
@@ -536,9 +562,20 @@ pub fn serve(
         }
         let _ = reader.send(Event::RuntimeClosed);
     });
+    let redactor = Redactor::new(launch);
+    // Served redacted too, whenever and however it was pinned.
+    let snapshot = snapshot.map(|pinned| {
+        let mut listing = Listing {
+            initialize: pinned.initialize,
+            tools: pinned.tools,
+        };
+        redactor.apply(&mut listing.initialize);
+        listing.tools.iter_mut().for_each(|t| redactor.apply(t));
+        Snapshot::of(&pinned.definition, &listing)
+    });
     let mut session = Session {
         launch,
-        redactor: Redactor::new(launch),
+        redactor,
         output,
         connection: None,
         down: None,
@@ -729,6 +766,9 @@ impl<W: Write> Session<'_, W> {
         mut message: Value,
         report: &mut dyn FnMut(ToolboxReportKind, String),
     ) -> Result<()> {
+        // Before anything reads it: answers to the proxy's own requests
+        // become the snapshot and reports, errors become failure reasons.
+        self.redactor.apply(&mut message);
         let own = message
             .get("id")
             .and_then(Value::as_str)
@@ -757,7 +797,6 @@ impl<W: Write> Session<'_, W> {
                 self.open.remove(&id.to_string());
             }
         }
-        self.redactor.apply(&mut message);
         self.write(&message)
     }
 
@@ -851,6 +890,7 @@ impl<W: Write> Session<'_, W> {
         if self.down.is_some() {
             return Ok(());
         }
+        let why = self.redactor.text(&why);
         report(ToolboxReportKind::Failed, why.clone());
         if let Some(mut connection) = self.connection.take() {
             connection.close();

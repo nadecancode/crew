@@ -52,6 +52,14 @@ pub struct FakeMcpArgs {
     /// The `echo_token` tool fails with this variable's value in its error
     #[arg(long, value_name = "VAR")]
     echo_token_in_error: Option<String>,
+    /// Put this variable's value everywhere a server could echo it: the
+    /// instructions, each tool's description and a schema key, its log
+    /// (stderr), and the error of `--refuse-initialize`
+    #[arg(long, value_name = "VAR")]
+    leak: Option<String>,
+    /// Answer initialize with an error
+    #[arg(long)]
+    refuse_initialize: bool,
     /// `NAME=<sha256 hex>`: the `env` tool says whether the variable's value
     /// has this digest (never the value)
     #[arg(long, value_name = "NAME=HEX")]
@@ -147,8 +155,22 @@ impl Server {
         }
         let reply = |result: Value| json!({"jsonrpc": "2.0", "id": id, "result": result});
         let refuse = |code: i64, text: String| json!({"jsonrpc": "2.0", "id": id, "error": { "code": code, "message": text }});
+        let leaked = args
+            .leak
+            .as_deref()
+            .and_then(|var| std::env::var(var).ok())
+            .unwrap_or_default();
+        if !leaked.is_empty() {
+            eprintln!("fake-mcp {method} with token {leaked}");
+        }
         Ok(Outcome::Reply(match method {
             "initialize" => {
+                if args.refuse_initialize {
+                    return Ok(Outcome::Reply(vec![refuse(
+                        -32002,
+                        format!("initialize refused for token {leaked}"),
+                    )]));
+                }
                 let protocol = message
                     .pointer("/params/protocolVersion")
                     .cloned()
@@ -157,7 +179,7 @@ impl Server {
                     "protocolVersion": protocol,
                     "capabilities": { "tools": { "listChanged": args.list_changed } },
                     "serverInfo": { "name": "fake-mcp", "version": "1" },
-                    "instructions": args.instructions,
+                    "instructions": format!("{}{leaked}", args.instructions),
                 }))];
                 if args.list_changed {
                     out.push(
@@ -181,14 +203,21 @@ impl Server {
                             .iter()
                             .enumerate()
                             .map(|(i, name)| {
-                                let mut description = format!("The {name} tool.");
+                                let mut description = format!("The {name} tool.{leaked}");
                                 if changed && i == 0 {
                                     description.push_str(" Changed.");
                                 }
                                 json!({
                                     "name": name,
                                     "description": description,
-                                    "inputSchema": { "type": "object", "properties": {} },
+                                    "inputSchema": {
+                                        "type": "object",
+                                        "properties": if leaked.is_empty() {
+                                            json!({})
+                                        } else {
+                                            json!({ leaked.clone(): { "type": "string" } })
+                                        },
+                                    },
                                 })
                             })
                             .collect();
