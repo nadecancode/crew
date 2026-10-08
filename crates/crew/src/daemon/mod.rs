@@ -32,6 +32,7 @@ mod delivery;
 mod fallback;
 mod gitops;
 mod handlers;
+mod keepalive;
 mod limits;
 mod orchestrate;
 mod overlap;
@@ -233,6 +234,12 @@ pub(crate) struct AgentRuntimeState {
     /// When its crew tools were last said to speak another protocol (0:
     /// not since the daemon started).
     pub protocol_warned_at: i64,
+    /// Cache keep-alives sent since it last worked (keepalive.rs).
+    pub keepalives: u32,
+    /// When the keep-alive not yet followed by a turn's end was sent.
+    pub keepalive_sent_at: Option<i64>,
+    /// When the rest's first keep-alive was sent.
+    pub keepalive_rest_from: i64,
 }
 
 #[derive(Default)]
