@@ -45,11 +45,11 @@ must not implement competing status rules.
 | `Epic.updated_at: i64` | Last metadata/member-task change affecting this epic, including progress. Report publication does not pretend that its work changed. |
 | `Epic.started_at: Option<i64>` | First observed task start/progress out of initial planning. Retained through retries/reassignment so an epic does not become newly planned again. Unknown imported history stays unknown. |
 | `Epic.closed_at: Option<i64>` | When this epic most recently entered the derived `done` state. Cleared on reopening. This is the aggregate transition time, not an invented completion time for an old task. |
-| `Epic.revision: u64` | Advances when its metadata, membership or a member task changes. Other epics' changes do not invalidate this revision. |
+| `Epic.revision: u64` | Increases by one per committed board change affecting its metadata, membership or member tasks. A batch affecting several of its tasks counts once. Other epics' changes do not invalidate this revision. |
 | `Epic.status: EpicStatus` | Derived `planned`, `active`, `blocked` or `done`, by the rules below. Not accepted in an edit request. |
 | `Epic.counts: EpicCounts` | `total` and one integer for each existing `TaskStatus`: queued, ready, working, waiting, blocked, review, done, failed. Their sum equals total. |
 | `Epic.report: Option<EpicReport>` | Latest report: summary, report time, the epic revision it covers, and linked operator-decision message ids. Preserve older reports in events. |
-| `EpicSummary` | Board row: id/title/source reference, timestamps/revision/status/counts, `last_done_at` (latest known successful task completion), per-agent counts, plus report time and covered revision if a report exists. No objective, report body or task bodies. |
+| `EpicSummary` | Board row: id/title/source reference, `created_at`, `updated_at`, `started_at`, `closed_at`, revision/status/counts, `last_done_at` (latest known successful task completion), per-agent counts, plus report time and covered revision if a report exists. No objective, report body or task bodies. |
 | `EpicBoard` | Ordered `epics: Vec<EpicSummary>`, counts for `no_epic`, derived `focus_epic: Option<String>`, a session generation and a monotonic board revision. It advertises the complete v1 read contract, not just the existence of an SQL table. |
 
 The server stores the editable metadata, timestamps, revisions and reports;
@@ -61,6 +61,11 @@ Per-agent counts include assigned total, unfinished assigned total and current
 review count, in stable agent-id order. An unassigned task still contributes
 to the epic total. A removed agent's id remains usable as historical identity;
 assignment and review counts must not be added as if they were disjoint tasks.
+The header uses agents whose unfinished assigned total is positive (at most
+three ids, then `+N`); detail uses assigned total and review count. The board
+timestamps support the created/first-started/closed timeline without a detail
+fetch. Completed epics display newest `closed_at` first; unknown times come
+last, with stored position breaking ties.
 
 `Task.completed_at` continues to mean the task's terminal transition, including
 failure. Preserve the existing review gate: submission for review is not task
@@ -263,6 +268,11 @@ it as the current verdict. Metadata/task edits and membership moves likewise
 make an older report stale when they change that epic's revision. A change to
 another epic does not. Decision replies remain associated with their originating
 epic, even if the user is viewing a different group.
+The detail can show the latest summary, report time and decision links with
+`covers revision R · N changes since`, where N is current minus covered work
+revision in the same generation. The summary row's report time/covered
+revision suffices for an available/stale marker without loading the report
+body. N counts committed changes as defined above, not tasks or operator asks.
 
 Closing/reporting one epic must not set the whole session's completion time,
 stop agents, satisfy another task's dependencies or suppress work in another
