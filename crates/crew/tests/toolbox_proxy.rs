@@ -515,3 +515,44 @@ fn a_remote_server_that_refuses_the_header_fails_preflight_without_the_secret() 
     assert!(reason.contains("HTTP 401"), "{reason}");
     assert!(!printed.to_string().contains("wrong-one-1234"));
 }
+
+/// Preflight with `SSL_CERT_FILE` set to `ca`, or unset.
+fn preflight_with_roots(launch: &Path, ca: Option<&Path>) -> (bool, Value) {
+    let mut cmd = Command::new(CREW);
+    cmd.args(["toolbox", "mcp", "x", "--preflight", "--preflight-within", "10", "--launch-file"])
+        .arg(launch)
+        .env_remove("CREW_IDENTITY")
+        .env_remove("SSL_CERT_FILE")
+        .env_remove("SSL_CERT_DIR");
+    if let Some(ca) = ca {
+        cmd.env("SSL_CERT_FILE", ca);
+    }
+    let out = cmd.output().unwrap();
+    (out.status.success(), serde_json::from_slice(&out.stdout).unwrap())
+}
+
+// An https server is reached only through a chain crew can verify: with the
+// operator's CA added through SSL_CERT_FILE it works; without it the
+// preflight fails, and nothing turns verification off.
+#[test]
+fn an_https_server_is_reached_only_through_a_verified_chain() {
+    use crew_core::toolbox::McpTransport;
+    let tls = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/toolbox-tls");
+    let cert = tls.join("server.pem").to_string_lossy().into_owned();
+    let key = tls.join("server.key").to_string_lossy().into_owned();
+    let fx = Fixture::new();
+    let remote = Remote::start(&["--http", "http", "--tls-cert", &cert, "--tls-key", &key]);
+    assert!(remote.url.starts_with("https://localhost:"), "{}", remote.url);
+    let launch = fx.remote_launch(&remote.url, McpTransport::Http, &[], &[]);
+
+    let (ok, printed) = preflight_with_roots(&launch, None);
+    assert!(!ok, "{printed}");
+    assert!(
+        printed["reason"].as_str().unwrap().to_lowercase().contains("certificate"),
+        "{printed}"
+    );
+
+    let (ok, printed) = preflight_with_roots(&launch, Some(&tls.join("ca.pem")));
+    assert!(ok, "{printed}");
+    assert_eq!(names(&printed["listing"]["tools"]), ["alpha", "beta", "gamma"]);
+}

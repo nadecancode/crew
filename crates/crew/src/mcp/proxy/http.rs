@@ -21,6 +21,63 @@ use super::{Connection, Event};
 const CONNECT_WITHIN: Duration = Duration::from_secs(30);
 /// How long the SSE transport may take to name its endpoint.
 const ENDPOINT_WITHIN: Duration = Duration::from_secs(30);
+/// How long the server may stay silent while it answers a request.
+const ANSWER_IDLE: Duration = Duration::from_secs(300);
+/// The longest status or header line, and how many header lines.
+const MAX_LINE: usize = 8 * 1024;
+const MAX_HEADERS: usize = 100;
+/// The largest JSON answer, and the largest server-sent event.
+const MAX_BODY: u64 = 16 * 1024 * 1024;
+const MAX_EVENT: usize = 16 * 1024 * 1024;
+
+/// Read one line of at most `max` bytes (its line break included).
+fn read_line(reader: &mut dyn BufRead, max: usize) -> std::io::Result<String> {
+    let mut line = Vec::new();
+    reader.take(max as u64 + 1).read_until(b'\n', &mut line)?;
+    if line.len() > max {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidData,
+            format!("a line longer than {max} bytes"),
+        ));
+    }
+    String::from_utf8(line)
+        .map_err(|_| std::io::Error::new(std::io::ErrorKind::InvalidData, "not UTF-8"))
+}
+
+/// The TLS client: the Mozilla roots crew is built with, plus any the
+/// operator adds with SSL_CERT_FILE or SSL_CERT_DIR (a company's own CA).
+/// Verification is never turned off.
+fn tls() -> Result<std::sync::Arc<rustls::ClientConfig>> {
+    static CONFIG: std::sync::OnceLock<std::sync::Arc<rustls::ClientConfig>> =
+        std::sync::OnceLock::new();
+    if let Some(config) = CONFIG.get() {
+        return Ok(config.clone());
+    }
+    let mut roots = rustls::RootCertStore::empty();
+    roots.extend(webpki_roots::TLS_SERVER_ROOTS.iter().cloned());
+    let mut extra: Vec<std::path::PathBuf> = Vec::new();
+    if let Some(file) = std::env::var_os("SSL_CERT_FILE") {
+        extra.push(file.into());
+    }
+    if let Some(dir) = std::env::var_os("SSL_CERT_DIR") {
+        if let Ok(entries) = std::fs::read_dir(dir) {
+            extra.extend(entries.filter_map(|e| e.ok()).map(|e| e.path()));
+        }
+    }
+    for path in extra {
+        let Ok(file) = std::fs::File::open(&path) else { continue };
+        for cert in rustls_pemfile::certs(&mut BufReader::new(file)).flatten() {
+            // A certificate rustls does not take is left out, not fatal.
+            let _ = roots.add(cert);
+        }
+    }
+    let provider = std::sync::Arc::new(rustls::crypto::ring::default_provider());
+    let config = rustls::ClientConfig::builder_with_provider(provider)
+        .with_safe_default_protocol_versions()?
+        .with_root_certificates(roots)
+        .with_no_client_auth();
+    Ok(CONFIG.get_or_init(|| std::sync::Arc::new(config)).clone())
+}
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct Url {
@@ -117,12 +174,6 @@ impl<T: Read + Write + Send> Stream for T {}
 /// A connection to the server, and a handle that can shut it down from
 /// another thread.
 fn open(url: &Url) -> Result<(Box<dyn Stream>, TcpStream)> {
-    if url.https {
-        bail!(
-            "crew cannot reach https toolbox servers yet (no TLS in this build): {}",
-            url.host
-        );
-    }
     let mut last = None;
     for address in (url.host.as_str(), url.port)
         .to_socket_addrs()
@@ -131,7 +182,13 @@ fn open(url: &Url) -> Result<(Box<dyn Stream>, TcpStream)> {
         match TcpStream::connect_timeout(&address, CONNECT_WITHIN) {
             Ok(stream) => {
                 let handle = stream.try_clone()?;
-                return Ok((Box::new(stream), handle));
+                if !url.https {
+                    return Ok((Box::new(stream), handle));
+                }
+                let name = rustls::pki_types::ServerName::try_from(url.host.clone())
+                    .map_err(|_| anyhow!("{} is not a host name TLS can verify", url.host))?;
+                let connection = rustls::ClientConnection::new(tls()?, name)?;
+                return Ok((Box::new(rustls::StreamOwned::new(connection, stream)), handle));
             }
             Err(e) => last = Some(e),
         }
@@ -175,8 +232,7 @@ impl<R: BufRead> Read for Chunked<R> {
             return Ok(0);
         }
         if self.left == 0 {
-            let mut line = String::new();
-            self.inner.read_line(&mut line)?;
+            let line = read_line(&mut self.inner, MAX_LINE)?;
             let size = line.trim().split(';').next().unwrap_or("");
             self.left = usize::from_str_radix(size, 16)
                 .map_err(|_| std::io::Error::new(std::io::ErrorKind::InvalidData, "bad chunk size"))?;
@@ -192,8 +248,7 @@ impl<R: BufRead> Read for Chunked<R> {
         }
         self.left -= n;
         if self.left == 0 {
-            let mut crlf = String::new();
-            self.inner.read_line(&mut crlf)?;
+            read_line(&mut self.inner, MAX_LINE)?;
         }
         Ok(n)
     }
@@ -229,8 +284,8 @@ fn request(
     }
     stream.flush()?;
     let mut reader = BufReader::new(stream);
-    let mut status_line = String::new();
-    reader.read_line(&mut status_line)?;
+    handle.set_read_timeout(Some(ANSWER_IDLE))?;
+    let status_line = read_line(&mut reader, MAX_LINE)?;
     let status: u16 = status_line
         .split_whitespace()
         .nth(1)
@@ -238,13 +293,13 @@ fn request(
         .ok_or_else(|| anyhow!("not an HTTP response from {}", url.authority()))?;
     let mut headers = Vec::new();
     loop {
-        let mut line = String::new();
-        if reader.read_line(&mut line)? == 0 {
-            break;
-        }
+        let line = read_line(&mut reader, MAX_LINE)?;
         let line = line.trim_end();
         if line.is_empty() {
             break;
+        }
+        if headers.len() >= MAX_HEADERS {
+            bail!("{} sent more than {MAX_HEADERS} headers", url.authority());
         }
         if let Some((k, v)) = line.split_once(':') {
             headers.push((k.trim().to_string(), v.trim().to_string()));
@@ -284,9 +339,12 @@ fn next_event(body: &mut dyn BufRead) -> Result<Option<(String, String)>> {
     let mut name = String::new();
     let mut data: Vec<String> = Vec::new();
     loop {
-        let mut line = String::new();
-        if body.read_line(&mut line)? == 0 {
+        let line = read_line(body, MAX_EVENT)?;
+        if line.is_empty() {
             return Ok(None);
+        }
+        if data.iter().map(String::len).sum::<usize>() + line.len() > MAX_EVENT {
+            bail!("a server-sent event larger than {MAX_EVENT} bytes");
         }
         let line = line.trim_end_matches(['\r', '\n']);
         if line.is_empty() {
@@ -435,7 +493,11 @@ impl Connection for Streamable {
                 }
             } else {
                 let mut text = String::new();
-                if response.body.read_to_string(&mut text).is_ok() && !text.trim().is_empty() {
+                let read = (&mut response.body).take(MAX_BODY + 1).read_to_string(&mut text);
+                if read.as_ref().is_ok_and(|n| *n as u64 > MAX_BODY) {
+                    return failed(&message, "the server's answer is larger than 16 MiB", &events);
+                }
+                if read.is_ok() && !text.trim().is_empty() {
                     note_protocol(initializing, &text, &protocol);
                     pass_on(&text, &events);
                 }

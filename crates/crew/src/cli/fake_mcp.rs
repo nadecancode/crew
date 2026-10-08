@@ -70,6 +70,11 @@ pub struct FakeMcpArgs {
     /// not have this digest
     #[arg(long, value_name = "NAME=HEX")]
     require_header: Vec<String>,
+    /// Serve https with this certificate chain (PEM) and its key
+    #[arg(long, value_name = "FILE", requires = "tls_key")]
+    tls_cert: Option<PathBuf>,
+    #[arg(long, value_name = "FILE")]
+    tls_key: Option<PathBuf>,
 }
 
 fn listings(state: &Option<PathBuf>) -> u64 {
@@ -281,16 +286,20 @@ pub fn run(args: FakeMcpArgs) -> Result<()> {
     Ok(())
 }
 
-/// The stand-in over HTTP: one connection at a time is enough for a test.
+/// The stand-in over HTTP (and https): one connection at a time is enough
+/// for a test.
 mod http {
     use std::io::{BufRead, BufReader, Read, Write};
-    use std::net::{TcpListener, TcpStream};
+    use std::net::TcpListener;
     use std::sync::{Arc, Mutex};
 
-    use anyhow::{bail, Result};
+    use anyhow::{bail, Context, Result};
     use serde_json::Value;
 
     use super::{sha256_hex, Outcome, Server};
+
+    trait Stream: Read + Write + Send {}
+    impl<T: Read + Write + Send> Stream for T {}
 
     struct Request {
         method: String,
@@ -308,9 +317,12 @@ mod http {
         }
     }
 
-    fn read_request(stream: &mut BufReader<TcpStream>) -> Result<Request> {
+    fn read_request(stream: &mut dyn Stream) -> Result<Request> {
+        // One request per connection (the client closes it), so nothing
+        // read ahead is lost with the reader.
+        let mut reader = BufReader::new(stream);
         let mut line = String::new();
-        stream.read_line(&mut line)?;
+        reader.read_line(&mut line)?;
         let mut parts = line.split_whitespace();
         let (Some(method), Some(path)) = (parts.next(), parts.next()) else {
             bail!("no request line");
@@ -319,7 +331,7 @@ mod http {
         let mut headers = Vec::new();
         loop {
             let mut line = String::new();
-            stream.read_line(&mut line)?;
+            reader.read_line(&mut line)?;
             let line = line.trim_end();
             if line.is_empty() {
                 break;
@@ -334,7 +346,7 @@ mod http {
             .and_then(|(_, v)| v.parse::<usize>().ok())
             .unwrap_or(0);
         let mut body = vec![0; length];
-        stream.read_exact(&mut body)?;
+        reader.read_exact(&mut body)?;
         Ok(Request {
             method,
             path,
@@ -343,8 +355,17 @@ mod http {
         })
     }
 
-    fn respond(stream: &mut TcpStream, status: &str, headers: &[(&str, String)], body: &[u8]) -> Result<()> {
-        write!(stream, "HTTP/1.1 {status}\r\nContent-Length: {}\r\nConnection: close\r\n", body.len())?;
+    fn respond(
+        stream: &mut dyn Stream,
+        status: &str,
+        headers: &[(&str, String)],
+        body: &[u8],
+    ) -> Result<()> {
+        write!(
+            stream,
+            "HTTP/1.1 {status}\r\nContent-Length: {}\r\nConnection: close\r\n",
+            body.len()
+        )?;
         for (k, v) in headers {
             write!(stream, "{k}: {v}\r\n")?;
         }
@@ -354,16 +375,20 @@ mod http {
         Ok(())
     }
 
-    /// An event stream, chunked, kept open until `close`.
-    fn start_stream(stream: &mut TcpStream) -> Result<()> {
+    /// The head of an event stream, chunked, kept open.
+    fn start_stream(stream: &mut dyn Stream, headers: &[(&str, String)]) -> Result<()> {
         stream.write_all(
-            b"HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nTransfer-Encoding: chunked\r\nConnection: close\r\n\r\n",
+            b"HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nTransfer-Encoding: chunked\r\nConnection: close\r\n",
         )?;
+        for (k, v) in headers {
+            write!(stream, "{k}: {v}\r\n")?;
+        }
+        stream.write_all(b"\r\n")?;
         stream.flush()?;
         Ok(())
     }
 
-    fn event(stream: &mut TcpStream, name: Option<&str>, data: &str) -> Result<()> {
+    fn event(stream: &mut dyn Stream, name: Option<&str>, data: &str) -> Result<()> {
         let mut text = String::new();
         if let Some(name) = name {
             text.push_str(&format!("event: {name}\n"));
@@ -374,17 +399,40 @@ mod http {
         Ok(())
     }
 
-    fn end_stream(stream: &mut TcpStream) -> Result<()> {
+    fn end_stream(stream: &mut dyn Stream) -> Result<()> {
         stream.write_all(b"0\r\n\r\n")?;
         stream.flush()?;
         Ok(())
     }
 
+    fn tls(cert: &std::path::Path, key: &std::path::Path) -> Result<Arc<rustls::ServerConfig>> {
+        let certs = rustls_pemfile::certs(&mut BufReader::new(std::fs::File::open(cert)?))
+            .collect::<Result<Vec<_>, _>>()?;
+        let key = rustls_pemfile::private_key(&mut BufReader::new(std::fs::File::open(key)?))?
+            .context("no private key")?;
+        let provider = Arc::new(rustls::crypto::ring::default_provider());
+        Ok(Arc::new(
+            rustls::ServerConfig::builder_with_provider(provider)
+                .with_safe_default_protocol_versions()?
+                .with_no_client_auth()
+                .with_single_cert(certs, key)?,
+        ))
+    }
+
     pub(super) fn serve(server: Server, transport: &str) -> Result<()> {
+        let tls = match (&server.args.tls_cert, &server.args.tls_key) {
+            (Some(cert), Some(key)) => Some(tls(cert, key)?),
+            _ => None,
+        };
         let listener = TcpListener::bind("127.0.0.1:0")?;
         let port = listener.local_addr()?.port();
         let path = if transport == "sse" { "/sse" } else { "/mcp" };
-        println!("http://127.0.0.1:{port}{path}");
+        let (scheme, host) = if tls.is_some() {
+            ("https", "localhost")
+        } else {
+            ("http", "127.0.0.1")
+        };
+        println!("{scheme}://{host}:{port}{path}");
         std::io::stdout().flush()?;
         let required: Vec<(String, String)> = server
             .args
@@ -396,31 +444,38 @@ mod http {
         let stream_responses = server.args.stream_responses;
         let server = Arc::new(Mutex::new(server));
         // Legacy SSE: the open stream every answer goes out on.
-        let sse: Arc<Mutex<Option<TcpStream>>> = Arc::new(Mutex::new(None));
+        let sse: Arc<Mutex<Option<Box<dyn Stream>>>> = Arc::new(Mutex::new(None));
         let session = "fake-session-1";
-        for stream in listener.incoming() {
-            let stream = stream?;
-            let mut reader = BufReader::new(stream.try_clone()?);
-            let Ok(request) = read_request(&mut reader) else {
+        for tcp in listener.incoming() {
+            let tcp = tcp?;
+            let mut stream: Box<dyn Stream> = match &tls {
+                Some(config) => Box::new(rustls::StreamOwned::new(
+                    rustls::ServerConnection::new(config.clone())?,
+                    tcp,
+                )),
+                None => Box::new(tcp),
+            };
+            // A client that gives up on the handshake (an untrusted
+            // certificate) is no reason to stop.
+            let Ok(request) = read_request(stream.as_mut()) else {
                 continue;
             };
-            let mut stream = stream;
             let refused = required.iter().any(|(name, hex)| {
                 request.header(name).map(sha256_hex).as_deref() != Some(hex.as_str())
             });
             if refused {
-                respond(&mut stream, "401 Unauthorized", &[], b"no")?;
+                respond(stream.as_mut(), "401 Unauthorized", &[], b"no")?;
                 continue;
             }
             if transport == "sse" {
                 if request.method == "GET" && request.path == "/sse" {
-                    start_stream(&mut stream)?;
-                    event(&mut stream, Some("endpoint"), "/messages?session=1")?;
+                    start_stream(stream.as_mut(), &[])?;
+                    event(stream.as_mut(), Some("endpoint"), "/messages?session=1")?;
                     *sse.lock().unwrap() = Some(stream);
                     continue;
                 }
                 if request.method == "POST" && request.path.starts_with("/messages") {
-                    respond(&mut stream, "202 Accepted", &[], b"")?;
+                    respond(stream.as_mut(), "202 Accepted", &[], b"")?;
                     let Ok(message) = serde_json::from_slice::<Value>(&request.body) else {
                         continue;
                     };
@@ -431,35 +486,35 @@ mod http {
                         Outcome::Reply(messages) => {
                             if let Some(out) = sse.lock().unwrap().as_mut() {
                                 for message in messages {
-                                    event(out, Some("message"), &message.to_string())?;
+                                    event(out.as_mut(), Some("message"), &message.to_string())?;
                                 }
                             }
                         }
                     }
                     continue;
                 }
-                respond(&mut stream, "404 Not Found", &[], b"")?;
+                respond(stream.as_mut(), "404 Not Found", &[], b"")?;
                 continue;
             }
             // Streamable HTTP.
             match request.method.as_str() {
                 "DELETE" => {
-                    respond(&mut stream, "200 OK", &[], b"")?;
+                    respond(stream.as_mut(), "200 OK", &[], b"")?;
                     continue;
                 }
                 "POST" => {}
                 _ => {
-                    respond(&mut stream, "405 Method Not Allowed", &[], b"")?;
+                    respond(stream.as_mut(), "405 Method Not Allowed", &[], b"")?;
                     continue;
                 }
             }
             let Ok(message) = serde_json::from_slice::<Value>(&request.body) else {
-                respond(&mut stream, "400 Bad Request", &[], b"")?;
+                respond(stream.as_mut(), "400 Bad Request", &[], b"")?;
                 continue;
             };
             let initializing = message.get("method").and_then(Value::as_str) == Some("initialize");
             if !initializing && request.header("mcp-session-id") != Some(session) {
-                respond(&mut stream, "400 Bad Request", &[], b"no session")?;
+                respond(stream.as_mut(), "400 Bad Request", &[], b"no session")?;
                 continue;
             }
             let outcome = server.lock().unwrap().handle(&message)?;
@@ -473,7 +528,7 @@ mod http {
                             std::thread::sleep(std::time::Duration::from_secs(3600));
                         });
                     } else {
-                        respond(&mut stream, "202 Accepted", &[], b"")?;
+                        respond(stream.as_mut(), "202 Accepted", &[], b"")?;
                     }
                     continue;
                 }
@@ -484,23 +539,16 @@ mod http {
                 headers.push(("Mcp-Session-Id", session.to_string()));
             }
             if stream_responses {
-                write!(
-                    stream,
-                    "HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nTransfer-Encoding: chunked\r\nConnection: close\r\n"
-                )?;
-                for (k, v) in &headers {
-                    write!(stream, "{k}: {v}\r\n")?;
-                }
-                stream.write_all(b"\r\n")?;
+                start_stream(stream.as_mut(), &headers)?;
                 // Notifications first, then the response, as a server may.
                 for message in messages.iter().rev() {
-                    event(&mut stream, None, &message.to_string())?;
+                    event(stream.as_mut(), None, &message.to_string())?;
                 }
-                end_stream(&mut stream)?;
+                end_stream(stream.as_mut())?;
             } else {
                 headers.push(("Content-Type", "application/json".to_string()));
                 // JSON carries the response; notifications are dropped.
-                respond(&mut stream, "200 OK", &headers, messages[0].to_string().as_bytes())?;
+                respond(stream.as_mut(), "200 OK", &headers, messages[0].to_string().as_bytes())?;
             }
         }
         Ok(())
