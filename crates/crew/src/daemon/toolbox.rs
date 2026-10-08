@@ -6,7 +6,6 @@ use crew_core::rpc::{MemberToolbox, PendingToolbox, RpcError, ToolboxReload};
 use crew_core::toolbox::{Item, ItemKind, ItemRef, McpServer, Resolved};
 use crew_core::{RuntimeKind, ToolboxItemCode, ToolboxItemKind, ToolboxItemStatus};
 use serde_json::Value;
-use std::os::fd::AsFd;
 use std::path::PathBuf;
 use std::time::Duration;
 
@@ -316,6 +315,7 @@ impl Daemon {
         if !plan.stops.is_empty() {
             anyhow::bail!("toolbox prevents launch: {}", plan.stops.join("; "));
         }
+        let snapshot_store = crate::agents::toolbox::store::Store::open(&self.state_dir)?;
         for name in plan.runtime.servers.clone() {
             if self.stops(&agent.id) != since {
                 anyhow::bail!("toolbox preflight was superseded by a stop");
@@ -326,25 +326,17 @@ impl Daemon {
                 _ => continue,
             };
             let definition = crate::mcp::proxy::definition_hash(&server);
-            if let Some(owner) = inherited
-                .as_ref()
-                .and_then(|active| active.snapshot_owner.as_deref())
-            {
-                let source = self.agent_root(owner)?;
-                let relative = PathBuf::from("toolbox/mcp").join(format!("{name}.json"));
-                let file = crew_core::paths::open_beneath(source.as_fd(), &relative)?;
-                let snapshot: Value =
-                    serde_json::from_reader(std::io::Read::take(file, 16 * 1024 * 1024))?;
-                if snapshot.get("definition").and_then(Value::as_str) != Some(definition.as_str()) {
-                    anyhow::bail!("inherited MCP snapshot does not match {name}'s definition");
-                }
-                crate::mcp::proxy::pin(
+            if let Some(inherited) = &inherited {
+                if let Err(error) = crate::agents::toolbox::restore_inherited_mcp(
+                    &snapshot_store,
                     &self.agent_dir(&agent.id),
                     &name,
                     &definition,
-                    &snapshot,
-                    true,
-                )?;
+                    inherited,
+                ) {
+                    plan.fail_server(&name, format!("{error:#}"), false);
+                    continue;
+                }
             }
             match self
                 .toolbox_preflight(agent, &name, &plan.runtime.scrub_env, since)
@@ -361,6 +353,11 @@ impl Daemon {
                     if pinned.outcome == crate::mcp::proxy::PinOutcome::KeptDiffers {
                         self.emit(NewEvent::new("daemon", "toolbox.listing", format!("{name}: upstream definitions differ; keeping the pinned snapshot")).agent(&agent.id));
                     }
+                    let frozen = snapshot_store.snapshot(&crate::mcp::proxy::snapshot_path(
+                        &self.agent_dir(&agent.id),
+                        &name,
+                    ))?;
+                    plan.active.mcp_snapshots.insert(name.clone(), frozen);
                     if let Some(item) = plan
                         .view
                         .items

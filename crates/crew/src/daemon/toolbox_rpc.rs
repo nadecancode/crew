@@ -362,6 +362,10 @@ what you have"
             }
             if item.kind == ItemKind::Mcp && active.servers.contains(&item.name) {
                 out.servers.insert(item.name.clone());
+                if let Some(snapshot) = active.mcp_snapshots.get(&item.name) {
+                    out.mcp_snapshots
+                        .insert(item.name.clone(), snapshot.clone());
+                }
             }
         }
         Ok(Some(out))

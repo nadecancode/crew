@@ -76,6 +76,11 @@ pub struct ActiveToolbox {
     pub resolved: Resolved,
     pub content: BTreeMap<ItemRef, Content>,
     pub files: BTreeMap<ItemRef, store::Snapshot>,
+    /// Immutable copies of daemon-pinned MCP catalogs. Inheriting this map
+    /// freezes the catalog even if the parent's launch later replaces its
+    /// mutable `toolbox/mcp/<name>.json` file.
+    #[serde(default)]
+    pub mcp_snapshots: BTreeMap<String, store::Snapshot>,
     /// Servers whose mapping and references permit preflight or session use.
     #[serde(default)]
     pub servers: BTreeSet<String>,
@@ -83,10 +88,133 @@ pub struct ActiveToolbox {
     pub definition_digest: Option<String>,
     #[serde(default)]
     pub scrub_env: BTreeSet<String>,
-    /// The member whose daemon-owned MCP snapshots this record refers to.
+    /// Provenance only. Catalogs are read through `mcp_snapshots`, never by
+    /// reopening this member's mutable pin during a child's launch.
     #[serde(default)]
     pub snapshot_owner: Option<String>,
     /// A fresh-session restart refreshes the upstream definition snapshots.
     #[serde(default)]
     pub refresh: bool,
+}
+
+/// Restore the inherited catalog, or reuse the child's identical existing
+/// pin. The content store verifies the snapshot hash and refuses links; no
+/// mutable file in the parent member's directory participates in this read.
+pub(crate) fn restore_inherited_mcp(
+    store: &store::Store,
+    agent_dir: &std::path::Path,
+    name: &str,
+    definition: &str,
+    inherited: &ActiveToolbox,
+) -> anyhow::Result<crate::mcp::proxy::PinOutcome> {
+    use anyhow::{anyhow, bail};
+    use std::path::Path;
+    let snapshot = inherited.mcp_snapshots.get(name).ok_or_else(|| {
+        anyhow!(
+        "inherited MCP catalog {name} is not frozen; restart the parent before spawning a new child"
+    )
+    })?;
+    let files = store.files(snapshot)?;
+    let bytes = files
+        .get(Path::new(""))
+        .ok_or_else(|| anyhow!("inherited MCP catalog {name} is not a file"))?;
+    let listing: Value = serde_json::from_slice(&bytes.0)?;
+    if listing.get("definition").and_then(Value::as_str) != Some(definition) {
+        bail!("inherited MCP snapshot does not match {name}'s definition");
+    }
+    let pinned = crate::mcp::proxy::pin(agent_dir, name, definition, &listing, false)?;
+    if pinned.outcome == crate::mcp::proxy::PinOutcome::KeptDiffers {
+        // The inherited selection, not a stray old child pin, is authoritative.
+        return Ok(crate::mcp::proxy::pin(agent_dir, name, definition, &listing, true)?.outcome);
+    }
+    Ok(pinned.outcome)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::mcp::proxy::{pin, snapshot_path, PinOutcome};
+    use serde_json::json;
+    use std::path::Path;
+
+    struct Fixture(tempfile::TempDir);
+
+    impl Drop for Fixture {
+        fn drop(&mut self) {
+            fn writable(path: &Path) {
+                use std::os::unix::fs::PermissionsExt;
+                if !std::fs::symlink_metadata(path).is_ok_and(|metadata| metadata.is_dir()) {
+                    return;
+                }
+                let _ = std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o700));
+                if let Ok(entries) = std::fs::read_dir(path) {
+                    for entry in entries.flatten() {
+                        writable(&entry.path());
+                    }
+                }
+            }
+            writable(self.0.path());
+        }
+    }
+
+    #[test]
+    fn inherited_catalog_survives_parent_replacement_before_first_launch_and_child_resume() {
+        let fixture = Fixture(tempfile::tempdir().unwrap());
+        let root = fixture.0.path();
+        let parent = root.join("parent");
+        let child = root.join("child");
+        std::fs::create_dir_all(&parent).unwrap();
+        std::fs::create_dir_all(&child).unwrap();
+        let store = store::Store::open(&root.join("state")).unwrap();
+        let definition = "a".repeat(64);
+        let listing = |name| json!({"initialize":{"capabilities":{"tools":{}},"instructions":"Frozen instructions"},"tools":[{"name":name,"inputSchema":{"type":"object"}}]});
+        pin(&parent, "docs", &definition, &listing("old_tool"), true).unwrap();
+        let mut active = ActiveToolbox::default();
+        active.snapshot_owner = Some("parent".into());
+        active.mcp_snapshots.insert(
+            "docs".into(),
+            store.snapshot(&snapshot_path(&parent, "docs")).unwrap(),
+        );
+        // Capture the selection, including persistence/recovery, before the
+        // parent changes either its catalog or its server definition.
+        let inherited: ActiveToolbox =
+            serde_json::from_slice(&serde_json::to_vec(&active).unwrap()).unwrap();
+        pin(&parent, "docs", &definition, &listing("new_tool"), true).unwrap();
+        assert_eq!(
+            restore_inherited_mcp(&store, &child, "docs", &definition, &inherited).unwrap(),
+            PinOutcome::Written
+        );
+        let old = std::fs::read(snapshot_path(&child, "docs")).unwrap();
+        assert!(String::from_utf8_lossy(&old).contains("old_tool"));
+        assert!(!String::from_utf8_lossy(&old).contains("new_tool"));
+        // A new upstream listing during the child's preflight also keeps
+        // the inherited pin rather than expanding its catalog.
+        assert_eq!(
+            pin(&child, "docs", &definition, &listing("new_tool"), false)
+                .unwrap()
+                .outcome,
+            PinOutcome::KeptDiffers
+        );
+        pin(
+            &parent,
+            "docs",
+            &"b".repeat(64),
+            &listing("different_server"),
+            true,
+        )
+        .unwrap();
+        assert_eq!(
+            restore_inherited_mcp(&store, &child, "docs", &definition, &inherited).unwrap(),
+            PinOutcome::Kept
+        );
+        assert_eq!(std::fs::read(snapshot_path(&child, "docs")).unwrap(), old);
+        // The parent can even be removed; a child's crash/resume does not
+        // depend on retaining that member's mutable directory.
+        std::fs::remove_file(snapshot_path(&parent, "docs")).unwrap();
+        assert_eq!(
+            restore_inherited_mcp(&store, &child, "docs", &definition, &inherited).unwrap(),
+            PinOutcome::Kept
+        );
+        assert_eq!(std::fs::read(snapshot_path(&child, "docs")).unwrap(), old);
+    }
 }
