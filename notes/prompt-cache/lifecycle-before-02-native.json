@@ -1,0 +1,75 @@
+{
+  "generated_layer": "Crew briefing hashes and byte deltas remain in the input report's lifecycle steps",
+  "input_report_sha256": "ee78bf90e47cf0d0e1f573aa151e3aedccae68c34ff6999556a7d238a1d02ab2",
+  "schema": 1,
+  "scope": "Persisted native surfaces only; not provider wire-prefix equality or the full MCP/skills catalog",
+  "sessions": [
+    {
+      "agent": "orchestrator",
+      "coverage": "unknown",
+      "reason": "No full effective Claude prompt or tool catalog in the selected native format",
+      "runtime": "claude",
+      "session_id": "e60e27f1-d188-44a5-bd4d-9709f62a5ebd",
+      "source_path": "/home/nade/.claude/projects/-home-nade-workspaces-personal-crew--crew-worktrees-qa-target-cache-bench-lifecycle-final-02r-workspace/e60e27f1-d188-44a5-bd4d-9709f62a5ebd.jsonl",
+      "surfaces": []
+    },
+    {
+      "agent": "claude-worker",
+      "coverage": "unknown",
+      "reason": "No full effective Claude prompt or tool catalog in the selected native format",
+      "runtime": "claude",
+      "session_id": "7862663a-3539-4543-be61-4a311528c7a1",
+      "source_path": "/home/nade/.claude/projects/-home-nade-workspaces-personal-crew--crew-worktrees-qa-target-cache-bench-lifecycle-final-02r-workspace--crew-worktrees-claude-worker/7862663a-3539-4543-be61-4a311528c7a1.jsonl",
+      "surfaces": []
+    },
+    {
+      "agent": "codex-worker",
+      "coverage": "persisted-native-surfaces",
+      "native_prefix_bytes": 213231,
+      "native_prefix_sha256": "f3ecb5a1e84e0fc95c71de25d59ca1ff6bd988e087d39d94e81c10aa3d2f6444",
+      "runtime": "codex",
+      "session_id": "01a11a03-0976-7552-ba20-5d3b2788d32e",
+      "source_path": "/home/nade/.codex/sessions/2026/10/08/rollout-2026-10-08T00-36-09-01a11a03-0976-7552-ba20-5d3b2788d32e.jsonl",
+      "surfaces": [
+        {
+          "line": 1,
+          "sha256": "b707476816bfe5e571a1bd2179f130fff2b132da5ab8e61063acdb7fd24daf12",
+          "surface": "session_meta.base_instructions.text",
+          "timestamp": "2026-10-08T05:36:09.233Z",
+          "utf8_bytes": 18043
+        },
+        {
+          "canonical_json_bytes": 2728,
+          "line": 1,
+          "sha256": "7c9625092939acae77a432dd9c5e70382219a06826eac1727276be0336a7a49f",
+          "surface": "session_meta.dynamic_tools",
+          "timestamp": "2026-10-08T05:36:09.233Z",
+          "tool_count": 1
+        },
+        {
+          "canonical_json_bytes": 34140,
+          "line": 3,
+          "sha256": "f11fe25717f7b792b296ffff44c72609a88f65c187d884d9bfe767e148c0d0fc",
+          "surface": "response_item.developer.content",
+          "timestamp": "2026-10-08T05:36:10.028Z"
+        },
+        {
+          "canonical_json_bytes": 2498,
+          "line": 4,
+          "sha256": "3c29d434679f6abc94b191851fb84cf5b5266c48b21286acb9faffae737fe47d",
+          "surface": "response_item.developer.content",
+          "timestamp": "2026-10-08T05:36:10.028Z"
+        },
+        {
+          "canonical_json_bytes": 304,
+          "line": 5,
+          "sha256": "776f0082c690841a8a00bebf40ec1f979f849af29ddcbd6a849b9fcfce6edbc3",
+          "surface": "response_item.developer.content",
+          "timestamp": "2026-10-08T05:36:10.028Z"
+        }
+      ]
+    }
+  ],
+  "synthetic_rendering_layer": "Separate fixture-only capability probes; not captured by paid benchmark runs",
+  "tool_sha256": "16407a62ade699820804235fa182629e012a1af26f3791bf4e754bd9e095a680"
+}

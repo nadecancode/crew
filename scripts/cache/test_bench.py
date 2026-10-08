@@ -3,9 +3,11 @@
 import json
 import os
 import argparse
+from contextlib import closing
 from pathlib import Path
 import subprocess
 import sys
+import sqlite3
 import tempfile
 import unittest
 from unittest.mock import patch
@@ -127,7 +129,7 @@ class CacheBenchTests(unittest.TestCase):
         result["outputs"]["claude-worker/summary.json"]["valid"] = False
         self.assertFalse(bench.validate_evidence(result))
 
-    def run_fake_team(self, expensive=False):
+    def run_fake_team(self, expensive=False, real_collector=False):
         """A real owned process tests cleanup without calling a model provider."""
         root = tempfile.TemporaryDirectory()
         self.addCleanup(root.cleanup)
@@ -147,6 +149,13 @@ class CacheBenchTests(unittest.TestCase):
         def fake_invoke(argv, env, cwd, timeout=20):
             nonlocal child, sent_followup
             argv = [str(x) for x in argv]
+            if real_collector and argv[0] == "node":
+                paths = [Path(argv[i + 1].split("=", 1)[1])
+                         for i, part in enumerate(argv) if part == "--session-file"]
+                before = {p: bench.digest(p) for p in paths}
+                result = real_invoke(argv, env, cwd, timeout)
+                self.assertEqual({p: bench.digest(p) for p in paths}, before)
+                return result
             if argv[0] == "git":
                 return real_invoke(argv, env, cwd, timeout)
             text = ""
@@ -176,20 +185,33 @@ class CacheBenchTests(unittest.TestCase):
                     home = workspace / ".crew/agents" / identity / "rw/home" / runtime
                     if runtime == "claude":
                         path = home / "projects/fixture" / f"{identity}.jsonl"
-                        records = [{"type": "assistant", "message": {
+                        records = [{"type": "assistant", "sessionId": identity,
+                                    "cwd": str(workdir), "timestamp": "2026-10-07T00:00:01Z", "message": {
                             "id": "first", "model": "claude-haiku-4-5",
                             "usage": {"input_tokens": 100, "cache_read_input_tokens": 100,
+                                      "cache_creation_input_tokens": 0,
                                       "output_tokens": 500_000 if expensive and number == 0 else 10}}}]
                     else:
                         path = home / "sessions/2026/10/07" / f"rollout-fixture-{identity}.jsonl"
-                        records = [{"type": "turn_context", "payload": {"model": "gpt-6-luna"}},
-                                   {"type": "event_msg", "payload": {"type": "token_count", "info": {
+                        records = [{"type": "session_meta", "payload": {"id": identity, "cwd": str(workdir)}},
+                                   {"type": "turn_context", "payload": {"model": "gpt-6-luna"}},
+                                   {"type": "event_msg", "timestamp": "2026-10-07T00:00:01Z", "payload": {"type": "token_count", "info": {
                                        "total_token_usage": {"input_tokens": 200,
                                                              "cached_input_tokens": 100,
+                                                             "cache_write_input_tokens": 0,
                                                              "output_tokens": 10}}}}]
                     path.parent.mkdir(parents=True)
                     path.write_text("\n".join(json.dumps(record) for record in records) + "\n")
                 state["tasks"] = [{"id": task, "status": "done"} for task in ("summarize", "audit")]
+                if real_collector:
+                    with closing(sqlite3.connect(workspace / ".crew/crew.db")) as db, db:
+                        db.executescript("""
+                            CREATE TABLE agents (id TEXT, data TEXT);
+                            CREATE TABLE events (seq INTEGER, timestamp INTEGER, event_type TEXT, agent_id TEXT);
+                            CREATE TABLE deliveries (message_id TEXT, recipient TEXT, delivered_at INTEGER);
+                        """)
+                        for agent in state["agents"]:
+                            db.execute("INSERT INTO agents VALUES (?, ?)", (agent["id"], json.dumps(agent)))
             elif argv[1] == "status":
                 text = json.dumps(state)
             elif argv[1:3] == ["task", "add"]:
@@ -210,6 +232,15 @@ class CacheBenchTests(unittest.TestCase):
         self.assertEqual(report["cleanup"]["stop_returncode"], 0)
         self.assertIsNotNone(child.poll())
         self.assertFalse(Path(report["runtime_directory"]).exists())
+        if real_collector:
+            self.assertEqual(report["baseline_collector"]["status"], "collected")
+            self.assertEqual(report["baseline_collector"]["explicit_session_files"], 3)
+            collected = json.loads((output / "baseline.json").read_text())
+            self.assertEqual({s["agent_id"] for s in collected["sessions"]},
+                             {"orchestrator", "claude-worker", "codex-worker"})
+            self.assertEqual(collected["coverage"]["discovered_files"], 3)
+            self.assertEqual(collected["coverage"]["discovery_errors"], [])
+            self.assertEqual(collected["totals"]["cache_read_tokens"], 300)
         return rc, report, sent_followup
 
     def test_full_runner_collects_review_and_idle_gap_without_a_provider(self):
@@ -228,6 +259,11 @@ class CacheBenchTests(unittest.TestCase):
         self.assertEqual(rc, 1)
         self.assertEqual(report["status"], "budget-stop")
         self.assertFalse(sent)
+
+    def test_fake_runner_hands_exact_sessions_to_real_node_collector(self):
+        rc, report, _ = self.run_fake_team(real_collector=True)
+        self.assertEqual(rc, 0)
+        self.assertEqual(report["status"], "complete")
 
 
 if __name__ == "__main__":
