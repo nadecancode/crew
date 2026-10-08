@@ -368,6 +368,12 @@ three such reminders while its own measurement subagent was running.
   that needs nothing back, such as main moving, with agent_broadcast type
   status; send a message only to the members who must act on it, saying what
   to do."
+  `agent_broadcast` already takes `type` (`mcp/tools.rs:90`, any of
+  `MESSAGE_TYPES`, default `message`), so the sentence needs no tool
+  change. It is a fixed workflow correction, separate from D3's prompt
+  placement experiment. Any D3 placement comparison carries the same
+  wording on both sides, so fewer wake-ups are not credited to the prefix
+  layout.
 
 **3b. The no-tool-call follow-up.**
 
