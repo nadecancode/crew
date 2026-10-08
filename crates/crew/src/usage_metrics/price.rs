@@ -48,11 +48,9 @@ pub struct Book {
     pub sources: Vec<String>,
 }
 
-/// The highest rate a book may hold, in micro-USD per million tokens
-/// (about 1.1 million USD per million tokens). With counters at most
-/// [`super::counters::MAX_COUNTER`] (2^53 - 1), one row's cost is a sum of at
-/// most six products below 2^93, so per-row arithmetic cannot overflow
-/// `u128`; sums across rows are checked.
+/// The highest rate a reviewed book holds, in micro-USD per million tokens
+/// (about 1.1 million USD per million tokens). Arithmetic is checked
+/// regardless; the cap keeps an overflow out of reach for real counters.
 pub const MAX_RATE: u64 = 1 << 40;
 
 /// USD per million tokens, written as micro-USD per million.
@@ -241,14 +239,15 @@ impl Bounds {
         Bounds { lo: 0, hi: None }
     }
 
-    /// The sum of two intervals. A lower bound that would overflow saturates,
-    /// which is still a lower bound; an upper bound that would overflow is
-    /// unknown.
-    pub fn plus(self, other: Bounds) -> Bounds {
-        Bounds {
-            lo: self.lo.saturating_add(other.lo),
-            hi: self.hi.zip(other.hi).and_then(|(a, b)| a.checked_add(b)),
-        }
+    /// The sum of two intervals, or `None` when a finite part overflows.
+    /// An unknown upper bound stays unknown; it never hides an overflow.
+    pub fn checked_plus(self, other: Bounds) -> Option<Bounds> {
+        let lo = self.lo.checked_add(other.lo)?;
+        let hi = match (self.hi, other.hi) {
+            (Some(a), Some(b)) => Some(a.checked_add(b)?),
+            _ => None,
+        };
+        Some(Bounds { lo, hi })
     }
 
     fn widen(self, other: Bounds) -> Bounds {
@@ -294,6 +293,8 @@ pub enum Priced {
     /// No model, or a model this book does not list.
     NoPrice,
     Cost(RowCost),
+    /// The cost does not fit the arithmetic: no bound is claimed.
+    Overflow,
 }
 
 fn mul(tokens: u64, rate: u64) -> u128 {
@@ -301,10 +302,9 @@ fn mul(tokens: u64, rate: u64) -> u128 {
 }
 
 /// Prices one normalized observation. `single` says its counters are one
-/// request's. A context tier applies per request, so the counters of a
-/// native batch decide it only when their total input is at most the lowest
-/// tier boundary (no request in it can be above that); otherwise the batch
-/// is priced across every tier, whatever its size.
+/// whole request's. A context tier applies per request, so only a single
+/// request's total input decides it; a native batch or partial increment is
+/// priced across every tier, whatever its size.
 pub fn price(book: &Book, model: Option<&str>, n: &Normalized, single: bool) -> Priced {
     let Some(model) = model else {
         return Priced::NoPrice;
@@ -314,7 +314,6 @@ pub fn price(book: &Book, model: Option<&str>, n: &Normalized, single: bool) -> 
         return Priced::NoPrice;
     }
     let c = &n.counters;
-    let lowest_boundary = tiers.iter().filter_map(|r| r.above_input_tokens).min();
     let candidates: Vec<&Rate> = match c.input_total.filter(|_| n.input_valid) {
         Some(input) if single => {
             let tier = tiers
@@ -325,13 +324,14 @@ pub fn price(book: &Book, model: Option<&str>, n: &Normalized, single: bool) -> 
                 .unwrap_or(tiers[0]);
             vec![tier]
         }
-        Some(input) if lowest_boundary.is_none_or(|t| input <= t) => vec![tiers[0]],
         _ => tiers.clone(),
     };
     let tier_unknown = candidates.len() > 1;
     let mut combined: Option<RowCost> = None;
     for rate in candidates {
-        let cost = price_tier(rate, n);
+        let Some(cost) = price_tier(rate, n) else {
+            return Priced::Overflow;
+        };
         combined = Some(match combined {
             None => cost,
             Some(prev) => RowCost {
@@ -354,9 +354,9 @@ pub fn price(book: &Book, model: Option<&str>, n: &Normalized, single: bool) -> 
     Priced::Cost(cost)
 }
 
-/// One tier's cost of one row. Counters are at most `MAX_COUNTER` and rates
-/// at most [`MAX_RATE`], so the plain sums here stay below 2^96.
-fn price_tier(rate: &Rate, n: &Normalized) -> RowCost {
+/// One tier's cost of one row, with every sum checked: `None` on overflow.
+fn price_tier(rate: &Rate, n: &Normalized) -> Option<RowCost> {
+    let add = |a: u128, b: u128| a.checked_add(b);
     let c = &n.counters;
     let output_known = n.output_valid && c.output.is_some();
     let output = match (n.output_valid, c.output) {
@@ -364,14 +364,14 @@ fn price_tier(rate: &Rate, n: &Normalized) -> RowCost {
         _ => Bounds::unbounded(),
     };
     if !n.input_valid {
-        return RowCost {
-            total: output.plus(Bounds::unbounded()),
+        return Some(RowCost {
+            total: output.checked_plus(Bounds::unbounded())?,
             share: None,
             ttl_unknown_tokens: 0,
             residual_tokens: 0,
             tier_unknown: false,
             observed: output_known,
-        };
+        });
     }
     let read = c
         .cache_read
@@ -380,9 +380,10 @@ fn price_tier(rate: &Rate, n: &Normalized) -> RowCost {
     let mut residual_tokens = 0;
     // The charge of the reported TTL buckets, whatever else is unknown.
     let known_buckets = match rate.write {
-        WriteRate::Buckets { m5, h1 } => {
-            mul(c.cache_write_5m.unwrap_or(0), m5) + mul(c.cache_write_1h.unwrap_or(0), h1)
-        }
+        WriteRate::Buckets { m5, h1 } => add(
+            mul(c.cache_write_5m.unwrap_or(0), m5),
+            mul(c.cache_write_1h.unwrap_or(0), h1),
+        )?,
         WriteRate::Flat(_) => 0,
     };
     // Writes, as an interval, when their total is known.
@@ -395,15 +396,21 @@ fn price_tier(rate: &Rate, n: &Normalized) -> RowCost {
                     .zip(c.cache_write_1h)
                     .and_then(|(a, b)| a.checked_add(b))
             });
-            total.map(|w| {
-                let rest = if c.cache_write_5m.is_some() && c.cache_write_1h.is_some() {
-                    0
-                } else {
-                    w - c.cache_write_5m.unwrap_or(0) - c.cache_write_1h.unwrap_or(0)
-                };
-                ttl_unknown_tokens = rest;
-                (known + mul(rest, m5.min(h1)), known + mul(rest, m5.max(h1)))
-            })
+            match total {
+                Some(w) => {
+                    let rest = if c.cache_write_5m.is_some() && c.cache_write_1h.is_some() {
+                        0
+                    } else {
+                        w - c.cache_write_5m.unwrap_or(0) - c.cache_write_1h.unwrap_or(0)
+                    };
+                    ttl_unknown_tokens = rest;
+                    Some((
+                        add(known, mul(rest, m5.min(h1)))?,
+                        add(known, mul(rest, m5.max(h1)))?,
+                    ))
+                }
+                None => None,
+            }
         }
     };
     // Without a total, known buckets still bound the writes from below.
@@ -417,7 +424,11 @@ fn price_tier(rate: &Rate, n: &Normalized) -> RowCost {
     let ordinary = c.input_uncached.map(|n| mul(n, rate.input));
     let mut input_side = read;
     match (ordinary, write) {
-        (Some(o), _) => input_side = input_side.plus(Bounds::exact(o)).plus(written),
+        (Some(o), _) => {
+            input_side = input_side
+                .checked_plus(Bounds::exact(o))?
+                .checked_plus(written)?
+        }
         (None, w) => {
             // Codex without write counters: input not read from cache is
             // ordinary input or writes, priced between the two rates.
@@ -428,18 +439,22 @@ fn price_tier(rate: &Rate, n: &Normalized) -> RowCost {
             match residual {
                 Some((x, p)) => {
                     residual_tokens = x;
-                    input_side = input_side.plus(Bounds::range(
+                    input_side = input_side.checked_plus(Bounds::range(
                         mul(x, rate.input.min(p)),
                         mul(x, rate.input.max(p)),
-                    ));
+                    ))?;
                 }
-                None => input_side = input_side.plus(Bounds::unbounded()).plus(written),
+                None => {
+                    input_side = input_side
+                        .checked_plus(Bounds::unbounded())?
+                        .checked_plus(written)?
+                }
             }
         }
     }
     let share = match (ordinary, c.cache_read, write) {
         (Some(o), Some(r), Some((wl, wh))) => {
-            let other = o + mul(r, rate.read);
+            let other = add(o, mul(r, rate.read))?;
             Some(ShareParts {
                 other_lo: other,
                 other_hi: other,
@@ -454,14 +469,14 @@ fn price_tier(rate: &Rate, n: &Normalized) -> RowCost {
         || write.is_some()
         || c.cache_write_5m.is_some()
         || c.cache_write_1h.is_some();
-    RowCost {
-        total: input_side.plus(output),
+    Some(RowCost {
+        total: input_side.checked_plus(output)?,
         share,
         ttl_unknown_tokens,
         residual_tokens,
         tier_unknown: false,
         observed: output_known || input_known,
-    }
+    })
 }
 
 #[cfg(test)]
@@ -543,7 +558,7 @@ mod tests {
             let n = counters::codex(Ok(Some(i)), Ok(Some(0)), Ok(Some(0)), Ok(Some(1_000_000)));
             match price(&book, Some("gpt-6.1-sol"), &n, true) {
                 Priced::Cost(c) => c.total.lo,
-                Priced::NoPrice => panic!("priced"),
+                other => panic!("{other:?}"),
             }
         };
         // 272,000 input at 2 USD/M + 1M output at 10 USD/M.
@@ -631,7 +646,7 @@ mod tests {
         let n = |i: u64| counters::codex(Ok(Some(i)), Ok(Some(0)), Ok(Some(0)), Ok(Some(0)));
         let cost = |i: u64, single: bool| match price(&book, Some("gpt-6.1-sol"), &n(i), single) {
             Priced::Cost(c) => c,
-            Priced::NoPrice => panic!("priced"),
+            other => panic!("{other:?}"),
         };
         // One 300,000-token request is long context: 1.20 USD.
         assert_eq!(
@@ -645,10 +660,13 @@ mod tests {
             Bounds::range(300_000 * 2_000_000, 300_000 * 4_000_000)
         );
         assert!(batch.tier_unknown);
-        // No request in a 200,000-token batch can be above 272,000.
-        let small = cost(200_000, false);
-        assert_eq!(small.total, Bounds::exact(200_000 * 2_000_000));
-        assert!(!small.tier_unknown);
+        // A small increment can be part of a long-context request.
+        let small = cost(1_000, false);
+        assert_eq!(
+            small.total,
+            Bounds::range(1_000 * 2_000_000, 1_000 * 4_000_000)
+        );
+        assert!(small.tier_unknown);
     }
 
     #[test]
@@ -725,13 +743,18 @@ mod tests {
         assert!(
             matches!(price(&buckets, Some("m"), &n, false), Priced::Cost(c) if c.total.hi.is_some())
         );
-        let huge = Bounds::exact(u128::MAX).plus(Bounds::exact(1));
         assert_eq!(
-            huge,
-            Bounds {
-                lo: u128::MAX,
-                hi: None
-            }
+            Bounds::exact(u128::MAX).checked_plus(Bounds::exact(1)),
+            None
+        );
+        let unknown_upper = Bounds {
+            lo: u128::MAX,
+            hi: None,
+        };
+        assert_eq!(
+            unknown_upper.checked_plus(Bounds::exact(1)),
+            None,
+            "an unknown upper bound does not hide an overflow"
         );
     }
 

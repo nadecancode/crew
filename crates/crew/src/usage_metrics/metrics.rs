@@ -253,8 +253,8 @@ fn hit_rate(facts: &[Fact], common: &Common) -> RatioMetric {
     }
 }
 
-/// Prices every observation once.
-fn costs(facts: &[Fact], book: &Book) -> Vec<Option<RowCost>> {
+/// Prices every observation once; `None` for an unusable one.
+fn costs(facts: &[Fact], book: &Book) -> Vec<Option<Priced>> {
     facts
         .iter()
         .map(|fact| {
@@ -262,15 +262,12 @@ fn costs(facts: &[Fact], book: &Book) -> Vec<Option<RowCost>> {
                 return None;
             }
             let single = fact.unit == ObservationUnit::Request;
-            match price(book, fact.model.as_deref(), &fact.normalized, single) {
-                Priced::Cost(cost) => Some(cost),
-                Priced::NoPrice => None,
-            }
+            Some(price(book, fact.model.as_deref(), &fact.normalized, single))
         })
         .collect()
 }
 
-fn write_share(facts: &[Fact], costs: &[Option<RowCost>], common: &Common) -> RatioMetric {
+fn write_share(facts: &[Fact], costs: &[Option<Priced>], common: &Common) -> RatioMetric {
     let mut tally = Tally::default();
     let (mut other_lo, mut other_hi, mut write_lo, mut write_hi) =
         (Some(0u128), Some(0u128), Some(0u128), Some(0u128));
@@ -281,9 +278,12 @@ fn write_share(facts: &[Fact], costs: &[Option<RowCost>], common: &Common) -> Ra
             tally.exclude(CoverageReason::InvalidCounter);
         } else {
             match cost {
-                None => tally.exclude(CoverageReason::NoPrice),
-                Some(RowCost { share: None, .. }) => tally.exclude(CoverageReason::NotReported),
-                Some(RowCost { share: Some(s), .. }) => {
+                None | Some(Priced::NoPrice) => tally.exclude(CoverageReason::NoPrice),
+                Some(Priced::Overflow) => tally.exclude(CoverageReason::InvalidCounter),
+                Some(Priced::Cost(RowCost { share: None, .. })) => {
+                    tally.exclude(CoverageReason::NotReported)
+                }
+                Some(Priced::Cost(RowCost { share: Some(s), .. })) => {
                     accumulate(&mut other_lo, s.other_lo);
                     accumulate(&mut other_hi, s.other_hi);
                     accumulate(&mut write_lo, s.write_lo);
@@ -369,7 +369,7 @@ fn label(text: String) -> Label {
 
 fn estimate(
     facts: &[Fact],
-    costs: &[Option<RowCost>],
+    costs: &[Option<Priced>],
     book: &Book,
     common: &Common,
 ) -> CostEstimate {
@@ -385,22 +385,32 @@ fn estimate(
             continue;
         }
         match cost {
-            None => {
+            None | Some(Priced::NoPrice) => {
                 tally.exclude(CoverageReason::NoPrice);
                 excluded.insert(fact.model.clone().unwrap_or_else(|| "unknown model".into()));
                 total.hi = None;
             }
+            Some(Priced::Overflow) => {
+                tally.exclude(CoverageReason::InvalidCounter);
+                overflow = true;
+            }
             // Nothing priced was reported: an unknown cost, not an observed zero.
-            Some(cost) if !cost.observed => {
+            Some(Priced::Cost(cost)) if !cost.observed => {
                 tally.exclude(CoverageReason::NotReported);
                 total.hi = None;
             }
-            Some(cost) => {
-                let sum = total.plus(cost.total);
-                overflow |= total.hi.is_some() && cost.total.hi.is_some() && sum.hi.is_none();
-                total = sum;
-                ttl_unknown = ttl_unknown.saturating_add(cost.ttl_unknown_tokens as u128);
-                residual = residual.saturating_add(cost.residual_tokens as u128);
+            Some(Priced::Cost(cost)) => {
+                match total.checked_plus(cost.total) {
+                    Some(sum) => total = sum,
+                    None => overflow = true,
+                }
+                match (
+                    ttl_unknown.checked_add(cost.ttl_unknown_tokens as u128),
+                    residual.checked_add(cost.residual_tokens as u128),
+                ) {
+                    (Some(t), Some(r)) => (ttl_unknown, residual) = (t, r),
+                    _ => overflow = true,
+                }
                 tier_unknown += cost.tier_unknown as u64;
                 tally.include(fact);
             }
@@ -423,7 +433,13 @@ fn estimate(
             "{tier_unknown} observations with unknown total input or batched requests, priced across both context tiers"
         )));
     }
-    let (state, reason) = if tally.eligible == 0 {
+    // An overflowing sum claims no bound at all.
+    let (state, reason) = if overflow {
+        (
+            EstimateState::Unavailable,
+            Some(CoverageReason::InvalidCounter),
+        )
+    } else if tally.eligible == 0 {
         let reason = if tally.seen == 0 {
             CoverageReason::NoEligibleCost
         } else {
@@ -432,8 +448,6 @@ fn estimate(
                 .unwrap_or(CoverageReason::NoEligibleCost)
         };
         (EstimateState::Unavailable, Some(reason))
-    } else if overflow {
-        (EstimateState::Partial, Some(CoverageReason::InvalidCounter))
     } else if hi.is_none() {
         (
             EstimateState::Partial,
@@ -887,12 +901,30 @@ mod tests {
             cardinality_complete: true,
             expected_agents: None,
         };
-        let costs = [Some(huge), Some(huge)];
+        let costs = [Some(Priced::Cost(huge)), Some(Priced::Cost(huge))];
         let e = estimate(&facts, &costs, &book, &common);
-        assert_eq!(e.state, EstimateState::Partial);
+        assert_eq!(e.state, EstimateState::Unavailable);
         assert_eq!(e.reason, Some(CoverageReason::InvalidCounter));
-        assert_eq!(e.lower_pico_usd, Some(Wide(u128::MAX)));
+        assert_eq!(e.lower_pico_usd, None, "no clamped bound");
         assert_eq!(e.upper_pico_usd, None);
+        // An unknown upper bound does not hide an overflowing lower sum.
+        let open = RowCost {
+            total: Bounds {
+                lo: u128::MAX,
+                hi: None,
+            },
+            ..huge
+        };
+        let costs = [Some(Priced::Cost(open)), Some(Priced::Cost(huge))];
+        let e = estimate(&facts, &costs, &book, &common);
+        assert_eq!(e.state, EstimateState::Unavailable);
+        assert_eq!(e.reason, Some(CoverageReason::InvalidCounter));
+        let costs = [Some(Priced::Overflow), Some(Priced::Cost(huge))];
+        assert_eq!(
+            estimate(&facts, &costs, &book, &common).state,
+            EstimateState::Unavailable
+        );
+        let costs = [Some(Priced::Cost(huge)), Some(Priced::Cost(huge))];
         let share = write_share(&facts, &costs, &common);
         assert_eq!(share.state, MetricState::Unavailable);
         assert_eq!(share.reason, Some(CoverageReason::InvalidCounter));

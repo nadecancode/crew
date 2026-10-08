@@ -82,25 +82,31 @@ pub fn cohort(book: &Book, members: &[Member], membership_complete: bool) -> Com
     } else if costed == 0 {
         unavailable(book, CoverageReason::NoEligibleCost, cost_coverage)
     } else {
-        // Checked: a lower bound that would overflow saturates (still a lower
-        // bound), an upper bound that would overflow is unknown.
-        let mut total = Bounds { lo: 0, hi: Some(0) };
-        let mut overflow = false;
+        // Checked: an overflowing sum claims no bound at all.
+        let mut total = Some(Bounds { lo: 0, hi: Some(0) });
         for member in members {
-            match member.cost {
-                Some(cost) => {
-                    let sum = total.plus(cost);
-                    overflow |= total.hi.is_some() && cost.hi.is_some() && sum.hi.is_none();
-                    total = sum;
-                }
-                None => total.hi = None,
-            }
+            total = total.and_then(|t| match member.cost {
+                Some(cost) => t.checked_plus(cost),
+                None => Some(Bounds { lo: t.lo, hi: None }),
+            });
         }
-        let (lo, hi) = (total.lo, total.hi);
+        let Some(Bounds { lo, hi }) = total else {
+            return CompletionCohort {
+                first_completions: Wide(n as u128),
+                membership_complete,
+                tasks_with_observed_cost: Wide(costed as u128),
+                membership_coverage,
+                cost_per_completed_task: unavailable(
+                    book,
+                    CoverageReason::InvalidCounter,
+                    cost_coverage,
+                ),
+                includes_earlier_spend: members.iter().any(|m| m.earlier_spend && m.cost.is_some()),
+            };
+        };
         let n = n as u128;
         let (state, reason) = match hi {
             Some(_) => (EstimateState::Finite, None),
-            None if overflow => (EstimateState::Partial, Some(CoverageReason::InvalidCounter)),
             None if costed < n as u64 => {
                 (EstimateState::Partial, Some(CoverageReason::NoEligibleCost))
             }
@@ -230,13 +236,23 @@ mod tests {
             true,
         );
         let e = &c.cost_per_completed_task;
-        assert_eq!(e.state, EstimateState::Partial);
+        assert_eq!(e.state, EstimateState::Unavailable);
         assert_eq!(e.reason, Some(CoverageReason::InvalidCounter));
-        assert_eq!(
-            e.lower_pico_usd,
-            Some(Wide(u128::MAX / 2)),
-            "a saturated lower bound is still one"
-        );
+        assert_eq!(e.lower_pico_usd, None, "no clamped bound");
         assert_eq!(e.upper_pico_usd, None);
+        // An unknown upper bound does not hide the overflow.
+        let c = cohort(
+            &book,
+            &[
+                member("a", Some((u128::MAX, None))),
+                member("b", Some((1, Some(1)))),
+            ],
+            true,
+        );
+        assert_eq!(
+            c.cost_per_completed_task.reason,
+            Some(CoverageReason::InvalidCounter)
+        );
+        assert_eq!(c.cost_per_completed_task.lower_pico_usd, None);
     }
 }
