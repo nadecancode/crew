@@ -357,9 +357,6 @@ agent_add a member for it instead",
                     crate::models::runtime_label(current)
                 )));
             }
-            // The toolbox is mapped onto the new CLI: an item it requires that
-            // would not load there refuses the move.
-            self.toolbox_switch_check(&agent, assigned.runtime)?;
             return self
                 .move_to_runtime(
                     who,

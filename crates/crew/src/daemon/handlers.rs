@@ -479,10 +479,7 @@ change identity",
             }
             Call::ToolboxReload { config } => {
                 operator_only(&who)?;
-                let _ = config;
-                Err(RpcError::invalid(
-                    "crew toolbox reload is not available in this build yet (it comes with toolbox-launch)",
-                ))
+                reply(self.toolbox_reload_call(&config)?)
             }
             Call::Credential => {
                 // An agent may fetch its own key and nobody else's: the

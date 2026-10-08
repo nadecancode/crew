@@ -173,7 +173,7 @@ to finish",
             .agent(&id)
             .data(json!({ "parent": parent_id })),
         );
-        self.give_subagent_toolbox(parent_id, &id, toolbox)?;
+        self.give_subagent_toolbox(&id, toolbox)?;
         self.create_task(own_task)?;
         // Dispatch first so the subagent's first prompt is its task.
         self.apply_plan().await;
