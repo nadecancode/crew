@@ -301,11 +301,22 @@ fn mul(tokens: u64, rate: u64) -> u128 {
     tokens as u128 * rate as u128
 }
 
-/// Prices one normalized observation. `single` says its counters are one
-/// whole request's. A context tier applies per request, so only a single
-/// request's total input decides it; a native batch or partial increment is
-/// priced across every tier, whatever its size.
-pub fn price(book: &Book, model: Option<&str>, n: &Normalized, single: bool) -> Priced {
+/// What decides the context tier of the counters being priced.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Tiering {
+    /// Whole requests, each with a total input in `min..=max`: one request
+    /// has `min == max`; a sum of requests prices exactly when they all
+    /// share a tier.
+    Requests { min: u64, max: u64 },
+    /// A native batch, a partial increment or unknown input: any tier.
+    Unknown,
+}
+
+/// Prices one normalized observation, or a sum of observations that share
+/// their model, unit and reported fields. A context tier applies per
+/// request, so only whole requests' total inputs decide it; a batch or
+/// partial increment is priced across every tier, whatever its size.
+pub fn price(book: &Book, model: Option<&str>, n: &Normalized, tiering: Tiering) -> Priced {
     let Some(model) = model else {
         return Priced::NoPrice;
     };
@@ -313,16 +324,15 @@ pub fn price(book: &Book, model: Option<&str>, n: &Normalized, single: bool) -> 
     if tiers.is_empty() {
         return Priced::NoPrice;
     }
-    let c = &n.counters;
-    let candidates: Vec<&Rate> = match c.input_total.filter(|_| n.input_valid) {
-        Some(input) if single => {
-            let tier = tiers
-                .iter()
-                .rev()
-                .find(|r| r.above_input_tokens.is_none_or(|t| input > t))
-                .copied()
-                .unwrap_or(tiers[0]);
-            vec![tier]
+    let tier_of = |input: u64| {
+        tiers
+            .iter()
+            .rposition(|r| r.above_input_tokens.is_none_or(|t| input > t))
+            .unwrap_or(0)
+    };
+    let candidates: Vec<&Rate> = match tiering {
+        Tiering::Requests { min, max } if n.input_valid && min <= max => {
+            tiers[tier_of(min)..=tier_of(max)].to_vec()
         }
         _ => tiers.clone(),
     };
@@ -484,6 +494,13 @@ mod tests {
     use super::super::counters;
     use super::*;
 
+    /// One whole request's tiering.
+    fn one(n: &Normalized) -> Tiering {
+        n.counters
+            .input_total
+            .map_or(Tiering::Unknown, |i| Tiering::Requests { min: i, max: i })
+    }
+
     const PICO: u128 = 1_000_000_000_000;
 
     fn usd_pico(usd_millionths_x10: u128) -> u128 {
@@ -502,7 +519,7 @@ mod tests {
             Ok(Some(4)),
             Ok(Some(5)),
         );
-        let Priced::Cost(cost) = price(&book, Some("claude-haiku-4-5"), &n, true) else {
+        let Priced::Cost(cost) = price(&book, Some("claude-haiku-4-5"), &n, one(&n)) else {
             panic!("priced")
         };
         // 0.0000585 USD total; 0.0000155 write; 0.0000335 input side.
@@ -527,7 +544,8 @@ mod tests {
             Ok(None),
             Ok(Some(5)),
         );
-        let Priced::Cost(cost) = price(&book, Some("claude-haiku-4-5-20251001"), &n, true) else {
+        let Priced::Cost(cost) = price(&book, Some("claude-haiku-4-5-20251001"), &n, one(&n))
+        else {
             panic!("priced")
         };
         assert_eq!(cost.total, Bounds::range(usd_pico(555), usd_pico(630)));
@@ -543,7 +561,7 @@ mod tests {
     fn luna_without_write_counter_bounds_the_residual() {
         let book = Book::standard_2026_10_08();
         let n = counters::codex(Ok(Some(100)), Ok(Some(80)), Ok(None), Ok(Some(5)));
-        let Priced::Cost(cost) = price(&book, Some("gpt-6-luna"), &n, true) else {
+        let Priced::Cost(cost) = price(&book, Some("gpt-6-luna"), &n, one(&n)) else {
             panic!("priced")
         };
         assert_eq!(cost.total, Bounds::range(usd_pico(53), usd_pico(58)));
@@ -556,7 +574,7 @@ mod tests {
         let book = Book::standard_2026_10_08();
         let at = |i: u64| {
             let n = counters::codex(Ok(Some(i)), Ok(Some(0)), Ok(Some(0)), Ok(Some(1_000_000)));
-            match price(&book, Some("gpt-6.1-sol"), &n, true) {
+            match price(&book, Some("gpt-6.1-sol"), &n, one(&n)) {
                 Priced::Cost(c) => c.total.lo,
                 other => panic!("{other:?}"),
             }
@@ -577,7 +595,7 @@ mod tests {
     fn unknown_tier_spans_both_and_unknown_models_have_no_price() {
         let book = Book::standard_2026_10_08();
         let batch = counters::codex(Ok(None), Ok(Some(10)), Ok(None), Ok(Some(10)));
-        let Priced::Cost(cost) = price(&book, Some("gpt-6-astra"), &batch, true) else {
+        let Priced::Cost(cost) = price(&book, Some("gpt-6-astra"), &batch, one(&batch)) else {
             panic!("priced")
         };
         assert!(cost.tier_unknown);
@@ -594,11 +612,11 @@ mod tests {
             Ok(Some(1)),
         );
         assert_eq!(
-            price(&book, Some("claude-haiku-4"), &n, true),
+            price(&book, Some("claude-haiku-4"), &n, one(&n)),
             Priced::NoPrice,
             "a family prefix is not a match"
         );
-        assert_eq!(price(&book, None, &n, true), Priced::NoPrice);
+        assert_eq!(price(&book, None, &n, one(&n)), Priced::NoPrice);
     }
 
     #[test]
@@ -612,7 +630,7 @@ mod tests {
             Ok(Some(0)),
             Ok(None),
         );
-        let Priced::Cost(cost) = price(&book, Some("claude-opus-5-5"), &n, true) else {
+        let Priced::Cost(cost) = price(&book, Some("claude-opus-5-5"), &n, one(&n)) else {
             panic!("priced")
         };
         assert_eq!(cost.total.hi, None);
@@ -644,9 +662,12 @@ mod tests {
     fn a_native_batch_is_priced_across_the_tiers_its_requests_could_fall_in() {
         let book = Book::standard_2026_10_08();
         let n = |i: u64| counters::codex(Ok(Some(i)), Ok(Some(0)), Ok(Some(0)), Ok(Some(0)));
-        let cost = |i: u64, single: bool| match price(&book, Some("gpt-6.1-sol"), &n(i), single) {
-            Priced::Cost(c) => c,
-            other => panic!("{other:?}"),
+        let cost = |i: u64, single: bool| {
+            let tiering = if single { one(&n(i)) } else { Tiering::Unknown };
+            match price(&book, Some("gpt-6.1-sol"), &n(i), tiering) {
+                Priced::Cost(c) => c,
+                other => panic!("{other:?}"),
+            }
         };
         // One 300,000-token request is long context: 1.20 USD.
         assert_eq!(
@@ -673,7 +694,7 @@ mod tests {
     fn a_row_with_no_reported_counter_has_no_observed_cost() {
         let book = Book::standard_2026_10_08();
         let none = counters::claude(Ok(None), Ok(None), Ok(None), Ok(None), Ok(None), Ok(None));
-        let Priced::Cost(cost) = price(&book, Some("claude-haiku-4-5"), &none, true) else {
+        let Priced::Cost(cost) = price(&book, Some("claude-haiku-4-5"), &none, one(&none)) else {
             panic!("priced")
         };
         assert!(!cost.observed);
@@ -686,7 +707,12 @@ mod tests {
             Ok(None),
             Ok(Some(0)),
         );
-        let Priced::Cost(cost) = price(&book, Some("claude-haiku-4-5"), &output_only, true) else {
+        let Priced::Cost(cost) = price(
+            &book,
+            Some("claude-haiku-4-5"),
+            &output_only,
+            one(&output_only),
+        ) else {
             panic!("priced")
         };
         assert!(cost.observed, "an explicit zero is observed");
@@ -726,7 +752,7 @@ mod tests {
             Ok(Some(max)),
         );
         assert!(
-            matches!(price(&flat, Some("m"), &n, true), Priced::Cost(c) if c.total.hi.is_some())
+            matches!(price(&flat, Some("m"), &n, one(&n)), Priced::Cost(c) if c.total.hi.is_some())
         );
         let buckets = at_limit(WriteRate::Buckets {
             m5: MAX_RATE,
@@ -741,7 +767,7 @@ mod tests {
             Ok(Some(max)),
         );
         assert!(
-            matches!(price(&buckets, Some("m"), &n, false), Priced::Cost(c) if c.total.hi.is_some())
+            matches!(price(&buckets, Some("m"), &n, Tiering::Unknown), Priced::Cost(c) if c.total.hi.is_some())
         );
         assert_eq!(
             Bounds::exact(u128::MAX).checked_plus(Bounds::exact(1)),
@@ -769,12 +795,43 @@ mod tests {
             Ok(None),
             Ok(Some(0)),
         );
-        let Priced::Cost(cost) = price(&book, Some("claude-haiku-4-5"), &n, true) else {
+        let Priced::Cost(cost) = price(&book, Some("claude-haiku-4-5"), &n, one(&n)) else {
             panic!("priced")
         };
         // 100 five-minute write tokens at 1.25 USD/M.
         assert_eq!(cost.total.lo, 125_000_000);
         assert_eq!(cost.total.hi, None, "the rest of the writes is unknown");
         assert!(cost.observed);
+    }
+
+    #[test]
+    fn a_sum_of_requests_prices_exactly_only_when_they_share_a_tier() {
+        let book = Book::standard_2026_10_08();
+        // Two requests of 150,000 and 200,000 input tokens, summed.
+        let sum = counters::codex(Ok(Some(350_000)), Ok(Some(0)), Ok(Some(0)), Ok(Some(0)));
+        let at = |min, max| match price(
+            &book,
+            Some("gpt-6.1-sol"),
+            &sum,
+            Tiering::Requests { min, max },
+        ) {
+            Priced::Cost(c) => c,
+            other => panic!("{other:?}"),
+        };
+        let short = at(150_000, 200_000);
+        assert_eq!(
+            short.total,
+            Bounds::exact(350_000 * 2_000_000),
+            "not long context"
+        );
+        assert!(!short.tier_unknown);
+        let long = at(300_000, 400_000);
+        assert_eq!(long.total, Bounds::exact(350_000 * 4_000_000));
+        let straddling = at(100_000, 300_000);
+        assert!(straddling.tier_unknown);
+        assert_eq!(
+            straddling.total,
+            Bounds::range(350_000 * 2_000_000, 350_000 * 4_000_000)
+        );
     }
 }

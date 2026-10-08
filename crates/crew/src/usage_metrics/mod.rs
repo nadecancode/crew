@@ -8,11 +8,15 @@
 //! - `cohort`: cost per completed task over first completions
 //! - `source`: bounded, read-only tailing of a native file, with continuity
 //! - `claude`, `codex`, `pi`: the runtime adapters (pi is gated)
+//! - `ledger`: durable streams, ownership, observations, coverage and aggregates
+//! - `collect`: one bounded read of a stream into the ledger
 
 pub mod claude;
 pub mod codex;
 pub mod cohort;
+pub mod collect;
 pub mod counters;
+pub mod ledger;
 pub mod metrics;
 #[cfg(test)]
 mod parity;

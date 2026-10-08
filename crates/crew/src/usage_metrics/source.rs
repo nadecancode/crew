@@ -120,6 +120,20 @@ pub struct Batch {
 }
 
 impl Batch {
+    /// The checkpoint after `self.lines[index]` and everything before it, to
+    /// commit part of a batch.
+    pub fn checkpoint_after(&self, file: &File, index: usize) -> io::Result<Checkpoint> {
+        let Some(next) = self.lines.get(index + 1) else {
+            return Ok(self.checkpoint.clone());
+        };
+        let mut cp = self.checkpoint.clone();
+        cp.offset = next.offset;
+        cp.line = next.number - 1;
+        cp.draining = false;
+        cp.witness = witness(file, cp.offset)?;
+        Ok(cp)
+    }
+
     /// Everything present when the batch started has been consumed, except an
     /// incomplete final line.
     pub fn caught_up(&self) -> bool {
@@ -440,15 +454,28 @@ impl Adapter {
         }
     }
 
-    /// Decodes a batch, starting a new generation first when it lost continuity.
-    pub fn decode(&mut self, batch: &Batch) -> Vec<Item> {
-        let decoder: &mut dyn Decoder = match self {
+    fn decoder(&mut self) -> &mut dyn Decoder {
+        match self {
             Self::Claude(d) => d,
             Self::Codex(d) => d,
-        };
+        }
+    }
+
+    /// Decodes a batch, starting a new generation first when it lost continuity.
+    pub fn decode(&mut self, batch: &Batch) -> Vec<Item> {
+        let mut out = self.begin(batch);
+        for line in &batch.lines {
+            self.line(line, &mut out);
+        }
+        out
+    }
+
+    /// What a batch reports before its lines: a new generation (the decoder
+    /// reseeds) and records drained for their size.
+    pub fn begin(&mut self, batch: &Batch) -> Vec<Item> {
         let mut out = Vec::new();
         if batch.loss.is_some() {
-            decoder.reset();
+            self.decoder().reset();
             out.push(Item::Gap {
                 reason: CoverageReason::SourceGap,
                 offset: 0,
@@ -460,10 +487,12 @@ impl Adapter {
                 offset: batch.checkpoint.offset,
             });
         }
-        for line in &batch.lines {
-            decoder.decode(line, &mut out);
-        }
         out
+    }
+
+    /// Decodes one line of a batch, after [`Adapter::begin`].
+    pub fn line(&mut self, line: &Line, out: &mut Vec<Item>) {
+        self.decoder().decode(line, out);
     }
 
     /// The persisted state, refused when it outgrows [`MAX_STATE`].

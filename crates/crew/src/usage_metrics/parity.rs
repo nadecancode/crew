@@ -146,6 +146,8 @@ fn lifecycle_fixtures_reproduce_the_reported_counters() {
                     source: session.into(),
                     turn: o.turn.clone(),
                     unusable: None,
+                    weight: 1,
+                    input_range: None,
                 })
                 .collect();
             let t = totals(&facts, &book, Some(1));

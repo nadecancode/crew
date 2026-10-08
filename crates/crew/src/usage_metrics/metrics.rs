@@ -14,7 +14,7 @@ use crew_core::rpc::usage_metrics::{
 };
 
 use super::counters::{Counters, Normalized};
-use super::price::{price, Book, Bounds, Priced, RowCost};
+use super::price::{price, Book, Bounds, Priced, RowCost, Tiering};
 
 /// One observation as the metrics see it.
 #[derive(Clone, Debug)]
@@ -31,6 +31,13 @@ pub struct Fact {
     pub turn: Option<String>,
     /// Why an `Unusable` observation could not be used.
     pub unusable: Option<CoverageReason>,
+    /// How many observations this fact sums: 1 for one observation, more
+    /// for a retained aggregate whose observations share every field
+    /// presence, validity, unit and model.
+    pub weight: u64,
+    /// For whole requests, the least and greatest total input among them,
+    /// which decides their context tier.
+    pub input_range: Option<(u64, u64)>,
 }
 
 /// Counts of seen and eligible observations for one metric, with the reasons
@@ -45,16 +52,16 @@ struct Tally {
 
 impl Tally {
     fn include(&mut self, fact: &Fact) {
-        self.seen += 1;
-        self.eligible += 1;
+        self.seen += fact.weight;
+        self.eligible += fact.weight;
         self.agents.insert(fact.agent.clone());
     }
 
-    fn exclude(&mut self, reason: CoverageReason) {
-        self.seen += 1;
+    fn exclude(&mut self, fact: &Fact, reason: CoverageReason) {
+        self.seen += fact.weight;
         match self.exclusions.iter_mut().find(|(r, _)| *r == reason) {
-            Some((_, n)) => *n += 1,
-            None => self.exclusions.push((reason, 1)),
+            Some((_, n)) => *n += fact.weight,
+            None => self.exclusions.push((reason, fact.weight)),
         }
     }
 
@@ -143,14 +150,14 @@ fn counter(
     let mut sum = Some(0u128);
     for fact in facts {
         if let Some(reason) = unusable(fact) {
-            tally.exclude(reason);
+            tally.exclude(fact, reason);
         } else if !valid(&fact.normalized) {
-            tally.exclude(CoverageReason::InvalidCounter);
+            tally.exclude(fact, CoverageReason::InvalidCounter);
         } else if let Some(v) = get(&fact.normalized.counters) {
             accumulate(&mut sum, v as u128);
             tally.include(fact);
         } else {
-            tally.exclude(CoverageReason::NotReported);
+            tally.exclude(fact, CoverageReason::NotReported);
         }
     }
     let Some(sum) = sum else {
@@ -202,15 +209,15 @@ fn hit_rate(facts: &[Fact], common: &Common) -> RatioMetric {
     for fact in facts {
         let n = &fact.normalized;
         if let Some(reason) = unusable(fact) {
-            tally.exclude(reason);
+            tally.exclude(fact, reason);
         } else if !n.input_valid {
-            tally.exclude(CoverageReason::InvalidCounter);
+            tally.exclude(fact, CoverageReason::InvalidCounter);
         } else if let (Some(i), Some(r)) = (n.counters.input_total, n.counters.cache_read) {
             accumulate(&mut read, r as u128);
             accumulate(&mut input, i as u128);
             tally.include(fact);
         } else {
-            tally.exclude(CoverageReason::NotReported);
+            tally.exclude(fact, CoverageReason::NotReported);
         }
     }
     let (Some(read), Some(input)) = (read, input) else {
@@ -253,6 +260,17 @@ fn hit_rate(facts: &[Fact], common: &Common) -> RatioMetric {
     }
 }
 
+/// Whole requests are tiered by their total input; anything else spans every tier.
+fn tiering(fact: &Fact) -> Tiering {
+    match (fact.unit, fact.normalized.counters.input_total) {
+        (ObservationUnit::Request, Some(i)) => {
+            let (min, max) = fact.input_range.unwrap_or((i, i));
+            Tiering::Requests { min, max }
+        }
+        _ => Tiering::Unknown,
+    }
+}
+
 /// Prices every observation once; `None` for an unusable one.
 fn costs(facts: &[Fact], book: &Book) -> Vec<Option<Priced>> {
     facts
@@ -261,8 +279,12 @@ fn costs(facts: &[Fact], book: &Book) -> Vec<Option<Priced>> {
             if unusable(fact).is_some() {
                 return None;
             }
-            let single = fact.unit == ObservationUnit::Request;
-            Some(price(book, fact.model.as_deref(), &fact.normalized, single))
+            Some(price(
+                book,
+                fact.model.as_deref(),
+                &fact.normalized,
+                tiering(fact),
+            ))
         })
         .collect()
 }
@@ -273,15 +295,15 @@ fn write_share(facts: &[Fact], costs: &[Option<Priced>], common: &Common) -> Rat
         (Some(0u128), Some(0u128), Some(0u128), Some(0u128));
     for (fact, cost) in facts.iter().zip(costs) {
         if let Some(reason) = unusable(fact) {
-            tally.exclude(reason);
+            tally.exclude(fact, reason);
         } else if !fact.normalized.input_valid {
-            tally.exclude(CoverageReason::InvalidCounter);
+            tally.exclude(fact, CoverageReason::InvalidCounter);
         } else {
             match cost {
-                None | Some(Priced::NoPrice) => tally.exclude(CoverageReason::NoPrice),
-                Some(Priced::Overflow) => tally.exclude(CoverageReason::InvalidCounter),
+                None | Some(Priced::NoPrice) => tally.exclude(fact, CoverageReason::NoPrice),
+                Some(Priced::Overflow) => tally.exclude(fact, CoverageReason::InvalidCounter),
                 Some(Priced::Cost(RowCost { share: None, .. })) => {
-                    tally.exclude(CoverageReason::NotReported)
+                    tally.exclude(fact, CoverageReason::NotReported)
                 }
                 Some(Priced::Cost(RowCost { share: Some(s), .. })) => {
                     accumulate(&mut other_lo, s.other_lo);
@@ -380,23 +402,23 @@ fn estimate(
     let (mut ttl_unknown, mut residual, mut tier_unknown) = (0u128, 0u128, 0u64);
     for (fact, cost) in facts.iter().zip(costs) {
         if let Some(reason) = unusable(fact) {
-            tally.exclude(reason);
+            tally.exclude(fact, reason);
             total.hi = None;
             continue;
         }
         match cost {
             None | Some(Priced::NoPrice) => {
-                tally.exclude(CoverageReason::NoPrice);
+                tally.exclude(fact, CoverageReason::NoPrice);
                 excluded.insert(fact.model.clone().unwrap_or_else(|| "unknown model".into()));
                 total.hi = None;
             }
             Some(Priced::Overflow) => {
-                tally.exclude(CoverageReason::InvalidCounter);
+                tally.exclude(fact, CoverageReason::InvalidCounter);
                 overflow = true;
             }
             // Nothing priced was reported: an unknown cost, not an observed zero.
             Some(Priced::Cost(cost)) if !cost.observed => {
-                tally.exclude(CoverageReason::NotReported);
+                tally.exclude(fact, CoverageReason::NotReported);
                 total.hi = None;
             }
             Some(Priced::Cost(cost)) => {
@@ -477,10 +499,11 @@ fn requests(facts: &[Fact], common: &Common) -> CounterMetric {
     for fact in facts {
         match fact.unit {
             ObservationUnit::Request => tally.include(fact),
-            ObservationUnit::CounterDelta => tally.exclude(CoverageReason::NativeBatch),
-            ObservationUnit::Unusable => {
-                tally.exclude(fact.unusable.unwrap_or(CoverageReason::InvalidCounter))
-            }
+            ObservationUnit::CounterDelta => tally.exclude(fact, CoverageReason::NativeBatch),
+            ObservationUnit::Unusable => tally.exclude(
+                fact,
+                fact.unusable.unwrap_or(CoverageReason::InvalidCounter),
+            ),
         }
     }
     let state = tally.state();
@@ -505,7 +528,7 @@ fn turns(facts: &[Fact], common: &Common) -> CounterMetric {
                 ids.insert((&fact.source, turn));
                 tally.include(fact);
             }
-            None => tally.exclude(CoverageReason::MissingTurnIdentity),
+            None => tally.exclude(fact, CoverageReason::MissingTurnIdentity),
         }
     }
     let state = tally.state();
@@ -543,7 +566,8 @@ pub fn totals(facts: &[Fact], book: &Book, expected_agents: Option<u64>) -> Usag
         requests: facts
             .iter()
             .filter(|f| f.unit == ObservationUnit::Request)
-            .count() as u64,
+            .map(|f| f.weight)
+            .sum(),
         cardinality_complete: facts.iter().all(|f| f.unit == ObservationUnit::Request),
         expected_agents,
     };
@@ -591,6 +615,8 @@ mod tests {
             source: format!("{agent}/stream"),
             turn: None,
             unusable: None,
+            weight: 1,
+            input_range: None,
         }
     }
 
