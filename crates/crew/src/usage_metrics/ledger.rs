@@ -670,6 +670,7 @@ impl Ledger {
             .query_map(params![run_id, from, to], |r| Ok((r.get(0)?, r.get(1)?)))?
             .collect::<rusqlite::Result<_>>()?;
         let mut members = Vec::new();
+        let mut uncertain = false;
         for (task, epic) in completions {
             let epic: EpicAttribution = serde_json::from_str(&epic)?;
             if !keep(&task, &epic) {
@@ -705,18 +706,26 @@ impl Ledger {
                     params![run_id, task, from.saturating_sub(from.rem_euclid(HOUR))],
                     |r| r.get(0),
                 )?;
+            uncertain |= self.conn.query_row(
+                "SELECT EXISTS (SELECT 1 FROM usage_task_costs t JOIN usage_uncertain u
+                 ON u.run_id = t.run_id AND u.hour = t.hour AND u.stream_id = t.stream_id
+                 WHERE t.run_id = ?1 AND t.task_id = ?2)",
+                params![run_id, task],
+                |r| r.get::<_, bool>(0),
+            )?;
             members.push(Member {
                 task_id: task,
                 cost,
                 earlier_spend,
             });
         }
-        Ok(cohort_with(
-            book,
-            &members,
-            complete,
-            self.spend_gap(run_id)?,
-        ))
+        let mut c = cohort_with(book, &members, complete, self.spend_gap(run_id)?);
+        // A member's spend includes an aggregate a late correction made
+        // uncertain: no bound of the average holds, the lower one included.
+        if uncertain && c.cost_per_completed_task.state != EstimateState::Unavailable {
+            unavailable(&mut c.cost_per_completed_task);
+        }
+        Ok(c)
     }
 
     /// Why some live spend of a run may be missing from task costs:
@@ -829,8 +838,29 @@ impl Ledger {
         if !self.sourced(run_id, execution_id)? {
             return Ok(None);
         }
-        let facts = self.facts(run_id, "aside", None, |a| a.aside_execution == execution_id)?;
-        let t = totals(&facts, book, None);
+        let uncertain_scopes = self.uncertain_scopes(run_id)?;
+        let rows = self.rows(run_id, "aside", |a| a.aside_execution == execution_id)?;
+        let uncertain = rows
+            .iter()
+            .any(|(a, _)| uncertain_scopes.contains(&(a.hour, a.stream_id.clone())));
+        let facts: Vec<Fact> = rows.into_iter().map(|(_, f)| f).collect();
+        let mut t = totals(&facts, book, None);
+        if uncertain {
+            // A late correction to expired detail: no figure stands.
+            for m in [
+                &mut t.input_total,
+                &mut t.input_uncached,
+                &mut t.cache_read,
+                &mut t.cache_write,
+                &mut t.cache_write_5m,
+                &mut t.cache_write_1h,
+                &mut t.output,
+                &mut t.total_tokens,
+            ] {
+                m.state = MetricState::Unavailable;
+            }
+            unavailable(&mut t.estimate);
+        }
         let whole = |m: &CounterMetric| {
             (m.state == MetricState::Complete)
                 .then_some(m.known_sum)
@@ -876,9 +906,17 @@ impl Ledger {
                 sourced.insert(e.clone());
             }
         }
-        let facts = self.facts(run_id, "aside", None, |a| {
-            sourced.contains(&a.aside_execution)
-        })?;
+        let uncertain_scopes = self.uncertain_scopes(run_id)?;
+        let rows = self.rows(run_id, "aside", |a| sourced.contains(&a.aside_execution))?;
+        if rows
+            .iter()
+            .any(|(a, _)| uncertain_scopes.contains(&(a.hour, a.stream_id.clone())))
+        {
+            let mut estimate = totals(&[], book, None).estimate;
+            unavailable(&mut estimate);
+            return Ok(Some(estimate));
+        }
+        let facts: Vec<Fact> = rows.into_iter().map(|(_, f)| f).collect();
         let mut estimate = totals(&facts, book, None).estimate;
         if sourced.len() < executions.len() && estimate.state != EstimateState::Unavailable {
             estimate.upper_pico_usd = None;
@@ -1932,6 +1970,14 @@ impl Aggregate {
     pub fn work(&self) -> Option<WorkAttribution> {
         serde_json::from_str(&self.work).ok()
     }
+}
+
+/// An estimate over an aggregate a late correction made uncertain.
+fn unavailable(e: &mut CostEstimate) {
+    e.lower_pico_usd = None;
+    e.upper_pico_usd = None;
+    e.state = EstimateState::Unavailable;
+    e.reason = Some(CoverageReason::CorrectionOutsideHorizon);
 }
 
 /// Creates or upgrades the usage tables. Additive and repeatable.
@@ -3519,5 +3565,65 @@ mod tests {
             after, before,
             "the original increment's model and unit stand"
         );
+    }
+
+    #[test]
+    fn late_corrections_make_cohort_and_aside_readback_unavailable() {
+        let book = Book::standard_2026_10_08();
+        // Cohort: t1's spend corrected downward after its detail expired.
+        let (_dir, path, mut ledger, stream) = setup(&[]);
+        ledger
+            .bind_work(&stream, &open(&path), &epic_task("t1", "e1"), NOW)
+            .unwrap();
+        append(&path, &[at("a", NOW, 10)]);
+        drain(&mut ledger, &stream, &open(&path), NOW).unwrap();
+        ledger
+            .first_completion("r1", "t1", NOW + HOUR, None, &EpicAttribution::NoEpic)
+            .unwrap();
+        let before = ledger.cohort("r1", None, |_, _| true, &book).unwrap();
+        assert!(before.cost_per_completed_task.lower_pico_usd.is_some());
+        ledger.expire(NOW + 31 * DAY, Retention::default()).unwrap();
+        append(&path, &[at("a", NOW, 1)]);
+        drain(&mut ledger, &stream, &open(&path), NOW).unwrap();
+        let after = ledger.cohort("r1", None, |_, _| true, &book).unwrap();
+        let e = &after.cost_per_completed_task;
+        assert_eq!(e.state, EstimateState::Unavailable);
+        assert_eq!(e.reason, Some(CoverageReason::CorrectionOutsideHorizon));
+        assert_eq!((e.lower_pico_usd, e.upper_pico_usd), (None, None));
+
+        // Aside: an execution's answer corrected after expiry.
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("fork.jsonl");
+        std::fs::write(&path, "").unwrap();
+        let mut ledger = Ledger::in_memory().unwrap();
+        ledger.begin_run("r1", Some(NOW), NOW).unwrap();
+        let mut r = reg("r1", "i1", Start::Fresh);
+        r.kind = UsageKind::Aside;
+        r.aside = Some(AsideIds {
+            execution_id: "x1".into(),
+            aside_id: "q1".into(),
+        });
+        let stream = ledger.register(&r, &open(&path), NOW).unwrap().unwrap();
+        append(&path, &[msg("ans", 7)]);
+        drain(&mut ledger, &stream, &open(&path), NOW).unwrap();
+        assert!(ledger
+            .aside_usage("r1", "x1", &book)
+            .unwrap()
+            .unwrap()
+            .counters
+            .output
+            .is_some());
+        ledger.expire(NOW + 31 * DAY, Retention::default()).unwrap();
+        append(&path, &[msg("ans", 2)]);
+        drain(&mut ledger, &stream, &open(&path), NOW).unwrap();
+        let usage = ledger.aside_usage("r1", "x1", &book).unwrap().unwrap();
+        assert_eq!(usage.counters.output, None);
+        assert_eq!(usage.counters.input_total, None);
+        let cost = usage.cost.unwrap();
+        assert_eq!(cost.state, EstimateState::Unavailable);
+        assert_eq!(cost.lower_pico_usd, None);
+        let total = ledger.aside_total_cost("r1", "q1", &book).unwrap().unwrap();
+        assert_eq!(total.state, EstimateState::Unavailable);
+        assert_eq!(total.reason, Some(CoverageReason::CorrectionOutsideHorizon));
     }
 }
