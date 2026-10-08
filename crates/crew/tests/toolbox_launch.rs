@@ -409,6 +409,14 @@ fn resumed_restart_refreshes_mcp_catalog(runtime: RuntimeKind) {
 
     // Unlike an automatic recovery, the explicit operator restart refreshes
     // the definitions while resuming the confirmed conversation.
+    let (record, resume_arg) = match runtime {
+        RuntimeKind::Claude => ("claude-home/fake-claude-x.json", "--resume"),
+        RuntimeKind::Codex => ("codex-home/fake-codex.json", "resume"),
+        RuntimeKind::Pi => ("pi-home/fake-pi.json", "--session-id"),
+        RuntimeKind::Shell => unreachable!(),
+    };
+    let record = s.root().join(record);
+    std::fs::remove_file(&record).unwrap();
     s.ok(&[
         "resume",
         "--restart",
@@ -424,6 +432,13 @@ fn resumed_restart_refreshes_mcp_catalog(runtime: RuntimeKind) {
     });
     let refreshed = find_agent(&refreshed, "x");
     assert_eq!(refreshed.session_id, initial.session_id);
+    let launch = fixture.record(&record);
+    let args = launch["args"].as_array().unwrap();
+    assert!(
+        args.windows(2)
+            .any(|pair| pair[0] == resume_arg && pair[1].as_str() == initial.session_id.as_deref()),
+        "{runtime} did not resume the confirmed session: {args:?}"
+    );
     let after = refreshed.toolbox.as_ref().unwrap();
     assert_eq!(after.fingerprint, before.fingerprint);
     assert_ne!(after.definition_digest, before.definition_digest);
