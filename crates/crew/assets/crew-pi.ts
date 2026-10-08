@@ -332,7 +332,11 @@ async function arrived(pi: any, server: Server, taken: Set<string>, until: numbe
 // then declares the tools in its own order: pi's own and other extensions'
 // as they are, then crew's, then each toolbox server's in name order, then
 // any other server's, each server's tools by name. The same toolbox gives
-// the same tool list, byte for byte, on every start and restart.
+// the same tool list, byte for byte, on every start and restart. Only
+// crew's own server and the toolbox's are waited for: a server the member
+// inherits (the operator's or the project's own MCP configuration, another
+// extension's) is ordered after them when it is already there, and one that
+// arrives later adds its tools then, outside that guarantee.
 //
 // A required server (crew's own, or one the toolbox requires, which a
 // strict toolbox does of every server) that does not answer in time, or
