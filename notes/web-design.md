@@ -71,6 +71,23 @@ each the measured size plus about 0.5 KB. P2 and P3 are unchanged. As above,
 P1 is a ceiling against growth nobody decided on, and this feature was
 decided.
 
+**That raise is withdrawn** (orchestrator, m-82bdbcb74686; reviewer,
+m-7868fb7673ea). Under `notes/web-revamp.md` a change to P4 needs the
+operator, so P1 is back at 230,500 bytes and P4 at 600,000, with the test
+constants unchanged. The toolbox display has to fit within them.
+
+Moving code into another chunk does not make it fit. P1 counts every chunk
+except the terminal's, and P4 counts every file the manifest lists. A chunk
+loaded only when it is needed would also break "No code after the start"
+(§security). The bytes have to go: shared decoding and rendering instead of
+toolbox-specific copies, and no repeated markup. If the display cannot fit
+without dropping part of it, the measured sizes go to the operator through
+the orchestrator, and nothing is cut silently.
+
+P4 counts the files of `web-dist/` that its manifest lists, which is every
+file except `manifest.json`. `web/test/budget.test.ts` and
+`crates/crew/tests/web_bundle.rs` both count it this way.
+
 **Revised by `notes/web-multi.md`** (operator, m-50a884c7d9b1: one server
 for several workspaces). It replaces W1: the server becomes a process of its
 own, shared by every workspace the operator joined, and the page gains a
@@ -1714,10 +1731,10 @@ the charts).
 
 | # | budget | limit | spike **(observed)** |
 |---|---|---|---|
-| P1 | script needed for the dashboard (everything but the terminal chunk), minified | ≤ 236.5 KB (raised for member toolboxes, above) | 31.8 KB; the whole app: 191 KB (172 KB app, 19 KB solid-js) |
+| P1 | script needed for the dashboard (everything but the terminal chunk), minified | ≤ 230.5 KB (the raise for member toolboxes is withdrawn, above) | 31.8 KB; the whole app: 191 KB (172 KB app, 19 KB solid-js) |
 | P2 | stylesheet | ≤ 34 KB | 5.0 KB (3.6 KB of it xterm's) |
 | P3 | terminal chunk (xterm.js), requested at the start beside the first paint, used when a terminal first opens | ≤ 350 KB | 331 KB |
-| P4 | the whole of `web-dist/` | ≤ 604.1 KB | 369 KB |
+| P4 | every file of `web-dist/` its manifest lists (all but `manifest.json`) | ≤ 600 KB | 369 KB |
 | P5 | first contentful paint, cold cache | ≤ 150 ms | 28–40 ms |
 | P6 | live (snapshot of 10 agents, 300 messages, 1000 events applied and drawn), cold cache | ≤ 300 ms | 44–55 ms median, 82 ms worst (6 agents; 300 messages and about 1000 events in the last run) |
 | P7 | daemon emits → the page's handler runs, p95 | ≤ 10 ms | 1 ms median, 2–4 ms p95 (real pushes, through the relay) |
@@ -1942,7 +1959,7 @@ the address `crew web --json` printed:
 `crates/crew/tests/web_bundle.rs` (no node needed): when
 `crates/crew/web-dist/manifest.json` exists, every listed file exists with
 its size and hash, nothing unlisted is in the directory, `index.html` names
-only listed files, the total is within P4, and `source` equals the
+only listed files, the listed files' total is within P4, and `source` equals the
 fingerprint recomputed over `web/` (§build). Without a manifest it checks
 that the built-in page is what `/` serves.
 
