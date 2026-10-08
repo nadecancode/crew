@@ -376,11 +376,21 @@ rewrite event-time epic token/cost totals. Costs can predate the selected
 range. Source/temporal uncertainty and tasks without observed cost remain
 explicit in the coverage, not zero-cost tasks.
 
-For a partially observed cohort, divide the observed cost bounds by the full
-cohort size, but leave the upper bound unknown when unobserved task cost is
-unbounded. Present that result as a partial/lower estimate, never as if the
-missing tasks cost zero. Keep the cohort count, tasks with observed cost and
-cost-coverage state together in the response.
+Track completion-membership coverage separately from cost coverage. The
+whole-period **Cost per completed task** requires complete first-completion
+membership for that run/range/epic selector. If membership is incomplete,
+return unavailable with `completion history incomplete`; do not divide by
+only the discovered completions and label the result a whole-period lower
+bound. A missing zero-cost completion can lower the true average, reversing
+that supposed bound. V1 does not silently substitute a known-completions-only
+cohort for the requested period.
+
+With complete membership but partially observed cost, divide observed cost
+bounds by the full known cohort size, leaving the upper bound unknown when
+unobserved task cost is unbounded. Present that result as a partial/lower
+estimate, never as if missing cost were zero. Keep the cohort count,
+completion-membership coverage, tasks with observed cost and cost-coverage
+state together in the response.
 Even `K=N` does not prove complete cost: source gaps or unattributed work can
 still leave some of those tasks' spend unknown. The cost-coverage state, not
 the task-count fraction, controls whether a finite upper estimate is justified.
@@ -521,7 +531,7 @@ Suggested dedicated tables (final schema belongs to the implementation card):
 | `usage_streams` / `usage_bindings` | Native stream lineage, private source locator, agent incarnation/launch, run/aside scope and event-time account assignment intervals. |
 | `usage_cursors` | Decoder/file generation and sanitized atomic checkpoint state. |
 | `usage_observations` | Stable observation key, current revision, normalized nullable counters, units, captured attribution/time/model evidence and safe diagnostic flags. |
-| `usage_seen_ids` | Compact dedup/correction tombstones and sealed watermarks for retained source generations after detail expiry; bounded by the same storage budget. |
+| `usage_seen_ids` | Exact seen-id membership across each logical stream while it admits appends, including ids whose counter detail expired; closed-admission markers and any proven immutable-sequence boundary. A sealed byte offset alone is insufficient. |
 | `usage_turns` | Correlation and immutable work-binding facts; no prompt bodies. |
 | `usage_first_completions` | Unique first-Done fact per run/task with completion epic and coverage. |
 | `usage_rollups` | Sufficient sums and per-metric coverage for five-minute/hour/session and task/cohort queries. |
@@ -537,18 +547,33 @@ inventing rows from a bucket.
 Defaults: detailed sanitized observations for 30 days, capped at 250,000 rows;
 hourly/run/cohort aggregates for 365 days, capped at 2,000 runs; total metrics
 storage target 256 MiB per workspace. Prune oldest eligible detail first,
-then old closed runs, in bounded batches. Preserve an active stream's cursor
-and the dedup/correction evidence required for its retained horizon. Record
-every retention floor and coverage loss. If the hard budget cannot be
-maintained without discarding required evidence, pause new collection with
-a visible storage-limit state rather than blocking task execution.
+then old closed runs, in bounded batches. Preserve the cursor and exact
+seen-id membership for every logical stream still admitting appends, even
+when its counter detail or old run aggregates expire. Membership spans
+restart, relocation and file generations; a rewritten file does not reset it.
+Record every retention floor and coverage loss. If the hard budget cannot
+retain required identity evidence, pause or close admission with a visible
+storage-limit/gap state rather than blocking task execution.
 
-After dedup evidence expires, data at/below the sealed source watermark is
-not inserted again. An ambiguous rewritten source cannot recover exact
-continuity by assumption; reseed with an explicit gap. Late corrections
-outside the retained correction horizon are reported, not applied to an
-unrelated/new bucket. Retention is a measurement limitation, not permission
-to double-count a replay.
+A byte watermark prevents replaying an old prefix, but cannot distinguish a
+new request from an old message id appended beyond that watermark. Look up
+every incoming id in exact retained membership before admission. An old id
+whose correction detail has expired produces `correction_outside_horizon`,
+never a new request or new spend. The same rule applies after restart/rewrite.
+Probabilistic membership alone is not sufficient for exact accounting.
+Keep enough scope identity to mark affected retained rollups uncertain; if
+the correction cannot be localized, mark the stream's retained scopes.
+The old contribution might have been corrected downward, so a stale sum is
+not automatically a valid lower bound. Such totals are unavailable until
+the uncertain contribution can be removed or corrected with retained evidence.
+
+If exact membership must be discarded, keep a closed-admission marker for
+that logical stream and reject further accounting from it with a gap. Resume
+only with retained membership or a verified stronger native immutable-sequence
+boundary that rules out old corrections; a new inode, new run or larger byte
+offset is not such proof. Ambiguous unidentified cumulative streams still
+follow the conservative continuity rules above. Retention cannot justify
+double-counting a replay.
 
 New `clear_session` archives the old run and initializes the next pointer in
 the same lifecycle transaction while keeping the dedicated history tables.
@@ -620,7 +645,8 @@ UsageScope = { workspace_run_id, kind: live | aside,
                agent_incarnation?, task_id?, epic_selector?, model?, account? }
 UsageQuery = { scope, from_ms?, to_ms?, group_by?, bucket?, price_book_id?, cursor?, limit? }
 UsageSummary = { revision, scope, range, as_of, tracking_state, totals,
-                 attribution_coverage, completion_cohort?, limitations[] }
+                 attribution_coverage, completion_cohort?,
+                 completion_membership_coverage?, limitations[] }
 UsageObservation = { id, revision, unit, binding, time_basis, native_time?,
                      counters, validity, attribution, diagnostic_codes[], event_refs[] }
 ```
@@ -668,6 +694,7 @@ Agreed display states for the frontend implementation:
 | Finite cost interval | `≈ $2,540–$2,610`. |
 | Partial cost with no finite upper bound | `at least $2,556 · 1 model has no price`, or `· cost observed for 104 of 112` for the completion cohort. No approximation sign or range dash on this state. |
 | No eligible cost | `Estimate unavailable · <reason>`. |
+| Incomplete completion membership | `Cost per completed task unavailable · completion history incomplete`; no whole-period lower-bound average from a partial denominator. |
 | Price basis | Scope line: `list-price estimate, prices checked Oct 8`; detailed help states the standard API-equivalent basis. |
 | Unknown request cardinality | `≥ 9,612` plus the actual reason, for example `Codex reports some usage in batches; those are not counted as requests`. Turns use their own correlation-coverage reason. |
 | Per-metric coverage | Scope line can name `hit rate from 11 of 12 agents`; each incomplete tile keeps its own coverage suffix. There is no universal all-metrics reporting count. |
@@ -689,7 +716,7 @@ CLIs against local stubs. Paid comparative work remains QA's
 
 | ID | Pass condition |
 | --- | --- |
-| U01 Native parity | Fresh-source fixture replay matches `baseline.mjs` normalized token totals for Claude/Codex, with explicit documented request-cardinality differences; supported pi requires native evidence. |
+| U01 Native parity | Fresh-source fixture replay and the committed lifecycle samples match `baseline.mjs` normalized per-member token totals for Claude/Codex, with explicit documented request-cardinality differences; supported pi requires native evidence. |
 | U02 Streaming | Repeated Claude/Pi identities replace counters; late/missing fields and downward corrections update sums and coverage once; synthetic/unsupported sidechain rows do not inflate totals. |
 | U03 Codex | Unchanged cumulative events deduplicate; missing-to-known fields reseed without lifetime catch-up; empty/intersection-only delta matches and repeated direct-last vectors are not new-request proof; resets use valid direct evidence or gaps; batches/corrections are not fabricated requests; reasoning is not double-counted. |
 | U04 Restart atomicity | Crash before/after every ingest transaction boundary produces the same rows/rollups/cursor as uninterrupted reading; no lost or duplicated increment. |
@@ -698,11 +725,11 @@ CLIs against local stubs. Paid comparative work remains QA's
 | U07 Unknowns | Missing versus explicit zero, negative/fractional/overflow counters, invalid relations and zero denominators produce the stated per-metric eligibility and labels. |
 | U08 Metric intersections | `I/R` coverage, ordinary-input coverage, output coverage, cost and complete-category charts each use their own correct rows. Weighted hit rate is not a mean of percentages. |
 | U09 Prices | Exact model rows, 272k boundary, write TTL mixtures/unknowns, flat writes, missing write counters, unpriced models and price-book changes yield checked ranges, never a subscription bill. |
-| U10 Cohort arithmetic | Immutable first-Done facts, approval, failure/recompletion, refile, earlier spend and missing task cost produce the agreed completed-task cohort and coverage. Zero completions is unavailable. |
+| U10 Cohort arithmetic | Immutable first-Done facts, approval, failure/recompletion, refile, earlier spend and missing task cost produce the agreed completed-task cohort and coverage. A missing zero-cost completion makes the whole-period average unavailable, not a lower bound; completion membership and cost coverage stay separate. Zero completions is unavailable. |
 | U11 Attribution | Delayed usage/corrections, multi-work turns, uncorrelated native turns, model/account switches and task/epic refile never join to current ownership by accident. |
 | U12 Run boundaries | Restart/resume preserves the run; new/old clear-session paths cannot attach old rows to reused ids. Epics disabled still supports metrics. Pre-tracking history stays qualified. |
 | U13 Asides | Copied context/cumulative prefixes are not new spend; new answer usage appears only in aside scope; explicit account subtotals can include it without contaminating live benchmarks. |
-| U14 Retention | Detail expiry preserves correct sufficient aggregates/coverage; late corrections and lost dedup evidence cannot double-count a replay; hard storage limits do not block tasks. |
+| U14 Retention | Detail expiry preserves sufficient aggregates/coverage and exact seen-id membership for append-admitting streams. An evicted-detail id appended beyond the sealed offset, also after restart/rewrite, is an outside-horizon correction, never new spend; uncorrectable rollups are unavailable, not claimed lower bounds. Lost identity evidence closes/pauses admission with a gap; hard storage limits do not block tasks. |
 | U15 Diagnostics | Strict request-id diagnostic joins and file order work under regressing timestamps; missing diagnostics and long gaps never become causal cache-loss claims. |
 | U16 Observer isolation | No model call, terminal scrape, CLI probe, prompt mutation, task/agent scheduling change, credential read for metering, or body/secret persistence/export. |
 | U17 Wire/security | Final escaped frames fit; capabilities gate new reads/pushes; pages/revisions/attempts fence stale data; gateway Read lanes/revocation and cross-workspace negatives pass. |
