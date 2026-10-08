@@ -1,0 +1,252 @@
+{
+  "source": "76aa89c7b2e14346fe6042a1031485e6e64ccce7",
+  "native_binary": {
+    "binary": "/home/nade/.local/share/claude/versions/2.1.291",
+    "sha256": "078fad28d0297c9a25d306b635b2d8816c6839347520f29eb54ffea5d56142fb",
+    "sdk_header": "// Written by Claude Code 2.1.291.",
+    "provider_calls": 0
+  },
+  "provider_calls": 0,
+  "native_scenarios": [
+    {
+      "scenario": "normal",
+      "exit": {
+        "code": 0,
+        "signal": null
+      },
+      "provider_calls": 0,
+      "native_requests": 3,
+      "initial_messages_sha256": "55b77bb027db37b69293022ff07f3019bb87b25945e1b1fa2305e6e065985560",
+      "raw_prefix_byte_equal": false,
+      "prior_content_equal_ignoring_only_cache_control_and_string_text_block_representation": true,
+      "batches": [
+        "offer-A",
+        "offer-B"
+      ],
+      "native_turns": [
+        "0b282dd2-20bc-4988-ab74-7e28be49775e",
+        "bef0cbba-c94a-40ee-b643-954f425e6c12"
+      ],
+      "report_sha256": "bfbd90cf2f71416dd023e4c580cbca35f34d2e588d9e9f8b9f3f090a6a08ce9b"
+    },
+    {
+      "scenario": "restart",
+      "exit": {
+        "code": 0,
+        "signal": null
+      },
+      "provider_calls": 0,
+      "native_requests": 3,
+      "initial_messages_sha256": "fe90247f158f9d266327c77aa7f39c54ef3a5a64fe5a2646215c94cc15967a8b",
+      "raw_prefix_byte_equal": false,
+      "prior_content_equal_ignoring_only_cache_control_and_string_text_block_representation": true,
+      "batches": [
+        "offer-A",
+        "offer-B"
+      ],
+      "native_turns": [
+        "a6b53494-4e6c-455e-ad37-4ec3aae2dbe8",
+        "6a97d985-a4dd-4ea7-af22-c1b05c53a9e8"
+      ],
+      "report_sha256": "32c8ee976166447babc62655d4b5fac16d918866319389b982b6a83847c10372"
+    },
+    {
+      "scenario": "slow",
+      "exit": {
+        "code": 0,
+        "signal": null
+      },
+      "provider_calls": 0,
+      "native_requests": 3,
+      "initial_messages_sha256": "35b0707b75dc89171b9c7e222860eb20aedf44bdac39bd80d07b2bd0cd46452b",
+      "raw_prefix_byte_equal": false,
+      "prior_content_equal_ignoring_only_cache_control_and_string_text_block_representation": true,
+      "batches": [
+        "offer-A",
+        "offer-B"
+      ],
+      "native_turns": [
+        "1a97519d-df7d-493b-9364-3a2f7c71c169",
+        "9050ad51-0d0a-423f-91b2-f38847e2c37e"
+      ],
+      "report_sha256": "609fef5a52448981bf4bcfafd0915086a02743d0fc4ae4c82afe3b7086fa4b90"
+    },
+    {
+      "scenario": "rewrite",
+      "exit": {
+        "code": 0,
+        "signal": null
+      },
+      "provider_calls": 0,
+      "native_requests": 3,
+      "initial_messages_sha256": "c04097a4742d83ee66e613e5734053c47189a17f805780aacebacd8e365bb794",
+      "raw_prefix_byte_equal": false,
+      "prior_content_equal_ignoring_only_cache_control_and_string_text_block_representation": true,
+      "batches": [
+        "offer-A",
+        "offer-B"
+      ],
+      "native_turns": [
+        "f5e5d3f2-79a5-41f4-80c6-344d37d24187",
+        "79c3540b-f7a0-4115-ba07-20f9fdf595db"
+      ],
+      "report_sha256": "981ecab6031fa1b5d4168219d97135c87932cf972b3930055ca5348446589f8f"
+    },
+    {
+      "scenario": "drop",
+      "exit": {
+        "code": 0,
+        "signal": null
+      },
+      "provider_calls": 0,
+      "native_requests": 2,
+      "initial_messages_sha256": "17606cd0011882d705a158ad81bccf942e5d2f1da0b52f208c557bbdb5e4f4e7",
+      "raw_prefix_byte_equal": false,
+      "prior_content_equal_ignoring_only_cache_control_and_string_text_block_representation": true,
+      "batches": [
+        "offer-B"
+      ],
+      "native_turns": [
+        "4b9817cc-ab76-45ab-baef-8cbe72350e93"
+      ],
+      "report_sha256": "9be0e4e854b9f78766d2ea9c9ecc0df91965359cdda4e9ea6593b94a2a85eeea"
+    },
+    {
+      "scenario": "shortcircuit",
+      "exit": {
+        "code": 0,
+        "signal": null
+      },
+      "provider_calls": 0,
+      "native_requests": 2,
+      "initial_messages_sha256": "bbd6d77718cd11f695307d06724e5c0ed6650c68f24469ecc8b38f339e35c7a8",
+      "raw_prefix_byte_equal": false,
+      "prior_content_equal_ignoring_only_cache_control_and_string_text_block_representation": true,
+      "batches": [
+        "offer-B"
+      ],
+      "native_turns": [
+        "65d7d20b-8527-41f9-9fef-0e6a8e1be5ac"
+      ],
+      "report_sha256": "3c448c92aa81b4fed903a8149269955b3b4981743ac0da31764f48936b045244"
+    }
+  ],
+  "gates": [
+    {
+      "name": "workspace-serial",
+      "file": "target/cache-delivery-workspace-serial.log",
+      "sha256": "ebfe7624aec6c4c38d83827055414334723f8f288ac34c25cd48fae4e2bbb258",
+      "passed": 711,
+      "failed": 1,
+      "ignored": 2,
+      "scope": "crew suites through web_bundle; known base web_bundle failed",
+      "exit_code": 101
+    },
+    {
+      "name": "remaining-workspace",
+      "file": "target/cache-delivery-remaining-workspace.log",
+      "sha256": "f970595a32b9b967941a28fc88387f07f6b0873a4aeedc16eddfab0e8e12052c",
+      "passed": 482,
+      "failed": 0,
+      "ignored": 2,
+      "scope": "remaining-workspace",
+      "exit_code": 0
+    },
+    {
+      "name": "remaining-web",
+      "file": "target/cache-delivery-remaining-web.log",
+      "sha256": "bda09e79fdb0648ff1798da76d85d5f82d5534fa82d8537e41b152c4ceef54f0",
+      "passed": 25,
+      "failed": 0,
+      "ignored": 0,
+      "scope": "remaining-web",
+      "exit_code": 0
+    },
+    {
+      "name": "crew-doc",
+      "file": "target/cache-delivery-crew-doc.log",
+      "sha256": "a99560f04ed191e1c454a5b1ad27337b0d4d3500381008750f3a9fec7364d2fc",
+      "passed": 0,
+      "failed": 0,
+      "ignored": 0,
+      "scope": "crew-doc",
+      "exit_code": 0
+    },
+    {
+      "name": "clippy",
+      "file": "target/cache-delivery-clippy.log",
+      "sha256": "4bd79f2742917ad20ce3a0dd7ae2211b2e4d4a7b0886e4900663d3ca3115cb04",
+      "passed": 0,
+      "failed": 0,
+      "ignored": 0,
+      "scope": "clippy",
+      "exit_code": 0
+    },
+    {
+      "name": "msrv",
+      "file": "target/cache-delivery-msrv.log",
+      "sha256": "83b98d0de062c71b7e7277f1a37200db34974405fc47763566744545e4c45fb7",
+      "passed": 0,
+      "failed": 0,
+      "ignored": 0,
+      "scope": "msrv",
+      "exit_code": 0
+    },
+    {
+      "name": "node",
+      "file": "target/cache-delivery-node.log",
+      "sha256": "854931c73c4a8e1daf6026518df898ebd9f51874312e518812d978fc9737bd26",
+      "passed": 8,
+      "failed": 0,
+      "ignored": 0,
+      "scope": "node",
+      "exit_code": 0
+    }
+  ],
+  "known_base_failure": {
+    "test": "web_bundle::the_bundle_is_what_its_manifest_and_sources_say",
+    "observed_bytes": 604322,
+    "base_cap": 600000,
+    "owner": "ui/web-bundle-trim",
+    "approved_fix_pending": false,
+    "replacement_pending": true,
+    "original_cap_unchanged": true,
+    "submission_disposition": "m-f24de6e70417",
+    "follow_up": "After reviewed web-bundle-trim lands, run only the focused web_bundle pair on the merged tip and send the result to reviewer."
+  },
+  "cache_improvement_claim": false,
+  "thinking_integrity": {
+    "exit": {
+      "code": 0,
+      "signal": null
+    },
+    "provider_calls": 0,
+    "native_requests": 3,
+    "retained_thinking_signature_bytes_equal": true,
+    "report_sha256": "0d5815a3881983c64cc67b08c55b881db053ce429aed96310d4c8de49b56dcb8"
+  },
+  "raw_sdk_merge": {
+    "exit": {
+      "code": 0,
+      "signal": null
+    },
+    "native_requests": 2,
+    "provider_calls": 0,
+    "submitted_batches": [
+      "A",
+      "B"
+    ],
+    "explicit_result_batches": [
+      "B"
+    ],
+    "merged_native_start": true,
+    "report_sha256": "d98cdf2b82e18b216f6d73ec0a7d2c67229931fa6812fb8a73b842cffdf50cc1"
+  },
+  "stale_attempt_regression": "daemon::delivery::tests::expired_receipt_restores_as_a_tombstone_and_stale_retirement_cannot_bind_a_new_attempt",
+  "transcript_check_limitation": {
+    "custom_tool_call_already_recognized": true,
+    "latest_prompt_can_hide_prior_turn_tools_during_500_ms_read_delay": true,
+    "codex_delivery_and_check_turn_unchanged": true,
+    "d1_does_not_claim_to_fix_transcript_read_race": true
+  }
+}
