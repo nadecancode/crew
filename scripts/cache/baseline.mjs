@@ -211,7 +211,7 @@ export async function readSession(file, runtime, options = {}) {
   for await (const text of readline.createInterface({ input: stream, crlfDelay: Infinity })) {
     line++;
     // Avoid parsing every tool output in multi-gigabyte transcripts.
-    if (!/"usage"|token_count|session_meta|turn_context|thinking_drop|compact_boundary|turn_duration|"compacted"|silent_turn_reminder|"isMeta"|"type"\s*:\s*"user"|user_message|"role"\s*:\s*"user"/.test(text)) continue;
+    if (!/"usage"|token_count|session_meta|turn_context|thinking_drop|compact_boundary|turn_duration|"compacted"|silent_turn_reminder|"isMeta"|"type"\s*:\s*"(user|session)"|user_message|"role"\s*:\s*"user"/.test(text)) continue;
     let value;
     try { value = JSON.parse(text); } catch { malformed++; continue; }
     if (!value || typeof value !== 'object' || Array.isArray(value)) { malformed++; continue; }
@@ -261,19 +261,22 @@ export function readWorkspace(workspace, stateDir = null) {
 }
 
 function agentFor(session, workspace) {
-  const exact = workspace.agents.find(a => a.session_id === session.session_id || (a.session_id && path.basename(session.file).includes(a.session_id)));
+  const exact = workspace.agents.find(a => a.session_id && (a.session_id === session.session_id || path.basename(session.file).includes(a.session_id)));
   if (exact) return exact;
   const declared = session.private_agent ?? session.prompt_agent;
   if (declared) return workspace.agents.find(a => a.id === declared) ?? { id: declared, role: null };
   const cwd = session.cwd;
-  const byCwd = cwd ? workspace.agents.find(a => a.workdir === cwd) : null;
-  if (byCwd) return byCwd;
+  const byCwd = cwd ? workspace.agents.filter(a => a.workdir === cwd) : [];
+  // The workspace root is often shared by historical members. Its current
+  // occupant is not proof of who authored a historical session.
+  if (byCwd.length === 1 && cwd !== workspace.workspace) return byCwd[0];
   const needle = path.join(workspace.state_dir, 'worktrees') + path.sep;
   if (cwd?.startsWith(needle)) return { id: cwd.slice(needle.length).split(path.sep)[0], role: null };
   // Claude project directories encode the working directory with '-' in
   // place of separators. Exact current workdirs disambiguate unusual ids.
   const parent = path.dirname(session.file);
-  for (const a of workspace.agents) if (a.workdir && parent.includes(a.workdir.replace(/[^a-zA-Z0-9]/g, '-'))) return a;
+  const encodedMatches = workspace.agents.filter(a => a.workdir && a.workdir !== workspace.workspace && path.basename(parent) === encodeProject(a.workdir));
+  if (encodedMatches.length === 1) return encodedMatches[0];
   const encoded = workspace.state_dir.replace(/[^a-zA-Z0-9]/g, '-') + '-worktrees-';
   const encodedAt = parent.indexOf(encoded);
   if (encodedAt !== -1) return { id: parent.slice(encodedAt + encoded.length).split(path.sep)[0], role: null };
@@ -462,7 +465,10 @@ export async function collect(options) {
     try {
       const parsed = await readSession(candidate.file, candidate.runtime, options);
       parsed.runtime = candidate.runtime; parsed.private_agent = candidate.private_agent ?? null;
-      const run = candidate.workspace;
+      // A nested registered run may share its cwd/project directory with a
+      // member of the enclosing team. Exact native identity wins over cwd.
+      const run = candidate.private_agent ? candidate.workspace : workspaces.find(w => w.agents.some(a => a.session_id && (a.session_id === parsed.session_id || path.basename(candidate.file).includes(a.session_id))))
+        ?? workspaces.find(w => parsed.prompt_agent && w.agents.some(a => a.id === parsed.prompt_agent && a.workdir === parsed.cwd)) ?? candidate.workspace;
       const known = run.agents.some(a => a.session_id && (a.session_id === parsed.session_id || path.basename(candidate.file).includes(a.session_id)));
       const inWorkerDir = workerCwd(parsed.cwd, run)
         || (projectNames(run).has(path.basename(path.dirname(candidate.file))) && path.basename(path.dirname(candidate.file)) !== encodeProject(run.workspace));

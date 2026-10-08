@@ -207,3 +207,17 @@ test('team worktree reports may be written while its database and agent homes st
   assert.doesNotThrow(() => guardOutputs([workerReport], report));
   for (const out of [db, `${db}-wal`, path.join(state, 'agents/worker/rw/native.json')]) assert.throws(() => guardOutputs([out], report), /Refusing/);
 });
+
+test('streamed Pi header retains native session identity and cwd', async t => {
+  const dir = scratch(t), file = path.join(dir, 'pi/session.jsonl');
+  writeSession(file, [{ type: 'session', id: 'pi-id', cwd: '/workspace' }, { type: 'message', timestamp: stamp(0), message: { role: 'assistant', usage: { input: 1, cacheRead: 9, cacheWrite: 0, output: 2 } } }]);
+  const parsed = await readSession(file, 'pi'); assert.equal(parsed.session_id, 'pi-id'); assert.equal(parsed.cwd, '/workspace');
+});
+
+test('null ids and ambiguous shared cwd cannot override known private owner or attach foreign events', () => {
+  const workspace = { ...emptyWorkspace(), agents: [{ id: 'first', session_id: null, workdir: '/shared', role: 'first' }, { id: 'second', session_id: null, workdir: '/shared', role: 'second' }],
+    events: [{ type: 'agent.restart', timestamp_ms: epoch, agent_id: 'first' }] };
+  const s = { ...parseRecords('codex', rows([tokenCount(0, counters(10, 9, 1))])), cwd: '/shared', file: '/native/session.jsonl', runtime: 'codex' };
+  const unknown = enrich(s, workspace); assert.equal(unknown.agent_id, null); assert.equal(unknown.requests[0].crew_events.length, 0);
+  const known = enrich({ ...s, private_agent: 'second' }, workspace); assert.equal(known.agent_id, 'second'); assert.equal(known.requests[0].crew_events.length, 0);
+});
