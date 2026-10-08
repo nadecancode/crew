@@ -688,7 +688,8 @@ fn render_inbox(inbox: &InboxResult) -> String {
     text
 }
 
-const NO_NEW_MESSAGES: &str = "No new messages. One that arrives later is delivered to you: if you \
+const NO_NEW_MESSAGES: &str =
+    "No new messages. One that arrives later is delivered to you: if you \
 are waiting for it, end your turn, or park your card with agent_status(\"waiting\", …), instead \
 of checking again.";
 
@@ -1378,7 +1379,9 @@ mod tests {
         let defs = definitions();
         let inbox = defs.iter().find(|d| d.name == "agent_inbox").unwrap();
         assert!(
-            inbox.description.contains("do not call this to wait for one"),
+            inbox
+                .description
+                .contains("do not call this to wait for one"),
             "{}",
             inbox.description
         );
