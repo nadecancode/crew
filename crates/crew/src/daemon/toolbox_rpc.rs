@@ -374,3 +374,163 @@ what you have"
         }
     }
 }
+
+/// T11's subagent cases (notes/toolboxes.md, Orchestrator tools): what a
+/// subagent gets from a parent whose session runs with a toolbox, and that
+/// it can never get more.
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::daemon::AgentLocal;
+
+    const TEAM: &str = r#"
+project: t
+objective: t
+toolboxes:
+  web:
+    mcp:
+      context7: { command: [ctx, --stdio] }
+  docs:
+    mcp:
+      manual: { command: [manual, --stdio] }
+agents:
+  - id: parent
+    role: worker
+"#;
+
+    async fn daemon() -> (tempfile::TempDir, crate::daemon::Running) {
+        let temp = tempfile::tempdir().unwrap();
+        let running = crate::daemon::start(crate::daemon::DaemonOptions {
+            workspace: temp.path().into(),
+            crew_bin: std::env::current_exe().unwrap(),
+            pin: None,
+        })
+        .await
+        .unwrap();
+        (temp, running)
+    }
+
+    /// The parent runs with bundles `web` and `docs` as the team defined
+    /// them when it started.
+    fn parent_runs_with(daemon: &Daemon, team: TeamConfig) -> ActiveToolbox {
+        let resolved = team
+            .resolve_toolbox(
+                &Toolbox {
+                    include: vec!["web".into(), "docs".into()],
+                    ..Toolbox::default()
+                },
+                "agents[0].toolbox",
+            )
+            .unwrap();
+        let active = ActiveToolbox {
+            resolved,
+            servers: ["context7".to_string(), "manual".to_string()].into(),
+            definition_digest: Some("digest".into()),
+            scrub_env: ["SHOP_TOKEN".to_string()].into(),
+            snapshot_owner: Some("parent".into()),
+            ..ActiveToolbox::default()
+        };
+        let mut model = daemon.model();
+        model.session.team = Some(team);
+        model.local.insert(
+            "parent".into(),
+            AgentLocal {
+                toolbox_active: Some(active.clone()),
+                ..AgentLocal::default()
+            },
+        );
+        model.local.insert("child".into(), AgentLocal::default());
+        active
+    }
+
+    fn team(yaml: &str) -> TeamConfig {
+        TeamConfig::from_yaml(yaml).unwrap()
+    }
+
+    #[tokio::test]
+    async fn a_default_subagent_gets_a_copy_of_its_parent_s_active_toolbox() {
+        let (_temp, running) = daemon().await;
+        let daemon = &running.daemon;
+        let active = parent_runs_with(daemon, team(TEAM));
+        let copy = daemon.subagent_toolbox("parent", None).unwrap().unwrap();
+        assert_eq!(copy.resolved, active.resolved);
+        assert_eq!(copy.content, active.content);
+        assert_eq!(copy.servers, active.servers);
+        // Its launch pins the parent's snapshots and fingerprints them anew.
+        assert_eq!(copy.snapshot_owner.as_deref(), Some("parent"));
+        assert_eq!(copy.definition_digest, None);
+        daemon
+            .give_subagent_toolbox("child", Some(copy.clone()))
+            .unwrap();
+        let inherited = daemon.model().local["child"].toolbox_inherited.clone();
+        assert_eq!(inherited.unwrap().resolved, copy.resolved);
+    }
+
+    #[tokio::test]
+    async fn a_selection_gives_only_those_bundles_and_never_more() {
+        let (_temp, running) = daemon().await;
+        let daemon = &running.daemon;
+        let active = parent_runs_with(daemon, team(TEAM));
+        let docs = daemon
+            .subagent_toolbox("parent", Some(vec!["docs".into()]))
+            .unwrap()
+            .unwrap();
+        let names: Vec<String> = docs.resolved.items.keys().map(|k| k.to_string()).collect();
+        assert_eq!(names, ["mcp.manual"]);
+        assert_eq!(docs.servers, ["manual".to_string()].into());
+        assert_eq!(docs.snapshot_owner.as_deref(), Some("parent"));
+        let manual = crew_core::toolbox::ItemRef::new(ItemKind::Mcp, "manual");
+        assert_eq!(docs.resolved.items[&manual], active.resolved.items[&manual]);
+
+        // A reload widens `web` while the parent still runs the old one: a
+        // default subagent gets the old items, and asking for `web` is
+        // refused, naming the first new item.
+        let widened = TEAM.replace(
+            "      context7: { command: [ctx, --stdio] }",
+            "      context7: { command: [ctx, --stdio] }\n      search: { command: [search] }",
+        );
+        daemon.model().session.team = Some(team(&widened));
+        let copy = daemon.subagent_toolbox("parent", None).unwrap().unwrap();
+        assert_eq!(copy.resolved, active.resolved);
+        let refused = daemon
+            .subagent_toolbox("parent", Some(vec!["web".into()]))
+            .unwrap_err();
+        assert!(
+            refused
+                .message
+                .contains("mcp.search is not in your toolbox"),
+            "{}",
+            refused.message
+        );
+
+        // Nor a bundle whose definition changed since the parent started.
+        let changed = TEAM.replace("[ctx, --stdio]", "[ctx, --http]");
+        daemon.model().session.team = Some(team(&changed));
+        let refused = daemon
+            .subagent_toolbox("parent", Some(vec!["web".into()]))
+            .unwrap_err();
+        assert!(
+            refused
+                .message
+                .contains("mcp.context7 is defined differently"),
+            "{}",
+            refused.message
+        );
+    }
+
+    #[tokio::test]
+    async fn a_parent_without_a_toolbox_has_nothing_to_give() {
+        let (_temp, running) = daemon().await;
+        let daemon = &running.daemon;
+        daemon.model().session.team = Some(team(TEAM));
+        assert!(daemon.subagent_toolbox("parent", None).unwrap().is_none());
+        let refused = daemon
+            .subagent_toolbox("parent", Some(vec!["web".into()]))
+            .unwrap_err();
+        assert!(
+            refused.message.contains("nothing to give"),
+            "{}",
+            refused.message
+        );
+    }
+}
