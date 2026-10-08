@@ -100,10 +100,10 @@ test("P1–P4: the bundle's sizes", () => {
     p4_web_dist: sum(() => true),
   };
   report.sizes_bytes = sizes;
-  expect(sizes.p1_dashboard_script).toBeLessThanOrEqual(236_500);
+  expect(sizes.p1_dashboard_script).toBeLessThanOrEqual(230_500);
   expect(sizes.p2_stylesheet).toBeLessThanOrEqual(34_000);
   expect(sizes.p3_terminal_chunk).toBeLessThanOrEqual(350_000);
-  expect(sizes.p4_web_dist).toBeLessThanOrEqual(604_100);
+  expect(sizes.p4_web_dist).toBeLessThanOrEqual(600_000);
 });
 
 test.describe("ten agents", () => {

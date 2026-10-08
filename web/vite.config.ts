@@ -3,7 +3,10 @@ import solid from "vite-plugin-solid";
 
 // The bundle is committed and embedded in the crew binary (notes/web-design.md
 // §build): reproducible names, no inlined assets, vendor code apart from the
-// app so that an ordinary change rewrites one chunk.
+// app so that an ordinary change rewrites one chunk. terser (pinned) minifies:
+// smaller than esbuild's output, which keeps the bundle within its budgets
+// (§Budgets). Only its safe transforms: `pure_getters` and the `unsafe_*`
+// options would drop reads Solid's stores track.
 //
 // `bun run dev` proxies /ws to the mock daemon (`bun run mock`), or to a real
 // daemon when CREW_WEB is the address `crew web --no-open` printed; the proxy
@@ -15,6 +18,8 @@ export default defineConfig({
     outDir: "../crates/crew/web-dist",
     emptyOutDir: true,
     target: "es2022",
+    minify: "terser",
+    terserOptions: { compress: { passes: 3 } },
     sourcemap: false,
     cssCodeSplit: false,
     assetsInlineLimit: 0,
