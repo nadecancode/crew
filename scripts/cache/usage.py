@@ -177,6 +177,7 @@ def collect(workspace, agents, operator_homes=None):
             "agent": identity, "runtime": runtime, "session_id": session,
             "coverage": "observed" if requests else "no-usage",
             "source": str(path.relative_to(home if operator_homes else workspace)),
+            "source_path": str(path.resolve()),
             "source_root": "operator-cli-home" if operator_homes else "fixture-workspace",
             "requests": requests, "request_count": len(requests),
             "models": sorted({r["model"] for r in requests}),

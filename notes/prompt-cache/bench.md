@@ -76,6 +76,12 @@ the operator-authorized baseline selects off explicitly. Claude uses
 `acceptEdits` plus explicit local-tool permissions to avoid the first-use
 Bypass Permissions dialog. Codex's permission policy is bypass. These settings
 and the selected sandbox mode are recorded as part of the workload.
+Unsandboxed members may load the operator's user agents, skills and plugins.
+Sandboxed production teams use filtered private homes, so this normal-login
+baseline does not establish their cache behavior. Keep that environment
+difference explicit when interpreting or comparing results. Each member's
+exact new session ID and native file path are recorded in the report; the
+harness never edits or deletes those files.
 
 Inherited `CREW_*` and `GIT_*` variables and parent CLI session identifiers are
 removed. Git system/global configuration is disabled for the fixture. A private,
