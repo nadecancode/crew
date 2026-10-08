@@ -729,9 +729,32 @@ The **Asides** side panel tab lists asides newest first. Each aside shows:
 
 The aside header shows the total cost of all its answers.
 
-Each aside offers **Cancel** while answers are pending, and **Remove from
-this list**. Removing only clears the dashboard view; it does not undo
-usage.
+Each aside offers **Cancel** while answers are pending, and **Remove for
+everyone**.
+
+**Remove for everyone** is the operator's way to get rid of an aside's text
+(`notes/btw.md` §Retention). When the daemon applies it, every client drops
+the question, its preview and every answer body at once, including views
+that are open. Nothing of the text stays behind:
+- the aside's row leaves every list;
+- the client that removed it shows "Aside removed for everyone" briefly;
+- a client that has the aside open replaces it with a body-free row, "This
+  aside was removed", with **Back** only, until it is closed. There is no
+  Ask again, since the text is gone.
+
+Removal does not undo usage: the aside's tokens and estimate stay in the
+Asides usage scope, without its text.
+
+**Lost, not removed.** An aside can also go without anyone removing it: the
+daemon drops the oldest settled asides to stay within its bounds, and a
+daemon restart drops them all. Neither is a removal. A client that already
+shows such an aside may keep what it shows, marked with the reason:
+- "This answer is no longer kept · removed to make room";
+- "This answer is no longer kept · the daemon restarted".
+
+Its one action is **Ask again**, which puts that question into the aside
+composer as a draft; sending it makes a new aside with a new id. A client
+that opens later shows neither, only the list note under "Kept where".
 
 **Send to claude-1 as a message…** is the only way an aside's content
 reaches a live session. It opens the normal composer prefilled with the
@@ -748,11 +771,13 @@ sent. Sending then follows normal message rules, with no special path.
 
 ### Kept where
 
-Asides live for the daemon session, with a bounded history: the last 50
-asides, with their answers truncated to 64 KiB each. They are not saved to
-the roster. Whether they survive a daemon restart is `btw-mechanism`'s
-decision; the tab says "Asides from before the dashboard reconnected are
-gone" when they did not survive.
+Asides live in the daemon's memory, with a bounded history: the last 50
+asides, with their answers truncated to 64 KiB each (`notes/btw.md`;
+the final bounds are `feature-protocol-plan`'s). They are not saved to the
+roster or to disk. They survive a dashboard reconnect but not a daemon
+restart; the tab then says "Asides from before the daemon restarted are
+gone". When the daemon has dropped older asides to make room, the list ends
+with "Older asides were removed to make room".
 
 ## TUI and native apps
 
@@ -834,7 +859,7 @@ Captures are taken in light and dark at 1440×960 and 390×844.
 | F13 | Trend and breakdown | The trend draws buckets from the samples, with the latest values as text. A bucket without a full category split is a hatched gap labelled split not reported. Show as table gives the same figures. The breakdown sorts by every column, shows `≥` Requests with its reason for a batch-reporting runtime, lists No epic, No task and Not attributed as separate rows with the Not attributed reason, and the narrow layout stacks without page overflow. |
 | F14 | Big writes, history and gaps | Big writes lists exactly the fixture's qualifying requests, and opens the agent at that time. History lists both sessions, and selecting the earlier one scopes the figures read-only. With a session file still being read, the gap line shows and no figure shows 0 for it; a later revision that lowers a figure is drawn as is. The scope line shows the tracking boundary and the price date. |
 | F15 | Aside ask | `/btw` switches the composer to aside mode with the copy line and the `--info` border. The recipient picker lists unavailable members with reasons. Escape keeps the text. Sending opens the Asides tab. |
-| F16 | Aside answers | Answers arrive independently; the slow one shows Answering and the failed one shows its reason. The footer names the source copy and time, and tokens and estimate are shown. Cancel stops pending answers. |
+| F16 | Aside answers | Answers arrive independently; the slow one shows Answering and the failed one shows its reason. The footer names the source copy and time, and tokens and estimate are shown. Cancel stops pending answers. Remove for everyone, with the aside open in a second client, leaves no question or answer text in either client, only "This aside was removed" with Back in the second; its usage remains. After a daemon restart, a client that had an aside open shows it with "the daemon restarted" and Ask again, which fills the composer as a draft; a newly opened client shows only the restart note. |
 | F17 | Aside isolation | During and after an aside: no bus row, inbox entry, transcript line, task change or briefing change. Only `aside.*` events without bodies appear. The fixture's live sessions receive no input. Send as message opens the normal composer prefilled, and only sending it reaches the member. |
 | F18 | Keyboard and screen reader | Every new control is reachable by Tab. The `n`, `b` and `D` keys work and are listed in Help. Tree and treegrid semantics hold, the announcements are polite and bounded, and focus is never stolen. |
 | F19 | Budgets | P1, P2 and P4 hold, or a raise is recorded with its card (as for toolbox-dashboards). The Docs chunk is requested at document start and never later. The idle page requests no animation frames. |
