@@ -371,71 +371,19 @@ what you have"
         Ok(Some(out))
     }
 
-    /// Hand a new subagent what `subagent_toolbox` chose, with the parent's
-    /// pinned MCP snapshots copied into the subagent's own directory now.
-    /// From then on the subagent serves its own copies: a later restart or
-    /// reload of the parent rewrites the parent's pins, never these, and the
-    /// subagent's own restarts keep them.
+    /// Hand a new subagent what `subagent_toolbox` chose. Its MCP catalog is
+    /// the frozen copies that came with that choice (`mcp_snapshots`, taken
+    /// when the parent launched); each of its launches restores its pins
+    /// from them, never from the parent's own files.
     pub(crate) fn give_subagent_toolbox(
         &self,
         child: &str,
         toolbox: Option<ActiveToolbox>,
     ) -> Result<(), RpcError> {
-        let Some(mut toolbox) = toolbox else {
-            return Ok(());
-        };
-        if let Some(owner) = toolbox.snapshot_owner.take() {
-            self.freeze_snapshots(&owner, child, &toolbox)
-                .map_err(|e| RpcError::internal(format!("{e:#}")))?;
+        match toolbox {
+            Some(toolbox) => self.inherit_toolbox(child, toolbox),
+            None => Ok(()),
         }
-        self.inherit_toolbox(child, toolbox)
-    }
-
-    /// Copy `owner`'s pin of each of `toolbox`'s servers to `child`, read
-    /// beneath the owner's directory and only for the definition the
-    /// subagent gets. A server the owner never pinned is left for the
-    /// subagent's launch to pin.
-    fn freeze_snapshots(
-        &self,
-        owner: &str,
-        child: &str,
-        toolbox: &ActiveToolbox,
-    ) -> anyhow::Result<()> {
-        use std::os::fd::AsFd;
-        let source = self.agent_root(owner)?;
-        for name in &toolbox.servers {
-            let Some(Item::Mcp(server)) = toolbox
-                .resolved
-                .items
-                .get(&crew_core::toolbox::ItemRef::new(ItemKind::Mcp, name))
-                .map(|entry| &entry.item)
-            else {
-                continue;
-            };
-            let relative = std::path::PathBuf::from("toolbox/mcp").join(format!("{name}.json"));
-            let file = match crew_core::paths::open_beneath(source.as_fd(), &relative) {
-                Ok(file) => file,
-                Err(e)
-                    if e.downcast_ref::<std::io::Error>()
-                        .is_some_and(|e| e.kind() == std::io::ErrorKind::NotFound) =>
-                {
-                    continue;
-                }
-                Err(e) => return Err(e),
-            };
-            let snapshot: serde_json::Value =
-                serde_json::from_reader(std::io::Read::take(file, 16 * 1024 * 1024))?;
-            let definition = crate::mcp::proxy::definition_hash(server);
-            if snapshot
-                .get("definition")
-                .and_then(serde_json::Value::as_str)
-                != Some(definition.as_str())
-            {
-                anyhow::bail!("{owner}'s MCP snapshot of {name} is not for the definition given");
-            }
-            crate::mcp::proxy::pin(&self.agent_dir(child), name, &definition, &snapshot, true)?;
-        }
-        Ok(())
     }
 }
 
@@ -612,82 +560,66 @@ mod frozen_snapshot_tests {
         })
     }
 
-    /// T11 / T07: a subagent's catalog is the one its parent had when it was
-    /// spawned. The parent pinning another (a restart, a reload) changes
-    /// nothing the subagent serves, now or at its own restarts.
+    /// T11 / T07: a subagent's catalog is the frozen copy its parent had
+    /// when the parent launched, carried with the choice itself. The parent
+    /// pinning another catalog afterwards (a restart, a reload), even between
+    /// the choice and the hand-over, changes nothing the subagent gets.
     #[tokio::test]
-    async fn a_subagent_keeps_the_catalog_its_parent_had_at_spawn() {
+    async fn a_subagent_keeps_the_catalog_its_parent_had_whatever_the_parent_pins_later() {
         let (_temp, running) = daemon().await;
         let daemon = &running.daemon;
-        let active = parent_runs_with(daemon, team(TEAM));
-        let server = |name: &str| match &active.resolved.items
-            [&crew_core::toolbox::ItemRef::new(ItemKind::Mcp, name)]
+        let mut active = parent_runs_with(daemon, team(TEAM));
+        let definition = match &active.resolved.items
+            [&crew_core::toolbox::ItemRef::new(ItemKind::Mcp, "context7")]
             .item
         {
             Item::Mcp(server) => crate::mcp::proxy::definition_hash(server),
             _ => unreachable!(),
         };
+        // The parent's launch pinned `context7` and froze that pin.
+        daemon.agent_root("parent").unwrap();
         let parent_dir = daemon.agent_dir("parent");
-        daemon.agent_root("parent").unwrap();
-        daemon.agent_root("child").unwrap();
-        crate::mcp::proxy::pin(
-            &parent_dir,
-            "context7",
-            &server("context7"),
-            &listing("Old."),
-            true,
-        )
-        .unwrap();
-
-        let copy = daemon.subagent_toolbox("parent", None).unwrap().unwrap();
-        daemon.give_subagent_toolbox("child", Some(copy)).unwrap();
-        let inherited = daemon.model().local["child"]
-            .toolbox_inherited
-            .clone()
+        crate::mcp::proxy::pin(&parent_dir, "context7", &definition, &listing("Old."), true)
             .unwrap();
-        // The subagent's launches pin from its own directory, not the parent's.
-        assert_eq!(inherited.snapshot_owner, None);
-        let child_pin = crate::mcp::proxy::snapshot_path(&daemon.agent_dir("child"), "context7");
-        let frozen = std::fs::read_to_string(&child_pin).unwrap();
-        assert!(frozen.contains("Old."), "{frozen}");
-        // `manual` was never pinned by the parent: left for the child's launch.
-        assert!(!crate::mcp::proxy::snapshot_path(&daemon.agent_dir("child"), "manual").exists());
+        let store = crate::agents::toolbox::store::Store::open(&daemon.state_dir).unwrap();
+        let frozen = store
+            .snapshot(&crate::mcp::proxy::snapshot_path(&parent_dir, "context7"))
+            .unwrap();
+        active
+            .mcp_snapshots
+            .insert("context7".into(), frozen.clone());
+        daemon
+            .model()
+            .local
+            .get_mut("parent")
+            .unwrap()
+            .toolbox_active = Some(active);
 
-        // The parent restarts and pins a new catalog: the child's is untouched.
-        crate::mcp::proxy::pin(
-            &parent_dir,
-            "context7",
-            &server("context7"),
-            &listing("New."),
-            true,
-        )
-        .unwrap();
-        assert_eq!(std::fs::read_to_string(&child_pin).unwrap(), frozen);
-    }
-
-    #[tokio::test]
-    async fn a_parent_pin_for_another_definition_is_not_given() {
-        let (_temp, running) = daemon().await;
-        let daemon = &running.daemon;
-        parent_runs_with(daemon, team(TEAM));
-        daemon.agent_root("parent").unwrap();
-        daemon.agent_root("child").unwrap();
-        crate::mcp::proxy::pin(
-            &daemon.agent_dir("parent"),
-            "context7",
-            &"f".repeat(64),
-            &listing("Other."),
-            true,
-        )
-        .unwrap();
-        let copy = daemon.subagent_toolbox("parent", None).unwrap().unwrap();
-        let refused = daemon
-            .give_subagent_toolbox("child", Some(copy))
-            .unwrap_err();
-        assert!(
-            refused.message.contains("not for the definition given"),
-            "{}",
-            refused.message
-        );
+        for selection in [None, Some(vec!["web".to_string()])] {
+            let chosen = daemon
+                .subagent_toolbox("parent", selection.clone())
+                .unwrap()
+                .unwrap();
+            // The parent restarts between the choice and the hand-over.
+            crate::mcp::proxy::pin(&parent_dir, "context7", &definition, &listing("New."), true)
+                .unwrap();
+            daemon.give_subagent_toolbox("child", Some(chosen)).unwrap();
+            let inherited = daemon.model().local["child"]
+                .toolbox_inherited
+                .clone()
+                .unwrap();
+            assert_eq!(
+                inherited.mcp_snapshots.get("context7"),
+                Some(&frozen),
+                "{selection:?}"
+            );
+            // Only the chosen bundles' servers come along.
+            assert!(
+                !inherited.mcp_snapshots.contains_key("manual"),
+                "{selection:?}"
+            );
+            crate::mcp::proxy::pin(&parent_dir, "context7", &definition, &listing("Old."), true)
+                .unwrap();
+        }
     }
 }
