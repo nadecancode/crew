@@ -1,6 +1,7 @@
 # Turn-boundary Claude delivery
 
-Validation in progress. This checkpoint is not a shipping or cache-savings claim.
+Source validation complete except the independently owned bundle-budget gate.
+This is not a controlled cache-savings claim.
 
 Ordinary Claude traffic stays in the durable bus until a native turn carrying
 its daemon-issued batch marker is observed. Operator traffic is classified by
@@ -33,6 +34,31 @@ receipt store. Native endpoint captures are fixture data and are not actual
 provider usage or a controlled C3 cost series.
 
 Source integration includes reviewed main `2c7a1c3f`, including D4. Remaining
-gates: final workspace tests, strict Clippy/rustfmt, Rust 1.82 default CLI,
-complete failure/receipt resync coverage, and reviewer verdict. No installed
+gate: the approved UI bundle-budget fix and focused `web_bundle` rerun, then
+reviewer verdict. The other workspace suites pass, including all 87 `team`
+tests serially, remaining packages, web-server/wire and doc tests. Whole
+workspace Clippy with `-D warnings`, rustfmt and the real Rust 1.82 default CLI
+build/help checks pass. The default-parallel Codex limit-event assertion raced;
+its exact focused rerun and serial suite pass. Two explicit terminal-mode
+regressions were fixed by preserving that opted-in legacy route; it is outside
+the queued-mod cache guarantee, and their original oracles pass.
+
+The current main bundle is 604,322 bytes against the old Rust P4 check of
+600,000. D1 changes no web source or bundle. `web-bundle-budget` owns that
+known base failure; no threshold is changed in this card. The retained checks,
+native binary fingerprint and fixture report hashes are in
+[cache-delivery.json](cache-delivery.json).
+
+Native raw request prefixes are not byte-identical: the SDK moves cache-control
+annotations and uses a string instead of a one-text-block array. After only
+those representation changes are normalized, old content is identical across
+all six baseline native scenarios. The thinking-stream case retains the same
+old thinking/signature block in later requests. This proves the narrower
+history-integrity claim, not whole-request equality, provider cache reuse or
+the C3 paired cost target. The native relay-reconnect probe makes one native
+copy per batch despite repeated frames; separate Rust metadata tests cover
+daemon receipt restore and consumption repair, and Node tests cover activation
+store restore and unknown tombstones.
+
+No installed
 operator binary, running team, provider credential or listener was changed.
