@@ -621,7 +621,7 @@ How `inherit` exclusions are enforced, per runtime:
 | Source kind excluded | Claude Code | Codex | pi |
 | --- | --- | --- | --- |
 | Operator MCP | `--strict-mcp-config` (also excludes project `.mcp.json`). | Closing step. Run `codex mcp list --json` with the member's overrides, home and worktree (no model request), then add `-c mcp_servers.<name>.enabled=false` for every listed server that is not in the toolbox, to the TUI and the app-server alike. Listed servers are named in the sources line. A table override is not enough, because it merges (current state, Codex inheritance probe). Plugin-bundled servers: *verify* that `mcp list` reports them; otherwise they are listed as cannot be excluded. | Sandboxed: excluded by the private agent directory. Unsandboxed: **Cannot be excluded on pi**. `--no-mcp` also removes crew's server, and a same-name server from the operator's `mcp.json` wins over crew's registration, so such a name is shown as Shadowed. |
-| Operator skills, subagents, hooks, settings and memory | `--setting-sources project`, dropping `user` and `local`, with preferences passed through crew's `--settings`. On Claude Code 2.1.291, `--setting-sources project,local` removed a user skill, user subagent, user `CLAUDE.md` and user `SessionStart` hook, and kept the project skill (capability probe). Dropping `local` as well is *verify*. All five Claude Code kinds come from the one `user` source, so they are inherited together or not at all: a list naming only some of them loads none, and reports the others as Not available separately on Claude Code. Sandboxed: also excluded by the private home. | Skills: one `skills.config` entry `{ path = "<…>/SKILL.md", enabled = false }` for each operator skill under `HOME/.agents/skills` and `CODEX_HOME/skills`. Only exact `SKILL.md` paths work; folder paths do nothing (capability probe, Codex 0.159.0). Subagents (`~/.codex/agents`), hooks (`-c hooks={}` removes neither user nor trusted project hooks) and `~/.codex/AGENTS.md`: **Cannot be excluded on Codex** unsandboxed. Bundled system skills always remain and are listed as a system source. Operator `developer_instructions`: crew stops prepending them. Sandboxed: excluded by the private home, except the instructions, which crew reads from the operator's configuration and drops under `none`. | Extensions: `--no-extensions` plus crew's explicit `--extension`. Skills: `--no-skills`, with toolbox and project skills passed explicitly. Instruction files: *verify*. |
+| Operator skills, subagents, hooks, settings and memory | `--setting-sources project`, dropping `user` and `local`, with preferences passed through crew's `--settings`. On Claude Code 2.1.291, `--setting-sources project,local` removed a user skill, user subagent, user `CLAUDE.md` and user `SessionStart` hook, and kept the project skill (capability probe). Dropping `local` as well is *verify*. All five Claude Code kinds come from the one `user` source, so they are inherited together or not at all: a list naming only some of them loads none and reports the named ones as Not available separately on Claude Code (use all). Sandboxed: also excluded by the private home. | Skills: one `skills.config` entry `{ path = "<…>/SKILL.md", enabled = false }` for each operator skill under `HOME/.agents/skills` and `CODEX_HOME/skills`. Only exact `SKILL.md` paths work; folder paths do nothing (capability probe, Codex 0.159.0). Subagents (`~/.codex/agents`), hooks (`-c hooks={}` removes neither user nor trusted project hooks) and `~/.codex/AGENTS.md`: **Cannot be excluded on Codex** unsandboxed. Bundled system skills always remain and are listed as a system source. Operator `developer_instructions`: crew stops prepending them. Sandboxed: excluded by the private home, except the instructions, which crew reads from the operator's configuration and drops under `none`. | Extensions: `--no-extensions` plus crew's explicit `--extension`. Skills: `--no-skills`, with toolbox and project skills passed explicitly. Instruction files: *verify*. |
 | Operator plugins | Excluded by the same `--setting-sources project`: an enabled user plugin's skill was removed (capability probe, Claude Code 2.1.291). Plugin-bundled MCP servers are covered by `--strict-mcp-config`; that is *verify* only for plugins the toolbox itself loads. | Plugin-bundled MCP servers follow the closing step, if `mcp list` reports them (*verify*). Plugin skills follow the exact-path rule. | Packages: excluded by `--no-extensions` (*verify*). |
 | Project kinds | Default: loaded, except MCP. Excluding them drops `project` from `--setting-sources`; that this also removes project skills, subagents and memory is *verify*. | Excluding project skills uses `skills.config` with exact paths, as for the operator. Project configuration needs trust, which crew does not grant. | `--no-approve` (the existing `auto_trust: false`) excludes project resources. With `--no-skills`, inherited project skills are passed explicitly, in name order. |
 
@@ -952,10 +952,18 @@ mechanism.
   - packages;
   - every pi row, on the supported pi.
 
-**Decision for the operator.** `inherit.operator: none` also keeps the
-operator's personal instructions (user `CLAUDE.md`, the operator's Codex
-`developer_instructions`) away from members. This follows "no silent leak",
-and on Claude Code it is one switch with skills and subagents. It is a change
-for teams that rely on those files. `inherit.operator: [memory]` keeps them on
-Codex and pi. On Claude Code it is all or nothing with the other user kinds.
-The spec assumes this default until the operator decides otherwise.
+**Decided: personal instructions under `none`** (orchestrator, m-dd4748765038).
+`inherit.operator: none` keeps the operator's personal instructions (user
+`CLAUDE.md`, `~/.codex/AGENTS.md`, the operator's Codex
+`developer_instructions`) away from members. This matches what Claude Code
+members already get with a private `CLAUDE_CONFIG_DIR`. The operator has none
+of these files or settings today, so the default changes nothing in
+practice. The opt-in is `inherit.operator: [memory]`:
+
+- Codex and pi: keeps the personal instructions alone.
+- Claude Code: personal instructions come only with all user kinds, that is
+  `inherit.operator: all`. `--setting-sources` loads or drops the whole `user`
+  source. Following the rule of never more than configured, a partial list
+  such as `[memory]` loads none of the user kinds. It reports the named ones as
+  **Not available separately on Claude Code (use all)**. The README says so
+  beside the field.
