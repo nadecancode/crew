@@ -1,0 +1,11 @@
+{
+  "project": "toolbox-legacy-inherit",
+  "defaults": {
+    "inherit_mcp": true
+  },
+  "agents": [
+    {
+      "id": "legacy"
+    }
+  ]
+}

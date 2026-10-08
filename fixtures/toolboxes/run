@@ -1,0 +1,15 @@
+#!/usr/bin/env bash
+set -euo pipefail
+export PYTHONDONTWRITEBYTECODE=1
+toolbox_fixture_dir=$(cd "$(dirname "$0")" && pwd)
+if [[ -n "${TOOLBOX_PYTHON:-}" ]]; then
+    exec "$TOOLBOX_PYTHON" "$toolbox_fixture_dir/harness.py" "$@"
+fi
+if command -v python3 >/dev/null 2>&1; then
+    exec python3 "$toolbox_fixture_dir/harness.py" "$@"
+fi
+if command -v nix >/dev/null 2>&1; then
+    exec nix shell nixpkgs#python3 --command python3 "$toolbox_fixture_dir/harness.py" "$@"
+fi
+echo 'toolbox fixtures need Python 3.11 or newer (or Nix)' >&2
+exit 2
