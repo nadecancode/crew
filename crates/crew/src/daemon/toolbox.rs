@@ -297,6 +297,49 @@ impl Daemon {
         if self.stops(&agent.id) != since {
             anyhow::bail!("toolbox preparation was superseded by a stop");
         }
+        // Fresh conversations need no native snapshot invalidation. Refuse an
+        // unsupported explicit resumed refresh before changing the old pins,
+        // so ordinary recovery can still use that conversation and its catalog.
+        let check_claude = {
+            let model = self.model();
+            agent.runtime == RuntimeKind::Claude
+                && refresh
+                && inherited.is_none()
+                && plan.stops.is_empty()
+                && model.local.get(&agent.id).is_some_and(|local| {
+                    local.session_confirmed
+                        && (!plan.active.resolved.items.is_empty()
+                            || local
+                                .toolbox_active
+                                .as_ref()
+                                .is_some_and(|active| !active.resolved.items.is_empty())
+                            || local.claude_rebuild_prompt_session.is_some())
+                })
+        };
+        if check_claude {
+            if let Err(error) = self
+                .check_claude_prompt_snapshot(agent, endpoint, &plan.runtime.scrub_env, since)
+                .await
+            {
+                if self.stops(&agent.id) != since {
+                    return Err(error);
+                }
+                for item in &mut plan.view.items {
+                    if matches!(
+                        item.status.code,
+                        ToolboxItemCode::Active | ToolboxItemCode::Planned
+                    ) {
+                        item.status = prepare::status(
+                            ToolboxItemCode::NotAvailable,
+                            "Not available on this Claude Code version",
+                        );
+                        item.detail = Some(error.to_string());
+                    }
+                }
+                self.update_agent(&agent.id, |member| member.toolbox = Some(plan.view));
+                return Err(error);
+            }
+        }
         plan.active.refresh = refresh;
         plan.active.snapshot_owner = Some(agent.id.clone());
         {
@@ -490,7 +533,7 @@ impl Daemon {
     }
 
     /// Bounded, stopped with the launch, and in the member's normal sandbox.
-    async fn toolbox_command(
+    pub(super) async fn toolbox_command(
         &self,
         agent: &crew_core::Agent,
         run: super::sandbox::Run,

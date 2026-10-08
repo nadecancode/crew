@@ -14,6 +14,9 @@ pub(crate) fn validate(runtime: RuntimeKind, args: &[String], path: &str) -> Res
                 }
                 "--plugin-dir" | "--plugin-url" => Some("toolbox.plugins"),
                 "--agents" => Some("toolbox.subagents"),
+                "--system-prompt-snapshot" => {
+                    Some("toolbox (prompt snapshot policy is managed by crew)")
+                }
                 _ => None,
             },
             RuntimeKind::Pi => match flag {

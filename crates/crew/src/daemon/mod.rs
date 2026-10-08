@@ -47,6 +47,7 @@ mod subagents;
 mod supervisor;
 mod team;
 mod toolbox;
+mod toolbox_claude;
 mod toolbox_rpc;
 mod turns;
 
@@ -91,6 +92,10 @@ pub(crate) struct AgentLocal {
     /// named bundles were reloaded while its parent was still running.
     #[serde(default)]
     pub toolbox_inherited: Option<crate::agents::toolbox::ActiveToolbox>,
+    /// A resumed Claude conversation whose recorded prompt contains obsolete
+    /// toolbox definitions. Bypass that snapshot on every launch of this SID.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub claude_rebuild_prompt_session: Option<String>,
     /// The runtime reported its session id, so the session can be resumed.
     pub session_confirmed: bool,
     /// The agent's current launch (`CREW_LAUNCH` of the processes it
