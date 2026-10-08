@@ -341,6 +341,12 @@ pub struct Unwatch {
     pub watch_id: Id,
 }
 
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct UnwatchResult {
+    pub watch_id: Id,
+    pub removed: bool,
+}
+
 /// Serialize the complete envelope, including escaping and its newline, bounded.
 /// The caller supplies the actual frame, never only an inner result record.
 pub fn encode_frame<T: Serialize>(frame: &T) -> Result<Vec<u8>, serde_json::Error> {

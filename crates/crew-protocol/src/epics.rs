@@ -41,7 +41,13 @@ pub struct EpicReport {
     pub summary: Content,
     pub reported_at: Timestamp,
     pub covered_revision: Wide,
-    pub decision_message_ids: Vec<Id>,
+    pub decision_message_ids: List<Id, 64>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct EpicReportSummary {
+    pub reported_at: Timestamp,
+    pub covered_revision: Wide,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -70,12 +76,12 @@ pub struct EpicSummary {
     pub started_at: Option<Timestamp>,
     pub closed_at: Option<Timestamp>,
     pub last_done_at: Option<Timestamp>,
+    /// Work revision; report publication does not increment it.
     pub revision: Wide,
     pub status: EpicStatus,
     pub counts: EpicCounts,
     pub agents: Vec<EpicAgentCounts>,
-    pub report_time: Option<Timestamp>,
-    pub report_covered_revision: Option<Wide>,
+    pub report: Option<EpicReportSummary>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -206,6 +212,11 @@ pub struct ScopedTaskCard {
     pub card: TaskCard,
     pub epic: Option<EpicSummary>,
 }
+
+pub type EpicCreateResult = EpicDetail;
+pub type EpicEditResult = EpicDetail;
+pub type TaskCreateScopedResult = ScopedTaskCard;
+pub type TaskReviseResult = ScopedTaskCard;
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]

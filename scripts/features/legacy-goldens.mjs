@@ -75,7 +75,12 @@ fn main() {
 const bytes = execFileSync(path.join(root, 'scripts/build-env'), [
   'cargo', 'run', '--offline', '--quiet', '--manifest-path', path.join(base, 'Cargo.toml'), '-p', 'crew-feature-legacy-probe',
 ], { cwd: root, env: { ...env, CARGO_TARGET_DIR: path.join(base, 'cargo') }, maxBuffer: 4 * 1024 * 1024 });
-const result = { source_commit: revision, source_sha256: sourceHashes, ...JSON.parse(bytes) };
+const result = {
+  source_commit: revision,
+  source_sha256: sourceHashes,
+  oracle_sha256: crypto.createHash('sha256').update(bytes).digest('hex'),
+  ...JSON.parse(bytes),
+};
 const serialized = JSON.stringify(result, null, 2) + '\n';
 if (process.argv.includes('--write')) put(output, serialized);
 else if (fs.readFileSync(output, 'utf8') !== serialized) throw new Error('legacy fixture differs; inspect before updating');

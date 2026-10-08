@@ -25,6 +25,7 @@ pub struct AsideTarget {
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum AsideUnavailableReason {
+    ShellMember,
     UnsupportedRuntime,
     UnsupportedVersion,
     NoSession,
@@ -50,6 +51,7 @@ pub struct AsideMember {
     pub runtime: RuntimeKind,
     pub model: Option<Label>,
     pub availability: AsideAvailability,
+    pub resets_at: Option<Timestamp>,
     pub last_turn_at: Option<Timestamp>,
 }
 
@@ -89,6 +91,7 @@ pub struct AsideAnswerMeta {
     pub model: Option<Label>,
     pub status: AsideStatus,
     pub reason: Option<AsideAnswerReason>,
+    pub resets_at: Option<Timestamp>,
     pub context_at: Option<Timestamp>,
     pub context_approximate: bool,
     pub last_turn_at: Option<Timestamp>,
@@ -101,6 +104,7 @@ pub struct AsideAnswerMeta {
 
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct AsideCounts {
+    pub total: Wide,
     pub waiting: Wide,
     pub answering: Wide,
     pub answered: Wide,
@@ -119,6 +123,8 @@ pub struct AsideSummary {
     pub question_preview: Text<512>,
     pub question_truncated: bool,
     pub answer_counts: AsideCounts,
+    /// Server aggregate, including observed failed/cancelled spend and its coverage.
+    pub total_cost: Option<CostEstimate>,
     pub answers: List<AsideAnswerMeta, MAX_TARGETS>,
 }
 
@@ -149,6 +155,22 @@ pub enum AsideGoneCause {
 pub enum AsideGetResult {
     Available {
         detail: Box<AsideDetail>,
+    },
+    Gone {
+        id: Id,
+        workspace_run_id: Id,
+        aside_epoch: Id,
+        revision: Wide,
+        cause: AsideGoneCause,
+    },
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "state", rename_all = "snake_case")]
+pub enum AsideAskResult {
+    Accepted {
+        summary: Box<AsideSummary>,
+        duplicate: bool,
     },
     Gone {
         id: Id,
@@ -225,6 +247,18 @@ pub struct AsideRemove {
     pub id: Id,
 }
 
+/// Cancel/remove acknowledgement. `changed=false` does not relabel successful
+/// answers as cancelled; clients reconcile through the revision/list/detail path.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct AsideMutationResult {
+    pub workspace_run_id: Id,
+    pub aside_epoch: Id,
+    pub revision: Wide,
+    pub id: Id,
+    pub changed: bool,
+    pub gone: Option<AsideGoneCause>,
+}
+
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct AsideListResult {
     pub workspace_run_id: Id,
@@ -240,6 +274,7 @@ pub struct AsideMembers {
     pub workspace_run_id: Id,
     pub aside_epoch: Id,
     pub revision: Wide,
+    pub total: Wide,
     pub rows: List<AsideMember, 200>,
     pub next_cursor: Option<Id>,
 }

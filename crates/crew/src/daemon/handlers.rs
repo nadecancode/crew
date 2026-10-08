@@ -228,10 +228,14 @@ change identity",
                     self.stop_stream(conn).await;
                     conn.subscribe_after_reply = Some(marker);
                 }
-                reply(self.snapshot(
-                    messages.unwrap_or(200).min(2000),
-                    events.unwrap_or(300).min(5000),
-                )?)
+                // No feature is negotiated in P1. P2 chooses the connection's view.
+                reply(
+                    self.snapshot(
+                        messages.unwrap_or(200).min(2000),
+                        events.unwrap_or(300).min(5000),
+                    )?
+                    .legacy_projection(),
+                )
             }
             Call::Subscribe => {
                 operator_only(&who)?;

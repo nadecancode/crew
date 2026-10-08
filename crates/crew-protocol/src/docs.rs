@@ -158,7 +158,7 @@ pub enum DocVersionKind {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-pub struct DocVersion {
+pub struct DocVersionData {
     pub id: Id,
     pub document: DocRef,
     pub kind: DocVersionKind,
@@ -170,6 +170,30 @@ pub struct DocVersion {
     pub change_id: Option<Id>,
     pub author: Option<Label>,
     pub subject: Option<Label>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(try_from = "DocVersionData")]
+pub struct DocVersion(DocVersionData);
+
+impl Deref for DocVersion {
+    type Target = DocVersionData;
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+impl TryFrom<DocVersionData> for DocVersion {
+    type Error = &'static str;
+    fn try_from(value: DocVersionData) -> Result<Self, Self::Error> {
+        if value.bytes as usize > MAX_MARKDOWN_BYTES {
+            return Err("document version exceeds byte limit");
+        }
+        if value.kind == DocVersionKind::Recorded && value.commit_id.is_none() {
+            return Err("recorded document version requires commit id");
+        }
+        Ok(Self(value))
+    }
 }
 
 /// A server-approved HTTP(S) link. It is display data, never a daemon fetch target.
@@ -323,6 +347,43 @@ pub enum DocImageState {
     Expired,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum UnsupportedImageKind {
+    Svg,
+    Animated,
+    Format,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum BlockedImageKind {
+    OutsideSource,
+    NotAllowed,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ImageLimitKind {
+    ImageBytes,
+    DocumentBudget,
+    AxisPixels,
+    TotalPixels,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "kind", content = "cause", rename_all = "snake_case")]
+pub enum DocImageReason {
+    Unsupported(UnsupportedImageKind),
+    Blocked(BlockedImageKind),
+    TooLarge(ImageLimitKind),
+    Remote,
+    Expired,
+    Missing,
+    Invalid,
+    Unstable,
+}
+
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct DocImage {
     pub asset_id: Option<Id>,
@@ -334,7 +395,7 @@ pub struct DocImage {
     pub height: Option<u32>,
     pub alt: Label,
     pub state: DocImageState,
-    pub reason: Option<Label>,
+    pub reason: Option<DocImageReason>,
     pub safe_external_href: Option<ExternalHref>,
 }
 
@@ -525,7 +586,7 @@ pub enum DocReadResult {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-pub struct DocAssetChunk {
+pub struct DocAssetChunkData {
     pub snapshot_id: Id,
     pub asset_id: Id,
     pub hash: Id,
@@ -534,6 +595,61 @@ pub struct DocAssetChunk {
     pub total_bytes: u32,
     pub data_base64: Text<262144>,
     pub next_offset: Option<u32>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(try_from = "DocAssetChunkData")]
+pub struct DocAssetChunk(DocAssetChunkData);
+
+impl Deref for DocAssetChunk {
+    type Target = DocAssetChunkData;
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+impl TryFrom<DocAssetChunkData> for DocAssetChunk {
+    type Error = &'static str;
+    fn try_from(value: DocAssetChunkData) -> Result<Self, Self::Error> {
+        let bytes = value.data_base64.as_bytes();
+        let padding = bytes.iter().rev().take_while(|b| **b == b'=').count();
+        let content = &bytes[..bytes.len() - padding];
+        let sextet = |b: u8| match b {
+            b'A'..=b'Z' => Some(b - b'A'),
+            b'a'..=b'z' => Some(b - b'a' + 26),
+            b'0'..=b'9' => Some(b - b'0' + 52),
+            b'+' => Some(62),
+            b'/' => Some(63),
+            _ => None,
+        };
+        if bytes.len() % 4 != 0
+            || padding > 2
+            || content.iter().any(|b| sextet(*b).is_none())
+            || (padding > 0
+                && content.last().is_none_or(|b| {
+                    let mask = if padding == 2 { 15 } else { 3 };
+                    sextet(*b).is_none_or(|v| v & mask != 0)
+                }))
+        {
+            return Err("invalid asset base64");
+        }
+        let decoded = (bytes.len() / 4 * 3)
+            .checked_sub(padding)
+            .ok_or("invalid asset base64")? as u32;
+        let end = value
+            .offset
+            .checked_add(decoded)
+            .ok_or("asset offset overflow")?;
+        if decoded > MAX_ASSET_CHUNK_BYTES
+            || value.total_bytes > MAX_IMAGE_BYTES
+            || end > value.total_bytes
+            || (decoded == 0 && end < value.total_bytes)
+            || value.next_offset != (end < value.total_bytes).then_some(end)
+        {
+            return Err("invalid asset chunk range");
+        }
+        Ok(Self(value))
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -663,6 +779,8 @@ pub struct DocsChanged {
     pub removed_doc_ids: List<Id, 200>,
     pub changed_selected: List<DocSelectedChange, 2>,
     pub history_sources_changed: List<Id, 64>,
+    /// Includes versions belonging to retained, currently unselected views.
+    pub expired_seen_versions: List<Id, 200>,
     pub resync_required: bool,
 }
 

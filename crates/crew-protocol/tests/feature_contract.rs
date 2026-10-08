@@ -1,7 +1,9 @@
 use crew_protocol::asides::{AsideAdmissionFailure, AsideAsk, AsideReceipt};
 use crew_protocol::docs::*;
 use crew_protocol::features::*;
-use crew_protocol::usage_metrics::{UsageCounters, UsageEpicFilter, UsageTaskFilter};
+use crew_protocol::usage_metrics::{
+    MetricCoverage, UsageCounters, UsageEpicFilter, UsageTaskFilter,
+};
 use serde_json::{json, Value};
 
 fn snapshot() -> Value {
@@ -152,4 +154,49 @@ fn known_empty_work_and_unknown_work_have_distinct_wire_values() {
         serde_json::to_value(UsageTaskFilter::NoTask).unwrap(),
         serde_json::to_value(UsageTaskFilter::NotAttributed).unwrap()
     );
+}
+
+#[test]
+fn historical_expected_membership_and_unavailable_image_causes_are_explicit() {
+    let coverage = serde_json::to_value(MetricCoverage::default()).unwrap();
+    assert!(coverage["expected_agents"].is_null());
+    assert!(coverage["source_backlog_files"].is_null());
+    for reason in [
+        DocImageReason::Unsupported(UnsupportedImageKind::Svg),
+        DocImageReason::Unsupported(UnsupportedImageKind::Animated),
+        DocImageReason::Blocked(BlockedImageKind::OutsideSource),
+        DocImageReason::Blocked(BlockedImageKind::NotAllowed),
+        DocImageReason::TooLarge(ImageLimitKind::DocumentBudget),
+        DocImageReason::TooLarge(ImageLimitKind::AxisPixels),
+    ] {
+        assert_eq!(
+            serde_json::from_value::<DocImageReason>(serde_json::to_value(reason).unwrap())
+                .unwrap(),
+            reason
+        );
+    }
+    let mut raw = snapshot();
+    raw["version"]["kind"] = json!("recorded");
+    assert!(serde_json::from_value::<DocSnapshot>(raw.clone()).is_err());
+    raw["version"]["commit_id"] = json!("commit-1");
+    assert!(serde_json::from_value::<DocSnapshot>(raw).is_ok());
+}
+
+#[test]
+fn asset_chunks_cannot_overstate_sizes_or_make_no_progress() {
+    let valid = json!({"snapshot_id":"snapshot-1","asset_id":"asset-1","hash":"hash-1",
+        "media_type":"png","offset":0,"total_bytes":1,"data_base64":"eA==","next_offset":null});
+    let chunk: DocAssetChunk = serde_json::from_value(valid.clone()).unwrap();
+    assert_eq!(serde_json::to_value(chunk).unwrap(), valid);
+    for (key, value) in [
+        ("total_bytes", json!(3_000_000)),
+        ("offset", json!(1)),
+        ("data_base64", json!("eB==")),
+        ("data_base64", json!("")),
+        ("next_offset", json!(1)),
+    ] {
+        let mut bad = valid.clone();
+        bad[key] = value;
+        assert!(serde_json::from_value::<DocAssetChunk>(bad).is_err());
+    }
 }

@@ -9,6 +9,8 @@ use crate::RuntimeKind;
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum CoverageReason {
+    ZeroInput,
+    NoCoveredInput,
     NotReported,
     InvalidCounter,
     UnknownTime,
@@ -58,8 +60,10 @@ pub struct MetricCoverage {
     pub known_requests: Wide,
     pub request_cardinality_complete: bool,
     pub reporting_agents: Wide,
-    pub expected_agents: Wide,
+    pub expected_agents: Option<Wide>,
     pub source_gaps: List<SourceGap, 64>,
+    pub source_gaps_total: Option<Wide>,
+    pub source_backlog_files: Option<Wide>,
     pub retained_from: Option<Timestamp>,
 }
 
@@ -76,6 +80,7 @@ pub enum MetricState {
 pub struct CounterMetric {
     pub known_sum: Option<Wide>,
     pub state: MetricState,
+    pub reason: Option<CoverageReason>,
     pub coverage: MetricCoverage,
 }
 
@@ -118,6 +123,7 @@ pub enum EstimateState {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct CostEstimate {
     pub price_book_id: Option<Id>,
+    pub prices_checked_at: Option<Timestamp>,
     pub basis: CostBasis,
     pub lower_pico_usd: Option<Wide>,
     pub upper_pico_usd: Option<Wide>,
@@ -296,6 +302,8 @@ pub struct UsageBinding {
 pub enum ObservationUnit {
     Request,
     CounterDelta,
+    /// Diagnostic evidence only; never eligible or priced without a valid revision.
+    Unusable,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -353,7 +361,24 @@ pub struct UsageSummary {
     pub totals: UsageTotals,
     pub attribution_coverage: MetricCoverage,
     pub completion_cohort: Option<CompletionCohort>,
+    /// Aside scope only: distinct executions with proven newly observed usage,
+    /// including explicit zero and failed/cancelled spend, excluding copied history.
+    /// Unknown execution membership is unavailable, never a guessed zero. Incomplete
+    /// spend coverage is separate from a known execution count.
+    pub executions_observed: Option<CounterMetric>,
+    pub execution_statuses: Option<ExecutionStatusCounts>,
     pub limitations: List<CoverageReason, 32>,
+}
+
+/// Status partition of the executions_observed cohort, not all currently retained asides.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ExecutionStatusCounts {
+    pub answered: Wide,
+    pub failed: Wide,
+    pub cancelled: Wide,
+    pub still_answering: Wide,
+    pub unknown: Wide,
+    pub complete: bool,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -388,18 +413,16 @@ pub enum UsageGroupKey {
         runtime: RuntimeKind,
     },
     NoEpic,
-    NoTask {
-        activity: ActivityKind,
-    },
-    NotAttributed {
-        reason: CoverageReason,
-    },
+    NoTask,
+    NotAttributed,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct UsageBreakdownRow {
     pub key: UsageGroupKey,
     pub totals: UsageTotals,
+    pub activities: List<ActivityKind, 8>,
+    pub reasons: List<CoverageExclusion, 32>,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -436,6 +459,7 @@ pub struct PriceRow {
     pub model: Label,
     /// Exclusive input threshold; None is the ordinary context tier.
     pub above_input_tokens: Option<Wide>,
+    /// Tokens * this wire rate / 1,000,000 gives pico-USD; no client repricing.
     pub input_pico_usd_per_million: Wide,
     pub output_pico_usd_per_million: Wide,
     pub cache_read_pico_usd_per_million: Option<Wide>,

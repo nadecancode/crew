@@ -21,6 +21,7 @@
     "Cargo.lock": "5f2f70497c975cd298d3c780d03c7aa1ba1bcd7a98d87995814967e4c51c05ae",
     "Cargo.toml": "72e0808c37ee070992f3fca95560532a50e0d45aa6e099284fbe1fc3bb7a7865"
   },
+  "oracle_sha256": "e180e5b98f4d01eb4529e6975b6c90635c2b981143216925ada0bb9919924855",
   "pushes": [
     "{\"kind\":\"task\",\"data\":{\"id\":\"fixture\",\"title\":\"Fixture\",\"description\":\"\",\"assigned_agent\":null,\"status\":\"waiting\",\"dependencies\":[],\"created_at\":12,\"started_at\":13,\"completed_at\":null,\"artifacts\":[],\"reviewer\":null,\"result\":null,\"progress\":null,\"note\":null,\"timeout_secs\":null}}",
     "{\"kind\":\"session\",\"data\":{\"project\":null,\"objective\":\"\",\"style\":null,\"quotas\":[],\"workspace\":\"\",\"state_dir\":\"\",\"backend\":\"\",\"isolation\":\"\",\"sandbox\":\"\",\"vcs\":\"\",\"vcs_note\":\"\",\"web\":\"\",\"socket_warning\":\"\",\"binary_warning\":\"\",\"daemon_started_at\":0,\"team_started_at\":null,\"completed_at\":null,\"summary\":null,\"herdr_workspace\":null,\"daemon_pid\":0,\"version\":\"\"}}",
