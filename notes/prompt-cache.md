@@ -967,11 +967,27 @@ sandbox off.
 
 The lifecycle baseline stays as it is. In it the team finishes before the
 long gap (the orchestrator is Done with a summary), so no member would be
-eligible. Both arms therefore add the same D2 setup before the long idle:
-each worker is given a sentinel card and parks it
-(`agent_status("waiting", …)`). The team stays unfinished and the
-orchestrator rests as Waiting. QA's `cache-retention-bench` card fixes its
-exact steps. Same models, catalog and build in both arms.
+eligible. Both arms therefore add the same D2 setup, and the original
+lifecycle template is not changed:
+
+- **Sentinel cards from the start.** Each worker gets a sentinel card when
+  the team is seeded, depending on its warm card. Adding sentinels only
+  after the team is done would be too late: creating a task clears
+  `completed_at` but leaves `session.summary`, and a team with a summary
+  gets no keep-alives.
+- **Re-parked before each idle.** Before each idle step the runner has each
+  worker park its sentinel explicitly (`agent_status("waiting", …)`), so it
+  rests as Waiting on open work.
+- **Never finished.** The sentinels stay open through the measurement, so
+  the team never gets an all-done summary and the orchestrator rests as
+  Waiting.
+- **Orchestrator probe.** After the gap, both arms send the orchestrator
+  the same explicit work probe. With sentinels open, no all-done notice
+  arrives to make it act, so without the probe there might be no
+  orchestrator request to measure.
+
+QA's `cache-retention-bench` card fixes the exact steps. Same models,
+catalog and build in both arms.
 
 - **Control arm.** The existing long idle: a measured gap over 3,600 s since
   each member's last work request, then the probes.
