@@ -1051,15 +1051,19 @@ the runtime's final tool order (current state). The benchmark measures that.
    match. The inspector and `crew toolbox` show the definition digest so the
    comparison is visible.
 
-   **Gap to probe.** Claude Code's skill and plugin catalog may name the
-   plugin directory crew passes with `--plugin-dir`. Today that directory is
-   `A/crew-toolbox`, a member path. Until a native-listing probe shows which
-   paths the catalog renders, the `crew-toolbox` plugin is not claimed free of
-   member paths. If the catalog renders the path, the plugin moves into the
-   content store under a digest of its rendered contents. Codex skill roots
-   and pi `--skill` paths point into the store already, and the same probe
-   confirms what their catalogs show. QA compares served definitions and
-   native listings, never `A/mcp.json`.
+   **Claude Code catalog paths.** Graph's captures (Claude Code 2.1.291)
+   settle the catalog part of this rule. Two runs passed different absolute
+   `crew-toolbox` directories with `--plugin-dir` and produced identical
+   catalog lines for the selected skill and subagent, and no request body
+   contained `/crew-toolbox/` (m-8c496045d424; evidence in graph's worktree,
+   `target/toolbox-audit/claude-discovery/{project-local-selected,private-config-selected}/requests.json`).
+   The plugin can therefore stay at `A/crew-toolbox`. This is a scoped
+   result, not whole-input equality: the requests still differed in the
+   working directory, which belongs to the cache work.
+
+   Codex skill roots and pi `--skill` paths point into the store already. A
+   native-listing probe confirms what their catalogs show. QA compares served
+   definitions and native listings, never `A/mcp.json`.
 3. **No secrets in rendered bytes**, so rotating a credential does not
    invalidate a cached prefix (see Secrets).
 4. **crew's own tools first and constant.** This is confirmed by the current
@@ -1235,7 +1239,7 @@ come from the supported pi, not the GSD binary on this host.
 | --- | --- | --- |
 | T01 | Team file without any `toolbox` key, Claude member, unsandboxed | `A/mcp.json` holds only `crew`; `--strict-mcp-config` and `--setting-sources project` are present; `crew toolbox --json` shows no items and lists the operator source as Not used. The sentinel user skill, subagent, enabled plugin, `CLAUDE.md` and hook do not reach the session; a project skill does. |
 | T02 | The example team above | `crew toolbox --json` for `qa` lists `mcp.context7` (bundle base via default), `mcp.playwright` (bundle web, required) and `skills.frontend-qa`. For `release` on Codex, unsandboxed: `mcp.github` and `mcp.docs` are Active; `skills.changelog` is Active through crew's app-server (with `delivery: terminal`, Not available on Codex without crew's app-server); `plugins.lint-kit` is Not available on Codex (Claude Code plugin format); `mcp.context7` is excluded. |
-| T03 | Reorder keys, items and bundles without changing meaning | Same fingerprint, byte-identical generated files for the same member. A second member with the same selection, role and stub account has the same definition digest and an equal native catalog listing (rule 2a). A stub that serves member-specific tools gives a different digest, and the two definitions stay distinct. Until the Claude catalog probe passes, the `crew-toolbox` plugin path is excluded from this comparison and listed as the open gap. |
+| T03 | Reorder keys, items and bundles without changing meaning | Same fingerprint, byte-identical generated files for the same member. A second member with the same selection, role and stub account has the same definition digest and an equal native catalog listing (rule 2a). A stub that serves member-specific tools gives a different digest, and the two definitions stay distinct. On Claude Code, the catalog lines are equal although each member's `crew-toolbox` directory differs. |
 | T04 | Validation | Each of these stops `crew run` and `crew toolbox check` with its field path: a bundle cycle; an unknown bundle; an exclusion matching nothing at its level; the same exclusion listed twice at one level (the second matches nothing); an item defined and excluded at one level; a reserved name; a plain string where a reference belongs; `inherit_mcp` together with `inherit`; a reference or source (alias) name that collides with a model credential or an endpoint variable. Accepted without error: defaults exclude `mcp.context7` from bundle base, and the member includes bundle base again, so `mcp.context7` is back with origin `bundle:base`. Accepted: defaults define `mcp.docs`, and the member defines `mcp.docs` differently, so the member's definition wins whole. Accepted: the member has `reset: true`, and defaults' `exclude`, `inherit` and `strict` do not apply to it. |
 | T05 | Secrets | Four sentinels are used. `SHOP_GITHUB_TOKEN` comes from `[agents.release.toolbox_env]` as a file. `DOCS_TOKEN` is exported in the daemon's environment. `SHOP_TOKEN = { env = "DAEMON_TOKEN" }` aliases a daemon variable, with `DAEMON_TOKEN` exported. `ENDPOINT_SENTINEL` is in the member's endpoint `env_files`. The first three values reach only their stub server's process, through the proxy (`DOCS_TOKEN` through the remote bridge). Each value arrives under its destination key (`GITHUB_TOKEN` for `SHOP_GITHUB_TOKEN`; the `env` key that references `SHOP_TOKEN` for the alias). No reference or source name (`SHOP_GITHUB_TOKEN`, `DOCS_TOKEN`, `SHOP_TOKEN`, `DAEMON_TOKEN`) is in the member session's environment. They are absent from: `A`, `A/settings.json`, the store, the roster, the event log, `crew toolbox` output, every dashboard payload, every argv (`/proc/*/cmdline`), and the member session's own environment, both unsandboxed (PTY) and sandboxed, including the Codex app-server. A toolbox reference to `ENDPOINT_SENTINEL`, and an alias whose source is `ENDPOINT_SENTINEL` or `OPENAI_API_KEY`, are validation errors. A stub that echoes its token in an error shows `[redacted $SHOP_GITHUB_TOKEN]` to the model. |
 | T06 | Missing variable | For an item that is not required, the member starts and the item shows Needs $SHOP_GITHUB_TOKEN. For a required item, or under `strict`, the member does not start, and the inspector and the orchestrator's result give the same text. |
@@ -1341,8 +1345,7 @@ mechanism.
 
 - Claude Code:
   - `project` alone (without `local`);
-  - project exclusion;
-  - which paths the skill and plugin catalog renders for a `--plugin-dir` plugin (rule 2a gap).
+  - project exclusion.
 - Codex:
   - whether `codex mcp list --json` reports plugin-bundled servers;
   - whether the TUI session sees app-server skill roots;
@@ -1354,7 +1357,8 @@ mechanism.
 Already settled by graph's probes and folded in above:
 
 - Claude Code: user sources, user plugins, plugin MCP under strict loading,
-  selected skill, subagent and hook through `--plugin-dir`.
+  selected skill, subagent and hook through `--plugin-dir`, catalog lines
+  free of the plugin directory path.
 - Codex: MCP merge, skill paths, app-server skill roots, `features.hooks`,
   `features.multi_agent`.
 - pi 1.1.0: skills, extensions and native MCP, `--no-approve`, the closed
