@@ -13,13 +13,17 @@
 #   first                   the session file's first request
 #   compaction              a compact_boundary since the previous request
 #   model_change            another model than the previous request
-#   ttl_expired             over TTL seconds since the previous request and a
+#   ttl_expired             (inferred) over TTL seconds since the previous request and a
 #                           cache read below INTACT (the session's own system
 #                           prompt was not read either)
 #   history_logged          Claude Code logged a thinking_drop for this
-#                           request id (client-declared history change)
+#                           request id with clientChange.kinds exactly
+#                           "messagesHistoryChanged" (client-declared)
+#   system_or_tools_logged  a thinking_drop whose kinds name a system prompt
+#                           or tool schema change
 #   history_unlogged        cache read at least INTACT (system prompt read,
-#                           messages written again), no thinking_drop
+#                           messages written again) and no such thinking_drop:
+#                           inferred from the signature, not declared
 #   system_lost_within_ttl  the rest: unexplained
 # Writes below BIG are not classed. Turns end at system/turn_duration; a turn
 # with a fold holds an isMeta user row whose array content starts "[crew]"
@@ -41,7 +45,9 @@ jq -r '
      (.message.usage.cache_creation.ephemeral_5m_input_tokens // 0),
      (.message.model // "")] | @tsv
   elif .type == "attachment" and .attachment.type == "thinking_drop" then
-    ["D", ts, (.attachment.requestId // "")] | @tsv
+    ["D", ts, (.attachment.requestId // ""),
+     (.attachment.clientChange.kinds // "" | tostring),
+     (.attachment.newlyDropped.reason // "" | tostring)] | @tsv
   elif .type == "attachment" and .attachment.type == "silent_turn_reminder" then
     ["S", ts] | @tsv
   elif .type == "system" and (.subtype // "") == "compact_boundary" then
@@ -59,7 +65,15 @@ awk -F'\t' -v label="$label" -v cutoff="$cutoff" -v BIG=10000 -v INTACT=26000 -v
   { n++; kind[n] = $1; t[n] = $2
     if ($1 == "R") { mid[n] = $3; rid[n] = $4; inp[n] = $5; cc[n] = $6; cr[n] = $7
                      c1h[n] = $8; c5m[n] = $9; model[n] = $10 }
-    if ($1 == "D" && $3 != "") dropped[$3] = 1 }
+    if ($1 == "D") {
+      # Only a drop the client declares as a message-history change counts
+      # as one; a change of system prompt or tool schemas, and kinds "none"
+      # (reason "other" or "prefix_mismatch"), are kept apart.
+      if ($4 == "messagesHistoryChanged") dk[n] = "history"
+      else if ($4 ~ /systemPromptChanged|toolSchemasChanged/) dk[n] = "system_or_tools"
+      else dk[n] = "other"
+      if ($3 != "") declared[$3] = dk[n]
+    } }
   END {
     OFS = "\t"
     for (i = 1; i <= n; i++) {
@@ -67,21 +81,28 @@ awk -F'\t' -v label="$label" -v cutoff="$cutoff" -v BIG=10000 -v INTACT=26000 -v
       if (kind[i] == "F") { fold = 1; continue }
       if (kind[i] == "S") { silent = 1; continue }
       if (kind[i] == "E") {
-        turns++; last = fold ? "fold" : (silent ? "nofold_silent" : "nofold_quiet")
+        turnstart = 1; turns++; last = fold ? "fold" : (silent ? "nofold_silent" : "nofold_quiet")
         tc[last]++; fold = 0; silent = 0; continue
       }
-      if (kind[i] == "D") { drops++; if (last != "") dc[last]++; continue }
+      if (kind[i] == "D") {
+        drops++; dn[dk[i]]++
+        if (dk[i] == "history" && last != "") dc[last]++
+        continue
+      }
       # A request (once per message id).
       if (seen[mid[i]]++) continue
       reqs++; tin += inp[i]; tcc += cc[i]; tcr += cr[i]; t1h += c1h[i]; t5m += c5m[i]
       m = model[i]; mr[m]++; min_[m] += inp[i]; m1h[m] += c1h[i]; m5m[m] += c5m[i]; mcr[m] += cr[i]
       gap = (prev == "") ? -1 : t[i] - prev
+      if (declared[rid[i]] == "history") { if (turnstart || prev == "") hfirst++; else hlater++ }
+      turnstart = 0
       if (cc[i] >= BIG && cc[i] > cr[i]) {
         if (prev == "") c = "first"
         else if (compact) c = "compaction"
         else if (model[i] != pmodel) c = "model_change"
         else if (gap > TTL && cr[i] < INTACT) c = "ttl_expired"
-        else if (rid[i] in dropped) c = "history_logged"
+        else if (declared[rid[i]] == "history") c = "history_logged"
+        else if (declared[rid[i]] == "system_or_tools") c = "system_or_tools_logged"
         else if (cr[i] >= INTACT) c = "history_unlogged"
         else c = "system_lost_within_ttl"
         bn[c]++; bt[c] += cc[i]
@@ -90,9 +111,11 @@ awk -F'\t' -v label="$label" -v cutoff="$cutoff" -v BIG=10000 -v INTACT=26000 -v
       compact = 0; prev = t[i]; pmodel = model[i]
     }
     for (m in mr) print "MOD", label, m, mr[m], min_[m], m1h[m], m5m[m], mcr[m] > "/dev/stderr"
-    split("first compaction model_change ttl_expired history_logged history_unlogged system_lost_within_ttl", cls, " ")
+    split("first compaction model_change ttl_expired history_logged system_or_tools_logged history_unlogged system_lost_within_ttl", cls, " ")
     row = label OFS reqs OFS tin OFS tcc OFS tcr OFS t1h OFS t5m OFS drops+0
-    for (k = 1; k <= 7; k++) row = row OFS bn[cls[k]]+0 OFS bt[cls[k]]+0
+    row = row OFS dn["history"]+0 OFS dn["system_or_tools"]+0 OFS dn["other"]+0
+    row = row OFS hfirst+0 OFS hlater+0
+    for (k = 1; k <= 8; k++) row = row OFS bn[cls[k]]+0 OFS bt[cls[k]]+0
     row = row OFS tc["fold"]+0 OFS dc["fold"]+0
     row = row OFS tc["nofold_quiet"]+tc["nofold_silent"] OFS dc["nofold_quiet"]+dc["nofold_silent"]
     row = row OFS tc["nofold_silent"]+0 OFS dc["nofold_silent"]+0

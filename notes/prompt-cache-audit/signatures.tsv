@@ -246,7 +246,7 @@ root/5a0d0468	ttl_expired	23368	597560	7307	claude-opus-5-5
 root/5a0d0468	history_logged	28099	617374	137	claude-opus-5-5
 root/66f738cc	history_logged	28081	222839	31	claude-sonnet-5-5
 root/66f738cc	history_logged	28081	291357	21	claude-sonnet-5-5
-root/66f738cc	history_logged	23484	329177	38	claude-sonnet-5-5
+root/66f738cc	system_lost_within_ttl	23484	329177	38	claude-sonnet-5-5
 root/66f738cc	history_logged	28081	333608	16	claude-sonnet-5-5
 root/66f738cc	history_logged	28081	359233	56	claude-sonnet-5-5
 root/66f738cc	ttl_expired	23484	412717	9360	claude-sonnet-5-5

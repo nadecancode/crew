@@ -84,15 +84,16 @@ everything after it.
     records.
   - A member on a gateway endpoint, or with `ENABLE_TOOL_SEARCH=false` in
     its endpoint `env`, would carry crew's tools in its prefix.
-- **History changes (code, measured).** When the client finds the message
-  history differs from what it sent before, it records a `thinking_drop`
-  attachment:
-  - `clientChange.kinds: messagesHistoryChanged`;
-  - `clientChange.firstChangedMessageIndex`;
-  - `newlyDropped.reason: prefix_mismatch`, with block and turn counts.
-
-  The request then drops every thinking block after that index and writes the
-  conversation from there to cache again.
+- **History changes (code, measured).** When the client drops thinking blocks
+  it records a `thinking_drop` attachment. It carries
+  `clientChange.kinds`, `clientChange.firstChangedMessageIndex` and
+  `newlyDropped.reason`, with block and turn counts.
+  - Kinds `messagesHistoryChanged` means the message history differs from
+    what was sent before. The request then drops every thinking block after
+    that index and writes the conversation from there to cache again.
+  - Other kinds seen are `none` (reason `other` or `prefix_mismatch`), and a
+    list that adds `systemPromptChanged` and `toolSchemasChanged`. Only kinds
+    exactly `messagesHistoryChanged` count as a history change here.
 - **Per-session cache report (code, unmeasured).** The statusline JSON carries
   a `prompt_cache` object:
   - `warm`, `ttl`, `expires_at`, `hit_ratio`, `misses`,
@@ -123,6 +124,14 @@ It uses the Responses API, which caches automatically from 1024 tokens.
   mid-thread changes the prefix.
 - Unmeasured: whether `codex resume` with different `developer_instructions`
   replaces the recorded ones or adds new ones.
+- **Measured by `runtime`, interim, one session (m-2d12f2182983).** Codex
+  session `01a10d19…`:
+  - 572 requests;
+  - 98.0% of input tokens read from cache;
+  - no native write field;
+  - two requests after gaps over 1 h, which read almost nothing.
+
+  Its full collector is in `cache-baseline`.
 
 #### pi
 
@@ -231,10 +240,11 @@ read ranges are the evidence for each class.
 | First request | first in the session file | 0 / 23,372 / 23,881 | 29 | 726,680 | 0.6% | $7.28 (0.3%) |
 | After compaction | a `compact_boundary` since the previous request | 0 / 28,434 / 29,835 | 4 | 135,831 | 0.1% | $2.37 (0.1%) |
 | Model change | another model than the previous request | 0 / 0 / 0 | 2 | 846,025 | 0.7% | $16.92 (0.7%) |
-| TTL expired | over 3600 s since the previous request and read below 26,000 | 0 / 23,368 / 23,881 | 58 | 24,474,046 | 21.3% | $322.36 (12.6%) |
-| History change, declared by the client | a `thinking_drop` with this request id | 23,484 / 28,786 / 30,696 | 122 | 41,374,107 | 36.0% | $399.40 (15.6%) |
-| History change, undeclared | read at least 26,000 (system read, messages written again), no `thinking_drop` | 27,697 / 30,368 / 31,351 | 48 | 18,635,030 | 16.2% | $364.83 (14.3%) |
-| Unexplained | the rest: within the TTL, system prompt not read | 0 / 23,368 / 23,368 | 3 | 1,217,767 | 1.1% | $14.47 (0.6%) |
+| TTL expired (inferred from gap and signature) | over 3600 s since the previous request and read below 26,000 | 0 / 23,368 / 23,881 | 58 | 24,474,046 | 21.3% | $322.36 (12.6%) |
+| History change, declared by the client | a `thinking_drop` for this request id with `clientChange.kinds` exactly `messagesHistoryChanged` | 27,719 / 28,786 / 30,696 | 121 | 41,044,930 | 35.7% | $398.08 (15.6%) |
+| Declared system prompt or tool change | a `thinking_drop` whose kinds name `systemPromptChanged` or `toolSchemasChanged` | | 0 | 0 | 0% | |
+| History change, undeclared (inferred from signature) | read at least 26,000 (system read, messages written again), no history `thinking_drop` | 27,697 / 30,368 / 31,351 | 48 | 18,635,030 | 16.2% | $364.83 (14.3%) |
+| Unexplained | the rest: within the TTL, system prompt not read | 0 / 23,368 / 23,484 | 4 | 1,546,944 | 1.3% | $15.79 (0.6%) |
 | Not classed | writes below the threshold (ordinary growth and small rewrites) | | | 27,647,468 | 24.0% | |
 
 The cost column is what the class's writes cost. Had the same tokens been read
@@ -247,24 +257,37 @@ Notes on the classes:
 - The 26,000 bound sits between the shared Claude Code prefix (23,368 to
   23,881) and the lowest read that included a session's own system prompt
   (27,697).
-- One declared history change read 23,484. It is kept in its class because
-  the client declared it.
-- Only 23 of the 49 sessions record `thinking_drop` at all, so some
-  undeclared changes may have the same cause. The two history classes are
-  kept apart for that reason.
+- The 177 `thinking_drop` records in the sample split as:
+  - 175 with kinds `messagesHistoryChanged`;
+  - none naming a system prompt or tool change;
+  - 2 with kinds `none` and reason `other`.
 
-**Fold association, with controls.** In the 23 sessions that record
-`thinking_drop`:
+  The `none` records are not counted as history changes. One sits on a request
+  that wrote 329,177 and read 23,484 (`root/66f738cc`,
+  `req_011CfexLpbtwpwM9aK4x62Cf`), which is therefore Unexplained.
+- Only 22 of the 49 sessions record a history change at all, so some
+  undeclared rewrites may have the same cause. The declared and inferred
+  classes are kept apart for that reason.
+- The TTL and undeclared classes are inferred from timing and cache-read
+  signatures. Only the declared class rests on a diagnostic the client wrote.
+
+**Fold association, with controls.** In the 22 sessions that record a
+declared history change:
 
 | Turn before the history change | Turns | Followed by a declared history change |
 | --- | --- | --- |
-| Contained a folded delivery | 330 | 175 (53.0%) |
-| Contained none | 1,118 | 2 (0.18%) |
-| Contained none, but had a silent-turn reminder (control) | 100 | 0 |
+| Contained a folded delivery | 326 | 175 (53.7%) |
+| Contained none | 1,106 | 0 |
+| Contained none, but had a silent-turn reminder (control) | 99 | 0 |
 
-A folded delivery is an `isMeta` user row whose array content starts with
-`[crew]`: crew-bridge's `session.append`. Turns end at
-`system/turn_duration`.
+How the turns are drawn:
+
+- A folded delivery is an `isMeta` user row whose array content starts with
+  `[crew]`: crew-bridge's `session.append`.
+- Turns end at `system/turn_duration`.
+- All 175 declared changes fall on the first request of a turn. That is the
+  first main-thread request after the previous `turn_duration`, or the
+  session's first. None falls later in a turn.
 
 This is an association, not proof of cause. `cache-bench` will compare the
 same workload before and after a delivery change (m-2176088183a2).
@@ -310,9 +333,9 @@ class. They are not avoidable loss: even a fixed event writes some tokens.
    - **Invalidates (measured):** the next turn's first request declares
      `messagesHistoryChanged` and drops later thinking blocks. Everything
      after the changed index is written again.
-   - **Write volume:** 122 declared events and 41.4M tokens (36.0% of
+   - **Write volume:** 121 declared events and 41.0M tokens (35.7% of
      writes), plus possibly part of the 48 undeclared ones (18.6M, 16.2%).
-     About 340k tokens per declared event.
+     About 339k tokens per declared event.
    - **Candidates for `cache-design`:**
      - submit each delivery as a queued prompt for the turn boundary (the
        mod's `prompt.submit` path at `:97`, which shows no association),
@@ -597,8 +620,14 @@ Keys read from each Claude Code session file:
   `cache_creation_input_tokens`, `cache_read_input_tokens` and
   `cache_creation.ephemeral_{1h,5m}_input_tokens`.
 - **History changes:** `type == "attachment"` with `.attachment.type ==
-  "thinking_drop"`. Joined to the request by `.attachment.requestId`. It also
-  carries `.attachment.clientChange` and `.attachment.newlyDropped`.
+  "thinking_drop"` and `.attachment.clientChange.kinds` exactly
+  `"messagesHistoryChanged"`.
+  - Joined to the request by `.attachment.requestId`. It also carries
+    `.attachment.newlyDropped.reason`.
+  - A drop naming `systemPromptChanged` or `toolSchemasChanged` is classed
+    apart.
+  - Kinds `none` is not counted. Every drop is still tallied by kind in
+    `sessions.tsv`.
 - **Folds:** `type == "user"` with `isMeta == true`, array content, and
   `.message.content[0].text` starting with `[crew]`. A delivery submitted
   while the member rests, and `WAKE`, are plain string content and not

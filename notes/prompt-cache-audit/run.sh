@@ -33,7 +33,8 @@ cutoff=${CUTOFF:-1791432000}
 } > "$here/cohort.tsv"
 
 header="session\trequests\tinput\tcache_write\tcache_read\twrite_1h\twrite_5m\tthinking_drops"
-for c in first compaction model_change ttl_expired history_logged history_unlogged system_lost_within_ttl; do
+header="$header\tdrops_history\tdrops_system_or_tools\tdrops_other\thistory_drops_turn_first\thistory_drops_mid_turn"
+for c in first compaction model_change ttl_expired history_logged system_or_tools_logged history_unlogged system_lost_within_ttl; do
   header="$header\t${c}_n\t${c}_tokens"
 done
 header="$header\tfold_turns\tdrops_after_fold\tnofold_turns\tdrops_after_nofold\tnofold_silent_turns\tdrops_after_nofold_silent"
