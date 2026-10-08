@@ -27,10 +27,19 @@ impl Daemon {
         task: String,
         runtime: Option<RuntimeKind>,
         model: Option<String>,
+        toolbox: Option<Vec<String>>,
     ) -> Result<Agent, RpcError> {
         let task = task.trim().to_string();
         if task.is_empty() {
             return Err(RpcError::invalid("a subagent needs a task"));
+        }
+        // Bundles are named, never defined, by an agent; each is checked
+        // against the parent's active toolbox once the subagent exists.
+        if let Some(names) = &toolbox {
+            self.check_bundle_selection(&crew_core::toolbox::Toolbox {
+                include: names.clone(),
+                ..Default::default()
+            })?;
         }
         if task.chars().count() > MAX_TASK_CHARS {
             return Err(RpcError::too_large(format!(

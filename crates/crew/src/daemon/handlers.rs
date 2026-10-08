@@ -256,6 +256,12 @@ change identity",
             Call::AgentsList => reply(self.model().agents.clone()),
             Call::AgentAdd { spec } => {
                 self.privileged(&who)?;
+                // The orchestrator chooses bundles by name; only the team file
+                // defines what they hold (notes/toolboxes.md, Orchestrator
+                // tools). The operator's are checked against the team in add_agent.
+                if matches!(&who, Who::Agent(_)) {
+                    self.check_bundle_selection(&spec.toolbox)?;
+                }
                 // The orchestrator's additions once the team is founded are
                 // temporary; the operator's are the operator's to remove.
                 let temporary =
@@ -388,10 +394,11 @@ change identity",
                 task,
                 runtime,
                 model,
+                toolbox,
             } => {
                 let parent = agent_only(&who)?.to_string();
                 reply(
-                    self.spawn_subagent(&parent, id, role, task, runtime, model)
+                    self.spawn_subagent(&parent, id, role, task, runtime, model, toolbox)
                         .await?,
                 )
             }

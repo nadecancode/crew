@@ -330,3 +330,58 @@ fn detail(item: &Item) -> Option<String> {
     }
     Some(out)
 }
+
+impl Daemon {
+    /// Whether `agent` may move to `runtime`: refused when its toolbox maps
+    /// there with a required item that would not load, with that item's
+    /// reason.
+    pub(crate) fn toolbox_switch_check(
+        &self,
+        agent: &Agent,
+        runtime: RuntimeKind,
+    ) -> Result<(), RpcError> {
+        let view = self.toolbox_view(agent, Some(runtime))?;
+        match view.stops.first() {
+            Some(stop) => Err(RpcError::invalid(format!(
+                "{} cannot move to {}: {stop}",
+                agent.id,
+                crate::models::runtime_label(runtime)
+            ))),
+            None => Ok(()),
+        }
+    }
+
+    /// The bundles an agent may name for a new member (`agent_add`): names
+    /// of the team's `toolboxes`, nothing else.
+    pub(crate) fn check_bundle_selection(&self, toolbox: &Toolbox) -> Result<(), RpcError> {
+        let selection_only = Toolbox {
+            include: toolbox.include.clone(),
+            ..Toolbox::default()
+        };
+        if *toolbox != selection_only {
+            return Err(RpcError::forbidden(
+                "an agent chooses bundles by name; toolbox items are defined in the team file",
+            ));
+        }
+        let model = self.model();
+        let bundles: Vec<&str> = model
+            .session
+            .team
+            .as_ref()
+            .map(|t| t.toolboxes.keys().map(String::as_str).collect())
+            .unwrap_or_default();
+        for name in &toolbox.include {
+            if !bundles.contains(&name.as_str()) {
+                return Err(RpcError::invalid(if bundles.is_empty() {
+                    format!("Unknown toolbox \"{name}\". This team defines no toolboxes.")
+                } else {
+                    format!(
+                        "Unknown toolbox \"{name}\". Toolboxes in this team: {}.",
+                        bundles.join(", ")
+                    )
+                }));
+            }
+        }
+        Ok(())
+    }
+}

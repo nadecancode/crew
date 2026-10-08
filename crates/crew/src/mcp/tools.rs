@@ -9,6 +9,7 @@ use crew_core::client::{Client, ClientError};
 use crew_core::config::TaskSpec;
 use crew_core::rpc::{Call, CommitInfo, GitOutcome, InboxResult, SendParams, SendResult, TaskCard};
 use crew_core::util::{fmt_clock, one_line, truncate_chars};
+use crew_core::types::{AgentToolbox, ToolboxItem, ToolboxItemCode};
 use crew_core::{Agent, AgentStatus, Artifact, Message, MessageType, Task, BROADCAST, OPERATOR_ID};
 use serde_json::{json, Value};
 
@@ -289,6 +290,7 @@ when done. Use it to parallelise your task, not to hand off all of it.",
                     "id": { "type": "string", "description": "Optional id; generated when omitted" },
                     "runtime": { "type": "string", "enum": ["claude", "codex", "pi"] },
                     "model": { "type": "string" },
+                    "toolbox": { "type": "array", "items": { "type": "string" }, "description": "Bundles by name, for a subagent that needs less than your own toolbox; default: a copy of yours. It cannot get anything you do not have" },
                 }),
                 &["task"],
             ),
@@ -307,6 +309,7 @@ added after are temporary: not saved, and taken off the team once their tasks ar
                     "model": { "type": "string", "description": "The model this member runs on, chosen for its role from the Models section of your briefing (e.g. opus, gpt-6-astra). It also decides which CLI runs the member. Default: the team default" },
                     "runtime": { "type": "string", "enum": ["claude", "codex", "pi"], "description": "Only needed for a model that is not in the catalog (pi: always, with the model as pi names it)" },
                     "task": { "type": "string", "description": "Optional first task for the new member" },
+                    "toolbox": { "type": "array", "items": { "type": "string" }, "description": "Bundles from the team's toolboxes this member gets on top of the team default, by name (e.g. [\"web\"]). The team file defines what each bundle holds" },
                 }),
                 &["id", "role"],
             ),
@@ -453,6 +456,30 @@ fn opt_str(args: &Value, key: &str) -> Option<String> {
         .filter(|s| !s.is_empty())
 }
 
+/// A list of names: an array of strings, or one string (a model may send
+/// either); None when left out.
+fn opt_str_list(args: &Value, key: &str) -> Option<Vec<String>> {
+    match args.get(key)? {
+        Value::Array(items) => Some(
+            items
+                .iter()
+                .filter_map(Value::as_str)
+                .map(str::trim)
+                .filter(|s| !s.is_empty())
+                .map(str::to_string)
+                .collect(),
+        ),
+        Value::String(one) => Some(
+            one.split(',')
+                .map(str::trim)
+                .filter(|s| !s.is_empty())
+                .map(str::to_string)
+                .collect(),
+        ),
+        _ => None,
+    }
+}
+
 fn message_type(args: &Value) -> Result<MessageType, String> {
     match opt_str(args, "type") {
         Some(t) => t.parse(),
@@ -532,6 +559,70 @@ fn status_cell(agent: &Agent) -> String {
     s
 }
 
+/// Whether an item counts as a problem in a summary: not Active, and not
+/// merely planned or not applicable.
+fn not_active(item: &ToolboxItem) -> bool {
+    !matches!(
+        item.status.code,
+        ToolboxItemCode::Active | ToolboxItemCode::Planned | ToolboxItemCode::NotApplicable
+    )
+}
+
+/// A member's toolbox in a list line: `toolbox 3f9a0c21e7b4 (1 not available)`.
+fn toolbox_cell(toolbox: &AgentToolbox) -> String {
+    let mut cell = format!("toolbox {}", toolbox.short_fingerprint());
+    let problems = toolbox.items.iter().filter(|i| not_active(i)).count();
+    if problems > 0 {
+        cell.push_str(&format!(" ({problems} not available)"));
+    }
+    if toolbox.pending_fingerprint.is_some() {
+        cell.push_str(" (restart to apply a change)");
+    }
+    cell
+}
+
+/// What a member's toolbox holds, by kind, and what will not load:
+/// `toolbox 3f9a0c21e7b4: mcp context7, playwright; skills frontend-qa;
+/// not available on Codex: plugins.lint-kit`.
+fn toolbox_summary(toolbox: &AgentToolbox) -> String {
+    let mut parts: Vec<String> = Vec::new();
+    let mut kinds: Vec<(String, Vec<&str>)> = Vec::new();
+    for item in toolbox.items.iter().filter(|i| !not_active(i)) {
+        let kind = serde_json::to_value(item.kind)
+            .ok()
+            .and_then(|v| v.as_str().map(str::to_string))
+            .unwrap_or_default();
+        match kinds.iter_mut().find(|(k, _)| *k == kind) {
+            Some((_, names)) => names.push(&item.name),
+            None => kinds.push((kind, vec![&item.name])),
+        }
+    }
+    for (kind, names) in kinds {
+        parts.push(format!("{kind} {}", names.join(", ")));
+    }
+    let mut problems: Vec<(String, Vec<String>)> = Vec::new();
+    for item in toolbox.items.iter().filter(|i| not_active(i)) {
+        let kind = serde_json::to_value(item.kind)
+            .ok()
+            .and_then(|v| v.as_str().map(str::to_string))
+            .unwrap_or_default();
+        let label = format!("{kind}.{}", item.name);
+        let status = item.status.text.to_lowercase();
+        match problems.iter_mut().find(|(s, _)| *s == status) {
+            Some((_, items)) => items.push(label),
+            None => problems.push((status, vec![label])),
+        }
+    }
+    for (status, items) in problems {
+        parts.push(format!("{status}: {}", items.join(", ")));
+    }
+    if parts.is_empty() {
+        format!("toolbox {}: no items", toolbox.short_fingerprint())
+    } else {
+        format!("toolbox {}: {}", toolbox.short_fingerprint(), parts.join("; "))
+    }
+}
+
 pub fn render_agents(agents: &[Agent]) -> String {
     let mut out = String::new();
     for a in agents {
@@ -542,6 +633,9 @@ pub fn render_agents(agents: &[Agent]) -> String {
         };
         let temporary = if a.temporary { " (temporary)" } else { "" };
         out.push_str(&format!("{} [{}] {role}{temporary}", a.id, status_cell(a)));
+        if let Some(toolbox) = &a.toolbox {
+            out.push_str(&format!(" · {}", toolbox_cell(toolbox)));
+        }
         if let Some(task) = &a.task {
             out.push_str(&format!(" — task: {task}"));
         }
@@ -1038,6 +1132,7 @@ pub fn call(client: &mut Client, name: &str, args: &Value) -> Result<ToolOutput,
                     task: arg_str(args, "task")?,
                     runtime,
                     model: opt_str(args, "model"),
+                    toolbox: opt_str_list(args, "toolbox"),
                 },
             )?;
             out(
@@ -1063,6 +1158,10 @@ reach it with agent_send(to=\"{}\").",
                         runtime,
                         model: opt_str(args, "model"),
                         task: opt_str(args, "task"),
+                        toolbox: crew_core::toolbox::Toolbox {
+                            include: opt_str_list(args, "toolbox").unwrap_or_default(),
+                            ..Default::default()
+                        },
                         ..Default::default()
                     }),
                 },
@@ -1085,9 +1184,22 @@ done and you have been told so."
             } else {
                 ""
             };
+            // What it was given beyond the team default, mapped onto its CLI.
+            let toolbox = rpc::<Vec<crew_core::rpc::MemberToolbox>>(
+                client,
+                Call::Toolbox {
+                    agent: Some(agent.id.clone()),
+                    runtime: None,
+                },
+            )
+            .ok()
+            .and_then(|(members, _)| members.into_iter().next())
+            .filter(|m| !m.toolbox.items.is_empty())
+            .map(|m| format!(" Its {}.", toolbox_summary(&m.toolbox)))
+            .unwrap_or_default();
             out(
                 format!(
-                    "{} joined the team as {} ({}{}).{instead}{temporary}",
+                    "{} joined the team as {} ({}{}).{toolbox}{instead}{temporary}",
                     agent.id,
                     agent.role,
                     agent.runtime,

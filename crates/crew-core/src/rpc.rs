@@ -157,6 +157,11 @@ pub enum Call {
         runtime: Option<RuntimeKind>,
         #[serde(default)]
         model: Option<String>,
+        /// Bundles by name: the subagent gets only these, each item equal to
+        /// one in the parent's active toolbox. Left out: a copy of the
+        /// parent's active toolbox.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        toolbox: Option<Vec<String>>,
     },
 
     Send(SendParams),
