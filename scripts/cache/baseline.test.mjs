@@ -221,3 +221,30 @@ test('null ids and ambiguous shared cwd cannot override known private owner or a
   const unknown = enrich(s, workspace); assert.equal(unknown.agent_id, null); assert.equal(unknown.requests[0].crew_events.length, 0);
   const known = enrich({ ...s, private_agent: 'second' }, workspace); assert.equal(known.agent_id, 'second'); assert.equal(known.requests[0].crew_events.length, 0);
 });
+
+test('streamed Codex context_compacted is kept for native compaction joins', async t => {
+  const dir = scratch(t), file = path.join(dir, 'codex/session.jsonl');
+  writeSession(file, [tokenCount(0, counters(100, 80, 2)), { type: 'event_msg', timestamp: stamp(1), payload: { type: 'context_compacted', replacement_history: 'PRIVATE SUMMARY' } }, tokenCount(2, counters(150, 80, 4), counters(50, 0, 2))]);
+  const s = await readSession(file, 'codex');
+  assert.equal(s.signals[0].type, 'compaction'); assert.equal(enrich({ ...s, file, runtime: 'codex' }, emptyWorkspace()).requests[1].association, 'compaction_associated');
+  assert.equal(JSON.stringify(s).includes('PRIVATE'), false);
+});
+
+test('an enclosing member exact session id wins over a nested registered workspace cwd', async t => {
+  const dir = scratch(t), home = path.join(dir, 'home'), workspace = path.join(dir, 'work'), nested = path.join(workspace, '.crew/worktrees/worker');
+  fixtureDb(workspace, [{ id: 'worker', session_id: 'worker-session', role: 'worker', runtime: 'codex', workdir: nested }]);
+  fixtureDb(nested, [{ id: 'orchestrator', session_id: 'nested-session', role: 'orchestrator', runtime: 'codex', workdir: nested }]);
+  const native = path.join(home, '.codex/sessions');
+  writeSession(path.join(native, 'worker-session.jsonl'), [{ type: 'session_meta', payload: { id: 'worker-session', cwd: nested } }, tokenCount(0, counters(100, 90, 3))]);
+  writeSession(path.join(native, 'nested-session.jsonl'), [{ type: 'session_meta', payload: { id: 'nested-session', cwd: nested } }, tokenCount(0, counters(100, 80, 3))]);
+  const state = path.join(home, '.local/state'), registry = path.join(state, 'crew/sessions'); fs.mkdirSync(registry, { recursive: true });
+  fs.writeFileSync(path.join(registry, 'nested.json'), JSON.stringify({ workspace: nested, state_dir: path.join(nested, '.crew') }));
+  const previous = new Map(['CLAUDE_CONFIG_DIR', 'CODEX_HOME', 'XDG_STATE_HOME'].map(k => [k, process.env[k]]));
+  t.after(() => { for (const [k, v] of previous) if (v === undefined) delete process.env[k]; else process.env[k] = v; });
+  delete process.env.CLAUDE_CONFIG_DIR; delete process.env.CODEX_HOME; process.env.XDG_STATE_HOME = state;
+  const report = await collect({ workspace, home, allRuns: true });
+  assert.equal(report.sessions.find(s => s.session_id === 'worker-session').run, path.join(workspace, '.crew'));
+  assert.equal(report.sessions.find(s => s.session_id === 'worker-session').agent_id, 'worker');
+  assert.equal(report.sessions.find(s => s.session_id === 'nested-session').agent_id, 'orchestrator');
+  assert.deepEqual(report.coverage.current_members_without_measured_session, []);
+});

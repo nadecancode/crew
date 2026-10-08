@@ -211,7 +211,7 @@ export async function readSession(file, runtime, options = {}) {
   for await (const text of readline.createInterface({ input: stream, crlfDelay: Infinity })) {
     line++;
     // Avoid parsing every tool output in multi-gigabyte transcripts.
-    if (!/"usage"|token_count|session_meta|turn_context|thinking_drop|compact_boundary|turn_duration|"compacted"|silent_turn_reminder|"isMeta"|"type"\s*:\s*"(user|session)"|user_message|"role"\s*:\s*"user"/.test(text)) continue;
+    if (!/"usage"|token_count|session_meta|turn_context|thinking_drop|compact_boundary|turn_duration|"compacted"|context_compacted|silent_turn_reminder|"isMeta"|"type"\s*:\s*"(user|session)"|user_message|"role"\s*:\s*"user"/.test(text)) continue;
     let value;
     try { value = JSON.parse(text); } catch { malformed++; continue; }
     if (!value || typeof value !== 'object' || Array.isArray(value)) { malformed++; continue; }
@@ -356,8 +356,10 @@ function combineReports(runs, window) {
   const foldCohorts = [true, false].map(folded => {
     const rs = requests.filter(r => r.first_request_in_turn && r.preceding_completed_turn_folded === folded);
     const changed = rs.filter(r => r.native_history_changed);
+    const observable = enriched.filter(s => s.coverage.diagnostics_observed).flatMap(s => s.requests).filter(r => r.first_request_in_turn && r.preceding_completed_turn_folded === folded);
     return { preceding_turn_folded: folded, ...summarize(rs), diagnostic_history_changed_requests: changed.length,
-      diagnostic_history_changed: summarize(changed), sessions_with_diagnostics: enriched.filter(s => s.coverage.diagnostics_observed).length };
+      diagnostic_history_changed: summarize(changed), in_sessions_with_any_diagnostic: summarize(observable),
+      sessions_with_diagnostics: enriched.filter(s => s.coverage.diagnostics_observed).length, absent_diagnostic_is_unchanged_history: false };
   });
   const eventClasses = [...new Set(requests.flatMap(r => r.crew_events.map(e => e.type)))].sort().map(name => ({ name,
     ...summarize(requests.filter(r => r.crew_events.some(e => e.type === name))), overlap_allowed: true, avoidable_miss_tokens: null }));
