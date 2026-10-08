@@ -6,6 +6,7 @@ Only numeric evidence and synthetic marker metadata leave the native reader.
 
 from datetime import datetime, timezone
 import hashlib
+import json
 from pathlib import Path
 import time
 
@@ -183,10 +184,13 @@ class Lifecycle:
         elif kind == "remove":
             self.command("agent", "remove", "cache-observer")
         elif kind in ("task", "fold"):
-            self.task(label, agent, f"Run Bash `sleep 30 # {arg}` exactly once, in the foreground. "
+            call = json.dumps({"command": f"sleep 8 # {arg}", "run_in_background": False, "timeout": 15000})
+            self.task(label, agent, f"Call Bash exactly once with these input fields: {call}. "
+                      "The foreground wait is the measurement; do not set run_in_background=true "
+                      "or append &, because that invalidates this benchmark. "
                       "After it returns, reason through the paid invoice checksum from SPEC.md and "
                       "invoices.csv and verify with another local tool call. Handle any incoming "
-                      "benchmark marker messages. Write " + label + ".txt containing exactly "
+                      "benchmark marker messages while preserving this card. Write " + label + ".txt containing exactly "
                       "'4 10206' and newline, commit, then task_complete. Do not read context/ yet.")
         elif kind == "message":
             self.marker_message(agent, arg)

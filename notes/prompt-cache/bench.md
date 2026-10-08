@@ -226,7 +226,8 @@ preserve the session ID. The Crew briefing's byte length, SHA-256 and longest
 common byte prefix are recorded before and after each restart; this measures
 Crew's own file, not the provider's full effective system prompt.
 
-The Claude worker then runs two 30-second shell windows. The control message is
+The Claude worker then runs two 8-second foreground shell windows, with explicit
+`run_in_background=false` and a 15-second tool timeout. The control message is
 sent after its turn ends. The fold message is sent only when the exact session
 JSONL contains the marked pending `tool_use` without its matching `tool_result`.
 The injected marker differs from the card's command marker, so the card itself
