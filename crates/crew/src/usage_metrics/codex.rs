@@ -10,11 +10,15 @@
 //! a gap and a new baseline: a direct last-request vector equal to the new
 //! cumulative does not prove a new occurrence. Because Codex counters only
 //! rise within a thread, an increment that starts below the highest vector
-//! already charged for the logical stream (kept across file generations and
-//! restarts) overlaps charged usage and is not charged either; old records
-//! read again, whole or in part, after a reset, a rewrite or a restart can
-//! never start above it. Output already includes
+//! already observed for the logical stream (charged, seeded from an existing
+//! prefix or taken as a baseline after a gap, and kept across file
+//! generations and restarts) overlaps usage already seen and is not charged
+//! either; old records read again, whole or in part, after a reset, a
+//! rewrite or a restart can never start above it. Output already includes
 //! reasoning, which is never added again.
+//!
+//! A native batch carries the position of the record it starts from, so the
+//! ledger can see every owner and work binding captured inside it.
 //!
 //! An increment is identified by the vector it starts from and the one it
 //! reaches, not by its epoch, so the same increment read again (appended
@@ -73,7 +77,7 @@ impl Vector {
             .any(|(a, b)| matches!((a, b), (Some(a), Some(b)) if *a < b))
     }
 
-    /// The fieldwise maximum, unknown where either is unknown.
+    /// The fieldwise maximum of the known values.
     fn max(self, other: Self) -> Self {
         let m = |a: Option<u64>, b: Option<u64>| a.zip(b).map(|(a, b)| a.max(b)).or(a).or(b);
         Self {
@@ -149,15 +153,16 @@ pub struct Codex {
     model_changed: bool,
     turn_changed: bool,
     last_ms: Option<i64>,
-    /// The highest cumulative vector any charged increment of this logical
-    /// stream reached, kept across file generations and restarts. Codex
-    /// counters only rise within a thread, so an increment starting below it
-    /// overlaps usage already charged: an old record read again (appended,
-    /// after a reset, after a rewrite, whole or in part) can never start at
-    /// or above it.
+    /// The highest cumulative vector of this logical stream observed so far,
+    /// whether charged, seeded from an existing prefix or taken as a baseline
+    /// after a gap, kept across file generations and restarts. Codex counters
+    /// only rise within a thread, so an increment starting below it overlaps
+    /// usage already seen: an old record read again (appended, after a reset,
+    /// after a rewrite, whole or in part) can never start at or above it.
     #[serde(default)]
     high_water: Option<Vector>,
-    /// Where the current baseline was read, in this file generation.
+    /// Where the current baseline was read in this file generation: the
+    /// start of a fresh session, or the record the previous vector came from.
     #[serde(default)]
     baseline_at: Option<u64>,
 }
@@ -237,7 +242,8 @@ impl Codex {
             turn_changed: false,
             last_ms: None,
             high_water: None,
-            baseline_at: None,
+            // A fresh session's first cumulative vector counts from its start.
+            baseline_at: (start == Start::Fresh).then_some(0),
         }
     }
 
@@ -254,7 +260,11 @@ impl Codex {
         }
     }
 
-    fn settle(&mut self, now: Vector) {
+    /// `now`, read at `offset`, is the new baseline and part of what the
+    /// logical stream has shown.
+    fn settle(&mut self, now: Vector, offset: u64) {
+        self.high_water = Some(self.high_water.map_or(now, |h| h.max(now)));
+        self.baseline_at = Some(offset);
         self.previous = Some(now);
         self.seed_next = false;
         self.model_changed = false;
@@ -291,7 +301,7 @@ impl Codex {
             if self.previous.is_some_and(|p| now.decreased_from(p)) {
                 self.epoch += 1;
             }
-            self.settle(now);
+            self.settle(now, line.offset);
             return;
         }
         let gap = |out: &mut Vec<Item>| {
@@ -310,26 +320,23 @@ impl Codex {
             }
             None if self.seed_next => {
                 gap(out);
-                self.settle(now);
-                self.baseline_at = Some(line.offset);
+                self.settle(now, line.offset);
                 return;
             }
             Some(p) if now.decreased_from(p) => {
                 self.epoch += 1;
                 gap(out);
-                self.settle(now);
-                self.baseline_at = Some(line.offset);
+                self.settle(now, line.offset);
                 return;
             }
-            // Starting below what was already charged: nothing proves this
-            // is new usage rather than old records read again.
+            // Starting below what was already seen: nothing proves this is
+            // new usage rather than old records read again.
             Some(p) if self.high_water.is_some_and(|h| p.below(h)) => {
                 out.push(Item::Gap {
                     reason: CoverageReason::AmbiguousBoundary,
                     offset: line.offset,
                 });
-                self.settle(now);
-                self.baseline_at = Some(line.offset);
+                self.settle(now, line.offset);
                 return;
             }
             previous => previous,
@@ -356,11 +363,7 @@ impl Codex {
             ObservationUnit::CounterDelta
         };
         self.emit(line, previous, now, delta, unit, reasons, native_ms, out);
-        if !delta.is_empty() {
-            self.high_water = Some(self.high_water.map_or(now, |h| h.max(now)));
-        }
-        self.settle(now);
-        self.baseline_at = Some(line.offset);
+        self.settle(now, line.offset);
     }
 
     #[allow(clippy::too_many_arguments)]

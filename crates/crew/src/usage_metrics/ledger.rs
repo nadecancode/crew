@@ -2174,6 +2174,59 @@ fn binding_at(
         .optional()?)
 }
 
+/// An owner was registered after `start` and at or before `end`.
+fn owner_within(
+    tx: &Connection,
+    stream_id: &str,
+    generation: u64,
+    start: u64,
+    end: u64,
+) -> Result<bool> {
+    Ok(tx.query_row(
+        "SELECT EXISTS (SELECT 1 FROM usage_owners WHERE stream_id = ?1
+         AND generation = ?2 AND from_offset > ?3 AND from_offset <= ?4)",
+        params![stream_id, generation as i64, start as i64, end as i64],
+        |r| r.get(0),
+    )?)
+}
+
+/// Every work and account in force under `owner_seq` from `start` to `end`:
+/// the binding at `start` (unknown when there is none) and every binding
+/// captured after it, whatever came later.
+fn bindings_within(
+    tx: &Connection,
+    stream_id: &str,
+    owner_seq: i64,
+    generation: u64,
+    start: u64,
+    end: u64,
+) -> Result<(Vec<String>, Vec<String>)> {
+    let (mut works, mut accounts) = match binding_at(tx, stream_id, owner_seq, generation, start)? {
+        Some((w, a, _)) => (vec![w], vec![a]),
+        None => (vec![json(&unknown_work())], vec![json(&unknown_account())]),
+    };
+    let mut stmt = tx.prepare(
+        "SELECT work, account FROM usage_bindings WHERE stream_id = ?1 AND owner_seq = ?2
+         AND generation = ?3 AND from_offset > ?4 AND from_offset <= ?5",
+    )?;
+    let rows = stmt.query_map(
+        params![
+            stream_id,
+            owner_seq,
+            generation as i64,
+            start as i64,
+            end as i64
+        ],
+        |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?)),
+    )?;
+    for row in rows {
+        let (w, a) = row?;
+        works.push(w);
+        accounts.push(a);
+    }
+    Ok((works, accounts))
+}
+
 fn cover(tx: &Connection, stream_id: &str, reason: &str, n: u64, now: i64) -> Result<()> {
     tx.execute(
         "INSERT INTO usage_coverage (stream_id, reason, count, first_at, last_at)
@@ -2315,26 +2368,43 @@ fn apply(
                     None => (json(&unknown_work()), json(&unknown_account()), None),
                 };
             // A native batch sums usage anywhere since its start record. When
-            // a work or account binding changed in between, its tokens stay
-            // as evidence but are not given to either side; when the owner
-            // changed, not even to a run or member.
+            // any work or account binding captured in between differs, even
+            // one later bound back, its tokens stay as evidence but are not
+            // given to either side; when an owner was registered in between,
+            // or the start is not known, not even to a run or member.
             let mut span_owner_changed = false;
-            if let Some(start) = o.span_start {
-                match owner_at(tx, stream_id, o.generation, start)? {
-                    Some(first) if first.seq == owner.seq => {
-                        let (w, a) = binding_at(tx, stream_id, owner.seq, o.generation, start)?
-                            .map(|(w, a, _)| (w, a))
-                            .unwrap_or_else(|| (json(&unknown_work()), json(&unknown_account())));
-                        if w != work {
-                            work = json(&WorkAttribution::Unknown {
-                                reason: CoverageReason::MultipleTasks,
-                            });
-                        }
-                        if a != account {
-                            account = json(&unknown_account());
+            if o.unit == ObservationUnit::CounterDelta {
+                match o.span_start {
+                    Some(start) if start <= o.offset => {
+                        let first = owner_at(tx, stream_id, o.generation, start)?;
+                        if first.is_some_and(|f| f.seq == owner.seq)
+                            && !owner_within(tx, stream_id, o.generation, start, o.offset)?
+                        {
+                            let (works, accounts) = bindings_within(
+                                tx,
+                                stream_id,
+                                owner.seq,
+                                o.generation,
+                                start,
+                                o.offset,
+                            )?;
+                            if works.iter().any(|w| *w != work) {
+                                work = json(&WorkAttribution::Unknown {
+                                    reason: CoverageReason::MultipleTasks,
+                                });
+                            }
+                            if accounts.iter().any(|a| *a != account) {
+                                account = json(&unknown_account());
+                            }
+                        } else {
+                            span_owner_changed = true;
                         }
                     }
                     _ => span_owner_changed = true,
+                }
+                if span_owner_changed {
+                    work = json(&unknown_work());
+                    account = json(&unknown_account());
                 }
             }
             let scope = match o.phase {
@@ -3712,13 +3782,19 @@ mod tests {
     }
 
     fn codex_setup(values: &[Value]) -> (tempfile::TempDir, PathBuf, Ledger, String) {
-        use crate::usage_metrics::source::Start;
+        codex_setup_from(values, Start::Fresh)
+    }
+
+    fn codex_setup_from(
+        values: &[Value],
+        start: Start,
+    ) -> (tempfile::TempDir, PathBuf, Ledger, String) {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("rollout.jsonl");
         std::fs::write(&path, text(values)).unwrap();
         let mut ledger = Ledger::open(&dir.path().join("crew.db")).unwrap();
         ledger.begin_run("r1", Some(NOW), NOW).unwrap();
-        let mut r = reg("r1", "i1", Start::Fresh);
+        let mut r = reg("r1", "i1", start);
         r.runtime = RuntimeKind::Codex;
         r.native_session_id = "th-1".into();
         let stream = ledger.register(&r, &open(&path), NOW).unwrap().unwrap();
@@ -3808,5 +3884,176 @@ mod tests {
         append(&path, &[codex_tc((350, 240, 35), Some((50, 40, 5)))]);
         drain(&mut ledger, &stream, &open(&path), NOW).unwrap();
         assert_eq!(by_task(&ledger, "tb"), Some(Wide(50)));
+    }
+
+    fn codex_ctx() -> Value {
+        json!({"type": "turn_context", "payload": {"model": "gpt-6-luna", "turn_id": "t1"}})
+    }
+
+    /// Input charged to the live scope where `keep` holds.
+    fn live_input(ledger: &Ledger, keep: impl Fn(&Aggregate) -> bool) -> Option<Wide> {
+        let facts = ledger.facts("r1", "live", None, keep).unwrap();
+        totals(&facts, &Book::standard_2026_10_08(), None)
+            .input_total
+            .known_sum
+    }
+
+    fn of_task(id: &str) -> impl Fn(&Aggregate) -> bool + '_ {
+        move |a| matches!(a.work(), Some(WorkAttribution::Task { id: t, .. }) if t == id)
+    }
+
+    fn of_multiple_tasks(a: &Aggregate) -> bool {
+        matches!(
+            a.work(),
+            Some(WorkAttribution::Unknown {
+                reason: CoverageReason::MultipleTasks
+            })
+        )
+    }
+
+    fn task_on(id: &str, account: &str) -> WorkBinding {
+        WorkBinding {
+            account: AccountAttribution::Known {
+                id: crew_core::rpc::features::Id::new(account.to_string()).unwrap(),
+                assignment_generation: Wide(1),
+                interval_id: crew_core::rpc::features::Id::new(format!("iv-{account}")).unwrap(),
+            },
+            ..task(id)
+        }
+    }
+
+    #[test]
+    fn old_records_below_a_seeded_prefix_are_not_charged_after_a_rewrite() {
+        // History up to 1000 written before tracking, seeded at registration.
+        let (dir, path, mut ledger, stream) = codex_setup_from(
+            &[
+                codex_ctx(),
+                codex_tc((1000, 800, 100), Some((1000, 800, 100))),
+            ],
+            Start::Existing,
+        );
+        drain(&mut ledger, &stream, &open(&path), NOW).unwrap();
+        assert_eq!(live_input(&ledger, |_| true), None);
+        // Rewritten to an old record of that history, which seeds again,
+        // then an old later record appended, before and after a restart.
+        replace(
+            &path,
+            &[codex_ctx(), codex_tc((100, 80, 10), Some((100, 80, 10)))],
+        );
+        drain(&mut ledger, &stream, &open(&path), NOW).unwrap();
+        append(&path, &[codex_tc((200, 160, 20), Some((100, 80, 10)))]);
+        drain(&mut ledger, &stream, &open(&path), NOW).unwrap();
+        drop(ledger);
+        let mut ledger = Ledger::open(&dir.path().join("crew.db")).unwrap();
+        append(&path, &[codex_tc((300, 240, 30), Some((100, 80, 10)))]);
+        drain(&mut ledger, &stream, &open(&path), NOW).unwrap();
+        assert_eq!(
+            live_input(&ledger, |_| true),
+            None,
+            "usage inside the seeded history is not current usage"
+        );
+        // A record reaching past the history is a new baseline; usage from
+        // there on is new.
+        append(
+            &path,
+            &[
+                codex_tc((1100, 880, 110), Some((800, 640, 80))),
+                codex_tc((1150, 920, 115), Some((50, 40, 5))),
+            ],
+        );
+        drain(&mut ledger, &stream, &open(&path), NOW).unwrap();
+        assert_eq!(live_input(&ledger, |_| true), Some(Wide(50)));
+    }
+
+    #[test]
+    fn a_batch_after_a_seeded_prefix_spans_the_bindings_captured_after_it() {
+        let (_dir, path, mut ledger, stream) = codex_setup_from(
+            &[codex_ctx(), codex_tc((100, 80, 10), Some((100, 80, 10)))],
+            Start::Existing,
+        );
+        drain(&mut ledger, &stream, &open(&path), NOW).unwrap();
+        for id in ["ta", "tb"] {
+            ledger
+                .bind_work(&stream, &open(&path), &task(id), NOW)
+                .unwrap();
+        }
+        append(&path, &[codex_tc((300, 200, 30), Some((100, 60, 10)))]);
+        drain(&mut ledger, &stream, &open(&path), NOW).unwrap();
+        assert_eq!(live_input(&ledger, of_task("ta")), None);
+        assert_eq!(
+            live_input(&ledger, of_task("tb")),
+            None,
+            "the first batch after the seeded prefix is not the latest binding's"
+        );
+        assert_eq!(live_input(&ledger, of_multiple_tasks), Some(Wide(200)));
+    }
+
+    #[test]
+    fn a_batch_across_a_binding_and_back_belongs_to_neither() {
+        let (_dir, path, mut ledger, stream) = codex_setup(&[codex_ctx()]);
+        ledger
+            .bind_work(&stream, &open(&path), &task_on("ta", "acct-1"), NOW)
+            .unwrap();
+        append(&path, &[codex_tc((100, 80, 10), Some((100, 80, 10)))]);
+        drain(&mut ledger, &stream, &open(&path), NOW).unwrap();
+        assert_eq!(live_input(&ledger, of_task("ta")), Some(Wide(100)));
+        // Task A, then B, then A again, all inside one batch.
+        for b in [task_on("tb", "acct-1"), task_on("ta", "acct-1")] {
+            ledger.bind_work(&stream, &open(&path), &b, NOW).unwrap();
+        }
+        append(&path, &[codex_tc((300, 200, 30), Some((100, 60, 10)))]);
+        drain(&mut ledger, &stream, &open(&path), NOW).unwrap();
+        assert_eq!(
+            live_input(&ledger, of_task("ta")),
+            Some(Wide(100)),
+            "same task at both ends does not prove the batch was all A's"
+        );
+        assert_eq!(live_input(&ledger, of_multiple_tasks), Some(Wide(200)));
+        // Same task throughout, but another account and back.
+        for b in [task_on("ta", "acct-2"), task_on("ta", "acct-1")] {
+            ledger.bind_work(&stream, &open(&path), &b, NOW).unwrap();
+        }
+        append(&path, &[codex_tc((360, 240, 36), Some((10, 6, 1)))]);
+        drain(&mut ledger, &stream, &open(&path), NOW).unwrap();
+        let unknown_account = |a: &Aggregate| {
+            matches!(
+                serde_json::from_str(&a.account),
+                Ok(AccountAttribution::Unknown { .. })
+            )
+        };
+        assert_eq!(
+            live_input(&ledger, |a| of_task("ta")(a) && unknown_account(a)),
+            Some(Wide(60)),
+            "the task stands, the account does not"
+        );
+        assert_eq!(
+            live_input(&ledger, |a| of_task("ta")(a) && !unknown_account(a)),
+            Some(Wide(100))
+        );
+    }
+
+    #[test]
+    fn a_batch_across_another_owner_and_back_belongs_to_no_member() {
+        let (_dir, path, mut ledger, stream) =
+            codex_setup(&[codex_ctx(), codex_tc((100, 80, 10), Some((100, 80, 10)))]);
+        drain(&mut ledger, &stream, &open(&path), NOW).unwrap();
+        // Owner i1, then i2, then i1 again, all inside one batch.
+        for incarnation in ["i2", "i1"] {
+            ledger.release(&stream).unwrap();
+            let mut r = reg("r1", incarnation, Start::Fresh);
+            r.runtime = RuntimeKind::Codex;
+            r.native_session_id = "th-1".into();
+            ledger.register(&r, &open(&path), NOW).unwrap().unwrap();
+        }
+        append(&path, &[codex_tc((300, 200, 30), Some((100, 60, 10)))]);
+        drain(&mut ledger, &stream, &open(&path), NOW).unwrap();
+        assert_eq!(
+            live_input(&ledger, |_| true),
+            Some(Wide(100)),
+            "the spanning batch is evidence, not usage of either owner"
+        );
+        let unusable = ledger.rows("r1", "live", |a| a.unit == "unusable").unwrap();
+        assert_eq!(unusable.len(), 1);
+        assert_eq!(unusable[0].0.reason, "ambiguous_boundary");
     }
 }
