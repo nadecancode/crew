@@ -117,6 +117,7 @@ pub struct Batch {
     pub oversized: u64,
     /// The file size captured when the batch started.
     pub size: u64,
+    caught_up: bool,
 }
 
 impl Batch {
@@ -135,12 +136,9 @@ impl Batch {
     }
 
     /// Everything present when the batch started has been consumed, except an
-    /// incomplete final line.
+    /// incomplete final line; `false` when a budget stopped the batch.
     pub fn caught_up(&self) -> bool {
-        !self.checkpoint.draining && self.lines.len() < BATCH_LINES && {
-            let left = self.size.saturating_sub(self.checkpoint.offset);
-            left < BATCH_BYTES
-        }
+        self.caught_up
     }
 }
 
@@ -247,9 +245,14 @@ pub fn read(file: &File, from: &Checkpoint) -> io::Result<Batch> {
     };
     let mut lines = Vec::new();
     let mut oversized = 0;
+    // Whether nothing complete is left: set where each path ends.
+    let caught_up;
     if cp.draining {
         drain(file, &mut cp, size)?;
-    } else if cp.offset < size {
+        caught_up = cp.offset == size;
+    } else if cp.offset >= size {
+        caught_up = true;
+    } else {
         let pos = cp.offset;
         let window = read_at(file, pos, (size - pos).min(BATCH_BYTES))?;
         let mut start = 0usize;
@@ -266,7 +269,10 @@ pub fn read(file: &File, from: &Checkpoint) -> io::Result<Batch> {
             start += nl + 1;
         }
         let window_full = window.len() as u64 == BATCH_BYTES;
+        // The window reached the end and holds no further complete line.
+        let mut done = pos + window.len() as u64 == size && !window[start..].contains(&b'\n');
         if lines.is_empty() && start == 0 && window_full {
+            done = false;
             // The first record is longer than a batch.
             let long = read_at(file, pos, (size - pos).min(MAX_RECORD + 1))?;
             match long.iter().position(|&b| b == b'\n') {
@@ -285,10 +291,12 @@ pub fn read(file: &File, from: &Checkpoint) -> io::Result<Batch> {
                     start = long.len();
                 }
                 // Incomplete and not yet too long: wait for its end.
-                None => {}
+                None => done = true,
             }
+            done = done || pos + start as u64 == size;
         }
         cp.offset = pos + start as u64;
+        caught_up = done;
     }
     cp.witness = witness(file, cp.offset)?;
     Ok(Batch {
@@ -297,6 +305,7 @@ pub fn read(file: &File, from: &Checkpoint) -> io::Result<Batch> {
         loss,
         oversized,
         size,
+        caught_up,
     })
 }
 
@@ -755,6 +764,45 @@ pub(super) mod tests {
         let one = read(&f, &cp).unwrap();
         assert_eq!(one.lines.len(), 3, "4 MiB holds three complete 1 MiB lines");
         assert!(one.checkpoint.offset <= BATCH_BYTES);
+    }
+
+    #[test]
+    fn a_budget_stopped_batch_is_not_caught_up() {
+        let dir = tempfile::tempdir().unwrap();
+        let line = |n: usize| format!("{{\"pad\":\"{}\"}}\n", "x".repeat(n));
+        // About 3 MiB and 2 MiB: the first window holds only the first.
+        let text = format!("{}{}", line(3 << 20), line(2 << 20));
+        let path = file(&dir, "s.jsonl", text.as_bytes());
+        let f = File::open(&path).unwrap();
+        let one = read(&f, &Checkpoint::new(&f, Start::Fresh).unwrap()).unwrap();
+        assert_eq!(one.lines.len(), 1);
+        assert!(!one.caught_up(), "a complete record remains");
+        let two = read(&f, &one.checkpoint).unwrap();
+        assert_eq!(two.lines.len(), 1);
+        assert!(two.caught_up());
+
+        // An oversized record drained before trailing complete records.
+        let text = format!("{}{}{}", line(9 << 20), line(10), "{\"part");
+        let path = file(&dir, "t.jsonl", text.as_bytes());
+        let f = File::open(&path).unwrap();
+        let mut cp = Checkpoint::new(&f, Start::Fresh).unwrap();
+        let mut states = Vec::new();
+        loop {
+            let b = read(&f, &cp).unwrap();
+            states.push((b.lines.len(), b.oversized, b.caught_up()));
+            let done = b.caught_up();
+            cp = b.checkpoint;
+            if done {
+                break;
+            }
+            assert!(states.len() < 10);
+        }
+        assert_eq!(states.last(), Some(&(1, 0, true)), "{states:?}");
+        assert!(
+            states[..states.len() - 1].iter().all(|s| !s.2),
+            "{states:?}"
+        );
+        assert_eq!(states.iter().map(|s| s.1).sum::<u64>(), 1);
     }
 
     #[test]
