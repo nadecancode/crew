@@ -589,25 +589,39 @@ the Codex and pi gaps in the current state.
   2. A variable of the same name in the daemon's environment.
 
   Values live only in the daemon's memory, as endpoint secrets do today.
-- **No collision with model credentials.** A reference name that the member's
-  endpoint also uses is a validation error. That covers `ANTHROPIC_API_KEY`,
-  `ANTHROPIC_AUTH_TOKEN`, `ANTHROPIC_BASE_URL`, `OPENAI_API_KEY`,
-  `CREW_CODEX_API_KEY`, `CODEX_HOME`, `CLAUDE_CONFIG_DIR`,
-  `PI_CODING_AGENT_DIR`, `CREW_IDENTITY` and every name in the member's
-  endpoint `env`, `env_files` and `secret_env`. Scrubbing such a name would
-  break the member's login, and passing it would hand the model credential to
-  a third-party server.
+- **Secret names.** For each reference, crew tracks two names:
+  - the **reference name** (`SHOP_GITHUB_TOKEN`);
+  - the **source name**, which is the daemon variable a `toolbox_env` entry
+    points at (`{ env = "DAEMON_TOKEN" }`), or the reference name itself when
+    the value comes straight from the daemon's environment.
+
+  A file source has no source name. The member's **secret names** are every
+  reference name and every source name of its effective toolbox.
+- **No collision with model credentials.** A secret name that the member's
+  runtime or endpoint also uses is a validation error. This applies to source
+  names as much as reference names, so `SHOP_TOKEN = { env =
+  "OPENAI_API_KEY" }` is refused. The protected names are:
+  - `ANTHROPIC_API_KEY`, `ANTHROPIC_AUTH_TOKEN`, `ANTHROPIC_BASE_URL`;
+  - `OPENAI_API_KEY`, `CREW_CODEX_API_KEY`;
+  - `CODEX_HOME`, `CLAUDE_CONFIG_DIR`, `PI_CODING_AGENT_DIR`, `CREW_IDENTITY`;
+  - every name in the member's endpoint `env`, `env_files` and `secret_env`;
+  - the variables the endpoint's `api_key_env` and `auth_token_env` name.
+
+  Scrubbing such a name would break the member's login, and passing it would
+  hand the model credential to a third-party server.
 - **Scrubbed from the session.** The member session's process environment has
-  every reference name of the member's effective toolbox removed, on both
-  launch paths:
+  every secret name of the member's effective toolbox removed, on both launch
+  paths:
   - The PTY launcher (`process/pty.rs`) adds the names to `SCRUBBED_ENV` for
     this launch.
   - The sandbox launcher (`daemon/sandbox.rs` and `sandbox::spec::launcher_env`)
     never passes them by name.
   - The Codex app-server sidecar follows the same rule.
 
-  An unsandboxed session therefore does not inherit `SHOP_GITHUB_TOKEN` even
-  when the operator started the daemon with it exported.
+  An unsandboxed session therefore inherits neither `SHOP_GITHUB_TOKEN` nor
+  the `DAEMON_TOKEN` it aliases, even when the operator started the daemon
+  with both exported. A server process gets the resolved value under its
+  reference name only, never under the source name.
 - **Delivery.** Every toolbox MCP server, local or remote, is reached through
   `crew toolbox mcp <name> --identity <identity file>`, the server entry crew
   renders for the runtime. Like `crew credential` for `apiKeyHelper` today, it
@@ -818,14 +832,31 @@ the runtime's final tool order (current state). The benchmark measures that.
    agent directory and the content store), never temporary. Filesystem
    enumeration order and server connection order never choose model-visible
    order.
-2a. **Model-visible definitions, across members.** What the model sees from a
-   toolbox must be identical for every member with the same fingerprint and
-   role, so a provider cache shared by those sessions can be reused. That
-   means the proxy's tool definitions, skill and subagent catalogs, and
-   plugin contents, and it contains no member id, identity path, agent
-   directory or worktree path. Store paths are content-addressed, so they are
-   equal by construction. QA compares the proxies' served definitions and the
-   runtimes' native listings, not `A/mcp.json`.
+2a. **Model-visible definitions, across members.** crew adds nothing
+   member-specific to what the model sees from a toolbox. It never adds a
+   member id, identity path, agent directory or worktree path to the proxy's
+   tool definitions, and it renders file items from content-addressed store
+   paths. Two members' toolbox definitions are equal only when the evidence
+   shows it, not because their fingerprints and roles match. The evidence is:
+   - the same fingerprint and role;
+   - the same definition digest, meaning byte-equal pinned snapshots;
+   - equal native catalog listings from the runtime.
+
+   References with the same names can resolve to different accounts, and an
+   upstream server can serve different definitions to each. Those
+   definitions stay distinct; the proxy sorts them but never rewrites them to
+   match. The inspector and `crew toolbox` show the definition digest so the
+   comparison is visible.
+
+   **Gap to probe.** Claude Code's skill and plugin catalog may name the
+   plugin directory crew passes with `--plugin-dir`. Today that directory is
+   `A/crew-toolbox`, a member path. Until a native-listing probe shows which
+   paths the catalog renders, the `crew-toolbox` plugin is not claimed free of
+   member paths. If the catalog renders the path, the plugin moves into the
+   content store under a digest of its rendered contents. Codex skill roots
+   and pi `--skill` paths point into the store already, and the same probe
+   confirms what their catalogs show. QA compares served definitions and
+   native listings, never `A/mcp.json`.
 3. **No secrets in rendered bytes**, so rotating a credential does not
    invalidate a cached prefix (see Secrets).
 4. **crew's own tools first and constant.** This is confirmed by the current
@@ -1001,9 +1032,9 @@ come from the supported pi, not the GSD binary on this host.
 | --- | --- | --- |
 | T01 | Team file without any `toolbox` key, Claude member, unsandboxed | `A/mcp.json` holds only `crew`; `--strict-mcp-config` and `--setting-sources project` are present; `crew toolbox --json` shows no items and lists the operator source as Not used. The sentinel user skill, subagent, enabled plugin, `CLAUDE.md` and hook do not reach the session; a project skill does. |
 | T02 | The example team above | `crew toolbox --json` for `qa` lists `mcp.context7` (bundle base via default), `mcp.playwright` (bundle web, required) and `skills.frontend-qa`. For `release` on Codex, unsandboxed: `mcp.github` and `mcp.docs` are Active; `skills.changelog` is Active through crew's app-server (with `delivery: terminal`, Not available on Codex without crew's app-server); `plugins.lint-kit` is Not available on Codex (Claude Code plugin format); `mcp.context7` is excluded. |
-| T03 | Reorder keys, items and bundles without changing meaning | Same fingerprint, byte-identical generated files for the same member, and identical model-visible definitions for a second member with the same selection and role (rule 2a). |
-| T04 | Validation | Each of these stops `crew run` and `crew toolbox check` with its field path: a bundle cycle; an unknown bundle; an exclusion matching nothing at its level; the same exclusion listed twice at one level (the second matches nothing); an item defined and excluded at one level; a reserved name; a plain string where a reference belongs; `inherit_mcp` together with `inherit`; a reference name that collides with a model credential or an endpoint variable. Accepted without error: defaults exclude `mcp.context7` from bundle base, and the member includes bundle base again, so `mcp.context7` is back with origin `bundle:base`. Accepted: defaults define `mcp.docs`, and the member defines `mcp.docs` differently, so the member's definition wins whole. Accepted: the member has `reset: true`, and defaults' `exclude`, `inherit` and `strict` do not apply to it. |
-| T05 | Secrets | Three sentinel values are used. `SHOP_GITHUB_TOKEN` comes from `[agents.release.toolbox_env]` as a file. `DOCS_TOKEN` is exported in the daemon's environment. `ENDPOINT_SENTINEL` is in the member's endpoint `env_files`. The first two reach only their stub server's process, through the proxy; `DOCS_TOKEN` goes through the remote bridge. They are absent from: `A`, `A/settings.json`, the store, the roster, the event log, `crew toolbox` output, every dashboard payload, every argv (`/proc/*/cmdline`), and the member session's own environment, both unsandboxed (PTY) and sandboxed, including the Codex app-server. A toolbox reference to `ENDPOINT_SENTINEL` is a validation error. A stub that echoes its token in an error shows `[redacted $SHOP_GITHUB_TOKEN]` to the model. |
+| T03 | Reorder keys, items and bundles without changing meaning | Same fingerprint, byte-identical generated files for the same member,. A second member with the same selection, role and stub account has the same definition digest and an equal native catalog listing (rule 2a). A stub that serves member-specific tools gives a different digest, and the two definitions stay distinct. Until the Claude catalog probe passes, the `crew-toolbox` plugin path is excluded from this comparison and listed as the open gap. |
+| T04 | Validation | Each of these stops `crew run` and `crew toolbox check` with its field path: a bundle cycle; an unknown bundle; an exclusion matching nothing at its level; the same exclusion listed twice at one level (the second matches nothing); an item defined and excluded at one level; a reserved name; a plain string where a reference belongs; `inherit_mcp` together with `inherit`; a reference or source (alias) name that collides with a model credential or an endpoint variable. Accepted without error: defaults exclude `mcp.context7` from bundle base, and the member includes bundle base again, so `mcp.context7` is back with origin `bundle:base`. Accepted: defaults define `mcp.docs`, and the member defines `mcp.docs` differently, so the member's definition wins whole. Accepted: the member has `reset: true`, and defaults' `exclude`, `inherit` and `strict` do not apply to it. |
+| T05 | Secrets | Four sentinels are used. `SHOP_GITHUB_TOKEN` comes from `[agents.release.toolbox_env]` as a file. `DOCS_TOKEN` is exported in the daemon's environment. `SHOP_TOKEN = { env = "DAEMON_TOKEN" }` aliases a daemon variable, with `DAEMON_TOKEN` exported. `ENDPOINT_SENTINEL` is in the member's endpoint `env_files`. The first three values reach only their stub server's process, through the proxy (`DOCS_TOKEN` through the remote bridge). The aliased value arrives there as `SHOP_TOKEN`, and neither `SHOP_TOKEN` nor `DAEMON_TOKEN` is in the member session's environment. They are absent from: `A`, `A/settings.json`, the store, the roster, the event log, `crew toolbox` output, every dashboard payload, every argv (`/proc/*/cmdline`), and the member session's own environment, both unsandboxed (PTY) and sandboxed, including the Codex app-server. A toolbox reference to `ENDPOINT_SENTINEL`, and an alias whose source is `ENDPOINT_SENTINEL` or `OPENAI_API_KEY`, are validation errors. A stub that echoes its token in an error shows `[redacted $SHOP_GITHUB_TOKEN]` to the model. |
 | T06 | Missing variable | For an item that is not required, the member starts and the item shows Needs $SHOP_GITHUB_TOKEN. For a required item, or under `strict`, the member does not start, and the inspector and the orchestrator's result give the same text. |
 | T07 | Stability over the lifecycle | Spawn, crash restart and `crew resume` give the same fingerprint and definition digest, and byte-identical `A/mcp.json`, plugin directory hashes, Codex `-c` arguments, pi arguments and pinned snapshots. |
 | T08 | Reload while running | After the team file is edited, `crew toolbox reload` leaves running sessions untouched. Affected members show the pending notice and `toolbox.pending` appears. A restart applies the change, and `toolbox.changed` carries both fingerprints. An edit to a field other than a toolbox field is reported and not applied. |
@@ -1107,7 +1138,8 @@ mechanism.
 
 - Claude Code:
   - `project` alone (without `local`);
-  - project exclusion.
+  - project exclusion;
+  - which paths the skill and plugin catalog renders for a `--plugin-dir` plugin (rule 2a gap).
 - Codex:
   - whether `codex mcp list --json` reports plugin-bundled servers;
   - whether the TUI session sees app-server skill roots;
