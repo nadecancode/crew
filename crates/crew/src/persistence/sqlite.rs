@@ -88,18 +88,19 @@ impl SqliteStore {
         Self::init(Connection::open_in_memory()?)
     }
 
-    fn init(conn: Connection) -> Result<Self> {
+    fn init(mut conn: Connection) -> Result<Self> {
         conn.busy_timeout(std::time::Duration::from_secs(5))?;
         // WAL keeps readers (e.g. `sqlite3` inspection) from blocking the daemon.
         conn.pragma_update(None, "journal_mode", "WAL").ok();
         conn.pragma_update(None, "synchronous", "NORMAL").ok();
         conn.execute_batch(SCHEMA).context("creating schema")?;
+        super::features::initialize(&mut conn)?;
         Ok(Self {
             conn: Mutex::new(conn),
         })
     }
 
-    fn conn(&self) -> MutexGuard<'_, Connection> {
+    pub(super) fn conn(&self) -> MutexGuard<'_, Connection> {
         self.conn.lock().unwrap_or_else(|e| e.into_inner())
     }
 }
@@ -129,12 +130,13 @@ fn load_docs<T: serde::de::DeserializeOwned>(conn: &Connection, table: &str) -> 
 
 impl AgentStore for SqliteStore {
     fn save_agent(&self, agent: &Agent) -> Result<()> {
-        upsert_doc(
-            &self.conn(),
-            "agents",
-            &agent.id,
-            &serde_json::to_string(agent)?,
-        )
+        let mut conn = self.conn();
+        let tx = conn.transaction()?;
+        let run = super::features::ensure_current(&tx, now_ms())?;
+        super::features::ensure_member(&tx, &run.id, &agent.id, now_ms())?;
+        upsert_doc(&tx, "agents", &agent.id, &serde_json::to_string(agent)?)?;
+        tx.commit()?;
+        Ok(())
     }
 
     fn load_agents(&self) -> Result<Vec<Agent>> {
@@ -142,9 +144,17 @@ impl AgentStore for SqliteStore {
     }
 
     fn delete_agent(&self, id: &str) -> Result<()> {
-        let conn = self.conn();
-        conn.execute("DELETE FROM agents WHERE id = ?1", params![id])?;
-        conn.execute("DELETE FROM tokens WHERE agent_id = ?1", params![id])?;
+        let mut conn = self.conn();
+        let tx = conn.transaction()?;
+        let run = super::features::ensure_current(&tx, now_ms())?;
+        tx.execute(
+            "UPDATE feature_members SET retired_at = ?1
+             WHERE run_id = ?2 AND agent_id = ?3 AND retired_at IS NULL",
+            params![now_ms(), run.id.as_str(), id],
+        )?;
+        tx.execute("DELETE FROM agents WHERE id = ?1", params![id])?;
+        tx.execute("DELETE FROM tokens WHERE agent_id = ?1", params![id])?;
+        tx.commit()?;
         Ok(())
     }
 
@@ -172,17 +182,17 @@ impl AgentStore for SqliteStore {
 
 impl TaskStore for SqliteStore {
     fn save_task(&self, task: &Task) -> Result<()> {
-        upsert_doc(
-            &self.conn(),
-            "tasks",
-            &task.id,
-            &serde_json::to_string(task)?,
-        )
+        save_task_in(&self.conn(), task)
     }
 
     fn load_tasks(&self) -> Result<Vec<Task>> {
         load_docs(&self.conn(), "tasks")
     }
+}
+
+/// A task write inside the caller's transaction. Does not lock or commit.
+pub(crate) fn save_task_in(conn: &Connection, task: &Task) -> Result<()> {
+    upsert_doc(conn, "tasks", &task.id, &serde_json::to_string(task)?)
 }
 
 fn event_from_row(row: &Row<'_>) -> rusqlite::Result<Event> {
@@ -203,33 +213,7 @@ fn event_from_row(row: &Row<'_>) -> rusqlite::Result<Event> {
 
 impl EventStore for SqliteStore {
     fn append_event(&self, event: NewEvent) -> Result<Event> {
-        let timestamp = now_ms();
-        let conn = self.conn();
-        conn.execute(
-            "INSERT INTO events (timestamp, source, event_type, agent_id, task_id, message, level, data)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
-            params![
-                timestamp,
-                event.source,
-                event.event_type,
-                event.agent_id,
-                event.task_id,
-                event.message,
-                event.level.as_str(),
-                serde_json::to_string(&event.data)?,
-            ],
-        )?;
-        Ok(Event {
-            seq: conn.last_insert_rowid(),
-            timestamp,
-            source: event.source,
-            event_type: event.event_type,
-            agent_id: event.agent_id,
-            task_id: event.task_id,
-            message: event.message,
-            level: event.level,
-            data: event.data,
-        })
+        append_event_in(&self.conn(), event)
     }
 
     fn recent_events(&self, agent: Option<&str>, limit: usize) -> Result<Vec<Event>> {
@@ -239,7 +223,7 @@ impl EventStore for SqliteStore {
             Some(agent) => {
                 let mut stmt = conn.prepare(
                     "SELECT seq, timestamp, source, event_type, agent_id, task_id, message, level, data
-                     FROM events WHERE agent_id = ?1 ORDER BY seq DESC LIMIT ?2",
+                     FROM events WHERE agent_id = ?1 AND event_type NOT LIKE 'aside.%' ORDER BY seq DESC LIMIT ?2",
                 )?;
                 let rows = stmt.query_map(params![agent, limit], event_from_row)?;
                 rows.collect::<rusqlite::Result<_>>()?
@@ -256,6 +240,37 @@ impl EventStore for SqliteStore {
         events.reverse();
         Ok(events)
     }
+}
+
+/// Append an event on the caller's connection/transaction, returning the
+/// allocated sequence. The caller publishes only after committing.
+pub(crate) fn append_event_in(conn: &Connection, event: NewEvent) -> Result<Event> {
+    let timestamp = now_ms();
+    conn.execute(
+            "INSERT INTO events (timestamp, source, event_type, agent_id, task_id, message, level, data)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+            params![
+                timestamp,
+                event.source,
+                event.event_type,
+                event.agent_id,
+                event.task_id,
+                event.message,
+                event.level.as_str(),
+                serde_json::to_string(&event.data)?,
+            ],
+        )?;
+    Ok(Event {
+        seq: conn.last_insert_rowid(),
+        timestamp,
+        source: event.source,
+        event_type: event.event_type,
+        agent_id: event.agent_id,
+        task_id: event.task_id,
+        message: event.message,
+        level: event.level,
+        data: event.data,
+    })
 }
 
 const MESSAGE_COLUMNS: &str =
@@ -277,9 +292,21 @@ fn message_from_row(row: &Row<'_>) -> rusqlite::Result<Message> {
     })
 }
 
+pub(crate) fn message_by_id_in(conn: &Connection, id: &str) -> Result<Option<Message>> {
+    let sql = format!("SELECT {MESSAGE_COLUMNS} FROM messages m WHERE m.id = ?1");
+    Ok(conn.query_row(&sql, [id], message_from_row).optional()?)
+}
+
+pub(crate) fn recipients_in(conn: &Connection, id: &str) -> Result<Vec<String>> {
+    let mut stmt =
+        conn.prepare("SELECT recipient FROM deliveries WHERE message_id = ?1 ORDER BY rowid")?;
+    let rows = stmt.query_map([id], |row| row.get(0))?;
+    Ok(rows.collect::<rusqlite::Result<_>>()?)
+}
+
 /// Insert `message` and its delivery rows within `tx`; `false` (nothing
 /// inserted) when its id is already taken.
-fn insert_message_in(
+pub(crate) fn insert_message_in(
     tx: &rusqlite::Transaction<'_>,
     message: &Message,
     recipients: &[String],
@@ -312,6 +339,21 @@ fn insert_message_in(
     Ok(true)
 }
 
+/// Preserve message idempotency: a duplicate message writes no task. Shares
+/// the legacy insertion/upsert helpers and never takes another writer lock.
+pub(crate) fn insert_message_with_task_in(
+    tx: &rusqlite::Transaction<'_>,
+    message: &Message,
+    recipients: &[String],
+    task: &Task,
+) -> Result<bool> {
+    if !insert_message_in(tx, message, recipients)? {
+        return Ok(false);
+    }
+    save_task_in(tx, task)?;
+    Ok(true)
+}
+
 impl MessageStore for SqliteStore {
     fn insert_message(&self, message: &Message, recipients: &[String]) -> Result<bool> {
         let mut conn = self.conn();
@@ -331,28 +373,19 @@ impl MessageStore for SqliteStore {
     ) -> Result<bool> {
         let mut conn = self.conn();
         let tx = conn.transaction()?;
-        if !insert_message_in(&tx, message, recipients)? {
+        if !insert_message_with_task_in(&tx, message, recipients, task)? {
             return Ok(false);
         }
-        upsert_doc(&tx, "tasks", &task.id, &serde_json::to_string(task)?)?;
         tx.commit()?;
         Ok(true)
     }
 
     fn get_message(&self, id: &str) -> Result<Option<Message>> {
-        let conn = self.conn();
-        let sql = format!("SELECT {MESSAGE_COLUMNS} FROM messages m WHERE m.id = ?1");
-        Ok(conn
-            .query_row(&sql, params![id], message_from_row)
-            .optional()?)
+        message_by_id_in(&self.conn(), id)
     }
 
     fn recipients(&self, message_id: &str) -> Result<Vec<String>> {
-        let conn = self.conn();
-        let mut stmt =
-            conn.prepare("SELECT recipient FROM deliveries WHERE message_id = ?1 ORDER BY rowid")?;
-        let rows = stmt.query_map(params![message_id], |row| row.get(0))?;
-        Ok(rows.collect::<rusqlite::Result<_>>()?)
+        recipients_in(&self.conn(), message_id)
     }
 
     fn inbox(&self, agent: &str, unread_only: bool, limit: usize) -> Result<Vec<InboxEntry>> {
@@ -512,17 +545,7 @@ impl MetaStore for SqliteStore {
 
 impl SessionStore for SqliteStore {
     fn clear_session(&self) -> Result<()> {
-        self.conn().execute_batch(
-            "BEGIN;
-             DELETE FROM agents;
-             DELETE FROM tokens;
-             DELETE FROM tasks;
-             DELETE FROM messages;
-             DELETE FROM deliveries;
-             DELETE FROM meta;
-             COMMIT;",
-        )?;
-        Ok(())
+        super::features::clear_session(&mut self.conn())
     }
 }
 

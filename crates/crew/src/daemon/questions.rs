@@ -25,6 +25,35 @@ const QUOTE_CHARS: usize = 400;
 /// How many decisions a final report may leave for the operator.
 const MAX_DECISIONS: usize = 12;
 
+/// Shared report normalization; callers retain their own bounded report size.
+pub(super) fn check_report_decisions(
+    who: &Who,
+    decisions: Vec<String>,
+    max_decisions: usize,
+) -> Result<Vec<String>, RpcError> {
+    let mut kept: Vec<String> = Vec::new();
+    for decision in decisions {
+        let decision = decision.trim().to_string();
+        if !decision.is_empty() && !kept.contains(&decision) {
+            kept.push(decision);
+        }
+    }
+    if kept.is_empty() {
+        return Ok(kept);
+    }
+    if !matches!(who, Who::Agent(_)) {
+        return Err(RpcError::invalid(
+            "decisions for the operator come from an agent",
+        ));
+    }
+    if kept.len() > max_decisions {
+        return Err(RpcError::invalid(format!(
+            "at most {max_decisions} decisions; put related ones into one question"
+        )));
+    }
+    Ok(kept)
+}
+
 fn internal(e: impl std::fmt::Display) -> RpcError {
     RpcError::internal(e.to_string())
 }
@@ -109,27 +138,7 @@ explanation in the question: {}",
         who: &Who,
         decisions: Vec<String>,
     ) -> Result<Vec<String>, RpcError> {
-        let mut kept: Vec<String> = Vec::new();
-        for decision in decisions {
-            let decision = decision.trim().to_string();
-            if !decision.is_empty() && !kept.contains(&decision) {
-                kept.push(decision);
-            }
-        }
-        if kept.is_empty() {
-            return Ok(kept);
-        }
-        if !matches!(who, Who::Agent(_)) {
-            return Err(RpcError::invalid(
-                "decisions for the operator come from an agent",
-            ));
-        }
-        if kept.len() > MAX_DECISIONS {
-            return Err(RpcError::invalid(format!(
-                "at most {MAX_DECISIONS} decisions; put related ones into one question"
-            )));
-        }
-        Ok(kept)
+        check_report_decisions(who, decisions, MAX_DECISIONS)
     }
 
     /// Put each decision of a final report to the operator as a question of

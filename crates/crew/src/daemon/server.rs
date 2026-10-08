@@ -9,10 +9,12 @@
 //! same frames through the same [`Session`], with its own checks in front.
 
 use crew_core::paths::uid;
+use crew_core::rpc::features::{Feature, Id};
 use crew_core::rpc::{Call, Push, Request, Role, RpcError, ServerFrame, WorkspaceSummary};
 use crew_core::util::ct_eq;
 use crew_core::MAX_FRAME_BYTES;
 use serde_json::Value;
+use std::collections::HashMap;
 use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader};
 use tokio::net::{UnixListener, UnixStream};
 use tokio::sync::{broadcast, mpsc};
@@ -48,6 +50,11 @@ impl Who {
 pub(crate) struct Conn {
     pub id: u64,
     pub who: Option<Who>,
+    pub feature_context: Option<super::features::ConnCtx>,
+    pub negotiated: Option<super::features::Negotiated>,
+    pub representation_started: bool,
+    pub feature_after_reply: Vec<super::features::PendingWatch>,
+    pub feature_tasks: HashMap<Id, (Feature, JoinHandle<()>)>,
     /// Its `hello` said `web`: the dashboard server opened it for a browser,
     /// which may not do what W7 keeps from a web session.
     pub web: bool,
@@ -92,6 +99,11 @@ impl Session {
                 .next_conn
                 .fetch_add(1, std::sync::atomic::Ordering::Relaxed),
             who: None,
+            feature_context: None,
+            negotiated: None,
+            representation_started: false,
+            feature_after_reply: Vec::new(),
+            feature_tasks: HashMap::new(),
             web: false,
             web_attached: false,
             tx,
@@ -125,6 +137,7 @@ impl Session {
         let frame = match serde_json::from_str::<Request>(text) {
             Ok(request) => {
                 let id = request.id;
+                let method = request.call.method();
                 // Input for an attached terminal is not acknowledged.
                 let silent = matches!(
                     request.call,
@@ -142,7 +155,7 @@ impl Session {
                         self.after_reply();
                         return true;
                     }
-                    Ok(result) => ServerFrame::ok(id, result),
+                    Ok(result) => ServerFrame::ok(id, legacy_task_result(method, result)),
                     Err(error) => ServerFrame::err(id, error),
                 }
             }
@@ -170,6 +183,12 @@ impl Session {
     /// Start the subscription a request asked for, now that its reply is
     /// queued: the reply precedes every push of it.
     fn after_reply(&mut self) {
+        for pending in std::mem::take(&mut self.conn.feature_after_reply) {
+            let id = pending.id.clone();
+            let feature = pending.feature;
+            let task = self.conn.spawn(pending.forward(self.conn.tx.clone()));
+            self.conn.feature_tasks.insert(id, (feature, task));
+        }
         if let Some(rx) = self.conn.subscribe_after_reply.take() {
             self.daemon.start_subscription(&mut self.conn, rx);
         }
@@ -179,8 +198,14 @@ impl Session {
     }
 
     /// Queue a frame that answers no request (an oversized message).
-    pub async fn send(&self, frame: ServerFrame) -> bool {
-        self.conn.tx.send(frame).await.is_ok()
+    pub fn send(
+        &self,
+        frame: ServerFrame,
+    ) -> impl std::future::Future<Output = bool> + Send + 'static {
+        // Own the sender rather than borrowing Session across the await.
+        // An observer stream has one consumer and need not implement Sync.
+        let tx = self.conn.tx.clone();
+        async move { tx.send(frame).await.is_ok() }
     }
 
     #[cfg(test)]
@@ -192,12 +217,29 @@ impl Session {
     pub fn delay_after_capture(&mut self, wait: std::time::Duration) {
         self.conn.after_capture = Some(wait);
     }
+
+    #[cfg(test)]
+    pub(crate) fn feature_watch_count(&mut self, feature: Feature) -> usize {
+        self.conn.feature_watch_count(feature)
+    }
 }
 
 impl Drop for Session {
     /// The connection ended, or the task that served it was aborted: its
     /// stream task stops, its listener slot is released.
     fn drop(&mut self) {
+        if let Some(context) = &self.conn.feature_context {
+            context.connection_closed.cancel();
+        }
+        for (_, (_, task)) in self.conn.feature_tasks.drain() {
+            task.abort();
+        }
+        if let Some(context) = &self.conn.feature_context {
+            context.cancellation.cancel();
+            self.daemon
+                .feature_services
+                .connection_closed(&context.connection_epoch);
+        }
         if let Some(task) = self.conn.stream_task.take() {
             task.abort();
         }
@@ -214,6 +256,74 @@ impl Drop for Session {
 }
 
 impl Conn {
+    pub(crate) fn has_feature(&self, feature: Feature) -> bool {
+        self.negotiated
+            .as_ref()
+            .is_some_and(|state| state.accepted(feature))
+    }
+    pub(crate) fn feature_watch_count(&mut self, feature: Feature) -> usize {
+        self.feature_tasks
+            .retain(|_, (_, task)| !task.is_finished());
+        self.feature_tasks
+            .values()
+            .filter(|(kind, _)| *kind == feature)
+            .count()
+            + self
+                .feature_after_reply
+                .iter()
+                .filter(|p| p.feature == feature)
+                .count()
+    }
+
+    pub(crate) fn feature_watch_exists(&self, id: &Id) -> bool {
+        self.feature_tasks.contains_key(id) || self.feature_after_reply.iter().any(|p| &p.id == id)
+    }
+
+    pub(crate) fn watch_belongs_to(&self, feature: Feature, id: &Id) -> bool {
+        self.feature_tasks
+            .get(id)
+            .is_some_and(|(kind, _)| *kind == feature)
+            || self
+                .feature_after_reply
+                .iter()
+                .any(|watch| watch.feature == feature && &watch.id == id)
+    }
+
+    pub(crate) async fn stop_feature_family(&mut self, feature: Feature) {
+        let ids: Vec<_> = self
+            .feature_tasks
+            .iter()
+            .filter(|(_, (kind, _))| *kind == feature)
+            .map(|(id, _)| id.clone())
+            .collect();
+        let mut retired = Vec::new();
+        for id in ids {
+            if let Some((_, task)) = self.feature_tasks.remove(&id) {
+                task.abort();
+                retired.push(task);
+            }
+        }
+        self.feature_after_reply
+            .retain(|watch| watch.feature != feature);
+        for task in retired {
+            let _ = task.await;
+        }
+    }
+
+    pub(crate) fn stop_feature_watch(&mut self, feature: Feature, id: &Id) {
+        if self
+            .feature_tasks
+            .get(id)
+            .is_some_and(|(kind, _)| *kind == feature)
+        {
+            if let Some((_, task)) = self.feature_tasks.remove(id) {
+                task.abort();
+            }
+        }
+        self.feature_after_reply
+            .retain(|pending| pending.feature != feature || &pending.id != id);
+    }
+
     /// Spawn a task of this connection (a forwarder).
     pub fn spawn<F>(&self, task: F) -> JoinHandle<F::Output>
     where
@@ -350,13 +460,14 @@ impl Daemon {
             task.abort();
         }
         conn.subscribed = true;
+        let epics = conn.has_feature(Feature::Epics);
         let tx = conn.tx.clone();
         conn.stream_task = Some(conn.spawn(async move {
             loop {
                 let frame = match rx.recv().await {
                     // P1 enables no features. P2 selects this projection or the
                     // negotiated stream per connection; never leak new variants.
-                    Ok(push) => match push.legacy_projection() {
+                    Ok(push) => match project_push(push, epics) {
                         Some(push) => ServerFrame::push(push),
                         None => continue,
                     },
@@ -370,6 +481,53 @@ impl Daemon {
             }
         }));
     }
+}
+
+fn project_push(push: Push, epics: bool) -> Option<Push> {
+    if !epics {
+        return push.legacy_projection();
+    }
+    match push {
+        Push::Task(_) | Push::Aside(_) | Push::DocsChanged(_) | Push::UsageChanged(_) => None,
+        other => Some(other),
+    }
+}
+
+fn legacy_task_result(method: &str, mut value: Value) -> Value {
+    fn task(value: &mut Value) {
+        if let Some(object) = value.as_object_mut() {
+            object.remove("epic");
+        }
+    }
+    match method {
+        "load_team" => {
+            if let Some(object) = value.as_object_mut() {
+                object.remove("workspace_run_id");
+            }
+        }
+        "tasks_list" => {
+            if let Some(tasks) = value.as_array_mut() {
+                for item in tasks {
+                    task(item);
+                }
+            }
+        }
+        "task_get" => {
+            if let Some(item) = value.get_mut("task") {
+                task(item);
+            }
+            if let Some(dependencies) = value.get_mut("dependencies").and_then(Value::as_array_mut)
+            {
+                for item in dependencies {
+                    task(item);
+                }
+            }
+        }
+        "task_create" | "task_edit" | "task_assign" | "task_complete" | "task_fail"
+        | "task_retry" | "review_submit" => task(&mut value),
+        _ => {}
+    }
+    value
 }
 
 #[cfg(test)]
@@ -476,7 +634,16 @@ mod tests {
         for call in calls {
             assert!(session.request(&call.to_string()).await);
             let frame = rx.recv().await.unwrap();
-            assert_eq!(frame.error.unwrap().code, "unsupported_feature");
+            if call["method"] == "features_negotiate" {
+                let result = frame
+                    .result
+                    .expect("discovery is supported without backends");
+                assert_eq!(result["accepted"], serde_json::json!({}));
+                assert_eq!(result["unavailable"].as_object().unwrap().len(), 4);
+                assert!(result["connection_epoch"].is_string());
+            } else {
+                assert_eq!(frame.error.unwrap().code, "unsupported_feature");
+            }
         }
         assert!(running.daemon.model().tasks.is_empty());
         assert!(

@@ -479,6 +479,16 @@ on overflow/gap emit a small resync marker for that feature, not a full body
 backlog. No observer watch can replace an agent Listen channel, write into a
 terminal or trigger scheduling/health activity.
 
+While its physical connection stays open, an observer watch cannot end
+silently. A feature epoch change queues one final resync marker carrying the
+new epoch and registered watch id before the forwarder ends. Stream end,
+stream error, invalid stream identity or run expiry queues a final resync
+with the registered identity. Physical disconnect sends no final frame and
+releases a blocked forwarder. Policy/source replacement queues terminal
+metadata before closing the domain queue. The client retires the stale watch
+and explicitly reissues the watch against current scope/readiness; unavailable
+features must not create an automatic retry loop. This is part of P07.
+
 Use existing RpcError envelopes with finite codes such as unsupported_feature,
 stale_scope, stale_cursor, snapshot_expired, too_large, busy, forbidden and
 gone. Unavailable domain content is its typed result where the feature design

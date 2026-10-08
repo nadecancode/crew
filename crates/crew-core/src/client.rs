@@ -43,6 +43,16 @@ pub enum ClientError {
     AgentContext { agent_id: String },
 }
 
+/// Optional discovery on an already authenticated connection. An unavailable
+/// result permits legacy reads; it never permits replaying a scoped mutation
+/// as an unscoped one.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum FeatureDiscovery {
+    Supported(crate::rpc::features::FeatureSession),
+    Unsupported,
+    Unavailable { code: String },
+}
+
 impl ClientError {
     /// The stream is unavailable or unsafe to continue. This does not make
     /// replaying a mutation safe: a request may have run before a read failed.
@@ -460,6 +470,65 @@ impl Client {
         })
     }
 
+    /// Discover feature support before Snapshot/Subscribe or a feature call.
+    /// Actual old v6 decoders/intermediaries use invalid/forbidden for an
+    /// unknown negotiation method. Authentication and transport errors retain
+    /// their normal recovery path; no operation is retried by this helper.
+    pub fn negotiate_features(
+        &mut self,
+        request: crate::rpc::features::FeaturesNegotiate,
+    ) -> ClientResult<FeatureDiscovery> {
+        let requested = request.versions.clone();
+        match self.call_value(Call::FeaturesNegotiate(request)) {
+            Ok(value) => {
+                let session: crate::rpc::features::FeatureSession = serde_json::from_value(value)
+                    .map_err(|_| {
+                    self.poison();
+                    ClientError::Protocol("invalid feature negotiation response".into())
+                })?;
+                let valid = session.accepted.iter().all(|(name, version)| {
+                    requested.get(name) == Some(version)
+                        && *version == crate::rpc::features::FEATURE_VERSION
+                        && crate::rpc::features::Feature::ALL
+                            .iter()
+                            .any(|feature| feature.name() == name)
+                }) && session
+                    .unavailable
+                    .keys()
+                    .all(|name| requested.contains_key(name))
+                    && session
+                        .accepted
+                        .keys()
+                        .all(|name| !session.unavailable.contains_key(name))
+                    && requested.keys().all(|name| {
+                        session.accepted.contains_key(name)
+                            || session.unavailable.contains_key(name)
+                    });
+                if !valid {
+                    self.poison();
+                    return Err(ClientError::Protocol(
+                        "feature negotiation changed requested versions".into(),
+                    ));
+                }
+                Ok(FeatureDiscovery::Supported(session))
+            }
+            Err(ClientError::Rpc(error))
+                if matches!(
+                    error.code.as_str(),
+                    "invalid" | "forbidden" | "unsupported_feature"
+                ) =>
+            {
+                Ok(FeatureDiscovery::Unsupported)
+            }
+            Err(ClientError::Rpc(error))
+                if !matches!(error.code.as_str(), "unauthorized" | "protocol") =>
+            {
+                Ok(FeatureDiscovery::Unavailable { code: error.code })
+            }
+            Err(error) => Err(error),
+        }
+    }
+
     /// Subscribe and turn the connection into a stream of pushes.
     pub fn subscribe(mut self) -> ClientResult<PushStream> {
         self.call_value(Call::Subscribe)?;
@@ -586,6 +655,105 @@ fn read_frame(reader: &mut BufReader<UnixStream>) -> ClientResult<ServerFrame> {
 mod tests {
     use super::*;
     use serde_json::json;
+
+    fn negotiation_request() -> crate::rpc::features::FeaturesNegotiate {
+        serde_json::from_value(json!({"versions":{"docs":1}})).unwrap()
+    }
+
+    fn negotiation_peer(
+        mut server: UnixStream,
+        response: ServerFrame,
+    ) -> std::thread::JoinHandle<()> {
+        std::thread::spawn(move || {
+            let mut line = String::new();
+            BufReader::new(server.try_clone().unwrap())
+                .read_line(&mut line)
+                .unwrap();
+            let request: Request = serde_json::from_str(&line).unwrap();
+            assert!(matches!(request.call, Call::FeaturesNegotiate(_)));
+            let mut response = response;
+            response.id = Some(request.id);
+            send_frame(&mut server, response);
+        })
+    }
+
+    #[test]
+    fn feature_discovery_classifies_old_peer_refusals_without_replaying_intent() {
+        for code in [
+            "invalid",
+            "forbidden",
+            "unsupported_feature",
+            "invalid_feature_request",
+            "unauthorized",
+        ] {
+            let (mut client, server) = paired_client();
+            let peer = negotiation_peer(
+                server,
+                ServerFrame::err(1, RpcError::new(code, "synthetic refusal")),
+            );
+            let result = client.negotiate_features(negotiation_request());
+            match code {
+                "unauthorized" => {
+                    assert!(matches!(result, Err(ClientError::Rpc(error)) if error.code == code))
+                }
+                "invalid_feature_request" => assert!(
+                    matches!(result, Ok(FeatureDiscovery::Unavailable {code: reason}) if reason == code)
+                ),
+                _ => assert_eq!(result.unwrap(), FeatureDiscovery::Unsupported),
+            }
+            assert_eq!(client.next_id, 2, "discovery sent an extra request");
+            peer.join().unwrap();
+        }
+    }
+
+    #[test]
+    fn feature_discovery_rejects_added_versions_and_poisoned_decoding() {
+        for accepted in [json!({"docs":2}), json!({"docs":1,"epics":1})] {
+            let (mut client, server) = paired_client();
+            let peer = negotiation_peer(
+                server,
+                ServerFrame::ok(
+                    1,
+                    json!({
+                        "accepted":accepted,"connection_epoch":"connection-1","workspace_run_id":"run-1","unavailable":{}
+                    }),
+                ),
+            );
+            assert!(matches!(
+                client.negotiate_features(negotiation_request()),
+                Err(ClientError::Protocol(_))
+            ));
+            assert!(client.closed);
+            peer.join().unwrap();
+        }
+    }
+
+    #[test]
+    fn feature_discovery_preserves_valid_connection_epoch_and_transport_failures() {
+        let (mut client, server) = paired_client();
+        let peer = negotiation_peer(
+            server,
+            ServerFrame::ok(
+                1,
+                json!({
+                    "accepted":{"docs":1},"connection_epoch":"exact-connection","workspace_run_id":"run-1","unavailable":{}
+                }),
+            ),
+        );
+        let FeatureDiscovery::Supported(session) =
+            client.negotiate_features(negotiation_request()).unwrap()
+        else {
+            panic!("feature support lost")
+        };
+        assert_eq!(session.connection_epoch.as_str(), "exact-connection");
+        peer.join().unwrap();
+        let (mut client, server) = paired_client();
+        drop(server);
+        assert!(client
+            .negotiate_features(negotiation_request())
+            .unwrap_err()
+            .is_disconnect());
+    }
 
     #[test]
     fn missing_token_preserves_old_daemon_protocol_diagnostics() {

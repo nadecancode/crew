@@ -31,6 +31,49 @@ pub enum BusError {
     Storage(#[from] anyhow::Error),
 }
 
+/// Shared preflight for messages prepared inside a feature transaction.
+pub(crate) fn check_message_body(body: &str, limit: usize) -> Result<(), BusError> {
+    if body.trim().is_empty() {
+        return Err(BusError::Empty);
+    }
+    if body.len() > limit {
+        return Err(BusError::TooLarge {
+            size: body.len(),
+            limit,
+        });
+    }
+    Ok(())
+}
+
+/// Prepare without storing or publishing; shared feature transactions use the
+/// same body/recipient/id rules as the ordinary bus.
+pub(crate) fn prepare_message(
+    new: NewMessage,
+    recipients: &[String],
+    limit: usize,
+) -> Result<Message, BusError> {
+    check_message_body(&new.body, limit)?;
+    if recipients.is_empty() && new.to != BROADCAST {
+        return Err(BusError::NoRecipients);
+    }
+    let id = match new.id {
+        Some(id) if valid_message_id(&id) => id,
+        Some(id) => return Err(BusError::InvalidId(id)),
+        None => new_id("m"),
+    };
+    Ok(Message {
+        id,
+        from: new.from,
+        to: new.to,
+        kind: new.kind,
+        body: new.body,
+        timestamp: now_ms(),
+        correlation_id: new.correlation_id,
+        reply_to: new.reply_to,
+        metadata: new.metadata,
+    })
+}
+
 /// A message as submitted, before the bus assigns id and timestamp.
 #[derive(Clone, Debug)]
 pub struct NewMessage {
@@ -87,6 +130,12 @@ pub struct BusEvent {
 }
 
 pub trait MessageBus: Send + Sync {
+    /// Whether a shared feature transaction may persist first and publish its
+    /// accepted outcome afterwards. Other transports retain the legacy path.
+    fn supports_external_commit(&self) -> bool {
+        false
+    }
+    fn publish_committed(&self, _outcome: &SendOutcome) {}
     /// Accept a message for the given recipients. For a direct message
     /// `recipients` is `[to]`; for a broadcast it is everyone but the sender.
     fn send(&self, message: NewMessage, recipients: Vec<String>) -> Result<SendOutcome, BusError>;
@@ -148,6 +197,17 @@ fn valid_message_id(id: &str) -> bool {
 }
 
 impl MessageBus for LocalBus {
+    fn supports_external_commit(&self) -> bool {
+        true
+    }
+    fn publish_committed(&self, outcome: &SendOutcome) {
+        if !outcome.duplicate {
+            let _ = self.tx.send(BusEvent {
+                message: outcome.message.clone(),
+                recipients: outcome.recipients.clone(),
+            });
+        }
+    }
     fn send(&self, new: NewMessage, recipients: Vec<String>) -> Result<SendOutcome, BusError> {
         self.accept(new, recipients, None)
     }
@@ -221,35 +281,7 @@ impl LocalBus {
         recipients: Vec<String>,
         task: Option<&Task>,
     ) -> Result<SendOutcome, BusError> {
-        if new.body.trim().is_empty() {
-            return Err(BusError::Empty);
-        }
-        let limit = self.max_bytes.load(Ordering::Relaxed);
-        if new.body.len() > limit {
-            return Err(BusError::TooLarge {
-                size: new.body.len(),
-                limit,
-            });
-        }
-        if recipients.is_empty() && new.to != BROADCAST {
-            return Err(BusError::NoRecipients);
-        }
-        let id = match new.id {
-            Some(id) if valid_message_id(&id) => id,
-            Some(id) => return Err(BusError::InvalidId(id)),
-            None => new_id("m"),
-        };
-        let message = Message {
-            id,
-            from: new.from,
-            to: new.to,
-            kind: new.kind,
-            body: new.body,
-            timestamp: now_ms(),
-            correlation_id: new.correlation_id,
-            reply_to: new.reply_to,
-            metadata: new.metadata,
-        };
+        let message = prepare_message(new, &recipients, self.max_bytes.load(Ordering::Relaxed))?;
         let inserted = match task {
             Some(task) => self
                 .store
