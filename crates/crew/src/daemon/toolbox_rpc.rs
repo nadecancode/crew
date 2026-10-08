@@ -241,12 +241,16 @@ impl Daemon {
             ));
         }
         let model = self.model();
-        let bundles: Vec<&str> = model
+        let mut bundles: Vec<&str> = model
             .session
             .team
             .as_ref()
             .map(|t| t.toolboxes.keys().map(String::as_str).collect())
             .unwrap_or_default();
+        if !bundles.contains(&crew_core::toolbox::COMPACT_CLI) {
+            bundles.push(crew_core::toolbox::COMPACT_CLI);
+            bundles.sort_unstable();
+        }
         for name in &toolbox.include {
             if !bundles.contains(&name.as_str()) {
                 return Err(RpcError::invalid(if bundles.is_empty() {
