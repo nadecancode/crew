@@ -66,6 +66,13 @@ impl Queue {
             return;
         }
         if let Some(old) = pending.value.take() {
+            let mut sources = old.history_sources_changed.to_vec();
+            sources.extend(change.history_sources_changed.iter().cloned());
+            sources.sort();
+            sources.dedup();
+            sources.truncate(64);
+            change.history_sources_changed =
+                crew_core::rpc::features::List::new(sources).expect("bounded source change set");
             change.from_revision = old.from_revision;
             // A slow consumer gets one small resync, not a second queued delta.
             change.resync_required = true;

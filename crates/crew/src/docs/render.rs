@@ -261,6 +261,7 @@ impl Resolve for Resolver {
             }
         };
         image.bytes = Some(bytes.len() as u32);
+        image.hash = Some(markdown::hash(&bytes));
         let raster = match assets::inspect(&bytes) {
             Ok(r) => r,
             Err(reason) => {

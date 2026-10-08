@@ -2,9 +2,9 @@
 //! see a fixed private bare view and a read-only object directory, never the
 //! repository's config, worktree, helpers, credentials or network. No host fallback.
 
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 use std::fs::File;
-use std::io::Read;
+use std::io::{Read, Write};
 use std::os::fd::AsRawFd;
 use std::os::unix::process::CommandExt;
 use std::path::{Path, PathBuf};
@@ -81,6 +81,16 @@ impl Reader {
             .map_err(|_| unavailable())?,
         );
         let objects_identity = identify(&objects).map_err(|_| unavailable())?;
+        // A read-only mount cannot manufacture this masking mountpoint. Normal
+        // Git stores have it; a missing/replaced directory fails before launch.
+        let _info = crate::os::open_no_symlinks(
+            directory.as_raw_fd(),
+            Path::new("info"),
+            libc::O_RDONLY | libc::O_DIRECTORY | libc::O_CLOEXEC,
+            0,
+            true,
+        )
+        .map_err(|_| unavailable())?;
         no_alternates(&directory)?;
         // No document bodies are written here. Git's private administrative view
         // has no copied configuration or refs and is mounted read-only.
@@ -233,7 +243,7 @@ impl Reader {
         if fields.len() % 4 != 0 {
             return Err(unavailable());
         }
-        let mut result = Vec::new();
+        let mut candidates = Vec::new();
         for row in fields.chunks_exact(4) {
             let text = |b| std::str::from_utf8(b).map_err(|_| unavailable());
             let commit = Id::new(text(row[0])?).map_err(|_| unavailable())?;
@@ -241,18 +251,38 @@ impl Reader {
             let seconds: i64 = text(row[1])?.parse().map_err(|_| unavailable())?;
             let recorded_at = Timestamp::new(seconds.checked_mul(1000).ok_or_else(unavailable)?)
                 .map_err(|_| unavailable())?;
-            let bytes = match self.blob(&commit, path, MAX_MARKDOWN_BYTES, deadline) {
-                Ok(bytes) => bytes,
+            let blob = match self.blob_id(&commit, path, deadline) {
+                Ok(blob) => blob,
                 Err(DocFailureCode::ObjectMissing | DocFailureCode::ForbiddenPath) => continue,
                 Err(e) => return Err(e),
             };
+            candidates.push((
+                commit,
+                recorded_at,
+                label(text(row[2])?),
+                label(text(row[3])?),
+                blob,
+            ));
+        }
+        let ids: Vec<_> = candidates.iter().map(|c| c.0.clone()).collect();
+        let reachable = self.reachable(head, &ids, deadline)?;
+        if reachable.len() != ids.iter().collect::<BTreeSet<_>>().len() {
+            return Err(unavailable());
+        }
+        let summaries = self.blob_summaries(
+            &candidates.iter().map(|c| c.4.clone()).collect::<Vec<_>>(),
+            deadline,
+        )?;
+        let mut result = Vec::new();
+        for (commit, recorded_at, author, subject, blob) in candidates {
+            let (hash, bytes) = summaries.get(&blob).ok_or_else(unavailable)?;
             result.push(Record {
                 commit,
                 recorded_at,
-                author: label(text(row[2])?),
-                subject: label(text(row[3])?),
-                hash: hash(&bytes),
-                bytes: bytes.len() as u32,
+                author,
+                subject,
+                hash: hash.clone(),
+                bytes: *bytes,
             });
         }
         Ok(Records {
@@ -296,6 +326,33 @@ impl Reader {
         if path.forbidden() {
             return Err(DocFailureCode::ForbiddenPath);
         }
+        let blob = self.blob_id(commit, path, deadline)?;
+        let size = self.command(&["cat-file", "-s", blob.as_str()], deadline, 64, false)?;
+        let size: usize = std::str::from_utf8(&size)
+            .map_err(|_| unavailable())?
+            .trim()
+            .parse()
+            .map_err(|_| unavailable())?;
+        if size > max {
+            return Err(DocFailureCode::TooLarge);
+        }
+        let bytes = self.command(&["cat-file", "blob", blob.as_str()], deadline, max, false)?;
+        if bytes.len() != size {
+            return Err(DocFailureCode::UnstableFile);
+        }
+        Ok(bytes)
+    }
+
+    fn blob_id(
+        &self,
+        commit: &Id,
+        path: &Relative,
+        deadline: Instant,
+    ) -> Result<Id, DocFailureCode> {
+        oid(commit)?;
+        if path.forbidden() {
+            return Err(DocFailureCode::ForbiddenPath);
+        }
         let raw = self.command(
             &["ls-tree", "-z", commit.as_str(), "--", path.as_str()],
             deadline,
@@ -319,20 +376,127 @@ impl Reader {
         }
         let blob = Id::new(parts[2]).map_err(|_| unavailable())?;
         oid(&blob)?;
-        let size = self.command(&["cat-file", "-s", blob.as_str()], deadline, 64, false)?;
-        let size: usize = std::str::from_utf8(&size)
-            .map_err(|_| unavailable())?
-            .trim()
-            .parse()
-            .map_err(|_| unavailable())?;
-        if size > max {
+        Ok(blob)
+    }
+
+    /// One graph walk per captured head checks a whole page. A candidate absent
+    /// from the excluded walk is reachable from that head. No caller revsets.
+    pub fn reachable(
+        &self,
+        head: &Id,
+        candidates: &[Id],
+        deadline: Instant,
+    ) -> Result<BTreeSet<Id>, DocFailureCode> {
+        oid(head)?;
+        if candidates.len() > 51 {
             return Err(DocFailureCode::TooLarge);
         }
-        let bytes = self.command(&["cat-file", "blob", blob.as_str()], deadline, max, false)?;
-        if bytes.len() != size {
-            return Err(DocFailureCode::UnstableFile);
+        if candidates.is_empty() {
+            return Ok(BTreeSet::new());
         }
-        Ok(bytes)
+        for candidate in candidates {
+            oid(candidate)?;
+        }
+        let mut args = vec!["rev-list"];
+        args.extend(candidates.iter().map(Id::as_str));
+        args.extend(["--not", head.as_str(), "--"]);
+        let out = self.command(&args, deadline, STDOUT_LIMIT, false)?;
+        let excluded = std::str::from_utf8(&out)
+            .map_err(|_| unavailable())?
+            .lines()
+            .map(|line| {
+                let id = Id::new(line).map_err(|_| unavailable())?;
+                oid(&id)?;
+                Ok(id)
+            })
+            .collect::<Result<BTreeSet<_>, DocFailureCode>>()?;
+        Ok(candidates
+            .iter()
+            .filter(|id| !excluded.contains(*id))
+            .cloned()
+            .collect())
+    }
+
+    fn blob_summaries(
+        &self,
+        objects: &[Id],
+        deadline: Instant,
+    ) -> Result<BTreeMap<Id, (Id, u32)>, DocFailureCode> {
+        let objects: Vec<_> = objects
+            .iter()
+            .cloned()
+            .collect::<BTreeSet<_>>()
+            .into_iter()
+            .collect();
+        if objects.is_empty() {
+            return Ok(BTreeMap::new());
+        }
+        let input = batch_input(&objects)?;
+        let meta = self.command_input(
+            &["cat-file", "--batch-check"],
+            deadline,
+            16 * 1024,
+            false,
+            Some(&input),
+        )?;
+        let lines = std::str::from_utf8(&meta)
+            .map_err(|_| unavailable())?
+            .lines()
+            .collect::<Vec<_>>();
+        if lines.len() != objects.len() {
+            return Err(unavailable());
+        }
+        let sizes: Vec<_> = lines
+            .iter()
+            .zip(&objects)
+            .map(|(line, id)| batch_header(line.as_bytes(), id, MAX_MARKDOWN_BYTES))
+            .collect::<Result<_, _>>()?;
+        let mut result = BTreeMap::new();
+        let mut start = 0;
+        while start < objects.len() {
+            let mut end = start;
+            let mut budget = 0;
+            while end < objects.len() && budget + sizes[end] + 128 <= STDOUT_LIMIT {
+                budget += sizes[end] + 128;
+                end += 1;
+            }
+            if end == start {
+                return Err(DocFailureCode::TooLarge);
+            }
+            let input = batch_input(&objects[start..end])?;
+            let bytes = self.command_input(
+                &["cat-file", "--batch"],
+                deadline,
+                STDOUT_LIMIT,
+                false,
+                Some(&input),
+            )?;
+            let mut at = 0;
+            for (i, id) in objects.iter().enumerate().take(end).skip(start) {
+                let newline = bytes[at..]
+                    .iter()
+                    .position(|b| *b == b'\n')
+                    .ok_or_else(unavailable)?
+                    + at;
+                let size = batch_header(&bytes[at..newline], id, MAX_MARKDOWN_BYTES)?;
+                if size != sizes[i] {
+                    return Err(DocFailureCode::UnstableFile);
+                }
+                at = newline + 1;
+                let body = bytes.get(at..at + size).ok_or_else(unavailable)?;
+                result.insert(id.clone(), (hash(body), size as u32));
+                at += size;
+                if bytes.get(at) != Some(&b'\n') {
+                    return Err(unavailable());
+                }
+                at += 1;
+            }
+            if at != bytes.len() {
+                return Err(unavailable());
+            }
+            start = end;
+        }
+        Ok(result)
     }
 
     fn command(
@@ -341,6 +505,16 @@ impl Reader {
         deadline: Instant,
         max: usize,
         allow_one: bool,
+    ) -> Result<Vec<u8>, DocFailureCode> {
+        self.command_input(args, deadline, max, allow_one, None)
+    }
+    fn command_input(
+        &self,
+        args: &[&str],
+        deadline: Instant,
+        max: usize,
+        allow_one: bool,
+        input: Option<&[u8]>,
     ) -> Result<Vec<u8>, DocFailureCode> {
         if Instant::now() >= deadline || identify(&self.objects).ok() != Some(self.objects_identity)
         {
@@ -366,7 +540,7 @@ impl Reader {
         }
         cmd.args(args);
         let command = self.launcher.launch(&cmd).map_err(|_| unavailable())?;
-        bounded_command(command, deadline, max, allow_one)
+        bounded_command(command, deadline, max, allow_one, input)
     }
 }
 
@@ -419,10 +593,15 @@ fn bounded_command(
     deadline: Instant,
     max: usize,
     allow_one: bool,
+    input: Option<&[u8]>,
 ) -> Result<Vec<u8>, DocFailureCode> {
     use std::os::fd::AsRawFd;
     command
-        .stdin(Stdio::null())
+        .stdin(if input.is_some() {
+            Stdio::piped()
+        } else {
+            Stdio::null()
+        })
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .process_group(0);
@@ -439,6 +618,14 @@ fn bounded_command(
     let mut stdout = child.stdout.take().ok_or_else(unavailable)?;
     let mut stderr = child.stderr.take().ok_or_else(unavailable)?;
     let mut child = Kill(child);
+    if let Some(input) = input {
+        if input.len() > 4096 {
+            return Err(DocFailureCode::TooLarge);
+        }
+        let mut stdin = child.0.stdin.take().ok_or_else(unavailable)?;
+        stdin.write_all(input).map_err(|_| unavailable())?;
+        drop(stdin);
+    }
     for fd in [stdout.as_raw_fd(), stderr.as_raw_fd()] {
         if unsafe { libc::fcntl(fd, libc::F_SETFL, libc::O_NONBLOCK) } < 0 {
             return Err(unavailable());
@@ -494,5 +681,32 @@ fn drain(
             Err(e) if e.kind() == std::io::ErrorKind::Interrupted => {}
             Err(_) => return Err(unavailable()),
         }
+    }
+}
+
+fn batch_input(objects: &[Id]) -> Result<Vec<u8>, DocFailureCode> {
+    let mut input = Vec::new();
+    for id in objects {
+        oid(id)?;
+        input.extend_from_slice(id.as_str().as_bytes());
+        input.push(b'\n');
+    }
+    if input.len() > 4096 {
+        Err(DocFailureCode::TooLarge)
+    } else {
+        Ok(input)
+    }
+}
+fn batch_header(line: &[u8], expected: &Id, max: usize) -> Result<usize, DocFailureCode> {
+    let text = std::str::from_utf8(line).map_err(|_| unavailable())?;
+    let fields: Vec<_> = text.split(' ').collect();
+    if fields.len() != 3 || fields[0] != expected.as_str() || fields[1] != "blob" {
+        return Err(unavailable());
+    }
+    let size: usize = fields[2].parse().map_err(|_| unavailable())?;
+    if size > max {
+        Err(DocFailureCode::TooLarge)
+    } else {
+        Ok(size)
     }
 }

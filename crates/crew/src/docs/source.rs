@@ -479,3 +479,51 @@ impl Scan {
         })
     }
 }
+
+#[cfg(test)]
+mod save_tests {
+    use super::*;
+    #[test]
+    fn k05_atomic_save_race_never_returns_a_mixed_or_cut_off_version() {
+        let dir = tempfile::tempdir().unwrap();
+        let a = vec![b'a'; 64 * 1024];
+        let b = vec![b'b'; 64 * 1024];
+        std::fs::write(dir.path().join("doc.md"), &a).unwrap();
+        let root = Root::open(dir.path()).unwrap();
+        let path = dir.path().to_owned();
+        let aa = a.clone();
+        let bb = b.clone();
+        let writer = std::thread::spawn(move || {
+            for n in 0..100 {
+                std::fs::write(path.join(".save"), if n % 2 == 0 { &aa } else { &bb }).unwrap();
+                std::fs::rename(path.join(".save"), path.join("doc.md")).unwrap();
+            }
+        });
+        for _ in 0..100 {
+            match root.read(
+                &Relative::new("doc.md").unwrap(),
+                &Policy::default(),
+                256 * 1024,
+            ) {
+                Ok(read) => assert!(read.bytes == a || read.bytes == b),
+                Err(reason) => assert!(matches!(
+                    reason,
+                    DocFailureCode::UnstableFile
+                        | DocFailureCode::ObjectMissing
+                        | DocFailureCode::ForbiddenPath
+                )),
+            }
+        }
+        writer.join().unwrap();
+        assert_eq!(
+            root.read(
+                &Relative::new("doc.md").unwrap(),
+                &Policy::default(),
+                256 * 1024
+            )
+            .unwrap()
+            .bytes,
+            b
+        );
+    }
+}

@@ -534,3 +534,278 @@ async fn k17_k18_diff_and_navigation_use_known_paths_and_immutable_versions() {
     assert!(diff.unified_diff.contains("+three\n"));
     assert!(!diff.truncated);
 }
+
+#[tokio::test]
+async fn k13_cache_pressure_expires_an_old_capture_without_serving_new_content() {
+    let (dir, service, ctx) = fixture();
+    let page = complete(&service, &ctx).await;
+    let doc = reference(&page, "notes/a.md");
+    let old = read(&service, &ctx, doc.clone()).await;
+    // Account one retained synthetic capture as consuming the budget, exercising
+    // the real global eviction path without a test allocating hundreds of MiB.
+    {
+        let mut state = service.state();
+        let retained = state
+            .connections
+            .get_mut(&ctx.connection_epoch)
+            .unwrap()
+            .versions
+            .get_mut(&old.version.id)
+            .unwrap();
+        Arc::get_mut(&mut retained.value).unwrap().charge = CACHE_BYTES;
+        state.cache_bytes = CACHE_BYTES;
+    }
+    fs::write(dir.path().join("notes/a.md"), "# New\n").unwrap();
+    let latest = read(&service, &ctx, doc.clone()).await;
+    assert_ne!(latest.version.id, old.version.id);
+    assert!(service.state().cache_bytes < CACHE_BYTES);
+    let result: DocReadResult = serde_json::from_value(
+        service
+            .handle(
+                &ctx,
+                Call::DocsRead(DocsRead {
+                    document: doc,
+                    version: DocVersionSelector::Id(old.version.id.clone()),
+                }),
+            )
+            .await
+            .unwrap(),
+    )
+    .unwrap();
+    assert!(
+        matches!(result,DocReadResult::Unavailable(f) if f.code==DocFailureCode::SnapshotExpired)
+    );
+}
+
+#[tokio::test]
+async fn k09_k10_late_directory_capture_and_trailing_revision_survive_one_pending_push() {
+    let (dir, service, ctx) = fixture();
+    let page = complete(&service, &ctx).await;
+    let doc = reference(&page, "notes/a.md");
+    let result = service
+        .state()
+        .watch(
+            &ctx,
+            DocsWatch {
+                selected: List::new(vec![doc]).unwrap(),
+            },
+        )
+        .unwrap();
+    let mut stream = service.watch_stream(ctx.clone(), result.watch_id).unwrap();
+    // Edit after initial capture but before any consumer asks for a push.
+    fs::create_dir_all(dir.path().join("notes/new/deep")).unwrap();
+    fs::write(
+        dir.path().join("notes/new/deep/untracked.md"),
+        "# Newly created\n",
+    )
+    .unwrap();
+    {
+        let mut state = service.state();
+        state.index.rescan();
+        for _ in 0..20 {
+            state.advance();
+        }
+        state.publish(false);
+    }
+    fs::write(dir.path().join("notes/a.md"), "# Trailing save\n").unwrap();
+    {
+        let mut state = service.state();
+        state.index.rescan();
+        for _ in 0..20 {
+            state.advance();
+        }
+        state.publish(false);
+    }
+    let push = stream.next().await.unwrap().unwrap();
+    let crew_core::rpc::Push::DocsChanged(change) = push else {
+        panic!("wrong push");
+    };
+    assert!(change.resync_required);
+    assert_eq!(change.from_revision, result.initial_index_page.revision);
+    let page = complete(&service, &ctx).await;
+    assert!(page
+        .entries
+        .iter()
+        .any(|e| &*e.relative_path == "notes/new/deep/untracked.md"));
+    assert!(page.entries.iter().any(|e| e
+        .variants
+        .iter()
+        .any(|v| v.title.as_ref().is_some_and(|t| &**t == "Trailing save"))));
+    assert!(
+        tokio::time::timeout(Duration::from_millis(10), stream.next())
+            .await
+            .is_err()
+    );
+}
+
+#[tokio::test]
+async fn k10_native_save_burst_publishes_at_most_once_per_second_and_the_final_save() {
+    let (dir, service, ctx) = fixture();
+    let page = complete(&service, &ctx).await;
+    let doc = reference(&page, "notes/a.md");
+    let result: DocsWatchResult = serde_json::from_value(
+        service
+            .handle(
+                &ctx,
+                Call::DocsWatch(DocsWatch {
+                    selected: List::new(vec![doc]).unwrap(),
+                }),
+            )
+            .await
+            .unwrap(),
+    )
+    .unwrap();
+    let mut stream = service.watch_stream(ctx.clone(), result.watch_id).unwrap();
+    let path = dir.path().join("notes/a.md");
+    let writer = tokio::spawn(async move {
+        for n in 0..20 {
+            fs::write(&path, format!("# Burst {n}\n")).unwrap();
+            tokio::time::sleep(Duration::from_millis(75)).await;
+        }
+    });
+    let end = tokio::time::Instant::now()
+        + if result.initial_index_page.watch_mode == DocWatchMode::Events {
+            Duration::from_millis(3400)
+        } else {
+            Duration::from_millis(6400)
+        };
+    let mut times = Vec::new();
+    while let Ok(Some(_)) = tokio::time::timeout_at(end, stream.next())
+        .await
+        .unwrap_or(Ok(None))
+    {
+        times.push(Instant::now());
+    }
+    writer.await.unwrap();
+    assert!(!times.is_empty());
+    assert!(
+        times
+            .windows(2)
+            .all(|pair| pair[1].duration_since(pair[0]) >= Duration::from_millis(900)),
+        "burst frames were not coalesced: {times:?}"
+    );
+    let page = complete(&service, &ctx).await;
+    assert!(page.entries.iter().any(|e| e
+        .variants
+        .iter()
+        .any(|v| v.title.as_ref().is_some_and(|t| &**t == "Burst 19"))));
+    service.connection_closed(&ctx.connection_epoch);
+}
+
+#[tokio::test]
+async fn p08_k16_coalesced_expiries_never_keep_an_omitted_old_handle_usable() {
+    let (dir, service, ctx) = fixture();
+    let page = complete(&service, &ctx).await;
+    let doc = reference(&page, "notes/a.md");
+    let watched = service
+        .state()
+        .watch(
+            &ctx,
+            DocsWatch {
+                selected: List::new(vec![doc.clone()]).unwrap(),
+            },
+        )
+        .unwrap();
+    let mut stream = service.watch_stream(ctx.clone(), watched.watch_id).unwrap();
+    // Queue a history invalidation before the long sequence of expiry metadata.
+    {
+        let mut state = service.state();
+        state.index.revision.0 += 1;
+        state.publish(true);
+    }
+    let mut ids = Vec::new();
+    for n in 0..240 {
+        fs::write(dir.path().join("notes/a.md"), format!("# Version {n}\n")).unwrap();
+        ids.push(
+            service
+                .read(
+                    &ctx,
+                    DocsRead {
+                        document: doc.clone(),
+                        version: DocVersionSelector::Current,
+                    },
+                )
+                .unwrap()
+                .version
+                .id
+                .clone(),
+        );
+    }
+    let push = stream.next().await.unwrap().unwrap();
+    let crew_core::rpc::Push::DocsChanged(change) = push else {
+        panic!("wrong push");
+    };
+    assert!(change.resync_required);
+    assert_eq!(change.expired_seen_versions.len(), 200);
+    assert!(!change.history_sources_changed.is_empty());
+    let omitted = {
+        let state = service.state();
+        ids.iter()
+            .find(|id| {
+                !change.expired_seen_versions.contains(id)
+                    && !state.connections[&ctx.connection_epoch]
+                        .versions
+                        .contains_key(id)
+            })
+            .unwrap()
+            .clone()
+    };
+    let result: DocReadResult = serde_json::from_value(
+        service
+            .handle(
+                &ctx,
+                Call::DocsRead(DocsRead {
+                    document: doc,
+                    version: DocVersionSelector::Id(omitted),
+                }),
+            )
+            .await
+            .unwrap(),
+    )
+    .unwrap();
+    assert!(
+        matches!(result,DocReadResult::Unavailable(f) if f.code==DocFailureCode::SnapshotExpired)
+    );
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn p08_cancelled_awaiter_does_not_release_a_blocking_job_permit_early() {
+    let (_dir, service, ctx) = fixture();
+    let page = complete(&service, &ctx).await;
+    let doc = reference(&page, "notes/a.md");
+    let owned = service.clone();
+    let caller = ctx.clone();
+    let guard = service.state();
+    let task = tokio::spawn(async move {
+        owned
+            .handle(
+                &caller,
+                Call::DocsRead(DocsRead {
+                    document: doc,
+                    version: DocVersionSelector::Current,
+                }),
+            )
+            .await
+    });
+    // The queued blocking worker cannot enter admit while this guard is held.
+    // The other Tokio worker can still cancel its awaiter independently.
+    let deadline = Instant::now() + Duration::from_secs(1);
+    while service.inner.reads.available_permits() != 1 && Instant::now() < deadline {
+        std::thread::sleep(Duration::from_millis(1));
+    }
+    assert_eq!(service.inner.reads.available_permits(), 1);
+    ctx.cancellation.cancel();
+    while !task.is_finished() && Instant::now() < deadline {
+        std::thread::sleep(Duration::from_millis(1));
+    }
+    assert!(task.is_finished());
+    assert_eq!(service.inner.reads.available_permits(), 1);
+    drop(guard);
+    assert!(task.await.unwrap().is_err());
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(1);
+    while service.inner.reads.available_permits() != 2 && tokio::time::Instant::now() < deadline {
+        tokio::task::yield_now().await;
+    }
+    assert_eq!(service.inner.reads.available_permits(), 2);
+    assert_eq!(service.state().cache_bytes, 0);
+}

@@ -407,3 +407,182 @@ fn k04_k15_recorded_symlinks_gitlinks_and_object_store_escape_are_refused() {
         Err(DocFailureCode::HistoryUnavailable)
     ));
 }
+
+#[tokio::test]
+async fn k13_k15_full_history_pages_batch_three_heads_over_320_commits() {
+    use std::io::Write;
+    use std::process::Stdio;
+    let Some(tools) = tools() else {
+        return;
+    };
+    let dir = tempfile::tempdir().unwrap();
+    git(&tools, dir.path(), &["init", "-q", "-b", "main"]);
+    let mut input = String::new();
+    for n in 1..=320 {
+        let subject = format!("note {n}");
+        let body = format!("# Note {n}\n");
+        input.push_str(&format!("commit refs/heads/main\ncommitter Docs Fixture <docs@example.invalid> {} +0000\ndata {}\n{}\nM 100644 inline notes/a.md\ndata {}\n{}\n",1700000000+n,subject.len(),subject,body.len(),body));
+    }
+    let mut command = Command::new(&tools.git);
+    for (name, _) in std::env::vars_os() {
+        let s = name.to_string_lossy();
+        if s.starts_with("GIT_") || s.starts_with("CREW_") {
+            command.env_remove(name);
+        }
+    }
+    let mut child = command
+        .arg("-C")
+        .arg(dir.path())
+        .args(["fast-import", "--quiet"])
+        .stdin(Stdio::piped())
+        .stdout(Stdio::null())
+        .stderr(Stdio::piped())
+        .spawn()
+        .unwrap();
+    child
+        .stdin
+        .take()
+        .unwrap()
+        .write_all(input.as_bytes())
+        .unwrap();
+    let output = child.wait_with_output().unwrap();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    fs::create_dir(dir.path().join("notes")).unwrap();
+    fs::write(dir.path().join("notes/a.md"), "# Note 320\n").unwrap();
+    let reader = Arc::new(
+        Reader::from_store(
+            &crew::vcs::Store::Git {
+                git_dir: dir.path().join(".git"),
+            },
+            tools.clone(),
+        )
+        .unwrap(),
+    );
+    let run = RunCtx {
+        workspace_run_id: Id::new("history-many").unwrap(),
+    };
+    let ctx = ConnCtx::new(
+        Id::new("history-many-conn").unwrap(),
+        run.clone(),
+        Caller::Operator,
+    );
+    let service = Service::new(run, Policy::default());
+    let mut registrations = Vec::new();
+    for (i, behind) in [0, 30, 50].into_iter().enumerate() {
+        let root = if i == 0 {
+            dir.path().to_owned()
+        } else {
+            let root = dir.path().join(format!(".crew/worktrees/member{i}"));
+            fs::create_dir_all(root.join("notes")).unwrap();
+            fs::write(
+                root.join("notes/a.md"),
+                format!("# Note {}\n", 320 - behind),
+            )
+            .unwrap();
+            root
+        };
+        let commit = Id::new(git(
+            &tools,
+            dir.path(),
+            &["rev-parse", &format!("main~{behind}")],
+        ))
+        .unwrap();
+        registrations.push(Registration {
+            key: Id::new(format!("source{i}")).unwrap(),
+            root,
+            kind: if i == 0 {
+                DocSourceKind::Workspace
+            } else {
+                DocSourceKind::Member
+            },
+            member_ids: vec![],
+            display_name: format!("source{i}"),
+            branch: None,
+            head_commit: Some(commit),
+            history: Some(reader.clone()),
+        });
+    }
+    service.replace_sources(registrations).unwrap();
+    let page = loop {
+        let p: DocIndexPage = serde_json::from_value(
+            service
+                .handle(&ctx, Call::DocsIndex(PageRequest::default()))
+                .await
+                .unwrap(),
+        )
+        .unwrap();
+        if p.phase == DocPhase::Ready {
+            break p;
+        }
+    };
+    let doc_id = page.entries[0].id.clone();
+    let mut cursor = None;
+    let mut seen = std::collections::BTreeSet::new();
+    for page_number in 0..2 {
+        let start = Instant::now();
+        let result: DocHistoryResult = serde_json::from_value(
+            service
+                .handle(
+                    &ctx,
+                    Call::DocsHistory(DocsHistory {
+                        doc_id: doc_id.clone(),
+                        source_ids: None,
+                        page: PageRequest {
+                            limit: Some(50),
+                            cursor,
+                        },
+                    }),
+                )
+                .await
+                .unwrap(),
+        )
+        .unwrap();
+        let DocHistoryResult::Available(page) = result else {
+            panic!("full page failed: {result:?}");
+        };
+        eprintln!(
+            "320-commit, three-head page {page_number}: {} rows, {} ms",
+            page.recorded_versions.len(),
+            start.elapsed().as_millis()
+        );
+        assert_eq!(page.recorded_versions.len(), 50);
+        assert!(start.elapsed() < DEADLINE);
+        assert_eq!(page.captured_heads.len(), 3);
+        for (i, row) in page.recorded_versions.iter().enumerate() {
+            assert!(seen.insert(row.version.commit_id.clone().unwrap()));
+            let number = 320 - page_number * 50 - i;
+            assert_eq!(
+                row.version.subject.as_ref().map(|s| s.to_string()),
+                Some(format!("note {number}"))
+            );
+            assert_eq!(
+                row.sources.len(),
+                1 + usize::from(number <= 290) + usize::from(number <= 270)
+            );
+        }
+        cursor = page.next_cursor;
+    }
+}
+
+#[test]
+fn k15_missing_object_info_is_an_explicit_unavailable_store() {
+    let Some(tools) = tools() else {
+        return;
+    };
+    let (dir, _, _) = repository(&tools);
+    fs::remove_dir(dir.path().join(".git/objects/info")).unwrap();
+    assert!(matches!(
+        Reader::from_store(
+            &crew::vcs::Store::Git {
+                git_dir: dir.path().join(".git")
+            },
+            tools
+        ),
+        Err(DocFailureCode::HistoryUnavailable)
+    ));
+    assert!(!dir.path().join(".git/objects/info").exists());
+}

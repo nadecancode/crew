@@ -22,7 +22,7 @@ use crew_core::rpc::features::{
 use crew_core::rpc::{Call, RpcError};
 use serde::Serialize;
 use serde_json::Value;
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard};
 use std::time::{Duration, Instant};
@@ -114,9 +114,10 @@ struct HistoryCursor {
     doc_id: Id,
     heads: Vec<Head>,
     positions: Vec<usize>,
-    pending: Vec<Option<history::Record>>,
+    pending: Vec<VecDeque<history::Record>>,
     done: Vec<bool>,
     seen: BTreeSet<Id>,
+    selection: Option<BTreeSet<Id>>,
 }
 type ImageDependencies = BTreeMap<(Id, Relative), (Option<Id>, BTreeSet<(Id, Id)>)>;
 
@@ -496,7 +497,13 @@ impl Service {
                 let CursorData::History(cursor) = cursor.data else {
                     return Err(DocFailureCode::StaleCursor);
                 };
-                if cursor.doc_id != request.doc_id {
+                if cursor.doc_id != request.doc_id
+                    || cursor.selection
+                        != request
+                            .source_ids
+                            .as_ref()
+                            .map(|ids| ids.iter().cloned().collect())
+                {
                     return Err(DocFailureCode::StaleCursor);
                 }
                 (state.index.epoch.clone(), cursor)
@@ -548,15 +555,31 @@ impl Service {
                 {
                     return Err(DocFailureCode::ForbiddenPath);
                 }
+                heads.sort_by_key(|h| {
+                    state
+                        .index
+                        .sources
+                        .get(&h.reference.source_id)
+                        .map(|source| {
+                            (
+                                source.record.kind != DocSourceKind::Workspace,
+                                source.key.clone(),
+                            )
+                        })
+                });
                 (
                     state.index.epoch.clone(),
                     HistoryCursor {
                         doc_id: request.doc_id.clone(),
                         positions: vec![0; heads.len()],
-                        pending: vec![None; heads.len()],
+                        pending: vec![VecDeque::new(); heads.len()],
                         done: vec![false; heads.len()],
                         heads,
                         seen: BTreeSet::new(),
+                        selection: request
+                            .source_ids
+                            .as_ref()
+                            .map(|ids| ids.iter().cloned().collect()),
                     },
                 )
             }
@@ -569,44 +592,36 @@ impl Service {
                 return Err(DocFailureCode::SnapshotExpired);
             }
             for (i, head) in cursor.heads.iter().enumerate() {
-                while cursor.pending[i].is_none() && !cursor.done[i] {
+                while cursor.pending[i].is_empty() && !cursor.done[i] {
+                    let fetch = limit.min((200 / cursor.heads.len()).max(1));
                     let page = head.reader.records(
                         &head.commit,
                         &head.path,
                         cursor.positions[i],
-                        1,
+                        fetch,
                         deadline,
                     )?;
                     cursor.positions[i] += page.examined;
-                    cursor.done[i] = page.examined == 0;
-                    cursor.pending[i] = page.rows.into_iter().next();
+                    cursor.done[i] = page.examined < fetch;
+                    cursor.pending[i].extend(page.rows);
                 }
             }
             let next = cursor
                 .pending
                 .iter()
                 .enumerate()
-                .filter_map(|(i, r)| r.as_ref().map(|r| (r.recorded_at, std::cmp::Reverse(i))))
+                .filter_map(|(i, r)| r.front().map(|r| (r.recorded_at, std::cmp::Reverse(i))))
                 .max();
             let Some((_, std::cmp::Reverse(i))) = next else {
                 break;
             };
             let head = &cursor.heads[i];
-            if let Some(record) = cursor.pending[i].take() {
+            if let Some(record) = cursor.pending[i].pop_front() {
                 if !cursor.seen.insert(record.commit.clone()) {
                     continue;
                 }
                 if cursor.seen.len() > 4000 {
                     return Err(DocFailureCode::TooLarge);
-                }
-                let mut sources = Vec::new();
-                for other in &cursor.heads {
-                    if other
-                        .reader
-                        .ancestor(&record.commit, &other.commit, deadline)?
-                    {
-                        sources.push(other.reference.clone());
-                    }
                 }
                 let version = DocVersion::try_from(DocVersionData {
                     id: index::id(),
@@ -629,8 +644,36 @@ impl Service {
                 });
                 rows.push(DocHistoryRow {
                     version,
-                    sources: List::new(sources).expect("registered sources"),
+                    sources: List::default(),
                 });
+            }
+        }
+        let commits: Vec<_> = rows
+            .iter()
+            .filter_map(|r| r.version.commit_id.clone())
+            .collect();
+        let mut reached = Vec::new();
+        for head in &cursor.heads {
+            reached.push(head.reader.reachable(&head.commit, &commits, deadline)?);
+        }
+        for row in &mut rows {
+            row.sources = List::new(
+                cursor
+                    .heads
+                    .iter()
+                    .zip(&reached)
+                    .filter(|(_, ids)| {
+                        row.version
+                            .commit_id
+                            .as_ref()
+                            .is_some_and(|id| ids.contains(id))
+                    })
+                    .map(|(h, _)| h.reference.clone())
+                    .collect(),
+            )
+            .expect("source bound");
+            if row.sources.is_empty() {
+                return Err(DocFailureCode::HistoryUnavailable);
             }
         }
         let mut state = self.state();
@@ -641,16 +684,17 @@ impl Service {
         for head in &cursor.heads {
             state.index.resolve(&head.reference)?;
         }
-        let next_cursor =
-            if cursor.pending.iter().any(Option::is_some) || cursor.done.iter().any(|done| !done) {
-                Some(state.put_cursor(
-                    context,
-                    CursorData::History(cursor.clone()),
-                    history_charge(&cursor),
-                )?)
-            } else {
-                None
-            };
+        let next_cursor = if cursor.pending.iter().any(|rows| !rows.is_empty())
+            || cursor.done.iter().any(|done| !done)
+        {
+            Some(state.put_cursor(
+                context,
+                CursorData::History(cursor.clone()),
+                history_charge(&cursor),
+            )?)
+        } else {
+            None
+        };
         let connection = state
             .connections
             .get_mut(&context.connection_epoch)
@@ -1394,7 +1438,15 @@ fn empty_change(index: &Index, watch: &Watch) -> DocsChanged {
     }
 }
 fn history_charge(cursor: &HistoryCursor) -> usize {
-    cursor.heads.len() * 8192 + cursor.seen.len() * 512 + 4096
+    cursor.heads.len() * 8192
+        + cursor.seen.len() * 512
+        + cursor
+            .pending
+            .iter()
+            .flatten()
+            .map(|r| 2048 + 3 * (r.author.len() + r.subject.len()))
+            .sum::<usize>()
+        + 4096
 }
 fn failure(document: Option<DocRef>, code: DocFailureCode) -> DocFailure {
     DocFailure {

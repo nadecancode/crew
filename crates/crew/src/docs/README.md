@@ -66,3 +66,28 @@ confined reader rather than counting an unavailable sandbox as evidence.
 Actual macOS opener execution, gateway framing/revocation integration, client
 lease invalidation and frontend rendering/network/CSP checks remain explicit
 platform/transport/UI gates. A Linux test is not evidence of those executions.
+
+The capture budget uses a global least-recently-used eviction order across
+operator connections. One reader can therefore expire another reader's oldest
+captures. An active watch receives expiries on that same physical connection;
+a read-lane capture reports `snapshot_expired` when it is next accessed. An
+unavailable `objects/info` masking mountpoint makes recorded history unavailable
+before launch; the observer does not create repository directories to repair it.
+
+History pages batch log records per captured head, check blob types/modes with
+literal tree lookups, then batch object sizes and content through
+[`git cat-file`](https://git-scm.com/docs/git-cat-file). Each content batch stays
+inside the 2 MiB subprocess output bound. A page-level
+[`git rev-list`](https://git-scm.com/docs/git-rev-list) exclusion walk computes
+which page commits are reachable from each captured head; it does not launch a
+merge-base process for every row/head pair. Frozen cursors retain bounded
+lookahead records and native offsets instead of restarting a log walk per row.
+
+A Docs `resync_required` update, epoch change or revision gap invalidates all
+cached Docs values and pending reads in the client, including retained leases
+and assets. Selected document references stay selected; the renderer discards
+its retained bodies and recaptures before displaying them. This is also the
+bounded fallback when more than 200 expiry ids would be needed. The physical
+connection remains open, but an expired opaque version still fails on the server
+even if its individual expiry id was omitted. History-source ids are merged
+independently when pending metadata is coalesced.
