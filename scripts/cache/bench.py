@@ -440,14 +440,20 @@ def run(args):
             report["status"] = "budget-exceeded"
         collector = HERE / "baseline.mjs"
         report["baseline_collector"] = {"status": "unavailable", "path": "scripts/cache/baseline.mjs"}
-        if not args.prepare_only and collector.is_file() and (workspace / ".crew/crew.db").is_file():
+        session_files = [a for a in report["agents"] if a.get("source_path")]
+        if (not args.prepare_only and collector.is_file() and session_files
+                and (workspace / ".crew/crew.db").is_file()):
             try:
-                collected = invoke(["node", collector, "--workspace", workspace,
-                                    "--output", output / "baseline.json"], env, output, 60)
+                argv = ["node", collector, "--workspace", workspace, "--output", output / "baseline.json"]
+                # Explicit files suppress the collector's broader home discovery.
+                for agent in session_files:
+                    argv.extend(["--session-file", f'{agent["runtime"]}={agent["source_path"]}'])
+                collected = invoke(argv, env, output, 60)
                 (output / "logs/collector.txt").write_text(collected.stdout + collected.stderr)
                 report["baseline_collector"] = {
                     "status": "collected" if collected.returncode == 0 else "failed",
-                    "returncode": collected.returncode, "path": "baseline.json"}
+                    "returncode": collected.returncode, "path": "baseline.json",
+                    "collector_sha256": digest(collector), "explicit_session_files": len(session_files)}
                 if collected.returncode and report["status"] == "complete":
                     report["status"] = "incomplete-evidence"
             except Exception as error:
