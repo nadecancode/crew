@@ -1196,9 +1196,11 @@ What a committed bundle costs, and the answers:
   give identical files (`run.sh` checks it).
 - **Minified with terser** (card `web-bundle-budget`, designer m-1226659f7b94
   answer): `build.minify: "terser"` with `compress.passes: 3` and
-  otherwise default, safe options. Unsafe compressions (`unsafe*`,
-  `pure_getters`, property mangling) stay off: `pure_getters` would drop Solid's
-  store reads. terser is an exactly pinned dev dependency in `bun.lock`; the
+  `pure_getters: false`, otherwise default, safe options. Unsafe compressions
+  (`unsafe*`, `pure_getters`, property mangling) stay off: `pure_getters`
+  would drop Solid's store reads, and terser's default for it is `"strict"`,
+  so it is turned off by name (cache-reviewer m-40a4d0e2a227; the bundle's
+  bytes did not change). terser is an exactly pinned dev dependency in `bun.lock`; the
   runtime dependencies stay the three above. It replaces esbuild's minifier
   because it gives the same code a smaller bundle, which keeps the toolbox
   display within P1 and P4 without a raise. Two clean builds must still be
