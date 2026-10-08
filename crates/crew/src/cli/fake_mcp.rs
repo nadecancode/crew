@@ -102,7 +102,6 @@ fn shuffle<T>(items: &mut [T]) {
     }
 }
 
-
 /// What the stand-in does with one message.
 enum Outcome {
     /// Messages to send back (a response, then any notifications).
@@ -123,8 +122,15 @@ impl Server {
         let args = &self.args;
         let method = message.get("method").and_then(Value::as_str).unwrap_or("");
         if let Some(log) = &args.log {
-            let mut file = std::fs::OpenOptions::new().create(true).append(true).open(log)?;
-            let entry = if method.is_empty() { "response" } else { method };
+            let mut file = std::fs::OpenOptions::new()
+                .create(true)
+                .append(true)
+                .open(log)?;
+            let entry = if method.is_empty() {
+                "response"
+            } else {
+                method
+            };
             writeln!(file, "{entry}")?;
         }
         if args.exit_during.as_deref() == Some(method) {
@@ -140,9 +146,7 @@ impl Server {
             return Ok(Outcome::Silent);
         }
         let reply = |result: Value| json!({"jsonrpc": "2.0", "id": id, "result": result});
-        let refuse = |code: i64, text: String| {
-            json!({"jsonrpc": "2.0", "id": id, "error": { "code": code, "message": text }})
-        };
+        let refuse = |code: i64, text: String| json!({"jsonrpc": "2.0", "id": id, "error": { "code": code, "message": text }});
         Ok(Outcome::Reply(match method {
             "initialize" => {
                 let protocol = message
@@ -156,7 +160,9 @@ impl Server {
                     "instructions": args.instructions,
                 }))];
                 if args.list_changed {
-                    out.push(json!({"jsonrpc": "2.0", "method": "notifications/tools/list_changed"}));
+                    out.push(
+                        json!({"jsonrpc": "2.0", "method": "notifications/tools/list_changed"}),
+                    );
                 }
                 out
             }
@@ -204,7 +210,10 @@ impl Server {
                 vec![reply(page)]
             }
             "tools/call" => {
-                let name = message.pointer("/params/name").and_then(Value::as_str).unwrap_or("");
+                let name = message
+                    .pointer("/params/name")
+                    .and_then(Value::as_str)
+                    .unwrap_or("");
                 match name {
                     "echo_token" => {
                         let var = args.echo_token_in_error.as_deref().unwrap_or("");
@@ -224,7 +233,9 @@ impl Server {
                             })
                             .collect();
                         let text = json!({ "names": names, "matches": matches }).to_string();
-                        vec![reply(json!({ "content": [{ "type": "text", "text": text }] }))]
+                        vec![reply(
+                            json!({ "content": [{ "type": "text", "text": text }] }),
+                        )]
                     }
                     _ => {
                         let text = message
@@ -232,7 +243,9 @@ impl Server {
                             .cloned()
                             .unwrap_or(Value::Null)
                             .to_string();
-                        vec![reply(json!({ "content": [{ "type": "text", "text": text }] }))]
+                        vec![reply(
+                            json!({ "content": [{ "type": "text", "text": text }] }),
+                        )]
                     }
                 }
             }
@@ -548,7 +561,12 @@ mod http {
             } else {
                 headers.push(("Content-Type", "application/json".to_string()));
                 // JSON carries the response; notifications are dropped.
-                respond(stream.as_mut(), "200 OK", &headers, messages[0].to_string().as_bytes())?;
+                respond(
+                    stream.as_mut(),
+                    "200 OK",
+                    &headers,
+                    messages[0].to_string().as_bytes(),
+                )?;
             }
         }
         Ok(())

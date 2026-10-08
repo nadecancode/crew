@@ -40,12 +40,12 @@ mod questions;
 mod retire;
 mod roster;
 mod sandbox;
-mod toolbox_rpc;
 pub(crate) mod server;
 mod subagents;
 mod supervisor;
 mod team;
 mod toolbox;
+mod toolbox_rpc;
 mod turns;
 
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");

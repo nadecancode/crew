@@ -8,8 +8,8 @@
 use crew_core::client::{Client, ClientError};
 use crew_core::config::TaskSpec;
 use crew_core::rpc::{Call, CommitInfo, GitOutcome, InboxResult, SendParams, SendResult, TaskCard};
-use crew_core::util::{fmt_clock, one_line, truncate_chars};
 use crew_core::types::{AgentToolbox, ToolboxItem, ToolboxItemCode};
+use crew_core::util::{fmt_clock, one_line, truncate_chars};
 use crew_core::{Agent, AgentStatus, Artifact, Message, MessageType, Task, BROADCAST, OPERATOR_ID};
 use serde_json::{json, Value};
 
@@ -619,7 +619,11 @@ fn toolbox_summary(toolbox: &AgentToolbox) -> String {
     if parts.is_empty() {
         format!("toolbox {}: no items", toolbox.short_fingerprint())
     } else {
-        format!("toolbox {}: {}", toolbox.short_fingerprint(), parts.join("; "))
+        format!(
+            "toolbox {}: {}",
+            toolbox.short_fingerprint(),
+            parts.join("; ")
+        )
     }
 }
 

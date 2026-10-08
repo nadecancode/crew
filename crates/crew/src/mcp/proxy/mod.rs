@@ -61,7 +61,10 @@ pub(crate) trait Connection: Send {
     fn close(&mut self);
 }
 
-fn connect(launch: &ToolboxServerLaunch, events: mpsc::Sender<Event>) -> Result<Box<dyn Connection>> {
+fn connect(
+    launch: &ToolboxServerLaunch,
+    events: mpsc::Sender<Event>,
+) -> Result<Box<dyn Connection>> {
     match &launch.upstream {
         Upstream::Stdio { command, cwd, env } => Ok(Box::new(stdio::Child::start(
             command,
@@ -91,7 +94,9 @@ pub fn definition_hash(server: &McpServer) -> String {
         "transport": server.transport,
         "headers": server.headers,
     });
-    hex(&Sha256::digest(serde_json::to_vec(&definition).expect("JSON values serialize")))
+    hex(&Sha256::digest(
+        serde_json::to_vec(&definition).expect("JSON values serialize"),
+    ))
 }
 
 fn hex(bytes: &[u8]) -> String {
@@ -167,8 +172,8 @@ impl Snapshot {
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(None),
             Err(e) => return Err(e).with_context(|| format!("reading {}", path.display())),
         };
-        let value: Value = serde_json::from_slice(&text)
-            .with_context(|| format!("parsing {}", path.display()))?;
+        let value: Value =
+            serde_json::from_slice(&text).with_context(|| format!("parsing {}", path.display()))?;
         if value.get("version").and_then(Value::as_u64) != Some(u64::from(SNAPSHOT_VERSION)) {
             // Another format: as if there were none, so it is taken again.
             return Ok(None);
@@ -204,7 +209,10 @@ impl Snapshot {
 
 /// Where a server's pinned snapshot lives in the agent directory.
 pub fn snapshot_path(agent_dir: &Path, name: &str) -> PathBuf {
-    agent_dir.join("toolbox").join("mcp").join(format!("{name}.json"))
+    agent_dir
+        .join("toolbox")
+        .join("mcp")
+        .join(format!("{name}.json"))
 }
 
 /// What `pin` did with a preflight's listing.
@@ -410,7 +418,8 @@ impl Handshake {
         params: Value,
     ) -> Result<Value> {
         let id = self.id();
-        connection.send(&json!({"jsonrpc": "2.0", "id": id, "method": method, "params": params}))?;
+        connection
+            .send(&json!({"jsonrpc": "2.0", "id": id, "method": method, "params": params}))?;
         loop {
             let left = deadline.saturating_duration_since(Instant::now());
             match events.recv_timeout(left) {
@@ -418,7 +427,9 @@ impl Handshake {
                     return answer(message, method);
                 }
                 Ok(Event::Upstream(_)) | Ok(Event::Runtime(_)) | Ok(Event::RuntimeClosed) => {}
-                Ok(Event::UpstreamClosed(why)) => bail!("the server stopped during {method}: {why}"),
+                Ok(Event::UpstreamClosed(why)) => {
+                    bail!("the server stopped during {method}: {why}")
+                }
                 Err(mpsc::RecvTimeoutError::Timeout) => {
                     bail!("the server did not answer {method} in time")
                 }
@@ -479,7 +490,10 @@ fn initialize_result(snapshot: &Snapshot, asked: Option<&str>) -> Value {
     if let Some(asked) = asked.filter(|v| PROTOCOLS.contains(v)) {
         result["protocolVersion"] = json!(asked);
     }
-    if let Some(capabilities) = result.get_mut("capabilities").and_then(Value::as_object_mut) {
+    if let Some(capabilities) = result
+        .get_mut("capabilities")
+        .and_then(Value::as_object_mut)
+    {
         for (_, capability) in capabilities.iter_mut() {
             if let Some(capability) = capability.as_object_mut() {
                 if capability.contains_key("listChanged") {
@@ -494,7 +508,6 @@ fn initialize_result(snapshot: &Snapshot, asked: Option<&str>) -> Value {
 fn is_list_changed(method: &str) -> bool {
     method.starts_with("notifications/") && method.ends_with("/list_changed")
 }
-
 
 /// Serve the session's runtime (`input`, `output`) for server `launch`, from
 /// `snapshot` when one is pinned, else from a live listing taken now and
@@ -611,7 +624,9 @@ impl<W: Write> Session<'_, W> {
     ) -> Result<()> {
         let id = self.own.id();
         let sent = match self.connection.as_mut() {
-            Some(c) => c.send(&json!({"jsonrpc": "2.0", "id": id, "method": method, "params": params})),
+            Some(c) => {
+                c.send(&json!({"jsonrpc": "2.0", "id": id, "method": method, "params": params}))
+            }
             None => return Ok(()),
         };
         match sent {
@@ -672,7 +687,9 @@ impl<W: Write> Session<'_, W> {
             }
             "tools/list" => {
                 let tools = self.snapshot.as_ref().expect("checked above").tools.clone();
-                self.write(&json!({"jsonrpc": "2.0", "id": message["id"], "result": { "tools": tools }}))
+                self.write(
+                    &json!({"jsonrpc": "2.0", "id": message["id"], "result": { "tools": tools }}),
+                )
             }
             "ping" if message.get("id").is_some() => {
                 self.write(&json!({"jsonrpc": "2.0", "id": message["id"], "result": {}}))
@@ -826,7 +843,11 @@ impl<W: Write> Session<'_, W> {
     /// The server is gone: the daemon is told once, and what waits for it is
     /// refused. `initialize` and `tools/list` stay answered from the
     /// snapshot, so the runtime's view does not change.
-    fn fail(&mut self, why: String, report: &mut dyn FnMut(ToolboxReportKind, String)) -> Result<()> {
+    fn fail(
+        &mut self,
+        why: String,
+        report: &mut dyn FnMut(ToolboxReportKind, String),
+    ) -> Result<()> {
         if self.down.is_some() {
             return Ok(());
         }
@@ -862,7 +883,9 @@ pub fn copy_snapshots(from: &Path, to: &Path, names: &[String]) -> Result<()> {
             Err(e) => return Err(e).with_context(|| format!("reading {}", source.display())),
         };
         let target = snapshot_path(to, name);
-        crew_core::paths::ensure_private_dir(target.parent().expect("a snapshot path has a parent"))?;
+        crew_core::paths::ensure_private_dir(
+            target.parent().expect("a snapshot path has a parent"),
+        )?;
         crew_core::paths::write_private_file(&target, &bytes)?;
     }
     Ok(())

@@ -40,7 +40,10 @@ fn member_level<'a>(team: &'a TeamConfig, agent: &Agent) -> (&'a Toolbox, String
     let id = agent.parent.as_deref().unwrap_or(&agent.id);
     match team.agents.iter().position(|a| a.id == id) {
         Some(i) => (&team.agents[i].toolbox, format!("agents[{i}].toolbox")),
-        None => (EMPTY.get_or_init(Toolbox::default), format!("agent '{id}'.toolbox")),
+        None => (
+            EMPTY.get_or_init(Toolbox::default),
+            format!("agent '{id}'.toolbox"),
+        ),
     }
 }
 
@@ -110,11 +113,12 @@ impl Daemon {
         if let Some(missing) = references.missing.iter().next() {
             return Err(RpcError::invalid(format!("Needs ${missing}")));
         }
-        let expose = |map: &BTreeMap<String, crate::endpoints::Secret>| -> BTreeMap<String, String> {
-            map.iter()
-                .map(|(k, v)| (k.clone(), v.expose().to_string()))
-                .collect()
-        };
+        let expose =
+            |map: &BTreeMap<String, crate::endpoints::Secret>| -> BTreeMap<String, String> {
+                map.iter()
+                    .map(|(k, v)| (k.clone(), v.expose().to_string()))
+                    .collect()
+            };
         let redact = references
             .redactions
             .iter()
@@ -290,7 +294,11 @@ fn planned(id: &str, runtime: RuntimeKind, resolved: &Resolved) -> MemberToolbox
         .collect();
     let fingerprint = resolved
         .canonical(&content)
-        .map(|canonical| Fingerprint::of(&canonical, runtime, MAPPING_VERSION).as_str().to_string())
+        .map(|canonical| {
+            Fingerprint::of(&canonical, runtime, MAPPING_VERSION)
+                .as_str()
+                .to_string()
+        })
         .unwrap_or_default();
     MemberToolbox {
         agent: id.to_string(),

@@ -3,6 +3,12 @@
 //! the session kept by `Mcp-Session-Id`), or the older SSE transport (one
 //! event stream for everything the server says, messages POSTed to the
 //! endpoint it names). A small HTTP/1.1 client, one connection per request.
+//!
+//! Limits, on purpose: TLS certificates are always verified (against the
+//! bundled web roots, plus any in `SSL_CERT_FILE` / `SSL_CERT_DIR`);
+//! redirects are not followed; an SSE endpoint must be on the server's own
+//! origin; `HTTP_PROXY` / `HTTPS_PROXY` are not honoured, so a server behind
+//! a required proxy is out of reach.
 
 use std::collections::BTreeMap;
 use std::io::{BufRead, BufReader, Read, Write};
@@ -65,7 +71,9 @@ fn tls() -> Result<std::sync::Arc<rustls::ClientConfig>> {
         }
     }
     for path in extra {
-        let Ok(file) = std::fs::File::open(&path) else { continue };
+        let Ok(file) = std::fs::File::open(&path) else {
+            continue;
+        };
         for cert in rustls_pemfile::certs(&mut BufReader::new(file)).flatten() {
             // A certificate rustls does not take is left out, not fatal.
             let _ = roots.add(cert);
@@ -112,7 +120,9 @@ impl Url {
                 .split_once(']')
                 .ok_or_else(|| anyhow!("unclosed IPv6 address in {text}"))?;
             let port = match after.strip_prefix(':') {
-                Some(port) => port.parse().with_context(|| format!("bad port in {text}"))?,
+                Some(port) => port
+                    .parse()
+                    .with_context(|| format!("bad port in {text}"))?,
                 None => default,
             };
             (host.to_string(), port)
@@ -120,7 +130,8 @@ impl Url {
             match authority.rsplit_once(':') {
                 Some((host, port)) => (
                     host.to_string(),
-                    port.parse().with_context(|| format!("bad port in {text}"))?,
+                    port.parse()
+                        .with_context(|| format!("bad port in {text}"))?,
                 ),
                 None => (authority.to_string(), default),
             }
@@ -128,6 +139,10 @@ impl Url {
         if host.is_empty() {
             bail!("no host in {text}");
         }
+        if host.contains(|c: char| c.is_ascii_control() || c == ' ') {
+            bail!("bad host in {text}");
+        }
+        check_target(&target)?;
         Ok(Url {
             https,
             host,
@@ -136,11 +151,15 @@ impl Url {
         })
     }
 
-    /// `reference` (an absolute URL, an absolute path, or a relative one)
-    /// against this URL.
+    /// `reference` (an absolute URL, a scheme-relative one, an absolute path,
+    /// or a relative one) against this URL.
     pub(crate) fn join(&self, reference: &str) -> Result<Self> {
         if reference.starts_with("http://") || reference.starts_with("https://") {
             return Url::parse(reference);
+        }
+        if let Some(rest) = reference.strip_prefix("//") {
+            let scheme = if self.https { "https" } else { "http" };
+            return Url::parse(&format!("{scheme}://{rest}"));
         }
         let mut url = self.clone();
         url.target = if reference.starts_with('/') {
@@ -150,7 +169,26 @@ impl Url {
             let base = &path[..path.rfind('/').map_or(0, |i| i + 1)];
             format!("{base}{reference}")
         };
+        check_target(&url.target)?;
         Ok(url)
+    }
+
+    /// The endpoint an SSE server names. It must be on the server's own
+    /// origin: the server's headers carry its credentials, and crew sends
+    /// them nowhere else.
+    pub(crate) fn endpoint(&self, reference: &str) -> Result<Self> {
+        let endpoint = self.join(reference)?;
+        if endpoint.https != self.https
+            || endpoint.port != self.port
+            || !endpoint.host.eq_ignore_ascii_case(&self.host)
+        {
+            bail!(
+                "the server named an endpoint on another origin ({}); crew sends the server's headers only to {}",
+                endpoint.authority(),
+                self.authority()
+            );
+        }
+        Ok(endpoint)
     }
 
     fn authority(&self) -> String {
@@ -165,6 +203,23 @@ impl Url {
         } else {
             format!("{host}:{}", self.port)
         }
+    }
+}
+
+/// A request target must fit on the request line.
+fn check_target(target: &str) -> Result<()> {
+    if target.contains(|c: char| c.is_ascii_control() || c == ' ') {
+        bail!("a URL path cannot hold spaces or control characters");
+    }
+    Ok(())
+}
+
+/// Why a response other than 2xx is refused. Redirects are not followed.
+fn refusal(status: u16) -> String {
+    if (300..=399).contains(&status) {
+        format!("the server answered HTTP {status}, a redirect, which crew does not follow")
+    } else {
+        format!("the server answered HTTP {status}")
     }
 }
 
@@ -188,7 +243,10 @@ fn open(url: &Url) -> Result<(Box<dyn Stream>, TcpStream)> {
                 let name = rustls::pki_types::ServerName::try_from(url.host.clone())
                     .map_err(|_| anyhow!("{} is not a host name TLS can verify", url.host))?;
                 let connection = rustls::ClientConnection::new(tls()?, name)?;
-                return Ok((Box::new(rustls::StreamOwned::new(connection, stream)), handle));
+                return Ok((
+                    Box::new(rustls::StreamOwned::new(connection, stream)),
+                    handle,
+                ));
             }
             Err(e) => last = Some(e),
         }
@@ -234,8 +292,9 @@ impl<R: BufRead> Read for Chunked<R> {
         if self.left == 0 {
             let line = read_line(&mut self.inner, MAX_LINE)?;
             let size = line.trim().split(';').next().unwrap_or("");
-            self.left = usize::from_str_radix(size, 16)
-                .map_err(|_| std::io::Error::new(std::io::ErrorKind::InvalidData, "bad chunk size"))?;
+            self.left = usize::from_str_radix(size, 16).map_err(|_| {
+                std::io::Error::new(std::io::ErrorKind::InvalidData, "bad chunk size")
+            })?;
             if self.left == 0 {
                 self.done = true;
                 return Ok(0);
@@ -311,19 +370,18 @@ fn request(
             .find(|(k, _): &&(String, String)| k.eq_ignore_ascii_case(name))
             .map(|(_, v)| v.clone())
     };
-    let body: Box<dyn BufRead + Send> = if find("transfer-encoding")
-        .is_some_and(|v| v.to_ascii_lowercase().contains("chunked"))
-    {
-        Box::new(BufReader::new(Chunked {
-            inner: reader,
-            left: 0,
-            done: false,
-        }))
-    } else if let Some(length) = find("content-length").and_then(|v| v.parse::<u64>().ok()) {
-        Box::new(BufReader::new(reader.take(length)))
-    } else {
-        Box::new(reader)
-    };
+    let body: Box<dyn BufRead + Send> =
+        if find("transfer-encoding").is_some_and(|v| v.to_ascii_lowercase().contains("chunked")) {
+            Box::new(BufReader::new(Chunked {
+                inner: reader,
+                left: 0,
+                done: false,
+            }))
+        } else if let Some(length) = find("content-length").and_then(|v| v.parse::<u64>().ok()) {
+            Box::new(BufReader::new(reader.take(length)))
+        } else {
+            Box::new(reader)
+        };
     Ok((
         Response {
             status,
@@ -352,7 +410,11 @@ fn next_event(body: &mut dyn BufRead) -> Result<Option<(String, String)>> {
                 name.clear();
                 continue;
             }
-            let kind = if name.is_empty() { "message".to_string() } else { name };
+            let kind = if name.is_empty() {
+                "message".to_string()
+            } else {
+                name
+            };
             return Ok(Some((kind, data.join("\n"))));
         }
         if line.starts_with(':') {
@@ -397,7 +459,10 @@ fn failed(message: &Value, why: &str, events: &mpsc::Sender<Event>) {
 }
 
 fn header_list(headers: &BTreeMap<String, String>) -> Vec<(String, String)> {
-    headers.iter().map(|(k, v)| (k.clone(), v.clone())).collect()
+    headers
+        .iter()
+        .map(|(k, v)| (k.clone(), v.clone()))
+        .collect()
 }
 
 pub(crate) fn connect(
@@ -440,10 +505,20 @@ impl Streamable {
             "Accept".into(),
             "application/json, text/event-stream".into(),
         ));
-        if let Some(session) = self.session.lock().unwrap_or_else(|e| e.into_inner()).clone() {
+        if let Some(session) = self
+            .session
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .clone()
+        {
             headers.push(("Mcp-Session-Id".into(), session));
         }
-        if let Some(protocol) = self.protocol.lock().unwrap_or_else(|e| e.into_inner()).clone() {
+        if let Some(protocol) = self
+            .protocol
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .clone()
+        {
             headers.push(("MCP-Protocol-Version".into(), protocol));
         }
         headers
@@ -475,13 +550,12 @@ impl Connection for Streamable {
             match response.status {
                 200..=299 => {}
                 404 if had_session => {
-                    let _ = events.send(Event::UpstreamClosed(
-                        "the server ended the session".into(),
-                    ));
+                    let _ =
+                        events.send(Event::UpstreamClosed("the server ended the session".into()));
                     return;
                 }
                 status => {
-                    return failed(&message, &format!("the server answered HTTP {status}"), &events);
+                    return failed(&message, &refusal(status), &events);
                 }
             }
             if response.is_event_stream() {
@@ -493,9 +567,15 @@ impl Connection for Streamable {
                 }
             } else {
                 let mut text = String::new();
-                let read = (&mut response.body).take(MAX_BODY + 1).read_to_string(&mut text);
+                let read = (&mut response.body)
+                    .take(MAX_BODY + 1)
+                    .read_to_string(&mut text);
                 if read.as_ref().is_ok_and(|n| *n as u64 > MAX_BODY) {
-                    return failed(&message, "the server's answer is larger than 16 MiB", &events);
+                    return failed(
+                        &message,
+                        "the server's answer is larger than 16 MiB",
+                        &events,
+                    );
                 }
                 if read.is_ok() && !text.trim().is_empty() {
                     note_protocol(initializing, &text, &protocol);
@@ -510,7 +590,11 @@ impl Connection for Streamable {
         if self.closed.swap(true, Ordering::SeqCst) {
             return;
         }
-        let session = self.session.lock().unwrap_or_else(|e| e.into_inner()).clone();
+        let session = self
+            .session
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .clone();
         if session.is_some() {
             // Ending the session is a courtesy; a server that does not
             // answer in time is left to expire it.
@@ -543,17 +627,21 @@ struct Legacy {
 }
 
 impl Legacy {
-    fn start(url: Url, headers: Vec<(String, String)>, events: mpsc::Sender<Event>) -> Result<Self> {
+    fn start(
+        url: Url,
+        headers: Vec<(String, String)>,
+        events: mpsc::Sender<Event>,
+    ) -> Result<Self> {
         let mut get = headers.clone();
         get.push(("Accept".into(), "text/event-stream".into()));
         let (mut response, stream) = request(&url, "GET", &get, None)?;
         if !(200..=299).contains(&response.status) {
-            bail!("the server answered HTTP {}", response.status);
+            bail!("{}", refusal(response.status));
         }
         stream.set_read_timeout(Some(ENDPOINT_WITHIN))?;
         let endpoint = loop {
             match next_event(response.body.as_mut()) {
-                Ok(Some((kind, data))) if kind == "endpoint" => break url.join(data.trim())?,
+                Ok(Some((kind, data))) if kind == "endpoint" => break url.endpoint(data.trim())?,
                 Ok(Some(_)) => {}
                 Ok(None) => bail!("the server's event stream ended before it named an endpoint"),
                 Err(e) => bail!("the server did not name its endpoint: {e}"),
@@ -595,11 +683,7 @@ impl Connection for Legacy {
         let events = self.events.clone();
         std::thread::spawn(move || match request(&url, "POST", &headers, Some(&body)) {
             Ok((response, _)) if (200..=299).contains(&response.status) => {}
-            Ok((response, _)) => failed(
-                &message,
-                &format!("the server answered HTTP {}", response.status),
-                &events,
-            ),
+            Ok((response, _)) => failed(&message, &refusal(response.status), &events),
             Err(e) => failed(&message, &format!("{e:#}"), &events),
         });
         Ok(())
@@ -617,16 +701,61 @@ mod tests {
     #[test]
     fn urls_parse_and_join() {
         let url = Url::parse("http://127.0.0.1:8080/sse?x=1").unwrap();
-        assert_eq!((url.host.as_str(), url.port, url.target.as_str()), ("127.0.0.1", 8080, "/sse?x=1"));
-        assert_eq!(url.join("/messages?session=1").unwrap().target, "/messages?session=1");
+        assert_eq!(
+            (url.host.as_str(), url.port, url.target.as_str()),
+            ("127.0.0.1", 8080, "/sse?x=1")
+        );
+        assert_eq!(
+            url.join("/messages?session=1").unwrap().target,
+            "/messages?session=1"
+        );
         assert_eq!(url.join("messages").unwrap().target, "/messages");
         let url = Url::parse("https://docs.example.com/mcp").unwrap();
-        assert_eq!((url.port, url.authority().as_str()), (443, "docs.example.com"));
+        assert_eq!(
+            (url.port, url.authority().as_str()),
+            (443, "docs.example.com")
+        );
         let url = Url::parse("http://[::1]:9/a/b").unwrap();
-        assert_eq!((url.host.as_str(), url.authority().as_str()), ("::1", "[::1]:9"));
+        assert_eq!(
+            (url.host.as_str(), url.authority().as_str()),
+            ("::1", "[::1]:9")
+        );
         assert_eq!(url.join("c").unwrap().target, "/a/c");
         assert!(Url::parse("http://user:pw@host/").is_err());
         assert!(Url::parse("ftp://host/").is_err());
+        assert!(Url::parse("http://host/a b").is_err());
+        assert!(url.join("x\nEvil: 1").is_err());
+    }
+
+    #[test]
+    fn an_sse_endpoint_stays_on_the_server_s_origin() {
+        let url = Url::parse("https://mcp.example.com/sse").unwrap();
+        assert_eq!(
+            url.endpoint("/messages?s=1").unwrap().target,
+            "/messages?s=1"
+        );
+        assert_eq!(
+            url.endpoint("https://MCP.example.com:443/m")
+                .unwrap()
+                .target,
+            "/m"
+        );
+        assert_eq!(url.endpoint("//mcp.example.com/m").unwrap().target, "/m");
+        for elsewhere in [
+            "https://other.example/messages",
+            "//other.example/messages",
+            "http://mcp.example.com/messages",
+            "https://mcp.example.com:8443/messages",
+        ] {
+            let error = url.endpoint(elsewhere).unwrap_err().to_string();
+            assert!(error.contains("another origin"), "{elsewhere}: {error}");
+        }
+    }
+
+    #[test]
+    fn a_redirect_is_named_as_one() {
+        assert!(refusal(307).contains("redirect"));
+        assert_eq!(refusal(500), "the server answered HTTP 500");
     }
 
     #[test]
