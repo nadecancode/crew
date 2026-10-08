@@ -44,6 +44,7 @@ pub(crate) mod server;
 mod subagents;
 mod supervisor;
 mod team;
+mod toolbox;
 mod turns;
 
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");
@@ -80,6 +81,13 @@ pub(crate) struct AgentLocal {
     /// written back out.
     #[serde(default)]
     pub spec: crew_core::config::AgentSpec,
+    /// The definitions and immutable files the current process was started with.
+    #[serde(default)]
+    pub toolbox_active: Option<crate::agents::toolbox::ActiveToolbox>,
+    /// A subagent keeps the parent's active selection, even if the team's
+    /// named bundles were reloaded while its parent was still running.
+    #[serde(default)]
+    pub toolbox_inherited: Option<crate::agents::toolbox::ActiveToolbox>,
     /// The runtime reported its session id, so the session can be resumed.
     pub session_confirmed: bool,
     /// The agent's current launch (`CREW_LAUNCH` of the processes it

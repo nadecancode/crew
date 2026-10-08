@@ -501,7 +501,9 @@ impl AgentToolbox {
             .filter(|item| {
                 !matches!(
                     item.status.code,
-                    ToolboxItemCode::Active | ToolboxItemCode::Planned | ToolboxItemCode::NotApplicable
+                    ToolboxItemCode::Active
+                        | ToolboxItemCode::Planned
+                        | ToolboxItemCode::NotApplicable
                 )
             })
             .count();
@@ -515,7 +517,10 @@ impl AgentToolbox {
     /// and no definition digest is known.
     pub fn definitions_unpinned(&self) -> bool {
         self.definition_digest.is_none()
-            && self.items.iter().any(|item| item.kind == ToolboxItemKind::Mcp)
+            && self
+                .items
+                .iter()
+                .any(|item| item.kind == ToolboxItemKind::Mcp)
     }
 
     /// Why the member needs attention, if it does: a pending change, or a
@@ -875,7 +880,10 @@ mod tests {
             name: name.into(),
             origin: "bundle:web".into(),
             required,
-            status: ToolboxItemStatus { code, text: text.into() },
+            status: ToolboxItemStatus {
+                code,
+                text: text.into(),
+            },
             detail: None,
         }
     }
@@ -888,7 +896,10 @@ mod tests {
         });
         let agent: Agent = serde_json::from_value(value).unwrap();
         assert_eq!(agent.toolbox, None);
-        assert!(serde_json::to_value(&agent).unwrap().get("toolbox").is_none());
+        assert!(serde_json::to_value(&agent)
+            .unwrap()
+            .get("toolbox")
+            .is_none());
     }
 
     #[test]
@@ -918,19 +929,30 @@ mod tests {
             items: vec![
                 toolbox_item("context7", false, ToolboxItemCode::Active, "Active"),
                 toolbox_item("playwright", true, ToolboxItemCode::Active, "Active"),
-                toolbox_item("lint", false, ToolboxItemCode::NotApplicable, "Not applicable"),
+                toolbox_item(
+                    "lint",
+                    false,
+                    ToolboxItemCode::NotApplicable,
+                    "Not applicable",
+                ),
                 toolbox_item("github", false, ToolboxItemCode::Needs, "Needs "),
             ],
             ..AgentToolbox::default()
         };
-        assert_eq!(toolbox.summary(), "Toolbox 3f9a0c21e7b4 · 4 items · 1 not available");
+        assert_eq!(
+            toolbox.summary(),
+            "Toolbox 3f9a0c21e7b4 · 4 items · 1 not available"
+        );
         assert!(toolbox.definitions_unpinned());
         assert_eq!(toolbox.attention(), None);
         toolbox.items[1].status = ToolboxItemStatus {
             code: ToolboxItemCode::FailedPreflight,
             text: "Failed preflight".into(),
         };
-        assert_eq!(toolbox.attention().as_deref(), Some("Required playwright: Failed preflight"));
+        assert_eq!(
+            toolbox.attention().as_deref(),
+            Some("Required playwright: Failed preflight")
+        );
         toolbox.pending_fingerprint = Some("ab".into());
         assert_eq!(toolbox.attention().as_deref(), Some(TOOLBOX_PENDING));
         toolbox.definition_digest = Some("cd".into());

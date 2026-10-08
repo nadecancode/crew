@@ -24,6 +24,7 @@ pub mod home;
 pub mod pi;
 pub mod prompt;
 pub mod shell;
+pub mod toolbox;
 
 /// Per-agent launch settings, resolved from the team defaults and the agent's
 /// own overrides. Persisted so an agent can be restarted after a daemon restart.
@@ -54,6 +55,9 @@ pub struct AgentSettings {
     /// How members write to one another.
     #[serde(default)]
     pub voice: crew_core::config::Voice,
+    /// Runtime-neutral selection, resolved from the daemon's team catalog.
+    #[serde(default)]
+    pub toolbox: crew_core::toolbox::Resolved,
 }
 
 fn default_true() -> bool {
@@ -88,6 +92,7 @@ impl AgentSettings {
             long_context: defaults.long_context,
             model_fallback: defaults.model_fallback,
             voice: defaults.voice,
+            toolbox: crew_core::toolbox::Resolved::default(),
         }
     }
 }
