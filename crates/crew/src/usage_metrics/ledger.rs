@@ -2133,6 +2133,18 @@ fn apply(
         Some((old, _, _, _)) if old == digest => {
             done.unchanged += 1;
         }
+        Some((_, _, _, _)) if !o.revisable => {
+            // An increment is a fixed fact: the same key with other values
+            // is a conflicting replay, not a correction.
+            cover(
+                tx,
+                stream_id,
+                &tag(&CoverageReason::AmbiguousBoundary),
+                1,
+                now,
+            )?;
+            done.quarantined += 1;
+        }
         Some((_, true, _, _)) if o.phase == Phase::Seed => {
             // A replayed prefix whose values differ from retained detail:
             // not evidence enough to replace it.
@@ -3443,6 +3455,69 @@ mod tests {
         assert!(
             !ledger.uncertain("r1").unwrap(),
             "identical replays are not corrections"
+        );
+    }
+
+    #[test]
+    fn a_replayed_codex_increment_with_other_metadata_is_quarantined() {
+        use crate::usage_metrics::source::Start;
+        let v = |i: u64, r: u64, o: u64| json!({"input_tokens": i, "cached_input_tokens": r, "output_tokens": o});
+        let tc = |total: Value, last: Option<Value>| {
+            let mut info = json!({"total_token_usage": total});
+            if let Some(last) = last {
+                info["last_token_usage"] = last;
+            }
+            json!({"type": "event_msg", "timestamp": "2026-10-08T00:00:00Z",
+                "payload": {"type": "token_count", "info": info}})
+        };
+        let ctx = |model: &str| json!({"type": "turn_context", "payload": {"model": model, "turn_id": "t1"}});
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("rollout.jsonl");
+        std::fs::write(
+            &path,
+            text(&[
+                ctx("gpt-6-luna"),
+                tc(v(100, 80, 10), Some(v(100, 80, 10))),
+                tc(v(150, 120, 15), Some(v(50, 40, 5))),
+            ]),
+        )
+        .unwrap();
+        let mut ledger = Ledger::in_memory().unwrap();
+        ledger.begin_run("r1", Some(NOW), NOW).unwrap();
+        let mut r = reg("r1", "i1", Start::Fresh);
+        r.runtime = RuntimeKind::Codex;
+        r.native_session_id = "th-1".into();
+        let stream = ledger.register(&r, &open(&path), NOW).unwrap().unwrap();
+        drain(&mut ledger, &stream, &open(&path), NOW).unwrap();
+        let before = dump(&ledger)
+            .into_iter()
+            .filter(|row| row.starts_with("usage_observations"))
+            .collect::<Vec<_>>();
+        // The 100..150 edge again under another model and without its
+        // direct vector, after a rewrite that seeds the same history.
+        replace(
+            &path,
+            &[
+                ctx("gpt-6-luna"),
+                tc(v(100, 80, 10), Some(v(100, 80, 10))),
+                ctx("gpt-6.1-sol"),
+                tc(v(150, 120, 15), None),
+            ],
+        );
+        drain(&mut ledger, &stream, &open(&path), NOW).unwrap();
+        append(
+            &path,
+            &[tc(v(100, 80, 10), None), tc(v(150, 120, 15), None)],
+        );
+        let done = drain(&mut ledger, &stream, &open(&path), NOW).unwrap();
+        assert_eq!(done.iter().map(|c| c.revised).sum::<u64>(), 0);
+        let after = dump(&ledger)
+            .into_iter()
+            .filter(|row| row.starts_with("usage_observations"))
+            .collect::<Vec<_>>();
+        assert_eq!(
+            after, before,
+            "the original increment's model and unit stand"
         );
     }
 }

@@ -7,17 +7,20 @@
 //! counts as one request only when it equals the direct `last_token_usage`
 //! on every field, unknown fields included, with input and output known;
 //! anything else is a native batch of unknown cardinality. A decrease starts
-//! a new counter epoch with a gap and a new baseline: a direct last-request
-//! vector equal to the new cumulative does not prove a new occurrence, since
-//! an old record appended again looks the same. Output already includes
+//! a gap, and closes charging for the rest of the file generation: a direct
+//! last-request vector equal to the new cumulative does not prove a new
+//! occurrence, and neither do later increments, since old records appended
+//! again (all of them or a subset) look the same. A new file generation
+//! reseeds and charges what is appended after it. Output already includes
 //! reasoning, which is never added again.
 //!
 //! An increment is identified by the vector it starts from and the one it
 //! reaches, not by its epoch, so the same increment read again (appended
 //! again, after a reset, after a rewrite or a restart) is the same
-//! observation and is never charged twice. Two genuinely distinct increments
-//! with the same start and end would be counted once: the error is an
-//! undercount, never a double charge.
+//! observation and is never charged twice. An increment is never revised:
+//! the same edge read again with another model or unit is a conflicting
+//! replay. Two genuinely distinct increments with the same start and end
+//! would be counted once: the error is an undercount, never a double charge.
 
 use crew_core::rpc::usage_metrics::{CoverageReason, ObservationUnit};
 use serde::{Deserialize, Serialize};
@@ -125,6 +128,11 @@ pub struct Codex {
     model_changed: bool,
     turn_changed: bool,
     last_ms: Option<i64>,
+    /// The counters went down in this file generation. No later increment
+    /// of the generation can be told apart from an old record appended
+    /// again, so none is charged.
+    #[serde(default)]
+    closed: bool,
 }
 
 #[derive(Deserialize)]
@@ -201,6 +209,7 @@ impl Codex {
             model_changed: false,
             turn_changed: false,
             last_ms: None,
+            closed: false,
         }
     }
 
@@ -278,7 +287,18 @@ impl Codex {
             }
             Some(p) if now.decreased_from(p) => {
                 self.epoch += 1;
+                self.closed = true;
                 gap(out);
+                self.settle(now);
+                return;
+            }
+            // After a decrease nothing proves a new occurrence: an old
+            // increment replayed with others skipped would look new.
+            _ if self.closed => {
+                out.push(Item::Gap {
+                    reason: CoverageReason::AmbiguousBoundary,
+                    offset: line.offset,
+                });
                 self.settle(now);
                 return;
             }
@@ -360,6 +380,7 @@ impl Codex {
             line: line.number,
             phase: line.phase,
             reasons,
+            revisable: false,
         })));
     }
 }
@@ -436,6 +457,7 @@ impl Decoder for Codex {
         self.model_changed = false;
         self.turn_changed = false;
         self.last_ms = None;
+        self.closed = false;
     }
 }
 
@@ -587,7 +609,7 @@ mod tests {
     }
 
     #[test]
-    fn decreases_reset_the_baseline_without_charging() {
+    fn a_decrease_closes_charging_for_the_generation() {
         let items = decode_all(
             RuntimeKind::Codex,
             "th-1",
@@ -598,29 +620,42 @@ mod tests {
                 // proof of a new request: an old record appended again looks
                 // the same.
                 tc(1, v(120, 100, 6), Some(v(120, 100, 6))),
-                // Usage after the new baseline is charged.
+                // Rising counters after it prove nothing either.
                 tc(2, v(150, 120, 9), Some(v(30, 20, 3))),
-                // Reset again, with more than the direct vector.
                 tc(3, v(90, 10, 4), Some(v(30, 10, 2))),
             ],
         );
         let obs = observations(&items);
-        assert_eq!(obs.len(), 2);
-        assert_eq!(obs[1].key, "c:120/100/-/6>150/120/-/9");
-        assert_eq!(obs[1].normalized.counters.input_total, Some(30));
-        let gaps = items
-            .iter()
-            .filter(|i| {
-                matches!(
-                    i,
-                    Item::Gap {
-                        reason: CoverageReason::SourceGap,
-                        ..
-                    }
-                )
-            })
-            .count();
-        assert_eq!(gaps, 2);
+        assert_eq!(obs.len(), 1, "only the first increment");
+        let gap = |reason| {
+            items
+                .iter()
+                .filter(|i| matches!(i, Item::Gap { reason: r, .. } if *r == reason))
+                .count()
+        };
+        // Each decrease is a source gap; a rise after one is ambiguous.
+        assert_eq!(gap(CoverageReason::SourceGap), 2);
+        assert_eq!(gap(CoverageReason::AmbiguousBoundary), 1);
+    }
+
+    #[test]
+    fn a_partial_replay_after_a_decrease_is_not_charged() {
+        let a = tc(0, v(100, 80, 10), Some(v(100, 80, 10)));
+        let b = tc(1, v(150, 120, 15), Some(v(50, 40, 5)));
+        let c = tc(2, v(200, 160, 20), Some(v(50, 40, 5)));
+        let items = decode_all(
+            RuntimeKind::Codex,
+            "th-1",
+            &[turn("gpt-6-luna", "t1"), a.clone(), b, c.clone(), a, c],
+        );
+        let total: u64 = latest(&items)
+            .values()
+            .filter_map(|o| o.normalized.counters.input_total)
+            .sum();
+        assert_eq!(
+            total, 200,
+            "A, B and C once; the replayed A..C edge is not new"
+        );
     }
 
     #[test]

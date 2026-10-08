@@ -371,6 +371,10 @@ pub struct Observation {
     pub phase: Phase,
     /// Why this is not a counted request or why counters are missing.
     pub reasons: Vec<CoverageReason>,
+    /// A later record with the same key may revise it (a streamed message).
+    /// A key that may not be revised (a cumulative increment) seen again
+    /// with other values is a conflicting replay, never a correction.
+    pub revisable: bool,
 }
 
 /// Native evidence that is not usage.
