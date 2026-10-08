@@ -21,7 +21,7 @@
     {
       "source": "0c07f932",
       "replay": "5de29f6a",
-      "patch_id": "ec3e386503aeb8587385088b9926c92fb2b535a4"
+      "patch_id": "05c5629e9f29fffdfa30a8336ebb45e3456798eb"
     },
     {
       "source": "e9fb6ec7",
@@ -31,7 +31,7 @@
     {
       "source": "6e39262d",
       "replay": "b4cf0db0",
-      "patch_id": "e36f9953903031d9d7f49e79b77533cca8191808"
+      "patch_id": "5c3a6c006a3dcbd469c31df1a91054ede5b015b5"
     }
   ],
   "toolchain": "rustc 1.93.1 (01f6ddf75 2026-02-11)",
@@ -106,5 +106,6 @@
       "failed": 0,
       "ignored": 0
     }
-  ]
+  ],
+  "patch_id_command": "git show --pretty=format: --no-ext-diff <commit> | git patch-id --stable"
 }
