@@ -166,10 +166,19 @@ them until the supported pi is checked.
 This is an interim sample of Claude Code sessions only; `cache-baseline`
 replaces it and adds Codex and pi. The data was read read-only.
 
-**Reproduce.** `notes/prompt-cache-audit/run.sh` reproduces it. It writes
-`sessions.tsv` (one row per session), `signatures.tsv` (class, cache read,
-cache write and gap of every big write) and `totals.tsv`. Those are kept as
-they were for this note. No message text leaves the scripts.
+**Reproduce.** `notes/prompt-cache-audit/run.sh` reproduces the token counts,
+then `cost.sh` the costs. They write:
+
+- `cohort.tsv`: the sessions read;
+- `sessions.tsv`: one row per session;
+- `signatures.tsv`: the class, cache read, cache write, gap and model of every
+  big write;
+- `models.tsv`: tokens per session and model;
+- `totals.tsv`;
+- `costs.tsv`.
+
+The files are kept as they were for this note. No message text leaves the
+scripts.
 
 **Cohort.**
 
@@ -184,10 +193,20 @@ they were for this note. No message text leaves the scripts.
 **Requests.** A request is one main-thread assistant response, counted once
 per `message.id`. Sidechain and `<synthetic>` lines are left out.
 
-**Cost weights.** Shares of input-side cost use Anthropic's ratios to each
-request's own base input price: uncached input 1, 1 h cache write 2, cache
-read 0.1. Models are not weighted against each other; most requests are on
-Opus 5.5, some on Fable 5.1. Output tokens are not counted.
+**Cost.** Costs are input-side list prices: each request is priced at its own
+model's rate from Anthropic's prompt-caching table
+(<https://platform.claude.com/docs/en/build-with-claude/prompt-caching#pricing>,
+read 2026-10-08, kept in `notes/prompt-cache-audit/prices.tsv`).
+
+| Model | Requests | Base input | 1 h write | Read |
+| --- | --- | --- | --- | --- |
+| Opus 5.5 | 10,136 | $4 / MTok | 2x base | 0.05x base |
+| Fable 5.1 | 4,114 | $10 / MTok | 2x base | 0.025x base |
+| Sonnet 5.5 | 1,339 | $2 / MTok | 2x base | 0.05x base |
+
+Output tokens are not counted. These are API list prices; how a Claude
+subscription is charged is not modelled. So the shares below describe API
+pricing, not what this team paid.
 
 | Measure | Value |
 | --- | --- |
@@ -197,25 +216,31 @@ Opus 5.5, some on Fable 5.1. Output tokens are not counted.
 | Cache read | 5,393,044,647 tokens |
 | Cache write (all 1 h) | 115,056,954 tokens |
 | Hit rate by tokens (read / all input) | 97.9% |
-| Cache writes as share of input-side cost | 29.9% |
+| Input-side list cost: writes / reads / uncached | $1,439.87 / $1,116.27 / $0.19 |
+| Cache writes as share of input-side list cost | 56.3% |
 
-Writes are 2.1% of input tokens and about 30% of input-side cost. The number
+Writes are 2.1% of input tokens but 56.3% of input-side list cost. The number
 worth moving is write volume, not the token hit rate.
 
 **Big writes.** A big write is a request that wrote at least 10k tokens and
 more than it read. Each is classed by the first test it passes; the cache
 read ranges are the evidence for each class.
 
-| Class | Test | Cache read (min / median / max) | Events | Tokens written | Share of writes |
-| --- | --- | --- | --- | --- | --- |
-| First request | first in the session file | 0 / 23,372 / 23,881 | 29 | 726,680 | 0.6% |
-| After compaction | a `compact_boundary` since the previous request | 0 / 28,434 / 29,835 | 4 | 135,831 | 0.1% |
-| Model change | another model than the previous request | 0 / 0 / 0 | 2 | 846,025 | 0.7% |
-| TTL expired | over 3600 s since the previous request and read below 26,000 | 0 / 23,368 / 23,881 | 58 | 24,474,046 | 21.3% |
-| History change, declared by the client | a `thinking_drop` with this request id | 23,484 / 28,786 / 30,696 | 122 | 41,374,107 | 36.0% |
-| History change, undeclared | read at least 26,000 (system read, messages written again), no `thinking_drop` | 27,697 / 30,368 / 31,351 | 48 | 18,635,030 | 16.2% |
-| Unexplained | the rest: within the TTL, system prompt not read | 0 / 23,368 / 23,368 | 3 | 1,217,767 | 1.1% |
-| Not classed | writes below the threshold (ordinary growth and small rewrites) | | | 27,647,468 | 24.0% |
+| Class | Test | Cache read (min / median / max) | Events | Tokens written | Share of writes | List cost (share of input side) |
+| --- | --- | --- | --- | --- | --- | --- |
+| First request | first in the session file | 0 / 23,372 / 23,881 | 29 | 726,680 | 0.6% | $7.28 (0.3%) |
+| After compaction | a `compact_boundary` since the previous request | 0 / 28,434 / 29,835 | 4 | 135,831 | 0.1% | $2.37 (0.1%) |
+| Model change | another model than the previous request | 0 / 0 / 0 | 2 | 846,025 | 0.7% | $16.92 (0.7%) |
+| TTL expired | over 3600 s since the previous request and read below 26,000 | 0 / 23,368 / 23,881 | 58 | 24,474,046 | 21.3% | $322.36 (12.6%) |
+| History change, declared by the client | a `thinking_drop` with this request id | 23,484 / 28,786 / 30,696 | 122 | 41,374,107 | 36.0% | $399.40 (15.6%) |
+| History change, undeclared | read at least 26,000 (system read, messages written again), no `thinking_drop` | 27,697 / 30,368 / 31,351 | 48 | 18,635,030 | 16.2% | $364.83 (14.3%) |
+| Unexplained | the rest: within the TTL, system prompt not read | 0 / 23,368 / 23,368 | 3 | 1,217,767 | 1.1% | $14.47 (0.6%) |
+| Not classed | writes below the threshold (ordinary growth and small rewrites) | | | 27,647,468 | 24.0% | |
+
+The cost column is what the class's writes cost. Had the same tokens been read
+from cache instead, each would cost about 2% less (`costs.tsv`, last column).
+That bounds what removing a class could save; it is not an avoidable-loss
+estimate.
 
 Notes on the classes:
 
@@ -319,9 +344,12 @@ class. They are not avoidable loss: even a fixed event writes some tokens.
        agent through `apply_endpoint` (`agents/claude.rs:128-146`).
      - The TTL of the supported pi is unknown (see §How each CLI caches).
      - Compacting before a long park shrinks what is written on waking.
-     - A keep-alive turn reads the context once (0.1x) and adds a little to
-       the history. About 19 of them cost one re-write at 2x, so they pay only
-       for a member expected to wake within hours.
+     - A keep-alive turn reads the context once and adds a little to the
+       history. One avoided re-write pays for about 39 such turns on Opus 5.5
+       or Sonnet 5.5, and about 79 on Fable 5.1: that is (1 h write − read) /
+       read at list price, ignoring each turn's output (`costs.tsv`). At one
+       turn per TTL hour, that covers a member expected to wake within a day
+       or more.
      - Batching wake-ups for the same member.
 
 3. **The briefing is rebuilt at every launch, a resume included.**
@@ -410,7 +438,7 @@ class. They are not avoidable loss: even a fixed event writes some tokens.
      tools stay.
    - **Write volume (measured):** 4 events and 0.14M tokens. The rebuild is
      small.
-   - **Hidden cost:** the compaction request reads the whole context, at 0.1x
+   - **Hidden cost:** the compaction request reads the whole context, at the read rate
      when warm. A member compacted after idling past its TTL writes its whole
      context first.
    - **Timing:** compact at turn end, as crew-bridge already does. Never
@@ -425,7 +453,7 @@ class. They are not avoidable loss: even a fixed event writes some tokens.
      thousand tokens per launch at most, so this is low priority.
 
 8. **Turns crew starts.** This is cost, not hit rate: each turn reads the
-   whole context once at 0.1x.
+   whole context once at the read rate (0.025x to 0.05x base input for the models here).
    - **Deliveries.** A 1.5 to 5 s gather (`daemon/delivery.rs:46-50`), and
      status news waiting for company (`:52-63`), already merge some.
    - **Reminder** (`daemon/supervisor/health.rs:104-128`).

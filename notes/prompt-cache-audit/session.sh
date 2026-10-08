@@ -74,6 +74,7 @@ awk -F'\t' -v label="$label" -v cutoff="$cutoff" -v BIG=10000 -v INTACT=26000 -v
       # A request (once per message id).
       if (seen[mid[i]]++) continue
       reqs++; tin += inp[i]; tcc += cc[i]; tcr += cr[i]; t1h += c1h[i]; t5m += c5m[i]
+      m = model[i]; mr[m]++; min_[m] += inp[i]; m1h[m] += c1h[i]; m5m[m] += c5m[i]; mcr[m] += cr[i]
       gap = (prev == "") ? -1 : t[i] - prev
       if (cc[i] >= BIG && cc[i] > cr[i]) {
         if (prev == "") c = "first"
@@ -84,10 +85,11 @@ awk -F'\t' -v label="$label" -v cutoff="$cutoff" -v BIG=10000 -v INTACT=26000 -v
         else if (cr[i] >= INTACT) c = "history_unlogged"
         else c = "system_lost_within_ttl"
         bn[c]++; bt[c] += cc[i]
-        print "SIG", label, c, cr[i], cc[i], gap > "/dev/stderr"
+        print "SIG", label, c, cr[i], cc[i], gap, model[i] > "/dev/stderr"
       }
       compact = 0; prev = t[i]; pmodel = model[i]
     }
+    for (m in mr) print "MOD", label, m, mr[m], min_[m], m1h[m], m5m[m], mcr[m] > "/dev/stderr"
     split("first compaction model_change ttl_expired history_logged history_unlogged system_lost_within_ttl", cls, " ")
     row = label OFS reqs OFS tin OFS tcc OFS tcr OFS t1h OFS t5m OFS drops+0
     for (k = 1; k <= 7; k++) row = row OFS bn[cls[k]]+0 OFS bt[cls[k]]+0

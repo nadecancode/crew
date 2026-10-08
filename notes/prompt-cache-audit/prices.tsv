@@ -1,0 +1,4 @@
+model	base_input	write_5m	write_1h	read	source
+claude-opus-5-5	4	5	8	0.20	https://platform.claude.com/docs/en/build-with-claude/prompt-caching#pricing (read 2026-10-08)
+claude-fable-5-1	10	12.50	20	0.25	same
+claude-sonnet-5-5	2	2.50	4	0.10	same
