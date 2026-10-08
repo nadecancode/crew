@@ -132,8 +132,10 @@ pub fn canonical(
         .to_ms
         .map(|t| timestamp(ceil(t.get(), unit)))
         .transpose()?;
+    // The page this reply answers: the request's cursor as sent, its limit
+    // resolved. Cursors and their digest ignore the page itself.
     canonical.page = PageRequest {
-        cursor: None,
+        cursor: query.page.cursor.clone(),
         limit: Some(query.page.limit.unwrap_or(max_rows)),
     };
     Ok((canonical, run, book))
@@ -1392,6 +1394,12 @@ mod tests {
         next.page.cursor = first.next_cursor.clone();
         let second = observations(&ledger, &next).unwrap();
         assert_eq!(second.rows.len(), 2);
+        assert_eq!(
+            second.query.page.cursor, first.next_cursor,
+            "the request cursor is echoed"
+        );
+        assert_eq!(second.query.page.limit, Some(2));
+        assert_eq!(first.query.page.cursor, None);
         assert_ne!(second.rows[0].id, first.rows[0].id);
         let mut other = next.clone();
         other.scope.task = UsageTaskFilter::NoTask;
