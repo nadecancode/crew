@@ -1,0 +1,47 @@
+{
+  "schema": 1,
+  "approval": "operator m-9a6de4b0d5cc, as recorded by orchestrator in features-acceptance-prep",
+  "scope": "one shared Epics/Docs/Usage/Asides allowance; test/documentation only",
+  "baseline_source": "fnv1a64:fa14dc56661a2b82",
+  "manifest_sha256": "2363676e9e7c888f2c84a72aa98831a68fb98dfd51cb6e405c06009933fdd3be",
+  "previous_limits": {
+    "P1": 230500,
+    "P2": 34000,
+    "P3": 350000,
+    "P4": 600000
+  },
+  "limits": {
+    "P1": 310500,
+    "P2": 42000,
+    "P3": 350000,
+    "P4": 688000
+  },
+  "measured": {
+    "P1": 230387,
+    "P2": 33999,
+    "P3": 330812,
+    "P4": 595884
+  },
+  "manifest_unchanged": true,
+  "counting_semantics_unchanged": true,
+  "tests": {
+    "vitest": 5,
+    "playwright_static_budget": 1,
+    "rust_web_bundle": 2
+  },
+  "runtime_performance_remeasured": false,
+  "logs": {
+    "budget-vitest.log": {
+      "path": "target/features-prep/budget-vitest.log",
+      "sha256": "5b94409a313839be61a037267ecdbe5f872b12ac46a2de8a642be4b91a5ba6a2"
+    },
+    "budget-playwright.log": {
+      "path": "target/features-prep/budget-playwright.log",
+      "sha256": "105c4ecd4a67e7fe1ed9a4748523f50b63013af9427fca25765aa50c74fd979c"
+    },
+    "budget-rust.log": {
+      "path": "target/features-prep/budget-rust.log",
+      "sha256": "6ef6a891a9288e12e38ab8c94ed80cfe93b20f461689bacfb8cbb0c317e68844"
+    }
+  }
+}

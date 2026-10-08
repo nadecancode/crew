@@ -293,6 +293,19 @@ can: a status filter subdues non-matching nodes and does not remove them.
 
 ### Performance
 
+Operator `m-9a6de4b0d5cc` approves one shared Epics/Docs/Usage/Asides allowance,
+recorded in `features-acceptance-prep` and `features-p6-integration`:
+P1 nonterminal JavaScript **310,500 bytes**, P2 all CSS **42,000 bytes**,
+P4 all manifest-listed files except `manifest.json` **688,000 bytes**.
+The increases over the prior ceilings are 80,000 / 8,000 / 88,000 bytes for
+the combined feature set, not per slice. Baseline manifest source
+`fnv1a64:fa14dc56661a2b82` measures P1 230,387 / P2 33,999 / P4 595,884 bytes.
+Each slice records its measured delta against a named base; the combined build
+is authoritative. P3 terminal and all other security, startup, frame, heap,
+accessibility and dependency gates stay unchanged. Every code chunk is
+requested at document start; no later code load is allowed. Historical results
+in the linked design/revamp notes keep their original budgets.
+
 - **Rendering.** The task list flattens groups into one list of rows of a
   single height per density: epic headers, task rows, done-fold rows and the
   `Done epics (N)` separator are all 44px in Comfortable and 32px in

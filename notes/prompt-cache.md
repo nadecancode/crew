@@ -1123,6 +1123,68 @@ between context enqueue and acknowledgement, and compaction reorientation.
 Native probes must also show what the runtime actually sends: changed files
 or CLI arguments alone do not establish replacement of resumed instructions.
 
+#### D3 revision: first-session evidence gate (2026-10-08)
+
+This revision supersedes D3's proposed resume snapshot module, `AgentLocal`
+manifest and live-context delivery machinery as implementation scope. QA's
+first complete lifecycle sample `0f143860`,
+`notes/prompt-cache/lifecycle-before-03.json`, does not reproduce a resume
+cache miss after roster changes on Claude Code 2.1.291 or Codex 0.159.0.
+The first post-add request reads 45,727/46,200 tokens on Claude and
+24,320/24,649 on Codex; after removal Claude reads 47,268/47,741. Briefing
+files change, but these native counters do not justify a snapshot mechanism
+to avoid a measured loss. No resume-token saving is expected or claimed on
+these versions from freezing those files.
+
+There is first-session exposure. The sample's first observed Claude worker
+request reads 23,940/39,055 tokens (61.298%); the orchestrator reads
+23,715/40,282 (58.872%). These are first-request values, not the warm step's
+aggregate rates. Codex starts at 20,224/20,717 (97.620%). The Claude non-read
+amounts, 15,115 and 16,567 tokens, include runtime context, catalogs and initial
+work; they are not an estimate of avoidable crew briefing cost. The historical
+1.6M-token startup class is likewise exposure, not a savings budget.
+
+Re-scope `cache-standing-prompts` to testing common crew text before member
+identity on **fresh sessions**. First use isolated synthetic native captures
+to determine whether differing runtime environment text already occurs before
+crew's proposed common segment. If it does, and no supported placement can
+preserve a reusable prefix without misrepresenting identity or the working
+directory, close this optimization as a documented no-op. Do not construct a
+resume snapshot subsystem, change personal-instruction precedence or add
+roster-update turns under this card. Epic/KB/metrics data still stays outside
+the standing prefix; that is a separate data-placement requirement.
+
+If the native rendering probe supports reuse, the candidate is limited to
+prompt composition and its adapter ordering/tests after `toolbox-launch`.
+Keep all existing instructions and real member/workspace identity. Expected
+mechanism: a new member can read the common segment primed by another member
+of the same role/model/catalog. Saved tokens are **unknown until measured**;
+there is no justified Codex hit-rate uplift target on the evidence above.
+
+Before any candidate provider run, freeze a first-session subcase with three
+before/after pairs, a matched native catalog and the same explicit peer-priming
+sequence/timing on both sides. Compare the **first request** of each fresh
+native session separately by role, not the whole warm phase. For Claude,
+require at least a 10% decrease in median first-request non-read input and a
+higher first-request read share in at least two pairs. Include peer priming,
+all output and all completed work in the existing +5% cost ceiling; adding
+priming turns only on the candidate does not qualify. Codex's gate is the
+existing 0.5-percentage-point non-regression margin and preserved instructions.
+Retain the lifecycle resume controls and their no-miss outcome; do not apply
+C3's resume-excess reduction to a nonexistent effect. If the rendering or
+measured benefit gate fails, deliver a doc-only closure. The earlier D3
+implementation-card row is narrowed by this revision; no manifest or storage
+change is authorized by that row alone.
+
+The [fresh native rendering checkpoint](prompt-cache/standing-rendering.md)
+records seven isolated pairs, exact text positions and the actual cache
+boundaries. Cwd did not precede Crew identity in those captures. String ordering
+alone does not establish a reusable boundary; the Claude shared-section seam is
+endpoint-qualified and the fixture's hook-failure case forbids stripping the
+original append text before load. No product change or cache saving is claimed.
+The checkpoint proposes doc-only closure for ordinary local CLI launches,
+pending review; it does not authorize a remote-ownership flag or a private hint.
+
 ### D4. Reduce wake-ups while keeping work moving
 
 Keep the existing status-message gather policy and 90-second/three-attempt

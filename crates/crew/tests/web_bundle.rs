@@ -16,7 +16,8 @@ use serde_json::Value;
 
 /// P4: every file of `web-dist/` its manifest lists (all but `manifest.json`),
 /// as `web/test/budget.test.ts` counts them (notes/web-design.md §Budgets).
-const MAX_BUNDLE_BYTES: u64 = 600_000;
+/// Operator m-9a6de4b0d5cc grants one shared four-feature allowance.
+const MAX_BUNDLE_BYTES: u64 = 688_000;
 
 fn dist() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join("web-dist")

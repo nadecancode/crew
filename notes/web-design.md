@@ -88,6 +88,18 @@ P4 counts the files of `web-dist/` that its manifest lists, which is every
 file except `manifest.json`. `web/test/budget.test.ts` and
 `crates/crew/tests/web_bundle.rs` both count it this way.
 
+**Current shared feature allowance** (operator `m-9a6de4b0d5cc`, recorded in
+`features-acceptance-prep` and `features-p6-integration`, 2026-10-08): Epics,
+Docs, Usage and Asides together may use P1 **310,500 bytes**, P2 **42,000
+bytes**, and P4 **688,000 bytes**. This adds 80,000 / 8,000 / 88,000 bytes to
+the prior ceilings once, not once per slice. The baseline manifest source
+`fnv1a64:fa14dc56661a2b82` measures P1 230,387 / P2 33,999 / P4 595,884 bytes.
+Each slice records its measured delta against a named base; the combined build
+is authoritative. P3 and every other security, startup, frame, heap,
+accessibility and dependency gate are unchanged. Request every code chunk at
+document start; later code loading remains forbidden. Earlier measurements
+and withdrawn approvals in this section remain historical evidence.
+
 It fits (card `web-bundle-trim`): terser replaces esbuild as the minifier
 (§build), and the toolbox code shares one decoder for items and sources and
 renders its conditions without `<Show>` wrappers. Measured on that card's
@@ -1750,10 +1762,10 @@ the charts).
 
 | # | budget | limit | spike **(observed)** |
 |---|---|---|---|
-| P1 | script needed for the dashboard (everything but the terminal chunk), minified | ≤ 230.5 KB (the raise for member toolboxes is withdrawn, above) | 31.8 KB; the whole app: 191 KB (172 KB app, 19 KB solid-js) |
-| P2 | stylesheet | ≤ 34 KB | 5.0 KB (3.6 KB of it xterm's) |
+| P1 | script needed for the dashboard (everything but the terminal chunk), minified | ≤ 310.5 KB (shared four-feature allowance above) | 31.8 KB; the whole app: 191 KB (172 KB app, 19 KB solid-js) |
+| P2 | stylesheet | ≤ 42 KB | 5.0 KB (3.6 KB of it xterm's) |
 | P3 | terminal chunk (xterm.js), requested at the start beside the first paint, used when a terminal first opens | ≤ 350 KB | 331 KB |
-| P4 | every file of `web-dist/` its manifest lists (all but `manifest.json`) | ≤ 600 KB | 369 KB |
+| P4 | every file of `web-dist/` its manifest lists (all but `manifest.json`) | ≤ 688 KB | 369 KB |
 | P5 | first contentful paint, cold cache | ≤ 150 ms | 28–40 ms |
 | P6 | live (snapshot of 10 agents, 300 messages, 1000 events applied and drawn), cold cache | ≤ 300 ms | 44–55 ms median, 82 ms worst (6 agents; 300 messages and about 1000 events in the last run) |
 | P7 | daemon emits → the page's handler runs, p95 | ≤ 10 ms | 1 ms median, 2–4 ms p95 (real pushes, through the relay) |
