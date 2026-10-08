@@ -37,6 +37,7 @@ pub(crate) fn native_hook(event: &str) -> bool {
             | "native-delivery-accepted"
             | "native-delivery-observed"
             | "native-delivery-started"
+            | "native-delivery-appended"
             | "native-delivery-unknown"
             | "native-delivery-retired"
     )
@@ -84,16 +85,20 @@ pub(crate) fn wakes(to: &Agent, pending: &[Message], resting: bool) -> bool {
     pending.iter().any(|m| !waits_for_company(to, m, resting))
 }
 
-fn clip_for_argv(mut text: String) -> String {
+fn clip_for_argv(mut text: String, ids: &[String]) -> Option<String> {
     if text.len() > MAX_ARGV_TEXT {
-        let mut cut = MAX_ARGV_TEXT;
+        let suffix = ids
+            .iter()
+            .map(|id| format!("\n… (truncated: agent_inbox(id: {id:?}) reads the full text)"))
+            .collect::<String>();
+        let mut cut = MAX_ARGV_TEXT.checked_sub(suffix.len())?;
         while !text.is_char_boundary(cut) {
             cut -= 1;
         }
         text.truncate(cut);
-        text.push_str("\n… (truncated — call agent_inbox for the full text)");
+        text.push_str(&suffix);
     }
-    text
+    Some(text)
 }
 
 enum Route {
@@ -114,41 +119,79 @@ impl Daemon {
     }
 
     fn load_receipts(&self, id: &str) -> Result<(), RpcError> {
-        let mut model = self.model();
-        if model.rt(id).native_receipts_loaded {
-            return Ok(());
-        }
-        let saved = self
-            .store
-            .get_meta(&Self::receipt_key(id))
-            .map_err(|e| RpcError::internal(e.to_string()))?;
-        let mut book: native::Book = match saved {
-            Some(text) => serde_json::from_str(&text)
-                .map_err(|_| RpcError::invalid("native delivery metadata is corrupt"))?,
-            None => native::Book::default(),
+        let consumed: Vec<_> = {
+            let mut model = self.model();
+            if !model.rt(id).native_receipts_loaded {
+                let saved = self
+                    .store
+                    .get_meta(&Self::receipt_key(id))
+                    .map_err(|e| RpcError::internal(e.to_string()))?;
+                let book: native::Book = match saved {
+                    Some(text) => serde_json::from_str(&text)
+                        .map_err(|_| RpcError::invalid("native delivery metadata is corrupt"))?,
+                    None => native::Book::default(),
+                };
+                if book.version != 1 {
+                    return Err(RpcError::invalid(
+                        "unknown native delivery metadata version",
+                    ));
+                }
+                model.rt(id).native_receipts = book;
+                model.rt(id).native_receipts_loaded = true;
+            }
+            model
+                .rt(id)
+                .native_receipts
+                .receipts
+                .values()
+                .filter(|r| r.phase == native::Phase::Consumed)
+                .cloned()
+                .collect()
         };
-        if book.version != 1 {
-            return Err(RpcError::invalid(
-                "unknown native delivery metadata version",
-            ));
-        }
-        // A crash after persisting native consumption but before updating the
-        // bus row is repaired from the receipt, never by submitting again.
-        let consumed: Vec<_> = book
-            .receipts
-            .values()
-            .filter(|r| r.phase == native::Phase::Consumed)
-            .cloned()
-            .collect();
+        // Do not hold the model lock while repairing the shared read-ack path.
+        // A failed repair remains consumed and can be retried, never submitted.
         for receipt in consumed {
-            self.bus
-                .mark_delivered(id, &receipt.ids)
-                .map_err(|e| RpcError::internal(e.to_string()))?;
-            book.receipts.remove(&receipt.batch_id);
+            self.finish_consumed_receipt(id, &receipt)?;
+            self.model()
+                .rt(id)
+                .native_receipts
+                .receipts
+                .remove(&receipt.batch_id);
+            self.save_receipts(id)?;
         }
-        model.rt(id).native_receipts = book;
-        model.rt(id).native_receipts_loaded = true;
         Ok(())
+    }
+
+    fn finish_consumed_receipt(&self, id: &str, receipt: &native::Receipt) -> Result<(), RpcError> {
+        self.bus
+            .mark_delivered(id, &receipt.ids)
+            .map_err(|e| RpcError::internal(e.to_string()))?;
+        if receipt
+            .coverage
+            .as_ref()
+            .is_some_and(|coverage| coverage.verified)
+        {
+            self.acknowledge_received(id, &receipt.ids, false)?;
+        }
+        Ok(())
+    }
+
+    fn delivery_messages(
+        &self,
+        recipient: &str,
+        ids: &[String],
+    ) -> Result<Option<Vec<Message>>, RpcError> {
+        let mut messages = Vec::new();
+        for id in ids {
+            let Some((message, recipients)) = self.bus.get(id)? else {
+                return Ok(None);
+            };
+            if !recipients.iter().any(|id| id == recipient) {
+                return Ok(None);
+            }
+            messages.push(message);
+        }
+        Ok(Some(messages))
     }
 
     fn save_receipts(&self, id: &str) -> Result<(), RpcError> {
@@ -191,6 +234,7 @@ impl Daemon {
         now: i64,
     ) -> Result<String, RpcError> {
         self.load_receipts(id)?;
+        let messages = self.delivery_messages(id, &ids)?;
         let receipt = {
             let mut model = self.model();
             let session = model
@@ -204,6 +248,23 @@ impl Daemon {
                 .native_receipts
                 .offer(ids, session, launch, now)
                 .ok_or_else(|| RpcError::invalid("native delivery is already pending or full"))?;
+            if let Some(messages) = &messages {
+                model
+                    .rt(id)
+                    .native_receipts
+                    .receipts
+                    .get_mut(&key)
+                    .unwrap()
+                    .coverage = Some(native::Coverage {
+                    sha256: native::rendered_digest(
+                        &key,
+                        &crate::agents::prompt::format_nudge(messages),
+                    ),
+                    eligible: crate::agents::prompt::nudge_is_complete(messages),
+                    immediate: messages.iter().all(|message| message.from == OPERATOR_ID),
+                    verified: false,
+                });
+            }
             model.rt(id).native_receipts.receipts[&key].clone()
         };
         if let Err(error) = self.save_receipts(id) {
@@ -296,7 +357,7 @@ impl Daemon {
             }
             self.expire_receipts(id);
             self.request_delivery(id);
-            return Ok(serde_json::json!({ "ok": true, "launch": generation }));
+            return Ok(serde_json::json!({ "ok": true, "launch": generation, "read_proofs": 1 }));
         }
         if self.model().rt(id).native_session.as_deref() != Some(session) {
             return Err(RpcError::invalid("unmatched native session"));
@@ -310,21 +371,27 @@ impl Daemon {
             if self.model().rt(id).native_turn.as_deref() == Some(turn) {
                 return Ok(serde_json::json!({"ok":true}));
             }
+            // A keep-alive's turn is not work: the member stays as it was.
+            let keepalive = self.keepalive_turn_started(id, now_ms());
             {
                 let mut model = self.model();
                 let rt = model.rt(id);
                 rt.native_turn = Some(turn.into());
                 rt.turn_active = true;
-                rt.self_status = None;
-                rt.idle_since = None;
-            }
-            self.update_agent(id, |a| {
-                if !a.status.is_terminal() {
-                    a.status = AgentStatus::Working;
-                    a.block_kind = None;
+                if !keepalive {
+                    rt.self_status = None;
+                    rt.idle_since = None;
                 }
-                a.last_activity_at = now_ms();
-            });
+            }
+            if !keepalive {
+                self.update_agent(id, |a| {
+                    if !a.status.is_terminal() {
+                        a.status = AgentStatus::Working;
+                        a.block_kind = None;
+                    }
+                    a.last_activity_at = now_ms();
+                });
+            }
             return Ok(serde_json::json!({"ok":true}));
         }
         if event == "native-turn-ended" {
@@ -378,6 +445,13 @@ impl Daemon {
             return Err(RpcError::invalid("native batch is not outstanding"));
         }
         let now = now_ms();
+        let immediate_origin = if event == "native-delivery-appended" {
+            self.delivery_messages(id, &ids)?.is_some_and(|messages| {
+                !messages.is_empty() && messages.iter().all(|message| message.from == OPERATOR_ID)
+            })
+        } else {
+            false
+        };
         let changed = {
             let mut model = self.model();
             let rt = model.rt(id);
@@ -405,15 +479,34 @@ impl Daemon {
                     r.observed_at = Some(now);
                     r.observed_turn = Some(turn.into());
                 }
-                "native-delivery-started" => {
-                    let turn = payload
-                        .get("turn_id")
-                        .and_then(serde_json::Value::as_str)
-                        .ok_or_else(|| RpcError::invalid("missing observed native turn"))?;
-                    if r.observed_turn.as_deref() != Some(turn) {
-                        return Err(RpcError::invalid(
-                            "native turn was not observed for this batch",
-                        ));
+                "native-delivery-started" | "native-delivery-appended" => {
+                    if event == "native-delivery-appended" {
+                        if !immediate_origin {
+                            return Err(RpcError::invalid("native append is not operator steering"));
+                        }
+                    } else {
+                        let turn = payload
+                            .get("turn_id")
+                            .and_then(serde_json::Value::as_str)
+                            .ok_or_else(|| RpcError::invalid("missing observed native turn"))?;
+                        if r.observed_turn.as_deref() != Some(turn) {
+                            return Err(RpcError::invalid(
+                                "native turn was not observed for this batch",
+                            ));
+                        }
+                    }
+                    if let Some(coverage) = &mut r.coverage {
+                        if let Some(hashes) = payload
+                            .get("observed_sha256")
+                            .and_then(serde_json::Value::as_array)
+                        {
+                            if hashes.len() <= 2 {
+                                coverage.verified |= coverage.eligible
+                                    && hashes
+                                        .iter()
+                                        .any(|hash| hash.as_str() == Some(&coverage.sha256));
+                            }
+                        }
                     }
                     r.consumed_at = Some(now);
                     r.phase = native::Phase::Consumed;
@@ -458,12 +551,13 @@ impl Daemon {
                     serde_json::json!({"turn_id":payload.get("turn_id")}),
                 );
             }
-            "native-delivery-started" => {
+            "native-delivery-started" | "native-delivery-appended" => {
                 // Late acceptance may arrive after the observed turn ended.
                 // Mark the row consumed without assigning it to another turn.
-                self.bus
-                    .mark_delivered(id, &ids)
-                    .map_err(|e| RpcError::internal(e.to_string()))?;
+                self.finish_consumed_receipt(id, &changed)?;
+                if event == "native-delivery-appended" {
+                    self.delivered(id, &ids, "socket");
+                }
                 self.model().rt(id).native_receipts.receipts.remove(key);
                 self.save_receipts(id)?;
                 self.refresh_counts(&[id.to_string()]);
@@ -471,7 +565,7 @@ impl Daemon {
                     id,
                     "message.runtime_consumed",
                     &changed,
-                    serde_json::json!({"turn_id":payload.get("turn_id")}),
+                    serde_json::json!({"turn_id":payload.get("turn_id"), "read":changed.coverage.as_ref().is_some_and(|coverage|coverage.verified)}),
                 );
             }
             "native-delivery-unknown" => self.receipt_event(
@@ -653,6 +747,14 @@ impl Daemon {
                     let fresh: Vec<Message> = pending
                         .iter()
                         .filter(|m| !rt.in_flight.contains_key(&m.id))
+                        // Keep clipped and complete bodies in separate native
+                        // batches: coverage is all ids or none.
+                        .take_while(|message| {
+                            !native_queue
+                                || crate::agents::prompt::nudge_is_complete(std::slice::from_ref(
+                                    message,
+                                )) == crate::agents::prompt::nudge_is_complete(&pending[..1])
+                        })
                         .cloned()
                         .collect();
                     for m in &fresh {
@@ -745,8 +847,11 @@ impl Daemon {
             }
             Route::Queue(socket, thread) => {
                 let ids: Vec<String> = pending.iter().map(|m| m.id.clone()).collect();
-                let text = clip_for_argv(runtime_for(kind).nudge(&pending));
-                match self.queue(id, kind, &socket, &thread, &text).await {
+                let result = match clip_for_argv(runtime_for(kind).nudge(&pending), &ids) {
+                    Some(text) => self.queue(id, kind, &socket, &thread, &text).await,
+                    None => Err("delivery references exceed the queue argument bound".into()),
+                };
+                match result {
                     Ok(()) => self.delivered(id, &ids, "socket"),
                     Err(e) => {
                         self.model().rt(id).queue_failed = true;
@@ -836,7 +941,7 @@ impl Daemon {
 
     /// Bookkeeping once messages are in the session: a turn is (or will be)
     /// running on them.
-    fn delivered(&self, id: &str, ids: &[String], via: &str) {
+    pub(crate) fn delivered(&self, id: &str, ids: &[String], via: &str) {
         if let Err(e) = self.bus.mark_delivered(id, ids) {
             tracing::error!("marking messages delivered for {id}: {e}");
         }
@@ -849,6 +954,8 @@ impl Daemon {
             let rt = model.rt(id);
             rt.nudges = 0;
             rt.idle_since = None;
+            // A turn a message joins is work: Working, watched as such.
+            rt.keepalive_turn_since = None;
             rt.delivered_at = now;
             rt.turn_messages.extend(ids.iter().cloned());
             if interactive {
@@ -949,6 +1056,11 @@ impl Daemon {
         // Unsandboxed it keeps running with the daemon's own environment.
         let env = if marked.is_some() { env } else { Vec::new() };
         let mut cmd = command(marked.as_ref(), &argv, &env).map_err(|e| format!("{e:#}"))?;
+        if let Some(toolbox) = self.active_toolbox(id) {
+            for name in toolbox.scrub_env {
+                cmd.env_remove(name);
+            }
+        }
         cmd.stdin(std::process::Stdio::null())
             .stdout(std::process::Stdio::null())
             .stderr(std::process::Stdio::piped());

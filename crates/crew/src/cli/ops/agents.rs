@@ -137,6 +137,18 @@ pub fn agent(target: &Target, cmd: AgentCommand) -> Result<()> {
                     "moving {id} to {} on {on}: a fresh session there, handed the work",
                     crate::models::runtime_label(agent.runtime)
                 );
+                // The toolbox is mapped again there: say what will not load.
+                // The move is made either way, so this is shown only when known.
+                let mapped: Result<Vec<crew_core::rpc::MemberToolbox>, _> =
+                    client.call(Call::Toolbox {
+                        agent: Some(id.clone()),
+                        runtime: Some(agent.runtime),
+                    });
+                if let Some(member) = mapped.ok().as_ref().and_then(|m| m.first()) {
+                    for line in super::toolbox::not_loading(&member.toolbox) {
+                        println!("  {line}");
+                    }
+                }
             } else {
                 println!("restarting {id} on {on}");
             }

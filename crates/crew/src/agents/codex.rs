@@ -32,6 +32,8 @@ const LONG_CONTEXT_COMPACT_AT: u64 = 900_000;
 
 pub struct CodexRuntime;
 
+pub(crate) mod toolbox;
+
 /// The developer instructions the user's own Codex config sets: a
 /// `developer_instructions` override replaces them, so crew's are added to
 /// them instead.
@@ -51,9 +53,24 @@ fn sidecar_dir(runtime: &Path, agent_dir: &Path) -> PathBuf {
     ))
 }
 
-/// A TOML value literal. JSON strings and arrays of strings are valid TOML.
+/// A TOML value literal. In particular, tables inside `skills.config` use
+/// equals signs, not JSON's colons.
 fn toml_value(value: &Value) -> String {
-    value.to_string()
+    match value {
+        Value::Object(table) => format!(
+            "{{{}}}",
+            table
+                .iter()
+                .map(|(key, value)| format!("{}={}", json!(key), toml_value(value)))
+                .collect::<Vec<_>>()
+                .join(",")
+        ),
+        Value::Array(values) => format!(
+            "[{}]",
+            values.iter().map(toml_value).collect::<Vec<_>>().join(",")
+        ),
+        _ => value.to_string(),
+    }
 }
 
 /// Whether a menu's cursor (`›`) sits on the option `option` picks out (it
@@ -83,7 +100,17 @@ impl AgentRuntime for CodexRuntime {
             overrides.push("-c".into());
             overrides.push(format!("{key}={}", toml_value(&value)));
         };
+        let toolbox = ctx.settings.toolbox_launch.as_ref();
+        if let Some(toolbox) = toolbox {
+            // A whole-table CLI override replaces earlier CLI leaves before
+            // Codex merges it with native configuration. Apply the closing
+            // patch first, then insert crew and the selected proxy leaves.
+            for (key, value) in &toolbox.codex_overrides {
+                set(key, value.clone());
+            }
+        }
         set("mcp_servers.crew.command", json!(crew_bin));
+        set("mcp_servers.crew.enabled", json!(true));
         set(
             "mcp_servers.crew.args",
             json!(["mcp", "--identity", identity]),
@@ -95,6 +122,23 @@ impl AgentRuntime for CodexRuntime {
             "mcp_servers.crew.default_tools_approval_mode",
             json!("approve"),
         );
+        if let Some(toolbox) = toolbox {
+            for name in &toolbox.servers {
+                // Toolbox names are validated bare identifiers. Codex's -c
+                // key parser splits on dots and does not unquote segments.
+                let key = format!("mcp_servers.{name}");
+                set(&format!("{key}.command"), json!(crew_bin));
+                set(
+                    &format!("{key}.args"),
+                    json!(["toolbox", "mcp", name, "--identity", identity]),
+                );
+                set(&format!("{key}.enabled"), json!(true));
+                set(
+                    &format!("{key}.default_tools_approval_mode"),
+                    json!("approve"),
+                );
+            }
+        }
         // Codex appends the event JSON as the final argument.
         set(
             "notify",
@@ -103,10 +147,14 @@ impl AgentRuntime for CodexRuntime {
         // The standing instructions (who the agent is, its role, the team,
         // the tools) go into the system prompt, after whatever the user's own
         // config puts there, rather than into a prompt of their own.
-        let mut instructions: Vec<String> =
+        let mut instructions: Vec<String> = if toolbox.is_none_or(|toolbox| toolbox.inherit_memory)
+        {
             own_developer_instructions(&super::home::Operator::detect(ctx.endpoint).codex)
                 .into_iter()
-                .collect();
+                .collect()
+        } else {
+            Vec::new()
+        };
         if !ctx.briefing.trim().is_empty() {
             instructions.push(ctx.briefing.trim_end().to_string());
         }
@@ -221,6 +269,7 @@ impl AgentRuntime for CodexRuntime {
             args.extend(server_permissions.iter().cloned());
             args.extend(ctx.settings.extra_args.iter().cloned());
             Ok(Sidecar {
+                scrub_env: toolbox.map(|toolbox| toolbox.scrub_env.clone()).unwrap_or_default(),
                 program: "codex".into(),
                 args,
                 cwd: cwd.clone().into(),
@@ -274,6 +323,9 @@ impl AgentRuntime for CodexRuntime {
         }
 
         Ok(LaunchSpec {
+            scrub_env: toolbox
+                .map(|toolbox| toolbox.scrub_env.clone())
+                .unwrap_or_default(),
             agent_id: ctx.agent.id.clone(),
             kind: RuntimeKind::Codex,
             program: "codex".into(),
@@ -373,6 +425,17 @@ impl AgentRuntime for CodexRuntime {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn table_overrides_are_native_toml_literals() {
+        let value = serde_json::json!([{"path":"/a path/SKILL.md","enabled":false}]);
+        let text = format!("skills.config={}", super::toml_value(&value));
+        let parsed: toml::Value = text.parse().unwrap();
+        assert_eq!(
+            serde_json::to_value(&parsed["skills"]["config"]).unwrap(),
+            value
+        );
+    }
+
     use super::*;
     use crate::agents::AgentSettings;
     use crate::endpoints::{Endpoint, Secret};

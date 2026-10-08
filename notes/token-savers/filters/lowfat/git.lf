@@ -1,0 +1,120 @@
+#!/usr/bin/env lowfat-filter
+# git-compact — compact git output for LLM contexts
+# env: $sub $level $exit $args
+
+# ── shared helpers ────────────────────────────────────────────────
+define strip-trailers:
+    drop /^[[:space:]]*(Signed-off-by|Co-authored-by|Change-Id|Reviewed-by|Acked-by|Tested-by|Reported-by|Cc):/
+
+define abbrev-hash:
+    shell: sed -E 's/^commit ([0-9a-f]{12})[0-9a-f]{28}/commit \1/'
+
+# State machine: drop pre-hunk metadata (--- +++ index mode), drop
+# unchanged context, strip @@ function-context tail when ultra.
+# Past the cap, keep counting so the tail marker reports what was cut.
+define compact-diff(limit):
+    shell: |
+        awk -v lim=$1 -v lvl=$level '
+          BEGIN { in_hunk=0; n=0; xf=0; xl=0 }
+          /^diff / { in_hunk=0
+                     if (n>=lim) { xf++; next }
+                     print; n++; next }
+          /^@@ /  { in_hunk=1
+                    if (n>=lim) { xl++; next }
+                    if (lvl=="ultra" && match($0,/ @@/))
+                        print substr($0,1,RSTART+2)
+                    else print
+                    n++; next }
+          lvl=="ultra" { next }
+          in_hunk && /^[+-]/ { if (n>=lim) { xl++; next }
+                               print; n++ }
+          END { if (xf || xl)
+                    printf "... [git-compact: truncated; %d more files, %d more lines omitted - use LOWFAT_LEVEL=lite for the full diff]\n", xf, xl }
+        '
+
+# Pre-hunk meta duplicates the `diff --git` path. `index` may end without
+# a mode, hence own anchor; --- / +++ keep the space guard for `--` lines.
+define drop-index-meta:
+    drop /^(index [0-9a-f]+\.\.[0-9a-f]+( [0-7]+)?$|(new file mode |deleted file mode |old mode |new mode |similarity index |dissimilarity index |rename from |rename to |copy from |copy to |---|\+\+\+) )/
+
+# ── status ────────────────────────────────────────────────────────
+# File entries: long-format indents them with a tab; short/porcelain (`-s`)
+# prefixes two status-code columns. At full/lite we also keep the section
+# headers ("On branch", "Changes …", "Untracked …", "## branch" for porcelain)
+# since they carry staged-vs-unstaged context; ultra strips them down to
+# file entries only.
+status:
+    match level:
+        ultra:
+            keep /^(\t|[ MADRCU?!]{2} )/
+            head 15
+            or "git status: clean"
+        lite:
+            keep /^(\t|[ MADRCU?!]{2} |## |On branch|Changes|Untracked)/
+            head 60
+            or "git status: clean"
+        else:
+            keep /^(\t|[ MADRCU?!]{2} |## |On branch|Changes|Untracked)/
+            head 30
+            or "git status: clean"
+
+# ── diff ──────────────────────────────────────────────────────────
+# Lite: uncapped, drops only pre-hunk meta + blank context lines.
+diff:
+    if exit failed:
+        raw
+    elif level ultra:
+        compact-diff 30
+        or-shell: awk 'NF' | head -50
+    elif level lite:
+        drop-index-meta
+        drop /^ ?[[:space:]]*$/
+    else:
+        compact-diff 200
+        or-shell: awk 'NF' | head -50
+
+# ── log ───────────────────────────────────────────────────────────
+log:
+    match level:
+        ultra:
+            keep /^(commit |    )/
+            strip-trailers
+            abbrev-hash
+            head 10
+        lite:
+            strip-trailers
+            abbrev-hash
+            head 50
+        else:
+            strip-trailers
+            abbrev-hash
+            head 25
+
+# ── show ──────────────────────────────────────────────────────────
+# Lite is permissive — only trailers and pre-hunk meta are dropped.
+show:
+    match level:
+        ultra:
+            keep /^(commit |Author:|Date:|    |diff --git)/
+            strip-trailers
+            abbrev-hash
+            head 20
+        lite:
+            strip-trailers
+            abbrev-hash
+            drop-index-meta
+            head 200
+        else:
+            # split at first `diff `, run separate chains on each half
+            split /^diff /
+            pre:
+                keep /^(commit |Merge:|Author:|Date:|    )/
+                strip-trailers
+                abbrev-hash
+            post:
+                compact-diff 100
+            head 100
+
+# ── default ───────────────────────────────────────────────────────
+*:
+    head 30

@@ -6,7 +6,9 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 use crew_core::config::{Style, TeamConfig};
-use crew_core::toolbox::{Fingerprint, Item, ItemKind, ItemRef, Origin, Resolved, SourceKind};
+use crew_core::toolbox::{
+    Content, Fingerprint, Item, ItemKind, ItemRef, Origin, Resolved, SourceKind,
+};
 use crew_core::RuntimeKind;
 use serde_json::Value;
 
@@ -190,7 +192,7 @@ fn fixture_key_order_and_same_selection_do_not_change_canonical_bytes() {
         .items
         .iter()
         .filter(|(_, item)| matches!(&item.item, Item::File(_)))
-        .map(|(key, _)| (key.clone(), "a".repeat(64)))
+        .map(|(key, _)| (key.clone(), Content::Sha256("a".repeat(64))))
         .collect();
     // Snapshot hashes are supplied by the real launcher later. This checks only
     // the pure schema contract given fixed hashes, not filesystem snapshotting.

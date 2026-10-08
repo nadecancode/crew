@@ -46,6 +46,12 @@ pub struct Identity {
     pub socket: String,
     pub agent_id: String,
     pub token: String,
+    /// Whether the agent is the orchestrator when it was launched: its MCP
+    /// server offers the orchestrator's tools by this, never by asking the
+    /// daemon, so the tool list stays the same whether or not the daemon
+    /// answers (prompt cache, notes/toolboxes.md rule 4).
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub orchestrator: bool,
 }
 
 impl Identity {

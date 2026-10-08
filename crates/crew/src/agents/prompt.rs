@@ -711,25 +711,34 @@ pub fn task_dispatch(task: &Task) -> String {
     }
 }
 
-fn clip(body: &str) -> String {
+fn clip(body: &str, id: &str) -> String {
     if body.chars().count() <= NUDGE_BODY_CHARS {
-        return body.trim_end().to_string();
+        return body.to_string();
     }
     let mut out: String = body.chars().take(NUDGE_BODY_CHARS).collect();
-    out.push_str("\n… (truncated — call agent_inbox for the full text)");
+    let _ = write!(
+        out,
+        "\n… (truncated: agent_inbox(id: {id:?}) reads the full text)"
+    );
     out
+}
+
+pub(crate) fn nudge_is_complete(messages: &[Message]) -> bool {
+    messages
+        .iter()
+        .all(|message| message.body.chars().count() <= NUDGE_BODY_CHARS)
 }
 
 /// Phrase bus messages as a prompt for an interactive agent session.
 pub fn format_nudge(messages: &[Message]) -> String {
-    match messages {
+    let mut text = match messages {
         [] => String::new(),
         [m] => format!(
             "[crew] Message from {} (type {}, id {}):\n\n{}",
             m.from,
             m.kind,
             m.id,
-            clip(&m.body)
+            clip(&m.body, &m.id)
         ),
         many => {
             let mut out = format!("[crew] {} new messages:\n", many.len());
@@ -741,12 +750,16 @@ pub fn format_nudge(messages: &[Message]) -> String {
                     m.from,
                     m.kind,
                     m.id,
-                    clip(&m.body)
+                    clip(&m.body, &m.id)
                 );
             }
             out
         }
+    };
+    if !messages.is_empty() {
+        text.push_str("\n\n[crew] Complete messages are marked read only after their unchanged text is confirmed. Truncated messages stay unread; fetch only the id named above.");
     }
+    text
 }
 
 /// Who sent the bus messages in a prompt `format_nudge` wrote, by message

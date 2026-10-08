@@ -157,6 +157,21 @@ impl Daemon {
             }
             Signal::Compacted => self.context_compacted(id).await,
             Signal::CompactSkipped(why) => self.compact_skipped(id, &why),
+            // The session's end is reported as any exit is.
+            Signal::ToolboxFailed {
+                server,
+                detail,
+                ended: true,
+            } => self.toolbox_failed_in_session(id, &server, &detail),
+            Signal::ToolboxFailed { server, detail, .. } => {
+                self.toolbox_report(
+                    id,
+                    &server,
+                    crew_core::rpc::ToolboxReportKind::Failed,
+                    &detail,
+                )
+                .await
+            }
             Signal::TurnFailed(what) => {
                 {
                     let mut model = self.model();
@@ -181,10 +196,15 @@ impl Daemon {
                 if self.model().rt(id).native_queue_bridge {
                     return;
                 }
+                // A keep-alive's turn is not work: the member stays as it was.
+                let keepalive = self.keepalive_turn_started(id, now);
                 {
                     let mut model = self.model();
                     let rt = model.rt(id);
                     rt.turn_active = true;
+                    if keepalive {
+                        return;
+                    }
                     rt.self_status = None;
                     rt.idle_since = None;
                 }
@@ -302,6 +322,7 @@ impl Daemon {
             let rt = model.rt(id);
             rt.turn_active = false;
             rt.parking_turn = false;
+            rt.keepalive_turn_since = None;
             rt.turn_ended_at = now;
             rt.idle_since = Some(now);
             // What this turn was given; what is delivered from here on is the next one's.
