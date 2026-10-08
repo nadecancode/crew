@@ -552,9 +552,10 @@ Resulting cells:
   listed as Cannot be excluded on Claude Code (mixed-scope MCP limit).
 - A list naming some but not all non-MCP kinds of a scope, or `[mcp]` alone
   (the legacy `inherit_mcp`): **Not available separately on Claude Code**.
-- A list naming every non-MCP kind is the same selection as `all` and
-  resolves to the same sources (`Sources` in crew-core canonicalizes both).
-  The same holds for project lists, where MCP is never included.
+- For project, a list naming every non-MCP kind is the same selection as
+  `all`: `Sources` in crew-core resolves both to the same set, because
+  project MCP is never included. For operator, such a list is the
+  every-kind-except-MCP set above, not `all`.
 
 #### Codex 0.159.0: the user AGENTS.md cannot be excluded unsandboxed
 
