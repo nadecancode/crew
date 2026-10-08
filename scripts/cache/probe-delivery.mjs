@@ -85,10 +85,17 @@ const server = http.createServer((req, res) => {
     res.writeHead(200, {'content-type':'text/event-stream'});
     const send = value => res.write(`event: ${value.type}\ndata: ${JSON.stringify(value)}\n\n`);
     send({type:'message_start',message:{id:'msg_'+n,type:'message',role:'assistant',model:'claude-opus-5-5',content:[],stop_reason:null,stop_sequence:null,usage:{input_tokens:100,output_tokens:0}}});
-    send({type:'content_block_start',index:0,content_block:{type:'text',text:''}});
-    setTimeout(() => {
-      send({type:'content_block_delta',index:0,delta:{type:'text_delta',text:'Synthetic response '+n}});
+    const textIndex = scenario==='thinking'?1:0;
+    if (scenario==='thinking') {
+      send({type:'content_block_start',index:0,content_block:{type:'thinking',thinking:''}});
+      send({type:'content_block_delta',index:0,delta:{type:'thinking_delta',thinking:'Synthetic retained reasoning '+n}});
+      send({type:'content_block_delta',index:0,delta:{type:'signature_delta',signature:'fixture-signature-'+n}});
       send({type:'content_block_stop',index:0});
+    }
+    send({type:'content_block_start',index:textIndex,content_block:{type:'text',text:''}});
+    setTimeout(() => {
+      send({type:'content_block_delta',index:textIndex,delta:{type:'text_delta',text:'Synthetic response '+n}});
+      send({type:'content_block_stop',index:textIndex});
       send({type:'message_delta',delta:{stop_reason:'end_turn',stop_sequence:null},usage:{output_tokens:10}});
       send({type:'message_stop'}); res.end();
     }, n===1?3500:500);

@@ -206,7 +206,15 @@ impl Daemon {
                 .ok_or_else(|| RpcError::invalid("native delivery is already pending or full"))?;
             model.rt(id).native_receipts.receipts[&key].clone()
         };
-        self.save_receipts(id)?;
+        if let Err(error) = self.save_receipts(id) {
+            // No frame has been sent, so this offer is known not admitted.
+            self.model()
+                .rt(id)
+                .native_receipts
+                .receipts
+                .remove(&receipt.batch_id);
+            return Err(error);
+        }
         self.receipt_event(
             id,
             "message.runtime_queued",
@@ -588,7 +596,13 @@ impl Daemon {
             if agent.runtime == RuntimeKind::Claude {
                 if pending.iter().any(|m| m.from == OPERATOR_ID) {
                     pending.retain(|m| m.from == OPERATOR_ID);
-                } else if !resting {
+                } else if !resting
+                    && (native_queue
+                        || model
+                            .local
+                            .get(id)
+                            .is_some_and(|local| local.settings.socket_delivery))
+                {
                     return;
                 }
                 if native_queue {
@@ -713,9 +727,15 @@ impl Daemon {
                     ids,
                     text,
                     immediate,
-                    batch_id,
+                    batch_id: batch_id.clone(),
                 });
                 if tx.send(frame).await.is_err() {
+                    if let Some(key) = batch_id {
+                        self.model().rt(id).native_receipts.receipts.remove(&key);
+                        if let Err(error) = self.save_receipts(id) {
+                            tracing::error!("{}", error.message);
+                        }
+                    }
                     drop(_guard);
                     self.listener_gone(id, conn);
                     return;
@@ -972,8 +992,6 @@ impl Daemon {
             Err(_) => false,
         }
     }
-
-
 }
 
 /// Run a queue command to its end, with its ledger entry and the agent's
