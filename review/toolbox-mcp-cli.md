@@ -143,6 +143,14 @@ cache for this toolchain, at the locked versions.
 - `mcp/tools.rs::toolbox_arguments_are_bundle_names_only` (T11, part): both
   schemas take strings only, and a `toolbox` argument that is not names is
   refused rather than dropped.
+- `daemon/toolbox_rpc.rs` unit tests (T11, subagents): a default subagent
+  gets a copy of the parent's active toolbox (same definitions, content and
+  servers, pinned from the parent's snapshots at its own launch); a
+  selection gives only those bundles; after a reload widens a bundle while
+  the parent runs the old one, a default subagent still gets the old items
+  and asking for the bundle is refused naming the first new item; a bundle
+  whose definition changed is refused; a parent without a toolbox has
+  nothing to give.
 - `mcp/proxy/http.rs` unit tests: URL parsing and joining, same-origin
   endpoints, event reading and its byte bound, header line count, chunked
   bodies, redirect wording; `mcp/proxy/stdio.rs` bounded lines.
@@ -155,13 +163,33 @@ On `bd6431d5`: `cargo fmt --all -- --check` clean;
 run inside `nix-shell` with `CREW_IDENTITY`, `CREW_SOCKET` and
 `CREW_LAUNCH` removed.
 
-## Not yet in this slice
+## Integration with toolbox-launch
 
-- `crew toolbox reload` answers that it is not available until graph's
-  reload service lands.
-- `crew toolbox` and `crew toolbox check` show Planned or Needs per item
-  until graph's per-runtime preview lands.
-- T11 daemon tests wait for graph's launch wiring; T18 needs real runtimes.
+graph's integration merge `563e871e` (its checkpoint `10702707` with this
+branch at `2f5a1849`) was merged as `e0160530`; this card's files came
+through byte for byte. On top, `b85b7345` moves the calls onto what a
+launch prepares:
+
+- `crew toolbox mcp` reaches only a server of the member's active toolbox
+  (`toolbox_item`), with the credentials captured for that launch
+  (`toolbox_references`), and scrubs every source name the launch
+  recorded (`ActiveToolbox.scrub_env`);
+- `crew toolbox` (with `--runtime`, or before a member has run) and `crew
+  toolbox check` map a configuration with `toolbox_preview`;
+- `crew toolbox reload` stages the team file's toolboxes with
+  `toolbox_reload`;
+- a move to another CLI is checked once, in `move_to_runtime`
+  (`toolbox_runtime_check`);
+- a subagent's launch pins its servers from its parent's snapshots
+  (`snapshot_owner`), so nothing is copied at spawn.
+
+## Left to end-to-end QA
+
+T14's second half (after `crew resume --restart` the new description
+appears, the digest changes, `toolbox.changed` is recorded) and T18 (resume
+after removing a server) need real runtimes and a full launch. They belong
+to `toolbox-docs-qa`. The proxy's part of T14 (refresh replaces a pin;
+nothing changes without it) is covered above.
 
 ## Early security review
 

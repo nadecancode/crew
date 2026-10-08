@@ -22,6 +22,7 @@ use crew_core::{AgentStatus, RuntimeKind};
 
 use super::Daemon;
 use crate::persistence::NewEvent;
+use serde_json::json;
 
 /// What the member is asked: a reply that adds as little as possible to its
 /// context, and no action.
@@ -56,24 +57,46 @@ impl Daemon {
                 }
                 rt.keepalives
             };
-            if !self.inject(&id, TEXT).await {
-                let mut model = self.model();
-                let rt = model.rt(&id);
-                rt.keepalives -= 1;
-                rt.keepalive_sent_at = None;
-                continue;
-            }
+            // Recorded before it is handed over, so the event comes before any
+            // request the keep-alive causes; whether the session took it
+            // follows as its own event.
+            let dispatched_at = now_ms();
             self.emit(
                 NewEvent::new(
                     "scheduler",
                     "agent.keepalive",
                     format!(
-                        "kept {id}'s prompt cache warm ({sent} of {}) after {} min at rest",
+                        "keeping {id}'s prompt cache warm ({sent} of {}) after {} min at rest",
                         limits.keep_cache_warm_max,
                         (now - rested).max(0) / 60_000
                     ),
                 )
-                .agent(&id),
+                .agent(&id)
+                .data(json!({
+                    "n": sent,
+                    "max": limits.keep_cache_warm_max,
+                    "rested_ms": (now - rested).max(0),
+                    "dispatched_at_ms": dispatched_at,
+                    "text": TEXT,
+                })),
+            );
+            if self.inject(&id, TEXT).await {
+                continue;
+            }
+            {
+                let mut model = self.model();
+                let rt = model.rt(&id);
+                rt.keepalives -= 1;
+                rt.keepalive_sent_at = None;
+            }
+            self.emit(
+                NewEvent::new(
+                    "scheduler",
+                    "agent.keepalive_failed",
+                    format!("{id}'s keep-alive could not be handed to its session"),
+                )
+                .agent(&id)
+                .data(json!({ "n": sent, "dispatched_at_ms": dispatched_at })),
             );
         }
     }
@@ -269,6 +292,17 @@ mod tests {
         daemon.keepalive_at(at + 10 * every, &limits).await;
         assert!(!sent(&mut receiver));
         let events = daemon.store.recent_events(Some("owner"), 1000).unwrap();
+        // Each keep-alive is recorded before it is handed over, with what was
+        // sent, and none failed.
+        let first = events
+            .iter()
+            .find(|e| e.event_type == "agent.keepalive")
+            .unwrap();
+        assert_eq!(first.data["text"], TEXT);
+        assert!(first.data["dispatched_at_ms"].as_i64().unwrap() > 0);
+        assert!(!events
+            .iter()
+            .any(|e| e.event_type == "agent.keepalive_failed"));
         assert_eq!(
             events
                 .iter()

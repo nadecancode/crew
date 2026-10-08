@@ -948,8 +948,11 @@ reminder (`Daemon::inject`), never a message:
   - it neither counts as nor resets a reminder or nudge;
   - the member's status is kept: its parked card (or the team's open
     cards, for the orchestrator) puts it back to Waiting when the turn ends.
-- **Visibility.** Each keep-alive is an `agent.keepalive` event, so
-  collectors and dashboards can tell its requests from work.
+- **Visibility.** Each keep-alive is an `agent.keepalive` event, emitted
+  before the line is handed to the session, so it precedes every request
+  the keep-alive causes. Its data holds `n`, `max`, `rested_ms`,
+  `dispatched_at_ms` and the exact `text` sent. A hand-over that fails adds
+  `agent.keepalive_failed`, and that keep-alive does not count.
 - **History.** Each keep-alive adds `Δin + Δout` to the session. The cap
   bounds it.
 
@@ -996,9 +999,12 @@ catalog and build in both arms.
     `keep_cache_warm_min_tokens: 0` (bench contexts are ~45k);
   - this sends one keep-alive to each Claude member at about 50 minutes;
   - a keep-alive turn is the member's first native turn after its
-    `agent.keepalive` event; the runner's quiet check ignores its requests
-    only if no `message.delivered` or `agent.reminded` event for that member
-    falls between the keep-alive event and that turn's last request;
+    `agent.keepalive` event (not followed by `agent.keepalive_failed`) whose
+    prompt is exactly the event's `text` and whose boundary is complete;
+    the runner's quiet check ignores its requests only if no
+    `message.delivered` or `agent.reminded` event for that member falls
+    between the keep-alive event and that turn's last request; anything
+    else is pending or invalid, never skipped;
   - a keep-alive turn that a delivery joined is work: the pair is retained
     and marked invalid, never excluded;
   - the matching rule is provisional until a native turn marker exists;
