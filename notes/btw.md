@@ -360,8 +360,8 @@ Asides are kept in the daemon's memory: the last 50, with each answer cut to
 - The dashboard note in §Asides "Kept where" therefore reads "Asides from
   before the daemon restarted are gone". It is shown when the daemon's start
   time is later than the newest aside the client had.
-- **Remove from this list** deletes the aside from the daemon's list for
-  every client. It does not undo usage.
+- **Remove for everyone** deletes the aside from the daemon's list for every
+  client. It does not undo usage.
 
 ## Protocol and entry points
 
@@ -378,7 +378,8 @@ tool catalogs and prefixes are unchanged):
     it.
 - `aside_ask { question, agents?: [id] }` (absent: everyone available) returns
   the new `Aside`. `aside_cancel { id }`, `aside_remove { id }`,
-  `aside_list {}` returns asides and per-member availability.
+  `aside_list {}` returns asides and, per member, availability with its
+  reason and `last_turn_at`.
 - Push `aside` with the updated record after every status change. The
   snapshot carries the list for a reconnecting client.
 - Events: `aside.asked { id, agents }` when asked, and `aside.answered { id,
@@ -463,9 +464,11 @@ standing prompts, briefings or members' tool catalogs.
 
 ## Open items
 
-- **Designer.** Should the picker show a member whose cache has probably
-  expired ("last request 2 h ago; answer reads the context again")? It is
-  not a cost estimate, but it says when an aside will be expensive. The
-  daemon knows each member's last request time.
 - **Operator, through orchestrator, for B10.** It needs a real credential and
   a few cents per runtime.
+
+Settled with the designer (m-302d057f4282, `dashboard-features.md` amended in
+217a8311): the picker shows each member's last turn as a fact ("last turn
+2 h ago"), from the daemon's last request time. It says nothing about the
+cache, whose state the dashboard does not know. `aside_list` carries
+`last_turn_at` per member for it.
