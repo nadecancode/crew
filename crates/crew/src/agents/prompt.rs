@@ -729,37 +729,64 @@ pub(crate) fn nudge_is_complete(messages: &[Message]) -> bool {
         .all(|message| message.body.chars().count() <= NUDGE_BODY_CHARS)
 }
 
-/// Phrase bus messages as a prompt for an interactive agent session.
-pub fn format_nudge(messages: &[Message]) -> String {
+pub(crate) struct NudgeSpan {
+    pub id: String,
+    pub start: usize,
+    pub end: usize,
+}
+
+/// Byte spans come from rendering, never by parsing headers out of a body.
+pub(crate) fn format_nudge_with_spans(messages: &[Message]) -> (String, Vec<NudgeSpan>) {
+    let mut spans = Vec::new();
     let mut text = match messages {
         [] => String::new(),
-        [m] => format!(
-            "[crew] Message from {} (type {}, id {}):\n\n{}",
-            m.from,
-            m.kind,
-            m.id,
-            clip(&m.body, &m.id)
-        ),
+        [m] => {
+            let text = format!(
+                "[crew] Message from {} (type {}, id {}):\n\n{}",
+                m.from,
+                m.kind,
+                m.id,
+                clip(&m.body, &m.id)
+            );
+            spans.push(NudgeSpan {
+                id: m.id.clone(),
+                start: 0,
+                end: text.len(),
+            });
+            text
+        }
         many => {
             let mut out = format!("[crew] {} new messages:\n", many.len());
             for (i, m) in many.iter().enumerate() {
+                let start = out.len();
                 let _ = write!(
                     out,
-                    "\n({}) from {} · type {} · id {}\n{}\n",
+                    "\n({}) from {} · type {} · id {}\n{}",
                     i + 1,
                     m.from,
                     m.kind,
                     m.id,
                     clip(&m.body, &m.id)
                 );
+                spans.push(NudgeSpan {
+                    id: m.id.clone(),
+                    start,
+                    end: out.len(),
+                });
+                out.push('\n');
             }
             out
         }
     };
     if !messages.is_empty() {
-        text.push_str("\n\n[crew] Complete messages are marked read only after their unchanged text is confirmed. Truncated messages stay unread; fetch only the id named above.");
+        text.push_str("\n\n[crew] Messages delivered here in full may be marked read; truncated messages stay unread; fetch only the id named above.");
     }
-    text
+    (text, spans)
+}
+
+/// Phrase bus messages as a prompt for an interactive agent session.
+pub fn format_nudge(messages: &[Message]) -> String {
+    format_nudge_with_spans(messages).0
 }
 
 /// Who sent the bus messages in a prompt `format_nudge` wrote, by message

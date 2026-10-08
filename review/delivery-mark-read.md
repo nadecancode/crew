@@ -12,12 +12,14 @@ turn-start segment beginning at that exact batch marker. Before a following
 marker, remove exactly one LF inserted by the SDK between adjacent prompts;
 otherwise preserve every byte. The rendered batch ends in fixed notice text
 without LF, and unclipped bodies retain their trailing whitespace. The
-daemon compares the digest with the immutable render captured at offer time.
+daemon compares exactly one observed digest with the immutable render captured
+at offer time. Missing or ambiguous proof does not mark a batch read.
 
 Coverage is all ids in a batch or none. Consecutive clipped and unclipped
 messages are offered separately. A clipped render is never read-eligible,
 even when its digest matches. Truncation names the actual message id for
-an exact agent_inbox lookup.
+an exact agent_inbox lookup. Argument clipping uses render-time byte spans;
+its suffix names only ids crossed or omitted by the reserved-suffix cut.
 
 Immediate Claude proof uses the single text block returned as the stored
 SessionAppendResult.message, domain-separated by the opaque batch marker.
@@ -25,6 +27,9 @@ The handshake advertises this receipt support; old bridges/daemons preserve
 legacy consumption without inventing a read proof. No native Codex echo is
 verified in this card. Codex, pi, terminal, shell, legacy and unknown routes
 therefore remain unread. A process exiting zero is not body coverage.
+An authenticated recipient agent's explicit id-scoped full-body fetch marks
+that one message read. Operator, outbox and foreign views do not acknowledge
+another inbox.
 
 The shared acknowledgement path records parked-card cues before it marks
 read, retaining the inbox path's bookkeeping order. A durable consumed

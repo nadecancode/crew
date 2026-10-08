@@ -85,20 +85,41 @@ pub(crate) fn wakes(to: &Agent, pending: &[Message], resting: bool) -> bool {
     pending.iter().any(|m| !waits_for_company(to, m, resting))
 }
 
-fn clip_for_argv(mut text: String, ids: &[String]) -> Option<String> {
-    if text.len() > MAX_ARGV_TEXT {
-        let suffix = ids
-            .iter()
-            .map(|id| format!("\n… (truncated: agent_inbox(id: {id:?}) reads the full text)"))
-            .collect::<String>();
-        let mut cut = MAX_ARGV_TEXT.checked_sub(suffix.len())?;
+fn clip_for_argv(text: String, spans: &[crate::agents::prompt::NudgeSpan]) -> Option<String> {
+    clip_argv_at(text, spans, MAX_ARGV_TEXT)
+}
+
+fn clip_argv_at(
+    mut text: String,
+    spans: &[crate::agents::prompt::NudgeSpan],
+    limit: usize,
+) -> Option<String> {
+    if text.len() <= limit {
+        return Some(text);
+    }
+    let mut cut = limit;
+    loop {
         while !text.is_char_boundary(cut) {
             cut -= 1;
         }
-        text.truncate(cut);
-        text.push_str(&suffix);
+        let suffix = spans
+            .iter()
+            .filter(|span| span.start >= cut || span.end > cut)
+            .map(|span| {
+                format!(
+                    "\n… (truncated: agent_inbox(id: {:?}) reads the full text)",
+                    span.id
+                )
+            })
+            .collect::<String>();
+        let next = limit.checked_sub(suffix.len())?;
+        if next >= cut {
+            text.truncate(cut);
+            text.push_str(&suffix);
+            return Some(text);
+        }
+        cut = next;
     }
-    Some(text)
 }
 
 enum Route {
@@ -502,7 +523,7 @@ impl Daemon {
                             .get("observed_sha256")
                             .and_then(serde_json::Value::as_array)
                         {
-                            if hashes.len() <= 2 {
+                            if hashes.len() == 1 {
                                 coverage.verified |= coverage.eligible
                                     && hashes
                                         .iter()
@@ -746,19 +767,26 @@ impl Daemon {
                     rt.in_flight.clear();
                     Route::SocketStale(conn)
                 } else {
-                    let fresh: Vec<Message> = pending
+                    let mut fresh: Vec<Message> = pending
                         .iter()
                         .filter(|m| !rt.in_flight.contains_key(&m.id))
-                        // Keep clipped and complete bodies in separate native
-                        // batches: coverage is all ids or none.
-                        .take_while(|message| {
-                            !native_queue
-                                || crate::agents::prompt::nudge_is_complete(std::slice::from_ref(
-                                    message,
-                                )) == crate::agents::prompt::nudge_is_complete(&pending[..1])
-                        })
                         .cloned()
                         .collect();
+                    // Select after dropping in-flight rows. Coverage is all
+                    // ids or none, so clipped bodies get a separate batch.
+                    if let Some(first) = fresh.first().filter(|_| native_queue) {
+                        let complete =
+                            crate::agents::prompt::nudge_is_complete(std::slice::from_ref(first));
+                        let count = fresh
+                            .iter()
+                            .take_while(|message| {
+                                crate::agents::prompt::nudge_is_complete(std::slice::from_ref(
+                                    message,
+                                )) == complete
+                            })
+                            .count();
+                        fresh.truncate(count);
+                    }
                     for m in &fresh {
                         rt.in_flight.insert(m.id.clone(), now);
                     }
@@ -849,7 +877,8 @@ impl Daemon {
             }
             Route::Queue(socket, thread) => {
                 let ids: Vec<String> = pending.iter().map(|m| m.id.clone()).collect();
-                let result = match clip_for_argv(runtime_for(kind).nudge(&pending), &ids) {
+                let (render, spans) = crate::agents::prompt::format_nudge_with_spans(&pending);
+                let result = match clip_for_argv(render, &spans) {
                     Some(text) => self.queue(id, kind, &socket, &thread, &text).await,
                     None => Err("delivery references exceed the queue argument bound".into()),
                 };
@@ -1487,7 +1516,7 @@ mod tests {
         };
         assert_eq!(ids, [short.id.clone()]);
         assert!(text.contains(&short.body));
-        assert!(text.contains("marked read only after their unchanged text is confirmed"));
+        assert!(text.contains("Messages delivered here in full may be marked read"));
         consume_with_text(daemon, &batch, &ids, &text).await;
         assert_eq!(
             daemon
@@ -1718,7 +1747,17 @@ mod tests {
                 .unwrap(),
         )
         .unwrap();
-        assert_eq!(local["task_wakeups"]["parked"], serde_json::json!(ids));
+        let recorded: Vec<_> = ["task_wakeups", "task_wakeup_seen"]
+            .iter()
+            .flat_map(|field| {
+                local[field]["parked"]
+                    .as_array()
+                    .into_iter()
+                    .flatten()
+                    .cloned()
+            })
+            .collect();
+        assert_eq!(recorded, serde_json::json!(ids).as_array().unwrap().clone());
         assert!(daemon.bus.receive("m", true, 50).unwrap().is_empty());
     }
 
@@ -1759,13 +1798,68 @@ mod tests {
 
     #[test]
     fn argv_clipping_names_exact_ids_and_preserves_the_byte_bound() {
-        let ids = vec!["m-one".into(), "m-two".into()];
-        let clipped = clip_for_argv("🙂".repeat(MAX_ARGV_TEXT), &ids).unwrap();
+        let ids: Vec<String> = vec!["m-one".into(), "m-two".into()];
+        let text = "🙂".repeat(MAX_ARGV_TEXT);
+        let spans: Vec<_> = ids
+            .iter()
+            .map(|id| crate::agents::prompt::NudgeSpan {
+                id: id.clone(),
+                start: 0,
+                end: text.len(),
+            })
+            .collect();
+        let clipped = clip_for_argv(text, &spans).unwrap();
         assert!(clipped.len() <= MAX_ARGV_TEXT);
         for id in ids {
             assert!(clipped.contains(&format!("agent_inbox(id: {id:?}) reads the full text")));
         }
         assert_eq!(clip_for_argv("short".into(), &[]), Some("short".into()));
+    }
+
+    #[test]
+    fn argv_cut_inside_third_message_names_only_the_truncated_id() {
+        let messages: Vec<_> = (1..=3)
+            .map(|n| Message {
+                id: format!("m-{n}"),
+                body: "x".repeat(500),
+                ..message("peer", MessageType::Message)
+            })
+            .collect();
+        let (text, spans) = crate::agents::prompt::format_nudge_with_spans(&messages);
+        let cut = spans[2].start + 300;
+        let clipped = clip_argv_at(text, &spans, cut).unwrap();
+        let suffix = clipped.split("\n… (truncated:").nth(1).unwrap();
+        assert!(suffix.contains("agent_inbox(id: \"m-3\")"));
+        assert!(!suffix.contains("m-1"));
+        assert!(!suffix.contains("m-2"));
+        assert!(clipped.len() <= cut);
+    }
+
+    #[tokio::test]
+    async fn an_in_flight_clipped_message_does_not_hold_complete_fresh_messages() {
+        let (_temp, running) = queued_daemon().await;
+        let daemon = &running.daemon;
+        let clipped = send_body(daemon, "peer", &"x".repeat(4_001));
+        let first = send_body(daemon, "peer", "First complete message");
+        let second = send_body(daemon, "peer", "Second complete message");
+        let (tx, mut rx) = mpsc::channel(16);
+        daemon.listener_joined("m", 1, tx);
+        daemon
+            .model()
+            .rt("m")
+            .in_flight
+            .insert(clipped.id, now_ms());
+        let Push::Deliver { ids, .. } =
+            tokio::time::timeout(std::time::Duration::from_secs(4), rx.recv())
+                .await
+                .unwrap()
+                .unwrap()
+                .push
+                .unwrap()
+        else {
+            panic!("expected complete fresh batch")
+        };
+        assert_eq!(ids, [first.id, second.id]);
     }
 
     fn agent(id: &str) -> Agent {
