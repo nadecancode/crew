@@ -194,6 +194,47 @@ pub enum Call {
     /// Agent only: the API key the crew config assigns to this agent.
     #[serde(deserialize_with = "empty_params")]
     Credential,
+    /// Agent only: how `crew toolbox mcp <name>` reaches one MCP server of
+    /// the caller's active toolbox, its references resolved. Like
+    /// `Credential`, the caller is the authenticated agent, never a
+    /// parameter. Answered with a [`ToolboxServerLaunch`].
+    ToolboxServer {
+        name: String,
+        /// Asked by the preflight before the session starts, not by the
+        /// session's proxy.
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        preflight: bool,
+    },
+    /// Agent only: what `crew toolbox mcp <name>` saw of its server after
+    /// the session started.
+    ToolboxReport {
+        name: String,
+        kind: ToolboxReportKind,
+        #[serde(default)]
+        detail: String,
+    },
+    /// Members' toolboxes as they show them (operator or orchestrator):
+    /// every member when `agent` is left out; `runtime` maps the toolbox
+    /// onto another runtime instead of the member's own.
+    Toolbox {
+        #[serde(default)]
+        agent: Option<String>,
+        #[serde(default)]
+        runtime: Option<RuntimeKind>,
+    },
+    /// Operator: validate the team file's toolboxes and resolve every
+    /// reference and source without starting anything. `file` is the team
+    /// file to check; the running team's own when left out.
+    ToolboxCheck {
+        #[serde(default)]
+        file: Option<String>,
+    },
+    /// Operator: reread the team file's `toolboxes` and `toolbox` fields into
+    /// the running team. Running sessions keep theirs until a restart.
+    ToolboxReload {
+        #[serde(default)]
+        file: Option<String>,
+    },
     History {
         #[serde(default)]
         agent: Option<String>,
@@ -469,6 +510,11 @@ impl Call {
             Call::Listen => "listen",
             Call::Delivered { .. } => "delivered",
             Call::Credential => "credential",
+            Call::ToolboxServer { .. } => "toolbox_server",
+            Call::ToolboxReport { .. } => "toolbox_report",
+            Call::Toolbox { .. } => "toolbox",
+            Call::ToolboxCheck { .. } => "toolbox_check",
+            Call::ToolboxReload { .. } => "toolbox_reload",
             Call::Send(_) => "send",
             Call::Inbox { .. } => "inbox",
             Call::Ack { .. } => "ack",
@@ -518,6 +564,138 @@ pub struct Request {
     pub id: u64,
     #[serde(flatten)]
     pub call: Call,
+}
+
+/// The answer to [`Call::ToolboxServer`]: one toolbox MCP server, ready to
+/// start or connect to. It carries resolved secret values: it lives in the
+/// memory of `crew toolbox mcp` only, and its `Debug` leaves them out.
+#[derive(Serialize, Deserialize, Clone, PartialEq, Eq)]
+pub struct ToolboxServerLaunch {
+    pub name: String,
+    pub upstream: Upstream,
+    /// Exact values replaced in the server's responses by `[redacted $NAME]`.
+    #[serde(default)]
+    pub redact: Vec<Redaction>,
+    /// The member's secret names (reference and source names): removed from
+    /// the environment the server inherits, whatever it was given.
+    #[serde(default)]
+    pub scrub: Vec<String>,
+    /// SHA-256 (hex) of the item's canonical definition: a pinned snapshot
+    /// taken for another definition is replaced.
+    pub definition: String,
+    /// Where the server's pinned tool-definition snapshot lives
+    /// (`<agent dir>/toolbox/mcp/<name>.json`).
+    pub snapshot: String,
+    /// Take a new snapshot even when the definition is unchanged
+    /// (`crew resume --restart`).
+    #[serde(default)]
+    pub refresh: bool,
+}
+
+impl std::fmt::Debug for ToolboxServerLaunch {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("ToolboxServerLaunch")
+            .field("name", &self.name)
+            .field("upstream", &self.upstream)
+            .field(
+                "redact",
+                &self.redact.iter().map(|r| &r.name).collect::<Vec<_>>(),
+            )
+            .field("scrub", &self.scrub)
+            .field("definition", &self.definition)
+            .field("snapshot", &self.snapshot)
+            .field("refresh", &self.refresh)
+            .finish()
+    }
+}
+
+/// How a toolbox MCP server is reached.
+#[derive(Serialize, Deserialize, Clone, PartialEq, Eq)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum Upstream {
+    /// A local server: started as a child of `crew toolbox mcp`.
+    Stdio {
+        command: Vec<String>,
+        /// Absolute.
+        #[serde(default)]
+        cwd: Option<String>,
+        /// Added to the scrubbed environment, values resolved.
+        #[serde(default)]
+        env: std::collections::BTreeMap<String, String>,
+    },
+    /// A remote server, bridged from stdio.
+    Http {
+        url: String,
+        #[serde(default)]
+        transport: crate::toolbox::McpTransport,
+        /// Values resolved.
+        #[serde(default)]
+        headers: std::collections::BTreeMap<String, String>,
+    },
+}
+
+impl std::fmt::Debug for Upstream {
+    /// Names only: the values may be secrets.
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Upstream::Stdio { command, cwd, env } => f
+                .debug_struct("Stdio")
+                .field("command", command)
+                .field("cwd", cwd)
+                .field("env", &env.keys().collect::<Vec<_>>())
+                .finish(),
+            Upstream::Http {
+                url,
+                transport,
+                headers,
+            } => f
+                .debug_struct("Http")
+                .field("url", url)
+                .field("transport", transport)
+                .field("headers", &headers.keys().collect::<Vec<_>>())
+                .finish(),
+        }
+    }
+}
+
+/// A resolved value and the reference name it is shown as.
+#[derive(Serialize, Deserialize, Clone, PartialEq, Eq)]
+pub struct Redaction {
+    pub name: String,
+    pub value: String,
+}
+
+/// What `crew toolbox mcp` tells the daemon about its server in session.
+#[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum ToolboxReportKind {
+    /// The server exited or its connection failed: Failed in session.
+    Failed,
+    /// A listing differs from the pinned snapshot; the snapshot is kept.
+    ListingDiffers,
+    /// The server lists tools the pinned snapshot does not expose.
+    NewTools,
+}
+
+/// The answer to [`Call::ToolboxReload`].
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq, Default)]
+pub struct ToolboxReload {
+    /// Members whose toolbox a restart would change.
+    #[serde(default)]
+    pub pending: Vec<PendingToolbox>,
+    /// Team-file fields other than toolboxes that differ from the running
+    /// team: reported, not applied.
+    #[serde(default)]
+    pub ignored: Vec<String>,
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
+pub struct PendingToolbox {
+    pub agent: String,
+    /// The active fingerprint, if the member has run.
+    #[serde(default)]
+    pub from: Option<String>,
+    pub to: String,
 }
 
 #[cfg(test)]

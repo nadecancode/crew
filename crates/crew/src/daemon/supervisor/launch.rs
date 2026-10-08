@@ -168,6 +168,7 @@ impl Daemon {
             socket: self.socket.to_string_lossy().into_owned(),
             agent_id: id.to_string(),
             token,
+            orchestrator: agent.orchestrator,
         };
         write_private_file(&identity_path, &serde_json::to_vec_pretty(&identity)?)?;
 

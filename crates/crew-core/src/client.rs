@@ -723,6 +723,7 @@ mod tests {
                 socket: socket.to_string_lossy().into_owned(),
                 agent_id: "worker".into(),
                 token: "identity-secret-do-not-print".into(),
+                orchestrator: false,
             })
             .unwrap(),
         )
@@ -1220,6 +1221,7 @@ mod tests {
                             socket: socket.to_string_lossy().into_owned(),
                             agent_id: "worker".into(),
                             token: "test".into(),
+                            orchestrator: false,
                         },
                         "test",
                     )

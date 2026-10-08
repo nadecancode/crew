@@ -244,6 +244,9 @@ answers: `crew answer 2`.")]
     /// Print the API key the crew config assigns to an agent (Claude Code's apiKeyHelper)
     #[command(hide = true)]
     Credential(IdentityArg),
+    /// Members' toolboxes: the MCP servers, skills, plugins, subagents and hooks
+    /// each one runs with
+    Toolbox(ToolboxArgs),
     /// Show the endpoints and keys team members are launched with
     Config {
         #[command(subcommand)]
@@ -322,6 +325,61 @@ pub enum StyleCommand {
         #[arg(long, value_name = "STYLE")]
         from: Option<String>,
     },
+}
+
+#[derive(Args)]
+#[command(args_conflicts_with_subcommands = true)]
+pub struct ToolboxArgs {
+    #[command(subcommand)]
+    pub command: Option<ToolboxCommand>,
+    /// Only this member (default: every member)
+    pub agent: Option<String>,
+    /// Show how the toolbox maps onto another runtime: claude, codex, pi or shell
+    #[arg(long)]
+    pub runtime: Option<crew_core::RuntimeKind>,
+    #[arg(long)]
+    pub json: bool,
+}
+
+#[derive(Subcommand)]
+pub enum ToolboxCommand {
+    /// Validate the team file's toolboxes and resolve every reference and
+    /// source, without starting anything; exits non-zero on an error or on a
+    /// status that would stop a launch
+    Check {
+        /// The team file (default: the running team's)
+        #[arg(long, value_name = "FILE")]
+        file: Option<PathBuf>,
+        #[arg(long)]
+        json: bool,
+    },
+    /// Reread the team file's toolboxes into the running team; members pick
+    /// the change up at their next restart
+    Reload {
+        /// The team file (default: the running team's)
+        #[arg(long, value_name = "FILE")]
+        file: Option<PathBuf>,
+    },
+    /// Run one toolbox MCP server for an agent's session (stdio); the runtime
+    /// starts this
+    #[command(hide = true)]
+    Mcp(ToolboxMcpArgs),
+}
+
+#[derive(Args)]
+pub struct ToolboxMcpArgs {
+    /// The server's name in the toolbox
+    pub name: String,
+    #[command(flatten)]
+    pub identity: IdentityArg,
+    /// Start or connect to the server, list its tools, stop it and print the
+    /// listing as JSON (the daemon runs this before a launch)
+    #[arg(long)]
+    pub preflight: bool,
+    /// Read how to reach the server from this file instead of asking the
+    /// daemon (tests)
+    #[arg(long, value_name = "FILE", hide = true)]
+    pub launch_file: Option<PathBuf>,
 }
 
 #[derive(Subcommand)]
@@ -648,6 +706,14 @@ pub fn run(cli: Cli) -> Result<()> {
             agent_side::delivered(identity.identity.as_deref(), ids)
         }
         Command::Credential(identity) => agent_side::credential(identity.identity.as_deref()),
+        Command::Toolbox(args) => match args.command {
+            Some(ToolboxCommand::Mcp(args)) => agent_side::toolbox_mcp(args),
+            Some(ToolboxCommand::Check { file, json }) => {
+                ops::toolbox_check(&target, file.as_deref(), json)
+            }
+            Some(ToolboxCommand::Reload { file }) => ops::toolbox_reload(&target, file.as_deref()),
+            None => ops::toolbox(&target, args.agent, args.runtime, args.json),
+        },
         Command::Config { command } => ops::config(&target, command.unwrap_or(ConfigCommand::Show)),
         Command::Style { command } => ops::style(&target, command.unwrap_or(StyleCommand::List)),
         Command::Models { command } => ops::models(command.unwrap_or(ModelsCommand::List)),
