@@ -97,3 +97,27 @@ barrier. These attempts remain retained and are not counted as final passes.
 This establishes deterministic packaging, native behavior and exact recovery.
 Whether the skill reduces total model usage after discovery, recovery and
 repair turns remains the later paired QA measurement.
+
+## Integration with the reviewed T14 and P1 changes
+
+At the orchestrator's request, merge `f8e8403c` combines approved compact
+submission `363d5ccf` with main `fbe243af`. The merge is clean, with no manual
+source resolution. This includes T14's runtime restart changes and the approved
+feature contract; P3 aside work remains separate and has no source changes in
+this integration.
+
+The requested focused gates passed on that merged tree in slot G:
+
+- `crew` toolbox launch: 13 passed, including Claude/Codex/pi resumed catalog
+  refresh and compact-cli's required-sandbox and unavailable-state cases.
+- `crew` output CLI: 4 passed with `CREW_TEST_SANDBOX=require`.
+- `crew` toolbox units: 11 passed; output store units: 7 passed.
+- `crew-core` toolbox units: 16 passed; compact selection, output-view and
+  shared toolbox fixtures: 2, 7 and 6 passed respectively.
+- Strict workspace/all-target Clippy and formatting: passed.
+
+The commands use the same locked dependencies and build environment above,
+with `CARGO_INCREMENTAL=0`, four build jobs and `target/cw`. Logs are
+`target/compact-integrated-{launch,toolbox-unit,output-unit,core-unit,core-fixtures,clippy,fmt}.log`.
+This is a focused integration rerun, not a second full-workspace or native
+model replay. The original native pin and evidence remain retained separately.
