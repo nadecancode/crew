@@ -447,6 +447,41 @@ mod tests {
         Arc,
     };
 
+    struct ReadyEpics;
+    #[async_trait::async_trait]
+    impl super::super::FeatureService for ReadyEpics {
+        fn feature(&self) -> crew_core::rpc::features::Feature {
+            crew_core::rpc::features::Feature::Epics
+        }
+        fn readiness(&self) -> super::super::Readiness {
+            super::super::Readiness::Ready
+        }
+        async fn handle(
+            &self,
+            _: &super::super::ConnCtx,
+            _: crew_core::rpc::Call,
+        ) -> Result<serde_json::Value, RpcError> {
+            Ok(serde_json::json!({}))
+        }
+    }
+
+    async fn rpc(
+        session: &mut super::super::super::server::Session,
+        rx: &mut tokio::sync::mpsc::Receiver<crew_core::rpc::ServerFrame>,
+        method: &str,
+        params: serde_json::Value,
+    ) -> crew_core::rpc::ServerFrame {
+        assert!(
+            session
+                .request(&serde_json::json!({"id":1,"method":method,"params":params}).to_string())
+                .await
+        );
+        tokio::time::timeout(std::time::Duration::from_secs(2), rx.recv())
+            .await
+            .unwrap()
+            .unwrap()
+    }
+
     struct Projection {
         fail: AtomicBool,
     }
@@ -746,6 +781,97 @@ mod tests {
             .unwrap_err();
         assert_eq!(error.code, "stale_scope");
         assert!(!entered.load(Ordering::Acquire));
+        daemon.shutdown(false).await;
+    }
+
+    #[tokio::test]
+    async fn legacy_and_negotiated_peers_receive_distinct_coherent_task_updates_and_bounded_snapshots(
+    ) {
+        use super::super::super::server::Session;
+        use serde_json::json;
+        let (_temp, running, _) = fixture().await;
+        let daemon = &running.daemon;
+        daemon.feature_services.register(Arc::new(ReadyEpics));
+        daemon
+            .create_task(crew_core::config::TaskSpec {
+                id: "task".into(),
+                ..Default::default()
+            })
+            .unwrap();
+        let (mut legacy, mut old_rx) = Session::new(daemon);
+        let (mut negotiated, mut new_rx) = Session::new(daemon);
+        let hello = json!({"role":"operator","token":daemon.operator_token,"protocol":6,"client":"fixture"});
+        rpc(&mut legacy, &mut old_rx, "hello", hello.clone()).await;
+        rpc(&mut negotiated, &mut new_rx, "hello", hello).await;
+        rpc(
+            &mut negotiated,
+            &mut new_rx,
+            "features_negotiate",
+            json!({"versions":{"epics":1}}),
+        )
+        .await;
+        let old = rpc(
+            &mut legacy,
+            &mut old_rx,
+            "snapshot",
+            json!({"messages":0,"events":0}),
+        )
+        .await
+        .result
+        .unwrap();
+        assert!(old.get("epics").is_none());
+        assert!(old["session"].get("workspace_run_id").is_none());
+        let new = rpc(
+            &mut negotiated,
+            &mut new_rx,
+            "snapshot",
+            json!({"messages":0,"events":0}),
+        )
+        .await
+        .result
+        .unwrap();
+        let run = daemon.run_context().unwrap().workspace_run_id;
+        assert_eq!(new["epics"]["generation"], json!(run));
+        assert_eq!(new["session"]["workspace_run_id"], json!(run));
+        assert_eq!(new["epics"]["revision"], "1");
+        rpc(&mut legacy, &mut old_rx, "subscribe", json!({})).await;
+        rpc(&mut negotiated, &mut new_rx, "subscribe", json!({})).await;
+        let task = daemon
+            .try_update_task("task", |task| task.status = TaskStatus::Working)
+            .unwrap()
+            .unwrap();
+        let old = tokio::time::timeout(std::time::Duration::from_secs(2), old_rx.recv())
+            .await
+            .unwrap()
+            .unwrap()
+            .push
+            .unwrap();
+        assert!(matches!(old, Push::Task(_)));
+        let new = tokio::time::timeout(std::time::Duration::from_secs(2), new_rx.recv())
+            .await
+            .unwrap()
+            .unwrap()
+            .push
+            .unwrap();
+        let Push::EpicBoardChanged(delta) = new else {
+            panic!("negotiated peer received a legacy task")
+        };
+        assert_eq!(delta.workspace_run_id, run);
+        assert_eq!(delta.to_revision, Wide(2));
+        assert_eq!(delta.tasks, vec![task]);
+        // Escaping exceeds the new page budget even while the raw text is small.
+        daemon.model().tasks[0].description = "\0".repeat(100_000);
+        let oversized = rpc(
+            &mut negotiated,
+            &mut new_rx,
+            "snapshot",
+            json!({"messages":0,"events":0}),
+        )
+        .await;
+        assert_eq!(oversized.error.unwrap().code, "too_large");
+        assert_eq!(daemon.model().tasks[0].description.len(), 100_000);
+        drop(legacy);
+        drop(negotiated);
         daemon.shutdown(false).await;
     }
 }

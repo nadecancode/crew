@@ -223,7 +223,7 @@ impl EventStore for SqliteStore {
             Some(agent) => {
                 let mut stmt = conn.prepare(
                     "SELECT seq, timestamp, source, event_type, agent_id, task_id, message, level, data
-                     FROM events WHERE agent_id = ?1 ORDER BY seq DESC LIMIT ?2",
+                     FROM events WHERE agent_id = ?1 AND event_type NOT LIKE 'aside.%' ORDER BY seq DESC LIMIT ?2",
                 )?;
                 let rows = stmt.query_map(params![agent, limit], event_from_row)?;
                 rows.collect::<rusqlite::Result<_>>()?

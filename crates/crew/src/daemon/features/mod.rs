@@ -20,8 +20,10 @@ use tokio::sync::Notify;
 use super::server::{Conn, Who};
 use super::Daemon;
 
+mod audit;
 mod tasks;
 mod watch;
+pub use audit::OperatorAudit;
 pub use tasks::{CommittedTasks, TaskChange, TaskModel, TaskProjection, TaskPublication, TaskView};
 pub use watch::FeatureWatch;
 pub(crate) use watch::PendingWatch;
@@ -843,6 +845,200 @@ mod tests {
         entered: Notify,
         release: Notify,
         calls: std::sync::atomic::AtomicUsize,
+    }
+
+    #[tokio::test]
+    async fn operator_audit_is_body_free_model_independent_and_absent_from_agent_events() {
+        let (_temp, running) = fixture().await;
+        let daemon = &running.daemon;
+        install_member(daemon, false, "token");
+        let run = daemon.run_context().unwrap();
+        let event = {
+            let _model = daemon.model();
+            daemon
+                .record_operator_audit(OperatorAudit::AsideAsked(
+                    crew_core::rpc::asides::AsideAsked {
+                        workspace_run_id: run.workspace_run_id.clone(),
+                        id: Id::new("aside").unwrap(),
+                        agents: Default::default(),
+                    },
+                ))
+                .unwrap()
+        };
+        assert_eq!(event.event_type, "aside.asked");
+        assert_eq!(event.agent_id, None);
+        assert_eq!(event.task_id, None);
+        assert_eq!(event.message, "aside.asked");
+        assert!(event.data.get("body").is_none());
+        // An old/imported row must not bypass the closed operator event family.
+        daemon
+            .store
+            .append_event(
+                crate::persistence::NewEvent::new("asides", "aside.answered", "metadata")
+                    .agent("worker"),
+            )
+            .unwrap();
+        daemon
+            .store
+            .append_event(
+                crate::persistence::NewEvent::new("test", "task.fixture", "visible")
+                    .agent("worker"),
+            )
+            .unwrap();
+        let (mut agent, mut rx) = Session::new(daemon);
+        let auth=request(&mut agent,&mut rx,"hello",json!({"role":"agent","agent_id":"worker","token":"token","protocol":6,"client":"fixture"})).await;
+        assert!(auth.error.is_none());
+        let events = request(
+            &mut agent,
+            &mut rx,
+            "events",
+            json!({"agent":"operator","limit":5000}),
+        )
+        .await
+        .result
+        .unwrap();
+        let events = events.as_array().unwrap();
+        assert_eq!(events.len(), 1);
+        assert_eq!(events[0]["event_type"], "task.fixture");
+        for method in ["snapshot", "subscribe"] {
+            assert_eq!(
+                request(&mut agent, &mut rx, method, json!({}))
+                    .await
+                    .error
+                    .unwrap()
+                    .code,
+                "forbidden"
+            );
+        }
+        let (mut operator, mut operator_rx) = Session::new(daemon);
+        hello(daemon, &mut operator, &mut operator_rx).await;
+        let all = request(
+            &mut operator,
+            &mut operator_rx,
+            "events",
+            json!({"limit":5000}),
+        )
+        .await
+        .result
+        .unwrap();
+        assert!(all
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|event| event["event_type"] == "aside.asked"));
+        assert_eq!(daemon.model().agent("worker").unwrap().last_activity_at, 0);
+        daemon.shutdown(false).await;
+    }
+
+    struct BoundWatchService {
+        feature: Feature,
+        next: std::sync::atomic::AtomicUsize,
+    }
+    struct Forever;
+    #[async_trait::async_trait]
+    impl FeatureWatch for Forever {
+        async fn next(&mut self) -> Result<Option<crew_core::rpc::Push>, RpcError> {
+            std::future::pending().await
+        }
+    }
+    #[async_trait::async_trait]
+    impl FeatureService for BoundWatchService {
+        fn feature(&self) -> Feature {
+            self.feature
+        }
+        fn readiness(&self) -> Readiness {
+            Readiness::Ready
+        }
+        async fn handle(&self, context: &ConnCtx, call: Call) -> Result<Value, RpcError> {
+            let watch = format!(
+                "{}-{}",
+                self.feature.name(),
+                self.next.fetch_add(1, Ordering::AcqRel)
+            );
+            match call {
+                Call::AsideWatch(_) => Ok(
+                    json!({"watch_id":watch,"initial":{"workspace_run_id":context.run.workspace_run_id,"aside_epoch":"aside-epoch","revision":"0"}}),
+                ),
+                Call::UsageWatch(query) => Ok(
+                    json!({"watch_id":watch,"epoch":"usage-epoch","initial":{"query":query,"revision":"0"}}),
+                ),
+                _ => Err(RpcError::invalid("fixture watch only")),
+            }
+        }
+        fn watch_stream(&self, _: ConnCtx, _: Id) -> Result<Box<dyn FeatureWatch>, RpcError> {
+            Ok(Box::new(Forever))
+        }
+    }
+
+    #[tokio::test]
+    async fn arbitrary_clients_cannot_exceed_aside_and_metrics_watch_bounds() {
+        let (_temp, running) = fixture().await;
+        let daemon = &running.daemon;
+        let aside = Arc::new(BoundWatchService {
+            feature: Feature::Asides,
+            next: std::sync::atomic::AtomicUsize::new(0),
+        });
+        let metrics = Arc::new(BoundWatchService {
+            feature: Feature::UsageMetrics,
+            next: std::sync::atomic::AtomicUsize::new(0),
+        });
+        daemon.feature_services.register(aside.clone());
+        daemon.feature_services.register(metrics.clone());
+        let run = daemon.run_context().unwrap();
+        let (mut session, mut rx) = Session::new(daemon);
+        hello(daemon, &mut session, &mut rx).await;
+        request(
+            &mut session,
+            &mut rx,
+            "features_negotiate",
+            json!({"versions":{"asides":1,"usage_metrics":1}}),
+        )
+        .await;
+        let params = json!({"workspace_run_id":run.workspace_run_id,"page":{}});
+        assert!(
+            request(&mut session, &mut rx, "aside_watch", params.clone())
+                .await
+                .error
+                .is_none()
+        );
+        assert_eq!(
+            request(&mut session, &mut rx, "aside_watch", params)
+                .await
+                .error
+                .unwrap()
+                .code,
+            "busy"
+        );
+        for _ in 0..4 {
+            assert!(request(
+                &mut session,
+                &mut rx,
+                "usage_watch",
+                metrics_query(&run.workspace_run_id)
+            )
+            .await
+            .error
+            .is_none());
+        }
+        assert_eq!(
+            request(
+                &mut session,
+                &mut rx,
+                "usage_watch",
+                metrics_query(&run.workspace_run_id)
+            )
+            .await
+            .error
+            .unwrap()
+            .code,
+            "busy"
+        );
+        assert_eq!(aside.next.load(Ordering::Acquire), 1);
+        assert_eq!(metrics.next.load(Ordering::Acquire), 4);
+        assert_eq!(session.feature_watch_count(Feature::Asides), 1);
+        assert_eq!(session.feature_watch_count(Feature::UsageMetrics), 4);
+        drop(session);
+        daemon.shutdown(false).await;
     }
     #[async_trait::async_trait]
     impl FeatureService for ShutdownSpy {
