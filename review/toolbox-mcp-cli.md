@@ -219,3 +219,15 @@ regression test in `tests/toolbox_proxy.rs` or the unit tests.
 
 One limit stays: a host name lookup cannot be cancelled. The caller gives up
 on it at the deadline; the lookup thread is left to finish on its own.
+
+## Final integrated gates
+
+On `ef969fb9`: this branch with graph's `7244d90f` (toolbox-launch through
+`65a3d0f2`, its team-test isolation fix) and main `d9d763cb` merged.
+`cargo fmt --all -- --check` clean; `cargo clippy --locked --workspace
+--all-targets -- -D warnings` clean; `cargo test --locked --workspace
+--no-fail-fast` passed with every test binary green (70 result lines, no
+failures), inside `nix-shell` with `CREW_IDENTITY`, `CREW_SOCKET` and
+`CREW_LAUNCH` removed; `scripts/check-msrv` passed with Rust 1.82.0 and the
+locked lockfile. cache-reviewer closed I1 on `038f8bc1` with its own runs
+of that commit's test binaries.
