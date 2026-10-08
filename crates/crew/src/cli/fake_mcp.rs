@@ -60,6 +60,10 @@ pub struct FakeMcpArgs {
     /// Answer initialize with an error
     #[arg(long)]
     refuse_initialize: bool,
+    /// Over streamable HTTP, answer this method with a broken message: JSON
+    /// cut short, or an event stream whose only event is not JSON
+    #[arg(long, value_name = "METHOD")]
+    break_answer: Option<String>,
     /// `NAME=<sha256 hex>`: the `env` tool says whether the variable's value
     /// has this digest (never the value)
     #[arg(long, value_name = "NAME=HEX")]
@@ -579,6 +583,23 @@ mod http {
             let mut headers = vec![];
             if initializing {
                 headers.push(("Mcp-Session-Id", session.to_string()));
+            }
+            let method = message.get("method").and_then(Value::as_str);
+            if method.is_some() && server.lock().unwrap().args.break_answer.as_deref() == method {
+                if stream_responses {
+                    start_stream(stream.as_mut(), &headers)?;
+                    event(stream.as_mut(), None, "{broken")?;
+                    end_stream(stream.as_mut())?;
+                } else {
+                    headers.push(("Content-Type", "application/json".to_string()));
+                    respond(
+                        stream.as_mut(),
+                        "200 OK",
+                        &headers,
+                        br#"{"jsonrpc":"2.0","id":"#,
+                    )?;
+                }
+                continue;
             }
             if stream_responses {
                 start_stream(stream.as_mut(), &headers)?;

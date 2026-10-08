@@ -270,7 +270,7 @@ answers: `crew answer 2`.")]
     FakeCli(fake_cli::FakeArgs),
     /// A stand-in MCP server, for tests of the toolbox proxy
     #[command(hide = true)]
-    FakeMcp(fake_mcp::FakeMcpArgs),
+    FakeMcp(Box<fake_mcp::FakeMcpArgs>),
     /// Start a program in an agent sandbox (the daemon puts this in front of it)
     #[command(hide = true)]
     SandboxRun(crate::sandbox::run::RunArgs),
@@ -723,7 +723,7 @@ pub fn run(cli: Cli) -> Result<()> {
         Command::Models { command } => ops::models(command.unwrap_or(ModelsCommand::List)),
         Command::ScriptedAgent(args) => scripted::run(args),
         Command::FakeCli(args) => fake_cli::run(args),
-        Command::FakeMcp(args) => fake_mcp::run(args),
+        Command::FakeMcp(args) => fake_mcp::run(*args),
         Command::SandboxRun(args) => crate::sandbox::run::run(args),
         Command::SandboxExec(args) => crate::sandbox::shim::run(args),
         Command::Daemon { workspace } => daemonize::run_foreground(&workspace),

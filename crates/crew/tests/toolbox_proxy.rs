@@ -769,3 +769,105 @@ fn an_https_server_is_reached_only_through_a_verified_chain() {
         ["alpha", "beta", "gamma"]
     );
 }
+
+/// A server that accepts the connection and then says nothing, ever: no
+/// TLS handshake, no HTTP answer, no endpoint.
+fn silent_server() -> (std::net::TcpListener, u16) {
+    let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    let port = listener.local_addr().unwrap().port();
+    let accepting = listener.try_clone().unwrap();
+    std::thread::spawn(move || {
+        let mut held = Vec::new();
+        for stream in accepting.incoming() {
+            match stream {
+                Ok(stream) => held.push(stream),
+                Err(_) => return,
+            }
+        }
+    });
+    (listener, port)
+}
+
+// A preflight's deadline covers everything: connecting, the TLS handshake,
+// sending, the answer and an SSE endpoint. A server that accepts and then
+// stalls fails the preflight on time, and a session meanwhile serves the
+// pinned view.
+#[test]
+fn a_server_that_stalls_is_given_up_on_by_the_deadline() {
+    use crew_core::toolbox::McpTransport;
+    let (_listener, port) = silent_server();
+    for (url, transport) in [
+        (format!("https://localhost:{port}/mcp"), McpTransport::Http),
+        (format!("https://localhost:{port}/sse"), McpTransport::Sse),
+        (format!("http://127.0.0.1:{port}/mcp"), McpTransport::Http),
+        (format!("http://127.0.0.1:{port}/sse"), McpTransport::Sse),
+    ] {
+        let fx = Fixture::new();
+        let launch = fx.remote_launch(&url, transport, &[], &[]);
+        let started = std::time::Instant::now();
+        let (ok, printed) = preflight(&launch, Some("0.5"));
+        let took = started.elapsed();
+        assert!(!ok, "{url}: {printed}");
+        assert!(
+            took < Duration::from_secs(5),
+            "{url}: the preflight took {took:?}"
+        );
+        assert!(
+            printed["reason"].as_str().unwrap().contains("in time"),
+            "{url}: {printed}"
+        );
+
+        // With a pinned view the runtime is answered at once, however long
+        // the server takes.
+        pin(
+            &fx.agent_dir(),
+            "x",
+            &"a".repeat(64),
+            &json!({
+                "initialize": { "protocolVersion": "2025-06-18", "capabilities": { "tools": {} } },
+                "tools": [{ "name": "pinned", "inputSchema": { "type": "object" } }],
+            }),
+            false,
+        )
+        .unwrap();
+        let mut session = Session::start(&launch, &[]);
+        let started = std::time::Instant::now();
+        session.request("initialize", json!({"protocolVersion": "2025-06-18"}));
+        let (tools, _) = session.request("tools/list", json!({}));
+        assert!(started.elapsed() < Duration::from_secs(5), "{url}");
+        assert_eq!(names(&tools["result"]["tools"]), ["pinned"]);
+    }
+}
+
+// A request the server answers with a broken message (JSON cut short, an
+// event stream with no answer in it) is answered with an error, never left
+// waiting; the session goes on.
+#[test]
+fn a_broken_answer_is_answered_with_an_error() {
+    use crew_core::toolbox::McpTransport;
+    for stream in [false, true] {
+        let fx = Fixture::new();
+        let mut args = vec!["--http", "http", "--break-answer", "tools/call"];
+        if stream {
+            args.push("--stream-responses");
+        }
+        let remote = Remote::start(&args);
+        let launch = fx.remote_launch(&remote.url, McpTransport::Http, &[], &[]);
+        let mut session = Session::start(&launch, &[]);
+        session.request("initialize", json!({"protocolVersion": "2025-06-18"}));
+        let (call, _) = session.request("tools/call", json!({"name": "alpha", "arguments": {}}));
+        let error = call["error"]["message"].as_str().unwrap_or_else(|| {
+            panic!("stream {stream}: {call}");
+        });
+        assert!(
+            error.contains("not JSON") || error.contains("without an answer"),
+            "stream {stream}: {error}"
+        );
+        let (tools, _) = session.request("tools/list", json!({}));
+        assert_eq!(
+            names(&tools["result"]["tools"]),
+            ["alpha", "beta", "gamma"],
+            "stream {stream}"
+        );
+    }
+}

@@ -9,13 +9,20 @@
 //! redirects are not followed; an SSE endpoint must be on the server's own
 //! origin; `HTTP_PROXY` / `HTTPS_PROXY` are not honoured, so a server behind
 //! a required proxy is out of reach.
+//!
+//! Every wait is bounded. Resolving, connecting, the TLS handshake and
+//! sending a request share one deadline, and a watchdog shuts the socket
+//! down when it passes, so no read or write outlives it. The answer's head
+//! has its own deadline; its body may pause for at most `ANSWER_IDLE`
+//! between reads. A caller with an overall deadline (a preflight) bounds
+//! the body by it as well.
 
 use std::collections::BTreeMap;
 use std::io::{BufRead, BufReader, Read, Write};
-use std::net::{Shutdown, TcpStream, ToSocketAddrs};
+use std::net::{Shutdown, SocketAddr, TcpStream, ToSocketAddrs};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{mpsc, Arc, Mutex};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use anyhow::{anyhow, bail, Context, Result};
 use crew_core::toolbox::McpTransport;
@@ -23,13 +30,17 @@ use serde_json::{json, Value};
 
 use super::{Connection, Event};
 
-/// How long connecting to the server may take.
+/// How long resolving, connecting, the TLS handshake and sending a request
+/// may take together.
 const CONNECT_WITHIN: Duration = Duration::from_secs(30);
 /// How long the SSE transport may take to name its endpoint.
 const ENDPOINT_WITHIN: Duration = Duration::from_secs(30);
 /// How long the server may stay silent while it answers a request.
 const ANSWER_IDLE: Duration = Duration::from_secs(300);
-/// The longest status or header line, and how many header lines.
+/// How long ending a streamable HTTP session may take.
+const CLOSE_WITHIN: Duration = Duration::from_secs(5);
+/// The longest status or header line, and how many header lines (malformed
+/// ones included).
 const MAX_LINE: usize = 8 * 1024;
 const MAX_HEADERS: usize = 100;
 /// The largest JSON answer, and the largest server-sent event.
@@ -226,41 +237,145 @@ fn refusal(status: u16) -> String {
 trait Stream: Read + Write + Send {}
 impl<T: Read + Write + Send> Stream for T {}
 
-/// A connection to the server, and a handle that can shut it down from
-/// another thread.
-fn open(url: &Url) -> Result<(Box<dyn Stream>, TcpStream)> {
-    let mut last = None;
-    for address in (url.host.as_str(), url.port)
-        .to_socket_addrs()
-        .with_context(|| format!("resolving {}", url.host))?
-    {
-        match TcpStream::connect_timeout(&address, CONNECT_WITHIN) {
-            Ok(stream) => {
-                let handle = stream.try_clone()?;
-                if !url.https {
-                    return Ok((Box::new(stream), handle));
-                }
-                let name = rustls::pki_types::ServerName::try_from(url.host.clone())
-                    .map_err(|_| anyhow!("{} is not a host name TLS can verify", url.host))?;
-                let connection = rustls::ClientConnection::new(tls()?, name)?;
-                return Ok((
-                    Box::new(rustls::StreamOwned::new(connection, stream)),
-                    handle,
-                ));
-            }
-            Err(e) => last = Some(e),
-        }
+/// A request that never reached the server: it could not be resolved or
+/// connected to, or the TLS handshake failed. A session takes this as the
+/// server being gone, unlike an answer that failed.
+#[derive(Debug)]
+struct Unreachable(String);
+
+impl std::fmt::Display for Unreachable {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&self.0)
     }
-    Err(match last {
+}
+
+impl std::error::Error for Unreachable {}
+
+fn unreachable(error: anyhow::Error) -> anyhow::Error {
+    anyhow::Error::new(Unreachable(format!("{error:#}")))
+}
+
+/// The earlier of `at` and `limit`.
+fn earliest(at: Instant, limit: Option<Instant>) -> Instant {
+    limit.map_or(at, |limit| limit.min(at))
+}
+
+/// Shuts a connection down when its deadline passes, so that nothing
+/// blocked on it (a TLS handshake, a write, a read) outlives the deadline.
+/// `extend` moves the deadline; dropping the watchdog stops it.
+struct Watchdog {
+    deadline: mpsc::Sender<Option<Instant>>,
+    fired: Arc<AtomicBool>,
+}
+
+impl Watchdog {
+    fn start(socket: TcpStream, by: Instant) -> Self {
+        let (deadline, moved) = mpsc::channel::<Option<Instant>>();
+        let fired = Arc::new(AtomicBool::new(false));
+        let flag = fired.clone();
+        std::thread::spawn(move || {
+            let mut by = by;
+            loop {
+                match moved.recv_timeout(by.saturating_duration_since(Instant::now())) {
+                    Ok(Some(next)) => by = next,
+                    Ok(None) | Err(mpsc::RecvTimeoutError::Disconnected) => return,
+                    Err(mpsc::RecvTimeoutError::Timeout) => {
+                        flag.store(true, Ordering::SeqCst);
+                        let _ = socket.shutdown(Shutdown::Both);
+                        return;
+                    }
+                }
+            }
+        });
+        Watchdog { deadline, fired }
+    }
+
+    fn extend(&self, by: Instant) {
+        let _ = self.deadline.send(Some(by));
+    }
+
+    fn fired(&self) -> bool {
+        self.fired.load(Ordering::SeqCst)
+    }
+}
+
+impl Drop for Watchdog {
+    fn drop(&mut self) {
+        let _ = self.deadline.send(None);
+    }
+}
+
+/// The server's addresses, looked up by `by`.
+fn resolve(url: &Url, by: Instant) -> Result<Vec<SocketAddr>> {
+    let (tx, rx) = mpsc::channel();
+    let target = (url.host.clone(), url.port);
+    std::thread::spawn(move || {
+        let _ = tx.send(target.to_socket_addrs().map(Iterator::collect::<Vec<_>>));
+    });
+    match rx.recv_timeout(by.saturating_duration_since(Instant::now())) {
+        Ok(found) => found.with_context(|| format!("resolving {}", url.host)),
+        Err(_) => bail!("resolving {} did not finish in time", url.host),
+    }
+}
+
+/// A connection to the server, its TLS handshake done, by `by`; a handle
+/// that can shut it down from another thread; and the watchdog that does
+/// so at `by`.
+fn open(url: &Url, by: Instant) -> Result<(Box<dyn Stream>, TcpStream, Watchdog)> {
+    let mut last = None;
+    for address in resolve(url, by).map_err(unreachable)? {
+        let left = by.saturating_duration_since(Instant::now());
+        if left.is_zero() {
+            break;
+        }
+        let mut stream = match TcpStream::connect_timeout(&address, left) {
+            Ok(stream) => stream,
+            Err(e) => {
+                last = Some(e);
+                continue;
+            }
+        };
+        let handle = stream.try_clone()?;
+        let watchdog = Watchdog::start(stream.try_clone()?, by);
+        if !url.https {
+            return Ok((Box::new(stream), handle, watchdog));
+        }
+        let name = rustls::pki_types::ServerName::try_from(url.host.clone())
+            .map_err(|_| unreachable(anyhow!("{} is not a host name TLS can verify", url.host)))?;
+        let mut connection = rustls::ClientConnection::new(tls()?, name)?;
+        while connection.is_handshaking() {
+            if let Err(e) = connection.complete_io(&mut stream) {
+                return Err(unreachable(if watchdog.fired() {
+                    anyhow!(
+                        "the TLS handshake with {} did not finish in time",
+                        url.authority()
+                    )
+                } else {
+                    anyhow!(e).context(format!("TLS with {}", url.authority()))
+                }));
+            }
+        }
+        return Ok((
+            Box::new(rustls::StreamOwned::new(connection, stream)),
+            handle,
+            watchdog,
+        ));
+    }
+    Err(unreachable(match last {
+        _ if Instant::now() >= by => {
+            anyhow!("connecting to {} did not finish in time", url.authority())
+        }
         Some(e) => anyhow!(e).context(format!("connecting to {}", url.authority())),
         None => anyhow!("{} has no address", url.host),
-    })
+    }))
 }
 
 struct Response {
     status: u16,
     headers: Vec<(String, String)>,
     body: Box<dyn BufRead + Send>,
+    /// Bounds the body by the caller's overall deadline, when it has one.
+    watchdog: Option<Watchdog>,
 }
 
 impl Response {
@@ -314,13 +429,16 @@ impl<R: BufRead> Read for Chunked<R> {
 }
 
 /// Send one request and read the response head; the body is left to read.
+/// Connecting and sending must finish within `CONNECT_WITHIN`, the head
+/// within `head_within` after that, and everything by `overall` when given.
 fn request(
     url: &Url,
     method: &str,
     headers: &[(String, String)],
     body: Option<&[u8]>,
+    head_within: Duration,
+    overall: Option<Instant>,
 ) -> Result<(Response, TcpStream)> {
-    let (mut stream, handle) = open(url)?;
     let mut head = format!(
         "{method} {} HTTP/1.1\r\nHost: {}\r\nUser-Agent: crew/{}\r\nConnection: close\r\n",
         url.target,
@@ -337,33 +455,26 @@ fn request(
         head.push_str(&format!("Content-Length: {}\r\n", body.len()));
     }
     head.push_str("\r\n");
-    stream.write_all(head.as_bytes())?;
-    if let Some(body) = body {
-        stream.write_all(body)?;
+    let (mut stream, handle, watchdog) =
+        open(url, earliest(Instant::now() + CONNECT_WITHIN, overall))?;
+    let sent = stream
+        .write_all(head.as_bytes())
+        .and_then(|()| body.map_or(Ok(()), |body| stream.write_all(body)))
+        .and_then(|()| stream.flush());
+    if let Err(e) = sent {
+        if watchdog.fired() {
+            bail!("sending to {} did not finish in time", url.authority());
+        }
+        return Err(anyhow!(e).context(format!("sending to {}", url.authority())));
     }
-    stream.flush()?;
-    let mut reader = BufReader::new(stream);
+    watchdog.extend(earliest(Instant::now() + head_within, overall));
     handle.set_read_timeout(Some(ANSWER_IDLE))?;
-    let status_line = read_line(&mut reader, MAX_LINE)?;
-    let status: u16 = status_line
-        .split_whitespace()
-        .nth(1)
-        .and_then(|s| s.parse().ok())
-        .ok_or_else(|| anyhow!("not an HTTP response from {}", url.authority()))?;
-    let mut headers = Vec::new();
-    loop {
-        let line = read_line(&mut reader, MAX_LINE)?;
-        let line = line.trim_end();
-        if line.is_empty() {
-            break;
-        }
-        if headers.len() >= MAX_HEADERS {
-            bail!("{} sent more than {MAX_HEADERS} headers", url.authority());
-        }
-        if let Some((k, v)) = line.split_once(':') {
-            headers.push((k.trim().to_string(), v.trim().to_string()));
-        }
-    }
+    let mut reader = BufReader::new(stream);
+    let (status, headers) = match read_head(&mut reader, &url.authority()) {
+        Ok(head) => head,
+        Err(_) if watchdog.fired() => bail!("{} did not answer in time", url.authority()),
+        Err(e) => return Err(e),
+    };
     let find = |name: &str| {
         headers
             .iter()
@@ -382,40 +493,90 @@ fn request(
         } else {
             Box::new(reader)
         };
+    // Without an overall deadline the body is bounded by ANSWER_IDLE between
+    // reads only: a tool may take its time.
+    let watchdog = overall.map(|by| {
+        watchdog.extend(by);
+        watchdog
+    });
     Ok((
         Response {
             status,
             headers,
             body,
+            watchdog,
         },
         handle,
     ))
 }
 
+/// A response's status and headers. At most `MAX_HEADERS` header lines are
+/// read, whether they parse or not.
+fn read_head(reader: &mut dyn BufRead, authority: &str) -> Result<(u16, Vec<(String, String)>)> {
+    let status_line = read_line(reader, MAX_LINE)?;
+    let status: u16 = status_line
+        .split_whitespace()
+        .nth(1)
+        .and_then(|s| s.parse().ok())
+        .ok_or_else(|| anyhow!("not an HTTP response from {authority}"))?;
+    let mut headers = Vec::new();
+    for lines in 0.. {
+        let line = read_line(reader, MAX_LINE)?;
+        if line.is_empty() {
+            bail!("{authority} ended its answer within the headers");
+        }
+        let line = line.trim_end();
+        if line.is_empty() {
+            break;
+        }
+        if lines >= MAX_HEADERS {
+            bail!("{authority} sent more than {MAX_HEADERS} header lines");
+        }
+        if let Some((k, v)) = line.split_once(':') {
+            headers.push((k.trim().to_string(), v.trim().to_string()));
+        }
+    }
+    Ok((status, headers))
+}
+
 /// One server-sent event: its name and data.
 fn next_event(body: &mut dyn BufRead) -> Result<Option<(String, String)>> {
+    next_event_within(body, MAX_EVENT)
+}
+
+/// One server-sent event of at most `max` bytes, counting every byte read
+/// for it: data, field names, comments and line breaks.
+fn next_event_within(body: &mut dyn BufRead, max: usize) -> Result<Option<(String, String)>> {
     let mut name = String::new();
-    let mut data: Vec<String> = Vec::new();
+    let mut data: Option<String> = None;
+    let mut size = 0;
     loop {
-        let line = read_line(body, MAX_EVENT)?;
+        let line = read_line(body, max)?;
         if line.is_empty() {
             return Ok(None);
         }
-        if data.iter().map(String::len).sum::<usize>() + line.len() > MAX_EVENT {
-            bail!("a server-sent event larger than {MAX_EVENT} bytes");
+        size += line.len();
+        if size > max {
+            bail!("a server-sent event larger than {max} bytes");
         }
         let line = line.trim_end_matches(['\r', '\n']);
         if line.is_empty() {
-            if data.is_empty() {
-                name.clear();
-                continue;
+            match data.take() {
+                Some(data) => {
+                    let kind = if name.is_empty() {
+                        "message".to_string()
+                    } else {
+                        name
+                    };
+                    return Ok(Some((kind, data)));
+                }
+                // Nothing to dispatch: what was read is let go.
+                None => {
+                    name.clear();
+                    size = 0;
+                    continue;
+                }
             }
-            let kind = if name.is_empty() {
-                "message".to_string()
-            } else {
-                name
-            };
-            return Ok(Some((kind, data.join("\n"))));
         }
         if line.starts_with(':') {
             continue;
@@ -426,25 +587,34 @@ fn next_event(body: &mut dyn BufRead) -> Result<Option<(String, String)>> {
         };
         match field {
             "event" => name = value.to_string(),
-            "data" => data.push(value.to_string()),
+            "data" => match &mut data {
+                Some(data) => {
+                    data.push('\n');
+                    data.push_str(value);
+                }
+                None => data = Some(value.to_string()),
+            },
             _ => {}
         }
     }
 }
 
-/// Pass each JSON-RPC message in `data` (one, or a batch) on.
-fn pass_on(data: &str, events: &mpsc::Sender<Event>) {
-    match serde_json::from_str::<Value>(data) {
-        Ok(Value::Array(batch)) => {
-            for message in batch {
-                let _ = events.send(Event::Upstream(message));
-            }
-        }
-        Ok(message) => {
-            let _ = events.send(Event::Upstream(message));
-        }
-        Err(_) => {}
+/// Pass each JSON-RPC message in `data` (one, or a batch) on, and say
+/// whether one of them answers the request `id`.
+fn pass_on(data: &str, events: &mpsc::Sender<Event>, id: Option<&Value>) -> Result<bool> {
+    let messages = match serde_json::from_str::<Value>(data)
+        .context("the server sent a message that is not JSON")?
+    {
+        Value::Array(batch) => batch,
+        message => vec![message],
+    };
+    let mut answered = false;
+    for message in messages {
+        answered |=
+            id.is_some_and(|id| message.get("id") == Some(id) && message.get("method").is_none());
+        let _ = events.send(Event::Upstream(message));
     }
+    Ok(answered)
 }
 
 /// An error answer for a request the server did not answer.
@@ -458,6 +628,16 @@ fn failed(message: &Value, why: &str, events: &mpsc::Sender<Event>) {
     }
 }
 
+/// A request that never reached the server ends the session: the request
+/// is refused, and the server is gone.
+fn unreached(message: &Value, error: &anyhow::Error, events: &mpsc::Sender<Event>) {
+    let why = format!("{error:#}");
+    failed(message, &why, events);
+    if error.downcast_ref::<Unreachable>().is_some() {
+        let _ = events.send(Event::UpstreamClosed(why));
+    }
+}
+
 fn header_list(headers: &BTreeMap<String, String>) -> Vec<(String, String)> {
     headers
         .iter()
@@ -465,11 +645,14 @@ fn header_list(headers: &BTreeMap<String, String>) -> Vec<(String, String)> {
         .collect()
 }
 
+/// Reach the server at `url`. `overall`, when given, bounds every request
+/// on the connection (a preflight's deadline).
 pub(crate) fn connect(
     url: &str,
     transport: McpTransport,
     headers: &BTreeMap<String, String>,
     events: mpsc::Sender<Event>,
+    overall: Option<Instant>,
 ) -> Result<Box<dyn Connection>> {
     let url = Url::parse(url)?;
     match transport {
@@ -480,8 +663,14 @@ pub(crate) fn connect(
             protocol: Arc::new(Mutex::new(None)),
             events,
             closed: Arc::new(AtomicBool::new(false)),
+            overall,
         })),
-        McpTransport::Sse => Ok(Box::new(Legacy::start(url, header_list(headers), events)?)),
+        McpTransport::Sse => Ok(Box::new(Legacy::start(
+            url,
+            header_list(headers),
+            events,
+            overall,
+        )?)),
     }
 }
 
@@ -495,6 +684,7 @@ struct Streamable {
     protocol: Arc<Mutex<Option<String>>>,
     events: mpsc::Sender<Event>,
     closed: Arc<AtomicBool>,
+    overall: Option<Instant>,
 }
 
 impl Streamable {
@@ -537,19 +727,28 @@ impl Connection for Streamable {
         let session = self.session.clone();
         let protocol = self.protocol.clone();
         let events = self.events.clone();
+        let overall = self.overall;
         let had_session = session.lock().unwrap_or_else(|e| e.into_inner()).is_some();
         let initializing = message.get("method").and_then(Value::as_str) == Some("initialize");
+        // A request (not a notification) must be answered, here or with an
+        // error: nothing the server does leaves it waiting.
+        let id = message
+            .get("id")
+            .filter(|_| message.get("method").is_some())
+            .cloned();
         std::thread::spawn(move || {
-            let (mut response, _handle) = match request(&url, "POST", &headers, Some(&body)) {
-                Ok(response) => response,
-                Err(e) => return failed(&message, &format!("{e:#}"), &events),
-            };
+            let (mut response, _handle) =
+                match request(&url, "POST", &headers, Some(&body), ANSWER_IDLE, overall) {
+                    Ok(response) => response,
+                    Err(e) => return unreached(&message, &e, &events),
+                };
             if let Some(id) = response.header("mcp-session-id") {
                 *session.lock().unwrap_or_else(|e| e.into_inner()) = Some(id.to_string());
             }
             match response.status {
                 200..=299 => {}
                 404 if had_session => {
+                    failed(&message, "the server ended the session", &events);
                     let _ =
                         events.send(Event::UpstreamClosed("the server ended the session".into()));
                     return;
@@ -558,29 +757,53 @@ impl Connection for Streamable {
                     return failed(&message, &refusal(status), &events);
                 }
             }
-            if response.is_event_stream() {
-                while let Ok(Some((kind, data))) = next_event(response.body.as_mut()) {
-                    if kind == "message" {
-                        note_protocol(initializing, &data, &protocol);
-                        pass_on(&data, &events);
+            let unanswered = if response.is_event_stream() {
+                let mut answered = false;
+                let mut problem = None;
+                let why = loop {
+                    match next_event(response.body.as_mut()) {
+                        Ok(Some((kind, data))) if kind == "message" => {
+                            note_protocol(initializing, &data, &protocol);
+                            match pass_on(&data, &events, id.as_ref()) {
+                                Ok(yes) => answered |= yes,
+                                Err(e) => problem = Some(format!("{e:#}")),
+                            }
+                        }
+                        Ok(Some(_)) => {}
+                        Ok(None) => {
+                            break problem.unwrap_or_else(|| {
+                                "the server's event stream ended without an answer".into()
+                            })
+                        }
+                        Err(e) => break format!("reading the server's event stream failed: {e:#}"),
                     }
-                }
+                };
+                (!answered).then_some(why)
             } else {
                 let mut text = String::new();
                 let read = (&mut response.body)
                     .take(MAX_BODY + 1)
                     .read_to_string(&mut text);
-                if read.as_ref().is_ok_and(|n| *n as u64 > MAX_BODY) {
-                    return failed(
-                        &message,
-                        "the server's answer is larger than 16 MiB",
-                        &events,
-                    );
+                match read {
+                    Err(e) => Some(format!("reading the server's answer failed: {e}")),
+                    Ok(n) if n as u64 > MAX_BODY => {
+                        Some("the server's answer is larger than 16 MiB".into())
+                    }
+                    Ok(_) if text.trim().is_empty() => {
+                        Some("the server answered without a message".into())
+                    }
+                    Ok(_) => {
+                        note_protocol(initializing, &text, &protocol);
+                        match pass_on(&text, &events, id.as_ref()) {
+                            Ok(true) => None,
+                            Ok(false) => Some("the server's answer was for another request".into()),
+                            Err(e) => Some(format!("{e:#}")),
+                        }
+                    }
                 }
-                if read.is_ok() && !text.trim().is_empty() {
-                    note_protocol(initializing, &text, &protocol);
-                    pass_on(&text, &events);
-                }
+            };
+            if let (Some(_), Some(why)) = (&id, unanswered) {
+                failed(&message, &why, &events);
             }
         });
         Ok(())
@@ -596,11 +819,15 @@ impl Connection for Streamable {
             .unwrap_or_else(|e| e.into_inner())
             .clone();
         if session.is_some() {
-            // Ending the session is a courtesy; a server that does not
-            // answer in time is left to expire it.
+            // Ending the session is a courtesy, bounded: a server that does
+            // not answer in time is left to expire it.
             let url = self.url.clone();
             let headers = self.request_headers();
-            let _ = std::thread::spawn(move || request(&url, "DELETE", &headers, None)).join();
+            let by = earliest(Instant::now() + CLOSE_WITHIN, self.overall);
+            let _ = std::thread::spawn(move || {
+                request(&url, "DELETE", &headers, None, CLOSE_WITHIN, Some(by))
+            })
+            .join();
         }
     }
 }
@@ -624,6 +851,7 @@ struct Legacy {
     headers: Vec<(String, String)>,
     events: mpsc::Sender<Event>,
     stream: TcpStream,
+    overall: Option<Instant>,
 }
 
 impl Legacy {
@@ -631,31 +859,54 @@ impl Legacy {
         url: Url,
         headers: Vec<(String, String)>,
         events: mpsc::Sender<Event>,
+        overall: Option<Instant>,
     ) -> Result<Self> {
         let mut get = headers.clone();
         get.push(("Accept".into(), "text/event-stream".into()));
-        let (mut response, stream) = request(&url, "GET", &get, None)?;
+        let endpoint_by = || earliest(Instant::now() + ENDPOINT_WITHIN, overall);
+        let (mut response, stream) = request(
+            &url,
+            "GET",
+            &get,
+            None,
+            ENDPOINT_WITHIN,
+            Some(endpoint_by()),
+        )?;
         if !(200..=299).contains(&response.status) {
             bail!("{}", refusal(response.status));
         }
-        stream.set_read_timeout(Some(ENDPOINT_WITHIN))?;
+        let watchdog = response.watchdog.take().expect("bounded by a deadline");
         let endpoint = loop {
             match next_event(response.body.as_mut()) {
                 Ok(Some((kind, data))) if kind == "endpoint" => break url.endpoint(data.trim())?,
                 Ok(Some(_)) => {}
+                Ok(None) | Err(_) if watchdog.fired() => {
+                    bail!("the server did not name its endpoint in time")
+                }
                 Ok(None) => bail!("the server's event stream ended before it named an endpoint"),
                 Err(e) => bail!("the server did not name its endpoint: {e}"),
             }
         };
+        // From here the stream stays open as long as the session, bounded by
+        // the overall deadline only, when there is one.
+        match overall {
+            Some(by) => {
+                watchdog.extend(by);
+                response.watchdog = Some(watchdog);
+            }
+            None => drop(watchdog),
+        }
         stream.set_read_timeout(None)?;
         let reader = events.clone();
         std::thread::spawn(move || {
             let mut body = response.body;
+            let _bounded = response.watchdog;
             let why = loop {
                 match next_event(body.as_mut()) {
                     Ok(Some((kind, data))) => {
+                        // Not JSON: no request can be told; dropped.
                         if kind == "message" {
-                            pass_on(&data, &reader);
+                            let _ = pass_on(&data, &reader, None);
                         }
                     }
                     Ok(None) => break "the server's event stream ended".to_string(),
@@ -669,6 +920,7 @@ impl Legacy {
             headers,
             events,
             stream,
+            overall,
         })
     }
 }
@@ -681,10 +933,13 @@ impl Connection for Legacy {
         let body = serde_json::to_vec(message)?;
         let message = message.clone();
         let events = self.events.clone();
-        std::thread::spawn(move || match request(&url, "POST", &headers, Some(&body)) {
-            Ok((response, _)) if (200..=299).contains(&response.status) => {}
-            Ok((response, _)) => failed(&message, &refusal(response.status), &events),
-            Err(e) => failed(&message, &format!("{e:#}"), &events),
+        let overall = self.overall;
+        std::thread::spawn(move || {
+            match request(&url, "POST", &headers, Some(&body), ANSWER_IDLE, overall) {
+                Ok((response, _)) if (200..=299).contains(&response.status) => {}
+                Ok((response, _)) => failed(&message, &refusal(response.status), &events),
+                Err(e) => unreached(&message, &e, &events),
+            }
         });
         Ok(())
     }
@@ -771,6 +1026,46 @@ mod tests {
             Some(("message".to_string(), "{\"a\":\n1}".to_string()))
         );
         assert_eq!(next_event(body.as_mut()).unwrap(), None);
+    }
+
+    #[test]
+    fn an_event_is_bounded_by_every_byte_read_for_it() {
+        // Empty data lines, field names, comments and line breaks all count.
+        for text in [
+            "data:\n".repeat(20),
+            format!("event: {}\ndata: x\n\n", "n".repeat(60)),
+            format!("{}data: x\n\n", format!(": {}\n", "c".repeat(30)).repeat(3)),
+        ] {
+            let mut body: Box<dyn BufRead> = Box::new(text.as_bytes());
+            let error = next_event_within(body.as_mut(), 64).unwrap_err();
+            assert!(error.to_string().contains("than 64"), "{text:?}: {error}");
+        }
+        // Blank lines between events let go of what was read.
+        let text = format!(
+            "{}data: {}\n\n",
+            ": keep-alive\n\n".repeat(20),
+            "y".repeat(40)
+        );
+        let mut body: Box<dyn BufRead> = Box::new(text.as_bytes());
+        assert_eq!(
+            next_event_within(body.as_mut(), 64).unwrap(),
+            Some(("message".to_string(), "y".repeat(40)))
+        );
+    }
+
+    #[test]
+    fn header_lines_are_counted_whether_they_parse_or_not() {
+        let many = format!("HTTP/1.1 200 OK\r\n{}\r\n", "no colon here\r\n".repeat(101));
+        let mut reader: Box<dyn BufRead> = Box::new(many.as_bytes());
+        let error = read_head(reader.as_mut(), "host").unwrap_err();
+        assert!(error.to_string().contains("header lines"), "{error}");
+        let few = "HTTP/1.1 204 No Content\r\nA: 1\r\nmalformed\r\n\r\n";
+        let mut reader: Box<dyn BufRead> = Box::new(few.as_bytes());
+        let (status, headers) = read_head(reader.as_mut(), "host").unwrap();
+        assert_eq!((status, headers.len()), (204, 1));
+        let cut = "HTTP/1.1 200 OK\r\nA: 1\r\n";
+        let mut reader: Box<dyn BufRead> = Box::new(cut.as_bytes());
+        assert!(read_head(reader.as_mut(), "host").is_err());
     }
 
     #[test]

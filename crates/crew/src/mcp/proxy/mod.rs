@@ -51,6 +51,9 @@ pub(crate) enum Event {
     Upstream(Value),
     /// The server went away, with what is known of why.
     UpstreamClosed(String),
+    /// The proxy's connection to the server, made off the main loop, or
+    /// why there is none.
+    Connected(Result<Box<dyn Connection>, String>),
 }
 
 /// A connection to the server: messages go out with `send`; what comes back
@@ -61,9 +64,12 @@ pub(crate) trait Connection: Send {
     fn close(&mut self);
 }
 
+/// Start or reach the server. `overall`, when given, bounds every wait on
+/// a remote one (a preflight's deadline).
 fn connect(
     launch: &ToolboxServerLaunch,
     events: mpsc::Sender<Event>,
+    overall: Option<Instant>,
 ) -> Result<Box<dyn Connection>> {
     match &launch.upstream {
         Upstream::Stdio { command, cwd, env } => Ok(Box::new(stdio::Child::start(
@@ -78,7 +84,7 @@ fn connect(
             url,
             transport,
             headers,
-        } => http::connect(url, *transport, headers, events),
+        } => http::connect(url, *transport, headers, events, overall),
     }
 }
 
@@ -395,7 +401,7 @@ pub fn preflight(launch: &ToolboxServerLaunch, within: Duration) -> Result<Listi
 fn live_listing(launch: &ToolboxServerLaunch, within: Duration) -> Result<Listing> {
     let deadline = Instant::now() + within;
     let (tx, rx) = mpsc::channel();
-    let mut connection = connect(launch, tx)?;
+    let mut connection = connect(launch, tx, Some(deadline))?;
     let result = (|| {
         let mut session = Handshake::default();
         let initialize = session.request(
@@ -452,7 +458,10 @@ impl Handshake {
                 Ok(Event::Upstream(message)) if message.get("id") == Some(&id) => {
                     return answer(message, method);
                 }
-                Ok(Event::Upstream(_)) | Ok(Event::Runtime(_)) | Ok(Event::RuntimeClosed) => {}
+                Ok(Event::Upstream(_))
+                | Ok(Event::Runtime(_))
+                | Ok(Event::RuntimeClosed)
+                | Ok(Event::Connected(_)) => {}
                 Ok(Event::UpstreamClosed(why)) => {
                     bail!("the server stopped during {method}: {why}")
                 }
@@ -589,24 +598,29 @@ pub fn serve(
         listed: false,
         open: HashSet::new(),
     };
-    match connect(launch, tx) {
-        Ok(connection) => {
-            session.connection = Some(connection);
-            let protocol = session
-                .snapshot
-                .as_ref()
-                .and_then(|s| s.initialize.get("protocolVersion"))
-                .and_then(Value::as_str)
-                .filter(|v| PROTOCOLS.contains(v))
-                .unwrap_or(PROTOCOLS[0])
-                .to_string();
-            session.ask("initialize", initialize_params(&protocol), report)?;
-        }
-        Err(e) => session.fail(format!("{e:#}"), report)?,
-    }
+    // Reaching a remote server can take until its deadlines; meanwhile the
+    // runtime is answered from the pinned snapshot.
+    let connecting = launch.clone();
+    std::thread::spawn(move || {
+        let connection = connect(&connecting, tx.clone(), None).map_err(|e| format!("{e:#}"));
+        let _ = tx.send(Event::Connected(connection));
+    });
     for event in rx.iter() {
         match event {
             Event::RuntimeClosed => break,
+            Event::Connected(Ok(connection)) => {
+                session.connection = Some(connection);
+                let protocol = session
+                    .snapshot
+                    .as_ref()
+                    .and_then(|s| s.initialize.get("protocolVersion"))
+                    .and_then(Value::as_str)
+                    .filter(|v| PROTOCOLS.contains(v))
+                    .unwrap_or(PROTOCOLS[0])
+                    .to_string();
+                session.ask("initialize", initialize_params(&protocol), report)?;
+            }
+            Event::Connected(Err(why)) => session.fail(why, report)?,
             Event::Runtime(message) => session.on_runtime(message)?,
             Event::Upstream(message) => session.on_server(message, report)?,
             Event::UpstreamClosed(why) => session.fail(why, report)?,
