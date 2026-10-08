@@ -200,3 +200,46 @@ fn asset_chunks_cannot_overstate_sizes_or_make_no_progress() {
         assert!(serde_json::from_value::<DocAssetChunk>(bad).is_err());
     }
 }
+
+#[test]
+fn effective_usage_query_shape_preserves_exact_range_and_pins_defaults() {
+    use crew_protocol::usage_metrics::UsageQuery;
+    let query:UsageQuery=serde_json::from_value(json!({"scope":{"workspace_run_id":"run-1","kind":"live",
+        "agent_incarnation":null,"task":{"kind":"all"},"epic":{"kind":"all"},"model":null,"account_id":null},
+        "from_ms":-1,"to_ms":3600001,"group_by":null,"bucket_seconds":null,"price_book_id":null,
+        "page":{"cursor":"page-2","limit":17}})).unwrap();
+    let book = Id::new("book-1").unwrap();
+    let hourly = query.resolved_shape(book.clone(), 200, false).unwrap();
+    assert_eq!(hourly.from_ms, query.from_ms);
+    assert_eq!(hourly.to_ms, query.to_ms);
+    assert_eq!(hourly.page, query.page);
+    assert_eq!(hourly.scope, query.scope);
+    for (asked, expected) in [
+        (1, 60),
+        (60, 60),
+        (61, 120),
+        (121, 300),
+        (1801, 3600),
+        (3601, 7200),
+        (86400, 86400),
+    ] {
+        let mut query = query.clone();
+        query.bucket_seconds = Some(asked);
+        let resolved = query.resolved_shape(book.clone(), 720, true).unwrap();
+        assert_eq!(resolved.bucket_seconds, Some(expected));
+        assert_eq!(resolved.from_ms, query.from_ms);
+        assert_eq!(resolved.to_ms, query.to_ms);
+    }
+    let mut extreme = query.clone();
+    extreme.to_ms = Some(Timestamp::new(Timestamp::MAX).unwrap());
+    assert_eq!(
+        extreme
+            .resolved_shape(book.clone(), 200, false)
+            .unwrap()
+            .to_ms,
+        extreme.to_ms
+    );
+    let mut pinned = query;
+    pinned.price_book_id = Some(Id::new("other-book").unwrap());
+    assert!(pinned.resolved_shape(book, 200, false).is_err());
+}
