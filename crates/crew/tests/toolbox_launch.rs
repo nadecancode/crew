@@ -375,8 +375,10 @@ fn guarded_codex_reports_compact_cli_unavailable_without_changing_permissions() 
         .as_deref()
         .unwrap()
         .contains("native sandbox"));
-    let roots = fixture.record(&s.root().join("codex-home/fake-codex-skill-roots.json"));
-    assert_eq!(roots["extraRoots"], json!([]));
+    assert!(!s
+        .root()
+        .join("codex-home/fake-codex-skill-roots.json")
+        .exists());
 }
 
 #[test]

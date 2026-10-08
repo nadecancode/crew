@@ -46,7 +46,7 @@ json(`${root}/versions.json`, { ...versions, node: process.version, executable_s
 // a recorded stand-in; native loading/permission/history are exercised below.
 const work = `${root}/workspace`;
 const fixtureEnv = { ...env(`${root}/daemon-home`), CLAUDE_CONFIG_DIR: `${root}/fake-home`, CREW_GLOBAL_CONFIG: `${root}/no-global.toml`, PATH: `${root}/bin:${process.env.PATH}` };
-put(`${root}/bin/claude`, `#!/bin/sh\nexec ${quote(crew)} fake-cli claude "$@"\n`);
+put(`${root}/bin/claude`, `#!/bin/sh\nif [ -n "\${CREW_LAUNCH:-}" ]; then printf 'compact-probe-launch:%s\\n' "$CREW_LAUNCH"; fi\nexec ${quote(crew)} fake-cli claude "$@"\n`);
 fs.chmodSync(`${root}/bin/claude`, 0o700);
 json(`${root}/team.json`, { project: 'compact-probe', objective: 'Offline toolbox fixture', workspace: { path: work, init: true, isolation: 'shared', vcs: 'git', sandbox: { mode: 'off' } }, backend: 'pty', orchestrator: { agent: false }, defaults: { max_restarts: 0 }, agents: [{ id: 'probe', role: 'Offline fixture', runtime: 'claude', toolbox: { include: ['compact-cli'] } }] });
 const stub = await startStub();
@@ -213,17 +213,22 @@ try {
   const launchBefore = JSON.parse(fs.readFileSync(launchRecord)).env.CREW_LAUNCH;
   assert.ok(beforeRestart.pid && launchBefore, 'original launch identity captured');
   await run('member-restart', crew, ['agent', 'restart', 'probe', '-C', work], { env: fixtureEnv });
-  let afterRestart, launchAfter;
+  let afterRestart, launchAfter, terminalReady = false;
   for (let i = 0; i < 150; i++) {
     afterRestart = await memberStatus(`status-after-restart-${i}`);
     try { launchAfter = JSON.parse(fs.readFileSync(launchRecord)).env.CREW_LAUNCH; } catch { launchAfter = undefined; }
     if (afterRestart?.pid && afterRestart.pid !== beforeRestart.pid && launchAfter && launchAfter !== launchBefore
-        && afterRestart.status === 'idle' && afterRestart.toolbox?.items[0]?.status.code === 'active') break;
+        && afterRestart.toolbox?.items[0]?.status.code === 'active') {
+      const terminal = await run(`ready-after-restart-${i}`, crew, ['agent', 'output', 'probe', '-n', '2000', '-C', work], { env: fixtureEnv });
+      const marker = terminal.indexOf(`compact-probe-launch:${launchAfter}`);
+      terminalReady = marker >= 0 && terminal.indexOf('fake claude ready', marker) > marker;
+      if (terminalReady) break;
+    }
     await pause(100);
   }
   assert.ok(afterRestart?.pid && afterRestart.pid !== beforeRestart.pid, 'restart produced a new process');
   assert.ok(launchAfter && launchAfter !== launchBefore, 'new process recorded its new launch identity');
-  assert.equal(afterRestart.status, 'idle', 'new member reached readiness');
+  assert.equal(terminalReady, true, 'new CLI printed readiness after its current launch marker and session-start hook');
   assert.equal(afterRestart.toolbox.items[0].status.code, 'active');
   assert.equal(afterRestart.toolbox.fingerprint, beforeRestart.toolbox.fingerprint);
   assert.deepEqual(Object.fromEntries(walk(skill).map(file => [path.relative(skill, file), sha(fs.readFileSync(file))])), skillBefore);
