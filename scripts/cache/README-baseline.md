@@ -10,6 +10,13 @@ node scripts/cache/baseline.mjs --workspace /path/to/project \
   --output /path/to/reports/baseline.json --markdown /path/to/reports/baseline.md
 ```
 
+The daemon's usage-metrics parity tests use allowlisted extracts of the
+lifecycle sessions named in `notes/prompt-cache/lifecycle-before-0*.json`
+(ids, models, counters, timestamps and turn markers only). `usage-fixtures.mjs`
+regenerates them under `crates/crew/tests/fixtures/usage/lifecycle`, bounded
+to each report's finish time; `--check` compares without writing, and
+`usage-fixtures.test.mjs` checks that this collector reads the same totals.
+
 Default discovery covers the specified workspace's operator and private native
 homes. `--all-runs` also reads workspaces in the local Crew session registry.
 Historical files in those native directories are included; arbitrary temporary

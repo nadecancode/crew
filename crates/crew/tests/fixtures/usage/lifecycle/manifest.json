@@ -1,0 +1,150 @@
+{
+  "schema": 1,
+  "script": "scripts/cache/usage-fixtures.mjs",
+  "fixtures": [
+    {
+      "fixture": "01-orchestrator.jsonl",
+      "report": "notes/prompt-cache/lifecycle-before-01.json",
+      "report_sha256": "eac96bdc06a80e957db1f186baa26755e1b8b9cd7d56941b33fa23c6056384ab",
+      "run": "01",
+      "agent": "orchestrator",
+      "runtime": "claude",
+      "session_id": "8bea5d11-2222-402a-bd28-21c907f279de",
+      "bound": "records timestamped at or before 2026-10-08T06:34:28.905404+00:00",
+      "source": {
+        "bytes_read": 469878,
+        "lines_read": 193,
+        "sha256": "2525e4fbb1bbb8316de374688e1ce7993947a76c2599a92f65f949324ed0f091"
+      },
+      "fixture_sha256": "d4a3c35f3b86f0075a5ce64a84f921a9afa67293f1ee2ca9baec0ead98d9612b"
+    },
+    {
+      "fixture": "01-claude-worker.jsonl",
+      "report": "notes/prompt-cache/lifecycle-before-01.json",
+      "report_sha256": "eac96bdc06a80e957db1f186baa26755e1b8b9cd7d56941b33fa23c6056384ab",
+      "run": "01",
+      "agent": "claude-worker",
+      "runtime": "claude",
+      "session_id": "6ba7c9c9-43e5-4ccb-ab55-8b6fa4c18128",
+      "bound": "records timestamped at or before 2026-10-08T06:34:28.905404+00:00",
+      "source": {
+        "bytes_read": 1621345,
+        "lines_read": 574,
+        "sha256": "54ac9408d93661c3bd5b73f201490035b67bfc2123fd3fe82a513d946e3461f5"
+      },
+      "fixture_sha256": "12cf7ef048adf22e5e35ce0f7ddf58addc49d62fcc00205ba6282523ff5b0db9"
+    },
+    {
+      "fixture": "01-codex-worker.jsonl",
+      "report": "notes/prompt-cache/lifecycle-before-01.json",
+      "report_sha256": "eac96bdc06a80e957db1f186baa26755e1b8b9cd7d56941b33fa23c6056384ab",
+      "run": "01",
+      "agent": "codex-worker",
+      "runtime": "codex",
+      "session_id": "01a119f6-1996-7a21-91c6-45a47fae3617",
+      "bound": "records timestamped at or before 2026-10-08T06:34:28.905404+00:00",
+      "source": {
+        "bytes_read": 239929,
+        "lines_read": 165,
+        "sha256": "32a1390867b737951b928738dfaf713e63f4a95116d037f8dd86db9b9218c9bc"
+      },
+      "fixture_sha256": "9e7624dd788708a060d4dd201e090d0d917533b69bbb73f7d6e866ebbeeec583"
+    },
+    {
+      "fixture": "02-orchestrator.jsonl",
+      "report": "notes/prompt-cache/lifecycle-before-02.json",
+      "report_sha256": "ee78bf90e47cf0d0e1f573aa151e3aedccae68c34ff6999556a7d238a1d02ab2",
+      "run": "02",
+      "agent": "orchestrator",
+      "runtime": "claude",
+      "session_id": "e60e27f1-d188-44a5-bd4d-9709f62a5ebd",
+      "bound": "records timestamped at or before 2026-10-08T05:46:47.519849+00:00",
+      "source": {
+        "bytes_read": 450397,
+        "lines_read": 182,
+        "sha256": "9d617abc8b70e28ded25284a100aa7773c2059b18091e52347f34c96132fca15"
+      },
+      "fixture_sha256": "bc1c22cf590466c521a7517316d8fb4dc84e1a732a7e8613587cd4ef05898b4d"
+    },
+    {
+      "fixture": "02-claude-worker.jsonl",
+      "report": "notes/prompt-cache/lifecycle-before-02.json",
+      "report_sha256": "ee78bf90e47cf0d0e1f573aa151e3aedccae68c34ff6999556a7d238a1d02ab2",
+      "run": "02",
+      "agent": "claude-worker",
+      "runtime": "claude",
+      "session_id": "7862663a-3539-4543-be61-4a311528c7a1",
+      "bound": "records timestamped at or before 2026-10-08T05:46:47.519849+00:00",
+      "source": {
+        "bytes_read": 1621650,
+        "lines_read": 582,
+        "sha256": "c93d38160f3070a431a8aa560f58264e8ad4b898c8e4495aa3ec91612d1d8dd5"
+      },
+      "fixture_sha256": "64c4ed4bb877b1dede19bd38394b87fabb22704be92caca2104ff4885f6b63ef"
+    },
+    {
+      "fixture": "02-codex-worker.jsonl",
+      "report": "notes/prompt-cache/lifecycle-before-02.json",
+      "report_sha256": "ee78bf90e47cf0d0e1f573aa151e3aedccae68c34ff6999556a7d238a1d02ab2",
+      "run": "02",
+      "agent": "codex-worker",
+      "runtime": "codex",
+      "session_id": "01a11a03-0976-7552-ba20-5d3b2788d32e",
+      "bound": "records timestamped at or before 2026-10-08T05:46:47.519849+00:00",
+      "source": {
+        "bytes_read": 213231,
+        "lines_read": 139,
+        "sha256": "f3ecb5a1e84e0fc95c71de25d59ca1ff6bd988e087d39d94e81c10aa3d2f6444"
+      },
+      "fixture_sha256": "da682c9fd2b7b33afa6bb44289613461646bafd50da51c5bd792ec0302d117fc"
+    },
+    {
+      "fixture": "03-orchestrator.jsonl",
+      "report": "notes/prompt-cache/lifecycle-before-03.json",
+      "report_sha256": "5a28ee2a011a46dd08d8805375806ce734fddcbe3019190b31be3bcacabb174e",
+      "run": "03",
+      "agent": "orchestrator",
+      "runtime": "claude",
+      "session_id": "1f5c362d-8327-4076-90c9-8433a01b5638",
+      "bound": "records timestamped at or before 2026-10-08T05:39:20.509233+00:00",
+      "source": {
+        "bytes_read": 461614,
+        "lines_read": 187,
+        "sha256": "5c735c32253dd20ea315aea7b6f45f16e5195f76ac3718842e4281fc66c162ec"
+      },
+      "fixture_sha256": "02e345ff67d5372e9475b1351b57f05fbb6e638c7ad02f763033a99e21db048a"
+    },
+    {
+      "fixture": "03-claude-worker.jsonl",
+      "report": "notes/prompt-cache/lifecycle-before-03.json",
+      "report_sha256": "5a28ee2a011a46dd08d8805375806ce734fddcbe3019190b31be3bcacabb174e",
+      "run": "03",
+      "agent": "claude-worker",
+      "runtime": "claude",
+      "session_id": "1f833e65-a656-4cdf-b6cd-8cf215eca5c8",
+      "bound": "records timestamped at or before 2026-10-08T05:39:20.509233+00:00",
+      "source": {
+        "bytes_read": 1623230,
+        "lines_read": 580,
+        "sha256": "527bc6033032ca9ed03317851b8e7a9b3426980b44a41ef9a09f43d0206cda5f"
+      },
+      "fixture_sha256": "72a5a08119b511cd9680494859a56764216537da5df7faa9ef2723de6f881648"
+    },
+    {
+      "fixture": "03-codex-worker.jsonl",
+      "report": "notes/prompt-cache/lifecycle-before-03.json",
+      "report_sha256": "5a28ee2a011a46dd08d8805375806ce734fddcbe3019190b31be3bcacabb174e",
+      "run": "03",
+      "agent": "codex-worker",
+      "runtime": "codex",
+      "session_id": "01a119fc-136d-7503-a759-e6f1f5a59083",
+      "bound": "records timestamped at or before 2026-10-08T05:39:20.509233+00:00",
+      "source": {
+        "bytes_read": 212353,
+        "lines_read": 133,
+        "sha256": "cd2711e7263e3fd87938695fbd1aa6c9cf1d86a414bad14dbbbf77afcc29c55f"
+      },
+      "fixture_sha256": "c640f78b81069977565652c7da57ee052ac7dc52be6c82280cf0520b2b4ebc1e"
+    }
+  ]
+}

@@ -34,6 +34,7 @@ pub mod scheduler;
 pub mod styles;
 pub mod tasks;
 pub mod transcript;
+pub mod usage_metrics;
 pub mod vcs;
 pub mod web;
 
