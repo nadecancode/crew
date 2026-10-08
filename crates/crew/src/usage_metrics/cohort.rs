@@ -82,15 +82,25 @@ pub fn cohort(book: &Book, members: &[Member], membership_complete: bool) -> Com
     } else if costed == 0 {
         unavailable(book, CoverageReason::NoEligibleCost, cost_coverage)
     } else {
-        let lo: u128 = members.iter().filter_map(|m| m.cost).map(|c| c.lo).sum();
-        let hi: Option<u128> = if costed == n {
-            members.iter().map(|m| m.cost.and_then(|c| c.hi)).sum()
-        } else {
-            None
-        };
+        // Checked: a lower bound that would overflow saturates (still a lower
+        // bound), an upper bound that would overflow is unknown.
+        let mut total = Bounds { lo: 0, hi: Some(0) };
+        let mut overflow = false;
+        for member in members {
+            match member.cost {
+                Some(cost) => {
+                    let sum = total.plus(cost);
+                    overflow |= total.hi.is_some() && cost.hi.is_some() && sum.hi.is_none();
+                    total = sum;
+                }
+                None => total.hi = None,
+            }
+        }
+        let (lo, hi) = (total.lo, total.hi);
         let n = n as u128;
         let (state, reason) = match hi {
             Some(_) => (EstimateState::Finite, None),
+            None if overflow => (EstimateState::Partial, Some(CoverageReason::InvalidCounter)),
             None if costed < n as u64 => {
                 (EstimateState::Partial, Some(CoverageReason::NoEligibleCost))
             }
@@ -206,5 +216,27 @@ mod tests {
         let mut m = member("a", Some((1, Some(1))));
         m.earlier_spend = true;
         assert!(cohort(&book, &[m], true).includes_earlier_spend);
+    }
+
+    #[test]
+    fn cohort_sums_never_wrap_or_panic() {
+        let book = Book::standard_2026_10_08();
+        let c = cohort(
+            &book,
+            &[
+                member("a", Some((u128::MAX, Some(u128::MAX)))),
+                member("b", Some((1, Some(1)))),
+            ],
+            true,
+        );
+        let e = &c.cost_per_completed_task;
+        assert_eq!(e.state, EstimateState::Partial);
+        assert_eq!(e.reason, Some(CoverageReason::InvalidCounter));
+        assert_eq!(
+            e.lower_pico_usd,
+            Some(Wide(u128::MAX / 2)),
+            "a saturated lower bound is still one"
+        );
+        assert_eq!(e.upper_pico_usd, None);
     }
 }

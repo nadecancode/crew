@@ -48,6 +48,13 @@ pub struct Book {
     pub sources: Vec<String>,
 }
 
+/// The highest rate a book may hold, in micro-USD per million tokens
+/// (about 1.1 million USD per million tokens). With counters at most
+/// [`super::counters::MAX_COUNTER`] (2^53 - 1), one row's cost is a sum of at
+/// most six products below 2^93, so per-row arithmetic cannot overflow
+/// `u128`; sums across rows are checked.
+pub const MAX_RATE: u64 = 1 << 40;
+
 /// USD per million tokens, written as micro-USD per million.
 const fn usd(micro: u64) -> u64 {
     micro
@@ -162,7 +169,7 @@ impl Book {
     /// The tiers of a model, ordinary tier first.
     pub fn tiers(&self, model: &str) -> Vec<&Rate> {
         let mut tiers: Vec<&Rate> = self.rates.iter().filter(|r| r.matches(model)).collect();
-        tiers.sort_by_key(|r| r.above_input_tokens.map_or(0, |t| t + 1));
+        tiers.sort_by_key(|r| r.above_input_tokens.map_or(0, |t| t.saturating_add(1)));
         tiers
     }
 
@@ -234,10 +241,13 @@ impl Bounds {
         Bounds { lo: 0, hi: None }
     }
 
-    fn add(self, other: Bounds) -> Bounds {
+    /// The sum of two intervals. A lower bound that would overflow saturates,
+    /// which is still a lower bound; an upper bound that would overflow is
+    /// unknown.
+    pub fn plus(self, other: Bounds) -> Bounds {
         Bounds {
-            lo: self.lo + other.lo,
-            hi: self.hi.zip(other.hi).map(|(a, b)| a + b),
+            lo: self.lo.saturating_add(other.lo),
+            hi: self.hi.zip(other.hi).and_then(|(a, b)| a.checked_add(b)),
         }
     }
 
@@ -270,8 +280,12 @@ pub struct RowCost {
     /// Codex input not read from cache, with writes unknown, priced between
     /// the ordinary-input and write rates.
     pub residual_tokens: u64,
-    /// The context tier could not be decided (total input unknown).
+    /// The context tier could not be decided: total input unknown, or a
+    /// native batch whose requests could fall in either tier.
     pub tier_unknown: bool,
+    /// At least one priced counter was reported. A row without one has no
+    /// observed cost, only an unknown one.
+    pub observed: bool,
 }
 
 /// How an observation prices.
@@ -286,8 +300,12 @@ fn mul(tokens: u64, rate: u64) -> u128 {
     tokens as u128 * rate as u128
 }
 
-/// Prices one normalized observation.
-pub fn price(book: &Book, model: Option<&str>, n: &Normalized) -> Priced {
+/// Prices one normalized observation. `single` says its counters are one
+/// request's. A context tier applies per request, so the counters of a
+/// native batch decide it only when their total input is at most the lowest
+/// tier boundary (no request in it can be above that); otherwise the batch
+/// is priced across every tier, whatever its size.
+pub fn price(book: &Book, model: Option<&str>, n: &Normalized, single: bool) -> Priced {
     let Some(model) = model else {
         return Priced::NoPrice;
     };
@@ -296,8 +314,9 @@ pub fn price(book: &Book, model: Option<&str>, n: &Normalized) -> Priced {
         return Priced::NoPrice;
     }
     let c = &n.counters;
+    let lowest_boundary = tiers.iter().filter_map(|r| r.above_input_tokens).min();
     let candidates: Vec<&Rate> = match c.input_total.filter(|_| n.input_valid) {
-        Some(input) => {
+        Some(input) if single => {
             let tier = tiers
                 .iter()
                 .rev()
@@ -306,7 +325,8 @@ pub fn price(book: &Book, model: Option<&str>, n: &Normalized) -> Priced {
                 .unwrap_or(tiers[0]);
             vec![tier]
         }
-        None => tiers.clone(),
+        Some(input) if lowest_boundary.is_none_or(|t| input <= t) => vec![tiers[0]],
+        _ => tiers.clone(),
     };
     let tier_unknown = candidates.len() > 1;
     let mut combined: Option<RowCost> = None;
@@ -325,6 +345,7 @@ pub fn price(book: &Book, model: Option<&str>, n: &Normalized) -> Priced {
                 ttl_unknown_tokens: prev.ttl_unknown_tokens.max(cost.ttl_unknown_tokens),
                 residual_tokens: prev.residual_tokens.max(cost.residual_tokens),
                 tier_unknown,
+                observed: prev.observed || cost.observed,
             },
         });
     }
@@ -333,19 +354,23 @@ pub fn price(book: &Book, model: Option<&str>, n: &Normalized) -> Priced {
     Priced::Cost(cost)
 }
 
+/// One tier's cost of one row. Counters are at most `MAX_COUNTER` and rates
+/// at most [`MAX_RATE`], so the plain sums here stay below 2^96.
 fn price_tier(rate: &Rate, n: &Normalized) -> RowCost {
     let c = &n.counters;
+    let output_known = n.output_valid && c.output.is_some();
     let output = match (n.output_valid, c.output) {
         (true, Some(o)) => Bounds::exact(mul(o, rate.output)),
         _ => Bounds::unbounded(),
     };
     if !n.input_valid {
         return RowCost {
-            total: output.add(Bounds::unbounded()),
+            total: output.plus(Bounds::unbounded()),
             share: None,
             ttl_unknown_tokens: 0,
             residual_tokens: 0,
             tier_unknown: false,
+            observed: output_known,
         };
     }
     let read = c
@@ -353,15 +378,23 @@ fn price_tier(rate: &Rate, n: &Normalized) -> RowCost {
         .map_or(Bounds::unbounded(), |r| Bounds::exact(mul(r, rate.read)));
     let mut ttl_unknown_tokens = 0;
     let mut residual_tokens = 0;
+    // The charge of the reported TTL buckets, whatever else is unknown.
+    let known_buckets = match rate.write {
+        WriteRate::Buckets { m5, h1 } => {
+            mul(c.cache_write_5m.unwrap_or(0), m5) + mul(c.cache_write_1h.unwrap_or(0), h1)
+        }
+        WriteRate::Flat(_) => 0,
+    };
     // Writes, as an interval, when their total is known.
     let write: Option<(u128, u128)> = match rate.write {
         WriteRate::Flat(p) => c.cache_write.map(|w| (mul(w, p), mul(w, p))),
         WriteRate::Buckets { m5, h1 } => {
-            let known =
-                mul(c.cache_write_5m.unwrap_or(0), m5) + mul(c.cache_write_1h.unwrap_or(0), h1);
-            let total = c
-                .cache_write
-                .or_else(|| c.cache_write_5m.zip(c.cache_write_1h).map(|(a, b)| a + b));
+            let known = known_buckets;
+            let total = c.cache_write.or_else(|| {
+                c.cache_write_5m
+                    .zip(c.cache_write_1h)
+                    .and_then(|(a, b)| a.checked_add(b))
+            });
             total.map(|w| {
                 let rest = if c.cache_write_5m.is_some() && c.cache_write_1h.is_some() {
                     0
@@ -373,13 +406,18 @@ fn price_tier(rate: &Rate, n: &Normalized) -> RowCost {
             })
         }
     };
+    // Without a total, known buckets still bound the writes from below.
+    let written = match write {
+        Some((wl, wh)) => Bounds::range(wl, wh),
+        None => Bounds {
+            lo: known_buckets,
+            hi: None,
+        },
+    };
     let ordinary = c.input_uncached.map(|n| mul(n, rate.input));
     let mut input_side = read;
     match (ordinary, write) {
-        (Some(o), Some((wl, wh))) => {
-            input_side = input_side.add(Bounds::exact(o)).add(Bounds::range(wl, wh));
-        }
-        (Some(o), None) => input_side = input_side.add(Bounds::exact(o)).add(Bounds::unbounded()),
+        (Some(o), _) => input_side = input_side.plus(Bounds::exact(o)).plus(written),
         (None, w) => {
             // Codex without write counters: input not read from cache is
             // ordinary input or writes, priced between the two rates.
@@ -390,17 +428,12 @@ fn price_tier(rate: &Rate, n: &Normalized) -> RowCost {
             match residual {
                 Some((x, p)) => {
                     residual_tokens = x;
-                    input_side = input_side.add(Bounds::range(
+                    input_side = input_side.plus(Bounds::range(
                         mul(x, rate.input.min(p)),
                         mul(x, rate.input.max(p)),
                     ));
                 }
-                None => {
-                    input_side = input_side.add(Bounds::unbounded());
-                    if let Some((wl, wh)) = w {
-                        input_side = input_side.add(Bounds::range(wl, wh));
-                    }
-                }
+                None => input_side = input_side.plus(Bounds::unbounded()).plus(written),
             }
         }
     }
@@ -416,12 +449,18 @@ fn price_tier(rate: &Rate, n: &Normalized) -> RowCost {
         }
         _ => None,
     };
+    let input_known = c.cache_read.is_some()
+        || ordinary.is_some()
+        || write.is_some()
+        || c.cache_write_5m.is_some()
+        || c.cache_write_1h.is_some();
     RowCost {
-        total: input_side.add(output),
+        total: input_side.plus(output),
         share,
         ttl_unknown_tokens,
         residual_tokens,
         tier_unknown: false,
+        observed: output_known || input_known,
     }
 }
 
@@ -448,7 +487,7 @@ mod tests {
             Ok(Some(4)),
             Ok(Some(5)),
         );
-        let Priced::Cost(cost) = price(&book, Some("claude-haiku-4-5"), &n) else {
+        let Priced::Cost(cost) = price(&book, Some("claude-haiku-4-5"), &n, true) else {
             panic!("priced")
         };
         // 0.0000585 USD total; 0.0000155 write; 0.0000335 input side.
@@ -473,7 +512,7 @@ mod tests {
             Ok(None),
             Ok(Some(5)),
         );
-        let Priced::Cost(cost) = price(&book, Some("claude-haiku-4-5-20251001"), &n) else {
+        let Priced::Cost(cost) = price(&book, Some("claude-haiku-4-5-20251001"), &n, true) else {
             panic!("priced")
         };
         assert_eq!(cost.total, Bounds::range(usd_pico(555), usd_pico(630)));
@@ -489,7 +528,7 @@ mod tests {
     fn luna_without_write_counter_bounds_the_residual() {
         let book = Book::standard_2026_10_08();
         let n = counters::codex(Ok(Some(100)), Ok(Some(80)), Ok(None), Ok(Some(5)));
-        let Priced::Cost(cost) = price(&book, Some("gpt-6-luna"), &n) else {
+        let Priced::Cost(cost) = price(&book, Some("gpt-6-luna"), &n, true) else {
             panic!("priced")
         };
         assert_eq!(cost.total, Bounds::range(usd_pico(53), usd_pico(58)));
@@ -502,7 +541,7 @@ mod tests {
         let book = Book::standard_2026_10_08();
         let at = |i: u64| {
             let n = counters::codex(Ok(Some(i)), Ok(Some(0)), Ok(Some(0)), Ok(Some(1_000_000)));
-            match price(&book, Some("gpt-6.1-sol"), &n) {
+            match price(&book, Some("gpt-6.1-sol"), &n, true) {
                 Priced::Cost(c) => c.total.lo,
                 Priced::NoPrice => panic!("priced"),
             }
@@ -523,7 +562,7 @@ mod tests {
     fn unknown_tier_spans_both_and_unknown_models_have_no_price() {
         let book = Book::standard_2026_10_08();
         let batch = counters::codex(Ok(None), Ok(Some(10)), Ok(None), Ok(Some(10)));
-        let Priced::Cost(cost) = price(&book, Some("gpt-6-astra"), &batch) else {
+        let Priced::Cost(cost) = price(&book, Some("gpt-6-astra"), &batch, true) else {
             panic!("priced")
         };
         assert!(cost.tier_unknown);
@@ -540,11 +579,11 @@ mod tests {
             Ok(Some(1)),
         );
         assert_eq!(
-            price(&book, Some("claude-haiku-4"), &n),
+            price(&book, Some("claude-haiku-4"), &n, true),
             Priced::NoPrice,
             "a family prefix is not a match"
         );
-        assert_eq!(price(&book, None, &n), Priced::NoPrice);
+        assert_eq!(price(&book, None, &n, true), Priced::NoPrice);
     }
 
     #[test]
@@ -558,7 +597,7 @@ mod tests {
             Ok(Some(0)),
             Ok(None),
         );
-        let Priced::Cost(cost) = price(&book, Some("claude-opus-5-5"), &n) else {
+        let Priced::Cost(cost) = price(&book, Some("claude-opus-5-5"), &n, true) else {
             panic!("priced")
         };
         assert_eq!(cost.total.hi, None);
@@ -584,5 +623,135 @@ mod tests {
             .find(|r| &*r.model == "gpt-6-luna" && r.above_input_tokens.is_some())
             .unwrap();
         assert_eq!(long.output_pico_usd_per_million, Wide(750_000_000_000));
+    }
+
+    #[test]
+    fn a_native_batch_is_priced_across_the_tiers_its_requests_could_fall_in() {
+        let book = Book::standard_2026_10_08();
+        let n = |i: u64| counters::codex(Ok(Some(i)), Ok(Some(0)), Ok(Some(0)), Ok(Some(0)));
+        let cost = |i: u64, single: bool| match price(&book, Some("gpt-6.1-sol"), &n(i), single) {
+            Priced::Cost(c) => c,
+            Priced::NoPrice => panic!("priced"),
+        };
+        // One 300,000-token request is long context: 1.20 USD.
+        assert_eq!(
+            cost(300_000, true).total,
+            Bounds::exact(300_000 * 4_000_000)
+        );
+        // A batch of 300,000 could be two 150,000-token requests: 0.60 to 1.20 USD.
+        let batch = cost(300_000, false);
+        assert_eq!(
+            batch.total,
+            Bounds::range(300_000 * 2_000_000, 300_000 * 4_000_000)
+        );
+        assert!(batch.tier_unknown);
+        // No request in a 200,000-token batch can be above 272,000.
+        let small = cost(200_000, false);
+        assert_eq!(small.total, Bounds::exact(200_000 * 2_000_000));
+        assert!(!small.tier_unknown);
+    }
+
+    #[test]
+    fn a_row_with_no_reported_counter_has_no_observed_cost() {
+        let book = Book::standard_2026_10_08();
+        let none = counters::claude(Ok(None), Ok(None), Ok(None), Ok(None), Ok(None), Ok(None));
+        let Priced::Cost(cost) = price(&book, Some("claude-haiku-4-5"), &none, true) else {
+            panic!("priced")
+        };
+        assert!(!cost.observed);
+        assert_eq!(cost.total.hi, None);
+        let output_only = counters::claude(
+            Ok(None),
+            Ok(None),
+            Ok(None),
+            Ok(None),
+            Ok(None),
+            Ok(Some(0)),
+        );
+        let Priced::Cost(cost) = price(&book, Some("claude-haiku-4-5"), &output_only, true) else {
+            panic!("priced")
+        };
+        assert!(cost.observed, "an explicit zero is observed");
+    }
+
+    #[test]
+    fn rates_and_counters_at_their_limits_do_not_overflow() {
+        let book = Book::standard_2026_10_08();
+        for rate in &book.rates {
+            assert!(rate.input.max(rate.read).max(rate.output) <= MAX_RATE);
+            match rate.write {
+                WriteRate::Flat(p) => assert!(p <= MAX_RATE),
+                WriteRate::Buckets { m5, h1 } => assert!(m5.max(h1) <= MAX_RATE),
+            }
+        }
+        let max = counters::MAX_COUNTER;
+        let at_limit = |write| Book {
+            id: "limit".into(),
+            checked_at_ms: 0,
+            rates: vec![Rate {
+                provider: "test".into(),
+                model: "m".into(),
+                aliases: vec![],
+                above_input_tokens: None,
+                input: MAX_RATE,
+                read: MAX_RATE,
+                write,
+                output: MAX_RATE,
+            }],
+            sources: vec![],
+        };
+        let flat = at_limit(WriteRate::Flat(MAX_RATE));
+        let n = counters::codex(
+            Ok(Some(max)),
+            Ok(Some(max / 2)),
+            Ok(Some(max / 2)),
+            Ok(Some(max)),
+        );
+        assert!(
+            matches!(price(&flat, Some("m"), &n, true), Priced::Cost(c) if c.total.hi.is_some())
+        );
+        let buckets = at_limit(WriteRate::Buckets {
+            m5: MAX_RATE,
+            h1: MAX_RATE,
+        });
+        let n = counters::claude(
+            Ok(Some(max / 3)),
+            Ok(Some(max / 3)),
+            Ok(Some(max / 3)),
+            Ok(None),
+            Ok(Some(max / 3)),
+            Ok(Some(max)),
+        );
+        assert!(
+            matches!(price(&buckets, Some("m"), &n, false), Priced::Cost(c) if c.total.hi.is_some())
+        );
+        let huge = Bounds::exact(u128::MAX).plus(Bounds::exact(1));
+        assert_eq!(
+            huge,
+            Bounds {
+                lo: u128::MAX,
+                hi: None
+            }
+        );
+    }
+
+    #[test]
+    fn a_known_ttl_bucket_keeps_its_charge_when_the_total_write_is_unknown() {
+        let book = Book::standard_2026_10_08();
+        let n = counters::claude(
+            Ok(Some(0)),
+            Ok(Some(0)),
+            Ok(None),
+            Ok(Some(100)),
+            Ok(None),
+            Ok(Some(0)),
+        );
+        let Priced::Cost(cost) = price(&book, Some("claude-haiku-4-5"), &n, true) else {
+            panic!("priced")
+        };
+        // 100 five-minute write tokens at 1.25 USD/M.
+        assert_eq!(cost.total.lo, 125_000_000);
+        assert_eq!(cost.total.hi, None, "the rest of the writes is unknown");
+        assert!(cost.observed);
     }
 }

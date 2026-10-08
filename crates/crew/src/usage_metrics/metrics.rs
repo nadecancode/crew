@@ -14,7 +14,7 @@ use crew_core::rpc::usage_metrics::{
 };
 
 use super::counters::{Counters, Normalized};
-use super::price::{price, Book, Priced, RowCost};
+use super::price::{price, Book, Bounds, Priced, RowCost};
 
 /// One observation as the metrics see it.
 #[derive(Clone, Debug)]
@@ -24,7 +24,10 @@ pub struct Fact {
     pub model: Option<String>,
     /// The agent incarnation it belongs to, for reporting-agent counts.
     pub agent: String,
-    /// Its correlated native or daemon turn, when one is known.
+    /// The logical native stream it was read from. Native turn ids are only
+    /// unique within their stream.
+    pub source: String,
+    /// Its correlated native or daemon turn within `source`, when one is known.
     pub turn: Option<String>,
     /// Why an `Unusable` observation could not be used.
     pub unusable: Option<CoverageReason>,
@@ -109,6 +112,21 @@ struct Common {
     expected_agents: Option<u64>,
 }
 
+/// Adds `v` to a checked sum; an overflow leaves no sum.
+fn accumulate(sum: &mut Option<u128>, v: u128) {
+    *sum = sum.and_then(|s| s.checked_add(v));
+}
+
+/// A metric whose sum overflowed: unavailable, never a wrapped or clamped total.
+fn overflowed(tally: &Tally, common: &Common) -> CounterMetric {
+    CounterMetric {
+        known_sum: None,
+        state: MetricState::Unavailable,
+        reason: Some(CoverageReason::InvalidCounter),
+        coverage: tally.coverage(common),
+    }
+}
+
 fn unusable(fact: &Fact) -> Option<CoverageReason> {
     (fact.unit == ObservationUnit::Unusable)
         .then(|| fact.unusable.unwrap_or(CoverageReason::InvalidCounter))
@@ -122,19 +140,22 @@ fn counter(
     empty_reason: CoverageReason,
 ) -> CounterMetric {
     let mut tally = Tally::default();
-    let mut sum: u128 = 0;
+    let mut sum = Some(0u128);
     for fact in facts {
         if let Some(reason) = unusable(fact) {
             tally.exclude(reason);
         } else if !valid(&fact.normalized) {
             tally.exclude(CoverageReason::InvalidCounter);
         } else if let Some(v) = get(&fact.normalized.counters) {
-            sum += v as u128;
+            accumulate(&mut sum, v as u128);
             tally.include(fact);
         } else {
             tally.exclude(CoverageReason::NotReported);
         }
     }
+    let Some(sum) = sum else {
+        return overflowed(&tally, common);
+    };
     let state = tally.state();
     CounterMetric {
         known_sum: (tally.eligible > 0).then_some(Wide(sum)),
@@ -177,7 +198,7 @@ fn both_valid(n: &Normalized) -> bool {
 
 fn hit_rate(facts: &[Fact], common: &Common) -> RatioMetric {
     let mut tally = Tally::default();
-    let (mut read, mut input) = (0u128, 0u128);
+    let (mut read, mut input) = (Some(0u128), Some(0u128));
     for fact in facts {
         let n = &fact.normalized;
         if let Some(reason) = unusable(fact) {
@@ -185,13 +206,25 @@ fn hit_rate(facts: &[Fact], common: &Common) -> RatioMetric {
         } else if !n.input_valid {
             tally.exclude(CoverageReason::InvalidCounter);
         } else if let (Some(i), Some(r)) = (n.counters.input_total, n.counters.cache_read) {
-            read += r as u128;
-            input += i as u128;
+            accumulate(&mut read, r as u128);
+            accumulate(&mut input, i as u128);
             tally.include(fact);
         } else {
             tally.exclude(CoverageReason::NotReported);
         }
     }
+    let (Some(read), Some(input)) = (read, input) else {
+        return RatioMetric {
+            numerator: None,
+            denominator: None,
+            value: None,
+            lower: None,
+            upper: None,
+            state: MetricState::Unavailable,
+            reason: Some(CoverageReason::InvalidCounter),
+            coverage: tally.coverage(common),
+        };
+    };
     let (state, reason) = if tally.eligible == 0 {
         (
             MetricState::Unavailable,
@@ -228,7 +261,8 @@ fn costs(facts: &[Fact], book: &Book) -> Vec<Option<RowCost>> {
             if unusable(fact).is_some() {
                 return None;
             }
-            match price(book, fact.model.as_deref(), &fact.normalized) {
+            let single = fact.unit == ObservationUnit::Request;
+            match price(book, fact.model.as_deref(), &fact.normalized, single) {
                 Priced::Cost(cost) => Some(cost),
                 Priced::NoPrice => None,
             }
@@ -238,7 +272,8 @@ fn costs(facts: &[Fact], book: &Book) -> Vec<Option<RowCost>> {
 
 fn write_share(facts: &[Fact], costs: &[Option<RowCost>], common: &Common) -> RatioMetric {
     let mut tally = Tally::default();
-    let (mut other_lo, mut other_hi, mut write_lo, mut write_hi) = (0u128, 0u128, 0u128, 0u128);
+    let (mut other_lo, mut other_hi, mut write_lo, mut write_hi) =
+        (Some(0u128), Some(0u128), Some(0u128), Some(0u128));
     for (fact, cost) in facts.iter().zip(costs) {
         if let Some(reason) = unusable(fact) {
             tally.exclude(reason);
@@ -249,18 +284,28 @@ fn write_share(facts: &[Fact], costs: &[Option<RowCost>], common: &Common) -> Ra
                 None => tally.exclude(CoverageReason::NoPrice),
                 Some(RowCost { share: None, .. }) => tally.exclude(CoverageReason::NotReported),
                 Some(RowCost { share: Some(s), .. }) => {
-                    other_lo += s.other_lo;
-                    other_hi += s.other_hi;
-                    write_lo += s.write_lo;
-                    write_hi += s.write_hi;
+                    accumulate(&mut other_lo, s.other_lo);
+                    accumulate(&mut other_hi, s.other_hi);
+                    accumulate(&mut write_lo, s.write_lo);
+                    accumulate(&mut write_hi, s.write_hi);
                     tally.include(fact);
                 }
             }
         }
     }
     let coverage = tally.coverage(common);
-    if tally.eligible == 0 {
-        let reason = tally.main_reason().unwrap_or(CoverageReason::NotReported);
+    // x / (other + x) grows with x and falls with other, so the extremes pair
+    // the cheapest writes with the dearest other input, and the reverse.
+    let operands = (|| {
+        let lo = (write_lo?, other_hi?.checked_add(write_lo?)?);
+        let hi = (write_hi?, other_lo?.checked_add(write_hi?)?);
+        Some((lo, hi))
+    })();
+    if tally.eligible == 0 || operands.is_none() {
+        let reason = match operands {
+            None => CoverageReason::InvalidCounter,
+            Some(_) => tally.main_reason().unwrap_or(CoverageReason::NotReported),
+        };
         return RatioMetric {
             numerator: None,
             denominator: None,
@@ -272,10 +317,7 @@ fn write_share(facts: &[Fact], costs: &[Option<RowCost>], common: &Common) -> Ra
             coverage,
         };
     }
-    // x / (other + x) grows with x and falls with other, so the extremes pair
-    // the cheapest writes with the dearest other input, and the reverse.
-    let (lo_num, lo_den) = (write_lo, other_hi + write_lo);
-    let (hi_num, hi_den) = (write_hi, other_lo + write_hi);
+    let ((lo_num, lo_den), (hi_num, hi_den)) = operands.expect("checked above");
     if lo_den == 0 || hi_den == 0 {
         return RatioMetric {
             numerator: Some(Wide(0)),
@@ -332,31 +374,39 @@ fn estimate(
     common: &Common,
 ) -> CostEstimate {
     let mut tally = Tally::default();
-    let (mut lo, mut hi) = (0u128, Some(0u128));
+    let mut total = Bounds { lo: 0, hi: Some(0) };
+    let mut overflow = false;
     let mut excluded: BTreeSet<String> = BTreeSet::new();
     let (mut ttl_unknown, mut residual, mut tier_unknown) = (0u128, 0u128, 0u64);
     for (fact, cost) in facts.iter().zip(costs) {
         if let Some(reason) = unusable(fact) {
             tally.exclude(reason);
-            hi = None;
+            total.hi = None;
             continue;
         }
         match cost {
             None => {
                 tally.exclude(CoverageReason::NoPrice);
                 excluded.insert(fact.model.clone().unwrap_or_else(|| "unknown model".into()));
-                hi = None;
+                total.hi = None;
+            }
+            // Nothing priced was reported: an unknown cost, not an observed zero.
+            Some(cost) if !cost.observed => {
+                tally.exclude(CoverageReason::NotReported);
+                total.hi = None;
             }
             Some(cost) => {
-                lo += cost.total.lo;
-                hi = hi.zip(cost.total.hi).map(|(a, b)| a + b);
-                ttl_unknown += cost.ttl_unknown_tokens as u128;
-                residual += cost.residual_tokens as u128;
+                let sum = total.plus(cost.total);
+                overflow |= total.hi.is_some() && cost.total.hi.is_some() && sum.hi.is_none();
+                total = sum;
+                ttl_unknown = ttl_unknown.saturating_add(cost.ttl_unknown_tokens as u128);
+                residual = residual.saturating_add(cost.residual_tokens as u128);
                 tier_unknown += cost.tier_unknown as u64;
                 tally.include(fact);
             }
         }
     }
+    let (lo, hi) = (total.lo, total.hi);
     let mut assumptions = Vec::new();
     if ttl_unknown > 0 {
         assumptions.push(label(format!(
@@ -370,16 +420,20 @@ fn estimate(
     }
     if tier_unknown > 0 {
         assumptions.push(label(format!(
-            "{tier_unknown} observations with unknown total input, priced across both context tiers"
+            "{tier_unknown} observations with unknown total input or batched requests, priced across both context tiers"
         )));
     }
     let (state, reason) = if tally.eligible == 0 {
         let reason = if tally.seen == 0 {
             CoverageReason::NoEligibleCost
         } else {
-            CoverageReason::NoPrice
+            tally
+                .main_reason()
+                .unwrap_or(CoverageReason::NoEligibleCost)
         };
         (EstimateState::Unavailable, Some(reason))
+    } else if overflow {
+        (EstimateState::Partial, Some(CoverageReason::InvalidCounter))
     } else if hi.is_none() {
         (
             EstimateState::Partial,
@@ -430,11 +484,11 @@ fn requests(facts: &[Fact], common: &Common) -> CounterMetric {
 
 fn turns(facts: &[Fact], common: &Common) -> CounterMetric {
     let mut tally = Tally::default();
-    let mut ids: BTreeSet<&str> = BTreeSet::new();
+    let mut ids: BTreeSet<(&str, &str)> = BTreeSet::new();
     for fact in facts {
         match &fact.turn {
             Some(turn) => {
-                ids.insert(turn);
+                ids.insert((&fact.source, turn));
                 tally.include(fact);
             }
             None => tally.exclude(CoverageReason::MissingTurnIdentity),
@@ -494,7 +548,11 @@ pub fn totals(facts: &[Fact], book: &Book, expected_agents: Option<u64>) -> Usag
             facts,
             &common,
             both_valid,
-            |c| c.input_total.zip(c.output).map(|(i, o)| i + o),
+            |c| {
+                c.input_total
+                    .zip(c.output)
+                    .and_then(|(i, o)| i.checked_add(o))
+            },
             none,
         ),
         hit_rate: hit_rate(facts, &common),
@@ -516,6 +574,7 @@ mod tests {
             normalized: n,
             model: Some(model.into()),
             agent: agent.into(),
+            source: format!("{agent}/stream"),
             turn: None,
             unusable: None,
         }
@@ -755,5 +814,114 @@ mod tests {
             EstimateState::Partial,
             "output is priced, input unknown"
         );
+    }
+
+    #[test]
+    fn a_batch_delta_is_priced_across_tiers_whatever_its_size() {
+        let book = Book::standard_2026_10_08();
+        let n = counters::codex(Ok(Some(300_000)), Ok(Some(0)), Ok(Some(0)), Ok(Some(0)));
+        let mut batch = fact("a", "gpt-6.1-sol", n);
+        batch.unit = ObservationUnit::CounterDelta;
+        let e = totals(&[batch], &book, None).estimate;
+        // Two 150,000-token requests (0.60 USD) or one long-context request (1.20 USD).
+        assert_eq!(e.lower_pico_usd, Some(Wide(600_000_000_000)));
+        assert_eq!(e.upper_pico_usd, Some(Wide(1_200_000_000_000)));
+        assert!(e
+            .assumptions
+            .iter()
+            .any(|a| a.contains("both context tiers")));
+    }
+
+    #[test]
+    fn a_priced_model_with_no_reported_counter_is_not_an_observed_zero() {
+        let book = Book::standard_2026_10_08();
+        let none = counters::claude(Ok(None), Ok(None), Ok(None), Ok(None), Ok(None), Ok(None));
+        let e = totals(&[fact("a", "claude-haiku-4-5", none.clone())], &book, None).estimate;
+        assert_eq!(e.state, EstimateState::Unavailable);
+        assert_eq!(e.reason, Some(CoverageReason::NotReported));
+        assert_eq!(e.lower_pico_usd, None);
+        assert_eq!(e.coverage.eligible_observations, Wide(0));
+        assert_eq!(e.coverage.observations_seen, Wide(1));
+        // Beside an observed row it leaves the upper bound open.
+        let seen = codex(Some(100), Some(80));
+        let e = totals(
+            &[
+                fact("a", "claude-haiku-4-5", none),
+                fact("a", "gpt-6-luna", seen),
+            ],
+            &book,
+            None,
+        )
+        .estimate;
+        assert_eq!(e.state, EstimateState::Partial);
+        assert_eq!(e.coverage.eligible_observations, Wide(1));
+        assert_eq!(e.upper_pico_usd, None);
+    }
+
+    #[test]
+    fn overflowing_cost_sums_are_checked() {
+        let book = Book::standard_2026_10_08();
+        let n = codex(Some(1), Some(1));
+        let facts = [
+            fact("a", "gpt-6-luna", n.clone()),
+            fact("a", "gpt-6-luna", n),
+        ];
+        let huge = RowCost {
+            total: Bounds {
+                lo: u128::MAX,
+                hi: Some(u128::MAX),
+            },
+            share: Some(super::super::price::ShareParts {
+                other_lo: u128::MAX,
+                other_hi: u128::MAX,
+                write_lo: 1,
+                write_hi: 1,
+            }),
+            ttl_unknown_tokens: 0,
+            residual_tokens: 0,
+            tier_unknown: false,
+            observed: true,
+        };
+        let common = Common {
+            requests: 2,
+            cardinality_complete: true,
+            expected_agents: None,
+        };
+        let costs = [Some(huge), Some(huge)];
+        let e = estimate(&facts, &costs, &book, &common);
+        assert_eq!(e.state, EstimateState::Partial);
+        assert_eq!(e.reason, Some(CoverageReason::InvalidCounter));
+        assert_eq!(e.lower_pico_usd, Some(Wide(u128::MAX)));
+        assert_eq!(e.upper_pico_usd, None);
+        let share = write_share(&facts, &costs, &common);
+        assert_eq!(share.state, MetricState::Unavailable);
+        assert_eq!(share.reason, Some(CoverageReason::InvalidCounter));
+        let mut sum = Some(u128::MAX);
+        accumulate(&mut sum, 1);
+        assert_eq!(sum, None);
+    }
+
+    #[test]
+    fn turn_ids_count_per_source_stream() {
+        let book = Book::standard_2026_10_08();
+        let mut a = fact("a", "gpt-6-luna", codex(Some(10), Some(5)));
+        a.turn = Some("turn-1".into());
+        let mut b = fact("b", "gpt-6-luna", codex(Some(10), Some(5)));
+        b.turn = Some("turn-1".into());
+        let mut a_again = a.clone();
+        a_again.turn = Some("turn-1".into());
+        let t = totals(&[a, b, a_again], &book, None);
+        assert_eq!(t.turns_observed.known_sum, Some(Wide(2)));
+    }
+
+    #[test]
+    fn only_unusable_rows_keep_their_own_reason() {
+        let book = Book::standard_2026_10_08();
+        let mut gap = fact("a", "gpt-6-luna", codex(None, None));
+        gap.unit = ObservationUnit::Unusable;
+        gap.unusable = Some(CoverageReason::SourceGap);
+        let e = totals(&[gap], &book, None).estimate;
+        assert_eq!(e.state, EstimateState::Unavailable);
+        assert_eq!(e.reason, Some(CoverageReason::SourceGap));
     }
 }
