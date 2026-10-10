@@ -869,7 +869,7 @@ mod tests {
 #[cfg(test)]
 mod codex_parent_tests {
     use super::*;
-    use chrono::Local;
+    use chrono::{Local, TimeZone};
     use crew_core::Agent;
     use std::path::PathBuf;
 
@@ -890,11 +890,24 @@ mod codex_parent_tests {
             self.capture["pairs"][pair]["cases"][index].clone()
         }
 
+        /// Where Codex keeps `thread`'s rollout: under the day the thread was
+        /// created, which a UUIDv7 id carries (the captured threads' are
+        /// days old), else today.
         fn path(&self, member: &str, thread: &str) -> PathBuf {
+            let born = uuid::Uuid::parse_str(thread)
+                .ok()
+                .filter(|uuid| uuid.as_bytes()[6] >> 4 == 7)
+                .map(|uuid| {
+                    uuid.as_bytes()[..6]
+                        .iter()
+                        .fold(0_i64, |millis, byte| (millis << 8) | i64::from(*byte))
+                })
+                .and_then(|millis| Local.timestamp_millis_opt(millis).single())
+                .unwrap_or_else(Local::now);
             self.daemon()
                 .agent_dir(member)
                 .join("rw/home/codex/sessions")
-                .join(Local::now().format("%Y/%m/%d").to_string())
+                .join(born.format("%Y/%m/%d").to_string())
                 .join(format!("rollout-fixture-{thread}.jsonl"))
         }
 
